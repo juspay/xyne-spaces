@@ -301,13 +301,9 @@ export function AutomationsList({
                   onClone={() => handleClone(item)}
                   onDelete={() => setPendingDelete(item)}
                   onArchive={
-                    isAutomationsAdmin && item.status === AutomationStatusValues.DISABLED
-                      ? () => archiveMutation.mutate(item.id)
-                      : undefined
-                  }
-                  onArchiveDraft={
-                    item.status === AutomationStatusValues.DRAFT &&
-                    (isAutomationsAdmin || (!!me && item.createdById === me.id))
+                    (isAutomationsAdmin && item.status === AutomationStatusValues.DISABLED) ||
+                    (item.status === AutomationStatusValues.DRAFT &&
+                      (isAutomationsAdmin || (!!me && item.createdById === me.id)))
                       ? () => archiveMutation.mutate(item.id)
                       : undefined
                   }
@@ -643,9 +639,8 @@ interface AutomationRowProps {
   onShowRuns?: (() => void) | undefined;
   onClone: () => void;
   onDelete: () => void;
+  /** Admin: a DISABLED row. Owner/admin: a DRAFT, offered only once it has runs. */
   onArchive?: (() => void) | undefined;
-  /** Owner/admin: archive a DRAFT that has runs (it can't be deleted). */
-  onArchiveDraft?: (() => void) | undefined;
   onToggleActive?: ((next: boolean) => void) | undefined;
   toggleLoading: boolean;
 }
@@ -660,7 +655,6 @@ function AutomationRow({
   onClone,
   onDelete,
   onArchive,
-  onArchiveDraft,
   onToggleActive,
   toggleLoading,
 }: AutomationRowProps): React.ReactElement {
@@ -854,8 +848,8 @@ function AutomationRow({
                   }}
                 />
               )}
-              {/* Admin-only: permanently retire a live automation. */}
-              {onArchive && (
+              {/* Permanently retire a live automation, or a draft with runs (it can't be deleted). */}
+              {onArchive && (!isDraft || hasRunsQuery.data === true) && (
                 <RowMenuButton
                   label='Archive'
                   icon={<Archive className='size-4' />}
@@ -868,7 +862,7 @@ function AutomationRow({
               {/* Delete is permitted only for DRAFT proposals with no runs — anything
                   past DRAFT (PLAYGROUND, PENDING, LIVE, ARCHIVED, terminal) is kept as
                   audit history, and a draft with runs is archived instead. */}
-              {isDraft ? (
+              {isDraft && hasRunsQuery.data !== true ? (
                 <>
                   <div role='separator' className='my-1 h-px bg-border' />
                   {hasRunsQuery.data === false ? (
@@ -881,17 +875,6 @@ function AutomationRow({
                         onDelete();
                       }}
                     />
-                  ) : hasRunsQuery.data === true ? (
-                    onArchiveDraft && (
-                      <RowMenuButton
-                        label='Archive'
-                        icon={<Archive className='size-4' />}
-                        onClick={() => {
-                          setMenuOpen(false);
-                          onArchiveDraft();
-                        }}
-                      />
-                    )
                   ) : (
                     <div className='px-3 py-1.5 text-xs text-muted-foreground'>
                       {hasRunsQuery.isError ? 'Could not check runs' : 'Checking runs…'}

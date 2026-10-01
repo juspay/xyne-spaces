@@ -12659,8 +12659,8 @@ export const mutators = defineMutators({
       },
     ),
 
-    // DRAFT → PLAYGROUND; demotes any other PLAYGROUND version in the lineage to DRAFT
-    // in the same transaction (at most one recording per lineage).
+    // DRAFT → PLAYGROUND. The server mutator also demotes any other PLAYGROUND version in
+    // the lineage to DRAFT (at most one recording per lineage); that syncs back.
     startRecording: defineMutator(
       z.object({ id: z.string(), timestamp: z.number() }),
       async ({ tx, args: { id, timestamp } }) => {
@@ -12681,21 +12681,6 @@ export const mutators = defineMutators({
           status: 'PLAYGROUND',
           updatedAt: timestamp,
         });
-        const seriesId = existing.automationSeriesId ?? existing.id;
-        const otherRecordings = await tx.run(
-          zql.workflows
-            .where('automationSeriesId', seriesId)
-            .where('workflowType', 'Automations')
-            .where('status', 'PLAYGROUND')
-            .where('id', '!=', id),
-        );
-        for (const other of otherRecordings) {
-          await tx.mutate.workflows.update({
-            id: other.id,
-            status: 'DRAFT',
-            updatedAt: timestamp,
-          });
-        }
       },
     ),
     // PLAYGROUND → DRAFT. Held runs stay listed; Play is disabled until it records again.

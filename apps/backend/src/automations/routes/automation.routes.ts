@@ -960,24 +960,17 @@ router.post(
           workflowType: AUTOMATION_WORKFLOW_TYPE,
           workspaceId: auth.workspaceId,
         },
-        select: { id: true, workflowId: true, status: true, tag: true },
+        select: {
+          status: true,
+          tag: true,
+          workflow: { select: { status: true, metadata: true } },
+        },
       });
       if (!execution) {
         res.status(404).json({ success: false, error: 'Run not found' });
         return;
       }
-      const workflow = await db.workflow.findFirst({
-        where: {
-          id: execution.workflowId,
-          workflowType: AUTOMATION_WORKFLOW_TYPE,
-          workspaceId: auth.workspaceId,
-        },
-        select: { id: true, status: true, metadata: true },
-      });
-      if (!workflow) {
-        res.status(404).json({ success: false, error: 'Automation not found' });
-        return;
-      }
+      const { workflow } = execution;
 
       await assertIsOwnerOrAutomationsAdmin(workflow, auth.userId);
 

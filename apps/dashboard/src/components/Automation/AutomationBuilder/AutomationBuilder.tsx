@@ -1151,9 +1151,12 @@ export function AutomationBuilder({
                   </Button>
                 )
               ) : null}
-              {/* Admin-only: permanently retire an automation. Only offered once it is
-                  DISABLED, so it has to be switched off first. */}
-              {savedId && isAutomationsAdmin && savedStatus === AutomationStatusValues.DISABLED ? (
+              {/* Permanently retire an automation. Admin-only once it is DISABLED (it has to
+                  be switched off first); owner or admin for a DRAFT with runs, which can't
+                  be deleted. */}
+              {savedId &&
+              ((isAutomationsAdmin && savedStatus === AutomationStatusValues.DISABLED) ||
+                (draftHasRuns && isOwnerOrAdmin)) ? (
                 <Button
                   variant='outline'
                   size='sm'
@@ -1162,20 +1165,6 @@ export function AutomationBuilder({
                   trackId='archive_automation'
                   data-track-category='automation-builder'
                   data-track-name='header-archive'
-                >
-                  <Archive className='size-4' />
-                  Archive
-                </Button>
-              ) : null}
-              {/* A DRAFT with runs can't be deleted; owner/admin archive it instead. */}
-              {savedId && draftHasRuns && isOwnerOrAdmin ? (
-                <Button
-                  variant='outline'
-                  size='sm'
-                  onClick={handleArchive}
-                  disabled={archiveMutation.isPending}
-                  data-track-category='automation-builder'
-                  data-track-name='header-archive-draft'
                 >
                   <Archive className='size-4' />
                   Archive

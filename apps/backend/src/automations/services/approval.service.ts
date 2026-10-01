@@ -72,17 +72,7 @@ export async function assertIsOwnerOrAutomationsAdmin(
 ): Promise<void> {
   const { createdById } = parseAutomationMetadata(workflow.metadata);
   if (createdById && createdById === userId) return;
-  try {
-    await assertIsAutomationsAdmin(userId, opts);
-  } catch (err) {
-    if (err instanceof ApprovalError && err.code === 'not-admin') {
-      throw new ApprovalError(
-        'Only the automation owner or an Automations admin can do this.',
-        'not-owner',
-      );
-    }
-    throw err;
-  }
+  await assertIsAutomationsAdmin(userId, opts);
 }
 
 function ensureAutomation(workflow: Workflow | null, id: string): Workflow {
