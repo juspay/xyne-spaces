@@ -24,7 +24,10 @@ import {
   getPeriodCallCountLabel,
   useXyneCalendarChannelPresentations,
 } from '../Chat/XyneCalendarSidebar/xyneCalendarSidebar.utils';
-import { mergeCallsById } from '../../routes/CallHistoryScreen/CalenderViewUtils';
+import {
+  getCalendarWindowRange,
+  mergeCallsById,
+} from '../../routes/CallHistoryScreen/CalenderViewUtils';
 
 /**
  * Renders a call activity's week directly in the Activity center pane, as a real
@@ -50,10 +53,7 @@ export const ActivityCalendarWeekView = (): ReactElement => {
 
   // This view is always a single week — fetch exactly that week.
   const calendarWindow = useMemo(
-    () => ({
-      from: startOfWeek(currentWeekStart, { weekStartsOn: 0 }).getTime(),
-      to: endOfWeek(currentWeekStart, { weekStartsOn: 0 }).getTime(),
-    }),
+    () => getCalendarWindowRange('week', currentWeekStart),
     [currentWeekStart],
   );
 

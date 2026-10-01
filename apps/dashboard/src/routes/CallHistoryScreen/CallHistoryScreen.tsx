@@ -59,6 +59,7 @@ import { useResolvedRecordingLabels } from '../../hooks/useResolvedRecordingLabe
 import { normalizeRecordingTags } from '../../utils/recordingUtils';
 import { CallExternalChatDialog } from '../../components/Call/CallExternalChatDialog/CallExternalChatDialog';
 import { ParticipantsModal } from './ParticipantsModal';
+import { getCalendarWindow } from './CalenderViewUtils';
 import CalendarWeekView from './CalendarWeekView';
 import CalendarDayView from './CalendarDayView';
 import CalendarMonthView from './CalenderMonthView';
@@ -136,19 +137,17 @@ const CallHistoryScreen = (): ReactElement => {
   // Date range for the currently displayed calendar view. Declared up here because it
   // is what useCallHistory fetches the calendar's calls for — the grid asks for the
   // window it is about to draw rather than filtering down a list-shaped pool.
-  const calendarFrom = useMemo(() => {
-    if (calendarSubView === 'week') return currentWeekStart;
-    if (calendarSubView === 'day') return currentDayStart;
-    return currentMonthStart;
+  // Each sub-view tracks its own anchor date, so pick the anchor and let
+  // getCalendarWindow decide the span.
+  const { from: calendarFrom, to: calendarTo } = useMemo(() => {
+    const anchor =
+      calendarSubView === 'week'
+        ? currentWeekStart
+        : calendarSubView === 'day'
+          ? currentDayStart
+          : currentMonthStart;
+    return getCalendarWindow(calendarSubView, anchor);
   }, [calendarSubView, currentWeekStart, currentDayStart, currentMonthStart]);
-
-  const calendarTo = useMemo(() => {
-    const d = new Date(calendarFrom);
-    if (calendarSubView === 'week') d.setDate(d.getDate() + 7);
-    else if (calendarSubView === 'day') d.setDate(d.getDate() + 1);
-    else d.setMonth(d.getMonth() + 1);
-    return d;
-  }, [calendarFrom, calendarSubView]);
 
   const calendarWindow = useMemo(
     () => ({ from: calendarFrom.getTime(), to: calendarTo.getTime() }),

@@ -67,6 +67,7 @@ import {
   dayKey,
   formatHourLabel,
   getCalendarCreateSlot,
+  getCalendarWindowRange,
   getCallPillVariant,
   getCallsOverlappingDay,
   hasCallEnded,
@@ -1082,20 +1083,12 @@ const XyneCalendarSidebarTimeline = memo(
   }: XyneCalendarSidebarTimelineProps): ReactElement => {
     const { user } = useAuth();
 
-    // The dates this sidebar is showing. Day/week/month each have their own span, and
-    // the query fetches exactly that — no list-shaped pool to filter down.
-    const calendarWindow = useMemo(() => {
-      const [from, to] =
-        viewMode === 'week'
-          ? [
-              startOfWeek(selectedDate, { weekStartsOn: 0 }),
-              endOfWeek(selectedDate, { weekStartsOn: 0 }),
-            ]
-          : viewMode === 'month'
-            ? [startOfMonth(selectedDate), endOfMonth(selectedDate)]
-            : [startOfDay(selectedDate), addDays(startOfDay(selectedDate), 1)];
-      return { from: from.getTime(), to: to.getTime() };
-    }, [viewMode, selectedDate]);
+    // The dates this sidebar is showing — the query fetches exactly that span, with no
+    // list-shaped pool to filter down.
+    const calendarWindow = useMemo(
+      () => getCalendarWindowRange(viewMode, selectedDate),
+      [viewMode, selectedDate],
+    );
 
     const {
       calls,
