@@ -134,7 +134,7 @@ Its `requirements-diarization.txt` torch/torchaudio pins are mutually incompatib
 ## Verification
 
 ```bash
-nix flake check --no-build
+nix flake check -L
 nix build .#xyne-space-services
 nix develop --command just prepare
 # Stop any running local services/backend before this command:

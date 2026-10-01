@@ -378,6 +378,27 @@ in
     '';
   };
 
+  checks = let
+    sourceCheck = name: nativeBuildInputs: command: pkgs.runCommand name {
+      inherit nativeBuildInputs;
+    } ''
+      # Checks only read sources; tests write their fixtures under TMPDIR.
+      cd ${flakeInputs.self}
+      ${command}
+      touch "$out"
+    '';
+  in {
+    referenced-paths = sourceCheck "referenced-paths" [ pkgs.bash pkgs.gnugrep ]
+      "bash nix/scripts/check-referenced-paths.sh";
+    script-tests = sourceCheck "script-tests" [ pkgs.nodejs_22 ] ''
+      # The proxy test transpiles config.ts; provide TypeScript without pnpm install.
+      export NODE_PATH=${pkgs.typescript_5}/lib/node_modules
+      node --test scripts/generate-local-secrets.test.mjs scripts/dashboard-dev-proxy.test.mjs
+    '';
+    compose-refs = sourceCheck "compose-refs" [ pkgs.bash pkgs.ripgrep pkgs.gnugrep ]
+      "bash nix/scripts/check-compose-refs.sh";
+  };
+
   # Custom apps/commands
   apps = {
     # Comprehensive cleanup command
