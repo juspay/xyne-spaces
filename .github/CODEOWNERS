@@ -68,3 +68,13 @@
 
 # bypassAcl framework — the sole sanctioned location for the ACL-bypass primitives
 /apps/backend/src/bypassAcl/ @juspay/xyne-acl-guardians
+
+# ---------------------------------------------------------------------------
+# Nix development environment and CI
+/.envrc @srid
+/flake.nix @srid
+/flake.lock @srid
+/project.nix @srid
+/nix/ @srid
+/.github/workflows/nix-ci.yml @srid
+/docs/setup/nix.md @srid
