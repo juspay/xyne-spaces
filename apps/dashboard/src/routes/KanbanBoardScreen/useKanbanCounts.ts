@@ -125,45 +125,66 @@ const getTicketCountsRoom = (
   return null;
 };
 
+/**
+ * A group a delta belongs to. The key is what the group is matched and created by; the name is
+ * what a group created by a delta is labelled with, which is the key for everything except a
+ * folded STRING value (see getFormFieldGroupKeys below).
+ */
+type DeltaGroup = { groupKey: string; displayName: string };
+
+const toDeltaGroup = (groupKey: string): DeltaGroup => ({ groupKey, displayName: groupKey });
+
 const getFormFieldGroupKeys = (
   snapshot: TicketCountsSnapshot,
   groupBy: Extract<KanbanCountsGroupBy, { type: 'formField' }>,
-): string[] => {
+): DeltaGroup[] => {
   const value = snapshot.formFieldValues[groupBy.fieldId] ?? null;
 
   if (groupBy.fieldType === FormFieldType.MULTI_SELECT) {
     const values = Array.isArray(value) ? value : [];
     const stringValues = values.map(stringifyFormFieldValue).filter(isStringValue);
-    return stringValues.length > 0 ? stringValues : ['No Value'];
+    return stringValues.length > 0 ? stringValues.map(toDeltaGroup) : [toDeltaGroup('No Value')];
   }
 
   if (groupBy.fieldType === FormFieldType.USER) {
     const values = Array.isArray(value) ? value : [];
     const stringValues = values.map(stringifyFormFieldValue).filter(isStringValue);
-    return stringValues.length > 0 ? stringValues : ['Unassigned'];
+    return stringValues.length > 0 ? stringValues.map(toDeltaGroup) : [toDeltaGroup('Unassigned')];
   }
+
+  // A STRING group is keyed by the folded value, the way the server keys it
+  // (getFormFieldGroupKeys in kanbanCountsService): a column's page is fetched with an uncased
+  // Vespa token, so "MID 1" and "mid 1" are one group. A delta keyed by the raw spelling would
+  // match no existing group, open a duplicate column and count itself into the wrong one. The
+  // spelling is kept as the name, so a value first seen through a delta is still labelled the
+  // way it was typed rather than lower-cased.
+  const toGroup = (stringValue: string): DeltaGroup =>
+    groupBy.fieldType === FormFieldType.STRING
+      ? { groupKey: stringValue.toLowerCase(), displayName: stringValue }
+      : toDeltaGroup(stringValue);
 
   if (Array.isArray(value)) {
     const stringValues = value.map(stringifyFormFieldValue).filter(isStringValue);
-    return stringValues.length > 0 ? stringValues : ['No Value'];
+    return stringValues.length > 0 ? stringValues.map(toGroup) : [toDeltaGroup('No Value')];
   }
 
-  if (value === null || value === undefined || value === '') return ['No Value'];
+  if (value === null || value === undefined || value === '') return [toDeltaGroup('No Value')];
   const stringValue = stringifyFormFieldValue(value);
-  return stringValue ? [stringValue] : ['No Value'];
+  return stringValue ? [toGroup(stringValue)] : [toDeltaGroup('No Value')];
 };
 
 const getGroupKeys = (
   snapshot: TicketCountsSnapshot,
   groupBy: KanbanCountsGroupBy | undefined,
-): string[] => {
-  if (!groupBy || groupBy === 'none') return [ALL_TICKETS_GROUP];
-  if (groupBy === 'assignee') return [normalizeIdentity(snapshot.assignedTo) ?? UNASSIGNED_GROUP];
+): DeltaGroup[] => {
+  if (!groupBy || groupBy === 'none') return [toDeltaGroup(ALL_TICKETS_GROUP)];
+  if (groupBy === 'assignee')
+    return [toDeltaGroup(normalizeIdentity(snapshot.assignedTo) ?? UNASSIGNED_GROUP)];
   if (groupBy === 'createdBy')
-    return [normalizeIdentity(snapshot.createdBy) ?? UNKNOWN_CREATOR_GROUP];
-  if (groupBy === 'status') return [snapshot.statusV2 ?? ''];
-  if (groupBy === 'priority') return [snapshot.priority ?? ''];
-  if (groupBy === 'merchantId') return [snapshot.merchantId ?? NO_MERCHANT_GROUP];
+    return [toDeltaGroup(normalizeIdentity(snapshot.createdBy) ?? UNKNOWN_CREATOR_GROUP)];
+  if (groupBy === 'status') return [toDeltaGroup(snapshot.statusV2 ?? '')];
+  if (groupBy === 'priority') return [toDeltaGroup(snapshot.priority ?? '')];
+  if (groupBy === 'merchantId') return [toDeltaGroup(snapshot.merchantId ?? NO_MERCHANT_GROUP)];
   if (typeof groupBy === 'object' && groupBy.type === 'formField') {
     return getFormFieldGroupKeys(snapshot, groupBy);
   }
@@ -328,8 +349,13 @@ const matchesRequest = (
       const value = snapshot.formFieldValues[fieldId] ?? null;
 
       if (Array.isArray(filterValue)) {
+        // Whole-value match against any selected value, case-insensitive. This decides which
+        // live updates move a badge, so it has to be the rule the counts it adjusts were
+        // computed with — matchesDynamicFilter in kanbanCountsService. Fold case on both
+        // sides: a ticket written as "mid 1" belongs to the same count as "MID 1".
+        const needles = new Set(filterValue.map(filter => filter.toLowerCase()));
         if (Array.isArray(value)) {
-          if (!value.some(item => typeof item === 'string' && filterValue.includes(item)))
+          if (!value.some(item => typeof item === 'string' && needles.has(item.toLowerCase())))
             return false;
         } else {
           const scalarValue =
@@ -337,11 +363,7 @@ const matchesRequest = (
               ? String(value)
               : null;
           if (!scalarValue) return false;
-          if (filterValue.length === 1) {
-            if (!scalarValue.toLowerCase().includes(filterValue[0]!.toLowerCase())) return false;
-          } else if (!filterValue.includes(scalarValue)) {
-            return false;
-          }
+          if (!needles.has(scalarValue.toLowerCase())) return false;
         }
       } else {
         const scalarValue =
@@ -392,14 +414,14 @@ const applyCountDelta = (
 
 const applyGroupDelta = (
   groups: KanbanCountGroup[],
-  groupKeys: string[],
+  deltaGroups: DeltaGroup[],
   stageKeys: string[],
   statusKeys: string[],
   delta: number,
   columnType: 'stage' | 'status',
 ): KanbanCountGroup[] => {
   const nextGroups = groups.map(cloneGroup);
-  for (const groupKey of groupKeys) {
+  for (const { groupKey, displayName } of deltaGroups) {
     // Snapshot keys may be `user:`-prefixed while deltas are bare — match both.
     const groupIndex = nextGroups.findIndex(
       group => group.groupKey === groupKey || normalizeIdentity(group.groupKey) === groupKey,
@@ -410,7 +432,7 @@ const applyGroupDelta = (
       if (delta <= 0) continue;
       group = {
         groupKey,
-        displayName: groupKey,
+        displayName,
         totalCount: 0,
         stages: {},
         statuses: {},
@@ -462,13 +484,13 @@ const applyTicketCountsUpdate = (
   const columnType = request.columnType ?? 'stage';
 
   if (previousMatches && event.previousTicket) {
-    const previousGroupKeys = getGroupKeys(event.previousTicket, request.groupBy);
-    if (previousGroupKeys.length > 0) {
+    const previousGroups = getGroupKeys(event.previousTicket, request.groupBy);
+    if (previousGroups.length > 0) {
       const previousStageKeys = getStageKeys(event.previousTicket);
       const previousStatusKeys = getStatusKeys(event.previousTicket);
       nextGroups = applyGroupDelta(
         nextGroups,
-        previousGroupKeys,
+        previousGroups,
         previousStageKeys,
         previousStatusKeys,
         -1,
@@ -478,13 +500,13 @@ const applyTicketCountsUpdate = (
   }
 
   if (currentMatches) {
-    const currentGroupKeys = getGroupKeys(event.ticket, request.groupBy);
-    if (currentGroupKeys.length > 0) {
+    const currentGroups = getGroupKeys(event.ticket, request.groupBy);
+    if (currentGroups.length > 0) {
       const currentStageKeys = getStageKeys(event.ticket);
       const currentStatusKeys = getStatusKeys(event.ticket);
       nextGroups = applyGroupDelta(
         nextGroups,
-        currentGroupKeys,
+        currentGroups,
         currentStageKeys,
         currentStatusKeys,
         1,

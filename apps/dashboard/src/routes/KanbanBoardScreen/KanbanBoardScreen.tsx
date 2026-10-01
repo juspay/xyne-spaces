@@ -449,6 +449,9 @@ function projectIdsForBoardSelection(
 // Mirrors the backend's NO_MERCHANT_GROUP in services/tickets/kanbanCountsService.ts.
 const NO_MERCHANT_GROUP = 'No Merchant';
 
+// Stable identity for the empty case: a fresh [] would re-key every query that takes it.
+const EMPTY_FIELD_IDS: string[] = [];
+
 const availableColumns = [
   { key: 'assignee', label: 'Assignee', icon: <User className='h-4 w-4' /> },
   { key: 'dueDate', label: 'Due Date', icon: <Calendar className='h-4 w-4' /> },
@@ -1539,7 +1542,25 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
     const result = Array.from(tokens).sort();
     return result;
   }, [filters.dynamicFields]);
-  const zeroOnlyDynamicFieldIds = useMemo<string[]>(() => [], []);
+  // A STRING value is matched case-insensitively everywhere it is counted or fetched (the
+  // Vespa token is an uncased attribute match, and the counts service folds case to agree
+  // with it). Zero cannot express that: its only comparison against the jsonb
+  // `actualFieldValue` is case-exact, so a column page built from it would leave out every
+  // ticket spelled differently from the picked value. Naming the field here keeps its value
+  // out of the Zero query and routes the column through the page that loads form values,
+  // where the shared matcher applies the same case-insensitive rule.
+  const zeroOnlyDynamicFieldIds = useMemo<string[]>(() => {
+    if (!filters.dynamicFields) return EMPTY_FIELD_IDS;
+    const fieldIds = Object.entries(filters.dynamicFields)
+      .filter(
+        ([fieldId, value]) =>
+          Array.isArray(value) &&
+          value.length > 0 &&
+          boardFieldTypesById.get(fieldId) === FormFieldType.STRING,
+      )
+      .map(([fieldId]) => fieldId);
+    return fieldIds.length > 0 ? fieldIds : EMPTY_FIELD_IDS;
+  }, [filters.dynamicFields, boardFieldTypesById]);
 
   // Dynamic grouping options based on form fields
   const groupingOptions = useMemo(() => {
@@ -2253,24 +2274,22 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
     if (kanbanSourceTickets && fevFieldIds.length > 0) {
       (kanbanSourceTickets as KanbanLocalTicket[]).forEach(ticket => {
         const ticketFEVs = ticket.formEntityValues;
-        if (ticketFEVs && ticketFEVs.length > 0) {
-          // Filter to only include FEVs for the fieldIds we're interested in
-          if (ticketFEVs.length > 0) {
-            valuesMap.set(ticket.id, ticketFEVs);
+        // An array — empty included — means the values were loaded with the ticket;
+        // `undefined` means they weren't (a column's page can arrive from Vespa, whose rows
+        // carry none). Recording only the loaded ones keeps this map meaning "values are
+        // known", which is what lets groupTicketsByFormField tell empty from unloaded.
+        if (!ticketFEVs) return;
+        valuesMap.set(ticket.id, ticketFEVs);
 
-            // Build field metadata map from the related formField data
-            ticketFEVs.forEach(fev => {
-              if (fev.formField && !fieldsMap.has(fev.fieldId)) {
-                fieldsMap.set(fev.fieldId, {
-                  fieldType: fev.formField.fieldType,
-                  fieldEnum: parseFieldOptions(
-                    fev.formField.fieldOptions ?? fev.formField.fieldEnum,
-                  ),
-                });
-              }
+        // Build field metadata map from the related formField data
+        ticketFEVs.forEach(fev => {
+          if (fev.formField && !fieldsMap.has(fev.fieldId)) {
+            fieldsMap.set(fev.fieldId, {
+              fieldType: fev.formField.fieldType,
+              fieldEnum: parseFieldOptions(fev.formField.fieldOptions ?? fev.formField.fieldEnum),
             });
           }
-        }
+        });
       });
     }
 
@@ -3742,6 +3761,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
     (
       group: {
         key: string;
+        displayName: string;
         entityType: 'user' | 'group' | null;
         entityId: string | null;
         priority: TicketPriority | null;
@@ -3759,6 +3779,12 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
           ? (group.key as TicketStatusV2)
           : undefined;
       const hasGroupValue = !['No Value', 'Unassigned', NO_MERCHANT_GROUP].includes(group.key);
+      // A STRING group key is folded to lower case (getFormFieldGroupKeys), so a new ticket
+      // takes the name shown on the column instead — the value as the group's tickets store it.
+      const formFieldGroupValue =
+        isFormFieldGroup(groupBy) && groupBy.fieldType === FormFieldType.STRING
+          ? group.displayName
+          : group.key;
       setCreateTicketSeed({
         ...viewCreateTicketSeed,
         status: groupStatus ?? column.status,
@@ -3769,8 +3795,12 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
         ...(isFormFieldGroup(groupBy) && hasGroupValue
           ? {
               dynamicFields: {
+                // Only MULTI_SELECT and USER take an array; a scalar field rejects one.
                 [groupBy.fieldName]:
-                  groupBy.fieldType === FormFieldType.SINGLE_SELECT ? group.key : [group.key],
+                  groupBy.fieldType === FormFieldType.MULTI_SELECT ||
+                  groupBy.fieldType === FormFieldType.USER
+                    ? [group.key]
+                    : formFieldGroupValue,
               },
             }
           : {}),
@@ -4056,6 +4086,11 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
         groupName !== 'Unassigned'
       ) {
         displayName = userNamesById.get(groupName) || displayName;
+      } else if (isFormFieldGroup(groupBy)) {
+        // Keep the name the counts sent with the group. A STRING group key is folded to
+        // lower case (getFormFieldGroupKeys), so the key is not the stored spelling and
+        // showing it would rewrite the user's value as "mid 1".
+        displayName = serverCountGroup?.displayName ?? displayName;
       } else if (groupBy !== 'none') {
         displayName = groupName
           .replace('user:', '')
