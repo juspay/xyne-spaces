@@ -901,9 +901,9 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
       }
       if (initialDescription) {
         form.setFieldValue('description', initialDescription);
-        if (descriptionTextareaRef.current) {
-          descriptionTextareaRef.current.value = initialDescription;
-        }
+      }
+      if (descriptionTextareaRef.current) {
+        descriptionTextareaRef.current.value = initialDescription;
       }
       if (initialPriority) {
         form.setFieldValue('priority', initialPriority);
@@ -1160,10 +1160,10 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
     }
   };
 
-  const missingMandatoryFieldMessage = useMemo(
-    () =>
+  const getMandatoryFieldMessage = useCallback(
+    (valuesSnapshot: CreateTicketFormData): string | null =>
       getMissingMandatoryFieldMessage({
-        formValues,
+        formValues: valuesSnapshot,
         boards,
         formMapping: { formFields: resolvedFormFields },
         showUserGroupsOnly,
@@ -1184,10 +1184,10 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
         releaseOnly,
       }),
     [
-      formValues,
       boards,
       resolvedFormFields,
       ticketKind,
+      releaseOnly,
       showUserGroupsOnly,
       showAssignee,
       showTodo,
@@ -1202,7 +1202,6 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
       mandatoryLabels,
       mandatoryMerchantId,
       mandatoryTicketType,
-      releaseOnly,
     ],
   );
 
@@ -2154,14 +2153,16 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
       return;
     }
 
-    const gateMessage = missingMandatoryFieldMessage ?? releaseGateMessage;
+    const gateMessage =
+      getMandatoryFieldMessage({ ...values, description: currentDescription }) ??
+      releaseGateMessage;
     if (gateMessage) {
       toast.error(gateMessage);
       return;
     }
 
     void form.handleSubmit();
-  }, [form, visibleDynamicFields, missingMandatoryFieldMessage, releaseGateMessage]);
+  }, [form, visibleDynamicFields, getMandatoryFieldMessage, releaseGateMessage]);
 
   // Field error
 
@@ -2376,6 +2377,19 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
                       const target = e.target;
                       target.style.height = 'auto';
                       target.style.height = `${target.scrollHeight}px`;
+                      // Validation runs at submit time only. While an error is
+                      // showing, re-evaluate it live against the typed value so
+                      // it clears as soon as the text is fixed — without writing
+                      // the value into the form store (which is what made typing
+                      // laggy). Mirrors the onSubmit validator's rules.
+                      if (field.state.meta.errors.length > 0) {
+                        const nextError = !target.value.trim()
+                          ? 'Description is required'
+                          : target.value.length < 5
+                            ? 'Description must be at least 5 characters'
+                            : undefined;
+                        field.setErrorMap({ onSubmit: nextError });
+                      }
                     }}
                     className={cn(
                       'rounded-[10px] border px-0 py-1 focus-visible:ring-0 min-h-[150px] transition-colors duration-150',
