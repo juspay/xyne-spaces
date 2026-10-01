@@ -3,6 +3,7 @@
 { config, pkgs, lib, flakeInputs, ... }:
 let
   inherit (import ./nix/packages.nix { inherit pkgs lib; }) y-sweet;
+  transcriptionEnv = import ./nix/python-agent.nix { inherit pkgs lib flakeInputs; };
   prismaEngines = import ./nix/prisma-engines.nix { inherit pkgs; };
   prismaEnvironment = lib.optionalAttrs pkgs.stdenv.isLinux {
     PRISMA_QUERY_ENGINE_LIBRARY = "${prismaEngines}/lib/libquery_engine.node";
@@ -13,6 +14,8 @@ in
   imports = [
     ./nix/modules/devshell.nix
   ];
+
+  packages.transcription-agent-env = transcriptionEnv;
 
   # Development shell configuration
   devShell = {
@@ -301,14 +304,10 @@ in
     # Python Transcription Agent - Native via Nix Python
     settings.processes.transcription-agent = {
       command = toString (pkgs.writeShellScript "transcription-agent" ''
+        set -e
         cd apps/backend/python-agent
         mkdir -p transcriptions
 
-        # PyPI native wheels need runtime libraries on Nix Linux hosts.
-        ${lib.optionalString pkgs.stdenv.isLinux ''
-          export LD_LIBRARY_PATH="${lib.makeLibraryPath [ pkgs.stdenv.cc.cc.lib pkgs.zlib ]}''${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
-        ''}
-        
         # Set environment variables
         export LIVEKIT_URL="ws://127.0.0.1:7880"
         export BACKEND_URL="http://127.0.0.1:3001"
@@ -318,19 +317,7 @@ in
         export STORAGE_EMULATOR_HOST="http://127.0.0.1:4443"
         export HEALTH_PORT="8001"
         
-        # Create virtual environment if it doesn't exist
-        if [ ! -d ".venv" ]; then
-          echo "📦 Creating Python virtual environment..."
-          ${pkgs.python3}/bin/python -m venv .venv
-          
-          echo "📦 Installing dependencies (this may take a minute)..."
-          .venv/bin/pip install --upgrade pip setuptools wheel
-          .venv/bin/pip install -r requirements.txt
-          echo "✓ Dependencies installed"
-        fi
-        
-        # Run the agent using the venv with 'start' command
-        .venv/bin/python -c 'from dotenv import load_dotenv; import runpy; load_dotenv("../.env.local", override=True); runpy.run_path("main.py", run_name="__main__")' start
+        exec ${transcriptionEnv}/bin/python -c 'from dotenv import load_dotenv; import runpy; load_dotenv("../.env.local", override=True); runpy.run_path("main.py", run_name="__main__")' start
       '');
       
       depends_on = {
@@ -349,9 +336,10 @@ in
         period_seconds = 10;
         timeout_seconds = 3;
         success_threshold = 1;
-        # First boot installs Python wheels before the health server can start.
-        # Do not kill that install after only one minute on a fresh machine.
-        failure_threshold = 90;
+        # The old 90-attempt allowance covered pip installs; Nix builds dependencies ahead of time.
+        # First start may still download the turn-detector model on a slow connection;
+        # raise failure_threshold if that download exceeds this readiness window.
+        failure_threshold = 6;
       };
       
       namespace = "ai.transcription-agent";
@@ -415,11 +403,6 @@ in
           echo -e "''${GREEN}   ✓ .logs/ removed''${NC}"
         fi
         
-        if [ -d "apps/backend/python-agent/.venv" ]; then
-          echo "   Removing Python virtual environment..."
-          rm -rf apps/backend/python-agent/.venv
-          echo -e "''${GREEN}   ✓ Python .venv/ removed''${NC}"
-        fi
         echo ""
         
         echo -e "''${YELLOW}⚠️  This is equivalent to 'docker-compose down -v' (volumes removed)''${NC}"

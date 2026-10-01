@@ -117,11 +117,16 @@ data**; use them only when you intend to start from an empty database.
   replaces published sample LiveKit keys with random local values. LiveKit, Zero (including `ZERO_AUTH_SECRET`), and the
   transcription agent read `apps/backend/.env.local` at runtime, keeping secrets out
   of the Nix store. Existing custom keys are preserved.
-- On Linux, the transcription process gets the C++ runtime and zlib library paths
-  needed by native Python wheels. The first launch installs its Python dependencies
-  and may take several minutes; its readiness probe allows up to 15 minutes for
-  this initial setup. Zero creates its replica directory itself, including when
-  started directly by the smoke test.
+- The transcription agent runs a Python 3.11 environment built from `uv.lock` by
+  uv2nix, with native wheels patched by Nix. No dependency installation happens at
+  service startup. Docker's `requirements.txt` is exported from the same lock with
+  `uv export --format requirements-txt --no-dev --no-emit-project`.
+  Zero creates its replica directory itself, including in the smoke test.
+
+## Diarization
+
+Diarization is not part of the Nix environment.
+Its `requirements-diarization.txt` torch/torchaudio pins are mutually incompatible and need fixing by whoever owns that feature.
 
 ## Verification
 
