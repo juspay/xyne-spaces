@@ -1,3 +1,10 @@
+## [1.452.1](https://github.com/juspay/xyne-spaces/compare/v1.452.0...v1.452.1) (2026-10-01)
+
+
+### Bug Fixes
+
+* pre-approve Xyne tools for the Claude Code local harness ([#2599](https://github.com/juspay/xyne-spaces/issues/2599)) ([1736f9f](https://github.com/juspay/xyne-spaces/commit/1736f9f37715991faec280b8cea1b8e216015a4e))
+
 ## [1.452.0](https://github.com/juspay/xyne-spaces/compare/v1.451.0...v1.452.0) (2026-10-01)
 
 
