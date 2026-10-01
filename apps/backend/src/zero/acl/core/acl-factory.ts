@@ -24,6 +24,10 @@ import { OrgMembersACL } from '../tables/org-members-acl';
 import { OrganizationsACL } from '../tables/organizations-acl';
 import { ReactionCountsACL } from '../tables/reaction-counts-acl';
 import { ReactionsACL } from '../tables/reactions-acl';
+import { PollsACL } from '../tables/polls-acl';
+import { PollQuestionsACL } from '../tables/poll-questions-acl';
+import { PollOptionsACL } from '../tables/poll-options-acl';
+import { PollVotesACL } from '../tables/poll-votes-acl';
 import { RolesACL } from '../tables/roles-acl';
 import { UserRoleMappingsACL } from '../tables/user-role-mappings-acl';
 import { UserGroupMappingsACL } from '../tables/user-group-mappings-acl';
@@ -137,6 +141,10 @@ import { WorkspacesACL } from '../tables/workspaces-acl';
 const GUEST_MUTATION_ALLOWLIST: readonly TableName[] = [
   'messages',
   'reactions',
+  'polls',
+  'poll_questions',
+  'poll_options',
+  'poll_votes',
   'message_attachments',
   'activities',
   'channel_user_status',
@@ -260,6 +268,14 @@ export class ACLFactory {
         return new ReactionCountsACL(ctx);
       case 'reactions':
         return new ReactionsACL(ctx);
+      case 'polls':
+        return new PollsACL(ctx);
+      case 'poll_questions':
+        return new PollQuestionsACL(ctx);
+      case 'poll_options':
+        return new PollOptionsACL(ctx);
+      case 'poll_votes':
+        return new PollVotesACL(ctx);
       case 'resources':
         return new ResourcesACL(ctx);
       case 'resource_access':

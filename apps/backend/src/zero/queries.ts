@@ -816,6 +816,24 @@ const applyArchiveFilter = <T extends { where: Function }>(
 };
 
 export const queries: AnyQueryRegistry = defineQueries({
+  pollByMessageId: defineQuery(
+    // channelId is intentionally consumed by defineQuery's ACL wrapper rather
+    // than this query body. PollsACL scopes poll -> message -> conversation -> channel.
+    z.object({ messageId: z.string(), channelId: z.string().optional() }),
+    ({ args: { messageId } }) =>
+      zql.polls
+        .where('messageId', '=', messageId)
+        .whereExists('message', message => message.where('isDeleted', false))
+        .related('questions', question =>
+          question
+            .orderBy('position', 'asc')
+            .related('options', option =>
+              option.orderBy('position', 'asc').orderBy('createdAt', 'asc'),
+            )
+            .related('votes'),
+        )
+        .one(),
+  ),
   activeSlashCommandArtifacts: defineQuery(({ ctx }) =>
     zql.message_artifacts
       .where('workspaceId', ctx.workspaceId)

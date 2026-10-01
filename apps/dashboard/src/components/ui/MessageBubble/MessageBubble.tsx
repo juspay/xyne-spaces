@@ -106,6 +106,7 @@ import { InlineVideoPreview } from './InlineVideoPreview';
 import { loadEmojiData } from '../../../utils/emojiLookup';
 import { RecordingShareContent } from './RecordingShareContent';
 import { useRecordingShareMessage } from './recordingShareMessage';
+import { MessagePollCard } from '../../Chat/Polls/MessagePollCard';
 
 // ================== ATTACHMENTS BLOCK ==================
 type AttachmentType = QueryResultType<
@@ -1293,6 +1294,8 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
             <div className='w-full flex flex-col gap-1 '>
               {message.isDeleted ? (
                 <div className='text-sm text-muted-foreground italic'>This message was deleted</div>
+              ) : metadata?.messageSubtype === 'poll' ? (
+                <MessagePollCard messageId={message.messageId} {...(channelId && { channelId })} />
               ) : isMentionUserAddition ? (
                 <NonParticipantActions
                   messageId={message.messageId}
