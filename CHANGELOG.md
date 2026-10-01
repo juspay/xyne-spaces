@@ -1,3 +1,10 @@
+## [1.446.3](https://github.com/juspay/xyne-spaces/compare/v1.446.2...v1.446.3) (2026-10-01)
+
+
+### Bug Fixes
+
+* hide cancelled calls from search ([#2425](https://github.com/juspay/xyne-spaces/issues/2425)) ([a11e44a](https://github.com/juspay/xyne-spaces/commit/a11e44ae5e6b48d7fb156aadf773d387950062a5))
+
 ## [1.446.2](https://github.com/juspay/xyne-spaces/compare/v1.446.1...v1.446.2) (2026-10-01)
 
 
