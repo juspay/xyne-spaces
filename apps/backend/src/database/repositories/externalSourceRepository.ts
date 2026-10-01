@@ -75,12 +75,6 @@ export class ExternalSourceRepository {
     });
   }
 
-  async findAllActiveInstagram() {
-    return await this.db.externalSource.findMany({
-      where: { sourceType: ExternalSourcePlatform.INSTAGRAM, isActive: true },
-    });
-  }
-
   /**
    * Find every migration source for a Slack channel.
    *

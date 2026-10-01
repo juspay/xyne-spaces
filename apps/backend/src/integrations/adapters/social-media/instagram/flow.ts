@@ -126,44 +126,53 @@ export class InstagramFlow extends BaseFlow {
           }
           if (!msg.text && attachments?.length) {
             const isTemplate = attachments.some((a) => a.type === 'template');
-            if (isTemplate && accessToken) {
+            if (isTemplate) {
               // IG Login delivers @mention-in-comment notifications as template messages with no text.
-              // await here yields the event loop — a concurrent changes.comments request for the
-              // same action (own-post comment with @mention) runs to completion and marks itself
-              // in _ownPostCommentDedup before getMessage returns.
-              const full = await metaGraphClient.getMessage(accessToken, msg.mid);
-              if (full?.from?.id) {
-                // If changes.comments already processed for this sender (own-post comment),
-                // skip — the comment ticket covers it.
-                if (source && _isCommentDuplicate(source.id, full.from.id)) {
-                  logger.info('[InstagramFlow] Skipping template mention — own-post comment already processed', {
+              // Only template attachments are echoes from comments/mentions — skip them.
+              // Non-template attachments (image, video, audio) are real customer DMs and fall through.
+              if (accessToken) {
+                // await here yields the event loop — a concurrent changes.comments request for the
+                // same action (own-post comment with @mention) runs to completion and marks itself
+                // in _ownPostCommentDedup before getMessage returns.
+                const full = await metaGraphClient.getMessage(accessToken, msg.mid);
+                if (full?.from?.id) {
+                  // If changes.comments already processed for this sender (own-post comment),
+                  // skip — the comment ticket covers it.
+                  if (source && _isCommentDuplicate(source.id, full.from.id)) {
+                    logger.info('[InstagramFlow] Skipping template mention — own-post comment already processed', {
+                      mid: msg.mid,
+                      senderId: full.from.id,
+                    });
+                    continue;
+                  }
+                  const senderUsername = full.from.username ?? full.from.id;
+                  logger.info('[InstagramFlow] Incoming mention via template message', {
                     mid: msg.mid,
+                    senderUsername,
                     senderId: full.from.id,
+                  });
+                  mentionComments.push({
+                    type: 'mention',
+                    senderUsername,
+                    senderId: full.from.id,
+                    text: `@${senderUsername} mentioned you on Instagram — open Instagram to view the comment`,
+                    mid: msg.mid,
+                    timestamp: (messaging.timestamp as number | undefined) ?? Date.now(),
                   });
                   continue;
                 }
-                const senderUsername = full.from.username ?? full.from.id;
-                logger.info('[InstagramFlow] Incoming mention via template message', {
-                  mid: msg.mid,
-                  senderUsername,
-                  senderId: full.from.id,
-                });
-                mentionComments.push({
-                  type: 'mention',
-                  senderUsername,
-                  senderId: full.from.id,
-                  text: `@${senderUsername} mentioned you on Instagram — open Instagram to view the comment`,
-                  mid: msg.mid,
-                  timestamp: (messaging.timestamp as number | undefined) ?? Date.now(),
-                });
-                continue;
               }
+              logger.info('[InstagramFlow] Skipping template-only notification (comment/mention echo)', {
+                mid: msg.mid,
+                attachmentTypes: attachments.map((a) => a.type),
+              });
+              continue;
             }
-            logger.info('[InstagramFlow] Skipping attachment-only notification (comment/mention echo)', {
+            // Non-template attachment (image, video, audio, etc.) — fall through to DM processing below.
+            logger.info('[InstagramFlow] Processing attachment-only DM', {
               mid: msg.mid,
               attachmentTypes: attachments.map((a) => a.type),
             });
-            continue;
           }
           logger.info('[InstagramFlow] Incoming DM', {
             mid: msg.mid,
