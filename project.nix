@@ -205,6 +205,7 @@ in
     # Zero Cache service (native, no container required)
     services.zero-cache."xyne-zero" = {
       enable = true;
+      nodeModulesPath = "./apps/backend/node_modules";
       port = 4848;
       upstreamDb = "postgresql://xyne:xyne123@127.0.0.1:5433/xyne_dev_db";
       cvrDb = "postgresql://xyne:xyne123@127.0.0.1:5433/xyne_dev_db";
