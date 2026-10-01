@@ -120,6 +120,7 @@ export const Event = {
   ATTACHMENT_UPLOAD_SUCCESS: 'attachment_upload_success',
   ATTACHMENT_UPLOAD_FAILED: 'attachment_upload_failed',
   DRAFT_ATTACHMENTS_LOAD_FAILED: 'draft_attachments_load_failed',
+  COMPOSE_DM_DRAFT_PERSIST_FAILED: 'compose_dm_draft_persist_failed',
   MESSAGE_SENT: 'message_sent',
   MESSAGE_SEND_FAILED: 'message_send_failed',
   MESSAGE_DELETED: 'message_deleted',

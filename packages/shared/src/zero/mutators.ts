@@ -1015,14 +1015,20 @@ export const mutators = defineMutators({
         );
 
         if (!participant) {
-          throw new Error('Not a channel participant');
+          // The local replica can lag behind the server for a freshly created DM: the
+          // creator's channel_user_status row is created hidden (silent auto-create from
+          // New Message) and may not be synced yet. Throwing here aborts the whole
+          // mutation on the client, so it is never pushed and the draft below is lost.
+          // On the client, skip the read-status update and still push the mutation —
+          // the server mutator re-checks participation and stays authoritative.
+          if (tx.location !== 'client') {
+            throw new Error('Not a channel participant');
+          }
         }
 
-        const conversationSeenCutoffAt = await getConversationSeenCutoffAt(
-          tx,
-          channelId,
-          timestamp,
-        );
+        const conversationSeenCutoffAt = participant
+          ? await getConversationSeenCutoffAt(tx, channelId, timestamp)
+          : undefined;
 
         const updateData: {
           lastViewedAt: number;
@@ -1039,11 +1045,13 @@ export const mutators = defineMutators({
           updateData.lastViewedConversationId = conversationId;
         }
 
-        await tx.mutate.channel_user_status.update({
-          id: participant.id,
-          ...updateData,
-          updatedAt: timestamp,
-        });
+        if (participant) {
+          await tx.mutate.channel_user_status.update({
+            id: participant.id,
+            ...updateData,
+            updatedAt: timestamp,
+          });
+        }
 
         // Query for drafts in this channel for this user (follows backend logic)
         const channelDrafts = await tx.run(

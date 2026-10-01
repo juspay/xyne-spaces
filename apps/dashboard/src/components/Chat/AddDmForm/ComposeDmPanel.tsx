@@ -34,6 +34,9 @@ import {
 import { userToMentionResult } from '../../../utils/userDisplayName';
 import { useRankedActivePeople } from '../../../hooks/useRankedPeopleSearch';
 import { useAffinityCallback } from '../../../hooks/useAffinityCallback';
+import { saveDraft } from '../../../hooks/useDraft';
+import { v4 as uuidv4 } from 'uuid';
+import { logger, Event } from '../../../utils/logger';
 import { rankChannelsByAffinity } from '../../../utils/rankingUtils';
 
 export interface CreateDmFormData {
@@ -100,6 +103,68 @@ export const ComposeDmPanel: React.FC = () => {
     setCreatedChannelId(undefined);
   }, [selectedUsers]);
 
+  // ── Draft persistence ───────────────────────────────────────────────────────
+  // The compose screen auto-creates the (group) DM in the background, but the user
+  // stays here instead of entering the channel, so neither ChatInput's per-keystroke
+  // saveDraft nor ChatListV4's unmount persist ever runs. Track the latest composer
+  // content and the resolved channel so we can save the draft against that DM.
+  const draftHtmlRef = useRef('');
+  const draftTextRef = useRef('');
+  const effectiveChannelIdRef = useRef<string | undefined>(effectiveChannelId);
+
+  useEffect(() => {
+    effectiveChannelIdRef.current = effectiveChannelId;
+    // Channel resolved after the user already typed (debounced auto-create):
+    // mirror the in-progress text into the local draft store for that DM.
+    if (effectiveChannelId && draftTextRef.current.trim()) {
+      saveDraft(effectiveChannelId, draftHtmlRef.current, draftTextRef.current);
+    }
+  }, [effectiveChannelId]);
+
+  const handleDraftContentChange = useCallback((html: string, text: string): void => {
+    draftHtmlRef.current = html;
+    draftTextRef.current = text;
+    const channelId = effectiveChannelIdRef.current;
+    if (!channelId) return;
+    if (text.trim()) {
+      saveDraft(channelId, html, text);
+    } else {
+      saveDraft(channelId, '', '');
+    }
+  }, []);
+
+  const clearDraftRefs = useCallback((): void => {
+    draftHtmlRef.current = '';
+    draftTextRef.current = '';
+  }, []);
+
+  // Persist the draft to the server when the user leaves the compose screen.
+  useEffect(() => {
+    return (): void => {
+      const channelId = effectiveChannelIdRef.current;
+      const text = draftTextRef.current;
+      if (!channelId || !text.trim()) return;
+      const html = draftHtmlRef.current;
+      saveDraft(channelId, html, text);
+      zero
+        .mutate(
+          mutators.channel.markChannelAsViewed({
+            channelId,
+            timestamp: Date.now(),
+            draftMessageId: uuidv4(),
+            draftMessage: html,
+          }),
+        )
+        .client.catch((error: unknown) => {
+          logger.error(Event.COMPOSE_DM_DRAFT_PERSIST_FAILED, {
+            channelId,
+            error: error instanceof Error ? error.message : String(error),
+          });
+        });
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   const navigateToChannel = useCallback(
     (channelId: string) => {
       const targetPath = location.pathname.includes('/chat/dm')
@@ -142,6 +207,9 @@ export const ComposeDmPanel: React.FC = () => {
       // Send the message (with or without attachments)
       try {
         await sendConversationWithAttachments(channelId, html, files);
+        // Message sent — nothing left to keep as a draft.
+        clearDraftRefs();
+        saveDraft(channelId, '', '');
         navigateToChannel(channelId);
       } catch (error) {
         toast.error('Failed to send message', {
@@ -150,7 +218,15 @@ export const ComposeDmPanel: React.FC = () => {
         throw error;
       }
     },
-    [selectedUsers, effectiveChannelId, cancelAutoCreate, createDm, navigateToChannel, zero],
+    [
+      selectedUsers,
+      effectiveChannelId,
+      cancelAutoCreate,
+      createDm,
+      navigateToChannel,
+      zero,
+      clearDraftRefs,
+    ],
   );
 
   const form = useForm({
@@ -468,8 +544,9 @@ export const ComposeDmPanel: React.FC = () => {
                     onMentionSearch={handleMentionSearch}
                     channelItems={channelItems}
                     onChannelSearch={handleChannelSearch}
-                    onContentChange={(html: string) => {
+                    onContentChange={(html: string, text: string) => {
                       field.handleChange(html);
+                      handleDraftContentChange(html, text);
                     }}
                     disabled={selectedUsers.length > 9}
                     disableDraftUpload
