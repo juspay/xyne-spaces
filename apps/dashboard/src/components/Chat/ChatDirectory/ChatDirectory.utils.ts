@@ -104,9 +104,14 @@ export const groupChannelsByScope = (
     statusByChannelId.set(status.channelId, status);
   }
   for (const channel of channelData) {
-    // SDLC repository channels are system-managed and hidden from chat,
-    // the same way SUPPORT channels are.
+    // SDLC repository channels are system-managed and hidden from the chat
+    // sidebar by default, the same way SUPPORT channels are. An explicit star
+    // from the user overrides that: the header Star button is available on
+    // SDLC channels, so a starred SDLC channel must show under Starred.
     if (channel.type === ChannelType.SDLC) {
+      if (statusByChannelId.get(channel.id)?.isStarred) {
+        starred.push(channel);
+      }
       continue;
     }
     // EMAIL channels live in Xyne Desk, not in the chat directory.
