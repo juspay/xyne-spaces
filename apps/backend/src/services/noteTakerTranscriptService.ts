@@ -23,6 +23,7 @@ import {
 } from '@xyne/shared';
 import { recordingSharingService } from '@/services/recordingSharingService';
 import { isRecording } from '@/utils/callTypeUtils';
+import { isTranscriptUnlinked } from '@/utils/transcriptUnlink';
 import { notificationService } from '@/services/notificationService';
 import { activityService } from '@/services/activity/activityService';
 import {
@@ -96,6 +97,14 @@ class NoteTakerTranscriptService {
           reason: 'agent_reported_no_transcript',
           path: 'note_taker',
         });
+        return;
+      }
+
+      // Admin unlink keeps the GCS files, so without this a late webhook or the
+      // reconcile would re-attach the transcript. Read fresh: the unlink takes this
+      // same lock, so `call` may predate it.
+      if (isTranscriptUnlinked(await repositories.calls.findByExternalId(callId))) {
+        logger.info(`[${callId}] note_taker_process_skipped`, { reason: 'transcript_unlinked' });
         return;
       }
 
@@ -198,11 +207,12 @@ class NoteTakerTranscriptService {
 
   /**
    * Regenerate only the detailed-summary canvas with an explicitly selected
-   * built-in template. The normal Call.aiSummary remains untouched.
+   * built-in template (the default template when none is given). The normal
+   * Call.aiSummary remains untouched.
    */
   async regenerateSummary(
     call: Call,
-    templateId: string,
+    templateId: string | undefined,
     modelType?: SummaryModelType,
   ): Promise<{
     summaryTemplateId: string;
@@ -210,7 +220,10 @@ class NoteTakerTranscriptService {
     detailedSummaryReady: boolean;
     summaryModelUsed: SummaryModelType;
   } | null> {
-    const formattedTranscript = await transcriptService.getTranscriptContent(call.externalId);
+    // An admin-unlinked transcript still sits in storage; treat it as absent.
+    const formattedTranscript = isTranscriptUnlinked(call)
+      ? null
+      : await transcriptService.getTranscriptContent(call.externalId);
     if (!formattedTranscript) {
       // No transcript at all is a terminal 'failed' state — the button offer
       // should still surface so the user isn't left staring at a stale 'ready'.
@@ -371,6 +384,7 @@ class NoteTakerTranscriptService {
    * (list-view "Generate labels" action).
    */
   async regenerateLabels(call: Call): Promise<string[] | null> {
+    if (isTranscriptUnlinked(call)) return null;
     const formattedTranscript = await transcriptService.getTranscriptContent(call.externalId);
     if (!formattedTranscript) return null;
 
