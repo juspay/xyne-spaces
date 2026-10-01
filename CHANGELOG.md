@@ -1,3 +1,10 @@
+## [1.446.1-release-20261001.1](https://github.com/juspay/xyne-spaces/compare/v1.446.0...v1.446.1-release-20261001.1) (2026-10-01)
+
+
+### Reverts
+
+* turn related conversations back off by default ([#2561](https://github.com/juspay/xyne-spaces/issues/2561)) ([63a8c36](https://github.com/juspay/xyne-spaces/commit/63a8c360d4f0a1eca61729488ba0ca4e274ec855)), closes [#2504](https://github.com/juspay/xyne-spaces/issues/2504)
+
 ## [1.446.0](https://github.com/juspay/xyne-spaces/compare/v1.445.0...v1.446.0) (2026-09-30)
 
 
