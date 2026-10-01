@@ -48,13 +48,28 @@ const DEFAULT_CONFIG: AssistantRouteConfig = {
   alsoThreshold: ALSO_THRESHOLD,
 };
 
-const getConfig = async (ctx: AssistantRouteContext): Promise<AssistantRouteConfig> => {
-  const remote = (await superpositionClient.getObjectValue(
+const isProbability = (value: unknown): value is number =>
+  typeof value === 'number' && value >= 0 && value <= 1;
+
+// Null when Superposition never initialised: retrying its init here would hold the request for
+// its full network timeout. Remote fields are checked one by one, so a mistyped value cannot turn
+// the kill switch off or make every message match.
+const getConfig = async (ctx: AssistantRouteContext): Promise<AssistantRouteConfig | null> => {
+  if (!superpositionClient.isReady()) return null;
+  const remote = await superpositionClient.getObjectValue(
     CONFIG_KEY,
     DEFAULT_CONFIG as unknown as JsonValue,
     { userId: ctx.userId, workspaceId: ctx.workspaceId }
-  )) as Partial<AssistantRouteConfig> | null;
-  return { ...DEFAULT_CONFIG, ...remote };
+  );
+  if (!remote || typeof remote !== 'object' || Array.isArray(remote)) return DEFAULT_CONFIG;
+  const { enabled, actionThreshold, alsoThreshold } = remote as Record<string, unknown>;
+  return {
+    enabled: enabled === undefined ? DEFAULT_CONFIG.enabled : enabled === true,
+    actionThreshold: isProbability(actionThreshold)
+      ? actionThreshold
+      : DEFAULT_CONFIG.actionThreshold,
+    alsoThreshold: isProbability(alsoThreshold) ? alsoThreshold : DEFAULT_CONFIG.alsoThreshold,
+  };
 };
 
 const shuffle = <T>(items: T[]): T[] => {
@@ -86,13 +101,7 @@ export const routeAssistantMessage = async (
   };
 
   if (!isJevConfigured()) return finish({ route: 'unavailable' });
-  // Superposition throws when it never initialised; routing then fails closed, like the kill switch.
-  const config = await getConfig(ctx).catch((error: unknown) => {
-    logger.warn('assistant route config unavailable', {
-      error: error instanceof Error ? error.name : 'unknown',
-    });
-    return null;
-  });
+  const config = await getConfig(ctx);
   if (!config?.enabled) return finish({ route: 'unavailable' });
 
   // Shuffled against position bias.

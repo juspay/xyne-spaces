@@ -27,7 +27,7 @@ export const assistantRouteBodySchema = Joi.object({
           .pattern(/^[a-z][a-z0-9_]*$/)
           .invalid(ASSISTANT_ROUTE_NONE_ID)
           .required(),
-        description: Joi.string().min(1).max(2000).required(),
+        description: Joi.string().trim().min(1).max(2000).required(),
       })
     )
     .min(1)
