@@ -1579,7 +1579,14 @@ export class TicketController {
       }
 
       await telephonyEmailService.setTranscriptionState(emailId, workspaceId, { status: 'queued' });
-      const enqueued = await callTranscriptionQueue.enqueue({ emailId, workspaceId, userId });
+      let enqueued: boolean;
+      try {
+        enqueued = await callTranscriptionQueue.enqueue({ emailId, workspaceId, userId });
+      } catch (enqueueError) {
+        // Enqueue failed (e.g. Redis down): don't leave the body stuck at "queued" with no job behind it.
+        await telephonyEmailService.setTranscriptionState(emailId, workspaceId, { status: 'failed', error: 'Could not start transcription. Please try again.' });
+        throw enqueueError;
+      }
       if (!enqueued) {
         res.status(409).json({ error: 'Transcription is already in progress' });
         return;
