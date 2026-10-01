@@ -6016,6 +6016,30 @@ export const SupportTicketDetail = ({
                           Summarize thread
                         </DropdownMenuItem>
                       )}
+                      <DropdownMenuItem
+                        onSelect={() => {
+                          if (!channelId || !ticketIdParam) {
+                            toast.error('Cannot copy link');
+                            return;
+                          }
+                          const url = `${shareableOrigin}/support/${channelId}/${ticketIdParam}`;
+                          void navigator.clipboard
+                            .writeText(url)
+                            .then(() => toast.success('Link copied'))
+                            .catch(() => toast.error('Failed to copy link'));
+                        }}
+                        data-track-category='Support'
+                        data-track-name='CopyTicketLink'
+                        data-track-metadata={JSON.stringify(
+                          deskTicketTrackingMetadata(ticket, {
+                            deskType: channelPreference?.deskType ?? null,
+                            emailCount,
+                          }),
+                        )}
+                      >
+                        <LinkIcon size={14} className='shrink-0' />
+                        Copy link
+                      </DropdownMenuItem>
                       {ticket?.id && !ticket.isArchived && (
                         <DropdownMenuItem
                           onSelect={recheckDuplicates}
@@ -6032,6 +6056,38 @@ export const SupportTicketDetail = ({
                           Check for duplicates
                         </DropdownMenuItem>
                       )}
+                      {emails.length > 0 &&
+                        channel?.type !== ChannelType.SLACK &&
+                        channel?.type !== ChannelType.APP && (
+                          <DropdownMenuItem
+                            onSelect={() => {
+                              if (!ticket?.id) return;
+                              void zero
+                                .mutate(
+                                  mutators.emailRead.bulkMarkAsUnread({ ticketIds: [ticket.id] }),
+                                )
+                                .client.then(() => {
+                                  trackDeskOutcome(
+                                    'READ_STATE_CHANGED',
+                                    ticket,
+                                    { deskType: channelPreference?.deskType ?? null, emailCount },
+                                    { to: 'unread', trigger: 'manual', bulkCount: 1 },
+                                  );
+                                });
+                              goBackToTicketList();
+                            }}
+                            data-track-category='Support'
+                            data-track-name='MarkTicketUnread'
+                            data-track-metadata={JSON.stringify(
+                              deskTicketTrackingMetadata(ticket, {
+                                deskType: channelPreference?.deskType ?? null,
+                              }),
+                            )}
+                          >
+                            <MailOpen size={14} className='shrink-0' />
+                            Mark as unread
+                          </DropdownMenuItem>
+                        )}
                       {channel?.type === ChannelType.EMAIL && mailboxTicketId && channelId && (
                         <>
                           {(mailboxOverlay?.state ?? MailboxState.INBOX) ===
@@ -6115,96 +6171,27 @@ export const SupportTicketDetail = ({
                           )}
                         </>
                       )}
+                      {channel && channel.type !== ChannelType.APP && (
+                        <DropdownMenuItem
+                          onSelect={e => e.preventDefault()}
+                          className='p-0 focus:bg-transparent'
+                        >
+                          <CloudAgentDock buttonBehavior='floating' />
+                        </DropdownMenuItem>
+                      )}
+                      <DropdownMenuSeparator />
+                      <DropdownMenuItem
+                        onSelect={() => setShowArchiveConfirmDialog(true)}
+                        disabled={!ticket || !!ticket.isArchived}
+                        data-track-category='Support'
+                        data-track-name='ArchiveTicket'
+                        className='text-destructive focus:text-destructive'
+                      >
+                        <Archive size={14} className='shrink-0' />
+                        Archive ticket
+                      </DropdownMenuItem>
                     </DropdownMenuContent>
                   </DropdownMenu>
-
-                  <Tooltip side='bottom' delayDuration={300} content='Copy link to ticket'>
-                    <button
-                      type='button'
-                      onClick={() => {
-                        if (!channelId || !ticketIdParam) {
-                          toast.error('Cannot copy link');
-                          return;
-                        }
-                        const url = `${shareableOrigin}/support/${channelId}/${ticketIdParam}`;
-                        void navigator.clipboard
-                          .writeText(url)
-                          .then(() => toast.success('Link copied'))
-                          .catch(() => toast.error('Failed to copy link'));
-                      }}
-                      className='p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors'
-                      aria-label='Copy link to ticket'
-                      data-track-category='Support'
-                      data-track-name='CopyTicketLink'
-                      data-track-metadata={JSON.stringify(
-                        deskTicketTrackingMetadata(ticket, {
-                          deskType: channelPreference?.deskType ?? null,
-                          emailCount,
-                        }),
-                      )}
-                    >
-                      <LinkIcon size={16} />
-                    </button>
-                  </Tooltip>
-                  <div className='w-px h-4 bg-border' />
-
-                  {channel && channel.type !== ChannelType.APP && (
-                    <CloudAgentDock buttonBehavior='floating' />
-                  )}
-
-                  <Tooltip
-                    side='bottom'
-                    delayDuration={300}
-                    content={ticket?.isArchived ? 'Already archived' : 'Archive ticket'}
-                  >
-                    <button
-                      type='button'
-                      onClick={() => setShowArchiveConfirmDialog(true)}
-                      disabled={!ticket || !!ticket.isArchived}
-                      className='p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted disabled:opacity-40 disabled:cursor-not-allowed transition-colors'
-                      aria-label='Archive ticket'
-                      data-track-category='Support'
-                      data-track-name='ArchiveTicket'
-                    >
-                      <Archive size={16} />
-                    </button>
-                  </Tooltip>
-                  {emails.length > 0 &&
-                    channel?.type !== ChannelType.SLACK &&
-                    channel?.type !== ChannelType.APP &&
-                    (channel?.type !== ChannelType.SOCIAL_MEDIA ||
-                      channelIntegrationInfo.sourceType !== 'instagram') && (
-                      <>
-                        <div className='w-px h-4 bg-border' />
-                        <Tooltip side='bottom' delayDuration={300} content='Mark as unread'>
-                          <button
-                            type='button'
-                            onClick={() => {
-                              if (!ticket?.id) return;
-                              void zero
-                                .mutate(
-                                  mutators.emailRead.bulkMarkAsUnread({ ticketIds: [ticket.id] }),
-                                )
-                                .client.then(() => {
-                                  trackDeskOutcome(
-                                    'READ_STATE_CHANGED',
-                                    ticket,
-                                    { deskType: channelPreference?.deskType ?? null, emailCount },
-                                    { to: 'unread', trigger: 'manual', bulkCount: 1 },
-                                  );
-                                });
-                              goBackToTicketList();
-                            }}
-                            className='p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors'
-                            aria-label='Mark as unread'
-                            data-track-category='Support'
-                            data-track-name='MarkTicketUnread'
-                          >
-                            <MailOpen size={16} />
-                          </button>
-                        </Tooltip>
-                      </>
-                    )}
                 </div>
               </div>
               <div className='flex flex-col gap-1 flex-shrink-0'>

@@ -2,7 +2,6 @@ import { ReactElement, useState } from 'react';
 import { Plug, Plus, Unplug } from 'lucide-react';
 import { toast } from 'sonner';
 import {
-  disconnectInstagramDesk,
   disconnectInstagramAccount,
   reconnectInstagramAccount,
   addInstagramAccount,
@@ -35,7 +34,9 @@ export const InstagramDeskIntegrationCard = ({
 
   const handleDisconnectAll = async (): Promise<void> => {
     try {
-      await disconnectInstagramDesk(channelId);
+      for (const account of deskApps) {
+        await disconnectInstagramAccount(channelId, account.id);
+      }
       toast.success('Instagram accounts disconnected. DM history is preserved.');
       clearChannelConnectedEmailCache(channelId);
     } catch (err) {
