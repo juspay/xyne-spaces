@@ -14,7 +14,7 @@
   },
   "scripts": {
     "typecheck": "tsc --noEmit",
-    "postinstall": "pnpm exec playwright install chromium",
+    "postinstall": "node scripts/install-browser.mjs",
     "test": "vitest run",
     "test:watch": "vitest"
   },

@@ -26,9 +26,25 @@ in
       pnpm
       just
       openssl
+      ffmpeg
+      gitleaks
+      trivy
+      postgresql
+      process-compose
+      kubernetes-helm
+      gauge
+      playwright-driver.browsers
     ];
 
-    environment = prismaEnvironment;
+    environment = prismaEnvironment // {
+      PLAYWRIGHT_BROWSERS_PATH = "${pkgs.playwright-driver.browsers}";
+      PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD = "1";
+      PLAYWRIGHT_SKIP_VALIDATE_HOST_REQUIREMENTS = "true";
+    };
+
+    shellHook = lib.optionalString pkgs.stdenv.isLinux ''
+      export LD_LIBRARY_PATH="${lib.makeLibraryPath [ pkgs.stdenv.cc.cc.lib pkgs.zlib ]}''${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+    '';
 
     banner = ''
       # Xyne Spaces Dev Environment
