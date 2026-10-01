@@ -42,6 +42,9 @@ export const xyneSpacesAdapter: StdioMcpAdapter = {
         XYNE_SPACES_SESSION_ID: sessionId,
         XYNE_SPACES_WORKSPACE_ID: workspaceId,
         XYNE_SPACES_AUTH_MODE: authMode,
+        // KNOWN EXCEPTION (XYNE-65520): this first-party child keeps the root
+        // INTERNAL_S2S_KEY — and ONLY that key — until the signed delegation
+        // token ships. TODO(XYNE-65483): replace with the delegation token.
         INTERNAL_S2S_KEY: process.env["INTERNAL_S2S_KEY"] ?? "",
         XYNE_USER_ID: userId,
         // Bench lane — set ONLY when the cred lane stamped directVespa + the

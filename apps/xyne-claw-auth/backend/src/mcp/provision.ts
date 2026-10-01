@@ -12,6 +12,7 @@ import { execFileSync } from "node:child_process";
 import path from "node:path";
 
 import { createLogger } from "../logger.js";
+import { isChildEnvAllowlistEnabled, pickAllowlistedEnv } from "./child-env.js";
 const log = createLogger("provision");
 
 /**
@@ -195,7 +196,13 @@ async function install(name: string, version: string | undefined, dir: string): 
       {
         stdio: ["ignore", "pipe", "pipe"],
         timeout: INSTALL_TIMEOUT_MS,
-        env: { ...process.env, npm_config_update_notifier: "false" },
+        // npm install runs the package's (and its deps') lifecycle scripts, so
+        // it gets the same minimal env as the third-party child it installs
+        // (XYNE-65520). Flag off = legacy full env.
+        env: {
+          ...(isChildEnvAllowlistEnabled() ? pickAllowlistedEnv(process.env) : process.env),
+          npm_config_update_notifier: "false",
+        },
       },
     );
 

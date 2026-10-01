@@ -5001,7 +5001,7 @@ const spacesReadCanvas: ToolDef = {
       const viewAccessId = String(params["viewAccessId"] ?? "").trim();
       if (!viewAccessId) return err("viewAccessId is required");
 
-      const s2sKey = process.env["INTERNAL_S2S_KEY"] || process.env["XYNE_CLAW_S2S_KEY"] || "";
+      const s2sKey = process.env["INTERNAL_S2S_KEY"] ?? "";
       const result = (await spacesFetch(
         `/api/internal/canvas/view/${encodeURIComponent(viewAccessId)}`,
         {
@@ -5052,7 +5052,7 @@ const spacesEditCanvas: ToolDef = {
       if (!viewAccessId) return err("viewAccessId is required");
       if (!content) return err("content is required");
 
-      const s2sKey = process.env["INTERNAL_S2S_KEY"] || process.env["XYNE_CLAW_S2S_KEY"] || "";
+      const s2sKey = process.env["INTERNAL_S2S_KEY"] ?? "";
       const result = (await spacesFetch(
         `/api/internal/canvas/view/${encodeURIComponent(viewAccessId)}`,
         {
@@ -5435,7 +5435,7 @@ async function sdlcClawCall(label: string, path: string, body: Record<string, un
 
 /** Internal routes that take the bound Actor pair in the body. */
 async function sdlcInternalFetch(path: string, body: Record<string, unknown>, ctx: HandlerContext): Promise<unknown> {
-  const s2sKey = process.env["INTERNAL_S2S_KEY"] ?? process.env["XYNE_CLAW_S2S_KEY"] ?? "";
+  const s2sKey = process.env["INTERNAL_S2S_KEY"] ?? "";
   if (!s2sKey) throw new Error("Internal S2S key is unavailable for SDLC tools.");
   return spacesFetch(
     path,
@@ -6025,11 +6025,16 @@ async function ingestAttachmentToMarkdown(
   source: AttachmentSource,
   size: number,
 ): Promise<Array<{ path: string; content: string }>> {
-  const response = await fetch(`${CONFIG.xyneClawUrl.replace(/\/+$/, "")}/internal/attachments/ingest`, {
+  // Routed through claw-auth's own `/internal/attachments/ingest` proxy
+  // (routes/attachments.ts, INTERNAL_S2S_KEY-guarded) rather than straight to
+  // the claw runtime, so this child never needs the runtime's root key
+  // XYNE_CLAW_S2S_KEY (XYNE-65520). The proxy forwards with that key itself.
+  const internalS2sKey = process.env["INTERNAL_S2S_KEY"] ?? "";
+  const response = await fetch(`${CONFIG.internalUrl.replace(/\/+$/, "")}/claw/api/v1/internal/attachments/ingest`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      ...(CONFIG.xyneClawS2sKey ? { "x-s2s-key": CONFIG.xyneClawS2sKey } : {}),
+      ...(internalS2sKey ? { "x-s2s-key": internalS2sKey } : {}),
     },
     body: JSON.stringify({
       attachments: [{

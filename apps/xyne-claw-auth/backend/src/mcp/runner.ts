@@ -12,6 +12,7 @@ import { resolveConnectorDefinition } from "./connector-definitions.js";
 import { getSpacesAuthForUser, getWorkspaceIdForUser } from "../lib/spaces-db.js";
 import { SPACES_SESSION_CREDENTIAL_SERVER_TYPES } from "../lib/spaces-session-server-types.js";
 import { provisionStdioCommand } from "./provision.js";
+import { buildChildEnv, isChildEnvAllowlistEnabled, isFirstPartyLaunch } from "./child-env.js";
 import { prisma } from "../db.js";
 import { decrypt } from "../crypto.js";
 import { CONFIG } from "../config.js";
@@ -381,10 +382,23 @@ async function spawnSession(
     // `ERR_MODULE_NOT_FOUND` → `MCP error -32000: Connection closed`. Non-npx
     // commands pass through untouched; failures fall back to the original npx.
     const launch = await provisionStdioCommand(cmd, resolvedArgs);
+    // XYNE-65520 (C-7): never hand the whole claw-auth env (root S2S keys, DB
+    // URLs, signing keys) to a child. Third-party children get a minimal
+    // allowlist + their adapter env; first-party in-tree servers keep the
+    // parent env minus every *_S2S_KEY they weren't explicitly given.
+    // Gated by MCP_CHILD_ENV_ALLOWLIST — flag off = legacy env, unchanged.
+    const firstParty = isFirstPartyLaunch(launch.args);
+    const childEnv = buildChildEnv({ adapterEnv: env, firstParty });
+    if (isChildEnvAllowlistEnabled()) {
+      log.info(
+        `[mcp/runner] child env for ${key}: firstParty=${firstParty} vars=${Object.keys(childEnv).length} ` +
+          `s2sKeys=[${Object.keys(childEnv).filter((k) => k.endsWith("_S2S_KEY")).join(",")}]`,
+      );
+    }
     transport = new StdioClientTransport({
       command: launch.command,
       args: launch.args,
-      env: { ...process.env, ...env } as Record<string, string>,
+      env: childEnv,
       cwd: "/tmp",
     });
   }
