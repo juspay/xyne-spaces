@@ -138,7 +138,9 @@ export class InvitationService {
           });
         });
 
-        isOrgApproved = !!inviteeInOrg;
+        // orgMember.email is globally unique, so the lookup can hit a member of a
+        // DIFFERENT org — only a same-org member skips the approval queue.
+        isOrgApproved = inviteeInOrg?.orgId === orgId;
 
         // Org admins/owners bypass the approval queue — the org member is created
         // directly and the invite email goes out immediately.
