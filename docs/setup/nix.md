@@ -133,6 +133,11 @@ Its `requirements-diarization.txt` torch/torchaudio pins are mutually incompatib
 
 ## Verification
 
+`nix/scripts/check-compose-refs.sh`, run by `nix flake check` as the `compose-refs`
+check, fails on any file containing `docker-compose` or `docker compose` that is
+not listed in `nix/compose-refs.allowlist`. A migration PR removes entries as it
+deletes references; a new entry needs a justification in the PR description.
+
 ```bash
 nix flake check -L
 nix build .#xyne-space-services
