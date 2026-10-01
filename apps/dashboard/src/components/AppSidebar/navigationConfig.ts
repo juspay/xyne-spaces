@@ -31,6 +31,7 @@ import {
   BookmarkDefault,
   SendPlaneSlant,
   ListAiGenerated,
+  ListSearch,
 } from '@xyne/icons';
 import { AudioLines, Radar } from 'lucide-react';
 
@@ -196,6 +197,7 @@ export const NAVIGATION_ITEMS: NavigationItem[] = [
   // Administration (the /organisations module) holds Workspace Management,
   // Members (formerly User Management), User Groups, Roles and Organisations.
   { path: '/organisations', label: 'Administration', icon: BuildingApartmentTwo, popout: true },
+  { path: '/audit-logs', label: 'Audit Logs', icon: ListSearch, popout: true },
   { path: '/tag-review', label: 'Tag Review', icon: Tag, iconSize: 18, popout: true },
   { path: '/analytics', label: 'Analytics', icon: GraphTrendLine, popout: true },
   { path: '/forms', label: 'Forms', icon: ClipboardDefault, popout: true },
@@ -287,6 +289,7 @@ export const TOOLBAR_ITEM_DESCRIPTIONS: Record<string, string> = {
   '/releaseManager': 'Release and deployment tracking',
   '/migrations/slack': 'Slack Migration tab under Migrations',
   '/scheduled-messages': 'Messages scheduled for later delivery (Inbox)',
+  '/audit-logs': 'Change history for boards, user groups and desks',
 };
 
 type Permissions = ReturnType<typeof usePermissions>;

@@ -7,6 +7,7 @@ export const PATH_TO_RESOURCE: Record<string, string> = {
   '/sdlc': 'SDLC',
   '/analytics': 'ANALYTICS',
   '/dashboards': 'ANALYTICS',
+  '/audit-logs': 'ANALYTICS',
   '/listProjects': 'LISTPROJECTS',
   '/migration/confluence': 'CONFLUENCE-MIGRATION',
   '/forms': 'FORMS',

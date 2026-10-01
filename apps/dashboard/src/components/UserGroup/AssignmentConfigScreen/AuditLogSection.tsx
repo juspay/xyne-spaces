@@ -7,6 +7,7 @@ import { Button } from '../../ui/Button/Button';
 import { HoverCard } from '../../ui/HoverCard';
 import { cn } from '../../../utils/classNames';
 import { fetchAuditLogPage } from '../../../services/auditLogService';
+import { fieldLabel, humanizeField } from '../../../utils/auditLogLabels';
 import {
   AuditAction,
   AuditEntityType,
@@ -16,9 +17,14 @@ import {
 
 interface AuditLogSectionProps {
   entityType: AuditEntityType;
-  entityId: string;
-  /** Display name of the audited scope (e.g. board name) used in the derived summary line. */
+  /** Omitted = every entity of the type (workspace-wide feed). */
+  entityId?: string | undefined;
+  /** Display name of the audited scope (e.g. board name); defaults to each entry's server-resolved name. */
   entityName?: string | undefined;
+  /** Inclusive epoch-ms window; omitted = all time. */
+  from?: number | undefined;
+  to?: number | undefined;
+  description?: string | undefined;
 }
 
 const PAGE_SIZE = 10;
@@ -65,48 +71,6 @@ const ACTION_VALUE_CLASSES: Record<string, string> = {
 
 const actionValueClass = (action: string): string =>
   ACTION_VALUE_CLASSES[action] ?? ACTION_VALUE_CLASSES['UPDATE']!;
-
-const humanizeField = (field: string): string =>
-  field
-    .replace(/([A-Z])/g, ' $1')
-    .replace(/^./, char => char.toUpperCase())
-    .trim();
-
-/** Column names that don't humanize well, worded like the settings screens. */
-const FIELD_LABELS: Record<string, string> = {
-  roleId: 'Role',
-  userGroupId: 'User group',
-  subCategory: 'Sub-category',
-  ownerUserId: 'Inbox owner',
-  sendAsEmail: 'Send-as alias',
-  dlEmail: 'Distribution list',
-  dlAliases: 'Additional inbound addresses',
-  deskAppIds: 'Desk apps',
-  defaultCc: 'Default CC',
-  assigneeUserGroupId: 'Default assignee group',
-  boardId: 'Board',
-  twoStepSendEnabled: 'Two-step send',
-  emailMergeMode: 'Auto-merge similar emails',
-  appWebhookDeliveryEnabled: 'Send replies to app webhook',
-  duplicateScopeConfig: 'Limit duplicate detection by field',
-  autoDraftMode: 'Auto AI draft',
-  autoDraftAgentSlug: 'Draft agent',
-  deskReportEnabled: 'Desk report',
-  deskReportAgentSlug: 'Desk report agent',
-  deskReportRangeDays: 'Report window',
-  classificationEnabled: 'Auto-classification',
-  categoryField: 'Category field',
-  subCategoryField: 'Sub-category field',
-  classificationPrompt: 'Classification prompt',
-  priorityClassificationEnabled: 'AI priority detection',
-  priorityClassificationThreshold: 'Confidence threshold',
-  priorityClassificationPrompt: 'Priority prompt',
-  metricsEnabled: 'Desk metrics',
-  frtStageNames: 'First response stops at',
-  metricsGuestVisibility: 'Guest visibility',
-};
-
-const fieldLabel = (field: string): string => FIELD_LABELS[field] ?? humanizeField(field);
 
 /** Values longer than this lose their inline readability — hover reveals the full text. */
 const LONG_VALUE_THRESHOLD = 48;
@@ -297,6 +261,9 @@ export const AuditLogSection = ({
   entityType,
   entityId,
   entityName,
+  from,
+  to,
+  description,
 }: AuditLogSectionProps): ReactElement => {
   const [logs, setLogs] = useState<AuditLogEntry[]>([]);
   const [nextCursor, setNextCursor] = useState<string | null>(null);
@@ -318,7 +285,14 @@ export const AuditLogSection = ({
       setIsLoading(true);
       setLoadError(false);
       try {
-        const page = await fetchAuditLogPage({ entityType, entityId, limit: PAGE_SIZE, cursor });
+        const page = await fetchAuditLogPage({
+          entityType,
+          entityId,
+          from,
+          to,
+          limit: PAGE_SIZE,
+          cursor,
+        });
         if (requestSeq !== requestSeqRef.current) return;
         setLogs(previous => {
           if (mode === 'replace') return page.logs;
@@ -335,10 +309,10 @@ export const AuditLogSection = ({
         if (requestSeq === requestSeqRef.current) setIsLoading(false);
       }
     },
-    [entityType, entityId],
+    [entityType, entityId, from, to],
   );
 
-  // Initial load, and a fresh start whenever the audited entity changes.
+  // Initial load, and a fresh start whenever the audited entity or window changes.
   useEffect(() => {
     setLogs([]);
     setExpandedLogIds(new Set());
@@ -387,7 +361,7 @@ export const AuditLogSection = ({
         }
         const targetNames = groups.map(group => group.targetName);
         const actorName = log.actor?.name || log.actor?.email || 'System';
-        const summaryText = deriveSummary(log.changes, entityType, entityName);
+        const summaryText = deriveSummary(log.changes, entityType, entityName ?? log.entityName);
         return {
           log,
           groups,
@@ -415,7 +389,7 @@ export const AuditLogSection = ({
         <div>
           <h2 className='text-sm font-semibold text-foreground'>Recent changes</h2>
           <p className='mt-1 text-[13px] leading-[1.4] text-muted-foreground'>
-            Every change made to this configuration.
+            {description ?? 'Every change made to this configuration.'}
           </p>
         </div>
         <button
