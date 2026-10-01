@@ -590,7 +590,16 @@ export const groupTicketsByFormField = (
           }
           // For objects/arrays, use JSON serialization or ignore
         }
-        const groupKey = val || 'No Value';
+        // A STRING key is folded to lower case to match the group list the server sends
+        // (getFormFieldGroupKeys in kanbanCountsService), which folds it so that "MID 1" and
+        // "mid 1" are one group — the column page is fetched with an uncased Vespa token and
+        // cannot tell them apart. The column header uses the server's displayName, so the
+        // stored spelling is still what the user sees.
+        const groupKey = val
+          ? fieldType === FormFieldType.STRING
+            ? val.toLowerCase()
+            : val
+          : 'No Value';
         if (!groups[groupKey]) groups[groupKey] = [];
         groups[groupKey].push(ticket);
       }

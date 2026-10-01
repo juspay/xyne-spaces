@@ -144,7 +144,9 @@ export const DynamicFieldSubmenu = ({
       }
     };
 
-    // A value outside the current page — or on no ticket yet — can still be typed in.
+    // A value outside the current page — or on no ticket yet — can still be typed in. It is
+    // matched as a whole value, case-insensitively, exactly like a picked one: a partial value
+    // selects nothing, because that is all the column's Vespa token can select.
     const typedValue = searchQuery.trim();
     const isTypedValueUsable =
       fieldType !== FormFieldType.NUMBER || Number.isFinite(Number(typedValue));

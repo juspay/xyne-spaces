@@ -283,8 +283,13 @@ const matchesRequest = (
       const value = snapshot.formFieldValues[fieldId] ?? null;
 
       if (Array.isArray(filterValue)) {
+        // Whole-value match against any selected value, case-insensitive. This decides which
+        // live updates move a badge, so it has to be the rule the counts it adjusts were
+        // computed with — matchesDynamicFilter in kanbanCountsService. Fold case on both
+        // sides: a ticket written as "mid 1" belongs to the same count as "MID 1".
+        const needles = new Set(filterValue.map(filter => filter.toLowerCase()));
         if (Array.isArray(value)) {
-          if (!value.some(item => typeof item === 'string' && filterValue.includes(item)))
+          if (!value.some(item => typeof item === 'string' && needles.has(item.toLowerCase())))
             return false;
         } else {
           const scalarValue =
@@ -292,11 +297,7 @@ const matchesRequest = (
               ? String(value)
               : null;
           if (!scalarValue) return false;
-          if (filterValue.length === 1) {
-            if (!scalarValue.toLowerCase().includes(filterValue[0]!.toLowerCase())) return false;
-          } else if (!filterValue.includes(scalarValue)) {
-            return false;
-          }
+          if (!needles.has(scalarValue.toLowerCase())) return false;
         }
       } else {
         const scalarValue =
