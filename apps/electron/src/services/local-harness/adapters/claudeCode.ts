@@ -12,6 +12,34 @@ const MCP_STARTUP_TIMEOUT_MS = 60000;
 const MCP_TOOL_TIMEOUT_MS = 600000;
 const SANDBOX_TOOLS = 'Read,Write,Edit,Glob,Grep,Bash';
 
+export function buildClaudeCodeArgs(input: {
+  systemPrompt: string;
+  mcpConfigPath: string;
+  mcpServerName: string;
+  tools: string;
+  writable: boolean;
+}): string[] {
+  return [
+    '-p',
+    '--output-format',
+    'stream-json',
+    '--verbose',
+    '--append-system-prompt',
+    input.systemPrompt,
+    '--mcp-config',
+    input.mcpConfigPath,
+    '--strict-mcp-config',
+    '--setting-sources',
+    '',
+    '--tools',
+    input.tools,
+    '--allowedTools',
+    `mcp__${input.mcpServerName}`,
+    '--permission-mode',
+    input.writable ? 'acceptEdits' : 'bypassPermissions',
+  ];
+}
+
 export class ClaudeCodeAdapter implements HarnessAdapter {
   async run(ctx: HarnessRunContext): Promise<HarnessRunOutcome> {
     const { envelope } = ctx;
@@ -27,27 +55,18 @@ export class ClaudeCodeAdapter implements HarnessAdapter {
     const mcpConfigPath = join(tmpdir(), `xyne-mcp-${randomBytes(12).toString('hex')}.json`);
     await fs.writeFile(mcpConfigPath, JSON.stringify(ctx.mcpConfig), { mode: 0o600 });
 
-    const args = [
-      '-p',
-      '--output-format',
-      'stream-json',
-      '--verbose',
-      '--append-system-prompt',
-      envelope.systemPrompt,
-      '--mcp-config',
+    const args = buildClaudeCodeArgs({
+      systemPrompt: envelope.systemPrompt,
       mcpConfigPath,
-      '--strict-mcp-config',
-      '--setting-sources',
-      '',
-      '--tools',
+      mcpServerName: ctx.mcpServerName,
+      tools:
       writable
         ? SANDBOX_TOOLS
         : envelope.localSandbox?.container || attached.needsFileTools
           ? 'Read,Glob,Grep'
           : '',
-      '--permission-mode',
-      writable ? 'acceptEdits' : 'bypassPermissions',
-    ];
+      writable,
+    });
 
     if (envelope.model) args.push('--model', envelope.model);
     if (ctx.resumeSessionId) args.push('--resume', ctx.resumeSessionId);
