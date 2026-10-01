@@ -33,6 +33,7 @@ export enum AppEventType {
     EMAIL = 'EMAIL',
     ADDITIONAL_FORM_FIELD_UPDATED = 'ADDITIONAL_FORM_FIELD_UPDATED',
     DESK_REPLY = 'DESK_REPLY',
+    CALL_SUMMARY_READY = 'CALL_SUMMARY_READY',
 }
 
 export enum ContentFormat {
@@ -170,11 +171,48 @@ export interface DeskReplyEventPayload {
 }
 
 /**
+ * One participant of a call, as delivered to apps. `userId` is null for
+ * external (non-Xyne) invitees — the DB stores a synthetic id on those rows to
+ * satisfy a NOT NULL constraint, and it resolves to no real user.
+ */
+export interface CallSummaryParticipant {
+    userId: string | null;
+    name: string;
+    email: string | null;
+    isExternal: boolean;
+    joinedAt: string | null;
+    leftAt: string | null;
+}
+
+/**
+ * Payload for CALL_SUMMARY_READY — delivered to the app that scheduled the
+ * call once its detailed summary finishes generating (first run or a
+ * regeneration). `summary` is the summary canvas rendered to markdown, so the
+ * app needs no follow-up call to read it; the transcript stays behind
+ * `transcriptUrl` because a full transcript is too large to deliver inline.
+ */
+export interface CallSummaryReadyEventPayload {
+    callId: string; // Call.externalId — the id every /api/apps/calls route takes
+    installedAppId: string;
+    userId: string; // the user the app is installed for (the call's creator)
+    workspaceId: string | null;
+    title: string | null;
+    startedAt: string | null;
+    endedAt: string | null;
+    durationSeconds: number | null;
+    summary: string;
+    summaryTemplateId: string | null;
+    detailedSummaryCanvasId: string;
+    transcriptUrl: string;
+    participants: CallSummaryParticipant[];
+}
+
+/**
  * Base app event type with dynamic, event-specific payload
  */
 export interface BaseAppEvent {
     eventType: AppEventType;
-    payload: AppMentionEventPayload | DMEventPayload | UserMentionedEventPayload | EmailEventPayload | AdditionalFormFieldUpdatedPayload | DeskReplyEventPayload;
+    payload: AppMentionEventPayload | DMEventPayload | UserMentionedEventPayload | EmailEventPayload | AdditionalFormFieldUpdatedPayload | DeskReplyEventPayload | CallSummaryReadyEventPayload;
     timestamp: string; // ISO timestamp
 }
 
