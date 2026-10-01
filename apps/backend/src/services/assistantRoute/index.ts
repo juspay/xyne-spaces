@@ -24,7 +24,7 @@ const CONFIG_KEY = 'assistant_route_config';
 
 // Tuned on jev-latest; re-tune when JEV_MODEL changes. ACTION_THRESHOLD applies to
 // 1 - p(none), not the top option: a sentence naming several actions splits the mass between them.
-const ACTION_THRESHOLD = 0.9;
+const ACTION_THRESHOLD = 0.85;
 const ALSO_THRESHOLD = 0.1;
 
 const TIMEOUT_MS = 2500;
