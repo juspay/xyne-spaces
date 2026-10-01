@@ -5,6 +5,7 @@ import { Popover } from '../../../ui/Popover';
 import { cn } from '../../../../utils/classNames';
 import { usePlatform } from '../../../../hooks/usePlatform';
 import { SELECTOR_ROW_CLASS, SELECTOR_ROW_SELECTED_CLASS } from '../../../AIScreen/selectorStyles';
+import { AutoAgentRow } from '../../../AIScreen/AutoAgentRow';
 
 /** Get initials from a name (e.g., "Xyne Grafana" -> "XG", "Assistant" -> "As") */
 const getInitials = (name: string): string => {
@@ -35,6 +36,8 @@ interface AgentSelectorProps {
   compact?: boolean;
   /** Optional label shown instead of the default. */
   label?: string;
+  auto?: boolean;
+  onSelectAuto?: () => void;
 }
 
 const MAX_VISIBLE_AGENTS = 6;
@@ -50,6 +53,8 @@ export const AgentSelector = ({
   disabled = false,
   compact = false,
   label,
+  auto = false,
+  onSelectAuto,
 }: AgentSelectorProps): ReactElement => {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState('');
@@ -76,7 +81,8 @@ export const AgentSelector = ({
 
   // On mobile in compact mode, show only color dot + initials (no chevron)
   const isMobileCompact = isMobile && compact;
-  const displayText = label ?? selectedAgent?.name ?? 'Ask AI';
+  const isAutoShown = auto && onSelectAuto !== undefined;
+  const displayText = label ?? (isAutoShown ? 'Auto' : (selectedAgent?.name ?? 'Ask AI'));
   const displayLabel = isMobileCompact ? getInitials(displayText) : displayText;
 
   const trigger = (
@@ -94,7 +100,7 @@ export const AgentSelector = ({
       {/* The frame shows label + chevron only, so the generic Bot fallback is
           gone. The colour dot stays for a selected agent — that's the only cue
           for which agent is active, and the frame depicts the unselected state. */}
-      {selectedAgent && (
+      {selectedAgent && !isAutoShown && (
         <span
           className={cn(
             'inline-block rounded-full shrink-0',
@@ -160,6 +166,19 @@ export const AgentSelector = ({
 
         {/* Scrollable list */}
         <div className='overflow-auto p-1.5'>
+          {onSelectAuto && (
+            <AutoAgentRow
+              selected={isAutoShown}
+              onSelect={() => {
+                if (disabled) return;
+                onSelectAuto();
+                setOpen(false);
+              }}
+              glyph={<Bot className='w-4 h-4 shrink-0 text-primary' />}
+              labelClassName='font-medium'
+            />
+          )}
+
           {/* Ask AI option */}
           <button
             onClick={() => {
@@ -170,7 +189,7 @@ export const AgentSelector = ({
             className={cn(
               SELECTOR_ROW_CLASS,
               'justify-between',
-              selectedAgentSlug === null && SELECTOR_ROW_SELECTED_CLASS,
+              selectedAgentSlug === null && !isAutoShown && SELECTOR_ROW_SELECTED_CLASS,
             )}
             data-track-category='XyneAI'
             data-track-name='SELECT_AGENT'
@@ -180,7 +199,9 @@ export const AgentSelector = ({
               <Bot className='w-4 h-4 shrink-0 text-primary' />
               <span className='font-medium'>Ask AI</span>
             </span>
-            {selectedAgentSlug === null && <Check className='h-3.5 w-3.5 shrink-0' aria-hidden />}
+            {selectedAgentSlug === null && !isAutoShown && (
+              <Check className='h-3.5 w-3.5 shrink-0' aria-hidden />
+            )}
           </button>
 
           {/* Divider if there are agents */}
@@ -203,7 +224,7 @@ export const AgentSelector = ({
                 className={cn(
                   SELECTOR_ROW_CLASS,
                   'justify-between',
-                  selectedAgentSlug === agent.slug && SELECTOR_ROW_SELECTED_CLASS,
+                  selectedAgentSlug === agent.slug && !isAutoShown && SELECTOR_ROW_SELECTED_CLASS,
                 )}
                 data-track-category='XyneAI'
                 data-track-name='SELECT_AGENT'
@@ -223,7 +244,7 @@ export const AgentSelector = ({
                   />
                   <span className='font-medium truncate'>{agent.name}</span>
                 </span>
-                {selectedAgentSlug === agent.slug && (
+                {selectedAgentSlug === agent.slug && !isAutoShown && (
                   <Check className='h-3.5 w-3.5 shrink-0' aria-hidden />
                 )}
               </button>

@@ -12,6 +12,7 @@ import {
   UserRound,
 } from 'lucide-react';
 import { useAuth } from '../../hooks/useAuth';
+import { markJustOnboarded } from '../../components/Assistant/newUser';
 import { useZero } from '../../hooks/useZero';
 import { useChannelByName } from '../../hooks/useChannels';
 import { useProfilePictureUrl } from '../../hooks/useProfilePicture';
@@ -238,6 +239,7 @@ const QuestionnaireScreen = (): ReactElement | null => {
       // Best-effort cleanup
     }
 
+    if (user?.id) markJustOnboarded(user.id);
     authActor.send({ type: 'COMPLETE_ONBOARDING' });
 
     const workspaceId = user?.workspaceId;
