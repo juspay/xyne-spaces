@@ -146,7 +146,7 @@ export interface IncomingWebhook {
   channelVisibility: string;
   boardId?: string | null;
   boardName?: string | null;
-  type: 'SLACK' | 'SENTINELONE' | 'AMAZON_SNS' | 'PINGDOM' | 'GCP';
+  type: 'SLACK' | 'SENTINELONE' | 'AMAZON_SNS' | 'PINGDOM' | 'GCP' | 'HUBSPOT';
   action: AppIncomingWebhookAction;
   isActive: boolean;
   createdAt: string;
@@ -158,7 +158,7 @@ export interface CreateIncomingWebhookRequest {
   channelId: string;
   boardId?: string;
   name: string;
-  type: 'SLACK' | 'SENTINELONE' | 'AMAZON_SNS' | 'PINGDOM' | 'GCP';
+  type: 'SLACK' | 'SENTINELONE' | 'AMAZON_SNS' | 'PINGDOM' | 'GCP' | 'HUBSPOT';
   action?: AppIncomingWebhookAction;
 }
 
