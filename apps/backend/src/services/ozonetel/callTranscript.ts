@@ -86,6 +86,7 @@ export function withTranscriptionState(body: string, state: TelephonyTranscripti
 export interface AttachmentLike {
   id: string;
   metadata?: unknown;
+  isDeleted?: boolean | null;
 }
 
 export function isCallTranscriptAttachment(attachment: AttachmentLike): boolean {
@@ -95,7 +96,7 @@ export function isCallTranscriptAttachment(attachment: AttachmentLike): boolean 
 }
 
 export function findCallTranscriptAttachment<T extends AttachmentLike>(attachments: T[]): T | undefined {
-  return attachments.find(isCallTranscriptAttachment);
+  return attachments.find(a => a.isDeleted !== true && isCallTranscriptAttachment(a));
 }
 
 /** The subset of the call email payload the transcript header uses. */

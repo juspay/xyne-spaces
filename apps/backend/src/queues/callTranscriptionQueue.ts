@@ -1,5 +1,6 @@
 import Bull from 'bull';
 import { logger } from '@/utils/logger';
+import { TranscriptionAgentError, describeTranscriptionAgentError } from '@/services/transcriptionAgentClient';
 
 export interface CallTranscriptionJobData {
   /** Call email id (the Ozonetel call message in the ticket thread). */
@@ -13,8 +14,9 @@ export const CALL_TRANSCRIPTION_JOB = 'transcribe';
 const QUEUE_NAME = 'call-transcription';
 const TAG = '[CALL-TRANSCRIPTION]';
 
-/** Whole-job timeout: the agent call is capped at 32 min, leave headroom for the attachment upload. */
-const JOB_TIMEOUT_MS = 35 * 60_000;
+/** Whole-job timeout: must stay above the agent HTTP call (45 min) with headroom for the
+ * attachment upload and summary that run after the agent returns. */
+const JOB_TIMEOUT_MS = 50 * 60_000;
 
 export function callTranscriptionJobId(emailId: string): string {
   return `call-transcript-${emailId}`;
@@ -123,7 +125,11 @@ class CallTranscriptionQueue {
         // Final attempt exhausted: surface it in the thread so the user can retry.
         try {
           const { callTranscriptionService } = await import('@/services/ozonetel/callTranscriptionService');
-          await callTranscriptionService.markFailed(job.data, error instanceof Error ? error.message : String(error));
+          // Keep the user-facing message friendly; never surface raw errors (internal IPs/ports).
+          const message = error instanceof TranscriptionAgentError
+            ? describeTranscriptionAgentError(error)
+            : 'Transcription failed. Please try again.';
+          await callTranscriptionService.markFailed(job.data, message);
         } catch (markError) {
           logger.error(`${TAG} Failed to record failure state for email ${job.data.emailId}:`, markError);
         }

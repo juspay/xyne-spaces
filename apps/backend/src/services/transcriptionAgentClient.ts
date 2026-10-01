@@ -80,9 +80,11 @@ export function describeTranscriptionAgentError(error: TranscriptionAgentError):
   }
 }
 
-// The agent waits up to 30 min on Google's batch operation (RECORDING_GOOGLE_BATCH_TIMEOUT_S);
-// give it 2 min of headroom for download + upload so the agent times out first.
-const DEFAULT_TIMEOUT_MS = 32 * 60_000;
+// Must exceed the agent's whole-request budget so the agent's own deadline fires first and
+// returns an error (instead of us timing out and letting Bull retry work that's still running):
+// up to 10 min downloading (_DOWNLOAD_TIMEOUT_S=600) + up to 30 min on Google's batch op
+// (RECORDING_GOOGLE_BATCH_TIMEOUT_S=1800) = ~40 min, plus headroom.
+const DEFAULT_TIMEOUT_MS = 45 * 60_000;
 
 export class TranscriptionAgentClient {
   constructor(private readonly timeoutMs: number = DEFAULT_TIMEOUT_MS) {}

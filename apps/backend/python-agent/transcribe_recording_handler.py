@@ -39,6 +39,7 @@ from urllib.parse import urljoin, urlsplit, urlunsplit
 
 import aiohttp
 from aiohttp import web
+from aiohttp.abc import AbstractResolver
 
 from config import Config, get_logger
 from modules.recording_transcriber import (
@@ -98,14 +99,10 @@ def _is_public_address(addr: str) -> bool:
     # IPv4-mapped IPv6 (::ffff:10.0.0.1) must be judged by the embedded IPv4.
     if isinstance(ip, ipaddress.IPv6Address) and ip.ipv4_mapped is not None:
         ip = ip.ipv4_mapped
-    return not (
-        ip.is_loopback
-        or ip.is_private       # RFC1918 / ULA
-        or ip.is_link_local    # 169.254/16 incl. cloud metadata endpoints
-        or ip.is_unspecified
-        or ip.is_multicast
-        or ip.is_reserved
-    )
+    # is_global is the strict complement of the special-use ranges (RFC1918/ULA, loopback,
+    # link-local incl. 169.254 metadata, unspecified, reserved, AND 100.64.0.0/10 CGNAT);
+    # multicast is excluded explicitly since some global-scope multicast reports is_global.
+    return ip.is_global and not ip.is_multicast
 
 
 def _resolve_addresses(host: str, port: int) -> Set[str]:
@@ -114,7 +111,40 @@ def _resolve_addresses(host: str, port: int) -> Set[str]:
     return {info[4][0] for info in infos if info and info[4]}
 
 
-async def _validate_recording_url(url: str, cfg: Config) -> None:
+class _PinnedResolver(AbstractResolver):
+    """Resolve each host only to the IP(s) that passed the SSRF check during validation, so the
+    address aiohttp connects to is exactly the one we checked — defeats DNS rebinding (a second
+    lookup answering with 169.254.169.254 / 10.x). TLS SNI is unaffected: the connector still
+    takes server_hostname from the URL; we only supply the address to dial."""
+
+    def __init__(self) -> None:
+        self._pinned: dict = {}
+
+    def pin(self, host: str, addresses: Set[str]) -> None:
+        self._pinned.setdefault(host.lower(), set()).update(addresses)
+
+    async def resolve(self, host: str, port: int = 0, family: int = socket.AF_INET) -> list:
+        pinned = self._pinned.get(host.lower())
+        if not pinned:
+            raise OSError(f"host not validated for connection: {host}")
+        results = []
+        for ip in pinned:
+            fam = socket.AF_INET6 if ipaddress.ip_address(ip).version == 6 else socket.AF_INET
+            if family not in (socket.AF_UNSPEC, fam):
+                continue
+            results.append({
+                "hostname": host, "host": ip, "port": port,
+                "family": fam, "proto": 0, "flags": 0,
+            })
+        if not results:
+            raise OSError(f"no validated address for {host} (family={family})")
+        return results
+
+    async def close(self) -> None:
+        return None
+
+
+async def _validate_recording_url(url: str, cfg: Config, resolver: "Optional[_PinnedResolver]" = None) -> None:
     """SSRF guard. Raises RecordingError(422, invalid_url) on any failure."""
     try:
         parts = urlsplit(url)
@@ -156,6 +186,8 @@ async def _validate_recording_url(url: str, cfg: Config) -> None:
     for addr in addresses:
         if not _is_public_address(addr):
             raise RecordingError(422, "invalid_url", "recordingUrl resolves to a non-public address")
+    if resolver is not None:
+        resolver.pin(host, addresses)
 
 
 def _suffix_from_url(url: str) -> str:
@@ -191,8 +223,12 @@ async def _download_recording(url: str, cfg: Config, job_id: str) -> Tuple[str, 
     timeout = aiohttp.ClientTimeout(total=_DOWNLOAD_TIMEOUT_S)
     current_url = url
     total = 0
+    # Validate again here and pin the resulting IP(s): the connector below dials only these,
+    # so the checked address is the one we connect to (no re-resolution between check and connect).
+    resolver = _PinnedResolver()
+    await _validate_recording_url(url, cfg, resolver)
     try:
-        async with aiohttp.ClientSession(timeout=timeout) as session:
+        async with aiohttp.ClientSession(timeout=timeout, connector=aiohttp.TCPConnector(resolver=resolver)) as session:
             for hop in range(_MAX_REDIRECT_HOPS + 1):
                 async with session.get(current_url, allow_redirects=False) as resp:
                     if resp.status in _REDIRECT_STATUSES:
@@ -202,7 +238,7 @@ async def _download_recording(url: str, cfg: Config, job_id: str) -> Tuple[str, 
                         if hop >= _MAX_REDIRECT_HOPS:
                             raise RecordingError(502, "download_failed", "too many redirects")
                         next_url = urljoin(current_url, location)
-                        await _validate_recording_url(next_url, cfg)
+                        await _validate_recording_url(next_url, cfg, resolver)
                         logger.info(
                             f"[transcribe_recording] Following redirect | jobId={job_id}"
                             f" | hop={hop + 1} | to={_log_safe_url(next_url)}"
