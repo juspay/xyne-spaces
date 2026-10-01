@@ -34,7 +34,6 @@ import {
   BookOpen,
   Boxes,
   Check,
-  ChevronDown,
   ChevronRight,
   CircleAlert,
   CircleDot,
@@ -147,7 +146,6 @@ import Avatar from '../../components/ui/Avatar/Avatar';
 import { UserHoverWrapper } from '../../components/ui/UserMentionPopover/UserMentionPopover';
 import { useUser } from '../../hooks/useUsers';
 import { getUserDisplayName } from '../../utils/userDisplayName';
-import { Popover } from '../../components/ui/Popover';
 import { Tooltip } from '../../components/ui/Tooltip';
 import { fileKind } from './fileKind';
 import { getLastSdlcLocation, sdlcHubIdOf } from './lastSdlcLocation';
@@ -218,18 +216,6 @@ const SIDEBAR_MAX_WIDTH = 360;
 const SIDEBAR_COLLAPSE_AT = 150;
 const SIDEBAR_RAIL_WIDTH = 52;
 const SIDEBAR_HOVER_WIDTH = 260;
-
-const TRACK_STATUS_OPTIONS = [
-  { value: 'ACTIVE', label: 'Active' },
-  { value: 'COMPLETED', label: 'Completed' },
-  { value: 'ARCHIVED', label: 'Archived' },
-] as const;
-
-const TRACK_STATUS_DOT: Record<string, string> = {
-  ACTIVE: 'bg-status-success',
-  COMPLETED: 'bg-status-scheduled',
-  ARCHIVED: 'bg-status-new',
-};
 
 const SECTION_IDS: ReadonlySet<string> = new Set<string>([
   ...SECTIONS.map(s => s.id),
@@ -501,7 +487,6 @@ export default function SdlcScreen(): ReactElement {
   const [artifactContextLocked, setArtifactContextLocked] = useState(false);
   const [linkDialog, setLinkDialog] = useState(false);
   const [membersDialog, setMembersDialog] = useState(false);
-  const [trackStatusOpen, setTrackStatusOpen] = useState(false);
   const [descriptionDraft, setDescriptionDraft] = useState<string | null>(null);
   const descriptionAbandoned = useRef(false);
   const [nameDraft, setNameDraft] = useState<string | null>(null);
@@ -2241,18 +2226,6 @@ export default function SdlcScreen(): ReactElement {
 
   const isDocumentWindow = isSdlcDocumentWindow();
 
-  const setTrackStatusAction = async (trackId: string, status: string): Promise<void> => {
-    await runTrackMutation(
-      zero.mutate(
-        mutators.sdlc.updateTrack({
-          trackId,
-          status: status as 'ACTIVE' | 'COMPLETED' | 'ARCHIVED',
-          timestamp: Date.now(),
-        }),
-      ),
-    );
-  };
-
   const renameFolderAction = async (folderId: string, name: string): Promise<void> => {
     if (!channel) return;
     await runTrackMutation(
@@ -2841,74 +2814,6 @@ export default function SdlcScreen(): ReactElement {
                   />
                 </span>
               )}
-              <Popover
-                open={trackStatusOpen}
-                onOpenChange={setTrackStatusOpen}
-                align='start'
-                sideOffset={6}
-                className='w-[168px] p-1'
-                trigger={
-                  <button
-                    type='button'
-                    className='flex shrink-0 items-center gap-1.5 rounded-md bg-muted px-2.5 py-1 text-[11.5px] font-medium text-foreground ring-1 ring-inset ring-border transition-colors hover:bg-muted/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring'
-                    aria-label={`Track status: ${
-                      TRACK_STATUS_OPTIONS.find(o => o.value === selectedTrack.status)?.label ??
-                      selectedTrack.status
-                    }. Change status`}
-                    data-track-category='SdlcHub'
-                    data-track-name='TrackStatusOpened'
-                  >
-                    <span
-                      className={cn(
-                        'size-1.5 shrink-0 rounded-full',
-                        TRACK_STATUS_DOT[selectedTrack.status] ?? TRACK_STATUS_DOT['ARCHIVED'],
-                      )}
-                      aria-hidden='true'
-                    />
-                    {TRACK_STATUS_OPTIONS.find(o => o.value === selectedTrack.status)?.label ??
-                      selectedTrack.status}
-                    <ChevronDown className='size-3 text-muted-foreground' />
-                  </button>
-                }
-              >
-                {TRACK_STATUS_OPTIONS.map(option => (
-                  <button
-                    key={option.value}
-                    type='button'
-                    onClick={() => {
-                      setTrackStatusOpen(false);
-                      if (option.value !== selectedTrack.status) {
-                        void call(
-                          `track-status-${selectedTrack.id}`,
-                          () => setTrackStatusAction(selectedTrack.id, option.value),
-                          `Track marked ${option.label.toLowerCase()}`,
-                        );
-                      }
-                    }}
-                    className={cn(
-                      'flex w-full items-center justify-between rounded-md px-2.5 py-1.5 text-left text-[13px] transition-colors hover:bg-muted/60',
-                      option.value === selectedTrack.status && 'font-medium',
-                    )}
-                    data-track-category='SdlcHub'
-                    data-track-name='TrackStatusChanged'
-                    data-track-metadata={JSON.stringify({ status: option.value })}
-                  >
-                    <span className='flex items-center gap-2'>
-                      <span
-                        className={cn(
-                          'size-1.5 shrink-0 rounded-full',
-                          TRACK_STATUS_DOT[option.value],
-                        )}
-                        aria-hidden='true'
-                      />
-                      {option.label}
-                    </span>
-                    {option.value === selectedTrack.status && (
-                      <Check className='size-3.5 text-muted-foreground' />
-                    )}
-                  </button>
-                ))}
-              </Popover>
             </div>
 
             {/* Click the text to edit it, blur to save. No chrome: the field
