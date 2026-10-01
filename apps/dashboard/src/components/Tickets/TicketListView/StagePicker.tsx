@@ -42,6 +42,7 @@ interface StagePickerProps {
     | undefined;
   /** Fired after a stage change is successfully initiated (not when a form gate opens). */
   onAfterStageChange?: ((stageName: string) => void) | undefined;
+  triggerClassName?: string | undefined;
 }
 
 const SUPPORT_STAGES: ReadonlyArray<string> = ['Backlog', 'To Do', 'In Progress', 'Review', 'Done'];
@@ -174,6 +175,7 @@ export function StagePicker({
   boardId,
   onStageChange,
   onAfterStageChange,
+  triggerClassName,
 }: StagePickerProps): ReactElement {
   const [open, setOpen] = useState(false);
   const zero = useZero();
@@ -678,7 +680,10 @@ export function StagePicker({
         setOpen(prev => !prev);
       }}
       onKeyDown={e => e.stopPropagation()}
-      className='inline-flex items-center gap-1 rounded-sm px-1.5 py-0.5 text-xs text-muted-foreground hover:bg-muted transition-colors whitespace-nowrap'
+      className={cn(
+        'inline-flex items-center gap-1 rounded-sm px-1.5 py-0.5 text-xs text-muted-foreground hover:bg-muted transition-colors whitespace-nowrap',
+        triggerClassName,
+      )}
       aria-label='Change stage'
       data-track-category='Tickets'
       data-track-name='ToggleRowStage'
