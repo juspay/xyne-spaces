@@ -43,6 +43,7 @@ import {
   Paperclip,
   Pencil,
   Plus,
+  Rocket,
   Search,
   ShieldCheck,
   Sparkles,
@@ -117,6 +118,10 @@ import {
 import { SdlcWikiSection } from './SdlcWikiSection';
 import { useSdlcWikiData } from './useSdlcWikiData';
 import SdlcWorkflowsSection from './SdlcWorkflowsSection';
+import { SdlcReleases } from './SdlcReleases/SdlcReleases';
+import { SdlcReleaseBreadcrumb, SdlcReleaseThread } from './SdlcReleases/SdlcReleaseDetail';
+import { useReleaseThreadAccess } from './SdlcReleases/useSdlcReleases';
+import { ThreadNavigationContext } from '../../components/Chat/ThreadNavigationContext';
 import { SdlcActivityPreview } from './SdlcActivityPreview';
 import { EntityLinkContext, type EntityLinkScope } from '../../contexts/EntityLinkContext';
 import { useScope, useShortcutById } from '../../shortcuts';
@@ -232,6 +237,7 @@ type Section =
   | 'tracks'
   | 'tickets'
   | 'calls'
+  | 'releases'
   | 'artifacts'
   | 'workflows';
 
@@ -243,6 +249,7 @@ const SECTIONS: Array<{ id: Exclude<Section, 'artifacts'>; label: string; icon: 
   { id: 'knowledge', label: 'Hub Knowledge', icon: ShieldCheck },
   { id: 'tickets', label: 'Issues', icon: CircleDot },
   { id: 'calls', label: 'Calls', icon: Phone },
+  { id: 'releases', label: 'Releases', icon: Rocket },
   { id: 'workflows', label: 'Workflows', icon: Workflow },
 ];
 
@@ -351,6 +358,7 @@ export default function SdlcScreen(): ReactElement {
         : 'overview'
   ) as Section;
   const routeSearchParams = useMemo(() => new URLSearchParams(location.search), [location.search]);
+  const openReleaseId = section === 'releases' ? routeSearchParams.get('release') : null;
   // In the URL, as a channel's tab is, so a link or a reload lands on the same tab. Not
   // `tab`: the channel's conversation panel beside it reads that one.
   const trackTab: TrackTab =
@@ -1164,10 +1172,13 @@ export default function SdlcScreen(): ReactElement {
     section === 'calls' && conversationOwner && isDiscussionOwnerType(conversationOwner.sourceType)
       ? { type: conversationOwner.sourceType, id: conversationOwner.sourceId }
       : null;
+  const releaseThreadId = selectedCanvasId ? null : openReleaseId;
+  const releaseThreadAvailable = useReleaseThreadAccess(releaseThreadId);
   const chatPanelAvailable =
     Boolean(discussionOwner && discussionSurface) ||
     Boolean(section === 'tracks' && selectedTrack) ||
-    Boolean(hubCallThreadOwner);
+    Boolean(hubCallThreadOwner) ||
+    releaseThreadAvailable;
   const showRightPanel = rightPanelOpen && chatPanelAvailable;
   const canvasDiscussionScope = useMemo<DiscussionScope | null>(
     () => (discussionOwner ? { ownerIds: [discussionOwner.canvasId] } : null),
@@ -1261,12 +1272,12 @@ export default function SdlcScreen(): ReactElement {
   };
 
   const navigateWithinSdlc = useCallback(
-    (pathname: string, destinationSearch = ''): void => {
+    (pathname: string, destinationSearch = '', state?: { returnToUrl: string }): void => {
       const search = sdlcChatNavigationSearch({
         currentSearch: location.search,
         destinationSearch,
       });
-      void navigate(`${pathname}${search}`);
+      void navigate(`${pathname}${search}`, state ? { state } : undefined);
     },
     [location.search, navigate],
   );
@@ -1275,6 +1286,36 @@ export default function SdlcScreen(): ReactElement {
     event?: { metaKey: boolean; ctrlKey: boolean } | undefined;
     withDiscussion?: boolean;
   }
+
+  const openReleaseTicket = useCallback(
+    (ticketId: string): void =>
+      navigateWithinSdlc(`/sdlc/${channelId}/tickets/${ticketId}`, '', {
+        returnToUrl: `${location.pathname}${location.search}`,
+      }),
+    [channelId, location.pathname, location.search, navigateWithinSdlc],
+  );
+
+  const openReleaseCanvas = useCallback(
+    (canvasId: string): void => {
+      setRelatedSourceId(null);
+      const search = new URLSearchParams({ canvas: canvasId });
+      if (openReleaseId) search.set('release', openReleaseId);
+      navigateWithinSdlc(`/sdlc/${channelId}/releases`, `?${search.toString()}`);
+    },
+    [channelId, openReleaseId, navigateWithinSdlc],
+  );
+
+  const releaseThreadNavigation = useMemo(
+    () => ({ openTicket: openReleaseTicket, openCanvas: openReleaseCanvas }),
+    [openReleaseTicket, openReleaseCanvas],
+  );
+
+  const openRelease = (releaseId: string): void => {
+    navigateWithinSdlc(
+      `/sdlc/${channelId}/releases`,
+      `?${new URLSearchParams({ release: releaseId, discussion: '1', chat: 'conversations' }).toString()}`,
+    );
+  };
 
   const canvasSearch = (canvasId: string, withDiscussion: boolean): URLSearchParams => {
     const search = new URLSearchParams({ canvas: canvasId });
@@ -1450,6 +1491,7 @@ export default function SdlcScreen(): ReactElement {
   const panelScopeActions = (place: 'header' | 'panel'): ReactNode => {
     if (!channel) return null;
     const scope = place === 'header' ? pageCallScope : callScope;
+    const onReleasePage = place === 'header' && section === 'releases' && !selectedCanvasId;
     return (
       <>
         {/* Ask AI, then call, then ticket: the order a thread's own actions take, so
@@ -1466,43 +1508,47 @@ export default function SdlcScreen(): ReactElement {
         >
           <XyneAIStar />
         </Button>
-        {/* Only the people picked are invited, and the call becomes a discussion in
-            what it is for — never a call the whole hub is rung for. */}
-        <Button
-          size='icon'
-          variant='ghost'
-          aria-label={`Start a call in ${scope.name}`}
-          title={isHubMember ? `Start a call in ${scope.name}` : 'Join the hub to start a call'}
-          disabled={!isHubMember}
-          onClick={() => setCallPicker(scope)}
-          data-track-category='SdlcHub'
-          data-track-name='StartCallOpened'
-          data-track-metadata={JSON.stringify({
-            place,
-            scope: scope.link?.ownerType ?? 'HUB',
-          })}
-        >
-          <PhoneDefault size={16} />
-        </Button>
-        <Button
-          size='icon'
-          variant='ghost'
-          aria-label='Create ticket'
-          title='Create ticket'
-          onClick={() => {
-            setCreateTicketSource('sdlc_header');
-            setCreateTicketOpen(true);
-          }}
-          data-track-category='SdlcHub'
-          data-track-name='HeaderCreateTicketClicked'
-          data-track-metadata={JSON.stringify({
-            place,
-            scope: entityLinkScope?.sourceType ?? null,
-            source: 'sdlc_header',
-          })}
-        >
-          <TicketToken size={16} />
-        </Button>
+        {!onReleasePage && (
+          <>
+            {/* Only the people picked are invited, and the call becomes a discussion in
+              what it is for — never a call the whole hub is rung for. */}
+            <Button
+              size='icon'
+              variant='ghost'
+              aria-label={`Start a call in ${scope.name}`}
+              title={isHubMember ? `Start a call in ${scope.name}` : 'Join the hub to start a call'}
+              disabled={!isHubMember}
+              onClick={() => setCallPicker(scope)}
+              data-track-category='SdlcHub'
+              data-track-name='StartCallOpened'
+              data-track-metadata={JSON.stringify({
+                place,
+                scope: scope.link?.ownerType ?? 'HUB',
+              })}
+            >
+              <PhoneDefault size={16} />
+            </Button>
+            <Button
+              size='icon'
+              variant='ghost'
+              aria-label='Create ticket'
+              title='Create ticket'
+              onClick={() => {
+                setCreateTicketSource('sdlc_header');
+                setCreateTicketOpen(true);
+              }}
+              data-track-category='SdlcHub'
+              data-track-name='HeaderCreateTicketClicked'
+              data-track-metadata={JSON.stringify({
+                place,
+                scope: entityLinkScope?.sourceType ?? null,
+                source: 'sdlc_header',
+              })}
+            >
+              <TicketToken size={16} />
+            </Button>
+          </>
+        )}
       </>
     );
   };
@@ -1691,6 +1737,10 @@ export default function SdlcScreen(): ReactElement {
 
   const closeCanvas = (): void => {
     if (!channelId) return;
+    if (section === 'releases' && openReleaseId) {
+      openRelease(openReleaseId);
+      return;
+    }
     const typeFolder =
       selectedCanvasTypeFolder ?? (section === 'artifacts' ? activeTypeFolder : null);
     if (typeFolder) {
@@ -3586,6 +3636,13 @@ export default function SdlcScreen(): ReactElement {
                       className='-mr-[10px] flex h-[52px] min-w-0 flex-1 items-stretch'
                     />
                   </>
+                ) : section === 'releases' && openReleaseId ? (
+                  <SdlcReleaseBreadcrumb
+                    releaseId={openReleaseId}
+                    canvasId={selectedCanvasId}
+                    onBack={() => navigateWithinSdlc(`/sdlc/${channelId}/releases`)}
+                    onOpenRelease={() => openRelease(openReleaseId)}
+                  />
                 ) : selectedCanvasId ? (
                   <>
                     <button
@@ -3762,6 +3819,16 @@ export default function SdlcScreen(): ReactElement {
                 <div className='min-h-0 flex-1 overflow-hidden bg-background'>
                   <SdlcWorkflowsSection />
                 </div>
+              ) : section === 'releases' ? (
+                <SdlcReleases
+                  projectId={channel.projectId ?? null}
+                  repositories={channelRepos}
+                  openReleaseId={openReleaseId}
+                  onOpenRelease={openRelease}
+                  onOpenTicket={openReleaseTicket}
+                  onOpenCanvas={openReleaseCanvas}
+                  onConnectRepository={() => setHubDialog('manage')}
+                />
               ) : (
                 <>
                   {onTrackPage && selectedTrack && (
@@ -4122,6 +4189,10 @@ export default function SdlcScreen(): ReactElement {
                       renderConversationBadge={renderFolderConversationBadge}
                       threadSubject={threadSubject}
                     />
+                  ) : releaseThreadAvailable && releaseThreadId ? (
+                    <ThreadNavigationContext.Provider value={releaseThreadNavigation}>
+                      <SdlcReleaseThread releaseId={releaseThreadId} onClose={closeConversations} />
+                    </ThreadNavigationContext.Provider>
                   ) : null}
                 </EntityLinkContext.Provider>
               </Panel>

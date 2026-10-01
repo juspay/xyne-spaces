@@ -6102,6 +6102,31 @@ dmChannelsLatestMessagesPaginated: defineQuery(
     },
   ),
 
+  // Newest release tickets across the SDLC hub's main release boards. The list
+  // pages by raising `limit` so every loaded row stays live.
+  releaseTicketsByBoardIds: defineQuery(
+    z.object({ boardIds: z.array(z.string()), limit: z.number().int().positive().max(1000) }),
+    ({ args: { boardIds, limit } }) => {
+      return zql.tickets
+        .where('ticketType', BaseTicketType.Release)
+        .where('boardId', 'IN', boardIds)
+        .where('isArchived', false)
+        .related('ticketDescription')
+        .orderBy('createdAt', 'desc')
+        .orderBy('id', 'desc')
+        .limit(limit);
+    },
+  ),
+
+  // Dev-ticket links of one release, without the ticket joins (ids only; the
+  // SDLC release page loads the tickets themselves through ticketsByIds).
+  releaseDevTicketLinksByReleaseId: defineQuery(
+    z.object({ releaseId: z.string().min(1) }),
+    ({ args: { releaseId } }) => {
+      return zql.application_release_tickets.where('releaseId', releaseId);
+    },
+  ),
+
   // Stable single-arg query: keying on the project avoids both the
   // boards->applications request waterfall and re-registering a new IN-list
   // view on zero-cache every time the board set changes.

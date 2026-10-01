@@ -32,6 +32,7 @@ interface ReleaseStagePickerProps {
   // is fired — useful when updating a ticket the current user can't write
   // directly (e.g. a dev ticket owned by another project).
   onSelect?: (stage: ReleaseStageOption) => void;
+  triggerClassName?: string;
 }
 
 /**
@@ -49,6 +50,7 @@ export function ReleaseStagePicker({
   boardId,
   onAfterChange,
   onSelect,
+  triggerClassName,
 }: ReleaseStagePickerProps): ReactElement {
   const [open, setOpen] = useState(false);
   const zero = useZero();
@@ -64,6 +66,7 @@ export function ReleaseStagePicker({
         statusV2={statusV2}
         boardId={boardId}
         onAfterStageChange={onAfterChange}
+        triggerClassName={triggerClassName}
       />
     );
   }
@@ -103,7 +106,10 @@ export function ReleaseStagePicker({
         setOpen(prev => !prev);
       }}
       onKeyDown={e => e.stopPropagation()}
-      className='inline-flex items-center gap-1 rounded-sm px-1.5 py-0.5 text-xs text-muted-foreground hover:bg-muted transition-colors whitespace-nowrap'
+      className={cn(
+        'inline-flex items-center gap-1 rounded-sm px-1.5 py-0.5 text-xs text-muted-foreground hover:bg-muted transition-colors whitespace-nowrap',
+        triggerClassName,
+      )}
       aria-label='Change stage'
       data-track-category='Release'
       data-track-name='ToggleRowStage'

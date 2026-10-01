@@ -1,4 +1,4 @@
-import React, { JSX, useEffect, useMemo, useRef, useState } from 'react';
+import React, { JSX, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import type { NavigateFunction } from 'react-router-dom';
 import {
   useRouterSelector,
@@ -6,6 +6,7 @@ import {
   useStableRouter,
 } from '../../../hooks/useStableRouter';
 import { usePlatform } from '../../../hooks/usePlatform';
+import { ThreadNavigationContext } from '../ThreadNavigationContext';
 import {
   Check,
   Copy,
@@ -264,6 +265,7 @@ const CanvasLink = ({
   const resolvedHref = href ?? '';
   const stableRouter = useStableRouter();
   const { isMobile } = usePlatform();
+  const { openCanvas } = useContext(ThreadNavigationContext);
 
   const handleClick = (event: React.MouseEvent<HTMLAnchorElement>): void => {
     if (!resolvedHref) return;
@@ -291,7 +293,9 @@ const CanvasLink = ({
     if (url.origin === window.location.origin && isSameWorkspace) {
       event.preventDefault();
 
-      if (canvasId && channelId) {
+      if (canvasId && openCanvas) {
+        openCanvas(canvasId);
+      } else if (canvasId && channelId) {
         // Open as overlay in current channel
         void navigate(`${location.pathname}#canvas=${canvasId}`);
       } else {
