@@ -1,3 +1,4 @@
+import './profiling.js';
 import { App } from './app.js';
 import { describeRejection, logger } from '@/utils/logger';
 import { configureJAF } from '@juspay-jaf/jaf';
