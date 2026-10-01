@@ -19,7 +19,16 @@ interface AppPickerDialogProps {
   /** `next` is the membership the row is being toggled to. */
   onToggle: (app: ArtifactAppSummary, next: boolean) => void;
   trackCategory: string;
+  /** Only rows this accepts are listed, e.g. a desk takes workspace-published apps only. */
+  appFilter?: (app: ArtifactAppSummary) => boolean;
+  /** Replaces the default "saved or published" line under the title. */
+  description?: string;
+  /** Replaces the default "up to N apps per bar" footnote, for a non-bar host. */
+  limitNote?: { normal: string; full: string };
 }
+
+const DEFAULT_DESCRIPTION =
+  'Apps you saved or that were published to this workspace. Pick as many as you need.';
 
 /**
  * Chooses artifact apps for a bar. Rows toggle, and the dialog stays open until
@@ -37,6 +46,9 @@ export const AppPickerDialog = ({
   isFull,
   onToggle,
   trackCategory,
+  appFilter,
+  description = DEFAULT_DESCRIPTION,
+  limitNote,
 }: AppPickerDialogProps): ReactElement => {
   const [query, setQuery] = useState('');
 
@@ -59,12 +71,13 @@ export const AppPickerDialog = ({
     }
     const q = query.trim().toLowerCase();
     return Array.from(byId.values())
+      .filter(a => !appFilter || appFilter(a))
       .filter(
         a =>
           !q || `${a.title} ${a.description ?? ''} ${a.ownerName ?? ''}`.toLowerCase().includes(q),
       )
       .sort((a, b) => a.title.localeCompare(b.title));
-  }, [mine.data, workspace.data, query]);
+  }, [mine.data, workspace.data, query, appFilter]);
 
   const isLoading = mine.isLoading || workspace.isLoading;
   const isError = mine.isError || workspace.isError;
@@ -74,7 +87,7 @@ export const AppPickerDialog = ({
       open={open}
       onOpenChange={onOpenChange}
       title='Add apps'
-      description='Apps you saved or that were published to this workspace. Pick as many as you need.'
+      description={description}
       className='max-w-md'
       mobileVariant='dialog'
     >
@@ -84,9 +97,7 @@ export const AppPickerDialog = ({
       <div className='p-6'>
         <div className='mb-4'>
           <h2 className='text-lg font-semibold text-foreground'>Add apps</h2>
-          <p className='mt-1 text-sm text-muted-foreground'>
-            Apps you saved or that were published to this workspace. Pick as many as you need.
-          </p>
+          <p className='mt-1 text-sm text-muted-foreground'>{description}</p>
         </div>
         <div className='flex flex-col gap-3'>
           <div className='relative'>
@@ -160,8 +171,9 @@ export const AppPickerDialog = ({
           </div>
           <p className='text-xs text-muted-foreground'>
             {isFull
-              ? 'This bar already holds the maximum number of apps. Switch one off to add another.'
-              : `Up to ${MAX_APPS_PER_BAR} apps per bar.`}
+              ? (limitNote?.full ??
+                'This bar already holds the maximum number of apps. Switch one off to add another.')
+              : (limitNote?.normal ?? `Up to ${MAX_APPS_PER_BAR} apps per bar.`)}
           </p>
         </div>
       </div>
