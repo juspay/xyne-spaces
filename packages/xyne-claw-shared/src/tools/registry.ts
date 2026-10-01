@@ -28,6 +28,7 @@ import * as todo from "./todo/index.js";
 import * as orchestrator from "./orchestrator/index.js";
 import * as agentIntrospect from "./agent-introspect/index.js";
 import * as skillManagement from "./skill-management/index.js";
+import * as conversationFork from "./conversation-fork/index.js";
 import * as videoExplainer from "./video-explainer/index.js";
 import * as reactArtifact from "./react-artifact/index.js";
 import * as recordSkill from "./record-skill/index.js";
@@ -205,6 +206,7 @@ register(postmanSbx.postmanSbxRunCollection);
 // AUTHOR" is one idea, and it was previously split across three one-tool groups.
 register(skillManagement.createSkillTool);
 register(skillManagement.updateSkillTool);
+register(conversationFork.forkToConversationTool);
 
 // Register agent-authoring tools — create/update agent, create/update subagent,
 // create MCP server. All approval-gated writes applied in claw-auth's

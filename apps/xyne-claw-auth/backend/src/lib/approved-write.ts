@@ -21,6 +21,7 @@ import { createLogger } from "../logger.js";
 import { errMsg } from "./errors.js";
 import type { SignedWriteAction as BaseWriteAction } from "./write-actions.js";
 import { AGENT_TOOL_SLUGS } from "./agent-tools-apply.js";
+import { FORK_TO_CONVERSATION_TOOL } from "xyne-claw-shared";
 import {
   defaultGatewayTenant,
   formatGatewayApprovalExecutionError,
@@ -47,7 +48,7 @@ export type ApprovedWriteOutcome =
 /** True when flow-action would take a branch this module does not implement. */
 export function needsSpacesApproval(serverType: string, tool: string): boolean {
   if (serverType === "skill") return true;
-  if (serverType === "agent-tools" && (AGENT_TOOL_SLUGS.has(tool) || tool === "create-skill")) return true;
+  if (serverType === "agent-tools" && (AGENT_TOOL_SLUGS.has(tool) || tool === "create-skill" || tool === FORK_TO_CONVERSATION_TOOL)) return true;
   // Posting AS the user through the Spaces app token needs an agent's
   // spacesAppToken, which is resolved from the card's own agent binding.
   if (serverType === "xyne-spaces" && tool === "spaces-send-message") return true;

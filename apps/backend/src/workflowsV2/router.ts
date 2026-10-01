@@ -21,13 +21,42 @@ import type { XyneCtx } from './types';
  */
 const NAME_PATTERN = /^[A-Za-z0-9 _()+-]+$/;
 
+const isPlainObject = (value: unknown): value is Record<string, unknown> =>
+  Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+
 /**
- * Route key → the path param naming the workflow it acts on. Mounted behind app auth
- * rather than the session, and absent from {@link PUBLIC_ALLOWED_ROUTES} so nothing else
- * exposes it. Re-check on an SDK bump.
+ * Route key → how to find the workflow it acts on. Mounted behind app auth rather than
+ * the session, and absent from {@link PUBLIC_ALLOWED_ROUTES} so nothing else exposes it.
+ * Re-check on an SDK bump.
+ *
+ * A trigger names its workflow in the path. A conversation names it only when it starts —
+ * after that it is identified by the run it created — so the workflow behind a running one
+ * is looked up. Either way the same check follows: in this workspace, attached to this
+ * install.
  */
-const APP_AUTH_ROUTES = new Map<string, string>([
-  ['POST /v2/workflows/:workflowId/trigger/v2', 'workflowId'],
+type WorkflowUnderTest = (req: Request) => Promise<string | undefined>;
+
+/** A conversation is an execution; its workflow is the one the app must be attached to. */
+const workflowOfConversation = async (id: unknown): Promise<string | undefined> => {
+  if (typeof id !== 'string' || id === '') return undefined;
+  return (await persistence.getExecution(id))?.workflowId ?? undefined;
+};
+
+const APP_AUTH_ROUTES = new Map<string, WorkflowUnderTest>([
+  ['POST /v2/workflows/:workflowId/trigger/v2', (req) => Promise.resolve(req.params['workflowId'])],
+
+  // Conversations: the whole surface, which is three calls.
+  [
+    'POST /conversations',
+    async (req) => {
+      const body = isPlainObject(req.body) ? req.body : {};
+      // Starting names the workflow; answering and reading name the conversation.
+      if (typeof body['workflowId'] === 'string') return body['workflowId'];
+      return workflowOfConversation(body['conversationId']);
+    },
+  ],
+  ['GET /conversations/:id', (req) => workflowOfConversation(req.params['id'])],
+  ['POST /conversations/:id/end', (req) => workflowOfConversation(req.params['id'])],
 ]);
 
 /**
@@ -51,9 +80,6 @@ const ctxFromRequest = (req: Request): XyneCtx => {
  * create to stamp ownership and is not persisted.
  */
 const ATTRIBUTE_INJECTED_ROUTES = new Set(['POST /workflows', 'POST /folders', 'POST /credentials']);
-
-const isPlainObject = (value: unknown): value is Record<string, unknown> =>
-  Boolean(value) && typeof value === 'object' && !Array.isArray(value);
 
 /** SDLC steps act as this author, so only the server sets it: whoever last changed the steps. */
 const guardSdlcAuthor = async (key: string, request: RouteRequest, ctx: XyneCtx): Promise<void> => {
@@ -96,12 +122,12 @@ const installedAppIdOf = (req: Request): string | null => {
   return typeof auth?.installedAppId === 'string' ? auth.installedAppId : null;
 };
 
-const assertTriggerableWorkflow = async (
+const assertAppMayUseWorkflow = async (
   req: Request,
   ctx: XyneCtx,
-  param: string,
+  find: WorkflowUnderTest,
 ): Promise<void> => {
-  const workflowId = req.params[param];
+  const workflowId = await find(req);
   const installedAppId = installedAppIdOf(req);
   const [workflow, attached] = await Promise.all([
     workflowId ? persistence.getWorkflow(workflowId) : Promise.resolve(null),
@@ -272,6 +298,7 @@ const mount = (
   authenticated: boolean,
   allow?: ReadonlySet<string>,
   guards: readonly express.RequestHandler[] = [],
+  appAuth?: ReadonlyMap<string, WorkflowUnderTest>,
 ): void => {
   const routes = createWorkflowRouter<XyneCtx>(workflowRuntime, {
     authenticate: () => {
@@ -280,12 +307,11 @@ const mount = (
   });
 
   for (const route of routes) {
-    if (needsSession(route.access) !== authenticated) continue;
-
     const method = route.method.toLowerCase() as 'get' | 'post' | 'put' | 'delete';
     const key = `${route.method} ${route.path}`;
-    const workflowIdParam = APP_AUTH_ROUTES.get(key);
+    const findWorkflow = appAuth?.get(key);
 
+    if (!findWorkflow && needsSession(route.access) !== authenticated) continue;
     if (allow && !allow.has(key)) continue;
 
     const middleware: express.RequestHandler[] = route.multipart
@@ -297,8 +323,8 @@ const mount = (
     router[method](route.path, ...guards, ...middleware, (req: Request, res: Response) => {
       void (async () => {
         try {
-          const ctx = authenticated || workflowIdParam ? ctxFromRequest(req) : null;
-          if (ctx && workflowIdParam) await assertTriggerableWorkflow(req, ctx, workflowIdParam);
+          const ctx = authenticated || findWorkflow ? ctxFromRequest(req) : null;
+          if (ctx && findWorkflow) await assertAppMayUseWorkflow(req, ctx, findWorkflow);
 
           const routeRequest = buildRouteRequest(req, route.rawBody === true);
 
@@ -335,4 +361,4 @@ mount(workflowsClawRouter, true, CLAW_ALLOWED_ROUTES);
 
 /** Registers only {@link APP_AUTH_ROUTES}; mounted under `/api/apps/workflows` behind `authenticateApp`. */
 export const workflowsAppRouter: Router = express.Router();
-mount(workflowsAppRouter, false, new Set(APP_AUTH_ROUTES.keys()));
+mount(workflowsAppRouter, false, new Set(APP_AUTH_ROUTES.keys()), [], APP_AUTH_ROUTES);

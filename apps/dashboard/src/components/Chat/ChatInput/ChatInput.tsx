@@ -241,10 +241,10 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
     const [activeArtifactCommand, setActiveArtifactCommand] = useState<string | null>(null);
     const [shortcutModalOpen, setShortcutModalOpen] = useState(false);
 
-    // Threads, tickets, canvases and calls the draft relates to. On by default, per device
+    // Threads, tickets, canvases and calls the draft relates to. Opt-in per device
     // (Preferences → Messaging), for new messages only — not edits, twin replies or a
     // slash-command artifact being declared.
-    const relatedPreferenceOn = useUserPreference('relatedContextOn');
+    const relatedPreferenceOn = useUserPreference('relatedContextEnabled');
     const relatedDebounceMs = useUserPreference('relatedContextDebounceMs');
     // Off in the screens the related-context popup embeds, so a reply typed there
     // doesn't open a popup of its own.
@@ -284,6 +284,7 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
           { modifier: event.metaKey || event.ctrlKey, isElectron: isElectronApp(), isMobile },
           navigate,
           getAllChannels(),
+          { callerUserId: context.userID },
         ).catch((error: unknown) => {
           logger.error(Event.FRONTEND_ERROR, {
             message: 'Opening a related-context item failed',
@@ -291,7 +292,7 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
           });
         });
       },
-      [isMobile, navigate],
+      [isMobile, navigate, context.userID],
     );
     const openRelated = useCallback(
       (item: RelatedItem, event: React.MouseEvent): void => {
@@ -1387,7 +1388,7 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
                       <button
                         type='button'
                         onClick={() => setShortcutModalOpen(true)}
-                        className='p-1.5 rounded hover:bg-accent transition-all duration-200 ease-in-out'
+                        className='p-1.5 rounded hover:bg-accent transition duration-200 ease-in-out'
                         aria-label='Open shortcuts'
                         data-track-category='CHAT_INPUT'
                         data-track-name='open-global-shortcuts'

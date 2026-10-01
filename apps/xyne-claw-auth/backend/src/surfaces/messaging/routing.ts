@@ -1,6 +1,6 @@
 /**
  * Agent selection for a channel message. Every account has a DEFAULT agent;
- * a message may start with `/slug ` or `@slug ` to pick another agent of the
+ * a message may start with `/slug ` to pick another agent of the
  * same org (subject to that agent's invocation ACL). `/agents` lists what the
  * sender can use. Parsing is pure; lookups live in inbound.ts.
  */
@@ -18,7 +18,7 @@ export interface AgentRoute {
 /**
  * Did this message address the agent by name? A messenger only offers a native
  * @mention inside a group, so in a one-to-one chat the equivalent is opening
- * with "/slug" or "@slug" — which is what parseAgentRoute already reads.
+ * with "/slug" — which is what parseAgentRoute already reads.
  */
 export function namesAnAgent(text: string): boolean {
   const trimmed = text.trim();

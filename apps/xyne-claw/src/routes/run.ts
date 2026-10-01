@@ -169,7 +169,7 @@ import {
   writeWorkspaceTextFiles,
   writeWorkspaceBinaryFiles,
 } from "../workspace.js";
-import { toolOutputBaseDir, deleteSession, branchSession, sessionDir } from "../session-store.js";
+import { toolOutputBaseDir, deleteSession, branchSession, sessionDir, sessionExistsAnywhere } from "../session-store.js";
 import { gcsUploadResultMarker, gcsDownloadResultMarker } from "../storage.js";
 import { takeLlmCitations } from "xyne-claw-shared";
 import { ingestAttachments } from "../attachment-ingest.js";
@@ -1383,8 +1383,9 @@ router.post("/clone-session", validateS2SKey, async (req, res: Response) => {
   }
 
   try {
+    const targetExisted = branchMode === "full" && (await sessionExistsAnywhere(targetConversationId));
     const success = await branchSession(sourceConversationId, targetConversationId, branchMode);
-    res.json({ success });
+    res.json({ success, targetExisted });
   } catch (err) {
     clog.error(
       `[clone-session] ${sourceConversationId} → ${targetConversationId}: ${err instanceof Error ? err.stack ?? err.message : String(err)}`,
