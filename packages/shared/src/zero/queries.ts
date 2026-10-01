@@ -777,6 +777,8 @@ const applyArchiveFilter = <T extends { where: Function }>(
 
 export const queries = defineQueries({
   pollByMessageId: defineQuery(
+    // channelId is intentionally consumed by defineQuery's ACL wrapper rather
+    // than this query body. PollsACL scopes poll -> message -> conversation -> channel.
     z.object({ messageId: z.string(), channelId: z.string().optional() }),
     ({ args: { messageId } }) =>
       zql.polls

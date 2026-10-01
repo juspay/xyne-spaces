@@ -196,6 +196,8 @@ Add shared query ACLs and backend mutation ACLs for all four tables and register
 - Guest behavior matches reactions: guests may vote or add a choice only when they already have mutation access to the owning channel.
 - Reply creation checks the owning conversation's initial message; when it owns a poll with `allowComments = false`, the backend rejects the reply even if a stale or modified client exposes a thread composer.
 
+The database trigger deliberately applies to every message insert, including bot, system, integration, and "also send to channel" writers. Prisma `db push` cannot install PostgreSQL triggers, so environments created exclusively with `db push` retain the UI and Zero-mutator checks but must apply this migration SQL before testing out-of-band writer enforcement. Production environments install the trigger through `prisma migrate deploy`.
+
 ## Rendering Integration
 
 Create focused components instead of extending the already-large message/composer files with poll business logic:

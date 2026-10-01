@@ -32,4 +32,21 @@ describe('calculatePollResults', () => {
       ],
     });
   });
+
+  it("counts another user's vote without marking it as the current user's selection", () => {
+    expect(
+      calculatePollResults(
+        [{ id: 'goa' }, { id: 'coorg' }],
+        [{ userId: 'other-user', optionIds: ['coorg'] }],
+        'current-user',
+      ),
+    ).toEqual({
+      voterCount: 1,
+      currentSelections: [],
+      options: [
+        { optionId: 'goa', count: 0, percentage: 0 },
+        { optionId: 'coorg', count: 1, percentage: 100 },
+      ],
+    });
+  });
 });
