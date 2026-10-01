@@ -1,3 +1,10 @@
+## [1.452.0](https://github.com/juspay/xyne-spaces/compare/v1.451.0...v1.452.0) (2026-10-01)
+
+
+### Features
+
+* inline CSV preview for chat attachments ([#2455](https://github.com/juspay/xyne-spaces/issues/2455)) ([3578f50](https://github.com/juspay/xyne-spaces/commit/3578f501ecf77f1a12c28025ae90eff78259ad23))
+
 ## [1.451.0](https://github.com/juspay/xyne-spaces/compare/v1.450.1...v1.451.0) (2026-10-01)
 
 
