@@ -25,6 +25,9 @@ export const xyneWorkflowsAdapter: StdioMcpAdapter = {
         XYNE_SPACES_TOKEN: String(credentials["token"] ?? ""),
         XYNE_SPACES_SESSION_ID: String(credentials["sessionId"] ?? ""),
         XYNE_SPACES_WORKSPACE_ID: String(credentials["workspaceId"] ?? ""),
+        // KNOWN EXCEPTION (XYNE-65520): this first-party child keeps the root
+        // INTERNAL_S2S_KEY — and ONLY that key — until the signed delegation
+        // token ships. TODO(XYNE-65483): replace with the delegation token.
         INTERNAL_S2S_KEY: process.env["INTERNAL_S2S_KEY"] ?? "",
         XYNE_USER_ID: String(credentials["userId"] ?? ""),
       },
