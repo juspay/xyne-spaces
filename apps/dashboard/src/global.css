@@ -4933,7 +4933,8 @@ img.inline-emoji,
   position: relative;
 }
 
-.xyne-related-scan::after {
+.xyne-related-scan::after,
+.cmdk-ai-scan::after {
   content: "";
   position: absolute;
   inset: 0;
@@ -4973,7 +4974,8 @@ img.inline-emoji,
     visibility 0s linear 420ms;
 }
 
-.xyne-related-scan[data-active="true"]::after {
+.xyne-related-scan[data-active="true"]::after,
+.cmdk-ai-scan[data-active="true"]::after {
   animation-play-state: running;
   opacity: 1;
   visibility: visible;
@@ -4983,8 +4985,182 @@ img.inline-emoji,
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .xyne-related-scan::after {
+  .xyne-related-scan::after,
+  .cmdk-ai-scan::after {
     animation: none;
+  }
+}
+
+.cmdk-ai-overview {
+  --cmdk-ai-pink: #ff6b9d;
+  --cmdk-ai-peach: #ffa06b;
+  position: relative;
+  isolation: isolate;
+  border-radius: 18px;
+  background-color: rgba(255, 138, 92, 0.045);
+  box-shadow: inset 0 0 0 1px rgba(255, 138, 92, 0.2);
+}
+
+[data-theme="midnight"] .cmdk-ai-overview {
+  background-color: rgba(255, 138, 92, 0.06);
+  box-shadow: inset 0 0 0 1px rgba(255, 138, 92, 0.24);
+}
+
+.cmdk-ai-overview::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  padding: 1px;
+  border-radius: inherit;
+  pointer-events: none;
+  background: conic-gradient(
+    from var(--xyne-angle),
+    transparent 0deg 140deg,
+    rgba(255, 107, 157, 0.95) 220deg,
+    rgba(255, 160, 107, 1) 280deg,
+    rgba(255, 214, 168, 0.85) 320deg,
+    transparent 360deg
+  );
+  -webkit-mask:
+    linear-gradient(#000 0 0) content-box,
+    linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask:
+    linear-gradient(#000 0 0) content-box exclude,
+    linear-gradient(#000 0 0);
+  animation: xyne-border-spin 2.2s linear infinite;
+  animation-play-state: paused;
+  opacity: 0;
+  transition: opacity 520ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.cmdk-ai-overview[data-state="answering"]::before {
+  animation-play-state: running;
+  opacity: 1;
+}
+
+@keyframes cmdk-ai-sheen {
+  from {
+    background-position: 100% 0;
+  }
+  to {
+    background-position: 0% 0;
+  }
+}
+
+.cmdk-ai-status {
+  background-image: linear-gradient(
+    100deg,
+    hsl(var(--muted-foreground)) 40%,
+    var(--cmdk-ai-peach) 50%,
+    hsl(var(--muted-foreground)) 60%
+  );
+  background-size: 300% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  animation: cmdk-ai-sheen 2s linear infinite;
+}
+
+.cmdk-ai-cite {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 16px;
+  height: 16px;
+  margin-left: 3px;
+  padding: 0 4px;
+  border-radius: 9999px;
+  vertical-align: 1px;
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+  color: #c2410c;
+  background-color: rgba(255, 138, 92, 0.14);
+  transition-property: color, background-color, transform;
+  transition-duration: 150ms;
+  transition-timing-function: cubic-bezier(0.23, 1, 0.32, 1);
+}
+
+.cmdk-ai-cite + .cmdk-ai-cite {
+  margin-left: 2px;
+}
+
+.cmdk-ai-cite:hover,
+.cmdk-ai-cite[data-active="true"] {
+  color: #ffffff;
+  background-color: #ff8a5c;
+}
+
+.cmdk-ai-cite:active {
+  transform: scale(0.96);
+}
+
+.cmdk-ai-cite:focus-visible {
+  outline: 2px solid hsl(var(--ring));
+  outline-offset: 1px;
+}
+
+[data-theme="midnight"] .cmdk-ai-cite {
+  color: #ffb38a;
+  background-color: rgba(255, 138, 92, 0.18);
+}
+
+[data-theme="midnight"] .cmdk-ai-cite:hover,
+[data-theme="midnight"] .cmdk-ai-cite[data-active="true"] {
+  color: #1c1917;
+  background-color: #ffa06b;
+}
+
+.cmdk-ai-source[data-active="true"] {
+  color: hsl(var(--foreground));
+  box-shadow: inset 0 0 0 1px rgba(255, 138, 92, 0.6);
+}
+
+@keyframes cmdk-ai-caret {
+  0%,
+  100% {
+    opacity: 0.35;
+    transform: scale(0.8);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+.cmdk-ai-answer[data-streaming="true"] .bot-markdown-content > p:last-child::after,
+.cmdk-ai-answer[data-streaming="true"]
+  .bot-markdown-content
+  > :is(ul, ol):last-child
+  > li:last-child::after {
+  content: "";
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  margin-left: 5px;
+  border-radius: 9999px;
+  vertical-align: 1px;
+  background-image: linear-gradient(135deg, var(--cmdk-ai-pink), var(--cmdk-ai-peach));
+  animation: cmdk-ai-caret 1.1s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cmdk-ai-overview::before,
+  .cmdk-ai-answer[data-streaming="true"] .bot-markdown-content > p:last-child::after {
+    animation: none;
+  }
+
+  .cmdk-ai-overview[data-state="answering"]::before {
+    background: rgba(255, 138, 92, 0.55);
+  }
+
+  .cmdk-ai-status {
+    animation: none;
+    background: none;
+    color: hsl(var(--muted-foreground));
   }
 }
 

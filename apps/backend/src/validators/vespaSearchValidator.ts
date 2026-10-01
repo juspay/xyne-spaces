@@ -456,3 +456,11 @@ export const relatedContextBodySchema = Joi.object({
   }),
   conversationId: Joi.string().max(64).optional(),
 });
+
+export const cmdkAnswerBodySchema = Joi.object({
+  q: Joi.string().trim().min(1).max(500).required().messages({
+    'string.empty': '"q" cannot be empty',
+    'string.max': 'Query cannot exceed 500 characters',
+    'any.required': '"q" is required'
+  }),
+});

@@ -1,16 +1,18 @@
 import { Router } from 'express';
 import { searchHandler } from '../services/vespaSearch';
 import { validate, validateQuery, validateSearchFilters } from '../middleware/validation';
-import { relatedContextLimiter } from '../middleware/rateLimiters';
+import { cmdkAnswerLimiter, relatedContextLimiter } from '../middleware/rateLimiters';
 import {
   vespaSearchQuerySchema,
   vespaSchemaQuerySchema,
   queryIntentQuerySchema,
   relatedContextBodySchema,
+  cmdkAnswerBodySchema,
 } from '../validators/vespaSearchValidator';
 import { schemaHandler } from '../services/vespaSearch/schemaHandler';
 import { queryIntentHandler } from '../services/queryIntent/handler';
 import { relatedContextHandler } from '../services/relatedContext/handler';
+import { cmdkAnswerHandler } from '../services/cmdkAnswer/handler';
 
 const router = Router();
 /**
@@ -20,6 +22,7 @@ const router = Router();
  * /api/vespaSearch/related only, behind user login.
  */
 export const relatedContextRouter = Router();
+export const cmdkAnswerRouter = Router();
 
 /**
  * @route GET /api/vespaSearch
@@ -91,5 +94,7 @@ relatedContextRouter.post(
   validate(relatedContextBodySchema),
   relatedContextHandler
 );
+
+cmdkAnswerRouter.post('/', cmdkAnswerLimiter, validate(cmdkAnswerBodySchema), cmdkAnswerHandler);
 
 export default router;

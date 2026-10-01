@@ -305,7 +305,8 @@ async function classify(
 export async function findRelatedContext(
   text: string,
   req: RelatedContextRequest,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  onCandidates?: (candidates: Candidate[]) => void
 ): Promise<RelatedContext | null> {
   if (!isJevConfigured() || !envConfig.jev.url || !envConfig.jev.model) return null;
   let config: RelatedContextConfig;
@@ -360,6 +361,7 @@ export async function findRelatedContext(
     );
     const retrievalMs = Date.now() - retrievalStarted;
     const candidates = found ?? [];
+    onCandidates?.(candidates);
     // One line per lookup: where the time went and how it ended. Never the draft.
     const summary = (extra: Record<string, unknown>): void => {
       logger.info('[RelatedContext] lookup', {

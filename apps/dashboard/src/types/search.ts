@@ -177,13 +177,6 @@ export interface VespaSearchGroup {
   results: DisplaySearchResult[];
 }
 
-/** Backend verdict on how the cmd+K palette should treat a query. */
-export interface QueryIntent {
-  mode: 'lexical' | 'ai';
-  /** Probability that the query needs AI (from Jev). */
-  pAI: number;
-}
-
 /** How an existing item relates to a draft in the composer. */
 export type RelatedLabel = 'answers_it' | 'same_question' | 'related_discussion';
 
@@ -206,6 +199,15 @@ export interface RelatedContext {
   /** The lookup failed; nothing to show, but worth asking again at the next pause. */
   failed?: boolean;
 }
+
+export type CmdkAnswerSource = Pick<RelatedItem, 'id' | 'kind' | 'result' | 'label'>;
+
+export type CmdkAnswerEvent =
+  | { type: 'sources'; sources: CmdkAnswerSource[] }
+  | { type: 'delta'; content: string }
+  | { type: 'done' }
+  | { type: 'skip'; reason: 'off' | 'not_ready' | 'failed' | 'nothing' }
+  | { type: 'error' };
 
 export interface VespaSearchResponse {
   success: boolean;
