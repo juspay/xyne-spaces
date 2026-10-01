@@ -3,7 +3,12 @@ import { Download, Maximize2, Sheet } from 'lucide-react';
 import { createPreviewUrl } from '../../../services/clients/fileFetchService';
 import { downloadAttachment, truncateFileName } from './utils';
 import { useWindowWidth } from '../../../hooks/useWindowWidth';
-import { CSV_PREVIEW_BYTES, CSV_PREVIEW_COLS, parseCsvPreview, type CsvPreview } from './csvPreview';
+import {
+  CSV_PREVIEW_BYTES,
+  CSV_PREVIEW_COLS,
+  parseCsvPreview,
+  type CsvPreview,
+} from './csvPreview';
 
 const useNearViewport = <T extends Element>(): [React.RefObject<T | null>, boolean] => {
   const ref = useRef<T | null>(null);
@@ -176,7 +181,9 @@ export const InlineCsvFile: React.FC<{
                   className='w-full px-2 py-1.5 text-xs text-muted-foreground bg-muted/50 hover:bg-accent hover:text-foreground border-t border-border text-left'
                 >
                   Showing first {preview.rows.length} rows
-                  {hiddenCols > 0 ? ` and ${CSV_PREVIEW_COLS} of ${preview.totalCols} columns` : ''}{' '}
+                  {hiddenCols > 0
+                    ? ` and ${CSV_PREVIEW_COLS} of ${preview.totalCols} columns`
+                    : ''}{' '}
                   — open full view
                 </button>
               )}
