@@ -5,7 +5,8 @@ import { ChannelScopeType, ChannelVisibility, ChannelType, ProjectType } from '@
 import { QueryOptions } from '@/types/database';
 import { logger } from '@/utils/logger';
 import { withWorkspaceScope } from '@/database/tenant/context';
-import { newConnectId, createConnectGroupForEntity } from '@/database/connectGroup';
+import { newConnectId } from '@/database/connectGroup';
+import { createChannelWithConnectGroupTx } from '@/bypassAcl/transactions/connectGroupEntities';
 //import { queueChannelIngestion } from '@/queues/vespaQueue';
 
 export interface CreateChannelInput {
@@ -68,11 +69,10 @@ export class ChannelRepository extends BaseRepository<Channel, CreateChannelInpu
     // Slack Connect: mint a connectId, stamp it on the channel, and create its private
     // connect_group row so every new channel has a group entry from creation.
     const connectId = newConnectId();
-    // Atomic: a channel with a connectId but no connect_group row is invisible to connectReach
-    // (matches neither branch) and unrepairable via the app. Create both or neither.
-    const result = await this.db.$transaction(async (tx) => {
-    const channel = await tx.channel.create({
-      data: {
+    // Atomic channel + connect_group (bypassAcl op): a channel with a connectId but no group row is
+    // invisible to connectReach and unrepairable via the app, so both must commit together.
+    const result = await createChannelWithConnectGroupTx(
+      {
         scopeType: data.scopeType,
         name: data.name,
         description: data.description,
@@ -83,16 +83,11 @@ export class ChannelRepository extends BaseRepository<Channel, CreateChannelInpu
         workspaceId: data.workspaceId,
         connectId,
         ...(data.type && { type: data.type }),
-      }
-    });
-    await createConnectGroupForEntity(tx, {
-      entityType: 'channel',
-      entityId: channel.id,
-      hostWorkspaceId: channel.workspaceId,
+      },
+      data.workspaceId,
       connectId,
-    });
-    return channel;
-    });
+      this.db,
+    );
 
     // Dual-write: mirror the channel→project board set into ChannelBoardMapping so
     // downstream consumers never read channel.projectId. Skipped entirely when the

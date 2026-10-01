@@ -11,7 +11,8 @@ import { CanvasSideEffectHandler } from '@/zero/side-effects/tables/canvas-handl
 import { vespaQueue } from '@/queues/vespaQueue';
 import { fileSchema, SubApp } from '@/vespa/src/types';
 import { db } from '@/database/client';
-import { newConnectId, createConnectGroupForEntity } from '@/database/connectGroup';
+import { newConnectId } from '@/database/connectGroup';
+import { createCanvasWithConnectGroupTx } from '@/bypassAcl/transactions/connectGroupEntities';
 import { withWorkspaceScope } from '@/database/tenant/context';
 import { CanvasRole, CanvasVisibility } from '@xyne/shared';
 import { readFromYSweetStrict, syncToYSweet } from '@/utils/ysweetUtils';
@@ -943,11 +944,10 @@ async function persistNewAnalysisCanvas(args: {
     throw new Error(`Failed to save commit analysis canvas ${canvasId} to Y-Sweet`);
   }
 
-  // Atomic: a canvas with a connectId but no connect_group row is invisible to connectReach
-  // (matches neither branch) and unrepairable via the app. Create both or neither.
-  await prisma.$transaction(async (tx) => {
-  await tx.canvas.create({
-    data: {
+  // Atomic canvas + connect_group (bypassAcl op): a canvas with a connectId but no group row is
+  // invisible to connectReach and unrepairable via the app, so both must commit together.
+  await createCanvasWithConnectGroupTx(
+    {
       id: canvasId,
       title: finalTitle,
       content: [],
@@ -977,14 +977,9 @@ async function persistNewAnalysisCanvas(args: {
         ...(metadata.conversationId && { conversationId: metadata.conversationId }),
       },
     },
-  });
-  await createConnectGroupForEntity(tx, {
-    entityType: 'canvas',
-    entityId: canvasId,
-    hostWorkspaceId: creator.workspaceId,
+    creator.workspaceId,
     connectId,
-  });
-  });
+  );
 
   await prisma.canvasParticipant.create({
     data: {
