@@ -235,6 +235,7 @@ export function AutomationBuilder({
   const [collapseAll, setCollapseAll] = useState<CollapseAllSignal | null>(null);
   const [flowFocus, setFlowFocus] = useState<{ id: string } | null>(null);
   const listRef = useRef<HTMLDivElement>(null);
+  const webhookPanelRef = useRef<HTMLDivElement>(null);
   const isFlowView = builderView === 'flow' && !readOnlyPreview;
 
   const [savedId, setSavedId] = useState<string | null>(automation?.id ?? null);
@@ -854,6 +855,13 @@ export function AutomationBuilder({
     else setEditConfirmOpen(true);
   }, [forksOnEdit]);
 
+  // View mode: the webhook panel stays clickable (copy the URL), so its clicks must not
+  // bubble into the list's click-to-edit.
+  const handleListClick = (event: React.MouseEvent<HTMLDivElement>): void => {
+    if (event.target instanceof Node && webhookPanelRef.current?.contains(event.target)) return;
+    handleRequestEdit();
+  };
+
   const triggerIssues = issuesUnder(validation?.issues, 'trigger');
 
   // Validation banner → the step (or trigger/timing section) an issue belongs to.
@@ -1335,7 +1343,7 @@ export function AutomationBuilder({
           'flex-1 overflow-y-auto bg-muted/30',
           !editMode && canEdit && !readOnlyPreview && 'cursor-pointer',
         )}
-        {...(!editMode && canEdit && !readOnlyPreview ? { onClick: handleRequestEdit } : {})}
+        {...(!editMode && canEdit && !readOnlyPreview ? { onClick: handleListClick } : {})}
       >
         <div
           className={cn(
@@ -1375,7 +1383,7 @@ export function AutomationBuilder({
               />
             </div>
             {config.trigger.type === 'WEBHOOK' && (
-              <div className='mt-4'>
+              <div ref={webhookPanelRef} className='mt-4'>
                 <WebhookEndpointPanel automationId={savedId} />
               </div>
             )}
