@@ -161,6 +161,7 @@ export function workflowExecutionToRunSummary(
     completedAt:
       execution.status === AutomationRunStatus.RUNNING ||
       execution.status === AutomationRunStatus.SCHEDULED ||
+      execution.status === AutomationRunStatus.HELD ||
       execution.status === 'EXTERNAL_WAIT'
         ? null
         : execution.updatedAt,

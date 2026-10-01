@@ -1,5 +1,6 @@
 import { ReadonlyJSONValue, Transaction, defineMutator, defineMutators, ApplicationError } from '@rocicorp/zero';
 import { AutomationStatus } from '../automations/types/status';
+import { WEBHOOK_EVENT } from '../automations/triggers/webhook.trigger';
 import {
   ChannelRole,
   ChannelType,
@@ -1040,6 +1041,23 @@ async function createNonParticipantSystemMessages(
   } catch (error) {
     logger.error('❌ [NON-PARTICIPANT] Error creating non-participant system messages:', error);
     // Don't throw - let the message creation succeed even if system message fails
+  }
+}
+
+/** Runs (any status) recorded against an automation version. Zero doesn't replicate
+ *  workflow_executions, so this is a synchronous repository-level check. */
+async function countAutomationRuns(workflowId: string): Promise<number> {
+  return db.workflowExecution.count({ where: { workflowId } });
+}
+
+/** Webhook triggers bypass the event router, so they can never capture in PLAYGROUND. */
+function isWebhookTriggeredAutomation(eventType: string | null, context: string | null): boolean {
+  if (eventType === WEBHOOK_EVENT) return true;
+  try {
+    const parsed = context ? (JSON.parse(context) as { trigger?: { type?: string } }) : null;
+    return parsed?.trigger?.type === WEBHOOK_EVENT;
+  } catch {
+    return false;
   }
 }
 
@@ -17849,6 +17867,12 @@ export function createMutators(
               `Automation "${id}" is ${existing.status}; only DRAFT proposals can be edited.`,
             );
           }
+          // Frozen once it has runs: held runs must keep playing the config that captured them.
+          if ((await countAutomationRuns(id)) > 0) {
+            throw new Error(
+              `Automation "${id}" has runs and can't be edited in place; save it as a new version.`,
+            );
+          }
 
           await tx.mutate.workflows.update({
             id,
@@ -17870,6 +17894,13 @@ export function createMutators(
               `Cannot delete "${id}": only DRAFT proposals can be deleted (status is ${existing.status}).`,
             );
           }
+          if (
+            existing &&
+            existing.workflowType === 'Automations' &&
+            (await countAutomationRuns(id)) > 0
+          ) {
+            throw new Error(`Cannot delete "${id}": it has runs. Archive it instead.`);
+          }
           await tx.mutate.workflows.delete({ id });
         },
       ),
@@ -17880,6 +17911,11 @@ export function createMutators(
           const existing = await tx.run(zql.workflows.where('id', id).one());
           if (!existing || existing.workflowType !== 'Automations') {
             throw new Error(`Automation "${id}" not found`);
+          }
+          if (existing.status !== 'DRAFT' && existing.status !== 'PLAYGROUND') {
+            throw new Error(
+              `Automation "${id}" is ${existing.status}; only DRAFT or PLAYGROUND versions can be submitted.`,
+            );
           }
           await tx.mutate.workflows.update({
             id,
@@ -18089,6 +18125,77 @@ export function createMutators(
           });
         },
       ),
+      // Owner-or-admin: DRAFT → PLAYGROUND. At most one recording per lineage, so this
+      // version is promoted and every other PLAYGROUND version in the lineage is demoted to
+      // DRAFT in this same synchronous transaction (never two recordings at once). Demoted
+      // versions keep their held runs. Webhook-triggered automations can't record.
+      startRecording: defineMutator(
+        z.object({ id: z.string(), timestamp: z.number() }),
+        async ({ tx, args: { id, timestamp } }) => {
+          logger.info(`[Mutator] automations.startRecording START id=${id}`);
+          const existing = await tx.run(zql.workflows.where('id', id).one());
+          if (!existing || existing.workflowType !== 'Automations') {
+            throw new Error(`Automation "${id}" not found`);
+          }
+          if (existing.status !== 'DRAFT') {
+            throw new Error(
+              `Automation "${id}" is ${existing.status}; only DRAFT versions can start recording.`
+            );
+          }
+          if (isWebhookTriggeredAutomation(existing.eventType, existing.context)) {
+            throw new Error('Webhook-triggered automations cannot record in Playground.');
+          }
+
+          // Promote first, then demote the lineage's other recordings in the same tx: the
+          // workflows ACL authorizes a sibling demotion by checking that the caller owns the
+          // lineage's (now) recording version, so the promotion must already be visible.
+          await tx.mutate.workflows.update({ id, status: 'PLAYGROUND', updatedAt: timestamp });
+
+          const seriesId = existing.automationSeriesId ?? existing.id;
+          const otherRecordings = await tx.run(
+            zql.workflows
+              .where('automationSeriesId', seriesId)
+              .where('workflowType', 'Automations')
+              .where('status', 'PLAYGROUND')
+              .where('id', '!=', id)
+          );
+          for (const other of otherRecordings) {
+            await tx.mutate.workflows.update({
+              id: other.id,
+              status: 'DRAFT',
+              updatedAt: timestamp,
+            });
+          }
+          logger.info(
+            `[Mutator] automations.startRecording OK id=${id} by userId=${authData.sub} demoted=${otherRecordings.map((o) => o.id).join(',') || 'none'}`
+          );
+        }
+      ),
+      // Owner-or-admin: PLAYGROUND → DRAFT. Held runs stay listed but can't be played
+      // until this version is put back into PLAYGROUND.
+      stopRecording: defineMutator(
+        z.object({ id: z.string(), timestamp: z.number() }),
+        async ({ tx, args: { id, timestamp } }) => {
+          logger.info(`[Mutator] automations.stopRecording START id=${id}`);
+          const existing = await tx.run(zql.workflows.where('id', id).one());
+          if (!existing || existing.workflowType !== 'Automations') {
+            throw new Error(`Automation "${id}" not found`);
+          }
+          if (existing.status !== 'PLAYGROUND') {
+            throw new Error(
+              `Automation "${id}" is ${existing.status}; only PLAYGROUND versions can stop recording.`
+            );
+          }
+          // The ACL lets the owner of a lineage recording demote siblings (startRecording);
+          // stopping is only ever for this version's own owner or an admin.
+          const { assertIsOwnerOrAutomationsAdmin } =
+            await import('../automations/services/approval.service');
+          await assertIsOwnerOrAutomationsAdmin(existing, authData.sub);
+          await tx.mutate.workflows.update({ id, status: 'DRAFT', updatedAt: timestamp });
+          logger.info(`[Mutator] automations.stopRecording OK id=${id} by userId=${authData.sub}`);
+        }
+      ),
+
 
       // Admin-only: permanently retire a live automation. ARCHIVED is gated to
       // admins by the workflows ACL, and the event-router only matches ACTIVE
@@ -18102,9 +18209,15 @@ export function createMutators(
             logger.warn(`[Mutator] automations.archive REJECT id=${id} reason=not-found`);
             throw new Error(`Automation "${id}" not found`);
           }
-          if (existing.status !== 'ACTIVE' && existing.status !== 'DISABLED') {
+          // A DRAFT that has runs can't be deleted (that would cascade its runs), so it is
+          // archived instead — by its owner or an admin (enforced in the workflows ACL).
+          const isDraftWithRuns =
+            existing.status === 'DRAFT' && (await countAutomationRuns(id)) > 0;
+          if (existing.status !== 'ACTIVE' && existing.status !== 'DISABLED' && !isDraftWithRuns) {
             throw new Error(
-              `Automation "${id}" is ${existing.status}; only LIVE rows can be archived.`,
+              existing.status === 'DRAFT'
+                ? `Automation "${id}" has no runs; delete it instead of archiving.`
+                : `Automation "${id}" is ${existing.status}; only LIVE rows or drafts with runs can be archived.`,
             );
           }
           await tx.mutate.workflows.update({

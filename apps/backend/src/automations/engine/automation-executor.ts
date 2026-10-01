@@ -6,7 +6,7 @@ import {
   persistAutomationState,
   getAutomationPauseState,
 } from '@/database/repositories/workflowExecutionStateUtils';
-import { AutomationStatus, AutomationRunStatus } from '../types/status';
+import { AutomationStatus, AutomationRunStatus, isPlaygroundRun } from '../types/status';
 import type { AutomationStepConfig } from '../types/automation-config';
 import type { AutomationContext } from '../types/context';
 import type { TriggerType } from '../types/trigger-types';
@@ -137,7 +137,13 @@ export class AutomationExecutor {
       );
       return undefined;
     }
-    if (workflow.status !== AutomationStatus.ACTIVE && !mayDrainInFlight(workflow)) {
+    // Played playground runs are keyed off the run's own tag, so a run already played
+    // finishes even if its version leaves PLAYGROUND mid-flight (DELAY / RUN_AGENT).
+    if (
+      workflow.status !== AutomationStatus.ACTIVE &&
+      !mayDrainInFlight(workflow) &&
+      !isPlaygroundRun(existing)
+    ) {
       await this.prisma.workflowExecution.update({
         where: { id: executionId },
         data: { status: AutomationRunStatus.CANCELLED },

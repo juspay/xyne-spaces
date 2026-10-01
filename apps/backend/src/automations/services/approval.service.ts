@@ -32,7 +32,7 @@ export class ApprovalError extends Error {
   }
 }
 
-async function assertIsAutomationsAdmin(
+export async function assertIsAutomationsAdmin(
   userId: string,
   opts: { isEnvAdmin?: boolean } = {},
 ): Promise<void> {
@@ -60,6 +60,36 @@ async function assertIsAutomationsAdmin(
   }
 }
 
+/**
+ * Owner (metadata.createdById) or an Automations admin. Used by the playground
+ * actions (start/stop recording, Play, archive-a-draft-with-runs), where admins
+ * can do everything the owner can.
+ */
+export async function assertIsOwnerOrAutomationsAdmin(
+  workflow: Pick<Workflow, 'metadata'>,
+  userId: string,
+  opts: { isEnvAdmin?: boolean } = {}
+): Promise<void> {
+  let createdById: string | undefined;
+  try {
+    createdById = parseAutomationMetadata(workflow.metadata).createdById;
+  } catch {
+    createdById = undefined;
+  }
+  if (createdById && createdById === userId) return;
+  try {
+    await assertIsAutomationsAdmin(userId, opts);
+  } catch (err) {
+    if (err instanceof ApprovalError && err.code === 'not-admin') {
+      throw new ApprovalError(
+        'Only the automation owner or an Automations admin can do this.',
+        'not-owner'
+      );
+    }
+    throw err;
+  }
+}
+
 function ensureAutomation(workflow: Workflow | null, id: string): Workflow {
   if (!workflow || workflow.workflowType !== AUTOMATION_WORKFLOW_TYPE) {
     throw new ApprovalError(`Automation "${id}" not found.`, 'not-found');
@@ -77,10 +107,11 @@ class ApprovalService {
 
     if (
       row.status !== AutomationStatus.DRAFT &&
+      row.status !== AutomationStatus.PLAYGROUND &&
       row.status !== AutomationStatus.PENDING_APPROVAL
     ) {
       throw new ApprovalError(
-        `Automation "${proposalId}" is ${row.status}; expected DRAFT or PENDING_APPROVAL.`,
+        `Automation "${proposalId}" is ${row.status}; expected DRAFT, PLAYGROUND or PENDING_APPROVAL.`,
         'wrong-status',
       );
     }
