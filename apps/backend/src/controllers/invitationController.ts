@@ -11,7 +11,7 @@ import { withWorkspaceScope, runAsSystem } from '@/database/tenant/context';
 import { createOwnerInvitation, syncAllBotUsersForNewWorkspace } from '@/bypassAcl/orgServices';
 import { logger } from '@/utils/logger';
 import { config } from '@/config/env';
-import { ProjectType, WorkspaceRole, OrgRole } from '@xyne/shared';
+import { ProjectType, WorkspaceRole, WorkspaceType, OrgRole } from '@xyne/shared';
 import { aiProvisioningService } from '@/services/aiProvisioningService';
 import { isOrganizationPolicyError, organizationDomainService } from '@/services/organizationDomainService';
 import { CacConfigService } from '@/services/cacConfigService';
@@ -81,13 +81,10 @@ export class InvitationController {
       }
 
       const inviterRole = req.user?.role;
-      if (
-        inviterRole !== 'ADMIN' &&
-        inviterRole !== 'OWNER' &&
-        role !== WorkspaceRole.COMMUNITY_MEMBER &&
-        role !== WorkspaceRole.MEMBER
-      ) {
-        res.status(403).json({ error: 'Only workspace admins can send invitations' });
+
+      // Guests are scoped to a single channel/canvas — they cannot invite anyone.
+      if (inviterRole === 'GUEST') {
+        res.status(403).json({ error: 'Guests cannot send invitations' });
         return;
       }
 
@@ -109,6 +106,28 @@ export class InvitationController {
       if (req.user?.workspaceId !== workspaceId) {
         res.status(403).json({ error: 'Access denied - insufficient permissions' });
         return;
+      }
+
+      // Non-admins can only send the invite role matching the workspace type —
+      // MEMBER in an enterprise workspace, COMMUNITY_MEMBER in a community
+      // workspace. Minting any other role (ADMIN, GUEST, cross-type) is admin-only.
+      if (inviterRole !== 'ADMIN' && inviterRole !== 'OWNER') {
+        const workspace = await DatabaseClient.getInstance().workspace.findUnique({
+          where: { id: workspaceId },
+          select: { workspaceType: true },
+        });
+        if (!workspace) {
+          res.status(404).json({ error: 'Workspace not found' });
+          return;
+        }
+        const allowedRole =
+          workspace.workspaceType === WorkspaceType.COMMUNITY
+            ? WorkspaceRole.COMMUNITY_MEMBER
+            : WorkspaceRole.MEMBER;
+        if (role !== allowedRole) {
+          res.status(403).json({ error: 'Only workspace admins can send this invitation type' });
+          return;
+        }
       }
 
       // Create the invitation (includes workspace data)
