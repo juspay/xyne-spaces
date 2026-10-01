@@ -93,7 +93,7 @@ def language_codes(language: str, cfg: Config) -> List[str]:
     Chirp 3 accepts several codes per request (it picks per utterance) and the
     special value "auto" for language identification.
     """
-    raw = (language or cfg.google_stt_language or "en-US").split(",")
+    raw = (language or cfg.google_stt_batch_language or "en-US").split(",")
     codes: List[str] = []
     for item in raw:
         code = item.strip()
