@@ -1,4 +1,9 @@
 import { randomBytes, createCipheriv, createDecipheriv, hkdfSync } from "node:crypto";
+import {
+  EncryptionKeyRingConfigError,
+  parseEncryptionKeyRing,
+} from "@xyne/shared/server/encryption-key-ring";
+import { createLogger } from "./logger.js";
 
 const ALGORITHM = "aes-256-gcm";
 const IV_LENGTH = 12;
@@ -65,19 +70,244 @@ export function decrypt(ciphertext: string, iv: string, authTag: string, key: Bu
 // SPACES_ENCRYPTION_KEY (Spaces' key, distinct from claw-auth's own). Throws
 // on malformed input; callers treat a throw as "skip this row".
 const SPACES_CBC_ALGO = "aes-256-cbc";
+const SPACES_VERSION_TAG = "v2";
+const SPACES_CBC_IV_LENGTH = 16;
 
-export function decryptSpacesCbc(blob: string, key: Buffer): string {
-  const sep = blob.indexOf(":");
-  if (sep < 0) throw new Error("decryptSpacesCbc: blob missing IV separator");
-  const ivHex = blob.slice(0, sep);
-  const ctHex = blob.slice(sep + 1);
-  if (ivHex.length === 0 || ctHex.length === 0) {
-    throw new Error("decryptSpacesCbc: empty IV or ciphertext");
+const logger = createLogger("spaces-crypto");
+
+export class SpacesCbcDecryptionError extends Error {
+  constructor(
+    readonly reasonCode: string,
+    message: string,
+  ) {
+    super(message);
+    this.name = "SpacesCbcDecryptionError";
   }
-  const decipher = createDecipheriv(SPACES_CBC_ALGO, key, Buffer.from(ivHex, "hex"));
-  const decrypted = Buffer.concat([
-    decipher.update(Buffer.from(ctHex, "hex")),
-    decipher.final(),
-  ]);
+}
+
+function decryptSpacesCbcPayload(
+  ivHex: string,
+  ciphertextHex: string,
+  key: Buffer,
+): string {
+  const decipher = createDecipheriv(
+    SPACES_CBC_ALGO,
+    key,
+    Buffer.from(ivHex, "hex"),
+  );
+
+  let decrypted: Buffer;
+
+  try {
+    decrypted = Buffer.concat([
+      decipher.update(
+        Buffer.from(ciphertextHex, "hex"),
+      ),
+      decipher.final(),
+    ]);
+  } catch {
+    throw new SpacesCbcDecryptionError(
+      "decrypt_failed",
+      "Spaces CBC decryption failed",
+    );
+  }
+
   return decrypted.toString("utf8");
+}
+
+/**
+ * Environment-based key-ring configuration, shared with the
+ * Spaces backend via `@xyne/shared/server/encryption-key-ring`.
+ *
+ * SPACES_ENCRYPTION_KEY always remains the legacy reader for
+ * the backend's `iv:ciphertext` format. SPACES_ENCRYPTION_KEYS
+ * is optional: a valid array of [{id,key}] additionally enables
+ * reads of `v2:keyId:iv:ciphertext`, matched by key ID. Blank or
+ * malformed values fall back to legacy-only with one sanitized log.
+ */
+
+export type SpacesEncryptionMode = "legacy" | "keyring-read";
+
+export type SpacesEncryptionModeReason =
+  | "keyring_not_configured"
+  | "keyring_json_invalid"
+  | "keyring_validation_failed"
+  | "keyring_read_enabled";
+
+interface SpacesEncryptionRuntimeConfig {
+  mode: SpacesEncryptionMode;
+  reason: SpacesEncryptionModeReason;
+  keys: ReadonlyMap<string, Buffer>;
+}
+
+let cachedConfig: SpacesEncryptionRuntimeConfig | null = null;
+
+/**
+ * One sanitized line per process when the mode is chosen —
+ * mode + reason only, never key material — mirroring the
+ * backend's `selected()` in encryptionService.ts.
+ */
+function selected(
+  config: SpacesEncryptionRuntimeConfig,
+  level: "info" | "warn",
+): SpacesEncryptionRuntimeConfig {
+  logger[level](
+    `[SpacesCrypto] mode=${config.mode} reason=${config.reason}`,
+  );
+
+  return config;
+}
+
+export function loadSpacesEncryptionRuntimeConfig(): SpacesEncryptionRuntimeConfig {
+  if (cachedConfig) {
+    return cachedConfig;
+  }
+
+  const rawKeys = process.env.SPACES_ENCRYPTION_KEYS?.trim();
+
+  if (!rawKeys) {
+    cachedConfig = selected(
+      {
+        mode: "legacy",
+        reason: "keyring_not_configured",
+        keys: new Map(),
+      },
+      "info",
+    );
+
+    return cachedConfig;
+  }
+
+  try {
+    const { keys } = parseEncryptionKeyRing(rawKeys);
+
+    cachedConfig = selected(
+      {
+        mode: "keyring-read",
+        reason: "keyring_read_enabled",
+        keys,
+      },
+      "info",
+    );
+
+    return cachedConfig;
+  } catch (error) {
+    cachedConfig = selected(
+      {
+        mode: "legacy",
+        reason:
+          error instanceof EncryptionKeyRingConfigError
+            ? error.reason
+            : "keyring_validation_failed",
+        keys: new Map(),
+      },
+      "warn",
+    );
+
+    return cachedConfig;
+  }
+}
+
+/**
+ * Decrypt a signing secret written by the Spaces backend.
+ *
+ * Legacy blobs continue using SPACES_ENCRYPTION_KEY from
+ * Claw-auth's original .env file.
+ *
+ * Versioned blobs (`v2:keyId:iv:ciphertext`) use the optional
+ * read-only SPACES_ENCRYPTION_KEYS key ring, matched by key ID.
+ */
+export function decryptSpacesCbc(
+  blob: string,
+  legacyKey: Buffer,
+): string {
+  const isVersioned = blob.startsWith(
+    `${SPACES_VERSION_TAG}:`,
+  );
+
+  if (!isVersioned) {
+    const separator = blob.indexOf(":");
+
+    if (separator < 0) {
+      throw new Error(
+        "decryptSpacesCbc: blob missing IV separator",
+      );
+    }
+
+    const ivHex = blob.slice(0, separator);
+    const ciphertextHex = blob.slice(
+      separator + 1,
+    );
+
+    if (
+      ivHex.length === 0 ||
+      ciphertextHex.length === 0
+    ) {
+      throw new Error(
+        "decryptSpacesCbc: empty IV or ciphertext",
+      );
+    }
+
+    return decryptSpacesCbcPayload(
+      ivHex,
+      ciphertextHex,
+      legacyKey,
+    );
+  }
+
+  const parts = blob.split(":");
+  const [
+    version,
+    keyId,
+    ivHex,
+    ciphertextHex,
+  ] = parts;
+
+  if (
+    parts.length !== 4 ||
+    version !== SPACES_VERSION_TAG ||
+    !keyId ||
+    !ivHex ||
+    !ciphertextHex
+  ) {
+    throw new SpacesCbcDecryptionError(
+      "invalid_encrypted_data_format",
+      "Invalid versioned Spaces ciphertext",
+    );
+  }
+
+  const config =
+    loadSpacesEncryptionRuntimeConfig();
+
+  if (config.mode === "legacy") {
+    throw new SpacesCbcDecryptionError(
+      "keyring_unavailable",
+      "Versioned Spaces data requires a valid " +
+        "SPACES_ENCRYPTION_KEYS configuration",
+    );
+  }
+
+  const key = config.keys.get(keyId);
+
+  if (!key) {
+    throw new SpacesCbcDecryptionError(
+      "versioned_key_not_found",
+      `No Spaces encryption key is registered for "${keyId}"`,
+    );
+  }
+
+  const iv = Buffer.from(ivHex, "hex");
+
+  if (iv.length !== SPACES_CBC_IV_LENGTH) {
+    throw new SpacesCbcDecryptionError(
+      "invalid_iv_length",
+      `Invalid IV length. Expected ${SPACES_CBC_IV_LENGTH} bytes`,
+    );
+  }
+
+  return decryptSpacesCbcPayload(
+    ivHex,
+    ciphertextHex,
+    key,
+  );
 }
