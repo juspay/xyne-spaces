@@ -14,6 +14,7 @@ import { setupTicketActivityChannelSync } from './middleware/ticketActivityChann
 import { setupTicketCreatedActivity } from './middleware/ticketCreatedActivity';
 import { setupUserVespaSync } from './middleware/userVespaSync';
 import { setupEnumTextValidation } from './middleware/enumTextValidation';
+import { setupCanvasContentSanitize } from './middleware/canvasContentSanitize';
 import { pingDatabase } from '@/bypassAcl/healthServices';
 
 export class DatabaseClient {
@@ -70,6 +71,7 @@ export class DatabaseClient {
       }
 
       setupEnumTextValidation(DatabaseClient.instance);
+      setupCanvasContentSanitize(DatabaseClient.instance);
       setupMessageMetadataSync(DatabaseClient.instance);
       setupTicketActivityChannelSync(DatabaseClient.instance);
       setupTicketCreatedActivity(DatabaseClient.instance);

@@ -112,6 +112,7 @@ import {
   type EtaRiskAcknowledgedActivityValue,
   resolveTicketDescription,
 } from '@xyne/shared';
+import { sanitizeCanvasContent } from '@xyne/shared';
 import {
   normalizeThreadTypeName,
   parseAppliedTags,
@@ -221,6 +222,17 @@ import {
 } from '@/services/flowCascadeService';
 import { validateFlowDecisionFields } from '@/zero/utils/flowPlanValidation';
 import { getEncryptionProvider } from '@/services/encryption';
+
+function sanitizeCanvasContentForWrite<T>(
+  content: T,
+  context: { mutator: string; canvasId: string; userId: string },
+): T {
+  const { content: sanitized, changed } = sanitizeCanvasContent(content);
+  if (changed) {
+    logger.warn('[CanvasContentSanitize] Repaired canvas content in Zero mutator', context);
+  }
+  return sanitized;
+}
 
 function sortCallParticipantsForPreview<T extends {
   id: string;
@@ -9535,7 +9547,11 @@ export function createMutators(
             workspaceId: authData.workspaceId,
             id,
             title,
-            content: content || [],
+            content: sanitizeCanvasContentForWrite(content || [], {
+              mutator: 'canvas.create',
+              canvasId: id,
+              userId: authData.sub,
+            }),
             channelId: resolvedChannelId,
             folderId,
             projectId: resolvedProjectId,
@@ -10248,7 +10264,13 @@ export function createMutators(
             lastEditedAt: params.timestamp,
             updatedAt: params.timestamp,
             ...(params.title !== undefined && { title: params.title }),
-            ...(params.content !== undefined && { content: params.content }),
+            ...(params.content !== undefined && {
+              content: sanitizeCanvasContentForWrite(params.content, {
+                mutator: 'canvas.update',
+                canvasId: canvas.id,
+                userId: authData.sub,
+              }),
+            }),
             ...(params.visibility !== undefined && { visibility: params.visibility }),
             ...(params.isCollaborative !== undefined && { isCollaborative: params.isCollaborative }),
             ...(params.folderId !== undefined && { folderId: params.folderId }),
@@ -10677,7 +10699,11 @@ export function createMutators(
             id,
             canvasId,
             name: name.trim(),
-            content,
+            content: sanitizeCanvasContentForWrite(content, {
+              mutator: 'canvasVersion.save',
+              canvasId,
+              userId: authData.sub,
+            }),
             contentHash,
             createdBy: authData.sub,
             createdAt: timestamp,
@@ -10740,7 +10766,13 @@ export function createMutators(
             lastEditedBy: authData.sub,
             lastEditedAt: timestamp,
             updatedAt: timestamp,
-            ...(!canvas.isCollaborative && { content: version.content }),
+            ...(!canvas.isCollaborative && {
+              content: sanitizeCanvasContentForWrite(version.content, {
+                mutator: 'canvasVersion.restore',
+                canvasId: canvas.id,
+                userId: authData.sub,
+              }),
+            }),
           });
 
           await tx.mutate.canvas_versions.update({

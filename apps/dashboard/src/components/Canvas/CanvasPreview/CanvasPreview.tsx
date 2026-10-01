@@ -17,6 +17,7 @@ import { useCachedQuery } from '../../../hooks/useCachedQuery';
 import { usePlatform } from '../../../hooks/usePlatform';
 import { useTheme } from '../../../hooks/useTheme';
 import { useNavigate } from '../../../hooks/useWorkspaceNavigate';
+import { CanvasRenderBoundary } from '../CanvasRenderBoundary';
 
 interface CanvasPreviewProps {
   canvasId?: string;
@@ -24,7 +25,7 @@ interface CanvasPreviewProps {
   expanded?: boolean;
 }
 
-export const CanvasPreview: React.FC<CanvasPreviewProps> = ({
+const CanvasPreviewContent: React.FC<CanvasPreviewProps> = ({
   canvasId: propCanvasId,
   onClose,
   expanded = false,
@@ -54,9 +55,9 @@ export const CanvasPreview: React.FC<CanvasPreviewProps> = ({
   const validContent = useMemo(
     () =>
       canvas?.content && Array.isArray(canvas.content) && canvas.content.length > 0
-        ? removeUnknownBlocks(canvas.content, knownCanvasBlockTypes)
+        ? removeUnknownBlocks(canvas.content, knownCanvasBlockTypes, canvasId)
         : undefined,
-    [canvas?.content],
+    [canvas?.content, canvasId],
   );
 
   // Create a read-only editor instance with URL resolver
@@ -267,5 +268,15 @@ export const CanvasPreview: React.FC<CanvasPreviewProps> = ({
         </div>
       </div>
     </div>
+  );
+};
+
+export const CanvasPreview: React.FC<CanvasPreviewProps> = props => {
+  const { canvasId: paramsCanvasId } = useParams<{ canvasId: string }>();
+  const canvasId = props.canvasId || paramsCanvasId;
+  return (
+    <CanvasRenderBoundary surface='canvas-preview' canvasId={canvasId} compact={!props.expanded}>
+      <CanvasPreviewContent {...props} />
+    </CanvasRenderBoundary>
   );
 };
