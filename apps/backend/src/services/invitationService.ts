@@ -27,6 +27,7 @@ import { ensureUserInGeneralChannel } from '@/utils/workspaceGeneralChannel';
 import { acceptInvitationTx } from '@/bypassAcl/transactions/invitationService';
 import { acceptInvitationTx2 } from '@/bypassAcl/transactions/invitationService';
 import { acceptInvitationTx3 } from '@/bypassAcl/transactions/invitationService';
+import { approveInvitationTx } from '@/bypassAcl/transactions/invitationService';
 
 type TxClient = Parameters<Parameters<PrismaClient['$transaction']>[0]>[0];
 
@@ -92,6 +93,7 @@ export class InvitationService {
     let orgId: string;
     // null = flow skips the in-org check (read as approved), false = pending admin approval
     let isOrgApproved: boolean | null = null;
+    let createOrgMemberDirectly = false;
 
     if (explicitOrgId) {
       // orgId supplied directly — skip inviter-org derivation and invitee-in-org check
@@ -114,7 +116,7 @@ export class InvitationService {
       });
       const inviterOrgMember = await this.prisma.orgMember.findFirst({
         where: { email: inviter?.email ?? '', leftAt: null },
-        select: { orgId: true },
+        select: { orgId: true, role: true },
       });
       const derivedOrgId = inviterOrgMember?.orgId;
 
@@ -137,6 +139,16 @@ export class InvitationService {
         });
 
         isOrgApproved = !!inviteeInOrg;
+
+        // Org admins/owners bypass the approval queue — the org member is created
+        // directly and the invite email goes out immediately.
+        if (
+          !isOrgApproved &&
+          (inviterOrgMember.role === OrgRole.ADMIN || inviterOrgMember.role === OrgRole.OWNER)
+        ) {
+          isOrgApproved = true;
+          createOrgMemberDirectly = true;
+        }
       }
     }
 
@@ -284,6 +296,18 @@ export class InvitationService {
     });
 
     logger.info(`[InvitationService] Created invitation with id=${invitation.id}, invitationId=${invitationLinkId} for ${email}`);
+
+    // Direct admin invite: create the org member now (idempotent) so the invite
+    // email + temp password can go out immediately instead of queueing for approval.
+    if (createOrgMemberDirectly) {
+      try {
+        await approveInvitationTx(this, invitation.id, invitation);
+      } catch (error) {
+        await this.deleteInvitation(invitation.id);
+        throw error;
+      }
+      return { ...invitation, isOrgApproved: true };
+    }
 
     return invitation;
   }
