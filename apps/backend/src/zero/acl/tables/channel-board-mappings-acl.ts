@@ -1,8 +1,8 @@
 import type { DeleteID, InsertValue, Transaction, UpdateValue } from '@rocicorp/zero';
-import { ChannelRole, ChannelScopeType, type Schema } from '@xyne/shared';
+import { BoardType, ChannelRole, ChannelScopeType, type Schema } from '@xyne/shared';
 import { BaseACL } from '../core/base-acl';
 import { MutationACLError, TableSchema } from '../core/types';
-import { hasProjectAdminAccess } from '../core/admin-access';
+import { hasProjectAdminAccess, hasReleaseManagerWriteAccess } from '../core/admin-access';
 import { zql } from '../../queries';
 
 export class ChannelBoardMappingsACL extends BaseACL<'channel_board_mappings'> {
@@ -57,8 +57,14 @@ export class ChannelBoardMappingsACL extends BaseACL<'channel_board_mappings'> {
     if (await hasProjectAdminAccess(this.ctx, tx)) {
       return;
     }
+    // Release managers link a repo's main release board to its release channel
+    // when saving release config (saveReleaseBoardConfig). Scoped to RELEASE
+    // boards so this grants nothing beyond what Release Manager already allows.
+    if (board.boardType === BoardType.RELEASE && (await hasReleaseManagerWriteAccess(this.ctx, tx))) {
+      return;
+    }
     throw new MutationACLError(
-      'Channel-board mapping insert failed: only a channel admin or a projects admin can link boards',
+      'Channel-board mapping insert failed: only a channel admin, a projects admin or a release manager can link boards',
       'channel_board_mappings',
     );
   }
