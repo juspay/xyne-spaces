@@ -134,7 +134,9 @@ export default defineConfig(({ command, mode }) => {
     server: {
       port: devPort,
       host: true,
-      allowedHosts: ['dashboard', 'localhost', '.localhost'],
+      // Dev server only: accept any Host header so a checkout reached over a
+      // LAN or tailnet hostname works without listing it anywhere.
+      allowedHosts: true,
       proxy: {
         // Same-origin proxy so the dashboard can call the claw-auth backend
         // (which sets no CORS headers) during local dev, mirroring

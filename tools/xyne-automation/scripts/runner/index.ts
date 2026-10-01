@@ -241,10 +241,10 @@ function prepareArtifactDirectory(artifactDir: string): void {
 function findMonorepoRoot(start: string): string {
   let dir = start;
   for (;;) {
-    if (fs.existsSync(path.join(dir, 'docker-compose.dev.yml'))) return dir;
+    if (fs.existsSync(path.join(dir, 'pnpm-workspace.yaml'))) return dir;
     const parent = path.dirname(dir);
     if (parent === dir) {
-      throw new Error(`Could not find monorepo root (docker-compose.dev.yml) above ${start}`);
+      throw new Error(`Could not find monorepo root (pnpm-workspace.yaml) above ${start}`);
     }
     dir = parent;
   }
@@ -274,10 +274,7 @@ async function main(): Promise<void> {
 
   const monorepoRoot = findMonorepoRoot(projectRoot);
 
-  const composeFiles = [
-    path.join(monorepoRoot, 'docker-compose.dev.yml'),
-    path.join(monorepoRoot, 'docker-compose.test.yml'),
-  ];
+  const composeFiles = [path.join(monorepoRoot, 'docker-compose.test.yml')];
 
   // Verify compose files exist
   for (const file of composeFiles) {
@@ -286,7 +283,7 @@ async function main(): Promise<void> {
         `Docker compose file not found: ${file}\n` +
           `Monorepo root: ${monorepoRoot}\n` +
           `Project root: ${projectRoot}\n` +
-          `Make sure docker-compose.dev.yml and docker-compose.test.yml exist in the monorepo root.`
+          `Make sure docker-compose.test.yml exists in the monorepo root.`
       );
     }
   }
