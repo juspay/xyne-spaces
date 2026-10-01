@@ -91,6 +91,7 @@ import {
   toWorkflowRecord,
 } from '../utils';
 import { createExecutionTx } from '@/bypassAcl/transactions/adaptersPersistence';
+import { publishRun } from './workspace-run-stream';
 
 // ─── Adapter ─────────────────────────────────────────────────────────────────
 
@@ -568,6 +569,24 @@ export class PrismaPersistenceAdapter implements PersistenceAdapter<XyneFilter> 
     const workspaceId = requireWorkspaceId(data.attributes, 'createExecution');
     const row = await createExecutionTx(workspaceId, data);
 
+    // Push the new run to the workspace's live Executions view. Name lookup so the
+    // frontend can render the row without a refetch; failures never block the run.
+    void db.workflow
+      .findUnique({ where: { id: data.workflowId }, select: { metadata: true } })
+      .then((wf) => {
+        const name = readNameFromMetadata(wf?.metadata ?? null);
+        publishRun(workspaceId, {
+          executionId: row.id,
+          workflowId: data.workflowId,
+          status: data.status,
+          ...(name !== null ? { workflowName: name } : {}),
+          createdAt: Date.now(),
+        });
+      })
+      .catch(() => {
+        publishRun(workspaceId, { executionId: row.id, workflowId: data.workflowId, status: data.status });
+      });
+
     return row.id;
   }
 
@@ -576,7 +595,18 @@ export class PrismaPersistenceAdapter implements PersistenceAdapter<XyneFilter> 
       where: { id: executionId, ...WORKFLOWS_SCOPE },
       data: { status },
     });
-    if (reason === undefined || updated.count === 0) return;
+    if (updated.count === 0) return;
+
+    // Push the status change to the workspace's live Executions view. A status-only
+    // patch — the row already exists client-side — so no name/createdAt is needed.
+    void db.workflowExecution
+      .findUnique({ where: { id: executionId }, select: { workspaceId: true, workflowId: true } })
+      .then((row) => {
+        if (row) publishRun(row.workspaceId, { executionId, workflowId: row.workflowId, status });
+      })
+      .catch(() => {});
+
+    if (reason === undefined) return;
     await db.workflowExecutionState.updateMany({
       where: { workflowExecutionId: executionId },
       data: { endReason: reason },
