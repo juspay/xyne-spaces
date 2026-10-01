@@ -114,8 +114,8 @@ data**; use them only when you intend to start from an empty database.
   was not re-entered. Both the npm version and `nix/prisma-engines.nix` must be
   updated together when upgrading Prisma.
 - LiveKit uses loopback addresses for Redis and backend webhooks. `just prepare`
-  replaces published sample LiveKit keys with random local values. LiveKit and the
-  transcription agent read the backend env file at runtime, keeping secrets out
+  replaces published sample LiveKit keys with random local values. LiveKit, Zero (including `ZERO_AUTH_SECRET`), and the
+  transcription agent read `apps/backend/.env.local` at runtime, keeping secrets out
   of the Nix store. Existing custom keys are preserved.
 - On Linux, the transcription process gets the C++ runtime and zlib library paths
   needed by native Python wheels. The first launch installs its Python dependencies

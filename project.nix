@@ -213,7 +213,6 @@ in
       replicaFile = "./data/zero-cache/replica.db";
       logLevel = "info";
       adminPassword = "dev-admin-password";
-      authSecret = builtins.getEnv "ZERO_AUTH_SECRET";
       mutateUrl = "http://127.0.0.1:3001/api/zero/push";
       queryUrl = "http://127.0.0.1:3001/api/zero/query";
       numSyncWorkers = 5;
@@ -230,6 +229,12 @@ in
     settings.processes."xyne-livekit".command = lib.mkForce (
       let livekit = config.process-compose."xyne-space-services".services.livekit."xyne-livekit";
       in "${pkgs.pnpm}/bin/pnpm --dir apps/backend exec dotenv -e .env.local -- ${pkgs.nodejs}/bin/node ../../nix/scripts/livekit.mjs ${livekit.configFile} ${livekit.package}/bin/livekit-server"
+    );
+
+    # Load runtime secrets without changing the module's repo-relative working directory.
+    settings.processes."xyne-zero".command = lib.mkForce (
+      let zero = config.process-compose."xyne-space-services".services.zero-cache."xyne-zero";
+      in "${pkgs.nodejs}/bin/node apps/backend/node_modules/dotenv-cli/cli.js -e apps/backend/.env.local -- ${zero.outputs.settings.processes.xyne-zero.command}"
     );
 
     # Add dependency: zero-cache depends on postgres
