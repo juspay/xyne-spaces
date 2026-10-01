@@ -2125,6 +2125,7 @@ model Conversation {
   @@index([channelId, doNotPostToChannel, createdAt(sort: Desc), conversationId(sort: Asc)])
   @@index([createdBy])
   @@index([initialMessageId])
+  @@index([parentMessageId])
   @@map("conversations")
   @@schema("public")
 }

@@ -1913,7 +1913,7 @@ export class CallController {
         return;
       }
 
-      if (!(await callShareService.isCallAudience(call, userId))) {
+      if (call.callType !== CallType.HEADLESS && !(await callShareService.isCallAudience(call, userId))) {
         res.status(403).json({ success: false, error: 'You do not have access to this call' });
         return;
       }
@@ -1999,7 +1999,7 @@ export class CallController {
         return;
       }
 
-      if (!(await callShareService.isCallAudience(call, userId))) {
+      if (call.callType !== CallType.HEADLESS && !(await callShareService.isCallAudience(call, userId))) {
         res.status(403).json({ success: false, error: 'You do not have access to this call' });
         return;
       }
@@ -2029,7 +2029,7 @@ export class CallController {
         return;
       }
 
-      const basePath = isRecording(call) ? `/recordings/${call.externalId}` : `/calls/${call.id}/detail`;
+      const basePath = isRecording(call) ? `/recordings/${call.externalId}` : `/calls/${call.externalId}/detail`;
       const actionUrl = `${basePath}?${new URLSearchParams({ lang: languageCode })}`;
       transcriptService.translateTranscriptInBackground(
         call.externalId,

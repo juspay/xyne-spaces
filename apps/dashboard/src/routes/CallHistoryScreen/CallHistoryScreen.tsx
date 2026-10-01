@@ -59,6 +59,7 @@ import { useResolvedRecordingLabels } from '../../hooks/useResolvedRecordingLabe
 import { normalizeRecordingTags } from '../../utils/recordingUtils';
 import { CallExternalChatDialog } from '../../components/Call/CallExternalChatDialog/CallExternalChatDialog';
 import { ParticipantsModal } from './ParticipantsModal';
+import { getCalendarWindow } from './CalenderViewUtils';
 import CalendarWeekView from './CalendarWeekView';
 import CalendarDayView from './CalendarDayView';
 import CalendarMonthView from './CalenderMonthView';
@@ -133,10 +134,30 @@ const CallHistoryScreen = (): ReactElement => {
     return d;
   });
 
+  // Date range for the currently displayed calendar view. Declared up here because it
+  // is what useCallHistory fetches the calendar's calls for — the grid asks for the
+  // window it is about to draw rather than filtering down a list-shaped pool.
+  // Each sub-view tracks its own anchor date, so pick the anchor and let
+  // getCalendarWindow decide the span.
+  const { from: calendarFrom, to: calendarTo } = useMemo(() => {
+    const anchor =
+      calendarSubView === 'week'
+        ? currentWeekStart
+        : calendarSubView === 'day'
+          ? currentDayStart
+          : currentMonthStart;
+    return getCalendarWindow(calendarSubView, anchor);
+  }, [calendarSubView, currentWeekStart, currentDayStart, currentMonthStart]);
+
+  const calendarWindow = useMemo(
+    () => ({ from: calendarFrom.getTime(), to: calendarTo.getTime() }),
+    [calendarFrom, calendarTo],
+  );
+
   const {
     calls,
     scheduledCalls,
-    calendarScheduledCalls,
+    calendarRangeCalls,
     missedCalls,
     isLoading,
     isScheduledCallsLoading,
@@ -169,7 +190,9 @@ const CallHistoryScreen = (): ReactElement => {
     closeEditModal,
     showChannelCalls,
     setShowChannelCalls,
-  } = useCallHistory(user?.id, { isCalendarView: viewMode === 'calendar' });
+  } = useCallHistory(user?.id, {
+    ...(viewMode === 'calendar' ? { calendarWindow } : {}),
+  });
 
   const allUsers = useUsers();
   const activeUsers = useActiveUsers();
@@ -373,20 +396,6 @@ const CallHistoryScreen = (): ReactElement => {
     },
     [],
   );
-  // Compute date range for the currently displayed calendar view
-  const calendarFrom = useMemo(() => {
-    if (calendarSubView === 'week') return currentWeekStart;
-    if (calendarSubView === 'day') return currentDayStart;
-    return currentMonthStart;
-  }, [calendarSubView, currentWeekStart, currentDayStart, currentMonthStart]);
-
-  const calendarTo = useMemo(() => {
-    const d = new Date(calendarFrom);
-    if (calendarSubView === 'week') d.setDate(d.getDate() + 7);
-    else if (calendarSubView === 'day') d.setDate(d.getDate() + 1);
-    else d.setMonth(d.getMonth() + 1);
-    return d;
-  }, [calendarFrom, calendarSubView]);
 
   useEffect(() => {
     setCallSearchActiveTab(TabType.CALL);
@@ -685,10 +694,6 @@ const CallHistoryScreen = (): ReactElement => {
     );
   }, [hasCallSearch, scheduledCalls, showChannelCalls, user?.id, vespaScheduledCallRows]);
 
-  const filteredCalendarScheduledCalls = hasCallSearch
-    ? visibleScheduledCalls
-    : calendarScheduledCalls;
-
   const limitedScheduledCalls = useMemo(() => {
     if (!visibleScheduledCalls) return visibleScheduledCalls;
     return visibleScheduledCalls.filter(call => !isExternalCalendarEvent(call));
@@ -743,14 +748,16 @@ const CallHistoryScreen = (): ReactElement => {
   )?.filter(call => !isExternalCalendarEvent(call));
 
   const calendarCalls = useMemo(() => {
-    const combined = [...(filteredRecentCalls || []), ...(filteredCalendarScheduledCalls || [])];
+    if (!hasCallSearch) return calendarRangeCalls ?? [];
+
+    const combined = [...(filteredRecentCalls || []), ...(visibleScheduledCalls || [])];
     const seenCallIds = new Set<string>();
     return combined.filter(call => {
       if (seenCallIds.has(call.id)) return false;
       seenCallIds.add(call.id);
       return true;
     });
-  }, [filteredRecentCalls, filteredCalendarScheduledCalls]);
+  }, [hasCallSearch, calendarRangeCalls, filteredRecentCalls, visibleScheduledCalls]);
 
   const displayRecentCalls = useMemo(() => {
     const base = filteredRecentCallsNoGcal || [];

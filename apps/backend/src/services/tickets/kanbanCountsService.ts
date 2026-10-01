@@ -114,12 +114,13 @@ const matchesDynamicFilter = (
     const normalizedValues = getJsonValueStrings(value);
     if (normalizedValues.length === 0) return false;
 
-    if (filterValue.length === 1) {
-      const needle = filterValue[0].toLowerCase();
-      return normalizedValues.some(item => item.toLowerCase().includes(needle));
-    }
-
-    return normalizedValues.some(item => filterValue.includes(item));
+    // Whole-value match against any selected value, case-insensitive — the rule the column
+    // itself is fetched with. `formFields.fieldValue` is an uncased Vespa attribute, so its
+    // token match folds case and compares the entire value; the substring rule a lone value
+    // used to get counted tickets no column could list. Mirrors matchesDynamicFieldValue in
+    // the dashboard and matchesRequest in useKanbanCounts, which applies the live deltas.
+    const needles = new Set(filterValue.map(value => value.toLowerCase()));
+    return normalizedValues.some(item => needles.has(item.toLowerCase()));
   }
 
   const scalarValue = getScalarValue(value);
@@ -182,8 +183,19 @@ export const getFormFieldGroupKeys = (
   }
 
   const scalarValue = getScalarValue(actualValue);
-  const groupKey = scalarValue || NO_VALUE_GROUP;
-  return [{ groupKey, displayName: groupKey }];
+  if (!scalarValue) return [{ groupKey: NO_VALUE_GROUP, displayName: NO_VALUE_GROUP }];
+
+  if (groupBy.fieldType === FormFieldType.STRING) {
+    // One group per value regardless of spelling. A column's page is selected by a Vespa
+    // token, and `formFields.fieldValue` is an uncased attribute, so the page for "MID 1"
+    // and the page for "mid 1" return the same rows — as two groups each ticket would show
+    // up in both columns and neither badge would match what is listed under it.
+    // groupTicketsByFormField in the dashboard folds the key the same way; the name shown
+    // keeps the spelling of the first ticket counted into the group.
+    return [{ groupKey: scalarValue.toLowerCase(), displayName: scalarValue }];
+  }
+
+  return [{ groupKey: scalarValue, displayName: scalarValue }];
 };
 
 const getBuiltInGroupKey = (

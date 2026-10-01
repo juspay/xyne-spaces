@@ -44,6 +44,8 @@ export const SDLC_TOOL_CAPABILITIES: readonly SdlcToolCapability[] = [
   { name: SDLC_TOOL_NAMES.listEntityLinks, transport: "direct", group: "sdlc", mutation: "read" },
 ] as const;
 
+export const SDLC_WRITES_WITHOUT_APPROVAL: readonly string[] = [SDLC_TOOL_NAMES.createPullRequest];
+
 export const SDLC_GENERIC_SANDBOX_TOOLS = [
   "sandbox-create",
   "sandbox-run",
@@ -117,7 +119,8 @@ export function sdlcToolPermissions(
   }
   for (const tool of SDLC_TOOL_CAPABILITIES) {
     if (tool.transport === "direct") {
-      toolPermissions[`xyne-spaces__${tool.name}`] = tool.mutation === "write" ? write : "allow";
+      const gated = tool.mutation === "write" && !SDLC_WRITES_WITHOUT_APPROVAL.includes(tool.name);
+      toolPermissions[`xyne-spaces__${tool.name}`] = gated ? write : "allow";
     }
   }
   for (const name of WORKFLOW_MCP_WRITE_TOOL_NAMES) {

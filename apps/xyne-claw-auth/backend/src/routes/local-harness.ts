@@ -38,6 +38,7 @@ import {
   type StreamAttachment,
 } from "../lib/local-harness.js";
 import { nextSurfaceCall, resolveSurfaceCall } from "../lib/surface-calls.js";
+import { parseDeviceCapabilities, serveDeviceStream } from "../lib/device-push.js";
 import { ingestDeliveredArtifact } from "../lib/conversation-artifact-signals.js";
 import { WORKSPACE_DIFF_FILENAME, WORKSPACE_DIFF_MIME, workspaceDiffRefId } from "../lib/workspace-diff.js";
 
@@ -49,6 +50,7 @@ const log = createLogger("local-harness-routes");
 // a cap a single device (or a leaked token) could exhaust the connection pool.
 const MAX_CONCURRENT_POLLS_PER_DEVICE = 2;
 const DEVICE_TOUCH_INTERVAL_MS = 30_000;
+const DEVICE_STREAM_HEARTBEAT_MS = 15_000;
 const activePolls = new Map<string, number>();
 
 const RATE_WINDOW_MS = 5 * 60 * 1000;
@@ -598,6 +600,34 @@ bridgeRouter.post("/runs/:runId/tools/call", async (req: Request<{ runId: string
     log.error(`[local-harness] tool call failed run=${run.id} tool=${serverType}/${toolName}:`, err);
     res.status(502).json({ success: false, error: "Tool execution failed" });
   }
+});
+
+bridgeRouter.get("/surface-calls/stream", async (req: Request, res: Response) => {
+  const device = req.localHarnessDevice!;
+  const capabilities = parseDeviceCapabilities(req.query["capabilities"]);
+  res.writeHead(200, {
+    "Content-Type": "text/event-stream",
+    "Cache-Control": "no-cache, no-transform",
+    Connection: "keep-alive",
+    "X-Accel-Buffering": "no",
+  });
+  let stop: (() => void) | null = null;
+  let disconnected = false;
+  req.on("close", () => {
+    disconnected = true;
+    stop?.();
+  });
+  stop = await serveDeviceStream({
+    deviceId: device.id,
+    capabilities,
+    write: (chunk) => {
+      if (!res.writableEnded) res.write(chunk);
+    },
+    nextCall: () => nextSurfaceCall(device.id),
+    touch: () => void localHarnessRepository.touchDevice(device.id).catch(() => {}),
+    heartbeatMs: DEVICE_STREAM_HEARTBEAT_MS,
+  });
+  if (disconnected) stop();
 });
 
 bridgeRouter.get("/surface-calls/next", async (req: Request, res: Response) => {
