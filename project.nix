@@ -2,6 +2,7 @@
 # This file contains all the development environment and service configurations
 { config, pkgs, lib, flakeInputs, ... }:
 let
+  inherit (import ./nix/packages.nix { inherit pkgs lib; }) y-sweet;
   prismaEngines = import ./nix/prisma-engines.nix { inherit pkgs; };
   prismaEnvironment = lib.optionalAttrs pkgs.stdenv.isLinux {
     PRISMA_QUERY_ENGINE_LIBRARY = "${prismaEngines}/lib/libquery_engine.node";
@@ -88,7 +89,7 @@ in
       echo "✓ All development ports are free"
       
       # Create necessary directories
-      mkdir -p data/zero-cache data/ysweet data/fake-gcs .logs .nix-cache
+      mkdir -p data/zero-cache data/ysweet data/fake-gcs .logs
     '';
 
     # Configure log files for all processes
@@ -271,41 +272,7 @@ in
       command = toString (pkgs.writeShellScript "ysweet" ''
         mkdir -p "$PWD/data/ysweet"
         
-        # Download y-sweet if not present
-        YSWEET_DIR="$PWD/.nix-cache/ysweet"
-        YSWEET_BIN="$YSWEET_DIR/y-sweet"
-        
-        if [ ! -f "$YSWEET_BIN" ]; then
-          echo "📦 Downloading y-sweet binary..."
-          mkdir -p "$YSWEET_DIR"
-          
-          # Detect platform
-          if [[ "$OSTYPE" == "darwin"* ]]; then
-            if [[ $(uname -m) == "arm64" ]]; then
-              PLATFORM="macos-arm64"
-            else
-              PLATFORM="macos-x64"
-            fi
-          else
-            if [[ $(uname -m) == "aarch64" ]]; then
-              PLATFORM="linux-arm64"
-            else
-              PLATFORM="linux-x64"
-            fi
-          fi
-          
-          # Download from GitHub releases (note: .gz not .tar.gz)
-          ${pkgs.curl}/bin/curl -L \
-            "https://github.com/jamsocket/y-sweet/releases/latest/download/y-sweet-$PLATFORM.gz" \
-            -o "$YSWEET_DIR/y-sweet.gz"
-          
-          ${pkgs.gzip}/bin/gunzip "$YSWEET_DIR/y-sweet.gz"
-          chmod +x "$YSWEET_BIN"
-          echo "✓ y-sweet downloaded"
-        fi
-        
-        # Run y-sweet
-        "$YSWEET_BIN" serve \
+        ${y-sweet}/bin/y-sweet serve \
           --host 0.0.0.0 \
           --port 8080 \
           --checkpoint-freq-seconds 10 \
@@ -440,12 +407,6 @@ in
           echo "   Removing .logs/ directory..."
           rm -rf .logs/
           echo -e "''${GREEN}   ✓ .logs/ removed''${NC}"
-        fi
-        
-        if [ -d ".nix-cache" ]; then
-          echo "   Removing .nix-cache/ directory (downloaded binaries)..."
-          rm -rf .nix-cache/
-          echo -e "''${GREEN}   ✓ .nix-cache/ removed''${NC}"
         fi
         
         if [ -d "apps/backend/python-agent/.venv" ]; then
