@@ -13,6 +13,7 @@ import {
 } from './lastSdlcLocation';
 import { openLink } from '../../utils/openLink';
 import { SdlcEmbeddedWebview } from './SdlcEmbeddedWebview';
+import { registerSdlcFramePoster } from '../../components/AIScreen/Workspace/sdlcBrowserTarget';
 
 /**
  * Owns the SDLC lane's iframe for the lifetime of the workspace.
@@ -75,6 +76,14 @@ const SdlcFrameHost = (): ReactElement | null => {
     initialSrcRef.current = `${SDLC_APP_BASE_PATH}${stored ?? `${location.pathname}${location.search}${location.hash}`}`;
     setHasActivated(true);
   }, [viewport, workspaceId, location.pathname, location.search, location.hash]);
+
+  useEffect(
+    () =>
+      registerSdlcFramePoster(message => {
+        iframeRef.current?.contentWindow?.postMessage(message, window.location.origin);
+      }),
+    [],
+  );
 
   // frame → parent
   useEffect(() => {
