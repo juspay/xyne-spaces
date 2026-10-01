@@ -336,11 +336,11 @@ const CallHistoryScreen = (): ReactElement => {
       }
 
       setSearchQuery(text);
-      setCallSearchEditorMentions(
-        mentions
+      setCallSearchEditorMentions(previous => {
+        const next = mentions
           .filter(mention => mention.type === ChipType.USER || mention.type === ChipType.CHANNEL)
           .map(mention => {
-            const existingMention = callSearchEditorMentions.find(
+            const existingMention = previous.find(
               selected => selected.id === mention.id && selected.type === mention.type,
             );
             const user =
@@ -361,10 +361,21 @@ const CallHistoryScreen = (): ReactElement => {
               type: mention.type,
               prefix: mention.type === ChipType.USER ? 'with:' : 'in:',
             };
-          }),
-      );
+          });
+        // Most keystrokes only change the text. Keep the same array so the merge effect above
+        // doesn't re-run and push a fresh mentions list into the search on every keystroke.
+        const unchanged =
+          next.length === previous.length &&
+          next.every(
+            (mention, index) =>
+              mention.id === previous[index]?.id &&
+              mention.type === previous[index]?.type &&
+              mention.name === previous[index]?.name,
+          );
+        return unchanged ? previous : next;
+      });
     },
-    [allChannels, allUsers, callSearchEditorMentions, setSearchQuery],
+    [allChannels, allUsers, setSearchQuery],
   );
 
   const handleInsertMentionReady = useCallback(
