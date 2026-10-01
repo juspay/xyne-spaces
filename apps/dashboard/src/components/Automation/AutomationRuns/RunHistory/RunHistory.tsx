@@ -7,6 +7,7 @@ import {
   Hourglass,
   MinusCircle,
   MultipleCrossCancelCircle,
+  PauseCircle,
   Spinner,
 } from '@xyne/icons';
 import { cn } from '../../../../utils/classNames';
@@ -23,6 +24,8 @@ import { DateRangeFilter, type DateRangeValue } from '../../../ui/DateRangeFilte
 import { loadRunFilters, saveRunFilters } from '../../AutomationsList/AutomationFiltersBar/filters';
 import { fetchAutomationRuns } from '../../../../api/automationsApi';
 import type { AutomationRunStatus, AutomationRunSummary } from '../../Automation.types';
+import { isHeldRunStatus, type RunAutomationRef } from '../../../../api/automationsApi';
+import { PlayRunButton } from '../PlayRunButton/PlayRunButton';
 import type { RunHistoryProps } from './RunHistory.types';
 
 const PAGE_SIZE = 50;
@@ -30,6 +33,7 @@ const SKELETON_ROWS = 6;
 
 const STATUS_OPTIONS = [
   { value: 'all', label: 'All statuses' },
+  { value: 'HELD', label: 'Held' },
   { value: 'PENDING', label: 'Pending' },
   { value: 'SCHEDULED', label: 'Scheduled' },
   { value: 'RUNNING', label: 'Running' },
@@ -42,6 +46,7 @@ const STATUS_OPTIONS = [
 type StatusFilterValue = (typeof STATUS_OPTIONS)[number]['value'];
 
 const STATUS_CLASSES: Record<AutomationRunStatus, string> = {
+  HELD: 'bg-sky-500/10 text-sky-700 border-sky-500/30 dark:text-sky-400 dark:border-sky-500/40',
   PENDING: 'bg-muted text-muted-foreground border-border',
   SCHEDULED:
     'bg-amber-500/10 text-amber-700 border-amber-500/30 dark:text-amber-400 dark:border-amber-500/40',
@@ -106,6 +111,8 @@ export function RunHistory({
   const filtered = useMemo<AutomationRunSummary[]>(() => {
     return data?.pages.flatMap(p => p.runs) ?? [];
   }, [data]);
+
+  const automationRef: RunAutomationRef | null = data?.pages[0]?.automation ?? null;
 
   const hasActiveFilters = statusFilter !== 'all' || dateRange !== null;
   const rowsEmpty = !isLoading && filtered.length === 0;
@@ -191,12 +198,20 @@ export function RunHistory({
           <div className='py-16 text-center text-sm text-muted-foreground'>
             {hasActiveFilters
               ? 'No runs match the current filters.'
-              : 'No runs yet. Activate the automation and trigger it to see runs here.'}
+              : 'No runs yet. Activate the automation, or start recording in Playground, and trigger it to see runs here.'}
           </div>
         ) : (
           <>
             {filtered.map(run => (
-              <RunRow key={run.id} run={run} onClick={() => onOpenRun(run)} />
+              <RunRow
+                key={run.id}
+                run={run}
+                automation={automationRef}
+                onClick={() => onOpenRun(run)}
+                onPlayed={() => {
+                  void refetch();
+                }}
+              />
             ))}
             {hasNextPage && (
               <div className='flex justify-center py-4'>
@@ -223,10 +238,14 @@ export function RunHistory({
 
 function RunRow({
   run,
+  automation,
   onClick,
+  onPlayed,
 }: {
   run: AutomationRunSummary;
+  automation: RunAutomationRef | null;
   onClick: () => void;
+  onPlayed: () => void;
 }): React.ReactElement {
   const isComplete = run.status === 'COMPLETED' || run.status === 'FAILED';
   const duration =
@@ -234,48 +253,59 @@ function RunRow({
       ? humanDuration(new Date(run.completedAt).getTime() - new Date(run.startedAt).getTime())
       : null;
 
+  // The row is a container, not a <button>, so the ▶ Play button isn't nested in a button.
   return (
-    <button
-      type='button'
-      onClick={onClick}
-      data-track-category='automation-runs'
-      data-track-name='run-history-row-open'
-      className='flex h-16 w-full items-center gap-3 border-b border-border px-6 text-left hover:bg-accent/30'
+    <div
+      role='listitem'
+      className='flex h-16 w-full items-center gap-3 border-b border-border px-6 hover:bg-accent/30'
     >
-      <div className='flex size-9 items-center justify-center'>
-        {run.status === 'COMPLETED' ? (
-          <CheckTickCircle className='size-4 text-green-600' />
-        ) : run.status === 'FAILED' ? (
-          <MultipleCrossCancelCircle className='size-4 text-red-600' />
-        ) : run.status === 'EXTERNAL_WAIT' ? (
-          <Hourglass className='size-4 text-purple-600' />
-        ) : run.status === 'SKIPPED' ? (
-          <MinusCircle className='size-4 text-muted-foreground' />
-        ) : run.status === 'PENDING' ? (
-          <ClockDefault className='size-4 text-muted-foreground' />
-        ) : (
-          <Spinner className='size-4 animate-spin text-blue-600' />
-        )}
-      </div>
-      <div className='flex flex-1 flex-col gap-0.5'>
-        <div className='flex items-center gap-2'>
-          <span className='font-mono text-xs text-foreground'>{run.id}</span>
-          <span
-            className={cn(
-              'rounded-full border px-2 py-0.5 text-[10px] font-medium',
-              STATUS_CLASSES[run.status],
-            )}
-          >
-            {run.status}
-          </span>
+      <button
+        type='button'
+        onClick={onClick}
+        data-track-category='automation-runs'
+        data-track-name='run-history-row-open'
+        className='flex h-full min-w-0 flex-1 items-center gap-3 text-left'
+      >
+        <div className='flex size-9 items-center justify-center'>
+          {run.status === 'COMPLETED' ? (
+            <CheckTickCircle className='size-4 text-green-600' />
+          ) : run.status === 'FAILED' ? (
+            <MultipleCrossCancelCircle className='size-4 text-red-600' />
+          ) : run.status === 'EXTERNAL_WAIT' ? (
+            <Hourglass className='size-4 text-purple-600' />
+          ) : run.status === 'SKIPPED' ? (
+            <MinusCircle className='size-4 text-muted-foreground' />
+          ) : run.status === 'PENDING' ? (
+            <ClockDefault className='size-4 text-muted-foreground' />
+          ) : isHeldRunStatus(run.status) ? (
+            <PauseCircle className='size-4 text-sky-600' />
+          ) : (
+            <Spinner className='size-4 animate-spin text-blue-600' />
+          )}
         </div>
-        {run.error && <span className='text-xs text-red-600 line-clamp-1'>{run.error}</span>}
-      </div>
-      <div className='flex flex-col items-end gap-0.5 text-xs text-muted-foreground'>
-        <span>Started {new Date(run.startedAt).toLocaleString()}</span>
-        {duration && <span>Took {duration}</span>}
-      </div>
-    </button>
+        <div className='flex flex-1 flex-col gap-0.5'>
+          <div className='flex items-center gap-2'>
+            <span className='font-mono text-xs text-foreground'>{run.id}</span>
+            <span
+              className={cn(
+                'rounded-full border px-2 py-0.5 text-[10px] font-medium',
+                STATUS_CLASSES[run.status],
+              )}
+            >
+              {run.status}
+            </span>
+          </div>
+          {run.error && <span className='text-xs text-red-600 line-clamp-1'>{run.error}</span>}
+        </div>
+        <div className='flex flex-col items-end gap-0.5 text-xs text-muted-foreground'>
+          <span>Started {new Date(run.startedAt).toLocaleString()}</span>
+          {duration && <span>Took {duration}</span>}
+        </div>
+      </button>
+      {isHeldRunStatus(run.status) && (
+        <PlayRunButton runId={run.id} automation={automation} onPlayed={onPlayed} />
+      )}
+    </div>
   );
 }
 

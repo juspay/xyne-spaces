@@ -56,8 +56,12 @@ export function createAutomationExecutionForEvent(input: {
   workflowId: string;
   workflowType: string | null;
   initialContext: unknown;
+  /** PENDING for live runs (queued right after), HELD for playground captures (not queued). */
+  status: AutomationRunStatus.PENDING | AutomationRunStatus.HELD;
+  /** 'root' for live runs, PLAYGROUND_RUN_TAG for playground captures. */
+  tag: string;
 }) {
-  const { workspaceId, workflowId, workflowType, initialContext } = input;
+  const { workspaceId, workflowId, workflowType, initialContext, status, tag } = input;
   return asService(
     ['WorkflowExecution', 'WorkflowExecutionState'],
     'event-routed automation: dispatched event has no caller, workspaceId comes from the event',
@@ -69,8 +73,8 @@ export function createAutomationExecutionForEvent(input: {
           data: {
             workflowId,
             workflowType,
-            status: AutomationRunStatus.PENDING,
-            tag: 'root',
+            status,
+            tag,
             workspaceId,
           },
         });
