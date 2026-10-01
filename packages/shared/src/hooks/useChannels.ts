@@ -1,5 +1,5 @@
 import { useSelector } from '@xstate/react';
-import { useMemo } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { stateMachineActor } from '../machines/stateMachine.js';
 import type { Conversation, VisibleChannel } from '../machines/stateMachine.js';
 import { queryCacheActor } from '../machines/queryCacheMachine.js';
@@ -7,7 +7,12 @@ import { searchChannels as _searchChannels, searchChannelsWithScores as _searchC
 import type { Channel, ChannelUserStatus } from '../zero/schema.js';
 import { ChannelScopeType, ChannelVisibility } from '../zero/schema.js';
 import { isDeskChannelType } from '../utils/channel.js';
-import { searchMentionableChannels } from '../utils/channelMentionSearch.js';
+import {
+  searchMentionableChannels,
+  rankMentionableChannels,
+  type ChannelMentionSignals,
+} from '../utils/channelMentionSearch.js';
+import { useAffinityService } from './useAffinityService.js';
 import { queries } from '../zero/queries.js';
 import { useQuery } from './useQuery.js';
 import { useCachedQuery } from './useCachedQuery';
@@ -174,18 +179,74 @@ export const useChannelByName = (channelName: string): Channel | undefined => {
   return channel || visibleChannel;
 };
 
-export { searchMentionableChannels };
+export { searchMentionableChannels, rankMentionableChannels };
+export type { ChannelMentionSignals };
 
 export const useChannelSearch = (query: string, limit: number): Channel[] => {
   const channels = useAllChannels();
   return useMemo(() => searchChannels(channels, query, limit), [channels, query, limit]);
 };
 
+/**
+ * Per-channel usage + recency signals for `#`-mention ranking.
+ *
+ * Recency comes from `useAllVisibleChannels()` because that is the only query that
+ * loads the `channelStats` relation. `useAllChannels()` carries it on NO row — the
+ * all-channels query loads no relation, and `combineChannels` keeps that statless
+ * copy even for channels the user has joined — so the lookup is by id, and a miss
+ * means "no activity data", not "zero".
+ */
+export const useChannelMentionSignals = (): ChannelMentionSignals => {
+  const visibleChannels = useAllVisibleChannels();
+  const affinityService = useAffinityService();
+
+  // Bumped once the async weights land, so ranking memos downstream recompute with
+  // the real scores — `getChannelWeight` is otherwise non-reactive. Mirrors the `@`
+  // picker's prefetch in `useMentionSearch`.
+  const [affinityVersion, setAffinityVersion] = useState(0);
+  useEffect(() => {
+    let cancelled = false;
+    affinityService
+      .prefetch()
+      .then(() => {
+        if (!cancelled) setAffinityVersion(v => v + 1);
+      })
+      .catch(() => {});
+    return (): void => {
+      cancelled = true;
+    };
+  }, [affinityService]);
+
+  const activityById = useMemo(
+    () => new Map(visibleChannels.map(c => [c.id, c.channelStats?.lastActivityAt])),
+    [visibleChannels],
+  );
+
+  return useMemo(
+    () => ({
+      getWeight: (channelId: string) => affinityService.getChannelWeight(channelId),
+      getLastActivityAt: (channelId: string) => activityById.get(channelId) ?? undefined,
+    }),
+    // affinityVersion is a recompute trigger, not a value this reads directly.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [affinityService, activityById, affinityVersion],
+  );
+};
+
+/**
+ * `#`-mention channel search, ordered by how much the user actually uses each
+ * channel — the way `@` orders people (XYNE-65164).
+ *
+ * Ranking lives here, in the hook every composer already calls, so all of them get
+ * it without an edit. Same shape the `@` picker settled on in XYNE-17900, and it
+ * keeps the behaviour identical across the dashboard and Lotus.
+ */
 export const useChannelMentionSearch = (query: string, limit: number): Channel[] => {
   const channels = useAllChannels();
+  const signals = useChannelMentionSignals();
   return useMemo(
-    () => searchMentionableChannels(channels, query, limit),
-    [channels, query, limit],
+    () => rankMentionableChannels(channels, query, limit, signals),
+    [channels, query, limit, signals],
   );
 };
 

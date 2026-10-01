@@ -84,7 +84,7 @@ import type {
 } from './ContextPickerPanel';
 import type { Channel } from '@xyne/shared';
 import { ChannelVisibility } from '@xyne/shared';
-import { searchMentionableChannels } from '../../../../hooks/useChannels';
+import { rankMentionableChannels, useChannelMentionSignals } from '../../../../hooks/useChannels';
 import type { DisplaySearchResult } from '../../../../types/search';
 import { TabType } from '../../ChatDirectory/ChannelCommandMenu.types';
 
@@ -336,6 +336,8 @@ export const XyneAIInputBox = forwardRef<XyneAIInputBoxHandle, XyneAIInputBoxPro
 
     // Channel search state for # mentions
     const [channelSearchQuery, setChannelSearchQuery] = useState('');
+    // Usage weights + per-channel recency; re-renders once the weights land.
+    const mentionSignals = useChannelMentionSignals();
 
     // Collection state
     const [selectedCollections, setSelectedCollections] = useState<{ id: string; name: string }[]>(
@@ -1185,16 +1187,20 @@ export const XyneAIInputBox = forwardRef<XyneAIInputBoxHandle, XyneAIInputBoxPro
       }
     }, [inputValue, editor]);
 
-    // Convert ranked, mentionable channels to MentionResult format for MentionSelector
+    // Convert ranked, mentionable channels to MentionResult format for MentionSelector.
+    // Uses the pure ranker rather than the hook: this picker has its own pool
+    // (`nonDMChannels`), which is already VisibleChannel[] and so access-filtered.
     const channelMentionItems: MentionResult[] = useMemo(() => {
-      return searchMentionableChannels(nonDMChannels, channelSearchQuery, 10).map(channel => ({
-        id: channel.id,
-        name: channel.name,
-        type: 'channel' as const,
-        isPrivate: String(channel.visibility) === 'PRIVATE',
-        ...(channel.description && { description: channel.description }),
-      }));
-    }, [nonDMChannels, channelSearchQuery]);
+      return rankMentionableChannels(nonDMChannels, channelSearchQuery, 10, mentionSignals).map(
+        channel => ({
+          id: channel.id,
+          name: channel.name,
+          type: 'channel' as const,
+          isPrivate: String(channel.visibility) === 'PRIVATE',
+          ...(channel.description && { description: channel.description }),
+        }),
+      );
+    }, [nonDMChannels, channelSearchQuery, mentionSignals]);
 
     // Handle channel search from # mention trigger
     const handleChannelSearch = useCallback((query: string) => {
