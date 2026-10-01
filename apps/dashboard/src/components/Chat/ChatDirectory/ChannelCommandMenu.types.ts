@@ -5,6 +5,7 @@ import { isChipPrefix, type ChipPrefix } from '../../../search/filterModel';
 import type { ContextItem } from '../ThreadContextPanel/ThreadContextPanel.types';
 import type { InitialQueryData } from './LexicalSearchInput';
 import { parseSearchFilters, parseTypeFilter } from '../../../utils/searchFilterParser';
+import type { TicketSearchView } from '../../../search/ticketSearchScope';
 
 type SearchResultsDocType = SearchResultsFilters['docType'];
 
@@ -198,7 +199,11 @@ export interface SearchScopeToggles {
  * A whole restorable palette search: the query text, its chips, and the scope it ran at.
  * Stored on the palette's history entry and rebuilt from the results page's parked params.
  */
-export type PaletteRestore = InitialQueryData & { toggles?: SearchScopeToggles };
+export type PaletteRestore = InitialQueryData & {
+  toggles?: SearchScopeToggles;
+  /** The ticket screen view the search ran in, so coming back reopens it in that view. */
+  ticketView?: TicketSearchView;
+};
 
 export interface ChipData {
   id: string;
@@ -287,6 +292,15 @@ export interface ChannelCommandMenuProps {
   hideTabs?: boolean;
   /** When true, enables desk ticket merge UI (only set when opened via the support screen search button) */
   deskMergeEnabled?: boolean;
+  /**
+   * The ticket screen view the palette searches in: its name shown under the input, its
+   * filters sent on Tickets-tab requests (Vespa's, then Zero's full set when needed).
+   */
+  ticketView?: TicketSearchView | null;
+  /** Removes that view: the screen's filters are dropped and a plain search remains. */
+  onRemoveTicketView?: () => void;
+  /** A back-navigation brought back a search that ran in a ticket view; re-apply it. */
+  onRestoreTicketView?: (ticketView: TicketSearchView) => void;
   /**
    * How a chosen row is marked — a solid brand tick (`filled`, the default) or a
    * bordered one (`outline`). Pick `outline` where the mark states a fact about

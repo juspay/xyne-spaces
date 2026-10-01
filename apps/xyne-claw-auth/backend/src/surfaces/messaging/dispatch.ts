@@ -9,7 +9,7 @@ import { fetch as httpFetch } from "undici";
 import { CONFIG } from "../../config.js";
 import { resolveAgentProviderConfigs, resolveSubagentProviderMode } from "../../lib/agent-provider-config.js";
 import { runAttachmentRefsEnabled, uploadRunAttachment } from "../../lib/run-attachment-store.js";
-import { setSession } from "../../lib/session-context.js";
+import { setSession, type SessionContext } from "../../lib/session-context.js";
 import { getChannel, type ChannelDeliveryTarget, type MessagingChannelKey } from "./plugin.js";
 import { channelConversationId } from "./ids.js";
 import type { BoundAgent } from "./store.js";
@@ -61,6 +61,8 @@ function channelSurfaceInstructions(channel: MessagingChannelKey): string {
     // asked for WhatsApp-style *bold* produces _italics_ on the phone.
     "- Write markdown: **bold**, _italic_, ~~strike~~, `code`, code blocks and `- ` bullets. It is converted to the messenger's own styling on the way out. There is no underline and no heading — bold a line instead. No tables. No markdown links — write the URL itself.",
     "- Bold the names you hand back — a channel, a person, a ticket, a file — so they are findable in a wall of phone text.",
+    "- They are waiting on a phone. When a task takes more than one step, write one short line of what you have found so far next to your next tool call — it is sent to them straight away. Say findings, not plumbing: \"2 of your 3 PRs have failing CI\", never \"calling the GitHub tool\". Skip it when you have nothing new to say.",
+    "- Those lines are already on their screen. Your final answer should not repeat them — give the conclusion.",
     `- Be brief. Replies longer than ${limit} characters are split across several messages.`,
   ];
   if (plugin?.capabilities.media) {
@@ -72,11 +74,19 @@ function channelSurfaceInstructions(channel: MessagingChannelKey): string {
       "- A file reaches them only if you DELIVER it with a tool that sends files (sandbox-deliver-files and the like). Writing a file into your workspace sends nothing.",
       "- Never say something is attached unless you delivered it in this reply. If you could not send it, say so and paste the content as text when it is short enough.",
     );
+    // The Cloud API rejects any document outside Meta's allowlist, HTML included.
+    if (channel === "whatsapp-cloud") {
+      lines.push(
+        "- Only PDF, Word, Excel, PowerPoint, plain-text, JPEG and PNG files can be sent here. Never produce an HTML file or HTML report: when they want a document, make a PDF. If the PDF cannot be made, say so instead of sending another format.",
+      );
+    }
   }
   lines.push("- They can send /new to start a fresh conversation, /stop to give up on a slow answer, /status to ask what you are doing, and /agents to see who else they can talk to. Mention these only if they ask how to do one of those things.");
   if (plugin && !plugin.capabilities.groups) lines.push("- This is a one-to-one conversation. There are no groups or threads here.");
   return lines.join("\n");
 }
+
+export const CHANNEL_RUN_OPTIMIZATIONS = "+subagent_direct_only,+interim_messages";
 
 /** A photo or PDF is the same weight here as in Spaces, so it takes the same
  *  route: bytes to object storage and a ref in the body, falling back to
@@ -100,7 +110,7 @@ async function toRunAttachments(
   );
 }
 
-export async function dispatchChannelRun(input: {
+export interface ChannelRunInput {
   agent: BoundAgent;
   userId: string;
   task: string;
@@ -113,7 +123,14 @@ export async function dispatchChannelRun(input: {
   idempotencyKey: string;
   senderName?: string;
   target: ChannelDeliveryTarget;
-}): Promise<string> {
+}
+
+export interface ChannelRun {
+  body: Record<string, unknown>;
+  sessionContext: SessionContext;
+}
+
+export async function buildChannelRun(input: ChannelRunInput): Promise<ChannelRun> {
   // Invocation whitelist — fail fast with a clear reason before the dispatch
   // round-trip; /internal/run enforces it again as the backstop.
   if (!isAgentInvocableBy(input.agent.config as Record<string, unknown> | null, input.userId)) {
@@ -122,13 +139,8 @@ export async function dispatchChannelRun(input: {
   const runAttachments = await toRunAttachments(input.conversationId, input.idempotencyKey, input.attachments ?? []);
 
   const providers = await resolveAgentProviderConfigs({ id: input.agent.id, config: input.agent.config });
-  const response = await httpFetch(`${CONFIG.internalUrl}/claw/api/v1/internal/run`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      ...(CONFIG.xyneClawS2sKey ? { "x-s2s-key": CONFIG.xyneClawS2sKey } : {}),
-    },
-    body: JSON.stringify({
+  return {
+    body: {
       userId: input.userId,
       task: input.task,
       conversationId: input.conversationId,
@@ -146,8 +158,41 @@ export async function dispatchChannelRun(input: {
       ...(runAttachments.length ? { attachments: runAttachments } : {}),
       additionalInstructions: channelSurfaceInstructions(input.target.channel),
       subagentProviderMode: resolveSubagentProviderMode(input.agent.config),
-      ...(input.agent.config ? { agentConfig: input.agent.config } : {}),
-    }),
+      optimizations: CHANNEL_RUN_OPTIMIZATIONS,
+      agentConfig: { ...((input.agent.config as Record<string, unknown> | null) ?? {}), planTracking: false },
+    },
+    sessionContext: {
+      mentionedUserId: input.userId,
+      targetUserId: input.userId,
+      senderId: input.userId,
+      senderName: input.senderName ?? input.target.senderId,
+      channelId: input.target.chatId,
+      channelName: input.target.chatId,
+      conversationId: input.conversationId,
+      sourceMessageId: input.idempotencyKey,
+      task: input.task,
+      agentId: input.agent.id,
+      agentOrgId: input.agent.orgId,
+      agentSlug: input.agent.slug,
+      responseMode: "conversation",
+      appToken: "",
+      spacesAppId: "",
+      spacesAppUserId: "",
+      rootAgentSlug: input.agent.slug,
+      triggerSource: input.target.channel,
+      channelDelivery: input.target,
+    },
+  };
+}
+
+export async function postChannelRun(run: ChannelRun): Promise<string> {
+  const response = await httpFetch(`${CONFIG.internalUrl}/claw/api/v1/internal/run`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      ...(CONFIG.xyneClawS2sKey ? { "x-s2s-key": CONFIG.xyneClawS2sKey } : {}),
+    },
+    body: JSON.stringify(run.body),
   });
   const body = (await response.json().catch(() => null)) as {
     success?: boolean;
@@ -155,29 +200,9 @@ export async function dispatchChannelRun(input: {
     error?: string;
   } | null;
   if (!response.ok || !body?.success || !body.sessionId) {
-    throw new Error(`${input.target.channel} run dispatch failed: ${body?.error ?? `HTTP ${response.status}`}`);
+    const channel = run.sessionContext.channelDelivery?.channel ?? "channel";
+    throw new Error(`${channel} run dispatch failed: ${body?.error ?? `HTTP ${response.status}`}`);
   }
-
-  await setSession(body.sessionId, {
-    mentionedUserId: input.userId,
-    targetUserId: input.userId,
-    senderId: input.userId,
-    senderName: input.senderName ?? input.target.senderId,
-    channelId: input.target.chatId,
-    channelName: input.target.chatId,
-    conversationId: input.conversationId,
-    sourceMessageId: input.idempotencyKey,
-    task: input.task,
-    agentId: input.agent.id,
-    agentOrgId: input.agent.orgId,
-    agentSlug: input.agent.slug,
-    responseMode: "conversation",
-    appToken: "",
-    spacesAppId: "",
-    spacesAppUserId: "",
-    rootAgentSlug: input.agent.slug,
-    triggerSource: input.target.channel,
-    channelDelivery: input.target,
-  });
+  await setSession(body.sessionId, run.sessionContext);
   return body.sessionId;
 }

@@ -11,7 +11,7 @@ of it; read it before adding a cloud, a service, an addon or an overlay.
 - [Validation](#validation)
 - [Continuous integration](#continuous-integration)
 
-The shapes every layer exchanges are specified in [contract.md](contract.md), the internal
+The shapes every layer exchanges are specified in [contract.md](reference/contract.md), the internal
 interface reference. Change that file in the same commit as any change to a shape.
 
 ## Ground rules
@@ -37,14 +37,17 @@ A cloud is a new producer of the contract. The work, in order:
    outputs:
    - `cluster` outputs `name`, `location`/`region`, `endpoint`, `ca_certificate` and
      `node_pools` in the contract shape (`enabled`, `node_selector`, `tolerations` with the
-     fixed taints `storage-type=local-ssd`, `pool=vespa`, `workload=sandbox`);
-   - `iam` outputs `identities` for the seven app identities (`backend`, `worker`,
-     `dashboard_edge`, `ysweet`, `claw`, `claw_auth`, `transcription`) with the annotations and
-     labels the workload needs, bound to the fixed ServiceAccount names;
+     fixed taints `storage-type=local-ssd`, `pool=vespa`, `workload=sandbox`, and
+     `nvidia.com/gpu=present` for a `gpu` pool);
+   - `iam` outputs `identities` for the app identities (`backend`, `worker`, `dashboard_edge`,
+     `ysweet`, `claw`, `claw_auth`, `transcription`, `zero`) with the annotations and labels the
+     workload needs, bound to the fixed ServiceAccount names, plus the controller identities the
+     cloud needs ([contract](reference/contract.md#identities));
+   - the cluster's CNI must enforce NetworkPolicy, or the sandbox isolation is void;
    - `postgres` outputs `postgres` (`mode = "managed"`, `host`, `ro_host`, `direct_host`,
      `port`, `username`, `sslmode`, `databases`) with logical replication enabled;
-   - `redis` outputs `redis` and `redis_auth`; `storage` outputs `storage` (provider `gcs` or
-     `s3`; the application supports no other) and `storage_credentials`;
+   - `redis` outputs `redis` and `redis_auth`; `storage` outputs `storage` (provider `gcs`, `s3`
+     or `azure`) and `storage_credentials`;
    - `livekit` calls `deployment/terraform/modules/livekit-config` for the YAML and keeps only
      the cloud-specific part: secret store write, instance template with the cloud-init from
      `templates/cloud-init.yaml.tftpl`, server and egress groups, firewall, TLS load balancer,
@@ -55,7 +58,7 @@ A cloud is a new producer of the contract. The work, in order:
      `hostname`. Reading `ip` must not pull the rest of the load balancer into the graph, because
      `setup.sh` reserves the address with a targeted apply before the cluster exists. How the
      backend attaches is the cloud's business: node pool instance groups on GCP, Auto Scaling
-     groups on AWS, an internal load balancer address on Azure. See [ingress.md](ingress.md).
+     groups on AWS, an internal load balancer address on Azure. See [ingress.md](concepts/ingress.md).
 2. **`01-infra` stack** under `deployment/terraform/stacks/<cloud>/01-infra/`: `variables.tf`
    (same names as the other clouds for everything cloud-neutral: `name`, `domain`, `dns_zone`,
    `namespace`, `worker_names`, `*_mode`, `postgres_*`, `redis_*`, `storage_*`, `external_*`,
@@ -63,7 +66,7 @@ A cloud is a new producer of the contract. The work, in order:
    `ingress_tls_secret`, `ingress_node_ports` and `ingress_external_traffic_policy` carry the
    same defaults on every cloud), `main.tf` calling `modules/contract` with
    `one(module.postgres[*].postgres)` and friends, `outputs.tf` with exactly the contract outputs
-   (extra cloud-specific outputs are allowed and listed in contract.md), `versions.tf`,
+   (extra cloud-specific outputs are allowed and listed in reference/contract.md), `versions.tf`,
    `backend.tf.example`, `terraform.tfvars.example`. Cloud-only preconditions go in a
    `terraform_data "inputs"` block in the stack, as AWS and Azure do.
 3. **`02-platform` stack** under `stacks/<cloud>/02-platform/`: `terraform_remote_state` for
@@ -83,9 +86,10 @@ A cloud is a new producer of the contract. The work, in order:
 6. **Example environment** `deployment/environments/example-<cloud>/` with `env.conf`,
    `01-infra.tfvars`, `02-platform.tfvars` using only placeholder values that `doctor.sh`'s
    placeholder check recognises (add new placeholder strings to `check_placeholders`).
-7. **Guide** `deployment/docs/<cloud>.md` in the shape of the existing three, and a row in every
-   per-cloud table of `configuration.md`, `architecture.md`, `secrets.md`, `operations.md` and
-   the README.
+7. **Guide** `deployment/docs/install/<cloud>.md` in the shape of the existing three, linked from
+   step 2 of `deployment/docs/install/README.md`, and a row in every per-cloud table of
+   `reference/configuration.md`, `concepts/architecture.md`, `operate/operations.md` and the
+   feature guides.
 
 ## Adding an application chart
 
@@ -106,12 +110,13 @@ A cloud is a new producer of the contract. The work, in order:
 3. **Secrets**: if the app needs its own Secret, add it to `secret_names` and `secret_data` in
    `deployment/terraform/modules/platform/locals.tf`, the fields to `app_secrets` in
    `modules/platform/variables.tf` **and** every `stacks/*/02-platform/variables.tf`, and the
-   table in contract.md and secrets.md.
+   tables in reference/contract.md and reference/secrets.md.
 4. **Identity**: if it reads a bucket, add the identity to all three `modules/<cloud>/iam` with
    its ServiceAccount name and bucket grants, to the `identities` object in
    `modules/platform/variables.tf`, to `root_values.infra.identities` in `locals.tf`, and use
    `"identity" "<key>"` in the helper.
-5. **Reference**: a row in configuration.md's `apps.<chart>` table.
+5. **Reference**: a row in reference/configuration.md's `apps.<chart>` table, and a feature guide
+   under `deployment/docs/features/` when the app is an optional feature.
 
 ## Adding an addon
 
@@ -122,7 +127,7 @@ An addon is anything that is not a Xyne service: an operator, a data service, a 
 2. `deployment/argocd/root/templates/<name>.yaml`: build the values with `xyne-root.merge`
    (base dict, then `.values`), then
    `include "xyne-root.application" (dict "root" $ "name" … "namespace" … "wave" … "source" (include "xyne-root.helmSource" …))`.
-   Pick the wave from the table in architecture.md: -3/-2 for things the apps need, 1 for
+   Pick the wave from the table in reference/contract.md: -3/-2 for things the apps need, 1 for
    things the apps use at run time.
 3. `templates/project.yaml`: add the addon's namespace to the `$namespaces` list so the
    AppProject may deploy there.
@@ -132,7 +137,7 @@ An addon is anything that is not a Xyne service: an operator, a data service, a 
 5. If Terraform should switch it, add `enable_<name>` to `modules/platform/variables.tf` and
    every `02-platform/variables.tf`, and a line in `addon_enabled` in `locals.tf`; `addon_values`
    already reaches any addon by name without code changes.
-6. Document the block in configuration.md's `addon_values` table.
+6. Document the block in reference/configuration.md's `addon_values` table.
 
 ## Using overlays
 
@@ -205,20 +210,29 @@ Run with `deployment/scripts/setup.sh --env prod --env-dir /path/to/private/envi
 
 ## Validation
 
-Terraform (no cloud access needed; `-backend=false` skips the state backend):
+Everything under `deployment/`, with no cloud account and no cluster:
 
 ```bash
-for d in deployment/terraform/stacks/*/0[12]-* deployment/terraform/modules/contract deployment/terraform/modules/livekit-config deployment/terraform/modules/platform; do
-  terraform -chdir="$d" init -backend=false -input=false >/dev/null && terraform -chdir="$d" validate || exit 1
-done
-terraform fmt -check -recursive deployment/terraform
+deployment/scripts/validate.sh                    # terraform fmt and validate, helm lint and template, bash -n
+deployment/scripts/validate.sh --terraform-only
+deployment/scripts/validate.sh --helm-only
 ```
 
-The root chart and the addon charts:
+It prints one line per check and exits non-zero if any failed. Export `TF_PLUGIN_CACHE_DIR` to
+reuse provider downloads. Run it on a checkout without the `backend.tf` files `setup.sh`
+generates next to the stacks: with them, `terraform init` reaches for the real state.
+
+The Vespa application package chart is outside `deployment/`, so check it by hand:
 
 ```bash
-helm lint deployment/argocd/root deployment/argocd/addons/platform-config deployment/argocd/addons/pg-cluster deployment/argocd/addons/sandbox
-helm template xyne-root deployment/argocd/root -n argocd >/dev/null
+helm lint vespa-core/vespa
+helm template xyne-vespa-app vespa-core/vespa -n xyne-apps >/dev/null
+```
+
+Every Application with its wave, to compare with the table in
+[reference/contract.md](reference/contract.md#sync-waves) after changing templates:
+
+```bash
 helm template xyne-root deployment/argocd/root -n argocd \
   --set global.cloud=aws --set infra.identities.lbController.annotations.x=y \
   --set addons.cnpg.enabled=true --set addons.redis.enabled=true --set addons.minio.enabled=true \
@@ -229,9 +243,6 @@ helm template xyne-root deployment/argocd/root -n argocd \
   --set apps.xyne-dashboard-edge.enabled=true \
   | grep -E '^  name:|sync-wave' | paste - - | sort -k4 -n
 ```
-
-The second render lists every Application with its wave; compare it with the table in
-architecture.md after changing templates.
 
 The service charts:
 
@@ -256,9 +267,11 @@ without cloud credentials; use it to review a change to `lib.sh`.
 
 | Workflow | Trigger | Runs |
 |---|---|---|
+| `.github/workflows/deployment-ci.yml` | pull requests touching `deployment/**` or the workflow | `deployment/scripts/validate.sh` |
 | `.github/workflows/helm-charts-ci.yml` | pull requests touching `helm-charts/**`, `ci/helm/**`, `ci/scripts/bump-chart.sh` or the workflow | `ci/scripts/lint-charts.sh` on every chart, then a version-stamp dry run (`bump-chart.sh 0.0.0-ci.1`) and the lint again |
-| `.github/workflows/publish-images.yml` | a `vX.Y.Z` tag, by an allow-listed actor | builds every image in `ci/images.json`, pushes `ghcr.io/<owner>/<image>:X.Y.Z` |
-| `.github/workflows/sync-chart-version.yml` | called by the above or by hand | stamps the charts, tags `chart-X.Y.Z`, pushes packaged charts to `oci://ghcr.io/<owner>/charts` |
+| `.github/workflows/publish-images.yml` | run by hand (inputs `image`, `version`, `sync_charts`) or a `publish-images` repository dispatch, by an allow-listed actor | builds every image in `ci/images.json`, or the one named, and pushes `ghcr.io/<owner>/<image>:<version>` |
+| `.github/workflows/sync-chart-version.yml` | called by the above, by hand, or by repository dispatch | stamps the charts, tags `chart-<version>`, pushes packaged charts to `oci://ghcr.io/<owner>/charts` |
+| `.github/workflows/rca-check.yml` | pull requests (opened, edited, synchronized, labelled) and the merge queue | a fix pull request (branch `fix/…`, title `fix:`, the Bugfix box, or the `bugfix` label) must have a `Root Cause` section of at least 150 characters |
 
-There is no workflow for `deployment/terraform` or `deployment/argocd` today; run the
-[validation](#validation) commands locally before opening a pull request that touches them.
+An image built from this repository needs an entry in `ci/images.json` (`name`, `image`,
+`dockerfile`, `context`, `charts`); the publish workflow picks it up with no other change.

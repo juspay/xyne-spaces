@@ -1,0 +1,57 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ .Release.Name }}-deploy
+  labels:
+    {{- include "vespa-app.labels" . | nindent 4 }}
+  annotations:
+    argocd.argoproj.io/hook: PostSync
+    argocd.argoproj.io/hook-delete-policy: BeforeHookCreation
+spec:
+  backoffLimit: {{ .Values.deploy.backoffLimit }}
+  activeDeadlineSeconds: {{ add (int .Values.deploy.timeoutSeconds) 300 }}
+  template:
+    metadata:
+      labels:
+        {{- include "vespa-app.labels" . | nindent 8 }}
+      annotations:
+        sidecar.istio.io/inject: "false"
+        checksum/package: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum | trunc 16 }}
+    spec:
+      restartPolicy: Never
+      automountServiceAccountToken: false
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+      containers:
+        - name: deploy
+          image: "{{ .Values.image.registry }}/{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command: ["/bin/bash", "/package/deploy.sh"]
+          resources:
+            {{- toYaml .Values.deploy.resources | nindent 12 }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - name: package
+              mountPath: /package
+              readOnly: true
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: package
+          configMap:
+            name: {{ .Release.Name }}
+        - name: tmp
+          emptyDir: {}

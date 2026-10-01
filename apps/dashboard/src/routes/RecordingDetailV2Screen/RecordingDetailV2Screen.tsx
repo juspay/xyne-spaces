@@ -2,6 +2,7 @@
   The Xyne Scribe Details Screen
  */
 
+import { useAskAIAvailable } from '../../contexts/AskAIAvailabilityContext';
 import { type ReactElement, useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { useParams, useNavigate, useLocation } from 'react-router-dom';
@@ -36,6 +37,7 @@ import {
 } from '../../utils/recordingSummaryRequest';
 import AppNavigator from '../../components/AppNavigator/AppNavigator';
 import { usePlatform } from '../../hooks/usePlatform';
+import { useTranscriptTranslation } from '../../hooks/useTranscriptTranslation';
 import { useSpeakerIdentificationEnabled } from '../../components/SpeakerIdentification/useSpeakerIdentificationEnabled';
 import {
   Spinner,
@@ -96,6 +98,7 @@ import {
   TranscriptSidePanel,
   type TranscriptPanelTarget,
 } from '../../components/Chat/TranscriptCitationModal/TranscriptSidePanel';
+import { ORIGINAL_TRANSCRIPT_LANGUAGE, SUPPORTED_TRANSCRIPT_LANGUAGES } from '@xyne/shared';
 import { transcriptCitationStore } from '../../components/Chat/TranscriptCitationModal';
 import { parseMarkedItems, type MarkedItem } from '../../components/CallTimeline/markedItems';
 import type { Canvas } from '../../components/Canvas/Canvas.types';
@@ -185,13 +188,27 @@ interface RecordingDetailV2ScreenProps {
    * navigator and a list to go back to, so this copy drops both.
    */
   embedded?: boolean;
+  /**
+   * The recording to show (its call's externalId) when there is no route for it —
+   * e.g. inside the composer's related-context popup. Defaults to the route param.
+   */
+  recordingId?: string;
+  /**
+   * Replaces "go back" wherever this screen would navigate away — for a host that
+   * has no page to go back to, like a popup that should just close.
+   */
+  onBack?: () => void;
 }
 
 export default function RecordingDetailV2Screen({
   embedded = false,
+  recordingId: recordingIdOverride,
+  onBack,
 }: RecordingDetailV2ScreenProps): ReactElement {
   const { isMobile } = usePlatform();
-  const { recordingId } = useParams<{ recordingId: string }>();
+  const askAIAvailable = useAskAIAvailable();
+  const params = useParams<{ recordingId: string }>();
+  const recordingId = recordingIdOverride ?? params.recordingId;
   const navigate = useNavigate();
   const location = useLocation();
   const requestedTab = useMemo(
@@ -204,7 +221,6 @@ export default function RecordingDetailV2Screen({
   const capturedTranscript =
     navState?.hasTranscript === true &&
     (stoppedAtMs === null || Date.now() - stoppedAtMs < NO_TRANSCRIPT_AFTER_MS);
-  const speakerIdentificationEnabled = useSpeakerIdentificationEnabled();
   const currentUser = useSelf();
   const { summaryModelPreference, setSummaryModelPreference } = useSummaryModelPreference();
 
@@ -225,6 +241,21 @@ export default function RecordingDetailV2Screen({
     requestedTab === 'notes' ? 'notes' : justStopped ? 'secondary' : getRecordingV2Tab(),
   );
   const [showTranscriptPanel, setShowTranscriptPanel] = useState(false);
+  const [selectedTranscriptLanguage, setSelectedTranscriptLanguage] = useState(
+    ORIGINAL_TRANSCRIPT_LANGUAGE,
+  );
+
+  // Deep link `?lang=…` opens the transcript panel on arrival
+  useEffect(() => {
+    const lang = new URLSearchParams(location.search).get('lang');
+    if (!lang) return;
+    const isValid =
+      lang === ORIGINAL_TRANSCRIPT_LANGUAGE ||
+      SUPPORTED_TRANSCRIPT_LANGUAGES.some(language => language.code === lang);
+    setShowTranscriptPanel(true);
+    setSelectedTranscriptLanguage(isValid ? lang : ORIGINAL_TRANSCRIPT_LANGUAGE);
+  }, [location.search]);
+
   const [showShareModal, setShowShareModal] = useState(false);
   const [showPostToChannelModal, setShowPostToChannelModal] = useState(false);
   const [showPostToEmailModal, setShowPostToEmailModal] = useState(false);
@@ -431,6 +462,16 @@ export default function RecordingDetailV2Screen({
   // Embedded, the only list behind this panel is the activity feed — the
   // recordings list would be a detour the user never came through.
   const backTo = embedded ? ACTIVITY_LIST_PATH : (navState?.from ?? '/recordings');
+  const goBack = useCallback(
+    (options?: { replace: boolean }): void => {
+      if (onBack) {
+        onBack();
+        return;
+      }
+      void navigate(backTo, options);
+    },
+    [onBack, navigate, backTo],
+  );
   const currentIndex = useMemo(
     () => (recordingId ? (recordingIds?.indexOf(recordingId) ?? -1) : -1),
     [recordingId, recordingIds],
@@ -679,16 +720,16 @@ export default function RecordingDetailV2Screen({
       // Patch only the fields being polled for: a failed refresh must not tear down
       // the loaded screen, and Zero owns the rest.
       void recordingService
-        .getRecordingDetail(recordingId)
+        .getRecordingStatus(recordingId)
         .then(fresh =>
           setRecording(current =>
             current
               ? {
                   ...current,
-                  hasRecording: !!fresh.hasRecording,
+                  hasRecording: fresh.hasRecording,
+                  durationMs: fresh.durationMs ?? current.durationMs,
                   recordingType: fresh.recordingType ?? current.recordingType ?? null,
                   attachmentId: fresh.attachmentId ?? current.attachmentId ?? null,
-                  durationMs: fresh.durationMs ?? current.durationMs,
                 }
               : current,
           ),
@@ -703,7 +744,7 @@ export default function RecordingDetailV2Screen({
     try {
       if (loadedRecordingIdRef.current !== id) setLoading(true);
       setFailure(null);
-      const data = await recordingService.getRecordingDetail(id);
+      const data = await recordingService.getRecordingDetail(id, { scope: 'metadata' });
       loadedRecordingIdRef.current = id;
       setRecording(prev =>
         prev ? { ...prev, ...data, durationMs: data.durationMs ?? prev.durationMs } : data,
@@ -725,8 +766,8 @@ export default function RecordingDetailV2Screen({
 
   const handleMinimize = useCallback((): void => {
     sendRecordingEvent({ type: 'setTranscriptMinimized', isMinimized: false });
-    void navigate(backTo);
-  }, [backTo, navigate]);
+    goBack();
+  }, [goBack]);
 
   /**
    * The panels differ wildly in height — a long transcript against a short notes
@@ -945,10 +986,20 @@ export default function RecordingDetailV2Screen({
     [recordingId],
   );
 
+  const transcript = useTranscriptTranslation({
+    externalId: recording?.externalId,
+    language: selectedTranscriptLanguage,
+    // Fetch only once the panel is actually opened, not on page load — mirrors
+    // getRecordingDetail no longer embedding the transcript body.
+    enabled: showTranscriptPanel,
+  });
+  const speakerIdentificationEnabled = useSpeakerIdentificationEnabled();
   const transcriptText =
-    speakerIdentificationEnabled && recording?.hasIdentifiedTranscript
-      ? (recording.identifiedTranscript ?? recording.transcript)
-      : recording?.transcript;
+    selectedTranscriptLanguage === ORIGINAL_TRANSCRIPT_LANGUAGE &&
+    speakerIdentificationEnabled &&
+    recording?.hasIdentifiedTranscript
+      ? (recording.identifiedTranscript ?? transcript.text)
+      : transcript.text;
 
   const markedMomentSeconds = useMemo(
     () =>
@@ -958,12 +1009,9 @@ export default function RecordingDetailV2Screen({
     [recording?.markedItems],
   );
 
-  /**
-   * Route canvas citations into this screen's own transcript panel instead of the
-   * global TranscriptCitationModal, so clicking a citation behaves like the toolbar
-   */
+  // Route canvas citations into this screen's own transcript panel instead of the global TranscriptCitationModal.
   useEffect(() => {
-    if (!recordingId || !transcriptText?.trim()) return;
+    if (!recordingId) return;
     return transcriptCitationStore.setHandler(ref => {
       if (ref.callId !== recordingId) return false;
       setCitationRef({
@@ -975,7 +1023,7 @@ export default function RecordingDetailV2Screen({
       setShowTranscriptPanel(true);
       return true;
     });
-  }, [recordingId, transcriptText]);
+  }, [recordingId]);
 
   // Seeds the summary-request record for the auto-detected pending state (server
   // summarizing without an explicit "Generate summary" click), so its progress
@@ -1016,7 +1064,7 @@ export default function RecordingDetailV2Screen({
       <RecordingLoadError
         failure={resolvedFailure}
         viewerEmail={currentUser?.email}
-        onBack={() => void navigate(backTo)}
+        onBack={() => goBack()}
       />
     );
   }
@@ -1137,8 +1185,6 @@ export default function RecordingDetailV2Screen({
           <AppNavigator />
         </div>
       )}
-      {/* layoutScroll: the tab indicator animates inside this scroller, so Motion has
-          to account for its scroll offset when measuring positions. */}
       <motion.div
         ref={scrollContainerRef}
         layoutScroll
@@ -1161,7 +1207,7 @@ export default function RecordingDetailV2Screen({
                 type='button'
                 variant='ghost'
                 size='iconSm'
-                onClick={() => void navigate(backTo, { replace: true })}
+                onClick={() => goBack({ replace: true })}
                 className='size-8 shrink-0 rounded-lg text-muted-foreground hover:text-foreground'
                 aria-label='Back to activity'
                 data-track-category='RecordingDetailV2'
@@ -1179,7 +1225,7 @@ export default function RecordingDetailV2Screen({
                   <li>
                     <button
                       type='button'
-                      onClick={() => void navigate(backTo)}
+                      onClick={() => goBack()}
                       className='flex items-center gap-1.5 text-muted-foreground transition-colors hover:text-foreground duration-300'
                       data-track-category='RecordingDetailV2'
                       data-track-name='breadcrumb_recordings'
@@ -1216,7 +1262,7 @@ export default function RecordingDetailV2Screen({
                   </Button>
                 </Tooltip>
               )}
-              {!isLive && (
+              {!isLive && askAIAvailable && (
                 <Tooltip content='Ask AI about this recording' side='bottom'>
                   <Button
                     type='button'
@@ -1259,7 +1305,7 @@ export default function RecordingDetailV2Screen({
                       recordingService.downloadRecordingBlob(recording.externalId, signal),
                   }
                 : {})}
-              {...(transcriptText
+              {...(hasTranscript
                 ? { onMarkerSelect: handleMarkerSelect, onOpenTranscript: openTranscriptPanel }
                 : {})}
             />
@@ -1417,7 +1463,7 @@ export default function RecordingDetailV2Screen({
                     </span>
                   )}
                 </div>
-                {transcriptText ? (
+                {hasTranscript ? (
                   <Tooltip
                     content={!showTranscriptPanel ? 'Open transcript' : 'Close transcript'}
                     side='left'
@@ -1605,7 +1651,7 @@ export default function RecordingDetailV2Screen({
                   initialProgress={getSummaryProgress(recordingId)}
                   initialStageIndex={getSummaryStage(recordingId)}
                   onProgressPause={handleSummaryProgressPause}
-                  onReadTranscript={transcriptText ? openTranscriptPanel : undefined}
+                  onReadTranscript={hasTranscript ? openTranscriptPanel : undefined}
                 />
               )}
               {/* Shown to everyone with the recording. Each doc lives in the
@@ -1623,12 +1669,19 @@ export default function RecordingDetailV2Screen({
 
       {/* Transcript side panel */}
       <AnimatePresence>
-        {showTranscriptPanel && transcriptText && (
+        {showTranscriptPanel && (
           <TranscriptSidePanel
-            transcript={transcriptText}
+            transcript={transcriptText ?? ''}
+            isLoading={transcript.isLoading}
+            error={transcript.error ?? null}
+            onRetry={transcript.retry}
             target={citationRef}
             openNonce={citationNonce}
             markedTimestampsSeconds={markedMomentSeconds}
+            title={recording.title}
+            selectedLanguage={selectedTranscriptLanguage}
+            onLanguageChange={setSelectedTranscriptLanguage}
+            isTranslating={transcript.isTranslating}
             onClose={() => {
               setShowTranscriptPanel(false);
               setCitationRef(null);

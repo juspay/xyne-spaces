@@ -29,6 +29,7 @@ import {
   schema,
   ChannelRole,
   AttachmentEntityType,
+  CHANNEL_VISIBLE_ATTACHMENT_ENTITY_TYPES,
   ChannelType,
   SDLC_MEMBERSHIP_RELATION,
   SDLC_CONTAINMENT_RELATION,
@@ -242,6 +243,132 @@ const relateSupportDynamicFieldValues = (
   return fieldIds.length > 0
     ? fev.where('entityType', 'TICKET').where('fieldId', 'IN', fieldIds)
     : fev.where('fieldId', '__no_dynamic_field_filters__');
+};
+
+const supportTicketFilterArgsSchema = z.object({
+  channelId: z.string(),
+  isMember: z.boolean(),
+  merchantMid: z.string().optional(),
+  assignedTo: z.array(z.string()).optional(),
+  createdBy: z.array(z.string()).optional(),
+  priority: z.array(z.nativeEnum(TicketPriority)).optional(),
+  stageName: z.array(z.string()).optional(),
+  aiCategory: z.array(z.string()).optional(),
+  conversationIds: z.array(z.string()).optional(),
+  hasAiDraft: z.boolean().optional(),
+  hasSubTickets: z.boolean().optional(),
+  userGroups: z.array(z.string()).optional(),
+  lastEmailAtStart: z.number().optional(),
+  lastEmailAtEnd: z.number().optional(),
+  createdAtStart: z.number().optional(),
+  createdAtEnd: z.number().optional(),
+  conversationLabelId: z.string().optional(),
+  dynamicFieldFilters: supportDynamicFieldFiltersSchema,
+  formEntityValueFieldIds: z.array(z.string()).optional(),
+});
+
+const isCreatedAtRangeValid = (args: { createdAtStart?: number; createdAtEnd?: number }) =>
+  args.createdAtStart === undefined || args.createdAtEnd === undefined || args.createdAtStart <= args.createdAtEnd;
+const CREATED_AT_RANGE_MESSAGE = 'createdAtStart must be less than or equal to createdAtEnd';
+
+const applySupportTicketFilters = (
+  args: z.infer<typeof supportTicketFilterArgsSchema>,
+) => {
+  const { channelId, merchantMid, assignedTo, createdBy, priority, stageName, aiCategory, conversationIds, hasAiDraft, hasSubTickets, userGroups, lastEmailAtStart, lastEmailAtEnd, createdAtStart, createdAtEnd, conversationLabelId, dynamicFieldFilters } = args;
+  let query = zql.tickets.where('channelId', channelId);
+  query = query.where('isArchived', false);
+
+  if (merchantMid) {
+    query = query.where('merchantId', merchantMid);
+  }
+
+  if (assignedTo && assignedTo.length > 0) {
+    // Desk tickets store a raw user id in assignedTo (no user:/group: prefixing).
+    // The shared 'Unassigned' sentinel filters tickets with no assignee
+    // (zero stores nullable strings, so unassigned = IS null OR '').
+    const { inverted, includeUnassigned, ids } = parseAssigneeFilter(assignedTo);
+    if (!inverted) {
+      query = query.where(({ or, cmp }) =>
+        or(
+          ...(ids.length ? [cmp('assignedTo', 'IN', ids)] : []),
+          ...(includeUnassigned ? [cmp('assignedTo', 'IS', null), cmp('assignedTo', '')] : []),
+        ),
+      );
+    } else if (includeUnassigned) {
+      query = query.where(({ and, cmp }) =>
+        and(
+          ...(ids.length ? [cmp('assignedTo', 'NOT IN', ids)] : []),
+          cmp('assignedTo', 'IS NOT', null),
+          cmp('assignedTo', '!=', ''),
+        ),
+      );
+    } else {
+      query = query.where(({ or, cmp }) =>
+        or(
+          cmp('assignedTo', 'NOT IN', ids),
+          cmp('assignedTo', 'IS', null),
+          cmp('assignedTo', ''),
+        ),
+      );
+    }
+  }
+
+  if (createdBy && createdBy.length > 0) {
+    query = query.where('createdBy', 'IN', createdBy);
+  }
+
+  if (priority && priority.length > 0) {
+    query = query.where('priority', 'IN', priority);
+  }
+
+  if (stageName && stageName.length > 0) {
+    query = query.where('stageName', 'IN', stageName);
+  }
+
+  if (aiCategory && aiCategory.length > 0) {
+    query = query.where('aiCategory', 'IN', aiCategory);
+  }
+
+  if (conversationIds !== undefined) {
+    query = query.where('conversationId', 'IN', conversationIds.length > 0 ? conversationIds : ['']);
+  }
+
+  if (hasAiDraft) {
+    query = query.where(({ exists }) =>
+      exists('emailDrafts', (draft) => draft.where('userId', 'IS', null)),
+    );
+  }
+
+  if (hasSubTickets) {
+    query = query.where(({ exists }) => exists('subTicketMappings'));
+  }
+
+  if (userGroups && userGroups.length > 0) {
+    query = query.where('userGroupId', 'IN', userGroups);
+  }
+  if (conversationLabelId) {
+    query = query.where(({ exists }) =>
+      exists('conversationLabelMappings', (m) => m.where('labelId', conversationLabelId)),
+    );
+  }
+
+  if (lastEmailAtStart !== undefined) {
+    query = query.where('lastEmailAt', '>=', lastEmailAtStart);
+  }
+
+  if (lastEmailAtEnd !== undefined) {
+    query = query.where('lastEmailAt', '<=', lastEmailAtEnd);
+  }
+
+  if (createdAtStart !== undefined) {
+    query = query.where('createdAt', '>=', createdAtStart);
+  }
+
+  if (createdAtEnd !== undefined) {
+    query = query.where('createdAt', '<=', createdAtEnd);
+  }
+
+  return applySupportDynamicFieldFilters(query, dynamicFieldFilters) as typeof query;
 };
 
 const applyKanbanTicketPageConditions = (
@@ -1726,6 +1853,46 @@ export const queries: AnyQueryRegistry = defineQueries({
           relateSupportDynamicFieldValues(fev, dynamicFieldFilters, formEntityValueFieldIds),
         );
     }
+  ),
+
+  // One Desk kanban column, newest activity first. Paged by growing `limit` rather than a
+  // cursor: updatedAt moves on every edit, so a cursor would skip or repeat rows.
+  // `otherStageNames` is set on the first column only, which also collects tickets whose
+  // stage is not on the board.
+  supportKanbanTicketsPage: defineQuery(
+    supportTicketFilterArgsSchema
+      .extend({
+        stage: z.string(),
+        otherStageNames: z.array(z.string()).optional(),
+        limit: z.number(),
+        updatedAfter: z.number().optional(),
+      })
+      .refine(isCreatedAtRangeValid, CREATED_AT_RANGE_MESSAGE),
+    ({ ctx, args }) => {
+      const { stage, otherStageNames, limit, updatedAfter } = args;
+      let query = applySupportTicketFilters(args);
+      query = otherStageNames
+        ? query.where(({ or, cmp }) =>
+            or(cmp('stageName', stage), cmp('stageName', 'NOT IN', [stage, ...otherStageNames])),
+          )
+        : query.where('stageName', stage);
+      if (updatedAfter !== undefined) {
+        query = query.where('updatedAt', '>=', updatedAfter);
+      }
+
+      return query
+        .orderBy('updatedAt', 'desc')
+        .orderBy('id', 'desc')
+        .limit(limit)
+        .related('project')
+        .related('tagMappings')
+        .related('entity')
+        .related('conversation', c => c.related('channel'))
+        .related('emailReads', q => q.where('userId', ctx.userID))
+        .related('formEntityValues', fev =>
+          relateSupportDynamicFieldValues(fev, args.dynamicFieldFilters, args.formEntityValueFieldIds),
+        );
+    },
   ),
 
   // Topics Explorer: one desk's tickets in a created-at window, rolled up client-side.
@@ -3313,17 +3480,27 @@ export const queries: AnyQueryRegistry = defineQueries({
     },
   ),
 
-  /**
-   * A single non-HEADLESS call (+ its shares) by row id — what the detail route
-   * carries. Used both to resolve a call reached by link, with no navigation state
-   * to read it from, and to list who a call is shared with.
-   */
+  /** Legacy row-id lookup retained for older dashboard bundles. */
   callById: defineQuery(
     z.object({ callId: z.string() }),
     ({ ctx, args: { callId } }) =>
       zql.calls
         .where('callType', '!=', CallType.HEADLESS)
         .where('id', callId)
+        .related('participants', p => p.where('userId', ctx.userID))
+        .related('shares', shares =>
+          shares.where('entityUserAccess', '!=', EntityUserAccess.REVOKED),
+        )
+        .one(),
+  ),
+
+  /** A single non-HEADLESS call (+ its shares) by its public route id. */
+  callByExternalId: defineQuery(
+    z.object({ callId: z.string() }),
+    ({ ctx, args: { callId } }) =>
+      zql.calls
+        .where('callType', '!=', CallType.HEADLESS)
+        .where('externalId', callId)
         .related('participants', p => p.where('userId', ctx.userID))
         .related('shares', shares =>
           shares.where('entityUserAccess', '!=', EntityUserAccess.REVOKED),
@@ -3399,6 +3576,22 @@ export const queries: AnyQueryRegistry = defineQueries({
                 ),
             ),
           ),
+        )
+        // Only the viewer's own shares: Zero does not ACL-filter `related()`.
+        .related('shares', shares =>
+          shares
+            .where('workspaceId', ctx.workspaceId)
+            .where('shareableEntityType', ShareableEntityType.SUMMARY_TEMPLATE)
+            .where('entityUserAccess', '!=', EntityUserAccess.REVOKED)
+            .where(({ or, cmp, exists }) =>
+              or(
+                cmp('userId', ctx.userID),
+                exists('userGroupMemberships', membership =>
+                  membership.where('userId', ctx.userID),
+                ),
+                exists('channelMembers', member => member.where('userId', ctx.userID)),
+              ),
+            ),
         )
         .orderBy('name', 'asc')
         .orderBy('version', 'desc'),
@@ -4574,9 +4767,10 @@ export const queries: AnyQueryRegistry = defineQueries({
       direction: z.literal('forward').or(z.literal('backward')),
     }),
     ({ args: { channelId, limit, start, direction } }) => {
-      let query = zql.message_attachments.whereExists('conversation', (conv) =>
-        conv.where('channelId', channelId)
-      );
+      let query = zql.message_attachments
+        .where('isDeleted', false)
+        .where('entityType', 'IN', CHANNEL_VISIBLE_ATTACHMENT_ENTITY_TYPES)
+        .whereExists('conversation', (conv) => conv.where('channelId', channelId));
 
       if (start) {
         query = query.start(
@@ -4776,13 +4970,17 @@ dmChannelsLatestMessagesPaginated: defineQuery(
       limit: z.number().optional(),
       start: z.object({ name: z.string(), id: z.string() }).nullish(),
       direction: z.enum(['forward', 'backward']).optional(),
+      search: z.string().optional(),
     }),
-    ({ args: { projectId, limit = 100, start, direction = 'forward' } }) => {
+    ({ args: { projectId, limit = 100, start, direction = 'forward', search } }) => {
       const isBackward = direction === 'backward';
       let q = zql.project_tags
         .where('projectId', projectId)
         .orderBy('name', isBackward ? 'desc' : 'asc')
         .orderBy('id', isBackward ? 'desc' : 'asc');
+      if (search) {
+        q = q.where('name', 'ILIKE', `%${search}%`);
+      }
       if (start) {
         q = q.start({ name: start.name, id: start.id }, { inclusive: false });
       }

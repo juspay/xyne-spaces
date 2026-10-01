@@ -6,6 +6,8 @@ import {
   createWorkspaceInOrgData,
   hasCompletedOnboardingQuery,
   getWorkspacesByEmailData,
+  findAuthIdentityByEmailData,
+  ensureUserPresenceData,
 } from '@/bypassAcl/userServices';
 import { unifiedBotUserService } from '@/bots/unified/services/unified-bot-user-service.js';
 import { grantPermissionsForRole, syncOrgResourceAdminAccess } from './permissionMatrix';
@@ -13,12 +15,11 @@ import { USER_PREFERENCE_NOTIFICATION_DEFAULTS } from '@/constants/userPreferenc
 import { OrgRole,
   WorkspaceJoinPolicy,
   WorkspaceType,
-  UserPresenceStatus,
   AuthProvider,
   ProjectType,
   UserStatus,
   WorkspaceRole,
-  Status, ChannelRole, WorkspaceJoinRequestStatus } from '@xyne/shared';
+  ChannelRole, WorkspaceJoinRequestStatus } from '@xyne/shared';
 import type { WorkspaceJoinPolicy as WorkspaceJoinPolicyValue, WorkspaceType as WorkspaceTypeValue } from '@xyne/shared';
 import { aiProvisioningService } from '@/services/aiProvisioningService';
 import { isOrganizationPolicyError, organizationDomainService } from '@/services/organizationDomainService';
@@ -28,6 +29,7 @@ import { ensureUserInGeneralChannel as joinUserToGeneralChannel } from '@/utils/
 import { redisService } from '@/services/redisService';
 import { createId } from '@paralleldrive/cuid2';
 import { getEncryptionProvider } from '@/services/encryption';
+import { createOrganizationWithUserTx } from '@/bypassAcl/transactions/userService';
 
 interface OAuthUserData {
   provider: AuthProvider;
@@ -50,7 +52,7 @@ export interface UserWithOrgRole extends User {
 }
 
 export class UserService {
-  private prisma: PrismaClient;
+  prisma: PrismaClient;
 
   constructor() {
     this.prisma = DatabaseClient.getInstance();
@@ -171,14 +173,7 @@ export class UserService {
     email: string,
   ): Promise<{ authProvider: AuthProvider; providerUserId: string } | null> {
     try {
-      const user = await this.prisma.user.findFirst({
-        where: { email: { equals: email, mode: 'insensitive' } },
-        select: { authProvider: true, providerUserId: true },
-        orderBy: { createdAt: 'asc' },
-      });
-      return user
-        ? { authProvider: user.authProvider as AuthProvider, providerUserId: user.providerUserId }
-        : null;
+      return await findAuthIdentityByEmailData(email);
     } catch (error) {
       logger.error('Error finding auth identity by email:', error);
       throw new Error('Failed to find auth identity');
@@ -284,39 +279,7 @@ export class UserService {
    * Ensure user presence entry exists (create if not exists)
    */
   async ensureUserPresence(userId: string, workspaceId: string): Promise<void> {
-    try {
-      const existingPresence = await this.prisma.userPresence.findUnique({
-        where: { userId },
-      });
-
-      if (!existingPresence) {
-        logger.info(`Creating user presence entry for user ${userId}`);
-        await this.prisma.userPresence.create({
-          data: {
-            userId,
-            workspaceId,
-            status: UserPresenceStatus.ONLINE,
-            lastActiveAt: new Date(),
-            lastSeenAt: new Date(),
-            isManual: false,
-          },
-        });
-        logger.info(`Successfully created user presence entry for user ${userId}`);
-      } else {
-        // Update last seen and last active timestamps on login
-        await this.prisma.userPresence.update({
-          where: { userId },
-          data: {
-            lastActiveAt: new Date(),
-            lastSeenAt: new Date(),
-          },
-        });
-        logger.debug(`Updated user presence timestamps for user ${userId}`);
-      }
-    } catch (error) {
-      logger.error(`Error ensuring user presence for user ${userId}:`, error);
-      // Don't throw - this shouldn't block authentication
-    }
+    await ensureUserPresenceData(userId, workspaceId);
   }
 
   /**
@@ -893,35 +856,7 @@ export class UserService {
       const orgId = createId();
       await getEncryptionProvider().initializeOrg(orgId);
 
-      const { organization, workspace } = await this.prisma.$transaction(async (tx) => {
-        // Step 1: Create organization with temporary createdBy (will update later)
-        const organization = await tx.organization.create({
-          data: {
-            orgId,
-            name: orgName,
-            createdBy: userData.providerUserId, // Temporary: will update after user creation
-            status: Status.ACTIVE
-          }
-        });
-
-        // Step 2: Create workspace with temporary createdBy (will update later)
-        const workspace = await tx.workspace.create({
-          data: {
-            orgId: organization.orgId,
-            name: workspaceName,
-            createdBy: userData.providerUserId, // Temporary: will update after user creation
-            status: Status.ACTIVE,
-            workspaceType: WorkspaceType.ENTERPRISE,
-            joinPolicy: WorkspaceJoinPolicy.INVITE_ONLY,
-          }
-        });
-        await getEncryptionProvider().provisionEntity({
-          entityId: workspace.id,
-          orgId: workspace.orgId,
-          entityType: 'WORKSPACE',
-        });
-        return { organization, workspace };
-      });
+      const { organization, workspace } = await createOrganizationWithUserTx(this, orgId, orgName, userData, workspaceName);
 
       // Step 3: Link workspace to organization
       await this.prisma.workspaceOrganization.create({
@@ -1117,3 +1052,4 @@ export class UserService {
     throw error;
   }
 }
+

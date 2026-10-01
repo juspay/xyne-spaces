@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Copy, Phone, Users, X } from 'lucide-react';
+import { Copy, Users, X } from 'lucide-react';
 import { toast } from 'sonner';
 import {
   InvitationResponse,
@@ -28,6 +28,7 @@ import { useZero } from '../../hooks/useZero';
 import { mutators } from '../../zero/mutators';
 import { useFlow } from '../flowUI/FlowContext';
 import { useActiveSlashCommandArtifact } from './SlashCommandArtifactSideEffects';
+import { PhoneDefault } from '@xyne/icons';
 
 /**
  * Composer entry for a slash-command artifact. Presentation and side-effect
@@ -476,7 +477,7 @@ export const SlashCommandArtifactCard: React.FC<SlashCommandArtifactCardProps> =
         ) : resolvedState === 'completed' ? (
           <>
             <div className='inline-flex h-10 items-center gap-2 rounded-lg bg-muted px-3 text-sm font-medium text-muted-foreground'>
-              <Phone className='size-4' />
+              <PhoneDefault className='size-4' />
               <span>
                 Call ended{endedDuration ? ` · lasted ${endedDuration}` : ''} · {joinedCount} joined
               </span>
@@ -496,7 +497,7 @@ export const SlashCommandArtifactCard: React.FC<SlashCommandArtifactCardProps> =
               data-track-name='START_NEW_CALL'
               data-track-metadata={trackingMetadata}
             >
-              <Phone className='size-4' />
+              <PhoneDefault className='size-4' />
               Start a new call
             </button>
           </>
@@ -510,7 +511,7 @@ export const SlashCommandArtifactCard: React.FC<SlashCommandArtifactCardProps> =
               aria-live='polite'
             >
               <span className='size-2.5 animate-pulse rounded-full bg-orange-500 motion-reduce:animate-none' />
-              <Phone className='size-4' />
+              <PhoneDefault className='size-4' />
               <span>Call live{activeDuration ? ` · ${activeDuration}` : ''}</span>
             </div>
             <button
@@ -547,7 +548,7 @@ export const SlashCommandArtifactCard: React.FC<SlashCommandArtifactCardProps> =
             data-track-name='START_CALL'
             data-track-metadata={trackingMetadata}
           >
-            <Phone className='size-4' />
+            <PhoneDefault className='size-4' />
             Start call
           </button>
         )}

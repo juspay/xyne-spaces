@@ -54,6 +54,11 @@ const ElectronEvent = {
     COOKIES_CLEARED: 'cookies_cleared',
     COOKIES_CLEAR_FAILED: 'cookies_clear_failed',
 
+    // Session-teardown telemetry: the 401 interceptor runs in the main process
+    // and is invisible to frontend logging, so every step is logged here.
+    AUTH_401_INTERCEPTED: 'auth_401_intercepted',
+    AUTH_TOKEN_EXPIRED_SENT: 'auth_token_expired_sent',
+
     // Security guard rail events
     OPEN_EXTERNAL_BLOCKED: 'open_external_blocked',
     DEEP_LINK_INVITATION_REJECTED: 'deep_link_invitation_rejected',

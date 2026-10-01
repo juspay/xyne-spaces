@@ -24,6 +24,17 @@ export interface UserPreferences {
   sdlcSidebarSectionsCollapsed: Record<string, boolean>;
   sdlcSidebarSectionHeights: Record<string, number>;
   sdlcShowClosedTracks: boolean;
+  // TODO: move relatedContextOn and relatedContextDebounceMs to the server-side
+  // user_preferences table (with the other Messaging preferences) once the
+  // related-context feature is confirmed; kept per device while it is on trial.
+  /**
+   * Suggest threads, tickets, canvases and calls related to the message being
+   * written, as chips in the composer. On until turned off in Preferences →
+   * Messaging.
+   */
+  relatedContextOn: boolean;
+  /** How long after the last keystroke to look them up, in ms. Never below 1000. */
+  relatedContextDebounceMs: number;
 }
 
 export const DEFAULT_USER_PREFERENCES: UserPreferences = {
@@ -38,6 +49,8 @@ export const DEFAULT_USER_PREFERENCES: UserPreferences = {
   sdlcSidebarSectionsCollapsed: { 'sdlc-sidebar-artifacts': true },
   sdlcSidebarSectionHeights: {},
   sdlcShowClosedTracks: false,
+  relatedContextOn: true,
+  relatedContextDebounceMs: 1000,
 };
 
 export interface UserPreferencesContext {

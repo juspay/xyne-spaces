@@ -25,6 +25,12 @@ locals {
     zero_change = "postgresql://${local.pg_userinfo}@${var.postgres.direct_host}:${var.postgres.port}/${var.postgres.databases.zero_cdb}?${local.pg_query}"
   }
 
+  node_pg_query = var.postgres.sslmode == "disable" ? "?${local.pg_query}" : ""
+  node_pg_urls = {
+    app_ro   = "postgresql://${local.pg_userinfo}@${var.postgres.ro_host}:${var.postgres.port}/${var.postgres.databases.app}${local.node_pg_query}"
+    zero_app = "postgresql://${local.pg_userinfo}@${var.postgres.direct_host}:${var.postgres.port}/${var.postgres.databases.app}${local.node_pg_query}"
+  }
+
   redis_scheme   = var.redis.tls ? "rediss" : "redis"
   redis_userinfo = local.redis_auth == "" ? "" : ":${urlencode(local.redis_auth)}@"
   redis_url      = "${local.redis_scheme}://${local.redis_userinfo}${var.redis.host}:${var.redis.port}"
@@ -54,8 +60,8 @@ locals {
     "xyne-backend-secrets" = {
       DATABASE_URL                   = local.pg_urls.app
       COMMON_DATABASE_URL            = local.pg_urls.common
-      DATABASE_READ_REPLICA_POOL_URL = local.pg_urls.app_ro
-      ZERO_UPSTREAM_DB               = local.pg_urls.zero_app
+      DATABASE_READ_REPLICA_POOL_URL = local.node_pg_urls.app_ro
+      ZERO_UPSTREAM_DB               = local.node_pg_urls.zero_app
       REDIS_URL                      = local.redis_url
       REDIS_PASSWORD                 = local.redis_auth
       JWT_SECRET                     = var.app_secrets.jwt_secret
@@ -67,6 +73,8 @@ locals {
       GOOGLE_CLIENT_SECRET           = var.app_secrets.google_client_secret
       AWS_ACCESS_KEY_ID              = local.storage_access_key
       AWS_SECRET_ACCESS_KEY          = local.storage_secret_key
+      LIVEKIT_API_KEY                = local.livekit_api_key
+      LIVEKIT_API_SECRET             = local.livekit_api_secret
     }
     "xyne-zero-secrets" = {
       ZERO_UPSTREAM_DB    = local.pg_urls.zero_app
@@ -151,17 +159,19 @@ locals {
   ]
 
   addon_enabled = {
-    lbController = var.cluster.cloud == "aws" && length(var.identities.lb_controller.annotations) > 0
-    externalDns  = var.ingress.mode == "gateway" && var.ingress.dns_zone != "" && length(var.identities.external_dns.annotations) > 0
-    istio        = true
-    certManager  = true
-    cnpg         = local.postgres_incluster
-    redis        = local.redis_incluster
-    minio        = local.storage_incluster
-    vespa        = var.enable_vespa
-    monitoring   = var.enable_monitoring
-    sandbox      = var.enable_sandbox
-    hindsight    = var.enable_hindsight
+    lbController      = var.cluster.cloud == "aws" && length(var.identities.lb_controller.annotations) > 0
+    clusterAutoscaler = var.cluster.cloud == "aws" && length(var.identities.cluster_autoscaler.annotations) > 0
+    externalDns       = var.ingress.mode == "gateway" && var.ingress.dns_zone != "" && length(var.identities.external_dns.annotations) > 0
+    istio             = true
+    certManager       = true
+    cnpg              = local.postgres_incluster
+    redis             = local.redis_incluster
+    minio             = local.storage_incluster
+    vespa             = var.enable_vespa
+    monitoring        = var.enable_monitoring
+    sandbox           = var.enable_sandbox
+    hindsight         = var.enable_hindsight
+    workflows         = var.enable_workflows
   }
 
   addon_extra = merge(
@@ -192,15 +202,30 @@ locals {
     },
   )
 
+  secret_checksums = {
+    for name in local.secret_names : name => nonsensitive(substr(sha256(jsonencode(merge(
+      local.secret_data[name],
+      lookup(var.extra_secret_data, name, {}),
+    ))), 0, 16))
+  }
+
   root_values = {
+    platformRevision = var.root_revision
+    argocd = {
+      expose = {
+        enabled = var.argocd_expose
+        host    = var.argocd_host
+      }
+    }
     global = {
-      cloud         = var.cluster.cloud
-      domain        = local.domain
-      namespace     = var.namespace
-      repoURL       = var.repo_url
-      chartRevision = var.chart_revision
-      imageRegistry = var.image_registry
-      imageTag      = var.image_tag
+      cloud           = var.cluster.cloud
+      domain          = local.domain
+      namespace       = var.namespace
+      repoURL         = var.repo_url
+      chartRevision   = var.chart_revision
+      imageRegistry   = var.image_registry
+      imageTag        = var.image_tag
+      secretChecksums = local.secret_checksums
     }
     infra = {
       cluster = {
@@ -240,15 +265,20 @@ locals {
         buckets           = var.storage.buckets
       }
       identities = {
-        backend       = var.identities.backend
-        worker        = var.identities.worker
-        dashboardEdge = var.identities.dashboard_edge
-        ysweet        = var.identities.ysweet
-        claw          = var.identities.claw
-        clawAuth      = var.identities.claw_auth
-        transcription = var.identities.transcription
-        lbController  = var.identities.lb_controller
-        externalDns   = var.identities.external_dns
+        backend           = var.identities.backend
+        worker            = var.identities.worker
+        dashboardEdge     = var.identities.dashboard_edge
+        ysweet            = var.identities.ysweet
+        claw              = var.identities.claw
+        clawAuth          = var.identities.claw_auth
+        transcription     = var.identities.transcription
+        lbController      = var.identities.lb_controller
+        clusterAutoscaler = var.identities.cluster_autoscaler
+        externalDns       = var.identities.external_dns
+        zero              = var.identities.zero
+      }
+      zero = {
+        backupUrl = var.zero_backup_url
       }
       nodePools = local.node_pools
       ingress = {

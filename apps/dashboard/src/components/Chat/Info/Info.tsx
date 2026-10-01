@@ -51,7 +51,7 @@ import { isStatusExpired } from '../../../utils/statusUtils';
 import { renderEmoji } from '../../../utils/customEmojiUtils';
 import Popover from '../../ui/Popover';
 import { useLocation, useNavigate } from 'react-router-dom';
-import HuddleIcon from '../../icons/HuddleIcon';
+import { PhoneDefault } from '@xyne/icons';
 import { useCallActions } from '../../../hooks/useCallActions';
 import Tooltip from '../../ui/Tooltip';
 import { useCallConfirmation } from '../../../hooks/useCallConfirmation';
@@ -62,7 +62,7 @@ import { useUser, useUsers } from '../../../hooks/useUsers';
 import { usePlatform } from '../../../hooks/usePlatform';
 import { v4 as uuidv4 } from 'uuid';
 import { VisibleChannel } from '../../../machines/stateMachine';
-import { getUserDisplayName } from '../../../utils/userDisplayName';
+import { getUserDisplayName, isUserDeactivated } from '../../../utils/userDisplayName';
 import { channelTrackingMetadata } from '../../../services/Analytics/channelTracking';
 
 export type ChannelTab =
@@ -151,6 +151,9 @@ const Info = ({
   }, [channel?.scopeType, channel?.name, context.userID, isDM]);
 
   const targetUser = useUser(targetUserId || '');
+
+  // A 1:1 DM with a deactivated user must not be turned into a group DM.
+  const canAddPeople = showAddPeopleButton && !(isDM && isUserDeactivated(targetUser));
 
   const hasValidStatus = useMemo(() => {
     return (
@@ -354,7 +357,7 @@ const Info = ({
             Starred
           </div>
         </button>
-        {showAddPeopleButton && (
+        {canAddPeople && (
           <button
             onClick={handleAddPeopleClick}
             className={headerLinkContainerStyle}
@@ -382,9 +385,9 @@ const Info = ({
           {isUserInCurrentChannelCall ? (
             <PhoneOff className='w-4 h-4 text-status-failure' />
           ) : hasActiveCallInChannel && !isUserInCurrentChannelCall ? (
-            <HuddleIcon color='currentColor' />
+            <PhoneDefault size={16} color='currentColor' />
           ) : (
-            <HuddleIcon color='currentColor' />
+            <PhoneDefault size={16} color='currentColor' />
           )}
           <div
             className={`${isUserInCurrentChannelCall ? 'text-status-failure' : 'text-muted-foreground'} text-[13px]`}

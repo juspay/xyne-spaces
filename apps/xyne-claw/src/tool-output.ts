@@ -70,6 +70,15 @@ export const SPILL_MAX_LINE_CHARS = Number(process.env["XYNE_CLAW_SPILL_MAX_LINE
 // mcpTool.name / custom-tool slug) that should get the larger retrieval cap.
 const RETRIEVAL_TOOL_NAMES: ReadonlySet<string> = new Set([
   "kb-search",
+  // spaces-vespa-search replaced spaces-search as the general search tool
+  // (2026-09-26); corpus-scan and evidence-pack return the same kind of
+  // reason-over-it evidence. Missing from this set they'd take the small
+  // bulk-tool cap and spill behind a 2KB preview — the grounding leak above.
+  "spaces-vespa-search",
+  "spaces-corpus-scan",
+  "spaces-evidence-pack",
+  // Kept so historical results and any not-yet-migrated caller still get the
+  // retrieval cap rather than silently degrading.
   "spaces-search",
   "spaces-research",
   "memory-search",

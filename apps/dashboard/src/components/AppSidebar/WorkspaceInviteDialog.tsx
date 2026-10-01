@@ -12,6 +12,7 @@ interface WorkspaceInviteDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   workspaceId: string | undefined;
+  isCommunityWorkspace: boolean;
 }
 
 const EMAIL_SPLIT_PATTERN = /[\s,;]+/;
@@ -52,6 +53,7 @@ export const WorkspaceInviteDialog = ({
   open,
   onOpenChange,
   workspaceId,
+  isCommunityWorkspace,
 }: WorkspaceInviteDialogProps): ReactElement => {
   const [emailsInput, setEmailsInput] = useState('');
   const [isInviting, setIsInviting] = useState(false);
@@ -106,7 +108,7 @@ export const WorkspaceInviteDialog = ({
           try {
             await apiInstance.post('/invitations', {
               email,
-              role: WorkspaceRole.COMMUNITY_MEMBER,
+              role: isCommunityWorkspace ? WorkspaceRole.COMMUNITY_MEMBER : WorkspaceRole.MEMBER,
               workspaceId,
             });
             return { email };

@@ -15,6 +15,7 @@ import { taskCommandsInternalRouter } from "./routes/task-commands-internal.js";
 import { evalJudgeRouter } from "./routes/eval-judge.js";
 import { evalExtractRouter } from "./routes/eval-extract.js";
 import { entityLlmRouter } from "./routes/entity-llm.js";
+import { chatTitleRouter } from "./routes/chat-title.js";
 import { attachmentsRouter } from "./routes/attachments.js";
 import { litellmModelsRouter } from "./routes/litellm-models.js";
 import { startSessionCleanup, flushAllActiveSessions } from "./session-store.js";
@@ -23,6 +24,7 @@ import { markRunQueueDrainPaused, startRunQueueWorker } from "./run-queue-worker
 import { startLoopWatchdog, stopLoopWatchdog } from "./loop-watchdog.js";
 import { stopRunControlSubscriber } from "./run-control.js";
 import { createLogger } from "./logger.js";
+import { startPodAddressPublisher } from "./run-ownership.js";
 const log = createLogger("main");
 
 const DRAIN_TIMEOUT_MS = Number(process.env["DRAIN_TIMEOUT"] ?? 900) * 1_000;
@@ -81,11 +83,13 @@ app.use(taskCommandsInternalRouter);
 app.use(evalJudgeRouter);
 app.use(evalExtractRouter);
 app.use(entityLlmRouter);
+app.use(chatTitleRouter);
 app.use(attachmentsRouter);
 app.use(litellmModelsRouter);
 
 const server = app.listen(SERVER.port, () => {
   log.info(`[xyne-claw] Server listening on port ${SERVER.port}`);
+  startPodAddressPublisher(SERVER.port);
 });
 
 let shuttingDown = false;

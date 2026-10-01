@@ -1,6 +1,5 @@
 import React, { useContext, useEffect, useMemo, useState } from 'react';
 import { ConversationBadgeContext } from '../../Chat/ConversationPannel/ConversationBadgeContext';
-import { useLocation, useNavigate } from 'react-router-dom';
 import Tooltip from '../Tooltip/Tooltip';
 import { AvatarSize } from '../../UserAvatar/UserAvatar';
 import * as Popover from '@radix-ui/react-popover';
@@ -33,6 +32,7 @@ import { MessageBubbleProps } from './MessageBubble.types';
 import { useAuth } from '../../../hooks/useAuth';
 import { useTheme } from '../../../hooks/useTheme';
 import { useChannel } from '../../../hooks/useChannels';
+import { useIsDmReadOnly } from '../../../hooks/useIsDmReadOnly';
 import { useChannelDisplayName } from '../../../hooks/useChannelDisplayName';
 import { ChannelScopeType, ChannelVisibility } from '@xyne/shared';
 import { usePendingStatusByMessageId } from '@xyne/shared/messages';
@@ -67,15 +67,15 @@ import { NonParticipantActions } from './NonParticipantActions';
 import { PostedInLink } from './PostedInLink';
 import { MessageHeader } from './MessageHeader';
 import { RunOriginChip } from './RunOriginChip';
-import HuddleIcon from '../../icons/HuddleIcon';
-import { MicOn } from '@xyne/icons';
+import { MicOn, PhoneDefault } from '@xyne/icons';
 import workflowBotAvatar from './workflowBotAvatar.png';
 import { downloadAttachment } from '../../Chat/MessageAttachment/utils';
 import { PendingIcon } from '../../../assets/icons/WorkflowIcons';
 import { useIsCallActive } from '../../../hooks/useCalls';
 import { useUsers, useUser } from '../../../hooks/useUsers';
 import { ThreadInfoIndicator, AlsoSentToChannelIndicator } from './ThreadMessageIndicators';
-import { useRouteContext } from '../../../hooks/useRouteContext';
+import { getBaseRoute } from '../../../hooks/useRouteContext';
+import { useStableRouter } from '../../../hooks/useStableRouter';
 import { getUserDisplayName } from '../../../utils/userDisplayName';
 import { StatusIndicator } from '../StatusIndicator';
 import DOMPurify from 'dompurify';
@@ -514,8 +514,14 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
   onUserClick,
 }) => {
   const renderConversationBadge = useContext(ConversationBadgeContext);
-  const navigate = useNavigate();
+  // Route state is read at click time: rendered once per message, subscribing to the router
+  // re-rendered every bubble on every navigation.
+  const stableRouter = useStableRouter();
+  const navigate = stableRouter.navigate;
   const { toggleReaction } = useReactions();
+  // Deactivated 1:1 DM archives are strictly read-only: existing reactions render
+  // but neither their toggle nor the add-reaction picker are interactive.
+  const isDmReadOnly = useIsDmReadOnly(channelId);
   const attachments = message.attachments || [];
   const [showLinkPreview, setShowLinkPreview] = useState(true);
 
@@ -661,8 +667,6 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
   const sender = useUser(message.senderId);
   const originalSender = useUser(forwardedMessageData?.originalSenderId || '');
   const isMe = user?.id === message.senderId;
-  const { baseRoute } = useRouteContext();
-  const location = useLocation();
   const actionableCount = useMemo(
     () => (message.nudgeCounts ?? []).reduce((sum, row) => sum + row.nudgeCount, 0),
     [message.nudgeCounts],
@@ -677,6 +681,8 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
       onUserClick(userId);
       return;
     }
+    const { location } = stableRouter.getSnapshot();
+    const baseRoute = getBaseRoute(location.pathname);
     const isFocusThread = new URLSearchParams(location.search).get('focusThread') === '1';
     const messageConversationId = conversation?.conversationId || message.conversationId;
     const threadSegment =
@@ -696,6 +702,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
     const isThreadReply = conversation?.initialMessageId
       ? conversation.initialMessageId !== message.messageId
       : context === 'thread' && !isFirstInThread;
+    const baseRoute = getBaseRoute(stableRouter.getSnapshot().location.pathname);
     if (window.location.pathname.includes('/chat/dir/threads')) {
       if (isThreadReply) {
         void navigate(
@@ -899,7 +906,8 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
               <div
                 className={`w-8 h-8 rounded-md flex items-center justify-center ${isActiveCall ? 'bg-stage-completed' : 'bg-muted-foreground/10'}`}
               >
-                <HuddleIcon
+                <PhoneDefault
+                  size={16}
                   color={isActiveCall ? 'var(--status-success)' : 'hsl(var(--foreground) / 0.8)'}
                 />
               </div>
@@ -1204,7 +1212,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                           }
                         }
                   }
-                  className={`${isMobile ? 'text-[12px]' : 'text-xs'} text-muted-foreground cursor-pointer hover:underline transition-all duration-150 visual-regression-hide ${searchItemView ? 'ml-auto shrink-0' : ''}`}
+                  className={`${isMobile ? 'text-[12px]' : 'text-xs'} text-muted-foreground cursor-pointer hover:underline transition duration-150 visual-regression-hide ${searchItemView ? 'ml-auto shrink-0' : ''}`}
                 >
                   {searchItemView || context === 'thread'
                     ? formatThreadTimestamp(message.createdAt)
@@ -1453,7 +1461,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                     <div className='flex items-center gap-2 mb-1'>
                       {forwardedMessageData.originalSenderName === 'Xyne Call' ? (
                         <div className='w-5 h-5 rounded-md flex items-center justify-center bg-muted'>
-                          <HuddleIcon color='hsl(var(--muted-foreground))' size={14} />
+                          <PhoneDefault color='hsl(var(--muted-foreground))' size={14} />
                         </div>
                       ) : (
                         forwardedMessageData.originalSenderId && (
@@ -1688,6 +1696,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                   reactionsMd={message.reactions_md}
                   toggleReaction={toggleReaction}
                   messageId={message.messageId}
+                  readOnly={isDmReadOnly}
                 />
               )}
             </div>
@@ -1750,10 +1759,13 @@ export const ReactionView = ({
   reactionsMd,
   toggleReaction,
   messageId,
+  readOnly = false,
 }: {
   reactionsMd: string | null | undefined;
   toggleReaction: (params: { messageId: string; emoji: string; hasReacted: boolean }) => void;
   messageId: string;
+  /** When true, existing reactions render but are non-interactive and the add-reaction picker is hidden. */
+  readOnly?: boolean;
 }): React.ReactNode => {
   const { user } = useAuth();
   const [emojiPickerOpen, setEmojiPickerOpen] = useState(false);
@@ -1874,12 +1886,19 @@ export const ReactionView = ({
               <button
                 type='button'
                 data-testid='message-reaction-chip'
-                className={`inline-flex items-center gap-1 h-6 px-2 rounded-full text-sm cursor-pointer transition-all duration-150 ${
+                disabled={readOnly}
+                className={`inline-flex items-center gap-1 h-6 px-2 rounded-full text-sm transition duration-150 ${
+                  readOnly ? 'cursor-default' : 'cursor-pointer'
+                } ${
                   reaction.userHasReacted
-                    ? 'bg-accent border border-action-primary hover:bg-accent/80'
-                    : 'bg-muted hover:bg-accent'
+                    ? `bg-accent border border-action-primary ${readOnly ? '' : 'hover:bg-accent/80'}`
+                    : `bg-muted ${readOnly ? '' : 'hover:bg-accent'}`
                 }`}
                 onClick={e => {
+                  if (readOnly) {
+                    e.stopPropagation();
+                    return;
+                  }
                   toggleReaction({
                     messageId: messageId,
                     emoji: reaction.emojiName,
@@ -1939,7 +1958,7 @@ export const ReactionView = ({
         })}
 
         {/* Add Reaction */}
-        {isMobile ? (
+        {readOnly ? null : isMobile ? (
           <AddReactionDrawerMobile
             messageId={messageId}
             user={user}
@@ -1952,7 +1971,7 @@ export const ReactionView = ({
             <Popover.Trigger asChild>
               <button
                 type='button'
-                className='inline-flex items-center justify-center w-6 h-6 rounded-full text-muted-foreground bg-muted hover:bg-accent cursor-pointer transition-all duration-150'
+                className='inline-flex items-center justify-center w-6 h-6 rounded-full text-muted-foreground bg-muted hover:bg-accent cursor-pointer transition duration-150'
                 onClick={e => e.stopPropagation()}
                 data-track-category='MESSAGE'
                 data-track-name='OPEN_EMOJI_PICKER'

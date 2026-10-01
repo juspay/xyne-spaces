@@ -1,10 +1,10 @@
-import { randomUUID } from 'node:crypto';
+import { executeTx } from '@/bypassAcl/transactions/summaryTemplateSharingService';
 import { Prisma, type EntityAccess, type SummaryTemplate } from '@prisma/client';
-import { EntityUserAccess, ShareableEntityType } from '@xyne/shared';
+import { ChannelVisibility, EntityUserAccess, ShareableEntityType } from '@xyne/shared';
 import { db } from '@/database/client';
 import {
   summaryTemplateSharingNotificationService,
-  type SummaryTemplateAccessActivity,
+  
 } from './summaryTemplateSharingNotificationService';
 
 export type SummaryTemplateShareTarget =
@@ -49,7 +49,7 @@ const targetWhere = (target: SummaryTemplateShareTarget): Prisma.EntityAccessWhe
       ? { userGroupId: target.id }
       : { channelId: target.id };
 
-const targetData = (
+export const targetData = (
   target: SummaryTemplateShareTarget
 ): { userId: string } | { userGroupId: string } | { channelId: string } =>
   target.type === 'user'
@@ -58,7 +58,53 @@ const targetData = (
       ? { userGroupId: target.id }
       : { channelId: target.id };
 
+export type SummaryTemplateShareLevel = 'view' | 'edit';
+
+/** Only EDIT lets a recipient edit; any other live level reads as view. */
+const toShareLevel = (entityUserAccess: string): SummaryTemplateShareLevel =>
+  entityUserAccess === EntityUserAccess.EDIT ? 'edit' : 'view';
+
 export class SummaryTemplateSharingService {
+  /** Templates shared with a user, each with the strongest level reaching them. */
+  async findSharedTemplateLevels(
+    workspaceId: string,
+    userId: string,
+    templateId?: string
+  ): Promise<Map<string, SummaryTemplateShareLevel>> {
+    const [groupMappings, channelParticipations] = await Promise.all([
+      db.userGroupMapping.findMany({
+        where: { userId },
+        select: { userGroupId: true },
+      }),
+      db.channelParticipant.findMany({
+        where: { userId },
+        select: { channelId: true },
+      }),
+    ]);
+    const userGroupIds = groupMappings.map((mapping) => mapping.userGroupId);
+    const channelIds = channelParticipations.map((participation) => participation.channelId);
+    const shares = await db.entityAccess.findMany({
+      where: {
+        workspaceId,
+        shareableEntityType: ShareableEntityType.SUMMARY_TEMPLATE,
+        entityUserAccess: { not: EntityUserAccess.REVOKED },
+        ...(templateId ? { entityId: templateId } : {}),
+        OR: [
+          { userId },
+          ...(userGroupIds.length ? [{ userGroupId: { in: userGroupIds } }] : []),
+          ...(channelIds.length ? [{ channelId: { in: channelIds } }] : []),
+        ],
+      },
+      select: { entityId: true, entityUserAccess: true },
+    });
+    const levels = new Map<string, SummaryTemplateShareLevel>();
+    for (const share of shares) {
+      if (levels.get(share.entityId) === 'edit') continue;
+      levels.set(share.entityId, toShareLevel(share.entityUserAccess));
+    }
+    return levels;
+  }
+
   async list(
     templateId: string,
     actor: SummaryTemplateSharingActor
@@ -121,59 +167,13 @@ export class SummaryTemplateSharingService {
     action: SummaryTemplateSharingCommand['action'];
     shares: SummaryTemplateShareView[];
   }> {
-    const activities = await this.runTransaction(async (tx) => {
-      const template = await this.loadManageableTemplate(tx, templateId, actor);
-      const targets = [
-        ...new Map(
-          command.targets.map((target) => [`${target.type}:${target.id}`, target])
-        ).values(),
-      ];
-      await this.validateTargets(tx, template, actor.workspaceId, targets);
-
-      const changes: SummaryTemplateAccessActivity[] = [];
-      for (const target of targets) {
-        const existing = await this.findShare(tx, template.id, actor.workspaceId, target);
-        if (command.action === 'grant') {
-          const activated = !existing || existing.entityUserAccess === EntityUserAccess.REVOKED;
-          const share = existing
-            ? await tx.entityAccess.update({
-                where: { id: existing.id },
-                data: { entityUserAccess: EntityUserAccess.VIEW, updatedAt: new Date() },
-              })
-            : await tx.entityAccess.create({
-                data: {
-                  id: randomUUID(),
-                  workspaceId: actor.workspaceId,
-                  shareableEntityType: ShareableEntityType.SUMMARY_TEMPLATE,
-                  entityId: template.id,
-                  entityUserAccess: EntityUserAccess.VIEW,
-                  updatedAt: new Date(),
-                  ...targetData(target),
-                },
-              });
-          if (activated && target.type !== 'channel') {
-            changes.push({ shareId: share.id, action: 'summary_template_shared' });
-          }
-          continue;
-        }
-
-        if (!existing || existing.entityUserAccess === EntityUserAccess.REVOKED) continue;
-        const share = await tx.entityAccess.update({
-          where: { id: existing.id },
-          data: { entityUserAccess: EntityUserAccess.REVOKED, updatedAt: new Date() },
-        });
-        if (target.type !== 'channel') {
-          changes.push({ shareId: share.id, action: 'summary_template_access_revoked' });
-        }
-      }
-      return changes;
-    });
+    const activities = await executeTx(this, templateId, actor, command);
 
     await summaryTemplateSharingNotificationService.publish(actor.userId, activities);
     return { action: command.action, shares: await this.list(templateId, actor) };
   }
 
-  private async loadManageableTemplate(
+  async loadManageableTemplate(
     client: Prisma.TransactionClient | typeof db,
     templateId: string,
     actor: SummaryTemplateSharingActor
@@ -188,12 +188,14 @@ export class SummaryTemplateSharingService {
     return template;
   }
 
-  private async validateTargets(
+  async validateTargets(
     tx: Prisma.TransactionClient,
     template: SummaryTemplate,
-    workspaceId: string,
-    targets: SummaryTemplateShareTarget[]
+    actor: SummaryTemplateSharingActor,
+    targets: SummaryTemplateShareTarget[],
+    action: SummaryTemplateSharingCommand['action']
   ): Promise<void> {
+    const { workspaceId } = actor;
     for (const target of targets) {
       if (target.type === 'user') {
         if (target.id === template.createdBy) {
@@ -215,16 +217,26 @@ export class SummaryTemplateSharingService {
       } else {
         const channel = await tx.channel.findFirst({
           where: { id: target.id, workspaceId },
-          select: { id: true },
+          select: { id: true, visibility: true },
         });
         if (!channel) {
           throw new SummaryTemplateSharingError('Channel not found in this workspace', 400);
+        }
+        // Only a member can share to a private channel; revoking is not restricted.
+        if (action === 'grant' && channel.visibility === ChannelVisibility.PRIVATE) {
+          const membership = await tx.channelParticipant.findFirst({
+            where: { channelId: channel.id, userId: actor.userId },
+            select: { id: true },
+          });
+          if (!membership) {
+            throw new SummaryTemplateSharingError('Channel not found in this workspace', 400);
+          }
         }
       }
     }
   }
 
-  private findShare(
+  findShare(
     tx: Prisma.TransactionClient,
     templateId: string,
     workspaceId: string,
@@ -238,22 +250,6 @@ export class SummaryTemplateSharingService {
         ...targetWhere(target),
       },
     });
-  }
-
-  private async runTransaction<T>(
-    operation: (tx: Prisma.TransactionClient) => Promise<T>
-  ): Promise<T> {
-    for (let attempt = 1; attempt <= 3; attempt += 1) {
-      try {
-        return await db.$transaction(operation, {
-          isolationLevel: Prisma.TransactionIsolationLevel.Serializable,
-        });
-      } catch (error) {
-        const isWriteConflict = (error as { code?: string } | null)?.code === 'P2034';
-        if (!isWriteConflict || attempt === 3) throw error;
-      }
-    }
-    throw new Error('Summary template sharing transaction retry limit exceeded');
   }
 }
 

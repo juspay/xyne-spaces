@@ -64,6 +64,7 @@ class CallNotesCanvasService {
           metadata: {
             source: 'call_notes',
             callId: call.externalId,
+            isRecording: false,
             ...(call.recurringSeriesId && { recurringSeriesId: call.recurringSeriesId }),
           },
         });

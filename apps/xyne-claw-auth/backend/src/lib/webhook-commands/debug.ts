@@ -20,7 +20,7 @@ const MAX_INDEX_DOWNLOADS = 5;
 /** Claw inlines each run's transcript; we render exactly one, newest-first. */
 const CLAW_RUN_LIMIT = 10;
 const NO_TRACE =
-  "🧵 **Debug** — no execution trace has been checkpointed for this run yet — try again in a minute or after it finishes.";
+  "**Debug** — no execution trace has been checkpointed for this run yet — try again in a minute or after it finishes.";
 
 interface ResolvedRun {
   sessionId: string;
@@ -154,7 +154,8 @@ async function fetchFromClaw(ctx: WebhookCommandCtx, run: ResolvedRun): Promise<
   const url =
     `${CONFIG.xyneClawUrl.replace(/\/+$/, "")}/internal/sessions/${encodeURIComponent(run.conversationId)}/debug` +
     `?agentSlug=${encodeURIComponent(run.agentSlug)}&limit=${CLAW_RUN_LIMIT}` +
-    `${run.userId ? `&userId=${encodeURIComponent(run.userId)}` : ""}`;
+    `${run.userId ? `&userId=${encodeURIComponent(run.userId)}` : ""}` +
+    `${run.status === "running" ? `&sessionId=${encodeURIComponent(run.sessionId)}` : ""}`;
   const res = await fetch(url, {
     headers: { ...(CONFIG.xyneClawS2sKey ? { "x-s2s-key": CONFIG.xyneClawS2sKey } : {}) },
     signal: AbortSignal.timeout(Number(process.env["DEBUG_PROXY_TIMEOUT_MS"] ?? 30_000)),
@@ -314,7 +315,7 @@ export async function handleDebug(
   ].filter(Boolean);
 
   const summary =
-    `🧵 **Debug trace** — ${ctx.agent.slug} · session \`${shortId}\` · ${run.status}\n` +
+    `**Debug trace** — ${ctx.agent.slug} · session \`${shortId}\` · ${run.status}\n` +
     `${toolCalls} tool calls · ${llmTurns} LLM turns · ${compactions} compactions` +
     (notes.length > 0 ? ` — ${notes.join(" · ")}` : "") +
     `\n_Earlier sessions in this thread: \`/debug all\`._`;
@@ -390,7 +391,7 @@ async function postSessionBundle(ctx: WebhookCommandCtx, run: ResolvedRun, store
 
   const omitted = total - entries.length;
   const summary =
-    `🧵 **Debug traces** — ${ctx.agent.slug} · ${entries.length} session${entries.length === 1 ? "" : "s"}, newest first\n` +
+    `**Debug traces** — ${ctx.agent.slug} · ${entries.length} session${entries.length === 1 ? "" : "s"}, newest first\n` +
     `Open the file and click a session to expand its timeline.` +
     (omitted > 0 ? ` _(${omitted} older session${omitted === 1 ? "" : "s"} not included.)_` : "");
 

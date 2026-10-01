@@ -14,6 +14,7 @@ import { webhookRouter } from "../routes/webhook.js";
 import { flowActionRouter } from "../routes/flow-action.js";
 import { twinDraftInternalRouter } from "../routes/twin-draft.js";
 import { attachmentsInternalRouter } from "../routes/attachments.js";
+import { appConnectorsInternalRouter } from "../routes/app-connectors-internal.js";
 import { agentsRouter } from "../routes/agents.js";
 import { chainWorkflowsRouter } from "../routes/chain-workflows.js";
 import { spacesRouter } from "../routes/spaces.js";
@@ -39,6 +40,7 @@ import { designSharesRouter, publicDesignSharesRouter } from "../routes/design-s
 import { conversationArtifactsRouter } from "../routes/conversation-artifacts.js";
 import { sessionsArchiveRouter } from "../routes/sessions-archive.js";
 import { surfaceInternalRouter } from "../routes/surface-internal.js";
+import { pagePanelRouter } from "../routes/page-panel.js";
 import { experimentsInternalRouter } from "../routes/experiments-internal.js";
 import { artifactAppsInternalRouter } from "../routes/artifact-apps-internal.js";
 import { errorPipelineIngestRouter, errorPipelineInternalRouter } from "../routes/error-pipeline.js";
@@ -51,6 +53,7 @@ import { docusignOAuthRouter, docusignCallbackRouter } from "../routes/docusign-
 import { egnyteOAuthRouter, egnyteCallbackRouter } from "../routes/egnyte-oauth.js";
 import { miroOAuthRouter, miroCallbackRouter } from "../routes/miro-oauth.js";
 import { webflowOAuthRouter, webflowCallbackRouter } from "../routes/webflow-oauth.js";
+import { clickupOAuthRouter, clickupCallbackRouter } from "../routes/clickup-oauth.js";
 import { wixOAuthRouter, wixCallbackRouter } from "../routes/wix-oauth.js";
 import { attioOAuthRouter, attioCallbackRouter } from "../routes/attio-oauth.js";
 import { mailerliteOAuthRouter, mailerliteCallbackRouter } from "../routes/mailerlite-oauth.js";
@@ -141,6 +144,7 @@ function mountCoreApi(app: Express): void {
   // can't be forged. Was previously fully unauthenticated: anyone could POST a
   // stdio connector whose launch command the gateway then spawned (RCE).
   app.use(`${BASE}/servers`, requireUserAuth, serversRouter);
+  app.use(`${BASE}/surface`, requireUserAuth, pagePanelRouter);
   app.use(`${BASE}/users`, requireAuth, requireNoAccessToken, usersRouter);
   app.use(`${BASE}/users`, requireAuth, requireNoAccessToken, connectionsRouter);
   // NOT behind requireAuth (so requireNoAccessToken never runs here): every
@@ -195,6 +199,7 @@ function mountCoreApi(app: Express): void {
   app.use(`${BASE}/internal/agent-chat`, requireStrictS2S, agentChatInternalRouter); // progress/callback from xyne-claw
   app.use(`${BASE}/internal/twin-draft`, requireInternalS2S, twinDraftInternalRouter);  // Spaces → approve/decline an in-thread Twin reply draft (INTERNAL_S2S_KEY)
   app.use(`${BASE}/internal/attachments`, requireInternalS2S, attachmentsInternalRouter); // Spaces → extract document text via claw's converters (INTERNAL_S2S_KEY)
+  app.use(`${BASE}/internal/app-connectors`, requireInternalS2S, appConnectorsInternalRouter); // Spaces → sdk.connectors: run the viewer's own MCP connection for an artifact app (INTERNAL_S2S_KEY)
   app.use(`${BASE}/internal/surface`, requireStrictS2S, surfaceInternalRouter);       // app-control calls from xyne-claw → the user's desktop window
   app.use(`${BASE}/internal/sessions`, requireStrictS2S, sessionsArchiveRouter);     // archive/restore session JSONLs to GCS — S2S only (transcripts)
   app.use(`${BASE}/internal/experiments`, requireStrictS2S, experimentsInternalRouter);
@@ -235,6 +240,8 @@ function mountOAuthProviders(app: Express): void {
   app.use(BASE, miroCallbackRouter);
   app.use(`${BASE}/users`, requireAuth, requireNoAccessToken, webflowOAuthRouter);
   app.use(BASE, webflowCallbackRouter);
+  app.use(`${BASE}/users`, requireAuth, requireNoAccessToken, clickupOAuthRouter);
+  app.use(BASE, clickupCallbackRouter);
   app.use(`${BASE}/users`, requireAuth, requireNoAccessToken, wixOAuthRouter);
   app.use(BASE, wixCallbackRouter);
   app.use(`${BASE}/users`, requireAuth, requireNoAccessToken, attioOAuthRouter);

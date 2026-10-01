@@ -27,7 +27,9 @@ export const RecordingSharedActivity = ({
   const isChanged = activity.actorAction === 'recording_access_changed';
   const isRecording = call.callType === CallType.HEADLESS;
   const subject = isRecording ? 'recording' : 'call';
-  const targetPath = isRecording ? `/recordings/${call.externalId}` : `/calls/${call.id}/detail`;
+  const targetPath = isRecording
+    ? `/recordings/${call.externalId}`
+    : `/calls/${call.externalId}/detail`;
 
   return (
     <ActivityItemCard

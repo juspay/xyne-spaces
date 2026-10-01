@@ -1,0 +1,8 @@
+apiVersion: v2
+name: workflows
+description: Upgrade workflow and access for Argo Workflows on a Xyne Spaces install
+type: application
+version: 0.1.0
+home: https://github.com/juspay/xyne-spaces
+sources:
+  - https://github.com/juspay/xyne-spaces

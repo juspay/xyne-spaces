@@ -805,7 +805,11 @@ const SearchResults = (): ReactElement => {
       const keyAtClick = fullSearchKeyRef.current;
       void (async (): Promise<void> => {
         try {
-          const channelId = await resolveOrCreateDmChannelId(userId, allChannelsForNav);
+          const channelId = await resolveOrCreateDmChannelId(
+            userId,
+            allChannelsForNav,
+            currentUserId,
+          );
           if (fullSearchKeyRef.current !== keyAtClick) return;
           setSelectedPanel({ kind: 'channel', channelId });
         } catch {
@@ -813,7 +817,7 @@ const SearchResults = (): ReactElement => {
         }
       })();
     },
-    [allChannelsForNav],
+    [allChannelsForNav, currentUserId],
   );
   // Single entry point for a result-card click: resolve what it should do, then do it.
   const openResult = useCallback(

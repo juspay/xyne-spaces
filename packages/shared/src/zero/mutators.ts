@@ -2256,6 +2256,7 @@ export const mutators = defineMutators({
                   entityId: clonedMessageId,
                   entityType: AttachmentEntityType.CHAT,
                   conversationId: conversationId,
+                  channelId: targetChannelId,
                   url: attInfo.fileUrl || attInfo.url || '',
                   originalFilename: attInfo.originalFilename || '',
                   size: attInfo.size || 0,
@@ -3437,6 +3438,7 @@ export const mutators = defineMutators({
               workspaceId: ctx.workspaceId,
               metadata: attachmentMetadata,
               conversationId: conversationId || null,
+              channelId,
               isDeleted: false,
             });
           }

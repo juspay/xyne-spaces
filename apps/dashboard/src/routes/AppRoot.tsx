@@ -13,7 +13,10 @@ import HomeScreen from './HomeScreen';
 import SlackMigration from '../pages/SlackMigration';
 import AuthScreen from './AuthScreen/AuthScreen';
 import CommunityWorkspaceSelectionRoute from './AuthScreen/CommunityWorkspaceSelectionRoute';
+import TermsOfServiceScreen from './TermsOfServiceScreen/TermsOfServiceScreen';
+import PrivacyPolicyScreen from './PrivacyPolicyScreen/PrivacyPolicyScreen';
 import WorkspaceSelectionScreen from './WorkspaceSelectionScreen';
+import SdkSsoAuthorizeScreen from './SdkSsoAuthorizeScreen';
 import QuestionnaireScreen from './QuestionnaireScreen/QuestionnaireScreen';
 import IntentPlaygroundScreen from './IntentPlaygroundScreen';
 import ChatScreen from './ChatScreen/ChatScreen';
@@ -48,6 +51,7 @@ import KanbanBoardScreen from './KanbanBoardScreen/KanbanBoardScreen';
 import MyTicketsScreen from './FilteredTicketsScreen/FilteredTicketsScreen.tsx';
 import ProjectViewBuilder from './ProjectViewsScreen/ProjectViewBuilder';
 import SupportScreen from './SupportScreen/SupportScreen.tsx';
+import { SupportListRestore } from './SupportScreen/SupportListRestore';
 import SaveRoute from '../components/SaveRoute/SaveRoute';
 import CanvasScreen from '../components/Canvas/CanvasScreen';
 import CanvasPanel from '../components/Canvas/CanvasPanel/CanvasPanel';
@@ -107,7 +111,7 @@ import { RouterErrorFallback } from '../components/ErrorBoundary';
 import NotFoundScreen from './NotFoundScreen/NotFoundScreen';
 import ChatRedirect from '../components/Chat/ChatRedirect/ChatRedirect';
 import DirectoryRedirect from '../components/Chat/DirectoryRedirect/DirectoryRedirect';
-import CallHistoryScreen from './CallHistoryScreen/CallHistoryScreen';
+import CallsRoute from './CallsRoute/CallsRoute';
 import CallDetailScreen from './CallDetailScreen/CallDetailScreen';
 import RecordingsRoute from './RecordingsRoute/RecordingsRoute';
 import RecordingDetailRoute from './RecordingDetailRoute/RecordingDetailRoute';
@@ -958,7 +962,7 @@ const AppRoot = (): ReactElement => {
                           <CallFromRecentsHandler />
                           <CloudAgentFloatingHost />
                           <BrowserPanelHandler />
-                          <GlobalCommandMenu aiOverview />
+                          <GlobalCommandMenu aiOverview ticketScreenScope />
                           <ShortcutsHelpModal
                             isOpen={isShortcutsModalOpen}
                             onClose={() => setIsShortcutsModalOpen(false)}
@@ -1688,7 +1692,7 @@ export const router = createBrowserRouter(
                   path: 'calls',
                   element: (
                     <ToolbarProtectedRoute path='/calls'>
-                      <CallHistoryScreen />
+                      <CallsRoute />
                     </ToolbarProtectedRoute>
                   ),
                   children: [
@@ -1765,22 +1769,24 @@ export const router = createBrowserRouter(
                   path: 'support',
                   element: (
                     <ResourceProtectedRoute resourceName='SUPPORT'>
-                      <SaveRoute
-                        keyword='support'
-                        stripSearchParams={['settings', 'openSettings']}
-                        preserveSearchParams={[
-                          'emailConnected',
-                          'emailError',
-                          'channelEmailMailboxConnected',
-                          'deskIntegrations',
-                          'workspaceMailboxConnected',
-                          'email',
-                          'provider',
-                        ]}
-                        redirectOnlyAt={/^\/[^/]+\/support\/?$/}
-                      >
-                        <SupportScreen />
-                      </SaveRoute>
+                      <SupportListRestore>
+                        <SaveRoute
+                          keyword='support'
+                          stripSearchParams={['settings', 'openSettings']}
+                          preserveSearchParams={[
+                            'emailConnected',
+                            'emailError',
+                            'channelEmailMailboxConnected',
+                            'deskIntegrations',
+                            'workspaceMailboxConnected',
+                            'email',
+                            'provider',
+                          ]}
+                          redirectOnlyAt={/^\/[^/]+\/support\/?$/}
+                        >
+                          <SupportScreen />
+                        </SaveRoute>
+                      </SupportListRestore>
                     </ResourceProtectedRoute>
                   ),
                   children: [
@@ -2065,6 +2071,18 @@ export const router = createBrowserRouter(
         {
           path: '/auth',
           element: <AuthScreen />,
+        },
+        {
+          path: '/terms',
+          element: <TermsOfServiceScreen />,
+        },
+        {
+          path: '/privacy',
+          element: <PrivacyPolicyScreen />,
+        },
+        {
+          path: '/sdk-sso/authorize',
+          element: <SdkSsoAuthorizeScreen />,
         },
         {
           path: '/workspaces',

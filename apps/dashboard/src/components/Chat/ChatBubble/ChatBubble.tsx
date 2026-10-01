@@ -1,4 +1,5 @@
 import React, { useState, useRef, useEffect, useId, useMemo } from 'react';
+import { useAskAIAvailable } from '../../../contexts/AskAIAvailabilityContext';
 import { useZero } from '../../../hooks/useZero';
 import { useSummaryCache } from '../../../hooks/useSummaryQuery';
 import { MessageBubble } from '../../ui/MessageBubble/MessageBubble';
@@ -21,7 +22,7 @@ import { ChatInput } from '../ChatInput';
 import { usePin } from '../../../hooks/usePin';
 import { useMessageEdit } from '../../../providers/EditProvider';
 import { toast } from 'sonner';
-import { useNavigate, useParams, useLocation } from 'react-router-dom';
+import { useRouterSelector, useStableNavigate } from '../../../hooks/useStableRouter';
 import {
   MessageType,
   BookmarkEntityType,
@@ -61,6 +62,7 @@ import {
 } from '../ChatList/ChatListUtils';
 import { useUserBookmarks } from '../../../hooks/useUserBookmarks';
 import { useChannel } from '../../../hooks/useChannels';
+import { useIsDmReadOnly } from '../../../hooks/useIsDmReadOnly';
 import { usePlatform } from '../../../hooks/usePlatform';
 import { logger, Event } from '../../../utils/logger';
 import { MessageActionsDrawer } from '../MessageActionsDrawer/MessageActionsDrawer';
@@ -170,6 +172,8 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
   afterTextContent,
 }) => {
   const { user } = useAuthContext();
+  // Off inside hosts that embed chat for one purpose (the related-context popup).
+  const askAIAvailable = useAskAIAvailable();
   const { copyImage } = useClipboard();
   const [isCreateTicketModalOpen, setIsCreateTicketModalOpen] = useState(false);
   const [isSubTicketModalOpen, setIsSubTicketModalOpen] = useState(false);
@@ -182,10 +186,16 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
   const zero = useZero();
   const { onMessageChange } = useSummaryCache();
   const { togglePin } = usePin();
-  const navigate = useNavigate();
+  const navigate = useStableNavigate();
   const shareableOrigin = useShareableOrigin();
-  const location = useLocation();
-  const { conversationId } = useParams<{ conversationId?: string }>();
+  // Router state through narrow selectors: rendered once per message, this component
+  // otherwise re-rendered on every navigation anywhere in the app.
+  const locationHash = useRouterSelector(snapshot => snapshot.location.hash);
+  // A repeat navigation to the same hash has to re-flash the highlight.
+  const hashNavigationKey = useRouterSelector(snapshot =>
+    snapshot.location.hash ? snapshot.location.key : '',
+  );
+  const conversationId = useRouterSelector(snapshot => snapshot.params['conversationId']);
   const { isEditingMessage, requestEdit, stopEditing } = useMessageEdit();
   // channelHasBoards rides on the context rather than a per-bubble query: it is
   // constant per channel and this component renders once per message.
@@ -210,8 +220,8 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
   const [isHighlighted, setIsHighlighted] = useState(false);
 
   useEffect(() => {
-    const highlightedConversationId = linkedConversationId ?? extractOriginFromHash(location.hash);
-    const highlightedMessageId = extractMessageIdFromHash(location.hash);
+    const highlightedConversationId = linkedConversationId ?? extractOriginFromHash(locationHash);
+    const highlightedMessageId = extractMessageIdFromHash(locationHash);
 
     let shouldHighlight = false;
     if (context === 'thread') {
@@ -235,8 +245,8 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
       setIsHighlighted(false);
     }
   }, [
-    location.key,
-    location.hash,
+    hashNavigationKey,
+    locationHash,
     linkedConversationId,
     highlightMessageId,
     context,
@@ -1014,13 +1024,19 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
       </>
     ) : undefined;
 
+  // A DM whose other participant is deactivated is an archive: no reactions, no
+  // edits, no thread replies — hide the hover toolbar and the mobile actions
+  // drawer entirely. The composer above is already replaced with a banner in
+  // ConversationPanelV2, so this closes the remaining write paths from the row.
+  const isDmReadOnly = useIsDmReadOnly(channelId);
   const canShowHoverToolbar =
     !isMobile &&
     !searchItemView &&
     variant !== 'pinned' &&
     !isMentionUserAddition &&
     !isTicketActivity &&
-    !isCurrentEditing;
+    !isCurrentEditing &&
+    !isDmReadOnly;
 
   // No dependency array on purpose: re-registering is a cheap Map.set and this
   // keeps the registered handlers/capabilities in sync with the latest render.
@@ -1122,6 +1138,7 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
           onPinMessage: handlePinMessage,
         }),
       ...(!disableAskAI &&
+        askAIAvailable &&
         ((conversation && (context === 'channel' || isFirstInThread)) || isCallMessage) &&
         (!isSystemMessage || isCallMessage) &&
         !isMessageDeleted && { onAskAI: handleAskAI }),
@@ -1217,6 +1234,20 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
         // every sub-layout (message, link/canvas previews, reply layout) is
         // covered uniformly and stays in sync with the toolbar.
         'data-[hovered]:bg-muted/50',
+        // Keyboard navigation adds an outline on top of the same tint, so a
+        // selected row and a hovered row can be on screen together and stay
+        // distinct. The outline is drawn by an ::after overlay rather than a
+        // ring on the root: an inset ring paints on the root's own background
+        // layer, which rows that bring their own backgrounds — pinned (plus
+        // its status bar), bookmarked, system — then cover. The overlay is the
+        // row's last child, so it sits above them; z-10 clears descendants
+        // that raise themselves, and pointer-events-none keeps clicks and
+        // hover actions reaching the message underneath.
+        'data-[keyboard-selected]:bg-muted/50',
+        'data-[keyboard-selected]:after:pointer-events-none data-[keyboard-selected]:after:absolute',
+        'data-[keyboard-selected]:after:inset-0 data-[keyboard-selected]:after:z-10',
+        'data-[keyboard-selected]:after:rounded-sm data-[keyboard-selected]:after:ring-2',
+        'data-[keyboard-selected]:after:ring-inset data-[keyboard-selected]:after:ring-primary',
       )}
       style={
         isMobile
@@ -1402,7 +1433,7 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
             />
           )}
           {/* Mobile Actions Drawer */}
-          {isMobile && !searchItemView && isActionsDrawerOpen && (
+          {isMobile && !searchItemView && isActionsDrawerOpen && !isDmReadOnly && (
             <MessageActionsDrawer
               open
               onOpenChange={handleActionsDrawerOpenChange}
@@ -1469,6 +1500,7 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
                   onPinMessage: handlePinMessage,
                 })}
               {...(!disableAskAI &&
+                askAIAvailable &&
                 ((conversation && (context === 'channel' || isFirstInThread)) || isCallMessage) &&
                 (!isSystemMessage || isCallMessage) &&
                 !isMessageDeleted && { onAskAI: handleAskAI })}

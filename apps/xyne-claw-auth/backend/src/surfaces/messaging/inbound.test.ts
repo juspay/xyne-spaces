@@ -7,7 +7,12 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
 
 const enqueueOutbound = vi.fn(async (_accountId: string, _item: Record<string, unknown>) => undefined);
-const dispatchChannelRun = vi.fn(async (_input: Record<string, unknown>) => "sess-1");
+const dispatchChannelRun = vi.fn(
+  async (_input: Record<string, unknown>) =>
+    ({ kind: "dispatched", sessionId: "sess-1" }) as
+      | { kind: "dispatched"; sessionId: string }
+      | { kind: "queued"; accepted: boolean; notice: string },
+);
 const resolveIdentity = vi.fn(async (_input: Record<string, unknown>) => "user-1" as string | null);
 const redisStore = new Map<string, string>();
 
@@ -43,7 +48,7 @@ vi.mock("./delivery.js", () => ({
 }));
 // Mocked outright, not partially: dispatch.ts reaches object storage at import
 // time, which a unit test has no business standing up.
-vi.mock("./dispatch.js", () => ({ dispatchChannelRun }));
+vi.mock("./busy.js", () => ({ dispatchOrQueueChannelRun: dispatchChannelRun }));
 vi.mock("./approvals.js", () => ({ redeemApproval: vi.fn() }));
 vi.mock("./agent-tools.js", () => ({ agentActionGatesOf: () => ({ sendToOtherChats: false, reactions: true, listGroups: true }) }));
 vi.mock("./identity.js", () => ({ resolveIdentity }));
@@ -53,6 +58,7 @@ vi.mock("./store.js", () => ({
   listOrgAgents: async () => [],
 }));
 vi.mock("xyne-claw-shared", () => ({ isAgentInvocableBy: () => true }));
+vi.mock("./shared-number.js", () => ({ accountForSender: async (ctx: { account: unknown }) => ctx.account }));
 
 const { handleInbound } = await import("./inbound.js");
 
@@ -119,6 +125,24 @@ describe("handleInbound", () => {
     });
   });
 
+  it("tells the person when a message waits behind a running reply", async () => {
+    dispatchChannelRun.mockResolvedValueOnce({ kind: "queued", accepted: true, notice: "wrapping up first" });
+    await handleInbound(ctx, msg({ text: "and the staging one?" }));
+    await settle();
+    const texts = enqueueOutbound.mock.calls.map((c) => c[1]).filter((item) => item["kind"] === "text");
+    expect(texts).toEqual([expect.objectContaining({ text: "wrapping up first" })]);
+    expect(enqueueOutbound.mock.calls.some((c) => c[1]["kind"] === "typing" && c[1]["on"] === false)).toBe(false);
+    expect([...redisStore.keys()].some((k) => k.includes(":run:"))).toBe(false);
+  });
+
+  it("stops typing when a busy chat could not take the message", async () => {
+    dispatchChannelRun.mockResolvedValueOnce({ kind: "queued", accepted: false, notice: "queue full" });
+    await handleInbound(ctx, msg({ text: "one more" }));
+    await settle();
+    expect(enqueueOutbound.mock.calls.some((c) => c[1]["kind"] === "typing" && c[1]["on"] === false)).toBe(true);
+    expect(enqueueOutbound.mock.calls.some((c) => c[1]["kind"] === "text" && c[1]["text"] === "queue full")).toBe(true);
+  });
+
   it("answers three quick lines as three turns, in order", async () => {
     // Each line is its own run, so none of them sees the others. What the
     // per-chat queue guarantees is the ORDER, not that they are merged.
@@ -139,6 +163,19 @@ describe("handleInbound", () => {
     await handleInbound(ctx, msg({ text: "   " }));
     await settle();
     expect(dispatchChannelRun).not.toHaveBeenCalled();
+  });
+
+  it("asks what to do when only tagged, without leaving typing on", async () => {
+    const openGroups = {
+      account: { ...(account as object), config: { label: "mine", dmPolicy: "linked", groupPolicy: "open", requireMention: true, channel: {} } },
+      plugin,
+    } as never;
+    await handleInbound(openGroups, msg({ text: "", isGroup: true, chatId: "g@g.us", mentionedSelf: true }));
+    await settle();
+    expect(dispatchChannelRun).not.toHaveBeenCalled();
+    const items = enqueueOutbound.mock.calls.map((c) => c[1] as { kind?: string; text?: string });
+    expect(items.map((i) => i.text)).toContain("What would you like /assistant to do?");
+    expect(items.some((i) => i.kind === "typing")).toBe(false);
   });
 
   it("handles the same message id only once", async () => {

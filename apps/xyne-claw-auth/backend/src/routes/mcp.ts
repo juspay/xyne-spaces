@@ -72,11 +72,13 @@ import {
 import { requiresGatewayToolApproval } from "../mcpgateway/tool-approval.js";
 import { buildAgentCallProposalFlow, parseToolsConfig, type AgentToolsConfig } from "xyne-claw-shared";
 import { visibleAgentWhereForRunningUser } from "../lib/callable-agent-resolver.js";
+import { loadKnownMcpTools } from "../lib/mcp-tool-name-index.js";
 import { isClawAdmin } from "../middleware/agent-acl.js";
 import {
   buildSubagentToolRefs,
   filterMcpServerToolsForAgentConfig,
   isMcpToolAllowedByAgentConfig,
+  mcpServerMayServeAgentConfig,
   shouldBypassMcpToolAgentFilter,
   subagentReferencingTool,
   type SubagentToolRefs,
@@ -589,6 +591,30 @@ function enforcementLogTypeForEntry(entry: ListEntry): EnforcementLogType {
 
 function serverToolsKey(serverType: string, serverName: string): string {
   return `${serverType}\u0000${serverName}`;
+}
+
+async function serverTypesAgentCannotUse(
+  entries: ListEntry[],
+  userId: string,
+  config: AgentToolsConfig | undefined,
+  sessionAgentTools: { slug: string; subagentToolRefs: SubagentToolRefs[] } | null | undefined,
+): Promise<Set<string>> {
+  const skipped = new Set<string>();
+  if (!config || !sessionAgentTools) return skipped;
+  const known = await loadKnownMcpTools(userId, [...new Set(entries.map((e) => e.serverType))]);
+  for (const entry of entries) {
+    if (CUSTOM_TOOL_INJECTIONS.some((inj) => inj.match(entry.serverType))) continue;
+    const keep = mcpServerMayServeAgentConfig({
+      config,
+      serverType: entry.serverType,
+      serverName: entry.serverName,
+      knownTools: known.get(entry.serverType) ?? null,
+      parseGatewayServerType,
+      subagentRefs: sessionAgentTools.subagentToolRefs,
+    });
+    if (!keep) skipped.add(entry.serverType);
+  }
+  return skipped;
 }
 
 function enforceMcpToolsListing(
@@ -1174,8 +1200,17 @@ router.get("/:sessionId/mcp/tools", async (req: Request<{ sessionId: string }>, 
       }
     }
 
+    const prefilterSkips = await serverTypesAgentCannotUse(entries, userId, strictAgentToolsConfig, sessionAgentTools);
+    const listingEntries = entries.filter((entry) => !prefilterSkips.has(entry.serverType));
+    if (prefilterSkips.size > 0) {
+      log.info(
+        `[mcp/tools] prefilter agent=${sessionAgentTools?.slug ?? "-"} ` +
+        `entries=${entries.length} skip=${prefilterSkips.size} [${[...prefilterSkips].join(",")}]`,
+      );
+    }
+
     const results = await Promise.allSettled(
-      entries.map(async (entry) => {
+      listingEntries.map(async (entry) => {
         if (!(await hasConnectorDefinition(entry.serverType))) return null;
         const effective = entry.serverType === "slack"
           ? await loadEffectiveCredentialsWithSpacesFallback(

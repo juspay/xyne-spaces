@@ -30,7 +30,7 @@
 
 import { Redis } from "ioredis";
 import { randomUUID } from "node:crypto";
-import { hostname } from "node:os";
+import { hostname, networkInterfaces } from "node:os";
 import { createLogger } from "./logger.js";
 
 const clog = createLogger("run-ownership");
@@ -41,6 +41,7 @@ export const POD_ALIVE_TTL_SECONDS = 120;
 export const POD_ALIVE_REFRESH_INTERVAL_MS = 30_000;
 export const OWNER_KEY_PREFIX = "claw:run-owner:";
 export const POD_ALIVE_KEY_PREFIX = "claw:pod-alive:";
+export const POD_ADDR_KEY_PREFIX = "claw:pod-addr:";
 
 let client: Redis | null = null;
 let disabled = false;
@@ -56,6 +57,57 @@ export function podAliveKey(pod: string): string {
 
 export function podName(): string {
   return process.env["POD_ID"] ?? hostname();
+}
+
+export function podAddrKey(pod: string): string {
+  return `${POD_ADDR_KEY_PREFIX}${pod}`;
+}
+
+function ownIpv4(): string | null {
+  const fromEnv = process.env["POD_IP"]?.trim();
+  if (fromEnv) return fromEnv;
+  for (const addrs of Object.values(networkInterfaces())) {
+    for (const addr of addrs ?? []) {
+      if (addr.family === "IPv4" && !addr.internal) return addr.address;
+    }
+  }
+  return null;
+}
+
+let podAddrTimer: ReturnType<typeof setInterval> | null = null;
+
+export function startPodAddressPublisher(port: number): void {
+  if (podAddrTimer) return;
+  const ip = ownIpv4();
+  if (!ip) {
+    clog.warn("[run-ownership] no non-internal IPv4 found — pod address not published; /debug cannot be routed to this pod");
+    return;
+  }
+  const url = `http://${ip}:${port}`;
+  const publish = async (): Promise<void> => {
+    const c = getClient();
+    if (!c) return;
+    try {
+      await c.set(podAddrKey(podName()), url, "EX", POD_ALIVE_TTL_SECONDS);
+    } catch (err) {
+      warnFailOpen("pod-addr", err);
+    }
+  };
+  void publish();
+  podAddrTimer = setInterval(() => { void publish(); }, POD_ALIVE_REFRESH_INTERVAL_MS);
+  podAddrTimer.unref();
+}
+
+export async function podAddress(pod: string): Promise<string | null> {
+  const c = getClient();
+  if (!c) return null;
+  try {
+    const value = await c.get(podAddrKey(pod));
+    return typeof value === "string" && value.length > 0 ? value : null;
+  } catch (err) {
+    warnFailOpen("pod-addr-read", err);
+    return null;
+  }
 }
 
 export function ownerPodFromToken(token: string): string | null {

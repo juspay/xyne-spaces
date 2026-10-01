@@ -1,7 +1,7 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { RenderMessageWithHTML } from '../RenderMessageWithHTML/RenderMessageWithHTML';
+import { ExpandableMessageContext } from './ExpandableMessageContext';
 import { MaximizeTwoArrow } from '@xyne/icons';
-import useMeasure from '../../../hooks/useMeasure';
 
 interface ExpandableMessageProps {
   message?: string;
@@ -37,28 +37,43 @@ export const ExpandableMessage: React.FC<ExpandableMessageProps> = ({
   const [shouldShowButton, setShouldShowButton] = useState(false);
   const contentRef = useRef<HTMLDivElement>(null);
 
-  // Use ResizeObserver via useMeasure hook for reliable size detection
-  const { height: contentHeight } = useMeasure({ ref: contentRef, observeResize: true });
-
+  // Measure only after layout: a sync read here forced a style recalc per mounted message.
+  // Re-subscribing on `message` re-measures, since `observe()` delivers an initial entry.
   useEffect(() => {
-    if (contentRef.current) {
-      const fullHeight = contentRef.current.scrollHeight;
+    const node = contentRef.current;
+    if (!node) return undefined;
+    const observer = new ResizeObserver((): void => {
       // Add a small buffer to account for rounding errors
-      setShouldShowButton(fullHeight > maxHeight + 10);
-    }
-  }, [contentHeight, message, maxHeight]);
+      setShouldShowButton(node.scrollHeight > maxHeight + 10);
+    });
+    observer.observe(node);
+    return (): void => observer.disconnect();
+  }, [message, maxHeight]);
 
   const toggleExpanded = () => {
     setIsExpanded(!isExpanded);
   };
 
-  return (
+  // Blocks inside the message that collapse themselves (long code blocks) report
+  // when the user expands them. That already expands the message, so don't clip
+  // it or show a second toggle while any of them is open.
+  const [expandedChildCount, setExpandedChildCount] = useState(0);
+  const childContext = useMemo(
+    () => ({
+      setChildExpanded: (expanded: boolean) =>
+        setExpandedChildCount(count => Math.max(0, count + (expanded ? 1 : -1))),
+    }),
+    [],
+  );
+  const hasExpandedChild = expandedChildCount > 0;
+
+  const content = (
     <div className={`expandable-message relative ${className}`}>
       <div
         ref={contentRef}
-        className='transition-all duration-300 ease-in-out overflow-hidden'
+        className='overflow-hidden'
         style={{
-          maxHeight: isExpanded ? 'none' : `${maxHeight}px`,
+          maxHeight: isExpanded || hasExpandedChild ? 'none' : `${maxHeight}px`,
         }}
       >
         {children !== undefined ? (
@@ -77,7 +92,7 @@ export const ExpandableMessage: React.FC<ExpandableMessageProps> = ({
         )}
       </div>
 
-      {shouldShowButton && (
+      {shouldShowButton && !hasExpandedChild && (
         <div
           className={
             isExpanded
@@ -106,5 +121,11 @@ export const ExpandableMessage: React.FC<ExpandableMessageProps> = ({
         </div>
       )}
     </div>
+  );
+
+  return (
+    <ExpandableMessageContext.Provider value={childContext}>
+      {content}
+    </ExpandableMessageContext.Provider>
   );
 };

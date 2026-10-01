@@ -1,0 +1,65 @@
+name: Create Daily Branch
+
+# Manually triggered. Cuts a branch named release-<today> (UTC, e.g.
+# release-20260930) from the latest main and pushes it to origin. Fails
+# loudly if the branch already exists so we never overwrite one.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+# Only one cut may run at a time.
+concurrency:
+  group: create-daily-branch
+  cancel-in-progress: false
+
+jobs:
+  create-daily-branch:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout main
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Compute branch name
+        id: name
+        run: |
+          BRANCH_NAME="release-$(date -u +'%Y%m%d')"
+          echo "Branch: ${BRANCH_NAME}"
+          echo "branch_name=${BRANCH_NAME}" >> "$GITHUB_OUTPUT"
+
+      - name: Fail if branch already exists on origin
+        env:
+          BRANCH_NAME: ${{ steps.name.outputs.branch_name }}
+        run: |
+          set -euo pipefail
+          if git ls-remote --exit-code --heads origin "refs/heads/${BRANCH_NAME}" >/dev/null 2>&1; then
+            echo "::error::Branch ${BRANCH_NAME} already exists on origin. Refusing to overwrite."
+            exit 1
+          fi
+          echo "No existing branch named ${BRANCH_NAME}. Proceeding."
+
+      - name: Create and push branch from latest main
+        env:
+          BRANCH_NAME: ${{ steps.name.outputs.branch_name }}
+        run: |
+          set -euo pipefail
+          MAIN_SHA="$(git rev-parse HEAD)"
+          echo "Cutting ${BRANCH_NAME} from main @ ${MAIN_SHA}"
+          git push origin "${MAIN_SHA}:refs/heads/${BRANCH_NAME}"
+          echo "Pushed ${BRANCH_NAME} @ ${MAIN_SHA}"
+
+      - name: Summary
+        if: success()
+        env:
+          BRANCH_NAME: ${{ steps.name.outputs.branch_name }}
+        run: |
+          {
+            echo "### Daily branch cut :rocket:"
+            echo ""
+            echo "- **Branch:** \`${BRANCH_NAME}\`"
+            echo "- **From:** \`main\`"
+          } >> "$GITHUB_STEP_SUMMARY"

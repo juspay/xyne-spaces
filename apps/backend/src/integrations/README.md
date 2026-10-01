@@ -249,6 +249,179 @@ Both connect paths — this API and APP-channel creation — go through one repo
 
 When an install's `desk:write` grant is revoked (`activateInstalledPermissions` or app update via `syncFromAppApproved`), its `app-desk` sources are set `isActive=false` (hook: `AppPermissionRepository.deactivateAppDeskSourcesIfDeskWriteLost`), so the UI shows the desk as disconnected. There is no app-uninstall flow to hook — none exists in the API surface today; inbound remains protected per call by `requirePermission`.
 
+### History export API (app implements, Xyne calls)
+
+The desk fetch button can pull history from each connected app in addition to the mailbox. The app exposes one endpoint; Xyne paginates it with the same HMAC secret used for outbound webhooks.
+
+**An app does not have to match Xyne's shape.** Both how the endpoint paginates and how its response is read are part of the per-install config, so an app with an existing export API is configured rather than changed.
+
+**The endpoint is configured per install, not derived.** A workspace admin sets it on Apps → Installed → Edit → History fetch, which stores a JSON config in `installed_apps.fetchConfig` (`AppFetchConfigSchema` in `apps/core/appFetchConfig.ts`): URL, method, headers, encoding, body, timeout, pagination mode and response mapping. An install with no config cannot be fetched from — there is no default endpoint.
+
+The config is deliberately the **same shape as an automation's `TRIGGER_WEBHOOK` step**, and the dashboard reuses that step's form. Two fields are narrowed, because this is a read rather than an arbitrary API call:
+
+- **Method is `POST` (default) or `GET` only.** `PUT`, `PATCH` and `DELETE` mean "change this resource", which an export never does — and a `DELETE` aimed at a mistyped URL would issue a signed destructive request once per page.
+- **No `responseSchema`.** That field declares a shape for *later automation steps* to read; nothing runs downstream of a fetch. Reading the app's response is the job of `response` below, which is a different thing: a mapping Xyne applies, not a shape the author declares for someone else.
+
+Two are added, because a fetch walks pages of a response where an automation reads one once: **`pagination`** (with `pageSize`) and **`response`**. Both are covered under [Response](#response).
+
+**One config serves every channel.** An app installed once is typically connected to several desk channels. Rather than holding a config per channel, Xyne sends the channel in the request and the app branches on it.
+
+#### Request
+
+The body is a **template string** in which `{{...}}` references are substituted, exactly as in an automation's webhook body. It is sent as the request body for `POST`; a `GET` sends no body, so its parameters go in the URL, which is templated the same way. A typical body:
+
+```json
+{
+  "startDate": "{{fetch.startDate}}",
+  "endDate": "{{fetch.endDate}}",
+  "cursor": "{{fetch.cursor}}",
+  "limit": 200,
+  "channelId": "{{channel.id}}",
+  "sourceId": "{{source.id}}",
+  "installedAppId": "{{installedApp.id}}"
+}
+```
+
+| Reference | Meaning |
+| --- | --- |
+| `{{fetch.startDate}}` / `{{fetch.endDate}}` | Window bounds, ISO 8601 |
+| `{{fetch.cursor}}` | Page cursor — **cursor pagination only**; empty string on the first page |
+| `{{fetch.offset}}` / `{{fetch.limit}}` | Rows already requested, and the page size — **offset pagination only** |
+| `{{channel.id}}` / `{{channel.name}}` | Desk channel being fetched into |
+| `{{source.id}}` | This app↔channel connection (`external_sources.id`) |
+| `{{installedApp.id}}` / `{{app.id}}` / `{{workspace.id}}` | Identity of the install, app and workspace |
+
+The cursor and offset variables are mutually exclusive — the config screen only offers the ones live in the selected mode, because the others always render empty or zero.
+
+Two things matter to an implementer:
+
+- **Substitution is textual.** The template is a string, so quoting is the author's: `"limit": 200` sends a number, `"limit": "200"` sends a string.
+- **An unresolved reference renders empty, it does not vanish.** The first request sends `"cursor": ""`, not an absent key, so **an app must treat an empty cursor as "start from the beginning"**. Same for a `GET`: the query carries `cursor=`.
+
+Headers may also contain references. Values of sensitive headers (`Authorization` and friends, plus anything named in `secretHeaders`) are encrypted at rest with the same helpers automations use, and are served back to the config screen redacted.
+
+#### Authentication
+
+Headers on every request: `X-Xyne-Timestamp` (epoch seconds), `X-Xyne-Request-Signature` (hex HMAC-SHA256), `X-Source: XyneSpaces`, `X-Xyne-Installed-App-Id` and `X-Xyne-Channel-Id`.
+
+The signed string is:
+
+```
+`${timestamp}\n${METHOD}\n${host}\n${pathWithQuery}\n${installedAppId}\n${channelId}\n${sha256Hex(rawBody)}`
+```
+
+**The body hash is part of the canonical string** — the last line, and the SHA-256 of the empty string for a bodyless request (every `GET`). It binds the payload to the signature: the body carries the channel id and the date window, so signing only the path would let a captured request be replayed against a different channel inside the skew window. `pathWithQuery` is signed exactly as sent, so a `GET` must be verified against the query string as received. This scheme is separate from the body-only `X-Xyne-Signature` webhook scheme; the shared secret is the same. Verify with a ±5 min skew window.
+
+##### Scope the export to the signed identity, not to the body
+
+> **Your signing secret is per APP, not per install.** Every workspace that installs your app is verified with the same key, and the request's URL and body are written by whichever workspace admin configured the fetch. A signature therefore proves *"Xyne sent this"* — on its own it does **not** prove which tenant asked for it.
+>
+> `X-Xyne-Installed-App-Id` and `X-Xyne-Channel-Id` are what carry that. Xyne sets both from its own record of the install; a fetch config cannot set or template them, and both are covered by the signature. **Scope every export to the install and channel in those headers, and ignore any ids the body names** — otherwise an admin in one workspace can hardcode another workspace's channel id in the body template and receive that tenant's history.
+>
+> `host` is signed for the same reason: without it, a config pointed at an attacker-controlled server yields a signature that still verifies when replayed against your real endpoint inside the skew window. Reject a request whose `Host` does not match the host you serve.
+
+Xyne applies its own headers **last**, so a stored header can never shadow the signature, `X-Source` or the content type. The signing secret itself is never part of the config: it is read from the app server-side at request time.
+
+#### Testing a config
+
+`POST /api/apps/installed/:installedAppId/fetch-config/test` (the **Test fetch** button) sends one real signed request over a recent 24-hour window and **ingests nothing**. It reports the rendered request, the status, and whether the response can be read through the configured mapping — a `200` in the wrong shape is reported as a failure, since it would fail the same way inside the worker. Pass a `config` in the body to test unsaved form state, and an optional `channelId` to render `{{channel.*}}` and `{{source.id}}` for a real desk.
+
+#### Response
+
+An app returning Xyne's own shape needs no mapping at all:
+
+```json
+{ "messages": [ { "externalId", "externalThreadId", "subject", "body",
+                  "sender": { "email", "name" }, "recipients", "sentAt",
+                  "additionalFormFields": { "orderId": "123" },
+                  "attachments": [ { "fileName": "receipt.pdf",
+                                     "fileUrl": "https://…", "mimeType", "size" } ] } ],
+  "nextCursor": "…" }
+```
+
+Anything else is described by `response` in the config (`AppFetchResponseMappingSchema`), which is applied before any of the ingest logic sees a message:
+
+| Setting | Meaning |
+| --- | --- |
+| `messagesPath` | Dot path to the message array. **Empty means the response is a bare array.** |
+| `nextCursorPath` | Dot path to the continuation token. Cursor pagination only. |
+| `fields.*` | Where each Xyne field lives on the app's item. Dot paths, so `meta.createdAt` is fine. |
+| `idFields` | Paths combined (joined with `\|`) into the deduplication id. Empty uses `fields.externalId` alone. |
+
+Only **`externalId` and `sentAt`** are mandatory per message; everything else degrades (a missing sender falls back to the desk owner, a missing subject to `(no subject)`). A mapping pointing at a field the app does not send fails with that path named, so the **Test fetch** button reports `message 3 has no timestamp at "meta.createdAt"` rather than a generic shape error. `sampleMessage` in the test result is the **mapped** message, which is where a wrong path shows up.
+
+##### Custom form fields and attachments (both optional)
+
+These two exist so a **pulled** ticket lands the same way a **pushed** one does (`POST /api/apps/tickets/appDeskInbound`). Send them and Xyne runs the same code the push endpoint runs; omit them and nothing happens.
+
+- **`additionalFormFields`** — an object of the app's own field names to values, mapped onto the desk board's custom fields exactly as the push endpoint's `additionalFormFields` is. The values also feed the desk's **duplicate-scope** rule, so a rule like "same Order ID" matches on pulled history too. Non-string values are kept. Per-field problems (a name the board's form does not have) are logged and skipped — they never fail the message.
+- **`attachments`** — an array of `{ fileName, fileUrl, mimeType?, size? }`. `fileName` and `fileUrl` are both required; entries missing either are dropped. The push endpoint takes attachments as `multipart/form-data` file parts, which a JSON export cannot carry, so the pull side takes URLs and Xyne GETs each one — the same downloader Slack and Zoho go through.
+
+  **Xyne sends no credentials on that GET.** An app whose files are not public must issue pre-signed or otherwise unguessable URLs. A download that fails is logged and the message is still ingested without it.
+
+  `fileUrl` is app-supplied, so it is fetched through the same SSRF guard as the export URL itself (`safeWebhookFetch`): the host is DNS-pinned and refused if it resolves to a private, loopback, link-local or cloud-metadata address, and redirects are **not** followed — a 3xx is a URL the guard has not validated, so the attachment is dropped rather than chased. At most 20 attachments per message and 25MB each are taken; the rest are skipped with a warning, because neither number is bounded by the 32MB page limit.
+
+Neither field can be used in `idFields`: a dedup path is read as a scalar, and an object or array yields no value, so every row would be rejected as "dedup key incomplete". The config UI leaves them out of the dedup-key picker for that reason.
+
+##### Why `idFields` exists
+
+Xyne deduplicates on `(externalSourceId, externalId)`. An app's own id is not always unique on its own: an auto-reply or canned-option message commonly carries its **template** id, so the same value legitimately appears on every ticket that used it. Left alone, the first occurrence would be ingested and every later copy discarded as a duplicate — silently, and in proportion to how many tickets use canned replies.
+
+Listing the jointly-unique fields fixes this without asking the app to change its ids. For an API whose rows are unique on thread + id + timestamp:
+
+```
+idFields: ["threadId", "externalId", "additionalFormFields.messageCreatedAt"]
+```
+
+##### Pagination
+
+`pagination` selects how Xyne walks pages. Both modes are sequential — page N+1 is only requested once page N is persisted.
+
+**`cursor`** (default) — the app returns an opaque token at `nextCursorPath` and Xyne echoes it back verbatim as `{{fetch.cursor}}`. Its absence marks the terminal page. Pages must be oldest-first and the cursor must strictly advance (never revisit older items). Mid-export arrivals at the old end must *not* be included — the `startDate..endDate` window is fixed.
+
+**`offset`** — for apps with no continuation token. Xyne sends `{{fetch.offset}}` and `{{fetch.limit}}`, then advances the offset by the configured `pageSize` itself. **An empty page is the only end-of-data signal**, so the app must return an empty array past the end rather than repeating the last page. `pageSize` must match the limit the app is actually sent, since it is also the increment. Note that some apps count `limit` in *threads* rather than messages; that is fine — the offset advances in whatever unit the app paginates by, and Xyne only cares that pages are disjoint and eventually empty.
+
+Either way the run also stops on the page cap, the wall-clock budget, or a throttle it cannot wait out; progress is parked (the cursor, or the offset) and the next Fetch resumes from it.
+
+##### Worked example: an existing offset-paginated API
+
+An app already exposes `GET /issues?startDate=&endDate=&limit=&offset=` behind a bearer token, returning a **bare array** whose items use their own field names and nest the timestamp. No change on their side; the config absorbs all of it:
+
+```
+Method      GET
+URL         https://app.example.com/issues?startDate={{fetch.startDate}}&endDate={{fetch.endDate}}&limit={{fetch.limit}}&offset={{fetch.offset}}
+Auth        Bearer  (stored encrypted, redacted in the UI; Xyne's signature is sent as well)
+Pagination  offset,  pageSize 50
+
+response.messagesPath   ""                       (bare array)
+response.fields.externalId        externalId
+response.fields.externalThreadId  threadId
+response.fields.sentAt            additionalFormFields.messageCreatedAt
+response.fields.senderName        senderName
+response.fields.subject           subject
+response.fields.body              body
+response.idFields  ["threadId", "externalId", "additionalFormFields.messageCreatedAt"]
+```
+
+Points worth copying:
+
+- `limit` there counts **issues**, not messages, so a `pageSize` of 50 returns however many messages those 50 issues contain. Harmless — the offset advances in the app's own unit.
+- The app's `externalId` repeats across tickets for canned replies, so `idFields` carries the composite key. Without it roughly a third of messages would be discarded as duplicates.
+- The app has no sender email; that field is simply unmapped and the desk owner is used instead.
+
+#### Throttling
+
+- Pages are requested **back-to-back with no client-side delay** — page N+1 is issued as soon as page N is persisted, so a fast app will see a sustained serial request stream. To slow Xyne down, answer `429` (or `503`) with a `Retry-After` header (delta-seconds or HTTP-date); Xyne honors it, backs off in place, and continues the same export — up to 5 backoff-and-retry rounds per page (6 requests in total; a 6th throttled response ends the run), falling back to exponential backoff from 1s when the header is absent. Each retry is **re-signed**, so the `X-Xyne-Timestamp` skew window applies to the retry, not the original attempt. A `Retry-After` longer than the run's remaining budget is not slept through: the export stops cleanly, keeps what it ingested, and resumes from the same page on the next Fetch. Do not answer `429` without `Retry-After` if you need a specific pace — the exponential fallback may be shorter than you want.
+Fetch requires `ENABLE_EMAIL_FETCH_WORKER=true` in the backend; otherwise the route returns `409` without calling the app.
+
+#### Before a first backfill: check the desk's automations
+
+A pulled ticket is a real ticket. It emits `TICKET_CREATED` exactly as a pushed one does, so **every automation on that board runs once per ticket the fetch creates** — including the steps that reach people outside Xyne: `send-email-reply`, `send-email-to-user`, `send-csat-request`, `make-call` and `trigger-webhook`. A desk with an acknowledgement or CSAT rule will, on a first import of months of history, contact every historical reporter about a ticket they filed long ago. None of it can be recalled once sent.
+
+This is not specific to app history — the mailbox range fetch behaves the same way — but an app export is usually the largest single import a desk ever takes, so it is where it first bites. **Disable or scope the board's automations before the first fetch of a wide window, and re-enable them afterwards.** Fetching a narrow recent window to fill a gap is normally fine; it is the deep first import that needs the check.
+
+Two related effects, for what to expect rather than what to prevent: SLA due dates are derived from each message's own `sentAt`, so backfilled tickets land already past their resolution target; and the assignee reply notification is deliberately not sent for fetched messages, matching the mailbox fetch — an agent sees a pulled reply when they open the ticket, not as a notification.
+
 ---
 
 ## Adding a New Adapter

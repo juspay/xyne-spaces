@@ -1,6 +1,6 @@
 import React, { useMemo, useState } from 'react';
 import type { SdlcCallLink } from '@xyne/shared';
-import { Headphones, ChevronDown } from '@xyne/icons';
+import { ChevronDown, PhoneDefault } from '@xyne/icons';
 import { Popover } from '../../ui/Popover/Popover';
 import { Drawer } from '../../ui/Drawer/Drawer';
 
@@ -144,7 +144,7 @@ export const CallTriggerModal: React.FC<CallTriggerModalProps> = ({
         className,
       )}
     >
-      <Headphones
+      <PhoneDefault
         className={cn(
           'h-4 w-4',
           isMobile && '!w-6',
@@ -242,7 +242,7 @@ export const CallTriggerModal: React.FC<CallTriggerModalProps> = ({
             })}
           >
             <div className='rounded-md bg-border p-2'>
-              <Headphones className='w-5 h-5 text-foreground' />
+              <PhoneDefault className='w-5 h-5 text-foreground' />
             </div>
             <span className='text-sm font-semibold text-foreground'>Start call now</span>
           </button>

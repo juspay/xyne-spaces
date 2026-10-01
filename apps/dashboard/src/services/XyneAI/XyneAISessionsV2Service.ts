@@ -3,6 +3,7 @@
  * Proxies through the Spaces backend to xyne-claw-auth conversation APIs.
  */
 
+import type { FlowDefinition } from '@xyne/shared';
 import { apiInstance } from '../clients/apiClient';
 import type {
   ConversationHistory as ConversationHistoryType,
@@ -24,6 +25,8 @@ import { getPendingActionId, getStoredPendingActionResolution } from './XyneAIPe
 interface ClawConversationSummary {
   conversationId: string;
   title: string;
+  titleGenerated?: boolean;
+  pinned?: boolean;
   messageCount: number;
   lastMessageAt: string;
 }
@@ -61,6 +64,8 @@ interface ClawChatMessage {
   /** Context the user attached to this turn, persisted by claw-auth on the user
    *  message. Rendered read-only in the transcript. Absent on assistant/legacy rows. */
   attachedContext?: AttachedContextItem[];
+  /** FlowUI artifact cards, re-tokenized by the Spaces proxy. */
+  uiFlows?: FlowDefinition[];
 }
 
 interface ClawMessagesResponse {
@@ -103,8 +108,9 @@ export async function fetchV2Conversations(
     id: conv.conversationId,
     sessionId: conv.conversationId,
     title: conv.title || 'New Chat',
+    titleGenerated: conv.titleGenerated === true && Boolean(conv.title),
     channelId: '',
-    isStarred: false,
+    isStarred: conv.pinned === true,
     lastUpdated: new Date(conv.lastMessageAt),
     createdAt: new Date(conv.lastMessageAt),
     messages: [],
@@ -275,6 +281,7 @@ export async function fetchV2ConversationMessages(
         : {}),
       // Read-only context pills for a user turn (persisted per message in claw-auth).
       ...(isUser && msg.attachedContext?.length ? { attachedContext: msg.attachedContext } : {}),
+      ...(!isUser && msg.uiFlows?.length ? { uiFlows: msg.uiFlows } : {}),
     };
 
     // Map attachments from claw format to frontend format
@@ -316,6 +323,20 @@ export async function deleteV2Conversation(
   const query = `?agentSlug=${encodeURIComponent(agentSlug ?? 'ask-ai')}`;
   await apiInstance.delete(
     `/xyne-ai/v2/conversations/${encodeURIComponent(conversationId)}${query}`,
+  );
+}
+
+export const MANUAL_CHAT_TITLE_MAX_CHARS = 100;
+
+export async function updateV2Conversation(
+  conversationId: string,
+  patch: { title?: string; pinned?: boolean },
+  agentSlug?: string | null,
+): Promise<void> {
+  const query = `?agentSlug=${encodeURIComponent(agentSlug ?? 'ask-ai')}`;
+  await apiInstance.patch(
+    `/xyne-ai/v2/conversations/${encodeURIComponent(conversationId)}${query}`,
+    patch,
   );
 }
 

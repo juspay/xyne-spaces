@@ -11,11 +11,10 @@ import { withWorkspaceScope } from '@/database/tenant/context';
 import { createOwnerInvitation, syncAllBotUsersForNewWorkspace } from '@/bypassAcl/orgServices';
 import { logger } from '@/utils/logger';
 import { config } from '@/config/env';
-import { WorkspaceJoinPolicy, WorkspaceType, ProjectType, Status, WorkspaceRole, OrgRole } from '@xyne/shared';
+import { ProjectType, WorkspaceRole } from '@xyne/shared';
 import { aiProvisioningService } from '@/services/aiProvisioningService';
 import { isOrganizationPolicyError, organizationDomainService } from '@/services/organizationDomainService';
 import { CacConfigService } from '@/services/cacConfigService';
-import { createCommunityWorkspaceDefaults } from '@/utils/communityWorkspaceDefaults';
 import { getEncryptionProvider } from '@/services/encryption';
 
 /**
@@ -61,6 +60,7 @@ export async function buildInvitationLink(params: {
   return `${baseUrl}/launch?path=${encodeURIComponent(path)}`;
 }
 import { createId } from '@paralleldrive/cuid2';
+import { provisionOrgTx } from '@/bypassAcl/transactions/invitationController';
 
 export class InvitationController {
   /**
@@ -81,7 +81,11 @@ export class InvitationController {
 
       // Only workspace admins/owners can send invitations
       const inviterRole = req.user?.role;
-      if (inviterRole !== 'ADMIN' && inviterRole !== 'OWNER') {
+      if (
+        inviterRole !== 'ADMIN' &&
+        inviterRole !== 'OWNER' &&
+        role !== WorkspaceRole.COMMUNITY_MEMBER
+      ) {
         res.status(403).json({ error: 'Only workspace admins can send invitations' });
         return;
       }
@@ -475,74 +479,7 @@ export class InvitationController {
       }
 
       // All creation steps in one transaction — rollback automatically on any failure
-      const { org, workspace } = await prisma.$transaction(async tx => {
-        const org = await tx.organization.create({
-          data: {
-            orgId,
-            name: orgName.trim(),
-            createdBy: invitedBy,
-            status: Status.ACTIVE,
-          },
-        });
-
-        const workspace = await tx.workspace.create({
-          data: {
-            orgId: org.orgId,
-            name: workspaceName.trim(),
-            createdBy: invitedBy,
-            status: Status.ACTIVE,
-            workspaceType: WorkspaceType.ENTERPRISE,
-            joinPolicy: WorkspaceJoinPolicy.INVITE_ONLY,
-          },
-        });
-
-        await getEncryptionProvider().provisionEntity({
-          entityId: workspace.id,
-          orgId: workspace.orgId,
-          entityType: 'WORKSPACE',
-        });
-
-        // DM project required for every workspace
-        await tx.project.create({
-          data: {
-            name: 'Direct Messages',
-            code: 'DM',
-            description: 'DM project for direct message channels',
-            type: ProjectType.DM,
-            workspaceId: workspace.id,
-            createdBy: invitedBy,
-          },
-        });
-
-        // Link workspace ↔ org
-        await tx.workspaceOrganization.create({
-          data: {
-            orgId: org.orgId,
-            workspaceId: workspace.id,
-            role: WorkspaceRole.ADMIN,
-          },
-        });
-
-        // Seed general channel + default project + board/stages
-        await createCommunityWorkspaceDefaults({
-          db: tx,
-          workspaceId: workspace.id,
-          workspaceName: workspaceName.trim(),
-          createdBy: invitedBy,
-        });
-
-        // Add owner as org_member (email-only — no User record yet)
-        await tx.orgMember.create({
-          data: {
-            orgId: org.orgId,
-            email: normalizedOwnerEmail,
-            role: OrgRole.OWNER,
-            invitedBy: req.user?.email ?? undefined,
-          },
-        });
-
-        return { org, workspace };
-      });
+      const { org, workspace } = await provisionOrgTx(prisma, orgId, orgName, invitedBy, workspaceName, normalizedOwnerEmail, req);
 
       await organizationDomainService.createDomainMappingForOrg({
         orgId: org.orgId,
@@ -660,3 +597,4 @@ export class InvitationController {
 }
 
 export const invitationController = new InvitationController();
+

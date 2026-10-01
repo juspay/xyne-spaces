@@ -11,10 +11,9 @@ import {
 import { emailReceivedTrigger } from '../triggers/email-received.trigger';
 import { extractDomain } from '../triggers/email-context';
 import {
-  applyConversationLabel,
-  archiveConversationMailbox,
   SKIPPABLE_LABEL_ERROR_CODES,
 } from './conversation-label.service';
+import { runDeskLabelBackfillTx } from '@/bypassAcl/transactions/deskLabelBackfillService';
 
 /**
  * Emails read per keyset page. Bounds both the page query and the two batched
@@ -53,7 +52,7 @@ export interface DeskLabelBackfillProgress {
   stoppedEarly: boolean;
 }
 
-interface ResolvedBackfillRule {
+export interface ResolvedBackfillRule {
   workflowId: string;
   workspaceId: string;
   ownerId: string;
@@ -348,33 +347,7 @@ export async function runDeskLabelBackfill(
       const startedAt = Date.now();
 
       try {
-        const labelResult = await db.$transaction(async tx => {
-          const result = needsLabel
-            ? await applyConversationLabel(
-                {
-                  conversationId,
-                  channelId: rule.channelId,
-                  labelName: rule.labelName,
-                  createdById: rule.ownerId,
-                  color: rule.color,
-                  labelId: rule.labelId,
-                },
-                tx,
-              )
-            : null;
-          if (!rule.keepInInbox) {
-            await archiveConversationMailbox(
-              {
-                conversationId,
-                channelId: rule.channelId,
-                workspaceId: rule.workspaceId,
-                userId: rule.ownerId,
-              },
-              tx,
-            );
-          }
-          return result;
-        });
+        const labelResult = await runDeskLabelBackfillTx(needsLabel, conversationId, rule);
 
         // null when the label was skipped as already present — counted up front.
         if (labelResult) {
@@ -412,3 +385,4 @@ export async function runDeskLabelBackfill(
 
   return progress;
 }
+

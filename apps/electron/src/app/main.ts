@@ -1,7 +1,8 @@
-import { app, dialog, Menu, MenuItem, MenuItemConstructorOptions } from 'electron';
+import { app, dialog, Menu, MenuItem } from 'electron';
 import path from 'path';
 import log from 'electron-log/main';
 import { config, ENABLE_LOCAL_HARNESS } from './config';
+import { setIsQuitting } from './app-state';
 import { setupDeepLinks } from '../services/deep-links';
 import { setupIpcHandlers } from '../ipc/handlers';
 import { createMainWindow, getMainWindow, setWindowReferences } from '../window/manager';
@@ -63,23 +64,37 @@ if (config.USER_DATA_SUFFIX) {
   app.setPath('userData', `${currentUserData}${config.USER_DATA_SUFFIX}`);
 }
 
+// Let hidden windows actually go hidden (frames stop), while keeping the timer
+// guarantees Zero and the sync socket rely on: the 1/min intensive clamp after 5min
+// hidden would trip Zero's 10s ping / 20s detection into reconnect churn.
+const addDisabledFeatures = (features: string[]): void => {
+  const existing = app.commandLine.getSwitchValue('disable-features');
+  const merged = Array.from(
+    new Set(existing.split(',').filter(Boolean).concat(features)),
+  );
+  app.commandLine.appendSwitch('disable-features', merged.join(','));
+};
+
+app.commandLine.appendSwitch('disable-renderer-backgrounding');
+addDisabledFeatures(
+  [
+    'IntensiveWakeUpThrottling',
+    'AllowAggressiveThrottlingWithWebSocket',
+  ].concat(
+    // Windows occlusion tracking has a live blank-client-area bug; macOS needs
+    // nothing here, Electron already disables MacWebContentsOcclusion.
+    process.platform === 'win32' ? ['CalculateNativeWinOcclusion'] : [],
+  ),
+);
+
 // Register deep links BEFORE app is ready (required for Windows/Linux)
 // This must be called before app.whenReady() for proper protocol handling
 const gotTheLock = setupDeepLinks(createMainWindow);
 
-// Track if app is quitting (for Cmd+Q support on macOS)
-let isQuitting = false;
-
-export function getIsQuitting(): boolean {
-  return isQuitting;
-}
-
-
-
 // Handle before-quit to allow Cmd+Q to actually quit the app
 app.on('before-quit', async () => {
-  isQuitting = true;
-  
+  setIsQuitting(true);
+
   // Log app quit event
   Logger.info(ElectronEvent.APP_QUIT, {}, 'App');
 
@@ -103,28 +118,17 @@ app.on('before-quit', async () => {
 
 
 
-function menuItemToTemplate(item: MenuItem): MenuItemConstructorOptions {
-  return {
-    label: item.label,
-    role: item.role || undefined,
-    type: item.type,
-    accelerator: item.accelerator || undefined,
-    checked: item.checked,
-    enabled: item.enabled,
-    visible: item.visible,
-    submenu: item.submenu ? item.submenu.items.map(menuItemToTemplate) : undefined,
-    click: item.click as MenuItemConstructorOptions['click'],
-    id: item.id,
-  };
-}
-
 function setupApplicationMenu(): void {
-  const existingMenu = Menu.getApplicationMenu();
-  const template: MenuItemConstructorOptions[] = existingMenu
-    ? existingMenu.items.map(menuItemToTemplate)
-    : [];
+  // Append to Electron's existing default menu instead of rebuilding it from
+  // a template. Copying `role`-derived `click` handlers off built MenuItems
+  // into a fresh Menu.buildFromTemplate() call detaches Electron's internal
+  // role dispatcher from its original context, which throws
+  // "e.getOwnerBrowserWindow is not a function" the next time a role item
+  // (e.g. macOS Window menu's zoom/front) is clicked and crashes the main
+  // process.
+  const menu = Menu.getApplicationMenu() ?? new Menu();
 
-  template.push({
+  menu.append(new MenuItem({
     label: 'Beta',
     submenu: [
       {
@@ -147,10 +151,9 @@ function setupApplicationMenu(): void {
         },
       },
     ],
-  });
+  }));
 
-  const newMenu = Menu.buildFromTemplate(template);
-  Menu.setApplicationMenu(newMenu);
+  Menu.setApplicationMenu(menu);
 }
 
 async function initializeApp(): Promise<void> {

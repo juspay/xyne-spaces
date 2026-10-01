@@ -211,7 +211,7 @@ async function postScheduledFailureNotice(row: {
 
   const next = nextFireText(row);
   const message = [
-    `⚠️ Scheduled run failed: ${error?.trim() || "unknown error"}.`,
+    `Scheduled run failed: ${error?.trim() || "unknown error"}.`,
     ...(next ? [`Next run: ${next}.`] : []),
   ].join("\n");
   const appToken = decryptStoredField(agent.spacesAppToken);
@@ -1216,7 +1216,7 @@ router.post("/:id/result", requireStrictS2S, async (req: Request<{ id: string }>
         const share = refreshed.share;
         if (share.linkChanged) {
           const link = designShareUrl(share.sharePath);
-          dashboardShareAnnouncement = `🔗 **Live dashboard:** ${link}\nThe same link updates after each successful refresh.`;
+          dashboardShareAnnouncement = `**Live dashboard:** ${link}\nThe same link updates after each successful refresh.`;
         }
         log.info(`[scheduled-jobs/result] Job ${id}: refreshed dashboard share=${share.id} conversation=${row.conversationId}`);
       } else {

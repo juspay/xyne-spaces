@@ -97,6 +97,7 @@ import {
 } from "../follow-up-generator.js";
 import {
   buildSubagentTools,
+  withoutBuiltinSubagents,
   loadDeepwikiTools,
   loadContext7Tools,
   type SkillTrigger,
@@ -142,7 +143,7 @@ import {
   isReadOnlyJob as isScheduledOrAutomationRun,
   type SetupStep,
 } from "xyne-claw-shared";
-import { SERVER, PATHS, LITELLM, isAllowedCallbackUrl } from "../config.js";
+import { SERVER, PATHS, LITELLM, litellmEndpoint, isAllowedCallbackUrl } from "../config.js";
 import { judgeChainContinuation } from "../chain-judge.js";
 import { isDigitalTwinAgent, listSubsystemTaxonomy, fetchAgentPromptFiles } from "../memory.js";
 import { buildMemorySearchTool } from "../memory-search.js";
@@ -166,7 +167,7 @@ import {
   writeWorkspaceTextFiles,
   writeWorkspaceBinaryFiles,
 } from "../workspace.js";
-import { toolOutputBaseDir, deleteSession, branchSession, sessionDir } from "../session-store.js";
+import { toolOutputBaseDir, deleteSession, branchSession, sessionDir, sessionExistsAnywhere } from "../session-store.js";
 import { gcsUploadResultMarker, gcsDownloadResultMarker } from "../storage.js";
 import { takeLlmCitations } from "xyne-claw-shared";
 import { ingestAttachments } from "../attachment-ingest.js";
@@ -1380,8 +1381,9 @@ router.post("/clone-session", validateS2SKey, async (req, res: Response) => {
   }
 
   try {
+    const targetExisted = branchMode === "full" && (await sessionExistsAnywhere(targetConversationId));
     const success = await branchSession(sourceConversationId, targetConversationId, branchMode);
-    res.json({ success });
+    res.json({ success, targetExisted });
   } catch (err) {
     clog.error(
       `[clone-session] ${sourceConversationId} → ${targetConversationId}: ${err instanceof Error ? err.stack ?? err.message : String(err)}`,
@@ -1403,9 +1405,13 @@ function buildInterruptSummary(partialResult: string, fallback?: { toolsUsed?: s
   const fallbackText = details.length > 0
     ? details.join("\n")
     : "I had not produced a stable partial result yet.";
+  // Claw speaking about itself, not agent output — italic marks it as an aside
+  // so it reads as distinct from the summary below, which is the agent's own
+  // words. See systemNote() in xyne-claw-auth notice-format.ts for the rule.
+  const lead = "_Picked up your new message and I'm switching to it now._";
   return trimmed
-    ? `✅ Picked up your new message and I’m switching to it now.\n\n**Summary of the work so far:**\n\n${trimmed}`
-    : `✅ Picked up your new message and I’m switching to it now.\n\n**Summary of the work so far:** ${fallbackText}`;
+    ? `${lead}\n\n**Summary of the work so far:**\n\n${trimmed}`
+    : `${lead}\n\n**Summary of the work so far:** ${fallbackText}`;
 }
 
 export async function processTask(
@@ -1808,6 +1814,7 @@ export async function processTask(
     if (agentSlug) meta["agentSlug"] = agentSlug;
     if (channelId) meta["channelId"] = channelId;
     if (conversationId) meta["conversationId"] = conversationId;
+    else meta["sandboxConversationId"] = sessionId;
     // Root of this run's spilled tool-result / attachment files, so sandbox-copy-in can forward a whole MCP result file into a sandbox (contextPath).
     meta["contextRoot"] = join(mcpOutputDir, ".context");
     if (taskCommand) meta["taskCommand"] = taskCommand.command;
@@ -2229,7 +2236,7 @@ export async function processTask(
       // here the palette has nothing to admit and load-tools nothing to load.
       // The palette itself still refuses wrappers (a wrapper grants a whole
       // server, not one tool).
-      includeSubagentTools: fastModeEnabled || paletteMode !== "off" || optEnabled("subagent_read_tools"),
+      includeSubagentTools: fastModeEnabled || paletteMode !== "off" || optEnabled("subagent_read_tools") || optEnabled("subagent_direct_only"),
       // Without this, def-less servers' tools and in-process custom tools are
       // admitted straight into the always-active set instead of the catalog —
       // bigger prompt, not wider reach.
@@ -2243,7 +2250,7 @@ export async function processTask(
      *  loadable on demand and must never be always-active. */
     const paletteAdmittedNames = new Set<string>();
 
-    const { subagentTools, directTools, remainingCustomTools } = fastModeEnabled
+    const { subagentTools: builtSubagentTools, directTools, remainingCustomTools } = fastModeEnabled
       ? {
           subagentTools: [] as ToolDefinition[],
           ...buildFastModeDirectTools({
@@ -2286,6 +2293,10 @@ export async function processTask(
           customSubagents,
           directPickSuffixes,
         );
+
+    const subagentTools = optEnabled("subagent_direct_only")
+      ? withoutBuiltinSubagents(builtSubagentTools)
+      : builtSubagentTools;
 
     directTools.push(buildPublishReviewRoomTool(sessionId));
 
@@ -3029,16 +3040,18 @@ export async function processTask(
     // mode's read-only filter passes it through untouched), and an agent
     // configured to plan first should still be able to say what it is. Twin is
     // excluded because that flow delivers through its own approval surface.
-    const describeAgentAvailable =
-      (!!channelId || (progressUrl && typeof progressUrl !== "string")) &&
+    const interactiveCardRun =
       !isScheduledOrAutomationRun(eventType, conversationId) &&
       !isTwinMentionFlow &&
       !isDailyBrief;
+    const hasSpacesCardSurface = !!channelId || (progressUrl && typeof progressUrl !== "string");
+    const isChatSurfaceRun = !channelId && !eventType;
+    const describeAgentAvailable = interactiveCardRun && (hasSpacesCardSurface || isChatSurfaceRun);
     if (describeAgentAvailable) {
       allTools.push(buildDescribeAgentTool(describeAgentRef));
-      // Same gate as describe-agent: a connector card is only worth posting
-      // where a human is watching and can press Connect.
-      allTools.push(buildSuggestConnectorsTool(suggestConnectorsRef, userId));
+    }
+    if (interactiveCardRun && hasSpacesCardSurface) {
+      allTools.push(buildSuggestConnectorsTool(suggestConnectorsRef, userId, { agentSlug }));
     }
 
 
@@ -3385,7 +3398,7 @@ export async function processTask(
       fastCatalogNames = fastCatalogItems.map((item) => item.entry.name);
       const finalFastCatalogNameSet = new Set(fastCatalogNames);
       const activeToolEntries: ToolCatalogEntry[] | undefined =
-        optEnabled("catalog_full_index") || optEnabled("subagent_read_tools") || optEnabled("active_tool_cap")
+        optEnabled("catalog_full_index") || optEnabled("subagent_read_tools") || optEnabled("subagent_direct_only") || optEnabled("active_tool_cap")
           ? allTools
               .filter((tool) =>
                 !duplicatesMetaTool(tool.name) &&
@@ -4000,8 +4013,8 @@ export async function processTask(
           // Only fast mode actually turns delegation off; asserting it on a
           // normal run would be a lie the model acts on.
           subagentDelegationDisabled: fastModeEnabled,
-          fullIndex: optEnabled("catalog_full_index") || optEnabled("subagent_read_tools") || optEnabled("active_tool_cap"),
-          preferDirect: optEnabled("subagent_read_tools"),
+          fullIndex: optEnabled("catalog_full_index") || optEnabled("subagent_read_tools") || optEnabled("subagent_direct_only") || optEnabled("active_tool_cap"),
+          preferDirect: optEnabled("subagent_read_tools") && !optEnabled("subagent_direct_only"),
         })
       : "";
     if (fastModeCatalogPrompt) {
@@ -4166,7 +4179,7 @@ export async function processTask(
         // Thread invocations (Spaces/Slack replies — channelId present) keep a
         // clean posted reply = the last 2 assistant turns; ask-ai and every other
         // surface keep ALL turns so the stored answer matches the streamed one.
-        finalAnswerMaxTurns: channelId ? 2 : undefined,
+        finalAnswerMaxTurns: channelId ? (optEnabled("interim_messages") ? 1 : 2) : undefined,
         ...(isRegenerate ? { isRegenerate: true } : {}),
         backgroundRegistry: childTaskRegistry,
         parentDebug: parentDebugHandle,
@@ -5403,7 +5416,7 @@ router.post("/generate-prompt", validateS2SKey, async (req, res: Response) => {
     : `Generate a system prompt for an agent${agentName ? ` called "${agentName}"` : ""}. The user described it as:\n\n"${intent}"\n\nThe prompt should:\n- Define the agent's role and personality\n- List what the agent can and cannot do\n- Include guidelines for response style\n- Be concise but thorough (200-400 words)`;
 
   try {
-    const llmRes = await fetch(`${LITELLM.url}/v1/chat/completions`, {
+    const llmRes = await fetch(litellmEndpoint("/v1/chat/completions"), {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -5593,7 +5606,7 @@ router.post(
 
     try {
       const llmRes = await fetchLiteLLMWithRetry(
-        `${LITELLM.url}/v1/chat/completions`,
+        litellmEndpoint("/v1/chat/completions"),
         {
           method: "POST",
           headers: {
@@ -5812,7 +5825,7 @@ router.post("/suggest-tools", validateS2SKey, async (req, res: Response) => {
   ].join("\n");
 
   try {
-    const llmRes = await fetch(`${LITELLM.url}/v1/chat/completions`, {
+    const llmRes = await fetch(litellmEndpoint("/v1/chat/completions"), {
       method: "POST",
       headers: {
         "Content-Type": "application/json",

@@ -96,6 +96,38 @@ nodePorts:
     - /spec/replicas
 {{- end }}
 
+{{- define "xyne-root.statefulSetClaimIgnore" -}}
+- group: apps
+  kind: StatefulSet
+  jqPathExpressions:
+    - .spec.volumeClaimTemplates[]?.apiVersion
+    - .spec.volumeClaimTemplates[]?.kind
+    - .spec.volumeClaimTemplates[]?.status
+{{- end }}
+
+{{- define "xyne-root.istioWebhookIgnore" -}}
+- group: admissionregistration.k8s.io
+  kind: ValidatingWebhookConfiguration
+  jqPathExpressions:
+    - .webhooks[]?.failurePolicy
+    - .webhooks[]?.clientConfig.caBundle
+{{- end }}
+
+{{- define "xyne-root.generatedCertIgnore" -}}
+- kind: Secret
+  name: {{ .secret }}
+  jsonPointers:
+    - /data
+- group: admissionregistration.k8s.io
+  kind: MutatingWebhookConfiguration
+  jqPathExpressions:
+    - .webhooks[]?.clientConfig.caBundle
+- group: admissionregistration.k8s.io
+  kind: ValidatingWebhookConfiguration
+  jqPathExpressions:
+    - .webhooks[]?.clientConfig.caBundle
+{{- end }}
+
 {{- define "xyne-root.helmSource" -}}
 {{- $root := .root }}
 {{- $src := dict "repoURL" (.repoURL | default $root.Values.global.repoURL) "targetRevision" (.targetRevision | default $root.Values.global.chartRevision) }}
@@ -104,7 +136,7 @@ nodePorts:
 {{- else }}
 {{- $_ := set $src "path" .path }}
 {{- end }}
-{{- $helm := dict "releaseName" .releaseName "valuesObject" (.values | default dict) }}
+{{- $helm := dict "releaseName" .releaseName "values" (toYaml (.values | default dict)) }}
 {{- $_ := set $src "helm" $helm }}
 {{- toYaml $src }}
 {{- end }}
@@ -353,11 +385,18 @@ LIVEKIT_SERVER_URL: {{ $lk.url | quote }}
 {{- define "xyne-root.backendSecretEnv" -}}
 {{- $root := .root }}
 {{- $sec := dict "REDIS_PASSWORD" (dict "name" "xyne-backend-secrets" "key" "REDIS_PASSWORD" "optional" true) }}
+{{- $_ := set $sec "GOOGLE_CLIENT_ID" (dict "name" "xyne-backend-secrets" "key" "GOOGLE_CLIENT_ID" "optional" true) }}
+{{- $_ := set $sec "GOOGLE_CLIENT_SECRET" (dict "name" "xyne-backend-secrets" "key" "GOOGLE_CLIENT_SECRET" "optional" true) }}
 {{- if .readReplica }}
 {{- $_ := set $sec "DATABASE_READ_REPLICA_POOL_URL" (dict "name" "xyne-backend-secrets" "key" "DATABASE_READ_REPLICA_POOL_URL" "optional" true) }}
 {{- end }}
 {{- if .ysweet }}
 {{- $_ := set $sec "Y_SWEET_SERVER_TOKEN" (dict "name" "xyne-backend-secrets" "key" "Y_SWEET_SERVER_TOKEN") }}
+{{- end }}
+{{- $lk := $root.Values.infra.livekit | default dict }}
+{{- if and $lk.enabled $lk.url }}
+{{- $_ := set $sec "LIVEKIT_API_KEY" (dict "name" "xyne-backend-secrets" "key" "LIVEKIT_API_KEY" "optional" true) }}
+{{- $_ := set $sec "LIVEKIT_API_SECRET" (dict "name" "xyne-backend-secrets" "key" "LIVEKIT_API_SECRET" "optional" true) }}
 {{- end }}
 {{- $sec = mergeOverwrite $sec (include "xyne-root.storageSecretEnv" (dict "root" $root "secret" "xyne-backend-secrets") | fromYaml) }}
 {{- toYaml $sec }}
@@ -376,7 +415,7 @@ LIVEKIT_SERVER_URL: {{ $lk.url | quote }}
 {{- $v := include "xyne-root.appBase" (dict "root" $root "xyneImage" true "pool" "general" "identity" "worker") | fromYaml }}
 {{- $env := include "xyne-root.backendEnv" (dict "root" $root) | fromYaml }}
 {{- $env = mergeOverwrite $env (deepCopy (.worker.env | default dict)) }}
-{{- $_ := set $v "fullnameOverride" .worker.name }}
+{{- $_ := set $v "fullnameOverride" (printf "xyne-worker-%s" .worker.name) }}
 {{- $_ := set $v "env" $env }}
 {{- $_ := set $v "secretEnv" (include "xyne-root.backendSecretEnv" (dict "root" $root "readReplica" false) | fromYaml) }}
 {{- toYaml $v }}
@@ -409,17 +448,28 @@ LIVEKIT_SERVER_URL: {{ $lk.url | quote }}
 {{- toYaml $v }}
 {{- end }}
 
+{{- define "xyne-root.zeroBackupUrl" -}}
+{{- ((.Values.infra.zero | default dict).backupUrl) | default "" }}
+{{- end }}
+
 {{- define "xyne-root.appValues.xyne-zero" -}}
 {{- $root := .root }}
-{{- $v := include "xyne-root.appBase" (dict "root" $root "xyneImage" false "pool" "zero") | fromYaml }}
-{{- $_ := set $v "env" (dict "ZERO_CHANGE_STREAMER_URI" "http://xyne-zero-replication:80") }}
+{{- $v := include "xyne-root.appBase" (dict "root" $root "xyneImage" false "pool" "zero" "identity" "zero") | fromYaml }}
+{{- $env := dict "ZERO_CHANGE_STREAMER_URI" "http://xyne-zero-replication:80" }}
+{{- with include "xyne-root.zeroBackupUrl" $root }}
+{{- $_ := set $env "ZERO_LITESTREAM_BACKUP_URL" . }}
+{{- end }}
+{{- $_ := set $v "env" $env }}
 {{- toYaml $v }}
 {{- end }}
 
 {{- define "xyne-root.appValues.xyne-zero-replication" -}}
 {{- $root := .root }}
-{{- $v := include "xyne-root.appBase" (dict "root" $root "xyneImage" false "pool" "zero") | fromYaml }}
+{{- $v := include "xyne-root.appBase" (dict "root" $root "xyneImage" false "pool" "zero" "identity" "zero") | fromYaml }}
 {{- $v = mergeOverwrite $v (include "xyne-root.zeroReplicationOverrides" $root | fromYaml) }}
+{{- with include "xyne-root.zeroBackupUrl" $root }}
+{{- $_ := set $v.env "ZERO_LITESTREAM_BACKUP_URL" . }}
+{{- end }}
 {{- toYaml $v }}
 {{- end }}
 
@@ -443,7 +493,6 @@ service:
 env:
   ZERO_NUM_SYNC_WORKERS: "0"
   ZERO_CHANGE_STREAMER_PORT: "4849"
-  ZERO_CHANGE_STREAMER_URI: null
 autoscaling:
   enabled: false
 pdb:
@@ -491,6 +540,9 @@ pdb:
 {{- $_ := set $env "KATA_ROUTER_URL" "http://xyne-sandbox-router:8080" }}
 {{- $_ := set $env "KATA_NAMESPACE" $root.Values.global.namespace }}
 {{- $_ := set $env "KATA_TEMPLATE" $sb.template.name }}
+{{- $_ := set $env "SANDBOX_PREVIEW_BASE_URL" (include "xyne-root.publicUrl" $root) }}
+{{- else }}
+{{- $_ := set $env "SANDBOX_PREVIEW_BASE_URL" "" }}
 {{- $_ := set $v "serviceAccount" (mergeOverwrite ($v.serviceAccount | default dict) (dict "automount" true)) }}
 {{- end }}
 {{- $_ := set $v "env" $env }}
@@ -530,8 +582,44 @@ pdb:
 {{- define "xyne-root.appValues.xyne-lighton-ocr" -}}
 {{- $root := .root }}
 {{- $v := include "xyne-root.appBase" (dict "root" $root "xyneImage" true "pool" "general") | fromYaml }}
-{{- $_ := set $v "env" (include "xyne-root.redisEnv" (dict "root" $root) | fromYaml) }}
+{{- $env := include "xyne-root.redisEnv" (dict "root" $root) | fromYaml }}
+{{- if (index $root.Values.apps "xyne-lighton-model").enabled }}
+{{- $_ := set $env "LIGHTON_URL" "http://xyne-lighton-model:8000/v1/chat/completions" }}
+{{- $_ := set $env "LIGHTON_TIMEOUT_SECONDS" "300" }}
+{{- end }}
+{{- $_ := set $v "env" $env }}
+{{- $_ := set $v "secretEnv" (dict "REDIS_PASSWORD" (dict "name" "xyne-backend-secrets" "key" "REDIS_PASSWORD" "optional" true)) }}
 {{- toYaml $v }}
+{{- end }}
+
+{{- define "xyne-root.appValues.xyne-lighton-model" -}}
+{{- include "xyne-root.appBase" (dict "root" .root "xyneImage" false "pool" "gpu") }}
+{{- end }}
+
+{{- define "xyne-root.secretChecksum" -}}
+{{- $sums := .root.Values.global.secretChecksums | default dict }}
+{{- $names := list (printf "%s-secrets" .chart) }}
+{{- range $_, $ref := (.values.secretEnv | default dict) }}
+{{- if kindIs "map" $ref }}
+{{- $names = append $names $ref.name }}
+{{- end }}
+{{- end }}
+{{- range (.values.envFromSecrets | default list) }}
+{{- if kindIs "string" . }}
+{{- $names = append $names . }}
+{{- else if .name }}
+{{- $names = append $names .name }}
+{{- end }}
+{{- end }}
+{{- $parts := list }}
+{{- range ($names | uniq | sortAlpha) }}
+{{- with index $sums . }}
+{{- $parts = append $parts . }}
+{{- end }}
+{{- end }}
+{{- if $parts }}
+{{- join "," $parts | sha256sum | trunc 16 }}
+{{- end }}
 {{- end }}
 
 {{- define "xyne-root.app" -}}
@@ -539,6 +627,9 @@ pdb:
 {{- $app := index $root.Values.apps .name | default dict }}
 {{- $built := include (printf "xyne-root.appValues.%s" (.builder | default .chart)) (dict "root" $root "worker" .worker) | fromYaml }}
 {{- $values := include "xyne-root.merge" (dict "base" $built "layers" (list $app.values .workerValues)) | fromYaml }}
+{{- with include "xyne-root.secretChecksum" (dict "root" $root "values" $values "chart" .chart) }}
+{{- $_ := set $values "podAnnotations" (merge (dict "checksum/secrets" .) ($values.podAnnotations | default dict)) }}
+{{- end }}
 {{- $source := include "xyne-root.helmSource" (dict "root" $root "path" (printf "helm-charts/charts/%s" .chart) "releaseName" .name "values" $values) | fromYaml }}
 {{- include "xyne-root.application" (dict "root" $root "name" .name "namespace" $root.Values.global.namespace "wave" (.wave | default 0) "source" $source "ignoreDifferences" (include "xyne-root.deploymentIgnore" . | fromYamlArray)) }}
 {{- end }}

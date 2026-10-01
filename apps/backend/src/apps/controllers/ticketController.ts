@@ -20,8 +20,6 @@ import {
   EmailType,
   DeskType,
   isDeskChannelType,
-  parseTicketEtaManagement,
-  mergeTicketEtaManagement,
 } from '@xyne/shared';
 import { syncConversationTicketMdFromPrismaTicket } from '@/utils/ticketMd';
 import { emitEventToWorkspaceApps } from '../core/eventSubscriptionUtils';
@@ -40,10 +38,8 @@ import { createTicketCustomFieldActivity } from '@/services/ticketCustomFieldAct
 
 import { resolveChannelId } from '../utils/channelUtils';
 import { decodeCursor, paginateResults } from '../core/paginationUtils';
-import type { MerchantTicketListItem } from '../types';
+import type { MerchantTicketListItem, TicketUserInfo } from '../types';
 import { validateChannelIdsAccess } from '../middelware/channelValidation';
-import { calculateETADeadline } from '@/utils/etaCalculation';
-import { generateKeyBetween } from 'fractional-indexing';
 import { resolveFormFieldDefinitionsForForm } from '@/utils/fieldDefinition';
 import type { TicketCustomFormData } from '@/database/repositories/formsRepository';
 import {
@@ -61,26 +57,19 @@ import {
   type CustomFieldWritePayload,
 } from '@/services/ticketCustomFieldService';
 import { emitTicketUpdated } from '@/automations/triggers/ticket-updated.trigger';
-import { syncStageOverdueFlag } from '@/services/tickets/syncStageOverdueFlag';
 import { getTicketBotActorId } from '@/utils/etaNotificationUtils';
 import {
-  resolveStepEstimate,
-  loadBoardEtaContext,
-  evaluateEta,
-  buildEtaActivityIntents,
-  isTerminalStatus,
   dispatchEtaNotifications,
   etaSignalsFromResult,
-  writeEtaActivitiesPrisma,
 } from '@/services/etaManagement';
-import { lockTicketMetadataAndEta } from '@/bypassAcl/rowLockServices';
+import { transferTicketToBoardTx } from '@/bypassAcl/transactions/controllersTicketController';
 
 const externalSourceRepo = new ExternalSourceRepository();
 const externalMessageRepo = new ExternalMessageRepository();
 const emailChannelPreferenceRepo = new EmailChannelPreferenceRepository();
 const appsFilesBaseUrl = `${config.backendUrl.replace(/\/$/, '')}/api/apps/files`;
 
-const prismaClient = DatabaseClient.getInstance();
+export const prismaClient = DatabaseClient.getInstance();
 
 const CreateTicketBodySchema = z.object({
   title: z.string().min(1, 'Title is required').trim(),
@@ -259,6 +248,14 @@ const SearchTicketsBodySchema = z.object({
   }
 });
 
+const ListBoardsQuerySchema = z.object({
+  projectId: z.string().min(1, 'projectId must not be empty').trim().optional(),
+});
+
+const BoardIdParamsSchema = z.object({
+  boardId: z.string().min(1, 'boardId is required').trim(),
+});
+
 const TicketConversationQuerySchema = z.object({
   limit: z.coerce.number().int().min(1).max(100).default(20),
   cursor: z.string().optional(),
@@ -296,6 +293,34 @@ interface TicketConversationCursor {
   id: string;
   createdAt: number;
 }
+/**
+ * Batch-resolve user ids to { userId, email, name, displayName } so ticket
+ * responses can expose who a ticket is assigned to / created by without the
+ * caller making a follow-up users lookup.
+ */
+const getTicketUserInfoMap = async (
+  userIds: Array<string | null | undefined>,
+): Promise<Map<string, TicketUserInfo>> => {
+  const ids = Array.from(new Set(userIds.filter((id): id is string => !!id)));
+  if (ids.length === 0) return new Map();
+
+  const users = await prismaClient.user.findMany({
+    where: { id: { in: ids } },
+    select: { id: true, email: true, name: true, displayName: true },
+  });
+  return new Map(
+    users.map(user => [
+      user.id,
+      { userId: user.id, email: user.email, name: user.name, displayName: user.displayName },
+    ]),
+  );
+};
+
+const userInfoOrNull = (
+  userMap: Map<string, TicketUserInfo>,
+  userId: string | null | undefined,
+): TicketUserInfo | null => (userId ? userMap.get(userId) ?? null : null);
+
 const replaceTicketTags = async (ticketId: string, tags: string[]): Promise<void> => {
   const normalizedTags = Array.from(new Set(tags.map(tag => tag.trim()).filter(Boolean)));
   const ticket = await prismaClient.ticket.findUnique({
@@ -396,149 +421,7 @@ const transferTicketToBoard = async (params: {
   // transactional state, and best kept off the held connection.
   const systemActorId = await getTicketBotActorId(currentTicket.workspaceId);
 
-  const txResult = await prismaClient.$transaction(async tx => {
-    const newBoardStages = await tx.stage.findMany({
-      where: { boardId: targetBoardId },
-      orderBy: { sequenceNumber: 'asc' },
-    });
-
-    if (newBoardStages.length === 0) {
-      throw new Error(`No stages found for board ${targetBoardId}`);
-    }
-
-    const firstStage = newBoardStages[0];
-
-    const firstTicketInStage = await tx.ticket.findFirst({
-      where: {
-        boardId: targetBoardId,
-        stageName: firstStage.name,
-        kanbanPosition: { not: null },
-      },
-      orderBy: { kanbanPosition: 'asc' },
-      select: { kanbanPosition: true },
-    });
-
-    let kanbanPosition: string;
-    try {
-      kanbanPosition = generateKeyBetween(null, firstTicketInStage?.kanbanPosition ?? null);
-    } catch {
-      kanbanPosition = generateKeyBetween(null, null);
-    }
-
-    // `eta` is deliberately left out of this base update - an automatic due date is only
-    // ever set by the domain-service evaluation below, and only when the target board has
-    // opted into automatic ETA management (never a blind stage-eta sum, and never a write
-    // that can shorten the ticket's existing due date).
-    await tx.ticket.update({
-      where: { id: ticketId },
-      data: {
-        boardId: targetBoardId,
-        stageName: firstStage.name,
-        statusV2: firstStage.defaultTicketStatusV2 ?? undefined,
-        kanbanPosition,
-        updatedAt: now,
-        updatedBy,
-      },
-    });
-
-    await tx.ticketStageEta.deleteMany({ where: { ticketId } });
-
-    let newStageEtaEntryId: string | null = null;
-    let stageEtaDeadline: Date | null = null;
-    if (firstStage.eta !== null && firstStage.eta > 0) {
-      stageEtaDeadline = calculateETADeadline(now, firstStage.eta);
-      const newStageEtaEntry = await tx.ticketStageEta.create({
-        data: {
-          ticketId,
-          stageId: firstStage.id,
-          stageEnteredAt: now,
-          stageLeftAt: null,
-          stageEta: stageEtaDeadline,
-          updatedBy,
-          workspaceId: currentTicket.workspaceId,
-        },
-        select: { id: true },
-      });
-      newStageEtaEntryId = newStageEtaEntry.id;
-    }
-
-    await syncStageOverdueFlag(tx, ticketId, now);
-    // ETA domain-service evaluation: forecast (extend-only) + planning-risk state, mirroring
-    // the pattern already used by TicketRepository.updateTicketStage and the Zero
-    // ticket.update board-transfer branch.
-    const effectiveStatusV2 = (firstStage.defaultTicketStatusV2 ?? currentTicket.statusV2) as TicketStatusV2;
-    // metadata AND eta were both read before this transaction opened, so a concurrent write
-    // (e.g. acknowledgeEtaRisk, or a manual due-date edit) landing before ours would be lost.
-    // FOR UPDATE locks the row so that can't happen. Both locked values feed evaluateEta:
-    // eta is the extend-only baseline and a fingerprint input, so a stale one could decide
-    // against - and then overwrite - a due date someone else just moved.
-    const lockedTicket = await lockTicketMetadataAndEta(tx, ticketId);
-    const lockedEta = lockedTicket?.eta ?? null;
-    const boardEtaCtx = await loadBoardEtaContext(tx, targetBoardId);
-    const currentTicketEtaManagement = parseTicketEtaManagement(lockedTicket?.metadata);
-    const stepEstimate = resolveStepEstimate(
-      { id: firstStage.id, eta: firstStage.eta },
-      null,
-      { requireExplicitTransition: false },
-    );
-
-    const etaResult = evaluateEta({
-      ticketId,
-      ticketStatus: effectiveStatusV2,
-      isTerminal: isTerminalStatus(effectiveStatusV2),
-      currentTicketEta: lockedEta,
-      currentTicketEtaManagement,
-      boardType: boardEtaCtx.boardType,
-      boardEtaManagement: boardEtaCtx.boardEtaManagement,
-      currentStageId: firstStage.id,
-      stages: boardEtaCtx.stages,
-      transitions: boardEtaCtx.transitions,
-      activeVisit: {
-        stageVisitId: newStageEtaEntryId,
-        transitionId: null,
-        deadline: stageEtaDeadline,
-        deadlineTracked: newStageEtaEntryId !== null,
-        estimateSource: stepEstimate.source,
-        estimateHours: stepEstimate.incomplete ? null : stepEstimate.hours,
-      },
-      trigger: 'STAGE_TRANSITION',
-      now,
-    });
-
-    const mergedMetadata = mergeTicketEtaManagement(
-      lockedTicket?.metadata,
-      etaResult.ticketEtaManagementPatch,
-    );
-
-    const updatedTicket = await tx.ticket.update({
-      where: { id: ticketId },
-      data: {
-        ...(etaResult.etaDecision.changed && etaResult.etaDecision.newEta
-          ? { eta: etaResult.etaDecision.newEta }
-          : {}),
-        metadata: mergedMetadata as Prisma.InputJsonValue,
-      },
-    });
-
-    const activityIntents = buildEtaActivityIntents(etaResult, {
-      currentStageId: firstStage.id,
-      oldEta: lockedEta ? lockedEta.getTime() : null,
-      trigger: 'STAGE_TRANSITION',
-      systemReason: `Automatic recalculation after moving ticket to board "${targetBoardId}"`,
-      previousRiskFingerprint: currentTicketEtaManagement.planningRisk.fingerprint,
-    });
-    await writeEtaActivitiesPrisma(tx, activityIntents, {
-      ticketId,
-      workspaceId: currentTicket.workspaceId,
-      channelId: currentTicket.channelId,
-      timestamp: now.getTime(),
-      systemActorId,
-    });
-
-    await syncConversationTicketMdFromPrismaTicket(tx, updatedTicket);
-
-    return { updatedTicket, etaResult };
-  });
+  const txResult = await transferTicketToBoardTx(targetBoardId, ticketId, now, updatedBy, currentTicket, systemActorId);
 
   // Post-commit notification dispatch - best-effort, must never affect the already-
   // committed response. Suppressed while the ticket is paused.
@@ -1463,6 +1346,8 @@ export class TicketController {
         boardId: true,
         projectId: true,
         merchantId: true,
+        assignedTo: true,
+        createdBy: true,
       } as const;
 
       const hasCustomFieldFilters = !!(customFields && Object.keys(customFields).length > 0);
@@ -1543,6 +1428,11 @@ export class TicketController {
         );
       }
 
+      // Only the page actually returned (limit), not the +1 lookahead row.
+      const userMap = await getTicketUserInfoMap(
+        tickets.slice(0, limit).flatMap(ticket => [ticket.assignedTo, ticket.createdBy]),
+      );
+
       const items: MerchantTicketListItem[] = tickets.map(ticket => {
         return {
           ticketId: ticket.id,
@@ -1558,6 +1448,10 @@ export class TicketController {
           boardId: ticket.boardId,
           projectId: ticket.projectId,
           merchantId: ticket.merchantId,
+          assignedTo: ticket.assignedTo,
+          assignedToUser: userInfoOrNull(userMap, ticket.assignedTo),
+          createdBy: ticket.createdBy,
+          createdByUser: userInfoOrNull(userMap, ticket.createdBy),
           ...(includeCustomFields ? { customFormData: customFormDataByTicketId.get(ticket.id) ?? null } : {}),
         };
       });
@@ -1578,6 +1472,122 @@ export class TicketController {
         res.status(400).json({ error: error.message, code: 'VALIDATION_ERROR' });
         return;
       }
+      res.status(500).json({ error: 'Internal server error', code: 'INTERNAL_ERROR' });
+    }
+  };
+
+  /**
+   * List boards in the app's workspace, optionally narrowed to one project.
+   * GET /api/apps/ticket/boards?projectId=...
+   */
+  listBoards = async (req: Request, res: Response): Promise<void> => {
+    try {
+      const queryResult = ListBoardsQuerySchema.safeParse(req.query);
+      if (!queryResult.success) {
+        res.status(400).json({
+          error: 'Validation error',
+          code: 'VALIDATION_ERROR',
+          details: queryResult.error.errors,
+        });
+        return;
+      }
+
+      const workspaceId = req.user?.workspaceId;
+      if (!workspaceId) {
+        res.status(400).json({ error: 'Authenticated workspace is required', code: 'VALIDATION_ERROR' });
+        return;
+      }
+
+      const { projectId } = queryResult.data;
+      const boards = await prismaClient.board.findMany({
+        where: { workspaceId, ...(projectId ? { projectId } : {}) },
+        orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+        select: {
+          id: true,
+          name: true,
+          boardType: true,
+          description: true,
+          projectId: true,
+          createdAt: true,
+          updatedAt: true,
+        },
+      });
+
+      res.status(200).json({
+        boards: boards.map(board => ({
+          boardId: board.id,
+          name: board.name,
+          boardType: board.boardType,
+          description: board.description,
+          projectId: board.projectId,
+          createdAt: board.createdAt,
+          updatedAt: board.updatedAt,
+        })),
+      });
+    } catch (error) {
+      logger.error('[TicketController] listBoards error:', error);
+      res.status(500).json({ error: 'Internal server error', code: 'INTERNAL_ERROR' });
+    }
+  };
+
+  /**
+   * List the stages of a board, ordered by sequence.
+   * GET /api/apps/ticket/boards/:boardId/stages
+   */
+  listBoardStages = async (req: Request, res: Response): Promise<void> => {
+    try {
+      const paramsResult = BoardIdParamsSchema.safeParse(req.params);
+      if (!paramsResult.success) {
+        res.status(400).json({
+          error: 'Validation error',
+          code: 'VALIDATION_ERROR',
+          details: paramsResult.error.errors,
+        });
+        return;
+      }
+
+      const workspaceId = req.user?.workspaceId;
+      if (!workspaceId) {
+        res.status(400).json({ error: 'Authenticated workspace is required', code: 'VALIDATION_ERROR' });
+        return;
+      }
+
+      const { boardId } = paramsResult.data;
+      const board = await prismaClient.board.findFirst({
+        where: { id: boardId, workspaceId },
+        select: { id: true, name: true, projectId: true },
+      });
+      if (!board) {
+        res.status(404).json({ error: `Board with ID ${boardId} not found`, code: 'BOARD_NOT_FOUND' });
+        return;
+      }
+
+      const stages = await prismaClient.stage.findMany({
+        where: { boardId },
+        orderBy: [{ sequenceNumber: 'asc' }, { createdAt: 'asc' }],
+        select: {
+          id: true,
+          name: true,
+          sequenceNumber: true,
+          eta: true,
+          defaultTicketStatusV2: true,
+        },
+      });
+
+      res.status(200).json({
+        boardId: board.id,
+        boardName: board.name,
+        projectId: board.projectId,
+        stages: stages.map(stage => ({
+          stageId: stage.id,
+          name: stage.name,
+          sequenceNumber: stage.sequenceNumber,
+          eta: stage.eta,
+          defaultTicketStatusV2: stage.defaultTicketStatusV2,
+        })),
+      });
+    } catch (error) {
+      logger.error('[TicketController] listBoardStages error:', error);
       res.status(500).json({ error: 'Internal server error', code: 'INTERNAL_ERROR' });
     }
   };
@@ -3013,3 +3023,4 @@ export class TicketController {
   };
 
 }
+

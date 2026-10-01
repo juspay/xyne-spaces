@@ -1,10 +1,9 @@
+import { createOrUpdateTx } from '@/bypassAcl/transactions/releaseReportCanvas';
 import { syncToYSweet } from '@/utils/ysweetUtils';
 import { Prisma, type User } from '@prisma/client';
-import { CanvasRole, CanvasVisibility } from '@xyne/shared';
 import { v4 as uuidv4 } from 'uuid';
 import type { ReleaseReport, ReleaseReportChange } from '@xyne/shared';
 import { db } from '@/database/client';
-import { newConnectId, createConnectGroupForEntity, resolveCanvasConnectId } from '@/database/connectGroup';
 import type { BlockNoteBlock, BlockNoteInlineContent } from '@/types/blockNoteTypes';
 import { CanvasSideEffectHandler } from '@/zero/side-effects/tables/canvas-handler';
 import { vespaQueue } from '@/queues/vespaQueue';
@@ -250,96 +249,7 @@ export class ReleaseReportCanvasService {
       throw new Error(`Failed to save release report canvas ${canvasId} to Y-Sweet`);
     }
 
-    const result = await db.$transaction(async (tx) => {
-      if (existingCanvas) {
-        await tx.canvas.update({
-          where: { id: existingCanvas.id },
-          data: {
-            title,
-            content: [],
-            channelId: report.release.channelId,
-            projectId: report.release.projectId,
-            createdBy: owner.id,
-            lastEditedBy: owner.id,
-            lastEditedAt: now,
-            visibility: CanvasVisibility.PUBLIC,
-            isCollaborative: true,
-            metadata,
-          },
-        });
-        const existingConnectId = await resolveCanvasConnectId(tx, existingCanvas.id);
-        await tx.canvasParticipant.upsert({
-          where: {
-            canvasId_userId: {
-              canvasId: existingCanvas.id,
-              userId: owner.id,
-            },
-          },
-          create: {
-            id: uuidv4(),
-            canvasId: existingCanvas.id,
-            userId: owner.id,
-            workspaceId: report.release.workspaceId,
-            role: CanvasRole.VIEWER,
-            joinedAt: now,
-            updatedAt: now,
-            ...(existingConnectId ? { connectId: existingConnectId } : {}),
-          },
-          update: {
-            role: CanvasRole.VIEWER,
-            updatedAt: now,
-          },
-        });
-
-        return {
-          canvasId: existingCanvas.id,
-          action: 'updated' as const,
-        };
-      }
-
-      // NOTE: reuse the OUTER canvasId (line ~246) — syncToYSweet already wrote the content
-      // under it. A local `uuidv4()` here would shadow it, so the row/connect_group would be
-      // created under a different id than the Y-Sweet doc → the canvas opens empty.
-      const connectId = newConnectId();
-      await tx.canvas.create({
-        data: {
-          id: canvasId,
-          title,
-          content: [],
-          channelId: report.release.channelId,
-          projectId: report.release.projectId,
-          workspaceId: report.release.workspaceId,
-          createdBy: owner.id,
-          visibility: CanvasVisibility.PUBLIC,
-          isTemplate: false,
-          isCollaborative: true,
-          lastEditedBy: owner.id,
-          lastEditedAt: now,
-          connectId,
-          metadata,
-        },
-      });
-      await createConnectGroupForEntity(tx, {
-        entityType: 'canvas',
-        entityId: canvasId,
-        hostWorkspaceId: report.release.workspaceId,
-        connectId,
-      });
-      await tx.canvasParticipant.create({
-        data: {
-          id: uuidv4(),
-          canvasId,
-          userId: owner.id,
-          workspaceId: report.release.workspaceId,
-          role: CanvasRole.VIEWER,
-          joinedAt: now,
-          updatedAt: now,
-          connectId,
-        },
-      });
-
-      return { canvasId, action: 'created' as const };
-    });
+    const result = await createOrUpdateTx(existingCanvas, title, report, owner, now, metadata, canvasId);
 
     await this.runSideEffects(result, owner);
     return result;
