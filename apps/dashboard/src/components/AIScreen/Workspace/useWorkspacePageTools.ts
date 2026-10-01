@@ -1,8 +1,8 @@
 import { useEffect } from 'react';
 import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import { isElectronApp } from '../../../utils/electronApp';
-import { executePageTool } from './workspaceBrowserTools';
 import { executeAppTool, isAppControlTool, registerAppControlHost } from './appControlTools';
+import { runSurfacePageCall } from './surfacePageCalls';
 
 export function useWorkspacePageTools(): void {
   const navigate = useNavigate();
@@ -21,7 +21,7 @@ export function useWorkspacePageTools(): void {
   }, [navigate, location.pathname, workspaceId]);
 
   useEffect(() => {
-    if (!isElectronApp()) return undefined;
+    if (!isElectronApp() || window.parent !== window) return undefined;
     const harness = window.electronAPI?.localHarness;
     if (!harness?.onPageToolRequest || !harness.sendPageToolResult) return undefined;
 
@@ -30,7 +30,7 @@ export function useWorkspacePageTools(): void {
       if (!req || typeof req.id !== 'string') return;
       const run = isAppControlTool(req.toolName)
         ? executeAppTool(req.toolName, req.args ?? {})
-        : executePageTool(req.toolName, req.args ?? {});
+        : runSurfacePageCall(req.toolName, req.args ?? {});
       void run
         .then(result => reply(req.id, result))
         .catch(() => reply(req.id, { ok: false, content: 'Tool failed' }));
