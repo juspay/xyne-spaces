@@ -20,6 +20,8 @@ import { redisService } from "../redis.js";
 import { CONFIG } from "../config.js";
 import { agentRepository } from "../repositories/index.js";
 import { decryptStoredField } from "../surfaces/spaces/client.js";
+import { resolveSpacesAppCreds } from "../lib/spaces-agent-install.js";
+import { getWorkspaceIdForUser } from "../lib/spaces-db.js";
 import { buildCapacityRetryFlow } from "xyne-claw-shared";
 import { createLogger } from "../logger.js";
 
@@ -219,7 +221,11 @@ async function updateCard(job: ProviderRetryJob, phase: "retrying" | "exhausted"
   if (!job.card?.messageId) return;
   const agent = await agentRepository.findBySlug(job.redispatch.agentSlug, job.redispatch.orgId).catch(() => null);
   if (!agent?.spacesAppToken || !agent.spacesAppUserId) return;
-  const appToken = decryptStoredField(agent.spacesAppToken);
+  // Token+bot-user for the user's workspace (inline columns = latest install).
+  const retryWsId = await getWorkspaceIdForUser(job.redispatch.userId, "write-action").catch(() => null);
+  const retryCreds = await resolveSpacesAppCreds(agent, retryWsId);
+  const appToken = decryptStoredField(retryCreds.spacesAppToken ?? agent.spacesAppToken);
+  const retryBotUserId = retryCreds.spacesAppUserId ?? agent.spacesAppUserId;
   const flow = buildCapacityRetryFlow(job.provider, {
     agentSlug: job.redispatch.agentSlug,
     channelId: job.redispatch.channelId,
@@ -235,7 +241,7 @@ async function updateCard(job: ProviderRetryJob, phase: "retrying" | "exhausted"
       body: JSON.stringify({
         messageId: job.card.messageId,
         flowJSON: flow,
-        userId: agent.spacesAppUserId,
+        userId: retryBotUserId,
         ...(job.card.spacesAppId ? { appId: job.card.spacesAppId } : {}),
         conversationId: job.redispatch.conversationId,
       }),

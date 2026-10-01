@@ -25,7 +25,8 @@ import {
 } from "../repositories/index.js";
 import type { DraftAgentSpec } from "../lib/agent-card.js";
 import { createAgentQueueError, draftCardCarriesReply, postAgentDraftCard, draftSpecFromCreateAgentParams } from "../lib/agent-draft-card.js";
-import { toResolvedAgent, type ResolvedAgent } from "../lib/resolved-agent.js";
+import { toResolvedAgentForWorkspace, type ResolvedAgent } from "../lib/resolved-agent.js";
+import { resolveSpacesAppCreds, resolveSpacesAppTokenByBotUser } from "../lib/spaces-agent-install.js";
 import { stripLeadingAgentMention } from "../lib/strip-agent-mention.js";
 import { resolveUserSpacesAuth } from "../surfaces/spaces/user-auth.js";
 import { IMMEDIATE_TASK_COMMAND_RE, RECORD_SKILL_COMMAND_RE, isVideoAttachment, videoFileExtension, SDLC_AGENT_SLUG } from "xyne-claw-shared";
@@ -973,7 +974,7 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
       res.json({ success: true });
       return;
     }
-    agent = toResolvedAgent(agentRow);
+    agent = await toResolvedAgentForWorkspace(agentRow, payload.workspaceId);
   } else if (agentSlugFromUrl) {
     const legacyMatches = await prisma.agent.findMany({
       where: { slug: agentSlugFromUrl },
@@ -1014,7 +1015,7 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
       return;
     }
 
-    if (agentRow) agent = toResolvedAgent(agentRow);
+    if (agentRow) agent = await toResolvedAgentForWorkspace(agentRow, payload.workspaceId);
   }
 
   if (!agent) {
@@ -2026,10 +2027,13 @@ async function redispatchQueuedMessage(msg: QueuedMessage): Promise<void> {
   if (!agentRow?.spacesAppToken || !agentRow.spacesAppId) {
     throw new Error(`/internal/run queued redispatch missing Spaces app identity for conv=${msg.conversationId} agent=${msg.agentSlug} org=${queuedOrgId}`);
   }
-  const appToken = decryptStoredField(agentRow.spacesAppToken);
   const workspaceId = msg.workspaceId
     ?? (await getWorkspaceIdForUser(msg.userId, "webhook").catch(() => null))
     ?? (agentRow.spacesAppUserId ? await getSpacesUserWorkspaceId(agentRow.spacesAppUserId).catch(() => null) : null);
+  // Bot token+user for THIS workspace (inline columns = latest install only).
+  const appCreds = await resolveSpacesAppCreds(agentRow, workspaceId);
+  const appToken = appCreds.spacesAppToken ? decryptStoredField(appCreds.spacesAppToken) : "";
+  const appBotUserId = appCreds.spacesAppUserId ?? "";
   const traceId = createTraceId();
   const fastModeEnabled = await resolveFastMode(msg.conversationId, msg.agentSlug, agentRow.config);
   const res = await fetch(runUrl, {
@@ -2073,7 +2077,7 @@ async function redispatchQueuedMessage(msg: QueuedMessage): Promise<void> {
     throw new Error(`/internal/run for queued message returned no sessionId conv=${msg.conversationId} agent=${msg.agentSlug}`);
   }
   const queuedContext: SessionContext = {
-    mentionedUserId: agentRow.spacesAppUserId ?? "",
+    mentionedUserId: appBotUserId,
     senderId: msg.userId,
     senderName: msg.senderName ?? msg.userId,
     channelId: msg.channelId,
@@ -2086,7 +2090,7 @@ async function redispatchQueuedMessage(msg: QueuedMessage): Promise<void> {
     responseMode: "conversation",
     appToken,
     spacesAppId: agentRow.spacesAppId,
-    spacesAppUserId: agentRow.spacesAppUserId ?? "",
+    spacesAppUserId: appBotUserId,
     traceId,
     rootAgentSlug: agentRow.slug,
     ...(workspaceId ? { workspaceId } : {}),
@@ -2101,7 +2105,7 @@ async function redispatchQueuedMessage(msg: QueuedMessage): Promise<void> {
       channelId: msg.channelId,
       agentSlug: msg.agentSlug,
       agentName: queuedContext.agentName,
-      spacesAppUserId: agentRow.spacesAppUserId ?? "",
+      spacesAppUserId: appBotUserId,
       appToken,
       toolLabel: "Picked up your new message — continuing from the summary above…",
     });
@@ -2461,9 +2465,12 @@ export async function handleAutomationWebhook(
     }
   }
   if (interpose) {
-    const appToken = decryptStoredField(agent.spacesAppToken!);
+    // Bot token+user for the automation's workspace (inline columns = latest).
+    const appCreds = await resolveSpacesAppCreds(agent, payload.workspaceId);
+    const appToken = appCreds.spacesAppToken ? decryptStoredField(appCreds.spacesAppToken) : "";
+    const appBotUserId = appCreds.spacesAppUserId ?? agent.spacesAppUserId!;
     const sessionContext: SessionContext = {
-      mentionedUserId: agent.spacesAppUserId!,
+      mentionedUserId: appBotUserId,
       senderId: clawUserId,
       senderName: senderDisplayName,
       // conversationId/channelId may be absent for new-conversation automations.
@@ -2486,7 +2493,7 @@ export async function handleAutomationWebhook(
       responseMode: "conversation",
       appToken,
       spacesAppId: agent.spacesAppId!,
-      spacesAppUserId: agent.spacesAppUserId!,
+      spacesAppUserId: appBotUserId,
       rootAgentSlug: agent.slug,
       // Explicit automation marker — routes/mcp.ts keys the app-mode Spaces
       // MCP swap on this (not on the resolveMentions proxy).
@@ -2748,8 +2755,11 @@ export async function handleAutomationWebhook(
       ...(providerParent ? { provider: providerParent } : {}),
       ...(context ? { context } : {}),
     };
+    // Bot token+user for the automation's workspace (inline columns = latest).
+    const recoveryCreds = await resolveSpacesAppCreds(agent, payload.workspaceId);
+    const recoveryBotUserId = recoveryCreds.spacesAppUserId ?? agent.spacesAppUserId!;
     const recoveryCtx: RecoverySessionContext = {
-      mentionedUserId: agent.spacesAppUserId!,
+      mentionedUserId: recoveryBotUserId,
       senderId: clawUserId,
       senderName: senderDisplayName,
       channelId: payload.channelId ?? "",
@@ -2761,9 +2771,9 @@ export async function handleAutomationWebhook(
       agentSlug: agent.slug,
       agentName: agent.name,
       responseMode: "conversation",
-      appToken: decryptStoredField(agent.spacesAppToken!),
+      appToken: recoveryCreds.spacesAppToken ? decryptStoredField(recoveryCreds.spacesAppToken) : "",
       spacesAppId: agent.spacesAppId!,
-      spacesAppUserId: agent.spacesAppUserId!,
+      spacesAppUserId: recoveryBotUserId,
       ...(payload.workspaceId ? { workspaceId: payload.workspaceId } : {}),
       // Explicit automation marker — see SessionContext.isAutomation. Set
       // unconditionally: a plain-callback automation (no externalResultCallback,
@@ -3875,9 +3885,12 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
           if (!runRes.ok) { clog.error(`[webhook/result] Failure chain trigger HTTP ${runRes.status}`); return; }
           const runBody = (await runRes.json()) as { success: boolean; sessionId?: string };
           if (runBody.success && runBody.sessionId && failureAgentRow?.spacesAppToken && failureAgentRow.spacesAppId) {
-            const failureAppToken = decryptStoredField(failureAgentRow.spacesAppToken);
+            // Token+bot-user for the conversation's workspace (inline = latest).
+            const failureCreds = await resolveSpacesAppCreds(failureAgentRow, ctx.workspaceId);
+            const failureAppToken = failureCreds.spacesAppToken ? decryptStoredField(failureCreds.spacesAppToken) : "";
+            const failureBotUserId = failureCreds.spacesAppUserId ?? "";
             const failureContext: SessionContext = {
-              mentionedUserId: failureAgentRow.spacesAppUserId ?? "",
+              mentionedUserId: failureBotUserId,
               senderId: ctx.senderId,
               senderName: ctx.senderName,
               channelId: ctx.channelId,
@@ -3890,7 +3903,7 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
               responseMode: "conversation",
               appToken: failureAppToken,
               spacesAppId: failureAgentRow.spacesAppId,
-              spacesAppUserId: failureAgentRow.spacesAppUserId ?? "",
+              spacesAppUserId: failureBotUserId,
               chainDepth: (ctx.chainDepth ?? 0) + 1,
               // Thread workflow identity through failure chains so the next
               // agent in the chain can re-resolve the same workflow binding
@@ -4943,9 +4956,12 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
           const runBody = (await runRes.json()) as { success: boolean; sessionId?: string; error?: string };
 
           if (runBody.success && runBody.sessionId && targetAgentRow.spacesAppToken && targetAgentRow.spacesAppId) {
-            const targetAppToken = decryptStoredField(targetAgentRow.spacesAppToken);
+            // Token+bot-user for the conversation's workspace (inline = latest).
+            const targetCreds = await resolveSpacesAppCreds(targetAgentRow, ctx.workspaceId);
+            const targetAppToken = targetCreds.spacesAppToken ? decryptStoredField(targetCreds.spacesAppToken) : "";
+            const targetBotUserId = targetCreds.spacesAppUserId ?? "";
             const targetContext: SessionContext = {
-              mentionedUserId: targetAgentRow.spacesAppUserId ?? "",
+              mentionedUserId: targetBotUserId,
               senderId: ctx.senderId,
               senderName: ctx.senderName,
               channelId: ctx.channelId,
@@ -4960,7 +4976,7 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
               responseMode: "conversation",
               appToken: targetAppToken,
               spacesAppId: targetAgentRow.spacesAppId,
-              spacesAppUserId: targetAgentRow.spacesAppUserId ?? "",
+              spacesAppUserId: targetBotUserId,
               chainDepth: currentDepth + 1,
               rootAgentSlug,
               workflowId: binding.workflowId,
@@ -6019,9 +6035,12 @@ async function syncWebhookPrCard(ev: PrEventInput): Promise<PrEventOutcome> {
     );
     return { outcome: "skipped", reason: "org-mismatch" };
   }
-  const appToken = decryptStoredField(agentRow.spacesAppToken);
   const userId = binding.spacesAppUserId || agentRow.spacesAppUserId || "";
   if (!userId) return { outcome: "skipped", reason: "no-bot-user" };
+  // The binding captured the per-workspace bot user at card-creation time —
+  // resolve that workspace's token (inline column holds only the latest).
+  const storedToken = (await resolveSpacesAppTokenByBotUser(userId)) ?? agentRow.spacesAppToken;
+  const appToken = decryptStoredField(storedToken);
 
   // The binding's own screenId, so the card reconciles onto the agent's original.
   const flow = buildPrFlow(

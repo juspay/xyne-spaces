@@ -52,6 +52,7 @@ import {
 } from "../middleware/require-auth.js";
 import { handleRunCompletion } from "../queue/run-recovery-worker.js";
 import { getDmChannelForUserAndApp, getSpacesAuthForUser, getWorkspaceIdForUser } from "../lib/spaces-db.js";
+import { resolveSpacesAppCreds } from "../lib/spaces-agent-install.js";
 import { isAllowedExternalCallbackUrl, isInternalCallbackOrigin, type ExternalResultCallbackConfig } from "../surfaces/external-api/delivery.js";
 import type { VerifiedCliToken } from "../lib/cli-tokens.js";
 import { agentScopeAllows, canPostToChannels, sanitizeExternalRunBody } from "../lib/service-tokens.js";
@@ -465,9 +466,13 @@ router.get(
     }
     if (token.appid) {
       const agent = await agentRepository.findBySpacesAppId(token.appid).catch(() => null);
-      if (agent?.spacesAppToken) {
+      if (agent) {
         try {
-          const appToken = decryptStoredField(agent.spacesAppToken);
+          // Per-workspace install first (when the user's live workspace is
+          // known); the inline Agent column is the latest-install fallback.
+          const creds = await resolveSpacesAppCreds(agent, live?.workspaceId);
+          if (!creds.spacesAppToken) throw new Error("no Spaces app credential on agent or install rows");
+          const appToken = decryptStoredField(creds.spacesAppToken);
           sources.push({
             label: "apps-route",
             url: `${CONFIG.spacesInternalUrl}/api/apps/attachments/${encodeURIComponent(attachmentId)}/download`,

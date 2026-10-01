@@ -7,6 +7,8 @@ import { parseFrontierItems, normalizeFocus } from "./experiment-text.js";
 import { registerRunRecovery } from "../queue/run-recovery-worker.js";
 import { createTraceId, createLogger } from "../logger.js";
 import { decryptStoredField, spacesAppFetch } from "../surfaces/spaces/client.js";
+import { resolveSpacesAppCreds } from "./spaces-agent-install.js";
+import { getWorkspaceIdForUser } from "./spaces-db.js";
 
 const log = createLogger("experiment");
 
@@ -426,7 +428,13 @@ async function dispatchExperimentRun(
   if (!chat && (!agent.spacesAppToken || !agent.spacesAppId || !agent.spacesAppUserId)) {
     throw new Error(`Experiment dispatch agent ${run.agentSlug} missing Spaces app identity`);
   }
-  const appToken = !chat && agent.spacesAppToken ? decryptStoredField(agent.spacesAppToken) : "";
+  // Token+bot-user for the experiment user's workspace (inline = latest only).
+  // Chat-started experiments report to the chat and need no Spaces app.
+  const expWsId = chat ? null : await getWorkspaceIdForUser(run.userId, "write-action").catch(() => null);
+  const expCreds = chat ? null : await resolveSpacesAppCreds(agent, expWsId);
+  const expBotUserId = expCreds?.spacesAppUserId ?? agent.spacesAppUserId ?? "";
+  const expToken = expCreds?.spacesAppToken ?? agent.spacesAppToken;
+  const appToken = !chat && expToken ? decryptStoredField(expToken) : "";
 
   const dispatchPayload = {
     userId: run.userId,
@@ -470,7 +478,7 @@ async function dispatchExperimentRun(
   }
 
   const sessionContext: SessionContext = {
-    mentionedUserId: chat ? run.userId : (agent.spacesAppUserId ?? ""),
+    mentionedUserId: chat ? run.userId : expBotUserId,
     targetUserId: run.userId,
     senderId: run.userId,
     senderName: run.userId,
@@ -484,8 +492,9 @@ async function dispatchExperimentRun(
     responseMode: "conversation",
     appToken,
     spacesAppId: chat ? "" : (agent.spacesAppId ?? ""),
-    spacesAppUserId: chat ? "" : (agent.spacesAppUserId ?? ""),
+    spacesAppUserId: chat ? "" : expBotUserId,
     ...(chat ? { channelDelivery: chat, triggerSource: chat.channel } : {}),
+    ...(expWsId ? { workspaceId: expWsId } : {}),
     traceId,
     rootAgentSlug: run.agentSlug,
     // Suppresses the channel agent-chain on every epoch callback (see the field

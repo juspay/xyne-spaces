@@ -1,4 +1,5 @@
 import { decryptStoredField } from "../surfaces/spaces/client.js";
+import { resolveSpacesAppCreds } from "./spaces-agent-install.js";
 
 export interface ResolvedAgent {
   id: string;
@@ -34,4 +35,17 @@ export function toResolvedAgent(row: {
         isDefault: row.isDefault,
       }
     : null;
+}
+
+/** Workspace-aware variant: bot token+user for `workspaceId` when the webhook
+ *  payload carries it (SurfaceAgentInstall); the inline columns hold only the
+ *  latest install's pair and stay the fallback. */
+export async function toResolvedAgentForWorkspace(
+  row: Parameters<typeof toResolvedAgent>[0],
+  workspaceId?: string | null,
+): Promise<ResolvedAgent | null> {
+  if (!row.spacesAppId || !row.spacesAppToken) return null;
+  const creds = await resolveSpacesAppCreds(row, workspaceId);
+  if (!creds.spacesAppToken) return null;
+  return toResolvedAgent({ ...row, spacesAppToken: creds.spacesAppToken, spacesAppUserId: creds.spacesAppUserId });
 }
