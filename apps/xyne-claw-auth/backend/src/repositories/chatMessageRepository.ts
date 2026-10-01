@@ -209,7 +209,7 @@ export const chatMessageRepository = {
     });
     if (result.count > 0) {
       await prisma.chatConversationMeta.deleteMany({
-        where: { conversationId, userId, agentSlug },
+        where: { conversationId, agentSlug, ...userIdFilter(userIds) },
       });
     }
     return result.count;
