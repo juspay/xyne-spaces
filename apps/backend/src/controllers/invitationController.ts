@@ -654,9 +654,11 @@ export class InvitationController {
       const invitations = await DatabaseClient.getInstance().invitation.findMany({
         where: {
           orgId,
-          isOrgApproved: false,
           acceptedAt: null,
-          OR: [{ expiredAt: null }, { expiredAt: { gt: new Date() } }],
+          AND: [
+            { OR: [{ expiredAt: null }, { expiredAt: { gt: new Date() } }] },
+            { OR: [{ isOrgApproved: false }, { isOrgApproved: true, inviteEmailSentAt: null }] },
+          ],
         },
         orderBy: { createdAt: 'desc' },
         select: {
@@ -666,6 +668,8 @@ export class InvitationController {
           invitedBy: true,
           invitedAt: true,
           createdAt: true,
+          isOrgApproved: true,
+          inviteEmailSentAt: true,
           workspace: { select: { name: true } },
         },
       });
@@ -689,6 +693,8 @@ export class InvitationController {
           createdAt: invitation.createdAt,
           invitedByName: inviterById.get(invitation.invitedBy)?.name ?? null,
           invitedByEmail: inviterById.get(invitation.invitedBy)?.email ?? null,
+          isOrgApproved: invitation.isOrgApproved,
+          inviteEmailSentAt: invitation.inviteEmailSentAt,
         })),
       });
     } catch (error) {
@@ -697,7 +703,7 @@ export class InvitationController {
     }
   };
 
-  /** POST /:id/approve — approve a pending invite, create the org member, send the email. */
+  /** POST /:id/approve — approve a pending invite, create the org member, send the email. Re-running on an approved, unaccepted invite resends the email (retry after a failed send). */
   approveInvitation = async (req: Request, res: Response): Promise<void> => {
     try {
       const { id } = req.params;
@@ -707,8 +713,15 @@ export class InvitationController {
         return;
       }
 
-      if (invitation.isOrgApproved !== false) {
+      // null = invite never went through the approval flow; false = pending; true = already approved (email retry).
+      if (invitation.isOrgApproved === null) {
         res.status(400).json({ error: 'Invitation is not pending approval' });
+        return;
+      }
+
+      // Already approved and emailed — a re-approve would send a duplicate email.
+      if (invitation.isOrgApproved === true && invitation.inviteEmailSentAt) {
+        res.status(400).json({ error: 'Invitation email has already been sent' });
         return;
       }
 
@@ -740,7 +753,7 @@ export class InvitationController {
 
       // Approval creates the orgMember row (and its password), so now generate a
       // temp password (if needed) and send the invite email.
-      let emailSent = false;
+      let emailSent = true;
       if (config.env === 'development') {
         logger.info(
           `[InvitationController] DEV MODE — approved invitation ${invitation.id} for ${invitation.email}, skipping email`
@@ -774,8 +787,16 @@ export class InvitationController {
           logger.error(
             `[InvitationController] Approved invitation ${invitation.id} but email failed: ${emailResult.error}`
           );
+          res.status(502).json({
+            error: 'Invite email failed to send. Click "Resend email" to try again.',
+            emailSent: false,
+          });
+          return;
         }
       }
+
+      // Email is out (or dev-skipped) — record it so the invite leaves the resend list.
+      await invitationService.markInviteEmailSent(invitation.id);
 
       res.json({ success: true, emailSent });
     } catch (error) {

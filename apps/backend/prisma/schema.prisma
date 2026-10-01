@@ -1706,6 +1706,7 @@ model Invitation {
   entityType   String?   // PROJECT | CHANNEL | CANVAS
   channelId    String?       // For PROJECT guests: the specific channel to grant access to
   isOrgApproved Boolean?
+  inviteEmailSentAt DateTime?  // Approval flow: when the invite email actually went out. null on an approved invite = email failed, resend needed
   createdAt    DateTime      @default(now())
   updatedAt    DateTime      @updatedAt
 
