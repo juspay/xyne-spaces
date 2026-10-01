@@ -148,7 +148,7 @@
     "@y-sweet/client": "^0.9.1",
     "ag-grid-community": "^35.0.0",
     "ag-grid-react": "^35.0.0",
-    "axios": "^1.18.1",
+    "axios": "^1.20.0",
     "blocknote-layout-extensions": "4.2.0",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
