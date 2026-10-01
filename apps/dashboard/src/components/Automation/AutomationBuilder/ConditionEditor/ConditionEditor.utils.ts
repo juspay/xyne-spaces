@@ -1,7 +1,7 @@
 import type { Condition, JsonSchema, LeafCondition } from '../../Automation.types';
 import type { VariablePickerSource } from '../VariablePicker/VariablePicker.types';
-import { parseReference } from '../VariablePicker/VariablePicker.utils';
-import { resolveSchema } from '../SchemaForm/SchemaForm.utils';
+import { formatReferenceLabel, parseReference } from '../VariablePicker/VariablePicker.utils';
+import { detectEntityKind, resolveSchema, type EntityKind } from '../SchemaForm/SchemaForm.utils';
 
 export function hasInvalidTagCondition(condition: Condition): boolean {
   if (isLeaf(condition)) {
@@ -58,32 +58,47 @@ const OPERATOR_VERBS: Record<string, string> = {
   has_tag: 'has tag',
 };
 
-export function summarizeCondition(condition: Condition | undefined): string {
+/** Looks up the display name of an id picked in an entity field (channel, user…). */
+export type EntityNameLookup = (kind: EntityKind, id: string) => string | undefined;
+
+/**
+ * One-line summary of a condition: variable references use the condition
+ * editor's labels, and a picked channel or user shows by name, not id.
+ */
+export function summarizeCondition(
+  condition: Condition | undefined,
+  sources: VariablePickerSource[],
+  nameForId: EntityNameLookup,
+): string {
   if (!condition) return 'Click to set a condition';
   if (isLeaf(condition)) {
     if (isEmptyLeaf(condition)) return 'Click to set a condition';
-    const lhs = formatVariableRef(condition.variable);
+    const lhs = formatReferenceLabel(condition.variable, sources) || '<empty>';
     const verb = OPERATOR_VERBS[condition.operator] ?? condition.operator;
     if (condition.operator === 'exists') return `${lhs} ${verb}`;
-    const rhs = formatValue(condition.value);
+    const rhs =
+      typeof condition.value === 'string' && parseReference(condition.value)
+        ? formatReferenceLabel(condition.value, sources)
+        : formatValue(entityName(condition, nameForId) ?? condition.value);
     return `${lhs} ${verb} ${rhs}`;
   }
   if (isAndGroup(condition)) {
     if (condition.all.length === 0) return 'Click to set a condition';
-    return `(${condition.all.map(summarizeCondition).join(' AND ')})`;
+    return `(${condition.all.map(c => summarizeCondition(c, sources, nameForId)).join(' AND ')})`;
   }
   if (isOrGroup(condition)) {
     if (condition.any.length === 0) return 'Click to set a condition';
-    return `(${condition.any.map(summarizeCondition).join(' OR ')})`;
+    return `(${condition.any.map(c => summarizeCondition(c, sources, nameForId)).join(' OR ')})`;
   }
   return 'Condition';
 }
 
-function formatVariableRef(value: string): string {
-  const match = /^\{\{context\.([^}]+)\}\}$/.exec(value);
-  if (!match || !match[1]) return value || '<empty>';
-  const segments = match[1].split('.').filter(s => s !== 'output' && s !== 'input');
-  return segments.slice(-2).join('.') || match[1];
+/** Same entity detection as the editor's value field (`detectEntityKind` on the leaf key). */
+function entityName(leaf: LeafCondition, nameForId: EntityNameLookup): string | undefined {
+  if (typeof leaf.value !== 'string' || !leaf.value) return undefined;
+  const lastKey = parseReference(leaf.variable)?.path.split('.').pop() ?? '';
+  const kind = detectEntityKind(lastKey);
+  return kind ? nameForId(kind, leaf.value) : undefined;
 }
 
 export function resolveLeafSchema(

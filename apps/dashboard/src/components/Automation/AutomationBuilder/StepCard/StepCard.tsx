@@ -28,6 +28,12 @@ import { NotifyStepForm } from './NotifyStepForm';
 import { ApplyConversationLabelStepForm } from './ApplyConversationLabelStepForm';
 import { DelayStepForm } from './DelayStepForm';
 import type { StepCardProps } from './StepCard.types';
+import { DiffBadge } from '../DiffHighlight/DiffBadge';
+import { diffHighlightClass, useDiffMark } from '../DiffHighlight/DiffHighlight';
+import { useCollapseAll } from '../CollapseAll/CollapseAll';
+import { StepIssueBadge } from '../ValidationBanner/StepIssueBadge';
+import { stepNumberForPrefix } from '../FlowAutomationView/FlowAutomationView.utils';
+import { MoveStepMenuItem } from '../MoveStep/MoveStep';
 
 export function StepCard({
   step,
@@ -48,27 +54,41 @@ export function StepCard({
   const [collapsed, setCollapsed] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const [peekOpen, setPeekOpen] = useState(false);
+  const diff = useDiffMark(step.id);
+  useCollapseAll(setCollapsed);
 
   const heading = catalogItem?.name ?? step.type;
   const description = catalogItem?.description;
+  const issueMessages = (issues ?? []).map(i => i.message);
+  const stepNumber = stepNumberForPrefix(pathPrefix);
 
   return (
     <div
       data-slot='automation-step-card'
-      className='flex flex-col gap-4 rounded-md border border-border bg-background p-5'
+      data-step-id={step.id}
+      className={cn(
+        'flex flex-col gap-4 rounded-md border border-border bg-background p-5',
+        issueMessages.length > 0 && 'border-destructive/60',
+        diff && diffHighlightClass(diff),
+      )}
     >
+      {diff && <DiffBadge diff={diff} />}
       <div className='flex items-start justify-between gap-3'>
         <button
           type='button'
           aria-expanded={!collapsed}
-          aria-label={`Step ${index} — ${heading}. ${collapsed ? 'Expand' : 'Collapse'} configuration.`}
+          aria-label={`Step ${stepNumber} — ${heading}.${issueMessages.length ? ` ${issueMessages.length} validation issue${issueMessages.length === 1 ? '' : 's'}.` : ''} ${collapsed ? 'Expand' : 'Collapse'} configuration.`}
           data-track-category='automation-builder'
           data-track-name='step-card-toggle-collapse'
           className={cn(
-            'flex flex-1 items-start gap-3 rounded-md text-left',
+            'pointer-events-auto flex flex-1 items-start gap-3 rounded-md text-left',
             'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-foreground/40',
           )}
-          onClick={() => setCollapsed(prev => !prev)}
+          onClick={e => {
+            // Read-only views: expanding must not also trigger the builder's click-to-edit.
+            e.stopPropagation();
+            setCollapsed(prev => !prev);
+          }}
         >
           <div
             aria-hidden='true'
@@ -77,8 +97,9 @@ export function StepCard({
             <Box className='size-4' />
           </div>
           <div className='flex flex-col'>
-            <span className='text-[10px] font-medium uppercase tracking-wide text-muted-foreground'>
-              Step {index} {catalogItem ? `· ${catalogItem.category}` : ''}
+            <span className='flex items-center gap-1.5 text-[10px] font-medium uppercase tracking-wide text-muted-foreground'>
+              Step {stepNumber} {catalogItem ? `· ${catalogItem.category}` : ''}
+              {issueMessages.length > 0 && <StepIssueBadge messages={issueMessages} />}
             </span>
             <span className='text-sm font-medium text-foreground'>{heading}</span>
             {description && (
@@ -90,12 +111,12 @@ export function StepCard({
           </div>
         </button>
 
-        <div className='flex items-center gap-1'>
+        <div className='flex items-center gap-1' inert={readOnly}>
           <button
             type='button'
             onClick={onMoveUp}
             disabled={index === 1}
-            aria-label={`Move step ${index} up`}
+            aria-label={`Move step ${stepNumber} up`}
             data-track-category='automation-builder'
             data-track-name='step-card-move-up'
             className={cn(
@@ -112,7 +133,7 @@ export function StepCard({
             type='button'
             onClick={onMoveDown}
             disabled={index === total}
-            aria-label={`Move step ${index} down`}
+            aria-label={`Move step ${stepNumber} down`}
             data-track-category='automation-builder'
             data-track-name='step-card-move-down'
             className={cn(
@@ -131,11 +152,11 @@ export function StepCard({
             align='end'
             side='bottom'
             sideOffset={4}
-            className='w-[160px] rounded-md p-1'
+            className='w-[240px] rounded-md p-1'
             trigger={
               <button
                 type='button'
-                aria-label={`Actions for step ${index}`}
+                aria-label={`Actions for step ${stepNumber}`}
                 aria-haspopup='menu'
                 aria-expanded={menuOpen}
                 className={cn(
@@ -148,6 +169,7 @@ export function StepCard({
               </button>
             }
           >
+            <MoveStepMenuItem stepId={step.id} onDone={() => setMenuOpen(false)} />
             <button
               type='button'
               onClick={() => {
@@ -166,7 +188,7 @@ export function StepCard({
       </div>
 
       {!collapsed && (
-        <div className='border-t border-border pt-4'>
+        <div className='border-t border-border pt-4' inert={readOnly}>
           {schemaLoading ? (
             <div className='flex items-center gap-2 text-xs text-muted-foreground'>
               <Loader2 className='size-4 animate-spin' />

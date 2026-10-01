@@ -19,8 +19,15 @@ import {
   summarizeCondition,
   hasInvalidTagCondition,
 } from '../ConditionEditor/ConditionEditor.utils';
+import { useEntityNameLookup } from '../ConditionEditor/useEntityNameLookup';
 import { BranchSteps } from '../BranchSteps/BranchSteps';
 import type { ConditionalCardProps } from './ConditionalCard.types';
+import { DiffBadge } from '../DiffHighlight/DiffBadge';
+import { diffHighlightClass, useDiffMark } from '../DiffHighlight/DiffHighlight';
+import { useCollapseAll } from '../CollapseAll/CollapseAll';
+import { StepIssueBadge } from '../ValidationBanner/StepIssueBadge';
+import { ownStepIssues, stepNumberForPrefix } from '../FlowAutomationView/FlowAutomationView.utils';
+import { MoveStepMenuItem } from '../MoveStep/MoveStep';
 
 export function ConditionalCard({
   step,
@@ -51,7 +58,8 @@ export function ConditionalCard({
     if (editorOpen) setDraftCondition(step.config.condition);
   }, [editorOpen, step.config.condition]);
 
-  const conditionSummary = summarizeCondition(step.config.condition);
+  const nameForId = useEntityNameLookup();
+  const conditionSummary = summarizeCondition(step.config.condition, variableSources, nameForId);
   const conditionUnset =
     conditionSummary === 'Click to set a condition' || conditionSummary === 'Condition';
 
@@ -67,17 +75,30 @@ export function ConditionalCard({
 
   const issuesUnder = (prefix: string): ValidationIssue[] =>
     issues.filter(i => i.path.startsWith(prefix));
+  const diff = useDiffMark(step.id);
+  useCollapseAll(setCollapsed);
+  const issueMessages = ownStepIssues(issues, pathPrefix).map(i => i.message);
 
   return (
     <div
       data-slot='automation-conditional-card'
-      className='flex flex-col gap-4 rounded-md border border-border bg-background p-5'
+      data-step-id={step.id}
+      className={cn(
+        'flex flex-col gap-4 rounded-md border border-border bg-background p-5',
+        issueMessages.length > 0 && 'border-destructive/60',
+        diff && diffHighlightClass(diff),
+      )}
     >
+      {diff && <DiffBadge diff={diff} />}
       <div className='flex items-start justify-between gap-3'>
         <button
           type='button'
-          className='flex flex-1 items-start gap-3 text-left'
-          onClick={() => setCollapsed(prev => !prev)}
+          className='pointer-events-auto flex flex-1 items-start gap-3 text-left'
+          onClick={e => {
+            // Read-only views: expanding must not also trigger the builder's click-to-edit.
+            e.stopPropagation();
+            setCollapsed(prev => !prev);
+          }}
           data-track-category='automation-builder'
           data-track-name='conditional-toggle-collapse'
         >
@@ -85,8 +106,9 @@ export function ConditionalCard({
             <GitBranch className='size-4' />
           </div>
           <div className='flex flex-col'>
-            <span className='text-[10px] font-medium uppercase tracking-wide text-muted-foreground'>
-              Step {index} · control
+            <span className='flex items-center gap-1.5 text-[10px] font-medium uppercase tracking-wide text-muted-foreground'>
+              Step {stepNumberForPrefix(pathPrefix)} · control
+              {issueMessages.length > 0 && <StepIssueBadge messages={issueMessages} />}
             </span>
             <span className='text-sm font-medium text-foreground'>If / Else</span>
             <span className='mt-1 text-xs text-muted-foreground'>
@@ -98,7 +120,7 @@ export function ConditionalCard({
           </div>
         </button>
 
-        <div className='flex items-center gap-1'>
+        <div className='flex items-center gap-1' inert={readOnly}>
           <button
             type='button'
             onClick={onMoveUp}
@@ -137,7 +159,7 @@ export function ConditionalCard({
             align='end'
             side='bottom'
             sideOffset={4}
-            className='w-[160px] rounded-md p-1'
+            className='w-[240px] rounded-md p-1'
             trigger={
               <button
                 type='button'
@@ -148,6 +170,7 @@ export function ConditionalCard({
               </button>
             }
           >
+            <MoveStepMenuItem stepId={step.id} onDone={() => setMenuOpen(false)} />
             <button
               type='button'
               onClick={() => {
@@ -167,7 +190,7 @@ export function ConditionalCard({
 
       {!collapsed && (
         <>
-          <div className='flex flex-col gap-2 border-t border-border pt-4'>
+          <div className='flex flex-col gap-2 border-t border-border pt-4' inert={readOnly}>
             <div className='flex items-center justify-between gap-3'>
               <span className='text-xs font-medium text-foreground'>Condition</span>
               <Button
@@ -191,7 +214,7 @@ export function ConditionalCard({
                 'rounded-md border px-3 py-2 text-left text-xs',
                 conditionUnset
                   ? 'border-dashed border-border text-muted-foreground hover:bg-accent/30'
-                  : 'border-border bg-accent/20 text-foreground font-mono hover:bg-accent/40',
+                  : 'border-border bg-accent/20 text-foreground hover:bg-accent/40',
               )}
             >
               {conditionSummary}
