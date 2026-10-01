@@ -4,6 +4,7 @@ import {
   mergeSdlcToolProfile,
   SDLC_DIRECT_TOOL_NAMES,
   SDLC_TOOL_NAMES,
+  sdlcToolPermissions,
   withSdlcToolsConfig,
 } from "./registry.js";
 
@@ -49,5 +50,20 @@ describe("withSdlcToolsConfig", () => {
     const tools = withSdlcToolsConfig({ subagents: ["jira"] }, profile)!;
     expect(tools["subagents"]).toEqual(expect.arrayContaining(["jira", "github"]));
     expect(tools["direct"]).toEqual(expect.arrayContaining([SDLC_TOOL_NAMES.createTrackFolder]));
+  });
+});
+
+describe("sdlcToolPermissions", () => {
+  it("opens pull requests without an approval card on every run", () => {
+    const key = `xyne-spaces__${SDLC_TOOL_NAMES.createPullRequest}`;
+    expect(sdlcToolPermissions(profile.tools.direct, true)[key]).toBe("allow");
+    expect(sdlcToolPermissions(profile.tools.direct, false)[key]).toBe("allow");
+  });
+
+  it("still asks before the other SDLC writes on a watched run", () => {
+    const watched = sdlcToolPermissions(profile.tools.direct, true);
+    for (const name of [SDLC_TOOL_NAMES.writeArtifact, SDLC_TOOL_NAMES.archiveArtifact, SDLC_TOOL_NAMES.createTrack, SDLC_TOOL_NAMES.createTrackFolder]) {
+      expect(watched[`xyne-spaces__${name}`]).toBe("ask");
+    }
   });
 });

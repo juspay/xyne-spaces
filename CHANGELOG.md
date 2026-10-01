@@ -1,3 +1,40 @@
+## [1.452.0](https://github.com/juspay/xyne-spaces/compare/v1.451.0...v1.452.0) (2026-10-01)
+
+
+### Features
+
+* inline CSV preview for chat attachments ([#2455](https://github.com/juspay/xyne-spaces/issues/2455)) ([3578f50](https://github.com/juspay/xyne-spaces/commit/3578f501ecf77f1a12c28025ae90eff78259ad23))
+
+## [1.451.0](https://github.com/juspay/xyne-spaces/compare/v1.450.1...v1.451.0) (2026-10-01)
+
+
+### Features
+
+* push browser calls to the desktop app over a device stream ([#2575](https://github.com/juspay/xyne-spaces/issues/2575)) ([f013fb7](https://github.com/juspay/xyne-spaces/commit/f013fb763685fd603ffe4147bdb8ae6808e703bc))
+
+## [1.450.1](https://github.com/juspay/xyne-spaces/compare/v1.450.0...v1.450.1) (2026-10-01)
+
+
+### Bug Fixes
+
+* added index to prevent the seq scan in conversations table ([#2593](https://github.com/juspay/xyne-spaces/issues/2593)) ([485d2a4](https://github.com/juspay/xyne-spaces/commit/485d2a40adf532189c7b3107870ab8c8e29e6d91))
+* open SDLC pull requests without an approval card ([#2589](https://github.com/juspay/xyne-spaces/issues/2589)) ([ba858cd](https://github.com/juspay/xyne-spaces/commit/ba858cd27721ca1793b995f252c61d3848b36a07))
+
+## [1.450.0](https://github.com/juspay/xyne-spaces/compare/v1.449.0...v1.450.0) (2026-10-01)
+
+
+### Features
+
+* added range query for calls ([#2563](https://github.com/juspay/xyne-spaces/issues/2563)) ([025cf0c](https://github.com/juspay/xyne-spaces/commit/025cf0c76201f4b3ff42f511b6043104666ab763))
+
+
+### Bug Fixes
+
+* merchantid column to CF ([#2284](https://github.com/juspay/xyne-spaces/issues/2284)) ([9aeeb49](https://github.com/juspay/xyne-spaces/commit/9aeeb4985e969b98a253aaf8d8e7200d7653c1eb))
+* meta integration ([#431](https://github.com/juspay/xyne-spaces/issues/431)) ([63baf16](https://github.com/juspay/xyne-spaces/commit/63baf16899f65d1c4b2f7dc1e4684b3bf96d64c7))
+* shared recording transcript acl release ([#2580](https://github.com/juspay/xyne-spaces/issues/2580)) ([4984875](https://github.com/juspay/xyne-spaces/commit/4984875526b142807daddad19286c71556d16cfc)), closes [#1424](https://github.com/juspay/xyne-spaces/issues/1424)
+* shared-recording transcript ACL and call translation notification route ([#2550](https://github.com/juspay/xyne-spaces/issues/2550)) ([8c65e71](https://github.com/juspay/xyne-spaces/commit/8c65e71c43c221c1a3992d51e69097c1578de156)), closes [#1424](https://github.com/juspay/xyne-spaces/issues/1424)
+
 ## [1.449.0](https://github.com/juspay/xyne-spaces/compare/v1.448.0...v1.449.0) (2026-10-01)
 
 
