@@ -60,18 +60,9 @@ async function ensureSigningSecretEnc(appId: string, signingSecretEnc: string | 
   return rows[0]?.signingSecret ?? fresh;
 }
 
-/** Adoptable only if the stored webhook already equals this template resolved for the app's own id. */
-function findTemplateOwnedApp<T extends { id: string; webhookUrl: string | null }>(
-  apps: T[],
-  webhookUrlTemplate: string | undefined,
-): T | undefined {
-  if (!webhookUrlTemplate) return undefined;
-  return apps.find((app) => app.webhookUrl === substituteAppId(webhookUrlTemplate, app.id));
-}
-
 /**
- * Idempotently ensure an org app exists (orgId + name, case-insensitive). Names aren't unique,
- * so only a template-owned app is adopted — a foreign same-name app gets 409, never an adoption.
+ * Idempotently ensure an org app exists (orgId + name, case-insensitive). Any same-name app in
+ * the org is adopted — the oldest one wins. Config (webhook, permissions) is always converged.
  * Returns the decrypted signing secret; S2S-only, the caller re-encrypts for webhook verification.
  */
 router.post(
@@ -86,33 +77,24 @@ router.post(
     }
 
     const sameNameApps = await findOrgAppsByName(input.orgId, input.name);
-    const existing = findTemplateOwnedApp(sameNameApps, input.webhookUrlTemplate);
+    const existing = sameNameApps[0]; // oldest first (orderBy createdAt asc)
     if (existing) {
       await ensureOrgAppConfig(existing.id, existing.workspaceId, {
-        webhookUrl: substituteAppId(input.webhookUrlTemplate!, existing.id),
+        webhookUrl: input.webhookUrlTemplate ? substituteAppId(input.webhookUrlTemplate, existing.id) : undefined,
         permissions: input.permissions,
       });
       const signingSecretEnc = await ensureSigningSecretEnc(existing.id, existing.signingSecret);
       res.status(200).json({ id: existing.id, signingSecret: decrypt(signingSecretEnc), created: false });
       return;
     }
-    if (sameNameApps.length > 0) {
-      throw new AppError(
-        `An app named "${input.name}" already exists in this org and was not provisioned for this webhook template — refusing to adopt it`,
-        409,
-      );
-    }
 
     let created;
     try {
       created = await provisionOrgApp(input);
     } catch (err) {
-      // Lost a concurrent create race — the winner answers the same lookup now.
+      // Lost a concurrent create race — adopt whatever the winner created.
       if (err instanceof Error && err.message.includes('already exists')) {
-        const winner = findTemplateOwnedApp(
-          await findOrgAppsByName(input.orgId, input.name),
-          input.webhookUrlTemplate,
-        );
+        const winner = (await findOrgAppsByName(input.orgId, input.name))[0];
         if (winner) {
           const signingSecretEnc = await ensureSigningSecretEnc(winner.id, winner.signingSecret);
           res.status(200).json({ id: winner.id, signingSecret: decrypt(signingSecretEnc), created: false });
