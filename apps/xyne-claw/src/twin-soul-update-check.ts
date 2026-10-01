@@ -12,32 +12,16 @@
  * direction of the change, which the opening of a persona file carries.
  */
 
-import type { ClassifierExchange } from "xyne-claw-shared";
+import type { MemoryUpdateCheck, MemoryUpdateVerdict } from "xyne-claw-shared";
 import type { JevAnswer, JevQuestion } from "./jev.js";
 import { collectJudgeExchanges, storableExchange } from "./judge-backend.js";
-import { answerProb, runJudgeSite } from "./judge-site.js";
+import { answerProb, round3, runJudgeSite, type JudgeSiteDeps } from "./judge-site.js";
 import { optEnabled } from "./optimizations.js";
-
-export type MemoryUpdateVerdict = "accept" | "review" | "reject";
-
-export interface MemoryUpdateCheck {
-  verdict: MemoryUpdateVerdict;
-  /** 0..1 — keeps what the old file said that is still supported (absent for a new file). */
-  keepsOld?: number;
-  /** 0..1 — every statement in the new file is supported by the approved facts. */
-  supported?: number;
-  /** Jev's own accept/review/reject pick. */
-  choice?: string;
-  source: "jev" | "fallback";
-  ms: number;
-  /** The classifier call in full (input, questions, answers). */
-  exchange?: ClassifierExchange;
-}
 
 const FILE_CHARS = 6_000;
 const FACT_CHARS = 4_000;
 
-export function updateCheckQuestions(hasOld: boolean): Record<string, JevQuestion> {
+function updateCheckQuestions(hasOld: boolean): Record<string, JevQuestion> {
   const q: Record<string, JevQuestion> = {
     supported: {
       type: "score",
@@ -84,19 +68,17 @@ export function checkFromAnswers(answers: Record<string, JevAnswer>, ms: number)
     choice === "reject" || low < 0.3 ? "reject" : choice === "accept" && low >= 0.5 ? "accept" : "review";
   return {
     verdict,
-    ...(keepsOld !== undefined ? { keepsOld: round(keepsOld) } : {}),
-    ...(supported !== undefined ? { supported: round(supported) } : {}),
+    ...(keepsOld !== undefined ? { keepsOld: round3(keepsOld) } : {}),
+    ...(supported !== undefined ? { supported: round3(supported) } : {}),
     ...(choice ? { choice } : {}),
     source: "jev",
     ms,
   };
 }
 
-const round = (v: number): number => Math.round(v * 1000) / 1000;
-
 export async function checkMemoryUpdate(
   input: { fileName: string; description: string; oldContent?: string; newContent: string; facts: string[] },
-  deps: { ask?: typeof import("./jev.js").jevAsk; enabled?: boolean } = {},
+  deps: JudgeSiteDeps = {},
 ): Promise<MemoryUpdateCheck> {
   const started = Date.now();
   const hasOld = Boolean(input.oldContent?.trim());
@@ -121,9 +103,8 @@ export async function checkMemoryUpdate(
     decide: (answers) => checkFromAnswers(answers, Date.now() - started),
     fallback: async () => ({ verdict: "accept", source: "fallback", ms: Date.now() - started }),
     describe: (c) => `${c.verdict} ${input.fileName}`,
-    ...(deps.ask ? { ask: deps.ask } : {}),
+    ask: deps.ask,
   }));
-  const decision = result.decision ?? { verdict: "accept" as const, source: "fallback" as const, ms: Date.now() - started };
   const exchange = exchanges[0];
-  return exchange ? { ...decision, exchange: storableExchange(exchange) } : decision;
+  return exchange ? { ...result.decision, exchange: storableExchange(exchange) } : result.decision;
 }

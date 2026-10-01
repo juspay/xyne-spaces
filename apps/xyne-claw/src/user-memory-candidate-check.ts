@@ -10,12 +10,20 @@
  * Jev off or down → candidates pass through unchanged (today's behaviour).
  */
 
-import type { ClassifierExchange, ExistingUserMemory, UserMemoryCandidatePayload } from "xyne-claw-shared";
+import type {
+  ClassifierExchange,
+  ExistingUserMemory,
+  UserMemoryCandidatePayload,
+  UserMemoryCandidateVerdict,
+  UserMemoryCuratorTrace,
+} from "xyne-claw-shared";
 import { jevAsk, jevEnabled, type JevAnswer, type JevQuestion } from "./jev.js";
 import { collectJudgeExchanges, recordJudgeOutcome, storableExchange } from "./judge-backend.js";
+import { round3, type JudgeSiteDeps } from "./judge-site.js";
 import { createLogger } from "./logger.js";
 import { metric } from "./metrics.js";
 import { optEnabled } from "./optimizations.js";
+import { jaccard, wordSet } from "./text-similarity.js";
 
 const log = createLogger("memory-candidate-check");
 
@@ -27,36 +35,20 @@ const BUDGET_MS = Number(process.env["MEMORY_CANDIDATE_CHECK_TIMEOUT_MS"] ?? 8_0
 const BATCH_DEADLINE_MS = Number(process.env["MEMORY_CANDIDATE_CHECK_DEADLINE_MS"] ?? 30_000);
 const MAX_CONSECUTIVE_MISSES = 3;
 
-export type CandidateVerdict = "new" | "duplicate" | "update" | "noise";
-
-export interface CheckedCandidate extends UserMemoryCandidatePayload {
-  jevVerdict?: CandidateVerdict;
-  jevScore?: number;
-}
-
 export interface CandidateCheckSummary {
   checked: number;
-  dropped: Array<{ text: string; verdict: CandidateVerdict; p: number }>;
+  dropped: Array<{ text: string; verdict: UserMemoryCandidateVerdict; p: number }>;
   /** Every candidate Jev answered for (kept or dropped), for the pipeline trace. */
-  verdicts: Array<{ text: string; verdict: CandidateVerdict; p: number; worth?: number }>;
+  verdicts: Array<{ text: string; verdict: UserMemoryCandidateVerdict; p: number; worth?: number }>;
   /** The classifier call per candidate text (first 200 chars), in full. */
   exchanges: Array<{ text: string; exchange: ClassifierExchange }>;
   unavailable: number;
   ms: number;
 }
 
-function tokens(text: string): Set<string> {
-  return new Set(text.toLowerCase().split(/[^a-z0-9]+/).filter((t) => t.length > 2));
-}
-
 /** Jaccard similarity of word sets — cheap, local, good enough to pick neighbours. */
 export function similarity(a: string, b: string): number {
-  const ta = tokens(a);
-  const tb = tokens(b);
-  if (ta.size === 0 || tb.size === 0) return 0;
-  let inter = 0;
-  for (const t of ta) if (tb.has(t)) inter += 1;
-  return inter / (ta.size + tb.size - inter);
+  return jaccard(wordSet(a), wordSet(b));
 }
 
 export function mostSimilar(text: string, existing: readonly ExistingUserMemory[], k = SIMILAR_K): ExistingUserMemory[] {
@@ -68,7 +60,7 @@ export function mostSimilar(text: string, existing: readonly ExistingUserMemory[
     .map((x) => x.m);
 }
 
-export const CANDIDATE_QUESTIONS: Record<string, JevQuestion> = {
+const CANDIDATE_QUESTIONS: Record<string, JevQuestion> = {
   verdict: {
     type: "choice",
     instructions: "Compared with the memories already stored about this user, what is the NEW candidate memory?",
@@ -86,7 +78,7 @@ export const CANDIDATE_QUESTIONS: Record<string, JevQuestion> = {
   },
 };
 
-export function candidateState(c: UserMemoryCandidatePayload, similar: readonly ExistingUserMemory[]): string {
+function candidateState(c: UserMemoryCandidatePayload, similar: readonly ExistingUserMemory[]): string {
   const stored = similar.length
     ? similar.map((m) => `- [${m.subsystem}] ${m.text.slice(0, 400)}`).join("\n")
     : "- (no similar stored memories)";
@@ -99,9 +91,9 @@ export function candidateState(c: UserMemoryCandidatePayload, similar: readonly 
 /** Pure: answers → keep/drop decision for one candidate. */
 export function decideCandidate(
   answers: Record<string, JevAnswer>,
-): { keep: boolean; verdict: CandidateVerdict; p: number; worth?: number } | null {
+): { keep: boolean; verdict: UserMemoryCandidateVerdict; p: number; worth?: number } | null {
   const a = answers["verdict"];
-  const verdict = a?.choice as CandidateVerdict | undefined;
+  const verdict = a?.choice as UserMemoryCandidateVerdict | undefined;
   if (!verdict) return null;
   const p = a?.probabilities?.[verdict] ?? a?.confidence ?? 0;
   const worthRaw = answers["worth"]?.score;
@@ -126,8 +118,8 @@ async function mapLimit<T, R>(items: readonly T[], limit: number, fn: (item: T) 
 export async function checkMemoryCandidates(
   candidates: readonly UserMemoryCandidatePayload[],
   existing: readonly ExistingUserMemory[],
-  deps: { ask?: typeof jevAsk; enabled?: boolean } = {},
-): Promise<{ candidates: CheckedCandidate[]; summary: CandidateCheckSummary | null }> {
+  deps: JudgeSiteDeps = {},
+): Promise<{ candidates: UserMemoryCandidatePayload[]; summary: CandidateCheckSummary | null }> {
   const enabled = deps.enabled ?? optEnabled("jev_memory_candidate_check");
   if (!enabled || candidates.length === 0 || (!deps.ask && !jevEnabled())) {
     return { candidates: [...candidates], summary: null };
@@ -155,25 +147,23 @@ export async function checkMemoryCandidates(
   const verdicts: CandidateCheckSummary["verdicts"] = [];
   const exchangeList: CandidateCheckSummary["exchanges"] = [];
   let unavailable = 0;
-  const kept: CheckedCandidate[] = [];
+  const kept: UserMemoryCandidatePayload[] = [];
   for (const { c, d, exchange } of results) {
-    if (exchange) exchangeList.push({ text: c.text.slice(0, 200), exchange: storableExchange(exchange, 4_000) });
+    const text = c.text.slice(0, 200);
+    if (exchange) exchangeList.push({ text, exchange: storableExchange(exchange, 4_000) });
     if (!d) {
       unavailable += 1;
       kept.push({ ...c });
       continue;
     }
-    verdicts.push({
-      text: c.text.slice(0, 200),
-      verdict: d.verdict,
-      p: Math.round(d.p * 1000) / 1000,
-      ...(d.worth !== undefined ? { worth: Math.round(d.worth * 1000) / 1000 } : {}),
-    });
+    const p = round3(d.p);
+    const worth = d.worth === undefined ? undefined : round3(d.worth);
+    verdicts.push({ text, verdict: d.verdict, p, ...(worth !== undefined ? { worth } : {}) });
     if (!d.keep) {
-      dropped.push({ text: c.text.slice(0, 200), verdict: d.verdict, p: Math.round(d.p * 1000) / 1000 });
+      dropped.push({ text, verdict: d.verdict, p });
       continue;
     }
-    kept.push({ ...c, jevVerdict: d.verdict, ...(d.worth !== undefined ? { jevScore: Math.round(d.worth * 1000) / 1000 } : {}) });
+    kept.push({ ...c, jevVerdict: d.verdict, ...(worth !== undefined ? { jevScore: worth } : {}) });
   }
   // Re-rank: the two opinions averaged; unchecked candidates keep their own score.
   kept.sort((a, b) => (b.jevScore ?? b.signalScore) + b.signalScore - ((a.jevScore ?? a.signalScore) + a.signalScore));
@@ -198,4 +188,49 @@ export async function checkMemoryCandidates(
     ms: summary.ms,
   });
   return { candidates: kept, summary };
+}
+
+/**
+ * Store the classifier pass WITH the curator's LLM exchange (same trace row):
+ * a batch-level record of every Jev call, plus its verdict on each candidate
+ * and its drops turned into candidate verdicts.
+ */
+export function applyClassifierToTrace(trace: UserMemoryCuratorTrace, summary: CandidateCheckSummary): UserMemoryCuratorTrace {
+  const byText = new Map(summary.verdicts.map((v) => [v.text, v]));
+  const dropped = new Set(summary.dropped.map((d) => d.text));
+  const classifier = {
+    checked: summary.checked,
+    kept: summary.checked - summary.dropped.length,
+    dropped: summary.dropped.length,
+    unavailable: summary.unavailable,
+    ms: summary.ms,
+    calls: summary.exchanges.map((x) => {
+      const v = byText.get(x.text);
+      return {
+        text: x.text,
+        ...(v ? { verdict: v.verdict, confidence: v.p } : {}),
+        ...(v?.worth !== undefined ? { worth: v.worth } : {}),
+        exchange: x.exchange,
+      };
+    }),
+  };
+  return {
+    ...trace,
+    classifier,
+    emitted: trace.emitted.map((e) => {
+      if (e.verdict !== "kept") return e;
+      const key = e.text.slice(0, 200);
+      const v = byText.get(key);
+      if (!v) return e;
+      const annotated = {
+        ...e,
+        jevVerdict: v.verdict,
+        jevConfidence: v.p,
+        ...(v.worth !== undefined ? { jevScore: v.worth } : {}),
+      };
+      return dropped.has(key)
+        ? { ...annotated, verdict: "dropped" as const, dropReason: v.verdict === "duplicate" ? "classifier-duplicate" as const : "classifier-noise" as const }
+        : annotated;
+    }),
+  };
 }

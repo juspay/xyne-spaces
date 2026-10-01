@@ -25,6 +25,9 @@ export interface DebugTraceRun {
   task?: unknown;
   tokenUsage?: unknown;
   latency?: unknown;
+  judge?: unknown;
+  optimizations?: unknown;
+  answerAssessment?: unknown;
   events?: unknown;
 }
 
@@ -209,6 +212,11 @@ function payloadBlock(p: Payload, max: number): string {
   if (!p.ref) return "";
   const preview = p.ref.preview ? cleanBlock(p.ref.preview, max) : "";
   return preview ? `${preview}\n${escapeHtml(refNote(p.ref))}` : escapeHtml(refNote(p.ref));
+}
+
+function jsonPayloadBlock(data: Record<string, unknown>, field: string, max: number): string {
+  const p = payload(data, field);
+  return payloadBlock(typeof p.value === "string" ? { ...p, value: parseJsonOr(p.value) } : p, max);
 }
 
 function payloadSize(p: Payload): number | null {
@@ -596,6 +604,13 @@ function renderWaterfall(spans: Span[], totalMs: number): string {
 }
 
 
+function scoreParts(s: Record<string, unknown>): string[] {
+  return ([["answered", "answered"], ["finished", "finished"], ["intent", "intent-only"]] as const).map(([key, label]) => {
+    const n = num(s[key]);
+    return n !== null ? `${label} ${n.toFixed(2)}` : "";
+  });
+}
+
 function judgeHeaderRows(
   run: DebugTraceRun,
   judgeCalls: number,
@@ -603,7 +618,7 @@ function judgeHeaderRows(
   autoContinues: number,
 ): Array<[string, string]> {
   const out: Array<[string, string]> = [];
-  const judge = rec((run as unknown as Record<string, unknown>)["judge"]);
+  const judge = rec(run.judge);
   const calls = num(judge["calls"]) ?? judgeCalls;
   if (calls > 0) {
     const failed = num(judge["failed"]) ?? judgeFailed;
@@ -622,7 +637,7 @@ function judgeHeaderRows(
       ].filter(Boolean).join(" · "),
     ]);
   }
-  const switches = Object.entries(rec((run as unknown as Record<string, unknown>)["optimizations"]));
+  const switches = Object.entries(rec(run.optimizations));
   if (switches.length > 0) {
     const on = switches.filter(([, v]) => v === true).map(([k]) => clean(k, 40));
     const off = switches.filter(([, v]) => v !== true).map(([k]) => clean(k, 40));
@@ -631,15 +646,13 @@ function judgeHeaderRows(
       [on.length ? `ON: ${on.join(", ")}` : "ON: none", off.length ? `OFF: ${off.join(", ")}` : ""].filter(Boolean).join(" · "),
     ]);
   }
-  const assessment = rec((run as unknown as Record<string, unknown>)["answerAssessment"]);
+  const assessment = rec(run.answerAssessment);
   if (str(assessment["verdict"])) {
     out.push([
       "Answer check",
       [
         `verdict ${clean(assessment["verdict"], 20)}`,
-        num(assessment["answered"]) !== null ? `answered ${(num(assessment["answered"]) ?? 0).toFixed(2)}` : "",
-        num(assessment["finished"]) !== null ? `finished ${(num(assessment["finished"]) ?? 0).toFixed(2)}` : "",
-        num(assessment["intent"]) !== null ? `intent-only ${(num(assessment["intent"]) ?? 0).toFixed(2)}` : "",
+        ...scoreParts(assessment),
         autoContinues > 0 ? `auto-continued ${autoContinues}×` : "",
       ].filter(Boolean).join(" · "),
     ]);
@@ -849,12 +862,6 @@ export function buildTraceParts(run: DebugTraceRun): TraceParts {
       // is shareable and never carries content. The input (state) and questions
       // hold user messages and tool output — they stay in the stored trace, for
       // the owner-only debug panel.
-      const answersPayload = payload(data, "answers");
-      const answered = payloadBlock(
-        typeof answersPayload.value === "string" ? { ...answersPayload, value: parseJsonOr(answersPayload.value) } : answersPayload,
-        8_000,
-      );
-      const body = answered ? `<details><summary>answers</summary><pre>${answered}</pre></details>` : "";
       rendered = row({
         offset: off,
         badge: clean(data["backend"], 12) || "judge",
@@ -865,23 +872,16 @@ export function buildTraceParts(run: DebugTraceRun): TraceParts {
           num(data["ms"]) !== null ? ms(data["ms"]) : "",
           data["ok"] === false ? `FAILED${data["error"] ? ` (${clean(data["error"], 120)})` : ""} — caller fell back to its previous path` : "",
         ].filter(Boolean).join(" · "),
-        ...(body ? { body } : {}),
+        body: collapsed("answers", jsonPayloadBlock(data, "answers", 8_000)),
       });
     } else if (kind === "judge_outcome") {
-      const detailPayload = payload(data, "detail");
-      const detail = payloadBlock(
-        typeof detailPayload.value === "string"
-          ? { ...detailPayload, value: parseJsonOr(detailPayload.value) }
-          : detailPayload,
-        4000,
-      );
       rendered = row({
         offset: off,
         badge: clean(data["backend"], 12) || "judge",
         kindClass: "k-judge",
         title: `Judge decided <span class="lbl">${clean(data["purpose"], 40) || ""}</span>`,
         meta: clean(data["summary"], 300),
-        ...(detail ? { body: `<details><summary>what it scored</summary><pre>${detail}</pre></details>` } : {}),
+        body: collapsed("what it scored", jsonPayloadBlock(data, "detail", 4000)),
       });
     } else if (kind === "auto_continue") {
       autoContinues += 1;
@@ -891,9 +891,7 @@ export function buildTraceParts(run: DebugTraceRun): TraceParts {
         kindClass: "k-retry",
         title: `Auto-continue ${num(data["attempt"]) ?? "?"}/${num(data["maxAttempts"]) ?? "?"} — answer judged ${clean(data["verdict"], 20) || "incomplete"}`,
         meta: [
-          num(data["answered"]) !== null ? `answered ${(num(data["answered"]) ?? 0).toFixed(2)}` : "",
-          num(data["finished"]) !== null ? `finished ${(num(data["finished"]) ?? 0).toFixed(2)}` : "",
-          num(data["intent"]) !== null ? `intent-only ${(num(data["intent"]) ?? 0).toFixed(2)}` : "",
+          ...scoreParts(data),
           "costs one extra model turn",
         ].filter(Boolean).join(" · "),
       });

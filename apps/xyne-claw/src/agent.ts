@@ -11,7 +11,9 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import { dirname, isAbsolute, join } from "node:path";
 import { createLogger } from "./logger.js";
-import { buildTwinDeliverMandate } from "./twin-deliver.js";
+import { buildTwinSystemPrompt, TWIN_DELIVER_NUDGE } from "./twin-prompts.js";
+import { installStopAfterDelivery, recoverTwinDeliveryFromText, TWIN_DELIVER_TOOL_NAME, type TwinDeliverRef } from "./twin-deliver.js";
+import { checkTwinDelivery } from "./twin-delivery-check.js";
 import { installMidTurnCompaction, forceCompaction } from "./mid-turn-compaction.js";
 import { promoteIfOversized } from "./tool-output.js";
 import { createScopedToolMap } from "./scoped-tools.js";
@@ -547,63 +549,6 @@ export class RunCancelledError extends Error {
     this.tokenUsage = payload.tokenUsage;
     this.partialText = payload.partialText;
   }
-}
-
-function buildSystemPrompt(userId: string, userName?: string, userEmail?: string, mandateDeliver = false): string {
-  const identity = userName ? `**${userName}**` : "the user";
-  const emailLine = userEmail ? `\n- **Email:** ${userEmail}` : "";
-
-  // Mention/approval flow only: the user NEVER sees your assistant text — only
-  // what you pass to twin_deliver. Shared with the systemPromptOverride path in
-  // run.ts (the ACTUAL prompt for the mention twin) via buildTwinDeliverMandate,
-  // so the mandate lands regardless of which prompt path runs.
-  const deliverySection = mandateDeliver ? buildTwinDeliverMandate(userName ? { userName } : {}) : "";
-
-  return `You are the **Digital Twin** of ${identity}. You act, think, and respond exactly as this person would.
-
-## Identity
-You ARE this user's digital representative. When someone asks you a question, they are asking ${userName ?? "this user"} — not a generic assistant. Your job is to respond the way this person would, using their knowledge, context, communication style, and expertise.
-- **Name:** ${userName ?? "unknown"}${emailLine}
-
-To get your Spaces user ID for filtering tools (assignedTo, from, createdBy), call the \`spaces-whoami\` tool first.
-
-## How to Build Context (do this FIRST)
-Before answering any query, use your available tools to gather context. Look at the tools you have access to — they include tools for searching messages, tickets, activity, memory, users, channels, and more. Use them proactively:
-
-1. **Recent activity** — Check for mentions, replies, and assignments.
-2. **Knowledge base** — Search memory/facts/SOPs relevant to the query.
-3. **Messages & conversations** — Read threads to understand communication style.
-4. **Tickets & work items** — Check current workload and priorities.
-5. **Search** — Broad search across all connected apps for relevant context.
-6. **People lookup** — Resolve names to user IDs when needed.
-
-Note: Tool names may be prefixed with the server name (e.g. \`xyne-spaces__spaces-search\`). Use the tools as they appear in your tool list.
-
-## How to Respond
-- **Mirror the user's communication style.** If they write short direct messages, you do too. If they use detailed explanations, match that.
-- **Use the user's actual knowledge.** Ground every answer in data from their messages, tickets, memory, and activity. Do not guess.
-- **For engineering queries** — use any available code/log/metrics tools.
-- **Be the user.** Respond in first person ("I", "my", "we") as if you are them. Do not say "the user" or "they".
-- **Acknowledge gaps honestly.** If you cannot find relevant information in the user's data, say so — don't fabricate.
-
-## Critical Rules
-1. NEVER fabricate information. Only use data retrieved from tools.
-2. ALWAYS gather context before responding — do not answer from thin air.
-3. Respond as the user, not as an assistant describing the user.
-4. When the query is about "what are you working on" or "what do you know about X", search the user's actual data first.
-5. Use the tools available to you — check your tool list, don't assume tool names.
-6. NEVER narrate your process or expose the machinery. No "Saved to memory", "Searching…", "Got it", "Step N", "updating todos", or references to tools/memory. Only the final human message is your voice.
-
-## Data Correlation Rules
-When correlating data across different systems (e.g. tickets from Spaces + PRs from Bitbucket):
-- ALWAYS clearly distinguish between verified facts and inferred/unverified data.
-- Ticket board status (COMPLETED, "Merged" stage) is a WORKFLOW state — it does NOT prove a Bitbucket PR exists or was merged. These are separate systems.
-- If Bitbucket search doesn't find a PR for a ticket, report it as "PR not found in search", NOT "No PR".
-- When reporting ticket-to-PR mappings, use three clear categories:
-  1. **PR verified** — matching PR found and confirmed in Bitbucket
-  2. **PR not found in search** — Bitbucket search returned no match (PR may exist under different naming)
-  3. **Board suggests done, PR not verified** — ticket board says Completed/Merged but no Bitbucket PR match found
-- Never collapse categories 2 and 3 together. The user needs to know what was verified vs what was assumed.${deliverySection}`;
 }
 
 /**
@@ -1793,7 +1738,7 @@ export interface RunTaskOptions {
    *  finish until this tool has run — enforced by a post-loop nudge pass. */
   requiredTool?: { name: string; nudge: string } | undefined;
   /** Digital Twin persona (soul.md, …) folded into the actual system prompt on
-   *  both the override and buildSystemPrompt-fallback paths, so it reads as
+   *  both the override and buildTwinSystemPrompt-fallback paths, so it reads as
    *  identity and shows in the debug panel. */
   twinPersona?: string | undefined;
   abortSignal?: AbortSignal | undefined;
@@ -1827,7 +1772,7 @@ export interface RunTaskOptions {
    *  delivery MANDATORY — runTask runs a hardcoded reflection stage that nudges
    *  the model to call the tool and, if it never does, leaves this undefined so
    *  the caller stays silent (fail-closed) instead of posting raw assistant text. */
-  twinDeliverRef?: import("./twin-deliver.js").TwinDeliverRef | undefined;
+  twinDeliverRef?: TwinDeliverRef | undefined;
   /** Pipeline mode of this run (plan / daily_brief / auto). Debug-telemetry only —
    *  emitted in the session_tools event so the pipeline UI shows which mode a run
    *  executed in. Behavior is driven by the tool palette / prompt assembled in
@@ -2401,7 +2346,7 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
   // "did it even get the tool?" question is answerable from the run logs.
   if (twinDeliverRef) {
     log.info(
-      `[agent] TWIN flow — twin_deliver in pi payload: ${customToolNames.includes("twin_deliver")} ` +
+      `[agent] TWIN flow — twin_deliver in pi payload: ${customToolNames.includes(TWIN_DELIVER_TOOL_NAME)} ` +
       `(allowlist=${builtinAllow.length + customToolNames.length}); customTools=[${customToolNames.join(", ")}]`,
     );
   }
@@ -2555,7 +2500,6 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
   // Digital Twin: end the loop right after the first accepted twin_deliver.
   // Installed after mid-turn compaction so it chains that stop hook.
   if (twinDeliverRef) {
-    const { installStopAfterDelivery } = await import("./twin-deliver.js");
     installStopAfterDelivery(session.agent, () => twinDeliverRef.value !== undefined);
   }
   // Pi v0.75 dropped the `setBeforeToolCall(fn)` method in favour of a
@@ -3646,7 +3590,7 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
     //   appended the <available_skills> XML block to it. We only send the
     //   query as the first user message.
     // - Otherwise: pi uses its default system prompt; we prepend our local
-    //   buildSystemPrompt scaffold to the user message so the agent gets
+    //   buildTwinSystemPrompt scaffold to the user message so the agent gets
     //   userId/email context.
     if (systemPromptOverride) {
       const prompt = `${contextBlock}\n\n## Query\n${task}`;
@@ -3656,7 +3600,7 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
       // Mention-flow twin has no systemPromptOverride — its persona is prepended
       // to the first user message. Fold the twin persona files in here too so a
       // mention-driven reply speaks as the user.
-      const basePrompt = `${buildSystemPrompt(userId, userName, userEmail, !!twinDeliverRef)}${personaSuffix}`;
+      const basePrompt = `${buildTwinSystemPrompt(userName, userEmail, !!twinDeliverRef)}${personaSuffix}`;
       const prompt = `${basePrompt}${contextBlock}\n\n## Query\n${task}`;
       recordPrompt(prompt, "fresh", images?.length ?? 0);
       await promptWithAbort(() => session.prompt(prompt, images?.length ? { images } : undefined));
@@ -3930,9 +3874,7 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
   // posting the raw assistant text (chatter). This is the hardcoded reflection
   // stage the Twin always runs.
   if (twinDeliverRef) {
-    const { TWIN_DELIVER_NUDGE, recoverTwinDeliveryFromText } = await import("./twin-deliver.js");
-    for (let nudge = 0; nudge < 2 && twinDeliverRef.value === undefined; nudge++) {
-      if (abortSignal?.aborted) break;
+    for (let nudge = 0; nudge < 2 && twinDeliverRef.value === undefined && !abortSignal?.aborted; nudge++) {
       log.info(`[agent] twin_deliver missing — nudge ${nudge + 1}/2 to deliver via twin_deliver`);
       pushDebugEvent("twin_deliver_reflection", { phase: "nudge", round: nudge + 1 });
       await promptWithAbort(() => session.prompt(`<system>${TWIN_DELIVER_NUDGE}</system>`));
@@ -3953,24 +3895,21 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
         pushDebugEvent("twin_deliver_reflection", { phase: "recovered", action: recovered.action });
       }
     }
-    const delivered = twinDeliverRef.value !== undefined;
-    pushDebugEvent("twin_deliver_reflection", { phase: "result", delivered, action: twinDeliverRef.value?.action ?? null });
+    const delivery = twinDeliverRef.value;
+    pushDebugEvent("twin_deliver_reflection", { phase: "result", delivered: delivery !== undefined, action: delivery?.action ?? null });
     // R6: classifier self-check of the accepted delivery. Advisory — the owner
     // still approves; the scores ride along for the approver and calibration.
-    if (delivered && twinDeliverRef.value && !abortSignal?.aborted) {
-      const { checkTwinDelivery } = await import("./twin-deliver.js");
-      const check = await checkTwinDelivery(twinDeliverRef.value, {
+    if (delivery && !abortSignal?.aborted) {
+      const check = await checkTwinDelivery(delivery, {
         task,
         messages: (session as unknown as { messages?: readonly unknown[] }).messages ?? [],
       }).catch(() => null);
       if (check) {
-        twinDeliverRef.value = { ...twinDeliverRef.value, check };
+        twinDeliverRef.value = { ...delivery, check };
         pushDebugEvent("twin_deliver_reflection", { phase: "check", ...check });
       }
     }
-    if (!delivered) {
-      log.warn("[agent] twin_deliver: model never delivered (no tool_call, nothing to recover) — staying silent (fail-closed)");
-    }
+    if (!delivery) log.warn("[agent] twin_deliver: model never delivered (no tool_call, nothing to recover) — staying silent (fail-closed)");
   }
 
   // NOTE: there used to be a raw `debug-session-<conv>.json` dump of these

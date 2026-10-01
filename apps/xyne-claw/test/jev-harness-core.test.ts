@@ -1,22 +1,16 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
-import { backendTimeoutMs, jevAsk, judgeBackendConfigured, type JevAnswer } from "../src/jev.js";
+import { describe, expect, it, vi } from "vitest";
+import { backendTimeoutMs, jevAsk, judgeBackendConfigured, normaliseScores, type JevAnswer } from "../src/jev.js";
 import { answerProb, band, runJudgeSite } from "../src/judge-site.js";
 import { buildJudgeState, summariseTranscript } from "../src/judge-state.js";
 import { attachRunMessages, currentRunMessages, pinRunTask } from "../src/run-context.js";
 import { takeSiftParam, withSiftParam } from "../src/tool-call-context.js";
+import { isolateEnv } from "./helpers/env.js";
 
 const ENV = [
   "LITELLM_URL", "LITELLM_API_KEY", "OUR_JEV_URL", "OUR_JEV_API_KEY", "OUR_NORMAL_JEV_URL", "OUR_NORMAL_JEV_MODEL",
   "JUDGE_BACKEND", "JUDGE_LLM_TIMEOUT_MS", "JEV_URL", "JEV_API_KEY",
 ];
-const saved = Object.fromEntries(ENV.map((k) => [k, process.env[k]]));
-afterEach(() => {
-  for (const k of ENV) {
-    if (saved[k] === undefined) delete process.env[k];
-    else process.env[k] = saved[k];
-  }
-  vi.unstubAllGlobals();
-});
+isolateEnv(ENV);
 
 const user = (text: string) => ({ role: "user", content: [{ type: "text", text }] });
 const assistant = (text: string, calls: Array<{ name: string; arguments: unknown }> = []) => ({
@@ -214,8 +208,7 @@ describe("per-call sift switch", () => {
 });
 
 describe("score normalisation", () => {
-  it("rescales System One level-index scores to 0..1 by (levels - 1)", async () => {
-    const { normaliseScores } = await import("../src/jev.js");
+  it("rescales System One level-index scores to 0..1 by (levels - 1)", () => {
     const q = { s: { type: "score" as const, instructions: "x", criteria: ["low", "mid", "high"] }, n: { type: "noul" as const, instructions: "y" } };
     const out = normaliseScores({ s: { type: "score", score: 1.76 }, n: { type: "noul", noul: 0.4 } }, q);
     expect(out["s"]!.score).toBeCloseTo(0.88);

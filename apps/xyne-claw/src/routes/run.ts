@@ -137,6 +137,7 @@ import {
   probeSession,
   buildSandboxStoreKey,
   clearPlan,
+  isDigitalTwinAgent,
   isPlanToolSlug,
   // Aliased: run.ts declares a local `isReadOnlyJob` const later in the same
   // scope; this shared util is the single-source scheduled/automation check.
@@ -145,12 +146,13 @@ import {
 } from "xyne-claw-shared";
 import { SERVER, PATHS, LITELLM, litellmEndpoint, isAllowedCallbackUrl } from "../config.js";
 import { judgeChainContinuation } from "../chain-judge.js";
-import { isDigitalTwinAgent, listSubsystemTaxonomy, fetchAgentPromptFiles } from "../memory.js";
+import { buildTaxonomyInjection, listSubsystemTaxonomy } from "../twin-memory-taxonomy.js";
 import { buildMemorySearchTool } from "../memory-search.js";
 import { buildMemoryWriteTool } from "../memory-write.js";
 import { buildMemoryFileTools } from "../memory-file-tools.js";
-import { pickPersonaFiles } from "../persona-pick.js";
-import { buildTwinDeliverTool, buildTwinDeliverMandate, type TwinDeliverRef } from "../twin-deliver.js";
+import { buildTwinDeliverTool, type TwinDeliverRef } from "../twin-deliver.js";
+import { buildTwinDeliverMandate } from "../twin-prompts.js";
+import { buildTwinPersonaBlock } from "../twin-persona.js";
 import { buildProposePlanTool, PROPOSE_PLAN_TOOL_NAME, type ProposePlanRef } from "../propose-plan.js";
 import { presentationCatalogDefaultOn, isFreePresentationTool, buildPresentationPrimer } from "../presentation-catalog.js";
 import { buildProposeAgentTool, type ProposeAgentRef } from "../propose-agent.js";
@@ -567,7 +569,6 @@ router.post("/run", validateS2SKey, async (req, res: Response) => {
     judgeBackend,
     optimizations,
     memoryBankId,
-    twinDestinations,
     senderName,
     channelName,
     mode,
@@ -825,7 +826,6 @@ router.post("/run", validateS2SKey, async (req, res: Response) => {
       fastMode,
       resumedFromHandoff,
       memoryBankId,
-      twinDestinations,
       senderName,
       channelName,
       effectiveMode,
@@ -952,7 +952,6 @@ router.post("/run", validateS2SKey, async (req, res: Response) => {
         fastMode,
         resumedFromHandoff,
         memoryBankId,
-        twinDestinations,
         senderName,
         channelName,
         effectiveMode,
@@ -1492,7 +1491,6 @@ export async function processTask(
   fastMode?: boolean,
   resumedFromHandoff?: boolean,
   memoryBankId?: string,
-  twinDestinations?: import("xyne-claw-shared").TwinDestinationCandidate[],
   senderName?: string,
   channelName?: string,
   mode?: "plan" | "auto" | "daily_brief",
@@ -2059,67 +2057,17 @@ export async function processTask(
     const memoryEnabled =
       agentConfig?.["memoryEnabled"] === true ||
       agentConfig?.["memoryEnabled"] === "true";
-    if (agentSlug && memoryEnabled) {
-      // Bank-id comparison, not raw slug — see isDigitalTwinAgent in memory.ts.
-      const isDigitalTwin = isDigitalTwinAgent(agentSlug);
-      const taxonomy = await listSubsystemTaxonomy(
-        agentSlug,
-        isDigitalTwin ? { userTag: `user:${userId}` } : undefined,
-        memoryBankId,
-      ).catch(() => []);
-      if (isDigitalTwin && taxonomy.length > 0) {
-        const lines = taxonomy
-          .slice(0, 12)
-          .map(
-            (s) =>
-              `- ${s.name} (${s.memoryCount} ${s.memoryCount === 1 ? "memory" : "memories"})`,
-          )
-          .join("\n");
-        activeInjections.push({
-          id: "__memory-taxonomy",
-          label: "Your Personal Memory",
-          content: [
-            "You have a personal memory bank — facts about THIS user that they",
-            "themselves approved. Currently you have memories under these clusters:",
-            "",
-            lines,
-            "",
-            "When you need to know how the user works, who they collaborate with,",
-            "what they prefer, or what they own, call `memory-search` FIRST with a",
-            "specific natural-language query. Never invent facts about the user —",
-            "only use what the tool returns.",
-          ].join("\n"),
-        });
-      }
+    // Bank-id comparison, not raw slug (see isDigitalTwinAgent in xyne-claw-shared).
+    const isTwinAgent = isDigitalTwinAgent(agentSlug);
+    if (agentSlug && memoryEnabled && isTwinAgent) {
+      const taxonomy = await listSubsystemTaxonomy(agentSlug, `user:${userId}`).catch(() => []);
+      if (taxonomy.length > 0) activeInjections.push(buildTaxonomyInjection(taxonomy));
 
-      // Digital Twin: inject the always-loaded persona files (soul.md, …) so the
-      // twin speaks AS the user with ZERO tool calls. Injected via
-      // activeInjections (not systemPrompt) so it applies on BOTH the @mention
-      // flow (which sends no systemPrompt) and interactive chat. Files are the
-      // user's own, ≤3, each ≤20k chars — enforced in claw-auth.
-      if (isDigitalTwin) {
-        // R9: with jev_memory_file_pick on, fetch every non-empty file and let
-        // the classifier pick ≤3 for THIS message; otherwise today's toggled set.
-        const pick = optEnabled("jev_memory_file_pick");
-        const available = await fetchAgentPromptFiles(agentSlug, userId, { candidates: pick }).catch(() => []);
-        const promptFiles = pick ? await pickPersonaFiles(available, task ?? "") : available;
-        if (promptFiles.length > 0) {
-          const body = promptFiles
-            .map((f) => `=== ${f.name} ===\n${f.content.trim()}`)
-            .join("\n\n");
-          // Folded into the system prompt inside runTask (both the override and
-          // the buildSystemPrompt-fallback paths), so it shows under LLM →
-          // system prompt in the debug panel.
-          twinPersonaBlock = [
-            "# Speaking as you",
-            "This is your persona — who you are and how you sound — drawn from the user's own",
-            "approved memory files. Speak AS this person by default; you do not need to call any",
-            "tool to use what's below. Prefer this voice over generic phrasing.",
-            "",
-            body,
-          ].join("\n");
-        }
-      }
+      // Digital Twin: the always-loaded persona files (soul.md, …), so the twin
+      // speaks AS the user with ZERO tool calls. Folded into the system prompt
+      // inside runTask (both the override and the buildTwinSystemPrompt-fallback
+      // paths), so it shows under LLM → system prompt in the debug panel.
+      twinPersonaBlock = await buildTwinPersonaBlock(agentSlug, userId, task);
     }
 
     // Resolve subagent-level skills: NONE by default — users opt skills in
@@ -2918,7 +2866,7 @@ export async function processTask(
     // actively conflict with twin_deliver — the model followed the primer and
     // never called the delivery tool, fail-closing to silence. Exclude the twin
     // mention flow from plan tools/primer entirely.
-    const isTwinMentionFlow = !!agentSlug && isDigitalTwinAgent(agentSlug) && eventType === "USER_MENTIONED";
+    const isTwinMentionFlow = isTwinAgent && eventType === "USER_MENTIONED";
     // Plan mode (agent.config.planMode → dispatched with mode='plan' for non-twin
     // thread mentions): the agent gets a READ-ONLY palette + the terminal
     // propose-plan tool, proposes a plan, and STOPS for approval. The
@@ -3091,7 +3039,7 @@ export async function processTask(
       log("Memory enabled — injected memory-search tool");
       // Deterministic file-memory tools (read/write named files) — twin only,
       // since the file store is per-user (agentSlug + userId).
-      if (isDigitalTwinAgent(agentSlug)) {
+      if (isTwinAgent) {
         for (const t of buildMemoryFileTools(agentSlug, userId, sessionId)) allTools.push(t);
         allTools.push(buildMemoryWriteTool(agentSlug, userId, sessionId));
         log("Digital Twin — injected read/write memory-file tools + memory-write");
@@ -3147,7 +3095,6 @@ export async function processTask(
     const verifyAllDefault =
       (process.env["RESPONSE_VERIFY_ALL"] ?? "off").toLowerCase() === "on";
     const verifyCfg = agentConfig?.["verifyResponses"] as boolean | undefined;
-    const isTwinAgent = agentSlug ? isDigitalTwinAgent(agentSlug) : false;
 
     // Digital Twin mention/approval flow: the twin_deliver tool is the single,
     // MANDATORY delivery channel (react and/or reply, and where). It replaces the
@@ -3961,16 +3908,10 @@ export async function processTask(
         : "";
     // Digital Twin mention flow runs with the agent's CONFIGURED system prompt
     // (systemPromptOverride), so the twin_deliver mandate baked into
-    // buildSystemPrompt's fallback never reaches it — the model was never told
+    // buildTwinSystemPrompt's fallback never reaches it — the model was never told
     // the tool is its only output channel and just answered in text. Append the
     // mandate to the ACTUAL system prompt here so the model always sees it.
-    const twinMandate = isTwinMentionFlow
-      ? buildTwinDeliverMandate({
-          ...(userName ? { userName } : {}),
-          ...(senderName ? { senderName } : {}),
-          ...(channelName ? { channelName } : {}),
-        })
-      : "";
+    const twinMandate = isTwinMentionFlow ? buildTwinDeliverMandate({ userName, senderName, channelName }) : "";
     // Accounts the agent is configured to use but the user hasn't connected or
     // configured. Told to the model so it surfaces the gap instead of
     // fabricating results from a tool it never received.

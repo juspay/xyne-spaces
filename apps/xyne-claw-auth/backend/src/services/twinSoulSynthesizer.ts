@@ -7,10 +7,10 @@
  * groups them by subsystem, and calls POST /internal/user-memory/synthesize-file
  * once per file. Never overwrites a file the user hand-edited (preserveEdits).
  *
- * Triggered: nightly (digitalTwinDaily) + on demand (POST /digital-twin/synthesize).
+ * Triggered: nightly (digitalTwinDailyCron) + on demand (POST /digital-twin/synthesize).
  */
 
-import { bankIdForAgent, getMemoryProvider } from "xyne-claw-shared";
+import type { MemoryUpdateCheck, SynthesizeFileRequest, SynthesizeFileTrace } from "xyne-claw-shared";
 import { errMsg } from "../lib/errors.js";
 import { CONFIG } from "../config.js";
 import { createLogger, createTraceId } from "../logger.js";
@@ -26,27 +26,19 @@ import {
   finishSynthesisEvent,
   type SynthFileResult,
 } from "./digitalTwinPipelineEvents.js";
+import { listUserTwinMemories, subsystemOfTags } from "./twinMemoryBank.js";
 
 const logger = createLogger("twin-soul-synthesizer", createTraceId());
-const TWIN_BANK_ID = bankIdForAgent("digital-twin");
-const memory = getMemoryProvider();
 
 const SYNTH_TIMEOUT_MS = Number(process.env["TWIN_SYNTH_CLIENT_TIMEOUT_MS"] ?? 130_000);
 const MAX_FACTS_PER_USER = 500;
 
-/** Approved facts for this user, grouped by subsystem. Authoritatively
- *  re-filtered by the `user:` tag (Hindsight over-matches tag queries). */
+/** Approved facts for this user, grouped by subsystem. */
 async function fetchApprovedFactsBySubsystem(userId: string): Promise<Map<string, string[]>> {
   const bySub = new Map<string, string[]>();
   try {
-    const page = await memory.listMemories(TWIN_BANK_ID, {
-      tags: [`user:${userId}`],
-      limit: MAX_FACTS_PER_USER,
-    });
-    for (const m of page.memories) {
-      const tags = m.tags ?? [];
-      if (!tags.includes(`user:${userId}`)) continue;
-      const sub = tags.find((t) => t.startsWith("subsystem:"))?.slice("subsystem:".length);
+    for (const m of await listUserTwinMemories(userId, MAX_FACTS_PER_USER)) {
+      const sub = subsystemOfTags(m.tags);
       if (!sub) continue;
       const text = (m.content ?? "").trim();
       if (!text) continue;
@@ -63,47 +55,9 @@ async function fetchApprovedFactsBySubsystem(userId: string): Promise<Map<string
   return bySub;
 }
 
-interface SynthReq {
-  fileName: string;
-  description: string;
-  facts: string[];
-  maxChars: number;
-  currentContent?: string;
-  preserveEdits?: boolean;
-  /** Ask claw to score the rewrite (nightly runs only, R10). */
-  check?: boolean;
-}
-
-/** claw's classifier verdict on a rewrite (R10). Only "accept" is written. */
-export interface SynthUpdateCheck {
-  verdict: "accept" | "review" | "reject";
-  keepsOld?: number;
-  supported?: number;
-  choice?: string;
-  source: "jev" | "fallback";
-  ms: number;
-  exchange?: import("xyne-claw-shared").ClassifierExchange;
-}
-
-interface SynthCallTrace {
-  model: string;
-  durationMs: number;
-  systemPrompt: string;
-  userPrompt: string;
-  rawOutput: string;
-  promptChars: number;
-  factsAvailable: number;
-  factsUsed: number;
-  factsDropped: number;
-  factsClipped: number;
-  factInputChars: number;
-  factInputBudgetChars: number;
-  contextLimited: boolean;
-  finishReason?: string;
-  usage?: { promptTokens?: number; completionTokens?: number };
-}
-
-async function synthesizeViaClaw(req: SynthReq): Promise<{ content: string | null; error?: string; trace?: SynthCallTrace; check?: SynthUpdateCheck }> {
+async function synthesizeViaClaw(
+  req: SynthesizeFileRequest,
+): Promise<{ content: string | null; error?: string; trace?: SynthesizeFileTrace; check?: MemoryUpdateCheck }> {
   if (!CONFIG.xyneClawS2sKey) return { content: null, error: "no-s2s-key" };
   const url = `${CONFIG.xyneClawUrl.replace(/\/$/, "")}/internal/user-memory/synthesize-file`;
   try {
@@ -114,7 +68,7 @@ async function synthesizeViaClaw(req: SynthReq): Promise<{ content: string | nul
       signal: AbortSignal.timeout(SYNTH_TIMEOUT_MS),
     });
     if (!res.ok) return { content: null, error: `http-${res.status}` };
-    const data = (await res.json()) as { content?: string | null; error?: string; trace?: SynthCallTrace; check?: SynthUpdateCheck };
+    const data = (await res.json()) as { content?: string | null; error?: string; trace?: SynthesizeFileTrace; check?: MemoryUpdateCheck };
     return {
       content: data.content ?? null,
       ...(data.error ? { error: data.error } : {}),
@@ -145,12 +99,15 @@ export async function synthesizeSoulFilesForUser(
   const updated: string[] = [];
   const skipped: string[] = [];
   const fileResults: SynthFileResult[] = [];
+  const skip = (result: SynthFileResult) => {
+    skipped.push(result.name);
+    fileResults.push(result);
+  };
 
   for (const spec of DEFAULT_TWIN_FILES) {
     const facts = spec.subsystems.flatMap((s) => factsBySub.get(s) ?? []);
     if (facts.length === 0) {
-      skipped.push(spec.name);
-      fileResults.push({ name: spec.name, factsUsed: 0, action: "skipped" });
+      skip({ name: spec.name, factsUsed: 0, action: "skipped" });
       continue;
     }
     const current = await getFile(TWIN_AGENT_SLUG, userId, spec.name);
@@ -165,15 +122,9 @@ export async function synthesizeSoulFilesForUser(
       // Only the nightly run is scored; manual re-synthesis writes as before.
       ...(trigger === "daily" ? { check: true } : {}),
     });
+    const base = { name: spec.name, ...(trace ?? {}), factsUsed: trace?.factsUsed ?? facts.length };
     if (!content) {
-      skipped.push(spec.name);
-      fileResults.push({
-        name: spec.name,
-        ...(trace ?? {}),
-        factsUsed: trace?.factsUsed ?? facts.length,
-        action: error ? "error" : "skipped",
-        ...(error ? { error } : {}),
-      });
+      skip({ ...base, action: error ? "error" : "skipped", ...(error ? { error } : {}) });
       if (error) logger.info("[soul-synth] file skipped", { userId, file: spec.name, error });
       continue;
     }
@@ -181,15 +132,7 @@ export async function synthesizeSoulFilesForUser(
     // "review" still writes — holding on "unsure" would freeze a file forever,
     // since the same synthesis reruns every night.
     if (check && check.verdict === "reject") {
-      skipped.push(spec.name);
-      fileResults.push({
-        name: spec.name,
-        ...(trace ?? {}),
-        factsUsed: trace?.factsUsed ?? facts.length,
-        action: "held",
-        chars: content.length,
-        check,
-      });
+      skip({ ...base, action: "held", chars: content.length, check });
       logger.info("[soul-synth] rewrite held by update check — old file kept", {
         userId,
         file: spec.name,
@@ -212,14 +155,7 @@ export async function synthesizeSoulFilesForUser(
       sortOrder: spec.sortOrder,
     });
     updated.push(spec.name);
-    fileResults.push({
-      name: spec.name,
-      ...(trace ?? {}),
-      factsUsed: trace?.factsUsed ?? facts.length,
-      action: "updated",
-      chars: content.length,
-      ...(check ? { check } : {}),
-    });
+    fileResults.push({ ...base, action: "updated", chars: content.length, ...(check ? { check } : {}) });
   }
 
   if (eventId) {

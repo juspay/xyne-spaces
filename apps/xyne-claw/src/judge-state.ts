@@ -10,7 +10,7 @@
  * a fenced block the questions refer to as data, never as instructions.
  */
 
-export interface JudgeStateInput {
+interface JudgeStateInput {
   /** The current request (the run's task). */
   task: string;
   /** pi transcript (AgentMessage[]); earlier turns and tool calls are drawn from it. */
@@ -19,20 +19,10 @@ export interface JudgeStateInput {
   current?: { tool: string; args?: unknown };
   /** Untrusted payload the questions are about (tool output, a draft, …). */
   payload?: { label: string; text: string };
-  caps?: Partial<JudgeStateCaps>;
+  caps?: Partial<typeof DEFAULT_CAPS>;
 }
 
-export interface JudgeStateCaps {
-  task: number;
-  history: number;
-  historyLine: number;
-  calls: number;
-  callArgs: number;
-  currentArgs: number;
-  payload: number;
-}
-
-export const DEFAULT_JUDGE_STATE_CAPS: JudgeStateCaps = {
+const DEFAULT_CAPS = {
   task: 2_000,
   history: 1_500,
   historyLine: 300,
@@ -115,14 +105,14 @@ function fitNewestFirst(lines: string[], budget: number): string[] {
 }
 
 export function buildJudgeState(input: JudgeStateInput): string {
-  const caps = { ...DEFAULT_JUDGE_STATE_CAPS, ...input.caps };
+  const caps = { ...DEFAULT_CAPS, ...input.caps };
   const task = input.task.trim();
   const sections: string[] = [`## The request\n${clip(task, caps.task) || "(none)"}`];
 
   const { turns, calls } = summariseTranscript(input.messages ?? []);
   // The request itself is usually the newest user turn; don't repeat it.
   const normalisedTask = clip(task, caps.historyLine);
-  const lastUser = lastUserIndex(turns);
+  const lastUser = turns.map((t) => t.role).lastIndexOf("user");
   const earlier = turns.filter((t, i) => !(i === lastUser && clip(t.text, caps.historyLine) === normalisedTask));
   const historyLines = fitNewestFirst(
     earlier.map((t) => `- ${t.role}: ${clip(t.text, caps.historyLine)}`),
@@ -156,9 +146,4 @@ export function buildJudgeState(input: JudgeStateInput): string {
   }
 
   return sections.join("\n\n");
-}
-
-function lastUserIndex(turns: Turn[]): number {
-  for (let i = turns.length - 1; i >= 0; i--) if (turns[i]!.role === "user") return i;
-  return -1;
 }

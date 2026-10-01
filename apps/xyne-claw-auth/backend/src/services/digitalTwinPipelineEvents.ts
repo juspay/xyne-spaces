@@ -8,19 +8,20 @@
  * break the pipeline it is observing.
  */
 
-import type { ClassifierExchange } from "xyne-claw-shared";
+import type { ClassifierExchange, MemoryUpdateCheck, SynthesizeFileTrace, UserMemoryCuratorTrace } from "xyne-claw-shared";
 import { prisma } from "../db.js";
 import { errMsg } from "../lib/errors.js";
 import { createLogger, createTraceId } from "../logger.js";
-import type { UserMemoryCuratorTrace } from "xyne-claw-shared";
 
 const logger = createLogger("digital-twin-pipeline-events", createTraceId());
 
 /** Rolling retention window for the event feed. */
 const DEFAULT_PRUNE_DAYS = 30;
 
-export type PipelineEventRunType = "backfill" | "daily" | "upload" | "twin-approval" | "synthesize" | "gate" | "retry";
-export type PipelineEventSourceKind = "messages" | "calls" | "canvases";
+const RUN_TYPES = ["backfill", "daily", "upload", "twin-approval", "synthesize", "gate", "retry"] as const;
+const SOURCE_KINDS = ["messages", "calls", "canvases"] as const;
+type PipelineEventRunType = (typeof RUN_TYPES)[number];
+type PipelineEventSourceKind = (typeof SOURCE_KINDS)[number];
 /** `running`/`retry` are IN-FLIGHT states (a curator batch mid-LLM-call) so the
  *  pipeline feed isn't silent for 15 min; terminal states are ok/empty/error. */
 export type PipelineEventStatus = "ok" | "empty" | "error" | "running" | "retry";
@@ -29,7 +30,7 @@ export type PipelineEventStatus = "ok" | "empty" | "error" | "running" | "retry"
  *  (parallel to SynthTrace) so the UI can show "running / retrying attempt N/M"
  *  during the long distill call, surviving a reload. Replaced by the real
  *  UserMemoryCuratorTrace once the batch finishes. */
-export interface CuratorBatchTrace {
+interface CuratorBatchTrace {
   kind: "curate";
   running?: boolean;
   attempt?: number;
@@ -38,42 +39,20 @@ export interface CuratorBatchTrace {
 }
 
 /** Per-file outcome of one soul-synthesis run (Memory v2, Phase 4). */
-export interface SynthFileResult {
+export interface SynthFileResult extends Partial<SynthesizeFileTrace> {
   name: string;
   factsUsed: number;
   /** "held" = the rewrite was generated but the update check kept the old file. */
   action: "updated" | "skipped" | "error" | "held";
   chars?: number;
   /** Classifier verdict on the rewrite (nightly runs, R10). */
-  check?: {
-    verdict: "accept" | "review" | "reject";
-    keepsOld?: number;
-    supported?: number;
-    choice?: string;
-    source: "jev" | "fallback";
-    ms: number;
-    exchange?: ClassifierExchange;
-  };
+  check?: MemoryUpdateCheck;
   error?: string;
-  model?: string;
-  durationMs?: number;
-  systemPrompt?: string;
-  userPrompt?: string;
-  rawOutput?: string;
-  promptChars?: number;
-  factsAvailable?: number;
-  factsDropped?: number;
-  factsClipped?: number;
-  factInputChars?: number;
-  factInputBudgetChars?: number;
-  contextLimited?: boolean;
-  finishReason?: string;
-  usage?: { promptTokens?: number; completionTokens?: number };
 }
 
 /** Stored in DigitalTwinPipelineEvent.trace for runType="synthesize" runs, so
  *  the activity panel can render synthesis progress (and it survives a reload). */
-export interface SynthTrace {
+interface SynthTrace {
   kind: "synthesize";
   trigger: "daily" | "manual";
   running?: boolean;
@@ -91,7 +70,7 @@ export interface PipelineRecordPreview {
   textPreview: string;
 }
 
-export interface RecordPipelineEventInput {
+interface RecordPipelineEventInput {
   userId: string;
   source: string;
   window: { from: Date; to: Date };
@@ -112,15 +91,8 @@ export interface RecordPipelineEventInput {
  * Derive the run type from the source-string prefix. Falls back to "daily" for
  * anything unrecognized so a malformed source never trips the not-null column.
  */
-export function deriveRunType(source: string): PipelineEventRunType {
-  if (source.startsWith("backfill:")) return "backfill";
-  if (source.startsWith("daily:")) return "daily";
-  if (source.startsWith("upload:")) return "upload";
-  if (source.startsWith("twin-approval:")) return "twin-approval";
-  if (source.startsWith("synthesize:")) return "synthesize";
-  if (source.startsWith("gate:")) return "gate";
-  if (source.startsWith("retry:")) return "retry";
-  return "daily";
+function deriveRunType(source: string): PipelineEventRunType {
+  return RUN_TYPES.find((t) => source.startsWith(`${t}:`)) ?? "daily";
 }
 
 /**
@@ -133,7 +105,7 @@ export function deriveRunType(source: string): PipelineEventRunType {
  *   daily:<date>:<source>
  * → the kind is the third segment. Upload / twin-approval have no kind.
  */
-export function deriveSourceKind(source: string): PipelineEventSourceKind | null {
+function deriveSourceKind(source: string): PipelineEventSourceKind | null {
   const parts = source.split(":");
   if (source.startsWith("backfill:")) {
     return asSourceKind(parts[parts.length - 2]);
@@ -146,49 +118,75 @@ export function deriveSourceKind(source: string): PipelineEventSourceKind | null
 }
 
 function asSourceKind(seg: string | undefined): PipelineEventSourceKind | null {
-  if (seg === "messages" || seg === "calls" || seg === "canvases") return seg;
-  return null;
+  return SOURCE_KINDS.find((k) => k === seg) ?? null;
+}
+
+
+/**
+ * Best-effort write: any failure is logged as `[digital-twin-pipeline-events] <msg>`
+ * (with `ctx` + the error) and swallowed, returning `fallback`, so the caller's
+ * return value and control flow are unaffected — a failed insert must never
+ * break the pipeline it is observing.
+ */
+async function bestEffort<T>(msg: string, ctx: Record<string, unknown>, fallback: T, write: () => Promise<T>): Promise<T> {
+  try {
+    return await write();
+  } catch (err) {
+    logger.warn(`[digital-twin-pipeline-events] ${msg}`, { ...ctx, err: errMsg(err) });
+    return fallback;
+  }
+}
+
+// `trace` / `records` are typed interfaces, not Prisma.InputJsonValue, so the
+// delegate is called through `any` (call form kept so `this` stays bound).
+async function insertEvent(data: Record<string, unknown>): Promise<string | null> {
+  const created = await (prisma.digitalTwinPipelineEvent.create as any)({ data, select: { id: true } });
+  return (created?.id as string | undefined) ?? null;
+}
+
+async function updateEvent(id: string, data: Record<string, unknown>): Promise<void> {
+  await (prisma.digitalTwinPipelineEvent.update as any)({ where: { id }, data });
+}
+
+/** Row identity derived from the source string: who, which run type/kind, which window. */
+function sourceColumns({ userId, source, window }: Pick<RecordPipelineEventInput, "userId" | "source" | "window">) {
+  return {
+    userId,
+    runType: deriveRunType(source),
+    source,
+    sourceKind: deriveSourceKind(source),
+    windowFrom: window.from,
+    windowTo: window.to,
+  };
+}
+
+/** Terminal columns (status, counts, preview, trace): the body of both the
+ *  direct insert and the finish-an-in-flight-row update. */
+function outcomeColumns(input: RecordPipelineEventInput) {
+  return {
+    status: input.status,
+    recordCount: input.recordCount,
+    records: input.records ?? undefined,
+    existingMemoryCount: input.existingMemoryCount ?? 0,
+    emittedCount: input.emittedCount ?? 0,
+    keptCount: input.keptCount ?? 0,
+    candidatesCreated: input.candidatesCreated ?? 0,
+    autoApproved: input.autoApproved ?? 0,
+    durationMs: input.durationMs ?? 0,
+    error: input.error ?? null,
+    trace: input.trace ?? undefined,
+  };
 }
 
 /**
- * Insert one pipeline event. Best-effort — swallows every error so the caller's
- * return value and control flow are unaffected. Returns the created event id
- * (so callers can stamp it onto the candidates the run emitted), or null when
- * the insert failed / was swallowed.
+ * Insert one pipeline event. Returns the created event id (so callers can stamp
+ * it onto the candidates the run emitted), or null when the insert failed /
+ * was swallowed.
  */
 export async function recordPipelineEvent(input: RecordPipelineEventInput): Promise<string | null> {
-  try {
-    const created = await (prisma.digitalTwinPipelineEvent.create as any)({
-      data: {
-        userId: input.userId,
-        runType: deriveRunType(input.source),
-        source: input.source,
-        sourceKind: deriveSourceKind(input.source),
-        windowFrom: input.window.from,
-        windowTo: input.window.to,
-        status: input.status,
-        recordCount: input.recordCount,
-        records: input.records ?? undefined,
-        existingMemoryCount: input.existingMemoryCount ?? 0,
-        emittedCount: input.emittedCount ?? 0,
-        keptCount: input.keptCount ?? 0,
-        candidatesCreated: input.candidatesCreated ?? 0,
-        autoApproved: input.autoApproved ?? 0,
-        durationMs: input.durationMs ?? 0,
-        error: input.error ?? null,
-        trace: input.trace ?? undefined,
-      },
-      select: { id: true },
-    });
-    return (created?.id as string | undefined) ?? null;
-  } catch (err) {
-    logger.warn("[digital-twin-pipeline-events] recordPipelineEvent failed", {
-      userId: input.userId,
-      source: input.source,
-      err: errMsg(err),
-    });
-    return null;
-  }
+  return bestEffort("recordPipelineEvent failed", { userId: input.userId, source: input.source }, null, () =>
+    insertEvent({ ...sourceColumns(input), ...outcomeColumns(input) }),
+  );
 }
 
 /**
@@ -200,64 +198,46 @@ export async function startSynthesisEvent(
   userId: string,
   trigger: "daily" | "manual",
 ): Promise<string | null> {
-  try {
+  return bestEffort("startSynthesisEvent failed", { userId }, null, () => {
     const now = new Date();
-    const created = await (prisma.digitalTwinPipelineEvent.create as any)({
-      data: {
-        userId,
-        runType: "synthesize",
-        source: `synthesize:${trigger}`,
-        sourceKind: null,
-        windowFrom: now,
-        windowTo: now,
-        status: "running",
-        recordCount: 0,
-        trace: { kind: "synthesize", trigger, running: true, files: [] } satisfies SynthTrace,
-      },
-      select: { id: true },
-    });
-    return (created?.id as string | undefined) ?? null;
-  } catch (err) {
-    logger.warn("[digital-twin-pipeline-events] startSynthesisEvent failed", {
+    return insertEvent({
       userId,
-      err: errMsg(err),
+      runType: "synthesize",
+      source: `synthesize:${trigger}`,
+      sourceKind: null,
+      windowFrom: now,
+      windowTo: now,
+      status: "running",
+      recordCount: 0,
+      trace: { kind: "synthesize", trigger, running: true, files: [] } satisfies SynthTrace,
     });
-    return null;
-  }
+  });
 }
 
-/** Finalize a synthesis event created by startSynthesisEvent. Best-effort. */
+/** Finalize a synthesis event created by startSynthesisEvent. */
 export async function finishSynthesisEvent(
   id: string,
   trigger: "daily" | "manual",
   result: { files: SynthFileResult[]; durationMs: number; error?: string | null },
 ): Promise<void> {
-  try {
+  await bestEffort("finishSynthesisEvent failed", { id }, undefined, () => {
     const updated = result.files.filter((f) => f.action === "updated");
     const errored = result.files.filter((f) => f.action === "error");
     const factsTotal = result.files.reduce((s, f) => s + f.factsUsed, 0);
     const synthesisError = result.error ?? (errored.length > 0
       ? `${errored.length} persona file${errored.length === 1 ? "" : "s"} failed to compile`
       : null);
-    await (prisma.digitalTwinPipelineEvent.update as any)({
-      where: { id },
-      data: {
-        status: synthesisError ? "error" : updated.length > 0 ? "ok" : "empty",
-        recordCount: factsTotal,
-        emittedCount: result.files.length,
-        keptCount: updated.length,
-        candidatesCreated: updated.length,
-        durationMs: result.durationMs,
-        error: synthesisError,
-        trace: { kind: "synthesize", trigger, files: result.files } satisfies SynthTrace,
-      },
+    return updateEvent(id, {
+      status: synthesisError ? "error" : updated.length > 0 ? "ok" : "empty",
+      recordCount: factsTotal,
+      emittedCount: result.files.length,
+      keptCount: updated.length,
+      candidatesCreated: updated.length,
+      durationMs: result.durationMs,
+      error: synthesisError,
+      trace: { kind: "synthesize", trigger, files: result.files } satisfies SynthTrace,
     });
-  } catch (err) {
-    logger.warn("[digital-twin-pipeline-events] finishSynthesisEvent failed", {
-      id,
-      err: errMsg(err),
-    });
-  }
+  });
 }
 
 /**
@@ -274,35 +254,19 @@ export async function startCuratorBatchEvent(input: {
   records?: PipelineRecordPreview[] | null;
   maxAttempts: number;
 }): Promise<string | null> {
-  try {
-    const created = await (prisma.digitalTwinPipelineEvent.create as any)({
-      data: {
-        userId: input.userId,
-        runType: deriveRunType(input.source),
-        source: input.source,
-        sourceKind: deriveSourceKind(input.source),
-        windowFrom: input.window.from,
-        windowTo: input.window.to,
-        status: "running",
-        recordCount: input.recordCount,
-        records: input.records ?? undefined,
-        trace: { kind: "curate", running: true, attempt: 1, maxAttempts: input.maxAttempts } satisfies CuratorBatchTrace,
-      },
-      select: { id: true },
-    });
-    return (created?.id as string | undefined) ?? null;
-  } catch (err) {
-    logger.warn("[digital-twin-pipeline-events] startCuratorBatchEvent failed", {
-      userId: input.userId,
-      source: input.source,
-      err: errMsg(err),
-    });
-    return null;
-  }
+  return bestEffort("startCuratorBatchEvent failed", { userId: input.userId, source: input.source }, null, () =>
+    insertEvent({
+      ...sourceColumns(input),
+      status: "running",
+      recordCount: input.recordCount,
+      records: input.records ?? undefined,
+      trace: { kind: "curate", running: true, attempt: 1, maxAttempts: input.maxAttempts } satisfies CuratorBatchTrace,
+    }),
+  );
 }
 
 /** Update the in-flight attempt state of a running curator batch (per distill
- *  retry). No-op when id is null. Best-effort. */
+ *  retry). No-op when id is null. */
 export async function updateCuratorBatchAttempt(
   id: string | null,
   attempt: number,
@@ -310,20 +274,12 @@ export async function updateCuratorBatchAttempt(
   lastError?: string | null,
 ): Promise<void> {
   if (!id) return;
-  try {
-    await (prisma.digitalTwinPipelineEvent.update as any)({
-      where: { id },
-      data: {
-        status: attempt > 1 ? "retry" : "running",
-        trace: { kind: "curate", running: true, attempt, maxAttempts, lastError: lastError ?? null } satisfies CuratorBatchTrace,
-      },
-    });
-  } catch (err) {
-    logger.warn("[digital-twin-pipeline-events] updateCuratorBatchAttempt failed", {
-      id,
-      err: errMsg(err),
-    });
-  }
+  await bestEffort("updateCuratorBatchAttempt failed", { id }, undefined, () =>
+    updateEvent(id, {
+      status: attempt > 1 ? "retry" : "running",
+      trace: { kind: "curate", running: true, attempt, maxAttempts, lastError: lastError ?? null } satisfies CuratorBatchTrace,
+    }),
+  );
 }
 
 /**
@@ -337,37 +293,17 @@ export async function finishCuratorBatchEvent(
   input: RecordPipelineEventInput,
 ): Promise<string | null> {
   if (!id) return recordPipelineEvent(input);
-  try {
-    await (prisma.digitalTwinPipelineEvent.update as any)({
-      where: { id },
-      data: {
-        status: input.status,
-        recordCount: input.recordCount,
-        records: input.records ?? undefined,
-        existingMemoryCount: input.existingMemoryCount ?? 0,
-        emittedCount: input.emittedCount ?? 0,
-        keptCount: input.keptCount ?? 0,
-        candidatesCreated: input.candidatesCreated ?? 0,
-        autoApproved: input.autoApproved ?? 0,
-        durationMs: input.durationMs ?? 0,
-        error: input.error ?? null,
-        trace: input.trace ?? undefined,
-      },
-    });
+  const done = await bestEffort("finishCuratorBatchEvent failed — creating fresh", { id }, null, async () => {
+    await updateEvent(id, outcomeColumns(input));
     return id;
-  } catch (err) {
-    logger.warn("[digital-twin-pipeline-events] finishCuratorBatchEvent failed — creating fresh", {
-      id,
-      err: errMsg(err),
-    });
-    return recordPipelineEvent(input);
-  }
+  });
+  return done ?? recordPipelineEvent(input);
 }
 
 /** Stored on a runType="gate" event: one respond/ignore decision + (for LLM
  *  decisions) the full exchange, so the pipeline UI can show input message,
  *  system prompt, user prompt, response, and thinking. */
-export interface GateTrace {
+interface GateTrace {
   kind: "gate";
   respond: boolean;
   confidence: number;
@@ -397,13 +333,12 @@ export interface GateTrace {
  * Record ONE respond/ignore gate decision as a pipeline event (runType="gate")
  * so it shows in the activity feed alongside curator runs, filterable on its own.
  * status = "ok" when the twin replied, "empty" when it stayed silent (reuses the
- * feed's status chip). Best-effort — never blocks or breaks the gate.
+ * feed's status chip).
  */
 export async function recordGateEvent(input: {
   userId: string;
   incoming: string;
   channelName?: string;
-  channelType?: string;
   senderName?: string;
   sourceMessageId?: string;
   decision: { respond: boolean; confidence: number; reason: string; source: string };
@@ -414,7 +349,7 @@ export async function recordGateEvent(input: {
   error?: string;
   durationMs: number;
 }): Promise<string | null> {
-  try {
+  return bestEffort("recordGateEvent failed", { userId: input.userId }, null, () => {
     const now = new Date();
     const trace: GateTrace = {
       kind: "gate",
@@ -424,7 +359,6 @@ export async function recordGateEvent(input: {
       decisionSource: input.decision.source,
       incoming: input.incoming.slice(0, 2000),
       ...(input.channelName ? { channelName: input.channelName } : {}),
-      ...(input.channelType ? { channelType: input.channelType } : {}),
       ...(input.senderName ? { senderName: input.senderName } : {}),
       ...(input.error ? { error: input.error } : {}),
       ...(input.classifier?.length ? { classifier: input.classifier } : {}),
@@ -438,53 +372,34 @@ export async function recordGateEvent(input: {
           }
         : {}),
     };
-    const created = await (prisma.digitalTwinPipelineEvent.create as any)({
-      data: {
-        userId: input.userId,
-        runType: "gate",
-        source: `gate:${input.sourceMessageId ?? now.getTime()}`,
-        sourceKind: null,
-        windowFrom: now,
-        windowTo: now,
-        status: input.error ? "error" : input.decision.respond ? "ok" : "empty",
-        recordCount: 1,
-        records: [
-          {
-            id: input.sourceMessageId ?? "incoming",
-            type: "mention",
-            ts: now.toISOString(),
-            ...(input.channelName ? { channelName: input.channelName } : {}),
-            textPreview: input.incoming.slice(0, 300),
-          },
-        ],
-        durationMs: input.durationMs,
-        trace,
-      },
-      select: { id: true },
-    });
-    return (created?.id as string | undefined) ?? null;
-  } catch (err) {
-    logger.warn("[digital-twin-pipeline-events] recordGateEvent failed", {
+    return insertEvent({
       userId: input.userId,
-      err: errMsg(err),
+      runType: "gate",
+      source: `gate:${input.sourceMessageId ?? now.getTime()}`,
+      sourceKind: null,
+      windowFrom: now,
+      windowTo: now,
+      status: input.error ? "error" : input.decision.respond ? "ok" : "empty",
+      recordCount: 1,
+      records: [
+        {
+          id: input.sourceMessageId ?? "incoming",
+          type: "mention",
+          ts: now.toISOString(),
+          ...(input.channelName ? { channelName: input.channelName } : {}),
+          textPreview: input.incoming.slice(0, 300),
+        },
+      ],
+      durationMs: input.durationMs,
+      trace,
     });
-    return null;
-  }
+  });
 }
 
-/** Delete pipeline events older than `days`. Best-effort; returns deleted count. */
+/** Delete pipeline events older than `days`. Returns the deleted count. */
 export async function prunePipelineEvents(days = DEFAULT_PRUNE_DAYS): Promise<number> {
-  try {
+  return bestEffort("prunePipelineEvents failed", { days }, 0, async () => {
     const cutoff = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
-    const result = await prisma.digitalTwinPipelineEvent.deleteMany({
-      where: { createdAt: { lt: cutoff } },
-    });
-    return result.count;
-  } catch (err) {
-    logger.warn("[digital-twin-pipeline-events] prunePipelineEvents failed", {
-      days,
-      err: errMsg(err),
-    });
-    return 0;
-  }
+    return (await prisma.digitalTwinPipelineEvent.deleteMany({ where: { createdAt: { lt: cutoff } } })).count;
+  });
 }

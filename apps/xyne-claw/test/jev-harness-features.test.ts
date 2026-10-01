@@ -1,17 +1,19 @@
 import { describe, expect, it, vi } from "vitest";
+import type { ClassifierExchange, UserMemoryCuratorTrace } from "xyne-claw-shared";
 import type { JevAnswer } from "../src/jev.js";
-import {
-  buildTwinDeliverTool,
-  checkTwinDelivery,
-  installStopAfterDelivery,
-  twinCheckFromAnswers,
-  twinCheckQuestions,
-  type TwinDeliverRef,
-} from "../src/twin-deliver.js";
+import { buildTwinDeliverTool, installStopAfterDelivery, type TwinDeliverRef } from "../src/twin-deliver.js";
+import { checkTwinDelivery, twinCheckFromAnswers, twinCheckQuestions } from "../src/twin-delivery-check.js";
 import { decideFromJev } from "../src/twin-respond-gate.js";
-import { pickFromAnswers, pickPersonaFiles, toggledFiles } from "../src/persona-pick.js";
-import { checkFromAnswers, checkMemoryUpdate } from "../src/memory-update-check.js";
-import { checkMemoryCandidates, decideCandidate, mostSimilar, similarity } from "../src/memory-candidate-check.js";
+import { pickFromAnswers, pickPersonaFiles, toggledFiles } from "../src/twin-persona.js";
+import { checkFromAnswers, checkMemoryUpdate } from "../src/twin-soul-update-check.js";
+import {
+  applyClassifierToTrace,
+  checkMemoryCandidates,
+  decideCandidate,
+  mostSimilar,
+  similarity,
+  type CandidateCheckSummary,
+} from "../src/user-memory-candidate-check.js";
 import { routeFromJev } from "../src/mode-router.js";
 import { goalFromJev } from "../src/goal-judge.js";
 import { prefetchGateFromJev } from "../src/prefetch.js";
@@ -80,9 +82,9 @@ describe("twin delivery check", () => {
   });
 
   it("overall is the lowest score; a wrong destination forces 0", () => {
-    const c = twinCheckFromAnswers({ action: "reply", message: "x" }, { answers_ask: score(0.9), grounded: score(0.4) }, 5);
+    const c = twinCheckFromAnswers({ answers_ask: score(0.9), grounded: score(0.4) }, 5);
     expect(c).toMatchObject({ answersAsk: 0.9, grounded: 0.4, overall: 0.4, source: "jev" });
-    const wrong = twinCheckFromAnswers({ action: "reply", message: "x" }, { answers_ask: score(0.9), grounded: score(0.9), destination: choice("wrong", 0.8) }, 5);
+    const wrong = twinCheckFromAnswers({ answers_ask: score(0.9), grounded: score(0.9), destination: choice("wrong", 0.8) }, 5);
     expect(wrong?.overall).toBe(0);
   });
 
@@ -200,6 +202,157 @@ describe("memory candidate check", () => {
     const out = await checkMemoryCandidates([cand("a")], existing, { ask, enabled: false });
     expect(out.summary).toBeNull();
     expect(ask).not.toHaveBeenCalled();
+  });
+});
+
+// ── R8: the classifier pass is stored on the curator's trace row ─────────────
+describe("applyClassifierToTrace", () => {
+  const exchange = (purpose: string): ClassifierExchange => ({
+    purpose,
+    backend: "test",
+    ms: 7,
+    ok: true,
+    state: `state for ${purpose}`,
+    questionSpec: { verdict: { type: "choice" } },
+    answers: { verdict: { choice: "new" } },
+    at: "2026-01-01T00:00:00.000Z",
+  });
+  const exTea = exchange("tea");
+  const exDup = exchange("dup");
+  const exNoise = exchange("noise");
+  const exBare = exchange("bare");
+  const prefix = "x".repeat(200);
+
+  const summary: CandidateCheckSummary = {
+    checked: 6,
+    dropped: [
+      { text: "same as stored", verdict: "duplicate", p: 0.85 },
+      { text: "chit chat", verdict: "noise", p: 0.75 },
+    ],
+    verdicts: [
+      { text: "likes tea", verdict: "new", p: 0.9, worth: 0.6 },
+      { text: "same as stored", verdict: "duplicate", p: 0.85, worth: 0.1 },
+      { text: "chit chat", verdict: "noise", p: 0.75 },
+      { text: "refines a fact", verdict: "update", p: 0.8 },
+    ],
+    exchanges: [
+      { text: "likes tea", exchange: exTea },
+      { text: "same as stored", exchange: exDup },
+      { text: "chit chat", exchange: exNoise },
+      { text: "no verdict for this call", exchange: exBare },
+    ],
+    unavailable: 1,
+    ms: 42,
+  };
+
+  const base = { subsystem: "style", signalScore: 0.8, groundedOnIds: ["r1"] };
+  const trace: UserMemoryCuratorTrace = {
+    model: "curator-model",
+    durationMs: 1200,
+    attempts: 2,
+    prompt: "the prompt",
+    promptChars: 10,
+    // A classifier block already on the trace is replaced, not merged.
+    classifier: { checked: 99, kept: 99, dropped: 99, unavailable: 99, ms: 99, calls: [] },
+    emitted: [
+      { ...base, text: "likes tea", verdict: "kept" },
+      { ...base, text: "same as stored", verdict: "kept" },
+      { ...base, text: "chit chat", verdict: "kept" },
+      { ...base, text: "refines a fact", verdict: "kept" },
+      { ...base, text: "kept but never checked", verdict: "kept" },
+      // The curator already dropped this one; a verdict for its text must not touch it.
+      { ...base, text: "likes tea", verdict: "dropped", dropReason: "low-signal" },
+    ],
+  };
+
+  it("annotates kept entries, turns classifier drops into dropped verdicts, leaves the rest", () => {
+    expect(applyClassifierToTrace(trace, summary)).toStrictEqual({
+      model: "curator-model",
+      durationMs: 1200,
+      attempts: 2,
+      prompt: "the prompt",
+      promptChars: 10,
+      classifier: {
+        checked: 6,
+        kept: 4,
+        dropped: 2,
+        unavailable: 1,
+        ms: 42,
+        calls: [
+          { text: "likes tea", verdict: "new", confidence: 0.9, worth: 0.6, exchange: exTea },
+          { text: "same as stored", verdict: "duplicate", confidence: 0.85, worth: 0.1, exchange: exDup },
+          { text: "chit chat", verdict: "noise", confidence: 0.75, exchange: exNoise },
+          { text: "no verdict for this call", exchange: exBare },
+        ],
+      },
+      emitted: [
+        { ...base, text: "likes tea", verdict: "kept", jevVerdict: "new", jevConfidence: 0.9, jevScore: 0.6 },
+        {
+          ...base,
+          text: "same as stored",
+          verdict: "dropped",
+          dropReason: "classifier-duplicate",
+          jevVerdict: "duplicate",
+          jevConfidence: 0.85,
+          jevScore: 0.1,
+        },
+        {
+          ...base,
+          text: "chit chat",
+          verdict: "dropped",
+          dropReason: "classifier-noise",
+          jevVerdict: "noise",
+          jevConfidence: 0.75,
+        },
+        { ...base, text: "refines a fact", verdict: "kept", jevVerdict: "update", jevConfidence: 0.8 },
+        { ...base, text: "kept but never checked", verdict: "kept" },
+        { ...base, text: "likes tea", verdict: "dropped", dropReason: "low-signal" },
+      ],
+    });
+  });
+
+  it("matches on the first 200 chars and the last verdict for a shared prefix wins", () => {
+    const shared: CandidateCheckSummary = {
+      checked: 2,
+      dropped: [],
+      verdicts: [
+        { text: prefix, verdict: "duplicate", p: 0.6 },
+        { text: prefix, verdict: "new", p: 0.5, worth: 0.4 },
+      ],
+      exchanges: [
+        { text: prefix, exchange: exTea },
+        { text: prefix, exchange: exDup },
+      ],
+      unavailable: 0,
+      ms: 3,
+    };
+    const longTrace: UserMemoryCuratorTrace = {
+      model: "m",
+      durationMs: 1,
+      prompt: "",
+      promptChars: 0,
+      emitted: [{ ...base, text: `${prefix} and a tail past the cutoff`, verdict: "kept" }],
+    };
+    expect(applyClassifierToTrace(longTrace, shared)).toStrictEqual({
+      model: "m",
+      durationMs: 1,
+      prompt: "",
+      promptChars: 0,
+      classifier: {
+        checked: 2,
+        kept: 2,
+        dropped: 0,
+        unavailable: 0,
+        ms: 3,
+        calls: [
+          { text: prefix, verdict: "new", confidence: 0.5, worth: 0.4, exchange: exTea },
+          { text: prefix, verdict: "new", confidence: 0.5, worth: 0.4, exchange: exDup },
+        ],
+      },
+      emitted: [
+        { ...base, text: `${prefix} and a tail past the cutoff`, verdict: "kept", jevVerdict: "new", jevConfidence: 0.5, jevScore: 0.4 },
+      ],
+    });
   });
 });
 

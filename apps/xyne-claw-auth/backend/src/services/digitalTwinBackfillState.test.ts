@@ -1,14 +1,18 @@
 import { describe, it, expect } from "vitest";
 import {
   applyBackfillPause,
+  asBackfillState,
+  backfillRangeProblem,
+  buildBackfillState,
   collectAndClearResumable,
   recoverableSources,
   summarizeBackfillState,
   isSourcePaused,
   pctByTime,
   pctByWindows,
+  windowsTotalFor,
   type BackfillState,
-} from "./backfillStatus.js";
+} from "./digitalTwinBackfillState.js";
 
 const ISO = (s: string) => new Date(s).toISOString();
 
@@ -167,5 +171,69 @@ describe("pct helpers", () => {
     expect(pctByTime({ from: ISO("2026-01-18"), to: ISO("2026-07-18"), cursor: ISO("2026-04-18") })).toBe(50);
     expect(pctByTime({ from: ISO("2026-01-18"), to: ISO("2026-07-18"), cursor: ISO("2026-07-18") })).toBe(0);
     expect(pctByTime({ from: ISO("2026-01-18"), to: ISO("2026-07-18"), cursor: ISO("2026-01-18") })).toBe(100);
+  });
+});
+
+describe("buildBackfillState", () => {
+  it("seeds every source with the same window, a cursor at `from` and fresh progress", () => {
+    const now = new Date("2026-08-15T10:00:00.000Z");
+    const nowIso = now.toISOString();
+    const state = buildBackfillState(
+      { from: new Date("2026-05-15T10:00:00.000Z"), to: new Date("2026-08-15T10:00:00.000Z") },
+      now,
+    );
+    const entry = {
+      from: "2026-05-15T10:00:00.000Z",
+      to: "2026-08-15T10:00:00.000Z",
+      cursor: "2026-05-15T10:00:00.000Z",
+      complete: false,
+      progress: {
+        windowsTotal: 4, // 92 days / 30d, ceil'd
+        windowsDone: 0,
+        recordsSeen: 0,
+        candidatesMade: 0,
+        currentWindow: null,
+        lastError: null,
+        startedAt: nowIso,
+        updatedAt: nowIso,
+      },
+    };
+    expect(state).toEqual({ messages: entry, calls: entry, canvases: entry });
+    expect(Object.keys(state)).toEqual(["messages", "calls", "canvases"]);
+  });
+});
+
+describe("backfillRangeProblem", () => {
+  it("flags unparsable dates and from > to as 'invalid'", () => {
+    const ok = new Date("2026-08-15T00:00:00.000Z");
+    expect(backfillRangeProblem(new Date("nope"), ok)).toBe("invalid");
+    expect(backfillRangeProblem(ok, new Date("nope"))).toBe("invalid");
+    expect(backfillRangeProblem(new Date("2026-08-16T00:00:00.000Z"), ok)).toBe("invalid");
+  });
+
+  it("accepts exactly 24 calendar months and rejects anything longer", () => {
+    const to = new Date("2026-08-15T00:00:00.000Z");
+    expect(backfillRangeProblem(new Date("2024-08-15T00:00:00.000Z"), to)).toBeNull();
+    expect(backfillRangeProblem(new Date("2024-08-14T23:59:59.999Z"), to)).toBe("too-long");
+  });
+});
+
+describe("windowsTotalFor", () => {
+  it("is ceil(span / 30d) and never below 1", () => {
+    expect(windowsTotalFor("2026-08-15T00:00:00.000Z", "2026-08-15T00:00:00.000Z")).toBe(1);
+    expect(windowsTotalFor("not-a-date", "2026-08-15T00:00:00.000Z")).toBe(1);
+    expect(windowsTotalFor("2024-08-15T00:00:00.000Z", "2026-08-15T00:00:00.000Z")).toBe(25);
+  });
+});
+
+describe("asBackfillState", () => {
+  it("passes objects (arrays included) through and nulls everything else", () => {
+    const state = { messages: { complete: false } };
+    expect(asBackfillState(state)).toBe(state);
+    expect(asBackfillState([])).toEqual([]);
+    expect(asBackfillState(null)).toBeNull();
+    expect(asBackfillState(undefined)).toBeNull();
+    expect(asBackfillState("x")).toBeNull();
+    expect(asBackfillState(0)).toBeNull();
   });
 });

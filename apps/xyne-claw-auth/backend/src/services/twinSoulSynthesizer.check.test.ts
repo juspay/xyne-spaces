@@ -77,4 +77,16 @@ describe("nightly persona rewrite check (R10)", () => {
     const r = await synthesizeSoulFilesForUser("u1", "daily");
     expect(r.updated).toEqual(["soul.md"]);
   });
+
+  it("a claw error is persisted as an 'error' result: name, trace keys, action, error", async () => {
+    const trace = { model: "m", durationMs: 5, factsUsed: 1 };
+    vi.stubGlobal("fetch", async () => new Response(JSON.stringify({ success: false, content: null, error: "x", trace }), { status: 200 }));
+    const r = await synthesizeSoulFilesForUser("u1", "daily");
+    expect(r.skipped).toContain("soul.md");
+    expect(upsertFile).not.toHaveBeenCalled();
+    const files = (finishSynthesisEvent.mock.calls[0] as unknown as [string, string, { files: Array<{ name: string }> }])[2].files;
+    const soul = files.find((f) => f.name === "soul.md");
+    expect(Object.keys(soul!)).toEqual(["name", "model", "durationMs", "factsUsed", "action", "error"]);
+    expect(soul).toMatchObject({ action: "error", error: "x", factsUsed: 1 });
+  });
 });

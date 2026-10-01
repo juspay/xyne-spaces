@@ -15,7 +15,7 @@ export type {
   EntityGraphNode,
   EntityGraphEdge,
 } from "./types.js";
-export { bankIdForAgent, bankIdForAgentOrg } from "./types.js";
+export { bankIdForAgent, bankIdForAgentOrg, DIGITAL_TWIN_SLUG, DIGITAL_TWIN_BANK_ID, isDigitalTwinAgent } from "./types.js";
 export { buildRetainMission } from "./retain-mission.js";
 export {
   getMemoryProvider,
@@ -25,18 +25,5 @@ export {
 export { HindsightProvider } from "./providers/hindsight.js";
 export { StubMemoryProvider } from "./providers/stub.js";
 export type { SessionTranscriptForCurator, SubsystemUpdate } from "./curator-types.js";
-export type {
-  UserMemoryRecord,
-  UserMemoryChannelType,
-  UserMemoryThreadMessage,
-  UserMemoryThreadContext,
-  UserMemorySubsystem,
-  UserMemoryCandidatePayload,
-  UserMemoryDistillRequest,
-  UserMemoryDistillResponse,
-  ExistingUserMemory,
-  UserMemoryCuratorTrace,
-  UserMemoryClassifierTrace,
-  UserMemoryCuratorEmittedCandidate,
-} from "./user-memory-types.js";
-export { USER_MEMORY_SUBSYSTEMS } from "./user-memory-types.js";
+export type * from "./user-memory-types.js";
+export { USER_MEMORY_SUBSYSTEMS, isUserMemorySubsystem } from "./user-memory-types.js";

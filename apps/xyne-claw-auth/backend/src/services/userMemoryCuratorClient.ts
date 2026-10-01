@@ -13,8 +13,8 @@
 
 import { Agent } from "undici";
 import { errMsg } from "../lib/errors.js";
-import { bankIdForAgent, getMemoryProvider } from "xyne-claw-shared";
-import { baseRecordId } from "./userMemoryBatcher.js";
+import { DIGITAL_TWIN_BANK_ID, getMemoryProvider } from "xyne-claw-shared";
+import { baseRecordId, packRecordsIntoBatches } from "./userMemoryBatcher.js";
 import { CONFIG } from "../config.js";
 import { prisma } from "../db.js";
 import { createLogger, createTraceId } from "../logger.js";
@@ -30,8 +30,10 @@ import {
   startCuratorBatchEvent,
   updateCuratorBatchAttempt,
   finishCuratorBatchEvent,
+  type PipelineEventStatus,
   type PipelineRecordPreview,
 } from "./digitalTwinPipelineEvents.js";
+import { ensureTwinBank, retainTwinMemory, subsystemOfTags } from "./twinMemoryBank.js";
 
 const logger = createLogger("user-memory-curator-client", createTraceId());
 // claw's /distill runs its OWN retry ladder internally: up to
@@ -61,77 +63,10 @@ const DISTILL_TIMEOUT_MS = Number(
 // "5-minute timeout" we kept hitting. Disable both (0) so the AbortSignal is the
 // sole clock; keep connectTimeout so a genuinely dead pod still fails fast.
 const distillDispatcher = new Agent({ headersTimeout: 0, bodyTimeout: 0, connectTimeout: 10_000 });
-const TWIN_BANK_ID = bankIdForAgent("digital-twin");
 const memory = getMemoryProvider();
-const DEFAULT_AUTO_APPROVE_MIN_SCORE = 0.9;
+export const DEFAULT_AUTO_APPROVE_MIN_SCORE = 0.9;
 
-interface SourceRef {
-  type: "message" | "call" | "canvas" | "mention_reply" | "conversation";
-  id: string;
-  channelId?: string;
-  ts: string;
-}
-
-/**
- * Named retain strategy for restoring an archive of ALREADY-EXTRACTED facts.
- *
- * `retain_extraction_mode: "chunks"` makes Hindsight skip the LLM entirely and
- * store each chunk as-is (hindsight `_extract_facts_chunks`) — no fact
- * extraction, no entity extraction. That is exactly right for re-importing
- * memories Hindsight itself produced: re-extracting them would both burn the
- * rate-limited extraction LLM and let the wording drift from what the user
- * already reviewed and approved.
- *
- * `retain_chunk_size` is pinned above the import route's per-record character
- * cap so one archived record stays ONE memory instead of being split.
- */
-export const VERBATIM_IMPORT_STRATEGY = "xyne-verbatim-import";
-const TWIN_RETAIN_STRATEGIES: Record<string, Record<string, unknown>> = {
-  [VERBATIM_IMPORT_STRATEGY]: {
-    retain_extraction_mode: "chunks",
-    retain_chunk_size: 8_000,
-  },
-};
-
-/** Ensure the twin bank exists AND has observations enabled (Hindsight's
- *  evolution/temporal tracking) plus the verbatim-import strategy registered.
- *  Cached per-pod in the provider, so calling before each retain is cheap.
- *  Best-effort — retain still works if it fails. */
-export async function ensureTwinBank(): Promise<void> {
-  try {
-    await memory.ensureBank(TWIN_BANK_ID, {
-      enableObservations: true,
-      retainStrategies: TWIN_RETAIN_STRATEGIES,
-    });
-  } catch {
-    /* non-fatal */
-  }
-}
-
-/** The latest source-record timestamp backing a candidate — its representative
- *  EVENT time, passed to Hindsight so facts rank by when they happened (not when
- *  approved). Falls back to undefined → provider uses now(). */
-export function pickEventTimestamp(sourceRefs: unknown): string | undefined {
-  if (!Array.isArray(sourceRefs)) return undefined;
-  let bestMs = 0;
-  let bestIso: string | undefined;
-  for (const r of sourceRefs) {
-    const ts = (r as { ts?: unknown } | null)?.ts;
-    if (typeof ts !== "string") continue;
-    const t = Date.parse(ts);
-    if (Number.isFinite(t) && t > bestMs) {
-      bestMs = t;
-      bestIso = new Date(t).toISOString();
-    }
-  }
-  return bestIso;
-}
-
-/** Observation scope confining consolidation to ONE user's facts (shared bank
- *  safety — observations never mix users). */
-export function twinObservationScopes(userId: string): string[][] {
-  return [[`user:${userId}`]];
-}
+type SourceRef = Pick<UserMemoryRecord, "type" | "id" | "channelId" | "ts">;
 
 /** Client-side attempts for the claw distill S2S call. The curator LLM already
  *  retries internally (no-tool-call / bad-json / 5xx); THIS layer covers
@@ -140,7 +75,12 @@ export function twinObservationScopes(userId: string): string[][] {
  *  whole batch (trace=null, 0 candidates), exactly the "24 → 0, no trace" case. */
 const DISTILL_CLIENT_ATTEMPTS = Math.max(1, Number(process.env["USER_MEMORY_CLIENT_MAX_ATTEMPTS"] ?? 3));
 
-export async function distillUserMemoryViaClaw(
+/** What every failed/refused distill call returns: no candidates, no trace. */
+const noResult = () => ({ candidates: [], trace: null });
+/** Linear backoff between transport retries. */
+const backoff = (attempt: number) => new Promise((r) => setTimeout(r, 2000 * attempt));
+
+async function distillUserMemoryViaClaw(
   req: UserMemoryDistillRequest,
   /** Fired at the START of each attempt so callers can surface live "running /
    *  retrying attempt N/M" state. `prevError` is set from attempt 2 onward. */
@@ -148,7 +88,7 @@ export async function distillUserMemoryViaClaw(
 ): Promise<{ candidates: UserMemoryCandidatePayload[]; trace: UserMemoryCuratorTrace | null }> {
   if (!CONFIG.xyneClawS2sKey) {
     logger.warn("[user-memory-curator-client] XYNE_CLAW_S2S_KEY not set — refusing call");
-    return { candidates: [], trace: null };
+    return noResult();
   }
   const url = `${CONFIG.xyneClawUrl.replace(/\/$/, "")}/internal/user-memory/distill`;
 
@@ -182,10 +122,10 @@ export async function distillUserMemoryViaClaw(
         // 5xx/gateway = transient → retry; 4xx is a real request problem → don't.
         if (res.status >= 500 && attempt < DISTILL_CLIENT_ATTEMPTS) {
           prevError = `claw ${res.status}`;
-          await new Promise((r) => setTimeout(r, 2000 * attempt));
+          await backoff(attempt);
           continue;
         }
-        return { candidates: [], trace: null };
+        return noResult();
       }
       const data = (await res.json()) as UserMemoryDistillResponse;
       if (!data.success || !Array.isArray(data.candidates)) {
@@ -195,7 +135,7 @@ export async function distillUserMemoryViaClaw(
           userId: req.userId,
           recordsCount: req.records.length,
         });
-        return { candidates: [], trace: null };
+        return noResult();
       }
       if (attempt > 1) {
         logger.info("[user-memory-curator-client] distill succeeded on retry", { userId: req.userId, attempt });
@@ -224,13 +164,13 @@ export async function distillUserMemoryViaClaw(
       });
       if (!isLast) {
         prevError = errMsg(err);
-        await new Promise((r) => setTimeout(r, 2000 * attempt));
+        await backoff(attempt);
         continue;
       }
-      return { candidates: [], trace: null };
+      return noResult();
     }
   }
-  return { candidates: [], trace: null };
+  return noResult();
 }
 
 /** How many of the user's existing memories to pull for update-vs-create
@@ -249,16 +189,14 @@ const MAX_EXISTING_MEMORIES = 200;
  */
 async function fetchExistingUserMemories(userId: string): Promise<ExistingUserMemory[]> {
   try {
-    const page = await memory.listMemories(TWIN_BANK_ID, {
+    const page = await memory.listMemories(DIGITAL_TWIN_BANK_ID, {
       tags: [`user:${userId}`],
       limit: MAX_EXISTING_MEMORIES,
     });
     const out: ExistingUserMemory[] = [];
     for (const m of page.memories) {
       if (!m.id) continue;
-      const subsystem = (m.tags ?? [])
-        .find((t) => t.startsWith("subsystem:"))
-        ?.slice("subsystem:".length);
+      const subsystem = subsystemOfTags(m.tags);
       if (!subsystem) continue;  // no subsystem tag → can't reconcile safely
       out.push({ id: m.id, subsystem, text: m.content ?? "" });
     }
@@ -272,13 +210,6 @@ async function fetchExistingUserMemories(userId: string): Promise<ExistingUserMe
   }
 }
 
-/**
- * High-level: take a record batch, run it through the curator, persist
- * candidates with resolved sourceRefs. Used by both the backfill worker (per
- * month-window) and the daily worker (per day).
- *
- * Returns the inserted candidate count for logging/progress UI.
- */
 /** First 300 chars of each fed record, for the pipeline-event preview. */
 function recordPreviews(records: UserMemoryRecord[]): PipelineRecordPreview[] {
   return records.map((r) => ({
@@ -292,6 +223,13 @@ function recordPreviews(records: UserMemoryRecord[]): PipelineRecordPreview[] {
   }));
 }
 
+/**
+ * High-level: take a record batch, run it through the curator, persist
+ * candidates with resolved sourceRefs. Used by both the backfill worker (per
+ * month-window) and the daily worker (per day).
+ *
+ * Returns the inserted candidate count for logging/progress UI.
+ */
 export async function curateAndPersistBatch(args: {
   userId: string;
   window: { from: Date; to: Date };
@@ -333,24 +271,26 @@ export async function curateAndPersistBatch(args: {
 
   const emittedCount = trace?.emitted.length ?? 0;
   const keptCount = trace?.emitted.filter((e) => e.verdict === "kept").length ?? 0;
-
-  if (candidates.length === 0) {
-    await finishCuratorBatchEvent(eventId, {
+  const finish = (status: PipelineEventStatus, candidatesCreated: number, error: string | null = null) =>
+    finishCuratorBatchEvent(eventId, {
       userId,
       source,
       window,
-      status: trace?.error ? "error" : "empty",
+      status,
       recordCount: records.length,
       records: previews,
       existingMemoryCount: existingMemories.length,
       emittedCount,
       keptCount,
-      candidatesCreated: 0,
+      candidatesCreated,
       autoApproved: 0,
       durationMs: Date.now() - tStart,
-      error: trace?.error ?? null,
+      error,
       trace,
     });
+
+  if (candidates.length === 0) {
+    await finish(trace?.error ? "error" : "empty", 0, trace?.error ?? null);
     return 0;
   }
 
@@ -386,32 +326,13 @@ export async function curateAndPersistBatch(args: {
   });
 
   // Skip if for some reason every candidate lost its grounding mid-flight.
-  const writable = candidateRows.filter(
-    (r) =>
-      Array.isArray(r.sourceRefs) &&
-      (r.sourceRefs as unknown as SourceRef[]).length > 0,
-  );
+  const writable = candidateRows.filter((r) => r.sourceRefs.length > 0);
   if (writable.length === 0) {
-    await finishCuratorBatchEvent(eventId, {
-      userId,
-      source,
-      window,
-      status: "empty",
-      recordCount: records.length,
-      records: previews,
-      existingMemoryCount: existingMemories.length,
-      emittedCount,
-      keptCount,
-      candidatesCreated: 0,
-      autoApproved: 0,
-      durationMs: Date.now() - tStart,
-      error: null,
-      trace,
-    });
+    await finish("empty", 0);
     return 0;
   }
 
-  const user = await (prisma.user.findUnique as any)({
+  const user = await prisma.user.findUnique({
     where: { id: userId },
     select: {
       digitalTwinMemoryApprovalMode: true,
@@ -430,22 +351,7 @@ export async function curateAndPersistBatch(args: {
   // retain returns no usable id, so candidate.hindsightMemoryId is unreliable —
   // the tag travels with the memory and is returned by listMemories.
   // `writable.length` is the create count: createMany below inserts every row.
-  const pipelineEventId = await finishCuratorBatchEvent(eventId, {
-    userId,
-    source,
-    window,
-    status: writable.length > 0 ? "ok" : "empty",
-    recordCount: records.length,
-    records: previews,
-    existingMemoryCount: existingMemories.length,
-    emittedCount,
-    keptCount,
-    candidatesCreated: writable.length,
-    autoApproved: 0, // fixed up in the log below; not persisted per-row
-    durationMs: Date.now() - tStart,
-    error: null,
-    trace,
-  });
+  const pipelineEventId = await finish("ok", writable.length);
 
   let autoApproved = 0;
   const rows: Array<Record<string, unknown>> = [];
@@ -462,25 +368,18 @@ export async function curateAndPersistBatch(args: {
     const jevScore = jevScoreByText.get(row.text as string);
     if (autoApproveEnabled && row.signalScore >= minScore && (jevScore === undefined || jevScore >= 0.5)) {
       try {
-        const content = row.text;
-        const tags = [
-          `user:${userId}`,
-          `subsystem:${row.subsystem}`,
-          "scope:user",
-          ...(pipelineEventId ? [`pipeline:${pipelineEventId}`] : []),
-        ];
-        const eventTs = pickEventTimestamp(row.sourceRefs);
-        const out = await memory.retain(TWIN_BANK_ID, [{
-          content,
-          tags,
-          ...(eventTs ? { timestamp: eventTs } : {}),
-          observationScopes: twinObservationScopes(userId),
-        }]);
+        const hindsightMemoryId = await retainTwinMemory({
+          userId,
+          subsystem: row.subsystem,
+          content: row.text,
+          sourceRefs: row.sourceRefs,
+          pipelineEventId,
+        });
         rows.push({
           ...row,
           status: "approved",
           approvedAt: now,
-          hindsightMemoryId: out?.[0]?.id ?? null,
+          hindsightMemoryId,
           pipelineEventId,
         });
         autoApproved += 1;
@@ -505,14 +404,12 @@ export async function curateAndPersistBatch(args: {
     rows.push({ ...row, status: "pending", pipelineEventId });
   }
 
-  const result = await (prisma.userMemoryCandidate.createMany as any)({
-    data: rows,
-  });
+  const result = await (prisma.userMemoryCandidate.createMany as any)({ data: rows });
 
   // The event was recorded before the retain loop (so its id could tag the
   // auto-approved memories); patch the real auto-approved count back now.
   if (pipelineEventId && autoApproved > 0) {
-    await (prisma.digitalTwinPipelineEvent.update as any)({
+    await prisma.digitalTwinPipelineEvent.update({
       where: { id: pipelineEventId },
       data: { autoApproved },
     }).catch(() => {});
@@ -532,78 +429,24 @@ export async function curateAndPersistBatch(args: {
   return result.count;
 }
 
-/** Ops kill-switch for the forward loop. On by default; set to "false" to stop
- *  learning from twin replies without a redeploy of the approve path. */
-const LEARN_FROM_REPLIES = process.env["DIGITAL_TWIN_LEARN_FROM_REPLIES"] !== "false";
-/** Cap each side of the pair so the combined record stays well under the
- *  curator's 1500-char/record ceiling. */
-const MAX_PAIR_PART_CHARS = 650;
-
 /**
- * Forward learning. When a user approves (or edits) a Digital Twin draft and it
- * posts as them, that (incoming message → the user's final reply) pair is the
- * single highest-signal example of how they actually respond. Feed it through
- * the SAME curator so the twin's own outcomes refine the user's style /
- * relationship memories — the self-learning loop that runs alongside the daily
- * + backfill pipeline.
- *
- * Fire-and-forget from the approve handler: never awaited in the request path,
- * never throws out. Uses only the final approved/edited text (the user's real
- * voice), not the twin's draft. Respects the user's approval mode via
- * curateAndPersistBatch (auto-approve vs pending review).
+ * Token-budgeted batching (userMemoryBatcher) + curateAndPersistBatch per batch.
+ * Returns the summed inserted count. A batch error is rethrown unless
+ * `onBatchError` is given, in which case it is handed there and the remaining
+ * batches still run (the daily cron isolates failures this way).
  */
-export async function learnFromTwinReply(args: {
-  /** The impersonated (mentioned) user — whose memory this refines. */
-  userId: string;
-  /** The incoming message that mentioned the user. */
-  incomingTask: string;
-  /** The final text posted as the user (edited or the approved draft). */
-  reply: string;
-  conversationId: string;
-  channelId?: string;
-  channelName?: string;
-}): Promise<void> {
-  if (!LEARN_FROM_REPLIES) return;
-  const incoming = (args.incomingTask ?? "").trim();
-  const reply = (args.reply ?? "").trim();
-  if (!args.userId || !incoming || !reply) return;
-
-  const nowIso = new Date().toISOString();
-  const text = [
-    `Someone mentioned the user${args.channelName ? ` in #${args.channelName}` : ""}. Incoming message:`,
-    `"${incoming.slice(0, MAX_PAIR_PART_CHARS)}"`,
-    "",
-    "The user's actual reply, posted as themselves:",
-    `"${reply.slice(0, MAX_PAIR_PART_CHARS)}"`,
-  ].join("\n");
-
-  const record: UserMemoryRecord = {
-    id: `twin-reply:${args.conversationId}:${nowIso}`,
-    type: "mention_reply",
-    ts: nowIso,
-    ...(args.channelId ? { channelId: args.channelId } : {}),
-    ...(args.channelName ? { channelName: args.channelName } : {}),
-    text,
-  };
-
-  try {
-    const now = new Date();
-    const inserted = await curateAndPersistBatch({
-      userId: args.userId,
-      window: { from: now, to: now },
-      records: [record],
-      source: `twin-approval:${args.conversationId}`,
-    });
-    logger.info("[user-memory-curator-client] learned from twin reply", {
-      userId: args.userId,
-      conversationId: args.conversationId,
-      candidates: inserted,
-    });
-  } catch (err) {
-    logger.warn("[user-memory-curator-client] learnFromTwinReply failed", {
-      userId: args.userId,
-      conversationId: args.conversationId,
-      err: errMsg(err),
-    });
+export async function curateRecordsInBatches(
+  args: Parameters<typeof curateAndPersistBatch>[0],
+  onBatchError?: (err: unknown) => void,
+): Promise<number> {
+  let total = 0;
+  for (const batch of packRecordsIntoBatches(args.records)) {
+    try {
+      total += await curateAndPersistBatch({ ...args, records: batch });
+    } catch (err) {
+      if (!onBatchError) throw err;
+      onBatchError(err);
+    }
   }
+  return total;
 }

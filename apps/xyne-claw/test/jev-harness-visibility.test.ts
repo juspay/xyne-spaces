@@ -1,16 +1,10 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { jevAsk } from "../src/jev.js";
 import { collectJudgeExchanges, pinRunJudgeBackend, setJudgeDebugSink } from "../src/judge-backend.js";
+import { isolateEnv } from "./helpers/env.js";
 
 const ENV = ["LITELLM_URL", "LITELLM_API_KEY", "JUDGE_BACKEND"];
-const saved = Object.fromEntries(ENV.map((k) => [k, process.env[k]]));
-afterEach(() => {
-  for (const k of ENV) {
-    if (saved[k] === undefined) delete process.env[k];
-    else process.env[k] = saved[k];
-  }
-  vi.unstubAllGlobals();
-});
+isolateEnv(ENV);
 
 function jevUp(answers: Record<string, unknown>) {
   process.env["LITELLM_URL"] = "https://grid.test";

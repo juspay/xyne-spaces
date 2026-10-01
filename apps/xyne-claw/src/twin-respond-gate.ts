@@ -13,17 +13,17 @@
  * run on every mention.
  */
 
-import { fetchLiteLLMWithRetry } from "@xyne/litellm-client";
 import type { ClassifierExchange } from "xyne-claw-shared";
 import type { JevAnswer, JevQuestion } from "./jev.js";
 import { collectJudgeExchanges, storableExchange } from "./judge-backend.js";
 import { answerProb, band, runJudgeSite } from "./judge-site.js";
+import { parseArgMarkup, parseJsonObject } from "./leaked-tool-call.js";
+import { postChatCompletion, type ChatCompletionResponse } from "./litellm-chat.js";
 import { createLogger } from "./logger.js";
 import { optEnabled } from "./optimizations.js";
 
 const log = createLogger("twin-respond-gate");
 
-const LITELLM_URL = (process.env["LITELLM_URL"] ?? "https://grid.ai.example.com").replace(/\/$/, "");
 const LITELLM_API_KEY = process.env["LITELLM_API_KEY"] ?? "";
 // Model for the gate. Defaults to LITELLM_MODEL (the platform default the rest of
 // the twin uses) for consistency, then haiku as a last resort. The gate's latency
@@ -86,6 +86,9 @@ export interface RespondGateResult {
   /** Every classifier call the gate made (includeTrace only), whichever path decided. */
   classifier?: ClassifierExchange[];
 }
+
+type GateDecision = Pick<RespondGateResult, "respond" | "confidence" | "reason">;
+const FAIL_CLOSED: RespondGateResult = { respond: false, confidence: 0, reason: "gate unavailable — staying silent", source: "fail-closed" };
 
 const DECISION_TOOL = {
   type: "function" as const,
@@ -155,33 +158,14 @@ function buildUserPrompt(req: RespondGateRequest): string {
  *  (values may be strings) whenever a `respond` field is present, else null. */
 function extractDecisionObject(raw: unknown): Record<string, unknown> | null {
   if (typeof raw !== "string" || !raw.trim()) return null;
-  const tryParse = (s: string): Record<string, unknown> | null => {
-    try {
-      const v = JSON.parse(s);
-      return v && typeof v === "object" && !Array.isArray(v) ? (v as Record<string, unknown>) : null;
-    } catch {
-      return null;
-    }
-  };
   // 1) Whole string as JSON, then the first `{…}` block (fences / prose wrappers).
-  const direct = tryParse(raw.trim());
+  const direct = parseJsonObject(raw.trim());
   if (direct && "respond" in direct) return direct;
-  const m = raw.match(/\{[\s\S]*\}/);
-  if (m) {
-    const p = tryParse(m[0]);
-    if (p && "respond" in p) return p;
-  }
-  // 2) GLM native tool-call markup leaked into content: pull each
-  //    <arg_key>K</arg_key><arg_value>V</arg_value> pair (non-greedy).
-  const pairRe = /<arg_key>\s*([\s\S]*?)\s*<\/arg_key>\s*<arg_value>\s*([\s\S]*?)\s*<\/arg_value>/gi;
-  const out: Record<string, unknown> = {};
-  let mm: RegExpExecArray | null;
-  while ((mm = pairRe.exec(raw)) !== null) {
-    const key = mm[1]?.trim();
-    if (key) out[key] = mm[2]?.trim();
-  }
-  if ("respond" in out) return out;
-  return null;
+  const p = parseJsonObject(raw.match(/\{[\s\S]*\}/)?.[0] ?? "");
+  if (p && "respond" in p) return p;
+  // 2) GLM native tool-call markup leaked into content.
+  const pairs = parseArgMarkup(raw);
+  return "respond" in pairs ? pairs : null;
 }
 
 /** Coerce the `respond` field to a strict boolean — booleans and the string
@@ -205,7 +189,7 @@ function coerceConfidence(v: unknown): number {
 /** Parse + normalize a gate decision from a raw model response (tool-call args
  *  or leaked content, JSON or GLM markup). Returns null when no usable decision
  *  is present. Exported for unit tests. */
-export function parseGateDecision(raw: unknown): { respond: boolean; confidence: number; reason: string } | null {
+export function parseGateDecision(raw: unknown): GateDecision | null {
   const obj = extractDecisionObject(raw);
   if (!obj) return null;
   const respond = coerceRespond(obj["respond"]);
@@ -220,7 +204,7 @@ const JEV_RESPOND_AT = Number(process.env["TWIN_GATE_JEV_RESPOND_AT"] ?? 0.7);
 const JEV_SKIP_AT = Number(process.env["TWIN_GATE_JEV_SKIP_AT"] ?? 0.3);
 const JEV_GATE_BUDGET_MS = Number(process.env["TWIN_GATE_JEV_TIMEOUT_MS"] ?? 3_000);
 
-export const JEV_GATE_QUESTIONS: Record<string, JevQuestion> = {
+const JEV_GATE_QUESTIONS: Record<string, JevQuestion> = {
   worth: {
     type: "score",
     instructions:
@@ -238,7 +222,7 @@ export function decideFromJev(
   answers: Record<string, JevAnswer>,
   high = JEV_RESPOND_AT,
   low = JEV_SKIP_AT,
-): { respond: boolean; confidence: number; reason: string } | null {
+): GateDecision | null {
   const p = answerProb(answers, "worth");
   const verdict = band(p, high, low);
   if (verdict === null || p === undefined) return null;
@@ -259,7 +243,7 @@ export async function decideRespond(req: RespondGateRequest): Promise<RespondGat
 
 async function decideRespondInner(req: RespondGateRequest): Promise<RespondGateResult> {
   const userPrompt = buildUserPrompt(req);
-  const result = await runJudgeSite<RespondGateResult>({
+  return (await runJudgeSite<RespondGateResult>({
     site: "twin-respond-gate",
     enabled: optEnabled("jev_twin_gate"),
     budgetMs: JEV_GATE_BUDGET_MS,
@@ -267,8 +251,7 @@ async function decideRespondInner(req: RespondGateRequest): Promise<RespondGateR
     questions: JEV_GATE_QUESTIONS,
     decide: (answers) => {
       const d = decideFromJev(answers);
-      if (!d) return null;
-      return {
+      return d && {
         ...d,
         source: "jev",
         ...(req.includeTrace
@@ -285,13 +268,11 @@ async function decideRespondInner(req: RespondGateRequest): Promise<RespondGateR
     },
     fallback: () => decideRespondLlm(req),
     describe: (d) => `${d.respond ? "respond" : "skip"} via ${d.source}`,
-  });
-  return result.decision ?? (await decideRespondLlm(req));
+  })).decision;
 }
 
 /** The LLM gate (the only path before Jev). */
-export async function decideRespondLlm(req: RespondGateRequest): Promise<RespondGateResult> {
-  const FAIL_CLOSED: RespondGateResult = { respond: false, confidence: 0, reason: "gate unavailable — staying silent", source: "fail-closed" };
+async function decideRespondLlm(req: RespondGateRequest): Promise<RespondGateResult> {
   if (!LITELLM_API_KEY) return FAIL_CLOSED;
   // No short-circuit on missing patterns — EVERY mention goes through the LLM.
   // With no patterns to judge on, the permissive prompt leans respond=true and
@@ -299,21 +280,17 @@ export async function decideRespondLlm(req: RespondGateRequest): Promise<Respond
 
   const userPrompt = buildUserPrompt(req);
   try {
-    const res = await fetchLiteLLMWithRetry(
-      `${LITELLM_URL}/v1/chat/completions`,
+    const res = await postChatCompletion(
+      LITELLM_API_KEY,
       {
-        method: "POST",
-        headers: { Authorization: `Bearer ${LITELLM_API_KEY}`, "Content-Type": "application/json" },
-        body: JSON.stringify({
-          model: GATE_MODEL,
-          messages: [
-            { role: "system", content: SYSTEM_PROMPT },
-            { role: "user", content: userPrompt },
-          ],
-          tools: [DECISION_TOOL],
-          tool_choice: { type: "function", function: { name: DECISION_TOOL.function.name } },
-          temperature: 0,
-        }),
+        model: GATE_MODEL,
+        messages: [
+          { role: "system", content: SYSTEM_PROMPT },
+          { role: "user", content: userPrompt },
+        ],
+        tools: [DECISION_TOOL],
+        tool_choice: { type: "function", function: { name: DECISION_TOOL.function.name } },
+        temperature: 0,
       },
       // maxRetries:0 — this is a COARSE pre-filter, NOT the offline curator.
       // fetchLiteLLMWithRetry's default (3 retries, 5s/15s/45s backoff, retrying
@@ -326,12 +303,7 @@ export async function decideRespondLlm(req: RespondGateRequest): Promise<Respond
       { timeoutMs: GATE_TIMEOUT_MS, label: "twin-respond-gate", maxRetries: 0 },
     );
     if (!res.ok) return FAIL_CLOSED;
-    const data = (await res.json()) as {
-      choices?: Array<{
-        finish_reason?: string;
-        message?: { content?: string | null; reasoning_content?: string | null; tool_calls?: Array<{ function?: { arguments?: string } }> };
-      }>;
-    };
+    const data = (await res.json()) as ChatCompletionResponse;
     const choice = data.choices?.[0];
     const msg = choice?.message;
     const raw = msg?.tool_calls?.[0]?.function?.arguments ?? msg?.content ?? "";

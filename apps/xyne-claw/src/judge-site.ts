@@ -38,7 +38,13 @@ export interface JudgeSiteSpec<D> {
   describe?: (decision: D) => string;
   signal?: AbortSignal;
   /** Test seam. */
-  ask?: typeof jevAsk;
+  ask?: typeof jevAsk | undefined;
+}
+
+/** The test seam a site's own deps object carries, passed straight through to its spec. */
+export interface JudgeSiteDeps {
+  ask?: typeof jevAsk | undefined;
+  enabled?: boolean | undefined;
 }
 
 export interface JudgeSiteResult<D> {
@@ -46,19 +52,22 @@ export interface JudgeSiteResult<D> {
   outcome: JudgeSiteOutcome;
   /** Raw answers when Jev replied (also on "unsure"), for callers that record scores. */
   answers: Record<string, JevAnswer> | null;
-  ms: number;
 }
 
 function summarise(answers: Record<string, JevAnswer> | null): Record<string, number | string> {
   const out: Record<string, number | string> = {};
-  if (!answers) return out;
-  for (const [id, a] of Object.entries(answers)) {
+  for (const [id, a] of Object.entries(answers ?? {})) {
     const v = a.noul ?? a.score ?? a.choice;
-    if (v !== undefined) out[id] = typeof v === "number" ? Math.round(v * 1000) / 1000 : v;
+    if (v !== undefined) out[id] = typeof v === "number" ? round3(v) : v;
   }
   return out;
 }
 
+// A supplied fallback means the decision is never null.
+export function runJudgeSite<D>(
+  spec: JudgeSiteSpec<D> & { fallback: () => Promise<D> },
+): Promise<JudgeSiteResult<D> & { decision: D }>;
+export function runJudgeSite<D>(spec: JudgeSiteSpec<D>): Promise<JudgeSiteResult<D>>;
 export async function runJudgeSite<D>(spec: JudgeSiteSpec<D>): Promise<JudgeSiteResult<D>> {
   const started = Date.now();
   const finish = async (
@@ -78,7 +87,7 @@ export async function runJudgeSite<D>(spec: JudgeSiteSpec<D>): Promise<JudgeSite
     if (outcome !== "disabled") {
       recordJudgeOutcome(spec.site, `${outcome} → ${action}`, { outcome, action, scores, ms });
     }
-    return { decision, outcome, answers, ms };
+    return { decision, outcome, answers };
   };
 
   if (!spec.enabled) return finish("disabled", null, null);
@@ -97,6 +106,8 @@ export async function runJudgeSite<D>(spec: JudgeSiteSpec<D>): Promise<JudgeSite
   }
   return finish(decided === null ? "unsure" : "decided", answers, decided);
 }
+
+export const round3 = (n: number): number => Math.round(n * 1000) / 1000;
 
 /** Read a 0..1 value from any answer type. */
 export function answerProb(answers: Record<string, JevAnswer>, id: string): number | undefined {

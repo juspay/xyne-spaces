@@ -56,22 +56,16 @@ export interface JevOptions {
   purpose?: string;
 }
 
-interface SystemOneConfig {
-  url: string;
-  key: string;
-  model: string;
-}
-
 function env(name: string): string {
   return process.env[name]?.trim() ?? "";
 }
 
-function systemOneConfig(backend: SystemOneBackendName): SystemOneConfig & { distinct: boolean } {
+function systemOneConfig(backend: SystemOneBackendName) {
   const spec: SystemOneBackendSpec = SYSTEM_ONE_BACKENDS[backend];
   const ownUrl = env(`${spec.envPrefix}_URL`);
   const ownModel = env(`${spec.envPrefix}_MODEL`);
   const shared = spec.sharedEnvPrefix;
-  const viaLitellm = "viaLitellm" in spec && spec.viaLitellm === true;
+  const viaLitellm = spec.viaLitellm === true;
   const litellmBase = env("LITELLM_URL").replace(/\/$/, "");
   return {
     url:
@@ -250,14 +244,18 @@ export async function jevAskOn(
   const onAbort = (): void => controller.abort();
   opts.signal?.addEventListener("abort", onAbort, { once: true });
   const timer = setTimeout(() => controller.abort(), backendTimeoutMs(backend, opts.timeoutMs));
+  const record = (ms: number, answers: Record<string, JevAnswer> | null, error?: string): void =>
+    recordJudgeExchange({
+      backend, purpose, ms, questions: count, ok: answers !== null,
+      state, questionSpec: questions, answers,
+      ...(error ? { error } : {}),
+      at: new Date(started).toISOString(),
+    });
   try {
     const answers = await post(backend, state, questions, controller.signal);
     const elapsed = Date.now() - started;
     metric.observe("jev_ms", elapsed, { purpose, backend, result: "ok", questions: count });
-    recordJudgeExchange({
-      backend, purpose, ms: elapsed, questions: count, ok: true,
-      state, questionSpec: questions, answers, at: new Date(started).toISOString(),
-    });
+    record(elapsed, answers);
     for (const shadow of shadowJudgeBackends(backend)) {
       if (!judgeBackendConfigured(shadow)) continue;
       void runShadow(backend, shadow, state, questions, answers, elapsed, purpose);
@@ -266,17 +264,10 @@ export async function jevAskOn(
   } catch (err) {
     const elapsed = Date.now() - started;
     const reason = controller.signal.aborted ? "timeout" : "error";
+    const msg = err instanceof Error ? err.message : String(err);
     metric.count("jev_failed", { purpose, backend, reason });
-    recordJudgeExchange({
-      backend, purpose, ms: elapsed, questions: count, ok: false,
-      state, questionSpec: questions, answers: null,
-      error: `${reason}: ${err instanceof Error ? err.message : String(err)}`,
-      at: new Date(started).toISOString(),
-    });
-    log.warn(
-      `[jev] ${purpose} via ${backend} unavailable after ${elapsed}ms — caller falls back:`,
-      err instanceof Error ? err.message : String(err),
-    );
+    record(elapsed, null, `${reason}: ${msg}`);
+    log.warn(`[jev] ${purpose} via ${backend} unavailable after ${elapsed}ms — caller falls back:`, msg);
     return null;
   } finally {
     clearTimeout(timer);
@@ -314,10 +305,9 @@ export async function jevScoreItems<T>(
 
   const results = await Promise.all(
     batches.map(async (group) => {
-      const questions: Record<string, JevQuestion> = {};
-      group.forEach((item, i) => {
-        questions[`i${i}`] = { type: "noul", instructions: opts.instructions(item) };
-      });
+      const questions = Object.fromEntries(
+        group.map((item, i) => [`i${i}`, { type: "noul" as const, instructions: opts.instructions(item) }]),
+      );
       const answers = await jevAsk(state, questions, { ...opts, purpose: opts.purpose ?? "score" });
       if (!answers) return null;
       const part = new Map<string, number>();

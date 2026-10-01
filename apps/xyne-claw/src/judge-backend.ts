@@ -1,4 +1,5 @@
 import { AsyncLocalStorage } from "node:async_hooks";
+import type { ClassifierExchange } from "xyne-claw-shared";
 
 export interface SystemOneBackendSpec {
   label: string;
@@ -37,7 +38,6 @@ export const SYSTEM_ONE_BACKENDS = {
 export type SystemOneBackendName = keyof typeof SYSTEM_ONE_BACKENDS;
 export const SYSTEM_ONE_BACKEND_NAMES = Object.keys(SYSTEM_ONE_BACKENDS) as SystemOneBackendName[];
 
-export const JUDGE_BACKENDS = [...SYSTEM_ONE_BACKEND_NAMES, "llm"] as const;
 export type JudgeBackendName = SystemOneBackendName | "llm";
 
 export function judgeBackendLabel(backend: JudgeBackendName): string {
@@ -57,13 +57,7 @@ export interface JudgeCallRecord {
  * asked (questions) and what it answered — so no classifier decision is a
  * black box. Recorded for EVERY call, by jev.ts, in one place.
  */
-export interface JudgeExchange extends JudgeCallRecord {
-  state: string;
-  questionSpec: Record<string, unknown>;
-  answers: Record<string, unknown> | null;
-  error?: string;
-  at: string;
-}
+export type JudgeExchange = JudgeCallRecord & Omit<ClassifierExchange, "backend">;
 
 export interface JudgeShadowRecord {
   primary: JudgeBackendName;
@@ -94,7 +88,7 @@ const collectors = new AsyncLocalStorage<JudgeExchange[]>();
 const MAX_PENDING = 100;
 
 export function isJudgeBackend(value: unknown): value is JudgeBackendName {
-  return typeof value === "string" && (JUDGE_BACKENDS as readonly string[]).includes(value);
+  return typeof value === "string" && (value === "llm" || (SYSTEM_ONE_BACKEND_NAMES as readonly string[]).includes(value));
 }
 
 function envDefault(): JudgeBackendName {
@@ -123,13 +117,7 @@ export function setJudgeDebugSink(sink: JudgeDebugSink): void {
   const ctx = store.getStore();
   if (ctx) {
     ctx.sink = sink;
-    for (const e of ctx.pending?.splice(0) ?? []) {
-      try {
-        sink(e.kind, e.data);
-      } catch {
-        // a trace write must never break the run
-      }
-    }
+    for (const e of ctx.pending?.splice(0) ?? []) emit(e.kind, e.data);
     return;
   }
   store.enterWith({ backend: envDefault(), calls: [], shadows: [], sink });
@@ -142,13 +130,16 @@ function emit(kind: JudgeDebugKind, data: Record<string, unknown>): void {
     if (ctx.sink) ctx.sink(kind, data);
     else if ((ctx.pending ??= []).length < MAX_PENDING) ctx.pending.push({ kind, data });
   } catch {
+    // a trace write must never break the run
     return;
   }
 }
 
+const clip = (s: string, n: number): string => (s.length <= n ? s : `${s.slice(0, n)}… [${s.length - n} more chars]`);
+
 /** An exchange sized for storing in a DB trace row (state capped). */
 export function storableExchange(x: JudgeExchange, stateChars = 8_000): JudgeExchange {
-  return x.state.length <= stateChars ? x : { ...x, state: `${x.state.slice(0, stateChars)}… [${x.state.length - stateChars} more chars]` };
+  return x.state.length <= stateChars ? x : { ...x, state: clip(x.state, stateChars) };
 }
 
 /**
@@ -160,8 +151,6 @@ export async function collectJudgeExchanges<T>(fn: () => Promise<T>): Promise<{ 
   const result = await collectors.run(exchanges, fn);
   return { result, exchanges };
 }
-
-const clip = (s: string, n: number): string => (s.length <= n ? s : `${s.slice(0, n)}… [${s.length - n} more chars]`);
 
 /**
  * One record per Jev call, with its full input and output, into the storage
@@ -180,11 +169,6 @@ export function recordJudgeExchange(x: JudgeExchange): void {
     questionSpec: JSON.stringify(x.questionSpec),
     answers: x.answers ? JSON.stringify(x.answers) : null,
   });
-}
-
-export function recordJudgeCall(record: JudgeCallRecord): void {
-  store.getStore()?.calls.push(record);
-  emit("judge_call", { ...record });
 }
 
 export function recordJudgeOutcome(purpose: string, summary: string, detail?: Record<string, unknown>): void {
