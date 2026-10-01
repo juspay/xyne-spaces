@@ -1,6 +1,6 @@
 # Nix roadmap for xyne-spaces
 
-Revised 2026-09-30 against `main` @ `8c655668b`. Supersedes the earlier
+Updated 2026-10-01 for Phase 0 in PR #2597. Supersedes the earlier
 Nammayatri-modeled plan, which predates the `apps/` restructure.
 
 ## Goal
@@ -24,25 +24,24 @@ months. Two mechanisms enforce this:
 1. A CI gate that fails on `docker compose` / `docker-compose` references outside
    `deployment/` and `helm-charts/`, with an allowlist file listing today's
    references. Every migration PR shrinks the allowlist; no PR may grow it.
-2. `docker-compose.test.yml` is made self-contained up front (it layers on
-   `dev.yml` today), so `dev.yml` can be dismantled service by service without
-   breaking e2e before e2e itself migrates.
+2. `docker-compose.test.yml` is self-contained, so `dev.yml` can be dismantled
+   service by service without breaking e2e before e2e itself migrates.
 
 ## Where we are
 
 **Nix has:** dev shell (node, pnpm, just, openssl, pinned Prisma engines);
 services bundle (Postgres, Redis, LiveKit, Zero, fake GCS, Y-Sweet, transcription
 agent, db-setup); `nix-ci.yml` with a runtime smoke test; `vira.hs`. Flake
-`checks` is empty. The Kata Claw sandboxes already run the bundle.
+`checks` cover referenced paths, script tests, Compose references, and Playwright versions. The Kata
+Claw sandboxes already run the bundle.
 
 **Docker still owns:**
 
 | Compose file | Started by |
 | --- | --- |
-| `docker-compose.dev.yml` | `pnpm run services` (`select-services.mjs` → `start-services.sh`), `services:win`, `apps/backend` ysweet scripts, `watch-transcription-agent.sh`, base of the test stack |
-| `docker-compose.test.yml` | `ci.yml` `test` job, `tools/xyne-automation` runner, `run-cucumber-local.sh`, `xyne-automation-old`; builds `apps/*/Dockerfile.test` |
+| `docker-compose.dev.yml` | `pnpm run services` (`select-services.mjs` → `start-services.sh`), `apps/backend` ysweet scripts, `watch-transcription-agent.sh` |
+| `docker-compose.test.yml` (standalone; no `dev.yml` layering) | `ci.yml` `test` job, `tools/xyne-automation` runner, `run-cucumber-local.sh`, `xyne-automation-old`; builds `apps/*/Dockerfile.test` |
 | `docker-compose.sandbox.yml` + `scripts/sandbox.sh` | Multi-sandbox with traefik |
-| `docker-compose.local.yml` + `docker/Dockerfile.dev-infra` | Only `services:stop` and `reset-local.sh`; nothing starts it |
 | `vespa-core/deployment/docker-compose.dev.yml` | `start-services.sh` when search is selected |
 
 Docs and agents still default to Docker: README Quickstart, `docs/setup/prerequisites.md`,
@@ -54,13 +53,7 @@ never builds.
 `helm-charts-ci.yml` use setup-node, pnpm/action-setup, curl-installed gitleaks
 and Trivy, and a `RUNNER_OS` switch for the mixed self-hosted runners.
 
-**The Nix path is impure at runtime:** Y-Sweet curled from `releases/latest`;
-Zero via `npx @rocicorp/zero@1.6.1` (workspace pins 1.9.0); transcription agent
-`pip install` from unpinned requirements; `ZERO_AUTH_SECRET` via `builtins.getEnv`
-(empty in pure eval, unverified); `nodejs` and `pnpm` float against a
-`packageManager` pin of 10.15.0; Playwright and gauge postinstalls download
-binaries that will not run on NixOS. Shell lacks ffmpeg (spawned by the backend),
-gitleaks, trivy, psql, process-compose, helm.
+Phase 0 removed runtime tool/dependency downloads and pins the development toolchain.
 
 **nixpkgs has:** rustfs, victoriametrics, victorialogs, grafana,
 opentelemetry-collector-contrib, fluent-bit, gauge, playwright-driver.browsers.
@@ -68,26 +61,37 @@ opentelemetry-collector-contrib, fluent-bit, gauge, playwright-driver.browsers.
 
 ## Roadmap
 
-Phase 0 makes the Nix runtime trustworthy and sets up the gate. Phases 1 to 5
-are independent slices; each lands its Nix piece and deletes the Compose piece it
+**Phase 0 landed ([PR #2597](https://github.com/juspay/xyne-spaces/pull/2597)):**
+Juspay Y-Sweet, workspace Zero, uv2nix transcription, runtime secrets, pinned
+toolchain, flake checks, Compose gate, first deletions, and standalone test Compose.
+
+Phases 1 to 5 are independent slices; each lands its Nix piece and deletes the Compose piece it
 replaces. Phase 2 (main CI) should land before Phase 4 (e2e) so Nix is proven on
 cheap jobs first.
 
-### Phase 0: purity, gate, and the first deletions (now)
+### Phase 0: purity, gate, and the first deletions (complete)
 
-- [ ] Pin Y-Sweet (finish `nix/packages.nix` or `fetchurl` + autoPatchelf); drop the curl and `.nix-cache/`.
-- [ ] Zero: use the module's `nodeModulesPath` against `apps/backend/node_modules`; drop `npx`.
-- [ ] Transcription agent: uv2nix-built Python environment; no venv or pip at start.
-- [ ] Verify `ZERO_AUTH_SECRET`; read `.env.local` at runtime like the LiveKit process does.
-- [ ] Pin `nodejs_22` and pnpm to `packageManager`; keep `Dockerfile.ci` and docs in lockstep.
-- [ ] Add to shell: ffmpeg, gitleaks, trivy, postgresql, process-compose, helm, gauge,
-      `playwright-driver.browsers` + `PLAYWRIGHT_BROWSERS_PATH`, `stdenv.cc.cc.lib` on `LD_LIBRARY_PATH`.
-- [ ] Flake `checks`: path-drift guard, `scripts/*.test.mjs`, the bash schema/SQL/enum/tenant guards.
-- [ ] **Gate:** add the Compose-reference CI check with an allowlist of today's references.
-- [ ] **Delete:** `docker-compose.local.yml`, `docker/Dockerfile.dev-infra`, `docker/dev-infra/`;
-      repoint `services:stop` at process-compose. Keep `docker/livekit.yaml` (read by `project.nix`).
-- [ ] **Delete:** `scripts/start-services-win.sh` and `services:win`; docs say WSL2 + Nix. Delete root `setup.sh` and the `just setup` recipe.
-- [ ] Make `docker-compose.test.yml` self-contained (inline the `dev.yml` services it needs) so `dev.yml` can shrink.
+- [x] Build Y-Sweet in `nix/packages.nix` from `github:juspay/y-sweet` at `221d5af`;
+      remove curl and runtime cache plumbing; keep `.nix-cache/` ignored for existing checkouts.
+- [x] Zero: use the module's `nodeModulesPath` against `apps/backend/node_modules`; drop `npx`.
+- [x] Transcription agent: uv2nix-built Python 3.11 environment for base requirements;
+      no venv or pip at startup. Export Docker requirements from the lock; diarization stays separate.
+- [x] Verify `ZERO_AUTH_SECRET` was empty under pure evaluation; read `.env.local` at runtime.
+- [x] Use `nodejs_22`; pin pnpm to 10.15.0 via a nixpkgs overlay in `flake.nix`, matching
+      `packageManager`. The pnpm 12 migration is a separate PR covering `ci.yml` flags,
+      all app Dockerfiles, and moving settings to `pnpm-workspace.yaml`.
+- [x] Add to shell: ffmpeg, gitleaks, trivy, postgresql, process-compose, helm, gauge,
+      Nix Playwright browsers aligned with npm pins, download-skip variables; prepend Linux C++/zlib library paths.
+- [x] Flake `checks`: referenced-paths, the secrets/proxy script tests, compose-refs, and playwright-version.
+      Git-history-dependent schema/SQL/enum/tenant guards remain outside these checks.
+- [x] **Gate:** check Compose references against the allowlist through `nix flake check` in CI.
+- [x] **Delete:** `docker-compose.local.yml`, `docker/Dockerfile.dev-infra`, `docker/dev-infra/`,
+      `docker/Dockerfile.call-services`, and `docker/entrypoint.sh`. Move `otel-collector-config.yaml`
+      to `docker/`; keep `docker/livekit.yaml`. Repoint `services:stop` to `just cleanup-ports`.
+- [x] **Delete:** `scripts/start-services-win.sh`, `services:win`, root `setup.sh`, its caller
+      `clone-and-setup.sh`, and `just setup`; Windows docs point to WSL2 + Nix.
+- [x] Make `docker-compose.test.yml` standalone with equivalent resolved configuration;
+      update the four callers and detect the repo root by `pnpm-workspace.yaml`.
 
 ### Phase 1: dev infra, one feature slice at a time
 
@@ -98,6 +102,7 @@ the same services from `docker-compose.dev.yml` and the feature from
 - [ ] **Core** (Postgres, Redis, Zero, Y-Sweet, fake GCS): already in Nix. Remove them from
       `dev.yml`; `pnpm run services` core path becomes `nix run .#xyne-space-services`.
       Move `apps/backend` ysweet scripts and `watch-transcription-agent.sh` to process-compose.
+      `docker-compose.test.yml` is standalone, so `dev.yml` can shrink freely.
 - [ ] **Storage**: rustfs in Nix; remove the `minio` service.
 - [ ] **Calls**: LiveKit already in Nix; egress via `nix/containers` or from source; remove `livekit`, `livekit-egress`.
 - [ ] **Search**: Vespa via `nix/containers` (spike on Linux and macOS first); delete
@@ -105,7 +110,7 @@ the same services from `docker-compose.dev.yml` and the feature from
 - [ ] **Observability**: otel-collector, victoriametrics, victorialogs, fluent-bit, grafana (+ provisioning
       from `docker/`); remove those five services. Or drop the feature if nobody uses it locally.
 - [ ] **Flags**: Superposition via `nix/containers`, or drop.
-- [ ] Along the way: one source of truth for ports (hardcoded today in `project.nix`, `setup.sh`,
+- [ ] Along the way: one source of truth for ports (hardcoded today in `project.nix`,
       smoke test); bundles `core`, `+calls`, `+search`, `+observability`, `+flags` replace the picker;
       `start-services.sh` and `reset-local.sh` behaviour folds into `db-setup`, `apps.cleanup`, `cleanup-all.sh`.
 - [ ] When the last service leaves `dev.yml`: **delete** `docker-compose.dev.yml`, `start-services.sh`,
@@ -136,7 +141,7 @@ Can start as soon as the Phase 1 core slice lands.
 
 - [ ] Automation suite runs with process-compose infra, backend/dashboard on the host, runner via `nix develop`.
       Fallback: `dockerTools` test images without Compose.
-- [ ] Port `tools/xyne-automation/scripts/runner/index.ts` (repo-root detection by `docker-compose.dev.yml`, lines 240–289),
+- [ ] Port `tools/xyne-automation/scripts/runner/index.ts` (repo-root detection now uses `pnpm-workspace.yaml`),
       `collect-ci-artifacts.sh`, `download-visual-regression-assets.sh`, `run-cucumber-local.sh`. Logs from `.logs/`.
 - [ ] Run both paths in `ci.yml` until Nix is green for two weeks.
 - [ ] Then **delete** `docker-compose.test.yml`, both `Dockerfile.test`, the Compose path in the runner,
@@ -186,8 +191,8 @@ are produced changes.
 2. Does a Jenkins job still consume `test:push` report branches? No Jenkinsfile is in the repo. If not, delete that machinery in Phase 3.
 3. macOS: are Vespa, Superposition, egress acceptable through podman-in-Nix (needs a VM), or served remotely? The search slice's spike answers.
 4. Which of observability, Superposition, egress are needed in a dev loop? Drop rather than port.
-5. ~~Node/pnpm pin policy~~ Decided: follow nixpkgs. `packageManager`, `Dockerfile.ci`
-   and docs track the pnpm version nixpkgs ships; bump them when `flake.lock` moves.
+5. ~~Node/pnpm pin policy~~ Decided: pnpm follows `packageManager` via a Nix override
+   until the separate pnpm 12 migration PR; Node follows nixpkgs (`nodejs_22`).
 
 ## Done when
 
