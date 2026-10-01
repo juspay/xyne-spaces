@@ -1907,18 +1907,16 @@ export class CallController {
     try {
       const call = await repositories.calls.findByExternalId(callId);
 
-      if (!call) {
+      if (!call || call.workspaceId !== req.user!.workspaceId) {
         logger.warn(`[${callId}] download_transcript_call_not_found | user_id=${userId}`);
         res.status(404).json({ success: false, error: 'Call not found' });
         return;
       }
 
-      if (!(await callShareService.isCallAudience(call, userId))) {
-        res.status(403).json({ success: false, error: 'You do not have access to this call' });
-        return;
-      }
-
-      if (!(await this.assertCanViewCallRecordings(callId, userId))) {
+      // Recordings are reached through share grants / public links, not the call
+      // audience, so gate on canViewRecordings (hasAtLeast('view') for recordings,
+      // isCallAudience for regular calls) rather than isCallAudience alone.
+      if (!(await callShareService.canViewRecordings(call, userId))) {
         res.status(403).json({ success: false, error: 'Access denied' });
         return;
       }
@@ -1994,17 +1992,15 @@ export class CallController {
     try {
       const call = await repositories.calls.findByExternalId(callId);
 
-      if (!call) {
+      if (!call || call.workspaceId !== req.user!.workspaceId) {
         res.status(404).json({ success: false, error: 'Call not found' });
         return;
       }
 
-      if (!(await callShareService.isCallAudience(call, userId))) {
-        res.status(403).json({ success: false, error: 'You do not have access to this call' });
-        return;
-      }
-
-      if (!(await this.assertCanViewCallRecordings(callId, userId))) {
+      // Same gate as GET /calls/recordings/:id, which previously served this text:
+      // share-grant and public-link viewers of a recording must pass, so do not
+      // pre-filter on isCallAudience (it ignores grants and PUBLIC visibility).
+      if (!(await callShareService.canViewRecordings(call, userId))) {
         res.status(403).json({ success: false, error: 'Access denied' });
         return;
       }
