@@ -225,11 +225,31 @@ function addForwardedEnvironment(args, childEnv, name, value) {
   args.push('--env', name);
 }
 
+// Docker's own failure codes: the container never ran, so nothing was measured.
+// 125 is `docker run` itself failing (daemon unreachable, out of memory, bad flag),
+// 126 the entrypoint not being executable, 127 it not being found. Observed live on
+// 2026-10-01 as "handle request: read response: unexpected EOF" with status 125.
+const DOCKER_START_FAILURES = new Set([125, 126, 127]);
+
 export function classifyK6ExitCode(status) {
   if (status === 0) return 'PASS';
   // k6 reserves exit code 99 for one or more failed thresholds.
   if (status === 99) return 'PRODUCT_FAILURE';
+  // Reported as an environment fault rather than a test failure, so the reader goes to
+  // Docker instead of debugging a k6 script that never executed.
+  if (DOCKER_START_FAILURES.has(status)) return 'ENVIRONMENT_FAILURE';
   return 'TEST_FAILURE';
+}
+
+/**
+ * The process exit code for a k6 status.
+ *
+ * A Docker start failure becomes 2 — the documented code for an environment fault —
+ * rather than leaking Docker's own 125, which the runbook does not describe. Every
+ * other status passes through so 99 stays distinguishable from a script failure.
+ */
+export function processExitCodeFor(status) {
+  return DOCKER_START_FAILURES.has(status) ? 2 : status;
 }
 
 export function buildDockerInvocation(config, runtime) {
@@ -332,7 +352,7 @@ export function main(argv = process.argv.slice(2), env = process.env) {
     if (classification !== 'PASS') {
       console.error(`${classification}: k6 exited with status ${status}; inspect the archived report`);
     }
-    return status;
+    return processExitCodeFor(status);
   } catch (error) {
     console.error(`ENVIRONMENT_FAILURE: ${error instanceof Error ? error.message : String(error)}`);
     return 2;
