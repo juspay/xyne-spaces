@@ -61,9 +61,8 @@ them again with `direnv allow`.
 
 ## Access over a LAN or Tailscale
 
-Set `__VITE_ADDITIONAL_SERVER_ALLOWED_HOSTS` to your hostname in the local
-`apps/backend/.env.local`, then run `direnv reload`. In
-`apps/dashboard/.env.local`, enable the development proxy:
+The Vite dev server accepts LAN and Tailscale hostnames without extra host
+configuration. In `apps/dashboard/.env.local`, enable the development proxy:
 
 ```dotenv
 VITE_DEV_PROXY=true
