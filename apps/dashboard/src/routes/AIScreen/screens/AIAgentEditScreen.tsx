@@ -2,14 +2,16 @@ import { type ReactElement } from 'react';
 import { useParams } from 'react-router-dom';
 import { AIShell } from '../../../components/AIScreen/AIShell';
 import { Skeleton } from '../../../components/ui/Skeleton';
+import { useAuth } from '../../../hooks/useAuth';
 import { useClawAgentDetail } from '../../../hooks/useClawAgentDetail';
-import ClawAgentCreateV2 from '../library/agents/create/ClawAgentCreateV2';
+import { AgentCreateSplitPage } from '../library/agents/create/AgentCreateSplitPage';
 import { useAIChatHandoff } from '../useAIChatHandoff';
 
 const AIAgentEditScreen = (): ReactElement => {
   const { onCreateChat, onSelectSession } = useAIChatHandoff();
   const { slug } = useParams<{ slug?: string }>();
   const { data: agent, isLoading, isError } = useClawAgentDetail(slug);
+  const { user } = useAuth();
 
   return (
     <AIShell onCreateChat={onCreateChat} onSelectSession={onSelectSession}>
@@ -29,7 +31,11 @@ const AIAgentEditScreen = (): ReactElement => {
             Couldn&apos;t load this agent.
           </p>
         ) : (
-          <ClawAgentCreateV2 agent={agent} />
+          // The create page's canvas and Build chat, on the saved agent.
+          <AgentCreateSplitPage
+            agent={agent}
+            canRenameHandle={Boolean(user?.id && agent.ownerUserId === user.id)}
+          />
         )}
       </main>
     </AIShell>

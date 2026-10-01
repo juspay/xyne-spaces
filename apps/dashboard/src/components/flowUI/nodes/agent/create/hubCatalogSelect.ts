@@ -16,6 +16,7 @@ import {
 import {
   buildMcpCatalog,
   enableEntry,
+  scopedToolKey,
   type McpCatalogEntry,
 } from '@/routes/AIScreen/library/shared/pickers/mcp/mcpCatalog';
 import type {
@@ -404,7 +405,12 @@ function filterSuggestionToRelevant(
     if (namedToolIds.has(id)) return true;
     for (const entry of mcpCatalog) {
       if (!softSlugs.has(entry.slug)) continue;
-      if (entry.tools.some(t => t.slug === id || t.name === id)) return true;
+      if (
+        entry.tools.some(
+          t => t.slug === id || t.name === id || id === scopedToolKey(entry.slug, t.name),
+        )
+      )
+        return true;
     }
     return false;
   });
@@ -478,10 +484,12 @@ export function describeSelectedTools(
       continue;
     }
     if (integration.kind === 'builtin' || integration.kind === 'custom') continue;
-    const toolNames = new Set([
-      ...integration.readTools.map(t => t.name),
-      ...integration.writeTools.map(t => t.name),
-    ]);
+    const toolNames = new Set(
+      [...integration.readTools, ...integration.writeTools].flatMap(t => [
+        t.name,
+        scopedToolKey(integration.slug, t.name),
+      ]),
+    );
     const hit = selection.direct.some(id => toolNames.has(id));
     if (hit) labels.push(integration.label || integration.slug);
   }

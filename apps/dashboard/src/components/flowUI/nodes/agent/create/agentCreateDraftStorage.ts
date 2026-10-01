@@ -75,14 +75,22 @@ export function parseStoredDraft(
   } catch {
     return null;
   }
-  if (!isRecord(parsed) || (parsed['v'] !== 1 && parsed['v'] !== VERSION) || !isRecord(parsed['form'])) {
+  if (
+    !isRecord(parsed) ||
+    (parsed['v'] !== 1 && parsed['v'] !== VERSION) ||
+    !isRecord(parsed['form'])
+  ) {
     return null;
   }
   const savedAt = typeof parsed['savedAt'] === 'number' ? parsed['savedAt'] : 0;
   // Version 1 drafts reopened on every visit, so they count as kept.
   const kept = parsed['v'] === 1 || parsed['kept'] === true;
   const maxAge =
-    parsed['v'] === 1 ? DRAFT_MAX_AGE_MS : kept ? Number.POSITIVE_INFINITY : UNSAVED_DRAFT_MAX_AGE_MS;
+    parsed['v'] === 1
+      ? DRAFT_MAX_AGE_MS
+      : kept
+        ? Number.POSITIVE_INFINITY
+        : UNSAVED_DRAFT_MAX_AGE_MS;
   if (now - savedAt > maxAge) return null;
   const stored = parsed['form'];
   const form: AgentCreateFormState = {
@@ -145,12 +153,27 @@ export function writeAgentDraft(
   }
 }
 
+/** Forgets a draft's canvas and keeps its Build chat: an edit taken back to the saved agent. */
+export function forgetAgentDraftForm(
+  key: string,
+  storage: DraftStorage | null = browserStorage(),
+): void {
+  try {
+    storage?.removeItem(key);
+  } catch {
+    // Nothing to forget when storage is blocked.
+  }
+}
+
 /** Where the Build chat for a draft is kept (buildChatStorage.ts). It goes when the draft does. */
 export function buildChatStorageKey(draftKey: string): string {
   return `${draftKey}:chat`;
 }
 
-export function clearAgentDraft(key: string, storage: DraftStorage | null = browserStorage()): void {
+export function clearAgentDraft(
+  key: string,
+  storage: DraftStorage | null = browserStorage(),
+): void {
   try {
     storage?.removeItem(key);
     storage?.removeItem(buildChatStorageKey(key));
@@ -198,7 +221,8 @@ export function listSavedAgentDrafts(
         clearAgentDraft(key, storage);
         continue;
       }
-      if (draft.kept) saved.push({ id: key.slice(prefix.length), savedAt: draft.savedAt, form: draft.form });
+      if (draft.kept)
+        saved.push({ id: key.slice(prefix.length), savedAt: draft.savedAt, form: draft.form });
     }
     return saved.sort((a, b) => b.savedAt - a.savedAt);
   } catch {

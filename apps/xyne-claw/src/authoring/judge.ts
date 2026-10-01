@@ -28,6 +28,35 @@ const MAX_SUBAGENT_PICKS = 4;
 const NAMED_CONFIDENCE = 0.95;
 const MAX_MCP_PICKS = 6;
 
+/**
+ * Products the judge never offers: every agent already has them (App Tools'
+ * bot-credential writes) or nobody can connect them (the pinned dashboard and
+ * workflow servers). Picking one only adds a pill and a connect card.
+ */
+export const NOT_PICKABLE_PRODUCTS: ReadonlySet<string> = new Set([
+  "xyne-spaces-app-tools",
+  "xyne-dashboard",
+  "xyne-workflows",
+]);
+
+/**
+ * Social and news feeds, with the words that name them. Their tools match
+ * "mentions" or "posts" in almost any job, so the model reaches for them too
+ * often: bound only when the job names one, otherwise kept as a suggestion.
+ */
+const SOCIAL_PRODUCTS: ReadonlyMap<string, RegExp> = new Map([
+  ["x-news", /\b(x|twitter|tweets?|x\.com)\b/i],
+  ["twitter", /\b(x|twitter|tweets?|x\.com)\b/i],
+  ["reddit", /\b(reddit|subreddits?)\b/i],
+  ["rapidapi-linkedin", /\blinked\s?in\b/i],
+]);
+
+/** The judge's products: connected ones and gateways, minus those it never offers. */
+const pickableProducts = (catalog: JudgeInput["catalog"]): JudgeInput["catalog"]["integrations"] =>
+  catalog.integrations.filter(
+    (i) => (i.kind === "mcp" || i.kind === "gateway") && !NOT_PICKABLE_PRODUCTS.has(i.slug),
+  );
+
 export interface JudgeInput {
   /** The job, in the user's words plus any context worth matching. */
   intent: string;
@@ -55,14 +84,15 @@ const names = (tools: Array<{ name: string }>): string => {
 };
 
 function integrationLine(i: JudgeInput["catalog"]["integrations"][number]): string {
+  const about = i.description?.trim() ? ` — ${truncate(i.description, 140)}` : "";
   const reads = i.readTools.length > 0 ? ` | read: ${names(i.readTools)}` : "";
   const writes = i.writeTools.length > 0 ? ` | write: ${names(i.writeTools)}` : "";
-  return `- ${i.slug} | ${i.label}${reads}${writes}`;
+  return `- ${i.slug} | ${i.label}${about}${reads}${writes}`;
 }
 
 export function buildJudgePrompt(input: JudgeInput): string {
   const wanted = new Set(input.hubs);
-  const products = input.catalog.integrations.filter((i) => i.kind === "mcp" || i.kind === "gateway");
+  const products = pickableProducts(input.catalog);
   const builtins = input.catalog.integrations.filter((i) => i.kind === "builtin" || i.kind === "custom");
   const sections: string[] = [];
   if (wanted.has("mcp")) {
@@ -102,7 +132,13 @@ export function buildJudgePrompt(input: JudgeInput): string {
     "- confidence is 0 to 1. A product or tool the user names outright is 1.0.",
     "- mcp: set access to \"write\" only when the job must send, post, create, edit or delete. Reading and reporting is \"read\".",
     "- Pick at most 2 subagents, 3 skills, 1 knowledge collection.",
-    "- A messaging or email product is needed only when the job names it or must send through it. Reading the user's Spaces DMs and tickets uses the Spaces product.",
+    "- Judge a product by its description. Tool lists can be partial: a product may list only its write tools.",
+    "- A messaging or email product is needed only when the job names it or must send through it.",
+    "- Mentions, DMs, messages, activity, channels, threads and tickets with no product named are the user's Xyne Spaces (xyne-spaces). They never mean X/Twitter, Reddit or Slack.",
+    "- Social and news feeds (X/Twitter, Reddit, LinkedIn) only when the job names them or their content (tweets, subreddits).",
+    "- Gmail, Google Calendar and Google Drive are the google product; Outlook, Teams and OneDrive are microsoft.",
+    "- Telling or sending the user the result (\"send me\", \"tell me\", \"remind me\", \"a report\") happens in the agent's own chat. It needs no messaging product (Slack, email) unless the job names one.",
+    "- Running on a schedule is built in. A calendar product is only for reading or changing the user's calendar.",
     "",
     "Return only JSON in this shape:",
     `{\n${shape}\n}`,
@@ -159,7 +195,7 @@ export function ruleMatchedBuiltinIds(
 /** Apply catalog checks and thresholds to the model's raw answer. Exported for tests. */
 export function resolveJudgement(raw: Record<string, unknown>, input: JudgeInput): JudgedCapabilities {
   const wanted = new Set(input.hubs);
-  const products = input.catalog.integrations.filter((i) => i.kind === "mcp" || i.kind === "gateway");
+  const products = pickableProducts(input.catalog);
   const builtins = input.catalog.integrations.filter((i) => i.kind === "builtin" || i.kind === "custom");
   const labels: Record<DraftHub, Map<string, string>> = {
     mcp: new Map(products.map((i) => [i.slug, i.label])),
@@ -188,7 +224,7 @@ export function resolveJudgement(raw: Record<string, unknown>, input: JudgeInput
     const trimmed = picks.map(({ id, confidence, reason }) => ({ id, confidence, reason }));
     hubs[hub] =
       hub === "mcp"
-        ? applyMcpThresholds(trimmed.slice(0, MAX_MCP_PICKS))
+        ? demoteUnnamedSocial(applyMcpThresholds(trimmed.slice(0, MAX_MCP_PICKS)), input.intent)
         : hub === "builtin"
           ? applyBuiltinThresholds(trimmed, ruleMatchedBuiltinIds(input.intent, builtins))
           : hub === "subagent"
@@ -221,6 +257,17 @@ export function resolveJudgement(raw: Record<string, unknown>, input: JudgeInput
   return { hubs, bound, suggested };
 }
 
+/** Social feeds the job doesn't name move from bound to suggested (see SOCIAL_PRODUCTS). */
+function demoteUnnamedSocial(result: AppliedHubResult, intent: string): AppliedHubResult {
+  const unnamed = (pick: JudgedPick): boolean => {
+    const named = SOCIAL_PRODUCTS.get(pick.id);
+    return named !== undefined && !named.test(intent);
+  };
+  const moved = result.bound.filter(unnamed);
+  if (moved.length === 0) return result;
+  return { ...result, bound: result.bound.filter((p) => !unnamed(p)), suggested: [...result.suggested, ...moved] };
+}
+
 /**
  * Every catalog item in the given hubs, for "add all the MCPs" and the like: no
  * model call and none of the judge's caps, since the user asked for all of them.
@@ -238,7 +285,7 @@ export function catalogPicks(
   const item = (hub: DraftHub, id: string, label: string): DraftPick => ({ hub, id, label, confidence: 1, reason: "" });
   if (wanted.has("mcp")) {
     for (const i of input.catalog.integrations) {
-      if ((i.kind !== "mcp" && i.kind !== "gateway") || i.readTools.length === 0) continue;
+      if ((i.kind !== "mcp" && i.kind !== "gateway") || i.readTools.length === 0 || NOT_PICKABLE_PRODUCTS.has(i.slug)) continue;
       const pick: DraftPick = { ...item("mcp", i.slug, i.label), access: "read" };
       if (i.requiresConnection) suggested.push({ ...pick, requiresConnection: i.requiresConnection });
       else bound.push(pick);

@@ -32,7 +32,7 @@ export function AgentDraftCard({
       <LibraryCard
         to={to}
         variant='flat'
-        icon={<DraftAgentAvatar form={form} size={44} />}
+        icon={<DraftAgentAvatar avatarKey={draft.id} size={44} />}
         name={name}
         meta={<Pill tone='neutral'>Draft</Pill>}
         description={about ? `${edited} · ${about}` : edited}

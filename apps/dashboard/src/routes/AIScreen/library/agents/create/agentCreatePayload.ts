@@ -1,4 +1,5 @@
 import type { AgentCreateFormState } from '@/components/flowUI/nodes/agent/create/types';
+import { AVATAR_KEY_CONFIG } from '@/components/agents/agentAvatarKey';
 import { normalizePermissionMode } from '@/components/flowUI/nodes/agent/create/agentPromptContract';
 import { schedulePromptLine } from '@/components/flowUI/nodes/agent/create/agentSchedule';
 import { customPropertyPromptLine } from '@/components/flowUI/nodes/agent/create/customProperty';
@@ -30,6 +31,8 @@ export function buildCreateAgentPayload(
   form: AgentCreateFormState,
   slug: string,
   ownerUserId: string | undefined,
+  /** The face the draft had (its id), kept so it doesn't change on Save. */
+  avatarKey?: string,
 ): CreateAgentPayload {
   const userScopedKb = form.selectedKbScope === 'USER';
   const properties = agentPropertiesSection(form);
@@ -61,6 +64,7 @@ export function buildCreateAgentPayload(
       // Kept on the config so the agent's page can show (and later edit) them.
       ...(form.customProperties.length > 0 ? { customProperties: form.customProperties } : {}),
       ...(form.schedule ? { schedule: form.schedule } : {}),
+      ...(avatarKey ? { [AVATAR_KEY_CONFIG]: avatarKey } : {}),
     },
     ...(form.selectedSkillIds.length > 0 ? { skills: [...new Set(form.selectedSkillIds)] } : {}),
   };

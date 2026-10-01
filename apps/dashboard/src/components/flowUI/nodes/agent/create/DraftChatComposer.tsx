@@ -195,14 +195,10 @@ export function DraftChatComposer({
   const reduceMotion = useReducedMotion();
   const showStatus = Boolean(status) && value.length === 0;
   const bare = statusOnly && showStatus;
-  // The box's cells, which the status shares: the whole row on its own, up to
-  // stop mid-reply, else between + and voice.
+  // The box's cells, which the status shares: the whole row on its own, else
+  // between + and voice.
   const boxCells =
-    expanded || bare
-      ? 'col-span-full col-start-1 row-start-1'
-      : pending
-        ? 'col-span-3 col-start-1 row-start-1'
-        : 'col-start-2 row-start-1';
+    expanded || bare ? 'col-span-full col-start-1 row-start-1' : 'col-start-2 row-start-1';
   const attachments = extras.attachments;
 
   const insertSnippet = useCallback(
@@ -365,8 +361,8 @@ export function DraftChatComposer({
                 expanded ? 'items-end' : 'items-center',
               )}
             >
-              {/* Nothing to add mid-reply: the + goes, and the status takes its place. */}
-              {pending || bare ? null : (
+              {/* Mid-reply the next message can still be written, so + and voice stay. */}
+              {bare ? null : (
                 <div
                   className={cn(
                     'justify-self-start',
@@ -445,8 +441,7 @@ export function DraftChatComposer({
                   </AnimatePresence>
                 </div>
               ) : null}
-              {/* Nothing can be sent mid-reply, so there is nothing to dictate either. */}
-              {bare || pending ? null : (
+              {bare ? null : (
                 <ComposerVoiceButton
                   onTranscript={text =>
                     onValueChange(current => (current ? `${current.trimEnd()} ${text}` : text))

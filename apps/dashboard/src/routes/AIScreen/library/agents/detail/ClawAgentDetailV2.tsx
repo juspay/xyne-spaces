@@ -4,7 +4,12 @@ import { PencilEditLine } from '@xyne/icons';
 import { Skeleton } from '@/components/ui/Skeleton';
 import { Button } from '@/components/ui/Button/index';
 import { AgentBotAvatar } from '@/components/agents/AgentBotAvatar';
+import { agentAvatarKey } from '@/components/agents/agentAvatarKey';
 import { AgentCreateCanvas } from '@/components/flowUI/nodes/agent/create/AgentCreateCanvas';
+import {
+  canvasColumnLeft,
+  useArrivalCanvasLeft,
+} from '@/components/flowUI/nodes/agent/create/editTransition';
 import { useClawAgentDetail } from '@/hooks/useClawAgentDetail';
 import { useOpenAgentChat } from '@/hooks/useOpenAgentChat';
 import type { Agent } from '@/services/claw/clawAuthAgentTypes';
@@ -62,6 +67,12 @@ function AgentProfileCanvas({
   onOpenSettings: () => void;
 }): ReactElement {
   const canEdit = actions.permissions?.canEdit ?? false;
+  const navigate = useNavigate();
+  const location = useLocation();
+  const { workspaceId } = useParams<{ workspaceId?: string }>();
+  // Back from editing: the canvas glides over from where the edit page had it.
+  const arrivalLeft = useArrivalCanvasLeft();
+  const returnTo = (location.state as { returnTo?: unknown } | null)?.returnTo;
   const updated = formatUpdated(agent.updatedAt);
   const version = agent.activePromptVersion;
 
@@ -70,41 +81,24 @@ function AgentProfileCanvas({
     updated ? `Last updated ${updated}` : null,
   ].filter((part): part is string => part !== null);
 
-  const editActions = !canEdit ? null : profile.editing ? (
-    <>
-      <Button
-        type='button'
-        variant='ghost'
-        size='sm'
-        onClick={profile.cancel}
-        disabled={profile.saving}
-        className='rounded-lg'
-        data-track-category='Claw Agents'
-        data-track-name='Agent profile: cancel edits'
-      >
-        Cancel
-      </Button>
-      <Button
-        type='button'
-        variant='default'
-        size='sm'
-        onClick={() => void profile.save()}
-        disabled={!profile.canSave}
-        loading={profile.saving}
-        className='rounded-lg'
-        data-track-category='Claw Agents'
-        data-track-name='Agent profile: save edits'
-        data-testid='agent-profile-save'
-      >
-        Save
-      </Button>
-    </>
-  ) : (
+  // Editing opens the create page on this agent: its canvas with the Build chat.
+  const editActions = !canEdit ? null : (
     <Button
       type='button'
       variant='outline'
       size='sm'
-      onClick={profile.start}
+      onClick={() =>
+        void navigate(
+          `${workspaceId ? `/${workspaceId}` : ''}/ai/library/agent/${encodeURIComponent(agent.slug)}/edit`,
+          // The edit page glides the canvas over from here, and hands Back's target back.
+          {
+            state: {
+              canvasLeft: canvasColumnLeft(),
+              ...(typeof returnTo === 'string' ? { returnTo } : {}),
+            },
+          },
+        )
+      }
       className='rounded-lg'
       data-track-category='Claw Agents'
       data-track-name='Agent profile: start editing'
@@ -117,6 +111,7 @@ function AgentProfileCanvas({
 
   return (
     <AgentCreateCanvas
+      glideFromLeft={arrivalLeft}
       form={profile.form}
       onFormChange={profile.patch}
       onFieldFocus={noop}
@@ -132,7 +127,7 @@ function AgentProfileCanvas({
       handleError={profile.error ?? (profile.slugChanged ? HANDLE_WARNING : null)}
       topBar={topBar}
       banner={banner}
-      avatar={<AgentBotAvatar agentKey={agent.id} asleep={!agent.enabled} size={56} />}
+      avatar={<AgentBotAvatar agentKey={agentAvatarKey(agent)} asleep={!agent.enabled} size={56} />}
       nameBadge={
         <Pill tone={agent.enabled ? 'success' : 'neutral'}>
           {agent.enabled ? 'Enabled' : 'Disabled'}

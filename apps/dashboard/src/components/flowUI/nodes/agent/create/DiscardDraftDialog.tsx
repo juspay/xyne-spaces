@@ -9,6 +9,9 @@ interface DiscardDraftDialogProps {
   onConfirm: () => void;
   /** Leave and save the draft; it is listed under Drafts in Agent Hub. */
   onKeepForLater?: () => void;
+  /** What leaving loses, when it isn't a new agent's draft (changes to a saved one). */
+  description?: string;
+  discardLabel?: string;
 }
 
 const DESCRIPTION =
@@ -19,20 +22,22 @@ export function DiscardDraftDialog({
   onOpenChange,
   onConfirm,
   onKeepForLater,
+  description = DESCRIPTION,
+  discardLabel = 'Discard draft',
 }: DiscardDraftDialogProps): ReactElement {
   return (
     <Dialog
       open={open}
       onOpenChange={onOpenChange}
       title='Leave without saving?'
-      description={DESCRIPTION}
+      description={description}
       className='max-w-md p-6'
       zIndexClassName='z-[60]'
     >
       <div className='flex flex-col gap-4'>
         <div className='flex flex-col gap-1'>
           <p className='text-base font-medium text-foreground'>Leave without saving?</p>
-          <p className='text-sm leading-5 text-muted-foreground'>{DESCRIPTION}</p>
+          <p className='text-sm leading-5 text-muted-foreground'>{description}</p>
         </div>
         <div className='flex flex-wrap justify-end gap-2'>
           <Button
@@ -65,7 +70,7 @@ export function DiscardDraftDialog({
             data-track-category='AGENT_ARTIFACT'
             data-track-name='CONFIRM_DISCARD_DRAFT'
           >
-            Discard draft
+            {discardLabel}
           </Button>
         </div>
       </div>

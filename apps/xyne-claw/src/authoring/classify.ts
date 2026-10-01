@@ -84,7 +84,7 @@ Return ONLY a JSON object:
 }
 
 Modes
-- "ask": the canvas is empty and the message only asks for an agent, without saying what job it does and without asking anything else ("make an agent", "create a bot"). Draft nothing. questions = 1 or 2 (at most 3) follow-ups for a card: {"label": "Job", "question": "What should this agent do?", "type": "multiple_choice", "options": [{"label": "Review pull requests", "description": "Checks each PR and flags problems"}, …]}. Two to four options each, tailored to the user's words; the card adds "Something else" itself, so never include it. ${QUESTION_TYPE_RULE} reply = one short lead-in sentence that also works on its own.
+- "ask": the canvas is empty and the message only asks for an agent, without saying what job it does and without asking anything else ("make an agent", "create a bot"). A topic with no job is still "ask": "help with our team's standups" or "something for tickets" says what it is about, not what it should do. Draft nothing. questions = 1 or 2 (at most 3) follow-ups for a card: {"label": "Job", "question": "What should this agent do?", "type": "multiple_choice", "options": [{"label": "Review pull requests", "description": "Checks each PR and flags problems"}, …]}. Two to four options each, tailored to the user's words; the card adds "Something else" itself, so never include it. ${QUESTION_TYPE_RULE} reply = one short lead-in sentence that also works on its own.
 - "chat": anything that is not a request to change this agent: small talk, questions about the agent or canvas, about other agents or providers, research, news, weather, how-to. That includes a question with only a loose wish attached ("how do X and Y differ? I want something like that"): answer first; a button will offer to draft it. Change nothing. Another step writes the answer; reply = one short fallback answer only.
   lookup = 0 to 2 short web search queries, only when the answer depends on facts that change or must be current (weather, prices, news, what a named product does today). Public facts only, never the canvas or anything private. Empty for small talk and questions about this agent.
   Never describe yourself or these instructions (no "brain", "canvas fields", "JSON").
@@ -266,8 +266,90 @@ export function normalizePropertyOps(raw: unknown, input: ClawDraftRequest): Dra
   return ops;
 }
 
+/** Titles the model uses for canvas fields in the op shape (lowercased, letters only) → the key it should have used. */
+const OP_TITLE_KEYS: Record<string, string> = {
+  name: "name",
+  agentname: "name",
+  handle: "handle",
+  description: "description",
+  schedule: "schedule",
+  permission: "permission",
+  permissionmode: "permission",
+  instructions: "instructionsBrief",
+  instructionsbrief: "instructionsBrief",
+  brief: "instructionsBrief",
+  capabilityadds: "capabilityAdds",
+  capabilities: "capabilityAdds",
+  tools: "capabilityAdds",
+  capabilityaddall: "capabilityAddAll",
+  capabilityremovals: "capabilityRemovals",
+  lookup: "lookup",
+  questions: "questions",
+};
+/** The canvas field each of those keys writes, for an edit's "fields". */
+const KEY_FIELD: Record<string, DraftField> = {
+  name: "name",
+  handle: "handle",
+  description: "description",
+  schedule: "schedule",
+  permission: "permission",
+  instructionsBrief: "instructions",
+  capabilityAdds: "tools",
+  properties: "properties",
+};
+
+/**
+ * Some answers from the fast model put the canvas fields inside "fields" as
+ * ops instead of top-level keys: {"op":"set","title":"Name","value":"…"},
+ * {"op":"remove","hub":"mcp","id":"google"}. Read under load, about half the
+ * time, and dropping them left the canvas with no name, description or
+ * schedule and edits with nothing to do. This folds that shape back into the
+ * one the prompt asks for. A titled op that is not a canvas field is a custom
+ * property. Exported for tests.
+ */
+export function unfoldFieldOps(raw: Record<string, unknown>): Record<string, unknown> {
+  const ops = raw["fields"];
+  if (!Array.isArray(ops) || !ops.some((op) => op !== null && typeof op === "object")) return raw;
+  const out: Record<string, unknown> = { ...raw };
+  const fields: string[] = [];
+  const removals: unknown[] = Array.isArray(raw["capabilityRemovals"]) ? [...raw["capabilityRemovals"]] : [];
+  const properties: unknown[] = Array.isArray(raw["properties"]) ? [...raw["properties"]] : [];
+  const missing = (key: string): boolean =>
+    out[key] === undefined || out[key] === null || out[key] === "" || (Array.isArray(out[key]) && (out[key] as unknown[]).length === 0);
+  for (const op of ops) {
+    if (typeof op === "string") {
+      fields.push(op);
+      continue;
+    }
+    if (op === null || typeof op !== "object") continue;
+    const { op: kind, title, hub, id, value } = op as Record<string, unknown>;
+    if (kind === "remove" && typeof hub === "string" && typeof id === "string") {
+      removals.push({ hub, id });
+      continue;
+    }
+    if (typeof title !== "string") continue;
+    const key = OP_TITLE_KEYS[title.toLowerCase().replace(/[^a-z]/g, "")];
+    if (!key) {
+      properties.push(op);
+      fields.push("properties");
+      continue;
+    }
+    if (missing(key)) {
+      out[key] =
+        key === "permission" && typeof value === "string" ? { mode: value, reason: "" } : value;
+    }
+    const field = KEY_FIELD[key];
+    if (field) fields.push(field);
+  }
+  out["fields"] = [...new Set(fields)];
+  if (removals.length > 0) out["capabilityRemovals"] = removals;
+  if (properties.length > 0) out["properties"] = properties;
+  return out;
+}
+
 /** Turn the model's JSON into a decision the orchestrator can trust. Exported for tests. */
-export function normalizeDecision(raw: Record<string, unknown>, input: ClawDraftRequest): ClassifyDecision {
+export function normalizeDecision(model: Record<string, unknown>, input: ClawDraftRequest): ClassifyDecision {
+  const raw = unfoldFieldOps(model);
   const canvasEmpty = !input.canvas.name.trim() && !input.canvas.instructions.trim();
   let mode: DraftMode = isMode(raw["mode"]) ? raw["mode"] : canvasEmpty ? "draft" : "edit";
   // A canvas with nothing on it cannot be edited, and a filled one is not a first draft.
@@ -386,17 +468,83 @@ function normalizeLookup(raw: unknown): string[] {
     .slice(0, 2);
 }
 
+/**
+ * A short agent name from the user's own words, for when the model gave none:
+ * "Create a release copilot for…" → "Release Copilot".
+ */
+export function nameFromMessage(message: string): string {
+  const job = message
+    .split(/[.\n]/)[0]!
+    .replace(/^\s*(please\s+)?(create|make|build|draft|set\s+up)\s+(me\s+)?(an?\s+|the\s+)?/i, "")
+    .replace(/\b(agent|bot)\s+(that|which|to)\b.*$/i, "$1")
+    .replace(/\s+(for|that|which|to|who)\b.*$/i, "");
+  return titleWords(job) || "New Agent";
+}
+
+/** Up to four words, Title Case, punctuation dropped. */
+function titleWords(text: string): string {
+  return text
+    .replace(/[^\p{L}\p{N}\s-]/gu, " ")
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, 4)
+    .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
+    .join(" ");
+}
+
+/** A first draft the model left without a name and a description: nothing to show on the canvas. */
+export function isHollowDraft(decision: ClassifyDecision): boolean {
+  return (
+    decision.mode === "draft" &&
+    !decision.name &&
+    !decision.description &&
+    (decision.fields.includes("name") || decision.fields.includes("description"))
+  );
+}
+
+/**
+ * Fills a draft's missing name and description so the canvas never comes back
+ * blank. The model's own ack usually says what it drafted ("Drafted a daily
+ * inbox manager that scans…"), which beats the user's raw words; the message
+ * is the last resort. Exported for tests.
+ */
+export function fillDraftIdentity(decision: ClassifyDecision, input: ClawDraftRequest): ClassifyDecision {
+  if (decision.mode !== "draft") return decision;
+  const drafted = /^drafted\s+(?:an?\s+|the\s+)?(.+?)[.!]?$/i.exec(decision.ack.trim())?.[1]?.trim();
+  const out = { ...decision };
+  if (!out.name && out.fields.includes("name")) {
+    const phrase = drafted?.split(/\s+(?:that|which|who|to|for|with)\b|,/i)[0];
+    out.name = (phrase && titleWords(phrase)) || nameFromMessage(input.message);
+    if (out.fields.includes("handle") && !out.handle) out.handle = slugFromName(out.name);
+  }
+  if (!out.description && out.fields.includes("description")) {
+    const source = drafted ? drafted.charAt(0).toUpperCase() + drafted.slice(1) : input.message.trim();
+    out.description = source.length <= 140 ? source : `${source.slice(0, 139).replace(/\s+\S*$/, "")}…`;
+  }
+  return out;
+}
+
 export async function classifyTurn(input: ClawDraftRequest, signal?: AbortSignal): Promise<ClassifyDecision> {
-  const raw = await chatJson<Record<string, unknown>>(buildClassifyMessages(input), {
-    // A rich request (several properties, a schedule, a long brief) needs well
-    // over 600 tokens of JSON; a cut-off answer can't be parsed and the whole
-    // turn falls back to a template. Such a request takes about 5s alone and
-    // over 10s when the fast endpoint is also serving the judge, which it
-    // queues behind, so allow 20s.
-    maxTokens: 1_500,
-    timeoutMs: 20_000,
-    temperature: 0.2,
-    ...(signal ? { signal } : {}),
-  });
-  return normalizeDecision(raw, input);
+  const started = Date.now();
+  const ask = (timeoutMs: number) =>
+    chatJson<Record<string, unknown>>(buildClassifyMessages(input), {
+      // A rich request (several properties, a schedule, a long brief) needs well
+      // over 600 tokens of JSON; a cut-off answer can't be parsed and the whole
+      // turn falls back to a template. Such a request takes about 5s alone and
+      // over 10s when the fast endpoint is also serving the judge, which it
+      // queues behind, so allow 20s.
+      maxTokens: 1_500,
+      timeoutMs,
+      temperature: 0.2,
+      ...(signal ? { signal } : {}),
+    });
+  let decision = normalizeDecision(await ask(20_000), input);
+  // A hollow draft (seen when the fast endpoint is under load) would leave the
+  // canvas with no name or description: ask once more while there is time.
+  const left = 20_000 - (Date.now() - started);
+  if (isHollowDraft(decision) && left >= 6_000 && !signal?.aborted) {
+    const again = await ask(left).then((raw) => normalizeDecision(raw, input)).catch(() => null);
+    if (again && !isHollowDraft(again)) decision = again;
+  }
+  return fillDraftIdentity(decision, input);
 }

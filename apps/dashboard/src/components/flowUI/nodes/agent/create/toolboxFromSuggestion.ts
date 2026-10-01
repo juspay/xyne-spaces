@@ -1,6 +1,10 @@
 import type { AvailableTools, ToolSuggestion } from '@/services/claw/clawToolsTypes';
 import { parseGatewaySource } from '@/components/ClawAgents/gatewayKeys';
 import type { AgentToolboxSelection } from '@/services/claw/clawToolsTypes';
+import {
+  scopedToolKey,
+  sharedMcpToolNames,
+} from '@/routes/AIScreen/library/shared/pickers/mcp/mcpCatalog';
 
 /** Additive merge of /suggest-tools into a toolbox selection (Hub ToolboxPicker). */
 export function toolboxFromSuggestion(
@@ -22,6 +26,8 @@ export function toolboxFromSuggestion(
     for (const name of sugg.writeTools ?? []) suggestedNames.add(name);
   }
   const directSet = new Set(current.direct);
+  // A name two connectors share goes in with its connector, or both get it.
+  const shared = sharedMcpToolNames(availableTools.integrations);
   const customSet = new Set(current.custom);
   const gatewaySet = new Set(current.gateway ?? []);
   for (const sugg of suggestion.integrations ?? []) {
@@ -38,17 +44,19 @@ export function toolboxFromSuggestion(
       if (named.size === 0) continue;
       for (const tool of [...integration.readTools, ...integration.writeTools]) {
         if (named.has(tool.name) || named.has(tool.slug)) {
-          directSet.add(tool.name);
+          directSet.add(
+            shared.has(tool.name) ? scopedToolKey(integration.slug, tool.name) : tool.name,
+          );
         }
       }
     }
   }
   for (const tool of availableTools.writeTools) {
-    if (suggestedNames.has(tool.name)) directSet.add(tool.name);
+    if (suggestedNames.has(tool.name) && !shared.has(tool.name)) directSet.add(tool.name);
   }
   for (const [source, tools] of Object.entries(availableTools.serverTools)) {
     for (const tool of tools) {
-      if (suggestedNames.has(tool.name)) {
+      if (suggestedNames.has(tool.name) && !shared.has(tool.name)) {
         directSet.add(parseGatewaySource(source) ? tool.slug : tool.name);
       }
     }

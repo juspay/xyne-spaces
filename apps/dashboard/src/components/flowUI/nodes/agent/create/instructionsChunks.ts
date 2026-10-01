@@ -175,16 +175,15 @@ export function nextRevealState(previous: RevealState | null, text: string): Rev
   }
   const rest = text.slice(keptEnd);
   let nextKey = previous.nextKey;
-  const added: RevealPart[] =
-    !rest
-      ? []
-      : keptEnd === previous.text.length
-        ? [{ key: nextKey++, text: rest, animate: true, delay: 0 }]
-        : chunkText(rest).map((chunk, index) => ({
-            key: nextKey++,
-            text: chunk,
-            animate: true,
-            delay: index * CHUNK_STAGGER_S,
-          }));
+  const added: RevealPart[] = !rest
+    ? []
+    : keptEnd === previous.text.length
+      ? [{ key: nextKey++, text: rest, animate: true, delay: 0 }]
+      : chunkText(rest).map((chunk, index) => ({
+          key: nextKey++,
+          text: chunk,
+          animate: true,
+          delay: index * CHUNK_STAGGER_S,
+        }));
   return { text, parts: [...kept, ...added], nextKey };
 }

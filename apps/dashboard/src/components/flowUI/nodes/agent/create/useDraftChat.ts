@@ -43,11 +43,17 @@ export function useDraftChat(
   {
     storageKey,
     open = false,
+    inferGaps,
   }: {
     /** Where the chat is kept across a reload (draftChatStorage.ts). None: it isn't. */
     storageKey?: string | undefined;
     /** Whether the chat is open now, kept with it. */
     open?: boolean;
+    /**
+     * Gap rows a finished reply should have reported but didn't (see
+     * inferredCapabilityGaps). Given the request, the reply and what it did report.
+     */
+    inferGaps?: (request: string, reply: string, reported: CapabilityGap[]) => CapabilityGap[];
   } = {},
 ): {
   threads: DraftChatThread[];
@@ -73,6 +79,8 @@ export function useDraftChat(
   const abortRef = useRef<AbortController | null>(null);
   const formRef = useRef(getForm);
   formRef.current = getForm;
+  const inferGapsRef = useRef(inferGaps);
+  inferGapsRef.current = inferGaps;
 
   const stop = useCallback((): void => {
     abortRef.current?.abort();
@@ -185,7 +193,21 @@ export function useDraftChat(
               ),
           },
         });
-        patch(assistantId, { streaming: false });
+        const infer = inferGapsRef.current;
+        update(messages =>
+          messages.map(message => {
+            if (message.id !== assistantId) return message;
+            const inferred =
+              infer && !message.error ? infer(trimmed, message.content, message.gaps ?? []) : [];
+            return {
+              ...message,
+              streaming: false,
+              ...(inferred.length > 0
+                ? { gaps: inferred.reduce((all, gap) => withCapabilityGap(all, gap), message.gaps) }
+                : {}),
+            };
+          }),
+        );
       } catch (err) {
         if (controller.signal.aborted) {
           patch(assistantId, { streaming: false });

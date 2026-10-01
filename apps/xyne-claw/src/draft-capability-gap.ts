@@ -6,7 +6,7 @@
  * connects after it is saved, and what could be added. When a request needs
  * something the test can't use, the model calls this once per gap. The tool
  * has no side effects: the dashboard reads the call off the invocation stream
- * and shows it under the reply, with an Add button for missing capabilities.
+ * and shows it under the reply: Connect for connectors, Add for anything else.
  */
 
 import { Type } from "@sinclair/typebox";

@@ -42,4 +42,42 @@ void describe('toolboxFromSuggestion', () => {
     assert.ok(!next.direct.includes('get_history'));
     assert.ok(!next.direct.includes('post_message'));
   });
+
+  void it('adds a tool name two connectors share with its connector in front', () => {
+    const merge = {
+      slug: 'merge_pull_request',
+      name: 'merge_pull_request',
+      description: '',
+      riskLevel: 'write' as const,
+    };
+    const catalog: AvailableTools = {
+      subagents: [],
+      mcpServers: [],
+      writeTools: [
+        { name: 'merge_pull_request', source: 'github' },
+        { name: 'merge_pull_request', source: 'bitbucket' },
+      ],
+      customGroups: [],
+      serverTools: { github: [merge], bitbucket: [merge] },
+      integrations: ['github', 'bitbucket'].map(slug => ({
+        slug,
+        label: slug,
+        kind: 'mcp' as const,
+        connected: true,
+        usageCount: 0,
+        readTools: [],
+        writeTools: [merge],
+      })),
+    };
+    const next = toolboxFromSuggestion(
+      { subagents: [], direct: [], custom: [], gateway: [], callableAgents: [] },
+      {
+        subagents: [],
+        integrations: [{ slug: 'github', readTools: [], writeTools: ['merge_pull_request'] }],
+        reasoning: {},
+      },
+      catalog,
+    );
+    assert.deepEqual(next.direct, ['github__merge_pull_request']);
+  });
 });

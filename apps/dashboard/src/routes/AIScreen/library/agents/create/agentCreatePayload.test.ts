@@ -84,4 +84,15 @@ describe('buildCreateAgentPayload', () => {
   it('leaves the instructions alone when there are no properties', () => {
     expect(buildCreateAgentPayload(form, 'morning-brief', 'user_1').systemPrompt).toBe('prompt');
   });
+
+  it('saves the face the draft had, so it does not change on Save', () => {
+    expect(
+      buildCreateAgentPayload(form, 'morning-brief', 'user_1', 'draft_9').config,
+    ).toMatchObject({
+      avatarKey: 'draft_9',
+    });
+    expect(buildCreateAgentPayload(form, 'morning-brief', 'user_1').config).not.toHaveProperty(
+      'avatarKey',
+    );
+  });
 });

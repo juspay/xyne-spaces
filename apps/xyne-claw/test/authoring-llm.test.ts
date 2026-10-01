@@ -113,3 +113,43 @@ describe("chatJson", () => {
     expect((err as AuthoringLlmError).kind).toBe("aborted");
   });
 });
+
+describe("chatJson retries", () => {
+  const answer = (): Response =>
+    new Response(JSON.stringify({ choices: [{ message: { content: '{"a":1}' } }] }), { status: 200 });
+  const ask = () => chatJson<{ a: number }>([{ role: "user", content: "hi" }], { maxTokens: 10, timeoutMs: 5_000 });
+
+  it("tries once more after a rate limit and returns that answer", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockImplementationOnce(async () => new Response("rate limited", { status: 429 }))
+      .mockImplementationOnce(async () => answer());
+    vi.stubGlobal("fetch", fetchMock);
+    await expect(ask()).resolves.toEqual({ a: 1 });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("tries once more after a dropped connection", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockImplementationOnce(async () => {
+        throw new TypeError("fetch failed");
+      })
+      .mockImplementationOnce(async () => answer());
+    vi.stubGlobal("fetch", fetchMock);
+    await expect(ask()).resolves.toEqual({ a: 1 });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("gives up after the second retryable answer, and never retries a plain error", async () => {
+    const busy = vi.fn(async () => new Response("busy", { status: 503 }));
+    vi.stubGlobal("fetch", busy);
+    await expect(ask()).rejects.toMatchObject({ kind: "http", status: 503 });
+    expect(busy).toHaveBeenCalledTimes(2);
+
+    const forbidden = vi.fn(async () => new Response("no", { status: 403 }));
+    vi.stubGlobal("fetch", forbidden);
+    await expect(ask()).rejects.toMatchObject({ kind: "http", status: 403 });
+    expect(forbidden).toHaveBeenCalledTimes(1);
+  });
+});

@@ -62,6 +62,16 @@ export function agentVisibleToUser(userId: string): Prisma.AgentWhereInput {
   };
 }
 
+/**
+ * A clone gets its own face: the dashboard keeps the one an agent was built
+ * with on `config.avatarKey`, and without it the clone is drawn from its own id.
+ */
+export function configForClone(config: unknown): unknown {
+  if (!config || typeof config !== "object" || Array.isArray(config)) return config;
+  const { avatarKey: _ownFace, ...rest } = config as Record<string, unknown>;
+  return rest;
+}
+
 export const agentRepository = {
   /**
    * Resolve a slug to an agent the caller is actually allowed to use.
@@ -279,7 +289,7 @@ export const agentRepository = {
           modelId: source.modelId,
           enabled: source.enabled,
           kbScope: source.kbScope,
-          config: source.config as Prisma.InputJsonValue,
+          config: configForClone(source.config) as Prisma.InputJsonValue,
           scope: "personal",
           owner: { connect: { id: newOwnerId } },
           ...(owner?.orgId ? { org: { connect: { id: owner.orgId } } } : {}),

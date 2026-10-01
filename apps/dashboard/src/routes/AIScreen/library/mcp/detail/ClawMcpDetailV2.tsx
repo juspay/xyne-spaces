@@ -16,7 +16,12 @@ import {
 import { useIsClawAdmin } from '@/hooks/useIsClawAdmin';
 import Tooltip from '@/components/ui/Tooltip';
 import { openOAuthConsent } from '../../shared/pickers/mcp/openOAuthConsent';
-import { FAKE_MCP_CONNECT, fakeConnect, fakeDisconnect, isFakeConnection } from '@/services/claw/fakeMcpConnect';
+import {
+  FAKE_MCP_CONNECT,
+  fakeConnect,
+  fakeDisconnect,
+  isFakeConnection,
+} from '@/services/claw/fakeMcpConnect';
 import { McpConnectDialog } from './McpConnectDialog';
 import { McpDefinitionDialog } from './McpDefinitionDialog';
 import { Pill } from '../../shared/primitives/Pill';

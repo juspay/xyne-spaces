@@ -31,7 +31,7 @@ import { validateSystemPromptContract } from "xyne-claw-shared";
 import { createLogger } from "../logger.js";
 import type { AuthoringMessage } from "./authoring-llm.js";
 import { AuthoringLlmError } from "./authoring-llm.js";
-import { classifyTurn, slugFromName, type ClassifyDecision } from "./classify.js";
+import { classifyTurn, nameFromMessage, slugFromName, type ClassifyDecision } from "./classify.js";
 import { catalogPicks, judgeCapabilities, type JudgeInput, type JudgedCapabilities } from "./judge.js";
 import {
   finishInstructions,
@@ -359,14 +359,7 @@ function fallbackDecision(input: ClawDraftRequest): ClassifyDecision {
       fromFallback: true,
     };
   }
-  // "Create a release copilot for…" → "Release Copilot", not "Create A Release Copilot".
-  const job = message
-    .split(/[.\n]/)[0]!
-    .replace(/^\s*(please\s+)?(create|make|build|draft|set\s+up)\s+(me\s+)?(an?\s+|the\s+)?/i, "")
-    .replace(/\b(agent|bot)\s+(that|which|to)\b.*$/i, "$1")
-    .replace(/\s+(for|that|which|to|who)\b.*$/i, "");
-  const words = job.replace(/[^\p{L}\p{N}\s-]/gu, " ").split(/\s+/).filter(Boolean).slice(0, 4);
-  const name = words.map((w) => w.charAt(0).toUpperCase() + w.slice(1)).join(" ") || "New Agent";
+  const name = nameFromMessage(message);
   return {
     mode: canvasEmpty ? "draft" : "edit",
     reply: "",

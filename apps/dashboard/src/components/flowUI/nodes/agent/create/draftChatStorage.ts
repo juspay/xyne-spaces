@@ -67,7 +67,11 @@ export function readDraftChat(key: string, storage = sessionStore()): StoredDraf
   }
 }
 
-export function writeDraftChat(key: string, value: StoredDraftChat, storage = sessionStore()): void {
+export function writeDraftChat(
+  key: string,
+  value: StoredDraftChat,
+  storage = sessionStore(),
+): void {
   try {
     if (value.threads.every(thread => thread.messages.length === 0)) storage?.removeItem(key);
     else storage?.setItem(key, JSON.stringify(value));

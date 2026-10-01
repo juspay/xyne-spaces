@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useId, useRef, useState, type ReactElement } from 'react';
 import { useReducedMotion } from 'motion/react';
 import { AgentBotAvatar } from '@/components/agents/AgentBotAvatar';
+import { agentAvatarKey } from '@/components/agents/agentAvatarKey';
 import type {
   ConversationHistory,
   Message,
@@ -206,7 +207,12 @@ export function AgentProfileChat({ agent }: { agent: Agent }): ReactElement {
         <DraftChatTranscript
           messages={toThreadMessages(messages)}
           avatar={(size, busy) => (
-            <AgentBotAvatar agentKey={agent.id} asleep={!agent.enabled} busy={busy} size={size} />
+            <AgentBotAvatar
+              agentKey={agentAvatarKey(agent)}
+              asleep={!agent.enabled}
+              busy={busy}
+              size={size}
+            />
           )}
           emptyLabel={`Chat with ${agent.name}`}
         />
@@ -237,12 +243,25 @@ export function AgentProfileChat({ agent }: { agent: Agent }): ReactElement {
         status={
           folded && pending ? (
             <ThinkingStatus
-              avatar={<AgentBotAvatar agentKey={agent.id} asleep={!agent.enabled} busy size={22} />}
+              avatar={
+                <AgentBotAvatar
+                  agentKey={agentAvatarKey(agent)}
+                  asleep={!agent.enabled}
+                  busy
+                  size={22}
+                />
+              }
               replying={replying}
             />
           ) : showUnread ? (
             <UnreadStatus
-              avatar={<AgentBotAvatar agentKey={agent.id} asleep={!agent.enabled} size={22} />}
+              avatar={
+                <AgentBotAvatar
+                  agentKey={agentAvatarKey(agent)}
+                  asleep={!agent.enabled}
+                  size={22}
+                />
+              }
               count={unread}
             />
           ) : undefined

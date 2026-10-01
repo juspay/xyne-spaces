@@ -48,7 +48,10 @@ export function capabilityGapKey(gap: CapabilityGap): string {
 }
 
 /** Adds a gap unless the same capability was already reported with that status. */
-export function withCapabilityGap(gaps: CapabilityGap[] | undefined, gap: CapabilityGap): CapabilityGap[] {
+export function withCapabilityGap(
+  gaps: CapabilityGap[] | undefined,
+  gap: CapabilityGap,
+): CapabilityGap[] {
   const list = gaps ?? [];
   const key = capabilityGapKey(gap);
   return list.some(existing => capabilityGapKey(existing) === key) ? list : [...list, gap];
@@ -60,4 +63,119 @@ export function addCapabilityRequest(gap: CapabilityGap): string {
   // "List your issues" reads as "…can list your issues"; leave "PRs…" alone.
   const need = /^[A-Z][a-z]/.test(trimmed) ? trimmed[0]!.toLowerCase() + trimmed.slice(1) : trimmed;
   return `Add ${gap.capability} so the agent can ${need}.`;
+}
+
+/** A connector as the test chat sees it, for {@link inferredCapabilityGaps}. */
+export interface GapConnector {
+  label: string;
+  serverType: string;
+  /** Some of its tools (or its subagent) are on the agent. */
+  onAgent: boolean;
+  /** The user has a key for it, their own or the org's, or it needs none. */
+  usable: boolean;
+}
+
+/** Other names people use for a connector. */
+const CONNECTOR_ALIASES: Readonly<Record<string, readonly string[]>> = {
+  google: [
+    'gmail',
+    'google calendar',
+    'google drive',
+    'google docs',
+    'google sheets',
+    'my calendar',
+  ],
+  microsoft: ['outlook', 'teams', 'onedrive'],
+  twitter: ['twitter', 'x.com', 'tweets'],
+};
+
+/** Words a model wraps around a connector's name ("the GitHub MCP", "Gmail account"). */
+const CONNECTOR_NOISE = /\b(the|my|your|mcp|connector|integration|server|account|tools?|api)\b/gi;
+
+function connectorName(text: string): string {
+  return text.toLowerCase().replace(CONNECTOR_NOISE, ' ').replace(/\s+/g, ' ').trim();
+}
+
+/**
+ * The catalog connector a gap names, if it is one: by label ("GitHub", or the
+ * first half of "Google / Gmail"), slug, server type or a common other name
+ * ("Gmail" for Google). Gaps that aren't connectors (web search, a skill)
+ * match nothing.
+ */
+export function connectorForGap<T extends { label: string; slug: string; serverType: string }>(
+  gap: CapabilityGap,
+  connectors: readonly T[],
+): T | undefined {
+  const name = connectorName(gap.capability);
+  if (!name) return undefined;
+  return connectors.find(connector => {
+    const names = [
+      connector.label,
+      connector.label.split(' / ')[0]!,
+      connector.slug,
+      connector.serverType,
+      ...(CONNECTOR_ALIASES[connector.serverType] ?? []),
+    ].map(connectorName);
+    return names.includes(name);
+  });
+}
+
+/** A gap the test chat answers with Connect: a connector not on the agent, or without a key. */
+export function isConnectGap(gap: CapabilityGap): boolean {
+  return gap.status === 'not_added' || gap.status === 'not_connected';
+}
+
+/** The reply says it couldn't: the moment a gap row should have been reported. */
+const COULD_NOT =
+  /\b(can't|cannot|can not|couldn't|unable to|don't have|do not have|doesn't have|no access|not available|isn't available|is not available|not connected|isn't connected|not set up|isn't set up|not added|isn't added|once [\w ]{1,40} (is|are) (connected|added|set up))\b/i;
+
+function escapeRegExp(text: string): string {
+  return text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+/** "Also check which of these have an open GitHub PR?" → "check which of these have an open GitHub PR". */
+export function needFromRequest(request: string): string {
+  const need = request
+    .trim()
+    .replace(/[?.!\s]+$/, '')
+    .replace(/^(and |also |so |please |can you |could you |would you |can |could )+/i, '')
+    .replace(/^(also |please )+/i, '');
+  return need ? need[0]!.toLowerCase() + need.slice(1) : '';
+}
+
+/**
+ * Gaps for a reply that said it couldn't do something with a product the
+ * request named, when the model answered in prose instead of reporting the gap
+ * itself. The status comes from the canvas and the user's connections, so it
+ * is right even when the model's wording isn't: not on the agent, or on it
+ * without a key (both offered as Connect). Products the reply already
+ * reported, or that would work, are left alone.
+ */
+export function inferredCapabilityGaps(
+  request: string,
+  reply: string,
+  connectors: readonly GapConnector[],
+  reported: readonly CapabilityGap[] = [],
+): CapabilityGap[] {
+  if (!COULD_NOT.test(reply)) return [];
+  const need = needFromRequest(request);
+  if (!need) return [];
+  const gaps: CapabilityGap[] = [];
+  for (const connector of connectors) {
+    const label = connector.label.split(' / ')[0]!.trim();
+    const names = [label, ...(CONNECTOR_ALIASES[connector.serverType] ?? [])];
+    const named = names.some(name => new RegExp(`\\b${escapeRegExp(name)}\\b`, 'i').test(request));
+    if (!named) continue;
+    const already = reported.some(gap =>
+      gap.capability.toLowerCase().startsWith(label.toLowerCase()),
+    );
+    if (already) continue;
+    const status: CapabilityGapStatus | null = !connector.onAgent
+      ? 'not_added'
+      : connector.usable
+        ? null
+        : 'not_connected';
+    if (status) gaps.push({ capability: connector.label, status, need });
+  }
+  return gaps;
 }

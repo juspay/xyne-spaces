@@ -1,6 +1,7 @@
 import {
   useCallback,
   useEffect,
+  useLayoutEffect,
   useRef,
   useState,
   type PointerEvent as ReactPointerEvent,
@@ -13,12 +14,24 @@ import { useAuth } from '@/hooks/useAuth';
 import { useAgentNameCheck } from '@/hooks/useAgentNameCheck';
 import { usePlatform } from '@/hooks/usePlatform';
 import { createAgent, generateAgentPrompt } from '@/services/claw/clawAgentWizardService';
-import { ClawApiError } from '@/services/claw/clawRequest';
+import { updateClawAgent } from '@/services/claw/clawAuthAgentsService';
+import type { Agent } from '@/services/claw/clawAuthAgentTypes';
+import { ClawApiError, clawErrorText } from '@/services/claw/clawRequest';
+import { clawAgentDetailKey } from '@/hooks/useClawAgentDetail';
+import { clawPromptVersionsKey } from '@/hooks/useClawPromptVersions';
+import { AgentBotAvatar } from '@/components/agents/AgentBotAvatar';
+import { agentAvatarKey } from '@/components/agents/agentAvatarKey';
 import { effectiveSlug, slugify } from '@/routes/ClawAgentsScreen/create/wizardState';
 import { AgentCreateCanvas } from '@/components/flowUI/nodes/agent/create/AgentCreateCanvas';
 import { DraftAgentChat } from '@/components/flowUI/nodes/agent/create/DraftAgentChat';
 import type { AgentSettingsTabId } from '../detail/detailTabs';
-import { DraftAgentSettings } from '../detail/settings/AgentSettingsView';
+import {
+  buildUpdateAgentPayload,
+  formFromAgent,
+  instructionsFromSaved,
+} from '../detail/agentProfileForm';
+import { DraftAgentSettings, SavedAgentSettings } from '../detail/settings/AgentSettingsView';
+import { useAgentDetailActions } from '../detail/useAgentDetailActions';
 import {
   AgentCreateChatPanel,
   type CreateChatTurn,
@@ -78,6 +91,7 @@ import {
 import { inferredCapabilityFields } from '@/components/flowUI/nodes/agent/create/capabilityInference';
 import {
   EMPTY_CREATE_FORM,
+  isFormDirty,
   type AgentCreateChatPatch,
   type AgentCreateField,
   type AgentCreateHubRow,
@@ -103,7 +117,6 @@ import {
 } from '@/components/flowUI/nodes/agent/create/draftReveal';
 import { WarmHubCatalogs } from '@/components/flowUI/nodes/agent/create/WarmHubCatalogs';
 import { connectorsToConnect } from '@/components/flowUI/nodes/agent/create/buildConnect';
-import { draftAvatarKey } from '@/components/flowUI/nodes/agent/create/DraftAgentAvatar';
 import { useMcpCatalog } from '../../shared/pickers/mcp/useMcpCatalog';
 import {
   chunkGapMs,
@@ -113,12 +126,19 @@ import {
   agentDraftStorageKey,
   buildChatStorageKey,
   clearAgentDraft,
+  forgetAgentDraftForm,
   newAgentDraftId,
   readAgentDraft,
   writeAgentDraft,
 } from '@/components/flowUI/nodes/agent/create/agentCreateDraftStorage';
 import { draftChatStorageKey } from '@/components/flowUI/nodes/agent/create/draftChatStorage';
 import { useOAuthReturn } from '@/routes/AIScreen/library/shared/pickers/mcp/useOAuthReturn';
+import {
+  canvasColumnLeft,
+  slideInPanel,
+  slideOutToProfile,
+  useArrivalCanvasLeft,
+} from '@/components/flowUI/nodes/agent/create/editTransition';
 import { buildCreateAgentPayload } from './agentCreatePayload';
 import { computeSaveGate } from './saveGate';
 import {
@@ -270,10 +290,20 @@ const DRAFT_PARAM = 'draft';
  * agent arrives without one and gets a fresh canvas, while a reload, or a draft
  * opened from Drafts in Agent Hub, comes back to the same one. The canvas
  * remounts per draft, so nothing carries over between them.
+ *
+ * With `agent`, the same page edits a saved agent: its canvas, the Build chat
+ * and the test chat, saving only what changed.
  */
 export function AgentCreateSplitPage({
   scripted = false,
-}: { scripted?: boolean } = {}): ReactElement {
+  agent,
+  canRenameHandle = false,
+}: {
+  scripted?: boolean;
+  agent?: Agent | undefined;
+  /** Only the owner renames an agent's handle. */
+  canRenameHandle?: boolean;
+} = {}): ReactElement {
   const [params, setParams] = useSearchParams();
   const location = useLocation();
   const requested = params.get(DRAFT_PARAM);
@@ -285,9 +315,11 @@ export function AgentCreateSplitPage({
   const draftId = requested ?? freshRef.current!.id;
   // Back from a connector's sign-in, started from a connect card on this page.
   useOAuthReturn();
+  // Where the profile had the canvas, when Edit was clicked there.
+  const arrivalLeft = useArrivalCanvasLeft();
 
   useEffect(() => {
-    if (scripted || requested) return;
+    if (scripted || requested || agent) return;
     setParams(
       current => {
         const next = new URLSearchParams(current);
@@ -296,25 +328,62 @@ export function AgentCreateSplitPage({
       },
       { replace: true },
     );
-  }, [draftId, requested, scripted, setParams]);
+  }, [agent, draftId, requested, scripted, setParams]);
 
+  if (agent) {
+    // Where the profile's Back goes, kept for the way back.
+    const returnTo = (location.state as { returnTo?: unknown } | null)?.returnTo;
+    // Unsaved edits are kept per agent, for a reload or a connector's sign-in.
+    return (
+      <AgentCreateCanvasPage
+        key={agent.id}
+        draftId={`edit-${agent.id}`}
+        scripted={false}
+        agent={agent}
+        canRenameHandle={canRenameHandle}
+        enterFromLeft={arrivalLeft}
+        returnTo={typeof returnTo === 'string' ? returnTo : undefined}
+      />
+    );
+  }
   return <AgentCreateCanvasPage key={draftId} draftId={draftId} scripted={scripted} />;
 }
 
 function AgentCreateCanvasPage({
   scripted,
   draftId,
+  agent,
+  canRenameHandle = false,
+  enterFromLeft,
+  returnTo,
 }: {
   scripted: boolean;
   draftId: string;
+  /** Editing this saved agent instead of creating one. */
+  agent?: Agent | undefined;
+  canRenameHandle?: boolean;
+  /**
+   * Where the canvas column was on the agent's profile: the canvas glides over
+   * from there and the Build chat slides in beside it.
+   */
+  enterFromLeft?: number | undefined;
+  /** Where the profile's Back goes, handed back to it on the way out. */
+  returnTo?: string | undefined;
 }): ReactElement {
   const { user } = useAuth();
   const { isMobile } = usePlatform();
   const navigate = useNavigate();
   const { workspaceId } = useParams<{ workspaceId?: string }>();
   const queryClient = useQueryClient();
-  const createForm = useAgentCreateForm(EMPTY_CREATE_FORM);
-  const [phase, setPhase] = useState<AgentCreatePhase>('empty');
+  // The agent as it was opened: what Save compares against, and what Start over goes back to.
+  const [startForm, setStartForm] = useState(() =>
+    agent ? formFromAgent(agent) : EMPTY_CREATE_FORM,
+  );
+  /** When the saved agent was last saved, as it was opened: older stored edits are stale. */
+  const [openedAt] = useState(() => (agent ? Date.parse(agent.updatedAt) : 0));
+  const startPhase: AgentCreatePhase = agent ? 'draft' : 'empty';
+  const createForm = useAgentCreateForm(startForm);
+  const [phase, setPhase] = useState<AgentCreatePhase>(startPhase);
   const [creating, setCreating] = useState(false);
   const [createError, setCreateError] = useState<string | null>(null);
   const [discardOpen, setDiscardOpen] = useState(false);
@@ -384,9 +453,24 @@ function AgentCreateCanvasPage({
     slug: createForm.form.slug,
     slugManual: createForm.form.slugManual,
   });
-  const nameCheck = useAgentNameCheck(phase === 'created' ? '' : createForm.form.name.trim(), slug);
+  const typedName = createForm.form.name.trim();
+  // A saved agent's own name and handle aren't taken: only a change is checked.
+  const identityChanged = !agent || typedName !== agent.name || slug !== agent.slug;
+  const availability = useAgentNameCheck(
+    phase === 'created' || !identityChanged ? '' : typedName,
+    slug,
+  );
+  const nameCheck = agent
+    ? {
+        ...availability,
+        nameError: typedName === agent.name ? null : availability.nameError,
+        slugError: slug === agent.slug ? null : availability.slugError,
+      }
+    : availability;
   const handleError = nameCheck.slugError
-    ? `@${slug} is taken. Rename the handle to create a new agent.`
+    ? agent
+      ? `@${slug} is taken. Choose another handle.`
+      : `@${slug} is taken. Rename the handle to create a new agent.`
     : nameCheck.nameError;
   const builtBy = user?.name ?? user?.email ?? 'you';
 
@@ -406,38 +490,49 @@ function AgentCreateCanvasPage({
    * Bumped when a stored draft is restored. The canvas remounts with it, so
    * the whole draft sweeps in as one instead of row by row.
    */
-  const [restoreEpoch, setRestoreEpoch] = useState(0);
+  // A saved agent opened for editing comes into focus the same way.
+  const [restoreEpoch, setRestoreEpoch] = useState(agent ? 1 : 0);
   /** Bumped when chat clears the canvas, so rows it had opened close too. */
   const [clearEpoch, setClearEpoch] = useState(0);
   useEffect(() => {
     if (!storageReady) return;
     const stored = readAgentDraft(draftKey);
     if (!stored) return;
+    // Edits older than the agent's last save are stale: someone saved since.
+    if (agent && stored.savedAt <= openedAt) {
+      forgetAgentDraftForm(draftKey);
+      return;
+    }
     keptRef.current = stored.kept;
     restoreForm(stored.form);
     setPhase('draft');
     setRestoreEpoch(epoch => epoch + 1);
-  }, [draftKey, restoreForm, storageReady]);
+  }, [agent, draftKey, openedAt, restoreForm, storageReady]);
 
   // Keep the stored draft in step with the canvas.
   useEffect(() => {
     if (!storageReady || phase === 'created') return undefined;
     const form = createForm.form;
-    const timer = window.setTimeout(
-      () => writeAgentDraft(draftKey, form, { kept: keptRef.current }),
-      400,
-    );
+    const timer = window.setTimeout(() => {
+      // An edit back at the saved agent has nothing to keep.
+      if (agent && !isFormDirty(form, startForm)) forgetAgentDraftForm(draftKey);
+      else writeAgentDraft(draftKey, form, { kept: keptRef.current });
+    }, 400);
     return () => window.clearTimeout(timer);
-  }, [createForm.form, draftKey, phase, storageReady]);
+  }, [agent, createForm.form, draftKey, phase, startForm, storageReady]);
 
   // Leaving for a connector's sign-in can come sooner than the save above.
   const { getForm } = createForm;
   useEffect(() => {
     if (!storageReady || phase === 'created') return undefined;
-    const flush = (): void => writeAgentDraft(draftKey, getForm(), { kept: keptRef.current });
+    const flush = (): void => {
+      const form = getForm();
+      if (agent && !isFormDirty(form, startForm)) return;
+      writeAgentDraft(draftKey, form, { kept: keptRef.current });
+    };
     window.addEventListener('pagehide', flush);
     return () => window.removeEventListener('pagehide', flush);
-  }, [draftKey, getForm, phase, storageReady]);
+  }, [agent, draftKey, getForm, phase, startForm, storageReady]);
 
   // A turn still writing the canvas would be lost on reload.
   useEffect(() => {
@@ -474,8 +569,18 @@ function AgentCreateCanvasPage({
     description: createForm.form.description,
     instructions: createForm.form.systemPrompt,
     conflictCount: createForm.conflicts.length,
-    scheduleProblem: scheduleProblem(createForm.form.schedule),
+    // A saved agent's schedule is managed in Activity, so it can't hold Save up.
+    scheduleProblem: agent ? null : scheduleProblem(createForm.form.schedule),
     nameCheck,
+    ...(agent
+      ? {
+          editing: {
+            dirty: isFormDirty(createForm.form, startForm),
+            instructionsChanged:
+              createForm.form.systemPrompt.trim() !== startForm.systemPrompt.trim(),
+          },
+        }
+      : {}),
   });
 
   const canvasSnapshot: CreateCanvasSnapshot = {
@@ -829,14 +934,15 @@ function AgentCreateCanvasPage({
     const before = createForm.getForm();
     const suggestionsBefore = hubSuggestionsRef.current;
     const planBefore = planRef.current;
-    createForm.resetFrom(EMPTY_CREATE_FORM);
+    // A saved agent starts over from itself as saved.
+    createForm.resetFrom(startForm);
     planRef.current = null;
     setHubSuggestions(EMPTY_HUB_SUGGESTIONS);
     setClearEpoch(epoch => epoch + 1);
-    setPhase('empty');
+    setPhase(startPhase);
     setSkeletonIdentity(false);
-    if (JSON.stringify(before) === JSON.stringify(EMPTY_CREATE_FORM)) return;
-    toast('Cleared the canvas', {
+    if (JSON.stringify(before) === JSON.stringify(startForm)) return;
+    toast(agent ? 'Back to the saved agent' : 'Cleared the canvas', {
       // Long enough to take back a wiped canvas.
       duration: 8_000,
       action: {
@@ -849,7 +955,7 @@ function AgentCreateCanvasPage({
         },
       },
     });
-  }, [createForm]);
+  }, [agent, createForm, startForm, startPhase]);
 
   /**
    * One streamed draft turn. The stream lands at full speed; the canvas shows it
@@ -1027,6 +1133,10 @@ function AgentCreateCanvasPage({
             apply({ permissionMode: event.mode });
             return;
           case 'schedule':
+            if (agent) {
+              turn.announce("A saved agent's schedule is set from Activity in its settings.");
+              return;
+            }
             if (event.op !== 'set' && event.op !== 'clear') {
               turn.announce(`Couldn't set the schedule (${event.text}): ${event.error}`);
               return;
@@ -1225,7 +1335,7 @@ function AgentCreateCanvasPage({
         markCreate('ready');
       }
     },
-    [clearCanvasFromChat, createForm, draftContext],
+    [agent, clearCanvasFromChat, createForm, draftContext],
   );
 
   const agentPath = useCallback(
@@ -1234,13 +1344,77 @@ function AgentCreateCanvasPage({
     [workspaceId],
   );
 
+  const pageRef = useRef<HTMLDivElement | null>(null);
+  const exitingRef = useRef(false);
+  /**
+   * Back to the agent's profile the way it came: the Build chat slides out and
+   * the canvas glides over, then the profile picks the glide up from there.
+   */
+  const leaveToProfile = useCallback(
+    async (agentSlug: string, options: { replace?: boolean } = {}): Promise<void> => {
+      if (exitingRef.current) return;
+      exitingRef.current = true;
+      if (pageRef.current) await slideOutToProfile(pageRef.current, enterFromLeft);
+      void navigate(agentPath(agentSlug), {
+        ...options,
+        state: { canvasLeft: canvasColumnLeft(), ...(returnTo ? { returnTo } : {}) },
+      });
+    },
+    [agentPath, enterFromLeft, navigate, returnTo],
+  );
+
+  /** Save for a saved agent: only what changed, then back to its profile. */
+  const persistEdit = useCallback(
+    async (saved: Agent): Promise<void> => {
+      const form = createForm.getForm();
+      const latest = queryClient.getQueryData<Agent>(clawAgentDetailKey(saved.slug)) ?? saved;
+      const payload = buildUpdateAgentPayload(
+        form,
+        startForm,
+        latest.config ?? {},
+        canRenameHandle,
+      );
+      const renaming = payload.slug !== undefined;
+      try {
+        const updated = await updateClawAgent(saved.slug, payload);
+        if (renaming) {
+          queryClient.removeQueries({ queryKey: clawAgentDetailKey(saved.slug), exact: true });
+        }
+        queryClient.setQueryData(clawAgentDetailKey(updated.slug), updated);
+        void queryClient.invalidateQueries({ queryKey: ['claw-auth-agents'] });
+        void queryClient.invalidateQueries({ queryKey: ['accessible-claw-agents'] });
+        if (payload.systemPrompt !== undefined) {
+          void queryClient.invalidateQueries({ queryKey: clawPromptVersionsKey(updated.slug) });
+        }
+        clearAgentDraft(draftKey);
+        setCreatedSlug(updated.slug);
+        setPhase('created');
+        toast.success('Changes saved');
+        await leaveToProfile(updated.slug, { replace: true });
+      } catch (err) {
+        setCreateError(
+          renaming && err instanceof ClawApiError && err.status === 409
+            ? `@${slug} is already taken. Change the handle and save again.`
+            : `Couldn't save the changes: ${clawErrorText(err, 'Something went wrong.')} Your edits are still here.`,
+        );
+      }
+    },
+    [canRenameHandle, createForm, draftKey, leaveToProfile, queryClient, slug, startForm],
+  );
+
   const persist = useCallback(async (): Promise<void> => {
     if (scripted || !saveGate.canSave || creating) return;
     setCreating(true);
     setCreateError(null);
+    if (agent) {
+      await persistEdit(agent);
+      setCreating(false);
+      return;
+    }
     try {
       const form = createForm.getForm();
-      const agent = await createAgent(buildCreateAgentPayload(form, slug, user?.id));
+      // The face it was built with goes with it (agentAvatarKey).
+      const agent = await createAgent(buildCreateAgentPayload(form, slug, user?.id, draftId));
       // A schedule needs the agent to exist first. If arming it fails the agent
       // still stands; say so rather than rolling anything back.
       if (form.schedule) {
@@ -1276,11 +1450,13 @@ function AgentCreateCanvasPage({
       setCreating(false);
     }
   }, [
+    agent,
     agentPath,
     createForm,
     creating,
     draftKey,
     navigate,
+    persistEdit,
     queryClient,
     saveGate.canSave,
     scripted,
@@ -1289,22 +1465,37 @@ function AgentCreateCanvasPage({
   ]);
 
   const leaveCreate = useCallback((): void => {
+    // Editing goes back to the agent's profile; creating, to Agent Hub.
+    if (agent) {
+      void leaveToProfile(agent.slug);
+      return;
+    }
     const libraryPath = workspaceId ? `/${workspaceId}/ai/library` : '/ai/library';
     void navigate(`${libraryPath}?tab=agents`);
-  }, [navigate, workspaceId]);
+  }, [agent, leaveToProfile, navigate, workspaceId]);
 
   const discardDraft = useCallback((): void => {
     clearAgentDraft(draftKey);
     setChatEpoch(epoch => epoch + 1);
     setBuildInbox([]);
-    createForm.resetFrom(EMPTY_CREATE_FORM);
-    setPhase('empty');
+    createForm.resetFrom(startForm);
+    setPhase(startPhase);
     setCreateError(null);
     setSkeletonIdentity(false);
-  }, [createForm, draftKey]);
+  }, [createForm, draftKey, startForm, startPhase]);
 
   const requestCancel = useCallback((): void => {
     if (creating) return;
+    if (agent) {
+      if (isFormDirty(createForm.getForm(), startForm)) {
+        setDiscardOpen(true);
+        return;
+      }
+      // Nothing changed: the next edit starts with a fresh Build chat.
+      clearAgentDraft(draftKey);
+      leaveCreate();
+      return;
+    }
     // A saved draft is already under Drafts; leaving just keeps the latest edits.
     if (storageReady && keptRef.current) {
       writeAgentDraft(draftKey, createForm.getForm(), { kept: true });
@@ -1316,12 +1507,30 @@ function AgentCreateCanvasPage({
       return;
     }
     leaveCreate();
-  }, [createForm, creating, draftKey, leaveCreate, storageReady]);
+  }, [agent, createForm, creating, draftKey, leaveCreate, startForm, storageReady]);
+
+  /**
+   * A prompt version restored from the gear is the saved prompt now: the canvas
+   * follows it unless the instructions were already being edited here.
+   */
+  const promptRestored = useCallback(
+    (systemPrompt: string): void => {
+      if (!agent) return;
+      void queryClient.invalidateQueries({ queryKey: clawAgentDetailKey(agent.slug) });
+      const instructions = instructionsFromSaved(systemPrompt);
+      const untouched = createForm.getForm().systemPrompt.trim() === startForm.systemPrompt.trim();
+      setStartForm(prev => ({ ...prev, systemPrompt: instructions }));
+      if (untouched) createForm.patchForm({ systemPrompt: instructions });
+    },
+    [agent, createForm, queryClient, startForm],
+  );
 
   const canvas = (
     <AgentCreateCanvas
       key={`canvas-${restoreEpoch}-${clearEpoch}`}
       revealOnMount={restoreEpoch > 0}
+      // Only the canvas the page opened with glides; a restore or Start over focuses in.
+      glideFromLeft={restoreEpoch === 1 && clearEpoch === 0 ? enterFromLeft : undefined}
       form={createForm.form}
       onFormChange={patch => {
         createForm.patchForm(patch);
@@ -1344,6 +1553,17 @@ function AgentCreateCanvasPage({
       handleError={handleError}
       checkingHandle={nameCheck.checking}
       layout='profile'
+      {...(agent
+        ? {
+            title: 'Edit Agent',
+            handleLocked: !canRenameHandle,
+            scheduleLocked: true,
+            avatar: (
+              <AgentBotAvatar agentKey={agentAvatarKey(agent)} asleep={!agent.enabled} size={56} />
+            ),
+          }
+        : // The face this draft keeps once saved.
+          { avatarKey: draftId })}
       onSave={() => {
         if (scripted) return;
         void persist();
@@ -1362,11 +1582,15 @@ function AgentCreateCanvasPage({
               <DraftAgentChat
                 getForm={createForm.getForm}
                 agentName={createForm.form.name}
-                agentKey={draftAvatarKey(createForm.form)}
+                agentKey={agent ? agentAvatarKey(agent) : draftId}
                 disabled={phase === 'created'}
                 // Mobile has no Build chat to hand off to.
                 onHandoff={isMobile ? undefined : handOffToBuild}
                 handoffs={handoffs}
+                onToolsChange={tools => {
+                  createForm.patchForm({ tools });
+                  if (phase === 'empty') setPhase('draft');
+                }}
                 storageKey={storageReady ? draftChatStorageKey(draftKey) : undefined}
               />
             ),
@@ -1376,10 +1600,21 @@ function AgentCreateCanvasPage({
 
   const overlay = useChatOverlayDial();
   const [sideCardDragging, setSideCardDragging] = useState(false);
+  const sideCardRef = useRef<HTMLDivElement | null>(null);
+  // Arriving from the profile, the Build chat slides in as the canvas moves over.
+  const slideInRef = useRef(enterFromLeft !== undefined);
+  useLayoutEffect(() => {
+    const card = sideCardRef.current;
+    if (!slideInRef.current || !card) return undefined;
+    return slideInPanel(card);
+  }, []);
 
   return (
     <div
-      className='flex h-full min-h-0 w-full'
+      ref={pageRef}
+      // Clip, not hidden: while the Build chat slides in from past the edge, its
+      // scroll-into-view would otherwise scroll the page sideways.
+      className='flex h-full min-h-0 w-full overflow-x-clip'
       data-component='AgentCreateSplitPage'
       data-created-slug={createdSlug ?? ''}
       {...(scripted
@@ -1391,7 +1626,17 @@ function AgentCreateCanvasPage({
         : {})}
     >
       {scripted ? null : <WarmHubCatalogs />}
-      {scripted ? null : (
+      {scripted ? null : agent ? (
+        // A saved agent's own settings, as on its profile: they save as they change.
+        <EditAgentSettings
+          agent={agent}
+          open={settingsOpen}
+          onClose={() => setSettingsOpen(false)}
+          tab={settingsTab}
+          onTabChange={setSettingsTab}
+          onPromptRestored={promptRestored}
+        />
+      ) : (
         <DraftAgentSettings
           open={settingsOpen}
           onClose={() => setSettingsOpen(false)}
@@ -1413,6 +1658,7 @@ function AgentCreateCanvasPage({
         <div className='flex h-full min-h-0 w-full bg-background'>
           <div className='min-h-0 min-w-0 flex-1'>{canvas}</div>
           <div
+            ref={sideCardRef}
             className='relative m-3 flex min-h-0 shrink-0 flex-col self-stretch overflow-hidden rounded-[20px] border border-border bg-background shadow-[0px_4px_4px_rgba(0,0,0,0.03),0px_14px_7px_rgba(0,0,0,0.03),0px_32px_9.5px_rgba(0,0,0,0.02)]'
             data-testid='create-agent-side-card'
             data-overlay-version={overlay.version}
@@ -1472,6 +1718,7 @@ function AgentCreateCanvasPage({
                 onIncomingPhase={onIncomingPhase}
                 disabled={phase === 'created'}
                 progressLabel={scripted ? null : progressLabel}
+                editing={Boolean(agent)}
                 {...(scripted
                   ? {
                       scripted: true,
@@ -1497,7 +1744,13 @@ function AgentCreateCanvasPage({
           discardDraft();
           leaveCreate();
         }}
-        {...(storageReady
+        {...(agent
+          ? {
+              description: `Your changes to ${agent.name} aren't saved yet. Leave and they're gone.`,
+              discardLabel: 'Discard changes',
+            }
+          : {})}
+        {...(storageReady && !agent
           ? {
               onKeepForLater: () => {
                 setDiscardOpen(false);
@@ -1510,5 +1763,35 @@ function AgentCreateCanvasPage({
           : {})}
       />
     </div>
+  );
+}
+
+/** The gear while editing a saved agent: the settings its profile opens. */
+function EditAgentSettings({
+  agent,
+  open,
+  onClose,
+  tab,
+  onTabChange,
+  onPromptRestored,
+}: {
+  agent: Agent;
+  open: boolean;
+  onClose: () => void;
+  tab: AgentSettingsTabId;
+  onTabChange: (tab: AgentSettingsTabId) => void;
+  onPromptRestored: (systemPrompt: string) => void;
+}): ReactElement {
+  const actions = useAgentDetailActions(agent);
+  return (
+    <SavedAgentSettings
+      open={open}
+      onClose={onClose}
+      agent={agent}
+      actions={actions}
+      tab={tab}
+      onTabChange={onTabChange}
+      onPromptRestored={onPromptRestored}
+    />
   );
 }

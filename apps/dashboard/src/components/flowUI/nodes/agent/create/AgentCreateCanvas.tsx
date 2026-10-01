@@ -29,6 +29,7 @@ import { AddPropertyMenu, PROPERTY_MENU_ITEM } from './AddPropertyMenu';
 import { ChatFillHighlight } from './ChatFillHighlight';
 import { InstructionsReveal } from './InstructionsReveal';
 import { focusInCanvas } from './canvasFocusIn';
+import { CANVAS_COLUMN_ATTR, glideCanvasFrom } from './editTransition';
 import { CustomPropertyRow } from './CustomPropertyRow';
 import { EditablePropertyLabel } from './EditablePropertyLabel';
 import { PropertyRow } from './PropertyRow';
@@ -119,14 +120,18 @@ interface AgentCreateCanvasProps {
   onOpenSettings?: () => void;
   /** Replaces the "Create Agent" bar (the profile's back link and actions). */
   topBar?: ReactNode;
+  /** The bar's title: "Create Agent", or "Edit Agent" for a saved one. */
+  title?: string;
   /** Before the gear, at the right of the identity row (the profile's Edit / Save). */
   identityActions?: ReactNode;
   /** After the name (Enabled / Disabled). */
   nameBadge?: ReactNode;
   /** After the handle (version, last updated). */
   handleMeta?: ReactNode;
-  /** The avatar, when it isn't the builder's. */
+  /** The avatar, when it isn't the draft's own (a saved agent's). */
   avatar?: ReactNode;
+  /** A draft's face: the key it was given when the draft started (see DraftAgentAvatar). */
+  avatarKey?: string | undefined;
   /** Above the identity (the "agent created" banner). */
   banner?: ReactNode;
   /** Looking, not editing: nothing dims, and nothing can be added or removed. */
@@ -143,6 +148,11 @@ interface AgentCreateCanvasProps {
    * are there from the first render.
    */
   revealOnMount?: boolean;
+  /**
+   * Where the canvas column was on the page before (an agent's profile, on its
+   * way to editing): the canvas glides from there instead of focusing in.
+   */
+  glideFromLeft?: number | undefined;
 }
 
 function ConflictChooser({
@@ -198,7 +208,7 @@ function SaveButton({
   const button = (
     <Button
       type='button'
-      variant='default'
+      variant='ink'
       size='sm'
       onClick={onSave}
       disabled={disabled}
@@ -286,12 +296,15 @@ export function AgentCreateCanvas({
   nameBadge,
   handleMeta,
   avatar,
+  avatarKey,
   banner,
   viewOnly = false,
   handleLocked = false,
   scheduleLocked = false,
+  title = 'Create Agent',
   floatingChat,
   revealOnMount = false,
+  glideFromLeft,
 }: AgentCreateCanvasProps): ReactElement {
   const conflictByField = useMemo(
     () => new Map(conflicts.map(conflict => [conflict.field, conflict])),
@@ -316,9 +329,18 @@ export function AgentCreateCanvas({
   // A restored draft comes into focus as one piece (canvasFocusIn.ts). Before
   // the first paint, so nothing shows before it starts.
   const columnRef = useRef<HTMLDivElement | null>(null);
+  const rootRef = useRef<HTMLDivElement | null>(null);
+  // Read once: the canvas arrives one way, on mount.
+  const glideFromRef = useRef(glideFromLeft);
   useLayoutEffect(() => {
     const column = columnRef.current;
-    if (!revealOnMount || !column) return undefined;
+    const root = rootRef.current;
+    if (!column) return undefined;
+    // Coming from the profile it is the same canvas, moving over: no blur.
+    if (glideFromRef.current !== undefined && root) {
+      return glideCanvasFrom(root, column, glideFromRef.current);
+    }
+    if (!revealOnMount) return undefined;
     return focusInCanvas(column);
   }, [revealOnMount]);
   const showIdentitySkeleton = Boolean(skeletonIdentity);
@@ -499,6 +521,7 @@ export function AgentCreateCanvas({
       <CapabilityPillsReadOnly.Provider value={viewOnly}>
         <CanvasEntranceContext.Provider value={entranceRoot}>
           <div
+            ref={rootRef}
             className='relative flex h-full min-w-0 flex-col bg-background'
             data-component='AgentCreateCanvas'
             data-writing-field={activeWrite}
@@ -534,7 +557,7 @@ export function AgentCreateCanvas({
                         : 'text-[11px] font-medium uppercase tracking-[0.16em] text-muted-foreground'
                     }
                   >
-                    {isProfile ? 'Create Agent' : 'Agent'}
+                    {isProfile ? title : 'Agent'}
                   </span>
                   <div
                     className={cn(
@@ -604,6 +627,7 @@ export function AgentCreateCanvas({
             >
               <div
                 ref={columnRef}
+                {...{ [CANVAS_COLUMN_ATTR]: '' }}
                 className={cn(
                   'relative flex w-full flex-col',
                   isProfile ? 'max-w-[860px] gap-0' : 'mx-auto max-w-3xl gap-10',
@@ -625,7 +649,7 @@ export function AgentCreateCanvas({
                       {isProfile
                         ? (avatar ?? (
                             <DraftAgentAvatar
-                              form={form}
+                              avatarKey={avatarKey ?? (form.slug || form.name)}
                               busy={Boolean(saving) || writingField !== null}
                               size={56}
                             />

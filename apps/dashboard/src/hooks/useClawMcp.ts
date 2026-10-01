@@ -34,7 +34,9 @@ export const useClawMcp = (): UseQueryResult<ClawMcpData, Error> => {
       ]);
       return {
         servers,
-        connections: FAKE_MCP_CONNECT ? withFakeConnections(userId!, servers, connections) : connections,
+        connections: FAKE_MCP_CONNECT
+          ? withFakeConnections(userId!, servers, connections)
+          : connections,
         availability,
       };
     },

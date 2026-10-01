@@ -31,10 +31,7 @@ export function isQuestionAnswered(
  * 14px pick mark. A square tick box when several options can be picked, a
  * round one when only one can, so the card says which before you click.
  */
-const OptionCheck: React.FC<{ checked: boolean; multiple: boolean }> = ({
-  checked,
-  multiple,
-}) => (
+const OptionCheck: React.FC<{ checked: boolean; multiple: boolean }> = ({ checked, multiple }) => (
   <span className='flex size-5 shrink-0 items-center justify-center'>
     <span
       className={cn(

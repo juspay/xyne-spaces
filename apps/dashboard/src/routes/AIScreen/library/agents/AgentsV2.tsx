@@ -6,6 +6,7 @@ import { useClawAuthAgents } from '@/hooks/useClawAuthAgents';
 import type { Agent } from '@/services/claw/clawAuthAgentTypes';
 import { groupAgentsByCategory } from '@/services/claw/agentCategory';
 import { AgentBotAvatar } from '@/components/agents/AgentBotAvatar';
+import { agentAvatarKey } from '@/components/agents/agentAvatarKey';
 import { LibraryCard } from '../shared/components/LibraryCard';
 import { LibraryFilterMenu } from '../shared/components/LibraryFilterMenu';
 import {
@@ -132,7 +133,13 @@ const AgentsV2 = ({ query }: { query: string }): ReactElement => {
                 to={prefixWs(`/ai/library/agent/${agent.slug}?tab=persona`)}
                 testId='claw-agent-card'
                 variant='flat'
-                icon={<AgentBotAvatar agentKey={agent.id} asleep={!agent.enabled} size={44} />}
+                icon={
+                  <AgentBotAvatar
+                    agentKey={agentAvatarKey(agent)}
+                    asleep={!agent.enabled}
+                    size={44}
+                  />
+                }
                 name={agent.name}
                 description={agent.description}
               />

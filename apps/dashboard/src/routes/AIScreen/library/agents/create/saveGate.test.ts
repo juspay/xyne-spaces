@@ -69,4 +69,29 @@ describe('computeSaveGate', () => {
     expect(computeSaveGate({ ...READY, name: ' ' }).reason).toBe('Add a name.');
     expect(computeSaveGate({ ...READY, description: '' }).reason).toBe('Add a description.');
   });
+
+  describe('editing a saved agent', () => {
+    const editing = { dirty: true, instructionsChanged: false };
+
+    it('waits for a change before Save', () => {
+      expect(
+        computeSaveGate({ ...READY, editing: { dirty: false, instructionsChanged: false } }),
+      ).toEqual({ canSave: false, reason: 'Nothing has changed yet.' });
+    });
+
+    it('does not ask an older agent for a description', () => {
+      expect(computeSaveGate({ ...READY, description: '', editing })).toEqual({
+        canSave: true,
+        reason: null,
+      });
+    });
+
+    it('checks the instructions against the contract only once they change', () => {
+      const old = { ...READY, instructions: 'Answer questions about tickets.' };
+      expect(computeSaveGate({ ...old, editing }).canSave).toBe(true);
+      expect(
+        computeSaveGate({ ...old, editing: { dirty: true, instructionsChanged: true } }).canSave,
+      ).toBe(false);
+    });
+  });
 });

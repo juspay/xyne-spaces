@@ -2,7 +2,16 @@ import { describe, expect, it } from "vitest";
 import type { AgentDraftBody, ClawDraftRequest, DraftPick } from "xyne-claw-shared";
 import { validateSystemPromptContract } from "xyne-claw-shared";
 import { AuthoringLlmError } from "../src/authoring/authoring-llm.js";
-import { normalizeDecision, repairCron, zonedLocalToIso, type ClassifyDecision } from "../src/authoring/classify.js";
+import {
+  fillDraftIdentity,
+  isHollowDraft,
+  unfoldFieldOps,
+  nameFromMessage,
+  normalizeDecision,
+  repairCron,
+  zonedLocalToIso,
+  type ClassifyDecision,
+} from "../src/authoring/classify.js";
 import {
   CAPABILITY_WAIT_MS,
   capabilityAck,
@@ -21,7 +30,7 @@ import {
   type InstructionsInput,
   type InstructionsResult,
 } from "../src/authoring/instructions.js";
-import { catalogPicks, resolveJudgement, type JudgeInput, type JudgedCapabilities } from "../src/authoring/judge.js";
+import { buildJudgePrompt, catalogPicks, resolveJudgement, type JudgeInput, type JudgedCapabilities } from "../src/authoring/judge.js";
 import { normalizeQuestions, normalizeSuggestions } from "../src/authoring/questions.js";
 import { parseSearchText, type WebLookup } from "../src/authoring/web-lookup.js";
 
@@ -1308,5 +1317,157 @@ describe("classify: add all", () => {
     expect(skillsOnly.fields).toEqual(["skills"]);
     const chat = normalizeDecision({ mode: "chat", capabilityAddAll: ["mcp"] }, request());
     expect(chat.capabilityAddAll).toBeUndefined();
+  });
+});
+
+describe("picker accuracy guards", () => {
+  const tool = (name: string, riskLevel = "read") => ({ name, description: "", riskLevel });
+  const catalog: JudgeInput["catalog"] = {
+    subagents: [],
+    integrations: [
+      { slug: "xyne-spaces", label: "Xyne Spaces", kind: "mcp", description: "Internal Xyne Spaces platform integration", readTools: [], writeTools: [tool("send_message", "write")] },
+      { slug: "xyne-spaces-app-tools", label: "Xyne Spaces App Tools", kind: "mcp", description: "Bot/app-credential write tools for Xyne Spaces", readTools: [tool("app_read")], writeTools: [] },
+      { slug: "x-news", label: "X (AI accounts)", kind: "mcp", description: "Read public X/Twitter posts", readTools: [tool("search_tweets")], writeTools: [] },
+      { slug: "google", label: "Google", kind: "mcp", description: "Google OAuth integration (Gmail, Calendar, Drive)", readTools: [tool("google-gmail-search")], writeTools: [] },
+    ],
+  };
+  const base = { catalog, skills: [], knowledge: [], hubs: ["mcp"] as const };
+  const pick = (id: string) => ({ id, confidence: 1, reason: "" });
+
+  it("shows each product's description and never offers the always-available ones", () => {
+    const prompt = buildJudgePrompt({ ...base, intent: "brief me" });
+    expect(prompt).toContain("- x-news | X (AI accounts) — Read public X/Twitter posts");
+    expect(prompt).not.toContain("xyne-spaces-app-tools");
+  });
+
+  it("drops a pick of a product it never offers", () => {
+    const out = resolveJudgement({ mcp: [pick("xyne-spaces-app-tools")] }, { ...base, intent: "post in Spaces" });
+    expect(out.bound).toEqual([]);
+    expect(out.suggested).toEqual([]);
+  });
+
+  it("only suggests a social feed the job doesn't name (Xyne is not X)", () => {
+    const out = resolveJudgement(
+      { mcp: [pick("xyne-spaces"), pick("google"), pick("x-news")] },
+      { ...base, intent: "Every weekday go through my Xyne Spaces DMs and mentions, and my Gmail" },
+    );
+    expect(out.bound.map((p) => p.id)).toEqual(["xyne-spaces", "google"]);
+    expect(out.suggested.map((p) => p.id)).toContain("x-news");
+  });
+
+  it("binds a social feed the job names", () => {
+    const out = resolveJudgement({ mcp: [pick("x-news")] }, { ...base, intent: "collect the top posts about AI from X every day" });
+    expect(out.bound.map((p) => p.id)).toEqual(["x-news"]);
+  });
+});
+
+describe("hollow drafts", () => {
+  const input = request({ message: "Every weekday at 9am, go through my Spaces DMs and my Gmail and tell me who to reply to first." });
+  const ack = "Drafted a daily inbox manager that scans your Spaces and Gmail.";
+
+  it("spots a first draft with no name or description", () => {
+    expect(isHollowDraft(normalizeDecision({ mode: "draft", ack }, input))).toBe(true);
+    expect(isHollowDraft(normalizeDecision({ mode: "draft", name: "Inbox", ack }, input))).toBe(false);
+  });
+
+  it("fills the name, handle and description from what the model said it drafted", () => {
+    const d = fillDraftIdentity(normalizeDecision({ mode: "draft", ack }, input), input);
+    expect(d.name).toBe("Daily Inbox Manager");
+    expect(d.handle).toBe("daily-inbox-manager");
+    expect(d.description).toBe("Daily inbox manager that scans your Spaces and Gmail");
+  });
+
+  it("falls back to the user's words when there is no ack, and leaves a full draft alone", () => {
+    const bare = request({ message: "Create a release copilot for the platform team" });
+    expect(fillDraftIdentity(normalizeDecision({ mode: "draft", ack: "" }, bare), bare).name).toBe("Release Copilot");
+    expect(nameFromMessage("Create a release copilot for the platform team")).toBe("Release Copilot");
+    const full = normalizeDecision({ mode: "draft", name: "Priority Inbox", description: "Ranks replies.", ack }, input);
+    expect(fillDraftIdentity(full, input)).toMatchObject({ name: "Priority Inbox", description: "Ranks replies." });
+  });
+});
+
+describe("planner answers that put the fields inside \"fields\" as ops", () => {
+  // Captured from the fast model under load (2026-10-01).
+  const empty = request({ message: "Every weekday at 9am, go through my Xyne Spaces activity, DMs and mentions, and my Gmail, and tell me who to reply to first." });
+  const filled = request({
+    message: "rename it to Inbox Triage",
+    canvas: {
+      ...request().canvas,
+      name: "Morning Brief",
+      instructions: "You are the Morning Brief agent.",
+      capabilities: [
+        { hub: "mcp", id: "xyne-spaces", label: "Xyne Spaces" },
+        { hub: "mcp", id: "google", label: "Google" },
+      ],
+    },
+  });
+
+  it("reads a first draft's name, handle, description, schedule, permission and adds", () => {
+    const raw = {
+      mode: "draft",
+      reply: "I'll draft a daily inbox manager for you.",
+      fields: [
+        { op: "set", title: "Name", type: "text", value: "Daily Inbox Manager" },
+        { op: "set", title: "Handle", type: "text", value: "daily-inbox-manager" },
+        { op: "set", title: "Description", type: "text", value: "Summarizes your daily activity and DMs to prioritize replies." },
+        { op: "set", title: "Schedule", type: "object", value: { kind: "repeat", cron: "0 9 * * 1-5", label: "Weekdays at 9:00 AM", task: "List who to reply to first." } },
+        { op: "set", title: "Permission", type: "text", value: "read-only" },
+        { op: "set", title: "Instructions", type: "text", value: "On weekdays at 9am, scan Spaces and Gmail." },
+        { op: "set", title: "Capability Adds", type: "array", value: ["Xyne Spaces", "Gmail"] },
+      ],
+      ack: "Drafted a daily inbox manager.",
+    };
+    const d = normalizeDecision(raw, empty);
+    expect(d).toMatchObject({
+      mode: "draft",
+      name: "Daily Inbox Manager",
+      handle: "daily-inbox-manager",
+      description: "Summarizes your daily activity and DMs to prioritize replies.",
+      schedule: { kind: "repeat", cron: "0 9 * * 1-5" },
+      permission: { mode: "read-only" },
+      instructionsBrief: "On weekdays at 9am, scan Spaces and Gmail.",
+      capabilityAdds: ["Xyne Spaces", "Gmail"],
+    });
+    expect(d.fields).toContain("schedule");
+    expect(isHollowDraft(d)).toBe(false);
+  });
+
+  it("takes lowercase titles and an object permission", () => {
+    const d = normalizeDecision(
+      {
+        mode: "draft",
+        fields: [
+          { op: "set", title: "name", value: "Daily Slack DM Summarizer" },
+          { op: "set", title: "description", value: "Summarizes unread Slack DMs each morning at 8 AM." },
+          { op: "set", title: "permission", type: "object", value: { mode: "ask-first" } },
+          { op: "set", title: "capabilityAdds", value: ["Slack"] },
+        ],
+        ack: "Drafted a daily Slack DM summarizer.",
+      },
+      empty,
+    );
+    expect(d).toMatchObject({ name: "Daily Slack DM Summarizer", permission: { mode: "ask-first" }, capabilityAdds: ["Slack"] });
+  });
+
+  it("reads an edit's rename and a removal", () => {
+    const rename = normalizeDecision(
+      { mode: "edit", fields: [{ op: "set", title: "name", value: "Inbox Triage" }, { op: "set", title: "handle", value: "inbox-triage" }], ack: "Renamed it." },
+      filled,
+    );
+    expect(rename).toMatchObject({ mode: "edit", name: "Inbox Triage", handle: "inbox-triage" });
+    expect(rename.fields).toEqual(expect.arrayContaining(["name", "handle"]));
+
+    const removal = normalizeDecision(
+      { mode: "edit", fields: [{ op: "remove", hub: "mcp", id: "google" }], ack: "Removed Gmail." },
+      { ...filled, message: "remove Gmail, I only want Spaces" },
+    );
+    expect(removal.capabilityRemovals).toEqual([{ hub: "mcp", id: "google" }]);
+  });
+
+  it("keeps a titled op that is not a canvas field as a custom property, and leaves the usual shape alone", () => {
+    const out = unfoldFieldOps({ mode: "draft", fields: [{ op: "set", title: "Budget", type: "number", value: "500" }] });
+    expect(out["properties"]).toEqual([{ op: "set", title: "Budget", type: "number", value: "500" }]);
+    const usual = { mode: "edit", fields: ["name"], name: "X" };
+    expect(unfoldFieldOps(usual)).toBe(usual);
   });
 });

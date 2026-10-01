@@ -26,7 +26,8 @@ export function useOAuthReturn(): void {
   useEffect(() => {
     if (!result || !ready || handled.current) return;
     handled.current = true;
-    const label = mcp.data?.servers.find(server => server.type === result.type)?.name ?? result.type;
+    const label =
+      mcp.data?.servers.find(server => server.type === result.type)?.name ?? result.type;
     if (result.ok) {
       void queryClient.invalidateQueries({ queryKey: ['claw-mcp', user?.id] });
       toast.success(oauthReturnMessage(result, label));

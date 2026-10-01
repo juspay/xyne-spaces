@@ -30,6 +30,30 @@ const MAIN_ENDPOINT: Endpoint = { url: LITELLM.url, apiKey: LITELLM.apiKey, mode
 /** The Build chat's conversational answers. No fallback here: the caller retries on the fast one. */
 const TALK_ENDPOINT: Endpoint = { url: LITELLM.url, apiKey: LITELLM.apiKey, model: LITELLM.talkModel };
 const SUGGEST_DOWN_MS = 60_000;
+/**
+ * Answers worth one more try: rate limited, or the proxy briefly unable to reach
+ * the model. Under load the fast endpoint returns these, or drops the
+ * connection, for a share of calls that succeed when sent again a moment later.
+ */
+const RETRYABLE_STATUS = new Set([429, 502, 503, 504]);
+const RETRY_DELAY_MS = { min: 350, max: 900 };
+
+/** Waits a short random beat (so parallel retries don't land together); false if cancelled meanwhile. */
+function retryPause(signal: AbortSignal): Promise<boolean> {
+  const ms = RETRY_DELAY_MS.min + Math.random() * (RETRY_DELAY_MS.max - RETRY_DELAY_MS.min);
+  return new Promise((resolve) => {
+    if (signal.aborted) return resolve(false);
+    const timer = setTimeout(() => {
+      signal.removeEventListener("abort", onAbort);
+      resolve(true);
+    }, ms);
+    const onAbort = (): void => {
+      clearTimeout(timer);
+      resolve(false);
+    };
+    signal.addEventListener("abort", onAbort, { once: true });
+  });
+}
 let suggestDownUntil = 0;
 
 /** Endpoints to try, in order: the suggest proxy (unless it just failed to connect), then the main one. */
@@ -139,12 +163,29 @@ async function post(
       return request(endpoint);
     }
   };
+  // One more try, within the same time budget, for a dropped connection or a
+  // retryable status.
+  const sendWithRetry = async (thinkingOff: boolean): Promise<Response> => {
+    let res: Response;
+    try {
+      res = await send(thinkingOff);
+    } catch (err) {
+      if (signal.aborted || !(await retryPause(signal))) throw err;
+      log.warn(`[authoring] ${endpoint.url} connection failed; retrying once`);
+      return send(thinkingOff);
+    }
+    if (!RETRYABLE_STATUS.has(res.status) || signal.aborted) return res;
+    await res.body?.cancel().catch(() => undefined);
+    if (!(await retryPause(signal))) return res;
+    log.warn(`[authoring] ${endpoint.url} returned ${res.status}; retrying once`);
+    return send(thinkingOff);
+  };
   try {
-    let res = await send(true);
+    let res = await sendWithRetry(true);
     if (res.status === 400) {
       // A proxy that does not know the thinking params rejects them; retry without.
       const text = await res.text().catch(() => "");
-      if (/reasoning|thinking/i.test(text)) res = await send(false);
+      if (/reasoning|thinking/i.test(text)) res = await sendWithRetry(false);
       else throw new AuthoringLlmError("http", `LLM returned 400: ${text.slice(0, 160)}`, 400);
     }
     if (!res.ok) {

@@ -9,6 +9,7 @@ import { useMcpCredentialFields } from '../../../routes/AIScreen/library/shared/
 import { McpLogo } from '../../../routes/AIScreen/library/shared/pickers/mcp/McpLogo';
 import { McpConnectDialog } from '../../../routes/AIScreen/library/mcp/detail/McpConnectDialog';
 import { openOAuthConsent } from '../../../routes/AIScreen/library/shared/pickers/mcp/openOAuthConsent';
+import { SPACES_SESSION_SERVER_TYPES } from '../../../routes/AIScreen/library/shared/pickers/mcp/mcpConnectStrategy';
 import {
   autoConnectSpaces,
   createMcpConnection,
@@ -47,6 +48,17 @@ export interface McpSuggestProps {
   totalCount?: number;
 }
 
+/**
+ * Connecting for something that needs the connector on it too (the agent in
+ * the create page's test chat): Connect puts it there first, then signs in
+ * only if the account still needs it, and a row reads Connected once both are
+ * done.
+ */
+export interface McpSuggestAttach {
+  isAttached: (server: McpServer) => boolean;
+  onAttach: (server: McpServer) => void;
+}
+
 export const McpSuggestNode: React.FC<{ node: FlowComponent; children?: React.ReactNode }> = ({
   node,
 }) => <McpSuggestCard {...(node.props as McpSuggestProps | undefined)} style={node.style} />;
@@ -61,15 +73,17 @@ export function McpSuggestCard({
   style,
   fullWidth = false,
   linkRows = true,
+  attach,
   ...rest
 }: McpSuggestProps & {
   style?: React.CSSProperties | undefined;
   fullWidth?: boolean;
   linkRows?: boolean;
+  attach?: McpSuggestAttach | undefined;
 }): React.ReactElement | null {
   const props: McpSuggestProps = rest;
   const { user } = useAuth();
-  const { entries, connectedServerIds, refetch } = useMcpCatalog();
+  const { entries, connectedServerIds, orgCoveredServerIds, refetch } = useMcpCatalog();
   const { ensureFieldsFor } = useMcpCredentialFields();
   const [busyType, setBusyType] = useState<string | null>(null);
   const [errorType, setErrorType] = useState<string | null>(null);
@@ -87,11 +101,22 @@ export function McpSuggestCard({
 
   const serverFor = (serverType: string): McpServer | undefined =>
     entries.find(entry => entry.server?.type === serverType)?.server;
+  // Attaching asks whether it would work, so the org's key or the Spaces
+  // session count; the plain card shows only the user's own connections.
+  const accountReady = (server: McpServer): boolean =>
+    connectedServerIds.has(server.id) ||
+    (attach !== undefined &&
+      (orgCoveredServerIds.has(server.id) || SPACES_SESSION_SERVER_TYPES.has(server.type)));
 
   const handleConnect = async (serverType: string): Promise<void> => {
     const server = serverFor(serverType);
     if (!server || !user?.id) return;
     setErrorType(null);
+    if (attach) {
+      // Before any sign-in, which may leave the page and come back.
+      if (!attach.isAttached(server)) attach.onAttach(server);
+      if (accountReady(server)) return;
+    }
 
     // Local development: no sign-in or form, just a short wait (fakeMcpConnect.ts).
     if (FAKE_MCP_CONNECT) {
@@ -149,7 +174,7 @@ export function McpSuggestCard({
           {connectors.map(item => {
             const server = serverFor(item.serverType);
             const isConnected = server
-              ? connectedServerIds.has(server.id)
+              ? accountReady(server) && (attach?.isAttached(server) ?? true)
               : (item.connected ?? false);
             const entry = entries.find(e => e.server?.type === item.serverType);
             const details = (

@@ -7,7 +7,11 @@ import type { ReactElement } from 'react';
  * dark theme and does not set the `dark` class, so the two are switched on `data-theme`.
  * One component serves every overlay version.
  */
-export function CreateEmptyState(): ReactElement {
+export function CreateEmptyState({
+  title = "Let's build your agent",
+}: {
+  title?: string;
+} = {}): ReactElement {
   return (
     <div
       className='flex h-full min-h-[12rem] animate-fadeUp flex-col items-center justify-center gap-7 px-6'
@@ -30,7 +34,7 @@ export function CreateEmptyState(): ReactElement {
         className='hidden size-16 shrink-0 [[data-theme=midnight]_&]:block'
       />
       <h1 className="text-center font-['Google_Sans_Flex',Inter,sans-serif] text-[36px] font-medium leading-[1.2] tracking-[-0.72px] text-foreground [font-variation-settings:'GRAD'_0,'ROND'_0,'wdth'_100]">
-        Let&apos;s build your agent
+        {title}
       </h1>
     </div>
   );

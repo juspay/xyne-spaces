@@ -92,7 +92,10 @@ export function sanitizeAgentCanvasName(raw: string): string {
     value = value.replace(/^\*?\s*name\s*:?\s*/i, '').trim();
   }
   value = value.replace(/^handle\s*:?\s*/i, '').trim();
-  return cleanDraftLine(value, 80);
+  const cleaned = cleanDraftLine(value, 80);
+  // Typing runs through here too: keep the space between words while it's
+  // being typed. Save trims the name.
+  return cleaned && /\s$/.test(raw) ? `${cleaned} ` : cleaned;
 }
 
 /** Prefer explicit name / @handle from the model's chat draft over prompt heuristics. */

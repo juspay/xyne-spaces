@@ -59,7 +59,10 @@ describe('build chat storage', () => {
     const now = at.getTime() + 1000;
     const withCards: BuildChatThread = {
       ...thread,
-      extras: { ...thread.extras, b2: { activities: [], suggestions: [], connect: ['github', 'slack'] } },
+      extras: {
+        ...thread.extras,
+        b2: { activities: [], suggestions: [], connect: ['github', 'slack'] },
+      },
     };
     const restored = parseStoredBuildChat(serializeBuildChat(withCards, now), now);
     expect(restored?.extras['b2']?.connect).toEqual(['github', 'slack']);

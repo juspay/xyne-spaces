@@ -183,6 +183,8 @@ export interface DraftCatalog {
     kind: "mcp" | "builtin" | "custom" | "gateway";
     /** Set for MCP servers that are not connected for this user. */
     requiresConnection?: string;
+    /** What the product is for, in one line (the server's own description). */
+    description?: string;
     readTools: Array<{ name: string; description: string; riskLevel: string }>;
     writeTools: Array<{ name: string; description: string; riskLevel: string }>;
   }>;

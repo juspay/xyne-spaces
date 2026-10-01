@@ -13,6 +13,11 @@ export interface SaveGateInput {
   /** Why the Schedule property can't be armed (a past time, a bad cron), if it can't. */
   scheduleProblem?: string | null;
   nameCheck: { checking: boolean; nameError: string | null; slugError: string | null };
+  /**
+   * Changing a saved agent: Save needs a change, and the instructions only
+   * have to meet the contract once they've been changed (older agents predate it).
+   */
+  editing?: { dirty: boolean; instructionsChanged: boolean };
 }
 
 export interface SaveGate {
@@ -28,9 +33,10 @@ export function computeSaveGate(input: SaveGateInput): SaveGate {
   if (input.created) return blocked('This agent is already saved.');
   if (input.creating) return blocked('Saving…');
   if (input.drafting) return blocked('Wait for the draft to finish.');
+  if (input.editing && !input.editing.dirty) return blocked('Nothing has changed yet.');
   if (!input.name.trim()) return blocked('Add a name.');
   if (!input.slug.trim()) return blocked('Add a handle.');
-  if (!input.description.trim()) return blocked('Add a description.');
+  if (!input.editing && !input.description.trim()) return blocked('Add a description.');
   if (!input.instructions.trim()) return blocked('Add instructions.');
   if (input.conflictCount > 0) {
     return blocked('Choose "Keep mine" or "Use chat" on the highlighted fields.');
@@ -38,7 +44,10 @@ export function computeSaveGate(input: SaveGateInput): SaveGate {
   if (input.nameCheck.checking) return blocked('Checking the name and handle…');
   if (input.nameCheck.slugError) return blocked(`@${input.slug} is taken. Change the handle.`);
   if (input.nameCheck.nameError) return blocked(input.nameCheck.nameError);
-  const contract = validateSystemPromptContract(input.instructions);
+  const contract =
+    input.editing && !input.editing.instructionsChanged
+      ? { ok: true, error: null }
+      : validateSystemPromptContract(input.instructions);
   if (!contract.ok) return blocked(contract.error ?? 'Instructions are incomplete.');
   if (input.scheduleProblem) return blocked(input.scheduleProblem);
   return { canSave: true, reason: null };

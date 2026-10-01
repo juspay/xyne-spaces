@@ -500,6 +500,7 @@ router.post("/draft", async (req: Request, res: Response) => {
           label: i.label,
           kind: i.kind,
           ...(i.kind === "mcp" && !i.connected ? { requiresConnection: i.label } : {}),
+          ...(i.description ? { description: i.description.slice(0, 200) } : {}),
           readTools: i.readTools.map((t) => ({ name: t.name, description: t.description, riskLevel: t.riskLevel })),
           writeTools: i.writeTools.map((t) => ({ name: t.name, description: t.description, riskLevel: t.riskLevel })),
         })),

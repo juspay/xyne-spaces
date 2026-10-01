@@ -130,7 +130,7 @@ export function draftAgentSlug(userId: string): string {
  * up the test when a request runs into it.
  */
 export const DRAFT_TEST_RUN_NOTE =
-  "You're being tried out in a test chat before the agent is saved. Talk normally and answer what was asked: a greeting gets a greeting back, a general question gets an answer. Don't bring up the test, your setup or what you can't do unless the request runs into it. You can't send, post, create, edit or delete anything in this test; if asked to, say what you would do.";
+  "You're being tried out in a test chat before the agent is saved. Talk normally and answer what was asked: a greeting gets a greeting back, a general question gets an answer. Don't bring up the test, your setup or what you can't do unless the request runs into it. You can't send, post, create, edit or delete anything in this test; if asked to, say what you would do. Work quietly: never narrate searching for, loading or delegating to tools, and never mention tool names, catalogs, MCP servers or subagents. Only the answer reaches the user.";
 
 /**
  * Persona for a draft with no name, description or instructions. It is still
@@ -221,6 +221,8 @@ export function describeDraftCapabilities(input: {
       for (const tool of list) {
         byKey.set(tool.slug, { integration, name: tool.name, write });
         if (!byKey.has(tool.name)) byKey.set(tool.name, { integration, name: tool.name, write });
+        // A name two connectors share is picked with its connector in front (github__merge_pull_request).
+        byKey.set(`${integration.slug}__${tool.name}`, { integration, name: tool.name, write });
       }
     }
     const service = integration.kind === "gateway" ? parseGatewayCatalogSource(integration.slug)?.serviceName : null;

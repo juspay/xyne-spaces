@@ -116,7 +116,10 @@ describe('nextRevealState', () => {
     state = nextRevealState(state, 'Keep this.\n\nOld ending.');
     const rewritten = nextRevealState(state, 'Keep this.\n\nNew ending.\n\nAnd more.');
     expect(rewritten.parts[0]).toBe(state.parts[0]);
-    expect(rewritten.parts.slice(1).map(part => part.text)).toEqual(['New ending.\n\n', 'And more.']);
+    expect(rewritten.parts.slice(1).map(part => part.text)).toEqual([
+      'New ending.\n\n',
+      'And more.',
+    ]);
     expect(rewritten.parts.slice(1).map(part => part.delay)).toEqual([0, expect.any(Number)]);
     expect(rewritten.parts[2]!.delay).toBeGreaterThan(0);
   });

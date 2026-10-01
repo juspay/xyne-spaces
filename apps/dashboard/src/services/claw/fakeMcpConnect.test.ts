@@ -13,13 +13,17 @@ vi.stubGlobal('window', {
   },
 });
 
-const { fakeConnect, fakeDisconnect, isFakeConnection, withFakeConnections } = await import(
-  './fakeMcpConnect'
-);
+const { fakeConnect, fakeDisconnect, isFakeConnection, withFakeConnections } =
+  await import('./fakeMcpConnect');
 
 const github = { id: 'srv-github', type: 'github', name: 'GitHub' } as McpServer;
 const slack = { id: 'srv-slack', type: 'slack', name: 'Slack' } as McpServer;
-const real = { id: 'c1', userId: 'u1', mcpServerId: 'srv-slack', mcpServer: slack } as UserConnection;
+const real = {
+  id: 'c1',
+  userId: 'u1',
+  mcpServerId: 'srv-slack',
+  mcpServer: slack,
+} as UserConnection;
 
 beforeEach(() => items.clear());
 

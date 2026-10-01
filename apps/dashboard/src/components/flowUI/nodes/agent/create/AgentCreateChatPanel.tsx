@@ -229,6 +229,8 @@ interface AgentCreateChatPanelProps {
   disabled?: boolean;
   /** Live draft pipeline phase — Braille + AnimatedLabel, not chat bubbles. */
   progressLabel?: string | null;
+  /** Changing a saved agent rather than building one: the empty state and hint say so. */
+  editing?: boolean;
   scripted?: boolean;
   scriptedMessages?: Message[];
   scriptedDraft?: string;
@@ -267,6 +269,7 @@ function StreamedAgentCreateChatPanel({
   onIncomingPhase,
   disabled,
   progressLabel = null,
+  editing = false,
 }: AgentCreateChatPanelProps & {
   onDraftTurn: (turn: DraftTurnArgs) => Promise<void>;
 }): ReactElement {
@@ -422,6 +425,7 @@ function StreamedAgentCreateChatPanel({
 
   return (
     <CreateChatLayout
+      editing={editing}
       empty={messages.length === 0 && !error}
       canvasError={error}
       messages={messages.filter(message => !fromCard.has(message.id))}
@@ -502,6 +506,7 @@ function LiveAgentCreateChatPanel({
   onIncomingPhase,
   disabled,
   progressLabel = null,
+  editing = false,
 }: AgentCreateChatPanelProps): ReactElement {
   const [messages, setMessages] = useState<Message[]>([]);
   const [conversationId, setConversationId] = useState('');
@@ -746,6 +751,7 @@ function LiveAgentCreateChatPanel({
 
   return (
     <CreateChatLayout
+      editing={editing}
       empty={empty}
       canvasError={canvasError}
       messages={messages}
@@ -814,6 +820,7 @@ function ScriptedAgentCreateChatPanel({
 }
 
 function CreateChatLayout({
+  editing = false,
   empty,
   canvasError,
   messages,
@@ -874,6 +881,8 @@ function CreateChatLayout({
   composerSlot?: ReactNode;
   /** Changes when the slot holds something new, so it animates in again. */
   composerSlotKey?: string;
+  /** Changing a saved agent: the empty state and hint ask what to change. */
+  editing?: boolean;
 }): ReactElement {
   const pinned = useStickToBottom();
   return (
@@ -912,7 +921,7 @@ function CreateChatLayout({
       )}
       <div className='flex-1 overflow-y-auto' onScroll={pinned.onScroll}>
         {empty && !progressLabel ? (
-          <CreateEmptyState />
+          <CreateEmptyState {...(editing ? { title: 'What should change?' } : {})} />
         ) : (
           <ul ref={pinned.listRef} className='flex flex-col pb-2'>
             {messages.map(message => {
@@ -1085,7 +1094,9 @@ function CreateChatLayout({
                 ref={composerRef}
                 appearance='create'
                 autoFocus={autoFocus}
-                placeholder='Describe what agent you want to build...'
+                placeholder={
+                  editing ? 'Describe what to change…' : 'Describe what agent you want to build...'
+                }
                 hideDisclaimer
                 showAgentSelector={false}
                 pending={pending}

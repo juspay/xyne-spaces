@@ -25,7 +25,8 @@ export function readOAuthReturn(params: URLSearchParams): OAuthReturn | null {
 
 export function oauthReturnMessage(result: OAuthReturn, label: string): string {
   if (result.ok) return `${label} connected`;
-  if (result.reason === 'access_denied') return `${label} wasn't connected: the sign-in was cancelled`;
+  if (result.reason === 'access_denied')
+    return `${label} wasn't connected: the sign-in was cancelled`;
   if (result.reason === 'expired' || result.reason === 'invalid_state') {
     return `${label} wasn't connected: the sign-in took too long. Try again.`;
   }
