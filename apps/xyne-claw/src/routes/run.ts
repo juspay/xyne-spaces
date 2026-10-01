@@ -132,7 +132,7 @@ import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
 import {
   parseToolsConfig,
   COPILOT_SYSTEM_INSTRUCTION,
-  REPO_CONFIGS,
+  getRepoConfig,
   getSandboxSession,
   probeSession,
   buildSandboxStoreKey,
@@ -3720,7 +3720,7 @@ export async function processTask(
       const pinnedRepoName =
         (agentConfig?.["sandboxRepo"] as string | undefined) ?? undefined;
       const pinnedRepo = pinnedRepoName
-        ? REPO_CONFIGS[pinnedRepoName]
+        ? await getRepoConfig(pinnedRepoName)
         : undefined;
       if (pinnedRepoName && pinnedRepo) {
         const installPkgs = pinnedRepo.steps

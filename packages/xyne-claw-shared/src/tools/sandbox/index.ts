@@ -26,3 +26,14 @@ export {
 } from "./tools.js";
 
 export { REPO_CONFIGS, SBX_GIT } from "./repo-configs.js";
+export {
+  buildEffectiveRepoConfigs,
+  getCachedRepoConfigs,
+  getRepoConfig,
+  getRepoConfigs,
+  invalidateRepoConfigCache,
+  setRepoConfigLoader,
+  type RepoConfigLoader,
+  type RepoConfigMap,
+  type RepoConfigOverride,
+} from "./repo-config-source.js";
