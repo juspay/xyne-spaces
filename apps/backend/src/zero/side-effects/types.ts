@@ -66,6 +66,8 @@ export interface DelayedMessagePreviousValue {
 export interface ChannelPreviousValue {
   name: string;
   scopeType: string | null;
+  type?: string | null;
+  isArchived?: boolean | null;
 }
 
 export interface EmailReadPreviousValue {
