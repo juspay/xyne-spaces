@@ -12,7 +12,7 @@ import { usersRouter } from "../routes/users.js";
 import { gatewaysRouter } from "../routes/gateways.js";
 import { webhookRouter } from "../routes/webhook.js";
 import { flowActionRouter } from "../routes/flow-action.js";
-import { twinDraftInternalRouter } from "../routes/twin-draft.js";
+import { twinDraftInternalRouter } from "../routes/twin-draft-internal.js";
 import { attachmentsInternalRouter } from "../routes/attachments.js";
 import { appConnectorsInternalRouter } from "../routes/app-connectors-internal.js";
 import { agentsRouter } from "../routes/agents.js";

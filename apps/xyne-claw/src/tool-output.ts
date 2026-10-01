@@ -37,7 +37,8 @@ import { metric } from "./metrics.js";
 import { createLogger } from "./logger.js";
 import { optEnabled } from "./optimizations.js";
 import { siftToolResult } from "./result-sift.js";
-import { currentRunTask } from "./run-context.js";
+import { currentRunMessages, currentRunTask } from "./run-context.js";
+import { currentToolCall } from "./tool-call-context.js";
 const log = createLogger("tool-output");
 
 // MCP/custom tool results are often structure-heavy JSON, so we use a tighter
@@ -212,10 +213,15 @@ async function siftIntoContext(
   clean: string,
   cap: number,
 ): Promise<string | null> {
+  const call = currentToolCall();
   const outcome = await siftToolResult({
     toolName,
     content: clean,
     task: currentRunTask(),
+    // R1: the classifier sees the conversation so far and this call's args,
+    // not just the latest message.
+    messages: currentRunMessages(),
+    ...(call ? { args: call.args } : {}),
     charBudget: cap,
   }).catch(() => null);
   if (!outcome) return null;
@@ -267,9 +273,17 @@ export async function promoteIfOversized(
 ): Promise<string> {
   const cap = inlineCapBytes ?? inlineCapForTool(toolName);
   const clean = stripControlChars(rawContent);
-  if (optEnabled("jev_result_sift") && isRetrievalTool(toolName)) {
+  // Per-call choice (the `sift` tool param) wins over the agent default, which
+  // covers retrieval tools. Only one pass sifts: an MCP result goes through
+  // this function twice (mcp.ts, then the custom-tool wrapper).
+  const call = currentToolCall();
+  const siftWanted = call?.sift ?? (optEnabled("jev_result_sift") && isRetrievalTool(toolName));
+  if (siftWanted && !call?.sifted) {
     const sifted = await siftIntoContext(outputBaseDir, category, toolName, clean, cap);
-    if (sifted) return sifted;
+    if (sifted) {
+      if (call) call.sifted = true;
+      return sifted;
+    }
   }
   if (clean.length <= cap) {
     if (!forceFile) return clean;

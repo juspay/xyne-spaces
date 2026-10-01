@@ -30,6 +30,50 @@ export const OPTIMIZATIONS = {
     summary: "Verify Responses asks Jev first: drafts Jev is confident are fine are delivered without the LLM verifier, the rest go to the LLM as before, and when the LLM verifier is unavailable a high-risk draft is sent back instead of passing unchecked",
     defaultOn: false,
   },
+  jev_twin_gate: {
+    summary: "the Digital Twin's respond/skip gate asks Jev first: a score ≥ 0.7 lets the twin run, ≤ 0.3 skips it as noise, anything in between (or Jev down) goes to the LLM gate as before",
+    defaultOn: true,
+  },
+  jev_twin_delivery_check: {
+    summary: "every accepted twin_deliver is scored by Jev (answers the ask, grounded, right destination); the scores ride along with the delivery for the approver and the pipeline log — advisory, never blocks",
+    defaultOn: true,
+  },
+  jev_memory_candidate_check: {
+    summary: "memory-curator candidates are checked by Jev against the user's most similar existing memories: clear duplicates and noise are dropped, the rest are ranked and carry a Jev score that auto-approval also requires",
+    defaultOn: true,
+  },
+  jev_memory_file_pick: {
+    summary: "a twin run loads the persona files Jev scores as needed for this message (max 3, soul.md always) instead of the fixed toggled set; Jev down → the toggled set",
+    defaultOn: true,
+  },
+  jev_memory_update_check: {
+    summary: "each nightly persona-file rewrite is scored by Jev against the old file and the approved facts; a rewrite Jev rejects keeps the old file",
+    defaultOn: true,
+  },
+  jev_context_gate: {
+    summary: "before the agent's answer is accepted, Jev scores whether the evidence gathered supports a complete answer; when it clearly does not, the agent is nudged once to fetch more context",
+    defaultOn: false,
+  },
+  jev_mode_router: {
+    summary: "plain-text messages are routed to /review, /learn or no mode by Jev when it is confident; otherwise the LLM router decides as before",
+    defaultOn: true,
+  },
+  jev_goal_prefilter: {
+    summary: "a /goal loop's done-check asks Jev first; only when Jev is unsure (or down) does the LLM boss judge run",
+    defaultOn: true,
+  },
+  jev_prefetch_gate: {
+    summary: "query prefetch asks Jev whether the first message names anything worth looking up; a clear no skips the LLM entity extractor",
+    defaultOn: true,
+  },
+  jev_checkpoint_precheck: {
+    summary: "the 'final answer looks like a compaction checkpoint' nudge asks Jev first; when Jev is confident the text is a real answer, the extra LLM turn is skipped",
+    defaultOn: true,
+  },
+  jev_tool_progress: {
+    summary: "on long tool loops, Jev scores whether the recent calls are still making progress; clear stalls get the converge nudge early instead of waiting for the fixed call count",
+    defaultOn: false,
+  },
   catalog_full_index: {
     summary: "the system-prompt tool index names every loadable tool, fitted to a size budget, instead of collapsing catalogs over 15 tools to a single line — so the model loads by exact name rather than guessing search terms",
     defaultOn: false,

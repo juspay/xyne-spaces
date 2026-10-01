@@ -229,12 +229,25 @@ export async function buildJevCompaction(
     return null;
   }
 
+  // jevScoreItems only returns null when EVERY batch fails. A partial failure
+  // (one batch timed out) leaves holes; reading a hole as score 0 would drop
+  // calls nobody judged. Too many holes → fall back; a few → keep an excerpt.
+  const missing = scorable.filter((c) => !keepCall.has(c.id) || !keepResult.has(c.id)).length;
+  if (missing > Math.max(1, Math.floor(scorable.length * 0.1))) {
+    metric.count("jev_compaction_rejected", { reason: "partial_scores" });
+    log.warn(`[jev-compaction] ${missing}/${scorable.length} calls unscored — falling back to pi compaction`);
+    return null;
+  }
+
   type Verdict = "verbatim" | "truncated" | "drop";
   const verdictFor = (call: Call): Verdict => {
     if (call.pinned) return "verbatim";
     if (unscored.has(call.id)) return "drop";
-    if ((keepCall.get(call.id) ?? 0) < threshold) return "drop";
-    return (keepResult.get(call.id) ?? 0) >= threshold ? "verbatim" : "truncated";
+    const callScore = keepCall.get(call.id);
+    const resultScore = keepResult.get(call.id);
+    if (callScore === undefined || resultScore === undefined) return "truncated";
+    if (callScore < threshold) return "drop";
+    return resultScore >= threshold ? "verbatim" : "truncated";
   };
 
   // One renderer for both the selected window and the keep-everything baseline,

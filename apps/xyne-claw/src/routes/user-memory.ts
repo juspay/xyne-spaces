@@ -10,9 +10,13 @@ import { Router } from "express";
 import type { Request, Response } from "express";
 import { validateS2SKey } from "../middleware/auth.js";
 import { distillUserMemory } from "../user-memory-curator.js";
-import { synthesizeMemoryFile, type SynthesizeFileRequest } from "../twin-soul-synthesizer.js";
+import { synthesizeMemoryFile } from "../twin-soul-synthesizer.js";
+import { checkMemoryUpdate } from "../twin-soul-update-check.js";
+import { applyClassifierToTrace, checkMemoryCandidates } from "../user-memory-candidate-check.js";
 import { decideRespond, type RespondGateRequest } from "../twin-respond-gate.js";
 import type {
+  ExistingUserMemory,
+  SynthesizeFileRequest,
   UserMemoryCuratorTrace,
   UserMemoryDistillRequest,
   UserMemoryRecord,
@@ -26,6 +30,8 @@ export const userMemoryRouter = Router();
 // Mirrors the curator's model resolution so the minimal empty-records trace
 // reports the same model the LLM path would have used.
 const CURATOR_MODEL = process.env["LITELLM_MODEL"] ?? "claude-haiku-4-5-20251001";
+
+const strings = (v: unknown): string[] => (Array.isArray(v) ? v.filter((x): x is string => typeof x === "string") : []);
 
 userMemoryRouter.post("/internal/user-memory/distill", validateS2SKey, async (req: Request, res: Response) => {
   try {
@@ -63,7 +69,7 @@ userMemoryRouter.post("/internal/user-memory/distill", validateS2SKey, async (re
     // of duplicate. Shape-filter defensively; a malformed entry just drops.
     const existingMemories = Array.isArray(body.existingMemories)
       ? body.existingMemories.filter(
-          (m): m is NonNullable<UserMemoryDistillRequest["existingMemories"]>[number] =>
+          (m): m is ExistingUserMemory =>
             !!m && typeof m === "object" &&
             typeof (m as { id?: unknown }).id === "string" &&
             typeof (m as { subsystem?: unknown }).subsystem === "string" &&
@@ -71,12 +77,18 @@ userMemoryRouter.post("/internal/user-memory/distill", validateS2SKey, async (re
         )
       : [];
 
-    const { candidates, trace } = await distillUserMemory(
+    const distilled = await distillUserMemory(
       body.userId,
       { from: body.window.from, to: body.window.to },
       records,
       existingMemories,
     );
+    // R8: classifier second opinion against the user's similar stored memories.
+    const { candidates, summary } = await checkMemoryCandidates(distilled.candidates, existingMemories).catch(() => ({
+      candidates: distilled.candidates,
+      summary: null,
+    }));
+    const trace = summary ? applyClassifierToTrace(distilled.trace, summary) : distilled.trace;
     res.json({ success: true, candidates, ...(includeTrace ? { trace } : {}) });
   } catch (err) {
     log.error(`[user-memory-route] distill failed: ${err instanceof Error ? err.message : String(err)}`);
@@ -96,19 +108,34 @@ userMemoryRouter.post("/internal/user-memory/synthesize-file", validateS2SKey, a
       res.status(400).json({ success: false, error: "Missing fileName or facts[]" });
       return;
     }
-    const result = await synthesizeMemoryFile({
+    const base = {
       fileName: body.fileName,
       description: typeof body.description === "string" ? body.description : "",
-      facts: body.facts.filter((f): f is string => typeof f === "string"),
+      facts: strings(body.facts),
+    };
+    const currentContent = typeof body.currentContent === "string" ? body.currentContent : undefined;
+    const result = await synthesizeMemoryFile({
+      ...base,
       maxChars: typeof body.maxChars === "number" ? body.maxChars : 20_000,
-      ...(typeof body.currentContent === "string" ? { currentContent: body.currentContent } : {}),
+      ...(currentContent !== undefined ? { currentContent } : {}),
       ...(body.preserveEdits === true ? { preserveEdits: true } : {}),
     });
+    // R10: nightly rewrites (claw-auth sends check:true) are scored before
+    // claw-auth writes them; only verdict "accept" replaces the old file.
+    const check =
+      body.check === true && result.content
+        ? await checkMemoryUpdate({
+            ...base,
+            ...(currentContent !== undefined ? { oldContent: currentContent } : {}),
+            newContent: result.content,
+          }).catch(() => null)
+        : null;
     res.json({
       success: !!result.content,
       content: result.content,
       ...(result.error ? { error: result.error } : {}),
       ...(result.trace ? { trace: result.trace } : {}),
+      ...(check ? { check } : {}),
     });
   } catch (err) {
     log.error(`[user-memory-route] synthesize-file failed: ${err instanceof Error ? err.message : String(err)}`);
@@ -135,10 +162,8 @@ userMemoryRouter.post("/internal/user-memory/should-respond", validateS2SKey, as
       ...(typeof body.channelName === "string" ? { channelName: body.channelName } : {}),
       ...(typeof body.channelType === "string" ? { channelType: body.channelType } : {}),
       ...(typeof body.senderName === "string" ? { senderName: body.senderName } : {}),
-      patterns: Array.isArray(body.patterns) ? body.patterns.filter((p): p is string => typeof p === "string") : [],
-      relevantContext: Array.isArray(body.relevantContext)
-        ? body.relevantContext.filter((p): p is string => typeof p === "string")
-        : [],
+      patterns: strings(body.patterns),
+      relevantContext: strings(body.relevantContext),
       ...(typeof body.stats === "string" ? { stats: body.stats } : {}),
       ...(body.isDirectMessage === true ? { isDirectMessage: true } : {}),
       ...(body.isThreadParticipant === true ? { isThreadParticipant: true } : {}),
