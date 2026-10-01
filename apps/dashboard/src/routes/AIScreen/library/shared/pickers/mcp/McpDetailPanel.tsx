@@ -10,7 +10,7 @@ import {
   type McpCatalogEntry,
   type McpSelection,
 } from './mcpCatalog';
-import { McpConnectForm } from './McpConnectForm';
+import { McpConnectFlow } from './McpConnectFlow';
 import Tooltip from '@/components/ui/Tooltip';
 import { Pill } from '../../primitives/Pill';
 import { McpLogo } from './McpLogo';
@@ -124,7 +124,7 @@ export function McpDetailPanel({
 
   const [authOpen, setAuthOpen] = useState(false);
   const connect = useMcpConnect(server, () => setAuthOpen(false));
-  const needsConnection = connect.strategy === 'oauth' || connect.fields.length > 0;
+  const needsConnection = connect.needsKey;
   const connectionHint = connected
     ? 'Runs with the key you connected.'
     : orgCovered
@@ -206,46 +206,12 @@ export function McpDetailPanel({
         {server && authOpen && !connected && (
           <Section>
             <div className='flex w-full flex-col gap-2 py-1'>
-              {connect.strategy === 'oauth' ? (
-                <>
-                  <p className='text-xs leading-4 tracking-[-0.24px] text-muted-foreground'>
-                    {entry.label} signs in through your browser. You will come back here once it is
-                    done.
-                  </p>
-                  {connect.error && (
-                    <p className='text-xs leading-4 text-destructive'>{connect.error}</p>
-                  )}
-                  <div className='flex items-center justify-end gap-1.5'>
-                    <button
-                      type='button'
-                      onClick={() => setAuthOpen(false)}
-                      data-track-category='Claw Agents'
-                      data-track-name='Create agent v2: cancel MCP oauth'
-                      className='flex h-7 items-center justify-center rounded-lg bg-card px-2 py-1.5 text-sm font-medium leading-5 text-foreground transition-colors hover:bg-muted'
-                    >
-                      Cancel
-                    </button>
-                    <button
-                      type='button'
-                      disabled={connect.isPending}
-                      onClick={() => connect.connect({})}
-                      data-track-category='Claw Agents'
-                      data-track-name='Create agent v2: start MCP oauth'
-                      className='flex h-7 items-center justify-center rounded-lg bg-foreground/[0.06] px-2 py-1.5 text-sm font-medium leading-5 text-foreground transition-colors hover:bg-foreground/[0.09] disabled:cursor-not-allowed disabled:opacity-50'
-                    >
-                      {connect.isPending ? 'Redirecting…' : 'Continue'}
-                    </button>
-                  </div>
-                </>
-              ) : (
-                <McpConnectForm
-                  fields={connect.fields}
-                  isPending={connect.isPending}
-                  error={connect.error}
-                  onCancel={() => setAuthOpen(false)}
-                  onSubmit={connect.connect}
-                />
-              )}
+              <McpConnectFlow
+                label={entry.label}
+                connect={connect}
+                onCancel={() => setAuthOpen(false)}
+                trackPrefix='Create agent v2'
+              />
             </div>
           </Section>
         )}

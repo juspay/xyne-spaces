@@ -1,5 +1,5 @@
 import { ReactElement, useMemo, useState } from 'react';
-import { Link, useNavigate, useSearchParams } from 'react-router-dom';
+import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { ChevronRight, Plus, Search } from 'lucide-react';
 import { cn } from '@/utils/classNames';
 import { Button } from '@/components/ui/Button';
@@ -115,6 +115,10 @@ const AgentsTab = (): ReactElement => {
 
   const { user } = useAuth();
   const userId = user?.id;
+  const { workspaceId } = useParams<{ workspaceId?: string }>();
+  const createPath = workspaceId
+    ? `/${workspaceId}/ai/library/agent/create`
+    : '/ai/library/agent/create';
 
   const navigate = useNavigate();
 
@@ -233,7 +237,7 @@ const AgentsTab = (): ReactElement => {
               <Button
                 type='button'
                 className='shrink-0'
-                onClick={() => void navigate('/claw-agents/create')}
+                onClick={() => void navigate(createPath)}
                 data-track-category='Claw Agents'
                 data-track-name='GO_TO_CREATE_AGENT'
               >

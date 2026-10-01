@@ -132,6 +132,10 @@ const XyneAIRequestSchemaV2 = z.object({
   // word, so camelCase and snake_case are identical — no dual key needed
   // (unlike webSearchEnabled/web_search_enabled above).
   instant: z.boolean().optional().default(false),
+  // Worker sends snake_case; agent-chat uses camelCase. Either pin strips
+  // tools on the claw-auth run-stream (same empty-tools instant path).
+  disableTools: z.boolean().optional().default(false),
+  disable_tools: z.boolean().optional().default(false),
   // cmd+K: the palette tab the `cmdk-answer` agent searches before answering.
   tab: z.string().max(40).optional(),
   // Per-run thinking level from the composer's dropdown. Absent = the agent's
@@ -276,6 +280,8 @@ export class XyneAIControllerV2 {
       deepResearchEnabled: deepResearchEnabledCC,
       deep_research_enabled: deepResearchEnabledSC,
       instant,
+      disableTools: disableToolsCC,
+      disable_tools: disableToolsSC,
       thinkingLevel,
       studioMode,
       sandboxMode,
@@ -325,6 +331,7 @@ export class XyneAIControllerV2 {
     const createCanvasEnabled = createCanvasEnabledCC || createCanvasEnabledSC;
     const webSearchEnabled = webSearchEnabledCC || webSearchEnabledSC;
     const deepResearchEnabled = deepResearchEnabledCC || deepResearchEnabledSC;
+    const disableTools = disableToolsCC || disableToolsSC;
 
     // Snake-case fallback for IDs sent by Web Worker
     const effectiveCanvasIds = canvasIds?.length ? canvasIds : canvas_ids;
@@ -536,6 +543,7 @@ export class XyneAIControllerV2 {
           webSearchEnabled,
           deepResearchEnabled,
           instant,
+          ...(disableTools ? { disableTools: true } : {}),
           // cmd+K scopes the agent's own search to the tab the answer is shown on.
           ...(agentSlug === CMDK_ANSWER_AGENT_SLUG && { answerScope: tab ?? 'all' }),
           ...(thinkingLevel ? { thinkingLevel } : {}),

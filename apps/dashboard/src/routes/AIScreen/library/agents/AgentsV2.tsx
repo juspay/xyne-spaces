@@ -5,7 +5,9 @@ import { useAuth } from '@/hooks/useAuth';
 import { useClawAuthAgents } from '@/hooks/useClawAuthAgents';
 import type { Agent } from '@/services/claw/clawAuthAgentTypes';
 import { groupAgentsByCategory } from '@/services/claw/agentCategory';
-import { LibraryCard, LibraryIconTile } from '../shared/components/LibraryCard';
+import { AgentBotAvatar } from '@/components/agents/AgentBotAvatar';
+import { agentAvatarKey } from '@/components/agents/agentAvatarKey';
+import { LibraryCard } from '../shared/components/LibraryCard';
 import { LibraryFilterMenu } from '../shared/components/LibraryFilterMenu';
 import {
   LibrarySections,
@@ -14,6 +16,8 @@ import {
 } from '../shared/components/LibraryTabShell';
 import { LibraryToolbarPortal } from '../shared/components/LibraryToolbarSlot';
 import { useCategoryFilter } from '../shared/hooks/useCategoryFilter';
+import { useSavedAgentDrafts } from '@/components/flowUI/nodes/agent/create/useSavedAgentDrafts';
+import { AgentDraftCard } from './AgentDraftCard';
 
 const AgentsV2 = ({ query }: { query: string }): ReactElement => {
   const { workspaceId } = useParams<{ workspaceId?: string }>();
@@ -23,6 +27,8 @@ const AgentsV2 = ({ query }: { query: string }): ReactElement => {
 
   const { user } = useAuth();
   const userId = user?.id;
+  // Saved create-canvas drafts, from this browser. Listed above everything else.
+  const { drafts, remove: removeDraft } = useSavedAgentDrafts(workspaceId, userId);
 
   const q = query.trim();
   const searched = useMemo(
@@ -40,6 +46,18 @@ const AgentsV2 = ({ query }: { query: string }): ReactElement => {
     groupBy: groupAgentsByCategory,
   });
 
+  // Drafts have no category yet, so a category filter hides them.
+  const shownDrafts = useMemo(
+    () =>
+      activeId
+        ? []
+        : searchByNameThenDescription(drafts, q, draft => ({
+            name: draft.form.name,
+            description: draft.form.description,
+          })),
+    [activeId, drafts, q],
+  );
+
   const sections = useMemo(() => {
     const mine: Agent[] = [];
     const global: Agent[] = [];
@@ -53,13 +71,13 @@ const AgentsV2 = ({ query }: { query: string }): ReactElement => {
   }, [filtered, userId]);
 
   const emptyState: LibraryEmptyState | undefined =
-    agents.length === 0
+    agents.length === 0 && drafts.length === 0
       ? {
           icon: '🤖',
           title: 'No agents yet',
           description: 'Agents you have access to will show up here.',
         }
-      : sections.length === 0
+      : sections.length === 0 && shownDrafts.length === 0
         ? {
             icon: '🔍',
             title: 'No matching agents',
@@ -87,20 +105,47 @@ const AgentsV2 = ({ query }: { query: string }): ReactElement => {
       emptyState={emptyState}
     >
       <LibrarySections
-        sections={sections.map(section => ({
-          key: section.key,
-          label: section.label,
-          items: section.agents.map(agent => (
-            <LibraryCard
-              key={agent.id}
-              to={prefixWs(`/ai/library/agent/${agent.slug}?tab=persona`)}
-              testId='claw-agent-card'
-              icon={<LibraryIconTile name={agent.name} color={agent.color || '#6366f1'} />}
-              name={agent.name}
-              description={agent.description}
-            />
-          )),
-        }))}
+        sections={[
+          ...(shownDrafts.length > 0
+            ? [
+                {
+                  key: 'drafts',
+                  label: 'Drafts',
+                  items: shownDrafts.map(draft => (
+                    <AgentDraftCard
+                      key={draft.id}
+                      draft={draft}
+                      to={prefixWs(
+                        `/ai/library/agent/create?draft=${encodeURIComponent(draft.id)}`,
+                      )}
+                      onDelete={() => removeDraft(draft.id)}
+                    />
+                  )),
+                },
+              ]
+            : []),
+          ...sections.map(section => ({
+            key: section.key,
+            label: section.label,
+            items: section.agents.map(agent => (
+              <LibraryCard
+                key={agent.id}
+                to={prefixWs(`/ai/library/agent/${agent.slug}?tab=persona`)}
+                testId='claw-agent-card'
+                variant='flat'
+                icon={
+                  <AgentBotAvatar
+                    agentKey={agentAvatarKey(agent)}
+                    asleep={!agent.enabled}
+                    size={44}
+                  />
+                }
+                name={agent.name}
+                description={agent.description}
+              />
+            )),
+          })),
+        ]}
       />
     </LibraryTabShell>
   );

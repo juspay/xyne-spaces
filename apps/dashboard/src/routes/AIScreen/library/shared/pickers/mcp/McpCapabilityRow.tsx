@@ -1,7 +1,11 @@
 import { useMemo, useState, type ReactElement } from 'react';
 import { Ai01, InformationCircle, PlusDefault } from '@xyne/icons';
+import { PropertyAddButton } from '@/components/flowUI/nodes/agent/create/PropertyAddButton';
+import type { CreateHubSuggestions } from '@/components/flowUI/nodes/agent/create/types';
 import { Tooltip } from '@/components/ui/Tooltip/Tooltip';
+import { matchSuggestedTools, suggestionFromPicks } from '../../primitives/suggestionMatch';
 import { disableEntry, enableEntry, isEntryEnabled, type McpSelection } from './mcpCatalog';
+import { CapabilityPillList } from '../CapabilityPillList';
 import { BrowseMcpsDialog } from './BrowseMcpsDialog';
 import { DotGridLoader } from './DotGridLoader';
 import { McpChip } from './McpChip';
@@ -14,12 +18,23 @@ interface McpCapabilityRowProps {
   selection: McpSelection;
   onSelectionChange: (next: McpSelection) => void;
   suggestContext: { systemPrompt: string; description: string };
+  /** Profile properties list: placeholder or chips, without the stacked header. */
+  layout?: 'profile';
+  /** Create page: mid-confidence picks shown as dashed chips (profile layout). */
+  hubSuggestions?: CreateHubSuggestions | undefined;
+  onSuggestionAccepted?: ((slug: string) => void) | undefined;
+  /** A chip was removed: the caller never re-adds it this session. */
+  onPickDismissed?: ((slug: string) => void) | undefined;
 }
 
 export function McpCapabilityRow({
   selection,
   onSelectionChange,
   suggestContext,
+  layout,
+  hubSuggestions,
+  onSuggestionAccepted,
+  onPickDismissed,
 }: McpCapabilityRowProps): ReactElement {
   const [browseOpen, setBrowseOpen] = useState(false);
   const [browseSlug, setBrowseSlug] = useState<string | null>(null);
@@ -34,6 +49,20 @@ export function McpCapabilityRow({
   const suggestedChips = useMemo(
     () => suggestions.suggested.filter(match => !isEntryEnabled(selection, match.entry)),
     [suggestions.suggested, selection],
+  );
+
+  const planChips = useMemo(
+    () =>
+      hubSuggestions && hubSuggestions.mcp.length > 0
+        ? matchSuggestedTools(
+            suggestionFromPicks(hubSuggestions.mcp),
+            entries,
+            entry => entry.slug,
+            entry => entry.tools,
+            entry => entry.label,
+          ).filter(match => !isEntryEnabled(selection, match.entry))
+        : [],
+    [hubSuggestions, entries, selection],
   );
 
   const renderSuggestAction = (): ReactElement => {
@@ -51,9 +80,7 @@ export function McpCapabilityRow({
     if (suggestions.status === 'error') {
       return (
         <span className='flex items-center gap-2 text-xs leading-5 tracking-[-0.24px]'>
-          <span className='text-muted-foreground'>
-            Couldn&apos;t suggest MCPs{suggestions.error ? ` — ${suggestions.error}` : ''}
-          </span>
+          <span className='text-muted-foreground'>None suggested</span>
           <button
             type='button'
             onClick={suggestions.run}
@@ -77,7 +104,9 @@ export function McpCapabilityRow({
         className='flex items-center gap-1.5 rounded-lg px-1 py-0.5 text-xs leading-5 tracking-[-0.24px] text-muted-foreground transition-colors hover:text-foreground disabled:pointer-events-none disabled:opacity-50'
       >
         <Ai01 className='size-3.5 shrink-0' aria-hidden />
-        {suggestions.status === 'ready' ? 'Suggest again' : 'Suggest MCPs'}
+        {suggestions.status === 'ready' || selectedEntries.length > 0
+          ? 'Suggest again'
+          : 'Suggest MCPs'}
       </button>
     );
 
@@ -89,6 +118,76 @@ export function McpCapabilityRow({
       </Tooltip>
     );
   };
+
+  if (layout === 'profile') {
+    return (
+      <>
+        <CapabilityPillList
+          add={
+            <PropertyAddButton
+              label='Add MCP'
+              trackName='Create agent v2: browse MCPs'
+              onClick={() => {
+                setBrowseSlug(null);
+                setBrowseOpen(true);
+              }}
+            />
+          }
+          pills={[
+            ...selectedEntries.map(entry => ({
+              key: entry.slug,
+              node: (
+                <McpChip
+                  label={entry.label}
+                  iconType={entry.iconType}
+                  selected
+                  onOpen={() => {
+                    setBrowseSlug(entry.slug);
+                    setBrowseOpen(true);
+                  }}
+                  onToggle={() => {
+                    onSelectionChange(disableEntry(entries, selection, entry));
+                    onPickDismissed?.(entry.slug);
+                  }}
+                />
+              ),
+            })),
+            ...planChips.map(match => ({
+              key: match.entry.slug,
+              node: (
+                <McpChip
+                  label={match.entry.label}
+                  iconType={match.entry.iconType}
+                  selected={false}
+                  onToggle={() => {
+                    onSelectionChange(enableEntry(entries, selection, match.entry, match.tools));
+                    onSuggestionAccepted?.(match.entry.slug);
+                  }}
+                />
+              ),
+            })),
+          ]}
+        />
+        <BrowseMcpsDialog
+          open={browseOpen}
+          onOpenChange={next => {
+            setBrowseOpen(next);
+            if (!next) setBrowseSlug(null);
+          }}
+          initialSlug={browseSlug}
+          catalog={entries}
+          connectedServerIds={connectedServerIds}
+          orgCoveredServerIds={orgCoveredServerIds}
+          loading={loading}
+          isError={isError}
+          onRetry={refetch}
+          selection={selection}
+          onSelectionChange={onSelectionChange}
+          suggested={suggestions.suggested}
+        />
+      </>
+    );
+  }
 
   return (
     <div className='flex w-full flex-col gap-1.5'>
@@ -155,7 +254,7 @@ export function McpCapabilityRow({
 
       {suggestions.status === 'ready' && suggestions.suggested.length === 0 && (
         <p className='text-xs text-muted-foreground'>
-          No MCP matched this agent — browse the full list to pick one yourself.
+          None needed — browse the full list to pick one yourself.
         </p>
       )}
 

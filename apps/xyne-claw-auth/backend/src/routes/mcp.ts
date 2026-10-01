@@ -85,6 +85,7 @@ import {
   type SubagentToolRefs,
 } from "./mcp-agent-tools.js";
 import { keywordQueryWords, listTools, searchToolsWithFallback } from "../services/tool-index/index.js";
+import { draftAgentSlug } from "../lib/draft-chat.js";
 
 const log = createLogger("mcp");
 
@@ -301,6 +302,10 @@ type SessionAgentToolsContext = {
    * (see buildSubagentToolRefs). Empty when the agent uses no custom subagents.
    */
   subagentToolRefs: SubagentToolRefs[];
+  /** ask-first | read-only | can-write from agent.config.permissionMode */
+  permissionMode: "ask-first" | "read-only" | "can-write";
+  /** Exact tool slugs that must never run for this agent. */
+  deniedTools: string[];
 };
 
 async function loadSessionAgentToolsContext(
@@ -323,6 +328,13 @@ async function loadSessionAgentToolsContext(
   if (!agent) return null;
   const storedConfig = (agent.config as Record<string, unknown> | null | undefined) ?? undefined;
   const toolsConfig = resolveAgentToolsConfig(storedConfig, agent.delegationTier);
+  const { normalizePermissionMode } = await import("xyne-claw-shared");
+  const permissionMode = normalizePermissionMode(storedConfig?.["permissionMode"]);
+  const deniedTools = Array.isArray(storedConfig?.["deniedTools"])
+    ? (storedConfig!["deniedTools"] as unknown[])
+        .filter((t): t is string => typeof t === "string" && t.trim().length > 0)
+        .map((t) => t.trim())
+    : [];
 
   let subagentToolRefs: SubagentToolRefs[] = [];
   const subagentNames = (toolsConfig?.subagents ?? []).filter(
@@ -356,6 +368,8 @@ async function loadSessionAgentToolsContext(
       return stored !== undefined && !isEmptyToolsSelection(stored);
     })(),
     subagentToolRefs,
+    permissionMode,
+    deniedTools,
   };
 }
 
@@ -1985,6 +1999,37 @@ router.post("/:sessionId/mcp/call", async (req: Request<{ sessionId: string }>, 
     // Write tools always require approval — cannot be overridden by agent config
     const definition = await resolveConnectorDefinition(serverType);
     const isWriteTool = definition?.writeTools?.includes(tool) ?? false;
+
+    // Agent-level deny list and read-only mode beat the approval card.
+    const denied = sessionAgentTools?.deniedTools ?? [];
+    if (denied.includes(tool) || denied.includes(`${serverType}/${tool}`)) {
+      log.info(`[mcp/call] denied ${serverType}/${tool} for agent=${agentSlug} (deniedTools)`);
+      res.json({
+        success: true,
+        data: {
+          content: `Blocked: ${tool} is on this agent's deny list and cannot run.`,
+        },
+      });
+      return;
+    }
+    // A create-page test run (draft-<user> slug, no Agent row yet) has no
+    // approval surface, so it is read-only regardless of the draft's mode.
+    const isDraftTestRun = !sessionAgentTools && agentSlug === draftAgentSlug(userId);
+    if ((sessionAgentTools?.permissionMode === "read-only" || isDraftTestRun) && isWriteTool) {
+      log.info(
+        `[mcp/call] denied ${serverType}/${tool} for agent=${agentSlug} (${isDraftTestRun ? "draft test run" : "permissionMode=read-only"})`,
+      );
+      res.json({
+        success: true,
+        data: {
+          content: isDraftTestRun
+            ? `Blocked: ${tool} is a write action and this is a test run of an unsaved draft. Save the agent to use it.`
+            : `Blocked: this agent is read-only and cannot call write tool ${tool}.`,
+        },
+      });
+      return;
+    }
+
     const effectivePermission = isWriteTool ? "ask" : (permission ?? "allow");
 
     log.info(

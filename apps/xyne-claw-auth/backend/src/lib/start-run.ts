@@ -413,6 +413,12 @@ export interface PreparedRun {
   projectName: string | undefined;
   externalResultCallback: ExternalResultCallbackConfig | undefined;
   sdlcAgentRunContext: ReturnType<typeof parseSdlcAgentRunContext>;
+  /** Product guidance truncation flags for AgentRun.metadata (Phase 3). */
+  guidanceMeta?: {
+    truncated: boolean;
+    bytes: number;
+    layersKept: number;
+  };
 }
 
 export type PrepareRunResult =
@@ -435,10 +441,21 @@ export async function persistRunStart(prepared: PreparedRun, rowSessionId?: stri
     externalResultCallback,
     effectiveFastMode,
     eventType,
+    guidanceMeta,
   } = prepared;
   const persistedByCaller = (body as { __persistedByCaller?: boolean }).__persistedByCaller;
   const skipUserMessagePersist =
     (body as { __skipUserMessagePersist?: boolean }).__skipUserMessagePersist === true;
+  const runMetadata = {
+    ...(externalResultCallback ? { externalResultCallback } : {}),
+    ...(guidanceMeta
+      ? {
+          guidanceTruncated: guidanceMeta.truncated,
+          guidanceBytes: guidanceMeta.bytes,
+          guidanceLayersKept: guidanceMeta.layersKept,
+        }
+      : {}),
+  };
   if (conversationId && !persistedByCaller && !skipUserMessagePersist) {
     try {
       await chatMessageRepository.create({
@@ -469,7 +486,7 @@ export async function persistRunStart(prepared: PreparedRun, rowSessionId?: stri
         ...(effectiveChannelId ? { channelId: effectiveChannelId } : {}),
         ...(projectId ? { projectId } : {}),
         ...(projectName ? { projectName } : {}),
-        ...(externalResultCallback ? { metadata: { externalResultCallback } } : {}),
+        ...(Object.keys(runMetadata).length > 0 ? { metadata: runMetadata } : {}),
         fastMode: effectiveFastMode,
       })
       .catch((e) => log.warn("[run] AgentRun.start failed:", e instanceof Error ? e.message : e));
@@ -499,13 +516,22 @@ async function persistDetachedRunStart(prepared: PreparedRun): Promise<void> {
       ...(prepared.effectiveChannelId ? { channelId: prepared.effectiveChannelId } : {}),
       ...(prepared.projectId ? { projectId: prepared.projectId } : {}),
       ...(prepared.projectName ? { projectName: prepared.projectName } : {}),
-      ...(prepared.externalResultCallback || prepared.sdlcAgentRunContext
+      ...(prepared.externalResultCallback ||
+      prepared.sdlcAgentRunContext ||
+      prepared.guidanceMeta
         ? {
             metadata: {
               ...(prepared.externalResultCallback
                 ? { externalResultCallback: prepared.externalResultCallback }
                 : {}),
               ...(prepared.sdlcAgentRunContext ? { sdlcContext: prepared.sdlcAgentRunContext } : {}),
+              ...(prepared.guidanceMeta
+                ? {
+                    guidanceTruncated: prepared.guidanceMeta.truncated,
+                    guidanceBytes: prepared.guidanceMeta.bytes,
+                    guidanceLayersKept: prepared.guidanceMeta.layersKept,
+                  }
+                : {}),
             },
           }
         : {}),
@@ -792,6 +818,44 @@ export async function prepareRun(
     let effectivePrompt = agent.systemPrompt;
     if (!agentSlug || agentSlug === "assistant") {
       effectivePrompt = eventType === "USER_MENTIONED" ? TWIN_PROMPT : ASSISTANT_PROMPT;
+    }
+
+    // Product guidance chain (org → space → leaf), capped at 32 KiB.
+    // Persona (systemPrompt) stays untouched — guidance ships as teamGuidance
+    // and is injected in xyne-claw after sorted tool schemas (Phase 3 / 6).
+    let teamGuidance: string | undefined;
+    let guidanceMeta: PreparedRun["guidanceMeta"];
+    const agentConfigRecord = (agent.config as Record<string, unknown> | null) ?? {};
+    const guidanceCfg = agentConfigRecord["guidance"] as
+      | { org?: string; space?: string; leaf?: string; orgLabel?: string; spaceLabel?: string; leafLabel?: string }
+      | undefined;
+    if (guidanceCfg && (guidanceCfg.org || guidanceCfg.space || guidanceCfg.leaf)) {
+      try {
+        const { compileRunGuidance } = await import("./run-guidance.js");
+        const compiled = compileRunGuidance({
+          orgGuidance: guidanceCfg.org ?? null,
+          spaceGuidance: guidanceCfg.space ?? null,
+          leafGuidance: guidanceCfg.leaf ?? null,
+          ...(guidanceCfg.orgLabel ? { orgLabel: guidanceCfg.orgLabel } : {}),
+          ...(guidanceCfg.spaceLabel ? { spaceLabel: guidanceCfg.spaceLabel } : {}),
+          ...(guidanceCfg.leafLabel ? { leafLabel: guidanceCfg.leafLabel } : {}),
+        });
+        if (compiled.text) {
+          teamGuidance = compiled.text;
+          guidanceMeta = {
+            truncated: compiled.truncated,
+            bytes: compiled.bytes,
+            layersKept: compiled.layersKept,
+          };
+          if (compiled.truncated) {
+            log.warn(
+              `[run] guidance chain truncated for agent=${agentSlug} bytes=${compiled.bytes} layersKept=${compiled.layersKept}`,
+            );
+          }
+        }
+      } catch (err) {
+        log.warn(`[run] guidance compile failed: ${errMsg(err)}`);
+      }
     }
 
     // Resolve attachedContext (+ the Spaces thread the assistant was opened
@@ -1415,6 +1479,7 @@ export async function prepareRun(
       ...(piSessionConversationId ? { piSessionConversationId } : {}),
       ...(effectiveCallbackUrl ? { callbackUrl: effectiveCallbackUrl } : {}),
       ...(effectivePrompt ? { systemPrompt: effectivePrompt } : {}),
+      ...(teamGuidance ? { teamGuidance } : {}),
       ...(agent.modelId ? { modelId: agent.modelId } : {}),
       agentConfig: mergedAgentConfig,
       agentSlug,
@@ -1467,6 +1532,11 @@ export async function prepareRun(
         ? { planContinuation: true }
         : {}),
       ...(generateFollowUpSuggestions === true ? { generateFollowUpSuggestions: true } : {}),
+      ...((body as { instant?: boolean }).instant === true ? { instant: true } : {}),
+      ...((body as { disableTools?: boolean }).disableTools === true ? { disableTools: true } : {}),
+      ...(typeof (body as { thinkingLevel?: unknown }).thinkingLevel === "string"
+        ? { thinkingLevel: (body as { thinkingLevel: string }).thinkingLevel }
+        : {}),
       // /experiment epoch context (id/epoch/deadlineAt/focus) — set only by
       // dispatchExperimentEpoch (lib/experiment.ts) via this same S2S proxy.
       // Must be threaded through the allowlist or the runtime never injects the
@@ -1500,6 +1570,7 @@ export async function prepareRun(
         projectName,
         externalResultCallback,
         sdlcAgentRunContext,
+        ...(guidanceMeta ? { guidanceMeta } : {}),
       },
     };
   }

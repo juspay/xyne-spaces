@@ -1,4 +1,4 @@
-import { clawRequest } from './clawRequest';
+import { clawRequest, ClawApiError } from './clawRequest';
 import type { Agent } from './clawAuthAgentTypes';
 import type { KbSelection } from './clawKnowledgeBaseTypes';
 
@@ -27,9 +27,13 @@ export interface CreateAgentPayload {
   ownerUserId?: string;
   kbScope?: 'COLLECTIONS' | 'USER';
   knowledgeBase?: KbSelection[];
+  /** Tools, permission mode and other agent config, stored in the same write. */
+  config?: Record<string, unknown>;
+  /** Skill ids to attach. */
+  skills?: string[];
 }
 
-/** Create the agent (identity + persona + KB scope/grants). */
+/** Create the agent (identity + persona + KB scope/grants, plus config and skills when given). */
 export async function createAgent(payload: CreateAgentPayload): Promise<Agent> {
   const data = await clawRequest<{ success: boolean; data: Agent }>('/api/v1/agents', {
     method: 'POST',
@@ -60,10 +64,15 @@ export async function updateAgent(slug: string, payload: UpdateAgentPayload): Pr
 export async function generateAgentPrompt(payload: {
   intent: string;
   agentName?: string;
+  existingPrompt?: string;
 }): Promise<string> {
   const data = await clawRequest<{ success: boolean; data?: { prompt?: string } }>(
     '/api/v1/agents/generate-prompt',
     { method: 'POST', body: JSON.stringify(payload) },
   );
-  return data.data?.prompt ?? '';
+  const prompt = data.data?.prompt?.trim() ?? '';
+  if (!prompt) {
+    throw new ClawApiError(500, 'Failed to generate prompt');
+  }
+  return prompt;
 }

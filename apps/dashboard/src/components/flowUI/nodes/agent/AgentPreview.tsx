@@ -6,16 +6,19 @@ import type { AgentIdentity } from '@xyne/shared';
 import { PreviewSplitDialog, PreviewThreadPanel } from '../../../ui/PreviewSplitDialog';
 import { usePlatform } from '../../../../hooks/usePlatform';
 import { AgentConnectLinks } from './AgentIdentityBlock';
+import { AgentCreateCanvas } from './create/AgentCreateCanvas';
+import { AgentCreateSessionContext } from './create/AgentCreateSessionContext';
+import type { useAgentCreateForm } from './create/useAgentCreateForm';
+import type { AgentCreatePhase } from './create/types';
 import type { DraftAgentEditor } from './useDraftAgentEditor';
 import { AgentPreviewTabs } from './preview/AgentPreviewTabs';
 import { IdentityEditControls } from './preview/AgentIdentityEditor';
 import { AutoWidthInput } from '../../../../routes/AIScreen/library/shared/primitives/AutoWidthInput';
 
 /**
- * True inside AgentPreview's right-hand thread panel. The thread re-renders the
- * SAME agent message as a live card, which would otherwise show its own expand
- * button and let the user stack a second full-screen preview on top. The agent
- * cards read this and hide their expand control when set.
+ * True inside AgentPreview's thread panel. The thread re-renders the SAME agent
+ * message as a live card, which would otherwise show its own expand button and
+ * let the user stack a second full-screen preview on top.
  */
 export const InsideAgentPreviewContext = createContext(false);
 
@@ -45,16 +48,21 @@ const SLUG_TEXT = 'text-sm leading-[22px] text-blue-500 dark:text-blue-400';
 interface AgentPreviewProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  messageId?: string | undefined;
   agent: AgentIdentity;
   /** Present ⇒ the tools/model/provider sections are editable. */
   editor?: DraftAgentEditor | undefined;
   note?: string | undefined;
-  /** State pill shown beside the name (the card's own "Draft"/"Created" chip). */
   statePill?: React.ReactNode;
-  /** Thread the card belongs to — rendered on the right. */
   conversationId?: string | undefined;
-  /** Phase-specific controls shown in the left panel footer (actions / audit). */
   footer?: React.ReactNode;
+  /** Create split: chat left / canvas right. Profile keeps identity left. */
+  mode?: 'create' | 'profile';
+  createForm?: ReturnType<typeof useAgentCreateForm>;
+  createPhase?: AgentCreatePhase;
+  handleError?: string | null | undefined;
+  checkingHandle?: boolean | undefined;
+  builtBy?: string | undefined;
 }
 
 const PanelHeader: React.FC<{ label: string; onClose?: (() => void) | undefined }> = ({
@@ -199,15 +207,20 @@ export const AgentPreview: React.FC<AgentPreviewProps> = ({
   statePill,
   conversationId,
   footer,
+  mode = 'profile',
+  createForm,
+  createPhase = 'draft',
+  handleError,
+  checkingHandle,
+  builtBy,
 }) => {
   const { channelId } = useParams<{ channelId?: string }>();
   const { isMobile } = usePlatform();
   const close = (): void => onOpenChange(false);
+  const isCreate = mode === 'create' && createForm !== undefined;
 
-  const detailPanel = (
+  const profilePanel = (
     <>
-      {/* Radix needs a Title/Description descendant of Dialog.Content (which the
-          shared shell renders); keep them screen-reader only. */}
       <Dialog.Title className='sr-only'>{agent.name}</Dialog.Title>
       <Dialog.Description className='sr-only'>
         {agent.description ?? 'Agent details'}
@@ -218,35 +231,89 @@ export const AgentPreview: React.FC<AgentPreviewProps> = ({
         note={note}
         statePill={statePill}
         footer={footer}
-        // Close button lives on the detail panel only when there is no thread
-        // panel to carry it (mobile / no conversation) — matching the viewer.
         {...(isMobile || !conversationId ? { onClose: close } : {})}
       />
     </>
   );
 
+  const canvasPanel = isCreate ? (
+    <>
+      <Dialog.Title className='sr-only'>{formTitle(createForm.form.name)}</Dialog.Title>
+      <Dialog.Description className='sr-only'>
+        Set up this agent, then create it.
+      </Dialog.Description>
+      <AgentCreateCanvas
+        form={createForm.form}
+        onFormChange={createForm.patchForm}
+        onFieldFocus={createForm.onFieldFocus}
+        writingField={createForm.writingField}
+        highlights={createForm.highlights}
+        conflicts={createForm.conflicts}
+        onResolveConflict={createForm.resolveConflict}
+        phase={createPhase}
+        builtBy={builtBy}
+        handleError={handleError}
+        checkingHandle={checkingHandle}
+        note={note}
+        footer={footer}
+        readOnly={createPhase === 'created' || createPhase === 'rejected'}
+        {...(isMobile || !conversationId ? { onClose: close } : {})}
+      />
+    </>
+  ) : (
+    profilePanel
+  );
+
   const threadPanel =
     isMobile || !conversationId ? undefined : (
-      // Mark the thread subtree so the nested (same) agent card hides its own
-      // expand button — no second full-screen preview stacked on top.
       <InsideAgentPreviewContext.Provider value={true}>
-        <PreviewThreadPanel
-          {...(channelId ? { channelId } : {})}
-          conversationId={conversationId}
-          onClose={close}
-        />
+        {isCreate ? (
+          <AgentCreateSessionContext.Provider value={{ applyChatDraft: createForm.applyChatPatch }}>
+            <PreviewThreadPanel
+              {...(channelId ? { channelId } : {})}
+              conversationId={conversationId}
+              onClose={close}
+            />
+          </AgentCreateSessionContext.Provider>
+        ) : (
+          <PreviewThreadPanel
+            {...(channelId ? { channelId } : {})}
+            conversationId={conversationId}
+            onClose={close}
+          />
+        )}
       </InsideAgentPreviewContext.Provider>
     );
 
-  // Same shell as the plan preview and the attachment viewer — only the left
-  // panel's content differs.
+  if (isCreate) {
+    const desktopChat = Boolean(threadPanel);
+    return (
+      <PreviewSplitDialog
+        open={open}
+        onClose={close}
+        idPrefix='agent-create-preview'
+        isMobile={isMobile}
+        left={desktopChat ? threadPanel : canvasPanel}
+        {...(desktopChat ? { right: canvasPanel } : {})}
+        leftDefaultSize='50%'
+        leftMinSize='30%'
+        rightDefaultSize='50%'
+        rightMinSize='30%'
+        rightMaxSize='70%'
+        overlayClassName='bg-black/80'
+        contentClassName='bg-black data-[state=closed]:fade-out transition-all ease-in-out duration-300 data-[state=open]:fade-in'
+        bodyClassName='bg-background'
+      />
+    );
+  }
+
   return (
     <PreviewSplitDialog
       open={open}
       onClose={close}
       idPrefix='agent-preview'
       isMobile={isMobile}
-      left={detailPanel}
+      left={profilePanel}
       right={threadPanel}
       overlayClassName='bg-black/80'
       contentClassName='bg-black data-[state=closed]:fade-out transition-all ease-in-out duration-300 data-[state=open]:fade-in'
@@ -254,3 +321,8 @@ export const AgentPreview: React.FC<AgentPreviewProps> = ({
     />
   );
 };
+
+function formTitle(name: string): string {
+  const trimmed = name.trim();
+  return trimmed.length > 0 ? trimmed : 'Create agent';
+}

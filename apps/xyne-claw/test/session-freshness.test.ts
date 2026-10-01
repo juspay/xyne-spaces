@@ -8,7 +8,7 @@ import path from "node:path";
 const dataDir = mkdtempSync(path.join(tmpdir(), "claw-freshness-"));
 process.env["XYNE_CLAW_DATA_DIR"] = dataDir;
 
-const { ensureFreshSession, sessionDir } = await import("../src/session-store.js");
+const { archiveUnverifiedMayStartFresh, ensureFreshSession, sessionDir } = await import("../src/session-store.js");
 
 // In the test environment there is no GKE metadata server and no S2S key, so:
 //   - gcsSessionUpdatedAt() → null  (freshness unknown)
@@ -38,6 +38,42 @@ describe("ensureFreshSession", () => {
     expect(await ensureFreshSession(id)).toBe("fresh-start");
     // The empty dir must be gone so SessionManager starts a genuinely new session.
     expect(existsSync(sessionDir(id))).toBe(false);
+  });
+
+  it("starts fresh in local dev when the emulator cannot be listed", () => {
+    expect(archiveUnverifiedMayStartFresh({
+      nodeEnv: "development",
+      fakeGcsHost: "localhost:4443",
+      directUnavailable: true,
+      directStorageConfigured: true,
+    })).toBe(true);
+  });
+
+  it("starts fresh in local dev when direct storage has no credentials", () => {
+    expect(archiveUnverifiedMayStartFresh({
+      nodeEnv: undefined,
+      fakeGcsHost: "",
+      directUnavailable: true,
+      directStorageConfigured: false,
+    })).toBe(true);
+  });
+
+  it("refuses a fresh session in production when the archive cannot be verified", () => {
+    expect(archiveUnverifiedMayStartFresh({
+      nodeEnv: "production",
+      fakeGcsHost: "",
+      directUnavailable: true,
+      directStorageConfigured: true,
+    })).toBe(false);
+  });
+
+  it("refuses a fresh session when listed archive bytes failed to restore", () => {
+    expect(archiveUnverifiedMayStartFresh({
+      nodeEnv: "development",
+      fakeGcsHost: "localhost:4443",
+      directUnavailable: false,
+      directStorageConfigured: true,
+    })).toBe(false);
   });
 
   it("keeps the local copy untouched when GCS freshness is unknown (local-unverified)", async () => {

@@ -3,6 +3,9 @@ import App from './App.tsx';
 import './global.css';
 import '@xyne/workflow-ui/styles.css';
 import './styles/workflow-ui-theme.css';
+// Personal, untracked style overrides (src/local-overrides.css, gitignored). A
+// glob, so builds without the file import nothing.
+import.meta.glob('./local-overrides.css', { eager: true });
 import { globalClickTracker } from './services/Analytics/globalClickTracker';
 import { installErrorReportLogCollector } from './utils/errorReportLogCollector';
 import { maybeOpenInDesktopApp } from './utils/openInDesktopApp';

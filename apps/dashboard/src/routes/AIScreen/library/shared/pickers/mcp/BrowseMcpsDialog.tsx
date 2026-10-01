@@ -20,7 +20,7 @@ import {
   type McpCatalogEntry,
   type McpSelection,
 } from './mcpCatalog';
-import { connectStrategyFor } from './mcpConnectionService';
+import { needsMcpKey } from './mcpConnectStrategy';
 import { useMcpCredentialFields } from './useMcpCredentialFields';
 import { McpChip } from './McpChip';
 import { McpIdentity } from './McpIdentity';
@@ -186,7 +186,7 @@ export function BrowseMcpsDialog({
     const server = entry.server;
     if (!server) return { needed: false, connected: false, orgCovered: false };
     return {
-      needed: connectStrategyFor(server) === 'oauth' || fieldsFor(server).length > 0,
+      needed: needsMcpKey(server, fieldsFor(server)),
       connected: connectedServerIds.has(server.id),
       orgCovered: !!orgCoveredServerIds?.has(server.id),
     };

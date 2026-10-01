@@ -1,11 +1,10 @@
 import { type ReactElement } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
-import { Network } from 'lucide-react';
+import { AgentBotAvatar } from '@/components/agents/AgentBotAvatar';
 import { cn } from '@/utils/classNames';
 import { Skeleton } from '@/components/ui/Skeleton';
 import { useClawSubagentDetail } from '@/hooks/useClawSubagents';
 import { Pill } from '../../shared/primitives/Pill';
-import { LibraryIconTile } from '../../shared/components/LibraryCard';
 import { DetailTabPlaceholder } from '../../shared/primitives/DetailPrimitives';
 import { SubagentDetailHeaderV2 } from './SubagentDetailHeaderV2';
 import { SubagentContributorsTabV2 } from './contributors/SubagentContributorsTabV2';
@@ -107,9 +106,7 @@ const ClawSubagentDetailV2 = (): ReactElement => {
         ) : (
           <>
             <div className='flex w-full items-start gap-3'>
-              <LibraryIconTile size='md'>
-                <Network className='size-4' aria-hidden />
-              </LibraryIconTile>
+              <AgentBotAvatar agentKey={subagent.name} asleep={!subagent.enabled} size={40} />
 
               <div className='flex min-w-0 flex-1 flex-col gap-0.5 overflow-hidden'>
                 <div className='flex min-w-0 items-center gap-2'>

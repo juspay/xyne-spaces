@@ -7,6 +7,7 @@ import {
   type McpAvailability,
 } from '../services/claw/clawMcpService';
 import type { McpServer, UserConnection } from '../services/claw/clawMcpTypes';
+import { FAKE_MCP_CONNECT, withFakeConnections } from '../services/claw/fakeMcpConnect';
 
 export interface ClawMcpData {
   servers: McpServer[];
@@ -31,7 +32,13 @@ export const useClawMcp = (): UseQueryResult<ClawMcpData, Error> => {
         listMcpConnections(userId!),
         listMcpAvailability(userId!).catch(() => [] as McpAvailability[]),
       ]);
-      return { servers, connections, availability };
+      return {
+        servers,
+        connections: FAKE_MCP_CONNECT
+          ? withFakeConnections(userId!, servers, connections)
+          : connections,
+        availability,
+      };
     },
     enabled: !!userId,
     staleTime: 5 * 60 * 1000,

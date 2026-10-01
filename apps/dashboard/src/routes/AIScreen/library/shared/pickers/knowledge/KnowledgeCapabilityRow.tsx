@@ -1,8 +1,18 @@
 import { useMemo, useState, type ReactElement } from 'react';
-import { InformationCircle, MultipleCrossCancelDefault, PlusDefault } from '@xyne/icons';
+import {
+  FileDefault,
+  FolderDefault,
+  InformationCircle,
+  MultipleCrossCancelDefault,
+  PlusDefault,
+} from '@xyne/icons';
+import { PropertyAddButton } from '@/components/flowUI/nodes/agent/create/PropertyAddButton';
+import type { CreateHubSuggestions } from '@/components/flowUI/nodes/agent/create/types';
 import { Tooltip } from '@/components/ui/Tooltip/Tooltip';
 import { useClawKnowledgeBaseTree } from '@/hooks/useClawKnowledgeBaseTree';
 import type { KbSelection } from '@/services/claw/clawKnowledgeBaseTypes';
+import { CapabilityChip } from '../CapabilityChip';
+import { CapabilityPillList } from '../CapabilityPillList';
 import { BrowseKnowledgeDialog } from './BrowseKnowledgeDialog';
 import { buildKbIndex, describeGrants, removeGrant, type KbScope } from './knowledgeCatalog';
 
@@ -13,6 +23,12 @@ interface KnowledgeCapabilityRowProps {
   onScopeChange: (next: KbScope) => void;
   grants: KbSelection[];
   onGrantsChange: (next: KbSelection[]) => void;
+  layout?: 'profile';
+  /** Create page: mid-confidence picks shown as dashed chips (profile layout). */
+  hubSuggestions?: CreateHubSuggestions | undefined;
+  onSuggestionAccepted?: ((collectionId: string) => void) | undefined;
+  /** A chip was removed: the caller never re-adds it this session. */
+  onPickDismissed?: ((collectionId: string) => void) | undefined;
 }
 
 export function KnowledgeCapabilityRow({
@@ -20,6 +36,10 @@ export function KnowledgeCapabilityRow({
   onScopeChange,
   grants,
   onGrantsChange,
+  layout,
+  hubSuggestions,
+  onSuggestionAccepted,
+  onPickDismissed,
 }: KnowledgeCapabilityRowProps): ReactElement {
   const [browseOpen, setBrowseOpen] = useState(false);
   const tree = useClawKnowledgeBaseTree();
@@ -28,6 +48,90 @@ export function KnowledgeCapabilityRow({
     const index = buildKbIndex(tree.data?.collections ?? []);
     return describeGrants(grants, index);
   }, [tree.data?.collections, grants]);
+
+  const planChips = useMemo(() => {
+    // "Match the running user's access" makes collection grants moot.
+    if (scope === 'USER') return [];
+    const granted = new Set(grants.map(grant => grant.collectionId));
+    return (hubSuggestions?.knowledge ?? []).filter(pick => !granted.has(pick.id));
+  }, [hubSuggestions, scope, grants]);
+
+  if (layout === 'profile') {
+    return (
+      <>
+        <CapabilityPillList
+          className='items-start'
+          add={
+            <PropertyAddButton
+              label='Add knowledge'
+              trackName='Create agent v2: browse knowledge'
+              onClick={() => setBrowseOpen(true)}
+            />
+          }
+          pills={[
+            ...(scope === 'USER'
+              ? [
+                  {
+                    key: '__user-access',
+                    node: (
+                      <span className='text-sm font-normal leading-[1.3] tracking-[-0.1px] text-foreground'>
+                        Matches the running user’s access
+                      </span>
+                    ),
+                  },
+                ]
+              : labels.map(grant => ({
+                  key: grant.key,
+                  node: (
+                    <CapabilityChip
+                      label={grant.label}
+                      meta={grant.meta}
+                      selected
+                      icon={
+                        grant.selection.fileId ? (
+                          <FileDefault className='size-4' aria-hidden />
+                        ) : (
+                          <FolderDefault className='size-4' aria-hidden />
+                        )
+                      }
+                      onOpen={() => setBrowseOpen(true)}
+                      onToggle={() => {
+                        onGrantsChange(removeGrant(grants, grant.selection));
+                        onPickDismissed?.(grant.selection.collectionId);
+                      }}
+                      trackName='Create agent v2: knowledge grant'
+                    />
+                  ),
+                }))),
+            // Keyed like the collection-wide grant it becomes, so accepting restyles it in place.
+            ...planChips.map(pick => ({
+              key: `${pick.id}:*`,
+              node: (
+                <CapabilityChip
+                  label={pick.name}
+                  selected={false}
+                  icon={<FolderDefault className='size-4' aria-hidden />}
+                  onToggle={() => {
+                    onGrantsChange([...grants, { collectionId: pick.id, fileId: null }]);
+                    onSuggestionAccepted?.(pick.id);
+                  }}
+                  trackName='Create agent v2: toggle knowledge chip'
+                />
+              ),
+            })),
+          ]}
+        />
+        <BrowseKnowledgeDialog
+          open={browseOpen}
+          onOpenChange={setBrowseOpen}
+          scope={scope}
+          onScopeChange={onScopeChange}
+          grants={grants}
+          onGrantsChange={onGrantsChange}
+        />
+      </>
+    );
+  }
 
   return (
     <div className='flex w-full flex-col gap-1.5'>

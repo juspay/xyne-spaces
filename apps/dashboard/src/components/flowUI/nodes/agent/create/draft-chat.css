@@ -1,0 +1,370 @@
+/* Floating test chat on the create canvas. Ported from the Digital Twin ask
+   composer (digital-twin.css / digital-twin-motion.css on
+   feature/digital-twin-v1-deveshp), renamed dt- → dc- so the two can ship
+   side by side. */
+
+.dc-root {
+  /* Figma 1615:43372 text-field elevation. Black, not foreground, so it does
+     not invert in midnight. */
+  --dc-elevated-shadow:
+    0 36px 10px 0 rgb(0 0 0 / 0%), 0 23px 9px 0 rgb(0 0 0 / 0%), 0 13px 8px 0 rgb(0 0 0 / 2%),
+    0 6px 6px 0 rgb(0 0 0 / 3%), 0 1px 3px 0 rgb(0 0 0 / 3%);
+  --dc-duration-press: 120ms;
+  --dc-duration-feedback: 180ms;
+  --dc-duration-state: 240ms;
+  --dc-ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+  --dc-panel-open: 400ms;
+  --dc-panel-close: 350ms;
+}
+
+/* The elevation above, scaled by --dc-composer-shadow-k: the overlay sets it to
+   1 minus the card frame's opacity, so the composer hands its shadow to the
+   card as the frame fades in (see .dc-frame-bg) and takes it back as it goes. */
+.dc-root .dc-composer-shadow {
+  overflow: visible;
+  background: transparent;
+  border-radius: 18px;
+  box-shadow:
+    0 13px 8px 0 rgb(0 0 0 / calc(2% * var(--dc-composer-shadow-k, 1))),
+    0 6px 6px 0 rgb(0 0 0 / calc(3% * var(--dc-composer-shadow-k, 1))),
+    0 1px 3px 0 rgb(0 0 0 / calc(3% * var(--dc-composer-shadow-k, 1)));
+}
+
+.dc-root .dc-composer {
+  overflow: visible !important;
+  transition: box-shadow var(--dc-duration-press) var(--dc-ease-out);
+}
+
+.dc-root .dc-composer-clip {
+  overflow: hidden;
+  border-radius: inherit;
+  background: transparent;
+}
+
+/* The session card: header + thread above the composer. */
+.dc-root .dc-overlay {
+  overflow: visible !important;
+}
+
+/* One surface, not a card behind a pill. The card's fill, edge and shadow are
+   a layer (.dc-frame-bg) behind the composer whose opacity follows the panel,
+   so opening fades the panel in around a composer that never fades or moves.
+   While that layer shows, the composer hands it its shadow. */
+.dc-root .dc-frame-bg {
+  border: 1px solid hsl(var(--border));
+  background-color: hsl(var(--background));
+  box-shadow: var(--dc-elevated-shadow);
+}
+
+.dc-root .dc-frame[data-frame="on"] .dc-composer {
+  box-shadow: none;
+}
+
+.dc-root .dc-chevron {
+  transition: transform var(--dc-duration-state) var(--dc-ease-out);
+}
+
+.dc-root .dc-overlay header button[data-state="open"] .dc-chevron {
+  transform: rotate(180deg);
+}
+
+.dc-root .dc-pressable {
+  transition:
+    color var(--dc-duration-feedback) var(--dc-ease-out),
+    background-color var(--dc-duration-state) var(--dc-ease-out),
+    opacity var(--dc-duration-feedback) var(--dc-ease-out),
+    transform var(--dc-duration-press) var(--dc-ease-out);
+}
+
+.dc-root .dc-pressable:active:not(:disabled) {
+  transform: scale(0.985);
+}
+
+/* The idle pill rises into place from below the bottom of the canvas when the
+   canvas opens: a plain slide on an even ease-out, so the rise is seen rather
+   than spent in its first few frames, with a quick fade. */
+.dc-root .dc-slide {
+  transform: translateY(100px);
+  opacity: 0;
+  pointer-events: none;
+  transition:
+    transform var(--dc-panel-close) var(--dc-ease-out),
+    opacity var(--dc-panel-close) var(--dc-ease-out);
+}
+
+.dc-root .dc-slide[data-open="true"] {
+  transform: translateY(0);
+  opacity: 1;
+  pointer-events: auto;
+  transition:
+    transform 520ms cubic-bezier(0.33, 1, 0.68, 1),
+    opacity 240ms ease-out;
+}
+
+/* Transitions.dev "Shimmer text": the text sits in a muted base while a
+   highlight band, painted on a ::before copy of it (data-text) and clipped to
+   its glyphs, sweeps left to right. Theme colours, so light and dark both work. */
+.dc-shimmer {
+  --dc-shimmer-dur: 2000ms;
+  --dc-shimmer-base: hsl(var(--muted-foreground));
+  --dc-shimmer-highlight: hsl(var(--foreground));
+  --dc-shimmer-band: 400%;
+  position: relative;
+  display: inline-block;
+  color: var(--dc-shimmer-base);
+}
+
+.dc-shimmer::before {
+  content: attr(data-text);
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background-image: linear-gradient(
+    90deg,
+    transparent 0%,
+    transparent 40%,
+    var(--dc-shimmer-highlight) 50%,
+    transparent 60%,
+    transparent 100%
+  );
+  background-size: var(--dc-shimmer-band) 100%;
+  background-repeat: no-repeat;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  -webkit-text-fill-color: transparent;
+  animation: dc-shimmer var(--dc-shimmer-dur) linear infinite;
+}
+
+@keyframes dc-shimmer {
+  0% {
+    background-position: 100% 0;
+  }
+  100% {
+    background-position: 0% 0;
+  }
+}
+
+/* Menus are portaled out of .dc-root, so their tokens live on the panel. The
+   doubled class beats the dropdown primitives' utility classes. */
+.dc-menu-content.dc-menu-content {
+  --dc-menu-item-pad: 0.5rem;
+  --dc-menu-item-min: 2.25rem;
+  --dc-menu-item-gap: 0.5rem;
+  --dc-menu-hover: hsl(var(--foreground) / 0.06);
+  width: 250px;
+  overflow: hidden;
+  padding: 0.25rem;
+  border: 0.8px solid hsl(var(--foreground) / 0.1);
+  border-radius: 1rem;
+  background: hsl(var(--popover));
+  color: hsl(var(--popover-foreground));
+  /* The canvas property menus' shadow: tighter than a panel's, it sits closer. */
+  box-shadow:
+    0 55px 16px rgb(0 0 0 / 0%),
+    0 35px 14px rgb(0 0 0 / 1%),
+    0 20px 12px rgb(0 0 0 / 2%),
+    0 9px 9px rgb(0 0 0 / 3%),
+    0 2px 5px rgb(0 0 0 / 4%);
+  animation-duration: 180ms !important;
+  animation-timing-function: cubic-bezier(0.22, 1, 0.36, 1) !important;
+}
+
+/* Submenus are not portaled; they paint outside the plus menu. */
+.dc-menu-content.dc-menu-plus {
+  overflow: visible;
+}
+
+/* The canvas's short menus (Add property, a row's "…", Change type). Change
+   type opens from inside a row's menu, so like the plus menu it can't clip. */
+.dc-menu-content.dc-menu-compact {
+  width: 168px;
+  overflow: visible;
+}
+
+.dc-menu-content.dc-menu-sub {
+  z-index: 70;
+  width: 300px;
+  max-height: 300px;
+  overflow-x: hidden;
+  overflow-y: auto;
+}
+
+.dc-menu-item.dc-menu-item {
+  min-height: var(--dc-menu-item-min, 2.25rem);
+  justify-content: space-between;
+  margin: 0;
+  gap: var(--dc-menu-item-gap, 0.5rem);
+  padding: var(--dc-menu-item-pad, 0.5rem);
+  border-radius: 0.625rem;
+  color: hsl(var(--foreground));
+  font-size: 0.875rem;
+  font-weight: 500;
+  line-height: 1.25rem;
+  letter-spacing: -0.01em;
+}
+
+.dc-menu-item.dc-menu-item:hover,
+.dc-menu-item.dc-menu-item:focus,
+.dc-menu-item.dc-menu-item[data-highlighted],
+.dc-menu-item.dc-menu-item[data-selected="true"],
+.dc-menu-item.dc-menu-item[data-state="open"] {
+  background: var(--dc-menu-hover, hsl(var(--foreground) / 0.06));
+  color: hsl(var(--foreground));
+}
+
+.dc-menu-item-label {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: var(--dc-menu-item-gap, 0.5rem);
+}
+
+.dc-menu-item-label > span:last-child {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dc-menu-item.dc-menu-item .dc-menu-item-label > svg,
+.dc-menu-item.dc-menu-item > svg {
+  width: 1rem;
+  height: 1rem;
+  flex-shrink: 0;
+  color: currentColor;
+}
+
+/* A hairline with the panel's inset either side, so a row's hover fill keeps
+   the same room from it as from the panel's edge. */
+.dc-menu-separator.dc-menu-separator {
+  position: relative;
+  height: 0;
+  margin: 0.25rem 0;
+  overflow: visible;
+  border: 0;
+  background: transparent;
+}
+
+.dc-menu-separator.dc-menu-separator::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  right: 8px;
+  left: 8px;
+  height: 0.8px;
+  background: hsl(var(--foreground) / 0.1);
+}
+
+.dc-menu-search {
+  display: flex;
+  min-height: var(--dc-menu-item-min, 2.25rem);
+  width: 100%;
+  align-items: center;
+  gap: var(--dc-menu-item-gap, 0.5rem);
+  padding: 0 var(--dc-menu-item-pad, 0.5rem);
+}
+
+.dc-menu-search > svg {
+  width: 1rem;
+  height: 1rem;
+  flex-shrink: 0;
+  color: hsl(var(--foreground) / 0.4);
+}
+
+.dc-menu-search input {
+  min-width: 0;
+  flex: 1;
+  border: 0;
+  background: transparent;
+  color: hsl(var(--foreground));
+  font-size: 0.875rem;
+  font-weight: 500;
+  letter-spacing: -0.02em;
+  line-height: 1.25rem;
+  outline: none;
+}
+
+.dc-menu-search input::placeholder {
+  color: hsl(var(--foreground) / 0.4);
+}
+
+.dc-menu-icon-btn {
+  display: inline-flex;
+  width: 1.75rem;
+  height: 1.75rem;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: 0.5rem;
+  background: transparent;
+  color: inherit;
+  opacity: 0.6;
+}
+
+.dc-menu-icon-btn > svg {
+  width: 1rem;
+  height: 1rem;
+}
+
+.dc-menu-icon-btn:hover,
+.dc-menu-icon-btn:focus-visible {
+  background: hsl(var(--foreground) / 0.06);
+  opacity: 1;
+  outline: none;
+}
+
+.dc-menu-heading {
+  display: flex;
+  min-height: 1.75rem;
+  align-items: center;
+  padding: 0.375rem 0.5rem;
+  color: hsl(var(--foreground) / 0.6);
+  font-size: 0.75rem;
+  font-weight: 500;
+  letter-spacing: 0.04em;
+  line-height: 1rem;
+  text-transform: capitalize;
+}
+
+.dc-menu-avatar {
+  display: flex;
+  width: 1rem;
+  height: 1rem;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  border-radius: 0.5rem;
+  color: #fff;
+  font-size: 0.4375rem;
+  font-weight: 600;
+  line-height: 1;
+}
+
+.dc-menu-empty {
+  padding: 0.5rem;
+  color: hsl(var(--foreground) / 0.6);
+  font-size: 0.75rem;
+  font-weight: 500;
+  line-height: 1rem;
+}
+
+/* The parts above that transition or animate in CSS; the card's own motion is
+   driven in JS and goes instant there. */
+@media (prefers-reduced-motion: reduce) {
+  .dc-root .dc-composer,
+  .dc-root .dc-chevron,
+  .dc-root .dc-pressable,
+  .dc-root .dc-slide,
+  .dc-menu-content.dc-menu-content {
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+  }
+
+  /* A near-zero loop would flicker; the base text alone marks it. */
+  .dc-shimmer::before {
+    animation: none !important;
+  }
+}

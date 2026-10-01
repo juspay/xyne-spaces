@@ -8,6 +8,10 @@ const ProtectedRoute = (): ReactElement => {
 
   if (location.pathname === '/newWindow/claw' && (isLoading || !isAuthenticated)) return <></>;
 
+  if (isLoading) {
+    return <></>;
+  }
+
   if (!isAuthenticated) {
     const searchParams = new URLSearchParams(location.search);
 

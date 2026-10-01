@@ -8,6 +8,7 @@ import { defaultOAuthReturn, resolveOAuthReturn, withOAuthResult } from "./oauth
 import { oauthLimiter } from "../middleware/rate-limiters.js";
 import { pinUserIdParam } from "../middleware/pin-user-id-param.js";
 import { asyncHandler, ok, badRequest, HttpError } from "./http.js";
+import { evictSession } from "../mcp/runner.js";
 import { createLogger } from "../logger.js";
 
 export interface ClassicOAuthConfig {
@@ -92,6 +93,8 @@ export function createClassicOAuthProvider(config: ClassicOAuthConfig): ClassicO
     } else {
       await prisma.userMcpConnection.create({ data: { userId, mcpServerId: server.id, encryptedCreds: ciphertext, iv, authTag } });
     }
+    // A server already running for this user still holds the old token (or none).
+    await evictSession(userId, type).catch((err) => log.error(`[${type}-oauth] evictSession failed:`, err));
   }
 
   async function authorize(userId: string, opts: OAuthAuthorizeOptions = {}): Promise<string> {

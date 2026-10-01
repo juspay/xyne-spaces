@@ -329,12 +329,18 @@ const XYNE_AI_PANEL_MIN_SIZE = 42;
 const XYNE_AI_PANEL_DEFAULT_SIZE = 35;
 
 const WorkspaceRedirect = (): ReactElement => {
-  const email = localStorage.getItem('user_email');
-  const workspaceId = email ? getLastActiveWorkspaceId(email) : null;
+  const { isAuthenticated, isLoading, user } = useAuth();
+  const email = user?.email ?? localStorage.getItem('user_email');
+  const workspaceId = user?.workspaceId || (email ? getLastActiveWorkspaceId(email) : null);
+  if (isLoading) {
+    return <></>;
+  }
   if (workspaceId) {
     return <Navigate to={`/${workspaceId}`} replace />;
   }
-  // No workspace in storage — send to auth
+  if (isAuthenticated) {
+    return <></>;
+  }
   return <Navigate to='/auth' replace />;
 };
 
@@ -1154,6 +1160,10 @@ export const router = createBrowserRouter(
                       ),
                     },
                     { path: 'library/agent/create', element: <AIAgentCreateScreen /> },
+                    {
+                      path: 'library/agent/create/script',
+                      element: <AIAgentCreateScreen scripted />,
+                    },
                     { path: 'library/subagent/create', element: <AISubagentCreateScreen /> },
                     { path: 'library/skill/create', element: <AISkillCreateScreen /> },
                     { path: 'library/agent/:slug/edit', element: <AIAgentEditScreen /> },

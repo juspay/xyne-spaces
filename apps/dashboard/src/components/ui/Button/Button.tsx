@@ -44,6 +44,9 @@ const buttonVariants = cva(
         ghost:
           'text-foreground hover:bg-accent hover:text-accent-foreground dark:hover:bg-accent/50',
         link: 'text-primary underline-offset-4 hover:underline',
+        // Tailwind's standard pill button in our darkest black (xyne-gray-1000),
+        // white on the dark theme so it still reads as the main action.
+        ink: 'rounded-full bg-xyne-gray-1000 font-semibold text-white shadow-sm hover:bg-xyne-gray-800 focus-visible:ring-xyne-gray-1000/30 [[data-theme=midnight]_&]:bg-white [[data-theme=midnight]_&]:text-xyne-gray-1000 [[data-theme=midnight]_&]:hover:bg-xyne-gray-200',
       },
       size: {
         default: 'h-9 px-4 py-2 has-[>svg]:px-3',
@@ -59,6 +62,8 @@ const buttonVariants = cva(
         inline: 'h-auto justify-start',
       },
     },
+    // The sizes round their corners; the pill keeps its own.
+    compoundVariants: [{ variant: 'ink', class: 'rounded-full' }],
     defaultVariants: {
       variant: 'default',
       size: 'default',

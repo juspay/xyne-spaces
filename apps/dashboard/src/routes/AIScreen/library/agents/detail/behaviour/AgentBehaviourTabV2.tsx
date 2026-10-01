@@ -1,18 +1,13 @@
 import { useState, type ReactElement } from 'react';
-import { useQueryClient } from '@tanstack/react-query';
-import { toast } from 'sonner';
 import { Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/Button/index';
-import { clawAgentDetailKey } from '@/hooks/useClawAgentDetail';
 import { useClawResearchAgentOptions } from '@/hooks/useClawResearchAgentOptions';
-import { updateClawAgent } from '@/services/claw/clawAuthAgentsService';
-import { clawErrorText } from '@/services/claw/clawRequest';
 import {
   applyBehaviour,
   readBehaviourDraft,
   type BehaviourDraft,
 } from '@/services/claw/behaviourConfig';
-import type { Agent } from '@/services/claw/clawAuthAgentTypes';
+import type { AgentConfigTarget } from '../settings/agentConfigTarget';
 import {
   DetailCard,
   DetailLockedNote,
@@ -39,13 +34,12 @@ const NONE = '__none__';
 const LOCK_NOTE = 'Only the owner, a contributor, or an admin can change how this agent behaves.';
 
 export function AgentBehaviourTabV2({
-  agent,
+  target,
   canEdit,
 }: {
-  agent: Agent;
+  target: AgentConfigTarget;
   canEdit: boolean;
 }): ReactElement {
-  const queryClient = useQueryClient();
   const [saving, setSaving] = useState(false);
   const [outputOpen, setOutputOpen] = useState(false);
   const [criteriaOpen, setCriteriaOpen] = useState(false);
@@ -53,8 +47,8 @@ export function AgentBehaviourTabV2({
   const { data: repos } = useSandboxRepos();
   const research = useClawResearchAgentOptions();
 
-  const behaviour = readBehaviourDraft(agent.config);
-  const sandbox = readSandboxDraft(agent.config);
+  const behaviour = readBehaviourDraft(target.config);
+  const sandbox = readSandboxDraft(target.config);
 
   const [reminders, setReminders] = useState(behaviour.promptInjection);
   const remindersDirty = reminders.trim() !== behaviour.promptInjection.trim();
@@ -62,32 +56,22 @@ export function AgentBehaviourTabV2({
   const persist = async (config: Record<string, unknown>, message: string): Promise<boolean> => {
     if (saving) return false;
     setSaving(true);
-    const previous = agent;
-    queryClient.setQueryData(clawAgentDetailKey(agent.slug), { ...agent, config });
     try {
-      const updated = await updateClawAgent(agent.slug, { config });
-      queryClient.setQueryData(clawAgentDetailKey(agent.slug), updated);
-      void queryClient.invalidateQueries({ queryKey: ['claw-auth-agents'] });
-      toast.success(message);
-      return true;
-    } catch (err) {
-      queryClient.setQueryData(clawAgentDetailKey(agent.slug), previous);
-      toast.error(clawErrorText(err, 'Could not update this agent'));
-      return false;
+      return await target.save(config, message);
     } finally {
       setSaving(false);
     }
   };
 
   const saveBehaviour = async (patch: Partial<BehaviourDraft>, message: string): Promise<boolean> =>
-    persist(applyBehaviour(agent.config, { ...behaviour, ...patch }), message);
+    persist(applyBehaviour(target.config, { ...behaviour, ...patch }), message);
 
   const setBehaviour = (patch: Partial<BehaviourDraft>, message: string): void => {
     void saveBehaviour(patch, message);
   };
 
   const setSandbox = (patch: Partial<SandboxDraft>, message: string): void => {
-    void persist(applySandbox(agent.config, { ...sandbox, ...patch }), message);
+    void persist(applySandbox(target.config, { ...sandbox, ...patch }), message);
   };
 
   const lockNote = canEdit ? null : <DetailLockedNote>{LOCK_NOTE}</DetailLockedNote>;

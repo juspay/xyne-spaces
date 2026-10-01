@@ -3,7 +3,7 @@ import { useMutation } from '@tanstack/react-query';
 import { ClawApiError } from '@/services/claw/clawRequest';
 import { suggestTools } from '@/services/claw/clawToolsService';
 import type { IntegrationToolEntry } from '@/services/claw/clawToolsTypes';
-import { matchSuggestedTools } from '../../primitives/suggestionMatch';
+import { matchSuggestedTools, withSuggestedPicks } from '../../primitives/suggestionMatch';
 import type { McpCatalogEntry } from './mcpCatalog';
 
 export interface SuggestedMcp {
@@ -22,7 +22,10 @@ export interface McpSuggestions {
 function describeError(error: Error | null): string | null {
   if (!error) return null;
   if (error instanceof ClawApiError && error.status >= 500) {
-    return 'the suggestion service is busy';
+    return 'No suggestions — browse to pick manually';
+  }
+  if (/timed out|abort/i.test(error.message)) {
+    return 'No suggestions — browse to pick manually';
   }
   return error.message;
 }
@@ -48,13 +51,14 @@ export function useMcpSuggestions(
     mutate({
       systemPrompt: systemPrompt || undefined,
       description: systemPrompt ? undefined : description || undefined,
+      emptyHubs: ['mcp'],
     });
   }, [canRun, isPending, mutate, systemPrompt, description]);
 
   const suggested = useMemo(
     () =>
       matchSuggestedTools(
-        mutation.data,
+        withSuggestedPicks(mutation.data),
         catalog,
         entry => entry.slug,
         entry => entry.tools,

@@ -11,7 +11,7 @@ import { validateS2SKey } from "../middleware/auth.js";
 import { judgeSemanticMatch, listJudgeModels } from "../eval-judge.js";
 import { LITELLM } from "../config.js";
 import { judgeBackendConfigured } from "../jev.js";
-import { SYSTEM_ONE_BACKEND_NAMES, judgeBackendLabel } from "../judge-backend.js";
+import { SELECTABLE_SYSTEM_ONE_BACKEND_NAMES, judgeBackendLabel } from "../judge-backend.js";
 import { OPTIMIZATIONS, OPTIMIZATION_KEYS } from "../optimizations.js";
 
 const router = Router();
@@ -48,7 +48,8 @@ router.post("/eval-judge", validateS2SKey, async (req: Request, res: Response): 
 
 router.get("/eval-models", validateS2SKey, async (_req: Request, res: Response): Promise<void> => {
   const models = await listJudgeModels();
-  const judgeBackends = SYSTEM_ONE_BACKEND_NAMES.filter((b) => judgeBackendConfigured(b));
+  // Explicit-only backends (xor) are left out: picking one as the eval judge would flood its rate-limited key.
+  const judgeBackends = SELECTABLE_SYSTEM_ONE_BACKEND_NAMES.filter((b) => judgeBackendConfigured(b));
   const judgeBackendLabels = Object.fromEntries(judgeBackends.map((b) => [b, judgeBackendLabel(b)]));
   // defaultModel = what an empty model resolves to (judge + extraction fallback).
   const optimizations = OPTIMIZATION_KEYS.map((key) => ({

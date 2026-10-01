@@ -24,6 +24,8 @@ const CLAW_APP_PERMISSIONS = [
 
 const AGENT_CHANNELS: Record<string, string[]> = {
   'ask-ai': ['general', 'ai-help', 'knowledge'],
+  // Local super-agent (Ask AI + authoring tools) — same channels as ask-ai.
+  'xyne': ['general', 'ai-help', 'knowledge'],
   'claw': ['general', 'ai-help', 'claw-lab', 'engineering'],
   'digital-twin': ['general', 'ai-help'],
   'doctor-agent': ['general', 'ai-help', 'incidents'],

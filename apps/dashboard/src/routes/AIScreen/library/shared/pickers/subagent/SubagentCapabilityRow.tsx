@@ -1,7 +1,10 @@
 import { useMemo, useState, type ReactElement } from 'react';
 import { Ai01, InformationCircle, PlusDefault } from '@xyne/icons';
+import { PropertyAddButton } from '@/components/flowUI/nodes/agent/create/PropertyAddButton';
+import type { CreateHubSuggestions } from '@/components/flowUI/nodes/agent/create/types';
 import { Tooltip } from '@/components/ui/Tooltip/Tooltip';
 import { DotGridLoader } from '../mcp/DotGridLoader';
+import { CapabilityPillList } from '../CapabilityPillList';
 import { BrowseSubagentsDialog } from './BrowseSubagentsDialog';
 import { SubagentChip } from './SubagentChip';
 import {
@@ -19,12 +22,22 @@ interface SubagentCapabilityRowProps {
   selection: SubagentSelection;
   onSelectionChange: (next: SubagentSelection) => void;
   suggestContext: { systemPrompt: string; description: string };
+  layout?: 'profile';
+  /** Create page: mid-confidence picks shown as dashed chips (profile layout). */
+  hubSuggestions?: CreateHubSuggestions | undefined;
+  onSuggestionAccepted?: ((name: string) => void) | undefined;
+  /** A chip was removed: the caller never re-adds it this session. */
+  onPickDismissed?: ((name: string) => void) | undefined;
 }
 
 export function SubagentCapabilityRow({
   selection,
   onSelectionChange,
   suggestContext,
+  layout,
+  hubSuggestions,
+  onSuggestionAccepted,
+  onPickDismissed,
 }: SubagentCapabilityRowProps): ReactElement {
   const [browseOpen, setBrowseOpen] = useState(false);
   const [browseName, setBrowseName] = useState<string | null>(null);
@@ -39,6 +52,12 @@ export function SubagentCapabilityRow({
     () => suggestions.suggested.filter(entry => !isSubagentSelected(selection, entry)),
     [suggestions.suggested, selection],
   );
+
+  const planChips = useMemo(() => {
+    const names = new Set((hubSuggestions?.subagents ?? []).map(pick => pick.name));
+    if (names.size === 0) return [];
+    return entries.filter(entry => names.has(entry.name) && !isSubagentSelected(selection, entry));
+  }, [hubSuggestions, entries, selection]);
 
   const renderSuggestAction = (): ReactElement => {
     if (suggestions.status === 'loading') {
@@ -55,9 +74,7 @@ export function SubagentCapabilityRow({
     if (suggestions.status === 'error') {
       return (
         <span className='flex items-center gap-2 text-xs leading-5 tracking-[-0.24px]'>
-          <span className='text-muted-foreground'>
-            Couldn&apos;t suggest subagents{suggestions.error ? ` — ${suggestions.error}` : ''}
-          </span>
+          <span className='text-muted-foreground'>None suggested</span>
           <button
             type='button'
             onClick={suggestions.run}
@@ -93,6 +110,73 @@ export function SubagentCapabilityRow({
       </Tooltip>
     );
   };
+
+  if (layout === 'profile') {
+    return (
+      <>
+        <CapabilityPillList
+          className='gap-3'
+          add={
+            <PropertyAddButton
+              label='Add subagent'
+              trackName='Create agent v2: browse subagents'
+              onClick={() => {
+                setBrowseName(null);
+                setBrowseOpen(true);
+              }}
+            />
+          }
+          pills={[
+            ...selectedEntries.map(entry => ({
+              key: entry.name,
+              node: (
+                <SubagentChip
+                  label={entry.name}
+                  selected
+                  onOpen={() => {
+                    setBrowseName(entry.name);
+                    setBrowseOpen(true);
+                  }}
+                  onToggle={() => {
+                    onSelectionChange(disableSubagent(selection, entry));
+                    onPickDismissed?.(entry.name);
+                  }}
+                />
+              ),
+            })),
+            ...planChips.map(entry => ({
+              key: entry.name,
+              node: (
+                <SubagentChip
+                  label={entry.name}
+                  selected={false}
+                  onToggle={() => {
+                    onSelectionChange(enableSubagent(selection, entry));
+                    onSuggestionAccepted?.(entry.name);
+                  }}
+                />
+              ),
+            })),
+          ]}
+        />
+        <BrowseSubagentsDialog
+          open={browseOpen}
+          onOpenChange={next => {
+            setBrowseOpen(next);
+            if (!next) setBrowseName(null);
+          }}
+          initialName={browseName}
+          catalog={entries}
+          loading={loading}
+          isError={isError}
+          onRetry={refetch}
+          selection={selection}
+          onSelectionChange={onSelectionChange}
+          suggested={suggestions.suggested}
+        />
+      </>
+    );
+  }
 
   return (
     <div className='flex w-full flex-col gap-1.5'>
@@ -155,7 +239,7 @@ export function SubagentCapabilityRow({
 
       {suggestions.status === 'ready' && suggestions.suggested.length === 0 && (
         <p className='text-xs text-muted-foreground'>
-          No subagent matched this agent — browse the full list to pick one yourself.
+          None needed — browse the full list to pick one yourself.
         </p>
       )}
 

@@ -3,7 +3,7 @@ import { useMutation } from '@tanstack/react-query';
 import { ClawApiError } from '@/services/claw/clawRequest';
 import { suggestTools } from '@/services/claw/clawToolsService';
 import type { IntegrationToolEntry } from '@/services/claw/clawToolsTypes';
-import { matchSuggestedTools } from '../../primitives/suggestionMatch';
+import { matchSuggestedTools, withSuggestedPicks } from '../../primitives/suggestionMatch';
 import type { BuiltinCatalogEntry } from './builtinCatalog';
 
 export interface SuggestedBuiltin {
@@ -21,7 +21,13 @@ export interface BuiltinSuggestions {
 
 function describeError(error: Error | null): string | null {
   if (!error) return null;
-  if (error instanceof ClawApiError && error.status >= 500) return 'the suggestion service is busy';
+  // Never show "suggestion service is busy" — fallback is local stage-C / none.
+  if (error instanceof ClawApiError && error.status >= 500) {
+    return 'No suggestions — browse to pick manually';
+  }
+  if (/timed out|abort/i.test(error.message)) {
+    return 'No suggestions — browse to pick manually';
+  }
   return error.message;
 }
 
@@ -46,13 +52,14 @@ export function useBuiltinSuggestions(
     mutate({
       systemPrompt: systemPrompt || undefined,
       description: systemPrompt ? undefined : description || undefined,
+      emptyHubs: ['builtin'],
     });
   }, [canRun, isPending, mutate, systemPrompt, description]);
 
   const suggested = useMemo(
     () =>
       matchSuggestedTools(
-        mutation.data,
+        withSuggestedPicks(mutation.data),
         catalog,
         entry => entry.source,
         entry => entry.tools,

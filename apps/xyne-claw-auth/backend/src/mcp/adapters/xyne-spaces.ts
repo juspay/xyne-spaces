@@ -18,6 +18,18 @@ export const xyneSpacesAdapter: StdioMcpAdapter = {
   // apps-send-message (in the sibling xyne-spaces-app-tools MCP) is NOT
   // gated by design — that one acts as the bot identity, autonomously.
   writeTools: ["spaces-create-ticket", "spaces-create-bulk-tickets", "spaces-update-ticket", "spaces-update-bulk-tickets", "spaces-schedule-call", "spaces-start-call", "spaces-create-canvas", "spaces-edit-canvas", "user-send-message", "spaces-upload-to-kb", "spaces-automation-submit", "spaces-automation-webhook-issue"],
+  // The everyday read tools, listed up front: synced tools only reach the
+  // `tools` table once a user connects, so a fresh environment would otherwise
+  // offer only the write tools above and an agent couldn't read activity, DMs
+  // or tickets. Automation and admin tools are left to the sync.
+  staticTools: [
+    "spaces-activity", "spaces-user-activity-context", "spaces-my-items", "spaces-messages",
+    "spaces-message-detail", "spaces-channels", "spaces-users", "spaces-whoami", "spaces-search",
+    "spaces-search-v2", "spaces-vespa-search", "spaces-tickets", "spaces-projects",
+    "spaces-project-team-members", "spaces-boards", "spaces-canvases", "spaces-read-canvas",
+    "spaces-calls", "spaces-meeting-insights", "spaces-emails", "spaces-thread-attachments",
+    "spaces-fetch-attachment", "spaces-saved-views",
+  ],
   credentialFields: [
     { name: "url", label: "Xyne Spaces URL", type: "text", placeholder: "https://app.spaces.xyne.juspay.net" },
     { name: "token", label: "Google Auth Token", type: "password", placeholder: "Paste your google_access_token" },

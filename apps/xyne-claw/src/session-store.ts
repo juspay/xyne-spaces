@@ -19,8 +19,8 @@ import path from "node:path";
 import { existsSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
-import { PATHS, SERVER } from "./config.js";
-import { gcsRestoreSessionToDisk, gcsUploadSessionFromDisk, gcsDeleteSession, gcsDeleteDebugRuns, gcsDeleteDebugIndex, gcsSessionUpdatedAt, gcsUploadDebugObject, gcsUploadDebugRunWithRetries, gcsPutDebugIndex, type SessionDiskFile } from "./storage.js";
+import { GCS, PATHS, SERVER } from "./config.js";
+import { gcsDirectConfigured, gcsRestoreSessionToDisk, gcsUploadSessionFromDisk, gcsDeleteSession, gcsDeleteDebugRuns, gcsDeleteDebugIndex, gcsSessionUpdatedAt, gcsUploadDebugObject, gcsUploadDebugRunWithRetries, gcsPutDebugIndex, type SessionDiskFile } from "./storage.js";
 import { indexObjectName, listRunDirs, packRun, packedRunObjectName, readRun, runFileNameFor, toV1Snapshot, type RunHeader } from "./debug/index.js";
 import { metric } from "./metrics.js";
 
@@ -490,6 +490,25 @@ export async function archiveSessionToGcsWithRetries(
 
 export type SessionRestoreOutcome = "restored" | "missing" | "failed";
 
+/**
+ * Local/dev may start a brand-new session when storage could not even be
+ * listed. Production must still refuse: an unverified archive might exist.
+ * A failed download of objects that were listed is never this case
+ * (`directUnavailable` stays false) — that archive is real and must not be
+ * forked.
+ */
+export function archiveUnverifiedMayStartFresh(input: {
+  nodeEnv: string | undefined;
+  fakeGcsHost: string;
+  directUnavailable: boolean;
+  directStorageConfigured: boolean;
+}): boolean {
+  if (input.nodeEnv === "production") return false;
+  if (!input.directUnavailable) return false;
+  if (input.fakeGcsHost.trim()) return true;
+  return !input.directStorageConfigured;
+}
+
 async function restoreBareSpillFromPvcFallback(storeKey: string): Promise<void> {
   const bareConversationId = bareConversationIdForStoreKey(storeKey);
   if (!bareConversationId) return;
@@ -556,7 +575,7 @@ async function restoreBareSpillFromArchive(storeKey: string): Promise<void> {
     log.info(`[session-store] Restored bare spill ${bareConversationId} for ${storeKey} (direct GCS stream)`);
   } else if (restored === "missing") {
     await restoreBareSpillFromPvcFallback(storeKey);
-  } else if (restored === null) {
+  } else if (restored === null || restored === "unavailable") {
     metric.count("session_spill_restore", { result: "fail", path: "gcs", storeKey });
     log.warn(`[session-store] Bare spill restore unavailable for ${storeKey} companion ${bareConversationId}; proceeding without spill files`);
     await restoreBareSpillFromPvcFallback(storeKey);
@@ -576,6 +595,20 @@ export async function restoreSessionFromArchiveDetailed(conversationId: string):
 
   const started = Date.now();
   const direct = await gcsRestoreSessionToDisk(conversationId, sessionDir(conversationId));
+  const devMayStartFresh = archiveUnverifiedMayStartFresh({
+    nodeEnv: process.env["NODE_ENV"],
+    fakeGcsHost: GCS.fakeHost,
+    directUnavailable: direct === "unavailable",
+    directStorageConfigured: gcsDirectConfigured(),
+  });
+  // The dev emulator is the only store both processes can see. If it is down,
+  // the S2S fallback fails the same way and would block authoring. Production
+  // never sets fakeHost, so a real GCS outage still falls through and refuses.
+  if (devMayStartFresh && GCS.fakeHost) {
+    metric.count("session_restore", { result: "missing", path: "gcs", reason: "dev_storage_unreachable" });
+    log.warn(`session_restore_dev_storage_unreachable conversationId=${conversationId} host=${GCS.fakeHost}`);
+    return "missing";
+  }
   if (direct === "restored") {
     await restoreBareSpillFromArchive(conversationId);
     metric.count("session_restore", { result: "ok", path: "gcs" });
@@ -595,6 +628,11 @@ export async function restoreSessionFromArchiveDetailed(conversationId: string):
   }
 
   if (!SERVER.s2sKey) {
+    if (devMayStartFresh) {
+      metric.count("session_restore", { result: "missing", path: "none", reason: "dev_storage_unreachable" });
+      log.warn(`session_restore_dev_storage_unreachable conversationId=${conversationId} reason=gcs_restore_failed_no_s2s`);
+      return "missing";
+    }
     metric.count("session_restore", { result: "fail", path: "none", reason: "no_s2s" });
     log.error(`session_restore_failed conversationId=${conversationId} reason=gcs_restore_failed_no_s2s`);
     return "failed";
@@ -611,6 +649,11 @@ export async function restoreSessionFromArchiveDetailed(conversationId: string):
 
     if (!res.ok) {
       log.warn(`[session-store] Restore HTTP ${res.status} for ${conversationId}`);
+      if (devMayStartFresh) {
+        metric.count("session_restore", { result: "missing", path: "clawauth", reason: "dev_storage_unreachable" });
+        log.warn(`session_restore_dev_storage_unreachable conversationId=${conversationId} reason=clawauth_http_${res.status}`);
+        return "missing";
+      }
       metric.count("session_restore", { result: "fail", path: "clawauth", reason: `http_${res.status}` });
       log.error(`session_restore_failed conversationId=${conversationId} reason=clawauth_http_${res.status}`);
       return "failed";
@@ -627,6 +670,11 @@ export async function restoreSessionFromArchiveDetailed(conversationId: string):
         metric.count("session_restore", { result: "missing", path: "clawauth" });
         return "missing";
       }
+      if (devMayStartFresh) {
+        metric.count("session_restore", { result: "missing", path: "clawauth", reason: "dev_storage_unreachable" });
+        log.warn(`session_restore_dev_storage_unreachable conversationId=${conversationId} reason=clawauth_rejected`);
+        return "missing";
+      }
       metric.count("session_restore", { result: "fail", path: "clawauth", reason: "rejected" });
       log.error(`session_restore_failed conversationId=${conversationId} reason=clawauth_rejected`);
       return "failed";
@@ -640,6 +688,11 @@ export async function restoreSessionFromArchiveDetailed(conversationId: string):
     return "restored";
   } catch (err) {
     log.warn(`[session-store] Restore call failed for ${conversationId}:`, err instanceof Error ? err.message : String(err));
+    if (devMayStartFresh) {
+      metric.count("session_restore", { result: "missing", path: "clawauth", reason: "dev_storage_unreachable" });
+      log.warn(`session_restore_dev_storage_unreachable conversationId=${conversationId} reason=clawauth_exception`);
+      return "missing";
+    }
     metric.count("session_restore", { result: "fail", path: "clawauth", reason: "exception" });
     log.error(`session_restore_failed conversationId=${conversationId} reason=clawauth_exception`);
     return "failed";

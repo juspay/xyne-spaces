@@ -20,7 +20,7 @@ import {
   DetailEmpty,
   DetailSection,
 } from '../../../shared/primitives/DetailPrimitives';
-import { DelegationStatusBadge } from '../tools/DelegationStatusBadge';
+import { DelegationStatusBadge } from './DelegationStatusBadge';
 import { delegationGrantsKey } from '../../../shared/pickers/callableAgent/useCallableAgents';
 
 const delegationRequestsKey = (slug: string): string[] => ['claw-delegation-requests', slug];

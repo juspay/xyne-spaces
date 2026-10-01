@@ -118,6 +118,7 @@ const LibraryV2 = (): ReactElement => {
           {activeTab.create && (
             <Button
               type='button'
+              variant='ink'
               className='shrink-0'
               onClick={() => void navigate(prefixWs(activeTab.create.path))}
               data-track-category='Claw Agents'

@@ -34,6 +34,8 @@
     --secondary-foreground: 240 5.9% 10%;
     --muted: 240 4.8% 95.9%;
     --muted-foreground: 240 3.8% 46.1%;
+    --fg-placeholder: #d3d3d4;
+    --fg-section: rgba(35, 34, 41, 0.4);
     --accent: 240 4.8% 95.9%;
     --accent-foreground: 240 5.9% 10%;
     --destructive: 0 84.2% 60.2%;
@@ -188,6 +190,8 @@
     --secondary-foreground: 240 5.9% 10%;
     --muted: 240 4.8% 95.9%;
     --muted-foreground: 240 3.8% 46.1%;
+    --fg-placeholder: #d3d3d4;
+    --fg-section: rgba(35, 34, 41, 0.4);
     --accent: 240 4.8% 95.9%;
     --accent-foreground: 240 5.9% 10%;
     --destructive: 0 84.2% 60.2%;
@@ -333,6 +337,8 @@
     --secondary-foreground: 210 8% 93%;
     --muted: 216 6% 18%;
     --muted-foreground: 216 5% 71%;
+    --fg-placeholder: #46464a;
+    --fg-section: #727275;
     --accent: 216 6% 18%;
     --accent-foreground: 210 8% 93%;
     --destructive: 0 62% 55%;
@@ -4795,13 +4801,13 @@ img.inline-emoji,
 
 /* AI composer dark mode shadows — surface/border come from the shared
    chat-composer tokens the channel & thread input uses */
-[data-theme="midnight"] .ai-composer-wrapper {
+[data-theme="midnight"] .ai-composer-wrapper:not(.shadow-none) {
   box-shadow:
     0 1px 0 rgba(255, 255, 255, 0.05),
     0 8px 24px -12px rgba(0, 0, 0, 0.3);
 }
 
-[data-theme="midnight"] .ai-composer-wrapper:focus-within {
+[data-theme="midnight"] .ai-composer-wrapper:not(.shadow-none):focus-within {
   box-shadow:
     0 1px 0 rgba(255, 255, 255, 0.1),
     0 12px 30px -12px rgba(0, 0, 0, 0.4);

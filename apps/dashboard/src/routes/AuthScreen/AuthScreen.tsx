@@ -557,6 +557,10 @@ const AuthScreen = (): ReactElement | null => {
     setRegConfirmPasswordError('');
   };
 
+  if (isLoading) {
+    return null;
+  }
+
   // SDK SSO flow - back to the authorize page after login (before the workspace redirect)
   const pendingSdkSsoUserCode = getPendingSdkSso();
   if (isAuthenticated && pendingSdkSsoUserCode) {

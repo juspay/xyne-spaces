@@ -24,6 +24,8 @@ import { buildSpacesMentionLookups, buildSpacesMentionLookupsDb } from "../lib/m
 import {
   enqueueDelayedJob,
   enqueueCronJob,
+  isValidTimezone,
+  schedulerTimezone,
   cancelJob,
   cancelCronJob,
   type ScheduledJobData,
@@ -71,13 +73,14 @@ function readWorkspaceCookie(req: Request): string | undefined {
 //      would let users burn LLM quota by firing far too often.
 function validateCronExpression(
   expr: string,
+  timezone?: string | null,
 ): { ok: true; cron: string } | { ok: false; error: string } {
   const trimmed = expr.trim();
   if (!trimmed) {
     return { ok: false, error: "cronExpression is required" };
   }
   try {
-    parseExpression(trimmed, { tz: "Asia/Kolkata" }).next();
+    parseExpression(trimmed, { tz: schedulerTimezone(timezone) }).next();
   } catch (err) {
     return {
       ok: false,
@@ -164,12 +167,12 @@ function isSessionLockedError(error?: string | null): boolean {
   return error === "session_locked" || error?.includes("session_locked") === true;
 }
 
-function nextFireText(row: { type: string; nextRunAt: Date | null; cronExpression: string | null; status: string }): string | null {
+function nextFireText(row: { type: string; nextRunAt: Date | null; cronExpression: string | null; timezone?: string | null; status: string }): string | null {
   if (row.status !== "active") return null;
   if (row.nextRunAt) return row.nextRunAt.toISOString();
   if (row.type === "cron" && row.cronExpression) {
     try {
-      return parseExpression(row.cronExpression, { tz: "Asia/Kolkata" }).next().toDate().toISOString();
+      return parseExpression(row.cronExpression, { tz: schedulerTimezone(row.timezone) }).next().toDate().toISOString();
     } catch {
       return null;
     }
@@ -321,7 +324,7 @@ router.post("/", asyncHandler(async (req: Request, res: Response) => {
   const {
     userId: bodyUserId, agentSlug, task, context,
     channelId, conversationId,
-    type, delayMs, cronExpression,
+    type, delayMs, cronExpression, timezone: bodyTimezone,
     label, maxRuns, replyMode,
     workspaceId: bodyWorkspaceId,
   } = req.body as {
@@ -334,6 +337,8 @@ router.post("/", asyncHandler(async (req: Request, res: Response) => {
     type?: string;
     delayMs?: number;
     cronExpression?: string;
+    /** IANA zone for a cron job ("Europe/London"). Omitted = Asia/Kolkata. */
+    timezone?: string;
     label?: string;
     maxRuns?: number;
     replyMode?: string;
@@ -425,10 +430,15 @@ router.post("/", asyncHandler(async (req: Request, res: Response) => {
     throw badRequest("cronExpression is required for type='cron'");
   }
 
+  const timezone = type === "cron" && bodyTimezone?.trim() ? bodyTimezone.trim() : null;
+  if (timezone && !isValidTimezone(timezone)) {
+    throw badRequest(`Unknown timezone: ${timezone}`);
+  }
+
   // Validate parseability + min-interval policy. Shared with PATCH.
   let normalizedCron: string | undefined;
   if (type === "cron" && cronExpression) {
-    const v = validateCronExpression(cronExpression);
+    const v = validateCronExpression(cronExpression, timezone);
     if (!v.ok) {
       throw badRequest(v.error);
     }
@@ -455,6 +465,7 @@ router.post("/", asyncHandler(async (req: Request, res: Response) => {
       type,
       delayMs: type === "once" ? BigInt(delayMs!) : null,
       cronExpression: type === "cron" ? (normalizedCron ?? null) : null,
+      timezone,
       maxRuns: maxRuns ?? (type === "once" ? 1 : null),
       nextRunAt,
       label: label ?? null,
@@ -482,7 +493,7 @@ router.post("/", asyncHandler(async (req: Request, res: Response) => {
   if (isChannelBroadcast) {
     const scheduleSummary = type === "once"
       ? (nextRunAt ? `Once — runs ${nextRunAt.toISOString()}` : "Once")
-      : `Recurring — ${normalizedCron} (Asia/Kolkata)`;
+      : `Recurring — ${normalizedCron} (${schedulerTimezone(timezone)})`;
     try {
       await postScheduledJobApprovalCard({
         row: { ...row, task },
@@ -514,7 +525,7 @@ router.post("/", asyncHandler(async (req: Request, res: Response) => {
     });
   } else {
     const schedulerId = `cron-${row.id}`;
-    await enqueueCronJob(schedulerId, data, normalizedCron!);
+    await enqueueCronJob(schedulerId, data, normalizedCron!, timezone);
     await prisma.scheduledJob.update({
       where: { id: row.id },
       data: { bullSchedulerId: schedulerId },
@@ -710,7 +721,7 @@ router.patch("/:id", asyncHandler(async (req: Request<{ id: string }>, res: Resp
     }
     // Same parseability + min-interval policy as POST. validateCronExpression
     // returns the trimmed value on success.
-    const v = validateCronExpression(String(cronExpression));
+    const v = validateCronExpression(String(cronExpression), row.timezone);
     if (!v.ok) {
       throw badRequest(v.error);
     }
@@ -766,7 +777,7 @@ router.patch("/:id", asyncHandler(async (req: Request<{ id: string }>, res: Resp
       ...(updated.conversationId ? { conversationId: updated.conversationId } : {}),
     };
     try {
-      await enqueueCronJob(schedulerId, jobData, updated.cronExpression!);
+      await enqueueCronJob(schedulerId, jobData, updated.cronExpression!, updated.timezone);
       if (!updated.bullSchedulerId) {
         await prisma.scheduledJob.update({
           where: { id: updated.id },
@@ -919,7 +930,7 @@ router.post(
         throw badRequest("Cannot resume cron job without cronExpression");
       }
       const schedulerId = row.bullSchedulerId ?? `cron-${row.id}`;
-      await enqueueCronJob(schedulerId, jobData, row.cronExpression);
+      await enqueueCronJob(schedulerId, jobData, row.cronExpression, row.timezone);
       updateData = { ...updateData, bullSchedulerId: schedulerId };
     } else if (row.type === "once") {
       const targetRunAt =
