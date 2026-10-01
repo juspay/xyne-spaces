@@ -55,16 +55,16 @@ export class ClaudeCodeAdapter implements HarnessAdapter {
     const mcpConfigPath = join(tmpdir(), `xyne-mcp-${randomBytes(12).toString('hex')}.json`);
     await fs.writeFile(mcpConfigPath, JSON.stringify(ctx.mcpConfig), { mode: 0o600 });
 
+    const tools = writable
+      ? SANDBOX_TOOLS
+      : envelope.localSandbox?.container || attached.needsFileTools
+        ? 'Read,Glob,Grep'
+        : '';
     const args = buildClaudeCodeArgs({
       systemPrompt: envelope.systemPrompt,
       mcpConfigPath,
       mcpServerName: ctx.mcpServerName,
-      tools:
-      writable
-        ? SANDBOX_TOOLS
-        : envelope.localSandbox?.container || attached.needsFileTools
-          ? 'Read,Glob,Grep'
-          : '',
+      tools,
       writable,
     });
 
