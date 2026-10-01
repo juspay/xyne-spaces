@@ -272,8 +272,8 @@ export const AcceptInvitation = (): ReactElement => {
           </div>
           <h1 className='text-2xl font-semibold text-foreground mb-2'>Pending Approval</h1>
           <p className='text-muted-foreground mb-6'>
-            This invitation is waiting for an organization admin&apos;s approval. You&apos;ll get
-            an email once it&apos;s approved.
+            This invitation is waiting for an organization admin&apos;s approval. You&apos;ll get an
+            email once it&apos;s approved.
           </p>
           <Button
             onClick={handleGoHome}
