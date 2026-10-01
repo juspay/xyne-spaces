@@ -127,6 +127,9 @@ interface UseSearchMetricsOptions {
   buildMentionHighlights?: MentionHighlightsBuilder;
   // Cmd-K only: skip the people/channel search on tabs that don't show those results.
   searchLocalOnlyOnShownTabs?: boolean;
+  // Query text on the first render. The results page passes its URL query so the first paint
+  // already searches it, instead of rendering one frame of the unfiltered lists.
+  initialText?: string;
   // The ticket screen view the palette was opened on (search button / Cmd+F): its filters
   // apply to Tickets-tab requests. Null in plain Cmd+K, whose Tickets tab searches every ticket.
   ticketView?: TicketSearchView | null;
@@ -297,7 +300,7 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
   const isModifiedRef = useRef<boolean>(false);
 
   // Search Input State
-  const [text, setText] = useState('');
+  const [text, setText] = useState(options.initialText ?? '');
   const inputRef = useRef<HTMLInputElement | null>(null);
 
   // Parse filters early for UI visibility (typeFilter) and cleaned searchText
@@ -360,12 +363,15 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
   const channelQuery = shownOnTab([TabType.ALL, TabType.CHANNELS]) ? cleanedSearchText : '';
 
   // Fuzzy matching runs in web workers so typing stays responsive in large workspaces.
-  const filteredLocalUsers = useWorkerUserSearch(peopleQuery, CMDK_USER_LIMIT);
-  const filteredLocalChannels: Array<{
-    channel: Channel;
-    category: ChannelCategory;
-    searchableNames?: string[];
-  }> = useWorkerChannelSearch(options.allChannels ?? NO_CHANNELS, channelQuery);
+  const { users: filteredLocalUsers, isPending: isLocalUserSearchPending } = useWorkerUserSearch(
+    peopleQuery,
+    CMDK_USER_LIMIT,
+  );
+  const { channels: filteredLocalChannels, isPending: isLocalChannelSearchPending } =
+    useWorkerChannelSearch(options.allChannels ?? NO_CHANNELS, channelQuery);
+  // True while there is a query but the people/channel lists are still the unfiltered ones,
+  // because the workers haven't answered yet. Later keystrokes keep the previous matches.
+  const isLocalSearchPending = isLocalUserSearchPending || isLocalChannelSearchPending;
 
   const [currentSearchContext, setCurrentSearchContext] = useState<{
     query: string;
@@ -2007,6 +2013,7 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
     loadMoreRef,
     filteredLocalUsers,
     filteredLocalChannels,
+    isLocalSearchPending,
     typeFilter,
 
     // Input state

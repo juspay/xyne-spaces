@@ -59,6 +59,7 @@ import {
   useUserChannelStatuses,
 } from '../../../hooks/useChannels';
 import { useSearchMetrics } from '../../../hooks/useSearchMetrics';
+import type { VisibleChannel } from '../../../machines/stateMachine';
 import { useCachedQuery } from '../../../hooks/useCachedQuery';
 import { queries } from '../../../zero/queries';
 import { useUser, useUsers } from '../../../hooks/useUsers';
@@ -150,6 +151,8 @@ const SORT_VALUES: ReadonlyArray<SearchResultsFilters['sortBy']> = [
   'newest',
   'oldest',
 ];
+
+const NO_LOCAL_CHANNELS: ResultsBodyProps['filteredLocalChannels'] = [];
 
 function parseFiltersFromParams(
   params: URLSearchParams,
@@ -248,15 +251,20 @@ const SearchResults = (): ReactElement => {
   const usersById = useMemo(() => new Map(allUsers.map(u => [u.id, u])), [allUsers]);
 
   // Partition channels into starred / regular / DMs — mirrors cmdK's allChannels build exactly.
+  // Like cmdK, match over every channel (not just the sidebar's visible set) so channels the
+  // user hasn't joined are found too; visible channels keep their sidebar data.
   const allChannelStatuses = useUserChannelStatuses();
   const {
     starred: starredChannels,
     channels: regularChannels,
     directMessages: dmChannels,
-  } = useMemo(
-    () => groupChannelsByScope(allChannels, allChannelStatuses),
-    [allChannels, allChannelStatuses],
-  );
+  } = useMemo(() => {
+    const visibleById = new Map(allChannels.map(channel => [channel.id, channel]));
+    const searchableChannels = allChannelsForNav.map(
+      channel => visibleById.get(channel.id) ?? channel,
+    ) as VisibleChannel[];
+    return groupChannelsByScope(searchableChannels, allChannelStatuses);
+  }, [allChannels, allChannelsForNav, allChannelStatuses]);
 
   const allChannelsWithCategory = useMemo((): Array<{
     channel: Channel;
@@ -327,10 +335,13 @@ const SearchResults = (): ReactElement => {
     setIncludeDebugInfo,
     loadMoreRef,
     paginationState,
+    searchText: localSearchText,
     filteredLocalUsers,
     filteredLocalChannels,
+    isLocalSearchPending,
   } = useSearchMetrics({
     allChannels: allChannelsWithCategory,
+    initialText: query,
     mentionSearchType: null,
     defaultOnlyMyChannels: filters.onlyMyChannels,
     // The Desk and Tickets tabs hide archived tickets by default; the "Show archived" toggle
@@ -351,6 +362,12 @@ const SearchResults = (): ReactElement => {
   // so query-driven UI (empty-state copy, local-section gating) must read this, not the
   // stale URL param. Falls back to `query` on first paint before the sync effect runs.
   const displayQuery = searchedText.trim() || query;
+  // Until the search workers answer, the people/channel lists are the unfiltered ones, which
+  // must not be shown as results for `displayQuery`.
+  const localResultsShown = isChannelsMode || filters.docType === 'all';
+  const hasLocalQuery = !!localSearchText.trim();
+  const localResultsReady = hasLocalQuery && !isLocalSearchPending;
+  const localResultsPending = localResultsShown && hasLocalQuery && isLocalSearchPending;
 
   // Sync hook text whenever the URL query param changes; also close sidebar on new search
   useEffect(() => {
@@ -668,11 +685,11 @@ const SearchResults = (): ReactElement => {
   }, [authContext.workspaceId, currentUserId, query, filters, activeFilterChips]);
 
   // Use filteredLocalChannels from the hook (same data pipeline as cmdK).
-  // Guard against empty query so we don't show all channels before the user types.
+  // Guard against a missing or unanswered query so we never show the unfiltered channels.
+  const readyLocalChannels = localResultsReady ? filteredLocalChannels : NO_LOCAL_CHANNELS;
   const localChannelResults = useMemo((): DisplaySearchResult[] => {
-    if (!isChannelsMode && filters.docType !== 'all') return [];
-    if (!displayQuery) return [];
-    return filteredLocalChannels.map(({ channel: c, searchableNames }) => {
+    if (!localResultsShown) return [];
+    return readyLocalChannels.map(({ channel: c, searchableNames }) => {
       const isDm = isDMChannel(c.scopeType);
       const title = isDm ? searchableNames?.join(', ') || c.name : c.name;
       return {
@@ -684,7 +701,7 @@ const SearchResults = (): ReactElement => {
         metadata: {},
       };
     });
-  }, [isChannelsMode, filters.docType, displayQuery, filteredLocalChannels]);
+  }, [localResultsShown, readyLocalChannels]);
 
   // Single "narrowing filter active" flag (from:/in:/assignee: + priority:, not the
   // onlyMyChannels scope toggle) — shared by result stripping and local-section suppression.
@@ -700,7 +717,8 @@ const SearchResults = (): ReactElement => {
       // For ALL tab, users and channels come from local Zero data (same as cmdK popup).
       // Strip them from backend results to avoid duplicates and use local versions.
       const vespaOnly = backendResults.filter(r => r.type !== 'user' && r.type !== 'channel');
-      const localUserResults: DisplaySearchResult[] = filteredLocalUsers.map(user => ({
+      const localUsers = localResultsReady ? filteredLocalUsers : [];
+      const localUserResults: DisplaySearchResult[] = localUsers.map(user => ({
         id: user.id,
         type: 'user' as const,
         title: user.name,
@@ -724,6 +742,7 @@ const SearchResults = (): ReactElement => {
     filters.docType,
     filtersActive,
     backendResults,
+    localResultsReady,
     filteredLocalUsers,
   ]);
 
@@ -980,6 +999,7 @@ const SearchResults = (): ReactElement => {
             displayQuery={displayQuery}
             hasActiveFilters={filtersActive}
             isSearchPending={isSearchPending}
+            isLocalSearchPending={localResultsPending}
             isLoading={isLoading}
             error={error}
             results={results}
@@ -995,7 +1015,7 @@ const SearchResults = (): ReactElement => {
             relevantIds={relevantIds}
             onToggleSelect={toggleSelect}
             docType={filters.docType}
-            filteredLocalChannels={filteredLocalChannels}
+            filteredLocalChannels={readyLocalChannels}
           />
         </TicketSearchHighlightContext.Provider>
       </div>
@@ -1084,6 +1104,8 @@ interface ResultsBodyProps {
   displayQuery: string;
   hasActiveFilters: boolean;
   isSearchPending: boolean;
+  /** The local people/channel matches haven't caught up with the query yet. */
+  isLocalSearchPending: boolean;
   isLoading: boolean;
   error: string | null;
   results: DisplaySearchResult[];
@@ -1229,6 +1251,7 @@ function ResultsBody({
   displayQuery,
   hasActiveFilters,
   isSearchPending,
+  isLocalSearchPending,
   isLoading,
   error,
   results,
@@ -1668,7 +1691,7 @@ function ResultsBody({
         );
       }
       // isSearchPending is primary (race-proof); isLoading backstops a real in-flight fetch.
-      if (isLoading || isSearchPending) {
+      if (isLoading || isSearchPending || isLocalSearchPending) {
         return (
           <div className='flex items-center justify-center h-full'>
             <Loader2 className='animate-spin text-muted-foreground' size={32} />
@@ -1735,7 +1758,7 @@ function ResultsBody({
       );
     }
     // isSearchPending is primary (race-proof); isLoading backstops a real in-flight fetch.
-    if (isLoading || isSearchPending) {
+    if (isLoading || isSearchPending || isLocalSearchPending) {
       return (
         <div className='flex items-center justify-center h-full'>
           <Loader2 className='animate-spin text-muted-foreground' size={32} />
