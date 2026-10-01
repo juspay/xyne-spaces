@@ -8,6 +8,7 @@ import {
   buildDockerInvocation,
   buildRunInput,
   classifyK6ExitCode,
+  processExitCodeFor,
   main,
   parseCliArgs,
   validateRuntime,
@@ -473,4 +474,45 @@ test('refuses a zero-push run that cannot address the endpoint', () => {
     }).zeroSchema,
     'xyne',
   );
+});
+
+test('a container that never started is an environment fault, not a test failure', () => {
+  // Observed live 2026-10-01: a memory-starved Docker daemon answered
+  // "handle request: read response: unexpected EOF" and docker exited 125. Reporting
+  // that as TEST_FAILURE sends the reader to debug the k6 script instead of Docker.
+  // 125 = docker run itself failed; 126 = command not executable; 127 = command not found.
+  assert.equal(classifyK6ExitCode(125), 'ENVIRONMENT_FAILURE');
+  assert.equal(classifyK6ExitCode(126), 'ENVIRONMENT_FAILURE');
+  assert.equal(classifyK6ExitCode(127), 'ENVIRONMENT_FAILURE');
+
+  // The existing taxonomy must not shift.
+  assert.equal(classifyK6ExitCode(0), 'PASS');
+  assert.equal(classifyK6ExitCode(99), 'PRODUCT_FAILURE');
+  assert.equal(classifyK6ExitCode(1), 'TEST_FAILURE');
+});
+
+test('an environment fault exits 2 however it was detected', () => {
+  // The documented taxonomy maps ENVIRONMENT_FAILURE to exit 2. A Docker start failure
+  // must not leak Docker's own 125 through, or CI branching on the exit code sees a
+  // code the runbook does not describe.
+  const reports = path.resolve(import.meta.dirname, '..', 'reports');
+  const before = new Set(readdirSync(reports));
+
+  // No PERF_BASE_URL: fails validation, which is the other ENVIRONMENT_FAILURE path.
+  assert.equal(main([], {}), 2);
+
+  assert.deepEqual(readdirSync(reports).filter((entry) => !before.has(entry)), []);
+});
+
+test('a Docker start failure exits 2, not Docker\'s own 125', () => {
+  // The documented taxonomy maps ENVIRONMENT_FAILURE to exit 2. Leaking 125 through
+  // would give CI a code the runbook does not describe.
+  assert.equal(processExitCodeFor(125), 2);
+  assert.equal(processExitCodeFor(126), 2);
+  assert.equal(processExitCodeFor(127), 2);
+
+  // Everything else keeps k6's own code, so 99 stays distinguishable.
+  assert.equal(processExitCodeFor(0), 0);
+  assert.equal(processExitCodeFor(99), 99);
+  assert.equal(processExitCodeFor(1), 1);
 });
