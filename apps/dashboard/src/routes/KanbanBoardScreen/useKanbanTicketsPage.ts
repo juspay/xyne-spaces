@@ -41,6 +41,11 @@ export type KanbanPageGroupBy =
 export type KanbanTicketsPageBaseArgs = FlowStepVisibilityOptions & {
   viewMode: KanbanViewMode;
   channelId?: string;
+  /**
+   * Only the tickets this SDLC track holds, from every board (needs `channelId`, the
+   * track's hub). Pages come from the track queries rather than the board ones.
+   */
+  trackId?: string;
   projectId?: string;
   boardId?: string;
   groupBy?: KanbanPageGroupBy;
@@ -66,6 +71,7 @@ type KanbanTicketsPageQueryArgs = Omit<
   'start'
 > & {
   start: KanbanCursor | null;
+  trackId?: string;
   dynamicFieldDateRanges?: Record<string, { start?: number; end?: number }>;
 };
 
@@ -273,6 +279,26 @@ export const toQueryFilters = (
   };
 };
 
+type KanbanPageRequest = ReturnType<typeof queries.kanbanTicketsPageV3>;
+
+/**
+ * The page query for these args: a board's, or a track's when `trackId` and its hub
+ * `channelId` are set. Both return the same rows in the same order — only their
+ * arguments differ — so the track request is typed as the board one for the hooks
+ * and `zero.run` that take it.
+ */
+export const kanbanPageQuery = (args: KanbanTicketsPageQueryArgs): KanbanPageRequest => {
+  const { trackId, channelId } = args;
+  if (trackId && channelId) {
+    return queries.trackKanbanTicketsPage({
+      ...args,
+      channelId,
+      trackId,
+    } as Parameters<typeof queries.trackKanbanTicketsPage>[0]) as unknown as KanbanPageRequest;
+  }
+  return queries.kanbanTicketsPageV3(args as Parameters<typeof queries.kanbanTicketsPageV3>[0]);
+};
+
 export const buildKanbanTicketsPageArgs = (
   options: UseKanbanTicketsPageOptions,
   start: KanbanTicketsPageQueryArgs['start'],
@@ -303,6 +329,7 @@ export const buildKanbanTicketsPageArgs = (
       showOverdueOnly: options.showOverdueOnly,
       overdueReferenceTime: options.overdueReferenceTime ?? undefined,
       createdAfter: options.createdAfter ?? undefined,
+      ...(options.trackId ? { trackId: options.trackId } : {}),
     },
     options.channelId,
   );
@@ -483,7 +510,10 @@ export const useKanbanTicketsPage = (
 
   // Declared after every pushdown value above, since it requires that each active filter
   // made it into the Vespa query — direct-Vespa rows are rendered without re-filtering.
+  // Never for a track: its search hits go through the track query, which keeps only
+  // the track's tickets, instead of being rendered as Vespa returned them.
   const shouldUseDirectVespaRows =
+    !options.trackId &&
     requiresVespaTicketIds &&
     !hasZeroOnlyFilters(
       options.filters,
@@ -592,9 +622,7 @@ export const useKanbanTicketsPage = (
     },
     fetchCursor,
   );
-  const pageQuery = queries.kanbanTicketsPageV3(
-    pageArgs as Parameters<typeof queries.kanbanTicketsPageV3>[0],
-  );
+  const pageQuery = kanbanPageQuery(pageArgs);
   const [page, pageDetails] = useCachedQuery(pageQuery, {
     enabled:
       (options.enabled ?? true) &&

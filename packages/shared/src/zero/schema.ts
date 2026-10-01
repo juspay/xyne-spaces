@@ -1520,6 +1520,8 @@ export const sdlcFolderTable = table('sdlc_folders')
     workspaceId: string(),
     id: string(),
     name: string(),
+    /** An @xyne/icons name shown in place of the folder mark; null shows the mark. */
+    icon: string().optional(),
     createdBy: string(),
     createdAt: number(),
     updatedAt: number(),
@@ -1552,6 +1554,8 @@ export const sdlcTrackTable = table('sdlc_tracks')
     repoId: string().optional(),
     name: string(),
     description: string().optional(),
+    /** An @xyne/icons name shown in place of the track mark; null shows the mark. */
+    icon: string().optional(),
     status: string(),
     createdBy: string(),
     createdAt: number(),
@@ -2541,6 +2545,13 @@ export const ticketTableRelationships = relationships(ticketTable, ({ one, many 
     destField: ['ticketId'],
     destSchema: ticketDescriptionTable,
   }),
+  // SDLC edges pointing at this ticket — how a track holds it. targetId is
+  // polymorphic, so readers filter by targetType and relationType.
+  sdlcEntityLinks: many({
+    sourceField: ['id'],
+    destField: ['targetId'],
+    destSchema: sdlcEntityLinkTable,
+  }),
 }));
 
 export const ticketDescriptionTableRelationships = relationships(ticketDescriptionTable, ({ one }) => ({
@@ -3264,6 +3275,13 @@ export const conversationTableRelationships = relationships(conversationTable, (
     destField: ['id'],
     destSchema: channelTable,
   }),
+  // SDLC links pointing at this conversation: the item it discusses, and the track it
+  // rolls up to. What lets a conversation list be scoped to a track or an item.
+  sdlcEntityLinks: many({
+    sourceField: ['conversationId'],
+    destField: ['targetId'],
+    destSchema: sdlcEntityLinkTable,
+  }),
   initialMessage: one({
     sourceField: ['initialMessageId'],
     destField: ['messageId'],
@@ -3446,7 +3464,7 @@ export const repoTableRelationships = relationships(repoTable, ({ one, many }) =
   }),
 }));
 
-export const sdlcEntityLinkTableRelationships = relationships(sdlcEntityLinkTable, ({ one }) => ({
+export const sdlcEntityLinkTableRelationships = relationships(sdlcEntityLinkTable, ({ one, many }) => ({
   // Only meaningful on membership edges, where targetId is the repository.
   repo: one({
     sourceField: ['targetId'],
@@ -3462,6 +3480,62 @@ export const sdlcEntityLinkTableRelationships = relationships(sdlcEntityLinkTabl
     sourceField: ['targetId'],
     destField: ['id'],
     destSchema: workflowTable,
+  }),
+  // Links into this link's source item — an artifact's track edge, from its discussion.
+  sourceItemLinks: many({
+    sourceField: ['sourceType', 'sourceId'],
+    destField: ['targetType', 'targetId'],
+    destSchema: sdlcEntityLinkTable,
+  }),
+  // Links into the same item as this one — a contained item's track edge, from its
+  // containment edge.
+  sameTargetLinks: many({
+    sourceField: ['targetType', 'targetId'],
+    destField: ['targetType', 'targetId'],
+    destSchema: sdlcEntityLinkTable,
+  }),
+  // The item at either end, so a list of links arrives with what they point at. Ids
+  // are polymorphic: each is only meaningful where that end's type matches, and ids
+  // never collide across these tables.
+  targetFolder: one({
+    sourceField: ['targetId'],
+    destField: ['id'],
+    destSchema: sdlcFolderTable,
+  }),
+  targetLink: one({
+    sourceField: ['targetId'],
+    destField: ['id'],
+    destSchema: linkTable,
+  }),
+  targetFile: one({
+    sourceField: ['targetId'],
+    destField: ['id'],
+    destSchema: messageAttachmentTable,
+  }),
+  targetCanvas: one({
+    sourceField: ['targetId'],
+    destField: ['id'],
+    destSchema: canvasTable,
+  }),
+  sourceFolder: one({
+    sourceField: ['sourceId'],
+    destField: ['id'],
+    destSchema: sdlcFolderTable,
+  }),
+  sourceLink: one({
+    sourceField: ['sourceId'],
+    destField: ['id'],
+    destSchema: linkTable,
+  }),
+  sourceFile: one({
+    sourceField: ['sourceId'],
+    destField: ['id'],
+    destSchema: messageAttachmentTable,
+  }),
+  sourceCanvas: one({
+    sourceField: ['sourceId'],
+    destField: ['id'],
+    destSchema: canvasTable,
   }),
 }));
 
@@ -3845,6 +3919,13 @@ export const callTableRelationships = relationships(callTable, ({ one, many }) =
     destField: ['id'],
     destSchema: summaryTemplateTable,
   }),
+  // The SDLC links filing the call: owner -> CALL, the owner a track, item or artifact.
+  // targetId is polymorphic, so readers filter on targetType and relationType.
+  sdlcEntityLinks: many({
+    sourceField: ['id'],
+    destField: ['targetId'],
+    destSchema: sdlcEntityLinkTable,
+  }),
 }));
 
 export const entityAccessTableRelationships = relationships(
@@ -4004,6 +4085,12 @@ export const canvasTableRelationships = relationships(canvasTable, ({ one, many 
     sourceField: ['id'],
     destField: ['artifactId'],
     destSchema: sdlcArtifactTable,
+  }),
+  // SDLC links pointing at this artifact: the track it belongs to, the folder holding it.
+  sdlcEntityLinks: many({
+    sourceField: ['id'],
+    destField: ['targetId'],
+    destSchema: sdlcEntityLinkTable,
   }),
   participants: many({
     sourceField: ['id'],

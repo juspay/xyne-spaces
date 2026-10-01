@@ -54,7 +54,7 @@ import { callNotesCanvasService } from '@/services/callNotesCanvasService';
 import { noteTakerTranscriptService } from '@/services/noteTakerTranscriptService';
 import { summaryTemplateService } from '@/services/summaryTemplateService';
 import { canvasAuthService } from '@/services/canvasAuthService';
-import { isTrackInChannel } from '@/sdlc/sdlcChannelMembership';
+import { validateOwnerInChannel } from '@/sdlc/entityLinkService';
 import { buildCallInviteUrl } from '@/utils/urlUtils';
 import { readRecordingGoogleDocLinks } from '@/utils/recordingGoogleDocs';
 import { hideCallTx } from '@/bypassAcl/transactions/callController';
@@ -596,23 +596,57 @@ export class CallController {
       const linkedArtifactMessageId =
         typeof artifactMessageId === 'string' ? artifactMessageId : undefined;
 
-      // For headless recordings, always create a new recording session
-      // For regular calls, check if there's already an active call in this channel
-      logger.info(`[${correlationId}] existing_call_check | channel_id=${finalChannelId}, conversation_id=${conversationId || 'none'}`);
-      stage = 'existing_call_lookup';
-      // If conversationId is provided, check for calls matching both channelId and conversationId
-      // Otherwise, check for calls matching only channelId
-      const existingCall = conversationId
-        ? await repositories.calls.findActiveCallByChannelIdAndConversationId(finalChannelId, conversationId)
-        : await repositories.calls.findActiveCallByChannelId(finalChannelId);
-
-      // Fetch channel to get scopeType (needed for existing call path)
+      // Fetch channel to get scopeType (needed for existing call path) and its type
+      // (an SDLC hub's calls can be filed on its tracks and items).
       stage = 'channel_lookup';
       const channel = await repositories.channels.findById(finalChannelId);
       if (!channel) {
         res.status(404).json({ success: false, error: 'Channel not found' });
         return;
       }
+
+      // SDLC linking context: validated here, applied by the LiveKit webhook when
+      // the call record (and its conversation) are created. Invalid input is
+      // dropped with a warning rather than failing the call.
+      let validatedSdlcLink: SdlcCallLink | null = null;
+      if (sdlcLink) {
+        const parsedSdlcLink = sdlcCallLinkSchema.safeParse(sdlcLink);
+        if (parsedSdlcLink.success) {
+          const link = parsedSdlcLink.data;
+          // The check the webhook makes before filing the call: an artifact or a track
+          // in this hub, or an item on one of its tracks. Checking every owner as a
+          // track dropped the link for folders, files and links.
+          const linkTargetValid = await validateOwnerInChannel(
+            db,
+            { sourceType: link.ownerType, sourceId: link.ownerId },
+            finalChannelId,
+          );
+          if (linkTargetValid) {
+            validatedSdlcLink = link;
+          } else {
+            logger.warn(`[${correlationId}] sdlc_link_dropped | reason=entity_not_in_channel`);
+          }
+        } else {
+          logger.warn(`[${correlationId}] sdlc_link_dropped | reason=invalid_shape`);
+        }
+      }
+
+      // For headless recordings, always create a new recording session
+      // For regular calls, check if there's already an active call in this channel
+      logger.info(`[${correlationId}] existing_call_check | channel_id=${finalChannelId}, conversation_id=${conversationId || 'none'}`);
+      stage = 'existing_call_lookup';
+      // If conversationId is provided, check for calls matching both channelId and conversationId.
+      // A call started on an SDLC track or item joins only one already live on that same
+      // item, and one started on the hub itself only a live call not filed on any item:
+      // each item's call is its own room, with the people picked for it.
+      // Otherwise, check for calls matching only channelId
+      const existingCall = conversationId
+        ? await repositories.calls.findActiveCallByChannelIdAndConversationId(finalChannelId, conversationId)
+        : validatedSdlcLink
+          ? await repositories.calls.findActiveCallFiledOn(finalChannelId, validatedSdlcLink)
+          : channel.type === 'SDLC'
+            ? await repositories.calls.findActiveUnfiledCallByChannelId(finalChannelId)
+            : await repositories.calls.findActiveCallByChannelId(finalChannelId);
 
       if (existingCall) {
         // Verify the LiveKit room still exists
@@ -738,33 +772,6 @@ export class CallController {
       }
       // Generate room link
       const roomLink = buildCallInviteUrl(callExternalId);
-
-      // SDLC linking context: validated here, applied by the LiveKit webhook when
-      // the call record (and its conversation) are created. Invalid input is
-      // dropped with a warning rather than failing the call.
-      let validatedSdlcLink: SdlcCallLink | null = null;
-      if (sdlcLink) {
-        const parsedSdlcLink = sdlcCallLinkSchema.safeParse(sdlcLink);
-        if (parsedSdlcLink.success) {
-          const link = parsedSdlcLink.data;
-          const linkTargetValid =
-            link.ownerType === 'CANVAS'
-              ? Boolean(
-                  await db.canvas.findFirst({
-                    where: { id: link.ownerId, channelId: channel.id },
-                    select: { id: true },
-                  }),
-                )
-              : await isTrackInChannel(db, link.ownerId, channel.id);
-          if (linkTargetValid) {
-            validatedSdlcLink = link;
-          } else {
-            logger.warn(`[${correlationId}] sdlc_link_dropped | reason=entity_not_in_channel`);
-          }
-        } else {
-          logger.warn(`[${correlationId}] sdlc_link_dropped | reason=invalid_shape`);
-        }
-      }
 
       stage = 'transcription_agent_resolution';
       const agentName = await livekitService.resolveAgentNameForUser(userId);

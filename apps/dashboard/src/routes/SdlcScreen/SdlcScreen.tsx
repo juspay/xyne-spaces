@@ -11,22 +11,14 @@ import {
   type ReactElement,
   type ReactNode,
 } from 'react';
-import { globalClickTracker } from '../../services/Analytics/globalClickTracker';
 import {
   ChannelRole,
-  SDLC_ENTITY_TYPES,
-  SDLC_RELATION_TYPES,
+  ChannelType,
   SDLC_HUB_KNOWLEDGE_FOLDER,
   SDLC_WIKI_FOLDER,
-  type SdlcEntityType,
-  type SdlcRelationType,
   type SdlcCallLink,
-  SDLC_CONTAINMENT_RELATION,
-  SDLC_TRACK_FLAT_RELATION,
   SDLC_UPLOAD_ACCEPT,
   isAllowedSdlcUpload,
-  TicketStatusV2,
-  TicketPriority,
 } from '@xyne/shared';
 import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import {
@@ -43,22 +35,19 @@ import {
   Folder,
   GitBranch,
   Layers,
+  Phone,
   Link2,
   Loader2,
   Maximize2,
   MessageCircle,
-  PanelLeft,
   Paperclip,
   Pencil,
   Plus,
-  RefreshCw,
   Search,
-  Settings,
   ShieldCheck,
   Sparkles,
   SquareArrowOutUpRight,
   Upload,
-  Users,
   Workflow,
   X,
 } from 'lucide-react';
@@ -69,25 +58,26 @@ import { SdlcArchiveMenu } from './SdlcArchiveMenu';
 import { SdlcHubDialog } from './SdlcHubDialog';
 import { SdlcHubRepositoriesDialog } from './SdlcHubRepositoriesDialog';
 import {
-  SdlcHubPicker,
-  persistSdlcSectionHeights,
-  sdlcFoldedGroupHeight,
-  SdlcSidebarFitSection,
-  SdlcSidebarSection,
-  SdlcSidebarSectionSeparator,
+  SdlcHubHeader,
+  SdlcSidebarAddRow,
+  SdlcSidebarGroup,
+  SdlcSidebarRow,
+  SdlcSidebarRowIcon,
+  sdlcSidebarRowClass,
 } from './SdlcHubSidebar';
+import { SdlcHubSwitcher } from './SdlcHubSwitcher';
 import { setUserPreference, useUserPreference } from '../../machines/userPreferencesMachine';
-import {
-  isFramedSdlcSurface,
-  isSdlcDocumentWindow,
-  requestSdlcFrameReset,
-} from './useSdlcFrameBridge';
+import { isSdlcDocumentWindow } from './useSdlcFrameBridge';
 import { toast } from 'sonner';
 import AppNavigator from '../../components/AppNavigator/AppNavigator';
 import { Button } from '../../components/ui/Button';
 import { Checkbox } from '../../components/ui/Checkbox/Checkbox';
 import { XyneAIStar } from '../../components/icons/xyne-ai';
-import { TicketToken } from '@xyne/icons';
+import { FolderDefault, PhoneDefault, TicketToken } from '@xyne/icons';
+import { IconPicker } from '../../components/AppIcon/IconPicker';
+import { AppIcon } from '../../components/AppIcon/AppIcon';
+import { TRACK_ICON_GROUPS } from './trackIcons';
+import * as TabsPrimitive from '@radix-ui/react-tabs';
 import { CreateTicketModal } from '../../components/Tickets/CreateTicketModal/CreateTicketModal';
 import { Dialog } from '../../components/ui/Dialog/Dialog';
 import Input from '../../components/ui/Input';
@@ -95,13 +85,14 @@ import Textarea from '../../components/ui/Textarea';
 import { Panel, ResizableGroup, Separator } from '../../components/ui/Resizable/Resizable';
 import { v4 as uuidv4 } from 'uuid';
 import { useCachedQuery } from '../../hooks/useCachedQuery';
+import { useAllVisibleChannels } from '../../hooks/useChannels';
 import { useZero } from '../../hooks/useZero';
 import { mutators } from '../../zero/mutators';
 import { SdlcChatPanel } from './SdlcChatPanel';
-import { CallTriggerModal } from '../../components/Call/CallTriggerModal/CallTriggerModal';
+import { CallParticipantsSelectionModal } from '../../components/Call/CallParticipantsSelectionModal';
 import { useAuthContextValues } from '../../hooks/useAuth';
 import { xyneAIActor, type ThreadInfo } from '../../machines/xyneAIMachine';
-import { apiInstance, getAttachmentStreamUrl } from '../../services/clients/apiClient';
+import { apiInstance } from '../../services/clients/apiClient';
 import { searchService } from '../../services/searchService';
 import { cn } from '../../utils/classNames';
 import { queries } from '../../zero/queries';
@@ -124,73 +115,134 @@ import {
   buildSdlcWikiPageCreationPrompt,
 } from './artifactCreationPrompt';
 import { SdlcWikiSection } from './SdlcWikiSection';
-import { type WikiCanvas, wikiScopePages, wikiScopes } from './sdlcWikiTree';
+import { useSdlcWikiData } from './useSdlcWikiData';
 import SdlcWorkflowsSection from './SdlcWorkflowsSection';
 import { SdlcActivityPreview } from './SdlcActivityPreview';
 import { EntityLinkContext, type EntityLinkScope } from '../../contexts/EntityLinkContext';
 import { useScope, useShortcutById } from '../../shortcuts';
-import {
-  discussionConversationIds as discussionIdsForOwner,
-  resolveSdlcDiscussionContext,
-} from './sdlcDiscussionModel';
+import { resolveSdlcDiscussionContext, type HubArtifactSummary } from './sdlcDiscussionModel';
+import type { ConversationBadgeSubject } from '../../components/Chat/ConversationPannel/ConversationBadgeContext';
+import type { DiscussionScope } from '../../components/Chat/ConversationPannel/DiscussionListContext';
 import {
   SDLC_CHAT_PANEL_ID,
   SDLC_MAIN_PANEL_ID,
   sdlcChatLayout,
   sdlcChatNavigationSearch,
+  parseSdlcDiscussionItem,
+  SDLC_ABOUT_PARAM,
+  SDLC_THREAD_ONLY_PARAM,
+  sdlcDiscussionItemParam,
   sdlcRightPanelIds,
   shouldCloseInvalidSdlcConversationDeepLink,
+  type SdlcDiscussionItemRef,
   shouldStartFreshSdlcAssistant,
 } from './sdlcChatPolicy';
 import { formatRelativeTime } from '../../utils/dateUtils';
 import Avatar from '../../components/ui/Avatar/Avatar';
-import { UserHoverWrapper } from '../../components/ui/UserMentionPopover/UserMentionPopover';
 import { useUser } from '../../hooks/useUsers';
-import { getUserDisplayName } from '../../utils/userDisplayName';
 import { Popover } from '../../components/ui/Popover';
 import { Tooltip } from '../../components/ui/Tooltip';
 import { fileKind } from './fileKind';
+import { FileTypeIcon } from './FileTypeIcon';
 import { getLastSdlcLocation, sdlcHubIdOf } from './lastSdlcLocation';
 import { SdlcFolderPage, SCRATCH_TAB_ID, type FolderTab } from './SdlcFolderPage';
 import { setSdlcCommentContext } from './sdlcCommentStore';
 import { publishPendingPassage, registerSelectionSink } from '../../components/workspaceItems';
 
-/** What a conversation in a track can be filed against, beside an artifact. */
+/** What in a track a conversation can be filed against, beside the track itself. */
 interface SdlcItemDiscussion {
-  type: 'FOLDER' | 'LINK' | 'ATTACHMENT';
+  type: 'FOLDER' | 'LINK' | 'ATTACHMENT' | 'CANVAS';
   id: string;
   name: string;
 }
+/** What a call is started in, and its name in the picker: nothing in scope is the hub. */
+interface SdlcCallScope {
+  link: SdlcCallLink | null;
+  name: string;
+}
+const DISCUSSION_OWNER_TYPES = ['CANVAS', 'TRACK', 'FOLDER', 'ATTACHMENT', 'LINK'] as const;
+type DiscussionOwnerType = (typeof DISCUSSION_OWNER_TYPES)[number];
+const isDiscussionOwnerType = (value: string): value is DiscussionOwnerType =>
+  DISCUSSION_OWNER_TYPES.some(type => type === value);
+
+/**
+ * The fields of a canvas row the screen reads. getCanvas comes back untyped — its
+ * visibility filter is typed loosely — so its row is checked rather than trusted.
+ */
+function canvasRowOf(row: unknown): { id: string; title: string; folderId: string | null } | null {
+  if (typeof row !== 'object' || row === null) return null;
+  if (!('id' in row) || typeof row.id !== 'string') return null;
+  if (!('title' in row) || typeof row.title !== 'string') return null;
+  const folderId = 'folderId' in row && typeof row.folderId === 'string' ? row.folderId : null;
+  return { id: row.id, title: row.title, folderId };
+}
+
+/** An item's mark where a discussion names it: its chosen icon, favicon or file type. */
+function discussedItemIcon(item: SdlcTrackItem, className: string): ReactNode {
+  if (item.kind === 'FOLDER') {
+    return item.icon ? (
+      <AppIcon name={item.icon} size={11} aria-hidden='true' />
+    ) : (
+      <Folder className={`${className} fill-primary/25 text-primary/70`} />
+    );
+  }
+  if (item.kind === 'LINK') {
+    return item.favicon ? (
+      <img src={item.favicon} alt='' className={`${className} rounded-[2px]`} />
+    ) : (
+      <Link2 className={className} />
+    );
+  }
+  if (item.kind === 'ATTACHMENT') {
+    return <FileTypeIcon kind={fileKind(item.mimetype, item.name)} bare className={className} />;
+  }
+  return <FileText className={`${className} text-muted-foreground`} />;
+}
+/** Named by kind until the item itself has loaded. */
+const DISCUSSION_ITEM_FALLBACK_NAME: Record<SdlcItemDiscussion['type'], string> = {
+  FOLDER: 'Folder',
+  LINK: 'Link',
+  ATTACHMENT: 'File',
+  CANVAS: 'Artifact',
+};
+/** A scope nothing belongs to, for a panel whose subject hasn't resolved yet. */
+const NO_DISCUSSIONS: DiscussionScope = { ownerIds: [] };
+/** Set on the history entry a conversation opened onto, so leaving it steps back. */
+const THREAD_STEP_STATE = { sdlcThreadStep: true } as const;
+import { SdlcFileList } from './SdlcFileList';
+import { SdlcCalls } from './SdlcCalls';
+import { ActivityPill, isPartOfCall, type SdlcLiveCalls } from './ActivityPill';
 import {
-  SdlcFinderColumn,
-  SdlcFinderItemPreview,
-  SdlcFinderPreview,
-  type SdlcFinderCanvas,
-  type SdlcFinderFile,
-  type SdlcFinderLink,
-  type SdlcFinderNodeType,
-  type SdlcFinderStep,
-} from './SdlcFinder';
-import { type SdlcTicket } from './ticketPolicy';
-import { linkedTicketIds } from './artifactTicketPolicy';
+  SDLC_FILES_FOLDER_PARAM,
+  sdlcItemName,
+  sdlcItemPlacement,
+  sourceItemOf,
+  targetItemOf,
+  type SdlcFilesLocation,
+  type SdlcItemKind,
+  type SdlcSourceLink,
+  type SdlcTrackItem,
+} from './sdlcItems';
 import { type HubWorkflow, type HubWorkflowPhase, useHubWorkflow } from './hubWorkflowRunPolicy';
 
-type Section = 'overview' | 'wiki' | 'knowledge' | 'tracks' | 'tickets' | 'artifacts' | 'workflows';
+type Section =
+  | 'overview'
+  | 'wiki'
+  | 'knowledge'
+  | 'tracks'
+  | 'tickets'
+  | 'calls'
+  | 'artifacts'
+  | 'workflows';
 
 const StableCanvasScreen = memo(CanvasScreen);
-
-const SDLC_ENTITY_TYPE_SET: ReadonlySet<string> = new Set(SDLC_ENTITY_TYPES);
-const SDLC_RELATION_TYPE_SET: ReadonlySet<string> = new Set(SDLC_RELATION_TYPES);
-const isSdlcEntityType = (value: string): value is SdlcEntityType =>
-  SDLC_ENTITY_TYPE_SET.has(value);
-const isSdlcRelationType = (value: string): value is SdlcRelationType =>
-  SDLC_RELATION_TYPE_SET.has(value);
 
 const SECTIONS: Array<{ id: Exclude<Section, 'artifacts'>; label: string; icon: typeof Boxes }> = [
   { id: 'overview', label: 'Overview', icon: Boxes },
   { id: 'wiki', label: 'Wiki', icon: BookOpen },
   { id: 'knowledge', label: 'Hub Knowledge', icon: ShieldCheck },
   { id: 'tickets', label: 'Issues', icon: CircleDot },
+  { id: 'calls', label: 'Calls', icon: Phone },
   { id: 'workflows', label: 'Workflows', icon: Workflow },
 ];
 
@@ -201,23 +253,23 @@ function sizeNameFieldToText(input: HTMLInputElement): void {
   input.style.width = `${Math.ceil(mirror.getBoundingClientRect().width) + 2}px`;
 }
 
-const TICKET_PRIORITY_LABEL: Record<TicketPriority, string> = {
-  [TicketPriority.LOW]: 'Low',
-  [TicketPriority.MEDIUM]: 'Medium',
-  [TicketPriority.HIGH]: 'High',
-  [TicketPriority.CRITICAL]: 'Critical',
-};
-
 const READER_EXIT_MS = 200;
 
 const TRACK_NAME_LIMIT = 120;
-const TRACK_DESCRIPTION_LIMIT = 2000;
+
+/** A track's page is split the way a channel's is: one tab per kind of thing it holds. */
+const TRACK_TABS = [
+  { value: 'files', label: 'Files', icon: <FolderDefault size={14} /> },
+  { value: 'tickets', label: 'Tickets', icon: <TicketToken size={14} /> },
+  { value: 'calls', label: 'Calls', icon: <PhoneDefault size={14} /> },
+] as const;
+type TrackTab = (typeof TRACK_TABS)[number]['value'];
 
 const SIDEBAR_MIN_WIDTH = 200;
 const SIDEBAR_MAX_WIDTH = 360;
 const SIDEBAR_COLLAPSE_AT = 150;
 const SIDEBAR_RAIL_WIDTH = 52;
-const SIDEBAR_HOVER_WIDTH = 260;
+const SIDEBAR_HOVER_WIDTH = 280;
 
 const TRACK_STATUS_OPTIONS = [
   { value: 'ACTIVE', label: 'Active' },
@@ -299,9 +351,29 @@ export default function SdlcScreen(): ReactElement {
         : 'overview'
   ) as Section;
   const routeSearchParams = useMemo(() => new URLSearchParams(location.search), [location.search]);
-  const [channels] = useCachedQuery(queries.getSdlcChannels());
+  // In the URL, as a channel's tab is, so a link or a reload lands on the same tab. Not
+  // `tab`: the channel's conversation panel beside it reads that one.
+  const trackTab: TrackTab =
+    TRACK_TABS.find(tab => tab.value === routeSearchParams.get('trackTab'))?.value ?? 'files';
+  const openTrackTab = (tab: TrackTab): void => {
+    const next = new URLSearchParams(location.search);
+    // Files is where a track opens, so it needs no param.
+    if (tab === 'files') next.delete('trackTab');
+    else next.set('trackTab', tab);
+    const search = next.toString();
+    void navigate(`${location.pathname}${search ? `?${search}` : ''}`);
+  };
+  // Your hubs: the channels the app loaded at start, so no query of their own.
+  const visibleChannels = useAllVisibleChannels();
+  const channels = useMemo(
+    () =>
+      visibleChannels
+        .filter(item => item.type === ChannelType.SDLC && !item.isArchived)
+        .sort((left, right) => left.name.localeCompare(right.name)),
+    [visibleChannels],
+  );
   const [channelRow, repoQueryDetails] = useCachedQuery(
-    queries.getSdlcChannelById({ channelId: channelId || '' }),
+    queries.getSdlcHub({ channelId: channelId || '' }),
     {
       enabled: Boolean(channelId),
     },
@@ -315,15 +387,8 @@ export default function SdlcScreen(): ReactElement {
         .filter((candidate): candidate is NonNullable<typeof candidate> => Boolean(candidate)),
     [channel],
   );
-  // Repositories come along so the switcher can search on their names.
   const hubOptions = useMemo(
-    () =>
-      (Array.isArray(channels) ? channels : []).map(item => ({
-        id: item.id,
-        name: item.name,
-        visibility: item.visibility,
-        repositories: (item.sdlcEntityLinks ?? []).flatMap(link => (link.repo ? [link.repo] : [])),
-      })),
+    () => channels.map(item => ({ id: item.id, name: item.name, visibility: item.visibility })),
     [channels],
   );
   // Repositories in a hub coexist; there is no selection.
@@ -344,11 +409,18 @@ export default function SdlcScreen(): ReactElement {
     kind: SdlcDocumentKind;
   } | null>(null);
   const [artifactFolderPath, setArtifactFolderPath] = useState('');
-  const [relatedCanvasIds, setRelatedCanvasIds] = useState<string[]>([]);
+  // Each with its title, from the search hit or the artifact it was started from.
+  const [relatedCanvases, setRelatedCanvases] = useState<Array<{ id: string; title: string }>>([]);
+  const relatedCanvasIds = useMemo(
+    () => relatedCanvases.map(canvas => canvas.id),
+    [relatedCanvases],
+  );
   const [relatedSearchQuery, setRelatedSearchQuery] = useState('');
-  const [relatedSearchResults, setRelatedSearchResults] = useState<
-    Array<{ id: string; title: string }>
-  >([]);
+  // What the search found, before the track filter: which track each is in comes from
+  // looking them up by id.
+  const [relatedSearchHits, setRelatedSearchHits] = useState<Array<{ id: string; title: string }>>(
+    [],
+  );
   const [relatedSearching, setRelatedSearching] = useState(false);
   const [relatedListOpen, setRelatedListOpen] = useState(false);
   const [relatedChipsExpanded, setRelatedChipsExpanded] = useState(false);
@@ -365,38 +437,25 @@ export default function SdlcScreen(): ReactElement {
   const [hoveredTypeId, setHoveredTypeId] = useState<string | null>(null);
   const [trackDialog, setTrackDialog] = useState(false);
   const showClosedTracks = useUserPreference('sdlcShowClosedTracks');
-  const foldedSidebarHeight = sdlcFoldedGroupHeight(
-    useUserPreference('sdlcSidebarSectionsCollapsed'),
-  );
+  const [hubSwitcherOpen, setHubSwitcherOpen] = useState(false);
   const setShowClosedTracks = (next: boolean): void =>
     setUserPreference('sdlcShowClosedTracks', next);
-  const finderGroupBy = useUserPreference('sdlcFinderGroupBy');
   const railCollapsed = useUserPreference('sdlcSidebarCollapsed');
   const storedRailWidth = useUserPreference('sdlcSidebarWidth');
   const [railHovered, setRailHovered] = useState(false);
-  const finderRef = useRef<HTMLDivElement | null>(null);
-  const ticketsRef = useRef<HTMLDivElement | null>(null);
+  const fileListRef = useRef<HTMLDivElement | null>(null);
   const sidebarRef = useRef<HTMLDivElement | null>(null);
   const [sidebarFocused, setSidebarFocused] = useState(false);
-  const [ticketsFocused, setTicketsFocused] = useState(false);
-  const [focusedTicketId, setFocusedTicketId] = useState<string | null>(null);
-  const finderFocusReturn = useRef<string | null>(null);
-  const rememberFinderFocus = (): void => {
-    const active = document.activeElement;
-    if (!(active instanceof HTMLElement) || !finderRef.current?.contains(active)) return;
-    const columns = finderRef.current.querySelectorAll<HTMLElement>('[data-finder-column]');
-    finderFocusReturn.current =
-      active.closest<HTMLElement>('[data-finder-column]')?.dataset['finderColumn'] ??
-      columns[columns.length - 1]?.dataset['finderColumn'] ??
-      null;
+  // A dialog or the reader opened from the file list hands the keyboard back to it
+  // when it closes, so the cursor is where it was.
+  const fileListFocusReturn = useRef(false);
+  const rememberFileListFocus = (): void => {
+    fileListFocusReturn.current = fileListRef.current?.contains(document.activeElement) ?? false;
   };
-  const returnFocusToFinder = (): void => {
-    const columnId = finderFocusReturn.current;
-    finderFocusReturn.current = null;
-    if (!columnId) return;
-    requestAnimationFrame(() => {
-      finderRef.current?.querySelector<HTMLElement>(`[data-finder-column="${columnId}"]`)?.focus();
-    });
+  const returnFocusToFileList = (): void => {
+    if (!fileListFocusReturn.current) return;
+    fileListFocusReturn.current = false;
+    requestAnimationFrame(() => fileListRef.current?.focus());
   };
   const [draggingWidth, setDraggingWidth] = useState<number | null>(null);
   const railWidth =
@@ -448,6 +507,8 @@ export default function SdlcScreen(): ReactElement {
     if (next) setRailHovered(false);
   };
   useShortcutById('sdlc.toggleSidebarDock', toggleRail);
+  // ⌘J; ⌘K stays the app's global search.
+  useShortcutById('sdlc.switchHub', () => setHubSwitcherOpen(open => !open));
   const sidebarItems = (): HTMLElement[] =>
     [...(sidebarRef.current?.querySelectorAll<HTMLElement>('button:not([disabled])') ?? [])].filter(
       item => item.offsetParent !== null,
@@ -473,24 +534,32 @@ export default function SdlcScreen(): ReactElement {
   useScope('sdlc-sidebar', sidebarFocused);
   useShortcutById('sdlc.sidebarDown', () => moveSidebarFocus(1), { enabled: sidebarFocused });
   useShortcutById('sdlc.sidebarUp', () => moveSidebarFocus(-1), { enabled: sidebarFocused });
+  const focusFileList = (): void => {
+    fileListRef.current?.focus();
+  };
+  // The file list and the tickets are on different tabs of a track. The tickets
+  // shortcut opens their tab; the files one also puts the keyboard on the list, once
+  // it is drawn.
+  const pendingTrackTabFocus = useRef<TrackTab | null>(null);
+  const onATrack = section === 'tracks' && routeSearchParams.has('track');
   useShortcutById('sdlc.focusTickets', () => {
-    // The list, not a row: the cursor is state, so focusing a row would leave the
-    // two out of step and let Enter both fire the binding and click the button.
-    ticketsRef.current?.focus();
-    ticketsRef.current?.scrollIntoView({ block: 'nearest' });
+    if (onATrack && trackTab !== 'tickets') openTrackTab('tickets');
   });
-  useShortcutById('sdlc.focusFinder', () => {
-    const columns = [
-      ...(finderRef.current?.querySelectorAll<HTMLElement>('[data-finder-column]') ?? []),
-    ];
-    // An empty level has nothing to put a cursor on, so land on the deepest one
-    // that holds something — which puts the cursor on the folder itself.
-    const target =
-      [...columns].reverse().find(column => column.querySelector('[data-finder-row]')) ??
-      columns[columns.length - 1];
-    target?.focus();
-    target?.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'nearest' });
+  useShortcutById('sdlc.focusFiles', () => {
+    if (onATrack && trackTab !== 'files') {
+      pendingTrackTabFocus.current = 'files';
+      openTrackTab('files');
+      return;
+    }
+    focusFileList();
   });
+  useEffect(() => {
+    if (pendingTrackTabFocus.current !== trackTab) return;
+    pendingTrackTabFocus.current = null;
+    if (trackTab === 'files') focusFileList();
+    // Only a tab change can land a pending focus; the helpers read refs.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [trackTab]);
   const [trackName, setTrackName] = useState('');
   const [trackDescription, setTrackDescription] = useState('');
   const [artifactTrack, setArtifactTrack] = useState<{ id: string; name: string } | null>(null);
@@ -502,12 +571,13 @@ export default function SdlcScreen(): ReactElement {
   const [linkDialog, setLinkDialog] = useState(false);
   const [membersDialog, setMembersDialog] = useState(false);
   const [trackStatusOpen, setTrackStatusOpen] = useState(false);
-  const [descriptionDraft, setDescriptionDraft] = useState<string | null>(null);
-  const descriptionAbandoned = useRef(false);
   const [nameDraft, setNameDraft] = useState<string | null>(null);
   const nameAbandoned = useRef(false);
-  const [previewCanvasId, setPreviewCanvasId] = useState<string | null>(null);
+  // The track page's tab row has no rule until the tab's content scrolls under it.
+  const [trackPageScrolled, setTrackPageScrolled] = useState(false);
   const [readerCanvasId, setReaderCanvasId] = useState<string | null>(null);
+  // Its title, from the file list row it was opened from.
+  const [readerTitle, setReaderTitle] = useState('');
   const [readerClosing, setReaderClosing] = useState(false);
 
   const closeReader = (): void => {
@@ -515,15 +585,27 @@ export default function SdlcScreen(): ReactElement {
     window.setTimeout(() => {
       setReaderCanvasId(null);
       setReaderClosing(false);
-      returnFocusToFinder();
+      returnFocusToFileList();
     }, READER_EXIT_MS);
   };
-  useShortcutById('finder.closePreview', () => closeReader(), {
+  useShortcutById('files.closePreview', () => closeReader(), {
     enabled: readerCanvasId !== null && !readerClosing,
   });
-  const [folderDiscussion, setFolderDiscussion] = useState<SdlcItemDiscussion | null>(null);
-  const [newFolderParent, setNewFolderParent] = useState<SdlcFinderStep | null>(null);
-  const [addItemParent, setAddItemParent] = useState<SdlcFinderStep | null>(null);
+  // A folder, link or file whose conversations the panel shows — from the url, so a
+  // reload or a new tab opens on the same ones. Its name comes once the items load.
+  const discussionItemRef = useMemo(
+    () => parseSdlcDiscussionItem(routeSearchParams.get(SDLC_ABOUT_PARAM)),
+    [routeSearchParams],
+  );
+  const [newFolderParent, setNewFolderParent] = useState<SdlcFilesLocation | null>(null);
+  // An item being opened from a discussion about it, until the lookup says where it is.
+  const [pendingOpen, setPendingOpen] = useState<{
+    item: SdlcDiscussionItemRef;
+    name: string;
+    /** The conversation on show, kept open beside the item. */
+    conversationId: string | null;
+  } | null>(null);
+  const [addItemParent, setAddItemParent] = useState<SdlcFilesLocation | null>(null);
   const [addItemTab, setAddItemTab] = useState<'artifact' | 'upload' | 'link'>('artifact');
   const [pendingUploads, setPendingUploads] = useState<File[]>([]);
   /** Named so the reader knows which file was dropped and why nothing happened. */
@@ -537,19 +619,14 @@ export default function SdlcScreen(): ReactElement {
   const [linkLoading, setLinkLoading] = useState(false);
   const [newFolderName, setNewFolderName] = useState('');
   const [pendingArtifactFolder, setPendingArtifactFolder] = useState<string | null>(null);
-  const [draggingItem, setDraggingItem] = useState<{
-    type: SdlcFinderNodeType;
-    id: string;
-  } | null>(null);
-  // A link or a file being previewed. Kept apart from previewCanvasId because an
-  // artifact preview reads the canvas tables and these read their own.
-  const [previewItem, setPreviewItem] = useState<{
-    kind: 'LINK' | 'ATTACHMENT';
-    id: string;
-  } | null>(null);
   // State, not a ref: the folder page only portals its tabs once the node exists.
   const [folderTabsSlot, setFolderTabsSlot] = useState<HTMLElement | null>(null);
   const [createTicketOpen, setCreateTicketOpen] = useState(false);
+  // What a new ticket is filed on, fixed when its form opens, as a call's scope is.
+  const [createTicketScope, setCreateTicketScope] = useState<EntityLinkScope | null>(null);
+  // The call being set up, and where: fixed when the picker opens, so what's on screen
+  // moving underneath it can't change where the call goes.
+  const [callPicker, setCallPicker] = useState<SdlcCallScope | null>(null);
   // Which surface opened the create form; rides on CREATE_TICKET_SUCCEEDED.
   const [createTicketSource, setCreateTicketSource] = useState('sdlc_header');
   const [relatedSourceId, setRelatedSourceId] = useState<string | null>(null);
@@ -559,7 +636,7 @@ export default function SdlcScreen(): ReactElement {
   const { selectedAgentSlug, setSelectedAgentSlug } = useSelectedAgent();
 
   useEffect(() => {
-    if (channelId || !Array.isArray(channels) || !workspaceId) return;
+    if (channelId || !workspaceId) return;
     const fallbackId = channels[0]?.id;
     if (!fallbackId) return;
     const storedPath = getLastSdlcLocation(workspaceId);
@@ -567,16 +644,94 @@ export default function SdlcScreen(): ReactElement {
     void navigate(`/sdlc/${stored?.id ?? fallbackId}/overview`, { replace: true });
   }, [navigate, channelId, channels, workspaceId]);
 
-  const canvases = useMemo(() => {
-    if (!channel) return [];
-    return (channel.canvasFolders ?? []).flatMap(folder => folder.canvases ?? []);
-  }, [channel]);
+  const selectedDiscussionConversationId = routeSearchParams.get('conversation');
+  const threadOnly = Boolean(
+    selectedDiscussionConversationId && routeSearchParams.get(SDLC_THREAD_ONLY_PARAM),
+  );
+  // The open conversation, as the panel loads it, with the item it is filed on — the
+  // same query, so it is fetched once.
+  const [selectedConversationRow, selectedConversationDetails] = useCachedQuery(
+    queries.sdlcDiscussionConversation({
+      channelId: channelId || '',
+      conversationId: selectedDiscussionConversationId || '',
+    }),
+    { enabled: Boolean(channelId && selectedDiscussionConversationId) },
+  );
+  const conversationOwner = selectedConversationRow?.sdlcEntityLinks[0] ?? null;
   const knowledgeFolderId = useMemo(
     () =>
       (channel?.canvasFolders ?? []).find(folder => folder.name === SDLC_HUB_KNOWLEDGE_FOLDER)
         ?.id ?? null,
     [channel],
   );
+  const selectedCanvasId = routeSearchParams.get('canvas');
+  const activeTypeFolderId = routeSearchParams.get('type');
+  // The hub's artifacts load a folder at a time, with the page that shows them. Hub
+  // Knowledge's load on its own page and the Overview, which counts those ready.
+  const knowledgeShown = section === 'knowledge' || section === 'overview';
+  const [knowledgeRows] = useCachedQuery(
+    queries.getSdlcFolderCanvases({
+      channelId: channelId || '',
+      folderId: knowledgeFolderId || '',
+    }),
+    { enabled: Boolean(channelId && knowledgeFolderId) && knowledgeShown },
+  );
+  const [typeFolderRows, typeFolderDetails] = useCachedQuery(
+    queries.getSdlcFolderCanvases({
+      channelId: channelId || '',
+      folderId: activeTypeFolderId || '',
+    }),
+    { enabled: Boolean(channelId && activeTypeFolderId) && section === 'artifacts' },
+  );
+  const typeFolderCanvases = useMemo(
+    () => (activeTypeFolderId && Array.isArray(typeFolderRows) ? typeFolderRows : []),
+    [activeTypeFolderId, typeFolderRows],
+  );
+  const canvases = useMemo(() => {
+    const byId = new Map<string, (typeof typeFolderCanvases)[number]>();
+    for (const rows of [knowledgeShown ? knowledgeRows : [], typeFolderCanvases]) {
+      for (const canvas of Array.isArray(rows) ? rows : []) byId.set(canvas.id, canvas);
+    }
+    return [...byId.values()];
+  }, [knowledgeShown, knowledgeRows, typeFolderCanvases]);
+  // What kind of document each of the hub's folders holds. A canvas is one of the hub's
+  // artifacts when it is filed in one of them.
+  const hubFolderKinds = useMemo(
+    () =>
+      new Map(
+        (channel?.canvasFolders ?? []).map(
+          folder =>
+            [
+              folder.id,
+              folder.name === SDLC_HUB_KNOWLEDGE_FOLDER
+                ? 'HUB_KNOWLEDGE'
+                : folder.name === SDLC_WIKI_FOLDER
+                  ? 'WIKI'
+                  : 'PIPELINE',
+            ] as const,
+        ),
+      ),
+    [channel],
+  );
+  const hubArtifactOf = useCallback(
+    (
+      canvas: { id: string; title: string; folderId?: string | null } | null | undefined,
+    ): (HubArtifactSummary & { folderId: string }) | null => {
+      const kind = canvas?.folderId ? hubFolderKinds.get(canvas.folderId) : undefined;
+      return canvas?.folderId && kind
+        ? { id: canvas.id, title: canvas.title, kind, folderId: canvas.folderId }
+        : null;
+    },
+    [hubFolderKinds],
+  );
+  // The open canvas, from the query its editor runs for it anyway.
+  const [openCanvasRow] = useCachedQuery(queries.getCanvas({ canvasId: selectedCanvasId || '' }), {
+    enabled: Boolean(selectedCanvasId),
+  });
+  const selectedCanvas = useMemo(() => {
+    const row = canvasRowOf(openCanvasRow);
+    return row && row.id === selectedCanvasId ? (hubArtifactOf(row) ?? undefined) : undefined;
+  }, [openCanvasRow, selectedCanvasId, hubArtifactOf]);
   // Adding and archiving hub documents is admin-only; the server enforces it too.
   const isHubAdmin = useMemo(
     () =>
@@ -593,15 +748,53 @@ export default function SdlcScreen(): ReactElement {
       archived ? 'Archived' : 'Restored',
     );
   };
-  const selectedCanvasId = routeSearchParams.get('canvas');
-  const selectedCanvas = canvases.find(canvas => canvas.id === selectedCanvasId);
   const [trackRows] = useCachedQuery(queries.getSdlcTracks({ channelId: channelId || '' }), {
     enabled: Boolean(channelId),
   });
-  // Membership edges share this table and are excluded by the query.
-  const [linkRows] = useCachedQuery(queries.getSdlcLinks({ channelId: channelId || '' }), {
-    enabled: Boolean(channelId),
-  });
+  // The hub's calls in progress, whatever page is open: the live marks on tracks,
+  // folders and items come from here.
+  const [activeCallRows] = useCachedQuery(
+    queries.getSdlcActiveCalls({ channelId: channelId || '' }),
+    { enabled: Boolean(channelId) },
+  );
+  /**
+   * The calls in progress in each track, folder and item: the ones started on it, and
+   * the ones started on something under it. A call on a file two folders deep is the
+   * file's own, and inside both folders and the track.
+   */
+  const liveCallCounts = useMemo(() => {
+    const counts = new Map<string, SdlcLiveCalls>();
+    const count = (id: string, where: 'own' | 'inside', mine: boolean): void => {
+      const live = counts.get(id) ?? { own: 0, inside: 0, ownMine: 0, insideMine: 0 };
+      live[where] += 1;
+      if (mine) live[where === 'own' ? 'ownMine' : 'insideMine'] += 1;
+      counts.set(id, live);
+    };
+    for (const call of Array.isArray(activeCallRows) ? activeCallRows : []) {
+      // Only your own participant row comes with it.
+      const mine = isPartOfCall(call.participants?.[0]);
+      const owners = new Set<string>();
+      const above = new Set<string>();
+      for (const link of call.sdlcEntityLinks ?? []) {
+        owners.add(link.sourceId);
+        // Where it sits: its track, and every folder above it.
+        for (const edge of link.sourceItemLinks ?? []) above.add(edge.sourceId);
+      }
+      for (const id of owners) count(id, 'own', mine);
+      for (const id of above) if (!owners.has(id)) count(id, 'inside', mine);
+    }
+    return counts;
+  }, [activeCallRows]);
+  /** Every call going on in the hub, and how many you are part of: the Calls row's pill. */
+  const hubLiveCalls = useMemo<SdlcLiveCalls>(() => {
+    const calls = Array.isArray(activeCallRows) ? activeCallRows : [];
+    return {
+      own: calls.length,
+      ownMine: calls.filter(call => isPartOfCall(call.participants?.[0])).length,
+      inside: 0,
+      insideMine: 0,
+    };
+  }, [activeCallRows]);
   const tracks = useMemo(
     () =>
       Array.isArray(trackRows)
@@ -609,6 +802,7 @@ export default function SdlcScreen(): ReactElement {
             id: string;
             name: string;
             description: string | null;
+            icon: string | null;
             status: string;
             createdBy: string;
             createdAt: number;
@@ -617,31 +811,20 @@ export default function SdlcScreen(): ReactElement {
         : [],
     [trackRows],
   );
+  // The hub's tracks by id, for the Calls page to say which one each call is in.
+  const trackNames = useMemo(
+    () => new Map(tracks.map(track => [track.id, track.name] as const)),
+    [tracks],
+  );
   const selectedTrackId = routeSearchParams.get('track');
   const openFolderId = routeSearchParams.get('folder');
   const browsingScratchTab = routeSearchParams.get('browse') === '1';
   const openFileId = routeSearchParams.get('file');
   const openLinkId = routeSearchParams.get('link');
   const selectedTrack = tracks.find(track => track.id === selectedTrackId);
-  const trackOwner = useUser(selectedTrack?.createdBy ?? '');
 
-  const finderPathByTrack = useUserPreference('sdlcFinderPathByTrack');
-  const finderPath: SdlcFinderStep[] = selectedTrackId
-    ? (finderPathByTrack[selectedTrackId] ?? [])
-    : [];
-  const setFinderPath = (next: SdlcFinderStep[]): void => {
-    // Keyed by a track we know, never by the ?track= value directly: the param is
-    // reader-supplied, and it would otherwise name any property it liked.
-    const track = tracks.find(item => item.id === selectedTrackId);
-    if (!track) return;
-    setUserPreference('sdlcFinderPathByTrack', { ...finderPathByTrack, [track.id]: next });
-  };
-  useEffect(() => {
-    setPreviewCanvasId(null);
-    // Links and files are hub-scoped, so one from the previous track would still
-    // resolve here and go on showing its preview column.
-    setPreviewItem(null);
-  }, [selectedTrackId]);
+  /** `?in=`: the folder the track's file list is showing; absent at its top level. */
+  const filesFolderId = selectedTrackId ? routeSearchParams.get(SDLC_FILES_FOLDER_PARAM) : null;
   const openTracks = useMemo(
     () => tracks.filter(track => track.status !== 'COMPLETED' && track.status !== 'ARCHIVED'),
     [tracks],
@@ -650,90 +833,24 @@ export default function SdlcScreen(): ReactElement {
     () => tracks.filter(track => track.status === 'COMPLETED' || track.status === 'ARCHIVED'),
     [tracks],
   );
-  const [hubItemRows] = useCachedQuery(queries.getSdlcHubItems({ channelId: channelId || '' }), {
-    enabled: Boolean(channelId),
+  // The Wiki page's data, loaded only while it is open; see useSdlcWikiData.
+  const {
+    scopes: wikiScopeList,
+    pageCounts: wikiPageCounts,
+    scope: wikiScope,
+    scopeRepo: wikiScopeRepo,
+    pages: wikiPages,
+    showArchived: showArchivedWiki,
+    setShowArchived: setShowArchivedWiki,
+    selectedPage: selectedWikiPage,
+    workflow: wikiState,
+  } = useSdlcWikiData({
+    channelId: channelId ?? null,
+    enabled: section === 'wiki',
+    repos: channelRepos,
+    scopeParam: routeSearchParams.get('wiki'),
+    selectedCanvasId,
   });
-  const [wikiFolderRows] = useCachedQuery(
-    queries.getSdlcHubFolders({ channelId: channelId || '' }),
-    { enabled: Boolean(channelId) },
-  );
-  const hubItems = useMemo(() => (Array.isArray(hubItemRows) ? hubItemRows : []), [hubItemRows]);
-  const hubFolderNames = useMemo(
-    () =>
-      new Map(
-        (Array.isArray(wikiFolderRows) ? wikiFolderRows : []).map(folder => [
-          folder.id,
-          folder.name,
-        ]),
-      ),
-    [wikiFolderRows],
-  );
-  const wikiScopeList = useMemo(
-    () =>
-      channelId
-        ? wikiScopes({
-            channelId,
-            edges: hubItems,
-            folderNames: hubFolderNames,
-            memberRepoIds: new Set(channelRepos.map(item => item.id)),
-          })
-        : [],
-    [channelId, hubItems, hubFolderNames, channelRepos],
-  );
-  const wikiPagesByScope = useMemo(() => {
-    const wikiCanvases = new Map<string, WikiCanvas>(
-      canvases.map(canvas => [
-        canvas.id,
-        {
-          id: canvas.id,
-          title: canvas.title,
-          updatedAt: canvas.lastEditedAt ?? canvas.updatedAt,
-          archived: canvas.sdlcArtifact?.artifactStatus === 'ARCHIVED',
-        },
-      ]),
-    );
-    return new Map(
-      wikiScopeList.map(scope => [
-        scope.folderId,
-        wikiScopePages({
-          scopeFolderId: scope.folderId,
-          edges: hubItems,
-          folderNames: hubFolderNames,
-          canvases: wikiCanvases,
-        }),
-      ]),
-    );
-  }, [wikiScopeList, hubItems, hubFolderNames, canvases]);
-  const wikiPageCounts = useMemo(
-    () =>
-      new Map(
-        [...wikiPagesByScope].map(
-          ([folderId, pages]) => [folderId, pages.filter(page => !page.archived).length] as const,
-        ),
-      ),
-    [wikiPagesByScope],
-  );
-  // A page link without ?wiki= falls back to the page's own folder.
-  const wikiScope =
-    wikiScopeList.find(scope => scope.folderId === routeSearchParams.get('wiki')) ??
-    wikiScopeList.find(scope =>
-      wikiPagesByScope.get(scope.folderId)?.some(page => page.canvasId === selectedCanvasId),
-    ) ??
-    null;
-  const wikiScopeRepo = useMemo(
-    () => channelRepos.find(item => item.id === wikiScope?.repoId) ?? null,
-    [channelRepos, wikiScope],
-  );
-  const [showArchivedWiki, setShowArchivedWiki] = useState(false);
-  const wikiScopeAllPages = useMemo(
-    () => (wikiScope ? (wikiPagesByScope.get(wikiScope.folderId) ?? []) : []),
-    [wikiScope, wikiPagesByScope],
-  );
-  const wikiPages = useMemo(
-    () => (showArchivedWiki ? wikiScopeAllPages : wikiScopeAllPages.filter(page => !page.archived)),
-    [showArchivedWiki, wikiScopeAllPages],
-  );
-  const selectedWikiPage = wikiScopeAllPages.find(page => page.canvasId === selectedCanvasId);
   const assistantCanvas = useMemo(
     () =>
       selectedCanvas
@@ -766,31 +883,23 @@ export default function SdlcScreen(): ReactElement {
         .map(folder => ({
           id: folder.id,
           name: folder.name,
-          canvases: folder.canvases ?? [],
+          // Only the open folder's are loaded; the others list nothing until opened.
+          canvases: folder.id === activeTypeFolderId ? typeFolderCanvases : [],
         })),
-    [folders],
+    [folders, activeTypeFolderId, typeFolderCanvases],
   );
-  const activeTypeFolderId = routeSearchParams.get('type');
   const activeTypeFolder = useMemo(
     () => typeFolders.find(folder => folder.id === activeTypeFolderId) ?? null,
     [typeFolders, activeTypeFolderId],
   );
+  // An artifact row says which folder it is in.
   const selectedCanvasTypeFolder = useMemo(
     () =>
-      selectedCanvasId
-        ? (typeFolders.find(folder =>
-            folder.canvases.some(canvas => canvas.id === selectedCanvasId),
-          ) ?? null)
+      selectedCanvas?.folderId
+        ? (typeFolders.find(folder => folder.id === selectedCanvas.folderId) ?? null)
         : null,
-    [typeFolders, selectedCanvasId],
+    [typeFolders, selectedCanvas?.folderId],
   );
-  const folderNameByCanvasId = useMemo(() => {
-    const map = new Map<string, string>();
-    for (const folder of folders) {
-      for (const canvas of folder.canvases ?? []) map.set(canvas.id, folder.name);
-    }
-    return map;
-  }, [folders]);
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       if (event.key !== 'F2' || !hoveredTypeId || renameTypeId) return;
@@ -803,97 +912,38 @@ export default function SdlcScreen(): ReactElement {
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, [hoveredTypeId, renameTypeId, typeFolders]);
-  const links = useMemo(
-    () =>
-      linkRows
-        ? linkRows.flatMap(link =>
-            isSdlcEntityType(link.sourceType) &&
-            isSdlcEntityType(link.targetType) &&
-            isSdlcRelationType(link.relationType)
-              ? [
-                  {
-                    ...link,
-                    sourceType: link.sourceType,
-                    targetType: link.targetType,
-                    relationType: link.relationType,
-                  },
-                ]
-              : [],
-          )
-        : [],
-    [linkRows],
-  );
-  // Tickets belonging to a track (TRACK -> TICKET TRACK_ITEM links), propagated
-  // from the ticket's source artifact when the ticket is created.
-  const trackTicketIdsByTrack = useMemo(() => {
-    const byTrack = new Map<string, Set<string>>();
-    for (const link of links) {
-      if (
-        link.sourceType === 'TRACK' &&
-        link.targetType === 'TICKET' &&
-        link.relationType === 'TRACK_ITEM'
-      ) {
-        const set = byTrack.get(link.sourceId) ?? new Set<string>();
-        set.add(link.targetId);
-        byTrack.set(link.sourceId, set);
-      }
-    }
-    return byTrack;
-  }, [links]);
-  // canvas id -> its track name (from TRACK -> CANVAS TRACK_ITEM links), for card metadata.
-  /** ticket id -> the artifact it was raised from, for the ticket rows. */
-  const artifactByTicketId = useMemo(() => {
-    const byTicket = new Map<string, string>();
-    for (const link of links) {
-      if (
-        link.sourceType === 'CANVAS' &&
-        link.targetType === 'TICKET' &&
-        link.relationType === 'TICKET'
-      ) {
-        const canvas = canvases.find(item => item.id === link.sourceId);
-        if (canvas) byTicket.set(link.targetId, canvas.title);
-      }
-    }
-    return byTicket;
-  }, [links, canvases]);
-
+  // Artifact id -> the track it belongs to, for card metadata, the related-artifact
+  // search and a Tech Doc started from a PRD.
   const trackByCanvasId = useMemo(() => {
     const nameById = new Map(tracks.map(track => [track.id, track.name]));
     const byCanvas = new Map<string, { id: string; name: string }>();
-    for (const link of links) {
-      if (
-        link.sourceType === 'TRACK' &&
-        link.targetType === 'CANVAS' &&
-        link.relationType === SDLC_TRACK_FLAT_RELATION
-      ) {
-        const name = nameById.get(link.sourceId);
-        if (name) byCanvas.set(link.targetId, { id: link.sourceId, name });
-      }
+    for (const canvas of canvases) {
+      // Each artifact row brings the track edge pointing at it.
+      const edge = canvas.sdlcEntityLinks?.[0];
+      const name = edge ? nameById.get(edge.sourceId) : undefined;
+      if (edge && name) byCanvas.set(canvas.id, { id: edge.sourceId, name });
     }
     return byCanvas;
-  }, [links, tracks]);
+  }, [canvases, tracks]);
 
   useEffect(() => {
     const query = relatedSearchQuery.trim();
     if (!artifactTrack || !channel || query.length < 2) {
-      setRelatedSearchResults([]);
+      setRelatedSearchHits([]);
       setRelatedSearching(false);
       return undefined;
     }
-    const trackId = artifactTrack.id;
     const controller = new AbortController();
     setRelatedSearching(true);
     const timer = setTimeout(() => {
       void searchService
         .vespaSearch({ query, apps: 'file', subApp: 'canvas', limit: 25 }, controller.signal)
         .then(response => {
-          setRelatedSearchResults(
-            response.results
-              .filter(result => trackByCanvasId.get(result.id)?.id === trackId)
-              .map(result => ({
-                id: result.id,
-                title: result.title.replace(/<\/?hi>/g, ''),
-              })),
+          setRelatedSearchHits(
+            response.results.map(result => ({
+              id: result.id,
+              title: result.title.replace(/<\/?hi>/g, ''),
+            })),
           );
         })
         .catch(() => {})
@@ -903,237 +953,139 @@ export default function SdlcScreen(): ReactElement {
       controller.abort();
       clearTimeout(timer);
     };
-  }, [relatedSearchQuery, artifactTrack, channel, trackByCanvasId]);
-  const trackConversationIds = useMemo(
-    () =>
-      selectedTrackId
-        ? Array.from(
-            new Set(
-              links
-                .filter(
-                  link =>
-                    link.sourceType === 'TRACK' &&
-                    link.sourceId === selectedTrackId &&
-                    link.targetType === 'CONVERSATION' &&
-                    (link.relationType === 'DISCUSSION' ||
-                      link.relationType === SDLC_TRACK_FLAT_RELATION),
-                )
-                .map(link => link.targetId),
-            ),
-          )
-        : [],
-    [links, selectedTrackId],
+  }, [relatedSearchQuery, artifactTrack, channel]);
+  // Which track each hit is in, and its type, looked up for the hits alone: the list
+  // offers only the chosen track's artifacts.
+  const hitRefs = useMemo(
+    () => relatedSearchHits.slice(0, 100).map(hit => ({ type: 'CANVAS' as const, id: hit.id })),
+    [relatedSearchHits],
   );
-  const folderConversationIds = useMemo(
-    () =>
-      folderDiscussion
-        ? links
-            .filter(
-              link =>
-                link.sourceType === folderDiscussion.type &&
-                link.sourceId === folderDiscussion.id &&
-                link.targetType === 'CONVERSATION' &&
-                link.relationType === 'DISCUSSION',
-            )
-            .map(link => link.targetId)
-        : [],
-    [links, folderDiscussion],
+  const [hitRows, hitDetails] = useCachedQuery(
+    queries.getSdlcTrackItems({ channelId: channelId || '', items: hitRefs }),
+    { enabled: Boolean(channelId) && hitRefs.length > 0 },
   );
-  const [hubFolderRows] = useCachedQuery(
-    queries.getSdlcFoldersByChannel({ channelId: channelId || '' }),
-    { enabled: Boolean(channelId) },
-  );
-  const parentFolderOf = useMemo(() => {
-    const map = new Map<string, string>();
-    for (const link of links) {
-      if (link.relationType === SDLC_CONTAINMENT_RELATION && link.sourceType === 'FOLDER') {
-        map.set(`${link.targetType}:${link.targetId}`, link.sourceId);
-      }
-    }
-    return map;
-  }, [links]);
-  const folderPageCanvasById = useMemo(
-    () =>
-      new Map<string, SdlcFinderCanvas>(
-        typeFolders.flatMap(folder =>
-          folder.canvases.map(canvas => [
-            canvas.id,
-            {
-              id: canvas.id,
-              title: canvas.title,
-              typeName: folder.name,
-              createdBy: canvas.createdBy,
-              createdAt: canvas.createdAt,
-              updatedAt: canvas.updatedAt,
-              lastEditedBy: canvas.lastEditedBy ?? undefined,
-              lastEditedAt: canvas.lastEditedAt ?? undefined,
-            } satisfies SdlcFinderCanvas,
-          ]),
-        ),
-      ),
-    [typeFolders],
-  );
-  const folderById = useMemo(
-    () => new Map((hubFolderRows ?? []).map(row => [row.id, { id: row.id, name: row.name }])),
-    [hubFolderRows],
-  );
-  const [hubLinkRows] = useCachedQuery(queries.getSdlcHubLinks({ channelId: channelId || '' }), {
-    enabled: Boolean(channelId),
-  });
-  const linkById = useMemo(
-    () =>
-      new Map<string, SdlcFinderLink>(
-        (hubLinkRows ?? []).map(row => [
-          row.id,
+  const hitPlaces = useMemo(() => {
+    const rows = hitRefs.length > 0 && Array.isArray(hitRows) ? hitRows : [];
+    const items = rows.map(row => targetItemOf(row));
+    return new Map(
+      hitRefs.map(ref => {
+        const item = items.find(found => found?.kind === 'CANVAS' && found.id === ref.id);
+        return [
+          ref.id,
           {
-            id: row.id,
-            title: row.title ?? '',
-            url: row.url,
-            description: row.description ?? null,
-            favicon: row.favicon ?? null,
-            createdBy: row.createdBy,
-            createdAt: row.createdAt,
-          } satisfies SdlcFinderLink,
-        ]),
-      ),
-    [hubLinkRows],
-  );
-  const [hubFileRows] = useCachedQuery(queries.getSdlcHubFiles({ channelId: channelId || '' }), {
-    enabled: Boolean(channelId),
-  });
-  const fileById = useMemo(
+            trackId: sdlcItemPlacement(rows, ref).trackId,
+            typeName: item?.kind === 'CANVAS' ? item.typeName : null,
+          },
+        ] as const;
+      }),
+    );
+  }, [hitRefs, hitRows]);
+  const relatedSearchResults = useMemo(
     () =>
-      new Map<string, SdlcFinderFile>(
-        (hubFileRows ?? []).map(row => [
-          row.id,
-          {
-            id: row.id,
-            name: row.originalFilename,
-            url: getAttachmentStreamUrl(row.id),
-            mimetype: row.mimetype,
-            size: row.size,
-            createdBy: row.createdBy,
-            createdAt: row.createdAt,
-          } satisfies SdlcFinderFile,
-        ]),
-      ),
-    [hubFileRows],
+      artifactTrack
+        ? relatedSearchHits.filter(hit => hitPlaces.get(hit.id)?.trackId === artifactTrack.id)
+        : [],
+    [artifactTrack, relatedSearchHits, hitPlaces],
   );
-  const conversationOwnerById = useMemo(() => {
-    const owners: ReadonlyArray<string> = ['FOLDER', 'CANVAS', 'LINK', 'ATTACHMENT'];
-    const map = new Map<
-      string,
-      { type: 'FOLDER' | 'CANVAS' | 'LINK' | 'ATTACHMENT'; id: string }
-    >();
-    for (const link of links) {
-      if (
-        link.targetType === 'CONVERSATION' &&
-        link.relationType === 'DISCUSSION' &&
-        owners.includes(link.sourceType)
-      ) {
-        map.set(link.targetId, {
-          type: link.sourceType as 'FOLDER' | 'CANVAS' | 'LINK' | 'ATTACHMENT',
-          id: link.sourceId,
-        });
-      }
-    }
-    return map;
-  }, [links]);
-  useEffect(() => {
-    setFolderDiscussion(null);
-  }, [selectedTrackId]);
-
-  useEffect(() => {
-    // Opening an artifact hands the panel to that artifact. Leaving one does
-    // not: closing a canvas tab for a file must not wipe the file's own
-    // discussion, which the same navigation has just set.
-    if (!selectedCanvasId) return;
-    setFolderDiscussion(null);
-  }, [selectedCanvasId]);
-  const relatedTicketIds = useMemo(() => {
-    const ids = new Set(linkedTicketIds(links));
-    for (const set of trackTicketIdsByTrack.values()) {
-      for (const id of set) ids.add(id);
-    }
-    return [...ids];
-  }, [links, trackTicketIdsByTrack]);
-  const [relatedTickets] = useCachedQuery(
-    queries.sdlcTicketsByIds({ ticketIds: relatedTicketIds }),
+  // Still searching while the hits' tracks are being looked up.
+  const relatedSearchPending =
+    relatedSearching || (hitRefs.length > 0 && hitDetails.type !== 'complete');
+  // Which discussions each panel lists, joined in the list's queries rather than
+  // gathered here as ids: the track's (its own, its items' and its artifacts'), or one
+  // item's. Memoised on their ids, so they stay the same query between renders.
+  const trackDiscussionScope = useMemo<DiscussionScope | null>(
+    () => (selectedTrackId ? { trackId: selectedTrackId } : null),
+    [selectedTrackId],
   );
-  const tickets = useMemo<readonly SdlcTicket[]>(
+  const itemDiscussionScope = useMemo<DiscussionScope | null>(
     () =>
-      Array.isArray(relatedTickets) ? (relatedTickets as unknown as readonly SdlcTicket[]) : [],
-    [relatedTickets],
+      !discussionItemRef
+        ? null
+        : // A folder's take in everything under it, however deep.
+          discussionItemRef.type === 'FOLDER'
+          ? { folderId: discussionItemRef.id }
+          : { ownerIds: [discussionItemRef.id] },
+    [discussionItemRef],
   );
-  const trackTicketList = useMemo<readonly SdlcTicket[]>(() => {
-    if (!selectedTrack) return [];
-    const ids = trackTicketIdsByTrack.get(selectedTrack.id) ?? new Set<string>();
-    return tickets.filter(ticket => ids.has(ticket.id));
-  }, [selectedTrack, trackTicketIdsByTrack, tickets]);
-  useScope('sdlc-tickets', ticketsFocused);
-  const focusedTicketIndex = trackTicketList.findIndex(ticket => ticket.id === focusedTicketId);
-  const moveTicketFocus = (delta: number): void => {
-    if (trackTicketList.length === 0) return;
-    const from =
-      focusedTicketIndex === -1 ? (delta > 0 ? -1 : trackTicketList.length) : focusedTicketIndex;
-    const next = trackTicketList[Math.min(trackTicketList.length - 1, Math.max(0, from + delta))];
-    if (!next) return;
-    setFocusedTicketId(next.id);
-    ticketsRef.current
-      ?.querySelector(`[data-ticket-row="${next.id}"]`)
-      ?.scrollIntoView({ block: 'nearest' });
-  };
-  const ticketBind = { enabled: ticketsFocused };
-  // Shortcuts fire no DOM click, so the delegated tracker never sees them.
-  const trackKeyboardNav = (action: 'down' | 'up' | 'open'): void => {
-    globalClickTracker.trackManualEvent('Tickets', 'KEYBOARD_NAV', undefined, {
-      action,
-      surface: 'sdlc',
-      listSize: trackTicketList.length,
-    });
-  };
-  useShortcutById(
-    'tickets.down',
-    () => {
-      trackKeyboardNav('down');
-      moveTicketFocus(1);
+  // What the page names by id — the folder it is open on, the folder its file list
+  // is in, and the item its panel is about — looked up by those ids alone rather than
+  // found among every folder, link and file in the hub.
+  const pageItemRefs = useMemo(
+    () => [
+      ...(openFolderId && openFolderId !== selectedTrackId
+        ? [{ type: 'FOLDER' as const, id: openFolderId }]
+        : []),
+      ...(filesFolderId ? [{ type: 'FOLDER' as const, id: filesFolderId }] : []),
+      ...(discussionItemRef ? [{ type: discussionItemRef.type, id: discussionItemRef.id }] : []),
+      ...(pendingOpen ? [{ type: pendingOpen.item.type, id: pendingOpen.item.id }] : []),
+    ],
+    [openFolderId, selectedTrackId, filesFolderId, discussionItemRef, pendingOpen],
+  );
+  const [pageItemRows, pageItemDetails] = useCachedQuery(
+    queries.getSdlcTrackItems({ channelId: channelId || '', items: pageItemRefs }),
+    { enabled: Boolean(channelId) && pageItemRefs.length > 0 },
+  );
+  const pageItemList = useMemo(
+    () => (pageItemRefs.length > 0 && Array.isArray(pageItemRows) ? pageItemRows : []),
+    [pageItemRefs.length, pageItemRows],
+  );
+  // By `KIND:id`.
+  const pageItems = useMemo<ReadonlyMap<string, SdlcTrackItem>>(
+    () =>
+      new Map(
+        pageItemList.flatMap(row => {
+          const item = targetItemOf(row);
+          return item ? [[`${item.kind}:${item.id}`, item] as const] : [];
+        }),
+      ),
+    [pageItemList],
+  );
+  const folderDiscussion = useMemo<SdlcItemDiscussion | null>(() => {
+    if (!discussionItemRef) return null;
+    const { type, id } = discussionItemRef;
+    const item = pageItems.get(`${type}:${id}`);
+    return { type, id, name: item ? sdlcItemName(item) : DISCUSSION_ITEM_FALLBACK_NAME[type] };
+  }, [discussionItemRef, pageItems]);
+  // The file list's path: the folders from the top of the track down to `?in=`. The
+  // lookup gives it however the folder was reached. The path the list itself just
+  // walked stands in until then, so the crumbs don't blink on every step.
+  const [walkedPath, setWalkedPath] = useState<SdlcFilesLocation[]>([]);
+  const filesPath = useMemo<SdlcFilesLocation[]>(() => {
+    if (!filesFolderId) return [];
+    const walked = walkedPath.at(-1)?.id === filesFolderId ? walkedPath : null;
+    const folder = pageItems.get(`FOLDER:${filesFolderId}`);
+    if (!folder) return walked ?? [];
+    const placement = sdlcItemPlacement(pageItemList, { type: 'FOLDER', id: filesFolderId });
+    // Another track's folder isn't this list's to show.
+    if (placement.trackId && placement.trackId !== selectedTrackId) return [];
+    if (!placement.complete && walked) return walked;
+    return [
+      ...placement.folders,
+      {
+        type: 'FOLDER',
+        id: folder.id,
+        name: sdlcItemName(folder),
+        icon: folder.kind === 'FOLDER' ? folder.icon : null,
+      },
+    ];
+  }, [filesFolderId, walkedPath, pageItems, pageItemList, selectedTrackId]);
+  const setFilesPath = useCallback(
+    (next: SdlcFilesLocation[], options?: { replace?: boolean }): void => {
+      setWalkedPath(next);
+      const params = new URLSearchParams(location.search);
+      const folderId = next.at(-1)?.id;
+      if (folderId) params.set(SDLC_FILES_FOLDER_PARAM, folderId);
+      else params.delete(SDLC_FILES_FOLDER_PARAM);
+      const search = params.toString();
+      // A step of its own, so Back goes back up.
+      void navigate(
+        `${location.pathname}${search ? `?${search}` : ''}`,
+        options?.replace ? { replace: true } : undefined,
+      );
     },
-    ticketBind,
+    [location.pathname, location.search, navigate],
   );
-  useShortcutById(
-    'tickets.up',
-    () => {
-      trackKeyboardNav('up');
-      moveTicketFocus(-1);
-    },
-    ticketBind,
-  );
-  useShortcutById(
-    'tickets.open',
-    () => {
-      const ticket = trackTicketList[focusedTicketIndex];
-      if (!ticket) return;
-      trackKeyboardNav('open');
-      setDiscussionUrl({
-        open: true,
-        conversationId: ticket.conversationId,
-        selectedTab: 'details',
-      });
-    },
-    ticketBind,
-  );
-  useEffect(() => {
-    if (!ticketsFocused || focusedTicketId !== null) return;
-    const first = trackTicketList[0];
-    if (first) setFocusedTicketId(first.id);
-  }, [ticketsFocused, focusedTicketId, trackTicketList]);
 
-  const [channelTicketRows] = useCachedQuery(
-    queries.sdlcTicketsByChannel({ channelId: channel?.id ?? '' }),
-    { enabled: Boolean(channel?.id) },
-  );
-  const channelTicketCount = Array.isArray(channelTicketRows) ? channelTicketRows.length : 0;
-  const [renderedConversationId, setRenderedConversationId] = useState<string | null>(null);
   const chatLayout = sdlcChatLayout({
     chatParam: routeSearchParams.get('chat'),
     discussionParam: routeSearchParams.get('discussion'),
@@ -1141,35 +1093,47 @@ export default function SdlcScreen(): ReactElement {
   const sdlcChatTab = chatLayout.activeTab;
   const discussionOpen = chatLayout.panelOpen && sdlcChatTab === 'conversations';
   const rightPanelOpen = chatLayout.panelOpen;
-  const selectedDiscussionConversationId = routeSearchParams.get('conversation');
-  useEffect(() => {
-    if (selectedDiscussionConversationId) {
-      setRenderedConversationId(selectedDiscussionConversationId);
-      return;
-    }
-    const timer = setTimeout(() => setRenderedConversationId(null), 300);
-    return () => clearTimeout(timer);
-  }, [selectedDiscussionConversationId]);
+  // The artifacts a discussion panel can be about: the open one, and an open
+  // conversation's, which its owner link brings.
+  const discussionCanvases = useMemo(
+    () =>
+      [selectedCanvas, hubArtifactOf(conversationOwner?.sourceCanvas)].filter(
+        (canvas): canvas is HubArtifactSummary & { folderId: string } => Boolean(canvas),
+      ),
+    [selectedCanvas, conversationOwner, hubArtifactOf],
+  );
   const discussionContext = useMemo(
     () =>
       resolveSdlcDiscussionContext({
         selectedCanvasId: selectedCanvas?.id ?? null,
         selectedWikiPage: selectedWikiPage ?? null,
         selectedConversationId: selectedDiscussionConversationId,
-        canvases,
-        links,
+        canvases: discussionCanvases,
+        conversationOwner,
       }),
-    [canvases, links, selectedCanvas?.id, selectedDiscussionConversationId, selectedWikiPage],
+    [
+      discussionCanvases,
+      conversationOwner,
+      selectedCanvas?.id,
+      selectedDiscussionConversationId,
+      selectedWikiPage,
+    ],
   );
 
   useEffect(() => {
     if (
       !shouldCloseInvalidSdlcConversationDeepLink({
-        dataLoaded: repoQueryDetails.type === 'complete' && linkRows !== undefined,
+        // Waits for the open conversation's owner too, or a valid link would close
+        // before it is known whose it is.
+        dataLoaded:
+          repoQueryDetails.type === 'complete' &&
+          (!selectedDiscussionConversationId || selectedConversationDetails.type === 'complete'),
         discussionOpen,
         selectedConversationId: selectedDiscussionConversationId,
         discussionContextResolved:
-          Boolean(discussionContext) || Boolean(section === 'tracks' && selectedTrackId),
+          Boolean(discussionContext) ||
+          Boolean(section === 'tracks' && selectedTrackId) ||
+          (section === 'calls' && Boolean(conversationOwner)),
       })
     ) {
       return;
@@ -1179,32 +1143,46 @@ export default function SdlcScreen(): ReactElement {
     next.delete('chat');
     next.delete('conversation');
     next.delete('selectedTab');
+    next.delete(SDLC_THREAD_ONLY_PARAM);
     const search = next.toString();
     void navigate(`${location.pathname}${search ? `?${search}` : ''}`, { replace: true });
   }, [
+    conversationOwner,
     discussionContext,
     discussionOpen,
     location.pathname,
     location.search,
     navigate,
     repoQueryDetails.type,
-    linkRows,
+    selectedConversationDetails.type,
     section,
     selectedDiscussionConversationId,
     selectedTrackId,
   ]);
   const discussionOwner = discussionContext?.owner ?? null;
   const discussionSurface = discussionContext?.surface ?? null;
+  // On the hub's Calls page, a call's discussion opens beside the list on its own.
+  const hubCallThreadOwner =
+    section === 'calls' && conversationOwner && isDiscussionOwnerType(conversationOwner.sourceType)
+      ? { type: conversationOwner.sourceType, id: conversationOwner.sourceId }
+      : null;
   const chatPanelAvailable =
-    Boolean(discussionOwner && discussionSurface) || Boolean(section === 'tracks' && selectedTrack);
+    Boolean(discussionOwner && discussionSurface) ||
+    Boolean(section === 'tracks' && selectedTrack) ||
+    Boolean(hubCallThreadOwner);
   const showRightPanel = rightPanelOpen && chatPanelAvailable;
-  const discussionConversationIds = useMemo(
-    () => discussionIdsForOwner(discussionOwner?.canvasId ?? null, links),
-    [discussionOwner, links],
+  const canvasDiscussionScope = useMemo<DiscussionScope | null>(
+    () => (discussionOwner ? { ownerIds: [discussionOwner.canvasId] } : null),
+    [discussionOwner],
   );
   const activeFolderDiscussion =
     folderDiscussion && section === 'tracks' && selectedTrack ? folderDiscussion : null;
   const entityLinkScope = useMemo<EntityLinkScope | null>(() => {
+    // An artifact's are its own, as on its page; they reach the track's list without a
+    // roll-up. A folder's, link's or file's roll up to the track.
+    if (activeFolderDiscussion?.type === 'CANVAS') {
+      return { sourceType: 'CANVAS', sourceId: activeFolderDiscussion.id };
+    }
     if (activeFolderDiscussion && selectedTrack) {
       return {
         sourceType: activeFolderDiscussion.type,
@@ -1219,18 +1197,15 @@ export default function SdlcScreen(): ReactElement {
     return null;
   }, [activeFolderDiscussion, discussionOwner, section, selectedTrack]);
   const relatedCanvas = canvases.find(canvas => canvas.id === relatedSourceId);
+  // Hub Knowledge's workflow, which only Overview and Hub Knowledge show.
+  const knowledgeWorkflowShown = section === 'overview' || section === 'knowledge';
   const [hubWorkflowLink] = useCachedQuery(
     queries.getSdlcHubWorkflow({ channelId: channelId || '' }),
-    { enabled: Boolean(channelId) },
+    { enabled: Boolean(channelId) && knowledgeWorkflowShown },
   );
-  const hubWorkflowId = hubWorkflowLink?.workflow?.id ?? null;
+  const hubWorkflowId = knowledgeWorkflowShown ? (hubWorkflowLink?.workflow?.id ?? null) : null;
   const state = useHubWorkflow(hubWorkflowId);
   const knowledgeRunning = state.phase === 'RUNNING';
-  const [wikiWorkflowLink] = useCachedQuery(
-    queries.getSdlcWikiWorkflow({ channelId: channelId || '' }),
-    { enabled: Boolean(channelId) },
-  );
-  const wikiState = useHubWorkflow(wikiWorkflowLink?.workflow?.id ?? null);
 
   const readyCount = knowledgeDocs.filter(
     canvas => canvas.sdlcArtifact?.artifactStatus === 'ACTIVE',
@@ -1340,14 +1315,66 @@ export default function SdlcScreen(): ReactElement {
     navigateWithinSdlc(`/sdlc/${channelId}/${section}`, `?${search.toString()}`);
   };
 
+  const openFolderItem = openFolderId ? pageItems.get(`FOLDER:${openFolderId}`) : undefined;
+  // A track's own page shows the track's icon at the root, as the sidebar does.
   const openFolder = openFolderId
-    ? (folderById.get(openFolderId) ??
-      (selectedTrack && openFolderId === selectedTrack.id
-        ? { id: selectedTrack.id, name: selectedTrack.name }
-        : null))
+    ? selectedTrack && openFolderId === selectedTrack.id
+      ? {
+          id: selectedTrack.id,
+          name: selectedTrack.name,
+          icon: selectedTrack.icon,
+        }
+      : openFolderItem
+        ? {
+            id: openFolderItem.id,
+            name: sdlcItemName(openFolderItem),
+            icon: openFolderItem.kind === 'FOLDER' ? openFolderItem.icon : null,
+          }
+        : // Named once it arrives. One that isn't there falls back to the track's page.
+          pageItemDetails.type === 'complete'
+          ? null
+          : { id: openFolderId, name: '', icon: null }
     : null;
   /** True while the page open is the track's own, rather than a folder inside it. */
   const openFolderIsTrack = Boolean(openFolder && openFolder.id === selectedTrackId);
+  /** A track's own page, which its name heads from the top bar. */
+  const onTrackPage =
+    section === 'tracks' && Boolean(selectedTrack) && !openFolder && !selectedCanvasId;
+  // Opening an item's discussions brings the item into view in the file list: into
+  // the folder that holds it, when the list is showing another. Once per item, so
+  // browsing on from there is never pulled back.
+  const revealedItemRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!discussionItemRef) {
+      revealedItemRef.current = null;
+      return;
+    }
+    if (!onTrackPage || trackTab !== 'files') return;
+    const key = `${discussionItemRef.type}:${discussionItemRef.id}`;
+    if (revealedItemRef.current === key) return;
+    const placement = sdlcItemPlacement(pageItemList, discussionItemRef);
+    // Where it sits arrives with the lookup.
+    if (!placement.parent) return;
+    revealedItemRef.current = key;
+    if (placement.trackId !== selectedTrackId) return;
+    // The folder the list is in, or one above it, is already on screen in the path.
+    if (filesPath.some(step => step.id === discussionItemRef.id)) return;
+    const holder = placement.parent.type === 'FOLDER' ? placement.parent.id : null;
+    if (holder === filesFolderId) return;
+    // A folder whose own folders aren't known can't be opened with its path.
+    if (holder && placement.folders.at(-1)?.id !== holder) return;
+    setFilesPath(holder ? placement.folders : [], { replace: true });
+  }, [
+    discussionItemRef,
+    onTrackPage,
+    trackTab,
+    pageItemList,
+    selectedTrackId,
+    filesPath,
+    filesFolderId,
+    setFilesPath,
+  ]);
+
   /** Names a parent for the mutators, which care whether it is a track. */
   const folderPageParent = (parent: {
     id: string;
@@ -1370,60 +1397,73 @@ export default function SdlcScreen(): ReactElement {
 
   const discussionScopeIcon = (item: SdlcItemDiscussion): ReactNode => {
     const className = 'size-3.5 shrink-0';
+    const found = pageItems.get(`${item.type}:${item.id}`);
     if (item.type === 'FOLDER') {
-      return <Folder className={`${className} fill-primary/25 text-primary/70`} />;
+      return found?.kind === 'FOLDER' && found.icon ? (
+        <AppIcon name={found.icon} size={14} className='shrink-0' aria-hidden='true' />
+      ) : (
+        <Folder className={`${className} text-muted-foreground`} />
+      );
     }
     if (item.type === 'LINK') {
-      const favicon = linkById.get(item.id)?.favicon;
+      const favicon = found?.kind === 'LINK' ? found.favicon : null;
       return favicon ? (
         <img src={favicon} alt='' className={`${className} rounded-[2px]`} />
       ) : (
         <Link2 className={className} />
       );
     }
-    const file = fileById.get(item.id);
-    const Icon = file ? fileKind(file.mimetype, file.name).icon : Paperclip;
-    return <Icon className={className} />;
+    if (item.type === 'CANVAS') {
+      return <FileText className={`${className} text-muted-foreground`} />;
+    }
+    if (found?.kind !== 'ATTACHMENT') return <Paperclip className={className} />;
+    return (
+      <FileTypeIcon kind={fileKind(found.mimetype, found.name)} size='sm' className='size-3.5' />
+    );
   };
+
+  // What a call started from the conversation panel is for: the track, item or artifact
+  // the panel is about. It is named after it and becomes a discussion there; with
+  // nothing in scope it is a call in the hub.
+  const callScope: SdlcCallScope = {
+    link: entityLinkScope
+      ? { ownerType: entityLinkScope.sourceType, ownerId: entityLinkScope.sourceId }
+      : null,
+    name:
+      activeFolderDiscussion?.name ??
+      discussionOwner?.title ??
+      (entityLinkScope?.sourceType === 'TRACK' ? selectedTrack?.name : undefined) ??
+      channel?.name ??
+      'this hub',
+  };
+  // The header's call is for the page on screen: the artifact or wiki page open, else
+  // the track, else the hub. The item the panel was last about stays in the url while
+  // the panel is shut, so a call from the header leaves it out.
+  const pageOwner = selectedCanvas || selectedWikiPage ? discussionOwner : null;
+  const pageCallScope: SdlcCallScope = pageOwner
+    ? { link: { ownerType: 'CANVAS', ownerId: pageOwner.canvasId }, name: pageOwner.title }
+    : section === 'tracks' && selectedTrack
+      ? { link: { ownerType: 'TRACK', ownerId: selectedTrack.id }, name: selectedTrack.name }
+      : { link: null, name: channel?.name ?? 'this hub' };
+  // The header's ticket is for the page too, for the same reason its call is: the
+  // item the panel was last about stays in the url while the panel is shut.
+  const pageEntityLinkScope: EntityLinkScope | null = pageOwner
+    ? { sourceType: 'CANVAS', sourceId: pageOwner.canvasId }
+    : section === 'tracks' && selectedTrack
+      ? { sourceType: 'TRACK', sourceId: selectedTrack.id }
+      : null;
+  const isHubMember = Boolean(
+    channel?.participants?.some(participant => participant.userId === auth.userID),
+  );
 
   const panelScopeActions = (place: 'header' | 'panel'): ReactNode => {
     if (!channel) return null;
-    const callLink: SdlcCallLink | undefined = entityLinkScope
-      ? { ownerType: entityLinkScope.sourceType, ownerId: entityLinkScope.sourceId }
-      : undefined;
+    const scope = place === 'header' ? pageCallScope : callScope;
+    const ticketScope = place === 'header' ? pageEntityLinkScope : entityLinkScope;
     return (
       <>
-        <CallTriggerModal
-          channelId={channel.id}
-          {...(channel.scopeType && { scopeType: channel.scopeType })}
-          channelName={channel.name}
-          participantCount={channel.channelStats?.participantCount ?? 0}
-          callDisplayName={channel.name}
-          trackSource={place === 'panel' ? 'sdlc_conversation_header' : 'sdlc_repo_header'}
-          isMember={Boolean(
-            channel.participants?.some(participant => participant.userId === auth.userID),
-          )}
-          {...(callLink ? { sdlcLink: callLink } : {})}
-        />
-        <Button
-          size='icon'
-          variant='ghost'
-          aria-label='Create ticket'
-          title='Create ticket'
-          onClick={() => {
-            setCreateTicketSource('sdlc_header');
-            setCreateTicketOpen(true);
-          }}
-          data-track-category='SdlcHub'
-          data-track-name='HeaderCreateTicketClicked'
-          data-track-metadata={JSON.stringify({
-            place,
-            scope: entityLinkScope?.sourceType ?? null,
-            source: 'sdlc_header',
-          })}
-        >
-          <TicketToken size={16} />
-        </Button>
+        {/* Ask AI, then call, then ticket: the order a thread's own actions take, so
+            opening one leaves these where they were. */}
         <Button
           size='icon'
           variant='ghost'
@@ -1436,25 +1476,52 @@ export default function SdlcScreen(): ReactElement {
         >
           <XyneAIStar />
         </Button>
+        {/* Only the people picked are invited, and the call becomes a discussion in
+            what it is for — never a call the whole hub is rung for. */}
+        <Button
+          size='icon'
+          variant='ghost'
+          aria-label={`Start a call in ${scope.name}`}
+          title={isHubMember ? `Start a call in ${scope.name}` : 'Join the hub to start a call'}
+          disabled={!isHubMember}
+          onClick={() => setCallPicker(scope)}
+          data-track-category='SdlcHub'
+          data-track-name='StartCallOpened'
+          data-track-metadata={JSON.stringify({
+            place,
+            scope: scope.link?.ownerType ?? 'HUB',
+          })}
+        >
+          <PhoneDefault size={16} />
+        </Button>
+        <Button
+          size='icon'
+          variant='ghost'
+          aria-label='Create ticket'
+          title='Create ticket'
+          onClick={() => {
+            setCreateTicketSource('sdlc_header');
+            setCreateTicketScope(ticketScope);
+            setCreateTicketOpen(true);
+          }}
+          data-track-category='SdlcHub'
+          data-track-name='HeaderCreateTicketClicked'
+          data-track-metadata={JSON.stringify({
+            place,
+            scope: ticketScope?.sourceType ?? null,
+            source: 'sdlc_header',
+          })}
+        >
+          <TicketToken size={16} />
+        </Button>
       </>
     );
   };
 
-  /** Opens a previewed item on the page of whatever holds it — its folder, or
-   *  the track's own page when it is filed straight on the track. */
-  const openPreviewedItem = (
-    kind: 'LINK' | 'ATTACHMENT',
-    id: string,
-    event?: { metaKey: boolean; ctrlKey: boolean },
-  ): void => {
-    const parentId = parentFolderOf.get(`${kind}:${id}`) ?? selectedTrackId;
-    if (!parentId) return;
-    openFolderPage(parentId, { kind, id }, event);
-  };
-
   /** A track's own page, with its conversations alongside it. */
-  const trackSearch = (trackId: string): string => {
+  const trackSearch = (trackId: string, filesFolder: string | null = null): string => {
     const search = new URLSearchParams({ track: trackId });
+    if (filesFolder) search.set(SDLC_FILES_FOLDER_PARAM, filesFolder);
     search.set('discussion', '1');
     search.set('chat', 'conversations');
     return `?${search.toString()}`;
@@ -1464,14 +1531,29 @@ export default function SdlcScreen(): ReactElement {
     folderId: string,
     tab: FolderTab | null,
     withDiscussion = false,
+    /** Another track's folder, reached from outside its page. */
+    trackId: string | null = selectedTrackId,
   ): string => {
     const search = new URLSearchParams();
-    if (selectedTrackId) search.set('track', selectedTrackId);
+    if (trackId) search.set('track', trackId);
+    // Kept for when the page closes, back to the file list where it was left.
+    if (filesFolderId && trackId === selectedTrackId) {
+      search.set(SDLC_FILES_FOLDER_PARAM, filesFolderId);
+    }
     search.set('folder', folderId);
     if (tab?.kind === 'CANVAS') search.set('canvas', tab.id);
     if (tab?.kind === 'ATTACHMENT') search.set('file', tab.id);
     if (tab?.kind === 'LINK') search.set('link', tab.id);
     if (tab?.kind === 'BROWSER') search.set('browse', '1');
+    // The panel's subject: a link or file tab is its own, and the folder itself is
+    // when no tab is open. An artifact carries its own through the canvas.
+    const about: SdlcDiscussionItemRef | null =
+      tab?.kind === 'LINK' || tab?.kind === 'ATTACHMENT'
+        ? { type: tab.kind, id: tab.id }
+        : !tab && folderId !== trackId
+          ? { type: 'FOLDER', id: folderId }
+          : null;
+    if (about) search.set(SDLC_ABOUT_PARAM, sdlcDiscussionItemParam(about));
     if (withDiscussion) {
       search.set('discussion', '1');
       search.set('chat', 'conversations');
@@ -1496,11 +1578,22 @@ export default function SdlcScreen(): ReactElement {
     );
   };
 
-  /** Stable identity: the folder page memoises its tree and tabs on this. */
-  const folderPageMaps = useMemo(
-    () => ({ folderById, canvasById: folderPageCanvasById, linkById, fileById }),
-    [folderById, folderPageCanvasById, linkById, fileById],
-  );
+  /**
+   * ⌘/Ctrl-click in the file list. The desktop app gives the item a window of its
+   * own, as it does elsewhere in the hub; on the web it opens in a new browser tab,
+   * at the address it would have had here. False when nothing opened, so the
+   * caller opens it in place.
+   */
+  const openInNewTab = (
+    event: { metaKey: boolean; ctrlKey: boolean } | undefined,
+    search: string,
+    inWindow: () => boolean,
+  ): boolean => {
+    if (!event || !(event.metaKey || event.ctrlKey) || !workspaceId || !channelId) return false;
+    if (shouldOpenInNewWindow(event)) return inWindow();
+    window.open(`/${workspaceId}/sdlc/${channelId}/tracks?${search}`, '_blank', 'noopener');
+    return true;
+  };
 
   const openFolderPage = (
     folderId: string,
@@ -1514,42 +1607,88 @@ export default function SdlcScreen(): ReactElement {
   ): void => {
     if (!channelId) return;
     if (shouldOpenInNewWindow(event) && openFolderInWindow(folderId, tab)) return;
-    setPreviewCanvasId(null);
-    setPreviewItem(null);
-    if (tab?.kind === 'LINK') {
-      const link = linkById.get(tab.id);
-      setFolderDiscussion({
-        type: 'LINK',
-        id: tab.id,
-        name: link ? link.title.trim() || link.url : 'Link',
-      });
-    } else if (tab?.kind === 'ATTACHMENT') {
-      setFolderDiscussion({
-        type: 'ATTACHMENT',
-        id: tab.id,
-        name: fileById.get(tab.id)?.name ?? 'File',
-      });
-    } else if (tab?.kind === 'CANVAS' || tab?.kind === 'BROWSER') {
-      // An artifact carries its own discussion through the canvas owner.
-      setFolderDiscussion(null);
-    } else {
-      // Opening the folder itself makes the folder the subject; otherwise the
-      // panel keeps showing the track you came from while you are inside it.
-      const folder = folderById.get(folderId);
-      setFolderDiscussion(folder ? { type: 'FOLDER', id: folder.id, name: folder.name } : null);
-    }
     navigateWithinSdlc(
       `/sdlc/${channelId}/tracks`,
       `?${folderPageSearch(folderId, tab, withDiscussion)}`,
     );
   };
 
+  /**
+   * Opens an item from a discussion about it, as double-clicking it in the file list
+   * would: a folder on its own page, anything else as a tab on the page of what holds
+   * it. Where that is comes from looking the item up; the conversation on show stays
+   * open beside it.
+   */
+  const openDiscussedItem = (item: SdlcDiscussionItemRef, name: string): void => {
+    setPendingOpen({ item, name, conversationId: selectedDiscussionConversationId });
+  };
+  useEffect(() => {
+    if (!pendingOpen || !channelId) return;
+    const { item, conversationId } = pendingOpen;
+    const placement = sdlcItemPlacement(pageItemList, item);
+    // Where it sits arrives with the lookup.
+    if (!placement.parent) return;
+    setPendingOpen(null);
+    const pageId = item.type === 'FOLDER' ? item.id : placement.parent.id;
+    const tab: FolderTab | null = item.type === 'FOLDER' ? null : { kind: item.type, id: item.id };
+    const search = new URLSearchParams(
+      folderPageSearch(pageId, tab, true, placement.trackId ?? selectedTrackId),
+    );
+    if (conversationId) search.set('conversation', conversationId);
+    // Straight there rather than through navigateWithinSdlc, which lets go of the
+    // open conversation.
+    void navigate(`/sdlc/${channelId}/tracks?${search.toString()}`);
+    // folderPageSearch reads the page's params; the lookup is what this waits on.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pendingOpen, pageItemList, channelId]);
+  // One the lookup can't place — deleted, or not in a track — says so rather than
+  // leaving the click unanswered.
+  useEffect(() => {
+    if (!pendingOpen) return undefined;
+    const timer = window.setTimeout(() => {
+      toast.error(`Couldn't open ${pendingOpen.name}`);
+      setPendingOpen(null);
+    }, 8000);
+    return (): void => window.clearTimeout(timer);
+  }, [pendingOpen]);
+  /** Whether an item is what the page already has open: its folder page, or its tab. */
+  const isOpenOnPage = (item: SdlcDiscussionItemRef): boolean =>
+    (item.type === 'FOLDER' && openFolderId === item.id && !activeFolderTab) ||
+    (activeFolderTab?.kind === item.type && activeFolderTab.id === item.id);
+  // The open conversation's item, for the thread to name and open. One on the track
+  // itself names nothing: the track is already the page.
+  const threadSubjectItem =
+    conversationOwner && conversationOwner.sourceType !== 'TRACK'
+      ? sourceItemOf(conversationOwner)
+      : null;
+  // Off the track's own page — the hub's Calls — a call on a track names the track.
+  const threadSubjectTrackId =
+    conversationOwner?.sourceType === 'TRACK' && !onTrackPage ? conversationOwner.sourceId : null;
+  const threadSubject: { name: string; icon: ReactNode; onOpen: () => void } | null =
+    threadSubjectTrackId
+      ? {
+          name: trackNames.get(threadSubjectTrackId) ?? 'Track',
+          icon: <Layers className='size-3 shrink-0' />,
+          onOpen: () => openTrack(threadSubjectTrackId),
+        }
+      : threadSubjectItem &&
+          !isOpenOnPage({ type: threadSubjectItem.kind, id: threadSubjectItem.id })
+        ? {
+            name: sdlcItemName(threadSubjectItem),
+            icon: discussedItemIcon(threadSubjectItem, 'size-3 shrink-0'),
+            onOpen: () =>
+              openDiscussedItem(
+                { type: threadSubjectItem.kind, id: threadSubjectItem.id },
+                sdlcItemName(threadSubjectItem),
+              ),
+          }
+        : null;
+
   const closeFolderPage = (): void => {
     if (!channelId) return;
-    setFolderDiscussion(null);
     navigateWithinSdlc(
       `/sdlc/${channelId}/tracks`,
-      selectedTrackId ? trackSearch(selectedTrackId) : '',
+      selectedTrackId ? trackSearch(selectedTrackId, filesFolderId) : '',
     );
   };
 
@@ -1583,6 +1722,12 @@ export default function SdlcScreen(): ReactElement {
       open: boolean;
       conversationId?: string | null;
       selectedTab?: 'details' | null;
+      /** The item the panel is about; left as it is when not given. */
+      about?: SdlcDiscussionItemRef | null;
+      /** Marks the conversation as opened from outside the list; kept while it stays open. */
+      threadOnly?: boolean;
+      /** A step of its own in history, which the browser's Back undoes. */
+      push?: boolean;
     }): void => {
       const next = new URLSearchParams(location.search);
       if (input.open) {
@@ -1597,115 +1742,95 @@ export default function SdlcScreen(): ReactElement {
       else next.delete('conversation');
       if (input.conversationId && input.selectedTab) next.set('selectedTab', input.selectedTab);
       else next.delete('selectedTab');
+      if (input.about === null) next.delete(SDLC_ABOUT_PARAM);
+      else if (input.about) next.set(SDLC_ABOUT_PARAM, sdlcDiscussionItemParam(input.about));
+      if (!input.conversationId || input.threadOnly === false) next.delete(SDLC_THREAD_ONLY_PARAM);
+      else if (input.threadOnly) next.set(SDLC_THREAD_ONLY_PARAM, '1');
       const search = next.toString();
-      void navigate(`${location.pathname}${search ? `?${search}` : ''}`, { replace: true });
+      const url = `${location.pathname}${search ? `?${search}` : ''}`;
+      void navigate(url, input.push ? { state: THREAD_STEP_STATE } : { replace: true });
     },
     [location.pathname, location.search, navigate],
   );
 
   const openConversations = useCallback((): void => {
-    setFolderDiscussion(null);
-    setDiscussionUrl({ open: true, conversationId: null });
+    setDiscussionUrl({ open: true, conversationId: null, about: null });
   }, [setDiscussionUrl]);
 
   const openItemConversations = useCallback(
     (item: SdlcItemDiscussion): void => {
-      setFolderDiscussion(item);
-      setDiscussionUrl({ open: true, conversationId: null });
+      setDiscussionUrl({
+        open: true,
+        conversationId: null,
+        about: { type: item.type, id: item.id },
+      });
     },
     [setDiscussionUrl],
   );
-  const openFolderConversations = useCallback(
-    (folder: { id: string; name: string }): void =>
-      openItemConversations({ type: 'FOLDER', id: folder.id, name: folder.name }),
-    [openItemConversations],
-  );
 
-  const renderFolderConversationBadge = useCallback(
-    (conversationId: string): ReactNode => {
-      const owner = conversationOwnerById.get(conversationId);
-      if (!owner) return null;
-
+  const describeDiscussionOwner = useCallback(
+    (found: SdlcSourceLink): ReactNode => {
       const iconClass = 'size-[11px] shrink-0';
-      const described =
-        owner.type === 'FOLDER'
-          ? (() => {
-              const name = folderById.get(owner.id)?.name;
-              return name
-                ? {
-                    name,
-                    icon: <Folder className={`${iconClass} fill-primary/25 text-primary/70`} />,
-                    open: () => openItemConversations({ type: 'FOLDER', id: owner.id, name }),
-                  }
-                : null;
-            })()
-          : owner.type === 'LINK'
-            ? (() => {
-                const link = linkById.get(owner.id);
-                if (!link) return null;
-                const name = link.title.trim() || link.url;
-                return {
-                  name,
-                  icon: link.favicon ? (
-                    <img src={link.favicon} alt='' className={`${iconClass} rounded-[2px]`} />
-                  ) : (
-                    <Link2 className={iconClass} />
-                  ),
-                  open: () => openItemConversations({ type: 'LINK', id: owner.id, name }),
-                };
-              })()
-            : owner.type === 'ATTACHMENT'
-              ? (() => {
-                  const file = fileById.get(owner.id);
-                  if (!file) return null;
-                  const Icon = fileKind(file.mimetype, file.name).icon;
-                  return {
-                    name: file.name,
-                    icon: <Icon className={iconClass} />,
-                    open: () =>
-                      openItemConversations({
-                        type: 'ATTACHMENT',
-                        id: owner.id,
-                        name: file.name,
-                      }),
-                  };
-                })()
-              : (() => {
-                  const canvas = folderPageCanvasById.get(owner.id);
-                  if (!canvas) return null;
-                  return {
-                    name: canvas.title,
-                    icon: <FileText className={`${iconClass} text-primary/70`} />,
-                    open: () => openCanvas(owner.id, { withDiscussion: true }),
-                  };
-                })();
-
-      if (!described) return null;
+      // Every discussion in a track's list says where it is happening. One on the
+      // track itself names the track, and goes nowhere: the list is already its.
+      if (found.sourceType === 'TRACK') {
+        if (!selectedTrack) return null;
+        const trackIcon = selectedTrack.icon;
+        return (
+          <span
+            title={`On ${selectedTrack.name}`}
+            className='inline-flex min-w-[3.75rem] max-w-[9rem] shrink items-center gap-1 rounded bg-foreground/[0.06] px-1 py-px text-[10.5px] font-medium text-muted-foreground'
+          >
+            {trackIcon ? (
+              <AppIcon name={trackIcon} size={11} aria-hidden='true' />
+            ) : (
+              <Layers className={iconClass} />
+            )}
+            <span className='truncate'>{selectedTrack.name}</span>
+          </span>
+        );
+      }
+      // Any other subject is one of the track's items, joined to the link by the list.
+      const item = sourceItemOf(found);
+      if (!item) return null;
+      const name = sdlcItemName(item);
+      const icon = discussedItemIcon(item, iconClass);
       return (
         <button
           type='button'
-          onClick={described.open}
-          title={`Conversations on ${described.name}`}
-          aria-label={`Conversations on ${described.name}`}
+          onClick={() => openItemConversations({ type: item.kind, id: item.id, name })}
+          title={`Conversations on ${name}`}
+          aria-label={`Conversations on ${name}`}
           className='inline-flex min-w-[3.75rem] max-w-[9rem] shrink items-center gap-1 rounded bg-foreground/[0.06] px-1 py-px text-[10.5px] font-medium text-muted-foreground transition-colors hover:bg-foreground/[0.11] hover:text-foreground'
           data-track-category='SdlcHub'
           data-track-name='FolderConversationsOpenedFromList'
-          data-track-metadata={JSON.stringify({ ownerType: owner.type })}
+          data-track-metadata={JSON.stringify({ ownerType: item.kind })}
         >
-          {described.icon}
-          <span className='truncate'>{described.name}</span>
+          {icon}
+          <span className='truncate'>{name}</span>
         </button>
       );
     },
-    [
-      conversationOwnerById,
-      fileById,
-      folderById,
-      folderPageCanvasById,
-      linkById,
-      openCanvas,
-      openItemConversations,
-    ],
+    [openItemConversations, selectedTrack],
+  );
+  // Each discussion in the list arrives with its DISCUSSION link, so its badge needs no
+  // lookup of its own.
+  const renderFolderConversationBadge = useCallback(
+    (conversation: ConversationBadgeSubject): ReactNode => {
+      const owner = conversation.sdlcEntityLinks?.[0];
+      return owner ? describeDiscussionOwner(owner) : null;
+    },
+    [describeDiscussionOwner],
+  );
+  // An item's list says where each discussion is only when it can be somewhere else:
+  // a folder's takes in everything under it. Those on the item itself go without.
+  const discussionItemId = discussionItemRef?.id ?? null;
+  const renderItemConversationBadge = useCallback(
+    (conversation: ConversationBadgeSubject): ReactNode => {
+      const owner = conversation.sdlcEntityLinks?.[0];
+      return owner && owner.sourceId !== discussionItemId ? describeDiscussionOwner(owner) : null;
+    },
+    [describeDiscussionOwner, discussionItemId],
   );
 
   const closeConversations = useCallback((): void => {
@@ -1713,20 +1838,37 @@ export default function SdlcScreen(): ReactElement {
   }, [setDiscussionUrl]);
 
   // Toggles the panel without disturbing its scope: the url already says what it
-  // is showing, so only the open flag moves.
+  // is showing, the open conversation included, so only the open flag moves.
   useShortcutById('sdlc.toggleConversations', () => {
     if (!chatPanelAvailable) return;
     setDiscussionUrl({
       open: !rightPanelOpen,
-      conversationId: rightPanelOpen ? null : selectedDiscussionConversationId,
+      conversationId: selectedDiscussionConversationId,
+      selectedTab: routeSearchParams.get('selectedTab') === 'details' ? 'details' : null,
     });
   });
 
+  // Whether the conversation on show was opened onto a history entry of its own,
+  // which leaving it should step back from rather than write over.
+  const threadStepped =
+    typeof location.state === 'object' &&
+    location.state !== null &&
+    'sdlcThreadStep' in location.state;
   const selectDiscussionConversation = useCallback(
     (conversationId: string | null, options?: { selectedTab?: 'details' }): void => {
-      setDiscussionUrl({ open: true, conversationId, selectedTab: options?.selectedTab ?? null });
+      if (conversationId === null && threadStepped) {
+        void navigate(-1);
+        return;
+      }
+      // Opening one is a step the browser's Back undoes, as leaving it here is.
+      setDiscussionUrl({
+        open: true,
+        conversationId,
+        selectedTab: options?.selectedTab ?? null,
+        push: conversationId !== null,
+      });
     },
-    [setDiscussionUrl],
+    [navigate, setDiscussionUrl, threadStepped],
   );
 
   const openSdlcAssistant = useCallback(
@@ -1871,15 +2013,15 @@ export default function SdlcScreen(): ReactElement {
 
   const clearArtifactDialogFields = (input?: {
     track?: { id: string; name: string } | null;
-    relatedCanvasIds?: string[];
+    relatedCanvases?: Array<{ id: string; title: string }>;
   }): void => {
     setArtifactTitle('');
     setArtifactAiPrompt('');
     setArtifactTrack(input?.track ?? null);
     setArtifactContextLocked(Boolean(input?.track));
-    setRelatedCanvasIds(input?.relatedCanvasIds ?? []);
+    setRelatedCanvases(input?.relatedCanvases ?? []);
     setRelatedSearchQuery('');
-    setRelatedSearchResults([]);
+    setRelatedSearchHits([]);
     setRelatedListOpen(false);
     setRelatedChipsExpanded(false);
     setArtifactFolderPath('');
@@ -1899,7 +2041,7 @@ export default function SdlcScreen(): ReactElement {
    */
   const closeAddItemDialog = (): void => {
     setAddItemParent(null);
-    returnFocusToFinder();
+    returnFocusToFileList();
     setPendingUploads([]);
     setRefusedUploads([]);
     setLinkUrl('');
@@ -1909,10 +2051,7 @@ export default function SdlcScreen(): ReactElement {
   };
 
   const relatedArtifactsForPayload = (): Array<{ canvasId: string; title: string }> =>
-    relatedCanvasIds
-      .map(id => canvases.find(canvas => canvas.id === id))
-      .filter((canvas): canvas is (typeof canvases)[number] => Boolean(canvas))
-      .map(canvas => ({ canvasId: canvas.id, title: canvas.title }));
+    relatedCanvases.map(canvas => ({ canvasId: canvas.id, title: canvas.title }));
 
   const createArtifact = (): void => {
     if (!channel || !artifactDialog || !canSubmitArtifactDialog) return;
@@ -2071,7 +2210,7 @@ export default function SdlcScreen(): ReactElement {
   // missing hub from one still loading.
   const hubLoading =
     Boolean(channelId) && channelRow === undefined && repoQueryDetails.type !== 'complete';
-  if (channels === undefined || hubLoading) {
+  if (hubLoading) {
     return (
       <div className='h-full grid place-items-center text-muted-foreground'>
         <Loader2 className='animate-spin' />
@@ -2083,7 +2222,9 @@ export default function SdlcScreen(): ReactElement {
   // invitation to create the first one.
   if (channelId && !channel) return <NotFoundScreen fallbackPath='/sdlc' />;
 
-  if (!Array.isArray(channels) || channels.length === 0) {
+  // Only with no hub open: an open hub is one, and the list fills a moment after the
+  // app's own start-up.
+  if (!channelId && channels.length === 0) {
     return (
       <div className='h-full bg-muted/30 grid place-items-center p-8'>
         <div className='max-w-lg rounded-2xl border bg-background p-10 text-center shadow-sm'>
@@ -2154,7 +2295,11 @@ export default function SdlcScreen(): ReactElement {
     .map(track => ({
       value: track.id,
       label: track.name,
-      icon: <Layers className='size-4 text-muted-foreground' />,
+      icon: track.icon ? (
+        <AppIcon name={track.icon} size={16} className='text-muted-foreground' aria-hidden='true' />
+      ) : (
+        <Layers className='size-4 text-muted-foreground' />
+      ),
     }));
 
   const openArtifactCreate = (folder: { id: string; name: string }): void => {
@@ -2173,11 +2318,11 @@ export default function SdlcScreen(): ReactElement {
 
   const openArtifactCreateFrom = (
     folder: { id: string; name: string },
-    sourceCanvasId: string,
+    source: { canvasId: string; title: string },
   ): void => {
     clearArtifactDialogFields({
-      track: trackByCanvasId.get(sourceCanvasId) ?? null,
-      relatedCanvasIds: [sourceCanvasId],
+      track: trackByCanvasId.get(source.canvasId) ?? null,
+      relatedCanvases: [{ id: source.canvasId, title: source.title }],
     });
     setArtifactDialog({ id: folder.id, name: folder.name, kind: 'artifact' });
   };
@@ -2196,7 +2341,7 @@ export default function SdlcScreen(): ReactElement {
             </Button>
           }
         />
-        {list.length === 0 ? (
+        {list.length === 0 && typeFolderDetails.type !== 'complete' ? null : list.length === 0 ? (
           <div className='flex flex-1 items-center justify-center pb-16'>
             <div className='flex flex-col items-center gap-2 text-center'>
               <div className='mb-0.5 flex size-[34px] items-center justify-center rounded-[9px] bg-muted text-muted-foreground/70'>
@@ -2265,7 +2410,21 @@ export default function SdlcScreen(): ReactElement {
         }),
       ),
     );
-    setFinderPath(finderPath.map(step => (step.id === folderId ? { ...step, name } : step)));
+    setWalkedPath(path => path.map(step => (step.id === folderId ? { ...step, name } : step)));
+  };
+
+  const setFolderIconAction = async (folderId: string, icon: string | null): Promise<void> => {
+    if (!channel) return;
+    await runTrackMutation(
+      zero.mutate(
+        mutators.sdlc.setSdlcFolderIcon({
+          folderId,
+          channelId: channel.id,
+          icon,
+          timestamp: Date.now(),
+        }),
+      ),
+    );
   };
 
   /**
@@ -2296,7 +2455,7 @@ export default function SdlcScreen(): ReactElement {
   };
 
   const moveItemAction = async (
-    item: { type: SdlcFinderNodeType; id: string },
+    item: { type: SdlcItemKind; id: string },
     parent: { type: 'TRACK' | 'FOLDER'; id: string },
   ): Promise<void> => {
     if (!channel) return;
@@ -2333,7 +2492,7 @@ export default function SdlcScreen(): ReactElement {
       ),
     );
     setNewFolderParent(null);
-    returnFocusToFinder();
+    returnFocusToFileList();
     setNewFolderName('');
   };
 
@@ -2365,16 +2524,10 @@ export default function SdlcScreen(): ReactElement {
     }
   };
 
-  const openAddItemDialog = (tab: 'artifact' | 'upload' | 'link', parent: SdlcFinderStep): void => {
-    // Adding to a level makes it the current one. Otherwise you add to a folder
-    // while looking at one several columns deeper, and the new item lands
-    // somewhere off to the left.
-    const depth = finderPath.findIndex(step => step.id === parent.id);
-    if (parent.type === 'TRACK') setFinderPath([]);
-    else if (depth !== -1 && depth < finderPath.length - 1) {
-      setFinderPath(finderPath.slice(0, depth + 1));
-    }
-    setPreviewCanvasId(null);
+  const openAddItemDialog = (
+    tab: 'artifact' | 'upload' | 'link',
+    parent: SdlcFilesLocation,
+  ): void => {
     setAddItemTab(tab);
     setAddItemParent(parent);
   };
@@ -2403,7 +2556,7 @@ export default function SdlcScreen(): ReactElement {
       ),
     );
     setAddItemParent(null);
-    returnFocusToFinder();
+    returnFocusToFileList();
     setLinkUrl('');
     setLinkTitle('');
     setLinkPreview(null);
@@ -2444,7 +2597,7 @@ export default function SdlcScreen(): ReactElement {
     setPendingUploads([]);
     setRefusedUploads([]);
     setAddItemParent(null);
-    returnFocusToFinder();
+    returnFocusToFileList();
   };
 
   const setTrackNameAction = async (trackId: string, name: string): Promise<void> => {
@@ -2453,15 +2606,15 @@ export default function SdlcScreen(): ReactElement {
     );
   };
 
-  const setTrackDescriptionAction = async (trackId: string, description: string): Promise<void> => {
-    await runTrackMutation(
-      zero.mutate(
-        mutators.sdlc.updateTrack({
-          trackId,
-          description: description.length > 0 ? description : null,
-          timestamp: Date.now(),
-        }),
-      ),
+  /** Everyone in the hub sees a track's icon; null goes back to the track mark. */
+  const setTrackIcon = (trackId: string, icon: string | null): void => {
+    void call(
+      `sdlc-track-icon-${trackId}`,
+      () =>
+        runTrackMutation(
+          zero.mutate(mutators.sdlc.updateTrack({ trackId, icon, timestamp: Date.now() })),
+        ),
+      icon ? 'Track icon changed' : 'Track icon removed',
     );
   };
 
@@ -2567,7 +2720,7 @@ export default function SdlcScreen(): ReactElement {
               <button
                 type='button'
                 onClick={() => {
-                  setRelatedCanvasIds([]);
+                  setRelatedCanvases([]);
                   setRelatedChipsExpanded(false);
                 }}
                 className='text-xs text-muted-foreground hover:text-foreground'
@@ -2604,7 +2757,7 @@ export default function SdlcScreen(): ReactElement {
                       const results = relatedSearchResults.filter(
                         result => !relatedCanvasIds.includes(result.id),
                       );
-                      if (relatedSearching && results.length === 0) {
+                      if (relatedSearchPending && results.length === 0) {
                         return (
                           <div className='px-2 py-2 text-[12.5px] text-muted-foreground'>
                             Searching…
@@ -2624,7 +2777,10 @@ export default function SdlcScreen(): ReactElement {
                           type='button'
                           onMouseDown={event => event.preventDefault()}
                           onClick={() => {
-                            setRelatedCanvasIds(prev => [...prev, result.id]);
+                            setRelatedCanvases(prev => [
+                              ...prev,
+                              { id: result.id, title: result.title },
+                            ]);
                             setRelatedSearchQuery('');
                           }}
                           className='flex w-full items-center gap-2 rounded-[7px] px-2 py-2 text-left hover:bg-muted'
@@ -2633,9 +2789,9 @@ export default function SdlcScreen(): ReactElement {
                         >
                           <FileText size={15} className='shrink-0 text-muted-foreground' />
                           <span className='flex-1 truncate text-[13px]'>{result.title}</span>
-                          {folderNameByCanvasId.get(result.id) && (
+                          {hitPlaces.get(result.id)?.typeName && (
                             <span className='rounded-full bg-muted px-2 py-0.5 text-[11px] text-muted-foreground'>
-                              {folderNameByCanvasId.get(result.id)}
+                              {hitPlaces.get(result.id)?.typeName}
                             </span>
                           )}
                         </button>
@@ -2646,9 +2802,8 @@ export default function SdlcScreen(): ReactElement {
               </div>
               {relatedCanvasIds.length > 0 && (
                 <div className='flex flex-wrap gap-1.5 pt-0.5'>
-                  {(relatedChipsExpanded ? relatedCanvasIds : relatedCanvasIds.slice(0, 3)).map(
-                    id => {
-                      const title = canvases.find(canvas => canvas.id === id)?.title ?? 'Artifact';
+                  {(relatedChipsExpanded ? relatedCanvases : relatedCanvases.slice(0, 3)).map(
+                    ({ id, title }) => {
                       return (
                         <span
                           key={id}
@@ -2661,7 +2816,9 @@ export default function SdlcScreen(): ReactElement {
                             data-track-category='SdlcHub'
                             data-track-name='RelatedArtifactRemoved'
                             onClick={() =>
-                              setRelatedCanvasIds(prev => prev.filter(existing => existing !== id))
+                              setRelatedCanvases(prev =>
+                                prev.filter(existing => existing.id !== id),
+                              )
                             }
                             className='flex size-4 items-center justify-center rounded text-muted-foreground hover:bg-foreground/10 hover:text-foreground'
                           >
@@ -2753,528 +2910,341 @@ export default function SdlcScreen(): ReactElement {
     </form>
   );
 
-  const renderTrack = (): ReactElement | null => {
-    if (!selectedTrack) return null;
-    const trackTickets = trackTicketList;
-    const openTicketCount = trackTickets.filter(
-      ticket =>
-        ticket.statusV2 !== TicketStatusV2.COMPLETED &&
-        ticket.statusV2 !== TicketStatusV2.CANCELLED,
-    ).length;
-    const unownedTicketCount = trackTickets.filter(ticket => !ticket.assignedTo).length;
-    const ticketTally = `${openTicketCount} open · ${unownedTicketCount} unowned`;
-    const finderCanvasById = folderPageCanvasById;
-    return (
-      <section>
-        {/* Heading: what this track is, who owns it, and what it holds. */}
-        <div className='mb-6 flex flex-wrap items-start gap-5'>
-          <div className='min-w-[280px] flex-1'>
-            <div className='mb-2 flex items-center gap-3'>
-              <div className='grid size-[30px] shrink-0 place-items-center rounded-lg bg-primary/10'>
-                <Layers className='size-4 text-primary' />
-              </div>
-              {/* Click the name to rename, the same way the description works. */}
-              {nameDraft === null ? (
-                <button
-                  type='button'
-                  onClick={() => {
-                    nameAbandoned.current = false;
-                    setNameDraft(selectedTrack.name);
-                  }}
-                  className='-mx-1 min-w-0 truncate rounded px-1 text-left text-[26px] font-bold leading-tight tracking-tight transition-colors hover:bg-muted/50'
-                  title='Rename track'
-                  data-track-category='SdlcHub'
-                  data-track-name='TrackNameEditOpened'
-                >
-                  {selectedTrack.name}
-                </button>
-              ) : (
-                <span className='relative inline-flex min-w-0 max-w-full items-center'>
-                  {/* Mirrors the field's text and typography. Character counts
-                      cannot size a proportional face — a space is far narrower
-                      than a `ch`, so the slack piled up as you typed. */}
-                  <span
-                    aria-hidden='true'
-                    data-name-mirror
-                    className='pointer-events-none invisible absolute left-0 top-0 whitespace-pre px-1 text-[26px] font-bold leading-tight tracking-tight'
-                  >
-                    {nameDraft || ' '}
-                  </span>
-                  <input
-                    autoFocus
-                    value={nameDraft}
-                    maxLength={TRACK_NAME_LIMIT}
-                    onChange={event => setNameDraft(event.target.value)}
-                    onFocus={event => {
-                      sizeNameFieldToText(event.currentTarget);
-                      event.target.setSelectionRange(
-                        event.target.value.length,
-                        event.target.value.length,
-                      );
-                    }}
-                    onKeyDown={event => {
-                      if (event.key === 'Escape') {
-                        nameAbandoned.current = true;
-                        setNameDraft(null);
-                      }
-                      if (event.key === 'Enter') event.currentTarget.blur();
-                    }}
-                    onBlur={() => {
-                      if (nameAbandoned.current) {
-                        nameAbandoned.current = false;
-                        return;
-                      }
-                      const next = nameDraft.trim();
-                      setNameDraft(null);
-                      if (next.length > 0 && next !== selectedTrack.name) {
-                        void call(
-                          `track-name-${selectedTrack.id}`,
-                          () => setTrackNameAction(selectedTrack.id, next),
-                          'Track renamed',
-                        );
-                      }
-                    }}
-                    onInput={event => sizeNameFieldToText(event.currentTarget)}
-                    className='-mx-1 min-w-0 max-w-full rounded border-0 bg-muted/40 px-1 text-[26px] font-bold leading-tight tracking-tight text-foreground outline-none ring-0 transition-colors duration-150 focus:bg-muted/60 focus:outline-none motion-reduce:transition-none'
-                    data-track-category='SdlcHub'
-                    data-track-name='TrackNameEdited'
-                  />
-                </span>
-              )}
-              <Popover
-                open={trackStatusOpen}
-                onOpenChange={setTrackStatusOpen}
-                align='start'
-                sideOffset={6}
-                className='w-[168px] p-1'
-                trigger={
-                  <button
-                    type='button'
-                    className='flex shrink-0 items-center gap-1.5 rounded-md bg-muted px-2.5 py-1 text-[11.5px] font-medium text-foreground ring-1 ring-inset ring-border transition-colors hover:bg-muted/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring'
-                    aria-label={`Track status: ${
-                      TRACK_STATUS_OPTIONS.find(o => o.value === selectedTrack.status)?.label ??
-                      selectedTrack.status
-                    }. Change status`}
-                    data-track-category='SdlcHub'
-                    data-track-name='TrackStatusOpened'
-                  >
-                    <span
-                      className={cn(
-                        'size-1.5 shrink-0 rounded-full',
-                        TRACK_STATUS_DOT[selectedTrack.status] ?? TRACK_STATUS_DOT['ARCHIVED'],
-                      )}
-                      aria-hidden='true'
-                    />
-                    {TRACK_STATUS_OPTIONS.find(o => o.value === selectedTrack.status)?.label ??
-                      selectedTrack.status}
-                    <ChevronDown className='size-3 text-muted-foreground' />
-                  </button>
-                }
-              >
-                {TRACK_STATUS_OPTIONS.map(option => (
-                  <button
-                    key={option.value}
-                    type='button'
-                    onClick={() => {
-                      setTrackStatusOpen(false);
-                      if (option.value !== selectedTrack.status) {
-                        void call(
-                          `track-status-${selectedTrack.id}`,
-                          () => setTrackStatusAction(selectedTrack.id, option.value),
-                          `Track marked ${option.label.toLowerCase()}`,
-                        );
-                      }
-                    }}
-                    className={cn(
-                      'flex w-full items-center justify-between rounded-md px-2.5 py-1.5 text-left text-[13px] transition-colors hover:bg-muted/60',
-                      option.value === selectedTrack.status && 'font-medium',
-                    )}
-                    data-track-category='SdlcHub'
-                    data-track-name='TrackStatusChanged'
-                    data-track-metadata={JSON.stringify({ status: option.value })}
-                  >
-                    <span className='flex items-center gap-2'>
-                      <span
-                        className={cn(
-                          'size-1.5 shrink-0 rounded-full',
-                          TRACK_STATUS_DOT[option.value],
-                        )}
-                        aria-hidden='true'
-                      />
-                      {option.label}
-                    </span>
-                    {option.value === selectedTrack.status && (
-                      <Check className='size-3.5 text-muted-foreground' />
-                    )}
-                  </button>
-                ))}
-              </Popover>
-            </div>
-
-            {/* Click the text to edit it, blur to save. No chrome: the field
-                sits exactly where the description sits, at the same size, so
-                editing looks like typing over what is already there. */}
-            {descriptionDraft === null ? (
-              <button
-                type='button'
-                onClick={() => {
-                  descriptionAbandoned.current = false;
-                  setDescriptionDraft(selectedTrack.description ?? '');
-                }}
-                className='-mx-1 block max-w-[918px] rounded px-1 text-left text-[13.5px] leading-relaxed text-muted-foreground transition-colors hover:bg-muted/50'
-                data-track-category='SdlcHub'
-                data-track-name='TrackDescriptionEditOpened'
-              >
-                {selectedTrack.description ? (
-                  <span className='whitespace-pre-wrap'>{selectedTrack.description}</span>
-                ) : (
-                  <>
-                    No description yet. <span className='text-primary'>Add one</span>
-                  </>
-                )}
-              </button>
-            ) : (
-              <div className='max-w-[918px]'>
-                <textarea
-                  autoFocus
-                  rows={1}
-                  value={descriptionDraft}
-                  maxLength={TRACK_DESCRIPTION_LIMIT}
-                  onChange={event => {
-                    setDescriptionDraft(event.target.value);
-                    event.target.style.height = 'auto';
-                    event.target.style.height = `${event.target.scrollHeight}px`;
-                  }}
-                  onFocus={event => {
-                    event.target.style.height = 'auto';
-                    event.target.style.height = `${event.target.scrollHeight}px`;
-                    event.target.setSelectionRange(
-                      event.target.value.length,
-                      event.target.value.length,
-                    );
-                  }}
-                  onKeyDown={event => {
-                    if (event.key === 'Escape') {
-                      descriptionAbandoned.current = true;
-                      setDescriptionDraft(null);
-                    }
-                    if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) {
-                      event.currentTarget.blur();
-                    }
-                  }}
-                  onBlur={() => {
-                    if (descriptionAbandoned.current) {
-                      descriptionAbandoned.current = false;
-                      return;
-                    }
-                    const next = descriptionDraft.trim();
-                    setDescriptionDraft(null);
-                    if (next !== (selectedTrack.description ?? '')) {
-                      void call(
-                        `track-description-${selectedTrack.id}`,
-                        () => setTrackDescriptionAction(selectedTrack.id, next),
-                        'Description saved',
-                      );
-                    }
-                  }}
-                  placeholder='What is this track for?'
-                  className='-mx-1 block w-[calc(100%+0.5rem)] resize-none overflow-hidden rounded border-0 bg-muted/40 px-1 py-0.5 text-[13.5px] leading-relaxed text-foreground outline-none ring-0 transition-[height,background-color] duration-150 ease-out placeholder:text-muted-foreground focus:bg-muted/60 focus:outline-none motion-reduce:transition-none'
-                  data-track-category='SdlcHub'
-                  data-track-name='TrackDescriptionEdited'
-                />
-                {/* Only speaks up near the cap; a counter on every edit is noise. */}
-                {descriptionDraft.length > TRACK_DESCRIPTION_LIMIT - 200 && (
-                  <div className='mt-1 text-[11px] tabular-nums text-muted-foreground'>
-                    {TRACK_DESCRIPTION_LIMIT - descriptionDraft.length} characters left
-                  </div>
-                )}
-              </div>
-            )}
-
-            <div className='mt-3 flex flex-wrap items-center gap-3 text-[12.5px] text-muted-foreground'>
-              {/* The avatar and name both open the shared profile card on hover,
-                  so the owner is reachable from here the way they are anywhere
-                  else a person appears. */}
-              <UserHoverWrapper userId={selectedTrack.createdBy}>
-                <span className='flex cursor-pointer items-center gap-2 transition-colors hover:text-foreground'>
-                  <Avatar userId={selectedTrack.createdBy} size='xs' showActiveStatus={false} />
-                  <span className='truncate'>
-                    {trackOwner ? getUserDisplayName(trackOwner) : 'Unknown'} · owner
-                  </span>
-                </span>
-              </UserHoverWrapper>
-            </div>
-          </div>
-        </div>
-        {/* The track's contents, browsed a level at a time. Each column is one
-            live query for the children of its parent, so opening a folder costs
-            one fetch and closing it drops one. The column headers name the path,
-            so there is no separate breadcrumb above them. */}
-        <div className='mb-6 overflow-hidden rounded-xl border border-border'>
-          {/* Controls for the browser below, kept out of the columns so a column
-              header stays the name of its level and nothing else. */}
-          <div className='flex items-center gap-3 border-b border-border bg-foreground/[0.03] px-3 py-1.5'>
-            <span className='text-[11px] font-medium uppercase tracking-[0.1em] text-muted-foreground'>
-              Group by
-            </span>
-            <div className='flex items-center gap-0.5 rounded-md border border-border p-0.5'>
-              {(
-                [
-                  { value: 'none', label: 'None' },
-                  { value: 'type', label: 'Type' },
-                ] as const
-              ).map(option => (
-                <button
-                  key={option.value}
-                  type='button'
-                  onClick={() => setUserPreference('sdlcFinderGroupBy', option.value)}
-                  className={cn(
-                    'rounded px-2 py-0.5 text-[11.5px] font-medium transition-colors',
-                    finderGroupBy === option.value
-                      ? 'bg-foreground/[0.08] text-foreground'
-                      : 'text-muted-foreground hover:text-foreground',
-                  )}
-                  data-track-category='SdlcHub'
-                  data-track-name='FinderGroupByChanged'
-                  data-track-metadata={JSON.stringify({ groupBy: option.value })}
-                >
-                  {option.label}
-                </button>
-              ))}
-            </div>
-          </div>
-          {/* A fixed height, not a floor: min-h let a column grow with its contents and
-              took the whole card — and the page — with it. Each column scrolls
-              inside this instead, so the page only scrolls when the pointer is
-              somewhere that has nothing of its own to scroll. */}
-          <div ref={finderRef} className='scrollbar-none flex h-[520px] overflow-x-auto'>
-            {(
-              [
-                { type: 'TRACK', id: selectedTrack.id, name: selectedTrack.name },
-                ...finderPath,
-              ] satisfies SdlcFinderStep[]
-            ).map((step, index, steps) => (
-              <SdlcFinderColumn
-                key={step.id}
-                channelId={channel.id}
-                parent={step}
-                selectedId={steps[index + 1]?.id ?? null}
-                activeSelectionId={
-                  previewCanvasId || previewItem ? null : (finderPath.at(-1)?.id ?? null)
-                }
-                canvasById={finderCanvasById}
-                linkById={linkById}
-                fileById={fileById}
-                previewItemId={previewItem?.id ?? null}
-                onPreviewItem={item => {
-                  setFinderPath(steps.slice(1, index + 1));
-                  setPreviewCanvasId(null);
-                  setPreviewItem(item);
-                }}
-                isLast={index === steps.length - 1}
-                onSelectFolder={folder => {
-                  setPreviewCanvasId(null);
-                  setPreviewItem(null);
-                  // Re-selecting the folder that is already open below would
-                  // rebuild the path from here and throw away every level under
-                  // it, so the tree blinks shut and reopens one column deep.
-                  if (steps[index + 1]?.id === folder.id) return;
-                  setFinderPath([
-                    ...steps.slice(1, index + 1),
-                    { type: 'FOLDER', id: folder.id, name: folder.name },
-                  ]);
-                }}
-                previewCanvasId={previewCanvasId}
-                onSelectCanvas={canvasId => {
-                  setFinderPath(steps.slice(1, index + 1));
-                  setPreviewItem(null);
-                  setPreviewCanvasId(canvasId);
-                }}
-                onOpenCanvas={(canvasId, event) =>
-                  openCanvas(canvasId, event ? { event } : undefined)
-                }
-                onNewFolder={parent => {
-                  finderFocusReturn.current = parent.id;
-                  setNewFolderParent(parent);
-                }}
-                onUploadFile={parent => {
-                  finderFocusReturn.current = parent.id;
-                  openAddItemDialog('upload', parent);
-                }}
-                onAddLink={parent => {
-                  finderFocusReturn.current = parent.id;
-                  openAddItemDialog('link', parent);
-                }}
-                onNewArtifact={parent => {
-                  finderFocusReturn.current = parent.id;
-                  openAddItemDialog('artifact', parent);
-                }}
-                onOpenFolderPage={(folder, event) => openFolderPage(folder.id, null, event)}
-                onOpenItem={(item, parent, event) => {
-                  // It opens as a tab on the page of whatever holds it. A track
-                  // holds its own page — the root folder, named after the track
-                  // — so an item filed straight on the track opens there rather
-                  // than being handed to the host with nowhere of its own to be.
-                  openFolderPage(parent.id, { kind: item.kind, id: item.id }, event);
-                }}
-                onDiscussFolder={openFolderConversations}
-                onDiscussTrack={() => openConversations()}
-                onPreviewCanvas={canvasId => {
-                  rememberFinderFocus();
-                  setReaderCanvasId(canvasId);
-                }}
-                folderById={folderById}
-                discussingFolderId={
-                  showRightPanel && activeFolderDiscussion ? activeFolderDiscussion.id : null
-                }
-                onRenameFolder={(folderId, name) =>
-                  void call(
-                    `sdlc-folder-rename-${folderId}`,
-                    () => renameFolderAction(folderId, name),
-                    'Folder renamed',
-                  )
-                }
-                draggingItem={draggingItem}
-                onDragItem={setDraggingItem}
-                onMoveItem={(item, parent) =>
-                  void call(`sdlc-move-${item.id}`, () => moveItemAction(item, parent), 'Moved')
-                }
-              />
-            ))}
-            {previewItem?.kind === 'LINK' && linkById.get(previewItem.id) && (
-              <SdlcFinderItemPreview
-                item={{ kind: 'LINK', link: linkById.get(previewItem.id) as SdlcFinderLink }}
-                onOpen={(_href, event) => openPreviewedItem('LINK', previewItem.id, event)}
-                onDiscuss={openItemConversations}
-              />
-            )}
-            {previewItem?.kind === 'ATTACHMENT' && fileById.get(previewItem.id) && (
-              <SdlcFinderItemPreview
-                item={{ kind: 'ATTACHMENT', file: fileById.get(previewItem.id) as SdlcFinderFile }}
-                onOpen={(_href, event) => openPreviewedItem('ATTACHMENT', previewItem.id, event)}
-                onDiscuss={openItemConversations}
-              />
-            )}
-            {previewCanvasId && finderCanvasById.get(previewCanvasId) && (
-              <SdlcFinderPreview
-                canvas={finderCanvasById.get(previewCanvasId) as SdlcFinderCanvas}
-                onOpen={(canvasId, event) => openCanvas(canvasId, event ? { event } : undefined)}
-                onPreview={canvasId => {
-                  rememberFinderFocus();
-                  setReaderCanvasId(canvasId);
-                }}
-              />
-            )}
-          </div>
-        </div>
-
-        {/* Tickets under this track, below the browser. A flat list rather than
-            columns: a ticket has no contents to step into. */}
-        <div className='mb-4 flex flex-wrap items-center gap-3'>
-          <span className='text-[10.5px] font-semibold uppercase tracking-[0.14em] text-muted-foreground'>
-            Tickets
-          </span>
-          <span className='text-[11.5px] text-muted-foreground'>{ticketTally}</span>
-          <div className='h-px min-w-[20px] flex-1 bg-border' aria-hidden='true' />
-          <Button
-            size='sm'
-            onClick={() => {
-              setCreateTicketSource('sdlc_track');
-              setCreateTicketOpen(true);
-            }}
-            data-track-category='SdlcHub'
-            data-track-name='TrackTicketCreateOpened'
-            data-track-metadata={JSON.stringify({ source: 'sdlc_track' })}
-          >
-            <Plus />
-            Create ticket
-          </Button>
-        </div>
-
-        <div
-          ref={ticketsRef}
-          tabIndex={-1}
-          onFocusCapture={() => setTicketsFocused(true)}
-          onBlurCapture={event => {
-            if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {
-              setTicketsFocused(false);
+  /** The track's name, which heads its page. Click it to rename, the same way the
+   *  description works. */
+  const renderTrackName = (track: { id: string; name: string }): ReactElement =>
+    nameDraft === null ? (
+      <button
+        type='button'
+        onClick={() => {
+          nameAbandoned.current = false;
+          setNameDraft(track.name);
+        }}
+        className='-mx-1 min-w-0 truncate rounded px-1 text-left text-xl font-semibold leading-8 tracking-tight transition-colors hover:bg-muted/50'
+        title='Rename track'
+        data-track-category='SdlcHub'
+        data-track-name='TrackNameEditOpened'
+      >
+        {track.name}
+      </button>
+    ) : (
+      // No percentage caps here: the heading is only as wide as this field, so a cap
+      // "100% of the heading" pointed back at the field and cut off its last letters.
+      // The field has a fixed-length cap instead; past it, a long name scrolls.
+      <span className='relative -mx-1 inline-flex min-w-0 items-center'>
+        {/* Mirrors the field's text and typography. Character counts
+            cannot size a proportional face — a space is far narrower
+            than a `ch`, so the slack piled up as you typed. */}
+        <span
+          aria-hidden='true'
+          data-name-mirror
+          className='pointer-events-none invisible absolute left-0 top-0 whitespace-pre px-1 text-xl font-semibold leading-8 tracking-tight'
+        >
+          {nameDraft || ' '}
+        </span>
+        <input
+          autoFocus
+          value={nameDraft}
+          maxLength={TRACK_NAME_LIMIT}
+          onChange={event => setNameDraft(event.target.value)}
+          onFocus={event => {
+            sizeNameFieldToText(event.currentTarget);
+            event.target.setSelectionRange(event.target.value.length, event.target.value.length);
+          }}
+          onKeyDown={event => {
+            if (event.key === 'Escape') {
+              nameAbandoned.current = true;
+              setNameDraft(null);
+            }
+            if (event.key === 'Enter') event.currentTarget.blur();
+          }}
+          onBlur={() => {
+            if (nameAbandoned.current) {
+              nameAbandoned.current = false;
+              return;
+            }
+            const next = nameDraft.trim();
+            setNameDraft(null);
+            if (next.length > 0 && next !== track.name) {
+              void call(
+                `track-name-${track.id}`,
+                () => setTrackNameAction(track.id, next),
+                'Track renamed',
+              );
             }
           }}
-          className='mb-6 overflow-hidden rounded-xl border border-border outline-none'
-        >
-          {trackTickets.length === 0 ? (
-            <p className='px-4 py-8 text-center text-[12px] text-muted-foreground'>
-              No tickets in this track yet.
-            </p>
-          ) : (
-            trackTickets.map(ticket => (
+          onInput={event => sizeNameFieldToText(event.currentTarget)}
+          className='min-w-0 max-w-[min(48rem,55vw)] rounded border-0 bg-muted/40 px-1 text-xl font-semibold leading-8 tracking-tight text-foreground outline-none ring-0 transition-colors duration-150 focus:bg-muted/60 focus:outline-none motion-reduce:transition-none'
+          data-track-category='SdlcHub'
+          data-track-name='TrackNameEdited'
+        />
+      </span>
+    );
+
+  /** The track's status, beside its name: the one fact about it worth a glance every time. */
+  const renderTrackStatus = (track: { id: string; status: string }): ReactElement => {
+    return (
+      <Popover
+        open={trackStatusOpen}
+        onOpenChange={setTrackStatusOpen}
+        align='start'
+        sideOffset={6}
+        className='w-[168px] p-1'
+        trigger={
+          <button
+            type='button'
+            className='flex shrink-0 items-center gap-1.5 rounded-md px-2 py-1 text-[13px] font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring'
+            aria-label={`Track status: ${
+              TRACK_STATUS_OPTIONS.find(o => o.value === track.status)?.label ?? track.status
+            }. Change status`}
+            data-track-category='SdlcHub'
+            data-track-name='TrackStatusOpened'
+          >
+            <span
+              className={cn(
+                'size-1.5 shrink-0 rounded-full',
+                TRACK_STATUS_DOT[track.status] ?? TRACK_STATUS_DOT['ARCHIVED'],
+              )}
+              aria-hidden='true'
+            />
+            {TRACK_STATUS_OPTIONS.find(o => o.value === track.status)?.label ?? track.status}
+            <ChevronDown className='size-3 text-muted-foreground' />
+          </button>
+        }
+      >
+        {TRACK_STATUS_OPTIONS.map(option => (
+          <button
+            key={option.value}
+            type='button'
+            onClick={() => {
+              setTrackStatusOpen(false);
+              if (option.value !== track.status) {
+                void call(
+                  `track-status-${track.id}`,
+                  () => setTrackStatusAction(track.id, option.value),
+                  `Track marked ${option.label.toLowerCase()}`,
+                );
+              }
+            }}
+            className={cn(
+              'flex w-full items-center justify-between rounded-md px-2.5 py-1.5 text-left text-[13px] transition-colors hover:bg-muted/60',
+              option.value === track.status && 'font-medium',
+            )}
+            data-track-category='SdlcHub'
+            data-track-name='TrackStatusChanged'
+            data-track-metadata={JSON.stringify({ status: option.value })}
+          >
+            <span className='flex items-center gap-2'>
+              <span
+                className={cn('size-1.5 shrink-0 rounded-full', TRACK_STATUS_DOT[option.value])}
+                aria-hidden='true'
+              />
+              {option.label}
+            </span>
+            {option.value === track.status && <Check className='size-3.5 text-muted-foreground' />}
+          </button>
+        ))}
+      </Popover>
+    );
+  };
+
+  /** The track's tabs, drawn as a channel's are: an icon and a label, the open one filled. */
+  const renderTrackTabs = (): ReactElement => (
+    <TabsPrimitive.Root
+      value={trackTab}
+      onValueChange={value => {
+        const tab = TRACK_TABS.find(item => item.value === value);
+        if (tab) openTrackTab(tab.value);
+      }}
+      activationMode='manual'
+    >
+      <TabsPrimitive.List aria-label='Track' className='flex items-center gap-0.5'>
+        {TRACK_TABS.map(tab => (
+          <TabsPrimitive.Trigger
+            key={tab.value}
+            value={tab.value}
+            className={cn(
+              'flex items-center justify-center gap-2 rounded-lg px-2.5 py-1.5 transition-colors duration-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+              trackTab === tab.value
+                ? 'bg-muted text-foreground'
+                : 'text-muted-foreground hover:bg-muted/60 hover:text-foreground',
+            )}
+            data-track-category='SdlcHub'
+            data-track-name='TrackTabOpened'
+            data-track-metadata={JSON.stringify({ tab: tab.value })}
+          >
+            <span className='shrink-0'>{tab.icon}</span>
+            <span className='text-sm font-medium tracking-[-0.28px]'>{tab.label}</span>
+            {/* Every call going on in the track, as its sidebar row counts them. */}
+            {tab.value === 'calls' && selectedTrack && (
+              <ActivityPill
+                live={liveCallCounts.get(selectedTrack.id)}
+                rollUp
+                place={selectedTrack.name}
+                size='sm'
+              />
+            )}
+          </TabsPrimitive.Trigger>
+        ))}
+      </TabsPrimitive.List>
+    </TabsPrimitive.Root>
+  );
+
+  const renderTrack = (): ReactElement | null => {
+    if (!selectedTrack) return null;
+    // Each tab fills the page and scrolls its own contents.
+    return trackTab === 'files' ? (
+      <section className='flex min-h-0 flex-1 flex-col'>
+        <SdlcFileList
+          liveCallCounts={liveCallCounts}
+          key={selectedTrack.id}
+          channelId={channel.id}
+          track={selectedTrack}
+          path={filesPath}
+          onNavigate={setFilesPath}
+          onOpenItem={(item, parent, event) => {
+            // It opens as a tab on the page of whatever holds it. A track holds its
+            // own page — the root folder, named after the track — so an item filed
+            // straight on the track opens there.
+            const tab: FolderTab = { kind: item.kind, id: item.id };
+            const search = folderPageSearch(parent.id, tab, true);
+            if (openInNewTab(event, search, () => openFolderInWindow(parent.id, tab))) return;
+            openFolderPage(parent.id, tab);
+          }}
+          onOpenFolderPage={(folder, event) => {
+            const search = folderPageSearch(folder.id, null, true);
+            if (openInNewTab(event, search, () => openFolderInWindow(folder.id))) return;
+            openFolderPage(folder.id);
+          }}
+          onPreviewCanvas={(canvasId, title) => {
+            rememberFileListFocus();
+            setReaderCanvasId(canvasId);
+            setReaderTitle(title);
+          }}
+          onNewFolder={parent => {
+            rememberFileListFocus();
+            setNewFolderParent(parent);
+          }}
+          onNewArtifact={parent => {
+            rememberFileListFocus();
+            openAddItemDialog('artifact', parent);
+          }}
+          onUploadFile={parent => {
+            rememberFileListFocus();
+            openAddItemDialog('upload', parent);
+          }}
+          onAddLink={parent => {
+            rememberFileListFocus();
+            openAddItemDialog('link', parent);
+          }}
+          // Every row's discussions open beside the list, an artifact's too; opening
+          // the artifact itself is what a double-click does.
+          onDiscussItem={item =>
+            openItemConversations({ type: item.kind, id: item.id, name: item.name })
+          }
+          onDiscussTrack={() => openConversations()}
+          {...(isHubMember && {
+            onStartCall: item =>
+              setCallPicker({ link: { ownerType: item.kind, ownerId: item.id }, name: item.name }),
+          })}
+          // The track itself counts as discussed while the panel shows its own
+          // conversations — no item's, and no artifact's.
+          discussingId={
+            showRightPanel
+              ? (activeFolderDiscussion?.id ?? (discussionOwner ? null : selectedTrack.id))
+              : null
+          }
+          onRenameFolder={(folderId, name) =>
+            void call(
+              `sdlc-folder-rename-${folderId}`,
+              () => renameFolderAction(folderId, name),
+              'Folder renamed',
+            )
+          }
+          onSetFolderIcon={(folderId, icon) =>
+            void call(
+              `sdlc-folder-icon-${folderId}`,
+              () => setFolderIconAction(folderId, icon),
+              icon ? 'Folder icon changed' : 'Folder icon removed',
+            )
+          }
+          onMoveItems={(items, parent) =>
+            void call(
+              `sdlc-move-${parent.id}`,
+              async () => {
+                for (const item of items) await moveItemAction(item, parent);
+              },
+              items.length === 1 ? 'Moved' : `Moved ${items.length} items`,
+            )
+          }
+          listRef={fileListRef}
+        />
+      </section>
+    ) : trackTab === 'calls' ? (
+      <section className='flex min-h-0 flex-1 flex-col'>
+        <SdlcCalls
+          key={selectedTrack.id}
+          channelId={channel.id}
+          track={selectedTrack}
+          hubName={channel.name}
+          trackNames={trackNames}
+          openConversationId={showRightPanel ? selectedDiscussionConversationId : null}
+          // As a ticket does: with the panel closed there is no list behind the call's
+          // discussion, so it opens on its own and closing it closes the panel.
+          onOpenCall={conversationId =>
+            setDiscussionUrl({
+              open: true,
+              conversationId,
+              threadOnly: !showRightPanel || threadOnly,
+              push: true,
+            })
+          }
+          onDiscussTrack={openConversations}
+          {...(isHubMember && { onStartCall: () => setCallPicker(pageCallScope) })}
+        />
+      </section>
+    ) : (
+      // The channel's ticket board — kanban and table, search, filters, grouping —
+      // over only this track's tickets, from every board they are on. A ticket
+      // created here is filed under the track.
+      <section className='flex min-h-0 flex-1 flex-col'>
+        <EntityLinkContext.Provider value={{ sourceType: 'TRACK', sourceId: selectedTrack.id }}>
+          <KanbanBoardScreen
+            channelId={channel.id}
+            trackId={selectedTrack.id}
+            // The track's discussions, beside New ticket as Chat sits beside New on the
+            // Files tab — the one way to them from here once the panel is closed.
+            headerEndSlot={
               <button
-                key={ticket.id}
                 type='button'
-                onClick={() => {
-                  setFocusedTicketId(ticket.id);
-                  setDiscussionUrl({
-                    open: true,
-                    conversationId: ticket.conversationId,
-                    selectedTab: 'details',
-                  });
-                }}
-                tabIndex={-1}
-                data-ticket-row={ticket.id}
+                aria-pressed={showRightPanel && !activeFolderDiscussion && !discussionOwner}
+                onClick={openConversations}
                 className={cn(
-                  'flex w-full items-center gap-3 border-b border-border px-3.5 py-2 text-left outline-none transition-colors last:border-b-0 hover:bg-foreground/[0.04]',
-                  ticketsFocused &&
-                    focusedTicketId === ticket.id &&
-                    'bg-foreground/[0.07] ring-2 ring-inset ring-foreground/40',
+                  'ml-0.5 flex h-[30px] shrink-0 items-center gap-1.5 whitespace-nowrap rounded-lg border border-border px-3 text-[12.5px] font-semibold text-foreground transition-colors hover:bg-muted',
+                  showRightPanel && !activeFolderDiscussion && !discussionOwner && 'bg-muted',
                 )}
                 data-track-category='SdlcHub'
-                data-track-name='TrackTicketOpened'
-                data-track-metadata={JSON.stringify({ ticketId: ticket.id, source: 'sdlc_track' })}
+                data-track-name='TrackTicketsChatOpened'
               >
-                <span className='shrink-0 font-mono text-[11px] text-muted-foreground'>
-                  {ticket.xyneId}
-                </span>
-                <span className='min-w-[110px] flex-1 truncate text-[13px] font-medium tracking-[-0.01em]'>
-                  {ticket.title}
-                </span>
-                {/* Where the ticket came from. Only shown when there is one — a
-                    ticket raised on its own has nothing to point at. */}
-                {artifactByTicketId.get(ticket.id) && (
-                  <span className='flex min-w-0 shrink items-center gap-1.5 text-[11px] text-muted-foreground'>
-                    <Link2 className='size-3 shrink-0' />
-                    <span className='truncate'>{artifactByTicketId.get(ticket.id)}</span>
-                  </span>
-                )}
-                {ticket.priority !== TicketPriority.LOW && (
-                  <span
-                    className={cn(
-                      'shrink-0 rounded-full px-2 py-0.5 text-[10.5px] font-medium',
-                      ticket.priority === TicketPriority.HIGH ||
-                        ticket.priority === TicketPriority.CRITICAL
-                        ? 'bg-destructive/15 text-destructive'
-                        : 'bg-foreground/[0.07] text-muted-foreground',
-                    )}
-                  >
-                    {TICKET_PRIORITY_LABEL[ticket.priority]}
-                  </span>
-                )}
-                <span className='shrink-0 rounded-full bg-foreground/[0.07] px-2 py-0.5 text-[10.5px] font-medium text-muted-foreground'>
-                  {ticket.stageName}
-                </span>
-                {ticket.assignedTo ? (
-                  <Avatar userId={ticket.assignedTo} size='xs' showActiveStatus={false} />
-                ) : (
-                  <span
-                    className='size-5 shrink-0 rounded-full border border-dashed border-border'
-                    title='Unassigned'
-                    aria-label='Unassigned'
-                  />
-                )}
-                <ChevronRight className='size-3.5 shrink-0 text-muted-foreground' />
+                <MessageCircle className='size-[14px]' />
+                Discussions
               </button>
-            ))
-          )}
-        </div>
+            }
+            // A ticket opens beside the track, in its conversation's details, rather
+            // than taking you to the hub's Issues page.
+            onOpenTicket={ticket =>
+              // With the panel closed there is no list behind the ticket, so it
+              // opens on its own and closing it closes the panel.
+              setDiscussionUrl({
+                open: true,
+                conversationId: ticket.conversationId,
+                selectedTab: 'details',
+                threadOnly: !showRightPanel || threadOnly,
+                push: true,
+              })
+            }
+          />
+        </EntityLinkContext.Provider>
       </section>
     );
   };
@@ -3287,39 +3257,26 @@ export default function SdlcScreen(): ReactElement {
     navigateWithinSdlc(`/sdlc/${channelId}/tracks`, trackId ? trackSearch(trackId) : '');
   };
 
-  const sectionNavRows = SECTIONS.map(item => {
-    const Icon = item.icon;
-    return (
-      <div key={item.id} className='mb-0.5'>
-        <button
-          onClick={event => {
-            navigateWithinSdlc(`/sdlc/${channelId}/${item.id}`);
-            event.currentTarget.blur();
-          }}
-          {...(section === item.id && { 'aria-current': 'page' as const })}
-          className={cn(
-            'flex h-[32px] w-full items-center gap-2.5 rounded-[6px] px-2 text-[13px] text-sidebar-foreground transition-colors',
-            section === item.id ? 'bg-foreground/10 font-medium' : 'hover:bg-foreground/[0.06]',
-          )}
-          data-track-category='SdlcHub'
-          data-track-name='SectionChanged'
-          data-track-metadata={JSON.stringify({ section: item.id, channelId: channel.id })}
-        >
-          <Icon size={15} className='shrink-0 text-sidebar-foreground/70' />
-          <span className='flex-1 truncate text-left'>{item.label}</span>
-          <span className='text-xs tabular-nums text-sidebar-foreground/50'>
-            {item.id === 'wiki'
-              ? [...wikiPageCounts.values()].reduce((total, count) => total + count, 0)
-              : item.id === 'knowledge'
-                ? knowledgeDocs.length
-                : item.id === 'tickets'
-                  ? channelTicketCount
-                  : ''}
-          </span>
-        </button>
-      </div>
-    );
-  });
+  const sectionNavRows = SECTIONS.map(item => (
+    <SdlcSidebarRow
+      key={item.id}
+      icon={item.icon}
+      label={item.label}
+      emphasis
+      active={section === item.id}
+      {...(item.id === 'calls' && { liveCalls: hubLiveCalls })}
+      onClick={event => {
+        navigateWithinSdlc(`/sdlc/${channelId}/${item.id}`);
+        event.currentTarget.blur();
+      }}
+      trackName='SectionChanged'
+      trackMetadata={{ section: item.id, channelId: channel.id }}
+    />
+  ));
+  const openNewArtifactType = (): void => {
+    setTypeName('');
+    setTypeDialogOpen(true);
+  };
 
   return (
     <div className='flex h-full min-w-0 overflow-hidden bg-transparent'>
@@ -3362,323 +3319,206 @@ export default function SdlcScreen(): ReactElement {
           <div className='h-[52px] w-full shrink-0 overflow-hidden'>
             {railOpen && <AppNavigator />}
           </div>
-          {/* Same 52px and 16px inset as the navigator above. */}
           <div
             className={cn(
-              'flex h-[52px] shrink-0 items-center gap-1 border-t border-sidebar-border-muted',
-              railOpen ? 'justify-between px-4' : 'justify-center px-2',
+              'flex min-h-0 flex-1 flex-col border-t border-sidebar-border-muted pt-3',
+              railOpen ? 'px-3' : 'px-2',
             )}
           >
-            {/* The toggle leads, so that peeking at a collapsed sidebar puts it
-              under the pointer and one click pins it open. */}
-            <div className='flex min-w-0 items-center gap-1.5'>
-              <button
-                type='button'
-                onClick={toggleRail}
-                title={railCollapsed ? 'Pin the sidebar open' : 'Collapse to icons'}
-                aria-label={railCollapsed ? 'Pin the sidebar open' : 'Collapse to icons'}
-                className='-ml-1 shrink-0 rounded-md p-1 text-sidebar-foreground/60 transition-colors hover:bg-sidebar-accent/60 hover:text-sidebar-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-sidebar-accent-ring'
-                data-track-category='SdlcHub'
-                data-track-name='SidebarRailToggled'
+            <SdlcHubHeader
+              open={railOpen}
+              collapsed={railCollapsed}
+              hubName={channel.name}
+              onToggleRail={toggleRail}
+              onOpenSwitcher={() => setHubSwitcherOpen(true)}
+              onAddMembers={() => setMembersDialog(true)}
+            />
+            {railOpen && (
+              // The hub's pages stay put; Tracks and Artifacts share what is left, each
+              // scrolling on its own once they don't both fit.
+              <nav
+                aria-label='Hub'
+                className='no-scrollbar flex min-h-0 flex-1 flex-col overflow-y-auto px-0.5 pb-3'
               >
-                <PanelLeft className='size-3.5' />
-              </button>
-              <div
-                className={cn(
-                  'min-w-0 truncate text-[10.5px] font-semibold uppercase tracking-[0.13em] text-sidebar-foreground/60',
-                  !railOpen && 'sr-only',
-                )}
-              >
-                SDLC Hub
-              </div>
-            </div>
-            <div className='flex shrink-0 items-center gap-0.5'>
-              {railOpen && (
-                <button
-                  type='button'
-                  onClick={() => setHubDialog('create')}
-                  title='New hub'
-                  aria-label='New hub'
-                  className='rounded-md p-1 text-sidebar-foreground/60 transition-colors hover:bg-sidebar-accent/60 hover:text-sidebar-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-sidebar-accent-ring'
-                  data-track-category='SdlcHub'
-                  data-track-name='NewHubOpened'
-                >
-                  <Plus className='size-3.5' />
-                </button>
-              )}
-              {/* Escape hatch for a wedged frame; only meaningful when framed. */}
-              {railOpen && isFramedSdlcSurface() && (
-                <button
-                  type='button'
-                  onClick={requestSdlcFrameReset}
-                  title='Reload SDLC Hub — discards this session and reloads the current page'
-                  aria-label='Reload SDLC Hub'
-                  className='rounded-md p-1 text-sidebar-foreground/60 transition-colors hover:bg-sidebar-accent/60 hover:text-sidebar-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-sidebar-accent-ring'
-                  data-track-category='SdlcHub'
-                  data-track-name='FrameReset'
-                >
-                  <RefreshCw className='h-3.5 w-3.5' aria-hidden='true' />
-                </button>
-              )}
-            </div>
-          </div>
-          <div className={cn('flex items-center gap-1 px-2 pb-2', !railOpen && 'hidden')}>
-            <div className='min-w-0 flex-1'>
-              <SdlcHubPicker
-                hubs={hubOptions}
-                selectedHubId={channel.id}
-                onSelect={nextChannelId => void navigate(`/sdlc/${nextChannelId}/overview`)}
-              />
-            </div>
-            {/* Beside the hub it acts on, rather than in a header whose scope is
-              whatever the reader has open. */}
-            <button
-              type='button'
-              onClick={() => setMembersDialog(true)}
-              title='Members'
-              aria-label='Members'
-              className='flex size-7 shrink-0 items-center justify-center rounded-md text-sidebar-foreground/60 transition-colors hover:bg-sidebar-accent/60 hover:text-sidebar-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-sidebar-accent-ring'
-              data-track-category='SdlcHub'
-              data-track-name='HeaderMembersClicked'
-              data-track-metadata={JSON.stringify({ place: 'hub-picker' })}
-            >
-              <Users className='size-4' />
-            </button>
-          </div>
-          {railOpen ? (
-            <SdlcSidebarFitSection id='sdlc-sidebar-hub' title='Hub'>
-              {sectionNavRows}
-            </SdlcSidebarFitSection>
-          ) : null}
-          {railOpen ? (
-            <ResizableGroup
-              orientation='vertical'
-              onLayoutChanged={(_layout, meta) => persistSdlcSectionHeights(meta)}
-              className={cn(
-                'border-t border-sidebar-border-muted',
-                foldedSidebarHeight === null ? 'min-h-0 flex-1' : 'mt-auto box-content shrink-0',
-              )}
-              {...(foldedSidebarHeight !== null && { style: { height: foldedSidebarHeight } })}
-            >
-              <SdlcSidebarSection
-                id='sdlc-sidebar-tracks'
-                title='Tracks'
-                count={openTracks.length}
-                action={{
-                  label: 'New track',
-                  trackName: 'NewTrackOpened',
-                  onClick: () => setTrackDialog(true),
-                }}
-              >
-                {openTracks.map(track => (
-                  <button
-                    key={track.id}
-                    type='button'
-                    onClick={event => openTrack(track.id, event)}
-                    {...(selectedTrackId === track.id && { 'aria-current': 'page' as const })}
-                    className={cn(
-                      'mb-0.5 flex h-[32px] w-full items-center gap-2.5 rounded-[6px] px-2 text-[13px] text-sidebar-foreground transition-colors',
-                      selectedTrackId === track.id
-                        ? 'bg-foreground/10 font-medium'
-                        : 'hover:bg-foreground/[0.06]',
+                <div className='shrink-0'>{sectionNavRows}</div>
+                <div className='h-5 shrink-0' />
+                <div className='flex min-h-0 flex-1 flex-col gap-3'>
+                  <SdlcSidebarGroup
+                    id='sdlc-sidebar-tracks'
+                    title='Tracks'
+                    count={openTracks.length}
+                    rows={
+                      Math.max(openTracks.length, 1) +
+                      (closedTracks.length > 0 ? 1 : 0) +
+                      (showClosedTracks ? closedTracks.length : 0)
+                    }
+                    action={{
+                      label: 'New track',
+                      trackName: 'NewTrackOpened',
+                      onClick: () => setTrackDialog(true),
+                    }}
+                  >
+                    {openTracks.map(track => (
+                      <SdlcSidebarRow
+                        key={track.id}
+                        icon={Layers}
+                        appIcon={track.icon}
+                        liveCalls={liveCallCounts.get(track.id)}
+                        label={track.name}
+                        active={selectedTrackId === track.id}
+                        title={track.description || track.name}
+                        onClick={event => openTrack(track.id, event)}
+                        trackName='TrackOpened'
+                        trackMetadata={{ trackId: track.id }}
+                      />
+                    ))}
+                    {openTracks.length === 0 && (
+                      <SdlcSidebarAddRow
+                        label='New track'
+                        onClick={() => setTrackDialog(true)}
+                        trackName='NewTrackOpened'
+                      />
                     )}
-                    title={track.description || track.name}
-                    data-track-category='SdlcHub'
-                    data-track-name='TrackOpened'
-                    data-track-metadata={JSON.stringify({ trackId: track.id })}
-                  >
-                    <Layers size={15} className='shrink-0 text-sidebar-foreground/70' />
-                    <span className='flex-1 truncate text-left'>{track.name}</span>
-                  </button>
-                ))}
-                {openTracks.length === 0 && (
-                  <p className='px-2 py-3 text-[12.5px] text-sidebar-foreground/50'>
-                    No open tracks yet.
-                  </p>
-                )}
-                {/* Finished work is out of the way but not gone — the same place it
-                  would be looked for. */}
-                {closedTracks.length > 0 && (
-                  <>
-                    <button
-                      type='button'
-                      onClick={() => setShowClosedTracks(!showClosedTracks)}
-                      className='mt-1 w-full px-2 py-1.5 text-left text-[12px] text-sidebar-foreground/45 transition-colors hover:text-sidebar-foreground/70'
-                      data-track-category='SdlcHub'
-                      data-track-name='ClosedTracksToggled'
-                    >
-                      {showClosedTracks
-                        ? 'Hide completed & parked'
-                        : `Show ${closedTracks.length} completed & parked`}
-                    </button>
-                    {showClosedTracks &&
-                      closedTracks.map(track => (
+                    {/* Finished work is out of the way but not gone — the same place it
+                      would be looked for. */}
+                    {closedTracks.length > 0 && (
+                      <>
                         <button
-                          key={track.id}
                           type='button'
-                          onClick={event => openTrack(track.id, event)}
-                          {...(selectedTrackId === track.id && { 'aria-current': 'page' as const })}
-                          className={cn(
-                            'mb-0.5 flex h-[32px] w-full items-center gap-2.5 rounded-[6px] px-2 text-[13px] text-sidebar-foreground/60 transition-colors',
-                            selectedTrackId === track.id
-                              ? 'bg-foreground/10 font-medium'
-                              : 'hover:bg-foreground/[0.06]',
-                          )}
-                          title={track.description || track.name}
+                          onClick={() => setShowClosedTracks(!showClosedTracks)}
+                          className='flex h-8 w-full items-center rounded-[10px] px-3 text-left text-xs text-sidebar-foreground/60 transition-colors hover:text-sidebar-accent-foreground'
                           data-track-category='SdlcHub'
-                          data-track-name='TrackOpened'
-                          data-track-metadata={JSON.stringify({ trackId: track.id })}
+                          data-track-name='ClosedTracksToggled'
                         >
-                          <Layers size={15} className='shrink-0 text-sidebar-foreground/50' />
-                          <span className='flex-1 truncate text-left'>{track.name}</span>
+                          {showClosedTracks
+                            ? 'Hide completed & parked'
+                            : `Show ${closedTracks.length} completed & parked`}
                         </button>
-                      ))}
-                  </>
-                )}
-              </SdlcSidebarSection>
-              <SdlcSidebarSectionSeparator />
-              <SdlcSidebarSection
-                id='sdlc-sidebar-artifacts'
-                title='Artifacts'
-                count={typeFolders.length}
-                action={{
-                  label: 'New artifact type',
-                  trackName: 'NewArtifactTypeClicked',
-                  onClick: () => {
-                    setTypeName('');
-                    setTypeDialogOpen(true);
-                  },
-                }}
-              >
-                {typeFolders.map(folder => {
-                  const isActive = section === 'artifacts' && activeTypeFolder?.id === folder.id;
-                  const isRenaming = renameTypeId === folder.id;
-                  return (
-                    <div
-                      key={folder.id}
-                      className='group relative mb-0.5'
-                      onMouseEnter={() => setHoveredTypeId(folder.id)}
-                      onMouseLeave={() =>
-                        setHoveredTypeId(current => (current === folder.id ? null : current))
-                      }
-                    >
-                      {isRenaming ? (
-                        <div className='flex h-[32px] w-full items-center gap-2.5 px-2'>
-                          <Folder size={15} className='shrink-0 text-sidebar-foreground/70' />
-                          <input
-                            autoFocus
-                            onFocus={event => event.currentTarget.select()}
-                            value={renameTypeName}
-                            onChange={event => setRenameTypeName(event.target.value)}
-                            onBlur={() => void renameArtifactType(folder.id, renameTypeName)}
-                            onKeyDown={event => {
-                              if (event.key === 'Enter')
-                                void renameArtifactType(folder.id, renameTypeName);
-                              if (event.key === 'Escape') {
-                                setRenameTypeId(null);
-                                setRenameTypeName('');
-                              }
-                            }}
-                            className='h-6 min-w-0 flex-1 rounded-[6px] border border-sidebar-accent-ring bg-background px-1.5 text-[13.5px] outline-none'
-                            data-track-category='SdlcHub'
-                            data-track-name='ArtifactTypeRenamed'
-                          />
-                        </div>
-                      ) : (
-                        <>
-                          <button
-                            onClick={() =>
-                              navigateWithinSdlc(
-                                `/sdlc/${channelId}/artifacts`,
-                                `?type=${encodeURIComponent(folder.id)}`,
-                              )
-                            }
-                            className={cn(
-                              'flex h-[32px] w-full items-center gap-2.5 rounded-[6px] px-2 text-[13px] text-sidebar-foreground transition-colors',
-                              isActive
-                                ? 'bg-foreground/10 font-medium'
-                                : 'group-hover:bg-foreground/[0.06]',
-                            )}
-                            data-track-category='SdlcHub'
-                            data-track-name='SectionChanged'
-                            data-track-metadata={JSON.stringify({
-                              type: folder.id,
-                              channelId: channel.id,
-                            })}
-                          >
-                            <Folder size={15} className='shrink-0 text-sidebar-foreground/70' />
-                            <span className='flex-1 truncate text-left'>{folder.name}</span>
-                            <span className='w-6 text-right text-xs tabular-nums text-sidebar-foreground/50 transition-opacity group-hover:opacity-0'>
-                              {folder.canvases.length}
-                            </span>
-                          </button>
-                          <button
-                            type='button'
-                            title='Rename (F2)'
-                            aria-label={`Rename ${folder.name}`}
-                            onClick={event => {
-                              event.stopPropagation();
-                              setRenameTypeId(folder.id);
-                              setRenameTypeName(folder.name);
-                            }}
-                            className='absolute right-1.5 top-1/2 hidden size-[22px] -translate-y-1/2 items-center justify-center rounded-[5px] text-sidebar-foreground/70 hover:bg-foreground/10 hover:text-sidebar-foreground group-hover:flex'
-                            data-track-category='SdlcHub'
-                            data-track-name='ArtifactTypeRenameStarted'
-                          >
-                            <Pencil size={13} />
-                          </button>
-                        </>
-                      )}
-                    </div>
-                  );
-                })}
-              </SdlcSidebarSection>
-              <SdlcSidebarSectionSeparator />
-              <SdlcSidebarSection
-                id='sdlc-sidebar-repositories'
-                title='Repositories'
-                count={channelRepos.length}
-                action={{
-                  label: 'Manage repositories',
-                  trackName: 'HubRepositoriesOpened',
-                  icon: <Settings className='size-3.5' />,
-                  onClick: () => setHubDialog('manage'),
-                }}
-              >
-                {channelRepos.map(repository => (
-                  <a
-                    key={repository.id}
-                    href={repository.canonicalUrl || repository.url}
-                    target='_blank'
-                    rel='noreferrer'
-                    className='mb-0.5 flex h-[32px] w-full items-center gap-2.5 rounded-[6px] px-2 text-[13px] text-sidebar-foreground transition-colors hover:bg-foreground/[0.06]'
-                    title={repository.canonicalUrl || repository.url}
-                    data-track-category='SdlcHub'
-                    data-track-name='HubRepositoryOpened'
-                    data-track-metadata={JSON.stringify({ repoId: repository.id })}
+                        {showClosedTracks &&
+                          closedTracks.map(track => (
+                            <SdlcSidebarRow
+                              key={track.id}
+                              icon={Layers}
+                              appIcon={track.icon}
+                              liveCalls={liveCallCounts.get(track.id)}
+                              label={track.name}
+                              muted
+                              active={selectedTrackId === track.id}
+                              title={track.description || track.name}
+                              onClick={event => openTrack(track.id, event)}
+                              trackName='TrackOpened'
+                              trackMetadata={{ trackId: track.id }}
+                            />
+                          ))}
+                      </>
+                    )}
+                  </SdlcSidebarGroup>
+                  <SdlcSidebarGroup
+                    id='sdlc-sidebar-artifacts'
+                    title='Artifacts'
+                    count={typeFolders.length}
+                    rows={Math.max(typeFolders.length, 1)}
+                    action={{
+                      label: 'New artifact type',
+                      trackName: 'NewArtifactTypeClicked',
+                      onClick: openNewArtifactType,
+                    }}
                   >
-                    <GitBranch size={15} className='shrink-0 text-sidebar-foreground/70' />
-                    <span className='flex-1 truncate text-left'>{repository.name}</span>
-                  </a>
-                ))}
-                {channelRepos.length === 0 && (
-                  <p className='px-2 py-3 text-[12.5px] text-sidebar-foreground/50'>
-                    No repositories yet.
-                  </p>
-                )}
-              </SdlcSidebarSection>
-              {/* Slack. Panels have to fill the group, so without something here to
-                take the leftover height the group refuses to collapse the last
-                open section — every section closed is a perfectly reasonable
-                thing to want, and this is what allows it.
-  
-                It claims the whole group by default so that the leftover is *its*
-                to give up: with no size of its own it was allotted nothing, and
-                the sections above grew to fill the sidebar instead of keeping the
-                heights they were told to take. */}
-              <Panel id='sdlc-sidebar-slack' minSize='0px' defaultSize='100%' />
-            </ResizableGroup>
-          ) : null}
+                    {typeFolders.map(folder => {
+                      const isActive =
+                        section === 'artifacts' && activeTypeFolder?.id === folder.id;
+                      const isRenaming = renameTypeId === folder.id;
+                      return (
+                        <div
+                          key={folder.id}
+                          className='group relative'
+                          onMouseEnter={() => setHoveredTypeId(folder.id)}
+                          onMouseLeave={() =>
+                            setHoveredTypeId(current => (current === folder.id ? null : current))
+                          }
+                        >
+                          {isRenaming ? (
+                            <div className='flex h-9 w-full items-center gap-3 rounded-[10px] border border-sidebar-border bg-sidebar-accent px-3'>
+                              <SdlcSidebarRowIcon icon={Folder} />
+                              <input
+                                autoFocus
+                                onFocus={event => event.currentTarget.select()}
+                                value={renameTypeName}
+                                onChange={event => setRenameTypeName(event.target.value)}
+                                onBlur={() => void renameArtifactType(folder.id, renameTypeName)}
+                                onKeyDown={event => {
+                                  if (event.key === 'Enter')
+                                    void renameArtifactType(folder.id, renameTypeName);
+                                  if (event.key === 'Escape') {
+                                    setRenameTypeId(null);
+                                    setRenameTypeName('');
+                                  }
+                                }}
+                                className='h-6 min-w-0 flex-1 rounded-[6px] border border-sidebar-accent-ring bg-background px-1.5 text-sm outline-none'
+                                data-track-category='SdlcHub'
+                                data-track-name='ArtifactTypeRenamed'
+                              />
+                            </div>
+                          ) : (
+                            <>
+                              <button
+                                type='button'
+                                onClick={() =>
+                                  navigateWithinSdlc(
+                                    `/sdlc/${channelId}/artifacts`,
+                                    `?type=${encodeURIComponent(folder.id)}`,
+                                  )
+                                }
+                                {...(isActive && { 'aria-current': 'page' as const })}
+                                className={cn(
+                                  sdlcSidebarRowClass(isActive),
+                                  !isActive &&
+                                    'group-hover:bg-sidebar-accent group-hover:text-sidebar-accent-foreground',
+                                )}
+                                data-track-category='SdlcHub'
+                                data-track-name='SectionChanged'
+                                data-track-metadata={JSON.stringify({
+                                  type: folder.id,
+                                  channelId: channel.id,
+                                })}
+                              >
+                                <SdlcSidebarRowIcon icon={Folder} />
+                                <span className='min-w-0 flex-1 truncate text-left'>
+                                  {folder.name}
+                                </span>
+                              </button>
+                              <button
+                                type='button'
+                                title='Rename (F2)'
+                                aria-label={`Rename ${folder.name}`}
+                                onClick={event => {
+                                  event.stopPropagation();
+                                  setRenameTypeId(folder.id);
+                                  setRenameTypeName(folder.name);
+                                }}
+                                className='absolute right-2 top-1/2 hidden size-6 -translate-y-1/2 items-center justify-center rounded-md text-sidebar-foreground/70 hover:bg-sidebar-border hover:text-sidebar-accent-foreground group-hover:flex'
+                                data-track-category='SdlcHub'
+                                data-track-name='ArtifactTypeRenameStarted'
+                              >
+                                <Pencil size={13} />
+                              </button>
+                            </>
+                          )}
+                        </div>
+                      );
+                    })}
+                    {typeFolders.length === 0 && (
+                      <SdlcSidebarAddRow
+                        label='New artifact type'
+                        onClick={openNewArtifactType}
+                        trackName='NewArtifactTypeClicked'
+                      />
+                    )}
+                  </SdlcSidebarGroup>
+                </div>
+              </nav>
+            )}
+          </div>
         </div>
         {!railCollapsed && (
           <div
@@ -3716,7 +3556,14 @@ export default function SdlcScreen(): ReactElement {
             minSize='45%'
             className='flex min-w-0 flex-col overflow-hidden'
           >
-            <header className='z-10 flex h-[52px] shrink-0 items-center justify-between gap-4 border-b bg-background/95 px-5 backdrop-blur'>
+            <header
+              className={cn(
+                'z-10 flex h-[52px] shrink-0 items-center justify-between gap-4 border-b bg-background/95 backdrop-blur',
+                // On a track's page the bar is the page's heading, so it lines up with
+                // the page, and the tab row under it draws the rule.
+                onTrackPage ? 'border-transparent px-7' : 'px-5',
+              )}
+            >
               <div className='flex min-w-0 flex-1 items-center gap-2'>
                 {section === 'wiki' && wikiScope ? (
                   <>
@@ -3786,7 +3633,24 @@ export default function SdlcScreen(): ReactElement {
                     </h1>
                   </>
                 ) : section === 'tracks' && selectedTrack ? (
-                  <h1 className='truncate font-semibold'>{selectedTrack.name}</h1>
+                  // A track's page starts with its name, and its status beside it: the
+                  // bar is its heading.
+                  <div className='flex min-w-0 flex-1 items-center gap-2'>
+                    <IconPicker
+                      value={selectedTrack.icon}
+                      onChange={icon => setTrackIcon(selectedTrack.id, icon)}
+                      size={18}
+                      className='-ml-1.5'
+                      subject='track'
+                      hint='Shown beside the track’s name.'
+                      placeholder={<Layers className='size-[18px]' aria-hidden='true' />}
+                      trackCategory='SdlcHub'
+                      trackPrefix='Track'
+                      groups={TRACK_ICON_GROUPS}
+                    />
+                    <h1 className='flex min-w-0 items-center'>{renderTrackName(selectedTrack)}</h1>
+                    {renderTrackStatus(selectedTrack)}
+                  </div>
                 ) : section === 'wiki' && wikiScope ? (
                   <h1 className='truncate font-semibold'>{wikiScope.name}</h1>
                 ) : (
@@ -3812,13 +3676,14 @@ export default function SdlcScreen(): ReactElement {
                     <SquareArrowOutUpRight className='size-4' />
                   </Button>
                 ) : null}
-                {chatPanelAvailable && !showRightPanel ? (
+                {/* A track's page has its own Chat beside New in the file list. */}
+                {chatPanelAvailable && !showRightPanel && !onTrackPage ? (
                   <Button
                     size='icon'
                     variant='ghost'
                     className='size-7 rounded-lg'
-                    aria-label='Chat'
-                    title='Chat'
+                    aria-label='Discussions'
+                    title='Discussions'
                     onClick={() => openConversations()}
                     data-track-category='SdlcHub'
                     data-track-name='OpenSdlcChat'
@@ -3830,25 +3695,24 @@ export default function SdlcScreen(): ReactElement {
                   </Button>
                 ) : null}
                 {/* While the conversation panel is open these live in its own
-                    header, beside the conversation they act on. */}
-                {showRightPanel ? null : (
+                    header, beside the conversation they act on. The hub's Calls page
+                    has none: it starts calls itself, and a ticket or Ask AI there
+                    would be about nothing on it. */}
+                {showRightPanel || section === 'calls' ? null : (
                   <div className='flex min-w-0 items-center gap-1.5 overflow-hidden [&_button]:!size-7 [&_button]:!rounded-lg'>
                     {panelScopeActions('header')}
                   </div>
                 )}
-                {/* Closes the right panel, and only that. Its label and action never
-                    depend on whether a thread is open, so the bar does not change
-                    under the reader — the thread's own cross lives in the panel. */}
               </div>
             </header>
             <main className='flex min-h-0 w-full min-w-0 flex-1 flex-col overflow-hidden bg-background'>
               {openFolder && channel ? (
                 <SdlcFolderPage
+                  liveCallCounts={liveCallCounts}
                   key={openFolder.id}
                   channelId={channel.id}
                   folder={openFolder}
                   rootType={openFolderIsTrack ? 'TRACK' : 'FOLDER'}
-                  maps={folderPageMaps}
                   activeTab={activeFolderTab}
                   onOpenTab={tab => openFolderPage(openFolder.id, tab)}
                   onDiscuss={item => {
@@ -3876,7 +3740,6 @@ export default function SdlcScreen(): ReactElement {
                   onAddItem={(tab, parent) => openAddItemDialog(tab, folderPageParent(parent))}
                   tabsContainer={folderTabsSlot}
                   onAddLink={addBrowsedLink}
-                  parentFolderOf={parentFolderOf}
                   onMoveItem={(item, parentFolderId) =>
                     void call(
                       `sdlc-move-${item.id}`,
@@ -3911,213 +3774,263 @@ export default function SdlcScreen(): ReactElement {
                   <SdlcWorkflowsSection />
                 </div>
               ) : (
-                <div className='min-h-0 flex-1 overflow-auto bg-background p-7'>
-                  {section === 'overview' && (
-                    <section>
-                      <h1 className='mb-5 text-2xl font-semibold tracking-tight'>{channel.name}</h1>
-                      {showAccessWarning && (
-                        <div className='mb-4 flex items-start gap-3 rounded-lg border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-foreground'>
-                          <CircleAlert className='mt-0.5 size-4 shrink-0 text-amber-500' />
-                          <div className='min-w-0'>
-                            <h2 className='text-sm font-semibold'>{accessWarning.title}</h2>
-                            <p className='mt-0.5 text-sm leading-5 text-muted-foreground'>
-                              {accessWarning.description}
-                            </p>
-                          </div>
-                        </div>
+                <>
+                  {onTrackPage && selectedTrack && (
+                    // Under the name, its tabs: one per kind of thing it holds, as a
+                    // channel's are under its name. Out of the scroll, so they stay in
+                    // view as a tab scrolls.
+                    <div
+                      className={cn(
+                        'shrink-0 border-b px-7 pb-2 transition-colors',
+                        trackPageScrolled ? 'border-border' : 'border-transparent',
                       )}
-                      <div className='rounded-xl border bg-background p-5'>
-                        <div className='flex items-center justify-between gap-6'>
-                          <div className='min-w-0'>
-                            <h2 className='text-base font-semibold'>Hub Knowledge</h2>
-                            <p className='mt-1 text-sm text-muted-foreground'>
-                              Create and approve repository guides used by SDLC Assistant.
-                            </p>
-                            <p className='mt-2 text-xs text-muted-foreground'>
-                              {readyCount} document{readyCount === 1 ? '' : 's'} ready
-                            </p>
-                          </div>
-                          {renderWorkflowControls('Hub Knowledge', state)}
-                        </div>
-                      </div>
-                      <div className='mt-5 grid grid-cols-2 divide-x overflow-hidden rounded-xl border bg-background'>
-                        <Metric
-                          label='Hub Knowledge ready'
-                          value={String(readyCount)}
-                          icon={ShieldCheck}
-                        />
-                        <Metric
-                          label='Tickets'
-                          value={String(channelTicketCount)}
-                          icon={CircleDot}
-                        />
-                      </div>
-                      <SdlcActivityPreview key={channel.id} channelId={channel.id} />
-                    </section>
-                  )}
-
-                  {section === 'tracks' && renderTrack()}
-
-                  {section === 'knowledge' && (
-                    <section className='mx-auto max-w-5xl'>
-                      {renderWorkflowHeader({
-                        icon: ShieldCheck,
-                        title: 'Hub Knowledge',
-                        description:
-                          'Given to SDLC Assistant in every chat. Admins edit; members read.',
-                        workflow: state,
-                      })}
-                      <div className='mb-4 flex items-center justify-between gap-3'>
-                        <Checkbox
-                          size='sm'
-                          label='Show archived'
-                          checked={showArchivedKnowledge}
-                          onChange={setShowArchivedKnowledge}
-                          data-track-category='SdlcHub'
-                          data-track-name='HubKnowledgeArchivedToggled'
-                        />
-                        {isHubAdmin && knowledgeFolderId && (
-                          <Button
-                            type='button'
-                            size='sm'
-                            onClick={() => openHubDocumentCreate('knowledge')}
-                            data-track-category='SdlcHub'
-                            data-track-name='HubKnowledgeDocCreateOpened'
-                          >
-                            <Plus size={15} />
-                            New document
-                          </Button>
-                        )}
-                      </div>
-                      <div className='grid grid-cols-2 gap-4'>
-                        {knowledgeDocs.map(canvas => {
-                          const generating = canvas.sdlcArtifact?.artifactStatus === 'DRAFT';
-                          const archived = canvas.sdlcArtifact?.artifactStatus === 'ARCHIVED';
-                          return (
-                            <div
-                              key={canvas.id}
-                              role='button'
-                              tabIndex={0}
-                              onClick={() => openCanvas(canvas.id)}
-                              data-track-category='SdlcHub'
-                              data-track-name='HubKnowledgeCanvasOpened'
-                              data-track-metadata={JSON.stringify({ canvasId: canvas.id })}
-                              onKeyDown={event => {
-                                // The archive menu lives inside this card.
-                                if (event.target !== event.currentTarget) return;
-                                if (event.key === 'Enter' || event.key === ' ') {
-                                  event.preventDefault();
-                                  openCanvas(canvas.id);
-                                }
-                              }}
-                              className={cn(
-                                'group cursor-pointer rounded-xl border bg-background p-5 transition-colors hover:border-primary/35 hover:bg-muted/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
-                                archived && 'opacity-60',
-                              )}
-                            >
-                              <div className='flex items-start justify-between gap-2'>
-                                <div className='grid size-9 place-items-center rounded-lg bg-primary/10 text-primary'>
-                                  <BookOpen size={18} />
-                                </div>
-                                <div className='flex items-start gap-1'>
-                                  {archived ? (
-                                    <span className='rounded-full bg-muted px-2 py-1 text-xs font-medium text-muted-foreground'>
-                                      Archived
-                                    </span>
-                                  ) : generating ? (
-                                    <span className='rounded-full bg-amber-500/10 px-2 py-1 text-xs font-medium text-amber-700'>
-                                      Generating
-                                    </span>
-                                  ) : (
-                                    <span className='flex items-center gap-1 rounded-full bg-emerald-500/10 px-2 py-1 text-xs font-medium text-emerald-700 dark:text-emerald-300'>
-                                      <Check size={12} />
-                                      Ready
-                                    </span>
-                                  )}
-                                  {isHubAdmin && (
-                                    <SdlcArchiveMenu
-                                      title={canvas.title}
-                                      archived={archived}
-                                      trackingScope='HubKnowledge'
-                                      className='-mr-1'
-                                      onToggle={next => archiveArtifact(canvas.id, next)}
-                                    />
-                                  )}
-                                </div>
-                              </div>
-                              <h3 className='mt-4 font-semibold'>{canvas.title}</h3>
-                              <p className='mt-1 text-xs text-muted-foreground'>
-                                Updated {updatedAtLabel(canvas.lastEditedAt ?? canvas.updatedAt)}
-                                {' · '}
-                                {typeof canvas.sdlcArtifact?.generationCommit === 'string'
-                                  ? canvas.sdlcArtifact.generationCommit.slice(0, 8)
-                                  : 'repository HEAD'}
-                              </p>
-                              <div className='mt-5 flex items-center justify-between gap-3'>
-                                <span className='text-xs font-medium text-muted-foreground transition-colors group-hover:text-foreground'>
-                                  Open document
-                                </span>
-                              </div>
-                            </div>
-                          );
-                        })}
-                        {knowledgeDocs.length === 0 && (
-                          <EmptyCard
-                            text={
-                              knowledgeRunning
-                                ? 'Hub Knowledge generation is in progress.'
-                                : isHubAdmin
-                                  ? 'Start the Hub Knowledge workflow, or add a document yourself.'
-                                  : 'Start the Hub Knowledge workflow to generate these documents.'
-                            }
-                          />
-                        )}
-                      </div>
-                    </section>
-                  )}
-
-                  {section === 'wiki' && (
-                    <SdlcWikiSection
-                      key={wikiScope?.folderId ?? 'repositories'}
-                      header={renderWorkflowHeader({
-                        icon: BookOpen,
-                        title: 'Wiki',
-                        description:
-                          'A Wiki for each repository, plus Relationships for how they connect.',
-                        workflow: wikiState,
-                      })}
-                      scopes={wikiScopeList}
-                      scope={wikiScope}
-                      pageCounts={wikiPageCounts}
-                      pages={wikiPages}
-                      showArchived={showArchivedWiki}
-                      onSelectScope={folderId =>
-                        navigateWithinSdlc(
-                          `/sdlc/${channelId}/wiki`,
-                          `?wiki=${encodeURIComponent(folderId)}`,
-                        )
-                      }
-                      onAddRepository={() => setHubDialog('manage')}
-                      onShowArchivedChange={setShowArchivedWiki}
-                      onOpen={page => openWikiPage(page.canvasId)}
-                      canManage={isHubAdmin}
-                      onCreatePage={() => openHubDocumentCreate('wiki')}
-                      onArchivePage={(page, archived) => archiveArtifact(page.canvasId, archived)}
-                    />
-                  )}
-
-                  {section === 'artifacts' &&
-                    (activeTypeFolder ? (
-                      renderArtifacts(activeTypeFolder)
-                    ) : (
-                      <EmptyCard text='Select an artifact type from the sidebar.' />
-                    ))}
-                  {section === 'tickets' && (
-                    <div className='relative h-[calc(100vh-8rem)] min-h-[36rem]'>
-                      <KanbanBoardScreen channelId={channel.id} />
+                    >
+                      {renderTrackTabs()}
                     </div>
                   )}
-                </div>
+                  <div
+                    onScroll={event => setTrackPageScrolled(event.currentTarget.scrollTop > 0)}
+                    className={cn(
+                      'min-h-0 flex-1 overflow-auto bg-background p-7',
+                      // Under the tabs. Files fills the tab and scrolls its own rows,
+                      // which fade out at the bottom edge, so no gap is left under it.
+                      onTrackPage && 'flex flex-col pt-4',
+                      onTrackPage && (trackTab === 'files' || trackTab === 'calls') && 'pb-0',
+                      // The ticket board brings its own header, padding and scrolling.
+                      onTrackPage && trackTab === 'tickets' && 'p-0',
+                      // The hub's calls fill the page and scroll their own rows.
+                      section === 'calls' && 'flex flex-col pb-0',
+                    )}
+                  >
+                    {section === 'overview' && (
+                      <section>
+                        <h1 className='mb-5 text-2xl font-semibold tracking-tight'>
+                          {channel.name}
+                        </h1>
+                        {showAccessWarning && (
+                          <div className='mb-4 flex items-start gap-3 rounded-lg border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-foreground'>
+                            <CircleAlert className='mt-0.5 size-4 shrink-0 text-amber-500' />
+                            <div className='min-w-0'>
+                              <h2 className='text-sm font-semibold'>{accessWarning.title}</h2>
+                              <p className='mt-0.5 text-sm leading-5 text-muted-foreground'>
+                                {accessWarning.description}
+                              </p>
+                            </div>
+                          </div>
+                        )}
+                        <div className='rounded-xl border bg-background p-5'>
+                          <div className='flex items-center justify-between gap-6'>
+                            <div className='min-w-0'>
+                              <h2 className='text-base font-semibold'>Hub Knowledge</h2>
+                              <p className='mt-1 text-sm text-muted-foreground'>
+                                Create and approve repository guides used by SDLC Assistant.
+                              </p>
+                              <p className='mt-2 text-xs text-muted-foreground'>
+                                {readyCount} document{readyCount === 1 ? '' : 's'} ready
+                              </p>
+                            </div>
+                            {renderWorkflowControls('Hub Knowledge', state)}
+                          </div>
+                        </div>
+                        <div className='mt-5 overflow-hidden rounded-xl border bg-background'>
+                          <Metric
+                            label='Hub Knowledge ready'
+                            value={String(readyCount)}
+                            icon={ShieldCheck}
+                          />
+                        </div>
+                        <SdlcActivityPreview key={channel.id} channelId={channel.id} />
+                      </section>
+                    )}
+
+                    {section === 'tracks' && renderTrack()}
+
+                    {section === 'knowledge' && (
+                      <section className='mx-auto max-w-5xl'>
+                        {renderWorkflowHeader({
+                          icon: ShieldCheck,
+                          title: 'Hub Knowledge',
+                          description:
+                            'Given to SDLC Assistant in every chat. Admins edit; members read.',
+                          workflow: state,
+                        })}
+                        <div className='mb-4 flex items-center justify-between gap-3'>
+                          <Checkbox
+                            size='sm'
+                            label='Show archived'
+                            checked={showArchivedKnowledge}
+                            onChange={setShowArchivedKnowledge}
+                            data-track-category='SdlcHub'
+                            data-track-name='HubKnowledgeArchivedToggled'
+                          />
+                          {isHubAdmin && knowledgeFolderId && (
+                            <Button
+                              type='button'
+                              size='sm'
+                              onClick={() => openHubDocumentCreate('knowledge')}
+                              data-track-category='SdlcHub'
+                              data-track-name='HubKnowledgeDocCreateOpened'
+                            >
+                              <Plus size={15} />
+                              New document
+                            </Button>
+                          )}
+                        </div>
+                        <div className='grid grid-cols-2 gap-4'>
+                          {knowledgeDocs.map(canvas => {
+                            const generating = canvas.sdlcArtifact?.artifactStatus === 'DRAFT';
+                            const archived = canvas.sdlcArtifact?.artifactStatus === 'ARCHIVED';
+                            return (
+                              <div
+                                key={canvas.id}
+                                role='button'
+                                tabIndex={0}
+                                onClick={() => openCanvas(canvas.id)}
+                                data-track-category='SdlcHub'
+                                data-track-name='HubKnowledgeCanvasOpened'
+                                data-track-metadata={JSON.stringify({ canvasId: canvas.id })}
+                                onKeyDown={event => {
+                                  // The archive menu lives inside this card.
+                                  if (event.target !== event.currentTarget) return;
+                                  if (event.key === 'Enter' || event.key === ' ') {
+                                    event.preventDefault();
+                                    openCanvas(canvas.id);
+                                  }
+                                }}
+                                className={cn(
+                                  'group cursor-pointer rounded-xl border bg-background p-5 transition-colors hover:border-primary/35 hover:bg-muted/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+                                  archived && 'opacity-60',
+                                )}
+                              >
+                                <div className='flex items-start justify-between gap-2'>
+                                  <div className='grid size-9 place-items-center rounded-lg bg-primary/10 text-primary'>
+                                    <BookOpen size={18} />
+                                  </div>
+                                  <div className='flex items-start gap-1'>
+                                    {archived ? (
+                                      <span className='rounded-full bg-muted px-2 py-1 text-xs font-medium text-muted-foreground'>
+                                        Archived
+                                      </span>
+                                    ) : generating ? (
+                                      <span className='rounded-full bg-amber-500/10 px-2 py-1 text-xs font-medium text-amber-700'>
+                                        Generating
+                                      </span>
+                                    ) : (
+                                      <span className='flex items-center gap-1 rounded-full bg-emerald-500/10 px-2 py-1 text-xs font-medium text-emerald-700 dark:text-emerald-300'>
+                                        <Check size={12} />
+                                        Ready
+                                      </span>
+                                    )}
+                                    {isHubAdmin && (
+                                      <SdlcArchiveMenu
+                                        title={canvas.title}
+                                        archived={archived}
+                                        trackingScope='HubKnowledge'
+                                        className='-mr-1'
+                                        onToggle={next => archiveArtifact(canvas.id, next)}
+                                      />
+                                    )}
+                                  </div>
+                                </div>
+                                <h3 className='mt-4 font-semibold'>{canvas.title}</h3>
+                                <p className='mt-1 text-xs text-muted-foreground'>
+                                  Updated {updatedAtLabel(canvas.lastEditedAt ?? canvas.updatedAt)}
+                                  {' · '}
+                                  {typeof canvas.sdlcArtifact?.generationCommit === 'string'
+                                    ? canvas.sdlcArtifact.generationCommit.slice(0, 8)
+                                    : 'repository HEAD'}
+                                </p>
+                                <div className='mt-5 flex items-center justify-between gap-3'>
+                                  <span className='text-xs font-medium text-muted-foreground transition-colors group-hover:text-foreground'>
+                                    Open document
+                                  </span>
+                                </div>
+                              </div>
+                            );
+                          })}
+                          {knowledgeDocs.length === 0 && (
+                            <EmptyCard
+                              text={
+                                knowledgeRunning
+                                  ? 'Hub Knowledge generation is in progress.'
+                                  : isHubAdmin
+                                    ? 'Start the Hub Knowledge workflow, or add a document yourself.'
+                                    : 'Start the Hub Knowledge workflow to generate these documents.'
+                              }
+                            />
+                          )}
+                        </div>
+                      </section>
+                    )}
+
+                    {section === 'wiki' && (
+                      <SdlcWikiSection
+                        key={wikiScope?.folderId ?? 'repositories'}
+                        header={renderWorkflowHeader({
+                          icon: BookOpen,
+                          title: 'Wiki',
+                          description:
+                            'A Wiki for each repository, plus Relationships for how they connect.',
+                          workflow: wikiState,
+                        })}
+                        scopes={wikiScopeList}
+                        scope={wikiScope}
+                        pageCounts={wikiPageCounts}
+                        pages={wikiPages}
+                        showArchived={showArchivedWiki}
+                        onSelectScope={folderId =>
+                          navigateWithinSdlc(
+                            `/sdlc/${channelId}/wiki`,
+                            `?wiki=${encodeURIComponent(folderId)}`,
+                          )
+                        }
+                        onAddRepository={() => setHubDialog('manage')}
+                        onShowArchivedChange={setShowArchivedWiki}
+                        onOpen={page => openWikiPage(page.canvasId)}
+                        canManage={isHubAdmin}
+                        onCreatePage={() => openHubDocumentCreate('wiki')}
+                        onArchivePage={(page, archived) => archiveArtifact(page.canvasId, archived)}
+                      />
+                    )}
+
+                    {section === 'artifacts' &&
+                      (activeTypeFolder ? (
+                        renderArtifacts(activeTypeFolder)
+                      ) : (
+                        <EmptyCard text='Select an artifact type from the sidebar.' />
+                      ))}
+                    {section === 'tickets' && (
+                      <div className='relative h-[calc(100vh-8rem)] min-h-[36rem]'>
+                        <KanbanBoardScreen channelId={channel.id} />
+                      </div>
+                    )}
+                    {section === 'calls' && (
+                      // Every call in the hub, as a track's Calls tab lists its own. A
+                      // call's discussion opens beside the list on its own: the hub has
+                      // no list of discussions to go back to.
+                      <SdlcCalls
+                        // Its lists, filter and loaded pages are one hub's.
+                        key={channel.id}
+                        channelId={channel.id}
+                        track={null}
+                        hubName={channel.name}
+                        trackNames={trackNames}
+                        openConversationId={
+                          showRightPanel ? selectedDiscussionConversationId : null
+                        }
+                        onOpenCall={conversationId =>
+                          setDiscussionUrl({
+                            open: true,
+                            conversationId,
+                            threadOnly: true,
+                            push: true,
+                          })
+                        }
+                        {...(isHubMember && { onStartCall: () => setCallPicker(pageCallScope) })}
+                      />
+                    )}
+                  </div>
+                </>
               )}
             </main>
           </Panel>
@@ -4138,22 +4051,28 @@ export default function SdlcScreen(): ReactElement {
                         ownerType: activeFolderDiscussion.type,
                         ownerId: activeFolderDiscussion.id,
                       }}
-                      conversationIds={folderConversationIds}
-                      selectedConversationId={renderedConversationId}
+                      discussionScope={itemDiscussionScope ?? NO_DISCUSSIONS}
+                      selectedConversationId={selectedDiscussionConversationId}
+                      threadOnly={threadOnly}
+                      headerRule={!onTrackPage}
                       onSelectConversation={selectDiscussionConversation}
                       onAskAI={openSdlcAssistant}
                       onClose={closeConversations}
                       listActions={panelScopeActions('panel')}
                       title={activeFolderDiscussion.name}
+                      renderConversationBadge={renderItemConversationBadge}
                       scopeHeader={{
                         name: activeFolderDiscussion.name,
                         icon: discussionScopeIcon(activeFolderDiscussion),
-                        // Only a folder was reached from the track's list, so
-                        // only a folder has somewhere to go back to.
-                        ...(activeFolderDiscussion.type === 'FOLDER'
-                          ? { onExit: () => setFolderDiscussion(null) }
-                          : {}),
+                        // Every item's conversations sit inside the track's, however
+                        // they were reached, so each has the same way back out.
+                        onExit: openConversations,
+                        ...(!isOpenOnPage(activeFolderDiscussion) && {
+                          onOpen: () =>
+                            openDiscussedItem(activeFolderDiscussion, activeFolderDiscussion.name),
+                        }),
                       }}
+                      threadSubject={threadSubject}
                     />
                   ) : discussionOwner && discussionSurface ? (
                     <SdlcChatPanel
@@ -4166,13 +4085,34 @@ export default function SdlcScreen(): ReactElement {
                         surfaceType: discussionSurface.type,
                         surfaceId: discussionSurface.id,
                       }}
-                      conversationIds={discussionConversationIds}
-                      selectedConversationId={renderedConversationId}
+                      discussionScope={canvasDiscussionScope ?? NO_DISCUSSIONS}
+                      selectedConversationId={selectedDiscussionConversationId}
+                      threadOnly={threadOnly}
+                      headerRule={!onTrackPage}
                       onSelectConversation={selectDiscussionConversation}
                       onAskAI={openSdlcAssistant}
                       onClose={closeConversations}
                       listActions={panelScopeActions('panel')}
                       title={discussionOwner.title}
+                      threadSubject={threadSubject}
+                    />
+                  ) : hubCallThreadOwner ? (
+                    <SdlcChatPanel
+                      key='hub-call'
+                      channelId={channel.id}
+                      discussion={{
+                        ...(repo && { repoId: repo.id }),
+                        ownerType: hubCallThreadOwner.type,
+                        ownerId: hubCallThreadOwner.id,
+                      }}
+                      discussionScope={NO_DISCUSSIONS}
+                      selectedConversationId={selectedDiscussionConversationId}
+                      threadOnly
+                      onSelectConversation={selectDiscussionConversation}
+                      onAskAI={openSdlcAssistant}
+                      onClose={closeConversations}
+                      title={channel.name}
+                      threadSubject={threadSubject}
                     />
                   ) : section === 'tracks' && selectedTrack ? (
                     <SdlcChatPanel
@@ -4183,14 +4123,17 @@ export default function SdlcScreen(): ReactElement {
                         ownerType: 'TRACK',
                         ownerId: selectedTrack.id,
                       }}
-                      conversationIds={trackConversationIds}
-                      selectedConversationId={renderedConversationId}
+                      discussionScope={trackDiscussionScope ?? NO_DISCUSSIONS}
+                      selectedConversationId={selectedDiscussionConversationId}
+                      threadOnly={threadOnly}
+                      headerRule={!onTrackPage}
                       onSelectConversation={selectDiscussionConversation}
                       onAskAI={openSdlcAssistant}
                       onClose={closeConversations}
                       listActions={panelScopeActions('panel')}
                       title={selectedTrack.name}
                       renderConversationBadge={renderFolderConversationBadge}
+                      threadSubject={threadSubject}
                     />
                   ) : null}
                 </EntityLinkContext.Provider>
@@ -4200,8 +4143,18 @@ export default function SdlcScreen(): ReactElement {
         </ResizableGroup>
       </div>
 
+      {callPicker ? (
+        <CallParticipantsSelectionModal
+          isOpen
+          onClose={() => setCallPicker(null)}
+          channelId={channel.id}
+          callDisplayName={callPicker.name}
+          {...(callPicker.link ? { sdlcLink: callPicker.link } : {})}
+        />
+      ) : null}
+
       {createTicketOpen ? (
-        <EntityLinkContext.Provider value={entityLinkScope}>
+        <EntityLinkContext.Provider value={createTicketScope}>
           <CreateTicketModal
             isOpen={createTicketOpen}
             onClose={() => setCreateTicketOpen(false)}
@@ -4370,7 +4323,7 @@ export default function SdlcScreen(): ReactElement {
                   const source = deriveSource;
                   setDeriveSource(null);
                   setDeriveTypeId(null);
-                  openArtifactCreateFrom(folder, source.canvasId);
+                  openArtifactCreateFrom(folder, source);
                 }}
                 data-track-category='SdlcHub'
                 data-track-name='DeriveTypeContinue'
@@ -4388,6 +4341,14 @@ export default function SdlcScreen(): ReactElement {
         open={hubDialog === 'create'}
         onOpenChange={open => setHubDialog(open ? 'create' : null)}
         onSaved={savedChannelId => void navigate(`/sdlc/${savedChannelId}/overview`)}
+      />
+      <SdlcHubSwitcher
+        open={hubSwitcherOpen}
+        onOpenChange={setHubSwitcherOpen}
+        hubs={hubOptions}
+        currentHubId={channel.id}
+        onSelect={nextChannelId => void navigate(`/sdlc/${nextChannelId}/overview`)}
+        onNewHub={() => setHubDialog('create')}
       />
       <SdlcHubRepositoriesDialog
         open={hubDialog === 'manage'}
@@ -4763,7 +4724,7 @@ export default function SdlcScreen(): ReactElement {
         onOpenChange={open => {
           if (!open) {
             setNewFolderParent(null);
-            returnFocusToFinder();
+            returnFocusToFileList();
             setNewFolderName('');
           }
         }}
@@ -4800,7 +4761,7 @@ export default function SdlcScreen(): ReactElement {
               variant='outline'
               onClick={() => {
                 setNewFolderParent(null);
-                returnFocusToFinder();
+                returnFocusToFileList();
                 setNewFolderName('');
               }}
               data-track-category='SdlcHub'
@@ -4846,7 +4807,7 @@ export default function SdlcScreen(): ReactElement {
           >
             <div className='flex h-[52px] shrink-0 items-center gap-2 border-b border-border px-4'>
               <span className='min-w-0 flex-1 truncate text-[13px] font-semibold'>
-                {canvases.find(canvas => canvas.id === readerCanvasId)?.title ?? 'Artifact'}
+                {readerTitle || 'Artifact'}
               </span>
               {/* Icons: this bar sits directly above the canvas's own toolbar, and
                   two worded buttons made the two rows compete. */}
