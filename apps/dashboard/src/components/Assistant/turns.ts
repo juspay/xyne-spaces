@@ -12,13 +12,16 @@ export interface AssistantTurn {
 
 const MESSAGE_ID_PREFIX = 'assistant-';
 
-const STARTER_ACTION_IDS = ['start_chat', 'create_agent', 'invite_people'];
+const ADMIN_STARTER_IDS = ['invite_people', 'create_agent', 'create_channel'];
+const MEMBER_STARTER_IDS = ['start_chat', 'create_agent', 'create_channel'];
 
 export const starterActions = (
   visible: readonly ActionDefinition[],
+  isAdmin: boolean,
   limit = 3,
 ): ActionDefinition[] => {
-  const starters = STARTER_ACTION_IDS.flatMap(id => visible.filter(action => action.id === id));
+  const ids = isAdmin ? ADMIN_STARTER_IDS : MEMBER_STARTER_IDS;
+  const starters = ids.flatMap(id => visible.filter(action => action.id === id));
   const rest = visible.filter(action => !starters.includes(action));
   return [...starters, ...rest].slice(0, limit);
 };

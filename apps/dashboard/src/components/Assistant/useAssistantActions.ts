@@ -1,4 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { WorkspaceRole } from '@xyne/shared';
+import { useAuth } from '../../hooks/useAuth';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useOrganisationsAccess } from '../../routes/OrganisationsModule/organisationsSections';
 import type { Message } from '../Chat/XyneAISidebar/utils/XyneAITypes';
@@ -22,7 +24,10 @@ export interface AssistantActions {
   ask: (text: string) => Promise<AskOutcome>;
 }
 
-type AskOutcome = 'replied' | 'ask_ai' | 'cancelled';
+export type AskOutcome =
+  | { outcome: 'replied'; reply: string }
+  | { outcome: 'ask_ai' }
+  | { outcome: 'cancelled' };
 
 const newId = (): string => `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
 
@@ -30,11 +35,13 @@ export const useAssistantActions = ({ enabled }: { enabled: boolean }): Assistan
   const navigate = useNavigate();
   const { workspaceId } = useParams<{ workspaceId?: string }>();
   const organisations = useOrganisationsAccess();
+  const role = useAuth().user?.role;
   const actions = useMemo(
     () => (enabled ? visibleActions(AREAS, { organisations }) : []),
     [enabled, organisations],
   );
-  const starters = useMemo(() => starterActions(actions), [actions]);
+  const isAdmin = role === WorkspaceRole.ADMIN || role === WorkspaceRole.OWNER;
+  const starters = useMemo(() => starterActions(actions, isAdmin), [actions, isAdmin]);
   const [turns, setTurns] = useState<AssistantTurn[]>([]);
   const messages = useMemo(() => toChatMessages(turns), [turns]);
   const [isRouting, setIsRouting] = useState(false);
@@ -49,12 +56,16 @@ export const useAssistantActions = ({ enabled }: { enabled: boolean }): Assistan
     [navigate, workspaceId],
   );
 
-  const append = useCallback((userText: string, chosen: readonly ActionDefinition[]): void => {
-    setTurns(prev => [...prev, ...exchange(userText, chosen, new Date(), newId)]);
+  const append = useCallback((userText: string, chosen: readonly ActionDefinition[]): string => {
+    const pair = exchange(userText, chosen, new Date(), newId);
+    setTurns(prev => [...prev, ...pair]);
+    return pair[1].text;
   }, []);
 
   const choose = useCallback(
-    (action: ActionDefinition): void => append(action.title, [action]),
+    (action: ActionDefinition): void => {
+      append(action.title, [action]);
+    },
     [append],
   );
 
@@ -79,16 +90,15 @@ export const useAssistantActions = ({ enabled }: { enabled: boolean }): Assistan
 
   const ask = useCallback(
     async (text: string): Promise<AskOutcome> => {
-      if (routingRef.current) return 'cancelled';
+      if (routingRef.current) return { outcome: 'cancelled' };
       const controller = new AbortController();
       routingRef.current = controller;
       setIsRouting(true);
       try {
         const route = await routeText(text.trim(), actions, controller.signal);
-        if (controller.signal.aborted) return 'cancelled';
-        if (route.kind === 'ask_ai') return 'ask_ai';
-        append(text.trim(), route.actions);
-        return 'replied';
+        if (controller.signal.aborted) return { outcome: 'cancelled' };
+        if (route.kind === 'ask_ai') return { outcome: 'ask_ai' };
+        return { outcome: 'replied', reply: append(text.trim(), route.actions) };
       } finally {
         if (routingRef.current === controller) {
           routingRef.current = null;

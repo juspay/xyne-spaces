@@ -44,8 +44,9 @@ import { ComposerVoiceButton } from './ComposerVoiceButton';
 import { cn } from '../../utils/classNames';
 import { commandsForSurface, type CommandDef } from '@xyne/shared/commands';
 import { CommandMenu } from './CommandMenu';
-import { useVoiceMode } from './voice/useVoiceMode';
-import { VoiceModeBar } from './voice/VoiceModeBar';
+import { useVoiceMode } from '../Voice/useVoiceMode';
+import { VoiceModeBar } from '../Voice/VoiceModeBar';
+import type { StreamState } from '../../services/XyneAI';
 import { detectStudioIntent } from './voice/studioIntent';
 import { apiInstance } from '../../services/clients/apiClient';
 import {
@@ -192,6 +193,8 @@ function ContextPill({
     </div>
   );
 }
+
+const startedOnAIPage = (state: StreamState): boolean => state.startedOnAIPage === true;
 
 // Ghost icon button matching the /ai composer's look.
 function ToolbarButton({
@@ -682,7 +685,24 @@ export const AIComposer = forwardRef<AIComposerHandle, AIComposerProps>(function
     },
     [onSubmit, buildContext],
   );
-  const voice = useVoiceMode({ enabled: voiceMode, submit: submitTranscript });
+  const answerTranscript = useMemo(
+    () =>
+      isAutoOn && assistant
+        ? async (text: string): Promise<string | null> => {
+            if (detectStudioIntent(text)) return null;
+            const result = await assistant.ask(text);
+            if (result.outcome === 'cancelled') return '';
+            return result.outcome === 'replied' ? result.reply : null;
+          }
+        : undefined,
+    [isAutoOn, assistant],
+  );
+  const voice = useVoiceMode({
+    enabled: voiceMode,
+    submit: submitTranscript,
+    ownsStream: startedOnAIPage,
+    ...(answerTranscript && { answer: answerTranscript }),
+  });
 
   const [dismissedStudioIntent, setDismissedStudioIntent] = useState<string | null>(null);
   const studioSuggestion = useMemo(() => detectStudioIntent(value), [value]);

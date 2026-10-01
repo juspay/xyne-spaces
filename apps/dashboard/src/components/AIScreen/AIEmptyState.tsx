@@ -1,7 +1,5 @@
 import { useAuth } from '../../hooks/useAuth';
 import type { ReactElement } from 'react';
-import type { ActionDefinition } from '../Assistant/actions/action';
-import { ActionCards } from '../Assistant/ActionCards';
 
 /**
  * Time-aware greeting heading ("Good morning, Om") extracted from the user's email.
@@ -26,35 +24,22 @@ const firstName = (email?: string): string | undefined => {
 
 interface AIEmptyStateProps {
   className?: string;
-  starters?: readonly ActionDefinition[];
-  onSelectStarter?: (action: ActionDefinition) => void;
 }
 
-export function AIEmptyState({
-  className,
-  starters = [],
-  onSelectStarter = () => {},
-}: AIEmptyStateProps): ReactElement {
+export function AIEmptyState({ className }: AIEmptyStateProps): ReactElement {
   const { user } = useAuth();
   const greet = timeGreeting();
   const display = firstName(user?.email);
 
   return (
-    <>
-      <h1
-        className={
-          'animate-fadeUp text-center text-[24px] font-normal leading-tight tracking-tight text-foreground ' +
-          (className ?? '')
-        }
-      >
-        {greet}
-        {display ? `, ${display}` : ''}
-      </h1>
-      {starters.length > 0 && (
-        <div className='mx-auto mt-6 w-full max-w-[382px]'>
-          <ActionCards actions={starters} onSelect={onSelectStarter} />
-        </div>
-      )}
-    </>
+    <h1
+      className={
+        'animate-fadeUp text-center text-[24px] font-normal leading-tight tracking-tight text-foreground ' +
+        (className ?? '')
+      }
+    >
+      {greet}
+      {display ? `, ${display}` : ''}
+    </h1>
   );
 }

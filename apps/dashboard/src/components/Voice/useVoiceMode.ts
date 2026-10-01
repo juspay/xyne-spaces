@@ -1,15 +1,18 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { toast } from 'sonner';
-import { voiceInputService } from '../../../services/VoiceInput/voiceInputService';
-import { ttsService } from '../../../services/VoiceInput/ttsService';
-import { xyneAIStreamManager, type StreamState } from '../../../services/XyneAI';
-import { splitSentences, flushRemainder } from './voiceSentences';
+import { voiceInputService } from '../../services/VoiceInput/voiceInputService';
+import { ttsService } from '../../services/VoiceInput/ttsService';
+import { xyneAIStreamManager, type StreamState } from '../../services/XyneAI';
+import { splitSentences, flushRemainder, toSpokenText } from './voiceSentences';
 
 export type VoicePhase = 'idle' | 'listening' | 'transcribing' | 'thinking' | 'speaking';
 
 interface UseVoiceModeParams {
   enabled: boolean;
   submit: (text: string) => void;
+  ownsStream: (state: StreamState) => boolean;
+  // A reply to speak, '' when the assistant took the text but has nothing to say, or null to submit it.
+  answer?: (text: string) => Promise<string | null>;
   voice?: string;
 }
 
@@ -31,7 +34,13 @@ function latestBotContent(messages: StreamState['messages']): string | null {
   return stream || null;
 }
 
-export function useVoiceMode({ enabled, submit, voice }: UseVoiceModeParams): UseVoiceModeResult {
+export function useVoiceMode({
+  enabled,
+  submit,
+  ownsStream,
+  answer,
+  voice,
+}: UseVoiceModeParams): UseVoiceModeResult {
   const [phase, setPhase] = useState<VoicePhase>('idle');
   const phaseRef = useRef<VoicePhase>('idle');
   const setPhaseSafe = useCallback((next: VoicePhase): void => {
@@ -107,6 +116,7 @@ export function useVoiceMode({ enabled, submit, voice }: UseVoiceModeParams): Us
       audioRef.current.src = '';
       audioRef.current = null;
     }
+    if (typeof speechSynthesis !== 'undefined') speechSynthesis.cancel();
     if (playResolveRef.current) {
       const resolve = playResolveRef.current;
       playResolveRef.current = null;
@@ -120,25 +130,32 @@ export function useVoiceMode({ enabled, submit, voice }: UseVoiceModeParams): Us
     try {
       while (pendingTextRef.current.length > 0) {
         const sentence = pendingTextRef.current.shift() as string;
-        let audio;
-        try {
-          audio = await ttsService.synthesize(sentence, voice);
-        } catch {
-          continue;
-        }
+        const audio = await ttsService.synthesize(sentence, voice).catch(() => null);
         if (!pumpingRef.current) return;
         setPhaseSafe('speaking');
         await new Promise<void>(resolve => {
-          const el = new Audio(`data:${audio.mimeType};base64,${audio.audioBase64}`);
-          audioRef.current = el;
           const done = (): void => {
             playResolveRef.current = null;
             resolve();
           };
           playResolveRef.current = done;
-          el.onended = done;
-          el.onerror = done;
-          void el.play().catch(done);
+          if (audio) {
+            const el = new Audio(`data:${audio.mimeType};base64,${audio.audioBase64}`);
+            audioRef.current = el;
+            el.onended = done;
+            el.onerror = done;
+            void el.play().catch(done);
+            return;
+          }
+          // Server voice unavailable: the browser's own voice reads it instead.
+          if (typeof speechSynthesis === 'undefined') {
+            done();
+            return;
+          }
+          const utterance = new SpeechSynthesisUtterance(sentence);
+          utterance.onend = done;
+          utterance.onerror = done;
+          speechSynthesis.speak(utterance);
         });
       }
     } finally {
@@ -186,7 +203,7 @@ export function useVoiceMode({ enabled, submit, voice }: UseVoiceModeParams): Us
     if (!enabled) return undefined;
     return xyneAIStreamManager.subscribe((state: StreamState): void => {
       if (!turnActiveRef.current) return;
-      if (!state.startedOnAIPage) return;
+      if (!ownsStream(state)) return;
       if (activeStreamIdRef.current === null) {
         if (state.status !== 'streaming') return;
         activeStreamIdRef.current = state.streamId;
@@ -201,7 +218,7 @@ export function useVoiceMode({ enabled, submit, voice }: UseVoiceModeParams): Us
         activeStreamIdRef.current = null;
       }
     });
-  }, [enabled, processReply]);
+  }, [enabled, ownsStream, processReply]);
 
   const transcribe = useCallback(
     async (blob: Blob): Promise<void> => {
@@ -213,10 +230,20 @@ export function useVoiceMode({ enabled, submit, voice }: UseVoiceModeParams): Us
           setPhaseSafe('idle');
           return;
         }
+        setPhaseSafe('thinking');
+        const reply = answer ? await answer(text) : null;
+        if (reply === '') {
+          setPhaseSafe('idle');
+          return;
+        }
+        if (reply !== null) {
+          const { sentences, rest } = splitSentences(toSpokenText(reply));
+          enqueue([...sentences, ...flushRemainder(rest)]);
+          return;
+        }
         consumedRef.current = 0;
         activeStreamIdRef.current = null;
         turnActiveRef.current = true;
-        setPhaseSafe('thinking');
         submit(text);
       } catch (err) {
         toast.error('Voice transcription failed', {
@@ -225,7 +252,7 @@ export function useVoiceMode({ enabled, submit, voice }: UseVoiceModeParams): Us
         setPhaseSafe('idle');
       }
     },
-    [submit, setPhaseSafe],
+    [submit, answer, enqueue, setPhaseSafe],
   );
 
   const startRecording = useCallback((): void => {

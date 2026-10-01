@@ -1,12 +1,10 @@
 import { useEffect } from 'react';
+import { WorkspaceRole } from '@xyne/shared';
 import { useLocation, useParams } from 'react-router-dom';
-import { useAuth } from '../../hooks/useAuth';
 import { usePlatform } from '../../hooks/usePlatform';
+import { useAuth } from '../../hooks/useAuth';
 import { xyneAIActor } from '../../machines/xyneAIMachine';
-import { isAIOnboardingActive, isAIOnboardingPending } from '../../contexts/AIOnboardingContext';
-import { useOrganisationsAccess } from '../../routes/OrganisationsModule/organisationsSections';
-import { AREAS } from '../Assistant/catalog';
-import { visibleActions } from '../Assistant/pages';
+import { useIsNewUser } from '../Assistant/newUser';
 
 const panelSeenKey = (userId: string, workspaceId: string): string =>
   `xyne-setup-panel-seen:${userId}:${workspaceId}`;
@@ -34,25 +32,20 @@ const isChatRoute = (pathname: string): boolean =>
 
 export const AssistantPanelTrigger = ({ isOnboarding }: { isOnboarding: boolean }): null => {
   const { user } = useAuth();
+  const isNewUser = useIsNewUser();
   const { workspaceId } = useParams<{ workspaceId?: string }>();
   const { pathname } = useLocation();
   const { isMobile } = usePlatform();
-  const organisations = useOrganisationsAccess();
-  const hasActions = visibleActions(AREAS, { organisations }).length > 0;
   const userId = user?.id;
+  const isGuest = user?.role === WorkspaceRole.GUEST;
 
   useEffect(() => {
-    if (isOnboarding || isMobile || !isChatRoute(pathname) || !userId || !workspaceId) return;
-    if (!hasActions || hasSeenPanel(userId, workspaceId)) return;
-    try {
-      if (isAIOnboardingActive() || isAIOnboardingPending()) return;
-    } catch {
-      return;
-    }
+    if (!isNewUser || isGuest || isOnboarding || isMobile || !userId || !workspaceId) return;
+    if (!isChatRoute(pathname) || hasSeenPanel(userId, workspaceId)) return;
     xyneAIActor.send({ type: 'OPEN', trackSource: 'setup', startFreshChat: true });
     // OPEN is ignored while a modal holds the panel closed; stay unseen and retry on the next page.
     if (xyneAIActor.getSnapshot().matches('open')) markPanelSeen(userId, workspaceId);
-  }, [isOnboarding, isMobile, pathname, userId, workspaceId, hasActions]);
+  }, [isNewUser, isGuest, isOnboarding, isMobile, pathname, userId, workspaceId]);
 
   return null;
 };

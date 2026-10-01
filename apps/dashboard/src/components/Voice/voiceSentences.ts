@@ -41,3 +41,8 @@ export function flushRemainder(rest: string): string[] {
   if (!trimmed) return [];
   return hardWrap(trimmed);
 }
+
+// Chat replies are markdown; the splitter would read "1." and emphasis marks aloud.
+export function toSpokenText(markdown: string): string {
+  return markdown.replace(/^\s*\d+\.\s+/gm, '').replace(/[*_`#]/g, '');
+}

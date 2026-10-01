@@ -10,6 +10,7 @@ import {
   type MouseEvent as ReactMouseEvent,
 } from 'react';
 import { toast } from 'sonner';
+import { useSelector } from '@xstate/react';
 import { useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { useQuery as useZeroQuery } from '../../../hooks/useQuery';
@@ -94,7 +95,9 @@ import {
   type XyneAIResearchContext,
   flattenCanvasContexts,
 } from '../../../machines/xyneAIMachine';
-import { xyneAIStreamManager } from '../../../services/XyneAI';
+import { xyneAIStreamManager, type StreamState } from '../../../services/XyneAI';
+import { useVoiceMode } from '../../Voice/useVoiceMode';
+import { VoiceModeBar } from '../../Voice/VoiceModeBar';
 import { useFlowActionComplete } from '../../../hooks/useFlowActionComplete';
 import {
   buildXyneAIStreamThreadId,
@@ -399,6 +402,8 @@ const XyneAISidebar = ({
     [messages, branchSelections],
   );
   const assistant = useAssistantActions({ enabled: !isFullscreen });
+  // Starter cards only on the panel opened for a user who just finished onboarding.
+  const openedForOnboarding = useSelector(xyneAIActor, s => s.context.openSource === 'setup');
   const { turns: assistantTurns, messages: assistantMessages, reset: resetAssistant } = assistant;
   const { messages: transcriptMessages, serverIndexById } = useMemo(
     () => mergeTranscript(displayMessages, assistantMessages),
@@ -2150,20 +2155,43 @@ const XyneAISidebar = ({
     submit: trigger => void handleSubmit(trigger),
   });
 
+  const canRoute =
+    isAuto &&
+    assistant.actions.length > 0 &&
+    !aiOnboarding.isActive &&
+    !editingMessageId &&
+    attachments.length === 0 &&
+    selectedActivities.length === 0 &&
+    activeSelectionInfos.length === 0;
+
   // Not in handleSubmit, so auto-send, suggestion and follow-up sends are never routed.
   const handleComposerSubmit = (trigger?: 'button' | 'enter'): void => {
-    const isRoutable =
-      isAuto &&
-      assistant.actions.length > 0 &&
-      inputValue.trim() !== '' &&
-      !aiOnboarding.isActive &&
-      !editingMessageId &&
-      attachments.length === 0 &&
-      selectedActivities.length === 0 &&
-      activeSelectionInfos.length === 0;
-    if (isRoutable && routedSubmit.route(trigger)) return;
+    if (canRoute && inputValue.trim() !== '' && routedSubmit.route(trigger)) return;
     void handleSubmit(trigger);
   };
+
+  const [voiceMode, setVoiceMode] = useState(false);
+  const submitTranscript = useCallback((text: string): void => {
+    autoSendPendingQueryRef.current = text;
+    setInputValue(text);
+  }, []);
+  const answerTranscript = canRoute
+    ? async (text: string): Promise<string | null> => {
+        const result = await assistant.ask(text);
+        if (result.outcome === 'cancelled') return '';
+        return result.outcome === 'replied' ? result.reply : null;
+      }
+    : undefined;
+  const ownsStream = useCallback(
+    (state: StreamState): boolean => state.streamSlotKey === streamThreadKey,
+    [streamThreadKey],
+  );
+  const voice = useVoiceMode({
+    enabled: voiceMode,
+    submit: submitTranscript,
+    ownsStream,
+    ...(answerTranscript && { answer: answerTranscript }),
+  });
 
   const hasBackgroundStreamingElsewhere = useMemo(() => {
     if (streamingSessionIds.length === 0) return false;
@@ -2499,7 +2527,7 @@ const XyneAISidebar = ({
                   ) : (
                     <XyneAIEmptyState
                       hideSuggestions={hideEmptyStateSuggestions}
-                      starters={assistant.starters}
+                      starters={openedForOnboarding ? assistant.starters : []}
                       onSelectStarter={assistant.choose}
                     />
                   )
@@ -2700,24 +2728,34 @@ const XyneAISidebar = ({
                 )}
               >
                 <div className={cn(isFullscreen && 'w-full max-w-2xl')}>
-                  <XyneAIInputSection
-                    ref={xyneAIInputRef}
-                    isOnboarding={aiOnboarding.isActive}
-                    showChannelTag={true}
-                    isStreaming={isActiveSessionStreaming || assistant.isRouting}
-                    contextPanelPosition='bottom'
-                    selectedAgentSlug={effectiveAgentSlug}
-                    agents={isV2 ? accessibleAgents : []}
-                    {...(isV2 && !isAgentForced ? { onSelectAgent: handleSelectAgent } : {})}
-                    {...(isV2 && !isAgentForced && !isFullscreen
-                      ? { isAuto, onSelectAuto: handleSelectAuto }
-                      : {})}
-                    compactToolbar={isCompactSidebar}
-                    {...sharedInputSectionProps}
-                    kbCollectionId={kbCollectionIdProp}
-                    kbOpenNonce={kbOpenNonce}
-                    onSelectedCollectionsChange={setSelectedCollectionIds}
-                  />
+                  {voiceMode ? (
+                    <VoiceModeBar
+                      phase={voice.phase}
+                      onHoldStart={voice.startRecording}
+                      onHoldEnd={voice.stopRecording}
+                      onExit={() => setVoiceMode(false)}
+                    />
+                  ) : (
+                    <XyneAIInputSection
+                      ref={xyneAIInputRef}
+                      isOnboarding={aiOnboarding.isActive}
+                      showChannelTag={true}
+                      isStreaming={isActiveSessionStreaming || assistant.isRouting}
+                      contextPanelPosition='bottom'
+                      selectedAgentSlug={effectiveAgentSlug}
+                      agents={isV2 ? accessibleAgents : []}
+                      {...(isV2 && !isAgentForced ? { onSelectAgent: handleSelectAgent } : {})}
+                      {...(isV2 && !isAgentForced && !isFullscreen
+                        ? { isAuto, onSelectAuto: handleSelectAuto }
+                        : {})}
+                      compactToolbar={isCompactSidebar}
+                      {...(!isFullscreen && { onEnterVoiceMode: () => setVoiceMode(true) })}
+                      {...sharedInputSectionProps}
+                      kbCollectionId={kbCollectionIdProp}
+                      kbOpenNonce={kbOpenNonce}
+                      onSelectedCollectionsChange={setSelectedCollectionIds}
+                    />
+                  )}
                 </div>
               </div>
             )}

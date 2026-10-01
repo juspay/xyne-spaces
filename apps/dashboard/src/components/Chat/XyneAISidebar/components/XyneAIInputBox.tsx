@@ -36,6 +36,7 @@ import Placeholder from '@tiptap/extension-placeholder';
 import LinkExtension from '@tiptap/extension-link';
 import { LinkSyncPlugin } from '../../../ui/TipTapExtensions/LinkSyncPlugin';
 import { toast } from 'sonner';
+import { AudioLines } from 'lucide-react';
 import { VoiceInput } from '../../../ui/InputBox/VoiceInput';
 import type { VoiceInputHandle } from '../../../ui/InputBox/VoiceInput';
 import { StopIcon } from './StopIcon';
@@ -128,6 +129,7 @@ export interface XyneAIInputBoxProps {
   onInputChange: (value: string) => void;
   /** `trigger` says which affordance sent it; the button has its own click row. */
   onSubmit: (trigger?: 'button' | 'enter') => void;
+  onEnterVoiceMode?: () => void;
   onSelectedCollectionsChange?: (collectionIds: string[]) => void;
   onThreadInfoChange?: (threadInfo: ThreadInfo | null) => void;
   onSelectionInfosChange?: (selectionInfos: SelectionInfo[]) => void;
@@ -249,6 +251,7 @@ export const XyneAIInputBox = forwardRef<XyneAIInputBoxHandle, XyneAIInputBoxPro
       inputValue,
       onInputChange,
       onSubmit,
+      onEnterVoiceMode,
       onSelectedCollectionsChange,
       onThreadInfoChange,
       onSelectionInfosChange,
@@ -2014,6 +2017,20 @@ export const XyneAIInputBox = forwardRef<XyneAIInputBoxHandle, XyneAIInputBoxPro
                     disabled={isStreaming}
                     onStateChange={({ isRecording }) => setIsVoiceRecording(isRecording)}
                   />
+                  {onEnterVoiceMode && (
+                    <button
+                      type='button'
+                      onClick={onEnterVoiceMode}
+                      className='p-1.5 rounded transition-all duration-200 ease-in-out hover:bg-accent text-muted-foreground'
+                      aria-label='Voice mode'
+                      title='Voice mode'
+                      disabled={isStreaming}
+                      data-track-category='CHAT_INPUT'
+                      data-track-name='ENTER_VOICE_MODE'
+                    >
+                      <AudioLines className='h-4 w-4' aria-hidden />
+                    </button>
+                  )}
                   <button
                     onClick={isStreaming ? onAbort : () => onSubmit('button')}
                     data-ph-capture-attribute-track-id={

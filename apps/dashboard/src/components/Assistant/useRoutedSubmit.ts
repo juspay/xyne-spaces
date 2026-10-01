@@ -30,8 +30,8 @@ export const useRoutedSubmit = <Trigger>({
     void assistant.ask(asked).then(outcome => {
       if (inFlightRef.current !== token) return;
       inFlightRef.current = null;
-      if (outcome === 'cancelled' || valueRef.current !== asked) return;
-      if (outcome === 'replied') clear();
+      if (outcome.outcome === 'cancelled' || valueRef.current !== asked) return;
+      if (outcome.outcome === 'replied') clear();
       else submitRef.current(trigger);
     });
     return true;

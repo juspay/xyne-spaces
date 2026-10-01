@@ -37,7 +37,6 @@ import { useV2SessionInvalidator } from '../../hooks/useAskAISessionsV2';
 import { useSelectedAgent } from '../../hooks/useSelectedAgent';
 import { useAssistantActions } from '../../components/Assistant/useAssistantActions';
 import type { AssistantRouting } from '../../components/Assistant/useRoutedSubmit';
-import type { ActionDefinition } from '../../components/Assistant/actions/action';
 import { AI_ACTIVE_SESSION_KEY, AI_SHOW_CHAT_VIEW_KEY } from './aiSessionStorage';
 
 function CitationWorkspaceOpener({ onOpenSources }: { onOpenSources: () => void }): null {
@@ -172,7 +171,7 @@ const AIScreen = (): ReactElement => {
   const { invalidateSessions: invalidateV2Sessions } = useV2SessionInvalidator();
   // Above the thread, whose remounts would otherwise drop the local turns.
   const assistant = useAssistantActions({ enabled: true });
-  const { reset: resetAssistant, choose: chooseAssistant } = assistant;
+  const { reset: resetAssistant } = assistant;
 
   useEffect(() => {
     showChatViewRef.current = showChatView;
@@ -436,20 +435,12 @@ const AIScreen = (): ReactElement => {
       ? {
           ask: async text => {
             const outcome = await assistant.ask(text);
-            if (outcome === 'replied') showAssistantThread();
+            if (outcome.outcome === 'replied') showAssistantThread();
             return outcome;
           },
           cancel: assistant.cancel,
         }
       : undefined;
-  const chooseLandingStarter = useCallback(
-    (action: ActionDefinition): void => {
-      chooseAssistant(action);
-      showAssistantThread();
-    },
-    [chooseAssistant, showAssistantThread],
-  );
-
   const handleConversationChange = useCallback(
     (sessionId: string): void => {
       setActiveSessionId(sessionId);
@@ -722,10 +713,7 @@ const AIScreen = (): ReactElement => {
                     </button>
                   )}
                   <div className='flex w-full max-w-3xl flex-col'>
-                    <AIEmptyState
-                      starters={assistant.starters}
-                      onSelectStarter={chooseLandingStarter}
-                    />
+                    <AIEmptyState />
                     <div className='mt-6'>
                       <AIComposer
                         ref={landingComposerRef}
