@@ -31,6 +31,7 @@ import {
   SendPlaneSlant,
   ListAiGenerated,
   KeySlant,
+  ListSearch,
 } from '@xyne/icons';
 import { AudioLines, Radar, Store } from 'lucide-react';
 
@@ -305,6 +306,13 @@ export const NAVIGATION_ITEMS: NavigationItem[] = [
     popout: true,
   },
   {
+    path: '/audit-logs',
+    label: 'Audit Logs',
+    description: 'Change history for boards, user groups and desks',
+    icon: ListSearch,
+    popout: true,
+  },
+  {
     path: '/tag-review',
     label: 'Tag Review',
     description: 'Proposed thread tags awaiting review',
@@ -476,6 +484,7 @@ export const TOOLBAR_ITEM_DESCRIPTIONS: Record<string, string> = {
   '/knowledge-base': 'File and folder knowledge base for Ask AI',
   '/migrations/slack': 'Slack Migration tab under Migrations',
   '/scheduled-messages': 'Messages scheduled for later delivery (Inbox)',
+  '/audit-logs': 'Change history for boards, user groups and desks',
 };
 
 type Permissions = ReturnType<typeof usePermissions>;
