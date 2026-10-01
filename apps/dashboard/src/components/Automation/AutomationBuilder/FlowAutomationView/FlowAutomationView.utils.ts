@@ -302,7 +302,7 @@ export function insertStepAtPath(
 }
 
 /** Path of the step with `id`, searching every branch. */
-export function findStepPath(
+function findStepPath(
   config: AutomationConfig,
   id: string,
   container: ViewStepPath = ROOT_CONTAINER,
