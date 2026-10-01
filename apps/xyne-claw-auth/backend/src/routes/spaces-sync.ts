@@ -5,7 +5,7 @@ import { prisma, type AppPrismaClient, type AppTransactionClient } from "../db.j
 import { asyncHandler, badRequest, conflict, ok } from "../lib/http.js";
 import { resolveSurfacePerson } from "../lib/identity-resolution.js";
 import { provisionDefaultAgents } from "../lib/provision-org-agents.js";
-import { ensureDefaultAgentSpacesApps, installDefaultAgentsToWorkspace } from "../lib/provision-workspace-agents.js";
+import { ensureAgentsInstalledInWorkspace } from "../lib/provision-workspace-agents.js";
 import { createLogger } from "../logger.js";
 
 const log = createLogger("spaces-sync");
@@ -367,14 +367,12 @@ router.post("/workspace", asyncHandler(async (req: Request, res: Response) => {
     });
   });
   provisionDefaultAgents(result.orgId)
-    .then(() => ensureDefaultAgentSpacesApps({
+    .then(() => ensureAgentsInstalledInWorkspace({
       orgId: result.orgId,
       spacesOrgId,
       spacesWorkspaceId,
       createdBySpacesUserId: optionalString(body, "createdBySpacesUserId"),
     }))
-    // Presence-checked (missing only) — safe to run on every sync.
-    .then(() => installDefaultAgentsToWorkspace({ orgId: result.orgId, spacesWorkspaceId }))
     .catch((err) => {
       log.error("[spaces-sync] default-agent provisioning failed", { orgId: result.orgId, err });
     });
@@ -483,16 +481,15 @@ router.post("/user", asyncHandler(async (req: Request, res: Response) => {
       workspaceCreated: workspace.created,
     };
   });
-  // Full agents → apps → install pipeline on every sync; presence-checked,
-  // so steady state is a self-healing no-op.
+  // Full agents → apps → install pipeline on every sync; idempotent, so
+  // steady state is a self-healing no-op.
   provisionDefaultAgents(result.orgId)
-    .then(() => ensureDefaultAgentSpacesApps({
+    .then(() => ensureAgentsInstalledInWorkspace({
       orgId: result.orgId,
       spacesOrgId,
       spacesWorkspaceId,
       createdBySpacesUserId: optionalString(body, "createdBySpacesUserId") ?? spacesUserId,
     }))
-    .then(() => installDefaultAgentsToWorkspace({ orgId: result.orgId, spacesWorkspaceId }))
     .catch((err) => {
       log.error("[spaces-sync] default-agent provisioning failed", { orgId: result.orgId, err });
     });
