@@ -334,6 +334,17 @@ export class InvitationService {
   }
 
   /**
+   * Mark that the invite email was actually sent (approval flow).
+   * null on an approved invite means the email failed and can be resent.
+   */
+  async markInviteEmailSent(id: string): Promise<void> {
+    await this.prisma.invitation.update({
+      where: { id },
+      data: { inviteEmailSentAt: new Date() },
+    });
+  }
+
+  /**
    * Ensure orgMember has a password. If not, generate a temporary one,
    * hash it, store it, and return the plaintext for the invitation email.
    */

@@ -751,6 +751,7 @@ export const invitationTable = table('invitations')
     entityType: string().optional(),
     channelId: string().optional(),
     isOrgApproved: boolean().optional(),
+    inviteEmailSentAt: number().optional(),
     createdAt: number(),
     updatedAt: number(),
   })

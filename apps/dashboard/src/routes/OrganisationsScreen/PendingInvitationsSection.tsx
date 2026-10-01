@@ -26,6 +26,8 @@ interface PendingInvitation {
   createdAt: string;
   invitedByName: string | null;
   invitedByEmail: string | null;
+  isOrgApproved: boolean;
+  inviteEmailSentAt: string | null;
 }
 
 interface PendingInvitationsSectionProps {
@@ -76,15 +78,17 @@ export const PendingInvitationsSection = ({
     setReviewingId(invitation.id);
     try {
       await apiInstance.post(`/invitations/${invitation.id}/${action}`);
+      const isResend = action === 'approve' && invitation.isOrgApproved;
       toast.success(
-        action === 'approve'
-          ? `Approved ${invitation.email} — invite emailed`
-          : `Rejected ${invitation.email}`,
+        action === 'reject'
+          ? `Rejected ${invitation.email}`
+          : isResend
+            ? `Invite email resent to ${invitation.email}`
+            : `Approved ${invitation.email} — invite emailed`,
       );
       await loadInvitations();
     } catch (error) {
-      const message =
-        error instanceof Error ? error.message : `Failed to ${action} invitation`;
+      const message = error instanceof Error ? error.message : `Failed to ${action} invitation`;
       toast.error(message);
     } finally {
       setReviewingId(null);
@@ -135,6 +139,7 @@ export const PendingInvitationsSection = ({
         <div className='divide-y divide-border'>
           {invitations.map(invitation => {
             const isReviewing = reviewingId === invitation.id;
+            const isEmailFailed = invitation.isOrgApproved && !invitation.inviteEmailSentAt;
 
             return (
               <div key={invitation.id} className='p-4'>
@@ -160,28 +165,48 @@ export const PendingInvitationsSection = ({
                     <span className='mr-2 text-xs text-muted-foreground'>
                       {formatDate(invitation.createdAt)}
                     </span>
-                    <Button
-                      variant='outline'
-                      size='sm'
-                      disabled={isReviewing}
-                      onClick={() => void reviewInvitation(invitation, 'reject')}
-                      data-track-category='Organisations'
-                      data-track-name='REJECT_PENDING_INVITATION'
-                      className='text-destructive hover:bg-destructive/10 hover:text-destructive'
-                    >
-                      <UserX className='h-4 w-4' />
-                      Reject
-                    </Button>
-                    <Button
-                      size='sm'
-                      loading={isReviewing}
-                      onClick={() => void reviewInvitation(invitation, 'approve')}
-                      data-track-category='Organisations'
-                      data-track-name='APPROVE_PENDING_INVITATION'
-                    >
-                      <UserCheck className='h-4 w-4' />
-                      Approve
-                    </Button>
+                    {isEmailFailed && (
+                      <span className='rounded bg-amber-500/10 px-2 py-0.5 text-xs text-amber-600'>
+                        Email failed to send
+                      </span>
+                    )}
+                    {isEmailFailed ? (
+                      <Button
+                        size='sm'
+                        loading={isReviewing}
+                        onClick={() => void reviewInvitation(invitation, 'approve')}
+                        data-track-category='Organisations'
+                        data-track-name='RESEND_INVITATION_EMAIL'
+                      >
+                        <RefreshCw className='h-4 w-4' />
+                        Resend email
+                      </Button>
+                    ) : (
+                      <>
+                        <Button
+                          variant='outline'
+                          size='sm'
+                          disabled={isReviewing}
+                          onClick={() => void reviewInvitation(invitation, 'reject')}
+                          data-track-category='Organisations'
+                          data-track-name='REJECT_PENDING_INVITATION'
+                          className='text-destructive hover:bg-destructive/10 hover:text-destructive'
+                        >
+                          <UserX className='h-4 w-4' />
+                          Reject
+                        </Button>
+                        <Button
+                          size='sm'
+                          loading={isReviewing}
+                          onClick={() => void reviewInvitation(invitation, 'approve')}
+                          data-track-category='Organisations'
+                          data-track-name='APPROVE_PENDING_INVITATION'
+                        >
+                          <UserCheck className='h-4 w-4' />
+                          Approve
+                        </Button>
+                      </>
+                    )}
                   </div>
                 </div>
               </div>
