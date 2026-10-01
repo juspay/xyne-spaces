@@ -3385,11 +3385,16 @@ export const queries: AnyQueryRegistry = defineQueries({
         .orderBy('id', 'desc');
 
       if (participantId) {
-        query = query.where(({ or, cmp }) =>
-          or(
-            cmp('createdByUserId', participantId),
-            cmp('recordingParticipants', 'LIKE', `%"${participantId}"%`),
-          ),
+        // Flagged `participants` rows are a derived index over the
+        // `recordingParticipants` JSON column, so membership is an indexed
+        // equality rather than a `LIKE '%"<id>"%'` scan.
+        //
+        // No separate creator arm: syncRecordingParticipantRows always writes a
+        // row for the creator, so this single EXISTS covers them too. An OR
+        // across `calls` and `call_participants` here would stop the planner
+        // driving the query from that index at all.
+        query = query.whereExists('participants', p =>
+          p.where('userId', participantId).where('isRecordingParticipant', true),
         );
       }
 
@@ -3464,11 +3469,10 @@ export const queries: AnyQueryRegistry = defineQueries({
         .orderBy('id', 'desc');
 
       if (participantId) {
-        query = query.where(({ or, cmp }) =>
-          or(
-            cmp('createdByUserId', participantId),
-            cmp('recordingParticipants', 'LIKE', `%"${participantId}"%`),
-          ),
+        // See createdOatsRecordings — same derived-index membership test, and
+        // the same reason there is no separate creator arm.
+        query = query.whereExists('participants', p =>
+          p.where('userId', participantId).where('isRecordingParticipant', true),
         );
       }
 

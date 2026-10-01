@@ -98,6 +98,69 @@ export type GoogleCalendarPushState = {
 };
 
 /**
+ * Rebuilds the recording-participant rows for one HEADLESS call from the ids
+ * just written to `calls.recordingParticipants`.
+ *
+ * That JSON column stays the source of truth. These rows are a derived index,
+ * so Zero can filter the Oats recording lists by participant with an indexed
+ * equality through the existing `participants` relationship, instead of the
+ * unindexable `recordingParticipants LIKE '%"<id>"%'` scan it replaced.
+ *
+ * They live on `call_participants` alongside real membership, told apart by
+ * `isRecordingParticipant`. Every write here is scoped to flagged rows, so an
+ * invitee row for the same call could never be touched — though by the
+ * invariant on the Prisma field, a HEADLESS call has none to begin with.
+ *
+ * Delete-all + re-insert rather than a diff: the sets are tiny (a handful of
+ * ids per recording), and being idempotent means re-running it against the JSON
+ * column repairs drift instead of compounding it. Must be called inside the
+ * same transaction that writes the JSON column, or the two can diverge.
+ *
+ * The creator is always included, whether or not the JSON lists them — the app
+ * has always treated them as one of a recording's people (the client prepends
+ * them when reading the JSON; see getRecordingParticipantIds). Holding that
+ * invariant here is what lets the participant filter be a single indexed EXISTS
+ * rather than an OR across two tables, which no index can drive. So these rows
+ * are the *effective* participant set (JSON ∪ {creator}), deliberately not a
+ * byte-for-byte mirror of the JSON column.
+ */
+export async function syncRecordingParticipantRows(
+  tx: Prisma.TransactionClient,
+  params: {
+    callId: string;
+    workspaceId: string;
+    createdByUserId: string;
+    participantIds: string[];
+  },
+): Promise<void> {
+  const { callId, workspaceId, createdByUserId, participantIds } = params;
+  // Creator first — see the invariant above. Removing them from the JSON list
+  // still leaves their row, which is what keeps the queries' single EXISTS
+  // correct for recordings whose stored list is empty.
+  const uniqueIds = [...new Set([createdByUserId, ...participantIds].filter(Boolean))];
+
+  await tx.callParticipant.deleteMany({
+    where: { callId, isRecordingParticipant: true },
+  });
+  if (uniqueIds.length === 0) return;
+
+  await tx.callParticipant.createMany({
+    data: uniqueIds.map(userId => ({
+      workspaceId,
+      callId,
+      userId,
+      // The creator curates this list; these columns carry no meeting semantics
+      // for a flagged row, they only satisfy the shared table's NOT NULLs.
+      invitedBy: createdByUserId,
+      meetingStatus: MeetingStatus.PENDING,
+      isExternal: false,
+      isRecordingParticipant: true,
+    })),
+    skipDuplicates: true,
+  });
+}
+
+/**
  * Shape of `calls.metadata` as written by this repository.
  * `artifactMessageId` is set only for calls started from a slash-command
  * artifact card, and links the call back to the message that owns it.

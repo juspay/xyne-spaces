@@ -8,7 +8,7 @@ import { DatabaseClient } from '@/database/client';
 import type { Call } from '@prisma/client';
 import { transaction } from '../base';
 import { setSlashCommandArtifactLifecycle } from '@/database/repositories/messageArtifactRepository';
-import { CallMetadata, CallRepository, CreateCallParticipantInput, parseRecordingParticipantIds, scheduledCallPillContent, scheduledCallPillMetadata } from '@/database/repositories/callRepository';
+import { CallMetadata, CallRepository, CreateCallParticipantInput, parseRecordingParticipantIds, scheduledCallPillContent, scheduledCallPillMetadata, syncRecordingParticipantRows } from '@/database/repositories/callRepository';
 import { queueCallVespaFeed, CallVespaFeedSource } from '@/services/callVespaQueue';
 import { updateCallSystemMessageIfNeeded } from '@/zero/utils/systemMessagesUtils';
 import { logger } from '@/utils/logger';
@@ -35,14 +35,14 @@ export function linkArtifactToActiveCallTx(callId: string, metadata: any, artifa
   });
 }
 export function updateRecordingParticipantsTx(lockKey: string, externalId: string, action: string, userId: string) {
-  return transaction(['Call'], 'updateRecordingParticipants: advisory-locked recording participant list update must commit atomically; tx is not ACL-wrapped', DatabaseClient.getInstance(), async (tx) => {
+  return transaction(['Call', 'CallParticipant'], 'updateRecordingParticipants: advisory-locked recording participant list update must commit atomically; tx is not ACL-wrapped', DatabaseClient.getInstance(), async (tx) => {
     await advisoryXactLock(tx, ['Call'],
       'call recording participants: serialize participant reconciliation for one call',
       lockKey);
 
     const call = await tx.call.findUnique({
       where: { externalId },
-      select: { recordingParticipants: true },
+      select: { id: true, workspaceId: true, createdByUserId: true, recordingParticipants: true },
     });
     if (!call) return false;
 
@@ -55,6 +55,13 @@ export function updateRecordingParticipantsTx(lockKey: string, externalId: strin
     await tx.call.update({
       where: { externalId },
       data: { recordingParticipants: JSON.stringify(next) },
+    });
+    // Same transaction as the JSON write, so the derived index can't drift.
+    await syncRecordingParticipantRows(tx, {
+      callId: call.id,
+      workspaceId: call.workspaceId,
+      createdByUserId: call.createdByUserId,
+      participantIds: next,
     });
     return true;
   });

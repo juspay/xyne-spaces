@@ -58,7 +58,9 @@ export class CallsACL extends BaseQueryACL<'calls'> {
             cmp('callType', CallType.HEADLESS),
             cmp('visibility', CallVisibility.PUBLIC),
           ),
-          exists('participants', (p) => p.where('userId', this.ctx.userID)),
+          exists('participants', (p) =>
+            p.where('userId', this.ctx.userID).where('isRecordingParticipant', false),
+          ),
           exists('channel', (ch) =>
             ch
               .where('workspaceId', '=', this.ctx.workspaceId)
@@ -119,7 +121,9 @@ export class CallsACL extends BaseQueryACL<'calls'> {
           cmp('callType', CallType.HEADLESS),
           cmp('visibility', CallVisibility.PUBLIC),
         ),
-        exists('participants', (p) => p.where('userId', this.ctx.userID)),
+        exists('participants', (p) =>
+            p.where('userId', this.ctx.userID).where('isRecordingParticipant', false),
+          ),
         exists('channel', (ch) =>
           ch
             .where('workspaceId', '=', this.ctx.workspaceId)
