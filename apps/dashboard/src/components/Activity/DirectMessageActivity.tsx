@@ -22,16 +22,17 @@ export const DirectMessageActivity = ({
   isExpanded: boolean;
 }): ReactElement | null => {
   const message = activity.message;
+  const conversation = activity.conversation;
   const sender = useUser(message?.senderId ?? '');
   const artifact = parseSlashCommandArtifactMessage(message?.content);
   const { baseRoute } = useRouteContext();
 
-  if (!message || !sender || !message.conversation) return null;
+  if (!message || !sender || !conversation) return null;
 
-  const isThreadReply = message.conversation?.initialMessageId !== message.messageId;
-  const targetPath = `${baseRoute}/${message.conversation?.channelId}${
-    isThreadReply ? `/${message.conversation?.conversationId}` : ''
-  }#origin=${message.conversation?.conversationId}${
+  const isThreadReply = conversation?.initialMessageId !== message.messageId;
+  const targetPath = `${baseRoute}/${conversation?.channelId}${
+    isThreadReply ? `/${conversation?.conversationId}` : ''
+  }#origin=${conversation?.conversationId}${
     isThreadReply ? `&messageId=${message.messageId}` : ''
   }`;
 
@@ -40,7 +41,7 @@ export const DirectMessageActivity = ({
       activity={activity}
       actorId={sender.id}
       actorName={getUserDisplayName(sender)}
-      channelId={message.conversation?.channelId}
+      channelId={conversation?.channelId}
       badgeIcon={<ChatDefault className='size-3 text-emerald-500' />}
       badgeColorClass='bg-muted'
       {...(artifact && {
@@ -49,7 +50,7 @@ export const DirectMessageActivity = ({
       description={<span className='text-muted-foreground text-sm'>sent you a DM in</span>}
       targetPath={targetPath}
       focusThread={isThreadReply}
-      linkedItemCreatedAt={message.conversation.createdAt}
+      linkedItemCreatedAt={conversation.createdAt}
       useActivityCutoff
       isExpanded={isExpanded}
       className='flex items-start'

@@ -21,19 +21,20 @@ export const KeywordMatchActivity = ({
   isExpanded: boolean;
 }): ReactElement | null => {
   const message = activity.message;
+  const conversation = activity.conversation;
   const sender = useUser(message?.senderId ?? '');
   const artifact = parseSlashCommandArtifactMessage(message?.content);
 
   const { baseRoute } = useRouteContext();
 
-  if (!message || !sender || !message.conversation) return null;
+  if (!message || !sender || !conversation) return null;
 
-  const isThreadReply = message.conversation?.initialMessageId !== message.messageId;
+  const isThreadReply = conversation?.initialMessageId !== message.messageId;
 
-  const targetPath = `${baseRoute}/${message.conversation?.channelId}${isThreadReply ? `/${message.conversation?.conversationId}` : ''}#origin=${message.conversation?.conversationId}${isThreadReply ? `&messageId=${message.messageId}` : ''}`;
+  const targetPath = `${baseRoute}/${conversation?.channelId}${isThreadReply ? `/${conversation?.conversationId}` : ''}#origin=${conversation?.conversationId}${isThreadReply ? `&messageId=${message.messageId}` : ''}`;
   const supportTargetPath =
-    message.conversation?.channelId && message.conversation?.conversationId
-      ? `/support/${message.conversation.channelId}?conversationId=${message.conversation.conversationId}&messageId=${message.messageId}`
+    conversation?.channelId && conversation?.conversationId
+      ? `/support/${conversation.channelId}?conversationId=${conversation.conversationId}&messageId=${message.messageId}`
       : undefined;
 
   return (
@@ -41,7 +42,7 @@ export const KeywordMatchActivity = ({
       activity={activity}
       actorId={sender.id}
       actorName={sender.name}
-      channelId={message.conversation?.channelId}
+      channelId={conversation?.channelId}
       badgeIcon={<Hashtag className='size-3 text-primary' />}
       badgeColorClass='bg-muted'
       {...(artifact && {
@@ -51,7 +52,7 @@ export const KeywordMatchActivity = ({
       targetPath={targetPath}
       focusThread={isThreadReply}
       supportTargetPath={supportTargetPath}
-      linkedItemCreatedAt={message.conversation.createdAt}
+      linkedItemCreatedAt={conversation.createdAt}
       useActivityCutoff
       isExpanded={isExpanded}
       showUnreadDot

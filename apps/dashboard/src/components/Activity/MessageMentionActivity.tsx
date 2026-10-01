@@ -22,6 +22,7 @@ export const MessageMentionActivity = ({
   isExpanded: boolean;
 }): ReactElement | null => {
   const message = activity.message;
+  const conversation = activity.conversation;
   const sender = useUser(message?.senderId ?? '');
   // Mentioning someone in a SEV2 notifies them as a plain mention, so this row —
   // not just the artifact row — has to present the artifact.
@@ -29,14 +30,14 @@ export const MessageMentionActivity = ({
 
   const { baseRoute } = useRouteContext();
 
-  if (!message || !sender || !message.conversation) return null;
+  if (!message || !sender || !conversation) return null;
 
-  const isThreadReply = message.conversation?.initialMessageId !== message.messageId;
+  const isThreadReply = conversation?.initialMessageId !== message.messageId;
 
-  const targetPath = `${baseRoute}/${message.conversation?.channelId}${isThreadReply ? `/${message.conversation?.conversationId}` : ''}#origin=${message.conversation?.conversationId}${isThreadReply ? `&messageId=${message.messageId}` : ''}`;
+  const targetPath = `${baseRoute}/${conversation?.channelId}${isThreadReply ? `/${conversation?.conversationId}` : ''}#origin=${conversation?.conversationId}${isThreadReply ? `&messageId=${message.messageId}` : ''}`;
   const supportTargetPath =
-    message.conversation?.channelId && message.conversation?.conversationId
-      ? `/support/${message.conversation.channelId}?conversationId=${message.conversation.conversationId}&messageId=${message.messageId}`
+    conversation?.channelId && conversation?.conversationId
+      ? `/support/${conversation.channelId}?conversationId=${conversation.conversationId}&messageId=${message.messageId}`
       : undefined;
 
   return (
@@ -44,7 +45,7 @@ export const MessageMentionActivity = ({
       activity={activity}
       actorId={sender.id}
       actorName={getUserDisplayName(sender)}
-      channelId={message.conversation?.channelId}
+      channelId={conversation?.channelId}
       badgeIcon={<AtMark className='size-3 text-primary' />}
       badgeColorClass='bg-muted'
       {...(artifact && {
@@ -54,7 +55,7 @@ export const MessageMentionActivity = ({
       targetPath={targetPath}
       focusThread={isThreadReply}
       supportTargetPath={supportTargetPath}
-      linkedItemCreatedAt={message.conversation.createdAt}
+      linkedItemCreatedAt={conversation.createdAt}
       useActivityCutoff
       isExpanded={isExpanded}
       showUnreadDot

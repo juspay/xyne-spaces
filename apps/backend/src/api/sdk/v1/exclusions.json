@@ -196,6 +196,10 @@
       "reason": "deferred:sdlc — the software-development-lifecycle subsystem (repos, links, baselines, discussions) is an internal surface driven by its own services and Claw execution profiles. Exposing it is a product decision, not an oversight."
     },
     {
+      "name": "sdlcUserActivitiesV2",
+      "reason": "deferred:sdlc — the software-development-lifecycle subsystem (repos, links, baselines, discussions) is an internal surface driven by its own services and Claw execution profiles. Exposing it is a product decision, not an oversight."
+    },
+    {
       "name": "supportTicketByXyneId",
       "kind": "query",
       "reason": "superseded-by:supportTicketByXyneIdV4",
@@ -326,6 +330,12 @@
       "kind": "query",
       "reason": "superseded-by:userActivitiesPaginatedV2",
       "note": "Older version of a covered operation."
+    },
+    {
+      "name": "userActivitiesPaginatedV3",
+      "kind": "query",
+      "reason": "deferred:response shape — retargeting activities.listPaginated would move each row's conversation from message.conversation to conversation",
+      "note": "Same rows and arguments as userActivitiesPaginatedV2, which activities.listPaginated keeps mapping to."
     },
     {
       "name": "userCallHistory",

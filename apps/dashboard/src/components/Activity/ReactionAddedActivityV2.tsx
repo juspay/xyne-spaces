@@ -28,10 +28,11 @@ export const ReactionAddedActivityV2 = ({
   isExpanded: boolean;
 }): ReactElement | null => {
   const message = activity.message;
+  const conversation = activity.conversation;
   const actorUser = useUser(activity.actorId); // Most recent reactor
   const { baseRoute } = useRouteContext();
 
-  if (!message || !message.conversation) return null;
+  if (!message || !conversation) return null;
 
   const isV2 = activity.actorAction === 'added_v2';
 
@@ -73,15 +74,15 @@ export const ReactionAddedActivityV2 = ({
     descriptionText = `and ${uniqueReactorCount - 1} others reacted to your message in`;
   }
 
-  const isThreadReply = message.conversation?.initialMessageId !== message.messageId;
-  const targetPath = `${baseRoute}/${message.conversation?.channelId}${isThreadReply ? `/${message.conversation?.conversationId}` : ''}#origin=${message.conversation?.conversationId}${isThreadReply ? `&messageId=${message.messageId}` : ''}`;
+  const isThreadReply = conversation?.initialMessageId !== message.messageId;
+  const targetPath = `${baseRoute}/${conversation?.channelId}${isThreadReply ? `/${conversation?.conversationId}` : ''}#origin=${conversation?.conversationId}${isThreadReply ? `&messageId=${message.messageId}` : ''}`;
 
   return (
     <ActivityItemCard
       activity={activity}
       actorId={activity.actorId} // Most recent reactor
       actorName={getUserDisplayName(actorUser)}
-      channelId={message.conversation?.channelId}
+      channelId={conversation?.channelId}
       badgeIcon={renderEmoji(latestEmoji)}
       badgeColorClass='bg-muted'
       {...(artifact && {
@@ -90,7 +91,7 @@ export const ReactionAddedActivityV2 = ({
       description={<span className='text-muted-foreground text-sm'>{descriptionText}</span>}
       targetPath={targetPath}
       focusThread={isThreadReply}
-      linkedItemCreatedAt={message.conversation.createdAt}
+      linkedItemCreatedAt={conversation.createdAt}
       useActivityCutoff
       isExpanded={isExpanded}
     >

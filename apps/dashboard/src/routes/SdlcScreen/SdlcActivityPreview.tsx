@@ -16,7 +16,7 @@ export function SdlcActivityPreview({ channelId }: SdlcActivityPreviewProps): Re
   const [cursor, setCursor] = useState<{ id: string; updatedAt: number } | null>(null);
   const [accumulated, setAccumulated] = useState<ActivityWithRelated[]>([]);
   const [activities, queryDetails] = useCachedQuery(
-    queries.sdlcUserActivities({ channelId, limit: PAGE_SIZE + 1, start: cursor }),
+    queries.sdlcUserActivitiesV2({ channelId, limit: PAGE_SIZE + 1, start: cursor }),
   );
   const rows = useMemo(
     () => (Array.isArray(activities) ? (activities as ActivityWithRelated[]) : []),
