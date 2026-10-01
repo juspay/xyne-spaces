@@ -3,6 +3,7 @@ import { type Prisma } from '@prisma/client';
 import { CallStatus, RecurringCallSeriesStatus } from '@xyne/shared';
 import { logger } from '@/utils/logger';
 import { queueScheduledCallPillSync } from '@/services/scheduledCallPillSync';
+import { CallVespaFeedSource, queueCallVespaFeed } from '@/services/callVespaQueue';
 
 export class ScheduledCallRepository {
   private client(tx?: Prisma.TransactionClient) {
@@ -18,6 +19,7 @@ export class ScheduledCallRepository {
       data: { status: CallStatus.CANCELLED },
     });
     queueScheduledCallPillSync(callId, 'scheduledCallRepository.cancelCall');
+    queueCallVespaFeed(callId, { source: CallVespaFeedSource.ScheduledCallRepositoryCancelCall });
   }
 
   async findFirstUpcomingSeriesInstance(params: {

@@ -353,6 +353,9 @@ export class RecurringCallService {
     const result = await cancelSeriesTx(db, seriesId, now);
 
     queueCallCalendarPushMany(futureInstanceIds, 'recurringCallService.cancelSeries');
+    futureInstanceIds.forEach((instanceId) =>
+      queueCallVespaFeed(instanceId, { source: CallVespaFeedSource.RecurringCallServiceCancelSeries }),
+    );
 
     return result;
   }
@@ -382,6 +385,9 @@ export class RecurringCallService {
     const result = await deleteSeriesTx(db, seriesId);
 
     queueCallCalendarPushMany(instanceIds, 'recurringCallService.deleteSeries');
+    instanceIds.forEach((instanceId) =>
+      queueCallVespaFeed(instanceId, { source: CallVespaFeedSource.RecurringCallServiceDeleteSeries }),
+    );
 
     return result;
   }
