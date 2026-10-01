@@ -126,6 +126,7 @@ import { confirmInterrupt, isInterruptible } from '../components/InterruptGuard/
 import { NoteTakerOverlayHost } from './RecordingsV2Screen/components/NoteTakerOverlayHost';
 import FormScreen from './FormScreen/FormScreen';
 import ScheduledMessageScreen from './ScheduledMessageScreen/ScheduledMessageScreen';
+import AuditLogsScreen from './AuditLogsScreen/AuditLogsScreen';
 import AppsScreen from './AppsScreen/AppsScreen';
 import InitialStateLoader from '../providers/InitialStateLoader';
 import { ZeroFallbackProvider } from '../contexts/ZeroFallbackContext';
@@ -1840,6 +1841,14 @@ export const router = createBrowserRouter(
                     <ToolbarProtectedRoute path='/scheduled-messages'>
                       <ScheduledMessageScreen />
                     </ToolbarProtectedRoute>
+                  ),
+                },
+                {
+                  path: 'audit-logs',
+                  element: (
+                    <ResourceProtectedRoute resourceName='ANALYTICS'>
+                      <AuditLogsScreen />
+                    </ResourceProtectedRoute>
                   ),
                 },
                 {

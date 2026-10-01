@@ -38,6 +38,7 @@ import {
   BookmarkDefault,
   SendPlaneSlant,
   ListAiGenerated,
+  ListSearch,
 } from '@xyne/icons';
 import { AudioLines, Radar } from 'lucide-react';
 
@@ -190,6 +191,7 @@ export const NAVIGATION_ITEMS: NavigationItem[] = [
   { path: '/workflows', label: 'Workflows', icon: GitBranch, popout: true },
   { path: '/scheduled-messages', label: 'Scheduled Messages', icon: CalendarTimer, popout: true },
   { path: '/user-groups', label: 'User Groups', icon: UserThree, popout: true },
+  { path: '/audit-logs', label: 'Audit Logs', icon: ListSearch, popout: true },
   {
     path: '/resource-access',
     label: 'User Management',
@@ -276,6 +278,7 @@ export const TOOLBAR_ITEM_DESCRIPTIONS: Record<string, string> = {
   '/knowledge-base': 'File and folder knowledge base for Ask AI',
   '/memory': 'Saved context and memory for AI',
   '/releaseManager': 'Release and deployment tracking',
+  '/audit-logs': 'Change history for boards, user groups and desks',
 };
 
 type Permissions = ReturnType<typeof usePermissions>;

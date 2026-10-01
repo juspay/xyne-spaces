@@ -94,10 +94,11 @@ export const matchPreset = (dr: DateRangeValue): string | null => {
   return null;
 };
 
-const TimeInput: React.FC<{ value: string; onChange: (v: string) => void }> = ({
-  value,
-  onChange,
-}) => {
+const TimeInput: React.FC<{
+  value: string;
+  onChange: (v: string) => void;
+  trackCategory: string;
+}> = ({ value, onChange, trackCategory }) => {
   const [h, setH] = useState(() => value.split(':')[0] ?? '00');
   const [m, setM] = useState(() => value.split(':')[1] ?? '00');
   const minRef = useRef<HTMLInputElement>(null);
@@ -152,7 +153,7 @@ const TimeInput: React.FC<{ value: string; onChange: (v: string) => void }> = ({
         value={h}
         placeholder='HH'
         maxLength={2}
-        data-track-category='DeskMetrics'
+        data-track-category={trackCategory}
         data-track-name='TimeInputHour'
         onChange={handleHourChange}
         onKeyDown={keyDown}
@@ -168,7 +169,7 @@ const TimeInput: React.FC<{ value: string; onChange: (v: string) => void }> = ({
         value={m}
         placeholder='MM'
         maxLength={2}
-        data-track-category='DeskMetrics'
+        data-track-category={trackCategory}
         data-track-name='TimeInputMinute'
         onChange={handleMinChange}
         onKeyDown={keyDown}
@@ -187,6 +188,8 @@ export interface DeskMetricsDateRangePickerProps {
   onChange: (dr: DateRangeValue, st: string, et: string) => void;
   /** Longest selectable range, in days. Hides longer presets too. */
   maxDays?: number;
+  /** data-track-category for the picker's clicks, so other screens can reuse it. */
+  trackCategory?: string;
 }
 
 export const DeskMetricsDateRangePicker: React.FC<DeskMetricsDateRangePickerProps> = ({
@@ -195,6 +198,7 @@ export const DeskMetricsDateRangePicker: React.FC<DeskMetricsDateRangePickerProp
   endTime,
   onChange,
   maxDays = MAX_CUSTOM_DAYS,
+  trackCategory = 'DeskMetrics',
 }) => {
   const [open, setOpen] = useState(false);
   const [showCustom, setShowCustom] = useState(false);
@@ -231,7 +235,7 @@ export const DeskMetricsDateRangePicker: React.FC<DeskMetricsDateRangePickerProp
       <Popover.Trigger asChild>
         <button
           type='button'
-          data-track-category='DeskMetrics'
+          data-track-category={trackCategory}
           data-track-name='DateRangePickerOpen'
           className='inline-flex h-[32px] items-center gap-1.5 rounded-[8px] border border-desk-border bg-background px-3 text-sm text-foreground hover:bg-muted/50 dark:border-border'
         >
@@ -252,7 +256,7 @@ export const DeskMetricsDateRangePicker: React.FC<DeskMetricsDateRangePickerProp
               <button
                 key={p.label}
                 type='button'
-                data-track-category='DeskMetrics'
+                data-track-category={trackCategory}
                 data-track-name='DateRangePreset'
                 onClick={() => {
                   onChange(p.getValue(), '00:00', '23:59');
@@ -270,7 +274,7 @@ export const DeskMetricsDateRangePicker: React.FC<DeskMetricsDateRangePickerProp
             ))}
             <button
               type='button'
-              data-track-category='DeskMetrics'
+              data-track-category={trackCategory}
               data-track-name='DateRangeCustomToggle'
               onClick={() => setShowCustom(v => !v)}
               className={cn(
@@ -298,11 +302,19 @@ export const DeskMetricsDateRangePicker: React.FC<DeskMetricsDateRangePickerProp
               <div className='flex flex-col gap-2 border-t border-border p-3'>
                 <div className='flex items-center gap-2'>
                   <span className='w-8 shrink-0 text-xs text-muted-foreground'>From</span>
-                  <TimeInput value={pendingStart} onChange={setPendingStart} />
+                  <TimeInput
+                    value={pendingStart}
+                    onChange={setPendingStart}
+                    trackCategory={trackCategory}
+                  />
                 </div>
                 <div className='flex items-center gap-2'>
                   <span className='w-8 shrink-0 text-xs text-muted-foreground'>To</span>
-                  <TimeInput value={pendingEnd} onChange={setPendingEnd} />
+                  <TimeInput
+                    value={pendingEnd}
+                    onChange={setPendingEnd}
+                    trackCategory={trackCategory}
+                  />
                 </div>
                 <button
                   type='button'
@@ -321,7 +333,7 @@ export const DeskMetricsDateRangePicker: React.FC<DeskMetricsDateRangePickerProp
                     onChange(pendingRange, pendingStart, pendingEnd);
                     setOpen(false);
                   }}
-                  data-track-category='DeskMetrics'
+                  data-track-category={trackCategory}
                   data-track-name='DateRangeApply'
                   className='w-full rounded-[8px] bg-desk-accent py-1.5 text-sm font-medium text-white hover:opacity-90'
                 >
