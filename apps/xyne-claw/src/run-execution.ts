@@ -1,5 +1,5 @@
 import { pinRunJudgeBackend } from "./judge-backend.js";
-import { pinRunOptimizations } from "./optimizations.js";
+import { pinRunOptimizations, tierOptimizationDefaults } from "./optimizations.js";
 import {
   ensureActiveRun,
   finishActiveRun,
@@ -238,7 +238,7 @@ export async function executeRunFromPayload(
   const state: RunExecutionState = hooks ? { hooks } : {};
 
   pinRunJudgeBackend(judgeBackend);
-  pinRunOptimizations(optimizations, agentConfig?.["optimizations"]);
+  pinRunOptimizations(optimizations, agentConfig?.["optimizations"], tierOptimizationDefaults(delegationMode));
 
   try {
     // Process in background

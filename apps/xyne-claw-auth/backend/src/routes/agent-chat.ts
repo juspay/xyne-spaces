@@ -2635,6 +2635,51 @@ internalRouter.post("/:slug/chat/:convId/callback", async (req: Request<{ slug: 
   }
   const persistedAttachments = persisted?.persistedAttachments ?? [];
 
+  // Connector card from the agent's suggest-connectors call — the same
+  // renderer (and already-connected filter) the Spaces webhook and run-stream
+  // paths use. This transport had no delivery at all, so the agent told the
+  // user to "connect it with the card" and no card ever appeared.
+  const callbackBody = req.body as {
+    pendingConnectorSuggestions?: { serverTypes: string[]; listAll?: boolean; title?: string };
+    blockedConnectors?: unknown;
+  };
+  if (finalStatus === "completed" && callbackBody.pendingConnectorSuggestions) {
+    try {
+      const { resolveXyneAiCardTarget } = await import("../lib/flow-card-delivery.js");
+      const target = await resolveXyneAiCardTarget({
+        assistantMessageId: chatMessageId,
+        conversationId: req.params.convId,
+        agentSlug: req.params.slug,
+      });
+      const { renderConnectorSuggestCard } = await import("../lib/connector-card-render.js");
+      const suggestions = callbackBody.pendingConnectorSuggestions;
+      if (target) {
+        const flow = await renderConnectorSuggestCard({
+          suggestions,
+          blockedConnectors: Array.isArray(callbackBody.blockedConnectors)
+            ? callbackBody.blockedConnectors.filter((t): t is string => typeof t === "string")
+            : undefined,
+          id: {
+            agentSlug: target.agentSlug,
+            agentOrgId: target.orgId,
+            userId: target.userId,
+            conversationId: target.conversationId,
+            channelId: "",
+            spacesAppId: target.spacesAppId,
+          },
+          target,
+        });
+        if (flow && callbackId) {
+          const localStream = pendingStreams.get(callbackId);
+          if (localStream) localStream.sendEvent("ui-flow", { flow });
+          else publishChatEvent({ kind: "progress", callbackId, events: [{ event: "ui-flow", data: { flow } }] });
+        }
+      }
+    } catch (err) {
+      log.warn(`[agent-chat] connector card delivery failed: ${errMsg(err)}`);
+    }
+  }
+
   const resolvePayload = {
     content: finalContent,
     status: finalStatus,
