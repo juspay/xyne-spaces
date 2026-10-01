@@ -16,6 +16,7 @@ export const AutomationStatusValues = {
   REVOKED: 'REVOKED',
   AUTO_REVOKED: 'AUTO_REVOKED',
   ARCHIVED: 'ARCHIVED',
+  PLAYGROUND: 'PLAYGROUND',
 } as const;
 export type AutomationStatus = (typeof AutomationStatusValues)[keyof typeof AutomationStatusValues];
 
@@ -28,6 +29,7 @@ export function isLiveStatus(status: string): boolean {
 export function isProposalStatus(status: string): boolean {
   return (
     status === AutomationStatusValues.DRAFT ||
+    status === AutomationStatusValues.PLAYGROUND ||
     status === AutomationStatusValues.PENDING_APPROVAL ||
     status === AutomationStatusValues.REJECTED ||
     status === AutomationStatusValues.REVOKED ||
@@ -53,6 +55,7 @@ export const AutomationRunStatusValues = {
   FAILED: 'FAILED',
   CANCELLED: 'CANCELLED',
   SKIPPED: 'SKIPPED',
+  HELD: 'HELD',
 } as const;
 export type AutomationRunStatus =
   (typeof AutomationRunStatusValues)[keyof typeof AutomationRunStatusValues];
@@ -509,9 +512,16 @@ export function releaseAutomationTemplate(attachmentId: string): Promise<{ remov
 }
 
 // ─── Runs API (REST — replaces Zero queries for runs) ────────────────────
+/** The version a run belongs to — enough for the Runs page to gate ▶ Play. */
+export interface RunAutomationRef {
+  status: AutomationStatus;
+  createdById: string;
+}
+
 export interface RunsListPage {
   runs: AutomationRunSummary[];
   nextCursor: string | null;
+  automation?: RunAutomationRef;
 }
 
 export function fetchAutomationRuns(
@@ -552,6 +562,7 @@ export interface RunDetail {
     createdAt: string;
     updatedAt: string;
   }>;
+  automation?: RunAutomationRef | null;
 }
 
 /** Every row in this automation's lineage (all past + current versions), newest first. */
@@ -569,4 +580,21 @@ export function fetchAutomationRun(executionId: string): Promise<RunDetail> {
       `/automations/runs/${encodeURIComponent(executionId)}`,
     ),
   );
+}
+
+/** Move a HELD playground run to PENDING and queue it (default priority). */
+export function playAutomationRun(
+  executionId: string,
+): Promise<{ runId: string; status: AutomationRunStatus }> {
+  return unwrap(
+    apiInstance.post<SuccessEnvelope<{ runId: string; status: AutomationRunStatus }>>(
+      `/automations/runs/${encodeURIComponent(executionId)}/play`,
+    ),
+  );
+}
+
+/** Whether a version has any run (any status) — decides Delete vs Archive and fork-on-edit. */
+export async function fetchAutomationHasRuns(automationId: string): Promise<boolean> {
+  const page = await fetchAutomationRuns(automationId, { limit: 1 });
+  return page.runs.length > 0;
 }

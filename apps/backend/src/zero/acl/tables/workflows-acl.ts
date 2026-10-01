@@ -31,6 +31,10 @@ const ADMIN_ONLY_STATUSES = new Set<string>(['DISABLED', 'REJECTED', 'ARCHIVED']
  */
 const AUTHOR_OR_ADMIN_STATUSES = new Set<string>(['PENDING_APPROVAL', 'REVOKED']);
 
+function createdByIdOf(row: { metadata: string | null }): string | undefined {
+  return parseAutomationMetadata(row.metadata).createdById || undefined;
+}
+
 export class WOrkflowsAcl extends BaseACL<'workflows'> {
   /**
    * Check that the calling user holds `ADMIN` on the AUTOMATIONS resource —
@@ -73,6 +77,55 @@ export class WOrkflowsAcl extends BaseACL<'workflows'> {
         'workflows',
       );
     }
+  }
+
+  /**
+   * Playground transitions (owner-or-admin, never open to every member):
+   *  - DRAFT → PLAYGROUND (start recording). No other status may enter PLAYGROUND.
+   *  - PLAYGROUND → DRAFT (stop recording, or the demote step of a sibling's start
+   *    recording — allowed when the caller owns the lineage's other recording).
+   *  - DRAFT → ARCHIVED (a draft with runs; the run count is checked in the mutator).
+   * Returns true when the transition was handled here.
+   */
+  private async checkPlaygroundTransition(
+    existing: {
+      id: string;
+      status: string;
+      metadata: string | null;
+      automationSeriesId: string | null;
+    },
+    nextStatus: string,
+    tx: Transaction<Schema>,
+  ): Promise<boolean> {
+    if (nextStatus === 'PLAYGROUND') {
+      if (existing.status !== 'DRAFT' && existing.status !== 'PLAYGROUND') {
+        throw new MutationACLError(
+          'Automation update failed: only a draft can start recording',
+          'workflows',
+        );
+      }
+      if (createdByIdOf(existing) !== this.ctx.userID) await this.requireAutomationsAdmin(tx);
+      return true;
+    }
+    if (existing.status === 'PLAYGROUND' && nextStatus === 'DRAFT') {
+      if (createdByIdOf(existing) === this.ctx.userID) return true;
+      const seriesId = existing.automationSeriesId ?? existing.id;
+      const siblings = await tx.run(
+        zql.workflows
+          .where('automationSeriesId', seriesId)
+          .where('workflowType', AUTOMATION_WORKFLOW_TYPE)
+          .where('status', 'PLAYGROUND')
+          .where('id', '!=', existing.id),
+      );
+      if (siblings.some(row => createdByIdOf(row) === this.ctx.userID)) return true;
+      await this.requireAutomationsAdmin(tx);
+      return true;
+    }
+    if (existing.status === 'DRAFT' && nextStatus === 'ARCHIVED') {
+      if (createdByIdOf(existing) !== this.ctx.userID) await this.requireAutomationsAdmin(tx);
+      return true;
+    }
+    return false;
   }
 
   async canInsert(
@@ -150,8 +203,12 @@ export class WOrkflowsAcl extends BaseACL<'workflows'> {
     // Status-transition authorization:
     //  - DISABLED / REJECTED / ARCHIVED → admin-only (approve / reject / disable / archive).
     //  - PENDING_APPROVAL / REVOKED → the automation's author, or an admin.
+    //  - PLAYGROUND transitions and DRAFT → ARCHIVED → the owner, or an admin.
     //  - all other transitions → workspace membership only.
     const nextStatus = (args as { status?: string }).status;
+    if (nextStatus && (await this.checkPlaygroundTransition(existing, nextStatus, tx))) {
+      return;
+    }
     if (nextStatus && ADMIN_ONLY_STATUSES.has(nextStatus)) {
       await this.requireAutomationsAdmin(tx);
     } else if (nextStatus && AUTHOR_OR_ADMIN_STATUSES.has(nextStatus)) {

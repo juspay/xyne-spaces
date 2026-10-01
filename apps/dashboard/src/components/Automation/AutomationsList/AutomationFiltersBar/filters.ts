@@ -33,6 +33,7 @@ export const DEFAULT_AUTOMATION_FILTERS: AutomationFilters = {
   channelIds: [],
   statuses: [
     AutomationStatusValues.DRAFT,
+    AutomationStatusValues.PLAYGROUND,
     AutomationStatusValues.PENDING_APPROVAL,
     AutomationStatusValues.ACTIVE,
     AutomationStatusValues.DISABLED,
@@ -69,6 +70,7 @@ export const TRIGGER_TYPE_OPTIONS: { value: WorkflowEventType; label: string }[]
 
 export const STATUS_OPTIONS: { value: AutomationStatus; label: string }[] = [
   { value: AutomationStatusValues.DRAFT, label: 'Draft' },
+  { value: AutomationStatusValues.PLAYGROUND, label: 'Playground' },
   { value: AutomationStatusValues.PENDING_APPROVAL, label: 'Pending Approval' },
   { value: AutomationStatusValues.ACTIVE, label: 'Active' },
   { value: AutomationStatusValues.DISABLED, label: 'Disabled' },
@@ -89,7 +91,7 @@ export function isHistoryRow(a: Automation): boolean {
 }
 
 /**
- * DRAFT and PENDING_APPROVAL rows are visible only to their creator. Every
+ * DRAFT, PLAYGROUND and PENDING_APPROVAL rows are visible only to their creator. Every
  * other status — live, or any history status — is visible to everyone. This
  * must be applied before any filter is considered, so that selecting a
  * status filter can never reveal another user's private draft.

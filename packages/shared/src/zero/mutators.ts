@@ -12544,9 +12544,9 @@ export const mutators = defineMutators({
         if (!existing || existing.workflowType !== 'Automations') {
           throw new Error(`Automation "${id}" not found`);
         }
-        if (existing.status !== 'DRAFT') {
+        if (existing.status !== 'DRAFT' && existing.status !== 'PLAYGROUND') {
           throw new Error(
-            `Automation "${id}" is ${existing.status}; only DRAFT proposals can be submitted.`,
+            `Automation "${id}" is ${existing.status}; only DRAFT or PLAYGROUND versions can be submitted.`,
           );
         }
         await tx.mutate.workflows.update({
@@ -12659,8 +12659,53 @@ export const mutators = defineMutators({
       },
     ),
 
+    // DRAFT → PLAYGROUND. The server mutator also demotes any other PLAYGROUND version in
+    // the lineage to DRAFT (at most one recording per lineage); that syncs back.
+    startRecording: defineMutator(
+      z.object({ id: z.string(), timestamp: z.number() }),
+      async ({ tx, args: { id, timestamp } }) => {
+        const existing = await tx.run(zql.workflows.where('id', id).one());
+        if (!existing || existing.workflowType !== 'Automations') {
+          throw new Error(`Automation "${id}" not found`);
+        }
+        if (existing.status !== 'DRAFT') {
+          throw new Error(
+            `Automation "${id}" is ${existing.status}; only DRAFT versions can start recording.`,
+          );
+        }
+        if (existing.eventType === 'WEBHOOK') {
+          throw new Error('Webhook-triggered automations cannot record in Playground.');
+        }
+        await tx.mutate.workflows.update({
+          id,
+          status: 'PLAYGROUND',
+          updatedAt: timestamp,
+        });
+      },
+    ),
+    // PLAYGROUND → DRAFT. Held runs stay listed; Play is disabled until it records again.
+    stopRecording: defineMutator(
+      z.object({ id: z.string(), timestamp: z.number() }),
+      async ({ tx, args: { id, timestamp } }) => {
+        const existing = await tx.run(zql.workflows.where('id', id).one());
+        if (!existing || existing.workflowType !== 'Automations') {
+          throw new Error(`Automation "${id}" not found`);
+        }
+        if (existing.status !== 'PLAYGROUND') {
+          throw new Error(
+            `Automation "${id}" is ${existing.status}; only PLAYGROUND versions can stop recording.`,
+          );
+        }
+        await tx.mutate.workflows.update({
+          id,
+          status: 'DRAFT',
+          updatedAt: timestamp,
+        });
+      },
+    ),
+
     // Admin-only: permanently retire a live automation. ARCHIVED is gated to
-    // admins by the workflows ACL, and the event-router only matches ACTIVE
+    // admins by the workflows ACL, and the event-router only matches ACTIVE and PLAYGROUND
     // rows, so archiving immediately stops it from firing.
     archive: defineMutator(
       z.object({ id: z.string(), timestamp: z.number() }),
@@ -12669,9 +12714,15 @@ export const mutators = defineMutators({
         if (!existing || existing.workflowType !== 'Automations') {
           throw new Error(`Automation "${id}" not found`);
         }
-        if (existing.status !== 'ACTIVE' && existing.status !== 'DISABLED') {
+        // DRAFT is allowed client-side for drafts with runs; the server mutator checks the
+        // run count (runs aren't replicated to the client).
+        if (
+          existing.status !== 'ACTIVE' &&
+          existing.status !== 'DISABLED' &&
+          existing.status !== 'DRAFT'
+        ) {
           throw new Error(
-            `Automation "${id}" is ${existing.status}; only LIVE rows can be archived.`,
+            `Automation "${id}" is ${existing.status}; only LIVE rows or drafts with runs can be archived.`,
           );
         }
         await tx.mutate.workflows.update({
