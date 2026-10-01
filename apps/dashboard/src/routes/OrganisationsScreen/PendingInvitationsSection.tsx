@@ -77,7 +77,9 @@ export const PendingInvitationsSection = ({
     try {
       await apiInstance.post(`/invitations/${invitation.id}/${action}`);
       toast.success(
-        action === 'approve' ? `Approved ${invitation.email}` : `Rejected ${invitation.email}`,
+        action === 'approve'
+          ? `Approved ${invitation.email} — invite emailed`
+          : `Rejected ${invitation.email}`,
       );
       await loadInvitations();
     } catch (error) {

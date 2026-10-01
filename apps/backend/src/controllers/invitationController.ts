@@ -11,7 +11,7 @@ import { withWorkspaceScope } from '@/database/tenant/context';
 import { createOwnerInvitation, syncAllBotUsersForNewWorkspace } from '@/bypassAcl/orgServices';
 import { logger } from '@/utils/logger';
 import { config } from '@/config/env';
-import { ProjectType, WorkspaceRole, OrgRole } from '@xyne/shared'; 65b9f155c3 (feat: XYNE-64977 invite contacts + Invite org approval)
+import { ProjectType, WorkspaceRole, OrgRole } from '@xyne/shared';
 import { aiProvisioningService } from '@/services/aiProvisioningService';
 import { isOrganizationPolicyError, organizationDomainService } from '@/services/organizationDomainService';
 import { CacConfigService } from '@/services/cacConfigService';
@@ -126,7 +126,22 @@ export class InvitationController {
 
       // Pending invites send the email right away — approval only gates the
       // accept. Temp password is skipped for them (no orgMember row yet).
-      const isPendingApproval = invitation.isOrgApproved === false;
+      // Pending approval sends the invite email only after an admin approves —
+      // no email here, and no temp password (that's generated at approval).
+      if (invitation.isOrgApproved === false) {
+        res.status(201).json({
+          success: true,
+          pendingApproval: true,
+          invitation: {
+            id: invitation.id,
+            email: invitation.email,
+            role: invitation.role,
+            workspaceId: invitation.workspaceId,
+            invitedAt: invitation.invitedAt,
+          },
+        });
+        return;
+      }
 
       // Only generate a temp password for brand-new invitees with no existing workspace access.
       // Existing users may have already set their own password; overwriting it would be destructive.
@@ -136,7 +151,6 @@ export class InvitationController {
 
       let tempPassword: string | null = null;
       if (
-        !isPendingApproval &&
         existingWorkspaceUsers === 0 &&
         role !== 'GUEST' &&
         role !== WorkspaceRole.COMMUNITY_MEMBER
@@ -171,7 +185,6 @@ export class InvitationController {
 
       res.status(201).json({
         success: true,
-        ...(isPendingApproval ? { pendingApproval: true } : {}),
         invitation: {
           id: invitation.id,
           email: invitation.email,
@@ -725,7 +738,46 @@ export class InvitationController {
 
       await approveInvitationTx(invitationService, invitation.id, invitation);
 
-      res.json({ success: true });
+      // Approval creates the orgMember row (and its password), so now generate a
+      // temp password (if needed) and send the invite email.
+      let emailSent = false;
+      if (config.env === 'development') {
+        logger.info(
+          `[InvitationController] DEV MODE — approved invitation ${invitation.id} for ${invitation.email}, skipping email`
+        );
+      } else {
+        let tempPassword: string | null = null;
+        const existingWorkspaceUsers = await DatabaseClient.getInstance().user.count({
+          where: { email: invitation.email, leftAt: null },
+        });
+        if (existingWorkspaceUsers === 0 && invitation.role !== 'GUEST') {
+          tempPassword = await invitationService.generateOrgMemberPassword(invitation.email);
+        }
+
+        const invitationLink = await buildInvitationLink({
+          req,
+          workspaceId: invitation.workspaceId,
+          invitationId: invitation.invitationId || invitation.id,
+        });
+
+        const emailResult = await invitationService.sendInvitationEmail({
+          to: invitation.email,
+          inviterName: req.user?.name || 'A team member',
+          workspaceName: invitation.workspace?.name || 'the workspace',
+          invitationLink,
+          invitationId: invitation.invitationId || invitation.id,
+          tempPassword: tempPassword ?? undefined,
+        });
+        emailSent = emailResult.success;
+
+        if (!emailSent) {
+          logger.error(
+            `[InvitationController] Approved invitation ${invitation.id} but email failed: ${emailResult.error}`
+          );
+        }
+      }
+
+      res.json({ success: true, emailSent });
     } catch (error) {
       logger.error('[InvitationController] Failed to approve invitation:', error);
       if (isOrganizationPolicyError(error)) {
