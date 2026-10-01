@@ -183,7 +183,7 @@ class RadarReactionResolver {
         undefined,
         { conversationId: scope.key },
       );
-      // Jev answering in the model's place (RADAR_JEV_REPLACE) means no parse ran.
+      // Jev answering in the model's place (CAC radar_jev_replace) means no parse ran.
       run.parserRan = transitions.decidedBy !== 'jev';
 
       run.proposedOps = transitions.operations;

@@ -49,6 +49,14 @@ const DEFAULT_MESSAGE_CLASSIFICATION_JEV_CITATION_THRESHOLD = 0.3;
 const DEFAULT_RADAR_JEV_WINDOW_SKIP_THRESHOLD = 0.15;
 const DEFAULT_RADAR_JEV_REACTION_COMPLETION_THRESHOLD = 0.5;
 const DEFAULT_RADAR_JEV_REACTION_ITEM_THRESHOLD = 0.6;
+// Jev switches for message tagging and Radar, like shadow_tag_generation_enabled: run (ask Jev),
+// log (write its answers), replace (use them instead of the LLM). All off by default.
+const DEFAULT_MESSAGE_CLASSIFICATION_JEV_ENABLED = false;
+const DEFAULT_MESSAGE_CLASSIFICATION_JEV_LOG_ENABLED = false;
+const DEFAULT_MESSAGE_CLASSIFICATION_JEV_REPLACE = false;
+const DEFAULT_RADAR_JEV_ENABLED = false;
+const DEFAULT_RADAR_JEV_LOG_ENABLED = false;
+const DEFAULT_RADAR_JEV_REPLACE = false;
 const DEFAULT_SUMMARISER_MODEL = 'glm-flash-experimental';
 const DEFAULT_ATTACHMENT_SUMMARISER_MODEL = 'kimi-latest';
 const DEFAULT_CLASSIFICATION_MODEL = 'glm-flash-experimental';
@@ -100,6 +108,12 @@ const CAC_KEYS = {
   radarJevWindowSkipThreshold: 'radar_jev_window_skip_threshold',
   radarJevReactionCompletionThreshold: 'radar_jev_reaction_completion_threshold',
   radarJevReactionItemThreshold: 'radar_jev_reaction_item_threshold',
+  messageClassificationJevEnabled: 'message_classification_jev_enabled',
+  messageClassificationJevLogEnabled: 'message_classification_jev_log_enabled',
+  messageClassificationJevReplace: 'message_classification_jev_replace',
+  radarJevEnabled: 'radar_jev_enabled',
+  radarJevLogEnabled: 'radar_jev_log_enabled',
+  radarJevReplace: 'radar_jev_replace',
   ticketBoardModel: 'ticket_board_model_name',
   releaseNotesGeneratorModel: 'release_notes_generator_model_name',
   releaseAiModel: 'release_ai_model_name',
@@ -162,6 +176,18 @@ export class AgentsConfig {
   public readonly radarJevReactionCompletionThreshold: number;
   /** Jev P(this item is the one settled) needed to resolve it; above 0.5 no item can tie. */
   public readonly radarJevReactionItemThreshold: number;
+  /** Whether message tagging asks Jev at all. Default false. */
+  public readonly messageClassificationJevEnabled: boolean;
+  /** Whether message tagging logs Jev's answers. Default false; fallbacks are logged regardless. */
+  public readonly messageClassificationJevLogEnabled: boolean;
+  /** Whether Jev's tags are stored instead of calling the LLM (LLM as fallback). Default false. */
+  public readonly messageClassificationJevReplace: boolean;
+  /** Whether Radar asks Jev at all. Default false. */
+  public readonly radarJevEnabled: boolean;
+  /** Whether Radar logs Jev's answers. Default false; fallbacks are logged regardless. */
+  public readonly radarJevLogEnabled: boolean;
+  /** Whether Jev skips chatter windows and decides reactions itself (parser as fallback). Default false. */
+  public readonly radarJevReplace: boolean;
   public readonly summariserModelName: string;
   public readonly attachmentSummariserModelName: string;
 
@@ -227,6 +253,12 @@ export class AgentsConfig {
     radarJevWindowSkipThreshold: number,
     radarJevReactionCompletionThreshold: number,
     radarJevReactionItemThreshold: number,
+    messageClassificationJevEnabled: boolean,
+    messageClassificationJevLogEnabled: boolean,
+    messageClassificationJevReplace: boolean,
+    radarJevEnabled: boolean,
+    radarJevLogEnabled: boolean,
+    radarJevReplace: boolean,
   ) {
     this.xyneAiTracingEnabled = xyneAiTracingEnabled;
     this.xyneAiMaskingEnabled = xyneAiMaskingEnabled;
@@ -263,6 +295,12 @@ export class AgentsConfig {
     this.radarJevWindowSkipThreshold = radarJevWindowSkipThreshold;
     this.radarJevReactionCompletionThreshold = radarJevReactionCompletionThreshold;
     this.radarJevReactionItemThreshold = radarJevReactionItemThreshold;
+    this.messageClassificationJevEnabled = messageClassificationJevEnabled;
+    this.messageClassificationJevLogEnabled = messageClassificationJevLogEnabled;
+    this.messageClassificationJevReplace = messageClassificationJevReplace;
+    this.radarJevEnabled = radarJevEnabled;
+    this.radarJevLogEnabled = radarJevLogEnabled;
+    this.radarJevReplace = radarJevReplace;
   }
 
   /**
@@ -319,6 +357,12 @@ export class AgentsConfig {
       const radarJevWindowSkipThreshold = getValue<number>(CAC_KEYS.radarJevWindowSkipThreshold, DEFAULT_RADAR_JEV_WINDOW_SKIP_THRESHOLD);
       const radarJevReactionCompletionThreshold = getValue<number>(CAC_KEYS.radarJevReactionCompletionThreshold, DEFAULT_RADAR_JEV_REACTION_COMPLETION_THRESHOLD);
       const radarJevReactionItemThreshold = getValue<number>(CAC_KEYS.radarJevReactionItemThreshold, DEFAULT_RADAR_JEV_REACTION_ITEM_THRESHOLD);
+      const messageClassificationJevEnabled = getValue<boolean>(CAC_KEYS.messageClassificationJevEnabled, DEFAULT_MESSAGE_CLASSIFICATION_JEV_ENABLED);
+      const messageClassificationJevLogEnabled = getValue<boolean>(CAC_KEYS.messageClassificationJevLogEnabled, DEFAULT_MESSAGE_CLASSIFICATION_JEV_LOG_ENABLED);
+      const messageClassificationJevReplace = getValue<boolean>(CAC_KEYS.messageClassificationJevReplace, DEFAULT_MESSAGE_CLASSIFICATION_JEV_REPLACE);
+      const radarJevEnabled = getValue<boolean>(CAC_KEYS.radarJevEnabled, DEFAULT_RADAR_JEV_ENABLED);
+      const radarJevLogEnabled = getValue<boolean>(CAC_KEYS.radarJevLogEnabled, DEFAULT_RADAR_JEV_LOG_ENABLED);
+      const radarJevReplace = getValue<boolean>(CAC_KEYS.radarJevReplace, DEFAULT_RADAR_JEV_REPLACE);
       const summariserModelName = getValue<string>(CAC_KEYS.summariserModel, DEFAULT_SUMMARISER_MODEL);
       const attachmentSummariserModelName = getValue<string>(CAC_KEYS.attachmentSummariserModel, DEFAULT_ATTACHMENT_SUMMARISER_MODEL);
 
@@ -594,6 +638,12 @@ export class AgentsConfig {
         radarJevWindowSkipThreshold,
         radarJevReactionCompletionThreshold,
         radarJevReactionItemThreshold,
+        messageClassificationJevEnabled,
+        messageClassificationJevLogEnabled,
+        messageClassificationJevReplace,
+        radarJevEnabled,
+        radarJevLogEnabled,
+        radarJevReplace,
       );
     } catch (error) {
       logger.error('[Agents Config] Error fetching CAC config, using DEFAULTS:', error);
@@ -634,6 +684,12 @@ export class AgentsConfig {
         DEFAULT_RADAR_JEV_WINDOW_SKIP_THRESHOLD,
         DEFAULT_RADAR_JEV_REACTION_COMPLETION_THRESHOLD,
         DEFAULT_RADAR_JEV_REACTION_ITEM_THRESHOLD,
+        DEFAULT_MESSAGE_CLASSIFICATION_JEV_ENABLED,
+        DEFAULT_MESSAGE_CLASSIFICATION_JEV_LOG_ENABLED,
+        DEFAULT_MESSAGE_CLASSIFICATION_JEV_REPLACE,
+        DEFAULT_RADAR_JEV_ENABLED,
+        DEFAULT_RADAR_JEV_LOG_ENABLED,
+        DEFAULT_RADAR_JEV_REPLACE,
       );
     }
   }
@@ -675,6 +731,12 @@ export class AgentsConfig {
       DEFAULT_RADAR_JEV_WINDOW_SKIP_THRESHOLD,
       DEFAULT_RADAR_JEV_REACTION_COMPLETION_THRESHOLD,
       DEFAULT_RADAR_JEV_REACTION_ITEM_THRESHOLD,
+      DEFAULT_MESSAGE_CLASSIFICATION_JEV_ENABLED,
+      DEFAULT_MESSAGE_CLASSIFICATION_JEV_LOG_ENABLED,
+      DEFAULT_MESSAGE_CLASSIFICATION_JEV_REPLACE,
+      DEFAULT_RADAR_JEV_ENABLED,
+      DEFAULT_RADAR_JEV_LOG_ENABLED,
+      DEFAULT_RADAR_JEV_REPLACE,
     );
   }
 }

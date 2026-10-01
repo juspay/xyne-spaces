@@ -37,10 +37,11 @@ import { MAX_SOURCES_PER_TYPE } from './prompt';
  * Where the data goes: the whole thread — DMs and private channels included — is sent to
  * JEV_URL, which is TypeSafe's hosted Jev unless the env points elsewhere.
  *
- * The two thresholds come from CAC (message_classification_jev_type_threshold,
- * message_classification_jev_citation_threshold), like ticket_duplicate_jev_threshold, so
- * they can be tuned against the shadow logs without a deploy. They are only valid for the
- * JEV_MODEL they were tuned on.
+ * Switches and thresholds all come from CAC, like the desk run's shadow_tag_generation_*,
+ * so rollout and tuning need no deploy:
+ *   message_classification_jev_enabled / _log_enabled / _replace   (run, log, replace)
+ *   message_classification_jev_type_threshold / _citation_threshold
+ * The thresholds are only valid for the JEV_MODEL they were tuned on.
  */
 
 interface Thresholds {
@@ -49,14 +50,6 @@ interface Thresholds {
   /** A message at or above this probability is evidence for a type. */
   citation: number;
 }
-
-const readThresholds = async (): Promise<Thresholds> => {
-  const cac = await AgentsConfig.fetch();
-  return {
-    type: cac.messageClassificationJevTypeThreshold,
-    citation: cac.messageClassificationJevCitationThreshold,
-  };
-};
 
 /** Per call. Classification runs in a background worker, so this can be generous. */
 const JEV_TIMEOUT_MS = 15_000;
@@ -69,10 +62,6 @@ const NO_EVIDENCE = 'none';
 
 const SHADOW_TAG = '[MSG-TAG][SHADOW]';
 const REPLACE_TAG = '[MSG-TAG][REPLACE]';
-
-/** RUN is on and Jev has a key. JEV_URL / JEV_MODEL always have values (TypeSafe's by default). */
-const isJevClassificationActive = (): boolean =>
-  config.messageClassification.jev.enabled && isJevConfigured();
 
 type JevClassificationResult =
   | {
@@ -352,11 +341,11 @@ export interface JevBeforeLlm {
 }
 
 /**
- * Jev's part of one classification, per MESSAGE_CLASSIFICATION_JEV_*. Null when Jev is off,
- * and the caller calls the model as it always has.
+ * Jev's part of one classification, per the message_classification_jev_* CAC switches.
+ * Null when Jev is off, and the caller calls the model as it always has.
  *
  *  - shadow (replace off): Jev runs alongside the model and is only logged — started here,
- *    not awaited, so it costs the job no time.
+ *    not awaited, so it costs the job no time beyond the CAC read.
  *  - replace: Jev is awaited and its answer is the classification. When Jev has no answer
  *    the model runs as usual, so the thread is still classified.
  */
@@ -365,40 +354,40 @@ export async function runJevBeforeLlm(
   vocabulary: readonly ThreadTypeEntry[],
   meta: LogMeta,
 ): Promise<JevBeforeLlm | null> {
-  if (!isJevClassificationActive()) return null;
-  const { replace, logEnabled } = config.messageClassification.jev;
-  const stateChars = JSON.stringify(input).length;
-
-  // The CAC read is part of Jev's work, so in shadow mode it too runs off the model's path.
-  // AgentsConfig.fetch falls back to the defaults rather than throwing.
-  const pending = readThresholds().then(async thresholds => ({
-    thresholds,
-    jev: await classifyThreadWithJev(input, vocabulary, thresholds),
-  }));
+  // No key, no Jev — and no CAC read for a feature that cannot run.
+  if (!isJevConfigured()) return null;
+  // One CAC read for the switches and the thresholds. AgentsConfig.fetch falls back to the
+  // defaults (everything off) rather than throwing.
+  const cac = await AgentsConfig.fetch();
+  if (!cac.messageClassificationJevEnabled) return null;
+  const replace = cac.messageClassificationJevReplace;
+  const logEnabled = cac.messageClassificationJevLogEnabled;
+  const thresholds: Thresholds = {
+    type: cac.messageClassificationJevTypeThreshold,
+    citation: cac.messageClassificationJevCitationThreshold,
+  };
   // Every line records the thresholds that produced it, so the logs can be re-read against
   // other values when tuning.
-  const contextFor = (thresholds: Thresholds): LogContext => ({
+  const ctx: LogContext = {
     meta: { ...meta, thresholds },
     vocabulary,
-    stateChars,
-  });
+    stateChars: JSON.stringify(input).length,
+  };
 
+  const pending = classifyThreadWithJev(input, vocabulary, thresholds);
   if (!replace) {
     return {
       answer: null,
       afterLlm: llm => {
         if (!logEnabled) return;
-        void pending.then(({ thresholds, jev }) => {
-          const ctx = contextFor(thresholds);
-          if (jev.ok) logComparison(SHADOW_TAG, ctx, jev, llm);
-          else logNoAnswer(SHADOW_TAG, ctx, jev, 'info');
-        });
+        void pending.then(jev =>
+          jev.ok ? logComparison(SHADOW_TAG, ctx, jev, llm) : logNoAnswer(SHADOW_TAG, ctx, jev, 'info'),
+        );
       },
     };
   }
 
-  const { thresholds, jev } = await pending;
-  const ctx = contextFor(thresholds);
+  const jev = await pending;
   if (jev.ok) {
     if (logEnabled) logDecision(ctx, jev);
     return { answer: jev.classification, afterLlm: () => {} };

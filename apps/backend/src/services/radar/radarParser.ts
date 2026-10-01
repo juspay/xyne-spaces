@@ -77,7 +77,7 @@ export interface ParsedTransitions {
   /** Set when the caller's semantic check sent the first answer back: what the
    *  model was told, and what it had proposed before being corrected. */
   repair?: { feedback: string; firstAttempt: ParserOperation[] };
-  /** Set when Jev answered in place of the model (RADAR_JEV_REPLACE). */
+  /** Set when Jev answered in place of the model (CAC radar_jev_replace). */
   decidedBy?: 'jev';
 }
 

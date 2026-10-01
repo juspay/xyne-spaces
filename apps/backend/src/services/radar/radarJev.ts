@@ -19,7 +19,7 @@ import type {
 } from '@/services/radar/radarParser';
 
 /**
- * Jev for Radar's two parser calls, behind RADAR_JEV_* (run / log / replace).
+ * Jev for Radar's two parser calls, behind the radar_jev_* CAC switches (run / log / replace).
  *
  * The two calls differ in what Jev can take over:
  *
@@ -39,10 +39,12 @@ import type {
  * elsewhere.
  *
  * Jev's yes/no answers are probabilities, so every decision below is a threshold on one.
- * The thresholds come from CAC (radar_jev_window_skip_threshold,
- * radar_jev_reaction_completion_threshold, radar_jev_reaction_item_threshold), like
- * ticket_duplicate_jev_threshold, so they can be tuned against the logs without a deploy.
- * They are only valid for the JEV_MODEL they were tuned on.
+ * Switches and thresholds all come from CAC, like the desk run's shadow_tag_generation_*,
+ * so rollout and tuning need no deploy:
+ *   radar_jev_enabled / radar_jev_log_enabled / radar_jev_replace     (run, log, replace)
+ *   radar_jev_window_skip_threshold, radar_jev_reaction_completion_threshold,
+ *   radar_jev_reaction_item_threshold
+ * The thresholds are only valid for the JEV_MODEL they were tuned on.
  */
 
 interface Thresholds {
@@ -56,16 +58,6 @@ interface Thresholds {
   reactionItem: number;
 }
 
-/** AgentsConfig.fetch falls back to the defaults rather than throwing. */
-const readThresholds = async (): Promise<Thresholds> => {
-  const cac = await AgentsConfig.fetch();
-  return {
-    windowSkip: cac.radarJevWindowSkipThreshold,
-    reactionCompletion: cac.radarJevReactionCompletionThreshold,
-    reactionItem: cac.radarJevReactionItemThreshold,
-  };
-};
-
 const JEV_TIMEOUT_MS = 8_000;
 
 /** The option standing for "this reaction settles nothing". Not a possible item id. */
@@ -73,9 +65,6 @@ const NONE = 'none';
 
 const SHADOW_TAG = '[RADAR][SHADOW]';
 const REPLACE_TAG = '[RADAR][REPLACE]';
-
-/** RUN is on and Jev has a key. JEV_URL / JEV_MODEL always have values (TypeSafe's by default). */
-const isRadarJevActive = (): boolean => config.radar.jev.enabled && isJevConfigured();
 
 // ─── Window: is anything trackable? ─────────────────────────────────────────────
 
@@ -328,16 +317,16 @@ function logReaction(tag: string, ctx: LogContext, check: ReactionCheck & { ok: 
 // ─── Entry point: the step right before the model ───────────────────────────────
 
 /**
- * Jev's part of one parse, per RADAR_JEV_*. Null when Jev is off, and the caller calls the
+ * Jev's part of one parse, per the radar_jev_* CAC switches. Null when Jev is off, and the caller calls the
  * model as it always has. A reaction pass is the one carrying `input.reaction`.
  *
  *  - shadow (replace off): Jev runs alongside the model and is only logged — started here,
- *    not awaited, so it costs the parse no time.
+ *    not awaited, so it costs the parse no time beyond the CAC read.
  *  - replace: Jev is awaited. A window it rates as chatter comes back as an empty answer,
  *    which is what the model returns for chatter; a reaction comes back resolved or not.
  *    When Jev has no answer, or the window may hold something, the model runs as usual.
  *
- * Every call is logged (with RADAR_JEV_LOG_ENABLED): the comparison when both ran, Jev's
+ * Every call is logged (with radar_jev_log_enabled): the comparison when both ran, Jev's
  * decision when it replaced the model, and NO ANSWER when it gave none. A fallback to the
  * parser is logged as a warning either way.
  */
@@ -345,31 +334,37 @@ export async function runJevBeforeLlm(
   input: ParserInput,
   conversationId: string,
 ): Promise<JevBeforeLlm | null> {
-  if (!isRadarJevActive()) return null;
-  const { replace, logEnabled } = config.radar.jev;
+  // No key, no Jev — and no CAC read for a feature that cannot run.
+  if (!isJevConfigured()) return null;
+  // One CAC read for the switches and the thresholds. AgentsConfig.fetch falls back to the
+  // defaults (everything off) rather than throwing.
+  const cac = await AgentsConfig.fetch();
+  if (!cac.radarJevEnabled) return null;
+  const replace = cac.radarJevReplace;
+  const logEnabled = cac.radarJevLogEnabled;
+  const thresholds: Thresholds = {
+    windowSkip: cac.radarJevWindowSkipThreshold,
+    reactionCompletion: cac.radarJevReactionCompletionThreshold,
+    reactionItem: cac.radarJevReactionItemThreshold,
+  };
   const stateChars = JSON.stringify(input).length;
-  // The CAC read is part of Jev's work, so in shadow mode it too runs off the parser's path.
-  const thresholdsRead = readThresholds();
 
   if (input.reaction) {
     const emoji = input.reaction.emoji;
     // Every line records the thresholds that produced it, so the logs can be re-read
     // against other values when tuning.
-    const contextFor = (thresholds: Thresholds): LogContext => ({
+    const ctx: LogContext = {
       meta: { conversationId, pass: 'reaction', emoji, candidates: input.open_items.length, thresholds },
       stateChars,
-    });
+    };
     const categories = ['completion', 'settles'];
-    const pending = thresholdsRead.then(async thresholds => ({
-      ctx: contextFor(thresholds),
-      check: await checkReaction(input, thresholds),
-    }));
+    const pending = checkReaction(input, thresholds);
     if (!replace) {
       return {
         answer: null,
         afterLlm: llm => {
           if (!logEnabled) return;
-          void pending.then(({ ctx, check }) =>
+          void pending.then(check =>
             check.ok
               ? logReaction(SHADOW_TAG, ctx, check, llm)
               : noAnswer(SHADOW_TAG, ctx, check, categories, 'info'),
@@ -377,7 +372,7 @@ export async function runJevBeforeLlm(
         },
       };
     }
-    const { ctx, check } = await pending;
+    const check = await pending;
     if (check.ok) {
       if (logEnabled) {
         logJevDecision(REPLACE_TAG, conversationId, {
@@ -404,27 +399,26 @@ export async function runJevBeforeLlm(
     return { answer: null, afterLlm: () => {} };
   }
 
-  const contextFor = (thresholds: Thresholds): LogContext => ({
+  // Every line records the thresholds that produced it, so the logs can be re-read against
+  // other values when tuning.
+  const ctx: LogContext = {
     meta: { conversationId, pass: 'window', windowSize: input.new_messages.length, thresholds },
     stateChars,
-  });
+  };
   const categories = ['trackable'];
-  const pending = thresholdsRead.then(async thresholds => ({
-    ctx: contextFor(thresholds),
-    check: await checkWindow(input, thresholds),
-  }));
+  const pending = checkWindow(input, thresholds);
   if (!replace) {
     return {
       answer: null,
       afterLlm: llm => {
         if (!logEnabled) return;
-        void pending.then(({ ctx, check }) =>
+        void pending.then(check =>
           check.ok ? logWindow(SHADOW_TAG, ctx, check, llm) : noAnswer(SHADOW_TAG, ctx, check, categories, 'info'),
         );
       },
     };
   }
-  const { ctx, check } = await pending;
+  const check = await pending;
   if (check.ok && check.skip) {
     if (logEnabled) {
       logJevDecision(REPLACE_TAG, conversationId, {
