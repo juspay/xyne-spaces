@@ -2777,6 +2777,33 @@ export class TicketController {
         appUserId: userId,
       });
 
+      // `externalId` must identify a message uniquely within the source, not just
+      // within its thread. Email's unique is (externalMessageId, channelId), so an
+      // id reused under a second thread cannot be stored.
+      // Scoped first, then the raw id: source-scoping (#1248) is recent, so an id
+      // this app pushed before it is stored unscoped.
+      const existingLink =
+        (await externalMessageRepo.findByExternalId(externalSource.id, externalMessageId)) ??
+        (await externalMessageRepo.findByExternalId(externalSource.id, appExternalId));
+      if (existingLink && existingLink.externalThreadId !== externalThreadId) {
+        logger.warn('[AppDeskInbound] externalId reused across threads — rejecting', {
+          channelId,
+          externalId: appExternalId,
+          externalMessageId,
+          incomingThreadId: externalThreadId,
+          alreadyUsedByThreadId: existingLink.externalThreadId,
+          externalSourceId: externalSource.id,
+        });
+        res.status(409).json({
+          error:
+            `externalId "${appExternalId}" is already in use by thread "${existingLink.externalThreadId}". ` +
+            'externalId must be unique per app, not per thread — send a globally unique id ' +
+            '(for example your message id combined with your thread id).',
+          code: 'EXTERNAL_ID_NOT_UNIQUE',
+        });
+        return;
+      }
+
       // Thread continuation is source-scoped via the app's ExternalMessage link; the
       // channel-scoped fallback only covers pre-existing threads with a missing link
       // (self-healed by the externalSourceLink write below). Do not remove the fallback.
