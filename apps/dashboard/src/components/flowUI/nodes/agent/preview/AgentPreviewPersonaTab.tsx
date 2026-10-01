@@ -274,9 +274,13 @@ export function AgentPreviewPersonaTab({ agent, editor }: AgentPreviewEditablePr
           open={orderOpen}
           onOpenChange={setOrderOpen}
           order={providerOrder}
+          localHarnessModels={{}}
           saving={false}
           onSave={next => {
-            editor.setProviderOrder(next);
+            // This draft editor has no slot for per-harness model picks — it
+            // only tracks the provider order — so next.localHarnessModels is
+            // intentionally dropped here.
+            editor.setProviderOrder(next.providerOrder);
             setOrderOpen(false);
           }}
         />
