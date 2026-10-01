@@ -3,6 +3,8 @@ import { AuthProvider, Platform, SessionStatus } from '@xyne/shared';
 import { logger } from '../utils/logger';
 import { DatabaseClient } from '@/database/client';
 import { userActivityTrackingService } from './userActivityTrackingService';
+import { syncContactsGrantForUser } from './userContactsService';
+import { googleClientKeyFromDeviceInfo } from './googleOAuthClients';
 
 // Why a session ended — stored as the AUTH/LOGOUT activity event's label.
 export type LogoutReason =
@@ -155,6 +157,19 @@ export class UserSessionService {
         platform: resolveSessionPlatform(session.deviceInfo),
         metadata: { authProvider: session.user.authProvider },
       });
+
+      const provider = session.user.authProvider as AuthProvider;
+      if (provider === AuthProvider.GOOGLE || provider === AuthProvider.MICROSOFT) {
+        void syncContactsGrantForUser({
+          provider,
+          userId: session.userId,
+          userEmail: session.user.email,
+          refreshToken: sessionData.refreshToken,
+          accessToken: sessionData.accessToken,
+          accessTokenExpiry: sessionData.accessTokenExpiry,
+          googleClientKey: googleClientKeyFromDeviceInfo(session.deviceInfo),
+        });
+      }
 
       return session;
     } catch (error) {

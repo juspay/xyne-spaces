@@ -1,6 +1,6 @@
 import { ReactElement, useEffect, useState } from 'react';
 import { useSearchParams, useNavigate } from 'react-router-dom';
-import { CheckCircle, XCircle, Loader2, FileText, Hash, Folder, Users } from 'lucide-react';
+import { CheckCircle, XCircle, Loader2, FileText, Hash, Folder, Users, Clock } from 'lucide-react';
 import { Button } from '../../components/ui/Button/Button';
 import axios from 'axios';
 import Cookies from 'js-cookie';
@@ -21,6 +21,7 @@ interface InvitationDetails {
   entityType?: string;
   entityId?: string;
   entityTitle?: string | null;
+  pendingApproval?: boolean;
 }
 
 interface VerificationResponse {
@@ -58,6 +59,7 @@ type PageState =
   | { status: 'redirecting' }
   | { status: 'verifying' }
   | { status: 'email_mismatch'; loggedInEmail: string; invitedEmail: string }
+  | { status: 'pending_approval' }
   | { status: 'ready'; invitation: InvitationDetails }
   | { status: 'accepting' }
   | {
@@ -117,8 +119,10 @@ export const AcceptInvitation = (): ReactElement => {
         if (response.data.valid && response.data.invitation) {
           const inv = response.data.invitation;
 
-          // Frontend email-match guard (backend also validates this on accept)
-          if (loggedInEmail && inv.email.toLowerCase() !== loggedInEmail.toLowerCase()) {
+          if (inv.pendingApproval) {
+            setState({ status: 'pending_approval' });
+          } else if (loggedInEmail && inv.email.toLowerCase() !== loggedInEmail.toLowerCase()) {
+            // Frontend email-match guard (backend also validates this on accept)
             setState({ status: 'email_mismatch', loggedInEmail, invitedEmail: inv.email });
           } else {
             setState({ status: 'ready', invitation: inv });
@@ -246,6 +250,31 @@ export const AcceptInvitation = (): ReactElement => {
           <h1 className='text-2xl font-semibold text-foreground mb-2'>
             You are not supposed to access this invitation
           </h1>
+          <Button
+            onClick={handleGoHome}
+            data-track-category='Invitations'
+            data-track-name='GO_HOME_FROM_INVITE'
+            className='w-full'
+          >
+            Go to Home
+          </Button>
+        </div>
+      </div>
+    );
+  }
+
+  if (state.status === 'pending_approval') {
+    return (
+      <div className='min-h-screen bg-background flex items-center justify-center p-4'>
+        <div className='max-w-md w-full bg-card border border-border rounded-lg p-8 text-center'>
+          <div className='w-16 h-16 bg-amber-500/10 rounded-full flex items-center justify-center mx-auto mb-4'>
+            <Clock className='w-8 h-8 text-amber-500' />
+          </div>
+          <h1 className='text-2xl font-semibold text-foreground mb-2'>Pending Approval</h1>
+          <p className='text-muted-foreground mb-6'>
+            This invitation is waiting for an organization admin&apos;s approval. You&apos;ll get
+            an email once it&apos;s approved.
+          </p>
           <Button
             onClick={handleGoHome}
             data-track-category='Invitations'
