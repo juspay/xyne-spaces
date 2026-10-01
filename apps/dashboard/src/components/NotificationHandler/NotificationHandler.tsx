@@ -6,7 +6,7 @@ import { hydrateDynamicHeaders } from '../../services/clients/dynamicHeaders';
 import { useDeferredClientCommand, type ClientCommand } from '../../hooks/useDeferredClientCommand';
 import { toast } from 'sonner';
 import { useAuthContext } from '../../providers/AuthProvider';
-import { useNavigate, useParams } from 'react-router-dom';
+import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import { API_BASE_URL } from '../../config';
 import { queryClient } from '../../services/clients/queryClient';
 import { NativeInboundMessageType, reactNativeBridge } from '../../utils/reactNativeBridge';
@@ -27,6 +27,7 @@ import {
   useRecordingStore,
 } from '../../hooks/useRecordingStore';
 import { getRecordingDefaultLayout } from '../../hooks/useRecordingDefaultLayout';
+import { isViewingNotificationTarget } from '../../utils/notificationViewing';
 import { sendSosAlertEvent } from '../../stores/sosAlertStore';
 import { globalClickTracker } from '../../services/Analytics/globalClickTracker';
 import { setExternalMeeting, setMicBusy } from '../../stores/externalMeetingStore';
@@ -73,6 +74,7 @@ interface NotificationData {
       senderName?: string;
       channelTitle?: string;
       messageType?: string;
+      relatedEntityType?: string;
       canvasId?: string;
       blockId?: string;
       commentThreadId?: string;
@@ -135,6 +137,12 @@ export const NotificationHandler: React.FC = () => {
   useEffect(() => {
     activeWorkspaceIdRef.current = activeWorkspaceId;
   }, [activeWorkspaceId]);
+  // Chat routes sit below this component, so read the open chat from the path.
+  const { pathname } = useLocation();
+  const pathnameRef = useRef(pathname);
+  useEffect(() => {
+    pathnameRef.current = pathname;
+  }, [pathname]);
   const isConnectedRef = useRef(false);
   const isElectron = typeof window !== 'undefined' && window.electronAPI !== undefined;
 
@@ -310,7 +318,25 @@ export const NotificationHandler: React.FC = () => {
           return;
         }
 
-        if (
+        const isViewingTarget = isViewingNotificationTarget(
+          {
+            type: data.notification.type,
+            workspaceId: notificationWorkspaceId,
+            relatedEntityType: data.notification.data?.relatedEntityType,
+            channelId: data.notification.data?.channelId,
+            conversationId: data.notification.data?.conversationId,
+            messageId: data.notification.data?.messageId,
+            initialMessageId: data.notification.data?.conversation?.initialMessageId,
+          },
+          {
+            pathname: pathnameRef.current,
+            isAppFocused: document.visibilityState === 'visible' && document.hasFocus(),
+          },
+        );
+
+        if (isViewingTarget) {
+          // Already on screen: no sound or banner; still acknowledged below.
+        } else if (
           isElectron &&
           window.electronAPI &&
           typeof window.electronAPI.showNotification === 'function'
