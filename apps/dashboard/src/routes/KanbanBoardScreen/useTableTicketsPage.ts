@@ -21,6 +21,8 @@ import {
 export type UseTableTicketsPageOptions = Omit<KanbanTicketsPageBaseArgs, 'vespaTicketIds'> & {
   enabled?: boolean;
   pageSize?: number;
+  /** Restricts the list to these tickets (e.g. a release's dev tickets); search narrows within it. */
+  scopeTicketIds?: string[];
 };
 
 export interface UseTableTicketsPageResult {
@@ -131,10 +133,19 @@ export const useTableTicketsPage = (
     ...(vespaAssignee ? { assignee: vespaAssignee } : {}),
     ...(vespaTags ? { tags: vespaTags } : {}),
   });
-  const vespaTicketIds = requiresVespaIds
+  const searchTicketIds = requiresVespaIds
     ? (vespaTicketSearch.searchResults?.map(ticket => ticket.id) ?? null)
     : undefined;
-  const vespaIdsKey = requiresVespaIds ? (vespaTicketIds?.join(',') ?? 'pending') : 'off';
+  const scopeTicketIds = options.scopeTicketIds;
+  const vespaTicketIds = useMemo(() => {
+    if (!scopeTicketIds || searchTicketIds === null) return searchTicketIds;
+    if (searchTicketIds === undefined) return scopeTicketIds;
+    const scope = new Set(scopeTicketIds);
+    return searchTicketIds.filter(id => scope.has(id));
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- ids keyed by content
+  }, [scopeTicketIds?.join(','), searchTicketIds?.join(',')]);
+  const vespaIdsKey =
+    requiresVespaIds || scopeTicketIds ? (vespaTicketIds?.join(',') ?? 'pending') : 'off';
 
   const basePageArgs = useMemo(
     () =>
@@ -211,7 +222,7 @@ export const useTableTicketsPage = (
   const cursor = cursorState?.queryKey === queryKey ? cursorState.cursor : null;
   const tickets = ticketsState.queryKey === queryKey ? ticketsState.tickets : [];
 
-  const pageEnabled = enabled && (!requiresVespaIds || vespaTicketIds !== null);
+  const pageEnabled = enabled && vespaTicketIds !== null;
 
   const pageArgs = useMemo(() => ({ ...basePageArgs, start: cursor }), [basePageArgs, cursor]);
   const [page, pageDetails] = useCachedQuery(tablePageQuery(pageArgs), { enabled: pageEnabled });
@@ -340,9 +351,7 @@ export const useTableTicketsPage = (
     tickets: overlaid,
     isLoading: isFirstPageLoading,
     isLoadingMore: isLoadingMoreRef.current,
-    hasMore:
-      hasMore &&
-      !(isSearchMode && Array.isArray(vespaTicketIds) && tickets.length >= vespaTicketIds.length),
+    hasMore: hasMore && !(Array.isArray(vespaTicketIds) && tickets.length >= vespaTicketIds.length),
     loadMore,
     isSearchMode,
   };
