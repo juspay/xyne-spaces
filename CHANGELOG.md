@@ -1,3 +1,15 @@
+## [1.447.0](https://github.com/juspay/xyne-spaces/compare/v1.446.3...v1.447.0) (2026-10-01)
+
+
+### Features
+
+* added-ability-to-share-views-with-channel  ([#2285](https://github.com/juspay/xyne-spaces/issues/2285)) ([4cd7039](https://github.com/juspay/xyne-spaces/commit/4cd7039d521d911be2c1367d9194f1732974dba3))
+
+
+### Reverts
+
+* turn related conversations back off by default ([#2560](https://github.com/juspay/xyne-spaces/issues/2560)) ([3c9f011](https://github.com/juspay/xyne-spaces/commit/3c9f011e25b720ecb4238c4f4588914dd9c59517)), closes [#2504](https://github.com/juspay/xyne-spaces/issues/2504)
+
 ## [1.446.3](https://github.com/juspay/xyne-spaces/compare/v1.446.2...v1.446.3) (2026-10-01)
 
 
