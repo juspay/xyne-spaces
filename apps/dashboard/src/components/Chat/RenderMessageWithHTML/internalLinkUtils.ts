@@ -182,6 +182,18 @@ export const isExternalUrl = (url: string): boolean => {
   }
 };
 
+export const isSandboxViewLink = (href: string): boolean => {
+  try {
+    const url = new URL(href, window.location.origin);
+    if (url.protocol !== 'http:' && url.protocol !== 'https:') return false;
+    const isOurHost =
+      INTERNAL_XYNE_HOSTS.has(url.hostname) || url.origin === window.location.origin;
+    return isOurHost && url.pathname.startsWith('/claw-');
+  } catch {
+    return false;
+  }
+};
+
 /**
  * Converts legacy internal Xyne URL formats to the current format.
  * Handles old workspace-scoped paths and legacy hostname rewrites.

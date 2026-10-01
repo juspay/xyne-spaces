@@ -1,14 +1,14 @@
 /**
  * BullMQ worker for Digital Twin backfill jobs.
  *
- * Walks a per-source time window newest → oldest in month-sized chunks.
+ * Walks a per-source time window oldest → newest in month-sized chunks.
  * After each chunk, persists the cursor on User.digitalTwinBackfillState
  * so the next invocation (after pod restart or natural job retry) resumes
  * exactly where this one stopped — no duplicate curator calls, no skipped
  * windows.
  *
- * Convention: cursor is the *upper bound* of the next chunk to process.
- * `complete=true` when cursor < from (we've walked past the lower bound).
+ * Convention: cursor is the *lower bound* of the next chunk to process,
+ * seeded at `from`. `complete=true` once cursor reaches `to`.
  */
 
 import { Worker, type Job } from "bullmq";
@@ -16,54 +16,28 @@ import { errMsg } from "../lib/errors.js";
 import { prisma } from "../db.js";
 import { redisService } from "../redis.js";
 import { createLogger, createTraceId } from "../logger.js";
-import {
-  fetchUserMessages,
-  fetchUserCalls,
-  fetchUserCanvases,
-} from "../services/userMemoryFetcher.js";
-import { assembleConversationUnits, isContextAssemblerEnabled } from "../services/contextAssembler.js";
-import { curateAndPersistBatch } from "../services/userMemoryCuratorClient.js";
-import { packRecordsIntoBatches } from "../services/userMemoryBatcher.js";
+import { fetchSourceRecords } from "../services/twinSourceRecords.js";
+import { curateRecordsInBatches } from "../services/userMemoryCuratorClient.js";
 import { recordPipelineEvent } from "../services/digitalTwinPipelineEvents.js";
-import type { BackfillJobData, BackfillSource } from "./digital-twin-backfill-queue.js";
-import { enqueueDigitalTwinBackfill, backfillJobIsLive } from "./digital-twin-backfill-queue.js";
+import { writeBackfillState } from "../services/digitalTwinLifecycle.js";
+import {
+  asBackfillState,
+  BACKFILL_WINDOW_MS,
+  recoverableSources,
+  seedBackfillProgress,
+  type BackfillEntry,
+  type BackfillProgress,
+  type BackfillSource,
+  type StrictBackfillState,
+} from "../services/digitalTwinBackfillState.js";
+import {
+  DIGITAL_TWIN_BACKFILL_QUEUE_NAME,
+  enqueueDigitalTwinBackfill,
+  backfillJobIsLive,
+  type BackfillJobData,
+} from "./digital-twin-backfill-queue.js";
 
 const logger = createLogger("digital-twin-backfill", createTraceId());
-const QUEUE_NAME = "digital-twin-backfill";
-
-/** One window = one month. Each window fans out into token-budgeted curator
- *  batches (userMemoryBatcher). 24-month backfill → up to 24 windows × 3 sources. */
-const WINDOW_DAYS = 30;
-
-interface BackfillProgress {
-  /** ceil((to-from)/WINDOW_DAYS). */
-  windowsTotal: number;
-  windowsDone: number;
-  /** Running sum of records fetched across processed windows. */
-  recordsSeen: number;
-  /** Running sum of candidates persisted across processed windows. */
-  candidatesMade: number;
-  currentWindow: { from: string; to: string } | null;
-  lastError: { message: string; windowUpper: string; at: string } | null;
-  startedAt: string;
-  /** Set on EVERY write — the server heartbeat the status endpoint watches. */
-  updatedAt: string;
-}
-
-interface BackfillEntry {
-  from: string;
-  to: string;
-  cursor: string;
-  complete: boolean;
-  /** Set by /backfill/pause; cleared by /backfill/resume. A paused source is NOT
-   *  auto-recovered on startup (the user deliberately stopped it). */
-  pausedAt?: string;
-  progress?: BackfillProgress;
-}
-
-interface BackfillState {
-  [source: string]: BackfillEntry;
-}
 
 /** Fields a single writeProgress call can mutate. `progress` is a shallow merge
  *  into the (seeded) progress object; `accumulate` adds to the running sums
@@ -76,22 +50,6 @@ interface ProgressPatch {
   accumulate?: { recordsSeen?: number; candidatesMade?: number; windowsDone?: number };
 }
 
-async function fetchForSource(
-  source: BackfillSource,
-  userId: string,
-  window: { from: Date; to: Date },
-) {
-  if (source === "messages") {
-    // Thread-complete conversation units when the assembler flag is on, else the
-    // legacy flat outgoing-message stream.
-    return isContextAssemblerEnabled()
-      ? assembleConversationUnits(userId, window)
-      : fetchUserMessages(userId, window);
-  }
-  if (source === "calls") return fetchUserCalls(userId, window);
-  return fetchUserCanvases(userId, window);
-}
-
 async function processOneWindow(
   job: Job<BackfillJobData>,
   userId: string,
@@ -99,7 +57,7 @@ async function processOneWindow(
   windowFrom: Date,
   windowTo: Date,
 ): Promise<{ candidates: number; records: number }> {
-  const records = await fetchForSource(source, userId, { from: windowFrom, to: windowTo });
+  const records = await fetchSourceRecords(source, userId, { from: windowFrom, to: windowTo });
 
   const windowKey = `${windowFrom.toISOString().slice(0, 7)}`;  // YYYY-MM
   const source_str = `backfill:${job.id ?? "unknown"}:${source}:${windowKey}`;
@@ -117,49 +75,24 @@ async function processOneWindow(
     return { candidates: 0, records: 0 };
   }
 
-  let totalInserted = 0;
-  for (const batch of packRecordsIntoBatches(records)) {
-    const inserted = await curateAndPersistBatch({
+  return {
+    candidates: await curateRecordsInBatches({
       userId,
       window: { from: windowFrom, to: windowTo },
-      records: batch,
+      records,
       source: source_str,
-    });
-    totalInserted += inserted;
-  }
-  return { candidates: totalInserted, records: records.length };
+    }),
+    records: records.length,
+  };
 }
 
-async function readBackfillState(userId: string): Promise<BackfillState> {
+async function readBackfillState(userId: string): Promise<StrictBackfillState> {
   const user = await prisma.user.findUnique({
     where: { id: userId },
     select: { digitalTwinBackfillState: true, digitalTwinEnabled: true },
   });
   if (!user?.digitalTwinEnabled) return {};
-  const raw = user.digitalTwinBackfillState as unknown;
-  if (!raw || typeof raw !== "object") return {};
-  return raw as BackfillState;
-}
-
-/** Total windows the walk covers, ceil'd. Never < 1 so an all-in-one-window
- *  range still reports 1/1 at completion. */
-function windowsTotalFor(from: string, to: string): number {
-  const span = new Date(to).getTime() - new Date(from).getTime();
-  if (!Number.isFinite(span) || span <= 0) return 1;
-  return Math.max(1, Math.ceil(span / (WINDOW_DAYS * 24 * 3600 * 1000)));
-}
-
-function seedProgress(entry: BackfillEntry, nowIso: string): BackfillProgress {
-  return {
-    windowsTotal: windowsTotalFor(entry.from, entry.to),
-    windowsDone: 0,
-    recordsSeen: 0,
-    candidatesMade: 0,
-    currentWindow: null,
-    lastError: null,
-    startedAt: nowIso,
-    updatedAt: nowIso,
-  };
+  return (asBackfillState(user.digitalTwinBackfillState) ?? {}) as StrictBackfillState;
 }
 
 async function writeProgress(userId: string, source: BackfillSource, patch: ProgressPatch): Promise<void> {
@@ -180,7 +113,7 @@ async function writeProgress(userId: string, source: BackfillSource, patch: Prog
   if (patch.complete !== undefined) entry.complete = patch.complete;
 
   const nowIso = new Date().toISOString();
-  const progress = entry.progress ?? seedProgress(entry, nowIso);
+  const progress = entry.progress ?? seedBackfillProgress(entry.from, entry.to, nowIso);
   if (patch.progress) Object.assign(progress, patch.progress);
   if (patch.accumulate) {
     if (patch.accumulate.recordsSeen) progress.recordsSeen += patch.accumulate.recordsSeen;
@@ -191,10 +124,7 @@ async function writeProgress(userId: string, source: BackfillSource, patch: Prog
   entry.progress = progress;
 
   state[source] = entry;
-  await prisma.user.update({
-    where: { id: userId },
-    data: { digitalTwinBackfillState: state as unknown as object },
-  });
+  await writeBackfillState(userId, state);
 }
 
 /**
@@ -208,7 +138,7 @@ async function writeProgress(userId: string, source: BackfillSource, patch: Prog
  * any dead job with the same id). This is what un-wedges a backfill stuck at a
  * partial % with a `failed` job. Best-effort; never throws. Returns #re-queued.
  */
-export async function recoverIncompleteBackfills(): Promise<number> {
+async function recoverIncompleteBackfills(): Promise<number> {
   let requeued = 0;
   try {
     const users = await prisma.user.findMany({
@@ -216,20 +146,18 @@ export async function recoverIncompleteBackfills(): Promise<number> {
       select: { id: true, digitalTwinBackfillState: true },
     });
     for (const u of users) {
-      const raw = u.digitalTwinBackfillState as unknown;
-      if (!raw || typeof raw !== "object") continue;
-      const state = raw as BackfillState;
-      for (const source of ["messages", "calls", "canvases"] as const) {
-        const entry = state[source];
-        // Skip: done, deliberately paused, or malformed window.
-        if (!entry || entry.complete === true || entry.pausedAt || !entry.from || !entry.to) continue;
+      const state = asBackfillState(u.digitalTwinBackfillState);
+      if (!state) continue;
+      // Skips done, deliberately paused, or malformed-window sources.
+      for (const source of recoverableSources(state)) {
         // Skip if a job is already progressing — re-enqueuing would orphan it.
         if (await backfillJobIsLive(u.id, source)) continue;
+        const entry = state[source]!;
         await enqueueDigitalTwinBackfill({
           userId: u.id,
           source,
-          from: new Date(entry.from),
-          to: new Date(entry.to),
+          from: new Date(entry.from!),
+          to: new Date(entry.to!),
         });
         requeued += 1;
         logger.info("[backfill] self-heal re-enqueued wedged source", { userId: u.id, source, cursor: entry.cursor });
@@ -248,7 +176,7 @@ export async function recoverIncompleteBackfills(): Promise<number> {
  */
 export function initDigitalTwinBackfillWorker(): Worker<BackfillJobData> {
   const worker = new Worker<BackfillJobData>(
-    QUEUE_NAME,
+    DIGITAL_TWIN_BACKFILL_QUEUE_NAME,
     async (job: Job<BackfillJobData>) => {
       const { userId, source } = job.data;
       const from = new Date(job.data.from);
@@ -289,7 +217,7 @@ export function initDigitalTwinBackfillWorker(): Worker<BackfillJobData> {
           return { candidates: totalCandidates, records: totalRecords, status: "paused" };
         }
 
-        const nextUpper = new Date(windowLower.getTime() + WINDOW_DAYS * 24 * 3600 * 1000);
+        const nextUpper = new Date(windowLower.getTime() + BACKFILL_WINDOW_MS);
         const effectiveUpper = nextUpper > to ? to : nextUpper;
 
         // Mark the window we're about to work so a mid-window crash / a status

@@ -246,6 +246,7 @@ export class DraftAttachmentController {
                 uploadedByUserId: userId,
                 createdBy: userId,
                 conversationId: conversationId || null,
+                channelId,
                 workspaceId: draftWorkspaceId,
                 ...attachmentData,
               },

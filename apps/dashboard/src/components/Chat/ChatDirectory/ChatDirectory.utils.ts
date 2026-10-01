@@ -6,6 +6,7 @@ import {
   ChannelUserStatus,
   ChannelSection,
   isDeskChannelType,
+  NotificationLevel,
 } from '@xyne/shared';
 import { generateKeyBetween } from 'fractional-indexing';
 import { VisibleChannel } from '../../../machines/stateMachine';
@@ -240,7 +241,7 @@ export const formatChannelLabel = (ch: {
 export const getDMNames = (
   channel: { name: string; scopeType: ChannelScopeType },
   currentUserId: string,
-  usersById: Map<string, { name: string; displayName?: string | null }>,
+  usersById: ReadonlyMap<string, { name: string; displayName?: string | null }>,
 ): { display: string[]; search: string[] } => {
   if (!isDMChannel(channel.scopeType)) {
     return { display: [channel.name], search: [channel.name] };
@@ -334,4 +335,89 @@ export const getDMSearchableName = (
   const participantIds = parseDMParticipantIds(channel).filter(id => id !== currentUserId);
   const names = participantIds.map(id => userMap.get(id)).filter(Boolean) as string[];
   return names.length > 0 ? names.join(', ') : (channel.name ?? '');
+};
+
+type SortableChannel = { id: string; name: string | null; scopeType: ChannelScopeType };
+type SortUserLookup = ReadonlyMap<string, { name: string; displayName?: string | null }>;
+
+/** True for the current user's own DM ("notes to self") — a DM whose only participant is them. */
+export const isSelfDMChannel = (
+  channel: { name: string | null; scopeType: ChannelScopeType },
+  currentUserId: string,
+): boolean => {
+  if (!isDMChannel(channel.scopeType)) return false;
+  const ids = (channel.name ?? '').split(',').filter(Boolean);
+  return ids.length === 1 && ids[0] === currentUserId;
+};
+
+/**
+ * Key used by the "Alphabetical A-Z" sort. A DM's `name` column holds participant ids, so
+ * sorting on it orders DMs by cuid — resolve to the names the sidebar renders instead.
+ * Falls back to the raw `name` if a participant isn't in the users list (e.g. deleted user).
+ */
+export const getChannelSortName = (
+  channel: SortableChannel,
+  currentUserId: string,
+  usersById: SortUserLookup,
+): string => {
+  const raw = channel.name ?? '';
+  if (!isDMChannel(channel.scopeType)) return raw;
+  // Derive from the canonical resolver so the sort key can't drift from the rendered names.
+  const { display } = getDMNames(
+    { name: raw, scopeType: channel.scopeType },
+    currentUserId,
+    usersById,
+  );
+  return display.length > 0 ? display.join(', ') : raw;
+};
+
+/**
+ * True when the sidebar row renders bold. DMs: unread count only. Channels: unread count or
+ * activity since last view, unless muted.
+ */
+export const isChannelBold = (
+  channel: Pick<VisibleChannel, 'scopeType' | 'channelStats'>,
+  unreadCount: number,
+  status: Pick<ChannelUserStatus, 'lastViewedAt' | 'desktopNotificationLevel'> | undefined,
+): boolean => {
+  if (isDMChannel(channel.scopeType)) return unreadCount > 0;
+  if (status?.desktopNotificationLevel === NotificationLevel.NONE) return false;
+  const lastActivityAt = channel.channelStats?.lastActivityAt;
+  return (
+    unreadCount > 0 ||
+    (!!status?.lastViewedAt && !!lastActivityAt && lastActivityAt > status.lastViewedAt)
+  );
+};
+
+/**
+ * A-Z: bold (unread) rows first, then the rest — each group case/accent-insensitive
+ * A-Z by display name, ties broken by id for a stable order.
+ */
+export const sortChannelsAlphabetically = <T extends SortableChannel>(
+  list: readonly T[],
+  currentUserId: string,
+  usersById: SortUserLookup,
+  isBold: (channel: T) => boolean = () => false,
+): T[] => {
+  const keys = new Map(list.map(c => [c.id, getChannelSortName(c, currentUserId, usersById)]));
+  const bold = new Set(list.filter(isBold).map(c => c.id));
+  return [...list].sort(
+    (a, b) =>
+      Number(bold.has(b.id)) - Number(bold.has(a.id)) ||
+      (keys.get(a.id) ?? '').localeCompare(keys.get(b.id) ?? '', undefined, {
+        sensitivity: 'base',
+      }) ||
+      a.id.localeCompare(b.id),
+  );
+};
+
+/** Moves the self-DM to the end of the list, preserving everyone else's order. */
+export const pinSelfDMLast = <T extends { name: string | null; scopeType: ChannelScopeType }>(
+  list: readonly T[],
+  currentUserId: string,
+): T[] => {
+  const others: T[] = [];
+  const self: T[] = [];
+  for (const c of list) (isSelfDMChannel(c, currentUserId) ? self : others).push(c);
+  return self.length === 0 ? [...list] : [...others, ...self];
 };

@@ -101,6 +101,7 @@ export class ExternalSourceCore {
 
     const allResults: IngestionResult[] = [];
     const failedExternalIds: string[] = [];
+    let firstFailureMessage: string | undefined;
     for (const payload of payloads) {
       if (payload && typeof payload === 'object' && (payload as any).__skipIngestion) {
         const reason = (payload as any).__skipReason || 'unspecified';
@@ -127,6 +128,7 @@ export class ExternalSourceCore {
           allResults.push(...results);
         } catch (error) {
           failedExternalIds.push(normalizedData.externalId);
+          firstFailureMessage ??= error instanceof Error ? error.message : String(error);
           logger.error(`Failed to sync interaction from ${sourceName}`, {
             externalId: normalizedData.externalId,
             eventType: normalizedData.metadata.eventType,
@@ -153,7 +155,7 @@ export class ExternalSourceCore {
         { sourceName, externalIds: failedExternalIds },
       );
       throw new Error(
-        `Failed to sync ${failedExternalIds.length} interaction${failedExternalIds.length === 1 ? '' : 's'} from ${sourceName}`,
+        `Failed to sync ${failedExternalIds.length} interaction${failedExternalIds.length === 1 ? '' : 's'} from ${sourceName}: ${firstFailureMessage}`,
       );
     }
 

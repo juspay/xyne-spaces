@@ -89,7 +89,7 @@ function isDefiniteScopeMismatch(
 }
 
 class EventRouter {
-  async emit(event: AutomationEvent, workspaceId: string): Promise<void> {
+  async emitToAutomations(event: AutomationEvent, workspaceId: string): Promise<void> {
     const { type: eventType, payload } = event;
     const chain = currentUpstreamChain();
 

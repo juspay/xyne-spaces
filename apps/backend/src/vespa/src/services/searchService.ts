@@ -296,7 +296,9 @@ export class SearchService {
     }
     try {
       const {
-        rankProfile = RankProfile.nativeRank,
+        // No rank profile asked for: rank with personalization (who the searcher is and what
+        // they're involved in) rather than text match alone.
+        rankProfile = RankProfile.personalizedRank,
         offset = 0,
         limit = 20,
         chunkLimit = 6,

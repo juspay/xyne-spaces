@@ -49,6 +49,40 @@ migrations run as a hook before the backend and claw-auth roll. Watch with
 Rolling back is setting the previous tags and re-applying; migrations are not rolled back, so take
 a database backup first. With `image_registry` set, mirror the new images before changing the tag.
 
+### Upgrading with the workflow
+
+With `enable_workflows = true`, Argo Workflows runs next to Argo CD and holds an `xyne-upgrade`
+workflow that does the whole upgrade as one run:
+
+| Step | Does |
+|---|---|
+| `check` | the `v<version>` and `chart-<version>` tags exist (the chart tag is only cut once every image is published) |
+| `plan-<app>` | runs the new image of each app with a database (`xyne-backend`, `xyne-claw-auth`) and prints every pending migration with its SQL |
+| `approve` | pauses, only when something is pending, until someone resumes it |
+| `deploy` | points `xyne-root` at `v<version>`, `chart-<version>` and image `<version>` |
+| `rollout` | waits for every app to reach `chart-<version>`, `Synced` and `Healthy` |
+
+The migrations themselves run in the migrate hook as usual once `deploy` has moved the version.
+
+The UI takes a Kubernetes token:
+
+```bash
+kubectl -n argo-workflows port-forward svc/argo-workflows-server 2746:2746
+kubectl -n xyne-apps create token xyne-workflows-ui --duration=8h
+```
+
+Open <http://localhost:2746>, paste `Bearer <token>`, pick the `xyne-apps` namespace. To reach it
+at `https://workflows.<domain>` instead, set `addon_values = { workflows = "expose:\n  enabled:
+true" }`; it still asks for the token.
+
+*Workflow Templates → xyne-upgrade → Submit* with `version` (for example `1.420.1`). Read the
+`plan-*` logs, then *Resume* to go ahead or *Stop* to leave the install where it is. From the CLI:
+`argo -n xyne-apps submit --from workflowtemplate/xyne-upgrade -p version=1.420.1 --watch`, then
+`argo -n xyne-apps resume @latest`.
+
+The run changes `xyne-root` directly, so put the versions it prints at the end of `deploy` into
+`02-platform.tfvars`; otherwise the next `setup.sh` run moves the install back.
+
 ## Upgrading addons, Argo CD and Kubernetes
 
 | Component | Default | Change it with |

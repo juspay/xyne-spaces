@@ -9,6 +9,10 @@ export default {
     './app/**/*.{ts,tsx}',
     './src/**/*.{ts,tsx}',
     './index.html',
+    // Shipped as text to the artifact sandbox, which runs its own Tailwind. Its
+    // `[&>svg+div]:` / `>svg` variants would put every div and svg in the host's
+    // universal `--tw-*` defaults.
+    '!./src/components/AIScreen/ReactArtifact/shadcnPreamble.generated.ts',
   ],
   prefix: '',
   theme: {
@@ -20,6 +24,10 @@ export default {
       },
     },
     extend: {
+      // Preflight's `*` rule reads this, so no second universal rule is needed for it.
+      borderColor: {
+        DEFAULT: 'hsl(var(--border))',
+      },
       fontFamily: {
         sans: ['Inter', 'sans-serif'],
         mono: ['"Geist Mono"', 'monospace'],
@@ -324,4 +332,9 @@ export default {
     },
   },
   plugins: [tailwindcssAnimate],
+  // Scope the ~40 `--tw-*` custom properties to elements that use transform /
+  // shadow / ring / filter utilities, instead of declaring them on every element.
+  experimental: {
+    optimizeUniversalDefaults: true,
+  },
 };

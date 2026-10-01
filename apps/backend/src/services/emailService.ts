@@ -1,3 +1,4 @@
+import { emitDomainEvent } from '@/events/emitDomainEvent';
 import { ingestEmailThreadTx } from '@/bypassAcl/transactions/emailService';
 /**
  * Email Service
@@ -66,7 +67,6 @@ import { dispatchEmailEventForEmailId } from '@/apps/core/emailUtils';
 import { normalizeRfcMessageId } from '@/utils/emailRfcMessageId';
 import { TICKET_CREATED_EVENT } from '@/automations/triggers/ticket-created.trigger';
 import { emitTicketUpdated } from '@/automations/triggers/ticket-updated.trigger';
-import { eventRouter } from '@/automations/engine/event-router';
 import { v4 as uuidv4 } from 'uuid';
 import { marked } from 'marked';
 import { findDuplicateEmailConversation } from '@/utils/vespaDuplicateDetector';
@@ -147,6 +147,10 @@ export interface CreateConversationWithEmailParams {
   // expanded inside ticketDuplicateService. Undefined → falls back to project-wide
   // detection when the channel's duplicateScopeConfig has no matching values.
   scopeFieldValues?: DuplicateScopeFieldValue[];
+  deferChannelSideEffects?: boolean;
+  // Called once the conversation/email/ticket/thread-link transaction commits,
+  // before the slower post-create side effects run.
+  onThreadCommitted?: () => Promise<void>;
 }
 
 export interface AddEmailToConversationParams {
@@ -169,6 +173,8 @@ export interface AddEmailToConversationParams {
   clientVersionCode?: string;
   uploadedFiles?: UploadedFileResult[];
   receivedAt?: Date;
+  /** See CreateConversationWithEmailParams.deferChannelSideEffects. */
+  deferChannelSideEffects?: boolean;
 }
 
 export interface UpdateExternalInteractionParams {
@@ -1003,6 +1009,7 @@ export class EmailService {
   private async createEmailAttachments(
     emailId: string,
     conversationId: string,
+    channelId: string | null,
     userId: string,
     workspaceId: string,
     uploadedFiles: UploadedFileResult[]
@@ -1025,6 +1032,7 @@ export class EmailService {
       createdBy: userId,
       storageProvider: config.fileStorage.provider,
       conversationId: conversationId,
+      channelId: channelId,
       workspaceId: workspaceId,
       metadata: file.metadata || {},
     }));
@@ -1062,6 +1070,8 @@ export class EmailService {
       clientVersionName,
       clientVersionCode,
       scopeFieldValues,
+      deferChannelSideEffects = false,
+      onThreadCommitted,
     } = params;
     const normalizedRfcMessageId = normalizeRfcMessageId(rfcMessageId);
 
@@ -1147,7 +1157,7 @@ export class EmailService {
     // concurrently, the transaction rolls back everything (no orphaned tickets).
     let txResult: { conversation: any; ticket: any; email: any };
     try {
-      txResult = await createConversationWithEmailTx(this, channelId, userId, channel, receivedAt, emailType, emailSubject, emailBody, emailTo, emailFrom, emailCc, emailBcc, emailReplyTo, externalThreadId, externalMessageId, sentByUserId, normalizedRfcMessageId, rating, clientVersionName, clientVersionCode, externalSourceId, projectId, boardId, firstStage, slaResolutionDue, userGroup, groupId, ticketMetadata);
+      txResult = await createConversationWithEmailTx(this, channelId, userId, channel, receivedAt, emailType, emailSubject, emailBody, emailTo, emailFrom, emailCc, emailBcc, emailReplyTo, externalThreadId, externalMessageId, sentByUserId, normalizedRfcMessageId, rating, clientVersionName, clientVersionCode, externalSourceId, projectId, boardId, firstStage, slaResolutionDue, userGroup, groupId, ticketMetadata, deferChannelSideEffects);
     } catch (err) {
       if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002') {
         await this.emailRepository.backfillRfcMessageIdByExternalMessageId(
@@ -1161,18 +1171,29 @@ export class EmailService {
       throw err;
     }
     const { conversation, ticket, email } = txResult;
+    await onThreadCommitted?.();
 
     // Direct DB ticket create bypasses Zero side-effects — invalidate the
     // channel's label unread counts so sidebar badges refresh.
-    websocketService.broadcastLabelUnreadCountsUpdate(channelId);
+    if (!deferChannelSideEffects) websocketService.broadcastLabelUnreadCountsUpdate(channelId);
 
     // --- Side effects (outside transaction) ---
 
     // Direct DB insert bypasses Zero side-effects, so dispatch the EMAIL app event ourselves.
     void dispatchEmailEventForEmailId(email.id);
 
-    void eventRouter.emit(
-      { type: TICKET_CREATED_EVENT, payload: { ticketId: ticket.id } },
+    void emitDomainEvent(
+      {
+        type: TICKET_CREATED_EVENT,
+        payload: {
+          ticketId: ticket.id,
+          scope: {
+            boardId: ticket.boardId ?? null,
+            projectId: ticket.projectId ?? null,
+            channelId: ticket.channelId ?? null,
+          },
+        },
+      },
       ticket.workspaceId,
     ).catch((err: unknown) => logger.error(`[EmailService] TICKET_CREATED emit failed for ticket ${ticket.id}:`, err));
 
@@ -1277,7 +1298,7 @@ export class EmailService {
     });
 
     // Create MessageAttachment entries for email attachments
-    await this.createEmailAttachments(email.id, conversation.conversationId, userId, channel.workspaceId, uploadedFiles);
+    await this.createEmailAttachments(email.id, conversation.conversationId, conversation.channelId, userId, channel.workspaceId, uploadedFiles);
 
     // Process Google Meet links from email body and send to SAM 
     try {
@@ -1305,7 +1326,7 @@ export class EmailService {
     }
 
     // Update channel last activity
-      await this.channelRepository.updateLastActivity(channelId);
+      if (!deferChannelSideEffects) await this.channelRepository.updateLastActivity(channelId);
 
       // Get sender info
       const senderInfo = await this.getUserInfo(userId);
@@ -1325,11 +1346,14 @@ export class EmailService {
         createdAt: message.createdAt,
       };
 
-      // Real-time broadcast via WebSocket
-      await websocketService.broadcastToSession(channelId, 'new_conversation', conversationMessage);
+      // Real-time broadcast via WebSocket. A historical import has no live
+      // conversation to announce, and `ingestEmailThread` sends neither of these.
+      if (!deferChannelSideEffects) {
+        await websocketService.broadcastToSession(channelId, 'new_conversation', conversationMessage);
 
-    // Also broadcast via Redis for horizontal scaling
-    await redisService.broadcastMessageToSession(channelId, conversationMessage);
+        // Also broadcast via Redis for horizontal scaling
+        await redisService.broadcastMessageToSession(channelId, conversationMessage);
+      }
 
     return {
       conversation,
@@ -1367,6 +1391,7 @@ export class EmailService {
         clientVersionCode,
         uploadedFiles = [],
         receivedAt,
+        deferChannelSideEffects = false,
       } = params;
 
       // Validate conversation exists
@@ -1408,7 +1433,7 @@ export class EmailService {
       // When an app-desk source link is requested, the Email upsert and the
       // link write share one transaction so neither can be lost on its own.
       const email = externalSourceId ? await addEmailToConversationTx(this, emailData, externalMessageId, externalThreadId, externalSourceId) : await this.emailRepository.create(emailData);
-      void this.channelRepository.updateLastActivity(conversation.channelId);
+      if (!deferChannelSideEffects) void this.channelRepository.updateLastActivity(conversation.channelId);
 
       // Direct DB insert bypasses Zero side-effects, so dispatch the EMAIL app event ourselves.
       void dispatchEmailEventForEmailId(email.id);
@@ -1424,7 +1449,7 @@ export class EmailService {
         }
 
         await syncTicketEmailCount(this.prisma, conversationId);
-        websocketService.broadcastLabelUnreadCountsUpdate(conversation.channelId);
+        if (!deferChannelSideEffects) websocketService.broadcastLabelUnreadCountsUpdate(conversation.channelId);
 
         const previousLatest = await this.prisma.email.findFirst({
           where: { conversationId, id: { not: email.id } },
@@ -1451,15 +1476,17 @@ export class EmailService {
             }));
           }
 
-          void this.notifyAssigneeOfReply({
-            ticketId: ticketRow.id,
-            conversationId,
-            channelId: conversation.channelId,
-            workspaceId: channel?.workspaceId,
-            emailSubject,
-            emailFrom,
-            emailId: email.id,
-          });
+          if (!deferChannelSideEffects) {
+            void this.notifyAssigneeOfReply({
+              ticketId: ticketRow.id,
+              conversationId,
+              channelId: conversation.channelId,
+              workspaceId: channel?.workspaceId,
+              emailSubject,
+              emailFrom,
+              emailId: email.id,
+            });
+          }
         }
 
         this.pushVespaJobForTicket(
@@ -1492,7 +1519,7 @@ export class EmailService {
       if (!channel?.workspaceId) {
         throw new Error(`workspaceId required: channel not found for email ${email.id} attachments`);
       }
-      await this.createEmailAttachments(email.id, conversation.conversationId, conversation.createdBy, channel.workspaceId, uploadedFiles);
+      await this.createEmailAttachments(email.id, conversation.conversationId, conversation.channelId, conversation.createdBy, channel.workspaceId, uploadedFiles);
 
       if (ticketRow) {
         void this.triggerAutoDraft({
@@ -1599,8 +1626,18 @@ export class EmailService {
       logger.error(`[EmailService] Error pushing Vespa job for ticket ${ticket.id}:`, error);
     });
 
-    void eventRouter.emit(
-      { type: TICKET_CREATED_EVENT, payload: { ticketId: ticket.id } },
+    void emitDomainEvent(
+      {
+        type: TICKET_CREATED_EVENT,
+        payload: {
+          ticketId: ticket.id,
+          scope: {
+            boardId: ticket.boardId ?? null,
+            projectId: ticket.projectId ?? null,
+            channelId: ticket.channelId ?? null,
+          },
+        },
+      },
       ticket.workspaceId,
     ).catch((err: unknown) => logger.error(`[EmailService] TICKET_CREATED emit failed for ticket ${ticket.id}:`, err));
 
@@ -2091,8 +2128,18 @@ export class EmailService {
         logger.warn('[EmailService] failed to sync initial message md', error);
       }
 
-      void eventRouter.emit(
-        { type: TICKET_CREATED_EVENT, payload: { ticketId: txResult.ticketId } },
+      void emitDomainEvent(
+        {
+          type: TICKET_CREATED_EVENT,
+          payload: {
+            ticketId: txResult.ticketId,
+            scope: {
+              boardId: boardId ?? null,
+              projectId: projectId ?? null,
+              channelId: channelId ?? null,
+            },
+          },
+        },
         channel.workspaceId,
       ).catch((err: unknown) => logger.error(`[EmailService] TICKET_CREATED emit failed for ticket ${txResult.ticketId}:`, err));
 
@@ -2177,6 +2224,7 @@ export class EmailService {
           await this.createEmailAttachments(
             e.id,
             txResult.conversationId,
+            channel.id,
             userId,
             channel.workspaceId,
             e.uploadedFiles,

@@ -72,8 +72,9 @@ const RecordingsV2Screen = (): ReactElement => {
   const shouldReduceMotion = useReducedMotion();
   const [scrollContainer, setScrollContainer] = useState<HTMLDivElement | null>(null);
   const listTabParam = searchParams.get('tab');
+  // "Created by me" is the default tab; "All" and "Shared" are explicit `?tab=` values.
   const activeListTab: RecordingOwnershipTab =
-    listTabParam === 'created' || listTabParam === 'shared' ? listTabParam : 'all';
+    listTabParam === 'all' || listTabParam === 'shared' ? listTabParam : 'created';
   const [selectedCreatorId, setSelectedCreatorId] = useState<string | null>(null);
   const [selectedDatePreset, setSelectedDatePreset] = useState<RecordingDatePreset>('all-time');
   const [selectedLabels, setSelectedLabels] = useState<string[]>([]);
@@ -210,7 +211,7 @@ const RecordingsV2Screen = (): ReactElement => {
       setSearchParams(
         prev => {
           const next = new URLSearchParams(prev);
-          if (tab === 'all') next.delete('tab');
+          if (tab === 'created') next.delete('tab');
           else next.set('tab', tab);
           return next;
         },

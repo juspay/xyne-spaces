@@ -584,6 +584,33 @@ export class CallRepository {
   }
 
   /**
+   * Record the ring status a callee device reported. Returns the number of rows updated.
+   * Only applies while the participant is still INVITED, and BUSY is sticky: an idle
+   * second device reporting RINGING must not undo it.
+   *
+   * Best-effort under concurrency: with relationMode = "prisma" an updateMany selects the
+   * matching ids and then updates by id, so two devices reporting within the same few
+   * milliseconds can both pass the guard and the later write wins.
+   */
+  async updateParticipantRingStatus(
+    participantId: string,
+    ringStatus: RingStatus.RINGING | RingStatus.BUSY,
+  ): Promise<number> {
+    const { count } = await DatabaseClient.getInstance().callParticipant.updateMany({
+      where: {
+        id: participantId,
+        response: InvitationResponse.INVITED,
+        OR: [
+          { ringStatus: null },
+          { ringStatus: { notIn: [ringStatus, RingStatus.BUSY] } },
+        ],
+      },
+      data: { ringStatus },
+    });
+    return count;
+  }
+
+  /**
    * Create a SCHEDULED call together with its participants in a single transaction.
    * Used by both one-time scheduled calls and recurring series instances.
    * Channel participants are fetched first (outside the transaction) and then
@@ -1337,6 +1364,67 @@ export class CallRepository {
         userPicture: user?.picture ?? null,
         response: p.response as InvitationResponse | null,
         meetingStatus: p.meetingStatus as MeetingStatus,
+        joinedAt: p.joinedAt,
+        leftAt: p.leftAt,
+      };
+    });
+  }
+
+  /**
+   * Participants shaped for the app API / app events: keeps `isExternal` (which
+   * getParticipantsInfo drops) and nulls `userId` on external rows, where the
+   * stored value is a synthetic id that resolves to no real user.
+   */
+  async findParticipantsForApps(
+    callExternalId: string
+  ): Promise<Array<{
+    userId: string | null;
+    name: string;
+    email: string | null;
+    isExternal: boolean;
+    joinedAt: Date | null;
+    leftAt: Date | null;
+  }>> {
+    const call = await this.findByExternalId(callExternalId);
+    if (!call) return [];
+
+    const participants = await DatabaseClient.getInstance().callParticipant.findMany({
+      where: { callId: call.id },
+      select: {
+        userId: true,
+        email: true,
+        displayName: true,
+        isExternal: true,
+        joinedAt: true,
+        leftAt: true,
+      },
+      orderBy: { invitedAt: 'asc' },
+    });
+    if (participants.length === 0) return [];
+
+    const internalUserIds = participants.filter(p => !p.isExternal).map(p => p.userId);
+    const users = internalUserIds.length
+      ? await repositories.users.findMany({ where: { id: { in: internalUserIds } } })
+      : [];
+    const userMap = new Map(users.map(u => [u.id, u]));
+
+    return participants.map(p => {
+      if (p.isExternal) {
+        return {
+          userId: null,
+          name: p.displayName || p.email || 'Guest',
+          email: p.email ?? null,
+          isExternal: true,
+          joinedAt: p.joinedAt,
+          leftAt: p.leftAt,
+        };
+      }
+      const user = userMap.get(p.userId);
+      return {
+        userId: p.userId,
+        name: (user?.displayName || user?.name) ?? 'Unknown',
+        email: user?.email ?? null,
+        isExternal: false,
         joinedAt: p.joinedAt,
         leftAt: p.leftAt,
       };

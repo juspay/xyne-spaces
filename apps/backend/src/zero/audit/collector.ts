@@ -126,6 +126,7 @@ export async function collectTableAudit(params: {
   // even fabricates phantom changes on identical content.
   const ignore = new Set([
     ...GLOBAL_IGNORE_FIELDS,
+    ...(config.primaryKey ? [config.primaryKey] : []),
     ...(config.ignoreFields ?? []),
     ...Object.keys(config.jsonFields ?? {}),
   ]);

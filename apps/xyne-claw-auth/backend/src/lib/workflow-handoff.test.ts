@@ -14,7 +14,7 @@ const pdf = { attachmentId: "att-pdf", fileName: "Flipkart Galaxy APIs.pdf", mim
 describe("toRootAttachmentRefs", () => {
   it("keeps supported files and drops videos, unsupported types and entries without an id", () => {
     const refs = toRootAttachmentRefs([
-      { ...pdf, fileSize: 1, fileUrl: "" },
+      pdf,
       { attachmentId: "att-mov", fileName: "demo.mp4", mimeType: "video/mp4" },
       { attachmentId: "att-exe", fileName: "tool.exe", mimeType: "application/x-msdownload" },
       { fileName: "orphan.pdf", mimeType: "application/pdf" },

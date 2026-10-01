@@ -620,12 +620,6 @@ interface KanbanColumnsProps {
     dynamicFieldEntries?: DynamicFieldFilterEntry[] | undefined;
     onPageComplete?: (pageArgs: SupportKanbanPageBaseArgs) => void;
   };
-  /**
-   * A search is active. Server counts are not refetched for the search term, so
-   * they are either stale or absent, and the count display has to stop trusting
-   * `stageCounts` while this is true.
-   */
-  searchActive?: boolean;
   allKnownTickets?: Ticket[];
   onTicketsChange?: (columnKey: string, tickets: Ticket[]) => void;
   onAddTicketInColumn?: (column: {
@@ -670,7 +664,6 @@ export const KanbanColumns: React.FC<KanbanColumnsProps> = ({
   slaPolicies,
   paginatedColumnConfig,
   deskPaginationConfig,
-  searchActive,
   allKnownTickets,
   onTicketsChange,
   onAddTicketInColumn,
@@ -689,21 +682,16 @@ export const KanbanColumns: React.FC<KanbanColumnsProps> = ({
     // In normal mode, use allKnownTickets for optimistic updates
     return allKnownTickets ?? Object.values(ticketsByStage).flat();
   }, [allKnownTickets, isGroupByActive, ticketsByStage]);
-  // Only the paginated board can starve a collapsed column of its count; the
-  // non-paginated board always has every ticket in `ticketsByStage`.
-  const countsAreReliable = !(paginatedColumnConfig && searchActive);
   const stageCountById = React.useMemo(() => {
     const counts: Record<string, number> = {};
 
     for (const stage of stages) {
       const loaded = ticketsByStage[stage.id]?.length ?? 0;
-      counts[stage.id] = countsAreReliable
-        ? (stageCounts?.[stage.id] ?? stageCounts?.[stage.name] ?? loaded)
-        : loaded;
+      counts[stage.id] = stageCounts?.[stage.id] ?? stageCounts?.[stage.name] ?? loaded;
     }
 
     return counts;
-  }, [stages, stageCounts, ticketsByStage, countsAreReliable]);
+  }, [stages, stageCounts, ticketsByStage]);
   const [columnOrder, setColumnOrder] = React.useState<string[]>([]);
   const [draggedStageId, setDraggedStageId] = React.useState<string | null>(null);
 
@@ -762,10 +750,9 @@ export const KanbanColumns: React.FC<KanbanColumnsProps> = ({
         const stageTickets = ticketsByStage[stage.id] || [];
         const ticketIds = stageTickets.map(t => t.id);
         const stageCount = stageCountById[stage.id] ?? stageTickets.length;
-        const serverStageCount =
-          countsAreReliable && stageCounts
-            ? (stageCounts[stage.id] ?? stageCounts[stage.name] ?? 0)
-            : undefined;
+        const serverStageCount = stageCounts
+          ? (stageCounts[stage.id] ?? stageCounts[stage.name] ?? 0)
+          : undefined;
         const columnKey = `${keyPrefix}${stage.id}`;
         const handleAddTicket = onAddTicketInColumn
           ? (): void =>

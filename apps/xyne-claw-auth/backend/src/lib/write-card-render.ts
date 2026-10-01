@@ -2,6 +2,8 @@ import { buildTicketProposalFlow, buildWriteApprovalFlow, type FlowDefinition } 
 import { createLogger } from "../logger.js";
 import { errMsg } from "./errors.js";
 import { postFlowCard, type XyneAiCardTarget } from "./flow-card-delivery.js";
+import { mentionShorthandToText } from "./mention-transform.js";
+import { looksLikeMemberIdList } from "./spaces-post-target.js";
 
 const log = createLogger("write-card");
 
@@ -45,16 +47,24 @@ const BULK_TICKETS_CARD_LIMIT = 25;
 
 export function formatActionDescription(tool: string, params: Record<string, unknown>, options?: { channelName?: string }): string {
   if (tool === "user-send-message") {
-    const content = (params["content"] as string ?? "").slice(0, 300);
+    const fullContent = mentionShorthandToText(params["content"] as string ?? "");
+    const content = fullContent.slice(0, 300);
     const conversationId = params["conversationId"] as string | undefined;
     const channelId = params["channelId"] as string | undefined;
     const lines = [`**Send Message as You**`, ``];
     if (channelId) {
-      lines.push(`**Destination:** post NEW message to #${options?.channelName ?? channelId}`);
+      const channelName = options?.channelName;
+      lines.push(
+        channelName && !looksLikeMemberIdList(channelName)
+          ? `**Destination:** post NEW message to #${channelName}`
+          : channelName
+            ? `**Destination:** post NEW message in a direct message`
+            : `**Destination:** post NEW message to a Spaces channel`,
+      );
     } else if (conversationId) {
-      lines.push(`**Destination:** reply in existing thread ${conversationId}`);
+      lines.push(`**Destination:** reply in an existing thread`);
     }
-    if (content) lines.push(``, `**Message:** ${content}${(params["content"] as string ?? "").length > 300 ? "..." : ""}`);
+    if (content) lines.push(``, `**Message:** ${content}${fullContent.length > 300 ? "..." : ""}`);
     return lines.join("\n");
   }
 

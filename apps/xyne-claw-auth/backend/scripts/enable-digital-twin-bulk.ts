@@ -34,12 +34,9 @@
  */
 import { prisma } from "../src/db.js";
 import { Prisma } from "@prisma/client";
-import {
-  enqueueDigitalTwinBackfill,
-  type BackfillSource,
-} from "../src/queue/digital-twin-backfill-queue.js";
+import { enqueueDigitalTwinBackfill } from "../src/queue/digital-twin-backfill-queue.js";
+import { BACKFILL_SOURCES } from "../src/services/digitalTwinBackfillState.js";
 
-const SOURCES: BackfillSource[] = ["messages", "calls", "canvases"];
 const MONTHS = Math.min(24, Math.max(1, Math.floor(Number(process.env["DT_MONTHS"] ?? 6))));
 const DRY = process.env["DRY_RUN"] === "1";
 
@@ -177,7 +174,7 @@ async function main(): Promise<void> {
   );
 
   const backfillState: Record<string, unknown> = {};
-  for (const s of SOURCES) {
+  for (const s of BACKFILL_SOURCES) {
     // cursor = LOWER bound of the next chunk. The worker walks CHRONOLOGICALLY
     // (oldest → newest) via `while (windowLower < to)` starting at `cursor`, so
     // it MUST seed at `from`. Seeding at `now` (= `to`) makes the loop exit
@@ -216,7 +213,7 @@ async function main(): Promise<void> {
     }
 
     if (DRY) {
-      console.log(`[dry] would enable ${u.email} (${userId}) + auto-approve + enqueue ${SOURCES.length} backfill jobs`);
+      console.log(`[dry] would enable ${u.email} (${userId}) + auto-approve + enqueue ${BACKFILL_SOURCES.length} backfill jobs`);
       enabled++;
       continue;
     }
@@ -230,7 +227,7 @@ async function main(): Promise<void> {
         ...approveFields,
       },
     });
-    for (const source of SOURCES) {
+    for (const source of BACKFILL_SOURCES) {
       const jobId = await enqueueDigitalTwinBackfill({ userId, source, from, to: now });
       jobs++;
       console.log(`  enqueued ${jobId}`);

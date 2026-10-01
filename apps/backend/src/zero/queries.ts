@@ -28,6 +28,7 @@ import {
   schema,
   ChannelRole,
   AttachmentEntityType,
+  CHANNEL_VISIBLE_ATTACHMENT_ENTITY_TYPES,
   ChannelType,
   SDLC_MEMBERSHIP_RELATION,
   SDLC_CONTAINMENT_RELATION,
@@ -3631,6 +3632,7 @@ export const queries: AnyQueryRegistry = defineQueries({
       .related('message', (m) => m.related('conversation').related('attachments'))
       .related('reaction')
       .related('canvas', (c) => c.related('sdlcArtifact'))
+      .related('savedView')
       .related('call')
       .related('ticket');
   }),
@@ -3744,6 +3746,7 @@ export const queries: AnyQueryRegistry = defineQueries({
         .related('message', (m) => m.related('conversation').related('attachments'))
         .related('reaction')
         .related('canvas', (c) => c.related('sdlcArtifact'))
+        .related('savedView')
         .related('call')
         .related('ticket');
     }
@@ -4753,9 +4756,10 @@ export const queries: AnyQueryRegistry = defineQueries({
       direction: z.literal('forward').or(z.literal('backward')),
     }),
     ({ args: { channelId, limit, start, direction } }) => {
-      let query = zql.message_attachments.whereExists('conversation', (conv) =>
-        conv.where('channelId', channelId)
-      );
+      let query = zql.message_attachments
+        .where('isDeleted', false)
+        .where('entityType', 'IN', CHANNEL_VISIBLE_ATTACHMENT_ENTITY_TYPES)
+        .whereExists('conversation', (conv) => conv.where('channelId', channelId));
 
       if (start) {
         query = query.start(
@@ -6247,9 +6251,23 @@ dmChannelsLatestMessagesPaginated: defineQuery(
   savedConfigsSharedWithUser: defineQuery(
     z.object({ userId: z.string() }),
     ({ args: { userId } }) => {
+      // Views shared directly with the user, plus views shared with any channel the
+      // user is a member of (CHANNEL grants store the channelId in entityId).
       return zql.view_access
-        .where('entityType', ViewAccessEntityType.USER)
-        .where('entityId', userId)
+        .where(({ or, and, cmp, exists }) =>
+          or(
+            and(
+              cmp('entityType', '=', ViewAccessEntityType.USER),
+              cmp('entityId', '=', userId),
+            ),
+            and(
+              cmp('entityType', '=', ViewAccessEntityType.CHANNEL),
+              exists('channel', (ch: any) =>
+                ch.whereExists('participants', (p: any) => p.where('userId', userId)),
+              ),
+            ),
+          ),
+        )
         .related('view', view => view.related('values'))
         .orderBy('createdAt', 'desc');
     },

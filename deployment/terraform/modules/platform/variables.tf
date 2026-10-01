@@ -320,6 +320,11 @@ variable "enable_hindsight" {
   default = false
 }
 
+variable "enable_workflows" {
+  type    = bool
+  default = false
+}
+
 variable "enable_monitoring" {
   type    = bool
   default = false

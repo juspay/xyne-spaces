@@ -9,6 +9,10 @@ import { createRequire } from 'module';
 
 const require = createRequire(import.meta.url);
 
+// Files that predate the perf rules. They report as warnings until cleaned up;
+// remove a file from the list once it passes, and never add new ones.
+const perfBaseline = require('./eslint-rules/perf-baseline.json');
+
 const localRules = {
   rules: {
     'no-fetch-use-axios': require('./eslint-rules/no-fetch-use-axios.cjs'),
@@ -20,6 +24,8 @@ const localRules = {
     'require-is-deleted-filter': require('../../packages/shared/eslint-rules/require-is-deleted-filter.cjs'),
     'require-initial-message-md-in-conversation-insert': require('./eslint-rules/require-initial-message-md-in-conversation-insert.cjs'),
     'no-direct-message-lookup-in-mutators': require('./eslint-rules/no-direct-message-lookup-in-mutators.cjs'),
+    'no-slow-tailwind-classes': require('./eslint-rules/no-slow-tailwind-classes.cjs'),
+    'no-sync-layout-read-in-effect': require('./eslint-rules/no-sync-layout-read-in-effect.cjs'),
   }
 };
 
@@ -94,10 +100,19 @@ export default tseslint.config(
       "local-rules/require-is-deleted-filter": "error",
       "local-rules/require-initial-message-md-in-conversation-insert": "error",
       "local-rules/no-direct-message-lookup-in-mutators": "error",
+      "local-rules/no-slow-tailwind-classes": "error",
+      "local-rules/no-sync-layout-read-in-effect": "warn",
       "local-rules/require-tracking-on-click": ["error", {
         exemptComponents: [],
         exemptDataTestIds: [],
       }],
+    },
+  },
+
+  {
+    files: perfBaseline["no-slow-tailwind-classes"],
+    rules: {
+      "local-rules/no-slow-tailwind-classes": "warn",
     },
   },
 

@@ -12,12 +12,8 @@
 import type Bull from 'bull';
 import { config } from '@/config/env';
 import { logger } from '@/utils/logger';
-import {
-  workspaceForExecution,
-  workspaceForWorkflow,
-  runExecutionUnderServiceActor,
-  runCronTickUnderServiceActor,
-} from '@/bypassAcl/workflowServices';
+import { workspaceForExecution, workspaceForWorkflow } from '@/bypassAcl/workflowServices';
+import { runExecutionUnderServiceActor, runCronTickUnderServiceActor } from '@/bypassAcl/workflowOperations';
 import {
   WORKFLOWS_JOB_NAME,
   workflowsQueue,

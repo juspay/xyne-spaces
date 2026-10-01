@@ -17,6 +17,7 @@ import { decrypt } from "../crypto.js";
 import { CONFIG } from "../config.js";
 
 import { createLogger } from "../logger.js";
+import { recordKnownMcpTools } from "../lib/mcp-tool-name-index.js";
 const log = createLogger("runner");
 
 /**
@@ -460,6 +461,7 @@ export async function listToolsForUser(
   const useShared =
     !options.fresh && TOOL_LIST_CACHE_TTL_MS > 0 && SHARED_TOOL_LIST_SERVER_TYPES.has(serverType);
   const tools = useShared ? await sharedToolList(serverType, fetchTools) : await fetchTools();
+  void recordKnownMcpTools(userId, serverType, tools);
 
   const definition = await resolveConnectorDefinition(serverType);
   const writeTools = definition?.writeTools ?? [];
