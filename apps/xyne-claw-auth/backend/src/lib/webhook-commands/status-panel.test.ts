@@ -39,7 +39,7 @@ describe("formatStatusPanel", () => {
     expect(out).toContain("**Last 5 min** — 3 tool calls:");
     expect(out).toContain("✓ grep 2.5s");
     expect(out).toContain("✕ read_file");
-    expect(out).toContain("⏳ bash");
+    expect(out).toContain("· bash");
     expect(out).not.toContain("ancient");
     expect(out).toContain("Ownership: `pod-7:uuid-1` · heartbeat fresh (90s ttl)");
     expect(out).toContain("Queue job: state `active` · attempt 1");

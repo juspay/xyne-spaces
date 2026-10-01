@@ -199,8 +199,10 @@ import { coerceTwinReplyDraft, destinationNameLookup, createTwinReplyDraft } fro
 import userMigrationRoutes from '@/routes/userMigration';
 import { decryptRequestBodyMiddleware, encryptResponseBodyMiddleware } from './middleware/decryptionMiddleware';
 import internalRoutes from '@/routes/internal';
+import userDeactivationRoutes from '@/routes/userDeactivation';
 import collectionsRoutes from '@/routes/collections';
 import merchantRoutes from '@/routes/merchants';
+import formFieldValuesRoutes from '@/routes/formFieldValues';
 import officeConversionRoutes from '@/routes/officeConversion';
 import sdlcRoutes from '@/routes/sdlc';
 import sdlcClawRoutes from '@/routes/sdlcClaw';
@@ -643,6 +645,8 @@ export class App {
 
     // Internal canvas read/update (S2S-only, used by MCP tools)
     this.app.use('/api/internal/canvas', internalCanvasRoutes);
+    // User deactivation cleanup, called by an out-of-cluster service (own secret)
+    this.app.use('/api/internal/users', userDeactivationRoutes);
     this.app.use('/api/canvas/claw', authenticateUserOrApp, canvasRoutes);
     this.app.use('/api/vespaSearch/claw', authenticateUserOrApp, vespaSearchRoutes);
     this.app.use('/api/dashboard/claw', authenticateUserOrApp, dashboardClawRouter);
@@ -734,6 +738,7 @@ export class App {
     // Collections routes
     this.app.use('/api/collections', authMiddleware.authenticate, collectionsRoutes);
     this.app.use('/api/merchants', authMiddleware.authenticate, merchantRoutes);
+    this.app.use('/api/form-field-values', authMiddleware.authenticate, formFieldValuesRoutes);
 
     // Office document (pptx, docx, ...) -> PDF conversion, via LibreOffice.
     // Stateless: takes uploaded bytes, returns converted bytes, touches no stored data.

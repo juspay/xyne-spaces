@@ -1396,7 +1396,7 @@ export async function prepareRun(
     ];
 
     const toolUsageRank =
-      agentSlug && wantsToolUsageRank(mergedAgentConfig["optimizations"], optimizations)
+      agentSlug && wantsToolUsageRank(mergedAgentConfig["optimizations"], optimizations, agent.delegationTier)
         ? await toolUsageRankFor(agentSlug, agent.orgId)
         : [];
     const { toolUsageRank: _suppliedToolUsageRank, ...agentConfigWithoutRank } = mergedAgentConfig;

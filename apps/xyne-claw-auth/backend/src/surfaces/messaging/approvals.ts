@@ -303,7 +303,7 @@ export async function redeemApproval(input: {
       approverUserId: effectiveUserId,
       ...(option.conversationId ? { conversationId: option.conversationId } : {}),
     });
-    await reply(outcome.ok ? `✅ ${outcome.message}` : `⚠️ ${outcome.message}`);
+    await reply(outcome.ok ? `${outcome.message}` : `${outcome.message}`);
     await recordOutcome(option, account.orgId, `Approved: ${option.action.label}`, outcome.message);
   } catch (err) {
     log.error(`[approvals] execution threw for ${option.action.label}: ${errMsg(err)}`);

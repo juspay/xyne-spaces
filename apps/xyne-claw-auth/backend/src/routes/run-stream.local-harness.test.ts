@@ -10,6 +10,10 @@ const state = vi.hoisted(() => ({
   messageUpdates: [] as Array<Record<string, unknown>>,
   handoffs: [] as Array<Record<string, unknown>>,
   handoffResult: { handedOff: false, reason: "no_active_run" } as { handedOff: boolean; reason: string },
+  /** Args every AgentRun.start received — i.e. the pre-dispatch run rows. */
+  runStarts: [] as Array<Record<string, unknown>>,
+  /** Ordered trace of the two events whose ORDER is the whole bug. */
+  order: [] as string[],
   config: {
     internalUrl: "http://auth.local",
     xyneClawS2sKey: "s2s-secret",
@@ -67,7 +71,11 @@ vi.mock("../repositories/index.js", () => ({
     latestLocalFolderContext: vi.fn(async () => state.stickyFolder),
   },
   agentRunRepository: {
-    start: vi.fn(async () => ({})),
+    start: vi.fn(async (args: Record<string, unknown>) => {
+      state.runStarts.push(args);
+      state.order.push("run-row-written");
+      return {};
+    }),
     finalize: vi.fn(async () => ({})),
     findBySessionId: vi.fn(async () => null),
     appendToolInvocation: vi.fn(async () => ({})),
@@ -127,6 +135,7 @@ vi.mock("../lib/run-turn-handoff.js", () => ({
   isTurnControlCommand: vi.fn(() => false),
   awaitTurnHandoff: vi.fn(async (a: Record<string, unknown>) => {
     state.handoffs.push(a);
+    state.order.push("handoff");
     if (state.handoffResult.handedOff) (a["onLabel"] as ((l: string) => void) | undefined)?.("Wrapping up the previous reply first…");
     return state.handoffResult;
   }),
@@ -221,6 +230,8 @@ describe("run/stream local harness", () => {
     state.messageUpdates = [];
     state.handoffs = [];
     state.handoffResult = { handedOff: false, reason: "no_active_run" };
+    state.runStarts = [];
+    state.order = [];
     vi.stubGlobal("fetch", vi.fn(async (_input: unknown, init?: RequestInit) => {
       if (typeof init?.body === "string") state.fetchBodies.push(JSON.parse(init.body) as Record<string, unknown>);
       return new Response(JSON.stringify({ success: true, sessionId: "server-session" }), {
@@ -437,6 +448,68 @@ describe("run/stream local harness", () => {
     expect(state.handoffs[0]).toMatchObject({ conversationId: "conv-1", agentSlug: "assistant", userId: "user-1" });
     const label = capture.frames.find((f) => f.event === "label");
     expect(label?.data["toolLabel"]).toBe("Wrapping up the previous reply first…");
+  });
+
+  /**
+   * Wiring regression (prod 2026-09-28). The AgentRun row for THIS turn is
+   * written at status "running" before dispatch, and the handoff runs after
+   * that. If the handoff is not told which session is ours, its
+   * newest-first "what is running on this conversation" lookup returns our own
+   * row: claw-auth then interrupted a session xyne-claw had never started and
+   * polled it for the full 30s timeout, on every chat turn.
+   *
+   * Types catch a missing `currentSessionId` at the call site; these catch the
+   * things types cannot — the wrong id being threaded, or the row being written
+   * after the handoff so the two drift apart.
+   */
+  it("tells the handoff which session is its own, and it is the row it just wrote", async () => {
+    const { runStreamRouter } = await import("./run-stream.js");
+    const { res } = makeResponse();
+    handle(runStreamRouter, makeRequest(runBody), res);
+    await vi.waitFor(() => expect(state.fetchBodies.length).toBeGreaterThan(0));
+
+    expect(state.runStarts).toHaveLength(1);
+    expect(state.handoffs).toHaveLength(1);
+
+    const ownSessionId = state.runStarts[0]!["sessionId"];
+    expect(typeof ownSessionId).toBe("string");
+    expect(ownSessionId).toBeTruthy();
+
+    // The row we wrote, the session we excluded, and the session we dispatched
+    // must all be the same id. Any drift reopens the stall.
+    expect(state.handoffs[0]!["currentSessionId"]).toBe(ownSessionId);
+    expect(state.fetchBodies[0]!["sessionId"]).toBe(ownSessionId);
+  });
+
+  it("writes the run row before handing off, so the handoff must exclude it", async () => {
+    const { runStreamRouter } = await import("./run-stream.js");
+    const { res } = makeResponse();
+    handle(runStreamRouter, makeRequest(runBody), res);
+    await vi.waitFor(() => expect(state.fetchBodies.length).toBeGreaterThan(0));
+
+    // This ordering is deliberate (see lib/chat-run-record.ts) and is exactly
+    // why the exclusion is mandatory. If someone reorders these, the exclusion
+    // becomes dead code rather than a live guard — fix the test knowingly.
+    expect(state.order).toEqual(["run-row-written", "handoff"]);
+  });
+
+  it("threads the same session id on the local-harness path too", async () => {
+    state.target = { provider: "codex-cli", device: { id: "device-1" } };
+    const { runStreamRouter } = await import("./run-stream.js");
+    const { res } = makeResponse();
+    handle(runStreamRouter, makeRequest(runBody), res);
+    await vi.waitFor(() => expect(state.dispatchArgs).toHaveLength(1));
+
+    expect(state.handoffs[0]!["currentSessionId"]).toBe(state.runStarts[0]!["sessionId"]);
+  });
+
+  it("skips the handoff entirely on a regenerate", async () => {
+    const { runStreamRouter } = await import("./run-stream.js");
+    const { res } = makeResponse();
+    handle(runStreamRouter, makeRequest({ ...runBody, isRegenerate: true }), res);
+    await vi.waitFor(() => expect(state.fetchBodies.length).toBeGreaterThan(0));
+
+    expect(state.handoffs).toHaveLength(0);
   });
 
   it("writes done and persists the message with clawRunOrigin when the harness result lands", async () => {

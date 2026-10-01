@@ -181,6 +181,13 @@ const envSchema = Joi.object({
   GOOGLE_AUTH_REDIRECT_URI: Joi.string().uri().allow('').default(''),
   MICROSOFT_AUTH_REDIRECT_URI: Joi.string().uri().allow('').default(''),
   EXTERNAL_CALL_INVITE_BASE_URL: Joi.string().default('http://localhost:5174/external'),
+  META_APP_ID: Joi.string().allow('').default(''), // Meta (Facebook/Instagram) App ID
+  META_APP_SECRET: Joi.string().allow('').default(''), // Meta App Secret for webhook HMAC verification
+  META_WEBHOOK_VERIFY_TOKEN: Joi.string().allow('').default(''), // Meta webhook hub.verify_token
+  META_IG_APP_ID: Joi.string().allow('').default(''), // Instagram App ID (for Instagram Login OAuth)
+  META_IG_APP_SECRET: Joi.string().allow('').default(''), // Instagram App Secret (for Instagram Login OAuth)
+  META_IG_REDIRECT_URI: Joi.string().allow('').default(''), // Override redirect URI for Instagram OAuth (e.g. ngrok URL in local dev)
+  ENABLE_INSTAGRAM_TOKEN_REFRESH_WORKER: Joi.boolean().default(false),
   SLACK_SIGNING_SECRET: Joi.string().allow('').default(''), // Slack signing secret for request verification
   SLACK_MIGRATION_APPROVALS: Joi.string().allow('').default(''), // Comma-separated list of approved Slack user IDs
   SLACK_IGNORED_BOT_IDS: Joi.string().allow('').default(''), // Comma-separated list of bot IDs to exclude from migration
@@ -330,8 +337,8 @@ const envSchema = Joi.object({
   // services/queryIntent and services/radar are only valid for the model they were
   // tuned on.
   JEV_API_KEY: Joi.string().allow('').default(''),
-  JEV_URL: Joi.string().uri().required().default('https://api.typesafe.ai/v1/systemone'),
-  JEV_MODEL: Joi.string().required().default('jev-1.13.0'),
+  JEV_URL: Joi.string().uri().default('https://api.typesafe.ai/v1/systemone'),
+  JEV_MODEL: Joi.string().default('jev-1.13.0'),
   // Genius Bot API Configuration
   GENIUS_API_URL: Joi.string().uri().default('http://localhost:8000'),
   GENIUS_API_KEY: Joi.string().allow('').default(''),
@@ -502,6 +509,9 @@ const envSchema = Joi.object({
   ENCRYPTION_REQUEST_TIMEOUT_MS: Joi.number().integer().min(1).default(5000),
   // Shared s2s secret sent as X-Internal-Service-Secret to internal services.
   INTERNAL_SERVICE_SECRET: Joi.string().allow('').default(''),
+  // Dedicated secret for POST /internal/users/deactivate, sent in the standard
+  // X-Internal-Service-Secret header.
+  USER_DEACTIVATION_SERVICE_SECRET: Joi.string().allow('').default(''),
   // mTLS certificate service (s2s). Empty url disables cert revocation.
   MTLS_SERVICE_URL: Joi.string().uri().allow('').default(''),
   MTLS_SERVICE_REQUEST_TIMEOUT_MS: Joi.number().integer().min(1).default(5000),
@@ -631,6 +641,11 @@ const envSchema = Joi.object({
   // are unaffected either way (always strict).
   WEBHOOK_ALLOW_INTERNAL_HOSTS: Joi.boolean().default(true),
   SDK_API_ENABLED: Joi.boolean().default(false),
+  // Continuous CPU + heap profiling pushed to Grafana Pyroscope. Off by default;
+  // needs PYROSCOPE_SERVER_ADDRESS (e.g. http://localhost:4040) to do anything.
+  PYROSCOPE_ENABLED: Joi.boolean().default(false),
+  PYROSCOPE_SERVER_ADDRESS: Joi.string().allow('').default(''),
+  PYROSCOPE_FLUSH_INTERVAL_MS: Joi.number().integer().min(1000).default(60000),
 
 }).unknown();
 
@@ -887,6 +902,13 @@ export const config = {
   googleAuthRedirectUri: envVars.GOOGLE_AUTH_REDIRECT_URI as string,
   microsoftAuthRedirectUri: envVars.MICROSOFT_AUTH_REDIRECT_URI as string,
   externalCallInviteBaseUrl: envVars.EXTERNAL_CALL_INVITE_BASE_URL,
+  META_APP_ID: envVars.META_APP_ID as string,
+  META_APP_SECRET: envVars.META_APP_SECRET as string,
+  META_WEBHOOK_VERIFY_TOKEN: envVars.META_WEBHOOK_VERIFY_TOKEN as string,
+  META_IG_APP_ID: envVars.META_IG_APP_ID as string,
+  META_IG_APP_SECRET: envVars.META_IG_APP_SECRET as string,
+  META_IG_REDIRECT_URI: envVars.META_IG_REDIRECT_URI as string,
+  enableInstagramTokenRefreshWorker: envVars.ENABLE_INSTAGRAM_TOKEN_REFRESH_WORKER as boolean,
   slackSigningSecret: envVars.SLACK_SIGNING_SECRET,
   slackMigrationApprovals: envVars.SLACK_MIGRATION_APPROVALS
     ? envVars.SLACK_MIGRATION_APPROVALS.split(',')
@@ -1208,6 +1230,7 @@ export const config = {
   },
   internalS2sKey: envVars.INTERNAL_S2S_KEY as string,
   internalServiceSecret: envVars.INTERNAL_SERVICE_SECRET as string,
+  userDeactivationServiceSecret: envVars.USER_DEACTIVATION_SERVICE_SECRET as string,
   mtlsService: {
     url: envVars.MTLS_SERVICE_URL as string,
     // Reuses the shared internal-service secret (X-Internal-Service-Secret).
@@ -1347,5 +1370,10 @@ export const config = {
   },
   webhooks: {
     allowInternalHosts: envVars.WEBHOOK_ALLOW_INTERNAL_HOSTS as boolean,
+  },
+  pyroscope: {
+    enabled: envVars.PYROSCOPE_ENABLED as boolean,
+    serverAddress: envVars.PYROSCOPE_SERVER_ADDRESS as string,
+    flushIntervalMs: envVars.PYROSCOPE_FLUSH_INTERVAL_MS as number,
   },
 };

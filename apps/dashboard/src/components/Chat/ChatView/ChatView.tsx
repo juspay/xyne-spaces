@@ -22,6 +22,8 @@ import { useAuthContextValues } from '../../../hooks/useAuth';
 import { mutators } from '../../../zero/mutators';
 import { usePreviousChannelId } from '../../../hooks/usePreviousChannelId';
 import { useChannel, useChannelParticipation } from '../../../hooks/useChannels';
+import { useUser } from '../../../hooks/useUsers';
+import { isUserDeactivated } from '../../../utils/userDisplayName';
 import { setLastVisitedChannel } from '../../../hooks/useLastVisitedChannel';
 import { useRouteContext } from '../../../hooks/useRouteContext';
 import { usePlatform } from '../../../hooks/usePlatform';
@@ -196,6 +198,16 @@ const ChatView = (): ReactElement => {
   const isFocusThread = isThreadActive && searchParams.get('focusThread') === '1';
   const isProfileActive = !!userId;
   const isThreadProfileActive = isThreadActive && isProfileActive;
+  // Deactivated-user profile: reached from Cmd+K's fallback when the target
+  // has no prior DM. Render the profile route full-viewport (like the
+  // focus-thread branch below), so the anchor channel behind is suppressed and
+  // the Slack-style layout inside ProfileSidebar owns the screen.
+  const deactivatedProfileUser = useUser(userId ?? '');
+  const isDeactivatedProfileActive =
+    isProfileActive &&
+    !isThreadActive &&
+    !!deactivatedProfileUser &&
+    isUserDeactivated(deactivatedProfileUser);
   const showSecondaryPanel =
     isThreadActive ||
     isCanvasActive ||
@@ -269,6 +281,21 @@ const ChatView = (): ReactElement => {
   }
 
   if (isFocusThread && !isThreadProfileActive) {
+    return (
+      <div
+        ref={chatViewContainerRef}
+        data-component='ChatView'
+        className={`w-full h-full overflow-hidden relative ${isInPanelWebview ? '' : 'rounded-2xl'}`}
+      >
+        <Outlet />
+      </div>
+    );
+  }
+
+  // Deactivated-user profile: render ProfileSidebar full-viewport (see
+  // isDeactivatedProfileActive above) — the anchor channel behind it is
+  // suppressed so the Slack-style layout inside ProfileSidebar owns the screen.
+  if (isDeactivatedProfileActive) {
     return (
       <div
         ref={chatViewContainerRef}

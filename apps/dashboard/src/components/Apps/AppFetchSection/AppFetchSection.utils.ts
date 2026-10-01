@@ -23,7 +23,6 @@ export const DEFAULT_RESPONSE_MAPPING: AppFetchResponseMapping = {
     additionalFormFields: 'additionalFormFields',
     attachments: 'attachments',
   },
-  idFields: [],
 };
 
 export const EMPTY_FETCH_FORM: AppFetchFormValue = {
@@ -42,7 +41,6 @@ export const MAPPED_FIELDS: readonly {
   label: string;
   required?: boolean;
   hint?: string;
-  structured?: boolean;
 }[] = [
   { key: 'externalId', label: 'Message id', required: true },
   { key: 'sentAt', label: 'Sent at', required: true },
@@ -56,13 +54,11 @@ export const MAPPED_FIELDS: readonly {
     key: 'additionalFormFields',
     label: 'Custom form fields',
     hint: 'Optional. An object of your field names to values, mapped onto the board’s custom fields.',
-    structured: true,
   },
   {
     key: 'attachments',
     label: 'Attachments',
     hint: 'Optional. An array of { fileName, fileUrl }. Xyne downloads each URL without sending credentials.',
-    structured: true,
   },
 ];
 
@@ -84,7 +80,6 @@ export function readMapping(value: AppFetchFormValue): AppFetchResponseMapping {
     messagesPath: typeof m.messagesPath === 'string' ? m.messagesPath : '',
     nextCursorPath: typeof m.nextCursorPath === 'string' ? m.nextCursorPath : 'nextCursor',
     fields: { ...DEFAULT_RESPONSE_MAPPING.fields, ...(m.fields ?? {}) },
-    idFields: Array.isArray(m.idFields) ? m.idFields.filter(x => typeof x === 'string') : [],
   };
 }
 

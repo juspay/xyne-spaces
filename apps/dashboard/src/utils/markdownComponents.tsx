@@ -13,6 +13,7 @@ import { ClawCitationGroup } from '../components/Chat/XyneAISidebar/components/C
 import { ThreadCitationChip } from '../components/ui/MessageBubble/ThreadCitationChip';
 import { parseCiteGroupHref } from '../components/ui/TipTapExtensions/CitationMark';
 import { InternalXyneLink } from '../components/Chat/RenderMessageWithHTML/RenderMessageWithHTML';
+import { useReportExpandedToMessage } from '../components/Chat/ExpandableMessage/ExpandableMessageContext';
 import {
   getAnchorTargetProps,
   parseInternalXyneLink,
@@ -77,6 +78,7 @@ const FencedCodeBlock = ({
 
   const lines = codeText.length > 0 ? codeText.replace(/\n$/, '').split('\n').length : 0;
   const collapsible = lines > CODE_BLOCK_COLLAPSE_THRESHOLD;
+  useReportExpandedToMessage(collapsible && isExpanded);
 
   return (
     <div className='xyne-code-block group/code-block relative my-3 max-w-full overflow-hidden rounded-[10px] border border-border bg-muted'>

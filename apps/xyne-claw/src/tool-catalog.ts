@@ -56,6 +56,14 @@ export interface ToolCatalogItem {
   tool: ToolDefinition;
 }
 
+/**
+ * Whether the SIGNED-IN user/agent can reach a tool's connector, as claw-auth
+ * reports it: `connected` (a credential path exists), `not_connected` (the user
+ * would have to connect it first), `builtin` (not a connector — no connection
+ * needed). Says nothing about whether THIS agent was granted the tool.
+ */
+export type ConnectorConnection = "connected" | "not_connected" | "builtin";
+
 /** One tool from the deployment-wide catalog, as claw-auth returns it. */
 export interface DeploymentToolMatch {
   slug: string;
@@ -65,6 +73,43 @@ export interface DeploymentToolMatch {
   risk: "read" | "write" | "destructive";
   params: Array<{ name: string; type: string; required: boolean; description: string }>;
   grantedToAgents?: number;
+  /** Absent from older claw-auth builds; then the connection is unknown. */
+  connection?: ConnectorConnection;
+  connector?: { type: string; name: string };
+}
+
+/**
+ * A connector with no tools in the deployment index yet (nobody has connected
+ * it, so its tools were never listed). Returned when its name/description
+ * matches the search, so "is there a Grafana integration?" is answerable.
+ */
+export interface DeploymentConnectorMatch {
+  type: string;
+  name: string;
+  description: string;
+  connection: "connected" | "not_connected";
+}
+
+export interface DeploymentSearchResult {
+  matches: DeploymentToolMatch[];
+  connectors: DeploymentConnectorMatch[];
+}
+
+/**
+ * An MCP server the agent's tools selection grants, but that did not resolve
+ * for this run — so none of its tools are in the tool list. claw-auth computes
+ * it (lib/connector-access.ts); without it the run dropped them silently and
+ * the agent never knew its config promised those tools.
+ */
+export interface UnresolvedConfiguredServer {
+  serverType: string;
+  serverName: string;
+  /** `not_connected`: the user must connect it. `unavailable`: it has
+   *  credentials but failed to load this run. */
+  reason: "not_connected" | "unavailable";
+  wholeServer: boolean;
+  tools: string[];
+  moreTools: number;
 }
 
 /**
@@ -79,7 +124,7 @@ export type DeploymentToolSearch = (params: {
   integration?: string;
   maxRisk?: string;
   limit: number;
-}) => Promise<DeploymentToolMatch[]>;
+}) => Promise<DeploymentSearchResult>;
 
 export interface FastToolRuntimeController {
   getActiveToolSet?: () => string[];
@@ -542,17 +587,184 @@ function renderGrouped(entries: ToolCatalogEntry[], header: string): string {
   return [header, ...sections].join("\n\n");
 }
 
-function renderDeployment(matches: DeploymentToolMatch[], note: string): string {
-  if (matches.length === 0) {
+function renderDeploymentLine(m: DeploymentToolMatch, tag = ""): string {
+  const required = m.params.filter((p) => p.required).map((p) => p.name);
+  const params = required.length ? ` — needs ${required.join(", ")}` : "";
+  const granted = typeof m.grantedToAgents === "number" ? `, granted to ${m.grantedToAgents} agent(s)` : "";
+  return `  - ${m.name} [${m.integration}, ${m.risk}${granted}]${tag}${params}\n      ${m.description.replace(/\s+/g, " ").slice(0, 200)}`;
+}
+
+/** How to tell the user to connect something, given what this run can do about it. */
+function connectAdvice(types: string[], suggestConnectorsAvailable: boolean): string {
+  const list = types.map((t) => JSON.stringify(t)).join(", ");
+  return suggestConnectorsAvailable
+    ? `If the task needs one of these, call suggest-connectors({ serverTypes: [${list}] }) — the user gets a Connect card; do not describe the connection steps in prose.`
+    : `If the task needs one of these, tell the user to connect ${types.join(", ")} (Connectors page) and ask again.`;
+}
+
+/** Lowercase alphanumeric tokens of any length. */
+function tokens(value: string): string[] {
+  return value.toLowerCase().split(/[^a-z0-9]+/).filter(Boolean);
+}
+
+/**
+ * True when the query names this connector: all of its type's tokens
+ * (`xyne-spaces` → xyne + spaces) or all of its display name's tokens appear.
+ * Deliberately strict — a generic word shared with a description must not
+ * advertise an unrelated integration.
+ */
+function queryNamesConnector(queryTokens: ReadonlySet<string>, type: string, name: string): boolean {
+  const byType = tokens(type);
+  const byName = tokens(name);
+  return (
+    (byType.length > 0 && byType.every((t) => queryTokens.has(t))) ||
+    (byName.length > 0 && byName.every((t) => queryTokens.has(t)))
+  );
+}
+
+/**
+ * For an agent-scope search: integrations the QUERY NAMES that this run does
+ * not have because the user never connected them. Agent scope otherwise only
+ * lists loadable tools, so "github … stars" in a run without GitHub came back as
+ * a page of unrelated keyword hits and no hint that GitHub exists here.
+ */
+async function namedNotConnectedSection(
+  query: string,
+  search: DeploymentToolSearch | undefined,
+  runServerTypes: ReadonlySet<string>,
+  suggestConnectorsAvailable: boolean,
+): Promise<string> {
+  if (!query || !search) return "";
+  const queryTokens = new Set(tokens(query));
+  let result: DeploymentSearchResult;
+  try {
+    result = await Promise.race([
+      search({ query, limit: 20 }),
+      new Promise<never>((_, reject) => setTimeout(() => reject(new Error("timeout")), NAMED_LOOKUP_TIMEOUT_MS)),
+    ]);
+  } catch {
+    return "";
+  }
+  const named = (type: string, name: string): boolean =>
+    !runServerTypes.has(type) && queryNamesConnector(queryTokens, type, name);
+  const tools = result.matches.filter(
+    (m) => m.connection === "not_connected" && m.connector && named(m.connector.type, m.connector.name),
+  );
+  const connectors = result.connectors.filter((c) => c.connection === "not_connected" && named(c.type, c.name));
+  if (tools.length === 0 && connectors.length === 0) return "";
+
+  const byConnector = new Map<string, { name: string; tools: DeploymentToolMatch[] }>();
+  for (const m of tools) {
+    const slot = byConnector.get(m.connector!.type) ?? { name: m.connector!.name, tools: [] };
+    slot.tools.push(m);
+    byConnector.set(m.connector!.type, slot);
+  }
+  for (const c of connectors) if (!byConnector.has(c.type)) byConnector.set(c.type, { name: c.name, tools: [] });
+  const lines: string[] = [
+    `## Named in your query but NOT connected for this user (${byConnector.size})`,
+  ];
+  for (const [type, slot] of byConnector) {
+    lines.push(`  ${slot.name} [${type}]${slot.tools.length ? "" : " — connector (its tools appear once someone connects it)"}`);
+    lines.push(...slot.tools.slice(0, 8).map((m) => renderDeploymentLine(m).replace(/^  /, "    ")));
+  }
+  lines.push(
+    `These are not in this run and cannot be loaded until the user connects them. ${connectAdvice([...byConnector.keys()], suggestConnectorsAvailable)}`,
+  );
+  return lines.join("\n");
+}
+
+const NAMED_LOOKUP_TIMEOUT_MS = 4000;
+
+/**
+ * Deployment-wide search, grouped by what the user can reach right now:
+ * connected (usable with the user's current connections) vs. available but not
+ * connected (the user must connect the integration first). "Connected" is about
+ * the user's credentials, not this agent's grant — whether it is loadable in
+ * THIS run is tagged per tool.
+ */
+function renderDeploymentSearch(
+  result: DeploymentSearchResult,
+  ctx: {
+    runServerTypes: ReadonlySet<string>;
+    /** Every tool name registered in this run (active or catalogued). */
+    runToolNames: ReadonlySet<string>;
+    openPalette: boolean;
+    suggestConnectorsAvailable: boolean;
+  },
+): string {
+  const { matches, connectors } = result;
+  if (matches.length === 0 && connectors.length === 0) {
     return "No tools in this deployment match that. Try fewer constraints, or describe the task differently.";
   }
-  const lines = matches.map((m) => {
-    const required = m.params.filter((p) => p.required).map((p) => p.name);
-    const params = required.length ? ` — needs ${required.join(", ")}` : "";
-    const granted = typeof m.grantedToAgents === "number" ? `, granted to ${m.grantedToAgents} agent(s)` : "";
-    return `  - ${m.name} [${m.integration}, ${m.risk}${granted}]${params}\n      ${m.description.replace(/\s+/g, " ").slice(0, 200)}`;
+  const unknown = matches.filter((m) => m.connection === undefined);
+  const connected = matches.filter((m) => m.connection === "connected" || m.connection === "builtin");
+  const notConnected = matches.filter((m) => m.connection === "not_connected");
+  const connectorsConnected = connectors.filter((c) => c.connection === "connected");
+  const connectorsNotConnected = connectors.filter((c) => c.connection === "not_connected");
+
+  const total = matches.length + connectors.length;
+  const out: string[] = [`Deployment catalog — ${total} match${total === 1 ? "" : "es"}.`];
+
+  if (unknown.length > 0) {
+    // Older claw-auth: no connection data, so no grouping.
+    out.push("", ...unknown.map((m) => renderDeploymentLine(m)));
+  }
+
+  if (connected.length > 0 || connectorsConnected.length > 0) {
+    // An MCP tool is here when its server resolved this run; a built-in one
+    // when its slug (= its runtime name) is registered.
+    const inRun = (m: DeploymentToolMatch): boolean =>
+      m.connection === "builtin"
+        ? ctx.runToolNames.has(m.slug)
+        : m.connection === "connected" && !!m.connector && ctx.runServerTypes.has(m.connector.type);
+    out.push("", `## Connected — the user's connections reach these (${connected.length + connectorsConnected.length})`);
+    out.push(...connected.map((m) => renderDeploymentLine(m, inRun(m) ? " (in this run)" : m.connection === "builtin" ? " (built-in)" : "")));
+    out.push(...connectorsConnected.map((c) => `  - ${c.name} [${c.type}] — connector, tools not indexed yet\n      ${c.description.replace(/\s+/g, " ").slice(0, 200)}`));
+    out.push(
+      ctx.openPalette
+        ? "Tagged \"(in this run)\" are already here: call them, or find them with search-tools scope=\"agent\" and load them. Others: try load-tools with the exact name; one that comes back \"unknown\" is not loadable in this run."
+        : "Tagged \"(in this run)\" are already here: call them, or find them with search-tools scope=\"agent\" and load them. Untagged ones are reachable with the user's connections but not loaded in this run — delegate to an agent that has them, or ask an admin to grant them.",
+    );
+  }
+
+  if (notConnected.length > 0 || connectorsNotConnected.length > 0) {
+    const byConnector = new Map<string, { name: string; tools: DeploymentToolMatch[] }>();
+    for (const m of notConnected) {
+      const type = m.connector?.type ?? m.integration;
+      const slot = byConnector.get(type) ?? { name: m.connector?.name ?? type, tools: [] };
+      slot.tools.push(m);
+      byConnector.set(type, slot);
+    }
+    out.push("", `## Available but NOT connected — the user must connect the integration first (${notConnected.length + connectorsNotConnected.length})`);
+    for (const [type, slot] of byConnector) {
+      out.push(`  ${slot.name} [${type}]`);
+      out.push(...slot.tools.map((m) => renderDeploymentLine(m).replace(/^  /, "    ")));
+    }
+    out.push(...connectorsNotConnected.map((c) => `  ${c.name} [${c.type}] — connector (its tools appear once someone connects it)\n      ${c.description.replace(/\s+/g, " ").slice(0, 200)}`));
+    const types = [...new Set([...byConnector.keys(), ...connectorsNotConnected.map((c) => c.type)])];
+    out.push(`None of these can be called until the user connects the integration. ${connectAdvice(types, ctx.suggestConnectorsAvailable)}`);
+  }
+  return out.join("\n");
+}
+
+/** Configured-but-unresolved servers, as one section the model can act on.
+ *  Shared by search-tools answers and the run-context primer (routes/run.ts). */
+export function renderUnresolvedConfigured(list: UnresolvedConfiguredServer[], suggestConnectorsAvailable: boolean): string {
+  if (list.length === 0) return "";
+  const lines = list.map((u) => {
+    const tools = u.tools.length
+      ? `: ${u.tools.join(", ")}${u.moreTools ? ` (+${u.moreTools} more)` : ""}`
+      : u.wholeServer ? " (whole server)" : "";
+    const why = u.reason === "not_connected" ? "not connected for this user" : "has credentials but failed to load this run";
+    return `  - ${u.serverType} (${u.serverName}) — ${why}${tools}`;
   });
-  return [`Deployment catalog — ${matches.length} match${matches.length === 1 ? "" : "es"}.`, ...lines, "", note].join("\n");
+  const notConnected = list.filter((u) => u.reason === "not_connected").map((u) => u.serverType);
+  return [
+    `## Selected in this agent's config but NOT in this run (${list.length})`,
+    ...lines,
+    "Their tools are not in your tool list and cannot be loaded.",
+    ...(notConnected.length ? [connectAdvice(notConnected, suggestConnectorsAvailable)] : []),
+  ].join("\n");
 }
 
 /** One MCP server this run is connected to, as search-tools reports it. */
@@ -611,6 +823,12 @@ export function buildFastModeMetaTools(options: {
   openPalette?: boolean;
   /** Connected MCP servers, for `scope:"mcp"`. Empty when none are wired. */
   mcpServers?: McpServerSummary[];
+  /** Servers the agent's selection grants that did not resolve this run. */
+  unresolvedConfigured?: UnresolvedConfiguredServer[];
+  /** Whether suggest-connectors is registered, so answers only point at it when it exists. */
+  suggestConnectorsAvailable?: boolean;
+  /** Every tool name registered in this run, for tagging deployment matches. */
+  runToolNames?: string[];
   activeTools?: ToolCatalogEntry[];
 }): ToolDefinition[] {
   const catalog = [...options.catalog].sort((a, b) => a.name.localeCompare(b.name));
@@ -624,6 +842,16 @@ export function buildFastModeMetaTools(options: {
 
   const catalogNames = [...new Set(catalog.map((entry) => entry.catalog))].sort();
   const mcpServers = options.mcpServers ?? [];
+  const unresolvedConfigured = options.unresolvedConfigured ?? [];
+  const suggestConnectorsAvailable = options.suggestConnectorsAvailable === true;
+  const unresolvedSection = renderUnresolvedConfigured(unresolvedConfigured, suggestConnectorsAvailable);
+  const unresolvedFor = (serverType: string): UnresolvedConfiguredServer | undefined =>
+    unresolvedConfigured.find((u) => u.serverType === serverType);
+  const unresolvedAnswer = (serverType: string): string | undefined => {
+    const u = unresolvedFor(serverType);
+    if (!u) return undefined;
+    return renderUnresolvedConfigured([u], suggestConnectorsAvailable);
+  };
   // Every server the run is connected to, plus any the catalog names on its own,
   // so the enum still guides the model when `mcpServers` was not supplied.
   const mcpServerTypes = [
@@ -651,7 +879,7 @@ export function buildFastModeMetaTools(options: {
       description:
         "Find a tool. Covers two different questions, and `scope` picks which one.\n" +
         `scope="agent" (the default) looks at the tools THIS run can use. Everything it returns is loadable right now — pass the exact names to load-tools and they are callable on your next turn. Catalogs: ${catalogNames.join(", ") || "(none)"}.\n` +
-        'scope="claw" looks at every tool the deployment has, including ones this agent was never given. Use it to find out what exists at all — planning work, configuring another agent, or checking whether a capability is even available here. Results are not necessarily loadable; the answer says which.\n' +
+        'scope="claw" looks at every tool the deployment has, including ones this agent was never given and integrations the user has not connected. Use it to find out what exists at all — planning work, configuring another agent, or checking whether a capability is even available here. Results are grouped into connected (the user\'s connections reach them; tagged when already in this run) and available-but-not-connected (the user must connect the integration first — offer that connection rather than working around it).\n' +
         'scope="mcp" answers "which MCP servers am I connected to". On its own it lists them with their tool counts; add `mcp` to list one server\'s tools. Use it when the ask names a system ("anything from Heisenberg?") rather than a task.\n' +
         "Omit `query` to browse the whole scope. Pass `query` to narrow it, and describe what you are trying to DO rather than guessing a tool name — \"post a message to a channel\", \"fill in a pdf form\". Agent scope matches on words, so keywords work; claw scope is a semantic search, so a full phrase works better than a single noun.\n" +
         "`catalog` narrows the agent scope to one catalog; `integration` narrows the claw scope to one product (google, sandbox, github). `maxRisk` is a ceiling, not an exact match: \"read\" excludes everything that writes, \"write\" still excludes destructive. Use it when you only need to look something up.\n" +
@@ -710,8 +938,11 @@ export function buildFastModeMetaTools(options: {
             const known = mcpServers.find((server) => server.serverType === mcp);
             const entries = entriesForMcp(mcp);
             if (!known && entries.length === 0) {
+              const configured = unresolvedAnswer(mcp);
+              if (configured) return text(configured);
               return text(
-                `No MCP server "${mcp}" in this run. Connected: ${mcpServerTypes.join(", ") || "(none)"}.`,
+                `No MCP server "${mcp}" in this run. Connected: ${mcpServerTypes.join(", ") || "(none)"}. ` +
+                'search-tools scope="claw" shows whether the deployment has it and whether the user has connected it.',
               );
             }
             if (entries.length === 0) {
@@ -730,7 +961,7 @@ export function buildFastModeMetaTools(options: {
             );
           }
           if (mcpServers.length === 0) {
-            return text("No MCP servers are connected in this run.");
+            return text(["No MCP servers are connected in this run.", unresolvedSection].filter(Boolean).join("\n\n"));
           }
           const lines = mcpServers.map((server) => {
             const loadable = entriesForMcp(server.serverType).length;
@@ -739,7 +970,8 @@ export function buildFastModeMetaTools(options: {
           });
           return text(
             `${mcpServers.length} connected MCP server(s):\n${lines.join("\n")}\n\n` +
-            'Add `mcp` to list one server\'s tools, or call load-tools({ mcp: "<server>" }) to take them all.',
+            'Add `mcp` to list one server\'s tools, or call load-tools({ mcp: "<server>" }) to take them all.' +
+            (unresolvedSection ? `\n\n${unresolvedSection}` : ""),
           );
         }
 
@@ -750,7 +982,7 @@ export function buildFastModeMetaTools(options: {
               'Use scope="agent" to search the tools already available here.',
             );
           }
-          const matches = await options.searchDeployment({
+          const result = await options.searchDeployment({
             query,
             limit,
             ...(typeof input.integration === "string" && input.integration.trim()
@@ -758,29 +990,37 @@ export function buildFastModeMetaTools(options: {
               : {}),
             ...(maxRisk ? { maxRisk } : {}),
           }).catch((err: unknown) => (err instanceof Error ? err.message : String(err)));
-          if (typeof matches === "string") {
+          if (typeof result === "string") {
             // Surface the real error (404 vs 403 vs timeout) rather than a
             // generic "could not reach" message.
             return text(
-              `Could not reach the deployment catalog: ${matches.slice(0, 200)}. ` +
+              `Could not reach the deployment catalog: ${result.slice(0, 200)}. ` +
               'scope="agent" still works and covers everything this run can load.',
             );
           }
-          // Telling a restricted agent to load-tools one of these yields
-          // "unknown", which reads as a broken tool, not a permission
-          // boundary — hence the distinct wording below. openPalette only
-          // waives the grant requirement; it can't conjure credentials, so a
-          // tool whose integration was never connected still isn't loadable.
-          return text(renderDeployment(matches, options.openPalette
-            ? "This agent has an open palette, so try load-tools with the exact name. "
-              + 'A name that comes back "unknown" is not in this run at all — its integration has no '
-              + "credentials here, and no palette setting changes that."
-            : "These are NOT loadable in this run: this agent only loads what it was granted. "
-              + 'Re-run with scope="agent" to see what is, or ask an admin to grant one of the above.'));
+          // Grouped by what the USER can reach (connected vs. needs connecting),
+          // with per-tool "(in this run)" tags — so the agent either uses a
+          // connected tool or offers the connection, instead of guessing.
+          const rendered = renderDeploymentSearch(result, {
+            runServerTypes: new Set(mcpServerTypes),
+            runToolNames: new Set(options.runToolNames ?? []),
+            openPalette: options.openPalette === true,
+            suggestConnectorsAvailable,
+          });
+          return text(unresolvedSection ? `${rendered}\n\n${unresolvedSection}` : rendered);
         }
 
+        // Agent scope lists what this run can load. When the query names an
+        // integration the run lacks, say it exists but is not connected.
+        const namedTail = await namedNotConnectedSection(
+          query,
+          options.searchDeployment,
+          new Set(mcpServerTypes),
+          suggestConnectorsAvailable,
+        );
+        const agentText = (body: string) => text(namedTail ? `${body}\n\n${namedTail}` : body);
         const scoped = scopeTo(input.catalog);
-        if ("error" in scoped) return text(scoped.error);
+        if ("error" in scoped) return agentText(scoped.error);
         const activeAllowed = maxRisk ? new Set(riskAtOrBelow(maxRisk as "read" | "write" | "destructive")) : null;
         const activeHits =
           query && options.activeTools && !input.catalog && !mcp
@@ -793,11 +1033,13 @@ export function buildFastModeMetaTools(options: {
             ].join("\n")
           : "";
         if (scoped.entries.length === 0) {
-          if (activeSection) return text(`${activeHits.length} tool(s) you already have match ${JSON.stringify(query)} — call them directly.\n\n${activeSection}`);
-          return text(`The tool catalog is empty. ${emptyCatalogMessage}`);
+          if (activeSection) return agentText(`${activeHits.length} tool(s) you already have match ${JSON.stringify(query)} — call them directly.\n\n${activeSection}`);
+          return agentText([`The tool catalog is empty. ${emptyCatalogMessage}`, unresolvedSection].filter(Boolean).join("\n\n"));
         }
         if (mcp && !mcpServerTypes.includes(mcp)) {
-          return text(`No MCP server "${mcp}" in this run. Connected: ${mcpServerTypes.join(", ") || "(none)"}.`);
+          const configured = unresolvedAnswer(mcp);
+          if (configured) return agentText(configured);
+          return agentText(`No MCP server "${mcp}" in this run. Connected: ${mcpServerTypes.join(", ") || "(none)"}.`);
         }
         const byServer = mcp ? scoped.entries.filter((e) => e.mcpServer === mcp) : scoped.entries;
 
@@ -805,13 +1047,14 @@ export function buildFastModeMetaTools(options: {
         const risked = allowed ? byServer.filter((e) => allowed.has(entryRisk(e))) : byServer;
         const matched = query ? await matchScopedSifted(risked, query) : risked;
         if (matched.length === 0 && activeSection) {
-          return text(`Nothing to load matches ${JSON.stringify(query)}, but ${activeHits.length} tool(s) you already have do — call them directly.\n\n${activeSection}`);
+          return agentText(`Nothing to load matches ${JSON.stringify(query)}, but ${activeHits.length} tool(s) you already have do — call them directly.\n\n${activeSection}`);
         }
         if (matched.length === 0) {
-          return text(
+          return agentText(
             `No tool in this agent's catalog matches ${JSON.stringify(query)}. ` +
             `${risked.length} tool(s) are available here — call search-tools with no query to browse them, ` +
-            'or scope="claw" to check whether the deployment has one this agent was not given.',
+            'or scope="claw" to check whether the deployment has one this agent was not given.' +
+            (unresolvedSection ? `\n\n${unresolvedSection}` : ""),
           );
         }
 
@@ -820,7 +1063,7 @@ export function buildFastModeMetaTools(options: {
           `${shown.length} of ${matched.length} matching tool(s)${query ? ` for ${JSON.stringify(query)}` : ""}. ` +
           'Pick the names you need and call load-tools({ names: [...] }), or load-tools({ catalog: "<name>" }) for a whole catalog.';
         const grouped = renderGrouped(shown, header);
-        return text(activeSection ? `${activeSection}\n\n${grouped}` : grouped);
+        return agentText(activeSection ? `${activeSection}\n\n${grouped}` : grouped);
       },
     },
     {

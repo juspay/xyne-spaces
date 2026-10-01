@@ -1,6 +1,12 @@
 /**
  * suggest-connectors — surfaces connector cards inside the conversation.
  *
+ * The ONLY way a connector card is produced. The server used to also infer
+ * cards from keywords in the user's message (connector-hints); that offered
+ * Grafana to an agent that already held Grafana credentials, so it was removed.
+ * The agent now learns what is missing from its run context ("Selected in this
+ * agent's config but NOT in this run") and from search-tools, and decides.
+ *
  * Covers the moments where an integration is the real answer:
  *   1. the user pastes a link to a service (Google Doc, GitHub repo, Figma file)
  *   2. mid-task, when the work needs an account the user has not connected
@@ -64,9 +70,15 @@ const UNKNOWN_AVAILABILITY: ConnectorAvailability = {
   catalogKnown: false,
 };
 
+interface AgentScope {
+  agentSlug?: string | undefined;
+  agentOrgId?: string | undefined;
+}
+
 async function fetchAvailability(
   userId: string | undefined,
   serverTypes: string[],
+  agent: AgentScope = {},
 ): Promise<ConnectorAvailability> {
   if (!userId || !SERVER.s2sKey || serverTypes.length === 0) return UNKNOWN_AVAILABILITY;
   try {
@@ -74,7 +86,12 @@ async function fetchAvailability(
     const res = await fetch(`${base}/claw/api/v1/internal/connectors/available`, {
       method: "POST",
       headers: { "Content-Type": "application/json", "x-s2s-key": SERVER.s2sKey },
-      body: JSON.stringify({ userId, serverTypes }),
+      body: JSON.stringify({
+        userId,
+        serverTypes,
+        ...(agent.agentSlug ? { agentSlug: agent.agentSlug } : {}),
+        ...(agent.agentOrgId ? { agentOrgId: agent.agentOrgId } : {}),
+      }),
       signal: AbortSignal.timeout(AVAILABILITY_TIMEOUT_MS),
     });
     if (!res.ok) return UNKNOWN_AVAILABILITY;
@@ -105,6 +122,7 @@ async function fetchAvailability(
 export function buildSuggestConnectorsTool(
   ref: SuggestConnectorsRef,
   userId?: string,
+  agent: AgentScope = {},
 ): ToolDefinition {
   return {
     name: SUGGEST_CONNECTORS_TOOL_NAME,
@@ -124,6 +142,9 @@ export function buildSuggestConnectorsTool(
       "    GitHub or Bitbucket repo or PR, a Figma file, a Notion page, a Jira ticket.",
       "  • a task needs an account you have no working tools for (e.g. summarising a Google",
       "    Doc with no Google tools available),",
+      "  • the task needs a server your run context lists under \"Selected in this agent's config",
+      "    but NOT in this run\" (not connected), or that search-tools scope=\"claw\" put under",
+      "    \"Available but NOT connected\" — use the server type exactly as shown there,",
       "  • the user asks to connect something by name (\"connect Figma\"),",
       "  • a tool you tried FAILED with a permission / auth error (401, 403, \"access denied\").",
       "    That means the shared org account cannot reach THIS user\'s data, and their own",
@@ -137,10 +158,10 @@ export function buildSuggestConnectorsTool(
       "  • you are only explaining what a connector does.",
       "",
       "The server resolves each type against the catalog and fills in the name, description",
-      "and connected state — nothing you write reaches the card. It DROPS a connector the",
-      "user has already connected themselves. One shared org-wide is dropped too, UNLESS a",
-      "tool call actually failed against it this turn, or the USER asked for it by name —",
-      "read from their own message, not from your claim.",
+      "and connected state — nothing you write reaches the card. It DROPS a connector this",
+      "user or agent can already reach (their own, the agent's, or shared org-wide), UNLESS a",
+      "tool call against it failed with an auth error (401/403) this turn — then the card",
+      "offers reconnecting.",
       "",
       "The tool result tells you exactly what will render. Follow it literally:",
       "  • it names the connectors whose cards will appear → you may point at them,",
@@ -162,7 +183,7 @@ export function buildSuggestConnectorsTool(
         listAll: {
           type: "boolean",
           description:
-            "True when the user asked to browse or list the available connectors, rather than naming specific ones.",
+            "True ONLY when the user asked to browse or list the available connectors and you name none. Ignored when serverTypes is non-empty.",
         },
         title: {
           type: "string",
@@ -197,7 +218,10 @@ export function buildSuggestConnectorsTool(
         ),
       ].slice(0, MAX_SUGGESTIONS);
 
-      const listAll = p["listAll"] === true;
+      // Named connectors win: a model that passes both (`serverTypes: ["github"],
+      // listAll: true`) wants GitHub, and the roster would bury it under a
+      // sample of unrelated connectors.
+      const listAll = p["listAll"] === true && serverTypes.length === 0;
 
       if (serverTypes.length === 0 && !listAll) {
         return {
@@ -214,7 +238,7 @@ export function buildSuggestConnectorsTool(
       const title = typeof p["title"] === "string" ? p["title"].trim().slice(0, 120) : "";
       const availability = listAll
         ? UNKNOWN_AVAILABILITY
-        : await fetchAvailability(userId, serverTypes);
+        : await fetchAvailability(userId, serverTypes, agent);
 
       const renderable =
         listAll || !availability.catalogKnown
@@ -242,12 +266,16 @@ export function buildSuggestConnectorsTool(
       );
 
       const connected = availability.connected.filter((t) => renderable.includes(t));
+      const toConnect = renderable.filter((t) => !connected.includes(t));
 
-      const stateNote = connected.length
-        ? ` ${connected.join(", ")} ${connected.length === 1 ? "is" : "are"} ALREADY CONNECTED and the card shows it that way — do NOT tell the user to press Connect or link an account for ${connected.length === 1 ? "it" : "them"}; say what you can already do with ${connected.length === 1 ? "it" : "them"}.`
-        : availability.known
-          ? " None of them are connected yet, so each card carries a Connect button."
-          : "";
+      // The server drops an already-connected connector's card (unless a call to
+      // it just failed with an auth error), so never promise a card for one.
+      const connectedNote = connected.length
+        ? ` ${connected.join(", ")} ${connected.length === 1 ? "is" : "are"} ALREADY CONNECTED — no card is shown for ${connected.length === 1 ? "it" : "them"} unless a call failed with an auth error this turn. Do NOT tell the user to press Connect or link an account for ${connected.length === 1 ? "it" : "them"}; use ${connected.length === 1 ? "its" : "their"} tools.`
+        : "";
+      const cardsLine = toConnect.length
+        ? `Connector cards for ${toConnect.join(", ")} will be shown with your reply. Do NOT list or describe these connectors in your text — say at most one short line about why they help.${availability.known ? " None of them are connected yet, so each card carries a Connect button." : ""}`
+        : "No Connect card will be shown.";
 
       return {
         content: [
@@ -255,7 +283,7 @@ export function buildSuggestConnectorsTool(
             type: "text" as const,
             text: listAll
               ? "A connector list with a Browse button will be shown with your reply. Do NOT list the connectors in your text — say at most one short line."
-              : `Connector cards for ${renderable.join(", ")} will be shown with your reply. Do NOT list or describe these connectors in your text — say at most one short line about why they help.${stateNote}`,
+              : `${cardsLine}${connectedNote}`,
           },
         ],
         details: { serverTypes: renderable, listAll, ...(availability.known ? { connected } : {}) },

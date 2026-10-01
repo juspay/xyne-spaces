@@ -997,7 +997,7 @@ async function notifyOwnerOfDelegationRequestInSpaces(args: {
   await postDelegationDmWithCalleeIdentity({
     callee,
     targetUserId: callee.ownerUserId,
-    text: `🤝 Delegation request: agent ${caller.name} (${ownerName}) wants to delegate tasks to your agent ${callee.name}.${reasonLine}\n\nApprove or reject: ${dashboardLink}`,
+    text: `Delegation request: agent ${caller.name} (${ownerName}) wants to delegate tasks to your agent ${callee.name}.${reasonLine}\n\nApprove or reject: ${dashboardLink}`,
     logContext: `request caller=${caller.slug} callee=${callee.slug}`,
   });
 }
@@ -1018,11 +1018,11 @@ async function notifyDelegationRequesterOfDecisionInSpaces(args: {
   if (grant.status !== "approved" && grant.status !== "rejected") return;
   const decider = await userRepository.findById(deciderUserId).catch(() => null);
   const deciderName = decider?.name ?? decider?.email ?? deciderUserId;
-  const emoji = grant.status === "approved" ? "✅" : "❌";
+
   await postDelegationDmWithCalleeIdentity({
     callee,
     targetUserId: grant.createdByUserId,
-    text: `${emoji} your delegation request for ${caller.name} → ${callee.name} was ${grant.status} by ${deciderName}`,
+    text: `Your delegation request for ${caller.name} → ${callee.name} was ${grant.status} by ${deciderName}.`,
     logContext: `decision caller=${caller.slug} callee=${callee.slug}`,
   });
 }

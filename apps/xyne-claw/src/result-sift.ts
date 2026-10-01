@@ -1,5 +1,6 @@
 import { jevEnabled, jevScoreItems, jevThreshold } from "./jev.js";
 import { recordJudgeOutcome } from "./judge-backend.js";
+import { buildJudgeState } from "./judge-state.js";
 import { metric } from "./metrics.js";
 
 const MIN_CHARS = Math.max(500, Number(process.env["JEV_RESULT_SIFT_MIN_CHARS"]) || 4_000);
@@ -113,10 +114,28 @@ export function selectItems(
   return keep;
 }
 
+/**
+ * The STATE the sift scores items against: the request, a short summary of the
+ * earlier conversation and tool calls, and this call's args (judge-state.ts).
+ * Exported for tests.
+ */
+export function siftState(params: { toolName: string; task: string; messages?: readonly unknown[]; args?: unknown }): string {
+  const context = buildJudgeState({
+    task: params.task,
+    ...(params.messages ? { messages: params.messages } : {}),
+    current: { tool: params.toolName, ...(params.args !== undefined ? { args: params.args } : {}) },
+  });
+  return `${context}\n\nThe agent called the tool \`${params.toolName}\` and it returned a list of items.`;
+}
+
 export async function siftToolResult(params: {
   toolName: string;
   content: string;
   task: string;
+  /** pi transcript so far — earlier turns and tool calls inform relevance. */
+  messages?: readonly unknown[];
+  /** This call's arguments. */
+  args?: unknown;
   charBudget: number;
 }): Promise<SiftOutcome | null> {
   const { toolName, content, task } = params;
@@ -127,7 +146,12 @@ export async function siftToolResult(params: {
   const started = Date.now();
   const indexed = split.items.map((text, index) => ({ text, index }));
   const scores = await jevScoreItems(
-    `The user's request:\n${task.slice(0, 4_000)}\n\nThe agent called the tool \`${toolName}\` and it returned a list of items.`,
+    siftState({
+      toolName,
+      task,
+      ...(params.messages ? { messages: params.messages } : {}),
+      ...(params.args !== undefined ? { args: params.args } : {}),
+    }),
     indexed,
     {
       purpose: "result-sift",

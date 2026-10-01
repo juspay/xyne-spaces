@@ -11,3 +11,7 @@ export function automationRunAllowsSandboxWrite(input: {
 }): boolean {
   return input.requested === true || input.sdlcProfile || isWorkflowEngineSession(input.sessionId);
 }
+
+export function automationRunIsHeadlessBulk(sessionId: unknown): boolean {
+  return !isWorkflowEngineSession(sessionId);
+}

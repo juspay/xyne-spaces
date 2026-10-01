@@ -205,8 +205,10 @@ import { SlackThread, SlackComposer } from '../../components/xyne-desk/SlackThre
 import { SocialMediaReplyComposer } from '../../components/xyne-desk/DeskReplyComposer';
 import {
   connectAppStoreDesk,
-  startGooglePlayOAuth,
+  connectGooglePlayDesk,
+  startInstagramOAuth,
 } from '../../services/clients/socialMediaDeskApi';
+import { InstagramCustomerHistory } from '../../components/xyne-desk/InstagramCustomerHistory/InstagramCustomerHistory';
 import { EmailThreadHeader } from '../../components/xyne-desk/EmailBody/EmailThreadHeader';
 import { DeskCalendarView } from '../../components/xyne-desk/DeskCalendar/DeskCalendarView';
 import { ConversationLabels } from '../../components/xyne-desk/ConversationLabels/ConversationLabels';
@@ -246,6 +248,7 @@ import { columnKeysFromValues, valuesToFilters } from '../../utils/savedViewSeri
 import {
   useChannelIntegrationInfo,
   clearChannelConnectedEmailCache,
+  fetchConnectedEmail,
 } from '../../hooks/useChannelConnectedEmail';
 import AddChannelForm from '../../components/Chat/AddChannelForm/AddChannelForm';
 import Info, { ChannelTab } from '../../components/Chat/Info/Info';
@@ -354,8 +357,9 @@ interface PersistedComposeInstance {
   savedAt?: number;
 }
 
-/** Desk types with no "new message" concept: calls aren't composed, and Slack/app
- *  desks can only reply into a thread that already exists externally. */
+/** Desk types with no "new message" concept: calls aren't composed, Slack/app
+ *  desks can only reply into an existing thread, and social media DMs originate
+ *  from the customer side only. */
 const COMPOSE_DISABLED_CHANNEL_TYPES: ReadonlySet<ChannelType | undefined> = new Set([
   ChannelType.CALL,
   ChannelType.SLACK,
@@ -1581,6 +1585,7 @@ const SupportScreen = (): ReactElement => {
   const [isReportOpen, setIsReportOpen] = useState(() => searchParams.get('report') === 'open');
   const [isTopicsOpen, setIsTopicsOpen] = useState(() => searchParams.get('topics') === 'open');
   const [showCreateChannelModal, setShowCreateChannelModal] = useState(false);
+  const [isConnectingReviewDesk, setIsConnectingReviewDesk] = useState(false);
   const [showDeskIntegrationsModal, setShowDeskIntegrationsModal] = useState(
     () =>
       searchParams.get('deskIntegrations') === 'open' ||
@@ -1889,6 +1894,48 @@ const SupportScreen = (): ReactElement => {
         { replace: true },
       );
     }
+
+    const socialMediaOAuth = searchParams.get('socialMediaOAuth');
+    const socialMediaProvider = searchParams.get('socialMediaProvider');
+    const socialMediaError = searchParams.get('socialMediaError');
+    if (socialMediaOAuth === 'success' && socialMediaProvider === 'instagram') {
+      toast.success('Instagram account connected successfully');
+      setSearchParams(
+        prev => {
+          const p = new URLSearchParams(prev);
+          p.delete('socialMediaOAuth');
+          p.delete('socialMediaProvider');
+          return p;
+        },
+        { replace: true },
+      );
+    } else if (socialMediaError && socialMediaProvider === 'instagram') {
+      // mismatch error format: "instagram_account_mismatch:@handle"
+      const [errorCode, errorPayload] = socialMediaError.split(':');
+      const mismatchMessage = errorPayload
+        ? `This channel is connected to ${errorPayload}. Please log into that account on instagram.com and try reconnecting.`
+        : 'Instagram account mismatch — please make sure the correct account is active in your browser and try reconnecting.';
+      const socialMediaErrorMessages: Record<string, string> = {
+        instagram_account_mismatch: mismatchMessage,
+        instagram_auth_denied: 'Instagram authorization was denied. Please try again.',
+        instagram_account_already_connected:
+          'This Instagram account is already connected to another channel.',
+        instagram_connection_failed: 'Failed to connect Instagram. Please try again.',
+      };
+      toast.error(
+        socialMediaErrorMessages[errorCode ?? ''] ??
+          'Instagram connection error. Please try again.',
+      );
+      setSearchParams(
+        prev => {
+          const p = new URLSearchParams(prev);
+          p.delete('socialMediaError');
+          p.delete('socialMediaProvider');
+          return p;
+        },
+        { replace: true },
+      );
+    }
   }, [searchParams, setSearchParams, navigate, queryClient]);
 
   // Sync panel open/close with the URL so back button works correctly
@@ -1926,6 +1973,26 @@ const SupportScreen = (): ReactElement => {
 
   // Email channels are already sorted by the useEmailChannels hook
   const sortedEmailChannels = emailChannels;
+  const [socialSourceTypes, setSocialSourceTypes] = useState<Record<string, string | null>>({});
+  const socialChannelIds = useMemo(
+    () => sortedEmailChannels.filter(c => c.type === ChannelType.SOCIAL_MEDIA).map(c => c.id),
+    [sortedEmailChannels],
+  );
+  useEffect(() => {
+    if (socialChannelIds.length === 0) return;
+    let cancelled = false;
+    void Promise.all(
+      socialChannelIds.map(id =>
+        fetchConnectedEmail(id).then(info => [id, info.sourceType] as const),
+      ),
+    ).then(entries => {
+      if (cancelled) return;
+      setSocialSourceTypes(Object.fromEntries(entries));
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [socialChannelIds]);
   const userChannelStatuses = useUserChannelStatuses();
   // Both star and joined state live on channel_user_status (per-user). A row
   // in that list for a given channelId means the user has joined the channel;
@@ -2104,6 +2171,13 @@ const SupportScreen = (): ReactElement => {
   );
   const selectedChannelName = selectedChannelFull?.name?.trim() || 'Xyne Desk';
   const isSocialMediaDesk = selectedChannelFull?.type === ChannelType.SOCIAL_MEDIA;
+  const selectedChannelIntegration = useChannelIntegrationInfo(
+    isSocialMediaDesk && selectedChannelId && selectedChannelId !== ALL_CHANNELS_ID
+      ? selectedChannelId
+      : null,
+  );
+  const isInstagramDesk = selectedChannelIntegration.sourceType === 'instagram';
+  const isCallDesk = selectedChannelFull?.type === ChannelType.CALL;
 
   // Manual fetch for the selected desk. Social-media desks fetch every review
   // currently available from Google; email desks open the range picker.
@@ -2112,6 +2186,7 @@ const SupportScreen = (): ReactElement => {
   const { refetch: handleRefetch, isPending: isRefetching } = useRefetchExternalSource(
     refetchChannelId,
     isSocialMediaDesk,
+    isCallDesk,
   );
   const canRefetch = !!refetchChannelId;
   const {
@@ -2524,8 +2599,9 @@ const SupportScreen = (): ReactElement => {
       dlEmail?: string;
       slackChannelId?: string;
       installedAppId?: string;
-      socialProvider?: 'GOOGLE_PLAY' | 'APP_STORE';
+      socialProvider?: 'GOOGLE_PLAY' | 'APP_STORE' | 'INSTAGRAM';
       applications?: Array<{ displayName: string; packageName: string }>;
+      serviceAccountKey?: string;
       appStore?: {
         keyId: string;
         privateKey: string;
@@ -2542,6 +2618,7 @@ const SupportScreen = (): ReactElement => {
       installedAppId,
       socialProvider,
       applications,
+      serviceAccountKey,
       appStore,
       channelType: _submittedChannelType,
       ...rest
@@ -2549,7 +2626,7 @@ const SupportScreen = (): ReactElement => {
     const isElectron = typeof window.electronAPI?.openExternal === 'function';
 
     if (deskType === 'SOCIAL_MEDIA') {
-      if (!rest.boardId) {
+      if (socialProvider !== 'INSTAGRAM' && !rest.boardId) {
         toast.error('A board is required');
         return;
       }
@@ -2560,13 +2637,14 @@ const SupportScreen = (): ReactElement => {
           toast.error('At least one bundle ID is required');
           return;
         }
+        setIsConnectingReviewDesk(true);
         void connectAppStoreDesk({
           channelName: rest.name,
           keyId: appStore.keyId,
           privateKey: appStore.privateKey,
           applications: appStore.applications,
           projectId: rest.projectId,
-          boardId: rest.boardId,
+          boardId: rest.boardId!,
           ...(rest.assigneeUserGroupId && {
             assigneeUserGroupId: rest.assigneeUserGroupId,
           }),
@@ -2584,37 +2662,71 @@ const SupportScreen = (): ReactElement => {
               (error as { response?: { data?: { error?: string } } })?.response?.data?.error ??
                 (error instanceof Error ? error.message : 'Failed to connect App Store desk'),
             );
-          });
+          })
+          .finally(() => setIsConnectingReviewDesk(false));
         return;
       }
 
-      if (!applications?.length) {
-        toast.error('At least one Google Play application is required');
+      if (socialProvider === 'GOOGLE_PLAY') {
+        if (!applications?.length) {
+          toast.error('At least one Google Play application is required');
+          return;
+        }
+        if (!serviceAccountKey) {
+          toast.error('A service account key is required');
+          return;
+        }
+        setIsConnectingReviewDesk(true);
+        void connectGooglePlayDesk({
+          serviceAccountKey,
+          channelName: rest.name,
+          applications,
+          projectId: rest.projectId,
+          boardId: rest.boardId!,
+          ...(rest.assigneeUserGroupId && {
+            assigneeUserGroupId: rest.assigneeUserGroupId,
+          }),
+          visibility: rest.visibility === 'public' ? 'PUBLIC' : 'PRIVATE',
+        })
+          .then(channelId => {
+            setShowCreateChannelModal(false);
+            clearChannelConnectedEmailCache(channelId);
+            toast.success('Google Play desk connected');
+            void navigate(`${supportBase}/${channelId}`);
+          })
+          .catch(error => {
+            toast.error(getApiErrorMessage(error, 'Failed to connect Google Play desk'));
+          })
+          .finally(() => setIsConnectingReviewDesk(false));
         return;
       }
-      void startGooglePlayOAuth({
-        channelName: rest.name,
-        applications,
-        projectId: rest.projectId,
-        boardId: rest.boardId,
-        ...(rest.assigneeUserGroupId && {
-          assigneeUserGroupId: rest.assigneeUserGroupId,
-        }),
-        visibility: rest.visibility === 'public' ? 'PUBLIC' : 'PRIVATE',
-        platform: isElectron ? 'electron' : 'web',
-      })
-        .then(authorizationUrl => {
-          setShowCreateChannelModal(false);
-          if (isElectron && window.electronAPI?.openExternal) {
-            window.electronAPI.openExternal(authorizationUrl);
-          } else {
-            window.location.href = authorizationUrl;
-          }
+
+      if (socialProvider === 'INSTAGRAM') {
+        void startInstagramOAuth({
+          channelName: rest.name,
+          projectId: rest.projectId,
+          ...(rest.boardId ? { boardId: rest.boardId } : {}),
+          ...(rest.assigneeUserGroupId && {
+            assigneeUserGroupId: rest.assigneeUserGroupId,
+          }),
+          visibility: rest.visibility === 'public' ? 'PUBLIC' : 'PRIVATE',
+          platform: isElectron ? 'electron' : 'web',
         })
-        .catch(error => {
-          toast.error(error instanceof Error ? error.message : 'Failed to start Google Play OAuth');
-        });
-      return;
+          .then(authUrl => {
+            setShowCreateChannelModal(false);
+            if (isElectron && window.electronAPI?.openExternal) {
+              window.electronAPI.openExternal(authUrl);
+            } else {
+              window.location.href = authUrl;
+            }
+          })
+          .catch(error => {
+            toast.error(
+              error instanceof Error ? error.message : 'Failed to start Instagram authorization',
+            );
+          });
+        return;
+      }
     }
 
     if (deskType === 'SLACK') {
@@ -2760,34 +2872,6 @@ const SupportScreen = (): ReactElement => {
     createChannelMutation.mutate(rest);
   };
 
-  useEffect(() => {
-    const connected = searchParams.get('socialMediaOAuth') === 'success';
-    const error = searchParams.get('socialMediaError');
-    const failedPackage = searchParams.get('socialMediaPackage');
-    if (!connected && !error) return;
-    if (connected) {
-      toast.success('Google Play reviews connected successfully');
-      if (selectedChannelId) clearChannelConnectedEmailCache(selectedChannelId);
-    }
-    if (error === 'google_play_package_validation_failed' && failedPackage) {
-      toast.error('Google Play app connection failed', {
-        description: `Could not access ${failedPackage}. Check its Play Console permissions.`,
-      });
-    } else if (error) {
-      toast.error(error.replaceAll('_', ' '));
-    }
-    setSearchParams(
-      previous => {
-        const next = new URLSearchParams(previous);
-        next.delete('socialMediaOAuth');
-        next.delete('socialMediaError');
-        next.delete('socialMediaPackage');
-        return next;
-      },
-      { replace: true },
-    );
-  }, [searchParams, selectedChannelId, setSearchParams]);
-
   // `trackSource` names the surface the open came from (kanban_card, inbox_row,
   // table_row, calendar); SUPPORT_TICKET_VIEWED reads it off the router state.
   // A new tab has no state, so the source rides the URL as ?src= instead.
@@ -2925,10 +3009,15 @@ const SupportScreen = (): ReactElement => {
                 'bg-emerald-100 text-emerald-700 dark:bg-emerald-500/20 dark:text-emerald-200',
             }
           : c.type === ChannelType.SOCIAL_MEDIA
-            ? {
-                label: 'Social',
-                className: 'bg-amber-100 text-amber-700 dark:bg-amber-500/20 dark:text-amber-200',
-              }
+            ? socialSourceTypes[c.id] === 'instagram'
+              ? {
+                  label: 'Instagram',
+                  className: 'bg-pink-100 text-pink-700 dark:bg-pink-500/20 dark:text-pink-200',
+                }
+              : {
+                  label: 'Social',
+                  className: 'bg-amber-100 text-amber-700 dark:bg-amber-500/20 dark:text-amber-200',
+                }
             : c.type === ChannelType.CALL
               ? {
                   label: 'Call',
@@ -3324,6 +3413,7 @@ const SupportScreen = (): ReactElement => {
                         )}
                       {canRefetch &&
                         isSelectedChannelJoined &&
+                        !isInstagramDesk &&
                         (isDlDesk ||
                           isSocialMediaDesk ||
                           isFetchSourcesLoading ||
@@ -3460,7 +3550,9 @@ const SupportScreen = (): ReactElement => {
                                 ? 'Fetching latest…'
                                 : isSocialMediaDesk
                                   ? 'Fetch reviews'
-                                  : 'Fetch latest emails'
+                                  : isCallDesk
+                                    ? 'Fetch missed calls'
+                                    : 'Fetch latest emails'
                             }
                             side='bottom'
                           >
@@ -4503,6 +4595,9 @@ const SupportScreen = (): ReactElement => {
                         dynamicFieldEntries={dynamicFieldEntries}
                         showExtraFields={true}
                         activeTicketId={ticketId}
+                        {...(channelPreference?.deskType !== undefined && {
+                          deskType: channelPreference.deskType,
+                        })}
                         selectedIds={selectedTicketIds}
                         onToggleSelect={toggleTicketSelected}
                         onBoardIdReady={handleChannelBoardIdResolved}
@@ -4596,7 +4691,7 @@ const SupportScreen = (): ReactElement => {
             requireConnector={true}
             onSubmit={data => handleCreateEmailChannel(data)}
             onCancel={() => setShowCreateChannelModal(false)}
-            loading={createChannelMutation.isPending}
+            loading={createChannelMutation.isPending || isConnectingReviewDesk}
           />
         </div>
       </Dialog>
@@ -4678,6 +4773,15 @@ const SupportScreen = (): ReactElement => {
                   summaryLabel: 'Will fetch reviews posted',
                 }
               : {})}
+          {...(isCallDesk && {
+            ...(!fetchTarget?.sourceName && {
+              title: 'Fetch calls',
+              subtitle: 'Pull calls from Ozonetel that did not reach this workspace.',
+              summaryLabel: 'Will fetch calls made',
+            }),
+            maxDays: 15,
+            withTime: true,
+          })}
           onConfirm={range => {
             setShowRefetchDialog(false);
             handleRefetch(range, fetchTarget);
@@ -6381,6 +6485,15 @@ export const SupportTicketDetail = ({
                 </div>
               )}
             </div>
+            {channelIntegrationInfo.sourceType === 'instagram' && channelId && conversationId && (
+              <InstagramCustomerHistory
+                channelId={channelId}
+                conversationId={conversationId}
+                onTicketClick={xyneId => {
+                  void navigate(`${navBasePath ?? supportBase}/${channelId}/${xyneId}`);
+                }}
+              />
+            )}
             <div
               className='absolute inset-x-0 bottom-0 z-20 bg-background'
               ref={composerOverlayRef}
@@ -6406,11 +6519,17 @@ export const SupportTicketDetail = ({
                     channelId={channel?.id ?? null}
                     drafts={ticketEmailDrafts}
                     replyBasePath='/integrations/social-media'
-                    placeholder='Reply to this review…'
+                    placeholder={
+                      channelIntegrationInfo.sourceType === 'instagram'
+                        ? 'Reply to this DM…'
+                        : 'Reply to this review…'
+                    }
                     // Play caps replies at 350; Apple documents no maximum, so do not invent one.
-                    {...(channelIntegrationInfo.sourceType === SOCIAL_MEDIA_SOURCE_TYPE.GOOGLE_PLAY
-                      ? { maxLength: 350 }
-                      : {})}
+                    {...(channelIntegrationInfo.sourceType === SOCIAL_MEDIA_SOURCE_TYPE.INSTAGRAM
+                      ? { maxLength: 1000 }
+                      : channelIntegrationInfo.sourceType === SOCIAL_MEDIA_SOURCE_TYPE.GOOGLE_PLAY
+                        ? { maxLength: 350 }
+                        : {})}
                     trackingCategory='social-media-composer'
                   />
                 ) : null
@@ -6521,21 +6640,23 @@ export const SupportTicketDetail = ({
                 data-thread-citation-host
               >
                 {conversationId && channelId ? (
-                  <ThreadMessages
-                    channelId={channelId}
-                    conversationId={conversationId}
-                    ticketId={ticket?.id ?? null}
-                    matchedMessageId={targetMessageId}
-                    skipInputAutoFocus
-                    onClose={() => setIsRightPanelOpen(false)}
-                    onAskAI={() => {
-                      if (isAIPanelOpen) {
-                        xyneAIActor.send({ type: 'CLOSE' });
-                      } else {
-                        void openDraftAgentSession();
-                      }
-                    }}
-                  />
+                  <>
+                    <ThreadMessages
+                      channelId={channelId}
+                      conversationId={conversationId}
+                      ticketId={ticket?.id ?? null}
+                      matchedMessageId={targetMessageId}
+                      skipInputAutoFocus
+                      onClose={() => setIsRightPanelOpen(false)}
+                      onAskAI={() => {
+                        if (isAIPanelOpen) {
+                          xyneAIActor.send({ type: 'CLOSE' });
+                        } else {
+                          void openDraftAgentSession();
+                        }
+                      }}
+                    />
+                  </>
                 ) : (
                   <div className='h-full flex items-center justify-center'>
                     <div className='text-lg font-semibold text-muted-foreground'>
