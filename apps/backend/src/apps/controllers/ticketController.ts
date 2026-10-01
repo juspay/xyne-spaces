@@ -693,7 +693,7 @@ export class TicketController {
             // Full role assignment will be done after ticket creation
             pendingFullRoleAssignment = true;
           } else {
-          const assignmentResult = await evaluateAssignmentRule(userGroupId, boardId, undefined, undefined, projectId);
+          const assignmentResult = await evaluateAssignmentRule(userGroupId, boardId, undefined, undefined, projectId, resolvedChannelId);
           if (assignmentResult.assignedUserId) {
             resolvedAssignedTo = assignmentResult.assignedUserId;
             }
@@ -749,6 +749,7 @@ export class TicketController {
             boardId,
             createdBy: userId,
             projectId,
+            channelId: resolvedChannelId,
           });
           const primaryUserId = primaryUserIdOf(fullRoles);
           if (primaryUserId) {
@@ -858,6 +859,7 @@ export class TicketController {
           statusV2: true,
           userGroupId: true,
           assignedTo: true,
+          channelId: true,
         },
       });
       if (!ticket) {
@@ -1066,6 +1068,7 @@ export class TicketController {
               boardId: targetBoardId,
               createdBy: userId,
               projectId: ticket.projectId,
+              channelId: ticket.channelId,
             });
             const primaryUserId = primaryUserIdOf(fullRoles);
             if (primaryUserId) {
@@ -1082,6 +1085,7 @@ export class TicketController {
               undefined,
               undefined,
               ticket.projectId,
+              ticket.channelId ?? null,
             );
             if (assignmentResult.assignedUserId) {
               await ticketService.updateTicketAssignee(ticketId, userId, assignmentResult.assignedUserId);
@@ -2505,7 +2509,7 @@ export class TicketController {
           if (boardMetadata?.fullRoleAssignment === true) {
             pendingFullRoleAssignment = true;
           } else {
-            const assignmentResult = await evaluateAssignmentRule(userGroupId, ticket.boardId, undefined, undefined, ticket.projectId);
+            const assignmentResult = await evaluateAssignmentRule(userGroupId, ticket.boardId, undefined, undefined, ticket.projectId, ticket.channelId ?? null);
             if (assignmentResult.assignedUserId) {
               resolvedAssignedTo = assignmentResult.assignedUserId;
               const updatedTicket = await prismaClient.ticket.update({
@@ -2528,6 +2532,7 @@ export class TicketController {
             boardId: ticket.boardId,
             createdBy: userId,
             projectId: ticket.projectId,
+            channelId: ticket.channelId ?? null,
           });
           const primaryUserId = primaryUserIdOf(fullRoles);
           if (primaryUserId) {
