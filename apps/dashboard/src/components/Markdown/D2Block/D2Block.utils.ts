@@ -1,5 +1,6 @@
 import type { D2, RenderOptions } from '@terrastruct/d2';
 import { logger, Event as LogEvent } from '../../../utils/logger';
+import { sanitizeD2Svg } from './D2Block.sanitize';
 
 let d2Promise: Promise<D2> | null = null;
 
@@ -21,7 +22,8 @@ function runExclusive<T>(fn: () => Promise<T>): Promise<T> {
   return result;
 }
 
-const SVG_CACHE_VERSION = 'v6-animated';
+// Bumped when the cached SVG shape changes; v7 = sanitized output only (XYNE-65425).
+const SVG_CACHE_VERSION = 'v7-sanitized';
 const svgCache = new Map<string, string>();
 const cacheKey = (source: string, isDark: boolean): string =>
   `${SVG_CACHE_VERSION}:${isDark ? 'd' : 'l'}:${source}`;
@@ -132,7 +134,8 @@ export async function renderD2Diagram({
       if (typeof rendered !== 'string') {
         throw new Error('D2 render returned a non-string result');
       }
-      return makeSvgResponsive(rendered);
+      // Sanitize before the SVG is cached or reaches dangerouslySetInnerHTML.
+      return sanitizeD2Svg(makeSvgResponsive(rendered));
     });
     svgCache.set(cacheKey(source, isDark), svg);
     onSuccess(svg);
