@@ -1,5 +1,6 @@
 import { prisma } from "../db.js";
 import { createLogger } from "../logger.js";
+import { callPagePanelTool, isPagePanelTool } from "./page-panel-calls.js";
 
 const log = createLogger("surface-calls");
 
@@ -23,10 +24,11 @@ export interface SurfaceCallResult {
   ok: boolean;
   content: string;
   image?: { data: string; mimeType: string };
+  unavailable?: boolean;
 }
 
 export function isSurfaceTool(toolName: string): boolean {
-  return SURFACE_TOOLS.has(toolName);
+  return SURFACE_TOOLS.has(toolName) || isPagePanelTool(toolName);
 }
 
 function deadlineFor(toolName: string): number {
@@ -81,6 +83,9 @@ export async function callSurfaceTool(input: {
   }
   if (tooBig(args)) {
     return { ok: false, content: "Arguments are too large for an app tool." };
+  }
+  if (isPagePanelTool(toolName)) {
+    return callPagePanelTool({ userId, sessionId: input.sessionId, toolName, args });
   }
 
   const devices = await prisma.localHarnessDevice.findMany({

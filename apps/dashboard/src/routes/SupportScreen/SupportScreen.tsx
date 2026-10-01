@@ -205,7 +205,7 @@ import { SlackThread, SlackComposer } from '../../components/xyne-desk/SlackThre
 import { SocialMediaReplyComposer } from '../../components/xyne-desk/DeskReplyComposer';
 import {
   connectAppStoreDesk,
-  startGooglePlayOAuth,
+  connectGooglePlayDesk,
 } from '../../services/clients/socialMediaDeskApi';
 import { EmailThreadHeader } from '../../components/xyne-desk/EmailBody/EmailThreadHeader';
 import { DeskCalendarView } from '../../components/xyne-desk/DeskCalendar/DeskCalendarView';
@@ -1581,6 +1581,7 @@ const SupportScreen = (): ReactElement => {
   const [isReportOpen, setIsReportOpen] = useState(() => searchParams.get('report') === 'open');
   const [isTopicsOpen, setIsTopicsOpen] = useState(() => searchParams.get('topics') === 'open');
   const [showCreateChannelModal, setShowCreateChannelModal] = useState(false);
+  const [isConnectingReviewDesk, setIsConnectingReviewDesk] = useState(false);
   const [showDeskIntegrationsModal, setShowDeskIntegrationsModal] = useState(
     () =>
       searchParams.get('deskIntegrations') === 'open' ||
@@ -2104,6 +2105,7 @@ const SupportScreen = (): ReactElement => {
   );
   const selectedChannelName = selectedChannelFull?.name?.trim() || 'Xyne Desk';
   const isSocialMediaDesk = selectedChannelFull?.type === ChannelType.SOCIAL_MEDIA;
+  const isCallDesk = selectedChannelFull?.type === ChannelType.CALL;
 
   // Manual fetch for the selected desk. Social-media desks fetch every review
   // currently available from Google; email desks open the range picker.
@@ -2112,6 +2114,7 @@ const SupportScreen = (): ReactElement => {
   const { refetch: handleRefetch, isPending: isRefetching } = useRefetchExternalSource(
     refetchChannelId,
     isSocialMediaDesk,
+    isCallDesk,
   );
   const canRefetch = !!refetchChannelId;
   const {
@@ -2526,6 +2529,7 @@ const SupportScreen = (): ReactElement => {
       installedAppId?: string;
       socialProvider?: 'GOOGLE_PLAY' | 'APP_STORE';
       applications?: Array<{ displayName: string; packageName: string }>;
+      serviceAccountKey?: string;
       appStore?: {
         keyId: string;
         privateKey: string;
@@ -2542,6 +2546,7 @@ const SupportScreen = (): ReactElement => {
       installedAppId,
       socialProvider,
       applications,
+      serviceAccountKey,
       appStore,
       channelType: _submittedChannelType,
       ...rest
@@ -2560,6 +2565,7 @@ const SupportScreen = (): ReactElement => {
           toast.error('At least one bundle ID is required');
           return;
         }
+        setIsConnectingReviewDesk(true);
         void connectAppStoreDesk({
           channelName: rest.name,
           keyId: appStore.keyId,
@@ -2584,7 +2590,8 @@ const SupportScreen = (): ReactElement => {
               (error as { response?: { data?: { error?: string } } })?.response?.data?.error ??
                 (error instanceof Error ? error.message : 'Failed to connect App Store desk'),
             );
-          });
+          })
+          .finally(() => setIsConnectingReviewDesk(false));
         return;
       }
 
@@ -2592,7 +2599,13 @@ const SupportScreen = (): ReactElement => {
         toast.error('At least one Google Play application is required');
         return;
       }
-      void startGooglePlayOAuth({
+      if (!serviceAccountKey) {
+        toast.error('A service account key is required');
+        return;
+      }
+      setIsConnectingReviewDesk(true);
+      void connectGooglePlayDesk({
+        serviceAccountKey,
         channelName: rest.name,
         applications,
         projectId: rest.projectId,
@@ -2601,19 +2614,17 @@ const SupportScreen = (): ReactElement => {
           assigneeUserGroupId: rest.assigneeUserGroupId,
         }),
         visibility: rest.visibility === 'public' ? 'PUBLIC' : 'PRIVATE',
-        platform: isElectron ? 'electron' : 'web',
       })
-        .then(authorizationUrl => {
+        .then(channelId => {
           setShowCreateChannelModal(false);
-          if (isElectron && window.electronAPI?.openExternal) {
-            window.electronAPI.openExternal(authorizationUrl);
-          } else {
-            window.location.href = authorizationUrl;
-          }
+          clearChannelConnectedEmailCache(channelId);
+          toast.success('Google Play desk connected');
+          void navigate(`${supportBase}/${channelId}`);
         })
         .catch(error => {
-          toast.error(error instanceof Error ? error.message : 'Failed to start Google Play OAuth');
-        });
+          toast.error(getApiErrorMessage(error, 'Failed to connect Google Play desk'));
+        })
+        .finally(() => setIsConnectingReviewDesk(false));
       return;
     }
 
@@ -2759,34 +2770,6 @@ const SupportScreen = (): ReactElement => {
 
     createChannelMutation.mutate(rest);
   };
-
-  useEffect(() => {
-    const connected = searchParams.get('socialMediaOAuth') === 'success';
-    const error = searchParams.get('socialMediaError');
-    const failedPackage = searchParams.get('socialMediaPackage');
-    if (!connected && !error) return;
-    if (connected) {
-      toast.success('Google Play reviews connected successfully');
-      if (selectedChannelId) clearChannelConnectedEmailCache(selectedChannelId);
-    }
-    if (error === 'google_play_package_validation_failed' && failedPackage) {
-      toast.error('Google Play app connection failed', {
-        description: `Could not access ${failedPackage}. Check its Play Console permissions.`,
-      });
-    } else if (error) {
-      toast.error(error.replaceAll('_', ' '));
-    }
-    setSearchParams(
-      previous => {
-        const next = new URLSearchParams(previous);
-        next.delete('socialMediaOAuth');
-        next.delete('socialMediaError');
-        next.delete('socialMediaPackage');
-        return next;
-      },
-      { replace: true },
-    );
-  }, [searchParams, selectedChannelId, setSearchParams]);
 
   // `trackSource` names the surface the open came from (kanban_card, inbox_row,
   // table_row, calendar); SUPPORT_TICKET_VIEWED reads it off the router state.
@@ -3460,7 +3443,9 @@ const SupportScreen = (): ReactElement => {
                                 ? 'Fetching latest…'
                                 : isSocialMediaDesk
                                   ? 'Fetch reviews'
-                                  : 'Fetch latest emails'
+                                  : isCallDesk
+                                    ? 'Fetch missed calls'
+                                    : 'Fetch latest emails'
                             }
                             side='bottom'
                           >
@@ -4596,7 +4581,7 @@ const SupportScreen = (): ReactElement => {
             requireConnector={true}
             onSubmit={data => handleCreateEmailChannel(data)}
             onCancel={() => setShowCreateChannelModal(false)}
-            loading={createChannelMutation.isPending}
+            loading={createChannelMutation.isPending || isConnectingReviewDesk}
           />
         </div>
       </Dialog>
@@ -4678,6 +4663,15 @@ const SupportScreen = (): ReactElement => {
                   summaryLabel: 'Will fetch reviews posted',
                 }
               : {})}
+          {...(isCallDesk && {
+            ...(!fetchTarget?.sourceName && {
+              title: 'Fetch calls',
+              subtitle: 'Pull calls from Ozonetel that did not reach this workspace.',
+              summaryLabel: 'Will fetch calls made',
+            }),
+            maxDays: 15,
+            withTime: true,
+          })}
           onConfirm={range => {
             setShowRefetchDialog(false);
             handleRefetch(range, fetchTarget);

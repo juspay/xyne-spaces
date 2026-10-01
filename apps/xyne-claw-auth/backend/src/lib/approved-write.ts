@@ -8,19 +8,26 @@
  * messaging channel (WhatsApp) can now render the same approval as a native
  * card, so the tap needs somewhere to land — this module.
  *
- * It covers the generic MCP-connector path and the Google/Microsoft tools
- * (lib/oauth-custom-tool.ts, shared with flow-action). The other branches
- * flow-action special-cases (Spaces app-token sends, gateway services, skill
- * and agent-tool mutations) carry setup that the Spaces card has and a
- * messenger does not, so those are refused here and pointed back at Spaces
- * rather than half-implemented. Widening this set means porting a branch
- * properly, not deleting a check.
+ * It covers the generic MCP-connector path, the Google/Microsoft tools
+ * (lib/oauth-custom-tool.ts, shared with flow-action) and MCP-gateway
+ * services (lib/gateway-approval.ts, shared with flow-action). The other
+ * branches flow-action special-cases (Spaces app-token sends, skill and
+ * agent-tool mutations) carry setup that the Spaces card has and a messenger
+ * does not, so those are refused here and pointed back at Spaces rather than
+ * half-implemented. Widening this set means porting a branch properly, not
+ * deleting a check.
  */
 import { createLogger } from "../logger.js";
 import { errMsg } from "./errors.js";
 import type { SignedWriteAction as BaseWriteAction } from "./write-actions.js";
 import { AGENT_TOOL_SLUGS } from "./agent-tools-apply.js";
-import { GATEWAY_KEY_PREFIX, parseGatewayCatalogSource } from "../mcpgateway/key-format.js";
+import { FORK_TO_CONVERSATION_TOOL } from "xyne-claw-shared";
+import {
+  defaultGatewayTenant,
+  formatGatewayApprovalExecutionError,
+  parseGatewayServerTypeForApproval,
+  sanitizeApprovalToolError,
+} from "./gateway-approval.js";
 import { agentRunRepository } from "../repositories/index.js";
 import { isOAuthProvider, prepareOAuthCustomTool } from "./oauth-custom-tool.js";
 
@@ -40,9 +47,8 @@ export type ApprovedWriteOutcome =
 
 /** True when flow-action would take a branch this module does not implement. */
 export function needsSpacesApproval(serverType: string, tool: string): boolean {
-  if (parseGatewayCatalogSource(serverType) || serverType.startsWith(GATEWAY_KEY_PREFIX)) return true;
   if (serverType === "skill") return true;
-  if (serverType === "agent-tools" && (AGENT_TOOL_SLUGS.has(tool) || tool === "create-skill")) return true;
+  if (serverType === "agent-tools" && (AGENT_TOOL_SLUGS.has(tool) || tool === "create-skill" || tool === FORK_TO_CONVERSATION_TOOL)) return true;
   // Posting AS the user through the Spaces app token needs an agent's
   // spacesAppToken, which is resolved from the card's own agent binding.
   if (serverType === "xyne-spaces" && tool === "spaces-send-message") return true;
@@ -96,6 +102,34 @@ export async function executeApprovedWrite(input: {
       log.error(`[approved-write] tool failed tool=${tool} user=${userId}: ${errMsg(err)}`);
       return { ok: false, reason: "failed", message: `${tool} failed to run. Please try again from Xyne Spaces.` };
     }
+  }
+
+  const gatewayTarget = parseGatewayServerTypeForApproval(serverType);
+  if (gatewayTarget) {
+    const tenant = defaultGatewayTenant();
+    if (!tenant) {
+      return { ok: false, reason: "unsupported", message: `The connector gateway isn't configured here. Please approve ${tool} in Xyne Spaces.` };
+    }
+    const { prisma } = await import("../db.js");
+    const user = await prisma.user.findUnique({ where: { id: userId }, select: { email: true } });
+    if (!user?.email) {
+      return { ok: false, reason: "no-connection", message: `Couldn't find your account email to run ${tool}.` };
+    }
+    const { executeTool } = await import("../mcpgateway/services/execution.js");
+    const execution = await executeTool(tenant, user.email, {
+      serviceName: gatewayTarget.serviceName,
+      toolName: tool,
+      arguments: params,
+      ...(gatewayTarget.backendId ? { backendId: gatewayTarget.backendId } : {}),
+    });
+    if (!execution.success) {
+      const errText = sanitizeApprovalToolError(formatGatewayApprovalExecutionError(execution, gatewayTarget.serviceName, tool));
+      log.error(`[approved-write] gateway tool failed server=${serverType} tool=${tool} user=${userId}: ${errText}`);
+      return { ok: false, reason: "failed", message: `${tool} failed: ${errText}` };
+    }
+    log.info(`[approved-write] executed gateway tool=${tool} service=${gatewayTarget.serviceName} user=${userId} backend=${execution.backendId}`);
+    const resultText = typeof execution.result === "string" ? execution.result : JSON.stringify(execution.result ?? "");
+    return { ok: true, message: `Done — ${tool} ran.`, resultText };
   }
 
   if (needsSpacesApproval(serverType, tool)) {

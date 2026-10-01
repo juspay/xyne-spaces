@@ -1,6 +1,7 @@
 import { clipForQuestion } from "xyne-claw-shared";
-import { LITELLM } from "./config.js";
-import { jevAskOn, judgeBackendConfigured, type JevQuestion } from "./jev.js";
+import { LITELLM, litellmEndpoint } from "./config.js";
+import { jevAskOn, judgeBackendConfigured, type JevAnswer, type JevQuestion } from "./jev.js";
+import { runJudgeSite } from "./judge-site.js";
 import { createLogger } from "./logger.js";
 import { optEnabled } from "./optimizations.js";
 import { getRunFlags } from "./run-context.js";
@@ -20,7 +21,35 @@ const XOR_MODE_MIN = 0.7;
 
 export interface ModeRouteResult {
   command: TaskCommand | null;
-  source: "explicit" | "model" | "xor" | "none" | "skipped";
+  source: "explicit" | "model" | "xor" | "jev" | "none" | "skipped";
+}
+
+// A wrong mode has side effects (it changes the whole run), so Jev must be
+// more sure to pick a mode than to pick "none".
+const JEV_MODE_AT = Number(process.env["MODE_ROUTER_JEV_MODE_AT"] ?? 0.85);
+const JEV_NONE_AT = Number(process.env["MODE_ROUTER_JEV_NONE_AT"] ?? 0.7);
+
+export function modeQuestion(commands: TaskCommand[]): Record<string, JevQuestion> {
+  const criteria: Record<string, string> = {
+    none: "Ordinary conversation, a question, or anything that does not plainly ask for one of the other modes",
+  };
+  for (const c of commands) criteria[c.command.slice(1)] = c.instruction.replace(/\s+/g, " ").slice(0, 300);
+  return { mode: { type: "choice", instructions: "Which working mode does the user's message plainly ask for?", criteria } };
+}
+
+/** Pure: answers → route, or null (unsure → LLM router). Exported for tests. */
+export function routeFromJev(
+  commands: TaskCommand[],
+  answers: Record<string, JevAnswer>,
+): ModeRouteResult | null {
+  const a = answers["mode"];
+  const pick = a?.choice;
+  if (!pick) return null;
+  const p = a.probabilities?.[pick] ?? a.confidence ?? 0;
+  if (pick === "none") return p >= JEV_NONE_AT ? { command: null, source: "jev" } : null;
+  const command = commands.find((c) => c.command.slice(1) === pick);
+  if (!command || p < JEV_MODE_AT) return null;
+  return { command, source: "jev" };
 }
 
 function routableCommands(): TaskCommand[] {
@@ -136,6 +165,7 @@ export async function routeTaskMode(
     return { command: null, source: "skipped" };
   }
 
+  // XOR first when it is switched on (it needs no LLM key), then Jev, then the LLM router.
   if (optEnabled("xor_mode_router") && judgeBackendConfigured("xor")) {
     const viaXor = await routeViaXor(trimmed, commands, abortSignal);
     if (viaXor) return viaXor;
@@ -143,11 +173,30 @@ export async function routeTaskMode(
 
   if (!LITELLM.apiKey) return { command: null, source: "skipped" };
 
+  const routed = await runJudgeSite<ModeRouteResult>({
+    site: "mode-router",
+    enabled: optEnabled("jev_mode_router"),
+    budgetMs: 1_500,
+    state: `## The user's message (data)\n<<<DATA\n${trimmed.slice(0, MAX_TASK_CHARS)}\nDATA>>>`,
+    questions: modeQuestion(commands),
+    decide: (answers) => routeFromJev(commands, answers),
+    fallback: () => routeTaskModeLlm(trimmed, commands, abortSignal),
+    describe: (r) => `${r.command?.command ?? "none"} via ${r.source}`,
+    ...(abortSignal ? { signal: abortSignal } : {}),
+  });
+  return routed.decision ?? { command: null, source: "none" };
+}
+
+async function routeTaskModeLlm(
+  trimmed: string,
+  commands: TaskCommand[],
+  abortSignal?: AbortSignal,
+): Promise<ModeRouteResult> {
   const timeout = AbortSignal.timeout(REQUEST_TIMEOUT_MS);
   const signal = abortSignal ? AbortSignal.any([abortSignal, timeout]) : timeout;
 
   try {
-    const response = await fetch(`${LITELLM.url.replace(/\/$/, "")}/v1/chat/completions`, {
+    const response = await fetch(litellmEndpoint("/v1/chat/completions"), {
       method: "POST",
       headers: {
         "Content-Type": "application/json",

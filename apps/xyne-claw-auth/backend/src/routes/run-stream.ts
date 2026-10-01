@@ -1244,6 +1244,10 @@ publicRouter.post("/", requireAuth, requireNoAccessToken, async (req: Request, r
         conversationId: convId,
         agentSlug: slug,
         userId,
+        // Our own run row was written at status "running" above, before dispatch.
+        // Without this the handoff finds it, interrupts a session claw has never
+        // started, and polls itself for the full 30s timeout.
+        currentSessionId: runSessionId,
         onLabel: (label) => pendingStreams.get(streamId)?.sendEvent("label", { toolLabel: label }),
       });
       if (handoff.handedOff) {
@@ -2101,7 +2105,7 @@ internalRouter.post("/:streamId/callback", async (req: Request<{ streamId: strin
       : undefined;
 
     const harnessUnreachableNotice = body["localHarnessUnreachable"] === true
-      ? `⚠️ I couldn't reach **${localHarnessProviderLabel(typeof body["localHarnessProvider"] === "string" ? body["localHarnessProvider"] : "your local harness")}** on your machine, and running this on Xyne's servers instead didn't start either. Open the Xyne desktop app (or turn off the local harness for this agent) and try again.`
+      ? `I couldn't reach **${localHarnessProviderLabel(typeof body["localHarnessProvider"] === "string" ? body["localHarnessProvider"] : "your local harness")}** on your machine, and running this on Xyne's servers instead didn't start either. Open the Xyne desktop app (or turn off the local harness for this agent) and try again.`
       : undefined;
 
     const content = harnessUnreachableNotice
@@ -2250,8 +2254,9 @@ internalRouter.post("/:streamId/callback", async (req: Request<{ streamId: strin
 
     // Connector + provider suggestion cards. Both are display plus client-side
     // connect, so there is no server action or terminal state to make
-    // surface-aware — delivery is the whole job. Triggers 2 and 3 are inferred
-    // from the user's own words, so these need no claw tool.
+    // surface-aware — delivery is the whole job. Connector cards come only
+    // from the agent's suggest-connectors call; provider cards are read from
+    // the user's own words.
     try {
       const { resolveXyneAiCardTarget } = await import("../lib/flow-card-delivery.js");
       const suggestTarget = await resolveXyneAiCardTarget({ assistantMessageId });
@@ -2266,13 +2271,12 @@ internalRouter.post("/:streamId/callback", async (req: Request<{ streamId: strin
           .catch(() => null);
         const taskText = ask?.content ?? "";
         if (taskText) {
-          const {
-            renderConnectorSuggestCard,
-            renderProviderSuggestCard,
-            resolveConnectorSuggestions,
-          } = await import("../lib/connector-card-render.js");
+          const { renderConnectorSuggestCard, renderProviderSuggestCard } = await import(
+            "../lib/connector-card-render.js"
+          );
           const suggestIdentity = {
             agentSlug: suggestTarget.agentSlug,
+            agentOrgId: suggestTarget.orgId,
             userId: suggestTarget.userId,
             conversationId: suggestTarget.conversationId,
             channelId: "",
@@ -2281,19 +2285,15 @@ internalRouter.post("/:streamId/callback", async (req: Request<{ streamId: strin
           const blocked = Array.isArray(body["blockedConnectors"])
             ? (body["blockedConnectors"] as string[])
             : undefined;
-          const connectorSuggestions = resolveConnectorSuggestions(
-            body["pendingConnectorSuggestions"] as
-              | { serverTypes: string[]; listAll?: boolean; inferred?: boolean; title?: string }
-              | undefined,
-            taskText,
-          );
+          const connectorSuggestions = body["pendingConnectorSuggestions"] as
+            | { serverTypes: string[]; listAll?: boolean; title?: string }
+            | undefined;
           const delivered: Array<FlowDefinition | null> = [];
           if (connectorSuggestions) {
             delivered.push(
               await renderConnectorSuggestCard({
                 suggestions: connectorSuggestions,
                 blockedConnectors: blocked,
-                taskText,
                 id: suggestIdentity,
                 target: suggestTarget,
               }),

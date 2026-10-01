@@ -29,8 +29,9 @@ export const OUTBOX_POP_TIMEOUT_S = 5;
 
 /** Typing keeps refreshing until the reply is delivered. This is only the
  *  backstop for a run that never reports back at all — without it a lost
- *  result would leave a number typing into someone's chat indefinitely. */
-export const TYPING_MAX_MS = 15 * 60 * 1_000;
+ *  result would leave a number typing into someone's chat indefinitely.
+ *  Matches ACTIVE_RUN_TTL_S so typing never stops while a run can still be live. */
+export const TYPING_MAX_MS = 30 * 60 * 1_000;
 
 /** How long we remember which run is working in a chat, for /stop and
  *  /status. Longer than any run should take, short enough that a lost result
@@ -51,9 +52,10 @@ export const MAX_INBOUND_BYTES = 12 * 1024 * 1024;
 export const REDIS_PREFIX = "claw:channel";
 export const CONTROL_CHANNEL = `${REDIS_PREFIX}:control`;
 
-/** `/slug task` or `@slug task` at the start of a message picks an agent. */
-export const AGENT_ROUTE_RE = /^[@/]([a-z0-9][a-z0-9_-]*)(?:\s+|$)/i;
-export const AGENTS_COMMAND_RE = /^[@/]agents\s*$/i;
+/** `/slug task` at the start of a message picks an agent. Not `@slug`: a
+ *  leading @ is a WhatsApp mention of a person, not an agent name. */
+export const AGENT_ROUTE_RE = /^\/([a-z0-9][a-z0-9_-]*)(?:\s+|$)/i;
+export const AGENTS_COMMAND_RE = /^\/agents\s*$/i;
 
 export const DEFAULT_RATE_LIMIT_PER_MINUTE = 10;
 /** Reaction dropped on the triggering message so the sender can see the run
@@ -72,7 +74,7 @@ export const UNLINKED_NOTICE_TTL_S = 60 * 60;
  *  Matches OpenClaw's default group context window. */
 export const GROUP_HISTORY_LIMIT = 50;
 /** Chatter is only useful while it is recent; it is never durable state. */
-export const GROUP_CONTEXT_TTL_S = 12 * 60 * 60;
+export const GROUP_CONTEXT_TTL_S = 15 * 24 * 60 * 60;
 
 export const FAILURE_TEXT = "The agent couldn't complete this request. Please try again.";
 /** A run that succeeded and said nothing. Rare, and almost always the model

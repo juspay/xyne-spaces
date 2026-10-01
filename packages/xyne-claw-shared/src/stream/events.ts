@@ -27,6 +27,7 @@ export interface ClawSandboxPreviewPayload extends ClawStreamMeta {
   sandboxId: string;
   sandboxPreviewUrl: string;
   sandboxCodePreviewUrl: string;
+  sandboxTermUrl?: string;
 }
 
 export interface ClawProgressLabelPayload extends ClawStreamMeta {

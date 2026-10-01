@@ -128,3 +128,44 @@ test("falls open to the old behaviour when the catalog answer is missing", async
 
   expect(ref.value).toEqual({ serverTypes: ["figma"] });
 });
+
+test("sends the run's agent so its own connections count as connected", async () => {
+  const fetchMock = vi.fn(async () => ({ ok: true, json: async () => ({ success: true, connected: ["grafana"], known: true }) }) as unknown as Response);
+  vi.stubGlobal("fetch", fetchMock);
+
+  const tool = buildSuggestConnectorsTool({}, "user-1", { agentSlug: "infra-doctor" });
+  await (tool as unknown as { execute: (id: string, p: unknown) => Promise<unknown> }).execute("tc-1", { serverTypes: ["grafana"] });
+
+  const init = fetchMock.mock.calls[0]?.[1] as unknown as { body: string };
+  expect(JSON.parse(init.body)).toEqual({ userId: "user-1", serverTypes: ["grafana"], agentSlug: "infra-doctor" });
+});
+
+test("named connectors win over listAll, so the card is not the whole roster", async () => {
+  mockAvailability({ success: true, connected: [], known: true, existing: ["github"], catalogKnown: true });
+
+  const ref: SuggestConnectorsRef = {};
+  const out = await callTool(ref, { serverTypes: ["github"], listAll: true }, "user-1");
+
+  expect(ref.value).toEqual({ serverTypes: ["github"] });
+  expect(out.content[0]?.text).toContain("Connector cards for github");
+  expect(out.details?.["listAll"]).toBe(false);
+});
+
+test("promises cards only for the connectors that are not connected", async () => {
+  mockAvailability({ success: true, connected: ["github"], known: true, existing: ["github", "grafana"], catalogKnown: true });
+
+  const out = await callTool({}, { serverTypes: ["github", "grafana"] }, "user-1");
+  const text = out.content[0]?.text ?? "";
+
+  expect(text).toContain("Connector cards for grafana will be shown");
+  expect(text).toContain("github is ALREADY CONNECTED — no card is shown for it");
+});
+
+test("promises no card at all when everything named is already connected", async () => {
+  mockAvailability({ success: true, connected: ["github"], known: true, existing: ["github"], catalogKnown: true });
+
+  const out = await callTool({}, { serverTypes: ["github"] }, "user-1");
+
+  expect(out.content[0]?.text).toContain("No Connect card will be shown.");
+  expect(out.content[0]?.text).not.toContain("Connector cards for");
+});

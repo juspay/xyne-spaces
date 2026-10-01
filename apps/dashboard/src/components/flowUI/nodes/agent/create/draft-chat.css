@@ -351,10 +351,14 @@
   line-height: 1rem;
 }
 
+/* The parts above that transition or animate in CSS; the card's own motion is
+   driven in JS and goes instant there. */
 @media (prefers-reduced-motion: reduce) {
-  .dc-root *,
-  .dc-menu-content.dc-menu-content,
-  .dc-menu-content.dc-menu-content * {
+  .dc-root .dc-composer,
+  .dc-root .dc-chevron,
+  .dc-root .dc-pressable,
+  .dc-root .dc-slide,
+  .dc-menu-content.dc-menu-content {
     transition-duration: 0.01ms !important;
     animation-duration: 0.01ms !important;
   }

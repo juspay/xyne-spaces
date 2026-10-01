@@ -51,6 +51,7 @@ import KanbanBoardScreen from './KanbanBoardScreen/KanbanBoardScreen';
 import MyTicketsScreen from './FilteredTicketsScreen/FilteredTicketsScreen.tsx';
 import ProjectViewBuilder from './ProjectViewsScreen/ProjectViewBuilder';
 import SupportScreen from './SupportScreen/SupportScreen.tsx';
+import { SupportListRestore } from './SupportScreen/SupportListRestore';
 import SaveRoute from '../components/SaveRoute/SaveRoute';
 import CanvasScreen from '../components/Canvas/CanvasScreen';
 import CanvasPanel from '../components/Canvas/CanvasPanel/CanvasPanel';
@@ -967,7 +968,7 @@ const AppRoot = (): ReactElement => {
                           <CallFromRecentsHandler />
                           <CloudAgentFloatingHost />
                           <BrowserPanelHandler />
-                          <GlobalCommandMenu aiOverview />
+                          <GlobalCommandMenu aiOverview ticketScreenScope />
                           <ShortcutsHelpModal
                             isOpen={isShortcutsModalOpen}
                             onClose={() => setIsShortcutsModalOpen(false)}
@@ -1778,22 +1779,24 @@ export const router = createBrowserRouter(
                   path: 'support',
                   element: (
                     <ResourceProtectedRoute resourceName='SUPPORT'>
-                      <SaveRoute
-                        keyword='support'
-                        stripSearchParams={['settings', 'openSettings']}
-                        preserveSearchParams={[
-                          'emailConnected',
-                          'emailError',
-                          'channelEmailMailboxConnected',
-                          'deskIntegrations',
-                          'workspaceMailboxConnected',
-                          'email',
-                          'provider',
-                        ]}
-                        redirectOnlyAt={/^\/[^/]+\/support\/?$/}
-                      >
-                        <SupportScreen />
-                      </SaveRoute>
+                      <SupportListRestore>
+                        <SaveRoute
+                          keyword='support'
+                          stripSearchParams={['settings', 'openSettings']}
+                          preserveSearchParams={[
+                            'emailConnected',
+                            'emailError',
+                            'channelEmailMailboxConnected',
+                            'deskIntegrations',
+                            'workspaceMailboxConnected',
+                            'email',
+                            'provider',
+                          ]}
+                          redirectOnlyAt={/^\/[^/]+\/support\/?$/}
+                        >
+                          <SupportScreen />
+                        </SaveRoute>
+                      </SupportListRestore>
                     </ResourceProtectedRoute>
                   ),
                   children: [

@@ -197,7 +197,10 @@
 /* ---- Reduced motion: no loop, no hop. Show "is working" as text next to the name instead. ---- */
 @media (prefers-reduced-motion: reduce) {
   .af svg,
-  .af * {
+  .af .af-eg,
+  .af .af-ef,
+  .af .af-ebr,
+  .af .af-eb {
     animation: none !important;
   }
 }

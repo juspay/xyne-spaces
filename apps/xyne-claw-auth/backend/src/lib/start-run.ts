@@ -833,12 +833,12 @@ export async function prepareRun(
       try {
         const { compileRunGuidance } = await import("./run-guidance.js");
         const compiled = compileRunGuidance({
-          orgGuidance: guidanceCfg.org,
-          spaceGuidance: guidanceCfg.space,
-          leafGuidance: guidanceCfg.leaf,
-          orgLabel: guidanceCfg.orgLabel,
-          spaceLabel: guidanceCfg.spaceLabel,
-          leafLabel: guidanceCfg.leafLabel,
+          orgGuidance: guidanceCfg.org ?? null,
+          spaceGuidance: guidanceCfg.space ?? null,
+          leafGuidance: guidanceCfg.leaf ?? null,
+          ...(guidanceCfg.orgLabel ? { orgLabel: guidanceCfg.orgLabel } : {}),
+          ...(guidanceCfg.spaceLabel ? { spaceLabel: guidanceCfg.spaceLabel } : {}),
+          ...(guidanceCfg.leafLabel ? { leafLabel: guidanceCfg.leafLabel } : {}),
         });
         if (compiled.text) {
           teamGuidance = compiled.text;
@@ -1460,7 +1460,7 @@ export async function prepareRun(
     ];
 
     const toolUsageRank =
-      agentSlug && wantsToolUsageRank(mergedAgentConfig["optimizations"], optimizations)
+      agentSlug && wantsToolUsageRank(mergedAgentConfig["optimizations"], optimizations, agent.delegationTier)
         ? await toolUsageRankFor(agentSlug, agent.orgId)
         : [];
     const { toolUsageRank: _suppliedToolUsageRank, ...agentConfigWithoutRank } = mergedAgentConfig;

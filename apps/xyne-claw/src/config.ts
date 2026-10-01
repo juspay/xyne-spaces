@@ -49,11 +49,15 @@ export const PATHS = {
   agentDir: process.env["XYNE_CLAW_AGENT_DIR"] ?? "",
 } as const;
 
+export function normalizeBaseUrl(value: string | undefined, fallback: string): string {
+  return (value ?? "").trim().replace(/\/+$/, "") || fallback;
+}
+
 const litellmModel = process.env["LITELLM_MODEL"]?.trim() || "kimi-latest";
 const litellmFastModel = process.env["LITELLM_FAST_MODEL"]?.trim() || litellmModel;
 
 export const LITELLM = {
-  url: process.env["LITELLM_URL"] ?? "http://localhost:4000",
+  url: normalizeBaseUrl(process.env["LITELLM_URL"], "http://localhost:4000"),
   apiKey: process.env["LITELLM_API_KEY"] ?? "",
   // Separate low-priority key for non-interactive load: automation/scheduled
   // agent runs and background curators. Keeps batch traffic from saturating
@@ -91,6 +95,10 @@ export const LITELLM = {
   subagentFastModel: process.env["LITELLM_SUBAGENT_FAST_MODEL"]?.trim() || litellmFastModel,
   subagentFastModelPercent: clampPercent(process.env["LITELLM_SUBAGENT_FAST_MODEL_PERCENT"], 100),
 } as const;
+
+export function litellmEndpoint(path: string, base: string = LITELLM.url): string {
+  return `${base.replace(/\/v1$/, "")}${path.startsWith("/") ? path : `/${path}`}`;
+}
 
 export const AGENT = {
   thinkingLevel: process.env["XYNE_CLAW_THINKING"] ?? "medium",

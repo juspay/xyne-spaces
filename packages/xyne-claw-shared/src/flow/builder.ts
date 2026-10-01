@@ -7,7 +7,7 @@
  * in xyne-claw-shared. They mirror @xyne/shared/types/flowUI exactly.
  */
 
-import type { TwinDelivery, TwinReplyDestination } from "../types/twin-delivery.js";
+import { twinDeliveryParts, type TwinDelivery, type TwinReplyDestination } from "../types/twin-delivery.js";
 import type { UserQuestion } from "../tools/types.js";
 import { normalizeUnifiedPatch } from "./unified-patch.js";
 
@@ -99,6 +99,12 @@ export interface FlowDefinition {
     history: string[];
     loadingComponentIds: string[];
   };
+}
+
+/** Stamp `data.spacesAppId` onto a flow (no-op when there is no app id) so card actions route back to the posting app. */
+export function withSpacesAppId<T extends { data?: Record<string, unknown> }>(flow: T, spacesAppId?: string | null): T {
+  if (!spacesAppId) return flow;
+  return { ...flow, data: { ...(flow.data ?? {}), spacesAppId } };
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -489,8 +495,7 @@ export function buildTwinApprovalFlow(params: TwinApprovalFlowParams): FlowDefin
     agentSlug, dmChannelId, spacesBaseUrl,
   } = params;
 
-  const willReact = delivery.action === "react" || delivery.action === "react_and_reply";
-  const willReply = delivery.action === "reply" || delivery.action === "react_and_reply";
+  const { emoji: willReact, message: willReply } = twinDeliveryParts(delivery.action);
   const message = delivery.message ?? "";
   const dest = delivery.destination;
   const destLabel = twinDestinationLabel(dest, channelName, senderName);

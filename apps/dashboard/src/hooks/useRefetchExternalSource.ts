@@ -59,6 +59,7 @@ export interface RefetchTarget {
 export const useRefetchExternalSource = (
   channelId: string | undefined,
   isSocialMedia = false,
+  isCallDesk = false,
 ): {
   refetch: (range?: RefetchRange, target?: RefetchTarget) => void;
   isPending: boolean;
@@ -129,7 +130,9 @@ export const useRefetchExternalSource = (
                     ? `Fetching from ${target.sourceName} in background`
                     : isSocialMedia
                       ? 'Fetching reviews in background'
-                      : 'Fetching emails in background';
+                      : isCallDesk
+                        ? 'Fetching calls in background'
+                        : 'Fetching emails in background';
               toast.success(label, {
                 description: 'We’ll notify you when this finishes.',
               });
@@ -137,7 +140,8 @@ export const useRefetchExternalSource = (
             }
             if (result.newTickets > 0) {
               toast.success(
-                `Fetched ${result.newTickets} new email${result.newTickets === 1 ? '' : 's'}`,
+                `Fetched ${result.newTickets} new ${isCallDesk ? 'call' : 'email'}${result.newTickets === 1 ? '' : 's'}`,
+                { description: `${result.newTickets} new, ${result.skipped} already imported.` },
               );
             } else if (result.processed > 0) {
               // Replies-only run: tickets stayed the same, but threads got updates.
@@ -145,9 +149,13 @@ export const useRefetchExternalSource = (
                 `Updated ${result.processed} thread${result.processed === 1 ? '' : 's'}`,
               );
             } else if (result.errors.length > 0) {
-              toast.error(`Refetch completed with ${result.errors.length} error(s)`);
+              toast.error(`Refetch completed with ${result.errors.length} error(s)`, {
+                description: result.errors[0],
+              });
             } else {
-              toast.success('Inbox is up to date');
+              toast.success(isCallDesk ? 'Calls are up to date' : 'Inbox is up to date', {
+                description: `${result.skipped} already imported.`,
+              });
             }
           },
           onError: err => {
@@ -165,7 +173,7 @@ export const useRefetchExternalSource = (
         },
       );
     },
-    [channelId, isSocialMedia, mutation],
+    [channelId, isSocialMedia, isCallDesk, mutation],
   );
 
   return { refetch, isPending: mutation.isPending };

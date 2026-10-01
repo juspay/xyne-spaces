@@ -16,5 +16,5 @@ export function normalizeReviewRoomReason(raw: unknown): string {
 }
 
 export function reviewRoomFailureText(prNumber: string, reason: string): string {
-  return `⚠️ Review room${prNumber ? ` for ${prNumber}` : ""} was not generated — ${reason}.`;
+  return `Review room${prNumber ? ` for ${prNumber}` : ""} was not generated — ${reason}.`;
 }

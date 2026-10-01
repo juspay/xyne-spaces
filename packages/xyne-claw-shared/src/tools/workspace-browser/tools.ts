@@ -1,5 +1,6 @@
 import type { ToolDefinition, ToolExecutionContext } from "../types.js";
 import { SANDBOX_PW_TOOLS } from "../sandbox-pw/tools.js";
+import { requestSurfaceCall, surfaceResultText } from "../surface-call.js";
 
 const SOURCE = "custom:workspace-browser";
 
@@ -17,6 +18,17 @@ async function viaSandbox(
   return tool.execute(params, context);
 }
 
+async function viaDesktop(
+  slug: string,
+  params: Record<string, unknown>,
+  context: ToolExecutionContext | undefined,
+): Promise<string | null> {
+  if (!context?.sessionId || !context.meta?.["userId"]) return null;
+  const outcome = await requestSurfaceCall(slug, params, context);
+  if ("error" in outcome || outcome.result.unavailable) return null;
+  return surfaceResultText(outcome.result, slug);
+}
+
 const ONLY_ON_DESKTOP =
   " On the Xyne desktop app this acts on the page shown in the workspace panel beside the chat; on a server run it acts on the sandbox browser.";
 
@@ -29,7 +41,9 @@ export const pageRead: ToolDefinition = {
   source: SOURCE,
   harness: "local",
   inputSchema: { type: "object", properties: {}, required: [] },
-  async execute(_params, context) {
+  async execute(params, context) {
+    const desktop = await viaDesktop("page-read", params, context);
+    if (desktop !== null) return desktop;
     // Server-side fallback only — the desktop path runs READ_SCRIPT in the
     // webview (dashboard executePageTool). This used to call
     // `sandbox-pw-snapshot`, which returns the ARIA element tree, so a
@@ -55,7 +69,9 @@ export const pageSnapshot: ToolDefinition = {
   source: SOURCE,
   harness: "local",
   inputSchema: { type: "object", properties: {}, required: [] },
-  async execute(_params, context) {
+  async execute(params, context) {
+    const desktop = await viaDesktop("page-snapshot", params, context);
+    if (desktop !== null) return desktop;
     return viaSandbox("sandbox-pw-snapshot", {}, context);
   },
 };
@@ -72,6 +88,8 @@ export const pageNavigate: ToolDefinition = {
     required: ["url"],
   },
   async execute(params, context) {
+    const desktop = await viaDesktop("page-navigate", params, context);
+    if (desktop !== null) return desktop;
     return viaSandbox("sandbox-pw-navigate", { url: params["url"] }, context);
   },
 };
@@ -88,6 +106,8 @@ export const pageClick: ToolDefinition = {
     required: ["ref"],
   },
   async execute(params, context) {
+    const desktop = await viaDesktop("page-click", params, context);
+    if (desktop !== null) return desktop;
     return viaSandbox("sandbox-pw-click", { element: String(params["ref"] ?? ""), ref: params["ref"] }, context);
   },
 };
@@ -108,6 +128,8 @@ export const pageType: ToolDefinition = {
     required: ["ref", "text"],
   },
   async execute(params, context) {
+    const desktop = await viaDesktop("page-type", params, context);
+    if (desktop !== null) return desktop;
     return viaSandbox(
       "sandbox-pw-type",
       { element: String(params["ref"] ?? ""), ref: params["ref"], text: params["text"], submit: params["submit"] === true },
@@ -128,6 +150,8 @@ export const pagePress: ToolDefinition = {
     required: ["key"],
   },
   async execute(params, context) {
+    const desktop = await viaDesktop("page-press", params, context);
+    if (desktop !== null) return desktop;
     return viaSandbox("sandbox-pw-press-key", { key: params["key"] }, context);
   },
 };
@@ -141,7 +165,9 @@ export const pageScreenshot: ToolDefinition = {
   source: SOURCE,
   harness: "local",
   inputSchema: { type: "object", properties: {}, required: [] },
-  async execute(_params, context) {
+  async execute(params, context) {
+    const desktop = await viaDesktop("page-screenshot", params, context);
+    if (desktop !== null) return desktop;
     return viaSandbox("sandbox-pw-screenshot", {}, context);
   },
 };

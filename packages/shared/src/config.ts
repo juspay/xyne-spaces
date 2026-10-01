@@ -21,13 +21,20 @@ const ELECTRON_BACKEND_URL = /* isProd */ !isLocalhost && !isSandBox && !isSandb
     : 'http://localhost:3001';
 const isDockerTestEnv = isTestEnv && !isSandboxLocal;
 const sameOriginPort = typeof window !== 'undefined' && window.location.port ? `:${window.location.port}` : '';
-const backendPort = isLocalhost && isSkipAuthEnv
-  ? sameOriginPort
-  : isLocalhost
-    ? ':3001'
-    : isDockerTestEnv
-      ? ':5173'
-      : '';
-export const API_BASE_URL = isElectronBundled
-  ? `${ELECTRON_BACKEND_URL}/api`
-  : `${protocol}://${hostname}${backendPort}/api`;
+const backendPort = isLocalhost ? ':3001' : isDockerTestEnv ? ':5173' : '';
+// Match the dashboard's explicit API override and opt-in Vite development proxy.
+// This package also runs in Node, where import.meta.env is absent.
+const env = (import.meta as ImportMeta & {
+  env?: { DEV?: boolean; VITE_DEV_PROXY?: string; VITE_API_BASE_OVERRIDE?: string };
+}).env;
+// Local dev auth also goes through the dashboard's own origin (its Vite proxy
+// forwards /api), as VITE_DEV_PROXY does.
+export const API_BASE_URL =
+  env?.VITE_API_BASE_OVERRIDE ||
+  (env?.DEV && env.VITE_DEV_PROXY === 'true'
+    ? '/api'
+    : isElectronBundled
+      ? `${ELECTRON_BACKEND_URL}/api`
+      : isLocalhost && isSkipAuthEnv
+        ? `${protocol}://${hostname}${sameOriginPort}/api`
+        : `${protocol}://${hostname}${backendPort}/api`);
