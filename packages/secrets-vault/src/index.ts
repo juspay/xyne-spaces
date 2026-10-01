@@ -1,0 +1,10 @@
+export { createSecretsVault, RotationInProgressError, ActiveVersionMismatchError } from './vault.js';
+export type { SecretsVault, SecretsVaultDeps, AddVersionResult, VaultLogger } from './vault.js';
+export { createCustomEncryptionAdapter, parseHexEncryptionKey } from './customEncryption.js';
+export { createSecretsVaultRouter } from './router.js';
+export type { SecretsVaultRouterDeps } from './router.js';
+export { EncryptionImpl, RotationState, SecretVersionStatus } from './types.js';
+export type { EncryptionAdapter, SecretDefinitionRow, SecretVersionRow, VaultPrismaClient } from './types.js';
+export { createSecretHandler } from './secretHandler.js';
+export type { SecretHandler, VerifyResult } from './secretHandler.js';
+export { githubToken, verifyGithubToken } from './handlers/githubToken.js';
