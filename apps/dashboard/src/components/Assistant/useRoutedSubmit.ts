@@ -1,7 +1,7 @@
 import { useRef } from 'react';
 import type { AssistantActions } from './useAssistantActions';
 
-export type AssistantRouting = Pick<AssistantActions, 'ask' | 'cancel'>;
+export type AssistantRouting = Pick<AssistantActions, 'ask' | 'answer' | 'cancel'>;
 
 export const useRoutedSubmit = <Trigger>({
   assistant,

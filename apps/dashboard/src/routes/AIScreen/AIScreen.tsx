@@ -438,6 +438,11 @@ const AIScreen = (): ReactElement => {
             if (outcome.outcome === 'replied') showAssistantThread();
             return outcome;
           },
+          answer: async text => {
+            const reply = await assistant.answer(text);
+            if (reply) showAssistantThread();
+            return reply;
+          },
           cancel: assistant.cancel,
         }
       : undefined;

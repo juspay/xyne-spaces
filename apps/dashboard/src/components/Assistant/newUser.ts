@@ -1,18 +1,16 @@
-import { useAuth } from '../../hooks/useAuth';
-
-// Finishing onboarding clears `isNewUser` before the user reaches a channel, so the last
-// onboarding step leaves this mark for the rest of the browser session.
+// Set by the last onboarding step and cleared once the assistant panel has opened, so the
+// panel opens once, only for someone who has just finished onboarding.
 const markKey = (userId: string): string => `xyne-assistant-new-user:${userId}`;
 
 export const markJustOnboarded = (userId: string): void => {
   try {
     sessionStorage.setItem(markKey(userId), 'true');
   } catch {
-    // Without storage the user is treated as already onboarded.
+    // Without storage the panel simply does not open.
   }
 };
 
-const isMarked = (userId: string): boolean => {
+export const hasJustOnboarded = (userId: string): boolean => {
   try {
     return sessionStorage.getItem(markKey(userId)) !== null;
   } catch {
@@ -20,9 +18,10 @@ const isMarked = (userId: string): boolean => {
   }
 };
 
-// True only for someone going through onboarding for the first time, not for an existing
-// user who creates or joins another workspace.
-export const useIsNewUser = (): boolean => {
-  const { user, isNewUser } = useAuth();
-  return isNewUser || (user?.id !== undefined && isMarked(user.id));
+export const clearJustOnboarded = (userId: string): void => {
+  try {
+    sessionStorage.removeItem(markKey(userId));
+  } catch {
+    // Nothing to clear.
+  }
 };

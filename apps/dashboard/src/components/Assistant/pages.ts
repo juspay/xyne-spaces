@@ -1,5 +1,5 @@
 import type { OrganisationsSectionKey } from '../../routes/OrganisationsModule/organisationsAccess';
-import type { ActionArea, ActionDefinition, DialogId, PageId } from './actions/action';
+import type { ActionDefinition, PageId } from './actions/action';
 
 type AccessContext = {
   organisations: Record<OrganisationsSectionKey, boolean>;
@@ -47,35 +47,17 @@ export const APP_PAGES: Record<PageId, AppPage> = {
     path: 'chat/search?mode=channels',
     allowed: () => true,
   },
+  add_channel: {
+    path: 'chat/dir?dialog=add_channel',
+    allowed: () => true,
+  },
   ai_agent_create: {
     path: 'ai/library/agent/create',
     allowed: () => true,
   },
 };
 
-export const APP_DIALOGS: Record<DialogId, AppPage> = {
-  add_channel: { path: 'chat/dir?dialog=add_channel', allowed: () => true },
-};
-
-const targetOf = (action: ActionDefinition): AppPage | undefined => {
-  for (const step of action.plan) {
-    if (step.op === 'open_page') {
-      return APP_PAGES[step.page];
-    }
-    if (step.op === 'open_dialog') {
-      return APP_DIALOGS[step.dialog];
-    }
-  }
-  return undefined;
-};
-
 export const visibleActions = (
-  areas: readonly ActionArea[],
+  actions: readonly ActionDefinition[],
   access: AccessContext,
-): ActionDefinition[] =>
-  areas
-    .flatMap(area => area.actions)
-    .filter(action => {
-      const target = targetOf(action);
-      return target !== undefined && target.allowed(access);
-    });
+): ActionDefinition[] => actions.filter(action => APP_PAGES[action.page].allowed(access));

@@ -5,23 +5,30 @@ import { useNavigate, useParams } from 'react-router-dom';
 import { useOrganisationsAccess } from '../../routes/OrganisationsModule/organisationsSections';
 import type { Message } from '../Chat/XyneAISidebar/utils/XyneAITypes';
 import type { ActionDefinition } from './actions/action';
-import { AREAS } from './catalog';
-import { runPlan } from './operations';
-import { visibleActions } from './pages';
+import { ACTIONS } from './catalog';
+import { APP_PAGES, visibleActions } from './pages';
 import { routeText } from './router';
-import { exchange, markOpened, starterActions, toChatMessages, type AssistantTurn } from './turns';
+import {
+  exchange,
+  markOpened,
+  pillAction,
+  starterActions,
+  toChatMessages,
+  type AssistantTurn,
+} from './turns';
 
 export interface AssistantActions {
   actions: readonly ActionDefinition[];
   starters: readonly ActionDefinition[];
-  turns: readonly AssistantTurn[];
   messages: Message[];
   isRouting: boolean;
   choose: (action: ActionDefinition) => void;
-  open: (action: ActionDefinition, messageId?: string) => void;
+  openPill: (messageId: string, label: string) => void;
   reset: () => void;
   cancel: () => void;
   ask: (text: string) => Promise<AskOutcome>;
+  // Voice: the reply to speak, '' when the text was handled with nothing to say, null to send it to Ask AI.
+  answer: (text: string) => Promise<string | null>;
 }
 
 export type AskOutcome =
@@ -37,7 +44,7 @@ export const useAssistantActions = ({ enabled }: { enabled: boolean }): Assistan
   const organisations = useOrganisationsAccess();
   const role = useAuth().user?.role;
   const actions = useMemo(
-    () => (enabled ? visibleActions(AREAS, { organisations }) : []),
+    () => (enabled ? visibleActions(ACTIONS, { organisations }) : []),
     [enabled, organisations],
   );
   const isAdmin = role === WorkspaceRole.ADMIN || role === WorkspaceRole.OWNER;
@@ -46,15 +53,6 @@ export const useAssistantActions = ({ enabled }: { enabled: boolean }): Assistan
   const messages = useMemo(() => toChatMessages(turns), [turns]);
   const [isRouting, setIsRouting] = useState(false);
   const routingRef = useRef<AbortController | null>(null);
-
-  const run = useCallback(
-    (action: ActionDefinition): void =>
-      runPlan(action, {
-        navigate: path => void navigate(path),
-        workspaceBase: workspaceId ? `/${workspaceId}` : '',
-      }),
-    [navigate, workspaceId],
-  );
 
   const append = useCallback((userText: string, chosen: readonly ActionDefinition[]): string => {
     const pair = exchange(userText, chosen, new Date(), newId);
@@ -69,12 +67,15 @@ export const useAssistantActions = ({ enabled }: { enabled: boolean }): Assistan
     [append],
   );
 
-  const open = useCallback(
-    (action: ActionDefinition, messageId?: string): void => {
-      run(action);
-      if (messageId) setTurns(prev => markOpened(prev, messageId, action.id));
+  const openPill = useCallback(
+    (messageId: string, label: string): void => {
+      const action = pillAction(turns, messageId, label);
+      if (!action) return;
+      const base = workspaceId ? `/${workspaceId}` : '';
+      void navigate(`${base}/${APP_PAGES[action.page].path}`);
+      setTurns(prev => markOpened(prev, messageId, action.id));
     },
-    [run],
+    [turns, navigate, workspaceId],
   );
 
   const cancel = useCallback((): void => {
@@ -109,5 +110,14 @@ export const useAssistantActions = ({ enabled }: { enabled: boolean }): Assistan
     [actions, append],
   );
 
-  return { actions, starters, turns, messages, isRouting, choose, open, reset, cancel, ask };
+  const answer = useCallback(
+    async (text: string): Promise<string | null> => {
+      const result = await ask(text);
+      if (result.outcome === 'replied') return result.reply;
+      return result.outcome === 'cancelled' ? '' : null;
+    },
+    [ask],
+  );
+
+  return { actions, starters, messages, isRouting, choose, openPill, reset, cancel, ask, answer };
 };

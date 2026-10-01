@@ -52,7 +52,7 @@ import type {
 import { buildXyneAIStreamThreadId } from '../../utils/xyneAIStreamThreadId';
 import { cn } from '../../utils/classNames';
 import { AskAiRatingButtons } from './AskAiRatingButtons';
-import { isAssistantMessage, actionOfPill, mergeTranscript } from '../Assistant/turns';
+import { isAssistantMessage, mergeTranscript } from '../Assistant/turns';
 import type { AssistantActions } from '../Assistant/useAssistantActions';
 import { AIComposer, type AIComposerAttachment, type AIComposerHandle } from './AIComposer';
 import { ReadonlyContextPills } from './ReadonlyContextPills';
@@ -2677,8 +2677,7 @@ export const AIChatThread = forwardRef<AIChatThreadHandle, AIChatThreadProps>(fu
                         message={message}
                         readOnly
                         onFollowUpSuggestionClick={label => {
-                          const action = actionOfPill(assistant?.turns ?? [], message.id, label);
-                          if (action) assistant?.open(action, message.id);
+                          assistant?.openPill(message.id, label);
                         }}
                       />
                     );

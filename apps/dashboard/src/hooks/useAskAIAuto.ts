@@ -1,4 +1,4 @@
-import { useCallback, useSyncExternalStore } from 'react';
+import { useSyncExternalStore } from 'react';
 
 // Auto is the default every time the app loads; picking an agent turns it off until then.
 let current = true;
@@ -23,5 +23,5 @@ export const useAskAIAuto = (): { isAuto: boolean; setAuto: (next: boolean) => v
     () => current,
     () => true,
   );
-  return { isAuto, setAuto: useCallback(setAuto, []) };
+  return { isAuto, setAuto };
 };

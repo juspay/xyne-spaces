@@ -688,12 +688,8 @@ export const AIComposer = forwardRef<AIComposerHandle, AIComposerProps>(function
   const answerTranscript = useMemo(
     () =>
       isAutoOn && assistant
-        ? async (text: string): Promise<string | null> => {
-            if (detectStudioIntent(text)) return null;
-            const result = await assistant.ask(text);
-            if (result.outcome === 'cancelled') return '';
-            return result.outcome === 'replied' ? result.reply : null;
-          }
+        ? async (text: string): Promise<string | null> =>
+            detectStudioIntent(text) ? null : assistant.answer(text)
         : undefined,
     [isAutoOn, assistant],
   );

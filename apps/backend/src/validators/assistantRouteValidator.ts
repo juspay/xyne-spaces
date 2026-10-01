@@ -4,7 +4,8 @@ const ASSISTANT_ROUTE_MAX_TEXT_CHARS = 2000;
 // Jev takes up to 255 options per choice question, and the service adds `none`.
 const ASSISTANT_ROUTE_MAX_ACTIONS = 250;
 
-const ASSISTANT_ROUTE_NONE_ID = 'none';
+// Reserved choice for "not one of the options"; callers may not use it as an id.
+export const ASSISTANT_ROUTE_NONE_ID = 'none';
 
 export const assistantRouteBodySchema = Joi.object({
   text: Joi.string()

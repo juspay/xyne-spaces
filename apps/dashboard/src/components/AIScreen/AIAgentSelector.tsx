@@ -202,7 +202,7 @@ export function AIAgentSelector({
               />
             )}
 
-            {/* Then, as it was before the restyle: Ask AI is the default and
+            {/* First, as it was before the restyle: Ask AI is the default and
                 must not be something you scroll a long agent list to reach. */}
             <button
               onClick={() => {

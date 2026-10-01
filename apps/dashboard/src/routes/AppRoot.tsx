@@ -787,7 +787,7 @@ const AppRoot = (): ReactElement => {
               <ShareRecordingHandler />
               <AIOnboardingProvider>
                 <AIOnboardingTrigger isOnboarding={isOnboarding} />
-                <AssistantPanelTrigger isOnboarding={isOnboarding} />
+                <AssistantPanelTrigger />
                 <AIOnboardingOverlay />
                 <SlashCommandArtifactSideEffectProvider>
                   {!isInPanelWebview && <SlashCommandArtifactBanner />}

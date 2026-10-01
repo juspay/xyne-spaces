@@ -41,6 +41,12 @@ export function useVoiceMode({
   answer,
   voice,
 }: UseVoiceModeParams): UseVoiceModeResult {
+  // Read inside the async callback created at record start, so they must be the latest versions.
+  const submitRef = useRef(submit);
+  submitRef.current = submit;
+  const answerRef = useRef(answer);
+  answerRef.current = answer;
+
   const [phase, setPhase] = useState<VoicePhase>('idle');
   const phaseRef = useRef<VoicePhase>('idle');
   const setPhaseSafe = useCallback((next: VoicePhase): void => {
@@ -231,7 +237,7 @@ export function useVoiceMode({
           return;
         }
         setPhaseSafe('thinking');
-        const reply = answer ? await answer(text) : null;
+        const reply = answerRef.current ? await answerRef.current(text) : null;
         if (reply === '') {
           setPhaseSafe('idle');
           return;
@@ -244,7 +250,7 @@ export function useVoiceMode({
         consumedRef.current = 0;
         activeStreamIdRef.current = null;
         turnActiveRef.current = true;
-        submit(text);
+        submitRef.current(text);
       } catch (err) {
         toast.error('Voice transcription failed', {
           description: err instanceof Error ? err.message : 'Unknown error',
@@ -252,7 +258,7 @@ export function useVoiceMode({
         setPhaseSafe('idle');
       }
     },
-    [submit, answer, enqueue, setPhaseSafe],
+    [enqueue, setPhaseSafe],
   );
 
   const startRecording = useCallback((): void => {

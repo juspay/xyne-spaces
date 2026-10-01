@@ -1,10 +1,3 @@
-// Mirrors core/action.ts of `@xyne/shared/assistant` (voice-assistant work): same names and
-// meanings, and this file goes when that lands. Three things the shared schema lacks and must
-// gain on merge: `hint` and `guide` on an action, and the `open_page` and `open_dialog`
-// operations (the shared `navigate` only opens a conversation).
-
-type Effect = 'read' | 'navigate' | 'send' | 'change';
-
 type IntentDefinition = {
   description: string;
   examples: readonly string[];
@@ -21,11 +14,8 @@ export type PageId =
   | 'admin_roles'
   | 'chat_new_message'
   | 'chat_browse_channels'
+  | 'add_channel'
   | 'ai_agent_create';
-
-export type DialogId = 'add_channel';
-
-export type PlanStep = { op: 'open_page'; page: PageId } | { op: 'open_dialog'; dialog: DialogId };
 
 export type ActionDefinition = {
   id: string;
@@ -33,17 +23,8 @@ export type ActionDefinition = {
   hint?: string;
   guide?: readonly string[];
   intent: IntentDefinition;
-  effect: Effect;
-  fields: Record<string, never>;
   summarize: string;
-  plan: readonly PlanStep[];
-  done: string;
-};
-
-export type ActionArea = {
-  id: string;
-  description: string;
-  actions: readonly ActionDefinition[];
+  page: PageId;
 };
 
 export function intentCriteria(action: Pick<ActionDefinition, 'intent'>): string {

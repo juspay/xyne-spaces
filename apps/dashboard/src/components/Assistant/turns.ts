@@ -93,7 +93,7 @@ export const markOpened = (
 export const isAssistantMessage = (messageId: string): boolean =>
   messageId.startsWith(MESSAGE_ID_PREFIX);
 
-export const actionOfPill = (
+export const pillAction = (
   turns: readonly AssistantTurn[],
   messageId: string,
   label: string,

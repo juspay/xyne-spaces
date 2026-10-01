@@ -1,6 +1,7 @@
 import type { JsonValue } from '@openfeature/server-sdk';
 import { logger } from '@/utils/logger';
 import { superpositionClient } from '@/services/superpositionClient';
+import { ASSISTANT_ROUTE_NONE_ID as NONE_ID } from '@/validators/assistantRouteValidator';
 import { askJev, isJevConfigured, type JevChoiceQuestion } from '@/services/queryIntent/jevClient';
 
 export interface AssistantRouteAction {
@@ -21,15 +22,12 @@ interface AssistantRouteContext {
 // Overrides `enabled` and the thresholds without a deploy.
 const CONFIG_KEY = 'assistant_route_config';
 
-// Tuned on jev-latest, 2026-09-30; re-tune when JEV_MODEL changes. ACTION_THRESHOLD applies to
+// Tuned on jev-latest; re-tune when JEV_MODEL changes. ACTION_THRESHOLD applies to
 // 1 - p(none), not the top option: a sentence naming several actions splits the mass between them.
 const ACTION_THRESHOLD = 0.9;
 const ALSO_THRESHOLD = 0.1;
 
-const TIMEOUT_MS = 1500;
-
-// Reserved choice for "not one of the options"; callers may not use it as an id.
-const NONE_ID = 'none';
+const TIMEOUT_MS = 2500;
 
 const NONE_DESCRIPTION =
   'None of these: a general question, or a request about something else, for the AI assistant to answer.';

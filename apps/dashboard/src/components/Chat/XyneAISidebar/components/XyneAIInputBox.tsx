@@ -2021,7 +2021,7 @@ export const XyneAIInputBox = forwardRef<XyneAIInputBoxHandle, XyneAIInputBoxPro
                     <button
                       type='button'
                       onClick={onEnterVoiceMode}
-                      className='p-1.5 rounded transition-all duration-200 ease-in-out hover:bg-accent text-muted-foreground'
+                      className='p-1.5 rounded transition-colors duration-200 ease-in-out hover:bg-accent text-muted-foreground'
                       aria-label='Voice mode'
                       title='Voice mode'
                       disabled={isStreaming}

@@ -49,7 +49,7 @@ import { trackCitationClicked, trackAskAIOpened } from '../../../services/otel/x
 import { globalClickTracker } from '../../../services/Analytics/globalClickTracker';
 import { AILandingHero, AILandingHeroErrorBoundary } from './components/AILandingHero';
 import { XyneAIEmptyState } from './components/XyneAIEmptyState';
-import { isAssistantMessage, actionOfPill, mergeTranscript } from '../../Assistant/turns';
+import { isAssistantMessage, mergeTranscript } from '../../Assistant/turns';
 import { useAssistantActions } from '../../Assistant/useAssistantActions';
 import { useRoutedSubmit } from '../../Assistant/useRoutedSubmit';
 import { cn } from '../../../utils/classNames';
@@ -404,7 +404,7 @@ const XyneAISidebar = ({
   const assistant = useAssistantActions({ enabled: !isFullscreen });
   // Starter cards only on the panel opened for a user who just finished onboarding.
   const openedForOnboarding = useSelector(xyneAIActor, s => s.context.openSource === 'setup');
-  const { turns: assistantTurns, messages: assistantMessages, reset: resetAssistant } = assistant;
+  const { messages: assistantMessages, reset: resetAssistant } = assistant;
   const { messages: transcriptMessages, serverIndexById } = useMemo(
     () => mergeTranscript(displayMessages, assistantMessages),
     [displayMessages, assistantMessages],
@@ -1073,8 +1073,8 @@ const XyneAISidebar = ({
   }, []);
 
   useEffect(() => {
-    if (assistantTurns.length > 0) scrollToBottom();
-  }, [assistantTurns, scrollToBottom]);
+    if (assistantMessages.length > 0) scrollToBottom();
+  }, [assistantMessages, scrollToBottom]);
 
   // AI Onboarding: derive answered count and visible suggestions from messages
   // No context dispatches — avoids re-renders that interfere with streaming
@@ -2175,13 +2175,7 @@ const XyneAISidebar = ({
     autoSendPendingQueryRef.current = text;
     setInputValue(text);
   }, []);
-  const answerTranscript = canRoute
-    ? async (text: string): Promise<string | null> => {
-        const result = await assistant.ask(text);
-        if (result.outcome === 'cancelled') return '';
-        return result.outcome === 'replied' ? result.reply : null;
-      }
-    : undefined;
+  const answerTranscript = canRoute ? assistant.answer : undefined;
   const ownsStream = useCallback(
     (state: StreamState): boolean => state.streamSlotKey === streamThreadKey,
     [streamThreadKey],
@@ -2477,7 +2471,7 @@ const XyneAISidebar = ({
                       </div>
                     </div>
                   </div>
-                ) : messages.length === 0 && assistantTurns.length === 0 ? (
+                ) : messages.length === 0 && assistantMessages.length === 0 ? (
                   isFullscreen ? (
                     <AILandingHeroErrorBoundary>
                       <AILandingHero
@@ -2573,12 +2567,7 @@ const XyneAISidebar = ({
                                     feedbackValue={null}
                                     isLatestBotMessage={message.type === 'bot'}
                                     onFollowUpSuggestionClick={label => {
-                                      const action = actionOfPill(
-                                        assistantTurns,
-                                        message.id,
-                                        label,
-                                      );
-                                      if (action) assistant.open(action, message.id);
+                                      assistant.openPill(message.id, label);
                                     }}
                                   />
                                 );
