@@ -100,3 +100,15 @@ export type {
   RecordingAccessLevel,
   ResolveRecordingAccessParams,
 } from './recordingAccess.js';
+export {
+  SAFE_INLINE_ATTACHMENT_MIME_TYPES,
+  INLINE_IMAGE_MIME_TYPES,
+  SVG_SANDBOX_CSP,
+  normalizeMimeType,
+  resolveSafeDownloadHeaders,
+  resolveSafeInlineImageHeaders,
+} from './safeAttachmentHeaders.js';
+export type {
+  SafeResponseHeaders,
+  SafeDownloadHeaderOptions,
+} from './safeAttachmentHeaders.js';
