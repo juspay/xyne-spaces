@@ -22,7 +22,7 @@ in
     name = "xyne-spaces-dev";
 
     packages = with pkgs; [
-      nodejs
+      nodejs_22
       pnpm
       just
       openssl
@@ -33,7 +33,7 @@ in
     banner = ''
       # Xyne Spaces Dev Environment
 
-      Node.js: ${pkgs.nodejs.version}
+      Node.js: ${pkgs.nodejs_22.version}
 
       ## Getting Started
 
@@ -129,7 +129,7 @@ in
           exit 1
         fi
 
-        export PATH="${lib.makeBinPath [ pkgs.nodejs pkgs.pnpm pkgs.openssl ]}:$PATH"
+        export PATH="${lib.makeBinPath [ pkgs.nodejs_22 pkgs.pnpm pkgs.openssl ]}:$PATH"
         cd "$BACKEND_DIR"
 
         # Also handle data directories created before the common DB was added.
@@ -231,13 +231,13 @@ in
     # Read credentials at runtime; local secrets must never enter the Nix store.
     settings.processes."xyne-livekit".command = lib.mkForce (
       let livekit = config.process-compose."xyne-space-services".services.livekit."xyne-livekit";
-      in "${pkgs.pnpm}/bin/pnpm --dir apps/backend exec dotenv -e .env.local -- ${pkgs.nodejs}/bin/node ../../nix/scripts/livekit.mjs ${livekit.configFile} ${livekit.package}/bin/livekit-server"
+      in "${pkgs.pnpm}/bin/pnpm --dir apps/backend exec dotenv -e .env.local -- ${pkgs.nodejs_22}/bin/node ../../nix/scripts/livekit.mjs ${livekit.configFile} ${livekit.package}/bin/livekit-server"
     );
 
     # Load runtime secrets without changing the module's repo-relative working directory.
     settings.processes."xyne-zero".command = lib.mkForce (
       let zero = config.process-compose."xyne-space-services".services.zero-cache."xyne-zero";
-      in "${pkgs.nodejs}/bin/node apps/backend/node_modules/dotenv-cli/cli.js -e apps/backend/.env.local -- ${zero.outputs.settings.processes.xyne-zero.command}"
+      in "${pkgs.nodejs_22}/bin/node apps/backend/node_modules/dotenv-cli/cli.js -e apps/backend/.env.local -- ${zero.outputs.settings.processes.xyne-zero.command}"
     );
 
     # Add dependency: zero-cache depends on postgres
@@ -356,7 +356,7 @@ in
 
   packages.nix-smoke-test = pkgs.writeShellApplication {
     name = "nix-smoke-test";
-    runtimeInputs = [ pkgs.python3 pkgs.process-compose pkgs.nodejs pkgs.pnpm pkgs.openssl ];
+    runtimeInputs = [ pkgs.python3 pkgs.process-compose pkgs.nodejs_22 pkgs.pnpm pkgs.openssl ];
     text = ''
       python ${./nix/scripts/smoke-test.py} ${config.packages.nix-services-config} "$@"
     '';
