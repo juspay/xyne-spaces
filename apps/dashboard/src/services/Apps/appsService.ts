@@ -66,12 +66,6 @@ export interface AppFetchResponseMapping {
     /** Optional: an array of `{ fileName, fileUrl, mimeType?, size? }`. */
     attachments: string;
   };
-  /**
-   * Paths combined into the dedup id. An app's own id is not always unique —
-   * a canned or auto-reply message carries its template id, so it repeats across
-   * tickets. Listing the jointly-unique fields makes the key meaningful.
-   */
-  idFields: string[];
 }
 
 export interface AppFetchConfig {

@@ -1371,6 +1371,67 @@ export class CallRepository {
   }
 
   /**
+   * Participants shaped for the app API / app events: keeps `isExternal` (which
+   * getParticipantsInfo drops) and nulls `userId` on external rows, where the
+   * stored value is a synthetic id that resolves to no real user.
+   */
+  async findParticipantsForApps(
+    callExternalId: string
+  ): Promise<Array<{
+    userId: string | null;
+    name: string;
+    email: string | null;
+    isExternal: boolean;
+    joinedAt: Date | null;
+    leftAt: Date | null;
+  }>> {
+    const call = await this.findByExternalId(callExternalId);
+    if (!call) return [];
+
+    const participants = await DatabaseClient.getInstance().callParticipant.findMany({
+      where: { callId: call.id },
+      select: {
+        userId: true,
+        email: true,
+        displayName: true,
+        isExternal: true,
+        joinedAt: true,
+        leftAt: true,
+      },
+      orderBy: { invitedAt: 'asc' },
+    });
+    if (participants.length === 0) return [];
+
+    const internalUserIds = participants.filter(p => !p.isExternal).map(p => p.userId);
+    const users = internalUserIds.length
+      ? await repositories.users.findMany({ where: { id: { in: internalUserIds } } })
+      : [];
+    const userMap = new Map(users.map(u => [u.id, u]));
+
+    return participants.map(p => {
+      if (p.isExternal) {
+        return {
+          userId: null,
+          name: p.displayName || p.email || 'Guest',
+          email: p.email ?? null,
+          isExternal: true,
+          joinedAt: p.joinedAt,
+          leftAt: p.leftAt,
+        };
+      }
+      const user = userMap.get(p.userId);
+      return {
+        userId: p.userId,
+        name: (user?.displayName || user?.name) ?? 'Unknown',
+        email: user?.email ?? null,
+        isExternal: false,
+        joinedAt: p.joinedAt,
+        leftAt: p.leftAt,
+      };
+    });
+  }
+
+  /**
    * Update a SCHEDULED call's fields and manage participant delta.
    * Only modifies fields that are explicitly provided.
    * Participant changes: addUserIds are added (skipping duplicates), removeUserIds are deleted.

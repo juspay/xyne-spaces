@@ -16,12 +16,21 @@ export class ViewAccessACL extends BaseQueryACL<'view_access'> {
       return denyGuestSelect(query, 'id');
     }
 
-    return query.where(({ or, and, cmp }) =>
+    return query.where(({ or, and, cmp, exists }) =>
       or(
+        // Directly shared with me
         and(
           cmp('entityType', '=', ViewAccessEntityType.USER),
           cmp('entityId', '=', this.ctx.userID),
         ),
+        // Shared with a channel I'm a member of (entityId holds the channelId)
+        and(
+          cmp('entityType', '=', ViewAccessEntityType.CHANNEL),
+          exists('channel', (ch: any) =>
+            ch.whereExists('participants', (p: any) => p.where('userId', this.ctx.userID)),
+          ),
+        ),
+        // Grants I created (as the sharer)
         cmp('sharedBy', '=', this.ctx.userID),
       ),
     );

@@ -14,6 +14,7 @@ import type { ExternalResultCallbackConfig } from "../surfaces/external-api/deli
 import type { SlackDeliveryTarget } from "../surfaces/slack/delivery.js";
 import type { ChannelDeliveryTarget, MessagingChannelKey } from "../surfaces/messaging/plugin.js";
 import type { RootAttachmentRef } from "./workflow-handoff.js";
+import { twinScopedKey } from "./twin-scope.js";
 
 
 export interface SessionContext {
@@ -183,15 +184,9 @@ const CONV_PREFIX = "session-by-conv:";
 // busy slot (tryAcquireSlot) + runtime session lock, not this key.
 export const AUTOMATION_RUN_DEDUP_TTL = Number(process.env["AUTOMATION_RUN_DEDUP_TTL_SEC"] ?? 30);
 
+// Digital-twin runs are PER-USER, so the conv index is user-scoped too (see twinScopedKey).
 export function convKey(conversationId: string, agentSlug: string, twinUserScopeId?: string): string {
-  const base = `${CONV_PREFIX}${conversationId}:${agentSlug}`;
-  // Digital-twin runs are PER-USER: one claw session per mentioned user in a
-  // thread (see buildSandboxStoreKey). So the conv index must be user-scoped
-  // too — otherwise two twins mentioned in ONE thread clobber each other's row
-  // and the /result conv-index fallback resolves the wrong user. Only the twin
-  // passes twinUserScopeId; every conversation-mode caller keeps the legacy 2-part
-  // key (backward compatible, unchanged).
-  return agentSlug === "digital-twin" && twinUserScopeId ? `${base}:${twinUserScopeId}` : base;
+  return twinScopedKey(`${CONV_PREFIX}${conversationId}:${agentSlug}`, agentSlug, twinUserScopeId);
 }
 
 export function automationRunDedupKey(conversationId: string, agentSlug: string): string {

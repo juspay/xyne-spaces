@@ -346,7 +346,6 @@ Anything else is described by `response` in the config (`AppFetchResponseMapping
 | `messagesPath` | Dot path to the message array. **Empty means the response is a bare array.** |
 | `nextCursorPath` | Dot path to the continuation token. Cursor pagination only. |
 | `fields.*` | Where each Xyne field lives on the app's item. Dot paths, so `meta.createdAt` is fine. |
-| `idFields` | Paths combined (joined with `\|`) into the deduplication id. Empty uses `fields.externalId` alone. |
 
 Only **`externalId` and `sentAt`** are mandatory per message; everything else degrades (a missing sender falls back to the desk owner, a missing subject to `(no subject)`). A mapping pointing at a field the app does not send fails with that path named, so the **Test fetch** button reports `message 3 has no timestamp at "meta.createdAt"` rather than a generic shape error. `sampleMessage` in the test result is the **mapped** message, which is where a wrong path shows up.
 
@@ -361,17 +360,15 @@ These two exist so a **pulled** ticket lands the same way a **pushed** one does 
 
   `fileUrl` is app-supplied, so it is fetched through the same SSRF guard as the export URL itself (`safeWebhookFetch`): the host is DNS-pinned and refused if it resolves to a private, loopback, link-local or cloud-metadata address, and redirects are **not** followed — a 3xx is a URL the guard has not validated, so the attachment is dropped rather than chased. At most 20 attachments per message and 25MB each are taken; the rest are skipped with a warning, because neither number is bounded by the 32MB page limit.
 
-Neither field can be used in `idFields`: a dedup path is read as a scalar, and an object or array yields no value, so every row would be rejected as "dedup key incomplete". The config UI leaves them out of the dedup-key picker for that reason.
+##### `externalId` must be unique per app, not per thread
 
-##### Why `idFields` exists
-
-Xyne deduplicates on `(externalSourceId, externalId)`. An app's own id is not always unique on its own: an auto-reply or canned-option message commonly carries its **template** id, so the same value legitimately appears on every ticket that used it. Left alone, the first occurrence would be ingested and every later copy discarded as a duplicate — silently, and in proportion to how many tickets use canned replies.
-
-Listing the jointly-unique fields fixes this without asking the app to change its ids. For an API whose rows are unique on thread + id + timestamp:
-
-```
-idFields: ["threadId", "externalId", "additionalFormFields.messageCreatedAt"]
-```
+> This is the one hard requirement on the app, and the only one Xyne cannot paper over.
+>
+> Xyne deduplicates on `(externalSourceId, externalId)`, and `Email` is unique on `(externalMessageId, channelId)` — **channel-scoped, not thread-scoped**. An id that is unique only *within* its thread therefore collides as soon as it reappears under a second thread on the same desk. Push answers `409 EXTERNAL_ID_NOT_UNIQUE` when it detects that; it does not guess.
+>
+> If your ids are only thread-unique (an auto-reply or canned-option message commonly carries its *template* id, so the same value appears on every ticket that used it), compose a unique one on your side — your message id joined with your thread id, for example — and send **that** as `externalId`.
+>
+> **Send the same `externalId` on both paths.** A message pushed to `/appDeskInbound` and the same message in the export must carry the identical id. That is what lets a history fetch recognise what push already stored: with matching ids a fetch over an already-covered window repairs the gaps and skips the rest, and with differing ids it duplicates everything it touches. Xyne deliberately does not compose or rewrite the id on either path, precisely so the two cannot drift.
 
 ##### Pagination
 
@@ -400,13 +397,12 @@ response.fields.sentAt            additionalFormFields.messageCreatedAt
 response.fields.senderName        senderName
 response.fields.subject           subject
 response.fields.body              body
-response.idFields  ["threadId", "externalId", "additionalFormFields.messageCreatedAt"]
 ```
 
 Points worth copying:
 
 - `limit` there counts **issues**, not messages, so a `pageSize` of 50 returns however many messages those 50 issues contain. Harmless — the offset advances in the app's own unit.
-- The app's `externalId` repeats across tickets for canned replies, so `idFields` carries the composite key. Without it roughly a third of messages would be discarded as duplicates.
+- The app's `externalId` is unique per message across the whole app, not just within a thread — see above. It also sends that same id on `/appDeskInbound`, so a history fetch and the live push agree on what is already stored.
 - The app has no sender email; that field is simply unmapped and the desk owner is used instead.
 
 #### Throttling

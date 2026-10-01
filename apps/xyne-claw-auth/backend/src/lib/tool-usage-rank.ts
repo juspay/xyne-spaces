@@ -71,6 +71,12 @@ const shared = createToolUsageRankCache(async (agentSlug, orgId, since, limit) =
   rankToolsByRuns(await agentRunRepository.toolsUsedSince(agentSlug, orgId, since, TOOL_USAGE_MAX_RUNS), limit),
 );
 
+/** Keyed `${orgId}:*` — every agent's runs in the org, same window. */
+const ORG_WIDE = "*";
+const orgShared = createToolUsageRankCache(async (_agentSlug, orgId, since, limit) =>
+  rankToolsByRuns(await agentRunRepository.toolsUsedSinceInOrg(orgId, since, TOOL_USAGE_MAX_RUNS), limit),
+);
+
 const CAP_KEY = "active_tool_cap";
 
 function specRequestsCap(spec: unknown): boolean | undefined {
@@ -91,10 +97,23 @@ function specRequestsCap(spec: unknown): boolean | undefined {
   return undefined;
 }
 
-export function wantsToolUsageRank(agentSpec: unknown, runSpec: unknown): boolean {
-  return specRequestsCap(runSpec) ?? specRequestsCap(agentSpec) ?? false;
+/**
+ * Whether the run needs the usage rank, i.e. whether `active_tool_cap` will be
+ * on. Mirrors claw's precedence (xyne-claw/src/optimizations.ts): the run's
+ * spec, then the agent's own, then the tier default — orchestrators cap their
+ * active tools unless they explicitly opt out.
+ */
+export function wantsToolUsageRank(agentSpec: unknown, runSpec: unknown, delegationTier?: string | null): boolean {
+  return specRequestsCap(runSpec) ?? specRequestsCap(agentSpec) ?? delegationTier === "orchestrator";
 }
 
-export function toolUsageRankFor(agentSlug: string, orgId: string): Promise<string[]> {
-  return shared.lookup(agentSlug, orgId);
+/**
+ * The agent's own most-used tools, or — when it has no runs in the window yet
+ * (a new agent) — the org's. Without the fallback a new orchestrator, which
+ * gets every resolvable tool, would start with no cap at all ("no-usage").
+ */
+export async function toolUsageRankFor(agentSlug: string, orgId: string): Promise<string[]> {
+  const own = await shared.lookup(agentSlug, orgId);
+  if (own.length > 0) return own;
+  return orgShared.lookup(ORG_WIDE, orgId);
 }

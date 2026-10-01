@@ -39,13 +39,14 @@ test("digital-twin recall with ONLY foreign results returns nothing", async () =
 });
 
 test("non-twin (shared) recall is NOT user-filtered (provider-trusted)", async () => {
+  // Distinct sentences: dedupeSimilar collapses near-identical token sets.
   recallMock.mockResolvedValue([
-    { id: "1", text: "shared-fact-A", tags: ["shared"] },
-    { id: "2", text: "shared-fact-B", tags: ["subsystem:spaces"] },
+    { id: "1", text: "deploys go through Argo", tags: ["shared"] },
+    { id: "2", text: "redis cache ttl is sixty seconds", tags: ["subsystem:spaces"] },
   ]);
   const text = await runRecall("assistant", "u1");
-  expect(text).toContain("shared-fact-A");
-  expect(text).toContain("shared-fact-B");
+  expect(text).toContain("deploys go through Argo");
+  expect(text).toContain("redis cache ttl is sixty seconds");
 });
 
 test("memory disabled → returns 'not configured' without calling the provider", async () => {

@@ -11,7 +11,9 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import { dirname, isAbsolute, join } from "node:path";
 import { createLogger } from "./logger.js";
-import { buildTwinDeliverMandate } from "./twin-deliver.js";
+import { buildTwinSystemPrompt, TWIN_DELIVER_NUDGE } from "./twin-prompts.js";
+import { installStopAfterDelivery, recoverTwinDeliveryFromText, TWIN_DELIVER_TOOL_NAME, type TwinDeliverRef } from "./twin-deliver.js";
+import { checkTwinDelivery } from "./twin-delivery-check.js";
 import { installMidTurnCompaction, forceCompaction } from "./mid-turn-compaction.js";
 import { promoteIfOversized } from "./tool-output.js";
 import { createScopedToolMap } from "./scoped-tools.js";
@@ -49,7 +51,9 @@ import { kickOffPrReviewRoom, registerLivePrRunContext, unregisterLivePrRunConte
 import { judgeRunSummary, recordJudgeOutcome, setJudgeDebugSink } from "./judge-backend.js";
 import { effectiveOptimizations, optEnabled } from "./optimizations.js";
 import { jevThreshold } from "./jev.js";
-import { pinRunTask } from "./run-context.js";
+import { attachRunMessages, pinRunTask } from "./run-context.js";
+import { CONTEXT_GATE_NUDGE, checkpointPrecheck, contextGate } from "./answer-gates.js";
+import { runWithToolCall, takeSiftParam, withSiftParam, type ToolCallContext } from "./tool-call-context.js";
 import { assessAnswer, type AnswerAssessment } from "./jev-completeness.js";
 import { gcsUploadDebugRunWithRetries, gcsUploadDebugObject, gcsPutDebugIndex } from "./storage.js";
 import {
@@ -547,63 +551,6 @@ export class RunCancelledError extends Error {
   }
 }
 
-function buildSystemPrompt(userId: string, userName?: string, userEmail?: string, mandateDeliver = false): string {
-  const identity = userName ? `**${userName}**` : "the user";
-  const emailLine = userEmail ? `\n- **Email:** ${userEmail}` : "";
-
-  // Mention/approval flow only: the user NEVER sees your assistant text — only
-  // what you pass to twin_deliver. Shared with the systemPromptOverride path in
-  // run.ts (the ACTUAL prompt for the mention twin) via buildTwinDeliverMandate,
-  // so the mandate lands regardless of which prompt path runs.
-  const deliverySection = mandateDeliver ? buildTwinDeliverMandate(userName ? { userName } : {}) : "";
-
-  return `You are the **Digital Twin** of ${identity}. You act, think, and respond exactly as this person would.
-
-## Identity
-You ARE this user's digital representative. When someone asks you a question, they are asking ${userName ?? "this user"} — not a generic assistant. Your job is to respond the way this person would, using their knowledge, context, communication style, and expertise.
-- **Name:** ${userName ?? "unknown"}${emailLine}
-
-To get your Spaces user ID for filtering tools (assignedTo, from, createdBy), call the \`spaces-whoami\` tool first.
-
-## How to Build Context (do this FIRST)
-Before answering any query, use your available tools to gather context. Look at the tools you have access to — they include tools for searching messages, tickets, activity, memory, users, channels, and more. Use them proactively:
-
-1. **Recent activity** — Check for mentions, replies, and assignments.
-2. **Knowledge base** — Search memory/facts/SOPs relevant to the query.
-3. **Messages & conversations** — Read threads to understand communication style.
-4. **Tickets & work items** — Check current workload and priorities.
-5. **Search** — Broad search across all connected apps for relevant context.
-6. **People lookup** — Resolve names to user IDs when needed.
-
-Note: Tool names may be prefixed with the server name (e.g. \`xyne-spaces__spaces-search\`). Use the tools as they appear in your tool list.
-
-## How to Respond
-- **Mirror the user's communication style.** If they write short direct messages, you do too. If they use detailed explanations, match that.
-- **Use the user's actual knowledge.** Ground every answer in data from their messages, tickets, memory, and activity. Do not guess.
-- **For engineering queries** — use any available code/log/metrics tools.
-- **Be the user.** Respond in first person ("I", "my", "we") as if you are them. Do not say "the user" or "they".
-- **Acknowledge gaps honestly.** If you cannot find relevant information in the user's data, say so — don't fabricate.
-
-## Critical Rules
-1. NEVER fabricate information. Only use data retrieved from tools.
-2. ALWAYS gather context before responding — do not answer from thin air.
-3. Respond as the user, not as an assistant describing the user.
-4. When the query is about "what are you working on" or "what do you know about X", search the user's actual data first.
-5. Use the tools available to you — check your tool list, don't assume tool names.
-6. NEVER narrate your process or expose the machinery. No "Saved to memory", "Searching…", "Got it", "Step N", "updating todos", or references to tools/memory. Only the final human message is your voice.
-
-## Data Correlation Rules
-When correlating data across different systems (e.g. tickets from Spaces + PRs from Bitbucket):
-- ALWAYS clearly distinguish between verified facts and inferred/unverified data.
-- Ticket board status (COMPLETED, "Merged" stage) is a WORKFLOW state — it does NOT prove a Bitbucket PR exists or was merged. These are separate systems.
-- If Bitbucket search doesn't find a PR for a ticket, report it as "PR not found in search", NOT "No PR".
-- When reporting ticket-to-PR mappings, use three clear categories:
-  1. **PR verified** — matching PR found and confirmed in Bitbucket
-  2. **PR not found in search** — Bitbucket search returned no match (PR may exist under different naming)
-  3. **Board suggests done, PR not verified** — ticket board says Completed/Merged but no Bitbucket PR match found
-- Never collapse categories 2 and 3 together. The user needs to know what was verified vs what was assumed.${deliverySection}`;
-}
-
 /**
  * (B) System-level parallelism preamble prepended to every parent agent's
  * persona. Same intent as SUBAGENT_PREAMBLE in subagent-tools.ts — push the
@@ -711,16 +658,32 @@ export async function applyCopilotProxyIfNeeded<T extends { apiKey: string; mode
  * catches the heavy-investigation bloat path.
  */
 export function capCustomToolOutput(tools: ToolDefinition[], outputBaseDir: string): ToolDefinition[] {
+  // With result sifting on, every wrapped tool gets an optional `sift` switch
+  // the model can set per call (R3); it is stripped here, before the tool (or
+  // its MCP server) ever sees the params.
+  const offerSift = optEnabled("jev_result_sift");
   return tools.map((tool) => {
     const orig = tool.execute.bind(tool);
+    // Only a `sift` we added is ours to strip; a tool's own `sift` param passes through.
+    const ownsSift = offerSift && withSiftParam(tool.parameters) !== tool.parameters;
     const wrapped: ToolDefinition["execute"] = async (...args) => {
-      const result = await orig(...args);
+      const [toolCallId, rawParams, ...rest] = args;
+      const { params, sift } = ownsSift ? takeSiftParam(rawParams) : { params: rawParams, sift: undefined };
+      const callCtx: ToolCallContext = { tool: tool.name, args: params, ...(sift !== undefined ? { sift } : {}) };
+      const result = await runWithToolCall(
+        callCtx,
+        () => (orig as (...a: unknown[]) => ReturnType<ToolDefinition["execute"]>)(toolCallId, params, ...rest),
+      );
       const content = (result as { content?: unknown })?.content;
       if (Array.isArray(content)) {
         const mapped = await Promise.all(content.map(async (block) => {
           const b = block as { type?: string; text?: string };
           if (b && b.type === "text" && typeof b.text === "string") {
-            return { ...b, text: await promoteIfOversized(outputBaseDir, "custom", tool.name, b.text) };
+            const text = b.text;
+            return {
+              ...b,
+              text: await runWithToolCall(callCtx, () => promoteIfOversized(outputBaseDir, "custom", tool.name, text)),
+            };
           }
           return block;
         }));
@@ -728,7 +691,9 @@ export function capCustomToolOutput(tools: ToolDefinition[], outputBaseDir: stri
       }
       return result;
     };
-    return { ...tool, execute: wrapped };
+    return ownsSift
+      ? { ...tool, parameters: withSiftParam(tool.parameters), execute: wrapped }
+      : { ...tool, execute: wrapped };
   });
 }
 
@@ -1773,7 +1738,7 @@ export interface RunTaskOptions {
    *  finish until this tool has run — enforced by a post-loop nudge pass. */
   requiredTool?: { name: string; nudge: string } | undefined;
   /** Digital Twin persona (soul.md, …) folded into the actual system prompt on
-   *  both the override and buildSystemPrompt-fallback paths, so it reads as
+   *  both the override and buildTwinSystemPrompt-fallback paths, so it reads as
    *  identity and shows in the debug panel. */
   twinPersona?: string | undefined;
   abortSignal?: AbortSignal | undefined;
@@ -1807,7 +1772,7 @@ export interface RunTaskOptions {
    *  delivery MANDATORY — runTask runs a hardcoded reflection stage that nudges
    *  the model to call the tool and, if it never does, leaves this undefined so
    *  the caller stays silent (fail-closed) instead of posting raw assistant text. */
-  twinDeliverRef?: import("./twin-deliver.js").TwinDeliverRef | undefined;
+  twinDeliverRef?: TwinDeliverRef | undefined;
   /** Pipeline mode of this run (plan / daily_brief / auto). Debug-telemetry only —
    *  emitted in the session_tools event so the pipeline UI shows which mode a run
    *  executed in. Behavior is driven by the tool palette / prompt assembled in
@@ -2381,7 +2346,7 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
   // "did it even get the tool?" question is answerable from the run logs.
   if (twinDeliverRef) {
     log.info(
-      `[agent] TWIN flow — twin_deliver in pi payload: ${customToolNames.includes("twin_deliver")} ` +
+      `[agent] TWIN flow — twin_deliver in pi payload: ${customToolNames.includes(TWIN_DELIVER_TOOL_NAME)} ` +
       `(allowlist=${builtinAllow.length + customToolNames.length}); customTools=[${customToolNames.join(", ")}]`,
     );
   }
@@ -2532,6 +2497,11 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
   // mid-turn-compaction.ts, where the pi-internals coupling is contained and
   // version-guarded — see that file's header.
   installMidTurnCompaction(session);
+  // Digital Twin: end the loop right after the first accepted twin_deliver.
+  // Installed after mid-turn compaction so it chains that stop hook.
+  if (twinDeliverRef) {
+    installStopAfterDelivery(session.agent, () => twinDeliverRef.value !== undefined);
+  }
   // Pi v0.75 dropped the `setBeforeToolCall(fn)` method in favour of a
   // directly-assignable property of the same name on the Agent. Semantics
   // unchanged — the hook still runs before each tool call.
@@ -2674,8 +2644,10 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
   const pushDebugEvent = (kind: DebugEventKind, data: Record<string, unknown> = {}, extras?: Partial<DebugEventRecord>): void => {
     recorder?.record(kind, data, extras);
   };
-  setJudgeDebugSink((kind, data) => pushDebugEvent(kind, data));
   pinRunTask(task);
+  // Lazy view of the live transcript for classifier call sites (result sift,
+  // context gate): read at call time, so a tool mid-loop sees every prior turn.
+  attachRunMessages(() => (session as unknown as { messages?: readonly unknown[] }).messages);
 
   /**
    * The single terminal path for a run's trace. Idempotent — the success path
@@ -2978,6 +2950,11 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
     ...(provider ? { provider } : {}),
   });
 
+  // Attach the judge sink only once capture has started: it flushes every Jev
+  // call made so far (pre-run sites: mode router, prefetch gate, plan gate,
+  // persona pick) into this run's trace. Attached earlier, those events went to
+  // a recorder with no open store and were lost.
+  setJudgeDebugSink((kind, data) => pushDebugEvent(kind, data));
   pushDebugEvent("session_start", {
     conversationId,
     sessionId,
@@ -3614,7 +3591,7 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
     //   appended the <available_skills> XML block to it. We only send the
     //   query as the first user message.
     // - Otherwise: pi uses its default system prompt; we prepend our local
-    //   buildSystemPrompt scaffold to the user message so the agent gets
+    //   buildTwinSystemPrompt scaffold to the user message so the agent gets
     //   userId/email context.
     if (systemPromptOverride) {
       const prompt = `${contextBlock}\n\n## Query\n${task}`;
@@ -3624,7 +3601,7 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
       // Mention-flow twin has no systemPromptOverride — its persona is prepended
       // to the first user message. Fold the twin persona files in here too so a
       // mention-driven reply speaks as the user.
-      const basePrompt = `${buildSystemPrompt(userId, userName, userEmail, !!twinDeliverRef)}${personaSuffix}`;
+      const basePrompt = `${buildTwinSystemPrompt(userName, userEmail, !!twinDeliverRef)}${personaSuffix}`;
       const prompt = `${basePrompt}${contextBlock}\n\n## Query\n${task}`;
       recordPrompt(prompt, "fresh", images?.length ?? 0);
       await promptWithAbort(() => session.prompt(prompt, images?.length ? { images } : undefined));
@@ -3898,9 +3875,7 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
   // posting the raw assistant text (chatter). This is the hardcoded reflection
   // stage the Twin always runs.
   if (twinDeliverRef) {
-    const { TWIN_DELIVER_NUDGE, recoverTwinDeliveryFromText } = await import("./twin-deliver.js");
-    for (let nudge = 0; nudge < 2 && twinDeliverRef.value === undefined; nudge++) {
-      if (abortSignal?.aborted) break;
+    for (let nudge = 0; nudge < 2 && twinDeliverRef.value === undefined && !abortSignal?.aborted; nudge++) {
       log.info(`[agent] twin_deliver missing — nudge ${nudge + 1}/2 to deliver via twin_deliver`);
       pushDebugEvent("twin_deliver_reflection", { phase: "nudge", round: nudge + 1 });
       await promptWithAbort(() => session.prompt(`<system>${TWIN_DELIVER_NUDGE}</system>`));
@@ -3921,11 +3896,21 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
         pushDebugEvent("twin_deliver_reflection", { phase: "recovered", action: recovered.action });
       }
     }
-    const delivered = twinDeliverRef.value !== undefined;
-    pushDebugEvent("twin_deliver_reflection", { phase: "result", delivered, action: twinDeliverRef.value?.action ?? null });
-    if (!delivered) {
-      log.warn("[agent] twin_deliver: model never delivered (no tool_call, nothing to recover) — staying silent (fail-closed)");
+    const delivery = twinDeliverRef.value;
+    pushDebugEvent("twin_deliver_reflection", { phase: "result", delivered: delivery !== undefined, action: delivery?.action ?? null });
+    // R6: classifier self-check of the accepted delivery. Advisory — the owner
+    // still approves; the scores ride along for the approver and calibration.
+    if (delivery && !abortSignal?.aborted) {
+      const check = await checkTwinDelivery(delivery, {
+        task,
+        messages: (session as unknown as { messages?: readonly unknown[] }).messages ?? [],
+      }).catch(() => null);
+      if (check) {
+        twinDeliverRef.value = { ...delivery, check };
+        pushDebugEvent("twin_deliver_reflection", { phase: "check", ...check });
+      }
     }
+    if (!delivery) log.warn("[agent] twin_deliver: model never delivered (no tool_call, nothing to recover) — staying silent (fail-closed)");
   }
 
   // NOTE: there used to be a raw `debug-session-<conv>.json` dump of these
@@ -3953,7 +3938,14 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
     };
     const isCheckpointAnswer = (): boolean =>
       looksLikeCompactionCheckpoint(extractFinalAnswerText(session, opts.finalAnswerMaxTurns)) && endedWithoutTools();
-    if (isCheckpointAnswer()) {
+    // Jev confirms the text-pattern match before paying for a full LLM turn.
+    const confirmedAnswer =
+      isCheckpointAnswer() &&
+      (await checkpointPrecheck(task, extractFinalAnswerText(session, opts.finalAnswerMaxTurns) ?? "").catch(() => false));
+    if (confirmedAnswer) {
+      log.info("[agent] Checkpoint-looking final text confirmed as a real answer by the classifier — no nudge");
+    }
+    if (!confirmedAnswer && isCheckpointAnswer()) {
       metric.count("agent_summary_as_answer", { provider: provider ?? "spaces" });
       log.warn("[agent] Final text looks like a compaction checkpoint, not an answer — nudging once to continue the task");
       if (!abortSignal?.aborted) {
@@ -3987,10 +3979,35 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
   const maxContinuations = optEnabled("jev_auto_continue")
     ? Math.max(0, Number(process.env["JEV_MAX_CONTINUATIONS"]) || 1)
     : 0;
-  const continuable = structuredOutputRef?.value === undefined && !checkpointSuppressed;
+  // A twin run's only output is twin_deliver (enforced by the reflection stage
+  // above); an auto-continue nudge would reopen a finished delivery.
+  const continuable = structuredOutputRef?.value === undefined && !checkpointSuppressed && !twinDeliverRef;
 
   let text = computeFinalText();
   let answerAssessment: AnswerAssessment | null = null;
+
+  // R12: before the answer is accepted, check the evidence supports it. A
+  // clear gap earns ONE nudge to fetch more context (never on twin runs or
+  // structured output — `continuable` excludes those).
+  if (continuable && text.trim() && optEnabled("jev_context_gate") && !abortSignal?.aborted) {
+    const messages = (session as unknown as { messages?: Array<Record<string, unknown>> }).messages ?? [];
+    const { extractEvidenceDigest } = await import("./verify-response.js");
+    const gate = await contextGate({
+      task,
+      messages,
+      answer: text,
+      evidence: extractEvidenceDigest(messages as Parameters<typeof extractEvidenceDigest>[0], 4_000),
+    }).catch(() => "accept" as const);
+    if (gate === "fetch-more") {
+      pushDebugEvent("auto_continue", { attempt: 0, maxAttempts: 1, verdict: "context-gate" });
+      metric.count("agent_context_gate_nudge", {});
+      log.info("[agent] context gate: evidence does not support the answer — nudging once to fetch more");
+      await promptWithAbort(() => session.prompt(`<system>${CONTEXT_GATE_NUDGE}</system>`));
+      const gq = session as unknown as { _agentEventQueue?: Promise<void> };
+      if (gq._agentEventQueue) await withAbort(gq._agentEventQueue);
+      text = computeFinalText();
+    }
+  }
 
   for (let attempt = 0; ; attempt += 1) {
     answerAssessment = await assessAnswer({

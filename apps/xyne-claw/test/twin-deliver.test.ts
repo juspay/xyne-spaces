@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { buildTwinDeliverTool, buildTwinDeliverMandate, TWIN_DELIVER_TOOL_NAME, recoverTwinDeliveryFromText, type TwinDeliverRef } from "../src/twin-deliver.js";
+import { buildTwinDeliverTool, TWIN_DELIVER_TOOL_NAME, recoverTwinDeliveryFromText, type TwinDeliverRef } from "../src/twin-deliver.js";
 
 const TWIN = "digital-twin";
 
@@ -8,14 +8,11 @@ const TWIN = "digital-twin";
 async function call(
   agentSlug: string,
   params: unknown,
-): Promise<{ ref: TwinDeliverRef; details: Record<string, unknown>; text: string }> {
+): Promise<{ ref: TwinDeliverRef; details: Record<string, unknown> }> {
   const ref: TwinDeliverRef = {};
   const tool = buildTwinDeliverTool(agentSlug, ref);
-  const res = (await tool.execute("call-1", params)) as {
-    content: Array<{ text: string }>;
-    details: Record<string, unknown>;
-  };
-  return { ref, details: res.details ?? {}, text: res.content?.[0]?.text ?? "" };
+  const res = (await tool.execute("call-1", params)) as { details: Record<string, unknown> };
+  return { ref, details: res.details ?? {} };
 }
 
 describe("twin_deliver tool", () => {
@@ -41,111 +38,78 @@ describe("twin_deliver tool", () => {
     expect(ref.value?.message).toBeUndefined();
   });
 
-  it("is hard-gated to the Digital Twin agent", async () => {
-    const { ref, details } = await call("some-other-agent", { action: "reply", message: "hi" });
+  // Every row must be rejected: details.error=true, nothing delivered, exactly one rejection.
+  it.each<[string, string, unknown]>([
+    ["is hard-gated to the Digital Twin agent", "some-other-agent", { action: "reply", message: "hi" }],
+    ["rejects an unknown action", TWIN, { action: "shout", message: "hi" }],
+    ["requires an emoji for react", TWIN, { action: "react" }],
+    ["rejects a non-string emoji", TWIN, { action: "react", emoji: 1 }],
+    ["requires a message for reply", TWIN, { action: "reply", message: "   " }],
+    ["rejects destination=channel with NO destination_channel_id", TWIN, { action: "reply", message: "x", destination: "channel" }],
+    ["rejects destination=thread missing the conversation id", TWIN, { action: "reply", message: "x", destination: "thread", destination_channel_id: "ch_eng" }],
+    ["rejects destination=dm with NO dm_user_id (use dm_sender instead)", TWIN, { action: "reply", message: "x", destination: "dm" }],
+  ])("%s", async (_title, agentSlug, params) => {
+    const { ref, details } = await call(agentSlug, params);
     expect(details["error"]).toBe(true);
     expect(ref.value).toBeUndefined();
+    expect(ref.rejections).toBe(1);
   });
 
-  it("rejects an unknown action", async () => {
-    const { ref, details } = await call(TWIN, { action: "shout", message: "hi" });
-    expect(details["error"]).toBe(true);
-    expect(ref.value).toBeUndefined();
-  });
-
-  it("requires an emoji for react", async () => {
-    const { ref, details } = await call(TWIN, { action: "react" });
-    expect(details["error"]).toBe(true);
-    expect(ref.value).toBeUndefined();
-  });
-
-  it("requires a message for reply", async () => {
-    const { ref, details } = await call(TWIN, { action: "reply", message: "   " });
-    expect(details["error"]).toBe(true);
-    expect(ref.value).toBeUndefined();
-  });
-
-  it("accepts a react-only delivery (no message)", async () => {
-    const { ref, details } = await call(TWIN, { action: "react", emoji: "👍" });
+  // Every row must be accepted with exactly this delivery (strict toEqual: no stray keys).
+  it.each<[string, unknown, unknown]>([
+    ["accepts a react-only delivery (no message)", { action: "react", emoji: "👍" }, { action: "react", emoji: "👍" }],
+    // origin_thread is the default, so destination is left out (not serialized).
+    [
+      "accepts a reply and defaults the destination to origin_thread (omitted)",
+      { action: "reply", message: "On it — shipping today." },
+      { action: "reply", message: "On it — shipping today." },
+    ],
+    [
+      "accepts react_and_reply with both",
+      { action: "react_and_reply", emoji: "✅", message: "done" },
+      { action: "react_and_reply", emoji: "✅", message: "done" },
+    ],
+    [
+      "resolves a channel destination from the explicit destination_channel_id",
+      { action: "reply", message: "posting here", destination: "channel", destination_channel_id: "ch_eng", destination_reason: "eng-specific" },
+      { action: "reply", message: "posting here", destination: { kind: "channel", channelId: "ch_eng" }, destinationReason: "eng-specific" },
+    ],
+    [
+      "resolves a thread destination from channel + conversation ids",
+      {
+        action: "reply",
+        message: "in the live thread",
+        destination: "thread",
+        destination_channel_id: "ch_eng",
+        destination_conversation_id: "conv_123",
+        destination_reason: "active thread",
+      },
+      {
+        action: "reply",
+        message: "in the live thread",
+        destination: { kind: "thread", channelId: "ch_eng", conversationId: "conv_123" },
+        destinationReason: "active thread",
+      },
+    ],
+    [
+      "dm_sender needs no id — DMs whoever mentioned the user",
+      { action: "reply", message: "pinging you 1:1", destination: "dm_sender" },
+      { action: "reply", message: "pinging you 1:1", destination: { kind: "dm_sender" } },
+    ],
+    [
+      "dm to ANYONE via dm_user_id (not just the sender)",
+      { action: "reply", message: "looping you in", destination: "dm", dm_user_id: "user_abc", destination_reason: "the real owner" },
+      { action: "reply", message: "looping you in", destination: { kind: "dm", userId: "user_abc" }, destinationReason: "the real owner" },
+    ],
+    [
+      "ignores destination for a react-only action",
+      { action: "react", emoji: "🎉", destination: "origin_channel" },
+      { action: "react", emoji: "🎉" },
+    ],
+  ])("%s", async (_title, params, expected) => {
+    const { ref, details } = await call(TWIN, params);
     expect(details["error"]).toBeUndefined();
-    expect(ref.value).toEqual({ action: "react", emoji: "👍" });
-  });
-
-  it("accepts a reply and defaults the destination to origin_thread (omitted)", async () => {
-    const { ref } = await call(TWIN, { action: "reply", message: "On it — shipping today." });
-    expect(ref.value).toEqual({ action: "reply", message: "On it — shipping today." });
-    // origin_thread is the default, so destination is left undefined (not serialized).
-    expect(ref.value?.destination).toBeUndefined();
-  });
-
-  it("accepts react_and_reply with both", async () => {
-    const { ref } = await call(TWIN, { action: "react_and_reply", emoji: "✅", message: "done" });
-    expect(ref.value).toEqual({ action: "react_and_reply", emoji: "✅", message: "done" });
-  });
-
-  it("resolves a channel destination from the explicit destination_channel_id", async () => {
-    const { ref } = await call(TWIN, {
-      action: "reply",
-      message: "posting here",
-      destination: "channel",
-      destination_channel_id: "ch_eng",
-      destination_reason: "eng-specific",
-    });
-    expect(ref.value?.destination).toEqual({ kind: "channel", channelId: "ch_eng" });
-    expect(ref.value?.destinationReason).toBe("eng-specific");
-  });
-
-  it("rejects destination=channel with NO destination_channel_id", async () => {
-    const { ref, details } = await call(TWIN, { action: "reply", message: "x", destination: "channel" });
-    expect(details["error"]).toBe(true);
-    expect(ref.value).toBeUndefined();
-  });
-
-  it("resolves a thread destination from channel + conversation ids", async () => {
-    const { ref } = await call(TWIN, {
-      action: "reply",
-      message: "in the live thread",
-      destination: "thread",
-      destination_channel_id: "ch_eng",
-      destination_conversation_id: "conv_123",
-      destination_reason: "active thread",
-    });
-    expect(ref.value?.destination).toEqual({ kind: "thread", channelId: "ch_eng", conversationId: "conv_123" });
-  });
-
-  it("rejects destination=thread missing the conversation id", async () => {
-    const { ref, details } = await call(TWIN, { action: "reply", message: "x", destination: "thread", destination_channel_id: "ch_eng" });
-    expect(details["error"]).toBe(true);
-    expect(ref.value).toBeUndefined();
-  });
-
-  it("dm_sender needs no id — DMs whoever mentioned the user", async () => {
-    const { ref } = await call(TWIN, { action: "reply", message: "pinging you 1:1", destination: "dm_sender" });
-    expect(ref.value?.destination).toEqual({ kind: "dm_sender" });
-  });
-
-  it("dm to ANYONE via dm_user_id (not just the sender)", async () => {
-    const { ref } = await call(TWIN, {
-      action: "reply",
-      message: "looping you in",
-      destination: "dm",
-      dm_user_id: "user_abc",
-      destination_reason: "the real owner",
-    });
-    expect(ref.value?.destination).toEqual({ kind: "dm", userId: "user_abc" });
-    expect(ref.value?.destinationReason).toBe("the real owner");
-  });
-
-  it("rejects destination=dm with NO dm_user_id (use dm_sender instead)", async () => {
-    const { ref, details } = await call(TWIN, { action: "reply", message: "x", destination: "dm" });
-    expect(details["error"]).toBe(true);
-    expect(ref.value).toBeUndefined();
-  });
-
-  it("ignores destination for a react-only action", async () => {
-    const { ref } = await call(TWIN, { action: "react", emoji: "🎉", destination: "origin_channel" });
-    expect(ref.value).toEqual({ action: "react", emoji: "🎉" });
-    expect(ref.value?.destination).toBeUndefined();
+    expect(ref.value).toEqual(expected);
   });
 
   it("captures private reasoning with clf- citation tokens verbatim (Why panel); message stays clean", async () => {
@@ -221,59 +185,6 @@ describe("twin_deliver tool", () => {
   });
 });
 
-describe("buildTwinDeliverMandate (system-prompt injection)", () => {
-  it("always states the tool is the only output channel", () => {
-    const m = buildTwinDeliverMandate();
-    expect(m).toContain("Delivering your response — REQUIRED");
-    expect(m).toContain("twin_deliver");
-    // The idempotency reinforcement must be present in the prompt too.
-    expect(m).toMatch(/Call it ONE time only/i);
-  });
-
-  it("emits the who/where line when senderName + channelName are provided", () => {
-    const m = buildTwinDeliverMandate({ userName: "Pradeesh S", senderName: "Mamtha", channelName: "sebi-demo" });
-    // This is the exact line that was MISSING from the real run — the whole RCA.
-    expect(m).toContain("You were mentioned by **Mamtha** in **#sebi-demo**");
-  });
-
-  it("omits the who/where line entirely when sender/channel are absent (no dangling 'by **someone**')", () => {
-    const m = buildTwinDeliverMandate({ userName: "Pradeesh S" });
-    expect(m).not.toContain("You were mentioned by");
-  });
-
-  it("does NOT render the broken possessive '<name>r own' — uses 'your own first-person voice'", () => {
-    const m = buildTwinDeliverMandate({ userName: "Pradeesh S" });
-    expect(m).not.toContain("Pradeesh Sr own"); // the old ${you}r bug
-    expect(m).toContain("your own first-person voice");
-  });
-
-  it("teaches the full destination model (origin/channel/thread/dm) WITH examples", () => {
-    const m = buildTwinDeliverMandate();
-    expect(m).toMatch(/Where the reply goes/i);
-    expect(m).toContain("origin_thread");
-    expect(m).toContain("origin_channel");
-    expect(m).toContain("dm_sender");
-    expect(m).toContain("dm_user_id");
-    expect(m).toContain("destination_channel_id");
-    expect(m).toContain("destination_conversation_id");
-    expect(m).toContain("destination_reason");
-    expect(m).toMatch(/Examples/);
-    // guardrail: use Spaces tools to find ids, never guess
-    expect(m).toMatch(/never guess an id/i);
-    expect(m).toMatch(/Spaces tools/i);
-  });
-
-  it("teaches the PRIVATE cited reasoning (the Why panel) with verbatim clf- tokens", () => {
-    const m = buildTwinDeliverMandate({ userName: "Pradeesh S" });
-    expect(m).toMatch(/reasoning/);
-    expect(m).toMatch(/Why\?/);
-    expect(m).toMatch(/never posted/i);
-    expect(m).toContain("[clf-…#n]");
-    // the message must stay citation-free — the split is explicit
-    expect(m).toMatch(/message.*citation-free|citation-free/i);
-  });
-});
-
 describe("recoverTwinDeliveryFromText (glm leaked tool-call recovery)", () => {
   it("recovers GLM <arg_key>/<arg_value> markup (the real failing case)", () => {
     const leaked =
@@ -321,6 +232,25 @@ describe("recoverTwinDeliveryFromText (glm leaked tool-call recovery)", () => {
     expect(d?.action).toBe("reply");
     expect(d?.message).toBe("on it, shipping this week");
     expect(d?.reasoning).toBe("you own ask-ai and it ships v2 this week [clf-abc#1]");
+  });
+
+  it("drops an invalid leaked destination AND its destination_reason — still delivers to the origin thread", () => {
+    const leaked = 'twin_deliver(action="reply", message="x", destination="channel", destination_reason="why")';
+    expect(recoverTwinDeliveryFromText(leaked)).toEqual({ action: "reply", message: "x" });
+  });
+
+  it("keeps a valid leaked destination (dm + dm_user_id)", () => {
+    const leaked = 'twin_deliver(action="reply", message="x", destination="dm", dm_user_id="u1")';
+    expect(recoverTwinDeliveryFromText(leaked)).toEqual({ action: "reply", message: "x", destination: { kind: "dm", userId: "u1" } });
+  });
+
+  it("String()-coerces JSON arg values (unlike the tool, which rejects a non-string emoji)", () => {
+    expect(recoverTwinDeliveryFromText('twin_deliver {"action":"react","emoji":1}')).toEqual({ action: "react", emoji: "1" });
+  });
+
+  it("keeps the args copied so far when a JSON value can't be String()-coerced", () => {
+    const leaked = 'twin_deliver {"action":"reply","message":"on it","x":{"toString":1}}';
+    expect(recoverTwinDeliveryFromText(leaked)).toEqual({ action: "reply", message: "on it" });
   });
 
   it("returns null when there is no twin_deliver call in the text", () => {

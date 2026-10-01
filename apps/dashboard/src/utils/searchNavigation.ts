@@ -663,24 +663,28 @@ export const navigateToCollection = (
   const { projectId, channelId, docId, collectionId, folderId } = result.searchContext || {};
 
   // Navigate to knowledge base file viewer
-  if (!projectId || !channelId || !collectionId || !docId) {
+  // projectId is not required: a projectless channel stores it as '', and the
+  // viewer route takes the '_' sentinel for it below.
+  if (!channelId || !collectionId || !docId) {
     logger.warn(LogEvent.FRONTEND_ERROR, {
       type: 'migrated_console_warn',
       message: String(
-        '[SEARCH-NAVIGATION] Cannot navigate to collection: missing projectId, channelId, collectionId, or docId',
+        '[SEARCH-NAVIGATION] Cannot navigate to collection: missing channelId, collectionId, or docId',
       ),
     });
     return;
   }
 
-  // Use '_' sentinel for root-level files (no parent folder), matching KB convention
+  // Use '_' sentinel for a missing project or a root-level file (no parent
+  // folder), matching KB convention — an empty segment would 404.
+  const project = projectId || '_';
   const folder = folderId || '_';
 
   const params = new URLSearchParams();
   if (result.context) params.set('highlight', btoa(encodeURIComponent(result.context)));
 
   const queryString = params.toString();
-  const path = `/knowledge-base/${projectId}/${channelId}/${collectionId}/${folder}/${docId}`;
+  const path = `/knowledge-base/${project}/${channelId}/${collectionId}/${folder}/${docId}`;
 
   void navigate(queryString ? `${path}?${queryString}` : path);
 };

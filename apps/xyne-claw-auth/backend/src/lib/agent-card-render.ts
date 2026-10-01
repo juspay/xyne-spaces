@@ -1,4 +1,4 @@
-import { buildAgentCardFlow, buildAgentSummaryFlow, MAX_AGENT_LIST_CARDS, type FlowDefinition } from "xyne-claw-shared";
+import { buildAgentCardFlow, buildAgentSummaryFlow, MAX_AGENT_LIST_CARDS, withSpacesAppId, type FlowDefinition } from "xyne-claw-shared";
 import { prisma } from "../db.js";
 import { createLogger } from "../logger.js";
 import { agentRepository } from "../repositories/index.js";
@@ -14,14 +14,6 @@ import { postFlowCard, type FlowCardTarget } from "./flow-card-delivery.js";
 const log = createLogger("agent-card");
 
 const AGENT_SUMMARY_SAMPLE = 5;
-
-function withSpacesAppId<T extends { data?: Record<string, unknown> }>(
-  flow: T,
-  spacesAppId?: string | null,
-): T {
-  if (!spacesAppId) return flow;
-  return { ...flow, data: { ...(flow.data ?? {}), spacesAppId } };
-}
 
 async function agentOwnerCredit(
   ownerUserId: string | null | undefined,

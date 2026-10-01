@@ -9,7 +9,7 @@
  *   1. Fetch yesterday's messages / hosted calls / authored canvases via
  *      the existing user-memory fetcher (which uses the user's own Spaces
  *      session creds).
- *   2. Pipe each source's records through the curator (batches of 40).
+ *   2. Pipe each source's records through the curator (token-budgeted batches).
  *   3. Inserted candidates show up in the user's pending review queue.
  *
  * Failures (Spaces 5xx, LLM rate-limit, missing creds) are non-fatal — log
@@ -20,14 +20,9 @@ import { prisma } from "../db.js";
 import { errMsg } from "../lib/errors.js";
 import { createLogger, createTraceId } from "../logger.js";
 import { acquireCronLeaderLock } from "../lib/cron-leader-lock.js";
-import {
-  fetchUserMessages,
-  fetchUserCalls,
-  fetchUserCanvases,
-} from "./userMemoryFetcher.js";
-import { assembleConversationUnits, isContextAssemblerEnabled } from "./contextAssembler.js";
-import { curateAndPersistBatch } from "./userMemoryCuratorClient.js";
-import { packRecordsIntoBatches } from "./userMemoryBatcher.js";
+import { BACKFILL_SOURCES } from "./digitalTwinBackfillState.js";
+import { fetchSourceRecords } from "./twinSourceRecords.js";
+import { curateRecordsInBatches } from "./userMemoryCuratorClient.js";
 import { assembleTwinFeedbackRecords, markTwinFeedbackLearned } from "./twinResponseFeedback.js";
 import { recordPipelineEvent, prunePipelineEvents } from "./digitalTwinPipelineEvents.js";
 import { synthesizeSoulFilesForUser } from "./twinSoulSynthesizer.js";
@@ -47,19 +42,10 @@ function yesterdayWindow(): { from: Date; to: Date; dateStr: string } {
 async function processUser(userId: string, window: { from: Date; to: Date; dateStr: string }): Promise<{ candidates: number }> {
   let total = 0;
 
-  for (const [source, fetcher] of [
-    // "messages" → thread-complete conversation units when the assembler flag is
-    // on, else the legacy flat outgoing-message stream. calls/canvases unchanged.
-    ["messages", () =>
-      isContextAssemblerEnabled()
-        ? assembleConversationUnits(userId, window)
-        : fetchUserMessages(userId, window)] as const,
-    ["calls", () => fetchUserCalls(userId, window)] as const,
-    ["canvases", () => fetchUserCanvases(userId, window)] as const,
-  ]) {
+  for (const source of BACKFILL_SOURCES) {
     let records;
     try {
-      records = await fetcher();
+      records = await fetchSourceRecords(source, userId, window);
     } catch (err) {
       const message = errMsg(err);
       logger.warn("[daily] fetch failed", { userId, source, err: message });
@@ -73,27 +59,16 @@ async function processUser(userId: string, window: { from: Date; to: Date; dateS
       });
       continue;
     }
-    if (records.length === 0) continue;
 
-    // Token-budgeted batching (userMemoryBatcher) — replaces fixed BATCH_SIZE
-    // now that a single message renders up to 3k chars.
-    for (const batch of packRecordsIntoBatches(records)) {
-      try {
-        const inserted = await curateAndPersistBatch({
-          userId,
-          window: { from: window.from, to: window.to },
-          records: batch,
-          source: `daily:${window.dateStr}:${source}`,
-        });
-        total += inserted;
-      } catch (err) {
-        logger.warn("[daily] curator batch failed", {
-          userId,
-          source,
-          err: errMsg(err),
-        });
-      }
-    }
+    total += await curateRecordsInBatches(
+      {
+        userId,
+        window: { from: window.from, to: window.to },
+        records,
+        source: `daily:${window.dateStr}:${source}`,
+      },
+      (err) => logger.warn("[daily] curator batch failed", { userId, source, err: errMsg(err) }),
+    );
   }
 
   // Twin response feedback (accept / decline / edit / ignore) — the DEFERRED
@@ -104,19 +79,18 @@ async function processUser(userId: string, window: { from: Date; to: Date; dateS
     const { records, ids } = await assembleTwinFeedbackRecords(userId);
     if (records.length > 0) {
       let ok = true;
-      for (const batch of packRecordsIntoBatches(records)) {
-        try {
-          total += await curateAndPersistBatch({
-            userId,
-            window: { from: window.from, to: window.to },
-            records: batch,
-            source: `daily:${window.dateStr}:twin_feedback`,
-          });
-        } catch (err) {
+      total += await curateRecordsInBatches(
+        {
+          userId,
+          window: { from: window.from, to: window.to },
+          records,
+          source: `daily:${window.dateStr}:twin_feedback`,
+        },
+        (err) => {
           ok = false;
           logger.warn("[daily] twin_feedback curator batch failed", { userId, err: errMsg(err) });
-        }
-      }
+        },
+      );
       if (ok) await markTwinFeedbackLearned(ids);
     }
   } catch (err) {
