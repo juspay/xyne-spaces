@@ -242,6 +242,7 @@ import ConfluenceMigrationScreen from './ConfluenceMigrationScreen/ConfluenceMig
 import AIScreen from './AIScreen/AIScreen';
 import AILibraryScreen from './AIScreen/screens/AILibraryScreen';
 import AIEnvironmentsScreen from './AIScreen/screens/AIEnvironmentsScreen';
+import AISandboxProfileScreen from './AIScreen/screens/AISandboxProfileScreen';
 import AIAdminScreen from './AIScreen/screens/AIAdminScreen';
 import AIAgentCreateScreen from './AIScreen/screens/AIAgentCreateScreen';
 import AISubagentCreateScreen from './AIScreen/screens/AISubagentCreateScreen';
@@ -1154,6 +1155,8 @@ export const router = createBrowserRouter(
                         </RequireClawAdmin>
                       ),
                     },
+                    { path: 'environments/profile/new', element: <AISandboxProfileScreen /> },
+                    { path: 'environments/profile/:key/edit', element: <AISandboxProfileScreen /> },
                     {
                       path: 'admin',
                       element: (

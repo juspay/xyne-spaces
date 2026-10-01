@@ -79,7 +79,11 @@ export type RepoConfigParseResult = { ok: true; config: RepoSetupConfig } | { ok
 
 export function parseRepoSetupConfig(input: unknown): RepoConfigParseResult {
   const parsed = repoSetupConfigSchema.safeParse(input);
-  if (parsed.success) return { ok: true, config: parsed.data as RepoSetupConfig };
+  if (parsed.success) {
+    // Ownership lives on the row; a pasted or stored workspaceId must not re-scope the profile.
+    const { workspaceId: _ignored, ...config } = parsed.data;
+    return { ok: true, config: config as RepoSetupConfig };
+  }
   const issue = parsed.error.issues[0];
   const where = issue?.path.length ? `${issue.path.join(".")}: ` : "";
   return { ok: false, error: `${where}${issue?.message ?? "invalid config"}` };
@@ -94,11 +98,30 @@ export async function loadRepoConfigOverrides(): Promise<RepoConfigOverride[]> {
       log.warn(`[sandbox-repo-configs] skipping invalid stored config "${row.key}": ${parsed.error}`);
       continue;
     }
-    overrides.push({ key: row.key, config: parsed.config, enabled: row.enabled });
+    overrides.push({ key: row.key, config: parsed.config, enabled: row.enabled, workspaceId: row.workspaceId });
   }
   return overrides;
 }
 
-export async function loadEffectiveRepoConfigs(): Promise<RepoConfigMap> {
-  return buildEffectiveRepoConfigs(await loadRepoConfigOverrides(), REPO_CONFIGS);
+/** Omit workspaceId for every workspace's profiles (the claw runtime cache); null keeps built-ins only. */
+export async function loadEffectiveRepoConfigs(workspaceId?: string | null): Promise<RepoConfigMap> {
+  return buildEffectiveRepoConfigs(await loadRepoConfigOverrides(), REPO_CONFIGS, workspaceId);
+}
+
+function canonical(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(canonical);
+  if (value && typeof value === "object") {
+    return Object.fromEntries(
+      Object.entries(value as Record<string, unknown>)
+        .filter(([, v]) => v !== undefined)
+        .sort(([a], [b]) => a.localeCompare(b))
+        .map(([k, v]) => [k, canonical(v)]),
+    );
+  }
+  return value;
+}
+
+/** Same config regardless of key order: tells a stored copy of a built-in from a real edit. */
+export function sameRepoConfig(a: unknown, b: unknown): boolean {
+  return JSON.stringify(canonical(a)) === JSON.stringify(canonical(b));
 }

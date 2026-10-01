@@ -491,6 +491,62 @@ export interface SdlcEnvironmentRow {
   hubChannelIds: string[];
 }
 
+export type SandboxSetupStep =
+  | { type: 'install'; packages: string[]; cmd?: string }
+  | {
+      type: 'services';
+      cmd: string;
+      markerPath?: string;
+      healthCheck?: {
+        cmd: string;
+        successCondition: 'all-healthy' | 'all-up';
+        intervalMs: number;
+        timeoutMs: number;
+      };
+    }
+  | { type: 'devserver'; name: string; cmd: string; cwd: string; markerPath?: string }
+  | { type: 'run'; label: string; cmd: string; cwd?: string; timeoutMs?: number };
+
+/** A sandbox profile's config, as claw-auth validates it (RepoSetupConfig in xyne-claw-shared). */
+export interface SandboxProfileConfig {
+  slug: string;
+  name: string;
+  description: string;
+  repoUrl?: string;
+  defaultBranch: string;
+  cloneDepth?: number;
+  cloneTimeoutMs?: number;
+  workDir: string;
+  template: string;
+  sessionTimeoutMs?: number;
+  idleTimeoutMs?: number;
+  readyTimeoutMs?: number;
+  writeSessionTimeoutMs?: number;
+  writeIdleTimeoutMs?: number;
+  readFirst?: boolean;
+  skipBakedCloneWait?: boolean;
+  steps: SandboxSetupStep[];
+  ports?: Record<string, number>;
+  auxRepos?: { name: string; url: string; defaultBranch: string; workDir: string }[];
+}
+
+/** GET /sdlc/sandbox-profiles row. `config` is trimmed to its overview fields unless canEdit. */
+export interface SdlcSandboxProfile {
+  key: string;
+  config: SandboxProfileConfig;
+  enabled: boolean;
+  builtIn: boolean;
+  /** A built-in whose stored copy differs from the code version; editors can reset it. */
+  overridden: boolean;
+  canEdit: boolean;
+}
+
+export interface SdlcSandboxProfileList {
+  profiles: SdlcSandboxProfile[];
+  /** Repos the viewer may add a profile to. */
+  canCreateRepoIds: string[];
+}
+
 export interface SdlcSandboxGitCredential {
   provider: SdlcVcsProvider;
   host: string;
