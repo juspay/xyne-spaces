@@ -2383,6 +2383,7 @@ model EmailChannelPreference {
   deskReportAgentSlug    String?
   deskReportRangeDays    Int?     @default(1) // 1 = "Last 1 day", 7 = "Last 1 week"
   duplicateScopeConfig   String?    // Scoped duplicate detection: JSON-serialized { enabled, scopeFieldGlobalIds }; stored as string for Zero compatibility, parsed at code level (null = project-wide legacy behavior)
+  slackDeskTriggerMode   String?  // ALL_MESSAGES | MENTION_ONLY; null == ALL_MESSAGES
   @@index([ownerUserId])
   @@index([assigneeUserGroupId])
   @@index([boardId])
@@ -2522,6 +2523,7 @@ model MessageAttachment {
   createdBy          String                // User who uploaded the attachment (no FK constraint)
   metadata           Json?                 // Width/height for images, duration for videos, etc.
   conversationId     String?                // Every message belongs to a conversation (no FK constraint)
+  channelId          String?               // Denormalized conversation.channelId, stamped on insert; NULL when not conversation-anchored
   thumbnailUrl       String?               // For images/videos
   isDeleted          Boolean               @default(false) // Soft-delete: true when attachment has been removed
   uploadStatus       String?                 // Tracks upload state
@@ -2535,6 +2537,7 @@ model MessageAttachment {
   @@index([entityId])
   @@index([entityId, id])
   @@index([entityId, position])
+  @@index([workspaceId, channelId, createdAt(sort: Desc), id])
   @@map("message_attachments")
   @@schema("public")
 }
@@ -2585,7 +2588,7 @@ model CustomEmoji {
   createdBy String   // User ID who created the emoji (no FK constraint)
   createdAt DateTime @default(now())
 
-  @@unique([name])
+  @@unique([workspaceId, name])
 
   @@index([createdAt(sort: Desc), id])
   @@map("custom_emojis")
@@ -2611,6 +2614,7 @@ model Activity {
   channelId       String?  // Channel where the activity occurred (optional, not present for ticket activities)
   pullRequestId   String?  // FK to pull_requests.id (optional, present only for PR-related ticket activities)
   canvasId        String?  // FK to canvas.id for canvas mention activities (no constraint)
+  savedViewId     String?  // FK to saved_user_configurations.id for view-share activities (no constraint)
   trackId         String?  // FK to sdlc_tracks.id (no constraint)
   blockId         String?  // Block ID within the canvas for canvas mention activities
   actorId         String  // User who performed the action (no FK constraint)
@@ -2646,6 +2650,7 @@ model Activity {
   @@index([reactionId]) // Fast lookup by reaction
   @@index([callId]) // Fast lookup by call
   @@index([ticketId]) // Fast lookup by ticket
+  @@index([savedViewId]) // Fast lookup by saved view
   @@index([channelId]) // Fast lookup by channel
   @@index([conversationId, userId]) // Fast lookup for reply batching
   @@index([actorId])
@@ -4346,6 +4351,7 @@ model InstalledApps {
   appId String
   userId String
   webhookUrl String?
+  fetchConfig String?
 
   signingSecret String?   // @deprecated
   version Int

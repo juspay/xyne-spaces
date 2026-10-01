@@ -46,6 +46,13 @@ argocd:
   service: argocd-server
   port: 80
 
+workflows:
+  enabled: false
+  host: ""
+  namespace: argo-workflows
+  service: argo-workflows-server
+  port: 2746
+
 routes:
   externalDashboard: false
   clawAuth: false

@@ -165,6 +165,19 @@ describe("handleInbound", () => {
     expect(dispatchChannelRun).not.toHaveBeenCalled();
   });
 
+  it("asks what to do when only tagged, without leaving typing on", async () => {
+    const openGroups = {
+      account: { ...(account as object), config: { label: "mine", dmPolicy: "linked", groupPolicy: "open", requireMention: true, channel: {} } },
+      plugin,
+    } as never;
+    await handleInbound(openGroups, msg({ text: "", isGroup: true, chatId: "g@g.us", mentionedSelf: true }));
+    await settle();
+    expect(dispatchChannelRun).not.toHaveBeenCalled();
+    const items = enqueueOutbound.mock.calls.map((c) => c[1] as { kind?: string; text?: string });
+    expect(items.map((i) => i.text)).toContain("What would you like /assistant to do?");
+    expect(items.some((i) => i.kind === "typing")).toBe(false);
+  });
+
   it("handles the same message id only once", async () => {
     const duplicate = msg({ messageId: "same", text: "hello" });
     await handleInbound(ctx, duplicate);

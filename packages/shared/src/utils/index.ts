@@ -1,4 +1,11 @@
-export { searchUsers, searchUsersWithScores, searchChannels } from './search.js';
+export {
+  searchUsers,
+  searchUsersWithScores,
+  searchChannels,
+  USER_FUSE_OPTIONS,
+  CHANNEL_FUSE_OPTIONS,
+  normalizeChannelName,
+} from './search.js';
 export { matchesAllTokens } from './tokenMatch.js';
 export { tierOf, TIER_FUZZY, type Tier } from './searchTier.js';
 export {

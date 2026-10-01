@@ -74,6 +74,12 @@ export enum EmailMergeMode {
 }
 
 // @ts-ignore TS1294
+export enum SlackDeskTriggerMode {
+  ALL_MESSAGES = 'ALL_MESSAGES',
+  MENTION_ONLY = 'MENTION_ONLY',
+}
+
+// @ts-ignore TS1294
 export enum UserResponsibility {
   MANAGER = 'MANAGER',
   TEAM_LEAD = 'TEAM_LEAD',
@@ -122,6 +128,17 @@ export enum AttachmentEntityType {
   RECORDING = 'RECORDING',
   SDLC_HUB = 'SDLC_HUB',
 }
+
+export const UNSENT_ATTACHMENT_ENTITY_TYPES: AttachmentEntityType[] = [
+  AttachmentEntityType.DRAFT,
+  AttachmentEntityType.DELAYED_MESSAGE,
+];
+
+export const CHANNEL_VISIBLE_ATTACHMENT_ENTITY_TYPES: AttachmentEntityType[] = [
+  AttachmentEntityType.CHAT,
+  AttachmentEntityType.EMAIL,
+  AttachmentEntityType.TICKET,
+];
 
 // @ts-ignore TS1294
 export enum TicketEnvironment {
@@ -600,6 +617,7 @@ export enum AuditAction {
 export enum AuditEntityType {
   USER_GROUP_ASSIGNMENT_CONFIG = 'USER_GROUP_ASSIGNMENT_CONFIG',
   BOARD = 'BOARD',
+  DESK = 'DESK',
 }
 
 // @ts-ignore TS1294
@@ -682,6 +700,7 @@ export enum NotificationType {
   EMAIL_FETCH_FAILED = "EMAIL_FETCH_FAILED",
   EMAIL_BACKFILL_REQUIRED = "EMAIL_BACKFILL_REQUIRED",
   CANVAS_SHARED = "CANVAS_SHARED",
+  VIEW_SHARED = "VIEW_SHARED",
   RECORDING_SHARED = "RECORDING_SHARED",
   RECORDING_SUMMARY_READY = "RECORDING_SUMMARY_READY",
   TRANSCRIPT_TRANSLATION_READY = "TRANSCRIPT_TRANSLATION_READY",
@@ -1037,10 +1056,12 @@ export enum SavedConfigEntityName {
   FORM_ENTITY_VALUE = 'FORM_ENTITY_VALUE',
 }
 
-// Who a saved-view share grant targets. USER today; USER_GROUP / CHANNEL slots reserved.
+// Who a saved-view share grant targets. USER shares with an individual; CHANNEL shares
+// with every current & future member of a channel. USER_GROUP slot reserved.
 // @ts-ignore TS1294
 export enum ViewAccessEntityType {
   USER = 'USER',
+  CHANNEL = 'CHANNEL',
 }
 
 // @ts-ignore TS1294

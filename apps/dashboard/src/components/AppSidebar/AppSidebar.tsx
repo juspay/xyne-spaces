@@ -1,5 +1,6 @@
 import { ReactElement, useEffect, useMemo, useRef, useState } from 'react';
-import { Link, useLocation, useNavigate, useParams } from 'react-router-dom';
+import { Link, type Location } from 'react-router-dom';
+import { useRouterSelector, useStableNavigate } from '../../hooks/useStableRouter';
 import { Tooltip } from '../ui/Tooltip/Tooltip';
 import { XyneAIQuickMenu } from './XyneAIQuickMenu';
 import { ChatQuickMenu } from './ChatQuickMenu';
@@ -170,10 +171,60 @@ const SUPPORT_REUSED_ROUTES = [
   '/knowledge-base',
 ];
 
+// Determine active route with early returns for special chat paths
+const getActiveRoute = (pathname: string): string => {
+  if (pathname.startsWith('/chat/dir')) return '/chat/dir';
+  if (pathname.startsWith('/chat/dm')) return '/chat/dm';
+  if (pathname.startsWith('/chat/activity')) return '/chat/activity';
+  if (pathname.startsWith('/chat/canvas')) return '/chat/canvas';
+  if (pathname.startsWith('/chat/drafts')) return '/chat/drafts';
+  if (pathname.startsWith('/chat/sent')) return '/chat/sent';
+  if (pathname.startsWith('/chat/scheduled')) return '/chat/scheduled';
+  if (pathname.startsWith('/migration/confluence')) return '/migration/confluence';
+  if (pathname.startsWith('/migration/whatsapp')) return '/migration/whatsapp';
+  // One rail entry per app, so the active route has to carry the app id.
+  if (pathname.startsWith('/app/')) return `/app/${pathname.split('/')[2] ?? ''}`;
+  return '/' + (pathname.split('/')[1] || '');
+};
+
+/** The rail entry to highlight for a location. */
+const getRailRoute = (location: Location, workspaceId: string | undefined): string => {
+  const relativePath =
+    workspaceId && location.pathname.startsWith(`/${workspaceId}`)
+      ? location.pathname.slice(`/${workspaceId}`.length) || '/'
+      : location.pathname;
+
+  // Release Manager reuses the /listProjects/:id URL family; keep it highlighted there.
+  const inReleaseManager =
+    relativePath.startsWith('/listProjects/') &&
+    (relativePath.includes('/releases/') ||
+      (location.state as { from?: string } | null)?.from === 'releaseManager');
+  return inReleaseManager ? '/releaseManager' : getActiveRoute(relativePath);
+};
+
+// Hide footer only on pages that have their own complete navigation (channels, bookmarks, threads, etc.)
+const isChannelOrThreadLocation = ({ pathname, hash }: Location): boolean =>
+  (pathname.includes('/chat/dir/') && pathname.split('/').length > 3) ||
+  (pathname.includes('/chat/dm/') && pathname.split('/').length > 3) ||
+  (pathname.includes('/chat/activity/') && pathname.split('/').length > 3) ||
+  (pathname.includes('/chat/bookmarks/') && pathname.split('/').length > 3) ||
+  (pathname.includes('/chat/drafts/') && pathname.split('/').length > 3) ||
+  (pathname.includes('/chat/sent/') && pathname.split('/').length > 3) ||
+  (pathname.includes('/chat/scheduled/') && pathname.split('/').length > 3) ||
+  pathname.includes('threadId') ||
+  hash.includes('threadId');
+
 const AppSidebar = (): ReactElement => {
-  const location = useLocation();
-  const navigate = useNavigate();
-  const { workspaceId } = useParams<{ workspaceId?: string }>();
+  const navigate = useStableNavigate();
+  const workspaceId = useRouterSelector(snapshot => snapshot.params['workspaceId']);
+  // Narrow selectors: the rail only changes with the section and whether a channel or thread
+  // is open, not on every navigation inside a section (switching channels, threads, hashes).
+  const activeRoute = useRouterSelector(({ location, params }) =>
+    getRailRoute(location, params['workspaceId']),
+  );
+  const hasChannelOrThreadId = useRouterSelector(({ location }) =>
+    isChannelOrThreadLocation(location),
+  );
   const prefixWs = (path: string): string => (workspaceId ? `/${workspaceId}${path}` : path);
   const { user } = useAuth();
   const currentUser = useSelf();
@@ -195,34 +246,6 @@ const AppSidebar = (): ReactElement => {
   const { isMobile } = usePlatform();
 
   const [windowWidth, setWindowWidth] = useState(window.innerWidth);
-
-  // Determine active route with early returns for special chat paths
-  const getActiveRoute = (pathname: string): string => {
-    if (pathname.startsWith('/chat/dir')) return '/chat/dir';
-    if (pathname.startsWith('/chat/dm')) return '/chat/dm';
-    if (pathname.startsWith('/chat/activity')) return '/chat/activity';
-    if (pathname.startsWith('/chat/canvas')) return '/chat/canvas';
-    if (pathname.startsWith('/chat/drafts')) return '/chat/drafts';
-    if (pathname.startsWith('/chat/sent')) return '/chat/sent';
-    if (pathname.startsWith('/chat/scheduled')) return '/chat/scheduled';
-    if (pathname.startsWith('/migration/confluence')) return '/migration/confluence';
-    if (pathname.startsWith('/migration/whatsapp')) return '/migration/whatsapp';
-    // One rail entry per app, so the active route has to carry the app id.
-    if (pathname.startsWith('/app/')) return `/app/${pathname.split('/')[2] ?? ''}`;
-    return '/' + (pathname.split('/')[1] || '');
-  };
-
-  const relativePath =
-    workspaceId && location.pathname.startsWith(`/${workspaceId}`)
-      ? location.pathname.slice(`/${workspaceId}`.length) || '/'
-      : location.pathname;
-
-  // Release Manager reuses the /listProjects/:id URL family; keep it highlighted there.
-  const inReleaseManager =
-    relativePath.startsWith('/listProjects/') &&
-    (relativePath.includes('/releases/') ||
-      (location.state as { from?: string } | null)?.from === 'releaseManager');
-  const activeRoute = inReleaseManager ? '/releaseManager' : getActiveRoute(relativePath);
 
   const isSupportHome = SUPPORT_HOME_ROUTES.includes(activeRoute);
   const isSupportReused = SUPPORT_REUSED_ROUTES.includes(activeRoute);
@@ -296,18 +319,6 @@ const AppSidebar = (): ReactElement => {
   const handleStatusModalClose = (): void => {
     setIsStatusModalOpen(false);
   };
-
-  // Hide footer only on pages that have their own complete navigation (channels, bookmarks, threads, etc.)
-  const hasChannelOrThreadId =
-    (location.pathname.includes('/chat/dir/') && location.pathname.split('/').length > 3) ||
-    (location.pathname.includes('/chat/dm/') && location.pathname.split('/').length > 3) ||
-    (location.pathname.includes('/chat/activity/') && location.pathname.split('/').length > 3) ||
-    (location.pathname.includes('/chat/bookmarks/') && location.pathname.split('/').length > 3) ||
-    (location.pathname.includes('/chat/drafts/') && location.pathname.split('/').length > 3) ||
-    (location.pathname.includes('/chat/sent/') && location.pathname.split('/').length > 3) ||
-    (location.pathname.includes('/chat/scheduled/') && location.pathname.split('/').length > 3) ||
-    location.pathname.includes('threadId') ||
-    location.hash.includes('threadId');
 
   // The rail in the user's order: nav items and artifact apps interleaved as
   // the toolbar list says. Ids that no longer resolve — a path the user lost
@@ -955,7 +966,7 @@ const MobileNavbar = ({
   const analyticsPermission = useCanViewAnalytics();
   const { isMobile } = usePlatform();
   const { isKeyboardOpen } = useKeyboard();
-  const { workspaceId } = useParams<{ workspaceId?: string }>();
+  const workspaceId = useRouterSelector(snapshot => snapshot.params['workspaceId']);
   const prefixWs = (path: string): string => (workspaceId ? `/${workspaceId}${path}` : path);
   const [isErrorReportOpen, setIsErrorReportOpen] = useState(false);
 

@@ -2,6 +2,7 @@ import { Router, type Request, type Response } from "express";
 import { errMsg } from "../lib/errors.js";
 import { randomUUID } from "node:crypto";
 import { CONFIG } from "../config.js";
+import type { FlowDefinition } from "xyne-claw-shared";
 import { requireAuth, requireNoAccessToken, requireResultToken } from "../middleware/require-auth.js";
 import { getRequesterId, getAgentEditAccess, isClawAdmin } from "../middleware/agent-acl.js";
 import { prisma } from "../db.js";
@@ -20,6 +21,7 @@ import {
   type LocalFolderContextItem,
 } from "../lib/local-folder-context.js";
 import { gcsService } from "../services/storageService.js";
+import { maybeGenerateConversationTitle } from "../services/chatTitleClient.js";
 import { appendCitations, hydrateInvocationIcons } from "../lib/citations.js";
 import { resolveAgentProviderConfigs, agentDefaultSpeed, parseFastModeProfile } from "../lib/agent-provider-config.js";
 import { resolveFastMode } from "../lib/fast-mode.js";
@@ -38,6 +40,10 @@ import { recordUploadedArtifacts } from "../lib/conversation-artifact-signals.js
 import { attachArtifactToSessionApp } from "../lib/artifact-app-session.js";
 import { recordDeliveredArtifacts } from "../lib/delivered-artifacts.js";
 import { publishLiveEvent } from "../lib/live-conversation-bus.js";
+import {
+  withAiScreenPresentationTools,
+  withAiScreenPresentationInstructions,
+} from "../lib/ai-screen-presentation-tools.js";
 import { pushDelta, endDeltaCoalescer } from "../lib/live-delta-coalescer.js";
 import { redisService } from "../redis.js";
 import {
@@ -250,6 +256,7 @@ export async function persistRunStreamResult(args: {
   content: string;
   status: "completed" | "failed" | "cancelled";
   orgId: string;
+  generateTitle?: boolean;
   attachments?: StreamAttachment[];
   sessionId?: string;
   pendingActions?: Array<Record<string, unknown>>;
@@ -389,6 +396,17 @@ export async function persistRunStreamResult(args: {
     }
   }
 
+  if (args.status === "completed") {
+    void maybeGenerateConversationTitle({
+      conversationId: args.conversationId,
+      agentSlug: args.agentSlug,
+      userId: args.userId,
+      orgId: args.orgId,
+      assistantReply: args.content,
+      ...(args.generateTitle !== undefined ? { generateTitle: args.generateTitle } : {}),
+    }).catch((err) => log.warn("[run-stream] chat title generation failed:", errMsg(err)));
+  }
+
   return { messageId: assistantMsg.id, persistedAttachments };
 }
 
@@ -452,6 +470,7 @@ publicRouter.post("/", requireAuth, requireNoAccessToken, async (req: Request, r
       agentConfig,
       additionalInstructions,
       generateFollowUpSuggestions,
+      generateTitle,
       // Branching: same semantics as the /agent-chat/:slug/chat route.
       isRegenerate,
       isEditUserMessage,
@@ -867,6 +886,16 @@ publicRouter.post("/", requireAuth, requireNoAccessToken, async (req: Request, r
       }
     }
 
+    if (convId && userId && createdUserMessageId) {
+      void maybeGenerateConversationTitle({
+        conversationId: convId,
+        agentSlug: slug,
+        userId,
+        orgId,
+        ...(generateTitle !== undefined ? { generateTitle: Boolean(generateTitle) } : {}),
+      }).catch((err) => log.warn("[run-stream] chat title generation failed:", errMsg(err)));
+    }
+
     // Pre-create the running assistant placeholder. Its id powers PI session
     // branching, AgentRun linkage, and the SSE `done` payload.
     let assistantMsg: Awaited<ReturnType<typeof chatMessageRepository.create>> | undefined;
@@ -1208,6 +1237,10 @@ publicRouter.post("/", requireAuth, requireNoAccessToken, async (req: Request, r
         conversationId: convId,
         agentSlug: slug,
         userId,
+        // Our own run row was written at status "running" above, before dispatch.
+        // Without this the handoff finds it, interrupts a session claw has never
+        // started, and polls itself for the full 30s timeout.
+        currentSessionId: runSessionId,
         onLabel: (label) => pendingStreams.get(streamId)?.sendEvent("label", { toolLabel: label }),
       });
       if (handoff.handedOff) {
@@ -1219,7 +1252,14 @@ publicRouter.post("/", requireAuth, requireNoAccessToken, async (req: Request, r
     // resolve the placeholder without depending on local pendingStreams.
     const internalCallbackUrl = `${CONFIG.internalUrl}/claw/api/v1/internal/run-stream/${streamId}/callback` +
       (assistantMsg ? `?assistantMessageId=${encodeURIComponent(assistantMsg.id)}` : "");
-    const internalProgressUrl = `${CONFIG.internalUrl}/claw/api/v1/internal/run-stream/${streamId}/progress`;
+    // A card needs the row it belongs on, which claw cannot know; conversation
+    // + agent ride in on the widget body instead.
+    const internalProgressUrl = `${CONFIG.internalUrl}/claw/api/v1/internal/run-stream/${streamId}/progress` +
+      (assistantMsg ? `?assistantMessageId=${encodeURIComponent(assistantMsg.id)}` : "");
+    // Composed here so both the base field and the design/page override use it.
+    const aiScreenInstructions = withAiScreenPresentationInstructions(
+      typeof additionalInstructions === "string" ? additionalInstructions : undefined,
+    );
     const incomingAgentConfig = agentConfig && typeof agentConfig === "object" && !Array.isArray(agentConfig)
       ? agentConfig as Record<string, unknown>
       : {};
@@ -1342,12 +1382,15 @@ publicRouter.post("/", requireAuth, requireNoAccessToken, async (req: Request, r
       researchContext,
       webSearchEnabled,
       deepResearchEnabled,
-      agentConfig: enrichedAgentConfig,
-      additionalInstructions,
+      agentConfig: withAiScreenPresentationTools(
+        enrichedAgentConfig,
+        (agentRow.config as Record<string, unknown> | null)?.["tools"],
+      ),
+      additionalInstructions: aiScreenInstructions,
       ...(designSelectionInstruction || pageSelectionInstruction || openItemsInstruction
         ? {
             additionalInstructions: [
-              typeof additionalInstructions === "string" ? additionalInstructions.trim() : "",
+              aiScreenInstructions,
               designSelectionInstruction,
               pageSelectionInstruction,
               openItemsInstruction,
@@ -1863,6 +1906,78 @@ internalRouter.post("/:streamId/progress", (req: Request<{ streamId: string }>, 
       events.push({ event: "delta", data: { content: body.textDelta } });
     } else if (Array.isArray(body.todos)) {
       events.push({ event: "plan", data: { todos: body.todos, ...(typeof body.planTitle === "string" ? { title: body.planTitle } : {}) } });
+    } else if (body.kind === "ui-widget" && body.widget) {
+      // Async, so it can't join the `events` batch. streamMeta is a same-pod
+      // fast path only — a late card needs the identity on the body/URL.
+      const meta = streamMeta.get(streamId);
+      const bodyStr = (key: string): string | undefined =>
+        typeof body[key] === "string" && body[key] ? (body[key] as string) : undefined;
+      const widgetConversationId = bodyStr("conversationId") ?? meta?.conversationId;
+      const widgetAgentSlug = bodyStr("agentSlug") ?? meta?.agentSlug;
+      const queryAssistantMessageId = req.query["assistantMessageId"];
+      const widgetAssistantMessageId =
+        (typeof queryAssistantMessageId === "string" && queryAssistantMessageId
+          ? queryAssistantMessageId
+          : undefined) ?? meta?.assistantMessageId;
+      if (widgetConversationId && widgetAgentSlug) {
+        void (async () => {
+          try {
+            const { isUiWidget } = await import("xyne-claw-shared");
+            if (!isUiWidget(body.widget)) return;
+            const { deliverXyneAiWidget } = await import("./webhook.js");
+            const flow = await deliverXyneAiWidget({
+              widget: body.widget,
+              agentSlug: widgetAgentSlug,
+              conversationId: widgetConversationId,
+              userId: meta?.userId,
+              orgId: meta?.orgId,
+              assistantMessageId: widgetAssistantMessageId,
+            });
+            if (!flow) return;
+            const target = pendingStreams.get(streamId);
+            if (target) target.sendEvent("ui-flow", { flow });
+            else publishStreamEvent({ kind: "progress", streamId, events: [{ event: "ui-flow", data: { flow } }] });
+          } catch (err) {
+            log.warn(`[run-stream] ui-flow progress delivery failed: ${errMsg(err)}`);
+          }
+        })();
+      } else {
+        log.warn(`[run-stream] ui-widget progress with no conversation identity stream=${streamId}; card dropped`);
+      }
+    } else if (body.kind === "pr" && body.pr) {
+      // Display-only, so nothing routes back. Same identity resolution as the
+      // ui-widget branch above.
+      const meta = streamMeta.get(streamId);
+      const queryAssistantMessageId = req.query["assistantMessageId"];
+      const prAssistantMessageId =
+        (typeof queryAssistantMessageId === "string" && queryAssistantMessageId
+          ? queryAssistantMessageId
+          : undefined) ?? meta?.assistantMessageId;
+      void (async () => {
+        try {
+          const { readPrProgressFact, renderXyneAiPrCard } = await import("../lib/pr-card-render.js");
+          const fact = readPrProgressFact(body.pr);
+          if (!fact) return;
+          const { resolveXyneAiCardTarget } = await import("../lib/flow-card-delivery.js");
+          const target = await resolveXyneAiCardTarget({
+            assistantMessageId: prAssistantMessageId,
+            conversationId:
+              (typeof body["conversationId"] === "string" ? body["conversationId"] : undefined) ??
+              meta?.conversationId,
+            agentSlug:
+              (typeof body["agentSlug"] === "string" ? body["agentSlug"] : undefined) ??
+              meta?.agentSlug,
+          });
+          if (!target) return;
+          const flow = await renderXyneAiPrCard({ pr: fact, target });
+          if (!flow) return;
+          const stream = pendingStreams.get(streamId);
+          if (stream) stream.sendEvent("ui-flow", { flow });
+          else publishStreamEvent({ kind: "progress", streamId, events: [{ event: "ui-flow", data: { flow } }] });
+        } catch (err) {
+          log.warn(`[run-stream] pr card delivery failed: ${errMsg(err)}`);
+        }
+      })();
     } else if (body.attachment) {
       events.push({ event: "attachment", data: body.attachment });
     } else if (body.debugEvent) {
@@ -1948,7 +2063,7 @@ internalRouter.post("/:streamId/callback", async (req: Request<{ streamId: strin
       : undefined;
 
     const harnessUnreachableNotice = body["localHarnessUnreachable"] === true
-      ? `⚠️ I couldn't reach **${localHarnessProviderLabel(typeof body["localHarnessProvider"] === "string" ? body["localHarnessProvider"] : "your local harness")}** on your machine, and running this on Xyne's servers instead didn't start either. Open the Xyne desktop app (or turn off the local harness for this agent) and try again.`
+      ? `I couldn't reach **${localHarnessProviderLabel(typeof body["localHarnessProvider"] === "string" ? body["localHarnessProvider"] : "your local harness")}** on your machine, and running this on Xyne's servers instead didn't start either. Open the Xyne desktop app (or turn off the local harness for this agent) and try again.`
       : undefined;
 
     const content = harnessUnreachableNotice
@@ -2039,6 +2154,172 @@ internalRouter.post("/:streamId/callback", async (req: Request<{ streamId: strin
       }
     } else {
       log.warn(`[run-stream] callback streamId=${streamId} missing meta (userId/conversationId) — message persistence skipped`);
+    }
+
+
+    const pendingAgentCard = body["pendingAgentCard"] as
+      | { variant?: string; slug?: string; slugs?: string[] }
+      | undefined;
+    if (pendingAgentCard?.variant) {
+      try {
+        const { resolveXyneAiCardTarget } = await import("../lib/flow-card-delivery.js");
+        const cardTarget = await resolveXyneAiCardTarget({ assistantMessageId });
+        if (!cardTarget) {
+          log.info(`[agent-card] xyne-ai card skipped — no assistant row for stream=${streamId}`);
+        } else {
+          const {
+            renderAgentProfileCard,
+            renderAgentProfileListCard,
+            renderAgentSummaryCard,
+          } = await import("../lib/agent-card-render.js");
+          const identity = {
+            agentSlug: cardTarget.agentSlug,
+            orgId: cardTarget.orgId,
+            userId: cardTarget.userId,
+            conversationId: cardTarget.conversationId,
+            channelId: "",
+            spacesAppId: cardTarget.spacesAppId,
+          };
+          const delivered =
+            pendingAgentCard.variant === "profile"
+              ? await renderAgentProfileCard(
+                  pendingAgentCard.slug?.trim() || cardTarget.agentSlug,
+                  identity,
+                  cardTarget,
+                )
+              : pendingAgentCard.variant === "summary"
+                ? await renderAgentSummaryCard(identity, cardTarget)
+                : pendingAgentCard.variant === "profile-list"
+                  ? await renderAgentProfileListCard(pendingAgentCard.slugs ?? [], identity, cardTarget)
+                  : null;
+          if (!delivered) {
+            log.info(`[agent-card] xyne-ai no card for variant "${pendingAgentCard.variant}"`);
+          } else {
+            const cardStream = pendingStreams.get(streamId);
+            if (cardStream) cardStream.sendEvent("ui-flow", { flow: delivered });
+            else
+              publishStreamEvent({
+                kind: "progress",
+                streamId,
+                events: [{ event: "ui-flow", data: { flow: delivered } }],
+              });
+          }
+        }
+      } catch (cardErr) {
+        log.warn(`[agent-card] xyne-ai card failed:`, errMsg(cardErr));
+      }
+    }
+
+    // Connector + provider suggestion cards. Both are display plus client-side
+    // connect, so there is no server action or terminal state to make
+    // surface-aware — delivery is the whole job. Triggers 2 and 3 are inferred
+    // from the user's own words, so these need no claw tool.
+    try {
+      const { resolveXyneAiCardTarget } = await import("../lib/flow-card-delivery.js");
+      const suggestTarget = await resolveXyneAiCardTarget({ assistantMessageId });
+      if (suggestTarget) {
+        // The user's own words, read off the row rather than streamMeta.
+        const ask = await prisma.chatMessage
+          .findFirst({
+            where: { conversationId: suggestTarget.conversationId, role: "user" },
+            orderBy: { createdAt: "desc" },
+            select: { content: true },
+          })
+          .catch(() => null);
+        const taskText = ask?.content ?? "";
+        if (taskText) {
+          const {
+            renderConnectorSuggestCard,
+            renderProviderSuggestCard,
+            resolveConnectorSuggestions,
+          } = await import("../lib/connector-card-render.js");
+          const suggestIdentity = {
+            agentSlug: suggestTarget.agentSlug,
+            agentOrgId: suggestTarget.orgId,
+            userId: suggestTarget.userId,
+            conversationId: suggestTarget.conversationId,
+            channelId: "",
+            spacesAppId: suggestTarget.spacesAppId,
+          };
+          const blocked = Array.isArray(body["blockedConnectors"])
+            ? (body["blockedConnectors"] as string[])
+            : undefined;
+          const connectorSuggestions = resolveConnectorSuggestions(
+            body["pendingConnectorSuggestions"] as
+              | { serverTypes: string[]; listAll?: boolean; inferred?: boolean; title?: string }
+              | undefined,
+            taskText,
+          );
+          const delivered: Array<FlowDefinition | null> = [];
+          if (connectorSuggestions) {
+            delivered.push(
+              await renderConnectorSuggestCard({
+                suggestions: connectorSuggestions,
+                blockedConnectors: blocked,
+                taskText,
+                id: suggestIdentity,
+                target: suggestTarget,
+              }),
+            );
+          }
+          delivered.push(
+            await renderProviderSuggestCard({
+              taskText,
+              id: suggestIdentity,
+              target: suggestTarget,
+            }),
+          );
+          // Same reason as the agent cards: the terminal payload has no uiFlows
+          // slot, so a card must go on the wire to paint without a refetch.
+          for (const flow of delivered) {
+            if (!flow) continue;
+            const suggestStream = pendingStreams.get(streamId);
+            if (suggestStream) suggestStream.sendEvent("ui-flow", { flow });
+            else
+              publishStreamEvent({
+                kind: "progress",
+                streamId,
+                events: [{ event: "ui-flow", data: { flow } }],
+              });
+          }
+        }
+      }
+    } catch (suggestErr) {
+      log.warn(`[connector-card] xyne-ai suggestion cards failed:`, errMsg(suggestErr));
+    }
+
+    // Request side only — action and result are surface-aware in flow-action.ts.
+    // A pending action with no card keeps its raw row, so a delivery failure
+    // cannot make it unapprovable.
+    if (pendingActions?.length) {
+      try {
+        const { resolveXyneAiCardTarget } = await import("../lib/flow-card-delivery.js");
+        const ticketTarget = await resolveXyneAiCardTarget({ assistantMessageId });
+        if (ticketTarget) {
+          const { readPendingWriteAction, renderXyneAiWriteApprovalCard } = await import(
+            "../lib/write-card-render.js"
+          );
+          for (const raw of pendingActions) {
+            const writeAction = readPendingWriteAction(raw);
+            if (!writeAction) continue;
+            const flow = await renderXyneAiWriteApprovalCard({
+              action: writeAction,
+              target: ticketTarget,
+            });
+            if (!flow) continue;
+            const ticketStream = pendingStreams.get(streamId);
+            if (ticketStream) ticketStream.sendEvent("ui-flow", { flow });
+            else
+              publishStreamEvent({
+                kind: "progress",
+                streamId,
+                events: [{ event: "ui-flow", data: { flow } }],
+              });
+          }
+        }
+      } catch (ticketErr) {
+        log.warn(`[ticket-card] xyne-ai ticket card failed:`, errMsg(ticketErr));
+      }
     }
 
     // Finalize AgentRun (same pattern as /agent-chat). Pod-independent —
@@ -2302,9 +2583,24 @@ async function runViaSseTransport(opts: RunViaSseOpts): Promise<void> {
       onUiWidget: (_sid, widget) => {
         if (widget.type === "plan") {
           stream.sendEvent("plan", { todos: widget.payload.todos });
-        } else {
-          stream.sendEvent("ui-widget", { widget });
+          return;
         }
+        void (async () => {
+          try {
+            const { deliverXyneAiWidget } = await import("./webhook.js");
+            const flow = await deliverXyneAiWidget({
+              widget,
+              agentSlug: slug,
+              conversationId: convId,
+              userId,
+              orgId,
+              assistantMessageId,
+            });
+            if (flow) stream.sendEvent("ui-flow", { flow });
+          } catch (err) {
+            log.warn(`[run-stream/sse] ui-flow emit failed: ${errMsg(err)}`);
+          }
+        })();
       },
       onSandboxPreview: (sessionId, payload) => {
         // Sandbox preview today lands on /webhook/progress which posts the

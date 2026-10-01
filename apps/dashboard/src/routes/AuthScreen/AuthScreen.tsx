@@ -1,5 +1,5 @@
 import { ReactElement, useEffect, useRef, useState } from 'react';
-import { Navigate, useNavigate, useSearchParams, useLocation } from 'react-router-dom';
+import { Link, Navigate, useNavigate, useSearchParams, useLocation } from 'react-router-dom';
 import Cookies from 'js-cookie';
 import { AxiosError } from 'axios';
 import { apiInstance } from '../../services/clients/apiClient';
@@ -19,6 +19,7 @@ import {
   clearEnterpriseLoginIntent,
 } from '../../machines/authMachine';
 import { WorkspaceType } from '@xyne/shared';
+import { getPendingSdkSso, clearPendingSdkSso } from '../../utils/pendingSdkSso';
 
 interface CommunityWorkspaceListItem {
   id: string;
@@ -555,6 +556,18 @@ const AuthScreen = (): ReactElement | null => {
     setRegPasswordError('');
     setRegConfirmPasswordError('');
   };
+
+  // SDK SSO flow - back to the authorize page after login (before the workspace redirect)
+  const pendingSdkSsoUserCode = getPendingSdkSso();
+  if (isAuthenticated && pendingSdkSsoUserCode) {
+    clearPendingSdkSso();
+    return (
+      <Navigate
+        to={`/sdk-sso/authorize?user_code=${encodeURIComponent(pendingSdkSsoUserCode)}`}
+        replace={true}
+      />
+    );
+  }
 
   if (isAuthenticated) {
     const dest = user?.workspaceId ? `/${user.workspaceId}` : '/';
@@ -1120,27 +1133,23 @@ const AuthScreen = (): ReactElement | null => {
                               </button>
                               <p className='text-xs text-muted-foreground text-center'>
                                 By signing up you are agreeing to the{' '}
-                                <a
-                                  href='/terms'
-                                  target='_blank'
-                                  rel='noopener noreferrer'
+                                <Link
+                                  to='/terms'
                                   className='underline underline-offset-2 hover:text-foreground'
                                   data-track-category='Auth'
                                   data-track-name='TermsOfServiceLink'
                                 >
                                   Terms of Service
-                                </a>{' '}
+                                </Link>{' '}
                                 and{' '}
-                                <a
-                                  href='/privacy'
-                                  target='_blank'
-                                  rel='noopener noreferrer'
+                                <Link
+                                  to='/privacy'
                                   className='underline underline-offset-2 hover:text-foreground'
                                   data-track-category='Auth'
                                   data-track-name='PrivacyPolicyLink'
                                 >
                                   Privacy Policy
-                                </a>
+                                </Link>
                                 .
                               </p>
                             </form>

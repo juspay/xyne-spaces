@@ -1,4 +1,4 @@
-import { ReactElement, useEffect, useMemo, useRef, useState } from 'react';
+import { ReactElement, useEffect, useMemo, useState } from 'react';
 import * as PopoverPrimitive from '@radix-ui/react-popover';
 import {
   CheckTickSingle as Check,
@@ -6,14 +6,14 @@ import {
   DownloadDown as Download,
   LayerTwo as Layers,
   PlusDefault as Plus,
-  SearchDefault as Search,
+  SearchBig,
   Star,
 } from '@xyne/icons';
 import { cn } from '../../../utils/classNames';
-import { TURN_OFF_EXACT_SEARCH, TURN_ON_EXACT_SEARCH } from '../../../utils/exactSearch';
 import Button from '../../ui/Button';
 import { Popover } from '../../ui/Popover/Popover';
 import { Tooltip } from '../../ui/Tooltip';
+import { ShortcutTooltip } from '../../ui/ShortcutTooltip';
 import { BoardsChip } from './BoardsChip';
 import { CustomiseViewPopover } from './CustomiseViewPopover';
 import { AddFilterChip } from './AddFilterChip';
@@ -47,10 +47,7 @@ export const TicketsHeader = (props: TicketsHeaderProps): ReactElement => {
     ticketCount,
     isFiltered,
     star,
-    searchValue,
-    onSearchChange,
-    isExactSearch,
-    onExactSearchChange,
+    onOpenSearch,
     share,
     onCreateTicket,
     createTicketMetadata,
@@ -71,15 +68,6 @@ export const TicketsHeader = (props: TicketsHeaderProps): ReactElement => {
     onExport,
     onOpenTicketReport,
   } = props;
-
-  const searchRef = useRef<HTMLInputElement>(null);
-  const pendingCaretRef = useRef(false);
-  useEffect(() => {
-    if (!pendingCaretRef.current || searchValue !== '""') return;
-    pendingCaretRef.current = false;
-    searchRef.current?.focus();
-    searchRef.current?.setSelectionRange(1, 1);
-  }, [searchValue]);
 
   const [addOpen, setAddOpen] = useState(false);
   const [openChipId, setOpenChipId] = useState<string | null>(null);
@@ -207,61 +195,18 @@ export const TicketsHeader = (props: TicketsHeaderProps): ReactElement => {
         </div>
         <div className='min-w-0 flex-1' />
         <div className='ml-auto flex min-w-0 flex-nowrap items-center gap-2'>
-          <div
-            className={cn(
-              'flex h-[30px] min-w-[96px] max-w-[220px] flex-[0_1_220px] items-center gap-2 rounded-lg border px-2.5 text-muted-foreground/80 transition-colors focus-within:border-muted-foreground/40 hover:border-muted-foreground/40',
-              searchValue ? 'border-muted-foreground/40' : 'border-border',
-            )}
-          >
-            <Search className='size-[14px] shrink-0' />
-            <input
-              ref={searchRef}
-              type='text'
-              value={searchValue}
-              onChange={e => onSearchChange(e.target.value)}
-              placeholder='Search'
-              aria-label='Search Tickets'
-              className='min-w-0 flex-1 bg-transparent text-[12.5px] text-foreground outline-none placeholder:text-muted-foreground/60'
+          <ShortcutTooltip label='Search tickets' shortcut='global.findInChannel' side='bottom'>
+            <button
+              type='button'
+              onClick={onOpenSearch}
+              aria-label='Search tickets'
+              className='flex size-[30px] shrink-0 items-center justify-center rounded-lg border border-border text-muted-foreground transition-colors hover:border-muted-foreground/40 hover:text-foreground'
               data-track-category='Tickets'
               data-track-name='SearchTickets'
-            />
-            {searchValue && (
-              <button
-                type='button'
-                onClick={() => onSearchChange('')}
-                aria-label='Clear search'
-                data-track-category='Tickets'
-                data-track-name='ClearTicketSearch'
-                className='text-[13px] leading-none text-muted-foreground/60 hover:text-foreground'
-              >
-                ×
-              </button>
-            )}
-            <Tooltip content={isExactSearch ? TURN_OFF_EXACT_SEARCH : TURN_ON_EXACT_SEARCH}>
-              <button
-                type='button'
-                onClick={() => {
-                  const next = !isExactSearch;
-                  pendingCaretRef.current = next && !searchValue.trim();
-                  onExactSearchChange(next);
-                  searchRef.current?.focus();
-                }}
-                aria-pressed={isExactSearch}
-                aria-label={isExactSearch ? TURN_OFF_EXACT_SEARCH : TURN_ON_EXACT_SEARCH}
-                className={cn(
-                  'shrink-0 rounded px-1 text-[11px] font-semibold leading-[18px] transition-colors',
-                  isExactSearch
-                    ? 'bg-[var(--desk-accent-badge-bg)] text-[var(--ticket-accent)]'
-                    : 'text-muted-foreground/60 hover:text-foreground',
-                )}
-                data-track-category='Tickets'
-                data-track-name='ToggleExactTicketSearch'
-                data-track-metadata={JSON.stringify({ exact: !isExactSearch })}
-              >
-                &quot;ab&quot;
-              </button>
-            </Tooltip>
-          </div>
+            >
+              <SearchBig size={16} />
+            </button>
+          </ShortcutTooltip>
           <CustomiseViewPopover
             layoutView={props.layoutView}
             onLayoutChange={props.onLayoutChange}

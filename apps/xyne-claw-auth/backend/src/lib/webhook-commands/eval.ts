@@ -352,12 +352,12 @@ export async function handleEval(
   });
 
   if (dispatched.length === 0) {
-    await ctx.reply(`⚖️ **Eval** — every provider failed to start (${failed.join(", ")}).`, REPLY_LABEL);
+    await ctx.reply(`**Eval** — every provider failed to start (${failed.join(", ")}).`, REPLY_LABEL);
     return;
   }
 
   await ctx.reply(
-    `⚖️ **Eval** — running on ${dispatched.length} provider${dispatched.length === 1 ? "" : "s"}: ` +
+    `**Eval** — running on ${dispatched.length} provider${dispatched.length === 1 ? "" : "s"}: ` +
     `${dispatched.map((d) => `\`${armLabel(d)}\``).join(", ")}` +
     `${failed.length ? ` · could not start: ${failed.join(", ")}` : ""}` +
     `\nEach answers in this thread; the comparison lands here when they finish.`,
@@ -399,7 +399,7 @@ export async function finalizeEval(state: EvalState, log: WebhookCommandCtx["log
   const unfinished = results.filter((r) => r.status !== "completed").length;
 
   const summary =
-    `⚖️ **Eval comparison** — ${results.length} provider${results.length === 1 ? "" : "s"}` +
+    `**Eval comparison** — ${results.length} provider${results.length === 1 ? "" : "s"}` +
     `${fastest ? ` · fastest \`${fastest.provider}\` at ${ms(fastest.totalMs)}` : ""}` +
     `${unfinished ? ` · ${unfinished} did not complete` : ""}` +
     `\nThe file has each provider's answer and its full execution trace.`;

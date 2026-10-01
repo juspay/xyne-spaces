@@ -3,16 +3,18 @@ import * as PopoverPrimitive from '@radix-ui/react-popover';
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
 import { toast } from 'sonner';
 import { v4 as uuidv4 } from 'uuid';
+import { Hash, Lock } from 'lucide-react';
 import {
   LinkChainHorizontal as Link,
   MultipleCrossCancelDefault as Cross,
   SearchDefault as Search,
   Share02 as Share,
 } from '@xyne/icons';
-import { ViewAccessEntityType } from '@xyne/shared';
+import { ChannelScopeType, ChannelVisibility, ViewAccessEntityType } from '@xyne/shared';
 import { useAuth } from '../../../hooks/useAuth';
 import { useCachedQuery } from '../../../hooks/useCachedQuery';
 import { useUsers } from '../../../hooks/useUsers';
+import { useAllVisibleChannels } from '../../../hooks/useChannels';
 import { useZero } from '../../../hooks/useZero';
 import { mutators } from '../../../zero/mutators';
 import { queries } from '../../../zero/queries';
@@ -32,6 +34,17 @@ interface AccessRow {
   entityId: string;
 }
 
+// A person or channel the view can be shared with.
+type ShareCandidate =
+  | { type: 'USER'; id: string; name: string; sub: string }
+  | { type: 'CHANNEL'; id: string; name: string; isPrivate: boolean };
+
+const candidateKey = (type: string, id: string): string => `${type}:${id}`;
+
+// String-typed aliases so we can compare against the plain-string `entityType`
+// column without tripping @typescript-eslint/no-unsafe-enum-comparison.
+const CHANNEL_TYPE: string = ViewAccessEntityType.CHANNEL;
+
 const actionLabelClass =
   'col-start-1 row-start-1 transition-[opacity,transform,filter] duration-200 ease-[cubic-bezier(0.23,1,0.32,1)]';
 
@@ -41,6 +54,7 @@ export const ShareViewPopover = ({ viewId, viewName }: ShareViewPopoverProps): R
   const zero = useZero();
   const { user } = useAuth();
   const allUsers = useUsers();
+  const allChannels = useAllVisibleChannels();
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState('');
   const [pendingId, setPendingId] = useState<string | null>(null);
@@ -53,45 +67,82 @@ export const ShareViewPopover = ({ viewId, viewName }: ShareViewPopoverProps): R
   });
   const access = useMemo((): AccessRow[] => {
     const view = configs?.find(c => c.id === viewId);
-    const rows = (view as { viewAccess?: readonly AccessRow[] } | undefined)?.viewAccess ?? [];
-    const userType: string = ViewAccessEntityType.USER;
-    return rows.filter(row => row.entityType === userType);
+    return [...((view as { viewAccess?: readonly AccessRow[] } | undefined)?.viewAccess ?? [])];
   }, [configs, viewId]);
-  const sharedIds = useMemo(() => new Set(access.map(row => row.entityId)), [access]);
+  const sharedKeys = useMemo(
+    () => new Set(access.map(row => candidateKey(row.entityType, row.entityId))),
+    [access],
+  );
 
   const people = useMemo(
-    () =>
+    (): ShareCandidate[] =>
       (allUsers ?? [])
         .filter(u => u.id !== user?.id)
-        .map(u => ({ id: u.id, name: getUserDisplayName(u), sub: u.email ?? '' })),
+        .map(u => ({ type: 'USER', id: u.id, name: getUserDisplayName(u), sub: u.email ?? '' })),
     [allUsers, user?.id],
   );
+  const channels = useMemo(
+    (): ShareCandidate[] =>
+      (allChannels ?? [])
+        .filter(
+          ch =>
+            !!ch?.id &&
+            ch.scopeType !== ChannelScopeType.DM &&
+            ch.scopeType !== ChannelScopeType.GROUP_DM,
+        )
+        .map(ch => ({
+          type: 'CHANNEL',
+          id: ch.id,
+          name: ch.name ?? '',
+          isPrivate: ch.visibility === ChannelVisibility.PRIVATE,
+        })),
+    [allChannels],
+  );
+  const candidateById = useMemo(() => {
+    const map = new Map<string, ShareCandidate>();
+    for (const c of [...people, ...channels]) map.set(candidateKey(c.type, c.id), c);
+    return map;
+  }, [people, channels]);
+
   const q = query.trim().toLowerCase();
   const matches = useMemo(
-    () =>
+    (): ShareCandidate[] =>
       q
-        ? people
-            .filter(p => p.name.toLowerCase().includes(q) || p.sub.toLowerCase().includes(q))
-            .slice(0, 30)
+        ? [
+            ...channels.filter(c => c.name.toLowerCase().includes(q)).slice(0, 8),
+            ...people
+              .filter(
+                p =>
+                  p.name.toLowerCase().includes(q) ||
+                  (p.type === 'USER' && p.sub.toLowerCase().includes(q)),
+              )
+              .slice(0, 30),
+          ]
         : [],
-    [people, q],
+    [people, channels, q],
   );
   const shared = useMemo(
-    () => access.map(row => ({ row, person: people.find(p => p.id === row.entityId) })),
-    [access, people],
+    () =>
+      access.map(row => ({
+        row,
+        candidate: candidateById.get(candidateKey(row.entityType, row.entityId)),
+      })),
+    [access, candidateById],
   );
 
-  const grant = async (personId: string): Promise<void> => {
-    setPendingId(personId);
-    setJustShared(ids => [...ids, personId]);
-    setTimeout(() => setJustShared(ids => ids.filter(id => id !== personId)), 900);
+  const grant = async (candidate: ShareCandidate): Promise<void> => {
+    const key = candidateKey(candidate.type, candidate.id);
+    setPendingId(key);
+    setJustShared(ids => [...ids, key]);
+    setTimeout(() => setJustShared(ids => ids.filter(id => id !== key)), 900);
     try {
       const res = await zero.mutate(
         mutators.viewAccess.grant({
           id: uuidv4(),
           viewId,
-          entityType: ViewAccessEntityType.USER,
-          entityId: personId,
+          entityType:
+            candidate.type === 'CHANNEL' ? ViewAccessEntityType.CHANNEL : ViewAccessEntityType.USER,
+          entityId: candidate.id,
           timestamp: Date.now(),
         }),
       ).server;
@@ -104,7 +155,8 @@ export const ShareViewPopover = ({ viewId, viewName }: ShareViewPopoverProps): R
   };
 
   const revoke = async (row: AccessRow): Promise<void> => {
-    setPendingId(row.entityId);
+    const key = candidateKey(row.entityType, row.entityId);
+    setPendingId(key);
     try {
       const res = await zero.mutate(mutators.viewAccess.revoke({ id: row.id })).server;
       if (res.type === 'error') toast.error(res.error?.message ?? 'Failed to remove access');
@@ -119,6 +171,25 @@ export const ShareViewPopover = ({ viewId, viewName }: ShareViewPopoverProps): R
     void navigator.clipboard.writeText(window.location.href).then(
       () => toast.success('Link copied'),
       () => toast.error('Failed to copy link'),
+    );
+  };
+
+  const renderIcon = (candidate: ShareCandidate | undefined, type: string): ReactElement => {
+    if (candidate?.type === 'CHANNEL' || (!candidate && type === CHANNEL_TYPE)) {
+      const isPrivate = candidate?.type === 'CHANNEL' ? candidate.isPrivate : false;
+      return (
+        <span className='flex size-6 shrink-0 items-center justify-center rounded-md bg-muted text-muted-foreground'>
+          {isPrivate ? <Lock className='size-3.5' /> : <Hash className='size-3.5' />}
+        </span>
+      );
+    }
+    return (
+      <Avatar
+        userId={candidate?.id ?? ''}
+        size='sm'
+        showActiveStatus={false}
+        className='shrink-0'
+      />
     );
   };
 
@@ -160,7 +231,7 @@ export const ShareViewPopover = ({ viewId, viewName }: ShareViewPopoverProps): R
               autoFocus
               value={query}
               onChange={e => setQuery(e.target.value)}
-              placeholder='Add people by name…'
+              placeholder='Add people or channels…'
               className='min-w-0 flex-1 bg-transparent text-[12.5px] text-foreground outline-none placeholder:text-muted-foreground/60'
               data-track-category='Projects'
               data-track-name='SearchShareViewUsers'
@@ -186,26 +257,23 @@ export const ShareViewPopover = ({ viewId, viewName }: ShareViewPopoverProps): R
                   Nobody matches “{query}”
                 </div>
               ) : (
-                matches.map(person => {
-                  const already = sharedIds.has(person.id);
-                  const celebrate = already && justShared.includes(person.id);
+                matches.map(candidate => {
+                  const key = candidateKey(candidate.type, candidate.id);
+                  const already = sharedKeys.has(key);
+                  const celebrate = already && justShared.includes(key);
+                  const subLabel = candidate.type === 'CHANNEL' ? 'Channel' : candidate.sub;
                   return (
                     <button
-                      key={person.id}
+                      key={key}
                       type='button'
-                      disabled={already || pendingId === person.id}
-                      onClick={() => void grant(person.id)}
+                      disabled={already || pendingId === key}
+                      onClick={() => void grant(candidate)}
                       className='flex min-h-[38px] items-center gap-[9px] rounded-lg px-[7px] py-1 text-left transition-colors hover:bg-muted disabled:cursor-default'
                       data-track-category='Projects'
-                      data-track-name='ShareViewWithUser'
+                      data-track-name='ShareViewWithEntity'
                     >
                       <span className='relative flex shrink-0'>
-                        <Avatar
-                          userId={person.id}
-                          size='sm'
-                          showActiveStatus={false}
-                          className='shrink-0'
-                        />
+                        {renderIcon(candidate, candidate.type)}
                         <AnimatePresence>
                           {celebrate && !reduceMotion && (
                             <motion.span
@@ -248,10 +316,10 @@ export const ShareViewPopover = ({ viewId, viewName }: ShareViewPopoverProps): R
                       </span>
                       <span className='min-w-0 flex-1'>
                         <span className='block truncate text-[12.5px] font-medium text-foreground'>
-                          {person.name}
+                          {candidate.name}
                         </span>
                         <span className='block truncate text-[11px] text-muted-foreground/60'>
-                          {person.sub}
+                          {subLabel}
                         </span>
                       </span>
                       <span className='grid shrink-0 justify-items-end text-[11.5px] font-medium'>
@@ -295,8 +363,16 @@ export const ShareViewPopover = ({ viewId, viewName }: ShareViewPopoverProps): R
               </div>
               <div className='max-h-[212px] overflow-y-auto px-1.5 pb-1.5'>
                 <AnimatePresence initial={false}>
-                  {shared.map(({ row, person }) => {
-                    const name = person?.name ?? 'Unknown user';
+                  {shared.map(({ row, candidate }) => {
+                    const isChannel = row.entityType === CHANNEL_TYPE;
+                    const name =
+                      candidate?.name ?? (isChannel ? 'Unknown channel' : 'Unknown user');
+                    const subLabel =
+                      candidate?.type === 'CHANNEL'
+                        ? 'Channel'
+                        : candidate?.type === 'USER'
+                          ? candidate.sub
+                          : '';
                     return (
                       <motion.div
                         key={row.id}
@@ -312,26 +388,21 @@ export const ShareViewPopover = ({ viewId, viewName }: ShareViewPopoverProps): R
                         className='overflow-hidden'
                       >
                         <div className='flex min-h-[36px] items-center gap-[9px] rounded-lg px-1.5 py-1 hover:bg-muted'>
-                          <Avatar
-                            userId={row.entityId}
-                            size='sm'
-                            showActiveStatus={false}
-                            className='shrink-0'
-                          />
+                          {renderIcon(candidate, row.entityType)}
                           <span className='min-w-0 flex-1'>
                             <span className='block truncate text-[12.5px] font-medium text-foreground'>
                               {name}
                             </span>
-                            {person?.sub && (
+                            {subLabel && (
                               <span className='block truncate text-[11px] text-muted-foreground/60'>
-                                {person.sub}
+                                {subLabel}
                               </span>
                             )}
                           </span>
                           <button
                             type='button'
                             title='Remove access'
-                            disabled={pendingId === row.entityId}
+                            disabled={pendingId === candidateKey(row.entityType, row.entityId)}
                             onClick={() => void revoke(row)}
                             className='flex size-[22px] shrink-0 items-center justify-center rounded-md text-muted-foreground/50 hover:bg-foreground/10 hover:text-foreground'
                             data-track-category='Projects'
@@ -359,7 +430,8 @@ export const ShareViewPopover = ({ viewId, viewName }: ShareViewPopoverProps): R
                           <Share className='size-3' />
                         </span>
                         <span className='min-w-0 flex-1 text-[12px] leading-[1.45] text-muted-foreground/80'>
-                          Not shared with anyone yet. Add people above to give them access.
+                          Not shared with anyone yet. Add people or channels above to give them
+                          access.
                         </span>
                       </div>
                     </motion.div>

@@ -135,6 +135,28 @@ export async function executeWriteAction(action: SignedWriteAction): Promise<Wri
       return { ok: true, content: String(result) };
     }
 
+    // 2b-i. Agent-authoring writes (agents, subagents, MCP servers) — no MCP
+    // connector; applied directly, mirroring routes/flow-action.ts.
+    {
+      const { AGENT_TOOL_SLUGS, applyAgentToolAction } = await import("./agent-tools-apply.js");
+      if (serverType === "agent-tools" && AGENT_TOOL_SLUGS.has(tool)) {
+        const outcome = await applyAgentToolAction(tool, params, userId);
+        if (!outcome.ok) return { ok: false, content: "", error: outcome.error };
+        return { ok: true, content: outcome.note ? `${outcome.message}\n\n${outcome.note}` : outcome.message };
+      }
+    }
+
+    // 2b-ii. create-skill — also no MCP connector. Without this it fell through
+    // to 2c and failed with "No adapter for server type: agent-tools".
+    {
+      const { applyCreateSkill, isCreateSkillAction } = await import("./skill-apply.js");
+      if (isCreateSkillAction(serverType, tool)) {
+        const outcome = await applyCreateSkill(params, userId);
+        if (outcome.status !== "created") return { ok: false, content: "", error: outcome.error };
+        return { ok: true, content: outcome.message };
+      }
+    }
+
     // 2c. MCP-based adapters (xyne-spaces, bitbucket, ardra-finops, github, ...)
     // Also covers dynamic DB-stored connectors (e.g. cloudinary, airtable)
     const { callTool } = await import("../mcp/runner.js");

@@ -22,6 +22,7 @@ import { asyncHandler, ok, badRequest } from "../lib/http.js";
 import { prisma } from "../db.js";
 import { CONFIG } from "../config.js";
 import { redisService } from "../redis.js";
+import { scanKeys } from "../lib/redis-scan.js";
 import { requireClawAdmin, getRequesterId } from "../middleware/agent-acl.js";
 import { requireS2S } from "../middleware/require-auth.js";
 import { getAdminOrgScope, getOrgNameMap, withOrgLabel } from "../lib/admin-org-scope.js";
@@ -145,7 +146,7 @@ interface ControlCenterApproval {
 
 async function getAllApprovals(): Promise<ControlCenterApproval[]> {
   const redis = redisService.getConnection();
-  const keys = await redis.keys(`${APPROVAL_PREFIX}*`);
+  const keys = await scanKeys(redis, `${APPROVAL_PREFIX}*`);
   if (keys.length === 0) return [];
   const values = await redis.mget(...keys);
   const approvals: ControlCenterApproval[] = [];

@@ -1,0 +1,44 @@
+{{- $w := .Values.addons.workflows }}
+{{- if $w.enabled }}
+{{- $ns := .Values.global.namespace }}
+{{- $awBase := dict
+  "fullnameOverride" "argo-workflows"
+  "controller" (dict
+    "workflowNamespaces" (list $ns)
+    "workflowDefaults" (dict "spec" (dict
+      "podMetadata" (dict "annotations" (dict "sidecar.istio.io/inject" "false"))
+      "ttlStrategy" (dict "secondsAfterCompletion" 604800)
+    ))
+  )
+  "workflow" (dict "serviceAccount" (dict "create" true "name" "xyne-upgrade") "rbac" (dict "create" true))
+  "server" (dict "authModes" (list "client"))
+}}
+{{- $awValues := include "xyne-root.merge" (dict "base" $awBase "layers" (list $w.values.argoWorkflows)) | fromYaml }}
+{{- include "xyne-root.application" (dict "root" $ "name" "argo-workflows" "namespace" $w.namespace "wave" 1 "source" (include "xyne-root.helmSource" (dict "root" $ "repoURL" "https://argoproj.github.io/argo-helm" "chart" "argo-workflows" "targetRevision" $w.version "releaseName" "argo-workflows" "values" $awValues) | fromYaml) "ignoreDifferences" (include "xyne-root.deploymentIgnore" . | fromYamlArray)) }}
+{{- $apps := list }}
+{{- $migrating := list }}
+{{- range $name := list "xyne-zero-replication" "xyne-backend" "xyne-dashboard" "xyne-dashboard-external" "xyne-dashboard-edge" "xyne-ysweet" "xyne-claw" "xyne-claw-auth" "xyne-claw-auth-frontend" "xyne-transcription-agent" "xyne-lighton-ocr" "xyne-lighton-model" "xyne-zero" }}
+{{- if (index $.Values.apps $name | default dict).enabled }}
+{{- $apps = append $apps $name }}
+{{- if has $name (list "xyne-backend" "xyne-claw-auth") }}
+{{- $migrating = append $migrating $name }}
+{{- end }}
+{{- end }}
+{{- end }}
+{{- range .Values.apps.workers }}
+{{- $apps = append $apps (printf "xyne-worker-%s" .name) }}
+{{- end }}
+{{- $upBase := dict
+  "namespace" $ns
+  "argocdNamespace" .Release.Namespace
+  "rootApp" .Release.Name
+  "repoURL" .Values.global.repoURL
+  "imageRegistry" .Values.global.imageRegistry
+  "toolsImage" $w.toolsImage
+  "serviceAccount" "xyne-upgrade"
+  "apps" $apps
+  "migrating" $migrating
+}}
+{{- $upValues := include "xyne-root.merge" (dict "base" $upBase "layers" (list $w.values.upgrade)) | fromYaml }}
+{{- include "xyne-root.application" (dict "root" $ "name" "xyne-workflows" "namespace" $ns "wave" 2 "source" (include "xyne-root.helmSource" (dict "root" $ "path" "deployment/argocd/addons/workflows" "targetRevision" .Values.platformRevision "releaseName" "xyne-workflows" "values" $upValues) | fromYaml) "syncOptions" (list "SkipDryRunOnMissingResource=true")) }}
+{{- end }}

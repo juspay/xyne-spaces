@@ -233,10 +233,18 @@ const matchNamesOf = (item: ChannelSearchItem): string[] =>
  *
  * @param options.excludeDMs  Drop DMs/Group DMs entirely — used by the `#`
  *   Slack-style quick switcher which should show only regular channels.
+ * @param options.regularFuseMatches  Regular-channel matches already computed in a web worker.
  */
 export function filterChannelsBySearchableNames<
   T extends { channel: Channel; searchableNames?: string[]; searchNames?: string[] },
->(items: T[], query: string, options: { excludeDMs?: boolean } = {}): T[] {
+>(
+  items: T[],
+  query: string,
+  options: {
+    excludeDMs?: boolean;
+    regularFuseMatches?: ReadonlyArray<{ id: string; score?: number | undefined }>;
+  } = {},
+): T[] {
   const scoped = options.excludeDMs
     ? items.filter(({ channel }) => !isDMChannel(channel.scopeType))
     : items;
@@ -314,11 +322,20 @@ export function filterChannelsBySearchableNames<
 
   const regularChannels = regularItems.map(item => item.channel);
   const regularItemsById = new Map(regularItems.map(item => [item.channel.id, item]));
+  const fuseMatches = options.regularFuseMatches?.flatMap(({ id, score }) => {
+    const item = regularItemsById.get(id);
+    return item ? [{ item: item.channel, score }] : [];
+  });
 
   // searchChannelsWithScores runs the same Fuse fuzzy match + prefix boosts
   // as searchChannels but returns { item, score }[] instead of just items,
   // so we can apply affinity on top before deciding the final order.
-  const matchedRegular = searchChannelsWithScores(regularChannels, query, regularChannels.length)
+  const matchedRegular = searchChannelsWithScores(
+    regularChannels,
+    query,
+    regularChannels.length,
+    fuseMatches,
+  )
     .flatMap(({ item: channel, score }) => {
       const item = regularItemsById.get(channel.id);
       if (!item) return [];

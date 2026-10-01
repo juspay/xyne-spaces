@@ -281,8 +281,8 @@ export const tools: JenkinsTool[] = [
       const parameters = (args["parameters"] as Record<string, string> | undefined) ?? undefined;
       const result = await triggerBuild(config, branch, parameters);
       return result.success
-        ? text(`✅ ${result.message || "Build triggered"} for branch: ${branch}`)
-        : text(`❌ Failed: ${result.error || "Unknown error"}`, true);
+        ? text(`${result.message || "Build triggered"} for branch: ${branch}`)
+        : text(`Failed: ${result.error || "Unknown error"}`, true);
     },
   },
   {

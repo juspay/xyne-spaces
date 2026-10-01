@@ -84,14 +84,12 @@ export const useTableTicketsPage = (
     overdueReferenceTimeRef.current = null;
   }
 
-  const trimmedSearchTerm = options.searchTerm?.trim() ?? '';
   const vespaTokens = useMemo(
     () => [...(options.dynamicFieldVespaTokens ?? [])].sort(),
     [options.dynamicFieldVespaTokens],
   );
   const vespaDateRangeCount = Object.keys(options.dynamicFieldDateRanges ?? {}).length;
-  const requiresVespaIds =
-    trimmedSearchTerm.length > 0 || vespaTokens.length > 0 || vespaDateRangeCount > 0;
+  const requiresVespaIds = vespaTokens.length > 0 || vespaDateRangeCount > 0;
 
   const parsedAssignee = options.filters?.assignee?.length
     ? parseAssigneeFilter(options.filters.assignee)
@@ -108,20 +106,9 @@ export const useTableTicketsPage = (
     options.boardId ??
     (options.filters?.boards?.length === 1 ? options.filters.boards[0] : undefined);
 
-  const groupByKey =
-    typeof options.groupBy === 'object'
-      ? `${options.groupBy.type}:${options.groupBy.fieldId}`
-      : String(options.groupBy ?? 'none');
-  const vespaSearchKey = `table:${groupByKey}:${options.groupKey ?? ''}`;
-
   const vespaTicketSearch = useVespaTicketSearch({
-    searchTerm: trimmedSearchTerm,
     dynamicFieldValues: vespaTokens,
     enabled: requiresVespaIds && enabled,
-    limit: trimmedSearchTerm ? 400 : 200,
-    fetchAllDynamicFieldMatches: true,
-    maxFetchedResults: trimmedSearchTerm ? 800 : 400,
-    searchKey: vespaSearchKey,
     ...(options.dynamicFieldDateRanges
       ? { dynamicFieldDateRanges: options.dynamicFieldDateRanges }
       : {}),

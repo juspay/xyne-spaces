@@ -1,8 +1,8 @@
+import { emitDomainEvent } from '@/events/emitDomainEvent';
 import { z } from 'zod';
 import { EmailType } from '@xyne/shared';
 import { BaseTrigger } from './base-trigger';
 import { TriggerCategory } from '../types/categories';
-import { eventRouter } from '../engine/event-router';
 import { repositories } from '@/database/repositories';
 import { logger } from '@/utils/logger';
 import { TicketContextSchema } from './ticket-context';
@@ -66,11 +66,13 @@ export const EmailSentOutputSchema = TicketContextSchema.partial().extend({
     to: z.array(z.string()),
     cc: z.array(z.string()),
     bcc: z.array(z.string()),
+    replyTo: z.array(z.string()),
     type: z.nativeEnum(EmailType),
     conversationId: z.string(),
     channelId: z.string(),
     externalThreadId: z.string(),
     externalMessageId: z.string(),
+    rating: z.number().nullable(),
     createdAt: z.coerce.date(),
   }),
   sender: z.object({
@@ -190,7 +192,7 @@ export async function emitEmailSent(emailId: string): Promise<void> {
       return;
     }
 
-    await eventRouter.emit({ type: EMAIL_SENT_EVENT, payload: { emailId } }, workspaceId);
+    await emitDomainEvent({ type: EMAIL_SENT_EVENT, payload: { emailId } }, workspaceId);
   } catch (err) {
     logger.error('[automations] emitEmailSent failed', {
       emailId,
