@@ -83,7 +83,7 @@ PROJECT="${COMPOSE_PROJECT_NAME:-$(basename "$REPO_ROOT")}"
 export COMPOSE_PROJECT_NAME="$PROJECT"
 
 COMPOSE_FILES=()
-for f in docker-compose.dev.yml docker-compose.local.yml docker-compose.sandbox.yml vespa-core/deployment/docker-compose.dev.yml; do
+for f in docker-compose.dev.yml docker-compose.sandbox.yml vespa-core/deployment/docker-compose.dev.yml; do
     [ -f "$f" ] && COMPOSE_FILES+=("$f")
 done
 
