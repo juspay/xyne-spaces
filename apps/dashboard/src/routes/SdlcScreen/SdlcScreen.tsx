@@ -32,6 +32,7 @@ import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import {
   ArrowRight,
   BookOpen,
+  Bot,
   Boxes,
   Check,
   ChevronDown,
@@ -53,6 +54,7 @@ import {
   Plus,
   RefreshCw,
   Search,
+  Server,
   Settings,
   ShieldCheck,
   Sparkles,
@@ -126,6 +128,8 @@ import {
 import { SdlcWikiSection } from './SdlcWikiSection';
 import { type WikiCanvas, wikiScopePages, wikiScopes } from './sdlcWikiTree';
 import SdlcWorkflowsSection from './SdlcWorkflowsSection';
+import LibraryV2 from '../AIScreen/library/LibraryV2';
+import { EnvironmentsView } from '../AIScreen/environments/EnvironmentsView';
 import { SdlcActivityPreview } from './SdlcActivityPreview';
 import { EntityLinkContext, type EntityLinkScope } from '../../contexts/EntityLinkContext';
 import { useScope, useShortcutById } from '../../shortcuts';
@@ -175,7 +179,16 @@ import { type SdlcTicket } from './ticketPolicy';
 import { linkedTicketIds } from './artifactTicketPolicy';
 import { type HubWorkflow, type HubWorkflowPhase, useHubWorkflow } from './hubWorkflowRunPolicy';
 
-type Section = 'overview' | 'wiki' | 'knowledge' | 'tracks' | 'tickets' | 'artifacts' | 'workflows';
+type Section =
+  | 'overview'
+  | 'wiki'
+  | 'knowledge'
+  | 'tracks'
+  | 'tickets'
+  | 'artifacts'
+  | 'workflows'
+  | 'agents'
+  | 'environments';
 
 const StableCanvasScreen = memo(CanvasScreen);
 
@@ -192,6 +205,8 @@ const SECTIONS: Array<{ id: Exclude<Section, 'artifacts'>; label: string; icon: 
   { id: 'knowledge', label: 'Hub Knowledge', icon: ShieldCheck },
   { id: 'tickets', label: 'Issues', icon: CircleDot },
   { id: 'workflows', label: 'Workflows', icon: Workflow },
+  { id: 'agents', label: 'Agents', icon: Bot },
+  { id: 'environments', label: 'Environments', icon: Server },
 ];
 
 function sizeNameFieldToText(input: HTMLInputElement): void {
@@ -3909,6 +3924,19 @@ export default function SdlcScreen(): ReactElement {
               ) : section === 'workflows' ? (
                 <div className='min-h-0 flex-1 overflow-hidden bg-background'>
                   <SdlcWorkflowsSection />
+                </div>
+              ) : section === 'agents' ? (
+                <div className='min-h-0 flex-1 overflow-auto bg-background'>
+                  <LibraryV2 channelId={channelId} />
+                </div>
+              ) : section === 'environments' ? (
+                <div className='min-h-0 flex-1 overflow-hidden bg-background'>
+                  <EnvironmentsView
+                    key={channelId}
+                    channelId={channelId}
+                    hubRepoIds={channelRepos.map(repo => repo.id)}
+                    onAddRepository={() => setHubDialog('manage')}
+                  />
                 </div>
               ) : (
                 <div className='min-h-0 flex-1 overflow-auto bg-background p-7'>
