@@ -2,6 +2,9 @@
 # This file contains all the development environment and service configurations
 { config, pkgs, lib, flakeInputs, ... }:
 let
+  # Developer data directories were created by 17; Compose runs 16.
+  # Moving majors needs a pg_upgrade story, not a flake bump.
+  postgres = pkgs.postgresql_17;
   inherit (import ./nix/packages.nix { inherit pkgs lib; }) y-sweet;
   transcriptionEnv = import ./nix/python-agent.nix { inherit pkgs lib flakeInputs; };
   prismaEngines = import ./nix/prisma-engines.nix { inherit pkgs; };
@@ -30,7 +33,7 @@ in
       ffmpeg
       gitleaks
       trivy
-      postgresql
+      postgres
       process-compose
       kubernetes-helm
       gauge
@@ -128,7 +131,7 @@ in
         echo "Checking PostgreSQL health..."
         
         # Wait for PostgreSQL to be ready
-        if ! ${pkgs.postgresql}/bin/psql -h 127.0.0.1 -p 5433 -U xyne -d xyne_dev_db -c "SELECT 1;" > /dev/null 2>&1; then
+        if ! ${postgres}/bin/psql -h 127.0.0.1 -p 5433 -U xyne -d xyne_dev_db -c "SELECT 1;" > /dev/null 2>&1; then
           echo "ERROR: PostgreSQL is not ready"
           exit 1
         fi
@@ -150,9 +153,9 @@ in
         cd "$BACKEND_DIR"
 
         # Also handle data directories created before the common DB was added.
-        if ! ${pkgs.postgresql}/bin/psql -h 127.0.0.1 -p 5433 -U xyne -d postgres -tAc \
+        if ! ${postgres}/bin/psql -h 127.0.0.1 -p 5433 -U xyne -d postgres -tAc \
           "SELECT 1 FROM pg_database WHERE datname = 'xyne_common'" | grep -q 1; then
-          ${pkgs.postgresql}/bin/createdb -h 127.0.0.1 -p 5433 -U xyne xyne_common
+          ${postgres}/bin/createdb -h 127.0.0.1 -p 5433 -U xyne xyne_common
         fi
 
         # Never reset existing data as part of ordinary startup.
@@ -176,6 +179,7 @@ in
 
     # PostgreSQL service
     services.postgres."xyne-db" = {
+      package = postgres;
       enable = true;
       listen_addresses = "127.0.0.1";
       port = 5433;

@@ -73,6 +73,7 @@ cheap jobs first.
 
 - [x] Build Y-Sweet in `nix/packages.nix` from `github:juspay/y-sweet` at `221d5af`;
       remove curl and runtime cache plumbing; keep `.nix-cache/` ignored for existing checkouts.
+- [x] Pin PostgreSQL server and clients to 17 for existing developer data directories.
 - [x] Zero: use the module's `nodeModulesPath` against `apps/backend/node_modules`; drop `npx`.
 - [x] Transcription agent: uv2nix-built Python 3.11 environment for base requirements;
       no venv or pip at startup. Export Docker requirements from the lock; diarization stays separate.
@@ -103,6 +104,7 @@ the same services from `docker-compose.dev.yml` and the feature from
       `dev.yml`; `pnpm run services` core path becomes `nix run .#xyne-space-services`.
       Move `apps/backend` ysweet scripts and `watch-transcription-agent.sh` to process-compose.
       `docker-compose.test.yml` is standalone, so `dev.yml` can shrink freely.
+      Decide the Postgres major for dev (16 in Compose, 17 in Nix) and align them.
 - [ ] **Storage**: rustfs in Nix; remove the `minio` service.
 - [ ] **Calls**: LiveKit already in Nix; egress via `nix/containers` or from source; remove `livekit`, `livekit-egress`.
 - [ ] **Search**: Vespa via `nix/containers` (spike on Linux and macOS first); delete

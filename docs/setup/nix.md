@@ -110,6 +110,7 @@ data**; use them only when you intend to start from an empty database.
 pnpm is pinned to the root `packageManager` version via a Nix override until the
 pnpm 12 migration lands.
 
+- PostgreSQL is pinned to 17 to keep existing developer data directories compatible.
 - Linux Prisma engines are pinned to Prisma 5.22.0 and patched for Nix. The shell
   and service environment set `PRISMA_QUERY_ENGINE_LIBRARY` and
   `PRISMA_SCHEMA_ENGINE_BINARY`. Do not suppress checksum errors: a `linux-nixos`
