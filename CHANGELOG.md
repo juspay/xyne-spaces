@@ -1,3 +1,10 @@
+## [1.451.0](https://github.com/juspay/xyne-spaces/compare/v1.450.1...v1.451.0) (2026-10-01)
+
+
+### Features
+
+* push browser calls to the desktop app over a device stream ([#2575](https://github.com/juspay/xyne-spaces/issues/2575)) ([f013fb7](https://github.com/juspay/xyne-spaces/commit/f013fb763685fd603ffe4147bdb8ae6808e703bc))
+
 ## [1.450.1](https://github.com/juspay/xyne-spaces/compare/v1.450.0...v1.450.1) (2026-10-01)
 
 
