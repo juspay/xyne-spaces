@@ -1322,12 +1322,14 @@ export const MessageAttachment: React.FC<MessageAttachmentProps> = ({
   };
 
   if (isCsv && !compact && !isMobile) {
+    const csvMetadata = attachment.metadata as Record<string, unknown> | null;
     return (
       <InlineCsvFile
         attachmentId={attachment.id}
         fileName={attachment.originalFilename}
         fileSize={attachment.size}
         onOpen={handleCardClick}
+        {...(csvMetadata && { metadata: csvMetadata })}
         {...(extraActions && { extraActions })}
       />
     );

@@ -8,6 +8,7 @@ import VideoViewer from './VideoViewer';
 import CodeViewer from './CodeViewer';
 import HtmlViewer from './HtmlViewer';
 import PptxFileViewer from './PptxFileViewer';
+import { CSV_MIME_TYPES } from '../ui/utils/files';
 
 export interface ZoomState {
   scale: number;
@@ -88,7 +89,7 @@ export const FILE_TYPE_CONFIG: Record<string, FileTypeConfig<BaseViewerProps>> =
     displayName: 'Image',
   },
   csv: {
-    mimeTypes: ['text/csv'],
+    mimeTypes: CSV_MIME_TYPES,
     extensions: ['.csv'],
     component: CsvViewer,
     wrapperClass: 'h-full overflow-auto p-4',

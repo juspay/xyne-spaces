@@ -1,11 +1,11 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Download, Maximize2, Sheet } from 'lucide-react';
 import { createPreviewUrl } from '../../../services/clients/fileFetchService';
-import { downloadAttachment, truncateFileName } from './utils';
+import { downloadAttachment, formatFileSize, truncateFileName } from './utils';
 import { useWindowWidth } from '../../../hooks/useWindowWidth';
 import {
   CSV_PREVIEW_BYTES,
-  CSV_PREVIEW_COLS,
+  CSV_PREVIEW_MAX_FILE_BYTES,
   parseCsvPreview,
   type CsvPreview,
 } from './csvPreview';
@@ -39,22 +39,38 @@ export const InlineCsvFile: React.FC<{
   attachmentId: string;
   fileName: string;
   fileSize?: number;
+  metadata?: Record<string, unknown>;
   onOpen: () => void;
   extraActions?: React.ReactNode;
-}> = ({ attachmentId, fileName, fileSize, onOpen, extraActions }) => {
+}> = ({ attachmentId, fileName, fileSize, metadata, onOpen, extraActions }) => {
   const [containerRef, isNearViewport] = useNearViewport<HTMLDivElement>();
   const [preview, setPreview] = useState<CsvPreview | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isExpanded, setIsExpanded] = useState(true);
+  const [refetchTrigger, setRefetchTrigger] = useState(0);
   const windowWidth = useWindowWidth();
   const displayName = windowWidth < 500 ? truncateFileName(fileName, 28) : fileName;
+  const oversizedBytes =
+    fileSize !== undefined && fileSize > CSV_PREVIEW_MAX_FILE_BYTES ? fileSize : null;
+
+  const meta = metadata as { type?: string; version?: number } | undefined;
+  const prevVersionRef = useRef(meta?.version ?? 0);
 
   useEffect(() => {
-    if (!isNearViewport) return undefined;
+    const currentVersion = meta?.version;
+    const prevVersion = prevVersionRef.current;
+    if (currentVersion !== undefined && currentVersion > prevVersion) {
+      setRefetchTrigger(prev => prev + 1);
+    }
+    prevVersionRef.current = currentVersion ?? 0;
+  }, [meta?.version, meta?.type]);
+
+  useEffect(() => {
+    if (!isNearViewport || oversizedBytes !== null) return undefined;
     let cancelled = false;
     const load = async (): Promise<void> => {
       try {
-        const blob = await createPreviewUrl(attachmentId);
+        const blob = await createPreviewUrl(attachmentId, { forceRefresh: refetchTrigger > 0 });
         const byteTruncated = blob.size > CSV_PREVIEW_BYTES;
         const text = await (byteTruncated ? blob.slice(0, CSV_PREVIEW_BYTES) : blob).text();
         if (cancelled) return;
@@ -68,10 +84,11 @@ export const InlineCsvFile: React.FC<{
     return (): void => {
       cancelled = true;
     };
-  }, [attachmentId, isNearViewport]);
+  }, [attachmentId, isNearViewport, oversizedBytes, refetchTrigger]);
 
-  const hiddenCols = preview ? Math.max(0, preview.totalCols - CSV_PREVIEW_COLS) : 0;
-  const isEmpty = preview !== null && preview.header.length === 0;
+  const columns = preview ? Array.from({ length: preview.colCount }, (_, i) => i) : [];
+  const hiddenCols = preview ? Math.max(0, preview.totalCols - preview.colCount) : 0;
+  const isEmpty = preview !== null && preview.colCount === 0;
 
   return (
     <div ref={containerRef} className='w-full max-w-2xl' data-testid='inline-csv-preview'>
@@ -123,7 +140,18 @@ export const InlineCsvFile: React.FC<{
 
       {isExpanded && (
         <>
-          {error ? (
+          {oversizedBytes !== null ? (
+            <button
+              type='button'
+              onClick={onOpen}
+              className='w-full p-3 bg-muted rounded-lg border border-border text-xs text-muted-foreground hover:bg-accent hover:text-foreground text-left'
+              data-track-category='MESSAGE'
+              data-track-name='OPEN_CSV_FILE_TOO_LARGE'
+              data-track-metadata={JSON.stringify({ fileName, attachmentId, fileSize })}
+            >
+              {formatFileSize(oversizedBytes)} CSV — too big to preview inline, open full view
+            </button>
+          ) : error ? (
             <div className='p-3 bg-destructive/10 rounded-lg border border-destructive/30 text-xs text-destructive'>
               Could not load preview: {error}
             </div>
@@ -143,13 +171,15 @@ export const InlineCsvFile: React.FC<{
                 <table className='min-w-full text-xs border-collapse'>
                   <thead className='sticky top-0 bg-muted z-10'>
                     <tr>
-                      {preview.header.map((cell, i) => (
+                      {columns.map(c => (
                         <th
-                          key={i}
-                          className='px-2 py-1.5 text-left font-semibold text-foreground whitespace-nowrap border-b border-border max-w-[220px] truncate'
-                          title={cell}
+                          key={c}
+                          scope='col'
+                          className='px-2 py-1.5 text-left font-semibold text-foreground border-b border-border'
                         >
-                          {cell}
+                          <div className='max-w-[220px] truncate' title={preview.header[c] ?? ''}>
+                            {preview.header[c] ?? ''}
+                          </div>
                         </th>
                       ))}
                     </tr>
@@ -157,13 +187,14 @@ export const InlineCsvFile: React.FC<{
                   <tbody>
                     {preview.rows.map((row, r) => (
                       <tr key={r} className='odd:bg-background even:bg-muted/30'>
-                        {preview.header.map((_, c) => (
+                        {columns.map(c => (
                           <td
                             key={c}
-                            className='px-2 py-1 text-foreground whitespace-nowrap border-b border-border/60 max-w-[220px] truncate'
-                            title={row[c] ?? ''}
+                            className='px-2 py-1 text-foreground border-b border-border/60'
                           >
-                            {row[c] ?? ''}
+                            <div className='max-w-[220px] truncate' title={row[c] ?? ''}>
+                              {row[c] ?? ''}
+                            </div>
                           </td>
                         ))}
                       </tr>
@@ -182,7 +213,7 @@ export const InlineCsvFile: React.FC<{
                 >
                   Showing first {preview.rows.length} rows
                   {hiddenCols > 0
-                    ? ` and ${CSV_PREVIEW_COLS} of ${preview.totalCols} columns`
+                    ? ` and ${preview.colCount} of ${preview.totalCols} columns`
                     : ''}{' '}
                   — open full view
                 </button>

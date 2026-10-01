@@ -374,15 +374,19 @@ const AttachmentsBlock: React.FC<AttachmentsBlockProps> = ({
 
           {csvAttachments.length > 0 && (
             <div className='flex flex-col gap-2'>
-              {csvAttachments.map(attachment => (
-                <InlineCsvFile
-                  key={attachment.id}
-                  attachmentId={attachment.id}
-                  fileName={attachment.originalFilename}
-                  fileSize={attachment.size}
-                  onOpen={() => handleFileClick(attachment)}
-                />
-              ))}
+              {csvAttachments.map(attachment => {
+                const csvMetadata = attachment.metadata as Record<string, unknown> | null;
+                return (
+                  <InlineCsvFile
+                    key={attachment.id}
+                    attachmentId={attachment.id}
+                    fileName={attachment.originalFilename}
+                    fileSize={attachment.size}
+                    onOpen={() => handleFileClick(attachment)}
+                    {...(csvMetadata && { metadata: csvMetadata })}
+                  />
+                );
+              })}
             </div>
           )}
 

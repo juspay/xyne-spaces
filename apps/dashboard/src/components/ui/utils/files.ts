@@ -25,6 +25,14 @@ export type FileCategory =
  */
 export const BLOCKED_EXTENSIONS: readonly string[] = DANGEROUS_EXTENSIONS;
 
+export const CSV_MIME_TYPES: string[] = [
+  'text/csv',
+  'text/comma-separated-values',
+  'application/csv',
+  'text/x-csv',
+  'application/x-csv',
+];
+
 /**
  * Extension to color mapping for file badges
  */
@@ -72,7 +80,7 @@ export const getFileCategory = (file: { type: string; name: string | undefined }
   if (type.startsWith('video/')) return 'video';
   if (type.startsWith('audio/')) return 'audio';
   if (type === 'application/pdf' || name.endsWith('.pdf')) return 'pdf';
-  if (type === 'text/csv' || name.endsWith('.csv')) return 'csv';
+  if (CSV_MIME_TYPES.includes(type) || name.endsWith('.csv')) return 'csv';
   const codeExtensions = [
     '.txt',
     '.json',
