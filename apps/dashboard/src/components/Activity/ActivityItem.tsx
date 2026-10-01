@@ -24,6 +24,7 @@ import { StageApprovalActivity } from './StageApprovalActivity';
 import { KbIngestionActivity } from './KbIngestionActivity';
 import { SlashCommandArtifactActivity } from './SlashCommandArtifactActivity';
 import { MaxWorkloadActivity } from './MaxWorkloadActivity';
+import { GenericActivity } from './GenericActivity';
 
 interface ActivityItemProps {
   activity: ActivityWithRelated;
@@ -87,6 +88,12 @@ export const ActivityItem = memo(function ActivityItem({
       return <TicketAssignmentActivity activity={activity} isExpanded={isExpanded} />;
 
     case 'ticket_status':
+    case 'ticket_status_v2':
+    case 'ticket_merged':
+    case 'ticket_merged_target':
+    case 'ticket_unmerged':
+    case 'ticket_unmerged_target':
+    case 'ticket_stage_eta':
     case 'ticket_eta':
     case 'ticket_board':
     case 'ticket_assigned_to':
@@ -158,7 +165,17 @@ export const ActivityItem = memo(function ActivityItem({
     case 'max_workload_reached':
       return <MaxWorkloadActivity activity={activity} isExpanded={isExpanded} />;
 
+    case 'missed_call':
+    case 'workflow_question':
+    case 'delayed_message_cancelled':
+    case 'delayed_message_failed':
+    case 'created':
+    case 'archived':
+    case 'visibility_changed':
+      return <GenericActivity activity={activity} isExpanded={isExpanded} />;
+
     default:
-      return null;
+      // Actions without a renderer yet still get a visible row instead of a blank gap.
+      return <GenericActivity activity={activity} isExpanded={isExpanded} />;
   }
 });
