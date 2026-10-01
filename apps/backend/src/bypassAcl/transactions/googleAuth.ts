@@ -3,13 +3,16 @@ import { GoogleService } from '@/services/googleService';
 import { ExternalSourcePlatform } from '@/integrations/core/types';
 import { config as appConfig } from '@/config/env';
 import { db } from '@/database/client';
+import { newConnectId, createConnectGroupForEntity } from '@/database/connectGroup';
 import { PendingChannelData } from '@/integrations/routes/google-auth';
 import { logger } from '@/utils/logger';
 import { ChannelScopeType, ChannelType, ChannelRole, EmailMergeMode, DeskType } from '@xyne/shared';
 
 
 export function getAuthCallbackTx(cd: PendingChannelData, network: Awaited<ReturnType<typeof GoogleService.prepareExternalSourceNetwork>>, emailAddress: any) {
-  return transaction(['Board', 'Channel', 'ChannelBoardMapping', 'ChannelParticipant', 'ChannelStats', 'ChannelUserStatus', 'Conversation', 'EmailChannelPreference', 'ExternalSource'], 'getAuthCallback: channel, participant, status, preference, board-mapping and external-source rows must commit atomically; tx is not ACL-wrapped', db, async (tx) => {
+  return transaction(['Board', 'Channel', 'ChannelBoardMapping', 'ChannelParticipant', 'ChannelStats', 'ChannelUserStatus', 'Conversation', 'EmailChannelPreference', 'ExternalSource', 'ConnectGroup'], 'getAuthCallback: channel, participant, status, preference, board-mapping and external-source rows must commit atomically; tx is not ACL-wrapped', db, async (tx) => {
+    // Slack Connect: the channel is a shareable entity → its own connectId + a private connect_group row.
+    const connectId = newConnectId();
     const ch = await tx.channel.create({
       data: {
         scopeType: ChannelScopeType.DEFAULT,
@@ -20,7 +23,14 @@ export function getAuthCallbackTx(cd: PendingChannelData, network: Awaited<Retur
         workspaceId: cd.workspaceId,
         projectId: cd.projectId,
         type: ChannelType.EMAIL,
+        connectId,
       },
+    });
+    await createConnectGroupForEntity(tx, {
+      entityType: 'channel',
+      entityId: ch.id,
+      hostWorkspaceId: cd.workspaceId,
+      connectId,
     });
     const now = new Date();
     const seenConversations = await tx.conversation.findMany({

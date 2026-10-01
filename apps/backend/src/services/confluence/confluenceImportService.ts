@@ -2,6 +2,7 @@ import crypto from 'crypto';
 import { v4 as uuidv4 } from 'uuid';
 import type { Prisma } from '@prisma/client';
 import { DatabaseClient } from '@/database/client';
+import { newConnectId, resolveCanvasConnectId } from '@/database/connectGroup';
 import { logger } from '@/utils/logger';
 import { convertMarkdownToBlockNote } from '@/services/canvasService';
 import type { BlockNoteBlock } from '@/types/blockNoteTypes';
@@ -1243,6 +1244,8 @@ export class ConfluenceImportService {
       throw new Error('workspaceId required: Confluence import config missing workspaceId');
     }
     const ownerUserIds = uniqueIds([creatorUserId, lastEditorUserId, actorUserId]);
+    const connectId = newConnectId();
+    const connectNow = new Date();
     await db.$transaction([
       db.canvas.create({
         data: {
@@ -1257,6 +1260,7 @@ export class ConfluenceImportService {
           isCollaborative: true,
           docType: DocType.Canvas,
           workspaceId,
+          connectId,
           projectId: prepared.destination.projectId,
           ...(prepared.destination.type === 'channel' || prepared.destination.type === 'channelFolder'
             ? { channelId: prepared.destination.channelId }
@@ -1265,6 +1269,19 @@ export class ConfluenceImportService {
             ? { folderId: prepared.destination.folderId }
             : {}),
           metadata: this.buildCanvasMetadata(prepared, input, checksum, sourceUrl, undefined, visibilityDecision) as Prisma.InputJsonValue,
+        },
+      }),
+      db.connectGroup.create({
+        data: {
+          entityType: 'canvas',
+          entityId: canvasId,
+          hostWorkspaceId: workspaceId,
+          invitedEntityId: null,
+          invitedWorkspaceId: null,
+          connectId,
+          status: 'ACTIVE',
+          createdAt: connectNow,
+          updatedAt: connectNow,
         },
       }),
       db.canvasParticipant.createMany({
@@ -1276,6 +1293,7 @@ export class ConfluenceImportService {
           joinedAt: new Date(),
           updatedAt: new Date(),
           workspaceId,
+          connectId,
         })),
         skipDuplicates: true,
       }),
@@ -1331,6 +1349,7 @@ export class ConfluenceImportService {
     const ownerUserIds = uniqueIds(userIds);
     if (ownerUserIds.length === 0) return;
 
+    const connectId = await resolveCanvasConnectId(db, canvasId);
     await db.canvasParticipant.createMany({
       data: ownerUserIds.map(userId => ({
         id: uuidv4(),
@@ -1340,6 +1359,7 @@ export class ConfluenceImportService {
         joinedAt: new Date(),
         updatedAt: new Date(),
         workspaceId,
+        ...(connectId ? { connectId } : {}),
       })),
       skipDuplicates: true,
     });

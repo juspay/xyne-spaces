@@ -1,5 +1,6 @@
 import { Prisma, PrismaClient } from '@prisma/client'
 import { BaseQueryACL, ACLContext } from '../base-acl'
+import { connectReachWhere } from '../../connectGroup'
 
 export class CanvasVersionsACL extends BaseQueryACL<
   Prisma.CanvasVersionWhereInput,
@@ -10,11 +11,13 @@ export class CanvasVersionsACL extends BaseQueryACL<
   }
 
   async getWhereClause(): Promise<Prisma.CanvasVersionWhereInput> {
-      return { workspaceId: this.ctx.workspaceId }
+      // Slack Connect: connectId → connect_group workspace truth; else workspaceId.
+      return connectReachWhere(this.prisma, this.ctx.workspaceId, 'canvas_versions')
   }
 
   async getMutateWhere(): Promise<Prisma.CanvasVersionWhereInput> {
-    return { workspaceId: this.ctx.workspaceId }
+    // Slack Connect: update/delete scope follows the same connect_group reach as reads.
+    return connectReachWhere(this.prisma, this.ctx.workspaceId, 'canvas_versions', 'write')
   }
 
   async canCreate(data: Prisma.CanvasVersionUncheckedCreateInput): Promise<boolean> {

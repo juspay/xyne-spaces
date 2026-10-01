@@ -5,6 +5,8 @@ import { ChannelScopeType, ChannelVisibility, ChannelType, ProjectType } from '@
 import { QueryOptions } from '@/types/database';
 import { logger } from '@/utils/logger';
 import { withWorkspaceScope } from '@/database/tenant/context';
+import { newConnectId } from '@/database/connectGroup';
+import { createChannelWithConnectGroupTx } from '@/bypassAcl/transactions/connectGroupEntities';
 //import { queueChannelIngestion } from '@/queues/vespaQueue';
 
 export interface CreateChannelInput {
@@ -64,8 +66,13 @@ export class ChannelRepository extends BaseRepository<Channel, CreateChannelInpu
       throw new Error(`Channel with name "${data.name}" already exists.`);
     }
 
-    const result = await this.db.channel.create({
-      data: {
+    // Slack Connect: mint a connectId, stamp it on the channel, and create its private
+    // connect_group row so every new channel has a group entry from creation.
+    const connectId = newConnectId();
+    // Atomic channel + connect_group (bypassAcl op): a channel with a connectId but no group row is
+    // invisible to connectReach and unrepairable via the app, so both must commit together.
+    const result = await createChannelWithConnectGroupTx(
+      {
         scopeType: data.scopeType,
         name: data.name,
         description: data.description,
@@ -74,9 +81,13 @@ export class ChannelRepository extends BaseRepository<Channel, CreateChannelInpu
         // '' sentinel for a projectless channel (column stays NOT NULL for prod/pre-prod sync).
         projectId: data.projectId ?? '',
         workspaceId: data.workspaceId,
+        connectId,
         ...(data.type && { type: data.type }),
-      }
-    });
+      },
+      data.workspaceId,
+      connectId,
+      this.db,
+    );
 
     // Dual-write: mirror the channel→project board set into ChannelBoardMapping so
     // downstream consumers never read channel.projectId. Skipped entirely when the

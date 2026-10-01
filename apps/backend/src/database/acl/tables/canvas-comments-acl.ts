@@ -1,5 +1,6 @@
 import { Prisma, PrismaClient } from '@prisma/client'
 import { BaseQueryACL, ACLContext } from '../base-acl'
+import { connectReachWhere } from '../../connectGroup'
 
 /** Canvas comments are tenant-scoped directly by their denormalized workspaceId. */
 export class CanvasCommentsACL extends BaseQueryACL<
@@ -11,11 +12,12 @@ export class CanvasCommentsACL extends BaseQueryACL<
   }
 
   async getWhereClause(): Promise<Prisma.CanvasCommentWhereInput> {
-    return { workspaceId: this.ctx.workspaceId }
+    // Slack Connect: connectId → connect_group workspace truth; else the row's own workspaceId.
+    return connectReachWhere(this.prisma, this.ctx.workspaceId, 'canvas_comments', 'read')
   }
 
   async getMutateWhere(): Promise<Prisma.CanvasCommentWhereInput> {
-    return { workspaceId: this.ctx.workspaceId }
+    return connectReachWhere(this.prisma, this.ctx.workspaceId, 'canvas_comments', 'write')
   }
 
   async canCreate(data: Prisma.CanvasCommentUncheckedCreateInput): Promise<boolean> {

@@ -551,6 +551,9 @@ export class ACLFactory {
       return new BaseQueryACL(ctx, prisma)
     case 'deskAutoLabelRuleReference':
       return new BaseQueryACL(ctx, prisma)
+    case 'connectGroup':
+      // Slack Connect reach table — default ACL in Phase 1 (no per-row restriction yet).
+      return new BaseQueryACL(ctx, prisma)
     }
   }
 }
