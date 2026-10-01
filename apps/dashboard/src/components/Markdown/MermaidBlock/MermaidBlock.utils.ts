@@ -49,6 +49,16 @@ export const isValidMermaidSyntax = (chart: string): boolean => {
 };
 
 /**
+ * While a reply streams, the closing ``` fence can arrive one backtick at a
+ * time, so the code block briefly holds the finished diagram plus a trailing
+ * line of one or two backticks. Mermaid rejects that line for most diagram
+ * types. A mermaid diagram never legitimately ends with a backtick-only line,
+ * so drop it before rendering.
+ */
+export const stripPartialClosingFence = (chart: string): string =>
+  chart.replace(/\n[ \t]*`{1,2}[ \t]*$/, '');
+
+/**
  * Generate a unique ID for mermaid diagram rendering
  */
 export const generateMermaidId = (): string => {
@@ -85,7 +95,13 @@ export const renderMermaidDiagram = async ({
 
   // Theme is part of the render identity; switching themes must replace the
   // SVG even when the diagram source is unchanged.
-  if (lastRenderedChart === `${isDark ? 'dark' : 'light'}:${chart}`) return;
+  if (lastRenderedChart === `${isDark ? 'dark' : 'light'}:${chart}`) {
+    // The SVG on screen already matches this chart. A render that failed in
+    // between (e.g. a half-streamed closing fence) may have left an error set;
+    // clear it, otherwise the block stays stuck on the error until remount.
+    onError('');
+    return;
+  }
 
   // Validate Mermaid syntax
   const hasValidSyntax = isValidMermaidSyntax(chart);

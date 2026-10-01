@@ -18,6 +18,7 @@ import {
   copyToClipboard,
   downloadDiagramAsPng,
   isValidMermaidSyntax,
+  stripPartialClosingFence,
 } from './MermaidBlock.utils';
 
 function useIsDarkTheme(): boolean {
@@ -86,10 +87,16 @@ const MermaidBlockComponent = ({
   const renderTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const lastRenderedChartRef = useRef<string>('');
   const hasValidSyntaxRef = useRef<boolean>(false);
+  // Monotonic id of the latest scheduled render. Renders are async and not
+  // serialized, so an older (partial, failing) render can settle after a newer
+  // one; only the latest render may update state.
+  const renderSeqRef = useRef<number>(0);
 
   useEffect(() => {
+    const renderChart = stripPartialClosingFence(chart);
+
     // Update valid syntax ref
-    hasValidSyntaxRef.current = isValidMermaidSyntax(chart);
+    hasValidSyntaxRef.current = isValidMermaidSyntax(renderChart);
 
     // Clear previous timeout
     if (renderTimeoutRef.current) {
@@ -98,17 +105,24 @@ const MermaidBlockComponent = ({
 
     // Debounce rendering to prevent flickering during streaming
     renderTimeoutRef.current = setTimeout(() => {
+      const seq = ++renderSeqRef.current;
+      const isLatest = (): boolean => seq === renderSeqRef.current;
       void renderMermaidDiagram({
-        chart,
+        chart: renderChart,
         messageId,
         isDark,
         lastRenderedChart: lastRenderedChartRef.current,
         onSuccess: (renderedSvg, renderedChart) => {
+          if (!isLatest()) return;
           setSvg(renderedSvg);
           lastRenderedChartRef.current = `${isDark ? 'dark' : 'light'}:${renderedChart}`;
         },
-        onError: setError,
-        onLoading: setIsRendering,
+        onError: message => {
+          if (isLatest()) setError(message);
+        },
+        onLoading: loading => {
+          if (isLatest()) setIsRendering(loading);
+        },
       });
     }, 400);
 
