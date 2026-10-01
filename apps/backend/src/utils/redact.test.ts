@@ -1,4 +1,4 @@
-import { isSensitiveKey, redactSensitiveFields, redactSensitiveUrl } from './redact';
+import { isSensitiveKey, redactSensitiveFields, redactSensitiveUrl, TRUNCATED_VALUE } from './redact';
 
 const CANARY = 'canary-secret-7f3a9c';
 
@@ -32,7 +32,29 @@ describe('redactSensitiveUrl', () => {
 });
 
 describe('isSensitiveKey', () => {
-  it.each(['secret', 'Secret', 'client_state', 'clientState', 'api-key', 'apiKey', 'Authorization', 'accessToken'])(
+  it.each([
+    'secret',
+    'Secret',
+    'client_state',
+    'clientState',
+    'api-key',
+    'apiKey',
+    'Authorization',
+    'accessToken',
+    // Common HTTP header spellings (e.g. axios error.response.headers).
+    'x-api-key',
+    'X-Api-Key',
+    'set-cookie',
+    'Set-Cookie',
+    'proxy-authorization',
+    'x-auth-token',
+    'signingSecret',
+    'signing_secret',
+    'authToken',
+    'sessionToken',
+    'apiSecret',
+    'bearer',
+  ])(
     'treats %s as sensitive',
     (key) => expect(isSensitiveKey(key)).toBe(true),
   );
@@ -69,5 +91,26 @@ describe('redactSensitiveFields', () => {
     input.self = input;
     const out = redactSensitiveFields(input);
     expect(out.secret).toBe('[REDACTED]');
+    // The cycle must resolve to the redacted copy, not the original.
+    expect(out.self).toBe(out);
+    expect((out.self as Record<string, unknown>).secret).toBe('[REDACTED]');
+    expect(input.secret).not.toBe('[REDACTED]');
+  });
+
+  it('does not leak through an indirect cycle back to a redacted ancestor', () => {
+    const parent: Record<string, unknown> = { token: CANARY };
+    parent.child = { meta: { back: parent } };
+    const out = redactSensitiveFields(parent);
+    expect(JSON.stringify(out, (key, v: unknown) => (key !== '' && v === out ? undefined : v))).not.toContain(CANARY);
+    const child = out.child as { meta: { back: Record<string, unknown> } };
+    expect(child.meta.back.token).toBe('[REDACTED]');
+  });
+
+  it('truncates containers deeper than the redaction depth instead of passing them through', () => {
+    let deep: Record<string, unknown> = { secret: CANARY };
+    for (let i = 0; i < 12; i++) deep = { next: deep };
+    const out = redactSensitiveFields(deep);
+    expect(JSON.stringify(out)).not.toContain(CANARY);
+    expect(JSON.stringify(out)).toContain(TRUNCATED_VALUE);
   });
 });

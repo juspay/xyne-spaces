@@ -82,6 +82,17 @@ export type WebhookContext = {
   body: unknown;
 };
 
+/**
+ * Reads a single id-like field from an untrusted request body for logging.
+ * Returns it only when it is a string, so arbitrary payload data never reaches
+ * the logs through this path.
+ */
+function pickLoggableId(body: unknown, field: string): string | undefined {
+  if (typeof body !== 'object' || body === null || !(field in body)) return undefined;
+  const value: unknown = Reflect.get(body, field);
+  return typeof value === 'string' ? value : undefined;
+}
+
 class IncomingWebhookController {
   buildIncomingWebhookUrl = (
     workspaceId: string | undefined,
@@ -506,7 +517,7 @@ class IncomingWebhookController {
     } catch (error) {
       logger.error('[Incoming-Webhook] Error creating webhook', {
         userId: req.user?.id,
-        installedAppId: (req.body as { installedAppId?: unknown } | undefined)?.installedAppId,
+        installedAppId: pickLoggableId(req.body, 'installedAppId'),
         error,
       });
       res.status(500).json({ error: 'Internal server error' });

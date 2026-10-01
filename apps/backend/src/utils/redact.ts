@@ -36,12 +36,21 @@ const SENSITIVE_KEYS = new Set(
     'refreshToken',
     'idToken',
     'authorization',
+    'proxyAuthorization',
     'cookie',
+    'setCookie',
     'apiKey',
+    'xApiKey',
+    'apiSecret',
+    'authToken',
+    'xAuthToken',
+    'sessionToken',
+    'bearer',
     'clientSecret',
     'clientState',
     'channelToken',
     'webhookSecret',
+    'signingSecret',
     'privateKey',
   ].map((key) => normalizeKey(key)),
 );
@@ -55,6 +64,7 @@ export function isSensitiveKey(key: string): boolean {
 }
 
 const MAX_REDACTION_DEPTH = 8;
+export const TRUNCATED_VALUE = '[TRUNCATED]';
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
   if (value === null || typeof value !== 'object') return false;
@@ -62,41 +72,69 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
   return proto === Object.prototype || proto === null;
 }
 
+function isTraversable(value: unknown): value is Record<string, unknown> | unknown[] {
+  return Array.isArray(value) || isPlainObject(value);
+}
+
+function isRedactableValue(value: unknown): boolean {
+  return value !== undefined && value !== null && value !== '';
+}
+
 /**
- * Returns `value` with every sensitive key's value replaced by `[REDACTED]`,
- * at any depth (up to MAX_REDACTION_DEPTH). Copy-on-write: the input is never
- * mutated, and the same reference is returned when nothing needed redacting.
+ * True when anything reachable from `value` needs rewriting: a sensitive key
+ * with a value, or a container beyond MAX_REDACTION_DEPTH (which we cannot
+ * inspect, so it fails closed and gets truncated).
  */
-export function redactSensitiveFields<T>(value: T, depth = 0, seen: WeakSet<object> = new WeakSet()): T {
-  if (depth > MAX_REDACTION_DEPTH) return value;
-  if (!Array.isArray(value) && !isPlainObject(value)) return value;
-  if (seen.has(value as object)) return value;
-  seen.add(value as object);
+function needsRedaction(value: unknown, depth: number, seen: WeakSet<object>): boolean {
+  if (!isTraversable(value)) return false;
+  if (depth > MAX_REDACTION_DEPTH) return true;
+  if (seen.has(value)) return false;
+  seen.add(value);
 
   if (Array.isArray(value)) {
-    let changed = false;
-    const out = value.map((item) => {
-      const next = redactSensitiveFields(item, depth + 1, seen);
-      if (next !== item) changed = true;
-      return next;
-    });
-    return (changed ? out : value) as T;
+    return value.some((item) => needsRedaction(item, depth + 1, seen));
+  }
+  return Object.keys(value).some((key) =>
+    isSensitiveKey(key) ? isRedactableValue(value[key]) : needsRedaction(value[key], depth + 1, seen),
+  );
+}
+
+/**
+ * Deep-copies plain objects/arrays, masking sensitive keys. `copies` maps each
+ * original container to its copy, and the copy is registered before its
+ * children are visited, so a cycle back to an ancestor resolves to the
+ * redacted copy rather than the original.
+ */
+function copyRedacted(value: unknown, depth: number, copies: WeakMap<object, unknown>): unknown {
+  if (!isTraversable(value)) return value;
+  const existing = copies.get(value);
+  if (existing !== undefined) return existing;
+  if (depth > MAX_REDACTION_DEPTH) return TRUNCATED_VALUE;
+
+  if (Array.isArray(value)) {
+    const out: unknown[] = [];
+    copies.set(value, out);
+    for (const item of value) out.push(copyRedacted(item, depth + 1, copies));
+    return out;
   }
 
-  const record = value as Record<string, unknown>;
-  let out: Record<string, unknown> | undefined;
-  for (const key of Object.keys(record)) {
-    const item = record[key];
-    let next: unknown;
-    if (isSensitiveKey(key) && item !== undefined && item !== null && item !== '') {
-      next = REDACTED_VALUE;
-    } else {
-      next = redactSensitiveFields(item, depth + 1, seen);
-    }
-    if (next !== item) {
-      out ??= { ...record };
-      out[key] = next;
-    }
+  const out: Record<string, unknown> = Object.getPrototypeOf(value) === null ? Object.create(null) : {};
+  copies.set(value, out);
+  for (const key of Object.keys(value)) {
+    const item = value[key];
+    out[key] = isSensitiveKey(key) && isRedactableValue(item) ? REDACTED_VALUE : copyRedacted(item, depth + 1, copies);
   }
-  return (out ?? value) as T;
+  return out;
+}
+
+/**
+ * Returns `value` with every sensitive key's value replaced by `[REDACTED]`,
+ * at any depth. Containers nested deeper than MAX_REDACTION_DEPTH are replaced
+ * by `[TRUNCATED]` (fail closed). The input is never mutated, and the same
+ * reference is returned when nothing needed rewriting. Cycle-safe: no path
+ * through a cycle leads back to an unredacted original.
+ */
+export function redactSensitiveFields<T>(value: T): T {
+  if (!needsRedaction(value, 0, new WeakSet())) return value;
+  return copyRedacted(value, 0, new WeakMap()) as T;
 }
