@@ -1,3 +1,18 @@
+## [1.449.0](https://github.com/juspay/xyne-spaces/compare/v1.448.0...v1.449.0) (2026-10-01)
+
+
+### Features
+
+* adding grafana pyroscope to backend ([#2567](https://github.com/juspay/xyne-spaces/issues/2567)) ([0f45982](https://github.com/juspay/xyne-spaces/commit/0f4598205c380d09c7489d20f2bb7542c54b0a56))
+* pragati xyne integration app changes ([#2501](https://github.com/juspay/xyne-spaces/issues/2501)) ([20bb474](https://github.com/juspay/xyne-spaces/commit/20bb47494a91b06655cf4a2d02d69cc7ec1b7e83))
+
+
+### Bug Fixes
+
+* agent mcp suggestions ([#2510](https://github.com/juspay/xyne-spaces/issues/2510)) ([a93127b](https://github.com/juspay/xyne-spaces/commit/a93127beda63d2253c29c151f2a39a2aa26c0bee))
+* removed unique id configuration to avoid pull push inconsistency ([#2572](https://github.com/juspay/xyne-spaces/issues/2572)) ([080fcae](https://github.com/juspay/xyne-spaces/commit/080fcae7b2c26a5f63f87182d3a4fd6a405442d2))
+* restyle claw agent progress indicator as the typing indicator's twin ([#2467](https://github.com/juspay/xyne-spaces/issues/2467)) ([a92a26d](https://github.com/juspay/xyne-spaces/commit/a92a26d69f54a02a95763b64ee9ec3980ee46c55))
+
 ## [1.448.0](https://github.com/juspay/xyne-spaces/compare/v1.447.1...v1.448.0) (2026-10-01)
 
 
