@@ -41,7 +41,7 @@ import {
 import { Switch } from '../../ui/Switch';
 import { Tooltip } from '../../ui/Tooltip';
 import Avatar from '../../ui/Avatar/Avatar';
-import { fetchTriggerCatalog } from '../../../api/automationsApi';
+import { fetchAutomationHasRuns, fetchTriggerCatalog } from '../../../api/automationsApi';
 import { useCachedQuery } from '../../../hooks/useCachedQuery';
 import { useAuthContextValues } from '../../../hooks/useAuth';
 import { useShareableOrigin } from '../../../hooks/useShareableOrigin';
@@ -302,6 +302,12 @@ export function AutomationsList({
                   onDelete={() => setPendingDelete(item)}
                   onArchive={
                     isAutomationsAdmin && item.status === AutomationStatusValues.DISABLED
+                      ? () => archiveMutation.mutate(item.id)
+                      : undefined
+                  }
+                  onArchiveDraft={
+                    item.status === AutomationStatusValues.DRAFT &&
+                    (isAutomationsAdmin || (!!me && item.createdById === me.id))
                       ? () => archiveMutation.mutate(item.id)
                       : undefined
                   }
@@ -638,6 +644,8 @@ interface AutomationRowProps {
   onClone: () => void;
   onDelete: () => void;
   onArchive?: (() => void) | undefined;
+  /** Owner/admin: archive a DRAFT that has runs (it can't be deleted). */
+  onArchiveDraft?: (() => void) | undefined;
   onToggleActive?: ((next: boolean) => void) | undefined;
   toggleLoading: boolean;
 }
@@ -652,12 +660,21 @@ function AutomationRow({
   onClone,
   onDelete,
   onArchive,
+  onArchiveDraft,
   onToggleActive,
   toggleLoading,
 }: AutomationRowProps): React.ReactElement {
   const TriggerIcon =
     (triggerIconName && TRIGGER_ICON_BY_NAME[triggerIconName]) || LightningThunderElectricOn;
   const [menuOpen, setMenuOpen] = useState(false);
+  const isDraft = automation.status === AutomationStatusValues.DRAFT;
+  // A draft with any run can't be deleted (it would cascade its runs) — offer Archive.
+  // Asked lazily, only once the row menu is opened.
+  const hasRunsQuery = useQuery({
+    queryKey: ['automation-has-runs', automation.id],
+    queryFn: () => fetchAutomationHasRuns(automation.id),
+    enabled: menuOpen && isDraft,
+  });
   const isActive = automation.status === 'ACTIVE';
   const creator = useUser(automation.createdById);
   const shareableOrigin = useShareableOrigin();
@@ -848,21 +865,38 @@ function AutomationRow({
                   }}
                 />
               )}
-              {/* Delete is permitted only for DRAFT proposals — anything past
-                  DRAFT (PENDING, LIVE, ARCHIVED, terminal) is kept as audit
-                  history. */}
-              {automation.status === AutomationStatusValues.DRAFT ? (
+              {/* Delete is permitted only for DRAFT proposals with no runs — anything
+                  past DRAFT (PLAYGROUND, PENDING, LIVE, ARCHIVED, terminal) is kept as
+                  audit history, and a draft with runs is archived instead. */}
+              {isDraft ? (
                 <>
                   <div role='separator' className='my-1 h-px bg-border' />
-                  <RowMenuButton
-                    label='Delete'
-                    danger
-                    icon={<DeleteDustbin01 className='size-4' />}
-                    onClick={() => {
-                      setMenuOpen(false);
-                      onDelete();
-                    }}
-                  />
+                  {hasRunsQuery.data === false ? (
+                    <RowMenuButton
+                      label='Delete'
+                      danger
+                      icon={<DeleteDustbin01 className='size-4' />}
+                      onClick={() => {
+                        setMenuOpen(false);
+                        onDelete();
+                      }}
+                    />
+                  ) : hasRunsQuery.data === true ? (
+                    onArchiveDraft && (
+                      <RowMenuButton
+                        label='Archive'
+                        icon={<Archive className='size-4' />}
+                        onClick={() => {
+                          setMenuOpen(false);
+                          onArchiveDraft();
+                        }}
+                      />
+                    )
+                  ) : (
+                    <div className='px-3 py-1.5 text-xs text-muted-foreground'>
+                      {hasRunsQuery.isError ? 'Could not check runs' : 'Checking runs…'}
+                    </div>
+                  )}
                 </>
               ) : null}
             </Popover>

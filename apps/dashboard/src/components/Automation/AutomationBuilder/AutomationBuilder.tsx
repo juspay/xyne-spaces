@@ -1,10 +1,11 @@
 import { logger, Event as LogEvent } from '../../../utils/logger';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { useMutation, useQueries, useQuery } from '@tanstack/react-query';
+import { useMutation, useQueries, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   Archive,
   ArrowLeft,
+  Circle,
   Check,
   Copy,
   GitBranch,
@@ -13,6 +14,7 @@ import {
   Power,
   Save as SaveIcon,
   Send,
+  Square,
   Trash2,
   Undo2,
   X,
@@ -40,6 +42,7 @@ import {
 } from '../Automation.types';
 import { useIsAutomationsAdmin } from '../useIsAutomationsAdmin';
 import {
+  fetchAutomationHasRuns,
   fetchAutomationVersions,
   fetchOperators,
   fetchStepCatalog,
@@ -51,6 +54,7 @@ import {
 import { useZero } from '../../../hooks/useZero';
 import { useSelf } from '../../../hooks/useUsers';
 import { mutators } from '../../../zero/mutators';
+import { surfaceMutationError } from '../../../utils/zeroMutationToast';
 import { v4 as uuid } from 'uuid';
 import { triggerTypeToEventType } from '../automation.adapter';
 import { TriggerCard } from './TriggerCard/TriggerCard';
@@ -76,6 +80,8 @@ const MAX_AUTOMATION_NAME_LENGTH = 80;
 
 const STATUS_PILL: Record<string, string> = {
   DRAFT: 'bg-muted text-muted-foreground border-border',
+  PLAYGROUND:
+    'bg-sky-500/10 text-sky-700 border-sky-500/30 dark:text-sky-400 dark:border-sky-500/40',
   ACTIVE:
     'bg-green-500/10 text-green-700 border-green-500/30 dark:text-green-400 dark:border-green-500/40',
   DISABLED: 'bg-muted text-muted-foreground border-border',
@@ -89,6 +95,7 @@ const STATUS_PILL: Record<string, string> = {
 
 const STATUS_LABEL: Record<string, string> = {
   DRAFT: 'Draft',
+  PLAYGROUND: 'Playground',
   ACTIVE: 'Active',
   DISABLED: 'Disabled',
   PENDING_APPROVAL: 'Pending approval',
@@ -286,6 +293,7 @@ export function AutomationBuilder({
   }, [config.steps]);
 
   const zero = useZero();
+  const queryClient = useQueryClient();
   const me = useSelf();
   const navigate = useNavigate();
   const isAutomationsAdmin = useIsAutomationsAdmin();
@@ -298,6 +306,25 @@ export function AutomationBuilder({
 
   const isLockedStatus = savedStatus === AutomationStatusValues.PENDING_APPROVAL;
 
+  const isPlayground = savedStatus === AutomationStatusValues.PLAYGROUND;
+  const isDraft = savedStatus === AutomationStatusValues.DRAFT;
+  const isOwnerOrAdmin =
+    isAutomationsAdmin || (!!me?.id && (automation?.createdById ?? me.id) === me.id);
+  // Same answer the server uses (run count > 0): a DRAFT with any run is frozen —
+  // editing forks a new draft, and it is archived instead of deleted.
+  const hasRunsQuery = useQuery({
+    queryKey: ['automation-has-runs', savedId],
+    queryFn: () => fetchAutomationHasRuns(savedId ?? ''),
+    enabled: !!savedId && isDraft && !readOnlyPreview,
+  });
+  const draftHasRuns = isDraft && hasRunsQuery.data === true;
+  const hasRunsUnknown =
+    isDraft && !!savedId && hasRunsQuery.data === undefined && !hasRunsQuery.isError;
+  /** PLAYGROUND, or a DRAFT with runs: never edited in place. If the run check failed, fork to be safe. */
+  const isFrozenProposal = isPlayground || draftHasRuns || (isDraft && hasRunsQuery.isError);
+  // Webhook-triggered automations can't record: a held run would never answer the caller.
+  const isWebhookTrigger = config.trigger.type === 'WEBHOOK';
+
   const isLiveRow =
     automation?.status === AutomationStatusValues.ACTIVE ||
     automation?.status === AutomationStatusValues.DISABLED;
@@ -307,9 +334,10 @@ export function AutomationBuilder({
     (savedStatus === AutomationStatusValues.DRAFT ||
       savedStatus === AutomationStatusValues.ACTIVE ||
       savedStatus === AutomationStatusValues.DISABLED ||
+      (isPlayground && isOwnerOrAdmin) ||
       isEditableDeadStatus);
 
-  const forksOnEdit = isLiveRow || isEditableDeadStatus;
+  const forksOnEdit = isLiveRow || isEditableDeadStatus || isFrozenProposal;
 
   const saveMutation = useMutation({
     mutationFn: async (payload: {
@@ -317,6 +345,8 @@ export function AutomationBuilder({
       description: string;
       priority: boolean;
       config: AutomationConfig;
+      /** "Start recording" at save time: move the saved draft to PLAYGROUND. */
+      startRecording?: boolean;
     }): Promise<SaveResult> => {
       logger.info(LogEvent.INFO, {
         type: 'migrated_console_info',
@@ -383,13 +413,24 @@ export function AutomationBuilder({
         );
       }
 
+      // Done here, not chained after the save: onSaved can navigate and remount the builder.
+      // Zero applies one client's mutations in order, so the server sees the save first.
+      const recording =
+        payload.startRecording === true &&
+        (await surfaceMutationError(
+          zero.mutate(mutators.automations.startRecording({ id: targetId, timestamp: now })),
+          'Start recording failed',
+        ));
+
       return {
         automation: {
           id: targetId,
           name: payload.name,
           description: payload.description,
           priority: payload.priority,
-          status: AutomationStatusValues.DRAFT as SaveResult['automation']['status'],
+          status: (recording
+            ? AutomationStatusValues.PLAYGROUND
+            : AutomationStatusValues.DRAFT) as SaveResult['automation']['status'],
           config: payload.config,
           createdById: me?.id ?? '',
           createdAt: new Date(now).toISOString(),
@@ -419,7 +460,11 @@ export function AutomationBuilder({
           },
         ],
       });
-      toast.success('Saved');
+      toast.success(
+        result.automation.status === AutomationStatusValues.PLAYGROUND
+          ? 'Saved. Recording started: matching events will be held for you to play'
+          : 'Saved',
+      );
       onSaved?.(result);
     },
     onError: err => {
@@ -513,6 +558,64 @@ export function AutomationBuilder({
       setErrorMessage(err instanceof Error ? err.message : 'Archive failed');
     },
   });
+
+  // Recording transitions are owner/admin-checked on the server; await the server result so a
+  // rejection shows its real reason instead of a silent optimistic rollback.
+  const startRecordingMutation = useMutation({
+    mutationFn: async (id: string): Promise<void> => {
+      setErrorMessage(null);
+      const ok = await surfaceMutationError(
+        zero.mutate(mutators.automations.startRecording({ id, timestamp: Date.now() })),
+        'Start recording failed',
+      );
+      if (!ok) return;
+      setSavedStatus(AutomationStatusValues.PLAYGROUND);
+      toast.success('Recording started: matching events will be held for you to play');
+    },
+  });
+
+  const stopRecordingMutation = useMutation({
+    mutationFn: async (id: string): Promise<void> => {
+      setErrorMessage(null);
+      const ok = await surfaceMutationError(
+        zero.mutate(mutators.automations.stopRecording({ id, timestamp: Date.now() })),
+        'Stop recording failed',
+      );
+      if (!ok) return;
+      setSavedStatus(AutomationStatusValues.DRAFT);
+      toast.success('Recording stopped');
+      // Drop the cached answer so Delete / in-place Edit never show from a stale `false`.
+      void queryClient.resetQueries({ queryKey: ['automation-has-runs', id] });
+    },
+  });
+
+  // One recording per lineage: starting here moves any other recording version back to
+  // DRAFT, so ask first. A failed lookup falls through — the server demotes either way.
+  const [demoteConfirm, setDemoteConfirm] = useState<{
+    versionNumber: number;
+    proceed: () => void;
+  } | null>(null);
+  const requestStartRecording = async (proceed: () => void): Promise<void> => {
+    const lineageId = savedId ?? forkSourceAutomationId;
+    if (lineageId) {
+      const versions = await queryClient
+        .fetchQuery({
+          queryKey: ['automation-versions', lineageId],
+          queryFn: () => fetchAutomationVersions(lineageId),
+        })
+        .catch(() => null);
+      // Versions come back newest-first; number chronologically (oldest = v1).
+      const recordingIndex =
+        versions?.findIndex(
+          v => v.id !== savedId && v.status === AutomationStatusValues.PLAYGROUND,
+        ) ?? -1;
+      if (versions && recordingIndex !== -1) {
+        setDemoteConfirm({ versionNumber: versions.length - recordingIndex, proceed });
+        return;
+      }
+    }
+    proceed();
+  };
 
   const submitForApprovalMutation = useMutation({
     mutationFn: async (id: string): Promise<void> => {
@@ -782,6 +885,24 @@ export function AutomationBuilder({
     saveMutation.mutate({ name: trimmedName, description, priority, config });
   }, [config, description, priority, nameError, saveMutation, trimmedName]);
 
+  // "Start recording" at save time: save as a draft, then move that draft to PLAYGROUND.
+  const handleSaveAndRecord = (): void => {
+    if (nameError) {
+      setErrorMessage(nameError);
+      toast.error(nameError);
+      return;
+    }
+    void requestStartRecording(() =>
+      saveMutation.mutate({
+        name: trimmedName,
+        description,
+        priority,
+        config,
+        startRecording: true,
+      }),
+    );
+  };
+
   const handleActivate = useCallback((): void => {
     if (!savedId) {
       toast.error('Save the automation before activating.');
@@ -880,10 +1001,7 @@ export function AutomationBuilder({
               </button>
             </Tooltip>
           )}
-          {!editMode &&
-          !readOnlyPreview &&
-          savedId &&
-          savedStatus === AutomationStatusValues.DRAFT ? (
+          {!editMode && !readOnlyPreview && savedId && isDraft && hasRunsQuery.data === false ? (
             <Tooltip content='Delete draft' side='bottom'>
               <button
                 type='button'
@@ -942,8 +1060,25 @@ export function AutomationBuilder({
                 className='font-semibold'
               >
                 <SaveIcon className='size-4' />
-                Save
+                Save as draft
               </Button>
+              {isOwnerOrAdmin && !isWebhookTrigger && (!savedId || isDraft) ? (
+                <Tooltip
+                  content='Save, then hold matching events as runs you play by hand from Runs.'
+                  side='bottom'
+                >
+                  <Button
+                    variant='outline'
+                    onClick={handleSaveAndRecord}
+                    disabled={saveMutation.isPending || !!nameError}
+                    data-track-category='automation-builder'
+                    data-track-name='header-save-start-recording'
+                  >
+                    <Circle className='size-4 fill-red-500 text-red-500' />
+                    Start recording
+                  </Button>
+                </Tooltip>
+              ) : null}
             </>
           ) : (
             <>
@@ -1032,8 +1167,56 @@ export function AutomationBuilder({
                   Archive
                 </Button>
               ) : null}
-              {/* DRAFT proposals can be sent for approval. */}
-              {savedId && savedStatus === AutomationStatusValues.DRAFT && !isLiveRow ? (
+              {/* A DRAFT with runs can't be deleted; owner/admin archive it instead. */}
+              {savedId && draftHasRuns && isOwnerOrAdmin ? (
+                <Button
+                  variant='outline'
+                  size='sm'
+                  onClick={handleArchive}
+                  disabled={archiveMutation.isPending}
+                  data-track-category='automation-builder'
+                  data-track-name='header-archive-draft'
+                >
+                  <Archive className='size-4' />
+                  Archive
+                </Button>
+              ) : null}
+              {/* Playground: record matching events as held runs to play by hand. */}
+              {savedId && isDraft && !isLiveRow && isOwnerOrAdmin && !isWebhookTrigger ? (
+                <Tooltip
+                  content='Matching events are held instead of run. Play them one at a time from Runs.'
+                  side='bottom'
+                >
+                  <Button
+                    variant='outline'
+                    size='sm'
+                    onClick={() =>
+                      void requestStartRecording(() => startRecordingMutation.mutate(savedId))
+                    }
+                    disabled={startRecordingMutation.isPending}
+                    data-track-category='automation-builder'
+                    data-track-name='header-start-recording'
+                  >
+                    <Circle className='size-4 fill-red-500 text-red-500' />
+                    Start recording
+                  </Button>
+                </Tooltip>
+              ) : null}
+              {savedId && isPlayground && isOwnerOrAdmin ? (
+                <Button
+                  variant='outline'
+                  size='sm'
+                  onClick={() => stopRecordingMutation.mutate(savedId)}
+                  disabled={stopRecordingMutation.isPending}
+                  data-track-category='automation-builder'
+                  data-track-name='header-stop-recording'
+                >
+                  <Square className='size-4' />
+                  Stop recording
+                </Button>
+              ) : null}
+              {/* DRAFT and PLAYGROUND proposals can be sent for approval. */}
+              {savedId && (isDraft || isPlayground) && !isLiveRow ? (
                 <Button
                   onClick={() => submitForApprovalMutation.mutate(savedId)}
                   loading={submitForApprovalMutation.isPending}
@@ -1070,6 +1253,7 @@ export function AutomationBuilder({
                   — the body differs per case. */}
               {canEdit ? (
                 <Button
+                  disabled={hasRunsUnknown}
                   onClick={() => {
                     if (forksOnEdit) setProposeChangeConfirmOpen(true);
                     else setEditConfirmOpen(true);
@@ -1079,7 +1263,7 @@ export function AutomationBuilder({
                   className='font-semibold'
                 >
                   <Pencil className='size-4' />
-                  {isLiveRow ? 'Propose change' : 'Edit'}
+                  {isLiveRow ? 'Propose change' : isFrozenProposal ? 'Edit as new version' : 'Edit'}
                 </Button>
               ) : null}
               {/* Approval review mode: admin opened this proposal from the
@@ -1160,6 +1344,7 @@ export function AutomationBuilder({
         {...(!editMode && canEdit && !readOnlyPreview
           ? {
               onClick: (): void => {
+                if (hasRunsUnknown) return;
                 if (forksOnEdit) setProposeChangeConfirmOpen(true);
                 else setEditConfirmOpen(true);
               },
@@ -1352,6 +1537,44 @@ export function AutomationBuilder({
       </div>
 
       <Dialog
+        open={demoteConfirm !== null}
+        onOpenChange={open => {
+          if (!open) setDemoteConfirm(null);
+        }}
+        title='Start recording?'
+        className='sm:max-w-md'
+      >
+        <div className='flex flex-col gap-4 px-5 py-4 text-sm text-foreground'>
+          <p>
+            Version v{demoteConfirm?.versionNumber} will stop recording and become a draft. Its
+            held runs can&apos;t be played until it&apos;s back in Playground.
+          </p>
+          <div className='flex justify-end gap-2 pt-2'>
+            <Button
+              variant='outline'
+              size='sm'
+              onClick={() => setDemoteConfirm(null)}
+              data-track-category='automation-builder'
+              data-track-name='start-recording-demote-cancel'
+            >
+              Cancel
+            </Button>
+            <Button
+              size='sm'
+              onClick={() => {
+                demoteConfirm?.proceed();
+                setDemoteConfirm(null);
+              }}
+              data-track-category='automation-builder'
+              data-track-name='start-recording-demote-confirm'
+            >
+              Start recording
+            </Button>
+          </div>
+        </div>
+      </Dialog>
+
+      <Dialog
         open={deleteDialogOpen}
         onOpenChange={setDeleteDialogOpen}
         title='Delete draft automation?'
@@ -1429,11 +1652,18 @@ export function AutomationBuilder({
       <Dialog
         open={proposeChangeConfirmOpen}
         onOpenChange={setProposeChangeConfirmOpen}
-        title='Propose a change to this automation?'
+        title={isFrozenProposal ? 'Edit as a new version?' : 'Propose a change to this automation?'}
         className='sm:max-w-md'
       >
         <div className='flex flex-col gap-4 px-5 py-4 text-sm text-foreground'>
-          <p>The live automation keeps running. Nothing changes until an admin approves.</p>
+          {isFrozenProposal ? (
+            <p>
+              This version has recorded runs, so it is frozen and keeps them. Your edits go into a
+              new draft version.
+            </p>
+          ) : (
+            <p>The live automation keeps running. Nothing changes until an admin approves.</p>
+          )}
           <p className='text-muted-foreground'>
             You&apos;ll edit a copy of it. <strong className='text-foreground'>Save</strong> when
             you&apos;re done, then <strong className='text-foreground'>Send for approval</strong>.
