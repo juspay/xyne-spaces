@@ -148,6 +148,7 @@ check_file() {
 script_supplied() {
   case "$1" in
     state_bucket|state_prefix|state_key|state_region|profile|state_resource_group_name|state_storage_account_name|state_container_name) return 0 ;;
+    state_endpoint|kubeconfig|kube_context) return 0 ;;
   esac
   return 1
 }
@@ -502,6 +503,13 @@ case "$CLOUD" in
     check_tool az
     check_tool kubelogin
     check_auth "az auth" show az account show --output tsv --query name
+    ;;
+  onprem)
+    # aws here is the S3 client for the state bucket on the object store, not a
+    # cloud login. There is no control-plane API to authenticate against, so the
+    # check is whether the supplied kubeconfig actually reaches the cluster.
+    check_tool aws
+    check_auth "cluster reachable" hide kubectl --kubeconfig "$KUBECONFIG_PATH" get --raw /version
     ;;
 esac
 
