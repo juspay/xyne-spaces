@@ -115,17 +115,6 @@ export const ticketTable = table("tickets")
   })
   .primaryKey("id");
 
-export const ticketDescriptionTable = table("ticket_descriptions")
-  .columns({
-    ticketId: string(),
-    workspaceId: string(),
-    channelId: string(),
-    description: string(),
-    createdAt: number(),
-    updatedAt: number(),
-  })
-  .primaryKey("ticketId");
-
 export const subTicketTable = table("sub_tickets")
   .columns({
     id: string(),
@@ -760,33 +749,6 @@ export const aclAuditLogTable = table("acl_audit_logs")
   })
   .primaryKey("id");
 
-export const auditLogTable = table("audit_logs")
-  .columns({
-    id: string(),
-    actorUserId: string().optional(),
-    entityType: string(),
-    entityId: string(),
-    createdAt: number(),
-    workspaceId: string(),
-  })
-  .primaryKey("id");
-
-export const auditLogChangeTable = table("audit_log_changes")
-  .columns({
-    id: string(),
-    auditLogId: string(),
-    action: string(),
-    tableName: string(),
-    recordId: string(),
-    targetName: string(),
-    field: string(),
-    oldValue: string().optional(),
-    newValue: string().optional(),
-    createdAt: number(),
-    workspaceId: string(),
-  })
-  .primaryKey("id");
-
 export const pullRequestsTable = table("pull_requests")
   .columns({
     workspaceId: string(),
@@ -1402,9 +1364,6 @@ export const emailChannelPreferenceTable = table("email_channel_preferences")
     deskReportEnabled: boolean().optional(),
     deskReportAgentSlug: string().optional(),
     deskReportRangeDays: number().optional(),
-    duplicateScopeConfig: string().optional(),
-    slackDeskTriggerMode: string().optional(),
-    deskAppIds: string().optional(),
   })
   .primaryKey("channelId");
 
@@ -1497,7 +1456,6 @@ export const messageAttachmentTable = table("message_attachments")
     createdBy: string(),
     metadata: json().optional(),
     conversationId: string().optional(),
-    channelId: string().optional(),
     thumbnailUrl: string().optional(),
     isDeleted: boolean(),
     uploadStatus: string().optional(),
@@ -1797,7 +1755,6 @@ export const callParticipantTable = table("call_participants")
     displayName: string().optional(),
     email: string().optional(),
     isExternal: boolean(),
-    ringStatus: string().optional(),
   })
   .primaryKey("id");
 
@@ -1923,7 +1880,7 @@ export const canvasVersionTable = table("canvas_versions")
 export const canvasCommentThreadTable = table("canvas_comment_threads")
   .columns({
     id: string(),
-    workspaceId: string(),
+    workspaceId: string().optional(),
     canvasId: string(),
     blockId: string(),
     anchorText: string().optional(),
@@ -1940,7 +1897,7 @@ export const canvasCommentThreadTable = table("canvas_comment_threads")
 export const canvasCommentTable = table("canvas_comments")
   .columns({
     id: string(),
-    workspaceId: string(),
+    workspaceId: string().optional(),
     threadId: string(),
     canvasId: string(),
     body: string(),
@@ -2637,7 +2594,6 @@ export const installedAppsTable = table("installed_apps")
     appId: string(),
     userId: string(),
     webhookUrl: string().optional(),
-    fetchConfig: string().optional(),
     signingSecret: string().optional(),
     version: number(),
     createdAt: number(),
@@ -3114,7 +3070,6 @@ export const executionRunLogTable = table("execution_run_logs")
     droppedOps: json().optional(),
     applied: json().optional(),
     assessment: string().optional(),
-    dedupChecks: json().optional(),
     error: string().optional(),
     durationMs: number().optional(),
     createdAt: number(),
@@ -3292,24 +3247,6 @@ export const ticketTableRelationships = relationships(ticketTable, ({ one, many 
     sourceField: ["id"],
     destField: ["ticketId"],
     destSchema: emailReadTable,
-  }),
-  ticketDescription: one({
-    sourceField: ["id"],
-    destField: ["ticketId"],
-    destSchema: ticketDescriptionTable,
-  })
-}));
-
-export const ticketDescriptionTableRelationships = relationships(ticketDescriptionTable, ({ one }) => ({
-  ticket: one({
-    sourceField: ["ticketId"],
-    destField: ["id"],
-    destSchema: ticketTable,
-  }),
-  channel: one({
-    sourceField: ["channelId"],
-    destField: ["id"],
-    destSchema: channelTable,
   })
 }));
 
@@ -3657,11 +3594,6 @@ export const userTableRelationships = relationships(userTable, ({ one, many }) =
     destField: ["actorUserId"],
     destSchema: aclAuditLogTable,
   }),
-  auditTrail: many({
-    sourceField: ["id"],
-    destField: ["actorUserId"],
-    destSchema: auditLogTable,
-  }),
   sessions: many({
     sourceField: ["id"],
     destField: ["userId"],
@@ -3963,27 +3895,6 @@ export const aclAuditLogTableRelationships = relationships(aclAuditLogTable, ({ 
     sourceField: ["actorUserId"],
     destField: ["id"],
     destSchema: userTable,
-  })
-}));
-
-export const auditLogTableRelationships = relationships(auditLogTable, ({ one, many }) => ({
-  actorUser: one({
-    sourceField: ["actorUserId"],
-    destField: ["id"],
-    destSchema: userTable,
-  }),
-  changes: many({
-    sourceField: ["id"],
-    destField: ["auditLogId"],
-    destSchema: auditLogChangeTable,
-  })
-}));
-
-export const auditLogChangeTableRelationships = relationships(auditLogChangeTable, ({ one }) => ({
-  auditLog: one({
-    sourceField: ["auditLogId"],
-    destField: ["id"],
-    destSchema: auditLogTable,
   })
 }));
 
@@ -4354,11 +4265,6 @@ export const channelTableRelationships = relationships(channelTable, ({ one, man
     sourceField: ["id"],
     destField: ["channelId"],
     destSchema: collectionPermissionTable,
-  }),
-  ticketDescriptions: many({
-    sourceField: ["id"],
-    destField: ["channelId"],
-    destSchema: ticketDescriptionTable,
   })
 }));
 
@@ -5272,7 +5178,6 @@ export const schema = createSchema(
       toolTable,
       agentToolsMappingTable,
       ticketTable,
-      ticketDescriptionTable,
       subTicketTable,
       ticketSubTicketMappingTable,
       ticketAssignmentTable,
@@ -5315,8 +5220,6 @@ export const schema = createSchema(
       resourceTable,
       resourceAccessTable,
       aclAuditLogTable,
-      auditLogTable,
-      auditLogChangeTable,
       pullRequestsTable,
       prThreadLinkTable,
       teamIntelligenceIngestionBatchV2Table,
@@ -5465,7 +5368,6 @@ export const schema = createSchema(
       toolTableRelationships,
       agentToolsMappingTableRelationships,
       ticketTableRelationships,
-      ticketDescriptionTableRelationships,
       subTicketTableRelationships,
       ticketSubTicketMappingTableRelationships,
       ticketAssignmentTableRelationships,
@@ -5497,8 +5399,6 @@ export const schema = createSchema(
       resourceTableRelationships,
       resourceAccessTableRelationships,
       aclAuditLogTableRelationships,
-      auditLogTableRelationships,
-      auditLogChangeTableRelationships,
       pullRequestsTableRelationships,
       teamIntelligenceIngestionBatchV2TableRelationships,
       teamIntelligenceUserIngestionV2TableRelationships,
@@ -5590,7 +5490,6 @@ export type Model = Row<typeof schema.tables.models>;
 export type Tool = Row<typeof schema.tables.tools>;
 export type AgentToolsMapping = Row<typeof schema.tables.agent_tools_mappings>;
 export type Ticket = Row<typeof schema.tables.tickets>;
-export type TicketDescription = Row<typeof schema.tables.ticket_descriptions>;
 export type SubTicket = Row<typeof schema.tables.sub_tickets>;
 export type TicketSubTicketMapping = Row<typeof schema.tables.ticket_sub_ticket_mappings>;
 export type TicketAssignment = Row<typeof schema.tables.ticket_assignments>;
@@ -5633,8 +5532,6 @@ export type UserProfile = Row<typeof schema.tables.user_profiles>;
 export type Resource = Row<typeof schema.tables.resources>;
 export type ResourceAccess = Row<typeof schema.tables.resource_access>;
 export type ACLAuditLog = Row<typeof schema.tables.acl_audit_logs>;
-export type AuditLog = Row<typeof schema.tables.audit_logs>;
-export type AuditLogChange = Row<typeof schema.tables.audit_log_changes>;
 export type PullRequests = Row<typeof schema.tables.pull_requests>;
 export type PrThreadLink = Row<typeof schema.tables.pr_thread_links>;
 export type TeamIntelligenceIngestionBatchV2 = Row<typeof schema.tables.team_intelligence_ingestion_batches_v2>;
