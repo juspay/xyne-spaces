@@ -922,7 +922,8 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                   }
                 />
               </div>
-            ) : showAvatar && sender?.userType === UserType.APP ? (
+            ) : showAvatar &&
+              (sender?.userType === UserType.APP || sender?.userType === UserType.AGENT) ? (
               <div
                 onClick={() => handleUserClick(sender.id)}
                 data-track-category='MESSAGE'

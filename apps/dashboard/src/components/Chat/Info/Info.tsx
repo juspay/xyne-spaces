@@ -102,7 +102,7 @@ const Info = ({
 
   const [participants] = useCachedQuery(queries.channelParticipants({ channelId: channel.id }));
 
-  // Authoritative app/bot list for this channel — server-filtered by
+  // Authoritative app/agent/bot list for this channel — server-filtered by
   // users.userType so we don't depend on the workspace users map hydrating
   // with userType before the tab-label counts render.
   const [appParticipantsForCount] = useCachedQuery(
@@ -886,7 +886,7 @@ const ChannelMembers = ({
   const isAuthorizedToRemoveParticipant =
     channel.scopeType === ChannelScopeType.DEFAULT && currentUserIsAdmin;
 
-  // Server-authoritative set of app/bot user IDs in this channel. Used to
+  // Server-authoritative set of app/agent/bot user IDs in this channel. Used to
   // bucket search results without depending on usersById.userType hydration.
   const appUserIdSet = useMemo(
     () => new Set(appParticipants.map(p => p.userId)),
