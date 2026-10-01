@@ -5,6 +5,7 @@ import { Call, isScheduledCallJoinable } from './callHistoryItem.utils';
 import type { OtherUserCalls, OtherUserBusySlot } from '../../hooks/useOtherUserCalls';
 import { formatDuration } from '../../utils/dateUtils';
 import type { XyneCalendarCallPillVariant } from '../../components/Chat/XyneCalendarSidebar/XyneCalendarCallPill';
+import type { CalendarViewMode } from '../../machines/xyneCalendarMachine';
 
 // ── Drag & Drop helpers ──────────────────────────────────────────────────────
 
@@ -311,6 +312,44 @@ export function getWeekStartForMonth(date: Date): Date {
     return firstOfMonth;
   }
   return d;
+}
+
+/**
+ * The half-open date range [from, to) a calendar sub-view covers, from any anchor date
+ * inside it. Every calendar surface derives its fetch window through this, so day, week
+ * and month mean the same span on the Calls screen, the Chat sidebar and the Activity
+ * pane — and so `userCallsInRange` is asked for the dates actually on screen.
+ *
+ * The end is exclusive, which is what the query's overlap predicate
+ * (`startsAt < to AND endsAt > from`) expects: a call starting exactly at `to` belongs
+ * to the next period, not this one. Weeks start Sunday, matching DAY_NAMES and the
+ * grids. Passing an already-normalised anchor (a month start, a week start) is a no-op.
+ */
+export function getCalendarWindow(mode: CalendarViewMode, anchor: Date): { from: Date; to: Date } {
+  const from = new Date(anchor);
+  from.setHours(0, 0, 0, 0);
+
+  if (mode === 'week') {
+    from.setDate(from.getDate() - from.getDay());
+  } else if (mode === 'month') {
+    from.setDate(1);
+  }
+
+  const to = new Date(from);
+  if (mode === 'week') to.setDate(to.getDate() + 7);
+  else if (mode === 'month') to.setMonth(to.getMonth() + 1);
+  else to.setDate(to.getDate() + 1);
+
+  return { from, to };
+}
+
+/** getCalendarWindow as the epoch-ms pair `userCallsInRange` takes. */
+export function getCalendarWindowRange(
+  mode: CalendarViewMode,
+  anchor: Date,
+): { from: number; to: number } {
+  const { from, to } = getCalendarWindow(mode, anchor);
+  return { from: from.getTime(), to: to.getTime() };
 }
 
 export type EventPosition = {
