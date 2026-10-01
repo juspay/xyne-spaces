@@ -1,3 +1,10 @@
+## [1.446.1](https://github.com/juspay/xyne-spaces/compare/v1.446.0...v1.446.1) (2026-10-01)
+
+
+### Bug Fixes
+
+* navigate terms/privacy via router Link so workspace prefix rewrite skips them ([#2525](https://github.com/juspay/xyne-spaces/issues/2525)) ([3a31f79](https://github.com/juspay/xyne-spaces/commit/3a31f79211b5b3919dd26e2253d78ba324303eab))
+
 ## [1.446.0](https://github.com/juspay/xyne-spaces/compare/v1.445.0...v1.446.0) (2026-09-30)
 
 
