@@ -13,6 +13,12 @@ export const isCsvFile = (mimeType: string | null | undefined, fileName: string)
   return CSV_MIME_TYPES.includes(mime) || fileName.toLowerCase().endsWith('.csv');
 };
 
+export const shouldRenderCsvInline = (
+  attachment: { mimetype: string | null | undefined; originalFilename: string },
+  opts: { compact?: boolean | undefined; isMobile: boolean },
+): boolean =>
+  isCsvFile(attachment.mimetype, attachment.originalFilename) && !opts.compact && !opts.isMobile;
+
 export interface CsvPreview {
   header: string[];
   rows: string[][];

@@ -51,7 +51,7 @@ import { mutators } from '../../../zero/mutators';
 import { DownloadButton } from './DownloadButton';
 import { DeleteButton } from './DeleteButton';
 import { InlineCsvFile } from './InlineCsvFile';
-import { isCsvFile } from './csvPreview';
+import { isCsvFile, shouldRenderCsvInline } from './csvPreview';
 
 import { CopyCopied, CopyDefault } from '@xyne/icons';
 import { useClipboard } from '../../../hooks/useClipboard';
@@ -1321,7 +1321,7 @@ export const MessageAttachment: React.FC<MessageAttachmentProps> = ({
     }
   };
 
-  if (isCsv && !compact && !isMobile) {
+  if (shouldRenderCsvInline(attachment, { compact, isMobile })) {
     const csvMetadata = attachment.metadata as Record<string, unknown> | null;
     return (
       <InlineCsvFile

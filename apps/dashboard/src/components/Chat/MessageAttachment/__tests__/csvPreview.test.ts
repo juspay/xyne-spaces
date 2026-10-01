@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { CSV_PREVIEW_COLS, CSV_PREVIEW_ROWS, isCsvFile, parseCsvPreview } from '../csvPreview';
+import {
+  CSV_PREVIEW_COLS,
+  CSV_PREVIEW_ROWS,
+  isCsvFile,
+  parseCsvPreview,
+  shouldRenderCsvInline,
+} from '../csvPreview';
 
 const row = (cols: number, r: number): string =>
   Array.from({ length: cols }, (_, c) => `r${r}c${c}`).join(',');
@@ -14,6 +20,7 @@ describe('isCsvFile', () => {
   it('matches the csv mime types', () => {
     expect(isCsvFile('text/csv', 'report.dat')).toBe(true);
     expect(isCsvFile('application/csv', 'report.dat')).toBe(true);
+    expect(isCsvFile('text/comma-separated-values', 'report.dat')).toBe(true);
     expect(isCsvFile('text/csv; charset=utf-8', 'report.dat')).toBe(true);
     expect(isCsvFile('TEXT/CSV', 'report.dat')).toBe(true);
   });
@@ -26,8 +33,29 @@ describe('isCsvFile', () => {
 
   it('rejects non-csv files', () => {
     expect(isCsvFile('text/plain', 'notes.txt')).toBe(false);
+    expect(isCsvFile('application/json', 'data.json')).toBe(false);
     expect(isCsvFile('application/pdf', 'doc.pdf')).toBe(false);
     expect(isCsvFile('text/plain', 'report.csv.txt')).toBe(false);
+  });
+});
+
+describe('shouldRenderCsvInline', () => {
+  const csv = { mimetype: 'text/csv', originalFilename: 'report.csv' };
+
+  it('renders inline only on non-compact desktop surfaces', () => {
+    expect(shouldRenderCsvInline(csv, { isMobile: false })).toBe(true);
+    expect(shouldRenderCsvInline(csv, { compact: false, isMobile: false })).toBe(true);
+    expect(shouldRenderCsvInline(csv, { compact: true, isMobile: false })).toBe(false);
+    expect(shouldRenderCsvInline(csv, { isMobile: true })).toBe(false);
+  });
+
+  it('never renders a non-csv inline', () => {
+    expect(
+      shouldRenderCsvInline(
+        { mimetype: 'text/plain', originalFilename: 'n.txt' },
+        { isMobile: false },
+      ),
+    ).toBe(false);
   });
 });
 
@@ -118,6 +146,7 @@ describe('parseCsvPreview', () => {
   it('reports empty input as having no columns', () => {
     expect(parseCsvPreview('', false).colCount).toBe(0);
     expect(parseCsvPreview('\n\n   \n', false).colCount).toBe(0);
+    expect(parseCsvPreview('', false).header).toEqual([]);
     expect(parseCsvPreview('', false).rows).toEqual([]);
   });
 });

@@ -28,7 +28,7 @@ import { UserHoverWrapper } from '../UserMentionPopover/UserMentionPopover';
 import MessageAttachment from '../../Chat/MessageAttachment/MessageAttachment';
 import { FilePill, HtmlPreviewCard } from '../files';
 import { InlineCsvFile } from '../../Chat/MessageAttachment/InlineCsvFile';
-import { isCsvFile } from '../../Chat/MessageAttachment/csvPreview';
+import { shouldRenderCsvInline } from '../../Chat/MessageAttachment/csvPreview';
 import { useReactions } from '../../../hooks/useReaction';
 import { MessageBubbleProps } from './MessageBubble.types';
 import { useAuth } from '../../../hooks/useAuth';
@@ -191,9 +191,7 @@ const AttachmentsBlock: React.FC<AttachmentsBlockProps> = ({
   // every sibling attachment to a pill.
   const htmlAttachments = activeAttachments.filter(a => isHtmlAttachment(a));
 
-  const csvAttachments = isMobile
-    ? []
-    : activeAttachments.filter(a => isCsvFile(a.mimetype, a.originalFilename));
+  const csvAttachments = activeAttachments.filter(a => shouldRenderCsvInline(a, { isMobile }));
   const isInlineCsv = (a: AttachmentType): boolean => csvAttachments.includes(a);
 
   // Files - separate into those with thumbnails (PDFs, Office docs) and those without
