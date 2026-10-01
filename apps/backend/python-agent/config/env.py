@@ -42,7 +42,10 @@ class Config:
     google_voice_credentials_json: Optional[str]
     google_stt_model: str  # Model for Google STT (e.g., chirp_3)
     google_stt_stream_model: str  # Model for Google STT streaming (chirp_3 does not support streaming+adaptation)
-    google_stt_language: str
+    google_stt_language: str  # Global fallback language(s); per-use-case envs below override it
+    google_stt_realtime_language: str  # Live call (LiveKit) realtime transcription languages
+    google_stt_voice_input_language: str  # Voice-input dictation languages
+    google_stt_batch_language: str  # Recording BatchRecognize languages (Chirp 3 batch uses first 2)
     google_stt_location: str  # Region for Google STT (chirp models require e.g. us-central1, not global)
     google_stt_stream_location: str  # Region for streaming STT — chirp_2 is not in the "us" multi-region
     
@@ -189,6 +192,11 @@ class Config:
             google_stt_model=os.getenv("GOOGLE_STT_MODEL", "chirp_3"),
             google_stt_stream_model=os.getenv("GOOGLE_STT_STREAM_MODEL", "chirp_2"),
             google_stt_language=os.getenv("GOOGLE_STT_LANGUAGE", "en-US"),
+            # Per-use-case language lists. Each falls back to GOOGLE_STT_LANGUAGE, then to its own default,
+            # so existing single-env deployments keep working until the per-mode envs are set.
+            google_stt_realtime_language=(os.getenv("GOOGLE_STT_REALTIME_LANGUAGE") or os.getenv("GOOGLE_STT_LANGUAGE") or "en-IN,hi-IN,ta-IN"),
+            google_stt_voice_input_language=(os.getenv("GOOGLE_STT_VOICE_INPUT_LANGUAGE") or os.getenv("GOOGLE_STT_LANGUAGE") or "en-IN,hi-IN"),
+            google_stt_batch_language=(os.getenv("GOOGLE_STT_BATCH_LANGUAGE") or os.getenv("GOOGLE_STT_LANGUAGE") or "en-IN,kn-IN"),
             google_stt_location=os.getenv("GOOGLE_STT_LOCATION", "us"),
             google_stt_stream_location=os.getenv("GOOGLE_STT_STREAM_LOCATION", "us-central1"),
             

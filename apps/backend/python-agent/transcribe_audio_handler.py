@@ -77,6 +77,17 @@ def _first_language(language: str, fallback: str) -> str:
     return value
 
 
+def _language_codes(language: str, fallback: str) -> list:
+    """Comma-separated request/config language -> de-duplicated list of codes (>=1)."""
+    raw = (language or fallback or 'en-US')
+    codes: list = []
+    for part in raw.split(','):
+        code = part.strip()
+        if code and code not in codes:
+            codes.append(code)
+    return codes or ['en-US']
+
+
 def _transcribe_file_with_azure(path: str, model: str, language: Optional[str]):
     client, _ = _get_azure_client_and_model()
     with open(path, 'rb') as audio_file:
@@ -144,7 +155,8 @@ async def _transcribe_with_google(
             'Google STT requires a project_id — set GCS_PROJECT_ID in .env or use a service-account credentials file'
         )
 
-    target_language = _first_language(requested_language or '', cfg.google_stt_language)
+    target_codes = _language_codes(requested_language or '', cfg.google_stt_voice_input_language)
+    target_language = target_codes[0]
     # location="us" matches multi_user_transcriber.py exactly — chirp models live in the
     # "us" multi-region endpoint, not "global" and not the full region name "us-central1".
     _GOOGLE_LOCATION = 'us'
@@ -204,7 +216,7 @@ async def _transcribe_with_google(
     payload = {
         'config': {
             'autoDecodingConfig': {},
-            'languageCodes': [target_language],
+            'languageCodes': target_codes,
             'model': cfg.google_stt_model,
             'adaptation': {'phraseSets': [{'inlinePhraseSet': {'phrases': phrases[:_GOOGLE_BATCH_PHRASE_LIMIT]}}]},
         },
@@ -398,7 +410,8 @@ async def _stream_with_google(
     )
 
     creds, project_id = await _build_google_credentials(cfg)
-    target_language = _first_language(requested_language or '', cfg.google_stt_language)
+    target_codes = _language_codes(requested_language or '', cfg.google_stt_voice_input_language)
+    target_language = target_codes[0]
     stream_model = cfg.google_stt_stream_model
     # Streaming uses its own region: chirp_2 (with streaming speech-adaptation) is not
     # hosted in the "us" multi-region that the batch chirp_3 path uses — it lives in
@@ -451,7 +464,7 @@ async def _stream_with_google(
 
     recognition_config = RecognitionConfig(
         auto_decoding_config=AutoDetectDecodingConfig(),
-        language_codes=[target_language],
+        language_codes=target_codes,
         model=stream_model,
         adaptation=adaptation,
     )
