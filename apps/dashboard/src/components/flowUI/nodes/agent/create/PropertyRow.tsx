@@ -7,6 +7,7 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { cn } from '@/utils/classNames';
 import { PROPERTY_MENU_PANEL } from './AddPropertyMenu';
+import { useExclusiveMenu } from './useExclusiveMenu';
 
 interface PropertyRowProps {
   label: ReactNode;
@@ -91,6 +92,7 @@ export function PropertyRow({
   menuDisabled = false,
 }: PropertyRowProps): ReactElement {
   const labelRef = useRef<HTMLDivElement>(null);
+  const rowMenu = useExclusiveMenu();
   const valueRef = useRef<HTMLDivElement>(null);
   const [pad, setPad] = useState(0);
 
@@ -127,7 +129,7 @@ export function PropertyRow({
         className={cn(labelClassName ?? LABEL_CLASS, 'relative flex h-9 shrink-0 items-center')}
       >
         {menu && !menuDisabled ? (
-          <DropdownMenu>
+          <DropdownMenu open={rowMenu.open} onOpenChange={rowMenu.onOpenChange}>
             <DropdownMenuTrigger
               className={MENU_HANDLE_CLASS}
               data-testid={menuTestId}

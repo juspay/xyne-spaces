@@ -1,4 +1,13 @@
-import { useEffect, useId, useMemo, useState, type ReactElement, type ReactNode } from 'react';
+import {
+  useEffect,
+  useId,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactElement,
+  type ReactNode,
+} from 'react';
 import { AtMark, PencilEditLine, Settings02 } from '@xyne/icons';
 import { Loader2 } from 'lucide-react';
 import { AnimatePresence, MotionConfig, motion, type MotionProps } from 'motion/react';
@@ -15,9 +24,11 @@ import { CapabilityPillsReadOnly } from '@/routes/AIScreen/library/shared/picker
 import { SkillsCapabilityRow } from '@/routes/AIScreen/library/shared/pickers/skill/SkillsCapabilityRow';
 import { SubagentCapabilityRow } from '@/routes/AIScreen/library/shared/pickers/subagent/SubagentCapabilityRow';
 import { slugify } from '@/routes/ClawAgentsScreen/create/wizardState';
-import { AgentBotAvatar } from '@/components/agents/AgentBotAvatar';
+import { DraftAgentAvatar } from './DraftAgentAvatar';
 import { AddPropertyMenu, PROPERTY_MENU_ITEM } from './AddPropertyMenu';
 import { ChatFillHighlight } from './ChatFillHighlight';
+import { InstructionsReveal } from './InstructionsReveal';
+import { focusInCanvas } from './canvasFocusIn';
 import { CustomPropertyRow } from './CustomPropertyRow';
 import { EditablePropertyLabel } from './EditablePropertyLabel';
 import { PropertyRow } from './PropertyRow';
@@ -126,6 +137,12 @@ interface AgentCreateCanvasProps {
   scheduleLocked?: boolean;
   /** Docked over the bottom of the canvas (the draft agent's test chat). */
   floatingChat?: ReactNode;
+  /**
+   * The whole canvas arrived at once (a restored draft): it sweeps in top to
+   * bottom as one, and rows and pills skip their own entrances because they
+   * are there from the first render.
+   */
+  revealOnMount?: boolean;
 }
 
 function ConflictChooser({
@@ -274,6 +291,7 @@ export function AgentCreateCanvas({
   handleLocked = false,
   scheduleLocked = false,
   floatingChat,
+  revealOnMount = false,
 }: AgentCreateCanvasProps): ReactElement {
   const conflictByField = useMemo(
     () => new Map(conflicts.map(conflict => [conflict.field, conflict])),
@@ -295,6 +313,14 @@ export function AgentCreateCanvas({
     );
   };
 
+  // A restored draft comes into focus as one piece (canvasFocusIn.ts). Before
+  // the first paint, so nothing shows before it starts.
+  const columnRef = useRef<HTMLDivElement | null>(null);
+  useLayoutEffect(() => {
+    const column = columnRef.current;
+    if (!revealOnMount || !column) return undefined;
+    return focusInCanvas(column);
+  }, [revealOnMount]);
   const showIdentitySkeleton = Boolean(skeletonIdentity);
   const isProfile = layout === 'profile';
   // Rows that land together (a draft turn fills several at once) come in one by
@@ -577,6 +603,7 @@ export function AgentCreateCanvas({
               data-view-only={viewOnly ? 'true' : undefined}
             >
               <div
+                ref={columnRef}
                 className={cn(
                   'relative flex w-full flex-col',
                   isProfile ? 'max-w-[860px] gap-0' : 'mx-auto max-w-3xl gap-10',
@@ -597,9 +624,8 @@ export function AgentCreateCanvas({
                     >
                       {isProfile
                         ? (avatar ?? (
-                            <AgentBotAvatar
-                              type='clover'
-                              agentKey={form.slug || form.name}
+                            <DraftAgentAvatar
+                              form={form}
                               busy={Boolean(saving) || writingField !== null}
                               size={56}
                             />
@@ -1109,25 +1135,34 @@ export function AgentCreateCanvas({
                           placement='block'
                           field='systemPrompt'
                         >
-                          <textarea
-                            id='agent-create-instructions'
-                            value={form.systemPrompt}
-                            onChange={event => onFormChange({ systemPrompt: event.target.value })}
-                            onFocus={() => onFieldFocus('systemPrompt')}
-                            onBlur={() => onFieldFocus(null)}
-                            // Viewing: read-only, so the instructions can still be selected and copied.
-                            disabled={disabled && !viewOnly}
-                            readOnly={viewOnly}
-                            maxLength={20000}
-                            placeholder='Give instructions to your agent'
-                            data-track-category='Claw Agents'
-                            data-track-name='Create agent canvas: instructions'
-                            rows={1}
-                            className={cn(
-                              plainField,
-                              'min-h-[1.5rem] font-normal [field-sizing:content] placeholder:font-normal placeholder:text-fg-placeholder',
-                            )}
-                          />
+                          {writingField === 'systemPrompt' ? (
+                            // The chat is writing: chunks blur in here, and the
+                            // textarea comes back with the same text when it's done.
+                            <InstructionsReveal
+                              text={form.systemPrompt}
+                              className='min-h-[1.5rem] w-full whitespace-pre-wrap break-words text-sm font-normal leading-6 text-foreground'
+                            />
+                          ) : (
+                            <textarea
+                              id='agent-create-instructions'
+                              value={form.systemPrompt}
+                              onChange={event => onFormChange({ systemPrompt: event.target.value })}
+                              onFocus={() => onFieldFocus('systemPrompt')}
+                              onBlur={() => onFieldFocus(null)}
+                              // Viewing: read-only, so the instructions can still be selected and copied.
+                              disabled={disabled && !viewOnly}
+                              readOnly={viewOnly}
+                              maxLength={20000}
+                              placeholder='Give instructions to your agent'
+                              data-track-category='Claw Agents'
+                              data-track-name='Create agent canvas: instructions'
+                              rows={1}
+                              className={cn(
+                                plainField,
+                                'min-h-[1.5rem] font-normal [field-sizing:content] placeholder:font-normal placeholder:text-fg-placeholder',
+                              )}
+                            />
+                          )}
                         </ChatFillHighlight>
                         {renderConflict('systemPrompt')}
                       </div>

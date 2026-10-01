@@ -1,6 +1,5 @@
 import { describe, expect, it } from 'vitest';
 import {
-  catchUpStep,
   createDraftReveal,
   expectedSlots,
   rowPatch,
@@ -202,12 +201,5 @@ describe('typing', () => {
     expect(steps.length).toBeLessThanOrEqual(17);
     expect(steps).toEqual([...steps].sort((a, b) => a - b));
     expect(typingSteps(0, 260)).toEqual([]);
-  });
-
-  it('catches up on a streamed backlog quickly without jumping it all at once', () => {
-    expect(catchUpStep(0)).toBe(0);
-    expect(catchUpStep(2)).toBe(2);
-    expect(catchUpStep(20)).toBe(3);
-    expect(catchUpStep(3000)).toBe(100);
   });
 });

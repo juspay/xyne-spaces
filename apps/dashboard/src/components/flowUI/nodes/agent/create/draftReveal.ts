@@ -321,13 +321,3 @@ export function typingSteps(length: number, maxMs: number, frameMs = 16): number
   steps.push(length);
   return steps;
 }
-
-/**
- * How many more characters of streamed text to show this frame: enough to catch
- * up on a backlog within about half a second, and at least a few so it reads as
- * writing rather than a stall.
- */
-export function catchUpStep(backlog: number): number {
-  if (backlog <= 0) return 0;
-  return Math.min(backlog, Math.max(3, Math.ceil(backlog / 30)));
-}

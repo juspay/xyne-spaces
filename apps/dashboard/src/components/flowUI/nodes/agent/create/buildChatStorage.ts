@@ -18,6 +18,8 @@ export interface BuildTurnExtras {
   activities: DraftActivity[];
   suggestions: DraftSuggestion[];
   question?: BuildQuestionState;
+  /** Connectors this turn added that the user hasn't connected, by catalog slug. */
+  connect?: string[];
 }
 
 export interface BuildChatThread {
@@ -85,6 +87,11 @@ function parseExtras(value: unknown, ids: ReadonlySet<string>): Record<string, B
         : [],
       ...(isRecord(raw['question']) && Array.isArray(raw['question']['questions'])
         ? { question: raw['question'] as unknown as BuildQuestionState }
+        : {}),
+      ...(Array.isArray(raw['connect'])
+        ? {
+            connect: raw['connect'].filter((slug): slug is string => typeof slug === 'string'),
+          }
         : {}),
     };
   }

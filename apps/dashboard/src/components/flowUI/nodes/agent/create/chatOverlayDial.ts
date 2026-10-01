@@ -79,6 +79,8 @@ function useFixedChatOverlay(): ChatOverlayControls {
 function useDialChatOverlay(): ChatOverlayControls {
   const dial = useDialKitController('Chat Overlay', CHAT_OVERLAY_DIAL, {
     id: CHAT_OVERLAY_DIAL_ID,
+    // The version you picked, and anything you tuned, survive a reload.
+    persist: true,
   });
   const version = dial.values.version === 'Figma' ? 'Figma' : 'Current';
   const applied = useRef(version);

@@ -6,6 +6,15 @@
  */
 import type { DraftQuestion, DraftSuggestion } from "xyne-claw-shared";
 
+/**
+ * When a card question takes several answers. Both prompts that write
+ * questions (classify's "ask" mode and talk's follow-ups) include it, so they
+ * agree. Without it the model defaulted to single choice, even for "What
+ * should this agent do?", where most agents do several of the options.
+ */
+export const QUESTION_TYPE_RULE =
+  'Set "type" per question. "multiple_choice" when more than one option can be true at once: what the agent should do, which apps, channels or sources it uses, what goes into a report. "single_choice" only when the options rule each other out: how often it runs, when, one tone, one place to post, one or the other.';
+
 const MAX_QUESTIONS = 3;
 const MAX_OPTIONS = 4;
 const MAX_SUGGESTIONS = 2;

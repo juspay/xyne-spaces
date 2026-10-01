@@ -6,7 +6,7 @@ import {
   type PointerEvent as ReactPointerEvent,
   type ReactElement,
 } from 'react';
-import { useNavigate, useParams } from 'react-router-dom';
+import { useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { useAuth } from '@/hooks/useAuth';
@@ -23,7 +23,9 @@ import {
   AgentCreateChatPanel,
   type CreateChatTurn,
   type DraftTurnArgs,
+  type IncomingBuildMessage,
 } from '@/components/flowUI/nodes/agent/create/AgentCreateChatPanel';
+import type { HandoffPhase } from '@/components/flowUI/nodes/agent/create/DraftChatGapRows';
 import {
   applyPropertyOps,
   capabilityRefs,
@@ -89,7 +91,6 @@ import {
   REVEAL_HOLD_MS,
   TYPE_MS,
   canvasFieldForRow,
-  catchUpStep,
   createDraftReveal,
   expectedSlots,
   nextFrame,
@@ -101,14 +102,23 @@ import {
   typingSteps,
 } from '@/components/flowUI/nodes/agent/create/draftReveal';
 import { WarmHubCatalogs } from '@/components/flowUI/nodes/agent/create/WarmHubCatalogs';
+import { connectorsToConnect } from '@/components/flowUI/nodes/agent/create/buildConnect';
+import { draftAvatarKey } from '@/components/flowUI/nodes/agent/create/DraftAgentAvatar';
+import { useMcpCatalog } from '../../shared/pickers/mcp/useMcpCatalog';
+import {
+  chunkGapMs,
+  nextRevealEnd,
+} from '@/components/flowUI/nodes/agent/create/instructionsChunks';
 import {
   agentDraftStorageKey,
   buildChatStorageKey,
   clearAgentDraft,
+  newAgentDraftId,
   readAgentDraft,
   writeAgentDraft,
 } from '@/components/flowUI/nodes/agent/create/agentCreateDraftStorage';
-import { readBuildChat } from '@/components/flowUI/nodes/agent/create/buildChatStorage';
+import { draftChatStorageKey } from '@/components/flowUI/nodes/agent/create/draftChatStorage';
+import { useOAuthReturn } from '@/routes/AIScreen/library/shared/pickers/mcp/useOAuthReturn';
 import { buildCreateAgentPayload } from './agentCreatePayload';
 import { computeSaveGate } from './saveGate';
 import {
@@ -252,9 +262,52 @@ function SideCardWidthEdge({
   );
 }
 
+/** The URL parameter that names the draft a canvas edits. */
+const DRAFT_PARAM = 'draft';
+
+/**
+ * Create Agent. Every canvas is a draft with its own id in the URL: Create
+ * agent arrives without one and gets a fresh canvas, while a reload, or a draft
+ * opened from Drafts in Agent Hub, comes back to the same one. The canvas
+ * remounts per draft, so nothing carries over between them.
+ */
 export function AgentCreateSplitPage({
   scripted = false,
 }: { scripted?: boolean } = {}): ReactElement {
+  const [params, setParams] = useSearchParams();
+  const location = useLocation();
+  const requested = params.get(DRAFT_PARAM);
+  // A new id per arrival without one: location.key changes on every navigation.
+  const freshRef = useRef<{ locationKey: string; id: string } | null>(null);
+  if (!requested && freshRef.current?.locationKey !== location.key) {
+    freshRef.current = { locationKey: location.key, id: newAgentDraftId() };
+  }
+  const draftId = requested ?? freshRef.current!.id;
+  // Back from a connector's sign-in, started from a connect card on this page.
+  useOAuthReturn();
+
+  useEffect(() => {
+    if (scripted || requested) return;
+    setParams(
+      current => {
+        const next = new URLSearchParams(current);
+        next.set(DRAFT_PARAM, draftId);
+        return next;
+      },
+      { replace: true },
+    );
+  }, [draftId, requested, scripted, setParams]);
+
+  return <AgentCreateCanvasPage key={draftId} draftId={draftId} scripted={scripted} />;
+}
+
+function AgentCreateCanvasPage({
+  scripted,
+  draftId,
+}: {
+  scripted: boolean;
+  draftId: string;
+}): ReactElement {
   const { user } = useAuth();
   const { isMobile } = usePlatform();
   const navigate = useNavigate();
@@ -278,6 +331,8 @@ export function AgentCreateSplitPage({
   const planRef = useRef<HubPlanResult | null>(null);
   const dismissedRef = useRef(createDismissedHubIds());
   const [hubSuggestions, setHubSuggestions] = useState<CreateHubSuggestions>(EMPTY_HUB_SUGGESTIONS);
+  const hubSuggestionsRef = useRef(hubSuggestions);
+  hubSuggestionsRef.current = hubSuggestions;
 
   const onHubSuggestionAccepted = useCallback((kind: HubPickKind, id: string): void => {
     setHubSuggestions(prev => removeHubSuggestion(prev, kind, id));
@@ -299,10 +354,30 @@ export function AgentCreateSplitPage({
   const draftIdRef = useRef<string>(crypto.randomUUID());
   const draftContextRef = useRef<Promise<HubPlanContext> | null>(null);
   const [draftStreamDown, setDraftStreamDown] = useState(false);
-  const draftKey = agentDraftStorageKey(workspaceId, user?.id);
+  const draftKey = agentDraftStorageKey(workspaceId, user?.id, draftId);
   const storageReady = !scripted && Boolean(user?.id);
+  /** The user saved this draft, so it is listed under Drafts and every autosave keeps it there. */
+  const keptRef = useRef(false);
   /** Bumped by Start over: the Build chat starts again with the canvas. */
   const [chatEpoch, setChatEpoch] = useState(0);
+  // Read at the end of a Build turn, to offer connect cards for what it added.
+  const mcpCatalog = useMcpCatalog();
+  const mcpCatalogRef = useRef(mcpCatalog);
+  mcpCatalogRef.current = mcpCatalog;
+  // Messages the test chat sends to the Build chat (build from a request, add a
+  // missing capability), and how far each has got.
+  const [buildInbox, setBuildInbox] = useState<IncomingBuildMessage[]>([]);
+  const [handoffs, setHandoffs] = useState<Readonly<Record<string, HandoffPhase>>>({});
+  const handOffToBuild = useCallback((text: string): string => {
+    const id = crypto.randomUUID();
+    setBuildInbox(current => [...current, { id, text }]);
+    setHandoffs(current => ({ ...current, [id]: 'queued' }));
+    return id;
+  }, []);
+  const onIncomingPhase = useCallback((id: string, next: 'running' | 'done'): void => {
+    setHandoffs(current => ({ ...current, [id]: next }));
+    if (next === 'running') setBuildInbox(current => current.filter(message => message.id !== id));
+  }, []);
 
   const slug = effectiveSlug({
     name: createForm.form.name,
@@ -324,32 +399,45 @@ export function AgentCreateSplitPage({
     return watchScriptedHubCatalog(queryClient, user?.id);
   }, [queryClient, scripted, user?.id]);
 
-  // Reopen the last unsaved draft for this workspace + user.
+  // Reopen this canvas's draft: a reload, or a draft opened from Agent Hub. The
+  // Build chat comes back on its own (the panel reads it by the same key).
   const { restore: restoreForm } = createForm;
-  const discardRef = useRef<() => void>(() => {});
+  /**
+   * Bumped when a stored draft is restored. The canvas remounts with it, so
+   * the whole draft sweeps in as one instead of row by row.
+   */
+  const [restoreEpoch, setRestoreEpoch] = useState(0);
+  /** Bumped when chat clears the canvas, so rows it had opened close too. */
+  const [clearEpoch, setClearEpoch] = useState(0);
   useEffect(() => {
     if (!storageReady) return;
     const stored = readAgentDraft(draftKey);
-    // A first turn can leave only a conversation (a question card) and no canvas yet.
-    const chat = readBuildChat(buildChatStorageKey(draftKey));
-    if (!stored && !chat) return;
-    if (stored) {
-      restoreForm(stored.form);
-      setPhase('draft');
-    }
-    toast('Restored your unsaved agent draft', {
-      id: 'agent-draft-restored',
-      action: { label: 'Start over', onClick: () => discardRef.current() },
-    });
+    if (!stored) return;
+    keptRef.current = stored.kept;
+    restoreForm(stored.form);
+    setPhase('draft');
+    setRestoreEpoch(epoch => epoch + 1);
   }, [draftKey, restoreForm, storageReady]);
 
   // Keep the stored draft in step with the canvas.
   useEffect(() => {
     if (!storageReady || phase === 'created') return undefined;
     const form = createForm.form;
-    const timer = window.setTimeout(() => writeAgentDraft(draftKey, form), 400);
+    const timer = window.setTimeout(
+      () => writeAgentDraft(draftKey, form, { kept: keptRef.current }),
+      400,
+    );
     return () => window.clearTimeout(timer);
   }, [createForm.form, draftKey, phase, storageReady]);
+
+  // Leaving for a connector's sign-in can come sooner than the save above.
+  const { getForm } = createForm;
+  useEffect(() => {
+    if (!storageReady || phase === 'created') return undefined;
+    const flush = (): void => writeAgentDraft(draftKey, getForm(), { kept: keptRef.current });
+    window.addEventListener('pagehide', flush);
+    return () => window.removeEventListener('pagehide', flush);
+  }, [draftKey, getForm, phase, storageReady]);
 
   // A turn still writing the canvas would be lost on reload.
   useEffect(() => {
@@ -733,6 +821,37 @@ export function AgentCreateSplitPage({
   }, [user?.id]);
 
   /**
+   * "Start over" asked in the Build chat: the canvas goes back to empty (the
+   * form, its dashed suggestions and the rows it had opened) and the chat
+   * carries on. Undo puts back what was there, in case it was misread.
+   */
+  const clearCanvasFromChat = useCallback((): void => {
+    const before = createForm.getForm();
+    const suggestionsBefore = hubSuggestionsRef.current;
+    const planBefore = planRef.current;
+    createForm.resetFrom(EMPTY_CREATE_FORM);
+    planRef.current = null;
+    setHubSuggestions(EMPTY_HUB_SUGGESTIONS);
+    setClearEpoch(epoch => epoch + 1);
+    setPhase('empty');
+    setSkeletonIdentity(false);
+    if (JSON.stringify(before) === JSON.stringify(EMPTY_CREATE_FORM)) return;
+    toast('Cleared the canvas', {
+      // Long enough to take back a wiped canvas.
+      duration: 8_000,
+      action: {
+        label: 'Undo',
+        onClick: () => {
+          createForm.restore(before);
+          planRef.current = planBefore;
+          setHubSuggestions(suggestionsBefore);
+          setPhase('draft');
+        },
+      },
+    });
+  }, [createForm]);
+
+  /**
    * One streamed draft turn. The stream lands at full speed; the canvas shows it
    * one part at a time, top to bottom (see draftReveal.ts): name, handle and
    * description type in, then each tools row, the schedule, each property, and
@@ -823,20 +942,26 @@ export function AgentCreateSplitPage({
           markCreate('prompt-done');
           return;
         }
-        // Type out what has streamed so far, catching up on any backlog, then
-        // follow the stream as it arrives.
+        // Land what has streamed a few lines at a time (instructionsChunks.ts).
+        // Only whole chunks go on the canvas, where each blurs in; a backlog
+        // drains at a quicker beat instead of flooding in, and the reveal waits
+        // on the stream when it catches up. One frame first, so the field mounts
+        // its reveal empty and the first chunk animates like the rest.
+        await nextFrame();
         let shown = 0;
         for (;;) {
           if (signal.aborted) return;
           const target = finalInstructions ?? plainInstructions(instructions);
-          if (shown >= target.length) {
-            if (finalInstructions !== null || streamEnded) break;
+          const done = finalInstructions !== null || streamEnded;
+          const end = nextRevealEnd(target, shown, done);
+          if (end === null) {
+            if (done) break;
             await instructionsChanged();
             continue;
           }
-          shown += catchUpStep(target.length - shown);
-          apply({ systemPrompt: target.slice(0, shown) });
-          await nextFrame();
+          apply({ systemPrompt: target.slice(0, end) });
+          shown = end;
+          await sleep(chunkGapMs(target, end));
         }
         // The final text can differ from the stream: a repaired section, late tools.
         if (finalInstructions !== null) apply({ systemPrompt: finalInstructions });
@@ -858,6 +983,10 @@ export function AgentCreateSplitPage({
         switch (event.event) {
           case 'mode':
             mode = event.mode;
+            if (event.mode === 'reset') {
+              clearCanvasFromChat();
+              return;
+            }
             overrideEdits = event.mode === 'edit';
             if (event.mode === 'draft') liveInstructions = true;
             if (event.mode === 'draft' || event.mode === 'edit') {
@@ -1081,6 +1210,14 @@ export function AgentCreateSplitPage({
         // A stream that broke still shows what it sent before it broke.
         await settleReveal().catch(() => undefined);
         signal.removeEventListener('abort', poke);
+        const { entries, connectedServerIds } = mcpCatalogRef.current;
+        const toConnect = connectorsToConnect(
+          entries,
+          form.tools,
+          createForm.getForm().tools,
+          connectedServerIds,
+        );
+        if (toConnect.length > 0) turn.connectors(toConnect);
         createForm.setWritingField(null);
         createForm.setAttentionField(null);
         setProgressLabel(null);
@@ -1088,7 +1225,7 @@ export function AgentCreateSplitPage({
         markCreate('ready');
       }
     },
-    [createForm, draftContext],
+    [clearCanvasFromChat, createForm, draftContext],
   );
 
   const agentPath = useCallback(
@@ -1159,24 +1296,32 @@ export function AgentCreateSplitPage({
   const discardDraft = useCallback((): void => {
     clearAgentDraft(draftKey);
     setChatEpoch(epoch => epoch + 1);
+    setBuildInbox([]);
     createForm.resetFrom(EMPTY_CREATE_FORM);
     setPhase('empty');
     setCreateError(null);
     setSkeletonIdentity(false);
   }, [createForm, draftKey]);
-  discardRef.current = discardDraft;
 
   const requestCancel = useCallback((): void => {
     if (creating) return;
+    // A saved draft is already under Drafts; leaving just keeps the latest edits.
+    if (storageReady && keptRef.current) {
+      writeAgentDraft(draftKey, createForm.getForm(), { kept: true });
+      leaveCreate();
+      return;
+    }
     if (createForm.canvasDirty) {
       setDiscardOpen(true);
       return;
     }
     leaveCreate();
-  }, [createForm.canvasDirty, creating, leaveCreate]);
+  }, [createForm, creating, draftKey, leaveCreate, storageReady]);
 
   const canvas = (
     <AgentCreateCanvas
+      key={`canvas-${restoreEpoch}-${clearEpoch}`}
+      revealOnMount={restoreEpoch > 0}
       form={createForm.form}
       onFormChange={patch => {
         createForm.patchForm(patch);
@@ -1217,8 +1362,12 @@ export function AgentCreateSplitPage({
               <DraftAgentChat
                 getForm={createForm.getForm}
                 agentName={createForm.form.name}
-                agentKey={createForm.form.slug || createForm.form.name}
+                agentKey={draftAvatarKey(createForm.form)}
                 disabled={phase === 'created'}
+                // Mobile has no Build chat to hand off to.
+                onHandoff={isMobile ? undefined : handOffToBuild}
+                handoffs={handoffs}
+                storageKey={storageReady ? draftChatStorageKey(draftKey) : undefined}
               />
             ),
           })}
@@ -1319,6 +1468,8 @@ export function AgentCreateSplitPage({
                 chatStorageKey={
                   storageReady && phase !== 'created' ? buildChatStorageKey(draftKey) : null
                 }
+                incoming={buildInbox}
+                onIncomingPhase={onIncomingPhase}
                 disabled={phase === 'created'}
                 progressLabel={scripted ? null : progressLabel}
                 {...(scripted
@@ -1350,7 +1501,9 @@ export function AgentCreateSplitPage({
           ? {
               onKeepForLater: () => {
                 setDiscardOpen(false);
-                writeAgentDraft(draftKey, createForm.getForm());
+                keptRef.current = true;
+                writeAgentDraft(draftKey, createForm.getForm(), { kept: true });
+                toast.success('Saved to Drafts in Agent Hub');
                 leaveCreate();
               },
             }

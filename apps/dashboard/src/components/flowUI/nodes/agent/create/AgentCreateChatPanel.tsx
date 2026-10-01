@@ -9,6 +9,7 @@ import {
   type ReactNode,
   type Ref,
   type RefObject,
+  type UIEvent,
 } from 'react';
 import { ThinkingOrb, type OrbState } from 'thinking-orbs';
 import { AnimatePresence, motion } from 'motion/react';
@@ -27,6 +28,7 @@ import { clawErrorText } from '@/services/claw/clawRequest';
 import { cn } from '@/utils/classNames';
 import { buildXyneAIStreamThreadId, newStreamSlotKey } from '@/utils/xyneAIStreamThreadId';
 import { CreateEmptyState } from './CreateEmptyState';
+import { BuildConnectCards } from './BuildConnectCards';
 import {
   BuildQuestionCard,
   BuildReplyMarkdown,
@@ -54,6 +56,41 @@ import { orbStateForProgress } from './createProgressLabel';
 
 const SCRIPTED_THINK_PHASES = ['Thinking', 'Weighing it up', 'Reasoning'] as const;
 const SCRIPTED_THINK_PHASE_MS = 1600;
+
+/**
+ * Keeps the transcript at the bottom while it grows, if it was there. The
+ * scroll to a new message runs before late parts of it have any height (a
+ * connect card waits for the connector catalog), which would leave them cut
+ * off under the composer. Scrolling up to read stops it until the bottom is
+ * reached again.
+ */
+function useStickToBottom(): {
+  listRef: (node: HTMLUListElement | null) => void;
+  onScroll: (event: UIEvent<HTMLDivElement>) => void;
+} {
+  const [list, setList] = useState<HTMLUListElement | null>(null);
+  const atBottomRef = useRef(true);
+
+  useEffect(() => {
+    const scroller = list?.parentElement;
+    if (!list || !scroller) return undefined;
+    const observer = new ResizeObserver(() => {
+      if (atBottomRef.current) scroller.scrollTop = scroller.scrollHeight;
+    });
+    observer.observe(list);
+    return () => observer.disconnect();
+  }, [list]);
+
+  const onScroll = useCallback((event: UIEvent<HTMLDivElement>): void => {
+    const el = event.currentTarget;
+    atBottomRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 24;
+  }, []);
+
+  return { listRef: setList, onScroll };
+}
+
+/** Side padding shared by the transcript and the composer, so their edges line up. */
+const CHAT_GUTTER = 'px-[11px]';
 
 /** The builder model's live indicator; the label beside it carries the words. */
 function BuildOrb({ state = 'working' }: { state?: OrbState }): ReactElement {
@@ -124,6 +161,40 @@ export interface DraftTurnArgs {
   suggest: (suggestions: DraftSuggestion[]) => void;
   /** Follow-up questions, shown as a card under the reply. */
   ask: (card: { id: string; questions: DraftQuestion[] }) => void;
+  /** Connectors this turn added that need the user's key, as connect cards under the reply. */
+  connectors: (slugs: string[]) => void;
+}
+
+export interface IncomingBuildMessage {
+  id: string;
+  text: string;
+}
+
+/**
+ * Sends incoming messages one at a time whenever the chat is free. Each id is
+ * sent once, even if the effect runs twice.
+ */
+function useIncomingMessages(
+  incoming: ReadonlyArray<IncomingBuildMessage> | undefined,
+  ready: boolean,
+  send: (text: string) => Promise<void>,
+  onPhase: ((id: string, phase: 'running' | 'done') => void) | undefined,
+): void {
+  const startedRef = useRef(new Set<string>());
+  const sendRef = useRef(send);
+  sendRef.current = send;
+  const onPhaseRef = useRef(onPhase);
+  onPhaseRef.current = onPhase;
+  const next = incoming?.find(message => !startedRef.current.has(message.id));
+  useEffect(() => {
+    if (!ready || !next || startedRef.current.has(next.id)) return;
+    startedRef.current.add(next.id);
+    onPhaseRef.current?.(next.id, 'running');
+    void sendRef
+      .current(next.text)
+      .catch(() => undefined)
+      .finally(() => onPhaseRef.current?.(next.id, 'done'));
+  }, [next, ready]);
 }
 
 export interface CreateChatTurn {
@@ -148,6 +219,13 @@ interface AgentCreateChatPanelProps {
   onDraftTurn?: (turn: DraftTurnArgs) => Promise<void>;
   /** Streamed path: where the Build chat is kept so a reload brings it back. */
   chatStorageKey?: string | null;
+  /**
+   * Messages sent here from elsewhere on the page (the test chat's Build and
+   * Add buttons), oldest first. Each is sent once the chat is free.
+   */
+  incoming?: ReadonlyArray<IncomingBuildMessage>;
+  /** Reports when an incoming message starts and when its turn ends. */
+  onIncomingPhase?: (id: string, phase: 'running' | 'done') => void;
   disabled?: boolean;
   /** Live draft pipeline phase — Braille + AnimatedLabel, not chat bubbles. */
   progressLabel?: string | null;
@@ -185,6 +263,8 @@ type TurnExtras = BuildTurnExtras;
 function StreamedAgentCreateChatPanel({
   onDraftTurn,
   chatStorageKey = null,
+  incoming,
+  onIncomingPhase,
   disabled,
   progressLabel = null,
 }: AgentCreateChatPanelProps & {
@@ -296,6 +376,7 @@ function StreamedAgentCreateChatPanel({
               activities: [...prior.activities.filter(a => a.id !== activity.id), activity],
             })),
           suggest: suggestions => updateExtras(botId, prior => ({ ...prior, suggestions })),
+          connectors: slugs => updateExtras(botId, prior => ({ ...prior, connect: slugs })),
           ask: card => {
             const questions = guardQuestions(card.questions);
             if (questions.length === 0) return;
@@ -325,6 +406,7 @@ function StreamedAgentCreateChatPanel({
   );
 
   const busy = running || Boolean(disabled);
+  useIncomingMessages(incoming, !busy, submit, onIncomingPhase);
   const lastBotId = [...messages].reverse().find(message => message.type === 'bot')?.id;
   // A card still waiting for an answer takes the composer's place; once answered
   // (or passed over) it lives in the transcript under its reply.
@@ -372,6 +454,7 @@ function StreamedAgentCreateChatPanel({
                 }}
               />
             ) : null}
+            {turn.connect?.length ? <BuildConnectCards slugs={turn.connect} /> : null}
             {turn.suggestions.length > 0 && message.id === lastBotId ? (
               <BuildSuggestionChips
                 suggestions={turn.suggestions}
@@ -415,6 +498,8 @@ function LiveAgentCreateChatPanel({
   canvas,
   onTurnComplete,
   onSend,
+  incoming,
+  onIncomingPhase,
   disabled,
   progressLabel = null,
 }: AgentCreateChatPanelProps): ReactElement {
@@ -650,6 +735,13 @@ function LiveAgentCreateChatPanel({
     [disabled, messages, onSend, streaming, submitQuery],
   );
 
+  useIncomingMessages(
+    incoming,
+    !streaming && !disabled && !progressLabel,
+    text => handleSubmit(text, [], undefined, 'programmatic'),
+    onIncomingPhase,
+  );
+
   const empty = messages.length === 0 && !streaming && !canvasError;
 
   return (
@@ -783,6 +875,7 @@ function CreateChatLayout({
   /** Changes when the slot holds something new, so it animates in again. */
   composerSlotKey?: string;
 }): ReactElement {
+  const pinned = useStickToBottom();
   return (
     <div
       className='flex h-full min-w-0 flex-col bg-background'
@@ -817,11 +910,11 @@ function CreateChatLayout({
           ) : null}
         </div>
       )}
-      <div className='flex-1 overflow-y-auto'>
+      <div className='flex-1 overflow-y-auto' onScroll={pinned.onScroll}>
         {empty && !progressLabel ? (
           <CreateEmptyState />
         ) : (
-          <ul className='flex flex-col pb-2'>
+          <ul ref={pinned.listRef} className='flex flex-col pb-2'>
             {messages.map(message => {
               const rawText = message.content || message.streamingContent || '';
               const streamingText = conversational
@@ -846,7 +939,8 @@ function CreateChatLayout({
                   key={message.stableKey ?? message.id}
                   className={cn(
                     'group w-full',
-                    message.type === 'user' ? 'flex justify-end px-2 py-3' : 'px-2 py-5',
+                    CHAT_GUTTER,
+                    message.type === 'user' ? 'flex justify-end py-3' : 'py-5',
                   )}
                 >
                   {message.type === 'user' ? (
@@ -926,12 +1020,12 @@ function CreateChatLayout({
               );
             })}
             {progressLabel ? (
-              <li className='px-2 py-3'>
+              <li className={cn(CHAT_GUTTER, 'py-3')}>
                 <WorkingProgressRow label={progressLabel} />
               </li>
             ) : null}
             {canvasError ? (
-              <li className='px-2 pb-4'>
+              <li className={cn(CHAT_GUTTER, 'pb-4')}>
                 <p className='text-sm leading-5 text-destructive' role='alert'>
                   {canvasError}
                 </p>
@@ -947,7 +1041,7 @@ function CreateChatLayout({
         ) : null}
       </div>
       <div
-        className='flex-shrink-0 px-[11px] pb-[11px]'
+        className={cn(CHAT_GUTTER, 'flex-shrink-0 pb-[11px]')}
         {...(scripted
           ? {
               onPointerDownCapture: onEngage,

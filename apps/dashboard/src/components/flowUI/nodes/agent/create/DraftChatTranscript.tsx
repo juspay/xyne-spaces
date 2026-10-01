@@ -1,6 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, type ReactElement, type ReactNode } from 'react';
 import { FileText } from '@xyne/icons';
 import { BuildReplyMarkdown } from './BuildChatExtras';
+import { ThinkingStatus } from './DraftChatComposer';
 import type { DraftChatMessage } from './useDraftChat';
 
 /** Closer than this to the bottom counts as "at the bottom". */
@@ -15,16 +16,26 @@ export function DraftChatTranscript({
   messages,
   avatar,
   emptyLabel,
+  renderAfterReply,
 }: {
   messages: DraftChatMessage[];
   /** The agent's face, at `size` px; `busy` while it is thinking. */
   avatar: (size: number, busy: boolean) => ReactNode;
   /** Under the face when nothing has been said yet. */
   emptyLabel: string;
+  /**
+   * Under a finished reply. `request` is the user message it answers; `latest`
+   * is true for the newest reply only.
+   */
+  renderAfterReply?: (
+    message: DraftChatMessage,
+    context: { request: string; latest: boolean },
+  ) => ReactNode;
 }): ReactElement {
   const listRef = useRef<HTMLUListElement | null>(null);
   const pinnedRef = useRef(true);
   const lastUserId = [...messages].reverse().find(message => message.role === 'user')?.id;
+  const lastReplyId = [...messages].reverse().find(message => message.role === 'assistant')?.id;
   const empty = messages.length === 0;
 
   // A message you just sent always brings you back to the bottom.
@@ -40,11 +51,18 @@ export function DraftChatTranscript({
   useEffect(() => {
     const list = listRef.current;
     if (!list) return undefined;
-    const observer = new ResizeObserver(() => {
+    const follow = (): void => {
       if (pinnedRef.current) list.scrollTop = list.scrollHeight;
-    });
-    observer.observe(list);
-    return (): void => observer.disconnect();
+    };
+    const resize = new ResizeObserver(follow);
+    resize.observe(list);
+    // Rows and buttons that appear under a finished reply don't change `messages`.
+    const mutation = new MutationObserver(follow);
+    mutation.observe(list, { childList: true, subtree: true });
+    return (): void => {
+      resize.disconnect();
+      mutation.disconnect();
+    };
     // The list only exists once there are messages.
   }, [empty]);
 
@@ -68,7 +86,7 @@ export function DraftChatTranscript({
       className='flex h-full flex-col overflow-y-auto px-3 pb-3 pt-2'
       data-testid='draft-chat-transcript'
     >
-      {messages.map(message => (
+      {messages.map((message, index) => (
         <li key={message.id} className={message.role === 'user' ? 'flex justify-end py-2' : 'py-3'}>
           {message.role === 'user' ? (
             <div className='flex max-w-[78%] flex-col items-end gap-1'>
@@ -92,10 +110,7 @@ export function DraftChatTranscript({
           ) : (
             <div className='flex min-w-0 flex-col gap-2'>
               {message.streaming && message.content.length === 0 && !message.error ? (
-                <span className='inline-flex items-center gap-1.5 text-xs text-muted-foreground'>
-                  {avatar(22, true)}
-                  Thinking
-                </span>
+                <ThinkingStatus avatar={avatar(22, true)} replying={false} />
               ) : message.content.length > 0 ? (
                 <BuildReplyMarkdown id={message.id} content={message.content} streamed />
               ) : null}
@@ -104,6 +119,16 @@ export function DraftChatTranscript({
                   {message.error}
                 </p>
               ) : null}
+              {renderAfterReply && !message.streaming
+                ? renderAfterReply(message, {
+                    request:
+                      messages
+                        .slice(0, index)
+                        .reverse()
+                        .find(prior => prior.role === 'user')?.content ?? '',
+                    latest: message.id === lastReplyId,
+                  })
+                : null}
             </div>
           )}
         </li>

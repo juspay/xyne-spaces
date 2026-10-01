@@ -7,12 +7,12 @@ interface DiscardDraftDialogProps {
   onOpenChange: (open: boolean) => void;
   /** Delete the unsaved draft from this browser and leave. */
   onConfirm: () => void;
-  /** Leave but keep the draft; it reopens on the next visit to Create Agent. */
+  /** Leave and save the draft; it is listed under Drafts in Agent Hub. */
   onKeepForLater?: () => void;
 }
 
 const DESCRIPTION =
-  'This agent isn’t saved yet. Keep the draft in this browser to finish it later, or discard it.';
+  'This agent isn’t created yet. Save it as a draft to finish later from Drafts in Agent Hub (kept in this browser), or discard it.';
 
 export function DiscardDraftDialog({
   open,
@@ -54,7 +54,7 @@ export function DiscardDraftDialog({
               data-track-category='AGENT_ARTIFACT'
               data-track-name='KEEP_DRAFT_FOR_LATER'
             >
-              Keep draft
+              Save draft
             </Button>
           ) : null}
           <Button

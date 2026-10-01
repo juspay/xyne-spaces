@@ -151,6 +151,13 @@ import { buildMemorySearchTool } from "../memory-search.js";
 import { buildMemoryWriteTool } from "../memory-write.js";
 import { buildMemoryFileTools } from "../memory-file-tools.js";
 import { buildTwinDeliverTool, buildTwinDeliverMandate, type TwinDeliverRef } from "../twin-deliver.js";
+import {
+  buildCapabilityGapTool,
+  CAPABILITY_GAP_TOOL_NAME,
+  DRAFT_FALLBACK_PERSONA,
+  draftTestModelSettings,
+  isDraftTestRun,
+} from "../draft-capability-gap.js";
 import { buildProposePlanTool, PROPOSE_PLAN_TOOL_NAME, type ProposePlanRef } from "../propose-plan.js";
 import { presentationCatalogDefaultOn, isFreePresentationTool, buildPresentationPrimer } from "../presentation-catalog.js";
 import { buildProposeAgentTool, type ProposeAgentRef } from "../propose-agent.js";
@@ -3128,7 +3135,10 @@ export async function processTask(
     // respond-to-user, and verifyResponses owns it via submit-response — when
     // outputFormat is set it wins over verifyResponses and is skipped in
     // copilot mode.
-    const modelSettings = parseModelSettings(agentConfig);
+    const agentModelSettings = parseModelSettings(agentConfig);
+    const modelSettings = isDraftTestRun(agentConfig)
+      ? draftTestModelSettings(agentModelSettings)
+      : agentModelSettings;
     if (modelSettings) {
       log(`Per-agent modelSettings: ${JSON.stringify(modelSettings)}`);
     }
@@ -3181,6 +3191,12 @@ export async function processTask(
       // twin_deliver's explicit id fields.
       allTools.push(buildTwinDeliverTool(agentSlug, twinDeliverRef));
       log(`Digital Twin mention flow — injected MANDATORY twin_deliver tool`);
+    }
+    // Test run of an unsaved draft: the model reports what the draft is missing
+    // with this tool, and the create page shows each report under the reply.
+    if (isDraftTestRun(agentConfig)) {
+      allTools.push(buildCapabilityGapTool());
+      log(`Draft test run — injected ${CAPABILITY_GAP_TOOL_NAME}`);
     }
 
     const verifyResponses =
@@ -4004,7 +4020,10 @@ export async function processTask(
     // Prompt tiers: platform persona → sorted tool schemas (above) → P3
     // teamGuidance (folded into personaWithGuidance) → dynamic Vespa/tools in
     // fullContext. compactBeforeRun is the compaction switch — no second service.
-    const basePrompt = (personaWithGuidance ?? "").trimEnd();
+    // An empty override sends runTask to its Digital Twin prompt, which a draft
+    // test run must never get: it would answer as the user.
+    const basePrompt =
+      (personaWithGuidance ?? "").trimEnd() || (isDraftTestRun(agentConfig) ? DRAFT_FALLBACK_PERSONA : "");
     const citationGuide =
       agentSlug && CITATION_GUIDE_AGENT_SLUGS.has(agentSlug)
         ? CITATION_GUIDE

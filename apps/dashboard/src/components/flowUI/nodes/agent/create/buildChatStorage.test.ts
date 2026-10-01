@@ -55,6 +55,17 @@ const thread: BuildChatThread = {
 };
 
 describe('build chat storage', () => {
+  it('keeps the connect cards a reply carries, so they survive an OAuth round trip', () => {
+    const now = at.getTime() + 1000;
+    const withCards: BuildChatThread = {
+      ...thread,
+      extras: { ...thread.extras, b2: { activities: [], suggestions: [], connect: ['github', 'slack'] } },
+    };
+    const restored = parseStoredBuildChat(serializeBuildChat(withCards, now), now);
+    expect(restored?.extras['b2']?.connect).toEqual(['github', 'slack']);
+    expect(restored?.extras['b1']?.connect).toBeUndefined();
+  });
+
   it('brings the conversation back, question cards and all', () => {
     const now = at.getTime() + 1000;
     const restored = parseStoredBuildChat(serializeBuildChat(thread, now), now);

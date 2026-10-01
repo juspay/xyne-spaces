@@ -1,3 +1,6 @@
+import { parseGatewayCatalogSource } from "../mcpgateway/key-format.js";
+import { SPACES_SESSION_CREDENTIAL_SERVER_TYPES } from "./spaces-session-server-types.js";
+
 export interface DraftChatTools {
   subagents: string[];
   direct: string[];
@@ -121,9 +124,225 @@ export function draftAgentSlug(userId: string): string {
   return `draft-${safe || "user"}`;
 }
 
-/** Test runs of an unsaved draft have no approval surface, so writes are blocked. */
+/**
+ * Test runs of an unsaved draft have no approval surface, so writes are
+ * blocked. Worded so ordinary chat stays ordinary: the model should only bring
+ * up the test when a request runs into it.
+ */
 export const DRAFT_TEST_RUN_NOTE =
-  "This is a test run of an unsaved agent draft. Write actions (sending, posting, creating, editing, deleting) are blocked; describe what you would do instead.";
+  "You're being tried out in a test chat before the agent is saved. Talk normally and answer what was asked: a greeting gets a greeting back, a general question gets an answer. Don't bring up the test, your setup or what you can't do unless the request runs into it. You can't send, post, create, edit or delete anything in this test; if asked to, say what you would do.";
+
+/**
+ * Persona for a draft with no name, description or instructions. It is still
+ * a model that can talk; it just has nothing to do the job with yet.
+ */
+export const DRAFT_BLANK_PERSONA =
+  "You are a brand-new agent that hasn't been set up yet: no name, no instructions, and only the capabilities listed under \"What this test run can use\". You can still hold a normal conversation. Greet people, make small talk, answer general questions from what you know, and help with things that need no tools or live data, like explaining something or drafting a message. Don't volunteer what you can't do. Only when someone asks for something that needs data or an app you don't have, say so plainly in a sentence, the way a person would, and mention what would let you do it.";
+
+/** claw adds its capability-gap tool to runs whose agentConfig carries this flag. */
+export const DRAFT_TEST_RUN_FLAG = "draftTestRun";
+export const CAPABILITY_GAP_TOOL = "report_capability_gap";
+
+/**
+ * The user's date and time, which claw doesn't give the model on its own.
+ * An unknown or missing time zone falls back to UTC.
+ */
+export function currentTimeNote(timeZone: string | undefined, now: Date = new Date()): string {
+  let zone = "UTC";
+  if (timeZone) {
+    try {
+      new Intl.DateTimeFormat("en-GB", { timeZone });
+      zone = timeZone;
+    } catch {
+      // Not an IANA zone; keep UTC.
+    }
+  }
+  const text = new Intl.DateTimeFormat("en-GB", {
+    timeZone: zone,
+    weekday: "long",
+    day: "numeric",
+    month: "long",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(now);
+  return `For the user it is ${text} (${zone}).`;
+}
+
+/** The org's capability catalog, cut down to what the test-run summary needs. */
+export interface DraftCapabilityCatalog {
+  integrations: Array<{
+    slug: string;
+    label: string;
+    kind: string;
+    readTools: Array<{ slug: string; name: string }>;
+    writeTools: Array<{ slug: string; name: string }>;
+  }>;
+  subagents: Array<{ name: string; description: string; serverType?: string | undefined }>;
+  /** Skills the user can see, by name. */
+  skillNames: string[];
+  /**
+   * MCP server types that need an account, and the ones this user can use
+   * (their own connection or the org's shared one). Absent means unknown, and
+   * every added server is treated as usable.
+   */
+  connections?: { serverTypes: string[]; connected: string[] } | null | undefined;
+}
+
+/** Longest "can be added" list per kind, so a big org doesn't flood the prompt. */
+const ADDABLE_LIST_MAX = 40;
+
+function capList(names: string[]): string {
+  const shown = names.slice(0, ADDABLE_LIST_MAX).join(", ");
+  return names.length > ADDABLE_LIST_MAX ? `${shown}, and ${names.length - ADDABLE_LIST_MAX} more` : shown;
+}
+
+/**
+ * What the test run can use, sorted by whether it works now, connects only
+ * after save, or is read-only while testing, plus what could be added. The
+ * model names gaps from this list, and the Add button sends that name to the
+ * Build chat, so names come from the catalog whenever the catalog knows them.
+ */
+export function describeDraftCapabilities(input: {
+  snapshot: DraftChatSnapshot;
+  /** Built-in tools on for this message, with the composer switches folded in. */
+  custom: string[];
+  /** Names of the selected skills that loaded. */
+  skillNames: string[];
+  catalog?: DraftCapabilityCatalog | null | undefined;
+}): string {
+  const { snapshot, catalog } = input;
+  const tools = snapshot.tools ?? EMPTY_TOOLS;
+  type Integration = DraftCapabilityCatalog["integrations"][number];
+  const byKey = new Map<string, { integration: Integration; name: string; write: boolean }>();
+  const byService = new Map<string, Integration[]>();
+  for (const integration of catalog?.integrations ?? []) {
+    for (const [list, write] of [[integration.readTools, false], [integration.writeTools, true]] as const) {
+      for (const tool of list) {
+        byKey.set(tool.slug, { integration, name: tool.name, write });
+        if (!byKey.has(tool.name)) byKey.set(tool.name, { integration, name: tool.name, write });
+      }
+    }
+    const service = integration.kind === "gateway" ? parseGatewayCatalogSource(integration.slug)?.serviceName : null;
+    if (service) byService.set(service, [...(byService.get(service) ?? []), integration]);
+  }
+
+  const picked = new Map<string, { integration: Integration; read: string[]; write: string[] }>();
+  const pick = (integration: Integration) => {
+    const entry = picked.get(integration.slug) ?? { integration, read: [], write: [] };
+    picked.set(integration.slug, entry);
+    return entry;
+  };
+  const unknownTools: string[] = [];
+  const unknownServices: string[] = [];
+  for (const key of [...tools.direct, ...input.custom]) {
+    const hit = byKey.get(key);
+    if (!hit) {
+      unknownTools.push(key);
+      continue;
+    }
+    const entry = pick(hit.integration);
+    (hit.write ? entry.write : entry.read).push(hit.name);
+  }
+  for (const service of tools.gateway) {
+    const integrations = byService.get(service);
+    if (!integrations) {
+      unknownServices.push(service);
+      continue;
+    }
+    for (const integration of integrations) pick(integration);
+  }
+
+  const needsAccount = new Set(catalog?.connections?.serverTypes ?? []);
+  const connected = new Set(catalog?.connections?.connected ?? []);
+  // Spaces, Dashboard and Workflows run on the user's Spaces sign-in, never a stored connection.
+  const unconnected = (serverType: string | undefined): boolean =>
+    Boolean(
+      serverType &&
+        needsAccount.has(serverType) &&
+        !connected.has(serverType) &&
+        !SPACES_SESSION_CREDENTIAL_SERVER_TYPES.has(serverType),
+    );
+
+  const works: string[] = [];
+  const afterSave: string[] = [];
+  const notConnected: string[] = [];
+  const writesBlocked: string[] = [];
+  for (const { integration, read, write } of picked.values()) {
+    // Gateway connections live on AgentMcpConnection, which only exists once the agent is saved.
+    if (integration.kind === "gateway") {
+      afterSave.push(integration.label);
+      continue;
+    }
+    // Its tools don't load without the user's account, saved or not.
+    if (integration.kind === "mcp" && unconnected(integration.slug)) {
+      notConnected.push(integration.label);
+      continue;
+    }
+    if (read.length > 0) works.push(`${integration.label} (${read.join(", ")})`);
+    if (write.length > 0) writesBlocked.push(`${integration.label} (${write.join(", ")})`);
+  }
+  if (unknownTools.length > 0) works.push(`Tools: ${unknownTools.join(", ")}`);
+  afterSave.push(...unknownServices);
+  const subagentInfo = new Map((catalog?.subagents ?? []).map(subagent => [subagent.name, subagent]));
+  for (const name of tools.subagents) {
+    const subagent = subagentInfo.get(name);
+    if (unconnected(subagent?.serverType)) {
+      notConnected.push(`${name} subagent`);
+      continue;
+    }
+    const about = subagent?.description.trim();
+    works.push(`${name} subagent${about ? `: ${about.slice(0, 120)}` : ""}`);
+  }
+  if (tools.callableAgents.length > 0) works.push(`Agents it can call: ${tools.callableAgents.join(", ")}`);
+  for (const name of input.skillNames) works.push(`Skill: ${name}`);
+  if (snapshot.kbScope === "USER") {
+    afterSave.push("Knowledge: the user's whole knowledge base");
+  } else {
+    for (const grant of snapshot.knowledgeBase) {
+      const label = grant.name || grant.collectionId;
+      if (label) afterSave.push(`Knowledge: ${label}`);
+    }
+  }
+
+  const lines = ["## What this test run can use", "Works in this test:"];
+  const nothing = snapshot.systemPrompt.trim() ? "- Nothing beyond its instructions." : "- Nothing yet.";
+  lines.push(...(works.length > 0 ? works.map(item => `- ${item}`) : [nothing]));
+  if (notConnected.length > 0) {
+    lines.push(
+      "Added, but the user hasn't connected the account it needs, so its tools are not loaded in this run. Don't look for them:",
+      ...notConnected.map(item => `- ${item}`),
+    );
+  }
+  if (afterSave.length > 0) {
+    lines.push("Added, but only connects after the agent is saved:", ...afterSave.map(item => `- ${item}`));
+  }
+  if (writesBlocked.length > 0) {
+    lines.push(
+      "Added, but read-only in this test (it can't send, post, create, edit or delete):",
+      ...writesBlocked.map(item => `- ${item}`),
+    );
+  }
+  if (catalog) {
+    const addable = {
+      integrations: catalog.integrations
+        .filter(integration => integration.kind !== "builtin" && !picked.has(integration.slug))
+        .map(integration => integration.label),
+      subagents: catalog.subagents.map(subagent => subagent.name).filter(name => !tools.subagents.includes(name)),
+      skills: catalog.skillNames.filter(name => !input.skillNames.includes(name)),
+    };
+    lines.push("Not on this agent, can be added (for naming a gap only; never recite this list):");
+    if (addable.integrations.length > 0) lines.push(`- Integrations: ${capList(addable.integrations)}`);
+    if (addable.subagents.length > 0) lines.push(`- Subagents: ${capList(addable.subagents)}`);
+    if (addable.skills.length > 0) lines.push(`- Skills: ${capList(addable.skills)}`);
+    lines.push("- Knowledge collections from the user's knowledge base");
+  }
+  lines.push(
+    "",
+    `Only when a request needs something missing, unconnected, not live until saved, or read-only here, call ${CAPABILITY_GAP_TOOL} once for each such capability before you write anything, so the reply doesn't narrate it: status "not_added" when the agent doesn't have it (${catalog ? "name the one from the list of what can be added that fits" : "name the product or capability it would need"}), "not_connected" when it is added but the account isn't connected, "after_save" when it is added but only connects after saving, "test_blocked" when the request would write. Use the names exactly as listed here. The user sees each call as a row under your reply, so don't list them again, and don't describe buttons, rows or anything else on screen: say in a sentence or two, in your own voice, what you can do now and what's missing. Don't call it for small talk or for questions you can answer from what you know. Never claim to have used a tool you don't have, and never make up results.`,
+  );
+  return lines.join("\n");
+}
 
 /**
  * Forward body for claw `/run`. No Agent row and no Spaces app identity.
@@ -146,6 +365,11 @@ export function buildDraftRunBody(input: {
   /** The composer's Web Search / Deep research switches, for this message only. */
   webSearch?: boolean | undefined;
   deepResearch?: boolean | undefined;
+  /** The org's capabilities, so the model can tell missing from not-yet-connected. Optional: without it the summary uses raw ids. */
+  catalog?: DraftCapabilityCatalog | null | undefined;
+  /** The user's IANA time zone, for today's date and time. */
+  timeZone?: string | undefined;
+  now?: Date | undefined;
 }): Record<string, unknown> {
   const snapshot = input.snapshot;
   const tools = snapshot.tools ?? EMPTY_TOOLS;
@@ -162,20 +386,16 @@ export function buildDraftRunBody(input: {
     snapshot.description.trim() ? `Description: ${snapshot.description.trim()}` : "",
   ].filter(part => part.length > 0).join("\n\n");
 
-  const notes: string[] = [DRAFT_TEST_RUN_NOTE];
-  if (tools.gateway.length > 0) {
-    notes.push(
-      `Selected MCP connections are not available until this agent is saved: ${tools.gateway.join(", ")}.`,
-    );
-  }
-  if (snapshot.kbScope === "USER") {
-    notes.push("The user selected their whole knowledge base for this agent.");
-  } else if (snapshot.knowledgeBase.length > 0) {
-    const labels = snapshot.knowledgeBase.map(grant => grant.name || grant.collectionId).filter(Boolean);
-    if (labels.length > 0) {
-      notes.push(`Selected knowledge collections (not mounted on a draft run): ${labels.join(", ")}.`);
-    }
-  }
+  const notes: string[] = [
+    DRAFT_TEST_RUN_NOTE,
+    currentTimeNote(input.timeZone, input.now),
+    describeDraftCapabilities({
+      snapshot,
+      custom,
+      skillNames: (input.skills ?? []).map(skill => skill.name),
+      catalog: input.catalog,
+    }),
+  ];
   if (input.webSearch) {
     notes.push("The user turned on web search for this message: search the web with web-search before answering.");
   }
@@ -194,8 +414,10 @@ export function buildDraftRunBody(input: {
     task: input.message.trim(),
     conversationId: input.draftConversationId,
     agentSlug: draftAgentSlug(input.userId),
-    systemPrompt: persona,
+    // An empty persona would make claw fall back to its Digital Twin prompt.
+    systemPrompt: persona || DRAFT_BLANK_PERSONA,
     agentConfig: {
+      [DRAFT_TEST_RUN_FLAG]: true,
       permissionMode: "read-only",
       tools: {
         subagents: tools.subagents,

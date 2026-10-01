@@ -14,7 +14,7 @@ import {
 } from "xyne-claw-shared";
 import { chatJson, chatStream, type AuthoringLlmOptions, type AuthoringMessage } from "./authoring-llm.js";
 import { canvasSummary } from "./classify.js";
-import { normalizeQuestions, normalizeSuggestions } from "./questions.js";
+import { normalizeQuestions, normalizeSuggestions, QUESTION_TYPE_RULE } from "./questions.js";
 import type { WebLookup } from "./web-lookup.js";
 
 /** How long the main model may stay silent before the fast one takes over. */
@@ -27,7 +27,7 @@ const TALK_SYSTEM = `You are the teammate helping someone build an AI agent on t
 - When web results are given, base the facts on them, link 1 to 3 sources inline as markdown links, and say how current the facts are.
 - When a question needs live facts (weather, prices, news, scores) and there are no web results, say you couldn't check live data just now. Never invent live numbers.
 - About other agents or providers: explain what they do and how they work, then add one line on how that could look for the agent this person is building.
-- About their own agent: use the agent summary below. Never claim to have changed it.
+- About their own agent: use the agent summary below. This reply can't change it: never say you changed, cleared, added or removed anything on it.
 - If a change to their agent, or a new agent, would help, say so as a plain statement in one sentence ("An agent could post this to you every morning."), not as a question: a button under your reply offers it.
 - If you need one detail before you can answer well, ask for it in one sentence and stop; any choices are shown to them separately.
 - Markdown: short paragraphs and bullets, no headings for short answers. Under about 180 words unless they ask for depth.
@@ -36,7 +36,7 @@ const TALK_SYSTEM = `You are the teammate helping someone build an AI agent on t
 const FOLLOWUPS_SYSTEM = `You read one exchange from the chat on the "Create agent" page of Xyne Spaces and decide what to offer next. Return ONLY a JSON object: {"suggestions": [], "questions": []}.
 
 - suggestions: 0 to 2 concrete changes to the agent being built that follow from the reply and what the user cares about. Each is {"label": "Add a PR review step", "message": "Add a step that reviews each open pull request for missing tests and flags it."}: label imperative, at most 6 words; message the full request the user would send. When the agent is still empty (no name, no instructions), offer only one: "Draft an agent that …", folding the best ideas into it. None for small talk, or when nothing would change the agent.
-- questions: only when the user must pick between several real alternatives before anything can be built. An offer they can take or leave is a suggestion, never a yes/no question. 1 or 2 of {"label": "Job", "question": "…", "type": "single_choice" or "multiple_choice", "options": [{"label": "…", "description": "one line"}]}, with 2 to 4 options and never an "Other" option.
+- questions: only when the user must pick between several real alternatives before anything can be built. An offer they can take or leave is a suggestion, never a yes/no question. 1 or 2 of {"label": "Job", "question": "…", "type": "single_choice" or "multiple_choice", "options": [{"label": "…", "description": "one line"}]}, with 2 to 4 options and never an "Other" option. ${QUESTION_TYPE_RULE}
 - If there are questions, suggestions must be empty.`;
 
 const clip = (text: string, max: number): string => (text.length <= max ? text : `${text.slice(0, max - 1)}…`);

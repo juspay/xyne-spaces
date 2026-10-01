@@ -40,6 +40,7 @@ import { pinUserIdParam } from "../middleware/pin-user-id-param.js";
 import { s2sKeyMatches } from "../middleware/require-auth.js";
 import { writeAuditLog } from "../lib/audit.js";
 import { buildAvailableToolsCatalog } from "./tools.js";
+import { availabilityForServerIds } from "../lib/connector-availability.js";
 import { validateAgentModelConfig, validateAwakeningConfig } from "../lib/agent-config-validation.js";
 import { syncAwakeningState } from "../awakening/lifecycle.js";
 import { removeAgentFromIndex, syncAgentToIndexBestEffort } from "../services/agent-index/index.js";
@@ -53,6 +54,7 @@ import {
   draftAgentSlug,
   parseDraftAttachments,
   parseDraftSnapshot,
+  type DraftCapabilityCatalog,
 } from "../lib/draft-chat.js";
 import { mintSessionToken } from "../lib/session-tokens.js";
 import { createAgentRecord } from "../lib/agent-create.js";
@@ -5339,6 +5341,77 @@ router.delete(
 /** Idle gap after which a draft test run is abandoned (no bytes from claw). */
 const DRAFT_CHAT_IDLE_MS = 90_000;
 const DRAFT_CHAT_TOKEN_TTL_S = 30 * 60;
+/** A test chat sends a message every few seconds; the catalog doesn't change that fast. */
+const DRAFT_CATALOG_TTL_MS = 60_000;
+const draftCatalogCache = new Map<
+  string,
+  { at: number; catalog: Promise<Omit<DraftCapabilityCatalog, "connections"> | null> }
+>();
+
+/**
+ * What the caller's org offers, for the test run's capability summary. A
+ * failure only costs the summary its labels, so it resolves to null.
+ */
+function draftCapabilityCatalog(orgId: string, userId: string): Promise<DraftCapabilityCatalog | null> {
+  return Promise.all([cachedDraftCatalog(orgId, userId), draftConnections(userId)]).then(
+    ([catalog, connections]) => (catalog ? { ...catalog, connections } : null),
+  );
+}
+
+/**
+ * Which MCP servers this user can use right now. Read on every message, not
+ * cached: connecting an account and asking again should just work.
+ */
+async function draftConnections(userId: string): Promise<DraftCapabilityCatalog["connections"]> {
+  try {
+    const servers = await prisma.mcpServer.findMany({ where: { enabled: true }, select: { id: true, type: true } });
+    const availability = await availabilityForServerIds(userId, servers.map(server => server.id));
+    return {
+      serverTypes: servers.map(server => server.type),
+      connected: servers
+        .filter(server => availability.personal.has(server.id) || availability.org.has(server.id))
+        .map(server => server.type),
+    };
+  } catch (err) {
+    log.warn(`[agents] draft-chat connections unavailable: ${err instanceof Error ? err.message : String(err)}`);
+    return null;
+  }
+}
+
+function cachedDraftCatalog(orgId: string, userId: string): Promise<Omit<DraftCapabilityCatalog, "connections"> | null> {
+  const key = `${orgId}:${userId}`;
+  const cached = draftCatalogCache.get(key);
+  if (cached && Date.now() - cached.at < DRAFT_CATALOG_TTL_MS) return cached.catalog;
+  const catalog = Promise.all([
+    buildAvailableToolsCatalog(undefined, orgId),
+    skillRepository.listVisible({ userId, orgId }),
+  ])
+    .then(([full, skills]): Omit<DraftCapabilityCatalog, "connections"> => ({
+      integrations: full.integrations.map(integration => ({
+        slug: integration.slug,
+        label: integration.label,
+        kind: integration.kind,
+        readTools: integration.readTools.map(tool => ({ slug: tool.slug, name: tool.name })),
+        writeTools: integration.writeTools.map(tool => ({ slug: tool.slug, name: tool.name })),
+      })),
+      subagents: full.subagents.map(subagent => ({
+        name: subagent.name,
+        description: subagent.description,
+        serverType: subagent.serverType,
+      })),
+      skillNames: skills.map(skill => skill.name),
+    }))
+    .catch((err: unknown) => {
+      log.warn(`[agents] draft-chat catalog unavailable: ${err instanceof Error ? err.message : String(err)}`);
+      draftCatalogCache.delete(key);
+      return null;
+    });
+  for (const [stale, entry] of draftCatalogCache) {
+    if (Date.now() - entry.at >= DRAFT_CATALOG_TTL_MS) draftCatalogCache.delete(stale);
+  }
+  draftCatalogCache.set(key, { at: Date.now(), catalog });
+  return catalog;
+}
 
 /** Short, user-facing text for a failed draft test run. Raw upstream bodies stay in logs. */
 function draftChatErrorText(status: number): string {
@@ -5377,6 +5450,7 @@ router.post("/draft-chat", asyncHandler(async (req: Request, res: Response) => {
   }
 
   const orgId = getOrgId(req);
+  const catalogPromise = orgId ? draftCapabilityCatalog(orgId, userId) : Promise.resolve(null);
   const loaded = snapshot.skillIds.length > 0
     ? await skillRepository.findByIds(snapshot.skillIds)
     : [];
@@ -5390,7 +5464,10 @@ router.post("/draft-chat", asyncHandler(async (req: Request, res: Response) => {
       description: skill.description,
       content: skill.content,
     }));
-  const user = await userRepository.findById(userId).catch(() => null);
+  const [user, catalog] = await Promise.all([
+    userRepository.findById(userId).catch(() => null),
+    catalogPromise,
+  ]);
 
   const sessionId = crypto.randomUUID();
   const forwardBody = buildDraftRunBody({
@@ -5412,6 +5489,8 @@ router.post("/draft-chat", asyncHandler(async (req: Request, res: Response) => {
     attachments,
     webSearch: req.body?.webSearchEnabled === true,
     deepResearch: req.body?.deepResearchEnabled === true,
+    catalog,
+    timeZone: typeof req.body?.timeZone === "string" ? req.body.timeZone.slice(0, 64) : undefined,
   });
 
   const controller = new AbortController();

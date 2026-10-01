@@ -57,7 +57,8 @@ export type DraftField =
 
 export type DraftHub = 'mcp' | 'builtin' | 'subagent' | 'skill' | 'knowledge';
 
-export type DraftMode = 'chat' | 'ask' | 'draft' | 'edit';
+/** `reset` is "start over": the page clears the canvas and nothing is drafted. */
+export type DraftMode = 'chat' | 'ask' | 'draft' | 'edit' | 'reset';
 
 export type DraftSchedule =
   | { kind: 'repeat'; cron: string; timezone: string; label: string; task: string }
@@ -398,6 +399,7 @@ export function removalPatch(
  */
 export function silentTurnReply(mode: DraftMode | null, name: string): string {
   if (mode === 'draft') return name.trim() ? `Drafted ${name.trim()}.` : 'Drafted the agent.';
+  if (mode === 'reset') return 'Cleared the canvas.';
   return 'Updated the canvas.';
 }
 

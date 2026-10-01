@@ -280,7 +280,10 @@ export async function buildAvailableToolsCatalog(tenantUniqueId: string | undefi
     // read/write/destructive tool lists with descriptions.
     const descriptionByName = new Map<string, string>();
     for (const t of tools) {
-      if (t.description) descriptionByName.set(t.name, t.description);
+      if (!t.description) continue;
+      descriptionByName.set(t.name, t.description);
+      // Adapter-declared tools are listed by slug (google-gmail-search, not "Gmail Search").
+      if (!descriptionByName.has(t.slug)) descriptionByName.set(t.slug, t.description);
     }
 
     const integrations: Integration[] = [];

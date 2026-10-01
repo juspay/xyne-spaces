@@ -201,6 +201,9 @@ export function CapabilityPillList({
             wrapped ? 'contents' : 'flex shrink-0 items-center gap-2',
             // Clip sideways only, so a pill's entrance (a small rise) isn't cut off.
             folded && 'overflow-x-clip',
+            // With no pills (a leaving one still counts) it takes no gap, so Add
+            // lines up with the pills on the rows above and below.
+            'empty:hidden',
           )}
           style={folded ? { width: fit.width } : undefined}
         >

@@ -7,6 +7,8 @@ import {
   type DraftChatExtras,
 } from '@/services/claw/draftChat';
 import { clawErrorText } from '@/services/claw/clawRequest';
+import { withCapabilityGap, type CapabilityGap } from './draftChatGaps';
+import { clearStoredDraftChat, readDraftChat, writeDraftChat } from './draftChatStorage';
 
 export interface DraftChatMessage {
   id: string;
@@ -16,6 +18,8 @@ export interface DraftChatMessage {
   files?: string[];
   streaming?: boolean;
   error?: string;
+  /** What the agent said this test can't use, in the order it said so. */
+  gaps?: CapabilityGap[];
 }
 
 /** One test conversation. Its id is the draft conversation id claw keeps context under. */
@@ -34,7 +38,18 @@ export function draftThreadTitle(thread: DraftChatThread | undefined): string {
   return first || 'New chat';
 }
 
-export function useDraftChat(getForm: () => AgentCreateFormState): {
+export function useDraftChat(
+  getForm: () => AgentCreateFormState,
+  {
+    storageKey,
+    open = false,
+  }: {
+    /** Where the chat is kept across a reload (draftChatStorage.ts). None: it isn't. */
+    storageKey?: string | undefined;
+    /** Whether the chat is open now, kept with it. */
+    open?: boolean;
+  } = {},
+): {
   threads: DraftChatThread[];
   activeThreadId: string;
   messages: DraftChatMessage[];
@@ -44,8 +59,13 @@ export function useDraftChat(getForm: () => AgentCreateFormState): {
   newChat: () => void;
   selectThread: (id: string) => void;
 } {
-  const [threads, setThreads] = useState<DraftChatThread[]>(() => [{ id: newId(), messages: [] }]);
-  const [activeThreadId, setActiveThreadId] = useState(() => threads[0]!.id);
+  const [restored] = useState(() => (storageKey ? readDraftChat(storageKey) : null));
+  const [threads, setThreads] = useState<DraftChatThread[]>(
+    () => restored?.threads ?? [{ id: newId(), messages: [] }],
+  );
+  const [activeThreadId, setActiveThreadId] = useState(
+    () => restored?.activeThreadId ?? threads[0]!.id,
+  );
   const [pending, setPending] = useState(false);
   const activeRef = useRef(activeThreadId);
   const threadsRef = useRef(threads);
@@ -107,16 +127,17 @@ export function useDraftChat(getForm: () => AgentCreateFormState): {
           messages.map(message => (message.id === id ? { ...message, ...fields } : message)),
         );
       const assistantId = newId();
+      const userMessage: DraftChatMessage = {
+        id: newId(),
+        role: 'user',
+        content: trimmed,
+        ...(extras.attachments.length > 0
+          ? { files: extras.attachments.map(file => file.fileName) }
+          : {}),
+      };
       update(messages => [
         ...messages,
-        {
-          id: newId(),
-          role: 'user',
-          content: trimmed,
-          ...(extras.attachments.length > 0
-            ? { files: extras.attachments.map(file => file.fileName) }
-            : {}),
-        },
+        userMessage,
         { id: assistantId, role: 'assistant', content: '', streaming: true },
       ]);
       const controller = new AbortController();
@@ -154,6 +175,14 @@ export function useDraftChat(getForm: () => AgentCreateFormState): {
               );
             },
             onError: message => patch(assistantId, { streaming: false, error: message }),
+            onCapabilityGap: gap =>
+              update(messages =>
+                messages.map(message =>
+                  message.id === assistantId
+                    ? { ...message, gaps: withCapabilityGap(message.gaps, gap) }
+                    : message,
+                ),
+              ),
           },
         });
         patch(assistantId, { streaming: false });
@@ -174,10 +203,18 @@ export function useDraftChat(getForm: () => AgentCreateFormState): {
     [startThread],
   );
 
-  // Test threads can't be reopened once the page is gone, so free them on claw.
+  useEffect(() => {
+    if (storageKey) writeDraftChat(storageKey, { threads, activeThreadId, open });
+  }, [activeThreadId, open, storageKey, threads]);
+
+  // Leaving the page in the app ends the test, so free its threads on claw. A
+  // reload never gets here, so the threads it keeps still have their context.
+  const storageKeyRef = useRef(storageKey);
+  storageKeyRef.current = storageKey;
   useEffect(
     () => (): void => {
       abortRef.current?.abort();
+      if (storageKeyRef.current) clearStoredDraftChat(storageKeyRef.current);
       for (const thread of threadsRef.current) {
         if (thread.messages.length > 0) void clearDraftChat(thread.id).catch(() => undefined);
       }
@@ -186,5 +223,14 @@ export function useDraftChat(getForm: () => AgentCreateFormState): {
   );
 
   const messages = threads.find(thread => thread.id === activeThreadId)?.messages ?? [];
-  return { threads, activeThreadId, messages, pending, send, stop, newChat, selectThread };
+  return {
+    threads,
+    activeThreadId,
+    messages,
+    pending,
+    send,
+    stop,
+    newChat,
+    selectThread,
+  };
 }

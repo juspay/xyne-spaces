@@ -16,6 +16,7 @@ import {
   startMcpOAuth,
 } from '../../../services/claw/clawMcpService';
 import type { McpServer } from '../../../services/claw/clawMcpTypes';
+import { FAKE_MCP_CONNECT, fakeConnect } from '../../../services/claw/fakeMcpConnect';
 import { CardShell } from './cardPrimitives';
 
 /**
@@ -27,7 +28,7 @@ import { CardShell } from './cardPrimitives';
  * shows the real current connected state rather than the one captured at post
  * time.
  */
-interface McpSuggestItem {
+export interface McpSuggestItem {
   serverType: string;
   name: string;
   description?: string;
@@ -38,7 +39,7 @@ interface McpSuggestItem {
 // underlined; these are buttons by intent, not links in prose.
 const LINK_BUTTON = '!text-foreground !no-underline hover:!text-foreground';
 
-interface McpSuggestProps {
+export interface McpSuggestProps {
   title?: string;
   reason?: string;
   connectors?: McpSuggestItem[];
@@ -48,8 +49,25 @@ interface McpSuggestProps {
 
 export const McpSuggestNode: React.FC<{ node: FlowComponent; children?: React.ReactNode }> = ({
   node,
-}) => {
-  const props = node.props as McpSuggestProps | undefined;
+}) => <McpSuggestCard {...(node.props as McpSuggestProps | undefined)} style={node.style} />;
+
+/**
+ * The card itself, for places that aren't a posted flow card (the create
+ * page's Build chat). `fullWidth` fills the column instead of the thread's
+ * 450px; without `linkRows` a row's name doesn't open the connector's page,
+ * for screens where leaving would drop unsaved work.
+ */
+export function McpSuggestCard({
+  style,
+  fullWidth = false,
+  linkRows = true,
+  ...rest
+}: McpSuggestProps & {
+  style?: React.CSSProperties | undefined;
+  fullWidth?: boolean;
+  linkRows?: boolean;
+}): React.ReactElement | null {
+  const props: McpSuggestProps = rest;
   const { user } = useAuth();
   const { entries, connectedServerIds, refetch } = useMcpCatalog();
   const { ensureFieldsFor } = useMcpCredentialFields();
@@ -74,6 +92,15 @@ export const McpSuggestNode: React.FC<{ node: FlowComponent; children?: React.Re
     const server = serverFor(serverType);
     if (!server || !user?.id) return;
     setErrorType(null);
+
+    // Local development: no sign-in or form, just a short wait (fakeMcpConnect.ts).
+    if (FAKE_MCP_CONNECT) {
+      setBusyType(serverType);
+      await fakeConnect(user.id, server.id);
+      refetch();
+      setBusyType(null);
+      return;
+    }
 
     // Resolved from the registry, not the connector's DB columns: those are
     // unset in some environments and the form would be skipped entirely.
@@ -102,7 +129,7 @@ export const McpSuggestNode: React.FC<{ node: FlowComponent; children?: React.Re
   };
 
   return (
-    <CardShell style={node.style}>
+    <CardShell style={fullWidth ? { ...style, width: '100%' } : style}>
       <div className='flex flex-col gap-4 rounded-b-[11px] border-b border-border bg-card/80 px-3 pb-4 pt-3'>
         <div className='flex h-6 items-center gap-2 pl-1'>
           <span className='min-w-0 truncate text-sm font-medium leading-5 tracking-[-0.5px] text-muted-foreground'>
@@ -125,35 +152,47 @@ export const McpSuggestNode: React.FC<{ node: FlowComponent; children?: React.Re
               ? connectedServerIds.has(server.id)
               : (item.connected ?? false);
             const entry = entries.find(e => e.server?.type === item.serverType);
+            const details = (
+              <>
+                <McpLogo type={entry?.iconType ?? item.serverType} name={item.name} size='sm' />
+                <div className='flex min-w-0 flex-1 flex-col'>
+                  <span className='truncate text-sm font-medium leading-5 text-foreground'>
+                    {item.name}
+                  </span>
+                  {item.description && (
+                    <span className='truncate text-xs leading-5 text-muted-foreground'>
+                      {item.description}
+                    </span>
+                  )}
+                  {errorType === item.serverType && (
+                    <span className='text-xs leading-5 text-destructive'>
+                      Could not connect. Try again.
+                    </span>
+                  )}
+                </div>
+              </>
+            );
 
             return (
               <div
                 key={item.serverType}
-                className='-mx-1 flex items-center gap-3 rounded-xl px-2 py-2.5 hover:bg-foreground/[0.04]'
+                className={cn(
+                  '-mx-1 flex items-center gap-3 rounded-xl px-2 py-2.5',
+                  linkRows && 'hover:bg-foreground/[0.04]',
+                )}
               >
-                <Link
-                  to={`/ai/library/mcp/${encodeURIComponent(item.serverType)}`}
-                  className={cn('flex min-w-0 flex-1 items-start gap-2', LINK_BUTTON)}
-                  data-track-category='Claw MCP'
-                  data-track-name='ViewMcpFromCard'
-                >
-                  <McpLogo type={entry?.iconType ?? item.serverType} name={item.name} size='sm' />
-                  <div className='flex min-w-0 flex-1 flex-col'>
-                    <span className='truncate text-sm font-medium leading-5 text-foreground'>
-                      {item.name}
-                    </span>
-                    {item.description && (
-                      <span className='truncate text-xs leading-5 text-muted-foreground'>
-                        {item.description}
-                      </span>
-                    )}
-                    {errorType === item.serverType && (
-                      <span className='text-xs leading-5 text-destructive'>
-                        Could not connect. Try again.
-                      </span>
-                    )}
-                  </div>
-                </Link>
+                {linkRows ? (
+                  <Link
+                    to={`/ai/library/mcp/${encodeURIComponent(item.serverType)}`}
+                    className={cn('flex min-w-0 flex-1 items-start gap-2', LINK_BUTTON)}
+                    data-track-category='Claw MCP'
+                    data-track-name='ViewMcpFromCard'
+                  >
+                    {details}
+                  </Link>
+                ) : (
+                  <div className='flex min-w-0 flex-1 items-start gap-2'>{details}</div>
+                )}
 
                 {isConnected ? (
                   <span className='flex shrink-0 items-center gap-1.5 rounded-lg px-2 py-1 text-xs font-medium leading-5 text-status-success'>
@@ -220,4 +259,4 @@ export const McpSuggestNode: React.FC<{ node: FlowComponent; children?: React.Re
       )}
     </CardShell>
   );
-};
+}

@@ -1,4 +1,4 @@
-import { useState, type ReactElement } from 'react';
+import type { ReactElement } from 'react';
 import { CalendarTimer } from '@xyne/icons';
 import { DropdownMenuItem } from '@/components/ui/dropdown-menu';
 import { Popover } from '@/components/ui/Popover';
@@ -6,6 +6,7 @@ import { cn } from '@/utils/classNames';
 import { PROPERTY_MENU_ITEM } from './AddPropertyMenu';
 import { ChatFillHighlight } from './ChatFillHighlight';
 import { PropertyRow } from './PropertyRow';
+import { useExclusiveMenu } from './useExclusiveMenu';
 import {
   cronFromRepeat,
   fromLocalInputValue,
@@ -52,7 +53,7 @@ export function ScheduleRow({
   onChange,
   onRemove,
 }: ScheduleRowProps): ReactElement {
-  const [open, setOpen] = useState(false);
+  const editor = useExclusiveMenu();
   const problem = scheduleProblem(schedule);
 
   return (
@@ -73,8 +74,8 @@ export function ScheduleRow({
     >
       <ChatFillHighlight active={shimmer} field='schedule'>
         <Popover
-          open={open}
-          onOpenChange={next => setOpen(disabled ? false : next)}
+          open={editor.open}
+          onOpenChange={next => editor.onOpenChange(disabled ? false : next)}
           align='start'
           sideOffset={6}
           className='w-[280px] rounded-xl border-[0.8px] border-border p-3'

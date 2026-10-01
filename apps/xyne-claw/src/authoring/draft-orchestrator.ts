@@ -92,6 +92,9 @@ const SMALL_TALK =
   /^\s*(hi|hii+|hello|hey|yo|sup|thanks|thank you|thx|ok|okay|cool|nice|great|good (morning|afternoon|evening))\b[\s!.?]*$/i;
 /** A question, not a change: without the planner, answer rather than rewrite the canvas. */
 const QUESTION = /\?\s*$|^\s*(what|who|how|why|when|where|which|is|are|can|could|does|do|should|will)\b/i;
+/** "Start over" with nothing else said: without the planner, clear rather than edit. */
+const START_OVER =
+  /^\s*(let'?s\s+|please\s+|can you\s+)?(start (over|again|afresh|fresh|from (a )?(clean slate|scratch))|(from )?(a )?clean slate|clear (the canvas|everything|it all|all)|wipe (it|the canvas|everything)|reset( the canvas| everything| it)?|scrap (this|it|everything))\b[\s!.?]*$/i;
 /** Time kept back at the end of a turn for follow-ups and the closing event. */
 const TALK_RESERVE_MS = 6_000;
 
@@ -308,6 +311,8 @@ export function crowdedNote(
   return `This agent now has about ${now} tools. Over ${CROWDED_TOOLS_OVER} makes it slower and more likely to pick the wrong one, so remove any it won't need.`;
 }
 
+const RESET_ACK = "Cleared the canvas. Tell me what this agent should do and I'll draft it fresh.";
+
 function fallbackDecision(input: ClawDraftRequest): ClassifyDecision {
   const canvasEmpty = !input.canvas.name.trim() && !input.canvas.instructions.trim();
   const message = input.message.trim();
@@ -321,6 +326,19 @@ function fallbackDecision(input: ClawDraftRequest): ClassifyDecision {
       capabilityRemovals: [],
       instructionsBrief: message,
       ack: "",
+      fromFallback: true,
+    };
+  }
+  if (!canvasEmpty && START_OVER.test(message)) {
+    return {
+      mode: "reset",
+      reply: "",
+      fields: [],
+      capabilityQuery: message,
+      capabilityAdds: [],
+      capabilityRemovals: [],
+      instructionsBrief: message,
+      ack: RESET_ACK,
       fromFallback: true,
     };
   }
@@ -472,6 +490,14 @@ export async function runDraftTurn(
 
     emit({ event: "mode", mode: decision.mode, fields: decision.fields });
 
+    // Start over: the page clears the canvas when it sees the mode; there is nothing to draft.
+    if (decision.mode === "reset") {
+      judgeAbort.abort();
+      emit({ event: "ack", text: decision.ack || RESET_ACK });
+      finish("completed");
+      return;
+    }
+
     if (decision.mode === "ask") {
       judgeAbort.abort();
       emit({ event: "reply.delta", text: decision.reply || "What job should this agent do for you?" });
@@ -484,7 +510,10 @@ export async function runDraftTurn(
 
     if (decision.mode === "chat") {
       judgeAbort.abort();
-      if (decision.fromFallback) {
+      // Without the planner a greeting gets its stock reply. Anything else still
+      // goes to the talk model (its own model, with the rest of the turn's
+      // budget), so a slow planner doesn't turn a real question away.
+      if (decision.fromFallback && SMALL_TALK.test(input.message)) {
         emit({ event: "reply.delta", text: decision.reply || "Tell me what you want to change." });
         finish("partial");
         return;

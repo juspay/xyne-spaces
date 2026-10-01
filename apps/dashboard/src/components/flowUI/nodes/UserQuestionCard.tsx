@@ -27,18 +27,30 @@ export function isQuestionAnswered(
   return answered || Boolean(notes[question.id]?.trim());
 }
 
-/** 14px square tick box — unchecked outline, or filled with the inverse check. */
-const OptionCheck: React.FC<{ checked: boolean }> = ({ checked }) => (
+/**
+ * 14px pick mark. A square tick box when several options can be picked, a
+ * round one when only one can, so the card says which before you click.
+ */
+const OptionCheck: React.FC<{ checked: boolean; multiple: boolean }> = ({
+  checked,
+  multiple,
+}) => (
   <span className='flex size-5 shrink-0 items-center justify-center'>
     <span
       className={cn(
-        'flex size-3.5 items-center justify-center rounded',
+        'flex size-3.5 items-center justify-center',
+        multiple ? 'rounded' : 'rounded-full',
         checked
           ? 'border-[0.875px] border-foreground/10 bg-foreground text-background'
           : 'border-[1.2px] border-foreground/40',
       )}
     >
-      {checked && <Check className='size-3' strokeWidth={2.75} />}
+      {checked &&
+        (multiple ? (
+          <Check className='size-3' strokeWidth={2.75} />
+        ) : (
+          <span className='size-1.5 rounded-full bg-background' />
+        ))}
     </span>
   </span>
 );
@@ -341,7 +353,10 @@ export function UserQuestionCard({
                           : 'border border-foreground/10 hover:border-foreground/[0.06] hover:bg-foreground/[0.04]',
                     )}
                   >
-                    <OptionCheck checked={chosen} />
+                    <OptionCheck
+                      checked={chosen}
+                      multiple={activeQuestion.type === 'multiple_choice'}
+                    />
                     <span className='flex min-w-0 flex-1 flex-col gap-1'>
                       <span className='text-sm font-semibold leading-5 text-foreground'>
                         {label}
@@ -364,7 +379,7 @@ export function UserQuestionCard({
                       optionStyle === 'outlined' && 'border border-foreground/10',
                     )}
                   >
-                    <OptionCheck checked />
+                    <OptionCheck checked multiple={activeQuestion.type === 'multiple_choice'} />
                     <textarea
                       ref={customInputRef}
                       value={customValue}

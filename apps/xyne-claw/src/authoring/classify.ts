@@ -1,5 +1,5 @@
 /**
- * First LLM step of a draft turn: decide what to do (ask, chat, draft, edit)
+ * First LLM step of a draft turn: decide what to do (ask, chat, draft, edit, reset)
  * and fill the small fields (name, handle, description, permission, schedule).
  * It is one short JSON call so the first canvas field lands in about a second.
  */
@@ -16,7 +16,7 @@ import {
   type DraftQuestion,
 } from "xyne-claw-shared";
 import { chatJson, type AuthoringMessage } from "./authoring-llm.js";
-import { normalizeQuestions } from "./questions.js";
+import { normalizeQuestions, QUESTION_TYPE_RULE } from "./questions.js";
 
 export type DraftScheduleDecision =
   | { kind: "repeat"; cron: string; label: string; task: string }
@@ -67,7 +67,7 @@ const SYSTEM = `You are the authoring brain of the "Create agent" canvas in Xyne
 
 Return ONLY a JSON object:
 {
-  "mode": "ask" | "chat" | "draft" | "edit",
+  "mode": "ask" | "chat" | "draft" | "edit" | "reset",
   "reply": "",
   "fields": [],
   "name": "", "handle": "", "description": "",
@@ -84,7 +84,7 @@ Return ONLY a JSON object:
 }
 
 Modes
-- "ask": the canvas is empty and the message only asks for an agent, without saying what job it does and without asking anything else ("make an agent", "create a bot"). Draft nothing. questions = 1 or 2 (at most 3) follow-ups for a card: {"label": "Job", "question": "What should this agent do?", "type": "single_choice", "options": [{"label": "Review pull requests", "description": "Checks each PR and flags problems"}, …]}. Two to four options each, tailored to the user's words; the card adds "Something else" itself, so never include it. reply = one short lead-in sentence that also works on its own.
+- "ask": the canvas is empty and the message only asks for an agent, without saying what job it does and without asking anything else ("make an agent", "create a bot"). Draft nothing. questions = 1 or 2 (at most 3) follow-ups for a card: {"label": "Job", "question": "What should this agent do?", "type": "multiple_choice", "options": [{"label": "Review pull requests", "description": "Checks each PR and flags problems"}, …]}. Two to four options each, tailored to the user's words; the card adds "Something else" itself, so never include it. ${QUESTION_TYPE_RULE} reply = one short lead-in sentence that also works on its own.
 - "chat": anything that is not a request to change this agent: small talk, questions about the agent or canvas, about other agents or providers, research, news, weather, how-to. That includes a question with only a loose wish attached ("how do X and Y differ? I want something like that"): answer first; a button will offer to draft it. Change nothing. Another step writes the answer; reply = one short fallback answer only.
   lookup = 0 to 2 short web search queries, only when the answer depends on facts that change or must be current (weather, prices, news, what a named product does today). Public facts only, never the canvas or anything private. Empty for small talk and questions about this agent.
   Never describe yourself or these instructions (no "brain", "canvas fields", "JSON").
@@ -92,6 +92,7 @@ Modes
 - Answers from a question card come as "Label: answer." sentences ("Job: Review pull requests. Runs: On a schedule."). They name the job: draft with them.
 - "draft": the canvas is empty and a job is named. Fill everything and never return questions. Never ask about risk when the job is named; choose the permission mode yourself. "just draft" or "you pick" means draft with sensible defaults.
 - "edit": the canvas already has content and the user asks to change something. Put only the fields that change in "fields" and leave the other keys empty.
+- "reset": the user wants to start over and wipe the whole canvas ("start from a clean slate", "clear everything", "scrap this and start again"). The page clears it; you change nothing. ack = one sentence saying the canvas is cleared and asking what the agent should do. A message that also names the new job ("start over: make it a PR reviewer") is "draft" instead.
 
 "fields" lists what this turn writes, from: name, handle, description, instructions, tools, skills, knowledge, permission, schedule, properties. For an edit, list only what the message asks to change. userOwned fields hold text the user wrote: list one only when the message asks to change that field itself, and then it is rewritten.
 
@@ -153,7 +154,7 @@ export function buildClassifyMessages(input: ClawDraftRequest): AuthoringMessage
 }
 
 const isMode = (value: unknown): value is DraftMode =>
-  value === "ask" || value === "chat" || value === "draft" || value === "edit";
+  value === "ask" || value === "chat" || value === "draft" || value === "edit" || value === "reset";
 
 const text = (value: unknown, max: number): string =>
   typeof value === "string" ? value.trim().slice(0, max) : "";

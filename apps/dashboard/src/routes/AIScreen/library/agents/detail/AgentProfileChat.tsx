@@ -6,7 +6,12 @@ import type {
   Message,
   MessageAttachment,
 } from '@/components/Chat/XyneAISidebar/utils/XyneAITypes';
-import { DraftChatComposer } from '@/components/flowUI/nodes/agent/create/DraftChatComposer';
+import {
+  ThinkingStatus,
+  DraftChatComposer,
+  UnreadStatus,
+} from '@/components/flowUI/nodes/agent/create/DraftChatComposer';
+import { useUnreadReplies } from '@/components/flowUI/nodes/agent/create/useUnreadReplies';
 import { DraftChatOverlay } from '@/components/flowUI/nodes/agent/create/DraftChatOverlay';
 import { DraftChatTranscript } from '@/components/flowUI/nodes/agent/create/DraftChatTranscript';
 import { composerPlaceholder } from '@/components/flowUI/nodes/agent/create/draftChatMotion';
@@ -174,6 +179,15 @@ export function AgentProfileChat({ agent }: { agent: Agent }): ReactElement {
   const activeSession = sessions.find(session => session.sessionId === conversationId);
   const firstQuestion = messages.find(message => message.type === 'user')?.content.trim();
   const title = activeSession?.title || firstQuestion || 'New chat';
+  const folded = active && !expanded;
+  const replying = Boolean(
+    [...messages].reverse().find(message => message.type === 'bot')?.streamingContent,
+  );
+  const unread = useUnreadReplies(
+    messages.filter(message => message.type === 'bot' && !message.isStreaming).length,
+    expanded,
+  );
+  const showUnread = folded && !pending && unread > 0;
   const threads = sessions
     .filter(session => session.sessionId)
     .map(session => ({ id: session.sessionId, title: session.title || 'Untitled chat' }));
@@ -215,13 +229,26 @@ export function AgentProfileChat({ agent }: { agent: Agent }): ReactElement {
         extras={extras}
         onExtrasChange={setExtras}
         placeholder={composerPlaceholder({
-          folded: active && !expanded,
+          folded,
           pending,
-          replying: Boolean(
-            [...messages].reverse().find(message => message.type === 'bot')?.streamingContent,
-          ),
+          replying,
           idle: `Ask ${agent.name} anything`,
         })}
+        status={
+          folded && pending ? (
+            <ThinkingStatus
+              avatar={<AgentBotAvatar agentKey={agent.id} asleep={!agent.enabled} busy size={22} />}
+              replying={replying}
+            />
+          ) : showUnread ? (
+            <UnreadStatus
+              avatar={<AgentBotAvatar agentKey={agent.id} asleep={!agent.enabled} size={22} />}
+              count={unread}
+            />
+          ) : undefined
+        }
+        statusKey={pending ? 'working' : 'unread'}
+        statusOnly={showUnread}
         pending={pending}
         disabled={!agent.enabled}
         onSend={handleSend}

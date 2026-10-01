@@ -600,6 +600,41 @@ describe("fallback when the planning call fails", () => {
   });
 });
 
+describe("start over", () => {
+  const filled = { ...request().canvas, name: "Morning Brief", instructions: "You are the Morning Brief agent." };
+
+  it("sends the reset mode and a reply, and writes nothing to the canvas", async () => {
+    const r = rig({ classify: async () => ({ ...DRAFT, mode: "reset", fields: [], ack: "" }) });
+    await run(request({ message: "lets start from clean slate", canvas: filled }), r);
+    expect(r.events.find((e) => e.event === "mode")).toMatchObject({ mode: "reset", fields: [] });
+    expect(r.events.find((e) => e.event === "ack")).toMatchObject({ text: expect.stringMatching(/^Cleared the canvas/) });
+    expect(names(r.events)).not.toContain("identity");
+    expect(names(r.events)).not.toContain("capabilities");
+    expect(names(r.events)).not.toContain("instructions.delta");
+    expect(r.events.at(-1)).toMatchObject({ event: "done", status: "completed" });
+  });
+
+  it("clears rather than edits when the planner fails on a start-over message", async () => {
+    const r = rig({
+      classify: async () => {
+        throw new AuthoringLlmError("timeout", "slow");
+      },
+    });
+    await run(request({ message: "lets start from clean slate", canvas: filled }), r);
+    expect(r.events.find((e) => e.event === "mode")).toMatchObject({ mode: "reset" });
+    expect(names(r.events)).not.toContain("identity");
+  });
+
+  it("keeps the reset mode from the planner, with no fields", () => {
+    const decision = normalizeDecision(
+      { mode: "reset", fields: ["name"], name: "New", ack: "Cleared the canvas." },
+      request({ canvas: filled }),
+    );
+    expect(decision).toMatchObject({ mode: "reset", fields: [], ack: "Cleared the canvas." });
+    expect(decision.name).toBeUndefined();
+  });
+});
+
 describe("blank ack", () => {
   const ackText = (events: AgentDraftBody[]): string | undefined =>
     (events.find((e) => e.event === "ack") as { text: string } | undefined)?.text;
@@ -864,14 +899,9 @@ describe("conversation turns", () => {
   });
 
   it("answers a question without the planner instead of rewriting the canvas", async () => {
-    let talked = 0;
     const r = rig({
       classify: async () => {
         throw new AuthoringLlmError("timeout", "slow");
-      },
-      talk: async () => {
-        talked += 1;
-        return { text: "", cutOff: false };
       },
     });
     await run(
@@ -880,7 +910,37 @@ describe("conversation turns", () => {
     );
     expect(r.events.find((e) => e.event === "mode")).toMatchObject({ mode: "chat" });
     expect(names(r.events)).not.toContain("instructions.delta");
+    const reply = r.events.filter((e) => e.event === "reply.delta").map((e) => (e as { text: string }).text);
+    expect(reply.join("")).toBe("It is sunny.");
+  });
+
+  it("says it couldn't answer only when the talk model fails too", async () => {
+    const r = rig({
+      classify: async () => {
+        throw new AuthoringLlmError("timeout", "slow");
+      },
+      talk: async () => ({ text: "", cutOff: false }),
+    });
+    await run(request({ message: "How can we streamline my mornings?" }), r);
+    const reply = r.events.filter((e) => e.event === "reply.delta").map((e) => (e as { text: string }).text);
+    expect(reply.join("")).toMatch(/couldn't answer/);
+  });
+
+  it("greets without the planner or the talk model", async () => {
+    let talked = 0;
+    const r = rig({
+      classify: async () => {
+        throw new AuthoringLlmError("http", "down");
+      },
+      talk: async () => {
+        talked += 1;
+        return { text: "Hey", cutOff: false };
+      },
+    });
+    await run(request({ message: "hi", canvas: { ...request().canvas, name: "Digest", instructions: "x" } }), r);
+    expect(r.events.find((e) => e.event === "mode")).toMatchObject({ mode: "chat" });
     expect(talked).toBe(0);
+    expect(names(r.events)).toEqual(["started", "mode", "reply.delta", "done"]);
   });
 
   it("never asks questions on a first draft", async () => {

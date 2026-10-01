@@ -17,7 +17,8 @@
 
 import type { AgentPermissionMode } from "../agent-prompt-contract.js";
 
-export type DraftMode = "chat" | "ask" | "draft" | "edit";
+/** `reset` is "start over": the page clears the canvas and nothing is drafted. */
+export type DraftMode = "chat" | "ask" | "draft" | "edit" | "reset";
 
 export type DraftField =
   | "name"

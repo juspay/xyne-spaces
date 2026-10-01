@@ -59,6 +59,8 @@ import { mailerliteOAuthRouter, mailerliteCallbackRouter } from "../routes/maile
 import { honeycombOAuthRouter, honeycombCallbackRouter } from "../routes/honeycomb-oauth.js";
 import { customerioOAuthRouter, customerioCallbackRouter } from "../routes/customerio-oauth.js";
 import { notionRemoteOAuthRouter, notionRemoteCallbackRouter } from "../routes/notion-remote-oauth.js";
+import { githubOAuthRouter, githubCallbackRouter } from "../routes/github-oauth.js";
+import { xOAuthRouter, xCallbackRouter } from "../routes/twitter-oauth.js";
 import { oauthTokenRouter } from "../routes/oauth-token.js";
 import { rapidApiLinkedInRouter } from "../routes/rapidapi-linkedin.js";
 import { scheduledJobsRouter } from "../routes/scheduled-jobs.js";
@@ -252,6 +254,12 @@ function mountOAuthProviders(app: Express): void {
   app.use(BASE, customerioCallbackRouter);
   app.use(`${BASE}/users`, requireAuth, requireNoAccessToken, notionRemoteOAuthRouter);
   app.use(BASE, notionRemoteCallbackRouter);
+  // GitHub and X sign in only when their OAuth apps are set up; otherwise the
+  // authorize routes refuse and the connectors take pasted keys.
+  app.use(`${BASE}/users`, requireAuth, requireNoAccessToken, githubOAuthRouter);
+  app.use(BASE, githubCallbackRouter);
+  app.use(`${BASE}/users`, requireAuth, requireNoAccessToken, xOAuthRouter);
+  app.use(BASE, xCallbackRouter);
   app.use(`${BASE}/users`, requireAuth, requireNoAccessToken, rapidApiLinkedInRouter);
 }
 

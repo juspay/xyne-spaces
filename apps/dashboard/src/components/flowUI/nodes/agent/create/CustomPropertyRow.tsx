@@ -19,7 +19,12 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { Checkbox } from '@/components/ui/Checkbox/Checkbox';
 import { cn } from '@/utils/classNames';
-import { PROPERTY_MENU_ITEM, PROPERTY_MENU_PANEL } from './AddPropertyMenu';
+import {
+  PROPERTY_MENU_ITEM,
+  PROPERTY_MENU_LABEL,
+  PROPERTY_MENU_PANEL,
+  PROPERTY_MENU_SEPARATOR,
+} from './AddPropertyMenu';
 import { EditablePropertyLabel } from './EditablePropertyLabel';
 import { PropertyRow } from './PropertyRow';
 import {
@@ -91,11 +96,13 @@ export function CustomPropertyRow({
       menu={
         <>
           <DropdownMenuSub>
-            <DropdownMenuSubTrigger className={cn(PROPERTY_MENU_ITEM, 'justify-between')}>
-              Change type
-              <ChevronRight className='size-4 shrink-0 text-muted-foreground' aria-hidden />
+            <DropdownMenuSubTrigger className={PROPERTY_MENU_ITEM}>
+              <span className={PROPERTY_MENU_LABEL}>
+                <span>Change type</span>
+              </span>
+              <ChevronRight aria-hidden />
             </DropdownMenuSubTrigger>
-            <DropdownMenuSubContent className={PROPERTY_MENU_PANEL} sideOffset={6}>
+            <DropdownMenuSubContent className={PROPERTY_MENU_PANEL} sideOffset={8}>
               {CUSTOM_PROPERTY_TYPES.map(type => {
                 const Icon = TYPE_ICON[type];
                 const selected = type === property.type;
@@ -105,17 +112,17 @@ export function CustomPropertyRow({
                     className={PROPERTY_MENU_ITEM}
                     onSelect={() => setType(type)}
                   >
-                    <Icon className='size-4 shrink-0 text-muted-foreground' aria-hidden />
-                    <span className='min-w-0 flex-1 truncate'>{CUSTOM_PROPERTY_LABEL[type]}</span>
-                    {selected ? (
-                      <CheckTickSingle className='size-4 shrink-0 text-foreground' aria-hidden />
-                    ) : null}
+                    <span className={PROPERTY_MENU_LABEL}>
+                      <Icon aria-hidden />
+                      <span>{CUSTOM_PROPERTY_LABEL[type]}</span>
+                    </span>
+                    {selected ? <CheckTickSingle aria-hidden /> : null}
                   </DropdownMenuItem>
                 );
               })}
             </DropdownMenuSubContent>
           </DropdownMenuSub>
-          <DropdownMenuSeparator />
+          <DropdownMenuSeparator className={PROPERTY_MENU_SEPARATOR} />
           <DropdownMenuItem
             className={PROPERTY_MENU_ITEM}
             onSelect={() => {
@@ -142,7 +149,7 @@ export function CustomPropertyRow({
           >
             Paste
           </DropdownMenuItem>
-          <DropdownMenuSeparator />
+          <DropdownMenuSeparator className={PROPERTY_MENU_SEPARATOR} />
           <DropdownMenuItem className={PROPERTY_MENU_ITEM} onSelect={onRemove}>
             Remove
           </DropdownMenuItem>

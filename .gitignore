@@ -246,3 +246,8 @@ out/
 
 # Local Laya sidecar venv
 .venv-laya/
+# Added by code-review-graph
+.code-review-graph/
+.gstack/
+# Personal dashboard style overrides, loaded by apps/dashboard/src/main.tsx when present
+apps/dashboard/src/local-overrides.css

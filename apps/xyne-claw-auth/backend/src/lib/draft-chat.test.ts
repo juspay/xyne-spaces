@@ -1,10 +1,15 @@
 import { describe, expect, it } from "vitest";
 import {
   buildDraftRunBody,
+  CAPABILITY_GAP_TOOL,
+  describeDraftCapabilities,
   DRAFT_ATTACHMENT_MAX_COUNT,
+  DRAFT_BLANK_PERSONA,
   DRAFT_TEST_RUN_NOTE,
+  currentTimeNote,
   parseDraftAttachments,
   parseDraftSnapshot,
+  type DraftCapabilityCatalog,
 } from "./draft-chat.js";
 
 describe("buildDraftRunBody", () => {
@@ -144,5 +149,154 @@ describe("parseDraftAttachments", () => {
     const file = { fileName: "big.bin", mimeType: "application/octet-stream", data: big };
     expect(parseDraftAttachments([file])).toHaveLength(1);
     expect(parseDraftAttachments([file, file])).toBeNull();
+  });
+});
+
+describe("currentTimeNote", () => {
+  const now = new Date("2026-10-01T05:12:00Z");
+
+  it("gives the date and time in the user's zone", () => {
+    expect(currentTimeNote("Asia/Kolkata", now)).toBe(
+      "For the user it is Thursday, 1 October 2026 at 10:42 (Asia/Kolkata).",
+    );
+  });
+
+  it("falls back to UTC for a missing or unknown zone", () => {
+    expect(currentTimeNote(undefined, now)).toContain("05:12 (UTC)");
+    expect(currentTimeNote("Mars/Olympus", now)).toContain("(UTC)");
+  });
+});
+
+describe("blank drafts", () => {
+  it("never sends an empty persona, which claw would turn into the Digital Twin", () => {
+    const body = buildDraftRunBody({
+      sessionId: "sess-5",
+      sessionToken: "tok-5",
+      userId: "user_5",
+      message: "hi",
+      draftConversationId: "conv-5",
+      snapshot: parseDraftSnapshot({ tools: { subagents: ["spaces"] } })!,
+    });
+    expect(body["systemPrompt"]).toBe(DRAFT_BLANK_PERSONA);
+    expect((body["agentConfig"] as Record<string, unknown>)["draftTestRun"]).toBe(true);
+  });
+});
+
+describe("describeDraftCapabilities", () => {
+  const catalog: DraftCapabilityCatalog = {
+    integrations: [
+      {
+        slug: "linear",
+        label: "Linear",
+        kind: "mcp",
+        readTools: [{ slug: "linear-list", name: "list_issues" }],
+        writeTools: [{ slug: "linear-create", name: "create_issue" }],
+      },
+      {
+        slug: "gateway:github:gh-1",
+        label: "Github (gh-1)",
+        kind: "gateway",
+        readTools: [{ slug: "gateway:github:gh-1:list_prs", name: "list_prs" }],
+        writeTools: [],
+      },
+      { slug: "slack", label: "Slack", kind: "mcp", readTools: [{ slug: "slack-read", name: "read_channel" }], writeTools: [] },
+      { slug: "builtin", label: "Sandbox", kind: "builtin", readTools: [], writeTools: [] },
+    ],
+    subagents: [
+      { name: "spaces", description: "Searches Spaces messages and tickets" },
+      { name: "bitbucket", description: "Reads pull requests" },
+    ],
+    skillNames: ["PRD writer", "Notes"],
+  };
+
+  it("sorts what the draft has by whether a test can use it", () => {
+    const snapshot = parseDraftSnapshot({
+      systemPrompt: "Triage issues.",
+      tools: {
+        direct: ["list_issues", "create_issue"],
+        gateway: ["github"],
+        subagents: ["spaces"],
+      },
+      knowledgeBase: [{ collectionId: "col-1", name: "Runbooks" }],
+    })!;
+    const text = describeDraftCapabilities({ snapshot, custom: [], skillNames: ["Notes"], catalog });
+
+    const section = (heading: string): string => text.split(heading)[1]?.split(/\n[A-Z]/)[0] ?? "";
+    expect(section("Works in this test:")).toContain("Linear (list_issues)");
+    expect(section("Works in this test:")).toContain("spaces subagent: Searches Spaces");
+    expect(section("Works in this test:")).toContain("Skill: Notes");
+    expect(section("only connects after the agent is saved:")).toContain("Github (gh-1)");
+    expect(section("only connects after the agent is saved:")).toContain("Knowledge: Runbooks");
+    expect(section("read-only in this test")).toContain("Linear (create_issue)");
+
+    const addable = section("never recite this list):");
+    expect(addable).toContain("Integrations: Slack");
+    expect(addable).not.toContain("Linear");
+    expect(addable).not.toContain("Sandbox");
+    expect(addable).toContain("Subagents: bitbucket");
+    expect(addable).toContain("Skills: PRD writer");
+    expect(text).toContain(CAPABILITY_GAP_TOOL);
+  });
+
+  it("keeps tools whose account isn't connected out of what works", () => {
+    const snapshot = parseDraftSnapshot({
+      systemPrompt: "Review PRs.",
+      tools: { direct: ["list_issues", "create_issue"], subagents: ["bitbucket", "spaces"] },
+    })!;
+    const text = describeDraftCapabilities({
+      snapshot,
+      custom: [],
+      skillNames: [],
+      catalog: {
+        ...catalog,
+        subagents: [
+          { name: "spaces", description: "Searches Spaces", serverType: "spaces" },
+          { name: "bitbucket", description: "Reads pull requests", serverType: "bitbucket" },
+        ],
+        connections: { serverTypes: ["linear", "bitbucket", "spaces"], connected: ["spaces"] },
+      },
+    });
+
+    const section = (heading: string): string => text.split(heading)[1]?.split(/\n[A-Z]/)[0] ?? "";
+    const unconnected = section("hasn't connected the account it needs");
+    expect(unconnected).toContain("- Linear");
+    expect(unconnected).toContain("- bitbucket subagent");
+    expect(section("Works in this test:")).toContain("spaces subagent");
+    expect(section("Works in this test:")).not.toContain("Linear");
+    // An unconnected server's writes aren't "read-only in this test"; they don't load at all.
+    expect(text).not.toContain("read-only in this test");
+    expect(text).toContain('"not_connected"');
+  });
+
+  it("counts Spaces as connected: runs reach it with the user's sign-in", () => {
+    const text = describeDraftCapabilities({
+      snapshot: parseDraftSnapshot({ systemPrompt: "x", tools: { subagents: ["spaces"] } })!,
+      custom: [],
+      skillNames: [],
+      catalog: {
+        ...catalog,
+        subagents: [{ name: "spaces", description: "Searches Spaces", serverType: "xyne-spaces" }],
+        connections: { serverTypes: ["xyne-spaces"], connected: [] },
+      },
+    });
+    expect(text).not.toContain("hasn't connected");
+    expect(text.split("Works in this test:")[1]).toContain("spaces subagent");
+  });
+
+  it("falls back to raw ids when the catalog is unavailable", () => {
+    const snapshot = parseDraftSnapshot({ systemPrompt: "x", tools: { direct: ["mystery_tool"], gateway: ["gmail"] } })!;
+    const text = describeDraftCapabilities({ snapshot, custom: [], skillNames: [], catalog: null });
+    expect(text).toContain("Tools: mystery_tool");
+    expect(text).toContain("- gmail");
+    expect(text).not.toContain("can be added");
+  });
+
+  it("says when nothing is wired in yet", () => {
+    const text = describeDraftCapabilities({
+      snapshot: parseDraftSnapshot({ systemPrompt: "Be brief." })!,
+      custom: [],
+      skillNames: [],
+    });
+    expect(text).toContain("Nothing beyond its instructions.");
   });
 });

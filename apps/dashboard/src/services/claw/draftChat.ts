@@ -1,4 +1,8 @@
 import type { AgentCreateFormState } from '@/components/flowUI/nodes/agent/create/types';
+import {
+  capabilityGapFromInvocation,
+  type CapabilityGap,
+} from '@/components/flowUI/nodes/agent/create/draftChatGaps';
 import { CLAW_API_BASE, ClawApiError, clawErrorText } from './clawRequest';
 
 export interface DraftChatSnapshot {
@@ -49,6 +53,8 @@ export interface DraftChatHandlers {
   onDelta: (text: string) => void;
   onDone: (finalText: string | null) => void;
   onError: (message: string) => void;
+  /** The agent reported something the test can't use (missing, after save, or a write). */
+  onCapabilityGap?: (gap: CapabilityGap) => void;
 }
 
 /**
@@ -85,6 +91,8 @@ export async function streamDraftChat(input: {
       message: input.message,
       draftConversationId: input.draftConversationId,
       snapshot: input.snapshot,
+      // claw doesn't tell the model the date; claw-auth adds it in this zone.
+      timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
       ...(extras.attachments.length > 0
         ? {
             attachments: extras.attachments.map(({ fileName, mimeType, data }) => ({
@@ -114,6 +122,8 @@ export async function streamDraftChat(input: {
   const handleFrame = (event: string, data: Record<string, unknown>): void => {
     if (event === 'invocation') {
       toolSinceText = true;
+      const gap = capabilityGapFromInvocation(data['toolInvocation']);
+      if (gap) input.handlers.onCapabilityGap?.(gap);
       return;
     }
     if (event === 'delta' && typeof data['textDelta'] === 'string') {

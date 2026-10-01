@@ -17,13 +17,17 @@
   --dc-panel-close: 350ms;
 }
 
+/* The elevation above, scaled by --dc-composer-shadow-k: the overlay sets it to
+   1 minus the card frame's opacity, so the composer hands its shadow to the
+   card as the frame fades in (see .dc-frame-bg) and takes it back as it goes. */
 .dc-root .dc-composer-shadow {
   overflow: visible;
   background: transparent;
   border-radius: 18px;
-  box-shadow: var(--dc-elevated-shadow);
-  /* Hands its shadow to the card as the card's frame fades in (see .dc-frame-bg). */
-  transition: box-shadow var(--dc-duration-feedback) var(--dc-ease-out);
+  box-shadow:
+    0 13px 8px 0 rgb(0 0 0 / calc(2% * var(--dc-composer-shadow-k, 1))),
+    0 6px 6px 0 rgb(0 0 0 / calc(3% * var(--dc-composer-shadow-k, 1))),
+    0 1px 3px 0 rgb(0 0 0 / calc(3% * var(--dc-composer-shadow-k, 1)));
 }
 
 .dc-root .dc-composer {
@@ -52,8 +56,7 @@
   box-shadow: var(--dc-elevated-shadow);
 }
 
-.dc-root .dc-frame[data-frame="on"] .dc-composer,
-.dc-root .dc-frame[data-frame="on"] .dc-composer-shadow {
+.dc-root .dc-frame[data-frame="on"] .dc-composer {
   box-shadow: none;
 }
 
@@ -77,27 +80,69 @@
   transform: scale(0.985);
 }
 
-/* The idle pill rises into place when the canvas opens. */
+/* The idle pill rises into place from below the bottom of the canvas when the
+   canvas opens: a plain slide on an even ease-out, so the rise is seen rather
+   than spent in its first few frames, with a quick fade. */
 .dc-root .dc-slide {
   transform: translateY(100px);
   opacity: 0;
-  filter: blur(2px);
   pointer-events: none;
   transition:
     transform var(--dc-panel-close) var(--dc-ease-out),
-    opacity var(--dc-panel-close) var(--dc-ease-out),
-    filter var(--dc-panel-close) var(--dc-ease-out);
+    opacity var(--dc-panel-close) var(--dc-ease-out);
 }
 
 .dc-root .dc-slide[data-open="true"] {
   transform: translateY(0);
   opacity: 1;
-  filter: none;
   pointer-events: auto;
   transition:
-    transform var(--dc-panel-open) var(--dc-ease-out),
-    opacity var(--dc-panel-open) var(--dc-ease-out),
-    filter var(--dc-panel-open) var(--dc-ease-out);
+    transform 520ms cubic-bezier(0.33, 1, 0.68, 1),
+    opacity 240ms ease-out;
+}
+
+/* Transitions.dev "Shimmer text": the text sits in a muted base while a
+   highlight band, painted on a ::before copy of it (data-text) and clipped to
+   its glyphs, sweeps left to right. Theme colours, so light and dark both work. */
+.dc-shimmer {
+  --dc-shimmer-dur: 2000ms;
+  --dc-shimmer-base: hsl(var(--muted-foreground));
+  --dc-shimmer-highlight: hsl(var(--foreground));
+  --dc-shimmer-band: 400%;
+  position: relative;
+  display: inline-block;
+  color: var(--dc-shimmer-base);
+}
+
+.dc-shimmer::before {
+  content: attr(data-text);
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background-image: linear-gradient(
+    90deg,
+    transparent 0%,
+    transparent 40%,
+    var(--dc-shimmer-highlight) 50%,
+    transparent 60%,
+    transparent 100%
+  );
+  background-size: var(--dc-shimmer-band) 100%;
+  background-repeat: no-repeat;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  -webkit-text-fill-color: transparent;
+  animation: dc-shimmer var(--dc-shimmer-dur) linear infinite;
+}
+
+@keyframes dc-shimmer {
+  0% {
+    background-position: 100% 0;
+  }
+  100% {
+    background-position: 0% 0;
+  }
 }
 
 /* Menus are portaled out of .dc-root, so their tokens live on the panel. The
@@ -114,18 +159,26 @@
   border-radius: 1rem;
   background: hsl(var(--popover));
   color: hsl(var(--popover-foreground));
+  /* The canvas property menus' shadow: tighter than a panel's, it sits closer. */
   box-shadow:
-    0 123px 34px rgb(0 0 0 / 0%),
-    0 79px 31px rgb(0 0 0 / 1%),
-    0 44px 27px rgb(0 0 0 / 2%),
-    0 20px 20px rgb(0 0 0 / 3%),
-    0 5px 11px rgb(0 0 0 / 4%);
+    0 55px 16px rgb(0 0 0 / 0%),
+    0 35px 14px rgb(0 0 0 / 1%),
+    0 20px 12px rgb(0 0 0 / 2%),
+    0 9px 9px rgb(0 0 0 / 3%),
+    0 2px 5px rgb(0 0 0 / 4%);
   animation-duration: 180ms !important;
   animation-timing-function: cubic-bezier(0.22, 1, 0.36, 1) !important;
 }
 
 /* Submenus are not portaled; they paint outside the plus menu. */
 .dc-menu-content.dc-menu-plus {
+  overflow: visible;
+}
+
+/* The canvas's short menus (Add property, a row's "…", Change type). Change
+   type opens from inside a row's menu, so like the plus menu it can't clip. */
+.dc-menu-content.dc-menu-compact {
+  width: 168px;
   overflow: visible;
 }
 
@@ -182,11 +235,12 @@
   color: currentColor;
 }
 
-/* Hairline on the item boundary, so dividers add no extra gap. */
+/* A hairline with the panel's inset either side, so a row's hover fill keeps
+   the same room from it as from the panel's edge. */
 .dc-menu-separator.dc-menu-separator {
   position: relative;
   height: 0;
-  margin: 0;
+  margin: 0.25rem 0;
   overflow: visible;
   border: 0;
   background: transparent;
@@ -305,7 +359,8 @@
     animation-duration: 0.01ms !important;
   }
 
-  .dc-root .dc-slide {
-    filter: none;
+  /* A near-zero loop would flicker; the base text alone marks it. */
+  .dc-shimmer::before {
+    animation: none !important;
   }
 }

@@ -7,7 +7,14 @@ import {
   type ReactElement,
   type ReactNode,
 } from 'react';
-import { animate, motion, useMotionValue, useTransform, type Transition } from 'motion/react';
+import {
+  animate,
+  motion,
+  useMotionValue,
+  useTransform,
+  type MotionStyle,
+  type Transition,
+} from 'motion/react';
 import {
   ChevronDown,
   MaximizeTwoArrow,
@@ -23,32 +30,30 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { cn } from '@/utils/classNames';
 import { DRAFT_CHAT_EASE_OUT } from './draftChatMotion';
+import { useDraftChatMotion } from './draftChatMotionDial';
+import { useExclusiveMenu } from './useExclusiveMenu';
 import './draft-chat.css';
 
 const OVERLAY_HEIGHT = 540;
-/** The composer on its own: idle, or with the card folded. */
-const REST_WIDTH = 500;
-const OVERLAY_WIDTH = 700;
+/**
+ * The composer and its card share one width, idle, folded or open, so opening
+ * only grows the card upward and the thread never re-wraps.
+ */
+const WIDTH = 650;
 const MAXIMIZED_WIDTH = 860;
 const HEADER_HEIGHT = 36;
-/** How far the card opens (0-1) before its messages start to show. */
-const CONTENT_LEAD = 0.15;
-/**
- * Granola's timing: the panel grows out of the bar and fades in within about
- * 200ms, and folds back faster than it opened. Quick ease-out, no spring.
- */
-const OPEN_S = 0.22;
-const FOLD_S = 0.16;
 /** Maximizing, or the canvas changing size. */
 const RESIZE_S = 0.3;
 /** Over this much panel above the composer (px), the card's frame fades in or out. */
-const FRAME_FADE_PX = 24;
+const FRAME_FADE_PX = 40;
 const RADIUS = 20;
 /** Matches bottom-6 on the dock. */
 const DOCK_BOTTOM = 24;
 /** Keeps the card below the canvas's Cancel / Save bar. */
 const TOP_RESERVE = 64;
 const DOCK_GUTTER = 16;
+/** The idle bar's slide up from the bottom (draft-chat.css .dc-slide) waits this long. */
+const SLIDE_IN_DELAY_MS = 200;
 const ICON_BUTTON =
   'dc-pressable inline-flex size-6 items-center justify-center rounded-md p-1 text-foreground/70 hover:bg-foreground/[0.06] hover:text-foreground';
 
@@ -126,7 +131,7 @@ export function DraftChatOverlay({
   const hostRef = useRef<HTMLDivElement | null>(null);
   const composerRef = useRef<HTMLDivElement | null>(null);
   const exitedRef = useRef(false);
-  const [available, setAvailable] = useState({ width: OVERLAY_WIDTH, height: OVERLAY_HEIGHT });
+  const [available, setAvailable] = useState({ width: WIDTH, height: OVERLAY_HEIGHT });
   const [slideOpen, setSlideOpen] = useState(false);
   /** Messages scrolled up under the header: the top of the thread fades out. */
   const [scrolledUnder, setScrolledUnder] = useState(false);
@@ -136,24 +141,22 @@ export function DraftChatOverlay({
   const showSession = variant === 'session';
   const sessionCard = showSession && !closing;
   const instant = reduceMotion === true;
-  /** Opening (toward 1) takes a little longer than folding (toward 0). */
+  // The card's rise and fold (see draftChatMotionDial.ts).
+  const cardMotion = useDraftChatMotion();
   const toward = (target: number): Transition =>
-    instant
-      ? { duration: 0 }
-      : { type: 'tween', ease: DRAFT_CHAT_EASE_OUT, duration: target > 0 ? OPEN_S : FOLD_S };
+    instant ? { duration: 0 } : target > 0 ? cardMotion.open : cardMotion.fold;
   const resize: Transition = instant
     ? { duration: 0 }
     : { type: 'tween', ease: DRAFT_CHAT_EASE_OUT, duration: RESIZE_S };
 
   const headerHeight = showHeader ? HEADER_HEIGHT : 0;
   const frameOn = sessionCard && (open || headerHeight > 0);
-  // At rest the composer is a compact bar; opening the card widens it along
-  // with the height, and maximizing widens it further.
-  const restWidth = Math.min(REST_WIDTH, available.width);
-  const frameWidth =
-    open && !closing
-      ? Math.min(maximized ? MAXIMIZED_WIDTH : OVERLAY_WIDTH, available.width)
-      : restWidth;
+  // Only the header's expand button widens it.
+  const frameWidth = Math.min(
+    open && !closing && maximized ? MAXIMIZED_WIDTH : WIDTH,
+    available.width,
+  );
+  const historyMenu = useExclusiveMenu();
   /** The open card, header to composer. Its height doesn't follow the composer. */
   const fittedHeight = maximized ? available.height : Math.min(OVERLAY_HEIGHT, available.height);
 
@@ -181,11 +184,13 @@ export function DraftChatOverlay({
   // over the last FRAME_FADE_PX, where the card merges into the composer (and
   // at rest there is no ring around it). A folded card with a header keeps it.
   const frameOpacityMV = useTransform(() => Math.min(1, underlayMV.get() / FRAME_FADE_PX));
-  // The messages show once the card is partly open and are gone well before it
-  // finishes folding, so text never gets squashed flat.
-  const threadOpacityMV = useTransform(() =>
-    Math.min(1, Math.max(0, (shownMV.get() * openedMV.get() - CONTENT_LEAD) / (1 - CONTENT_LEAD))),
-  );
+  // The composer's own shadow, the other way round: the two trade places frame
+  // by frame instead of on separate timers, so they never double up.
+  const composerShadowMV = useTransform(() => 1 - frameOpacityMV.get());
+  // Granola: the messages are already there and ride up with the card from
+  // behind the composer (and back down when it folds), showing with the card's
+  // own fill rather than after it has opened.
+  const threadOpacityMV = frameOpacityMV;
 
   // The canvas is the dock's parent: its size bounds the card.
   useLayoutEffect(() => {
@@ -240,8 +245,9 @@ export function DraftChatOverlay({
       setSlideOpen(true);
       return;
     }
-    const frame = window.requestAnimationFrame(() => setSlideOpen(true));
-    return (): void => window.cancelAnimationFrame(frame);
+    // A beat after the canvas appears, so the bar is seen rising into it.
+    const timer = window.setTimeout(() => setSlideOpen(true), SLIDE_IN_DELAY_MS);
+    return (): void => window.clearTimeout(timer);
   }, [variant]);
 
   useEffect(() => {
@@ -308,14 +314,11 @@ export function DraftChatOverlay({
     >
       <motion.div
         ref={hostRef}
-        initial={
-          variant === 'session' && reduceMotion !== true
-            ? { width: restWidth, borderRadius: RADIUS }
-            : false
-        }
+        initial={false}
         animate={{ width: frameWidth, borderRadius: RADIUS }}
         transition={resize}
-        style={{ overflow: 'visible' }}
+        // eslint-disable-next-line @typescript-eslint/naming-convention
+        style={{ overflow: 'visible', '--dc-composer-shadow-k': composerShadowMV } as MotionStyle}
         className={cn(
           'dc-frame relative flex max-w-full flex-col justify-end overflow-visible',
           sessionCard && 'dc-overlay pointer-events-auto',
@@ -342,7 +345,7 @@ export function DraftChatOverlay({
             <motion.div className='flex w-full shrink-0 flex-col' style={{ height: panelHeightMV }}>
               {showHeader ? (
                 <header className='flex h-9 w-full shrink-0 items-center justify-between py-1.5 pl-3 pr-1.5'>
-                  <DropdownMenu>
+                  <DropdownMenu open={historyMenu.open} onOpenChange={historyMenu.onOpenChange}>
                     <DropdownMenuTrigger asChild>
                       <button
                         type='button'
@@ -430,14 +433,18 @@ export function DraftChatOverlay({
                   }
                 }}
               >
-                {/* No divider under the header: messages scrolled under it fade out instead. */}
-                <div
-                  aria-hidden
-                  className={cn(
-                    'pointer-events-none absolute inset-x-0 top-0 z-10 h-8 bg-gradient-to-b from-background to-transparent transition-opacity duration-200 ease-out',
-                    scrolledUnder ? 'opacity-100' : 'opacity-0',
-                  )}
-                />
+                {/* No divider under the header: messages scrolled under it fade out
+                    instead. Without a header there is nothing to go under, and the
+                    fade would only wash out the card's top edge. */}
+                {showHeader ? (
+                  <div
+                    aria-hidden
+                    className={cn(
+                      'pointer-events-none absolute inset-x-0 top-0 z-10 h-8 bg-gradient-to-b from-background to-transparent transition-opacity duration-200 ease-out',
+                      scrolledUnder ? 'opacity-100' : 'opacity-0',
+                    )}
+                  />
+                ) : null}
                 {transcript}
               </motion.div>
             </motion.div>
