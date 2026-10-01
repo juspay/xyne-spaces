@@ -822,6 +822,16 @@ export function setupIpcHandlers(): void {
     return localHarnessBridge.disconnect(await xyneCookieHeader());
   });
 
+  ipcMain.handle('local-harness:connect-computer', async (event) => {
+    requireLocalHarness(event);
+    return localHarnessBridge.connectComputer(await xyneCookieHeader());
+  });
+
+  ipcMain.handle('local-harness:disconnect-computer', async (event) => {
+    requireLocalHarness(event);
+    return localHarnessBridge.disconnectComputer(await xyneCookieHeader());
+  });
+
   ipcMain.handle('local-harness:pick-folder', async (event) => {
     requireLocalHarness(event);
     const win = BrowserWindow.fromWebContents(event.sender);
