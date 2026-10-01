@@ -132,7 +132,15 @@ export class MicrosoftAuthController {
   }
 
   private getMicrosoftAuthScopes(): string[] {
-    return ['openid', 'email', 'profile', 'User.Read', 'offline_access'];
+    return [
+      'openid',
+      'email',
+      'profile',
+      'User.Read',
+      'offline_access',
+      'Contacts.Read',
+      'People.Read',
+    ];
   }
 
   private getAccessTokenExpiry(token: Record<string, unknown>): Date | undefined {

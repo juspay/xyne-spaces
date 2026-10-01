@@ -47,6 +47,7 @@ export class InvitationsACL extends BaseQueryACL<
 
   async canCreate(data: Prisma.InvitationUncheckedCreateInput): Promise<boolean> {
     if (data.workspaceId !== this.ctx.workspaceId) return false
-    return this.ctx.role === 'ADMIN' || this.ctx.role === 'OWNER'
+    if (this.ctx.role === 'ADMIN' || this.ctx.role === 'OWNER') return true
+    return data.role === 'COMMUNITY_MEMBER' || data.role === 'MEMBER'
   }
 }
