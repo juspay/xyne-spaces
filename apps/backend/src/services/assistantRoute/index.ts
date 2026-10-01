@@ -86,8 +86,14 @@ export const routeAssistantMessage = async (
   };
 
   if (!isJevConfigured()) return finish({ route: 'unavailable' });
-  const config = await getConfig(ctx);
-  if (!config.enabled) return finish({ route: 'unavailable' });
+  // Superposition throws when it never initialised; routing then fails closed, like the kill switch.
+  const config = await getConfig(ctx).catch((error: unknown) => {
+    logger.warn('assistant route config unavailable', {
+      error: error instanceof Error ? error.name : 'unknown',
+    });
+    return null;
+  });
+  if (!config?.enabled) return finish({ route: 'unavailable' });
 
   // Shuffled against position bias.
   const criteria: Record<string, string> = {};
