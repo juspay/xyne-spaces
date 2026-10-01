@@ -40,6 +40,7 @@ import { designSharesRouter, publicDesignSharesRouter } from "../routes/design-s
 import { conversationArtifactsRouter } from "../routes/conversation-artifacts.js";
 import { sessionsArchiveRouter } from "../routes/sessions-archive.js";
 import { surfaceInternalRouter } from "../routes/surface-internal.js";
+import { pagePanelRouter } from "../routes/page-panel.js";
 import { experimentsInternalRouter } from "../routes/experiments-internal.js";
 import { artifactAppsInternalRouter } from "../routes/artifact-apps-internal.js";
 import { errorPipelineIngestRouter, errorPipelineInternalRouter } from "../routes/error-pipeline.js";
@@ -143,6 +144,7 @@ function mountCoreApi(app: Express): void {
   // can't be forged. Was previously fully unauthenticated: anyone could POST a
   // stdio connector whose launch command the gateway then spawned (RCE).
   app.use(`${BASE}/servers`, requireUserAuth, serversRouter);
+  app.use(`${BASE}/surface`, requireUserAuth, pagePanelRouter);
   app.use(`${BASE}/users`, requireAuth, requireNoAccessToken, usersRouter);
   app.use(`${BASE}/users`, requireAuth, requireNoAccessToken, connectionsRouter);
   // NOT behind requireAuth (so requireNoAccessToken never runs here): every
