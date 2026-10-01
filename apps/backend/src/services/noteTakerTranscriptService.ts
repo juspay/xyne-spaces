@@ -29,6 +29,7 @@ import {
   mergeRecordingSummaryMarkedItems,
   type RecordingSummaryMarkedItem,
 } from '@/services/recordingSummaryMarkedItems';
+import { emitCallSummaryReadyToApp } from '@/services/callSummaryAppEventService';
 
 // Activity.actorAction for "the AI summary for this recording is ready".
 // Rendered by the dashboard's RecordingSummaryActivity.
@@ -314,6 +315,13 @@ class NoteTakerTranscriptService {
     }
 
     await this.recordSummaryReadyActivity(call);
+
+    // App-scheduled calls get the summary pushed to their app's webhook. This
+    // covers the note-taker pipeline and every regeneration (both call types
+    // route through regenerateSummary); regular calls are covered from
+    // transcriptService.processCallWithSummary. No-ops unless the call carries
+    // an initiatedByInstalledAppId, and never throws.
+    await emitCallSummaryReadyToApp(call.externalId);
   }
 
   /**

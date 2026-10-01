@@ -25,6 +25,9 @@
  *      the model re-checks rather than anchoring on it.
  */
 
+import type { JevAnswer, JevQuestion } from "./jev.js";
+import { runJudgeSite } from "./judge-site.js";
+import { optEnabled } from "./optimizations.js";
 import { LITELLM, litellmEndpoint } from "./config.js";
 import { createLogger } from "./logger.js";
 
@@ -199,6 +202,40 @@ function asStringList(v: unknown, max = 5): string[] {
  */
 export function startPrefetchExtraction(task: string): Promise<PrefetchSpec | null> {
   if (!LITELLM.apiKey || !task.trim()) return Promise.resolve(null);
+  if (!optEnabled("jev_prefetch_gate")) return startPrefetchExtractionLlm(task);
+  return (async (): Promise<PrefetchSpec | null> => {
+    const gate = await runJudgeSite<"skip" | "extract">({
+      site: "prefetch-gate",
+      enabled: true,
+      budgetMs: 1_500,
+      state: `## The user's first message (data)\n<<<DATA\n${task.slice(0, 2_000)}\nDATA>>>`,
+      questions: PREFETCH_GATE_QUESTIONS,
+      decide: prefetchGateFromJev,
+      fallback: async () => "extract",
+      describe: (d) => d,
+    });
+    if (gate.decision === "skip") return { intent: "conversational", entities: [] };
+    return startPrefetchExtractionLlm(task);
+  })();
+}
+
+export const PREFETCH_GATE_QUESTIONS: Record<string, JevQuestion> = {
+  names_entity: {
+    type: "noul",
+    instructions:
+      "The message names a specific person, channel, project, ticket, document or service whose details would need to be looked up to answer it.",
+  },
+};
+
+/** Pure: a clear "names nothing to look up" skips the LLM extractor; anything else extracts. */
+export function prefetchGateFromJev(answers: Record<string, JevAnswer>): "skip" | "extract" | null {
+  const p = answers["names_entity"]?.noul;
+  if (typeof p !== "number") return null;
+  return p <= 0.2 ? "skip" : "extract";
+}
+
+function startPrefetchExtractionLlm(task: string): Promise<PrefetchSpec | null> {
+  if (!LITELLM.apiKey) return Promise.resolve(null);
 
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), EXTRACT_TIMEOUT_MS);

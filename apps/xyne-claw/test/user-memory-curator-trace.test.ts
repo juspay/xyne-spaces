@@ -131,7 +131,8 @@ test("no tool_call → error trace, empty candidates and emitted", async () => {
   expect(candidates).toEqual([]);
   expect(trace.error).toBe("no-tool-call");
   expect(trace.emitted).toEqual([]);
-  expect(trace.rawResponse).toBeUndefined();
+  // runDistillAttempt keeps a diagnostic string here (finish_reason, tool_calls, content).
+  expect(trace.rawResponse).toContain("no tool_call");
   expect(trace.prompt.length).toBeGreaterThan(0);
 });
 

@@ -79,11 +79,7 @@ router.get("/users", async (req: Request, res: Response) => {
     };
     const where: Prisma.UserWhereInput = {
       ...baseWhere,
-      ...(status === "enabled"
-        ? { digitalTwinEnabled: true }
-        : status === "disabled"
-          ? { digitalTwinEnabled: false }
-          : {}),
+      ...(status === "all" ? {} : { digitalTwinEnabled: status === "enabled" }),
     };
     const orderBy: Prisma.UserOrderByWithRelationInput[] =
       sort === "name_desc"

@@ -5,6 +5,7 @@ import {
   optEnabled,
   parseOptimizationSpec,
   pinRunOptimizations,
+  tierOptimizationDefaults,
 } from "../src/optimizations.js";
 
 const ENV = ["XYNE_OPT_ALL", ...OPTIMIZATION_KEYS.map((k) => `XYNE_OPT_${k.toUpperCase()}`)];
@@ -24,13 +25,25 @@ describe("optimization switches", () => {
     }
   });
 
-  const inRun = <T>(spec: unknown, fn: () => T, agentSpec?: unknown): Promise<T> =>
+  const inRun = <T>(spec: unknown, fn: () => T, agentSpec?: unknown, delegationMode?: string): Promise<T> =>
     new Promise((resolve) => {
       setImmediate(() => {
-        pinRunOptimizations(spec, agentSpec);
+        pinRunOptimizations(spec, agentSpec, tierOptimizationDefaults(delegationMode));
         resolve(fn());
       });
     });
+
+  it("turns the active-tool cap on by default for orchestrators only", async () => {
+    expect(await inRun(undefined, () => optEnabled("active_tool_cap"), undefined, "orchestrator")).toBe(true);
+    expect(await inRun(undefined, () => optEnabled("active_tool_cap"), undefined, undefined)).toBe(false);
+  });
+
+  it("lets an orchestrator's own setting, the run, or the env flag switch the cap off", async () => {
+    expect(await inRun(undefined, () => optEnabled("active_tool_cap"), { active_tool_cap: false }, "orchestrator")).toBe(false);
+    expect(await inRun("-active_tool_cap", () => optEnabled("active_tool_cap"), undefined, "orchestrator")).toBe(false);
+    process.env["XYNE_OPT_ACTIVE_TOOL_CAP"] = "off";
+    expect(await inRun(undefined, () => optEnabled("active_tool_cap"), undefined, "orchestrator")).toBe(false);
+  });
 
   it("uses each switch's default when nothing overrides it", () => {
     expect(optEnabled("jev_tool_sift")).toBe(true);

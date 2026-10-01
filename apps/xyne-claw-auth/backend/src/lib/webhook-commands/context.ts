@@ -1,5 +1,5 @@
 import type { Logger } from "../../logger.js";
-import type { ResolvedAgent } from "../digital-twin-agent.js";
+import type { ResolvedAgent } from "../resolved-agent.js";
 import type { ProviderOverride } from "../parseSlashCommand.js";
 
 export interface StopReconcileResult {

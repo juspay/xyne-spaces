@@ -1,9 +1,12 @@
 import { describe, expect, it, vi } from "vitest";
 
-vi.mock("../repositories/agentRunRepository.js", () => ({ agentRunRepository: { toolsUsedSince: vi.fn() } }));
+vi.mock("../repositories/agentRunRepository.js", () => ({
+  agentRunRepository: { toolsUsedSince: vi.fn(), toolsUsedSinceInOrg: vi.fn() },
+}));
 vi.mock("../logger.js", () => ({ createLogger: () => ({ warn: vi.fn(), info: vi.fn() }) }));
 
-import { createToolUsageRankCache, rankToolsByRuns, TOOL_USAGE_RANK_LIMIT, TOOL_USAGE_WINDOW_MS, wantsToolUsageRank } from "./tool-usage-rank.js";
+import { agentRunRepository } from "../repositories/agentRunRepository.js";
+import { createToolUsageRankCache, rankToolsByRuns, TOOL_USAGE_RANK_LIMIT, TOOL_USAGE_WINDOW_MS, toolUsageRankFor, wantsToolUsageRank } from "./tool-usage-rank.js";
 
 describe("tool usage rank cache", () => {
   it("asks for the last 7 days and caches per agent for an hour", async () => {
@@ -68,6 +71,13 @@ describe("which runs need the usage rank", () => {
     expect(wantsToolUsageRank(undefined, undefined)).toBe(false);
   });
 
+  it("defaults on for orchestrators unless the agent or the run says otherwise", () => {
+    expect(wantsToolUsageRank(undefined, undefined, "orchestrator")).toBe(true);
+    expect(wantsToolUsageRank(undefined, undefined, "standard")).toBe(false);
+    expect(wantsToolUsageRank({ active_tool_cap: false }, undefined, "orchestrator")).toBe(false);
+    expect(wantsToolUsageRank(undefined, "-active_tool_cap", "orchestrator")).toBe(false);
+  });
+
   it("lets a per-run spec win over the agent's switch", () => {
     expect(wantsToolUsageRank({ active_tool_cap: true }, "none")).toBe(false);
     expect(wantsToolUsageRank({ active_tool_cap: true }, "all,-active_tool_cap")).toBe(false);
@@ -96,5 +106,21 @@ describe("rankToolsByRuns", () => {
   it("ignores empty names and returns nothing for no runs", () => {
     expect(rankToolsByRuns([["", "webfetch"]], 10)).toEqual(["webfetch"]);
     expect(rankToolsByRuns([], 10)).toEqual([]);
+  });
+});
+
+describe("toolUsageRankFor", () => {
+  it("falls back to the org's most-used tools when the agent has no runs yet", async () => {
+    vi.mocked(agentRunRepository.toolsUsedSince).mockResolvedValueOnce([]);
+    vi.mocked(agentRunRepository.toolsUsedSinceInOrg).mockResolvedValueOnce([["read", "todo-write"], ["read"]]);
+    expect(await toolUsageRankFor("brand-new-orchestrator", "org-fallback")).toEqual(["read", "todo-write"]);
+  });
+
+  it("keeps the agent's own rank when it has one", async () => {
+    vi.mocked(agentRunRepository.toolsUsedSince).mockResolvedValueOnce([["webfetch"]]);
+    const inOrg = vi.mocked(agentRunRepository.toolsUsedSinceInOrg);
+    inOrg.mockClear();
+    expect(await toolUsageRankFor("busy-agent", "org-own")).toEqual(["webfetch"]);
+    expect(inOrg).not.toHaveBeenCalled();
   });
 });

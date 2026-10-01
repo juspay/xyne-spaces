@@ -641,6 +641,11 @@ const envSchema = Joi.object({
   // are unaffected either way (always strict).
   WEBHOOK_ALLOW_INTERNAL_HOSTS: Joi.boolean().default(true),
   SDK_API_ENABLED: Joi.boolean().default(false),
+  // Continuous CPU + heap profiling pushed to Grafana Pyroscope. Off by default;
+  // needs PYROSCOPE_SERVER_ADDRESS (e.g. http://localhost:4040) to do anything.
+  PYROSCOPE_ENABLED: Joi.boolean().default(false),
+  PYROSCOPE_SERVER_ADDRESS: Joi.string().allow('').default(''),
+  PYROSCOPE_FLUSH_INTERVAL_MS: Joi.number().integer().min(1000).default(60000),
 
 }).unknown();
 
@@ -1365,5 +1370,10 @@ export const config = {
   },
   webhooks: {
     allowInternalHosts: envVars.WEBHOOK_ALLOW_INTERNAL_HOSTS as boolean,
+  },
+  pyroscope: {
+    enabled: envVars.PYROSCOPE_ENABLED as boolean,
+    serverAddress: envVars.PYROSCOPE_SERVER_ADDRESS as string,
+    flushIntervalMs: envVars.PYROSCOPE_FLUSH_INTERVAL_MS as number,
   },
 };
