@@ -22,8 +22,7 @@ function runExclusive<T>(fn: () => Promise<T>): Promise<T> {
   return result;
 }
 
-// Bumped when the cached SVG shape changes; v7 = sanitized output only (XYNE-65425).
-const SVG_CACHE_VERSION = 'v7-sanitized';
+const SVG_CACHE_VERSION = 'v6-animated';
 const svgCache = new Map<string, string>();
 const cacheKey = (source: string, isDark: boolean): string =>
   `${SVG_CACHE_VERSION}:${isDark ? 'd' : 'l'}:${source}`;
