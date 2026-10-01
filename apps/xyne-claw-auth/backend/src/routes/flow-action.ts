@@ -975,6 +975,7 @@ router.post("/action", pinAgentSlugFromHeader, verifySpacesSignature, async (req
           res.json({ type: "error", message: "Invalid spacesAppToken format" } satisfies AppActionResponse);
           return;
         }
+        const appToken = decrypt(parts[0], parts[1], parts[2], CONFIG.encryptionKey);
 
         const content = params["content"] as string;
         const targetChannelId = params["targetChannelId"] as string | undefined;

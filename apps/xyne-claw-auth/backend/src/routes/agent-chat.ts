@@ -3724,7 +3724,7 @@ router.get("/:slug/conversations", async (req: Request<{ slug: string }>, res: R
     }
 
     const meta = await chatConversationMetaRepository
-      .byConversationIds([...convMap.keys()], userId, req.params.slug)
+      .byConversationIds([...convMap.keys()], userIds, req.params.slug)
       .catch((err) => {
         log.error("[agent-chat] conversation meta lookup failed:", err);
         return new Map<string, { title: string | null; pinned: boolean }>();
