@@ -19,6 +19,7 @@ import {
   downloadDiagramAsPng,
   isValidMermaidSyntax,
   stripPartialClosingFence,
+  MERMAID_STALE_BUILD_ERROR,
 } from './MermaidBlock.utils';
 
 function useIsDarkTheme(): boolean {
@@ -155,6 +156,17 @@ const MermaidBlockComponent = ({
     return (
       <div className='p-4 bg-red-50 border border-red-200 rounded-lg'>
         <p className='text-sm text-red-600'>{error}</p>
+        {error === MERMAID_STALE_BUILD_ERROR && (
+          <button
+            type='button'
+            onClick={() => window.location.reload()}
+            className='mt-2 rounded-md border border-red-200 bg-background px-2 py-1 text-xs text-red-600 hover:bg-red-100'
+            data-track-category='Mermaid'
+            data-track-name='RELOAD_STALE_BUILD'
+          >
+            Reload
+          </button>
+        )}
         <details className='mt-2'>
           <summary className='text-xs text-red-500 cursor-pointer'>Show diagram code</summary>
           <pre className='mt-2 text-xs text-foreground overflow-x-auto'>{chart}</pre>

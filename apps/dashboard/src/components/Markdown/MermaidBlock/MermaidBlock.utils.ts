@@ -59,6 +59,25 @@ export const stripPartialClosingFence = (chart: string): string =>
   chart.replace(/\n[ \t]*`{1,2}[ \t]*$/, '');
 
 /**
+ * Shown when mermaid's lazily-loaded diagram code cannot be fetched. This
+ * happens when the tab still runs a build whose hashed chunks were replaced by
+ * a redeploy: every diagram of that type fails until the app is reloaded, and
+ * re-rendering the same chart can never succeed.
+ */
+export const MERMAID_STALE_BUILD_ERROR =
+  'This diagram could not load because Xyne was updated. Reload to view it.';
+
+/**
+ * Detects a failed dynamic import (stale/missing chunk) across browsers.
+ */
+export const isChunkLoadError = (err: unknown): boolean => {
+  const message = err instanceof Error ? err.message : typeof err === 'string' ? err : '';
+  return /Failed to fetch dynamically imported module|error loading dynamically imported module|Importing a module script failed/i.test(
+    message,
+  );
+};
+
+/**
  * Generate a unique ID for mermaid diagram rendering
  */
 export const generateMermaidId = (): string => {
@@ -163,8 +182,10 @@ export const renderMermaidDiagram = async ({
       message: String('Mermaid rendering error:'),
       error: err,
     });
-    // Only set error if it looks like a complete diagram
-    if (chart.split('\n').length > 2) {
+    if (isChunkLoadError(err)) {
+      onError(MERMAID_STALE_BUILD_ERROR);
+    } else if (chart.split('\n').length > 2) {
+      // Only set error if it looks like a complete diagram
       onError('Failed to render diagram');
     }
   } finally {
