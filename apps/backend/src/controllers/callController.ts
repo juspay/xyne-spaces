@@ -1913,9 +1913,6 @@ export class CallController {
         return;
       }
 
-      // Recordings are reached through share grants / public links, not the call
-      // audience, so gate on canViewRecordings (hasAtLeast('view') for recordings,
-      // isCallAudience for regular calls) rather than isCallAudience alone.
       if (!(await callShareService.canViewRecordings(call, userId))) {
         res.status(403).json({ success: false, error: 'Access denied' });
         return;
@@ -1997,9 +1994,6 @@ export class CallController {
         return;
       }
 
-      // Same gate as GET /calls/recordings/:id, which previously served this text:
-      // share-grant and public-link viewers of a recording must pass, so do not
-      // pre-filter on isCallAudience (it ignores grants and PUBLIC visibility).
       if (!(await callShareService.canViewRecordings(call, userId))) {
         res.status(403).json({ success: false, error: 'Access denied' });
         return;
