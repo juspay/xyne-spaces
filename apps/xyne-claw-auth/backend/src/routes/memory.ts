@@ -56,6 +56,7 @@ import { ensureTwinBank, twinObservationScopes, VERBATIM_IMPORT_STRATEGY } from 
  * use this: wiping a shared bank stays owner/admin-only.
  */
 async function canMaintainAgentMemory(req: Request, agentSlug: string, userId: string): Promise<boolean> {
+  if (await isClawAdmin(userId)) return true;
   const access = await getAgentEditAccess(userId, agentSlug, getOrgId(req));
   return Boolean(access?.canEdit);
 }
