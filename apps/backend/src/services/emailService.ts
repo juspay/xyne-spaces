@@ -47,7 +47,7 @@ import {
   TicketPriority,
   ActivityType,
   EmailMergeMode,
-  NotificationType, AutoDraftStatus, AutoDraftMode } from '@xyne/shared';
+  NotificationType, AutoDraftStatus, AutoDraftMode, findInvalidRecipients } from '@xyne/shared';
 import { UploadedFileResult } from './fileUploadService';
 import { config } from '@/config/env';
 import { vespaQueue } from '@/queues/vespaQueue';
@@ -1881,6 +1881,10 @@ export class EmailService {
         : [...new Set([initialEmail.replyTo?.[0] ?? initialEmail.from, ...initialEmail.to])];
     const cc = params.cc ?? (params.type === 'REPLY_ALL' && !params.to ? (initialEmail.cc || []) : []);
     const bcc = params.bcc ?? [];
+    const invalidRecipients = findInvalidRecipients([...to, ...cc, ...bcc]);
+    if (invalidRecipients.length > 0) {
+      throw new Error(`Invalid recipient address(es): ${invalidRecipients.join(', ')}`);
+    }
 
     const adapter = adapterRegistry.getAdapter(externalSource.name);
     if (!adapter.sendMailReply) {

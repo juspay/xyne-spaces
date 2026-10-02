@@ -1,4 +1,5 @@
 import React, { type DragEvent, useEffect, useRef } from 'react';
+import { isValidRecipientAddress } from '@xyne/shared';
 import { cn } from '../../../utils/classNames';
 import { EmailTagWithAvatar } from '../EmailTagWithAvatar/EmailTagWithAvatar';
 import { RecipientSuggestionsDropdown } from '../RecipientSuggestionsDropdown/RecipientSuggestionsDropdown';
@@ -160,6 +161,7 @@ export const RecipientField = ({
               draggable
               onDragStart={handleChipDragStart(field, email)}
               onDragEnd={handleChipDragEnd}
+              invalid={!isValidRecipientAddress(email)}
             />
           ))}
           <span className='inline-flex items-center gap-1 min-w-[80px]'>
