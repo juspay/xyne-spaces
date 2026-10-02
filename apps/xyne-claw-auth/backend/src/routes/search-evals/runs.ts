@@ -5,6 +5,7 @@ import { Router, type Request, type Response } from "express";
 import { searchEvalRepository, computeSearchEvalSummary, toMetricsSummary, type SearchEvalRunSummary } from "../../repositories/index.js";
 import { getRequesterId, getOrgId } from "../../middleware/agent-acl.js";
 import { enqueueSearchEvalRun, getSearchEvalRunStatus } from "../../queue/search-eval-run-queue.js";
+import { requestWorkspaceHint } from "../../lib/spaces-db.js";
 
 import { createLogger } from "../../logger.js";
 const log = createLogger("search-evals/runs");
@@ -112,6 +113,7 @@ router.post("/sheets/:id/runs", async (req: Request<{ id: string }>, res: Respon
       rankProfileInputs: rankProfileInputsValue,
       asOfTimestamp: asOf ? asOf.toISOString() : null,
       userId,
+      ...(requestWorkspaceHint(req) ? { workspaceId: requestWorkspaceHint(req) } : {}),
     });
     res.json({ success: true, runId: run.id, jobId });
   } catch (err) {

@@ -1,6 +1,7 @@
 import { Router, type Request, type Response } from "express";
 import { executeTwinApprovalDelivery, type TwinDeliveryContext } from "../lib/twin-approval-delivery.js";
 import { recordTwinApprovalOutcome } from "../services/twinResponseFeedback.js";
+import { resolveCanonicalUserIdOrSelf } from "../lib/users-jit.js";
 import { createLogger } from "../logger.js";
 
 const log = createLogger("twin-draft");
@@ -67,6 +68,31 @@ twinDraftInternalRouter.post("/action", async (req: Request, res: Response) => {
     return;
   }
 
+  // Feedback row shape read by recordTwinApprovalOutcome (mirrors flow-data keys).
+  // twinResponseFeedback is Claw-owned and keyed by the CANONICAL Claw user
+  // (recordTwinApprovalPending on the producer side); ownerId here is the raw
+  // Spaces id from the draft, so canonicalize before writing.
+  const feedbackData: Record<string, unknown> = {
+    mentionedUserId: await resolveCanonicalUserIdOrSelf(ownerId, draft.workspaceId),
+    sourceMessageId: draft.sourceMessageId,
+    targetConversationId: draft.conversationId,
+    targetChannelId: draft.channelId,
+    channelName: draft.channelName,
+    incomingTask: draft.incomingTask,
+    deliveryAction: draft.action,
+    deliveryEmoji: draft.emoji,
+    destinationKind: draft.destinationKind,
+    messageContent: draft.message,
+  };
+
+  if (action === "decline") {
+    void recordTwinApprovalOutcome(feedbackData, "declined");
+    log.info(`[twin-draft] declined by ${ownerId} (msg ${draft.sourceMessageId ?? "(none)"})`);
+    res.json({ ok: true });
+    return;
+  }
+
+  // approve — deliver, then record the outcome.
   const ctx: TwinDeliveryContext = {
     mentionedUserId: ownerId,
     workspaceId: draft.workspaceId,

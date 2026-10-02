@@ -4,6 +4,9 @@ import { randomUUID } from "node:crypto";
 import { CONFIG } from "../config.js";
 import type { FlowDefinition } from "xyne-claw-shared";
 import { requireAuth, requireNoAccessToken, requireResultToken } from "../middleware/require-auth.js";
+import { matchesAuthenticatedUserId } from "../middleware/pin-user-id-param.js";
+import { resolveCanonicalUserIdOrSelf } from "../lib/users-jit.js";
+import { requestWorkspaceHint } from "../lib/spaces-db.js";
 import { getRequesterId, getAgentEditAccess, isClawAdmin } from "../middleware/agent-acl.js";
 import { prisma } from "../db.js";
 import { chatMessageRepository, agentRunRepository, chatAttachmentRepository, userAgentConfigRepository } from "../repositories/index.js";
@@ -431,7 +434,6 @@ publicRouter.post("/", requireAuth, requireNoAccessToken, async (req: Request, r
 
   try {
     const {
-      userId,
       userName,
       userEmail,
       task,
@@ -490,10 +492,14 @@ publicRouter.post("/", requireAuth, requireNoAccessToken, async (req: Request, r
       return;
     }
 
-    if (!userId || typeof userId !== "string") {
+    // Declared separately (typed `string`) so the canonicalization below can
+    // reassign it: a destructured `unknown` binding would lose its narrowing.
+    const rawUserId = (req.body as Record<string, unknown>)["userId"];
+    if (!rawUserId || typeof rawUserId !== "string") {
       res.status(400).json({ success: false, error: "userId is required" });
       return;
     }
+    let userId: string = rawUserId;
 
     if (studioMode !== undefined && studioMode !== "design") {
       res.status(400).json({ success: false, error: "Unknown studioMode" });
@@ -630,10 +636,22 @@ publicRouter.post("/", requireAuth, requireNoAccessToken, async (req: Request, r
       : applyAiScreenCommand(task).task;
 
     const sessionUserId = req.headers["x-user-id"];
-    if (typeof sessionUserId === "string" && sessionUserId && sessionUserId !== userId) {
+    // Spaces sends its workspace membership ID in the body while requireAuth
+    // resolves the verified session to Claw's canonical user ID. They are two
+    // representations of the same caller, not an attempted cross-user run.
+    if (typeof sessionUserId === "string" && sessionUserId && !matchesAuthenticatedUserId(req, userId)) {
       res.status(403).json({ success: false, error: "Body userId does not match authenticated session" });
       return;
     }
+    // Canonicalize once: everything downstream — ACL checks (isClawAdmin,
+    // getAgentEditAccess), user-agent config, local-harness device lookup and
+    // session-token minting, and every persisted chat/run/attachment row —
+    // keys on Claw's canonical user id. The verified session header already
+    // carries it; an S2S caller that pinned only the raw alias is resolved
+    // through the identity ladder (fail-open to the supplied id).
+    userId = typeof sessionUserId === "string" && sessionUserId
+      ? sessionUserId
+      : await resolveCanonicalUserIdOrSelf(userId, requestWorkspaceHint(req));
 
     const slug = typeof agentSlug === "string" && agentSlug ? agentSlug : "assistant";
     const convId = typeof conversationId === "string" && conversationId ? conversationId : `chat-${randomUUID()}`;
@@ -677,6 +695,7 @@ publicRouter.post("/", requireAuth, requireNoAccessToken, async (req: Request, r
         ? researchContext as { type?: unknown; id?: unknown }
         : undefined,
       convId,
+      requestWorkspaceHint(req),
     );
     if (!sdlcResolution.ok) {
       res.status(sdlcResolution.status).json({ success: false, error: sdlcResolution.error });
@@ -685,7 +704,7 @@ publicRouter.post("/", requireAuth, requireNoAccessToken, async (req: Request, r
     const sdlcContext =
       sdlcResolution.repository?.agentContext ??
       (typeof channelId === "string"
-        ? await resolveSdlcHubContextForUser(userId, channelId, convId)
+        ? await resolveSdlcHubContextForUser(userId, channelId, convId, requestWorkspaceHint(req))
         : undefined);
 
     // Resolve the agent's provider credentials so this SSE run uses the agent's
@@ -1465,7 +1484,7 @@ publicRouter.post("/", requireAuth, requireNoAccessToken, async (req: Request, r
           "../services/agentChatContextService.js"
         );
         const { getSpacesAuthForUser } = await import("../lib/spaces-db.js");
-        const auth = await getSpacesAuthForUser(userId);
+        const auth = await getSpacesAuthForUser(userId, "agent-chat", requestWorkspaceHint(req));
         const normalized = normalizeAttachedContext(forwardedAttachedContext);
         if (auth && normalized.items.length > 0) {
           const payload = await buildAttachedContextPayload(normalized.items, auth);
@@ -1830,7 +1849,10 @@ publicRouter.post("/cancel", requireAuth, requireNoAccessToken, async (req: Requ
     }
 
     const run = await agentRunRepository.findBySessionId(sessionId);
-    if (!run || run.userId !== userId) {
+    // run.userId may be keyed by EITHER verified representation of the caller
+    // (canonical Claw id or the raw Spaces id the session was started under),
+    // so a strict equality check would 404 the legitimate owner.
+    if (!run || (run.userId !== userId && !matchesAuthenticatedUserId(req, run.userId))) {
       res.status(404).json({ success: false, error: "Run not found" });
       return;
     }
@@ -1843,12 +1865,14 @@ publicRouter.post("/cancel", requireAuth, requireNoAccessToken, async (req: Requ
       return;
     }
 
+    // Forward the run's stored owner id (not the requester): the pod compares
+    // x-user-id against the id the run was dispatched with.
     const cancelRes = await fetch(`${CONFIG.internalUrl}/claw/api/v1/internal/run/${encodeURIComponent(sessionId)}/cancel`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
         ...(CONFIG.xyneClawS2sKey ? { "x-s2s-key": CONFIG.xyneClawS2sKey } : {}),
-        "x-user-id": userId,
+        "x-user-id": run.userId,
       },
     });
 

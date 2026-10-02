@@ -37,6 +37,7 @@ import {
 import { markSdlcRun, SDLC_AGENT_TOOL_PROFILE } from "./sdlc-run-tools.js";
 import { getSessionByConv } from "./session-context.js";
 import { mintSessionToken } from "./session-tokens.js";
+import { resolveClawUserIdForSpacesIdentity, spacesUserIdForClawUser } from "./users-jit.js";
 import {
   resolveAgentProviderConfigs,
   resolveSubagentProviderMode,
@@ -241,12 +242,23 @@ async function resolveUserId(
 
   // Direct call with userId (e.g., from Xyne Spaces)
   if (userId && typeof userId === "string" && userId.trim().length > 0) {
+    // The body id arrives in either representation: legacy callers (queued
+    // messages, pre-migration cards) send the raw Spaces id, current callers
+    // the canonical Claw id. Resolve through the identity ladder so the run
+    // and every downstream row is keyed canonically.
+    // Deliberate MIXED failure policy: an identity-resolution failure here is
+    // FAIL-OPEN (fall back to the raw id — the request was authenticated
+    // upstream and a lookup hiccup must not block runs), while the
+    // body-vs-header userId pin check above is FAIL-CLOSED (403) because a
+    // mismatch there is a conflicting identity claim, not an infra error.
+    const clawUserId =
+      (await resolveClawUserIdForSpacesIdentity(userId.trim()).catch(() => undefined)) ?? userId.trim();
     const user = await prisma.user.findUnique({
-      where: { id: userId.trim() },
+      where: { id: clawUserId },
       select: { name: true, email: true, orgId: true },
     });
     return {
-      userId: userId.trim(),
+      userId: clawUserId,
       userName: userName?.trim() ?? user?.name ?? "",
       userEmail: user?.email ?? "",
       ...(user?.orgId ? { orgId: user.orgId } : {}),
@@ -662,8 +674,16 @@ export async function prepareRun(
     const bodyUserId =
       typeof bodyUserIdRaw === "string" && bodyUserIdRaw.trim() ? bodyUserIdRaw.trim() : undefined;
     if (bodyUserId && authenticatedUserId && bodyUserId !== authenticatedUserId) {
-      log.warn(`[run] userId pin mismatch: session=${authenticatedUserId} body=${bodyUserId}`);
-      return { ok: false, status: 403, error: "Body userId does not match authenticated session" };
+      // The pinned header is canonical while legacy clients still send the
+      // raw Spaces alias in the body — resolve before comparing, or the
+      // authenticated user's own runs get falsely rejected. FAIL-CLOSED: an
+      // unresolvable or mismatching body id is a 403 (see resolveUserId for
+      // the complementary fail-open path).
+      const resolvedBodyUserId = await resolveClawUserIdForSpacesIdentity(bodyUserId).catch(() => undefined);
+      if (!resolvedBodyUserId || resolvedBodyUserId !== authenticatedUserId) {
+        log.warn(`[run] userId pin mismatch: session=${authenticatedUserId} body=${bodyUserId}`);
+        return { ok: false, status: 403, error: "Body userId does not match authenticated session" };
+      }
     }
 
     const identityBody = {
@@ -910,14 +930,6 @@ export async function prepareRun(
         ? `${resolvedAttachedContext.promptPrefix}\n\n${mergedContext}`
         : resolvedAttachedContext.promptPrefix;
     }
-    if (effectiveChannelId) {
-      try {
-        const hubKnowledge = await loadSdlcHubKnowledge(effectiveChannelId, resolved.userId);
-        if (hubKnowledge) mergedContext = mergedContext ? `${hubKnowledge}\n\n${mergedContext}` : hubKnowledge;
-      } catch (err) {
-        log.warn("[run] failed to load SDLC Hub Knowledge:", errMsg(err));
-      }
-    }
 
     // Inject live agent catalog for the Claw concierge agent so the LLM
     // always sees the current agents without any hardcoded list in the prompt.
@@ -969,8 +981,13 @@ export async function prepareRun(
         (conversationId && agentSlug
           ? ((await getSessionByConv(conversationId, agentSlug).catch(() => null))?.channelId ?? "")
           : "");
+      // Automation/queued dispatch bodies may carry the hub's workspace;
+      // without it a two-workspace user's identity resolution is ambiguous.
+      const bodyWorkspaceId = (body as { workspaceId?: unknown }).workspaceId;
+      const hubWorkspaceHint =
+        typeof bodyWorkspaceId === "string" && bodyWorkspaceId.trim() ? bodyWorkspaceId.trim() : undefined;
       sdlcAgentRunContext = parseSdlcAgentRunContext(
-        await resolveSdlcHubContextForUser(resolved.userId, hubChannelId, conversationId),
+        await resolveSdlcHubContextForUser(resolved.userId, hubChannelId, conversationId, hubWorkspaceHint),
       );
       if (sdlcAgentRunContext) mergedAgentConfig = { ...mergedAgentConfig, sdlcContext: sdlcAgentRunContext };
     }
@@ -979,6 +996,24 @@ export async function prepareRun(
       mergedAgentConfig = mergeSdlcToolProfile(mergedAgentConfig, SDLC_AGENT_TOOL_PROFILE, {
         interactive: !isScheduledOrAutomationEvent(eventType),
       });
+    }
+    if (effectiveChannelId) {
+      try {
+        // Hub Knowledge membership (channelParticipant.userId) is keyed by the
+        // workspace-scoped Spaces id, while resolved.userId is the canonical
+        // Claw id — convert before the lookup or the filter matches nothing
+        // and hub knowledge silently drops out of the run context. The hub
+        // context carries the run's workspace, which disambiguates users
+        // holding memberships in two Spaces workspaces.
+        const hubWorkspaceRaw = sdlcAgentRunContext?.["workspaceId"];
+        const hubWorkspaceId =
+          typeof hubWorkspaceRaw === "string" && hubWorkspaceRaw.trim() ? hubWorkspaceRaw.trim() : undefined;
+        const hubKnowledgeUserId = await spacesUserIdForClawUser(resolved.userId, hubWorkspaceId);
+        const hubKnowledge = await loadSdlcHubKnowledge(effectiveChannelId, hubKnowledgeUserId);
+        if (hubKnowledge) mergedContext = mergedContext ? `${hubKnowledge}\n\n${mergedContext}` : hubKnowledge;
+      } catch (err) {
+        log.warn("[run] failed to load SDLC Hub Knowledge:", errMsg(err));
+      }
     }
     const effectiveFastMode =
       explicitFastMode ??
@@ -1269,7 +1304,8 @@ export async function prepareRun(
         const sessionContext: SessionContext = {
           mentionedUserId: agent.spacesAppUserId ?? "",
           senderId: resolved.userId,
-          senderName: resolved.userName || resolved.userId,
+          // Never render the canonical id as a display name.
+          senderName: resolved.userName || resolved.userEmail || resolved.userId,
           channelId: effectiveChannelId ?? "",
           channelName: effectiveChannelId ?? "",
           conversationId: conversationId ?? "",
