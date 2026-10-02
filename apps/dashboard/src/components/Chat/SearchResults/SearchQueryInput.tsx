@@ -74,7 +74,29 @@ interface SearchQueryInputProps {
   onLiveChange: (next: string) => void;
   /** True while a search is in flight — swaps the leading icon for a spinner. */
   isSearching: boolean;
+  /**
+   * Take focus when the box appears, so typing goes straight in — Cmd+K landing on full page, or
+   * the palette expanding into it. Waits for a dialog over the page (the palette handing off) to
+   * go first, and never takes focus from something the user has already moved into.
+   */
+  autoFocus?: boolean;
+  /**
+   * Bumped to send the caret here on demand (Cmd+K / Cmd+F on the results page): focuses the box,
+   * selects its text so typing replaces it, and pulses the box once so the jump is noticed.
+   */
+  focusRequest?: number;
 }
+
+// The one pulse a focus request draws around the box, in the palette's accent orange.
+const FOCUS_PULSE: Keyframe[] = [
+  { boxShadow: '0 0 0 0 rgba(255, 105, 0, 0)' },
+  { boxShadow: '0 0 0 4px rgba(255, 105, 0, 0.35)', offset: 0.35 },
+  { boxShadow: '0 0 0 0 rgba(255, 105, 0, 0)' },
+];
+const FOCUS_PULSE_MS = 700;
+
+// The longest the box waits for a dialog over the page to go before giving up on taking focus.
+const AUTO_FOCUS_WAIT_MS = 3000;
 
 /**
  * Editable query box for the full-screen search results header. Replaces the old
@@ -128,9 +150,42 @@ export function SearchQueryInput({
   onSubmit,
   onLiveChange,
   isSearching,
+  autoFocus = false,
+  focusRequest = 0,
 }: SearchQueryInputProps): ReactElement {
   const { userID: currentUserId } = useAuthContextValues();
   const inputRef = useRef<HTMLInputElement>(null);
+  const boxRef = useRef<HTMLLabelElement>(null);
+
+  useEffect(() => {
+    if (!focusRequest) return;
+    const input = inputRef.current;
+    if (!input) return;
+    input.focus({ preventScroll: true });
+    input.select();
+    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+    boxRef.current?.animate(FOCUS_PULSE, { duration: FOCUS_PULSE_MS, easing: 'ease-out' });
+  }, [focusRequest]);
+
+  useEffect(() => {
+    if (!autoFocus) return;
+    const deadline = performance.now() + AUTO_FOCUS_WAIT_MS;
+    let frame = 0;
+    const focusWhenClear = (): void => {
+      const input = inputRef.current;
+      if (!input) return;
+      if (document.querySelector('[role="dialog"]')) {
+        if (performance.now() < deadline) frame = requestAnimationFrame(focusWhenClear);
+        return;
+      }
+      const active = document.activeElement;
+      if (active && active !== document.body && active !== input) return;
+      input.focus({ preventScroll: true });
+      input.setSelectionRange(input.value.length, input.value.length);
+    };
+    focusWhenClear();
+    return (): void => cancelAnimationFrame(frame);
+  }, [autoFocus]);
   const [value, setValue] = useState(query);
   const [activeIndex, setActiveIndex] = useState(0);
 
@@ -255,6 +310,7 @@ export function SearchQueryInput({
     // gaps between tokens included — focuses the input natively, with no handler to keep
     // in sync and no a11y role to fake.
     <label
+      ref={boxRef}
       htmlFor={QUERY_INPUT_ID}
       className={cn(
         'relative flex flex-wrap items-center gap-2 min-h-10 px-3 py-1 rounded-xl border border-border bg-background',

@@ -1,5 +1,5 @@
 import { ReactElement, useState, useMemo, useCallback, useEffect } from 'react';
-import { useLocation } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { isDeskChannelType, ChannelType } from '@xyne/shared';
 import { useAuthContextValues } from '../../hooks/useAuth';
 import {
@@ -15,8 +15,25 @@ import { useAllUnreadCount } from '../../hooks/useUnreadCount';
 import { rankChannelsByAffinity } from '../../utils/rankingUtils';
 import { useAffinityCallback } from '../../hooks/useAffinityCallback';
 import ChannelCommandMenu from '../Chat/ChatDirectory/ChannelCommandMenu';
+import {
+  COLLAPSE_TO_CMDK_EVENT,
+  noteLocation,
+  whenCollapseSettled,
+  owedFullPageAnnouncement,
+  recordDefaultFullPageOpen,
+  resultsParamsForQuery,
+  focusFullPageSearch,
+  resumeSearchOnOpen,
+  saveFullPageOrigin,
+  SELECTED_RESULT_PARAM,
+  isFullPageSearchPath,
+  type CollapseToCmdkDetail,
+} from '../Chat/ChatDirectory/cmdkFullPage';
+import { loadCmdkPolicy, openCmdk, saveCmdkPolicy } from '../../search/cmdkPolicy';
+import { useCmdkPolicyOptions } from '../../hooks/useCmdkSearchConfig';
 import type { ContextItem } from '../Chat/ThreadContextPanel/ThreadContextPanel.types';
 import {
+  DOC_TYPE_TO_TAB,
   TabType,
   type ChipData,
   type SearchScopeToggles,
@@ -63,7 +80,14 @@ interface GlobalCommandMenuProps {
   // Tickets tab only, seeded with its filters. Only the app-level cmd+K instance sets it;
   // pickers built on this menu leave it off. Cmd+K itself always opens the global search.
   ticketScreenScope?: boolean;
+  // The app-level cmd+K search: reopens with the last query on a quick return (offering the
+  // full-page banner), and when the results page collapses full page back into the palette.
+  // Only the app-level cmd+K instance sets it.
+  fullPageSearch?: boolean;
 }
+
+// The longest a collapse waits for the palette to land before returning to the page anyway.
+const COLLAPSE_SETTLE_TIMEOUT_MS = 1200;
 
 const GlobalCommandMenu = ({
   open: controlledOpen,
@@ -85,6 +109,7 @@ const GlobalCommandMenu = ({
   seedCommand,
   aiOverview,
   ticketScreenScope,
+  fullPageSearch,
 }: GlobalCommandMenuProps = {}): ReactElement | null => {
   const context = useAuthContextValues();
   const channelData = useAllChannels();
@@ -102,6 +127,19 @@ const GlobalCommandMenu = ({
   const [internalEnabledTabs, setInternalEnabledTabs] = useState<TabType[] | undefined>(undefined);
   const [deskMergeEnabled, setDeskMergeEnabled] = useState(false);
   const [ticketView, setTicketView] = useState<TicketSearchView | null>(null);
+  // The results page's search, while the palette is open because full page collapsed into it.
+  const [collapsedSearch, setCollapsedSearch] = useState<string | null>(null);
+  // Whether this open is Cmd+F (scoped, never teaches the size policy) or a search.
+  const [sessionOrigin, setSessionOrigin] = useState<'search' | 'findInChannel'>('search');
+  // The result that was highlighted on the results page, to keep highlighted after a collapse.
+  const [preferredResultId, setPreferredResultId] = useState<string | null>(null);
+  // The last query, restored because Cmd+K reopened right after a result was opened from it.
+  const [returnOpen, setReturnOpen] = useState<{
+    query: InitialQueryData;
+    toggles: SearchScopeToggles;
+    banner: boolean;
+  } | null>(null);
+  const policyOptions = useCmdkPolicyOptions();
 
   // External props take priority over internal state (e.g. when opened from SupportScreen)
   const initialMention =
@@ -111,6 +149,7 @@ const GlobalCommandMenu = ({
   const effectiveHideTabs = hideTabs !== undefined ? hideTabs : internalHideTabs;
   const effectiveEnabledTabs = enabledTabs !== undefined ? enabledTabs : internalEnabledTabs;
   const location = useLocation();
+  const navigate = useNavigate();
   const allUsers = useUsers();
   const [allBoards] = useCachedQuery(queries.getAllBoardsList());
 
@@ -135,6 +174,8 @@ const GlobalCommandMenu = ({
     const ticketContext = getCurrentTicketView();
     if (!ticketContext) return false;
     applyTicketView(ticketContext);
+    // The screen's own search, like Cmd+F: scoped, so it never teaches the open-size policy.
+    setSessionOrigin('findInChannel');
     onOpenChange(true);
     return true;
   }, [applyTicketView, onOpenChange]);
@@ -156,7 +197,55 @@ const GlobalCommandMenu = ({
   }, [ticketScreenScope, openScopedToTicketScreen]);
 
   const handleOpenChange = useCallback(
-    (newOpen: boolean) => {
+    // False when an open went elsewhere instead of showing the palette.
+    (newOpen: boolean, via?: 'shortcut'): boolean => {
+      // Full page never has the palette over it: opening it there goes to the page's own search
+      // box instead (where the page does not take it, as on mobile, the palette opens as before).
+      if (newOpen && !open && fullPageSearch && focusFullPageSearch()) return false;
+      if (newOpen && !open) setSessionOrigin('search');
+      // Only Cmd+K itself (and the top bar's search, which invokes it) asks the policy what size to
+      // open at and whether this is a quick return. A back-navigation reopening the palette on its
+      // entry must not: with full page as the default it would send Back straight to full page
+      // again. Not on the results page either (on mobile, the one place it opens there).
+      if (
+        via === 'shortcut' &&
+        newOpen &&
+        !open &&
+        fullPageSearch &&
+        context.workspaceId &&
+        context.userID &&
+        !isFullPageSearchPath(location.pathname)
+      ) {
+        const decision = openCmdk(
+          loadCmdkPolicy(context.workspaceId, context.userID),
+          Date.now(),
+          policyOptions,
+          'search',
+        );
+        saveCmdkPolicy(context.workspaceId, context.userID, decision.state);
+        const restored = decision.restore?.query;
+        // Full page is the learned default: go straight there, on the restored query if any.
+        if (decision.size === 'full') {
+          const params = restored ? resultsParamsForQuery(restored) : new URLSearchParams();
+          saveFullPageOrigin(window.location.pathname + window.location.search);
+          if (decision.announceFullPage) owedFullPageAnnouncement();
+          recordDefaultFullPageOpen(context.userID);
+          const query = params.toString();
+          void navigate(`/search-results${query ? `?${query}` : ''}`);
+          return false;
+        }
+        if (restored) {
+          resumeSearchOnOpen();
+          setReturnOpen({
+            query: { mentions: restored.filterChips as ChipData[], text: restored.text },
+            toggles: restored.toggles,
+            banner: decision.bannerEligible,
+          });
+          setInternalContextualTab(restored.tab);
+          onOpenChange(true);
+          return true;
+        }
+      }
       if (newOpen && internalContextualTab === undefined && externalInitialTab === undefined) {
         const pathParts = location.pathname.split('/').filter(Boolean);
         if (pathParts.includes('support')) {
@@ -171,12 +260,31 @@ const GlobalCommandMenu = ({
         setInternalEnabledTabs(undefined);
         setDeskMergeEnabled(false);
         setTicketView(null);
+        setCollapsedSearch(null);
+        setReturnOpen(null);
+        setPreferredResultId(null);
       }
+      return true;
     },
-    [onOpenChange, internalContextualTab, externalInitialTab, location.pathname],
+    [
+      navigate,
+      onOpenChange,
+      internalContextualTab,
+      externalInitialTab,
+      location.pathname,
+      open,
+      fullPageSearch,
+      context.workspaceId,
+      context.userID,
+      policyOptions,
+    ],
   );
 
   const handleFindInChannel = useCallback(() => {
+    // On full page, Cmd+F goes to the page's own search box, like Cmd+K there.
+    if (fullPageSearch && focusFullPageSearch()) return;
+    // Cmd+F always opens the modal, whatever the learned size, and never teaches the policy.
+    setSessionOrigin('findInChannel');
     // On a ticket screen, Cmd+F is the screen's search bar: a ticket search in its view.
     if (ticketScreenScope && openScopedToTicketScreen()) return;
 
@@ -270,6 +378,7 @@ const GlobalCommandMenu = ({
     context.userID,
     ticketScreenScope,
     openScopedToTicketScreen,
+    fullPageSearch,
   ]);
 
   // Only the search-mode instance owns Cmd+F; the context-picker copy mounted in
@@ -372,9 +481,14 @@ const GlobalCommandMenu = ({
     [allUsers, channelData, context.userID, allBoards],
   );
 
+  // The URL restore (top-bar screen search) or a collapse from full page, which carries the
+  // results page's search because the location has already moved on by the time it opens.
+  const restoreSearch = restoreQueryFromUrl ? location.search : collapsedSearch;
+
   const initialQuery = useMemo(
-    () => (restoreQueryFromUrl ? buildQueryFromParams(new URLSearchParams(location.search)) : null),
-    [restoreQueryFromUrl, location.search, buildQueryFromParams],
+    () =>
+      restoreSearch !== null ? buildQueryFromParams(new URLSearchParams(restoreSearch)) : null,
+    [restoreSearch, buildQueryFromParams],
   );
 
   // The scope the results page is searching at, so reopening the palette doesn't quietly
@@ -388,9 +502,84 @@ const GlobalCommandMenu = ({
   );
 
   const initialToggles = useMemo(
-    () => (restoreQueryFromUrl ? togglesFromParams(new URLSearchParams(location.search)) : null),
-    [restoreQueryFromUrl, location.search, togglesFromParams],
+    () => (restoreSearch !== null ? togglesFromParams(new URLSearchParams(restoreSearch)) : null),
+    [restoreSearch, togglesFromParams],
   );
+
+  const openCollapsed = useCallback(
+    (search: string): void => {
+      // The results page keeps its docType in `tab`; land the palette on the matching tab.
+      const params = new URLSearchParams(search);
+      const docType = params.get('tab');
+      setCollapsedSearch(search);
+      setSessionOrigin('search');
+      setPreferredResultId(params.get(SELECTED_RESULT_PARAM));
+      setInternalInitialMention(null);
+      setInternalContextualTab(
+        docType && docType in DOC_TYPE_TO_TAB
+          ? DOC_TYPE_TO_TAB[docType as keyof typeof DOC_TYPE_TO_TAB]
+          : undefined,
+      );
+      setInternalHideTabs(false);
+      setInternalEnabledTabs(undefined);
+      // The search the results page just ran: the palette re-runs it at once, from the cache.
+      resumeSearchOnOpen();
+      onOpenChange(true);
+    },
+    [onOpenChange],
+  );
+
+  // Where a collapse from full page is taking the user back to, until they get there. The palette
+  // opens at once (the click must feel immediate), but the router applies navigations as
+  // transitions and may keep the results page up while the origin route loads; the palette's
+  // history entry waits for the origin, since pushing it earlier would cancel the way back.
+  const [collapseReturnTo, setCollapseReturnTo] = useState<string | null>(null);
+
+  // Every page the user lands on outside full page is a place a collapse can return to.
+  useEffect(() => {
+    noteLocation(location.pathname + location.search);
+  }, [location.pathname, location.search]);
+
+  useEffect(() => {
+    if (!fullPageSearch) return;
+    const onCollapse = (event: Event): void => {
+      const { search, origin, returnVia } = (event as CustomEvent<CollapseToCmdkDetail>).detail;
+      openCollapsed(search);
+      if (!origin) return;
+      setCollapseReturnTo(origin.href);
+      // Step back to the entry the palette expanded from rather than pushing a new one, so the
+      // stack stays as it was before the expand and Back keeps meaning what it did. A step back
+      // renders the page it lands on in one blocking pass, so it waits for the palette to land
+      // with its content showing first: the collapse plays out in full, then the page fills in.
+      const here = (window.history.state as { idx?: unknown } | null)?.idx;
+      const returnBack = (): void => {
+        if (
+          origin.historyIndex !== null &&
+          typeof here === 'number' &&
+          origin.historyIndex < here
+        ) {
+          void navigate(origin.historyIndex - here);
+        } else {
+          void navigate(origin.href);
+        }
+      };
+      void whenCollapseSettled(COLLAPSE_SETTLE_TIMEOUT_MS).then(returnVia ?? returnBack);
+    };
+    window.addEventListener(COLLAPSE_TO_CMDK_EVENT, onCollapse);
+    return (): void => window.removeEventListener(COLLAPSE_TO_CMDK_EVENT, onCollapse);
+  }, [fullPageSearch, openCollapsed, navigate]);
+
+  useEffect(() => {
+    if (!collapseReturnTo) return;
+    const target = new URL(collapseReturnTo, window.location.origin);
+    if (location.pathname === target.pathname && location.search === target.search) {
+      setCollapseReturnTo(null);
+      return;
+    }
+    // A return that never lands must not leave the palette without its history entry for good.
+    const timer = setTimeout(() => setCollapseReturnTo(null), 5000);
+    return (): void => clearTimeout(timer);
+  }, [collapseReturnTo, location.pathname, location.search]);
 
   /**
    * The search the results page was actually showing, for a back-navigation. Preferred over
@@ -409,7 +598,8 @@ const GlobalCommandMenu = ({
   // taking priority over any URL-restored query.
   const seededInitialQuery: InitialQueryData | null = seedCommand
     ? { mentions: [], text: '/' }
-    : initialQuery;
+    : (initialQuery ?? returnOpen?.query ?? null);
+  const seededToggles = initialToggles ?? returnOpen?.toggles ?? null;
 
   if (!context.userID) return null;
 
@@ -424,7 +614,7 @@ const GlobalCommandMenu = ({
       onOpenChange={handleOpenChange}
       initialMention={initialMention}
       {...(seededInitialQuery !== null ? { initialQuery: seededInitialQuery } : {})}
-      {...(initialToggles !== null ? { initialToggles } : {})}
+      {...(seededToggles !== null ? { initialToggles: seededToggles } : {})}
       restoreFromLastSearch={restoreFromLastSearch}
       {...(contextSelectionMode !== undefined ? { contextSelectionMode } : {})}
       {...(contextItems !== undefined ? { contextItems } : {})}
@@ -440,6 +630,11 @@ const GlobalCommandMenu = ({
       {...(effectiveHideTabs ? { hideTabs: effectiveHideTabs } : {})}
       {...(aiOverview !== undefined ? { aiOverview } : {})}
       deskMergeEnabled={deskMergeEnabled}
+      fullPageSearch={fullPageSearch ?? false}
+      returnBanner={returnOpen?.banner ?? false}
+      deferHistory={collapseReturnTo !== null}
+      sessionOrigin={sessionOrigin}
+      preferredResultId={preferredResultId}
       ticketView={ticketView}
       onRemoveTicketView={removeTicketView}
       onRestoreTicketView={applyTicketView}

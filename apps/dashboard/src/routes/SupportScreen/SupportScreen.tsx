@@ -271,6 +271,7 @@ import {
 } from './DeskFilterTrigger';
 import { useDeskToolbarOverflow } from './useDeskToolbarOverflow';
 import { clearDeskContactsCache } from '../../hooks/useDeskContacts';
+import { usePageCoverage } from '../../hooks/usePageCoverage';
 import { XyneAIStar } from '../../components/icons/xyne-ai';
 import {
   channelService,
@@ -2150,21 +2151,31 @@ const SupportScreen = (): ReactElement => {
     );
   }, [selectedChannelId, zero]);
 
+  // Covered by full-page search counts as leaving the channel: unmounting while covered marks it
+  // viewed as of when it was covered, so what arrived meanwhile stays unread.
+  const pageCoverage = usePageCoverage();
   useEffect(() => {
     if (!selectedChannelId || !isSelectedChannelJoined) return;
-    const markViewed = (): void => {
+    const markViewed = (timestamp = Date.now()): void => {
       void zero.mutate(
         mutators.channel.markChannelAsViewed({
           channelId: selectedChannelId,
-          timestamp: Date.now(),
+          timestamp,
           draftMessageId: uuidv4(),
           draftMessage: '',
         }),
       );
     };
     markViewed();
-    return markViewed;
-  }, [selectedChannelId, isSelectedChannelJoined]);
+    let coveredAt: number | null = null;
+    const stopWatching = pageCoverage.subscribe(covered => {
+      coveredAt = covered ? Date.now() : null;
+    });
+    return (): void => {
+      stopWatching();
+      markViewed(pageCoverage.isCovered() ? (coveredAt ?? Date.now()) : Date.now());
+    };
+  }, [selectedChannelId, isSelectedChannelJoined, pageCoverage]);
   const selectedChannelFull = useMemo(
     () => sortedEmailChannels.find(c => c.id === selectedChannelId),
     [sortedEmailChannels, selectedChannelId],

@@ -116,6 +116,32 @@ export const TAB_TO_DOC_TYPE = {
   [TabType.DESK]: 'desk',
 } as const satisfies Partial<Record<TabType, SearchResultsDocType>>;
 
+/** The palette's tab names; full page labels recent searches with them too (see tabLabel). */
+export const TAB_LABELS = {
+  [TabType.MESSAGES]: 'Messages',
+  [TabType.USERS]: 'People',
+  [TabType.CHANNELS]: 'Channels',
+  [TabType.ATTACHMENTS]: 'Files',
+  [TabType.CANVAS]: 'Canvas',
+  [TabType.TICKETS]: 'Tickets',
+  [TabType.CALL]: 'Calls',
+  [TabType.RECORDING]: 'Recordings',
+  [TabType.DESK]: 'Desk',
+} as const satisfies Partial<Record<TabType, string>>;
+
+/** A tab's name, or '' for one without (All). */
+export const tabLabel = (tab: TabType): string =>
+  (TAB_LABELS as Partial<Record<TabType, string>>)[tab] ?? '';
+
+/**
+ * The palette at rest, which full page shows too with nothing searched: Starred capped while
+ * recents show, to fit both, and the merged people+channel list's rows before "See more" — the
+ * merge keeps more than that, so expanding has something to reveal.
+ */
+export const RECENTS_STARRED_CAP = 3;
+export const MERGED_DISPLAY_LIMIT = 8;
+export const MERGED_CANDIDATE_LIMIT = MERGED_DISPLAY_LIMIT * 5;
+
 /**
  * Backend-result group key -> results-page docType — derived by inverting each
  * registry entry's `groupKeys`.
@@ -233,7 +259,11 @@ export interface ChannelCommandMenuProps {
   currentUserID: string;
   unreadCounts: Record<string, number>;
   open: boolean;
-  onOpenChange: (open: boolean) => void;
+  /**
+   * `via: 'shortcut'` marks an open from Cmd+K itself (the only open that consults the size policy).
+   * Returns false when an open went elsewhere instead (to full page, or its search box).
+   */
+  onOpenChange: (open: boolean, via?: 'shortcut') => boolean | void;
   /** When true, clicking items adds them to context instead of navigating */
   contextSelectionMode?: boolean;
   /** Currently selected context items (used to show checkmarks) */
@@ -314,6 +344,19 @@ export interface ChannelCommandMenuProps {
    * by default: every existing caller keeps the full-label row it had.
    */
   compactTabs?: boolean;
+  /**
+   * The app-level Cmd+K search: remembers the query of an opened result for a quick return.
+   * Pickers built on this menu leave it off.
+   */
+  fullPageSearch?: boolean;
+  /** Offer the "Expand to full-page search" return banner on this open, in place of the row. */
+  returnBanner?: boolean;
+  /** Hold off the palette's history entry while a collapse from full page navigates back. */
+  deferHistory?: boolean;
+  /** How this open started: Cmd+F sessions never teach the open-size policy. */
+  sessionOrigin?: 'search' | 'findInChannel';
+  /** A result carried back from full page: selected in place of the first result once it loads. */
+  preferredResultId?: string | null;
 }
 
 /* ------------------------------------------------------------------------- *
