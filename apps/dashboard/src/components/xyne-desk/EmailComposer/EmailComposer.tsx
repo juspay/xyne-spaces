@@ -70,7 +70,7 @@ import { queries } from '../../../zero/queries';
 import { useUsers } from '../../../hooks/useUsers';
 import { useAuthContextValues } from '../../../hooks/useAuth';
 import { useComposeSubjectAI } from '../../../hooks/useComposeSubjectAI';
-import { AutoDraftStatus, type EmailChannelPreference } from '@xyne/shared';
+import { AutoDraftStatus, findInvalidRecipients, type EmailChannelPreference } from '@xyne/shared';
 import { useEmailDraftOperations, type EmailDraftRecord } from '../../../hooks/useEmailDraft';
 import { useComposeDraftOperations, type ComposeDraftRecord } from '../../../hooks/useComposeDraft';
 import { useDeskAIDraft } from '../../../hooks/useDeskAIDraft';
@@ -1577,6 +1577,23 @@ export const EmailComposer = ({
     if (isComposeMode) {
       if (!channelId || composeSubject.trim().length === 0) return;
     } else if (!conversationId) {
+      return;
+    }
+    // Block undeliverable addresses before calling the API. Reply All copies
+    // recipients verbatim from inbound mail, so a sender's shorthand such as
+    // `support@jiopay` would otherwise fail the whole send at the provider
+    // with an opaque `Invalid To header`. Name the address so it can be fixed.
+    const invalidRecipients = findInvalidRecipients([...toEmails, ...ccEmails, ...bccEmails]);
+    if (invalidRecipients.length > 0) {
+      setShowSendConfirm(false);
+      toast.error(
+        invalidRecipients.length === 1
+          ? `"${invalidRecipients[0]}" is not a valid email address`
+          : `${invalidRecipients.length} recipients are not valid email addresses`,
+        {
+          description: `Remove or correct ${invalidRecipients.join(', ')} (highlighted in red) and send again.`,
+        },
+      );
       return;
     }
     // Two-step send — first click only opens the confirm dialog; the real send
