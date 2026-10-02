@@ -19,6 +19,8 @@ export interface AuditFeedFilter {
   /** Inclusive epoch-ms window; omitted = all time. */
   from?: number | undefined;
   to?: number | undefined;
+  /** Only entries touching these audited tables, with only their change rows. */
+  tables?: string[] | undefined;
 }
 
 const feedParams = (filter: AuditFeedFilter): Record<string, string | number> => ({
@@ -26,6 +28,7 @@ const feedParams = (filter: AuditFeedFilter): Record<string, string | number> =>
   ...(filter.entityId && { entityId: filter.entityId }),
   ...(filter.from !== undefined && { from: filter.from }),
   ...(filter.to !== undefined && { to: filter.to }),
+  ...(filter.tables && filter.tables.length > 0 && { tables: filter.tables.join(',') }),
 });
 
 const unwrap = <T>(envelope: ApiEnvelope<T>, fallbackError: string): T => {

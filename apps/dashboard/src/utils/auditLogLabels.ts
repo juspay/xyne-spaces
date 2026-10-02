@@ -37,6 +37,21 @@ const FIELD_LABELS: Record<string, string> = {
   metricsEnabled: 'Desk metrics',
   frtStageNames: 'First response stops at',
   metricsGuestVisibility: 'Guest visibility',
+  onCall: 'On call',
+  isActiveForAssignment: 'Active',
+  onCallMembers: 'On-call members',
+  activeMembers: 'Active members',
+};
+
+/** Switch-like flags read as on/off rather than the stored true/false. */
+const SWITCH_FIELDS = new Set(['onCall', 'isActiveForAssignment']);
+
+/** Display form of a stored change value. */
+export const formatAuditValue = (field: string, value: string | null): string | null => {
+  if (value === null || !SWITCH_FIELDS.has(field)) return value;
+  if (value === 'true') return 'on';
+  if (value === 'false') return 'off';
+  return value;
 };
 
 /** Label for a change row's field; JSON paths label each segment, e.g. "Metadata › Sla Policy Type". */

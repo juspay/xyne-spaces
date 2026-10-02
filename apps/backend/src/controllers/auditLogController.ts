@@ -4,6 +4,7 @@ import type { Prisma } from '@prisma/client';
 import { ApiResponse } from '@/types/express';
 import { logger } from '@/utils/logger';
 import { db } from '@/database/client';
+import { AUDIT_TABLE_CONFIG } from '@/zero/audit';
 import {
   AuditEntityType,
   type AuditLogEntityOption,
@@ -21,6 +22,8 @@ const MAX_EXPORT_LOGS = 5000;
 
 const cursorPayloadSchema = z.object({ createdAt: z.number(), id: z.string() });
 
+const AUDITED_TABLES = new Set(Object.keys(AUDIT_TABLE_CONFIG));
+
 const feedFilterShape = {
   entityType: z.nativeEnum(AuditEntityType),
   // Omitted = every entity of the type (the workspace-wide Audit Logs screen).
@@ -28,6 +31,14 @@ const feedFilterShape = {
   // Inclusive epoch-ms window on audit_logs.createdAt.
   from: z.coerce.number().int().nonnegative().optional(),
   to: z.coerce.number().int().nonnegative().optional(),
+  // Comma-separated audited tables: only entries touching them, with only their change rows.
+  tables: z
+    .string()
+    .optional()
+    .transform((value) => (value ? value.split(',').filter(Boolean) : undefined))
+    .refine((tables) => !tables || tables.every((table) => AUDITED_TABLES.has(table)), {
+      message: 'Unknown audit table',
+    }),
 };
 
 type FeedFilter = z.infer<z.ZodObject<typeof feedFilterShape>>;
@@ -56,6 +67,16 @@ const LOG_INCLUDE = {
 
 type AuditLogRow = Prisma.AuditLogGetPayload<{ include: typeof LOG_INCLUDE }>;
 
+/** LOG_INCLUDE, narrowed to the requested tables' change rows when filtering. */
+const logInclude = (tables: string[] | undefined) =>
+  ({
+    actorUser: LOG_INCLUDE.actorUser,
+    changes: {
+      orderBy: LOG_INCLUDE.changes.orderBy,
+      where: tables ? { tableName: { in: tables } } : {},
+    },
+  }) satisfies Prisma.AuditLogInclude;
+
 const ENTITY_NOUNS: Record<AuditEntityType, string> = {
   [AuditEntityType.BOARD]: 'board',
   [AuditEntityType.USER_GROUP_ASSIGNMENT_CONFIG]: 'user group',
@@ -80,6 +101,7 @@ const feedWhere = (workspaceId: string, filter: FeedFilter): Prisma.AuditLogWher
   workspaceId,
   entityType: filter.entityType,
   ...(filter.entityId && { entityId: filter.entityId }),
+  ...(filter.tables && { changes: { some: { tableName: { in: filter.tables } } } }),
   ...((filter.from !== undefined || filter.to !== undefined) && {
     createdAt: {
       ...(filter.from !== undefined && { gte: new Date(filter.from) }),
@@ -205,7 +227,7 @@ export class AuditLogController {
         },
         orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
         take: limit + 1,
-        include: LOG_INCLUDE,
+        include: logInclude(parsed.data.tables),
       });
 
       const hasMore = rows.length > limit;
@@ -300,7 +322,7 @@ export class AuditLogController {
         where: feedWhere(workspaceId, parsed.data),
         orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
         take: MAX_EXPORT_LOGS + 1,
-        include: LOG_INCLUDE,
+        include: logInclude(parsed.data.tables),
       });
       const truncated = rows.length > MAX_EXPORT_LOGS;
 

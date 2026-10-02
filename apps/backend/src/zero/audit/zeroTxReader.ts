@@ -3,7 +3,7 @@ import type { Schema } from '@xyne/shared';
 import { zql } from '../queries';
 import { AUDIT_TABLE_CONFIG } from './config';
 import { collectTableAudit } from './collector';
-import { AuditResolution } from './resolution';
+import { AuditResolution, rowString } from './resolution';
 import type {
   AuditJobsAccumulator,
   AuditLookup,
@@ -101,6 +101,19 @@ export function createZeroAuditLookup(tx: Transaction<Schema>): AuditLookup {
         boardIds: [...boardIds],
       }));
     },
+    memberAssignmentStates: async userGroupId => {
+      const statesBuilder = builderFor('user_assignment_states');
+      const mappingsBuilder = builderFor('user_group_mappings');
+      if (!statesBuilder || !mappingsBuilder) return [];
+      const states = (await tx.run(
+        statesBuilder.where('userGroupId', userGroupId) as never,
+      )) as AuditRow[];
+      const mappings = (await tx.run(
+        mappingsBuilder.where('userGroupId', userGroupId) as never,
+      )) as AuditRow[];
+      const memberIds = new Set(mappings.map(mapping => String(mapping.userId)));
+      return states.filter(state => memberIds.has(String(state.userId)));
+    },
   };
 }
 
@@ -154,6 +167,16 @@ export async function collectZeroAuditOperation(params: {
     params.operation === 'delete'
       ? null
       : ({ ...(beforeRow ?? {}), ...rowArgs } as AuditRow);
+
+  // Counted sets are baselined here, before this write; the snapshot is memoized
+  // for the whole save, so it stays the pre-save state.
+  if (config.counters) {
+    await params.accumulator.resolution.warmCounterSnapshot(
+      params.table,
+      rowString(afterRow ?? beforeRow ?? {}, config.counters.groupBy),
+      config.counters,
+    );
+  }
 
   await collectTableAudit({
     table: params.table,
