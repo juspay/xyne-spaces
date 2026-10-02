@@ -26,7 +26,12 @@ import { formatExpiryTime } from '../../../utils/statusUtils';
 import { OnCallRotationModal } from '../OnCallRotationModal/OnCallRotationModal';
 import { getUserDisplayName } from '../../../utils/userDisplayName';
 import { VisibilityTab } from './VisibilityTab';
-import { AuditLogSection } from './AuditLogSection';
+import { AuditLogSection, type AuditLogTab } from './AuditLogSection';
+
+const AUDIT_LOG_TABS: AuditLogTab[] = [
+  { id: 'all', label: 'All changes' },
+  { id: 'availability', label: 'On-call & active', tables: ['user_assignment_states'] },
+];
 
 interface AssignmentConfigScreenProps {
   userGroupId: string;
@@ -1789,6 +1794,7 @@ export const AssignmentConfigScreen = ({
                 entityType={AuditEntityType.USER_GROUP_ASSIGNMENT_CONFIG}
                 entityId={userGroupId}
                 entityName={userGroup?.name ?? undefined}
+                tabs={AUDIT_LOG_TABS}
               />
             </>
           )}

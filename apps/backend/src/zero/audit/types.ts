@@ -41,11 +41,37 @@ export interface AuditLookup {
   boardIdsForFormIds(formIds: string[]): Promise<{ formId: string; boardIds: string[] }[]>;
   /** The given channel ids that are desks (have an email_channel_preferences row). */
   deskChannelIds(channelIds: string[]): Promise<string[]>;
+  /** Assignment-state rows of a user group's current members (state rows outlive membership). */
+  memberAssignmentStates(userGroupId: string): Promise<AuditRow[]>;
+}
+
+/**
+ * Set-level totals (e.g. on-call members of a group) recorded as extra change rows
+ * whenever a save moves them. The set is snapshotted before the save's first write
+ * to it; each written row then moves the totals by its own before/after.
+ */
+export interface AuditCounters {
+  /** Column whose value identifies the counted set, e.g. userGroupId. */
+  groupBy: string;
+  /** Change-group label for the totals rows. */
+  targetName: string;
+  /** Counter field -> whether a row counts towards it. */
+  fields: Record<string, (row: AuditRow) => boolean>;
+  /** The set's rows as they currently stand. */
+  loadRows(key: string, lookup: AuditLookup): Promise<AuditRow[]>;
+}
+
+/** How far one written row moved a counted set. */
+export interface AuditCounterDelta {
+  table: string;
+  key: string;
+  delta: Record<string, number>;
 }
 
 export interface AuditJob {
   scope: AuditScope;
   drafts: AuditChangeDraft[];
+  counterDelta?: AuditCounterDelta;
 }
 
 export interface AuditDeleteSummary {
@@ -86,6 +112,8 @@ export interface AuditTableConfig {
    * pairs DELETE/CREATE drafts sharing a fingerprint and merges them.
    */
   reconcileKey?: (row: AuditRow) => string;
+  /** Set-level totals recorded alongside this table's row changes. */
+  counters?: AuditCounters;
 }
 
 /**

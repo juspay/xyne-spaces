@@ -26,7 +26,8 @@ router.get('/export', authMiddleware.authenticate, analyticsAdmin, AuditLogContr
 /**
  * @route GET /api/audit-logs?entityType=BOARD&entityId=<id>&from=<ms>&to=<ms>&limit=10&cursor=<opaque>
  * @desc Keyset-paginated audit feed (newest first), always scoped to the caller's
- *       workspace. entityId, from and to are optional.
+ *       workspace. entityId, from, to and tables (comma-separated audited tables,
+ *       e.g. user_assignment_states) are optional.
  * @access ANALYTICS Admin (individual grants only)
  */
 router.get('/', authMiddleware.authenticate, analyticsAdmin, AuditLogController.list);

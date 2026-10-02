@@ -7,13 +7,20 @@ import { Button } from '../../ui/Button/Button';
 import { HoverCard } from '../../ui/HoverCard';
 import { cn } from '../../../utils/classNames';
 import { fetchAuditLogPage } from '../../../services/auditLogService';
-import { fieldLabel, humanizeField } from '../../../utils/auditLogLabels';
+import { fieldLabel, formatAuditValue, humanizeField } from '../../../utils/auditLogLabels';
 import {
   AuditAction,
   AuditEntityType,
   type AuditLogChange,
   type AuditLogEntry,
 } from '@xyne/shared';
+
+export interface AuditLogTab {
+  id: string;
+  label: string;
+  /** Only entries touching these audited tables, with only their change rows; omitted = everything. */
+  tables?: string[];
+}
 
 interface AuditLogSectionProps {
   entityType: AuditEntityType;
@@ -25,6 +32,8 @@ interface AuditLogSectionProps {
   from?: number | undefined;
   to?: number | undefined;
   description?: string | undefined;
+  /** Feed views shown as a switcher; the first is selected initially. */
+  tabs?: AuditLogTab[] | undefined;
 }
 
 const PAGE_SIZE = 10;
@@ -35,6 +44,19 @@ const ENTITY_NOUNS: Record<AuditEntityType, string> = {
   [AuditEntityType.DESK]: 'desk settings',
 };
 
+/** Entries touching only one of these tables read as that thing rather than the entity. */
+const TABLE_SUMMARIES: Record<string, { noun: string; verb?: string }> = {
+  classification_mappings: { noun: 'routing rule' },
+  // Toggles: a new member's state row isn't "added availability".
+  user_assignment_states: { noun: 'availability', verb: 'updated' },
+};
+
+/** Group totals counted at write time, shown as chips on the entry line. */
+const TOTAL_LABELS: Record<string, string> = {
+  onCallMembers: 'On call',
+  activeMembers: 'Active',
+};
+
 /** Reconstructs the feed line ("updated board for Payments") from the change rows. */
 const deriveSummary = (
   changes: AuditLogChange[],
@@ -42,15 +64,16 @@ const deriveSummary = (
   entityName: string | undefined,
 ): string => {
   const actions = new Set(changes.map(change => change.action));
+  const tables = new Set(changes.map(change => change.tableName));
+  const tableSummary = tables.size === 1 ? TABLE_SUMMARIES[[...tables][0]!] : undefined;
   const verb =
-    actions.size === 1 && actions.has(AuditAction.CREATE)
+    tableSummary?.verb ??
+    (actions.size === 1 && actions.has(AuditAction.CREATE)
       ? 'added'
       : actions.size === 1 && actions.has(AuditAction.DELETE)
         ? 'removed'
-        : 'updated';
-  const isRoutingOnly =
-    changes.length > 0 && changes.every(change => change.tableName === 'classification_mappings');
-  const noun = isRoutingOnly ? 'routing rule' : ENTITY_NOUNS[entityType];
+        : 'updated');
+  const noun = tableSummary?.noun ?? ENTITY_NOUNS[entityType];
   return `${verb} ${noun}${entityName ? ` for ${entityName}` : ''}`;
 };
 
@@ -119,40 +142,41 @@ const AuditChangeRow = ({
   change: AuditLogChange;
   label?: string;
   bullet?: boolean;
-}): ReactElement => (
-  <li className='flex items-center justify-between gap-3 border-b border-dashed border-border py-1 text-xs last:border-b-0'>
-    <span className='flex min-w-0 shrink items-center gap-2 font-medium text-muted-foreground'>
-      {bullet && <span className='h-1 w-1 shrink-0 rounded-full bg-muted-foreground/60' />}
-      <span className='min-w-0 truncate'>{label ?? fieldLabel(change.field)}</span>
-    </span>
-    <span className='flex min-w-0 max-w-[60%] shrink items-center justify-end gap-1.5 font-mono text-[11px] tabular-nums'>
-      {change.action === AuditAction.DELETE ? (
-        <AuditValueText
-          value={change.oldValue ?? ''}
-          className='text-red-600/70 line-through dark:text-red-400/70'
-        />
-      ) : (
-        <>
-          {change.oldValue !== null && change.oldValue !== undefined && (
-            <AuditValueText
-              value={change.oldValue}
-              className='text-muted-foreground/60 line-through'
-            />
-          )}
-          {change.action === AuditAction.UPDATE && (
-            <span className='shrink-0 text-muted-foreground/60'>→</span>
-          )}
-          {change.newValue !== null && change.newValue !== undefined && (
-            <AuditValueText
-              value={change.newValue}
-              className={cn('font-medium', actionValueClass(change.action))}
-            />
-          )}
-        </>
-      )}
-    </span>
-  </li>
-);
+}): ReactElement => {
+  const oldValue = formatAuditValue(change.field, change.oldValue);
+  const newValue = formatAuditValue(change.field, change.newValue);
+  return (
+    <li className='flex items-center justify-between gap-3 border-b border-dashed border-border py-1 text-xs last:border-b-0'>
+      <span className='flex min-w-0 shrink items-center gap-2 font-medium text-muted-foreground'>
+        {bullet && <span className='h-1 w-1 shrink-0 rounded-full bg-muted-foreground/60' />}
+        <span className='min-w-0 truncate'>{label ?? fieldLabel(change.field)}</span>
+      </span>
+      <span className='flex min-w-0 max-w-[60%] shrink items-center justify-end gap-1.5 font-mono text-[11px] tabular-nums'>
+        {change.action === AuditAction.DELETE ? (
+          <AuditValueText
+            value={oldValue ?? ''}
+            className='text-red-600/70 line-through dark:text-red-400/70'
+          />
+        ) : (
+          <>
+            {oldValue !== null && oldValue !== undefined && (
+              <AuditValueText value={oldValue} className='text-muted-foreground/60 line-through' />
+            )}
+            {change.action === AuditAction.UPDATE && (
+              <span className='shrink-0 text-muted-foreground/60'>→</span>
+            )}
+            {newValue !== null && newValue !== undefined && (
+              <AuditValueText
+                value={newValue}
+                className={cn('font-medium', actionValueClass(change.action))}
+              />
+            )}
+          </>
+        )}
+      </span>
+    </li>
+  );
+};
 
 interface ChangeGroup {
   targetName: string;
@@ -264,7 +288,13 @@ export const AuditLogSection = ({
   from,
   to,
   description,
+  tabs,
 }: AuditLogSectionProps): ReactElement => {
+  const [activeTabId, setActiveTabId] = useState(() => tabs?.[0]?.id ?? '');
+  const activeTab = tabs?.find(tab => tab.id === activeTabId) ?? tabs?.[0];
+  // A string key, so a parent re-creating its tabs array doesn't refetch.
+  const tablesKey = activeTab?.tables?.join(',') ?? '';
+
   const [logs, setLogs] = useState<AuditLogEntry[]>([]);
   const [nextCursor, setNextCursor] = useState<string | null>(null);
   const [hasMore, setHasMore] = useState(false);
@@ -290,6 +320,7 @@ export const AuditLogSection = ({
           entityId,
           from,
           to,
+          tables: tablesKey ? tablesKey.split(',') : undefined,
           limit: PAGE_SIZE,
           cursor,
         });
@@ -309,10 +340,10 @@ export const AuditLogSection = ({
         if (requestSeq === requestSeqRef.current) setIsLoading(false);
       }
     },
-    [entityType, entityId, from, to],
+    [entityType, entityId, from, to, tablesKey],
   );
 
-  // Initial load, and a fresh start whenever the audited entity or window changes.
+  // Initial load, and a fresh start whenever the audited entity, window or tab changes.
   useEffect(() => {
     setLogs([]);
     setExpandedLogIds(new Set());
@@ -362,11 +393,14 @@ export const AuditLogSection = ({
         const targetNames = groups.map(group => group.targetName);
         const actorName = log.actor?.name || log.actor?.email || 'System';
         const summaryText = deriveSummary(log.changes, entityType, entityName ?? log.entityName);
+        const totals = log.changes.filter(change => TOTAL_LABELS[change.field] !== undefined);
         return {
           log,
           groups,
           summaryText,
           actorName,
+          totals,
+          changeCount: log.changes.length - totals.length,
           searchText: `${actorName} ${summaryText} ${targetNames.join(' ')}`.toLowerCase(),
         };
       }),
@@ -408,6 +442,35 @@ export const AuditLogSection = ({
           Refresh
         </button>
       </div>
+
+      {tabs && tabs.length > 1 && (
+        <div
+          role='tablist'
+          aria-label='Change type'
+          className='mb-3 inline-flex items-center gap-0.5 rounded-[8px] border border-border bg-muted/30 p-0.5'
+        >
+          {tabs.map(tab => (
+            <button
+              key={tab.id}
+              type='button'
+              role='tab'
+              aria-selected={activeTab?.id === tab.id}
+              onClick={() => setActiveTabId(tab.id)}
+              className={cn(
+                'rounded-[6px] px-2.5 py-1 text-xs font-medium transition-colors',
+                activeTab?.id === tab.id
+                  ? 'bg-background text-foreground shadow-sm'
+                  : 'text-muted-foreground hover:text-foreground',
+              )}
+              data-track-category='AuditTrail'
+              data-track-name='SwitchAuditLogTab'
+              data-track-metadata={JSON.stringify({ tab: tab.id })}
+            >
+              {tab.label}
+            </button>
+          ))}
+        </div>
+      )}
 
       {loadError && logs.length === 0 ? (
         <div className='flex flex-col items-center gap-3 border-t border-border py-8'>
@@ -471,7 +534,8 @@ export const AuditLogSection = ({
             </div>
           ) : (
             <div className='overflow-hidden rounded-lg border border-border animate-fade-in'>
-              {visibleEntries.map(({ log, groups, summaryText, actorName }) => {
+              {visibleEntries.map(entry => {
+                const { log, groups, summaryText, actorName, totals, changeCount } = entry;
                 const isExpanded = expandedLogIds.has(log.id);
                 return (
                   <div key={log.id} className='border-b border-border last:border-b-0'>
@@ -488,14 +552,28 @@ export const AuditLogSection = ({
                           <span className='font-semibold text-foreground'>{actorName}</span>{' '}
                           <span className='text-muted-foreground'>{summaryText}</span>
                         </span>
-                        <span className='mt-0.5 flex items-center gap-1.5 text-[11px] text-muted-foreground/80'>
+                        <span className='mt-0.5 flex flex-wrap items-center gap-1.5 text-[11px] text-muted-foreground/80'>
                           <span className='tabular-nums'>
                             {formatDistanceToNow(new Date(log.createdAt), { addSuffix: true })}
                           </span>
-                          <span aria-hidden>•</span>
-                          <span className='rounded border border-border bg-muted/50 px-1.5 py-px text-[10px] font-medium tabular-nums'>
-                            {log.changes.length} {log.changes.length === 1 ? 'change' : 'changes'}
-                          </span>
+                          {changeCount > 0 && (
+                            <>
+                              <span aria-hidden>•</span>
+                              <span className='rounded border border-border bg-muted/50 px-1.5 py-px text-[10px] font-medium tabular-nums'>
+                                {changeCount} {changeCount === 1 ? 'change' : 'changes'}
+                              </span>
+                            </>
+                          )}
+                          {totals.length > 0 && <span aria-hidden>•</span>}
+                          {totals.map(total => (
+                            <span
+                              key={total.id}
+                              className='rounded border border-border bg-muted/50 px-1.5 py-px text-[10px] font-medium tabular-nums'
+                            >
+                              {TOTAL_LABELS[total.field]} {total.oldValue} →{' '}
+                              <span className='text-foreground'>{total.newValue}</span>
+                            </span>
+                          ))}
                         </span>
                       </span>
                       <ChevronRight
