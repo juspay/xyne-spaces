@@ -124,11 +124,11 @@
     },
     {
       "type": "logs",
-      "title": "Recent migration errors",
+      "title": "Recent migration errors (excl. GCS delete-perm 403)",
       "datasource": { "type": "victoriametrics-logs-datasource", "uid": "${DS_LOGS}" },
       "gridPos": { "h": 8, "w": 16, "x": 8, "y": 12 },
       "options": { "showTime": true, "wrapLogMessage": true, "sortOrder": "Descending", "enableLogDetails": true },
-      "targets": [{ "refId": "A", "expr": "container:\"migration\" AND level:error", "queryType": "instant" }]
+      "targets": [{ "refId": "A", "expr": "container:\"migration\" AND level:error AND NOT \"storage.objects.delete\"", "queryType": "instant" }]
     }
   ],
   "refresh": "30s",

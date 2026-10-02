@@ -9,6 +9,7 @@
  */
 import { config } from '@/config/env';
 import { logger } from '@/utils/logger';
+import { initializeOpenTelemetry } from '@/services/otel';
 import { getStorageService } from '@/services/storage';
 import { vespaQueue, vespaBackfillQueue } from '@/queues/vespaQueue';
 import { superpositionClient } from '@/services/superpositionClient';
@@ -43,6 +44,8 @@ process.on('SIGTERM', () => gracefulExit('SIGTERM'));
 process.on('SIGINT', () => gracefulExit('SIGINT'));
 
 async function boot(): Promise<void> {
+  // Forked children don't boot through app.ts, so start the OTel SDK here or the slack_migration_* gauges never export.
+  initializeOpenTelemetry();
   // These forked worker children never boot through app.ts, so the Vespa PRODUCER queues would be uninitialised here —
   // every enqueueMessageVespa would then throw "Vespa queue not initialized Properly" and NO migrated message would be
   // indexed. Initialise them (idempotent) BEFORE registering workers. Draining stays with the backfill worker pods.
