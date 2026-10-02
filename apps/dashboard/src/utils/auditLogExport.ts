@@ -1,6 +1,6 @@
 import { format } from 'date-fns';
 import { AuditAction, type AuditLogEntry } from '@xyne/shared';
-import { fieldLabel } from './auditLogLabels';
+import { fieldLabel, formatAuditValue } from './auditLogLabels';
 
 const ACTION_LABELS: Record<string, string> = {
   [AuditAction.CREATE]: 'Added',
@@ -39,8 +39,8 @@ export const buildAuditLogRows = (logs: AuditLogEntry[], entityLabel: string): s
         change.targetName,
         ACTION_LABELS[change.action] ?? change.action,
         fieldLabel(change.field),
-        change.oldValue,
-        change.newValue,
+        formatAuditValue(change.field, change.oldValue),
+        formatAuditValue(change.field, change.newValue),
       ].map(value => (value ?? '').slice(0, MAX_CELL_LENGTH)),
     ),
   ),
