@@ -36,10 +36,13 @@ import { fetchChannelLinks, ingestChannelLinks, type ChannelLink } from '@/migra
 import { fetchChannelCanvases, ingestChannelCanvases, type ChannelCanvas } from '@/migration/slack/channelCanvases';
 import { encryptStream, decryptStream, encryptBuffer, decryptBuffer } from './migrationCrypto';
 import { getMigrationRuntimeConfig, MIGRATION_DEFAULTS } from './migrationRuntimeConfig';
+import { getMigrationAnnouncement, FINAL_MESSAGE_LINK_PLACEHOLDER } from './migrationAnnouncementConfig';
 import { ChannelInput, MigrationJob, MigrationType } from './types';
 
 const PAGE = 1000;
 const UPLOAD_CHUNK_SIZE = 8 * 1024 * 1024;
+const FILE_DOWNLOAD_MAX_ATTEMPTS = 4;      // retry transient attachment-download failures during collection
+const FILE_DOWNLOAD_RETRY_BASE_MS = 1_000; // exponential backoff base between attempts
 // Refresh scans this far back so replies on threads whose parent predates the delta are still caught (matches the
 // daily-sync "legacy thread replies" 30-day window). A reply on a thread older than this window isn't picked up.
 const REFRESH_LOOKBACK_DAYS = 30;
@@ -518,44 +521,65 @@ export class SlackMigrationEngine {
     const uploaded = await this.uploadedFileSet(gcsPrefix);
     if (uploaded.has(dest)) return this.storage.buildStorageUri(dest);
     const url = file.url_private_download || file.url_private;
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), cfg.fileTimeoutMs);
-    const startedAt = Date.now();
-    try {
-      const res = await fetch(url, {
-        headers: { Authorization: `Bearer ${token}`, 'User-Agent': 'Xyne-Spaces-Backend/1.0' },
-        signal: controller.signal,
-      });
-      if (!res.ok || !res.body) {
-        // Skip rather than fail the conversation — a 403 (missing files:read) or dead file shouldn't abort the migration.
-        logger.warn('[SlackMigration] attachment download failed — skipping', {
-          id: file.id, status: res.status, statusText: res.statusText,
+
+    // Retry transient failures (429 / 5xx / timeout / network). The token is only held during collection, so a file
+    // not captured here can't be recovered at ingest. Permanent errors (403/404) skip without retry.
+    for (let attempt = 1; attempt <= FILE_DOWNLOAD_MAX_ATTEMPTS; attempt++) {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), cfg.fileTimeoutMs);
+      const startedAt = Date.now();
+      try {
+        const res = await fetch(url, {
+          headers: { Authorization: `Bearer ${token}`, 'User-Agent': 'Xyne-Spaces-Backend/1.0' },
+          signal: controller.signal,
         });
+        if (!res.ok || !res.body) {
+          const transient = res.status === 429 || res.status >= 500;
+          if (transient && attempt < FILE_DOWNLOAD_MAX_ATTEMPTS) {
+            const retryAfter = Number(res.headers.get('retry-after'));
+            const delay = Math.min(
+              Number.isFinite(retryAfter) && retryAfter > 0 ? retryAfter * 1000 : FILE_DOWNLOAD_RETRY_BASE_MS * 2 ** (attempt - 1),
+              30_000, // cap the wait so a large Retry-After can't stall a batch
+            );
+            logger.warn('[SlackMigration] attachment download transient failure — retrying', { id: file.id, status: res.status, attempt, delayMs: delay });
+            await sleep(delay);
+            continue;
+          }
+          // Permanent (403/404/…) or retries exhausted — skip rather than fail the conversation.
+          logger.warn('[SlackMigration] attachment download failed — skipping', { id: file.id, status: res.status, statusText: res.statusText, attempt });
+          return undefined;
+        }
+        const body = res.body as NodeJS.ReadableStream;
+        // node-fetch emits the abort/socket error on the body stream out-of-band; without a listener it becomes an
+        // uncaught exception that can crash the pod. Handle it here so a slow/aborted download is contained, not fatal.
+        body.on('error', (err: unknown) => logger.warn('[SlackMigration] attachment stream aborted — skipping', {
+          id: file.id, error: err instanceof Error ? err.message : String(err),
+        }));
+        await this.storage.uploadStreamToPath(encryptStream(body), {
+          path: dest,
+          contentType: 'application/octet-stream',
+        });
+        const ms = Date.now() - startedAt;
+        if (ms >= 5000) logger.warn('[SlackMigration] slow attachment download', { id: file.id, ms });
+        uploaded.add(dest);
+        // Full gs://bucket/key URI so ingestion reads the migration bucket, not the default attachment storage.
+        return this.storage.buildStorageUri(dest);
+      } catch (e) {
+        // Don't retry our own timeout (would multiply the 10-min fileTimeout and risk the stall watchdog);
+        // retry only fast network errors (ECONNRESET etc.).
+        const timedOut = controller.signal.aborted;
+        if (!timedOut && attempt < FILE_DOWNLOAD_MAX_ATTEMPTS) {
+          logger.warn('[SlackMigration] attachment download errored — retrying', { id: file.id, attempt, error: e instanceof Error ? e.message : String(e) });
+          await sleep(FILE_DOWNLOAD_RETRY_BASE_MS * 2 ** (attempt - 1));
+          continue;
+        }
+        logger.warn('[SlackMigration] attachment download errored — skipping', { id: file.id, timedOut, error: e instanceof Error ? e.message : String(e) });
         return undefined;
+      } finally {
+        clearTimeout(timer);
       }
-      const body = res.body as NodeJS.ReadableStream;
-      // node-fetch emits the abort/socket error on the body stream out-of-band; without a listener it becomes an
-      // uncaught exception that can crash the pod. Handle it here so a slow/aborted download is contained, not fatal.
-      body.on('error', (err: unknown) => logger.warn('[SlackMigration] attachment stream aborted — skipping', {
-        id: file.id, error: err instanceof Error ? err.message : String(err),
-      }));
-      await this.storage.uploadStreamToPath(encryptStream(body), {
-        path: dest,
-        contentType: 'application/octet-stream',
-      });
-      const ms = Date.now() - startedAt;
-      if (ms >= 5000) logger.warn('[SlackMigration] slow attachment download', { id: file.id, ms });
-      uploaded.add(dest);
-      // Full gs://bucket/key URI so ingestion reads the migration bucket, not the default attachment storage.
-      return this.storage.buildStorageUri(dest);
-    } catch (e) {
-      logger.warn('[SlackMigration] attachment download errored — skipping', {
-        id: file.id, error: e instanceof Error ? e.message : String(e),
-      });
-      return undefined;
-    } finally {
-      clearTimeout(timer);
     }
+    return undefined;
   }
 
   /** Build the offline Slack reference (users/groups/channels) from the collected dumps. */
@@ -755,8 +779,16 @@ export class SlackMigrationEngine {
     const wsConfig = getBotConfigByWorkspaceId(job.workspaceId);
     if (!wsConfig.notificationsEnabled) return;
     const link = `<https://spaces.xyne.juspay.net/${job.workspaceId}/chat/dir/${job.channelInput.xyneChannelId}|Xyne Spaces>`;
-    let text = `<!channel> This Channel has been migrated to ${link}. Please move your conversations there only this channel will be soon archived.`;
-    if (wsConfig.migrationFinalMessage) text += `\n${wsConfig.migrationFinalMessage}`;
+    // Prefer the full body authored in Superposition ({link} → the Xyne Spaces link). Fall back to the
+    // hardcoded line + the MIGRATION_SLACK_BOT_CONFIGS suffix when no final_message is configured.
+    const { final_message } = await getMigrationAnnouncement(job.workspaceId);
+    let text: string;
+    if (final_message?.trim()) {
+      text = final_message.split(FINAL_MESSAGE_LINK_PLACEHOLDER).join(link);
+    } else {
+      text = `<!channel> This Channel has been migrated to ${link}. Please move your conversations there only this channel will be soon archived.`;
+      if (wsConfig.migrationFinalMessage) text += `\n${wsConfig.migrationFinalMessage}`;
+    }
     await postMessage({
       channelId: job.channelInput.slackChannelId,
       text,

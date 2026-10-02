@@ -81,15 +81,50 @@ export class MigrationQueues {
     );
   }
 
+  /** migrationIds by queue: active (running now) + waiting in processing order (next first), for queue-position display. */
+  async getQueueOrder(name: QueueName): Promise<{ activeIds: string[]; waitingIds: string[] }> {
+    const q = this.queue(name);
+    const [active, waiting] = await Promise.all([q.getActive(), q.getWaiting()]);
+    // Bull drains the wait list tail-first (lifo 'front' jobs sit at the tail), so reverse to get next-first order.
+    return { activeIds: active.map((j) => j.data.migrationId), waitingIds: waiting.map((j) => j.data.migrationId).reverse() };
+  }
+
   pause(name: QueueName): Promise<void> { return this.queue(name).pause(); }
   resume(name: QueueName): Promise<void> { return this.queue(name).resume(); }
   isPaused(name: QueueName): Promise<boolean> { return this.queue(name).isPaused(); }
+
+  // Local pause/resume affect ONLY this worker's consumption (not the shared queue). The leader lease uses these to
+  // keep the singleton queues (collection + ingestion planner) draining on exactly one worker cluster-wide.
+  pauseLocal(name: QueueName): Promise<void> { return this.queue(name).pause(true); }
+  resumeLocal(name: QueueName): Promise<void> { return this.queue(name).resume(true); }
+
+  /** Live Bull counts for one queue — drives the dashboard queue-depth gauges. (completed/failed read ~0 here
+   *  because the queues use removeOnComplete/removeOnFail; waiting/active/delayed are the meaningful ones.) */
+  async getStats(name: QueueName): Promise<{ waiting: number; active: number; completed: number; failed: number; delayed: number; total: number }> {
+    const q = this.queue(name);
+    const [waiting, active, completed, failed, delayed] = await Promise.all([
+      q.getWaitingCount(), q.getActiveCount(), q.getCompletedCount(), q.getFailedCount(), q.getDelayedCount(),
+    ]);
+    return { waiting, active, completed, failed, delayed, total: waiting + active + completed + failed + delayed };
+  }
 
   /** On first-ever init, pause ingestion so approved jobs only stage until someone with SLACK-MIGRATION-INGEST starts it. NX marker keeps restarts from re-pausing in-progress ingestion. */
   async pauseIngestionOnFirstInit(): Promise<void> {
     const q = this.queue(QueueName.INGESTION);
     const firstInit = await q.client.set('slackmig:ingestion:initialized', '1', 'NX');
     if (firstInit) await q.pause();
+  }
+
+  /** Kill-switch (MIGRATION_INGEST_CONTROL off): globally pause BOTH the planner and the fan-out so nothing ingests
+   *  cluster-wide — pausing the planner alone would let already-fanned-out conversations keep draining. Returns true
+   *  if it paused anything. Global (Redis) pause, so one pod is enough and repeated calls are idempotent. */
+  async pauseIngestionIfRunning(): Promise<boolean> {
+    let paused = false;
+    for (const name of [QueueName.INGESTION, QueueName.CONV_INGEST]) {
+      const q = this.queue(name);
+      if (!(await q.isPaused())) { await q.pause(); paused = true; }
+    }
+    return paused;
   }
 
   private queue(name: QueueName): Bull.Queue<JobRef> {

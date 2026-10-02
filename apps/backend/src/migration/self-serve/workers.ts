@@ -1,5 +1,6 @@
 import { config } from '@/config/env';
 import { logger } from '@/utils/logger';
+import { acquireLeadership, releaseLock, renewLock, type LockHandle } from '@/utils/distributedLock';
 import { MigrationStore } from './store';
 import { MigrationQueues } from './queues';
 import { SlackMigrationEngine, type CollectedConversation, type DirUser } from './engine';
@@ -9,6 +10,15 @@ import { getMigrationRuntimeConfig } from './migrationRuntimeConfig';
 const HEARTBEAT_MS = 15_000;
 const RECONCILE_EVERY_MS = 60_000;
 const RECLAIM_STALE_MS = 90_000; // several missed heartbeats ⇒ the pod that owned the job is gone
+// Leader lease: exactly one worker cluster-wide runs the singleton duties (collection, ingestion planner, reconcile).
+// Renew 3× per TTL so a transient Redis blip doesn't drop it; a dead leader is reclaimed within one TTL.
+const LEADER_KEY = 'slackmig:leader';
+const LEADER_TTL_S = 30;
+const LEADER_RENEW_MS = 10_000;
+// Transient encryption-provider / DB-transaction blips during a heavy ingest — retry the conversation before failing it.
+const INGEST_MAX_ATTEMPTS = 4;
+const INGEST_RETRY_BASE_MS = 2_000;
+const RETRYABLE_INGEST_ERROR = /batch-encrypt (?:failed with status 5\d\d|timed out)|Transaction already closed|expired transaction/i;
 // stallLimitMs (live heartbeat but no forward progress ⇒ worker wedged) is now live-tunable via Superposition — read per reconcile tick.
 
 /** Human-readable ingest duration for the completion log, e.g. "7m 12s". */
@@ -28,22 +38,93 @@ export class MigrationWorkers {
     private readonly engine: SlackMigrationEngine,
   ) {}
 
+  private leaderHandle: LockHandle | null = null;
+  private singletonsRegistered = false;
+  private reconcileTimer: NodeJS.Timeout | null = null;
+  private leaderTimer: NodeJS.Timeout | null = null;
+
   register(): void {
-    // Under pm2 cluster mode NODE_APP_INSTANCE is 0..N-1; single process → undefined. Singleton duties (collection,
-    // the ingestion planner, and reconcile) run on instance 0 only, so they don't fire N times. Every process drains
-    // the fanned-out conversation jobs for cross-process parallelism.
-    const isPrimary = !process.env.NODE_APP_INSTANCE || process.env.NODE_APP_INSTANCE === '0';
-    if (isPrimary) {
+    // Fan-out ingest runs on EVERY worker (every process on every pod). Bull delivers each conversation to exactly
+    // one worker cluster-wide, and re-ingest is idempotent (done-set skip + per-message dedup), so this is safe to fan out.
+    this.queues.processConv(config.slackMigration.ingestConcurrency, (mid, cid) => this.ingestConversation(mid, cid));
+
+    // Collection, the ingestion planner and reconcile are SINGLETON duties — exactly one worker cluster-wide may run
+    // them (N collectors would blow Slack's rate limits). A Redis lease elects that one; the winner lazily subscribes
+    // to those queues on promote (so a follower never consumes them), and on its death the lease TTL-expires and
+    // another worker takes over.
+    void this.runLeaderLoop();
+
+    logger.info('[SlackMigration] workers registered', {
+      instance: process.env.NODE_APP_INSTANCE ?? 'single', ingestConcurrency: config.slackMigration.ingestConcurrency,
+    });
+  }
+
+  /** True while this worker holds the migration leader lease — gates leader-only metrics so counts aren't reported N×. */
+  isLeader(): boolean { return this.leaderHandle !== null; }
+
+  /** Poll the lease: renew while leader (step down if lost), else try to acquire and promote. */
+  private async runLeaderLoop(): Promise<void> {
+    const tick = async (): Promise<void> => {
+      try {
+        if (this.leaderHandle) {
+          if (!(await renewLock(this.leaderHandle, LEADER_TTL_S))) await this.demote();
+        } else {
+          const handle = await acquireLeadership(LEADER_KEY, LEADER_TTL_S);
+          if (handle) await this.promote(handle);
+        }
+      } catch (e) {
+        logger.warn('[SlackMigration] leader loop tick failed', { error: e instanceof Error ? e.message : String(e) });
+      }
+    };
+    this.leaderTimer = setInterval(() => void tick(), LEADER_RENEW_MS);
+    this.leaderTimer.unref?.();
+    await tick();
+  }
+
+  private async promote(handle: LockHandle): Promise<void> {
+    this.leaderHandle = handle;
+    logger.info('[SlackMigration] acquired leadership — running collection, ingestion planner & reconcile');
+    if (!this.singletonsRegistered) {
+      // First time as leader: subscribe to the singleton queues. Bull's .process() is once-per-process, so followers
+      // that never win the lease never register these handlers and therefore never consume collection/planner jobs.
       this.queues.process(QueueName.COLLECTION, (id) => this.guard(id, (j) => j.refreshRequested ? this.refresh(j) : this.collect(j)));
       this.queues.process(QueueName.INGESTION, (id) => this.guard(id, (j) => this.ingest(j)));
-      const timer = setInterval(() => void this.reconcile().catch(() => undefined), RECONCILE_EVERY_MS);
-      timer.unref?.();
-      void this.reconcile().catch(() => undefined);
+      this.singletonsRegistered = true;
+    } else {
+      // Re-elected after a demotion: resume local consumption of the already-registered processors.
+      await this.queues.resumeLocal(QueueName.COLLECTION).catch(() => undefined);
+      await this.queues.resumeLocal(QueueName.INGESTION).catch(() => undefined);
     }
-    this.queues.processConv(config.slackMigration.ingestConcurrency, (mid, cid) => this.ingestConversation(mid, cid));
-    logger.info('[SlackMigration] workers registered', {
-      primary: isPrimary, instance: process.env.NODE_APP_INSTANCE ?? 'single', ingestConcurrency: config.slackMigration.ingestConcurrency,
-    });
+    this.startReconcile();
+  }
+
+  private async demote(): Promise<void> {
+    logger.warn('[SlackMigration] lost leadership — stepping down from singleton duties');
+    this.leaderHandle = null;
+    this.stopReconcile();
+    if (this.singletonsRegistered) {
+      await this.queues.pauseLocal(QueueName.COLLECTION).catch(() => undefined);
+      await this.queues.pauseLocal(QueueName.INGESTION).catch(() => undefined);
+    }
+  }
+
+  private startReconcile(): void {
+    if (this.reconcileTimer) return;
+    this.reconcileTimer = setInterval(() => void this.reconcile().catch(() => undefined), RECONCILE_EVERY_MS);
+    this.reconcileTimer.unref?.();
+    void this.reconcile().catch(() => undefined);
+  }
+
+  private stopReconcile(): void {
+    if (this.reconcileTimer) { clearInterval(this.reconcileTimer); this.reconcileTimer = null; }
+  }
+
+  /** Graceful shutdown: release the lease (if held) so another worker takes over immediately instead of waiting the TTL. */
+  async shutdown(): Promise<void> {
+    if (this.leaderTimer) { clearInterval(this.leaderTimer); this.leaderTimer = null; }
+    const handle = this.leaderHandle;
+    this.leaderHandle = null;
+    if (handle) await releaseLock(handle);
   }
 
   /** Recover running jobs that a live worker can no longer make progress on: pod died (stale heartbeat) → re-enqueue;
@@ -264,15 +345,15 @@ export class MigrationWorkers {
   }
 
   /**
-   * PLANNER (runs on the INGESTION queue, instance-0 only, one migration at a time): fan the conversations out
-   * as CONV_INGEST jobs that every worker process drains in parallel. Idempotent — re-running on resume/restart
-   * re-enqueues only conversations not yet in the done-set. Does NOT ingest anything itself.
+   * PLANNER (INGESTION queue, instance-0, one migration at a time): fan conversations out as CONV_INGEST jobs
+   * (drained in parallel), then hold the slot until they finish so migrations ingest one-at-a-time end-to-end.
+   * Idempotent on resume. Does NOT ingest anything itself.
    */
   private async ingest(job: MigrationJob): Promise<void> {
     // Idempotency: never re-plan a completed job (its GCS data is already deleted).
     if ([MigrationStatus.SUBMITTED, MigrationStatus.COLLECTING, MigrationStatus.COMPLETED].includes(job.status)) return;
-    // Stamp the ingest start once (kept across resume). Drop the token now — no collection/refresh happens after ingest begins.
-    await this.store.update(job.id, { status: MigrationStatus.INGESTING, encryptedToken: undefined, ...(job.ingestStartedAt ? {} : { ingestStartedAt: Date.now() }) });
+    // ingestStartedAt is stamped at the first conversation, not here.
+    await this.store.update(job.id, { status: MigrationStatus.INGESTING, encryptedToken: undefined });
     let conversations;
     try {
       conversations = await this.engine.readManifest(job.gcsPrefix);
@@ -300,7 +381,42 @@ export class MigrationWorkers {
     }
     logger.info('[SlackMigration] ingestion fanned out', { id: job.id, enqueued, total: conversations.length, concurrency: config.slackMigration.ingestConcurrency });
     // Nothing left to enqueue (all already done, or empty manifest) → no processor will fire, so finalize here.
-    if (enqueued === 0) await this.maybeFinalize(job.id);
+    if (enqueued === 0) {
+      await this.maybeFinalize(job.id);
+      return;
+    }
+    // One migration at a time: hold the slot until this job's conversations finish.
+    await this.awaitIngestionComplete(job.id, uniqueConversations.length);
+  }
+
+  /** Hold the INGESTION slot until this migration's conversations finish, or it's stopped/finalized. */
+  private async awaitIngestionComplete(migrationId: string, total: number): Promise<void> {
+    const POLL_MS = 2000;
+    for (;;) {
+      const job = await this.store.findById(migrationId);
+      if (!job || job.status !== MigrationStatus.INGESTING) return;
+      if (await this.store.isStopRequested(migrationId)) return;
+      if (await this.store.doneCount(migrationId) >= total) {
+        await this.maybeFinalize(migrationId);
+        return;
+      }
+      await new Promise((resolve) => setTimeout(resolve, POLL_MS));
+    }
+  }
+
+  /** Retry a conversation load on a transient encryption/DB error (re-ingest is idempotent); rethrow otherwise. */
+  private async loadWithRetry(migrationId: string, conversationId: string, run: () => Promise<{ ingested: number; failed: number }>): Promise<{ ingested: number; failed: number }> {
+    for (let attempt = 1; ; attempt++) {
+      try {
+        return await run();
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        if (attempt >= INGEST_MAX_ATTEMPTS || !RETRYABLE_INGEST_ERROR.test(msg)) throw err;
+        const delay = INGEST_RETRY_BASE_MS * 2 ** (attempt - 1);
+        logger.warn('[SlackMigration] transient ingest error — retrying conversation', { migrationId, conversationId, attempt, delayMs: delay, error: msg });
+        await new Promise((r) => setTimeout(r, delay));
+      }
+    }
   }
 
   /**
@@ -316,13 +432,19 @@ export class MigrationWorkers {
     }
     if (await this.store.isConversationDone(migrationId, conversationId)) return; // already done (stale re-delivery) → idempotent skip
 
+    // Stamp ingest start on the first conversation to run.
+    if (!job.ingestStartedAt) {
+      await this.store.update(migrationId, { ingestStartedAt: Date.now() }).catch(() => undefined);
+    }
+
     const heartbeat = setInterval(() => void this.store.heartbeat(migrationId).catch(() => undefined), HEARTBEAT_MS);
     heartbeat.unref?.();
     try {
       const conv = await this.engine.getManifestConversation(migrationId, job.gcsPrefix, conversationId);
       if (conv) {
         const ref = await this.engine.getOfflineReference(migrationId, job.gcsPrefix);
-        const loaded = await this.engine.loadConversation(job, conv, ref, () => void this.store.markProgress(migrationId).catch(() => undefined));
+        const onProgress = () => void this.store.markProgress(migrationId).catch(() => undefined);
+        const loaded = await this.loadWithRetry(migrationId, conversationId, () => this.engine.loadConversation(job, conv, ref, onProgress));
         if (loaded.failed > 0) {
           await this.store.addIssue(migrationId, { conversationId, kind: 'ingest-error', reason: `${loaded.failed} message(s) couldn't be migrated (unresolved sender or attachment).` });
         }
@@ -330,8 +452,8 @@ export class MigrationWorkers {
         logger.warn('[SlackMigration] conversation missing from manifest — skipping', { migrationId, conversationId });
       }
     } catch (err) {
-      // Record and move on so the migration can still finalize (never stuck). A hard-failed conversation is surfaced as an issue, not auto-retried.
-      logger.error('[SlackMigration] conversation ingest failed (recorded, not retried)', { migrationId, conversationId, error: err instanceof Error ? err.message : String(err) });
+      // Record and move on so the migration can still finalize (never stuck). Transient errors were already retried above.
+      logger.error('[SlackMigration] conversation ingest failed (recorded)', { migrationId, conversationId, error: err instanceof Error ? err.message : String(err) });
       await this.store.addIssue(migrationId, { conversationId, kind: 'ingest-error', reason: err instanceof Error ? err.message : String(err) }).catch(() => undefined);
     } finally {
       clearInterval(heartbeat);
