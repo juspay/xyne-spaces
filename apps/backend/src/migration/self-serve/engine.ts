@@ -14,6 +14,8 @@ import { UserRepository } from '@/database/repositories/users';
 import { ChannelRepository } from '@/database/repositories/channelRepository';
 import { ChannelParticipantRepository } from '@/database/repositories/channelParticipantRepository';
 import { channelService } from '@/services/channelService';
+import { vespaQueue } from '@/queues/vespaQueue';
+import { channelSchema } from '@/vespa/src/types';
 import {
   findOrCreateUser,
   findOrCreateApp,
@@ -694,6 +696,12 @@ export class SlackMigrationEngine {
       const newest = newestMessageDate(messages);
       if (newest) await channelRepo.setLastActivity(channelId, newest);
     }
+
+    // The channel and its participants above are written through the repositories, which never index the channel.
+    // Feed it here, or a newly created DM has no chat_container doc and its messages resolve no workspace/permissions
+    // in search. Live queue (not backfill) so it lands before the messages rather than behind a deep backfill backlog.
+    void vespaQueue.addJob({ schema: channelSchema, jobType: 'feed', docId: channelId, workspaceId: job.workspaceId })
+      .catch((e) => logger.warn('[SlackMigration] channel vespa enqueue failed (non-fatal)', { channelId, error: e instanceof Error ? e.message : String(e) }));
 
     const ingestInput = {
       slackMessages: messages,
