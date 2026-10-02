@@ -29,6 +29,10 @@ spec:
       match:
         - uri:
             prefix: /api/
+      headers:
+        request:
+          set:
+            x-original-host: {{ .Values.domain }}
       route:
         - destination:
             host: {{ $s.backend.host }}
@@ -50,6 +54,8 @@ spec:
       match:
         - uri:
             prefix: /ysweet/
+      rewrite:
+        uri: /
       route:
         - destination:
             host: {{ $s.ysweet.host }}

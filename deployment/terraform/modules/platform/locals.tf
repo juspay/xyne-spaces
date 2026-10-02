@@ -84,20 +84,25 @@ locals {
       ZERO_ADMIN_PASSWORD = var.app_secrets.zero_admin_password
     }
     "xyne-claw-secrets" = {
-      XYNE_CLAW_S2S_KEY = var.app_secrets.claw_s2s_key
-      INTERNAL_S2S_KEY  = var.app_secrets.internal_s2s_key
-      LITELLM_API_KEY   = var.app_secrets.litellm_api_key
-      HINDSIGHT_API_KEY = var.app_secrets.hindsight_api_key
-      REDIS_PASSWORD    = local.redis_auth
+      XYNE_CLAW_S2S_KEY     = var.app_secrets.claw_s2s_key
+      INTERNAL_S2S_KEY      = var.app_secrets.internal_s2s_key
+      LITELLM_API_KEY       = var.app_secrets.litellm_api_key
+      HINDSIGHT_API_KEY     = var.app_secrets.hindsight_api_key
+      REDIS_PASSWORD        = local.redis_auth
+      AWS_ACCESS_KEY_ID     = local.storage_access_key
+      AWS_SECRET_ACCESS_KEY = local.storage_secret_key
     }
     "xyne-claw-auth-secrets" = {
-      DATABASE_URL         = local.pg_urls.claw_auth
-      ENCRYPTION_KEY       = var.app_secrets.claw_auth_encryption_key
-      XYNE_CLAW_S2S_KEY    = var.app_secrets.claw_s2s_key
-      INTERNAL_S2S_KEY     = var.app_secrets.internal_s2s_key
-      GOOGLE_CLIENT_ID     = var.app_secrets.google_client_id
-      GOOGLE_CLIENT_SECRET = var.app_secrets.google_client_secret
-      REDIS_PASSWORD       = local.redis_auth
+      DATABASE_URL          = local.pg_urls.claw_auth
+      ENCRYPTION_KEY        = var.app_secrets.claw_auth_encryption_key
+      XYNE_CLAW_S2S_KEY     = var.app_secrets.claw_s2s_key
+      INTERNAL_S2S_KEY      = var.app_secrets.internal_s2s_key
+      GOOGLE_CLIENT_ID      = var.app_secrets.google_client_id
+      GOOGLE_CLIENT_SECRET  = var.app_secrets.google_client_secret
+      SPACES_DB_URL         = var.app_secrets.spaces_db_url
+      REDIS_PASSWORD        = local.redis_auth
+      AWS_ACCESS_KEY_ID     = local.storage_access_key
+      AWS_SECRET_ACCESS_KEY = local.storage_secret_key
     }
     "xyne-ysweet-secrets" = {
       Y_SWEET_AUTH          = var.app_secrets.ysweet_auth

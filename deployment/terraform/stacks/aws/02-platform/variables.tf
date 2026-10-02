@@ -170,6 +170,7 @@ variable "app_secrets" {
     litellm_api_key             = optional(string, "")
     hindsight_api_key           = optional(string, "")
     hindsight_llm_api_key       = optional(string, "")
+    spaces_db_url               = optional(string, "")
     google_client_id            = optional(string, "")
     google_client_secret        = optional(string, "")
   })
