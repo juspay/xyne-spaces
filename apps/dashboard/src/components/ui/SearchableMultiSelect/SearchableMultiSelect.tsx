@@ -174,6 +174,9 @@ export function SearchableMultiSelect({
         aria-multiselectable='true'
         aria-label={listAriaLabel}
         className='thin-scrollbar mt-1.5 max-h-56 overflow-y-auto'
+        // Keep wheel events inside the list so a modal Dialog's scroll-lock
+        // (react-remove-scroll) doesn't swallow them — otherwise only the scrollbar drag works.
+        onWheel={e => e.stopPropagation()}
       >
         {visibleOptions.length === 0 && !canCreate ? (
           <p className='px-2 py-6 text-center text-xs text-muted-foreground'>{emptyMessage}</p>

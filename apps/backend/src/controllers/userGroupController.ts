@@ -31,9 +31,16 @@ export class UserGroupController {
       }
 
       if (userRoleUpdates && typeof userRoleUpdates === 'object') {
-        for (const [userId, roleId] of Object.entries(userRoleUpdates)) {
-          if (typeof userId !== 'string' || typeof roleId !== 'string') {
-            res.status(400).json({ error: 'userRoleUpdates must be a map of userId to roleId' });
+        // Backward compatible: each value may be a single roleId (legacy) or an array of roleIds.
+        for (const [userId, roleIds] of Object.entries(userRoleUpdates)) {
+          const valid =
+            typeof userId === 'string' &&
+            (typeof roleIds === 'string' ||
+              (Array.isArray(roleIds) && roleIds.every(roleId => typeof roleId === 'string')));
+          if (!valid) {
+            res.status(400).json({
+              error: 'userRoleUpdates must map userId to a roleId or an array of roleIds',
+            });
             return;
           }
         }
