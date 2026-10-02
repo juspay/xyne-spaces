@@ -108,6 +108,8 @@ export interface MigrationJobView {
   refreshTotal?: number;
   canRefresh: boolean;       // awaiting approval AND token still held → "Get latest messages" available
   error?: string;
+  queuePosition?: number;    // turn in its queue: 0 = running now, N = Nth in line (waiting jobs only)
+  queueTotal?: number;       // jobs waiting in that queue
 }
 
 export const toView = (j: MigrationJob): MigrationJobView => ({

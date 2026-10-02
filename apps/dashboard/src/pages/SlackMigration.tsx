@@ -6,6 +6,7 @@ import {
   Square,
   Trash2,
   RotateCcw,
+  ChevronsUp,
   Check,
   TriangleAlert,
   Clock,
@@ -178,6 +179,13 @@ function StatusPill({ job }: { job: MigrationJobView }): React.JSX.Element {
       : approvedQueued
         ? { label: 'Approved · waiting to ingest', tone: 'violet' as Tone }
         : STATUS[job.status];
+  const queued =
+    (job.status === 'SUBMITTED' || job.status === 'QUEUED') && job.queuePosition !== undefined;
+  const label = !queued
+    ? desc.label
+    : job.queuePosition === 0
+      ? 'Up next'
+      : `${desc.label} · #${job.queuePosition} of ${job.queueTotal}`;
   const t = TONE[desc.tone];
   const live = running && !stalled; // pulse while collecting/ingesting
   return (
@@ -194,7 +202,7 @@ function StatusPill({ job }: { job: MigrationJobView }): React.JSX.Element {
           live && 'animate-pulse motion-reduce:animate-none',
         )}
       />
-      {desc.label}
+      {label}
     </span>
   );
 }
@@ -1278,8 +1286,24 @@ function AdminActions({
   const canStop =
     job.status === 'COLLECTING' || job.status === 'INGESTING' || job.status === 'QUEUED';
   const canResume = job.status === 'STOPPED' || job.status === 'FAILED';
+  const canPrioritize = job.status === 'SUBMITTED' || job.status === 'QUEUED';
   return (
     <>
+      {canPrioritize && (
+        <Button
+          variant='outline'
+          size='sm'
+          disabled={busy}
+          loading={pending === 'prioritize'}
+          trackId='slack_migration_prioritize'
+          onClick={() => act('prioritize', () => slackMigrationApi.prioritize(job.id))}
+          data-track-category='SLACK_MIGRATION'
+          data-track-name='PRIORITIZE_JOB'
+        >
+          <ChevronsUp className='size-3.5' />
+          Move to front
+        </Button>
+      )}
       {canApprove && job.canRefresh && (
         <Button
           variant='outline'

@@ -212,6 +212,39 @@ export class SlackMigrationService {
     return toView(updated);
   }
 
+  /** Jump a queued job to the front of its queue (collection or ingestion). The store record is updated first, so even
+   *  if the re-enqueue fails the reconcile watchdog re-adds it — the job is never lost. A running job can't be reordered. */
+  async prioritize(id: string, actor: Actor): Promise<MigrationJobView> {
+    const job = await this.mustGet(id, actor);
+    if ([MigrationStatus.COLLECTING, MigrationStatus.REFRESHING, MigrationStatus.INGESTING].includes(job.status)) {
+      throw new HttpError(409, 'INVALID_STATE', `Migration is already running (current: ${job.status}) — it's already next in line.`);
+    }
+    if (![MigrationStatus.SUBMITTED, MigrationStatus.QUEUED].includes(job.status)) {
+      throw new HttpError(409, 'INVALID_STATE', `Only a queued migration can be prioritised (current: ${job.status}).`);
+    }
+    if (job.currentQueue === QueueName.INGESTION) this.assertIngestControlEnabled();
+    const updated = await this.store.update(id, { status: MigrationStatus.QUEUED });
+    await this.queues.enqueue(job.currentQueue, id, 'front');
+    logger.info('[SlackMigration][audit] job prioritised', { id, queue: job.currentQueue, by: actor.userId, name: actor.name, email: actor.email });
+    return (await this.withPositions([toView(updated)]))[0];
+  }
+
+  /** Annotate views with their live queue turn (0 = running, N = Nth waiting); only for SUBMITTED/QUEUED jobs. */
+  private async withPositions(views: MigrationJobView[]): Promise<MigrationJobView[]> {
+    if (!views.some((v) => v.status === MigrationStatus.SUBMITTED || v.status === MigrationStatus.QUEUED)) return views;
+    const [collect, ingest] = await Promise.all([
+      this.queues.getQueueOrder(QueueName.COLLECTION),
+      this.queues.getQueueOrder(QueueName.INGESTION),
+    ]);
+    return views.map((v) => {
+      if (v.status !== MigrationStatus.SUBMITTED && v.status !== MigrationStatus.QUEUED) return v;
+      const o = v.phase === 'ingest' ? ingest : collect;
+      if (o.activeIds.includes(v.id)) return { ...v, queuePosition: 0, queueTotal: o.waitingIds.length };
+      const idx = o.waitingIds.indexOf(v.id);
+      return idx >= 0 ? { ...v, queuePosition: idx + 1, queueTotal: o.waitingIds.length } : v;
+    });
+  }
+
   /**
    * Reset a finished job back to the approval gate so it can be re-ingested from its existing GCS dump via the normal
    * Approve → ingest flow — recovers channels wiped by a prior ingest bug. Clears the done-set + finalize claim and
@@ -257,11 +290,11 @@ export class SlackMigrationService {
 
   async listForAdmin(actor: Actor, limit = 500): Promise<MigrationJobView[]> {
     // Scope to the caller's workspace — slackmig:index is global, so filter after fetch.
-    return (await this.store.list(limit, 0)).filter((j) => j.workspaceId === actor.workspaceId).map(toView);
+    return this.withPositions((await this.store.list(limit, 0)).filter((j) => j.workspaceId === actor.workspaceId).map(toView));
   }
 
   async getMineList(actor: Actor): Promise<MigrationJobView[]> {
-    return (await this.store.list(500, 0)).filter((j) => j.submittedByUserId === actor.userId).map(toView);
+    return this.withPositions((await this.store.list(500, 0)).filter((j) => j.submittedByUserId === actor.userId).map(toView));
   }
 
   /** Free-text notice shown atop the dashboard Slack-migration page, resolved per workspace from

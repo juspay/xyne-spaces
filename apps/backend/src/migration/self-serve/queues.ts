@@ -81,6 +81,14 @@ export class MigrationQueues {
     );
   }
 
+  /** migrationIds by queue: active (running now) + waiting in processing order (next first), for queue-position display. */
+  async getQueueOrder(name: QueueName): Promise<{ activeIds: string[]; waitingIds: string[] }> {
+    const q = this.queue(name);
+    const [active, waiting] = await Promise.all([q.getActive(), q.getWaiting()]);
+    // Bull drains the wait list tail-first (lifo 'front' jobs sit at the tail), so reverse to get next-first order.
+    return { activeIds: active.map((j) => j.data.migrationId), waitingIds: waiting.map((j) => j.data.migrationId).reverse() };
+  }
+
   pause(name: QueueName): Promise<void> { return this.queue(name).pause(); }
   resume(name: QueueName): Promise<void> { return this.queue(name).resume(); }
   isPaused(name: QueueName): Promise<boolean> { return this.queue(name).isPaused(); }
