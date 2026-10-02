@@ -5,8 +5,14 @@ import {
   type AuditChangeDraft,
 } from '@xyne/shared';
 import { AUDIT_TABLE_CONFIG } from './config';
-import type { AuditResolution } from './resolution';
-import type { AuditJobsAccumulator, AuditOperation, AuditRow, AuditTableConfig } from './types';
+import { rowString, type AuditResolution } from './resolution';
+import type {
+  AuditCounterDelta,
+  AuditJobsAccumulator,
+  AuditOperation,
+  AuditRow,
+  AuditTableConfig,
+} from './types';
 
 /**
  * Table-agnostic audit collection. Given the before/after state of one mutated
@@ -95,6 +101,31 @@ const buildDeleteDraft = (params: {
   };
 };
 
+/** How a written row moves its table's counted set; undefined when it doesn't. */
+const counterDeltaOf = (
+  table: string,
+  config: AuditTableConfig,
+  action: AuditAction,
+  beforeRow: AuditRow | null,
+  afterRow: AuditRow | null,
+): AuditCounterDelta | undefined => {
+  const counters = config.counters;
+  if (!counters) return undefined;
+  const key = rowString(afterRow ?? beforeRow ?? {}, counters.groupBy);
+  if (!key) return undefined;
+
+  // Inserts may omit defaulted columns; count them at their create defaults.
+  const after =
+    afterRow && action === AuditAction.CREATE ? { ...config.createDefaults, ...afterRow } : afterRow;
+  const delta: Record<string, number> = {};
+  let moved = false;
+  for (const [field, counts] of Object.entries(counters.fields)) {
+    delta[field] = (after && counts(after) ? 1 : 0) - (beforeRow && counts(beforeRow) ? 1 : 0);
+    if (delta[field] !== 0) moved = true;
+  }
+  return moved ? { table, key, delta } : undefined;
+};
+
 export async function collectTableAudit(params: {
   table: string;
   operation: AuditOperation;
@@ -176,7 +207,10 @@ export async function collectTableAudit(params: {
     }
   }
 
-  if (drafts.length === 0) return;
+  // A row can move a counted set without a visible field change (e.g. a member
+  // added at the default flags), so its job is kept for the totals alone.
+  const counterDelta = counterDeltaOf(params.table, config, action, beforeRow, afterRow);
+  if (drafts.length === 0 && !counterDelta) return;
 
   // Fingerprint replacements (delete + reinsert with a new id) so the flush can
   // pair and merge them — see reconcileReplacePairs.
@@ -190,6 +224,6 @@ export async function collectTableAudit(params: {
   const scopes = Array.isArray(scopeOrScopes) ? scopeOrScopes : [scopeOrScopes];
   for (const scope of scopes) {
     if (!scope.entityId) continue;
-    accumulator.jobs.push({ scope, drafts });
+    accumulator.jobs.push({ scope, drafts, ...(counterDelta && { counterDelta }) });
   }
 }

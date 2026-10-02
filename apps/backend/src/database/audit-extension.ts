@@ -141,7 +141,40 @@ function createPrismaAuditLookup(prisma: PrismaAuditClient): AuditLookup {
         boardIds: [...boardIds],
       }));
     },
+    memberAssignmentStates: async userGroupId => {
+      const states = (await prisma.userAssignmentState.findMany({
+        where: { userGroupId },
+      })) as AuditRow[];
+      const mappings = (await prisma.userGroupMapping.findMany({
+        where: { userGroupId },
+      })) as AuditRow[];
+      const memberIds = new Set(mappings.map(mapping => String(mapping.userId)));
+      return states.filter(state => memberIds.has(String(state.userId)));
+    },
   };
+}
+
+/** Counted-set keys a write will touch, read before it runs. */
+async function counterKeysBeforeWrite(params: {
+  delegate: PrismaDelegate | undefined;
+  operation: string;
+  args: Record<string, unknown>;
+  beforeRows: AuditRow[];
+  groupBy: string;
+}): Promise<string[]> {
+  const { delegate, operation, args, beforeRows, groupBy } = params;
+  const rows: unknown[] = [...beforeRows];
+  if (operation === 'create' || operation === 'createMany') {
+    rows.push(...(Array.isArray(args.data) ? args.data : [args.data]));
+  } else if (operation === 'upsert') {
+    rows.push(args.create);
+  } else if (operation === 'delete' && delegate) {
+    rows.push(await delegate.findUnique({ where: args.where }));
+  }
+  const keys = rows
+    .map(row => (row as AuditRow | null | undefined)?.[groupBy])
+    .filter((key): key is string => typeof key === 'string' && key.length > 0);
+  return [...new Set(keys)];
 }
 
 export const auditExtension = Prisma.defineExtension(client =>
@@ -170,6 +203,7 @@ async function auditPrismaOperation(params: {
   const { client, operation, table, model, args, query } = params;
   const prisma = asAuditClient(client);
   const delegate = prisma[prismaDelegateName(model)];
+  const resolution = new AuditResolution(createPrismaAuditLookup(prisma));
 
   // Before-state for the diff. `delete` returns the removed row itself, so it
   // needs no pre-read; update/upsert/updateMany/deleteMany do.
@@ -194,10 +228,31 @@ async function auditPrismaOperation(params: {
     }
   }
 
+  // Counted sets are baselined before the write (a delete's returned row comes too late).
+  const counters = AUDIT_TABLE_CONFIG[table]?.counters;
+  if (counters) {
+    try {
+      const keys = await counterKeysBeforeWrite({
+        delegate,
+        operation,
+        args,
+        beforeRows,
+        groupBy: counters.groupBy,
+      });
+      for (const key of keys) await resolution.warmCounterSnapshot(table, key, counters);
+    } catch (error) {
+      logger.warn('[AuditExtension] counter snapshot failed', {
+        table,
+        operation,
+        error: error instanceof Error ? error.message : error,
+      });
+    }
+  }
+
   const result = await query(args);
 
   try {
-    await emitPrismaAudit(prisma, table, operation, args, beforeRows, result);
+    await emitPrismaAudit(prisma, table, operation, args, beforeRows, result, resolution);
   } catch (error) {
     logger.error('[AuditExtension] failed to persist audit rows', {
       table,
@@ -215,6 +270,7 @@ async function emitPrismaAudit(
   args: Record<string, unknown>,
   beforeRows: AuditRow[],
   result: unknown,
+  resolution: AuditResolution,
 ): Promise<void> {
   const resultRow =
     typeof result === 'object' && result !== null && !('count' in (result as Record<string, unknown>))
@@ -290,10 +346,7 @@ async function emitPrismaAudit(
 
   if (writes.length === 0) return;
 
-  const accumulator: AuditJobsAccumulator = {
-    jobs: [],
-    resolution: new AuditResolution(createPrismaAuditLookup(prisma)),
-  };
+  const accumulator: AuditJobsAccumulator = { jobs: [], resolution };
   for (const write of writes) {
     await collectTableAudit({
       table,

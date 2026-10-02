@@ -1,4 +1,4 @@
-import type { AuditLookup, AuditRow } from './types';
+import type { AuditCounters, AuditLookup, AuditRow } from './types';
 
 /**
  * Per-save resolution context. Name lookups are warmed in bulk (async) then read
@@ -19,8 +19,29 @@ export class AuditResolution {
   private readonly globalFieldNameById = new Map<string, string>();
   private readonly userGroupNameById = new Map<string, string>();
   private readonly boardIdsByFormId = new Map<string, string[]>();
+  private readonly counterSnapshots = new Map<string, Record<string, number>>();
 
   constructor(private readonly lookup: AuditLookup) {}
+
+  /**
+   * Snapshot a counted set. Must run before the save's first write to it; memoized,
+   * so later writes in the same save keep that pre-save baseline.
+   */
+  async warmCounterSnapshot(table: string, key: string, counters: AuditCounters): Promise<void> {
+    const cacheKey = `${table}:${key}`;
+    if (!key || this.counterSnapshots.has(cacheKey)) return;
+    const rows = await counters.loadRows(key, this.lookup);
+    const snapshot: Record<string, number> = {};
+    for (const [field, counts] of Object.entries(counters.fields)) {
+      snapshot[field] = rows.filter(counts).length;
+    }
+    this.counterSnapshots.set(cacheKey, snapshot);
+  }
+
+  /** Pre-save totals of a counted set, or undefined when it wasn't snapshotted before the write. */
+  counterSnapshot(table: string, key: string): Record<string, number> | undefined {
+    return this.counterSnapshots.get(`${table}:${key}`);
+  }
 
   async warmStages(ids: Iterable<string>): Promise<void> {
     const missing = [...new Set(ids)].filter(id => !this.stageNameById.has(id));

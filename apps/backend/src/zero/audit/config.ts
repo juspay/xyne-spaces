@@ -434,6 +434,16 @@ export const AUDIT_TABLE_CONFIG: Record<string, AuditTableConfig> = {
     ignoreFields: ['userId', 'userGroupId'],
     createDefaults: { onCall: true, isActiveForAssignment: true },
     deleteSummary: { field: 'member', value: (row, res) => res.userName(rowString(row, 'userId')) },
+    // Group totals beside the per-member flips, e.g. "On-call members 3 → 2".
+    counters: {
+      groupBy: 'userGroupId',
+      targetName: 'Group totals',
+      fields: {
+        onCallMembers: row => row.onCall === true,
+        activeMembers: row => row.isActiveForAssignment === true,
+      },
+      loadRows: (userGroupId, lookup) => lookup.memberAssignmentStates(userGroupId),
+    },
   },
 
   user_group_mappings: {

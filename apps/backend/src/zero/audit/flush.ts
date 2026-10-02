@@ -1,6 +1,8 @@
 import { v4 as uuidv4 } from 'uuid';
 import { AuditAction, type AuditChangeDraft } from '@xyne/shared';
-import type { AuditJobsAccumulator, AuditScope } from './types';
+import { AUDIT_TABLE_CONFIG } from './config';
+import type { AuditResolution } from './resolution';
+import type { AuditCounterDelta, AuditJobsAccumulator, AuditScope } from './types';
 
 /**
  * Flush the per-save accumulator: drafts are grouped by (entityType, entityId)
@@ -26,17 +28,61 @@ export interface AuditJobGroup {
 }
 
 export function groupAuditJobs(accumulator: AuditJobsAccumulator): AuditJobGroup[] {
-  const groups = new Map<string, AuditJobGroup>();
+  const groups = new Map<string, AuditJobGroup & { counterDeltas: AuditCounterDelta[] }>();
   for (const job of accumulator.jobs) {
     const key = `${job.scope.entityType}:${job.scope.entityId}`;
-    const group = groups.get(key) ?? { scope: job.scope, drafts: [] };
+    const group = groups.get(key) ?? { scope: job.scope, drafts: [], counterDeltas: [] };
     group.drafts.push(...job.drafts);
+    if (job.counterDelta) group.counterDeltas.push(job.counterDelta);
     groups.set(key, group);
   }
-  for (const group of groups.values()) {
-    group.drafts = reconcileReplacePairs(group.drafts);
+  return [...groups.values()].map(({ scope, drafts, counterDeltas }) => ({
+    scope,
+    drafts: [
+      ...reconcileReplacePairs(drafts),
+      ...counterDrafts(counterDeltas, accumulator.resolution),
+    ],
+  }));
+}
+
+/**
+ * Totals rows for the counted sets a save moved: the pre-save snapshot plus the
+ * summed row deltas. A set without a pre-write snapshot is skipped, never guessed.
+ */
+function counterDrafts(
+  deltas: AuditCounterDelta[],
+  resolution: AuditResolution,
+): AuditChangeDraft[] {
+  const summed = new Map<string, AuditCounterDelta>();
+  for (const { table, key, delta } of deltas) {
+    const id = `${table}:${key}`;
+    const total = summed.get(id) ?? { table, key, delta: {} };
+    for (const [field, moved] of Object.entries(delta)) {
+      total.delta[field] = (total.delta[field] ?? 0) + moved;
+    }
+    summed.set(id, total);
   }
-  return [...groups.values()];
+
+  const drafts: AuditChangeDraft[] = [];
+  for (const { table, key, delta } of summed.values()) {
+    const counters = AUDIT_TABLE_CONFIG[table]?.counters;
+    const baseline = resolution.counterSnapshot(table, key);
+    if (!counters || !baseline) continue;
+    for (const [field, moved] of Object.entries(delta)) {
+      if (moved === 0) continue;
+      const before = baseline[field] ?? 0;
+      drafts.push({
+        action: AuditAction.UPDATE,
+        tableName: table,
+        recordId: key,
+        targetName: counters.targetName,
+        field,
+        oldValue: String(before),
+        newValue: String(before + moved),
+      });
+    }
+  }
+  return drafts;
 }
 
 /**
