@@ -948,6 +948,28 @@
   [data-theme="midnight"] .cmdk-active-row {
     background-color: hsl(var(--accent)); /* gray */
   }
+  /* The Cmd+K return banner shows selection with its orange border, so it keeps its card
+     background instead of the selected-row gray. */
+  [cmdk-root] [cmdk-item][data-return-banner="true"][aria-selected="true"],
+  [data-theme="midnight"] [cmdk-root] [cmdk-item][data-return-banner="true"][aria-selected="true"] {
+    background-color: hsl(var(--card)) !important;
+  }
+  /* The selected result on the full-page results screen: the palette's selected-row gray, so the
+     selection reads the same on both sides of the expand, on every card type. */
+  [data-cmdk-full-page] [data-selected-result="true"] > [class] {
+    background-color: hsl(var(--accent));
+  }
+  /* The page under full-page search: kept live, but not drawn while full page opens — its style,
+     layout and paint are skipped (their state kept) until it is drawn again under the settled
+     page. See FullPageKeepAliveOutlet. */
+  [data-cmdk-kept-page][inert]:not([data-cmdk-drawn]) > * {
+    content-visibility: hidden;
+  }
+  /* A palette growing into full page: just the surface, no content, including any rows that
+     render meanwhile. */
+  [cmdk-root][data-cmdk-surface-only] > *:not([data-cmdk-skeleton]) {
+    opacity: 0; /* not visibility: descendants that set visibility themselves would show through */
+  }
 
   /* Paragraph Adjacent Sibling */
   .chat-input-field p + p {

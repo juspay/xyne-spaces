@@ -1,9 +1,10 @@
-import { useEffect, useRef } from 'react';
+import { useCallback, useEffect, useRef } from 'react';
 import { v4 as uuidv4 } from 'uuid';
 import { useZero } from './useZero';
 import { mutators } from '../zero/mutators';
 import { trackDeskOutcome } from '../services/Analytics/deskTracking';
 import { logger, Event as LoggerEvent } from '../utils/logger';
+import { afterTransition, usePageCoverage } from './usePageCoverage';
 
 /**
  * Marks a Desk ticket's latest email as read when its detail thread opens.
@@ -16,21 +17,26 @@ export function useMarkEmailRead(
   shouldMark: boolean,
 ): void {
   const zero = useZero();
+  // Under full-page search the thread is not being read: what arrives then waits until it is seen.
+  const coverage = usePageCoverage();
 
   const markedRef = useRef<string | null>(null);
+  const latestRef = useRef({ ticketId, latestEmailId, shouldMark });
+  latestRef.current = { ticketId, latestEmailId, shouldMark };
 
-  useEffect(() => {
-    if (!shouldMark) return;
-    if (!ticketId) return;
-    if (!latestEmailId) return;
-    if (markedRef.current === latestEmailId) return;
-    markedRef.current = latestEmailId;
+  const markLatest = useCallback((): void => {
+    const { ticketId: id, latestEmailId: emailId, shouldMark: enabled } = latestRef.current;
+    if (!enabled || coverage.isCovered()) return;
+    if (!id) return;
+    if (!emailId) return;
+    if (markedRef.current === emailId) return;
+    markedRef.current = emailId;
     void zero
       .mutate(
         mutators.emailRead.markAsRead({
           id: uuidv4(),
-          ticketId,
-          lastReadEmailId: latestEmailId,
+          ticketId: id,
+          lastReadEmailId: emailId,
           updatedAt: Date.now(),
         }),
       )
@@ -40,7 +46,7 @@ export function useMarkEmailRead(
           // variants report the same outcome with their own trigger.
           trackDeskOutcome(
             'READ_STATE_CHANGED',
-            { id: ticketId },
+            { id },
             {},
             {
               to: 'read',
@@ -59,5 +65,19 @@ export function useMarkEmailRead(
           });
         },
       );
-  }, [shouldMark, ticketId, latestEmailId, zero]);
+  }, [zero, coverage]);
+
+  useEffect(() => markLatest(), [shouldMark, ticketId, latestEmailId, markLatest]);
+  // Uncovered: the thread is on screen again, with whatever arrived meanwhile.
+  useEffect(() => {
+    let cancel: (() => void) | null = null;
+    const stopWatching = coverage.subscribe(covered => {
+      cancel?.();
+      cancel = covered ? null : afterTransition(markLatest);
+    });
+    return (): void => {
+      stopWatching();
+      cancel?.();
+    };
+  }, [coverage, markLatest]);
 }

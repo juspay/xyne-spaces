@@ -1,5 +1,6 @@
 import { useMemo } from 'react';
 import { useCacConfig } from '@xyne/shared/hooks';
+import { DEFAULT_CMDK_POLICY_OPTIONS, type CmdkPolicyOptions } from '../search/cmdkPolicy';
 
 export const CMDK_SEARCH_CAC_KEY = 'cmdk_search_config';
 // Per-deployment overrides come through the CAC key below.
@@ -19,6 +20,17 @@ export interface CmdkSearchCacConfig {
    * docType. Any profile not listed here keeps the sectioned ALL view.
    */
   flatAllRankProfiles?: string[];
+  /** Full-page open policy thresholds; any field left out keeps its default. */
+  fullPage?: CmdkFullPageCacConfig;
+}
+
+export interface CmdkFullPageCacConfig {
+  /** Seconds after opening a result during which a Cmd+K reopen restores it (default 15). */
+  returnWindowSec?: number;
+  /** Consecutive full-page sessions that switch the default to full page (default 1). */
+  fullPageStreak?: number;
+  /** How many times the return banner may be shown, while full page is still unused (default 5). */
+  maxBannerShows?: number;
 }
 
 export const DEFAULT_CMDK_SEARCH_CAC_CONFIG: CmdkSearchCacConfig = {
@@ -56,6 +68,30 @@ export function useCmdkFlatAllRankProfiles(): Set<string> {
   return useMemo(() => {
     const profiles = config.flatAllRankProfiles ?? DEFAULT_FLAT_ALL_RANK_PROFILES;
     return new Set(profiles.map(p => p?.trim().toLowerCase()).filter(Boolean));
+  }, [config]);
+}
+
+const positiveInt = (value: unknown, fallback: number): number =>
+  typeof value === 'number' && Number.isFinite(value) && value >= 1 ? Math.floor(value) : fallback;
+
+/**
+ * Cmd+K full-page policy thresholds from the `cmdk_search_config` CAC key (`fullPage`). Shares the
+ * CAC query cache with the rank-profile hooks. Missing or invalid values keep
+ * DEFAULT_CMDK_POLICY_OPTIONS.
+ */
+export function useCmdkPolicyOptions(): CmdkPolicyOptions {
+  const { config } = useCacConfig<CmdkSearchCacConfig>({
+    key: CMDK_SEARCH_CAC_KEY,
+    fallbackConfig: DEFAULT_CMDK_SEARCH_CAC_CONFIG,
+  });
+  return useMemo(() => {
+    const fullPage = config.fullPage ?? {};
+    const defaults = DEFAULT_CMDK_POLICY_OPTIONS;
+    return {
+      returnWindowMs: positiveInt(fullPage.returnWindowSec, defaults.returnWindowMs / 1000) * 1000,
+      fullPageStreak: positiveInt(fullPage.fullPageStreak, defaults.fullPageStreak),
+      maxBannerShows: positiveInt(fullPage.maxBannerShows, defaults.maxBannerShows),
+    };
   }, [config]);
 }
 

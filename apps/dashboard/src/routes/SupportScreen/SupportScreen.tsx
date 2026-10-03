@@ -271,6 +271,7 @@ import {
 } from './DeskFilterTrigger';
 import { useDeskToolbarOverflow } from './useDeskToolbarOverflow';
 import { clearDeskContactsCache } from '../../hooks/useDeskContacts';
+import { afterTransition, usePageCoverage } from '../../hooks/usePageCoverage';
 import { XyneAIStar } from '../../components/icons/xyne-ai';
 import {
   channelService,
@@ -2150,21 +2151,47 @@ const SupportScreen = (): ReactElement => {
     );
   }, [selectedChannelId, zero]);
 
+  // Covered by full-page search counts as leaving the channel, and uncovering as opening it again;
+  // each mark is written once the expand or collapse is over. Unmounting while still covered marks
+  // nothing more, so what arrives while the user searches stays unread.
+  const pageCoverage = usePageCoverage();
   useEffect(() => {
     if (!selectedChannelId || !isSelectedChannelJoined) return;
-    const markViewed = (): void => {
+    const markViewed = (timestamp = Date.now()): void => {
       void zero.mutate(
         mutators.channel.markChannelAsViewed({
           channelId: selectedChannelId,
-          timestamp: Date.now(),
+          timestamp,
           draftMessageId: uuidv4(),
           draftMessage: '',
         }),
       );
     };
     markViewed();
-    return markViewed;
-  }, [selectedChannelId, isSelectedChannelJoined]);
+    // The mark owed for the last cover or uncover, until it is written.
+    let owed: { at: number; cancel: () => void } | null = null;
+    const payOwed = (): void => {
+      if (!owed) return;
+      const { at, cancel } = owed;
+      owed = null;
+      cancel();
+      markViewed(at);
+    };
+    const stopWatching = pageCoverage.subscribe(() => {
+      // A later mark covers everything an earlier unwritten one would have.
+      owed?.cancel();
+      const at = Date.now();
+      owed = { at, cancel: afterTransition(payOwed) };
+    });
+    return (): void => {
+      stopWatching();
+      if (pageCoverage.isCovered()) payOwed();
+      else {
+        owed?.cancel();
+        markViewed();
+      }
+    };
+  }, [selectedChannelId, isSelectedChannelJoined, pageCoverage]);
   const selectedChannelFull = useMemo(
     () => sortedEmailChannels.find(c => c.id === selectedChannelId),
     [sortedEmailChannels, selectedChannelId],

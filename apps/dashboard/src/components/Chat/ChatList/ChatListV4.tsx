@@ -40,6 +40,7 @@ import { getInitialMessageFromConversation } from '../../../utils/conversationMe
 import { usePendingForChannel, buildPendingChannelConversation } from '@xyne/shared/messages';
 import { useEphemeralChannelConversations } from '../../../hooks/useEphemeralMessages';
 import { MessageHoverToolbar } from '../HoverActionsToolbar/MessageHoverToolbar';
+import { afterTransition, usePageCoverage } from '../../../hooks/usePageCoverage';
 
 export type ChatListProps = {
   channelId: string;
@@ -472,8 +473,12 @@ const ChatListV4: React.FC<ChatListProps> = ({
       const scrollElement = parentRef.current;
       if (!scrollElement) return false;
 
-      const conversationElement = document.getElementById(`conv-${conversationId}`);
-      if (!conversationElement || !scrollElement.contains(conversationElement)) return false;
+      // Scoped to this list: the same conversation can also be rendered elsewhere in the document
+      // (a page kept mounted, hidden, under full-page search).
+      const conversationElement = scrollElement.querySelector(
+        `#${CSS.escape(`conv-${conversationId}`)}`,
+      );
+      if (!conversationElement) return false;
 
       const scrollRect = scrollElement.getBoundingClientRect();
       const conversationRect = conversationElement.getBoundingClientRect();
@@ -1080,10 +1085,14 @@ const ChatListV4: React.FC<ChatListProps> = ({
   }, [channelId, latestConversations, latestConversationsDetails.type, isInitialLoadComplete]);
 
   // ── Mark as read on unmount ────────────────────────────────────────────────────
+  // Covered by full-page search counts as leaving: the channel is marked viewed as it is covered —
+  // written once the expand is over, so the write stays out of the animation — and unmounting while
+  // still covered marks nothing more, so what arrives while the user searches stays unread.
+  const coverage = usePageCoverage();
   useEffect(() => {
     if (!channelId) return;
 
-    return () => {
+    const markViewed = (timestamp: number): void => {
       if (skipMarkAsReadRef?.current || activitySkipMarkAsReadChannelRef.current) {
         skipMarkAsReadRef.current = false;
         activitySkipMarkAsReadChannelRef.current = false;
@@ -1093,13 +1102,35 @@ const ChatListV4: React.FC<ChatListProps> = ({
       const draft = getDraft(channelId, null);
       const payload = {
         channelId,
-        timestamp: Date.now(),
+        timestamp,
         draftMessageId: uuidv4(),
         draftMessage: draft || '',
       };
       void zero.mutate(mutators.channel.markChannelAsViewed(payload));
     };
-  }, [channelId]);
+    // The mark owed for being covered, until it is written.
+    let owed: { at: number; cancel: () => void } | null = null;
+    const payOwed = (): void => {
+      if (!owed) return;
+      const { at, cancel } = owed;
+      owed = null;
+      cancel();
+      markViewed(at);
+    };
+    const stopWatching = coverage.subscribe(covered => {
+      owed?.cancel();
+      owed = null;
+      if (!covered) return;
+      const at = Date.now();
+      owed = { at, cancel: afterTransition(payOwed) };
+    });
+
+    return () => {
+      stopWatching();
+      if (coverage.isCovered()) payOwed();
+      else markViewed(Date.now());
+    };
+  }, [channelId, coverage]);
 
   // ── Persist conversations to query cache ──────────────────────────────────────
   useEffect(() => {
