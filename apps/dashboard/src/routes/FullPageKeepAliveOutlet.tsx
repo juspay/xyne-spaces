@@ -15,6 +15,7 @@ import {
   useOutlet,
 } from 'react-router-dom';
 import {
+  COLLAPSE_TO_CMDK_EVENT,
   isFullPageSearchPath,
   KEPT_PAGE_ATTR,
   KEPT_DRAWN_ATTR,
@@ -32,22 +33,8 @@ interface RouterView {
   routerState: ContextType<typeof UNSAFE_DataRouterStateContext>;
 }
 
-/**
- * The route outlet, with full-page search as a layer over the page it opened from rather than a
- * page in its place.
- *
- * Cmd+K expands into `/search-results` and collapses back to the page it came from. That page
- * stays mounted, live and laid out under full page — the overlay-route pattern, a modal route
- * drawn over its background page — so collapsing is the layer going away with the real page
- * already there, as it was. Under the layer the page is inert (no focus, no pointer) and hidden
- * from assistive tech, it keeps rendering at its own location with the router as it was (it never
- * sees `/search-results`, nor re-renders for the navigations to and around it), the browser skips
- * drawing it (`content-visibility`, global.css) while full page opens, and the shortcut system
- * treats full page as a modal over it.
- *
- * Loaded directly, full page has nothing under it. Any other navigation renders exactly as a
- * plain outlet would.
- */
+// Route outlet that keeps the page full page opened from mounted (inert, frozen router, skipped
+// while full page opens) under a fixed results layer: the overlay-route pattern.
 export function FullPageKeepAliveOutlet(): ReactElement {
   const outlet = useOutlet();
   const view: RouterView = {
@@ -81,6 +68,14 @@ export function FullPageKeepAliveOutlet(): ReactElement {
   // covered in its cleanup: it was never seen again.
   const [coverage] = useState(createPageCoverage);
   useEffect(() => coverage.set(onFullPage), [coverage, onFullPage]);
+  // A collapse is this page coming back: uncovered from its first frame, so nothing owed for having
+  // been covered is written in the middle of the collapse.
+  useEffect(() => {
+    if (!onFullPage) return;
+    const uncover = (): void => coverage.set(false);
+    window.addEventListener(COLLAPSE_TO_CMDK_EVENT, uncover);
+    return (): void => window.removeEventListener(COLLAPSE_TO_CMDK_EVENT, uncover);
+  }, [coverage, onFullPage]);
 
   return (
     <>

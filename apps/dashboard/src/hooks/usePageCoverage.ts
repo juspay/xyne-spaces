@@ -44,16 +44,24 @@ export function createPageCoverage(): PageCoverage & { set: (covered: boolean) =
   };
 }
 
-// Past the collapse that uncovers a page (its animation and the palette taking over).
-const PAST_COLLAPSE_MS = 1000;
+// Past the expand or collapse that covers or uncovers a page, and the page settling after it.
+const PAST_TRANSITION_MS = 1500;
 
-/** Runs `work` once a collapse is over and the browser is idle, so it never lands in the animation. */
-export function afterUncovering(work: () => void): void {
-  setTimeout(() => {
+/**
+ * Runs `work` once the expand or collapse that just covered or uncovered the page is over and the
+ * browser is idle, so writes it makes never land in the animation. Returns the cancel.
+ */
+export function afterTransition(work: () => void): () => void {
+  let idle: number | undefined;
+  const timer = setTimeout(() => {
     if (typeof window.requestIdleCallback === 'function') {
-      window.requestIdleCallback(work, { timeout: 2000 });
+      idle = window.requestIdleCallback(work, { timeout: 2000 });
     } else {
       work();
     }
-  }, PAST_COLLAPSE_MS);
+  }, PAST_TRANSITION_MS);
+  return (): void => {
+    clearTimeout(timer);
+    if (idle !== undefined) window.cancelIdleCallback(idle);
+  };
 }

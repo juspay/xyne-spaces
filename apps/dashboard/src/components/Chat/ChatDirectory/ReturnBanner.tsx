@@ -6,7 +6,7 @@ interface ReturnBannerProps {
   /** The filter chips of the restored query, rendered the way the expand row renders them. */
   chips: ReactNode;
   queryText: string;
-  /** Expand to full page. Wired like the expand row: cmdk's onSelect for keys, onClick for mouse. */
+  /** Expand to full page, with how it was chosen (cmdk reports both a click and Enter as a select). */
   onExpand: (trigger: 'click' | 'keyboard') => void;
   onDismiss: () => void;
   /** It is on screen; fired once per mount. */
@@ -28,6 +28,8 @@ export function ReturnBanner({
 }: ReturnBannerProps): ReactElement {
   const onShownRef = useRef(onShown);
   onShownRef.current = onShown;
+  // Like the expand row: a press marks the select that follows as a click.
+  const triggerRef = useRef<'click' | 'keyboard'>('keyboard');
   useEffect(() => {
     onShownRef.current();
   }, []);
@@ -40,8 +42,14 @@ export function ReturnBanner({
         // It stands in for the expand row, so the palette's keyboard handling treats it the same:
         // skipped by the first-row auto-select, and Enter on it expands.
         data-show-results-item='true'
-        onClick={() => onExpand('click')}
-        onSelect={() => onExpand('keyboard')}
+        onPointerDown={() => {
+          triggerRef.current = 'click';
+        }}
+        onSelect={() => {
+          const trigger = triggerRef.current;
+          triggerRef.current = 'keyboard';
+          onExpand(trigger);
+        }}
         className='group flex items-center gap-3 px-3 py-2.5 rounded-xl border border-[rgba(255,105,0,0.35)] bg-card cursor-pointer text-sm text-foreground animate-cmdk-banner-pulse motion-reduce:animate-none transition-colors [transition-duration:200ms] hover:border-xyne-orange-500 aria-selected:border-xyne-orange-500'
         data-track-category='SEARCH'
         data-track-name='RETURN_BANNER'

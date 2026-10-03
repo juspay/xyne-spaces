@@ -98,7 +98,7 @@ export const DOC_TYPE_TO_TAB = Object.fromEntries(
 ) as Record<SearchResultsDocType, TabType>;
 
 /**
- * Palette TabType -> results-page docType, so "Show detailed results for" lands on the
+ * Palette TabType -> results-page docType, so "Expand to full-page search" lands on the
  * tab the user was already looking at.
  *
  * Deliberately NOT an inversion of DOC_TYPE_TO_TAB: 'all' and 'channels' both map to

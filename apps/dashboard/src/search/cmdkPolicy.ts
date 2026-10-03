@@ -1,19 +1,5 @@
-/**
- * Cmd+K open-size policy: whether the palette opens as the modal or full page, when the
- * "Expand to full-page search" return banner shows, and when the last query comes back.
- *
- * Every transition is a pure function over a small persisted state object; the palette reads
- * and writes it through {@link loadCmdkPolicy} / {@link saveCmdkPolicy}. The rules:
- *   - Opening a result remembers the query. Reopening Cmd+K within the return window restores
- *     it, once — the reopen consumes it, and a later Cmd+K starts empty.
- *   - The return banner is offered on that reopen only while the default is still modal, full
- *     page has never been used, and it has been shown fewer than the configured max times.
- *   - A session that ends in full page extends the streak; at the configured streak the default
- *     switches to full page and, the first time it ever does, the next full-page open announces
- *     it (the snackbar). A session that ends in the modal resets the streak.
- *   - Collapsing (or the snackbar's Undo) puts the default straight back to modal.
- *   - Cmd+F (search in the current channel) always opens the modal and never teaches the policy.
- */
+// Cmd+K open-size policy (pure, persisted): learned modal/full default, quick-return restore,
+// return banner and the full-page snackbar. Cmd+F never teaches it; collapsing resets to modal.
 import { z } from 'zod';
 import type { StoredRecentSearch } from '../components/Chat/ChatDirectory/RecentSearches/storage';
 

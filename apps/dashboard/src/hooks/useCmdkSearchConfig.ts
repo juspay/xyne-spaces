@@ -76,8 +76,8 @@ const positiveInt = (value: unknown, fallback: number): number =>
 
 /**
  * Cmd+K full-page policy thresholds from the `cmdk_search_config` CAC key (`fullPage`). Shares the
- * CAC query cache with the rank-profile hooks. Missing or invalid values keep the defaults
- * (15s return window, streak 1, five banner shows).
+ * CAC query cache with the rank-profile hooks. Missing or invalid values keep
+ * DEFAULT_CMDK_POLICY_OPTIONS.
  */
 export function useCmdkPolicyOptions(): CmdkPolicyOptions {
   const { config } = useCacConfig<CmdkSearchCacConfig>({

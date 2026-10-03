@@ -4,7 +4,7 @@ import { useZero } from './useZero';
 import { mutators } from '../zero/mutators';
 import { trackDeskOutcome } from '../services/Analytics/deskTracking';
 import { logger, Event as LoggerEvent } from '../utils/logger';
-import { afterUncovering, usePageCoverage } from './usePageCoverage';
+import { afterTransition, usePageCoverage } from './usePageCoverage';
 
 /**
  * Marks a Desk ticket's latest email as read when its detail thread opens.
@@ -69,11 +69,15 @@ export function useMarkEmailRead(
 
   useEffect(() => markLatest(), [shouldMark, ticketId, latestEmailId, markLatest]);
   // Uncovered: the thread is on screen again, with whatever arrived meanwhile.
-  useEffect(
-    () =>
-      coverage.subscribe(covered => {
-        if (!covered) afterUncovering(markLatest);
-      }),
-    [coverage, markLatest],
-  );
+  useEffect(() => {
+    let cancel: (() => void) | null = null;
+    const stopWatching = coverage.subscribe(covered => {
+      cancel?.();
+      cancel = covered ? null : afterTransition(markLatest);
+    });
+    return (): void => {
+      stopWatching();
+      cancel?.();
+    };
+  }, [coverage, markLatest]);
 }

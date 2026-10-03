@@ -2,6 +2,7 @@ import { ReactElement, useState, useMemo, useCallback, useEffect } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { isDeskChannelType, ChannelType } from '@xyne/shared';
 import { useAuthContextValues } from '../../hooks/useAuth';
+import { usePlatform } from '../../hooks/usePlatform';
 import {
   useAllChannels,
   useAllVisibleChannels,
@@ -112,6 +113,7 @@ const GlobalCommandMenu = ({
   fullPageSearch,
 }: GlobalCommandMenuProps = {}): ReactElement | null => {
   const context = useAuthContextValues();
+  const { isMobile } = usePlatform();
   const channelData = useAllChannels();
   const visibleAllChannels = useAllVisibleChannels();
   const allChannelsUserStatus = useUserChannelStatuses();
@@ -203,11 +205,10 @@ const GlobalCommandMenu = ({
       // box instead (where the page does not take it, as on mobile, the palette opens as before).
       if (newOpen && !open && fullPageSearch && focusFullPageSearch()) return false;
       if (newOpen && !open) setSessionOrigin('search');
-      // Only Cmd+K itself (and the top bar's search, which invokes it) asks the policy what size to
-      // open at and whether this is a quick return. A back-navigation reopening the palette on its
-      // entry must not: with full page as the default it would send Back straight to full page
-      // again. Not on the results page either (on mobile, the one place it opens there).
+      // Only Cmd+K consults the policy: a Back-restore must not bounce to full page, and mobile
+      // (palette already full screen, no collapse there) and the results page never do.
       if (
+        !isMobile &&
         via === 'shortcut' &&
         newOpen &&
         !open &&
@@ -277,6 +278,7 @@ const GlobalCommandMenu = ({
       context.workspaceId,
       context.userID,
       policyOptions,
+      isMobile,
     ],
   );
 

@@ -117,7 +117,7 @@ import {
 } from '../ChatDirectory/RecentSearches';
 import { Command } from 'cmdk';
 import { mergeRankedCandidates } from '@xyne/shared/utils';
-import { toChannelCandidates } from '../../../utils/rankingUtils';
+import { rankChannelsByAffinity, toChannelCandidates } from '../../../utils/rankingUtils';
 import { useAffinityCallback } from '../../../hooks/useAffinityCallback';
 import { FullPageSnackbar } from '../ChatDirectory/FullPageSnackbar';
 import { ChannelCategory } from '../ChatDirectory/ChatDirectory.types';
@@ -174,11 +174,39 @@ function hasActiveFilters(
   );
 }
 
+// Any filter that narrows the search, beyond hasActiveFilters' people and places: with one set,
+// the page has a search to show even with nothing typed. The scope toggles, sort and rank profile
+// only shape a search, so they don't count.
+function narrowsSearch(filters: SearchResultsFilters): boolean {
+  return (
+    hasActiveFilters(filters) ||
+    !!filters.priority ||
+    filters.fromEmails.length > 0 ||
+    filters.toEmails.length > 0 ||
+    filters.mentionUserIds.length > 0 ||
+    filters.mentionChannelIds.length > 0 ||
+    filters.mentionUserGroupIds.length > 0 ||
+    filters.statuses.length > 0 ||
+    filters.boardIds.length > 0 ||
+    filters.tags.length > 0 ||
+    filters.entities.length > 0 ||
+    !!filters.dateRange ||
+    !!filters.after ||
+    !!filters.before
+  );
+}
+
 function toMessageType(value?: string): MessageType {
   return (Object.values(MessageType) as string[]).includes(value ?? '')
     ? (value as MessageType)
     : MessageType.USER;
 }
+
+// Marks each result card with its result id — the order the arrow keys walk.
+const RESULT_CARD_ATTR = 'data-result-card-id';
+// A control that owns the keys while it has focus.
+const FOCUSABLE_CONTROL =
+  'input, textarea, select, button, a[href], [contenteditable=""], [contenteditable="true"], [role="textbox"], [role="button"], [role="menu"], [role="menuitem"], [role="listbox"], [role="option"], [role="combobox"], [role="tab"]';
 
 /**
  * URL ⇄ filter-bar state. The palette hands the page its whole search through these params,
@@ -186,12 +214,6 @@ function toMessageType(value?: string): MessageType {
  * description of the search (UX-5). `query` and `display` are owned by the header input and
  * handled separately.
  */
-// Marks each result card with its result id — the order the arrow keys walk.
-const RESULT_CARD_ATTR = 'data-result-card-id';
-// A control that owns the keys while it has focus.
-const FOCUSABLE_CONTROL =
-  'input, textarea, select, button, a[href], [contenteditable=""], [contenteditable="true"], [role="textbox"], [role="button"], [role="menu"], [role="menuitem"], [role="listbox"], [role="option"], [role="combobox"], [role="tab"]';
-
 const SORT_VALUES: ReadonlyArray<SearchResultsFilters['sortBy']> = [
   'relevance',
   'newest',
@@ -299,18 +321,31 @@ const SearchResults = (): ReactElement => {
   // Partition channels into starred / regular / DMs — mirrors cmdK's allChannels build exactly.
   // Like cmdK, match over every channel (not just the sidebar's visible set) so channels the
   // user hasn't joined are found too; visible channels keep their sidebar data.
+  // Each group ranked as cmdK ranks it (GlobalCommandMenu): by affinity, then recency — the order
+  // its resting list shows and its ties keep. EMAIL/desk channels, which groupChannelsByScope
+  // leaves to Desk, join the channels as they do there.
   const allChannelStatuses = useUserChannelStatuses();
+  const affinityVersion = useAffinityCallback();
   const {
     starred: starredChannels,
     channels: regularChannels,
     directMessages: dmChannels,
   } = useMemo(() => {
+    void affinityVersion;
     const visibleById = new Map(allChannels.map(channel => [channel.id, channel]));
     const searchableChannels = allChannelsForNav.map(
       channel => visibleById.get(channel.id) ?? channel,
     ) as VisibleChannel[];
-    return groupChannelsByScope(searchableChannels, allChannelStatuses);
-  }, [allChannels, allChannelsForNav, allChannelStatuses]);
+    const grouped = groupChannelsByScope(searchableChannels, allChannelStatuses);
+    return {
+      starred: rankChannelsByAffinity(grouped.starred),
+      channels: rankChannelsByAffinity([
+        ...grouped.channels,
+        ...searchableChannels.filter(channel => isDeskChannelType(channel.type)),
+      ]),
+      directMessages: rankChannelsByAffinity(grouped.directMessages),
+    };
+  }, [allChannels, allChannelsForNav, allChannelStatuses, affinityVersion]);
 
   const allChannelsWithCategory = useMemo((): Array<{
     channel: Channel;
@@ -331,12 +366,6 @@ const SearchResults = (): ReactElement => {
     for (const ch of regularChannels) {
       result.push({ channel: ch, category: ChannelCategory.CHANNELS, searchableNames: [ch.name] });
     }
-    // EMAIL/desk channels are excluded by groupChannelsByScope (they live in Desk). Re-include them
-    // as CHANNELS from the full set (useAllChannels) — like GlobalCommandMenu — since desk channels
-    // aren't in useAllVisibleChannels.
-    for (const ch of allChannelsForNav.filter(channel => isDeskChannelType(channel.type))) {
-      result.push({ channel: ch, category: ChannelCategory.CHANNELS, searchableNames: [ch.name] });
-    }
     for (const ch of dmChannels) {
       const dmNames = getDMNames(ch, currentUserId, usersById);
       result.push({
@@ -347,7 +376,7 @@ const SearchResults = (): ReactElement => {
       });
     }
     return result;
-  }, [starredChannels, regularChannels, dmChannels, allChannelsForNav, currentUserId, usersById]);
+  }, [starredChannels, regularChannels, dmChannels, currentUserId, usersById]);
 
   // Reuse this component's existing usersById + allUserGroups (no re-subscription) to resolve
   // each mention chip's display forms for result highlighting.
@@ -698,11 +727,6 @@ const SearchResults = (): ReactElement => {
   );
   handleFiltersChangeRef.current = handleFiltersChange;
 
-  // Editing the query in the header re-runs the search through the URL, the same path a
-  // cmd+K search takes, so back/forward and the overlay's query restore keep working.
-  // Filters live in their own params and are deliberately left untouched. Safe to write
-  // separately: this runs from a user event, not alongside the combined effect above.
-  /** Commit a query to the URL. Always replaces — see the sync effect above. */
   // Collapse back into the Cmd+K modal, carrying the search as it stands on this page. The palette
   // shrinks down from here, over wherever the user expanded from.
   // One collapse at a time: a second click before the palette covers the page is ignored.
@@ -711,13 +735,17 @@ const SearchResults = (): ReactElement => {
   // and the one drawn as selected, which the arrow keys move on from.
   const selectedResultIdRef = useRef<string | null>(null);
   const shownResultIdRef = useRef<string | null>(null);
-  // The search as it stands on this page, for the palette a collapse opens: this page's query and
-  // filters (from its own router location — a Back has already moved the window's URL on), with
-  // the selection, so the palette opens on the result selected here.
+  // The search as it stands on this page, for the palette a collapse opens: this page's filters
+  // (from its own router location — a Back has already moved the window's URL on), the text in its
+  // search box (the URL only takes a query once a search for it finds something), and the
+  // selection, so the palette opens on the result selected here.
   const locationSearchRef = useRef('');
   locationSearchRef.current = searchParams.toString();
   const searchToCarry = useCallback((): string => {
     const params = new URLSearchParams(locationSearchRef.current);
+    const text = searchTextRef.current.trim();
+    if (text) params.set('query', text);
+    else params.delete('query');
     if (selectedResultIdRef.current) params.set(SELECTED_RESULT_PARAM, selectedResultIdRef.current);
     else params.delete(SELECTED_RESULT_PARAM);
     return `?${params.toString()}`;
@@ -746,6 +774,11 @@ const SearchResults = (): ReactElement => {
     collapseToCmdk(searchToCarry(), returnTo);
   };
 
+  // Editing the query in the header re-runs the search through the URL, the same path a
+  // cmd+K search takes, so back/forward and the overlay's query restore keep working.
+  // Filters live in their own params and are deliberately left untouched. Safe to write
+  // separately: this runs from a user event, not alongside the combined effect above.
+  /** Commit a query to the URL. Always replaces — see the sync effect above. */
   const handleQuerySubmit = useCallback(
     (next: string) => {
       if (next === query) return;
@@ -816,7 +849,7 @@ const SearchResults = (): ReactElement => {
   // lifts onto the real results rather than the placeholder list this page paints first.
   const sawSearchRef = useRef(false);
   useEffect(() => {
-    if (!query && !filtersActive) {
+    if (!query && !narrowsSearch(filters)) {
       markFullPageReady();
       return;
     }
@@ -825,7 +858,7 @@ const SearchResults = (): ReactElement => {
       return;
     }
     if (sawSearchRef.current) markFullPageReady();
-  }, [query, filtersActive, isSearchPending, isLoading, localResultsPending]);
+  }, [query, filters, isSearchPending, isLoading, localResultsPending]);
 
   // Full page with nothing searched shows the palette's recents, the same list the modal shows.
   const recentSearches = useRecentSearches({
@@ -842,8 +875,9 @@ const SearchResults = (): ReactElement => {
     },
   });
   // Choosing a recent runs it here, as choosing one in the modal fills and runs it there.
+  // In place, as a submitted query is (handleQuerySubmit): a new search, not a step to go back to.
   const runRecent = (entry: RecentSearchEntry): void => {
-    setSearchParams(resultsParamsForQuery(entry));
+    setSearchParams(resultsParamsForQuery(entry), { replace: true });
   };
   const recentsContent =
     recentSearches.recents.length > 0 ? (
@@ -871,8 +905,7 @@ const SearchResults = (): ReactElement => {
 
   // Nothing searched on the All tab shows what Cmd+K shows at rest, from the same channel list and
   // the same ranking: Starred, then the recents, then every other conversation by affinity.
-  const browsing = !displayQuery && !filtersActive && filters.docType === 'all';
-  const affinityVersion = useAffinityCallback();
+  const browsing = !displayQuery && !narrowsSearch(filters) && filters.docType === 'all';
   const browseChannels = useMemo<BrowseChannels | null>(() => {
     void affinityVersion;
     if (!browsing) return null;
@@ -890,21 +923,15 @@ const SearchResults = (): ReactElement => {
   // The result highlighted in the palette when it expanded, kept highlighted here.
   const carriedResultId = searchParams.get(SELECTED_RESULT_PARAM);
 
-  // The selected result, as in the palette: it starts on the carried one, follows the pointer and
-  // the arrow keys, and Enter opens it once the arrows have been used. Drawn on the cards directly
-  // (paintSelection), as the palette draws its rows, so the pointer crossing the cards never
-  // re-renders the page.
+  // The selected result: starts on the carried one, follows the pointer and the arrows.
   const selectionRef = useRef<string | null>(carriedResultId);
   // The query box: the arrows and Enter it gets move and open the selection.
   const queryBoxRef = useRef<HTMLDivElement>(null);
   // What the drawing depends on besides the cards: nothing searched, and the search settled.
   const selectionContextRef = useRef({ browsing: false, settled: false });
 
-  // Something is always shown selected, as in the palette: the selection, else — its card is not
-  // on the page (the carried result may not be among these results) — the first card. Only once
-  // the search has settled: the list painted before that can be a placeholder. With nothing
-  // searched nothing is, as in the palette at rest, until the pointer or the arrows pick a card.
-  // The selection itself is kept, so collapsing still carries it back to the palette.
+  // Selection is painted in the DOM so pointer moves don't re-render; shown = selection if on page,
+  // else first card once settled, none at rest. The selection itself is kept for the collapse.
   const paintSelection = useCallback((): void => {
     const cards = Array.from(document.querySelectorAll<HTMLElement>(`[${RESULT_CARD_ATTR}]`));
     const ids = cards.map(card => card.getAttribute(RESULT_CARD_ATTR));
@@ -968,9 +995,8 @@ const SearchResults = (): ReactElement => {
     settled: !isSearchPending && !isLoading && !localResultsPending,
   };
 
-  // ↑/↓ move the selection through the cards; Enter opens it, but only after the arrows moved it —
-  // until then Enter in the query box still runs the search. The query box's typeahead keeps the
-  // arrows while it is open (it prevents them first).
+  // ↑/↓ move the selection; Enter opens it only after the arrows were used (until then Enter in the
+  // query box runs the search). An open typeahead keeps the arrows (it prevents them first).
   useEffect(() => {
     if (isMobile) return;
     let navigating = false;
@@ -1692,10 +1718,16 @@ function ResultsBody({
     if (!query.trim()) setExpandedCategories(new Set());
   }, [query]);
 
-  const toggleExpand = (key: string): void => {
+  // A section holding the carried result opens for it, once: "See less" still closes it.
+  const [carryClosed, setCarryClosed] = useState<ReadonlySet<string>>(() => new Set());
+  useEffect(() => setCarryClosed(new Set()), [highlightId]);
+  const sectionExpanded = (key: string, holdsCarried: boolean): boolean =>
+    expandedCategories.has(key) || (holdsCarried && !carryClosed.has(key));
+  const toggleSection = (key: string, expanded: boolean): void => {
+    if (expanded) setCarryClosed(prev => new Set(prev).add(key));
     setExpandedCategories(prev => {
       const next = new Set(prev);
-      if (next.has(key)) next.delete(key);
+      if (expanded) next.delete(key);
       else next.add(key);
       return next;
     });
@@ -1918,19 +1950,17 @@ function ResultsBody({
     // both as TicketCardV2 (single onClick) avoids the message-bubble's embedded ticket
     // widget fighting the card click for board tickets.
     if (isTicket && ticketSummary) {
+      // The wrapper opens it — the card's own button bubbles here — so Enter, which activates a
+      // card's first element, opens tickets too.
       return (
         <div
           key={key}
           className='w-full'
+          onClick={() => onOpenResult(result)}
           data-track-category='SEARCH_RESULTS'
           data-track-name='OPEN_DESK_TICKET_RESULT'
         >
-          <TicketCardV2
-            ticket={ticketSummary}
-            isConversation
-            width='max-w-none w-full'
-            onClick={() => onOpenResult(result)}
-          />
+          <TicketCardV2 ticket={ticketSummary} isConversation width='max-w-none w-full' />
         </div>
       );
     }
@@ -2046,7 +2076,7 @@ function ResultsBody({
       // A result carried over from the palette is never left behind "See more".
       const holdsCarried =
         !!highlightId && items.slice(limit).some(({ channel: c }) => c.id === highlightId);
-      const isExpanded = expandedCategories.has(sectionKey) || holdsCarried;
+      const isExpanded = sectionExpanded(sectionKey, holdsCarried);
       const hasMore = collapsible && items.length > limit;
       const displayItems = !isExpanded && hasMore ? items.slice(0, limit) : items;
       const hiddenCount = items.length - limit;
@@ -2062,7 +2092,7 @@ function ResultsBody({
           </div>
           {hasMore && (
             <button
-              onClick={() => toggleExpand(sectionKey)}
+              onClick={() => toggleSection(sectionKey, isExpanded)}
               className='mt-2 px-1 text-xs text-muted-foreground hover:text-foreground hover:underline'
               data-track-category='SEARCH_RESULTS'
               data-track-name='TOGGLE_LOCAL_SECTION'
@@ -2077,10 +2107,11 @@ function ResultsBody({
     // Renders the collapsible Users section — label HAS count (mirrors cmdK: "Users (N)")
     const renderUserSection = (): ReactElement | null => {
       if (userResults.length === 0) return null;
-      const isExpanded =
-        expandedCategories.has('user') ||
-        (!!highlightId &&
-          userResults.slice(LOCAL_SECTION_DISPLAY_LIMIT).some(user => user.id === highlightId));
+      const isExpanded = sectionExpanded(
+        'user',
+        !!highlightId &&
+          userResults.slice(LOCAL_SECTION_DISPLAY_LIMIT).some(user => user.id === highlightId),
+      );
       const hasMore = userResults.length > LOCAL_SECTION_DISPLAY_LIMIT;
       const displayItems =
         !isExpanded && hasMore ? userResults.slice(0, LOCAL_SECTION_DISPLAY_LIMIT) : userResults;
@@ -2093,7 +2124,7 @@ function ResultsBody({
           <div className='space-y-2'>{displayItems.map(result => renderCard(result))}</div>
           {hasMore && (
             <button
-              onClick={() => toggleExpand('user')}
+              onClick={() => toggleSection('user', isExpanded)}
               className='mt-2 px-1 text-xs text-muted-foreground hover:text-foreground hover:underline'
               data-track-category='SEARCH_RESULTS'
               data-track-name='TOGGLE_USERS_SECTION'

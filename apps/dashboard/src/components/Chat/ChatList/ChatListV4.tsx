@@ -40,7 +40,7 @@ import { getInitialMessageFromConversation } from '../../../utils/conversationMe
 import { usePendingForChannel, buildPendingChannelConversation } from '@xyne/shared/messages';
 import { useEphemeralChannelConversations } from '../../../hooks/useEphemeralMessages';
 import { MessageHoverToolbar } from '../HoverActionsToolbar/MessageHoverToolbar';
-import { usePageCoverage } from '../../../hooks/usePageCoverage';
+import { afterTransition, usePageCoverage } from '../../../hooks/usePageCoverage';
 
 export type ChatListProps = {
   channelId: string;
@@ -1085,9 +1085,9 @@ const ChatListV4: React.FC<ChatListProps> = ({
   }, [channelId, latestConversations, latestConversationsDetails.type, isInitialLoadComplete]);
 
   // ── Mark as read on unmount ────────────────────────────────────────────────────
-  // Covered by full-page search counts as leaving: unmounting while covered (the user went on from
-  // full page) marks the channel viewed as of when it was covered, so what arrived meanwhile stays
-  // unread. Marked then rather than on covering, which would put the write in the expand.
+  // Covered by full-page search counts as leaving: the channel is marked viewed as it is covered —
+  // written once the expand is over, so the write stays out of the animation — and unmounting while
+  // still covered marks nothing more, so what arrives while the user searches stays unread.
   const coverage = usePageCoverage();
   useEffect(() => {
     if (!channelId) return;
@@ -1108,14 +1108,27 @@ const ChatListV4: React.FC<ChatListProps> = ({
       };
       void zero.mutate(mutators.channel.markChannelAsViewed(payload));
     };
-    let coveredAt: number | null = null;
+    // The mark owed for being covered, until it is written.
+    let owed: { at: number; cancel: () => void } | null = null;
+    const payOwed = (): void => {
+      if (!owed) return;
+      const { at, cancel } = owed;
+      owed = null;
+      cancel();
+      markViewed(at);
+    };
     const stopWatching = coverage.subscribe(covered => {
-      coveredAt = covered ? Date.now() : null;
+      owed?.cancel();
+      owed = null;
+      if (!covered) return;
+      const at = Date.now();
+      owed = { at, cancel: afterTransition(payOwed) };
     });
 
     return () => {
       stopWatching();
-      markViewed(coverage.isCovered() ? (coveredAt ?? Date.now()) : Date.now());
+      if (coverage.isCovered()) payOwed();
+      else markViewed(Date.now());
     };
   }, [channelId, coverage]);
 

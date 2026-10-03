@@ -1,12 +1,4 @@
-/**
- * The Cmd+K palette growing into the full-page results screen, and shrinking back into it.
- *
- * Full page is still the `/search-results` route. What makes it read as one surface is the
- * motion: expanding animates the palette's own box out to the area the route renders into,
- * then hands off to the route underneath; collapsing reopens the palette at that size and
- * animates it back down. The route stays the source of truth, so deep links, back/forward and
- * the side panel are untouched.
- */
+// Cmd+K <-> /search-results: the grow morph, the collapse stand-in, and the Back hold.
 import { searchMetricsService } from '../../../services/searchMetricsService';
 import { DEFAULT_SEARCH_FILTERS } from '../../../hooks/useSearchResultsScreen';
 import {
@@ -237,10 +229,12 @@ function resultsSkeleton(query: string): HTMLElement {
     easing: 'ease',
     fill: 'forwards',
   });
+  // Finite, so it ends on its own once the palette has closed: it covers the longest hand-off (the
+  // route and the page's search, each given up on after 3s).
   list.animate([{ opacity: 1 }, { opacity: 0.55 }, { opacity: 1 }], {
     duration: 1400,
     delay: MORPH_MS,
-    iterations: Infinity,
+    iterations: 5,
     easing: 'ease-in-out',
   });
   return root;
@@ -329,10 +323,8 @@ function shrinkFromFullPage(el: HTMLElement, from: Box): void {
   // Where its layout box sits before that transform moves it.
   const originLeft = to.left - base.e;
   const originTop = to.top - base.f;
-  // The transform in an animation of its own, so the compositor runs it: a collapse lands while
-  // the page it returns to is still rendering, and a main-thread shrink would drop most of its
-  // frames to that work. The corners and shadow follow on the main thread, where a dropped frame
-  // barely shows. No fill: once it lands, the palette's own classes take over again.
+  // Transform-only so it runs on the compositor; corners and shadow follow on the main thread. No
+  // fill: once it lands, the palette's own classes take over again.
   el.animate(
     [
       {
@@ -422,19 +414,8 @@ export function whenCollapseSettled(timeoutMs: number): Promise<void> {
 }
 
 // ─── Collapse stand-in ──────────────────────────────────────────────────────
-//
-// The page a collapse returns to can take a long time to render, and that render blocks the main
-// thread — React even renders a Back synchronously. Rather than wait for it with nothing moving,
-// a collapse starts at once with a stand-in drawn outside React: the full-page layer hidden off the
-// page it returns to, and a blank palette card that shrinks from full page to the modal on the
-// compositor (transform only), so it stays smooth through whatever renders underneath. The real
-// palette mounts at rest under the card and takes its place once the card has landed and the
-// palette has its search to show, so the palette is only ever seen once, already filled.
-//
-// The page underneath is the one full page was drawn over, mounted and live the whole time (see
-// FullPageKeepAliveOutlet), so hiding the layer shows it as it is, ahead of the route change. Only
-// when there is no such page (full page was loaded directly) does a plain cover clear the results
-// instead, lifting once the page is there.
+// A DOM card shrinks on the compositor while the returning page renders; the palette mounts under
+// it and takes over once it has landed, filled. With no page kept under full page, a cover instead.
 
 interface CollapseStandIn {
   /** Null once the palette has taken the card over (see `landingCard`). */
@@ -584,8 +565,7 @@ function startCollapseStandIn(then: () => void): void {
     zIndex: '10000',
   });
   document.body.append(card);
-  // Transform alone in its own animation, so the compositor can run it while the main thread is
-  // busy; the corners and shadow follow on the main thread, where a dropped frame barely shows.
+  // Split as in shrinkFromFullPage.
   card.animate(
     [
       {
@@ -604,12 +584,10 @@ function startCollapseStandIn(then: () => void): void {
     ],
     { duration: MORPH_MS, easing: MORPH_EASE, fill: 'forwards' },
   );
-  // The layer comes off in the same frame the card first shows, so the page it returns to is what
-  // the card shrinks over from the start. (Drawn ahead, that is just a repaint.)
+  // The layer comes off in the card's first frame, so the card shrinks over the page underneath.
   if (under) liftLayer(under);
   standIn = { card, cover, under, timer: setTimeout(removeStandIn, STAND_IN_MAX_MS) };
-  // Two frames for the stand-in to reach the screen before the palette's own render takes the
-  // main thread.
+  // Two frames to paint the stand-in before the palette's render takes the main thread.
   requestAnimationFrame(() => requestAnimationFrame(then));
 }
 
@@ -675,11 +653,7 @@ export function armCollapseFromFullPage(): void {
   pendingCollapse = { from: fullPageBox() };
 }
 
-// A Back from the results page onto the palette's own entry collapses exactly like the collapse
-// button. React renders a Back synchronously inside the popstate event — the page it lands on in
-// one blocking pass — so the event is held back: the palette collapses first, over the results
-// page it still has, and once it has landed the event is let through to the router (and every
-// other listener) as if it had just arrived.
+// Hold a Back onto the palette's entry until the collapse lands, then replay it to the router.
 let replayingPopState = false;
 // The results page that is up, if any: hands over its search as it stands, for the palette.
 let fullPageWatcher: { currentSearch: () => string } | null = null;

@@ -394,9 +394,6 @@ type MentionGroupKey = (typeof MENTION_GROUPS)[number]['key'];
 const MENTION_GROUP_PAGE = 5;
 const MENTION_GROUP_MAX = 20;
 
-// The flat ALL view's merged people+channel list (MERGED_DISPLAY_LIMIT, MERGED_CANDIDATE_LIMIT):
-// its entries are the ones the per-category sections would have rendered — it only changes their
-// order.
 /** expandedCategories key for the merged section — not a ChannelCategory, it spans types. */
 const MERGED_CATEGORY = 'merged-people-channels';
 
@@ -690,7 +687,7 @@ const ChannelCommandMenuContent = ({
   const ticketViewName = ticketView?.viewName ?? null;
 
   // The top-bar palette (screen mode, tabs hidden) always routes to the results page;
-  // the default cmd+K popup renders results inline. Both show the "Show results for"
+  // the default cmd+K popup renders results inline. Both show the "Expand to full-page search"
   // row, but only the screen palette lets it own the default Enter target.
   const isScreenPalette = hideTabs && searchMode === 'screen';
 
@@ -722,7 +719,11 @@ const ChannelCommandMenuContent = ({
   const growingToFullPageRef = useRef(false);
   growingToFullPageRef.current = growingToFullPage;
 
-  // How this Cmd+K session ends, for the open-size policy: in full page once it expands.
+  // Platform detection - needs to be before useEffects that depend on it
+  const { isMobile } = usePlatform();
+
+  // How this Cmd+K session ends, for the open-size policy: in full page once it expands. Not
+  // recorded on mobile, where the policy never applies (see GlobalCommandMenu).
   const endedInFullPageRef = useRef(false);
   const wasOpenRef = useRef(open);
   useEffect(() => {
@@ -732,7 +733,7 @@ const ChannelCommandMenuContent = ({
       if (!wasOpen) endedInFullPageRef.current = false;
       return;
     }
-    if (!wasOpen || !fullPageSearch || !workspaceId) return;
+    if (!wasOpen || !fullPageSearch || !workspaceId || isMobile) return;
     recordSessionEnd(
       { workspaceId, userId: currentUserID, searchSessionId },
       endedInFullPageRef.current ? 'full' : 'modal',
@@ -1584,7 +1585,7 @@ const ChannelCommandMenuContent = ({
     setPayload,
   ]);
 
-  // Leave the palette for the full-screen results page via the "Show results for" row.
+  // Leave the palette for the full-screen results page via the "Expand to full-page search" row.
   // Logged as its own event so the jump-out rate is readable per palette and trigger.
   const goToSearchResults = (
     trigger: 'click' | 'keyboard',
@@ -1654,16 +1655,15 @@ const ChannelCommandMenuContent = ({
       setGrowingToFullPage(false);
       onOpenChange(false);
     };
-    // Mobile has no modal size to grow from — the palette is already full screen.
+    // Mobile has no modal size to grow from — the palette is already full screen — and the top
+    // bar's inline palette sits in a popover, not over the page.
     const root = commandRef.current;
-    if (!root || isMobile) {
+    if (!root || isMobile || inline) {
       leave();
       void navigate(resultsUrl);
       return;
     }
-    // The palette grows over the page, then navigates while it still covers it. It only lifts
-    // once the results route has rendered underneath (the effect on the location), because the
-    // router applies navigations as transitions and can keep the old page up for a while.
+    // Grow, navigate, lift only once the results route has rendered (the effect on the location).
     growingToFullPageRef.current = true;
     setGrowingToFullPage(true);
     void growToFullPage(root).then(() => {
@@ -1779,9 +1779,6 @@ const ChannelCommandMenuContent = ({
   // (CSS :hover on one item + aria-selected on another) when mouse is already resting in the dialog area
   const [suppressHover, setSuppressHover] = useState(false);
   const hasNavigatedRef = useRef(false);
-
-  // Platform detection - needs to be before useEffects that depend on it
-  const { isMobile } = usePlatform();
 
   // Suppress hover on open to prevent dual-highlight when mouse is already in dialog area
   useEffect(() => {
@@ -2787,9 +2784,11 @@ const ChannelCommandMenuContent = ({
     // Skip user/channel opens — recents capture content searches, not navigation to a person/channel.
     if (result.type !== 'user' && result.type !== 'channel') recentSearches.save();
     // Remember what this result was found with, so reopening Cmd+K straight after brings it back.
-    // Content results only, like recents: jumping to a person or channel is navigation.
+    // Content results only, like recents: jumping to a person or channel is navigation. Not from a
+    // Cmd+F search: it is scoped to where it was opened and never teaches the policy.
     if (
       fullPageSearch &&
+      sessionOrigin === 'search' &&
       workspaceId &&
       result.type !== 'user' &&
       result.type !== 'channel' &&
@@ -3238,7 +3237,7 @@ const ChannelCommandMenuContent = ({
     mentionSearchType,
     commandActive,
     // Adding/removing a chip flips the resting Enter target between the first result and
-    // the "Show results for" row, so the auto-select has to re-run.
+    // the "Expand to full-page search" row, so the auto-select has to re-run.
     selectedMentions.length,
     // `commandText` is a dep (not read in the body) so the first-row auto-select
     // re-fires as the `/` command list / user picker narrows while typing.
@@ -3548,7 +3547,7 @@ const ChannelCommandMenuContent = ({
   );
 
   // Render the plain-search USERS section. Extracted so it can be rendered
-  // above the "Show results for" row when there is a strong user match.
+  // above the "Expand to full-page search" row when there is a strong user match.
   const renderSearchUsersSection = () =>
     (activeTab === TabType.ALL || activeTab === TabType.USERS) &&
     showGroupedUsers &&
@@ -4449,7 +4448,7 @@ const ChannelCommandMenuContent = ({
     const enterTarget =
       activeItem ??
       (commandRef.current?.querySelector(
-        // In the popup the pinned "Show results for" row is the first item in the DOM,
+        // In the popup the pinned "Expand to full-page search" row is the first item in the DOM,
         // so exclude it here — the resting Enter target is still the first real result.
         isScreenPalette
           ? '[cmdk-item]:not([aria-disabled="true"])'
@@ -4499,7 +4498,7 @@ const ChannelCommandMenuContent = ({
       },
     });
 
-  // "Show results for: <chips> <query>" — the row that leaves the palette for the
+  // "Expand to full-page search: <chips> <query>" — the row that leaves the palette for the
   // full-screen results page. Rendered in both palettes; where it sits in the list is
   // decided at the call sites below. Never in the inline/context-selection palettes
   // (Ask AI context picker, thread-panel context) — navigating away would hijack the
@@ -4975,7 +4974,7 @@ const ChannelCommandMenuContent = ({
               // position is communicated by aria-selected, never by a ring here.
               'flex-1 overflow-y-auto px-4 pt-3 pb-6 focus:outline-none focus-visible:outline-none',
               '[&_[cmdk-item]]:scroll-mb-[30px]',
-              // The pinned "Show results for" row is exempt: it sits where the cursor
+              // The pinned "Expand to full-page search" row is exempt: it sits where the cursor
               // rests when the palette opens, and its first click must land even before
               // any mousemove clears suppressHover. Result rows keep the guard.
               suppressHover && '[&_[cmdk-item]:not([data-show-results-item])]:pointer-events-none',
@@ -5009,7 +5008,7 @@ const ChannelCommandMenuContent = ({
                 {/* Best local matches pinned to the top of the list — both popup and
                     screen. Starred leads; the strong-matched user/channel then becomes
                     the default Enter target (Slack-style). In screen mode these sit
-                    above the "Show results for" row below. */}
+                    above the "Expand to full-page search" row below. */}
 
                 {/* Screen palette: the row stays below the hoisted best matches, which
                     own the Enter target there. */}
