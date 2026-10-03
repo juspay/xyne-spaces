@@ -1,6 +1,12 @@
 import type { ThreadTypeEntry } from '@xyne/shared';
 
 /**
+ * Citations kept per type, matching "never cite more than three" in the prompt below.
+ * Shared by the LLM path and the Jev path, which cap their citations the same way.
+ */
+export const MAX_SOURCES_PER_TYPE = 3;
+
+/**
  * The classifier prompt is GENERATED from the workspace's vocabulary rather than written out
  * by hand. Nothing here names a thread type — a hand-copied list is the classic way for a
  * prompt to drift out of sync with the values that will actually be accepted.
