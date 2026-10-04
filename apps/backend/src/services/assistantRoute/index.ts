@@ -104,10 +104,12 @@ export const routeAssistantMessage = async (
   const config = await getConfig(ctx);
   if (!config?.enabled) return finish({ route: 'unavailable' });
 
-  // Shuffled against position bias.
-  const criteria: Record<string, string> = {};
-  for (const action of shuffle(actions)) criteria[action.id] = action.description;
-  criteria[NONE_ID] = NONE_DESCRIPTION;
+  // Shuffled against position bias. Built with fromEntries, not `criteria[id] =`: ids come from
+  // the request, and fromEntries defines own keys without going through prototype setters.
+  const criteria: Record<string, string> = Object.fromEntries([
+    ...shuffle(actions).map((action) => [action.id, action.description]),
+    [NONE_ID, NONE_DESCRIPTION],
+  ]);
   const question: JevChoiceQuestion = { type: 'choice', instructions: INSTRUCTIONS, criteria };
 
   const answers = await askJev({ text: text.trim() }, { action: question }, TIMEOUT_MS, signal);
