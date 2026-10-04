@@ -1908,6 +1908,7 @@ const ChatDirectory = ({
 
       <ChannelCommandMenu
         aiOverview
+        globalShortcuts={false}
         channels={channels}
         starred={starred}
         directMessages={directMessages}

@@ -143,11 +143,22 @@ export class SearchService {
    * Null means "no verdict" (feature off, clearly lexical, or classifier down).
    */
   async getQueryIntent(query: string, signal?: AbortSignal): Promise<QueryIntent | null> {
+    // Kept with the handoff search (see cachedVespaSearch): the palette coming back from full page
+    // asks again for the query it just classified.
+    if (cachedQueryIntent?.query === query && cachedQueryIntent.expiresAt > Date.now()) {
+      return cachedQueryIntent.value;
+    }
     const response = await apiInstance.get<{ success: boolean; data: QueryIntent | null }>(
       `${this.vespaBaseUrl}/intent`,
       { params: { q: query }, ...(signal ? { signal } : {}) },
     );
-    return response.data.success ? response.data.data : null;
+    if (!response.data.success) return null;
+    cachedQueryIntent = {
+      query,
+      value: response.data.data,
+      expiresAt: Date.now() + VESPA_SEARCH_CACHE_TTL_MS,
+    };
+    return response.data.data;
   }
 
   /**
@@ -425,12 +436,16 @@ type VespaSearchResult = Awaited<ReturnType<SearchService['vespaSearch']>>;
 // always fetches fresh — only the in-flight handoff survives. Module state is also wiped on
 // the hard reload a workspace switch triggers, so there is no cross-workspace leak.
 let cachedVespaSearch: { key: string; value: VespaSearchResult; expiresAt: number } | null = null;
+// The last query's intent verdict, kept and cleared with the handoff search.
+let cachedQueryIntent: { query: string; value: QueryIntent | null; expiresAt: number } | null =
+  null;
 
 // Drop the handoff entry so the next search fetches fresh. Called when the cmd+K palette is
 // opened anew (not on the back-navigation restore), so a reopened palette never serves a
 // result cached by an earlier session.
 export function clearVespaSearchCache(): void {
   cachedVespaSearch = null;
+  cachedQueryIntent = null;
 }
 
 // Export singleton instance

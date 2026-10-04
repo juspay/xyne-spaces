@@ -12,6 +12,7 @@ import { AutomationStatusValues } from '../../Automation/Automation.types';
 import { Button } from '../../ui/Button/Button';
 import { Tooltip } from '../../ui/Tooltip/Tooltip';
 import { cn } from '../../../utils/classNames';
+import { usePollWhenShown } from '../../../hooks/usePageCoverage';
 
 interface MyAutoLabelRulesProps {
   channelId: string;
@@ -38,12 +39,14 @@ const backfillQueryKey = (automationId: string) =>
  * rule that never ran renders nothing.
  */
 function BackfillStatus({ automationId }: { automationId: string }): React.ReactElement | null {
+  // Not polled under full-page search, out of sight there, as leaving the page stopped it.
+  const shown = usePollWhenShown(backfillQueryKey(automationId));
   const { data } = useQuery({
     queryKey: backfillQueryKey(automationId),
     queryFn: () => fetchDeskLabelRuleBackfill(automationId),
     refetchInterval: query => {
       const state = query.state.data?.backfill?.state;
-      return state === 'queued' || state === 'running' ? 3000 : false;
+      return shown() && (state === 'queued' || state === 'running') ? 3000 : false;
     },
   });
 

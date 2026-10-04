@@ -41,6 +41,7 @@ import type {
   MemoryRange,
   RecallResult,
 } from '@/services/claw/digitalTwinTypes';
+import { usePollWhenShown } from './usePageCoverage';
 
 export interface DigitalTwinProposalGroup {
   subsystem: string;
@@ -124,12 +125,13 @@ export type UseClawDigitalTwinStatusResult = UseQueryResult<DigitalTwinStatus, E
 
 export const useClawDigitalTwinStatus = (): UseClawDigitalTwinStatusResult => {
   const { user } = useAuth();
+  const shown = usePollWhenShown(statusKey(user?.id));
   const query = useQuery({
     queryKey: statusKey(user?.id),
     queryFn: () => getDigitalTwinStatus(user!.id),
     enabled: !!user?.id,
-    // Poll every 10s while a backfill is in progress; idle otherwise.
-    refetchInterval: q => (backfillRunning(q.state.data) ? 10_000 : false),
+    // Poll every 10s while a backfill is in progress (and the page is shown); idle otherwise.
+    refetchInterval: q => (shown() && backfillRunning(q.state.data) ? 10_000 : false),
   });
   const backfillStalled = useBackfillStall(query.data, query.dataUpdatedAt);
   return { ...query, backfillStalled };

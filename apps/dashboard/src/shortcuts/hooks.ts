@@ -5,6 +5,7 @@ import type { ShortcutScope, ShortcutRegistration } from './shortcutsRegistry';
 import { getShortcut } from './catalog';
 import { isElectronApp } from '../utils/electronApp';
 import type { ShortcutDefinition, ShortcutId } from './catalog';
+import { usePageCoverage } from '../hooks/usePageCoverage';
 
 export const useShortcut = (
   keys: ShortcutRegistration['keys'],
@@ -13,6 +14,10 @@ export const useShortcut = (
 ): void => {
   const handlerRef = useRef(handler);
   const whenRef = useRef(config.when);
+  // A page kept mounted under full-page search is not on screen, so its shortcuts stay quiet
+  // until it is uncovered. A modal mutes only non-global scopes, and pages register bare letters
+  // (j/k, r/a…) as global; outside a kept page coverage is never set and nothing changes.
+  const coverage = usePageCoverage();
 
   useEffect(() => {
     handlerRef.current = handler;
@@ -31,9 +36,7 @@ export const useShortcut = (
       {
         ...registerConfig,
         // Use ref for `when` to avoid re-registration when function reference changes
-        ...(config.when && {
-          when: (event: KeyboardEvent) => whenRef.current?.(event) ?? true,
-        }),
+        when: (event: KeyboardEvent) => !coverage.isCovered() && (whenRef.current?.(event) ?? true),
       },
       event => {
         handlerRef.current(event);
@@ -47,9 +50,8 @@ export const useShortcut = (
     config.preventDefault,
     config.description,
     config.category,
-    // Only re-register when `when` is added or removed, not when reference changes
-    config.when !== undefined,
     config.enabled,
+    coverage,
   ]);
 };
 

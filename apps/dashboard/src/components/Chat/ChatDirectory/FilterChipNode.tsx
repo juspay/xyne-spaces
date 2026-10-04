@@ -272,7 +272,7 @@ export function ChannelChipGlyph({
 }
 
 /**
- * Exported so the palette's "Show detailed results for" row renders the *same* glyph as the
+ * Exported so the palette's "Expand to full-page search" row renders the *same* glyph as the
  * chip above it — it previously had a parallel copy that drifted on size and colour.
  */
 export function ChipIcon({ mentionData }: { mentionData: ChipData }): React.JSX.Element {

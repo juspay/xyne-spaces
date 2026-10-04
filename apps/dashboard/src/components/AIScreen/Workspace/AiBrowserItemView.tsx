@@ -15,6 +15,7 @@ import { artifactKindIcon, linkHost, providerLabel } from './artifactKinds';
 import { safeHttpUrl } from './safeHttpUrl';
 import { registerWorkspaceWebview } from './workspaceBrowserTools';
 import { SignInImportBar, looksLikeSignIn } from './SignInImportBar';
+import { UnmountWhenCovered } from '../../../hooks/usePageCoverage';
 
 import { usePublishViewerAction } from './viewerActions';
 import { InlineCommentThread, type InlineCommentTarget } from './InlineCommentThread';
@@ -32,6 +33,16 @@ const EDITABLE_PROVIDERS = new Set(['google_docs', 'google_sheets', 'google_slid
  * the registration that lets the agent's page tools drive it.
  */
 export function AiBrowserItemView({ item }: { item: WorkspaceItem }): ReactElement {
+  // Not under full-page search, as leaving the page took it: back on return with the page loaded
+  // anew, and nothing kept from the one before (the sign-in offer, a picked block, a comment).
+  return (
+    <UnmountWhenCovered fallback={<div className='h-full min-h-0 bg-background' />}>
+      <AiBrowserItem item={item} />
+    </UnmountWhenCovered>
+  );
+}
+
+function AiBrowserItem({ item }: { item: WorkspaceItem }): ReactElement {
   const url = safeHttpUrl(item.url ?? null);
   const [atSignIn, setAtSignIn] = useState(false);
   const [copied, setCopied] = useState(false);

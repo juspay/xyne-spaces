@@ -45,6 +45,7 @@ import { getInitialMessageFromConversation } from '../../../utils/conversationMe
 import { usePendingForChannel, buildPendingChannelConversation } from '@xyne/shared/messages';
 import { useEphemeralChannelConversations } from '../../../hooks/useEphemeralMessages';
 import { MessageHoverToolbar } from '../HoverActionsToolbar/MessageHoverToolbar';
+import { afterReturn, markWhenLeft, usePageCoverage } from '../../../hooks/usePageCoverage';
 
 export type ChatListProps = {
   channelId: string;
@@ -491,8 +492,12 @@ const ChatListV4: React.FC<ChatListProps> = ({
       const scrollElement = parentRef.current;
       if (!scrollElement) return false;
 
-      const conversationElement = document.getElementById(`conv-${conversationId}`);
-      if (!conversationElement || !scrollElement.contains(conversationElement)) return false;
+      // Scoped to this list: the same conversation can also be rendered elsewhere in the document
+      // (a page kept mounted, hidden, under full-page search).
+      const conversationElement = scrollElement.querySelector(
+        `#${CSS.escape(`conv-${conversationId}`)}`,
+      );
+      if (!conversationElement) return false;
 
       const scrollRect = scrollElement.getBoundingClientRect();
       const conversationRect = conversationElement.getBoundingClientRect();
@@ -1106,15 +1111,25 @@ const ChatListV4: React.FC<ChatListProps> = ({
   }, [channelId, latestConversations, latestConversationsDetails.type, isInitialLoadComplete]);
 
   // ── Mark as read on unmount ────────────────────────────────────────────────────
+  // Full-page search covering the channel counts as leaving it (markWhenLeft), so what arrives
+  // while the user searches stays unread; the route coming back to it marks it read again, as
+  // reopening it would. The skip flags hold until unmount: a cover is not the end of the page's
+  // skip. The Activity flag is app-wide and goes to the first list that reads it, so this one takes
+  // it as it leaves — a list opened meanwhile (full page's side panel) neither sees nor uses it up.
+  const coverage = usePageCoverage();
+  const activitySkipRef = useRef(false);
   useEffect(() => {
     if (!channelId) return;
 
-    return () => {
-      if (skipMarkAsReadRef?.current || activitySkipMarkAsReadChannelRef.current) {
-        skipMarkAsReadRef.current = false;
+    const skipped = (): boolean => {
+      if (activitySkipMarkAsReadChannelRef.current) {
         activitySkipMarkAsReadChannelRef.current = false;
-        return;
+        activitySkipRef.current = true;
       }
+      return !!skipMarkAsReadRef?.current || activitySkipRef.current;
+    };
+    const stopWatching = markWhenLeft(coverage, () => {
+      if (skipped()) return;
 
       const draft = getDraft(channelId, null);
       const payload = {
@@ -1124,8 +1139,22 @@ const ChatListV4: React.FC<ChatListProps> = ({
         draftMessage: draft || '',
       };
       void zero.mutate(mutators.channel.markChannelAsViewed(payload));
+    });
+    // No draft args, as on open: the composer's draft is saved when the channel is left. Once the
+    // collapse is over and the browser idle: the re-renders the write sets off must not land in it.
+    // Covered again by then (expanded straight back), that cover has marked it.
+    const stopReturning = afterReturn(coverage, () => {
+      if (skipped()) return;
+      void zero.mutate(mutators.channel.markChannelAsViewed({ channelId, timestamp: Date.now() }));
+    });
+
+    return () => {
+      stopWatching();
+      stopReturning();
+      skipMarkAsReadRef.current = false;
+      activitySkipRef.current = false;
     };
-  }, [channelId]);
+  }, [channelId, coverage]);
 
   // ── Mark as read once the list has loaded ─────────────────────────────────────
   // Without this the channel only counts as read on unmount, so the sidebar badge

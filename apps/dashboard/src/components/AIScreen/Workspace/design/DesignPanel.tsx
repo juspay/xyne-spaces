@@ -38,6 +38,7 @@ import {
   type DesignVersion,
 } from './designDocument';
 import { designSelectionPayload, useDesignStudio } from './designStudioContext';
+import { UnmountWhenCovered } from '../../../../hooks/usePageCoverage';
 
 const DEVICE_PRESETS = [
   { id: 'desktop', label: 'Desktop', width: null },
@@ -269,6 +270,8 @@ export function DesignPanel({ artifact, title }: DesignPanelProps): ReactElement
   const scrollRef = useRef(0);
   const selectionRef = useRef<DesignNodeSelection | null>(null);
   selectionRef.current = selection;
+  const inspectingRef = useRef(inspecting);
+  inspectingRef.current = inspecting;
   const onFrameLoad = useCallback((): void => {
     const frame = iframeRef.current?.contentWindow;
     if (!frame) return;
@@ -276,6 +279,10 @@ export function DesignPanel({ artifact, title }: DesignPanelProps): ReactElement
     if (y > 0) frame.postMessage({ type: DESIGN_SCROLL_RESTORE_EVENT, y }, '*');
     const current = selectionRef.current;
     if (current) frame.postMessage({ type: DESIGN_VERIFY_EVENT, selector: current.selector }, '*');
+    // A frame loaded again (back from full-page search) starts with inspecting off.
+    if (inspectingRef.current) {
+      frame.postMessage({ type: DESIGN_INSPECTOR_MODE_EVENT, enabled: true }, '*');
+    }
   }, []);
 
   const setPendingEdit = studio?.setPendingEdit;
@@ -448,16 +455,19 @@ export function DesignPanel({ artifact, title }: DesignPanelProps): ReactElement
           </pre>
         ) : (
           <div className='flex h-full w-full justify-center overflow-auto'>
-            <iframe
-              ref={iframeRef}
-              title={heading}
-              srcDoc={srcDoc}
-              onLoad={onFrameLoad}
-              sandbox='allow-scripts'
-              referrerPolicy='no-referrer'
-              style={frameStyle}
-              className='border-0 bg-white'
-            />
+            {/* Its scripts stop under full-page search, as leaving the page stopped them. */}
+            <UnmountWhenCovered fallback={<div style={frameStyle} className='bg-white' />}>
+              <iframe
+                ref={iframeRef}
+                title={heading}
+                srcDoc={srcDoc}
+                onLoad={onFrameLoad}
+                sandbox='allow-scripts'
+                referrerPolicy='no-referrer'
+                style={frameStyle}
+                className='border-0 bg-white'
+              />
+            </UnmountWhenCovered>
           </div>
         )}
         {selection && selectionStale && (

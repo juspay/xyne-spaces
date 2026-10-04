@@ -26,6 +26,7 @@ import { ShortcutHint } from '../ShortcutHint';
 import type { MentionResult } from '@xyne/shared';
 import { voiceInputService } from '../../../services/VoiceInput/voiceInputService';
 import type { VoiceStreamSession } from '../../../services/VoiceInput/voiceInputService';
+import { useStopWhenCovered } from '../../../hooks/usePageCoverage';
 
 const escapeRegex = (value: string): string => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
@@ -488,6 +489,8 @@ export const VoiceInput = forwardRef<VoiceInputHandle, VoiceInputProps>(
       if (recorder.state !== 'inactive') recorder.stop();
       setIsVoiceRecording(false);
     }, []);
+    // Under full-page search the mic button is out of reach: covering the composer stops it.
+    useStopWhenCovered(isVoiceRecording, stopVoiceRecording);
 
     const startVoiceRecording = useCallback(async (): Promise<void> => {
       if (!navigator.mediaDevices?.getUserMedia) {

@@ -6,6 +6,7 @@ import {
   type LabelUnreadFilters,
 } from '../../../api/conversationLabelsApi';
 import { websocketService } from '../../../services/clients/socketClient';
+import { usePollWhenShown } from '../../../hooks/usePageCoverage';
 
 /**
  * Unread-count queries for desk conversation labels. Mode A returns all-label
@@ -106,14 +107,17 @@ export const useLabelUnreadCounts = (channelId: string, enabled = true) => {
   const queryClient = useQueryClient();
   const isEnabled = !!channelId && enabled;
   const room = `label-unread-counts:channel:${channelId}`;
+  const queryKey = ['conversation-label-unread-counts', channelId];
+  const shown = usePollWhenShown(queryKey);
 
   const query = useQuery({
-    queryKey: ['conversation-label-unread-counts', channelId],
+    queryKey,
     queryFn: () => fetchConversationLabelUnreadCounts(channelId),
     enabled: isEnabled,
     staleTime: STALE_TIME,
-    refetchInterval: FALLBACK_REFETCH_INTERVAL_MS,
+    refetchInterval: () => (shown() ? FALLBACK_REFETCH_INTERVAL_MS : false),
     refetchIntervalInBackground: false,
+    refetchOnReconnect: () => shown(),
   });
 
   useEffect(() => {
@@ -127,9 +131,11 @@ export const useLabelUnreadCounts = (channelId: string, enabled = true) => {
         () => {
           invalidateTimer = null;
           if (cancelled) return;
-          // Prefix match covers both this hook's key and the filtered-count keys.
+          // Prefix match covers both this hook's key and the filtered-count keys. Under full-page
+          // search only marked stale: they fetch once the desk is shown again.
           void queryClient.invalidateQueries({
             queryKey: ['conversation-label-unread-counts', channelId],
+            refetchType: shown() ? 'active' : 'none',
           });
         },
         INVALIDATE_DEBOUNCE_MS + Math.random() * INVALIDATE_JITTER_MS,
@@ -178,7 +184,7 @@ export const useLabelUnreadCounts = (channelId: string, enabled = true) => {
       websocketService.removeListener('connect', handleSocketConnect);
       websocketService.emit('unsubscribe_from_label_unread_counts', { room });
     };
-  }, [channelId, isEnabled, queryClient, room]);
+  }, [channelId, isEnabled, queryClient, room, shown]);
 
   return query;
 };
@@ -200,16 +206,19 @@ export const useFilteredLabelUnreadCount = ({
     const normalized = normalizeLabelUnreadFilters(filters);
     return { normalizedFilters: normalized, filterKey: JSON.stringify(normalized ?? null) };
   }, [filters]);
+  const queryKey = ['conversation-label-unread-counts', channelId, 'filtered', labelId, filterKey];
+  const shown = usePollWhenShown(queryKey);
 
   return useQuery({
-    queryKey: ['conversation-label-unread-counts', channelId, 'filtered', labelId, filterKey],
+    queryKey,
     queryFn: () => {
       if (!labelId) throw new Error('labelId is required for the filtered label unread count');
       return fetchFilteredLabelUnreadCount({ channelId, labelId, filters: normalizedFilters });
     },
     enabled: !!channelId && !!labelId && enabled,
     staleTime: STALE_TIME,
-    refetchInterval: FALLBACK_REFETCH_INTERVAL_MS,
+    refetchInterval: () => (shown() ? FALLBACK_REFETCH_INTERVAL_MS : false),
     refetchIntervalInBackground: false,
+    refetchOnReconnect: () => shown(),
   });
 };

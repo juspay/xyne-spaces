@@ -7,6 +7,12 @@ import { apiInstance, BASE_URL } from '../../../services/clients/apiClient';
 import { showDownloadCompleteToast } from '../../../utils/downloadToast';
 import { globalClickTracker } from '../../../services/Analytics/globalClickTracker';
 import { errorKindOf } from '../DeskSettings/deskSettingsTracking';
+import {
+  afterReturn,
+  UnmountWhenCovered,
+  usePageCoverage,
+  watchShown,
+} from '../../../hooks/usePageCoverage';
 
 export interface DeskReportPanelProps {
   open: boolean;
@@ -73,19 +79,28 @@ export const DeskReportPanel: React.FC<DeskReportPanelProps> = ({
     [channelId],
   );
 
+  // Fetched as it opens, and again once the collapse back from full-page search is over, as
+  // coming back to the page fetched it.
+  const pageCoverage = usePageCoverage();
   useEffect(() => {
     if (!open) return;
     void fetchLatest();
-  }, [open, fetchLatest]);
+    return afterReturn(pageCoverage, () => void fetchLatest({ silent: true }));
+  }, [open, fetchLatest, pageCoverage]);
 
-  // Poll quietly while generating so the banner clears on its own.
+  // Poll quietly while generating so the banner clears on its own. Not under full-page search, out
+  // of sight there, as leaving the page stopped it.
   useEffect(() => {
     if (!open || !report?.generating) return;
+    const watch = watchShown(pageCoverage);
     const interval = setInterval((): void => {
-      void fetchLatest({ silent: true });
+      if (watch.shown()) void fetchLatest({ silent: true });
     }, 5000);
-    return (): void => clearInterval(interval);
-  }, [open, report?.generating, fetchLatest]);
+    return (): void => {
+      clearInterval(interval);
+      watch.stop();
+    };
+  }, [open, report?.generating, fetchLatest, pageCoverage]);
 
   const handleGenerateNow = useCallback(async () => {
     setSubmitting(true);
@@ -287,12 +302,15 @@ export const DeskReportPanel: React.FC<DeskReportPanelProps> = ({
                 )}
                 {/* Load via src: the /view route sends a strict CSP and inlines
                     avatars server-side, so no client fetch/inline is needed. */}
-                <iframe
-                  title='Desk report'
-                  src={report.url ? `${BASE_URL}${report.url}` : undefined}
-                  sandbox='allow-scripts'
-                  className='h-full w-full flex-1 border-0'
-                />
+                {/* Its scripts stop under full-page search, as leaving the page stopped them. */}
+                <UnmountWhenCovered fallback={<div className='h-full w-full flex-1' />}>
+                  <iframe
+                    title='Desk report'
+                    src={report.url ? `${BASE_URL}${report.url}` : undefined}
+                    sandbox='allow-scripts'
+                    className='h-full w-full flex-1 border-0'
+                  />
+                </UnmountWhenCovered>
               </div>
             )}
           </div>

@@ -13,6 +13,10 @@ import type {
   SearchTabClickEvent,
   SearchShowResultsEvent,
   SearchSurface,
+  SearchFullPageOpenEvent,
+  SearchSizePreferenceSwitchEvent,
+  SearchReturnBannerEvent,
+  SearchFullPageSnackbarEvent,
 } from '../types/searchEvents';
 import * as otelMetrics from './otel/searchMetrics';
 import { SEARCH_VERSION } from '../config';
@@ -301,6 +305,76 @@ class SearchMetricsService {
       filters_used: params.filtersUsed,
     };
     logger.info(Event.VESPA_SEARCH_SHOW_RESULTS, event as unknown as Record<string, unknown>);
+  }
+
+  /**
+   * Track each time cmd+K search is shown full page, by entry point. Log-only, like
+   * trackShowResults.
+   */
+  trackFullPageOpen(params: {
+    searchSessionId: string;
+    userId: string;
+    source: SearchFullPageOpenEvent['source'];
+  }): void {
+    const event: SearchFullPageOpenEvent = {
+      search_session_id: params.searchSessionId,
+      user_id: params.userId,
+      source: params.source,
+    };
+    logger.info(Event.VESPA_SEARCH_FULL_PAGE_OPEN, event as unknown as Record<string, unknown>);
+  }
+
+  /**
+   * Track a change of the learned cmd+K open size.
+   */
+  trackSizePreferenceSwitch(params: {
+    searchSessionId: string;
+    userId: string;
+    to: SearchSizePreferenceSwitchEvent['to'];
+    reason: SearchSizePreferenceSwitchEvent['reason'];
+  }): void {
+    const event: SearchSizePreferenceSwitchEvent = {
+      search_session_id: params.searchSessionId,
+      user_id: params.userId,
+      to: params.to,
+      reason: params.reason,
+    };
+    logger.info(
+      Event.VESPA_SEARCH_SIZE_PREFERENCE_SWITCH,
+      event as unknown as Record<string, unknown>,
+    );
+  }
+
+  /**
+   * Track the return banner being shown, clicked or dismissed.
+   */
+  trackReturnBanner(params: {
+    searchSessionId: string;
+    userId: string;
+    action: SearchReturnBannerEvent['action'];
+  }): void {
+    const event: SearchReturnBannerEvent = {
+      search_session_id: params.searchSessionId,
+      user_id: params.userId,
+      action: params.action,
+    };
+    logger.info(Event.VESPA_SEARCH_RETURN_BANNER, event as unknown as Record<string, unknown>);
+  }
+
+  /**
+   * Track the "Search now opens in full page" snackbar being shown, undone or dismissed.
+   */
+  trackFullPageSnackbar(params: {
+    searchSessionId: string;
+    userId: string;
+    action: SearchFullPageSnackbarEvent['action'];
+  }): void {
+    const event: SearchFullPageSnackbarEvent = {
+      search_session_id: params.searchSessionId,
+      user_id: params.userId,
+      action: params.action,
+    };
+    logger.info(Event.VESPA_SEARCH_FULL_PAGE_SNACKBAR, event as unknown as Record<string, unknown>);
   }
 }
 

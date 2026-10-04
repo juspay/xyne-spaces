@@ -29,6 +29,7 @@ import {
   type BriefSwitchSource,
 } from '../../services/otel/dailyBriefMetrics';
 import { globalClickTracker } from '../../services/Analytics/globalClickTracker';
+import { usePageCoverage, watchShown } from '../../hooks/usePageCoverage';
 
 const REMARK_PLUGINS = [remarkGfm];
 const IS_DEV = import.meta.env.DEV;
@@ -331,19 +332,32 @@ const DailyBriefScreen = (): ReactElement => {
   const latestGenerating = latest?.status === 'generating';
   const generationInFlight = regenerating || latestGenerating || briefGenerating;
 
+  // Under full-page search the brief is out of sight, as when the user left it: no polling or
+  // reloading there, and reloaded once the collapse back to it is over.
+  const pageCoverage = usePageCoverage();
   useEffect(() => {
     if (!generationInFlight) return undefined;
-    const id = window.setInterval(() => void load({ quiet: true }), 10_000);
-    return () => window.clearInterval(id);
-  }, [generationInFlight, load]);
+    const watch = watchShown(pageCoverage);
+    const id = window.setInterval(() => {
+      if (watch.shown()) void load({ quiet: true });
+    }, 10_000);
+    return (): void => {
+      window.clearInterval(id);
+      watch.stop();
+    };
+  }, [generationInFlight, load, pageCoverage]);
 
   useEffect(() => {
+    const watch = watchShown(pageCoverage, () => void load({ quiet: true }));
     const onVisible = (): void => {
-      if (document.visibilityState === 'visible') void load({ quiet: true });
+      if (document.visibilityState === 'visible' && watch.shown()) void load({ quiet: true });
     };
     document.addEventListener('visibilitychange', onVisible);
-    return () => document.removeEventListener('visibilitychange', onVisible);
-  }, [load]);
+    return (): void => {
+      document.removeEventListener('visibilitychange', onVisible);
+      watch.stop();
+    };
+  }, [load, pageCoverage]);
 
   const handleRegenerate = useCallback(async () => {
     if (generationInFlight) return;

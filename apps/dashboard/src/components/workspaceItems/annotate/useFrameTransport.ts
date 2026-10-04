@@ -35,7 +35,9 @@ export function useFrameTransport(
     const onMessage = (event: MessageEvent<DocMessage>): void => {
       const data = event.data;
       if (!data || data.channel !== 'xyne-doc') return;
-      if (frame?.contentWindow && event.source !== frame.contentWindow) return;
+      // Only the frame's own document speaks for it: with no frame (not loaded yet, or gone under
+      // full-page search) nothing does.
+      if (!frame?.contentWindow || event.source !== frame.contentWindow) return;
 
       if (data.type === 'ready') {
         setReady(true);

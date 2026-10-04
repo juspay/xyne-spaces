@@ -112,6 +112,7 @@ import {
 } from './components/SummaryTemplatesModal';
 import { useSummaryTemplates } from '../../hooks/useSummaryTemplates';
 import { useSummaryModelPreference } from '../../hooks/useSummaryModelPreference';
+import { usePageCoverage, watchShown } from '../../hooks/usePageCoverage';
 
 const EMPTY_LABEL_SUGGESTIONS: string[] = [];
 
@@ -696,7 +697,9 @@ export default function RecordingDetailV2Screen({
 
   // The audio is stitched after the room closes, so `hasRecording` is still false for
   // a while once a recording ends — and it is REST-only, so nothing pushes it here.
-  // Poll until it lands, which is what enables the player's controls.
+  // Poll until it lands, which is what enables the player's controls. Not under full-page search,
+  // out of sight there, as leaving the page stopped it (no attempt used up).
+  const pageCoverage = usePageCoverage();
   useEffect(() => {
     if (!recordingId || isLive || !recording || recording.hasRecording) return;
 
@@ -710,18 +713,18 @@ export default function RecordingDetailV2Screen({
 
     setAudioPollExhausted(false);
     let attempts = 0;
-    const timer = window.setInterval(() => {
-      attempts += 1;
-      if (attempts > AUDIO_POLL_MAX_ATTEMPTS) {
-        window.clearInterval(timer);
-        setAudioPollExhausted(true);
-        return;
-      }
-      // Patch only the fields being polled for: a failed refresh must not tear down
-      // the loaded screen, and Zero owns the rest.
-      void recordingService
+    let timer = 0;
+    let stopped = false;
+    const giveUp = (): void => {
+      window.clearInterval(timer);
+      setAudioPollExhausted(true);
+    };
+    // Patch only the fields being polled for: a failed refresh must not tear down
+    // the loaded screen, and Zero owns the rest. Resolves to whether the audio is there.
+    const checkAudio = (): Promise<boolean> =>
+      recordingService
         .getRecordingStatus(recordingId)
-        .then(fresh =>
+        .then(fresh => {
           setRecording(current =>
             current
               ? {
@@ -732,13 +735,35 @@ export default function RecordingDetailV2Screen({
                   attachmentId: fresh.attachmentId ?? current.attachmentId ?? null,
                 }
               : current,
-          ),
-        )
-        .catch(() => undefined);
+          );
+          return fresh.hasRecording;
+        })
+        .catch(() => false);
+    // Back from full-page search once the collapse is over: checked straight away, as coming back
+    // to the page did, and given up on if the audio still isn't there and it ended too long ago.
+    const watch = watchShown(pageCoverage, () => {
+      if (attempts > AUDIO_POLL_MAX_ATTEMPTS) return;
+      void checkAudio().then(hasAudio => {
+        if (stopped || hasAudio) return;
+        if (endedAtMs !== null && Date.now() - endedAtMs > AUDIO_STITCH_GRACE_MS) giveUp();
+      });
+    });
+    timer = window.setInterval(() => {
+      if (!watch.shown()) return;
+      attempts += 1;
+      if (attempts > AUDIO_POLL_MAX_ATTEMPTS) {
+        giveUp();
+        return;
+      }
+      void checkAudio();
     }, AUDIO_POLL_INTERVAL_MS);
 
-    return (): void => window.clearInterval(timer);
-  }, [recordingId, isLive, recording?.hasRecording, recording?.endedAt]);
+    return (): void => {
+      stopped = true;
+      window.clearInterval(timer);
+      watch.stop();
+    };
+  }, [recordingId, isLive, recording?.hasRecording, recording?.endedAt, pageCoverage]);
 
   const loadRecording = async (id: string): Promise<void> => {
     try {

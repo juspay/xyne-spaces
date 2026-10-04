@@ -10,6 +10,7 @@ import { canvasService } from '../services/Canvas/canvasService';
 import type { YSweetAuthToken } from '../services/Canvas/canvasService';
 import { canvasPrefetchService } from '../services/Canvas/canvasPrefetchService';
 import { logger, Event } from '../utils/logger';
+import { afterReturn, usePageCoverage } from './usePageCoverage';
 
 const COLLABORATION_COLORS = [
   '#E57373',
@@ -123,15 +124,28 @@ export function useCanvasYjsProvider(options: CanvasYjsProviderOptions): CanvasY
     hasLocalChangesRef.current = hasLocalChanges;
   }, [hasLocalChanges]);
 
+  // Present to the others only while the canvas is on screen: not under full-page search, as
+  // leaving the canvas made the user, and present again once back on it.
+  const pageCoverage = usePageCoverage();
   useEffect(() => {
     if (!awareness) return;
 
-    awareness.setLocalStateField('user', {
-      id: userId,
-      name: userName,
-      color: userColor,
+    const user = { id: userId, name: userName, color: userColor };
+    // Back without a cursor, as on opening the canvas: the editor shows it again once it has focus.
+    const present = (): void => {
+      awareness.setLocalState({ ...(awareness.getLocalState() ?? {}), user });
+    };
+    if (pageCoverage.isCovered()) awareness.setLocalState(null);
+    else present();
+    const stopWatching = pageCoverage.subscribe(covered => {
+      if (covered) awareness.setLocalState(null);
     });
-  }, [awareness, userId, userName, userColor]);
+    const stopReturning = afterReturn(pageCoverage, present);
+    return (): void => {
+      stopWatching();
+      stopReturning();
+    };
+  }, [awareness, userId, userName, userColor, pageCoverage]);
 
   useEffect(() => {
     if (!awareness) return;

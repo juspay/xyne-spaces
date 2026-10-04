@@ -14,6 +14,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { toast } from 'sonner';
+import { useStopWhenCovered } from '../../../hooks/usePageCoverage';
 
 export type AudioPlayState = 'idle' | 'loading' | 'playing' | 'paused';
 
@@ -77,6 +78,13 @@ export function useAudioPlayback({
   useEffect(() => {
     return (): void => releaseRef.current();
   }, []);
+
+  // Nothing plays on under full-page search: the player's controls are out of reach there. Paused,
+  // not released, so it can be resumed where it was.
+  useStopWhenCovered(state === 'playing', () => {
+    audioRef.current?.pause();
+    setState('paused');
+  });
 
   const startAudio = async (url: string, isStream: boolean): Promise<void> => {
     const audio = new Audio();

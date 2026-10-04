@@ -44,6 +44,7 @@ import { ArtifactBootOverlay } from './ArtifactBootOverlay';
 import { ArtifactErrorOverlay } from './ArtifactErrorOverlay';
 import { AppLoaderMark } from '../../AppLoader/AppLoaderMark';
 import { useAuthContextValues } from '../../../hooks/useAuth';
+import { UnmountWhenCovered } from '../../../hooks/usePageCoverage';
 import { TOP_BAR_HEIGHT_CLASS } from '../../AppNavigator/topBarHeight';
 // Forces Sandpack's own auto-height wrapper elements to fill the frame; see the
 // file header for why `--sp-layout-height` alone is not enough.
@@ -476,19 +477,23 @@ export const ReactArtifactView = ({
         }
       >
         <style>{SANDPACK_FILL_CSS}</style>
-        <ArtifactSandpack
-          payload={payload}
-          theme={theme}
-          refreshRef={refreshRef}
-          contextRef={contextRef}
-          pushContextRef={pushContextRef}
-          fill={fill}
-          canWrite
-          canInvokeAgents
-          currentUserId={auth.userID ?? ''}
-          {...(artifact.savedAppId ? { appId: artifact.savedAppId } : {})}
-          {...(!artifact.savedAppId && attachmentId ? { attachmentId } : {})}
-        />
+        {/* Not under full-page search: the app stops there, as leaving the page stopped it, and
+            starts again on return. Agent runs it already started keep going, as they did then. */}
+        <UnmountWhenCovered fallback={<div className='h-full w-full bg-background' />}>
+          <ArtifactSandpack
+            payload={payload}
+            theme={theme}
+            refreshRef={refreshRef}
+            contextRef={contextRef}
+            pushContextRef={pushContextRef}
+            fill={fill}
+            canWrite
+            canInvokeAgents
+            currentUserId={auth.userID ?? ''}
+            {...(artifact.savedAppId ? { appId: artifact.savedAppId } : {})}
+            {...(!artifact.savedAppId && attachmentId ? { attachmentId } : {})}
+          />
+        </UnmountWhenCovered>
       </div>
       {fill && tab === 'code' && (
         <div style={bodyStyle}>

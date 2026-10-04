@@ -3,6 +3,7 @@ import { cn } from '../../utils/classNames';
 import { fetchFile } from '../../services/clients/fileFetchService';
 import { detectFileType } from '../FileViewer/utils';
 import ReadmeViewer from '../FileViewer/ReadmeViewer';
+import { UnmountWhenCovered } from '../../hooks/usePageCoverage';
 
 export const IFRAME_SANDBOX = 'allow-scripts allow-forms allow-modals allow-popups';
 
@@ -55,14 +56,18 @@ export function useRemoteFile(
 }
 
 export function SandboxedFrame({ url, title }: { url: string; title: string }): ReactElement {
+  // Not under full-page search: the page in it runs on there, out of reach, so it goes, as leaving
+  // the page took it, and loads again on return.
   return (
-    <iframe
-      src={url}
-      title={title}
-      sandbox={IFRAME_SANDBOX}
-      className='h-full w-full border-0 bg-background'
-      referrerPolicy='no-referrer'
-    />
+    <UnmountWhenCovered fallback={<div className='h-full w-full bg-background' />}>
+      <iframe
+        src={url}
+        title={title}
+        sandbox={IFRAME_SANDBOX}
+        className='h-full w-full border-0 bg-background'
+        referrerPolicy='no-referrer'
+      />
+    </UnmountWhenCovered>
   );
 }
 
@@ -141,14 +146,17 @@ export function HtmlDocView({
       : html + inject
     : html;
 
+  // Its scripts stop under full-page search, as leaving the page stopped them.
   return (
-    <iframe
-      title={title}
-      ref={onFrame}
-      srcDoc={source}
-      sandbox='allow-scripts allow-popups'
-      referrerPolicy='no-referrer'
-      className='h-full w-full border-0 bg-background'
-    />
+    <UnmountWhenCovered fallback={<div className='h-full w-full bg-background' />}>
+      <iframe
+        title={title}
+        ref={onFrame}
+        srcDoc={source}
+        sandbox='allow-scripts allow-popups'
+        referrerPolicy='no-referrer'
+        className='h-full w-full border-0 bg-background'
+      />
+    </UnmountWhenCovered>
   );
 }

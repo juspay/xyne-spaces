@@ -112,6 +112,9 @@ function collect(): Array<{ ref: string; role: string; label: string }> {
   for (const node of Array.from(document.querySelectorAll<HTMLElement>(selector))) {
     if (rows.length >= MAX_ELEMENTS) break;
     if (node.closest('webview')) continue;
+    // Inert content can't be used: the page kept under full-page search, mounted ahead of the
+    // results in the DOM, would otherwise fill the snapshot with what is out of reach.
+    if (node.closest('[inert]')) continue;
     if (!visible(node)) continue;
     const label = labelOf(node);
     if (!label) continue;
@@ -127,9 +130,29 @@ function collect(): Array<{ ref: string; role: string; label: string }> {
   return rows;
 }
 
+// A ref from an earlier snapshot, while it can still be used: gone from the page, or now inert (a
+// page full-page search has opened over since), it is out of reach, like anything a snapshot skips.
+function usableRef(ref: string): HTMLElement | null {
+  const el = refs.get(ref);
+  return el && el.isConnected && !el.closest('[inert]') ? el : null;
+}
+
+// innerText, leaving out what is inert (the page kept under full-page search): it is not on screen.
+function shownText(el: HTMLElement): string {
+  if (el.inert) return '';
+  if (!el.querySelector('[inert]')) return el.innerText || '';
+  return Array.from(el.children)
+    .filter((child): child is HTMLElement => child instanceof HTMLElement)
+    .map(shownText)
+    .filter(Boolean)
+    .join('\n');
+}
+
 function describe(): string {
   const main = document.querySelector('main') ?? document.body;
-  const text = (main.innerText || '').replace(/\n{3,}/g, '\n\n').trim();
+  const text = shownText(main)
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
   return [
     `Screen: ${host?.currentPath() ?? window.location.pathname}`,
     `Title: ${document.title || '(untitled)'}`,
@@ -191,7 +214,7 @@ export async function executeAppTool(
 
     if (toolName === 'app-click') {
       const ref = asString(args['ref']);
-      const el = refs.get(ref);
+      const el = usableRef(ref);
       if (!el) return { ok: false, content: `No element ${ref}. Take an app-snapshot first.` };
       el.scrollIntoView({ block: 'center' });
       el.click();
@@ -202,7 +225,7 @@ export async function executeAppTool(
     if (toolName === 'app-type') {
       const ref = asString(args['ref']);
       const text = typeof args['text'] === 'string' ? args['text'] : '';
-      const el = refs.get(ref);
+      const el = usableRef(ref);
       if (!el) return { ok: false, content: `No element ${ref}. Take an app-snapshot first.` };
       const field = el as HTMLInputElement | HTMLTextAreaElement;
       el.focus();

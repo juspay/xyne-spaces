@@ -1,5 +1,6 @@
 import { useMemo } from 'react';
 import { useCacConfig } from '@xyne/shared/hooks';
+import { DEFAULT_CMDK_POLICY_OPTIONS, type CmdkPolicyOptions } from '../search/cmdkPolicy';
 
 export const CMDK_SEARCH_CAC_KEY = 'cmdk_search_config';
 // Per-deployment overrides come through the CAC key below.
@@ -19,6 +20,19 @@ export interface CmdkSearchCacConfig {
    * docType. Any profile not listed here keeps the sectioned ALL view.
    */
   flatAllRankProfiles?: string[];
+  /** Full-page open policy thresholds; any field left out keeps its default. */
+  fullPage?: CmdkFullPageCacConfig;
+}
+
+export interface CmdkFullPageCacConfig {
+  /**
+   * Seconds after opening a result during which a Cmd+K reopen restores it (default 15; 0 = off).
+   */
+  returnWindowSec?: number;
+  /** Consecutive full-page sessions that switch the default to full page (default 2). */
+  fullPageStreak?: number;
+  /** Times the return banner may show while full page is still unused (default 5; 0 = off). */
+  maxBannerShows?: number;
 }
 
 export const DEFAULT_CMDK_SEARCH_CAC_CONFIG: CmdkSearchCacConfig = {
@@ -56,6 +70,35 @@ export function useCmdkFlatAllRankProfiles(): Set<string> {
   return useMemo(() => {
     const profiles = config.flatAllRankProfiles ?? DEFAULT_FLAT_ALL_RANK_PROFILES;
     return new Set(profiles.map(p => p?.trim().toLowerCase()).filter(Boolean));
+  }, [config]);
+}
+
+const intAtLeast = (value: unknown, min: number, fallback: number): number =>
+  typeof value === 'number' && Number.isFinite(value) && value >= min
+    ? Math.floor(value)
+    : fallback;
+
+/**
+ * Cmd+K full-page policy thresholds from the `cmdk_search_config` CAC key (`fullPage`). Shares the
+ * CAC query cache with the rank-profile hooks. Missing or invalid values keep
+ * DEFAULT_CMDK_POLICY_OPTIONS.
+ */
+export function useCmdkPolicyOptions(): CmdkPolicyOptions {
+  const { config } = useCacConfig<CmdkSearchCacConfig>({
+    key: CMDK_SEARCH_CAC_KEY,
+    fallbackConfig: DEFAULT_CMDK_SEARCH_CAC_CONFIG,
+  });
+  return useMemo(() => {
+    const fullPage = config.fullPage ?? {};
+    const defaults = DEFAULT_CMDK_POLICY_OPTIONS;
+    return {
+      // 0 turns the quick return / the banner off; a streak of 0 would mean nothing, so it
+      // stays ≥ 1.
+      returnWindowMs:
+        intAtLeast(fullPage.returnWindowSec, 0, defaults.returnWindowMs / 1000) * 1000,
+      fullPageStreak: intAtLeast(fullPage.fullPageStreak, 1, defaults.fullPageStreak),
+      maxBannerShows: intAtLeast(fullPage.maxBannerShows, 0, defaults.maxBannerShows),
+    };
   }, [config]);
 }
 

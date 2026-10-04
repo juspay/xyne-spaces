@@ -1,6 +1,7 @@
 import React, { useEffect, useState, useCallback, memo } from 'react';
 import { BaseViewerProps } from './utils';
 import { inlineAuthenticatedImages } from '../../utils/inlineAuthenticatedImages';
+import { UnmountWhenCovered } from '../../hooks/usePageCoverage';
 
 const declaresEncoding = async (file: Blob): Promise<boolean> => {
   const head = new Uint8Array(await file.slice(0, 1024).arrayBuffer());
@@ -92,14 +93,17 @@ const HtmlViewer: React.FC<BaseViewerProps> = memo(({ source }) => {
 
   if (!blobUrl) return null;
 
+  // Its scripts stop under full-page search, as leaving the page stopped them.
   return (
-    <iframe
-      src={blobUrl}
-      sandbox='allow-scripts'
-      title='HTML Document'
-      className='w-full h-full border-0 bg-white'
-      style={{ minHeight: '100%' }}
-    />
+    <UnmountWhenCovered fallback={<div className='w-full h-full bg-white' />}>
+      <iframe
+        src={blobUrl}
+        sandbox='allow-scripts'
+        title='HTML Document'
+        className='w-full h-full border-0 bg-white'
+        style={{ minHeight: '100%' }}
+      />
+    </UnmountWhenCovered>
   );
 });
 

@@ -8,6 +8,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from 'react';
 import type { RecordedSpan } from './recordingSpans';
+import { useStopWhenCovered } from '../../hooks/usePageCoverage';
 
 export type TimelinePlaybackState = 'idle' | 'loading' | 'playing' | 'paused';
 
@@ -290,6 +291,13 @@ export function useTimelinePlayback(
     },
     [canPlay, effectiveSpans, pauseAll, preload, spanSeconds, startTimer, state],
   );
+
+  // Nothing plays on under full-page search: the timeline's controls are out of reach there.
+  useStopWhenCovered(state === 'playing', () => {
+    stopTimer();
+    pauseAll();
+    setState('paused');
+  });
 
   const toggle = useCallback((): void => {
     if (!canPlay) return;
