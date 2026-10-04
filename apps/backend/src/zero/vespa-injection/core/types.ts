@@ -33,12 +33,8 @@ export interface VespaJobConfig<S extends keyof SchemaDataMap> {
   nameOnly?: boolean;
   // Hint on a 'feed' job that the row was just created, so no Vespa document can exist yet
   // and the worker may skip reading it back before the write. Only a hint: the worker
-  // ignores it where the document may already be indexed (a retry, or a stale copy of a
-  // broadcast job).
+  // ignores it for retried or stale jobs, where the document may already be indexed.
   newDocument?: boolean;
-  // Set by the queue, not by producers: the job was added to more than one queue, so another
-  // worker may process a copy of it.
-  broadcast?: boolean;
 }
 
 export type VespaQueueHandler = VespaJobConfig<keyof SchemaDataMap>

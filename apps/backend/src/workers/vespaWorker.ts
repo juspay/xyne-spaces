@@ -10,8 +10,8 @@ import { vespaPostIngestHooks } from './vespaPostIngestHooks';
 import { VespaInsertionStatus } from '@xyne/shared';
 import { config } from '@/config/env';
 
-// How long after it was queued a broadcast feed job's `newDocument` hint is still trusted.
-const NEW_DOCUMENT_MAX_BROADCAST_AGE_MS = 30_000;
+// How long after it was queued a feed job's `newDocument` hint is still trusted.
+const NEW_DOCUMENT_MAX_JOB_AGE_MS = 30_000;
 
 export class VespaWorker {
 	private queue: Bull.Queue<VespaJob> | null = null;
@@ -277,15 +277,17 @@ export class VespaWorker {
 
 	/**
 	 * Whether a feed job's document can be assumed absent from Vespa. The producer's
-	 * `newDocument` hint is only trusted on the first attempt, since a retry may follow a
-	 * write that already landed. A broadcast job must also be picked up promptly: the copy
-	 * on another queue may have indexed the document, and entity extraction may have
-	 * written its fields, by the time a late copy is processed. A job on a single queue has
-	 * no such copy, so a backfill that waits behind a backlog keeps the hint.
+	 * `newDocument` hint is only trusted on the first attempt of a job picked up promptly.
+	 * A retry may follow a write that already landed. A job that waited (a backlog, or the
+	 * late copy of a broadcast job) may run after another feed of the same document indexed
+	 * it and entity extraction wrote its fields, which skipping the read would erase.
 	 */
 	private isNewDocument(job: Bull.Job<VespaJob>): boolean {
-		if (job.data.newDocument !== true || job.attemptsMade !== 0) return false;
-		return !job.data.broadcast || Date.now() - job.timestamp <= NEW_DOCUMENT_MAX_BROADCAST_AGE_MS;
+		return (
+			job.data.newDocument === true &&
+			job.attemptsMade === 0 &&
+			Date.now() - job.timestamp <= NEW_DOCUMENT_MAX_JOB_AGE_MS
+		);
 	}
 
 	private async handleFeed(
