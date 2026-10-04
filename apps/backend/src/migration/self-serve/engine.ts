@@ -760,7 +760,7 @@ export class SlackMigrationEngine {
           logger.warn('[SlackMigration] links ingest failed', { convId: conv.id, error: e instanceof Error ? e.message : String(e) });
         }
         try {
-          const n = await ingestChannelCanvases(canvases, target, config.slackBotToken); // central bot token → rehost canvas images
+          const n = await ingestChannelCanvases(canvases, target, getBotConfigByWorkspaceId(job.workspaceId).slackBotToken); // per-workspace bot token → rehost canvas images
           logger.info('[SlackMigration] canvases ingested', { convId: conv.id, collected: canvases.length, ingested: n });
         } catch (e) {
           logger.warn('[SlackMigration] canvases ingest failed', { convId: conv.id, error: e instanceof Error ? e.message : String(e) });
@@ -810,7 +810,8 @@ export class SlackMigrationEngine {
 
   decryptToken(job: MigrationJob): string {
     if (!job.encryptedToken) throw new Error('migration token missing');
-    return decrypt(job.encryptedToken);
+    // Trim: tokens baked from a config value with a trailing newline make `Bearer <token>` an illegal HTTP header for raw fetch (files, canvases).
+    return decrypt(job.encryptedToken).trim();
   }
 
   /** Snapshot path a refresh writes new messages to (base file stays untouched). */
