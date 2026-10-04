@@ -281,7 +281,8 @@ export class SlackMigrationService {
       }));
     }
     if (opts.dryRun !== false) return { dryRun: true, eligible: eligible.map(describe), skipped };
-    this.assertIngestControlEnabled(); // a real run ends in ingestion — gated like approve/reingest
+    // No ingestion gate: phase 1 is collection, and phase 2 waits in the ingestion queue, which the kill switch keeps
+    // paused while MIGRATION_INGEST_CONTROL is off — nothing ingests until ingestion is enabled and started.
 
     // 'front' is LIFO, so enqueue the largest first → the smallest channels run first (most channels recovered soonest).
     for (const j of [...eligible].sort((a, b) => b.stats.messages - a.stats.messages)) {
