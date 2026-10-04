@@ -7,7 +7,15 @@ import jwt from 'jsonwebtoken';
 import { Request, Response } from 'express';
 import { invitationService } from '@/services/invitationService';
 import { DatabaseClient } from '@/database/client';
-import { withWorkspaceScope, runAsSystem } from '@/database/tenant/context';
+import { withWorkspaceScope } from '@/database/tenant/context';
+import {
+  getInvitationByIdOrgWide,
+  listPendingApprovalInvitations,
+  markInvitationEmailSentOrgWide,
+  deleteInvitationOrgWide,
+  countActiveUsersByEmail,
+  generateOrgMemberPasswordOrgWide,
+} from '@/bypassAcl/invitationApprovalServices';
 import { createOwnerInvitation, syncAllBotUsersForNewWorkspace } from '@/bypassAcl/orgServices';
 import { logger } from '@/utils/logger';
 import { config } from '@/config/env';
@@ -203,10 +211,8 @@ export class InvitationController {
       }
 
       // Email is out (or dev-skipped) — stamp delivery so auto-approved invites
-      // don't render as "Email failed to send" in the approval list. Runs as
-      // system: a MEMBER creator cannot mutate invitation rows under the ACL.
-      const createdInvitationId = invitation.id;
-      await runAsSystem(() => invitationService.markInviteEmailSent(createdInvitationId));
+      // don't render as "Email failed to send" in the approval list.
+      await markInvitationEmailSentOrgWide(invitation.id);
 
       res.status(201).json({
         success: true,
@@ -676,42 +682,8 @@ export class InvitationController {
         return;
       }
 
-      // Org-wide read: the invite may live in any workspace of the org, so this
-      // must run outside the caller's workspace-scoped ACL.
-      const { invitations, inviterById } = await runAsSystem(async () => {
-        const invitations = await DatabaseClient.getInstance().invitation.findMany({
-          where: {
-            orgId,
-            acceptedAt: null,
-            // Pending approvals, plus approved invites whose email never went out (resend needed).
-            AND: [
-              { OR: [{ expiredAt: null }, { expiredAt: { gt: new Date() } }] },
-              { OR: [{ isOrgApproved: false }, { isOrgApproved: true, inviteEmailSentAt: null }] },
-            ],
-          },
-          orderBy: { createdAt: 'desc' },
-          select: {
-            id: true,
-            email: true,
-            role: true,
-            invitedBy: true,
-            invitedAt: true,
-            createdAt: true,
-            isOrgApproved: true,
-            inviteEmailSentAt: true,
-            workspace: { select: { name: true } },
-          },
-        });
-
-        const inviterIds = Array.from(new Set(invitations.map(i => i.invitedBy)));
-        const inviters = inviterIds.length
-          ? await DatabaseClient.getInstance().user.findMany({
-              where: { id: { in: inviterIds } },
-              select: { id: true, name: true, email: true },
-            })
-          : [];
-        return { invitations, inviterById: new Map(inviters.map(u => [u.id, u])) };
-      });
+      // Org-wide read: the invite may live in any workspace of the org.
+      const { invitations, inviterById } = await listPendingApprovalInvitations(orgId);
 
       res.json({
         invitations: invitations.map(invitation => ({
@@ -738,7 +710,7 @@ export class InvitationController {
     try {
       const { id } = req.params;
       // Org-wide read: the invite may live in any workspace of the org.
-      const invitation = await runAsSystem(() => invitationService.getInvitationById(id ?? ''));
+      const invitation = await getInvitationByIdOrgWide(id ?? '');
       if (!invitation) {
         res.status(404).json({ error: 'Invitation not found' });
         return;
@@ -777,31 +749,24 @@ export class InvitationController {
         return;
       }
 
-      // The invite may live in any workspace of the org, so the org-wide reads
-      // and writes below run as system — outside the caller's workspace-scoped ACL.
-      const orgId = invitation.orgId;
-      const emailSent = await runAsSystem(async (): Promise<boolean> => {
-        // Seats may have changed since the invite was created.
-        await organizationDomainService.assertOrgMemberLimit(orgId, invitation.email);
+      // Seats may have changed since the invite was created. (assertOrgMemberLimit
+      // self-scopes: it counts every seat in the org.)
+      await organizationDomainService.assertOrgMemberLimit(invitation.orgId, invitation.email);
 
-        await approveInvitationTx(invitationService, invitation.id, invitation);
+      await approveInvitationTx(invitationService, invitation.id, invitation);
 
-        // Approval creates the orgMember row (and its password), so now generate a
-        // temp password (if needed) and send the invite email.
-        if (config.env === 'development') {
-          logger.info(
-            `[InvitationController] DEV MODE — approved invitation ${invitation.id} for ${invitation.email}, skipping email`
-          );
-          await invitationService.markInviteEmailSent(invitation.id);
-          return true;
-        }
-
+      // Approval creates the orgMember row (and its password), so now generate a
+      // temp password (if needed) and send the invite email.
+      if (config.env === 'development') {
+        logger.info(
+          `[InvitationController] DEV MODE — approved invitation ${invitation.id} for ${invitation.email}, skipping email`
+        );
+        await markInvitationEmailSentOrgWide(invitation.id);
+      } else {
         let tempPassword: string | null = null;
-        const existingWorkspaceUsers = await DatabaseClient.getInstance().user.count({
-          where: { email: invitation.email, leftAt: null },
-        });
+        const existingWorkspaceUsers = await countActiveUsersByEmail(invitation.email);
         if (existingWorkspaceUsers === 0 && invitation.role !== 'GUEST') {
-          tempPassword = await invitationService.generateOrgMemberPassword(invitation.email);
+          tempPassword = await generateOrgMemberPasswordOrgWide(invitation.email);
         }
 
         const invitationLink = await buildInvitationLink({
@@ -822,20 +787,15 @@ export class InvitationController {
           logger.error(
             `[InvitationController] Approved invitation ${invitation.id} but email failed: ${emailResult.error}`
           );
-          return false;
+          res.status(502).json({
+            error: 'Invite email failed to send. Click "Resend email" to try again.',
+            emailSent: false,
+          });
+          return;
         }
 
         // Email is out — record it so the invite leaves the resend list.
-        await invitationService.markInviteEmailSent(invitation.id);
-        return true;
-      });
-
-      if (!emailSent) {
-        res.status(502).json({
-          error: 'Invite email failed to send. Click "Resend email" to try again.',
-          emailSent: false,
-        });
-        return;
+        await markInvitationEmailSentOrgWide(invitation.id);
       }
 
       res.json({ success: true, emailSent: true });
@@ -856,7 +816,7 @@ export class InvitationController {
     try {
       const { id } = req.params;
       // Org-wide read: the invite may live in any workspace of the org.
-      const invitation = await runAsSystem(() => invitationService.getInvitationById(id ?? ''));
+      const invitation = await getInvitationByIdOrgWide(id ?? '');
       if (!invitation) {
         res.status(404).json({ error: 'Invitation not found' });
         return;
@@ -878,9 +838,8 @@ export class InvitationController {
         return;
       }
 
-      // Org-wide delete — runs as system so invites from any workspace of the
-      // org can be rejected, not just the caller's own workspace.
-      await runAsSystem(() => invitationService.deleteInvitation(invitation.id));
+      // Org-wide delete — the invite may live in any workspace of the org.
+      await deleteInvitationOrgWide(invitation.id);
       res.json({ success: true });
     } catch (error) {
       logger.error('[InvitationController] Failed to reject invitation:', error);
