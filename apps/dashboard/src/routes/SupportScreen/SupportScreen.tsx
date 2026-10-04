@@ -4658,9 +4658,9 @@ const SupportScreen = (): ReactElement => {
                           showExtraFields={true}
                           activeTicketId={ticketId}
                           {...(channelPreference?.deskType !== undefined && {
-                          deskType: channelPreference.deskType,
-                        })}
-                        selectedIds={selectedTicketIds}
+                            deskType: channelPreference.deskType,
+                          })}
+                          selectedIds={selectedTicketIds}
                           onToggleSelect={toggleTicketSelected}
                           onBoardIdReady={handleChannelBoardIdResolved}
                           onPageChange={clearTicketSelection}
