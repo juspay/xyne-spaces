@@ -104,15 +104,26 @@ export const pillAction = (
     ?.actions?.find(action => action.title === title);
 };
 
+// Each local message sits after the server messages that were on screen when it first appeared.
+// Placed by position, not timestamp: local times come from the browser clock and history from the server's.
 export const mergeTranscript = (
   serverMessages: readonly Message[],
-  localMessages: readonly Message[] = [],
-): { messages: readonly Message[]; serverIndexById: ReadonlyMap<string, number> } => ({
-  messages:
-    localMessages.length === 0
-      ? serverMessages
-      : [...serverMessages, ...localMessages].sort(
-          (left, right) => left.timestamp.getTime() - right.timestamp.getTime(),
-        ),
-  serverIndexById: new Map(serverMessages.map((message, index) => [message.id, index])),
-});
+  localMessages: readonly Message[],
+  positions: ReadonlyMap<string, number>,
+): { messages: readonly Message[]; serverIndexById: ReadonlyMap<string, number> } => {
+  const serverIndexById = new Map(serverMessages.map((message, index) => [message.id, index]));
+  if (localMessages.length === 0) return { messages: serverMessages, serverIndexById };
+  const messages: Message[] = [];
+  let next = 0;
+  for (let index = 0; index <= serverMessages.length; index++) {
+    while (next < localMessages.length) {
+      const local = localMessages[next];
+      if (!local || (positions.get(local.id) ?? serverMessages.length) > index) break;
+      messages.push(local);
+      next++;
+    }
+    const server = serverMessages[index];
+    if (server) messages.push(server);
+  }
+  return { messages: [...messages, ...localMessages.slice(next)], serverIndexById };
+};

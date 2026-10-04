@@ -12,6 +12,9 @@ type RouteResponse =
 
 const UNAVAILABLE: RouteResponse = { route: 'unavailable' };
 
+// Above the backend's 2.5 s Jev timeout, so that one decides and this only covers the network.
+const ROUTE_DEADLINE_MS = 3000;
+
 const isRouteResponse = (body: unknown): body is RouteResponse => {
   if (typeof body !== 'object' || body === null) return false;
   const { route, actionIds } = body as Record<string, unknown>;
@@ -31,7 +34,7 @@ export async function routeWithJev(
     const response = await apiInstance.post<unknown>(
       '/assistant/route',
       { text, actions },
-      { signal },
+      { signal, timeout: ROUTE_DEADLINE_MS },
     );
     return isRouteResponse(response.data) ? response.data : UNAVAILABLE;
   } catch {

@@ -100,6 +100,8 @@ export const useAssistantActions = ({ enabled }: { enabled: boolean }): Assistan
         if (controller.signal.aborted) return { outcome: 'cancelled' };
         if (route.kind === 'ask_ai') return { outcome: 'ask_ai' };
         return { outcome: 'replied', reply: append(text.trim(), route.actions) };
+      } catch {
+        return { outcome: 'ask_ai' };
       } finally {
         if (routingRef.current === controller) {
           routingRef.current = null;

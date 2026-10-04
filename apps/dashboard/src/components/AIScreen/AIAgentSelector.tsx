@@ -82,7 +82,7 @@ export function AIAgentSelector({
 
   const { selectedAgentSlug, setSelectedAgentSlug } = useSelectedAgent();
   const { isAuto, setAuto } = useAskAIAuto();
-  const isAutoShown = isAuto && onSelectAuto !== undefined;
+  const isAutoShown = isAuto && onSelectAuto !== undefined && selectedAgentSlug === null;
 
   const { data: agents = [], isLoading } = useQuery({
     queryKey: ['accessible-claw-agents'],
