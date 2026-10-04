@@ -10,6 +10,9 @@ import { vespaPostIngestHooks } from './vespaPostIngestHooks';
 import { VespaInsertionStatus } from '@xyne/shared';
 import { config } from '@/config/env';
 
+// How long after it was queued a feed job's `newDocument` hint is still trusted.
+const NEW_DOCUMENT_MAX_JOB_AGE_MS = 30_000;
+
 export class VespaWorker {
 	private queue: Bull.Queue<VespaJob> | null = null;
 	private isInitialized = false;
@@ -245,7 +248,7 @@ export class VespaWorker {
 			}
 
 			const handlers: Record<VespaJobType, () => Promise<void>> = {
-				feed: () => this.handleFeed(schema, mappedData as InsertDocument),
+				feed: () => this.handleFeed(schema, mappedData as InsertDocument, this.isNewDocument(job)),
 				update: () => this.handleUpdate(docId, schema, mappedData as InsertDocument, job.data.create),
 				delete: () => this.handleDelete(schema, docId),
 			}
@@ -272,12 +275,28 @@ export class VespaWorker {
 		}
 	}
 
+	/**
+	 * Whether a feed job's document can be assumed absent from Vespa. The producer's
+	 * `newDocument` hint is only trusted on the first attempt of a job picked up promptly:
+	 * a retry may follow a write that already landed, and a job that sat in a queue (a
+	 * backlog, or the copy of a job broadcast to a second queue) may be processed after the
+	 * document was indexed and its entity fields written.
+	 */
+	private isNewDocument(job: Bull.Job<VespaJob>): boolean {
+		return (
+			job.data.newDocument === true &&
+			job.attemptsMade === 0 &&
+			Date.now() - job.timestamp <= NEW_DOCUMENT_MAX_JOB_AGE_MS
+		);
+	}
+
 	private async handleFeed(
 		schema: VespaSchema,
 		data: InsertDocument,
+		newDocument = false,
 	): Promise<void> {
 		logger.info(`[Vespa-Worker]: queue ${schema} insert ${schema}/${data.docId}`);
-		const [result] = await vespaClient.crudService.insert([data], schema);
+		const [result] = await vespaClient.crudService.insert([data], schema, { newDocument });
 		if (!result.success) {
 			throw new Error(`Failed to insert ${data.docId}: ${result.error}`);
 		}

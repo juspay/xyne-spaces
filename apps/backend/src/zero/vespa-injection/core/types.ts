@@ -31,6 +31,10 @@ export interface VespaJobConfig<S extends keyof SchemaDataMap> {
   // searchable by name in cmd+K within seconds; a second full feed enriches the
   // same docId with content later.
   nameOnly?: boolean;
+  // Hint on a 'feed' job that the row was just created, so no Vespa document can exist yet
+  // and the worker may skip reading it back before the write. Only a hint: the worker
+  // ignores it for retried or stale jobs, where the document may already be indexed.
+  newDocument?: boolean;
 }
 
 export type VespaQueueHandler = VespaJobConfig<keyof SchemaDataMap>

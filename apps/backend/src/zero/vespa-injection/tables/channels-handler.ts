@@ -21,7 +21,8 @@ export class ChannelsVespaHandler extends BaseVespaHandler<'channels'> {
       schema: channelSchema,
       jobType: 'feed',
       data: args,
-      docId: args.id
+      docId: args.id,
+      newDocument: true,
     }];
   }
 

@@ -193,13 +193,14 @@ export class ConversationService {
     return isHistorical ? vespaBackfillQueue : vespaQueue;
   }
 
-  private async pushVespaJobForMessage(messageID: string, userId: string, workspaceId?: string, createdAt?: Date): Promise<void> {
+  private async pushVespaJobForMessage(messageID: string, userId: string, workspaceId?: string, createdAt?: Date, newDocument = false): Promise<void> {
     this.pickVespaQueue(createdAt)
       .addJob({
         schema: messageSchema,
         jobType: 'feed',
         docId: messageID,
         ...(workspaceId ? { workspaceId } : {}),
+        ...(newDocument ? { newDocument: true } : {}),
       })
       .catch(async (error) => {
         logger.error('Error queuing Vespa job for channel:', error);
@@ -523,7 +524,7 @@ export class ConversationService {
     }
 
     // Push Vespa job for message indexing
-    this.pushVespaJobForMessage(message.messageId, userId, channel?.workspaceId, message.createdAt).catch((error) => {
+    this.pushVespaJobForMessage(message.messageId, userId, channel?.workspaceId, message.createdAt, true).catch((error) => {
       logger.error(
         `[ConversationService] Error pushing Vespa job for message ${message.messageId}:`,
         error
@@ -758,7 +759,7 @@ export class ConversationService {
     }
 
     // Push Vespa job for message indexing
-    this.pushVespaJobForMessage(message.messageId, userId, channel?.workspaceId, message.createdAt).catch((error) => {
+    this.pushVespaJobForMessage(message.messageId, userId, channel?.workspaceId, message.createdAt, true).catch((error) => {
       logger.error(
         `[ConversationService] Error pushing Vespa job for message ${message.messageId}:`,
         error

@@ -38,11 +38,17 @@ export class CRUDService {
     this.vespa = vespaClient;
   }
 
-  insert = async (documents: InsertDocument[], schema: VespaSchema): Promise<BatchResult[]> => {
+  insert = async (
+    documents: InsertDocument[],
+    schema: VespaSchema,
+    opts?: { newDocument?: boolean },
+  ): Promise<BatchResult[]> => {
     try {
       // Only chat_message, ticket and chat_container carry externally owned fields; every
-      // other schema feeds straight through without an extra read.
-      const owned = EXTERNALLY_OWNED_FIELDS[schema];
+      // other schema feeds straight through without an extra read. So does a document the
+      // caller knows is new: nothing is indexed yet to carry over, and the read would only
+      // come back 404.
+      const owned = opts?.newDocument ? undefined : EXTERNALLY_OWNED_FIELDS[schema];
       const payload = owned
         ? await this.withExternallyOwnedFields(documents, schema, owned)
         : documents;

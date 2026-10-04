@@ -25,7 +25,8 @@ export class TicketsVespaHandler extends BaseVespaHandler<'tickets'> {
       schema: ticketSchema,
       jobType: 'feed',
       data: args,
-      docId: args.id
+      docId: args.id,
+      newDocument: true,
     }];
   }
 

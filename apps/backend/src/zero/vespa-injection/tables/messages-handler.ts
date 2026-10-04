@@ -28,6 +28,7 @@ export class MessagesVespaHandler extends BaseVespaHandler<'messages'> {
       jobType: 'feed',
       data: args,
       docId: args.messageId,
+      newDocument: true,
     }] as VespaQueueHandler[];
   }
 

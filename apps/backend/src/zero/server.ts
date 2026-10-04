@@ -349,6 +349,7 @@ export async function handleMutate(request: Request): Promise<unknown> {
             userId: authData!.sub,
             workspaceId: authData!.workspaceId,
             ...(job.app ? { app: job.app } : {}),
+            ...(job.newDocument ? { newDocument: true } : {}),
             ...(job.jobType === "update" ? { data: job.data } : {})
           });
         } catch (err) {
@@ -775,6 +776,7 @@ export async function runCatalogMutation(
           docId: job.docId,
           userId: authData.sub,
           workspaceId: authData.workspaceId,
+          ...(job.newDocument ? { newDocument: true } : {}),
           ...(job.jobType === "update" ? { data: job.data } : {})
         });
       } catch (err) {
