@@ -432,7 +432,8 @@ const CallsScreen = (): ReactElement => {
 
       {isFocused && (
         <CallsFab
-          onPress={() => setIsInstantCallOpen(true)}
+          onStartCall={() => setIsInstantCallOpen(true)}
+          onScheduleCall={() => {}}
           isHidden={isInstantCallOpen || isDetailsOpen}
         />
       )}
