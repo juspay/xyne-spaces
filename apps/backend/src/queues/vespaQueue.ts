@@ -173,8 +173,9 @@ class VespaQueue {
 			}
 
 			// Broadcast to all target queues
+			const queuedData: VespaJob = targetQueues.length > 1 ? { ...jobData, broadcast: true } : jobData;
 			const jobs = await Promise.all(
-				targetQueues.map(q => q.add(`vespa-${schema}`, jobData, jobOpts))
+				targetQueues.map(q => q.add(`vespa-${schema}`, queuedData, jobOpts))
 			);
 
 			const queueNames = targetQueues.map(q => q.name);
@@ -410,8 +411,9 @@ class VespaQueue {
 					continue;
 				}
 
-				// Re-add the job to the queue
-				await this.addJob(jobData);
+				// Re-add the job to the queue. Drop the new-document hint: by the time a failed job
+				// is retried from the log, the document may have been indexed.
+				await this.addJob({ ...jobData, newDocument: undefined, broadcast: undefined });
 
 				// Update retry count
 				await db.vespaInsertionLogs.update({

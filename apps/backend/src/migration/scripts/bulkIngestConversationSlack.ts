@@ -50,7 +50,8 @@ const VESPA_BACKFILL_AGE_DAYS = Number(process.env.VESPA_BACKFILL_AGE_DAYS ?? 36
 function enqueueMessageVespa(messageId: string, workspaceId: string | undefined, createdAt: Date): void {
   const historical = Date.now() - createdAt.getTime() > VESPA_BACKFILL_AGE_DAYS * 86_400_000;
   const q = historical ? vespaBackfillQueue : vespaQueue;
-  void q.addJob({ schema: 'chat_message', jobType: 'feed', docId: messageId, ...(workspaceId ? { workspaceId } : {}) })
+  // newDocument: the row was created in this flush with a fresh id, so nothing is indexed for it yet.
+  void q.addJob({ schema: 'chat_message', jobType: 'feed', docId: messageId, newDocument: true, ...(workspaceId ? { workspaceId } : {}) })
     .catch((e) => logger.warn('[BulkIngest] vespa enqueue failed (non-fatal)', { messageId, error: e instanceof Error ? e.message : String(e) }));
 }
 
