@@ -105,6 +105,7 @@ import ActivitySupportTicket from '../components/Activity/ActivitySupportTicket/
 import { ActivityCalendarWeekView } from '../components/Activity/ActivityCalendarWeekView';
 import Search from '../components/Chat/Search/Search';
 import SearchResults from '../components/Chat/SearchResults/SearchResults';
+import { FullPageKeepAliveOutlet } from './FullPageKeepAliveOutlet';
 import ProjectsListView from './ProjectsScreen/ProjectsListView';
 import ReleaseManagerView from './ProjectsScreen/ReleaseManagerView';
 import BookmarksPanel from '../components/Chat/BookmarksPanel/BookmarksPanel';
@@ -891,9 +892,13 @@ const AppRoot = (): ReactElement => {
                                     className={`flex h-full ${shouldShowMobileHeader ? 'pt-[60px]' : ''}`}
                                   >
                                     <AppSidebar />
-                                    <main className='flex-1 no-scrollbar overflow-auto'>
+                                    <main
+                                      className='flex-1 no-scrollbar overflow-auto'
+                                      // Cmd+K grows into this box as it expands to full page.
+                                      data-cmdk-full-page
+                                    >
                                       <EditWarningModal />
-                                      <Outlet />
+                                      <FullPageKeepAliveOutlet />
                                     </main>
                                     <SiteMap />
                                   </div>
@@ -916,9 +921,13 @@ const AppRoot = (): ReactElement => {
                             className={`flex h-full ${shouldShowMobileHeader ? 'pt-[60px]' : ''}`}
                           >
                             <AppSidebar />
-                            <main className='flex-1 no-scrollbar overflow-auto'>
+                            <main
+                              className='flex-1 no-scrollbar overflow-auto'
+                              // Cmd+K grows into this box when it expands to full-page search.
+                              data-cmdk-full-page
+                            >
                               <EditWarningModal />
-                              <Outlet />
+                              <FullPageKeepAliveOutlet />
                             </main>
                             <SiteMap />
                           </div>
@@ -956,7 +965,7 @@ const AppRoot = (): ReactElement => {
                           {/* The browser's pages: here, where they never move, so
                               docking or undocking the browser doesn't reload them. */}
                           <BrowserPageLayer />
-                          <GlobalCommandMenu aiOverview ticketScreenScope />
+                          <GlobalCommandMenu aiOverview ticketScreenScope fullPageSearch />
                           <ShortcutsHelpModal
                             isOpen={isShortcutsModalOpen}
                             onClose={() => setIsShortcutsModalOpen(false)}

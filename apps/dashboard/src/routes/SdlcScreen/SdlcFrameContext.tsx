@@ -23,12 +23,16 @@ interface SdlcFrameContextValue {
   /** Null while no SDLC route is mounted, which hides the frame. */
   viewport: SdlcFrameViewport | null;
   setViewport: (viewport: SdlcFrameViewport | null) => void;
+  /** The SDLC route is mounted but under full-page search, which hides the frame too. */
+  covered: boolean;
+  setCovered: (covered: boolean) => void;
 }
 
 const SdlcFrameContext = createContext<SdlcFrameContextValue | null>(null);
 
 export const SdlcFrameProvider = ({ children }: { children: ReactNode }): ReactElement => {
   const [viewport, setViewportState] = useState<SdlcFrameViewport | null>(null);
+  const [covered, setCovered] = useState(false);
 
   const setViewport = useCallback((next: SdlcFrameViewport | null): void => {
     setViewportState(previous => {
@@ -44,7 +48,10 @@ export const SdlcFrameProvider = ({ children }: { children: ReactNode }): ReactE
     });
   }, []);
 
-  const value = useMemo(() => ({ viewport, setViewport }), [viewport, setViewport]);
+  const value = useMemo(
+    () => ({ viewport, setViewport, covered, setCovered }),
+    [viewport, setViewport, covered],
+  );
 
   return <SdlcFrameContext.Provider value={value}>{children}</SdlcFrameContext.Provider>;
 };

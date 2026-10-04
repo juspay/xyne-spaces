@@ -20,6 +20,7 @@ import {
 import { parseAssigneeFilter } from '../../zero/queries';
 import { websocketService } from '../../services/clients/socketClient';
 import type { TicketFilters } from '../../components/Tickets/TicketFilters/types';
+import { usePollWhenShown } from '../../hooks/usePageCoverage';
 
 interface UseKanbanCountsOptions extends FlowStepVisibilityOptions {
   viewMode: KanbanCountsViewMode;
@@ -659,10 +660,14 @@ export const useKanbanCounts = (options: UseKanbanCountsOptions): UseKanbanCount
   // A track across all its boards has no single board's room to hear changes on, so
   // its counts are refreshed on a timer instead.
   const pollTrackCounts = isTrack && ticketCountsRooms.length === 0;
+  // Nor, under full-page search, refetched on a counts event: marked stale, and fetched on return.
+  const shown = usePollWhenShown(queryKey);
 
   const query = useQuery({
     queryKey,
-    ...(pollTrackCounts ? { refetchInterval: 30_000 } : {}),
+    ...(pollTrackCounts
+      ? { refetchInterval: (): number | false => (shown() ? 30_000 : false) }
+      : {}),
     queryFn: () => {
       if (!track) return getKanbanCounts(request);
       const { viewMode: _viewMode, projectId: _projectId, boardId: _boardId, ...rest } = request;
@@ -690,7 +695,10 @@ export const useKanbanCounts = (options: UseKanbanCountsOptions): UseKanbanCount
       // counts so materialized flow steps cannot leak into the total. Nor do they
       // say which track a ticket is in, so a track's counts are refetched too.
       if (request.excludeFlowSteps || hasUnmatchableDeskFilter(request.deskFilters) || track) {
-        void queryClient.invalidateQueries({ queryKey });
+        void queryClient.invalidateQueries({
+          queryKey,
+          refetchType: shown() ? 'active' : 'none',
+        });
         return;
       }
 
@@ -744,6 +752,7 @@ export const useKanbanCounts = (options: UseKanbanCountsOptions): UseKanbanCount
     requestKey,
     ticketCountsRooms,
     queryKey,
+    shown,
   ]);
 
   return {
