@@ -52,7 +52,8 @@ import type {
 import { buildXyneAIStreamThreadId } from '../../utils/xyneAIStreamThreadId';
 import { cn } from '../../utils/classNames';
 import { AskAiRatingButtons } from './AskAiRatingButtons';
-import { isAssistantMessage, mergeTranscript } from '../Assistant/turns';
+import { isAssistantMessage } from '../Assistant/turns';
+import { useTranscript } from '../Assistant/useTranscript';
 import type { AssistantActions } from '../Assistant/useAssistantActions';
 import { AIComposer, type AIComposerAttachment, type AIComposerHandle } from './AIComposer';
 import { ReadonlyContextPills } from './ReadonlyContextPills';
@@ -1823,9 +1824,9 @@ export const AIChatThread = forwardRef<AIChatThreadHandle, AIChatThreadProps>(fu
     [messages, branchSelections],
   );
   const assistantMessages = assistant?.messages;
-  const { messages: transcriptMessages, serverIndexById } = useMemo(
-    () => mergeTranscript(displayMessages, assistantMessages),
-    [displayMessages, assistantMessages],
+  const { messages: transcriptMessages, serverIndexById } = useTranscript(
+    displayMessages,
+    assistantMessages,
   );
 
   const queryClient = useQueryClient();

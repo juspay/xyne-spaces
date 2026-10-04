@@ -49,7 +49,8 @@ import { trackCitationClicked, trackAskAIOpened } from '../../../services/otel/x
 import { globalClickTracker } from '../../../services/Analytics/globalClickTracker';
 import { AILandingHero, AILandingHeroErrorBoundary } from './components/AILandingHero';
 import { XyneAIEmptyState } from './components/XyneAIEmptyState';
-import { isAssistantMessage, mergeTranscript } from '../../Assistant/turns';
+import { isAssistantMessage } from '../../Assistant/turns';
+import { useTranscript } from '../../Assistant/useTranscript';
 import { useAssistantActions } from '../../Assistant/useAssistantActions';
 import { useRoutedSubmit } from '../../Assistant/useRoutedSubmit';
 import { cn } from '../../../utils/classNames';
@@ -404,10 +405,10 @@ const XyneAISidebar = ({
   const assistant = useAssistantActions({ enabled: !isFullscreen });
   // Starter cards only on the panel opened for a user who just finished onboarding.
   const openedForOnboarding = useSelector(xyneAIActor, s => s.context.openSource === 'setup');
-  const { messages: assistantMessages, reset: resetAssistant } = assistant;
-  const { messages: transcriptMessages, serverIndexById } = useMemo(
-    () => mergeTranscript(displayMessages, assistantMessages),
-    [displayMessages, assistantMessages],
+  const { messages: assistantMessages, reset: resetAssistant, cancel: cancelRouting } = assistant;
+  const { messages: transcriptMessages, serverIndexById } = useTranscript(
+    displayMessages,
+    assistantMessages,
   );
 
   const isActiveSessionStreaming = useMemo(
@@ -557,6 +558,7 @@ const XyneAISidebar = ({
     if (newConvId && prevThreadConversationIdRef.current !== newConvId) {
       prevThreadConversationIdRef.current = newConvId;
       hasLoadedInitialConversationRef.current = false;
+      resetAssistant();
       setMessages([]);
       setConversationId('');
       setBranchSelections({});
@@ -564,7 +566,7 @@ const XyneAISidebar = ({
       setStreamThreadKey(newStreamSlotKey());
       usesDraftStreamKeyRef.current = true;
     }
-  }, [threadInfo]);
+  }, [threadInfo, resetAssistant]);
 
   // Track processed selection keys to avoid duplicates
   const processedSelectionKeysRef = useRef<Set<string>>(new Set());
@@ -841,7 +843,8 @@ const XyneAISidebar = ({
 
   const effectiveAgentSlug = selectedAgentSlug;
   const { isAuto: isAutoStored, setAuto } = useAskAIAuto();
-  const isAuto = isAutoStored && !isAgentForced;
+  // An agent restored from an earlier visit wins over Auto.
+  const isAuto = isAutoStored && !isAgentForced && selectedAgentSlug === null;
   // Same key the sidebar's own streams register under (see the adopt/attach
   // sites below), so the shared handler targets this surface's stream.
   const flowThreadId = useMemo(
@@ -1020,6 +1023,7 @@ const XyneAISidebar = ({
       }
 
       // Reset to fresh state (keeps threadInfo but clears messages/conversation)
+      resetAssistant();
       setMessages([]);
       setBranchSelections({});
       setConversationId('');
@@ -1061,6 +1065,7 @@ const XyneAISidebar = ({
     researchContext,
     isFullscreen,
     isAgentForced,
+    resetAssistant,
   ]);
 
   // Scroll to bottom function
@@ -1453,12 +1458,13 @@ const XyneAISidebar = ({
   const handleSelectAgent = useCallback(
     (slug: string | null): void => {
       if (!isV2) return;
+      cancelRouting();
       setAuto(false);
       if (slug === selectedAgentSlug) return;
       setSelectedAgentSlug(slug);
       handleNewChat();
     },
-    [isV2, selectedAgentSlug, setSelectedAgentSlug, handleNewChat, setAuto],
+    [isV2, selectedAgentSlug, setSelectedAgentSlug, handleNewChat, setAuto, cancelRouting],
   );
 
   const handleSelectAuto = useCallback((): void => {
@@ -1475,6 +1481,7 @@ const XyneAISidebar = ({
       if (slug === selectedAgentSlug) return;
       setSelectedAgentSlug(slug);
       // Clear active conversation but stay on history page
+      resetAssistant();
       setConversationId('');
       setMessages([]);
       setBranchSelections({});
@@ -1483,7 +1490,7 @@ const XyneAISidebar = ({
       // Refresh sessions list for the new agent
       void refetchV2Sessions();
     },
-    [isV2, selectedAgentSlug, setSelectedAgentSlug, refetchV2Sessions, setAuto],
+    [isV2, selectedAgentSlug, setSelectedAgentSlug, refetchV2Sessions, setAuto, resetAssistant],
   );
 
   const handleLoadConversationRef = useRef(handleLoadConversation);
@@ -2136,6 +2143,8 @@ const XyneAISidebar = ({
     ],
   );
 
+  // Bumped by a voice transcript, which may equal the current input and so not change inputValue.
+  const [autoSendRequest, setAutoSendRequest] = useState(0);
   // Submits once the auto-send seed effect above has landed in inputValue (handleSubmit closes over it).
   useEffect(() => {
     if (
@@ -2146,7 +2155,7 @@ const XyneAISidebar = ({
       autoSendTriggerRef.current = 'auto_send';
       void handleSubmit();
     }
-  }, [inputValue, handleSubmit]);
+  }, [inputValue, handleSubmit, autoSendRequest]);
 
   const routedSubmit = useRoutedSubmit<'button' | 'enter' | undefined>({
     assistant,
@@ -2174,6 +2183,7 @@ const XyneAISidebar = ({
   const submitTranscript = useCallback((text: string): void => {
     autoSendPendingQueryRef.current = text;
     setInputValue(text);
+    setAutoSendRequest(request => request + 1);
   }, []);
   const answerTranscript = canRoute ? assistant.answer : undefined;
   const ownsStream = useCallback(
