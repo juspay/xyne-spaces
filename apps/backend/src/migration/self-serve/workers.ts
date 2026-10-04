@@ -87,7 +87,7 @@ export class MigrationWorkers {
     if (!this.singletonsRegistered) {
       // First time as leader: subscribe to the singleton queues. Bull's .process() is once-per-process, so followers
       // that never win the lease never register these handlers and therefore never consume collection/planner jobs.
-      this.queues.process(QueueName.COLLECTION, (id) => this.guard(id, (j) => j.refreshRequested ? this.refresh(j) : this.collect(j)));
+      this.queues.process(QueueName.COLLECTION, (id) => this.guard(id, (j) => j.backfill ? this.collectMissingFiles(j) : j.refreshRequested ? this.refresh(j) : this.collect(j)));
       this.queues.process(QueueName.INGESTION, (id) => this.guard(id, (j) => this.ingest(j)));
       this.singletonsRegistered = true;
     } else {
@@ -138,7 +138,7 @@ export class MigrationWorkers {
       if (job.status === MigrationStatus.QUEUED || job.status === MigrationStatus.SUBMITTED) {
         if (now - job.updatedAt >= RECLAIM_STALE_MS && !(await this.queues.hasJob(job.currentQueue, job.id))) {
           logger.warn('[SlackMigration] re-enqueuing stranded job (no queue entry)', { id: job.id, status: job.status });
-          await this.queues.enqueue(job.currentQueue, job.id, 'end').catch(() => undefined);
+          await this.queues.enqueue(job.currentQueue, job.id, job.backfill ? 'front' : 'end').catch(() => undefined); // a backfill keeps its priority
         }
         continue;
       }
@@ -181,7 +181,7 @@ export class MigrationWorkers {
         id: job.id, status: job.status, queue: job.currentQueue,
       });
       await this.store.update(job.id, { status: MigrationStatus.QUEUED }).catch(() => undefined); // waiting to resume, not running
-      await this.queues.enqueue(job.currentQueue, job.id, 'end');
+      await this.queues.enqueue(job.currentQueue, job.id, job.backfill ? 'front' : 'end'); // a backfill keeps its priority
     }
   }
 
@@ -272,6 +272,23 @@ export class MigrationWorkers {
     logger.info('[SlackMigration] collection complete → awaiting approval', {
       id: job.id, conversations: conversations.length, collected, messages, skipped, truncated,
     });
+  }
+
+  /**
+   * Attachment backfill, phase 1: fetch the files the collected dump references but never stored, then hand the job to
+   * ingestion at the FRONT of the queue (phase 2 re-ingests with upsert: missing messages are inserted, existing ones get
+   * their files attached). Messages come from the dump — only file downloads hit Slack. Idempotent on restart.
+   */
+  private async collectMissingFiles(job: MigrationJob): Promise<void> {
+    if (![MigrationStatus.QUEUED, MigrationStatus.COLLECTING].includes(job.status)) return; // stale delivery
+    await this.store.update(job.id, { status: MigrationStatus.COLLECTING });
+    logger.info('[SlackMigration] backfill: collecting missing files', { id: job.id });
+    const r = await this.engine.collectMissingFiles(job, () => this.store.markProgress(job.id), () => this.store.isStopRequested(job.id));
+    if (r.stopped) return void this.store.update(job.id, { status: MigrationStatus.STOPPED });
+    const filesCollected = { messages: r.messages, withFiles: r.withFiles, files: r.files, stored: r.stored, failed: r.files - r.stored, at: Date.now() };
+    logger.info('[SlackMigration] backfill: files collected → re-ingesting', { id: job.id, ...filesCollected });
+    await this.store.update(job.id, { status: MigrationStatus.QUEUED, currentQueue: QueueName.INGESTION, filesCollected });
+    await this.queues.enqueue(QueueName.INGESTION, job.id, 'front');
   }
 
   /**
@@ -471,8 +488,9 @@ export class MigrationWorkers {
     if (await this.store.doneCount(migrationId) < job.checkpoint.totalConversations) return; // SCARD is the source of truth, not the derived ingestedCount field
     if (!(await this.store.tryClaimFinalize(migrationId))) return; // another worker is finalizing
     const completedAt = Date.now();
-    await this.store.update(migrationId, { status: MigrationStatus.COMPLETED, completedAt });
-    await this.engine.announceMigration(job).catch((err) => logger.warn('[SlackMigration] announce failed (non-fatal)', { id: migrationId, error: err instanceof Error ? err.message : String(err) }));
+    await this.store.update(migrationId, { status: MigrationStatus.COMPLETED, completedAt, backfill: undefined });
+    // A backfill of a channel that was already announced stays silent in Slack.
+    if (job.backfill !== 'silent') await this.engine.announceMigration(job).catch((err) => logger.warn('[SlackMigration] announce failed (non-fatal)', { id: migrationId, error: err instanceof Error ? err.message : String(err) }));
     await this.engine.deletePrefix(job.gcsPrefix).catch(() => undefined);
     const durationMs = job.ingestStartedAt ? completedAt - job.ingestStartedAt : undefined;
     logger.info('[SlackMigration] ingestion complete', {

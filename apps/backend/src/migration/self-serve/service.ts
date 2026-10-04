@@ -251,6 +251,80 @@ export class SlackMigrationService {
    * empties the ingested checkpoint so Approve re-plans every conversation; dedup by externalId keeps it safe on
    * channels that were only partially ingested. No re-collection happens — the dump on GCS is reused as-is.
    */
+  /**
+   * Attachment backfill for channels collected with a token that couldn't fetch files: re-collect the missing files from
+   * the stored dump, then re-ingest with upsert — both at the FRONT of their queues, smallest channels first. Eligible:
+   * this workspace's idle channel jobs whose dump has messages but no stored files. dryRun (the default) only lists them.
+   * Already-completed channels re-ingest silently (no second Slack final message).
+   */
+  async backfillAttachments(actor: Actor, opts: { dryRun?: boolean; jobIds?: string[] }) {
+    const wanted = opts.jobIds?.length ? new Set(opts.jobIds) : undefined;
+    const idle = (j: MigrationJob) =>
+      [MigrationStatus.COMPLETED, MigrationStatus.AWAITING_APPROVAL, MigrationStatus.FAILED, MigrationStatus.STOPPED].includes(j.status)
+      || (j.status === MigrationStatus.QUEUED && j.currentQueue === QueueName.INGESTION);
+    const jobs = (await this.store.list(1000, 0))
+      .filter((j) => j.workspaceId === actor.workspaceId && j.type === MigrationType.CHANNEL && (!wanted || wanted.has(j.id)));
+    const describe = (j: MigrationJob) => ({ id: j.id, name: j.slackChannelName, status: j.status, messages: j.stats.messages, silent: j.status === MigrationStatus.COMPLETED });
+    const eligible: MigrationJob[] = [];
+    const skipped: { id: string; name?: string; status: MigrationStatus; reason: string }[] = [];
+    const candidates: MigrationJob[] = [];
+    for (const j of jobs) {
+      if (idle(j)) candidates.push(j);
+      else if (wanted) skipped.push({ id: j.id, name: j.slackChannelName, status: j.status, reason: 'running or not collected yet' });
+    }
+    for (let i = 0; i < candidates.length; i += 10) { // a few GCS listings at a time
+      await Promise.all(candidates.slice(i, i + 10).map(async (j) => {
+        const dump = await this.engine.dumpState(j.gcsPrefix);
+        if (!dump.hasMessages) skipped.push({ id: j.id, name: j.slackChannelName, status: j.status, reason: 'no message dump in GCS — resubmit instead' });
+        else if (!dump.hasFiles) eligible.push(j);
+        else if (wanted) skipped.push({ id: j.id, name: j.slackChannelName, status: j.status, reason: 'files already collected' });
+      }));
+    }
+    if (opts.dryRun !== false) return { dryRun: true, eligible: eligible.map(describe), skipped };
+    this.assertIngestControlEnabled(); // a real run ends in ingestion — gated like approve/reingest
+
+    // 'front' is LIFO, so enqueue the largest first → the smallest channels run first (most channels recovered soonest).
+    for (const j of [...eligible].sort((a, b) => b.stats.messages - a.stats.messages)) {
+      await this.queues.removeJob(QueueName.INGESTION, j.id).catch(() => undefined); // was waiting to ingest
+      await this.store.clearIngestState(j.id);
+      await this.store.update(j.id, {
+        status: MigrationStatus.QUEUED,
+        currentQueue: QueueName.COLLECTION,
+        backfill: j.status === MigrationStatus.COMPLETED ? 'silent' : 'announce',
+        checkpoint: { ...j.checkpoint, ingestedConversationIds: [] },
+        stopRequested: false,
+        stopReason: undefined,
+        error: undefined,
+        completedAt: undefined,
+        ingestStartedAt: undefined,
+        filesCollected: undefined, // set again when phase 1 finishes
+      });
+      await this.queues.enqueue(QueueName.COLLECTION, j.id, 'front'); // store first: if this fails, reconcile re-adds it
+    }
+    logger.info('[SlackMigration][audit] attachment backfill started', { jobs: eligible.length, by: actor.userId, name: actor.name, email: actor.email });
+    return { dryRun: false, started: eligible.map(describe), skipped };
+  }
+
+  /** Admin: live order of the collection and ingestion queues — running job(s), then waiting jobs in processing order. */
+  async queueOrder(actor: Actor) {
+    const describe = async (name: QueueName) => {
+      const { activeIds, waitingIds } = await this.queues.getQueueOrder(name);
+      const row = async (id: string, position: number) => {
+        const j = await this.store.findById(id);
+        if (!j || j.workspaceId !== actor.workspaceId) return null;
+        const label = j.type === MigrationType.CHANNEL ? (j.slackChannelName ?? j.channelInput?.slackChannelId) : j.submittedByName;
+        return { position, id, type: j.type, name: label, status: j.status, messages: j.stats.messages, backfill: j.backfill, filesCollected: j.filesCollected };
+      };
+      const [running, waiting] = await Promise.all([
+        Promise.all(activeIds.map((id) => row(id, 0))),
+        Promise.all(waitingIds.map((id, i) => row(id, i + 1))),
+      ]);
+      return { running: running.filter(Boolean), waiting: waiting.filter(Boolean), totalWaiting: waitingIds.length };
+    };
+    const [collection, ingestion] = await Promise.all([describe(QueueName.COLLECTION), describe(QueueName.INGESTION)]);
+    return { collection, ingestion };
+  }
+
   async reingest(id: string, actor: Actor): Promise<MigrationJobView> {
     this.assertIngestControlEnabled(); // stages the job for re-ingestion
     const job = await this.mustGet(id, actor);

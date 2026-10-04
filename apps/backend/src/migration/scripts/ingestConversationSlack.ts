@@ -45,6 +45,8 @@ export interface IngestConversationSlackInput {
   /** Pause (ms) between messages to cap DB/Vespa-queue rate (self-serve migration); 0/undefined = unpaced. */
   interMessageDelayMs?: number;
   onProgress?: () => void;
+  /** Self-serve attachment backfill: a message that's already migrated but has no attachments gets its collected files attached. */
+  backfillAttachments?: boolean;
 }
 
 export interface IngestConversationSlackResult {
@@ -316,7 +318,7 @@ export const findOrCreateApp = async (
 export async function ingestConversationSlack(
   input: IngestConversationSlackInput
 ): Promise<IngestConversationSlackResult> {
-  const { slackMessages, externalSourceName, channelId, onlyReplies = false, workspaceId, userToken, botToken: inputBotToken, skipChannelMigratedUpdate = false, interMessageDelayMs = 0, onProgress } = input;
+  const { slackMessages, externalSourceName, channelId, onlyReplies = false, workspaceId, userToken, botToken: inputBotToken, skipChannelMigratedUpdate = false, interMessageDelayMs = 0, onProgress, backfillAttachments = false } = input;
 
   logger.info('[IngestSlack] Starting ingestion', {
     externalSourceName,
@@ -539,6 +541,18 @@ export async function ingestConversationSlack(
       };
     };
 
+    // Backfill (upsert): attach the now-collected files to a message migrated without them. Skips one that already
+    // has attachments, so re-runs are idempotent. Only stored (collected) files — no Slack fetch here.
+    const attachMissingFiles = async (messageId: string | null | undefined, files?: SlackFile[]): Promise<void> => {
+      const collected = (files ?? []).filter((f) => f.prefetchedStoragePath);
+      if (!backfillAttachments || !messageId || collected.length === 0) return;
+      const existing = await messageRepo.findById(messageId);
+      if (!existing || existing.hasAttachment) return;
+      const uploadedFiles = await downloadAttachments(collected);
+      if (uploadedFiles.length === 0) return;
+      await conversationService.updateMessageContent({ messageId, uploadedFiles, isMigrationImport: true });
+    };
+
     // Process all messages
     let ingestProgress = 0;
     for (const slackMessage of slackMessages) {
@@ -578,6 +592,8 @@ export async function ingestConversationSlack(
               slackMessage.botUserId,
               slackMessage.isPinned
             );
+          } else {
+            await attachMissingFiles(existingTopLevel.entityId, slackMessage.files);
           }
         }
 
@@ -592,6 +608,7 @@ export async function ingestConversationSlack(
               );
 
               if (existingReply) {
+                await attachMissingFiles(existingReply.entityId, reply.files);
                 continue; // Skip duplicate
               }
 

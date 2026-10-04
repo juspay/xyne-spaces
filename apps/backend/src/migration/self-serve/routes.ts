@@ -78,6 +78,14 @@ export function buildRouter(service: SlackMigrationService): Router {
   router.post('/migration-jobs/:id/resume', admin, wrap(async (req, res) => { res.json(ok(await service.resume(req.params.id, actorOf(req)))); }));
   // Recover a wiped/finished channel: reset it to AWAITING_APPROVAL so Approve re-ingests from the existing GCS dump (no re-collect).
   router.post('/migration-jobs/:id/reingest', admin, wrap(async (req, res) => { res.json(ok(await service.reingest(req.params.id, actorOf(req)))); }));
+  // Attachment backfill: re-collect missing files from the stored dump, then re-ingest with upsert — ahead of the queue.
+  // Body: { dryRun?: boolean (default true — lists eligible channels only), jobIds?: string[] (default: all eligible) }.
+  router.post('/migration-jobs/backfill-attachments', admin, wrap(async (req, res) => {
+    const jobIds = Array.isArray(req.body?.jobIds) ? req.body.jobIds.filter((s: unknown): s is string => typeof s === 'string') : undefined;
+    res.json(ok(await service.backfillAttachments(actorOf(req), { dryRun: req.body?.dryRun, jobIds })));
+  }));
+  // Live order of the collection and ingestion queues (running, then waiting in processing order).
+  router.get('/queues/order', admin, wrap(async (req, res) => { res.json(ok(await service.queueOrder(actorOf(req)))); }));
   // Jump a queued job to the front of its queue (collection or ingestion).
   router.post('/migration-jobs/:id/prioritize', admin, wrap(async (req, res) => { res.json(ok(await service.prioritize(req.params.id, actorOf(req)))); }));
   router.delete('/migration-jobs/:id', admin, wrap(async (req, res) => { await service.remove(req.params.id, actorOf(req)); res.json(ok({ deleted: true })); }));

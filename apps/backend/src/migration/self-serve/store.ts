@@ -45,6 +45,7 @@ function encodePatch(patch: Partial<MigrationJob>): { set: Record<string, string
       case 'channelInput':
       case 'channelProgress':
       case 'issues':
+      case 'filesCollected':
         set[k] = JSON.stringify(v);
         break;
       default:
@@ -309,6 +310,8 @@ function decode(h: Record<string, string>): MigrationJob {
     refreshCount: numOpt('refreshCount'),
     refreshDone: numOpt('refreshDone'),
     refreshTotal: numOpt('refreshTotal'),
+    backfill: opt('backfill') as MigrationJob['backfill'],
+    filesCollected: h.filesCollected ? (JSON.parse(h.filesCollected) as MigrationJob['filesCollected']) : undefined,
     error: opt('error'),
     issues: h.issues ? (JSON.parse(h.issues) as MigrationIssue[]) : undefined,
   };
