@@ -17,6 +17,8 @@ export interface ScheduledCallPillSnapshot {
 }
 
 export interface MessageMetadata {
+  senderNameOverride?: string;
+  senderIconOverride?: string;
   ticketId?: string;
   xyneId?: string;
   workflowId?: string;

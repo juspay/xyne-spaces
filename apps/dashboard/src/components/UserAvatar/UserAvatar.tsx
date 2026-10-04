@@ -25,11 +25,13 @@ const UserAvatar = ({
   size,
   shape,
   showActiveStatus = true,
+  pictureOverride,
 }: {
   userId?: string | null;
   size?: AvatarSizeValue;
   shape?: AvatarShapeValue;
   showActiveStatus?: boolean;
+  pictureOverride?: string | null | undefined;
 }): ReactElement => {
   const rounded = shape === AvatarShape.CIRCULAR;
   const radixSize = (size ?? AvatarSize.SM) as RadixAvatarSize;
@@ -40,6 +42,7 @@ const UserAvatar = ({
       size={radixSize}
       rounded={rounded}
       showActiveStatus={showActiveStatus}
+      pictureOverride={pictureOverride}
     />
   );
 };
