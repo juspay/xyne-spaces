@@ -79,7 +79,7 @@ export function mentionActivities(
     messageId: messageId,
     channelId,
     isThreadActivity,
-    classification: ActivityClassification.PENDING,
+    classification: ActivityClassification.PENDING_CLASSIFY,
   }));
 }
 

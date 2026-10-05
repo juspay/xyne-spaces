@@ -87,7 +87,8 @@ export function getWorkspaceActivityCountsQuery(memberId: string): Promise<
  * batch atomically with FOR UPDATE SKIP LOCKED; the worker sweeps every workspace, so there
  * is no single tenant to scope to. SQL unchanged.
  */
-export async function claimSpecialMentionAudienceActivitiesQuery() {
+/** Same window and order as claimSingleActivitiesQuery. */
+export async function claimSpecialMentionAudienceActivitiesQuery(since: Date) {
   return rawQuery(
     ['Activity'],
     'activity classification worker: FOR UPDATE SKIP LOCKED claim so competing workers cannot double-process a batch',
@@ -95,9 +96,10 @@ export async function claimSpecialMentionAudienceActivitiesQuery() {
       WITH batch AS (
         SELECT "actionSourceId", "channelId"
         FROM "activities"
-        WHERE "classification" = ${ActivityClassification.PENDING}
+        WHERE "classification" = ${ActivityClassification.PENDING_CLASSIFY}
           AND "classificationJobType" = ${ActivityClassificationJobType.SPECIAL_MENTION_AUDIENCE}
-        ORDER BY "createdAt" ASC
+          AND "createdAt" > ${since}
+        ORDER BY "createdAt" DESC
         LIMIT 1
         FOR UPDATE SKIP LOCKED
       ),
@@ -107,7 +109,7 @@ export async function claimSpecialMentionAudienceActivitiesQuery() {
         JOIN batch b
           ON a."actionSourceId" = b."actionSourceId"
          AND a."channelId" = b."channelId"
-        WHERE a."classification" = ${ActivityClassification.PENDING}
+        WHERE a."classification" = ${ActivityClassification.PENDING_CLASSIFY}
           AND a."classificationJobType" = ${ActivityClassificationJobType.SPECIAL_MENTION_AUDIENCE}
         FOR UPDATE SKIP LOCKED
       )
@@ -125,7 +127,14 @@ export async function claimSpecialMentionAudienceActivitiesQuery() {
  * atomically with FOR UPDATE SKIP LOCKED; the worker sweeps every workspace, so there is no
  * single tenant to scope to. SQL unchanged.
  */
-export async function claimSingleActivitiesQuery(limit: number) {
+/**
+ * Only PENDING_CLASSIFY rows are claimed. Legacy PENDING rows (written while the classifier
+ * was off) are never picked up: classifying months of backlog would push old mentions into
+ * people's Actionable tab. As a second guard, claims are limited to activities created after
+ * `since` (CAC activity_classification_max_age_days) and taken newest first, so a new
+ * activity never waits behind older ones.
+ */
+export async function claimSingleActivitiesQuery(limit: number, since: Date) {
   return rawQuery(
     ['Activity'],
     'activity classification worker: FOR UPDATE SKIP LOCKED claim so competing workers cannot double-process a row',
@@ -133,9 +142,10 @@ export async function claimSingleActivitiesQuery(limit: number) {
       WITH cte AS (
         SELECT "id"
         FROM "activities"
-        WHERE "classification" = ${ActivityClassification.PENDING}
+        WHERE "classification" = ${ActivityClassification.PENDING_CLASSIFY}
           AND ("classificationJobType" IS NULL OR "classificationJobType" = ${ActivityClassificationJobType.SINGLE})
-        ORDER BY "createdAt" ASC
+          AND "createdAt" > ${since}
+        ORDER BY "createdAt" DESC
         LIMIT ${limit}
         FOR UPDATE SKIP LOCKED
       )
