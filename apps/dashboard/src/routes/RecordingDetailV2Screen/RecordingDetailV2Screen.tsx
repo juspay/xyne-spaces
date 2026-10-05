@@ -18,7 +18,6 @@ import { toast } from 'sonner';
 import {
   logRecordingError,
   NO_TRANSCRIPT_AFTER_MS,
-  NO_TRANSCRIPT_RECORDING_TITLE,
   resolveRecordingTitle,
 } from '../../utils/recordingUtils';
 import {
@@ -1133,7 +1132,7 @@ export default function RecordingDetailV2Screen({
     recording,
     awaitingSummary,
     summaryFailed,
-    noTranscriptTimedOut: !hasTranscript && breadcrumbTitle === NO_TRANSCRIPT_RECORDING_TITLE,
+    noTranscriptTimedOut: !isLive && !hasTranscript,
   });
   const showSummaryShimmer = summaryPanelState === 'pending';
   const summaryFailedEffective = summaryPanelState === 'failed';

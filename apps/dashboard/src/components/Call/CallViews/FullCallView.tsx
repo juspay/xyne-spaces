@@ -607,8 +607,10 @@ export function FullCallView({
           lights in Electron. */}
       <div
         className={cn(
-          'relative flex h-14 shrink-0 items-center justify-between gap-3 pr-3 pt-4 sm:pr-4',
-          isElectron && isMac ? 'pl-24 [[data-fs]_&]:pl-3 sm:[[data-fs]_&]:pl-4' : 'pl-3 sm:pl-4',
+          'relative flex shrink-0 items-center justify-between gap-3 pr-3 sm:pr-4',
+          isElectron && isMac
+            ? 'h-14 pl-24 [[data-fs]_&]:pl-3 sm:[[data-fs]_&]:pl-4'
+            : 'h-16 pl-3 pt-4 sm:pl-4',
         )}
       >
         <div className='flex min-w-0 items-center gap-2 sm:gap-3'>
@@ -700,7 +702,7 @@ export function FullCallView({
         </div>
 
         {/* Control bar */}
-        <div className='relative z-50 shrink-0 -mt-3'>
+        <div className='relative z-50 shrink-0'>
           <CallControls
             isMicEnabled={isMicEnabled}
             isCameraEnabled={isCameraEnabled}
