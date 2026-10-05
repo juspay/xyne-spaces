@@ -92,10 +92,6 @@ export function ScheduledCallPill({ message, callId }: ScheduledCallPillProps): 
   const isReschedule = state === 'CANCELLED';
   const isOpenSummary = state === 'ENDED';
   const when = formatCallWindow(call.startsAt, call.endsAt);
-  // DM/group-DM channels have no human name (their `name` is participant ids), so
-  // only show the "in #…" suffix for real channels.
-  const channel = channels.find(c => c.id === call.channelId);
-  const channelName = channel && !isDMChannel(channel.scopeType) ? channel.name : undefined;
 
   // CallHistoryScreen keys ?callId= on the internal id, not externalId.
   const openInCalls = (): void => {
@@ -112,9 +108,7 @@ export function ScheduledCallPill({ message, callId }: ScheduledCallPillProps): 
 
   return (
     <div className='xs-cc-scope flex w-full max-w-[560px] flex-col gap-2'>
-      <p className='text-[13.5px] leading-[1.55] text-muted-foreground'>
-        scheduled a call{channelName ? ` in #${channelName}` : ''}
-      </p>
+      <p className='text-[13.5px] leading-[1.55] text-muted-foreground'>scheduled a call</p>
 
       <div
         className={cn(
