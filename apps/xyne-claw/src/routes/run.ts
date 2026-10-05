@@ -45,6 +45,7 @@ import {
   openPaletteModeFromTools,
 } from "xyne-claw-shared";
 import { SessionLockedError } from "../session-lock.js";
+import { matchesDirectPick } from "../tool-resolution.js";
 import { SandboxUnavailableError } from "../sandbox-unavailable.js";
 import { isSafeId } from "../safe-id.js";
 import { sanitizeCitations } from "../citation-sanitizer.js";
@@ -2279,17 +2280,7 @@ export async function processTask(
       const rawName = extractRuntimeToolName(tool.name);
       return groups.some((group) => group.writeTools.map(String).includes(rawName));
     };
-    const selectedAsDirect = (tool: ToolDefinition, allowedDirect: string[]): boolean => {
-      const norm = (s: string): string => s.toLowerCase().replace(/_/g, "-");
-      const toolSelectionKey = (tool as { selectionKey?: string }).selectionKey;
-      return allowedDirect.some((d) =>
-        tool.name === d ||
-        tool.name.endsWith(d) ||
-        d.endsWith(`__${tool.name}`) ||
-        norm(tool.name) === norm(d) ||
-        (toolSelectionKey ? d === toolSelectionKey : false),
-      );
-    };
+    const selectedAsDirect = (tool: ToolDefinition, allowedDirect: string[]): boolean => matchesDirectPick(tool, allowedDirect);
     const applyAgentToolFilter = (
       tools: ToolDefinition[],
       cfg: ReturnType<typeof parseToolsConfig>,
@@ -3239,6 +3230,11 @@ export async function processTask(
         "sandbox-run", "sandbox-run-detached", "sandbox-write-file",
         "sandbox-create", "sandbox-destroy", "write",
       ]);
+      const pinnedProfile = meta["sandboxRepo"] ? REPO_CONFIGS[meta["sandboxRepo"]] : undefined;
+      if (!forceReadOnlySandbox && pinnedProfile && !pinnedProfile.repoUrl) {
+        RO_DISABLED.delete("sandbox-create");
+        RO_DISABLED.delete("sandbox-destroy");
+      }
       const before = allTools.length;
       allTools = allTools.filter((t) => !RO_DISABLED.has(t.name));
       if (allTools.length !== before) {

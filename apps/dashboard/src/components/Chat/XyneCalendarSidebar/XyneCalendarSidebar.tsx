@@ -33,6 +33,7 @@ import {
   startOfMonth,
   startOfWeek,
 } from 'date-fns';
+import { MeetingStatus } from '@xyne/shared';
 import {
   xyneCalendarActor,
   globalXyneCalendarPanelRef,
@@ -72,6 +73,7 @@ import {
   getCalendarWindowRange,
   getCallPillVariant,
   getCallsOverlappingDay,
+  getCurrentUserMeetingStatus,
   hasCallEnded,
   isCallDraggable,
   isCallJoinableNow,
@@ -518,6 +520,7 @@ interface XyneCalendarDraggableDayPillProps {
   joinDisabled: boolean;
   showJoinByDefault: boolean;
   past: boolean;
+  maybe: boolean;
   compact: boolean;
   showCompactMetadata: boolean;
   continuesFromPreviousDay: boolean;
@@ -541,6 +544,7 @@ function XyneCalendarDraggableDayPill({
   joinDisabled,
   showJoinByDefault,
   past,
+  maybe,
   compact,
   showCompactMetadata,
   continuesFromPreviousDay,
@@ -582,6 +586,7 @@ function XyneCalendarDraggableDayPill({
         joinDisabled={joinDisabled}
         showJoinByDefault={showJoinByDefault}
         past={past}
+        maybe={maybe}
         compact={compact}
         showCompactMetadata={showCompactMetadata}
         continuesFromPreviousDay={continuesFromPreviousDay}
@@ -1040,7 +1045,7 @@ const XyneCalendarDayView = memo(
 
                 const callHasEnded = hasCallEnded(call, now);
                 const variant = getCallPillVariant(call, currentUserId, now);
-                const joinable = isCallJoinableNow(call, variant, now);
+                const joinable = isCallJoinableNow(call, now);
                 const continuesFromPreviousDay = !isSameDay(new Date(call.startsAt), currentDay);
                 const continuesToNextDay =
                   !!call.endsAt && !isSameDay(new Date(call.endsAt), currentDay);
@@ -1076,6 +1081,7 @@ const XyneCalendarDayView = memo(
                       position.widthPct >= ALWAYS_VISIBLE_JOIN_MIN_WIDTH_PERCENTAGE
                     }
                     past={callHasEnded}
+                    maybe={getCurrentUserMeetingStatus(call, currentUserId) === MeetingStatus.MAYBE}
                     compact={height < 40}
                     showCompactMetadata={position.widthPct >= COMPACT_METADATA_MIN_WIDTH_PERCENTAGE}
                     continuesFromPreviousDay={continuesFromPreviousDay}

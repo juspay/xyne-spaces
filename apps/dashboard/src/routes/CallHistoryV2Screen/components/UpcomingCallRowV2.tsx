@@ -9,6 +9,7 @@ import { roomActor } from '../../../machines/roomMachine';
 import { xyneCalendarActor } from '../../../machines/xyneCalendarMachine';
 import { cn } from '../../../utils/classNames';
 import { copyTextToClipboard } from '../../../utils/clipboardUtils';
+import { buildCallInviteText } from '../../../utils/callControls';
 import { dateToIso } from '../../../utils/dateUtils';
 import {
   buildParticipantSummary,
@@ -120,7 +121,13 @@ export function UpcomingCallRowV2({
       toast.error('No link available');
       return;
     }
-    copyTextToClipboard(call.roomLink)
+    const hostId = call.organizerId ?? call.createdByUserId;
+    const text = buildCallInviteText({
+      ...call,
+      roomLink: call.roomLink,
+      hostName: userMap.get(hostId)?.name,
+    });
+    copyTextToClipboard(text)
       .then(() => {
         setIsCopied(true);
         setTimeout(() => setIsCopied(false), 1500);

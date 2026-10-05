@@ -1181,10 +1181,10 @@ export class CallDocumentService {
     }
   }
 
-  /** True when the call was scheduled by an app/bot user rather than a person. */
+  /** True when the call was scheduled by an app/agent/bot user rather than a person. */
   private async isBotCreatedCall(call: Pick<Call, 'createdByUserId'>): Promise<boolean> {
     const creator = await repositories.users.findById(call.createdByUserId);
-    return creator?.userType === UserType.APP || creator?.userType === UserType.BOT;
+    return creator?.userType === UserType.APP || creator?.userType === UserType.AGENT || creator?.userType === UserType.BOT;
   }
 
   /**

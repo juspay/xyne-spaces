@@ -61,6 +61,10 @@ router.get('/:ticketId/latest-email-tags', ticketController.getLatestEmailTags);
 
 router.post('/:ticketId/attachments/from-conversation', ticketController.addAttachmentsFromConversation);
 
+// Ozonetel call recording → transcript attachment (manual trigger from the call thread)
+router.post('/:ticketId/emails/:emailId/transcribe', ticketController.transcribeCallRecording);
+router.post('/:ticketId/emails/:emailId/summarize', ticketController.summarizeCallTranscript);
+
 router.post('/:ticketId/release-notes/generate', releaseNotesController.generateReleaseNotes);
 // Gated like the other release-manager AI actions (suggest/analyze), not plain TICKETS WRITE.
 router.post(

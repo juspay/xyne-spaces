@@ -60,7 +60,11 @@ env:
   AZURE_OPENAI_STT_API_VERSION: 2025-03-01-preview
   AZURE_OPENAI_STT_MODEL: gpt-4o-transcribe
   GOOGLE_STT_MODEL: chirp_3
-  GOOGLE_STT_LANGUAGE: en-US
+  GOOGLE_STT_LANGUAGE: "en-IN"
+  # Per-use-case language lists (each overrides GOOGLE_STT_LANGUAGE for its Google Speech path)
+  GOOGLE_STT_REALTIME_LANGUAGE: "en-IN,hi-IN,ta-IN"
+  GOOGLE_STT_VOICE_INPUT_LANGUAGE: "en-IN,hi-IN"
+  GOOGLE_STT_BATCH_LANGUAGE: "en-IN,kn-IN"
   GOOGLE_STT_STREAM_MODEL: chirp_2
   GOOGLE_STT_STREAM_LOCATION: us-central1
   DEEPGRAM_MODEL: nova-3

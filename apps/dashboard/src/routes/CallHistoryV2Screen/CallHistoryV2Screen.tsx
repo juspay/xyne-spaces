@@ -645,12 +645,6 @@ const CallHistoryV2Screen = (): ReactElement => {
         </div>
         {/* Page body */}
         <div className='max-w-[820px] w-full flex flex-col gap-6 px-6 pb-20 sm:px-8'>
-          <StartCallPill
-            onInstantCall={() => setIsInstantCallModalOpen(true)}
-            onScheduleCall={() => setIsScheduleModalOpen(true)}
-            isMobile={isMobile}
-          />
-
           {/* UPCOMING section */}
           {(!hasCallSearch || isVespaCallSearching || hasUpcomingCallsToday) && (
             <div className='flex flex-col gap-3'>
@@ -805,6 +799,11 @@ const CallHistoryV2Screen = (): ReactElement => {
         </div>
       </div>
 
+      <StartCallPill
+        onInstantCall={() => setIsInstantCallModalOpen(true)}
+        onScheduleCall={() => setIsScheduleModalOpen(true)}
+      />
+
       <ParticipantsModal
         isOpen={isParticipantsModalOpen}
         onClose={closeParticipantsModal}
@@ -919,23 +918,13 @@ const NoFilteredCalls = ({
 interface StartCallPillProps {
   onInstantCall: () => void;
   onScheduleCall: () => void;
-  isMobile: boolean;
 }
 
-const StartCallPill = ({
-  onInstantCall,
-  onScheduleCall,
-  isMobile,
-}: StartCallPillProps): ReactElement => {
+const StartCallPill = ({ onInstantCall, onScheduleCall }: StartCallPillProps): ReactElement => {
   const [isOpen, setIsOpen] = useState(false);
 
   return (
-    <div
-      className={cn(
-        'fixed bottom-7 z-50 -translate-x-1/2',
-        isMobile ? 'left-1/2' : 'left-[calc(50%+30px)]',
-      )}
-    >
+    <div className='sticky bottom-7 z-50 mx-auto mt-auto w-fit'>
       <Popover
         open={isOpen}
         onOpenChange={setIsOpen}
