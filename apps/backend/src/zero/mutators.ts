@@ -139,6 +139,7 @@ import {
   serializeDeskAppIds,
   supportsChannelApps,
   canPublishChannelApps,
+  parsePublishedAppIds,
 } from '@xyne/shared';
 import {
   evaluateEta,
@@ -293,6 +294,42 @@ const storageService = getStorageService();
 
 const serializeCanvasCommentMentionedUserIds = (mentionedUserIds: string[]): string =>
   JSON.stringify([...new Set(mentionedUserIds)]);
+
+/**
+ * Loads a channel for publishing an app and checks the caller may: the channel
+ * exists, isn't archived, supports apps (channel, DM or group DM — never a
+ * desk), and the caller passes canPublishChannelApps. Returns the published
+ * list as stored NOW, so publishApp/unpublishApp change one entry against the
+ * current row instead of overwriting it with a client's (possibly stale) copy.
+ */
+async function loadChannelForAppPublish(
+  tx: Transaction<Schema>,
+  channelId: string,
+  userId: string,
+): Promise<string[]> {
+  const channel = await tx.run(zql.channels.where('id', channelId).one());
+  if (!channel) {
+    throw new Error("Channel doesn't exist");
+  }
+  if (channel.isArchived) {
+    throw new Error('Cannot publish apps to an archived channel');
+  }
+  if (!supportsChannelApps(channel)) {
+    throw new Error('Apps can only be published to channels, DMs and group DMs');
+  }
+  const participant = await tx.run(
+    zql.channel_participants.where('channelId', channelId).where('userId', userId).one(),
+  );
+  // Channels: ADMINs only. DMs and group DMs: any participant (peers).
+  if (!canPublishChannelApps(channel.scopeType, participant?.role)) {
+    throw new Error(
+      channel.scopeType === ChannelScopeType.DEFAULT
+        ? 'Only channel admins can publish apps to the channel'
+        : 'Only participants can publish apps to this conversation',
+    );
+  }
+  return parsePublishedAppIds(channel.publishedAppIds);
+}
 
 async function getCanvasThreadCommentCount(
   tx: Transaction<Schema>,
@@ -1599,36 +1636,31 @@ export function createMutators(
       // ADMIN in a channel, by any participant in a DM or group DM. Members layer their
       // own changes on top locally. Desks are excluded outright: they keep their own
       // all-shared list in email_channel_preferences.deskAppIds.
-      setPublishedApps: defineMutator(
-        z.object({
-          channelId: z.string(),
-          appIds: z.array(z.string().min(1).max(64)).max(MAX_CHANNEL_PUBLISHED_APPS),
-        }),
-        async ({ tx, args: { channelId, appIds } }) => {
-          const channel = await tx.run(zql.channels.where('id', channelId).one());
-          if (!channel) {
-            throw new Error("Channel doesn't exist");
-          }
-          if (channel.isArchived) {
-            throw new Error('Cannot publish apps to an archived channel');
-          }
-          if (!supportsChannelApps(channel)) {
-            throw new Error('Apps can only be published to channels, DMs and group DMs');
-          }
-          const participant = await tx.run(
-            zql.channel_participants.where('channelId', channelId).where('userId', authData.sub).one(),
-          );
-          // Channels: ADMINs only. DMs and group DMs: any participant (peers).
-          if (!canPublishChannelApps(channel.scopeType, participant?.role)) {
-            throw new Error(
-              channel.scopeType === ChannelScopeType.DEFAULT
-                ? 'Only channel admins can publish apps to the channel'
-                : 'Only participants can publish apps to this conversation',
-            );
+      //
+      // One app per call, applied to the row as read inside this transaction, so two
+      // people publishing at once each add their app rather than overwriting the other.
+      publishApp: defineMutator(
+        z.object({ channelId: z.string(), appId: z.string().min(1).max(64) }),
+        async ({ tx, args: { channelId, appId } }) => {
+          const current = await loadChannelForAppPublish(tx, channelId, authData.sub);
+          if (current.includes(appId)) return;
+          if (current.length >= MAX_CHANNEL_PUBLISHED_APPS) {
+            throw new Error(`Up to ${MAX_CHANNEL_PUBLISHED_APPS} apps can be published here`);
           }
           await tx.mutate.channels.update({
             id: channelId,
-            publishedAppIds: serializeAppIdList(appIds),
+            publishedAppIds: serializeAppIdList([...current, appId]),
+          });
+        },
+      ),
+      unpublishApp: defineMutator(
+        z.object({ channelId: z.string(), appId: z.string().min(1).max(64) }),
+        async ({ tx, args: { channelId, appId } }) => {
+          const current = await loadChannelForAppPublish(tx, channelId, authData.sub);
+          if (!current.includes(appId)) return;
+          await tx.mutate.channels.update({
+            id: channelId,
+            publishedAppIds: serializeAppIdList(current.filter(id => id !== appId)),
           });
         },
       ),

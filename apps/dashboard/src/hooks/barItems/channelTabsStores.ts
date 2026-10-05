@@ -104,22 +104,33 @@ export const getChannelTabsStore = (channelId: string): BarItemsStore => {
 const addedStores = new Map<string, BarItemsStore>();
 
 /**
- * One-time repair. An earlier build seeded `:added` from the channel's visible
- * list even when the channel had never been customized — so the default
- * layout's apps were recorded as "added" in every channel it was opened in.
- * Any real edit writes the channel's own list too (useChannelTabsStore's `set`
- * writes all three), so an `:added` list next to NO saved channel list can only
- * be that seed: drop it and let the corrected migration reseed it (empty).
+ * One-time repair, run once when this module loads (never during render). An
+ * earlier build seeded `:added` from the channel's visible list even when the
+ * channel had never been customized — so the default layout's apps were
+ * recorded as "added" in every channel it was opened in. Any real edit writes
+ * the channel's own list too (useChannelTabsStore's `set` writes all three), so
+ * an `:added` list next to NO saved channel list can only be that seed: drop it
+ * and let the corrected migration reseed it (empty).
  */
-const repairSeededFromDefaults = (channelId: string): void => {
+const ADDED_SUFFIX = ':added';
+const repairSeededFromDefaults = (): void => {
   try {
-    const addedKey = `${CHANNEL_TABS_KEY_PREFIX}${channelId}:added`;
-    if (localStorage.getItem(`${CHANNEL_TABS_KEY_PREFIX}${channelId}`) !== null) return;
-    if ((readList(addedKey) ?? []).length > 0) localStorage.removeItem(addedKey);
+    const stale: string[] = [];
+    for (let i = 0; i < localStorage.length; i += 1) {
+      const key = localStorage.key(i);
+      if (!key?.startsWith(CHANNEL_TABS_KEY_PREFIX) || !key.endsWith(ADDED_SUFFIX)) continue;
+      const orderKey = key.slice(0, -ADDED_SUFFIX.length);
+      if (localStorage.getItem(orderKey) === null && (readList(key) ?? []).length > 0) {
+        stale.push(key);
+      }
+    }
+    // Removed after the scan: removing while iterating shifts localStorage's indices.
+    stale.forEach(key => localStorage.removeItem(key));
   } catch {
     // Storage unavailable: nothing persisted to repair.
   }
 };
+repairSeededFromDefaults();
 const hiddenStores = new Map<string, BarItemsStore>();
 
 /**
@@ -132,9 +143,8 @@ const hiddenStores = new Map<string, BarItemsStore>();
 const getAddedStore = (channelId: string): BarItemsStore => {
   const existing = addedStores.get(channelId);
   if (existing) return existing;
-  repairSeededFromDefaults(channelId);
   const store = createBarItemsStore({
-    storageKey: `${CHANNEL_TABS_KEY_PREFIX}${channelId}:added`,
+    storageKey: `${CHANNEL_TABS_KEY_PREFIX}${channelId}${ADDED_SUFFIX}`,
     defaults: [],
     migrate: () => (readList(`${CHANNEL_TABS_KEY_PREFIX}${channelId}`) ?? []).filter(isAppItemId),
   });

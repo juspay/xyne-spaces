@@ -1,4 +1,13 @@
-import { ChannelRole, ChannelScopeType, ChannelType, DeskType, MAX_CHANNEL_PUBLISHED_APPS, MAX_DESK_APPS } from '../zero/types.js';
+// From types.js, not schema.js: these are all plain enums, and types.js has no
+// imports of its own, so this module (and its node:test) loads without the schema.
+import {
+  ChannelRole,
+  ChannelScopeType,
+  ChannelType,
+  DeskType,
+  MAX_CHANNEL_PUBLISHED_APPS,
+  MAX_DESK_APPS,
+} from '../zero/types.js';
 
 /** Desk channel types — EMAIL, SLACK, APP, CALL and SOCIAL_MEDIA channels all feed into Xyne Desk. */
 export const DESK_CHANNEL_TYPES: ReadonlySet<ChannelType> = new Set([
@@ -59,6 +68,35 @@ export function parseDeskAppIds(raw: string | null | undefined): string[] {
 
 export const serializeDeskAppIds = serializeAppIdList;
 
+/** Longest app id accepted in Channel.publishedAppIds (ids are 25-char cuids). */
+export const MAX_PUBLISHED_APP_ID_LENGTH = 64;
+
+/**
+ * Whether a raw Channel.publishedAppIds value is one the writers could have
+ * produced: null, or a JSON array of at most MAX_CHANNEL_PUBLISHED_APPS
+ * distinct ids of 1–64 characters. The channels ACL checks this, so a write that
+ * bypasses publishApp/unpublishApp can't store anything larger or malformed in a
+ * column every member syncs.
+ */
+export function isValidPublishedAppIdList(raw: string | null | undefined): boolean {
+  if (raw === null || raw === undefined) return true;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return false;
+  }
+  return (
+    Array.isArray(parsed) &&
+    parsed.length > 0 &&
+    parsed.length <= MAX_CHANNEL_PUBLISHED_APPS &&
+    new Set(parsed).size === parsed.length &&
+    parsed.every(
+      id => typeof id === 'string' && id.length > 0 && id.length <= MAX_PUBLISHED_APP_ID_LENGTH,
+    )
+  );
+}
+
 /**
  * Apps a channel admin published to a normal channel (Channel.publishedAppIds),
  * in order. Desks never have any — see isDeskChannelType.
@@ -74,7 +112,7 @@ export function parsePublishedAppIds(raw: string | null | undefined): string[] {
  * and never a ticket or document channel.
  */
 export function supportsChannelApps(channel: {
-  scopeType?: string | null;
+  scopeType?: ChannelScopeType | null;
   type?: string | null;
 }): boolean {
   const scope = channel.scopeType;
@@ -92,8 +130,8 @@ export function supportsChannelApps(channel: {
  * rule runs in both mutators, the channels ACL and the UI.
  */
 export function canPublishChannelApps(
-  scopeType: string | null | undefined,
-  participantRole: string | null | undefined,
+  scopeType: ChannelScopeType | null | undefined,
+  participantRole: ChannelRole | null | undefined,
 ): boolean {
   if (!participantRole) return false;
   if (scopeType === ChannelScopeType.DM || scopeType === ChannelScopeType.GROUP_DM) return true;

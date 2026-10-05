@@ -4,6 +4,7 @@ import {
   Schema,
   canPublishChannelApps,
   isDeskChannelType,
+  isValidPublishedAppIdList,
   supportsChannelApps,
 } from '@xyne/shared';
 import { BaseACL } from '../core/base-acl';
@@ -28,7 +29,7 @@ export class ChannelsACL extends BaseACL<'channels'> {
   async canInsert(args: InsertValue<TableSchema<'channels'>>, tx: Transaction<Schema>): Promise<void> {
     assertGuestWriteBlocked(this.ctx, 'channels', 'insert', 'Channel');
 
-    // Apps are published to an existing channel by its admin (channel.setPublishedApps),
+    // Apps are published to an existing channel (channel.publishApp / unpublishApp),
     // never seeded at creation — which also keeps the column null on every new desk.
     if (args.publishedAppIds) {
       throw new MutationACLError('Channel insert failed: apps are published after the channel exists', 'channels');
@@ -87,6 +88,11 @@ export class ChannelsACL extends BaseACL<'channels'> {
       }
       if (!canPublishChannelApps(channel.scopeType, currentUserParticipantData.role)) {
         throw new MutationACLError('Channel update failed: only ADMINs can publish apps to the channel', 'channels');
+      }
+      // Who may write it is checked above; this is what may be written. The
+      // mutators already enforce it — this covers any other update path.
+      if (!isValidPublishedAppIdList(args.publishedAppIds)) {
+        throw new MutationACLError('Channel update failed: published apps must be up to 8 distinct app ids', 'channels');
       }
     }
 

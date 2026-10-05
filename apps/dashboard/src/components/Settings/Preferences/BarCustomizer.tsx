@@ -65,6 +65,7 @@ export const BarCustomizer = ({
   const ids = store.useItems();
   const snapshots = useAppSnapshots();
   const [pickerOpen, setPickerOpen] = useState(false);
+  const [confirmingReset, setConfirmingReset] = useState(false);
 
   const builtInById = useMemo(() => new Map(builtIns.map(b => [b.id, b])), [builtIns]);
 
@@ -122,18 +123,50 @@ export const BarCustomizer = ({
         <p className='text-base font-semibold text-foreground'>{title}</p>
         <p className='mt-0.5 text-sm text-muted-foreground'>{subtitle}</p>
         {headerSlot && <div className='mt-3'>{headerSlot}</div>}
-        {resetLabel && (
-          <Button
-            variant='ghost'
-            size='sm'
-            className='mt-2 h-7 px-2 text-xs text-muted-foreground'
-            onClick={() => store.reset()}
-            data-track-category={trackCategory}
-            data-track-name='ResetBarLayout'
-          >
-            {resetLabel}
-          </Button>
-        )}
+        {resetLabel &&
+          // Two steps: reset discards this person's order, their own apps and
+          // the published apps they removed, all at once.
+          (confirmingReset ? (
+            <div className='mt-2 flex items-center gap-2 text-xs'>
+              <span className='text-muted-foreground'>
+                Discard your order and your own apps here?
+              </span>
+              <Button
+                variant='destructive'
+                size='sm'
+                className='h-7 px-2 text-xs'
+                onClick={() => {
+                  store.reset();
+                  setConfirmingReset(false);
+                }}
+                data-track-category={trackCategory}
+                data-track-name='ResetBarLayout'
+              >
+                Reset
+              </Button>
+              <Button
+                variant='ghost'
+                size='sm'
+                className='h-7 px-2 text-xs'
+                onClick={() => setConfirmingReset(false)}
+                data-track-category={trackCategory}
+                data-track-name='CancelResetBarLayout'
+              >
+                Cancel
+              </Button>
+            </div>
+          ) : (
+            <Button
+              variant='ghost'
+              size='sm'
+              className='mt-2 h-7 px-2 text-xs text-muted-foreground'
+              onClick={() => setConfirmingReset(true)}
+              data-track-category={trackCategory}
+              data-track-name='StartResetBarLayout'
+            >
+              {resetLabel}
+            </Button>
+          ))}
       </div>
 
       <section className='space-y-2'>

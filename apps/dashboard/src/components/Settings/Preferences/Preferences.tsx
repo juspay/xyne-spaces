@@ -1373,7 +1373,7 @@ const ChannelTabsSection: FC<{ state: PreferencesState }> = () => {
   const builtIns = useChannelTabBuiltIns(selected?.scopeType);
   // Hooks run before the empty-state return below, so they take a placeholder id.
   const store = useChannelTabsStore(selected?.id ?? 'unknown', selected?.publishedAppIds);
-  const publish = useChannelAppPublishing(selected?.id ?? '', selected);
+  const publish = useChannelAppPublishing(selected?.id ?? 'unknown', selected);
   const publishedIds = useMemo(
     () => parsePublishedAppIds(selected?.publishedAppIds),
     [selected?.publishedAppIds],

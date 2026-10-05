@@ -43,7 +43,9 @@ export const useChannelAppPublishing = (
   const zero = useZero();
   // Only this user's ADMIN participations; the same source Canvas and Desk use.
   const [adminParticipations] = useCachedQuery(queries.myChannelParticipations({}));
-  const isAdmin = (adminParticipations ?? []).some(p => p.channelId === channelId);
+  const isAdmin = (adminParticipations ?? []).some(
+    p => p.channelId === channelId && p.role === ChannelRole.ADMIN,
+  );
   const isDirect =
     channel?.scopeType === ChannelScopeType.DM || channel?.scopeType === ChannelScopeType.GROUP_DM;
   // A DM is only visible to its participants, so seeing one means being in it;
@@ -62,9 +64,13 @@ export const useChannelAppPublishing = (
       audience: isDirect ? 'conversation' : 'channel',
       onToggle: (app, next): void => {
         if (next) setAppSnapshot(app.id, { title: app.title, icon: app.icon });
-        const appIds = next ? [...current, app.id] : current.filter(id => id !== app.id);
+        // One app per call: the mutator applies it to the row as it stands, so a
+        // quick second click or another person publishing at once isn't lost.
+        const args = { channelId, appId: app.id };
         void surfaceMutationError(
-          zero.mutate(mutators.channel.setPublishedApps({ channelId, appIds })),
+          zero.mutate(
+            next ? mutators.channel.publishApp(args) : mutators.channel.unpublishApp(args),
+          ),
           next ? 'Could not publish the app' : 'Could not unpublish the app',
         );
       },
