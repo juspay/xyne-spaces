@@ -453,6 +453,7 @@ export const boardComplexityScoreTable = table('board_complexity_scores')
     usePercentage: boolean(),
     percentageWindowDays: number(),
     percentageShareBasis: string(),
+    percentageWindowStartAt: number().optional(),
     createdAt: number(),
     updatedAt: number(),
     createdBy: string(),

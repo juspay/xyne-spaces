@@ -123,7 +123,7 @@ export function VisibilityTab({
           <p className='text-xs leading-[1.4] text-muted-foreground'>
             {selectedBoardId
               ? usePercentage
-                ? `“Use percentage assignment” is on for this board: each ticket goes to whoever is furthest below their % share of ${shareTicketsLabel} assigned here in the last ${shareWindowDays} day${shareWindowDays === 1 ? '' : 's'}. Open tickets only break ties, so no score is shown.`
+                ? `“Use percentage assignment” is on for this board: each ticket goes to whoever is furthest below their % share of ${shareTicketsLabel} assigned here in the current window, which resets every ${shareWindowDays} day${shareWindowDays === 1 ? '' : 's'}. Open tickets only break ties, so no score is shown.`
                 : 'Score = (weightedActiveTasks + coldStartOffset) − expertiseBonus. Lowest score is assigned next.'
               : 'Pick a board to see the exact score. With “All boards”, only total open tickets and weighted load are shown.'}
           </p>

@@ -16,8 +16,29 @@ export const toPercentageShareBasis = (value: string | null | undefined): Percen
 
 const OPEN_STATUSES: string[] = [TicketStatusV2.TODO, TicketStatusV2.STARTED];
 
+const DAY_MS = 24 * 60 * 60 * 1000;
+
 /**
- * Distinct tickets on (boardId, userGroupId) assigned to each user within the window.
+ * Start of the share window that contains `now`. Windows are fixed, back-to-back periods of
+ * `windowDays` counted from `windowStartAt`, so counts reset to zero at each boundary rather
+ * than sliding. Boards saved before fixed windows existed have no start and keep the old
+ * rolling "last N days" window.
+ */
+export function currentShareWindowStart(
+  windowStartAt: Date | null | undefined,
+  windowDays: number,
+  now: number = Date.now(),
+): Date {
+  if (!windowStartAt) return new Date(now - windowDays * DAY_MS);
+  const start = windowStartAt.getTime();
+  if (now <= start) return windowStartAt;
+  const length = windowDays * DAY_MS;
+  return new Date(start + Math.floor((now - start) / length) * length);
+}
+
+/**
+ * Distinct tickets on (boardId, userGroupId) assigned to each user since `since` (the start
+ * of the current share window).
  *
  * Two sources, unioned per ticket so a ticket is never counted twice for the same user:
  * - ASSIGNED_TO activities, so a ticket keeps counting for whoever received it even after
@@ -30,11 +51,10 @@ export async function countRecentAssignmentsByUser(
   boardId: string,
   userGroupId: string,
   userIds: string[],
-  windowDays: number,
+  since: Date,
   basis: PercentageShareBasis,
 ): Promise<Map<string, number>> {
   const openOnly = basis === 'OPEN';
-  const since = new Date(Date.now() - windowDays * 24 * 60 * 60 * 1000);
   const pool = new Set(userIds);
   const ticketsByUser = new Map<string, Set<string>>(userIds.map(id => [id, new Set<string>()]));
 
@@ -98,11 +118,11 @@ export async function rankCandidatesByShare(params: {
   candidates: AssignmentCandidate[];
   boardId: string;
   userGroupId: string;
-  windowDays: number;
+  windowStart: Date;
   basis: PercentageShareBasis;
   targetPercentOf: (userId: string) => number;
 }): Promise<AssignmentCandidate[] | null> {
-  const { candidates, boardId, userGroupId, windowDays, basis, targetPercentOf } = params;
+  const { candidates, boardId, userGroupId, windowStart, basis, targetPercentOf } = params;
 
   const withTarget = candidates.filter(c => targetPercentOf(c.userId) > 0);
   if (withTarget.length === 0) {
@@ -118,7 +138,7 @@ export async function rankCandidatesByShare(params: {
       boardId,
       userGroupId,
       withTarget.map(c => c.userId),
-      windowDays,
+      windowStart,
       basis,
     );
   } catch (error) {
@@ -151,7 +171,7 @@ export async function rankCandidatesByShare(params: {
     .sort((a, b) => a.score - b.score);
 
   logger.info(
-    `[Assignment] %-share ranking for board ${boardId}, userGroupId ${userGroupId}, window ${windowDays}d, basis ${basis}, counted ${assignedTotal}: ${ranked
+    `[Assignment] %-share ranking for board ${boardId}, userGroupId ${userGroupId}, window since ${windowStart.toISOString()}, basis ${basis}, counted ${assignedTotal}: ${ranked
       .map(
         c =>
           `${c.userId}(share=${(c.details.share * 100).toFixed(1)}%, assigned=${c.details.assignedInWindow}, deficit=${c.details.deficit.toFixed(2)})`,

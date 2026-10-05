@@ -7948,6 +7948,8 @@ export const mutators = defineMutators({
             usePercentage: z.boolean(),
             percentageWindowDays: z.number().int().min(1).max(90).optional(),
             percentageShareBasis: z.enum(['ALL', 'OPEN']).optional(),
+            // Start of the first share window (ms); null clears it. Omit to keep the current start.
+            percentageWindowStartAt: z.number().nullable().optional(),
           })
           .optional(),
         expertiseMappings: z
@@ -8069,6 +8071,9 @@ export const mutators = defineMutators({
               ...(boardWeight.percentageShareBasis !== undefined && {
                 percentageShareBasis: boardWeight.percentageShareBasis,
               }),
+              ...(boardWeight.percentageWindowStartAt !== undefined && {
+                percentageWindowStartAt: boardWeight.percentageWindowStartAt,
+              }),
               updatedAt: now,
             });
           } else {
@@ -8087,6 +8092,7 @@ export const mutators = defineMutators({
               usePercentage: boardWeight.usePercentage,
               percentageWindowDays: boardWeight.percentageWindowDays ?? 7,
               percentageShareBasis: boardWeight.percentageShareBasis ?? 'ALL',
+              percentageWindowStartAt: boardWeight.percentageWindowStartAt ?? null,
               createdBy: ctx.userID,
               createdAt: now,
               updatedAt: now,

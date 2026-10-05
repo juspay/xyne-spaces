@@ -30,6 +30,8 @@ export interface ComplexityScoreLike {
   percentageWindowDays?: number | null;
   /** 'ALL' | 'OPEN' — which tickets in the window count toward a member's % share. */
   percentageShareBasis?: string | null;
+  /** Start (ms) of the first fixed share window; null/unset falls back to a rolling window. */
+  percentageWindowStartAt?: number | null;
 }
 
 export interface ExpertiseMappingLike {

@@ -1114,6 +1114,7 @@ model BoardComplexityScore {
   usePercentage   Boolean  @default(false)
   percentageWindowDays Int @default(7) // Look-back window (days) for % share assignment when usePercentage is on
   percentageShareBasis String @default("ALL") // ALL | OPEN — which tickets in the window count toward a member's % share
+  percentageWindowStartAt DateTime? // Start of the first % share window; counts reset every percentageWindowDays from here
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
   createdBy       String

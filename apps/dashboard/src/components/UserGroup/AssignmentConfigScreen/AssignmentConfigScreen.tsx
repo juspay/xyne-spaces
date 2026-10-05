@@ -47,6 +47,23 @@ const MAX_SHARE_WINDOW_DAYS = 90;
 
 /** Which tickets received in the share window count toward a member's % share. */
 type ShareBasis = 'ALL' | 'OPEN';
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+/** Local midnight today — share windows start at the beginning of the day they are (re)started. */
+const startOfToday = (): number => {
+  const d = new Date();
+  d.setHours(0, 0, 0, 0);
+  return d.getTime();
+};
+
+/** Start of the fixed share window containing now; mirrors currentShareWindowStart on the backend. */
+const currentShareWindowStart = (startAt: number, windowDays: number): number => {
+  const now = Date.now();
+  if (now <= startAt) return startAt;
+  const length = windowDays * DAY_MS;
+  return startAt + Math.floor((now - startAt) / length) * length;
+};
+
 const SHARE_BASIS_OPTIONS: { value: ShareBasis; label: string }[] = [
   { value: 'ALL', label: 'All tickets' },
   { value: 'OPEN', label: 'Open tickets only' },
@@ -75,6 +92,8 @@ export const AssignmentConfigScreen = ({
   const [maxWorkloadError, setMaxWorkloadError] = useState<string | null>(null);
   const [isRotationModalOpen, setIsRotationModalOpen] = useState(false);
   const [showDisableRotationWarning, setShowDisableRotationWarning] = useState(false);
+  // Asked when the share window length changes on a board whose window is already running
+  const [showShareWindowChangeDialog, setShowShareWindowChangeDialog] = useState(false);
   const [activeTab, setActiveTab] = useState<'availability' | 'visibility'>('availability');
   // Members switched off in this session who were opted in to a ticket handoff on save
   const [pendingReassignUserIds, setPendingReassignUserIds] = useState<Set<string>>(new Set());
@@ -653,6 +672,27 @@ export const AssignmentConfigScreen = ({
     setHasChanges(true);
   };
 
+  const savedBoardScore = selectedBoardId
+    ? boardComplexityScores?.find(s => s.boardId === selectedBoardId)
+    : undefined;
+  const savedShareWindowStartAt =
+    savedBoardScore?.usePercentage === true ? (savedBoardScore.percentageWindowStartAt ?? null) : null;
+
+  // Changing the window length mid-window: the admin chooses whether to restart counting today
+  // or keep the current start date and apply the new length from it.
+  const needsShareWindowChoice = (): boolean =>
+    localUsePercentage &&
+    savedShareWindowStartAt !== null &&
+    localShareWindowDays !== (savedBoardScore?.percentageWindowDays ?? DEFAULT_SHARE_WINDOW_DAYS);
+
+  const continueSave = (): void => {
+    if (needsShareWindowChoice()) {
+      setShowShareWindowChangeDialog(true);
+      return;
+    }
+    void performSave();
+  };
+
   const handleSave = (): void => {
     // Check if user is disabling auto-rotation - show warning if so
     const isDisablingRotation =
@@ -663,10 +703,18 @@ export const AssignmentConfigScreen = ({
       return;
     }
 
-    void performSave();
+    continueSave();
   };
 
-  const performSave = async (): Promise<void> => {
+  /** What to send for percentageWindowStartAt; undefined keeps the stored start. */
+  const resolveShareWindowStartAt = (resetShareWindow: boolean): number | undefined => {
+    if (!localUsePercentage) return undefined;
+    // First time % share is turned on (or it never had a start): the first window begins today
+    if (savedShareWindowStartAt === null) return startOfToday();
+    return resetShareWindow ? startOfToday() : undefined;
+  };
+
+  const performSave = async (resetShareWindow = false): Promise<void> => {
     // Validate percentage sum equals 100 when usePercentage is enabled
     if (localUsePercentage) {
       if (localAutoRotationEnabled) {
@@ -713,6 +761,7 @@ export const AssignmentConfigScreen = ({
             usePercentage: localUsePercentage,
             percentageWindowDays: localShareWindowDays,
             percentageShareBasis: localShareBasis,
+            percentageWindowStartAt: resolveShareWindowStartAt(resetShareWindow),
           }
         : undefined;
 
@@ -1426,9 +1475,24 @@ export const AssignmentConfigScreen = ({
                       </label>
                       <p className='text-xs leading-[1.4] text-muted-foreground'>
                         New tickets go to whoever is furthest below their % share of the tickets
-                        assigned on this board over this many days. Range: 1 to{' '}
+                        assigned on this board in the current window. Counts reset to zero every
+                        this many days, starting from the day % share was turned on. Range: 1 to{' '}
                         {MAX_SHARE_WINDOW_DAYS}.
                       </p>
+                      {savedShareWindowStartAt !== null && (
+                        <p className='text-xs leading-[1.4] text-muted-foreground'>
+                          Current window started{' '}
+                          <span className='font-medium text-foreground'>
+                            {new Date(
+                              currentShareWindowStart(
+                                savedShareWindowStartAt,
+                                savedBoardScore?.percentageWindowDays ?? DEFAULT_SHARE_WINDOW_DAYS,
+                              ),
+                            ).toLocaleDateString()}
+                          </span>
+                          .
+                        </p>
+                      )}
                       <Input
                         type='text'
                         inputMode='numeric'
@@ -1731,6 +1795,49 @@ export const AssignmentConfigScreen = ({
         </div>
       </Dialog>
 
+      {/* Share window length changed mid-window */}
+      <Dialog
+        open={showShareWindowChangeDialog}
+        onOpenChange={setShowShareWindowChangeDialog}
+        title='Restart the share window?'
+      >
+        <div className='p-6'>
+          <p className='mb-6 text-[13px] leading-[1.5] text-muted-foreground'>
+            You changed the share window from{' '}
+            {savedBoardScore?.percentageWindowDays ?? DEFAULT_SHARE_WINDOW_DAYS} to{' '}
+            {localShareWindowDays} days. Restart counting from today, or keep the current start date
+            {savedShareWindowStartAt !== null &&
+              ` (${new Date(savedShareWindowStartAt).toLocaleDateString()})`}{' '}
+            and apply the new length from there?
+          </p>
+
+          <div className='flex justify-end gap-3'>
+            <Button
+              variant='secondary'
+              onClick={() => {
+                setShowShareWindowChangeDialog(false);
+                void performSave(false);
+              }}
+              data-track-category='UserGroups'
+              data-track-name='ContinueShareWindow'
+            >
+              Keep current start
+            </Button>
+            <Button
+              onClick={() => {
+                setShowShareWindowChangeDialog(false);
+                void performSave(true);
+              }}
+              data-track-category='UserGroups'
+              data-track-name='ResetShareWindow'
+              data-track-metadata={JSON.stringify({ userGroupId })}
+            >
+              Restart from today
+            </Button>
+          </div>
+        </div>
+      </Dialog>
+
       {/* Disable Auto-Rotation Warning Dialog */}
       <Dialog
         open={showDisableRotationWarning}
@@ -1756,7 +1863,7 @@ export const AssignmentConfigScreen = ({
               variant='destructive'
               onClick={() => {
                 setShowDisableRotationWarning(false);
-                void performSave();
+                continueSave();
               }}
               data-track-category='UserGroups'
               data-track-name='ConfirmDisableRotation'
