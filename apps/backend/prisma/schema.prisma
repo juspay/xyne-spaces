@@ -1964,10 +1964,11 @@ model ConnectGroup {
   createdAt          DateTime // set in code
   updatedAt          DateTime // set in code
 
+  // (connectId, invitedWorkspaceId) unique also serves every `connectId = ?` probe via its
+  // leftmost prefix, so no standalone @@index([connectId]) is needed. Only invitedWorkspaceId
+  // has its own index — resolveReachableConnectIds() filters on it on every ACL read/write.
+  // hostWorkspaceId / entityId indexes were dropped: nothing queries them in Phase 1.
   @@unique([connectId, invitedWorkspaceId])
-  @@index([connectId])
-  @@index([entityId])
-  @@index([hostWorkspaceId])
   @@index([invitedWorkspaceId])
   @@map("connect_group")
   @@schema("public")

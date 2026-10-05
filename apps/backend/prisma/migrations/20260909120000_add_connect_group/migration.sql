@@ -15,10 +15,7 @@ CREATE TABLE "public"."connect_group" (
 );
 
 -- CreateIndex
-CREATE INDEX "connect_group_connectId_idx" ON "public"."connect_group"("connectId");
-
--- CreateIndex
-CREATE INDEX "connect_group_entityId_idx" ON "public"."connect_group"("entityId");
-
--- CreateIndex
+-- The (connectId, invitedWorkspaceId) unique below also serves every `connectId = ?` probe
+-- via its leftmost prefix, so no standalone connectId index is created. entityId / hostWorkspaceId
+-- indexes are intentionally omitted — nothing queries connect_group by them in Phase 1.
 CREATE UNIQUE INDEX "connect_group_connectId_invitedWorkspaceId_key" ON "public"."connect_group"("connectId", "invitedWorkspaceId");
