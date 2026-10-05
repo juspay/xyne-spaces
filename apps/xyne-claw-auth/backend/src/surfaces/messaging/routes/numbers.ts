@@ -2,10 +2,9 @@
  * "My number" — self-service linking for every org member, not admins.
  *
  * One question, asked by someone already signed in to Claw: "here is my phone
- * number, make messages from it run as me." No admin approval and no
- * confirmation from the phone — the session says who the caller is, and the
- * number they type is taken at face value (see linkNumber in identity.ts for
- * what that does and does not protect).
+ * number, make messages from it run as me." No admin approval, but the phone
+ * has to confirm: the claim returns a code, and the number is only linked once
+ * that code is sent from it (claimNumber / redeemLinkCode in identity.ts).
  *
  * The link belongs to the person, not to an assistant: it is recognised by
  * every account on the channel in their org, including a colleague's personal
@@ -16,7 +15,7 @@
  */
 import { Router, type Request, type Response } from "express";
 import { getOrgId, getRequesterId } from "../../../middleware/agent-acl.js";
-import { linkNumber, LinkError } from "../identity.js";
+import { claimNumber, LinkError } from "../identity.js";
 import { linkNumberBodySchema } from "../schema.js";
 import { channelOf } from "./context.js";
 import { getSurface, listIdentitiesForUser, unlinkOwnIdentity } from "../store.js";
@@ -69,8 +68,8 @@ router.get("/my-numbers", async (req: Request, res: Response) => {
   });
 });
 
-/** "This is my number." Links it to the caller immediately — the signed-in
- *  session is the identity, and the number says which sender id it answers to. */
+/** "This is my number." Starts a claim: the number is linked only after the
+ *  returned code is sent from it. */
 router.post("/my-numbers", async (req: Request, res: Response) => {
   const caller = callerOf(req, res);
   if (!caller) return;
@@ -82,7 +81,7 @@ router.post("/my-numbers", async (req: Request, res: Response) => {
     return;
   }
   try {
-    const linked = await linkNumber({
+    const pending = await claimNumber({
       plugin: channelOf(req)!,
       surfaceId,
       orgId: caller.orgId,
@@ -91,7 +90,12 @@ router.post("/my-numbers", async (req: Request, res: Response) => {
     });
     res.json({
       success: true,
-      linked: { senderId: linked.senderId, sendTo: linked.sendTo, linkedAt: linked.linkedAt.toISOString() },
+      pending: {
+        senderId: pending.senderId,
+        sendTo: pending.sendTo,
+        code: pending.code,
+        expiresAt: pending.expiresAt.toISOString(),
+      },
     });
   } catch (err) {
     if (err instanceof LinkError) {

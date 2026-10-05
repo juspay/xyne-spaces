@@ -7422,7 +7422,8 @@ export interface ChannelNumberLink {
   senderId: string;
   /** The number to message, when the org has exactly one to offer. */
   sendTo: string | null;
-  linkedAt: string;
+  code: string;
+  expiresAt: string;
 }
 
 export async function listMyChannelNumbers(channel: MessagingChannelKey): Promise<LinkedChannelNumber[]> {
@@ -7431,11 +7432,11 @@ export async function listMyChannelNumbers(channel: MessagingChannelKey): Promis
 }
 
 export async function linkChannelNumber(channel: MessagingChannelKey, phone: string): Promise<ChannelNumberLink> {
-  const data = await request<{ success: boolean; linked: ChannelNumberLink }>(`${channelBase(channel)}/my-numbers`, {
+  const data = await request<{ success: boolean; pending: ChannelNumberLink }>(`${channelBase(channel)}/my-numbers`, {
     method: "POST",
     body: JSON.stringify({ phone }),
   });
-  return data.linked;
+  return data.pending;
 }
 
 export async function unlinkMyChannelNumber(channel: MessagingChannelKey, senderId: string): Promise<void> {

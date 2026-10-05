@@ -89,5 +89,10 @@ export const RATE_LIMITED_TEXT =
   "That's a lot at once — I've paused on the last few. Give me a minute and send it again.";
 
 export const NOT_LINKED_TEXT =
-  "Your number isn't linked to a Xyne Claw user yet. Sign in to Xyne Claw and add this number, and I'll know who you are next time.";
+  "Your number isn't linked to a Xyne Claw user yet. Sign in to Xyne Claw, add this number, and send me the code it shows you.";
+
+export const LINK_VERIFIED_TEXT = "✅ Verified — this number is now linked to your Xyne Claw account. Message me anytime.";
+export const LINK_INVALID_TEXT =
+  "That code isn't valid for this number or has expired. Get a new code from Xyne Claw and send it from the number you're linking.";
+export const LINK_TAKEN_TEXT = "This number is already linked to someone else. An admin has to unlink it first.";
 
