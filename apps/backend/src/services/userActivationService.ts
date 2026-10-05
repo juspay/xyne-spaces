@@ -3,7 +3,7 @@ import { UserStatus } from '@xyne/shared';
 import { logger } from '../utils/logger';
 import { DatabaseClient } from '@/database/client';
 import { ticketReassignmentQueue } from '@/queues/ticketReassignmentQueue';
-import { bulkUpdateUserStatusTx } from '@/bypassAcl/transactions/userActivationService';
+import { deactivateUsersTx } from '@/bypassAcl/transactions/userActivationService';
 
 export interface BulkStatusUpdateResult {
   successful: string[];
@@ -46,6 +46,66 @@ export class UserActivationService {
       batches.push(items.slice(i, i + batchSize));
     }
     return batches;
+  }
+
+  /**
+   * Deactivate users and take them out of auto-assignment.
+   *
+   * Every path that sets a user INACTIVE (admin bulk update, Mettle HR sync) must go
+   * through here. Flipping `status` alone leaves the user's user_group_mappings in
+   * place, and those mappings are what the assignment engine builds its candidate
+   * pool from — a user deactivated that way kept receiving new tickets while being
+   * hidden from the group's member list.
+   *
+   * Idempotent: re-running over an already-deactivated user finds no memberships and
+   * keeps the original `leftAt`, so it is also how stale departures are cleaned up.
+   *
+   * @returns the number of group memberships whose open tickets were queued for handoff
+   */
+  async deactivateUsers(userIds: string[], workspaceId: string): Promise<number> {
+    // Scope to the workspace before touching anything: the cleanup below deletes by
+    // userId alone, so an id from another tenant must never reach it.
+    const scopedUsers = await this.prisma.user.findMany({
+      where: { id: { in: userIds }, workspaceId },
+      select: { id: true }
+    });
+    const scopedIds = scopedUsers.map(u => u.id);
+    if (scopedIds.length === 0) return 0;
+
+    // Capture group membership BEFORE the transaction: it deletes the
+    // user_group_mappings rows, and those pairs are the only record of which
+    // groups' open tickets need handing off. Read after the delete and there is
+    // nothing left to schedule.
+    const membershipsToHandOff = await this.prisma.userGroupMapping.findMany({
+      where: { userId: { in: scopedIds } },
+      select: { userId: true, userGroupId: true },
+    });
+
+    await deactivateUsersTx(this, scopedIds);
+
+    // Hand off the departed members' open tickets. Scheduled post-commit so the
+    // queue processor reads committed rows: by the time it runs, the mappings above
+    // are gone, so the departing user is already out of every candidate pool and
+    // cannot be picked as their own replacement.
+    //
+    // Deliberately not gated on userGroup.reassignOnUnavailable, unlike the member
+    // pause flow. That flag governs a temporary absence, where holding a member's
+    // tickets for their return is reasonable. A departure is permanent, so leaving
+    // open tickets on an account that will never act on them is never correct.
+    for (const { userId, userGroupId } of membershipsToHandOff) {
+      try {
+        await ticketReassignmentQueue.scheduleReassignment(userId, userGroupId);
+      } catch (error) {
+        // Best-effort: a scheduling failure must not fail the deactivation itself,
+        // which has already committed.
+        logger.error(
+          `[deactivateUsers] Failed to schedule ticket reassignment for user ${userId} in group ${userGroupId}:`,
+          error
+        );
+      }
+    }
+
+    return membershipsToHandOff.length;
   }
 
   /**
@@ -103,41 +163,15 @@ export class UserActivationService {
           continue; // Move to next batch
         }
 
-        // Capture group membership BEFORE the transaction: deactivation deletes the
-        // user_group_mappings rows below, and those pairs are the only record of which
-        // groups' open tickets need handing off. Read after the delete and there is
-        // nothing left to schedule.
-        const membershipsToHandOff =
-          status === UserStatus.INACTIVE
-            ? await this.prisma.userGroupMapping.findMany({
-                where: { userId: { in: batch } },
-                select: { userId: true, userGroupId: true },
-              })
-            : [];
-
-        // Step 2: All users exist, perform batch update in transaction
-        await bulkUpdateUserStatusTx(this, batch, workspaceId, status);
-
-        // Hand off the departed members' open tickets. Scheduled post-commit so the
-        // queue processor reads committed rows: by the time it runs, the mappings above
-        // are gone, so the departing user is already out of every candidate pool and
-        // cannot be picked as their own replacement.
-        //
-        // Deliberately not gated on userGroup.reassignOnUnavailable, unlike the member
-        // pause flow. That flag governs a temporary absence, where holding a member's
-        // tickets for their return is reasonable. A departure is permanent, so leaving
-        // open tickets on an account that will never act on them is never correct.
-        for (const { userId, userGroupId } of membershipsToHandOff) {
-          try {
-            await ticketReassignmentQueue.scheduleReassignment(userId, userGroupId);
-          } catch (error) {
-            // Best-effort: a scheduling failure must not fail the deactivation itself,
-            // which has already committed.
-            logger.error(
-              `[bulkUpdateUserStatus] Failed to schedule ticket reassignment for user ${userId} in group ${userGroupId}:`,
-              error
-            );
-          }
+        // Step 2: All users exist, apply the status change
+        let handedOff = 0;
+        if (status === UserStatus.INACTIVE) {
+          handedOff = await this.deactivateUsers(batch, workspaceId);
+        } else {
+          await this.prisma.user.updateMany({
+            where: { id: { in: batch }, workspaceId },
+            data: { status, leftAt: null }
+          });
         }
 
         // Mark all as successful
@@ -145,7 +179,7 @@ export class UserActivationService {
           result.successful.push(userId);
         }
 
-        logger.info(`[bulkUpdateUserStatus] Batch ${batchNumber} completed successfully: ${batch.length} users updated${membershipsToHandOff.length ? `; queued reassignment for ${membershipsToHandOff.length} membership(s)` : ''}`);
+        logger.info(`[bulkUpdateUserStatus] Batch ${batchNumber} completed successfully: ${batch.length} users updated${handedOff ? `; queued reassignment for ${handedOff} membership(s)` : ''}`);
 
       } catch (error) {
         // Transaction failed - fail entire batch
