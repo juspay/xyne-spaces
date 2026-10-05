@@ -618,7 +618,7 @@ const ThreadList = ({
     return (
       <div
         ref={hoverToolbarContainerRef}
-        className='relative min-h-0 max-h-full bg-background isolate'
+        className='relative min-h-0 max-h-full bg-background isolate overflow-hidden'
       >
         {/* ONE shared hover-actions toolbar for the thread (zero-render hover). */}
         <MessageHoverToolbar
@@ -755,7 +755,7 @@ const ThreadList = ({
   return (
     <div
       ref={hoverToolbarContainerRef}
-      className='relative min-h-0 max-h-full bg-background isolate'
+      className='relative min-h-0 max-h-full bg-background isolate overflow-hidden'
     >
       {/* ONE shared hover-actions toolbar for the thread (zero-render hover). */}
       <MessageHoverToolbar
