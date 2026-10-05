@@ -290,12 +290,29 @@ function channelConfigOf(ctx: AccountRuntimeContext): WhatsAppChannelConfig {
   return parsed.success ? parsed.data : whatsappChannelConfigSchema.parse({});
 }
 
+/** The WhatsApp Web version, fetched once per process. Asking GitHub on every
+ *  connect puts a network call with no timeout in front of each reconnect. */
+let latestVersion: Promise<[number, number, number] | undefined> | null = null;
+
+function baileysVersion(): Promise<[number, number, number] | undefined> {
+  latestVersion ??= fetchLatestBaileysVersion({ timeout: 5_000 })
+    .then((result) => {
+      if (result.error) latestVersion = null;
+      return result.error ? undefined : result.version;
+    })
+    .catch(() => {
+      latestVersion = null;
+      return undefined;
+    });
+  return latestVersion;
+}
+
 async function connect(handle: WhatsAppHandle): Promise<void> {
   const { ctx } = handle;
   if (handle.stopped) return;
   const cfg = channelConfigOf(ctx);
   const { state, saveCreds } = await makeStoredAuthState(ctx.authState);
-  const { version } = await fetchLatestBaileysVersion().catch(() => ({ version: undefined as [number, number, number] | undefined }));
+  const version = await baileysVersion();
 
   const sock = makeWASocket({
     ...(version ? { version } : {}),

@@ -11,6 +11,7 @@ import { errMsg } from "../../../lib/errors.js";
 import { createLogger } from "../../../logger.js";
 import { prisma } from "../../../db.js";
 import { accountManager, getLoginArtifact } from "../account-manager.js";
+import { enqueueAndWait } from "../delivery.js";
 import { leaseHolder, publishControl } from "../placement.js";
 import { type AnyChannelPlugin } from "../plugin.js";
 import {
@@ -364,11 +365,12 @@ router.get("/accounts/:id/groups", async (req: Request, res: Response) => {
     return;
   }
   try {
-    const groups = await accountManager.listGroups(account.id);
+    let groups = await accountManager.listGroups(account.id);
     if (groups === null) {
-      // Another pod holds the socket; a sweep moves it within ~30s.
-      res.status(503).json({ success: false, error: "This account is running on another server right now — try again in a moment." });
-      return;
+      // Another pod holds the socket, so ask it through the account's outbox.
+      const reply = await enqueueAndWait(account.id, { kind: "list-groups" });
+      if (!reply.ok) throw new Error(reply.error);
+      groups = reply.groups ?? [];
     }
     res.json({ success: true, groups, supported: true });
   } catch (err) {
