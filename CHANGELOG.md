@@ -1,3 +1,25 @@
+## [1.455.2](https://github.com/juspay/xyne-spaces/compare/v1.455.1...v1.455.2) (2026-10-05)
+
+
+### Bug Fixes
+
+* whatsapp lease handover ([#2613](https://github.com/juspay/xyne-spaces/issues/2613)) ([6d980cf](https://github.com/juspay/xyne-spaces/commit/6d980cf93f1e9e82bba6e2d66e26db3182d2c93c))
+
+## [1.455.1](https://github.com/juspay/xyne-spaces/compare/v1.455.0...v1.455.1) (2026-10-05)
+
+
+### Bug Fixes
+
+* open sub-ticket indicator for desk, closed, and un-joined parent channels ([#2611](https://github.com/juspay/xyne-spaces/issues/2611)) ([022718b](https://github.com/juspay/xyne-spaces/commit/022718b8bca05fbd86b4f902a61d2e83cfcc03a4))
+
+## [1.455.0](https://github.com/juspay/xyne-spaces/compare/v1.454.3...v1.455.0) (2026-10-05)
+
+
+### Features
+
+* Add developer tab to Agent Hub ([#2566](https://github.com/juspay/xyne-spaces/issues/2566)) ([9ab46f5](https://github.com/juspay/xyne-spaces/commit/9ab46f5eb21845e472fe9a874b23c5e8274097bf))
+* agent-no-host-control ([#2233](https://github.com/juspay/xyne-spaces/issues/2233)) ([a52afe1](https://github.com/juspay/xyne-spaces/commit/a52afe14db5a47f50f6eeee55fecd14648a93581))
+
 ## [1.454.3](https://github.com/juspay/xyne-spaces/compare/v1.454.2...v1.454.3) (2026-10-05)
 
 
