@@ -1,3 +1,10 @@
+## [1.455.1](https://github.com/juspay/xyne-spaces/compare/v1.455.0...v1.455.1) (2026-10-05)
+
+
+### Bug Fixes
+
+* open sub-ticket indicator for desk, closed, and un-joined parent channels ([#2611](https://github.com/juspay/xyne-spaces/issues/2611)) ([022718b](https://github.com/juspay/xyne-spaces/commit/022718b8bca05fbd86b4f902a61d2e83cfcc03a4))
+
 ## [1.455.0](https://github.com/juspay/xyne-spaces/compare/v1.454.3...v1.455.0) (2026-10-05)
 
 
