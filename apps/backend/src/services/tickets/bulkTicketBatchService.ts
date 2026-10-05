@@ -36,7 +36,14 @@ import {
 } from '@/database/repositories/ticketRepository';
 import { maybeCreateEntryApprovalRequest } from '@/services/stageTransition/stageEntryApproval';
 import { ticketDuplicateService } from '@/services/ticketDuplicateService';
-import { ticketAssignmentService, primaryUserIdOf } from '@/services/ticketAssignmentService';
+import {
+  ticketAssignmentService,
+  primaryUserIdOf,
+  secondaryAssignmentsOf,
+} from '@/services/ticketAssignmentService';
+import type { QueryContext } from '@/zero/acl/core/types';
+import { TicketAssignmentsSideEffectHandler } from '@/zero/side-effects/tables/ticket-assignments-handler';
+import { TicketsSideEffectHandler } from '@/zero/side-effects/tables/tickets-handler';
 import { dualWriteTicketTags } from '@/services/ticketTagDualWriteService';
 import { websocketService } from '@/services/websocketService';
 import { userActivityTrackingService } from '@/services/userActivityTrackingService';
@@ -44,23 +51,19 @@ import { messageClassificationQueue } from '@/queues/messageClassificationQueue'
 import { vespaQueue } from '@/queues/vespaQueue';
 import { ticketSchema } from '@/vespa/src/types';
 import {
-  syncConversationSubTicketsMd,
   syncConversationTicketMdFromPrismaTicket,
   linkSubTicketConversationToParent,
 } from '@/utils/ticketMd';
 import { recordTicketTimelineEvent } from '@/services/ticketTimelineEventService';
-import { resolveInheritedOwner, linkCreatedEntities } from '@/sdlc/entityLinkService';
+import { commitBulkTicketBatchTx } from '@/bypassAcl/transactions/bulkTicketBatchService';
 import { advisoryXactLock } from '@/bypassAcl/lockServices';
 import { logger } from '@/utils/logger';
 
 const prisma = DatabaseClient.getInstance();
 
 /** The interactive-transaction client every commit step writes through. */
-type BatchTransaction = Parameters<Parameters<typeof prisma.$transaction>[0]>[0];
+type BatchTransaction = Prisma.TransactionClient;
 
-/** Comfortable for a batch this size; Prisma's 5s default is not. */
-const BATCH_TRANSACTION_TIMEOUT_MS = 30_000;
-const BATCH_TRANSACTION_MAX_WAIT_MS = 5_000;
 
 export interface BatchTicketInput {
   title: string;
@@ -90,10 +93,12 @@ export interface BatchTicketContext {
    */
   sourceConversationId?: string | undefined;
   fromTicketsTab?: boolean | undefined;
+  /** Caller's identity for the side-effect handlers fired after commit. */
+  queryContext: QueryContext;
 }
 
 /** Everything about one row, fully resolved in memory before any write. */
-interface PreparedRow {
+export interface PreparedRow {
   input: BatchTicketInput;
   index: number;
   ticketId: string;
@@ -350,7 +355,8 @@ const prepareRows = async (
           row.boardId,
           undefined,
           undefined,
-          row.projectId
+          row.projectId,
+          row.channelId
         );
         return { assignedTo: result.assignedUserId ?? null, needsFullRoleAssignment: false };
       } catch (error) {
@@ -529,7 +535,7 @@ const prepareRows = async (
 };
 
 /** Every insert for the batch, in FK order. Runs inside the caller's transaction. */
-const commitRows = async (
+export const commitRows = async (
   tx: BatchTransaction,
   prepared: PreparedRow[],
   ctx: BatchTicketContext
@@ -821,14 +827,59 @@ const fanOut = (prepared: PreparedRow[], ctx: BatchTicketContext): void => {
           boardId: row.input.boardId,
           createdBy: ctx.createdBy,
           projectId: row.input.projectId,
+          channelId: row.input.channelId,
         });
+        // Same activity + notification handlers single creation fires after its
+        // role assignment: the primary holder via the ticket update, everyone
+        // else via their assignment rows.
         const primaryUserId = primaryUserIdOf(fullRoles);
-        if (!primaryUserId) return;
-        const updated = await prisma.ticket.update({
-          where: { id: row.ticketId },
-          data: { assignedTo: primaryUserId },
-        });
-        await syncConversationTicketMdFromPrismaTicket(prisma, updated);
+        if (primaryUserId) {
+          const updated = await prisma.ticket.update({
+            where: { id: row.ticketId },
+            data: { assignedTo: primaryUserId },
+          });
+          await syncConversationTicketMdFromPrismaTicket(prisma, updated);
+
+          new TicketsSideEffectHandler(ctx.queryContext)
+            .onUpdate({
+              entityId: row.ticketId,
+              entityType: 'tickets',
+              operation: 'update',
+              args: { assignedTo: primaryUserId },
+              previousValue: {
+                assignedTo: row.assignedTo,
+                stageName: row.stageName,
+                statusV2: row.statusV2,
+                eta: row.eta ? row.eta.getTime() : null,
+                boardId: row.input.boardId,
+                createdBy: ctx.createdBy,
+                channelId: row.input.channelId,
+              },
+            })
+            .catch((error: unknown) => {
+              logger.error('[BulkTicketBatch] TicketsSideEffectHandler failed', {
+                ticketId: row.ticketId,
+                error,
+              });
+            });
+        }
+
+        const assignmentsHandler = new TicketAssignmentsSideEffectHandler(ctx.queryContext);
+        for (const assignment of secondaryAssignmentsOf(fullRoles)) {
+          assignmentsHandler
+            .onInsert({
+              entityId: assignment.assignmentId,
+              entityType: 'ticket_assignments',
+              operation: 'insert',
+            })
+            .catch((error: unknown) => {
+              logger.error('[BulkTicketBatch] TicketAssignmentsSideEffectHandler failed', {
+                ticketId: row.ticketId,
+                assignmentId: assignment.assignmentId,
+                error,
+              });
+            });
+        }
       } catch (error) {
         logger.error('[BulkTicketBatch] Full role assignment failed', {
           ticketId: row.ticketId,
@@ -852,14 +903,28 @@ export interface BulkBatchRequest {
   children: BatchTicketInput[];
 }
 
+export interface BulkBatchTicket {
+  ticket: Ticket;
+  /** Echoed from the input row so callers can pair results without relying on order. */
+  clientRowId?: string | undefined;
+}
+
 export interface BulkBatchResult {
   parentTicketId: string | null;
+  /** Set only when this batch created the parent itself. */
+  createdParent: {
+    id: string;
+    xyneId: string;
+    title: string;
+    conversationId: string;
+    clientRowId?: string | undefined;
+  } | null;
   /** The children, in request order. Excludes a parent created by this batch. */
-  tickets: Ticket[];
+  tickets: BulkBatchTicket[];
 }
 
 /** Sub-ticket rows and their parent mappings, inside the caller's transaction. */
-const commitSubTicketLinks = async (
+export const commitSubTicketLinks = async (
   tx: BatchTransaction,
   parent: { id: string; conversationId: string; workspaceId: string },
   children: PreparedRow[],
@@ -959,7 +1024,11 @@ export const createBulkTicketBatch = async (
 ): Promise<BulkBatchResult> => {
   const allRows = request.parent ? [request.parent, ...request.children] : request.children;
   if (allRows.length === 0) {
-    return { parentTicketId: request.existingParentTicketId ?? null, tickets: [] };
+    return {
+      parentTicketId: request.existingParentTicketId ?? null,
+      createdParent: null,
+      tickets: [],
+    };
   }
 
   const shared = await loadSharedContext(allRows);
@@ -995,40 +1064,13 @@ export const createBulkTicketBatch = async (
     parentLink = existing;
   }
 
-  await prisma.$transaction(
-    async (tx) => {
-      await commitRows(tx, prepared, ctx);
-
-      // SDLC linking: the owner comes from the conversation the batch was raised
-      // in, not from the freshly created ones (those can't have a link yet).
-      if (ctx.sourceConversationId) {
-        const owner = await resolveInheritedOwner(tx, ctx.sourceConversationId);
-        if (owner) {
-          for (const row of prepared) {
-            await linkCreatedEntities(
-              tx,
-              {
-                owner,
-                channelId: row.input.channelId,
-                conversationId: row.conversationId,
-                ticketId: row.ticketId,
-              },
-              { workspaceId: row.workspaceId, userId: ctx.createdBy }
-            );
-          }
-        }
-      }
-
-      if (request.mode === BulkTicketMode.PARENT_SUB && parentLink) {
-        await commitSubTicketLinks(tx, parentLink, childRows, ctx);
-        // Reads back the rows just inserted above, so it must stay inside this
-        // transaction — and running it once is the whole point: the per-item
-        // path re-serialises the parent's entire child list on every insert.
-        await syncConversationSubTicketsMd(tx, parentLink.id);
-      }
-    },
-    { timeout: BATCH_TRANSACTION_TIMEOUT_MS, maxWait: BATCH_TRANSACTION_MAX_WAIT_MS }
-  );
+  await commitBulkTicketBatchTx({
+    mode: request.mode,
+    prepared,
+    childRows,
+    parentLink,
+    ctx,
+  });
 
   fanOut(prepared, ctx);
 
@@ -1049,9 +1091,20 @@ export const createBulkTicketBatch = async (
 
   return {
     parentTicketId: parentLink?.id ?? null,
-    tickets: childRows
-      .map((r) => byId.get(r.ticketId))
-      .filter((ticket): ticket is Ticket => ticket !== undefined),
+    createdParent: parentRow
+      ? {
+          id: parentRow.ticketId,
+          xyneId: parentRow.xyneId,
+          title: parentRow.input.title,
+          conversationId: parentRow.conversationId,
+          ...(parentRow.input.clientRowId ? { clientRowId: parentRow.input.clientRowId } : {}),
+        }
+      : null,
+    tickets: childRows.flatMap((r) => {
+      const ticket = byId.get(r.ticketId);
+      if (!ticket) return [];
+      return [{ ticket, ...(r.input.clientRowId ? { clientRowId: r.input.clientRowId } : {}) }];
+    }),
   };
 };
 

@@ -80,15 +80,21 @@ export const MAX_BULK_TICKETS = 20;
  * synchronously and all-or-nothing, so a 2xx means every row landed and a
  * non-2xx means none did.
  */
+export interface CreatedBulkTicket {
+  id: string;
+  xyneId: string;
+  title: string;
+  conversationId: string;
+  /** Echo of the request row's clientRowId, for pairing results to inputs. */
+  clientRowId?: string;
+}
+
 export interface CreateBulkTicketResponse {
   /** The parent, whether it already existed or this request created it. */
   parentTicketId?: string;
-  createdTickets: Array<{
-    id: string;
-    xyneId: string;
-    title: string;
-    conversationId: string;
-  }>;
+  /** Present only when this request created the parent itself. */
+  createdParent?: CreatedBulkTicket;
+  createdTickets: CreatedBulkTicket[];
 }
 
 /** Existing parent ticket reference (for retry flows). */

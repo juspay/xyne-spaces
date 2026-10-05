@@ -188,7 +188,6 @@ export const TicketsHeader = (props: TicketsHeaderProps): ReactElement => {
                 data-track-category='TICKETS'
                 data-track-name='BULK_CREATE_TICKET_KANBAN'
                 data-track-metadata={bulkCreateTicketMetadata}
-                title='Bulk create tickets'
                 className='ml-0.5 flex size-[30px] shrink-0 items-center justify-center rounded-lg border border-border text-foreground/70 transition-colors hover:bg-muted hover:text-foreground'
               >
                 <ListPlus className='size-[15px]' strokeWidth={2} />

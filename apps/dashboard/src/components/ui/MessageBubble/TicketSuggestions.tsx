@@ -238,37 +238,29 @@ export const TicketSuggestions: React.FC<TicketSuggestionsProps> = ({
             // Without this the suggestions stay selectable and the bulk button
             // stays live, so a second click recreates the whole batch — the
             // single-ticket path is guarded server-side, this one is not.
-            // A batch that creates its own parent consumes suggestions[0] as
-            // that parent, so the children line up from index 1.
-            const parentConsumesFirst = !existingParentTicket;
+            // Rows carry their suggestionId as clientRowId and the backend echoes
+            // it back, so pairing survives rows being deleted or added in the modal.
+            const suggestionById = new Map(suggestions.map(s => [s.suggestionId, s]));
+            const created = [
+              ...(result.createdParent ? [result.createdParent] : []),
+              ...result.createdTickets,
+            ];
             void (async () => {
               try {
-                if (parentConsumesFirst && result.parentTicketId && suggestions[0]) {
-                  await conversationService.markTicketSuggestionAsCreated(
-                    conversationId,
-                    messageId,
-                    {
-                      suggestionId: suggestions[0].suggestionId,
-                      ticketId: result.parentTicketId,
-                      xyneId: '',
-                      title: suggestions[0].title,
-                      ticketConversationId: '',
-                    },
-                  );
-                }
-                const offset = parentConsumesFirst ? 1 : 0;
-                for (const [index, created] of result.createdTickets.entries()) {
-                  const suggestion = suggestions[index + offset];
+                for (const ticket of created) {
+                  const suggestion = ticket.clientRowId
+                    ? suggestionById.get(ticket.clientRowId)
+                    : undefined;
                   if (!suggestion) continue;
                   await conversationService.markTicketSuggestionAsCreated(
                     conversationId,
                     messageId,
                     {
                       suggestionId: suggestion.suggestionId,
-                      ticketId: created.id,
-                      xyneId: created.xyneId,
-                      title: created.title,
-                      ticketConversationId: created.conversationId,
+                      ticketId: ticket.id,
+                      xyneId: ticket.xyneId,
+                      title: ticket.title,
+                      ticketConversationId: ticket.conversationId,
                     },
                   );
                 }

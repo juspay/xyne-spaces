@@ -283,7 +283,7 @@ export const BulkCreateTicketsModal: React.FC<BulkCreateTicketsModalProps> = ({
       let updated = prev.map(r => {
         if (r.id !== id) return r;
         const next = { ...r, ...patch };
-        if (patch.title !== undefined && !r.description.trim()) {
+        if (patch.title !== undefined && (!r.description.trim() || r.description === r.title)) {
           next.description = patch.title;
         }
         return next;
@@ -329,8 +329,10 @@ export const BulkCreateTicketsModal: React.FC<BulkCreateTicketsModalProps> = ({
   const filledRows = rows.filter(r => r.title.trim().length > 0);
   const validCount = filledRows.filter(r => r.description.trim().length > 0).length;
   const minimumRows = isAllParentsMode || hasExistingParent ? 1 : 2;
+  const isNewParentMode = !isAllParentsMode && !hasExistingParent;
   const blockingReason = ((): string | null => {
     if (!projectId) return 'Pick a channel to set the project';
+    if (isNewParentMode && !rows[0]?.title.trim()) return 'The main ticket needs a title';
     if (filledRows.length < minimumRows) {
       return minimumRows === 1
         ? 'Add at least one ticket'
@@ -428,8 +430,8 @@ export const BulkCreateTicketsModal: React.FC<BulkCreateTicketsModalProps> = ({
         return;
       }
 
-      const parent = completeRows[0];
-      if (!parent) return;
+      const parent = rows[0];
+      if (!parent || completeRows[0] !== parent) return;
       const subTickets = completeRows.slice(1).map(r => ({
         title: r.title.trim(),
         description: r.description,
@@ -467,6 +469,7 @@ export const BulkCreateTicketsModal: React.FC<BulkCreateTicketsModalProps> = ({
           eta: parent.eta ?? undefined,
           ...resolveAssignee(parent.assigneeId),
           ticketType: parent.ticketType,
+          clientRowId: parent.clientRowId ?? parent.id,
         },
         subTickets,
         ...(fromTicketsTab ? { fromTicketsTab: true } : {}),

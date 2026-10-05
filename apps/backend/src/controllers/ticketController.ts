@@ -89,7 +89,6 @@ import { BaseTicketType,
   OrgRole,
   AccessType,
 } from '@xyne/shared';
-import { messageMetadataService } from '@/services/messageMetadataService';
 import { CommitAnalysisController } from './commitAnalysisController';
 import { isReleaseTicket } from '@xyne/shared';
 import { backlogFlowGroup } from '@/services/flowCascadeService';
@@ -384,9 +383,10 @@ export class TicketController {
         return;
       }
 
-      const userId = req.user?.id;
-      const workspaceId = req.user?.workspaceId;
-      if (!userId || !workspaceId) {
+      const user = req.user;
+      const userId = user?.id;
+      const workspaceId = user?.workspaceId;
+      if (!user || !userId || !workspaceId) {
         res.status(401).json({ error: 'User not authenticated' });
         return;
       }
@@ -402,6 +402,7 @@ export class TicketController {
           assignedTo?: string;
           priority?: string;
           statusV2?: string;
+          clientRowId?: string;
         };
         tickets?: Array<Record<string, unknown>>;
         subTickets?: Array<Record<string, unknown>>;
@@ -546,9 +547,40 @@ export class TicketController {
         }
       }
 
+      // sourceConversationId decides which SDLC owner every ticket inherits, so
+      // it gets the same existence + private-channel check as single creation.
+      if (body.sourceConversationId) {
+        const sourceConversation = await this.conversationRepository.findById(body.sourceConversationId);
+        if (!sourceConversation) {
+          res.status(400).json({ error: 'Source conversation not found' });
+          return;
+        }
+        const sourceChannel = await this.channelRepository.findById(sourceConversation.channelId);
+        if (sourceChannel && sourceChannel.visibility === 'PRIVATE') {
+          const isParticipant = await this.channelParticipantRepository.isParticipant(
+            sourceConversation.channelId,
+            userId
+          );
+          if (!isParticipant) {
+            res.status(403).json({
+              error: 'Access denied - you do not have permission to access this conversation',
+              code: 'NOT_CONVERSATION_PARTICIPANT',
+            });
+            return;
+          }
+        }
+      }
+
       const batchCtx = {
         createdBy: userId,
         workspaceId,
+        queryContext: {
+          userID: userId,
+          workspaceId,
+          role: user.role,
+          orgRole: user.orgRole,
+          memberId: user.memberId,
+        },
         ...(body.sourceConversationId ? { sourceConversationId: body.sourceConversationId } : {}),
         fromTicketsTab: body.fromTicketsTab === true,
       };
@@ -567,11 +599,13 @@ export class TicketController {
 
       const response: CreateBulkTicketResponse = {
         parentTicketId: batch.parentTicketId ?? undefined,
-        createdTickets: batch.tickets.map((ticket) => ({
+        ...(batch.createdParent ? { createdParent: batch.createdParent } : {}),
+        createdTickets: batch.tickets.map(({ ticket, clientRowId }) => ({
           id: ticket.id,
           xyneId: ticket.xyneId,
           title: ticket.title,
           conversationId: ticket.conversationId,
+          ...(clientRowId ? { clientRowId } : {}),
         })),
       };
 
