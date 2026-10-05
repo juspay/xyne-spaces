@@ -23,6 +23,10 @@ import {
   CALL_EVENT,
   CallEventOutputSchema,
 } from '../triggers/call.trigger';
+import {
+  USER_JOINED_CHANNEL_EVENT,
+  UserJoinedChannelOutputSchema,
+} from '../triggers/user-joined-channel.trigger';
 import type { TicketContext } from '../triggers/ticket-context';
 import type { TicketChanges } from '../triggers/ticket-updated.trigger';
 
@@ -55,6 +59,10 @@ export type TriggerContext =
     })
   | (z.infer<typeof CallEventOutputSchema> & {
       type: typeof CALL_EVENT;
+      data: Record<string, unknown>;
+    })
+  | (z.infer<typeof UserJoinedChannelOutputSchema> & {
+      type: typeof USER_JOINED_CHANNEL_EVENT;
       data: Record<string, unknown>;
     });
 

@@ -5,6 +5,7 @@ import { notificationService } from '@/services/notificationService';
 import { logger } from '@/utils/logger';
 import { ChannelScopeType } from '@xyne/shared';
 import { refreshCanvasPermissionsForChannel } from '@/services/canvasPermissionSync';
+import { emitUserJoinedChannel } from '@/automations/triggers/user-joined-channel.trigger';
 
 export class ChannelParticipantsSideEffectHandler extends BaseSideEffectHandler {
 
@@ -49,6 +50,8 @@ export class ChannelParticipantsSideEffectHandler extends BaseSideEffectHandler 
       await refreshCanvasPermissionsForChannel(channelId).catch(err =>
         logger.error(`[ChannelParticipantsHandler] canvas ACL refresh failed for channel ${channelId}: ${err}`));
 
+      // Automations: "When a user joins a channel". Fire-and-forget; never throws.
+      void emitUserJoinedChannel({ channelId, userId, actorId: this.ctx.userID });
 
       if (this.ctx.userID === userId) {
         logger.info(`[ChannelParticipantsHandler] User ${userId} joined channel ${channelId} themselves - skipping notification`);

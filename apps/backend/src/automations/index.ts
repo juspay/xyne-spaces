@@ -11,6 +11,7 @@ import { messageReceivedTrigger } from './triggers/message-received.trigger';
 import { callTrigger } from './triggers/call.trigger';
 import { webhookTrigger } from './triggers/webhook.trigger';
 import { tagGeneratedTrigger } from './triggers/tag-generated.trigger';
+import { userJoinedChannelTrigger } from './triggers/user-joined-channel.trigger';
 
 import { conditionalStep } from './steps/conditional.step';
 import { switchStep } from './steps/switch.step';
@@ -60,6 +61,7 @@ export async function initializeAutomations(): Promise<void> {
   triggerRegistry.register(callTrigger);
   triggerRegistry.register(webhookTrigger);
   triggerRegistry.register(tagGeneratedTrigger);
+  triggerRegistry.register(userJoinedChannelTrigger);
 
   stepRegistry.register(conditionalStep);
   stepRegistry.register(switchStep);
