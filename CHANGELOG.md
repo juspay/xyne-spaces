@@ -1,3 +1,10 @@
+## [1.455.2](https://github.com/juspay/xyne-spaces/compare/v1.455.1...v1.455.2) (2026-10-05)
+
+
+### Bug Fixes
+
+* whatsapp lease handover ([#2613](https://github.com/juspay/xyne-spaces/issues/2613)) ([6d980cf](https://github.com/juspay/xyne-spaces/commit/6d980cf93f1e9e82bba6e2d66e26db3182d2c93c))
+
 ## [1.455.1](https://github.com/juspay/xyne-spaces/compare/v1.455.0...v1.455.1) (2026-10-05)
 
 
