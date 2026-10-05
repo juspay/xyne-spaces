@@ -13,6 +13,7 @@ import {
   formatTime,
   getCurrentUserMeetingStatus,
   getCallPillVariant,
+  hasCallEnded,
   isCallJoinableNow,
   HATCH_BACKGROUND,
 } from './CalenderViewUtils';
@@ -251,7 +252,7 @@ const CalendarMonthView = ({
                           const isMaybe =
                             getCurrentUserMeetingStatus(call, currentUserId) ===
                             MeetingStatus.MAYBE;
-                          const joinable = isCallJoinableNow(call, variant, today);
+                          const joinable = isCallJoinableNow(call, today);
 
                           return (
                             <PopoverPrimitive.Root
@@ -273,6 +274,9 @@ const CalendarMonthView = ({
                                         : variant === 'highlighted'
                                           ? 'bg-primary text-primary-foreground'
                                           : 'bg-primary/10 text-foreground',
+                                    variant === 'highlighted' &&
+                                      hasCallEnded(call, today) &&
+                                      'opacity-60 hover:opacity-90',
                                   )}
                                 >
                                   {isMaybe && variant !== 'past' && (
