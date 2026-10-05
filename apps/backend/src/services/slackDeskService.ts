@@ -60,6 +60,15 @@ export class SlackDeskService {
         sourceTypes: ['slack-desk'],
       }));
     if (!externalSource) throw new Error(`No external source for channel ${conversation.channelId}`);
+    // Unlinked (legacy) thread: with several Slack channels on the desk there is no safe guess.
+    const slackSources = { channelId: conversation.channelId, sourceType: 'slack-desk' };
+    if (!origin && (await this.prisma.externalSource.count({ where: slackSources })) > 1) {
+      throw new Error(`Cannot route reply: conversation ${conversationId} is not linked to a Slack channel`);
+    }
+    // Ingest drops events from an inactive source, and a source moved to another desk would cross-thread.
+    if (!externalSource.isActive || externalSource.channelId !== conversation.channelId) {
+      throw new Error('This Slack channel is disconnected from the desk. Reconnect it to reply.');
+    }
 
     // 2. Get Slack channel ID and bot token from credentials
     const decryptedCreds = decrypt(externalSource.credentials);

@@ -161,16 +161,18 @@ router.post(
 router.post(
   '/:channelId/disconnect',
   authV2Middleware.authenticate,
+  validateZod(z.object({ slackChannelId: z.string().trim().min(1) })),
   async (req: Request, res: Response): Promise<void> => {
     try {
       const { channelId } = req.params;
+      const { slackChannelId } = req.body as { slackChannelId: string };
 
       if (!(await authorizeAppDeskManager(channelId, req.user!.id, req.user!.workspaceId!, res)))
         return;
 
       // Deactivate ExternalSource
       const source = await db.externalSource.findFirst({
-        where: { channelId, isActive: true, sourceType: 'slack-desk' },
+        where: { channelId, isActive: true, sourceType: 'slack-desk', name: buildSlackDeskSourceName(slackChannelId) },
         select: { id: true },
       });
 
@@ -370,23 +372,20 @@ router.post(
         botOauthToken: creds.botOauthToken,
       }));
 
-      // One binding per desk and one desk per Slack channel (ingest resolves by name).
+      // A desk can hold many Slack channels, but each Slack channel feeds one desk (ingest resolves by name).
       const name = buildSlackDeskSourceName(slackChannelId);
       const clash = await db.externalSource.findFirst({
         where: {
           workspaceId,
           sourceType: 'slack-desk',
           isActive: true,
-          OR: [{ channelId, NOT: { name } }, { name, NOT: { channelId } }],
+          name,
+          NOT: { channelId },
         },
         select: { name: true },
       });
       if (clash) {
-        res.status(409).json({
-          error: clash.name === name
-            ? 'This Slack channel is already connected to another desk'
-            : 'This desk already has a Slack channel connected',
-        });
+        res.status(409).json({ error: 'This Slack channel is already connected to another desk' });
         return;
       }
 

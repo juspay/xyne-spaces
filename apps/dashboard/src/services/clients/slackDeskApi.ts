@@ -14,8 +14,13 @@ export { SlackDeskTriggerMode };
  * Soft-disconnect: server marks the Slack channel's ExternalSource inactive.
  * Existing message history on the desk is preserved.
  */
-export async function disconnectSlackDesk(channelId: string): Promise<void> {
-  await apiInstance.post<{ message: string }>(`/integrations/slack-desk/${channelId}/disconnect`);
+export async function disconnectSlackDesk(
+  channelId: string,
+  slackChannelId: string,
+): Promise<void> {
+  await apiInstance.post<{ message: string }>(`/integrations/slack-desk/${channelId}/disconnect`, {
+    slackChannelId,
+  });
 }
 
 export interface DeskSlackChannel {
