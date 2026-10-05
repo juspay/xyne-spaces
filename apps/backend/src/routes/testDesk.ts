@@ -335,13 +335,15 @@ router.post('/desk/workspace-mailbox', async (req, res, next) => {
         sourceType,
         displayName: email,
         workspaceId,
-        ownerUserId: userId,
+        // Workspace-level sources carry no channel/owner (see WORKSPACE_LEVEL in
+        // integrations/core/sourceScope.ts); shared-desk lookups filter on it.
+        ownerUserId: null,
         credentials: buildMockDeskCredentials({ email, sourceType }),
         isActive: true,
       },
       update: {
         displayName: email,
-        ownerUserId: userId,
+        ownerUserId: null,
         credentials: buildMockDeskCredentials({ email, sourceType }),
         isActive: true,
       },
