@@ -1,3 +1,10 @@
+## [1.457.0](https://github.com/juspay/xyne-spaces/compare/v1.456.2...v1.457.0) (2026-10-05)
+
+
+### Features
+
+* redesign the ticket details header ([#2617](https://github.com/juspay/xyne-spaces/issues/2617)) ([881226f](https://github.com/juspay/xyne-spaces/commit/881226fa421414e19789d1b303f2b1bf0e9fa3fe))
+
 ## [1.456.2](https://github.com/juspay/xyne-spaces/compare/v1.456.1...v1.456.2) (2026-10-05)
 
 
