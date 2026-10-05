@@ -91,7 +91,9 @@ export class CallTranscriptionService {
         logger.warn(`${TAG} permanent failure | emailId=${emailId} | code=${error.code} | ${error.message}`);
         return this.fail(data, describeTranscriptionAgentError(error));
       }
-      const message = error instanceof TranscriptionAgentError ? describeTranscriptionAgentError(error) : String(error);
+      const message = error instanceof TranscriptionAgentError
+        ? describeTranscriptionAgentError(error)
+        : 'Transcription failed. Please try again.';
       if (attempt >= maxAttempts) {
         await this.safeSetState(data, { status: 'failed', error: message });
       } else {
@@ -144,7 +146,7 @@ export class CallTranscriptionService {
         ` | provider=${result.provider} | elapsed=${Date.now() - t0}ms`,
     );
 
-    const summary = await this.generateSummary(emailId, text);
+    const summary = await this.generateSummary(emailId, workspaceId, text);
     if (summary) {
       await this.safeSetState(data, { status: 'done', attachmentId: attachment.id, summary });
       logger.info(`${TAG} summary stored | emailId=${emailId} | chars=${summary.length} | elapsed=${Date.now() - t0}ms`);
@@ -177,7 +179,7 @@ export class CallTranscriptionService {
     const text = extractTranscriptBody(Buffer.concat(chunks).toString('utf8'));
     if (!text) return { ok: false, code: 'empty_transcript' };
 
-    const summary = await this.generateSummary(emailId, text);
+    const summary = await this.generateSummary(emailId, workspaceId, text);
     if (!summary) return { ok: false, code: 'generation_failed' };
 
     await telephonyEmailService.setTranscriptionState(emailId, workspaceId, {
@@ -193,9 +195,15 @@ export class CallTranscriptionService {
    * AI summary via the shared call-summary prompt (same one Xyne call recordings
    * use). Best effort: any failure just leaves the transcript without a summary.
    */
-  private async generateSummary(emailId: string, transcript: string): Promise<string | null> {
+  private async generateSummary(emailId: string, workspaceId: string, transcript: string): Promise<string | null> {
     try {
-      const markdown = await transcriptService.generateCallSummary(numberTranscriptForSummary(transcript));
+      // No Xyne call behind a desk recording, so the org LLM credential is resolved from the workspace.
+      const markdown = await transcriptService.generateCallSummary(
+        numberTranscriptForSummary(transcript),
+        undefined,
+        undefined,
+        workspaceId,
+      );
       const cleaned = markdown ? cleanCallSummary(markdown) : '';
       if (!cleaned) {
         logger.warn(`${TAG} summary unavailable | emailId=${emailId}`);

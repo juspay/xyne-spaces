@@ -91,6 +91,16 @@ export function findCallTranscriptAttachment(
 
 const DEFAULT_TRANSCRIPT_FILENAME = 'call-transcript.txt';
 
+/** One job attempt is capped at 50 min on the backend; a queued/processing state older than this has lost its job. */
+const STALE_IN_PROGRESS_MS = 60 * 60_000;
+/** Zero can deliver the `done` body before the attachment row; a fresh `done` is still loading. */
+const ATTACHMENT_SYNC_GRACE_MS = 60_000;
+
+const stateAgeMs = (updatedAt: string | undefined): number => {
+  const timestamp = updatedAt ? Date.parse(updatedAt) : Number.NaN;
+  return Number.isNaN(timestamp) ? Number.POSITIVE_INFINITY : Date.now() - timestamp;
+};
+
 /** `call-transcript-TXR9dcf5ba965…20260925.txt` style: keep the start and the tail, cap at ~20 chars. */
 const shortFilename = (name: string, max = 20): string => {
   if (name.length <= max) return name;
@@ -162,8 +172,13 @@ export function CallTranscriptControls({
   }
 
   const status = transcription?.status;
+  const ageMs = stateAgeMs(transcription?.updatedAt);
+  // The job can vanish without a final state (queue flush, lost worker): offer Retry instead of
+  // spinning forever. The backend answers 409 if a job is in fact still running.
+  const isStale = (status === 'queued' || status === 'processing') && ageMs > STALE_IN_PROGRESS_MS;
+  const isAwaitingAttachment = status === 'done' && ageMs < ATTACHMENT_SYNC_GRACE_MS;
 
-  if (status === 'queued' || status === 'processing') {
+  if (((status === 'queued' || status === 'processing') && !isStale) || isAwaitingAttachment) {
     return (
       <div className={rowClass}>
         <Button
@@ -176,18 +191,26 @@ export function CallTranscriptControls({
           data-track-name='CallTranscriptionPending'
         >
           <Loader2 className='size-3.5 animate-spin' />
-          {status === 'queued' ? 'Queued…' : 'Transcribing…'}
+          {status === 'queued'
+            ? 'Queued…'
+            : status === 'processing'
+              ? 'Transcribing…'
+              : 'Loading transcript…'}
         </Button>
       </div>
     );
   }
 
-  if (status === 'failed') {
+  if (status === 'failed' || isStale) {
     return (
       <div className={rowClass}>
         <span className='flex min-w-0 items-center gap-1.5 text-xs text-destructive'>
           <AlertCircle className='size-3.5 shrink-0' />
-          <span className='truncate'>{transcription?.error ?? 'Transcription failed'}</span>
+          <span className='truncate'>
+            {isStale
+              ? 'Transcription did not finish'
+              : (transcription?.error ?? 'Transcription failed')}
+          </span>
         </span>
         <Button
           type='button'

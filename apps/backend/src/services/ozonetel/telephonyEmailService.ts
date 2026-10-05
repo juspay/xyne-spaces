@@ -13,6 +13,7 @@ import { EmailRepository } from '@/database/repositories/emailRepository';
 import { ExternalMessageRepository } from '@/database/repositories/externalMessageRepository';
 import { UserRepository } from '@/database/repositories/users';
 import { logger } from '@/utils/logger';
+import { callTranscriptionQueue } from '@/queues/callTranscriptionQueue';
 import { ozonetelConfigService, type OzonetelTicketRules } from './ozonetelConfigService';
 import { unifiedBotUserService } from '@/bots/unified/services/unified-bot-user-service';
 import { syncConversationTicketMdFromPrismaTicket } from '@/utils/ticketMd';
@@ -708,6 +709,12 @@ export class TelephonyEmailService {
         title: true,
       },
     });
+
+    // First event carrying the recording: transcribe (and then summarise) without waiting for a click.
+    if (mergedMeta.recordingUrl && !previousMeta?.transcription) {
+      await this.autoTranscribe(existingEmail.id, event.workspaceId, nextMeta.agentUserId ?? ticket?.createdBy);
+    }
+
     // Only linked calls land on a non-call desk; leave that customer ticket's title, assignee and fields alone.
     if (ticket && existingEmail.channel.type !== ChannelType.CALL) {
       return { emailId: existingEmail.id, externalId: event.externalId, ticketId: ticket.id };
@@ -740,6 +747,28 @@ export class TelephonyEmailService {
     }
 
     return { emailId: existingEmail.id, externalId: event.externalId, ticketId: ticket?.id ?? null };
+  }
+
+  /**
+   * Same job the "Transcribe" button enqueues; `queued` is written first so later events
+   * (disposition, comments) see the state and don't enqueue again. Never fails the webhook.
+   */
+  private async autoTranscribe(emailId: string, workspaceId: string, userId: string | undefined): Promise<void> {
+    if (!userId) {
+      logger.warn(`${TAG} auto-transcription skipped: no agent or ticket creator to attribute it to`, { emailId, workspaceId });
+      return;
+    }
+    try {
+      await this.setTranscriptionState(emailId, workspaceId, { status: 'queued' });
+      const enqueued = await callTranscriptionQueue.enqueue({ emailId, workspaceId, userId });
+      logger.info(`${TAG} auto-transcription ${enqueued ? 'queued' : 'already in progress'}`, { emailId, workspaceId });
+    } catch (error) {
+      logger.error(`${TAG} auto-transcription failed to enqueue`, { emailId, workspaceId, error });
+      await this.setTranscriptionState(emailId, workspaceId, {
+        status: 'failed',
+        error: 'Could not start transcription. Please try again.',
+      }).catch(() => undefined);
+    }
   }
 
   /**

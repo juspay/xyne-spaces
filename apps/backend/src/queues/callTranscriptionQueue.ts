@@ -66,6 +66,9 @@ class CallTranscriptionQueue {
         removeOnComplete: true,
         removeOnFail: false,
       },
+      // The consumer lives in the API process and a job can hold for ~45 min, so a rolling
+      // deploy can stall the same job more than once. Bull's default of 1 would fail it.
+      settings: { maxStalledCount: 3 },
     });
     this.queue.on('error', (error) => {
       logger.error(`${TAG} Queue error:`, error);
@@ -119,20 +122,21 @@ class CallTranscriptionQueue {
       return callTranscriptionService.process(job.data, job.attemptsMade + 1, job.opts.attempts ?? 1);
     });
     queue.on('failed', async (job, error) => {
-      logger.error(`${TAG} Job for email ${job.data?.emailId} failed (attempt ${job.attemptsMade}):`, error);
-      const attempts = job.opts.attempts ?? 1;
-      if (job.attemptsMade >= attempts && job.data) {
-        // Final attempt exhausted: surface it in the thread so the user can retry.
-        try {
+      if (!job?.data) return;
+      logger.error(`${TAG} Job for email ${job.data.emailId} failed (attempt ${job.attemptsMade}):`, error);
+      try {
+        // Finally failed = attempts exhausted OR stalled past maxStalledCount (which never bumps
+        // attemptsMade). An attempt with retries left sits in `delayed`, not `failed`.
+        if (await job.isFailed()) {
           const { callTranscriptionService } = await import('@/services/ozonetel/callTranscriptionService');
           // Keep the user-facing message friendly; never surface raw errors (internal IPs/ports).
           const message = error instanceof TranscriptionAgentError
             ? describeTranscriptionAgentError(error)
             : 'Transcription failed. Please try again.';
           await callTranscriptionService.markFailed(job.data, message);
-        } catch (markError) {
-          logger.error(`${TAG} Failed to record failure state for email ${job.data.emailId}:`, markError);
         }
+      } catch (markError) {
+        logger.error(`${TAG} Failed to record failure state for email ${job.data.emailId}:`, markError);
       }
     });
     logger.info(`${TAG} Consumer started (concurrency=${concurrency})`);
@@ -140,7 +144,8 @@ class CallTranscriptionQueue {
 
   async close(): Promise<void> {
     if (this.queue) {
-      await this.queue.close();
+      // doNotWaitJobs: a running job can take ~45 min; it stalls and another pod picks it up.
+      await this.queue.close(true);
       this.queue = null;
       this.consuming = false;
       logger.info(`${TAG} Queue closed`);

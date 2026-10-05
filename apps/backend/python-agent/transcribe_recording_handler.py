@@ -22,6 +22,7 @@ Response codes
 422  {error, code: "too_large"}             exceeds RECORDING_MAX_BYTES
 422  {error, code: "recording_unavailable"} upstream 403/404/410 (or empty body)
 422  {error, code: "unsupported_media"}     Google rejected the audio (INVALID_ARGUMENT)
+422  {error, code: "timeout"}               batch operation exceeded RECORDING_GOOGLE_BATCH_TIMEOUT_S
 502  {error, code: "download_failed"}       transient download failure (caller retries)
 502  {error, code: "transcription_failed"}  provider failure after retries (caller retries)
 """

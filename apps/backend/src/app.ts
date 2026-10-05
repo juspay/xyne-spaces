@@ -1198,6 +1198,9 @@ export class App {
       // Close auto draft queue
       await autoDraftQueue.close();
 
+      // Close call transcription queue
+      await callTranscriptionQueue.close();
+
       // Close radar execution producer queue (initialized above when enabled)
       const { radarExecutionQueue: radarQueue } = await import('@/queues/radarExecutionQueue');
       await radarQueue.close();

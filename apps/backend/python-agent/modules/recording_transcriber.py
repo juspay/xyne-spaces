@@ -93,7 +93,8 @@ async def _transcribe_with_retry(path: str, cfg: Config, language: str, job_id: 
     """BatchRecognize wrapped in a bounded retry. Returns (text, language, model).
 
     Raises TranscriptionError(unsupported_media, permanent) when Google rejects the
-    audio itself; any other error after the retries is TranscriptionError(
+    audio itself and TranscriptionError(timeout, permanent) when the batch operation
+    outlives its deadline; any other error after the retries is TranscriptionError(
     transcription_failed, transient).
     """
     last: Optional[BaseException] = None

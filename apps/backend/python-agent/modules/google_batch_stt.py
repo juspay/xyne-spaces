@@ -302,12 +302,19 @@ async def _run_batch(speech: SpeechAsyncClient, request: BatchRecognizeRequest, 
     try:
         return await operation.result(timeout=timeout_s)
     except (asyncio.TimeoutError, TimeoutError) as e:
-        # Do not let the generic retry re-submit a job that already took this long.
+        # Stop Google working on (and billing) a job we have given up on; the caller's
+        # `finally` deletes the scratch object next. Best effort.
+        try:
+            await operation.cancel()
+        except Exception as cancel_err:  # noqa: BLE001
+            logger.warning(f"{tag} | failed to cancel timed-out operation: {cancel_err}")
+        # Permanent, own code: neither the in-agent retry nor the backend's Bull retry should
+        # re-run a whole job (download, upload, new batch operation) that already took this long.
         from modules.recording_transcriber import TranscriptionError
         raise TranscriptionError(
-            "transcription_failed",
+            "timeout",
             f"Google batch operation did not finish within {timeout_s}s",
-            False,
+            True,
         ) from e
 
 

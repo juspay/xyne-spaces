@@ -462,9 +462,12 @@ async def _stream_with_google(
         f' (hot_words={len(_HOT_WORDS)} + hints={len(extra_hints or [])})'
     )
 
+    # One code only: multi-language recognition exists only in the eu/global/us locations, and
+    # the streaming model (chirp_2) lives in a regional one, so a second code is INVALID_ARGUMENT
+    # (verified 2026-10-01). The sync Chirp 3 path in `us` sends the full list.
     recognition_config = RecognitionConfig(
         auto_decoding_config=AutoDetectDecodingConfig(),
-        language_codes=target_codes,
+        language_codes=[target_language],
         model=stream_model,
         adaptation=adaptation,
     )

@@ -30,6 +30,7 @@ export type TranscriptionAgentErrorCode =
   | 'too_large'
   | 'recording_unavailable'
   | 'unsupported_media'
+  | 'timeout'
   | 'download_failed'
   | 'transcription_failed'
   | 'agent_unsupported'
@@ -42,6 +43,7 @@ const PERMANENT_CODES: ReadonlySet<TranscriptionAgentErrorCode> = new Set([
   'too_large',
   'recording_unavailable',
   'unsupported_media',
+  'timeout',
   'agent_unsupported',
 ]);
 
@@ -75,8 +77,14 @@ export function describeTranscriptionAgentError(error: TranscriptionAgentError):
       return 'The transcription service does not support call recordings yet.';
     case 'agent_unreachable':
       return 'The transcription service is unreachable.';
+    case 'timeout':
+      return 'The recording took too long to transcribe.';
+    case 'download_failed':
+      return 'The recording could not be downloaded.';
     default:
-      return error.message || 'Transcription failed.';
+      // Never error.message: for transcription_failed / unknown it is raw agent or provider
+      // text (URLs, hosts, bucket names). The raw message stays in the logs.
+      return 'Transcription failed. Please try again.';
   }
 }
 
