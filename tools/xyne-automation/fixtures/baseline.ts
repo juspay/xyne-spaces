@@ -492,9 +492,9 @@ async function gotoChatViewUntilReady(url: string, readySelector: string): Promi
   const maxAttempts = 4;
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     if (attempt === 1) {
-      await page.goto(url, { waitUntil: 'networkidle' });
+      await page.goto(url, { waitUntil: 'domcontentloaded' });
     } else {
-      await page.reload({ waitUntil: 'networkidle' });
+      await page.reload({ waitUntil: 'domcontentloaded' });
     }
 
     const ready = page.locator(readySelector).first();
@@ -535,8 +535,9 @@ async function createProject(adminUser: StoredUser): Promise<BaselineProject> {
   if (await projectsNav.count()) {
     await projectsNav.click();
   }
-  await page.waitForLoadState('networkidle');
 
+  // networkidle is flaky under the dashboard's persistent WebSockets (zero-cache,
+  // livekit). The subsequent waitFor on the "New" button is the real readiness gate.
   const newProjectTrigger = page.getByText('New', { exact: true }).first();
   // 60s: the first authenticated render on a cold Docker/CI start waits on zero-cache
   // sync + hydration and can exceed the default 30s.
@@ -839,7 +840,10 @@ export async function bootstrapBaselineFixture(): Promise<void> {
           path: path.resolve(artifactDir, 'baseline-failure.png'),
           fullPage: true,
         });
-        const body = await page.locator('body').innerText().catch(() => '');
+        const body = await page
+          .locator('body')
+          .innerText()
+          .catch(() => '');
         baselineLogger.error(
           `Baseline bootstrap failed at ${page.url()}. Body(0..300): ${body.slice(0, 300)}`
         );
