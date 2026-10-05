@@ -5,6 +5,7 @@ import {
   ENVIRONMENTS,
   K6_IMAGE,
   resolveRunConfig,
+  PROFILES,
   SCENARIOS,
   WRITE_SCENARIOS,
 } from '../config/catalog.mjs';
@@ -149,4 +150,32 @@ test('search is a read scenario, so it carries no write gate', () => {
     resolveRunConfig({ profile: 'release', scenario: 'search' }).scenario,
     'search',
   );
+});
+
+test('the runner and the k6 profiles agree on which profiles exist', async () => {
+  // These are two separate lists: catalog.mjs gates what the runner accepts, profiles.mjs
+  // defines what k6 executes. A profile added to one and not the other is either rejected
+  // before it runs or accepted and then unbuildable, so they must be kept in lockstep.
+  const { PROFILE_NAMES } = await import('../k6/profiles.mjs');
+  assert.deepEqual([...PROFILES].sort(), [...PROFILE_NAMES].sort());
+});
+
+test('every accepted profile is actually buildable by k6', async () => {
+  const { buildExecutionProfile } = await import('../k6/profiles.mjs');
+  for (const profile of PROFILES) {
+    assert.doesNotThrow(() => buildExecutionProfile(profile), profile);
+  }
+});
+
+test('no profile default exceeds the cap of an environment that allows it', async () => {
+  const { buildExecutionProfile, peakVus } = await import('../k6/profiles.mjs');
+  for (const [environment, limits] of Object.entries(ENVIRONMENTS)) {
+    for (const profile of PROFILES) {
+      let allowed = true;
+      try { resolveRunConfig({ environment, profile }); } catch { allowed = false; }
+      if (!allowed) continue;
+      const peak = peakVus(buildExecutionProfile(profile));
+      assert.ok(peak <= limits.maxVus, `${profile} peaks at ${peak} on ${environment}`);
+    }
+  }
 });
