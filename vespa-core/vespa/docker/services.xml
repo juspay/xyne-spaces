@@ -139,6 +139,7 @@
             <document type="memory" mode="index" />
             <document type="sam_transcript" mode="index" />
             <document type="app" mode="index" />
+            <document type="project_tag" mode="index" />
 
             <!-- Route document indexing/processing through the container cluster above -->
             <document-processing cluster="feed" />

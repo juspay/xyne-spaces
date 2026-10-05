@@ -19,6 +19,7 @@ import { useAuthContextValues } from '../../hooks/useAuth';
 import { usePermissions } from '../../hooks/usePermissions';
 import { useCachedQuery } from '../../hooks/useCachedQuery';
 import { queries } from '../../zero/queries';
+import { useProjectTagOptions } from '../../hooks/useProjectTagOptions';
 import { Button } from '../../components/ui/Button';
 import { MultiSelect } from '../../components/ui/MultiSelect';
 import { Switch } from '../../components/ui/Switch';
@@ -122,8 +123,10 @@ const TicketReportsScreen = ({
     queries.getStagesByBoardIds({ boardIds: allBoardIds }),
   );
   const [formRows, formQueryDetails] = useCachedQuery(queries.getAllForms());
-  const [projectTagRows] = useCachedQuery(queries.projectTagsByProjectId({ projectId }), {
+  const { tagRows: projectTagRows } = useProjectTagOptions({
+    projectId,
     enabled: Boolean(projectId),
+    autoLoadAll: true,
   });
   const [exportRows, exportQueryDetails] = useCachedQuery(queries.ticketExportsForCurrentUser());
   const scopeLoading =

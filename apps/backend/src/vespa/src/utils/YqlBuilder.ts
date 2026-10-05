@@ -11,11 +11,12 @@ import {
   samTranscriptSchema,
   mailSchema,
   appSchema,
+  projectTagSchema,
   callSchema,
 } from '../types';
 import { parseDateToTimestamp, parseTimeKeyword } from './dateParser';
 
-type AppName = 'chat' | 'ticket' | 'user' | 'file' | 'collection' | 'transcript' | 'mail' | 'xyneapp' | 'call';
+type AppName = 'chat' | 'ticket' | 'user' | 'file' | 'collection' | 'transcript' | 'mail' | 'xyneapp' | 'call' | 'projecttag';
 
 const VESPA_MISSING_DYNAMIC_FIELD_VALUE = '__VESPA_MISSING__';
 
@@ -149,6 +150,23 @@ const scopedLexicalClause = (
   }
   return `(\n      ${branches.join('\n   or ')}\n    )`;
 };
+
+/**
+ * Filters for the `project_tag` catalog. Tag documents carry no permission field,
+ * so scoping is projectId + the top-level workspaceId guard -- see
+ * buildProjectTagConditions.
+ */
+export interface ProjectTagFilters {
+  docType?: string[];
+  projectId?: string[];
+  /**
+   * The user's query BEFORE escapeQueryForUserInput(). The prefix term below is a
+   * bound parameter, which Vespa matches verbatim, so the userInput-grammar
+   * escaping (backslashes before `(`, `"`, `!`, ...) would be matched literally
+   * and break the match. searchVespa sets this; other callers need not.
+   */
+  rawQuery?: string;
+}
 
 export interface SlackFilters {
   channelId?: string[];
@@ -326,6 +344,7 @@ export class YqlBuilder {
     useExactMatch: boolean = false,
     rankProfile?: string,
     userEmail?: string,
+    projectTagFilters: ProjectTagFilters = {},
   ): { yql: string; params: Record<string, string> } {
     const schemaNames = schemas.join(', ');
     // `limit` is interpolated raw into non-bindable YQL grammar ({targetHits:N}, max(N)); coerce to
@@ -344,7 +363,15 @@ export class YqlBuilder {
     // `vespa_search_semantic_disabled_rank_profiles` Superposition flag and turns it off for
     // rank profiles that read no vector feature). Short queries skip it regardless — under 4
     // characters the embedding is noise.
-    const useSemantic = useSemanticAnyway && queryLength > 3;
+    // project_tag carries no embedding fields, and the semantic branch below emits
+    // nearestNeighbor(text_embeddings|chunk_embeddings|combined_embeddings, e)
+    // unconditionally. Against this schema Vespa answers HTTP 400 ("requires a
+    // tensor rank feature named 'query(e)'"), which vespaClient.search turns into a
+    // throw -- so without this gate every tag query longer than 3 characters 500s.
+    // Embedding a tag name would mean running the ONNX embedder per tag row and
+    // maintaining three HNSW indexes over a catalog of short labels.
+    const isProjectTagOnly = apps.length === 1 && apps[0].toLowerCase() === 'projecttag';
+    const useSemantic = useSemanticAnyway && queryLength > 3 && !isProjectTagOnly;
 
     if (query && query !== '*') {
       if (useExactMatch) {
@@ -395,6 +422,19 @@ export class YqlBuilder {
         or ({targetHits:${safeLimit}} nearestNeighbor(chunk_embeddings, e))
         or ({targetHits:${safeLimit}, approximate:false} nearestNeighbor(combined_embeddings, e))
         )`);
+        } else if (isProjectTagOnly) {
+          // Prefix + grams are complementary, so the dropdown ORs them:
+          //   prefix  -- matches from ONE character, but anchored to the start of
+          //             the whole value ("pay" finds "payment gateway"; "gateway"
+          //             does not).
+          //   grams   -- match mid-string, but need 3+ characters.
+          // Either alone leaves a hole; together they cover every keystroke.
+          const prefixTerm = (projectTagFilters.rawQuery ?? query).trim().toLowerCase();
+          whereConditions.push(
+            prefixTerm
+              ? `(${mainLexical} or nameLower contains ({prefix:true}${params.bind('namePrefix', prefixTerm)}))`
+              : mainLexical,
+          );
         } else {
           whereConditions.push(mainLexical);
         }
@@ -501,6 +541,10 @@ export class YqlBuilder {
       openConditions.push(this.buildMeetingConditions(meetingFilters, params, userId));
     }
 
+    if (apps.some((a) => a.toLowerCase() === 'projecttag')) {
+      openConditions.push(this.buildProjectTagConditions(projectTagFilters, params));
+    }
+
     // Combine per-app guarded groups with open conditions.
     // Structure: ((chatConds) AND chatGuard) OR ((fileConds) AND fileGuard) OR (openConds)
     // Even if a filter injection creates extra OR branches inside an app's conditions,
@@ -561,6 +605,30 @@ export class YqlBuilder {
    * Build YQL condition for user search
    * Applies to user schemas
    */
+  /**
+   * Conditions for the `project_tag` catalog.
+   *
+   * Placed with the OPEN conditions (alongside user/transcript) rather than in a
+   * guarded branch: buildPermGuard emits `permissions contains @userId`, and
+   * project_tag has no permissions field -- referencing it would make Vespa reject
+   * the whole YQL. Isolation therefore rests on the top-level `workspaceId
+   * contains @ws` guard plus the projectId filter below, which is the same
+   * arrangement the user and transcript branches use.
+   */
+  private buildProjectTagConditions(filters: ProjectTagFilters, params: VespaQueryParams): string {
+    const conditions: string[] = [`docType contains "project_tag"`];
+
+    const projectIds = filters.projectId ?? [];
+    if (projectIds.length > 0) {
+      const clauses = projectIds.map((id, i) =>
+        `projectId contains ${params.bind(`projectTagProjectId${i}`, id)}`,
+      );
+      conditions.push(`(${clauses.join(' or ')})`);
+    }
+
+    return conditions.join(' and ');
+  }
+
   private buildUserConditions(): string {
     // People-search filters only on `docType contains "user"` today — with two known gaps:
     //  1. transformUserToVespa stamps docType='user' on EVERY user (human/BOT/APP alike), so
@@ -1407,6 +1475,7 @@ export class YqlBuilder {
       transcript: [samTranscriptSchema],
       mail: [mailSchema],
       xyneapp: [appSchema],
+      projecttag: [projectTagSchema],
       call: [callSchema],
     };
 
