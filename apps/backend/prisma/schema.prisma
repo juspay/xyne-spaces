@@ -2432,6 +2432,7 @@ model EmailChannelPreference {
   duplicateScopeConfig   String?    // Scoped duplicate detection: JSON-serialized { enabled, scopeFieldGlobalIds }; stored as string for Zero compatibility, parsed at code level (null = project-wide legacy behavior)
   slackDeskTriggerMode   String?  // ALL_MESSAGES | MENTION_ONLY; null == ALL_MESSAGES
   deskAppIds             String?  // JSON-serialised string[] of artifact app ids shown on this desk, in order; set by the desk owner or a channel admin
+  duplicateLookbackDays  Int?     // Duplicate detection only considers tickets created in the last N days; null/0 = all time
   @@index([ownerUserId])
   @@index([assigneeUserGroupId])
   @@index([boardId])

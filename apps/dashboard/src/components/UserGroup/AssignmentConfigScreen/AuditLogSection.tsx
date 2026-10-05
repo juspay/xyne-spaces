@@ -89,6 +89,7 @@ const FIELD_LABELS: Record<string, string> = {
   emailMergeMode: 'Auto-merge similar emails',
   appWebhookDeliveryEnabled: 'Send replies to app webhook',
   duplicateScopeConfig: 'Limit duplicate detection by field',
+  duplicateLookbackDays: 'Duplicate detection window',
   autoDraftMode: 'Auto AI draft',
   autoDraftAgentSlug: 'Draft agent',
   deskReportEnabled: 'Desk report',
