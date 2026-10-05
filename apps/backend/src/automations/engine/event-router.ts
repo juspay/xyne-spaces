@@ -64,6 +64,8 @@ function eventScope(
       return { channelIds: payload['channelId'] };
     case 'MESSAGE_RECEIVED':
       return { channelIds: payload['channelId'], fromUserIds: payload['authorId'] };
+    case 'USER_JOINED_CHANNEL':
+      return { channelIds: payload['channelId'], userIds: payload['userId'] };
     default:
       return null;
   }

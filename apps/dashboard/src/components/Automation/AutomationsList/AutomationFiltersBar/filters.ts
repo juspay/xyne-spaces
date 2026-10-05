@@ -64,6 +64,7 @@ export const TRIGGER_TYPE_OPTIONS: { value: WorkflowEventType; label: string }[]
   { value: EventType.MESSAGE_RECEIVED, label: 'Message Received' },
   { value: EventType.CALL_EVENT, label: 'Call Event' },
   { value: EventType.TAG_GENERATED, label: 'Tag Generated' },
+  { value: EventType.USER_JOINED_CHANNEL, label: 'User Joined Channel' },
   { value: EventType.NO_OP, label: 'Manual / Other' },
 ];
 

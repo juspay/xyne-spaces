@@ -1,6 +1,7 @@
 import { Prisma, PrismaClient } from '@prisma/client';
 import { sanitizeProjectCode, ProjectType, ChannelRole, ChannelScopeType, ChannelVisibility } from '@xyne/shared';
 import { repositories } from '@/database/repositories';
+import { emitUserJoinedChannel } from '@/automations/triggers/user-joined-channel.trigger';
 
 type PrismaClientLike = PrismaClient | Prisma.TransactionClient;
 
@@ -138,6 +139,8 @@ export async function ensureUserInGeneralChannel(
   }
 
   await repositories.channelParticipants.addParticipant(generalChannel.id, userId, role);
+  // Automations: "When a user joins a channel" (platform auto-join). Fire-and-forget.
+  void emitUserJoinedChannel({ channelId: generalChannel.id, userId, autoJoined: true });
   return generalChannel.id;
 }
 

@@ -11,6 +11,10 @@ import {
 import { MESSAGE_RECEIVED_EVENT } from '../triggers/message-received.trigger';
 import { CALL_EVENT, CALL_STARTED, CALL_ENDED } from '../triggers/call.trigger';
 import { TAG_GENERATED_EVENT } from '../triggers/tag-generated.trigger';
+import {
+  USER_JOINED_CHANNEL_EVENT,
+  type UserJoinMethod,
+} from '../triggers/user-joined-channel.trigger';
 
 export interface TicketEventScope {
   boardId: string | null;
@@ -85,6 +89,14 @@ export interface TagGeneratedEventPayload {
   tags: Array<{ category: string; tag: string; reason: string | null }>;
 }
 
+export interface UserJoinedChannelEventPayload {
+  channelId: string;
+  userId: string;
+  /** Who added the user; null for self-joins and platform auto-joins. */
+  addedById: string | null;
+  joinMethod: UserJoinMethod;
+}
+
 export type AutomationEvent =
   | { type: typeof EMAIL_RECEIVED_EVENT; payload: EmailEventPayload }
   | { type: typeof EMAIL_SENT_EVENT; payload: EmailEventPayload }
@@ -93,6 +105,7 @@ export type AutomationEvent =
   | { type: typeof TICKET_UPDATED_EVENT; payload: TicketUpdatedEventPayload }
   | { type: typeof MESSAGE_RECEIVED_EVENT; payload: MessageReceivedEventPayload }
   | { type: typeof CALL_EVENT; payload: CallEventPayload }
-  | { type: typeof TAG_GENERATED_EVENT; payload: TagGeneratedEventPayload };
+  | { type: typeof TAG_GENERATED_EVENT; payload: TagGeneratedEventPayload }
+  | { type: typeof USER_JOINED_CHANNEL_EVENT; payload: UserJoinedChannelEventPayload };
 
 export type AutomationEventType = AutomationEvent['type'];
