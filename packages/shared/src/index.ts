@@ -29,6 +29,7 @@ export * from './utils/formFieldBranching';
 export * from './utils/formFieldOptions';
 export * from './utils/slaCalculator';
 export * from './utils/relatedContextDraft';
+export * from './utils/emailRecipient';
 export * from './utils/project';
 export * from './utils/activityMetadataParser';
 export * from './utils/radarRules';

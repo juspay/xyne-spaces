@@ -23,6 +23,7 @@ import {
   ExternalEntityType,
   AttachmentEntityType,
   ActivityType,
+  findInvalidRecipients,
 } from '@xyne/shared';
 import { db } from '@/database/client';
 import { websocketService } from '@/services/websocketService';
@@ -52,6 +53,12 @@ import { DESK_EMAIL_SOURCE_TYPE, deskEmailConfigKey } from '@/tags';
 import { ChannelExternalSourceResolver } from '@/services/channelExternalSourceResolver';
 import { recordTicketTimelineEvent } from '@/services/ticketTimelineEventService';
 import { v4 as uuidv4 } from 'uuid';
+
+const invalidRecipientsBody = (invalidRecipients: string[]) => ({
+  error: 'invalid_recipients',
+  message: `${invalidRecipients.length === 1 ? 'This address is' : 'These addresses are'} not valid: ${invalidRecipients.join(', ')}. Remove or correct ${invalidRecipients.length === 1 ? 'it' : 'them'} and send again.`,
+  invalidRecipients,
+});
 
 interface ReplyEmailRequest {
   body: string;
@@ -222,6 +229,13 @@ export class EmailController {
 
       if (!customTo || customTo.length === 0) {
         return res.status(400).json({ error: 'Recipients required' });
+      }
+      // Reject undeliverable addresses (e.g. `support@jiopay`, copied verbatim
+      // by Reply All) here, naming them, instead of letting Gmail/Graph fail the
+      // whole send with an opaque `Invalid To header` 500.
+      const invalidRecipients = findInvalidRecipients([...customTo, ...(customCc || []), ...(customBcc || [])]);
+      if (invalidRecipients.length > 0) {
+        return res.status(400).json(invalidRecipientsBody(invalidRecipients));
       }
       const toRecipients = customTo;
       const ccRecipients = customCc || [];
@@ -886,6 +900,14 @@ export class EmailController {
       }
       if (!Array.isArray(to) || to.length === 0) {
         return res.status(400).json({ error: 'At least one recipient is required' });
+      }
+      const invalidComposeRecipients = findInvalidRecipients([
+        ...to,
+        ...(Array.isArray(req.body.cc) ? req.body.cc : []),
+        ...(Array.isArray(req.body.bcc) ? req.body.bcc : []),
+      ]);
+      if (invalidComposeRecipients.length > 0) {
+        return res.status(400).json(invalidRecipientsBody(invalidComposeRecipients));
       }
       if (typeof subject !== 'string' || subject.trim().length === 0) {
         return res.status(400).json({ error: 'Subject is required' });

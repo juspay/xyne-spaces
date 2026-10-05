@@ -100,3 +100,8 @@ export type {
   RecordingAccessLevel,
   ResolveRecordingAccessParams,
 } from './recordingAccess.js';
+export {
+  extractRecipientAddress,
+  isValidRecipientAddress,
+  findInvalidRecipients,
+} from './emailRecipient.js';
