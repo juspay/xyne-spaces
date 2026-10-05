@@ -1,6 +1,7 @@
 import express from 'express';
 import { CollectionController } from '../controllers/collectionController';
 import { collectionUpload, versionUpload } from '../middleware/upload';
+import { authMiddleware } from '../middleware/auth';
 
 const router = express.Router();
 const collectionController = new CollectionController();
@@ -20,8 +21,10 @@ router.get('/items/:itemId/download', collectionController.downloadFile);
 // Resolve one chunk's highlight snippet (for pdf.js find-based citation highlighting)
 router.get('/items/:itemId/chunk', collectionController.getFileChunk);
 
-// Inspect the raw Vespa fields for a collection file
-router.get('/items/:itemId/vespa-doc', collectionController.getFileVespaDocument);
+// Inspect the indexed Vespa chunks for a collection file. Debug surface:
+// restricted to workspace/org admins & owners (collection access is still
+// checked in the controller).
+router.get('/items/:itemId/vespa-doc', authMiddleware.requireAdminOrOwner, collectionController.getFileVespaDocument);
 
 // Download folder as zip
 router.get('/items/:itemId/download-folder', collectionController.downloadFolder);

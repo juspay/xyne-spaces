@@ -1,4 +1,5 @@
 import { Request, Response } from 'express';
+import { pickInspectableVespaFields } from '../utils/vespaInspectFields';
 import { CollectionRepository } from '../database/repositories/collectionRepository';
 import { logger } from '@/utils/logger';
 import { z } from 'zod';
@@ -882,7 +883,11 @@ uploadFiles = async (req: Request, res: Response): Promise<void> => {
             }
 
             const rawDoc = await vespaClient.crudService.getDocument(file.fileId, fileSchema);
-            const fields = ((rawDoc as { fields?: Record<string, unknown> } | null)?.fields) ?? {};
+            const rawFields = ((rawDoc as { fields?: Record<string, unknown> } | null)?.fields) ?? {};
+            // Only expose chunk/content fields. ACL data (permissions, ownerId,
+            // channelPermissions, workspace ids) and embedding tensors must
+            // never reach the client.
+            const fields = pickInspectableVespaFields(rawFields);
 
             res.json({
                 docId: file.fileId,

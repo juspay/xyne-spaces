@@ -37,3 +37,14 @@ export const useCanManageRelease = (): boolean => {
     )
   );
 };
+
+// Mirrors the backend's authMiddleware.requireAdminOrOwner (workspace or org admin/owner).
+export const useIsAdminOrOwner = (): boolean => {
+  const { user } = useAuth();
+  return (
+    user?.role === 'ADMIN' ||
+    user?.role === 'OWNER' ||
+    user?.orgRole === 'ADMIN' ||
+    user?.orgRole === 'OWNER'
+  );
+};

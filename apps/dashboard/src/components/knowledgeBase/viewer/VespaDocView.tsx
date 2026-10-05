@@ -262,6 +262,11 @@ export const VespaDocView: React.FC<{ itemId: string; name: string }> = ({ itemI
       })
       .catch((err: unknown) => {
         if (cancelled) return;
+        const status = (err as { response?: { status?: number } } | null)?.response?.status;
+        if (status === 403) {
+          setError('You do not have permission to inspect this Vespa document.');
+          return;
+        }
         setError(err instanceof Error ? err.message : 'Failed to load Vespa document');
       })
       .finally(() => {

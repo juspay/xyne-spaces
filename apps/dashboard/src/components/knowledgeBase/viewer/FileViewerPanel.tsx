@@ -11,6 +11,7 @@ import { KbCodeViewer } from './KbCodeViewer';
 import { KbTxtViewer } from './KbTxtViewer';
 import { KbPdfViewer } from './KbPdfViewer';
 import { VespaDocView } from './VespaDocView';
+import { useIsAdminOrOwner } from '../../../hooks/usePermissions';
 import { ShareLinkModal } from '../../knowledgeBaseV2/components/ShareLinkModal';
 
 // KB-local override map. Substitutes the shared viewers with the thin
@@ -67,6 +68,8 @@ export const FileViewerPanel: React.FC<{
   const [containerWidth, setContainerWidth] = useState<number | undefined>(undefined);
   const [highlightQuery, setHighlightQuery] = useState<string | undefined>(undefined);
   const [vespaInspectorOpen, setVespaInspectorOpen] = useState(false);
+  // Vespa chunk inspector is an admin-only debug surface (backend enforces the same).
+  const canInspectVespa = useIsAdminOrOwner();
   const [shareOpen, setShareOpen] = useState(false);
   const contentRef = useRef<HTMLDivElement>(null);
   const fileIdRef = useRef<string | undefined>(fileId);
@@ -342,23 +345,25 @@ export const FileViewerPanel: React.FC<{
           </Tooltip>
         )}
 
-        <Tooltip content='View Vespa document' side='bottom'>
-          <button
-            type='button'
-            onClick={() => setVespaInspectorOpen(open => !open)}
-            aria-label='View Vespa document'
-            aria-pressed={vespaInspectorOpen}
-            data-track-category='knowledge-base'
-            data-track-name='file-viewer-vespa-document'
-            className={`grid h-8 w-8 place-items-center rounded-md transition ${
-              vespaInspectorOpen
-                ? 'bg-secondary text-foreground'
-                : 'text-muted-foreground hover:bg-secondary hover:text-foreground'
-            }`}
-          >
-            <Database className='h-4 w-4' strokeWidth={1.75} />
-          </button>
-        </Tooltip>
+        {canInspectVespa && (
+          <Tooltip content='View Vespa document' side='bottom'>
+            <button
+              type='button'
+              onClick={() => setVespaInspectorOpen(open => !open)}
+              aria-label='View Vespa document'
+              aria-pressed={vespaInspectorOpen}
+              data-track-category='knowledge-base'
+              data-track-name='file-viewer-vespa-document'
+              className={`grid h-8 w-8 place-items-center rounded-md transition ${
+                vespaInspectorOpen
+                  ? 'bg-secondary text-foreground'
+                  : 'text-muted-foreground hover:bg-secondary hover:text-foreground'
+              }`}
+            >
+              <Database className='h-4 w-4' strokeWidth={1.75} />
+            </button>
+          </Tooltip>
+        )}
 
         <Tooltip content='Share' side='bottom'>
           <button
@@ -414,7 +419,7 @@ export const FileViewerPanel: React.FC<{
 
       <div className='flex min-h-0 flex-1 bg-background'>
         <div className='min-w-0 flex-1 overflow-auto'>{renderContent()}</div>
-        {vespaInspectorOpen && fileId && (
+        {canInspectVespa && vespaInspectorOpen && fileId && (
           <aside
             className='flex h-full w-[420px] max-w-[45vw] flex-shrink-0 flex-col border-l border-border bg-background'
             aria-label='Vespa document inspector'
