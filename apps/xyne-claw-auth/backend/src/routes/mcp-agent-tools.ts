@@ -2,6 +2,8 @@ import type { AgentToolsConfig } from "xyne-claw-shared";
 import { getSubagentDefinition,
   openPaletteAdmits,
   openPaletteModeFromTools,
+  shadowToolGrant,
+  type ToolGrantConfig,
 } from "xyne-claw-shared";
 import type { McpServerTools, McpToolInfo } from "../mcp/types.js";
 import type { KnownMcpTool } from "../lib/mcp-tool-name-index.js";
@@ -13,6 +15,47 @@ import {
 } from "../mcpgateway/key-format.js";
 
 export type GatewayServerTarget = { serviceName: string; backendId?: string };
+
+export type ToolGrantShadowContext = { agent?: string | null; log: (message: string) => void };
+
+function canonicalGrantConfig(config: AgentToolsConfig): ToolGrantConfig {
+  return {
+    direct: config.direct ?? [],
+    custom: config.custom ?? [],
+    gateway: config.gateway ?? [],
+    subagents: config.subagents ?? [],
+    subagentServerTypes: (config.subagents ?? [])
+      .map((entry) => getSubagentDefinition(entry)?.serverType)
+      .filter((serverType): serverType is string => typeof serverType === "string"),
+  };
+}
+
+function shadowMcpToolGrant(
+  site: string,
+  legacy: boolean,
+  config: AgentToolsConfig,
+  serverType: string,
+  serverName: string,
+  tool: Pick<McpToolInfo, "name" | "selectionKey">,
+  parseGatewayServerType: (serverType: string) => GatewayServerTarget | null,
+  shadow: ToolGrantShadowContext,
+): void {
+  const serviceName = parseGatewayServerType(serverType)?.serviceName;
+  shadowToolGrant({
+    site,
+    legacy,
+    subject: {
+      toolName: tool.name,
+      serverType,
+      serverName,
+      ...(tool.selectionKey ? { selectionKey: tool.selectionKey } : {}),
+      ...(serviceName ? { serviceName } : {}),
+    },
+    config: canonicalGrantConfig(config),
+    agent: shadow.agent ?? null,
+    log: shadow.log,
+  });
+}
 
 export function normToolKey(value: string): string {
   return value.toLowerCase().replace(/_/g, "-");
@@ -211,10 +254,15 @@ export function isMcpToolAllowedByAgentConfig(
   parseGatewayServerType: (serverType: string) => GatewayServerTarget | null,
   /** Whether the connector marks this tool a write — only used by the open-palette fallback below. */
   isWriteTool?: boolean,
+  shadow?: ToolGrantShadowContext,
 ): boolean {
   if (!config) return true;
   const tool = typeof toolNameOrInfo === "string" ? { name: toolNameOrInfo } : toolNameOrInfo;
-  if (isMcpToolAllowedByAgentAllowSet(buildAgentToolAllowSet(config), serverType, serverName, tool, parseGatewayServerType)) {
+  const granted = isMcpToolAllowedByAgentAllowSet(buildAgentToolAllowSet(config), serverType, serverName, tool, parseGatewayServerType);
+  if (shadow) {
+    shadowMcpToolGrant("claw-auth:call-gate", granted, config, serverType, serverName, tool, parseGatewayServerType, shadow);
+  }
+  if (granted) {
     return true;
   }
   // Open palette is checked last so it never overrides an explicit grant —
@@ -306,11 +354,21 @@ export function filterMcpServerToolsForAgentConfig(
   subagentRefs?: SubagentToolRefs[],
   /** Out-param: names of custom subagents whose references kept tools alive on this server. */
   retainedForSubagents?: Set<string>,
+  shadow?: ToolGrantShadowContext,
 ): McpServerTools | null {
   if (!config) return serverTools;
   if (shouldBypassMcpToolAgentFilter(serverTools.serverType)) return serverTools;
   const allow = buildAgentToolAllowSet(config);
-  if (isMcpServerAllowedByAgentAllowSet(allow, serverTools.serverType, serverTools.serverName, parseGatewayServerType)) {
+  const serverAllowed = isMcpServerAllowedByAgentAllowSet(allow, serverTools.serverType, serverTools.serverName, parseGatewayServerType);
+  if (shadow) {
+    for (const tool of serverTools.tools) {
+      const granted =
+        serverAllowed ||
+        isMcpToolAllowedByAgentAllowSet(allow, serverTools.serverType, serverTools.serverName, tool, parseGatewayServerType);
+      shadowMcpToolGrant("claw-auth:listing", granted, config, serverTools.serverType, serverTools.serverName, tool, parseGatewayServerType, shadow);
+    }
+  }
+  if (serverAllowed) {
     return serverTools;
   }
   const palette = openPaletteModeFromTools(config);

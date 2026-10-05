@@ -21,14 +21,19 @@
  * instead of handing the model an absence it will confabulate a cause for.
  */
 import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
+import { createLogger } from "./logger.js";
 import {
   findSubagentDefinitionForServer,
   openPaletteAdmits,
   openPaletteModeFromTools,
+  shadowToolGrant,
+  toolGrantSubjectFromRuntimeTool,
   type AgentToolsConfig,
   type SubagentDefinition,
 } from "xyne-claw-shared";
 import type { McpToolGroup } from "./mcp.js";
+
+const grantLog = createLogger("tool-grant");
 
 /** A listed (or failed) tool server, wrapper-resolved. */
 export interface ResolvedServer {
@@ -84,11 +89,15 @@ function extractRuntimeToolName(name: string): string {
  * (five conventions — bare, suffix, prefixed-config, normalized, selectionKey).
  * Load-bearing for existing agent configs; do not "simplify".
  */
-export function matchesDirectPick(tool: ToolDefinition, allowedDirect: readonly string[]): boolean {
+export function matchesDirectPick(
+  tool: ToolDefinition,
+  allowedDirect: readonly string[],
+  shadow?: { site?: string; agent?: string | null },
+): boolean {
   const norm = (s: string): string => s.toLowerCase().replace(/_/g, "-");
   const toolSelectionKey = (tool as { selectionKey?: string }).selectionKey;
   const serverToolKey = (tool as { serverToolKey?: string }).serverToolKey;
-  return allowedDirect.some(
+  const matched = allowedDirect.some(
     (d) =>
       tool.name === d ||
       tool.name.endsWith(d) ||
@@ -97,6 +106,15 @@ export function matchesDirectPick(tool: ToolDefinition, allowedDirect: readonly 
       (toolSelectionKey ? d === toolSelectionKey : false) ||
       (serverToolKey ? d === serverToolKey : false),
   );
+  shadowToolGrant({
+    site: shadow?.site ?? "claw:matchesDirectPick",
+    legacy: matched,
+    subject: toolGrantSubjectFromRuntimeTool(tool as Parameters<typeof toolGrantSubjectFromRuntimeTool>[0]),
+    config: { direct: allowedDirect },
+    agent: shadow?.agent ?? null,
+    log: (message) => grantLog.info(message),
+  });
+  return matched;
 }
 
 /**

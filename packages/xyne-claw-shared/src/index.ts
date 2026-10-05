@@ -12,6 +12,19 @@ export { parseAgentPrivacy, isAgentInvocableBy, normalizeAgentPrivacy, DEFAULT_A
 export { PRESENTATION_TOOL_SOURCES, PRESENTATION_CATALOG_SOURCE, isPresentationToolSource } from "./tools/presentation.js";
 export { classifyToolRisk, riskAtOrBelow, TOOL_RISK_LADDER, type ToolRiskLevel } from "./tools/tool-risk.js";
 export { openPaletteMode, openPaletteModeFromTools, openPaletteAdmits, type OpenPaletteMode } from "./tools/open-palette.js";
+export {
+  normalizeToolGrantKey,
+  parseToolGrantEntry,
+  resolveToolGrant,
+  shadowToolGrant,
+  toolGrantShadowEnabled,
+  toolGrantSubjectFromRuntimeTool,
+  resetToolGrantShadowForTests,
+  type ToolGrantConfig,
+  type ToolGrantSubject,
+  type ToolGrantReason,
+  type ToolGrantResult,
+} from "./tools/tool-grant.js";
 export { getSandboxSession, probeSession, cleanupSdlcSandboxCredentialsForContext, buildSandboxStoreKey, sandboxConversationIdFromMeta, sandboxContentType, REPO_CONFIGS, SBX_GIT, type RepoSetupConfig, type SetupStep } from "./tools/sandbox/index.js";
 export type { Citation, CitationIconKey } from "./types/citation.js";
 export { citationIconUrl, citationIconKey, iconUrlForKey, toolIconKey, CITATION_ICONS } from "./types/citation.js";

@@ -147,6 +147,8 @@ import {
   // Aliased: run.ts declares a local `isReadOnlyJob` const later in the same
   // scope; this shared util is the single-source scheduled/automation check.
   isReadOnlyJob as isScheduledOrAutomationRun,
+  shadowToolGrant,
+  toolGrantSubjectFromRuntimeTool,
   type SetupStep,
 } from "xyne-claw-shared";
 import { SERVER, PATHS, LITELLM, litellmEndpoint, isAllowedCallbackUrl } from "../config.js";
@@ -2281,7 +2283,8 @@ export async function processTask(
       const rawName = extractRuntimeToolName(tool.name);
       return groups.some((group) => group.writeTools.map(String).includes(rawName));
     };
-    const selectedAsDirect = (tool: ToolDefinition, allowedDirect: string[]): boolean => matchesDirectPick(tool, allowedDirect);
+    const selectedAsDirect = (tool: ToolDefinition, allowedDirect: string[]): boolean =>
+      matchesDirectPick(tool, allowedDirect, { site: "claw:applyAgentToolFilter", agent: agentSlug ?? null });
     const applyAgentToolFilter = (
       tools: ToolDefinition[],
       cfg: ReturnType<typeof parseToolsConfig>,
@@ -2754,6 +2757,14 @@ export async function processTask(
           // can stay in claw-auth (/mcp/call) while the picker shows it as a
           // System Tool. See mcp/adapters/webfetch.ts in xyne-claw-auth.
           const isCustomPick = toolSelectionKey ? allowedCustom.has(toolSelectionKey) : false;
+          shadowToolGrant({
+            site: "claw:grantedByConfig",
+            legacy: isDirectPick || isGatewayPick || isCustomPick,
+            subject: toolGrantSubjectFromRuntimeTool(t as Parameters<typeof toolGrantSubjectFromRuntimeTool>[0]),
+            config: { direct: allowedDirect, custom: [...allowedCustom], gateway: [...allowedGatewayServices] },
+            agent: agentSlug ?? null,
+            log: (message) => clog.info(message),
+          });
           return isDirectPick || isGatewayPick || isCustomPick;
         }
         if (customToolDefs.some((c) => c.name === t.name)) {
