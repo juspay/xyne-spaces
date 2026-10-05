@@ -1,3 +1,11 @@
+## [1.455.0](https://github.com/juspay/xyne-spaces/compare/v1.454.3...v1.455.0) (2026-10-05)
+
+
+### Features
+
+* Add developer tab to Agent Hub ([#2566](https://github.com/juspay/xyne-spaces/issues/2566)) ([9ab46f5](https://github.com/juspay/xyne-spaces/commit/9ab46f5eb21845e472fe9a874b23c5e8274097bf))
+* agent-no-host-control ([#2233](https://github.com/juspay/xyne-spaces/issues/2233)) ([a52afe1](https://github.com/juspay/xyne-spaces/commit/a52afe14db5a47f50f6eeee55fecd14648a93581))
+
 ## [1.454.3](https://github.com/juspay/xyne-spaces/compare/v1.454.2...v1.454.3) (2026-10-05)
 
 
