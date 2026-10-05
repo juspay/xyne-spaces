@@ -4,7 +4,7 @@ import cors from 'cors';
 import helmet from 'helmet';
 import compression from 'compression';
 import cookieParser from 'cookie-parser';
-import { webhookLimiter } from '@/middleware/rateLimiters';
+import { ttsLimiter, webhookLimiter } from '@/middleware/rateLimiters';
 import morgan from 'morgan';
 
 import { config } from '@/config/env';
@@ -542,7 +542,7 @@ export class App {
     this.app.use('/api/calendar/sync', authMiddleware.authenticate, calendarSyncRoutes); // Calendar manual sync
     this.app.use('/api/calendar/watch', authMiddleware.authenticate, calendarWatchRoutes); // Calendar watch setup
     this.app.use('/api/voice-input', authMiddleware.authenticate, voiceInputRoutes); // Low-latency chat voice input
-    this.app.use('/api/tts', authMiddleware.authenticate, ttsRoutes);
+    this.app.use('/api/tts', authMiddleware.authenticate, ttsLimiter, ttsRoutes);
 
     // App routes
     this.app.use('/api/apps', appRoutes);
