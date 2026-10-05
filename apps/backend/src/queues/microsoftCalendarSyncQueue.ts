@@ -35,7 +35,6 @@ import {
   MAX_CALENDAR_EVENTS_PER_SYNC,
 } from '@/services/calendarSyncConfig';
 import { calendarSyncErrorMessage, isPermanentCalendarAuthError } from './calendarSyncErrorUtils';
-import { withCalendarSyncLock } from './calendarSyncLock';
 
 const TAG = '[CALENDAR_SYNC][MICROSOFT][QUEUE]';
 
@@ -345,24 +344,22 @@ class MicrosoftCalendarSyncQueue {
     const queue = await this.ensureQueue();
     if (this.processorRegistered) return;
 
-    const runManualSync = async (job: Bull.Job): Promise<void> => {
+    queue.process('manual-sync', async (job) => {
       const sourceId = await resolveSourceId(job.data as CalendarSyncJobData);
       try {
-        await withCalendarSyncLock('microsoft', sourceId, () => performManualSync(sourceId));
+        await performManualSync(sourceId);
       } catch (err) {
         await deactivateSourceOnPermanentAuthError(sourceId, err);
         throw err;
       }
-    };
+    });
 
-    const runIncrementalSync = async (job: Bull.Job): Promise<void> => {
+    queue.process('incremental-sync', async (job) => {
       const jobData = job.data as CalendarSyncJobData;
       const sourceId = await resolveSourceId(jobData);
       let continuation: MicrosoftIncrementalContinuation | null;
       try {
-        continuation = await withCalendarSyncLock('microsoft', sourceId, () =>
-          performIncrementalSync(sourceId, jobData)
-        );
+        continuation = await performIncrementalSync(sourceId, jobData);
       } catch (err) {
         await deactivateSourceOnPermanentAuthError(sourceId, err);
         throw err;
@@ -379,16 +376,6 @@ class MicrosoftCalendarSyncQueue {
           delay: CALENDAR_INCREMENTAL_CONTINUATION_DELAY_MS,
         });
       }
-    };
-
-    // One job at a time: a single catch-all processor at concurrency 1, so each
-    // job runs to completion before the next is picked. Separate named processors
-    // would each get their own slot and let a manual and an incremental sync overlap.
-    // withCalendarSyncLock extends this across both providers and all replicas.
-    queue.process('*', 1, async (job) => {
-      if (job.name === 'manual-sync') return runManualSync(job);
-      if (job.name === 'incremental-sync') return runIncrementalSync(job);
-      throw new Error(`Unknown Microsoft calendar sync job: ${job.name}`);
     });
 
     queue.on('failed', (job, err) => {
@@ -401,7 +388,7 @@ class MicrosoftCalendarSyncQueue {
     });
 
     this.processorRegistered = true;
-    logger.info(`${TAG} Sync queue processor registered`);
+    logger.info(`${TAG} Sync queue processors registered`);
   }
 
   async enqueueManualSync(sourceId: string): Promise<void> {
