@@ -11,8 +11,9 @@
 import type { MentionLookups } from "./mention-transform.js";
 import {
   getSpacesGroupByAlias,
-  getSpacesUsersByName,
   getSpacesUserByEmail,
+  getSpacesActiveUserById,
+  getSpacesUsersByName,
   getSpacesUsersByHandle,
 } from "./spaces-db.js";
 import { createLogger } from "../logger.js";
@@ -36,6 +37,10 @@ export function buildSpacesMentionLookupsDb(workspaceId?: string): MentionLookup
     byEmail: (email) => getSpacesUserByEmail(email, workspaceId),
     byHandle: (handle) => getSpacesUsersByHandle(handle, workspaceId),
     byGroupAlias: getSpacesGroupByAlias,
+    // `<@userId>` Slack-style tokens carry a primary key — a users-row id
+    // exists in exactly one workspace, so unlike names/emails/handles this
+    // lookup needs no workspace scoping.
+    byId: (id) => getSpacesActiveUserById(id),
   };
 }
 
