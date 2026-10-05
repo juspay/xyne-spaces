@@ -1049,7 +1049,7 @@ export const AssignmentConfigScreen = ({
   };
 
   return (
-    <div className='flex h-full w-full flex-col overflow-hidden bg-background shadow-md md:rounded-2xl'>
+    <div className='flex h-full w-full flex-col overflow-hidden bg-background'>
       {/* Header */}
       <div className='shrink-0'>
         <div className='flex w-full items-center gap-5 px-6 pt-5'>
@@ -1057,7 +1057,7 @@ export const AssignmentConfigScreen = ({
             variant='ghost'
             size='iconSm'
             className='shrink-0 text-muted-foreground hover:text-foreground'
-            onClick={() => void navigate('/user-groups')}
+            onClick={() => void navigate('/organisations/user-groups')}
             aria-label='Back to user groups'
             data-track-category='UserGroups'
             data-track-name='BackToUserGroups'

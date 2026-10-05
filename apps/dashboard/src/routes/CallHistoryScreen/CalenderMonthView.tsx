@@ -19,41 +19,62 @@ import {
 import { usePlatform } from '../../hooks/usePlatform';
 import type { OtherUserCalls } from '../../hooks/useOtherUserCalls';
 
+/** Start – end for a month row, in the calendar's usual h:mm format; start alone without an end. */
+function formatMonthTimeRange(
+  startsAt: string | number | null | undefined,
+  endsAt: string | number | null | undefined,
+): string {
+  const start = formatTime(startsAt);
+  const end = formatTime(endsAt);
+  return start && end ? `${start} - ${end}` : start;
+}
+
 function MonthOtherUserEventRow({
   color,
   title,
   startsAt,
+  endsAt,
+  userName,
   variant = 'cell',
 }: {
   color: string;
   title: string | undefined;
   startsAt: number | undefined;
+  endsAt: number | null;
+  userName: string;
   variant?: 'cell' | 'overflow';
-}) {
+}): ReactElement {
+  // The colour is per person and only known at runtime, so it has to be an inline
+  // style — Tailwind can't generate a class for it.
   if (variant === 'overflow') {
     return (
       <div className='flex items-center gap-2 w-full px-4 py-2'>
-        <div className={`w-0.5 h-4 rounded-full shrink-0 bg-[${color}]`} />
-        <span className='flex-1 min-w-0 truncate text-sm font-medium text-foreground'>
-          {title ?? 'Busy'}
-        </span>
+        <div className='w-0.5 h-8 rounded-full shrink-0' style={{ backgroundColor: color }} />
+        <div className='flex min-w-0 flex-1 flex-col'>
+          <span className='truncate text-sm font-medium text-foreground'>{title ?? 'Busy'}</span>
+          <span className='truncate text-xs text-muted-foreground'>{userName}</span>
+        </div>
         {startsAt && (
           <span className='shrink-0 text-xs text-muted-foreground tabular-nums'>
-            {formatTime(startsAt)}
+            {formatMonthTimeRange(startsAt, endsAt)}
           </span>
         )}
       </div>
     );
   }
   return (
-    <div className='flex items-center gap-1 text-left w-full px-1 py-0.5 rounded'>
-      <div className={`w-0.5 h-3.5 rounded-full shrink-0 bg-[${color}]`} />
-      <span className='truncate flex-1 min-w-0 leading-tight text-foreground text-[12px] font-medium'>
+    <div
+      title={`${userName} · ${title ?? 'Busy'}`}
+      className='flex shrink-0 items-center gap-1 text-left w-full px-1 py-0.5 rounded'
+      style={{ backgroundColor: `${color}1a` }}
+    >
+      <div className='w-0.5 h-3.5 rounded-full shrink-0' style={{ backgroundColor: color }} />
+      <span className='truncate flex-1 min-w-0 leading-tight text-foreground text-xs font-medium'>
         {title ?? 'Busy'}
       </span>
       {startsAt && (
-        <span className='shrink-0 tabular-nums ml-1 text-muted-foreground text-[10px] opacity-70'>
-          {formatTime(startsAt)}
+        <span className='shrink-0 tabular-nums text-muted-foreground text-xs opacity-70 max-sm:hidden'>
+          {formatMonthTimeRange(startsAt, endsAt)}
         </span>
       )}
     </div>
@@ -195,7 +216,12 @@ const CalendarMonthView = ({
             {week.map((day, di) => {
               const isToday = day ? isSameDay(day, today) : false;
               const dayEvents = day ? (eventsByDay.get(day.getDate()) ?? []) : [];
-              const visible = dayEvents.slice(0, MAX_EVENTS_PER_CELL);
+              // My own calls take the cell's few rows first, so other people's slots
+              // can't push them into "+N more".
+              const visible = [
+                ...dayEvents.filter(event => event.kind === 'own'),
+                ...dayEvents.filter(event => event.kind === 'other'),
+              ].slice(0, MAX_EVENTS_PER_CELL);
               const overflow = dayEvents.length - visible.length;
               const dayKey = day ? `${year}-${month}-${day.getDate()}` : null;
 
@@ -241,6 +267,8 @@ const CalendarMonthView = ({
                                 color={event.color}
                                 title={event.slot.title}
                                 startsAt={event.slot.startsAt}
+                                endsAt={event.slot.endsAt}
+                                userName={event.userName}
                               />
                             );
                           }
@@ -329,7 +357,7 @@ const CalendarMonthView = ({
                                           isDeclined && 'line-through',
                                         )}
                                       >
-                                        {formatTime(call.startsAt)}
+                                        {formatMonthTimeRange(call.startsAt, call.endsAt)}
                                       </span>
                                     )}
                                   </div>
@@ -440,7 +468,7 @@ const CalendarMonthView = ({
                                 </div>
 
                                 {/* Event list */}
-                                <div className='flex flex-col pb-3'>
+                                <div className='flex max-h-80 flex-col overflow-y-auto pb-3'>
                                   {dayEvents.map((event, ei) => {
                                     if (event.kind === 'other') {
                                       return (
@@ -449,6 +477,8 @@ const CalendarMonthView = ({
                                           color={event.color}
                                           title={event.slot.title}
                                           startsAt={event.slot.startsAt}
+                                          endsAt={event.slot.endsAt}
+                                          userName={event.userName}
                                           variant='overflow'
                                         />
                                       );
@@ -504,7 +534,7 @@ const CalendarMonthView = ({
                                                     : 'none',
                                                 }}
                                               >
-                                                {formatTime(call.startsAt)}
+                                                {formatMonthTimeRange(call.startsAt, call.endsAt)}
                                               </span>
                                             )}
                                           </button>

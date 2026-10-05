@@ -3,8 +3,6 @@ import { personalizationSyncWorker } from './personalizationSyncWorker';
 import { redisService } from '@/services/redisService';
 import { logger } from '@/utils/logger';
 import { config } from '@/config/env';
-import { runReclusteringFlow } from '@/services/productInsightsPipeline';
-import { db } from '@/database/client';
 import { recapWorker } from './recapWorker';
 import { deskReportWorker } from './deskReportWorker';
 import { instagramTokenRefreshWorker } from './instagramTokenRefreshWorker';
@@ -17,7 +15,6 @@ import { instagramTokenRefreshWorker } from './instagramTokenRefreshWorker';
 export class WorkerScheduler {
     private isRunning = false;
     private personalizationQueue: Bull.Queue | null = null;
-    private productInsightsQueue: Bull.Queue | null = null;
     private recapGenerationQueue: Bull.Queue | null = null;
     private recapCleanupQueue: Bull.Queue | null = null;
     private deskReportGenerationQueue: Bull.Queue | null = null;
@@ -71,32 +68,6 @@ export class WorkerScheduler {
         );
 
         logger.info('[WORKER_SCHEDULER] Personalization sync scheduled via Bull (every 6 hours)');
-
-        // Initialize Product Insights recluster queue
-        this.productInsightsQueue = new Bull('product-insights-recluster', {
-            redis: workerRedisConfig,
-        });
-
-        this.productInsightsQueue.process(async (job) => {
-            logger.info(`[PRODUCT_INSIGHTS] Processing recluster job ${job.id}...`);
-            try {
-                await this.runProductInsightsRecluster();
-                logger.info(`[PRODUCT_INSIGHTS] Recluster job ${job.id} completed successfully`);
-            } catch (error) {
-                logger.error(`[PRODUCT_INSIGHTS] Recluster job ${job.id} failed:`, error);
-                throw error;
-            }
-        });
-
-        await this.productInsightsQueue.add(
-            {},
-            {
-                repeat: { cron: config.productInsights.recluster.cron },
-                jobId: 'product-insights-recluster-repeatable',
-            },
-        );
-
-        logger.info('[WORKER_SCHEDULER] Product insights recluster scheduled via Bull');
 
         // Initialize Recap Generation Queue
         if (config.recapScheduler.enabled) {
@@ -388,9 +359,31 @@ export class WorkerScheduler {
         } else {
             logger.info('[WORKER_SCHEDULER] Instagram token refresh worker is disabled (ENABLE_INSTAGRAM_TOKEN_REFRESH_WORKER=false)');
         }
+        await this.removeRetiredQueues(workerRedisConfig);
 
         this.isRunning = true;
         logger.info('[WORKER_SCHEDULER] All workers started');
+    }
+
+    /**
+     * Queues whose worker was removed. Bull keeps a repeatable job's repeat key
+     * and next delayed job in Redis until something deletes them, so drop the
+     * whole queue once on startup. Safe to repeat: obliterating an empty queue
+     * is a no-op. Remove an entry once every environment has run it.
+     */
+    private async removeRetiredQueues(redis: Bull.QueueOptions['redis']): Promise<void> {
+        const retiredQueueNames = ['product-insights-recluster'];
+        for (const name of retiredQueueNames) {
+            const queue = new Bull(name, { redis });
+            try {
+                await queue.obliterate({ force: true });
+                logger.info(`[WORKER_SCHEDULER] Removed retired queue ${name}`);
+            } catch (error) {
+                logger.error(`[WORKER_SCHEDULER] Failed to remove retired queue ${name}:`, error);
+            } finally {
+                await queue.close();
+            }
+        }
     }
 
 
@@ -408,11 +401,6 @@ export class WorkerScheduler {
         if (this.personalizationQueue) {
             await this.personalizationQueue.close();
             this.personalizationQueue = null;
-        }
-
-        if (this.productInsightsQueue) {
-            await this.productInsightsQueue.close();
-            this.productInsightsQueue = null;
         }
 
         if (this.recapGenerationQueue) {
@@ -442,45 +430,6 @@ export class WorkerScheduler {
 
         this.isRunning = false;
         logger.info('[WORKER_SCHEDULER] Workers stopped');
-    }
-
-    private async runProductInsightsRecluster(): Promise<void> {
-        // TODO(product-insights): Support multiple configured window sizes and run reclustering for each window.
-        const { windowDays } = config.productInsights.recluster;
-        const toTs = Date.now();
-        const fromTs = toTs - windowDays * 24 * 60 * 60 * 1000;
-
-        const projects = await db.project.findMany({ select: { id: true, name: true } });
-        if (projects.length === 0) {
-            logger.warn('[PRODUCT_INSIGHTS] No projects found; skipping recluster');
-            return;
-        }
-
-        logger.info('[PRODUCT_INSIGHTS] Starting recluster run for all projects', {
-            projectCount: projects.length,
-            fromTs,
-            toTs,
-        });
-
-        for (const project of projects) {
-            try {
-                logger.info('[PRODUCT_INSIGHTS] Reclustering project', {
-                    projectId: project.id,
-                    projectName: project.name,
-                });
-                await runReclusteringFlow({
-                    projectId: project.id,
-                    fromTs,
-                    toTs,
-                });
-            } catch (error) {
-                logger.error('[PRODUCT_INSIGHTS] Reclustering failed for project', {
-                    projectId: project.id,
-                    projectName: project.name,
-                    error: error,
-                });
-            }
-        }
     }
 }
 

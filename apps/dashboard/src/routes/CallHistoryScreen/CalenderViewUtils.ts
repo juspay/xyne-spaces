@@ -412,6 +412,7 @@ export function getVisibleMinutesForDay(
 export function computeEventPositions(
   dayCalls: PositionableEvent[],
   referenceDay: Date,
+  maxColumns: number = MAX_OVERLAP_COLUMNS,
 ): Map<string, EventPosition> {
   const result = new Map<string, EventPosition>();
   const valid = dayCalls.filter(c => c.startsAt);
@@ -455,7 +456,7 @@ export function computeEventPositions(
       }
       // If no column was found, create a new one (or double up in the last column if maxed out)
       if (!placed) {
-        if (columns.length < MAX_OVERLAP_COLUMNS) {
+        if (columns.length < maxColumns) {
           columns.push([item]);
         } else {
           columns[columns.length - 1]!.push(item);

@@ -1,5 +1,5 @@
 import { randomUUID } from 'crypto';
-import { createRepositoryTx, createChannelTx, addChannelRepositoriesTx, createArtifactFromClawTx, updateArtifactTitleOrLinksTx, writeArtifactContentTx, moveArtifactFromClawTx, createTrackFolderFromClawTx, createTrackTx } from '@/bypassAcl/transactions/SdlcHubService';
+import { createRepositoryTx, createChannelTx, addChannelRepositoriesTx, createArtifactFromClawTx, updateArtifactTitleOrLinksTx, writeArtifactContentTx, moveArtifactFromClawTx, createTrackFolderFromClawTx, createTrackTx, unlinkContextTx } from '@/bypassAcl/transactions/SdlcHubService';
 
 import { Prisma, PrismaClient } from '@prisma/client';
 import {
@@ -901,7 +901,7 @@ export class SdlcHubService implements SdlcHub {
     );
     const link = await this.prisma.sdlcEntityLink.findFirst({
       where: { id: linkId, channelId: repo.channelId, workspaceId: actor.workspaceId },
-      select: { relationType: true },
+      select: { id: true, relationType: true, targetType: true, targetId: true },
     });
     if (!link) {
       throw new AppError('SDLC relationship not found', 404);
@@ -912,10 +912,8 @@ export class SdlcHubService implements SdlcHub {
     if ((SDLC_STRUCTURAL_RELATIONS as readonly string[]).includes(link.relationType)) {
       throw new AppError('Structural SDLC edges are not deleted through the link API', 400);
     }
-    const result = await this.prisma.sdlcEntityLink.deleteMany({
-      where: { id: linkId, channelId: repo.channelId, workspaceId: actor.workspaceId },
-    });
-    if (result.count === 0) {
+    const removed = await unlinkContextTx(this, actor, repo.channelId, link);
+    if (removed === 0) {
       throw new AppError('SDLC relationship not found', 404);
     }
   }

@@ -98,7 +98,10 @@ import {
   SDLC_TRACK_MEMBERSHIP_RELATION,
   createSdlcLinkSchema,
   entityLinkContextSchema,
+  sdlcIconNameSchema,
 } from '../sdlc.js';
+import { isSdlcTreeItemType } from '../sdlcFolderAncestry.js';
+import { refileSdlcFolderEdges } from './sdlcFolderAncestry.js';
 import { parseFieldOptions, serializeFieldOptions } from '../utils/formFieldOptions.js';
 import {
   validateFieldBranches,
@@ -112,8 +115,8 @@ import {
   MAX_NOTIFICATION_KEYWORD_LENGTH,
   normalizeNotificationKeywords,
 } from '../utils/notificationKeywords.js';
-import { isDeskChannelType, deskTypeForChannelType } from '../utils/channel.js';
-import { MAX_DUPLICATE_SCOPE_FIELDS } from './types.js';
+import { isDeskChannelType, deskTypeForChannelType, serializeDeskAppIds } from '../utils/channel.js';
+import { MAX_DESK_APPS, MAX_DUPLICATE_SCOPE_FIELDS } from './types.js';
 import { DEFAULT_ROLE_NAME_TO_ENUM } from '../utils/roleFrameworkUtils.js';
 import { SUMMARY_PROMPT_MAX_LENGTH } from '../templates/callSummary.js';
 import { z } from 'zod';
@@ -8409,6 +8412,22 @@ export const mutators = defineMutators({
           throw new Error('Structural SDLC edges are not deleted through the link API');
         }
         await tx.mutate.sdlc_entity_links.delete({ id: linkId });
+        // Unfiled from a folder: it leaves the folders it was under, and takes what
+        // is under it along.
+        if (
+          link.relationType === SDLC_CONTAINMENT_RELATION &&
+          isSdlcTreeItemType(link.targetType)
+        ) {
+          await refileSdlcFolderEdges(tx, {
+            channelId,
+            workspaceId: ctx.workspaceId,
+            userId: ctx.userID,
+            timestamp: Date.now(),
+            idSeed: linkId,
+            item: { type: link.targetType, id: link.targetId },
+            parent: null,
+          });
+        }
       },
     ),
 
@@ -8461,6 +8480,45 @@ export const mutators = defineMutators({
         await tx.mutate.sdlc_folders.update({
           id: args.folderId,
           name: args.name,
+          updatedAt: args.timestamp,
+        });
+      },
+    ),
+
+    /** A folder's icon; null goes back to the folder mark. */
+    setSdlcFolderIcon: defineMutator(
+      z.object({
+        folderId: z.string(),
+        channelId: z.string(),
+        // Null goes back to the folder mark.
+        icon: sdlcIconNameSchema.nullable(),
+        timestamp: z.number(),
+      }),
+      async ({ tx, ctx, args }) => {
+        const participant = await tx.run(
+          zql.channel_participants
+            .where('channelId', args.channelId)
+            .where('userId', ctx.userID)
+            .one(),
+        );
+        if (!participant) {
+          throw new Error('Hub membership required');
+        }
+        const placement = await tx.run(
+          zql.sdlc_entity_links
+            .where('channelId', args.channelId)
+            .where('sourceType', 'TRACK')
+            .where('targetType', 'FOLDER')
+            .where('targetId', args.folderId)
+            .where('relationType', SDLC_TRACK_FLAT_RELATION)
+            .one(),
+        );
+        if (!placement) {
+          throw new Error('Folder not found in this hub');
+        }
+        await tx.mutate.sdlc_folders.update({
+          id: args.folderId,
+          icon: args.icon,
           updatedAt: args.timestamp,
         });
       },
@@ -8562,6 +8620,16 @@ export const mutators = defineMutators({
           createdBy: ctx.userID,
           createdAt: args.timestamp,
         });
+        // Its folder edges, and those of everything under it, follow it.
+        await refileSdlcFolderEdges(tx, {
+          channelId: args.channelId,
+          workspaceId: ctx.workspaceId,
+          userId: ctx.userID,
+          timestamp: args.timestamp,
+          idSeed: args.linkId,
+          item: { type: args.itemType, id: args.itemId },
+          parent: { type: args.parentType, id: args.parentId },
+        });
       },
     ),
 
@@ -8645,6 +8713,16 @@ export const mutators = defineMutators({
           relationType: SDLC_TRACK_FLAT_RELATION,
           createdBy: ctx.userID,
           createdAt: args.timestamp,
+        });
+        // Under every folder above it as well, not only the one it is in.
+        await refileSdlcFolderEdges(tx, {
+          channelId: args.channelId,
+          workspaceId: ctx.workspaceId,
+          userId: ctx.userID,
+          timestamp: args.timestamp,
+          idSeed: args.containmentLinkId,
+          item: { type: 'FOLDER', id: args.id },
+          parent: { type: args.parentType, id: args.parentId },
         });
       },
     ),
@@ -8768,6 +8846,16 @@ export const mutators = defineMutators({
           createdBy: ctx.userID,
           createdAt: args.timestamp,
         });
+        // Under every folder above it as well, not only the one it is in.
+        await refileSdlcFolderEdges(tx, {
+          channelId: args.channelId,
+          workspaceId: ctx.workspaceId,
+          userId: ctx.userID,
+          timestamp: args.timestamp,
+          idSeed: args.containmentLinkId,
+          item: { type: args.itemType, id: args.itemId },
+          parent: { type: args.parentType, id: args.parentId },
+        });
       },
     ),
 
@@ -8822,6 +8910,8 @@ export const mutators = defineMutators({
         name: z.string().trim().min(1).max(120).optional(),
         description: z.string().trim().max(2000).nullable().optional(),
         status: sdlcTrackStatusSchema.optional(),
+        // Null goes back to the track mark.
+        icon: sdlcIconNameSchema.nullable().optional(),
         timestamp: z.number(),
       }),
       async ({ tx, ctx, args }) => {
@@ -8854,6 +8944,7 @@ export const mutators = defineMutators({
           ...(args.name !== undefined ? { name: args.name } : {}),
           ...(args.description !== undefined ? { description: args.description } : {}),
           ...(args.status !== undefined ? { status: args.status } : {}),
+          ...(args.icon !== undefined ? { icon: args.icon } : {}),
           updatedAt: args.timestamp,
         });
       },
@@ -10516,6 +10607,9 @@ export const mutators = defineMutators({
         deskReportEnabled: z.boolean().optional(),
         deskReportAgentSlug: z.string().optional().nullable(),
         deskReportRangeDays: z.number().optional(),
+        // Artifact apps shown on this desk, in order (see EmailChannelPreference.deskAppIds).
+        // An empty list clears the column.
+        deskAppIds: z.array(z.string().min(1).max(64)).max(MAX_DESK_APPS).nullable().optional(),
         // Scoped duplicate detection config (see EmailChannelPreference.duplicateScopeConfig)
         duplicateScopeConfig: z
           .object({
@@ -10546,6 +10640,7 @@ export const mutators = defineMutators({
           deskReportEnabled,
           deskReportAgentSlug,
           deskReportRangeDays,
+          deskAppIds,
           duplicateScopeConfig,
         },
       }) => {
@@ -10571,6 +10666,7 @@ export const mutators = defineMutators({
             ...(deskReportEnabled !== undefined ? { deskReportEnabled } : {}),
             ...(deskReportAgentSlug !== undefined ? { deskReportAgentSlug } : {}),
             ...(deskReportRangeDays !== undefined ? { deskReportRangeDays } : {}),
+            ...(deskAppIds !== undefined ? { deskAppIds: serializeDeskAppIds(deskAppIds) } : {}),
             ...(duplicateScopeConfig !== undefined
               ? { duplicateScopeConfig: duplicateScopeConfig == null ? null : JSON.stringify(duplicateScopeConfig) }
               : {}),
@@ -10605,6 +10701,7 @@ export const mutators = defineMutators({
             deskReportEnabled: deskReportEnabled ?? false,
             deskReportAgentSlug: deskReportAgentSlug ?? null,
             deskReportRangeDays: deskReportRangeDays ?? 1,
+            deskAppIds: serializeDeskAppIds(deskAppIds ?? null),
             duplicateScopeConfig: duplicateScopeConfig ? JSON.stringify(duplicateScopeConfig) : null,
           });
         }

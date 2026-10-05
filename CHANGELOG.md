@@ -1,3 +1,84 @@
+## [1.457.1](https://github.com/juspay/xyne-spaces/compare/v1.457.0...v1.457.1) (2026-10-05)
+
+
+### Bug Fixes
+
+* sanitize d2 svg output to prevent stored xss ([#2588](https://github.com/juspay/xyne-spaces/issues/2588)) ([e9ce0e3](https://github.com/juspay/xyne-spaces/commit/e9ce0e37e3e32e5849eca82f8158ac90f648b7b9))
+
+## [1.457.0](https://github.com/juspay/xyne-spaces/compare/v1.456.2...v1.457.0) (2026-10-05)
+
+
+### Features
+
+* redesign the ticket details header ([#2617](https://github.com/juspay/xyne-spaces/issues/2617)) ([881226f](https://github.com/juspay/xyne-spaces/commit/881226fa421414e19789d1b303f2b1bf0e9fa3fe))
+
+## [1.456.2](https://github.com/juspay/xyne-spaces/compare/v1.456.1...v1.456.2) (2026-10-05)
+
+
+### Bug Fixes
+
+* Fix guest user channel creation ACL in /api/channels ([#2621](https://github.com/juspay/xyne-spaces/issues/2621)) ([8285fbd](https://github.com/juspay/xyne-spaces/commit/8285fbd5d48b5c98fe98bc183ac80155d34efd12))
+
+## [1.456.1](https://github.com/juspay/xyne-spaces/compare/v1.456.0...v1.456.1) (2026-10-05)
+
+
+### Bug Fixes
+
+* ask for a reason before requesting delegation to someone else's agent ([#2624](https://github.com/juspay/xyne-spaces/issues/2624)) ([ec3ea93](https://github.com/juspay/xyne-spaces/commit/ec3ea933a14acb04ad31157d4b41923325767641))
+* removed app store channel creation check ([#2620](https://github.com/juspay/xyne-spaces/issues/2620)) ([fd48306](https://github.com/juspay/xyne-spaces/commit/fd483061213bb840ad40608193ae3d15b0643348))
+
+## [1.456.0](https://github.com/juspay/xyne-spaces/compare/v1.455.2...v1.456.0) (2026-10-05)
+
+
+### Features
+
+* Add UX meeting feature for people ([#2618](https://github.com/juspay/xyne-spaces/issues/2618)) ([a79f24c](https://github.com/juspay/xyne-spaces/commit/a79f24c5e09cf7b812620ea9b4b555f96aa043af))
+* Artifact App support in desk channel ([#2557](https://github.com/juspay/xyne-spaces/issues/2557)) ([251d811](https://github.com/juspay/xyne-spaces/commit/251d81198811e9e74357fcc8ae9886b7f2033abc))
+* conversation-flow-features ([#2616](https://github.com/juspay/xyne-spaces/issues/2616)) ([8b2e6b8](https://github.com/juspay/xyne-spaces/commit/8b2e6b8ae21503763b241b28da5b6b8dc9e59580))
+* lower calendar sync batch from 100 to 20 events ([#2236](https://github.com/juspay/xyne-spaces/issues/2236)) ([744800a](https://github.com/juspay/xyne-spaces/commit/744800a5b0d4acadd0c203d33fa63ffc3c926f17))
+
+
+### Bug Fixes
+
+* chaning the super position key name to snake case ([#2614](https://github.com/juspay/xyne-spaces/issues/2614)) ([f7686d8](https://github.com/juspay/xyne-spaces/commit/f7686d85b8ef8e228515f8ee4040756e96e7f7aa))
+* clean UI ([#2437](https://github.com/juspay/xyne-spaces/issues/2437)) ([d06318e](https://github.com/juspay/xyne-spaces/commit/d06318e6fabb0119c25885ffb48081dd27ae0bfd)), closes [#2535](https://github.com/juspay/xyne-spaces/issues/2535)
+
+## [1.455.2](https://github.com/juspay/xyne-spaces/compare/v1.455.1...v1.455.2) (2026-10-05)
+
+
+### Bug Fixes
+
+* whatsapp lease handover ([#2613](https://github.com/juspay/xyne-spaces/issues/2613)) ([6d980cf](https://github.com/juspay/xyne-spaces/commit/6d980cf93f1e9e82bba6e2d66e26db3182d2c93c))
+
+## [1.455.1](https://github.com/juspay/xyne-spaces/compare/v1.455.0...v1.455.1) (2026-10-05)
+
+
+### Bug Fixes
+
+* open sub-ticket indicator for desk, closed, and un-joined parent channels ([#2611](https://github.com/juspay/xyne-spaces/issues/2611)) ([022718b](https://github.com/juspay/xyne-spaces/commit/022718b8bca05fbd86b4f902a61d2e83cfcc03a4))
+
+## [1.455.0](https://github.com/juspay/xyne-spaces/compare/v1.454.3...v1.455.0) (2026-10-05)
+
+
+### Features
+
+* Add developer tab to Agent Hub ([#2566](https://github.com/juspay/xyne-spaces/issues/2566)) ([9ab46f5](https://github.com/juspay/xyne-spaces/commit/9ab46f5eb21845e472fe9a874b23c5e8274097bf))
+* agent-no-host-control ([#2233](https://github.com/juspay/xyne-spaces/issues/2233)) ([a52afe1](https://github.com/juspay/xyne-spaces/commit/a52afe14db5a47f50f6eeee55fecd14648a93581))
+
+## [1.454.3](https://github.com/juspay/xyne-spaces/compare/v1.454.2...v1.454.3) (2026-10-05)
+
+
+### Bug Fixes
+
+* auto assignment in private channel ([#2346](https://github.com/juspay/xyne-spaces/issues/2346)) ([9bdafee](https://github.com/juspay/xyne-spaces/commit/9bdafeed0222e22f39784312a0ec8eaa9451e8fd))
+
+## [1.454.2](https://github.com/juspay/xyne-spaces/compare/v1.454.1...v1.454.2) (2026-10-05)
+
+
+### Bug Fixes
+
+* added indexes to prevent seq scans on workflow_executions, external_messages and users ([#2608](https://github.com/juspay/xyne-spaces/issues/2608)) ([3a77c42](https://github.com/juspay/xyne-spaces/commit/3a77c42221506b7b67f3b13bb09bc906a819ee9a))
+
 ## [1.454.1](https://github.com/juspay/xyne-spaces/compare/v1.454.0...v1.454.1) (2026-10-05)
 
 

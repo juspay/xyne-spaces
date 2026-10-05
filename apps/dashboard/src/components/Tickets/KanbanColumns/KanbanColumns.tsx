@@ -4,6 +4,7 @@ import { useDroppable } from '@dnd-kit/core';
 import { SortableContext, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 import { useVirtualizer } from '@tanstack/react-virtual';
+import { useScrollFade } from '../../../hooks/useScrollFade';
 import type { Ticket, TicketTagMapping, FormEntityValues } from '@xyne/shared';
 import { TicketStatusV2 } from '@xyne/shared';
 
@@ -203,7 +204,9 @@ const VirtualizedStageList: React.FC<{
   onTicketClick,
   slaPolicies,
 }) => {
-  const scrollRef = React.useRef<HTMLDivElement>(null);
+  // Fades at the column's ends while there are more cards past them.
+  const fade = useScrollFade<HTMLDivElement>('y', 40);
+  const scrollRef = fade.node;
   const lastReportedTicketSnapshotRef = React.useRef<string>('');
   const scrollKey = `kanban-scroll-${stageId}`;
   const ticketSnapshotSignature = React.useMemo(
@@ -248,7 +251,12 @@ const VirtualizedStageList: React.FC<{
   const virtualItems = virtualizer.getVirtualItems();
 
   return (
-    <div ref={scrollRef} className='h-full overflow-y-auto pt-3 px-3'>
+    <div
+      ref={fade.ref}
+      onScroll={fade.onScroll}
+      style={fade.style}
+      className='h-full overflow-y-auto pt-3 px-3'
+    >
       <div
         className='relative w-full'
         style={{

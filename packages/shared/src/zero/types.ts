@@ -862,6 +862,12 @@ export enum FormFieldType {
  */
 export const MAX_DUPLICATE_SCOPE_FIELDS = 5;
 
+/**
+ * Max artifact apps on EmailChannelPreference.deskAppIds. Enforced by both Zero
+ * mutators and the desk's app picker; matches the per-bar cap on the other bars.
+ */
+export const MAX_DESK_APPS = 8;
+
 // @ts-ignore TS1294
 export enum FormContextType {
   BOARD = 'BOARD',

@@ -6,7 +6,6 @@ import {
 import { z } from 'zod';
 import { authV2Middleware } from '@/middleware/authV2Middleware';
 import { db } from '@/database/client';
-import { config as appConfig } from '@/config/env';
 import { encrypt } from '@/services/encryptionService';
 import { logger } from '@/utils/logger';
 import { ExternalSourcePlatform } from '../../core/types';
@@ -57,20 +56,6 @@ class AppStoreConnectError extends Error {
     message: string,
   ) {
     super(message);
-  }
-}
-
-/**
- * Nothing ever syncs without the polling worker, and this connect flow is synchronous — so without
- * this check a desk would look fully connected and silently ingest nothing forever.
- */
-function assertSyncWorkerEnabled(): void {
-  if (!appConfig.enableSocialMediaSyncWorker) {
-    throw new AppStoreConnectError(
-      503,
-      'Review syncing is disabled on this deployment (ENABLE_SOCIAL_MEDIA_SYNC_WORKER). ' +
-        'Enable it before connecting an App Store desk, or reviews will never arrive.',
-    );
   }
 }
 
@@ -202,7 +187,6 @@ router.post(
   authV2Middleware.authenticate,
   async (req: Request, res: Response): Promise<void> => {
     try {
-      assertSyncWorkerEnabled();
       const workspaceId = req.user!.workspaceId!;
       const userId = req.user!.id;
       const input = connectSchema.parse(req.body);

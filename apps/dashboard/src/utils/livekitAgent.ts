@@ -27,3 +27,18 @@ export function shouldConfirmTranscriptionAgentLeft(room: Room): boolean {
     isTranscriptionAgentIdentity(participant.identity),
   );
 }
+
+export type TranscriptionDisplayStatus = 'transcribing' | 'connecting' | 'off';
+
+/**
+ * The indicator combines the host's on/off intent with whether the agent is actually
+ * present. `connecting` covers "meant to be on but the agent isn't here yet" (never joined,
+ * or dropped and being redispatched) — it self-heals once the agent (re)joins.
+ */
+export function deriveTranscriptionDisplayStatus(args: {
+  isTranscriptionEnabled: boolean;
+  agentPresent: boolean;
+}): TranscriptionDisplayStatus {
+  if (!args.isTranscriptionEnabled) return 'off';
+  return args.agentPresent ? 'transcribing' : 'connecting';
+}
