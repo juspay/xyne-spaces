@@ -25,6 +25,9 @@ import TicketView from '../components/Tickets/TicketView/TicketView';
 import { BrowserTabsScreen } from './BrowserTabsScreen';
 import { getLastActiveWorkspaceId } from '../machines/authMachine';
 import AgentsScreen from './AgentsScreen/AgentScreen';
+// ClawSettingsScreen and ClawMetricsScreen are also mounted at /ai/settings and
+// /ai/metrics (via AISectionLayout below) — kept even though the standalone
+// /claw-agents module that used to own them is gone.
 import ClawSettingsScreen from './ClawAgentsScreen/ClawSettingsScreen';
 import ClawMetricsScreen from './ClawAgentsScreen/ClawMetricsScreen';
 import { RequireClawAdmin } from './AIScreen/screens/RequireClawAdmin';
@@ -32,7 +35,6 @@ import { RequireOrgManager } from './AIScreen/screens/RequireOrgManager';
 import { KnowledgeBaseV2Layout } from '../components/knowledgeBaseV2/KnowledgeBaseV2Layout';
 import KnowledgeBaseV2Screen from '../components/knowledgeBaseV2/KnowledgeBaseV2Screen';
 import { LegacyKbRedirect } from '../components/knowledgeBaseV2/LegacyKbRedirect';
-import { MemoryScreen } from './MemoryScreen';
 import { FileViewerLayout } from '../components/knowledgeBase/layout/FileViewerLayout';
 import AnalyticsScreen from './AnalyticsScreen/AnalyticsScreen';
 import ProjectsScreen from './ProjectsScreen/ProjectsScreen';
@@ -174,7 +176,6 @@ import { KeyedComposeDmPanel } from '../components/Chat/AddDmForm/ComposeDmPanel
 import ProfileSidebar from '../components/ProfileSidebar/ProfileSidebar';
 import UserGroupSidePanel from '../components/UserGroup/UserGroupSidePanel/UserGroupSidePanel';
 import GlobalCommandMenu from '../components/GlobalCommandMenu/GlobalCommandMenu';
-import ProductInsightsScreen from './ProductInsightsScreen/ProductInsightsScreen';
 import TicketReportsScreen from './TicketReportsScreen/TicketReportsScreen';
 import LaunchScreen from './LaunchScreen/LaunchScreen';
 import { AssignmentConfigWrapper } from '../components/UserGroup/AssignmentConfigScreen';
@@ -191,6 +192,7 @@ import {
 } from '../contexts/AIOnboardingContext';
 import UnreadsInbox from '../components/Chat/UnreadsInbox/UnreadsInbox';
 import { AIOnboardingOverlay } from '../components/AIOnboarding/AIOnboardingOverlay';
+import { AssistantPanelTrigger } from '../components/AIOnboarding/AssistantPanelTrigger';
 import XyneAISidebar from '../components/Chat/XyneAISidebar/XyneAISidebar';
 import {
   XyneCalendarSidebar,
@@ -211,13 +213,26 @@ import { AttachmentCitationPreview } from '../components/FileViewer/AttachmentCi
 import { ThreadCitationModal } from '../components/xyne-desk/ThreadCitationModal/ThreadCitationModal';
 import { TranscriptCitationModal } from '../components/Chat/TranscriptCitationModal';
 import { sharedChatRoutes } from './SharedChatRoutes';
-import { ResourceAccessScreen } from './ResourceAccessScreen/ResourceAccessScreen';
 import { RoleManagementScreen } from './RoleManagementScreen';
 import { TagReviewView } from '../components/tags/TagReview/TagReviewView';
 import { ResourceProtectedRoute } from '../components/Auth/ResourceProtectedRoute';
 import { WorkflowScreen } from './WorkflowScreen';
 import { ToolbarProtectedRoute } from '../components/Auth/ToolbarProtectedRoute';
-import { WorkspaceManagementScreen } from './WorkspaceManagementScreen';
+import {
+  GeneralTab,
+  GuestUsersTab,
+  InvitationsTab,
+  MembersTab,
+  RepositoryCredentialsTab,
+  ToolbarTab,
+} from './WorkspaceManagementScreen';
+import OrganisationsModuleScreen, {
+  LegacyOrganisationsRedirect,
+  OrganisationsIndexRedirect,
+  OrganisationsPage,
+  OrganisationsSectionGuard,
+  legacyWorkspaceTab,
+} from './OrganisationsModule/OrganisationsModuleScreen';
 import OrganisationsScreen from './OrganisationsScreen/OrganisationsScreen';
 import { AcceptInvitation } from './InvitationScreen/AcceptInvitation';
 import NoOrganizationAccessScreen from './NoOrganizationAccessScreen/NoOrganizationAccessScreen';
@@ -235,6 +250,7 @@ import { ShareRecordingHandler } from '../components/Chat/ShareRecordingHandler/
 import { GlobalUploadProgress } from '../components/knowledgeBase/upload/GlobalUploadProgress';
 import JiraMigrationScreen from './JiraMigrationScreen/JiraMigrationScreen';
 import WhatsAppBulkMigrationScreen from './WhatsAppBulkMigrationScreen/WhatsAppBulkMigrationScreen';
+import MigrationsScreen, { MigrationsIndexRedirect } from './MigrationsScreen/MigrationsScreen';
 import { ErrorReportModal } from '../components/ErrorReportModal/ErrorReportModal';
 import { useScreenRecorder } from '../hooks/useScreenRecorder';
 import type { ScreenSource } from '../types/electron';
@@ -548,12 +564,8 @@ const AppRoot = (): ReactElement => {
   // like "/<workspaceId>/ai" or "/<workspaceId>/ai/<sub>". Match that
   // structure rather than a leading "/ai" prefix (which never matches).
   const isOnAIPage = /^\/[^/]+\/ai(\/|$)/.test(location.pathname);
-  // /ai/knowledge is a KB browser (AIKnowledgeScreen), not the full-screen
-  // chat experience the isOnAIPage suppression below exists for — it has no
-  // embedded chat pane of its own, so "Ask AI" there needs the same global
-  // XyneAISidebar drawer /knowledge-base uses, or clicking it does nothing.
-  const isOnAIKnowledgePage = /^\/[^/]+\/ai\/knowledge(\/|$)/.test(location.pathname);
-  const isOnAIChatExperiencePage = isOnAIPage && !isOnAIKnowledgePage;
+  // Only /ai/chat has its own full-screen chat; other /ai pages keep the global XyneAISidebar.
+  const isOnAIChatExperiencePage = /^\/[^/]+\/ai\/chat(\/|$)/.test(location.pathname);
   // Streams turns Ask AI into a column in the stream, so the floating drawer must
   // not also appear — otherwise one trigger produces two chats. Same suppression
   // shape as the /ai page, which has the same "already showing this" problem.
@@ -687,7 +699,6 @@ const AppRoot = (): ReactElement => {
   // global XyneAISidebar must never be open there. Close it on any pathname
   // change that lands inside /ai — this covers both opening it elsewhere and
   // then navigating in, and any code path that tries to open it while here.
-  // /ai/knowledge is exempt — see isOnAIKnowledgePage above.
   useEffect(() => {
     if (!isOnAIChatExperiencePage) return;
     if (xyneAIActor.getSnapshot().matches('open')) {
@@ -776,6 +787,7 @@ const AppRoot = (): ReactElement => {
               <ShareRecordingHandler />
               <AIOnboardingProvider>
                 <AIOnboardingTrigger isOnboarding={isOnboarding} />
+                <AssistantPanelTrigger />
                 <AIOnboardingOverlay />
                 <SlashCommandArtifactSideEffectProvider>
                   {!isInPanelWebview && <SlashCommandArtifactBanner />}
@@ -1119,8 +1131,22 @@ export const router = createBrowserRouter(
                   element: <ArtifactAppHostRoute placement={{ surface: 'toolbar' }} />,
                 },
                 {
+                  // Standalone migration/insights URLs from before these were
+                  // folded into /migrations or removed; bookmarks still land here.
                   path: 'slack-migration',
-                  element: <SlackMigration />,
+                  element: <Navigate to='../migrations/slack' replace />,
+                },
+                {
+                  path: 'jira-migration',
+                  element: <Navigate to='../migrations/jira' replace />,
+                },
+                {
+                  path: 'migration/whatsapp',
+                  element: <Navigate to='../migrations/whatsapp' replace />,
+                },
+                {
+                  path: 'product-insights',
+                  element: <Navigate to='..' replace />,
                 },
                 {
                   path: 'ai',
@@ -1480,14 +1506,6 @@ export const router = createBrowserRouter(
                   ),
                 },
                 {
-                  path: 'product-insights',
-                  element: (
-                    <ResourceProtectedRoute resourceName='PRODUCT-INSIGHTS'>
-                      <ProductInsightsScreen />
-                    </ResourceProtectedRoute>
-                  ),
-                },
-                {
                   path: 'ticket-reports',
                   element: (
                     <ResourceProtectedRoute resourceName='TICKET-REPORTS' minAccess='WRITE'>
@@ -1537,12 +1555,9 @@ export const router = createBrowserRouter(
                   ],
                 },
                 {
+                  // The Context screen was removed; old links land on the workspace home.
                   path: 'memory',
-                  element: (
-                    <ToolbarProtectedRoute path='/memory'>
-                      <MemoryScreen />
-                    </ToolbarProtectedRoute>
-                  ),
+                  element: <Navigate to='..' replace />,
                 },
                 {
                   path: 'analytics',
@@ -1654,15 +1669,7 @@ export const router = createBrowserRouter(
                 },
                 {
                   path: 'user-groups',
-                  element: (
-                    <ResourceProtectedRoute
-                      resourceName='USER-GROUPS'
-                      minAccess='WRITE'
-                      allowUserGroupCreator
-                    >
-                      <UserGroupsScreen />
-                    </ResourceProtectedRoute>
-                  ),
+                  element: <LegacyOrganisationsRedirect section='user-groups' />,
                 },
                 {
                   path: 'listProjects',
@@ -1724,15 +1731,7 @@ export const router = createBrowserRouter(
                 },
                 {
                   path: 'user-groups/:userGroupId/assignment-config',
-                  element: (
-                    <ResourceProtectedRoute
-                      resourceName='USER-GROUPS'
-                      minAccess='WRITE'
-                      allowUserGroupCreator
-                    >
-                      <AssignmentConfigWrapper />
-                    </ResourceProtectedRoute>
-                  ),
+                  element: <LegacyOrganisationsRedirect section='user-groups' />,
                 },
                 {
                   path: 'analytics-dashboard',
@@ -1812,19 +1811,115 @@ export const router = createBrowserRouter(
                 },
                 {
                   path: 'workspace-management',
-                  element: (
-                    <ResourceProtectedRoute resourceName='WORKSPACE'>
-                      <WorkspaceManagementScreen />
-                    </ResourceProtectedRoute>
-                  ),
+                  element: <LegacyOrganisationsRedirect section={legacyWorkspaceTab} />,
                 },
                 {
+                  // One sidebar module for workspace settings, members, user
+                  // groups, roles and organisations — see OrganisationsModule.
                   path: 'organisations',
-                  element: (
-                    <ResourceProtectedRoute resourceName='ORGANIZATIONS'>
-                      <OrganisationsScreen />
-                    </ResourceProtectedRoute>
-                  ),
+                  element: <OrganisationsModuleScreen />,
+                  children: [
+                    { index: true, element: <OrganisationsIndexRedirect /> },
+                    {
+                      path: 'general',
+                      element: (
+                        <OrganisationsSectionGuard section='general'>
+                          <OrganisationsPage>
+                            <GeneralTab isActive />
+                          </OrganisationsPage>
+                        </OrganisationsSectionGuard>
+                      ),
+                    },
+                    {
+                      path: 'members',
+                      element: (
+                        <OrganisationsSectionGuard section='members'>
+                          <OrganisationsPage>
+                            <MembersTab />
+                          </OrganisationsPage>
+                        </OrganisationsSectionGuard>
+                      ),
+                    },
+                    {
+                      path: 'invitations',
+                      element: (
+                        <OrganisationsSectionGuard section='invitations'>
+                          <OrganisationsPage>
+                            <InvitationsTab isActive />
+                          </OrganisationsPage>
+                        </OrganisationsSectionGuard>
+                      ),
+                    },
+                    {
+                      path: 'guests',
+                      element: (
+                        <OrganisationsSectionGuard section='guests'>
+                          <OrganisationsPage>
+                            <GuestUsersTab isActive />
+                          </OrganisationsPage>
+                        </OrganisationsSectionGuard>
+                      ),
+                    },
+                    {
+                      path: 'repository-credentials',
+                      element: (
+                        <OrganisationsSectionGuard section='repository-credentials'>
+                          <OrganisationsPage>
+                            <RepositoryCredentialsTab isActive />
+                          </OrganisationsPage>
+                        </OrganisationsSectionGuard>
+                      ),
+                    },
+                    {
+                      path: 'toolbar',
+                      element: (
+                        <OrganisationsSectionGuard section='toolbar'>
+                          <OrganisationsPage>
+                            <ToolbarTab isActive />
+                          </OrganisationsPage>
+                        </OrganisationsSectionGuard>
+                      ),
+                    },
+                    {
+                      path: 'user-groups',
+                      element: (
+                        <OrganisationsSectionGuard section='user-groups'>
+                          <UserGroupsScreen />
+                        </OrganisationsSectionGuard>
+                      ),
+                    },
+                    {
+                      path: 'user-groups/:userGroupId/assignment-config',
+                      // The inner guard also checks a creator owns *this* group.
+                      element: (
+                        <OrganisationsSectionGuard section='user-groups'>
+                          <ResourceProtectedRoute
+                            resourceName='USER-GROUPS'
+                            minAccess='WRITE'
+                            allowUserGroupCreator
+                          >
+                            <AssignmentConfigWrapper />
+                          </ResourceProtectedRoute>
+                        </OrganisationsSectionGuard>
+                      ),
+                    },
+                    {
+                      path: 'roles',
+                      element: (
+                        <OrganisationsSectionGuard section='roles'>
+                          <RoleManagementScreen />
+                        </OrganisationsSectionGuard>
+                      ),
+                    },
+                    {
+                      path: 'all',
+                      element: (
+                        <OrganisationsSectionGuard section='all'>
+                          <OrganisationsScreen />
+                        </OrganisationsSectionGuard>
+                      ),
+                    },
+                  ],
                 },
                 {
                   path: 'forms',
@@ -1868,33 +1963,17 @@ export const router = createBrowserRouter(
                 },
                 {
                   path: 'resource-access',
-                  element: (
-                    <ResourceProtectedRoute resourceName='USERS'>
-                      <ResourceAccessScreen />
-                    </ResourceProtectedRoute>
-                  ),
+                  element: <LegacyOrganisationsRedirect section='members' />,
                 },
                 {
                   path: 'roles',
-                  element: (
-                    <ResourceProtectedRoute resourceName='ROLES'>
-                      <RoleManagementScreen />
-                    </ResourceProtectedRoute>
-                  ),
+                  element: <LegacyOrganisationsRedirect section='roles' />,
                 },
                 {
                   path: 'tag-review',
                   element: (
                     <ResourceProtectedRoute resourceName='WORKSPACE'>
                       <TagReviewView />
-                    </ResourceProtectedRoute>
-                  ),
-                },
-                {
-                  path: 'jira-migration',
-                  element: (
-                    <ResourceProtectedRoute resourceName='TICKET-MIGRATION'>
-                      <JiraMigrationScreen />
                     </ResourceProtectedRoute>
                   ),
                 },
@@ -1907,12 +1986,38 @@ export const router = createBrowserRouter(
                   ),
                 },
                 {
-                  path: 'migration/whatsapp',
-                  element: (
-                    <ResourceProtectedRoute resourceName='TICKET-MIGRATION'>
-                      <WhatsAppBulkMigrationScreen />
-                    </ResourceProtectedRoute>
-                  ),
+                  // No toolbar guard on the hub itself: Jira/WhatsApp are gated by
+                  // TICKET-MIGRATION, Slack by its own toolbar path, and the index
+                  // redirect 404s when neither is reachable.
+                  path: 'migrations',
+                  element: <MigrationsScreen />,
+                  children: [
+                    { index: true, element: <MigrationsIndexRedirect /> },
+                    {
+                      path: 'jira',
+                      element: (
+                        <ResourceProtectedRoute resourceName='TICKET-MIGRATION'>
+                          <JiraMigrationScreen />
+                        </ResourceProtectedRoute>
+                      ),
+                    },
+                    {
+                      path: 'whatsapp',
+                      element: (
+                        <ResourceProtectedRoute resourceName='TICKET-MIGRATION'>
+                          <WhatsAppBulkMigrationScreen />
+                        </ResourceProtectedRoute>
+                      ),
+                    },
+                    {
+                      path: 'slack',
+                      element: (
+                        <ToolbarProtectedRoute path='/migrations/slack'>
+                          <SlackMigration />
+                        </ToolbarProtectedRoute>
+                      ),
+                    },
+                  ],
                 },
                 {
                   path: 'guide',

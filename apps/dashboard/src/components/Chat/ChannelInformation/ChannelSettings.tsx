@@ -192,7 +192,7 @@ export const ChannelSettings: React.FC<ChannelSettingsProps> = ({
   };
 
   const handleOpenWorkspaceSettings = (): void => {
-    void navigate(`/${context.workspaceId}/workspace-management`);
+    void navigate(`/${context.workspaceId}/organisations/general`);
   };
 
   const handlePolicyChange = (policy: ChannelAddUserPolicy): void => {

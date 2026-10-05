@@ -3,8 +3,8 @@ import { useSyncExternalStore } from 'react';
 /**
  * User preference for on-device intent suggestions (Settings → Developer).
  *
- * Mirrors useClawDashboardVisibility: localStorage + a listener set via
- * useSyncExternalStore, so every consumer re-renders on change.
+ * Backed by localStorage + a listener set via useSyncExternalStore, so every
+ * consumer re-renders on change.
  *
  * Defaults OFF. Not because it is risky — it is local-only, no server call and no
  * cost — but because the first thing it does when enabled is pull a ~23MB model

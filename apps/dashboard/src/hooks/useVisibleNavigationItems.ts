@@ -1,4 +1,5 @@
 import { useMemo } from 'react';
+import { AccessType } from '@xyne/shared';
 import { usePermissions } from './usePermissions';
 import { useAuth } from './useAuth';
 import { useUserGroups } from './useUserGroup';
@@ -40,6 +41,16 @@ export const useVisibleNavigationItems = (): NavigationItem[] => {
       showStreams && !isMobile
         ? visibleItems
         : visibleItems.filter(item => item.path !== '/streams');
-    return withStreams.filter(item => !disabledToolbarPaths.has(item.path));
+    // Migrations with nothing to show: no ticket-migration access and the one
+    // ungated tab (Slack) disabled for this workspace.
+    const migrationsEmpty =
+      disabledToolbarPaths.has('/migrations/slack') &&
+      !permissions.some(
+        p => p.resourceName === 'TICKET-MIGRATION' && p.accessType === AccessType.ADMIN,
+      );
+    return withStreams.filter(
+      item =>
+        !disabledToolbarPaths.has(item.path) && !(item.path === '/migrations' && migrationsEmpty),
+    );
   }, [permissions, canManageOwnUserGroups, showStreams, isMobile, disabledToolbarPaths]);
 };

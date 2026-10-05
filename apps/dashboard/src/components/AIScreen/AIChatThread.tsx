@@ -52,6 +52,9 @@ import type {
 import { buildXyneAIStreamThreadId } from '../../utils/xyneAIStreamThreadId';
 import { cn } from '../../utils/classNames';
 import { AskAiRatingButtons } from './AskAiRatingButtons';
+import { isAssistantMessage } from '../Assistant/turns';
+import { useTranscript } from '../Assistant/useTranscript';
+import type { AssistantActions } from '../Assistant/useAssistantActions';
 import { AIComposer, type AIComposerAttachment, type AIComposerHandle } from './AIComposer';
 import { ReadonlyContextPills } from './ReadonlyContextPills';
 import { type ComposerContext, toStreamOverrides } from './composerContext';
@@ -177,6 +180,7 @@ interface AIChatThreadProps {
    *  it and opens yet another conversation. Clearing it at the source is the
    *  guard that survives a remount. */
   onInitialQueryConsumed?: (() => void) | undefined;
+  assistant?: AssistantActions | undefined;
 }
 
 export interface AIChatThreadHandle {
@@ -825,8 +829,10 @@ function ChatMessageBubble({
   onPendingActionResolved,
   conversationId,
   onFlowActionComplete,
+  readOnly = false,
 }: {
   message: Message;
+  readOnly?: boolean;
   /** FlowUI actions are dispatched against (messageId, conversationId). */
   conversationId?: string | undefined;
   onFlowActionComplete?: (() => void) | undefined;
@@ -1498,7 +1504,7 @@ function ChatMessageBubble({
           )}
 
           {/* Hover actions — on all bot messages */}
-          {!isUser && !message.isStreaming && (
+          {!isUser && !message.isStreaming && !readOnly && (
             <div className='mt-1.5 flex items-center gap-0.5 opacity-0 transition-opacity duration-150 group-hover:opacity-100'>
               <button
                 type='button'
@@ -1623,6 +1629,7 @@ export const AIChatThread = forwardRef<AIChatThreadHandle, AIChatThreadProps>(fu
     onAgentChange,
     onContextChange,
     onInitialQueryConsumed,
+    assistant,
   },
   ref,
 ): ReactElement {
@@ -1815,6 +1822,11 @@ export const AIChatThread = forwardRef<AIChatThreadHandle, AIChatThreadProps>(fu
   const displayMessages = useMemo(
     () => resolveActivePath(messages, branchSelections),
     [messages, branchSelections],
+  );
+  const assistantMessages = assistant?.messages;
+  const { messages: transcriptMessages, serverIndexById } = useTranscript(
+    displayMessages,
+    assistantMessages,
   );
 
   const queryClient = useQueryClient();
@@ -2340,7 +2352,7 @@ export const AIChatThread = forwardRef<AIChatThreadHandle, AIChatThreadProps>(fu
     const tail = tailRef.current;
     if (!tail) return;
     tail.scrollIntoView({ block: 'end', behavior: 'instant' as ScrollBehavior });
-  }, [messages]);
+  }, [messages, assistantMessages]);
 
   const jumpToLatest = useCallback((): void => {
     isAtBottomRef.current = true;
@@ -2658,7 +2670,20 @@ export const AIChatThread = forwardRef<AIChatThreadHandle, AIChatThreadProps>(fu
           >
             <div ref={contentRef} className='mx-auto flex max-w-3xl flex-col'>
               <ConversationToolInvocationsContext.Provider value={conversationToolInvocations}>
-                {displayMessages.map((message, idx) => {
+                {transcriptMessages.map(message => {
+                  if (isAssistantMessage(message.id)) {
+                    return (
+                      <ChatMessageBubble
+                        key={message.id}
+                        message={message}
+                        readOnly
+                        onFollowUpSuggestionClick={label => {
+                          assistant?.openPill(message.id, label);
+                        }}
+                      />
+                    );
+                  }
+                  const idx = serverIndexById.get(message.id) ?? -1;
                   const feedbackValue: FeedbackValue =
                     message.feedback === 1 ? 'LIKE' : message.feedback === 2 ? 'DISLIKE' : null;
                   const botTurnIndex =
@@ -2823,8 +2848,9 @@ export const AIChatThread = forwardRef<AIChatThreadHandle, AIChatThreadProps>(fu
               showAgentSelector={isV2}
               initialExtras={initialExtras}
               onContextChange={onContextChange}
-              pending={isAnyMessageStreaming}
+              pending={isAnyMessageStreaming || (assistant?.isRouting ?? false)}
               onStop={handleStop}
+              assistant={assistant && assistant.actions.length > 0 ? assistant : undefined}
               placeholder='Write a message...'
             />
           </div>
