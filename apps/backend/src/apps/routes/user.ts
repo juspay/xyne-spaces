@@ -7,4 +7,8 @@ const userController = new UserController();
 
 router.get('/info', requirePermission('users:read'), userController.getUserInfo);
 
+// Status of the app's own user — target is always the authenticated app user.
+router.post('/status', requirePermission('users:write'), userController.setStatus);
+router.delete('/status', requirePermission('users:write'), userController.deleteStatus);
+
 export default router;
