@@ -28,8 +28,6 @@ import sandboxRouter from "../routes/sandbox.js";
 import { adminRouter } from "../routes/admin.js";
 import { adminDigitalTwinRouter } from "../routes/admin-digital-twin.js";
 import { organizationsRouter } from "../routes/organizations.js";
-// TEMPORARY — delete after backfill of agents.signingSecret is complete.
-import { adminBackfillSigningSecretsRouter } from "../routes/admin-backfill-signing-secrets.js";
 import { dashboardRouter } from "../routes/dashboard.js";
 import { messagingRouter } from "../surfaces/messaging/routes/index.js";
 import { agentChatRouter, agentChatInternalRouter } from "../routes/agent-chat.js";
@@ -183,8 +181,6 @@ function mountCoreApi(app: Express): void {
   app.use(`${BASE}/organizations`, requireAuth, requireNoAccessToken, organizationsRouter);
   app.use(`${BASE}/admin/digital-twin`, requireAuth, requireNoAccessToken, requireClawAdmin, adminDigitalTwinRouter);
   app.use(`${BASE}/admin`, requireAuth, requireNoAccessToken, adminRouter);
-  // TEMPORARY — delete this mount + the import above + the file after backfill.
-  app.use(`${BASE}/admin`, requireAuth, requireNoAccessToken, adminBackfillSigningSecretsRouter);
   app.use(`${BASE}/dashboard`, requireAuth, requireNoAccessToken, dashboardRouter);
   app.use(`${BASE}/agent-chat`, requireAuth, requireNoAccessToken, agentChatRouter);
   app.use(`${BASE}/artifact-apps`, requireAuth, artifactAppsRouter);

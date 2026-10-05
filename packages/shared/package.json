@@ -7,6 +7,11 @@
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "exports": {
+    "./server/encryption-key-ring": {
+      "types": "./dist/server/encryption-key-ring.d.ts",
+      "import": "./dist/server/encryption-key-ring.js",
+      "default": "./dist/server/encryption-key-ring.js"
+    },
     ".": {
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js",
