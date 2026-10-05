@@ -11,7 +11,7 @@ import {
 } from '../types/workflow-adapter';
 import { triggerRegistry } from '../triggers/trigger-registry';
 import type { TriggerType } from '../types/trigger-types';
-import { AutomationStatus } from '../types/status';
+import { AutomationRunStatus, AutomationStatus, PLAYGROUND_RUN_TAG } from '../types/status';
 import { automationQueue } from '../queue/automation.queue';
 import type { AutomationEvent } from '../types/automation-events';
 import { EMAIL_RECEIVED_EVENT } from '../triggers/email-received.trigger';
@@ -30,10 +30,12 @@ const CANDIDATE_SELECT = {
   workflowType: true,
   context: true,
   metadata: true,
+  status: true,
 } as const;
 
 type WorkflowCandidate = {
   id: string;
+  status: string;
   workspaceId: string;
   workflowType: string | null;
   context: string | null;
@@ -114,6 +116,7 @@ class EventRouter {
     });
 
     let enqueued = 0;
+    let held = 0;
     let preFiltered = 0;
 
     for (const workflow of candidates) {
@@ -152,11 +155,28 @@ class EventRouter {
           __meta: { error: null, chain },
         };
 
+        // Playground capture = the live path minus the enqueue: the run is stored HELD and
+        // waits for a manual Play. Full trigger filters run in the worker at Play time.
+        if (workflow.status === AutomationStatus.PLAYGROUND) {
+          await createAutomationExecutionForEvent({
+            workspaceId,
+            workflowId: workflow.id,
+            workflowType: workflow.workflowType,
+            initialContext,
+            status: AutomationRunStatus.HELD,
+            tag: PLAYGROUND_RUN_TAG,
+          });
+          held += 1;
+          continue;
+        }
+
         const execution = await createAutomationExecutionForEvent({
           workspaceId,
           workflowId: workflow.id,
           workflowType: workflow.workflowType,
           initialContext,
+          status: AutomationRunStatus.PENDING,
+          tag: 'root',
         });
 
         // Priority runs get put near the front of the queue. Normal runs pass no
@@ -168,14 +188,14 @@ class EventRouter {
         enqueued += 1;
       } catch (err) {
         logger.error(
-          `[EVENT-ROUTER] failed to enqueue automation=${workflow.id} event=${eventType}:`,
+          `[EVENT-ROUTER] failed to route automation=${workflow.id} event=${eventType}:`,
           err,
         );
       }
     }
 
     logger.info(
-      `[EVENT-ROUTER] event=${eventType} workspaceId=${workspaceId} candidates=${candidates.length} preFiltered=${preFiltered} enqueued=${enqueued} chain=${chain.join(' → ') || '∅'}`,
+      `[EVENT-ROUTER] event=${eventType} workspaceId=${workspaceId} candidates=${candidates.length} preFiltered=${preFiltered} enqueued=${enqueued} held=${held} chain=${chain.join(' → ') || '∅'}`,
     );
   }
 
@@ -232,23 +252,23 @@ class EventRouter {
       status: AutomationStatus.ACTIVE,
       workspaceId,
     };
+    // General automations also capture while recording; desk auto-label rules never record.
+    const automationsWhere = {
+      ...baseWhere,
+      workflowType: AUTOMATION_WORKFLOW_TYPE,
+      status: { in: [AutomationStatus.ACTIVE, AutomationStatus.PLAYGROUND] },
+    };
 
     if (event.type !== EMAIL_RECEIVED_EVENT || typeof event.payload.channelId !== 'string') {
       return db.workflow.findMany({
-        where: {
-          workflowType: AUTOMATION_WORKFLOW_TYPE,
-          ...baseWhere,
-        },
+        where: automationsWhere,
         select: CANDIDATE_SELECT,
       });
     }
 
     const [generalAutomations, deskRules] = await Promise.all([
       db.workflow.findMany({
-        where: {
-          workflowType: AUTOMATION_WORKFLOW_TYPE,
-          ...baseWhere,
-        },
+        where: automationsWhere,
         select: CANDIDATE_SELECT,
       }),
       db.deskAutoLabelRuleReference.findMany({
