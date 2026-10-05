@@ -1,3 +1,11 @@
+## [1.456.1](https://github.com/juspay/xyne-spaces/compare/v1.456.0...v1.456.1) (2026-10-05)
+
+
+### Bug Fixes
+
+* ask for a reason before requesting delegation to someone else's agent ([#2624](https://github.com/juspay/xyne-spaces/issues/2624)) ([ec3ea93](https://github.com/juspay/xyne-spaces/commit/ec3ea933a14acb04ad31157d4b41923325767641))
+* removed app store channel creation check ([#2620](https://github.com/juspay/xyne-spaces/issues/2620)) ([fd48306](https://github.com/juspay/xyne-spaces/commit/fd483061213bb840ad40608193ae3d15b0643348))
+
 ## [1.456.0](https://github.com/juspay/xyne-spaces/compare/v1.455.2...v1.456.0) (2026-10-05)
 
 
