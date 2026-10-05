@@ -13,6 +13,8 @@ import HomeScreen from './HomeScreen';
 import SlackMigration from '../pages/SlackMigration';
 import AuthScreen from './AuthScreen/AuthScreen';
 import CommunityWorkspaceSelectionRoute from './AuthScreen/CommunityWorkspaceSelectionRoute';
+import CommunityJoinRoute from './AuthScreen/CommunityJoinRoute';
+import EnterpriseJoinRoute from './AuthScreen/EnterpriseJoinRoute';
 import TermsOfServiceScreen from './TermsOfServiceScreen/TermsOfServiceScreen';
 import PrivacyPolicyScreen from './PrivacyPolicyScreen/PrivacyPolicyScreen';
 import WorkspaceSelectionScreen from './WorkspaceSelectionScreen';
@@ -2174,6 +2176,14 @@ export const router = createBrowserRouter(
         {
           path: '/community',
           element: <CommunityWorkspaceSelectionRoute />,
+        },
+        {
+          path: '/community/join',
+          element: <CommunityJoinRoute />,
+        },
+        {
+          path: '/enterprise/join',
+          element: <EnterpriseJoinRoute />,
         },
         {
           path: '/auth',
