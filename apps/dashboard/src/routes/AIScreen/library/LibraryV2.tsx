@@ -119,7 +119,10 @@ const LibraryV2 = (): ReactElement => {
             <Button
               type='button'
               variant='ink'
-              className='shrink-0'
+              size='sm'
+              // Figma "Button Container" (1338:41812): ink colour, 8px corners,
+              // 8px padding, medium label, no shadow.
+              className='shrink-0 rounded-lg px-2 font-medium leading-[1.2] shadow-none has-[>svg]:px-2'
               onClick={() => void navigate(prefixWs(activeTab.create.path))}
               data-track-category='Claw Agents'
               data-track-name={activeTab.create.label}
