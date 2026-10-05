@@ -343,13 +343,6 @@ router.get('/oauth/google/callback', async (req: Request, res: Response) => {
     // uses only this server-validated value, never the query params.
     peekedState = await contactsOAuthStateService.peek(stateParam);
 
-    if (req.query.error) {
-      // Cancelled at the provider. Nothing sensitive runs here; the one-time
-      // state simply expires via its TTL.
-      redirectWithError(req, res, peekedState, 'authorization_denied');
-      return;
-    }
-
     if (!peekedState) {
       redirectWithError(req, res, null, 'missing_or_expired_state');
       return;
@@ -361,8 +354,9 @@ router.get('/oauth/google/callback', async (req: Request, res: Response) => {
       return;
     }
 
-    // A missing code fails the token exchange and lands in the catch below —
-    // user input must not gate the state handling above.
+    // A cancelled consent (error=..., no code) and a missing code both fail the
+    // token exchange and land in the catch below, which maps the reason — no
+    // user input gates the state handling above.
     const code = typeof req.query.code === 'string' ? req.query.code : '';
     const user = await validateBoundUser(state);
     const client = createGoogleClient(req);
@@ -404,8 +398,12 @@ router.get('/oauth/google/callback', async (req: Request, res: Response) => {
     });
     redirectWithResult(req, res, state, new URLSearchParams({ contactsImport: 'success' }));
   } catch (error) {
+    // A cancelled consent arrives as error=... with no code, so the token
+    // exchange above threw — map it back to the cancel reason. The reason pick
+    // is data (a string), never a gate in front of the security checks.
+    const reason = req.query.error ? 'authorization_denied' : 'google_contacts_oauth_failed';
     logger.error('[USER_CONTACTS][GOOGLE][OAUTH] Callback failed', error);
-    redirectWithError(req, res, peekedState, 'google_contacts_oauth_failed');
+    redirectWithError(req, res, peekedState, reason);
   }
 });
 
@@ -418,13 +416,6 @@ router.get('/oauth/microsoft/callback', async (req: Request, res: Response) => {
     // uses only this server-validated value, never the query params.
     peekedState = await contactsOAuthStateService.peek(stateParam);
 
-    if (req.query.error) {
-      // Cancelled at the provider. Nothing sensitive runs here; the one-time
-      // state simply expires via its TTL.
-      redirectWithError(req, res, peekedState, 'authorization_denied');
-      return;
-    }
-
     if (!peekedState) {
       redirectWithError(req, res, null, 'missing_or_expired_state');
       return;
@@ -436,8 +427,9 @@ router.get('/oauth/microsoft/callback', async (req: Request, res: Response) => {
       return;
     }
 
-    // A missing code fails the token exchange and lands in the catch below —
-    // user input must not gate the state handling above.
+    // A cancelled consent (error=..., no code) and a missing code both fail the
+    // token exchange and land in the catch below, which maps the reason — no
+    // user input gates the state handling above.
     const code = typeof req.query.code === 'string' ? req.query.code : '';
     const user = await validateBoundUser(state);
     const microsoftClient = createMicrosoftClient();
@@ -480,8 +472,11 @@ router.get('/oauth/microsoft/callback', async (req: Request, res: Response) => {
     });
     redirectWithResult(req, res, state, new URLSearchParams({ contactsImport: 'success' }));
   } catch (error) {
+    // Same as the Google catch: a cancelled consent (error=..., no code) failed
+    // the token exchange — map it back to the cancel reason.
+    const reason = req.query.error ? 'authorization_denied' : 'microsoft_contacts_oauth_failed';
     logger.error('[USER_CONTACTS][MICROSOFT][OAUTH] Callback failed', error);
-    redirectWithError(req, res, peekedState, 'microsoft_contacts_oauth_failed');
+    redirectWithError(req, res, peekedState, reason);
   }
 });
 
