@@ -3,6 +3,7 @@
 // webhook services).
 
 import { config } from '@/config/env';
+import { sanitizeForLog } from '@/git-providers/github/apis';
 import { logger } from '@/utils/logger';
 
 /** The PR card statuses a webhook can drive (subset of PrStatus in xyne-claw-shared/flow/pr-flow.ts). */
@@ -42,12 +43,12 @@ export function forwardPrCardStatus(ev: PrCardStatusEvent, logPrefix: string): v
   })
     .then((res) => {
       if (!res.ok) {
-        logger.warn(`${logPrefix} pr-card forward non-OK (HTTP ${res.status}) for PR ${ev.prUrl}`);
+        logger.warn(`${logPrefix} pr-card forward non-OK (HTTP ${res.status}) for PR ${sanitizeForLog(ev.prUrl)}`);
       }
     })
     .catch((err) => {
       logger.warn(
-        `${logPrefix} pr-card forward failed for PR ${ev.prUrl}: ${err instanceof Error ? err.message : String(err)}`,
+        `${logPrefix} pr-card forward failed for PR ${sanitizeForLog(ev.prUrl)}: ${err instanceof Error ? err.message : String(err)}`,
       );
     });
 }
