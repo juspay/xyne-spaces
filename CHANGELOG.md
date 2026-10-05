@@ -1,3 +1,10 @@
+## [1.454.2](https://github.com/juspay/xyne-spaces/compare/v1.454.1...v1.454.2) (2026-10-05)
+
+
+### Bug Fixes
+
+* added indexes to prevent seq scans on workflow_executions, external_messages and users ([#2608](https://github.com/juspay/xyne-spaces/issues/2608)) ([3a77c42](https://github.com/juspay/xyne-spaces/commit/3a77c42221506b7b67f3b13bb09bc906a819ee9a))
+
 ## [1.454.1](https://github.com/juspay/xyne-spaces/compare/v1.454.0...v1.454.1) (2026-10-05)
 
 
