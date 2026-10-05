@@ -35,6 +35,7 @@ describe("agent draft events", () => {
       frameDraftEvent({
         event: "schedule",
         op: "set",
+        kind: "repeat",
         cron: "0 9 * * 1-5",
         timezone: "Asia/Kolkata",
         label: "Weekdays at 9:00 AM",
