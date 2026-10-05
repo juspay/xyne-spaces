@@ -75,6 +75,9 @@ const LID_MAP_TTL_MS = 10 * 60 * 1_000;
 /** WhatsApp rotates the QR every ~20s. Ten of them is several minutes of
  *  nobody scanning, which means nobody is going to. */
 const MAX_QR_ROUNDS = 10;
+/** Reconnects allowed after a bad-session close before giving up. Counted by
+ *  handle.attempt, which resets whenever a connection opens. */
+const MAX_BAD_SESSION_RETRIES = 3;
 /** How often the watchdog looks. */
 const WATCHDOG_INTERVAL_MS = 30_000;
 /** Silence long enough to be worth probing. A real account can legitimately
@@ -290,12 +293,29 @@ function channelConfigOf(ctx: AccountRuntimeContext): WhatsAppChannelConfig {
   return parsed.success ? parsed.data : whatsappChannelConfigSchema.parse({});
 }
 
+/** The WhatsApp Web version, fetched once per process. Asking GitHub on every
+ *  connect puts a network call with no timeout in front of each reconnect. */
+let latestVersion: Promise<[number, number, number] | undefined> | null = null;
+
+function baileysVersion(): Promise<[number, number, number] | undefined> {
+  latestVersion ??= fetchLatestBaileysVersion({ timeout: 5_000 })
+    .then((result) => {
+      if (result.error) latestVersion = null;
+      return result.error ? undefined : result.version;
+    })
+    .catch(() => {
+      latestVersion = null;
+      return undefined;
+    });
+  return latestVersion;
+}
+
 async function connect(handle: WhatsAppHandle): Promise<void> {
   const { ctx } = handle;
   if (handle.stopped) return;
   const cfg = channelConfigOf(ctx);
   const { state, saveCreds } = await makeStoredAuthState(ctx.authState);
-  const { version } = await fetchLatestBaileysVersion().catch(() => ({ version: undefined as [number, number, number] | undefined }));
+  const version = await baileysVersion();
 
   const sock = makeWASocket({
     ...(version ? { version } : {}),
@@ -352,6 +372,18 @@ async function connect(handle: WhatsAppHandle): Promise<void> {
         handle.sock = null;
         stopWatchdog(handle);
         if (handle.stopped) return;
+        // A stream error carries WhatsApp's own node (which ack it rejected,
+        // and why); the message alone says only "Stream Errored (ack)".
+        const node = (update.lastDisconnect?.error as { data?: unknown } | undefined)?.data;
+        if (node && reason.startsWith("Stream Errored")) {
+          let detail: string;
+          try {
+            detail = JSON.stringify(node).slice(0, 1000);
+          } catch {
+            detail = "(unserializable)";
+          }
+          ctx.logger.warn(`[whatsapp] stream error detail account=${ctx.account.id} code=${code ?? "none"}: ${detail}`);
+        }
         if (code === DisconnectReason.loggedOut || code === DisconnectReason.forbidden) {
           await ctx.authState.clear().catch(() => undefined);
           await ctx.setState({ connState: "logged_out", loginArtifact: null });
@@ -375,9 +407,11 @@ async function connect(handle: WhatsAppHandle): Promise<void> {
             lastDisconnect: { ...(code !== undefined ? { code } : {}), reason: reason.slice(0, 200), at: new Date().toISOString() },
           });
         }
-        // Credentials the server rejects do not heal by being retried: every
-        // reconnect re-presents the same broken session.
-        if (code === DisconnectReason.badSession) {
+        // Baileys reports ANY stream error it has no code for as badSession —
+        // "Stream Errored (ack)" included, which a reconnect clears. Treating
+        // that as terminal left working numbers stopped until someone noticed.
+        // Only a session that keeps failing without ever opening is broken.
+        if (code === DisconnectReason.badSession && handle.attempt >= MAX_BAD_SESSION_RETRIES) {
           ctx.logger.warn(`[whatsapp] bad session account=${ctx.account.id}; not reconnecting — re-link the number`);
           ctx.onClosed({ loggedOut: false, stop: true, ...(code !== undefined ? { code } : {}), reason });
           return;
