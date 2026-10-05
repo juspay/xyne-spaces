@@ -161,7 +161,7 @@ import {
   assertFieldIsCurrentlyActive,
 } from './formsMutatorHelpers';
 import { v4 as uuidv4 } from 'uuid';
-import { extractAllMentions } from '@/utils/mentionParser';
+import { extractAllMentions, keepMentionsWithin } from '@/utils/mentionParser';
 import { detectVcsProvider } from '@/utils/repoUrlParser';
 import { getStorageService } from '@/services/storage';
 import { repositories } from '@/database/repositories';
@@ -531,6 +531,18 @@ async function resolveCollectionPermissionRole(
     if (!role || COLLECTION_ROLE_RANK[candidate] > COLLECTION_ROLE_RANK[role]) role = candidate;
   }
   return role;
+}
+
+/** Guests may only mention people in the channel (see keepMentionsWithin). */
+async function guestSafeContent(
+  tx: Transaction<Schema>,
+  role: string | undefined,
+  channelId: string,
+  content: string,
+): Promise<string> {
+  if (role !== WorkspaceRole.GUEST || !content.includes('data-mention-type')) return content;
+  const participants = await tx.run(zql.channel_participants.where('channelId', channelId));
+  return keepMentionsWithin(content, new Set(participants.map(participant => participant.userId)));
 }
 
 async function resolveMentionParticipantUserIds(
@@ -2638,6 +2650,7 @@ export function createMutators(
           if (content === '') {
             throw new Error('Message content or files are required to start a conversation');
           }
+          content = await guestSafeContent(tx, authData.role, channelId, content);
 
           const user = await tx.run(zql.users.where('id', authData.sub).one());
           const now = timestamp;
@@ -3492,6 +3505,7 @@ export function createMutators(
           if (!conversation) {
             throw new Error("Message doesn't belong to a conversation");
           }
+          content = await guestSafeContent(tx, authData.role, conversation.channelId, content);
           const [channel, participant, channelDrafts] = await Promise.all([
             tx.run(zql.channels.where('id', conversation.channelId).related('project').one()),
             tx.run(zql.channel_participants
@@ -3938,6 +3952,10 @@ export function createMutators(
             if (message.msgType === MessageType.BOT) {
               throw new Error('BOT Messages cannot be edited');
             }
+          }
+          if (content !== undefined && authData.role === WorkspaceRole.GUEST) {
+            const edited = await tx.run(zql.conversations.where('conversationId', message.conversationId).one());
+            content = await guestSafeContent(tx, authData.role, edited?.channelId ?? '', content);
           }
 
           // Only process mention changes if content is being updated

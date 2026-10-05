@@ -1,4 +1,5 @@
 import { Request, Response } from 'express';
+import { keepMentionsWithin } from '@/utils/mentionParser';
 import {
   ConversationRepository,
   CreateConversationInput,
@@ -16,7 +17,7 @@ import { websocketService } from '../services/websocketService';
 import { redisService } from '../services/redisService';
 import { uploadFiles, UploadedFileResult } from '../services/fileUploadService';
 import { Message } from '@prisma/client';
-import { MessageType, AttachmentEntityType, ChannelScopeType, ChannelRole } from '@xyne/shared';
+import { MessageType, AttachmentEntityType, ChannelScopeType, ChannelRole, WorkspaceRole } from '@xyne/shared';
 import { BotCommandParser, botProcessor, BotMessageMetadata } from '../services/bots';
 import { getBotInfo, isRegisteredBot } from '../bots/core/bot-utils';
 import { v4 as uuidv4 } from 'uuid';
@@ -382,7 +383,7 @@ export class ConversationController {
     try {
       const { channelId } = req.params;
       const {
-        content,
+        content: rawContent,
         msgType,
         visibleTo,
         fileMetadata: fileMetadataJson,
@@ -392,6 +393,16 @@ export class ConversationController {
         visibleTo?: string | null;
         fileMetadata?: string;
       } = req.body;
+      // Guests may only mention people in the channel (see keepMentionsWithin).
+      const content =
+        req.user?.role === WorkspaceRole.GUEST && rawContent?.includes('data-mention-type')
+          ? keepMentionsWithin(
+              rawContent,
+              new Set(
+                (await this.channelParticipantRepository.getChannelParticipants(channelId)).map(p => p.userId),
+              ),
+            )
+          : rawContent;
       const reqFiles =
         (req as Express.Request & { files?: { [fieldname: string]: Express.Multer.File[] } })
           .files || {};

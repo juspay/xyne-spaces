@@ -35,6 +35,8 @@ const ListChannelsQuerySchema = z.object({
       return Math.min(parsed, MAX_CHANNEL_LIST_LIMIT);
     }),
   cursor: z.string().optional(),
+  // Only channels the app's bot is a member of.
+  joined: z.enum(['true', 'false']).optional(),
   projectId: z.string().optional(),
   scopeType: z.string().optional(),
   // Exact channel-name match. Served directly by the existing
@@ -167,7 +169,7 @@ export class ChannelController {
         return;
       }
 
-      const { limit, cursor, projectId, scopeType, name } = queryResult.data;
+      const { limit, cursor, joined, projectId, scopeType, name } = queryResult.data;
 
       // Tenant comes from the verified app token, never from the query string.
       const workspaceId = req.user?.workspaceId;
@@ -180,6 +182,7 @@ export class ChannelController {
       if (projectId) where.projectId = projectId;
       if (scopeType) where.scopeType = scopeType;
       if (name) where.name = name;
+      if (joined === 'true') where.participants = { some: { userId: req.user!.id } };
 
       // Fetch one extra to determine hasMore
       const channels = await repositories.channels.findManyPaginated({
