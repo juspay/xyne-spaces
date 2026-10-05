@@ -20,6 +20,8 @@ export enum ExternalSourcePlatform {
   MICROSOFT = 'microsoft',
   GOOGLE = 'google',
   APP_DESK = 'app-desk',
+  APP_HUB = 'app-hub', // HUB desk link to an installed app; not a message source
+  APP_HUB_CHANNEL = 'app-hub-channel', // A channel added to a HUB desk; not a message source
   OZONETEL = 'ozonetel',
   GOOGLE_PLAY = 'google-play-reviews',
   APP_STORE = 'app-store-reviews',

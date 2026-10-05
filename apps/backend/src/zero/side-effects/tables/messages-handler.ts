@@ -71,6 +71,7 @@ import {
   mentionRecipients,
   notifyMentioned,
 } from './mention-delivery';
+import { hubTicketForConversation } from '@/bypassAcl/hubDeskServices';
 
 const messageAttachmentRepository = new MessageAttachmentRepository();
 const channelRepository = new ChannelRepository();
@@ -302,6 +303,7 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
       where: { conversationId: message.conversationId },
       select: {
         channelId: true,
+        workspaceId: true,
         initialMessageId: true,
         // Radar keys a DM's window on its channel, and the queue needs that
         // key at add time — read here rather than costing the message path
@@ -348,6 +350,12 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
       userId: senderId,
       isReply: conversation.initialMessageId !== message.messageId,
     });
+    if (conversation.initialMessageId === message.messageId) {
+      // A new thread in a channel that feeds a HUB desk gets a desk ticket.
+      hubTicketForConversation(conversation.workspaceId, conversationId).catch(error => {
+        logger.error('[MessagesSideEffect] HUB desk ticket failed:', { conversationId, error });
+      });
+    }
 
     const [channel, sender, channelParticipantsRaw, userPreference] = await Promise.all([
       db.channel.findUnique({
