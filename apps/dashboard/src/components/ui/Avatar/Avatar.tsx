@@ -17,7 +17,6 @@ interface AvatarProps {
   rounded?: boolean;
   showActiveStatus?: boolean;
   className?: string;
-  pictureOverride?: string | null | undefined;
 }
 
 // Only dimension classes
@@ -145,7 +144,6 @@ const Avatar = ({
   rounded = false,
   showActiveStatus = true,
   className,
-  pictureOverride,
 }: AvatarProps): ReactElement => {
   const { user: currentUser } = useAuth();
   const targetUserId = userId !== undefined ? (userId ?? '') : (currentUser?.id ?? '');
@@ -163,8 +161,7 @@ const Avatar = ({
       .slice(0, 1) || '';
 
   // Picture path includes timestamp, so it naturally changes on each upload
-  const { url: ownPictureUrl } = useProfilePictureUrl(targetUserId, user?.picture);
-  const pictureUrl = pictureOverride || ownPictureUrl;
+  const { url: pictureUrl } = useProfilePictureUrl(targetUserId, user?.picture);
 
   const sizeClass = sizeClasses[size];
   const textSizeClass = textSizeClasses[size];

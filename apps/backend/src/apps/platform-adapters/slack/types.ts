@@ -22,22 +22,13 @@ export interface SlackChatPostMessageRequest {
 	thread_ts?: string;
 	mrkdwn?: boolean;
 	metadata?: Record<string, unknown>;
-	username?: string;
-	/**
-	 * Overrides the displayed avatar for this message only, as Slack's `icon_url`
-	 * does. Loaded directly by each viewer's browser — not proxied.
-	 */
-	icon_url?: string;
 	// Fields accepted but ignored by Xyne
 	reply_broadcast?: boolean;
 	unfurl_links?: boolean;
 	unfurl_media?: boolean;
-	/**
-	 * Not supported: Xyne's avatar square renders an image or initials only, so an
-	 * emoji avatar would be a new visual state for an app-wide component. Senders
-	 * that use it fall back to the app's normal avatar.
-	 */
 	icon_emoji?: string;
+	icon_url?: string;
+	username?: string;
 }
 
 export interface SlackChatPostEphemeralRequest {

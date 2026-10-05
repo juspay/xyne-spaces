@@ -10,7 +10,6 @@ import { config } from '@/config/env';
 import { resolveChannelId } from '../utils/channelUtils';
 import { MessageType } from '@xyne/shared';
 import { validateFlowDefinition, formatValidationErrors, MESSAGE_DELIVERY } from '@xyne/shared';
-import { applySenderOverrides } from '@/apps/core/senderOverrides';
 import { deliverEphemeralMessage } from '../core/ephemeralDelivery';
 import { ContentFormat } from '../types';
 import { updateAppActionStatus } from '@/utils/appActionMarkdownUtils';
@@ -41,9 +40,6 @@ const PostMessageBodySchema = ChatActionBodySchema.extend({
   channelId: z.string().min(1, 'Channel ID is required').trim().optional(),
   channelName: z.string().min(1, 'Channel name is required').trim().optional(),
   conversationId: z.string().trim().optional(),
-  username: z.string().max(80).trim().optional(),
-  /** Avatar override for this message only, matching Slack's `icon_url`. */
-  iconUrl: z.string().max(2048).trim().optional(),
   // Flow-based UI support — v2 only
   flow: z.object({
     version: z.literal('2.0'),
@@ -278,8 +274,6 @@ export class ChatController {
         uploadedFiles,
         metadata,
         contentFormat,
-        username,
-        iconUrl,
       } = bodyResult.data;
 
       // App-token callers post as the authenticated bot user; the S2S postAsUser
@@ -358,23 +352,6 @@ export class ChatController {
         ? MessageType.USER
         : MessageType.BOT;
 
-      // `username` / `iconUrl` override the displayed sender name and avatar for this
-      // message (Slack parity). Only meaningful for BOT messages: the internal
-      // postAsUser route authors on behalf of a real human, where either override would
-      // be impersonation, so both are dropped there. applySenderOverrides also strips
-      // the reserved metadata keys from the caller's own metadata, so a stored override
-      // can only come from these validated fields.
-      const baseMetadata = {
-        ...(isMarkdown && { contentFormat: ContentFormat.MARKDOWN }),
-        ...metadata,
-      };
-      const isBotMessage = messageType === MessageType.BOT;
-      const messageMetadata =
-        applySenderOverrides(baseMetadata, {
-          username: isBotMessage ? username : undefined,
-          iconUrl: isBotMessage ? iconUrl : undefined,
-        }) ?? baseMetadata;
-
       const result = await findOrCreateConversation(
         resolvedChannelId,
         senderUserId,
@@ -383,7 +360,7 @@ export class ChatController {
         conversationId,
         uploadedFiles,
         messageType,
-        messageMetadata,
+        { ...(isMarkdown && { contentFormat: ContentFormat.MARKDOWN }), ...metadata },
       );
 
       res.status(201).json(result);

@@ -5,7 +5,6 @@ import {
 	resolveSlackText,
 } from "@/integrations/adapters/slack-webhook-tickets/utils/slackUtils";
 import { config } from "@/config/env";
-import { applySenderOverrides } from "@/apps/core/senderOverrides";
 import { resolveSlackHandleMentions } from "./handleMentions";
 import type { TransformContext } from "../../types";
 import type {
@@ -121,12 +120,7 @@ export async function transformPostMessage(
 		content,
 		isMarkdown,
 		conversationId: slackReq.thread_ts,
-		// `username` / `icon_url` are display-only overrides, stamped onto metadata under
-		// reserved keys that are stripped from the caller's own metadata first.
-		metadata: applySenderOverrides(slackReq.metadata, {
-			username: slackReq.username,
-			iconUrl: slackReq.icon_url,
-		}),
+		metadata: slackReq.metadata,
 	};
 }
 

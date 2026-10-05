@@ -140,8 +140,7 @@ const PostMessageSchema = z
 		thread_ts: SlackOptionalStringSchema,
 		mrkdwn: SlackBooleanSchema.default(true),
 		metadata: SlackRecordSchema,
-		username: z.string().max(80).nullable().optional().transform((v) => v ?? undefined),
-		icon_url: z.string().max(2048).nullable().optional().transform((v) => v ?? undefined),
+		username: SlackOptionalStringSchema,
 	})
 	.refine(
 		(data) =>

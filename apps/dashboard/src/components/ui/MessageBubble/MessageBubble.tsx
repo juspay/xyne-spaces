@@ -967,16 +967,10 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                     userId={sender.id}
                     size={AvatarSize.REGULAR}
                     showActiveStatus={false}
-                    pictureOverride={metadata?.senderIconOverride}
                   />
                 ) : (
                   <UserHoverWrapper userId={sender.id} preserveThreadRoute={context === 'thread'}>
-                    <UserAvatar
-                      userId={sender.id}
-                      size={AvatarSize.MD}
-                      showActiveStatus={false}
-                      pictureOverride={metadata?.senderIconOverride}
-                    />
+                    <UserAvatar userId={sender.id} size={AvatarSize.MD} showActiveStatus={false} />
                   </UserHoverWrapper>
                 )}
               </div>
@@ -1138,7 +1132,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                 <h3 className='text-sm font-medium text-foreground'>Recording</h3>
               ) : isXyneBot ? (
                 <h3 className='text-sm font-medium text-foreground'>
-                  {metadata?.senderNameOverride || getUserDisplayName(sender) || 'AI Assistant'}
+                  {getUserDisplayName(sender) || 'AI Assistant'}
                 </h3>
               ) : isPrivateSystemNotice ? (
                 <div className=''>
