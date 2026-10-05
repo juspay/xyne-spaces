@@ -30,13 +30,7 @@ export class ApiKeyService {
     }
 
     const token = authHeader.split(' ')[1];
-    
-    // Check if the raw token matches the environment API key first
-    const envApiKey = process.env.API_KEY;
-    if (envApiKey && token === envApiKey) {
-      return token; // Return raw environment API key
-    }
-    
+
     try {
       // Try to decode as base64 - regular API keys are base64 encoded
       const decodedKey = Buffer.from(token, 'base64').toString('utf-8');
@@ -50,112 +44,9 @@ export class ApiKeyService {
   /**
    * Validate API key and return user data
    * @param apiKey The API key to validate
-   * @param userHeaders Optional headers containing user details (X-User-Name, X-User-Email)
    */
-  async validateApiKey(apiKey: string, userHeaders?: { name?: string; email?: string; workspaceId?: string }): Promise<ApiKeyUser | null> {
+  async validateApiKey(apiKey: string): Promise<ApiKeyUser | null> {
     try {
-      // Check for environment API key first
-      const envApiKey = process.env.API_KEY;
-      if (envApiKey && apiKey === envApiKey) {
-        logger.info('Environment API key used for authentication');
-        
-        // Use custom user details from headers if provided, otherwise use defaults
-        const userName = userHeaders?.name || 'API User';
-        const userEmail = userHeaders?.email || 'api@xyne.juspay.in';
-        
-        logger.info(`API key user: ${userName} (${userEmail})`);
-        
-        // Create or find a real user in the database for environment API key
-        try {
-          const workspaceId = userHeaders?.workspaceId;
-          if (!workspaceId) {
-            logger.error('workspaceId is required for API key authentication');
-            return null;
-          }
-          // Find existing user by email or create a new one
-          let user = await this.db.user.findUnique({
-            where: { email_workspaceId: { email: userEmail, workspaceId } }
-          });
-
-          if (!user) {
-            // Fetch existing orgMember by email
-            const orgMember = await this.db.orgMember.findUnique({
-              where: { email: userEmail },
-              select: { memberId: true }
-            });
-
-            if (!orgMember) {
-              logger.error(`Cannot create API key user: orgMember not found for email ${userEmail}`);
-              return null;
-            }
-
-            // Create new user for environment API key
-            user = await this.db.user.create({
-              data: {
-                name: userName,
-                email: userEmail,
-                authProvider: AuthProvider.API_KEY,
-                providerUserId: `env_api_${Buffer.from(userEmail).toString('base64')}`,
-                status: UserStatus.ACTIVE,
-                workspace: { connect: { id: workspaceId } },
-                orgMember: { connect: { memberId: orgMember.memberId } },
-              }
-            });
-            logger.info(`Created new user for environment API key: ${userEmail} (${user.id})`);
-          } else {
-            // Update existing user's name if provided
-            if (userHeaders?.name && user.name !== userName) {
-              user = await this.db.user.update({
-                where: { id: user.id },
-                data: { name: userName }
-              });
-            }
-            logger.info(`Found existing user for environment API key: ${userEmail} (${user.id})`);
-          }
-
-          // Fetch org member for role
-          const orgMember = await this.db.orgMember.findUnique({
-            where: { memberId: user.orgMemberId },
-            select: { role: true }
-          });
-
-          // Return admin user for the environment key with real user ID
-          return {
-            id: user.id, // Use real database user ID
-            username: user.name,
-            email: user.email,
-            role: 'user',
-            scopes: [
-              'tickets:read', 'tickets:write',
-              'workflows:read', 'workflows:write', 'workflows:execute',
-            ],
-            isApiKeyUser: true,
-            apiKeyName: 'Environment API Key',
-            workspaceId: user.workspaceId,
-            orgRole: orgMember!.role,
-            memberId: user.orgMemberId,
-          };
-        } catch (dbError) {
-          logger.error('Error creating/finding user for environment API key:', dbError);
-          // Fallback to virtual user if database operation fails
-          return {
-            id: 'env-api-user',
-            username: userName,
-            email: userEmail,
-            role: 'user',
-            scopes: [
-              'tickets:read', 'tickets:write',
-              'workflows:read', 'workflows:write', 'workflows:execute',
-            ],
-            isApiKeyUser: true,
-            apiKeyName: 'Environment API Key',
-            workspaceId: userHeaders?.workspaceId ?? '',
-            orgRole: '',
-            memberId: '',
-          };
-        }
-      }
-
       const keyHash = this.hashApiKey(apiKey);
 
       // Find API key in database with user and permissions

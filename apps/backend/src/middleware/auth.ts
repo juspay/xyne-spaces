@@ -75,14 +75,7 @@ export class AuthMiddleware {
         }
 
         if (apiKey) {
-          // Extract user details from headers
-          const userHeaders = {
-            name: req.headers['x-user-name'] as string,
-            email: req.headers['x-user-email'] as string,
-            workspaceId: req.headers['x-workspace-id'] as string,
-          };
-
-          const apiKeyUser = await apiKeyService.validateApiKey(apiKey, userHeaders);
+          const apiKeyUser = await apiKeyService.validateApiKey(apiKey);
           if (apiKeyUser) {
             // Attach API key user to request object
             req.user = {
