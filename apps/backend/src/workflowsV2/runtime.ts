@@ -12,6 +12,7 @@ import {
 } from '@xyne/workflow-sdk';
 import { BitbucketConnector } from '@xyne/connector-sdk/bitbucket';
 import { GitHubConnector } from '@xyne/connector-sdk/github';
+import { XyneSpacesConnector } from '@xyne/connector-sdk/xyne-spaces';
 import { HostAgentStep } from '@xyne/workflow-sdk/agents/host';
 import { config } from '@/config/env';
 import { logger } from '@/utils/logger';
@@ -22,6 +23,7 @@ import { SdlcArtifactAgentProvider } from './agents/sdlc-artifact-provider';
 import { SDLC_AGENT_STEP_TYPE, SdlcAgentProvider } from './agents/sdlc-agent-provider';
 import { SdlcWikiPlanStep } from '@/sdlc/wiki/wikiPlanStep';
 import { RedisEventBus } from './adapters/event-bus';
+import { XyneSpacesMessengerAdapter } from './adapters/messenger';
 import { PrismaPersistenceAdapter } from './adapters/persistence';
 import { BullQueueAdapter } from './adapters/queue';
 import { BullSchedulerAdapter } from './adapters/scheduler';
@@ -49,6 +51,7 @@ const connectors = new ConnectorRegistry();
 connectors.register(new XyneSpacesConnector());
 connectors.register(new GitHubConnector());
 connectors.register(new BitbucketConnector({ apiBaseUrl: config.bitbucket.baseUrl }));
+connectors.register(new XyneSpacesConnector({ messenger: new XyneSpacesMessengerAdapter() }));
 
 /**
  * RUN_AGENT — runs on xyne-claw. See docs/guidelines/workflows/AGENTS.md.
