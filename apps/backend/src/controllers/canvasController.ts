@@ -983,7 +983,7 @@ export class CanvasController {
         channelId: canvasChannelId ?? undefined,
         canvasId: canvasId,
         blockId: blockId ?? undefined,
-        classification: ActivityClassification.PENDING,
+        classification: ActivityClassification.PENDING_CLASSIFY,
       }));
 
       const senderName = sender?.name ?? 'Someone';

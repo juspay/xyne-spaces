@@ -82,7 +82,7 @@ export class SummaryTemplateSharingNotificationService {
           actorAction: change.action,
           actionSource: 'summary_template',
           actionSourceId: template.id,
-          classification: ActivityClassification.PENDING,
+          classification: ActivityClassification.PENDING_CLASSIFY,
         }))
       ),
       notificationService.createSummaryTemplateSharedNotifications(

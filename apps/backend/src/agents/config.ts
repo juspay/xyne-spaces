@@ -42,6 +42,12 @@ const DEFAULT_RELEASE_NOTES_GENERATOR_MODEL = 'glm-latest';
 const DEFAULT_RELEASE_AI_MODEL = 'glm-flash-experimental';
 const DEFAULT_TICKET_DUPLICATE_JEV_ENABLED = false;
 const DEFAULT_TICKET_DUPLICATE_JEV_THRESHOLD = 0.75;
+// Activity classification by Jev (services/activity/activityClassificationJev.ts).
+const DEFAULT_ACTIVITY_CLASSIFICATION_JEV_ENABLED = false;
+const DEFAULT_ACTIVITY_CLASSIFICATION_JEV_LOG_ENABLED = false;
+const DEFAULT_ACTIVITY_CLASSIFICATION_JEV_MIN_CONFIDENCE = 0.5;
+const DEFAULT_ACTIVITY_CLASSIFICATION_JEV_SKIP_THRESHOLD = 0.8;
+const DEFAULT_ACTIVITY_CLASSIFICATION_MAX_AGE_DAYS = 7;
 const DEFAULT_SUMMARISER_MODEL = 'glm-flash-experimental';
 const DEFAULT_ATTACHMENT_SUMMARISER_MODEL = 'kimi-latest';
 const DEFAULT_CLASSIFICATION_MODEL = 'glm-flash-experimental';
@@ -88,6 +94,11 @@ const CAC_KEYS = {
   shadowTagGenerationLogEnabled: 'shadow_tag_generation_log_enabled',
   ticketDuplicateJevEnabled: 'ticket_duplicate_jev_enabled',
   ticketDuplicateJevThreshold: 'ticket_duplicate_jev_threshold',
+  activityClassificationJevEnabled: 'activity_classification_jev_enabled',
+  activityClassificationJevLogEnabled: 'activity_classification_jev_log_enabled',
+  activityClassificationJevMinConfidence: 'activity_classification_jev_min_confidence',
+  activityClassificationJevSkipThreshold: 'activity_classification_jev_skip_threshold',
+  activityClassificationMaxAgeDays: 'activity_classification_max_age_days',
   ticketBoardModel: 'ticket_board_model_name',
   releaseNotesGeneratorModel: 'release_notes_generator_model_name',
   releaseAiModel: 'release_ai_model_name',
@@ -140,6 +151,16 @@ export class AgentsConfig {
   public readonly releaseAiModelName: string;
   public readonly ticketDuplicateJevEnabled: boolean;
   public readonly ticketDuplicateJevThreshold: number;
+  /** Whether each Jev activity label is logged. Default false; failures are logged regardless. */
+  public readonly activityClassificationJevLogEnabled: boolean;
+  /** Whether the worker classifies activities with Jev at all. Default false. */
+  public readonly activityClassificationJevEnabled: boolean;
+  /** Below this, Jev's pick is not trusted and the activity is filed as FYI. */
+  public readonly activityClassificationJevMinConfidence: number;
+  /** SKIP deletes the activity, so it needs at least this confidence; below it, FYI. */
+  public readonly activityClassificationJevSkipThreshold: number;
+  /** Only PENDING activities newer than this are classified; older ones are left as they are. */
+  public readonly activityClassificationMaxAgeDays: number;
   public readonly summariserModelName: string;
   public readonly attachmentSummariserModelName: string;
 
@@ -200,6 +221,11 @@ export class AgentsConfig {
     shadowTagGenerationLogEnabled: boolean,
     ticketDuplicateJevEnabled: boolean,
     ticketDuplicateJevThreshold: number,
+    activityClassificationJevLogEnabled: boolean,
+    activityClassificationJevEnabled: boolean,
+    activityClassificationJevMinConfidence: number,
+    activityClassificationJevSkipThreshold: number,
+    activityClassificationMaxAgeDays: number,
   ) {
     this.xyneAiTracingEnabled = xyneAiTracingEnabled;
     this.xyneAiMaskingEnabled = xyneAiMaskingEnabled;
@@ -231,6 +257,11 @@ export class AgentsConfig {
     this.shadowTagGenerationLogEnabled = shadowTagGenerationLogEnabled;
     this.ticketDuplicateJevEnabled = ticketDuplicateJevEnabled;
     this.ticketDuplicateJevThreshold = ticketDuplicateJevThreshold;
+    this.activityClassificationJevLogEnabled = activityClassificationJevLogEnabled;
+    this.activityClassificationJevEnabled = activityClassificationJevEnabled;
+    this.activityClassificationJevMinConfidence = activityClassificationJevMinConfidence;
+    this.activityClassificationJevSkipThreshold = activityClassificationJevSkipThreshold;
+    this.activityClassificationMaxAgeDays = activityClassificationMaxAgeDays;
   }
 
   /**
@@ -282,6 +313,11 @@ export class AgentsConfig {
       const releaseAiModelName = getValue<string>(CAC_KEYS.releaseAiModel, DEFAULT_RELEASE_AI_MODEL);
       const ticketDuplicateJevEnabled = getValue<boolean>(CAC_KEYS.ticketDuplicateJevEnabled, DEFAULT_TICKET_DUPLICATE_JEV_ENABLED);
       const ticketDuplicateJevThreshold = getValue<number>(CAC_KEYS.ticketDuplicateJevThreshold, DEFAULT_TICKET_DUPLICATE_JEV_THRESHOLD);
+      const activityClassificationJevLogEnabled = getValue<boolean>(CAC_KEYS.activityClassificationJevLogEnabled, DEFAULT_ACTIVITY_CLASSIFICATION_JEV_LOG_ENABLED);
+      const activityClassificationJevEnabled = getValue<boolean>(CAC_KEYS.activityClassificationJevEnabled, DEFAULT_ACTIVITY_CLASSIFICATION_JEV_ENABLED);
+      const activityClassificationJevMinConfidence = getValue<number>(CAC_KEYS.activityClassificationJevMinConfidence, DEFAULT_ACTIVITY_CLASSIFICATION_JEV_MIN_CONFIDENCE);
+      const activityClassificationJevSkipThreshold = getValue<number>(CAC_KEYS.activityClassificationJevSkipThreshold, DEFAULT_ACTIVITY_CLASSIFICATION_JEV_SKIP_THRESHOLD);
+      const activityClassificationMaxAgeDays = getValue<number>(CAC_KEYS.activityClassificationMaxAgeDays, DEFAULT_ACTIVITY_CLASSIFICATION_MAX_AGE_DAYS);
       const summariserModelName = getValue<string>(CAC_KEYS.summariserModel, DEFAULT_SUMMARISER_MODEL);
       const attachmentSummariserModelName = getValue<string>(CAC_KEYS.attachmentSummariserModel, DEFAULT_ATTACHMENT_SUMMARISER_MODEL);
 
@@ -552,6 +588,11 @@ export class AgentsConfig {
         shadowTagGenerationLogEnabled,
         ticketDuplicateJevEnabled,
         ticketDuplicateJevThreshold,
+        activityClassificationJevLogEnabled,
+        activityClassificationJevEnabled,
+        activityClassificationJevMinConfidence,
+        activityClassificationJevSkipThreshold,
+        activityClassificationMaxAgeDays,
       );
     } catch (error) {
       logger.error('[Agents Config] Error fetching CAC config, using DEFAULTS:', error);
@@ -587,6 +628,11 @@ export class AgentsConfig {
         DEFAULT_SHADOW_TAG_GENERATION_LOG_ENABLED,
         DEFAULT_TICKET_DUPLICATE_JEV_ENABLED,
         DEFAULT_TICKET_DUPLICATE_JEV_THRESHOLD,
+        DEFAULT_ACTIVITY_CLASSIFICATION_JEV_LOG_ENABLED,
+        DEFAULT_ACTIVITY_CLASSIFICATION_JEV_ENABLED,
+        DEFAULT_ACTIVITY_CLASSIFICATION_JEV_MIN_CONFIDENCE,
+        DEFAULT_ACTIVITY_CLASSIFICATION_JEV_SKIP_THRESHOLD,
+        DEFAULT_ACTIVITY_CLASSIFICATION_MAX_AGE_DAYS,
       );
     }
   }
@@ -623,6 +669,11 @@ export class AgentsConfig {
       DEFAULT_SHADOW_TAG_GENERATION_LOG_ENABLED,
       DEFAULT_TICKET_DUPLICATE_JEV_ENABLED,
       DEFAULT_TICKET_DUPLICATE_JEV_THRESHOLD,
+      DEFAULT_ACTIVITY_CLASSIFICATION_JEV_LOG_ENABLED,
+      DEFAULT_ACTIVITY_CLASSIFICATION_JEV_ENABLED,
+      DEFAULT_ACTIVITY_CLASSIFICATION_JEV_MIN_CONFIDENCE,
+      DEFAULT_ACTIVITY_CLASSIFICATION_JEV_SKIP_THRESHOLD,
+      DEFAULT_ACTIVITY_CLASSIFICATION_MAX_AGE_DAYS,
     );
   }
 }

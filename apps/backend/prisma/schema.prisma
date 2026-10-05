@@ -2622,7 +2622,7 @@ model Activity {
   trackId         String?  // FK to sdlc_tracks.id (no constraint)
   blockId         String?  // Block ID within the canvas for canvas mention activities
   actorId         String  // User who performed the action (no FK constraint)
-  classification  String                 @default("PENDING")
+  classification  String                 @default("PENDING_CLASSIFY")
   classificationConfidence Float?
   classificationJobType String?
   isRead          Boolean  @default(false)

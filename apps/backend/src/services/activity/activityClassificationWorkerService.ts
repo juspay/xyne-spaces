@@ -5,6 +5,8 @@ import { activityClassificationService } from '@/services/activity/activityClass
 import { logger } from '@/utils/logger';
 import { config } from '@/config/env';
 import { claimSingleActivitiesQuery, claimSpecialMentionAudienceActivitiesQuery } from '@/bypassAcl/activityServices';
+import { AgentsConfig } from '@/agents/config';
+import { isJevConfigured } from '@/services/queryIntent/jevClient';
 const MIN_INTERVAL_MS = 5000;
 const MAX_INTERVAL_MS = 15000;
 const BATCH_SIZE = 25;
@@ -24,6 +26,11 @@ class ActivityClassificationWorkerService {
 
     this.isRunning = true;
     logger.info('[ActivityClassificationWorker] Started');
+    if (!isJevConfigured()) {
+      // Every classification would come back "no answer" and the activities would sit in
+      // PENDING with nothing else to show for it — say so once, loudly.
+      logger.error('[ActivityClassificationWorker] JEV_API_KEY is not set: activities will stay PENDING');
+    }
     await this.resetProcessingOnStart();
     this.scheduleNextPoll();
   }
@@ -51,14 +58,24 @@ class ActivityClassificationWorkerService {
   }
 
   private async pollAndProcess(): Promise<void> {
-    const audienceActivities = await this.claimSpecialMentionAudienceActivities();
+    // One CAC read per poll: the on/off switch and the age window both live there, so either
+    // can change without a restart.
+    const cac = await AgentsConfig.fetch();
+    if (!cac.activityClassificationJevEnabled) {
+      // Off: claim nothing, so activities stay PENDING exactly as they would with no worker.
+      this.currentInterval = MAX_INTERVAL_MS;
+      return;
+    }
+    // Only activities newer than this are classified (CAC activity_classification_max_age_days).
+    const since = new Date(Date.now() - cac.activityClassificationMaxAgeDays * 24 * 60 * 60 * 1000);
+    const audienceActivities = await this.claimSpecialMentionAudienceActivities(since);
     if (audienceActivities.length > 0) {
       await this.processSpecialMentionAudienceActivities(audienceActivities);
       this.currentInterval = MIN_INTERVAL_MS;
       return;
     }
 
-    const activities = await this.claimSingleActivities();
+    const activities = await this.claimSingleActivities(since);
     if (activities.length === 0) {
       this.currentInterval = MAX_INTERVAL_MS;
       return;
@@ -84,7 +101,8 @@ class ActivityClassificationWorkerService {
         classification: ActivityClassification.PROCESSING,
       },
       data: {
-        classification: ActivityClassification.PENDING,
+        // Back in the queue — PENDING_CLASSIFY, not legacy PENDING, which is never claimed.
+        classification: ActivityClassification.PENDING_CLASSIFY,
       },
     });
 
@@ -95,12 +113,12 @@ class ActivityClassificationWorkerService {
     }
   }
 
-  private async claimSingleActivities(): Promise<Activity[]> {
-    return claimSingleActivitiesQuery(BATCH_SIZE);
+  private async claimSingleActivities(since: Date): Promise<Activity[]> {
+    return claimSingleActivitiesQuery(BATCH_SIZE, since);
   }
 
-  private async claimSpecialMentionAudienceActivities(): Promise<Activity[]> {
-    return claimSpecialMentionAudienceActivitiesQuery();
+  private async claimSpecialMentionAudienceActivities(since: Date): Promise<Activity[]> {
+    return claimSpecialMentionAudienceActivitiesQuery(since);
   }
 
   private async processSingleActivity(activity: Activity): Promise<void> {
@@ -212,7 +230,7 @@ class ActivityClassificationWorkerService {
     await db.activity.updateMany({
       where: { id: { in: activities.map(a => a.id) } },
       data: {
-        classification: ActivityClassification.PENDING,
+        classification: ActivityClassification.PENDING_CLASSIFY,
       },
     });
   }

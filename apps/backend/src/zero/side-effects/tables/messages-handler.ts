@@ -767,7 +767,7 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
         messageId: messageId,
         channelId,
         isThreadActivity,
-        classification: ActivityClassification.PENDING,
+        classification: ActivityClassification.PENDING_CLASSIFY,
       })));
 
       const keywordEmailMap = new Map(
@@ -1680,7 +1680,7 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
               messageId,
               channelId,
               isThreadActivity: true,
-              classification: ActivityClassification.PENDING,
+              classification: ActivityClassification.PENDING_CLASSIFY,
             }));
             await activityService.createActivities(mentionActivities);
           }
@@ -1849,7 +1849,7 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
             messageId,
             channelId,
             isThreadActivity: false,
-            classification: ActivityClassification.PENDING,
+            classification: ActivityClassification.PENDING_CLASSIFY,
           }));
           await activityService.createActivities(mentionActivities);
         }
@@ -1972,7 +1972,7 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
         messageId: messageId,
         channelId,
         isThreadActivity,
-        classification: activityOverride?.classification ?? ActivityClassification.PENDING,
+        classification: activityOverride?.classification ?? ActivityClassification.PENDING_CLASSIFY,
         // Audience classification only applies to inferred broadcast audiences.
         ...(activityOverride
           ? {}
