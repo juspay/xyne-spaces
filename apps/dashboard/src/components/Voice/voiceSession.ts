@@ -12,7 +12,15 @@ import { DIAGNOSE_ENABLED, type VoiceDiagnostic } from './diagnoseLog';
 import { getVoiceSettings, subscribeVoiceSettings } from './voiceSettings';
 import { createSpeechQueue } from './speechQueue';
 
-export type VoicePhase = 'idle' | 'listening' | 'transcribing' | 'thinking' | 'speaking';
+// 'understanding' is Auto routing deciding what to do with the request; 'asking' is the request
+// sent to Ask AI, from submit until its answer starts being spoken.
+export type VoicePhase =
+  | 'idle'
+  | 'listening'
+  | 'transcribing'
+  | 'understanding'
+  | 'asking'
+  | 'speaking';
 
 // What was said this session, for the captions.
 export interface VoiceTurn {
@@ -23,7 +31,7 @@ export interface VoiceTurn {
 
 export interface VoiceSessionState {
   phase: VoicePhase;
-  // Live transcript of the current utterance while listening/transcribing, '' otherwise.
+  // The current line: what you are saying while listening, then Xyne's reply as it streams in and is spoken.
   liveText: string;
   turns: VoiceTurn[];
   // What happened, step by step; empty unless diagnostics are enabled (see diagnoseLog).
@@ -46,7 +54,12 @@ export interface VoiceHost {
 
 const MAX_TURNS = 20;
 const MAX_DIAGNOSTICS = 200;
-const LIVE_PHASES: VoicePhase[] = ['listening', 'transcribing'];
+// Ask AI gets 15s to start answering and 45s between updates before the turn is given up.
+const START_TIMEOUT_MS = 15_000;
+const STALL_TIMEOUT_MS = 45_000;
+const ASK_AI_FAILED = "Xyne AI couldn't answer this. Try again.";
+// The phases that keep the current line: it carries over from live speech to reply to speech.
+const TEXT_PHASES: VoicePhase[] = ['listening', 'transcribing', 'asking', 'speaking'];
 
 const IDLE: VoiceSessionState = {
   phase: 'idle',
@@ -68,7 +81,7 @@ function setState(patch: Partial<VoiceSessionState>): void {
 
 const setPhase = (phase: VoicePhase): void => {
   if (phase !== state.phase) {
-    setState({ phase, ...(!LIVE_PHASES.includes(phase) && { liveText: '' }) });
+    setState({ phase, ...(!TEXT_PHASES.includes(phase) && { liveText: '' }) });
   }
 };
 
@@ -81,10 +94,14 @@ let turnSeq = 0;
 let diagnosticSeq = 0;
 let holdStart: number | null = null;
 
-// The turn being followed: what has been spoken of the streamed reply, and which stream it is.
+// The turn being followed: when it was submitted, what has been spoken of the streamed reply, and
+// which stream it is. `watchdog` gives the turn up when Ask AI goes quiet.
 let turnActive = false;
+let askedAt = 0;
+let gotText = false;
 let consumed = 0;
 let activeStreamId: string | null = null;
+let watchdog: ReturnType<typeof setTimeout> | undefined;
 
 function log(step: string, detail = ''): void {
   if (!DIAGNOSE_ENABLED) return;
@@ -113,7 +130,7 @@ function appendTurn(speaker: VoiceTurn['speaker'], text: string): void {
 
 const speech = createSpeechQueue({
   log,
-  onSpeaking: () => setPhase('speaking'),
+  onSpeaking: sentence => setState({ phase: 'speaking', liveText: sentence }),
   // A streamed reply may still add sentences, so running dry mid-reply is not the end.
   onDrained: () => {
     if (!turnActive && state.phase === 'speaking') setPhase('idle');
@@ -123,11 +140,34 @@ const speech = createSpeechQueue({
   },
 });
 
-// Ends the turn being followed and silences what is being said.
-function interrupt(): void {
+function endTurn(): void {
   turnActive = false;
   activeStreamId = null;
+  clearTimeout(watchdog);
+}
+
+// Ends the turn being followed and silences what is being said.
+function interrupt(): void {
+  endTurn();
   speech.cancel();
+}
+
+// Ends the turn with a message when Ask AI errored or went quiet.
+function failTurn(detail: string): void {
+  log('Ask AI', `error: ${detail}`);
+  interrupt();
+  speak(ASK_AI_FAILED);
+  // Muted, the message would only be a caption in the transcript, so it also stays on the stage.
+  if (state.phase === 'idle') setState({ liveText: ASK_AI_FAILED });
+}
+
+// Gives the turn up unless Ask AI shows progress within `ms`; an answer still being spoken is not stalled.
+function watch(ms: number): void {
+  clearTimeout(watchdog);
+  watchdog = setTimeout(
+    () => (speech.isBusy() ? watch(ms) : failTurn(`no progress for ${ms / 1000}s`)),
+    ms,
+  );
 }
 
 function enqueue(sentences: string[]): void {
@@ -164,8 +204,13 @@ function processReply(fullText: string, done: boolean): void {
   }
 }
 
+const latestBot = (
+  messages: StreamState['messages'],
+): StreamState['messages'][number] | undefined =>
+  [...messages].reverse().find(m => m.type === 'bot');
+
 function latestBotContent(messages: StreamState['messages']): string | null {
-  const bot = [...messages].reverse().find(m => m.type === 'bot');
+  const bot = latestBot(messages);
   if (!bot) return null;
   if (bot.parsedContent?.summary) return bot.parsedContent.summary;
   const stream = bot.streamingContent || bot.content || '';
@@ -174,23 +219,48 @@ function latestBotContent(messages: StreamState['messages']): string | null {
   return stream || null;
 }
 
+// The sentence being written or, between sentences, the last one finished.
+function latestSentence(markdown: string): string {
+  const { sentences, rest } = splitSentences(toSpokenText(markdown));
+  return rest.trim() || (sentences.at(-1) ?? '');
+}
+
 // Speaks the reply of the submitted turn as it streams in.
 function followReply(stream: StreamState): void {
   if (!turnActive || !host) return;
-  // Picked up by owner, then followed by id: the slot key moves to the session id mid-stream.
+  // Picked up by owner as soon as it appears, whatever its status, then followed by id: the slot
+  // key moves to the session id mid-stream. A stream older than the submit is a previous turn's.
   if (activeStreamId === null) {
-    if (!host.ownsStream(stream) || stream.status !== 'streaming') return;
+    if (stream.startedAt < askedAt || !host.ownsStream(stream)) return;
     activeStreamId = stream.streamId;
   } else if (stream.streamId !== activeStreamId) {
     return;
   }
+  // Aborted only ever means someone stopped it, so it ends quietly; an error gets a message.
+  if (stream.status === 'aborted') {
+    log('Ask AI', 'stopped');
+    interrupt();
+    setPhase('idle');
+    return;
+  }
+  if (stream.status === 'error') {
+    failTurn(stream.error ?? latestBot(stream.messages)?.errorInfo?.message ?? stream.status);
+    return;
+  }
+  watch(STALL_TIMEOUT_MS);
   const content = latestBotContent(stream.messages);
   const done = stream.status !== 'streaming';
-  if (content !== null) processReply(content, done);
-  else if (done && !speech.isBusy()) setPhase('idle');
+  if (content !== null) {
+    if (!gotText) {
+      gotText = true;
+      log('Ask AI', `first text after ${Date.now() - askedAt}ms`);
+    }
+    if (state.phase === 'asking') setState({ liveText: latestSentence(content) });
+    processReply(content, done);
+  } else if (done && !speech.isBusy()) setPhase('idle');
   if (done) {
-    turnActive = false;
-    activeStreamId = null;
+    log('Ask AI', 'done');
+    endTurn();
   }
 }
 
@@ -211,7 +281,7 @@ async function handleTranscript(rawText: string): Promise<void> {
     }
     log('Transcript', `“${text}”`);
     appendTurn('you', text);
-    setPhase('thinking');
+    setPhase('understanding');
     const reply = (await host?.answer?.(text)) ?? null;
     if (session !== current || !host) return;
     if (reply === '') {
@@ -228,6 +298,11 @@ async function handleTranscript(rawText: string): Promise<void> {
     consumed = 0;
     activeStreamId = null;
     turnActive = true;
+    gotText = false;
+    askedAt = Date.now();
+    setPhase('asking');
+    log('Ask AI', 'request sent');
+    watch(START_TIMEOUT_MS);
     host.submit(text);
   } catch (err) {
     if (session !== current) return;

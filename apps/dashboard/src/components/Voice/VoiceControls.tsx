@@ -8,8 +8,11 @@ import { updateVoiceSettings, useVoiceSettings } from './voiceSettings';
 import { useSpaceToTalk } from './useSpaceToTalk';
 import type { VoicePhase } from './voiceSession';
 
+// The assistant is working out an answer: routing the request, waiting on Ask AI.
+const isWorking = (phase: VoicePhase): boolean => phase === 'understanding' || phase === 'asking';
+
 // Stop applies while the assistant is working out or speaking an answer.
-export const canStop = (phase: VoicePhase): boolean => phase === 'thinking' || phase === 'speaking';
+export const canStop = (phase: VoicePhase): boolean => isWorking(phase) || phase === 'speaking';
 
 /** A round icon button with its name as tooltip; forwards props so a popover can use it as trigger. */
 export function IconButton({
@@ -46,7 +49,7 @@ export function VoiceOrbButton({
   onHoldStart,
   onHoldEnd,
 }: VoiceOrbButtonProps): ReactElement {
-  const busy = phase === 'transcribing' || phase === 'thinking';
+  const busy = phase === 'transcribing' || isWorking(phase);
   const speaking = phase === 'speaking';
 
   useSpaceToTalk(scope, {

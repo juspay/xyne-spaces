@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type ReactElement } from 'react';
-import { Bug, Sparkles } from 'lucide-react';
+import { Bug, Captions, Sparkles } from 'lucide-react';
 import { cn } from '../../utils/classNames';
 import {
   BackButton,
@@ -24,14 +24,18 @@ const PHASE_LABEL: Record<VoicePhase, string> = {
   idle: 'Ready',
   listening: 'Listening…',
   transcribing: 'Transcribing…',
-  thinking: 'Thinking…',
+  understanding: 'Understanding…',
+  asking: 'Asking Xyne AI…',
   speaking: 'Speaking…',
 };
 
-/** Voice mode for the sidebar and the /ai page: the orb and its status on top, the conversation as captions below. */
+type Panel = 'transcript' | 'diagnose';
+
+/** Voice mode for the sidebar and the /ai page: the orb centered with its status and current line, the transcript or diagnostics in a panel below on request. */
 export function VoiceStage({ studioMode }: VoiceStageProps): ReactElement {
   const { phase, liveText, turns, diagnostics, playbackBlocked } = useVoiceSession();
-  const [diagnosing, setDiagnosing] = useState(false);
+  const [panel, setPanel] = useState<Panel | null>(null);
+  const toggle = (next: Panel): void => setPanel(open => (open === next ? null : next));
   const stageRef = useRef<HTMLElement>(null);
   const stoppable = canStop(phase);
 
@@ -59,7 +63,7 @@ export function VoiceStage({ studioMode }: VoiceStageProps): ReactElement {
   const endRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     endRef.current?.scrollIntoView({ block: 'nearest' });
-  }, [turns, diagnosing]);
+  }, [turns, panel]);
 
   return (
     <section
@@ -68,73 +72,83 @@ export function VoiceStage({ studioMode }: VoiceStageProps): ReactElement {
       aria-label='Voice mode'
       className='flex min-h-0 flex-1 flex-col items-center px-4 pb-3 pt-4 outline-none'
     >
-      <VoiceOrbButton
-        phase={phase}
-        scope={stageRef}
-        onHoldStart={voiceSession.startRecording}
-        onHoldEnd={voiceSession.stopRecording}
-      />
-      <p
-        role='status'
-        className={cn(
-          'mt-1 text-sm font-medium',
-          phase === 'listening' ? 'text-primary' : 'text-foreground',
-        )}
-      >
-        {PHASE_LABEL[phase]}
-      </p>
-      {studioMode && (
-        <span className='mt-1 inline-flex items-center gap-1 rounded-full bg-claw-ai-fg/10 px-2.5 py-1 text-xs font-semibold text-claw-ai-fg'>
-          <Sparkles className='h-3 w-3' aria-hidden />
-          {studioMode} mode
-        </span>
-      )}
-      <div className='flex h-8 items-center'>
-        {playbackBlocked ? (
-          <TapToHearButton onClick={voiceSession.resumePlayback} />
-        ) : (
-          <p className='text-xs text-muted-foreground'>Hold the orb or Space to talk</p>
-        )}
-      </div>
-      <p className='line-clamp-3 min-h-[3.75rem] max-w-xs text-center text-sm text-foreground'>
-        {liveText}
-      </p>
-
-      <div className='mt-2 flex min-h-0 w-full flex-1 flex-col'>
-        {diagnosing ? (
-          <DiagnosePanel events={diagnostics} />
-        ) : (
-          <div
-            aria-label='Conversation'
-            className='flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto'
+      <div className='flex min-h-0 w-full flex-[3] flex-col items-center justify-center'>
+        <VoiceOrbButton
+          phase={phase}
+          scope={stageRef}
+          onHoldStart={voiceSession.startRecording}
+          onHoldEnd={voiceSession.stopRecording}
+        />
+        <div className='flex h-7 items-center gap-2'>
+          <p
+            role='status'
+            className={cn(
+              'text-sm font-medium',
+              phase === 'listening' ? 'text-primary' : 'text-foreground',
+            )}
           >
-            {turns.map(turn => (
-              <p
-                key={turn.id}
-                className={cn(
-                  'max-w-[85%] rounded-2xl px-3 py-1.5 text-sm leading-snug',
-                  turn.speaker === 'you'
-                    ? 'self-end rounded-br-sm bg-primary text-primary-foreground'
-                    : 'self-start rounded-bl-sm bg-secondary text-secondary-foreground',
-                )}
-              >
-                {turn.text}
-              </p>
-            ))}
-            <div ref={endRef} />
-          </div>
-        )}
+            {PHASE_LABEL[phase]}
+          </p>
+          {studioMode && (
+            <span className='inline-flex items-center gap-1 rounded-full bg-claw-ai-fg/10 px-2.5 py-1 text-xs font-semibold text-claw-ai-fg'>
+              <Sparkles className='h-3 w-3' aria-hidden />
+              {studioMode} mode
+            </span>
+          )}
+        </div>
+        <p className='line-clamp-2 h-10 max-w-xs text-center text-sm text-foreground'>{liveText}</p>
+        <div className='flex h-8 items-center'>
+          {playbackBlocked ? (
+            <TapToHearButton onClick={voiceSession.resumePlayback} />
+          ) : (
+            <p className='text-xs text-muted-foreground'>Hold the orb or Space to talk</p>
+          )}
+        </div>
       </div>
+
+      {panel === 'diagnose' && (
+        <div className='mt-2 flex min-h-0 w-full flex-[2] flex-col'>
+          <DiagnosePanel events={diagnostics} />
+        </div>
+      )}
+      {panel === 'transcript' && (
+        <div
+          aria-label='Conversation'
+          className='mt-2 flex min-h-0 w-full flex-[2] flex-col gap-2 overflow-y-auto'
+        >
+          {turns.map(turn => (
+            <p
+              key={turn.id}
+              className={cn(
+                'max-w-[85%] rounded-2xl px-3 py-1.5 text-sm leading-snug',
+                turn.speaker === 'you'
+                  ? 'self-end rounded-br-sm bg-primary text-primary-foreground'
+                  : 'self-start rounded-bl-sm bg-secondary text-secondary-foreground',
+              )}
+            >
+              {turn.text}
+            </p>
+          ))}
+          <div ref={endRef} />
+        </div>
+      )}
 
       <div className='flex items-center justify-center gap-1 pt-3'>
         <BackButton onExit={voiceSession.exit} />
         <MuteButton />
         <VoiceSettingsPopover />
+        <IconButton
+          label={panel === 'transcript' ? 'Hide transcript' : 'Show transcript'}
+          className={cn(panel === 'transcript' && 'bg-accent text-foreground')}
+          onClick={() => toggle('transcript')}
+        >
+          <Captions />
+        </IconButton>
         {DIAGNOSE_ENABLED && (
           <IconButton
-            label={diagnosing ? 'Hide diagnostics' : 'Diagnose'}
-            className={cn(diagnosing && 'bg-accent text-foreground')}
-            onClick={() => setDiagnosing(on => !on)}
+            label={panel === 'diagnose' ? 'Hide diagnostics' : 'Diagnose'}
+            className={cn(panel === 'diagnose' && 'bg-accent text-foreground')}
+            onClick={() => toggle('diagnose')}
           >
             <Bug />
           </IconButton>

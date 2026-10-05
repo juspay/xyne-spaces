@@ -5640,10 +5640,12 @@ img.inline-emoji,
   animation-duration: 2.3s;
 }
 
-.voice-orb[data-phase="thinking"] {
+.voice-orb[data-phase="understanding"],
+.voice-orb[data-phase="asking"] {
   animation-duration: 2.6s;
 }
-.voice-orb[data-phase="thinking"]::before {
+.voice-orb[data-phase="understanding"]::before,
+.voice-orb[data-phase="asking"]::before {
   animation-duration: 1.6s;
 }
 

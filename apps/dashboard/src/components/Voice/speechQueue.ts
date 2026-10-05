@@ -10,8 +10,8 @@ type SpeechAudio = Promise<(SynthesizedSpeech & { voiceName: string | undefined 
 
 interface SpeechQueueOptions {
   log: (step: string, detail?: string) => void;
-  // Audio started playing.
-  onSpeaking: () => void;
+  // Audio started playing this sentence.
+  onSpeaking: (sentence: string) => void;
   // The queue ran dry, was cancelled, or stopped because the browser blocked playback.
   onDrained: () => void;
   // The browser refused to start audio without a user gesture, or that was resolved.
@@ -116,7 +116,7 @@ export function createSpeechQueue({
           'TTS started',
           `${audio ? `${audio.voiceName ?? 'Default'} (server voice)` : 'browser voice'} · ${Math.round(performance.now() - requestedAt)}ms`,
         );
-        onSpeaking();
+        onSpeaking(sentence);
         if (!(await play(sentence, audio))) {
           // Nothing was heard, so the sentence stays queued for resume().
           pending.unshift(sentence);
