@@ -4,6 +4,7 @@ import { Calendar, XCircle } from 'lucide-react';
 import { PhoneDefault } from '@xyne/icons';
 import { useCallJoinOrInitiate } from '../../../hooks/useCallJoinOrInitiate';
 import { useAllChannels } from '../../../hooks/useChannels';
+import { isDMChannel } from '../../Chat/ChatDirectory/ChatDirectory.utils';
 import { cn } from '../../../utils/classNames';
 import { PILL_STATUS_LABEL, formatCallWindow, toPillState } from '../../../utils/scheduledCallPill';
 import type { MessageMetadata, ScheduledCallPillSnapshot } from './MessageBubble.utils';
@@ -34,7 +35,9 @@ export function ScheduledCallPill({ message, callId }: ScheduledCallPillProps): 
 
   // The call moved channels. This card is dead and is never updated again.
   if (metadata?.retired === true) {
-    const movedToName = channels.find(c => c.id === metadata.movedTo)?.name;
+    const movedToChannel = channels.find(c => c.id === metadata.movedTo);
+    const movedToName =
+      movedToChannel && !isDMChannel(movedToChannel.scopeType) ? movedToChannel.name : undefined;
     return (
       <div className='xs-cc-scope'>
         <div
@@ -89,7 +92,10 @@ export function ScheduledCallPill({ message, callId }: ScheduledCallPillProps): 
   const isReschedule = state === 'CANCELLED';
   const isOpenSummary = state === 'ENDED';
   const when = formatCallWindow(call.startsAt, call.endsAt);
-  const channelName = channels.find(c => c.id === call.channelId)?.name;
+  // DM/group-DM channels have no human name (their `name` is participant ids), so
+  // only show the "in #…" suffix for real channels.
+  const channel = channels.find(c => c.id === call.channelId);
+  const channelName = channel && !isDMChannel(channel.scopeType) ? channel.name : undefined;
 
   // CallHistoryScreen keys ?callId= on the internal id, not externalId.
   const openInCalls = (): void => {
