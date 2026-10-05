@@ -14,7 +14,11 @@ vi.mock("./xyne-spaces-client.js", () => mocks);
 
 process.env["ENCRYPTION_KEY"] ||= "00".repeat(32);
 process.env["XYNE_CLAW_URL"] = "http://claw.local";
-process.env["XYNE_CLAW_S2S_KEY"] = "s2s-secret";
+// The child must reach ingest through claw-auth with INTERNAL_S2S_KEY only;
+// the runtime key is set here to prove it is NOT the one sent (XYNE-65520).
+process.env["XYNE_CLAW_S2S_KEY"] = "runtime-root-key";
+process.env["INTERNAL_S2S_KEY"] = "internal-s2s-secret";
+process.env["AUTH_SERVICE_INTERNAL_URL"] = "http://claw-auth.local";
 
 async function fetchAttachmentTool() {
   const mod = await import("./xyne-spaces-tools.js");
@@ -78,10 +82,10 @@ describe("spaces-fetch-attachment", () => {
     expect(mocks.spacesFetchBuffer).not.toHaveBeenCalled();
     expect(mocks.spacesFetch).toHaveBeenCalledWith("/api/attachments/att-1/signed-url");
     expect(global.fetch).toHaveBeenCalledWith(
-      "http://claw.local/internal/attachments/ingest",
+      "http://claw-auth.local/claw/api/v1/internal/attachments/ingest",
       expect.objectContaining({
         method: "POST",
-        headers: expect.objectContaining({ "x-s2s-key": "s2s-secret" }),
+        headers: expect.objectContaining({ "x-s2s-key": "internal-s2s-secret" }),
         body: JSON.stringify({
           attachments: [{
             fileName: "Lotuspay Webappsec final report.pdf",
