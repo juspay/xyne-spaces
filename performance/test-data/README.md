@@ -47,6 +47,7 @@ and reports the limiter working correctly as a product failure. So `pnpm perf:ru
 | `release` | 25 | 5 |
 | `load` | 100 | 20 |
 | `stress` | 300 | 60 |
+| `spike` | 300 | 60 |
 | `soak` | 25 | 5 |
 
 A longer `PERF_THINK_TIME_SECONDS` lowers the requirement proportionally. If the target has been

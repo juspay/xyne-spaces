@@ -78,7 +78,27 @@ and are required for that.
 
 ## Workload profiles
 
-`smoke`, `release`, `load`, `stress`, `soak`. Every completed run writes a self-contained
+`smoke`, `release`, `load`, `stress`, `spike`, `soak`.
+
+| Profile | Shape | Answers |
+| --- | --- | --- |
+| `smoke` | 1 VU, 1 iteration | Is it reachable at all? |
+| `release` | ramp to 25 over ~10m | Did this release regress? |
+| `load` | ramp to 100 over ~40m | Does expected peak traffic hold up? |
+| `stress` | 4 steps to 300 over ~17m | *Where* does it start to degrade? |
+| `spike` | 30 → 300 in **10s**, then recover | Does it survive a surge, and does it come back? |
+| `soak` | 25 held for 4h | Does anything leak or drift? |
+
+`spike` is not a shorter `stress`. Stress climbs in three-minute steps to locate the
+degradation point; spike slams from a tenth of peak to full peak in ten seconds, holds
+briefly, drops back and then **holds at baseline for three minutes so recovery is
+observable**. That recovery window is the point — the production signals behind this work
+include roughly 10,000 socket retries per second, which arrives as a surge rather than a
+ramp, and a stepped profile would never reproduce it. A `--duration` override lengthens
+the recovery hold rather than the surge, because a surge held for ten minutes is no
+longer a spike.
+
+Every completed run writes a self-contained
 `report.html`, `summary.json` and `metadata.json`, and can optionally Remote Write to
 VictoriaMetrics for the Grafana dashboard.
 

@@ -5,7 +5,17 @@ export const ENVIRONMENTS = Object.freeze({
   preprod: Object.freeze({ maxVus: 500, maxDurationSeconds: 8 * 60 * 60 }),
 });
 
-export const PROFILES = new Set(['smoke', 'release', 'load', 'stress', 'soak']);
+// Must stay in lockstep with PROFILE_NAMES in performance/k6/profiles.mjs — this set
+// gates what the runner accepts, that one defines what k6 can build. A parity test
+// in performance/tests/catalog.test.mjs fails if they drift.
+export const PROFILES = new Set([
+  'smoke',
+  'release',
+  'load',
+  'stress',
+  'spike',
+  'soak',
+]);
 // `zero-query-transform` exercises the query-transform step of POST /api/zero/query:
 // auth, rate limit, ACL, tenant scoping and AST compilation. It does not execute SQL and
 // is not a Zero-sync test. `rest-messaging` exercises POST /api/conversations/:id/messages,
