@@ -516,3 +516,34 @@ test('a Docker start failure exits 2, not Docker\'s own 125', () => {
   assert.equal(processExitCodeFor(99), 99);
   assert.equal(processExitCodeFor(1), 1);
 });
+
+test('refuses a production host even when the run is labelled preprod', () => {
+  // The whole point: the name says preprod, the traffic would hit customers.
+  assert.throws(
+    () => validateRuntime({
+      root,
+      config: { scenario: 'smoke', profile: 'smoke' },
+      env: { PERF_BASE_URL: 'https://app.spaces.xyne.juspay.net' },
+    }),
+    /serves production/i,
+  );
+  assert.throws(
+    () => validateRuntime({
+      root,
+      config: { scenario: 'smoke', profile: 'smoke' },
+      env: { PERF_BASE_URL: 'https://auth.spaces.xyne.juspay.net/api' },
+    }),
+    /serves production/i,
+  );
+});
+
+test('still accepts sandbox and other non-production hosts', () => {
+  assert.equal(
+    validateRuntime({
+      root,
+      config: { scenario: 'smoke', profile: 'smoke' },
+      env: { PERF_BASE_URL: 'https://spaces.sandbox.xyne.juspay.net' },
+    }).baseUrl,
+    'https://spaces.sandbox.xyne.juspay.net',
+  );
+});

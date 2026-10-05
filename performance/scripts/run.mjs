@@ -9,6 +9,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { K6_IMAGE, resolveRunConfig } from '../config/catalog.mjs';
 import { minimumIdentities, resolveZeroRequestBudget } from '../config/rate-limit.mjs';
 import { buildExecutionProfile, peakVus } from '../k6/profiles.mjs';
+import { assertNotProductionHost } from '../k6/env-routing.mjs';
 
 const REPOSITORY_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 const SAFE_METADATA = /^[A-Za-z0-9._-]+$/;
@@ -164,6 +165,9 @@ function requireRateLimitHeadroom({ config, env, identityCount, thinkTimeSeconds
 
 export function validateRuntime({ root, config = {}, env }) {
   const baseUrl = requireHttpUrl(env.PERF_BASE_URL);
+  // Checked by host, not by the environment name: pre-production shares production's
+  // host, so a name alone cannot keep load off customers.
+  assertNotProductionHost(baseUrl);
   const releaseVersion = requireSafeMetadata(env.PERF_RELEASE_VERSION, 'PERF_RELEASE_VERSION', 'local');
   const thinkTimeSeconds = parseThinkTime(env.PERF_THINK_TIME_SECONDS);
   let usersFile;

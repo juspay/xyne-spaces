@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
 import path from 'node:path';
 import test from 'node:test';
 
@@ -131,4 +131,14 @@ test('the attachments scenario reads only and does not buffer file bodies', () =
   // Bodies are discarded after transfer so a large file does not sit in k6 memory.
   assert.match(source, /responseType:\s*'none'/);
   assert.match(source, /ENVIRONMENT_FAILURE[^\n]*token rejected/);
+});
+
+test('every authenticated scenario sends the environment routing header', () => {
+  // Pre-production is the production host plus x-route-env, so a scenario that omits it
+  // would silently exercise production when pointed at that host.
+  const dir = path.join(repositoryRoot, 'performance', 'k6', 'scenarios');
+  for (const file of readdirSync(dir)) {
+    const source = readFileSync(path.join(dir, file), 'utf8');
+    assert.match(source, /routeEnvHeaders/, `${file} must apply the routing header`);
+  }
 });

@@ -21,6 +21,7 @@ import { attachmentDuration, parseJson, verify } from '../lib/checks.js';
 import { buildOptions, getRunConfig, pathUrl, readinessUrl } from '../lib/config.js';
 import { authenticatedHeaders, userForVirtualUser } from '../lib/data.js';
 import { buildSummary } from '../lib/report.js';
+import { routeEnvHeaders } from '../env-routing.mjs';
 import {
   ATTACHMENT_KINDS,
   buildAttachmentPath,
@@ -29,11 +30,13 @@ import {
 
 const config = getRunConfig();
 
+const ROUTE_HEADERS = routeEnvHeaders(config.environment);
+
 export const options = buildOptions(config);
 
 function requestAttachment(user, path) {
   return http.get(pathUrl(config, path), {
-    headers: authenticatedHeaders(user),
+    headers: authenticatedHeaders(user, ROUTE_HEADERS),
     // Transfer the bytes but do not keep them: we want retrieval latency, not the file.
     responseType: 'none',
     tags: { operation: 'attachment', name: 'GET /api/attachments/:id' },
@@ -41,7 +44,7 @@ function requestAttachment(user, path) {
 }
 
 export function setup() {
-  const readiness = http.get(readinessUrl(config), { tags: { operation: 'readiness' } });
+  const readiness = http.get(readinessUrl(config), { headers: ROUTE_HEADERS, tags: { operation: 'readiness' } });
   const readinessBody = parseJson(readiness);
   const ready = verify(readiness, {
     'readiness returns 200': (result) => result.status === 200,

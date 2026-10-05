@@ -17,6 +17,7 @@ import { parseJson, searchDuration, verify } from '../lib/checks.js';
 import { buildOptions, getRunConfig, readinessUrl, searchUrl } from '../lib/config.js';
 import { authenticatedHeaders, userForVirtualUser } from '../lib/data.js';
 import { buildSummary } from '../lib/report.js';
+import { routeEnvHeaders } from '../env-routing.mjs';
 import {
   SEARCH_APP_SETS,
   buildSearchPath,
@@ -26,19 +27,21 @@ import {
 
 const config = getRunConfig();
 
+const ROUTE_HEADERS = routeEnvHeaders(config.environment);
+
 export const options = buildOptions(config);
 
 const PAGE_SIZE = 20;
 
 function requestSearch(user, path) {
   return http.get(searchUrl(config, path), {
-    headers: authenticatedHeaders(user),
+    headers: authenticatedHeaders(user, ROUTE_HEADERS),
     tags: { operation: 'search', name: 'GET /api/vespaSearch' },
   });
 }
 
 export function setup() {
-  const readiness = http.get(readinessUrl(config), { tags: { operation: 'readiness' } });
+  const readiness = http.get(readinessUrl(config), { headers: ROUTE_HEADERS, tags: { operation: 'readiness' } });
   const readinessBody = parseJson(readiness);
   const ready = verify(readiness, {
     'readiness returns 200': (result) => result.status === 200,

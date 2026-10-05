@@ -8,10 +8,17 @@ export function userForVirtualUser(vuNumber) {
   return fixture.users[(vuNumber - 1) % fixture.users.length];
 }
 
-export function authenticatedHeaders(user) {
+/**
+ * Headers for an authenticated request.
+ *
+ * `extra` carries the environment routing header; pre-production is the production host
+ * plus `x-route-env`, so omitting it would exercise production instead.
+ */
+export function authenticatedHeaders(user, extra = {}) {
   return {
     Authorization: `Bearer ${user.token}`,
     'Content-Type': 'application/json',
     'x-workspace-id': user.workspaceId,
+    ...extra,
   };
 }

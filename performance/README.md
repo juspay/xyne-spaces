@@ -102,6 +102,27 @@ Every completed run writes a self-contained
 `report.html`, `summary.json` and `metadata.json`, and can optionally Remote Write to
 VictoriaMetrics for the Grafana dashboard.
 
+## How Xyne environments are addressed
+
+Sandbox is a separate deployment with its own host. **Pre-production is not** — it is the
+production host plus a routing header, exactly as the desktop app does it when the Beta
+menu's "Enable pre-prod features" is on
+(`apps/electron/src/services/request-interceptor.ts:129-131`):
+
+| Environment | Host | Selected by |
+| --- | --- | --- |
+| sandbox | `spaces.sandbox.xyne.juspay.net` | separate deployment |
+| production | `app.spaces.xyne.juspay.net` | no header |
+| pre-production | `app.spaces.xyne.juspay.net` | **`x-route-env: playground`** |
+
+That makes the environment *name* an unreliable guard: a run labelled `preprod` pointed at
+the production host with no header is a production load test wearing a pre-production
+label, and every report would say "preprod" while the traffic landed on customers.
+
+So two things are enforced. Every scenario sends the routing header for `preprod`, and the
+runner **refuses the production hosts by hostname**, whatever the run is called. The
+hostname is compared exactly, so a lookalike or a port cannot disguise one.
+
 Routine runs accept only `sandbox` and `preprod`. Production is deliberately rejected. Sandbox is
 restricted to the short `smoke` and `release` profiles; capacity profiles run only in pre-production.
 
