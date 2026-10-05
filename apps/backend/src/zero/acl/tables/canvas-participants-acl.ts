@@ -18,8 +18,14 @@ export class CanvasParticipantsACL extends BaseACL<'canvas_participants'> {
     return this.roleRank(a) >= this.roleRank(b) ? a : b;
   }
 
-  /** Effective canvas role for the requester: direct row, else strongest of group- and channel-based rows. */
+  /** Effective canvas role for the requester: creator, else direct row, else strongest of group- and channel-based rows. */
   private async getRequesterEffectiveRole(canvasId: string, tx: Transaction<Schema>): Promise<CanvasRole | null> {
+    // Applies to every canvas. The creator may have no row (older SDLC) or only a VIEWER row
+    // (commit analysis, release reports). The VIEWER row was never a lock: the creator could
+    // already edit and add anyone at any role, so changing and removing roles is expected too.
+    const canvas = await tx.run(zql.canvases.where('id', canvasId).one());
+    if (canvas?.createdBy === this.ctx.userID) return CanvasRole.OWNER;
+
     const direct = await tx.run(
       zql.canvas_participants.where('canvasId', canvasId).where('userId', this.ctx.userID).one(),
     );
