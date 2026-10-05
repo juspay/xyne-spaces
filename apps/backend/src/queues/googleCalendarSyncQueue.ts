@@ -35,7 +35,7 @@ import {
   MAX_CALENDAR_EVENTS_PER_SYNC,
 } from '@/services/calendarSyncConfig';
 import { calendarSyncErrorMessage, isPermanentCalendarAuthError } from './calendarSyncErrorUtils';
-import { withCalendarSourceLock } from './calendarSourceLock';
+import { withCalendarSyncLock } from './calendarSyncLock';
 
 const TAG = '[CALENDAR_SYNC][GOOGLE][QUEUE]';
 
@@ -353,7 +353,7 @@ class GoogleCalendarSyncQueue {
     const runManualSync = async (job: Bull.Job): Promise<void> => {
       const sourceId = await resolveSourceId(job.data as CalendarSyncJobData);
       try {
-        await withCalendarSourceLock('google', sourceId, () => performManualSync(sourceId));
+        await withCalendarSyncLock('google', sourceId, () => performManualSync(sourceId));
       } catch (err) {
         await deactivateSourceOnPermanentAuthError(sourceId, err);
         throw err;
@@ -365,7 +365,7 @@ class GoogleCalendarSyncQueue {
       const sourceId = await resolveSourceId(jobData);
       let continuation: GoogleIncrementalContinuation | null;
       try {
-        continuation = await withCalendarSourceLock('google', sourceId, () =>
+        continuation = await withCalendarSyncLock('google', sourceId, () =>
           performIncrementalSync(sourceId, jobData)
         );
       } catch (err) {
@@ -389,6 +389,7 @@ class GoogleCalendarSyncQueue {
     // One job at a time: a single catch-all processor at concurrency 1, so each
     // job runs to completion before the next is picked. Separate named processors
     // would each get their own slot and let a manual and an incremental sync overlap.
+    // withCalendarSyncLock extends this across both providers and all replicas.
     queue.process('*', 1, async (job) => {
       if (job.name === 'manual-sync') return runManualSync(job);
       if (job.name === 'incremental-sync') return runIncrementalSync(job);
