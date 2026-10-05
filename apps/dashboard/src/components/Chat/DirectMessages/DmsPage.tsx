@@ -87,10 +87,6 @@ const getDmFilterEmptyCopy = (activeTab: DmFilterTab): { title: string; descript
 };
 
 const DmsPage = (): ReactElement => {
-  const dmsPageRenders = useRef(0);
-  dmsPageRenders.current += 1;
-  console.log(`[PERF] DmsPage render #${dmsPageRenders.current}`);
-
   const navigate = useNavigate();
   const { isMobile } = usePlatform();
   const { channelId } = useParams<{ channelId: string }>();

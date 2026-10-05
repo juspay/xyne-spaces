@@ -1,4 +1,4 @@
-import { useState, useEffect, useLayoutEffect, useCallback, useMemo, useRef } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useAllChannels } from './useChannels';
 import { useUsers } from './useUsers';
 import { useAuthContextValues } from './useAuth';
@@ -48,12 +48,6 @@ export const useDmsSearch = (): UseDmsSearchReturn => {
   const [showDmSearchDropdown, setShowDmSearchDropdown] = useState(false);
   const [selectedDmSearchIndex, setSelectedDmSearchIndex] = useState(0);
   const dmSearchInputRef = useRef<HTMLInputElement>(null);
-  const keystrokeTimeRef = useRef<number>(0);
-
-  const setDmSearchQueryTimed = useCallback((query: string) => {
-    keystrokeTimeRef.current = performance.now();
-    setDmSearchQuery(query);
-  }, []);
 
   const allChannels = useAllChannels();
   const allUsers = useUsers();
@@ -93,7 +87,6 @@ export const useDmsSearch = (): UseDmsSearchReturn => {
   const peopleResults = useMemo((): DmPersonResult[] => {
     void affinityVersion;
     if (!trimmedQuery) return [];
-    const t0 = performance.now();
     const isSelfSearch = trimmedQuery.toLowerCase() === 'self';
     const eligible = workerUserResults.filter(
       user =>
@@ -102,11 +95,9 @@ export const useDmsSearch = (): UseDmsSearchReturn => {
         (isSelfSearch && user.id === currentUserId),
     );
     let newPeopleLeft = PEOPLE_LIMIT;
-    const result = rankUsers(eligible, trimmedQuery, dmContactRecency)
+    return rankUsers(eligible, trimmedQuery, dmContactRecency)
       .filter(user => oneToOneDmByUserId.has(user.id) || newPeopleLeft-- > 0)
       .map(user => ({ user, channelId: oneToOneDmByUserId.get(user.id)?.id ?? null }));
-    console.log(`[PERF] peopleResults (rank worker hits): ${(performance.now() - t0).toFixed(2)}ms — ${result.length} results from ${workerUserResults.length} worker hits`);
-    return result;
   }, [
     workerUserResults,
     trimmedQuery,
@@ -164,9 +155,7 @@ export const useDmsSearch = (): UseDmsSearchReturn => {
       .map(item => item.channel)
       .sort(byRecency);
 
-    const result = [...workerChannelResults.map(item => item.channel), ...emailMatched];
-    console.log(`[PERF] groupDmResults (email fallback): ${result.length} total (${workerChannelResults.length} worker + ${emailMatched.length} email)`);
-    return result;
+    return [...workerChannelResults.map(item => item.channel), ...emailMatched];
   }, [workerChannelResults, groupItems, trimmedQuery, affinityVersion]);
 
   // Autofocus search input when navigating to DM page
@@ -231,17 +220,9 @@ export const useDmsSearch = (): UseDmsSearchReturn => {
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
-  useLayoutEffect(() => {
-    if (keystrokeTimeRef.current > 0 && trimmedQuery) {
-      const elapsed = performance.now() - keystrokeTimeRef.current;
-      console.log(`[PERF] keystroke→DOM update: ${elapsed.toFixed(2)}ms (query="${dmSearchQuery}")`);
-      keystrokeTimeRef.current = 0;
-    }
-  }, [peopleResults, groupDmResults, dmSearchQuery, trimmedQuery]);
-
   return {
     dmSearchQuery,
-    setDmSearchQuery: setDmSearchQueryTimed,
+    setDmSearchQuery,
     peopleResults,
     groupDmResults,
     totalResultCount,
