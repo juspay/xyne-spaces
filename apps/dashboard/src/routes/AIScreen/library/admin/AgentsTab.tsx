@@ -359,14 +359,15 @@ export function AgentsTab({
           </Button>
         </DropdownMenuTrigger>
         <DropdownMenuContent align='end'>
-          <DropdownMenuItem
-            disabled={registered}
-            onSelect={() => registration.start(agent)}
-            className='data-[disabled]:pointer-events-auto data-[disabled]:cursor-not-allowed'
-          >
-            <SurfaceLogo surface='spaces' label='' className='mr-2 size-4' />
-            {hasApp && !registered ? 'Spaces (resume setup)' : 'Spaces'}
-          </DropdownMenuItem>
+          {/* Spaces is a one-per-agent surface: once registered, hide it instead of
+              showing a greyed-out option. Slack stays listed because an installed
+              agent can still be added to another Slack workspace. */}
+          {!registered && (
+            <DropdownMenuItem onSelect={() => registration.start(agent)}>
+              <SurfaceLogo surface='spaces' label='' className='mr-2 size-4' />
+              {hasApp ? 'Spaces (resume setup)' : 'Spaces'}
+            </DropdownMenuItem>
+          )}
           <DropdownMenuItem
             disabled={!slack.isReady || slackActions.busySlug === agent.slug}
             onSelect={() => onSlackConnect(agent)}
