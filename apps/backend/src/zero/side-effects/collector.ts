@@ -191,6 +191,8 @@ export async function collectSideEffectJobs(
       previousValue = {
         name: entity.name,
         scopeType: entity.scopeType,
+        type: entity.type,
+        isArchived: entity.isArchived,
       };
     }
   }

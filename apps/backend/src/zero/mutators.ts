@@ -2340,8 +2340,10 @@ export function createMutators(
             throw new Error("Channel doesn't exist");
           }
 
-          if (channel.type !== ChannelType.DEFAULT) {
-            throw new Error('Only channels can be unarchived');
+          // Desk channels (EMAIL/SLACK/APP/CALL/SOCIAL_MEDIA) are user-facing channels
+          // too and expose the Archive action in settings; only system channels are blocked.
+          if (channel.type !== ChannelType.DEFAULT && !isDeskChannelType(channel.type)) {
+            throw new Error('Only channels can be archived');
           }
 
           const user = await tx.run(zql.users.where('id', authData.sub).one());
