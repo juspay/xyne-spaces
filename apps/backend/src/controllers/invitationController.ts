@@ -3,7 +3,6 @@
  * Handles HTTP requests for invitation operations
  */
 
-import jwt from 'jsonwebtoken';
 import { Request, Response } from 'express';
 import { invitationService } from '@/services/invitationService';
 import { DatabaseClient } from '@/database/client';
@@ -16,6 +15,8 @@ import { aiProvisioningService } from '@/services/aiProvisioningService';
 import { isOrganizationPolicyError, organizationDomainService } from '@/services/organizationDomainService';
 import { CacConfigService } from '@/services/cacConfigService';
 import { getEncryptionProvider } from '@/services/encryption';
+import { PENDING_AUTH_COOKIE } from '@/auth/constants';
+import { readPendingAuth } from '@/auth/pendingAuth';
 
 /**
  * Extract the hostname from an Origin header value.
@@ -313,43 +314,27 @@ export class InvitationController {
         return;
       }
 
-      // Read identity from the httpOnly google_access_token cookie.
-      // Supports both signed-JWT (new email/OAuth flows) and legacy JSON shapes.
-      const pendingAuthRaw = req.cookies?.google_access_token as string | undefined;
-      if (!pendingAuthRaw) {
+      // Read identity from the httpOnly pending-auth cookie (identity only; it is
+      // NOT cleared here — login-workspace follows and consumes it).
+      if (!req.cookies?.[PENDING_AUTH_COOKIE]) {
         res.status(401).json({ error: 'Not authenticated. Please login first.' });
         return;
       }
 
-      let oauthUser: { email: string; googleId?: string; providerUserId?: string; name: string; picture?: string };
-      let provider: string;
-
-      try {
-        const decoded = jwt.verify(pendingAuthRaw, process.env.JWT_SECRET!) as {
-          email?: string;
-          name?: string;
-          providerUserId?: string;
-          picture?: string;
-          googleId?: string;
-          provider?: string;
-          refreshToken?: string | null;
-          accessToken?: string | null;
-        };
-        if (!decoded.email) throw new Error('Invalid JWT payload');
-
-
-        oauthUser = {
-          email: decoded.email,
-          name: decoded.name || '',
-          googleId: decoded.googleId,
-          providerUserId: decoded.providerUserId,
-          picture: decoded.picture || '',
-        };
-        provider = decoded.provider || 'GOOGLE';
-      } catch {
+      const pending = readPendingAuth(req);
+      if (!pending) {
         res.status(401).json({ error: 'Invalid authentication session. Please login again.' });
         return;
       }
+
+      const oauthUser = {
+        email: pending.email,
+        name: pending.name,
+        googleId: pending.googleId,
+        providerUserId: pending.providerUserId,
+        picture: pending.picture || '',
+      };
+      const provider = pending.provider;
 
       // Support both Google (googleId), Microsoft and Email (providerUserId)
       const providerUserId = oauthUser.googleId || oauthUser.providerUserId;

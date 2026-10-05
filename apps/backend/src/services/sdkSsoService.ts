@@ -6,9 +6,12 @@
  * 2. User visits the verification URL, logs in, approves
  * 3. SDK polls with device_code → gets the user's session cookie when approved
  *
- * The session handed out is the same `xyne_ws_<workspaceId>_token` JWT the
- * dashboard runs on, so `/api/sdk` authenticates it with the ordinary
- * `authMiddleware` — there is no SDK-specific credential.
+ * The session handed out is a workspace JWT shaped like the
+ * `xyne_ws_<workspaceId>_token` the dashboard runs on, so `/api/sdk`
+ * authenticates it with the ordinary `authMiddleware` — there is no
+ * SDK-specific credential format. It is minted by routes/sdk-sso.ts against a
+ * real account session (platform SDK, `sid` claim) with the SDK TTL
+ * (`config.sdkSso.tokenTtlSeconds`), so deactivation revokes it like any other.
  *
  * The weakness of this flow is phishing (RFC 8628 §5.4): anyone can start a
  * request and send the approval link to someone else. The defence is the user
@@ -79,9 +82,9 @@ export type DeviceAuthStatus = 'pending' | 'approved' | 'denied';
 export interface SdkSsoSession {
   userId: string;
   workspaceId: string;
-  /** Session JWT — the value of the `xyne_ws_<workspaceId>_token` cookie */
+  /** Workspace JWT — shaped like the value of the `xyne_ws_<workspaceId>_token` cookie */
   token: string;
-  /** When the token expires, in epoch milliseconds */
+  /** When the token expires (SDK TTL), in epoch milliseconds */
   expiresAt: number;
 }
 

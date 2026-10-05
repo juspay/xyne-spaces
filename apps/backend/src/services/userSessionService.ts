@@ -21,14 +21,14 @@ export type LoginMethod =
   | 'TEST'
   | 'WORKSPACE_CREATED' // already signed in — a session for a workspace they just created
   | 'WORKSPACE_JOINED' // already signed in — a session for a community workspace they just joined
-  | 'AUTO_LOGIN'; // reused an existing session to auto-log into a single workspace
+  | 'WORKSPACE_SWITCH' // already signed in — a grant (+ legacy row) for the workspace they switched to
+  | 'AUTO_LOGIN' // reused an existing session to auto-log into a single workspace
+  | 'SDK'; // sdk-sso device-flow approval (platform SDK, cookies discarded)
 
 export interface CreateSessionData {
   userId: string;
   refreshToken: string;
   refreshTokenExpiry: Date;
-  accessToken?: string;
-  accessTokenExpiry?: Date;
   deviceInfo?: string;
   deviceId?: string;
   fcmToken?: string;
@@ -38,8 +38,6 @@ export interface CreateSessionData {
 }
 
 export interface UpdateSessionData {
-  accessToken?: string;
-  accessTokenExpiry?: Date;
   lastActivity?: Date;
   status?: SessionStatus;
   deviceId?: string;
@@ -128,8 +126,6 @@ export class UserSessionService {
           workspaceId: sessionUser.workspaceId,
           refreshToken: sessionData.refreshToken,
           refreshTokenExpiry: sessionData.refreshTokenExpiry,
-          accessToken: sessionData.accessToken,
-          accessTokenExpiry: sessionData.accessTokenExpiry,
           deviceInfo: sessionData.deviceInfo,
           deviceId: sessionData.deviceId,
           fcmToken: sessionData.fcmToken,
@@ -170,26 +166,6 @@ export class UserSessionService {
   }
 
   /**
-   * Get session by refresh token
-   */
-  async getSessionByRefreshToken(refreshToken: string): Promise<(UserSession & { user: any }) | null> {
-    try {
-      return await this.prisma.userSession.findUnique({
-        where: {
-          refreshToken,
-          status: SessionStatus.ACTIVE,
-        },
-        include: {
-          user: true,
-        },
-      });
-    } catch (error) {
-      logger.error('Error getting session by refresh token:', error);
-      throw new Error('Failed to get session by refresh token');
-    }
-  }
-
-  /**
    * Get session by ID
    */
   async getSessionById(sessionId: string): Promise<(UserSession & { user: any }) | null> {
@@ -207,29 +183,6 @@ export class UserSessionService {
     } catch (error) {
       logger.error('Error getting session by ID:', error);
       throw new Error('Failed to get session by ID');
-    }
-  }
-
-  /**
-   * Get all active sessions for a user
-   */
-  async getActiveSessionsForUser(userId: string): Promise<UserSession[]> {
-    try {
-      return await this.prisma.userSession.findMany({
-        where: {
-          userId,
-          status: SessionStatus.ACTIVE,
-          refreshTokenExpiry: {
-            gt: new Date(), // Only get non-expired sessions
-          },
-        },
-        orderBy: {
-          lastActivity: 'desc',
-        },
-      });
-    } catch (error) {
-      logger.error('Error getting active sessions for user:', error);
-      throw new Error('Failed to get active sessions for user');
     }
   }
 
@@ -254,24 +207,6 @@ export class UserSessionService {
     } catch (error) {
       logger.error('Error updating session:', error);
       throw new Error('Failed to update session');
-    }
-  }
-
-  /**
-   * Update session activity (touch session)
-   */
-  async updateSessionActivity(sessionId: string): Promise<void> {
-    try {
-      await this.prisma.userSession.update({
-        where: { id: sessionId },
-        data: {
-          lastActivity: new Date(),
-          updatedAt: new Date(),
-        },
-      });
-    } catch (error) {
-      logger.error('Error updating session activity:', error);
-      throw new Error('Failed to update session activity');
     }
   }
 
@@ -307,33 +242,6 @@ export class UserSessionService {
   }
 
   /**
-   * Revoke session by refresh token
-   */
-  async revokeSessionByRefreshToken(refreshToken: string, reason: LogoutReason): Promise<void> {
-    try {
-      const liveSessions = await this.prisma.userSession.findMany({
-        where: { refreshToken, status: SessionStatus.ACTIVE },
-        select: { id: true, userId: true, deviceInfo: true, createdAt: true },
-      });
-
-      await this.prisma.userSession.updateMany({
-        where: { refreshToken },
-        data: {
-          status: SessionStatus.REVOKED,
-          updatedAt: new Date(),
-        },
-      });
-
-      liveSessions.forEach((session) => this.trackLogout(session, reason));
-
-      logger.info(`Revoked session by refresh token`);
-    } catch (error) {
-      logger.error('Error revoking session by refresh token:', error);
-      throw new Error('Failed to revoke session by refresh token');
-    }
-  }
-
-  /**
    * Revoke all sessions for a user
    */
   async revokeAllUserSessions(userId: string, reason: LogoutReason): Promise<void> {
@@ -363,31 +271,6 @@ export class UserSessionService {
   }
 
   /**
-   * Check if refresh token is valid and not expired
-   */
-  async isRefreshTokenValid(refreshToken: string): Promise<boolean> {
-    try {
-      const session = await this.prisma.userSession.findUnique({
-        where: { refreshToken },
-        select: {
-          status: true,
-          refreshTokenExpiry: true,
-        },
-      });
-
-      if (!session) {
-        return false;
-      }
-
-      const now = new Date();
-      return session.status === SessionStatus.ACTIVE && session.refreshTokenExpiry > now;
-    } catch (error) {
-      logger.error('Error checking refresh token validity:', error);
-      return false;
-    }
-  }
-
-  /**
    * Clean up expired sessions
    */
   async cleanupExpiredSessions(): Promise<number> {
@@ -411,49 +294,5 @@ export class UserSessionService {
       logger.error('Error cleaning up expired sessions:', error);
       throw new Error('Failed to clean up expired sessions');
     }
-  }
-
-  /**
-   * Get session statistics for a user
-   */
-  async getUserSessionStats(userId: string) {
-    try {
-      const stats = await this.prisma.userSession.groupBy({
-        by: ['status'],
-        where: { userId },
-        _count: {
-          status: true,
-        },
-      });
-
-      const totalSessions = await this.prisma.userSession.count({
-        where: { userId },
-      });
-
-      const lastActivity = await this.prisma.userSession.findFirst({
-        where: { userId },
-        orderBy: { lastActivity: 'desc' },
-        select: { lastActivity: true },
-      });
-
-      return {
-        totalSessions,
-        statusDistribution: stats.reduce((acc, stat) => {
-          acc[stat.status] = stat._count.status;
-          return acc;
-        }, {} as Record<string, number>),
-        lastActivity: lastActivity?.lastActivity,
-      };
-    } catch (error) {
-      logger.error('Error getting user session stats:', error);
-      throw new Error('Failed to get user session statistics');
-    }
-  }
-
-  /**
-   * Clean up - close Prisma connection
-   */
-  async disconnect(): Promise<void> {
-    await this.prisma.$disconnect();
   }
 }

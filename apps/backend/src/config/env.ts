@@ -71,6 +71,25 @@ const envSchema = Joi.object({
   JWT_EXPIRATION_SECONDS: Joi.number().default(86400), // 24 hours in seconds
   FORCE_LOGOUT_BEFORE: Joi.number().optional(), // Unix timestamp (seconds) - reject tokens issued before this time
   SESSION_EXPIRY_DAYS: Joi.number().default(180), // Session + refresh-cookie expiry in days (default 1 year); also drives the xyne_last_workspace pointer
+  // --- Account sessions (auth_sessions + session_workspace_grants) rollout flags ---
+  // See src/auth/flags.ts for the allowed combinations (validated at startup).
+  // legacy: only workflow.user_sessions is written. dual: auth_sessions + grant + one legacy
+  // row per grant. v3: no legacy rows (blocked in this release — claw still reads the table).
+  AUTH_SESSION_WRITE_MODE: Joi.string().valid('legacy', 'dual', 'v3').default('legacy'),
+  // legacy: xyne_session / auth_sessions ignored. v3_with_legacy_fallback: opaque token first,
+  // then legacy id mapped through grants, then raw legacy row. v3: legacy rows never consulted.
+  AUTH_SESSION_READ_MODE: Joi.string().valid('legacy', 'v3_with_legacy_fallback', 'v3').default('legacy'),
+  // legacy: user_session_id + xyne_ws_<ws>_token + xyne_last_workspace. dual: + xyne_session.
+  // v3: xyne_session + xyne_ws_ + hint; user_session_id only for legacy-looking clients.
+  AUTH_COOKIE_MODE: Joi.string().valid('legacy', 'dual', 'v3').default('legacy'),
+  // legacy: opaque token payload == auth_sessions.id. hashed: random payload, row stores sha256.
+  SESSION_TOKEN_MODE: Joi.string().valid('legacy', 'hashed').default('legacy'),
+  // CSV of orgIds issued in WRITE/COOKIE mode (others stay legacy), or `all`. Empty = none.
+  AUTH_V3_ORGS: Joi.string().allow('').default(''),
+  // SDK SSO JWT lifetime, decoupled from JWT_EXPIRATION_SECONDS so the web JWT can shrink.
+  SDK_SSO_TOKEN_TTL_SECONDS: Joi.number().integer().min(60).default(86400),
+  ENABLE_SESSION_CLEANUP_WORKER: Joi.boolean().default(false),
+  SESSION_CLEANUP_CRON: Joi.string().default('15 3 * * *'),
   // File Storage Configuration
   STORAGE_PROVIDER: Joi.string().valid('gcs', 'local', 's3', 'azure').default('gcs'),
   // AWS S3 Configuration
@@ -515,16 +534,6 @@ const envSchema = Joi.object({
   // mTLS certificate service (s2s). Empty url disables cert revocation.
   MTLS_SERVICE_URL: Joi.string().uri().allow('').default(''),
   MTLS_SERVICE_REQUEST_TIMEOUT_MS: Joi.number().integer().min(1).default(5000),
-  // Comma-separated Google OAuth error codes that, when returned by the client
-  // that owns a refresh token, mean the token is permanently revoked.
-  GOOGLE_AUTH_PERMANENT_ERRORS: Joi.string().default('invalid_grant,invalid_token'),
-  GOOGLE_AUTH_CLIENT_ERRORS: Joi.string().default('unauthorized_client,invalid_client'),
-  // Master switch for the session-refresh provider-revocation check (Google /
-  // Microsoft verification + account-deactivation cleanup). When false, refresh
-  // falls back to the legacy behaviour: session status + expiry only, no
-  // provider call and no deactivation. Kill switch if provider verification
-  // misbehaves in production.
-  ENABLE_PROVIDER_REVOCATION_CHECK: Joi.boolean().default(true),
   // Email fetch
   EMAIL_FETCH_BATCH_SIZE: Joi.number().integer().default(10),
   EMAIL_FETCH_BATCH_DELAY_MS: Joi.number().integer().default(5000),
@@ -1138,9 +1147,22 @@ export const config = {
   session: {
     expiryDays: envVars.SESSION_EXPIRY_DAYS,
   },
-  pendingOAuthTokens: {
-    redisKeyPrefix: 'pendingauth:oauth:',
-    ttlSeconds: 10 * 60,
+  authSessions: {
+    writeMode: envVars.AUTH_SESSION_WRITE_MODE as 'legacy' | 'dual' | 'v3',
+    readMode: envVars.AUTH_SESSION_READ_MODE as 'legacy' | 'v3_with_legacy_fallback' | 'v3',
+    cookieMode: envVars.AUTH_COOKIE_MODE as 'legacy' | 'dual' | 'v3',
+    tokenMode: envVars.SESSION_TOKEN_MODE as 'legacy' | 'hashed',
+    // 'all' or the trimmed, non-empty org ids from AUTH_V3_ORGS.
+    v3Orgs: ((raw: string): 'all' | string[] => {
+      const trimmed = raw.trim();
+      if (trimmed.toLowerCase() === 'all') return 'all';
+      return trimmed.split(',').map((o) => o.trim()).filter(Boolean);
+    })(envVars.AUTH_V3_ORGS as string),
+    cleanupWorkerEnabled: envVars.ENABLE_SESSION_CLEANUP_WORKER as boolean,
+    cleanupCron: envVars.SESSION_CLEANUP_CRON as string,
+  },
+  sdkSso: {
+    tokenTtlSeconds: envVars.SDK_SSO_TOKEN_TTL_SECONDS as number,
   },
   recentVisitedConversations: {
     lookbackDays: envVars.RECENT_VISITED_LOOKBACK_DAYS,
@@ -1237,17 +1259,6 @@ export const config = {
     s2sSecret: envVars.INTERNAL_SERVICE_SECRET as string,
     requestTimeoutMs: envVars.MTLS_SERVICE_REQUEST_TIMEOUT_MS as number,
   },
-  // Google OAuth error codes from the owning client that mean permanent revocation.
-  googleAuthPermanentErrors: (envVars.GOOGLE_AUTH_PERMANENT_ERRORS as string)
-    .split(',')
-    .map((code: string) => code.trim())
-    .filter(Boolean),
-  googleAuthClientErrors: (envVars.GOOGLE_AUTH_CLIENT_ERRORS as string)
-    .split(',')
-    .map((code: string) => code.trim())
-    .filter(Boolean),
-  // Kill switch for provider-revocation verification during session refresh.
-  enableProviderRevocationCheck: envVars.ENABLE_PROVIDER_REVOCATION_CHECK as boolean,
   apps: {
     internalHostMap: parseInternalAppHostMap(envVars.INTERNAL_APP_HOST_MAP as string),
   },

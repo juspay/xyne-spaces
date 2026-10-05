@@ -6,6 +6,7 @@ import type { NavigateFunction } from 'react-router-dom-actual';
 
 import { API_BASE_URL, DEFAULT_WORKSPACE_ID } from '../config';
 import { queryClient } from '../services/clients/queryClient';
+import { buildAuthHeaders } from '../services/clients/authHeaders';
 import { confirmInterrupt } from '../components/InterruptGuard/InterruptGuard';
 import { parseInternalXyneLink } from '../components/Chat/RenderMessageWithHTML/internalLinkUtils';
 import { useWorkspaceNavigate } from './useWorkspaceNavigate';
@@ -55,7 +56,7 @@ export const crossWorkspaceNavigate = async ({
     await axios.post(
       `${API_BASE_URL}/auth/switch-workspace`,
       { workspaceId: targetWorkspaceId },
-      { withCredentials: true },
+      { withCredentials: true, headers: buildAuthHeaders(currentWorkspaceId) },
     );
   } catch (error) {
     // 403 is terminal: the server resolves membership from the session's own

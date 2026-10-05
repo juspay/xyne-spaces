@@ -146,6 +146,8 @@ export const ENUM_TEXT_FIELDS: readonly EnumTextField[] = [
   { prismaModel: 'WorkflowMapping', field: 'entityType', values: Object.values(WorkflowMappingEntityType) },
   { prismaModel: 'UserGroup', field: 'rotationInterval', values: Object.values(RotationInterval) },
   { prismaModel: 'UserSession', field: 'status', values: Object.values(SessionStatus) },
+  { prismaModel: 'AuthSession', field: 'status', values: Object.values(SessionStatus) },
+  { prismaModel: 'AuthSession', field: 'platform', values: [...Object.values(Platform), 'SDK'] },
   { prismaModel: 'User', field: 'authProvider', values: Object.values(AuthProvider) },
   { prismaModel: 'User', field: 'status', values: Object.values(UserStatus) },
   { prismaModel: 'User', field: 'userType', values: Object.values(UserType) },

@@ -163,7 +163,7 @@ const ProfileView = ({
   );
 
   const handleLogout = (): void => {
-    logout();
+    void logout();
   };
 
   const handleProfileClick = (): void => {

@@ -1,5 +1,4 @@
 import { ReactElement, useEffect, useState } from 'react';
-import Cookies from 'js-cookie';
 import {
   CheckCircle2,
   Clock3,
@@ -13,6 +12,7 @@ import {
 } from 'lucide-react';
 import { CommunityJoinResultStatus, WorkspaceJoinPolicy } from '@xyne/shared';
 import { apiInstance } from '../../services/clients/apiClient';
+import { useAuth } from '../../hooks/useAuth';
 import { cn } from '../../utils/classNames';
 import {
   PENDING_WORKSPACE_ID_KEY,
@@ -445,6 +445,9 @@ export const CommunityWorkspaceScreen = ({
   communityJoinRequest,
   onContinueToAuth,
 }: CommunityWorkspaceScreenProps): ReactElement => {
+  // The session cookie is httpOnly, so "already signed in" comes from the auth
+  // machine rather than a cookie read.
+  const { isAuthenticated } = useAuth();
   const [communityOrganizations, setCommunityOrganizations] = useState<
     CommunityWorkspaceOrganization[]
   >([]);
@@ -483,7 +486,7 @@ export const CommunityWorkspaceScreen = ({
     localStorage.setItem(PENDING_WORKSPACE_ID_KEY, workspace.id);
     localStorage.setItem(PENDING_WORKSPACE_NAME_KEY, workspace.name);
 
-    if (pendingUserData || Cookies.get('user_session_id')) {
+    if (pendingUserData || isAuthenticated) {
       joinCommunityWorkspace(workspace.id);
       return;
     }

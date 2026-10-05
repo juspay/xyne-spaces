@@ -10,7 +10,7 @@ generator client {
 
 generator zero {
   provider      = "prisma-generator-zero"
-  excludeTables = ["WorkspaceJoinRequest", "AiProvisioningStatus", "OrgLLMServiceAccountCredential", "OrganizationDomain", "QuestionnaireResponse", "ExternalSource", "WorkflowFolder", "WorkflowCredential", "AgentConversationShare"]
+  excludeTables = ["WorkspaceJoinRequest", "AiProvisioningStatus", "OrgLLMServiceAccountCredential", "OrganizationDomain", "QuestionnaireResponse", "ExternalSource", "WorkflowFolder", "WorkflowCredential", "AgentConversationShare", "AuthSession", "SessionWorkspaceGrant"]
 }
 
 datasource db {
@@ -847,7 +847,7 @@ model UserSession {
   workspaceId String // denormalized tenant key (stamped on insert)
   id                  String        @id @default(cuid())
   userId              String
-  refreshToken        String        @unique
+  refreshToken        String        // no longer unique: every legacy row of one auth_session shares the session deviceKey
   refreshTokenExpiry  DateTime
   accessToken         String?       // Store the current access token
   accessTokenExpiry   DateTime?
@@ -870,6 +870,65 @@ model UserSession {
   @@index([refreshTokenExpiry])
   @@map("user_sessions")
   @@schema("workflow")
+}
+
+// Account-level login session. The principal is the OrgMember (email is globally unique),
+// so one session spans every workspace the account can reach via session_workspace_grants.
+// `orgId` is the tenant key. Opaque client token: `xs1_` + (id | random payload whose sha256
+// is `tokenHash`, see src/auth/sessionTokens.ts). Never stores provider tokens.
+model AuthSession {
+  id              String    @id @default(uuid())
+  accountId       String    // org_members.memberId
+  orgId           String    // denormalized tenant key
+  tokenHash       String?   @unique // sha256 of the opaque token payload (SESSION_TOKEN_MODE=hashed)
+  legacySessionId String?   @unique // login row in workflow.user_sessions (dual-write)
+  deviceKey       String    // randomUUID(); == refreshToken of every dual-written legacy row
+  status          String    @default("ACTIVE") // SessionStatus
+  platform        String    @default("WEB")    // Platform + 'SDK'
+  aal             Int       @default(1)
+  amr             String[]  @default([])
+  authenticatedAt DateTime
+  absoluteExpiry  DateTime
+  lastSeenAt      DateTime
+  ipAddress       String?   // encryptionService.encrypt()
+  deviceInfo      String?   // encryptionService.encrypt(JSON)
+  revokedAt       DateTime?
+  revokeReason    String?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  orgMember OrgMember               @relation(fields: [accountId], references: [memberId])
+  grants    SessionWorkspaceGrant[]
+
+  @@index([accountId, status])
+  @@index([deviceKey])
+  @@index([status, absoluteExpiry])
+  @@index([orgId])
+  @@map("auth_sessions")
+  @@schema("non_zero")
+}
+
+// One row per workspace an auth_session may act in. `userId` is the workspace-scoped
+// public.users row; `legacySessionId` is the dual-written workflow.user_sessions row.
+model SessionWorkspaceGrant {
+  id              String    @id @default(uuid())
+  sessionId       String
+  workspaceId     String    // tenant key
+  userId          String    // public.users.id
+  legacySessionId String?   @unique
+  grantedAt       DateTime  @default(now())
+  expiresAt       DateTime?
+  revokedAt       DateTime?
+  revokeReason    String?
+
+  session AuthSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  user    User        @relation(fields: [userId], references: [id])
+
+  @@unique([sessionId, workspaceId])
+  @@index([workspaceId, userId])
+  @@index([userId])
+  @@map("session_workspace_grants")
+  @@schema("non_zero")
 }
 
 model User {
@@ -905,6 +964,7 @@ model User {
   auditLogs                 ACLAuditLog[]
   auditTrail                AuditLog[]
   sessions                  UserSession[]           // User can have multiple sessions (multi-device support)
+  sessionGrants             SessionWorkspaceGrant[] // per-workspace grants of account-level auth_sessions
   apiKeys                   ApiKey[]                // User can have multiple API keys
   presenceStatus            UserPresence?           // One-to-one relation with presence status
   createdTickets            Ticket[]               @relation("TicketCreatedBy")
@@ -1577,6 +1637,7 @@ model OrgMember {
   // Relations
   organization Organization @relation(fields: [orgId], references: [orgId])
   users        User[]
+  authSessions AuthSession[]
 
   @@index([orgId])
   @@index([orgId, joinedAt])

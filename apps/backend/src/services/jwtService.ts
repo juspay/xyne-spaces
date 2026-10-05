@@ -11,6 +11,10 @@ export interface JwtPayload {
   memberId: string;
   providerUserId?: string;
   provider?: string;
+  /** auth_sessions.id the token was minted from (absent on legacy-only issuance). */
+  sid?: string;
+  /** workflow.user_sessions id of the grant the token was minted for (indexes the legacy table). */
+  lsid?: string;
   iat?: number;
   exp?: number;
   iss?: string;
@@ -33,7 +37,10 @@ export class JwtService {
   /**
    * Generate a JWT token with the specified payload
    */
-  generateToken(payload: Omit<JwtPayload, 'iat' | 'exp' | 'iss' | 'aud'>): string {
+  generateToken(
+    payload: Omit<JwtPayload, 'iat' | 'exp' | 'iss' | 'aud'>,
+    opts?: { expiresInSeconds?: number },
+  ): string {
     try {
       const token = jwt.sign(
         {
@@ -45,10 +52,12 @@ export class JwtService {
           memberId: payload.memberId,
           providerUserId: payload.providerUserId,
           provider: payload.provider,
+          ...(payload.sid ? { sid: payload.sid } : {}),
+          ...(payload.lsid ? { lsid: payload.lsid } : {}),
         },
         this.secret,
         {
-          expiresIn: config.jwt.expirationSeconds,
+          expiresIn: opts?.expiresInSeconds ?? config.jwt.expirationSeconds,
           issuer: this.issuer,
           audience: this.audience,
         }

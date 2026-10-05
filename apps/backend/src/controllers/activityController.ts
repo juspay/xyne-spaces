@@ -30,10 +30,10 @@ export class ActivityController {
       // req.body is already validated by middleware
       const validated = req.body as ValidatedActivityPayload;
 
-      // Fetch platform from UserSession.deviceInfo
-      let platform: string | undefined;
+      // Platform: the auth session knows it directly; legacy sessions keep it in deviceInfo JSON.
+      let platform: string | undefined = req.authSession?.platform?.toLowerCase();
       const sessionId = req.authenticatedSessionId;
-      if (sessionId) {
+      if (!platform && sessionId) {
         try {
           const session = await this.userSessionService.getSessionById(sessionId);
           if (session?.deviceInfo) {

@@ -1,4 +1,5 @@
 import { Request, Response } from 'express';
+import type { AuthSessionInfo } from '@/auth/types';
 
 export interface ApiResponse<T = any> {
   success: boolean;
@@ -60,7 +61,10 @@ declare global {
   namespace Express {
     interface Request {
       user?: AuthenticatedUser;
+      /** The id that indexes `workflow.user_sessions` for this request (grant legacy row; login row for legacy sessions). */
       authenticatedSessionId?: string;
+      /** Present only when the request resolved through a v3 auth session (session + grant known). */
+      authSession?: AuthSessionInfo;
     }
   }
 }

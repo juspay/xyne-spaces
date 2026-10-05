@@ -65,7 +65,7 @@ const Settings = ({
   const [presencePopoverOpen, setPresencePopoverOpen] = useState(false);
 
   const handleLogout = (): void => {
-    logout();
+    void logout();
   };
 
   const hasValidStatus =

@@ -1,6 +1,7 @@
 import { UserSessionService } from '@/services/userSessionService';
 import { fcmPushService } from '@/services/fcmService';
 import { mtlsCertificateService } from '@/services/mtlsCertificateService';
+import { revokeAccountSessions } from '@/bypassAcl/authSessionServices';
 import { logger } from '@/utils/logger';
 import { db } from '@/database/client';
 import { UserStatus } from '@xyne/shared';
@@ -92,14 +93,31 @@ class AccountDeactivationService {
     return results;
   }
 
+  /**
+   * Account-level sessions (`auth_sessions`) hang off the OrgMember, not the
+   * workspace user, so they are revoked once per email. Idempotent: calling it
+   * for every workspace row of the same email just finds nothing left to revoke.
+   * Provider tokens are never stored any more, so this is the kill switch.
+   */
+  private async revokeAccountSessionsForEmail(email: string): Promise<number> {
+    const orgMember = await db.orgMember.findFirst({
+      where: { email: { equals: email, mode: 'insensitive' } },
+      select: { memberId: true },
+    });
+    if (!orgMember) return 0;
+    return revokeAccountSessions(orgMember.memberId, 'PROVIDER_REVOKED');
+  }
+
   async handleDeactivatedUser({ userId, email }: DeactivatedUser): Promise<UserDeactivationResult> {
     logger.warn('[Deactivation] Cleaning up deactivated user', { userId });
 
     const steps: Array<{ name: string; run: () => Promise<unknown> }> = [
       // Revoke any mTLS certificates issued to the user (s2s call).
       { name: 'revokeCertificates', run: () => mtlsCertificateService.revokeUserCertificates(email) },
-      // Revoke every session so the user cannot refresh into a new token.
+      // Revoke every legacy session so the user cannot refresh into a new token.
       { name: 'revokeSessions', run: () => this.userSessionService.revokeAllUserSessions(userId, 'PROVIDER_REVOKED') },
+      // Revoke the account-level sessions (+ grants, tombstones) behind every workspace.
+      { name: 'revokeAccountSessions', run: () => this.revokeAccountSessionsForEmail(email) },
       // Stop notifications: clear mobile push tokens and browser subscriptions.
       { name: 'unregisterPushTokens', run: () => fcmPushService.unregisterUserTokens(userId) },
     ];

@@ -560,12 +560,12 @@ export class UserService {
 
   /**
    * Get user by refresh token (deprecated - use UserSessionService instead)
-   * @deprecated Use UserSessionService.getSessionByRefreshToken() instead
+   * @deprecated Sessions are resolved by id (see src/auth/sessionResolver.ts); refresh tokens are no longer looked up.
    */
   async getUserByRefreshToken(_refreshToken: string): Promise<User | null> {
     try {
       logger.info(
-        'getUserByRefreshToken called - use UserSessionService.getSessionByRefreshToken() instead'
+        'getUserByRefreshToken called - sessions are resolved by id, not refresh token'
       );
       return null;
     } catch (error) {

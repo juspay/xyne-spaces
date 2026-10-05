@@ -1,7 +1,7 @@
 import axios, { AxiosInstance, InternalAxiosRequestConfig, AxiosResponse, AxiosError } from 'axios';
 import { v4 as uuidv4 } from 'uuid';
 import { reactNativeBridge } from '../../utils/reactNativeBridge';
-import { API_BASE_URL, APP_BASE_PATH, isExternalApp } from '../../config';
+import { API_BASE_URL, isExternalApp } from '../../config';
 import { logger, Logger } from '../../utils/logger';
 import {
   httpRequestDuration,
@@ -11,6 +11,7 @@ import {
   clearAuthTokenTotal,
 } from '../otel';
 import { getDynamicHeaders } from './dynamicHeaders';
+import { buildAuthHeaders } from './authHeaders';
 import { stateMachineActor } from '../../machines/stateMachine';
 import {
   encryptionRequestInterceptor,
@@ -48,7 +49,10 @@ type RefreshOutcome = 'ok' | 'dead' | 'transient';
 let refreshInFlight: Promise<RefreshOutcome> | null = null;
 const refreshSessionOnce = (): Promise<RefreshOutcome> =>
   (refreshInFlight ??= axios
-    .get(`${BASE_URL}/auth/refresh-session`, { withCredentials: true })
+    .get(`${BASE_URL}/auth/refresh-session`, {
+      withCredentials: true,
+      headers: buildAuthHeaders(),
+    })
     .then((): RefreshOutcome => 'ok')
     .catch(
       (e): RefreshOutcome =>
@@ -76,7 +80,10 @@ apiConfig.interceptors.request.use(
     // Tokens are now in HTTP-only cookies and sent automatically by the browser
     // No need to manually set Authorization header - backend reads from cookie
 
-    const requestId = uuidv4();
+    // x-workspace-id (from the URL), x-request-id, x-client-id, x-zero-client-group-id,
+    // x-user-email, x-client-session-id — shared with every apiClient-bypassing call.
+    const authHeaders = buildAuthHeaders();
+    const requestId = authHeaders['x-request-id'] ?? uuidv4();
 
     // Capture request start time for latency tracking
     (
@@ -89,44 +96,8 @@ apiConfig.interceptors.request.use(
     if (config.headers) {
       config.headers.Accept = '*/*';
       config.headers['Access-Control-Allow-Credentials'] = 'true';
-      config.headers['x-request-id'] = requestId;
-
-      // X-Workspace-Id for multi-workspace. Main routes are /:workspaceId/...; standalone
-      // /newWindow/* windows carry it as a query param (then fall back to lastActiveWorkspaceId).
-      // The lane serves under the /sdlc-app basename, whose segment would otherwise
-      // read as the workspace id. APP_BASE_PATH is '' in the main bundle.
-      const path = window.location.pathname;
-      const appPath = path.startsWith(APP_BASE_PATH) ? path.slice(APP_BASE_PATH.length) : path;
-      const firstPathSegment = appPath.match(/^\/([^/]+)/)?.[1];
-      let workspaceId: string | undefined = firstPathSegment;
-      if (firstPathSegment === 'newWindow') {
-        const search = new URLSearchParams(window.location.search);
-        const userEmail = logger.emailId || localStorage.getItem('user_email');
-        workspaceId =
-          search.get('workspaceId') ||
-          (userEmail
-            ? localStorage.getItem(`lastActiveWorkspaceId_${userEmail}`) || undefined
-            : undefined);
-      }
-      if (workspaceId && workspaceId !== 'auth' && workspaceId !== 'sdk-sso') {
-        config.headers['x-workspace-id'] = workspaceId;
-      }
-
-      const zeroClientId = logger.zeroClientId;
-      if (zeroClientId) {
-        config.headers['x-client-id'] = zeroClientId;
-      }
-      const zeroClientGroupId = logger.zeroClientGroupId;
-      if (zeroClientGroupId) {
-        config.headers['x-zero-client-group-id'] = zeroClientGroupId;
-      }
-      const userEmail = logger.emailId;
-      if (userEmail) {
-        config.headers['x-user-email'] = userEmail;
-      }
-      const clientSessionId = logger.clientSessionId;
-      if (clientSessionId) {
-        config.headers['x-client-session-id'] = clientSessionId;
+      for (const [name, value] of Object.entries(authHeaders)) {
+        config.headers[name] = value;
       }
       for (const [name, value] of Object.entries(getDynamicHeaders())) {
         config.headers[name] = value;
