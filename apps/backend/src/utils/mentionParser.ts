@@ -8,6 +8,8 @@
  * shared copy was fixed. Only the channel-reference helper below is
  * backend-local; @xyne/shared has no equivalent.
  */
+import { extractAllMentions } from '@xyne/shared/utils';
+
 export {
   extractUserMentions,
   extractGroupMentions,
@@ -36,3 +38,26 @@ export function extractChannelMentions(htmlContent: string): string[] {
   return [...new Set(channelIds)];
 }
 
+
+// The opening tag @xyne/shared's extractUserMentions / extractGroupMentions match: no closing tag
+// needed, either quote at each end. Mentions are found (and notified) from this tag alone.
+const MENTION_TAG = /<span[^>]*data-mention-type=["'](user|group)["'][^>]*>/g;
+const MENTION_USER_ID = /data-user-id=(["'])([^"']+)\1/;
+
+/**
+ * Guests may only mention people in the channel. Any other mention, and any group mention,
+ * loses its mention tag and stays as plain text, so participants, notifications and
+ * automations never act on it.
+ */
+export function keepMentionsWithin(htmlContent: string, allowedUserIds: ReadonlySet<string>): string {
+  if (!htmlContent.includes('data-mention-type')) return htmlContent;
+  const kept = htmlContent.replace(MENTION_TAG, (tag: string, type: string) => {
+    const userId = type === 'user' ? MENTION_USER_ID.exec(tag)?.[2] : undefined;
+    return userId && allowedUserIds.has(userId) ? tag : '<span>';
+  });
+  // The extractors decide who is mentioned; if they still find anyone else, drop every mention.
+  const { userIds, groupIds } = extractAllMentions(kept);
+  return groupIds.length > 0 || userIds.some((id) => !allowedUserIds.has(id))
+    ? kept.replace(/data-mention-type/g, 'data-mention-removed')
+    : kept;
+}

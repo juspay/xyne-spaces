@@ -91,6 +91,7 @@ export function errorHandler(
   const body: ApiErrorBody = {
     error: {
       code: apiError.code,
+      ...(apiError.reason ? { reason: apiError.reason } : {}),
       message: isServerError ? 'An unexpected error occurred.' : apiError.message,
       ...(apiError.details ? { details: apiError.details } : {}),
       request_id: id,
