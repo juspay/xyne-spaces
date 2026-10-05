@@ -1276,7 +1276,7 @@ model AgentWidgetBinding {
   externalKey     String?
   conversationId  String /// the Spaces thread the card was posted into
   channelId       String
-  messageId       String? /// the posted flow-card message — what a webhook status change updates in place
+  messageId       String? /// the posted flow-card message (informational / future update-in-place)
   spacesAppId     String /// agent lookup key → findBySpacesAppId → decrypt spacesAppToken
   spacesAppUserId String /// bot user the card is posted as (postMessage userId)
   agentSlug       String?
