@@ -1,16 +1,20 @@
-import { MessageType } from '@xyne/shared';
 import { db } from '@/database/client';
 import { logger } from '@/utils/logger';
 import { CacConfigService } from '@/services/cacConfigService';
-import { conversationService } from '@/services/conversationService';
-import { UserGroupRepository } from '@/database/repositories/userGroups';
 import {
   formatGroupMention,
   formatUserMention,
 } from '@/bots/implementations/qa-alert-bot/alert-formatting';
-import { MessagesSideEffectHandler } from '@/zero/side-effects/tables/messages-handler';
 import { buildUserQueryContext } from '@/utils/queryContext';
-import { runAsServiceActor, runAsSystem } from '@/database/tenant/context';
+import {
+  countFeedbackGroupMembers,
+  findFeedbackChannelById,
+  findFeedbackGroupByHandle,
+  findFeedbackGroupById,
+  findFeedbackWorkspaceName,
+  notifyFeedbackPosted,
+  postFeedbackMessage,
+} from '@/bypassAcl/searchFeedbackServices';
 import { UserRepository } from '@/database/repositories/users';
 import { sanitizeForLog } from '@/git-providers/github/apis';
 import {
@@ -65,7 +69,6 @@ export interface PostSearchFeedbackResult {
 export class SearchFeedbackUnavailableError extends Error {}
 
 export class SearchFeedbackService {
-  private userGroupRepository = new UserGroupRepository();
   private userRepository = new UserRepository();
 
   /** Reads the CAC destination for this workspace. Returns `{}` if unset or CAC is unreachable. */
@@ -84,26 +87,16 @@ export class SearchFeedbackService {
   /**
    * Channel to post into, plus the workspace it belongs to.
    *
-   * The configured id is read with `runAsSystem` because the channel may live in a different
-   * workspace than the reporter (one shared default for all workspaces), and normal reads are
-   * scoped to the reporter's workspace. The id only ever comes from CAC, never the request.
-   * Without a configured id, falls back to `#xyne-spaces` in the reporter's workspace.
+   * The configured id is read across workspaces (see bypassAcl/searchFeedbackServices), since
+   * one shared default channel can serve every workspace. The id only ever comes from CAC, never
+   * the request. Without a configured id, falls back to `#xyne-spaces` in the reporter's workspace.
    */
   private async resolveChannel(
     workspaceId: string,
     target: SearchFeedbackTarget
   ): Promise<{ id: string; name: string; workspaceId: string } | null> {
     if (target.channelId) {
-      // Keep the `await` inside the callback. Prisma queries run when awaited, so returning
-      // the promise un-awaited would execute it after the system scope has ended.
-      const byId = await runAsSystem(
-        async () =>
-          await db.channel.findFirst({
-            // Private is allowed here (an admin chose it); archived is not.
-            where: { id: target.channelId, isArchived: false },
-            select: { id: true, name: true, workspaceId: true },
-          })
-      );
+      const byId = await findFeedbackChannelById(target.channelId);
       if (byId) return byId;
       logger.error(
         '[SearchFeedback] Configured channel missing or archived; falling back to default',
@@ -138,13 +131,7 @@ export class SearchFeedbackService {
     target: SearchFeedbackTarget
   ): Promise<{ id: string; name: string; alias: string | null } | null> {
     if (target.userGroupId) {
-      const byId = await runAsSystem(
-        async () =>
-          await db.userGroup.findUnique({
-            where: { id: target.userGroupId },
-            select: { id: true, name: true, alias: true },
-          })
-      );
+      const byId = await findFeedbackGroupById(target.userGroupId);
       if (byId) return byId;
       logger.error(
         '[SearchFeedback] Configured user group does not exist; falling back to default',
@@ -156,11 +143,7 @@ export class SearchFeedbackService {
         }
       );
     }
-    return runAsSystem(
-      async () =>
-        (await this.userGroupRepository.findByAlias(FEEDBACK_GROUP, workspaceId)) ??
-        (await this.userGroupRepository.findByName(FEEDBACK_GROUP, workspaceId))
-    );
+    return findFeedbackGroupByHandle(FEEDBACK_GROUP, workspaceId);
   }
 
   /**
@@ -205,12 +188,9 @@ export class SearchFeedbackService {
     // - reporterWorkspace: for the `Workspace:` line (the channel can be shared)
     // - reporter: for the headline mention, read before switching workspace
     // - ctx: for the notification step after the save
-    const [group, reporterWorkspace, reporter, ctx] = await Promise.all([
+    const [group, reporterWorkspaceName, reporter, ctx] = await Promise.all([
       this.resolveGroup(channel.workspaceId, target),
-      runAsSystem(
-        async () =>
-          await db.workspace.findUnique({ where: { id: workspaceId }, select: { name: true } })
-      ),
+      findFeedbackWorkspaceName(workspaceId),
       this.userRepository.findById(userId),
       buildUserQueryContext(userId),
     ]);
@@ -218,9 +198,7 @@ export class SearchFeedbackService {
     // If the group can't be found, still post the feedback, just without the tag.
     let groupMentionHtml: string | null = null;
     if (group) {
-      const memberCount = await runAsSystem(
-        async () => await this.userGroupRepository.getUserCount(group.id)
-      );
+      const memberCount = await countFeedbackGroupMembers(group.id);
       groupMentionHtml = formatGroupMention(group.id, group.name, group.alias, memberCount);
     } else {
       logger.warn('[SearchFeedback] User group not found; posting without a mention', {
@@ -246,36 +224,17 @@ export class SearchFeedbackService {
       filters,
       ...(sort ? { sort } : {}),
       source,
-      workspaceName: reporterWorkspace?.name ?? '',
+      workspaceName: reporterWorkspaceName ?? '',
       when: new Date(),
       timeZone: FEEDBACK_TIMEZONE,
     });
 
-    // Write in the channel's workspace, which may differ from the reporter's.
-    const result = await runAsServiceActor(userId, channel.workspaceId, () =>
-      conversationService.createConversationWithMessage({
-        channelId: channel.id,
-        userId,
-        content,
-        msgType: MessageType.USER,
-        // Don't add the reporter to the channel just because they sent feedback.
-        isAddingParticipant: false,
-        emitsMessageReceivedViaSideEffects: true,
-      })
-    );
+    // Written in the channel's workspace, which may differ from the reporter's.
+    const result = await postFeedbackMessage(userId, channel, content);
 
-    // Notifications (incl. the group ping) and unread counts, in the channel's workspace.
-    // Only `workspaceId` is overridden: the handler reads just `userID` and `workspaceId`, so the
-    // reporter's own role/memberId are unused here. Revisit if the handler starts reading them.
-    void runAsServiceActor(userId, channel.workspaceId, () =>
-      new MessagesSideEffectHandler({ ...ctx, workspaceId: channel.workspaceId })
-        .onInsert({
-          entityId: result.message.messageId,
-          entityType: 'messages',
-          operation: 'insert',
-        })
-        .catch((err) => logger.error('[SearchFeedback] Side-effect handler error:', err))
-    );
+    // Notifications (incl. the group ping), in the channel's workspace. Not awaited: the
+    // message is already posted, and failures are logged inside.
+    void notifyFeedbackPosted(ctx, channel.workspaceId, result.message.messageId);
 
     logger.info('[SearchFeedback] Posted feedback', {
       source: sanitizeForLog(source),
