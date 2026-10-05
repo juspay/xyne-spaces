@@ -111,8 +111,8 @@ import {
   MAX_NOTIFICATION_KEYWORD_LENGTH,
   normalizeNotificationKeywords,
 } from '../utils/notificationKeywords.js';
-import { isDeskChannelType, deskTypeForChannelType } from '../utils/channel.js';
-import { MAX_DUPLICATE_SCOPE_FIELDS } from './types.js';
+import { isDeskChannelType, deskTypeForChannelType, serializeDeskAppIds } from '../utils/channel.js';
+import { MAX_DESK_APPS, MAX_DUPLICATE_SCOPE_FIELDS } from './types.js';
 import { DEFAULT_ROLE_NAME_TO_ENUM } from '../utils/roleFrameworkUtils.js';
 import { SUMMARY_PROMPT_MAX_LENGTH } from '../templates/callSummary.js';
 import { z } from 'zod';
@@ -10475,6 +10475,9 @@ export const mutators = defineMutators({
         deskReportEnabled: z.boolean().optional(),
         deskReportAgentSlug: z.string().optional().nullable(),
         deskReportRangeDays: z.number().optional(),
+        // Artifact apps shown on this desk, in order (see EmailChannelPreference.deskAppIds).
+        // An empty list clears the column.
+        deskAppIds: z.array(z.string().min(1).max(64)).max(MAX_DESK_APPS).nullable().optional(),
         // Scoped duplicate detection config (see EmailChannelPreference.duplicateScopeConfig)
         duplicateScopeConfig: z
           .object({
@@ -10505,6 +10508,7 @@ export const mutators = defineMutators({
           deskReportEnabled,
           deskReportAgentSlug,
           deskReportRangeDays,
+          deskAppIds,
           duplicateScopeConfig,
         },
       }) => {
@@ -10530,6 +10534,7 @@ export const mutators = defineMutators({
             ...(deskReportEnabled !== undefined ? { deskReportEnabled } : {}),
             ...(deskReportAgentSlug !== undefined ? { deskReportAgentSlug } : {}),
             ...(deskReportRangeDays !== undefined ? { deskReportRangeDays } : {}),
+            ...(deskAppIds !== undefined ? { deskAppIds: serializeDeskAppIds(deskAppIds) } : {}),
             ...(duplicateScopeConfig !== undefined
               ? { duplicateScopeConfig: duplicateScopeConfig == null ? null : JSON.stringify(duplicateScopeConfig) }
               : {}),
@@ -10564,6 +10569,7 @@ export const mutators = defineMutators({
             deskReportEnabled: deskReportEnabled ?? false,
             deskReportAgentSlug: deskReportAgentSlug ?? null,
             deskReportRangeDays: deskReportRangeDays ?? 1,
+            deskAppIds: serializeDeskAppIds(deskAppIds ?? null),
             duplicateScopeConfig: duplicateScopeConfig ? JSON.stringify(duplicateScopeConfig) : null,
           });
         }

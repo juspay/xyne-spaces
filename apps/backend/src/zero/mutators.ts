@@ -128,7 +128,7 @@ import {
   withSlashCommandArtifactClosed,
 } from '@xyne/shared';
 import { SDLC_HUB_KNOWLEDGE_FOLDER, sdlcTrackStatusSchema } from '@xyne/shared';
-import { MAX_DUPLICATE_SCOPE_FIELDS } from '@xyne/shared';
+import { MAX_DESK_APPS, MAX_DUPLICATE_SCOPE_FIELDS, serializeDeskAppIds } from '@xyne/shared';
 import {
   evaluateEta,
   buildEtaActivityIntents,
@@ -16607,6 +16607,9 @@ export function createMutators(
           deskReportEnabled: z.boolean().optional(),
           deskReportAgentSlug: z.string().optional().nullable(),
           deskReportRangeDays: z.number().optional(),
+          // Artifact apps shown on this desk, in order (see EmailChannelPreference.deskAppIds).
+          // An empty list clears the column.
+          deskAppIds: z.array(z.string().min(1).max(64)).max(MAX_DESK_APPS).nullable().optional(),
           // Scoped duplicate detection config (see EmailChannelPreference.duplicateScopeConfig)
           duplicateScopeConfig: z
             .object({
@@ -16636,6 +16639,7 @@ export function createMutators(
             deskReportEnabled,
             deskReportAgentSlug,
             deskReportRangeDays,
+            deskAppIds,
             duplicateScopeConfig,
           },
         }) => {
@@ -16681,6 +16685,7 @@ export function createMutators(
               ...(deskReportEnabled !== undefined ? { deskReportEnabled } : {}),
               ...(deskReportAgentSlug !== undefined ? { deskReportAgentSlug } : {}),
               ...(deskReportRangeDays !== undefined ? { deskReportRangeDays } : {}),
+              ...(deskAppIds !== undefined ? { deskAppIds: serializeDeskAppIds(deskAppIds) } : {}),
               ...(duplicateScopeConfig !== undefined
                 ? { duplicateScopeConfig: duplicateScopeConfig == null ? null : JSON.stringify(duplicateScopeConfig) }
                 : {}),
@@ -16716,6 +16721,7 @@ export function createMutators(
               deskReportEnabled: deskReportEnabled ?? false,
               deskReportAgentSlug: deskReportAgentSlug ?? null,
               deskReportRangeDays: deskReportRangeDays ?? 1,
+              deskAppIds: serializeDeskAppIds(deskAppIds ?? null),
               duplicateScopeConfig: duplicateScopeConfig ? JSON.stringify(duplicateScopeConfig) : null,
             });
           }
