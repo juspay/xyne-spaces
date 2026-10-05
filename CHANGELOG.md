@@ -1,3 +1,10 @@
+## [1.454.1-release-20261005.2](https://github.com/juspay/xyne-spaces/compare/v1.454.1-release-20261005.1...v1.454.1-release-20261005.2) (2026-10-05)
+
+
+### Bug Fixes
+
+* clean UI release ([#2645](https://github.com/juspay/xyne-spaces/issues/2645)) ([f5746eb](https://github.com/juspay/xyne-spaces/commit/f5746eb8fad1fe46bb070f187005f9cd455aa14d)), closes [#2535](https://github.com/juspay/xyne-spaces/issues/2535)
+
 ## [1.454.1-release-20261005.1](https://github.com/juspay/xyne-spaces/compare/v1.454.0...v1.454.1-release-20261005.1) (2026-10-05)
 
 
