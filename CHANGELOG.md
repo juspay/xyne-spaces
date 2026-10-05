@@ -1,3 +1,15 @@
+## [1.458.0](https://github.com/juspay/xyne-spaces/compare/v1.457.1...v1.458.0) (2026-10-05)
+
+
+### Features
+
+* sdlc changes sync with latest main ([#2630](https://github.com/juspay/xyne-spaces/issues/2630)) ([840df62](https://github.com/juspay/xyne-spaces/commit/840df622011f26d4274be4279c94b3a583aef8ee)), closes [#2531](https://github.com/juspay/xyne-spaces/issues/2531) [#2532](https://github.com/juspay/xyne-spaces/issues/2532) [#2528](https://github.com/juspay/xyne-spaces/issues/2528)
+
+
+### Bug Fixes
+
+* show starred SDLC channels under Starred in chat sidebar ([#2598](https://github.com/juspay/xyne-spaces/issues/2598)) ([07f8842](https://github.com/juspay/xyne-spaces/commit/07f88422524380d679e10be684b99f63f738252b))
+
 ## [1.457.1](https://github.com/juspay/xyne-spaces/compare/v1.457.0...v1.457.1) (2026-10-05)
 
 
