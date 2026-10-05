@@ -116,8 +116,13 @@ import {
   MAX_NOTIFICATION_KEYWORD_LENGTH,
   normalizeNotificationKeywords,
 } from '../utils/notificationKeywords.js';
-import { isDeskChannelType, deskTypeForChannelType, serializeDeskAppIds } from '../utils/channel.js';
-import { MAX_DESK_APPS, MAX_DUPLICATE_SCOPE_FIELDS } from './types.js';
+import {
+  isDeskChannelType,
+  deskTypeForChannelType,
+  serializeAppIdList,
+  serializeDeskAppIds,
+} from '../utils/channel.js';
+import { MAX_CHANNEL_PUBLISHED_APPS, MAX_DESK_APPS, MAX_DUPLICATE_SCOPE_FIELDS } from './types.js';
 import { DEFAULT_ROLE_NAME_TO_ENUM } from '../utils/roleFrameworkUtils.js';
 import { SUMMARY_PROMPT_MAX_LENGTH } from '../templates/callSummary.js';
 import { z } from 'zod';
@@ -910,6 +915,37 @@ export const mutators = defineMutators({
         await tx.mutate.channel_stats.update({
           channelId,
           addUserPolicy: policy,
+        });
+      },
+    ),
+    // Apps a channel admin publishes to every member's tabs (Channel.publishedAppIds).
+    // Members layer their own changes on top locally. Desks are excluded outright:
+    // they keep their own all-shared list in email_channel_preferences.deskAppIds.
+    setPublishedApps: defineMutator(
+      z.object({
+        channelId: z.string(),
+        appIds: z.array(z.string().min(1).max(64)).max(MAX_CHANNEL_PUBLISHED_APPS),
+      }),
+      async ({ tx, ctx, args: { channelId, appIds } }) => {
+        const channel = await tx.run(zql.channels.where('id', channelId).one());
+        if (!channel) {
+          throw new Error("Channel doesn't exist");
+        }
+        if (channel.isArchived) {
+          throw new Error('Cannot publish apps to an archived channel');
+        }
+        if (channel.scopeType !== ChannelScopeType.DEFAULT || isDeskChannelType(channel.type)) {
+          throw new Error('Apps can only be published to public or private channels');
+        }
+        const participant = await tx.run(
+          zql.channel_participants.where('channelId', channelId).where('userId', ctx.userID).one(),
+        );
+        if (participant?.role !== ChannelRole.ADMIN) {
+          throw new Error('Only channel admins can publish apps to the channel');
+        }
+        await tx.mutate.channels.update({
+          id: channelId,
+          publishedAppIds: serializeAppIdList(appIds),
         });
       },
     ),

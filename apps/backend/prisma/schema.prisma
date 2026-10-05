@@ -1902,6 +1902,7 @@ model Channel {
   showTicketsTabTicketsInChat Boolean?   @default(true)
   callSummaryPrompt String?              // Per-channel detailed call summary sections override; null = default
   connectId       String?                // Slack Connect: this channel's connect_group handle (null until backfilled)
+  publishedAppIds String?                // JSON-serialised string[] of artifact app ids a channel admin published to every member's tabs, in order; always null on desk channels
 
   // Relations
   conversations      Conversation[]

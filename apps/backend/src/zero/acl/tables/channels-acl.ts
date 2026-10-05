@@ -1,5 +1,5 @@
 import type { DeleteID, InsertValue, Transaction, UpdateValue } from '@rocicorp/zero';
-import { ChannelRole, Schema } from '@xyne/shared';
+import { ChannelRole, Schema, isDeskChannelType } from '@xyne/shared';
 import { BaseACL } from '../core/base-acl';
 import { MutationACLError, TableSchema } from '../core/types';
 import { zql } from '../../queries';
@@ -21,6 +21,12 @@ export class ChannelsACL extends BaseACL<'channels'> {
 
   async canInsert(args: InsertValue<TableSchema<'channels'>>, tx: Transaction<Schema>): Promise<void> {
     assertGuestWriteBlocked(this.ctx, 'channels', 'insert', 'Channel');
+
+    // Apps are published to an existing channel by its admin (channel.setPublishedApps),
+    // never seeded at creation — which also keeps the column null on every new desk.
+    if (args.publishedAppIds) {
+      throw new MutationACLError('Channel insert failed: apps are published after the channel exists', 'channels');
+    }
 
     if (args.projectId) {
       const project = await tx.run(zql.projects.where('id', args.projectId).one());
@@ -61,6 +67,17 @@ export class ChannelsACL extends BaseACL<'channels'> {
 
     if (!currentUserParticipantData) {
        throw new MutationACLError('Channel update failed: only channel participants can modify channel settings', 'channels');
+    }
+
+    // Published apps are a normal-channel feature; desks keep theirs in
+    // email_channel_preferences.deskAppIds, so the column must stay null on a desk.
+    if (args.publishedAppIds !== undefined) {
+      if (isDeskChannelType(channel.type)) {
+        throw new MutationACLError('Channel update failed: apps cannot be published to a desk channel', 'channels');
+      }
+      if (currentUserParticipantData.role !== ChannelRole.ADMIN) {
+        throw new MutationACLError('Channel update failed: only ADMINs can publish apps to the channel', 'channels');
+      }
     }
 
     // Only admins or channel creator can rename the channel

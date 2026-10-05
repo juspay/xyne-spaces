@@ -870,6 +870,12 @@ export const MAX_DUPLICATE_SCOPE_FIELDS = 5;
  */
 export const MAX_DESK_APPS = 8;
 
+/**
+ * Max artifact apps a channel admin can publish to a normal channel
+ * (Channel.publishedAppIds). Enforced by both Zero mutators and the app picker.
+ */
+export const MAX_CHANNEL_PUBLISHED_APPS = 8;
+
 // @ts-ignore TS1294
 export enum FormContextType {
   BOARD = 'BOARD',

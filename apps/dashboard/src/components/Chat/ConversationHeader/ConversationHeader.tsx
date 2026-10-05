@@ -35,11 +35,12 @@ import {
   ConversationTabListType,
   isChannelTabsCustomizable,
 } from '../ConversationPannel/ConversationPannel.utils';
-import { getChannelTabsStore } from '../../../hooks/barItems';
+import { useChannelTabsStore } from '../../../hooks/barItems';
 import {
   BarAddMenu,
   BarRemoveButton,
   SortableBar,
+  useChannelAppPublishing,
   SortableBarItem,
   useChannelTabBuiltIns,
 } from '../../BarCustomize';
@@ -58,7 +59,7 @@ import { standaloneNavigate, APP_DRAG_STYLE, APP_NO_DRAG_STYLE } from '../../../
 import { usePlatform } from '../../../hooks/usePlatform';
 import { XyneAIStar } from '../../icons/xyne-ai';
 import { invokeShortcut } from '../../../shortcuts';
-import { CalendarEvent, PencilEdit, PlusDefault } from '@xyne/icons';
+import { CalendarEvent, Globe, PencilEdit, PlusDefault } from '@xyne/icons';
 import { xyneCalendarActor } from '../../../machines/xyneCalendarMachine';
 import { useCachedQuery } from '../../../hooks/useCachedQuery';
 import { queries } from '../../../zero/queries';
@@ -113,6 +114,13 @@ const ChannelTabTrigger = ({
           {cloneElement(tab.icon, { color: 'currentColor' } as { color: string })}
         </span>
         <span className={cn('text-sm font-medium tracking-[-0.28px]')}>{tab.label}</span>
+        {tab.published && (
+          <Globe
+            size={12}
+            className='shrink-0 text-muted-foreground'
+            aria-label='Published to this channel'
+          />
+        )}
       </button>
     </Tabs.Trigger>
   );
@@ -148,11 +156,12 @@ const ConversationHeader = ({
   const channel = useVisibleChannel(channelId);
   const askAIAvailable = useAskAIAvailable();
   const channelTabBuiltIns = useChannelTabBuiltIns(channel?.scopeType);
-  // Null in a DM, a group DM or a ticket/document channel: those show the
-  // built-in tabs with no ×, no + and no dragging.
-  const tabsStore = isChannelTabsCustomizable(channel?.scopeType)
-    ? getChannelTabsStore(channelId)
-    : null;
+  // Null in a DM, a group DM, a ticket/document channel or a desk: those show
+  // the built-in tabs with no ×, no + and no dragging.
+  const layeredTabsStore = useChannelTabsStore(channelId, channel?.publishedAppIds);
+  const tabsStore = isChannelTabsCustomizable(channel) ? layeredTabsStore : null;
+  // Channel admins get step 2 in the app picker: publish to everyone's tabs.
+  const appPublishing = useChannelAppPublishing(channelId, channel);
   const channelTabIds = useMemo(() => (channelTabs ?? []).map(tab => tab.value), [channelTabs]);
   const [editSnapshot, setEditSnapshot] = useState<readonly string[] | null>(null);
   const isEditingTabs = !!tabsStore && editSnapshot !== null;
@@ -681,6 +690,7 @@ const ConversationHeader = ({
               <BarAddMenu
                 store={tabsStore}
                 builtIns={channelTabBuiltIns}
+                {...(appPublishing ? { publish: appPublishing } : {})}
                 trackCategory='CHANNELS'
                 side='bottom'
                 align='start'

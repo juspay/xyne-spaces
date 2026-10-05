@@ -18,6 +18,7 @@ import { Button } from '../../ui/Button/Button';
 import { AppIcon } from '../../AppIcon/AppIcon';
 import { SortableBarRow } from './SortableBarRow';
 import { AppPickerDialog, type BarBuiltIn } from '../../BarCustomize';
+import type { AppPublishOptions } from '../../BarCustomize/useChannelAppPublishing';
 import {
   type BarItemsStore,
   useAppSnapshots,
@@ -36,6 +37,12 @@ interface BarCustomizerProps {
   trackCategory: string;
   /** Rendered under the subtitle — the channel selector, for channel tabs. */
   headerSlot?: ReactNode;
+  /** Channel admins only: lets the app picker publish apps to the channel. */
+  publish?: AppPublishOptions;
+  /** Shows a reset control with this label, calling `store.reset()`. */
+  resetLabel?: string;
+  /** App ids to mark as "Published" in the Shown list. */
+  publishedAppIds?: ReadonlySet<string>;
 }
 
 /**
@@ -51,6 +58,9 @@ export const BarCustomizer = ({
   builtIns,
   trackCategory,
   headerSlot,
+  publish,
+  resetLabel,
+  publishedAppIds,
 }: BarCustomizerProps): ReactElement => {
   const ids = store.useItems();
   const snapshots = useAppSnapshots();
@@ -99,7 +109,7 @@ export const BarCustomizer = ({
       return {
         icon: <AppIcon name={snapshot.icon} size={16} aria-hidden='true' />,
         label: snapshot.title,
-        hint: 'App',
+        hint: publishedAppIds?.has(appId) ? 'Published app' : 'App',
       };
     }
     const builtIn = builtInById.get(id);
@@ -112,6 +122,18 @@ export const BarCustomizer = ({
         <p className='text-base font-semibold text-foreground'>{title}</p>
         <p className='mt-0.5 text-sm text-muted-foreground'>{subtitle}</p>
         {headerSlot && <div className='mt-3'>{headerSlot}</div>}
+        {resetLabel && (
+          <Button
+            variant='ghost'
+            size='sm'
+            className='mt-2 h-7 px-2 text-xs text-muted-foreground'
+            onClick={() => store.reset()}
+            data-track-category={trackCategory}
+            data-track-name='ResetBarLayout'
+          >
+            {resetLabel}
+          </Button>
+        )}
       </div>
 
       <section className='space-y-2'>
@@ -206,6 +228,7 @@ export const BarCustomizer = ({
           store.add(appItemId(app.id));
         }}
         trackCategory={trackCategory}
+        {...(publish ? { publish } : {})}
       />
     </div>
   );

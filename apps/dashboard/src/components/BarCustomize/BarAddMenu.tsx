@@ -12,6 +12,7 @@ import {
   MAX_APPS_PER_BAR,
 } from '../../hooks/barItems';
 import { cn } from '../../utils/classNames';
+import type { AppPublishOptions } from './useChannelAppPublishing';
 
 interface BarAddMenuProps {
   store: BarItemsStore;
@@ -21,6 +22,8 @@ interface BarAddMenuProps {
   trigger?: ReactNode;
   side?: 'top' | 'right' | 'bottom' | 'left';
   align?: 'start' | 'center' | 'end';
+  /** Channel admins only: lets the app picker publish apps to the channel. */
+  publish?: AppPublishOptions;
 }
 
 /**
@@ -41,6 +44,7 @@ export const BarAddMenu = ({
   trigger,
   side = 'bottom',
   align = 'start',
+  publish,
 }: BarAddMenuProps): ReactElement => {
   const ids = store.useItems();
   const [open, setOpen] = useState(false);
@@ -149,6 +153,7 @@ export const BarAddMenu = ({
           store.add(appItemId(app.id));
         }}
         trackCategory={trackCategory}
+        {...(publish ? { publish } : {})}
       />
     </>
   );

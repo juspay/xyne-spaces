@@ -794,6 +794,7 @@ export const channelTable = table('channels')
     showTicketsTabTicketsInChat: boolean().optional(),
     callSummaryPrompt: string().optional(), // Per-channel detailed call summary sections override
     connectId: string().optional(), // Slack Connect: connect_group handle (null until backfilled)
+    publishedAppIds: string().optional(), // JSON string[] of artifact apps a channel admin published; always null on desks
   })
   .primaryKey('id');
 
