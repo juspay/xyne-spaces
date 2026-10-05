@@ -1,3 +1,10 @@
+## [1.460.1](https://github.com/juspay/xyne-spaces/compare/v1.460.0...v1.460.1) (2026-10-05)
+
+
+### Bug Fixes
+
+* calls v2 copy link, start-call position, and RSVP-based calendar pills ([#2631](https://github.com/juspay/xyne-spaces/issues/2631)) ([153a6ff](https://github.com/juspay/xyne-spaces/commit/153a6ffed7b51d9f387efa1aacd64be1c92d4637))
+
 ## [1.460.0](https://github.com/juspay/xyne-spaces/compare/v1.459.1...v1.460.0) (2026-10-05)
 
 
