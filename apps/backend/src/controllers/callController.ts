@@ -59,6 +59,8 @@ import { validateOwnerInChannel } from '@/sdlc/entityLinkService';
 import { buildCallInviteUrl } from '@/utils/urlUtils';
 import { readRecordingGoogleDocLinks } from '@/utils/recordingGoogleDocs';
 import { hideCallTx } from '@/bypassAcl/transactions/callController';
+import { acquireLock, releaseLock } from '@/utils/distributedLock';
+import { redisService } from '@/services/redisService';
 
 const RecordingParticipantsCommandSchema = z.object({
   action: z.enum(['add', 'remove']),
@@ -597,6 +599,31 @@ export class CallController {
       const linkedArtifactMessageId =
         typeof artifactMessageId === 'string' ? artifactMessageId : undefined;
 
+      // Guards the channel-call race: two near-simultaneous initiateCall requests for the
+      // same channel can both miss any existing Call row (there is none yet for a brand-new
+      // call — see the pending-room marker below) and both create separate LiveKit rooms.
+      // The lock serializes that check-then-create window per channel (+conversation, when
+      // thread-linked, to match the two lookup variants below).
+      const channelCallKeySuffix = conversationId ? `${finalChannelId}:${conversationId}` : finalChannelId;
+      const lockKey = `lock:call-initiate:${channelCallKeySuffix}`;
+      const markerKey = `call:pending-room:${channelCallKeySuffix}`;
+      // Must stay comfortably under createRoom's emptyTimeout (120s, below) so a marker
+      // never points at a room identity that's about to be reclaimed by LiveKit.
+      const PENDING_ROOM_MARKER_TTL_SECONDS = 90;
+      // Fails open (proceeds unlocked) on contention or a Redis error — a rare duplicate
+      // room is preferable to ever blocking a user from starting a call.
+      const callInitiateLock = await acquireLock(lockKey, { ttlSeconds: 15, waitTimeoutMs: 5000, retryDelayMs: 500 });
+      if (!callInitiateLock) {
+        logger.warn('call_initiate_lock_contended', { correlationId, channelId: finalChannelId, proceedingUnlocked: true });
+      }
+      let callInitiateLockReleased = false;
+      const releaseCallInitiateLockOnce = async (): Promise<void> => {
+        if (callInitiateLockReleased) return;
+        callInitiateLockReleased = true;
+        await releaseLock(callInitiateLock);
+      };
+
+      try {
       // For headless recordings, always create a new recording session
       // For regular calls, check if there's already an active call in this channel
       logger.info(`[${correlationId}] existing_call_check | channel_id=${finalChannelId}, conversation_id=${conversationId || 'none'}`);
@@ -621,6 +648,10 @@ export class CallController {
         const roomInfo = await livekitService.getRoomInfo(existingCall.externalId);
 
         if (roomInfo) {
+          // A live room was confirmed to already exist for this channel — the race this
+          // lock guards against (two requests both creating a room) can no longer happen,
+          // so release early rather than serializing ordinary concurrent joins.
+          await releaseCallInitiateLockOnce();
           stage = 'existing_call_removed_participant_gate';
           const participant = await repositories.calls.findParticipant(existingCall.id, userId);
           const pMeta = (participant?.metadata as CallParticipantMetadata | null) ?? null;
@@ -723,6 +754,67 @@ export class CallController {
         }
       }
 
+      // Bridges the gap between "a room was just created for this channel" and "the webhook
+      // has persisted the Call row for it" (the webhook only fires once a participant actually
+      // connects, which can lag room creation by a meaningful amount). Without this, a second
+      // request arriving in that window would see no existingCall above and create its own
+      // duplicate room — exactly the race this lock+marker pair exists to close.
+      stage = 'pending_room_marker_check';
+      const markerRaw = await redisService.get(markerKey).catch((err) => {
+        logger.warn(`[${correlationId}] pending_room_marker_read_failed`, { markerKey, error: err });
+        return null;
+      });
+      if (markerRaw) {
+        let marker: { roomName: string; roomLink: string; createdByUserId: string; createdAt: number } | null = null;
+        try {
+          marker = JSON.parse(markerRaw);
+        } catch (parseError) {
+          logger.warn(`[${correlationId}] pending_room_marker_parse_failed`, { markerKey, error: parseError });
+        }
+        if (marker) {
+          stage = 'pending_room_liveness_check';
+          const pendingRoomInfo = await livekitService.getRoomInfo(marker.roomName);
+          if (pendingRoomInfo) {
+            await releaseCallInitiateLockOnce();
+            stage = 'pending_room_user_lookup';
+            const pendingRoomUser = await db.user.findUnique({ where: { id: userId }, select: { picture: true } });
+            stage = 'pending_room_token_generation';
+            const token = await livekitService.generateAccessToken({
+              userIdentity: userId,
+              roomName: marker.roomName,
+              userName: userName || userEmail || 'Unknown',
+              metadata: JSON.stringify({ picture: pendingRoomUser?.picture || null }),
+            });
+            logger.info('joining_pending_room_via_marker', {
+              roomName: marker.roomName,
+              userId,
+              channelId: finalChannelId,
+              correlationId,
+            });
+
+            void userActivityTrackingService.trackCallJoined(userId, {
+              callId: marker.roomName,
+              channelId: finalChannelId,
+            });
+
+            res.json({
+              success: true,
+              token,
+              livekitUrl: livekitService.getServerUrl(),
+              externalId: marker.roomName,
+              callId: marker.roomName,
+              roomLink: marker.roomLink,
+              channelId: finalChannelId,
+              scopeType: channel.scopeType,
+            });
+            return;
+          }
+          // The pending room died before the webhook could persist a Call row for it
+          // (e.g. the creator never actually connected) — stale marker, self-heal.
+          await redisService.del(markerKey).catch(() => {});
+        }
+      }
+
       // No active call or existing call's room is gone - create a new LiveKit room
       // DB records will be created by webhook when first participant joins
       callExternalId = uuidv4();
@@ -794,6 +886,20 @@ export class CallController {
 
       logger.info(`[${callExternalId}] livekit_room_created | user_id=${userId}`);
 
+      // Lets a request racing in behind this one (lock wait, or Redis-down fail-open)
+      // discover this just-created room before the webhook has had a chance to persist
+      // its Call DB row, instead of creating a second duplicate room. TTL is kept under
+      // createRoom's emptyTimeout (120s) above so a stale marker never outlives its room.
+      stage = 'pending_room_marker_write';
+      await redisService.set(
+        markerKey,
+        JSON.stringify({ roomName: callExternalId, roomLink, createdByUserId: userId, createdAt: Date.now() }),
+        PENDING_ROOM_MARKER_TTL_SECONDS,
+      ).catch((err) => {
+        logger.warn(`[${callExternalId}] pending_room_marker_write_failed`, { markerKey, error: err });
+      });
+      await releaseCallInitiateLockOnce();
+
       // Explicit dispatch — the worker now runs with agent_name set, so it no longer
       // auto-joins; every call must be dispatched. Best-effort, with its own retry
       // chain (dispatchTranscriptionAgentForCall); must not fail call creation.
@@ -854,6 +960,12 @@ export class CallController {
         channelId: finalChannelId,
         scopeType: channel.scopeType, // Add scopeType for CallKit filtering
       });
+      } finally {
+        // Safety net — every success path above already releases explicitly once it's
+        // past the room-creation risk; this only fires for an early return (e.g. channel
+        // not found) or an exception thrown while still holding the lock.
+        await releaseCallInitiateLockOnce();
+      }
     } catch (error) {
       const callIdForLog = callExternalId ?? correlationId;
       logger.error(`[${callIdForLog}] call_initiation_failed`, { stage, error: error, stack: error instanceof Error ? error.stack : undefined });

@@ -5,6 +5,7 @@ import { ChannelScopeType, ChannelVisibility, ChannelType, ProjectType } from '@
 import { QueryOptions } from '@/types/database';
 import { logger } from '@/utils/logger';
 import { withWorkspaceScope } from '@/database/tenant/context';
+import { acquireLock, releaseLock } from '@/utils/distributedLock';
 //import { queueChannelIngestion } from '@/queues/vespaQueue';
 
 export interface CreateChannelInput {
@@ -416,31 +417,42 @@ export class ChannelRepository extends BaseRepository<Channel, CreateChannelInpu
     // Single user - create or find DM channel
     if (invitedUserIds.length === 1) {
       const targetUserId = invitedUserIds[0];
-
-      // Check if DM channel exists
-      let dmChannel = await this.getDMChannel(userId, targetUserId);
-
-      if (dmChannel) {
-        return dmChannel.id;
-      }
-
-      // Create new DM channel
+      // name is deterministic for a given pair, so it doubles as the lock key — two
+      // concurrent first-time DMs between the same two users (e.g. both calling each
+      // other at once) would otherwise both miss the existence check below and each
+      // create their own duplicate DM channel (no DB unique constraint catches this).
       const dmChannelName = [userId, targetUserId].sort().join(',');
-
-      dmChannel = await this.create({
-        scopeType: ChannelScopeType.DM,
-        name: dmChannelName,
-        visibility: ChannelVisibility.PRIVATE,
-        createdBy: userId,
-        projectId,
-        workspaceId,
+      const dmChannelLock = await acquireLock(`lock:dm-channel:${dmChannelName}`, {
+        ttlSeconds: 20,
+        waitTimeoutMs: 10000,
+        retryDelayMs: 500,
       });
+      try {
+        // Check if DM channel exists
+        let dmChannel = await this.getDMChannel(userId, targetUserId);
 
-      // Add both users as participants
-      await channelParticipants.addParticipant(dmChannel.id, userId, 'ADMIN', false);
-      await channelParticipants.addParticipant(dmChannel.id, targetUserId, 'MEMBER', false);
+        if (dmChannel) {
+          return dmChannel.id;
+        }
 
-      return dmChannel.id;
+        // Create new DM channel
+        dmChannel = await this.create({
+          scopeType: ChannelScopeType.DM,
+          name: dmChannelName,
+          visibility: ChannelVisibility.PRIVATE,
+          createdBy: userId,
+          projectId,
+          workspaceId,
+        });
+
+        // Add both users as participants
+        await channelParticipants.addParticipant(dmChannel.id, userId, 'ADMIN', false);
+        await channelParticipants.addParticipant(dmChannel.id, targetUserId, 'MEMBER', false);
+
+        return dmChannel.id;
+      } finally {
+        await releaseLock(dmChannelLock);
+      }
     }
 
     // Multiple users - create or find group DM channel
@@ -452,53 +464,75 @@ export class ChannelRepository extends BaseRepository<Channel, CreateChannelInpu
     const isLargeGroup = groupDmName.length > 255;
 
     if (!isLargeGroup) {
-      // Check if group DM already exists with these exact participants
-      const existingGroupDM = await this.getGroupChannelByMembers(allUserIds);
-
-      if (existingGroupDM) {
-        return existingGroupDM.id;
-      }
-
-      // Create new group DM channel
-      const groupDMChannel = await this.create({
-        scopeType: ChannelScopeType.GROUP_DM,
-        name: groupDmName,
-        visibility: ChannelVisibility.PRIVATE,
-        createdBy: userId,
-        projectId,
-        workspaceId,
+      const groupDmLock = await acquireLock(`lock:dm-channel:${groupDmName}`, {
+        ttlSeconds: 20,
+        waitTimeoutMs: 10000,
+        retryDelayMs: 500,
       });
+      try {
+        // Check if group DM already exists with these exact participants
+        const existingGroupDM = await this.getGroupChannelByMembers(allUserIds);
 
-      // Add all users as participants
-      await channelParticipants.addParticipant(groupDMChannel.id, userId, 'ADMIN', false);
-      for (const invitedId of invitedUserIds) {
-        await channelParticipants.addParticipant(groupDMChannel.id, invitedId, 'MEMBER', false);
+        if (existingGroupDM) {
+          return existingGroupDM.id;
+        }
+
+        // Create new group DM channel
+        const groupDMChannel = await this.create({
+          scopeType: ChannelScopeType.GROUP_DM,
+          name: groupDmName,
+          visibility: ChannelVisibility.PRIVATE,
+          createdBy: userId,
+          projectId,
+          workspaceId,
+        });
+
+        // Add all users as participants
+        await channelParticipants.addParticipant(groupDMChannel.id, userId, 'ADMIN', false);
+        for (const invitedId of invitedUserIds) {
+          await channelParticipants.addParticipant(groupDMChannel.id, invitedId, 'MEMBER', false);
+        }
+
+        return groupDMChannel.id;
+      } finally {
+        await releaseLock(groupDmLock);
       }
-
-      return groupDMChannel.id;
     }
 
     // Large group: create nothing — back the group with the initiator's own self-DM
     // (the "Saved messages" DM, keyed on the bare userId). Calls get their access
     // from call_participants, so invitees still see and join without a channel.
-    const selfDm = await this.getDMChannel(userId, userId);
-    if (selfDm) {
-      return selfDm.id;
+    // Same race shape as above (self-DM is normally provisioned at login, so this is
+    // a rare fallback, but guard it identically rather than leave a narrower gap).
+    const selfDmLock = await acquireLock(`lock:dm-channel:${userId}`, {
+      ttlSeconds: 20,
+      waitTimeoutMs: 10000,
+      retryDelayMs: 500,
+    });
+    let newSelfDmId: string;
+    try {
+      const selfDm = await this.getDMChannel(userId, userId);
+      if (selfDm) {
+        return selfDm.id;
+      }
+
+      // Self-DM is provisioned at login; create it here only if it is somehow missing.
+      const newSelfDm = await this.create({
+        scopeType: ChannelScopeType.DM,
+        name: userId,
+        description: 'Saved messages',
+        visibility: ChannelVisibility.PRIVATE,
+        createdBy: userId,
+        projectId,
+        workspaceId,
+      });
+      await channelParticipants.addParticipant(newSelfDm.id, userId, 'ADMIN', false);
+      newSelfDmId = newSelfDm.id;
+    } finally {
+      await releaseLock(selfDmLock);
     }
 
-    // Self-DM is provisioned at login; create it here only if it is somehow missing.
-    const newSelfDm = await this.create({
-      scopeType: ChannelScopeType.DM,
-      name: userId,
-      description: 'Saved messages',
-      visibility: ChannelVisibility.PRIVATE,
-      createdBy: userId,
-      projectId,
-      workspaceId,
-    });
-    await channelParticipants.addParticipant(newSelfDm.id, userId, 'ADMIN', false);
-
-    return newSelfDm.id;
+    return newSelfDmId;
   }
 
 }
