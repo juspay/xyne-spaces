@@ -6,16 +6,18 @@ export const DEFAULT_MIN_CHANNELS = 2;
 
 export const ACTIVE_SUGGESTION_ID = '__active__';
 export const DORMANT_SUGGESTION_ID = '__dormant__';
-export const ACTIVE_SUGGESTION_NAME = 'Active';
-export const DORMANT_SUGGESTION_NAME = 'Quiet';
+export const ACTIVE_SUGGESTION_NAME = 'In Focus';
+export const DORMANT_SUGGESTION_NAME = 'In the Background';
 
 export const BOT_SUGGESTION_ID = '__bots__';
 export const GROUP_DM_SUGGESTION_ID = '__groupDms__';
 export const FREQUENT_CONTACTS_SUGGESTION_ID = '__frequentContacts__';
 export const BOT_SUGGESTION_NAME = 'Apps & Bots';
 export const GROUP_DM_SUGGESTION_NAME = 'Group DMs';
-export const FREQUENT_CONTACTS_SUGGESTION_NAME = 'Frequent contacts';
-export const MAX_FREQUENT_CONTACTS = 8;
+export const FREQUENT_CONTACTS_SUGGESTION_NAME = 'Top contacts';
+export const MAX_FREQUENT_CONTACTS = 5;
+export const MAX_GROUP_DMS = 3;
+export const MAX_BOT_DMS = 2;
 
 export const DEFAULT_ACTIVE_WINDOW_DAYS = 30;
 export const MIN_ACTIVE_WINDOW_DAYS = 1;
@@ -92,6 +94,8 @@ export interface ComputeDmSectionSuggestionsInput {
   existingSectionNames: readonly string[];
   minChannels?: number;
   maxFrequentContacts?: number;
+  maxGroupDms?: number;
+  maxBotDms?: number;
 }
 
 const normalizeName = (name: string): string => name.trim().toLowerCase();
@@ -210,34 +214,27 @@ export function computeProjectSectionSuggestions(
     else channelIdsByProjectId.set(channel.projectId, [channel.id]);
   }
 
-  const takenNames = new Set(existingSectionNames.map(normalizeName));
-
   const suggestions: SectionSuggestion[] = [];
-  for (const [projectId, channelIds] of channelIdsByProjectId) {
-    if (channelIds.length < minChannels) continue;
+  const addBucket = makeBucketAdder(suggestions, existingSectionNames, minChannels);
+
+  const ordered = [...channelIdsByProjectId].sort(([aId, aIds], [bId, bIds]) => {
+    if (bIds.length !== aIds.length) return bIds.length - aIds.length;
+    const aName = projectById.get(aId)?.name ?? '';
+    const bName = projectById.get(bId)?.name ?? '';
+    return aName.localeCompare(bName);
+  });
+
+  for (const [projectId, channelIds] of ordered) {
     const project = projectById.get(projectId);
     if (!project) continue;
 
     const name = project.name.trim().slice(0, SECTION_NAME_MAX_LENGTH).trim();
     if (!name) continue;
 
-    const normalized = normalizeName(name);
-    if (takenNames.has(normalized)) continue;
-    takenNames.add(normalized);
-
-    suggestions.push({ id: projectId, kind: 'project', name, channelIds });
+    addBucket(projectId, 'project', name, channelIds);
   }
 
-  suggestions.sort(
-    (a, b) => b.channelIds.length - a.channelIds.length || a.name.localeCompare(b.name),
-  );
-
-  const only = suggestions.length === 1 ? suggestions[0] : undefined;
-  if (only && only.channelIds.length === candidates.length) {
-    return [];
-  }
-
-  return suggestions;
+  return suppressAllEncompassing(suggestions, candidates.length);
 }
 
 export function computeActivitySectionSuggestions(
@@ -283,26 +280,39 @@ export function computeDmSectionSuggestions(
     existingSectionNames,
     minChannels = DEFAULT_MIN_CHANNELS,
     maxFrequentContacts = MAX_FREQUENT_CONTACTS,
+    maxGroupDms = MAX_GROUP_DMS,
+    maxBotDms = MAX_BOT_DMS,
   } = input;
 
   const candidates = selectDmCandidates(channels, indexStatuses(statuses));
 
   if (candidates.length === 0) return [];
 
-  const botChannelIds: string[] = [];
-  const groupDmChannelIds: string[] = [];
+  const botCandidates: SuggestionChannel[] = [];
+  const groupDmCandidates: SuggestionChannel[] = [];
   const contactCandidates: SuggestionChannel[] = [];
   for (const channel of candidates) {
-    if (channel.scopeType === ChannelScopeType.GROUP_DM) groupDmChannelIds.push(channel.id);
-    else if (channel.isBotDm) botChannelIds.push(channel.id);
+    if (channel.scopeType === ChannelScopeType.GROUP_DM) groupDmCandidates.push(channel);
+    else if (channel.isBotDm) botCandidates.push(channel);
     else if ((channel.contactWeight ?? 0) > 0) contactCandidates.push(channel);
   }
 
+  const byRecency = (a: SuggestionChannel, b: SuggestionChannel): number =>
+    (b.lastActivityAt ?? 0) - (a.lastActivityAt ?? 0) || a.id.localeCompare(b.id);
+
   const frequentContactChannelIds = contactCandidates
-    .sort(
-      (a, b) => (b.contactWeight ?? 0) - (a.contactWeight ?? 0) || a.id.localeCompare(b.id),
-    )
+    .sort((a, b) => (b.contactWeight ?? 0) - (a.contactWeight ?? 0) || a.id.localeCompare(b.id))
     .slice(0, maxFrequentContacts)
+    .map(channel => channel.id);
+
+  const botChannelIds = botCandidates
+    .sort(byRecency)
+    .slice(0, maxBotDms)
+    .map(channel => channel.id);
+
+  const groupDmChannelIds = groupDmCandidates
+    .sort(byRecency)
+    .slice(0, maxGroupDms)
     .map(channel => channel.id);
 
   const suggestions: SectionSuggestion[] = [];

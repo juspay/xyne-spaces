@@ -71,6 +71,7 @@ import { affinityService } from '../../../services/affinityService';
 import { useCachedQuery } from '../../../hooks/useCachedQuery';
 import { queries } from '../../../zero/queries';
 import { mutators } from '../../../zero/mutators';
+import { surfaceMutationError } from '../../../utils/zeroMutationToast';
 import { toast } from 'sonner';
 import {
   useChannelSort,
@@ -87,6 +88,7 @@ import {
   ChannelSection,
   ChannelType,
   ChannelScopeType,
+  ChannelFilterMode,
   isDeskChannelType,
   NotificationLevel,
   DEFAULT_ACTIVE_WINDOW_DAYS,
@@ -126,6 +128,7 @@ import { stateMachineActor, type VisibleChannel } from '../../../machines/stateM
 import { usePendingDelayedMessagesCount } from '../../../hooks/useUserDelayedMessages';
 
 const SECTION_SUGGESTION_DISMISSED_KEY = 'xyne:section-suggestion-dismissed';
+const CREATE_SECTION_CHUNK_SIZE = 25;
 
 const ContainerDropZone = ({
   id,
@@ -378,7 +381,9 @@ const ChatDirectory = ({
     let hasAffinity = false;
     for (const [channelId, otherId] of dmCounterpartByChannelId) {
       const weight = affinityService.getUserWeight(otherId);
-      if (weight > 0) hasAffinity = true;
+      const userType = usersById.get(otherId)?.userType;
+      const isBot = userType === UserType.BOT || userType === UserType.APP;
+      if (weight > 0 && !isBot) hasAffinity = true;
       weights.set(channelId, weight);
     }
     if (hasAffinity) return weights;
@@ -388,7 +393,7 @@ const ChatDirectory = ({
       weights.set(channelId, recencyScore.get(otherId) ?? 0);
     }
     return weights;
-  }, [dmCounterpartByChannelId, dmRank, suggestionDismissed, affinityVersion]);
+  }, [dmCounterpartByChannelId, dmRank, suggestionDismissed, affinityVersion, usersById]);
 
   const suggestionChannels = useMemo(
     () =>
@@ -492,44 +497,64 @@ const ChatDirectory = ({
   }, []);
 
   const handleCreateSections = useCallback(
-    (groups: OrganizerGroup[]) => {
+    async (groups: OrganizerGroup[]) => {
       const timestamp = Date.now();
       const created: { id: string; channelIds: string[] }[] = [];
       let prevSectionKey = lastSectionPosition;
+
+      setShowOrganizer(false);
 
       for (const group of groups) {
         const sectionId = crypto.randomUUID();
         const position = keyBetween(prevSectionKey, null);
         prevSectionKey = position;
 
-        void zero.mutate(
-          mutators.channelSection.create({
-            id: sectionId,
-            name: group.name.trim(),
-            emoji: null,
-            position,
-            timestamp,
-          }),
-        );
-
-        let prevChannelKey: string | null = null;
-        for (const channelId of group.channelIds) {
-          const channelPosition = keyBetween(prevChannelKey, null);
-          prevChannelKey = channelPosition;
-          void zero.mutate(
-            mutators.channel.moveToSection({
-              channelId,
-              sectionId,
-              position: channelPosition,
+        const sectionCreated = await surfaceMutationError(
+          zero.mutate(
+            mutators.channelSection.create({
+              id: sectionId,
+              name: group.name.trim(),
+              emoji: null,
+              position,
+              filterMode: ChannelFilterMode.ALL,
               timestamp,
             }),
+          ),
+        );
+        if (!sectionCreated) continue;
+
+        const movedChannelIds: string[] = [];
+        let prevChannelKey: string | null = null;
+        for (let i = 0; i < group.channelIds.length; i += CREATE_SECTION_CHUNK_SIZE) {
+          const chunk = group.channelIds.slice(i, i + CREATE_SECTION_CHUNK_SIZE);
+          const positions = chunk.map(() => {
+            const channelPosition = keyBetween(prevChannelKey, null);
+            prevChannelKey = channelPosition;
+            return channelPosition;
+          });
+          const results = await Promise.all(
+            chunk.map((channelId, index) =>
+              surfaceMutationError(
+                zero.mutate(
+                  mutators.channel.moveToSection({
+                    channelId,
+                    sectionId,
+                    position: positions[index] ?? keyBetween(null, null),
+                    timestamp,
+                  }),
+                ),
+              ),
+            ),
           );
+          chunk.forEach((channelId, index) => {
+            if (results[index]) movedChannelIds.push(channelId);
+          });
         }
 
-        created.push({ id: sectionId, channelIds: group.channelIds });
+        created.push({ id: sectionId, channelIds: movedChannelIds });
       }
 
-      setShowOrganizer(false);
+      if (created.length === 0) return;
 
       const sectionCount = created.length;
       const channelCount = created.reduce((sum, s) => sum + s.channelIds.length, 0);
@@ -542,8 +567,10 @@ const ChatDirectory = ({
             onClick: () => {
               const undoTimestamp = Date.now();
               for (const section of created) {
-                void zero.mutate(
-                  mutators.channelSection.remove({ id: section.id, timestamp: undoTimestamp }),
+                void surfaceMutationError(
+                  zero.mutate(
+                    mutators.channelSection.remove({ id: section.id, timestamp: undoTimestamp }),
+                  ),
                 );
               }
             },
@@ -1538,7 +1565,7 @@ const ChatDirectory = ({
               activeWindowDays={activeWindowDays}
               onActiveWindowDaysChange={setActiveWindowDays}
               onCancel={() => setShowOrganizer(false)}
-              onConfirm={handleCreateSections}
+              onConfirm={groups => void handleCreateSections(groups)}
             />
           )}
         </Dialog>

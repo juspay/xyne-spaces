@@ -7,15 +7,7 @@ import {
   type ChangeEvent,
   type ReactElement,
 } from 'react';
-import {
-  ChatDefault,
-  ChevronRight,
-  FolderAi,
-  Hashtag,
-  MultipleCrossCancelDefault,
-  PlusDefault,
-  SearchDefault,
-} from '@xyne/icons';
+import { ChatDefault, FolderAi, Hashtag, MultipleCrossCancelDefault } from '@xyne/icons';
 import {
   ChannelVisibility,
   MAX_ACTIVE_WINDOW_DAYS,
@@ -27,6 +19,11 @@ import {
 import ChatLock from '../../icons/ChatLock';
 import { Button } from '../../ui/Button';
 import { Checkbox } from '../../ui/Checkbox/Checkbox';
+import {
+  GroupedSelectList,
+  GroupedSelectGroup,
+  GroupedSelectRow,
+} from '../../ui/GroupedSelectList/GroupedSelectList';
 import {
   SegmentedToggle,
   type SegmentedToggleOption,
@@ -52,8 +49,8 @@ const SECTION_TIPS = [
   'Drag DMs into a section anytime.',
   'Your sections are private to you.',
   'Click a section name to rename it.',
-  'Uncheck a section to skip it.',
-  'Use × to remove a channel and + to add it back.',
+  'Untick every channel to skip a section.',
+  'Untick a channel to leave it out of the section.',
   'Drag channels between sections anytime.',
 ];
 
@@ -62,7 +59,6 @@ export interface OrganizerGroup {
   name: string;
   channelIds: string[];
   excludedChannelIds: string[];
-  included: boolean;
   expanded: boolean;
 }
 
@@ -98,34 +94,25 @@ const ChannelLine = ({
   const { userID } = useAuthContextValues();
   const { displayName } = useChannelDisplayName(channel, userID);
   return (
-    <div
-      className={cn(
-        'group flex h-9 items-center gap-3 rounded-[10px] border border-transparent px-3 transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground',
-        excluded ? 'text-muted-foreground' : 'text-sidebar-foreground',
-      )}
-    >
+    <GroupedSelectRow>
+      <Checkbox
+        checked={!excluded}
+        onChange={onToggle}
+        ariaLabel={`Include ${displayName}`}
+        label=''
+        data-track-category='CHAT_SIDEBAR'
+        data-track-name={excluded ? 'ORGANIZER_RESTORE_CHANNEL' : 'ORGANIZER_REMOVE_CHANNEL'}
+      />
       <span className='flex size-4 shrink-0 items-center justify-center text-muted-foreground'>
         <ChannelIcon channel={channel} />
       </span>
-      <span className={cn('min-w-0 flex-1 truncate text-sm', excluded && 'line-through')}>
-        {displayName}
-      </span>
-      <button
-        type='button'
-        onClick={onToggle}
-        aria-label={excluded ? `Add ${displayName} back` : `Remove ${displayName}`}
-        data-track-category='CHAT_SIDEBAR'
-        data-track-name={excluded ? 'ORGANIZER_RESTORE_CHANNEL' : 'ORGANIZER_REMOVE_CHANNEL'}
-        className={cn(
-          'shrink-0 rounded p-0.5 text-muted-foreground transition-opacity hover:text-foreground',
-          excluded ? 'opacity-100' : 'opacity-0 group-hover:opacity-100',
-        )}
-      >
-        {excluded ? <PlusDefault size={13} /> : <MultipleCrossCancelDefault size={13} />}
-      </button>
-    </div>
+      <span className='min-w-0 flex-1 truncate text-[13px] text-foreground'>{displayName}</span>
+    </GroupedSelectRow>
   );
 };
+
+const groupsSignature = (suggestions: readonly SectionSuggestion[]): string =>
+  suggestions.map(s => `${s.id}:${s.channelIds.join('|')}`).join(';');
 
 const buildGroups = (
   suggestions: readonly SectionSuggestion[],
@@ -136,7 +123,6 @@ const buildGroups = (
     name: s.name,
     channelIds: [...s.channelIds],
     excludedChannelIds: [],
-    included: true,
     expanded: totalChannels <= AUTO_EXPAND_MAX_CHANNELS,
   }));
 
@@ -166,12 +152,11 @@ export const SectionOrganizerDialog = ({
   suggestionsRef.current = suggestions;
   totalChannelsRef.current = totalChannels;
 
-  const isFirstRender = useRef(true);
+  const appliedSignatureRef = useRef(groupsSignature(suggestions));
   useEffect(() => {
-    if (isFirstRender.current) {
-      isFirstRender.current = false;
-      return;
-    }
+    const nextSignature = groupsSignature(suggestionsRef.current);
+    if (nextSignature === appliedSignatureRef.current) return;
+    appliedSignatureRef.current = nextSignature;
     setGroups(buildGroups(suggestionsRef.current, totalChannelsRef.current));
   }, [mode, activeWindowDays]);
 
@@ -217,15 +202,22 @@ export const SectionOrganizerDialog = ({
     );
   };
 
-  const includedCount = (group: OrganizerGroup): number =>
-    group.channelIds.filter(id => !group.excludedChannelIds.includes(id)).length;
+  const toggleAllChannels = (groupId: string, checked: boolean): void => {
+    setGroups(prev =>
+      prev.map(g =>
+        g.id === groupId ? { ...g, excludedChannelIds: checked ? [] : [...g.channelIds] } : g,
+      ),
+    );
+  };
+
+  const liveChannelIds = (group: OrganizerGroup): string[] =>
+    group.channelIds.filter(id => !group.excludedChannelIds.includes(id) && channelsById.has(id));
+
+  const includedCount = (group: OrganizerGroup): number => liveChannelIds(group).length;
 
   const selectedGroups = groups
-    .filter(g => g.included && includedCount(g) > 0)
-    .map(g => ({
-      ...g,
-      channelIds: g.channelIds.filter(id => !g.excludedChannelIds.includes(id)),
-    }));
+    .filter(g => includedCount(g) > 0)
+    .map(g => ({ ...g, channelIds: liveChannelIds(g) }));
   const takenNames = new Set(existingNames.map(n => n.trim().toLowerCase()));
 
   const invalidNames = new Set<string>();
@@ -239,6 +231,7 @@ export const SectionOrganizerDialog = ({
   }
 
   const canConfirm = selectedGroups.length > 0 && invalidNames.size === 0;
+  const selectedChannelCount = selectedGroups.reduce((sum, g) => sum + g.channelIds.length, 0);
 
   const [tipIndex] = useState(() => {
     const stored = Number(localStorage.getItem(TIP_INDEX_KEY));
@@ -300,101 +293,83 @@ export const SectionOrganizerDialog = ({
         )}
       </div>
 
-      <div className='flex items-center gap-2 rounded-md border border-border bg-background px-2 focus-within:ring-2 focus-within:ring-ring'>
-        <SearchDefault size={16} className='shrink-0 text-muted-foreground' />
-        <input
-          value={filter}
-          onChange={(e: ChangeEvent<HTMLInputElement>) => setFilter(e.target.value)}
-          placeholder='Find a channel…'
-          autoComplete='off'
-          data-track-category='CHAT_SIDEBAR'
-          data-track-name='ORGANIZER_SEARCH'
-          className='flex-1 border-0 bg-transparent py-2 text-sm text-foreground outline-none placeholder:text-muted-foreground'
-        />
-      </div>
-
-      <div className='flex min-h-0 flex-col'>
-        <div className='max-h-[22rem] min-h-0 overflow-y-auto rounded-md border border-border bg-sidebar/40 p-2'>
-          {visibleGroups.map(group => {
-            const isOpen = (group.expanded || !!query) && group.included;
-            const hasNameError = invalidNames.has(group.id);
-            return (
-              <div key={group.id} className='mb-1'>
-                <div className='flex h-9 items-center gap-1.5 rounded-[10px] border border-transparent px-2 text-sidebar-foreground transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground'>
-                  <Checkbox
-                    checked={group.included}
-                    onChange={included => updateGroup(group.id, { included })}
-                    ariaLabel={`Include ${group.name}`}
-                    label=''
-                    size='sm'
+      <GroupedSelectList
+        search={filter}
+        onSearchChange={setFilter}
+        searchPlaceholder='Search channels...'
+        isEmpty={visibleGroups.length === 0}
+        emptyLabel={
+          query
+            ? 'No channels found'
+            : mode === 'activity'
+              ? `Everything falls on one side of ${activeWindowDays} days. Try a shorter window.`
+              : mode === 'dms'
+                ? 'No app, bot or group DMs to group.'
+                : 'No channels found'
+        }
+        trackCategory='CHAT_SIDEBAR'
+        trackName='ORGANIZER_SEARCH'
+        className='rounded-md border border-border'
+      >
+        {visibleGroups.map(group => {
+          const isOpen = group.expanded || !!query;
+          const hasNameError = invalidNames.has(group.id);
+          const selectedInGroup = includedCount(group);
+          return (
+            <GroupedSelectGroup
+              key={group.id}
+              expanded={isOpen}
+              onToggleExpand={() => updateGroup(group.id, { expanded: !group.expanded })}
+              count={selectedInGroup}
+              trackCategory='CHAT_SIDEBAR'
+              trackName='ORGANIZER_TOGGLE_EXPAND'
+              header={
+                <input
+                  value={group.name}
+                  onChange={e => updateGroup(group.id, { name: e.target.value })}
+                  maxLength={SECTION_NAME_MAX_LENGTH}
+                  data-track-category='CHAT_SIDEBAR'
+                  data-track-name='ORGANIZER_RENAME_SECTION'
+                  className={cn(
+                    'min-w-0 flex-1 border-0 border-b border-transparent bg-transparent px-0.5 py-0.5 text-[13px] font-medium text-foreground outline-none focus:border-b-primary',
+                    hasNameError && 'border-b-destructive focus:border-b-destructive',
+                  )}
+                />
+              }
+            >
+              <GroupedSelectRow>
+                <Checkbox
+                  checked={selectedInGroup > 0 && selectedInGroup === group.channelIds.length}
+                  indeterminate={selectedInGroup > 0 && selectedInGroup < group.channelIds.length}
+                  onChange={checked => toggleAllChannels(group.id, checked)}
+                  label='All channels'
+                  data-track-category='CHAT_SIDEBAR'
+                  data-track-name='ORGANIZER_TOGGLE_SECTION'
+                />
+              </GroupedSelectRow>
+              {group.channelIds.map(channelId => {
+                const channel = channelsById.get(channelId);
+                if (!channel) return null;
+                return (
+                  <ChannelLine
+                    key={channelId}
+                    channel={channel}
+                    excluded={group.excludedChannelIds.includes(channelId)}
+                    onToggle={() => toggleChannel(group.id, channelId)}
                   />
-                  <button
-                    type='button'
-                    onClick={() => updateGroup(group.id, { expanded: !group.expanded })}
-                    aria-label={isOpen ? 'Collapse' : 'Expand'}
-                    data-track-category='CHAT_SIDEBAR'
-                    data-track-name='ORGANIZER_TOGGLE_EXPAND'
-                    className='shrink-0 text-muted-foreground'
-                  >
-                    <ChevronRight
-                      size={13}
-                      className={cn('transition-transform', isOpen && 'rotate-90')}
-                    />
-                  </button>
-                  <input
-                    value={group.name}
-                    onChange={e => updateGroup(group.id, { name: e.target.value })}
-                    maxLength={SECTION_NAME_MAX_LENGTH}
-                    disabled={!group.included}
-                    data-track-category='CHAT_SIDEBAR'
-                    data-track-name='ORGANIZER_RENAME_SECTION'
-                    className={cn(
-                      'min-w-0 flex-1 border-0 border-b border-transparent bg-transparent px-0.5 py-0.5 text-sm font-medium text-foreground outline-none focus:border-b-primary',
-                      !group.included && 'text-muted-foreground line-through',
-                      hasNameError && 'border-b-destructive focus:border-b-destructive',
-                    )}
-                  />
-                  <span className='shrink-0 text-xs text-muted-foreground'>
-                    {includedCount(group)}
-                  </span>
-                </div>
-
-                {isOpen && (
-                  <div className='pl-6'>
-                    {group.channelIds.map(channelId => {
-                      const channel = channelsById.get(channelId);
-                      if (!channel) return null;
-                      return (
-                        <ChannelLine
-                          key={channelId}
-                          channel={channel}
-                          excluded={group.excludedChannelIds.includes(channelId)}
-                          onToggle={() => toggleChannel(group.id, channelId)}
-                        />
-                      );
-                    })}
-                  </div>
-                )}
-              </div>
-            );
-          })}
-
-          {visibleGroups.length === 0 && (
-            <div className='px-3 py-6 text-center text-sm text-muted-foreground'>
-              {query
-                ? 'No channels found'
-                : mode === 'activity'
-                  ? `Everything falls on one side of ${activeWindowDays} days. Try a shorter window.`
-                  : mode === 'dms'
-                    ? 'No app, bot or group DMs to group.'
-                    : 'No channels found'}
-            </div>
-          )}
-        </div>
-      </div>
+                );
+              })}
+            </GroupedSelectGroup>
+          );
+        })}
+      </GroupedSelectList>
 
       <div className='flex items-center justify-between gap-3'>
-        <span className='text-xs text-muted-foreground'>{SECTION_TIPS[tipIndex]}</span>
+        <span className='text-xs text-muted-foreground'>
+          {query
+            ? `Filtered view — Create still applies to all ${selectedChannelCount} channels.`
+            : SECTION_TIPS[tipIndex]}
+        </span>
         <span className={cn('inline-flex', !canConfirm && 'cursor-not-allowed')}>
           <Button
             type='button'

@@ -2504,9 +2504,10 @@ export function createMutators(
           name: z.string(),
           emoji: z.string().nullable().optional(),
           position: z.string(),
+          filterMode: z.nativeEnum(ChannelFilterMode).nullable().optional(),
           timestamp: z.number(),
         }),
-        async ({ tx, args: { id, name, emoji, position, timestamp } }) => {
+        async ({ tx, args: { id, name, emoji, position, filterMode, timestamp } }) => {
           // Reject a name this user already uses in this workspace (case-insensitive).
           const siblings = await tx.run(
             zql.channel_sections
@@ -2527,6 +2528,7 @@ export function createMutators(
             position,
             isCollapsed: false,
             isDeleted: false,
+            ...(filterMode !== undefined && { filterMode: filterMode ?? null }),
             createdAt: timestamp,
             updatedAt: timestamp,
           });

@@ -64,7 +64,7 @@ const SortableSection = ({
     id: section.id,
     data: { type: 'section' },
   });
-  // Drop zone over the section body, so a channel can be dropped into an empty section to.
+  // Drop zone over the section body, so a channel can be dropped into an empty section too.
   const { setNodeRef: setDropNodeRef } = useDroppable({
     id: `section-drop-${section.id}`,
     data: { type: 'container' },
