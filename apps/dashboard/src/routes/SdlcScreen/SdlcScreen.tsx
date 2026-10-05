@@ -207,8 +207,6 @@ const DISCUSSION_ITEM_FALLBACK_NAME: Record<SdlcItemDiscussion['type'], string> 
 };
 /** A scope nothing belongs to, for a panel whose subject hasn't resolved yet. */
 const NO_DISCUSSIONS: DiscussionScope = { ownerIds: [] };
-/** Set on the history entry a conversation opened onto, so leaving it steps back. */
-const THREAD_STEP_STATE = { sdlcThreadStep: true } as const;
 import { SdlcFileList } from './SdlcFileList';
 import { SdlcCalls } from './SdlcCalls';
 import { ActivityPill, isPartOfCall, type SdlcLiveCalls } from './ActivityPill';
@@ -1748,7 +1746,7 @@ export default function SdlcScreen(): ReactElement {
       else if (input.threadOnly) next.set(SDLC_THREAD_ONLY_PARAM, '1');
       const search = next.toString();
       const url = `${location.pathname}${search ? `?${search}` : ''}`;
-      void navigate(url, input.push ? { state: THREAD_STEP_STATE } : { replace: true });
+      void navigate(url, { replace: !input.push });
     },
     [location.pathname, location.search, navigate],
   );
@@ -1848,19 +1846,10 @@ export default function SdlcScreen(): ReactElement {
     });
   });
 
-  // Whether the conversation on show was opened onto a history entry of its own,
-  // which leaving it should step back from rather than write over.
-  const threadStepped =
-    typeof location.state === 'object' &&
-    location.state !== null &&
-    'sdlcThreadStep' in location.state;
   const selectDiscussionConversation = useCallback(
     (conversationId: string | null, options?: { selectedTab?: 'details' }): void => {
-      if (conversationId === null && threadStepped) {
-        void navigate(-1);
-        return;
-      }
-      // Opening one is a step the browser's Back undoes, as leaving it here is.
+      // Leaving never steps history back: the frame shares it with the host app, so
+      // the previous entry can be a screen outside SDLC.
       setDiscussionUrl({
         open: true,
         conversationId,
@@ -1868,7 +1857,7 @@ export default function SdlcScreen(): ReactElement {
         push: conversationId !== null,
       });
     },
-    [navigate, setDiscussionUrl, threadStepped],
+    [setDiscussionUrl],
   );
 
   const openSdlcAssistant = useCallback(
