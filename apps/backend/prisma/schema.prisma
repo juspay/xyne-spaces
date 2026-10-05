@@ -516,6 +516,7 @@ model WorkflowExecution {
   @@index([workflowId])
   @@index([workflowId, createdAt(sort: Desc), id])
   @@index([parentWorkflowExecutionId])
+  @@index([status, workflowType, createdAt])
   @@map("workflow_executions")
   @@schema("workflow")
 }
@@ -947,6 +948,7 @@ model User {
 
   @@index([workspaceId, id])
   @@index([activityStatus])
+  @@index([orgMemberId])
   @@map("users")
   @@schema("public")
 }
@@ -2731,6 +2733,7 @@ model ExternalMessage {
   @@unique([externalSourceId, externalId])  // Prevent duplicates
   @@index([externalSourceId, externalThreadId])  // Fast lookup by thread
   @@index([messageId])                           // Fast lookup by message
+  @@index([externalId])
   @@map("external_messages")
   @@schema("workflow")
 }
