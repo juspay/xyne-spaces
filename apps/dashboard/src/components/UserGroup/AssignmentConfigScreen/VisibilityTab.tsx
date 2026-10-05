@@ -82,11 +82,17 @@ export function VisibilityTab({
   const usePercentage = computeUsePercentageForBoard(boardComplexityScores, selectedBoardId);
   // On % share boards the engine ranks by share of recent assignments, which this client-side
   // score cannot reproduce, so the score column is hidden rather than shown as misleading.
-  const showScore = selectedBoardId !== null && !usePercentage;
   const selectedBoardScore = (boardComplexityScores ?? []).find(s => s.boardId === selectedBoardId);
-  const shareWindowDays = selectedBoardScore?.percentageWindowDays ?? 7;
-  const shareTicketsLabel =
-    selectedBoardScore?.percentageShareBasis === 'OPEN' ? 'still-open tickets' : 'tickets';
+  const shareWindowDays = selectedBoardScore?.percentageWindowDays ?? null;
+  const shareBasis = selectedBoardScore?.percentageShareBasis ?? null;
+  // Without all three share settings the engine falls back to standard workload scoring
+  const isShareConfigured =
+    usePercentage &&
+    shareWindowDays !== null &&
+    (shareBasis === 'ALL' || shareBasis === 'OPEN') &&
+    (selectedBoardScore?.percentageWindowStartAt ?? null) !== null;
+  const showScore = selectedBoardId !== null && !isShareConfigured;
+  const shareTicketsLabel = shareBasis === 'OPEN' ? 'still-open tickets' : 'tickets';
 
   if (!isCurrentUserGroupMember) {
     return (
@@ -122,9 +128,11 @@ export function VisibilityTab({
           </Select>
           <p className='text-xs leading-[1.4] text-muted-foreground'>
             {selectedBoardId
-              ? usePercentage
+              ? isShareConfigured
                 ? `“Use percentage assignment” is on for this board: each ticket goes to whoever is furthest below their % share of ${shareTicketsLabel} assigned here in the current window, which resets every ${shareWindowDays} day${shareWindowDays === 1 ? '' : 's'}. Open tickets only break ties, so no score is shown.`
-                : 'Score = (weightedActiveTasks + coldStartOffset) − expertiseBonus. Lowest score is assigned next.'
+                : usePercentage
+                  ? '“Use percentage assignment” is on, but the share window or tickets counted is not set, so the standard score is used. Lowest score is assigned next.'
+                  : 'Score = (weightedActiveTasks + coldStartOffset) − expertiseBonus. Lowest score is assigned next.'
               : 'Pick a board to see the exact score. With “All boards”, only total open tickets and weighted load are shown.'}
           </p>
         </div>

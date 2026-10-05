@@ -6,13 +6,14 @@ import type { AssignmentCandidate } from './assignmentEngine';
 
 const db = DatabaseClient.getInstance();
 
-export const DEFAULT_PERCENTAGE_WINDOW_DAYS = 7;
-
 /** Which tickets received in the window count toward a member's share. */
 export type PercentageShareBasis = 'ALL' | 'OPEN';
 
-export const toPercentageShareBasis = (value: string | null | undefined): PercentageShareBasis =>
-  value === 'OPEN' ? 'OPEN' : 'ALL';
+/** The resolved % share settings for one board: where the current window starts and what counts. */
+export interface ShareWindowConfig {
+  windowStart: Date;
+  basis: PercentageShareBasis;
+}
 
 const OPEN_STATUSES: string[] = [TicketStatusV2.TODO, TicketStatusV2.STARTED];
 
@@ -21,19 +22,44 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 /**
  * Start of the share window that contains `now`. Windows are fixed, back-to-back periods of
  * `windowDays` counted from `windowStartAt`, so counts reset to zero at each boundary rather
- * than sliding. Boards saved before fixed windows existed have no start and keep the old
- * rolling "last N days" window.
+ * than sliding.
  */
 export function currentShareWindowStart(
-  windowStartAt: Date | null | undefined,
+  windowStartAt: Date,
   windowDays: number,
   now: number = Date.now(),
 ): Date {
-  if (!windowStartAt) return new Date(now - windowDays * DAY_MS);
   const start = windowStartAt.getTime();
   if (now <= start) return windowStartAt;
   const length = windowDays * DAY_MS;
   return new Date(start + Math.floor((now - start) / length) * length);
+}
+
+/**
+ * The board's % share settings, or null when any of them is missing. There are no defaults:
+ * an incompletely configured board is assigned by standard workload scoring instead.
+ */
+export function resolveShareWindowConfig(
+  score:
+    | {
+        percentageWindowDays: number | null;
+        percentageShareBasis: string | null;
+        percentageWindowStartAt: Date | null;
+      }
+    | undefined,
+  boardId: string,
+  userGroupId: string,
+): ShareWindowConfig | null {
+  const windowDays = score?.percentageWindowDays ?? null;
+  const basis = score?.percentageShareBasis ?? null;
+  const startAt = score?.percentageWindowStartAt ?? null;
+  if (windowDays === null || windowDays < 1 || (basis !== 'ALL' && basis !== 'OPEN') || startAt === null) {
+    logger.info(
+      `[Assignment] %-share: board ${boardId} for userGroupId ${userGroupId} is missing share window settings (days=${windowDays}, basis=${basis}, startAt=${startAt?.toISOString() ?? null}); using workload scoring`,
+    );
+    return null;
+  }
+  return { windowStart: currentShareWindowStart(startAt, windowDays), basis };
 }
 
 /**

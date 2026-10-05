@@ -41,8 +41,7 @@ const ROTATION_INTERVAL_OPTIONS: { value: RotationInterval; label: string }[] = 
 /** Radix Select rejects an empty-string item value, so "no board filter" needs a sentinel. */
 const ALL_BOARDS_VALUE = '__all_boards__';
 
-// Mirrors the backend default and the mutator's accepted range for percentageWindowDays
-const DEFAULT_SHARE_WINDOW_DAYS = 7;
+// Mirrors the mutator's accepted range for percentageWindowDays
 const MAX_SHARE_WINDOW_DAYS = 90;
 
 /** Which tickets received in the share window count toward a member's % share. */
@@ -120,13 +119,10 @@ export const AssignmentConfigScreen = ({
   const [localMaxTickets, setLocalMaxTickets] = useState<Map<string, number>>(new Map());
   const [localBoardWeight, setLocalBoardWeight] = useState<number>(1);
   const [localUsePercentage, setLocalUsePercentage] = useState<boolean>(false);
-  // Look-back window (days) the engine uses to measure each member's % share
-  const [shareWindowDaysInput, setShareWindowDaysInput] = useState<string>(
-    String(DEFAULT_SHARE_WINDOW_DAYS),
-  );
-  const [localShareWindowDays, setLocalShareWindowDays] =
-    useState<number>(DEFAULT_SHARE_WINDOW_DAYS);
-  const [localShareBasis, setLocalShareBasis] = useState<ShareBasis>('ALL');
+  // Share window length (days) and which tickets count; no defaults — required when % share is on
+  const [shareWindowDaysInput, setShareWindowDaysInput] = useState<string>('');
+  const [localShareWindowDays, setLocalShareWindowDays] = useState<number | null>(null);
+  const [localShareBasis, setLocalShareBasis] = useState<ShareBasis | null>(null);
 
   // Group-level rotation state
   const [localAutoRotationEnabled, setLocalAutoRotationEnabled] = useState<boolean>(false);
@@ -338,17 +334,18 @@ export const AssignmentConfigScreen = ({
       setBoardWeight(String(weight));
       setLocalBoardWeight(weight);
       setLocalUsePercentage(score?.usePercentage ?? false);
-      const windowDays = score?.percentageWindowDays ?? DEFAULT_SHARE_WINDOW_DAYS;
-      setShareWindowDaysInput(String(windowDays));
+      const windowDays = score?.percentageWindowDays ?? null;
+      setShareWindowDaysInput(windowDays === null ? '' : String(windowDays));
       setLocalShareWindowDays(windowDays);
-      setLocalShareBasis(score?.percentageShareBasis === 'OPEN' ? 'OPEN' : 'ALL');
+      const basis = score?.percentageShareBasis;
+      setLocalShareBasis(basis === 'ALL' || basis === 'OPEN' ? basis : null);
     } else {
       setBoardWeight('1');
       setLocalBoardWeight(1);
       setLocalUsePercentage(false);
-      setShareWindowDaysInput(String(DEFAULT_SHARE_WINDOW_DAYS));
-      setLocalShareWindowDays(DEFAULT_SHARE_WINDOW_DAYS);
-      setLocalShareBasis('ALL');
+      setShareWindowDaysInput('');
+      setLocalShareWindowDays(null);
+      setLocalShareBasis(null);
     }
     setHasChanges(false);
   }, [selectedBoardId, boardComplexityScores]);
@@ -585,6 +582,10 @@ export const AssignmentConfigScreen = ({
   };
 
   // Check if percentage is valid (sum = 100 per set) when usePercentage is enabled and rotation is enabled
+  // % share needs both a window length and a ticket basis; neither has a default
+  const isShareSettingsValid =
+    !localUsePercentage || (localShareWindowDays !== null && localShareBasis !== null);
+
   const isPercentageValid = useMemo(() => {
     if (!localUsePercentage) return true;
 
@@ -676,14 +677,18 @@ export const AssignmentConfigScreen = ({
     ? boardComplexityScores?.find(s => s.boardId === selectedBoardId)
     : undefined;
   const savedShareWindowStartAt =
-    savedBoardScore?.usePercentage === true ? (savedBoardScore.percentageWindowStartAt ?? null) : null;
+    savedBoardScore?.usePercentage === true
+      ? (savedBoardScore.percentageWindowStartAt ?? null)
+      : null;
+  const savedShareWindowDays = savedBoardScore?.percentageWindowDays ?? null;
 
   // Changing the window length mid-window: the admin chooses whether to restart counting today
   // or keep the current start date and apply the new length from it.
   const needsShareWindowChoice = (): boolean =>
     localUsePercentage &&
     savedShareWindowStartAt !== null &&
-    localShareWindowDays !== (savedBoardScore?.percentageWindowDays ?? DEFAULT_SHARE_WINDOW_DAYS);
+    savedShareWindowDays !== null &&
+    localShareWindowDays !== savedShareWindowDays;
 
   const continueSave = (): void => {
     if (needsShareWindowChoice()) {
@@ -715,6 +720,10 @@ export const AssignmentConfigScreen = ({
   };
 
   const performSave = async (resetShareWindow = false): Promise<void> => {
+    if (!isShareSettingsValid) {
+      setPercentageError('Set the share window and which tickets count before saving.');
+      return;
+    }
     // Validate percentage sum equals 100 when usePercentage is enabled
     if (localUsePercentage) {
       if (localAutoRotationEnabled) {
@@ -759,8 +768,8 @@ export const AssignmentConfigScreen = ({
             boardId: selectedBoardId,
             weight: localBoardWeight,
             usePercentage: localUsePercentage,
-            percentageWindowDays: localShareWindowDays,
-            percentageShareBasis: localShareBasis,
+            percentageWindowDays: localShareWindowDays ?? undefined,
+            percentageShareBasis: localShareBasis ?? undefined,
             percentageWindowStartAt: resolveShareWindowStartAt(resetShareWindow),
           }
         : undefined;
@@ -1164,7 +1173,7 @@ export const AssignmentConfigScreen = ({
           <Button
             className='h-auto shrink-0 rounded-lg p-2 text-sm'
             onClick={() => void handleSave()}
-            disabled={!hasChanges || isSaving || !isPercentageValid}
+            disabled={!hasChanges || isSaving || !isPercentageValid || !isShareSettingsValid}
             data-track-category='UserGroups'
             data-track-name='SaveAssignmentConfig'
           >
@@ -1479,14 +1488,14 @@ export const AssignmentConfigScreen = ({
                         this many days, starting from the day % share was turned on. Range: 1 to{' '}
                         {MAX_SHARE_WINDOW_DAYS}.
                       </p>
-                      {savedShareWindowStartAt !== null && (
+                      {savedShareWindowStartAt !== null && savedShareWindowDays !== null && (
                         <p className='text-xs leading-[1.4] text-muted-foreground'>
                           Current window started{' '}
                           <span className='font-medium text-foreground'>
                             {new Date(
                               currentShareWindowStart(
                                 savedShareWindowStartAt,
-                                savedBoardScore?.percentageWindowDays ?? DEFAULT_SHARE_WINDOW_DAYS,
+                                savedShareWindowDays,
                               ),
                             ).toLocaleDateString()}
                           </span>
@@ -1502,10 +1511,12 @@ export const AssignmentConfigScreen = ({
                         onBlur={() => {
                           // Restore the last valid value if left empty
                           if (shareWindowDaysInput === '') {
-                            setShareWindowDaysInput(String(localShareWindowDays));
+                            setShareWindowDaysInput(
+                              localShareWindowDays === null ? '' : String(localShareWindowDays),
+                            );
                           }
                         }}
-                        placeholder={String(DEFAULT_SHARE_WINDOW_DAYS)}
+                        placeholder='e.g. 7'
                         className='mt-1 w-24 text-sm'
                         data-track-event='change'
                         data-track-category='UserGroups'
@@ -1524,7 +1535,7 @@ export const AssignmentConfigScreen = ({
                         share. With open only, a ticket stops counting once it is closed.
                       </p>
                       <Select
-                        value={localShareBasis}
+                        value={localShareBasis ?? ''}
                         onValueChange={value => {
                           setLocalShareBasis(value as ShareBasis);
                           setHasChanges(true);
@@ -1536,7 +1547,7 @@ export const AssignmentConfigScreen = ({
                           data-track-category='UserGroups'
                           data-track-name='SelectShareBasis'
                         >
-                          <SelectValue />
+                          <SelectValue placeholder='Select…' />
                         </SelectTrigger>
                         <SelectContent>
                           {SHARE_BASIS_OPTIONS.map(option => (
@@ -1546,6 +1557,11 @@ export const AssignmentConfigScreen = ({
                           ))}
                         </SelectContent>
                       </Select>
+                      {!isShareSettingsValid && (
+                        <p className='text-[13px] text-destructive'>
+                          Set the share window and which tickets count to save % share.
+                        </p>
+                      )}
                     </div>
                   )}
                 </div>
@@ -1803,9 +1819,8 @@ export const AssignmentConfigScreen = ({
       >
         <div className='p-6'>
           <p className='mb-6 text-[13px] leading-[1.5] text-muted-foreground'>
-            You changed the share window from{' '}
-            {savedBoardScore?.percentageWindowDays ?? DEFAULT_SHARE_WINDOW_DAYS} to{' '}
-            {localShareWindowDays} days. Restart counting from today, or keep the current start date
+            You changed the share window from {savedShareWindowDays} to {localShareWindowDays} days.
+            Restart counting from today, or keep the current start date
             {savedShareWindowStartAt !== null &&
               ` (${new Date(savedShareWindowStartAt).toLocaleDateString()})`}{' '}
             and apply the new length from there?

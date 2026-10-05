@@ -3,7 +3,7 @@ import { UserResponsibility } from '@xyne/shared';
 import { withWorkspaceScope } from '@/database/tenant/context';
 import { notificationService } from '@/services/notificationService';
 import { syncWorkloadForUsers } from './workloadUtils';
-import { DEFAULT_PERCENTAGE_WINDOW_DAYS, currentShareWindowStart, rankCandidatesByShare, toPercentageShareBasis, type PercentageShareBasis } from './assignmentShare';
+import { rankCandidatesByShare, resolveShareWindowConfig, type ShareWindowConfig } from './assignmentShare';
 import { logger } from './logger';
 import type {
   UserGroupMapping,
@@ -403,12 +403,10 @@ export async function evaluateAssignmentRule(
   // smallest share of the board (see boardComplexityScore.usePercentage).
   const targetBoardScore = allBoardScores.find(s => s.boardId === boardId);
   const usePercentageForBoard = targetBoardScore?.usePercentage === true;
-  // Counts reset at each fixed window boundary (every percentageWindowDays from percentageWindowStartAt)
-  const percentageWindowStart = currentShareWindowStart(
-    targetBoardScore?.percentageWindowStartAt,
-    targetBoardScore?.percentageWindowDays ?? DEFAULT_PERCENTAGE_WINDOW_DAYS,
-  );
-  const percentageShareBasis = toPercentageShareBasis(targetBoardScore?.percentageShareBasis);
+  // Current fixed share window and basis; null when % share is off or not fully configured
+  const shareConfig = usePercentageForBoard
+    ? resolveShareWindowConfig(targetBoardScore, boardId, userGroupId)
+    : null;
   // % share boards split by each member's share of recent assignments, not by open load.
   // A member with no expertise row has no configured share.
   const targetPercentOf = (userId: string) => expertiseMap.get(userId)?.percentage ?? 0;
@@ -488,8 +486,8 @@ export async function evaluateAssignmentRule(
   }
 
   // Sort by new score ascending (lowest wins); % share boards rank by share deficit instead
-  const shareRanked = usePercentageForBoard
-    ? await rankCandidatesByShare({ candidates, boardId, userGroupId, windowStart: percentageWindowStart, basis: percentageShareBasis, targetPercentOf })
+  const shareRanked = shareConfig
+    ? await rankCandidatesByShare({ candidates, boardId, userGroupId, ...shareConfig, targetPercentOf })
     : null;
   if (shareRanked) {
     candidates.splice(0, candidates.length, ...shareRanked);
@@ -610,8 +608,8 @@ export async function evaluateAssignmentRule(
       });
     }
     
-    const fallbackShareRanked = usePercentageForBoard
-      ? await rankCandidatesByShare({ candidates: fallbackCandidates, boardId, userGroupId, windowStart: percentageWindowStart, basis: percentageShareBasis, targetPercentOf })
+    const fallbackShareRanked = shareConfig
+      ? await rankCandidatesByShare({ candidates: fallbackCandidates, boardId, userGroupId, ...shareConfig, targetPercentOf })
       : null;
     if (fallbackShareRanked) {
       fallbackCandidates.splice(0, fallbackCandidates.length, ...fallbackShareRanked);
@@ -693,8 +691,7 @@ interface SharedContext {
   expertiseMap:             Map<string, UserExpertiseMapping>;
   userGroupMappingByUserId: Map<string, UserGroupMapping>;
   usePercentageForBoard:    boolean;
-  percentageWindowStart:    Date;
-  percentageShareBasis:     PercentageShareBasis;
+  shareConfig:              ShareWindowConfig | null;
   maxWorkload:              number | null;
   userGroup:                { name: string; workspaceId: string } | null;
   totalTicketsOnBoard:      number;
@@ -711,7 +708,7 @@ async function pickBest(
   boardId: string,
   excludeUserId?: string,
 ): Promise<AssignmentResult> {
-  const { userGroupMappings, userStateMap, expertiseMappings, boardWeightMap, workloadsByUserId, workloadByUserAndBoard, expertiseMap, userGroupMappingByUserId, usePercentageForBoard, percentageWindowStart, percentageShareBasis, maxWorkload, userGroup, totalTicketsOnBoard } = ctx;
+  const { userGroupMappings, userStateMap, expertiseMappings, boardWeightMap, workloadsByUserId, workloadByUserAndBoard, expertiseMap, userGroupMappingByUserId, usePercentageForBoard, shareConfig, maxWorkload, userGroup, totalTicketsOnBoard } = ctx;
   const userGroupId = userGroupMappings[0]?.userGroupId;
 
   const getUserState   = (id: string) => userStateMap.get(id);
@@ -809,13 +806,12 @@ async function pickBest(
 
   const scored = finalEligible.map(score);
   // % share boards rank by share deficit instead of workload score.
-  const shareRanked = usePercentageForBoard && userGroupId
+  const shareRanked = shareConfig && userGroupId
     ? await rankCandidatesByShare({
         candidates: scored,
         boardId,
         userGroupId,
-        windowStart: percentageWindowStart,
-        basis: percentageShareBasis,
+        ...shareConfig,
         targetPercentOf: id => expertiseMap.get(id)?.percentage ?? 0,
       })
     : null;
@@ -887,12 +883,10 @@ export async function evaluateAllRoles(
   const boardWeightMap = new Map<string, number>(allBoardScores.map(s => [s.boardId, s.weight]));
   const targetBoardScore = allBoardScores.find(s => s.boardId === boardId);
   const usePercentageForBoard = targetBoardScore?.usePercentage === true;
-  // Counts reset at each fixed window boundary (every percentageWindowDays from percentageWindowStartAt)
-  const percentageWindowStart = currentShareWindowStart(
-    targetBoardScore?.percentageWindowStartAt,
-    targetBoardScore?.percentageWindowDays ?? DEFAULT_PERCENTAGE_WINDOW_DAYS,
-  );
-  const percentageShareBasis = toPercentageShareBasis(targetBoardScore?.percentageShareBasis);
+  // Current fixed share window and basis; null when % share is off or not fully configured
+  const shareConfig = usePercentageForBoard
+    ? resolveShareWindowConfig(targetBoardScore, boardId, userGroupId)
+    : null;
 
   // Pre-compute userStateMap for O(1) lookups across all 5 roles
   const userStateMap = new Map<string, UserAssignmentState>(userStates.map(s => [s.userId, s]));
@@ -938,8 +932,7 @@ export async function evaluateAllRoles(
     expertiseMap,
     userGroupMappingByUserId,
     usePercentageForBoard,
-    percentageWindowStart,
-    percentageShareBasis,
+    shareConfig,
     maxWorkload,
     userGroup,
     totalTicketsOnBoard,
@@ -1048,12 +1041,10 @@ export async function evaluateRoleSlots(
   const boardWeightMap = new Map<string, number>(allBoardScores.map(s => [s.boardId, s.weight]));
   const targetBoardScore = allBoardScores.find(s => s.boardId === boardId);
   const usePercentageForBoard = targetBoardScore?.usePercentage === true;
-  // Counts reset at each fixed window boundary (every percentageWindowDays from percentageWindowStartAt)
-  const percentageWindowStart = currentShareWindowStart(
-    targetBoardScore?.percentageWindowStartAt,
-    targetBoardScore?.percentageWindowDays ?? DEFAULT_PERCENTAGE_WINDOW_DAYS,
-  );
-  const percentageShareBasis = toPercentageShareBasis(targetBoardScore?.percentageShareBasis);
+  // Current fixed share window and basis; null when % share is off or not fully configured
+  const shareConfig = usePercentageForBoard
+    ? resolveShareWindowConfig(targetBoardScore, boardId, userGroupId)
+    : null;
   const userStateMap = new Map<string, UserAssignmentState>(userStates.map(s => [s.userId, s]));
   const workloadsByUserId = new Map<string, UserWorkloadMapping[]>();
   for (const w of allWorkloadMappings) {
@@ -1080,8 +1071,7 @@ export async function evaluateRoleSlots(
     expertiseMap,
     userGroupMappingByUserId,
     usePercentageForBoard,
-    percentageWindowStart,
-    percentageShareBasis,
+    shareConfig,
     maxWorkload,
     userGroup,
     totalTicketsOnBoard,
