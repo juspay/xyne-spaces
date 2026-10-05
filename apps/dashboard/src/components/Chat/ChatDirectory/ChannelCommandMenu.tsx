@@ -4297,6 +4297,18 @@ const ChannelCommandMenuContent = ({
       </div>
     ) : null;
 
+  // Leave the feedback view and put focus back in the search box, so typing and arrow keys
+  // work straight away. Next frame, same as the Actions menu: the editor is still hidden
+  // when this runs.
+  const closeFeedback = (): void => {
+    setFeedbackOpen(false);
+    requestAnimationFrame(() => {
+      (
+        commandRef.current?.querySelector('[contenteditable="true"]') as HTMLElement | null
+      )?.focus();
+    });
+  };
+
   const commandBody = (
     <>
       {/* Search Input — hidden (but kept mounted) during `/chat` compose so its
@@ -4452,7 +4464,7 @@ const ChannelCommandMenuContent = ({
             <CmdkFeedbackView
               query={searchText}
               filters={feedbackFilters}
-              onBack={() => setFeedbackOpen(false)}
+              onBack={closeFeedback}
               onPosted={() => {
                 setFeedbackOpen(false);
                 onOpenChange(false);
@@ -5731,7 +5743,7 @@ const ChannelCommandMenuContent = ({
               // Esc in the feedback view goes back to the results instead of closing the palette.
               if (feedbackOpen) {
                 event.preventDefault();
-                setFeedbackOpen(false);
+                closeFeedback();
                 return;
               }
               // While the ⌥↵ Actions menu is open, Escape closes only it — never the palette.

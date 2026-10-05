@@ -86,7 +86,8 @@ const SearchFeedbackForm = ({
     return (): void => cancelAnimationFrame(id);
   }, []);
 
-  const canPost = feedback.trim() !== '' && !isPosting;
+  // Post needs something to report: a search query or a comment. Disabled only when both are empty.
+  const canPost = (query.trim() !== '' || feedback.trim() !== '') && !isPosting;
 
   const post = (): void => {
     if (!canPost) return;

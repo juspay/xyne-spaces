@@ -81,8 +81,11 @@ export function buildSearchFeedbackContent(params: SearchFeedbackContentParams):
 
   lines.push(groupMentionHtml ? `${groupMentionHtml} ${headline}` : headline);
   lines.push('');
-  lines.push(`<em>"${escapeHtml(feedback)}"</em>`);
-  lines.push('');
+  // The comment is optional; without one the message goes straight to the details.
+  if (feedback.trim()) {
+    lines.push(`<em>"${escapeHtml(feedback)}"</em>`);
+    lines.push('');
+  }
   lines.push(
     query.trim()
       ? `<strong>Query:</strong> ${escapeHtml(query)}`

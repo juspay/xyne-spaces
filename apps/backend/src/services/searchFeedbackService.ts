@@ -46,7 +46,7 @@ export interface PostSearchFeedbackParams {
   workspaceId: string;
   /** Search query on screen when Feedback was opened. */
   query: string;
-  /** Text the user typed. */
+  /** Comment from the user; may be empty if a query was given. */
   feedback: string;
   /** Active filter labels as shown in the UI, e.g. `@Ch`, `from:alice`, `"ab"`. */
   filters: string[];
@@ -98,21 +98,32 @@ export class SearchFeedbackService {
       // the promise un-awaited would execute it after the system scope has ended.
       const byId = await runAsSystem(
         async () =>
-          await db.channel.findUnique({
-            where: { id: target.channelId },
+          await db.channel.findFirst({
+            // Private is allowed here (an admin chose it); archived is not.
+            where: { id: target.channelId, isArchived: false },
             select: { id: true, name: true, workspaceId: true },
           })
       );
       if (byId) return byId;
-      logger.error('[SearchFeedback] Configured channel does not exist; falling back to default', {
-        cacKey: FEEDBACK_TARGET_CAC_KEY,
-        channelId: sanitizeForLog(target.channelId ?? ''),
-        fallbackChannelName: FEEDBACK_CHANNEL_NAME,
-        workspaceId: sanitizeForLog(workspaceId),
-      });
+      logger.error(
+        '[SearchFeedback] Configured channel missing or archived; falling back to default',
+        {
+          cacKey: FEEDBACK_TARGET_CAC_KEY,
+          channelId: sanitizeForLog(target.channelId ?? ''),
+          fallbackChannelName: FEEDBACK_CHANNEL_NAME,
+          workspaceId: sanitizeForLog(workspaceId),
+        }
+      );
     }
+    // Public and not archived only: this path skips the membership check that the normal
+    // message API does, so it must not post into a private channel the reporter isn't in.
     return db.channel.findFirst({
-      where: { workspaceId, name: { equals: FEEDBACK_CHANNEL_NAME, mode: 'insensitive' } },
+      where: {
+        workspaceId,
+        name: { equals: FEEDBACK_CHANNEL_NAME, mode: 'insensitive' },
+        visibility: 'PUBLIC',
+        isArchived: false,
+      },
       select: { id: true, name: true, workspaceId: true },
     });
   }
@@ -187,10 +198,25 @@ export class SearchFeedbackService {
       );
     }
 
-    // Look up the group in the channel's workspace. If it can't be found, still post the
-    // feedback, just without the tag.
+    // Independent lookups, run together. Everything that can fail runs before the message is
+    // saved, so an error never leaves a posted message behind for the user to retry into a
+    // duplicate.
+    // - group: tagged in the channel's workspace
+    // - reporterWorkspace: for the `Workspace:` line (the channel can be shared)
+    // - reporter: for the headline mention, read before switching workspace
+    // - ctx: for the notification step after the save
+    const [group, reporterWorkspace, reporter, ctx] = await Promise.all([
+      this.resolveGroup(channel.workspaceId, target),
+      runAsSystem(
+        async () =>
+          await db.workspace.findUnique({ where: { id: workspaceId }, select: { name: true } })
+      ),
+      this.userRepository.findById(userId),
+      buildUserQueryContext(userId),
+    ]);
+
+    // If the group can't be found, still post the feedback, just without the tag.
     let groupMentionHtml: string | null = null;
-    const group = await this.resolveGroup(channel.workspaceId, target);
     if (group) {
       const memberCount = await runAsSystem(
         async () => await this.userGroupRepository.getUserCount(group.id)
@@ -203,14 +229,6 @@ export class SearchFeedbackService {
       });
     }
 
-    // Reporter's workspace name for the `Workspace:` line (the channel can be shared).
-    const reporterWorkspace = await runAsSystem(
-      async () =>
-        await db.workspace.findUnique({ where: { id: workspaceId }, select: { name: true } })
-    );
-
-    // Reporter for the headline mention. Read before switching to the channel's workspace.
-    const reporter = await this.userRepository.findById(userId);
     const reporterName = reporter?.name || 'a teammate';
     const reporterMentionHtml = reporter
       ? formatUserMention(reporter.id, reporter.name, {
@@ -247,7 +265,8 @@ export class SearchFeedbackService {
     );
 
     // Notifications (incl. the group ping) and unread counts, in the channel's workspace.
-    const ctx = await buildUserQueryContext(userId);
+    // Only `workspaceId` is overridden: the handler reads just `userID` and `workspaceId`, so the
+    // reporter's own role/memberId are unused here. Revisit if the handler starts reading them.
     void runAsServiceActor(userId, channel.workspaceId, () =>
       new MessagesSideEffectHandler({ ...ctx, workspaceId: channel.workspaceId })
         .onInsert({

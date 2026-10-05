@@ -954,9 +954,9 @@ const SearchResults = (): ReactElement => {
             onQueryChange={handleQuerySubmit}
           />
         </div>
-        {/* Shown for any query so Feedback is available even with no results.
+        {/* Shown for any query or active filter so Feedback is available even with no results.
             The result count and Compare still need results. */}
-        {(hasResultsRow || !!displayQuery) && (
+        {(hasResultsRow || !!displayQuery || filtersActive) && (
           <div className='flex items-center justify-between gap-3 pb-2'>
             {hasResultsRow && (
               <p className='text-xs text-muted-foreground tabular-nums'>

@@ -38,7 +38,7 @@ export class SearchFeedbackController {
    * Post search feedback into the feedback channel.
    * POST /api/search-feedback
    * Body: {
-   *   query: string, feedback: string, source: 'cmdk' | 'search_results',
+   *   query?: string, feedback?: string, source: 'cmdk' | 'search_results',
    *   filters?: string[], sort?: string
    * }
    */
@@ -52,8 +52,12 @@ export class SearchFeedbackController {
 
       const { query, feedback, source, filters, sort } = req.body ?? {};
 
-      if (typeof feedback !== 'string' || feedback.trim() === '') {
-        res.status(400).json({ success: false, error: 'Feedback is required' });
+      // Either a query or a comment is enough; reject only when both are empty.
+      const safeQuery = typeof query === 'string' ? query.trim().slice(0, MAX_QUERY_LENGTH) : '';
+      const safeFeedback =
+        typeof feedback === 'string' ? feedback.trim().slice(0, MAX_FEEDBACK_LENGTH) : '';
+      if (!safeQuery && !safeFeedback) {
+        res.status(400).json({ success: false, error: 'A search query or feedback is required' });
         return;
       }
 
@@ -78,8 +82,8 @@ export class SearchFeedbackController {
       const result = await searchFeedbackService.postFeedback({
         userId: user.id,
         workspaceId: user.workspaceId,
-        query: typeof query === 'string' ? query.trim().slice(0, MAX_QUERY_LENGTH) : '',
-        feedback: feedback.trim().slice(0, MAX_FEEDBACK_LENGTH),
+        query: safeQuery,
+        feedback: safeFeedback,
         filters: safeFilters,
         ...(safeSort ? { sort: safeSort } : {}),
         source: source as SearchFeedbackSource,
