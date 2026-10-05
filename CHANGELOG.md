@@ -1,3 +1,11 @@
+## [1.460.3](https://github.com/juspay/xyne-spaces/compare/v1.460.2...v1.460.3) (2026-10-05)
+
+
+### Bug Fixes
+
+* fetch workspace counts only when switcher opens; use activity count for current workspace ([#2573](https://github.com/juspay/xyne-spaces/issues/2573)) ([16e6ede](https://github.com/juspay/xyne-spaces/commit/16e6ede05ce8ace2ec1ee3a92367f2775b0e9b5a))
+* time out hung queue runs and log callback failure causes ([#2643](https://github.com/juspay/xyne-spaces/issues/2643)) ([dff2c46](https://github.com/juspay/xyne-spaces/commit/dff2c4618f864a82414a4eddd59d75db8ea834e1))
+
 ## [1.460.2](https://github.com/juspay/xyne-spaces/compare/v1.460.1...v1.460.2) (2026-10-05)
 
 
