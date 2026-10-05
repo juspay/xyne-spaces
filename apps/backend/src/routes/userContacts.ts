@@ -339,19 +339,19 @@ router.get('/oauth/google/callback', async (req: Request, res: Response) => {
   let peekedState: ContactsOAuthState | null = null;
 
   try {
-    // Always validate: peek on an empty/unknown state returns null, which the
-    // guard below rejects — the check must not depend on the query param.
+    // Always resolve the pending state first — every security decision below
+    // uses only this server-validated value, never the query params.
     peekedState = await contactsOAuthStateService.peek(stateParam);
+
     if (req.query.error) {
-      await contactsOAuthStateService.delete(stateParam);
+      // Cancelled at the provider. Nothing sensitive runs here; the one-time
+      // state simply expires via its TTL.
       redirectWithError(req, res, peekedState, 'authorization_denied');
       return;
     }
 
-    const code = typeof req.query.code === 'string' ? req.query.code : '';
-    if (!code || !peekedState) {
-      await contactsOAuthStateService.delete(stateParam);
-      redirectWithError(req, res, peekedState, 'missing_or_expired_state');
+    if (!peekedState) {
+      redirectWithError(req, res, null, 'missing_or_expired_state');
       return;
     }
 
@@ -361,6 +361,9 @@ router.get('/oauth/google/callback', async (req: Request, res: Response) => {
       return;
     }
 
+    // A missing code fails the token exchange and lands in the catch below —
+    // user input must not gate the state handling above.
+    const code = typeof req.query.code === 'string' ? req.query.code : '';
     const user = await validateBoundUser(state);
     const client = createGoogleClient(req);
     const { tokens } = await client.getToken({
@@ -411,19 +414,19 @@ router.get('/oauth/microsoft/callback', async (req: Request, res: Response) => {
   let peekedState: ContactsOAuthState | null = null;
 
   try {
-    // Always validate: peek on an empty/unknown state returns null, which the
-    // guard below rejects — the check must not depend on the query param.
+    // Always resolve the pending state first — every security decision below
+    // uses only this server-validated value, never the query params.
     peekedState = await contactsOAuthStateService.peek(stateParam);
+
     if (req.query.error) {
-      await contactsOAuthStateService.delete(stateParam);
+      // Cancelled at the provider. Nothing sensitive runs here; the one-time
+      // state simply expires via its TTL.
       redirectWithError(req, res, peekedState, 'authorization_denied');
       return;
     }
 
-    const code = typeof req.query.code === 'string' ? req.query.code : '';
-    if (!code || !peekedState) {
-      await contactsOAuthStateService.delete(stateParam);
-      redirectWithError(req, res, peekedState, 'missing_or_expired_state');
+    if (!peekedState) {
+      redirectWithError(req, res, null, 'missing_or_expired_state');
       return;
     }
 
@@ -433,6 +436,9 @@ router.get('/oauth/microsoft/callback', async (req: Request, res: Response) => {
       return;
     }
 
+    // A missing code fails the token exchange and lands in the catch below —
+    // user input must not gate the state handling above.
+    const code = typeof req.query.code === 'string' ? req.query.code : '';
     const user = await validateBoundUser(state);
     const microsoftClient = createMicrosoftClient();
     const tokenResult = await microsoftClient.getToken({
