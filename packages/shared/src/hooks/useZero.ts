@@ -17,6 +17,7 @@ import { encryptField, decryptField, isEncryptedField } from '../crypto/field-de
 import { validateQueryWhereClause } from '../zero/query-validation.js';
 import { wasInterrupted } from './metricValidity.js';
 import { trackMutationStart, trackMutationSettled } from './pendingMutations.js';
+import { emitUnreadRefetch, UNREAD_COUNT_MUTATORS } from '../unread/bellCountRules.js';
 
 export interface Instrumentation {
   logger: Logger;
@@ -197,6 +198,16 @@ export function useZero(): Zero {
                     errorMessage =
                       (err.message as string) || (err.type as string) || 'Unknown error';
                   }
+                }
+
+                // Read mutations change unread counts — refresh the poll-fed
+                // badges (dock, switcher) immediately rather than waiting for
+                // the next poll tick.
+                if (
+                  !hasError &&
+                  (UNREAD_COUNT_MUTATORS as readonly string[]).includes(mutationName)
+                ) {
+                  emitUnreadRefetch();
                 }
 
                 if (hasError) {

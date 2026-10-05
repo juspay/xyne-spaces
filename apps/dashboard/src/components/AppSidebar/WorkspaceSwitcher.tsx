@@ -14,6 +14,7 @@ import {
 } from '../../machines/authMachine';
 import { queryClient } from '../../services/clients/queryClient';
 import { useCanCreateWorkspace } from '../../hooks/usePermissions';
+import { useWorkspaceUnreadCounts } from '../../hooks/useWorkspaceUnreadCounts';
 import { confirmInterrupt } from '../InterruptGuard/InterruptGuard';
 
 type CreateWorkspaceType = (typeof WorkspaceType)[keyof typeof WorkspaceType];
@@ -29,16 +30,6 @@ interface WorkspacesResponse {
   workspaces: WorkspaceItem[];
 }
 
-interface WorkspaceCountItem {
-  workspaceId: string;
-  userId: string;
-  count: number;
-}
-
-interface WorkspaceCountsResponse {
-  counts: WorkspaceCountItem[];
-}
-
 interface CreateWorkspaceResponse {
   workspace: { id: string; name: string };
   user: { id: string; email: string; name: string; workspaceId: string };
@@ -47,6 +38,7 @@ interface CreateWorkspaceResponse {
 export const WorkspaceSwitcher: React.FC = () => {
   const { workspaceId } = useParams<{ workspaceId?: string }>();
   const canCreateWorkspace = useCanCreateWorkspace();
+  const { byWorkspace: activityCounts } = useWorkspaceUnreadCounts();
 
   // Read initial name from user-bound localStorage so the button renders immediately without an API call
   const [localWorkspaceName, setLocalWorkspaceName] = useState<string>(() => {
@@ -56,7 +48,6 @@ export const WorkspaceSwitcher: React.FC = () => {
 
   const [isOpen, setIsOpen] = useState(false);
   const [workspaces, setWorkspaces] = useState<WorkspaceItem[]>([]);
-  const [activityCounts, setActivityCounts] = useState<Map<string, number>>(new Map());
   const [loading, setLoading] = useState(false);
   const [switching, setSwitching] = useState<string | null>(null);
   const [showCreateForm, setShowCreateForm] = useState(false);
@@ -98,24 +89,6 @@ export const WorkspaceSwitcher: React.FC = () => {
     }
   };
 
-  const fetchActivityCounts = async (): Promise<void> => {
-    try {
-      const res = await axios.get<WorkspaceCountsResponse>(
-        `${API_BASE_URL}/activity/workspace-counts`,
-        { withCredentials: true },
-      );
-      const counts = new Map<string, number>();
-
-      for (const item of res.data.counts) {
-        counts.set(item.workspaceId, item.count);
-      }
-
-      setActivityCounts(counts);
-    } catch {
-      // silently ignore
-    }
-  };
-
   // Force fetch when the URL's workspaceId no longer matches the cached one —
   // handles external redirects (e.g. cross-workspace notification click) that
   // change the URL without going through the switcher's own update path.
@@ -149,7 +122,6 @@ export const WorkspaceSwitcher: React.FC = () => {
   useEffect(() => {
     if (isOpen) {
       void fetchWorkspaces();
-      void fetchActivityCounts();
     } else {
       setShowCreateForm(false);
       setShowSignInList(false);
@@ -158,19 +130,6 @@ export const WorkspaceSwitcher: React.FC = () => {
       setError(null);
     }
   }, [isOpen]);
-
-  // Fetch activity counts on mount so badge is visible immediately
-  useEffect(() => {
-    void fetchActivityCounts();
-  }, []);
-
-  // Poll activity counts every 30s to keep badge fresh
-  useEffect(() => {
-    const interval = setInterval(() => {
-      void fetchActivityCounts();
-    }, 30000);
-    return () => clearInterval(interval);
-  }, []);
 
   // Close on outside click
   useEffect(() => {
@@ -288,7 +247,13 @@ export const WorkspaceSwitcher: React.FC = () => {
   const bgColor = displayName ? getInitialColor(displayName) : '#607d8b';
 
   // Show only the active workspace's unread count on the switcher trigger.
-  const totalUnread = workspaceId ? (activityCounts.get(workspaceId) ?? 0) : 0;
+  const totalUnread = workspaceId ? (activityCounts[workspaceId] ?? 0) : 0;
+  // When the active workspace has no unread but other workspaces do, show a
+  // dot so the dock's total (which spans all workspaces) is explainable
+  // from the UI alone.
+  const hasOtherWorkspaceUnread =
+    totalUnread === 0 &&
+    Object.entries(activityCounts).some(([id, count]) => id !== workspaceId && count > 0);
   const createLabel = 'Create enterprise workspace';
 
   // Always rendered so community members in community workspaces see the action
@@ -328,10 +293,15 @@ export const WorkspaceSwitcher: React.FC = () => {
         title={displayName || 'Workspace'}
       >
         {initial}
-        {totalUnread > 0 && (
+        {/* Count/dot hidden while the popover is open — the popover's own rows
+            show every workspace's count, so the trigger badge is redundant. */}
+        {!isOpen && totalUnread > 0 && (
           <span className='absolute -top-1 -right-1 min-w-[16px] h-4 bg-red-500 text-white text-[10px] font-bold rounded-full flex items-center justify-center px-1'>
             {totalUnread > 99 ? '99+' : totalUnread}
           </span>
+        )}
+        {!isOpen && totalUnread === 0 && hasOtherWorkspaceUnread && (
+          <span className='absolute -top-1 -right-1 size-[9px] bg-red-500 rounded-full border border-sidebar-accent-ring' />
         )}
       </button>
 
@@ -359,7 +329,7 @@ export const WorkspaceSwitcher: React.FC = () => {
               workspaces.map(ws => {
                 const isActive = ws.id === workspaceId;
                 const isSwitching = switching === ws.id;
-                const count = activityCounts.get(ws.id) || 0;
+                const count = activityCounts[ws.id] || 0;
                 return (
                   <button
                     key={ws.id}
@@ -444,7 +414,7 @@ export const WorkspaceSwitcher: React.FC = () => {
                       workspaces.map(ws => {
                         const isActive = ws.id === workspaceId;
                         const isSwitching = switching === ws.id;
-                        const count = activityCounts.get(ws.id) || 0;
+                        const count = activityCounts[ws.id] || 0;
                         return (
                           <button
                             key={ws.id}

@@ -1521,7 +1521,10 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
     prefetchedData?: PrefetchedFilterData,
   ): Promise<void> {
     const isReply = !!(initialMessageId && initialMessageId !== messageId);
-    if (mentionType) {
+    // Not in a 1:1 DM: the only recipient already gets the message as a DM unread (top-level)
+    // or a reply activity (thread), so a group_mention row would count it a second time in
+    // the bell. GROUP_DM keeps it; the DM shelf subtracts those rows instead.
+    if (mentionType && scopeType !== ChannelScopeType.DM) {
       await this.handleSpecialMentionActivities(channelId, messageId, senderId, mentionType, [], initialMessageId !== messageId);
     }
 
