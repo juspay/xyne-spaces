@@ -18,6 +18,7 @@ const FIELD_LABELS: Record<string, string> = {
   defaultCc: 'Default CC',
   assigneeUserGroupId: 'Default assignee group',
   boardId: 'Board',
+  globalFieldId: 'Field',
   twoStepSendEnabled: 'Two-step send',
   emailMergeMode: 'Auto-merge similar emails',
   appWebhookDeliveryEnabled: 'Send replies to app webhook',
