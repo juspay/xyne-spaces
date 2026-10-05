@@ -132,9 +132,9 @@ export const TicketUpdates: React.FC<TicketUpdatesProps> = ({
     [syncedUpdates, handledIds],
   );
   const markHandled = (id: string): void => setHandledIds(prev => [...prev, id]);
-  const [drafts, setDrafts] = useState<Record<string, RowDraft>>({});
-  // Rows whose stage the user set by hand: never overwritten by a later prefill.
-  const [stageTouchedIds, setStageTouchedIds] = useState<string[]>([]);
+  // Only what the user changed on a row. Everything else is read from the card as
+  // it is now, so a re-run that rewrites a row's note or stage shows through.
+  const [edits, setEdits] = useState<Record<string, Partial<RowDraft>>>({});
   const [busyId, setBusyId] = useState<string | null>(null);
   const [bulkBusy, setBulkBusy] = useState(false);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
@@ -245,44 +245,31 @@ export const TicketUpdates: React.FC<TicketUpdatesProps> = ({
   const actionable = updates.filter(u => ticketFor(u).state === 'ready' && !claimedByOther(u));
   const lockedCount = updates.filter(u => ticketFor(u).state === 'locked').length;
 
-  // Seed a draft per pending row; keep the user's edits across re-renders, and
-  // drop selections for rows that were approved or ignored (possibly by someone else).
+  // Drop selections for rows that were approved or ignored (possibly by someone else).
   useEffect(() => {
-    setDrafts(prev => {
-      const next: Record<string, RowDraft> = {};
-      for (const u of updates) next[u.updateId] = prev[u.updateId] ?? draftFor(u);
-      return next;
-    });
     setSelectedIds(prev => prev.filter(id => updates.some(u => u.updateId === id)));
   }, [updates]);
 
-  // Prefill the stage of a restricted row once its board's stages have synced, the
-  // same way the backend does for a ticket in the call's own channel.
-  useEffect(() => {
-    setDrafts(prev => {
-      let next = prev;
-      for (const u of updates) {
-        if (
-          !u.restricted ||
-          u.boardType === FLOW_BOARD ||
-          !u.proposedStatusV2 ||
-          stageTouchedIds.includes(u.updateId)
-        )
-          continue;
-        const draft = prev[u.updateId];
-        const ticket = restrictedById.get(u.ticketId);
-        if (!draft || draft.stageName || !ticket) continue;
-        const resolved = resolveStageForStatus(
-          stagesByBoard.get(ticket.boardId) ?? [],
-          ticket.stageName,
-          u.proposedStatusV2,
-        );
-        if (!resolved) continue;
-        next = { ...next, [u.updateId]: { ...draft, stageName: resolved } };
-      }
-      return next;
-    });
-  }, [updates, restrictedById, stagesByBoard, stageTouchedIds]);
+  /**
+   * The row as it will be applied: the card's proposal, with the stage of a
+   * restricted row worked out from the viewer's own synced board (the same way
+   * the backend does for a ticket in the call's channel), then the user's edits.
+   */
+  const draftOf = (u: TicketUpdateProposal): RowDraft => {
+    const base = draftFor(u);
+    if (u.restricted && u.boardType !== FLOW_BOARD && u.proposedStatusV2 && !base.stageName) {
+      const ticket = restrictedById.get(u.ticketId);
+      const resolved = ticket
+        ? resolveStageForStatus(
+            stagesByBoard.get(ticket.boardId) ?? [],
+            ticket.stageName,
+            u.proposedStatusV2,
+          )
+        : null;
+      if (resolved) base.stageName = resolved;
+    }
+    return { ...base, ...edits[u.updateId] };
+  };
 
   // The line the server appends to a posted comment, so the preview shows the
   // whole comment. Unknown for a viewer who cannot read the call itself.
@@ -310,15 +297,9 @@ export const TicketUpdates: React.FC<TicketUpdatesProps> = ({
   }, [updates.length, messageId, channelId, applied.length]);
 
   const patch = (id: string, changes: Partial<RowDraft>): void =>
-    setDrafts(prev => ({
-      ...prev,
-      [id]: { ...(prev[id] ?? { text: '', postComment: true, stageName: '' }), ...changes },
-    }));
+    setEdits(prev => ({ ...prev, [id]: { ...prev[id], ...changes } }));
 
-  const setStage = (id: string, stageName: string): void => {
-    setStageTouchedIds(prev => (prev.includes(id) ? prev : [...prev, id]));
-    patch(id, { stageName });
-  };
+  const setStage = (id: string, stageName: string): void => patch(id, { stageName });
 
   const openEditor = (id: string): void =>
     setEditingIds(prev => (prev.includes(id) ? prev : [...prev, id]));
@@ -348,7 +329,7 @@ export const TicketUpdates: React.FC<TicketUpdatesProps> = ({
   const applyOne = async (
     u: TicketUpdateProposal,
   ): Promise<{ error: string } | { result: AppliedTicketUpdateResult }> => {
-    const d = drafts[u.updateId] ?? draftFor(u);
+    const d = draftOf(u);
     const changeStatus = d.stageName !== '';
     const postComment = postsComment(d);
     if (!postComment && !changeStatus) {
@@ -572,7 +553,7 @@ export const TicketUpdates: React.FC<TicketUpdatesProps> = ({
 
           <div className='divide-y divide-border rounded-lg border border-border'>
             {updates.map(u => {
-              const d = drafts[u.updateId] ?? draftFor(u);
+              const d = draftOf(u);
               const ticket = ticketFor(u);
               const locked = ticket.state !== 'ready';
               const inFlightElsewhere = claimedByOther(u);

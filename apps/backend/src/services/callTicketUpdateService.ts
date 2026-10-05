@@ -79,6 +79,8 @@ interface CandidateTicket {
   conversationId: string;
   assignedTo: string | null;
   assigneeName: string | null;
+  /** The stages of the ticket's board, in order; empty for a flow board, which takes no stage. */
+  stageNames: string[];
   /** Where this candidate came from. */
   source: 'spoken-id' | 'channel' | 'participant';
 }
@@ -87,6 +89,8 @@ interface LlmMention {
   ref: string;
   update: string;
   statusIntent: string | null;
+  /** A stage of the ticket's own board that was named as where it goes. */
+  stageIntent: string | null;
   speaker: string | null;
   segment: number | null;
   quote: string | null;
@@ -105,18 +109,19 @@ TRANSCRIPT — each line is "[n] [MM:SS] Speaker: text"; n is the line number:
 RULES:
 - Only include a ticket that was actually discussed in this call. Never invent tickets or updates.
 - One entry per ticket: merge every mention of the same ticket into a single entry.
-- "update": a 1-2 sentence status note in the third person, past tense, saying what was said about the ticket (what was done, what is blocked, what comes next). No speaker labels, no timestamps.
+- "update": a 1-2 sentence status note in the third person saying what was said about the ticket (what was done, what is blocked, what comes next). Keep the sense of what was said: something planned or proposed ("we can move it to review") is written as planned ("To be moved to In Review"), never as already done. No speaker labels, no timestamps.
 - "statusIntent": ONLY when someone explicitly stated a change of state, else null. Map: done / finished / merged / shipped / closed -> COMPLETED; started / picking up / working on it now -> STARTED; blocked / on hold / parked / pausing -> PAUSED; dropping / cancelling / won't do -> CANCELLED; back to backlog / not started yet -> TODO. Discussing a ticket without changing its state is null.
+- "stageIntent": ONLY when someone said which stage the ticket moves to, or should move to ("move it to in review", "that one goes to QA"). Use the exact name from that candidate's "stages" list; null when no stage was named, when the name is not in the list, or when the candidate lists no stages. A stage can be named without any statusIntent, and the other way round.
 - "segment": the n of the single most relevant transcript line. "quote": that line's text, verbatim.
 - "speaker": the speaker name from that line.
 - "confidence": 0 to 1, how sure you are this is the right ticket AND the update is accurate.
 - "matchedBy": "xyne-id" when the ticket id was spoken (even garbled), "title" when matched from the topic, "number-only" as described below.
 - Speech-to-text garbles ticket ids: "token 4127", "token dash forty one twenty seven", "tokin 4127" all mean TOKEN-4127. Resolve them against the candidate ids.
-- If a ticket number is spoken with an unrecognisable prefix and EXACTLY ONE candidate carries that number, use it with "matchedBy": "number-only" and confidence at most 0.6. If several candidates share the number, leave it out.
+- If a ticket is referred to by its number alone ("ticket 4", "number twelve") or with an unrecognisable prefix, and EXACTLY ONE candidate carries that number, use it with "matchedBy": "number-only" and confidence at most 0.6. Leading zeros do not matter: 4 is 0004. If several candidates share the number, leave it out. A number counts only when it clearly points at a ticket, not a quantity or a figure of speech ("one of them", "step 2").
 - Skip greetings, small talk and anything that is not about a candidate ticket.
 
 OUTPUT: valid JSON only, no code fences, no explanations:
-{"mentions":[{"ref":"<candidate ref>","update":"...","statusIntent":"COMPLETED"|"STARTED"|"PAUSED"|"CANCELLED"|"TODO"|null,"speaker":"...","segment":12,"quote":"...","confidence":0.85,"matchedBy":"xyne-id"}]}
+{"mentions":[{"ref":"<candidate ref>","update":"...","statusIntent":"COMPLETED"|"STARTED"|"PAUSED"|"CANCELLED"|"TODO"|null,"stageIntent":"<stage name>"|null,"speaker":"...","segment":12,"quote":"...","confidence":0.85,"matchedBy":"xyne-id"}]}
 If nothing qualifies: {"mentions":[]}`;
 
 const TICKET_CANDIDATE_SELECT = {
@@ -282,6 +287,7 @@ export class CallTicketUpdateService {
         conversationId: row.conversationId,
         assignedTo: row.assignedTo,
         assigneeName: null,
+        stageNames: [],
         source,
       });
     };
@@ -360,6 +366,19 @@ export class CallTicketUpdateService {
       }
     }
 
+    // Board stages for the prompt, so a stage that was named can be proposed as it is.
+    const boardIds = [...new Set([...candidates.values()].filter((c) => c.boardType !== BoardType.FLOW).map((c) => c.boardId))];
+    if (boardIds.length > 0) {
+      const stages = await db.stage.findMany({
+        where: { boardId: { in: boardIds } },
+        orderBy: { sequenceNumber: 'asc' },
+        select: { boardId: true, name: true },
+      });
+      for (const c of candidates.values()) {
+        if (c.boardType !== BoardType.FLOW) c.stageNames = stages.filter((s) => s.boardId === c.boardId).map((s) => s.name);
+      }
+    }
+
     return candidates;
   }
 
@@ -380,6 +399,7 @@ export class CallTicketUpdateService {
           `title: ${c.title}`,
           `status: ${c.statusV2}`,
           `stage: ${c.stageName}`,
+          c.stageNames.length > 0 ? `stages: ${c.stageNames.join(', ')}` : null,
           c.assigneeName ? `assignee: ${c.assigneeName}` : null,
         ].filter(Boolean);
         return `- ${bits.join(' | ')}`;
@@ -433,10 +453,16 @@ export class CallTicketUpdateService {
       }
       if (confidence < MIN_CONFIDENCE) continue;
       const statusIntent = typeof m['statusIntent'] === 'string' && STATUS_VALUES.includes(m['statusIntent']) ? m['statusIntent'] : null;
+      // Only a stage of the ticket's own board, and not the one it is already in.
+      const candidate = candidates.get(ref)!;
+      const stageSaid = typeof m['stageIntent'] === 'string' ? m['stageIntent'].trim().toLowerCase() : '';
+      const stageIntent =
+        (stageSaid && candidate.stageNames.find((n) => n.toLowerCase() === stageSaid && n !== candidate.stageName)) || null;
       const mention: LlmMention = {
         ref,
         update,
         statusIntent,
+        stageIntent,
         speaker: typeof m['speaker'] === 'string' ? m['speaker'] : null,
         segment: typeof m['segment'] === 'number' ? Math.trunc(m['segment']) : null,
         quote: typeof m['quote'] === 'string' ? m['quote'] : null,
@@ -522,10 +548,12 @@ export class CallTicketUpdateService {
         boardType: c.boardType,
         currentStageName: c.stageName,
         currentStatusV2: c.statusV2,
+        // A stage that was named wins; otherwise the stage that stands for the spoken status.
         proposedStageName:
-          spoken.proposedStatusV2 && c.boardType !== BoardType.FLOW
-            ? resolveStageForStatus(boardStages, c.stageName, spoken.proposedStatusV2)
-            : null,
+          c.boardType === BoardType.FLOW
+            ? null
+            : m.stageIntent ??
+              (spoken.proposedStatusV2 ? resolveStageForStatus(boardStages, c.stageName, spoken.proposedStatusV2) : null),
         stageOptions: boardStages.map((s) => s.name).filter((n) => n !== c.stageName),
       };
     });
