@@ -3,6 +3,8 @@ import { Message } from '@prisma/client';
 import { PaginationOptions, PaginatedResult, QueryOptions } from '@/types/database';
 import { sanitizeMessageContent } from '@/utils/contentUtils';
 import { getMessageContentLength, MAX_MESSAGE_CONTENT_LENGTH, MessageType } from '@xyne/shared';
+import { expandBotMentionShorthand, BOT_MENTION_PRECHECK_RE } from '@/utils/botMentionExpansion';
+import { logger } from '@/utils/logger';
 //import { queueMessageIngestion } from '@/queues/vespaQueue';
 
 //import { extractAllMentions } from '@/utils/mentionParser';
@@ -97,6 +99,39 @@ export class MessageRepository extends BaseRepository<Message, CreateMessageInpu
   }
 
   /**
+   * Expands mention shorthand (`@Name[userId]`, Slack-style `<@userId>`,
+   * group/special forms) into HTML mention spans for NON-HUMAN senders only
+   * (userType !== 'USER' — APP integrations like TARA, and BOT senders).
+   * Human senders already emit real spans from the composer and are returned
+   * untouched. Gated behind a cheap regex pre-check so the common
+   * no-mention message adds zero queries; any failure never blocks the save.
+   */
+  private async expandBotMentionsIfSenderIsApp(data: CreateMessageInput): Promise<void> {
+    if (!data.content || !BOT_MENTION_PRECHECK_RE.test(data.content)) return;
+    try {
+      const sender = await this.db.user.findUnique({
+        where: { id: data.senderId },
+        select: { userType: true },
+      });
+      if (!sender || sender.userType === 'USER') return;
+      const before = data.content;
+      data.content = await expandBotMentionShorthand(data.content, async (id) =>
+        this.db.user.findMany({
+          where: { id, status: 'ACTIVE', userType: 'USER' },
+          select: { id: true, name: true },
+        }),
+      );
+      if (data.content !== before) {
+        logger.info(
+          `[messageRepository] expanded bot mention shorthand for non-human sender (userType=${sender.userType})`,
+        );
+      }
+    } catch (err) {
+      logger.error('[messageRepository] bot mention expansion failed; saving original content', err);
+    }
+  }
+
+  /**
    * Validates message content length using the shared getMessageContentLength,
    * the same measurement the client composer uses. Content is stored as HTML,
    * but the limit applies to the visible (HTML-stripped) character count — so a
@@ -169,6 +204,7 @@ export class MessageRepository extends BaseRepository<Message, CreateMessageInpu
     }
 
     this.sanitizeMarkdownContent(data);
+    await this.expandBotMentionsIfSenderIsApp(data);
 
      const workspaceId = await this.resolveMessageWorkspaceId(data);
      const result = await this.db.message.create({
@@ -474,6 +510,7 @@ export class MessageRepository extends BaseRepository<Message, CreateMessageInpu
     }
 
     this.sanitizeMarkdownContent(data);
+    await this.expandBotMentionsIfSenderIsApp(data);
 
     const workspaceId = await this.resolveMessageWorkspaceId(data);
     const result = await this.db.message.create({
