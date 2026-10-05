@@ -1,3 +1,36 @@
+## [1.458.0](https://github.com/juspay/xyne-spaces/compare/v1.457.1...v1.458.0) (2026-10-05)
+
+
+### Features
+
+* sdlc changes sync with latest main ([#2630](https://github.com/juspay/xyne-spaces/issues/2630)) ([840df62](https://github.com/juspay/xyne-spaces/commit/840df622011f26d4274be4279c94b3a583aef8ee)), closes [#2531](https://github.com/juspay/xyne-spaces/issues/2531) [#2532](https://github.com/juspay/xyne-spaces/issues/2532) [#2528](https://github.com/juspay/xyne-spaces/issues/2528)
+
+
+### Bug Fixes
+
+* show starred SDLC channels under Starred in chat sidebar ([#2598](https://github.com/juspay/xyne-spaces/issues/2598)) ([07f8842](https://github.com/juspay/xyne-spaces/commit/07f88422524380d679e10be684b99f63f738252b))
+
+## [1.457.1](https://github.com/juspay/xyne-spaces/compare/v1.457.0...v1.457.1) (2026-10-05)
+
+
+### Bug Fixes
+
+* sanitize d2 svg output to prevent stored xss ([#2588](https://github.com/juspay/xyne-spaces/issues/2588)) ([e9ce0e3](https://github.com/juspay/xyne-spaces/commit/e9ce0e37e3e32e5849eca82f8158ac90f648b7b9))
+
+## [1.457.0](https://github.com/juspay/xyne-spaces/compare/v1.456.2...v1.457.0) (2026-10-05)
+
+
+### Features
+
+* redesign the ticket details header ([#2617](https://github.com/juspay/xyne-spaces/issues/2617)) ([881226f](https://github.com/juspay/xyne-spaces/commit/881226fa421414e19789d1b303f2b1bf0e9fa3fe))
+
+## [1.456.2](https://github.com/juspay/xyne-spaces/compare/v1.456.1...v1.456.2) (2026-10-05)
+
+
+### Bug Fixes
+
+* Fix guest user channel creation ACL in /api/channels ([#2621](https://github.com/juspay/xyne-spaces/issues/2621)) ([8285fbd](https://github.com/juspay/xyne-spaces/commit/8285fbd5d48b5c98fe98bc183ac80155d34efd12))
+
 ## [1.456.1](https://github.com/juspay/xyne-spaces/compare/v1.456.0...v1.456.1) (2026-10-05)
 
 

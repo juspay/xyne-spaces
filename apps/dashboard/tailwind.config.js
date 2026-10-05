@@ -31,6 +31,15 @@ export default {
       fontFamily: {
         sans: ['Inter', 'sans-serif'],
         mono: ['"Geist Mono"', 'monospace'],
+        code: [
+          'ui-monospace',
+          'SFMono-Regular',
+          '"SF Mono"',
+          'Menlo',
+          'Consolas',
+          '"Liberation Mono"',
+          'monospace',
+        ],
         serif: ['"Libre Baskerville"', 'Georgia', 'serif'],
       },
       maxWidth: {

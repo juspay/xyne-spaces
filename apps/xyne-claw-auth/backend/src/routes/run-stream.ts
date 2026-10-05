@@ -190,7 +190,8 @@ type StreamBusEvent =
       toolInvocations?: unknown;
       followUpSuggestions?: string[];
       followUpsPending?: boolean;
-    };
+    }
+  | { kind: "follow_ups"; streamId: string; suggestions: string[] };
 
 let _streamSubReady = false;
 function ensureStreamEventsSubscriber(): void {
@@ -204,6 +205,12 @@ function ensureStreamEventsSubscriber(): void {
   sub.on("message", (_ch: string, raw: string) => {
     let msg: StreamBusEvent;
     try { msg = JSON.parse(raw) as StreamBusEvent; } catch { return; }
+    if (msg.kind === "follow_ups") {
+      // The answer's pendingStreams entry is gone by now; the held stream is
+      // tracked separately. Never republish — every pod already got this.
+      deliverLateFollowUpsLocally(msg.streamId, msg.suggestions);
+      return;
+    }
     const stream = pendingStreams.get(msg.streamId);
     if (!stream) return; // stream lives on another pod (or already resolved)
     if (msg.kind === "progress") {
@@ -238,6 +245,85 @@ function publishStreamEvent(event: StreamBusEvent): void {
   redisService.getConnection()
     .publish(STREAM_EVENTS_CHANNEL, JSON.stringify(event))
     .catch((err) => log.warn("[run-stream] events publish failed:", err instanceof Error ? err.message : err));
+}
+
+/* ─────────────────────────────────────────────────────────────────────
+   Late follow-ups ride the answer's own SSE stream.
+
+   claw generates follow-up suggestions AFTER the answer, so they reach
+   /callback/follow-ups seconds after `done`. Rather than closing on `done`
+   and having the dashboard poll conversation history, the route holds the
+   answer stream open (bounded by CONFIG.followUpStreamHoldMs), writes
+   `event: follow-ups` the moment they land, then closes. claw's POST can
+   land on any replica, so delivery reuses the bus above; only the pod
+   holding the stream writes. The callback persists BEFORE delivering, so a
+   missed hold (expired, Redis down) costs liveness only.
+   ───────────────────────────────────────────────────────────────────── */
+interface FollowUpHold {
+  res: Response;
+  messageId: string | undefined;
+}
+/** Plain data keyed by streamId — nothing looked up here is ever invoked. */
+const followUpHolds = new Map<string, FollowUpHold>();
+/** Follow-ups that beat their own answer's `done` on the owning pod (an
+ *  instant fallback when generation fails fast). Consumed when the hold starts. */
+const earlyFollowUps = new Map<string, string[]>();
+
+/** Write the follow-ups and end the answer stream; ending it releases the hold. */
+function writeLateFollowUps(hold: FollowUpHold, suggestions: string[]): void {
+  const { res, messageId } = hold;
+  if (res.writableEnded || res.destroyed) return;
+  try {
+    res.write(`event: follow-ups\ndata: ${JSON.stringify({ suggestions, ...(messageId ? { id: messageId } : {}) })}\n\n`);
+    res.end();
+  } catch { /* client already gone; its 'close' releases the hold */ }
+}
+
+/** True when this pod owns the stream (held now, or still running). */
+function deliverLateFollowUpsLocally(streamId: string, suggestions: string[]): boolean {
+  const hold = followUpHolds.get(streamId);
+  if (hold) {
+    writeLateFollowUps(hold, suggestions);
+    return true;
+  }
+  if (pendingStreams.has(streamId)) {
+    earlyFollowUps.set(streamId, suggestions);
+    setTimeout(() => earlyFollowUps.delete(streamId), CONFIG.followUpStreamHoldMs + 60_000).unref();
+    return true;
+  }
+  return false;
+}
+
+/** After `done`: wait until this answer's follow-ups are written as
+ *  `event: follow-ups` (which ends `res`), the hold lapses, or the client
+ *  leaves. The caller ends `res` if it is still open. */
+function holdForLateFollowUps(res: Response, streamId: string, messageId: string | undefined): Promise<void> {
+  if (CONFIG.followUpStreamHoldMs <= 0 || res.writableEnded || res.destroyed) return Promise.resolve();
+  return new Promise<void>((resolve) => {
+    const hold: FollowUpHold = { res, messageId };
+    let settled = false;
+    const finish = (): void => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      if (followUpHolds.get(streamId) === hold) followUpHolds.delete(streamId);
+      res.off("finish", finish);
+      res.off("close", finish);
+      resolve();
+    };
+    const timer = setTimeout(() => {
+      log.info(`[follow-ups] stream hold lapsed streamId=${streamId} after ${CONFIG.followUpStreamHoldMs}ms`);
+      finish();
+    }, CONFIG.followUpStreamHoldMs);
+    res.on("finish", finish);
+    res.on("close", finish);
+    followUpHolds.set(streamId, hold);
+    const early = earlyFollowUps.get(streamId);
+    if (early) {
+      earlyFollowUps.delete(streamId);
+      writeLateFollowUps(hold, early);
+    }
+  });
 }
 
 /**
@@ -1735,7 +1821,8 @@ publicRouter.post("/", requireAuth, requireNoAccessToken, async (req: Request, r
           ...(result.followUpSuggestions?.length ? { followUpSuggestions: result.followUpSuggestions } : {}),
           ...(result.followUpsPending === true ? { followUpsPending: true } : {}),
         })}\n\n`);
-        res.end();
+        if (result.followUpsPending === true) await holdForLateFollowUps(res, streamId, assistantMsg?.id);
+        if (!res.writableEnded) res.end();
       }
       return;
     }
@@ -1817,7 +1904,8 @@ publicRouter.post("/", requireAuth, requireNoAccessToken, async (req: Request, r
         ...(result.followUpSuggestions?.length ? { followUpSuggestions: result.followUpSuggestions } : {}),
         ...(result.followUpsPending === true ? { followUpsPending: true } : {}),
       })}\n\n`);
-      res.end();
+      if (result.followUpsPending === true) await holdForLateFollowUps(res, streamId, assistantMsg?.id);
+      if (!res.writableEnded) res.end();
     }
 
   } catch (err) {
@@ -2445,10 +2533,10 @@ internalRouter.post("/:streamId/callback", async (req: Request<{ streamId: strin
 });
 
 /**
- * Persists contextual follow-ups that finish after the main answer callback.
- * The answer stream is already closed at this point, so conversation history
- * is the durable delivery channel; the dashboard's bounded reconciliation
- * picks up the recorder without delaying the answer.
+ * Persists contextual follow-ups that finish after the main answer callback,
+ * then pushes them down the answer stream, which the route holds open after
+ * `done` for exactly this (see holdForLateFollowUps). Conversation history
+ * stays the durable channel when the hold has already lapsed.
  */
 internalRouter.post(
   "/:streamId/callback/follow-ups",
@@ -2501,6 +2589,10 @@ internalRouter.post(
       await agentRunRepository.flushToolInvocations(sessionId);
       await Promise.all(appended);
       log.info(`[follow-ups] persisted late suggestions streamId=${req.params.streamId} sessionId=${sessionId} count=${suggestions.length}`);
+      // Persisted first (durable); now push them down the held answer stream.
+      if (!deliverLateFollowUpsLocally(req.params.streamId, suggestions)) {
+        publishStreamEvent({ kind: "follow_ups", streamId: req.params.streamId, suggestions });
+      }
       res.json({ success: true });
     } catch (err) {
       log.warn(`[follow-ups] failed to persist late suggestions sessionId=${sessionId}:`, errMsg(err));

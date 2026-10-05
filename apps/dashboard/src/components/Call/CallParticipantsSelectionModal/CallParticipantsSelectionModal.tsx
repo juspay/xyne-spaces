@@ -10,7 +10,7 @@ import { EntityMultiSelector } from '../../ui/EntitySelector/EntityMultiSelector
 import { useCallJoinOrInitiate } from '../../../hooks/useCallJoinOrInitiate';
 import { useChannel } from '../../../hooks/useChannels';
 import { usePlatform } from '../../../hooks/usePlatform';
-import { ChannelScopeType } from '@xyne/shared';
+import { ChannelScopeType, type SdlcCallLink } from '@xyne/shared';
 import { useAuth } from '../../../hooks/useAuth';
 import { getUserDisplayName, isUserDeactivated } from '../../../utils/userDisplayName';
 import { rankParticipantOptions } from '../../../utils/participantSearch';
@@ -21,6 +21,10 @@ interface InstantCallModalProps {
   channelId: string;
   conversationId?: string;
   onCallInitiated?: () => void;
+  /** An SDLC track, item or artifact the call belongs to: it becomes a discussion there. */
+  sdlcLink?: SdlcCallLink | undefined;
+  /** The call's name, and what the heading says it is for; the channel's otherwise. */
+  callDisplayName?: string | undefined;
 }
 
 export const InstantCallModal: React.FC<InstantCallModalProps> = ({
@@ -29,6 +33,8 @@ export const InstantCallModal: React.FC<InstantCallModalProps> = ({
   channelId,
   conversationId,
   onCallInitiated,
+  sdlcLink,
+  callDisplayName,
 }) => {
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedParticipants, setSelectedParticipants] = useState<string[]>([]);
@@ -124,13 +130,15 @@ export const InstantCallModal: React.FC<InstantCallModalProps> = ({
         channelId,
         ...(targetUserIds.length > 0 && { targetUserIds }),
         ...(conversationId && { conversationId }),
+        ...(sdlcLink && { sdlcLink }),
+        ...(callDisplayName && { callDisplayName }),
         onComplete: () => {
           onCallInitiated?.();
           onClose();
         },
       });
     },
-    [channelId, conversationId, initiateCall, onCallInitiated, onClose],
+    [channelId, conversationId, sdlcLink, callDisplayName, initiateCall, onCallInitiated, onClose],
   );
 
   useEffect(() => {
@@ -218,7 +226,7 @@ export const InstantCallModal: React.FC<InstantCallModalProps> = ({
       <div className='flex flex-col w-full'>
         <div className='flex items-start justify-between px-5 py-3.5 border-b border-border h-14'>
           <h2 className='text-[15px] font-semibold text-foreground leading-5'>
-            Start an Instant Call
+            {callDisplayName ? `Start a call in ${callDisplayName}` : 'Start an Instant Call'}
           </h2>
           <Button
             variant='outline'

@@ -809,6 +809,17 @@ export async function runClawAgentStream(
                 })}\n\n`
               );
               if (typeof (res as any).flush === 'function') (res as any).flush();
+            } else if (eventType === 'follow-ups') {
+              // Generated after the answer; claw-auth holds the stream open
+              // past `done` and delivers them here.
+              res.write(
+                `data: ${JSON.stringify({
+                  type: 'follow_ups',
+                  followUpSuggestions: parsed.suggestions,
+                  ...(parsed.id && { messageId: parsed.id }),
+                })}\n\n`
+              );
+              if (typeof (res as any).flush === 'function') (res as any).flush();
             } else if (eventType === 'error') {
               res.write(
                 `data: ${JSON.stringify({
