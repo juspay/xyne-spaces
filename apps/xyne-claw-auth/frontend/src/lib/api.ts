@@ -1108,7 +1108,7 @@ export async function createChainWorkflow(payload: {
   name: string;
   definition: ChainWorkflowDefinition;
   isPublished?: boolean;
-  triggers?: Array<{ type: string; channelIds: string[]; configValues?: Record<string, string> }>;
+  triggers?: Array<{ type: string; channelIds: string[]; configValues?: Record<string, string>; config?: Record<string, unknown> }>;
   /** Owner consent: run triggered executions with the creator's own creds. */
   useCreatorCredentials?: boolean;
 }): Promise<ChainWorkflow> {
@@ -1123,7 +1123,7 @@ export async function updateChainWorkflow(id: string, payload: {
   name?: string;
   definition?: ChainWorkflowDefinition;
   isPublished?: boolean;
-  triggers?: Array<{ id?: string; type: string; channelIds: string[]; configValues?: Record<string, string> }> | null;
+  triggers?: Array<{ id?: string; type: string; channelIds: string[]; configValues?: Record<string, string>; config?: Record<string, unknown> }> | null;
   /** Owner consent toggle (owner-only on the backend). */
   useCreatorCredentials?: boolean;
 }): Promise<ChainWorkflow> {
