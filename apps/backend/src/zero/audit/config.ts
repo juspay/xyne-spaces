@@ -1,6 +1,7 @@
 import {
   AuditEntityType,
   deserializeFlowPlan,
+  parseDeskAppIds,
   stringifyAuditValue,
 } from '@xyne/shared';
 import type { AuditResolution } from './resolution';
@@ -501,6 +502,11 @@ export const AUDIT_TABLE_CONFIG: Record<string, AuditTableConfig> = {
       assigneeUserGroupId: (value, res) => (value ? res.userGroupName(String(value)) : null),
       boardId: (value, res) => (value ? res.boardName(String(value)) : null),
       dlAliases: value => formatSet(parseJsonText(value)),
+      // App titles live in claw-auth, out of reach here; the count still says what changed.
+      deskAppIds: value => {
+        const count = parseDeskAppIds(typeof value === 'string' ? value : null).length;
+        return count === 0 ? 'None' : `${count} app${count === 1 ? '' : 's'}`;
+      },
       // Empty means the default: the first email reply stops the clock.
       frtStageNames: value =>
         formatSet(parseJsonText(value), name => (name === FRT_EMAIL_REPLY ? 'Email reply' : name)) ??

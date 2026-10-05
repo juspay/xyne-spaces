@@ -211,12 +211,25 @@ export function embedPageOverElement(url: string, element: HTMLElement): () => v
  * The SDLC bundle's half of the frame contract: applies NAVIGATE from the parent
  * and reports its own route back. Active only when framed.
  */
+export function browserTabSearch(search: string): string | null {
+  const params = new URLSearchParams(search);
+  if (!params.get('folder')) return null;
+  if (params.get('browse') === '1') return null;
+  params.delete('canvas');
+  params.delete('file');
+  params.delete('link');
+  params.set('browse', '1');
+  return `?${params.toString()}`;
+}
+
 export function useSdlcFrameBridge(): void {
   const location = useLocation();
   const navigate = useNavigate();
 
   // Where the parent is now, from its last NAVIGATE or our last report; reporting it again only echoes.
   const parentLocationRef = useRef<string | null>(null);
+  const locationRef = useRef(location);
+  locationRef.current = location;
 
   const enabled = isFramedSdlcSurface();
 
@@ -228,6 +241,12 @@ export function useSdlcFrameBridge(): void {
       if (event.source !== window.parent) return;
 
       const message = parseSdlcFrameMessage(event.data);
+      if (message?.type === SDLC_FRAME_MESSAGE.showBrowser) {
+        const here = locationRef.current;
+        const next = browserTabSearch(here.search);
+        if (next !== null) void navigate(`${here.pathname}${next}`);
+        return;
+      }
       if (!message || message.type !== SDLC_FRAME_MESSAGE.navigate) return;
 
       parentLocationRef.current = message.path;

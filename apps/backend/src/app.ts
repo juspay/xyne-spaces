@@ -105,6 +105,7 @@ import sdlcRepoCredentialBackfillRoutes from '@/routes/sdlcRepoCredentialBackfil
 import searchMetricsRoutes from '@/routes/searchMetrics';
 import knowledgeRoutes from '@/routes/knowledge';
 import vespaSearchRoutes, { relatedContextRouter } from '@/routes/vespaSearch';
+import assistantRouteRoutes from '@/routes/assistantRoute';
 import { dashboardClawRouter } from '@/routes/dashboardClaw';
 import summarizeRoutes from '@/routes/summarize';
 import xyneAIRoutes from '@/routes/xyneAI';
@@ -114,7 +115,6 @@ import ticketMigrationRoutes from '@/routes/ticketMigration';
 import gmailWatchRenewalRoutes from '@/routes/gmailWatchRenewal';
 import { registerPrivateBackfillRoutes } from '@/routes/privateBackfillRoutes';
 import aiRoutes from '@/routes/aiRoutes';
-import productInsightsRoutes from '@/routes/productInsights';
 // import adminBackfillRoutes from '@/routes/adminBackfill';
 import ysweetRoutes, { ysweetValidateRouter } from '@/routes/ysweet';
 import canvasRoutes from '@/routes/canvas';
@@ -202,6 +202,7 @@ import internalRoutes from '@/routes/internal';
 import userDeactivationRoutes from '@/routes/userDeactivation';
 import collectionsRoutes from '@/routes/collections';
 import merchantRoutes from '@/routes/merchants';
+import formFieldValuesRoutes from '@/routes/formFieldValues';
 import officeConversionRoutes from '@/routes/officeConversion';
 import sdlcRoutes from '@/routes/sdlc';
 import sdlcClawRoutes from '@/routes/sdlcClaw';
@@ -737,6 +738,7 @@ export class App {
     // Collections routes
     this.app.use('/api/collections', authMiddleware.authenticate, collectionsRoutes);
     this.app.use('/api/merchants', authMiddleware.authenticate, merchantRoutes);
+    this.app.use('/api/form-field-values', authMiddleware.authenticate, formFieldValuesRoutes);
 
     // Office document (pptx, docx, ...) -> PDF conversion, via LibreOffice.
     // Stateless: takes uploaded bytes, returns converted bytes, touches no stored data.
@@ -771,8 +773,7 @@ export class App {
     this.app.use('/api/vespaSearch/related', authMiddleware.authenticate, relatedContextRouter);
     this.app.use('/api/vespaSearch', authMiddleware.authenticate, vespaSearchRoutes);
 
-    // Product Insights routes (auth and ACL required)
-    this.app.use('/api/productInsights', authMiddleware.authenticate, productInsightsRoutes);
+    this.app.use('/api/assistant/route', authMiddleware.authenticate, assistantRouteRoutes);
 
     // API Key management routes (admin only, no ACL needed as it has requireAdmin middleware)
     this.app.use('/api/admin/api-keys', apiKeyRoutes);

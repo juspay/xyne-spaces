@@ -22,6 +22,7 @@ import { CallVespaFeedSource, queueCallVespaFeed } from '@/services/callVespaQue
 import { queueCallCalendarPush, queueCallCalendarPushMany } from '@/queues/callCalendarPushQueue';
 import { buildCallInviteUrl } from '@/utils/urlUtils';
 import { messageMetadataService } from '@/services/messageMetadataService';
+import { summaryTemplateService } from '@/services/summaryTemplateService';
 import { withWorkspaceScope } from '@/database/tenant/context';
 
 // Number of milliseconds to buffer recurring call instances ahead of time (60 days)
@@ -180,6 +181,23 @@ export class ScheduleCallController {
     return participantUserIds;
   }
 
+  /**
+   * A pinned summary template must be one the organizer can access: the detailed summary
+   * later resolves it as the organizer, and falls back to LLM selection if it can't.
+   */
+  private async canPinSummaryTemplate(
+    summaryTemplateId: string,
+    req: Request,
+    organizerId: string,
+  ): Promise<boolean> {
+    const template = await summaryTemplateService.findAccessibleById(
+      summaryTemplateId,
+      req.user!.workspaceId!,
+      organizerId,
+    );
+    return template !== null;
+  }
+
   // POST /api/calls/series - Create a recurring call series
   createRecurringSeries = async (req: Request, res: Response): Promise<void> => {
     try {
@@ -203,8 +221,14 @@ export class ScheduleCallController {
         endsOn,
         externalInvitees,
         invitation,
+        summaryTemplateId,
       } = RecurringScheduleCallSchema.parse(req.body);
       const normalizedExternalInvitees = normalizeEmailList(externalInvitees);
+
+      if (summaryTemplateId && !(await this.canPinSummaryTemplate(summaryTemplateId, req, userId))) {
+        res.status(400).json({ success: false, error: 'Invalid summary template' });
+        return;
+      }
 
       // Scope is fully decided by the frontend; the backend does NO scopeType inspection:
       //   - channelId present [+ targetUserIds subset] → channel-scoped call, keep channelId
@@ -249,7 +273,7 @@ export class ScheduleCallController {
       // Create series and pre-create all instances for the next 60 days
       // Only the first upcoming instance notifies participants (to avoid spam)
       let createdCallIds: string[] = [];
-      ({ createdCallIds } = await createRecurringSeriesTx(dbClient, seriesId, title, description, req, userId, finalChannelId, recurrenceRule, timezone, startTime, endTime, startsOn, resolvedEndsOn, callUpdatesChannel, recurringParticipantUserIds, normalizedExternalInvitees, createdCallIds));
+      ({ createdCallIds } = await createRecurringSeriesTx(dbClient, seriesId, title, description, req, userId, finalChannelId, recurrenceRule, timezone, startTime, endTime, startsOn, resolvedEndsOn, callUpdatesChannel, recurringParticipantUserIds, normalizedExternalInvitees, createdCallIds, summaryTemplateId));
 
       logger.info(
         `Recurring series ${seriesId} created by ${userId} — ${createdCallIds.length} instances pre-created`,
@@ -311,7 +335,13 @@ export class ScheduleCallController {
         externalInvitees,
         externalInviteDelivery,
         invitation,
+        summaryTemplateId,
       } = ScheduleCallSchema.parse(req.body);
+
+      if (summaryTemplateId && !(await this.canPinSummaryTemplate(summaryTemplateId, req, userId))) {
+        res.status(400).json({ success: false, error: 'Invalid summary template' });
+        return;
+      }
 
       // Scope is fully decided by the frontend; the backend does NO scopeType inspection
       // (see createRecurringSeries for the full rationale):
@@ -354,7 +384,7 @@ export class ScheduleCallController {
       const db = DatabaseClient.getInstance();
       const resolvedCallOrigin = conversationId ? CallOrigin.CONVERSATION : CallOrigin.CHANNEL;
 
-      const { participantUserIds, pillConversationId } = await scheduleCallTx(db, callId, externalId, title, userId, finalChannelId, conversationId, roomLink, startsAt, endsAt, targetUserIds, callUpdatesChannel, normalizedExternalInvitees, resolvedCallOrigin, req);
+      const { participantUserIds, pillConversationId } = await scheduleCallTx(db, callId, externalId, title, userId, finalChannelId, conversationId, roomLink, startsAt, endsAt, targetUserIds, callUpdatesChannel, normalizedExternalInvitees, resolvedCallOrigin, req, summaryTemplateId);
 
       // Eager, so initial_message_md is populated before the response returns.
       if (pillConversationId) {
@@ -480,7 +510,7 @@ export class ScheduleCallController {
 
     try {
       const parsedBody = UpdateScheduleCallSchema.parse(req.body);
-      const { title, startsAt, endsAt, targetUserIds, channelId: reqChannelId, callUpdatesChannel: reqCallUpdatesChannel, externalInvitees } = parsedBody;
+      const { title, startsAt, endsAt, targetUserIds, channelId: reqChannelId, callUpdatesChannel: reqCallUpdatesChannel, externalInvitees, summaryTemplateId } = parsedBody;
       const normalizedExternalInvitees = externalInvitees !== undefined
         ? normalizeEmailList(externalInvitees)
         : undefined;
@@ -510,7 +540,8 @@ export class ScheduleCallController {
           endsAt !== undefined ||
           reqChannelId !== undefined ||
           reqCallUpdatesChannel !== undefined ||
-          normalizedExternalInvitees !== undefined,
+          normalizedExternalInvitees !== undefined ||
+          summaryTemplateId !== undefined,
         targetUserIds,
         // findParticipants already excludes external invitees.
         loadParticipants: () => repositories.calls.findParticipants(call.id),
@@ -522,6 +553,14 @@ export class ScheduleCallController {
 
       if (call.status !== CallStatus.SCHEDULED) {
         res.status(400).json({ success: false, error: 'Only SCHEDULED calls can be edited' });
+        return;
+      }
+
+      if (
+        summaryTemplateId &&
+        !(await this.canPinSummaryTemplate(summaryTemplateId, req, call.createdByUserId))
+      ) {
+        res.status(400).json({ success: false, error: 'Invalid summary template' });
         return;
       }
 
@@ -614,6 +653,7 @@ export class ScheduleCallController {
         invitedByUserId: userId,
         callUpdatesChannel: newCallUpdatesChannel,
         externalInvitees: normalizedExternalInvitees,
+        summaryTemplateId,
       });
 
       logger.info(`[updateScheduledCall] repo update complete | callId=${call.id} resolvedChannelId=${resolvedChannelId}`);
@@ -749,7 +789,7 @@ export class ScheduleCallController {
 
     try {
       const parsedBody = UpdateRecurringSeriesSchema.parse(req.body);
-      const { title, recurrenceRule, startTime, endTime, endsOn, timezone, targetUserIds, channelId: reqChannelId, callUpdatesChannel: reqCallUpdatesChannel, externalInvitees } = parsedBody;
+      const { title, recurrenceRule, startTime, endTime, endsOn, timezone, targetUserIds, channelId: reqChannelId, callUpdatesChannel: reqCallUpdatesChannel, externalInvitees, summaryTemplateId } = parsedBody;
       const normalizedExternalInvitees = externalInvitees !== undefined
         ? normalizeEmailList(externalInvitees)
         : undefined;
@@ -783,7 +823,8 @@ export class ScheduleCallController {
           timezone !== undefined ||
           reqChannelId !== undefined ||
           reqCallUpdatesChannel !== undefined ||
-          normalizedExternalInvitees !== undefined,
+          normalizedExternalInvitees !== undefined ||
+          summaryTemplateId !== undefined,
         targetUserIds,
         loadParticipants: () =>
           repositories.recurringCallParticipants.findInternalParticipants(series.id),
@@ -804,6 +845,14 @@ export class ScheduleCallController {
 
       if (series.status === 'CANCELLED') {
         res.status(400).json({ success: false, error: 'Cannot edit a cancelled series' });
+        return;
+      }
+
+      if (
+        summaryTemplateId &&
+        !(await this.canPinSummaryTemplate(summaryTemplateId, req, series.organizerId))
+      ) {
+        res.status(400).json({ success: false, error: 'Invalid summary template' });
         return;
       }
 
@@ -878,6 +927,7 @@ export class ScheduleCallController {
       if (endsOn !== undefined) seriesUpdate.endsOn = new Date(endsOn);
       if (resolvedChannelId !== undefined) seriesUpdate.channelId = resolvedChannelId;
       if (newCallUpdatesChannel !== undefined) seriesUpdate.callUpdatesChannel = newCallUpdatesChannel;
+      if (summaryTemplateId !== undefined) seriesUpdate.summaryTemplateId = summaryTemplateId;
       // NOTE: We intentionally do NOT update startsOn. The original series.startsOn is the
       // RRULE dtstart anchor and must remain unchanged. The frontend may send startsOn as the
       // instance date, but overwriting the series start would corrupt the recurrence calculation.
@@ -970,6 +1020,7 @@ export class ScheduleCallController {
 
         // Cascade callUpdatesChannel when mode changed — safe to use updateMany on a plain column
         if (newCallUpdatesChannel !== undefined) instanceCascade.callUpdatesChannel = newCallUpdatesChannel;
+        if (summaryTemplateId !== undefined) instanceCascade.summaryTemplateId = summaryTemplateId;
 
         if (Object.keys(instanceCascade).length > 0 && allScheduledInstances.length > 0) {
           logger.info(`[updateRecurringSeries] cascading ${JSON.stringify(instanceCascade)} to ${allScheduledInstances.length} instances`);
@@ -978,6 +1029,7 @@ export class ScheduleCallController {
             title: title !== undefined ? title : undefined,
             channelId: resolvedChannelId,
             callUpdatesChannel: newCallUpdatesChannel,
+            summaryTemplateId,
           });
           allScheduledInstances.forEach((instance) => queueCallVespaFeed(instance.id, {
             source: CallVespaFeedSource.ScheduleCallControllerUpdateRecurringSeriesCascade,

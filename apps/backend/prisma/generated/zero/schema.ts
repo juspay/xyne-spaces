@@ -1404,6 +1404,7 @@ export const emailChannelPreferenceTable = table("email_channel_preferences")
     deskReportRangeDays: number().optional(),
     duplicateScopeConfig: string().optional(),
     slackDeskTriggerMode: string().optional(),
+    deskAppIds: string().optional(),
   })
   .primaryKey("channelId");
 
@@ -1839,6 +1840,7 @@ export const recurringCallSeriesTable = table("recurring_call_series")
     endsOn: number().optional(),
     metadata: json().optional(),
     callUpdatesChannel: string().optional(),
+    summaryTemplateId: string().optional(),
     createdAt: number(),
     updatedAt: number(),
   })

@@ -2,12 +2,13 @@ import type { ReactElement } from 'react';
 import { AgentPromptVersions } from './AgentPromptVersions';
 import { CredentialsCard } from './credentials/CredentialsCard';
 import { ModelCard } from './model/ModelCard';
+import { PersonalHarnessSection } from './model/PersonalHarnessSection';
 import type { AgentConfigTarget } from '../settings/agentConfigTarget';
 
 /**
  * Persona settings. Description and instructions are edited on the profile
- * itself; this holds what sits behind them: prompt versions, model, keys.
- * An agent that isn't saved yet has no versions or keys, only the model.
+ * itself; this holds what sits behind them: prompt versions, model, my own
+ * harness override, keys. An agent that isn't saved yet has only the model.
  */
 export function AgentPersonaTabV2({
   target,
@@ -33,6 +34,8 @@ export function AgentPersonaTabV2({
       )}
 
       <ModelCard target={target} canEdit={canEdit} />
+
+      {saved && <PersonalHarnessSection agentSlug={saved.slug} />}
 
       {saved && (
         <CredentialsCard

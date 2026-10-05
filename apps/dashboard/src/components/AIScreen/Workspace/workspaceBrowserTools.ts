@@ -166,8 +166,9 @@ function unknownRef(ref: string): PageToolResult {
 export async function executePageTool(
   toolName: string,
   args: Record<string, unknown>,
+  target?: ElectronWebviewElement | null,
 ): Promise<PageToolResult> {
-  const wv = registeredWebview;
+  const wv = target === undefined ? registeredWebview : target;
   if (!wv) return { ok: false, content: NO_PAGE };
 
   try {

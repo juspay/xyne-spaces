@@ -8,6 +8,7 @@ import SubagentsV2 from './subagents/SubagentsV2';
 import SkillsV2 from './skills/SkillsV2';
 import McpV2 from './mcp/McpV2';
 import AppsV2 from './apps/AppsV2';
+import DevelopersV2 from './developers/DevelopersV2';
 import { LibraryToolbarSlotProvider } from './shared/components/LibraryToolbarSlot';
 
 interface LibraryTab {
@@ -53,6 +54,14 @@ const LIBRARY_TABS = [
     content: AppsV2,
     searchPlaceholder: 'Search apps',
     // Apps are created by saving one out of a chat, never from a blank form.
+    create: null,
+  },
+  {
+    id: 'developers',
+    label: 'Developers',
+    content: DevelopersV2,
+    searchPlaceholder: 'Search developer tools',
+    // Shipped products (the Spaces MCP and SDK), not something a user creates.
     create: null,
   },
 ] as const satisfies readonly LibraryTab[];

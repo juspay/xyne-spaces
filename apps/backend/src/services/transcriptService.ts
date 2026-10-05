@@ -2108,7 +2108,7 @@ export class TranscriptService {
               logger.info(`Auto-generated detailed summary for call: ${callId}`);
               // App-scheduled calls get the finished summary pushed to their
               // app's webhook. No-ops for calls no app owns, and never throws.
-              await emitCallSummaryReadyToApp(callId);
+              await emitCallSummaryReadyToApp(callId, detailedSummaryResult.rawSummary);
             }
             // A failure here was already logged by whichever exit gave up, so
             // there is no second line and the alert counts one per recording.

@@ -26,6 +26,7 @@ import AboutChannel from '../AboutChannel/AboutChannel';
 import ChannelSettings from '../ChannelInformation/ChannelSettings';
 import { CallSummaryConfig } from '../CallSettings/CallSummaryConfig';
 import NotificationsTab from '../AboutChannel/NotificationsTab';
+import ScheduledMessagesTab from '../AboutChannel/ScheduledMessagesTab';
 import { AddChannelForm } from '../AddChannelForm/AddChannelForm';
 import { PromoteGroupDmRequest } from '../../../services/Chat/channelService';
 import { toast } from 'sonner';
@@ -68,11 +69,11 @@ import { channelTrackingMetadata } from '../../../services/Analytics/channelTrac
 export type ChannelTab =
   | 'about'
   | 'members'
-  | 'agents-apps'
   | 'notifications'
   | 'settings'
-  | 'ai-features';
-
+  | 'ai-features'
+  | 'scheduled-messages'
+  | 'agents-apps';
 interface InfoProps {
   channel: VisibleChannel;
   previousChannelId?: string | null;
@@ -122,6 +123,8 @@ const Info = ({
   const isDefaultChannel = channel.scopeType === ChannelScopeType.DEFAULT;
   const canManageAiPreferences =
     currentUserParticipant?.role === ChannelRole.ADMIN || channel.createdBy === context.userID;
+  const canManageScheduledMessages =
+    isDefaultChannel && currentUserParticipant?.role === ChannelRole.ADMIN;
 
   const addUserPolicy = channel.channelStats?.addUserPolicy ?? ChannelAddUserPolicy.EVERYONE;
   const showAddPeopleButton =
@@ -455,6 +458,14 @@ const Info = ({
               AI Preference
             </Tabs.Trigger>
           )}
+          {canManageScheduledMessages && (
+            <Tabs.Trigger
+              value='scheduled-messages'
+              className={tabTriggerClass('scheduled-messages')}
+            >
+              Scheduled Messages
+            </Tabs.Trigger>
+          )}
         </Tabs.List>
         <Tabs.Content
           value='about'
@@ -538,6 +549,14 @@ const Info = ({
             className='outline-none flex-1 min-h-0 overflow-y-auto'
           >
             <NotificationsTab channel={channel} isParticipant={isParticipant} />
+          </Tabs.Content>
+        )}
+        {canManageScheduledMessages && (
+          <Tabs.Content
+            value='scheduled-messages'
+            className='outline-none flex-1 min-h-0 overflow-hidden'
+          >
+            <ScheduledMessagesTab channelId={channel.id} />
           </Tabs.Content>
         )}
       </Tabs.Root>

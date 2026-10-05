@@ -1281,6 +1281,7 @@ export const recurringCallSeriesTable = table('recurring_call_series')
     createdAt: number(),
     updatedAt: number(),
     callUpdatesChannel: string().optional(),
+    summaryTemplateId: string().optional(),
   })
   .primaryKey('id');
 
@@ -1709,6 +1710,7 @@ export const emailChannelPreferenceTable = table('email_channel_preferences')
     deskReportRangeDays: number().optional(),
     duplicateScopeConfig: string().optional(),
     slackDeskTriggerMode: enumeration<SlackDeskTriggerMode>().optional(),
+    deskAppIds: string().optional(),
   })
   .primaryKey('channelId');
 

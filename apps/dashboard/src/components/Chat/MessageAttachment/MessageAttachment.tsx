@@ -50,6 +50,8 @@ import { useZero } from '../../../hooks/useZero';
 import { mutators } from '../../../zero/mutators';
 import { DownloadButton } from './DownloadButton';
 import { DeleteButton } from './DeleteButton';
+import { InlineCsvFile } from './InlineCsvFile';
+import { isCsvFile } from './csvPreview';
 
 import { CopyCopied, CopyDefault } from '@xyne/icons';
 import { useClipboard } from '../../../hooks/useClipboard';
@@ -1273,8 +1275,10 @@ export const MessageAttachment: React.FC<MessageAttachmentProps> = ({
     );
   }
 
+  const isCsv = isCsvFile(attachment.mimetype, attachment.originalFilename);
   const isTextFile =
-    attachment.mimetype === 'text/plain' || attachment.originalFilename.endsWith('.txt');
+    !isCsv &&
+    (attachment.mimetype === 'text/plain' || attachment.originalFilename.endsWith('.txt'));
   const isCodeFile = isCodeFileByName(attachment.originalFilename);
   const isVideo = isVideoFile(attachment.mimetype);
   const isImage =
@@ -1316,6 +1320,18 @@ export const MessageAttachment: React.FC<MessageAttachmentProps> = ({
       handleCardClick();
     }
   };
+
+  if (isCsv && !compact && !isMobile) {
+    return (
+      <InlineCsvFile
+        attachmentId={attachment.id}
+        fileName={attachment.originalFilename}
+        fileSize={attachment.size}
+        onOpen={handleCardClick}
+        {...(extraActions && { extraActions })}
+      />
+    );
+  }
 
   // Render inline text viewer for .txt files on PC only (mobile shows as regular attachment)
   if (isTextFile && !compact && !isMobile) {

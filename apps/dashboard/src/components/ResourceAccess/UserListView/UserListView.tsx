@@ -1,4 +1,4 @@
-import { ReactElement, useMemo, useState } from 'react';
+import { ReactElement, ReactNode, useEffect, useMemo, useState } from 'react';
 import { Button } from '../../ui/Button';
 import Avatar from '../../ui/Avatar/Avatar';
 import type { User as UserType } from '../../../machines/stateMachine';
@@ -14,16 +14,21 @@ type UserWithProfile = UserType & { userProfile?: UserProfile };
 
 interface UserListViewProps {
   users: UserType[];
-  onEditResource: (user: UserType) => void;
+  /** Shown next to the user's name (e.g. workspace role, "You"). */
+  renderUserBadge?: (user: UserType) => ReactNode;
+  /** Right-hand actions for the row. */
+  renderActions: (user: UserType) => ReactNode;
 }
 
 // Single user row component that uses related profile data
 const UserRow = ({
   user,
-  onEditResource,
+  renderUserBadge,
+  renderActions,
 }: {
   user: UserWithProfile;
-  onEditResource: (user: UserType) => void;
+  renderUserBadge?: (user: UserType) => ReactNode;
+  renderActions: (user: UserType) => ReactNode;
 }): ReactElement => {
   const userProfile = user.userProfile;
   const allUsers = useUsers();
@@ -33,10 +38,6 @@ const UserRow = ({
     if (!userProfile?.manager) return null;
     return allUsers.find(u => u.id === userProfile.manager);
   }, [userProfile?.manager, allUsers]);
-
-  const handleEditClick = (): void => {
-    onEditResource(user as UserType);
-  };
 
   return (
     <div className='flex items-center px-6 py-4 hover:bg-muted transition-colors border-b border-border last:border-b-0'>
@@ -50,6 +51,7 @@ const UserRow = ({
             >
               {getUserDisplayName(user)}
             </span>
+            {renderUserBadge?.(user)}
             {isDeactivated && (
               <span className='text-xs text-muted-foreground bg-muted px-1.5 py-0.5 rounded shrink-0'>
                 Deactivated
@@ -77,33 +79,32 @@ const UserRow = ({
         )}
       </div>
 
-      {/* Role Column */}
+      {/* Job title — the profile role, not the workspace role or an access Role */}
       <div className='flex-1 min-w-0 px-4'>
         <div className='text-sm text-foreground truncate'>{userProfile?.role || '-'}</div>
       </div>
 
       {/* Actions Column */}
-      <div className='w-32 flex justify-end'>
-        <Button
-          variant='secondary'
-          size='sm'
-          onClick={handleEditClick}
-          data-track-category='RESOURCE_ACCESS'
-          data-track-name='EDIT_USER_ACCESS'
-        >
-          Edit
-        </Button>
-      </div>
+      <div className='w-44 flex items-center justify-end gap-1'>{renderActions(user)}</div>
     </div>
   );
 };
 
 const ITEMS_PER_PAGE = 10;
 
-export const UserListView = ({ users, onEditResource }: UserListViewProps): ReactElement => {
+export const UserListView = ({
+  users,
+  renderUserBadge,
+  renderActions,
+}: UserListViewProps): ReactElement => {
   const [currentPage, setCurrentPage] = useState(1);
 
   const totalPages = Math.ceil(users.length / ITEMS_PER_PAGE);
+
+  // A new search can leave fewer pages than the one being viewed.
+  useEffect(() => {
+    setCurrentPage(page => Math.min(page, Math.max(1, totalPages)));
+  }, [totalPages]);
 
   const paginatedUsers = useMemo(() => {
     const startIndex = (currentPage - 1) * ITEMS_PER_PAGE;
@@ -143,9 +144,9 @@ export const UserListView = ({ users, onEditResource }: UserListViewProps): Reac
           Manager
         </div>
         <div className='flex-1 text-xs font-semibold text-muted-foreground uppercase tracking-wider px-4'>
-          Role
+          Job title
         </div>
-        <div className='w-32 text-right text-xs font-semibold text-muted-foreground uppercase tracking-wider'>
+        <div className='w-44 text-right text-xs font-semibold text-muted-foreground uppercase tracking-wider'>
           Actions
         </div>
       </div>
@@ -153,7 +154,12 @@ export const UserListView = ({ users, onEditResource }: UserListViewProps): Reac
       {/* User Rows */}
       <div className='divide-y divide-border'>
         {usersWithProfiles.map(user => (
-          <UserRow key={user.id} user={user} onEditResource={onEditResource} />
+          <UserRow
+            key={user.id}
+            user={user}
+            renderActions={renderActions}
+            {...(renderUserBadge ? { renderUserBadge } : {})}
+          />
         ))}
       </div>
 

@@ -307,11 +307,87 @@ export function serializeLinkPreviewMd(data: LinkPreviewData | null | undefined)
 }
 
 // ==========================================================================
+// CALL PREVIEW (Xyne call link preview)
+// ==========================================================================
+
+/**
+ * Pointer to a Xyne call, written into link_preview_md when a call link is posted.
+ *
+ * No title or status on purpose: the card reads those live, so it can never show a stale
+ * copy or one the calls ACL would deny.
+ */
+export interface CallPreviewData {
+  url: string;
+  /** Public id in the URL; the card's live query keys on it. */
+  externalId: string;
+}
+
+const CALL_PREVIEW_BLOCK_START = ':::call_preview';
+const CALL_PREVIEW_BLOCK_END = ':::';
+
+/**
+ * Parse link_preview_md Markdown string for Xyne call previews.
+ *
+ * Format:
+ * :::call_preview
+ * url: https://spaces.xyne.juspay.net/call/abc123
+ * externalId: abc123
+ * :::
+ */
+export function parseCallPreviewMd(md: string | null | undefined): CallPreviewData | null {
+  if (!md) return null;
+
+  const lines = md.split('\n');
+  let inBlock = false;
+  const data: Record<string, string> = {};
+
+  for (const line of lines) {
+    const trimmed = line.trim();
+
+    if (trimmed === CALL_PREVIEW_BLOCK_START) {
+      inBlock = true;
+      continue;
+    }
+
+    if (inBlock && trimmed === CALL_PREVIEW_BLOCK_END) {
+      inBlock = false;
+      continue;
+    }
+
+    if (!inBlock || !trimmed.includes(':')) continue;
+
+    const colonIndex = trimmed.indexOf(':');
+    const key = trimmed.slice(0, colonIndex).trim();
+    data[key] = trimmed.slice(colonIndex + 1).trim();
+  }
+
+  if (!data['url'] || !data['externalId']) return null;
+
+  return {
+    url: unescapePreviewValue(data['url']),
+    externalId: unescapePreviewValue(data['externalId']),
+  };
+}
+
+/** Serialize call preview data into Markdown. */
+export function serializeCallPreviewMd(data: CallPreviewData | null | undefined): string | null {
+  if (!data || !data.url || !data.externalId) return null;
+
+  return [
+    CALL_PREVIEW_BLOCK_START,
+    `url: ${escapePreviewValue(data.url)}`,
+    `externalId: ${escapePreviewValue(data.externalId)}`,
+    CALL_PREVIEW_BLOCK_END,
+  ].join('\n');
+}
+
+// ==========================================================================
 // UNIFIED PREVIEW PARSER (reads link_preview_md column)
 // ==========================================================================
 
 export type PreviewMdResult =
   | { type: 'message_preview'; data: MessagePreviewData }
+  | { type: 'call_preview'; data: CallPreviewData }
   | { type: 'link_preview'; data: LinkPreviewData };
 
 /**
@@ -324,6 +400,11 @@ export function parsePreviewMd(md: string | null | undefined): PreviewMdResult |
   if (md.includes(MESSAGE_PREVIEW_BLOCK_START)) {
     const data = parseMessagePreviewMd(md);
     return data ? { type: 'message_preview', data } : null;
+  }
+
+  if (md.includes(CALL_PREVIEW_BLOCK_START)) {
+    const data = parseCallPreviewMd(md);
+    return data ? { type: 'call_preview', data } : null;
   }
 
   if (md.includes(LINK_PREVIEW_BLOCK_START)) {

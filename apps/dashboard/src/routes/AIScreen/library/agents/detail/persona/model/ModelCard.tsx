@@ -182,11 +182,17 @@ export function ModelCard({
         open={orderOpen}
         onOpenChange={setOrderOpen}
         order={draft.providerOrder}
+        localHarnessModels={draft.localHarnessModels}
         saving={saving}
         onSave={next => {
-          void persist({ ...draft, providerOrder: next }, 'Provider order updated').then(() =>
-            setOrderOpen(false),
-          );
+          void persist(
+            {
+              ...draft,
+              providerOrder: next.providerOrder,
+              localHarnessModels: next.localHarnessModels,
+            },
+            'Provider order updated',
+          ).then(() => setOrderOpen(false));
         }}
       />
     </DetailSection>

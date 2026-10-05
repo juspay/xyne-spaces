@@ -103,6 +103,7 @@ interface PersistedState {
   deviceTokenPlain?: string;
   enabledProviders?: LocalHarnessProvider[];
   localWorkspaces?: LocalWorkspaceEntry[];
+  computerConnected?: boolean;
 }
 
 export class LocalHarnessBridge {
@@ -247,7 +248,38 @@ export class LocalHarnessBridge {
       lastError: this.lastError,
       activeRuns: this.active.size,
       containerRuntime: await containerSandbox.probe(),
+      computerConnected: this.isComputerConnected(),
     };
+  }
+
+  private isComputerConnected(): boolean {
+    return this.store.get('computerConnected') === true && !!this.deviceToken();
+  }
+
+  async connectComputer(cookieHeader: string): Promise<LocalHarnessStatus> {
+    await this.refreshInstallations();
+    if (!this.deviceToken()) {
+      await this.registerDevice(cookieHeader);
+    } else {
+      try {
+        await this.syncInstallations();
+      } catch (err) {
+        if (!(err instanceof StaleDevicePairingError)) throw err;
+        log.warn('[LocalHarness] stored device token is unknown to the server — re-pairing this computer');
+        this.clearPairing();
+        await this.registerDevice(cookieHeader);
+      }
+    }
+    this.store.set('computerConnected', true);
+    this.lastError = null;
+    log.info('[LocalHarness] computer connected');
+    this.start();
+    return this.status();
+  }
+
+  async disconnectComputer(cookieHeader: string): Promise<LocalHarnessStatus> {
+    this.store.set('computerConnected', false);
+    return this.disconnect(cookieHeader);
   }
 
   private async registerDevice(cookieHeader: string): Promise<void> {
@@ -324,7 +356,13 @@ export class LocalHarnessBridge {
     else next.delete(provider);
     this.setEnabledProviders(next);
 
-    if (next.size === 0) return this.disconnect(cookieHeader);
+    if (next.size === 0) {
+      if (this.isComputerConnected()) {
+        log.info(`[LocalHarness] ${provider} disconnected; computer stays connected for browser calls`);
+        return this.status();
+      }
+      return this.disconnect(cookieHeader);
+    }
 
     try {
       if (this.deviceToken()) {
@@ -373,6 +411,12 @@ export class LocalHarnessBridge {
   }
 
   async disconnect(cookieHeader: string): Promise<LocalHarnessStatus> {
+    if (this.isComputerConnected()) {
+      this.store.set('enabledProviders', []);
+      this.installations = this.installations.map((i) => ({ ...i, enabled: false }));
+      log.info('[LocalHarness] harness disconnected; computer stays connected for browser calls');
+      return this.status();
+    }
     const deviceId = this.store.get('deviceId');
     this.stop();
     if (deviceId) {
@@ -388,11 +432,12 @@ export class LocalHarnessBridge {
   }
 
   start(): void {
-    if (!this.stopped) return;
     if (!this.deviceToken()) return;
-    this.stopped = false;
-    void this.pollLoop();
-    this.surfaceWatcher.start();
+    if (this.stopped) {
+      this.stopped = false;
+      this.surfaceWatcher.start();
+    }
+    if (this.enabledProviders().size > 0) void this.pollLoop();
   }
 
   stop(): void {
@@ -421,6 +466,7 @@ export class LocalHarnessBridge {
       while (!this.stopped) {
         const token = this.deviceToken();
         if (!token) break;
+        if (this.enabledProviders().size === 0 && this.active.size === 0) break;
 
         if (this.active.size >= MAX_CONCURRENT_RUNS) {
           await delay(POLL_CAPACITY_WAIT_MS);

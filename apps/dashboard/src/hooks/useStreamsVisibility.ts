@@ -12,8 +12,7 @@ const subscribe = (listener: () => void): (() => void) => {
 /**
  * Whether Streams exists for this person at all.
  *
- * Opt-in, unlike `useClawDashboardVisibility` which reads `!== 'false'`: Streams
- * is new, so the absence of a stored value means off and nobody meets a surface
+ * Opt-in: the absence of a stored value means off, so nobody meets a surface
  * they did not ask for.
  *
  * This is the feature's single flag. `useVisibleNavigationItems` is the one source
