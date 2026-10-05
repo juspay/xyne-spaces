@@ -1,3 +1,10 @@
+## [1.456.2](https://github.com/juspay/xyne-spaces/compare/v1.456.1...v1.456.2) (2026-10-05)
+
+
+### Bug Fixes
+
+* Fix guest user channel creation ACL in /api/channels ([#2621](https://github.com/juspay/xyne-spaces/issues/2621)) ([8285fbd](https://github.com/juspay/xyne-spaces/commit/8285fbd5d48b5c98fe98bc183ac80155d34efd12))
+
 ## [1.456.1](https://github.com/juspay/xyne-spaces/compare/v1.456.0...v1.456.1) (2026-10-05)
 
 
