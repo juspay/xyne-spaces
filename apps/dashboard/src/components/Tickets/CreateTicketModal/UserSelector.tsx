@@ -2,7 +2,7 @@ import { useMemo, useState, type MouseEvent, type KeyboardEvent, type ReactEleme
 import { UserPlus } from '@xyne/icons';
 import UserAvatar, { AvatarShape, AvatarSize } from '../../UserAvatar/UserAvatar';
 import { EntitySelector } from '../../ui/EntitySelector/EntitySelector';
-import type { SelectorOption } from '../../ui/EntitySelector/EntitySelector.types';
+import type { SelectorOption, TriggerState } from '../../ui/EntitySelector/EntitySelector.types';
 import { useActiveUsers, useSelf, useUser } from '../../../hooks/useUsers';
 import { getUserDisplayName, matchesUserQuery, withYouLabel } from '../../../utils/userDisplayName';
 import { useChannelAssignGate } from '../../../hooks/useChannelAssignGate';
@@ -24,6 +24,7 @@ interface UserSelectorProps {
   assignedGroupId?: string | null;
   noBorder?: boolean;
   placeholder?: string;
+  renderTrigger?: (state: TriggerState) => ReactElement;
 }
 
 /**
@@ -42,6 +43,7 @@ export function UserSelector({
   assignedGroupId,
   noBorder,
   placeholder = 'Assign User',
+  renderTrigger,
 }: UserSelectorProps): ReactElement {
   const [open, setOpen] = useState(false);
   const [searchValue, setSearchValue] = useState('');
@@ -183,6 +185,7 @@ export function UserSelector({
       // must not silently clear the assignment.
       allowDeselect={false}
       virtualize={true}
+      {...(renderTrigger ? { renderTrigger, dropdownMinWidth: '16rem' } : {})}
       {...(variant === 'compact'
         ? {
             renderTrigger: renderCompactTrigger,
