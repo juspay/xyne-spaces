@@ -12,7 +12,6 @@ import {
   ChevronRight,
   FolderAi,
   Hashtag,
-  LockClose,
   MultipleCrossCancelDefault,
   PlusDefault,
   SearchDefault,
@@ -25,6 +24,7 @@ import {
   clampActiveWindowDays,
   type SectionSuggestion,
 } from '@xyne/shared';
+import ChatLock from '../../icons/ChatLock';
 import { Button } from '../../ui/Button';
 import { Checkbox } from '../../ui/Checkbox/Checkbox';
 import {
@@ -82,8 +82,8 @@ interface SectionOrganizerDialogProps {
 
 const ChannelIcon = ({ channel }: { channel: VisibleChannel }): ReactElement => {
   if (isDMChannel(channel.scopeType)) return <ChatDefault size={14} />;
-  if (channel.visibility === ChannelVisibility.PRIVATE) return <LockClose size={14} />;
-  return <Hashtag size={14} />;
+  if (channel.visibility === ChannelVisibility.PRIVATE) return <ChatLock />;
+  return <Hashtag size={12} />;
 };
 
 const ChannelLine = ({
