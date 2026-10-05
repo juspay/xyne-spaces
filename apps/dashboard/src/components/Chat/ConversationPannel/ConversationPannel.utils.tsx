@@ -9,7 +9,7 @@ import {
   TicketToken,
 } from '@xyne/icons';
 import { useCanReadTicket } from '../../../hooks/usePermissions';
-import { ChannelScopeType, isDeskChannelType, parsePublishedAppIds } from '@xyne/shared';
+import { ChannelScopeType, parsePublishedAppIds, supportsChannelApps } from '@xyne/shared';
 import { isDMChannel } from '../ChatDirectory/ChatDirectory.utils';
 import { AppIcon } from '../../AppIcon/AppIcon';
 import {
@@ -103,14 +103,14 @@ export const useAvailableBuiltInTabs = (
 };
 
 /**
- * Whether this channel's tabs can be customized. Only real channels qualify,
- * public and private alike — a DM, a group DM, a ticket/document channel or a
- * desk shows the built-in tabs and offers no editing affordances. Desks are
- * DEFAULT-scoped channels too, so the type check is what keeps them out; they
- * keep their own shared app list (email_channel_preferences.deskAppIds).
+ * Whether this channel's tabs can be customized: public and private channels,
+ * DMs and group DMs. A ticket/document channel or a desk shows the built-in tabs
+ * and offers no editing affordances. Desks are DEFAULT-scoped channels too, so
+ * the type check (inside supportsChannelApps) is what keeps them out; they keep
+ * their own shared app list (email_channel_preferences.deskAppIds).
  */
 export const isChannelTabsCustomizable = (channel?: ChannelTabsSource | null): boolean =>
-  channel?.scopeType === ChannelScopeType.DEFAULT && !isDeskChannelType(channel.type);
+  !!channel && supportsChannelApps(channel);
 
 // Hook to get conversation tabs for this channel: the member's own layout over
 // the apps a channel admin published, where that is allowed; the built-in list

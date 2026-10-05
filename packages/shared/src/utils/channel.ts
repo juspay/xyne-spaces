@@ -1,4 +1,4 @@
-import { ChannelType, DeskType, MAX_CHANNEL_PUBLISHED_APPS, MAX_DESK_APPS } from '../zero/types.js';
+import { ChannelRole, ChannelScopeType, ChannelType, DeskType, MAX_CHANNEL_PUBLISHED_APPS, MAX_DESK_APPS } from '../zero/types.js';
 
 /** Desk channel types — EMAIL, SLACK, APP, CALL and SOCIAL_MEDIA channels all feed into Xyne Desk. */
 export const DESK_CHANNEL_TYPES: ReadonlySet<ChannelType> = new Set([
@@ -65,6 +65,39 @@ export const serializeDeskAppIds = serializeAppIdList;
  */
 export function parsePublishedAppIds(raw: string | null | undefined): string[] {
   return parseAppIdList(raw, MAX_CHANNEL_PUBLISHED_APPS);
+}
+
+/**
+ * Whether a channel has member-customizable tabs and can have apps published to
+ * it: public and private channels, DMs and group DMs — never a desk (desks are
+ * DEFAULT-scoped too, and keep their own email_channel_preferences.deskAppIds)
+ * and never a ticket or document channel.
+ */
+export function supportsChannelApps(channel: {
+  scopeType?: string | null;
+  type?: string | null;
+}): boolean {
+  const scope = channel.scopeType;
+  const isConversation =
+    scope === ChannelScopeType.DEFAULT ||
+    scope === ChannelScopeType.DM ||
+    scope === ChannelScopeType.GROUP_DM;
+  return isConversation && !isDeskChannelType(channel.type);
+}
+
+/**
+ * Who may publish apps (Channel.publishedAppIds), given the caller's participant
+ * role (null when they are not a participant). In a channel, only its ADMINs; in
+ * a DM or group DM every participant is a peer, so any of them may. The same
+ * rule runs in both mutators, the channels ACL and the UI.
+ */
+export function canPublishChannelApps(
+  scopeType: string | null | undefined,
+  participantRole: string | null | undefined,
+): boolean {
+  if (!participantRole) return false;
+  if (scopeType === ChannelScopeType.DM || scopeType === ChannelScopeType.GROUP_DM) return true;
+  return scopeType === ChannelScopeType.DEFAULT && participantRole === ChannelRole.ADMIN;
 }
 
 export const CHANNEL_NAME_MIN_LENGTH = 2;

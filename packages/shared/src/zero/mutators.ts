@@ -121,6 +121,8 @@ import {
   deskTypeForChannelType,
   serializeAppIdList,
   serializeDeskAppIds,
+  supportsChannelApps,
+  canPublishChannelApps,
 } from '../utils/channel.js';
 import { MAX_CHANNEL_PUBLISHED_APPS, MAX_DESK_APPS, MAX_DUPLICATE_SCOPE_FIELDS } from './types.js';
 import { DEFAULT_ROLE_NAME_TO_ENUM } from '../utils/roleFrameworkUtils.js';
@@ -918,9 +920,10 @@ export const mutators = defineMutators({
         });
       },
     ),
-    // Apps a channel admin publishes to every member's tabs (Channel.publishedAppIds).
-    // Members layer their own changes on top locally. Desks are excluded outright:
-    // they keep their own all-shared list in email_channel_preferences.deskAppIds.
+    // Apps published to every participant's tabs (Channel.publishedAppIds) — by an
+    // ADMIN in a channel, by any participant in a DM or group DM. Members layer their
+    // own changes on top locally. Desks are excluded outright: they keep their own
+    // all-shared list in email_channel_preferences.deskAppIds.
     setPublishedApps: defineMutator(
       z.object({
         channelId: z.string(),
@@ -934,14 +937,19 @@ export const mutators = defineMutators({
         if (channel.isArchived) {
           throw new Error('Cannot publish apps to an archived channel');
         }
-        if (channel.scopeType !== ChannelScopeType.DEFAULT || isDeskChannelType(channel.type)) {
-          throw new Error('Apps can only be published to public or private channels');
+        if (!supportsChannelApps(channel)) {
+          throw new Error('Apps can only be published to channels, DMs and group DMs');
         }
         const participant = await tx.run(
           zql.channel_participants.where('channelId', channelId).where('userId', ctx.userID).one(),
         );
-        if (participant?.role !== ChannelRole.ADMIN) {
-          throw new Error('Only channel admins can publish apps to the channel');
+        // Channels: ADMINs only. DMs and group DMs: any participant (peers).
+        if (!canPublishChannelApps(channel.scopeType, participant?.role)) {
+          throw new Error(
+            channel.scopeType === ChannelScopeType.DEFAULT
+              ? 'Only channel admins can publish apps to the channel'
+              : 'Only participants can publish apps to this conversation',
+          );
         }
         await tx.mutate.channels.update({
           id: channelId,

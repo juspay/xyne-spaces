@@ -11,10 +11,9 @@ import { mergeChannelTabs, splitChannelTabs, type ChannelTabLayers } from './cha
  * because an app added inside one channel is almost never wanted in all of them
  * — which is exactly what the first, single-list version did.
  *
- * Only real channels (ChannelScopeType.DEFAULT, public and private alike, and
- * never a desk) are customizable; DMs, group DMs, ticket/document channels and
- * desks show the built-in tabs and never reach this module. See
- * `isChannelTabsCustomizable`.
+ * Channels (public and private), DMs and group DMs are customizable; ticket and
+ * document channels and desks show the built-in tabs and never reach this
+ * module. See `isChannelTabsCustomizable`.
  *
  * On top of that list sit the apps a channel admin published
  * (Channel.publishedAppIds). Two more local lists per channel record how this
@@ -56,10 +55,12 @@ const readList = (key: string): string[] | null => {
 
 /**
  * What a channel starts with. The old global list becomes that starting layout
- * rather than being discarded: it is what the user currently sees in every
- * channel, apps included, so dropping it would look like the tabs reset
- * themselves. Read once at module load — a default that changed mid-session
- * would make two channels disagree about what "uncustomized" means.
+ * rather than being discarded, so its built-in choices (order, removed tabs)
+ * carry over. Its APPS do not: an app belongs to the channel it was added in,
+ * and one that should be in every member's tabs is published to that channel
+ * instead. Seeding apps here put them into every new channel and DM. Read once
+ * at module load — a default that changed mid-session would make two channels
+ * disagree about what "uncustomized" means.
  */
 const resolveDefaults = (): string[] => {
   const legacy = readList(LEGACY_GLOBAL_KEY);
@@ -75,7 +76,7 @@ const resolveDefaults = (): string[] => {
   return readList(CHANNEL_TABS_DEFAULT_KEY) ?? [...DEFAULT_CHANNEL_TABS];
 };
 
-const channelTabDefaults = resolveDefaults();
+const channelTabDefaults = resolveDefaults().filter(id => !isAppItemId(id));
 
 // One store per channel, created on first use. A Map, not an object: the key is
 // a channel id off the URL, and a plain object would make that untrusted string
@@ -101,20 +102,41 @@ export const getChannelTabsStore = (channelId: string): BarItemsStore => {
 };
 
 const addedStores = new Map<string, BarItemsStore>();
+
+/**
+ * One-time repair. An earlier build seeded `:added` from the channel's visible
+ * list even when the channel had never been customized — so the default
+ * layout's apps were recorded as "added" in every channel it was opened in.
+ * Any real edit writes the channel's own list too (useChannelTabsStore's `set`
+ * writes all three), so an `:added` list next to NO saved channel list can only
+ * be that seed: drop it and let the corrected migration reseed it (empty).
+ */
+const repairSeededFromDefaults = (channelId: string): void => {
+  try {
+    const addedKey = `${CHANNEL_TABS_KEY_PREFIX}${channelId}:added`;
+    if (localStorage.getItem(`${CHANNEL_TABS_KEY_PREFIX}${channelId}`) !== null) return;
+    if ((readList(addedKey) ?? []).length > 0) localStorage.removeItem(addedKey);
+  } catch {
+    // Storage unavailable: nothing persisted to repair.
+  }
+};
 const hiddenStores = new Map<string, BarItemsStore>();
 
 /**
  * Apps this member added to the channel themselves. The first read seeds it
- * with every app already in the channel's list: before publishing existed,
- * every app there was one the member added, so it must stay theirs.
+ * with the apps in the channel's OWN saved list: before publishing existed,
+ * every app there was one the member added, so it must stay theirs. A channel
+ * with no saved list seeds nothing — its layout is the defaults, which hold no
+ * apps (see resolveDefaults).
  */
 const getAddedStore = (channelId: string): BarItemsStore => {
   const existing = addedStores.get(channelId);
   if (existing) return existing;
+  repairSeededFromDefaults(channelId);
   const store = createBarItemsStore({
     storageKey: `${CHANNEL_TABS_KEY_PREFIX}${channelId}:added`,
     defaults: [],
-    migrate: () => getChannelTabsStore(channelId).get().filter(isAppItemId),
+    migrate: () => (readList(`${CHANNEL_TABS_KEY_PREFIX}${channelId}`) ?? []).filter(isAppItemId),
   });
   addedStores.set(channelId, store);
   return store;

@@ -188,7 +188,7 @@ export const AppPickerDialog = ({
                 'This bar already holds the maximum number of apps. Switch one off to add another.')
               : (limitNote?.normal ?? `Up to ${MAX_APPS_PER_BAR} apps per bar.`)}
             {publish &&
-              ' Publish puts an app in the tabs of everyone in this channel; each member can still remove it for themselves.'}
+              ` Publish puts an app in the tabs of everyone in this ${publish.audience}; each person can still remove it for themselves.`}
           </p>
         </div>
       </div>
@@ -211,12 +211,12 @@ const PublishButton = ({
   const notShared = app.visibility !== 'WORKSPACE';
   const blocked = !published && (notShared || publish.isFull);
   const title = published
-    ? 'Unpublish: remove it from everyone’s tabs in this channel'
+    ? `Unpublish: remove it from everyone’s tabs in this ${publish.audience}`
     : notShared
       ? 'Publish the app to the workspace first'
       : publish.isFull
-        ? 'This channel already has the maximum number of published apps'
-        : 'Add to the tabs of everyone in this channel';
+        ? `This ${publish.audience} already has the maximum number of published apps`
+        : `Add to the tabs of everyone in this ${publish.audience}`;
   return (
     <button
       type='button'

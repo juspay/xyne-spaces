@@ -156,8 +156,8 @@ const ConversationHeader = ({
   const channel = useVisibleChannel(channelId);
   const askAIAvailable = useAskAIAvailable();
   const channelTabBuiltIns = useChannelTabBuiltIns(channel?.scopeType);
-  // Null in a DM, a group DM, a ticket/document channel or a desk: those show
-  // the built-in tabs with no ×, no + and no dragging.
+  // Null in a ticket/document channel or a desk: those show the built-in tabs
+  // with no ×, no + and no dragging. Channels, DMs and group DMs are editable.
   const layeredTabsStore = useChannelTabsStore(channelId, channel?.publishedAppIds);
   const tabsStore = isChannelTabsCustomizable(channel) ? layeredTabsStore : null;
   // Channel admins get step 2 in the app picker: publish to everyone's tabs.

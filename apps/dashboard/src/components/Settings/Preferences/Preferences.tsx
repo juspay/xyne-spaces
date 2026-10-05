@@ -74,7 +74,7 @@ import {
 } from '../../../hooks/useCallMediaQualitySettings';
 import { useMaxCameraHeight, filterQualityOptionsByMax } from '../../../hooks/useMaxCameraQuality';
 import { useParams } from 'react-router-dom';
-import { parsePublishedAppIds } from '@xyne/shared';
+import { ChannelScopeType, parsePublishedAppIds } from '@xyne/shared';
 import { AI_TOOLBAR_PATH, useAiLaunchPreference } from '../../../hooks/useAiLaunchPreference';
 import {
   toolbarItemsStore,
@@ -1348,8 +1348,14 @@ const ChannelTabsSection: FC<{ state: PreferencesState }> = () => {
   const channels = useMemo(
     () =>
       allChannels
-        // Same rule as the header: real channels only — never a DM or a desk.
-        .filter(channel => isChannelTabsCustomizable(channel) && !channel.isArchived)
+        // Channels only. DMs and group DMs are customizable too, but from their own
+        // tab bar: their `name` is a participant id, not something to list here.
+        .filter(
+          channel =>
+            channel.scopeType === ChannelScopeType.DEFAULT &&
+            isChannelTabsCustomizable(channel) &&
+            !channel.isArchived,
+        )
         .sort((a, b) => (a.name ?? '').localeCompare(b.name ?? '')),
     [allChannels],
   );
@@ -1392,7 +1398,7 @@ const ChannelTabsSection: FC<{ state: PreferencesState }> = () => {
       // flight) carries over from the channel being left.
       key={selected.id}
       title='Channel tabs'
-      subtitle='Tabs are per channel — what you choose here applies to you, in this channel only. Apps a channel admin published show for everyone; you can still remove them for yourself. DMs always show the standard tabs.'
+      subtitle='Tabs are per channel — what you choose here applies to you, in this channel only. Apps a channel admin published show for everyone; you can still remove them for yourself. DMs and group DMs are customized from their own tab bar (pencil icon).'
       store={store}
       resetLabel='Reset to channel layout'
       publishedAppIds={publishedSet}

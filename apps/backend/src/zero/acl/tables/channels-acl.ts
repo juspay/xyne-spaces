@@ -1,5 +1,11 @@
 import type { DeleteID, InsertValue, Transaction, UpdateValue } from '@rocicorp/zero';
-import { ChannelRole, Schema, isDeskChannelType } from '@xyne/shared';
+import {
+  ChannelRole,
+  Schema,
+  canPublishChannelApps,
+  isDeskChannelType,
+  supportsChannelApps,
+} from '@xyne/shared';
 import { BaseACL } from '../core/base-acl';
 import { MutationACLError, TableSchema } from '../core/types';
 import { zql } from '../../queries';
@@ -69,13 +75,17 @@ export class ChannelsACL extends BaseACL<'channels'> {
        throw new MutationACLError('Channel update failed: only channel participants can modify channel settings', 'channels');
     }
 
-    // Published apps are a normal-channel feature; desks keep theirs in
-    // email_channel_preferences.deskAppIds, so the column must stay null on a desk.
+    // Published apps: channels (ADMINs), DMs and group DMs (any participant). Desks
+    // keep theirs in email_channel_preferences.deskAppIds, so the column must stay
+    // null on a desk — and on ticket/document channels, which have no tabs.
     if (args.publishedAppIds !== undefined) {
       if (isDeskChannelType(channel.type)) {
         throw new MutationACLError('Channel update failed: apps cannot be published to a desk channel', 'channels');
       }
-      if (currentUserParticipantData.role !== ChannelRole.ADMIN) {
+      if (!supportsChannelApps(channel)) {
+        throw new MutationACLError('Channel update failed: apps can only be published to channels, DMs and group DMs', 'channels');
+      }
+      if (!canPublishChannelApps(channel.scopeType, currentUserParticipantData.role)) {
         throw new MutationACLError('Channel update failed: only ADMINs can publish apps to the channel', 'channels');
       }
     }
