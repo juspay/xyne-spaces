@@ -7,7 +7,7 @@ import {
   useEffect,
   useMemo,
 } from 'react';
-import { Search, PenBox, X } from 'lucide-react';
+import { PenBox } from 'lucide-react';
 import { QuestionMarkCircle, EnvelopeDefault, Star, UserTwo, PencilEditBox } from '@xyne/icons';
 import { useAllUnreadCount } from '../../../hooks/useUnreadCount';
 import { DmListItem } from './DmListItem';
@@ -36,16 +36,14 @@ import {
   DM_SIDEBAR_MAX_WIDTH,
   DM_SIDEBAR_MIN_WIDTH,
 } from './dmSidebarWidth';
-import Button from '../../ui/Button';
 import { useDmsPaginatedMessages } from '../../../hooks/useDmsPaginatedMessages';
-import { useDmsSearch } from '../../../hooks/useDmsSearch';
 import { Virtuoso, type VirtuosoHandle } from 'react-virtuoso';
 import { Channel, ChannelScopeType } from '@xyne/shared';
 import { FilterPills, type FilterPillOption } from '../../ui/FilterPills';
 import * as Tabs from '@radix-ui/react-tabs';
 import { cn } from '../../../utils/classNames';
 import { ShortcutTooltip } from '../../ui/ShortcutTooltip';
-import { DmSearchDropdown } from './DmSearchDropdown';
+import { DmSearchBox } from './DmSearchBox';
 
 // Hardcoded item heights derived from CSS (avoids DOM measurement via ref)
 // Desktop: py-2 (16px) + 19px title + 1px + 20px preview + 2px border
@@ -89,6 +87,10 @@ const getDmFilterEmptyCopy = (activeTab: DmFilterTab): { title: string; descript
 };
 
 const DmsPage = (): ReactElement => {
+  const dmsPageRenders = useRef(0);
+  dmsPageRenders.current += 1;
+  console.log(`[PERF] DmsPage render #${dmsPageRenders.current}`);
+
   const navigate = useNavigate();
   const { isMobile } = usePlatform();
   const { channelId } = useParams<{ channelId: string }>();
@@ -178,27 +180,6 @@ const DmsPage = (): ReactElement => {
 
   const filterEmptyCopy = getDmFilterEmptyCopy(activeTab);
 
-  const {
-    dmSearchQuery,
-    setDmSearchQuery,
-    peopleResults,
-    groupDmResults,
-    isSearchStale,
-    showDmSearchDropdown,
-    setShowDmSearchDropdown,
-    selectedDmSearchIndex,
-    dmSearchInputRef,
-    handleDmSearchKeyDown,
-  } = useDmsSearch();
-
-  // Clear search when a DM is selected
-  useEffect(() => {
-    if (channelId) {
-      setDmSearchQuery('');
-      setShowDmSearchDropdown(false);
-    }
-  }, [channelId, setDmSearchQuery, setShowDmSearchDropdown]);
-
   // j/k keyboard navigation through DM list
   const currentDmIndex = useMemo(
     () => (channelId ? filteredDirectMessages.findIndex(ch => ch.id === channelId) : -1),
@@ -239,8 +220,6 @@ const DmsPage = (): ReactElement => {
   // Handle DM selection from search dropdown
   const handleDmSelect = useCallback(
     async (selectedChannelId: string) => {
-      setDmSearchQuery('');
-      setShowDmSearchDropdown(false);
       void navigate(`/chat/dm/${selectedChannelId}`);
 
       // On mobile the sidebar unmounts immediately after navigation, so jumping the
@@ -258,7 +237,7 @@ const DmsPage = (): ReactElement => {
         pendingScrollChannelIdRef.current = selectedChannelId;
       }
     },
-    [isMobile, jumpToChannel, navigate, setDmSearchQuery, setShowDmSearchDropdown],
+    [isMobile, jumpToChannel, navigate],
   );
 
   // When directMessages updates, check if the pending scroll channel has appeared.
@@ -334,35 +313,17 @@ const DmsPage = (): ReactElement => {
   // on a new selection (even if the same userId is re-selected after removing them via X).
   const handleUserSelect = useCallback(
     (userId: string) => {
-      setDmSearchQuery('');
-      setShowDmSearchDropdown(false);
       void navigate(`/chat/dm/compose?userId=${userId}`, {
         state: { composePanelKey: Date.now() },
       });
     },
-    [navigate, setDmSearchQuery, setShowDmSearchDropdown],
+    [navigate],
   );
 
-  // Stable void-wrapper (handleDmSelect is async; the dropdown's prop type is sync).
+  // Stable void-wrapper: handleDmSelect is async; DmSearchBox.onSelectChannel is sync.
   const handleSearchSelectChannel = useCallback(
     (selectedChannelId: string): void => void handleDmSelect(selectedChannelId),
     [handleDmSelect],
-  );
-
-  // Shared search dropdown props — identical for mobile and desktop layouts
-  const searchDropdown = (
-    <DmSearchDropdown
-      isVisible={showDmSearchDropdown && dmSearchQuery.trim().length > 0}
-      peopleResults={peopleResults}
-      groupDmResults={groupDmResults}
-      selectedIndex={selectedDmSearchIndex}
-      isStale={isSearchStale}
-      queryLength={dmSearchQuery.length}
-      trackedResultCount={filteredDirectMessages.length}
-      currentUserId={context.userID}
-      onSelectChannel={handleSearchSelectChannel}
-      onSelectUser={handleUserSelect}
-    />
   );
 
   if (isMobile) {
@@ -403,56 +364,14 @@ const DmsPage = (): ReactElement => {
           </div>
 
           {/* Search Row: Input Only */}
-          <div className='relative w-full dm-search-container'>
-            <div className='absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none'>
-              <Search className='size-5 text-muted-foreground' />
-            </div>
-            <input
-              id='dm-search-input'
-              ref={dmSearchInputRef}
-              type='text'
-              className='w-full h-11 pl-12 pr-10 py-3 bg-background rounded-full border border-border text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-0'
-              placeholder='Search DMs (Cmd+K)'
-              autoFocus={!isMobile}
-              value={dmSearchQuery}
-              onChange={e => {
-                setDmSearchQuery(e.target.value);
-                setShowDmSearchDropdown(true);
-              }}
-              onFocus={() => setShowDmSearchDropdown(true)}
-              onKeyDown={e =>
-                handleDmSearchKeyDown(e, id => void handleDmSelect(id), handleUserSelect)
-              }
-              data-track-event='blur'
-              data-track-category='DM'
-              data-track-name='SEARCH_DMS_INPUT'
-              data-track-metadata={JSON.stringify({
-                resultCount: filteredDirectMessages.length,
-                queryLength: dmSearchQuery.length,
-              })}
-            />
-            {dmSearchQuery && (
-              <Button
-                className='absolute inset-y-1 right-1 pr-3 flex items-center'
-                onClick={() => {
-                  setDmSearchQuery('');
-                  setShowDmSearchDropdown(false);
-                }}
-                data-track-category='DM'
-                data-track-name='CLEAR_DM_SEARCH'
-                data-track-metadata={JSON.stringify({
-                  hadResults: filteredDirectMessages.length > 0,
-                  resultCount: filteredDirectMessages.length,
-                })}
-                aria-label='Clear search'
-                variant='link'
-                size='icon'
-              >
-                <X className='size-4 text-muted-foreground hover:text-foreground' />
-              </Button>
-            )}
-            {searchDropdown}
-          </div>
+          <DmSearchBox
+            currentUserId={context.userID}
+            onSelectChannel={handleSearchSelectChannel}
+            onSelectUser={handleUserSelect}
+            clearSignal={channelId}
+            trackedDmCount={filteredDirectMessages.length}
+            isMobile
+          />
           <FilterPills
             tabs={dmFilterTabs}
             activeTab={activeTab}
@@ -595,47 +514,13 @@ const DmsPage = (): ReactElement => {
               </div>
 
               <div className='px-3'>
-                <div className='relative dm-search-container'>
-                  <Search className='absolute left-3 top-1/2 -translate-y-1/2 size-4 text-muted-foreground' />
-                  <input
-                    id='dm-search-input'
-                    ref={dmSearchInputRef}
-                    type='text'
-                    autoFocus
-                    className='w-full pl-9 pr-8 py-2 bg-muted rounded-lg text-sm focus:outline-none focus:ring-1 focus:ring-ring'
-                    placeholder='Search DMs (Cmd+K)'
-                    value={dmSearchQuery}
-                    onChange={e => {
-                      setDmSearchQuery(e.target.value);
-                      setShowDmSearchDropdown(true);
-                    }}
-                    onFocus={() => setShowDmSearchDropdown(true)}
-                    onKeyDown={e =>
-                      handleDmSearchKeyDown(e, id => void handleDmSelect(id), handleUserSelect)
-                    }
-                    data-testid='search-messages-input'
-                    data-track-event='blur'
-                    data-track-category='DM'
-                    data-track-name='SEARCH_DMS_INPUT_DESKTOP'
-                  />
-                  {dmSearchQuery && (
-                    <Button
-                      className='absolute right-1 top-1/2 -translate-y-1/2 flex items-center'
-                      onClick={() => {
-                        setDmSearchQuery('');
-                        setShowDmSearchDropdown(false);
-                      }}
-                      data-track-category='DM'
-                      data-track-name='CLEAR_DM_SEARCH'
-                      aria-label='Clear search'
-                      variant='link'
-                      size='icon'
-                    >
-                      <X className='size-4 text-muted-foreground hover:text-foreground' />
-                    </Button>
-                  )}
-                  {searchDropdown}
-                </div>
+                <DmSearchBox
+                  currentUserId={context.userID}
+                  onSelectChannel={handleSearchSelectChannel}
+                  onSelectUser={handleUserSelect}
+                  clearSignal={channelId}
+                  trackedDmCount={filteredDirectMessages.length}
+                />
               </div>
 
               <Tabs.Root

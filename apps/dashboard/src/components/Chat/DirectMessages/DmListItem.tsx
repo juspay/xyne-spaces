@@ -1,4 +1,4 @@
-import { ReactElement, ReactNode, KeyboardEvent, memo, useMemo } from 'react';
+import { ReactElement, ReactNode, KeyboardEvent, memo, useMemo, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   type Channel,
@@ -45,6 +45,10 @@ const DmListItemComponent = ({
   isSelected = false,
   latestConversation,
 }: DmListItemProps): ReactElement => {
+  const renders = useRef(0);
+  renders.current += 1;
+  console.log(`[PERF] DmListItem render #${renders.current} — ${channel.id}`);
+
   const navigate = useNavigate();
   const context = useAuthContextValues();
 

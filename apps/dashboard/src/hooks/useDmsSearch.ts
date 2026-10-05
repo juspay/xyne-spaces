@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo, useRef, useDeferredValue } from 'react';
+import { useState, useEffect, useLayoutEffect, useCallback, useMemo, useRef } from 'react';
 import { useAllChannels } from './useChannels';
 import { useUsers } from './useUsers';
 import { useAuthContextValues } from './useAuth';
@@ -29,7 +29,7 @@ interface UseDmsSearchReturn {
   groupDmResults: Channel[];
   /** Combined count for keyboard navigation */
   totalResultCount: number;
-  /** True while the deferred results lag behind the typed query. */
+  /** True while the workers haven't yet replied for the current query. */
   isSearchStale: boolean;
   showDmSearchDropdown: boolean;
   setShowDmSearchDropdown: (show: boolean) => void;
@@ -43,14 +43,17 @@ interface UseDmsSearchReturn {
 }
 
 export const useDmsSearch = (): UseDmsSearchReturn => {
-  // Input stays instant; the heavy filter memos below run off the deferred (background) render.
   const [dmSearchQuery, setDmSearchQuery] = useState('');
-  const deferredQuery = useDeferredValue(dmSearchQuery);
-  const trimmedQuery = deferredQuery.trim();
-  const isSearchStale = trimmedQuery !== dmSearchQuery.trim();
+  const trimmedQuery = dmSearchQuery.trim();
   const [showDmSearchDropdown, setShowDmSearchDropdown] = useState(false);
   const [selectedDmSearchIndex, setSelectedDmSearchIndex] = useState(0);
   const dmSearchInputRef = useRef<HTMLInputElement>(null);
+  const keystrokeTimeRef = useRef<number>(0);
+
+  const setDmSearchQueryTimed = useCallback((query: string) => {
+    keystrokeTimeRef.current = performance.now();
+    setDmSearchQuery(query);
+  }, []);
 
   const allChannels = useAllChannels();
   const allUsers = useUsers();
@@ -82,13 +85,16 @@ export const useDmsSearch = (): UseDmsSearchReturn => {
   // Worker-based user search: fuzzy matching runs off the main thread.
   // Use a generous limit so DM contacts are not accidentally sliced out before
   // the DM-specific filter below runs.
-  const workerUserResults = useWorkerUserSearch(dmSearchQuery, 500);
+  const { results: workerUserResults, settledQuery: userSettledQuery } = useWorkerUserSearch(
+    dmSearchQuery,
+    500,
+  );
 
   const peopleResults = useMemo((): DmPersonResult[] => {
     void affinityVersion;
     if (!trimmedQuery) return [];
-    const trimmed = trimmedQuery;
-    const isSelfSearch = trimmed.toLowerCase() === 'self';
+    const t0 = performance.now();
+    const isSelfSearch = trimmedQuery.toLowerCase() === 'self';
     const eligible = workerUserResults.filter(
       user =>
         oneToOneDmByUserId.has(user.id) ||
@@ -96,9 +102,11 @@ export const useDmsSearch = (): UseDmsSearchReturn => {
         (isSelfSearch && user.id === currentUserId),
     );
     let newPeopleLeft = PEOPLE_LIMIT;
-    return rankUsers(eligible, trimmed, dmContactRecency)
+    const result = rankUsers(eligible, trimmedQuery, dmContactRecency)
       .filter(user => oneToOneDmByUserId.has(user.id) || newPeopleLeft-- > 0)
       .map(user => ({ user, channelId: oneToOneDmByUserId.get(user.id)?.id ?? null }));
+    console.log(`[PERF] peopleResults (rank worker hits): ${(performance.now() - t0).toFixed(2)}ms — ${result.length} results from ${workerUserResults.length} worker hits`);
+    return result;
   }, [
     workerUserResults,
     trimmedQuery,
@@ -134,13 +142,14 @@ export const useDmsSearch = (): UseDmsSearchReturn => {
   // Worker-based channel search: regular-channel Fuse runs in a web worker;
   // group-DM participant matching still runs on the main thread inside the hook
   // (same as filterChannelsBySearchableNames) since DM docs are excluded from the worker.
-  const workerChannelResults = useWorkerChannelSearch(groupItems, dmSearchQuery);
+  const { results: workerChannelResults, settledQuery: channelSettledQuery } =
+    useWorkerChannelSearch(groupItems, dmSearchQuery);
 
   const groupDmResults = useMemo(() => {
     if (!trimmedQuery) return [];
 
     // Referenced so this memo re-runs when affinity weights land (read imperatively inside
-    // filterChannelsBySearchableNames, which useWorkerChannelSearch calls).
+    // filterChannelsBySearchableNames).
     void affinityVersion;
 
     const query = trimmedQuery.toLowerCase();
@@ -155,7 +164,9 @@ export const useDmsSearch = (): UseDmsSearchReturn => {
       .map(item => item.channel)
       .sort(byRecency);
 
-    return [...workerChannelResults.map(item => item.channel), ...emailMatched];
+    const result = [...workerChannelResults.map(item => item.channel), ...emailMatched];
+    console.log(`[PERF] groupDmResults (email fallback): ${result.length} total (${workerChannelResults.length} worker + ${emailMatched.length} email)`);
+    return result;
   }, [workerChannelResults, groupItems, trimmedQuery, affinityVersion]);
 
   // Autofocus search input when navigating to DM page
@@ -165,13 +176,15 @@ export const useDmsSearch = (): UseDmsSearchReturn => {
 
   const totalResultCount = peopleResults.length + groupDmResults.length;
 
-  // Render-time derived-state reset: selection resets when the settled query changes, without
-  // the extra per-keystroke render a reset effect would commit.
-  const [indexResetQuery, setIndexResetQuery] = useState(deferredQuery);
-  if (indexResetQuery !== deferredQuery) {
-    setIndexResetQuery(deferredQuery);
-    if (selectedDmSearchIndex !== 0) setSelectedDmSearchIndex(0);
-  }
+  // Stale until both workers have replied for the current raw query.
+  const isSearchStale =
+    trimmedQuery.length > 0 &&
+    (userSettledQuery !== dmSearchQuery || channelSettledQuery !== dmSearchQuery);
+
+  // Reset selection on every query change.
+  useEffect(() => {
+    setSelectedDmSearchIndex(0);
+  }, [dmSearchQuery]);
 
   const handleDmSearchKeyDown = useCallback(
     (
@@ -218,9 +231,17 @@ export const useDmsSearch = (): UseDmsSearchReturn => {
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
+  useLayoutEffect(() => {
+    if (keystrokeTimeRef.current > 0 && trimmedQuery) {
+      const elapsed = performance.now() - keystrokeTimeRef.current;
+      console.log(`[PERF] keystroke→DOM update: ${elapsed.toFixed(2)}ms (query="${dmSearchQuery}")`);
+      keystrokeTimeRef.current = 0;
+    }
+  }, [peopleResults, groupDmResults, dmSearchQuery, trimmedQuery]);
+
   return {
     dmSearchQuery,
-    setDmSearchQuery,
+    setDmSearchQuery: setDmSearchQueryTimed,
     peopleResults,
     groupDmResults,
     totalResultCount,
