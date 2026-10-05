@@ -132,6 +132,7 @@ export class CallTranscriptionService {
       createdBy: userId,
       storageProvider: config.fileStorage.provider,
       conversationId: email.conversationId,
+      channelId: email.channelId,
       workspaceId,
       metadata: { type: CALL_TRANSCRIPT_ATTACHMENT_TYPE, provider: result.provider },
     });
