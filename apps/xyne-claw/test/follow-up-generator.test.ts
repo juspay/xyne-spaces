@@ -3,6 +3,7 @@ import {
   buildFollowUpUserMessage,
   clipFinalResponseForFollowUps,
   describeFollowUpGenerationInput,
+  parseFollowUpPayload,
 } from "../src/follow-up-generator.js";
 
 describe("follow-up generation input", () => {
@@ -52,5 +53,31 @@ describe("buildFollowUpUserMessage", () => {
     const message = buildFollowUpUserMessage({ task: "hello", finalResponse: "   " });
     expect(message).not.toContain("Assistant's final response");
     expect(message).toContain("No agent metadata was provided");
+  });
+});
+
+describe("parseFollowUpPayload", () => {
+  const options = [
+    "Draft a reply to this ticket and send it as me",
+    "Create a ticket for the follow-up work",
+    "Summarize the open decisions in this thread",
+  ];
+
+  it("recovers GLM tool-call markup leaked into content (the real failing case)", () => {
+    const content =
+      "<tool_call><tool_call>record_follow_up_suggestions<arg_key>options</arg_key>" +
+      `<arg_value>${JSON.stringify(options)}</arg_value></tool_call>`;
+    expect(parseFollowUpPayload(content)).toEqual(options);
+  });
+
+  it("recovers a bare JSON array wrapped in prose", () => {
+    expect(parseFollowUpPayload(`Here you go: ${JSON.stringify(options)}`)).toEqual(options);
+  });
+
+  it("still rejects markup that does not carry exactly three options", () => {
+    const content =
+      "<tool_call>record_follow_up_suggestions<arg_key>options</arg_key>" +
+      `<arg_value>${JSON.stringify(options.slice(0, 2))}</arg_value></tool_call>`;
+    expect(parseFollowUpPayload(content)).toBeUndefined();
   });
 });

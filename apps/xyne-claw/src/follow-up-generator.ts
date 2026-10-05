@@ -1,5 +1,6 @@
 import crypto from "node:crypto";
 import { LITELLM, litellmEndpoint } from "./config.js";
+import { parseArgMarkup } from "./leaked-tool-call.js";
 import { createLogger } from "./logger.js";
 import type { PendingQuestion } from "xyne-claw-shared";
 
@@ -172,7 +173,21 @@ export function parseFollowUpPayload(value: unknown): string[] | undefined {
   if (typeof value !== "string" || !value.trim()) return undefined;
 
   const trimmed = value.trim().replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "");
-  for (const candidate of [trimmed, trimmed.match(/\{[\s\S]*\}/)?.[0]]) {
+  // GLM via LiteLLM intermittently leaks the forced tool call into content as
+  // native markup (sometimes with a doubled opening tag):
+  //   <tool_call><tool_call>record_follow_up_suggestions<arg_key>options</arg_key><arg_value>[…]</arg_value></tool_call>
+  const markup = parseArgMarkup(trimmed);
+  for (const key of ["options", "suggestions", "questions"]) {
+    const raw = markup[key];
+    if (raw === undefined) continue;
+    try {
+      const parsed = parseFollowUpPayload(JSON.parse(raw));
+      if (parsed) return parsed;
+    } catch {
+      // Not a JSON array — fall through to the generic recoveries below.
+    }
+  }
+  for (const candidate of [trimmed, trimmed.match(/\{[\s\S]*\}/)?.[0], trimmed.match(/\[[\s\S]*\]/)?.[0]]) {
     if (!candidate) continue;
     try {
       const parsed = parseFollowUpPayload(JSON.parse(candidate));
