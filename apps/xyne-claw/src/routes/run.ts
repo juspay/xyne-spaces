@@ -2731,17 +2731,8 @@ export async function processTask(
           // matching across different servers — we compare the whole string,
           // not just the bare suffix, so a config entry from server A can't
           // accidentally grant tools from server B that share a bare name.
-          const norm = (s: string): string =>
-            s.toLowerCase().replace(/_/g, "-");
-          const tNorm = norm(t.name);
           const toolSelectionKey = (t as { selectionKey?: string }).selectionKey;
-          const isDirectPick = allowedDirect.some((d: string) =>
-            t.name === d ||
-            t.name.endsWith(d) ||
-            d.endsWith(`__${t.name}`) ||
-            tNorm === norm(d) ||
-            (toolSelectionKey ? d === toolSelectionKey : false),
-          );
+          const isDirectPick = matchesDirectPick(t, allowedDirect);
           // Gateway tools are exposed as direct tools; keep them when their
           // service name (e.g. "mettle") is selected in tools.gateway.
           // Use stable serviceName metadata instead of mutable display label.
