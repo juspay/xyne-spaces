@@ -1,3 +1,15 @@
+## [1.460.0](https://github.com/juspay/xyne-spaces/compare/v1.459.1...v1.460.0) (2026-10-05)
+
+
+### Features
+
+* Feature/desk recordings asr ([#2353](https://github.com/juspay/xyne-spaces/issues/2353)) ([d533e27](https://github.com/juspay/xyne-spaces/commit/d533e270d2e8919a04e421809ff4e621cbe00f33))
+
+
+### Bug Fixes
+
+* removed multiple ticket style apply ([#2642](https://github.com/juspay/xyne-spaces/issues/2642)) ([4b92299](https://github.com/juspay/xyne-spaces/commit/4b92299e635b187a6c963020475bc85e14fcb453))
+
 ## [1.459.1](https://github.com/juspay/xyne-spaces/compare/v1.459.0...v1.459.1) (2026-10-05)
 
 ## [1.459.0](https://github.com/juspay/xyne-spaces/compare/v1.458.0...v1.459.0) (2026-10-05)
