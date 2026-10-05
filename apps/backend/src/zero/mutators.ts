@@ -783,7 +783,7 @@ async function assignFullRoles(
     boardId,
     createdBy,
     projectId,
-    channelId: channelId ?? undefined,
+    channelId: channelId ?? null,
   });
 
   const primaryUserId = primaryUserIdOf(fullResult);
@@ -1677,8 +1677,8 @@ export function createMutators(
           channelId: z.string(),
           conversationId: z.string().optional(),
           timestamp: z.number(),
-          draftMessage: z.string(),
-          draftMessageId: z.string(),
+          draftMessage: z.string().optional(),
+          draftMessageId: z.string().optional(),
         }),
         async ({ tx, args: { channelId, conversationId, timestamp, draftMessage, draftMessageId } }) => {
           const participant = await tx.run(zql.channel_user_status
@@ -1714,31 +1714,35 @@ export function createMutators(
             updatedAt: timestamp,
           });
 
-          const channelDrafts = await tx.run(
-            zql.draft_messages
-              .where('channelId', channelId)
-              .where('userId', authData.sub)
-              .where(({ or, cmp }) => or(cmp('origin', '=', DraftOrigin.user), cmp('origin', 'IS', null))),
-          );
+          // Draft args are only for callers that also save the channel draft. Omit them
+          // to just mark the channel read and leave the draft untouched.
+          if (draftMessage !== undefined && draftMessageId !== undefined) {
+            const channelDrafts = await tx.run(
+              zql.draft_messages
+                .where('channelId', channelId)
+                .where('userId', authData.sub)
+                .where(({ or, cmp }) => or(cmp('origin', '=', DraftOrigin.user), cmp('origin', 'IS', null))),
+            );
 
-          // Find the channel-level draft (conversationId === null)
-          const draft = channelDrafts.find(d => d.conversationId === null);
+            // Find the channel-level draft (conversationId === null)
+            const draft = channelDrafts.find(d => d.conversationId === null);
 
-          if (draft && draftMessage.trim() === '' && !draft.hasAttachment) {
-            await tx.mutate.draft_messages.delete({ id: draft.id });
-          } else if (draftMessage.trim() !== '') {
-            await tx.mutate.draft_messages.upsert({
-              workspaceId: authData.workspaceId,
-              id: draft?.id || draftMessageId,
-              conversationId: null,
-              channelId,
-              userId: authData.sub,
-              content: draftMessage,
-              hasAttachment: draft?.hasAttachment || false,
-              origin: DraftOrigin.user,
-              updatedAt: timestamp,
-              createdAt: draft?.createdAt || timestamp,
-            });
+            if (draft && draftMessage.trim() === '' && !draft.hasAttachment) {
+              await tx.mutate.draft_messages.delete({ id: draft.id });
+            } else if (draftMessage.trim() !== '') {
+              await tx.mutate.draft_messages.upsert({
+                workspaceId: authData.workspaceId,
+                id: draft?.id || draftMessageId,
+                conversationId: null,
+                channelId,
+                userId: authData.sub,
+                content: draftMessage,
+                hasAttachment: draft?.hasAttachment || false,
+                origin: DraftOrigin.user,
+                updatedAt: timestamp,
+                createdAt: draft?.createdAt || timestamp,
+              });
+            }
           }
 
           const unreadActivities = await tx.run(
@@ -6371,7 +6375,7 @@ export function createMutators(
                       channelId: ticket.channelId,
                     });
                   } else {
-                    const assignmentResult = await evaluateAssignmentRule(ticket.userGroupId!, newBoardId, undefined, undefined, ticket.projectId);
+                    const assignmentResult = await evaluateAssignmentRule(ticket.userGroupId!, newBoardId, undefined, undefined, ticket.projectId, ticket.channelId);
                     if (assignmentResult.assignedUserId) {
                       logger.info(`[MUTATOR-TICKET-UPDATE] Autoassignment result: assigning to ${assignmentResult.assignedUserId}`);
 
@@ -6922,7 +6926,8 @@ export function createMutators(
                   targetBoardId,
                   AssignmentType.TICKET_ASSIGNEE,
                   undefined,
-                  ticket.projectId
+                  ticket.projectId,
+                  ticket.channelId
                 );
 
                   if (assignmentResult.assignedUserId) {

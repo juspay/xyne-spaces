@@ -2212,8 +2212,9 @@ internalRouter.post("/:streamId/callback", async (req: Request<{ streamId: strin
 
     // Connector + provider suggestion cards. Both are display plus client-side
     // connect, so there is no server action or terminal state to make
-    // surface-aware — delivery is the whole job. Triggers 2 and 3 are inferred
-    // from the user's own words, so these need no claw tool.
+    // surface-aware — delivery is the whole job. Connector cards come only
+    // from the agent's suggest-connectors call; provider cards are read from
+    // the user's own words.
     try {
       const { resolveXyneAiCardTarget } = await import("../lib/flow-card-delivery.js");
       const suggestTarget = await resolveXyneAiCardTarget({ assistantMessageId });
@@ -2228,11 +2229,9 @@ internalRouter.post("/:streamId/callback", async (req: Request<{ streamId: strin
           .catch(() => null);
         const taskText = ask?.content ?? "";
         if (taskText) {
-          const {
-            renderConnectorSuggestCard,
-            renderProviderSuggestCard,
-            resolveConnectorSuggestions,
-          } = await import("../lib/connector-card-render.js");
+          const { renderConnectorSuggestCard, renderProviderSuggestCard } = await import(
+            "../lib/connector-card-render.js"
+          );
           const suggestIdentity = {
             agentSlug: suggestTarget.agentSlug,
             agentOrgId: suggestTarget.orgId,
@@ -2244,19 +2243,15 @@ internalRouter.post("/:streamId/callback", async (req: Request<{ streamId: strin
           const blocked = Array.isArray(body["blockedConnectors"])
             ? (body["blockedConnectors"] as string[])
             : undefined;
-          const connectorSuggestions = resolveConnectorSuggestions(
-            body["pendingConnectorSuggestions"] as
-              | { serverTypes: string[]; listAll?: boolean; inferred?: boolean; title?: string }
-              | undefined,
-            taskText,
-          );
+          const connectorSuggestions = body["pendingConnectorSuggestions"] as
+            | { serverTypes: string[]; listAll?: boolean; title?: string }
+            | undefined;
           const delivered: Array<FlowDefinition | null> = [];
           if (connectorSuggestions) {
             delivered.push(
               await renderConnectorSuggestCard({
                 suggestions: connectorSuggestions,
                 blockedConnectors: blocked,
-                taskText,
                 id: suggestIdentity,
                 target: suggestTarget,
               }),

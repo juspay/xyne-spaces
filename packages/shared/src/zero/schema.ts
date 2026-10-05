@@ -1281,6 +1281,7 @@ export const recurringCallSeriesTable = table('recurring_call_series')
     createdAt: number(),
     updatedAt: number(),
     callUpdatesChannel: string().optional(),
+    summaryTemplateId: string().optional(),
   })
   .primaryKey('id');
 

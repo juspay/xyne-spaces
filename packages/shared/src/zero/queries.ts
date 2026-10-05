@@ -2619,6 +2619,42 @@ export const queries = defineQueries({
     },
   ),
 
+  /**
+   * Every call overlapping [from, to) that the viewer can reach, in calendar order.
+   *
+   * Spans the whole lifecycle — SCHEDULED, ACTIVE and ENDED alike — so the calendar
+   * owns one query instead of stitching the scheduled query to the paginated history
+   * pool. That pool is ranked by startedAt (row-creation time for a call nobody
+   * joined) while the grid places by startsAt, it only grows when the *list* view is
+   * scrolled, and everything past its first page is a one-shot snapshot that never
+   * refreshes — none of which the calendar can work with.
+   *
+   * CANCELLED is excluded, as everywhere else. HEADLESS recordings never belong here.
+   *
+   * The overlap predicate doubles as the placement guard: startsAt/endsAt are both
+   * nullable, and a NULL fails either comparison, so calls the grid cannot position
+   * (ad-hoc calls, which carry only startedAt) are dropped by construction.
+   *
+   * Bounded by the window rather than by a row count, so it takes no limit/cursor.
+   */
+  userCallsInRange: defineQuery(
+    z.object({
+      from: z.number(),
+      to: z.number(),
+    }),
+    ({ ctx, args: { from, to } }) => {
+      return zql.calls
+        .where(helpers => helpers.cmp('callType', 'NOT IN', [CallType.HEADLESS]))
+        .where('status', '!=', CallStatus.CANCELLED)
+        .where(helpers =>
+          helpers.and(helpers.cmp('startsAt', '<', to), helpers.cmp('endsAt', '>', from)),
+        )
+        .where(eb => callsReachableByUser(eb, ctx.userID, ctx.workspaceId))
+        .orderBy('startsAt', 'asc')
+        .related('participants', p => p.where('userId', ctx.userID));
+    },
+  ),
+
   userCallHistory: defineQuery(
     z.object({
       limit: z.number(),

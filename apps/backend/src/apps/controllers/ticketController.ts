@@ -696,7 +696,7 @@ export class TicketController {
             // Full role assignment will be done after ticket creation
             pendingFullRoleAssignment = true;
           } else {
-          const assignmentResult = await evaluateAssignmentRule(userGroupId, boardId, undefined, undefined, projectId);
+          const assignmentResult = await evaluateAssignmentRule(userGroupId, boardId, undefined, undefined, projectId, resolvedChannelId);
           if (assignmentResult.assignedUserId) {
             resolvedAssignedTo = assignmentResult.assignedUserId;
             }
@@ -752,6 +752,7 @@ export class TicketController {
             boardId,
             createdBy: userId,
             projectId,
+            channelId: resolvedChannelId,
           });
           const primaryUserId = primaryUserIdOf(fullRoles);
           if (primaryUserId) {
@@ -861,6 +862,7 @@ export class TicketController {
           statusV2: true,
           userGroupId: true,
           assignedTo: true,
+          channelId: true,
         },
       });
       if (!ticket) {
@@ -1069,6 +1071,7 @@ export class TicketController {
               boardId: targetBoardId,
               createdBy: userId,
               projectId: ticket.projectId,
+              channelId: ticket.channelId,
             });
             const primaryUserId = primaryUserIdOf(fullRoles);
             if (primaryUserId) {
@@ -1085,6 +1088,7 @@ export class TicketController {
               undefined,
               undefined,
               ticket.projectId,
+              ticket.channelId ?? null,
             );
             if (assignmentResult.assignedUserId) {
               await ticketService.updateTicketAssignee(ticketId, userId, assignmentResult.assignedUserId);
@@ -2508,7 +2512,7 @@ export class TicketController {
           if (boardMetadata?.fullRoleAssignment === true) {
             pendingFullRoleAssignment = true;
           } else {
-            const assignmentResult = await evaluateAssignmentRule(userGroupId, ticket.boardId, undefined, undefined, ticket.projectId);
+            const assignmentResult = await evaluateAssignmentRule(userGroupId, ticket.boardId, undefined, undefined, ticket.projectId, ticket.channelId ?? null);
             if (assignmentResult.assignedUserId) {
               resolvedAssignedTo = assignmentResult.assignedUserId;
               const updatedTicket = await prismaClient.ticket.update({
@@ -2531,6 +2535,7 @@ export class TicketController {
             boardId: ticket.boardId,
             createdBy: userId,
             projectId: ticket.projectId,
+            channelId: ticket.channelId ?? null,
           });
           const primaryUserId = primaryUserIdOf(fullRoles);
           if (primaryUserId) {
@@ -2776,6 +2781,33 @@ export class TicketController {
         fileCount: uploadedFiles.length,
         appUserId: userId,
       });
+
+      // `externalId` must identify a message uniquely within the source, not just
+      // within its thread. Email's unique is (externalMessageId, channelId), so an
+      // id reused under a second thread cannot be stored.
+      // Scoped first, then the raw id: source-scoping (#1248) is recent, so an id
+      // this app pushed before it is stored unscoped.
+      const existingLink =
+        (await externalMessageRepo.findByExternalId(externalSource.id, externalMessageId)) ??
+        (await externalMessageRepo.findByExternalId(externalSource.id, appExternalId));
+      if (existingLink && existingLink.externalThreadId !== externalThreadId) {
+        logger.warn('[AppDeskInbound] externalId reused across threads — rejecting', {
+          channelId,
+          externalId: appExternalId,
+          externalMessageId,
+          incomingThreadId: externalThreadId,
+          alreadyUsedByThreadId: existingLink.externalThreadId,
+          externalSourceId: externalSource.id,
+        });
+        res.status(409).json({
+          error:
+            `externalId "${appExternalId}" is already in use by thread "${existingLink.externalThreadId}". ` +
+            'externalId must be unique per app, not per thread — send a globally unique id ' +
+            '(for example your message id combined with your thread id).',
+          code: 'EXTERNAL_ID_NOT_UNIQUE',
+        });
+        return;
+      }
 
       // Thread continuation is source-scoped via the app's ExternalMessage link; the
       // channel-scoped fallback only covers pre-existing threads with a missing link

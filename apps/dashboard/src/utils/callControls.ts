@@ -183,6 +183,17 @@ export function buildCallInviteText({
   return lines.join('\n');
 }
 
+/**
+ * The call link inside a pasted buildCallInviteText block, or null when the text is not one.
+ * Keyed on the "Xyne Call joining info" heading plus the "Video call link:" line, so an
+ * ordinary paste that merely mentions a link is left alone.
+ */
+export function extractCallLinkFromInviteText(text: string): string | null {
+  if (!text.includes('Xyne Call joining info')) return null;
+  const match = /^Video call link:\s*(\S+)\s*$/m.exec(text);
+  return match?.[1] ?? null;
+}
+
 export function handleAiButtonClick({
   hasPendingRequestFromOther,
   isControlledByOther,

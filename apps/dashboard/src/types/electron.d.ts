@@ -229,6 +229,8 @@ export interface ElectronAPI {
     detect: () => Promise<LocalHarnessInstallation[]>;
     connect: () => Promise<LocalHarnessStatus>;
     disconnect: () => Promise<LocalHarnessStatus>;
+    connectComputer?: () => Promise<LocalHarnessStatus>;
+    disconnectComputer?: () => Promise<LocalHarnessStatus>;
     setProviderEnabled: (
       provider: LocalHarnessInstallation['provider'],
       enabled: boolean,
@@ -281,6 +283,7 @@ export interface LocalHarnessStatus {
   installations: LocalHarnessInstallation[];
   lastError: string | null;
   containerRuntime?: { available: boolean; reason?: string };
+  computerConnected?: boolean;
 }
 
 export interface ElectronWebviewElement extends HTMLElement {

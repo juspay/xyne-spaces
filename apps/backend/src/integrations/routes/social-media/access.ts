@@ -5,7 +5,7 @@ import { db } from '@/database/client';
 export async function canAccessSocialMediaChannel(
   channelId: string,
   userId: string,
-  workspaceId: string
+  workspaceId: string,
 ): Promise<boolean> {
   const channel = await db.channel.findFirst({
     where: {
@@ -23,7 +23,7 @@ export async function authorizeSocialMediaManager(
   channelId: string,
   userId: string,
   workspaceId: string,
-  res: Response
+  res: Response,
 ): Promise<boolean> {
   const channel = await db.channel.findFirst({
     where: { id: channelId, workspaceId, type: ChannelType.SOCIAL_MEDIA },

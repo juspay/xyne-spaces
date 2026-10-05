@@ -99,19 +99,6 @@ export const AppFetchResponseMappingSchema = z.object({
       attachments: z.string().default('attachments'),
     })
     .default({}),
-  /**
-   * Paths combined into the dedup id, joined with `|`.
-   *
-   * An app's own id is not always unique on its own: a canned or auto-reply
-   * message legitimately carries its *template* id, so the same value appears on
-   * every ticket that used it. Xyne dedups on (source, externalId), so such an
-   * id alone would discard every later copy. Listing the fields that are jointly
-   * unique — typically thread, id and timestamp — makes the key meaningful
-   * without asking the app to change its ids.
-   *
-   * Empty uses `fields.externalId` alone.
-   */
-  idFields: z.array(z.string()).default([]),
 });
 
 export type AppFetchResponseMapping = z.infer<typeof AppFetchResponseMappingSchema>;
@@ -585,22 +572,7 @@ export function mapExportPage(
       return;
     }
 
-    // Every listed dedup path must resolve.
-    let id: string | undefined;
-    if (mapping.idFields.length > 0) {
-      const missing = mapping.idFields.filter(path => !readString(row, path));
-      if (missing.length > 0) {
-        invalidRows.push(
-          `row ${index}: dedup key incomplete — no value at ${missing
-            .map(path => `"${path}"`)
-            .join(', ')}`,
-        );
-        return;
-      }
-      id = mapping.idFields.map(path => readString(row, path)).join('|');
-    } else {
-      id = readString(row, f.externalId);
-    }
+    const id = readString(row, f.externalId);
     if (!id) {
       invalidRows.push(`row ${index}: no id at "${f.externalId}"`);
       return;
