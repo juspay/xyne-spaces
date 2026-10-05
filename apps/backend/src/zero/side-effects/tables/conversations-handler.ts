@@ -36,10 +36,10 @@ export class ConversationsSideEffectHandler extends BaseSideEffectHandler {
       return;
     }
 
-    // handleUnreadCount skips recompute when lastActivityAt <= lastViewedAt, but ordinary
-    // messages never bump channel_stats.lastActivityAt — only channel creation, membership
-    // changes and calls do. Bump it to the conversation's createdAt so recompute runs and
-    // unreadCount doesn't freeze at 0 for every channel the user has already viewed.
+    // handleUnreadCount skips recompute when lastActivityAt <= lastViewedAt. The Zero `send`
+    // mutator already bumps channel_stats.lastActivityAt, but conversations inserted outside
+    // it (server-side/integration paths) don't. Bump it to the conversation's createdAt so
+    // recompute runs and unreadCount doesn't freeze at 0 for channels the user already viewed.
     // updateMany (not update): never throws on a missing channel_stats row, and the
     // lastActivityAt guard makes the write monotonic — a redelivered older side-effect
     // can never move the timestamp (and the DM shelf ordering) backward.

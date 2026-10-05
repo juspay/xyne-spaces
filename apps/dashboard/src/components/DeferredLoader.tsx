@@ -15,7 +15,10 @@ interface CurrentUserRolesApiResponse {
  * Rendered inside InitialStateLoader after hydration is complete.
  */
 export const DeferredLoader: React.FC = () => {
-  const [unreadActivities] = useCachedQuery(queries.userUnreadActivities());
+  const [unreadActivities, unreadActivitiesDetails] = useCachedQuery(
+    queries.userUnreadActivities(),
+  );
+  const unreadActivitiesLoaded = unreadActivitiesDetails.type === 'complete';
 
   const currentUserRolesQuery = useTanStackQuery<CurrentUserRolesApiResponse>({
     queryKey: ['current-user-roles'],
@@ -30,8 +33,9 @@ export const DeferredLoader: React.FC = () => {
     stateMachineActor.send({
       type: 'SET_UNREAD_ACTIVITIES',
       unreadActivities: unreadActivities ?? [],
+      loaded: unreadActivitiesLoaded,
     });
-  }, [unreadActivities]);
+  }, [unreadActivities, unreadActivitiesLoaded]);
 
   useEffect(() => {
     if (currentUserRolesQuery.isSuccess && currentUserRolesQuery.data?.success) {

@@ -322,6 +322,11 @@ interface StateMachineContext {
   threadTracking: ThreadTrackingMap;
   /** Unread activities from zero query, used to derive unread counts */
   unreadActivities: UnreadActivity[];
+  /**
+   * True once unreadActivities holds a completed query result. Lets consumers tell
+   * "not loaded yet" apart from "loaded and empty" (both are []).
+   */
+  unreadActivitiesLoaded: boolean;
 }
 
 type StateMachineEvent =
@@ -367,7 +372,7 @@ type StateMachineEvent =
   | { type: 'UNARCHIVE_CHANNEL'; channelId: string }
   | { type: 'SET_THREAD_LAST_READ'; conversationId: string; lastReadAt: number }
   | { type: 'SET_THREAD_SCROLL'; conversationId: string; scrollTop: number }
-  | { type: 'SET_UNREAD_ACTIVITIES'; unreadActivities: UnreadActivity[] }
+  | { type: 'SET_UNREAD_ACTIVITIES'; unreadActivities: UnreadActivity[]; loaded?: boolean }
   | { type: 'RESET_WORKSPACE_SESSION' };
 
 export const stateMachine = setup({
@@ -828,6 +833,8 @@ export const stateMachine = setup({
         }
         return [];
       },
+      unreadActivitiesLoaded: ({ event }) =>
+        event.type === 'SET_UNREAD_ACTIVITIES' ? (event.loaded ?? true) : false,
     }),
     // Clears user-scoped state on workspace switch so the app renders the
     // new workspace's data instead of stale entries from the previous one.
@@ -847,6 +854,7 @@ export const stateMachine = setup({
       twinDrafts: [],
       delayedMessages: [],
       unreadActivities: [],
+      unreadActivitiesLoaded: false,
       filteredTicketIds: [],
       onlineUsers: [],
     }),
@@ -911,6 +919,7 @@ export const stateMachine = setup({
     overlayDepth: 0,
     threadTracking: hydrateThreadTracking(),
     unreadActivities: [],
+    unreadActivitiesLoaded: false,
   },
   initial: 'idle',
   states: {

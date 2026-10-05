@@ -1,9 +1,7 @@
 /**
  * Pure unread-count predicates shared by the dashboard hooks. The backend
- * endpoint (activityService.getWorkspaceActivityCounts) mirrors these rules as
- * Prisma where-clauses — see the parity tests in
- * packages/shared/test/unreadCountParity.test.mjs, which run the same golden
- * fixtures through this predicate and pin the server-side translations.
+ * endpoint (bypassAcl/activityServices getWorkspaceActivityCounts) mirrors these
+ * rules as Prisma where-clauses — change both together.
  */
 import {
   BELL_EXCLUDED_ACTOR_ACTIONS,

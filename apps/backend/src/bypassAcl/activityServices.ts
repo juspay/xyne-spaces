@@ -121,10 +121,12 @@ export function getWorkspaceActivityCountsQuery(memberId: string): Promise<
                 isRead: false,
                 actorAction: { in: [...DM_SHELF_MENTION_ACTOR_ACTIONS] },
                 actionSource: 'message',
-                // { not: true } (IS DISTINCT FROM TRUE) matches false AND null
-                // rows — parity with the client predicate's `!== true`, which
-                // treats legacy null rows as top-level mentions.
-                isThreadActivity: { not: true },
+                // Top-level only (false OR null) — parity with the client's
+                // `!== true`, which treats legacy null rows as top-level. Thread
+                // replies never enter the DM unreadCount, so they are bell-only and
+                // must not be subtracted. Not `{ not: true }`: Prisma emits `<> true`,
+                // which drops the null rows and double counts them (dm + bell).
+                OR: [{ isThreadActivity: false }, { isThreadActivity: null }],
                 channelId: { in: groupDmChannelIds },
               },
               _count: {

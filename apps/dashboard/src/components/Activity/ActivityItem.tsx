@@ -1,7 +1,6 @@
 import { memo, ReactElement } from 'react';
 import type { ActivityWithRelated } from '../../types/activity';
 import { MessageMentionActivity } from './MessageMentionActivity';
-import { ChannelAddedActivity } from './ChannelAddedActivity';
 import { KeywordMatchActivity } from './KeywordMatchActivity';
 import { CanvasMentionActivity } from './CanvasMentionActivity';
 import { isCanvasActivity } from './isCanvasActivity';
@@ -53,9 +52,6 @@ export const ActivityItem = memo(function ActivityItem({
 
     case 'group_mention':
       return <MessageMentionActivity activity={activity} isExpanded={isExpanded} />;
-
-    case 'added_to_channel':
-      return <ChannelAddedActivity activity={activity} isExpanded={isExpanded} />;
 
     case 'keyword_match':
       return <KeywordMatchActivity activity={activity} isExpanded={isExpanded} />;

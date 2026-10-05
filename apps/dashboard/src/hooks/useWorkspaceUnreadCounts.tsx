@@ -8,8 +8,10 @@ import React, {
   useState,
 } from 'react';
 import axios from 'axios';
+import { useSelector } from '@xstate/react';
 import { API_BASE_URL, isSdlcSurface } from '../config';
-import { UNREAD_REFETCH_EVENT_NAME } from '@xyne/shared';
+import { UNREAD_REFETCH_EVENT_NAME, emitUnreadRefetch } from '@xyne/shared';
+import { stateMachineActor } from '../machines/stateMachine';
 import { useIsInPanelWebview } from './useIsInPanelWebview';
 import { logger, Event as LogEvent } from '../utils/logger';
 
@@ -60,7 +62,9 @@ const emptyCounts: WorkspaceUnreadCounts = {
  * and the dock badge consume it — rail badges are Zero-synced by design.
  *
  * Refreshes: mount, 30s interval, tab becoming visible, and the
- * `unread:refetch` window event (fired after read mutations, debounced). visibilitychange
+ * `unread:refetch` window event (debounced) — fired after read mutations and
+ * whenever the active workspace's Zero-synced unread inputs change, so new
+ * messages reach the dock without waiting for the poll. visibilitychange
  * alone covers both tab switches and app switches; listening to window focus
  * as well would double-fire on returning to the app.
  */
@@ -129,6 +133,31 @@ export const WorkspaceUnreadCountsProvider: React.FC<{ children: React.ReactNode
       window.removeEventListener(UNREAD_REFETCH_EVENT_NAME, onRefetchEvent);
     };
   }, [fetchCounts, shouldPoll]);
+
+  // Active workspace's live unread inputs (Zero-synced). A primitive signature so
+  // unrelated re-syncs of the same rows don't trigger a request; the change itself
+  // means the server already has the new state (Zero replicates from Postgres).
+  // null until unread activities have loaded: "not loaded" and "loaded, empty" are
+  // both [], so without this the initial load would look like a change.
+  const unreadInputsSignature = useSelector(stateMachineActor, state => {
+    if (!state.context.unreadActivitiesLoaded) return null;
+    let dmUnread = 0;
+    for (const status of state.context.userChannelStatuses ?? []) {
+      dmUnread += status.unreadCount || 0;
+    }
+    return `${state.context.unreadActivities.length}:${dmUnread}`;
+  });
+  const lastSignature = useRef<string | null>(null);
+
+  useEffect(() => {
+    const previous = lastSignature.current;
+    lastSignature.current = unreadInputsSignature;
+    // The first loaded value (app start, workspace switch) is a baseline, not news:
+    // the mount fetch / regular poll already covers it.
+    if (!shouldPoll || previous === null || unreadInputsSignature === null) return;
+    if (previous === unreadInputsSignature) return;
+    emitUnreadRefetch();
+  }, [unreadInputsSignature, shouldPoll]);
 
   const value = useMemo<WorkspaceUnreadCounts>(() => {
     let total = 0;
