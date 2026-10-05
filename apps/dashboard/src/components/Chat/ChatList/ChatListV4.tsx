@@ -73,6 +73,12 @@ export type ChatListProps = {
   loadingFallback?: React.ReactNode;
   // Reports the virtualizer's real total content height (px) whenever it changes.
   onTotalHeightChange?: (height: number) => void;
+  /**
+   * Called when a deep link inside this already-open list points at a conversation
+   * that isn't loaded. The host recreates the list (new key) so it opens at the
+   * target like a fresh deep link instead of jumping into freshly fetched rows.
+   */
+  onLinkedTargetNotLoaded?: () => void;
 };
 
 type Anchor = {
@@ -255,6 +261,7 @@ const ChatListV4: React.FC<ChatListProps> = ({
   onThreadClick,
   loadingFallback,
   onTotalHeightChange,
+  onLinkedTargetNotLoaded,
 }) => {
   // Set where these conversations are shown as discussions (the SDLC panel).
   const discussionList = useContext(DiscussionListContext);
@@ -1071,6 +1078,18 @@ const ChatListV4: React.FC<ChatListProps> = ({
       setCutoffAnchor(prev =>
         prev?.createdAt === linkedCutoffCreatedAt.createdAt ? prev : linkedCutoffCreatedAt,
       );
+      return;
+    }
+    // Ask the host to recreate the list so it opens at the target. Not when this list
+    // was already created for this target (e.g. the target no longer exists) — that
+    // would loop — and only where deep-link opening applies (see openedFromDeepLink).
+    const canOpenAtTarget =
+      !unreadsOnly &&
+      !discussionScope &&
+      (!conversationIdsFilter || conversationIdsFilter.includes(linkedConversationId));
+    const listWasCreatedForTarget = deepLinkTarget?.conversationId === linkedConversationId;
+    if (onLinkedTargetNotLoaded && canOpenAtTarget && !listWasCreatedForTarget) {
+      onLinkedTargetNotLoaded();
       return;
     }
     oldConversationsAnchorRef.current = linkedItemCreatedAt;

@@ -239,6 +239,13 @@ const ConversationPanelV2 = ({
     return snapshot.filter(conversation => allowed.has(conversation.conversationId));
   }, [channelId, urlCreatedAt, conversationIds, discussionScope]);
 
+  // Bumped when ChatListV4 reports that a deep link's target isn't in its loaded
+  // list: the new key recreates the list, which then opens at the target exactly
+  // like a fresh deep link (target first, older rows after it lands).
+  const [chatListInstance, setChatListInstance] = useState(0);
+  const handleLinkedTargetNotLoaded = useCallback(() => setChatListInstance(n => n + 1), []);
+  const chatListKey = `${channelId}:${chatListInstance}`;
+
   // Skip mark as read functionality
   const skipMarkAsReadRef = useRef(skipMarkAsRead || false);
   const setSkipMarkAsRead = useCallback((skip: boolean) => {
@@ -315,6 +322,8 @@ const ConversationPanelV2 = ({
                 </div>
               ) : (
                 <ChatListV4
+                  key={chatListKey}
+                  onLinkedTargetNotLoaded={handleLinkedTargetNotLoaded}
                   {...(listLoadingFallback !== undefined && {
                     loadingFallback: listLoadingFallback,
                   })}
