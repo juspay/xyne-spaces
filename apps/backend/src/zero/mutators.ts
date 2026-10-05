@@ -127,7 +127,8 @@ import {
   parseSlashCommandArtifactMessage,
   withSlashCommandArtifactClosed,
 } from '@xyne/shared';
-import { SDLC_HUB_KNOWLEDGE_FOLDER, sdlcTrackStatusSchema } from '@xyne/shared';
+import { SDLC_HUB_KNOWLEDGE_FOLDER, sdlcIconNameSchema, sdlcTrackStatusSchema } from '@xyne/shared';
+import { isSdlcTreeItemType, refileSdlcFolderEdges } from '@xyne/shared';
 import { MAX_DESK_APPS, MAX_DUPLICATE_SCOPE_FIELDS, serializeDeskAppIds } from '@xyne/shared';
 import {
   evaluateEta,
@@ -8022,6 +8023,26 @@ export function createMutators(
             await ensureBoardFormMapping(mainBoardId);
           }
 
+          // Create Release lists the boards linked to the chosen channel, so the release
+          // channel gets its main board linked here. Additive only, and never as the
+          // channel's default: everyday tickets in that channel must not land on it.
+          const channelMappings = await tx.run(
+            zql.channel_board_mappings.where('channelId', channelId),
+          );
+          if (!channelMappings.some(mapping => mapping.boardId === mainBoardId)) {
+            const linkedAt = Date.now();
+            await tx.mutate.channel_board_mappings.insert({
+              id: uuidv4(),
+              channelId,
+              boardId: mainBoardId,
+              workspaceId: authData.workspaceId,
+              isDefault: false,
+              createdBy: authData.sub,
+              createdAt: linkedAt,
+              updatedAt: linkedAt,
+            });
+          }
+
           // Group-scoped edits only load applications owned by this main board.
           const existingApps = await tx.run(
             zql.applications.where('mainReleaseBoardId', mainBoardId),
@@ -11802,6 +11823,22 @@ export function createMutators(
             throw new Error('Structural SDLC edges are not deleted through the link API');
           }
           await tx.mutate.sdlc_entity_links.delete({ id: linkId });
+          // Unfiled from a folder: it leaves the folders it was under, and takes what
+          // is under it along.
+          if (
+            link.relationType === SDLC_CONTAINMENT_RELATION &&
+            isSdlcTreeItemType(link.targetType)
+          ) {
+            await refileSdlcFolderEdges(tx, {
+              channelId,
+              workspaceId: authData.workspaceId,
+              userId: authData.sub,
+              timestamp: Date.now(),
+              idSeed: linkId,
+              item: { type: link.targetType, id: link.targetId },
+              parent: null,
+            });
+          }
         },
       ),
 
@@ -11854,6 +11891,45 @@ export function createMutators(
           await tx.mutate.sdlc_folders.update({
             id: args.folderId,
             name: args.name,
+            updatedAt: args.timestamp,
+          });
+        }
+      ),
+
+      /** A folder's icon; null goes back to the folder mark. */
+      setSdlcFolderIcon: defineMutator(
+        z.object({
+          folderId: z.string(),
+          channelId: z.string(),
+          // Null goes back to the folder mark.
+          icon: sdlcIconNameSchema.nullable(),
+          timestamp: z.number(),
+        }),
+        async ({ tx, args }) => {
+          const participant = await tx.run(
+            zql.channel_participants
+              .where('channelId', args.channelId)
+              .where('userId', authData.sub)
+              .one(),
+          );
+          if (!participant) {
+            throw new Error('Hub membership required');
+          }
+          const placement = await tx.run(
+            zql.sdlc_entity_links
+              .where('channelId', args.channelId)
+              .where('sourceType', 'TRACK')
+              .where('targetType', 'FOLDER')
+              .where('targetId', args.folderId)
+              .where('relationType', SDLC_TRACK_FLAT_RELATION)
+              .one(),
+          );
+          if (!placement) {
+            throw new Error('Folder not found in this hub');
+          }
+          await tx.mutate.sdlc_folders.update({
+            id: args.folderId,
+            icon: args.icon,
             updatedAt: args.timestamp,
           });
         }
@@ -11955,6 +12031,16 @@ export function createMutators(
             createdBy: authData.sub,
             createdAt: args.timestamp,
           });
+          // Its folder edges, and those of everything under it, follow it.
+          await refileSdlcFolderEdges(tx, {
+            channelId: args.channelId,
+            workspaceId: authData.workspaceId,
+            userId: authData.sub,
+            timestamp: args.timestamp,
+            idSeed: args.linkId,
+            item: { type: args.itemType, id: args.itemId },
+            parent: { type: args.parentType, id: args.parentId },
+          });
         },
       ),
 
@@ -12038,6 +12124,16 @@ export function createMutators(
             relationType: SDLC_TRACK_FLAT_RELATION,
             createdBy: authData.sub,
             createdAt: args.timestamp,
+          });
+          // Under every folder above it as well, not only the one it is in.
+          await refileSdlcFolderEdges(tx, {
+            channelId: args.channelId,
+            workspaceId: authData.workspaceId,
+            userId: authData.sub,
+            timestamp: args.timestamp,
+            idSeed: args.containmentLinkId,
+            item: { type: 'FOLDER', id: args.id },
+            parent: { type: args.parentType, id: args.parentId },
           });
         }
       ),
@@ -12161,6 +12257,16 @@ export function createMutators(
             createdBy: authData.sub,
             createdAt: args.timestamp,
           });
+          // Under every folder above it as well, not only the one it is in.
+          await refileSdlcFolderEdges(tx, {
+            channelId: args.channelId,
+            workspaceId: authData.workspaceId,
+            userId: authData.sub,
+            timestamp: args.timestamp,
+            idSeed: args.containmentLinkId,
+            item: { type: args.itemType, id: args.itemId },
+            parent: { type: args.parentType, id: args.parentId },
+          });
         }
       ),
 
@@ -12215,6 +12321,8 @@ export function createMutators(
           name: z.string().trim().min(1).max(120).optional(),
           description: z.string().trim().max(2000).nullable().optional(),
           status: sdlcTrackStatusSchema.optional(),
+          // Null goes back to the track mark.
+          icon: sdlcIconNameSchema.nullable().optional(),
           timestamp: z.number(),
         }),
         async ({ tx, args }) => {
@@ -12247,6 +12355,7 @@ export function createMutators(
             ...(args.name !== undefined ? { name: args.name } : {}),
             ...(args.description !== undefined ? { description: args.description } : {}),
             ...(args.status !== undefined ? { status: args.status } : {}),
+            ...(args.icon !== undefined ? { icon: args.icon } : {}),
             updatedAt: args.timestamp,
           });
         },

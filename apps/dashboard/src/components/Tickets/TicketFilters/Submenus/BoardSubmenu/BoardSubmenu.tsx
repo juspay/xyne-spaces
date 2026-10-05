@@ -14,13 +14,17 @@ interface BoardSubmenuProps {
    * selection would leave the ticket query with no scope at all.
    */
   allowAllBoards?: boolean;
+  /** Offer "All Boards" even with a single board to pick (see TicketsHeader). */
+  alwaysOfferAllBoards?: boolean;
 }
 
 export const BoardSubmenu = ({
   selectedBoards,
   onChange,
+  onClose,
   boards: allBoards = [],
   allowAllBoards = true,
+  alwaysOfferAllBoards = false,
 }: BoardSubmenuProps): ReactElement => {
   const [isPending, startTransition] = useTransition();
 
@@ -36,10 +40,14 @@ export const BoardSubmenu = ({
   return (
     <div className='py-1.5 px-1 flex flex-col gap-1 w-full max-h-80 overflow-y-auto'>
       {/* All Boards option - only show when there are more than 1 board */}
-      {allowAllBoards && allBoards.length > 1 && (
+      {allowAllBoards && (alwaysOfferAllBoards || allBoards.length > 1) && (
         <Button
           variant='ghost'
-          onClick={() => startTransition(() => onChange([]))}
+          onClick={() => {
+            // A single choice, like picking a board: the menu closes on it.
+            startTransition(() => onChange([]));
+            onClose();
+          }}
           data-track-category='TicketFilters'
           data-track-name='SelectAllBoards'
           data-track-metadata={JSON.stringify({ filterType: 'board', selectedBoards })}
