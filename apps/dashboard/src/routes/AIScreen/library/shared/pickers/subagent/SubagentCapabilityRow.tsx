@@ -13,8 +13,6 @@ import {
 import { useSubagentCatalog } from './useSubagentCatalog';
 import { useSubagentSuggestions } from './useSubagentSuggestions';
 
-const CAPTION = 'Delegate specialized tasks to focused agents.';
-
 interface SubagentCapabilityRowProps {
   selection: SubagentSelection;
   onSelectionChange: (next: SubagentSelection) => void;
@@ -101,7 +99,7 @@ export function SubagentCapabilityRow({
       <div className='flex w-full items-center justify-between gap-4'>
         <div className='flex min-w-0 items-center gap-4'>
           <div className='flex shrink-0 items-center gap-2'>
-            <span className='text-sm font-semibold leading-[1.2] tracking-[-0.1px] text-foreground'>
+            <span className='text-sm leading-[1.2] tracking-[-0.1px] text-foreground'>
               Subagent
             </span>
           </div>
@@ -122,8 +120,6 @@ export function SubagentCapabilityRow({
           <PlusDefault className='size-4' aria-hidden />
         </button>
       </div>
-
-      <p className='text-[13px] leading-5 text-muted-foreground'>{CAPTION}</p>
 
       {(selectedEntries.length > 0 || suggestedChips.length > 0) && (
         <div className='flex flex-wrap items-start gap-2 pt-1'>

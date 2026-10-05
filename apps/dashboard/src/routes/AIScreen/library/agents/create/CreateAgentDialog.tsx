@@ -71,7 +71,7 @@ export function CreateAgentDialog({ open, onOpenChange }: CreateAgentDialogProps
   );
 
   const submit = (): void => {
-    const seed: AgentDraftSeed = { name, systemPrompt: intent, color };
+    const seed: AgentDraftSeed = { name, intent, color };
     close(false);
     void navigate(`${workspaceId ? `/${workspaceId}` : ''}/ai/library/agent/create`, {
       state: { draftSeed: seed },

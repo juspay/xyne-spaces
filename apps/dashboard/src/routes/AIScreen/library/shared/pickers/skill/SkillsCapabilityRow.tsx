@@ -5,8 +5,6 @@ import { SkillChip } from './SkillChip';
 import { disableSkill, isSkillSelected } from './skillCatalog';
 import { useSkillCatalog } from './useSkillCatalog';
 
-const CAPTION = 'Add reusable instructions for specialized workflows.';
-
 interface SkillsCapabilityRowProps {
   selectedIds: readonly string[];
   onChange: (next: string[]) => void;
@@ -30,9 +28,7 @@ export function SkillsCapabilityRow({
       <div className='flex w-full items-center justify-between gap-4'>
         <div className='flex min-w-0 items-center gap-4'>
           <div className='flex shrink-0 items-center gap-2'>
-            <span className='text-sm font-semibold leading-[1.2] tracking-[-0.1px] text-foreground'>
-              Skills
-            </span>
+            <span className='text-sm leading-[1.2] tracking-[-0.1px] text-foreground'>Skills</span>
           </div>
           {selectedEntries.length > 0 && (
             <span className='text-xs leading-5 tracking-[-0.24px] text-muted-foreground'>
@@ -55,8 +51,6 @@ export function SkillsCapabilityRow({
           <PlusDefault className='size-4' aria-hidden />
         </button>
       </div>
-
-      <p className='text-[13px] leading-5 text-muted-foreground'>{CAPTION}</p>
 
       {selectedEntries.length > 0 && (
         <div className='flex flex-wrap items-start gap-2 pt-1'>

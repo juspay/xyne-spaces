@@ -1,14 +1,17 @@
 import { useState, type ReactElement, type ReactNode } from 'react';
 import {
+  AtMark,
   ChatDefault,
   ChevronBigLeft,
   CopyDefault,
   DeleteDustbin01,
   Globe,
+  PauseCircle,
+  PlayCircle,
   ThreeDotsMenuHorizontal,
   UserDefault,
 } from '@xyne/icons';
-import { Loader2, Wrench } from 'lucide-react';
+import { Loader2, Settings, Wrench } from 'lucide-react';
 import { cn } from '@/utils/classNames';
 import { Tooltip } from '@/components/ui/Tooltip/Tooltip';
 import { Popover } from '@/components/ui/Popover/index';
@@ -46,7 +49,7 @@ const Action = ({
         'flex h-7 shrink-0 items-center gap-1.5 rounded-lg border px-2 text-sm font-medium leading-[1.2] transition-colors disabled:pointer-events-none disabled:opacity-50',
         primary
           ? 'border-transparent bg-primary text-primary-foreground hover:bg-primary/90'
-          : 'border-transparent text-foreground hover:bg-muted',
+          : 'border-transparent text-muted-foreground hover:bg-muted hover:text-foreground',
       )}
     >
       {busy ? <Loader2 className='size-3.5 animate-spin' aria-hidden /> : icon}
@@ -100,6 +103,7 @@ interface AgentDetailHeaderV2Props {
   onBack: () => void;
   onChat: () => void;
   onBuild?: (() => void) | undefined;
+  onSettings?: (() => void) | undefined;
 }
 
 export function AgentDetailHeaderV2({
@@ -109,6 +113,7 @@ export function AgentDetailHeaderV2({
   onBack,
   onChat,
   onBuild,
+  onSettings,
 }: AgentDetailHeaderV2Props): ReactElement {
   const [menuOpen, setMenuOpen] = useState(false);
   const [cloneOpen, setCloneOpen] = useState(false);
@@ -123,8 +128,6 @@ export function AgentDetailHeaderV2({
   const showModerate = isAdmin && (isGlobal || !isOwner);
   const showPublish = isOwner && !isGlobal;
 
-  const hasMenu = canEdit || isOwner;
-
   return (
     <div className='flex w-full items-center justify-between gap-4'>
       <button
@@ -132,46 +135,13 @@ export function AgentDetailHeaderV2({
         onClick={onBack}
         data-track-category='Claw Agents'
         data-track-name='Agent detail v2: back'
-        className='flex h-7 shrink-0 items-center rounded-[10px] pr-2 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground'
+        className='flex h-7 shrink-0 items-center gap-1 rounded-lg px-1.5 text-sm font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground'
       >
-        <span className='flex h-7 w-[22px] shrink-0 items-center justify-center'>
-          <ChevronBigLeft className='size-4' aria-hidden />
-        </span>
-        <span className='text-base font-semibold leading-6 tracking-[-0.32px] text-foreground'>
-          Agents
-        </span>
+        <ChevronBigLeft className='size-4 shrink-0' aria-hidden />
+        <span className='text-sm font-medium leading-[1.2]'>Agents</span>
       </button>
 
       <div className='flex shrink-0 items-center gap-1.5'>
-        {showModerate && (
-          <Action
-            label={isGlobal ? 'Demote to personal' : 'Promote to global'}
-            icon={
-              isGlobal ? (
-                <UserDefault className='size-4' aria-hidden />
-              ) : (
-                <Globe className='size-4' aria-hidden />
-              )
-            }
-            hint={
-              isGlobal
-                ? 'Make this agent personal again — it leaves the shared library'
-                : 'Make this agent global — everyone in the workspace can use it'
-            }
-            busy={busy.moderating !== null}
-            onClick={() => setModerateOpen(isGlobal ? 'demote' : 'promote')}
-          />
-        )}
-        {showPublish && (
-          <Action
-            label='Request to publish'
-            icon={<Globe className='size-4' aria-hidden />}
-            hint='Ask an admin to make this agent global. It stays personal until they approve.'
-            busy={busy.publishing}
-            onClick={() => void actions.publish()}
-          />
-        )}
-
         {canEdit && onBuild && (
           <Action
             label='Build with AI'
@@ -188,68 +158,106 @@ export function AgentDetailHeaderV2({
           />
         )}
 
-        <Action
-          label={canEdit ? 'Clone agent' : 'Request clone'}
-          icon={<CopyDefault className='size-4' aria-hidden />}
-          hint={
-            canEdit
-              ? 'Create your own copy — prompt, tools, skills and knowledge'
-              : "Ask this agent's owner for a copy"
+        <Popover
+          open={menuOpen}
+          onOpenChange={setMenuOpen}
+          align='end'
+          sideOffset={4}
+          trigger={
+            <button
+              type='button'
+              aria-label='More actions'
+              data-track-category='Claw Agents'
+              data-track-name='Agent detail v2: more actions'
+              className='flex size-7 shrink-0 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-muted hover:text-foreground'
+            >
+              <ThreeDotsMenuHorizontal className='size-4' aria-hidden />
+            </button>
           }
-          busy={busy.cloning}
-          onClick={() => setCloneOpen(true)}
-        />
-
-        {hasMenu && (
-          <Popover
-            open={menuOpen}
-            onOpenChange={setMenuOpen}
-            align='end'
-            sideOffset={4}
-            trigger={
-              <button
-                type='button'
-                aria-label='More actions'
-                data-track-category='Claw Agents'
-                data-track-name='Agent detail v2: more actions'
-                className='flex size-7 shrink-0 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-muted hover:text-foreground'
-              >
-                <ThreeDotsMenuHorizontal className='size-4' aria-hidden />
-              </button>
-            }
-            className='w-52 rounded-xl border border-border bg-popover p-1 shadow-md'
-          >
-            {canEdit && (
-              <MenuItem
-                label={agent.enabled ? 'Pause agent' : 'Enable agent'}
-                onClick={() => {
-                  setMenuOpen(false);
-                  void actions.toggleEnabled(!agent.enabled);
-                }}
-              />
-            )}
-            {isOwner && (
-              <MenuItem
-                label='Rename handle'
-                onClick={() => {
-                  setMenuOpen(false);
-                  setRenameOpen(true);
-                }}
-              />
-            )}
-            {isOwner && (
-              <MenuItem
-                label='Delete agent'
-                danger
-                icon={<DeleteDustbin01 className='size-4 shrink-0' aria-hidden />}
-                onClick={() => {
-                  setMenuOpen(false);
-                  setDeleteOpen(true);
-                }}
-              />
-            )}
-          </Popover>
-        )}
+          className='w-52 rounded-xl border border-border bg-popover p-1 shadow-md'
+        >
+          {onSettings && (
+            <MenuItem
+              label='Settings'
+              icon={<Settings className='size-4 shrink-0' aria-hidden />}
+              onClick={() => {
+                setMenuOpen(false);
+                onSettings();
+              }}
+            />
+          )}
+          {showPublish && (
+            <MenuItem
+              label='Request to publish'
+              icon={<Globe className='size-4 shrink-0' aria-hidden />}
+              onClick={() => {
+                setMenuOpen(false);
+                void actions.publish();
+              }}
+            />
+          )}
+          {showModerate && (
+            <MenuItem
+              label={isGlobal ? 'Demote to personal' : 'Promote to global'}
+              icon={
+                isGlobal ? (
+                  <UserDefault className='size-4 shrink-0' aria-hidden />
+                ) : (
+                  <Globe className='size-4 shrink-0' aria-hidden />
+                )
+              }
+              onClick={() => {
+                setMenuOpen(false);
+                setModerateOpen(isGlobal ? 'demote' : 'promote');
+              }}
+            />
+          )}
+          <MenuItem
+            label={canEdit ? 'Clone agent' : 'Request clone'}
+            icon={<CopyDefault className='size-4 shrink-0' aria-hidden />}
+            onClick={() => {
+              setMenuOpen(false);
+              setCloneOpen(true);
+            }}
+          />
+          {canEdit && (
+            <MenuItem
+              label={agent.enabled ? 'Pause agent' : 'Enable agent'}
+              icon={
+                agent.enabled ? (
+                  <PauseCircle className='size-4 shrink-0' aria-hidden />
+                ) : (
+                  <PlayCircle className='size-4 shrink-0' aria-hidden />
+                )
+              }
+              onClick={() => {
+                setMenuOpen(false);
+                void actions.toggleEnabled(!agent.enabled);
+              }}
+            />
+          )}
+          {isOwner && (
+            <MenuItem
+              label='Rename handle'
+              icon={<AtMark className='size-4 shrink-0' aria-hidden />}
+              onClick={() => {
+                setMenuOpen(false);
+                setRenameOpen(true);
+              }}
+            />
+          )}
+          {isOwner && (
+            <MenuItem
+              label='Delete agent'
+              danger
+              icon={<DeleteDustbin01 className='size-4 shrink-0' aria-hidden />}
+              onClick={() => {
+                setMenuOpen(false);
+                setDeleteOpen(true);
+              }}
+            />
+          )}
+        </Popover>
       </div>
 
       <CloneAgentDialog

@@ -1,14 +1,13 @@
 import { effectiveSlug, type WizardState } from '../../../../ClawAgentsScreen/create/wizardState';
 
-export function buildSeedQuery(draft: WizardState): string {
+export function buildSeedQuery(draft: WizardState, intent: string): string {
   const name = draft.name.trim();
-  const intent = draft.systemPrompt.trim();
   const subject = name || 'this agent';
-  const purpose = intent && intent !== name ? ` — ${intent}` : '';
+  const purpose = intent.trim() ? ` — ${intent.trim()}` : '';
   return `Set up “${subject}”${purpose}`;
 }
 
-function draftSummary(draft: WizardState): string[] {
+function draftSummary(draft: WizardState, intent: string): string[] {
   const tools = [
     ...draft.tools.subagents,
     ...draft.tools.direct,
@@ -17,6 +16,7 @@ function draftSummary(draft: WizardState): string[] {
   ];
   return [
     '[Agent draft — the user is building this right now. It has NOT been created.]',
+    `What the user asked for: ${intent.trim() || '(not given)'}`,
     `Name: ${draft.name.trim() || '(unset)'}`,
     `Handle: @${effectiveSlug(draft) || '(unset)'}`,
     `Description: ${draft.description.trim() || '(unset)'}`,
@@ -26,9 +26,11 @@ function draftSummary(draft: WizardState): string[] {
 }
 
 const STANDING_TASK = [
-  'Your standing task: refine the instructions and suggest the tools this',
-  'agent needs. The opening message carries only the intent — this is what',
-  'the user is asking you to do with it.',
+  'Your standing task: write the instructions and choose the tools this agent',
+  'needs, working from what the user asked for. Instructions start EMPTY on',
+  'purpose — the one line above is the brief, not a draft prompt, and it is',
+  'yours to turn into a real one. Do not describe the setup as a placeholder',
+  'or ask the user to write it for you.',
 ];
 
 const HOW_TO_NAME_TOOLS = [
@@ -55,9 +57,9 @@ const STAY_IN_CHARACTER = [
   'user is configuring an agent, not operating an API.',
 ];
 
-export function buildHiddenContext(draft: WizardState): string {
+export function buildHiddenContext(draft: WizardState, intent: string): string {
   return [
-    ...draftSummary(draft),
+    ...draftSummary(draft, intent),
     '',
     ...STANDING_TASK,
     '',

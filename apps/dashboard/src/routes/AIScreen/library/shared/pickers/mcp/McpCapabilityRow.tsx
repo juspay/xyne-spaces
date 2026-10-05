@@ -8,8 +8,6 @@ import { McpChip } from './McpChip';
 import { useMcpCatalog } from './useMcpCatalog';
 import { useMcpSuggestions } from './useMcpSuggestions';
 
-const CAPTION = 'Connect external apps and services your agent can use.';
-
 interface McpCapabilityRowProps {
   selection: McpSelection;
   onSelectionChange: (next: McpSelection) => void;
@@ -97,9 +95,7 @@ export function McpCapabilityRow({
       <div className='flex w-full items-center justify-between gap-4'>
         <div className='flex min-w-0 items-center gap-4'>
           <div className='flex shrink-0 items-center gap-2'>
-            <span className='text-sm font-semibold leading-[1.2] tracking-[-0.1px] text-foreground'>
-              MCP
-            </span>
+            <span className='text-sm leading-[1.2] tracking-[-0.1px] text-foreground'>MCP</span>
           </div>
           {showSuggestions && renderSuggestAction()}
         </div>
@@ -118,8 +114,6 @@ export function McpCapabilityRow({
           <PlusDefault className='size-4' aria-hidden />
         </button>
       </div>
-
-      <p className='text-[13px] leading-5 text-muted-foreground'>{CAPTION}</p>
 
       {(selectedEntries.length > 0 || suggestedChips.length > 0) && (
         <div className='flex flex-wrap items-start gap-2 pt-1'>

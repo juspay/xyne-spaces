@@ -27,12 +27,15 @@ function parseFlowParams(raw: unknown): Record<string, unknown> | null {
 
 interface AgentDraftBuilderPanelProps {
   draft: WizardState;
+  /** The user's opening brief. Seeds the conversation; never the draft. */
+  intent: string;
   onApplyPatch: (patch: Partial<WizardState>) => void;
   onBusyChange?: (busy: boolean) => void;
 }
 
 export function AgentDraftBuilderPanel({
   draft,
+  intent,
   onApplyPatch,
   onBusyChange,
 }: AgentDraftBuilderPanelProps): ReactElement {
@@ -44,12 +47,18 @@ export function AgentDraftBuilderPanel({
   catalogRef.current = catalog;
 
   const seed = useMemo(
-    () => ({ query: buildSeedQuery(draft), nonce: Date.now() }),
+    () => ({ query: buildSeedQuery(draft, intent), nonce: Date.now() }),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [],
   );
 
-  const hiddenContext = useCallback(() => buildHiddenContext(draftRef.current), []);
+  const intentRef = useRef(intent);
+  intentRef.current = intent;
+
+  const hiddenContext = useCallback(
+    () => buildHiddenContext(draftRef.current, intentRef.current),
+    [],
+  );
 
   const applyProposal = useCallback(
     (params: Record<string, unknown>): void => {
@@ -98,13 +107,6 @@ export function AgentDraftBuilderPanel({
 
   return (
     <div className='agent-builder-pane flex h-full min-h-0 flex-col border-l border-border bg-background'>
-      <div className='flex shrink-0 flex-col gap-0.5 px-6 pb-4 pt-5'>
-        <h2 className='text-sm font-medium text-foreground'>Build with Xyne AI</h2>
-        <p className='text-xs leading-5 text-muted-foreground'>
-          Describe the agent you want. Xyne AI will help configure it.
-        </p>
-      </div>
-
       <div className='min-h-0 flex-1'>
         <FlowDraftScopeContext.Provider value={draftScope}>
           <XyneAISidebar

@@ -13,7 +13,11 @@ import { useAIChatHandoff } from '../useAIChatHandoff';
 
 export interface AgentDraftSeed {
   name?: string;
-  systemPrompt?: string;
+  /** What the user said the agent is for. Seeds the CONVERSATION, never the
+   *  draft: a one-line brief is not a system prompt, and writing it into
+   *  Instructions makes the form look configured when nothing has been decided
+   *  — which is also what made the builder call its own setup a placeholder. */
+  intent?: string;
   color?: string;
 }
 
@@ -23,7 +27,6 @@ function seededDraft(seed: AgentDraftSeed | undefined): WizardState {
   return {
     ...INITIAL_WIZARD_STATE,
     ...(name ? { name, slug: slugify(name) } : {}),
-    ...(seed.systemPrompt?.trim() ? { systemPrompt: seed.systemPrompt.trim() } : {}),
     ...(seed.color ? { color: seed.color } : {}),
   };
 }
@@ -44,9 +47,6 @@ const AIAgentCreateScreen = (): ReactElement => {
     if (patch.systemPrompt !== undefined) setInstructionsPatchNonce(n => n + 1);
   }, []);
 
-  const initial = useRef(draft);
-  const dirty = draft !== initial.current;
-
   const [aiBusy, setAiBusy] = useState(false);
 
   const [collapseSignal, setCollapseSignal] = useState(0);
@@ -66,6 +66,7 @@ const AIAgentCreateScreen = (): ReactElement => {
       workspacePanel={
         <AgentDraftBuilderPanel
           draft={draft}
+          intent={seed?.intent ?? ''}
           onApplyPatch={applyAiPatch}
           onBusyChange={setAiBusy}
         />
@@ -79,7 +80,6 @@ const AIAgentCreateScreen = (): ReactElement => {
           draft={draft}
           onDraftChange={applyPatch}
           busy={aiBusy}
-          dirty={dirty}
           instructionsPatchNonce={instructionsPatchNonce}
         />
       </main>

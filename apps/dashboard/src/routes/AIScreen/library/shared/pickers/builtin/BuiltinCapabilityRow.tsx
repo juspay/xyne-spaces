@@ -8,8 +8,6 @@ import { disableEntry, enableEntry, isEntryEnabled, type BuiltinSelection } from
 import { useBuiltinCatalog } from './useBuiltinCatalog';
 import { useBuiltinSuggestions } from './useBuiltinSuggestions';
 
-const CAPTION = 'Let your agent search, create, and take action.';
-
 interface BuiltinCapabilityRowProps {
   selection: BuiltinSelection;
   onSelectionChange: (next: BuiltinSelection) => void;
@@ -96,7 +94,7 @@ export function BuiltinCapabilityRow({
       <div className='flex w-full items-center justify-between gap-4'>
         <div className='flex min-w-0 items-center gap-4'>
           <div className='flex shrink-0 items-center gap-2'>
-            <span className='text-sm font-semibold leading-[1.2] tracking-[-0.1px] text-foreground'>
+            <span className='text-sm leading-[1.2] tracking-[-0.1px] text-foreground'>
               Built in tools
             </span>
           </div>
@@ -117,8 +115,6 @@ export function BuiltinCapabilityRow({
           <PlusDefault className='size-4' aria-hidden />
         </button>
       </div>
-
-      <p className='text-[13px] leading-5 text-muted-foreground'>{CAPTION}</p>
 
       {(selectedEntries.length > 0 || suggestedChips.length > 0) && (
         <div className='flex flex-wrap items-start gap-2 pt-1'>

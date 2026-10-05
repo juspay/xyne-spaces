@@ -48,6 +48,7 @@ const AIAgentDetailScreen = (): ReactElement => {
         data-id='ai-agent-detail-view'
         className='relative flex h-full flex-1 flex-col overflow-hidden'
       >
+        <div className='h-[32px] w-full shrink-0' />
         <ClawAgentDetailV2 />
       </main>
     </AIShell>

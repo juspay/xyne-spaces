@@ -1,6 +1,7 @@
 import { useCallback, useState, type ReactElement } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { AtMark, PencilEditLine } from '@xyne/icons';
+import { ChevronLeft } from 'lucide-react';
 import { Button } from '@/components/ui/Button/index';
 import { useAuth } from '@/hooks/useAuth';
 import { useCreateClawSkill } from '@/hooks/useCreateClawSkill';
@@ -66,6 +67,17 @@ const ClawSkillCreateV2 = (): ReactElement => {
   return (
     <div className='h-full overflow-y-auto no-scrollbar' data-component='ClawSkillCreateV2'>
       <div className='mx-auto flex w-full max-w-[800px] flex-col gap-6 px-6 py-6'>
+        <button
+          type='button'
+          onClick={() => void navigate(libraryPath)}
+          data-track-category='Claw Agents'
+          data-track-name='Create skill v2: back'
+          className='-ml-1.5 flex w-fit items-center gap-1 rounded-lg px-1.5 py-1 text-sm font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground'
+        >
+          <ChevronLeft className='size-4' aria-hidden />
+          Back
+        </button>
+
         <h1 className='text-2xl font-semibold leading-[1.2] tracking-[-0.24px] text-foreground'>
           Create skill
         </h1>

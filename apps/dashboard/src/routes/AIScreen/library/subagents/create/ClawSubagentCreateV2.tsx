@@ -2,6 +2,7 @@ import { useCallback, useMemo, useState, type ReactElement } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { toast } from 'sonner';
 import { PencilEditLine } from '@xyne/icons';
+import { ChevronLeft } from 'lucide-react';
 import { cn } from '@/utils/classNames';
 import { Button } from '@/components/ui/Button/index';
 import { useAuth } from '@/hooks/useAuth';
@@ -36,6 +37,9 @@ const ClawSubagentCreateV2 = ({ subagent }: ClawSubagentCreateV2Props = {}): Rea
   const navigate = useNavigate();
   const { workspaceId } = useParams<{ workspaceId?: string }>();
   const libraryPath = workspaceId ? `/${workspaceId}/ai/library` : '/ai/library';
+  const leavePath = isEdit
+    ? `${libraryPath}/subagent/${encodeURIComponent(subagent.name)}?tab=persona`
+    : libraryPath;
 
   const { user } = useAuth();
   const builtBy =
@@ -88,6 +92,17 @@ const ClawSubagentCreateV2 = ({ subagent }: ClawSubagentCreateV2Props = {}): Rea
   return (
     <div className='h-full overflow-y-auto no-scrollbar' data-component='ClawSubagentCreateV2'>
       <div className='mx-auto flex w-full max-w-[800px] flex-col gap-6 px-6 py-6'>
+        <button
+          type='button'
+          onClick={() => void navigate(leavePath)}
+          data-track-category='Claw Agents'
+          data-track-name='Create subagent v2: back'
+          className='-ml-1.5 flex w-fit items-center gap-1 rounded-lg px-1.5 py-1 text-sm font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground'
+        >
+          <ChevronLeft className='size-4' aria-hidden />
+          Back
+        </button>
+
         <h1 className='text-2xl font-semibold leading-[1.2] tracking-[-0.24px] text-foreground'>
           {isEdit ? 'Edit subagent' : 'Create subagent'}
         </h1>
