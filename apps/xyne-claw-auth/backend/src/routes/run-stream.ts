@@ -259,16 +259,31 @@ function publishStreamEvent(event: StreamBusEvent): void {
    holding the stream writes. The callback persists BEFORE delivering, so a
    missed hold (expired, Redis down) costs liveness only.
    ───────────────────────────────────────────────────────────────────── */
-const followUpHolds = new Map<string, (suggestions: string[]) => void>();
+interface FollowUpHold {
+  res: Response;
+  messageId: string | undefined;
+}
+/** Plain data keyed by streamId — nothing looked up here is ever invoked. */
+const followUpHolds = new Map<string, FollowUpHold>();
 /** Follow-ups that beat their own answer's `done` on the owning pod (an
  *  instant fallback when generation fails fast). Consumed when the hold starts. */
 const earlyFollowUps = new Map<string, string[]>();
+
+/** Write the follow-ups and end the answer stream; ending it releases the hold. */
+function writeLateFollowUps(hold: FollowUpHold, suggestions: string[]): void {
+  const { res, messageId } = hold;
+  if (res.writableEnded || res.destroyed) return;
+  try {
+    res.write(`event: follow-ups\ndata: ${JSON.stringify({ suggestions, ...(messageId ? { id: messageId } : {}) })}\n\n`);
+    res.end();
+  } catch { /* client already gone; its 'close' releases the hold */ }
+}
 
 /** True when this pod owns the stream (held now, or still running). */
 function deliverLateFollowUpsLocally(streamId: string, suggestions: string[]): boolean {
   const hold = followUpHolds.get(streamId);
   if (hold) {
-    hold(suggestions);
+    writeLateFollowUps(hold, suggestions);
     return true;
   }
   if (pendingStreams.has(streamId)) {
@@ -280,16 +295,19 @@ function deliverLateFollowUpsLocally(streamId: string, suggestions: string[]): b
 }
 
 /** After `done`: wait until this answer's follow-ups are written as
- *  `event: follow-ups`, the hold lapses, or the client leaves. The caller ends `res`. */
+ *  `event: follow-ups` (which ends `res`), the hold lapses, or the client
+ *  leaves. The caller ends `res` if it is still open. */
 function holdForLateFollowUps(res: Response, streamId: string, messageId: string | undefined): Promise<void> {
   if (CONFIG.followUpStreamHoldMs <= 0 || res.writableEnded || res.destroyed) return Promise.resolve();
   return new Promise<void>((resolve) => {
+    const hold: FollowUpHold = { res, messageId };
     let settled = false;
     const finish = (): void => {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
-      followUpHolds.delete(streamId);
+      if (followUpHolds.get(streamId) === hold) followUpHolds.delete(streamId);
+      res.off("finish", finish);
       res.off("close", finish);
       resolve();
     };
@@ -297,20 +315,13 @@ function holdForLateFollowUps(res: Response, streamId: string, messageId: string
       log.info(`[follow-ups] stream hold lapsed streamId=${streamId} after ${CONFIG.followUpStreamHoldMs}ms`);
       finish();
     }, CONFIG.followUpStreamHoldMs);
+    res.on("finish", finish);
     res.on("close", finish);
-    const deliver = (suggestions: string[]): void => {
-      if (!res.writableEnded && !res.destroyed) {
-        try {
-          res.write(`event: follow-ups\ndata: ${JSON.stringify({ suggestions, ...(messageId ? { id: messageId } : {}) })}\n\n`);
-        } catch { /* client already gone */ }
-      }
-      finish();
-    };
-    followUpHolds.set(streamId, deliver);
+    followUpHolds.set(streamId, hold);
     const early = earlyFollowUps.get(streamId);
     if (early) {
       earlyFollowUps.delete(streamId);
-      deliver(early);
+      writeLateFollowUps(hold, early);
     }
   });
 }
