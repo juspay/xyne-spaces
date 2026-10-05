@@ -15,7 +15,9 @@ export class CallParticipantsACL extends BaseQueryACL<'call_participants'> {
         call.where(({ or, exists, cmp }) =>
           or(
             cmp('createdByUserId', this.ctx.userID),
-            exists('participants', (p) => p.where('userId', this.ctx.userID)),
+            exists('participants', (p) =>
+            p.where('userId', this.ctx.userID).where('isRecordingParticipant', false),
+          ),
             exists('channel', (ch) =>
               ch
                 .where('workspaceId', '=', this.ctx.workspaceId)
@@ -30,7 +32,9 @@ export class CallParticipantsACL extends BaseQueryACL<'call_participants'> {
       call.where(({ or, exists, cmp }) =>
         or(
           cmp('createdByUserId', this.ctx.userID),
-          exists('participants', (p) => p.where('userId', this.ctx.userID)),
+          exists('participants', (p) =>
+            p.where('userId', this.ctx.userID).where('isRecordingParticipant', false),
+          ),
           exists('channel', (ch) =>
             ch
               .where('workspaceId', '=', this.ctx.workspaceId)

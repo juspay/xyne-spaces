@@ -4852,6 +4852,8 @@ export function createMutators(
             leftAt: null,
             meetingStatus: MeetingStatus.ACCEPTED,
             isExternal: false,
+            // Real call membership, not a recording-participant marker.
+            isRecordingParticipant: false,
           });
 
           // Invite specific users or all channel participants
@@ -4877,6 +4879,8 @@ export function createMutators(
                   leftAt: null,
                   meetingStatus: MeetingStatus.PENDING,
                   isExternal: false,
+                  // Real call membership, not a recording-participant marker.
+                  isRecordingParticipant: false,
                 });
               }
             }
@@ -4902,6 +4906,8 @@ export function createMutators(
                   joinedAt: null,
                   leftAt: null,
                   meetingStatus: MeetingStatus.PENDING,
+                  // Real call membership, not a recording-participant marker.
+                  isRecordingParticipant: false,
                 });
               }
             }
@@ -4997,6 +5003,8 @@ export function createMutators(
               leftAt: null,
               meetingStatus: MeetingStatus.ACCEPTED,
               isExternal: false,
+              // Real call membership, not a recording-participant marker.
+              isRecordingParticipant: false,
             });
           }
         },
@@ -5242,7 +5250,9 @@ export function createMutators(
                 joinedAt: null,
                 leftAt: null,
                 meetingStatus: MeetingStatus.PENDING,
-                isExternal: false
+                isExternal: false,
+                // Real call membership, not a recording-participant marker.
+                isRecordingParticipant: false,
               });
             }
           }
@@ -5386,6 +5396,8 @@ export function createMutators(
               joinedAt: null,
               leftAt: null,
               isExternal: false,
+              // Real call membership, not a recording-participant marker.
+              isRecordingParticipant: false,
             });
           }
         }

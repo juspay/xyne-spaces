@@ -1260,6 +1260,10 @@ export const callParticipantTable = table('call_participants')
     email: string().optional(),
     isExternal: boolean(),
     ringStatus: enumeration<RingStatus>().optional(),
+    // True only for the people a HEADLESS recording is *about*. Not membership,
+    // and deliberately excluded from the ACLs' participant checks — see the
+    // field docs in schema.prisma.
+    isRecordingParticipant: boolean(),
   })
   .primaryKey('id');
 

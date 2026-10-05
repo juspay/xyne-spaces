@@ -3664,7 +3664,9 @@ export const mutators = defineMutators({
               respondedAt: null,
               joinedAt: null,
               leftAt: null,
-              isExternal: false
+              isExternal: false,
+              // Real call membership, not a recording-participant marker.
+              isRecordingParticipant: false,
             });
           }
         }
@@ -3747,6 +3749,8 @@ export const mutators = defineMutators({
             joinedAt: null,
             leftAt: null,
             isExternal: false,
+            // Real call membership, not a recording-participant marker.
+            isRecordingParticipant: false,
           });
         }
       },
