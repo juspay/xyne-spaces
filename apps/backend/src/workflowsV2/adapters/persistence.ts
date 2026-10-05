@@ -567,6 +567,7 @@ export class PrismaPersistenceAdapter implements PersistenceAdapter<XyneFilter> 
   }): Promise<string> {
     const workspaceId = requireWorkspaceId(data.attributes, 'createExecution');
     const row = await createExecutionTx(workspaceId, data);
+
     return row.id;
   }
 
@@ -575,11 +576,7 @@ export class PrismaPersistenceAdapter implements PersistenceAdapter<XyneFilter> 
       where: { id: executionId, ...WORKFLOWS_SCOPE },
       data: { status },
     });
-    if (updated.count === 0) return;
-    // Run-change notification is published by the SDK runtime (see runtime.ts
-    // `rootScope`), not here.
-
-    if (reason === undefined) return;
+    if (reason === undefined || updated.count === 0) return;
     await db.workflowExecutionState.updateMany({
       where: { workflowExecutionId: executionId },
       data: { endReason: reason },

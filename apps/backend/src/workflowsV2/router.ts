@@ -304,9 +304,6 @@ const mount = (
     authenticate: () => {
       throw Object.assign(new Error('Unauthorized'), { statusCode: 401 });
     },
-    // Powers GET /events?root=1 — the unscoped Executions feed. The SDK's root
-    // scope is this host's workspace; the id comes from the authenticated ctx, so
-    // a caller only ever streams its own.
     rootId: (ctx) => ctx.workspaceId,
   });
 
@@ -354,11 +351,6 @@ const mount = (
     });
   }
 };
-
-// The whole-workspace Executions feed is now served by the SDK's own
-// `GET /events?workspace=1` route (see workspaceId resolver in createWorkflowRouter
-// above); the backend adapter publishes run changes onto the bus channel the route
-// subscribes to. No bespoke backend stream route is needed.
 
 export const workflowsRouter: Router = express.Router();
 mount(workflowsRouter, true);
