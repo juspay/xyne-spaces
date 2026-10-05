@@ -949,9 +949,10 @@ export async function evaluateRoleSlots(
   projectId: string | undefined,
   channelId: string | null,
   excludeUserId?: string,
+  ticketId?: string,
 ): Promise<RoleSlotsResult> {
   logger.info(
-    `[Assignment] evaluateRoleSlots for userGroupId: ${userGroupId}, boardId: ${boardId}, roleIds: [${roleIds.join(', ')}]${projectId ? `, projectId: ${projectId}` : ''}${channelId ? `, channelId: ${channelId}` : ''}${excludeUserId ? `, excludeUserId: ${excludeUserId}` : ''}`,
+    `[Assignment] evaluateRoleSlots for userGroupId: ${userGroupId}, boardId: ${boardId}, roleIds: [${roleIds.join(', ')}]${projectId ? `, projectId: ${projectId}` : ''}${channelId ? `, channelId: ${channelId}` : ''}${excludeUserId ? `, excludeUserId: ${excludeUserId}` : ''}${ticketId ? `, ticketId: ${ticketId}` : ''}`,
   );
 
   const result: RoleSlotsResult = {};
@@ -964,6 +965,10 @@ export async function evaluateRoleSlots(
   }
 
   if (userGroupMappings.length === 0) {
+    // Returns before the results log below, so log here or this exit is invisible.
+    logger.info(
+      `[Assignment] evaluateRoleSlots results — no group members${channelId ? ' after channel-participant filter' : ''} for userGroupId: ${userGroupId}${ticketId ? ` ticketId=${ticketId}` : ''}`,
+    );
     for (const roleId of roleIds) result[roleId] = { reason: 'NO_ON_CALL_USERS' };
     return result;
   }
@@ -1041,10 +1046,24 @@ export async function evaluateRoleSlots(
     const pool = filterUsersByRoleId(userGroupMappings, roleId);
     const res = await pickBest(pool, AssignmentType.TICKET_ASSIGNEE, ctx, boardId);
     result[roleId] = res;
-    summary.push(`${roleId}:${res.assignedUserId ?? 'none'}`);
+    // Carry the reason and the pool shape, not just the outcome. "none" alone cannot
+    // distinguish nobody-holds-this-role from everyone-unavailable from everyone-capped,
+    // and those have completely different fixes.
+    if (res.assignedUserId) {
+      summary.push(`${roleId}:${res.assignedUserId}`);
+    } else {
+      const activeInPool = pool.filter(
+        id => userStateMap.get(id)?.isActiveForAssignment === true,
+      ).length;
+      summary.push(
+        `${roleId}:none(reason=${res.reason ?? 'UNKNOWN'} pool=${pool.length} active=${activeInPool})`,
+      );
+    }
   }
 
-  logger.info(`[Assignment] evaluateRoleSlots results — ${summary.join(' ')}`);
+  logger.info(
+    `[Assignment] evaluateRoleSlots results — ${summary.join(' ')}${ticketId ? ` ticketId=${ticketId}` : ''}`,
+  );
 
   return result;
 }

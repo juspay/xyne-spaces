@@ -85,10 +85,11 @@ export class EmailClassificationWorker {
     // If explicit flags provided (retrigger path), respect them; otherwise run both (normal ingestion path)
     const runClassification = job.data.runClassification ?? true;
     const runPriority = job.data.runPriority ?? true;
+    const runAssignment = job.data.runAssignment ?? false;
 
-    logger.info(`[EMAIL-CLASSIFICATION-WORKER] Processing job ${job.id} — ticket ${ticketId} runClassification=${runClassification} runPriority=${runPriority}`);
+    logger.info(`[EMAIL-CLASSIFICATION-WORKER] Processing job ${job.id} — ticket ${ticketId} runClassification=${runClassification} runPriority=${runPriority} runAssignment=${runAssignment}`);
 
-    if (!runClassification && !runPriority) {
+    if (!runClassification && !runPriority && !runAssignment) {
       logger.info(`[EMAIL-CLASSIFICATION-WORKER] Nothing to run for ticket ${ticketId}, skipping`);
       return;
     }
@@ -113,9 +114,11 @@ export class EmailClassificationWorker {
     } | null = null;
 
     try {
-      classificationData = await emailClassificationService.classify(channelId, emailRecord.subject, emailRecord.body, {
-        emailMetadata: buildEmailMetadata(emailRecord),
-      });
+      if (runClassification || runPriority) {
+        classificationData = await emailClassificationService.classify(channelId, emailRecord.subject, emailRecord.body, {
+          emailMetadata: buildEmailMetadata(emailRecord),
+        });
+      }
     } catch (error) {
       logger.error(
         `[EMAIL-CLASSIFICATION-WORKER] Classification failed for ticket ${ticketId}:`,
@@ -234,6 +237,13 @@ export class EmailClassificationWorker {
             assignmentSucceeded = true;
             logger.info(
               `[EMAIL-CLASSIFICATION-WORKER] Full-role assigned ticket ${ticketId}: primary=${primaryUserId}`,
+            );
+          } else {
+            // Without this the full-role path fails silently — the branch below logs a
+            // warn, so the desk flow that actually uses roles was the one saying nothing.
+            // The ticket stays unassigned and nothing retries it.
+            logger.warn(
+              `[EMAIL-CLASSIFICATION-WORKER] No primary assignee for ticket ${ticketId} (group ${effectiveGroupId}, board ${ticket.boardId}) — ticket left unassigned; see [Assignment] evaluateRoleSlots results for the reason`,
             );
           }
         } else {

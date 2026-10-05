@@ -180,6 +180,7 @@ import { boardConfigCopyWorker } from '@/workers/boardConfigCopyWorker';
 import { assignmentReactivationQueue } from '@/queues/assignmentReactivationQueue';
 import { ticketReassignmentQueue } from '@/queues/ticketReassignmentQueue';
 import { onCallRotationQueue } from '@/queues/onCallRotationQueue';
+import { assignmentBackfillQueue } from '@/queues/assignmentBackfillQueue';
 import { scheduledMessageQueue } from '@/queues/scheduledMessageQueue';
 import { conversationIngestQueue } from '@/queues/conversationIngestQueue';
 import { documentIngestQueue } from '@/queues/documentIngestQueue';
@@ -895,6 +896,10 @@ export class App {
           await onCallRotationQueue.initialize();
         })(),
         (async () => {
+          logger.info('Initializing assignment backfill queue...');
+          await assignmentBackfillQueue.initialize();
+        })(),
+        (async () => {
           logger.info('Initializing scheduled message queue...');
           await scheduledMessageQueue.initialize();
         })(),
@@ -946,6 +951,9 @@ export class App {
 
       logger.info('Initializing on-call rotation queue...');
       await onCallRotationQueue.initialize();
+
+      logger.info('Initializing assignment backfill queue...');
+      await assignmentBackfillQueue.initialize();
 
       logger.info('Initializing scheduled message queue...');
       await scheduledMessageQueue.initialize();
@@ -1189,6 +1197,9 @@ export class App {
 
       // Close on-call rotation queue
       await onCallRotationQueue.close();
+
+      // Close assignment backfill queue
+      await assignmentBackfillQueue.close();
 
       // Close scheduled message queue
       await scheduledMessageQueue.close();
