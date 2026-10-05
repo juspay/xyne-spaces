@@ -1,6 +1,6 @@
 import { Prisma } from '@prisma/client';
 import { db } from '@/database/client';
-import { newConnectId } from '@/database/connectGroup';
+import { newConnectId, ConnectEntityType } from '@/database/connectGroup';
 import {
   resolveCanvasHierarchy,
   GuestEntity,
@@ -460,7 +460,7 @@ class CanvasAuthService {
         }),
         db.connectGroup.create({
           data: {
-            entityType: 'canvas',
+            entityType: ConnectEntityType.CANVAS,
             entityId: canvasId,
             hostWorkspaceId: workspaceId,
             invitedEntityId: null,

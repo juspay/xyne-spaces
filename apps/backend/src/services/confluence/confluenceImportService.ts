@@ -2,7 +2,7 @@ import crypto from 'crypto';
 import { v4 as uuidv4 } from 'uuid';
 import type { Prisma } from '@prisma/client';
 import { DatabaseClient } from '@/database/client';
-import { newConnectId, resolveCanvasConnectId } from '@/database/connectGroup';
+import { newConnectId, resolveCanvasConnectId, ConnectEntityType } from '@/database/connectGroup';
 import { logger } from '@/utils/logger';
 import { convertMarkdownToBlockNote } from '@/services/canvasService';
 import type { BlockNoteBlock } from '@/types/blockNoteTypes';
@@ -1273,7 +1273,7 @@ export class ConfluenceImportService {
       }),
       db.connectGroup.create({
         data: {
-          entityType: 'canvas',
+          entityType: ConnectEntityType.CANVAS,
           entityId: canvasId,
           hostWorkspaceId: workspaceId,
           invitedEntityId: null,

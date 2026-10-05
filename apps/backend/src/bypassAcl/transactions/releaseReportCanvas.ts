@@ -3,7 +3,7 @@ import type { ReleaseReport } from '@xyne/shared';
 import type { User } from '@prisma/client';
 import { Prisma } from '@prisma/client';
 import { db } from '@/database/client';
-import { newConnectId, createConnectGroupForEntity, resolveCanvasConnectId } from '@/database/connectGroup';
+import { newConnectId, createConnectGroupForEntity, resolveCanvasConnectId, ConnectEntityType } from '@/database/connectGroup';
 import { CanvasVisibility, CanvasRole } from '@xyne/shared';
 import { v4 as uuidv4 } from 'uuid';
 export function createOrUpdateTx(existingCanvas: any, title: string, report: ReleaseReport, owner: User, now: Date, metadata: Prisma.InputJsonObject, canvasId: any) {
@@ -75,7 +75,7 @@ export function createOrUpdateTx(existingCanvas: any, title: string, report: Rel
       },
     });
     await createConnectGroupForEntity(tx, {
-      entityType: 'canvas',
+      entityType: ConnectEntityType.CANVAS,
       entityId: canvasId,
       hostWorkspaceId: report.release.workspaceId,
       connectId,

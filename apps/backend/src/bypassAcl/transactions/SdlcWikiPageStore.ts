@@ -1,7 +1,7 @@
 import { transaction } from '../base';
 import { placeHubItem } from '@/sdlc/hubFolders';
 import { sdlcChannelCanvasParticipant } from '@/sdlc/sdlcCanvasAccess';
-import { newConnectId, createConnectGroupForEntity, resolveCanvasConnectId } from '@/database/connectGroup';
+import { newConnectId, createConnectGroupForEntity, resolveCanvasConnectId, ConnectEntityType } from '@/database/connectGroup';
 import { PageAction, SdlcWikiPageStore, WikiScope, versionName } from '@/sdlc/wiki/SdlcWikiPageStore';
 import { Prisma } from '@prisma/client';
 import type { BlockNoteBlock } from '@/types/blockNoteTypes';
@@ -74,7 +74,7 @@ export function createTx(self: SdlcWikiPageStore, scope: WikiScope, page: { titl
       select: { id: true },
     });
     await createConnectGroupForEntity(tx, {
-      entityType: 'canvas',
+      entityType: ConnectEntityType.CANVAS,
       entityId: canvas.id,
       hostWorkspaceId: scope.workspaceId,
       connectId,

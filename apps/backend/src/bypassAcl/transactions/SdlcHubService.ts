@@ -2,7 +2,7 @@ import { transaction } from '../base';
 import type { SdlcActor } from '@/sdlc/types';
 import { AppError } from '@/middleware/errorHandler';
 import { sdlcChannelCanvasParticipant } from '@/sdlc/sdlcCanvasAccess';
-import { newConnectId, createConnectGroupForEntity } from '@/database/connectGroup';
+import { newConnectId, createConnectGroupForEntity, ConnectEntityType } from '@/database/connectGroup';
 import { ensureHubKnowledgeFolder, placeHubItem, ensureHubWikiFolder, ensureRepositoryWikiFolder } from '@/sdlc/hubFolders';
 import { ensureLink } from '@/sdlc/entityLinkService';
 import { SdlcHubService, SDLC_FOLDERS, channelRepository, linkRelatedCanvases } from '@/sdlc/SdlcHubService';
@@ -117,7 +117,7 @@ export function createArtifactFromClawTx(self: SdlcHubService, actor: SdlcActor,
       },
     });
     await createConnectGroupForEntity(tx, {
-      entityType: 'canvas',
+      entityType: ConnectEntityType.CANVAS,
       entityId: canvas.id,
       hostWorkspaceId: actor.workspaceId,
       connectId,
@@ -394,7 +394,7 @@ export async function createSdlcChannel(tx: TransactionClient, actor: SdlcActor,
       },
     });
     await createConnectGroupForEntity(tx, {
-      entityType: 'channel',
+      entityType: ConnectEntityType.CHANNEL,
       entityId: channelId,
       hostWorkspaceId: actor.workspaceId,
       connectId,

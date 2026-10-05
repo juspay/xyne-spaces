@@ -3,7 +3,7 @@ import { GoogleService } from '@/services/googleService';
 import { ExternalSourcePlatform } from '@/integrations/core/types';
 import { config as appConfig } from '@/config/env';
 import { db } from '@/database/client';
-import { newConnectId, createConnectGroupForEntity } from '@/database/connectGroup';
+import { newConnectId, createConnectGroupForEntity, ConnectEntityType } from '@/database/connectGroup';
 import { PendingChannelData } from '@/integrations/routes/google-auth';
 import { logger } from '@/utils/logger';
 import { ChannelScopeType, ChannelType, ChannelRole, EmailMergeMode, DeskType } from '@xyne/shared';
@@ -27,7 +27,7 @@ export function getAuthCallbackTx(cd: PendingChannelData, network: Awaited<Retur
       },
     });
     await createConnectGroupForEntity(tx, {
-      entityType: 'channel',
+      entityType: ConnectEntityType.CHANNEL,
       entityId: ch.id,
       hostWorkspaceId: cd.workspaceId,
       connectId,

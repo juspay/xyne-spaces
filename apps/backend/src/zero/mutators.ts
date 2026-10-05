@@ -128,6 +128,7 @@ import {
   withSlashCommandArtifactClosed,
 } from '@xyne/shared';
 import { SDLC_HUB_KNOWLEDGE_FOLDER, sdlcTrackStatusSchema } from '@xyne/shared';
+import { ConnectEntityType } from '@xyne/shared';
 import { MAX_DUPLICATE_SCOPE_FIELDS } from '@xyne/shared';
 import {
   evaluateEta,
@@ -9559,7 +9560,7 @@ export function createMutators(
           if (connectId) {
             await tx.mutate.connect_group.insert({
               id: connectId,
-              entityType: 'canvas',
+              entityType: ConnectEntityType.CANVAS,
               entityId: id,
               hostWorkspaceId: authData.workspaceId,
               connectId,

@@ -1,6 +1,6 @@
 import { CanvasVisibility, CallOrigin, CanvasRole } from '@xyne/shared';
 import {  INITIAL_DETAILED_SUMMARY_CANVAS_VERSION } from '@/services/callDocumentService';
-import { newConnectId, createConnectGroupForEntity, resolveCanvasConnectId } from '@/database/connectGroup';
+import { newConnectId, createConnectGroupForEntity, resolveCanvasConnectId, ConnectEntityType } from '@/database/connectGroup';
 import { PrismaClient } from '@prisma/client';
 import { transaction } from '../base';
 import { v4 as uuidv4 } from 'uuid';
@@ -62,7 +62,7 @@ export async function createPRDCanvasTx(prisma: PrismaClient, canvasId: string, 
       },
     });
     await createConnectGroupForEntity(tx, {
-      entityType: 'canvas',
+      entityType: ConnectEntityType.CANVAS,
       entityId: canvasId,
       hostWorkspaceId: workspaceId,
       connectId,
@@ -119,7 +119,7 @@ export async function createDetailedSummaryCanvasTx(prisma: PrismaClient, canvas
       },
     });
     await createConnectGroupForEntity(tx, {
-      entityType: 'canvas',
+      entityType: ConnectEntityType.CANVAS,
       entityId: canvasId,
       hostWorkspaceId: workspaceId,
       connectId,

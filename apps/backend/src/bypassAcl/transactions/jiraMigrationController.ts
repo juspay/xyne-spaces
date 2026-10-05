@@ -2,7 +2,7 @@ import { transaction } from '../base';
 import { db, JiraMigrationController } from '@/controllers/jiraMigrationController';
 import { CanvasVisibility, CanvasRole, MessageType, ConversationParticipation } from '@xyne/shared';
 import { JiraMigrationExecuteResult } from '@/services/jiraMigrationImportService';
-import { createConnectGroupForEntity } from '@/database/connectGroup';
+import { createConnectGroupForEntity, ConnectEntityType } from '@/database/connectGroup';
 import { randomUUID } from 'crypto';
 
 
@@ -138,7 +138,7 @@ export function createMigrationReportCanvasTx(canvasId: string, canvasChannel: a
       },
     });
     await createConnectGroupForEntity(tx, {
-      entityType: 'canvas',
+      entityType: ConnectEntityType.CANVAS,
       entityId: canvasId,
       hostWorkspaceId: canvasChannel.workspaceId,
       connectId,

@@ -1,6 +1,6 @@
 import { transaction } from '../base';
 import { db } from '@/database/client';
-import { newConnectId, createConnectGroupForEntity } from '@/database/connectGroup';
+import { newConnectId, createConnectGroupForEntity, ConnectEntityType } from '@/database/connectGroup';
 import { buildGooglePlaySourceRecords } from '@/integrations/adapters/social-media/google-play/sourceRecords';
 import { logger } from '@/utils/logger';
 import { ChannelType, ChannelScopeType, ChannelVisibility, ChannelRole, DeskType, EmailMergeMode } from '@xyne/shared';
@@ -40,7 +40,7 @@ export function postGooglePlayConnectTx(state: GooglePlayConnectInput & { userId
       },
     });
     await createConnectGroupForEntity(tx, {
-      entityType: 'channel',
+      entityType: ConnectEntityType.CHANNEL,
       entityId: channel.id,
       hostWorkspaceId: state.workspaceId,
       connectId,

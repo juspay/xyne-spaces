@@ -1,5 +1,5 @@
 import { DatabaseClient } from '@/database/client';
-import { newConnectId, createConnectGroupForEntity } from '@/database/connectGroup';
+import { newConnectId, createConnectGroupForEntity, ConnectEntityType } from '@/database/connectGroup';
 import {
   ActivityClassification,
   AuthProvider,
@@ -374,7 +374,7 @@ export class TestAuthSeeder {
           },
         });
         await createConnectGroupForEntity(db, {
-          entityType: 'channel',
+          entityType: ConnectEntityType.CHANNEL,
           entityId: channel.id,
           hostWorkspaceId: workspaceId,
           connectId,
@@ -652,7 +652,7 @@ export class TestAuthSeeder {
           },
         });
         await createConnectGroupForEntity(db, {
-          entityType: 'channel',
+          entityType: ConnectEntityType.CHANNEL,
           entityId: channel.id,
           hostWorkspaceId: workspaceId,
           connectId,

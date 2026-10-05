@@ -19,7 +19,7 @@ import { slackService } from '../services/slackService.js';
 import { activityService } from '../services/activity/activityService.js';
 import { DatabaseClient } from '@/database/client';
 import { tagRepository } from '@/database/repositories/tagRepository';
-import { newConnectId } from '@/database/connectGroup';
+import { newConnectId, ConnectEntityType } from '@/database/connectGroup';
 import { getGroupMembersForNotification } from '../utils/mentionUtils.js';
 import { getSlackRecipientEmails } from '../utils/notificationHelper.js';
 import { cleanupProxiedFile } from '../utils/attachmentUtils';
@@ -658,7 +658,7 @@ export class CanvasController {
         }),
         prisma.connectGroup.create({
           data: {
-            entityType: 'canvas',
+            entityType: ConnectEntityType.CANVAS,
             entityId: canvasId,
             hostWorkspaceId: req.user!.workspaceId!,
             invitedEntityId: null,

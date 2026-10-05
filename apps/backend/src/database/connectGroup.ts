@@ -1,6 +1,10 @@
 import { randomUUID } from 'crypto';
 import type { Prisma } from '@prisma/client';
 import { getConnectAclMode } from '@/services/otel';
+import { ConnectEntityType } from '@xyne/shared';
+
+// Re-export so existing `@/database/connectGroup` importers can pull the enum from here too.
+export { ConnectEntityType };
 
 /**
  * Slack Connect — Phase 1 helper.
@@ -16,12 +20,10 @@ import { getConnectAclMode } from '@/services/otel';
  *   const connectId = newConnectId();
  *   const channel = await tx.channel.create({ data: { ...input, connectId } });
  *   await createConnectGroupForEntity(tx, {
- *     entityType: 'channel', entityId: channel.id,
+ *     entityType: ConnectEntityType.CHANNEL, entityId: channel.id,
  *     hostWorkspaceId: channel.workspaceId, connectId,
  *   });
  */
-
-export type ConnectEntityType = 'channel' | 'canvas';
 
 /**
  * Client surface both the top-level `db` and an interactive `$transaction` tx satisfy.

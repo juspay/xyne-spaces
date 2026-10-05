@@ -1,7 +1,7 @@
 import type { Prisma, PrismaClient } from '@prisma/client';
 import { transaction, type TxCapableClient } from '../base';
 import { db } from '@/database/client';
-import { createConnectGroupForEntity } from '@/database/connectGroup';
+import { createConnectGroupForEntity, ConnectEntityType } from '@/database/connectGroup';
 
 /**
  * Slack Connect — create a canvas and its private connect_group row atomically.
@@ -24,7 +24,7 @@ export function createCanvasWithConnectGroupTx(
     async (tx) => {
       const canvas = await tx.canvas.create({ data });
       await createConnectGroupForEntity(tx, {
-        entityType: 'canvas',
+        entityType: ConnectEntityType.CANVAS,
         entityId: canvas.id,
         hostWorkspaceId,
         connectId,
@@ -48,7 +48,7 @@ export function createChannelWithConnectGroupTx(
     async (tx) => {
       const channel = await tx.channel.create({ data });
       await createConnectGroupForEntity(tx, {
-        entityType: 'channel',
+        entityType: ConnectEntityType.CHANNEL,
         entityId: channel.id,
         hostWorkspaceId,
         connectId,
@@ -72,7 +72,7 @@ export async function createChannelWithConnectGroupMaybeTx(
   const insert = async (tx: Prisma.TransactionClient): Promise<{ id: string }> => {
     const channel = await tx.channel.create({ data, select: { id: true } });
     await createConnectGroupForEntity(tx, {
-      entityType: 'channel',
+      entityType: ConnectEntityType.CHANNEL,
       entityId: channel.id,
       hostWorkspaceId,
       connectId,

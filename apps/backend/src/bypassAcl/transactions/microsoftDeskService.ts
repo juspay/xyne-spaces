@@ -1,7 +1,7 @@
 import { transaction } from '../base';
 import { config } from '@/config/env';
 import { db } from '@/database/client';
-import { newConnectId, createConnectGroupForEntity } from '@/database/connectGroup';
+import { newConnectId, createConnectGroupForEntity, ConnectEntityType } from '@/database/connectGroup';
 import { MicrosoftDeskService, PendingChannelCreate } from '@/services/microsoftDeskService';
 import { logger } from '@/utils/logger';
 import { ChannelScopeType, ChannelType, ChannelRole, EmailMergeMode, DeskType } from '@xyne/shared';
@@ -25,7 +25,7 @@ export function createChannelAndSourceTx(channelData: PendingChannelCreate, sour
       },
     });
     await createConnectGroupForEntity(tx, {
-      entityType: 'channel',
+      entityType: ConnectEntityType.CHANNEL,
       entityId: channel.id,
       hostWorkspaceId: channelData.workspaceId,
       connectId,

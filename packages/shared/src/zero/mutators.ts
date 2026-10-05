@@ -59,6 +59,7 @@ import {
   SavedConfigEntityName,
   ViewAccessEntityType,
   GuestEntity,
+  ConnectEntityType,
   WorkspaceRole,
   Status,
   OrgRole,
@@ -6074,7 +6075,7 @@ export const mutators = defineMutators({
         if (connectId) {
           await tx.mutate.connect_group.insert({
             id: connectId, // host/private row: one per connectId, so id == connectId
-            entityType: 'canvas',
+            entityType: ConnectEntityType.CANVAS,
             entityId: id,
             hostWorkspaceId: ctx.workspaceId,
             connectId,
