@@ -699,7 +699,8 @@ export class SlackMigrationEngine {
 
     // The channel and its participants above are written through the repositories, which never index the channel.
     // Feed it here, or a newly created DM has no chat_container doc and its messages resolve no workspace/permissions
-    // in search. Live queue (not backfill) so it lands before the messages rather than behind a deep backfill backlog.
+    // in search; for a channel migration it refreshes permissions after the member sync. Live queue (not backfill) so
+    // it lands before the messages rather than behind a deep backfill backlog.
     void vespaQueue.addJob({ schema: channelSchema, jobType: 'feed', docId: channelId, workspaceId: job.workspaceId })
       .catch((e) => logger.warn('[SlackMigration] channel vespa enqueue failed (non-fatal)', { channelId, error: e instanceof Error ? e.message : String(e) }));
 
