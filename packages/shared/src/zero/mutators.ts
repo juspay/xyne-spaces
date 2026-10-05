@@ -999,8 +999,8 @@ export const mutators = defineMutators({
         channelId: z.string(),
         conversationId: z.string().optional(),
         timestamp: z.number(),
-        draftMessageId: z.string(),
-        draftMessage: z.string(),
+        draftMessageId: z.string().optional(),
+        draftMessage: z.string().optional(),
       }),
       async ({
         tx,
@@ -1046,32 +1046,36 @@ export const mutators = defineMutators({
           updatedAt: timestamp,
         });
 
-        // Query for drafts in this channel for this user (follows backend logic)
-        const channelDrafts = await tx.run(
-          zql.draft_messages
-            .where('channelId', channelId)
-            .where('userId', ctx.userID)
-            .where(({ or, cmp }) => or(cmp('origin', '=', DraftOrigin.user), cmp('origin', 'IS', null))),
-        );
+        // Draft args are only for callers that also save the channel draft. Omit them
+        // to just mark the channel read and leave the draft untouched.
+        if (draftMessage !== undefined && draftMessageId !== undefined) {
+          // Query for drafts in this channel for this user (follows backend logic)
+          const channelDrafts = await tx.run(
+            zql.draft_messages
+              .where('channelId', channelId)
+              .where('userId', ctx.userID)
+              .where(({ or, cmp }) => or(cmp('origin', '=', DraftOrigin.user), cmp('origin', 'IS', null))),
+          );
 
-        // Find the channel-level draft (conversationId === null)
-        const draft = channelDrafts.find(d => d.conversationId === null);
+          // Find the channel-level draft (conversationId === null)
+          const draft = channelDrafts.find(d => d.conversationId === null);
 
-        if (draft && draftMessage.trim() === '' && !draft.hasAttachment) {
-          await tx.mutate.draft_messages.delete({ id: draft.id });
-        } else if (draftMessage.trim() !== '') {
-          await tx.mutate.draft_messages.upsert({
-            workspaceId: ctx.workspaceId,
-            id: draft?.id || draftMessageId,
-            conversationId: null,
-            channelId,
-            userId: ctx.userID,
-            content: draftMessage,
-            hasAttachment: draft?.hasAttachment || false,
-            origin: DraftOrigin.user,
-            updatedAt: timestamp,
-            createdAt: draft?.createdAt || timestamp,
-          });
+          if (draft && draftMessage.trim() === '' && !draft.hasAttachment) {
+            await tx.mutate.draft_messages.delete({ id: draft.id });
+          } else if (draftMessage.trim() !== '') {
+            await tx.mutate.draft_messages.upsert({
+              workspaceId: ctx.workspaceId,
+              id: draft?.id || draftMessageId,
+              conversationId: null,
+              channelId,
+              userId: ctx.userID,
+              content: draftMessage,
+              hasAttachment: draft?.hasAttachment || false,
+              origin: DraftOrigin.user,
+              updatedAt: timestamp,
+              createdAt: draft?.createdAt || timestamp,
+            });
+          }
         }
 
         const unreadActivities = await tx.run(

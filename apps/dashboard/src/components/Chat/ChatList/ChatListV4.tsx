@@ -254,6 +254,16 @@ const ChatListV4: React.FC<ChatListProps> = ({
   const { baseRoute } = useRouteContext();
   const { isEditingMessage, requestEdit } = useMessageEdit();
   const channelParticipation = useChannelParticipation(channelId);
+  // lastViewedAt as it was when this channel opened. The list marks what is on
+  // screen as read while open, which moves the live value — the "New Messages"
+  // divider and unread scroll must keep pointing at where the user left off.
+  const lastViewedAtOnOpenRef = useRef<{ value: number | null } | null>(null);
+  if (!lastViewedAtOnOpenRef.current && channelParticipation) {
+    lastViewedAtOnOpenRef.current = { value: channelParticipation.lastViewedAt ?? null };
+  }
+  const lastViewedAtOnOpen = lastViewedAtOnOpenRef.current
+    ? lastViewedAtOnOpenRef.current.value
+    : channelParticipation?.lastViewedAt;
   const isDmScope =
     channelScopeType === ChannelScopeType.DM || channelScopeType === ChannelScopeType.GROUP_DM;
   // A closed DM isn't in the seeded status map at mount, so participation is briefly undefined;
@@ -362,11 +372,9 @@ const ChatListV4: React.FC<ChatListProps> = ({
   // In unreads-only mode (the Unreads inbox), hide everything the user has
   // already seen; pending rows carry the newest timestamps so they survive.
   const filteredConversations = useMemo(() => {
-    if (!unreadsOnly || !channelParticipation?.lastViewedAt) return conversationsWithPending;
-    return conversationsWithPending.filter(
-      conv => conv.createdAt > channelParticipation.lastViewedAt,
-    );
-  }, [conversationsWithPending, unreadsOnly, channelParticipation?.lastViewedAt]);
+    if (!unreadsOnly || !lastViewedAtOnOpen) return conversationsWithPending;
+    return conversationsWithPending.filter(conv => conv.createdAt > lastViewedAtOnOpen);
+  }, [conversationsWithPending, unreadsOnly, lastViewedAtOnOpen]);
 
   const ephemeralConversations = useEphemeralChannelConversations(channelId);
   const conversationsWithEphemeral = useMemo(() => {
@@ -776,11 +784,11 @@ const ChatListV4: React.FC<ChatListProps> = ({
 
   // ── New message boundary ──────────────────────────────────────────────────────
   useEffect(() => {
-    if (!channelParticipation?.lastViewedAt || !isInitialLoadComplete) {
+    if (!lastViewedAtOnOpen || !isInitialLoadComplete) {
       setNewConversationBoundary(null);
       return;
     }
-    const idx = computeNewConvIdx(combinedMessages, channelParticipation?.lastViewedAt, user?.id);
+    const idx = computeNewConvIdx(combinedMessages, lastViewedAtOnOpen, user?.id);
     setNewConversationBoundary(prev => {
       if (idx === -1) {
         return null;
@@ -792,7 +800,7 @@ const ChatListV4: React.FC<ChatListProps> = ({
       if (prev !== null && prev.index === idx) return prev;
       return { index: idx, seenConvId: null };
     });
-  }, [combinedMessages, isInitialLoadComplete, channelParticipation?.lastViewedAt, user?.id]);
+  }, [combinedMessages, isInitialLoadComplete, lastViewedAtOnOpen, user?.id]);
 
   // ── Initial scroll ────────────────────────────────────────────────────────────
   // Fires as soon as there is data to render (cache or fresh fetch). Runs before
@@ -828,7 +836,7 @@ const ChatListV4: React.FC<ChatListProps> = ({
       ? combinedMessages.findIndex(m => m.data.conversationId === linkedConversationId)
       : -1;
 
-    const p3Idx = computeNewConvIdx(combinedMessages, channelParticipation?.lastViewedAt, user?.id);
+    const p3Idx = computeNewConvIdx(combinedMessages, lastViewedAtOnOpen, user?.id);
 
     // ── Select winner by priority order ──
     let doScroll: () => void;
@@ -1100,6 +1108,21 @@ const ChatListV4: React.FC<ChatListProps> = ({
       void zero.mutate(mutators.channel.markChannelAsViewed(payload));
     };
   }, [channelId]);
+
+  // ── Mark as read once the list has loaded ─────────────────────────────────────
+  // Without this the channel only counts as read on unmount, so the sidebar badge
+  // keeps showing unread for a channel the user is looking at. The divider and
+  // unread scroll read lastViewedAtOnOpen, so moving lastViewedAt here is safe.
+  const hasMarkedOnOpenRef = useRef(false);
+  useEffect(() => {
+    if (!channelId || !isInitialLoadComplete || hasMarkedOnOpenRef.current) return;
+    if (skipMarkAsReadRef?.current || activitySkipMarkAsReadChannelRef.current) return;
+
+    hasMarkedOnOpenRef.current = true;
+    // No draft args: the composer may not have loaded the draft yet, and sending
+    // '' would delete it. The unmount call above still saves the draft on leave.
+    void zero.mutate(mutators.channel.markChannelAsViewed({ channelId, timestamp: Date.now() }));
+  }, [channelId, isInitialLoadComplete, skipMarkAsReadRef, zero]);
 
   // ── Persist conversations to query cache ──────────────────────────────────────
   useEffect(() => {
