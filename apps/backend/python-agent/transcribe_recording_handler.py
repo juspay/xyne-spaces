@@ -217,6 +217,11 @@ async def _download_recording(url: str, cfg: Config, job_id: str) -> Tuple[str, 
     is re-validated by the SSRF guard). Returns (path, bytes). Raises RecordingError.
     """
     max_bytes = int(cfg.recording_max_bytes)
+    # Validate again here and pin the resulting IP(s): the connector below dials only these,
+    # so the checked address is the one we connect to (no re-resolution between check and connect).
+    resolver = _PinnedResolver()
+    await _validate_recording_url(url, cfg, resolver)
+
     tmp = tempfile.NamedTemporaryFile(delete=False, suffix=_suffix_from_url(url))
     tmp_path = tmp.name
     tmp.close()
@@ -224,10 +229,6 @@ async def _download_recording(url: str, cfg: Config, job_id: str) -> Tuple[str, 
     timeout = aiohttp.ClientTimeout(total=_DOWNLOAD_TIMEOUT_S)
     current_url = url
     total = 0
-    # Validate again here and pin the resulting IP(s): the connector below dials only these,
-    # so the checked address is the one we connect to (no re-resolution between check and connect).
-    resolver = _PinnedResolver()
-    await _validate_recording_url(url, cfg, resolver)
     try:
         async with aiohttp.ClientSession(timeout=timeout, connector=aiohttp.TCPConnector(resolver=resolver)) as session:
             for hop in range(_MAX_REDIRECT_HOPS + 1):

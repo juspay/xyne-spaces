@@ -1,5 +1,6 @@
 import Bull from 'bull';
 import { logger } from '@/utils/logger';
+import { redisService } from '@/services/redisService';
 import { TranscriptionAgentError, describeTranscriptionAgentError } from '@/services/transcriptionAgentClient';
 
 export interface CallTranscriptionJobData {
@@ -42,20 +43,8 @@ class CallTranscriptionQueue {
   private ensureQueue(): Bull.Queue<CallTranscriptionJobData> {
     if (this.queue) return this.queue;
 
-    const redisConfig = {
-      host: process.env.REDIS_HOST || 'localhost',
-      port: parseInt(process.env.REDIS_PORT || '6379', 10),
-      maxRetriesPerRequest: 3,
-      ...(process.env.REDIS_PASSWORD && { password: process.env.REDIS_PASSWORD }),
-      ...(process.env.REDIS_TLS === 'true' && {
-        tls: {
-          rejectUnauthorized: false,
-        },
-      }),
-    };
-
     this.queue = new Bull<CallTranscriptionJobData>(QUEUE_NAME, {
-      redis: redisConfig,
+      redis: { ...redisService.getRedisConfig(), lazyConnect: false },
       defaultJobOptions: {
         attempts: 3,
         backoff: {
