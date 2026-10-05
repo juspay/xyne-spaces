@@ -18,6 +18,7 @@ import { useFallbackHydratedQuery } from '@xyne/shared/hooks';
 import { ReadonlyJSONValue } from '@rocicorp/zero';
 import { websocketService } from '../services/clients/socketClient';
 import { DeferredLoader } from '../components/DeferredLoader';
+import { MissingUsersResolver } from '../components/MissingUsersResolver';
 import axios from 'axios';
 import { API_BASE_URL } from '../config';
 import { v4 as uuidv4 } from 'uuid';
@@ -33,6 +34,7 @@ import {
   HttpClientProvider,
   ChannelServiceProvider,
   AffinityServiceProvider,
+  resetEnsureUsersState,
 } from '@xyne/shared/hooks';
 import { axiosHttpClient, affinityService } from '../services/affinityService';
 import { channelService } from '../services/Chat/channelService';
@@ -330,8 +332,11 @@ const InitialStateLoader: React.FC<InitialStateLoaderProps> = ({ children }): Re
     };
   }, [state.name]);
 
-  // Users: fallback-hydrated query (REST initial + Zero delta)
-  const [users, usersDetails] = useFallbackHydratedQuery(queries.getUsersV2());
+  // Users: fallback-hydrated query (REST initial + Zero delta). getUsersV2 filters on
+  // `updatedAt`; every users write bumps it, so the delta can be a real delta.
+  const [users, usersDetails] = useFallbackHydratedQuery(queries.getUsersV2(), {
+    deltaArgKey: 'updatedAt',
+  });
 
   // Channels: fallback-hydrated query (REST initial + Zero delta)
   const [allChannels, allChannelsDetails] = useFallbackHydratedQuery(queries.userAllChannels());
@@ -386,6 +391,7 @@ const InitialStateLoader: React.FC<InitialStateLoaderProps> = ({ children }): Re
   useEffect(() => {
     setPermissionsHydrated(false);
     stateMachineActor.send({ type: 'RESET_ALL_USER_GROUPS' });
+    resetEnsureUsersState();
   }, [context.userID, context.workspaceId]);
 
   useEffect(() => {
@@ -493,6 +499,7 @@ const InitialStateLoader: React.FC<InitialStateLoaderProps> = ({ children }): Re
               }
             >
               <DeferredLoader />
+              <MissingUsersResolver />
               {children}
             </ChannelServiceProvider>
           </AffinityServiceProvider>

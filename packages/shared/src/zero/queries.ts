@@ -2775,6 +2775,14 @@ export const queries = defineQueries({
     }
     return query;
   }),
+  // Users looked up by id, for senders/mentions not yet in the boot-time user list.
+  // Tenant-scoped by the ACL backstop like getUsersV2. See hooks/useEnsureUser.ts.
+  usersByIds: defineQuery(
+    z.object({ userIds: z.array(z.string()).max(200) }),
+    ({ args: { userIds } }) => {
+      return zql.users.where('id', 'IN', userIds);
+    },
+  ),
   getUserProfilesByIds: defineQuery(
     z.object({ userIds: z.array(z.string()) }),
     ({ args: { userIds } }) => {

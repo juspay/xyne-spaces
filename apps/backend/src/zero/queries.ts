@@ -3382,6 +3382,15 @@ export const queries: AnyQueryRegistry = defineQueries({
     return query
   }),
 
+  // Users looked up by id, for senders/mentions not yet in the client's boot-time
+  // user list. Tenant-scoped by scopeQueryToTenant like getUsersV2.
+  usersByIds: defineQuery(
+    z.object({ userIds: z.array(z.string()).max(200) }),
+    ({ args: { userIds } }) => {
+      return zql.users.where('id', 'IN', userIds);
+    }
+  ),
+
   getUserProfilesByIds: defineQuery(
     z.object({ userIds: z.array(z.string()) }),
     ({ args: { userIds } }) => {

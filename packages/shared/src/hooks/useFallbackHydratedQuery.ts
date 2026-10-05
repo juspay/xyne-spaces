@@ -61,9 +61,21 @@ export function useFallbackHydratedQuery<
   TContext extends BaseDefaultContext = DefaultContext,
 >(
   query: QueryRequest<TTable, TInput, TOutput, TSchema, TReturn, TContext>,
-  options?: { enabled?: boolean },
+  options?: {
+    enabled?: boolean;
+    /**
+     * Arg name the query's validator declares for its delta filter, e.g.
+     * `updatedAt` for getUsersV2. The watermark is always sent as `lastUpdatedAt`
+     * (read by arg-less queries), but zod validators strip unknown keys, so a
+     * query with its own validator only filters when the watermark also arrives
+     * under the key it declares. Without it, the delta subscription returns the
+     * whole table. Only set this for tables whose every write bumps `updatedAt`.
+     */
+    deltaArgKey?: string;
+  },
 ): QueryResult<TReturn> {
   const enabled = options?.enabled ?? true;
+  const deltaArgKey = options?.deltaArgKey;
   const zero = useZero();
   const executeFallback = useFallbackExecutor();
 
@@ -191,9 +203,13 @@ export function useFallbackHydratedQuery<
       : {}) as Record<string, unknown>;
     return {
       ...query,
-      args: { ...baseArgs, lastUpdatedAt: watermark },
+      args: {
+        ...baseArgs,
+        ...(deltaArgKey ? { [deltaArgKey]: watermark } : {}),
+        lastUpdatedAt: watermark,
+      },
     } as unknown as typeof query;
-  }, [query, deltaEnabled, watermark]);
+  }, [query, deltaEnabled, watermark, deltaArgKey]);
 
   const [deltaData, deltaDetails] = useQuery(deltaQuery, {
     enabled: deltaEnabled,

@@ -47,6 +47,12 @@ export {
   useActiveUserSearch,
   invalidateUsersMapCache,
 } from "./useUsers.js";
+export {
+  useEnsureUser,
+  useMissingUsersResolver,
+  resetEnsureUsersState,
+} from "./useEnsureUser.js";
+export type { EnsuredUserStatus } from "./useEnsureUser.js";
 
 export {
   searchChannels,

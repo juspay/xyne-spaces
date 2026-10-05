@@ -8,4 +8,5 @@ export {
   useUserSearch,
   useActiveUsers,
   useActiveUserSearch,
+  useEnsureUser,
 } from '@xyne/shared/hooks';

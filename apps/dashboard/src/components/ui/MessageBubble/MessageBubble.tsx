@@ -2,6 +2,7 @@ import React, { useContext, useEffect, useMemo, useState } from 'react';
 import { ConversationBadgeContext } from '../../Chat/ConversationPannel/ConversationBadgeContext';
 import Tooltip from '../Tooltip/Tooltip';
 import { AvatarSize } from '../../UserAvatar/UserAvatar';
+import { Skeleton } from '../Skeleton';
 import * as Popover from '@radix-ui/react-popover';
 import {
   MessageType,
@@ -76,7 +77,7 @@ import workflowBotAvatar from './workflowBotAvatar.png';
 import { downloadAttachment } from '../../Chat/MessageAttachment/utils';
 import { PendingIcon } from '../../../assets/icons/WorkflowIcons';
 import { useIsCallActive } from '../../../hooks/useCalls';
-import { useUsers, useUser } from '../../../hooks/useUsers';
+import { useUsers, useUser, useEnsureUser } from '../../../hooks/useUsers';
 import { ThreadInfoIndicator, AlsoSentToChannelIndicator } from './ThreadMessageIndicators';
 import { getBaseRoute } from '../../../hooks/useRouteContext';
 import { useStableRouter } from '../../../hooks/useStableRouter';
@@ -699,7 +700,10 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
   const isChannelEmailMessage = metadata?.['messageSubtype'] === 'channel_email';
 
   const { isMobile } = usePlatform();
-  const sender = useUser(message.senderId);
+  // Fetches the sender by id when it is not in the user store yet, so the header
+  // shows a placeholder while loading instead of a fake "User" name.
+  const { user: sender, status: senderStatus } = useEnsureUser(message.senderId);
+  const isSenderLoading = senderStatus === 'loading';
   const originalSender = useUser(forwardedMessageData?.originalSenderId || '');
   const isMe = user?.id === message.senderId;
   const actionableCount = useMemo(
@@ -1062,6 +1066,11 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                   </defs>
                 </svg>
               </div>
+            ) : showAvatar && !sender && isSenderLoading ? (
+              <Skeleton
+                className='size-8 shrink-0'
+                data-testid='message-sender-avatar-skeleton'
+              />
             ) : showAvatar && sender ? (
               <div
                 onClick={() => handleUserClick(sender.id)}
@@ -1213,10 +1222,13 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                     />
                   </span>
                 )
+              ) : isSenderLoading ? (
+                <Skeleton
+                  className='h-4 w-24 self-center'
+                  data-testid='message-sender-name-skeleton'
+                />
               ) : (
-                <h3 className='text-sm font-medium text-foreground cursor-pointer hover:underline'>
-                  {'User'}
-                </h3>
+                <h3 className='text-sm font-medium text-muted-foreground'>Unknown user</h3>
               )}
 
               {searchItemView && searchChannel && (
