@@ -388,9 +388,10 @@ export async function loadMcpToolsForUser(
       const acceptsFiles = isFileInputForwardingServer(server.serverType);
       const trustedBindings = trustedToolBindings?.[mcpTool.name];
       const baseDescription = mcpTool.description || `Tool ${mcpTool.name} from ${displayName}`;
-      const definition: ToolDefinition & { serviceName?: string; backendId?: string; selectionKey?: string; mcpToolName?: string; isWriteTool?: boolean } = {
+      const definition: ToolDefinition & { serviceName?: string; backendId?: string; selectionKey?: string; mcpToolName?: string; serverToolKey?: string; isWriteTool?: boolean } = {
         name: safeName,
         mcpToolName: mcpTool.name,
+        serverToolKey: toolKey,
         // A declared read-only tool carries `isWriteTool: false` so the open
         // palette (routes/run.ts::admittedByOpenPalette) believes the
         // declaration instead of guessing risk from the name. The guess leans
