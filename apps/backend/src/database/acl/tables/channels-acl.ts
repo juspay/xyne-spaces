@@ -1,6 +1,6 @@
 import { Prisma, PrismaClient } from '@prisma/client'
 import { BaseQueryACL, ACLContext } from '../base-acl'
-import { getGuestAccessibleChannelIds, isGuestContext } from './channel-access-helper'
+import { denyGuestWhere, getGuestAccessibleChannelIds, isGuestContext } from './channel-access-helper'
 
 export class ChannelsACL extends BaseQueryACL<
   Prisma.ChannelWhereInput,
@@ -39,10 +39,12 @@ export class ChannelsACL extends BaseQueryACL<
   }
 
   async getMutateWhere(): Promise<Prisma.ChannelWhereInput> {
+    if (this.ctx.role === 'GUEST') return denyGuestWhere('id')
     return { workspaceId: this.ctx.workspaceId }
   }
 
   async canCreate(data: Prisma.ChannelUncheckedCreateInput): Promise<boolean> {
+    if (this.ctx.role === 'GUEST') return false
     if (data.projectId) {
       const project = await this.prisma.project.findFirst({
         where: { id: data.projectId, workspaceId: this.ctx.workspaceId },
