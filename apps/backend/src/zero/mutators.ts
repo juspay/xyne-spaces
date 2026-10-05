@@ -8154,6 +8154,32 @@ export function createMutators(
               updatedAt: Date.now(),
             });
           }
+
+          // The New Release modal lists repos from the channel's LINKED boards
+          // (channel_board_mappings), not from the project. Link the main release
+          // board to the configured channel so a saved repo always shows up there.
+          // Idempotent: skipped when already linked. Only DEFAULT, non-archived
+          // channels accept board links (ChannelBoardMappingsACL), so skip the rest
+          // instead of failing the whole release-config save.
+          if (channel.scopeType === ChannelScopeType.DEFAULT && !channel.isArchived) {
+            const channelMappings = await tx.run(
+              zql.channel_board_mappings.where('channelId', channelId),
+            );
+            if (!channelMappings.some(mapping => mapping.boardId === mainBoardId)) {
+              const linkedAt = Date.now();
+              await tx.mutate.channel_board_mappings.insert({
+                id: uuidv4(),
+                channelId,
+                boardId: mainBoardId,
+                workspaceId: authData.workspaceId,
+                // At most one default per channel (partial unique index).
+                isDefault: !channelMappings.some(mapping => mapping.isDefault),
+                createdBy: authData.sub,
+                createdAt: linkedAt,
+                updatedAt: linkedAt,
+              });
+            }
+          }
         },
       ),
     },
