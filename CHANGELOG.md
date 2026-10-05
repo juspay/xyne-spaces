@@ -1,3 +1,10 @@
+## [1.454.0](https://github.com/juspay/xyne-spaces/compare/v1.453.0...v1.454.0) (2026-10-05)
+
+
+### Features
+
+* pragati schedule intergeration ([#2605](https://github.com/juspay/xyne-spaces/issues/2605)) ([cf5e0a4](https://github.com/juspay/xyne-spaces/commit/cf5e0a45fb22ef5a78be1f30b71b896138730dd1))
+
 ## [1.453.0](https://github.com/juspay/xyne-spaces/compare/v1.452.1...v1.453.0) (2026-10-05)
 
 
