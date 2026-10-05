@@ -34,26 +34,33 @@ export interface ChatTitleInput {
 
 const STRUCTURED_ARTIFACT =
   /<\/?(?:tool_?calls?|function_?calls?|invoke|parameter)\b|toolcall|arg_?key|record_?chat_?title|^\s*[{[]/i;
-const NARRATION = /^(the user|user (asks|asked|wants)|this (conversation|chat)|here('s| is)|okay|sure)\b/i;
+const NARRATION =
+  /^(?:(?:the|this) (?:user|conversation|chat|subject|topic|title)|user (?:asks|asked|wants)|here(?:'s| is)|okay|sure|(?:another )?candidate|sentence case)\b/i;
+// The prompt asks for 3-6 words; anything past this is the model reasoning, not a title.
+const MAX_TITLE_WORDS = 8;
+// Double quotes are forbidden by the prompt, so one surviving inside the title means the
+// model is discussing a candidate title rather than emitting one. Apostrophes stay allowed.
+const INNER_QUOTE = /["“”]/;
 
 export function sanitizeChatTitle(raw: unknown): string | null {
   if (typeof raw !== "string") return null;
   if (STRUCTURED_ARTIFACT.test(raw)) return null;
-  const candidate = raw
+  const lines = raw
     .split(/\r?\n/)
     .map((line) => line.trim())
-    .filter(Boolean)
-    .pop();
-  if (!candidate) return null;
-  const cleaned = candidate
+    .filter(Boolean);
+  // A real title is one line. Multiple non-empty lines means the model leaked its
+  // reasoning; picking the last line used to surface fragments of that reasoning.
+  if (lines.length !== 1) return null;
+  const cleaned = lines[0]!
     .replace(/^title\s*:\s*/i, "")
-    .replace(/[\r\n]+/g, " ")
     .replace(/[*_`#]/g, "")
     .replace(/\s+/g, " ")
-    .replace(/^['"“”‘’\s]+|['"“”‘’\s]+$/g, "")
-    .replace(/[.,;:!]+$/g, "")
+    // Strip wrapping quotes and trailing punctuation together so `"Title".` is fully unwrapped.
+    .replace(/^['"“”‘’\s]+|['"“”‘’\s.,;:!]+$/g, "")
     .trim();
-  if (!cleaned || NARRATION.test(cleaned)) return null;
+  if (!cleaned || NARRATION.test(cleaned) || INNER_QUOTE.test(cleaned)) return null;
+  if (cleaned.split(" ").length > MAX_TITLE_WORDS) return null;
   return cleaned.slice(0, GENERATED_CHAT_TITLE_MAX_CHARS).trim() || null;
 }
 
@@ -108,7 +115,8 @@ export async function generateChatTitle(input: ChatTitleInput): Promise<string |
           },
         ],
         temperature: 0.2,
-        max_tokens: 400,
+        // A 3-6 word title fits comfortably; a tight cap stops reasoning-style rambling at source.
+        max_tokens: 24,
         chat_template_kwargs: { enable_thinking: false },
       }),
       signal: AbortSignal.timeout(CHAT_TITLE_TIMEOUT_MS),
