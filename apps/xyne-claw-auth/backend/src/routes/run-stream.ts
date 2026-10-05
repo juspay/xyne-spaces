@@ -2348,13 +2348,18 @@ internalRouter.post("/:streamId/callback", async (req: Request<{ streamId: strin
               }),
             );
           }
-          delivered.push(
-            await renderProviderSuggestCard({
-              taskText,
-              id: suggestIdentity,
-              target: suggestTarget,
-            }),
-          );
+          const providerSuggestions = body["pendingProviderSuggestions"] as
+            | { providers: string[]; listAll?: boolean; title?: string }
+            | undefined;
+          if (providerSuggestions) {
+            delivered.push(
+              await renderProviderSuggestCard({
+                suggestions: providerSuggestions,
+                id: suggestIdentity,
+                target: suggestTarget,
+              }),
+            );
+          }
           // Same reason as the agent cards: the terminal payload has no uiFlows
           // slot, so a card must go on the wire to paint without a refetch.
           for (const flow of delivered) {
