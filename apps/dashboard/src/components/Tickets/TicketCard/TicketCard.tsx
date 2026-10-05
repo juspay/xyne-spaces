@@ -654,9 +654,18 @@ export const TicketCard: React.FC<TicketCardProps> = ({
   }
 
   return (
-    <button
-      type='button'
+    // Not a <button>: the card holds buttons of its own (assignee, priority, stage),
+    // and a button can't contain another. It still behaves as one.
+    <div
+      role='button'
+      tabIndex={0}
       onClick={e => onClick?.(e)}
+      onKeyDown={e => {
+        // The card's own keys only; the controls inside it handle theirs.
+        if (e.target !== e.currentTarget || (e.key !== 'Enter' && e.key !== ' ')) return;
+        e.preventDefault();
+        onClick?.(e.nativeEvent);
+      }}
       data-testid={`ticket-card-${ticket.id}`}
       className={cn(
         width,
@@ -1075,6 +1084,6 @@ export const TicketCard: React.FC<TicketCardProps> = ({
           </div>
         </div>
       </div>
-    </button>
+    </div>
   );
 };

@@ -1,4 +1,4 @@
-import { ReactElement, useMemo, useState, useEffect, useRef, useCallback } from 'react';
+import { ReactElement, useMemo, useState, useEffect, useRef, useCallback, useContext } from 'react';
 import { createPortal } from 'react-dom';
 import { activitySkipMarkAsReadThreadRef } from '../Activity/activitySkipMarkAsRead';
 import { useEphemeralThreadMessages } from '../../hooks/useEphemeralMessages';
@@ -112,6 +112,7 @@ import { ThreadRecordingButton } from '../Call/ThreadRecordingButton/ThreadRecor
 import { sendRecordingEvent, useRecordingStore } from '../../hooks/useRecordingStore';
 import { getRecordingDefaultLayout } from '../../hooks/useRecordingDefaultLayout';
 import { ConversationTabContext } from './ConversationTabContext';
+import { ThreadNavigationContext } from './ThreadNavigationContext';
 
 const VALID_TABS = ['thread', 'details', 'files', 'rca', 'relationships', 'release'] as const;
 type TabType = (typeof VALID_TABS)[number];
@@ -193,6 +194,7 @@ export const ThreadMessages = ({
   const shareableOrigin = useShareableOrigin();
 
   const outletContext = useOutletContext<{ onClose?: () => void } | null>();
+  const threadNavigation = useContext(ThreadNavigationContext);
   const resolvedOnClose = onClose ?? outletContext?.onClose;
 
   // Restore Electron window dragging on the thread header — but ONLY when this is the
@@ -1011,6 +1013,11 @@ export const ThreadMessages = ({
 
   const openTicketDetailsExpandedView = (): void => {
     if (!ticket?.channelId || !ticket.conversationId) return;
+
+    if (threadNavigation.openTicket) {
+      threadNavigation.openTicket(ticket.id);
+      return;
+    }
 
     // An SDLC ticket has its own page under the hub, not a panel over the chat channel.
     if (channel?.type === ChannelType.SDLC) {

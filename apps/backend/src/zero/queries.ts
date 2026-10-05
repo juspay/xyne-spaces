@@ -3,6 +3,7 @@ import {
   defineQueries,
   type AnyQueryRegistry,
   type AnyQueryDefinition,
+  type Query,
   type QueryRegistry,
 } from '@rocicorp/zero';
 import {
@@ -23,6 +24,7 @@ import {
   CanvasVisibility,
   ChannelVisibility,
   CallStatus,
+  InvitationResponse,
   ChannelScopeType,
   ConversationParticipation,
   schema,
@@ -32,9 +34,9 @@ import {
   ChannelType,
   SDLC_MEMBERSHIP_RELATION,
   SDLC_CONTAINMENT_RELATION,
-  SDLC_HUB_GRAPH_EXCLUDED_RELATIONS,
   SDLC_TREE_TARGET_TYPES,
   SDLC_TRACK_FLAT_RELATION,
+  SDLC_FOLDER_FLAT_RELATION,
   SDLC_TRACK_MEMBERSHIP_RELATION,
   SDLC_WORKFLOW_RELATION,
   SDLC_WIKI_WORKFLOW_RELATION,
@@ -157,6 +159,7 @@ const tableTicketsPageArgsSchema = kanbanTicketsPageV3ArgsSchema.omit({
   dir: true,
 });
 
+type TableTicketsPageArgs = z.infer<typeof tableTicketsPageArgsSchema>;
 const prefixedKanbanIdentityValues = (id: string): string[] => [
   id,
   `user:${id}`,
@@ -707,6 +710,266 @@ const applyKanbanTicketPageV3Conditions = (
 
   return query;
 };
+
+// The kanban and table pages, over whichever tickets `root` starts from: every
+// ticket for the board views, or one track's tickets for the track view.
+const buildKanbanTicketsPageV3Query = (
+  root: typeof zql.tickets,
+  ctx: { userID: string },
+  args: KanbanTicketsPageV3Args,
+) => {
+  const dir = args.dir ?? 'forward';
+  let query = applyKanbanTicketPageV3Conditions(root, ctx, args)
+    .orderBy('createdAt', dir === 'forward' ? 'desc' : 'asc')
+    .orderBy('id', dir === 'forward' ? 'asc' : 'desc');
+
+  if (args.start) {
+    query =
+      dir === 'forward'
+        ? query.where('createdAt', '<=', args.start.createdAt)
+        : query.where('createdAt', '>=', args.start.createdAt);
+  }
+
+  if (args.createdAfter !== undefined) {
+    query =
+      dir === 'forward'
+        ? query.where('createdAt', '>=', args.createdAfter)
+        : query.where('createdAt', '<=', args.createdAfter);
+  }
+
+  let finalQuery = query
+    .limit(args.limit)
+    .related('assignments', (a: typeof zql.ticket_assignments) => a.related('role'))
+    .related('tagMappings');
+
+  if (args.formEntityValueFieldIds?.length) {
+    finalQuery = finalQuery.related('formEntityValues', (fev: typeof zql.form_entity_values) =>
+      fev.where('fieldId', 'IN', args.formEntityValueFieldIds ?? []).related('formField').related('globalField'),
+    );
+  }
+
+  return finalQuery;
+};
+
+const buildTableTicketsPageQuery = (
+  root: typeof zql.tickets,
+  ctx: { userID: string },
+  args: TableTicketsPageArgs,
+) => {
+  // Empty stageName = no stage pin; the page spans every stage.
+  let query = applyKanbanTicketPageV3Conditions(root, ctx, {
+    ...args,
+    stageName: '',
+  } as KanbanTicketsPageV3Args)
+    .orderBy('createdAt', 'desc')
+    // id tiebreak keeps the (createdAt, id) keyset cursor deterministic on ties.
+    .orderBy('id', 'desc');
+
+  if (args.start) {
+    query = query.start(
+      { createdAt: args.start.createdAt, id: args.start.id },
+      { inclusive: false },
+    );
+  }
+
+  if (args.createdAfter !== undefined) {
+    query = query.where('createdAt', '>=', args.createdAfter);
+  }
+
+  let finalQuery = query
+    .limit(args.limit)
+    .related('assignments', (a: typeof zql.ticket_assignments) => a.related('role'))
+    .related('tagMappings');
+
+  if (args.formEntityValueFieldIds?.length) {
+    finalQuery = finalQuery.related('formEntityValues', (fev: typeof zql.form_entity_values) =>
+      fev
+        .where('fieldId', 'IN', args.formEntityValueFieldIds ?? [])
+        .related('formField')
+        .related('globalField'),
+    );
+  }
+
+  return finalQuery;
+};
+
+// A track's tickets: the ones a TRACK -> TICKET containment edge in its hub points
+// at. Flipped so the few edges drive the join rather than every ticket.
+const scopeTicketsToTrack = (
+  query: typeof zql.tickets,
+  channelId: string,
+  trackId: string,
+): typeof zql.tickets =>
+  query.where(({ exists }) =>
+    exists(
+      'sdlcEntityLinks',
+      link =>
+        link
+          .where('channelId', channelId)
+          .where('sourceType', 'TRACK')
+          .where('sourceId', trackId)
+          .where('targetType', 'TICKET')
+          .where('relationType', SDLC_CONTAINMENT_RELATION),
+      { flip: true },
+    ),
+  );
+
+const trackTicketsScopeShape = { channelId: z.string(), trackId: z.string() };
+
+/**
+ * Which SDLC discussions a conversation list shows: a track's — its own, those rolled
+ * up from items filed in it, and its artifacts' — a folder's, with those of everything
+ * under it, or those filed on given items. Joined
+ * in the query through the links pointing at each conversation, so the list's own
+ * paging applies and no list of ids is ever sent.
+ */
+const sdlcDiscussionScopeSchema = z.union([
+  z.object({ trackId: z.string() }),
+  z.object({ folderId: z.string() }),
+  z.object({ ownerIds: z.array(z.string()) }),
+]);
+type SdlcDiscussionScope = z.infer<typeof sdlcDiscussionScopeSchema>;
+
+const withSdlcDiscussionScope = (
+  query: typeof zql.conversations,
+  channelId: string,
+  scope: SdlcDiscussionScope,
+): typeof zql.conversations =>
+  query.where(({ exists }) =>
+    exists(
+      'sdlcEntityLinks',
+      link => {
+        const discussions = link.where('channelId', channelId).where('targetType', 'CONVERSATION');
+        if ('trackId' in scope) {
+          return discussions.where(({ or, and, cmp, exists: linked }) =>
+            or(
+              and(
+                cmp('sourceType', 'TRACK'),
+                cmp('sourceId', scope.trackId),
+                cmp('relationType', 'IN', ['DISCUSSION', SDLC_TRACK_FLAT_RELATION]),
+              ),
+              // An artifact's discussions don't roll up to its track; its track edge says
+              // whose it is.
+              and(
+                cmp('sourceType', 'CANVAS'),
+                cmp('relationType', 'DISCUSSION'),
+                linked('sourceItemLinks', edge =>
+                  edge
+                    .where('sourceType', 'TRACK')
+                    .where('sourceId', scope.trackId)
+                    .where('relationType', SDLC_TRACK_FLAT_RELATION),
+                ),
+              ),
+            ),
+          );
+        }
+        if ('folderId' in scope) {
+          // A folder's own, and those of everything under it however deep: the folder
+          // edge each of those items carries says so.
+          return discussions.where('relationType', 'DISCUSSION').where(({ or, and, cmp, exists: linked }) =>
+            or(
+              and(cmp('sourceType', 'FOLDER'), cmp('sourceId', scope.folderId)),
+              linked('sourceItemLinks', edge =>
+                edge
+                  .where('sourceType', 'FOLDER')
+                  .where('sourceId', scope.folderId)
+                  .where('relationType', SDLC_FOLDER_FLAT_RELATION),
+              ),
+            ),
+          );
+        }
+        return discussions
+          .where('relationType', 'DISCUSSION')
+          .where(({ cmp }) =>
+            cmp('sourceId', 'IN', scope.ownerIds.length > 0 ? scope.ownerIds : ['__no_sdlc_owner__']),
+          );
+      },
+      { flip: true },
+    ),
+  );
+
+/** Links other members keep to themselves stay theirs, as in the hub's own link list. */
+const visibleSdlcLinks = <TReturn>(
+  query: Query<'links', typeof schema, TReturn>,
+  userId: string,
+): Query<'links', typeof schema, TReturn> =>
+  query.where(({ or, and, cmp, exists }) =>
+    or(
+      cmp('visibility', LinkVisibility.DEFAULT),
+      and(cmp('visibility', LinkVisibility.PERSONAL), cmp('createdBy', userId)),
+      and(
+        cmp('visibility', LinkVisibility.PERSONAL),
+        exists('sharedWith', shared => shared.where('userId', userId)),
+      ),
+    ),
+  );
+
+/** Files uploaded to the hub, and not deleted since. */
+const sdlcHubFiles = <TReturn>(
+  query: Query<'message_attachments', typeof schema, TReturn>,
+  channelId: string,
+): Query<'message_attachments', typeof schema, TReturn> =>
+  query
+    .where('entityType', AttachmentEntityType.SDLC_HUB)
+    .where('entityId', channelId)
+    .where('isDeleted', false);
+
+/**
+ * The items a hub's links point at, joined onto each link, so a folder's contents
+ * arrive named rather than being looked up in the hub's every folder, link and file.
+ * A link's id names a row in only the table its type says. Joined rows skip their
+ * own table's rules, so a link and a file bring the ones their lists apply.
+ */
+const withSdlcTargetItems = (
+  query: typeof zql.sdlc_entity_links,
+  channelId: string,
+  userId: string,
+) =>
+  query
+    .related('targetFolder')
+    .related('targetLink', link => visibleSdlcLinks(link, userId))
+    .related('targetFile', file => sdlcHubFiles(file, channelId))
+    .related('targetCanvas', canvas => canvas.related('folder'));
+
+/** A conversation's DISCUSSION link, with the item it is about, for saying where it is. */
+const sdlcDiscussionOwnerLink = (
+  link: typeof zql.sdlc_entity_links,
+  channelId: string,
+  userId: string,
+) =>
+  link
+    .where('targetType', 'CONVERSATION')
+    .where('relationType', 'DISCUSSION')
+    .related('sourceFolder')
+    .related('sourceLink', item => visibleSdlcLinks(item, userId))
+    .related('sourceFile', file => sdlcHubFiles(file, channelId))
+    .related('sourceCanvas');
+
+/** A hub artifact as its pages show it: its status, and the track edge naming its track. */
+const withSdlcHubCanvas = (query: typeof zql.canvases) =>
+  query
+    .related('sdlcArtifact')
+    .related('sdlcEntityLinks', link =>
+      link.where('sourceType', 'TRACK').where('relationType', SDLC_TRACK_FLAT_RELATION),
+    );
+
+/** A call's owner link — owner -> CALL — with the track, item or artifact it names. */
+const sdlcCallOwnerLink = (
+  link: typeof zql.sdlc_entity_links,
+  channelId: string,
+  userId: string,
+) =>
+  link
+    .where('channelId', channelId)
+    .where('targetType', 'CALL')
+    .where('relationType', 'CALL')
+    .related('sourceFolder')
+    .related('sourceLink', item => visibleSdlcLinks(item, userId))
+    .related('sourceFile', file => sdlcHubFiles(file, channelId))
+    .related('sourceCanvas');
+
+const trackKanbanTicketsPageArgsSchema = kanbanTicketsPageV3ArgsSchema.extend(trackTicketsScopeShape);
+const trackTableTicketsPageArgsSchema = tableTicketsPageArgsSchema.extend(trackTicketsScopeShape);
 
 // Without the public arm every branch is bounded by the viewer, so each is flipped and
 // the viewer's own canvases / participations drive instead of every canvas in the workspace.
@@ -1386,78 +1649,29 @@ export const queries: AnyQueryRegistry = defineQueries({
 
   kanbanTicketsPageV3: defineQuery(
     kanbanTicketsPageV3ArgsSchema,
-    ({ ctx, args }) => {
-      const dir = args.dir ?? 'forward';
-      let query = applyKanbanTicketPageV3Conditions(zql.tickets, ctx, args)
-        .orderBy('createdAt', dir === 'forward' ? 'desc' : 'asc')
-        .orderBy('id', dir === 'forward' ? 'asc' : 'desc');
-
-      if (args.start) {
-        query =
-          dir === 'forward'
-            ? query.where('createdAt', '<=', args.start.createdAt)
-            : query.where('createdAt', '>=', args.start.createdAt);
-      }
-
-      if (args.createdAfter !== undefined) {
-        query =
-          dir === 'forward'
-            ? query.where('createdAt', '>=', args.createdAfter)
-            : query.where('createdAt', '<=', args.createdAfter);
-      }
-
-      let finalQuery = query
-        .limit(args.limit)
-        .related('assignments', (a: any) => a.related('role'))
-        .related('tagMappings');
-
-      if (args.formEntityValueFieldIds?.length) {
-        finalQuery = finalQuery.related('formEntityValues', (fev: any) =>
-          fev.where('fieldId', 'IN', args.formEntityValueFieldIds ?? []).related('formField').related('globalField'),
-        );
-      }
-
-      return finalQuery;
-    },
+    ({ ctx, args }) => buildKanbanTicketsPageV3Query(zql.tickets, ctx, args),
   ),
 
-  tableTicketsPage: defineQuery(tableTicketsPageArgsSchema, ({ ctx, args }) => {
-    // Empty stageName = no stage pin; the page spans every stage.
-    let query = applyKanbanTicketPageV3Conditions(zql.tickets, ctx, {
-      ...args,
-      stageName: '',
-    } as KanbanTicketsPageV3Args)
-      .orderBy('createdAt', 'desc')
-      // id tiebreak keeps the (createdAt, id) keyset cursor deterministic on ties.
-      .orderBy('id', 'desc');
+  tableTicketsPage: defineQuery(tableTicketsPageArgsSchema, ({ ctx, args }) =>
+    buildTableTicketsPageQuery(zql.tickets, ctx, args),
+  ),
 
-    if (args.start) {
-      query = query.start(
-        { createdAt: args.start.createdAt, id: args.start.id },
-        { inclusive: false },
-      );
-    }
-
-    if (args.createdAfter !== undefined) {
-      query = query.where('createdAt', '>=', args.createdAfter);
-    }
-
-    let finalQuery = query
-      .limit(args.limit)
-      .related('assignments', (a: any) => a.related('role'))
-      .related('tagMappings');
-
-    if (args.formEntityValueFieldIds?.length) {
-      finalQuery = finalQuery.related('formEntityValues', (fev: any) =>
-        fev
-          .where('fieldId', 'IN', args.formEntityValueFieldIds ?? [])
-          .related('formField')
-          .related('globalField'),
-      );
-    }
-
-    return finalQuery;
-  }),
+  // A track's tickets, from every board they are on: the same pages, filters and
+  // grouping as the two above, over only the tickets the track holds.
+  trackKanbanTicketsPage: defineQuery(
+    trackKanbanTicketsPageArgsSchema,
+    ({ ctx, args: { channelId, trackId, ...pageArgs } }) =>
+      buildKanbanTicketsPageV3Query(
+        scopeTicketsToTrack(zql.tickets, channelId, trackId),
+        ctx,
+        pageArgs,
+      ),
+  ),
+  trackTableTicketsPage: defineQuery(
+    trackTableTicketsPageArgsSchema,
+    ({ ctx, args: { channelId, trackId, ...pageArgs } }) =>
+      buildTableTicketsPageQuery(scopeTicketsToTrack(zql.tickets, channelId, trackId), ctx, pageArgs),
+  ),
 
   workflowsPaginated: defineQuery(
     z.object({
@@ -4556,9 +4770,14 @@ export const queries: AnyQueryRegistry = defineQueries({
       start: z.object({ createdAt: z.number() }).nullable(),
       direction: z.literal('forward').or(z.literal('backward')),
       conversationIds: z.array(z.string()).optional(),
+      discussionScope: sdlcDiscussionScopeSchema.optional(),
     }),
-    ({ ctx, args: { channelId, limit, start, direction, conversationIds } }) => {
-      let query = zql.conversations
+    ({ ctx, args: { channelId, limit, start, direction, conversationIds, discussionScope } }) => {
+      let query = (
+        discussionScope
+          ? withSdlcDiscussionScope(zql.conversations, channelId, discussionScope)
+          : zql.conversations
+      )
         .where('channelId', channelId)
         .related('initialMessageAttachments')
         .related('initialMessageNudgeCounts', nudgeCountsQuery =>
@@ -4584,7 +4803,12 @@ export const queries: AnyQueryRegistry = defineQueries({
       }
 
       // Apply limit
-      return limit ? query.limit(limit) : query;
+      const page = limit ? query.limit(limit) : query;
+      // A discussion list says where each one is happening: its DISCUSSION link comes
+      // with it, so no row has to ask for its own.
+      return discussionScope
+        ? page.related('sdlcEntityLinks', link => sdlcDiscussionOwnerLink(link, channelId, ctx.userID))
+        : page;
     },
   ),
   channelLatestMultipleConversations: defineQuery(
@@ -4657,14 +4881,18 @@ export const queries: AnyQueryRegistry = defineQueries({
     },
   ),
   channelLatestMultipleConversationsV3: defineQuery(
-    z.object({ channelId: z.string(), isMember: z.boolean(), limit: z.number(), conversationIds: z.array(z.string()).optional() }),
-    ({ ctx, args: { channelId, limit, conversationIds } }) => {
-      let query = zql.conversations
+    z.object({ channelId: z.string(), isMember: z.boolean(), limit: z.number(), conversationIds: z.array(z.string()).optional(), discussionScope: sdlcDiscussionScopeSchema.optional() }),
+    ({ ctx, args: { channelId, limit, conversationIds, discussionScope } }) => {
+      let query = (
+        discussionScope
+          ? withSdlcDiscussionScope(zql.conversations, channelId, discussionScope)
+          : zql.conversations
+      )
         .where('channelId', channelId);
       if (conversationIds) {
         query = query.where(helpers => helpers.cmp('conversationId', 'IN', conversationIds));
       }
-      return query
+      const latest = query
         .related('initialMessageAttachments')
         .related('initialMessageNudgeCounts', nudgeCountsQuery =>
           nudgeCountsQuery.where(helpers =>
@@ -4676,6 +4904,10 @@ export const queries: AnyQueryRegistry = defineQueries({
         )
         .orderBy('createdAt', 'desc')
         .limit(limit);
+      // Where each discussion is happening, with it; see channelConversationsPaginatedV3.
+      return discussionScope
+        ? latest.related('sdlcEntityLinks', link => sdlcDiscussionOwnerLink(link, channelId, ctx.userID))
+        : latest;
     },
   ),
 
@@ -5133,21 +5365,6 @@ dmChannelsLatestMessagesPaginated: defineQuery(
   getAllRepos: defineQuery(() => {
     return zql.repos.orderBy('name', 'asc');
   }),
-  /** SDLC hubs the viewer can reach, each with the repositories it covers. */
-  getSdlcChannels: defineQuery(({ ctx }) =>
-    zql.channels
-      .where('type', ChannelType.SDLC)
-      .where('isArchived', false)
-      // The channels ACL lets workspace admins and public channels through; a hub
-      // is only usable by its participants, and every write re-checks that.
-      .whereExists('participants', participant => participant.where('userId', ctx.userID))
-      .related('sdlcEntityLinks', link =>
-        link
-          .where('relationType', SDLC_MEMBERSHIP_RELATION)
-          .related('repo', repo => repo.related('project')),
-      )
-      .orderBy('name', 'asc'),
-  ),
   getSdlcChannelById: defineQuery(z.object({ channelId: z.string() }), ({ args: { channelId } }) =>
     zql.channels
       .where('id', channelId)
@@ -5163,6 +5380,119 @@ dmChannelsLatestMessagesPaginated: defineQuery(
           .related('repo', repo => repo.related('project')),
       )
       .one(),
+  ),
+  /**
+   * A hub's calls in progress, each with the track, item or artifact it belongs to,
+   * where that sits — its track and every folder above it — and the viewer's own
+   * invitation. Loaded whenever a hub is open: it is the sidebar's live count and the
+   * live marks on tracks and folders. Only live calls, so it stays small.
+   */
+  getSdlcActiveCalls: defineQuery(z.object({ channelId: z.string() }), ({ ctx, args: { channelId } }) =>
+    zql.calls
+      .where('channelId', channelId)
+      .where('status', CallStatus.ACTIVE)
+      .where(helpers => helpers.cmp('callType', '!=', CallType.HEADLESS))
+      // Reads are scoped to the workspace only; this is the calls rule every call list uses.
+      .where(eb => callsReachableByUser(eb, ctx.userID, ctx.workspaceId))
+      .related('participants', participant => participant.where('userId', ctx.userID))
+      .related('sdlcEntityLinks', link =>
+        sdlcCallOwnerLink(link, channelId, ctx.userID).related('sourceItemLinks', edge =>
+          edge
+            .where('channelId', channelId)
+            .where(({ cmp }) =>
+              cmp('relationType', 'IN', [SDLC_TRACK_FLAT_RELATION, SDLC_FOLDER_FLAT_RELATION]),
+            ),
+        ),
+      )
+      .orderBy('startedAt', 'desc'),
+  ),
+  // A hub's calls, or one track's, a phase at a time: in progress, still to come, or
+  // over, a page at a time. A track's are the ones started on it or on anything it
+  // holds; every folder, file, link and artifact carries a track -> item edge.
+  getSdlcCalls: defineQuery(
+    z.object({
+      channelId: z.string(),
+      trackId: z.string().optional(),
+      phase: z.enum(['LIVE', 'UPCOMING', 'PAST']),
+      /** Upcoming only: calls not over by then, rounded by the caller so it holds still. */
+      from: z.number().optional(),
+      invitedOnly: z.boolean().optional(),
+      limit: z.number().int().min(1).max(100),
+      /** Past only: the last row of the page before. */
+      start: z.object({ endedAt: z.number(), id: z.string() }).optional(),
+    }),
+    ({ ctx, args }) => {
+      const { channelId, trackId, phase } = args;
+      let query = zql.calls
+        .where('channelId', channelId)
+        .where(({ cmp }) => cmp('callType', '!=', CallType.HEADLESS))
+        // Reads are scoped to the workspace only; this is the calls rule every call list uses.
+        .where(eb => callsReachableByUser(eb, ctx.userID, ctx.workspaceId));
+      if (trackId) {
+        query = query.whereExists('sdlcEntityLinks', link =>
+          link
+            .where('channelId', channelId)
+            .where('targetType', 'CALL')
+            .where('relationType', 'CALL')
+            .where(({ or, and, cmp, exists }) =>
+              or(
+                and(cmp('sourceType', 'TRACK'), cmp('sourceId', trackId)),
+                exists('sourceItemLinks', edge =>
+                  edge
+                    .where('channelId', channelId)
+                    .where('sourceType', 'TRACK')
+                    .where('sourceId', trackId)
+                    .where('relationType', SDLC_TRACK_FLAT_RELATION),
+                ),
+              ),
+            ),
+        );
+      }
+      if (args.invitedOnly) {
+        // Part of it: asked, or let in. A request to join still waiting doesn't count.
+        query = query.whereExists('participants', participant =>
+          participant
+            .where('userId', ctx.userID)
+            .where(({ or, cmp }) =>
+              or(cmp('response', 'IS', null), cmp('response', '!=', InvitationResponse.REQUESTED)),
+            ),
+        );
+      }
+      if (phase === 'LIVE') {
+        query = query.where('status', CallStatus.ACTIVE).orderBy('startedAt', 'desc').orderBy('id', 'asc');
+      } else if (phase === 'UPCOMING') {
+        query = query
+          .where('status', CallStatus.SCHEDULED)
+          // Not over yet; one with no end time, until it starts.
+          .where(({ or, and, cmp }) =>
+            or(
+              cmp('endsAt', '>=', args.from ?? 0),
+              and(cmp('endsAt', 'IS', null), cmp('startsAt', '>=', args.from ?? 0)),
+            ),
+          )
+          .orderBy('startsAt', 'asc')
+          .orderBy('id', 'asc');
+      } else {
+        query = query.where('status', CallStatus.ENDED).orderBy('endedAt', 'desc').orderBy('id', 'asc');
+        if (args.start) query = query.start(args.start, { inclusive: false });
+      }
+      return (
+        query
+          .limit(args.limit)
+          // Invited: your own participant row, when you were asked.
+          .related('participants', participant => participant.where('userId', ctx.userID))
+          // Where: the track, item or artifact it was started on, and an item's track,
+          // which the hub's list names beside it.
+          .related('sdlcEntityLinks', link =>
+            sdlcCallOwnerLink(link, channelId, ctx.userID).related('sourceItemLinks', edge =>
+              edge
+                .where('channelId', channelId)
+                .where('sourceType', 'TRACK')
+                .where('relationType', SDLC_TRACK_FLAT_RELATION),
+            ),
+          )
+      );
+    },
   ),
   getSdlcHubWorkflow: defineQuery(
     z.object({ channelId: z.string() }),
@@ -5190,7 +5520,9 @@ dmChannelsLatestMessagesPaginated: defineQuery(
   getSdlcHubItems: defineQuery(z.object({ channelId: z.string() }), ({ args: { channelId } }) =>
     zql.sdlc_entity_links
       .where('channelId', channelId)
-      .where('relationType', SDLC_HUB_ITEM_RELATION),
+      .where('relationType', SDLC_HUB_ITEM_RELATION)
+      // A page's artifact rides with its link, so the wiki needs no hub-wide list.
+      .related('targetCanvas', canvas => canvas.related('sdlcArtifact')),
   ),
   getSdlcHubFolders: defineQuery(z.object({ channelId: z.string() }), ({ args: { channelId } }) =>
     zql.sdlc_folders.whereExists('sdlcEntityLinks', link =>
@@ -5198,16 +5530,52 @@ dmChannelsLatestMessagesPaginated: defineQuery(
     ),
   ),
   /**
-   * One level of a track's folder tree: the things directly inside `parentId`.
+   * The hub as its screen needs it: the channel, its artifact type folders without
+   * their artifacts, its repositories, and your own membership. Artifacts load a folder
+   * at a time, with the page that shows them. getSdlcChannelById keeps the full shape
+   * for the SDK.
+   */
+  getSdlcHub: defineQuery(z.object({ channelId: z.string() }), ({ ctx, args: { channelId } }) =>
+    zql.channels
+      .where('id', channelId)
+      .where('type', ChannelType.SDLC)
+      .related('participants', participant => participant.where('userId', ctx.userID))
+      // Its add-member policy and member count, which the members dialog reads.
+      .related('channelStats')
+      .related('canvasFolders')
+      .related('sdlcEntityLinks', link =>
+        link
+          .where('relationType', SDLC_MEMBERSHIP_RELATION)
+          .related('repo', repo => repo.related('project')),
+      )
+      .one(),
+  ),
+  /** One of the hub's artifact folders with its artifacts: Hub Knowledge, or a type. */
+  getSdlcFolderCanvases: defineQuery(
+    z.object({ channelId: z.string(), folderId: z.string() }),
+    ({ ctx, args: { channelId, folderId } }) =>
+      withSdlcHubCanvas(
+        // Reads are scoped to the workspace only, so the canvas visibility rule every
+        // canvas list uses applies here too: yours, shared with you or a channel you
+        // are in, or public.
+        applyCanvasVisibilityQueryFilter(
+          zql.canvases
+            .where('folderId', folderId)
+            .whereExists('folder', folder => folder.where('channelId', channelId)),
+          ctx.userID,
+        ),
+      ),
+  ),
+  /**
+   * One level of a track's folder tree: the things directly inside `parentId`, each
+   * with its item.
    *
    * Containment is an edge, so this is the same query at every depth — only the
    * parent changes, from the TRACK at the root to a FOLDER below it. Covered by
    * the (sourceType, sourceId, relationType) index.
    *
-   * The entities themselves are fetched separately by id: sourceId and targetId
-   * are polymorphic, so no relation covers them. The targetType filter keeps the
-   * tree to things it can render — TRACK -> TICKET edges share this relationType
-   * and are not part of the folder tree.
+   * The targetType filter keeps the tree to things it can render — TRACK -> TICKET
+   * edges share this relationType and are not part of the folder tree.
    */
   getSdlcFolderChildren: defineQuery(
     z.object({
@@ -5215,28 +5583,64 @@ dmChannelsLatestMessagesPaginated: defineQuery(
       parentType: z.enum(['TRACK', 'FOLDER']),
       parentId: z.string(),
     }),
-    ({ args: { channelId, parentType, parentId } }) =>
-      zql.sdlc_entity_links
-        .where('channelId', channelId)
-        .where('relationType', SDLC_CONTAINMENT_RELATION)
-        .where('sourceType', parentType)
-        .where('sourceId', parentId)
-        .where(helpers => helpers.cmp('targetType', 'IN', [...SDLC_TREE_TARGET_TYPES]))
+    ({ ctx, args: { channelId, parentType, parentId } }) =>
+      withSdlcTargetItems(
+        zql.sdlc_entity_links
+          .where('channelId', channelId)
+          .where('relationType', SDLC_CONTAINMENT_RELATION)
+          .where('sourceType', parentType)
+          .where('sourceId', parentId)
+          .where(helpers => helpers.cmp('targetType', 'IN', [...SDLC_TREE_TARGET_TYPES])),
+        channelId,
+        ctx.userID,
+      )
+        // The track each item is on. Moving or filing into a row checks it, and the
+        // client runs those checks against what it holds.
+        .related('sameTargetLinks', track =>
+          track.where('channelId', channelId).where('relationType', SDLC_TRACK_FLAT_RELATION),
+        )
         .orderBy('createdAt', 'asc'),
   ),
-  /** A hub's tracks. Tracks carry no scope column; the CHANNEL -> TRACK edge places them. */
   /**
-   * Every folder in a hub, in one subscription. Folders carry no scope column,
-   * so the flat TRACK -> FOLDER edge places them — the same shape getSdlcTracks
-   * uses. One query for the hub beats one per open finder column, and it is what
-   * lets a conversation say which folder it belongs to without a second fetch.
+   * Items a page names by id — the folder it is open on, its open tabs, the item its
+   * panel is about — each through the links that place it, in a folder and on its
+   * track, with the item and the folders above it. An artifact can be on a track
+   * without being in a folder.
+   * The ids come from the address and the page's own tabs, never from another query.
    */
-  getSdlcFoldersByChannel: defineQuery(
-    z.object({ channelId: z.string() }),
-    ({ args: { channelId } }) =>
-      zql.sdlc_folders.whereExists('sdlcEntityLinks', link =>
-        link.where('channelId', channelId).where('relationType', SDLC_TRACK_FLAT_RELATION),
-      ),
+  getSdlcTrackItems: defineQuery(
+    z.object({
+      channelId: z.string(),
+      items: z
+        .array(z.object({ type: z.enum(SDLC_TREE_TARGET_TYPES), id: z.string() }))
+        .max(100),
+    }),
+    ({ ctx, args: { channelId, items } }) =>
+      withSdlcTargetItems(
+        zql.sdlc_entity_links
+          .where('channelId', channelId)
+          .where(({ cmp }) =>
+            cmp('relationType', 'IN', [SDLC_CONTAINMENT_RELATION, SDLC_TRACK_FLAT_RELATION]),
+          )
+          .where(({ or, and, cmp }) =>
+            items.length > 0
+              ? or(...items.map(item => and(cmp('targetType', item.type), cmp('targetId', item.id))))
+              : cmp('targetId', '__no_sdlc_item__'),
+          ),
+        channelId,
+        ctx.userID,
+      )
+        // The folders above it, named, each with the edge filing it, so the page can
+        // put them in order: its breadcrumbs, and the branches to open down to it.
+        .related('sameTargetLinks', above =>
+          above
+            .where('channelId', channelId)
+            .where('relationType', SDLC_FOLDER_FLAT_RELATION)
+            .related('sourceFolder')
+            .related('sourceItemLinks', filing =>
+              filing.where('channelId', channelId).where('relationType', SDLC_CONTAINMENT_RELATION),
+            ),
+        ),
   ),
   /** Every comment left on one hub entity, oldest first.
    *  Scoped the way SdlcItemCommentsACL scopes writes: the commented entity
@@ -5257,34 +5661,7 @@ dmChannelsLatestMessagesPaginated: defineQuery(
         )
         .orderBy('createdAt', 'asc'),
   ),
-  getSdlcHubLinks: defineQuery(
-    z.object({ channelId: z.string() }),
-    // Same visibility rule channelLinks applies: LinksACL checks workspace and
-    // channel membership but deliberately not visibility, so a query that asks
-    // for every link in the hub would sync other members' PERSONAL ones.
-    ({ ctx, args: { channelId } }) =>
-      zql.links.where("channelId", channelId).where(({ or, cmp, and, exists }) =>
-        or(
-          cmp("visibility", "=", LinkVisibility.DEFAULT),
-          and(
-            cmp("visibility", "=", LinkVisibility.PERSONAL),
-            cmp("createdBy", "=", ctx.userID)
-          ),
-          and(
-            cmp("visibility", "=", LinkVisibility.PERSONAL),
-            exists("sharedWith", (sw) => sw.where("userId", "=", ctx.userID))
-          )
-        )
-      ),
-  ),
-  getSdlcHubFiles: defineQuery(
-    z.object({ channelId: z.string() }),
-    ({ args: { channelId } }) =>
-      zql.message_attachments
-        .where("entityType", AttachmentEntityType.SDLC_HUB)
-        .where("entityId", channelId)
-        .where("isDeleted", false),
-  ),
+  /** A hub's tracks. Tracks carry no scope column; the CHANNEL -> TRACK edge places them. */
   getSdlcTracks: defineQuery(z.object({ channelId: z.string() }), ({ args: { channelId } }) =>
     zql.sdlc_tracks
       .whereExists('sdlcEntityLinks', link =>
@@ -5300,51 +5677,6 @@ dmChannelsLatestMessagesPaginated: defineQuery(
       .where('projectId', 'IS NOT', null)
       .related('project')
       .one(),
-  ),
-  /**
-     * The content graph for a hub. Structural edges (repository and track membership)
-     * share this table — grep SDLC_STRUCTURAL_RELATIONS for every exclusion.
-     */
-  getSdlcLinks: defineQuery(z.object({ channelId: z.string() }), ({ args: { channelId } }) =>
-    zql.sdlc_entity_links
-      .where('channelId', channelId)
-      .where(helpers =>
-        helpers.cmp('relationType', 'NOT IN', [...SDLC_HUB_GRAPH_EXCLUDED_RELATIONS]),
-      )
-      .where(helpers =>
-        helpers.or(
-          helpers.cmp('relationType', '!=', SDLC_TRACK_FLAT_RELATION),
-          helpers.cmp('targetType', '!=', 'FOLDER'),
-        ),
-      )
-      .orderBy('createdAt', 'asc'),
-  ),
-  sdlcTicketsByIds: defineQuery(
-    z.object({ ticketIds: z.array(z.string()) }),
-    ({ args: { ticketIds } }) =>
-      zql.tickets
-        .where(helpers =>
-          helpers.cmp(
-            'id',
-            'IN',
-            ticketIds.length > 0 ? ticketIds : ['__no_sdlc_ticket__'],
-          ),
-        )
-        .related('pullRequests', pullRequest => pullRequest.orderBy('updatedAt', 'desc')),
-  ),
-  sdlcTicketsByChannel: defineQuery(
-    z.object({ channelId: z.string() }),
-    ({ args: { channelId } }) =>
-      zql.tickets
-        .where('channelId', channelId)
-        .where('isArchived', false)
-        .where('rootId', 'IS', null)
-        .where(helpers =>
-          helpers.or(
-            helpers.cmp('ticketType', 'IS', null),
-            helpers.cmp('ticketType', '!=', BaseTicketType.Support),
-          ),
-        ),
   ),
   sdlcDiscussionConversations: defineQuery(
     z.object({
@@ -5407,6 +5739,8 @@ dmChannelsLatestMessagesPaginated: defineQuery(
         .related('participants', participantQuery =>
           participantQuery.where('userId', ctx.userID).orderBy('joinedAt', 'asc'),
         )
+        // The item it is filed on, which a deep link needs to open the right panel.
+        .related('sdlcEntityLinks', link => sdlcDiscussionOwnerLink(link, channelId, ctx.userID))
         .one(),
   ),
   sdlcUserActivities: defineQuery(
@@ -5765,6 +6099,31 @@ dmChannelsLatestMessagesPaginated: defineQuery(
         // Release history grows forever; the Releases tab only shows recent
         // releases, so cap the per-client materialized view.
         .limit(100);
+    },
+  ),
+
+  // Newest release tickets across the SDLC hub's main release boards. The list
+  // pages by raising `limit` so every loaded row stays live.
+  releaseTicketsByBoardIds: defineQuery(
+    z.object({ boardIds: z.array(z.string()), limit: z.number().int().positive().max(1000) }),
+    ({ args: { boardIds, limit } }) => {
+      return zql.tickets
+        .where('ticketType', BaseTicketType.Release)
+        .where('boardId', 'IN', boardIds)
+        .where('isArchived', false)
+        .related('ticketDescription')
+        .orderBy('createdAt', 'desc')
+        .orderBy('id', 'desc')
+        .limit(limit);
+    },
+  ),
+
+  // Dev-ticket links of one release, without the ticket joins (ids only; the
+  // SDLC release page loads the tickets themselves through ticketsByIds).
+  releaseDevTicketLinksByReleaseId: defineQuery(
+    z.object({ releaseId: z.string().min(1) }),
+    ({ args: { releaseId } }) => {
+      return zql.application_release_tickets.where('releaseId', releaseId);
     },
   ),
 
