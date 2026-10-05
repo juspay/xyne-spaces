@@ -312,6 +312,7 @@ const SearchResults = (): ReactElement => {
     searchResults: backendResults,
     isGrouped,
     isSearching: isLoading,
+    isLoadingMore,
     isSearchPending,
     searchError: error,
     text: searchedText,
@@ -352,8 +353,21 @@ const SearchResults = (): ReactElement => {
   // stale URL param. Falls back to `query` on first paint before the sync effect runs.
   const displayQuery = searchedText.trim() || query;
 
-  // Sync hook text whenever the URL query param changes; also close sidebar on new search
+  // Latest live text, read by the re-seed effect below without making it re-run per keystroke.
+  const searchedTextRef = useRef(searchedText);
+  searchedTextRef.current = searchedText;
+
+  // Sync hook text whenever the URL query param changes; also close sidebar on new search.
+  //
+  // Skipped when the URL is only catching up to what was already typed: every completed
+  // live search commits its query through `onSearchComplete`, so this effect used to fire
+  // on that echo too. Re-seeding then pushed the older committed query back into the live
+  // search (reverting text the user had already typed past, and re-running the previous
+  // search) and tore down the open preview panel and compare selection mid-typing — which
+  // is what read as the results area flickering between two queries. Mirrors the same
+  // guard SearchQueryInput uses for its own value.
   useEffect(() => {
+    if (query === searchedTextRef.current.trim()) return;
     setText(query);
     setSelectedPanel(null);
     setSelected([]);
@@ -968,10 +982,11 @@ const SearchResults = (): ReactElement => {
         className={cn(
           // pb-16 so the last card clears the bottom of the viewport instead of sitting
           // flush against it (and above the floating compare bar when it's up).
-          'flex-1 min-h-0 overflow-y-auto px-4 pb-16',
           // A re-search keeps the previous results on screen rather than blanking to a
-          // spinner — they fade back while the new ones land, and the box spins.
-          isLoading && results.length > 0 && 'opacity-50 transition-opacity duration-150',
+          // spinner, and now keeps them at full opacity too: results refresh on every
+          // keystroke, so dimming the pane per search flashed the whole list on and off
+          // while typing. The spinner in the search box is the loading signal.
+          'flex-1 min-h-0 overflow-y-auto px-4 pb-16',
         )}
       >
         <TicketSearchHighlightContext.Provider value={ticketHighlightMap}>
@@ -981,6 +996,7 @@ const SearchResults = (): ReactElement => {
             hasActiveFilters={filtersActive}
             isSearchPending={isSearchPending}
             isLoading={isLoading}
+            isLoadingMore={isLoadingMore}
             error={error}
             results={results}
             loadMoreRef={loadMoreRef}
@@ -1085,6 +1101,8 @@ interface ResultsBodyProps {
   hasActiveFilters: boolean;
   isSearchPending: boolean;
   isLoading: boolean;
+  /** True only while a further page is being appended — drives the bottom spinner. */
+  isLoadingMore: boolean;
   error: string | null;
   results: DisplaySearchResult[];
   loadMoreRef: React.RefObject<HTMLDivElement | null>;
@@ -1230,6 +1248,7 @@ function ResultsBody({
   hasActiveFilters,
   isSearchPending,
   isLoading,
+  isLoadingMore,
   error,
   results,
   loadMoreRef,
@@ -1527,7 +1546,10 @@ function ResultsBody({
     <>
       {/* Sentinel for load-more */}
       <div ref={loadMoreRef} className='h-1' />
-      {isLoading && (
+      {/* Pagination only. Keyed off isLoading it also appeared for every keystroke's
+          re-search, growing and collapsing the list by a row each time — a jump the
+          user reads as flicker while the results themselves stay put. */}
+      {isLoadingMore && (
         <div className='flex justify-center py-4'>
           <Loader2 className='animate-spin text-muted-foreground' size={20} />
         </div>
