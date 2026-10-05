@@ -326,8 +326,11 @@ function report() {
   console.log(`\n${verdict}`);
 
   if (process.env.GITHUB_STEP_SUMMARY) {
+    // Markdown table cell: escape backslashes before pipes, and keep each row on one line.
+    const cell = (text) =>
+      text.replace(/\\/g, '\\\\').replace(/\|/g, '\\|').replace(/\r?\n/g, ' ');
     const rows = results
-      .map((r) => `| ${ICON[r.status]} | ${r.name} | ${r.detail.replace(/\|/g, '\\|')} | ${r.ms || ''} |`)
+      .map((r) => `| ${ICON[r.status]} | ${r.name} | ${cell(r.detail)} | ${r.ms || ''} |`)
       .join('\n');
     appendFileSync(
       process.env.GITHUB_STEP_SUMMARY,
