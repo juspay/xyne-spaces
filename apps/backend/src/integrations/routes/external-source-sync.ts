@@ -13,6 +13,8 @@ import { MAILBOX_SOURCE_TYPES } from '@/database/repositories/externalSourceRepo
 import { authenticate } from '../core/authenticate';
 import { adapterResolver } from '../middleware/adapterResolver';
 import { adapterRegistry } from '../core/adapterRegistry';
+import { ExternalSourcePlatform } from '../core/types';
+import { facebookPageIdsInPayload } from '../adapters/social-media/facebook/flow';
 import { logger } from '../../utils/logger';
 import { RawBodyRequest } from '@/types/express';
 import { webhookLimiter } from '@/middleware/rateLimiters';
@@ -175,7 +177,7 @@ router.get(
  *
  * Unified webhook ingestion endpoint for all external sources.
  * HMAC-SHA256 signature verification for Instagram is handled inside
- * InstagramAuthenticator.authenticate() — no duplicate route middleware needed.
+ * MetaWebhookAuthenticator.authenticate() — no duplicate route middleware needed.
  * Meta's configured webhook URL (/instagram/ingest) routes here with sourceName='instagram'.
  */
 router.post(
@@ -215,6 +217,19 @@ router.post(
         throw new Error(`External source ingest: no resolvable workspaceId for source ${source?.id ?? sourceName}`);
       }
       const results = await ingestExternalSource(ingestWorkspaceId, adapter, sourceName, req.body, source);
+
+      // Meta can batch events for several Pages into one POST, but authenticate resolved only one
+      // connected Page. The signature covers the whole body, so ingest the rest against their own sources;
+      // FacebookFlow keeps each source to its own entries.
+      if (source?.sourceType === ExternalSourcePlatform.FACEBOOK) {
+        const repo = new ExternalSourceRepository();
+        for (const pageId of facebookPageIdsInPayload(req.body)) {
+          if (pageId === source.externalIdentifier) continue;
+          const other = await repo.findByName(`facebook-${pageId}`);
+          if (!other?.isActive) continue;
+          results.push(...(await ingestExternalSource(other.workspaceId, adapter, other.name, req.body, other)));
+        }
+      }
 
       const duration = Date.now() - startTime;
       logger.info(`Data processed in ${duration}ms`, {

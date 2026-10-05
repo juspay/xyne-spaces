@@ -1,34 +1,26 @@
 import express, { type Request, type Response } from 'express';
 import { Prisma } from '@prisma/client';
 import { ChannelType } from '@xyne/shared';
-import { z } from 'zod';
 import { authV2Middleware } from '@/middleware/authV2Middleware';
 import { db } from '@/database/client';
-import { getInstagramOauthCallbackTx, addInstagramSourceToChannelTx } from '@/bypassAcl/transactions/instagram';
+import { createMetaDeskTx, addMetaSourcesToChannelTx } from '@/bypassAcl/transactions/metaDesk';
 import { decrypt, encrypt } from '@/services/encryptionService';
 import { getBackendUrl, getFrontendUrl } from '@/utils/publicUrls';
 import { logger } from '@/utils/logger';
 import { config } from '@/config/env';
 import { buildSupportPath, postOAuthRedirect } from '../urlHelpers';
 import { ExternalSourcePlatform } from '../../core/types';
+import { META_MESSAGING_PLATFORMS } from '../../social-media/constants';
 import { metaGraphClient } from '../../adapters/social-media/instagram/metaGraphClient';
 import { instagramOAuthStateService } from '../../adapters/social-media/instagram/oauthStateService';
 import type { InstagramCredentials } from '../../adapters/social-media/instagram/types';
 import { authorizeSocialMediaManager, canAccessSocialMediaChannel } from './access';
+import { oauthDeskStartSchema, validateOAuthDeskSetup } from './deskSetup';
 
 const TAG = '[InstagramRoutes]';
 const router = express.Router();
 
 const IG_AUTH_BASE = 'https://www.instagram.com';
-
-const startSchema = z.object({
-  name: z.string().trim().min(1).max(120),
-  projectId: z.string().min(1),
-  boardId: z.string().min(1).optional(),
-  assigneeUserGroupId: z.preprocess(v => (typeof v === 'string' ? v.trim() || undefined : undefined), z.string().min(1).optional()),
-  visibility: z.enum(['PUBLIC', 'PRIVATE', 'public', 'private']).default('PUBLIC'),
-  platform: z.enum(['web', 'electron']).default('web'),
-});
 
 function callbackUri(req: Request): string {
   return config.META_IG_REDIRECT_URI || `${getBackendUrl(req)}/api/integrations/social-media/instagram/oauth/callback`;
@@ -60,7 +52,7 @@ router.post(
   authV2Middleware.authenticate,
   async (req: Request, res: Response): Promise<void> => {
     try {
-      const parsed = startSchema.safeParse(req.body);
+      const parsed = oauthDeskStartSchema.safeParse(req.body);
       if (!parsed.success) {
         logger.warn(`${TAG} Validation failed`, { issues: parsed.error.issues, body: req.body });
         res.status(400).json({ error: 'Valid channel name and project are required' });
@@ -71,45 +63,7 @@ router.post(
       const workspaceId = req.user!.workspaceId!;
       const input = parsed.data;
 
-      const [project, board, group, duplicateChannel] = await Promise.all([
-        db.project.findFirst({
-          where: { id: input.projectId, workspaceId },
-          select: { id: true },
-        }),
-        input.boardId
-          ? db.board.findFirst({
-              where: { id: input.boardId, projectId: input.projectId, workspaceId },
-              select: { id: true },
-            })
-          : null,
-        input.assigneeUserGroupId
-          ? db.userGroup.findFirst({
-              where: { id: input.assigneeUserGroupId, workspaceId, isActive: true },
-              select: { id: true },
-            })
-          : null,
-        db.channel.findFirst({
-          where: { workspaceId, name: input.name },
-          select: { id: true },
-        }),
-      ]);
-
-      if (!project) {
-        res.status(404).json({ error: 'Project not found' });
-        return;
-      }
-      if (input.boardId && !board) {
-        res.status(404).json({ error: 'Board not found' });
-        return;
-      }
-      if (input.assigneeUserGroupId && !group) {
-        res.status(404).json({ error: 'Assignee group not found' });
-        return;
-      }
-      if (duplicateChannel) {
-        res.status(409).json({ error: 'A channel with this display name already exists' });
-        return;
-      }
+      if (!(await validateOAuthDeskSetup(input, workspaceId, res))) return;
 
       const { state, codeChallenge } = await instagramOAuthStateService.create({
         userId,
@@ -355,6 +309,12 @@ router.get(
       };
       const encryptedCredentials = encrypt(JSON.stringify(credentials));
       const sourceName = `instagram-${igUserId}`;
+      const metaSource = {
+        name: sourceName,
+        displayName: igUsername,
+        externalIdentifier: igUserId,
+        encryptedCredentials,
+      };
 
       // Revalidate that the user who initiated OAuth still belongs to the workspace.
       // The state was consumed from Redis (10-min TTL) — in that window the user
@@ -470,15 +430,13 @@ router.get(
           });
           return;
         }
-        await addInstagramSourceToChannelTx(
+        await addMetaSourcesToChannelTx(
           state.channelId,
           state.workspaceId,
           state.userId,
           state.boardId,
-          sourceName,
-          igUsername,
-          igUserId,
-          encryptedCredentials,
+          ExternalSourcePlatform.INSTAGRAM,
+          [metaSource],
         );
         redirectToDesk(req, res, {
           workspaceId: state.workspaceId,
@@ -507,7 +465,7 @@ router.get(
         return;
       }
 
-      const result = await getInstagramOauthCallbackTx(state, sourceName, igUsername, igUserId, encryptedCredentials, new Date());
+      const result = await createMetaDeskTx(state, ExternalSourcePlatform.INSTAGRAM, [metaSource], new Date());
 
       redirectToDesk(req, res, {
         workspaceId: state.workspaceId,
@@ -795,7 +753,7 @@ router.post(
 );
 
 // GET /:channelId/customer-history?conversationId=xxx
-// Returns previous tickets from the same Instagram customer (identified by IGSID) in this channel.
+// Returns previous tickets from the same Instagram/Facebook customer (identified by IGSID/PSID) in this channel.
 router.get(
   '/:channelId/customer-history',
   authV2Middleware.authenticate,
@@ -815,11 +773,12 @@ router.get(
         return;
       }
 
-      const source = await db.externalSource.findFirst({
-        where: { channelId, workspaceId, sourceType: ExternalSourcePlatform.INSTAGRAM, isActive: true },
+      // A desk can hold several accounts; the conversation's own message picks the right one.
+      const sources = await db.externalSource.findMany({
+        where: { channelId, workspaceId, sourceType: { in: [...META_MESSAGING_PLATFORMS] }, isActive: true },
         select: { id: true },
       });
-      if (!source) {
+      if (sources.length === 0) {
         res.json({ igsid: null, tickets: [] });
         return;
       }
@@ -830,12 +789,12 @@ router.get(
       const extMsg = emailIds.length > 0
         ? await db.externalMessage.findFirst({
             where: {
-              externalSourceId: source.id,
+              externalSourceId: { in: sources.map(s => s.id) },
               entityType: 'EMAIL',
               direction: 'INCOMING',
               entityId: { in: emailIds },
             },
-            select: { externalThreadId: true },
+            select: { externalThreadId: true, externalSourceId: true },
           })
         : null;
 
@@ -846,7 +805,7 @@ router.get(
 
       const relatedExtMsgs = await db.externalMessage.findMany({
         where: {
-          externalSourceId: source.id,
+          externalSourceId: extMsg.externalSourceId,
           externalThreadId: { startsWith: `${igsid}:` },
           direction: 'INCOMING',
           entityType: 'EMAIL',

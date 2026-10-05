@@ -11,6 +11,8 @@ import {
   type IngestionOptions,
 } from './types';
 import { SourceNotFoundError } from './errors';
+import { isMetaMessagingPlatform } from '../social-media/constants';
+import { appendFailedAttachmentLinks } from '../adapters/social-media/shared/metaDmAttachments';
 import { ExternalSourceRepository } from '../../database/repositories/externalSourceRepository';
 import { ExternalMessageRepository } from '../../database/repositories/externalMessageRepository';
 import { ConversationRepository } from '../../database/repositories/conversationRepository';
@@ -283,6 +285,14 @@ export class ExternalSourceCore {
       }
     }
 
+    if (isMetaMessagingPlatform(source.sourceType) && normalizedData.attachments?.length) {
+      normalizedData.content = appendFailedAttachmentLinks(
+        normalizedData.content,
+        normalizedData.attachments,
+        downloadedAttachments.map((attachment) => attachment.metadata?.externalUrl),
+      );
+    }
+
     // 3. Check for duplicate (deduplication)
     const existingExtMsg = await this.externalMessageRepo.findByExternalId(
       source.id,
@@ -388,9 +398,9 @@ export class ExternalSourceCore {
           ? MessageDirection.OUTGOING
           : MessageDirection.INCOMING,
         entityType: isDeskChannel ? ExternalEntityType.EMAIL : ExternalEntityType.MESSAGE,
-        // Override createdAt with the real event time for Instagram only (24h window check).
+        // Override createdAt with the real event time for Instagram/Facebook only (24h window check).
         // Other adapters keep @default(now()) to avoid reordering historical imports.
-        ...(source.sourceType === ExternalSourcePlatform.INSTAGRAM && { createdAt: normalizedData.metadata.timestamp }),
+        ...(isMetaMessagingPlatform(source.sourceType) && { createdAt: normalizedData.metadata.timestamp }),
       });
     }
 
