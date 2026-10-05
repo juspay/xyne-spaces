@@ -662,6 +662,37 @@ export async function getSpacesUsersByHandle(handle: string, workspaceId?: strin
   }
 }
 
+/**
+ * Resolve a KNOWN user id — the `<@userId>` Slack-style token some agents
+ * emit — to the active human user with that exact id. The id is the table's
+ * primary key, so unlike name/email/handle lookups there is no cross-workspace
+ * duplication and no workspace scoping is needed. The HUMAN + ACTIVE filter
+ * means a guessed id, a bot/app row, or a departed user's id can never be
+ * turned into a mention (an unresolved token stays raw text — no false pings).
+ * LIMIT 2 is defensive; the resolver treats ≥2 as ambiguous.
+ *
+ * Requires `GRANT SELECT ON public.users TO claw_readonly` (already granted).
+ *
+ * Distinct from `getSpacesUserById` above (the JIT-profile fetch): that one
+ * matches ANY row for user provisioning; this one resolves a MENTION — active
+ * humans only, array shape, ≥2 ⇒ ambiguous.
+ */
+export async function getSpacesActiveUserById(id: string): Promise<UserHit[]> {
+  const client = getClient();
+  if (!client) return [];
+  const trimmed = id.trim();
+  if (!trimmed) return [];
+  try {
+    return await client.$queryRawUnsafe<UserHit[]>(
+      `SELECT id, name FROM public.users WHERE ${HUMAN} AND id = $1 LIMIT 2`,
+      trimmed,
+    );
+  } catch (err) {
+    log.warn(`[spaces-db] user-by-id id=${trimmed} err=${errMsg(err)}`);
+    return [];
+  }
+}
+
 /** Graceful shutdown — called from main.ts shutdown handler. */
 export async function disconnectSpacesDb(): Promise<void> {
   if (_client) {
