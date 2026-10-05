@@ -47,6 +47,11 @@ interface CreateBarItemsStoreOptions {
    * is responsible for clearing whatever it read.
    */
   migrate?: () => string[] | null;
+  /**
+   * Stored ids that now mean a different id — e.g. rail items folded into
+   * another. Renamed on read (and deduped), so an old pin becomes the new one.
+   */
+  aliases?: Readonly<Record<string, string>>;
 }
 
 const isStringArray = (value: unknown): value is string[] =>
@@ -66,6 +71,7 @@ export const createBarItemsStore = ({
   defaults,
   locked = [],
   migrate,
+  aliases = {},
 }: CreateBarItemsStoreOptions): BarItemsStore => {
   const listeners = new Set<() => void>();
   const normalizedDefaults = withLocked(defaults, locked);
@@ -110,7 +116,12 @@ export const createBarItemsStore = ({
     if (raw) {
       try {
         const parsed: unknown = JSON.parse(raw);
-        if (isStringArray(parsed)) ids = withLocked(parsed, locked);
+        if (isStringArray(parsed)) {
+          ids = withLocked(
+            parsed.map(id => aliases[id] ?? id),
+            locked,
+          );
+        }
       } catch {
         ids = normalizedDefaults;
       }

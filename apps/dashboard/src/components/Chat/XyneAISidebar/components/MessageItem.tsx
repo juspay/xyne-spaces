@@ -723,6 +723,8 @@ interface MessageItemProps {
   onEditSubmit?: ((newContent: string, context?: EditedMessageContext) => void) | undefined;
   onEditMobile?: (() => void) | undefined;
   isLatestBotMessage?: boolean | undefined;
+  /** Hides feedback and regenerate, for messages the Ask AI server does not know about. */
+  readOnly?: boolean | undefined;
   branchInfo?: { index: number; total: number } | undefined;
   onBranchNavigate?: ((direction: 'prev' | 'next') => void) | undefined;
   onDebug?: (() => void) | undefined;
@@ -1163,6 +1165,7 @@ export const MessageItem = React.memo(
     onEditSubmit,
     onEditMobile,
     isLatestBotMessage,
+    readOnly = false,
     branchInfo,
     onBranchNavigate,
     onDebug,
@@ -1608,7 +1611,7 @@ export const MessageItem = React.memo(
             (() => {
               const stamp = formatMessageTime(message.timestamp);
               const complete = !message.isStreaming;
-              const showActions = complete && !message.isAborted;
+              const showActions = complete && !message.isAborted && !readOnly;
               return (
                 <div className='mt-3 flex items-center justify-between gap-2'>
                   <div className='flex items-center gap-2 text-muted-foreground'>

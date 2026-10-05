@@ -181,7 +181,6 @@ const getActiveRoute = (pathname: string): string => {
   if (pathname.startsWith('/chat/sent')) return '/chat/sent';
   if (pathname.startsWith('/chat/scheduled')) return '/chat/scheduled';
   if (pathname.startsWith('/migration/confluence')) return '/migration/confluence';
-  if (pathname.startsWith('/migration/whatsapp')) return '/migration/whatsapp';
   // One rail entry per app, so the active route has to carry the app id.
   if (pathname.startsWith('/app/')) return `/app/${pathname.split('/')[2] ?? ''}`;
   return '/' + (pathname.split('/')[1] || '');
