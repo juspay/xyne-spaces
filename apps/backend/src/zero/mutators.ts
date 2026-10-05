@@ -192,7 +192,7 @@ import { evaluateAssignmentRule, AssignmentType } from '@/utils/assignmentEngine
 import { syncUserWorkload } from '@/utils/workloadUtils';
 import { ticketAssignmentService, primaryUserIdOf } from '@/services/ticketAssignmentService';
 import { calculateETADeadline, calculateWorkingDurationMs } from '@/utils/etaCalculation';
-import { groupRoleMappingId } from '@/utils/roleFrameworkUtils';
+import { groupRoleMappingId, DEFAULT_ROLE_NAME_TO_ENUM } from '@/utils/roleFrameworkUtils';
 import { grantPermissionsForRole, syncResourceAdminAccess, syncOrgResourceAdminAccess } from '@/services/permissionMatrix';
 import {
   deleteDraftEntityAttachments,
@@ -278,6 +278,32 @@ async function updateCallParticipantPreview(
     participantCount: participants.length,
     participantPreviewUserIds,
   });
+}
+
+// Legacy responsibilities (MANAGER/TEAM_LEAD/QA/...) a user effectively holds in a group,
+// derived from their user_role_mappings USER_GROUP roles mapped to the 5-enum by role name.
+// The new multi-role UI no longer stamps user_group_mappings.responsibility, so the legacy
+// isAllowedToTransfer ticket-control gate must union these in (see etaPermissions.ts).
+async function getUserGroupResponsibilitiesFromTx(
+  tx: Transaction<Schema>,
+  userId: string,
+  userGroupId: string,
+): Promise<string[]> {
+  const roleRows = await tx.run(
+    zql.user_role_mappings
+      .where('userId', userId)
+      .where('entityType', UserRoleMappingEntityType.USER_GROUP)
+      .where('entityId', userGroupId),
+  );
+  const roleIds = roleRows.map(r => r.roleId);
+  if (roleIds.length === 0) return [];
+  const roles = await tx.run(zql.roles.where('id', 'IN', roleIds));
+  const responsibilities: string[] = [];
+  for (const role of roles) {
+    const responsibility = DEFAULT_ROLE_NAME_TO_ENUM[role.name];
+    if (responsibility) responsibilities.push(responsibility);
+  }
+  return responsibilities;
 }
 
 const storageService = getStorageService();
@@ -6210,6 +6236,8 @@ export function createMutators(
                   );
                   return roleRows.map(r => r.roleId);
                 },
+                getUserGroupResponsibilities: async (userId, userGroupId) =>
+                  getUserGroupResponsibilitiesFromTx(tx, userId, userGroupId),
               },
             );
             if (!permission.allowed) {
@@ -7155,6 +7183,8 @@ export function createMutators(
                 );
                 return roleRows.map(r => r.roleId);
               },
+              getUserGroupResponsibilities: async (userId, userGroupId) =>
+                getUserGroupResponsibilitiesFromTx(tx, userId, userGroupId),
             },
           );
           if (!permission.allowed) {
@@ -7400,6 +7430,8 @@ export function createMutators(
                   );
                   return roleRows.map(r => r.roleId);
                 },
+                getUserGroupResponsibilities: async (userId, userGroupId) =>
+                  getUserGroupResponsibilitiesFromTx(tx, userId, userGroupId),
               },
             );
             if (!permission.allowed) {
@@ -18551,6 +18583,8 @@ export function createMutators(
                   );
                   return roleRows.map(r => r.roleId);
                 },
+                getUserGroupResponsibilities: async (userId, userGroupId) =>
+                  getUserGroupResponsibilitiesFromTx(tx, userId, userGroupId),
               },
             );
             if (!permission.allowed) {

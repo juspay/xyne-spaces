@@ -30,6 +30,7 @@ export interface EtaPermissionDataSource {
    * callers that provide it get the multi-role union honored.
    */
   getUserGroupRoleIds?(userId: string, userGroupId: string): Promise<string[]>;
+  getUserGroupResponsibilities?(userId: string, userGroupId: string): Promise<string[]>;
 }
 
 export interface EtaPermissionResult {
@@ -89,9 +90,22 @@ export async function canUserModifyTicketControl(
   }
 
   // Legacy enum fallback (only reachable when isAllowedToTransfer === true).
+  // Union the legacy user_group_mappings.responsibility with role-derived responsibilities:
+  // the new multi-role UI never sets `responsibility`, so a MANAGER/TEAM_LEAD assigned through
+  // it is only visible via user_role_mappings. Without this union such users would be denied.
+  const effectiveResponsibilities = new Set<string>();
+  if (mapping.responsibility) {
+    effectiveResponsibilities.add(mapping.responsibility);
+  }
+  if (dataSource.getUserGroupResponsibilities) {
+    const roleResponsibilities = await dataSource.getUserGroupResponsibilities(userId, userGroupId);
+    for (const responsibility of roleResponsibilities) {
+      effectiveResponsibilities.add(responsibility);
+    }
+  }
   if (
-    mapping.responsibility !== UserResponsibility.MANAGER &&
-    mapping.responsibility !== UserResponsibility.TEAM_LEAD
+    !effectiveResponsibilities.has(UserResponsibility.MANAGER) &&
+    !effectiveResponsibilities.has(UserResponsibility.TEAM_LEAD)
   ) {
     return {
       allowed: false,

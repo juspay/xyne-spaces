@@ -18,7 +18,7 @@ import { queries } from '../../../zero/queries';
 import { mutators } from '../../../zero/mutators';
 import { useActiveUsers } from '../../../hooks/useUsers';
 import type { Board, UserAssignmentState } from '@xyne/shared';
-import { AuditEntityType, RotationInterval } from '@xyne/shared';
+import { AuditEntityType, RotationInterval, UserRoleMappingEntityType } from '@xyne/shared';
 import type { User } from '../../../machines/stateMachine';
 import { useCachedQuery } from '../../../hooks/useCachedQuery';
 import { v4 as uuidv4 } from 'uuid';
@@ -107,6 +107,16 @@ export const AssignmentConfigScreen = ({
 
   const [userGroupMembers] = useCachedQuery(queries.getUserGroupMembers({ userGroupId }));
 
+  // Multi-role bindings (user_role_mappings USER_GROUP rows). Roles assigned through the new
+  // multi-role UI live here, not in the legacy user_group_mappings.roleId, so notify-role
+  // selection and bulk-apply must union both sources.
+  const [groupRoleMappings] = useCachedQuery(
+    queries.getRoleMappingsByEntity({
+      entityType: UserRoleMappingEntityType.USER_GROUP,
+      entityId: userGroupId,
+    }),
+  );
+
   const [allBoards] = useCachedQuery(queries.getAllBoardsList());
 
   const [userAssignmentStates] = useCachedQuery(queries.getUserAssignmentStates({ userGroupId }));
@@ -162,8 +172,39 @@ export const AssignmentConfigScreen = ({
         byId.set(role.id, role.name);
       }
     }
+    // Union roles assigned via the new multi-role UI (user_role_mappings USER_GROUP rows),
+    // otherwise such roles never appear as a notify-role option.
+    for (const mapping of groupRoleMappings ?? []) {
+      const role = (mapping as { role?: { id?: string; name?: string } | null }).role;
+      if (role?.id && role.name) {
+        byId.set(role.id, role.name);
+      }
+    }
     return Array.from(byId.entries()).map(([id, name]) => ({ id, name }));
-  }, [userGroupMembers]);
+  }, [userGroupMembers, groupRoleMappings]);
+
+  // Per-user set of roleIds, unioned across the legacy user_group_mappings.roleId and the
+  // user_role_mappings USER_GROUP rows. Used by bulk notify-by-role so members whose roles
+  // were assigned through the new multi-role UI are matched, not silently skipped.
+  const roleIdsByUserId = useMemo(() => {
+    const byUser = new Map<string, Set<string>>();
+    const add = (userId: string, roleId?: string | null): void => {
+      if (!userId || !roleId) return;
+      let set = byUser.get(userId);
+      if (!set) {
+        set = new Set<string>();
+        byUser.set(userId, set);
+      }
+      set.add(roleId);
+    };
+    for (const mapping of userGroupMembers ?? []) {
+      add(mapping.userId, (mapping as { roleId?: string | null }).roleId ?? null);
+    }
+    for (const mapping of groupRoleMappings ?? []) {
+      add(mapping.userId, mapping.roleId);
+    }
+    return byUser;
+  }, [userGroupMembers, groupRoleMappings]);
 
   // Effective mappings: use pending changes if available (for instant UI feedback before save)
   const effectiveUserGroupMembers = useMemo(() => {
@@ -421,9 +462,14 @@ export const AssignmentConfigScreen = ({
     if (selectedNotifyRoleIds.length === 0) return;
     const newNotified = new Map(localIsNotified);
     let enabledCount = 0;
+    const selectedRoleIdSet = new Set(selectedNotifyRoleIds);
     for (const mapping of userGroupMembers ?? []) {
-      const roleId = (mapping as { role?: { id?: string } | null }).role?.id;
-      if (roleId && selectedNotifyRoleIds.includes(roleId) && !newNotified.get(mapping.userId)) {
+      // Union both role sources: a member qualifies if any of their roles (legacy roleId or a
+      // new-UI user_role_mappings role) is in the selected set.
+      const memberRoleIds = roleIdsByUserId.get(mapping.userId);
+      const matches =
+        !!memberRoleIds && [...memberRoleIds].some(roleId => selectedRoleIdSet.has(roleId));
+      if (matches && !newNotified.get(mapping.userId)) {
         newNotified.set(mapping.userId, true);
         enabledCount++;
       }

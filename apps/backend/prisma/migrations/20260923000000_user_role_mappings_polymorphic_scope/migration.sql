@@ -5,11 +5,6 @@ ALTER TABLE "public"."user_role_mappings" ADD COLUMN "entityType" TEXT;
 ALTER TABLE "public"."user_role_mappings" ADD COLUMN "entityId" TEXT;
 
 
-UPDATE "public"."user_role_mappings"
-SET "entityType" = 'WORKSPACE', "entityId" = "workspaceId"
-WHERE "entityType" IS NULL;
-
-
 DROP INDEX IF EXISTS "public"."user_role_mappings_userId_roleId_key";
 CREATE UNIQUE INDEX "user_role_mappings_userId_roleId_entityId_key" ON "public"."user_role_mappings"("userId", "roleId", "entityId");
 
