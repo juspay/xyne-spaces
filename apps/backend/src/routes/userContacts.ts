@@ -339,16 +339,18 @@ router.get('/oauth/google/callback', async (req: Request, res: Response) => {
   let peekedState: ContactsOAuthState | null = null;
 
   try {
-    peekedState = stateParam ? await contactsOAuthStateService.peek(stateParam) : null;
+    // Always validate: peek on an empty/unknown state returns null, which the
+    // guard below rejects — the check must not depend on the query param.
+    peekedState = await contactsOAuthStateService.peek(stateParam);
     if (req.query.error) {
-      if (stateParam) await contactsOAuthStateService.delete(stateParam);
+      await contactsOAuthStateService.delete(stateParam);
       redirectWithError(req, res, peekedState, 'authorization_denied');
       return;
     }
 
     const code = typeof req.query.code === 'string' ? req.query.code : '';
-    if (!code || !stateParam || !peekedState) {
-      if (stateParam) await contactsOAuthStateService.delete(stateParam);
+    if (!code || !peekedState) {
+      await contactsOAuthStateService.delete(stateParam);
       redirectWithError(req, res, peekedState, 'missing_or_expired_state');
       return;
     }
@@ -409,16 +411,18 @@ router.get('/oauth/microsoft/callback', async (req: Request, res: Response) => {
   let peekedState: ContactsOAuthState | null = null;
 
   try {
-    peekedState = stateParam ? await contactsOAuthStateService.peek(stateParam) : null;
+    // Always validate: peek on an empty/unknown state returns null, which the
+    // guard below rejects — the check must not depend on the query param.
+    peekedState = await contactsOAuthStateService.peek(stateParam);
     if (req.query.error) {
-      if (stateParam) await contactsOAuthStateService.delete(stateParam);
+      await contactsOAuthStateService.delete(stateParam);
       redirectWithError(req, res, peekedState, 'authorization_denied');
       return;
     }
 
     const code = typeof req.query.code === 'string' ? req.query.code : '';
-    if (!code || !stateParam || !peekedState) {
-      if (stateParam) await contactsOAuthStateService.delete(stateParam);
+    if (!code || !peekedState) {
+      await contactsOAuthStateService.delete(stateParam);
       redirectWithError(req, res, peekedState, 'missing_or_expired_state');
       return;
     }
