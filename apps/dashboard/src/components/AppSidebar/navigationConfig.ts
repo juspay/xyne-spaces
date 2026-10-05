@@ -1,10 +1,8 @@
 import { createElement, type ComponentType, type ReactElement } from 'react';
 import {
   GraphTrendLine,
-  Settings01,
   Notebook,
   TicketToken,
-  UserThree,
   FolderDefault,
   Hashtag,
   PhoneDefault,
@@ -12,13 +10,9 @@ import {
   ChatDefault,
   Troubleshoot,
   ClipboardDefault,
-  Piechart01,
   FileText,
   CalendarTimer,
   Globe,
-  UserShield,
-  ShieldCheck,
-  Database,
   GridDashboard01,
   SwapArrowHorizontal,
   Grid02,
@@ -26,7 +20,6 @@ import {
   BuildingApartmentTwo,
   LightningThunderElectricOn,
   Atom,
-  ChatChatting,
   RocketShip,
   GitBranch,
   LayoutGridTwoVertical,
@@ -46,6 +39,7 @@ import { isElectronApp } from '../../utils/electronApp';
 import type { usePermissions } from '../../hooks/usePermissions';
 import { AccessType } from '@xyne/shared';
 import { XyneAISidebarIcon } from '../icons/xyne-ai';
+import { organisationsAccess } from '../../routes/OrganisationsModule/organisationsAccess';
 
 /** A themeable pika-icon component (accepts size, color, variant, strokeWidth, className). */
 export type PikaIcon = ComponentType<PikaIconProps>;
@@ -65,7 +59,8 @@ export type ChatNavKey =
   | 'bookmarks'
   | 'drafts-sent'
   | 'recap'
-  | 'radar';
+  | 'radar'
+  | 'scheduled-messages';
 
 /** A built-in Inbox entry, or an artifact app the user added (`app:<id>`). */
 export type InboxItemKey = ChatNavKey | `app:${string}`;
@@ -78,6 +73,8 @@ export interface ChatNavItem {
   trackName: string;
   replace?: boolean;
   requiresRadar?: boolean;
+  /** disabled_toolbar_paths entry that hides this item for a workspace. */
+  toolbarPath?: string;
 }
 
 export const CHAT_NAV_ITEMS: ChatNavItem[] = [
@@ -116,6 +113,14 @@ export const CHAT_NAV_ITEMS: ChatNavItem[] = [
     to: '/chat/drafts-sent',
     icon: SendPlaneSlant,
     trackName: 'OPEN_DRAFTS_AND_SENT',
+  },
+  {
+    key: 'scheduled-messages',
+    label: 'Scheduled Messages',
+    to: '/scheduled-messages',
+    icon: CalendarTimer,
+    trackName: 'OPEN_SCHEDULED_MESSAGES',
+    toolbarPath: '/scheduled-messages',
   },
   {
     key: 'recap',
@@ -188,33 +193,22 @@ export const NAVIGATION_ITEMS: NavigationItem[] = [
   { path: '/chat/canvas', label: 'My Canvas', icon: FileText, popout: true },
   { path: '/automations', label: 'Automations', icon: LightningThunderElectricOn, popout: true },
   { path: '/workflows', label: 'Workflows', icon: GitBranch, popout: true },
-  { path: '/scheduled-messages', label: 'Scheduled Messages', icon: CalendarTimer, popout: true },
-  { path: '/user-groups', label: 'User Groups', icon: UserThree, popout: true },
-  {
-    path: '/resource-access',
-    label: 'User Management',
-    icon: UserShield,
-    iconSize: 18,
-    popout: true,
-  },
-  { path: '/roles', label: 'Roles', icon: ShieldCheck, iconSize: 18, popout: true },
-  { path: '/workspace-management', label: 'Workspace Management', icon: Settings01, popout: true },
+  // Administration (the /organisations module) holds Workspace Management,
+  // Members (formerly User Management), User Groups, Roles and Organisations.
+  { path: '/organisations', label: 'Administration', icon: BuildingApartmentTwo, popout: true },
   { path: '/tag-review', label: 'Tag Review', icon: Tag, iconSize: 18, popout: true },
-  { path: '/organisations', label: 'Organisations', icon: BuildingApartmentTwo, popout: true },
   { path: '/analytics', label: 'Analytics', icon: GraphTrendLine, popout: true },
   { path: '/forms', label: 'Forms', icon: ClipboardDefault, popout: true },
   { path: '/browser', label: 'Browser', icon: Globe, popout: true },
   { path: '/apps', label: 'Apps', icon: Grid02, popout: true },
   { path: '/guide', label: 'User Guide', icon: QuestionMarkCircle, popout: true },
-  { path: '/product-insights', label: 'Insights', icon: Piechart01, popout: true },
   { path: '/knowledge-base', label: 'Knowledge Base', icon: Notebook, popout: true },
-  { path: '/memory', label: 'Context', icon: Database, popout: true },
   { path: '/dashboards', label: 'Dashboards', icon: GridDashboard01, popout: true },
   { path: '/listProjects', label: 'List Projects', icon: FolderDefault, popout: true },
   { path: '/releaseManager', label: 'Release Manager', icon: RocketShip, popout: true },
   {
-    path: '/jira-migration',
-    label: 'Jira Migration',
+    path: '/migrations',
+    label: 'Migrations',
     icon: SwapArrowHorizontal,
     iconSize: 18,
     popout: true,
@@ -226,21 +220,38 @@ export const NAVIGATION_ITEMS: NavigationItem[] = [
     iconSize: 18,
     popout: true,
   },
-  {
-    path: '/migration/whatsapp',
-    label: 'WhatsApp Migration',
-    icon: ChatChatting,
-    iconSize: 18,
-    popout: true,
-  },
-  {
-    path: '/slack-migration',
-    label: 'Slack Migration',
-    icon: SwapArrowHorizontal,
-    iconSize: 18,
-    popout: true,
-  },
   { path: '/team-intelligence', label: 'Team Intelligence', icon: Atom, popout: true },
+];
+
+// Rail items that were folded into a combined screen. A toolbar pin stored on
+// the old path pins the new one instead of silently disappearing.
+export const LEGACY_TOOLBAR_PATH_ALIASES: Readonly<Record<string, string>> = {
+  '/workspace-management': '/organisations',
+  '/resource-access': '/organisations',
+  '/user-groups': '/organisations',
+  '/roles': '/organisations',
+  '/jira-migration': '/migrations',
+  '/migration/whatsapp': '/migrations',
+  '/slack-migration': '/migrations',
+};
+
+// Old entries in a workspace's disabled_toolbar_paths, read as their new path.
+// Slack Migration could be disabled on its own (Jira/WhatsApp are permission-
+// gated instead), so it maps to its tab, not to the whole Migrations screen.
+export const LEGACY_DISABLED_TOOLBAR_PATH_ALIASES: Readonly<Record<string, string>> = {
+  '/slack-migration': '/migrations/slack',
+};
+
+// Rail items a workspace can't switch off as a whole, so the admin Toolbar tab
+// leaves them out. Migrations' tabs are gated individually (TICKET-MIGRATION
+// for Jira/WhatsApp, /migrations/slack for Slack).
+export const TOOLBAR_UNMANAGED_PATHS: ReadonlySet<string> = new Set(['/migrations']);
+
+// Toolbar-guarded screens that aren't rail items of their own but can still be
+// disabled per workspace, so the admin Toolbar tab keeps listing them.
+export const NON_RAIL_TOOLBAR_ITEMS: NavigationItem[] = [
+  { path: '/migrations/slack', label: 'Slack Migration', icon: SwapArrowHorizontal },
+  { path: '/scheduled-messages', label: 'Scheduled Messages', icon: CalendarTimer },
 ];
 
 // Paths shown in the toolbar by default (before any user customization).
@@ -269,13 +280,13 @@ export const TOOLBAR_ITEM_DESCRIPTIONS: Record<string, string> = {
   '/recordings': 'Call and meeting recordings',
   '/chat/canvas': 'Personal canvas documents',
   '/automations': 'Workflow automation triggers and actions',
-  '/scheduled-messages': 'Messages scheduled for later delivery',
   '/browser': 'In-app browser tabs (desktop app only)',
   '/apps': 'Installed app integrations',
   '/guide': 'Product documentation and onboarding guide',
   '/knowledge-base': 'File and folder knowledge base for Ask AI',
-  '/memory': 'Saved context and memory for AI',
   '/releaseManager': 'Release and deployment tracking',
+  '/migrations/slack': 'Slack Migration tab under Migrations',
+  '/scheduled-messages': 'Messages scheduled for later delivery (Inbox)',
 };
 
 type Permissions = ReturnType<typeof usePermissions>;
@@ -292,19 +303,13 @@ export const filterNavItemsByPermission = (
     const requiresAccess = resourceName !== undefined;
 
     let hasAccess = true;
-    if (requiresAccess) {
+    if (item.path === '/organisations') {
+      const access = organisationsAccess(permissions, canManageOwnUserGroups);
+      hasAccess = Object.values(access).some(Boolean);
+    } else if (requiresAccess) {
       if (resourceName === 'SDLC') {
         // Any tier (READ/WRITE/ADMIN) unlocks the screen.
         hasAccess = permissions.some(p => p.resourceName === resourceName);
-      } else if (resourceName === 'USER-GROUPS' || resourceName === 'ROLES') {
-        hasAccess = permissions.some(
-          p =>
-            p.resourceName === resourceName &&
-            (p.accessType === AccessType.ADMIN || p.accessType === AccessType.WRITE),
-        );
-        if (resourceName === 'USER-GROUPS') {
-          hasAccess ||= canManageOwnUserGroups;
-        }
       } else {
         hasAccess = permissions.some(
           p => p.resourceName === resourceName && p.accessType === AccessType.ADMIN,

@@ -633,14 +633,14 @@ export const RoleManagementScreen = (): ReactElement => {
         <Separator className='w-[2px] transition-colors cursor-col-resize flex items-center justify-center group'>
           <div
             id='panel-resize-divider'
-            className='w-[2px] h-full bg-transparent group-hover:bg-primary group-active:bg-primary'
+            className='w-px h-full bg-border group-hover:bg-primary group-active:bg-primary'
           />
         </Separator>
 
         <Panel id='roles-main' minSize='30%'>
           <main
             data-id='roles-view'
-            className='flex-1 h-full overflow-hidden relative flex flex-col rounded-2xl border border-border bg-background'
+            className='flex-1 h-full overflow-hidden relative flex flex-col bg-background'
           >
             {!selectedId ? (
               <div className='flex-1 flex flex-col items-center justify-center text-center px-6'>
