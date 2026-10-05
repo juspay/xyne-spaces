@@ -1,3 +1,10 @@
+## [1.454.1](https://github.com/juspay/xyne-spaces/compare/v1.454.0...v1.454.1) (2026-10-05)
+
+
+### Bug Fixes
+
+* mark channel as read on load and hide unread badge on open DM ([#2497](https://github.com/juspay/xyne-spaces/issues/2497)) ([094fca0](https://github.com/juspay/xyne-spaces/commit/094fca07ccf63ad8f3f9482fe0a37626451a01bf))
+
 ## [1.454.0](https://github.com/juspay/xyne-spaces/compare/v1.453.0...v1.454.0) (2026-10-05)
 
 
