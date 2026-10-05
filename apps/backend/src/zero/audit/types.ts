@@ -37,8 +37,10 @@ export interface AuditLookup {
   formsByIds(ids: string[]): Promise<{ id: string; formName: string }[]>;
   globalFieldsByIds(ids: string[]): Promise<{ id: string; fieldName: string }[]>;
   userGroupsByIds(ids: string[]): Promise<{ id: string; name: string }[]>;
-  /** board ids a form is bound to, resolved through forms_context_mapping (BOARD + STAGE contexts). */
+  /** board ids a form is bound to: forms_context_mapping (BOARD + STAGE contexts) and transition forms. */
   boardIdsForFormIds(formIds: string[]): Promise<{ formId: string; boardIds: string[] }[]>;
+  /** form ids whose form_fields rows use each shared global field. */
+  formIdsForGlobalFieldIds(globalFieldIds: string[]): Promise<{ globalFieldId: string; formIds: string[] }[]>;
   /** Assignment-state rows of a user group's current members (state rows outlive membership). */
   memberAssignmentStates(userGroupId: string): Promise<AuditRow[]>;
 }

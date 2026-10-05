@@ -47,6 +47,9 @@ const ENTITY_NOUNS: Record<AuditEntityType, string> = {
 /** Entries touching only one of these tables read as that thing rather than the entity. */
 const TABLE_SUMMARIES: Record<string, { noun: string; verb?: string }> = {
   classification_mappings: { noun: 'routing rule' },
+  forms: { noun: 'form' },
+  form_fields: { noun: 'form field' },
+  global_fields: { noun: 'form field' },
   // Toggles: a new member's state row isn't "added availability".
   user_assignment_states: { noun: 'availability', verb: 'updated' },
 };

@@ -19,6 +19,7 @@ export class AuditResolution {
   private readonly globalFieldNameById = new Map<string, string>();
   private readonly userGroupNameById = new Map<string, string>();
   private readonly boardIdsByFormId = new Map<string, string[]>();
+  private readonly formIdsByGlobalFieldId = new Map<string, string[]>();
   private readonly counterSnapshots = new Map<string, Record<string, number>>();
 
   constructor(private readonly lookup: AuditLookup) {}
@@ -230,6 +231,20 @@ export class AuditResolution {
 
   boardIdsForForm(formId: string): string[] {
     return this.boardIdsByFormId.get(formId) ?? [];
+  }
+
+  async warmGlobalFieldForms(globalFieldIds: Iterable<string>): Promise<void> {
+    const missing = [...new Set(globalFieldIds)].filter(id => !this.formIdsByGlobalFieldId.has(id));
+    if (missing.length === 0) return;
+    const usages = await this.lookup.formIdsForGlobalFieldIds(missing);
+    for (const id of missing) {
+      const usage = usages.find(candidate => candidate.globalFieldId === id);
+      this.formIdsByGlobalFieldId.set(id, usage?.formIds ?? []);
+    }
+  }
+
+  formIdsForGlobalField(globalFieldId: string): string[] {
+    return this.formIdsByGlobalFieldId.get(globalFieldId) ?? [];
   }
 
   /** Collect the role/form/stage ids referenced by the known board-metadata keys. */

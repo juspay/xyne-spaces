@@ -199,6 +199,28 @@ const formatGuestVisibility = (value: unknown): string | null => {
   return hidden ? `hidden: ${hidden}` : null;
 };
 
+/** fieldOptions is a JSON-stringified {id,value}[] — collapsed to its option labels. */
+const formatFieldOptions = (value: unknown): string | null => {
+  if (value === null || value === undefined) return null;
+  try {
+    const parsed = typeof value === 'string' ? (JSON.parse(value) as unknown) : value;
+    if (!Array.isArray(parsed)) return compactJson(parsed);
+    const labels = parsed
+      .map(option => String((option as { value?: unknown }).value ?? ''))
+      .filter(Boolean);
+    return labels.length > 0 ? labels.join(', ') : null;
+  } catch {
+    return compactJson(value);
+  }
+};
+
+/** FormFieldType value -> "Single select". */
+const formatFieldType = (value: unknown): string | null => {
+  if (value === null || value === undefined || value === '') return null;
+  const words = String(value).toLowerCase().replace(/_/g, ' ');
+  return words.charAt(0).toUpperCase() + words.slice(1);
+};
+
 export const AUDIT_TABLE_CONFIG: Record<string, AuditTableConfig> = {
   boards: {
     resolveScope: async row => boardScope(row),
@@ -398,22 +420,42 @@ export const AUDIT_TABLE_CONFIG: Record<string, AuditTableConfig> = {
         if (Array.isArray(value)) return value.map(String).join(', ') || null;
         return compactJson(value);
       },
-      fieldOptions: value => {
-        if (value === null || value === undefined) return null;
-        try {
-          const parsed = typeof value === 'string' ? (JSON.parse(value) as unknown) : value;
-          if (!Array.isArray(parsed)) return compactJson(parsed);
-          const labels = parsed
-            .map(option => String((option as { value?: unknown }).value ?? ''))
-            .filter(Boolean);
-          return labels.length > 0 ? labels.join(', ') : null;
-        } catch {
-          return compactJson(value);
-        }
-      },
+      fieldOptions: formatFieldOptions,
+      fieldType: formatFieldType,
+      // Rows on a shared definition carry only its id, so adds/removes read by its name.
+      globalFieldId: (value, res) => (value ? res.globalFieldName(String(value)) : null),
     },
-    ignoreFields: ['formId', 'globalFieldId', 'sequenceNumber', 'parentOptionId'],
+    ignoreFields: ['formId', 'sequenceNumber', 'parentOptionId'],
     createDefaults: { isOptional: false },
+    deleteSummary: {
+      field: 'fieldName',
+      value: (row, res) =>
+        rowString(row, 'fieldName') || res.globalFieldName(rowString(row, 'globalFieldId')) || null,
+    },
+  },
+
+  // Shared field definitions (name, type, options), recorded on every board whose forms use them.
+  global_fields: {
+    resolveScope: async (row, res) => {
+      const formIds = res.formIdsForGlobalField(rowString(row, 'id'));
+      await res.warmFormBoards(formIds);
+      const boardIds = new Set(formIds.flatMap(formId => res.boardIdsForForm(formId)));
+      return [...boardIds].map(entityId => ({ entityType: AuditEntityType.BOARD, entityId }));
+    },
+    prewarm: async (beforeRow, afterRow, res) => {
+      const globalFieldId = rowString(afterRow ?? beforeRow ?? {}, 'id');
+      await res.warmGlobalFieldForms([globalFieldId]);
+      await res.warmForms(res.formIdsForGlobalField(globalFieldId));
+    },
+    // "Form · Field" like form_fields while one form uses it; just the field once shared wider.
+    resolveTargetName: async (row, res) => {
+      const fieldName = rowString(row, 'fieldName') || rowString(row, 'id');
+      const formIds = res.formIdsForGlobalField(rowString(row, 'id'));
+      return formIds.length === 1 ? `${res.formName(formIds[0])} · ${fieldName}` : fieldName;
+    },
+    fieldFormatters: { fieldOptions: formatFieldOptions, fieldType: formatFieldType },
+    // fieldEnum is the legacy projection of fieldOptions, always written alongside it.
+    ignoreFields: ['projectId', 'fieldEnum'],
     deleteSummary: { field: 'fieldName' },
   },
 

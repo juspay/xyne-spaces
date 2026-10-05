@@ -41,7 +41,8 @@ const MODEL_TO_TABLE: Record<string, string> = {
   BoardSlaPolicy: 'board_sla_policies',
   FormContextMapping: 'forms_context_mapping',
   Form: 'forms',
-  FormField: 'form_fields',
+  FormFields: 'form_fields',
+  GlobalField: 'global_fields',
   UserGroup: 'user_groups',
   UserAssignmentState: 'user_assignment_states',
   UserGroupMapping: 'user_group_mappings',
@@ -68,6 +69,24 @@ type PrismaDelegate = {
 
 type PrismaAuditClient = Record<string, PrismaDelegate> & {
   auditLog: { create(args: { data: unknown }): Promise<unknown> };
+};
+
+/**
+ * Global-field names written by this process. A field created inside a caller's
+ * open transaction isn't readable by the root client yet, so lookups fall back here.
+ */
+const recentGlobalFieldNames = new Map<string, string>();
+const MAX_RECENT_GLOBAL_FIELD_NAMES = 500;
+
+const rememberGlobalFieldName = (row: unknown): void => {
+  const { id, fieldName } = (row ?? {}) as AuditRow;
+  if (typeof id !== 'string' || typeof fieldName !== 'string') return;
+  recentGlobalFieldNames.delete(id);
+  recentGlobalFieldNames.set(id, fieldName);
+  if (recentGlobalFieldNames.size > MAX_RECENT_GLOBAL_FIELD_NAMES) {
+    const oldest = recentGlobalFieldNames.keys().next().value;
+    if (oldest !== undefined) recentGlobalFieldNames.delete(oldest);
+  }
 };
 
 const prismaDelegateName = (model: string): string =>
@@ -107,8 +126,15 @@ function createPrismaAuditLookup(prisma: PrismaAuditClient): AuditLookup {
       (await rowsByIds('Role', ids)) as unknown as { id: string; name: string }[],
     formsByIds: async ids =>
       (await rowsByIds('Form', ids)) as unknown as { id: string; formName: string }[],
-    globalFieldsByIds: async ids =>
-      (await rowsByIds('GlobalField', ids)) as unknown as { id: string; fieldName: string }[],
+    globalFieldsByIds: async ids => {
+      const fields = (await rowsByIds('GlobalField', ids)) as unknown as { id: string; fieldName: string }[];
+      const found = new Set(fields.map(field => field.id));
+      for (const id of ids) {
+        const fieldName = recentGlobalFieldNames.get(id);
+        if (fieldName && !found.has(id)) fields.push({ id, fieldName });
+      }
+      return fields;
+    },
     userGroupsByIds: async ids =>
       (await rowsByIds('UserGroup', ids)) as unknown as { id: string; name: string }[],
     boardIdsForFormIds: async formIds => {
@@ -116,6 +142,10 @@ function createPrismaAuditLookup(prisma: PrismaAuditClient): AuditLookup {
       const mappings = (await prisma.formContextMapping.findMany({
         where: { formId: { in: formIds } },
       })) as { formId: string; contextId: string; contextType: string }[];
+      // Non-linear boards attach forms to the transition itself.
+      const transitions = (await prisma.stageTransition.findMany({
+        where: { formId: { in: formIds } },
+      })) as { formId: string; boardId: string }[];
       const stageIds = mappings
         .filter(mapping => mapping.contextType === 'STAGE')
         .map(mapping => mapping.contextId);
@@ -136,9 +166,30 @@ function createPrismaAuditLookup(prisma: PrismaAuditClient): AuditLookup {
         boardIds.add(boardId);
         boardIdsByFormId.set(mapping.formId, boardIds);
       }
+      for (const transition of transitions) {
+        const boardIds = boardIdsByFormId.get(transition.formId) ?? new Set<string>();
+        boardIds.add(transition.boardId);
+        boardIdsByFormId.set(transition.formId, boardIds);
+      }
       return [...boardIdsByFormId].map(([formId, boardIds]) => ({
         formId,
         boardIds: [...boardIds],
+      }));
+    },
+    formIdsForGlobalFieldIds: async globalFieldIds => {
+      if (globalFieldIds.length === 0) return [];
+      const rows = (await prisma.formFields.findMany({
+        where: { globalFieldId: { in: globalFieldIds } },
+      })) as { formId: string; globalFieldId: string }[];
+      const formIdsByGlobalFieldId = new Map<string, Set<string>>();
+      for (const row of rows) {
+        const formIds = formIdsByGlobalFieldId.get(row.globalFieldId) ?? new Set<string>();
+        formIds.add(row.formId);
+        formIdsByGlobalFieldId.set(row.globalFieldId, formIds);
+      }
+      return [...formIdsByGlobalFieldId].map(([globalFieldId, formIds]) => ({
+        globalFieldId,
+        formIds: [...formIds],
       }));
     },
     memberAssignmentStates: async userGroupId => {
@@ -250,6 +301,7 @@ async function auditPrismaOperation(params: {
   }
 
   const result = await query(args);
+  if (table === 'global_fields') rememberGlobalFieldName(result);
 
   try {
     await emitPrismaAudit(prisma, table, operation, args, beforeRows, result, resolution);

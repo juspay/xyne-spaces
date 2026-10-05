@@ -96,9 +96,38 @@ export function createZeroAuditLookup(tx: Transaction<Schema>): AuditLookup {
         set.add(boardId);
         boardIdsByFormId.set(mapping.formId, set);
       }
+      // Non-linear boards attach forms to the transition itself.
+      const transitionsBuilder = builderFor('stage_transitions');
+      const transitions = transitionsBuilder
+        ? ((await tx.run(
+            transitionsBuilder.where('formId', 'IN', formIds) as never,
+          )) as { formId: string; boardId: string }[])
+        : [];
+      for (const transition of transitions) {
+        const set = boardIdsByFormId.get(transition.formId) ?? new Set<string>();
+        set.add(transition.boardId);
+        boardIdsByFormId.set(transition.formId, set);
+      }
       return [...boardIdsByFormId].map(([formId, boardIds]) => ({
         formId,
         boardIds: [...boardIds],
+      }));
+    },
+    formIdsForGlobalFieldIds: async globalFieldIds => {
+      const builder = builderFor('form_fields');
+      if (globalFieldIds.length === 0 || !builder) return [];
+      const rows = (await tx.run(
+        builder.where('globalFieldId', 'IN', globalFieldIds) as never,
+      )) as { formId: string; globalFieldId: string }[];
+      const formIdsByGlobalFieldId = new Map<string, Set<string>>();
+      for (const row of rows) {
+        const set = formIdsByGlobalFieldId.get(row.globalFieldId) ?? new Set<string>();
+        set.add(row.formId);
+        formIdsByGlobalFieldId.set(row.globalFieldId, set);
+      }
+      return [...formIdsByGlobalFieldId].map(([globalFieldId, formIds]) => ({
+        globalFieldId,
+        formIds: [...formIds],
       }));
     },
     memberAssignmentStates: async userGroupId => {
