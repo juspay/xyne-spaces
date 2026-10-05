@@ -810,6 +810,10 @@ const RadarPanel = (): ReactElement => {
   // metadata block (a forwarded message's carrier format, meant to be parsed
   // before display, never shown as-is) rather than the human text it wraps.
   // Unwrap it to that real content when present.
+  // The unwrapped content is editor HTML, and a title from any other source can
+  // be too, so the text is always flattened to plain text before it is rendered
+  // — DOMParser is fault-tolerant, so even a mid-tag truncated string degrades
+  // to readable text instead of leaking markup into the heading.
   const cleanText = (text: string): string => {
     const unwrapped = text.trimStart().startsWith(':::initialMessage')
       ? parseInitialMessageMd(text)?.content || text
