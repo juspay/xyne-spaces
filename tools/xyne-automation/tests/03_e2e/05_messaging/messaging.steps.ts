@@ -10,6 +10,7 @@ import {
   assertValidMessageAlias,
   assertValidUserAlias,
 } from '@/tests/shared/support/literal-validation';
+import { dispatchHoverEvents } from '@/tests/shared/support/message-hover';
 
 function ensureDmContext(userAlias: string, dmAlias: string): void {
   const user = getStoredUser(userAlias);
@@ -53,18 +54,20 @@ async function clickHoverActionOnMessage(
   await message.waitFor({ state: 'visible' });
 
   const actionButton = page.locator(hoverActionSelector).first();
-  // Hover actions vanish if the message re-renders under load — re-hover per attempt.
   for (let attempt = 1; attempt <= 3; attempt++) {
     await message.scrollIntoViewIfNeeded();
-    await message.hover({ force: true });
+    // The dashboard's shared MessageHoverToolbar is a delegated listener on the
+    // chat-message-list container. It reacts to pointermove/pointerover events
+    // dispatched on child message rows. Dispatch them directly on the row so
+    // nothing in between (overlays, Virtuoso recycling, scroll handlers) can
+    // intercept or race with us.
+    await message.evaluate(dispatchHoverEvents);
     try {
       await actionButton.waitFor({ state: 'visible', timeout: 5000 });
       await actionButton.click({ force: true, timeout: 5000 });
       return;
     } catch (error) {
-      if (attempt === 3) {
-        throw error;
-      }
+      if (attempt === 3) throw error;
     }
   }
 }
