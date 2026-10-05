@@ -1,6 +1,7 @@
 import { randomUUID } from 'crypto';
 import type { Prisma } from '@prisma/client';
 import { getConnectAclMode } from '@/services/otel';
+import { isConnectCanvasReachEnabled } from '@/services/connectFlags';
 import { ConnectEntityType } from '@xyne/shared';
 
 // Re-export so existing `@/database/connectGroup` importers can pull the enum from here too.
@@ -86,80 +87,199 @@ export async function resolveCanvasConnectId(
 export type ConnectAclOp = 'read' | 'write';
 
 /**
- * Resolve the connectIds shared INTO `workspaceId` — the connectIds of ACTIVE connect_groups where
- * this workspace is the INVITED side — and record the connect_acl_mode metric.
- *
- * We deliberately do NOT include groups this workspace HOSTS: a host's own rows already carry its
- * `workspaceId`, so `connectReachWhere` covers them with the cheap, indexed `workspaceId = ctx.ws`
- * branch. Fetching only the invited set keeps the `connectId IN (...)` list tiny (empty until
- * sharing exists) instead of "one id per channel+canvas in the workspace". Prisma can't subquery
- * connect_group by the non-unique connectId, so callers match `connectId IN (ids)` themselves.
- *
- * `ok = false` means the connect_group lookup threw: the caller MUST fall back to its plain
- * workspace predicate (the exact pre-Connect behaviour) rather than filter on an empty id list,
- * and the metric records outcome=error_fallback so a real regression is visible, not silent.
- * `table`/`op` are metric labels only.
+ * Why a reach call resolved the way it did — the `reason` label on `connect_acl_mode`, so every
+ * evaluation is accounted for (e.g. "10 calls: 7 connect_group, 3 workspace — 2 flag_off, 1 missing").
+ *  - connect_group    : resolved via connect_group (parent id-set, or child single-connectId gate)
+ *  - flag_off         : connect reach flag disabled → legacy workspace scope (no connect_group query)
+ *  - unknown_table    : table not in the canvas reach set → legacy workspace scope
+ *  - connect_id_missing: child read with no connectId to gate on (un-backfilled canvas / unscoped list)
+ *  - error_fallback   : a connect_group lookup threw → legacy workspace scope (a real regression)
  */
-export async function resolveReachableConnectIds(
+export type ConnectAclReason =
+  | 'connect_group'
+  | 'flag_off'
+  | 'unknown_table'
+  | 'connect_id_missing'
+  | 'error_fallback';
+
+/** Emit one connect_acl_mode sample. Every connectReachWhere return path calls this exactly once. */
+function recordConnectAcl(
+  table: string,
+  op: ConnectAclOp,
+  mode: 'connect_group' | 'workspace',
+  reason: ConnectAclReason,
+): void {
+  getConnectAclMode().add(1, {
+    entity: ConnectEntityType.CANVAS,
+    table,
+    layer: 'prisma',
+    op,
+    mode,
+    outcome: reason === 'error_fallback' ? 'error_fallback' : 'ok',
+    reason,
+  });
+}
+
+/**
+ * Slack Connect — the workspaces that can reach a given `connectId`: the host plus every ACTIVE
+ * invited workspace. This is the SMALL per-entity set (one entity's sharing), not the per-workspace
+ * set, so a single-entity (child) read — which is already scoped to one `connectId` — can authorize
+ * by "is the caller's workspace in this set?" instead of materialising every reachable connectId.
+ */
+export async function resolveConnectWorkspaces(
+  client: Prisma.TransactionClient,
+  connectId: string,
+): Promise<string[]> {
+  const groups = await client.connectGroup.findMany({
+    where: { status: 'ACTIVE', connectId },
+    select: { hostWorkspaceId: true, invitedWorkspaceId: true },
+  });
+  const workspaces = new Set<string>();
+  for (const g of groups) {
+    workspaces.add(g.hostWorkspaceId);
+    if (g.invitedWorkspaceId) workspaces.add(g.invitedWorkspaceId);
+  }
+  return [...workspaces];
+}
+
+/**
+ * Slack Connect — single-entity authorization gate: may `workspaceId` reach `connectId`?
+ * True when the caller's workspace is the host or an ACTIVE invited workspace of that connect group.
+ * Use this for connectId-scoped child reads (participants, comments, versions of ONE canvas): the
+ * query isolates rows by `connectId`, and this gate decides whether the caller is allowed to see them.
+ */
+export async function canWorkspaceReachConnect(
   client: Prisma.TransactionClient,
   workspaceId: string,
-  table = 'unknown',
-  op: ConnectAclOp = 'read',
-): Promise<{ ids: string[]; ok: boolean }> {
+  connectId: string,
+): Promise<boolean> {
+  const workspaces = await resolveConnectWorkspaces(client, connectId);
+  return workspaces.includes(workspaceId);
+}
+
+// Slack Connect — canvas tables whose Prisma reach resolves via connect_group. The PARENT canvas is
+// matched on its own `id` (== connect_group.entityId); CHILD tables on their `connectId`.
+const CANVAS_PARENT_TABLES = new Set<string>(['canvases']);
+const CANVAS_CHILD_TABLES = new Set<string>([
+  'canvas_participants',
+  'canvas_versions',
+  'canvas_comment_threads',
+  'canvas_comments',
+  'canvas_user_status',
+]);
+
+/**
+ * Resolve the reachable PARENT entity ids for `workspaceId` from connect_group: the `entityId`s of
+ * ACTIVE groups this workspace HOSTS or is INVITED to, for the given `entityType` — used to scope the
+ * entity LIST (e.g. "all canvases I can reach"). Records the connect_acl_mode metric. `ok = false`
+ * means the lookup threw → the caller MUST degrade to its plain workspace predicate (the exact
+ * pre-Connect behaviour), and the metric records outcome=error_fallback so a real regression is visible.
+ * Child reads do NOT use this — they gate on their single connectId (see canWorkspaceReachConnect).
+ */
+export async function resolveReachableEntity(
+  client: Prisma.TransactionClient,
+  workspaceId: string,
+  entityType: ConnectEntityType,
+): Promise<{ entityIds: string[]; ok: boolean }> {
   try {
     const groups = await client.connectGroup.findMany({
       where: {
         status: 'ACTIVE',
-        invitedWorkspaceId: workspaceId,
+        entityType,
+        OR: [{ hostWorkspaceId: workspaceId }, { invitedWorkspaceId: workspaceId }],
       },
-      select: { connectId: true },
+      select: { entityId: true },
     });
-    getConnectAclMode().add(1, {
-      entity: 'canvas',
-      table,
-      layer: 'prisma',
-      op,
-      mode: 'connect_group',
-      outcome: 'ok',
-    });
-    return { ids: groups.map((g) => g.connectId), ok: true };
+    return { entityIds: groups.map((g) => g.entityId), ok: true };
   } catch {
-    getConnectAclMode().add(1, {
-      entity: 'canvas',
-      table,
-      layer: 'prisma',
-      op,
-      mode: 'workspace',
-      outcome: 'error_fallback',
-    });
-    return { ids: [], ok: false };
+    return { entityIds: [], ok: false };
   }
 }
 
+/** connectId IS NULL (un-backfilled) → legacy workspace scope; matches Zero's `legacy` branch. */
+type ConnectNullFallback = { AND: [{ connectId: null }, { workspaceId: string }] };
+export type ConnectReachWhere =
+  | { workspaceId: string }
+  | Record<string, never> // gate ALLOW: the query already isolates the one entity; add no restriction
+  | { connectId: { in: string[] } } // gate DENY (empty `in`) — every child table has connectId
+  | { OR: [{ id: { in: string[] } }, ConnectNullFallback] }; // parent reachable id-set
+
+/** What the query is scoped to, so a child read can authorize by its single connectId (not a list). */
+export interface ConnectReachScope {
+  connectId?: string;
+  canvasId?: string;
+}
+
 /**
- * Slack Connect — Prisma ACL reach fragment for tables that HAVE a `workspaceId` column. A row is
- * reachable when it belongs to THIS workspace (its own entities — the bulk; covered by the indexed
- * `workspaceId` column, and this also catches null-connectId rows) OR its connectId was shared INTO
- * this workspace (the small invited set). AND this with the table's membership clause. On lookup
- * failure, degrades to the plain `workspaceId` predicate (see resolveReachableConnectIds).
+ * Slack Connect — Prisma ACL reach fragment for the canvas entity + its child tables.
  *
- * Equivalent to the old `connectId IN (host+invited) OR (connectId null AND workspaceId)`, but the
- * huge "host" half is handled by the indexed `workspaceId = ctx.ws` instead of a giant IN-list —
- * only the tiny shared-into-me set stays a `connectId IN (...)` (empty until sharing exists).
+ * The two halves are gated differently on purpose:
+ *
+ *  - CHILD (participants/versions/… of ONE opened canvas) — ALWAYS connect_group, no flag. The query
+ *    already isolates rows by a single `connectId`/`canvasId`, so we authorize with the small per-entity
+ *    GATE: resolve that one connectId's host+invited workspaces and check the caller is among them. It's
+ *    cheap and self-correcting — a row with no connectId yet (un-backfilled canvas) falls back to
+ *    `{ workspaceId }`, so it works incrementally during backfill without a switch. Gate pass → add no
+ *    restriction (the query already pins the entity); gate fail → match nothing.
+ *
+ *  - PARENT (canvases list) — FLAG-GATED (`connect_query_enabled_canvas`, default OFF). Listing "all
+ *    canvases I can reach" via `id IN (reachable entityIds)` is only complete once EVERY canvas has a
+ *    connect_group row (the backfill), and it materialises the reachable id-set; so until the flag is
+ *    flipped (post-backfill) the parent stays on the legacy `{ workspaceId }` list. Flag ON →
+ *    `id IN entityIds` OR the `connectId IS NULL` legacy fallback.
+ *
+ * On a connect_group lookup failure either half degrades to plain `{ workspaceId }`.
  */
 export async function connectReachWhere(
   client: Prisma.TransactionClient,
   workspaceId: string,
   table = 'unknown',
   op: ConnectAclOp = 'read',
-): Promise<
-  | { OR: [{ workspaceId: string }, { connectId: { in: string[] } }] }
-  | { workspaceId: string }
-> {
-  const { ids, ok } = await resolveReachableConnectIds(client, workspaceId, table, op);
-  // No invited connectIds (the norm today) or a lookup failure → plain workspace scope.
-  if (!ok || ids.length === 0) return { workspaceId };
-  return { OR: [{ workspaceId }, { connectId: { in: ids } }] };
+  scope?: ConnectReachScope,
+): Promise<ConnectReachWhere> {
+  const isParent = CANVAS_PARENT_TABLES.has(table);
+  const isChild = CANVAS_CHILD_TABLES.has(table);
+  // Unknown table → stay safe on plain workspace scope.
+  if (!isParent && !isChild) {
+    recordConnectAcl(table, op, 'workspace', 'unknown_table');
+    return { workspaceId };
+  }
+
+  // CHILD: always-on per-connectId gate (no flag — self-correcting via the missing-connectId fallback).
+  if (isChild) {
+    let connectId = scope?.connectId;
+    if (!connectId && scope?.canvasId) {
+      connectId = (await resolveCanvasConnectId(client, scope.canvasId)) ?? undefined;
+    }
+    // No connectId to gate on (un-backfilled canvas, or an unscoped child list) → legacy scope.
+    if (!connectId) {
+      recordConnectAcl(table, op, 'workspace', 'connect_id_missing');
+      return { workspaceId };
+    }
+    try {
+      const allowed = await canWorkspaceReachConnect(client, workspaceId, connectId);
+      recordConnectAcl(table, op, 'connect_group', 'connect_group');
+      // Pass → no extra restriction (the query's connectId already isolates). Fail → match nothing.
+      return allowed ? {} : { connectId: { in: [] } };
+    } catch {
+      recordConnectAcl(table, op, 'workspace', 'error_fallback');
+      return { workspaceId };
+    }
+  }
+
+  // PARENT (canvases list): flag-gated until the backfill is complete.
+  if (!(await isConnectCanvasReachEnabled())) {
+    recordConnectAcl(table, op, 'workspace', 'flag_off');
+    return { workspaceId };
+  }
+  const { entityIds, ok } = await resolveReachableEntity(client, workspaceId, ConnectEntityType.CANVAS);
+  if (!ok) {
+    recordConnectAcl(table, op, 'workspace', 'error_fallback');
+    return { workspaceId };
+  }
+  recordConnectAcl(table, op, 'connect_group', 'connect_group');
+  const nullFallback: ConnectNullFallback = { AND: [{ connectId: null }, { workspaceId }] };
+  return { OR: [{ id: { in: entityIds } }, nullFallback] };
 }
 
 /** Resolve the connectId of an existing channel (for channel-scoped folders). */

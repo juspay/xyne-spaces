@@ -12,8 +12,13 @@ export class CanvasParticipantsACL extends BaseQueryACL<
     super(ctx, prisma)
   }
 
-  async getWhereClause(): Promise<Prisma.CanvasParticipantWhereInput | null> {
+  async getWhereClause(queryWhere?: Record<string, unknown>): Promise<Prisma.CanvasParticipantWhereInput | null> {
     const ctx = this.ctx
+    // Slack Connect: single-entity gate keyed off the query's connectId/canvasId (one opened canvas).
+    const reachScope = {
+      connectId: queryWhere?.connectId as string | undefined,
+      canvasId: queryWhere?.canvasId as string | undefined,
+    }
     if (isGuestContext(ctx)) {
       const canvasIds = await getGuestAccessibleCanvasIds(
         this.prisma,
@@ -23,8 +28,8 @@ export class CanvasParticipantsACL extends BaseQueryACL<
 
       return {
         AND: [
-          // Slack Connect: connectId → connect_group workspace truth; else workspaceId.
-          await connectReachWhere(this.prisma, ctx.workspaceId ?? '', 'canvas_participants'),
+          // Slack Connect: single-entity gate on the opened canvas; else workspaceId.
+          await connectReachWhere(this.prisma, ctx.workspaceId ?? '', 'canvas_participants', 'read', reachScope),
           {
             OR: [
               { userId: this.ctx.userId },
@@ -59,8 +64,8 @@ export class CanvasParticipantsACL extends BaseQueryACL<
     // layer applies the same scope structurally after every canSelect.
     return {
       AND: [
-        // Slack Connect: connectId → connect_group workspace truth; else workspaceId.
-        await connectReachWhere(this.prisma, this.ctx.workspaceId, 'canvas_participants'),
+        // Slack Connect: single-entity gate on the opened canvas; else workspaceId.
+        await connectReachWhere(this.prisma, this.ctx.workspaceId, 'canvas_participants', 'read', reachScope),
         {
           OR: [
             { userId: this.ctx.userId },
@@ -99,7 +104,7 @@ export class CanvasParticipantsACL extends BaseQueryACL<
     }
   }
 
-  async getMutateWhere(): Promise<Prisma.CanvasParticipantWhereInput> {
+  async getMutateWhere(queryWhere?: Record<string, unknown>): Promise<Prisma.CanvasParticipantWhereInput> {
     const workspaceId = this.ctx.workspaceId;
     const mappings = await this.prisma.userGroupMapping.findMany({
       where: { userId: this.ctx.userId },
@@ -118,8 +123,11 @@ export class CanvasParticipantsACL extends BaseQueryACL<
 
     return {
       AND: [
-        // Slack Connect: update/delete scope follows the same connect_group reach as reads.
-        await connectReachWhere(this.prisma, workspaceId, 'canvas_participants', 'write'),
+        // Slack Connect: update/delete scope follows the same single-entity gate as reads.
+        await connectReachWhere(this.prisma, workspaceId, 'canvas_participants', 'write', {
+          connectId: queryWhere?.connectId as string | undefined,
+          canvasId: queryWhere?.canvasId as string | undefined,
+        }),
         {
           OR: [
             { userId: this.ctx.userId },
