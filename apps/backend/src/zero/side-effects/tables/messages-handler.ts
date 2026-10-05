@@ -374,7 +374,7 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
       where: { id: { in: participantUserIds } },
       select: { id: true, email: true, name: true, displayName: true, userType: true, status: true }
     });
-    const appUserIds = users.filter(u => u.userType === UserType.APP).map(u => u.id);
+    const appUserIds = users.filter(u => u.userType === UserType.APP || u.userType === UserType.AGENT).map(u => u.id);
 
     // Top-level user message with a Bitbucket PR link in a regular channel:
     // post the "Run PR Check" button in this thread (gated on the Varys bot
@@ -387,6 +387,7 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
       message.msgType === 'USER' &&
       sender != null &&
       sender.userType !== UserType.APP &&
+      sender.userType !== UserType.AGENT &&
       channel?.scopeType === ChannelScopeType.DEFAULT &&
       content?.includes('/pull-requests/')
     ) {
