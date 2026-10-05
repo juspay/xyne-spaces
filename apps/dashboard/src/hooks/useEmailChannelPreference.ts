@@ -78,6 +78,7 @@ export function useUpdateEmailChannelPreference() {
       deskReportAgentSlug,
       deskReportRangeDays,
       duplicateScopeConfig,
+      duplicateLookbackDays,
     }: {
       channelId: string;
       ownerUserId?: string;
@@ -97,6 +98,7 @@ export function useUpdateEmailChannelPreference() {
       deskReportAgentSlug?: string | null;
       deskReportRangeDays?: number;
       duplicateScopeConfig?: DuplicateScopeConfig | null;
+      duplicateLookbackDays?: number;
     }): Promise<void> => {
       const mutation = zero.mutate(
         mutators.emailChannelPreference.upsert({
@@ -122,6 +124,7 @@ export function useUpdateEmailChannelPreference() {
             : {}),
           ...(deskReportRangeDays !== undefined ? { deskReportRangeDays } : {}),
           ...(duplicateScopeConfig !== undefined ? { duplicateScopeConfig } : {}),
+          ...(duplicateLookbackDays !== undefined ? { duplicateLookbackDays } : {}),
         }),
       );
       // Zero resolves .server with the rejection instead of rejecting the promise.

@@ -511,6 +511,8 @@ export const AUDIT_TABLE_CONFIG: Record<string, AuditTableConfig> = {
         typeof value === 'number' ? `${Math.round(value * 100)}%` : null,
       deskReportRangeDays: value =>
         typeof value === 'number' ? `${value} day${value === 1 ? '' : 's'}` : null,
+      duplicateLookbackDays: value =>
+        typeof value === 'number' && value > 0 ? `Last ${value} days` : 'All time',
     },
     ignoreFields: ['deskType'],
     // Column defaults. metricsEnabled is left out: Prisma creates it as null, Zero as false.
@@ -524,6 +526,7 @@ export const AUDIT_TABLE_CONFIG: Record<string, AuditTableConfig> = {
       appWebhookDeliveryEnabled: true,
       deskReportEnabled: false,
       deskReportRangeDays: 1,
+      duplicateLookbackDays: null,
       frtStageNames: null,
     },
   },

@@ -1755,6 +1755,7 @@ export const emailChannelPreferenceTable = table('email_channel_preferences')
     deskReportAgentSlug: string().optional(),
     deskReportRangeDays: number().optional(),
     duplicateScopeConfig: string().optional(),
+    duplicateLookbackDays: number().optional(),
     slackDeskTriggerMode: enumeration<SlackDeskTriggerMode>().optional(),
   })
   .primaryKey('channelId');

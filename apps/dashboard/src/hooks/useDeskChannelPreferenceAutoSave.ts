@@ -24,6 +24,7 @@ export type ChannelPreferencePatch = {
   deskReportAgentSlug?: string | null;
   deskReportRangeDays?: number;
   duplicateScopeConfig?: DuplicateScopeConfig | null;
+  duplicateLookbackDays?: number;
 };
 
 /**
