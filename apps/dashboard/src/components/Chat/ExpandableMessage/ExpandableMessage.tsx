@@ -1,6 +1,9 @@
 import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { RenderMessageWithHTML } from '../RenderMessageWithHTML/RenderMessageWithHTML';
-import { ExpandableMessageContext } from './ExpandableMessageContext';
+import {
+  ExpandableMessageContext,
+  EXPANDABLE_MESSAGE_MAX_HEIGHT,
+} from './ExpandableMessageContext';
 import { MaximizeTwoArrow } from '@xyne/icons';
 
 interface ExpandableMessageProps {
@@ -25,7 +28,7 @@ export const ExpandableMessage: React.FC<ExpandableMessageProps> = ({
   message,
   children,
   showEdited = false,
-  maxHeight = 500,
+  maxHeight = EXPANDABLE_MESSAGE_MAX_HEIGHT,
   className = '',
   fadeColor = 'hsl(var(--background))',
   isSystemMessage = false,

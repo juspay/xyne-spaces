@@ -87,6 +87,20 @@ type UpdatedConveresationsAnchor = {
 
 const PAGE_SIZE = 50;
 
+type DeepLinkTarget = { conversationId: string; createdAt: number };
+
+/**
+ * The deep-link target itself, or a row strictly newer than it. Rows sharing the
+ * target's timestamp are excluded: the list sorts by createdAt only, so they could
+ * land above the target. They arrive later with the older rows.
+ */
+function isDeepLinkTargetOrNewer(conversation: Conversation, target: DeepLinkTarget): boolean {
+  return (
+    conversation.conversationId === target.conversationId ||
+    conversation.createdAt > target.createdAt
+  );
+}
+
 function dedupeAndSort(a: Conversation[], b: Conversation[]): Conversation[] {
   const map = new Map<string, Conversation>();
   for (const c of a) map.set(c.conversationId, c);
@@ -297,27 +311,79 @@ const ChatListV4: React.FC<ChatListProps> = ({
     },
   );
   const [inViewAnchor, setInViewAnchor] = useState<UpdatedConveresationsAnchor | null>(null);
-  const [conversations, setConversations] = useState<Conversation[]>(cachedConversations);
-  const conversationsRef = useRef<Conversation[]>(cachedConversations);
+  // Deep link opened at mount: the linked conversation becomes the FIRST row and
+  // only newer rows load below it. With nothing above the target its offset is 0,
+  // so the jump needs no height estimates and nothing above can resize and push
+  // it. Older rows are held until the target has landed, then preloaded in the
+  // background (see isDeepLinkLandingRef). Decided once at mount: a link clicked
+  // inside an already-open list doesn't switch modes.
+  const [openedFromDeepLink] = useState(
+    () =>
+      !!linkedConversationId &&
+      !!linkedItemCreatedAt &&
+      !linkedCutoffCreatedAt &&
+      !unreadsOnly &&
+      !discussionScope &&
+      (!conversationIdsFilter || conversationIdsFilter.includes(linkedConversationId)),
+  );
+  // The linked conversation, or null when this list didn't open from a deep link.
+  const [deepLinkTarget] = useState<DeepLinkTarget | null>(() =>
+    openedFromDeepLink && linkedConversationId && linkedItemCreatedAt
+      ? { conversationId: linkedConversationId, createdAt: linkedItemCreatedAt.createdAt }
+      : null,
+  );
+  const [initialConversations] = useState<Conversation[]>(() => {
+    // Normal opening: start from the cached rows as they are.
+    if (!deepLinkTarget) return cachedConversations;
+
+    // Target not cached yet: start empty (loader) rather than painting the cached
+    // newer rows — the list would scroll to their bottom, queue size corrections
+    // there, and those would land after the jump to the target at offset 0.
+    const isTargetCached = cachedConversations.some(
+      c => c.conversationId === deepLinkTarget.conversationId,
+    );
+    if (!isTargetCached) return [];
+
+    return cachedConversations.filter(c => isDeepLinkTargetOrNewer(c, deepLinkTarget));
+  });
+  // True while a deep link's target is being placed: older rows are held and kept
+  // out of the list. Goes false once the first load has placed it (when the older
+  // rows are preloaded) and stays false — from then on this is a normal list.
+  const isDeepLinkLandingRef = useRef(openedFromDeepLink);
+  const [conversations, setConversations] = useState<Conversation[]>(initialConversations);
+  const conversationsRef = useRef<Conversation[]>(initialConversations);
   // The cache snapshot we hydrated from — used to skip echoing identical
   // data back into the query cache at mount (would dirty the IndexedDB
   // persist key for no reason).
-  const hydratedFromCacheRef = useRef<Conversation[]>(cachedConversations);
+  const hydratedFromCacheRef = useRef<Conversation[]>(initialConversations);
+  // While the deep link is landing, the target must stay the first row: every write
+  // (cache, newer fetch, the real-time "latest" tail — which can contain rows older
+  // than a target near the end of the channel) drops rows before it. Returns the
+  // same array when nothing is dropped, so an unchanged list doesn't re-render.
+  const dropRowsBeforeDeepLinkTarget = useCallback(
+    (list: Conversation[]): Conversation[] => {
+      if (!deepLinkTarget || !isDeepLinkLandingRef.current) return list;
+      const kept = list.filter(c => isDeepLinkTargetOrNewer(c, deepLinkTarget));
+      return kept.length === list.length ? list : kept;
+    },
+    [deepLinkTarget],
+  );
   const setConversationsState = useCallback(
     (next: Conversation[] | ((prev: Conversation[]) => Conversation[])): void => {
       if (typeof next !== 'function') {
-        conversationsRef.current = next;
-        setConversations(next);
+        const kept = dropRowsBeforeDeepLinkTarget(next);
+        conversationsRef.current = kept;
+        setConversations(kept);
         return;
       }
 
       setConversations(prev => {
-        const resolved = next(prev);
+        const resolved = dropRowsBeforeDeepLinkTarget(next(prev));
         conversationsRef.current = resolved;
         return resolved;
       });
     },
-    [],
+    [dropRowsBeforeDeepLinkTarget],
   );
   const [latestConversationsList, setLatestConversationsList] = useState<Conversation[]>([]);
   const latestConversationsListRef = useRef<Conversation[]>([]);
@@ -397,6 +463,7 @@ const ChatListV4: React.FC<ChatListProps> = ({
     isMobile,
     newConversationBoundary?.index ?? -1,
   );
+
   const lastConversationAutoScrollKey = useMemo(() => {
     const lastConversation = conversations[conversations.length - 1];
     if (!lastConversation) return '';
@@ -456,17 +523,40 @@ const ChatListV4: React.FC<ChatListProps> = ({
   // viewport stays anchored (prevents flicker from estimate→measure drift).
   // After initial load: adjust when scrolling up, or when idle at bottom AND
   // the changed item is among the last few (prevents drift from async loads).
-  virtualizer.shouldAdjustScrollPositionOnItemSizeChange = (item, _delta, instance) => {
+  const shouldAdjustOnSizeChange = (
+    item: { index: number; key: React.Key; start: number; size: number },
+    instance: { options: { count: number } },
+  ): boolean => {
     if (!lifecycleRef.current.initialPositionSet) return false;
     if (!lifecycleRef.current.initialLoadComplete) {
       // Only keep the viewport pinned while we intentionally anchored to bottom.
       // This prevents "almost at bottom" drift on initial load as tall rows measure.
       return lifecycleRef.current.didInitialScrollAlign === 'end';
     }
+    // A row above the viewport measured for the first time (e.g. older rows just
+    // prepended) replaces its estimate with its real height; compensate so the
+    // rows on screen don't get pushed down. TanStack's own default for first
+    // measurements. Needed even without a 'backward' scroll: a wheel-up at
+    // scrollTop 0 fires no scroll event, so scrollDirection never turns backward.
+    // The virtualizer's own offset, not the DOM's: right after an insert above, the
+    // end-anchor has already moved its offset (e.g. 0 → 17096) but hasn't written it
+    // to scrollTop yet, so the DOM would still say 0 and every row would look
+    // "below" the viewport. Same basis TanStack's default rule uses.
+    const scrollTop = (virtualizer.scrollOffset ?? 0) + virtualizer.scrollAdjustments;
+    const isFirstMeasure = !virtualizer.itemSizeCache.has(item.key);
+    if (isFirstMeasure && item.start < scrollTop) return true;
+    // A row entirely above the viewport can't be seen, so shifting the viewport by
+    // its size change is always invisible — compensate regardless of scroll
+    // direction (at scrollTop ~0 a wheel-up fires no scroll event, so the
+    // 'backward' check below never sees the user scrolling up).
+    const previousSize = virtualizer.itemSizeCache.get(item.key) ?? item.size;
+    if (item.start + previousSize <= scrollTop) return true;
     const isNearBottom = virtualizer.isAtEnd(80);
     const isLastFewItems = item.index >= instance.options.count - 5;
     return (isNearBottom && isLastFewItems) || virtualizer.scrollDirection === 'backward';
   };
+  virtualizer.shouldAdjustScrollPositionOnItemSizeChange = (item, _delta, instance) =>
+    shouldAdjustOnSizeChange(item, instance);
 
   const lastReportedTotalHeightRef = useRef<number | null>(null);
   useEffect(() => {
@@ -501,6 +591,26 @@ const ChatListV4: React.FC<ChatListProps> = ({
         conversationRect.top >= scrollRect.top - VISIBLE_CONVERSATION_EPSILON_PX &&
         conversationRect.bottom <= scrollRect.bottom + VISIBLE_CONVERSATION_EPSILON_PX
       );
+    },
+    [virtualizer],
+  );
+
+  // Deep links land with the linked row at the top (below the sticky date pill):
+  // rows below it can then grow or shrink without moving it, and the end-anchor
+  // keeps the top row in place when the list is swapped. The newest row aligns
+  // to the end instead, so the list isn't left with empty space below it.
+  const scrollLinkedConversationIntoView = useCallback(
+    (index: number, isLast: boolean): void => {
+      if (isLast) {
+        virtualizer.scrollToIndex(index, { align: 'end', behavior: 'auto' });
+        return;
+      }
+      const offsetInfo = virtualizer.getOffsetForIndex(index, 'start');
+      if (!offsetInfo) {
+        virtualizer.scrollToIndex(index, { align: 'start', behavior: 'auto' });
+        return;
+      }
+      virtualizer.scrollToOffset(Math.max(0, offsetInfo[0] - SELECTION_SCROLL_TOP_OFFSET));
     },
     [virtualizer],
   );
@@ -573,11 +683,15 @@ const ChatListV4: React.FC<ChatListProps> = ({
             queries.channelConversationsPaginatedV3({
               channelId,
               isMember,
-              ...(conversationIdsFilter && { conversationIds: conversationIdsFilter }),
+              // Deep link at top: fetch only the linked conversation itself, not the
+              // page of older rows before it.
+              ...(openedFromDeepLink && linkedConversationId
+                ? { conversationIds: [linkedConversationId] }
+                : conversationIdsFilter && { conversationIds: conversationIdsFilter }),
               ...(discussionScope && { discussionScope }),
-              start: oldConversationsAnchorRef.current,
+              start: openedFromDeepLink ? null : oldConversationsAnchorRef.current,
               direction: 'forward',
-              limit: PAGE_SIZE,
+              limit: openedFromDeepLink ? 1 : PAGE_SIZE,
             }),
             { type: 'complete' },
           )
@@ -590,13 +704,17 @@ const ChatListV4: React.FC<ChatListProps> = ({
             ...(discussionScope && { discussionScope }),
             start: newConversationsAnchor,
             direction: 'backward',
-            limit: PAGE_SIZE / 2,
+            limit: openedFromDeepLink ? PAGE_SIZE : PAGE_SIZE / 2,
           }),
           { type: 'complete' },
         ),
     ])
       .then(([older, newerNullable]) => {
-        const newer = newerNullable ?? [];
+        // Deep link at top: same rule as the cached rows — only rows strictly newer
+        // than the target go below it; same-timestamp rows load with the older ones.
+        const newer = (newerNullable ?? []).filter(
+          c => !deepLinkTarget || isDeepLinkTargetOrNewer(c, deepLinkTarget),
+        );
         const fetched = dedupeAndSort(older, newer);
         const mergedWithCached = mergeWithCached(conversations, fetched);
         const { merged, latestClear } = mergeWithLatest(
@@ -700,6 +818,8 @@ const ChatListV4: React.FC<ChatListProps> = ({
   ]);
 
   const fetchOlderMessages = useCallback(() => {
+    // Deep link at top: nothing loads above the target until it has landed.
+    if (isDeepLinkLandingRef.current) return;
     // isFetchingOlder=true → suppressed (previous fetch in flight).
     if (isFetchingOlderRef.current || hasReachedChannelStartRef.current || unreadsOnly) return;
     isFetchingOlderRef.current = true;
@@ -800,6 +920,18 @@ const ChatListV4: React.FC<ChatListProps> = ({
       });
   }, [channelId, newConversationsAnchor, isInitialLoadComplete, zero]);
 
+  // ── Deep link at top: load older rows once the target has landed ─────────────
+  // Once the first load has placed the target (the jump runs in the initial-scroll
+  // layout effect, before this), release the hold and fetch the older rows, so they
+  // are already there when the user scrolls up. They are inserted above the target:
+  // the end-anchor keeps it in place and their size changes are compensated (see
+  // shouldAdjustOnSizeChange), both from the virtualizer's own offset.
+  useEffect(() => {
+    if (!isInitialLoadComplete || !isDeepLinkLandingRef.current) return;
+    isDeepLinkLandingRef.current = false;
+    fetchOlderMessages();
+  }, [isInitialLoadComplete, fetchOlderMessages]);
+
   // ── New message boundary ──────────────────────────────────────────────────────
   useEffect(() => {
     if (!lastViewedAtOnOpen || !isInitialLoadComplete) {
@@ -867,11 +999,11 @@ const ChatListV4: React.FC<ChatListProps> = ({
       };
     } else if (p2Idx !== -1) {
       const isLast = p2Idx === combinedMessages.length - 1;
-      const p2Align = isLast ? 'end' : 'center';
+      const p2Align = isLast ? 'end' : 'start';
       initialLinkedIdRef.current = `${linkedConversationId}:${location.key}:${activityNavigationNonce}`;
       doScroll = () => {
         lifecycleRef.current.didInitialScrollAlign = p2Align;
-        virtualizer.scrollToIndex(p2Idx, { align: p2Align, behavior: 'auto' });
+        scrollLinkedConversationIntoView(p2Idx, isLast);
       };
     } else if (p3Idx !== -1) {
       const p3Align = 'start';
@@ -919,7 +1051,7 @@ const ChatListV4: React.FC<ChatListProps> = ({
       requestAnimationFrame(() => {
         const scrollToLinkedConversation = (): boolean => {
           if (isConversationFullyVisible(linkedConversationId, idx)) return false;
-          virtualizer.scrollToIndex(idx, { align: isLast ? 'end' : 'center', behavior: 'auto' });
+          scrollLinkedConversationIntoView(idx, isLast);
           return true;
         };
         if (scrollToLinkedConversation()) {
@@ -1642,7 +1774,9 @@ const ChatListV4: React.FC<ChatListProps> = ({
       </div>
     );
 
-  if (!isInitialLoadComplete && cachedConversations.length === 0)
+  // `conversations`, not the cache prop: a deep link whose target isn't cached
+  // starts empty on purpose (see initialConversations) and should show the loader.
+  if (!isInitialLoadComplete && conversations.length === 0)
     return loadingFallback !== undefined ? (
       <div className='absolute inset-0 bg-background z-50' data-testid='chat-list-loading'>
         {loadingFallback}
