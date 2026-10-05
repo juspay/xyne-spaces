@@ -138,6 +138,43 @@ export const getAvatarColorClassNames = (userId: string): { bg: string; text: st
   return colorPalette[colorIndex] || { bg: 'bg-muted', text: 'text-muted-foreground' };
 };
 
+// Hex values of the Tailwind classes above, for surfaces that colour with inline
+// styles (e.g. calendar blocks) and so can't use a class name.
+const AVATAR_BG_HEX = new Map<string, string>([
+  ['bg-red-400', '#f87171'],
+  ['bg-teal-400', '#2dd4bf'],
+  ['bg-sky-400', '#38bdf8'],
+  ['bg-orange-300', '#fdba74'],
+  ['bg-green-300', '#86efac'],
+  ['bg-yellow-300', '#fde047'],
+  ['bg-purple-300', '#d8b4fe'],
+  ['bg-blue-300', '#93c5fd'],
+  ['bg-amber-400', '#fbbf24'],
+  ['bg-green-500', '#22c55e'],
+  ['bg-pink-400', '#f472b6'],
+  ['bg-indigo-400', '#818cf8'],
+  ['bg-emerald-500', '#10b981'],
+  ['bg-yellow-500', '#eab308'],
+  ['bg-orange-600', '#ea580c'],
+  ['bg-blue-400', '#60a5fa'],
+  ['bg-purple-400', '#c084fc'],
+  ['bg-rose-400', '#fb7185'],
+  ['bg-cyan-500', '#06b6d4'],
+  ['bg-teal-300', '#5eead4'],
+  ['bg-pink-300', '#f9a8d4'],
+  ['bg-green-400', '#4ade80'],
+  ['bg-orange-400', '#fb923c'],
+  ['bg-violet-400', '#a78bfa'],
+  ['bg-red-600', '#dc2626'],
+  ['bg-blue-600', '#2563eb'],
+  ['bg-emerald-600', '#059669'],
+  ['bg-orange-500', '#f97316'],
+]);
+
+/** Hex of the user's letter-avatar background, or null when it's the theme's muted tone. */
+export const getAvatarColorHex = (userId: string): string | null =>
+  AVATAR_BG_HEX.get(getAvatarColorClassNames(userId).bg) ?? null;
+
 const Avatar = ({
   userId,
   size = 'md',
