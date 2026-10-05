@@ -10,6 +10,7 @@ import { ExternalSourceRepository } from '@/database/repositories/externalSource
 import { logger } from '@/utils/logger';
 import { z } from 'zod';
 import type { BotExecutionContext } from '@/bots/core/types/bot';
+import { ExternalSourcePlatform } from './types';
 
 // Store display info for external sources
 const externalSourceDisplayInfo = new Map<string, { name: string; email: string }>();
@@ -17,6 +18,8 @@ const DISPLAY_BOT_EXCLUDED_SOURCE_TYPES = new Set([
   'google_calendar',
   'microsoft_calendar',
   'sdlc_vcs_credential',
+  ExternalSourcePlatform.APP_HUB, // HUB desk links, not message sources
+  ExternalSourcePlatform.APP_HUB_CHANNEL,
 ]);
 
 /**

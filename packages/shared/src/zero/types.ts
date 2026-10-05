@@ -823,6 +823,8 @@ export enum ChannelType {
   // SDLC repository channel: system-managed, hidden from the chat surfaces
   // the same way SUPPORT channels are (inline type checks).
   SDLC = 'SDLC',
+  // Hub desk: tickets for threads in channels connected to one service account.
+  HUB = 'HUB',
 }
 
 // @ts-ignore TS1294
@@ -833,6 +835,7 @@ export enum DeskType {
   APP = 'APP',
   CALL = 'CALL',
   SOCIAL_MEDIA = 'SOCIAL_MEDIA',
+  HUB = 'HUB',
 }
 
 // @ts-ignore TS1294

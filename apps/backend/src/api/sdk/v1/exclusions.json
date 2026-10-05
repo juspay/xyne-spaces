@@ -341,6 +341,12 @@
       "kind": "query",
       "reason": "superseded-by:userVisibleChannelsV3",
       "note": "Older version of a covered operation."
+    },
+    {
+      "name": "hubTicketStub",
+      "kind": "query",
+      "reason": "internal",
+      "note": "Desk ticket view of a HUB ticket's stub thread; SDK callers read threads through conversations.* instead."
     }
   ]
 }
