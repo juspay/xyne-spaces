@@ -289,7 +289,7 @@ function CodeViewer({ row }: { row: ReleaseChangeRow }): ReactElement {
         </Button>
       </div>
       <div className='max-h-[360px] overflow-auto py-2'>
-        <div className='min-w-max font-code [&_*]:font-code'>
+        <div className='min-w-max'>
           {row.lines.map((line, index) => (
             <div
               key={index}
@@ -299,12 +299,12 @@ function CodeViewer({ row }: { row: ReleaseChangeRow }): ReactElement {
                   'bg-[color-mix(in_srgb,var(--status-failure)_8%,transparent)] line-through decoration-status-failure/60',
               )}
             >
-              <span className='w-12 shrink-0 select-none pr-4 text-right text-muted-foreground/60'>
+              <span className='w-12 shrink-0 select-none pr-4 text-right font-code text-muted-foreground/60'>
                 {line.number ?? '−'}
               </span>
               <span className='whitespace-pre pr-6'>
                 {line.tokens.map((token, tokenIndex) => (
-                  <span key={tokenIndex} className={CODE_TONE_CLASS[token.tone]}>
+                  <span key={tokenIndex} className={cn('font-code', CODE_TONE_CLASS[token.tone])}>
                     {token.text}
                   </span>
                 ))}
