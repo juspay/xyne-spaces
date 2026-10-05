@@ -195,10 +195,13 @@ export interface RoomContext {
   callStartTime: number | null; // Track when the call started for duration calculation
   isAIAssistantEnabled: boolean; // Track Xyne Automatic state
   transcriptionAgentLeft: boolean; // Track if the transcription agent left mid-call
-  isTranscriptionEnabled: boolean; // Host kill-switch: false = agent silenced (audio unsubscribed)
+  isTranscriptionEnabled: boolean; // Host/acting-host kill-switch: false = agent silenced (audio unsubscribed)
   transcriptionToggleNotice: { enabled: boolean; byName: string } | null; // Drives the toggle toast
   privacyPopoverOpen: boolean; // Shared open-state for the CallPrivacyIndicator popover
-  transcriptionPending: boolean; // A host toggle is in-flight, awaiting the agent's confirmation
+  transcriptionPending: boolean; // A toggle is in-flight, awaiting the agent's confirmation
+  // Acting host (longest-present human while the real host is absent) — gets every
+  // host-only in-call action. Backend-computed; null whenever the host is present.
+  actingHostId: string | null;
   aiController: { id: string; name: string } | null;
   pendingControlRequest: { requesterId: string; requesterName: string } | null;
   isAiControlRequested: boolean; // Track if local user has a pending control request
@@ -329,6 +332,7 @@ export type RoomMachineEvent =
   | { type: 'DISMISS_TRANSCRIPTION_NOTICE' } // User acknowledged the transcription-toggle toast
   | { type: 'SET_PRIVACY_POPOVER'; open: boolean } // Open/close the transcription privacy popover
   | { type: 'SYNC_TRANSCRIPTION_STATE'; enabled: boolean } // Late-joiner sync from room metadata
+  | { type: 'SYNC_ACTING_HOST'; actingHostId: string | null } // Room-metadata acting-host sync
   | { type: 'AI_CONTROL_REQUEST'; requesterId: string; requesterName: string }
   | { type: 'AI_CONTROL_REQUEST_PENDING'; requesterId: string; requesterName: string }
   | { type: 'AI_CONTROL_REQUEST_SENT' } // Local user sent a control request
@@ -502,23 +506,40 @@ export const roomMachine = setup({
           }
         };
 
+        // Backend-published acting-host id, synced on every metadata change. UI
+        // hint only — enforcement is server-side (every host-only endpoint + agent).
+        const syncActingHost = (metadata?: string) => {
+          if (!metadata) return;
+          try {
+            const { actingHostId } = JSON.parse(metadata) as { actingHostId?: unknown };
+            if (typeof actingHostId === 'string' || actingHostId === null) {
+              sendBack({ type: 'SYNC_ACTING_HOST', actingHostId });
+            }
+          } catch {
+            // ignore malformed metadata
+          }
+        };
+
         // Connection events
         room.on(LiveKitRoomEvent.Connected, () => {
           sendBack({ type: 'CONNECTION_STATE_CHANGED', state: ConnectionState.Connected });
           updateParticipants();
           syncHostControls(room.metadata);
           syncTranscriptionState(room.metadata);
+          syncActingHost(room.metadata);
         });
 
         room.on(LiveKitRoomEvent.RoomMetadataChanged, (metadata: string) => {
           syncHostControls(metadata);
           syncTranscriptionState(metadata);
+          syncActingHost(metadata);
           updateParticipants();
         });
 
         // Listener mounts after connect; sync current metadata once.
         syncHostControls(room.metadata);
         syncTranscriptionState(room.metadata);
+        syncActingHost(room.metadata);
         updateParticipants();
 
         // Same for connection state: the Connected event fired before this listener
@@ -1356,6 +1377,7 @@ export const roomMachine = setup({
       transcriptionToggleNotice: () => null,
       privacyPopoverOpen: () => false,
       transcriptionPending: () => false,
+      actingHostId: () => null,
       aiController: () => null,
       pendingControlRequest: () => null,
       isAiControlRequested: () => false,
@@ -1552,6 +1574,7 @@ export const roomMachine = setup({
     transcriptionToggleNotice: null,
     privacyPopoverOpen: false,
     transcriptionPending: false,
+    actingHostId: null,
     aiController: null,
     pendingControlRequest: null,
     isAiControlRequested: false,
@@ -2165,16 +2188,18 @@ export const roomMachine = setup({
           ],
         },
         // Agent's authoritative confirmation: reflect the real state + clear pending.
-        // Peers get the toast; the host's own toast/undo is handled by useTranscriptionHostToast.
+        // Peers get the toast, naming the acting host when one is standing in.
         TRANSCRIPTION_CONFIRMED: {
           actions: assign({
             isTranscriptionEnabled: ({ event }) => event.enabled,
             isAIAssistantEnabled: ({ event, context }) =>
               event.enabled ? context.isAIAssistantEnabled : false,
             transcriptionPending: () => false,
-            transcriptionToggleNotice: ({ event }) => ({
+            transcriptionToggleNotice: ({ event, context }) => ({
               enabled: event.enabled,
-              byName: 'The host',
+              byName:
+                context.participants.find(p => p.identity === context.actingHostId)?.name ??
+                'The host',
             }),
           }),
         },
@@ -2202,6 +2227,12 @@ export const roomMachine = setup({
             isTranscriptionEnabled: ({ event }) => event.enabled,
             isAIAssistantEnabled: ({ event, context }) =>
               event.enabled ? context.isAIAssistantEnabled : false,
+          }),
+        },
+        // Room-metadata sync of the acting host (UI hint only).
+        SYNC_ACTING_HOST: {
+          actions: assign({
+            actingHostId: ({ event }) => event.actingHostId,
           }),
         },
         AI_CONTROLLER_CHANGED: {

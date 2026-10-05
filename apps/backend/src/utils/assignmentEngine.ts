@@ -140,7 +140,7 @@ async function resolveStartOffsets(
   return offsets;
 }
 
-async function filterMappingsToChannelParticipants(
+export async function filterMappingsToChannelParticipants(
   userGroupMappings: UserGroupMapping[],
   channelId: string,
 ): Promise<UserGroupMapping[]> {
@@ -259,9 +259,10 @@ export async function evaluateAssignmentRule(
   userGroupId: string,
   boardId: string,
   assignmentType: AssignmentType = AssignmentType.TICKET_ASSIGNEE,
-  excludeUserId?: string,
-  projectId?: string,
-  channelId?: string,
+  excludeUserId: string | undefined,
+  projectId: string | undefined,
+  // Required so every caller supplies the ticket's channel — private channels restrict the pool to participants.
+  channelId: string | null,
 ): Promise<AssignmentResult> {
   logger.info(`[Assignment] Evaluating for userGroupId: ${userGroupId}, boardId: ${boardId}, type: ${assignmentType}${excludeUserId ? `, excludeUserId: ${excludeUserId}` : ''}${projectId ? `, projectId: ${projectId}` : ''}${channelId ? `, channelId: ${channelId}` : ''}`);
 
@@ -797,8 +798,8 @@ async function pickBest(
 export async function evaluateAllRoles(
   userGroupId: string,
   boardId: string,
-  projectId?: string,
-  channelId?: string,
+  projectId: string | undefined,
+  channelId: string | null,
 ): Promise<AllRolesResult> {
   logger.info(`[Assignment] evaluateAllRoles for userGroupId: ${userGroupId}, boardId: ${boardId}${projectId ? `, projectId: ${projectId}` : ''}${channelId ? `, channelId: ${channelId}` : ''}`);
 
@@ -945,8 +946,8 @@ export async function evaluateRoleSlots(
   userGroupId: string,
   boardId: string,
   roleIds: string[],
-  projectId?: string,
-  channelId?: string,
+  projectId: string | undefined,
+  channelId: string | null,
   excludeUserId?: string,
 ): Promise<RoleSlotsResult> {
   logger.info(

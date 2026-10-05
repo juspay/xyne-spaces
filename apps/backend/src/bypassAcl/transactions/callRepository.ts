@@ -544,7 +544,7 @@ export function createCallWithParticipantsAndMessageTx(callId: string, roomName:
   });
 }
 
-export function updateScheduledCallTx(db: PrismaClient, title: string | undefined, startsAt: Date | undefined, endsAt: Date | undefined, channelId: string | undefined, metadata: Record<string, unknown> | undefined, callUpdatesChannel: string | null | undefined, callId: string, removeUserIds: string[] | undefined, addUserIds: string[] | undefined, invitedByUserId: string | undefined, externalInvitees: string[] | undefined) {
+export function updateScheduledCallTx(db: PrismaClient, title: string | undefined, startsAt: Date | undefined, endsAt: Date | undefined, channelId: string | undefined, metadata: Record<string, unknown> | undefined, callUpdatesChannel: string | null | undefined, callId: string, removeUserIds: string[] | undefined, addUserIds: string[] | undefined, invitedByUserId: string | undefined, externalInvitees: string[] | undefined, summaryTemplateId?: string | null) {
   return transaction(['Call', 'CallParticipant'], 'updateScheduledCall: scheduled call update with participant add, remove and preview refresh must commit atomically; tx is not ACL-wrapped', db, async (tx) => {
     const updateData: Record<string, unknown> = { updatedAt: new Date() };
     if (title !== undefined) updateData.title = title;
@@ -553,6 +553,7 @@ export function updateScheduledCallTx(db: PrismaClient, title: string | undefine
     if (channelId !== undefined) updateData.channelId = channelId;
     if (metadata !== undefined) updateData.metadata = metadata as Prisma.InputJsonValue;
     if (callUpdatesChannel !== undefined) updateData.callUpdatesChannel = callUpdatesChannel;
+    if (summaryTemplateId !== undefined) updateData.summaryTemplateId = summaryTemplateId;
 
     const updatedCall = await tx.call.update({
       where: { id: callId },

@@ -516,6 +516,7 @@ model WorkflowExecution {
   @@index([workflowId])
   @@index([workflowId, createdAt(sort: Desc), id])
   @@index([parentWorkflowExecutionId])
+  @@index([status, workflowType, createdAt])
   @@map("workflow_executions")
   @@schema("workflow")
 }
@@ -947,6 +948,7 @@ model User {
 
   @@index([workspaceId, id])
   @@index([activityStatus])
+  @@index([orgMemberId])
   @@map("users")
   @@schema("public")
 }
@@ -2731,6 +2733,7 @@ model ExternalMessage {
   @@unique([externalSourceId, externalId])  // Prevent duplicates
   @@index([externalSourceId, externalThreadId])  // Fast lookup by thread
   @@index([messageId])                           // Fast lookup by message
+  @@index([externalId])
   @@map("external_messages")
   @@schema("workflow")
 }
@@ -3074,6 +3077,7 @@ model RecurringCallSeries {
   endsOn         DateTime?                 // Series end date (null = indefinite)
   metadata           Json?                     // Extra config e.g. { "reminderMinutes": 10 }
   callUpdatesChannel String?                   // Non-null = post call updates to this channel (Case 3); null = no broadcast
+  summaryTemplateId  String?                   // Pinned detailed-summary template, stamped onto every instance (no FK constraint)
   createdAt          DateTime                  // Set explicitly in code
   updatedAt          DateTime                  @updatedAt
 

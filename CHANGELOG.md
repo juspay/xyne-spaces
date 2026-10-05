@@ -1,3 +1,46 @@
+## [1.455.0](https://github.com/juspay/xyne-spaces/compare/v1.454.3...v1.455.0) (2026-10-05)
+
+
+### Features
+
+* Add developer tab to Agent Hub ([#2566](https://github.com/juspay/xyne-spaces/issues/2566)) ([9ab46f5](https://github.com/juspay/xyne-spaces/commit/9ab46f5eb21845e472fe9a874b23c5e8274097bf))
+* agent-no-host-control ([#2233](https://github.com/juspay/xyne-spaces/issues/2233)) ([a52afe1](https://github.com/juspay/xyne-spaces/commit/a52afe14db5a47f50f6eeee55fecd14648a93581))
+
+## [1.454.3](https://github.com/juspay/xyne-spaces/compare/v1.454.2...v1.454.3) (2026-10-05)
+
+
+### Bug Fixes
+
+* auto assignment in private channel ([#2346](https://github.com/juspay/xyne-spaces/issues/2346)) ([9bdafee](https://github.com/juspay/xyne-spaces/commit/9bdafeed0222e22f39784312a0ec8eaa9451e8fd))
+
+## [1.454.2](https://github.com/juspay/xyne-spaces/compare/v1.454.1...v1.454.2) (2026-10-05)
+
+
+### Bug Fixes
+
+* added indexes to prevent seq scans on workflow_executions, external_messages and users ([#2608](https://github.com/juspay/xyne-spaces/issues/2608)) ([3a77c42](https://github.com/juspay/xyne-spaces/commit/3a77c42221506b7b67f3b13bb09bc906a819ee9a))
+
+## [1.454.1](https://github.com/juspay/xyne-spaces/compare/v1.454.0...v1.454.1) (2026-10-05)
+
+
+### Bug Fixes
+
+* mark channel as read on load and hide unread badge on open DM ([#2497](https://github.com/juspay/xyne-spaces/issues/2497)) ([094fca0](https://github.com/juspay/xyne-spaces/commit/094fca07ccf63ad8f3f9482fe0a37626451a01bf))
+
+## [1.454.0](https://github.com/juspay/xyne-spaces/compare/v1.453.0...v1.454.0) (2026-10-05)
+
+
+### Features
+
+* pragati schedule intergeration ([#2605](https://github.com/juspay/xyne-spaces/issues/2605)) ([cf5e0a4](https://github.com/juspay/xyne-spaces/commit/cf5e0a45fb22ef5a78be1f30b71b896138730dd1))
+
+## [1.453.0](https://github.com/juspay/xyne-spaces/compare/v1.452.1...v1.453.0) (2026-10-05)
+
+
+### Features
+
+* xyne calls link unfurl ([#2090](https://github.com/juspay/xyne-spaces/issues/2090)) ([cfdb7a2](https://github.com/juspay/xyne-spaces/commit/cfdb7a27f09d779e35acf15205f74480274d2b41))
+
 ## [1.452.1](https://github.com/juspay/xyne-spaces/compare/v1.452.0...v1.452.1) (2026-10-01)
 
 
