@@ -1,11 +1,13 @@
 /**
  * Per-source mutex for the calendar sync queues.
  *
- * Concurrency is safe across sources but not within one: both providers keep a
- * cursor (Google syncToken, Graph deltaLink) that a sync reads at the start and
- * writes back at the end, so two overlapping jobs for one source would leave a
- * cursor that skips events. Deterministic jobIds only stop a duplicate job being
- * enqueued — manual-sync and incremental-sync have different ids and can overlap.
+ * Each worker process runs one calendar job at a time, but the worker scales to
+ * several replicas, so two processes can still pick up jobs for the same source.
+ * Both providers keep a cursor (Google syncToken, Graph deltaLink) that a sync
+ * reads at the start and writes back at the end, so overlapping jobs for one
+ * source would leave a cursor that skips events. Deterministic jobIds only stop a
+ * duplicate job being enqueued — manual-sync and incremental-sync have different
+ * ids and can overlap.
  */
 
 import {
