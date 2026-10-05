@@ -123,6 +123,8 @@ export interface XyneAIContext {
   threadInfo: ThreadInfo | null;
   // Flag to indicate a fresh chat should be started
   startFreshChat: boolean;
+  // Open with voice mode on (the onboarding greeting)
+  openInVoiceMode: boolean;
   // Canvas context (legacy - kept for backward compatibility)
   canvasInfo: CanvasInfo | null;
   // Canvas selection context - groups canvas with its selections
@@ -173,6 +175,7 @@ export type XyneAIEvent =
       channelId?: string;
       threadInfo?: ThreadInfo | null;
       startFreshChat?: boolean;
+      startVoiceMode?: boolean;
       canvasInfo?: CanvasInfo | null;
       selectionInfo?: SelectionInfo | null;
       selectionInfos?: SelectionInfo[];
@@ -556,6 +559,7 @@ export const xyneAIMachine = setup({
           channelId: contextType === 'chat' ? contextId : null, // Legacy support
           threadInfo,
           startFreshChat,
+          openInVoiceMode: event.startVoiceMode ?? false,
           canvasInfo: event.canvasInfo ?? null,
           canvasContexts: newCanvasContexts,
           initialContextSelections: event.initialContextSelections ?? null,
@@ -637,6 +641,7 @@ export const xyneAIMachine = setup({
           channelId: contextType === 'chat' ? contextId : null, // Legacy support
           threadInfo,
           startFreshChat,
+          openInVoiceMode: event.startVoiceMode ?? false,
           canvasInfo: event.canvasInfo ?? null,
           canvasContexts: newCanvasContexts,
           initialContextSelections:
@@ -725,6 +730,7 @@ export const xyneAIMachine = setup({
         channelId: null,
         threadInfo: null,
         startFreshChat: false,
+        openInVoiceMode: false,
         canvasInfo: null,
         canvasContexts: [] as CanvasSelectionContext[],
         initialContextSelections: null,
@@ -876,6 +882,7 @@ export const xyneAIMachine = setup({
     channelId: null,
     threadInfo: null,
     startFreshChat: false,
+    openInVoiceMode: false,
     canvasInfo: null,
     canvasContexts: [],
     initialContextSelections: null,

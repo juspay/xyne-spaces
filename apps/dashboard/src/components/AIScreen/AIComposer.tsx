@@ -13,6 +13,7 @@ import {
   type ChangeEvent,
   type ReactElement,
 } from 'react';
+import { createPortal } from 'react-dom';
 import {
   ArrowUp,
   Square,
@@ -44,8 +45,8 @@ import { ComposerVoiceButton } from './ComposerVoiceButton';
 import { cn } from '../../utils/classNames';
 import { commandsForSurface, type CommandDef } from '@xyne/shared/commands';
 import { CommandMenu } from './CommandMenu';
-import { useVoiceMode } from '../Voice/useVoiceMode';
-import { VoiceModeBar } from '../Voice/VoiceModeBar';
+import { useVoiceHost } from '../Voice/voiceSession';
+import { VoiceStage } from '../Voice/VoiceStage';
 import type { StreamState } from '../../services/XyneAI';
 import { detectStudioIntent } from './voice/studioIntent';
 import { apiInstance } from '../../services/clients/apiClient';
@@ -121,6 +122,8 @@ interface AIComposerProps {
    *  the latest snapshot so selections survive switching to a recent chat,
    *  matching XyneAISidebar (where composer state lives in the parent). */
   onContextChange?: ((context: ComposerContext) => void) | undefined;
+  /** Where voice mode shows its stage: a positioned element covering the chat area (null until mounted). */
+  voiceStageHost: HTMLElement | null;
 }
 
 interface XyneAIConfigResponse {
@@ -244,6 +247,7 @@ export const AIComposer = forwardRef<AIComposerHandle, AIComposerProps>(function
     showAgentSelector = true,
     initialExtras,
     onContextChange,
+    voiceStageHost,
   },
   ref,
 ): ReactElement {
@@ -591,6 +595,12 @@ export const AIComposer = forwardRef<AIComposerHandle, AIComposerProps>(function
     onStop?.();
   };
 
+  // Voice routes through assistant.answer rather than routedSubmit, so its routing is cancelled directly.
+  const handleVoiceStop = (): void => {
+    assistant?.cancel();
+    handleStop();
+  };
+
   function send(trigger: 'button' | 'enter'): void {
     onSubmit?.(
       applyStudioMode(value.trim()),
@@ -693,11 +703,12 @@ export const AIComposer = forwardRef<AIComposerHandle, AIComposerProps>(function
         : undefined,
     [isAutoOn, assistant],
   );
-  const voice = useVoiceMode({
-    enabled: voiceMode,
+  useVoiceHost(voiceMode, {
     submit: submitTranscript,
     ownsStream: startedOnAIPage,
-    ...(answerTranscript && { answer: answerTranscript }),
+    answer: answerTranscript,
+    onStop: handleVoiceStop,
+    onExit: () => setVoiceMode(false),
   });
 
   const [dismissedStudioIntent, setDismissedStudioIntent] = useState<string | null>(null);
@@ -826,15 +837,17 @@ export const AIComposer = forwardRef<AIComposerHandle, AIComposerProps>(function
 
   if (voiceMode) {
     return (
-      <div className='relative'>
-        <VoiceModeBar
-          phase={voice.phase}
-          studioMode={voiceStudioMode}
-          onHoldStart={voice.startRecording}
-          onHoldEnd={voice.stopRecording}
-          onExit={() => setVoiceMode(false)}
-        />
-      </div>
+      <>
+        {voiceStageHost &&
+          createPortal(
+            <div className='absolute inset-0 z-30 bg-background'>
+              <div className='mx-auto flex h-full max-w-xl'>
+                <VoiceStage studioMode={voiceStudioMode} />
+              </div>
+            </div>,
+            voiceStageHost,
+          )}
+      </>
     );
   }
 

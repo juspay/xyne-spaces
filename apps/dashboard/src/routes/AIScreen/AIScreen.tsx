@@ -157,6 +157,8 @@ const AIScreen = (): ReactElement => {
   const [isDragging, setIsDragging] = useState(false);
   const dropZoneRef = useRef<HTMLDivElement | null>(null);
   const landingComposerRef = useRef<AIComposerHandle | null>(null);
+  // Voice mode covers the landing page, so the composer shows it there.
+  const [landingVoiceHost, setLandingVoiceHost] = useState<HTMLElement | null>(null);
   const chatThreadRef = useRef<AIChatThreadHandle | null>(null);
   const dragCounterRef = useRef(0);
   const showChatViewRef = useRef(showChatView);
@@ -699,7 +701,10 @@ const AIScreen = (): ReactElement => {
                 />
               ) : (
                 /* Landing page – centred greeting + composer */
-                <main className='relative flex h-full flex-1 items-center justify-center px-6 py-8'>
+                <main
+                  ref={setLandingVoiceHost}
+                  className='relative flex h-full flex-1 items-center justify-center px-6 py-8'
+                >
                   {/* The landing page has no header, so without this the
                       sidebar's own collapse button would strand the user with
                       no way to bring it back. */}
@@ -730,6 +735,7 @@ const AIScreen = (): ReactElement => {
                         showAgentSelector={isV2}
                         onContextChange={handleContextChange}
                         hideDisclaimer
+                        voiceStageHost={landingVoiceHost}
                       />
                     </div>
                   </div>

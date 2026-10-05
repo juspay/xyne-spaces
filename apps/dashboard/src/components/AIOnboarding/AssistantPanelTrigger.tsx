@@ -20,7 +20,12 @@ export const AssistantPanelTrigger = (): null => {
   useEffect(() => {
     if (!userId || isGuest || isMobile || !isChatRoute(pathname)) return;
     if (!hasJustOnboarded(userId)) return;
-    xyneAIActor.send({ type: 'OPEN', trackSource: 'setup', startFreshChat: true });
+    xyneAIActor.send({
+      type: 'OPEN',
+      trackSource: 'setup',
+      startFreshChat: true,
+      startVoiceMode: true,
+    });
     // OPEN is ignored while a modal holds the panel closed; keep the mark and retry on the next page.
     if (xyneAIActor.getSnapshot().matches('open')) clearJustOnboarded(userId);
   }, [userId, isGuest, isMobile, pathname]);
