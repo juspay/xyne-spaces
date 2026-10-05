@@ -3,8 +3,6 @@ import { ChevronDown, ChevronRight } from 'lucide-react';
 import Input from '../../ui/Input/Input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../../ui/Select';
 import { cn } from '../../../utils/classNames';
-import { EntityMultiSelector } from '../../ui/EntitySelector/EntityMultiSelector';
-import type { SelectorOption } from '../../ui/EntitySelector/EntitySelector.types';
 import type { AppFetchFormValue } from './AppFetchSection.types';
 import { MAPPED_FIELDS, readMapping, readNumber, readPagination } from './AppFetchSection.utils';
 
@@ -36,30 +34,6 @@ export const AppFetchMapping = ({
     onChange({ ...value, response: { ...mapping, ...patch } });
   const setField = (key: string, next: string): void =>
     setMapping({ fields: { ...mapping.fields, [key]: next } });
-
-  const dedupableFields = MAPPED_FIELDS.filter(f => f.structured !== true);
-  const mappedPaths = new Set(
-    dedupableFields.map(f => mapping.fields[f.key]).filter((p): p is string => Boolean(p)),
-  );
-  const unmappedIdFields = mapping.idFields.filter(p => !mappedPaths.has(p));
-
-  // Offer the paths already mapped above — a dedup key is almost always a
-  // subset of them. `allowCreate` still permits a path that is not mapped.
-  const idFieldOptions: SelectorOption[] = ((): SelectorOption[] => {
-    const seen = new Map<string, string>();
-    for (const field of dedupableFields) {
-      const path = mapping.fields[field.key];
-      if (path && !seen.has(path)) seen.set(path, field.label);
-    }
-    // Keep an already-selected custom path visible as a chip rather than a bare id.
-    for (const path of mapping.idFields) if (!seen.has(path)) seen.set(path, 'Custom path');
-    return [...seen].map(([path, label]) => ({
-      value: path,
-      label: path,
-      subtitle: label,
-      icon: null,
-    }));
-  })();
 
   return (
     <div className='rounded-md border border-border'>
@@ -201,65 +175,6 @@ export const AppFetchMapping = ({
               Dot paths into each item, e.g.{' '}
               <code className='font-mono'>additionalFormFields.messageCreatedAt</code>. Only the
               starred fields are required.
-            </span>
-          </div>
-
-          <div className='flex flex-col gap-1'>
-            <span className='text-xs font-medium'>Deduplication key</span>
-            {readOnly ? (
-              <p className='text-xs font-mono text-muted-foreground'>
-                {mapping.idFields.length > 0 ? mapping.idFields.join(' | ') : 'message id alone'}
-              </p>
-            ) : (
-              <EntityMultiSelector
-                options={idFieldOptions}
-                selectedValues={mapping.idFields}
-                onMultiSelect={next => setMapping({ idFields: next })}
-                placeholder='Message id alone'
-                searchPlaceholder='Search or type a path'
-                showSearch
-                allowCreate
-                onCreateOption={path => {
-                  const trimmed = path.trim();
-                  if (trimmed && !mapping.idFields.includes(trimmed)) {
-                    setMapping({ idFields: [...mapping.idFields, trimmed] });
-                  }
-                }}
-                collapseSelectedAfter={0}
-                collapsedLabel='paths'
-              />
-            )}
-
-            {mapping.idFields.length > 0 && (
-              <div className='flex flex-col gap-0.5'>
-                <span className='text-[11px] text-muted-foreground'>
-                  Key:{' '}
-                  {mapping.idFields.map((path, i) => (
-                    <span key={path}>
-                      {i > 0 && <span className='text-muted-foreground'> | </span>}
-                      <code
-                        className={cn(
-                          'font-mono',
-                          unmappedIdFields.includes(path) && 'text-destructive underline',
-                        )}
-                      >
-                        {path}
-                      </code>
-                    </span>
-                  ))}
-                </span>
-                {unmappedIdFields.length > 0 && (
-                  <span className='text-[11px] text-destructive'>
-                    {unmappedIdFields.map(p => `"${p}"`).join(', ')} match no field path above. If
-                    you renamed a field, update this key to match.
-                  </span>
-                )}
-              </div>
-            )}
-            <span className='text-[11px] text-muted-foreground'>
-              Paths combined into one id, in the order chosen. Needed when the app&apos;s own id is
-              not unique on its own. Listing the jointly-unique fields keeps those messages from
-              being discarded as duplicates.
             </span>
           </div>
         </div>

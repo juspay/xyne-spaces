@@ -1,5 +1,7 @@
 /**
- * Pure helpers for Digital Twin backfill STATUS + PAUSE/RESUME state math.
+ * Digital Twin backfill state: the JSONB types, the window validation + state
+ * builders shared by the user route, the admin controls and the worker, and the
+ * pure STATUS + PAUSE/RESUME math.
  *
  * No IO here — every function takes plain state in and returns plain data out,
  * so the tricky bits (paused vs running vs stalled, what a resume re-enqueues)
@@ -10,30 +12,47 @@
  *   { [source]: { from, to, cursor, complete, pausedAt?, progress? } }
  */
 
-export type BackfillSourceKey = "messages" | "calls" | "canvases";
-export const BACKFILL_SOURCE_KEYS: readonly BackfillSourceKey[] = ["messages", "calls", "canvases"];
+/** Sources the backfill walks (one BullMQ job per source per user). */
+export const BACKFILL_SOURCES = ["messages", "calls", "canvases"] as const;
+export type BackfillSource = (typeof BACKFILL_SOURCES)[number];
 
-export interface BackfillProgressShape {
-  windowsTotal?: number;
-  windowsDone?: number;
-  recordsSeen?: number;
-  candidatesMade?: number;
-  currentWindow?: { from: string; to: string } | null;
-  lastError?: { message: string; windowUpper: string; at: string } | null;
-  startedAt?: string;
-  updatedAt?: string;
+/** Strict shape of what the builders/worker write (every field present). */
+export interface BackfillProgress {
+  /** ceil((to-from)/BACKFILL_WINDOW_MS). */
+  windowsTotal: number;
+  windowsDone: number;
+  /** Running sum of records fetched across processed windows. */
+  recordsSeen: number;
+  /** Running sum of candidates persisted across processed windows. */
+  candidatesMade: number;
+  currentWindow: { from: string; to: string } | null;
+  lastError: { message: string; windowUpper: string; at: string } | null;
+  startedAt: string;
+  /** Set on EVERY write — the server heartbeat the status endpoint watches. */
+  updatedAt: string;
 }
 
-export interface BackfillEntryShape {
-  from?: string;
-  to?: string;
-  cursor?: string;
-  complete?: boolean;
+export interface BackfillEntry {
+  from: string;
+  to: string;
+  cursor: string;
+  complete: boolean;
   /** ISO timestamp set when the user PAUSED this (incomplete) source. Absent =
-   *  not paused. The cursor is preserved so a resume continues where it left. */
+   *  not paused. The cursor is preserved so a resume continues where it left;
+   *  a paused source is NOT auto-recovered on startup (the user deliberately
+   *  stopped it). */
   pausedAt?: string;
-  progress?: BackfillProgressShape;
+  progress?: BackfillProgress;
 }
+
+export type StrictBackfillState = Record<string, BackfillEntry>;
+
+/** Tolerant shapes for state read back from the JSONB column (any field may be
+ *  missing on old/partial rows). */
+export type BackfillProgressShape = Partial<BackfillProgress>;
+export type BackfillEntryShape = Partial<Omit<BackfillEntry, "progress">> & {
+  progress?: BackfillProgressShape;
+};
 
 export interface BackfillJobProbe {
   state: string;
@@ -43,6 +62,77 @@ export interface BackfillJobProbe {
 }
 
 export type BackfillState = Record<string, BackfillEntryShape>;
+
+/** The raw JSONB column as a state object, or null when it is absent/not an
+ *  object. Arrays pass through, exactly like the inline checks this replaced. */
+export function asBackfillState(raw: unknown): BackfillState | null {
+  return raw && typeof raw === "object" ? (raw as BackfillState) : null;
+}
+
+/** Hard limit on the backfill window length, in calendar months. */
+export const MAX_BACKFILL_MONTHS = 24;
+
+/** One window = one month. Each window fans out into token-budgeted curator
+ *  batches (userMemoryBatcher). 24-month backfill → up to 24 windows × 3 sources. */
+export const BACKFILL_WINDOW_MS = 30 * 24 * 3600 * 1000;
+
+/**
+ * Why a requested backfill window is unacceptable, or null when it is fine.
+ * Unparsable dates / from after to → 'invalid' (checked first), a span over
+ * MAX_BACKFILL_MONTHS → 'too-long'. The caller owns the error message/status.
+ */
+export function backfillRangeProblem(from: Date, to: Date): "invalid" | "too-long" | null {
+  if (Number.isNaN(from.getTime()) || Number.isNaN(to.getTime()) || from > to) return "invalid";
+  // Calendar months, NOT 30-day months. A true 24-calendar-month span is
+  // 730/731 days = 24.33 "30-day months", so 30-day arithmetic rejected the
+  // UI's own "Last 24 months" preset with a 400 every single time.
+  const earliestAllowed = new Date(to);
+  earliestAllowed.setUTCMonth(earliestAllowed.getUTCMonth() - MAX_BACKFILL_MONTHS);
+  return from < earliestAllowed ? "too-long" : null;
+}
+
+/** Total windows the walk covers, ceil'd. Never < 1 so an all-in-one-window
+ *  range still reports 1/1 at completion. */
+export function windowsTotalFor(fromIso: string, toIso: string): number {
+  const span = new Date(toIso).getTime() - new Date(fromIso).getTime();
+  if (!Number.isFinite(span) || span <= 0) return 1;
+  return Math.max(1, Math.ceil(span / BACKFILL_WINDOW_MS));
+}
+
+export function seedBackfillProgress(fromIso: string, toIso: string, nowIso: string): BackfillProgress {
+  return {
+    windowsTotal: windowsTotalFor(fromIso, toIso),
+    windowsDone: 0,
+    recordsSeen: 0,
+    candidatesMade: 0,
+    currentWindow: null,
+    lastError: null,
+    startedAt: nowIso,
+    updatedAt: nowIso,
+  };
+}
+
+/** Fresh state for a (re-)enable / admin start: one entry per source, all
+ *  walking the same window. Fresh progress every time so old counts never
+ *  carry over. */
+export function buildBackfillState({ from, to }: { from: Date; to: Date }, now: Date): StrictBackfillState {
+  const fromIso = from.toISOString();
+  const toIso = to.toISOString();
+  const nowIso = now.toISOString();
+  const state: StrictBackfillState = {};
+  for (const source of BACKFILL_SOURCES) {
+    state[source] = {
+      from: fromIso,
+      to: toIso,
+      // Chronological walk (oldest → newest): cursor is the LOWER bound of the
+      // next chunk, seeded at `from`. See the backfill worker.
+      cursor: fromIso,
+      complete: false,
+      progress: seedBackfillProgress(fromIso, toIso, nowIso),
+    };
+  }
+  return state;
+}
 
 /** Legacy cursor math: fraction of the [from,to] span already walked. */
 export function pctByTime(entry: BackfillEntryShape): number | null {
@@ -74,7 +164,7 @@ export function isSourcePaused(entry: BackfillEntryShape | undefined): boolean {
  */
 export function applyBackfillPause(state: BackfillState, nowIso: string): number {
   let paused = 0;
-  for (const s of BACKFILL_SOURCE_KEYS) {
+  for (const s of BACKFILL_SOURCES) {
     const entry = state[s];
     if (entry && entry.complete !== true) {
       entry.pausedAt = nowIso;
@@ -90,9 +180,9 @@ export function applyBackfillPause(state: BackfillState, nowIso: string): number
  * their persisted cursor). Complete sources are skipped. Entries with an invalid
  * from/to are skipped (can't build a valid job window).
  */
-export function collectAndClearResumable(state: BackfillState): BackfillSourceKey[] {
-  const out: BackfillSourceKey[] = [];
-  for (const s of BACKFILL_SOURCE_KEYS) {
+export function collectAndClearResumable(state: BackfillState): BackfillSource[] {
+  const out: BackfillSource[] = [];
+  for (const s of BACKFILL_SOURCES) {
     const entry = state[s];
     if (!entry || entry.complete === true) continue;
     if (!entry.from || !entry.to) continue;
@@ -105,8 +195,8 @@ export function collectAndClearResumable(state: BackfillState): BackfillSourceKe
 
 /** Incomplete + NOT paused source keys — what the startup self-heal re-enqueues
  *  (only when the queue has no live job for them). Pure; does not mutate. */
-export function recoverableSources(state: BackfillState): BackfillSourceKey[] {
-  return BACKFILL_SOURCE_KEYS.filter((s) => {
+export function recoverableSources(state: BackfillState): BackfillSource[] {
+  return BACKFILL_SOURCES.filter((s) => {
     const entry = state[s];
     return !!entry && entry.complete !== true && !entry.pausedAt && !!entry.from && !!entry.to;
   });
@@ -141,10 +231,10 @@ export interface BackfillSummary {
  */
 export function summarizeBackfillState(
   state: BackfillState,
-  probes: Partial<Record<BackfillSourceKey, BackfillJobProbe | null>>,
+  probes: Partial<Record<BackfillSource, BackfillJobProbe | null>>,
   opts: { nowMs: number; stallMs: number },
 ): BackfillSummary | null {
-  const sourceKeys = BACKFILL_SOURCE_KEYS.filter((s) => state[s]);
+  const sourceKeys = BACKFILL_SOURCES.filter((s) => state[s]);
   if (sourceKeys.length === 0) return null;
 
   const sources: Record<string, unknown> = {};

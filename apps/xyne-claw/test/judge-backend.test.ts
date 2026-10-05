@@ -1,7 +1,8 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { jevAsk, jevEnabled, judgeBackendConfigured, type JevQuestion } from "../src/jev.js";
 import { judgeRunSummary, pinRunJudgeBackend, recordJudgeOutcome, setJudgeDebugSink } from "../src/judge-backend.js";
 import { parseLlmJudgeReply } from "../src/judge-llm.js";
+import { isolateEnv } from "./helpers/env.js";
 
 const QUESTIONS: Record<string, JevQuestion> = {
   a: { type: "noul", instructions: "is it done?" },
@@ -28,27 +29,15 @@ function chatReply(values: Record<string, number>): Response {
   );
 }
 
+isolateEnv(ENV_KEYS, { clear: true });
+
+let fetchMock: ReturnType<typeof vi.fn>;
+beforeEach(() => {
+  fetchMock = vi.fn();
+  vi.stubGlobal("fetch", fetchMock);
+});
+
 describe("judge backends", () => {
-  const saved: Record<string, string | undefined> = {};
-  let fetchMock: ReturnType<typeof vi.fn>;
-
-  beforeEach(() => {
-    for (const key of ENV_KEYS) {
-      saved[key] = process.env[key];
-      delete process.env[key];
-    }
-    fetchMock = vi.fn();
-    vi.stubGlobal("fetch", fetchMock);
-  });
-
-  afterEach(() => {
-    for (const key of ENV_KEYS) {
-      if (saved[key] === undefined) delete process.env[key];
-      else process.env[key] = saved[key];
-    }
-    vi.unstubAllGlobals();
-  });
-
   it("routes each run to the backend it was pinned to", async () => {
     process.env["JEV_API_KEY"] = "k-jev";
     process.env["OUR_JEV_URL"] = "https://ourjev.internal/v1/systemone";
@@ -163,25 +152,8 @@ describe("judge backends", () => {
 });
 
 describe("judge debug events", () => {
-  const saved: Record<string, string | undefined> = {};
-  let fetchMock: ReturnType<typeof vi.fn>;
-
   beforeEach(() => {
-    for (const key of ENV_KEYS) {
-      saved[key] = process.env[key];
-      delete process.env[key];
-    }
     process.env["JEV_API_KEY"] = "k-jev";
-    fetchMock = vi.fn();
-    vi.stubGlobal("fetch", fetchMock);
-  });
-
-  afterEach(() => {
-    for (const key of ENV_KEYS) {
-      if (saved[key] === undefined) delete process.env[key];
-      else process.env[key] = saved[key];
-    }
-    vi.unstubAllGlobals();
   });
 
   it("sends every call and outcome to the run's debug sink", async () => {

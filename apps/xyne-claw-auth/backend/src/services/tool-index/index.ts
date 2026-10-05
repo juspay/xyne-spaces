@@ -26,7 +26,7 @@ export {
   syncToolsToIndex,
   syncToolsToIndexBestEffort,
 } from "./sync.js";
-export { listTools, rankBySlug, searchTools } from "./search.js";
+export { keywordQueryWords, keywordSearchTools, listTools, rankBySlug, searchTools, searchToolsWithFallback } from "./search.js";
 export type { SearchToolsOpts } from "./search.js";
 export { TOOL_INDEX_KINDS } from "./types.js";
 export type { RiskLevel, ToolBlob, ToolMatch, ToolParam, ToolRow, ToolSyncOutcome } from "./types.js";

@@ -202,10 +202,12 @@ const canRepresentGroupInVespa = (
     return Boolean(groupKey);
   }
   if (typeof groupBy !== 'object' || groupBy.type !== 'formField') return false;
-  if (!groupKey) return false;
-  // All form field groups can be represented (MISSING_FORM_FIELD_GROUP_KEYS handled via
-  // __VESPA_MISSING__ token). DATE groupBy is not supported in the UI, so no special case.
-  return true;
+  // The __VESPA_MISSING__ / value token does select the group's rows, but which group a
+  // ticket is drawn in is decided client-side from its form values (groupTicketsByFormField),
+  // and a Vespa payload row carries none — those rows land in no group at all and the column
+  // renders empty under a correct badge. The Zero page loads the values as related rows, so
+  // form field grouping goes through it and the token only narrows which ids it reads.
+  return false;
 };
 
 export const getDynamicFieldScalarFilters = (
@@ -240,7 +242,13 @@ export const getFormFieldValue = (
   if (MISSING_FORM_FIELD_GROUP_KEYS.has(groupKey)) return undefined;
   if (
     groupBy.fieldType === FormFieldType.MULTI_SELECT ||
-    groupBy.fieldType === FormFieldType.USER
+    groupBy.fieldType === FormFieldType.USER ||
+    // A STRING group key is folded to lower case so that it names one group per value
+    // regardless of spelling (getFormFieldGroupKeys). Zero's only comparison against the
+    // jsonb value is case-exact, so matching on it would drop every ticket stored with a
+    // different spelling. The Vespa token already restricts the page to the group — it is an
+    // uncased attribute match, which is what the fold was made to agree with.
+    groupBy.fieldType === FormFieldType.STRING
   ) {
     return undefined;
   }

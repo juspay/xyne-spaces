@@ -18,6 +18,7 @@ import {
   
   
   SUMMARY_MAX_INPUT_CHARS,
+  UserType,
 } from '@xyne/shared';
 import { logger } from '@/utils/logger';
 import { formatToISTLocaleString } from '@/utils/dateUtils';
@@ -1144,6 +1145,132 @@ export class CallDocumentService {
       });
       return null;
     }
+  }
+
+  /**
+   * The template already pinned on a regular call, checked against its creator's access.
+   * Null (call default) when it is gone or no longer accessible.
+   */
+  private async resolvePinnedCallSummaryTemplate(
+    call: Pick<Call, 'createdByUserId' | 'summaryTemplateId'>,
+    workspaceId: string,
+    callId: string,
+  ): Promise<SummaryTemplate | null> {
+    if (!call.summaryTemplateId) return null;
+    try {
+      const template = await summaryTemplateService.findAccessibleById(
+        call.summaryTemplateId,
+        workspaceId,
+        call.createdByUserId,
+      );
+      if (!template) {
+        logger.warn(`[${callId}] call_summary_pinned_template_unavailable`, {
+          template_id: call.summaryTemplateId,
+          fallback: 'call_default',
+        });
+        return null;
+      }
+      return await summaryTemplateService.ensureGeneratedSystemPrompt(template);
+    } catch (error) {
+      logger.warn(`[${callId}] call_summary_pinned_template_failed`, {
+        template_id: call.summaryTemplateId,
+        error: error instanceof Error ? error.message : String(error),
+        fallback: 'call_default',
+      });
+      return null;
+    }
+  }
+
+  /** True when the call was scheduled by an app/bot user rather than a person. */
+  private async isBotCreatedCall(call: Pick<Call, 'createdByUserId'>): Promise<boolean> {
+    const creator = await repositories.users.findById(call.createdByUserId);
+    return creator?.userType === UserType.APP || creator?.userType === UserType.BOT;
+  }
+
+  /**
+   * Template for a bot-created call: the one pinned on the call, else the LLM's pick.
+   * Its stored system prompt is used as-is, so no Xyne-generated (Markdown) prompt is
+   * written onto it. Null when nothing was chosen, which falls back to the regular summary.
+   */
+  private async resolveBotCallSummaryTemplate(
+    transcript: string,
+    call: Pick<Call, 'createdByUserId' | 'summaryTemplateId' | 'title'>,
+    workspaceId: string,
+    callId: string,
+  ): Promise<SummaryTemplate | null> {
+    try {
+      if (call.summaryTemplateId) {
+        const pinned = await summaryTemplateService.findAccessibleById(
+          call.summaryTemplateId,
+          workspaceId,
+          call.createdByUserId,
+        );
+        if (pinned) return pinned;
+        logger.warn(`[${callId}] bot_call_summary_pinned_template_unavailable`, {
+          template_id: call.summaryTemplateId,
+          fallback: 'template_selection',
+        });
+      }
+
+      const { templates, defaultTemplate } = await this.loadRecordingSummaryTemplateCandidates(
+        workspaceId,
+        call.createdByUserId,
+      );
+      const selection = await this.pickRecordingSummaryTemplate(
+        transcript,
+        templates,
+        defaultTemplate,
+        callId,
+        undefined,
+        call.title,
+      );
+      return selection.fellBack ? null : selection.template;
+    } catch (error) {
+      logger.warn(`[${callId}] bot_call_summary_template_resolution_failed`, {
+        error: error instanceof Error ? error.message : String(error),
+        fallback: 'call_default',
+      });
+      return null;
+    }
+  }
+
+  /**
+   * Summary for a call scheduled by an app/bot user, whose consumer expects the template's
+   * own output format. Only the template and the transcript reach the model: none of the
+   * Markdown, citation or marked-item instructions of the regular summary are added.
+   */
+  private async generateBotCallSummary(
+    transcript: string,
+    callId: string,
+    template: SummaryTemplate,
+    onDelta?: (accumulatedContent: string) => void | Promise<void>,
+  ): Promise<string | null> {
+    const context = sanitizeInput(template.autoTriggerPrompt).trim();
+    const sections = sanitizeInput(formatSummaryTemplateSections(template.sections));
+    const userPrompt = [
+      context ? `MEETING CONTEXT:\n${context}` : '',
+      sections ? `SECTIONS:\n${sections}` : '',
+      `TRANSCRIPT:\n"""\n${sanitizeInput(transcript)}\n"""`,
+    ]
+      .filter(Boolean)
+      .join('\n\n');
+    const systemPrompt = sanitizeInput(template.systemPrompt).trim();
+
+    const result = await executeStreamingLlmRequest({
+      userPrompt,
+      operation: 'bot_call_summary_generation',
+      callId,
+      ...(systemPrompt ? { systemPrompt } : {}),
+      onDelta,
+    });
+
+    if (!result.ok) {
+      logger.error(`[${callId}] bot_call_summary_llm_request_failed`, { reason: result.reason });
+      return null;
+    }
+
+    logger.info(`[${callId}] bot_call_summary_generated`, { template_id: template.id });
+    return result.content;
   }
 
   /** One annotated summary run for a regular call, through its template when it has one. */
@@ -2316,7 +2443,8 @@ A comprehensive detailed summary has been generated from this call.
     conversationId: string,
     customPrompt?: string,
     options: { callTitlePromise?: Promise<string | null> } = {},
-  ): Promise<{ success: boolean; canvasUrl?: string; error?: string }> {
+    // `rawSummary` is the untouched model output of a bot-created call's template summary.
+  ): Promise<{ success: boolean; canvasUrl?: string; error?: string; rawSummary?: string }> {
     // Tracks a brand-new, lazily-created streaming canvas so any failure after
     // its first chunk can tear down the canvas and published message.
     let newCanvasId: string | null = null;
@@ -2346,11 +2474,20 @@ A comprehensive detailed summary has been generated from this call.
       // token→segment map used to turn `[clf-n]` tokens into canvas citation chips.
       // Both derive from the SAME transcript string, so segment ids always agree.
       const { numbered: numberedTranscript, segments } = numberTranscriptSegments(transcript);
-      // A custom prompt and a channel's own sections are deliberate overrides.
-      const summaryTemplatePromise =
-        customPrompt || channel.callSummaryPrompt || isRecording(call)
+      // A custom prompt is a deliberate override. A template pinned on the call (e.g. at
+      // scheduling) is used as-is with no LLM selection, ahead of the channel's own sections.
+      // A bot-created call always goes through a template, even past the channel's sections.
+      const botCreated =
+        !customPrompt && !isRecording(call) && (await this.isBotCreatedCall(call));
+      const summaryTemplatePromise = botCreated
+        ? this.resolveBotCallSummaryTemplate(transcript, call, channel.workspaceId, callId)
+        : customPrompt || isRecording(call)
           ? Promise.resolve(null)
-          : this.selectCallSummaryTemplate(numberedTranscript, call, channel.workspaceId, callId);
+          : call.summaryTemplateId
+            ? this.resolvePinnedCallSummaryTemplate(call, channel.workspaceId, callId)
+            : channel.callSummaryPrompt
+              ? Promise.resolve(null)
+              : this.selectCallSummaryTemplate(numberedTranscript, call, channel.workspaceId, callId);
       // Best-effort: attach each speaker's participant userId (matched by name) so
       // the citation chip + hover can show the real user avatar. Unmatched speakers
       // fall back to initials on the frontend.
@@ -2406,15 +2543,24 @@ A comprehensive detailed summary has been generated from this call.
       // mid-generation failure can never leave a previously-good summary erased.
       const existingCanvas = await findExistingDetailedSummaryCanvas(callId);
       const summaryTemplate = await summaryTemplatePromise;
+      // Bot-created calls get the template's own format, from the un-numbered transcript.
+      const botTemplate = botCreated ? summaryTemplate : null;
+      const generateSummary = (
+        onDelta?: (accumulatedContent: string) => void | Promise<void>,
+      ): Promise<string | null> =>
+        botTemplate
+          ? this.generateBotCallSummary(transcript, callId, botTemplate, onDelta)
+          : this.generateAnnotatedCallSummary(
+              numberedTranscript,
+              callId,
+              summaryTemplate,
+              customPrompt,
+              channel.callSummaryPrompt ?? undefined,
+              onDelta,
+            );
 
       if (existingCanvas) {
-        const annotatedMarkdown = await this.generateAnnotatedCallSummary(
-          numberedTranscript,
-          callId,
-          summaryTemplate,
-          customPrompt,
-          channel.callSummaryPrompt ?? undefined,
-        );
+        const annotatedMarkdown = await generateSummary();
         if (!annotatedMarkdown) {
           logDetailedSummaryFailed(callId, 'generation_failed');
           return { success: false, error: 'Failed to generate detailed summary' };
@@ -2466,7 +2612,7 @@ A comprehensive detailed summary has been generated from this call.
           channel.workspaceId,
           version
         );
-        return { success: true, canvasUrl };
+        return { success: true, canvasUrl, ...(botTemplate && { rawSummary: annotatedMarkdown }) };
       }
 
       // New canvas: start the LLM first. The first content delta creates the
@@ -2597,20 +2743,13 @@ A comprehensive detailed summary has been generated from this call.
 
       let detailedSummaryMarkdown: string | null;
       try {
-        detailedSummaryMarkdown = await this.generateAnnotatedCallSummary(
-          numberedTranscript,
-          callId,
-          summaryTemplate,
-          customPrompt,
-          channel.callSummaryPrompt ?? undefined,
-          async (accumulated: string) => {
-            // Stripped from every delta, partial ones included, so `[xyne-action]`
-            // is never briefly visible mid-stream.
-            const visibleMarkdown = stripRecordingSummaryMarkedItemAnnotations(accumulated);
-            latestMarkdown = visibleMarkdown;
-            await ensureStreamingCanvas(visibleMarkdown);
-          },
-        );
+        detailedSummaryMarkdown = await generateSummary(async (accumulated: string) => {
+          // Stripped from every delta, partial ones included, so `[xyne-action]`
+          // is never briefly visible mid-stream.
+          const visibleMarkdown = stripRecordingSummaryMarkedItemAnnotations(accumulated);
+          latestMarkdown = visibleMarkdown;
+          await ensureStreamingCanvas(visibleMarkdown);
+        });
       } finally {
         // Stop the writer on success, handled failure, or throw. It is only
         // started after the first chunk has successfully published the canvas.
@@ -2631,6 +2770,8 @@ A comprehensive detailed summary has been generated from this call.
         }
         return { success: false, error: 'Failed to generate detailed summary' };
       }
+
+      const rawSummary = botTemplate ? detailedSummaryMarkdown : undefined;
 
       // Markers come off the ANNOTATED copy; everything downstream renders stripped.
       await this.persistCallMarkedItems(
@@ -2706,7 +2847,7 @@ A comprehensive detailed summary has been generated from this call.
         }
       }
 
-      return { success: true, canvasUrl: finalizedCanvasUrl };
+      return { success: true, canvasUrl: finalizedCanvasUrl, ...(rawSummary && { rawSummary }) };
     } catch (error) {
       logDetailedSummaryFailed(callId, 'unexpected_error', error);
       // If a brand-new canvas + link was already published before the throw,

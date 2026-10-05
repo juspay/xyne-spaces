@@ -19,6 +19,7 @@ export const SDLC_FRAME_MESSAGE = {
   embedState: 'xyne:sdlc-frame:embed-state',
   embedScript: 'xyne:sdlc-frame:embed-script',
   embedEvent: 'xyne:sdlc-frame:embed-event',
+  showBrowser: 'xyne:sdlc-frame:show-browser',
 } as const;
 
 export interface SdlcFrameNavigateMessage {
@@ -55,6 +56,10 @@ export interface SdlcFrameInitiateCallMessage {
   sdlcLink?: SdlcCallLink;
 }
 
+export interface SdlcFrameShowBrowserMessage {
+  type: typeof SDLC_FRAME_MESSAGE.showBrowser;
+}
+
 export type SdlcFrameMessage =
   | SdlcFrameNavigateMessage
   | SdlcFrameRouteMessage
@@ -67,7 +72,8 @@ export type SdlcFrameMessage =
   | SdlcFrameEmbedReleaseMessage
   | SdlcFrameEmbedStateMessage
   | SdlcFrameEmbedScriptMessage
-  | SdlcFrameEmbedEventMessage;
+  | SdlcFrameEmbedEventMessage
+  | SdlcFrameShowBrowserMessage;
 
 /**
  * Frame → parent: open this url the way the app opens links. The lane is an
@@ -303,6 +309,10 @@ export function parseSdlcFrameMessage(data: unknown): SdlcFrameMessage | null {
       tabs: cleanTabs,
       activeTabId: typeof activeTabId === 'string' ? activeTabId : '',
     };
+  }
+
+  if (type === SDLC_FRAME_MESSAGE.showBrowser) {
+    return { type };
   }
 
   if (type === SDLC_FRAME_MESSAGE.openLink) {

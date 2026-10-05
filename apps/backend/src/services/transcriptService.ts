@@ -31,6 +31,7 @@ import { acquireLock, releaseLock } from '@/utils/distributedLock';
 import { mapWithConcurrency } from '@/utils/concurrency';
 import { orgLLMCredentialService } from '@/services/orgLLMCredentialService';
 import { processCallWithSummaryTx } from '@/bypassAcl/transactions/transcriptService';
+import { emitCallSummaryReadyToApp } from '@/services/callSummaryAppEventService';
 
 const SPEAKER_IDENTIFICATION_CAC_KEY = 'speaker_identification_config';
 
@@ -2105,6 +2106,9 @@ export class TranscriptService {
             const detailedSummaryResult = await detailedSummaryPromise;
             if (detailedSummaryResult.success) {
               logger.info(`Auto-generated detailed summary for call: ${callId}`);
+              // App-scheduled calls get the finished summary pushed to their
+              // app's webhook. No-ops for calls no app owns, and never throws.
+              await emitCallSummaryReadyToApp(callId, detailedSummaryResult.rawSummary);
             }
             // A failure here was already logged by whichever exit gave up, so
             // there is no second line and the alert counts one per recording.
