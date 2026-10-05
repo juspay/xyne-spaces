@@ -61,6 +61,10 @@ interface TriggerPayloadItem {
   type: string;
   channelIds: string[];
   configValues?: Record<string, string>;
+  /** Typed native-trigger filter config, built by the modal from configValues
+   *  + the trigger's Spaces schema (arrays split, booleans parsed). Ignored for
+   *  VCS templates. Sanitized by `sanitizeNativeTriggerConfig` before use. */
+  config?: Record<string, unknown>;
 }
 
 /* ------------------------------------------------------------------ */
@@ -226,20 +230,77 @@ export function isVcsTemplateTrigger(triggerType: string): boolean {
  * conditional — so multi-node chain hops beyond the entry agent aren't driven
  * from here; the entry agent is what fires.
  */
-function buildSpacesConfig(
+/** Keys the workflow owns (channel scope) or that are claw-only (prompt
+ *  context) — never taken from the user-supplied trigger config. */
+const RESERVED_NATIVE_CONFIG_KEYS = new Set(["channelIds", "context"]);
+const MAX_NATIVE_CONFIG_KEYS = 32;
+const MAX_NATIVE_CONFIG_ARRAY = 100;
+const MAX_NATIVE_CONFIG_STRING = 1000;
+
+type NativeConfigValue = string | number | boolean | string[];
+
+/**
+ * Keep only plain, bounded JSON filter values from the modal's typed trigger
+ * config. Spaces re-validates the result against the trigger's zod schema on
+ * create (and the call runs with the requester's own Spaces token), so this is
+ * shape/size hygiene, not the authority on what a trigger accepts.
+ */
+export function sanitizeNativeTriggerConfig(raw: unknown): Record<string, NativeConfigValue> {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return {};
+  const out: Record<string, NativeConfigValue> = {};
+  for (const [key, value] of Object.entries(raw as Record<string, unknown>)) {
+    if (Object.keys(out).length >= MAX_NATIVE_CONFIG_KEYS) break;
+    if (RESERVED_NATIVE_CONFIG_KEYS.has(key) || key === "__proto__" || key === "constructor") continue;
+    if (typeof value === "boolean") out[key] = value;
+    else if (typeof value === "number" && Number.isFinite(value)) out[key] = value;
+    else if (typeof value === "string") {
+      const v = value.trim();
+      if (v) out[key] = v.slice(0, MAX_NATIVE_CONFIG_STRING);
+    } else if (Array.isArray(value)) {
+      const items = value
+        .filter((v): v is string => typeof v === "string")
+        .map((v) => v.trim().slice(0, MAX_NATIVE_CONFIG_STRING))
+        .filter(Boolean)
+        .slice(0, MAX_NATIVE_CONFIG_ARRAY);
+      if (items.length > 0) out[key] = items;
+    }
+  }
+  return out;
+}
+
+/** Stable fingerprint of what a trigger compiles to, used on edit to decide
+ *  whether an existing Spaces automation is still current. */
+export function triggerConfigFingerprint(
+  type: string,
+  configValues?: Record<string, string>,
+): string {
+  const entries = Object.entries(configValues ?? {})
+    .map(([k, v]) => [k, typeof v === "string" ? v.trim() : v] as const)
+    .filter(([, v]) => v !== "")
+    .sort(([a], [b]) => a.localeCompare(b));
+  return JSON.stringify([type, entries]);
+}
+
+export function buildSpacesConfig(
   triggerType: string,
   channelId: string,
   entryAgentSlug: string,
   requesterId: string,
   configValues?: Record<string, string>,
+  nativeConfig?: Record<string, unknown>,
 ) {
   const isVcs = isVcsTemplateTrigger(triggerType);
-  const nativeTriggerConfig =
+  // Channel scope is owned by the workflow binding and always wins over
+  // user-supplied filters. For the "*" (agent-page) binding, MESSAGE_RECEIVED
+  // stays pinned to the requester's own messages so a workspace-wide trigger
+  // can't be created from here.
+  const scopeConfig =
     channelId === "*"
       ? triggerType === "MESSAGE_RECEIVED"
         ? { fromUserIds: [requesterId] }
         : {}
       : { channelIds: [channelId] };
+  const nativeTriggerConfig = { ...sanitizeNativeTriggerConfig(nativeConfig), ...scopeConfig };
 
   const trigger = isVcs
     ? { type: "WEBHOOK", config: { bodySchema: {}, headerSchema: {} } }
@@ -416,6 +477,15 @@ export async function syncWorkflowTriggers(params: {
 
       const existing_t = t.id ? existingById.get(t.id) : undefined;
       const existingChannelMap = new Map(existing_t?.channels.map((c) => [c.channelId, c]) ?? []);
+      // An existing Spaces automation is only reusable if the trigger still
+      // compiles to the same thing. VCS templates are reused regardless: their
+      // filters live in the prompt today and recreating would rotate the
+      // webhook URL already pasted into the repo.
+      const configChanged =
+        !!existing_t &&
+        !isVcsTemplateTrigger(t.type) &&
+        triggerConfigFingerprint(existing_t.type, existing_t.configValues) !==
+          triggerConfigFingerprint(t.type, t.configValues);
       const newChannelSet = new Set(t.channelIds.filter(Boolean));
       const channels: TriggerChannel[] = [];
 
@@ -428,16 +498,21 @@ export async function syncWorkflowTriggers(params: {
       // Create or keep automations for current channels.
       for (const channelId of newChannelSet) {
         const existingChannel = existingChannelMap.get(channelId);
-        if (existingChannel) {
+        if (existingChannel && !configChanged) {
           channels.push(existingChannel);
         } else {
           const { id, webhookUrl } = await createAndSubmitSpacesAutomation(
             requesterId,
             `${workflowName} — ${t.type}`,
-            buildSpacesConfig(t.type, channelId, entryAgentSlug, requesterId, t.configValues),
+            buildSpacesConfig(t.type, channelId, entryAgentSlug, requesterId, t.configValues, t.config),
             { issueWebhook: isVcsTemplateTrigger(t.type) },
           );
           channels.push({ channelId, spacesAutomationId: id, webhookUrl });
+          // Replace, don't duplicate: retire the stale automation only after
+          // the new one was accepted, so a rejected config keeps the old one.
+          if (existingChannel?.spacesAutomationId) {
+            await callSpacesAutomations(requesterId, "DELETE", `/${existingChannel.spacesAutomationId}`);
+          }
         }
         newChannelIds.add(channelId);
       }
@@ -574,7 +649,7 @@ router.post("/", asyncHandler(async (req: Request, res: Response) => {
         const { id, webhookUrl } = await createAndSubmitSpacesAutomation(
           requesterId,
           `${name.trim()} — ${t.type}`,
-          buildSpacesConfig(t.type, channelId, entryAgentSlug, requesterId, t.configValues),
+          buildSpacesConfig(t.type, channelId, entryAgentSlug, requesterId, t.configValues, t.config),
           { issueWebhook: isVcsTemplateTrigger(t.type) },
         );
         channels.push({ channelId, spacesAutomationId: id, webhookUrl });

@@ -62,6 +62,7 @@ import {
   isChainCommandPresetActive,
   toggleChainCommandPreset,
 } from "../../lib/chainCommandPresets";
+import { buildTypedTriggerConfig } from "../../lib/triggerConfig";
 import { Button } from "./ui/Button";
 import { Dialog } from "./ui/Dialog";
 import { useSnackbar } from "./ui/Snackbar";
@@ -1418,16 +1419,38 @@ function ChainWorkflowModalInner({
 
     // Event triggers (optional). They reuse the workflow's channel binding —
     // each enabled trigger fires the workflow on the same channel(s) picked
-    // above. configValues carries the trigger-type's schema fields as strings
-    // (the backend splits comma-separated array fields like eventTypes).
+    // above. configValues keeps the raw form strings (persisted for re-edit);
+    // `config` is the typed native-trigger filter config Spaces actually
+    // enforces (arrays split, booleans parsed). VCS templates have no native
+    // config — their fields are compiled server-side.
     const triggersPayload = triggers
       .filter((t) => t.type.trim())
-      .map((t) => ({
-        ...(t.dbId ? { id: t.dbId } : {}),
-        type: t.type,
-        channelIds,
-        configValues: t.configValues,
-      }));
+      .map((t) => {
+        const isVcs = !!VCS_TEMPLATE_CONFIG_FIELDS[t.type];
+        const { props } = triggerSchemaFields(schemaCache[t.type], t.type);
+        return {
+          ...(t.dbId ? { id: t.dbId } : {}),
+          type: t.type,
+          channelIds,
+          configValues: t.configValues,
+          ...(isVcs ? {} : { config: buildTypedTriggerConfig(t.configValues, props) }),
+        };
+      });
+
+    // Never save a native trigger before its schema arrives: without it the
+    // typed config would be empty and the trigger would silently match every
+    // event instead of the filters the user entered.
+    const schemaPending = triggers.some(
+      (t) =>
+        t.type.trim() &&
+        !VCS_TEMPLATE_CONFIG_FIELDS[t.type] &&
+        !schemaCache[t.type] &&
+        Object.entries(t.configValues).some(([k, v]) => k !== "context" && v.trim()),
+    );
+    if (schemaPending) {
+      setMessage("Trigger settings are still loading. Try saving again in a moment.");
+      return;
+    }
 
     setSaving(true);
     setMessage(null);
@@ -2045,6 +2068,22 @@ function ChainWorkflowModalInner({
                                 >
                                   <option value="">—</option>
                                   {p.enum.map((v) => <option key={v} value={v}>{v}</option>)}
+                                </select>
+                              </label>
+                            );
+                          }
+                          if (p.type === "boolean") {
+                            return (
+                              <label key={key} className="block text-[11px] text-xyne-fg-tertiary">
+                                {label}
+                                <select
+                                  value={t.configValues[key] ?? ""}
+                                  onChange={(e) => setTriggerConfig(t.id, key, e.target.value)}
+                                  className="mt-1 w-full rounded-lg border border-xyne-border bg-xyne-surface-sunken px-2 py-1.5 text-[12px] text-xyne-fg-primary outline-none focus:border-xyne-border-focus"
+                                >
+                                  <option value="">Default</option>
+                                  <option value="true">Yes</option>
+                                  <option value="false">No</option>
                                 </select>
                               </label>
                             );
