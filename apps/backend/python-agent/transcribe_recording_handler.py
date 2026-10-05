@@ -217,8 +217,8 @@ async def _download_recording(url: str, cfg: Config, job_id: str) -> Tuple[str, 
     is re-validated by the SSRF guard). Returns (path, bytes). Raises RecordingError.
     """
     max_bytes = int(cfg.recording_max_bytes)
-    # Validate again here and pin the resulting IP(s): the connector below dials only these,
-    # so the checked address is the one we connect to (no re-resolution between check and connect).
+    # Validate and pin the resulting IP(s): the connector below dials only these, so the
+    # checked address is the one we connect to (no re-resolution between check and connect).
     resolver = _PinnedResolver()
     await _validate_recording_url(url, cfg, resolver)
 
@@ -321,7 +321,7 @@ async def transcribe_recording(request: web.Request) -> web.Response:
     downloaded_path: Optional[str] = None
     total_bytes = 0
     try:
-        await _validate_recording_url(recording_url, cfg)
+        # SSRF validation happens inside _download_recording (pinned to the checked addresses).
         downloaded_path, total_bytes = await _download_recording(recording_url, cfg, job_id)
         logger.info(
             f"[transcribe_recording] Downloaded | jobId={job_id}"
