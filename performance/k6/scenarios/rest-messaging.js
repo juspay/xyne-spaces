@@ -5,13 +5,17 @@ import { messageSendDuration, parseJson, verify } from '../lib/checks.js';
 import { buildOptions, getRunConfig, readinessUrl } from '../lib/config.js';
 import { authenticatedHeaders, userForVirtualUser } from '../lib/data.js';
 import { buildSummary } from '../lib/report.js';
+import { routeEnvHeaders } from '../env-routing.mjs';
 
 const config = getRunConfig();
+
+const ROUTE_HEADERS = routeEnvHeaders(config.environment);
 
 export const options = buildOptions(config);
 
 export function setup() {
   const response = http.get(readinessUrl(config), {
+    headers: ROUTE_HEADERS,
     tags: { operation: 'readiness' },
   });
   const body = parseJson(response);
@@ -32,7 +36,7 @@ export default function (setupData) {
     `${config.baseUrl}/api/conversations/${encodeURIComponent(user.conversationId)}/messages`,
     JSON.stringify({ content: marker, msgType: 'USER' }),
     {
-      headers: authenticatedHeaders(user),
+      headers: authenticatedHeaders(user, ROUTE_HEADERS),
       tags: { operation: 'message_send', name: 'POST /api/conversations/:id/messages' },
     },
   );

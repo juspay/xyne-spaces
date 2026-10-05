@@ -22,6 +22,7 @@ import { messageSendDuration, parseJson, verify } from '../lib/checks.js';
 import { buildOptions, getRunConfig, pathUrl, readinessUrl } from '../lib/config.js';
 import { authenticatedHeaders, userForVirtualUser } from '../lib/data.js';
 import { buildSummary } from '../lib/report.js';
+import { routeEnvHeaders } from '../env-routing.mjs';
 import {
   buildClientIdentity,
   buildMutatePath,
@@ -32,6 +33,8 @@ import {
 } from '../zero-push.mjs';
 
 const config = getRunConfig();
+
+const ROUTE_HEADERS = routeEnvHeaders(config.environment);
 
 export const options = buildOptions(config);
 
@@ -47,7 +50,7 @@ let mutationCounter = 0;
 
 function pushMessage(user, body) {
   return http.post(pathUrl(config, MUTATE_PATH), JSON.stringify(body), {
-    headers: authenticatedHeaders(user),
+    headers: authenticatedHeaders(user, ROUTE_HEADERS),
     tags: { operation: 'zero_push', name: 'POST /api/zero/push' },
   });
 }
@@ -64,7 +67,7 @@ function sendArgs(user, marker, timestamp) {
 }
 
 export function setup() {
-  const readiness = http.get(readinessUrl(config), { tags: { operation: 'readiness' } });
+  const readiness = http.get(readinessUrl(config), { headers: ROUTE_HEADERS, tags: { operation: 'readiness' } });
   const readinessBody = parseJson(readiness);
   const ready = verify(readiness, {
     'readiness returns 200': (result) => result.status === 200,
