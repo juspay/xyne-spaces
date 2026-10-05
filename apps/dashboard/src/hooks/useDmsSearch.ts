@@ -4,14 +4,15 @@ import { useUsers } from './useUsers';
 import { useAuthContextValues } from './useAuth';
 import { useAffinityCallback } from './useAffinityCallback';
 import { useDmContactRecency } from './useRankedPeopleSearch';
-import { filterChannelsBySearchableNames, rankUsers } from '../utils/rankingUtils';
-import { getUserDisplayName, matchesUserQuery } from '../utils/userDisplayName';
+import { rankUsers } from '../utils/rankingUtils';
 import {
   isGroupDMChannel,
   isOneToOneDMChannel,
   parseDMParticipantIds,
 } from '../components/Chat/ChatDirectory/ChatDirectory.utils';
 import { Channel, User, UserStatus, UserType } from '@xyne/shared';
+import { useWorkerUserSearch } from './useWorkerUserSearch';
+import { useWorkerChannelSearch } from './useWorkerChannelSearch';
 
 const PEOPLE_LIMIT = 20;
 
@@ -46,7 +47,6 @@ export const useDmsSearch = (): UseDmsSearchReturn => {
   const [dmSearchQuery, setDmSearchQuery] = useState('');
   const deferredQuery = useDeferredValue(dmSearchQuery);
   const trimmedQuery = deferredQuery.trim();
-  const hasQuery = trimmedQuery.length > 0;
   const isSearchStale = trimmedQuery !== dmSearchQuery.trim();
   const [showDmSearchDropdown, setShowDmSearchDropdown] = useState(false);
   const [selectedDmSearchIndex, setSelectedDmSearchIndex] = useState(0);
@@ -79,31 +79,28 @@ export const useDmsSearch = (): UseDmsSearchReturn => {
     return map;
   }, [allChannels, currentUserId]);
 
-  const peoplePool = useMemo(
-    () =>
-      hasQuery
-        ? [...allUsers].sort((a, b) => getUserDisplayName(a).localeCompare(getUserDisplayName(b)))
-        : [],
-    [allUsers, hasQuery],
-  );
+  // Worker-based user search: fuzzy matching runs off the main thread.
+  // Use a generous limit so DM contacts are not accidentally sliced out before
+  // the DM-specific filter below runs.
+  const workerUserResults = useWorkerUserSearch(dmSearchQuery, 500);
 
   const peopleResults = useMemo((): DmPersonResult[] => {
     void affinityVersion;
     if (!trimmedQuery) return [];
     const trimmed = trimmedQuery;
     const isSelfSearch = trimmed.toLowerCase() === 'self';
-    const matched = peoplePool.filter(
+    const eligible = workerUserResults.filter(
       user =>
-        (oneToOneDmByUserId.has(user.id) ||
-          (user.status === UserStatus.ACTIVE && user.userType === UserType.USER)) &&
-        (matchesUserQuery(user, trimmed) || (isSelfSearch && user.id === currentUserId)),
+        oneToOneDmByUserId.has(user.id) ||
+        (user.status === UserStatus.ACTIVE && user.userType === UserType.USER) ||
+        (isSelfSearch && user.id === currentUserId),
     );
     let newPeopleLeft = PEOPLE_LIMIT;
-    return rankUsers(matched, trimmed, dmContactRecency)
+    return rankUsers(eligible, trimmed, dmContactRecency)
       .filter(user => oneToOneDmByUserId.has(user.id) || newPeopleLeft-- > 0)
       .map(user => ({ user, channelId: oneToOneDmByUserId.get(user.id)?.id ?? null }));
   }, [
-    peoplePool,
+    workerUserResults,
     trimmedQuery,
     dmContactRecency,
     oneToOneDmByUserId,
@@ -134,23 +131,20 @@ export const useDmsSearch = (): UseDmsSearchReturn => {
     [allChannels, usersById, currentUserId],
   );
 
+  // Worker-based channel search: regular-channel Fuse runs in a web worker;
+  // group-DM participant matching still runs on the main thread inside the hook
+  // (same as filterChannelsBySearchableNames) since DM docs are excluded from the worker.
+  const workerChannelResults = useWorkerChannelSearch(groupItems, dmSearchQuery);
+
   const groupDmResults = useMemo(() => {
     if (!trimmedQuery) return [];
 
-    // Referenced so this memo re-runs when affinity weights land (read imperatively below).
+    // Referenced so this memo re-runs when affinity weights land (read imperatively inside
+    // filterChannelsBySearchableNames, which useWorkerChannelSearch calls).
     void affinityVersion;
 
     const query = trimmedQuery.toLowerCase();
-
-    // Match DMs with the SAME fuzzy, per-token, cross-participant matcher cmd+k uses
-    // (filterChannelsBySearchableNames → one Fuse over participant docs, AND across query tokens).
-    // Each participant contributes BOTH its displayName and raw name, so a full-name query matches
-    // even when the displayName is a short nickname — the same names getDMNames(...).search builds.
-    // Keep filterChannelsBySearchableNames' own ordering (fuseScore − affinity), the SAME blended
-    // relevance cmd+k uses, so a strong prefix match ("Rajesh") outranks a weak fuzzy match to a
-    // higher-affinity contact. Re-ranking the matched set by pure affinity buried clean matches.
-    const nameMatched = filterChannelsBySearchableNames(groupItems, trimmedQuery);
-    const nameMatchedIds = new Set(nameMatched.map(item => item.channel.id));
+    const nameMatchedIds = new Set(workerChannelResults.map(item => item.channel.id));
 
     // Email-only matches (participant email substring, no name match): cmd+k finds emails via People,
     // which the DM screen can't fall back to for existing contacts, so keep them here — appended
@@ -161,8 +155,8 @@ export const useDmsSearch = (): UseDmsSearchReturn => {
       .map(item => item.channel)
       .sort(byRecency);
 
-    return [...nameMatched.map(item => item.channel), ...emailMatched];
-  }, [groupItems, trimmedQuery, affinityVersion]);
+    return [...workerChannelResults.map(item => item.channel), ...emailMatched];
+  }, [workerChannelResults, groupItems, trimmedQuery, affinityVersion]);
 
   // Autofocus search input when navigating to DM page
   useEffect(() => {
