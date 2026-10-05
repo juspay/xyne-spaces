@@ -1,3 +1,10 @@
+## [1.460.4](https://github.com/juspay/xyne-spaces/compare/v1.460.3...v1.460.4) (2026-10-05)
+
+
+### Bug Fixes
+
+* use the shared direct-pick matcher in grantedByConfig ([#2663](https://github.com/juspay/xyne-spaces/issues/2663)) ([e8109fe](https://github.com/juspay/xyne-spaces/commit/e8109fe3770034b4a3d02f1e876d1482273ca476))
+
 ## [1.460.3](https://github.com/juspay/xyne-spaces/compare/v1.460.2...v1.460.3) (2026-10-05)
 
 
