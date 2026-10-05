@@ -13,7 +13,7 @@ import { DatabaseClient } from '@/database/client';
 import { encrypt } from '@/services/encryptionService';
 import { GoogleService } from '@/services/googleService';
 import { MicrosoftDeskService } from '@/services/microsoftDeskService';
-import type { GoogleClientKey } from '@/services/googleOAuthClients';
+import { GOOGLE_CLIENTS } from '@/services/googleOAuthClients';
 import { logger } from '@/utils/logger';
 
 export type UserContactsProvider = 'GOOGLE' | 'MICROSOFT';
@@ -175,16 +175,24 @@ export function logContactsOAuthEvent(event: string, data: Record<string, unknow
 }
 
 /**
- * True when a Google access token's granted scopes include the contacts read
- * scope. Uses Google's tokeninfo (no extra scope needed). False on any error
- * (network, invalid token) — we must never persist a grant whose token cannot
- * actually fetch contacts.
- */
+  * True when a Google access token's granted scopes include the contacts read
+  * scope AND the token was minted by the web client — a refresh token only
+  * refreshes with the client that minted it, and GoogleService.listContacts
+  * refreshes with the web client. `aud` names the minting client directly, so
+  * this does not depend on the session's deviceInfo (several login paths record
+  * no platform there). False on any error (network, invalid token) — we must
+  * never persist a grant whose token cannot actually fetch contacts.
+  */
 async function googleTokenHasContactsScope(accessToken: string): Promise<boolean> {
   try {
     const tokenInfo = await new OAuth2Client().getTokenInfo(accessToken);
+    const webClientId = GOOGLE_CLIENTS.web().id;
+    if (!webClientId) return false;
     const scopes = tokenInfo.scopes ?? [];
-    return scopes.includes('https://www.googleapis.com/auth/contacts.readonly');
+    return (
+      scopes.includes('https://www.googleapis.com/auth/contacts.readonly') &&
+      tokenInfo.aud === webClientId
+    );
   } catch (error) {
     logger.warn('[USER_CONTACTS][AUTO] Failed to verify Google token scopes', getErrorMessage(error));
     return false;
@@ -228,8 +236,6 @@ export async function syncContactsGrantForUser(params: {
   refreshToken?: string | null;
   accessToken?: string | null;
   accessTokenExpiry?: Date | null;
-  /** Client that minted the Google login token, from the session's deviceInfo. */
-  googleClientKey?: GoogleClientKey | null;
 }): Promise<void> {
   const {
     provider,
@@ -238,18 +244,9 @@ export async function syncContactsGrantForUser(params: {
     refreshToken,
     accessToken,
     accessTokenExpiry,
-    googleClientKey,
   } = params;
   const contactsProvider = providerFromAuthProvider(provider);
   if (!contactsProvider || !refreshToken || !accessToken) return;
-
-  // A Google refresh token only refreshes with the client that minted it, and
-  // GoogleService.listContacts refreshes with the web client (GOOGLE_CLIENT_ID).
-  // Persisting a token minted by the electron/new or mobile client works for the
-  // access token's ~1h lifetime and then silently yields zero contacts. Skip
-  // those (and unknown origins) — the user goes through the one-time contacts
-  // consent instead, which mints a web-client grant that refreshes correctly.
-  if (contactsProvider === 'GOOGLE' && googleClientKey !== 'web') return;
 
   try {
     const existing = await getUserContactsSource(userId, contactsProvider);

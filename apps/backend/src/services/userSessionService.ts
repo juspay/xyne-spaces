@@ -4,7 +4,6 @@ import { logger } from '../utils/logger';
 import { DatabaseClient } from '@/database/client';
 import { userActivityTrackingService } from './userActivityTrackingService';
 import { syncContactsGrantForUser } from './userContactsService';
-import { googleClientKeyFromDeviceInfo } from './googleOAuthClients';
 
 // Why a session ended — stored as the AUTH/LOGOUT activity event's label.
 export type LogoutReason =
@@ -167,7 +166,6 @@ export class UserSessionService {
           refreshToken: sessionData.refreshToken,
           accessToken: sessionData.accessToken,
           accessTokenExpiry: sessionData.accessTokenExpiry,
-          googleClientKey: googleClientKeyFromDeviceInfo(session.deviceInfo),
         });
       }
 
