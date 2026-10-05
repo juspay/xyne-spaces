@@ -27,8 +27,6 @@ import { attioOAuthProvider } from "./attio-oauth.js";
 import { honeycombOAuthProvider } from "./honeycomb-oauth.js";
 import { customerioOAuthProvider } from "./customerio-oauth.js";
 import { notionRemoteOAuthProvider } from "./notion-remote-oauth.js";
-import { GITHUB_SERVER_TYPE, githubOAuthConfigured } from "./github-oauth.js";
-import { X_SERVER_TYPE, xOAuthConfigured } from "./twitter-oauth.js";
 
 const ALL_OAUTH_PROVIDERS: OAuthTokenProvider[] = [
   googleOAuthProvider,
@@ -60,16 +58,6 @@ export function getOAuthProvider(serverType: string): OAuthTokenProvider | undef
 }
 
 /**
- * Connectors that sign in only once their OAuth app is set up on this server;
- * until then they take pasted keys. Their tokens never expire, so they have no
- * entry in the refresh registry above.
- */
-const OPTIONAL_OAUTH: Readonly<Record<string, () => boolean>> = {
-  [GITHUB_SERVER_TYPE]: githubOAuthConfigured,
-  [X_SERVER_TYPE]: xOAuthConfigured,
-};
-
-/**
  * Complete "is this connector OAuth?" predicate — the single source of truth
  * the API/UI should use instead of the static {@link isOAuthServer} set alone.
  *
@@ -84,11 +72,7 @@ const OPTIONAL_OAUTH: Readonly<Record<string, () => boolean>> = {
  * OAuth connector was mislabelled `oauth: false` by the /servers route.
  */
 export function isOAuthConnector(serverType: string, connectorMeta?: unknown, isOauth?: boolean): boolean {
-  return (
-    getOAuthProvider(serverType) !== undefined ||
-    OPTIONAL_OAUTH[serverType]?.() === true ||
-    isOAuthServer(serverType, connectorMeta, isOauth)
-  );
+  return getOAuthProvider(serverType) !== undefined || isOAuthServer(serverType, connectorMeta, isOauth);
 }
 
 export const oauthTokenRouter = buildOAuthTokenRouter(ALL_OAUTH_PROVIDERS);

@@ -3,21 +3,14 @@ import {
   useEffect,
   useRef,
   useState,
-  type ClipboardEvent,
-  type KeyboardEvent,
   type ReactElement,
   type ReactNode,
-  type Ref,
   type RefObject,
   type UIEvent,
 } from 'react';
 import { ThinkingOrb, type OrbState } from 'thinking-orbs';
 import { AnimatePresence, motion } from 'motion/react';
-import {
-  AIComposer,
-  type AIComposerAttachment,
-  type AIComposerHandle,
-} from '@/components/AIScreen/AIComposer';
+import { AIComposer, type AIComposerAttachment } from '@/components/AIScreen/AIComposer';
 import { AnimatedLabel, useStableLabel } from '@/components/AIScreen/ReasoningLoader';
 import { ActivityBlock } from '@/components/Chat/XyneAISidebar/components/ActivityBlock';
 import { type ComposerContext, toStreamOverrides } from '@/components/AIScreen/composerContext';
@@ -53,9 +46,6 @@ import {
   type ParsedCreateChatAction,
 } from './createChatMode';
 import { orbStateForProgress } from './createProgressLabel';
-
-const SCRIPTED_THINK_PHASES = ['Thinking', 'Weighing it up', 'Reasoning'] as const;
-const SCRIPTED_THINK_PHASE_MS = 1600;
 
 /**
  * Keeps the transcript at the bottom while it grows, if it was there. The
@@ -109,30 +99,6 @@ function WorkingProgressRow({ label }: { label: string }): ReactElement {
       <BuildOrb state={orbStateForProgress(stable)} />
       <span className='select-none'>
         <AnimatedLabel text={stable} />
-      </span>
-    </div>
-  );
-}
-
-function ScriptedThinkLabel(): ReactElement {
-  const [phase, setPhase] = useState(0);
-  useEffect((): (() => void) => {
-    const id = window.setInterval((): void => {
-      setPhase(current => (current + 1) % SCRIPTED_THINK_PHASES.length);
-    }, SCRIPTED_THINK_PHASE_MS);
-    return (): void => {
-      window.clearInterval(id);
-    };
-  }, []);
-  const label = useStableLabel(`${SCRIPTED_THINK_PHASES[phase]}…`);
-  return (
-    <div
-      className='-ml-1 inline-flex items-center gap-1.5 rounded-md px-1.5 py-1 text-xs text-muted-foreground'
-      data-testid='agent-create-chat-thinking'
-    >
-      <BuildOrb />
-      <span className='select-none'>
-        <AnimatedLabel text={label} />
       </span>
     </div>
   );
@@ -231,20 +197,9 @@ interface AgentCreateChatPanelProps {
   progressLabel?: string | null;
   /** Changing a saved agent rather than building one: the empty state and hint say so. */
   editing?: boolean;
-  scripted?: boolean;
-  scriptedMessages?: Message[];
-  scriptedDraft?: string;
-  scriptedPlaying?: boolean;
-  scriptedTyping?: boolean;
-  scriptedDone?: boolean;
-  onScriptedEngage?: () => void;
-  onScriptedReplay?: () => void;
 }
 
 export function AgentCreateChatPanel(props: AgentCreateChatPanelProps): ReactElement {
-  if (props.scripted) {
-    return <ScriptedAgentCreateChatPanel {...props} />;
-  }
   if (props.onDraftTurn) {
     return <StreamedAgentCreateChatPanel {...props} onDraftTurn={props.onDraftTurn} />;
   }
@@ -767,58 +722,6 @@ function LiveAgentCreateChatPanel({
   );
 }
 
-function ScriptedAgentCreateChatPanel({
-  scriptedMessages,
-  scriptedDraft = '',
-  scriptedPlaying = false,
-  scriptedTyping = false,
-  scriptedDone = false,
-  onScriptedEngage,
-  onScriptedReplay,
-}: AgentCreateChatPanelProps): ReactElement {
-  const composerRef = useRef<AIComposerHandle>(null);
-  const bottomRef = useRef<HTMLDivElement | null>(null);
-  const messages = scriptedMessages ?? [];
-  const streaming = messages.some(message => message.isStreaming);
-  const empty = messages.length === 0 && !streaming;
-  const pending = scriptedPlaying && !scriptedTyping;
-
-  useEffect(() => {
-    if (scriptedDraft === '' && !scriptedPlaying && !scriptedTyping) return;
-    composerRef.current?.setPrompt(scriptedDraft);
-  }, [scriptedDraft, scriptedPlaying, scriptedTyping]);
-
-  useEffect(() => {
-    bottomRef.current?.scrollIntoView({ block: 'end' });
-  }, [messages, scriptedDraft]);
-
-  const engage = useCallback((): void => {
-    onScriptedEngage?.();
-  }, [onScriptedEngage]);
-
-  return (
-    <CreateChatLayout
-      empty={empty}
-      canvasError={null}
-      messages={messages}
-      bottomRef={bottomRef}
-      pending={pending}
-      autoFocus={false}
-      composerRef={composerRef}
-      scripted
-      pane
-      scriptedDone={scriptedDone && !scriptedPlaying}
-      locked={scriptedPlaying}
-      onEngage={engage}
-      {...(onScriptedReplay ? { onReplay: onScriptedReplay } : {})}
-      {...(pending ? { onStop: () => undefined } : {})}
-      onSubmit={() => {
-        if (!scriptedPlaying) engage();
-      }}
-    />
-  );
-}
-
 function CreateChatLayout({
   editing = false,
   empty,
@@ -828,13 +731,6 @@ function CreateChatLayout({
   pending,
   onStop,
   onSubmit,
-  autoFocus = true,
-  composerRef,
-  scripted = false,
-  scriptedDone = false,
-  locked = false,
-  onReplay,
-  onEngage,
   progressLabel = null,
   pane = false,
   conversational = false,
@@ -856,13 +752,6 @@ function CreateChatLayout({
     context?: ComposerContext,
     trigger?: 'button' | 'enter' | 'programmatic',
   ) => void;
-  autoFocus?: boolean;
-  composerRef?: Ref<AIComposerHandle>;
-  scripted?: boolean;
-  scriptedDone?: boolean;
-  locked?: boolean;
-  onReplay?: () => void;
-  onEngage?: () => void;
   progressLabel?: string | null;
   /** Figma pane: no "Chat" bar. The empty state shows in every overlay version. */
   pane?: boolean;
@@ -889,34 +778,12 @@ function CreateChatLayout({
     <div
       className='flex h-full min-w-0 flex-col bg-background'
       data-component='AgentCreateChatPanel'
-      {...(scripted
-        ? {
-            'data-scripted': 'true',
-            'data-testid': 'scripted-create-player',
-          }
-        : {})}
     >
-      {pane && !scriptedDone ? null : (
-        <div className='flex h-11 flex-shrink-0 items-center justify-between gap-3 px-5'>
-          {pane ? (
-            <span />
-          ) : (
-            <span className='text-[11px] font-medium uppercase tracking-[0.16em] text-muted-foreground'>
-              Chat
-            </span>
-          )}
-          {scriptedDone ? (
-            <button
-              type='button'
-              onClick={onReplay}
-              className='text-[11px] font-medium text-foreground underline-offset-2 hover:underline'
-              data-testid='scripted-create-replay'
-              data-track-category='AGENT_ARTIFACT'
-              data-track-name='SCRIPTED_CREATE_REPLAY'
-            >
-              Replay
-            </button>
-          ) : null}
+      {pane ? null : (
+        <div className='flex h-11 flex-shrink-0 items-center gap-3 px-5'>
+          <span className='text-[11px] font-medium uppercase tracking-[0.16em] text-muted-foreground'>
+            Chat
+          </span>
         </div>
       )}
       <div className='flex-1 overflow-y-auto' onScroll={pinned.onScroll}>
@@ -957,34 +824,6 @@ function CreateChatLayout({
                       <div className='ai-user-bubble max-w-full rounded-3xl bg-muted px-4 py-2.5 text-sm leading-relaxed text-foreground'>
                         <p className='whitespace-pre-wrap'>{message.content}</p>
                       </div>
-                    </div>
-                  ) : scripted ? (
-                    <div className='flex min-w-0 flex-col gap-2'>
-                      {thinking ? (
-                        <ScriptedThinkLabel />
-                      ) : message.isStreaming ? (
-                        <div
-                          className='-ml-1 inline-flex items-center gap-1.5 rounded-md px-1.5 py-1 text-xs text-muted-foreground'
-                          data-testid='agent-create-chat-thinking'
-                        >
-                          <BuildOrb />
-                          <span className='select-none'>
-                            <AnimatedLabel text={thinkLabel} />
-                          </span>
-                        </div>
-                      ) : null}
-                      {message.errorInfo ? (
-                        <p className='text-sm leading-5 text-destructive' role='alert'>
-                          {message.errorInfo.message || message.errorInfo.title}
-                        </p>
-                      ) : streamingText.trim().length > 0 ? (
-                        <p
-                          className='bot-markdown-content xyne-ai-markdown whitespace-pre-wrap text-sm font-normal leading-7 text-foreground'
-                          data-testid='agent-create-chat-reply'
-                        >
-                          {streamingText}
-                        </p>
-                      ) : null}
                     </div>
                   ) : (
                     <div
@@ -1049,28 +888,7 @@ function CreateChatLayout({
           </p>
         ) : null}
       </div>
-      <div
-        className={cn(CHAT_GUTTER, 'flex-shrink-0 pb-[11px]')}
-        {...(scripted
-          ? {
-              onPointerDownCapture: onEngage,
-              onFocusCapture: onEngage,
-            }
-          : {})}
-        {...(locked
-          ? {
-              onKeyDownCapture: (event: KeyboardEvent<HTMLDivElement>) => {
-                if (event.key === 'Tab') return;
-                event.preventDefault();
-                event.stopPropagation();
-              },
-              onPasteCapture: (event: ClipboardEvent<HTMLDivElement>) => {
-                event.preventDefault();
-                event.stopPropagation();
-              },
-            }
-          : {})}
-      >
+      <div className={cn(CHAT_GUTTER, 'flex-shrink-0 pb-[11px]')}>
         <AnimatePresence initial={false} mode='wait'>
           {composerSlot ? (
             <motion.div
@@ -1091,9 +909,8 @@ function CreateChatLayout({
               transition={{ type: 'spring', visualDuration: 0.28, bounce: 0 }}
             >
               <AIComposer
-                ref={composerRef}
                 appearance='create'
-                autoFocus={autoFocus}
+                autoFocus
                 placeholder={
                   editing ? 'Describe what to change…' : 'Describe what agent you want to build...'
                 }

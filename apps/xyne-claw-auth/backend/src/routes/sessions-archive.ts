@@ -153,28 +153,6 @@ function isNotFound(err: unknown): boolean {
   return /not found|does not exist|no such bucket/i.test(errMsg(err));
 }
 
-/**
- * Local dev points at fake-gcs. If that emulator is not running, a connection
- * error is "no archive we can verify", not a production data-loss failure.
- * Production (or any process without FAKE_GCS_HOST) still returns 500 so the
- * caller refuses to start a fresh session over an unverified archive.
- */
-export function isDevEmulatorUnreachable(err: unknown): boolean {
-  if (process.env["NODE_ENV"] === "production") return false;
-  if (!(process.env["FAKE_GCS_HOST"]?.trim())) return false;
-  const code = (err as { code?: unknown } | null)?.code;
-  if (
-    code === "ECONNREFUSED" ||
-    code === "EHOSTUNREACH" ||
-    code === "EAI_AGAIN" ||
-    code === "ETIMEDOUT" ||
-    code === "ENETUNREACH"
-  ) {
-    return true;
-  }
-  return /ECONNREFUSED|EHOSTUNREACH|EAI_AGAIN|ETIMEDOUT|ENETUNREACH|fetch failed|socket hang up/i.test(errMsg(err));
-}
-
 sessionsArchiveRouter.get("/restore/:conversationId", async (req: Request, res: Response) => {
   const rawParam = req.params["conversationId"];
   const conversationId = typeof rawParam === "string" ? rawParam : undefined;
@@ -207,7 +185,7 @@ sessionsArchiveRouter.get("/restore/:conversationId", async (req: Request, res: 
     // A bucket or prefix that does not exist means this conversation was never
     // archived. Reporting that as an error makes the caller refuse to start a
     // session it is allowed to start fresh, so answer it as an empty archive.
-    if (isNotFound(err) || isDevEmulatorUnreachable(err)) {
+    if (isNotFound(err)) {
       log.warn(`[sessions-archive] no archive for conversationId=${conversationId}: ${msg}`);
       res.json({ success: true, files: [] });
       return;

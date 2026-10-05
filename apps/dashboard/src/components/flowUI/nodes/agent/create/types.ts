@@ -21,7 +21,7 @@ export type AgentCreateField =
   /** The custom property rows, as one field (chat edits them as a set). */
   | 'properties';
 
-/** Hub capability row the write pointer should rest on during scripted fills. */
+/** Hub capability row the write pointer should rest on while a fill writes it. */
 export type AgentCreateHubRow = 'mcp' | 'builtin' | 'subagent' | 'skills' | 'knowledge';
 
 /** Which hub a suggested / dismissed pick belongs to (the suggest-tools hub names). */

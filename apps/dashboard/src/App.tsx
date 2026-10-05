@@ -1,5 +1,5 @@
 import './App.css';
-import { ReactElement, Suspense, lazy, useEffect } from 'react';
+import { ReactElement, useEffect } from 'react';
 import { AuthProvider } from './providers/AuthProvider';
 import { AnalyticsProvider } from './providers/AnalyticsProvider';
 import { RouterProvider } from 'react-router-dom';
@@ -45,10 +45,6 @@ import {
   MultipleCrossCancelDefault,
 } from '@xyne/icons';
 
-/** Design-tuning overlays stay out of production bundles. */
-const DevDesignTools = import.meta.env.DEV
-  ? lazy(() => import('./components/DevDesignTools'))
-  : null;
 const stableRouter = createStableRouter(router);
 
 const App = (): ReactElement => {
@@ -182,90 +178,83 @@ const App = (): ReactElement => {
   }, []);
 
   return (
-    <>
-      <ErrorBoundary>
-        <QueryClientProvider client={queryClient}>
-          <KeyboardProvider>
-            <AuthProvider>
-              <AnalyticsProvider>
-                <ThemeProvider
-                  foundationTokens={
-                    theme === 'midnight' ? XYNE_DARK_FOUNDATION_TOKENS : XYNE_FOUNDATION_TOKENS
-                  }
-                  componentTokens={
-                    theme === 'midnight'
-                      ? XYNE_THEME_COMPONENT_TOKENS_DARK
-                      : XYNE_THEME_COMPONENT_TOKENS
-                  }
-                  theme={theme === 'midnight' ? 'dark' : 'light'}
-                >
-                  <ShortcutsProvider>
-                    <TooltipProvider delayDuration={0}>
-                      <main className='h-screen' style={{ background: 'var(--root-bg)' }}>
-                        <Wallpaper />
-                        <StableRouterContext.Provider value={stableRouter}>
-                          <RouterProvider router={router}></RouterProvider>
-                        </StableRouterContext.Provider>
-                      </main>
-                      <SwitchLoadingOverlay />
-                      <InterruptGuard />
-                      <WorkspaceSwitchToastListener />
-                      <Toaster
-                        position='top-right'
-                        richColors
-                        closeButton
-                        className='visual-regression-hide'
-                        icons={{
-                          success: <CheckTickCircle size={20} />,
-                          error: <AlertCircle size={20} />,
-                          warning: <AlertTriangle size={20} />,
-                          info: <InformationCircle size={20} />,
-                          close: <MultipleCrossCancelDefault size={16} />,
-                        }}
-                        toastOptions={{
-                          style: {
-                            alignItems: 'flex-start',
-                            background: 'hsl(var(--card))',
-                            color: 'hsl(var(--card-foreground))',
-                            border: '1px solid hsl(var(--border))',
-                            pointerEvents: 'auto',
-                          },
-                          classNames: {
-                            toast: 'relative items-start group !pt-3 !pr-3 !pb-3 !pl-4',
-                            icon: 'mt-1',
-                            title:
-                              '!text-card-foreground !font-semibold !max-w-[calc(100%-2rem)] !mr-8',
-                            description: '!text-card-foreground/80',
+    <ErrorBoundary>
+      <QueryClientProvider client={queryClient}>
+        <KeyboardProvider>
+          <AuthProvider>
+            <AnalyticsProvider>
+              <ThemeProvider
+                foundationTokens={
+                  theme === 'midnight' ? XYNE_DARK_FOUNDATION_TOKENS : XYNE_FOUNDATION_TOKENS
+                }
+                componentTokens={
+                  theme === 'midnight'
+                    ? XYNE_THEME_COMPONENT_TOKENS_DARK
+                    : XYNE_THEME_COMPONENT_TOKENS
+                }
+                theme={theme === 'midnight' ? 'dark' : 'light'}
+              >
+                <ShortcutsProvider>
+                  <TooltipProvider delayDuration={0}>
+                    <main className='h-screen' style={{ background: 'var(--root-bg)' }}>
+                      <Wallpaper />
+                      <StableRouterContext.Provider value={stableRouter}>
+                        <RouterProvider router={router}></RouterProvider>
+                      </StableRouterContext.Provider>
+                    </main>
+                    <SwitchLoadingOverlay />
+                    <InterruptGuard />
+                    <WorkspaceSwitchToastListener />
+                    <Toaster
+                      position='top-right'
+                      richColors
+                      closeButton
+                      className='visual-regression-hide'
+                      icons={{
+                        success: <CheckTickCircle size={20} />,
+                        error: <AlertCircle size={20} />,
+                        warning: <AlertTriangle size={20} />,
+                        info: <InformationCircle size={20} />,
+                        close: <MultipleCrossCancelDefault size={16} />,
+                      }}
+                      toastOptions={{
+                        style: {
+                          alignItems: 'flex-start',
+                          background: 'hsl(var(--card))',
+                          color: 'hsl(var(--card-foreground))',
+                          border: '1px solid hsl(var(--border))',
+                          pointerEvents: 'auto',
+                        },
+                        classNames: {
+                          toast: 'relative items-start group !pt-3 !pr-3 !pb-3 !pl-4',
+                          icon: 'mt-1',
+                          title:
+                            '!text-card-foreground !font-semibold !max-w-[calc(100%-2rem)] !mr-8',
+                          description: '!text-card-foreground/80',
 
-                            actionButton:
-                              '!bg-primary !text-primary-foreground hover:!bg-primary/90 !mt-8',
-                            cancelButton:
-                              '!bg-secondary !text-secondary-foreground hover:!bg-secondary/80 !mt-8',
+                          actionButton:
+                            '!bg-primary !text-primary-foreground hover:!bg-primary/90 !mt-8',
+                          cancelButton:
+                            '!bg-secondary !text-secondary-foreground hover:!bg-secondary/80 !mt-8',
 
-                            closeButton:
-                              '!absolute !right-3 !top-5 !left-auto !bg-transparent !border-0 !ring-0 focus:!ring-0 focus:!outline-none !opacity-100 !text-card-foreground hover:!opacity-50 rounded-md z-10',
+                          closeButton:
+                            '!absolute !right-3 !top-5 !left-auto !bg-transparent !border-0 !ring-0 focus:!ring-0 focus:!outline-none !opacity-100 !text-card-foreground hover:!opacity-50 rounded-md z-10',
 
-                            success: '!text-status-success',
-                            error: '!text-status-failure',
-                            warning: '!text-status-pending',
-                            info: '!text-status-scheduled',
-                          },
-                        }}
-                      />
-                    </TooltipProvider>
-                  </ShortcutsProvider>
-                </ThemeProvider>
-              </AnalyticsProvider>
-            </AuthProvider>
-          </KeyboardProvider>
-        </QueryClientProvider>
-      </ErrorBoundary>
-      {DevDesignTools ? (
-        <Suspense fallback={null}>
-          <DevDesignTools />
-        </Suspense>
-      ) : null}
-    </>
+                          success: '!text-status-success',
+                          error: '!text-status-failure',
+                          warning: '!text-status-pending',
+                          info: '!text-status-scheduled',
+                        },
+                      }}
+                    />
+                  </TooltipProvider>
+                </ShortcutsProvider>
+              </ThemeProvider>
+            </AnalyticsProvider>
+          </AuthProvider>
+        </KeyboardProvider>
+      </QueryClientProvider>
+    </ErrorBoundary>
   );
 };
 

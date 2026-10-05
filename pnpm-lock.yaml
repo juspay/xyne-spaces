@@ -1075,9 +1075,6 @@ importers:
       mermaid:
         specifier: 11.16.1
         version: 11.16.1
-      mesurer:
-        specifier: ^0.2.0
-        version: 0.2.0(react-dom@19.2.3(react@19.2.3))(react@19.2.3)
       motion:
         specifier: ^12.43.0
         version: 12.43.0(@emotion/is-prop-valid@1.4.0)(react-dom@19.2.3(react@19.2.3))(react@19.2.3)
@@ -16200,12 +16197,6 @@ packages:
 
   meshoptimizer@1.1.1:
     resolution: {integrity: sha512-oRFNWJRDA/WTrVj7NWvqa5HqE1t9MYDj2VaWirQCzCCrAd2GHrqR/sQezCxiWATPNlKTcRaPRHPJwIRoPBAp5g==}
-
-  mesurer@0.2.0:
-    resolution: {integrity: sha512-xUvsuO2xGKDkyGkpO43K2Yius5723lNwNA31FVrpRxKgXg+K4cnVnFY23GEOkMAXMH2E6QnoneA49Ac3+llssg==}
-    peerDependencies:
-      react: '>=18.0.0'
-      react-dom: '>=18.0.0'
 
   methods@1.1.2:
     resolution: {integrity: sha512-iclAHeNqNm68zFtnZ0e+1L2yUIdvzNoauKU4WBA3VvH/vPFieF7qfRlwUZU+DA9P9bPXIS90ulxoUoCH23sV2w==}
@@ -38138,11 +38129,6 @@ snapshots:
       three: 0.182.0
 
   meshoptimizer@1.1.1: {}
-
-  mesurer@0.2.0(react-dom@19.2.3(react@19.2.3))(react@19.2.3):
-    dependencies:
-      react: 19.2.3
-      react-dom: 19.2.3(react@19.2.3)
 
   methods@1.1.2: {}
 

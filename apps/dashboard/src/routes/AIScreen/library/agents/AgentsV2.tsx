@@ -103,6 +103,7 @@ const AgentsV2 = ({ query }: { query: string }): ReactElement => {
         isError ? { message: "Couldn't load agents.", onRetry: () => void refetch() } : undefined
       }
       emptyState={emptyState}
+      cardVariant='flat'
     >
       <LibrarySections
         sections={[

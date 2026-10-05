@@ -1,5 +1,6 @@
 import { type ReactElement, type ReactNode } from 'react';
 import { Link } from 'react-router-dom';
+import { ChevronRight } from '@xyne/icons';
 import { cn } from '@/utils/classNames';
 import { Skeleton } from '@/components/ui/Skeleton';
 import { Tooltip } from '@/components/ui/Tooltip/Tooltip';
@@ -11,7 +12,12 @@ const getInitials = (name: string): string => {
   }
   return name.slice(0, 2).toUpperCase();
 };
-const TILE_SIZE = { sm: 'size-8', md: 'size-10' } as const;
+const TILE_SIZE = {
+  sm: 'size-8 rounded-lg',
+  md: 'size-10 rounded-lg',
+  // The 44px tile on Agent Hub's flat cards (Figma 1338:41838).
+  lg: 'size-11 rounded-xl',
+} as const;
 
 export function LibraryIconTile({
   name,
@@ -27,7 +33,7 @@ export function LibraryIconTile({
   return (
     <span
       className={cn(
-        'flex shrink-0 items-center justify-center overflow-hidden rounded-lg text-sm font-medium shadow-sm',
+        'flex shrink-0 items-center justify-center overflow-hidden text-sm font-medium shadow-sm',
         TILE_SIZE[size],
 
         color ? 'text-white' : 'border border-border bg-card text-muted-foreground',
@@ -77,8 +83,12 @@ export interface LibraryCardProps {
    */
   footer?: ReactNode;
   dimmed?: boolean;
-  /** Borderless card that only tints on hover (Figma 1959:34563). Agents tab. */
+  /** Borderless card that only tints on hover (Figma 1959:34563, 1338:41838). */
   variant?: 'outlined' | 'flat';
+  /** Flat only: a chevron at the end of the name row. */
+  chevron?: boolean;
+  /** Flat only: green tint and border, for items you already have (a connected MCP). */
+  highlighted?: boolean;
 }
 
 export function LibraryCard({
@@ -92,6 +102,8 @@ export function LibraryCard({
   footer,
   dimmed = false,
   variant = 'outlined',
+  chevron = false,
+  highlighted = false,
 }: LibraryCardProps): ReactElement {
   const flat = variant === 'flat';
   return (
@@ -101,7 +113,13 @@ export function LibraryCard({
       className={cn(
         'flex overflow-hidden transition-colors',
         flat
-          ? 'items-center gap-2 rounded-2xl p-3 hover:bg-foreground/[0.04]'
+          ? // p-[11px] + a 1px border keeps every flat card 12px in, tinted or not.
+            cn(
+              'items-center gap-2 rounded-2xl border p-[11px]',
+              highlighted
+                ? 'border-[color-mix(in_srgb,var(--status-success)_20%,transparent)] bg-[color-mix(in_srgb,var(--status-success)_4%,transparent)] hover:bg-[color-mix(in_srgb,var(--status-success)_8%,transparent)]'
+                : 'border-transparent hover:bg-foreground/[0.04]',
+            )
           : 'items-start gap-3 rounded-[20px] border border-border bg-background p-4 hover:bg-muted/40',
         dimmed && 'opacity-60',
       )}
@@ -127,6 +145,9 @@ export function LibraryCard({
             )
           ) : null}
           {statusDot}
+          {flat && chevron ? (
+            <ChevronRight className='ml-auto size-4 shrink-0 text-muted-foreground' aria-hidden />
+          ) : null}
         </div>
         {footer ?? (
           <p
@@ -145,10 +166,22 @@ export function LibraryCard({
   );
 }
 
-export function LibraryCardSkeleton(): ReactElement {
+export function LibraryCardSkeleton({
+  variant = 'outlined',
+}: {
+  variant?: LibraryCardProps['variant'];
+}): ReactElement {
+  const flat = variant === 'flat';
   return (
-    <div className='flex items-start gap-3 rounded-[20px] border border-border bg-background p-4'>
-      <Skeleton className='size-8 shrink-0 rounded-lg' />
+    <div
+      className={cn(
+        'flex',
+        flat
+          ? 'items-center gap-2 p-3'
+          : 'items-start gap-3 rounded-[20px] border border-border bg-background p-4',
+      )}
+    >
+      <Skeleton className={cn('shrink-0', flat ? 'size-11 rounded-xl' : 'size-8 rounded-lg')} />
 
       <div className='flex min-w-0 flex-1 flex-col gap-0.5'>
         <div className='flex min-h-[22px] items-center'>

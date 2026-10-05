@@ -15,6 +15,7 @@ import {
 import { LibraryToolbarPortal } from '../shared/components/LibraryToolbarSlot';
 import { useCategoryFilter } from '../shared/hooks/useCategoryFilter';
 import { Badge } from '@/components/ui/Badge';
+import { Pill } from '../shared/primitives/Pill';
 
 const McpV2 = ({ query }: { query: string }): ReactElement => {
   const { workspaceId } = useParams<{ workspaceId?: string }>();
@@ -90,26 +91,43 @@ const McpV2 = ({ query }: { query: string }): ReactElement => {
           : undefined
       }
       emptyState={emptyState}
+      cardVariant='flat'
     >
       <LibrarySections
         sections={sections.map(section => ({
           key: section.key,
           label: section.label,
           items: section.servers.map(server => {
+            const connected = connectedServerIds.has(server.id);
             return (
               <LibraryCard
                 key={server.id}
                 to={prefixWs(`/ai/library/mcp/${encodeURIComponent(server.type)}`)}
                 testId='claw-mcp-card'
                 dimmed={server.enabled === false}
-                icon={<McpServerIcon server={server} size='sm' />}
+                variant='flat'
+                chevron
+                highlighted={connected}
+                icon={<McpServerIcon server={server} size='tile' />}
                 name={server.name}
                 description={server.description ?? undefined}
                 meta={
-                  server.oauth ? (
-                    <Badge variant='secondary' className='px-1.5 py-0 text-[10px] leading-tight'>
-                      OAuth
-                    </Badge>
+                  connected || server.oauth ? (
+                    <>
+                      {connected ? (
+                        <Pill tone='success' size='md'>
+                          Connected
+                        </Pill>
+                      ) : null}
+                      {server.oauth ? (
+                        <Badge
+                          variant='secondary'
+                          className='px-1.5 py-0 text-[10px] leading-tight'
+                        >
+                          OAuth
+                        </Badge>
+                      ) : null}
+                    </>
                   ) : undefined
                 }
               />

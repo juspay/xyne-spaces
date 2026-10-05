@@ -1,6 +1,6 @@
 import { type ReactElement, type ReactNode } from 'react';
 import { EmptyState } from '@/components/Board/EmptyState/EmptyState';
-import { LibraryCardSkeleton } from './LibraryCard';
+import { LibraryCardSkeleton, type LibraryCardProps } from './LibraryCard';
 
 const SKELETON_COUNT = 6;
 
@@ -38,12 +38,15 @@ export function LibraryTabShell({
   isLoading,
   error,
   emptyState,
+  cardVariant,
   children,
 }: {
   toolbar: ReactNode;
   isLoading: boolean;
   error?: { message: string; onRetry: () => void } | undefined;
   emptyState?: LibraryEmptyState | undefined;
+  /** Shapes the loading placeholders like the tab's cards. */
+  cardVariant?: LibraryCardProps['variant'];
   children: ReactNode;
 }): ReactElement {
   return (
@@ -52,7 +55,7 @@ export function LibraryTabShell({
       {isLoading ? (
         <LibraryGrid>
           {Array.from({ length: SKELETON_COUNT }).map((_, i) => (
-            <LibraryCardSkeleton key={i} />
+            <LibraryCardSkeleton key={i} variant={cardVariant} />
           ))}
         </LibraryGrid>
       ) : error ? (

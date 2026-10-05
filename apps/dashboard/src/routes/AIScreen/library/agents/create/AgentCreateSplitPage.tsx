@@ -148,11 +148,6 @@ import {
 } from '@/components/flowUI/nodes/agent/create/agentSchedule';
 import { createScheduledJob } from '../detail/activity/createScheduledJob';
 import {
-  seedScriptedHubCatalog,
-  watchScriptedHubCatalog,
-} from '@/components/flowUI/nodes/agent/create/scriptedHubCatalog';
-import { useScriptedCreatePlayer } from '@/components/flowUI/nodes/agent/create/useScriptedCreatePlayer';
-import {
   CHAT_OVERLAY_WIDTH_MAX,
   CHAT_OVERLAY_WIDTH_MIN,
   chatOverlayShadow,
@@ -295,11 +290,9 @@ const DRAFT_PARAM = 'draft';
  * and the test chat, saving only what changed.
  */
 export function AgentCreateSplitPage({
-  scripted = false,
   agent,
   canRenameHandle = false,
 }: {
-  scripted?: boolean;
   agent?: Agent | undefined;
   /** Only the owner renames an agent's handle. */
   canRenameHandle?: boolean;
@@ -319,7 +312,7 @@ export function AgentCreateSplitPage({
   const arrivalLeft = useArrivalCanvasLeft();
 
   useEffect(() => {
-    if (scripted || requested || agent) return;
+    if (requested || agent) return;
     setParams(
       current => {
         const next = new URLSearchParams(current);
@@ -328,7 +321,7 @@ export function AgentCreateSplitPage({
       },
       { replace: true },
     );
-  }, [agent, draftId, requested, scripted, setParams]);
+  }, [agent, draftId, requested, setParams]);
 
   if (agent) {
     // Where the profile's Back goes, kept for the way back.
@@ -338,7 +331,6 @@ export function AgentCreateSplitPage({
       <AgentCreateCanvasPage
         key={agent.id}
         draftId={`edit-${agent.id}`}
-        scripted={false}
         agent={agent}
         canRenameHandle={canRenameHandle}
         enterFromLeft={arrivalLeft}
@@ -346,18 +338,16 @@ export function AgentCreateSplitPage({
       />
     );
   }
-  return <AgentCreateCanvasPage key={draftId} draftId={draftId} scripted={scripted} />;
+  return <AgentCreateCanvasPage key={draftId} draftId={draftId} />;
 }
 
 function AgentCreateCanvasPage({
-  scripted,
   draftId,
   agent,
   canRenameHandle = false,
   enterFromLeft,
   returnTo,
 }: {
-  scripted: boolean;
   draftId: string;
   /** Editing this saved agent instead of creating one. */
   agent?: Agent | undefined;
@@ -424,7 +414,7 @@ function AgentCreateCanvasPage({
   const draftContextRef = useRef<Promise<HubPlanContext> | null>(null);
   const [draftStreamDown, setDraftStreamDown] = useState(false);
   const draftKey = agentDraftStorageKey(workspaceId, user?.id, draftId);
-  const storageReady = !scripted && Boolean(user?.id);
+  const storageReady = Boolean(user?.id);
   /** The user saved this draft, so it is listed under Drafts and every autosave keeps it there. */
   const keptRef = useRef(false);
   /** Bumped by Start over: the Build chat starts again with the canvas. */
@@ -473,15 +463,6 @@ function AgentCreateCanvasPage({
       : `@${slug} is taken. Rename the handle to create a new agent.`
     : nameCheck.nameError;
   const builtBy = user?.name ?? user?.email ?? 'you';
-
-  const seedHub = useCallback((): void => {
-    seedScriptedHubCatalog(queryClient, user?.id);
-  }, [queryClient, user?.id]);
-
-  useEffect(() => {
-    if (!scripted) return undefined;
-    return watchScriptedHubCatalog(queryClient, user?.id);
-  }, [queryClient, scripted, user?.id]);
 
   // Reopen this canvas's draft: a reload, or a draft opened from Agent Hub. The
   // Build chat comes back on its own (the panel reads it by the same key).
@@ -544,22 +525,6 @@ function AgentCreateCanvasPage({
     return () => window.removeEventListener('beforeunload', warn);
   }, [drafting]);
 
-  const scriptedPlayer = useScriptedCreatePlayer({
-    enabled: scripted,
-    emptyForm: EMPTY_CREATE_FORM,
-    form: {
-      applyChatPatch: createForm.applyChatPatch,
-      setWritingField: createForm.setWritingField,
-      clearHighlights: createForm.clearHighlights,
-      patchForm: createForm.patchForm,
-      resetFrom: createForm.resetFrom,
-      resolveConflict: createForm.resolveConflict,
-    },
-    setPhase,
-    setSkeletonIdentity,
-    seedHub,
-  });
-
   const saveGate = computeSaveGate({
     created: phase === 'created',
     creating,
@@ -593,7 +558,6 @@ function AgentCreateCanvasPage({
 
   const onTurnComplete = useCallback(
     (turn: CreateChatTurn): Promise<void> => {
-      if (scripted) return Promise.resolve();
       markCreate('turn');
       turnsInFlightRef.current += 1;
       setDrafting(true);
@@ -897,12 +861,11 @@ function AgentCreateCanvasPage({
       canvasTurnChainRef.current = settled;
       return run;
     },
-    [createForm, scripted, user?.id],
+    [createForm, user?.id],
   );
 
   const onSend = useCallback(
     (userText: string): void => {
-      if (scripted) return;
       markCreate('send');
       // Only when this turn is likely to touch hubs: an empty canvas (first draft)
       // or words that name a tool, skill or knowledge. Chit-chat costs no XOR call.
@@ -917,7 +880,7 @@ function AgentCreateCanvasPage({
         context: loadHubPlanContext(user?.id),
       };
     },
-    [createForm, scripted, user?.id],
+    [createForm, user?.id],
   );
 
   const draftContext = useCallback((): Promise<HubPlanContext> => {
@@ -1403,7 +1366,7 @@ function AgentCreateCanvasPage({
   );
 
   const persist = useCallback(async (): Promise<void> => {
-    if (scripted || !saveGate.canSave || creating) return;
+    if (!saveGate.canSave || creating) return;
     setCreating(true);
     setCreateError(null);
     if (agent) {
@@ -1459,7 +1422,6 @@ function AgentCreateCanvasPage({
     persistEdit,
     queryClient,
     saveGate.canSave,
-    scripted,
     slug,
     user?.id,
   ]);
@@ -1565,7 +1527,6 @@ function AgentCreateCanvasPage({
         : // The face this draft keeps once saved.
           { avatarKey: draftId })}
       onSave={() => {
-        if (scripted) return;
         void persist();
       }}
       onCancel={requestCancel}
@@ -1573,28 +1534,24 @@ function AgentCreateCanvasPage({
       saveBlockedReason={phase === 'empty' ? null : saveGate.reason}
       saving={creating}
       saveError={createError}
-      readOnly={phase === 'created' || (scripted && scriptedPlayer.playing)}
-      {...(scripted
-        ? {}
-        : {
-            onOpenSettings: () => setSettingsOpen(true),
-            floatingChat: (
-              <DraftAgentChat
-                getForm={createForm.getForm}
-                agentName={createForm.form.name}
-                agentKey={agent ? agentAvatarKey(agent) : draftId}
-                disabled={phase === 'created'}
-                // Mobile has no Build chat to hand off to.
-                onHandoff={isMobile ? undefined : handOffToBuild}
-                handoffs={handoffs}
-                onToolsChange={tools => {
-                  createForm.patchForm({ tools });
-                  if (phase === 'empty') setPhase('draft');
-                }}
-                storageKey={storageReady ? draftChatStorageKey(draftKey) : undefined}
-              />
-            ),
-          })}
+      readOnly={phase === 'created'}
+      onOpenSettings={() => setSettingsOpen(true)}
+      floatingChat={
+        <DraftAgentChat
+          getForm={createForm.getForm}
+          agentName={createForm.form.name}
+          agentKey={agent ? agentAvatarKey(agent) : draftId}
+          disabled={phase === 'created'}
+          // Mobile has no Build chat to hand off to.
+          onHandoff={isMobile ? undefined : handOffToBuild}
+          handoffs={handoffs}
+          onToolsChange={tools => {
+            createForm.patchForm({ tools });
+            if (phase === 'empty') setPhase('draft');
+          }}
+          storageKey={storageReady ? draftChatStorageKey(draftKey) : undefined}
+        />
+      }
     />
   );
 
@@ -1617,16 +1574,9 @@ function AgentCreateCanvasPage({
       className='flex h-full min-h-0 w-full overflow-x-clip'
       data-component='AgentCreateSplitPage'
       data-created-slug={createdSlug ?? ''}
-      {...(scripted
-        ? {
-            'data-scripted': 'true',
-            'data-scripted-step': scriptedPlayer.step,
-            'data-scripted-ready': scriptedPlayer.ready ? 'true' : 'false',
-          }
-        : {})}
     >
-      {scripted ? null : <WarmHubCatalogs />}
-      {scripted ? null : agent ? (
+      <WarmHubCatalogs />
+      {agent ? (
         // A saved agent's own settings, as on its profile: they save as they change.
         <EditAgentSettings
           agent={agent}
@@ -1717,20 +1667,8 @@ function AgentCreateCanvasPage({
                 incoming={buildInbox}
                 onIncomingPhase={onIncomingPhase}
                 disabled={phase === 'created'}
-                progressLabel={scripted ? null : progressLabel}
+                progressLabel={progressLabel}
                 editing={Boolean(agent)}
-                {...(scripted
-                  ? {
-                      scripted: true,
-                      scriptedMessages: scriptedPlayer.messages,
-                      scriptedDraft: scriptedPlayer.draft,
-                      scriptedPlaying: scriptedPlayer.playing,
-                      scriptedTyping: scriptedPlayer.typing,
-                      scriptedDone: scriptedPlayer.step === 'done',
-                      onScriptedEngage: scriptedPlayer.engageComposer,
-                      onScriptedReplay: scriptedPlayer.replay,
-                    }
-                  : {})}
               />
             </div>
           </div>
