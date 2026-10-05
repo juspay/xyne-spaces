@@ -2,7 +2,7 @@ import { BaseRepository } from './base';
 import { Message } from '@prisma/client';
 import { PaginationOptions, PaginatedResult, QueryOptions } from '@/types/database';
 import { sanitizeMessageContent } from '@/utils/contentUtils';
-import { getMessageContentLength, MAX_MESSAGE_CONTENT_LENGTH, MessageType } from '@xyne/shared';
+import { CALL_TICKET_UPDATES_SUBTYPE, getMessageContentLength, MAX_MESSAGE_CONTENT_LENGTH, MessageType } from '@xyne/shared';
 //import { queueMessageIngestion } from '@/queues/vespaQueue';
 
 //import { extractAllMentions } from '@/utils/mentionParser';
@@ -560,32 +560,12 @@ export class MessageRepository extends BaseRepository<Message, CreateMessageInpu
         conversationId,
         msgType: MessageType.BOT,
         AND: [
-          { metadata: { path: ['messageSubtype'], equals: 'call_ticket_updates' } },
+          { metadata: { path: ['messageSubtype'], equals: CALL_TICKET_UPDATES_SUBTYPE } },
           { metadata: { path: ['callId'], equals: callId } },
         ],
       },
-    });
-  }
-
-  /**
-   * Ticket-update card messages in the given call threads (series memory for
-   * recurring calls). Newest first. Scoped to the workspace and to those
-   * conversations so it runs on the conversationId index instead of scanning
-   * every bot message.
-   */
-  async findTicketUpdateMessagesByConversationIds(
-    workspaceId: string,
-    conversationIds: string[],
-  ): Promise<Message[]> {
-    if (conversationIds.length === 0) return [];
-    return await this.db.message.findMany({
-      where: {
-        workspaceId,
-        conversationId: { in: conversationIds },
-        msgType: MessageType.BOT,
-        metadata: { path: ['messageSubtype'], equals: 'call_ticket_updates' },
-      },
-      orderBy: { createdAt: 'desc' },
+      // Two overlapping runs can each create a card; every lookup settles on the oldest.
+      orderBy: { createdAt: 'asc' },
     });
   }
 

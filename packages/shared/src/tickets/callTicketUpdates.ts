@@ -88,8 +88,6 @@ export interface TicketUpdatesDoc {
   ignored: IgnoredTicketUpdate[];
 }
 
-export const EMPTY_TICKET_UPDATES_DOC: TicketUpdatesDoc = { updates: [], applied: [], ignored: [] };
-
 const str = (v: unknown, fallback = ''): string => (typeof v === 'string' ? v : fallback);
 const strOrNull = (v: unknown): string | null => (typeof v === 'string' && v.length > 0 ? v : null);
 const numOrNull = (v: unknown): number | null =>
@@ -202,7 +200,8 @@ function compact<T extends object>(entry: T): Record<string, unknown> {
 
 /**
  * The plain object to dump as frontmatter. A restricted row never serialises an
- * identity field, whatever the in-memory object holds.
+ * identity field, whatever the in-memory object holds. `boardType` stays: it
+ * identifies nothing, and the card needs it to know a flow board takes no stage.
  */
 export function serializeTicketUpdatesDoc(doc: TicketUpdatesDoc): Record<string, unknown> {
   const stripIdentity = <T extends { restricted: boolean }>(entry: T): T =>
@@ -213,7 +212,6 @@ export function serializeTicketUpdatesDoc(doc: TicketUpdatesDoc): Record<string,
           title: '',
           ticketConversationId: '',
           ticketChannelId: '',
-          boardType: '',
           currentStageName: '',
           currentStatusV2: '',
           proposedStageName: null,
@@ -227,6 +225,34 @@ export function serializeTicketUpdatesDoc(doc: TicketUpdatesDoc): Record<string,
   if (doc.applied.length > 0) data['applied'] = doc.applied.map((a) => compact(stripIdentity(a)));
   if (doc.ignored.length > 0) data['ignored'] = doc.ignored.map((i) => compact(stripIdentity(i)));
   return data;
+}
+
+/** A position in a call as MM:SS, or H:MM:SS past the hour. */
+export function formatCallTimestamp(seconds: number): string {
+  const h = Math.floor(seconds / 3600);
+  const m = Math.floor((seconds % 3600) / 60);
+  const s = Math.floor(seconds % 60);
+  const mm = String(m).padStart(2, '0');
+  const ss = String(s).padStart(2, '0');
+  return h > 0 ? `${h}:${mm}:${ss}` : `${mm}:${ss}`;
+}
+
+/**
+ * Where an approved update came from: the line appended to the comment posted on
+ * the ticket. One wording for the server that posts it and the card that previews it.
+ * `when` is the already-formatted position in the call, when one is known.
+ */
+export function ticketUpdateCommentSource(params: {
+  callTitle: string | null;
+  callStartedAt: Date | number;
+  when: string | null;
+  speaker: string | null;
+}): string {
+  const { callTitle, callStartedAt, when, speaker } = params;
+  const callLabel = callTitle
+    ? `the call "${callTitle}"`
+    : `the call on ${new Date(callStartedAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}`;
+  return `From ${callLabel}${when ? ` at ${when}` : ''}${speaker ? `, said by ${speaker}` : ''}.`;
 }
 
 export interface TicketUpdateBoardStage {

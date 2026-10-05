@@ -258,7 +258,7 @@ export class TranscriptService {
    * Create a fresh Agent instance for each request
    * This prevents state pollution and BUSY errors between concurrent requests
    */
-  async createAgent(callId?: string, modelType?: SummaryModelType): Promise<Agent | null> {
+  private async createAgent(callId?: string, modelType?: SummaryModelType): Promise<Agent | null> {
     try {
       const userId = await this.getCreatedByUserIdForCall(callId);
       const credential = await orgLLMCredentialService.getCredentialByUserId(
@@ -1807,11 +1807,12 @@ export class TranscriptService {
         `AI generation completed in ${duration}ms. Summary: ${!!summary}, Title: ${!!title}, Ticket updates: ${ticketUpdateCount}`
       );
 
-      // If ALL three AI calls failed, escalate from per-call warns to a single error so
-      // an LLM outage affecting every call is immediately visible rather than buried in warns.
-      const aiFullyFailed = !summary && !title && ticketUpdateCount === 0;
+      // If both the summary and the title failed, escalate from per-call warns to a single
+      // error so an LLM outage affecting every call is immediately visible rather than buried
+      // in warns. Ticket updates are not part of the test: most calls have none to find.
+      const aiFullyFailed = !summary && !title;
       if (aiFullyFailed) {
-        logger.error(`[${callId}] ai_generation_all_failed`, { summary: false, title: false, ticketUpdates: 0 });
+        logger.error(`[${callId}] ai_generation_all_failed`, { summary: false, title: false });
       }
 
       if (summary) {

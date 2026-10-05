@@ -4,6 +4,7 @@ import { queryClient } from '../clients/queryClient';
 import { AxiosError } from 'axios';
 import { CallType, MeetingStatus, type HostControls, CalendarVisibility } from '@xyne/shared';
 import { logger, Event } from '../../utils/logger';
+import { getApiErrorMessage } from '../../utils/apiError';
 
 // ============================================================================
 // TYPES
@@ -217,14 +218,6 @@ function extractStageOptions(error: unknown): string[] {
   return Array.isArray(data?.stageOptions)
     ? data.stageOptions.filter((s): s is string => typeof s === 'string')
     : [];
-}
-
-function extractApiError(error: unknown, fallback: string): string {
-  if (error instanceof AxiosError) {
-    const data = error.response?.data as { error?: unknown } | undefined;
-    if (data && typeof data.error === 'string') return data.error;
-  }
-  return fallback;
 }
 
 export class CallService {
@@ -963,21 +956,18 @@ export class CallService {
       };
     } catch (error) {
       throw new TicketUpdateApplyError(
-        extractApiError(error, 'Failed to apply the ticket update'),
+        getApiErrorMessage(error, 'Failed to apply the ticket update'),
         extractStageOptions(error),
       );
     }
   }
 
   /** Ignore one item on a call's "ticket updates" card. */
-  async ignoreTicketUpdate(callId: string, updateId: string): Promise<{ content: string }> {
+  async ignoreTicketUpdate(callId: string, updateId: string): Promise<void> {
     try {
-      const response = await apiInstance.post<{ success: true; content: string }>(
-        `/calls/${callId}/ticket-updates/${updateId}/ignore`,
-      );
-      return { content: response.data.content };
+      await apiInstance.post(`/calls/${callId}/ticket-updates/${updateId}/ignore`);
     } catch (error) {
-      throw new Error(extractApiError(error, 'Failed to ignore the ticket update'));
+      throw new Error(getApiErrorMessage(error, 'Failed to ignore the ticket update'));
     }
   }
 }

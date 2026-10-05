@@ -12,6 +12,7 @@ import {
   parseReactionsMd,
   ReactionsData,
   parseTicketMd,
+  CALL_TICKET_UPDATES_SUBTYPE,
 } from '@xyne/shared';
 import {
   formatFullTimestamp,
@@ -665,7 +666,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
   const isEphemeralNotice = metadata?.['__xyneEphemeral'] === true;
   // Detect any message with markdown content format (call_summary, call_prd, etc.)
   const isMarkdownContent = metadata?.['contentFormat'] === 'markdown';
-  const isTicketUpdatesMessage = metadata?.['messageSubtype'] === 'call_ticket_updates';
+  const isTicketUpdatesMessage = metadata?.['messageSubtype'] === CALL_TICKET_UPDATES_SUBTYPE;
   // Retired "Suggested Tickets" cards stay readable: the old suggestions as plain
   // text, and links to the tickets that were created from them.
   const isLegacySuggestedTickets = metadata?.['messageSubtype'] === 'call_suggested_tickets';

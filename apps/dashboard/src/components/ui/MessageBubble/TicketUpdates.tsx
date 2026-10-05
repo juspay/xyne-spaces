@@ -12,7 +12,13 @@ import {
   Pencil,
   X,
 } from 'lucide-react';
-import { isTicketUpdateClaimFresh, resolveStageForStatus } from '@xyne/shared';
+import {
+  BoardType,
+  formatCallTimestamp,
+  isTicketUpdateClaimFresh,
+  resolveStageForStatus,
+  ticketUpdateCommentSource,
+} from '@xyne/shared';
 import { logger, Event as LogEvent } from '../../../utils/logger';
 import {
   callService,
@@ -27,7 +33,6 @@ import { Button } from '../Button';
 import { Checkbox } from '../Checkbox/Checkbox';
 import { Textarea } from '../Textarea';
 import {
-  formatTranscriptTimestamp,
   type AppliedTicketUpdate,
   type IgnoredTicketUpdate,
   type TicketUpdateProposal,
@@ -70,6 +75,8 @@ interface TicketRef {
   currentStageName?: string;
 }
 
+// The card carries the board type as plain text.
+const FLOW_BOARD: string = BoardType.FLOW;
 const NO_ACCESS = "You don't have access to this ticket";
 const FIELD_LABEL = 'pt-0.5 text-xs font-medium uppercase tracking-wide text-muted-foreground';
 const FIELD_GRID = 'grid grid-cols-[4.5rem_minmax(0,1fr)] gap-x-3 gap-y-1.5';
@@ -77,10 +84,13 @@ const FIELD_GRID = 'grid grid-cols-[4.5rem_minmax(0,1fr)] gap-x-3 gap-y-1.5';
 const draftFor = (u: TicketUpdateProposal): RowDraft => ({
   text: u.update,
   postComment: true,
-  stageName: u.boardType === 'FLOW' ? '' : (u.proposedStageName ?? ''),
+  stageName: u.boardType === FLOW_BOARD ? '' : (u.proposedStageName ?? ''),
 });
 
 const plural = (count: number, word: string): string => `${count} ${word}${count === 1 ? '' : 's'}`;
+
+/** A cleared comment box posts nothing, the same as unticking the checkbox. */
+const postsComment = (d: RowDraft): boolean => d.postComment && d.text.trim() !== '';
 
 const StageChange: React.FC<{ from: string; to: string }> = ({ from, to }) => (
   <span className='inline-flex shrink-0 items-center gap-1 rounded bg-muted px-1.5 py-0.5 text-xs text-foreground'>
@@ -108,12 +118,20 @@ export const TicketUpdates: React.FC<TicketUpdatesProps> = ({
   callId,
   channelId,
   messageId,
-  updates,
+  updates: syncedUpdates,
   applied,
   ignored,
 }) => {
   const navigate = useNavigate();
   const { user } = useAuth();
+  // Rows this user just approved or ignored: hidden at once, so a second click
+  // cannot race the sync that removes them from the message content.
+  const [handledIds, setHandledIds] = useState<string[]>([]);
+  const updates = useMemo(
+    () => syncedUpdates.filter(u => !handledIds.includes(u.updateId)),
+    [syncedUpdates, handledIds],
+  );
+  const markHandled = (id: string): void => setHandledIds(prev => [...prev, id]);
   const [drafts, setDrafts] = useState<Record<string, RowDraft>>({});
   // Rows whose stage the user set by hand: never overwritten by a later prefill.
   const [stageTouchedIds, setStageTouchedIds] = useState<string[]>([]);
@@ -215,6 +233,15 @@ export const TicketUpdates: React.FC<TicketUpdatesProps> = ({
 
   const claimedByOther = (u: TicketUpdateProposal): boolean =>
     isTicketUpdateClaimFresh(u.claim) && u.claim.by !== user?.id;
+  // A claim expires on the clock, not on a sync: tick while one is live so its
+  // row unlocks without waiting for something else to re-render the card.
+  const [, setClaimTick] = useState(0);
+  const hasLiveClaim = updates.some(u => isTicketUpdateClaimFresh(u.claim));
+  useEffect(() => {
+    if (!hasLiveClaim) return;
+    const timer = setInterval(() => setClaimTick(tick => tick + 1), 5_000);
+    return (): void => clearInterval(timer);
+  }, [hasLiveClaim]);
   const actionable = updates.filter(u => ticketFor(u).state === 'ready' && !claimedByOther(u));
   const lockedCount = updates.filter(u => ticketFor(u).state === 'locked').length;
 
@@ -235,7 +262,13 @@ export const TicketUpdates: React.FC<TicketUpdatesProps> = ({
     setDrafts(prev => {
       let next = prev;
       for (const u of updates) {
-        if (!u.restricted || !u.proposedStatusV2 || stageTouchedIds.includes(u.updateId)) continue;
+        if (
+          !u.restricted ||
+          u.boardType === FLOW_BOARD ||
+          !u.proposedStatusV2 ||
+          stageTouchedIds.includes(u.updateId)
+        )
+          continue;
         const draft = prev[u.updateId];
         const ticket = restrictedById.get(u.ticketId);
         if (!draft || draft.stageName || !ticket) continue;
@@ -250,6 +283,19 @@ export const TicketUpdates: React.FC<TicketUpdatesProps> = ({
       return next;
     });
   }, [updates, restrictedById, stagesByBoard, stageTouchedIds]);
+
+  // The line the server appends to a posted comment, so the preview shows the
+  // whole comment. Unknown for a viewer who cannot read the call itself.
+  const [call] = useQuery(queries.callByExternalId({ callId }));
+  const commentSourceFor = (u: TicketUpdateProposal): string | null =>
+    call
+      ? ticketUpdateCommentSource({
+          callTitle: call.title ?? null,
+          callStartedAt: call.startedAt,
+          when: u.timestampSeconds !== null ? formatCallTimestamp(u.timestampSeconds) : null,
+          speaker: u.speaker,
+        })
+      : null;
 
   const shownForMessageRef = React.useRef<string | null>(null);
   useEffect(() => {
@@ -304,17 +350,19 @@ export const TicketUpdates: React.FC<TicketUpdatesProps> = ({
   ): Promise<{ error: string } | { result: AppliedTicketUpdateResult }> => {
     const d = drafts[u.updateId] ?? draftFor(u);
     const changeStatus = d.stageName !== '';
-    if (!d.postComment && !changeStatus) {
+    const postComment = postsComment(d);
+    if (!postComment && !changeStatus) {
       openEditor(u.updateId);
       return { error: 'nothing to apply: no comment and no stage change' };
     }
     try {
       const result = await callService.applyTicketUpdate(callId, u.updateId, {
-        postComment: d.postComment,
+        postComment,
         changeStatus,
         message: d.text,
         ...(changeStatus ? { stageName: d.stageName } : {}),
       });
+      markHandled(u.updateId);
       return { result };
     } catch (error) {
       if (error instanceof TicketUpdateApplyError && error.stageOptions.length > 0) {
@@ -404,6 +452,7 @@ export const TicketUpdates: React.FC<TicketUpdatesProps> = ({
     setBusyId(u.updateId);
     try {
       await callService.ignoreTicketUpdate(callId, u.updateId);
+      markHandled(u.updateId);
     } catch (error) {
       logger.error(LogEvent.FRONTEND_ERROR, {
         type: 'ticket_update_ignore',
@@ -416,7 +465,9 @@ export const TicketUpdates: React.FC<TicketUpdatesProps> = ({
     }
   };
 
-  if (updates.length === 0 && applied.length === 0 && ignored.length === 0) return null;
+  // The synced rows decide whether there is a card at all, so it does not blink
+  // out between hiding the last row here and its outcome arriving.
+  if (syncedUpdates.length === 0 && applied.length === 0 && ignored.length === 0) return null;
 
   const selectable = actionable.length > 1;
   const handledCount = applied.length + ignored.length;
@@ -530,7 +581,7 @@ export const TicketUpdates: React.FC<TicketUpdatesProps> = ({
               const editing = editingIds.includes(u.updateId) && !locked;
               const open = isOpen(u.updateId);
               const stageOptions = stageOptionsFor(u);
-              const canChangeStage = u.boardType !== 'FLOW' && stageOptions.length > 0;
+              const canChangeStage = u.boardType !== FLOW_BOARD && stageOptions.length > 0;
               // The status was said out loud but no stage on the board stands for it.
               const unmatchedStatus =
                 !d.stageName && u.proposedStatusV2 ? u.proposedStatusV2.toLowerCase() : '';
@@ -645,8 +696,15 @@ export const TicketUpdates: React.FC<TicketUpdatesProps> = ({
                       <dl className={FIELD_GRID}>
                         <dt className={FIELD_LABEL}>Comment</dt>
                         <dd className='text-sm'>
-                          {d.postComment ? (
-                            <span className='text-foreground'>{d.text}</span>
+                          {postsComment(d) ? (
+                            <>
+                              <span className='text-foreground'>{d.text}</span>
+                              {commentSourceFor(u) && (
+                                <span className='mt-0.5 block text-xs italic text-muted-foreground'>
+                                  {commentSourceFor(u)}
+                                </span>
+                              )}
+                            </>
                           ) : (
                             <span className='text-muted-foreground'>Not posting a comment</span>
                           )}
@@ -687,6 +745,11 @@ export const TicketUpdates: React.FC<TicketUpdatesProps> = ({
                             onChange={e => patch(u.updateId, { text: e.target.value })}
                             className='text-sm'
                           />
+                          {postsComment(d) && commentSourceFor(u) && (
+                            <p className='text-xs italic text-muted-foreground'>
+                              {commentSourceFor(u)}
+                            </p>
+                          )}
                           <Checkbox
                             size='sm'
                             checked={d.postComment}
@@ -724,7 +787,7 @@ export const TicketUpdates: React.FC<TicketUpdatesProps> = ({
                               “{unmatchedStatus}” was said; pick the stage for it
                             </span>
                           )}
-                          {u.boardType === 'FLOW' && (
+                          {u.boardType === FLOW_BOARD && (
                             <span className='text-xs text-muted-foreground'>
                               Flow boards move through their own transitions
                             </span>
@@ -735,7 +798,7 @@ export const TicketUpdates: React.FC<TicketUpdatesProps> = ({
                         <p className='mt-2.5 border-l-2 border-border pl-2 text-xs text-muted-foreground'>
                           “{u.quote}”{u.speaker ? ` ${u.speaker}` : ''}
                           {u.timestampSeconds !== null
-                            ? `, ${formatTranscriptTimestamp(u.timestampSeconds)}`
+                            ? `, ${formatCallTimestamp(u.timestampSeconds)}`
                             : ''}
                         </p>
                       )}
