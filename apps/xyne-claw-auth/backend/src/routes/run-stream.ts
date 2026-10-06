@@ -53,6 +53,7 @@ import {
   cloneBranchSession,
   type ChatTreeMessage,
 } from "./lib/branching.js";
+import { buildCallbackBodyFromDone } from "./lib/sse-done-callback.js";
 
 import { createLogger } from "../logger.js";
 const log = createLogger("run-stream");
@@ -740,6 +741,7 @@ publicRouter.post("/", requireAuth, requireNoAccessToken, async (req: Request, r
         description: true,
         config: true,
         systemPrompt: true,
+        delegationTier: true,
       },
     }).catch(() => null);
     if (!agentRow) {
@@ -1471,6 +1473,7 @@ publicRouter.post("/", requireAuth, requireNoAccessToken, async (req: Request, r
       agentConfig: withAiScreenPresentationTools(
         enrichedAgentConfig,
         (agentRow.config as Record<string, unknown> | null)?.["tools"],
+        agentRow.delegationTier,
       ),
       additionalInstructions: aiScreenInstructions,
       ...(designSelectionInstruction || pageSelectionInstruction || openItemsInstruction
@@ -2689,6 +2692,26 @@ async function runViaSseTransport(opts: RunViaSseOpts): Promise<void> {
           }
         })();
       },
+      onPr: (_sid, pr) => {
+        void (async () => {
+          try {
+            const { readPrProgressFact, renderXyneAiPrCard } = await import("../lib/pr-card-render.js");
+            const fact = readPrProgressFact(pr);
+            if (!fact) return;
+            const { resolveXyneAiCardTarget } = await import("../lib/flow-card-delivery.js");
+            const target = await resolveXyneAiCardTarget({
+              assistantMessageId,
+              conversationId: convId,
+              agentSlug: slug,
+            });
+            if (!target) return;
+            const flow = await renderXyneAiPrCard({ pr: fact, target });
+            if (flow) stream.sendEvent("ui-flow", { flow });
+          } catch (err) {
+            log.warn(`[run-stream/sse] pr card emit failed: ${errMsg(err)}`);
+          }
+        })();
+      },
       onSandboxPreview: (sessionId, payload) => {
         // Sandbox preview today lands on /webhook/progress which posts the
         // noVNC link as a Spaces channel message. Replaying that POST keeps
@@ -2806,30 +2829,12 @@ async function runViaSseTransport(opts: RunViaSseOpts): Promise<void> {
       "Content-Type": "application/json",
       ...(CONFIG.xyneClawS2sKey ? { "x-s2s-key": CONFIG.xyneClawS2sKey } : {}),
     },
-    body: JSON.stringify({
+    body: JSON.stringify(buildCallbackBodyFromDone(r, {
       sessionId,
-      // Ship the meta explicitly so the receiving pod's /callback handler
-      // can persist without falling back to an agent_runs lookup when the
-      // POST load-balances away from the SSE pod.
       userId,
       conversationId: convId,
       agentSlug: slug,
-      status: r["status"],
-      // claw's sendCallback puts assistant text on `result` (both completed
-      // and cancelled paths). `.content` is kept as a forward-compat fallback.
-      result:
-        (r["result"] as string | undefined)
-        ?? (r["content"] as string | undefined)
-        ?? "",
-      ...(r["error"] ? { error: r["error"] } : {}),
-      ...(r["pendingActions"] ? { pendingActions: r["pendingActions"] } : {}),
-      ...(r["attachments"] ? { attachments: r["attachments"] } : {}),
-      ...(r["toolInvocations"] ? { toolInvocations: r["toolInvocations"] } : {}),
-      ...(r["pendingQuestions"] ? { pendingQuestions: r["pendingQuestions"] } : {}),
-      ...(r["toolsUsed"] ? { toolsUsed: r["toolsUsed"] } : {}),
-      ...(r["followUpsPending"] === true ? { followUpsPending: true } : {}),
-      ...((r["meta"] as Record<string, unknown> | undefined) ?? {}),
-    }),
+    })),
   });
   if (!cbRes.ok) {
     const text = await cbRes.text().catch(() => "");
