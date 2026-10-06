@@ -1,8 +1,8 @@
 import { FormFieldType } from '@xyne/shared';
 import { format, parseISO, isValid } from 'date-fns';
 import { Lock } from 'lucide-react-native';
-import { memo, useCallback, useMemo, useState, type ReactElement } from 'react';
-import { Pressable, Text, TextInput, View } from 'react-native';
+import { memo, useCallback, useMemo, useRef, useState, type ReactElement } from 'react';
+import { Keyboard, Pressable, Text, TextInput, View } from 'react-native';
 import { useCSSVariable } from 'uniwind';
 
 import Avatar from '@/src/components/ui/avatar';
@@ -31,15 +31,12 @@ type EditableFormFieldProps = {
   onSave: (newValue: string[]) => void;
 };
 
-type EditorKind =
-  | 'none'
-  | 'text'
-  | 'boolean'
-  | 'single'
-  | 'multi'
-  | 'date'
-  | 'user'
-  | 'ticket';
+type EditorKind = 'none' | 'text' | 'boolean' | 'single' | 'multi' | 'date' | 'user';
+
+const BOOLEAN_OPTIONS = [
+  { value: 'true', label: 'Yes' },
+  { value: 'false', label: 'No' },
+] as const;
 
 function parseDateMs(value: unknown): number | null {
   if (typeof value !== 'string' || !value.trim()) return null;
@@ -67,15 +64,14 @@ export const EditableFormField = memo(function EditableFormField({
 
   const [editor, setEditor] = useState<EditorKind>('none');
   const [draftText, setDraftText] = useState('');
-
-  const effectiveValue = fieldValue;
+  const textInputRef = useRef<TextInput>(null);
 
   const displayValue = useMemo(() => {
     if (fieldType === FormFieldType.BOOLEAN) {
-      return formatBooleanDisplay(effectiveValue);
+      return formatBooleanDisplay(fieldValue);
     }
     if (fieldType === FormFieldType.USER) {
-      const ids = jsonToStringArray(effectiveValue).map(stripUserPrefix);
+      const ids = jsonToStringArray(fieldValue).map(stripUserPrefix);
       if (ids.length === 0) return '';
       return ids
         .map(id => {
@@ -85,22 +81,14 @@ export const EditableFormField = memo(function EditableFormField({
         .join(', ');
     }
     if (fieldType === FormFieldType.MULTI_SELECT) {
-      return jsonToStringArray(effectiveValue).join(', ');
+      return jsonToStringArray(fieldValue).join(', ');
     }
-    return jsonToDisplayString(effectiveValue);
-  }, [effectiveValue, fieldType, users]);
+    return jsonToDisplayString(fieldValue);
+  }, [fieldType, fieldValue, users]);
 
   const selectOptions = useMemo(
     () => (fieldEnum ?? []).map(value => ({ value, label: value })),
     [fieldEnum],
-  );
-
-  const booleanOptions = useMemo(
-    () => [
-      { value: 'true', label: 'Yes' },
-      { value: 'false', label: 'No' },
-    ],
-    [],
   );
 
   const openEditor = useCallback((): void => {
@@ -122,23 +110,26 @@ export const EditableFormField = memo(function EditableFormField({
         setEditor('user');
         break;
       case FormFieldType.TICKET:
-        setDraftText(jsonToDisplayString(effectiveValue));
-        setEditor('ticket');
-        break;
       case FormFieldType.NUMBER:
       case FormFieldType.STRING:
       case FormFieldType.DOC:
       default:
-        setDraftText(jsonToDisplayString(effectiveValue));
+        setDraftText(jsonToDisplayString(fieldValue));
         setEditor('text');
         break;
     }
-  }, [effectiveValue, fieldType, readOnly]);
+  }, [fieldType, fieldValue, readOnly]);
 
-  const closeEditor = useCallback((): void => setEditor('none'), []);
+  const closeEditor = useCallback((): void => {
+    textInputRef.current?.blur();
+    Keyboard.dismiss();
+    setEditor('none');
+  }, []);
 
   const commitText = useCallback((): void => {
     const trimmed = draftText.trim();
+    textInputRef.current?.blur();
+    Keyboard.dismiss();
     onSave(trimmed ? [trimmed] : []);
     setEditor('none');
   }, [draftText, onSave]);
@@ -154,15 +145,15 @@ export const EditableFormField = memo(function EditableFormField({
   );
 
   const selectedUserIds = useMemo(
-    () => jsonToStringArray(effectiveValue).map(stripUserPrefix),
-    [effectiveValue],
+    () => jsonToStringArray(fieldValue).map(stripUserPrefix),
+    [fieldValue],
   );
 
-  const selectedMulti = useMemo(() => jsonToStringArray(effectiveValue), [effectiveValue]);
+  const selectedMulti = useMemo(() => jsonToStringArray(fieldValue), [fieldValue]);
 
   const booleanSelected = useMemo(() => {
-    return normalizeBooleanSaveValue(jsonToDisplayString(effectiveValue));
-  }, [effectiveValue]);
+    return normalizeBooleanSaveValue(jsonToDisplayString(fieldValue));
+  }, [fieldValue]);
 
   return (
     <View className='border-b border-ticket-overview-divider py-3'>
@@ -174,9 +165,10 @@ export const EditableFormField = memo(function EditableFormField({
           </Text>
         </View>
         <View className='min-w-0 flex-1'>
-          {editor === 'text' || editor === 'ticket' ? (
+          {editor === 'text' ? (
             <View className='gap-2'>
               <TextInput
+                ref={textInputRef}
                 autoFocus
                 value={draftText}
                 onChangeText={setDraftText}
@@ -238,7 +230,7 @@ export const EditableFormField = memo(function EditableFormField({
         <SingleSelectPickerSheet
           isOpen
           title={fieldName}
-          options={booleanOptions}
+          options={[...BOOLEAN_OPTIONS]}
           selectedValue={booleanSelected}
           onClose={closeEditor}
           onSelect={value => {
@@ -258,7 +250,7 @@ export const EditableFormField = memo(function EditableFormField({
           isOpen
           title={fieldName}
           options={selectOptions}
-          selectedValue={jsonToDisplayString(effectiveValue) || null}
+          selectedValue={jsonToDisplayString(fieldValue) || null}
           searchable={selectOptions.length > 8}
           onClose={closeEditor}
           onSelect={value => {
@@ -309,7 +301,7 @@ export const EditableFormField = memo(function EditableFormField({
         <DatePickerSheet
           isOpen
           title={fieldName}
-          value={parseDateMs(effectiveValue)}
+          value={parseDateMs(fieldValue)}
           mode='date'
           allowClear
           onClose={closeEditor}

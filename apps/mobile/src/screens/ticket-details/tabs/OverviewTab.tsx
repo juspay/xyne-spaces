@@ -81,6 +81,9 @@ export function OverviewTab({
       style={{ flex: 1 }}
       keyboardShouldPersistTaps='handled'
       bottomOffset={72}
+      // Closing an inline field editor dismisses the keyboard; keep the user's
+      // scroll position instead of snapping back to the top of the overview.
+      disableScrollOnKeyboardHide
       contentContainerStyle={{
         paddingTop: contentPaddingTop,
         paddingBottom: Math.max(insets.bottom, 16),

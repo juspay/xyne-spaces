@@ -45,7 +45,7 @@ const isBoardContextValue = (
   return value.contextId === boardId;
 };
 
-export const buildLatestEntityWideValueByField = (
+const buildLatestEntityWideValueByField = (
   values: readonly FormEntityValueRow[],
   fieldIds: ReadonlySet<string>,
 ): Map<string, FormEntityValueRow> => {

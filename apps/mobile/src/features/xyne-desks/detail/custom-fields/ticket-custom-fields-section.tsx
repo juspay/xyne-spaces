@@ -60,8 +60,6 @@ export const TicketCustomFieldsSection = memo(function TicketCustomFieldsSection
     { enabled: Boolean(boardId) },
   );
 
-  const boardCustomFieldsFormId = formMapping?.formId;
-
   const allFormFields = useMemo(() => {
     if (!workspaceId) return [] as ResolvedBoardAdditionalField[];
 
@@ -148,68 +146,24 @@ export const TicketCustomFieldsSection = memo(function TicketCustomFieldsSection
       formEntityValueId: string,
       newValue: string[],
       isPlaceholder: boolean,
-      formId?: string | null,
       membershipFieldId?: string | null,
     ): void => {
       if (isPlaceholder) {
-        const resolvedFieldId = formEntityValueId.replace(/^(placeholder|prefill)-/, '');
         if (!boardId) {
           showMessageToast('Cannot save field without a board.', 'error');
           return;
         }
 
-        // Newer shared pins expose createV2 (global fields + explicit formId).
-        // mobile-dev's pin only has legacy create, which looks up form_fields by id.
-        const createV2 = (
-          mutators.formEntityValue as {
-            createV2?: (args: {
-              id: string;
-              entityId: string;
-              entityType: FormEntityType;
-              fieldId: string;
-              formId: string;
-              newValue: string[];
-              timestamp: number;
-              contextId?: string;
-            }) => Parameters<typeof zero.mutate>[0];
-          }
-        ).createV2;
-
-        if (createV2) {
-          const resolvedFormId = formId ?? boardCustomFieldsFormId;
-          if (!resolvedFormId) {
-            showMessageToast(
-              'Board custom fields form is not available yet. Please try again.',
-              'error',
-            );
-            return;
-          }
-          void runTicketMutation(
-            zero.mutate(
-              createV2({
-                id: uuidv4(),
-                entityId: ticketId,
-                entityType: FormEntityType.TICKET,
-                fieldId: resolvedFieldId,
-                formId: resolvedFormId,
-                newValue,
-                timestamp: Date.now(),
-                contextId: boardId,
-              }),
-            ),
-            'Failed to save field',
-          );
-          return;
-        }
-
-        const legacyFieldId = membershipFieldId ?? resolvedFieldId;
+        // Current shared pin looks up form_fields by membership id.
+        const fieldId =
+          membershipFieldId ?? formEntityValueId.replace(/^(placeholder|prefill)-/, '');
         void runTicketMutation(
           zero.mutate(
             mutators.formEntityValue.create({
               id: uuidv4(),
               entityId: ticketId,
               entityType: FormEntityType.TICKET,
-              fieldId: legacyFieldId,
+              fieldId,
               newValue,
               timestamp: Date.now(),
               contextId: boardId,
@@ -231,7 +185,7 @@ export const TicketCustomFieldsSection = memo(function TicketCustomFieldsSection
         'Failed to save field',
       );
     },
-    [boardCustomFieldsFormId, boardId, ticketId, zero],
+    [boardId, ticketId, zero],
   );
 
   if (allFormFields.length === 0 && leftoverFieldValues.length === 0) {
@@ -263,7 +217,6 @@ export const TicketCustomFieldsSection = memo(function TicketCustomFieldsSection
               fieldValue.id,
               newValue,
               fieldValue.isPlaceholder,
-              fieldValue.formId,
               fieldValue.formField?.id ?? null,
             )
           }
