@@ -4155,23 +4155,24 @@ router.post("/:slug/chat/approve-action", async (req: Request<{ slug: string }>,
     }
 
     persistResolution("approved");
-    if (result.createdSkillId && approvedConversationId && conversationOwned) {
+    const createdSkillId = result.createdSkillId;
+    if (createdSkillId && approvedConversationId && conversationOwned) {
       // Chat approvals carry no channel, and only a chat's first message names the hub,
       // so the hub comes from whichever run of the conversation started in one.
-      const runs = await prisma.agentRun.findMany({
-        where: { conversationId: approvedConversationId, userId: callerUserId },
-        orderBy: { startedAt: "desc" },
-        take: 20,
-        select: { sessionId: true },
-      });
-      const { sdlcRunChannelId } = await import("../lib/sdlc-run-tools.js");
-      const hubChannelId = (await Promise.all(runs.map((run) => sdlcRunChannelId(run.sessionId)))).find(Boolean);
-      if (hubChannelId) {
+      // Detached: the skill exists by now, so a failed link must not fail the approval.
+      void (async () => {
+        const runs = await prisma.agentRun.findMany({
+          where: { conversationId: approvedConversationId, userId: callerUserId },
+          orderBy: { startedAt: "desc" },
+          take: 20,
+          select: { sessionId: true },
+        });
+        const { sdlcRunChannelId } = await import("../lib/sdlc-run-tools.js");
+        const hubChannelId = (await Promise.all(runs.map((run) => sdlcRunChannelId(run.sessionId)))).find(Boolean);
+        if (!hubChannelId) return;
         const { linkSdlcHubSkill } = await import("../lib/sdlc-repository-context.js");
-        void linkSdlcHubSkill(hubChannelId, callerUserId, result.createdSkillId).catch((err: unknown) =>
-          log.warn(`[agent-chat] create-skill hub link failed: ${errMsg(err)}`),
-        );
-      }
+        await linkSdlcHubSkill(hubChannelId, callerUserId, createdSkillId);
+      })().catch((err: unknown) => log.warn(`[agent-chat] create-skill hub link failed: ${errMsg(err)}`));
     }
     if (approvedConversationId && conversationOwned) {
       const { ingestArtifactSignals } = await import("../lib/conversation-artifact-signals.js");

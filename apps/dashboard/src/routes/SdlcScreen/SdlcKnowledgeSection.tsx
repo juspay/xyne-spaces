@@ -14,6 +14,7 @@ import {
   Wrench,
 } from 'lucide-react';
 import type { SdlcHubKnowledgeLinks, SdlcHubPin } from '@xyne/shared';
+import { isAxiosError } from 'axios';
 import { toast } from 'sonner';
 import { Button } from '../../components/ui/Button';
 import { Dialog } from '../../components/ui/Dialog/Dialog';
@@ -75,8 +76,7 @@ function PinButton(props: {
   pinned: boolean;
   disabledReason?: string | undefined;
   label: string;
-  /** Replaces the default Pin / Pinned wording. */
-  text?: string;
+  text: string;
   onToggle: () => void;
 }): ReactElement {
   return (
@@ -95,7 +95,7 @@ function PinButton(props: {
       className={pinClass(props.pinned)}
     >
       <Pin size={13} />
-      {props.text ?? (props.pinned ? 'Pinned' : 'Pin')}
+      {props.text}
     </button>
   );
 }
@@ -183,13 +183,20 @@ export function SdlcKnowledgeSection(props: {
     queryKey: linksKey,
     queryFn: async () => (await apiInstance.get<SdlcHubKnowledgeLinks>(base)).data,
   });
-  const { data: skillCatalog } = useClawSkills();
+  const skills = useClawSkills();
+  const skillCatalog = skills.data;
+  // Until both load, an empty list would read as "nothing linked, nothing pinned".
+  const ready = Boolean(links.data && skillCatalog);
+  const failed = links.isError || skills.isError;
 
-  const change = async (request: () => Promise<unknown>, failure: string): Promise<void> => {
+  const change = async (
+    request: () => Promise<unknown>,
+    failure: string | ((error: unknown) => string),
+  ): Promise<void> => {
     try {
       await request();
-    } catch {
-      toast.error(failure);
+    } catch (error) {
+      toast.error(typeof failure === 'string' ? failure : failure(error));
     }
     // The catalog too: a link whose skill is missing from a stale catalog reads as removed.
     await Promise.all([
@@ -244,7 +251,10 @@ export function SdlcKnowledgeSection(props: {
   const unlinkSkill = (skillId: string): void =>
     void change(
       () => apiInstance.delete(`${base}/skills/${encodeURIComponent(skillId)}`),
-      'Only the member who linked it or a hub admin can unlink.',
+      error =>
+        isAxiosError(error) && error.response?.status === 403
+          ? 'Only the member who linked it or a hub admin can unlink.'
+          : 'Could not unlink the skill.',
     );
   const requestGlobal = async (skill: Skill): Promise<void> => {
     if (!userId) return;
@@ -403,26 +413,28 @@ export function SdlcKnowledgeSection(props: {
                   </div>
                   <p className='mt-0.5 break-words text-xs text-muted-foreground'>{file.detail}</p>
                 </div>
-                <PinButton
-                  pinned={pinnedCanvasIds.has(file.id)}
-                  text={pinnedCanvasIds.has(file.id) ? 'Pinned for everyone' : 'Pin for everyone'}
-                  label={file.title}
-                  disabledReason={
-                    !isHubAdmin
-                      ? 'Only hub admins can pin Knowledge Files'
-                      : file.status !== 'ready'
-                        ? 'Not ready yet'
-                        : undefined
-                  }
-                  onToggle={() =>
-                    setPin({
-                      targetType: 'CANVAS',
-                      targetId: file.id,
-                      scope: 'hub',
-                      pinned: !pinnedCanvasIds.has(file.id),
-                    })
-                  }
-                />
+                {links.data && (
+                  <PinButton
+                    pinned={pinnedCanvasIds.has(file.id)}
+                    text={pinnedCanvasIds.has(file.id) ? 'Pinned for everyone' : 'Pin for everyone'}
+                    label={file.title}
+                    disabledReason={
+                      !isHubAdmin
+                        ? 'Only hub admins can pin Knowledge Files'
+                        : file.status !== 'ready'
+                          ? 'Not ready yet'
+                          : undefined
+                    }
+                    onToggle={() =>
+                      setPin({
+                        targetType: 'CANVAS',
+                        targetId: file.id,
+                        scope: 'hub',
+                        pinned: !pinnedCanvasIds.has(file.id),
+                      })
+                    }
+                  />
+                )}
                 {isHubAdmin && (
                   <SdlcArchiveMenu
                     title={file.title}
@@ -439,7 +451,13 @@ export function SdlcKnowledgeSection(props: {
             title='Linked Skills'
             count={skillRows.length}
             help='Reusable procedures from the skill library, attached to this hub. Agents running here can use them.'
-            empty='No skills linked. Link one from the library, or create one with AI.'
+            empty={
+              failed
+                ? 'Could not load the linked skills. Reload to try again.'
+                : ready
+                  ? 'No skills linked. Link one from the library, or create one with AI.'
+                  : 'Loading…'
+            }
           >
             {skillRows.map((row, index) => {
               const { skillId, linkedBy, pinnedForHub, pinnedForMe, skill, forEveryone } = row;
@@ -624,24 +642,26 @@ export function SdlcKnowledgeSection(props: {
         </div>
 
         <aside className='flex min-w-0 flex-col gap-4 lg:sticky lg:top-4'>
-          <div className='rounded-xl border bg-background p-5'>
-            <h3 className='text-sm font-semibold'>Your runs in this hub receive</h3>
-            <div className='mt-3 grid grid-cols-2 gap-3'>
-              <div>
-                <p className='text-2xl font-semibold tabular-nums leading-none'>{pinnedCount}</p>
-                <p className='mt-1 text-xs text-muted-foreground'>pinned, in full</p>
+          {ready && (
+            <div className='rounded-xl border bg-background p-5'>
+              <h3 className='text-sm font-semibold'>Your runs in this hub receive</h3>
+              <div className='mt-3 grid grid-cols-2 gap-3'>
+                <div>
+                  <p className='text-2xl font-semibold tabular-nums leading-none'>{pinnedCount}</p>
+                  <p className='mt-1 text-xs text-muted-foreground'>pinned, in full</p>
+                </div>
+                <div>
+                  <p className='text-2xl font-semibold tabular-nums leading-none'>{listedCount}</p>
+                  <p className='mt-1 text-xs text-muted-foreground'>listed by name</p>
+                </div>
               </div>
-              <div>
-                <p className='text-2xl font-semibold tabular-nums leading-none'>{listedCount}</p>
-                <p className='mt-1 text-xs text-muted-foreground'>listed by name</p>
-              </div>
+              <p className='mt-3 text-xs text-muted-foreground'>
+                {pinnedCount === 0
+                  ? 'Nothing is pinned. Agents choose what to open from the names alone.'
+                  : 'Every run pays for pinned text before the question. Pin only what most requests need.'}
+              </p>
             </div>
-            <p className='mt-3 text-xs text-muted-foreground'>
-              {pinnedCount === 0
-                ? 'Nothing is pinned. Agents choose what to open from the names alone.'
-                : 'Every run pays for pinned text before the question. Pin only what most requests need.'}
-            </p>
-          </div>
+          )}
           <>
             {(
               [
@@ -742,31 +762,22 @@ export function SdlcKnowledgeSection(props: {
                 <>
                   <p className='mt-4 flex items-center gap-1 text-sm font-medium'>
                     Save as
-                    <Tooltip
-                      side='right'
-                      className='max-w-xs p-3'
-                      content={
-                        <ul className='flex flex-col gap-2 text-xs'>
-                          <li>
-                            <b>Let AI decide:</b> a Knowledge File when it is about this hub, a
-                            skill when it is a generic procedure.
-                          </li>
-                          <li>
-                            <b>Knowledge File:</b> a document that belongs to this hub, for facts
-                            about its repositories, systems and environments.
-                          </li>
-                          <li>
-                            <b>Skill:</b> a procedure that works in any hub. It is yours alone until
-                            an admin makes it global.
-                          </li>
-                        </ul>
-                      }
-                    >
-                      <HelpCircle
-                        className='size-3.5 shrink-0 text-muted-foreground'
-                        aria-label='About Save as'
-                      />
-                    </Tooltip>
+                    <Help about='Save as'>
+                      <ul className='flex flex-col gap-2'>
+                        <li>
+                          <b>Let AI decide:</b> a Knowledge File when it is about this hub, a skill
+                          when it is a generic procedure.
+                        </li>
+                        <li>
+                          <b>Knowledge File:</b> a document that belongs to this hub, for facts
+                          about its repositories, systems and environments.
+                        </li>
+                        <li>
+                          <b>Skill:</b> a procedure that works in any hub. It is yours alone until
+                          an admin makes it global.
+                        </li>
+                      </ul>
+                    </Help>
                   </p>
                   <SegmentedToggle<HubKnowledgeAiDraft['kind']>
                     className='mt-2 flex w-full [&>button]:flex-1'

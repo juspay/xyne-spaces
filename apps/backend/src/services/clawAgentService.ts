@@ -1773,7 +1773,8 @@ export async function listS2SClawSkills(
 ): Promise<Array<{ id: string; scope: string; ownerUserId: string | null }>> {
   const url = `${getClawBaseUrl()}/claw/api/v1/skills?userId=${encodeURIComponent(userId)}`;
   const res = await fetch(url, {
-    headers: { 'Content-Type': 'application/json', ...getS2SHeaders() },
+    // The pinned user scopes the list to their org.
+    headers: { 'Content-Type': 'application/json', ...getS2SHeaders(), ...extractUserIdHeader(userId) },
     signal: AbortSignal.timeout(15_000),
   });
   if (!res.ok) {
