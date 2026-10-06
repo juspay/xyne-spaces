@@ -1,3 +1,10 @@
+## [1.465.2](https://github.com/juspay/xyne-spaces/compare/v1.465.1...v1.465.2) (2026-10-06)
+
+
+### Bug Fixes
+
+* ai provider cards suggestion ([#2633](https://github.com/juspay/xyne-spaces/issues/2633)) ([51f47e0](https://github.com/juspay/xyne-spaces/commit/51f47e02d0bbca4f7804e1629aba7c0aaa9517be))
+
 ## [1.465.1](https://github.com/juspay/xyne-spaces/compare/v1.465.0...v1.465.1) (2026-10-06)
 
 
