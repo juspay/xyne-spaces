@@ -2,8 +2,8 @@ apiVersion: v2
 name: xyne-claw
 description: Xyne Claw agent runtime (Node.js) - runs agent sessions, drives remote sandboxes through SandboxClaims and talks to LiteLLM
 type: application
-version: 0.1.0-app.1.454.1-release-20261005.1
-appVersion: "1.454.1-release-20261005.1"
+version: 0.1.0-app.1.460.4
+appVersion: "1.460.4"
 keywords:
   - xyne
   - claw
