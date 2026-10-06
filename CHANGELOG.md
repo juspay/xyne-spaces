@@ -1,3 +1,11 @@
+## [1.461.3](https://github.com/juspay/xyne-spaces/compare/v1.461.2...v1.461.3) (2026-10-06)
+
+
+### Bug Fixes
+
+* key public-share and OAuth rate limits on verified user, not forgeable cookies ([#2689](https://github.com/juspay/xyne-spaces/issues/2689)) ([4418c38](https://github.com/juspay/xyne-spaces/commit/4418c387187a7ffc89b6ebda66c2f3282d326e3a))
+* require X-Xyne-Signature on all webhook callers, including s2s ([#2688](https://github.com/juspay/xyne-spaces/issues/2688)) ([3df7acc](https://github.com/juspay/xyne-spaces/commit/3df7accbc9ba8146a1d08c3097e38c833114c734))
+
 ## [1.461.2](https://github.com/juspay/xyne-spaces/compare/v1.461.1...v1.461.2) (2026-10-06)
 
 
