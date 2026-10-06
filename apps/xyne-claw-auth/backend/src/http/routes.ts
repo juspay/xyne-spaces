@@ -26,6 +26,7 @@ import { gatewayRegistryUiRouter } from "../routes/gateway-registry-ui.js";
 import { knowledgeBaseRouter } from "../routes/knowledge-base.js";
 import subagentsRouter from "../routes/subagents.js";
 import sandboxRouter from "../routes/sandbox.js";
+import sandboxAccessRouter from "../routes/sandbox-access.js";
 import { adminRouter } from "../routes/admin.js";
 import { adminDigitalTwinRouter } from "../routes/admin-digital-twin.js";
 import { organizationsRouter } from "../routes/organizations.js";
@@ -84,7 +85,7 @@ import { slackRouter } from "../surfaces/slack/routes/index.js";
 import { mcpGatewayRouter } from "../mcpgateway/index.js";
 import { requireAuth, requireNoAccessToken, allowReadAccessToken, allowScopedAccessToken, requireStrictS2S, requireInternalS2S, requireUserAuth, optionalAuth, s2sKeyMatches } from "../middleware/require-auth.js";
 import { requireClawAdmin, requireSearchEvalAccess } from "../middleware/agent-acl.js";
-import { apiLimiter } from "../middleware/rate-limiters.js";
+import { apiLimiter, sampleClientIp } from "../middleware/rate-limiters.js";
 
 const SIGNED_INGRESS_PREFIXES = ["/webhook"] as const;
 
@@ -127,6 +128,7 @@ function mountRequestContext(app: Express): void {
       next();
       return;
     }
+    sampleClientIp(req);
     apiLimiter(req, res, next);
   });
 }
@@ -180,6 +182,7 @@ function mountCoreApi(app: Express): void {
   app.use(`${BASE}/gateway-registry`, requireAuth, requireNoAccessToken, gatewayRegistryUiRouter);
   app.use(`${BASE}/knowledge-base`, requireAuth, requireNoAccessToken, knowledgeBaseRouter);
   app.use(`${BASE}/subagents`, requireAuth, allowScopedAccessToken({ write: "subagents:write" }), subagentsRouter);
+  app.use(`${BASE}/sandbox-access`, requireUserAuth, sandboxAccessRouter); // sandbox-router → may this Spaces session open /claw-preview|code|term/<sandboxId>?
   app.use(`${BASE}/sandbox`, requireAuth, requireNoAccessToken, sandboxRouter);
   app.use(`${BASE}/organizations`, requireAuth, requireNoAccessToken, organizationsRouter);
   app.use(`${BASE}/admin/digital-twin`, requireAuth, requireNoAccessToken, requireClawAdmin, adminDigitalTwinRouter);
