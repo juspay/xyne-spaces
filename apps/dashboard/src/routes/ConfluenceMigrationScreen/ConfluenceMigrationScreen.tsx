@@ -446,7 +446,7 @@ const ConfluenceMigrationScreen = (): ReactElement => {
                       channel => channel.id === nextChannelId,
                     );
                     if (selectedChannel) {
-                      setSelectedProjectId(selectedChannel.projectId);
+                      setSelectedProjectId(selectedChannel.projectId ?? '');
                     }
                     setPreview(null);
                     setResult(null);

@@ -75,7 +75,7 @@ export function invitationEmailHtml({
                 <tr>
                   <td style="border-top:1px solid #e5e7eb;padding-top:28px;" align="center">
                     <p style="color:#6b7280;font-size:13px;margin:0 0 14px 0;text-align:center;">Want the full desktop experience?</p>
-                    <a href="${frontendUrl}/apps/downloads" style="display:inline-block;background:#6366f1;color:#ffffff;text-decoration:none;padding:12px 28px;border-radius:8px;font-weight:600;font-size:14px;">Download Xyne Spaces App</a>
+                    <a href="${frontendUrl}/apps/downloads/" style="display:inline-block;background:#6366f1;color:#ffffff;text-decoration:none;padding:12px 28px;border-radius:8px;font-weight:600;font-size:14px;">Download Xyne Spaces App</a>
                   </td>
                 </tr>
               </table>
@@ -129,7 +129,7 @@ Sign in with Google/Microsoft SSO, or use this temporary password to sign in wit
 ` : ''}
 Want the full desktop experience? Download the app:
 
-  ${frontendUrl}/apps/downloads
+  ${frontendUrl}/apps/downloads/
 
 ──────────────────────────────────────────
 This invitation was sent by Xyne Spaces. If you weren't expecting this email, you can safely ignore it.

@@ -1,0 +1,254 @@
+global:
+  imageRegistry: ""
+  imagePullSecrets: []
+
+nameOverride: ""
+fullnameOverride: ""
+
+image:
+  registry: ghcr.io
+  repository: juspay/xyne-spaces-lighton-ocr-server
+  tag: ""
+  digest: ""
+  pullPolicy: IfNotPresent
+imagePullSecrets: []
+
+version: ""
+versionedName: false
+
+replicaCount: 1
+revisionHistoryLimit: 3
+strategy:
+  type: RollingUpdate
+  rollingUpdate:
+    maxSurge: 25%
+    maxUnavailable: 0
+
+command: []
+args: []
+
+containerPorts:
+  - name: http
+    containerPort: 8000
+    protocol: TCP
+
+service:
+  enabled: true
+  type: ClusterIP
+  annotations: {}
+  ports:
+    - name: http
+      port: 80
+      targetPort: http
+    - name: http-app
+      port: 8000
+      targetPort: http
+
+env:
+  PYTHONUNBUFFERED: "1"
+  HOME: /tmp
+  LIGHTON_URL: ""
+  LIGHTON_MODEL: lightonai/LightOnOCR-2-1B-bbox
+  LIGHTON_TIMEOUT_SECONDS: "60"
+  LIGHTON_CONCURRENCY: "8"
+  LIGHTON_MAX_OUTPUT_TOKENS: "8192"
+  LIGHTON_TEMPERATURE: "0.0"
+  LIGHTON_RETRIES: "2"
+  LIGHTON_IMAGE_MAX_DIM: "1540"
+  LIGHTON_SSL_VERIFY: "true"
+  LIGHTON_MAX_IMAGE_REGIONS_PER_PAGE: "256"
+  LIGHTON_MAX_CROPS_PER_PAGE: "32"
+  OCR_RENDER_MAX_DIM: "1540"
+  OCR_PDF_RENDER_DPI: "200"
+  OCR_MAX_PAGES: "-1"
+  OCR_JPEG_QUALITY: "90"
+  OCR_OFFICE_CONVERT_TIMEOUT_SECONDS: "120"
+  E5_TOKENIZER_PATH: /app/e5-tokenizer
+  MAX_TOKENS: "460"
+  CHUNK_OVERLAP_TOKENS: "12"
+  IMAGE_CHUNK_MAX_TOKENS: "460"
+  REDIS_HOST: redis
+  REDIS_PORT: "6379"
+  REDIS_TLS: "false"
+  OCR_RESULTS_STREAM: docling:results
+  OCR_RESULT_KEY_PREFIX: docling:result
+  OCR_RESULT_TTL_SECONDS: "604800"
+  OCR_ASYNC_JOB_TTL_SECONDS: "86400"
+  OCR_ASYNC_MAX_INFLIGHT: "1"
+  OCR_ASYNC_GLOBAL_MAX_INFLIGHT: "-1"
+  OCR_ASYNC_GLOBAL_ADMISSION_KEY: docling:async:global:active
+  OCR_ASYNC_GLOBAL_ADMISSION_LEASE_TTL_SECONDS: "86400"
+  OCR_ASYNC_RETRY_AFTER_SECONDS: "180"
+  OCR_RUNTIME_CONFIG_KEY: docling:runtime-config
+  OCR_RUNTIME_CONFIG_POLL_SECONDS: "300"
+
+secretEnv:
+  LIGHTON_ACCESS_TOKEN:
+    name: xyne-lighton-ocr-secrets
+    key: LIGHTON_ACCESS_TOKEN
+    optional: true
+  REDIS_PASSWORD:
+    name: xyne-lighton-ocr-secrets
+    key: REDIS_PASSWORD
+    optional: true
+
+envFromSecrets: []
+envFromConfigMaps: []
+extraEnv: []
+
+startupProbe:
+  httpGet:
+    path: /health
+    port: http
+  periodSeconds: 10
+  timeoutSeconds: 5
+  failureThreshold: 30
+livenessProbe:
+  httpGet:
+    path: /health
+    port: http
+  periodSeconds: 30
+  timeoutSeconds: 10
+  failureThreshold: 3
+readinessProbe:
+  httpGet:
+    path: /health
+    port: http
+  periodSeconds: 10
+  timeoutSeconds: 5
+  failureThreshold: 3
+lifecycle: {}
+
+resources:
+  requests:
+    cpu: "1"
+    memory: 2Gi
+  limits:
+    memory: 4Gi
+
+podSecurityContext:
+  fsGroup: 1001
+securityContext:
+  runAsNonRoot: true
+  runAsUser: 1001
+  allowPrivilegeEscalation: false
+  capabilities:
+    drop:
+      - ALL
+  seccompProfile:
+    type: RuntimeDefault
+
+serviceAccount:
+  create: true
+  name: ""
+  annotations: {}
+  automount: false
+
+commonLabels: {}
+podLabels: {}
+podAnnotations: {}
+deploymentAnnotations: {}
+
+nodeSelector: {}
+tolerations: []
+affinity: {}
+podAntiAffinityPreset: soft
+topologySpreadConstraints: []
+priorityClassName: ""
+runtimeClassName: ""
+terminationGracePeriodSeconds: 120
+hostAliases: []
+dnsPolicy: ""
+dnsConfig: {}
+
+initContainers: []
+sidecars: []
+
+volumes:
+  - name: tmp
+    emptyDir: {}
+volumeMounts:
+  - name: tmp
+    mountPath: /tmp
+
+persistence:
+  enabled: false
+  existingClaim: ""
+  storageClass: ""
+  accessModes:
+    - ReadWriteOnce
+  size: 10Gi
+  mountPath: /data
+  subPath: ""
+  annotations: {}
+
+autoscaling:
+  enabled: true
+  minReplicas: 1
+  maxReplicas: 4
+  targetCPUUtilizationPercentage: 70
+  targetMemoryUtilizationPercentage: ""
+  metrics: []
+  behavior:
+    scaleUp:
+      stabilizationWindowSeconds: 0
+      selectPolicy: Max
+      policies:
+        - type: Pods
+          value: 2
+          periodSeconds: 60
+    scaleDown:
+      stabilizationWindowSeconds: 300
+      selectPolicy: Max
+      policies:
+        - type: Pods
+          value: 1
+          periodSeconds: 120
+
+pdb:
+  enabled: true
+  maxUnavailable: 1
+  unhealthyPodEvictionPolicy: ""
+
+ingress:
+  enabled: false
+  className: ""
+  annotations: {}
+  hosts:
+    - host: ocr.example.com
+      paths:
+        - path: /
+          pathType: Prefix
+  tls: []
+
+istio:
+  virtualService:
+    enabled: false
+    hosts: []
+    gateways: []
+    timeout: 600s
+    retries: {}
+    http: []
+  destinationRule:
+    enabled: false
+    exportTo: []
+    trafficPolicy: {}
+    subsets: []
+
+networkPolicy:
+  enabled: false
+  policyTypes:
+    - Ingress
+  ingress: []
+  egress: []
+
+serviceMonitor:
+  enabled: false
+  namespace: ""
+  labels: {}
+  port: http
+  path: /metrics
+  interval: 30s
+  scrapeTimeout: ""
+
+extraObjects: []

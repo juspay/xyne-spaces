@@ -1,7 +1,9 @@
 /**
- * Result worker: reads OCR completion events from the Redis stream,
- * fetches the result payload, stores it in the local staging filesystem,
- * and marks the Postgres part row as Ready for the writer to pick up.
+ * Result worker: reads OCR completion events from the Redis stream, fetches the
+ * result payload, stages it in the default storage bucket under
+ * docling-staging/ (see scheduler/storage.ts — NOT pod-local disk, the writer
+ * runs on a different pod), and marks the Postgres part row as Ready for the
+ * writer to pick up.
  *
  * Ported from xyne-spaces doclingScheduler/workers.ts — the result worker
  * section extracted for xyne-search structural parity.

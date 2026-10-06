@@ -20,7 +20,12 @@ export const sdlcChatLayout = (input: {
   // no longer opens the SDLC panel — SdlcScreen migrates old ?chat=ai links by
   // opening the sidebar once and stripping the param.
   const activeTab: SdlcChatTab = input.chatParam === 'ai' ? 'ai' : 'conversations';
-  const panelOpen = input.discussionParam === '1';
+  // Open unless the reader closed it. Every surface that can hold a discussion —
+  // a track, a folder, an artifact, a link, a file — shows it by default, so the
+  // absence of the param means open and only an explicit '0' closes. What the
+  // panel is scoped to, and whether there is anything to scope it to at all, is
+  // still decided by the screen.
+  const panelOpen = input.discussionParam !== '0';
   return {
     activeTab,
     panelOpen,
@@ -40,8 +45,11 @@ export const sdlcChatNavigationSearch = (input: {
   });
 
   if (!currentLayout.panelOpen) {
-    const search = destination.toString();
-    return search ? `?${search}` : '';
+    // Closed carries — but a destination that asks for the panel outranks it, so
+    // opening a track, folder or artifact still brings its conversations back
+    // after the reader has closed the panel somewhere else.
+    if (!destination.has('discussion')) destination.set('discussion', '0');
+    return `?${destination.toString()}`;
   }
 
   destination.delete('conversation');
@@ -66,7 +74,7 @@ export const shouldStartFreshSdlcAssistant = (input: {
   actorChannelId: string | null;
   repositoryChannelId: string;
   actorRepositoryId: string | null;
-  repositoryId: string;
+  repositoryId: string | null;
 }): boolean =>
   !input.actorOpen ||
   input.selectedAgentSlug !== 'sdlc-agent' ||
@@ -84,3 +92,42 @@ export const shouldCloseInvalidSdlcConversationDeepLink = (input: {
   input.discussionOpen &&
   Boolean(input.selectedConversationId) &&
   !input.discussionContextResolved;
+
+/** What in a track its conversations can be filed against, beside the track itself. */
+export type SdlcDiscussionItemType = 'FOLDER' | 'LINK' | 'ATTACHMENT' | 'CANVAS';
+export interface SdlcDiscussionItemRef {
+  type: SdlcDiscussionItemType;
+  id: string;
+}
+const DISCUSSION_ITEM_TYPES: readonly SdlcDiscussionItemType[] = [
+  'FOLDER',
+  'LINK',
+  'ATTACHMENT',
+  'CANVAS',
+];
+
+/**
+ * `?about=folder:<id>`: whose conversations the panel shows when they are an item's —
+ * a folder's, link's, file's or artifact's — rather than the track's. In the url, so
+ * a reload, a new tab or a shared link opens on the same ones.
+ */
+export const SDLC_ABOUT_PARAM = 'about';
+
+export function parseSdlcDiscussionItem(value: string | null): SdlcDiscussionItemRef | null {
+  if (!value) return null;
+  const at = value.indexOf(':');
+  if (at <= 0) return null;
+  const type = DISCUSSION_ITEM_TYPES.find(known => known === value.slice(0, at).toUpperCase());
+  const id = value.slice(at + 1);
+  return type && id ? { type, id } : null;
+}
+
+export const sdlcDiscussionItemParam = (item: SdlcDiscussionItemRef): string =>
+  `${item.type.toLowerCase()}:${item.id}`;
+
+/**
+ * `?threadOnly=1`: the open conversation came from outside the panel's list — a
+ * ticket opened from the board — so there is no list behind it to go back to, and
+ * closing it closes the panel.
+ */
+export const SDLC_THREAD_ONLY_PARAM = 'threadOnly';

@@ -167,6 +167,41 @@ export function useReleaseConfigForm({
     setReleaseTrackingMode(mode);
   }, []);
 
+  // Apply AI-suggested services (envPaths/migrationPaths arrive as arrays; form
+  // state holds them as CSV strings). 'replace' swaps all rows; 'add' keeps your
+  // named rows and appends suggestions not already present by name.
+  const applyServiceSuggestions = useCallback(
+    (
+      services: { name: string; regex: string; envPaths: string[]; migrationPaths: string[] }[],
+      mode: 'replace' | 'add',
+    ) => {
+      if (services.length === 0) return;
+      setUserTouched(true);
+      const norm = (name: string): string => name.trim().toLowerCase();
+      // Keep the existing row's id/boardId for a same-named service: on save, an app missing
+      // from the payload is deleted (board, stages, approvers, mappings), so reseeding ids for
+      // a service that already exists would tear its board down and recreate it.
+      const toRow = (
+        service: (typeof services)[number],
+        existing?: ApplicationConfig,
+      ): ApplicationConfig => ({
+        ...(existing ?? { ...EMPTY_APP, id: uuidv4(), boardId: uuidv4() }),
+        name: service.name,
+        regex: service.regex,
+        envPaths: service.envPaths.join(', '),
+        migrationPaths: service.migrationPaths.join(', '),
+      });
+      setApplications(prev => {
+        const kept = prev.filter(app => app.name.trim());
+        const byName = new Map(kept.map(app => [norm(app.name), app]));
+        if (mode === 'replace') return services.map(s => toRow(s, byName.get(norm(s.name))));
+        const additions = services.filter(s => !byName.has(norm(s.name))).map(s => toRow(s));
+        return [...kept, ...additions];
+      });
+    },
+    [],
+  );
+
   // ─── Save ───────────────────────────────────────────────────────────────────
 
   const handleSave = useCallback(async () => {
@@ -288,6 +323,7 @@ export function useReleaseConfigForm({
     addApplication,
     removeApplication,
     updateApplication,
+    applyServiceSuggestions,
     // Add-service mode: id of the blank service row seeded into the group.
     addedServiceId: addedService?.id ?? null,
     // Channel

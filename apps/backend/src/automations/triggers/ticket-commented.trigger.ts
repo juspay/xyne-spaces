@@ -1,8 +1,8 @@
+import { emitDomainEvent } from '@/events/emitDomainEvent';
 import { z } from 'zod';
 import { MessageType } from '@xyne/shared';
 import { BaseTrigger } from './base-trigger';
 import { TriggerCategory } from '../types/categories';
-import { eventRouter } from '../engine/event-router';
 import { repositories } from '@/database/repositories';
 import { logger } from '@/utils/logger';
 import { db } from '@/database/client';
@@ -19,6 +19,10 @@ import type { TicketLike } from './ticket-context';
 export const TICKET_COMMENTED_EVENT = 'TICKET_COMMENTED';
 
 const TicketCommentedConfigSchema = z.object({
+  projectIds: z
+    .array(z.string())
+    .optional()
+    .describe('Limit to tickets on these projects. Empty matches every project.'),
   boardIds: z
     .array(z.string())
     .optional()
@@ -27,10 +31,6 @@ const TicketCommentedConfigSchema = z.object({
     .array(z.string())
     .optional()
     .describe('Limit to tickets posted to these channels. Empty matches every channel.'),
-  projectIds: z
-    .array(z.string())
-    .optional()
-    .describe('Limit to tickets on these projects. Empty matches every project.'),
   contentContains: z
     .string()
     .optional()
@@ -132,7 +132,7 @@ export async function emitTicketCommented(message: AddedMessage): Promise<void> 
     const ticketStub = await repositories.tickets.findFirstByConversationId(message.conversationId);
     if (!ticketStub) return;
 
-    await eventRouter.emit(
+    await emitDomainEvent(
       {
         type: TICKET_COMMENTED_EVENT,
         payload: {

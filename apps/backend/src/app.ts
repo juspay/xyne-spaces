@@ -74,11 +74,13 @@ import callRoutes from '@/routes/calls';
 import calendarSyncRoutes from '@/routes/calendarSync';
 import calendarOAuthRoutes from '@/routes/calendarOAuth';
 import driveOAuthRoutes from '@/routes/driveOAuth';
+import userContactsRoutes from '@/routes/userContacts';
 import calendarWatchRoutes from '@/routes/calendarWatch';
 import calendarWebhookRoutes from '@/routes/calendarWebhooks';
 import callLobbyRoutes from '@/routes/callLobby';
 import csatRoutes from '@/routes/csat';
 import voiceInputRoutes from '@/routes/voiceInput';
+import ttsRoutes from '@/routes/tts';
 import { attachVoiceInputStreamHandler } from '@/routes/voiceInputStream';
 import transcriptionAgentRoutes from '@/routes/transcriptionAgent';
 import livekitWebhookRoutes from '@/routes/livekitWebhook';
@@ -98,10 +100,13 @@ import ticketReportRoutes from '@/routes/ticketReports';
 import boardRoutes from '@/routes/boards';
 import subTicketRoutes from '@/routes/subTickets';
 import boardConfigCopyRoutes from '@/routes/boardConfigCopy';
+import auditLogRoutes from '@/routes/auditLogs';
 import recordingPointerBackfillRoutes from '@/routes/recordingPointerBackfill';
+import sdlcRepoCredentialBackfillRoutes from '@/routes/sdlcRepoCredentialBackfill';
 import searchMetricsRoutes from '@/routes/searchMetrics';
 import knowledgeRoutes from '@/routes/knowledge';
-import vespaSearchRoutes from '@/routes/vespaSearch';
+import vespaSearchRoutes, { relatedContextRouter } from '@/routes/vespaSearch';
+import assistantRouteRoutes from '@/routes/assistantRoute';
 import { dashboardClawRouter } from '@/routes/dashboardClaw';
 import summarizeRoutes from '@/routes/summarize';
 import xyneAIRoutes from '@/routes/xyneAI';
@@ -111,7 +116,6 @@ import ticketMigrationRoutes from '@/routes/ticketMigration';
 import gmailWatchRenewalRoutes from '@/routes/gmailWatchRenewal';
 import { registerPrivateBackfillRoutes } from '@/routes/privateBackfillRoutes';
 import aiRoutes from '@/routes/aiRoutes';
-import productInsightsRoutes from '@/routes/productInsights';
 // import adminBackfillRoutes from '@/routes/adminBackfill';
 import ysweetRoutes, { ysweetValidateRouter } from '@/routes/ysweet';
 import canvasRoutes from '@/routes/canvas';
@@ -181,6 +185,7 @@ import { conversationIngestQueue } from '@/queues/conversationIngestQueue';
 import { documentIngestQueue } from '@/queues/documentIngestQueue';
 import { teamIntelligenceQueue } from '@/team-intelligence/queue';
 import { emailClassificationQueue } from '@/queues/emailClassificationQueue';
+import { callTranscriptionQueue } from '@/queues/callTranscriptionQueue';
 import { autoDraftQueue } from '@/queues/autoDraftQueue';
 import { entityExtractionQueue } from '@/queues/entityExtractionQueue';
 import { initStorage } from '@/services/storage';
@@ -196,7 +201,10 @@ import { coerceTwinReplyDraft, destinationNameLookup, createTwinReplyDraft } fro
 import userMigrationRoutes from '@/routes/userMigration';
 import { decryptRequestBodyMiddleware, encryptResponseBodyMiddleware } from './middleware/decryptionMiddleware';
 import internalRoutes from '@/routes/internal';
+import userDeactivationRoutes from '@/routes/userDeactivation';
 import collectionsRoutes from '@/routes/collections';
+import merchantRoutes from '@/routes/merchants';
+import formFieldValuesRoutes from '@/routes/formFieldValues';
 import officeConversionRoutes from '@/routes/officeConversion';
 import sdlcRoutes from '@/routes/sdlc';
 import sdlcClawRoutes from '@/routes/sdlcClaw';
@@ -204,7 +212,7 @@ import sdlcVcsInternalRoutes from '@/routes/sdlcVcsInternal';
 import sdlcAgentInternalRoutes from '@/routes/sdlcAgentInternal';
 import { createSdkPublicRouter, createSdkRouter } from '@/api/sdk';
 import { errorHandler as sdkErrorHandler } from '@/api/sdk/handler';
-import { encryptedFieldsConfig } from '@xyne/shared';
+import sdkSsoRoutes from '@/routes/sdk-sso';
 
 
 export class App {
@@ -367,6 +375,9 @@ export class App {
     // everything else. The trailing `sdkErrorHandler` gives auth failures the
     // SDK's own error envelope.
     if (config.sdk.enabled) {
+      // Xyne SSO device flow, mounted before authMiddleware: init/poll/consent
+      // are public, status/approve authenticate the dashboard session themselves.
+      this.app.use('/api/sdk/auth/sso', sdkSsoRoutes);
       this.app.use('/api/sdk', createSdkPublicRouter());
       this.app.use('/api/sdk', authMiddleware.authenticate, createSdkRouter(), sdkErrorHandler);
       logger.info('Public SDK API mounted at /api/sdk');
@@ -374,9 +385,9 @@ export class App {
 
     this.app.use('/api/automation-webhooks', webhookLimiter, automationWebhookRoutes);
 
-    // Claw MCP route (user + app auth) — must be before /api/query
+
+    // Claw MCP route (user + app auth)
     this.app.use('/api/query/claw', authenticateUserOrApp, pythonQueryRoutes);
-    this.app.use('/api/query', authMiddleware.authenticate, pythonQueryRoutes);
 
     // Commit analysis routes (auth and ACL required)
     this.app.use('/api/commits/analyze', authMiddleware.authenticate, commitAnalysisRoutes);
@@ -440,10 +451,12 @@ export class App {
     this.app.use('/api/admin/migrate-tickets-xyneid', workspaceScopedRoute, ticketMigrationRoutes);
     this.app.use('/api/admin/gmail-watch-renewal', workspaceScopedRoute, gmailWatchRenewalRoutes);
     this.app.use('/api/admin/board-config-copy', workspaceScopedRoute, boardConfigCopyRoutes);
+    this.app.use('/api/audit-logs', workspaceScopedRoute, auditLogRoutes);
     // No workspaceScopedRoute: the controller opens its own runAsSystem scope, since
     // this one-off repair links summary canvases across every workspace. The
     // '-backfill' path suffix also puts it behind backfillMountGuard above.
     this.app.use('/api/admin/recording-pointer-backfill', recordingPointerBackfillRoutes);
+    this.app.use('/api/admin/sdlc-repo-credential-backfill', sdlcRepoCredentialBackfillRoutes);
     // Same shape: the one-off SDLC multi-repo data migration spans every workspace,
     // so it opens its own runAsSystem scope rather than taking workspaceScopedRoute.
 
@@ -525,9 +538,11 @@ export class App {
     this.app.use('/api/calls', authMiddleware.authenticate, callRoutes); // Calling feature routes
     this.app.use('/api/calendar/oauth', calendarOAuthRoutes); // Calendar-only OAuth (init is authenticated; callbacks use bound state)
     this.app.use('/api/drive/oauth', driveOAuthRoutes); // KB Drive import OAuth (init is authenticated; callback uses bound state)
+    this.app.use('/api/user-contacts', userContactsRoutes); // Per-user contacts import (invite dialog; init is authenticated, callbacks use bound state)
     this.app.use('/api/calendar/sync', authMiddleware.authenticate, calendarSyncRoutes); // Calendar manual sync
     this.app.use('/api/calendar/watch', authMiddleware.authenticate, calendarWatchRoutes); // Calendar watch setup
     this.app.use('/api/voice-input', authMiddleware.authenticate, voiceInputRoutes); // Low-latency chat voice input
+    this.app.use('/api/tts', authMiddleware.authenticate, ttsRoutes);
 
     // App routes
     this.app.use('/api/apps', appRoutes);
@@ -619,19 +634,6 @@ export class App {
     );
     this.app.use('/api/internal/sdlc/vcs', validateS2SKey, sdlcVcsInternalRoutes);
     this.app.use('/api/internal/sdlc/agent', validateS2SKey, sdlcAgentInternalRoutes);
-
-    // Encrypted-fields config (S2S-only). Backend is the source of truth; the
-    // encryption service fetches this and caches it instead of importing @xyne/shared.
-    this.app.get('/api/internal/encryption/fields-config', validateS2SKey, (_req: Request, res: Response) => {
-      const encryptedFields = Object.fromEntries(
-        Object.entries(encryptedFieldsConfig).map(([table, tableConfig]) => [
-          table,
-          { fields: [...tableConfig.fields], enforceClientEncryption: tableConfig.enforceClientEncryption },
-        ]),
-      );
-      res.json({ encryptedFields });
-    });
-
     this.app.use('/api/internal/sdlc/wiki', validateS2SKey, sdlcWikiInternalRoutes);
     this.app.use(
       '/api/internal/sdlc/artifact-versions',
@@ -646,6 +648,8 @@ export class App {
 
     // Internal canvas read/update (S2S-only, used by MCP tools)
     this.app.use('/api/internal/canvas', internalCanvasRoutes);
+    // User deactivation cleanup, called by an out-of-cluster service (own secret)
+    this.app.use('/api/internal/users', userDeactivationRoutes);
     this.app.use('/api/canvas/claw', authenticateUserOrApp, canvasRoutes);
     this.app.use('/api/vespaSearch/claw', authenticateUserOrApp, vespaSearchRoutes);
     this.app.use('/api/dashboard/claw', authenticateUserOrApp, dashboardClawRouter);
@@ -736,6 +740,8 @@ export class App {
 
     // Collections routes
     this.app.use('/api/collections', authMiddleware.authenticate, collectionsRoutes);
+    this.app.use('/api/merchants', authMiddleware.authenticate, merchantRoutes);
+    this.app.use('/api/form-field-values', authMiddleware.authenticate, formFieldValuesRoutes);
 
     // Office document (pptx, docx, ...) -> PDF conversion, via LibreOffice.
     // Stateless: takes uploaded bytes, returns converted bytes, touches no stored data.
@@ -766,10 +772,11 @@ export class App {
     this.app.use('/api/drafts', authMiddleware.authenticate, draftRoutes);
 
     // Vespa search routes (auth required)
+    // Ahead of the general mount, so a lookup is answered here and nothing else runs.
+    this.app.use('/api/vespaSearch/related', authMiddleware.authenticate, relatedContextRouter);
     this.app.use('/api/vespaSearch', authMiddleware.authenticate, vespaSearchRoutes);
 
-    // Product Insights routes (auth and ACL required)
-    this.app.use('/api/productInsights', authMiddleware.authenticate, productInsightsRoutes);
+    this.app.use('/api/assistant/route', authMiddleware.authenticate, assistantRouteRoutes);
 
     // API Key management routes (admin only, no ACL needed as it has requireAdmin middleware)
     this.app.use('/api/admin/api-keys', apiKeyRoutes);
@@ -899,6 +906,10 @@ export class App {
           logger.info('Initializing email classification queue...');
           await emailClassificationQueue.initialize();
         })(),
+        (async () => {
+          logger.info('Initializing call transcription queue...');
+          callTranscriptionQueue.startConsumer();
+        })(),
       ]);
 
       logger.info('[TEST MODE] All queues initialized');
@@ -944,6 +955,12 @@ export class App {
 
       logger.info('Initializing email classification queue...');
       await emailClassificationQueue.initialize();
+
+      // Ozonetel call-recording transcription (manual "Transcribe" button). The audio
+      // work runs in the Python agent; this consumer only holds the Bull job while it
+      // waits for the agent, then writes the transcript attachment.
+      logger.info('Initializing call transcription queue...');
+      callTranscriptionQueue.startConsumer();
 
       // Producer only — messages are enqueued here at ingest; the worker (a
       // separate process) drains each thread once its debounce window elapses.
@@ -1113,6 +1130,10 @@ export class App {
     const { messageClassificationQueue } = await import('@/queues/messageClassificationQueue');
     await messageClassificationQueue.initialize();
 
+    logger.info('Initializing HEIC rendition queue (producer)...');
+    const { heicRenditionQueue } = await import('@/queues/heicRenditionQueue');
+    await heicRenditionQueue.initialize();
+
     if (config.enableTagGenerationPipeline) {
       logger.info('Initializing tag generation pipeline queue (producer)...');
       registerDeskEmailTags(tagGenerationPipeline);
@@ -1177,6 +1198,9 @@ export class App {
 
       // Close auto draft queue
       await autoDraftQueue.close();
+
+      // Close call transcription queue
+      await callTranscriptionQueue.close();
 
       // Close radar execution producer queue (initialized above when enabled)
       const { radarExecutionQueue: radarQueue } = await import('@/queues/radarExecutionQueue');

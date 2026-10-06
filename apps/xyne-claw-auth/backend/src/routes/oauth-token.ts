@@ -21,10 +21,12 @@ import { calendlyOAuthProvider } from "./calendly-oauth.js";
 import { jotformOAuthProvider } from "./jotform-oauth.js";
 import { wixOAuthProvider } from "./wix-oauth.js";
 import { webflowOAuthProvider } from "./webflow-oauth.js";
+import { clickupOAuthProvider } from "./clickup-oauth.js";
 import { mailerliteOAuthProvider } from "./mailerlite-oauth.js";
 import { attioOAuthProvider } from "./attio-oauth.js";
 import { honeycombOAuthProvider } from "./honeycomb-oauth.js";
 import { customerioOAuthProvider } from "./customerio-oauth.js";
+import { notionRemoteOAuthProvider } from "./notion-remote-oauth.js";
 
 const ALL_OAUTH_PROVIDERS: OAuthTokenProvider[] = [
   googleOAuthProvider,
@@ -36,10 +38,12 @@ const ALL_OAUTH_PROVIDERS: OAuthTokenProvider[] = [
   jotformOAuthProvider,
   wixOAuthProvider,
   webflowOAuthProvider,
+  clickupOAuthProvider,
   mailerliteOAuthProvider,
   attioOAuthProvider,
   honeycombOAuthProvider,
   customerioOAuthProvider,
+  notionRemoteOAuthProvider,
 ];
 
 const PROVIDERS_BY_TYPE = new Map(ALL_OAUTH_PROVIDERS.map((p) => [p.serverType, p]));

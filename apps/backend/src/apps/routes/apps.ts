@@ -2,6 +2,7 @@ import express, { Router } from 'express';
 import { AccessType } from '@xyne/shared';
 import { AppController } from '../controllers/appController';
 import { incomingWebhookController } from '../controllers/incomingWebhookController';
+import { fetchConfigController } from '../controllers/fetchConfigController';
 import { ChatController } from '../controllers/chatController';
 import { CommandController } from '../controllers/commandController';
 import { authorize } from '@/middleware/authorize';
@@ -13,12 +14,14 @@ import channelRoutes from './channel';
 import userGroupRoutes from './usergroups';
 import emailRoutes from './email';
 import callRoutes from './calls';
+import workflowRoutes from './workflows';
 import prCheckCallbackRouter from './prCheckCallback';
 import { authenticateApp } from '../middelware/authenticator';
 import { uploadMultiple, uploadConfig } from '@/middleware/upload';
 import { authMiddleware } from '@/middleware/auth';
 import { FlowController } from '../controllers/flowController';
 import { PermissionController } from '../controllers/permissionController';
+import { AppResourceController } from '../controllers/appResourceController';
 import { webhookLimiter } from '@/middleware/rateLimiters';
 import { PlatformAdapterRegistry } from '../platform-adapters/types';
 import { SlackAdapter } from '../platform-adapters/slack';
@@ -28,6 +31,7 @@ const appController = new AppController();
 const chatController = new ChatController();
 const flowController = new FlowController();
 const permissionController = new PermissionController();
+const appResourceController = new AppResourceController();
 const platformRegistry = new PlatformAdapterRegistry();
 
 platformRegistry.register(new SlackAdapter());
@@ -61,6 +65,15 @@ router.get('/installed/:installedAppId/permissions', authMiddleware.authenticate
 router.post('/installed/:installedAppId/permissions', authMiddleware.authenticate, authorize('XYNE-APPS', AccessType.WRITE), permissionController.setInstalledPermissions);
 router.post('/installed/:installedAppId/permissions/activate', authMiddleware.authenticate, authorize('XYNE-APPS', AccessType.WRITE), permissionController.activateInstalledPermissions);
 router.get('/installed/:installedAppId/commands', authMiddleware.authenticate, authorize('XYNE-APPS', AccessType.READ), commandController.getInstalledCommands);
+router.get('/installed/:installedAppId/resources/:resourceType', authMiddleware.authenticate, authorize('XYNE-APPS', AccessType.READ), appResourceController.listAttached);
+router.patch('/installed/:installedAppId/resources/:resourceType', authMiddleware.authenticate, authorize('XYNE-APPS', AccessType.ADMIN), appResourceController.setAttached);
+
+// App Desk history fetch config. The test route makes a real outbound call on the
+// caller's behalf, so it is WRITE rather than READ.
+router.get('/installed/:installedAppId/fetch-config', authMiddleware.authenticate, authorize('XYNE-APPS', AccessType.READ), fetchConfigController.getFetchConfig);
+router.put('/installed/:installedAppId/fetch-config', authMiddleware.authenticate, authorize('XYNE-APPS', AccessType.WRITE), fetchConfigController.putFetchConfig);
+router.delete('/installed/:installedAppId/fetch-config', authMiddleware.authenticate, authorize('XYNE-APPS', AccessType.WRITE), fetchConfigController.deleteFetchConfig);
+router.post('/installed/:installedAppId/fetch-config/test', authMiddleware.authenticate, authorize('XYNE-APPS', AccessType.WRITE), webhookLimiter, fetchConfigController.testFetchConfig);
 
 router.post('/incoming-webhooks', authMiddleware.authenticate, authorize('XYNE-APPS', AccessType.WRITE), incomingWebhookController.createWebhook);
 router.get('/incoming-webhooks/:installedAppId', authMiddleware.authenticate, authorize('XYNE-APPS', AccessType.READ), incomingWebhookController.listWebhooks);
@@ -99,6 +112,9 @@ router.use("/email", authenticateApp, emailRoutes);
 
 // Call routes
 router.use("/calls", authenticateApp, callRoutes);
+
+// Workflow routes
+router.use("/workflows", authenticateApp, workflowRoutes);
 
 // PR check callback (called by dispatchAction when user clicks "Run PR Check" button)
 // No auth needed here - dispatchAction is already authenticated and validates the request

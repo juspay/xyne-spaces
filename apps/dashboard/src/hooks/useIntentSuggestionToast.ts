@@ -120,16 +120,38 @@ export function useIntentSuggestionToast(actions: IntentSuggestionActions): void
     if (shownAt !== undefined && now - shownAt < REPEAT_COOLDOWN_MS) return;
     lastShownAt.current.set(key, now);
 
+    // Impression, so ACT_ON has a denominator. Same reasoning as the action
+    // click: the toast is a portal the DOM listener never sees.
+    globalClickTracker.trackManualEvent('INTENT_SUGGESTION', 'SUGGESTION_SHOWN', undefined, {
+      intentKey: key,
+      hasAction: !!(copy.action && copy.run),
+    });
+    // Set by the action click so the close that follows it is not counted as a
+    // dismissal. Sonner fires onDismiss for programmatic and user closes and
+    // onAutoClose when the duration runs out.
+    let acted = false;
+    const trackDismissed = (reason: 'auto' | 'closed'): void => {
+      if (acted) return;
+      globalClickTracker.trackManualEvent('INTENT_SUGGESTION', 'SUGGESTION_DISMISSED', undefined, {
+        intentKey: key,
+        reason,
+        msShown: Date.now() - now,
+      });
+    };
+
     toast(copy.message, {
       // Stable id keyed on the message: re-classifying the same message replaces
       // its toast instead of stacking duplicates.
       id: `intent-${detection.messageId}`,
       duration: TOAST_DURATION_MS,
+      onDismiss: () => trackDismissed('closed'),
+      onAutoClose: () => trackDismissed('auto'),
       ...(copy.action && copy.run
         ? {
             action: {
               label: copy.action,
               onClick: () => {
+                acted = true;
                 // The toast action is rendered by the toast library from a
                 // {label, onClick} pair, so there is no element to hang
                 // data-track-* on and the DOM listener never sees this click.
@@ -137,7 +159,7 @@ export function useIntentSuggestionToast(actions: IntentSuggestionActions): void
                   'INTENT_SUGGESTION',
                   'ACT_ON_INTENT_SUGGESTION',
                   copy.action,
-                  { intentKey: key, action: copy.action },
+                  { intentKey: key, action: copy.action, msShown: Date.now() - now },
                 );
                 copy.run?.(latestActions.current);
               },

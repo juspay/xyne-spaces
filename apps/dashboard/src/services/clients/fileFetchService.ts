@@ -42,7 +42,7 @@ export const fetchFile = async (
       });
 
       const blob: Blob = response.data;
-      return new File([blob], fileName, { type: mimeType });
+      return new File([blob], fileName, { type: blob.type || mimeType });
     },
     staleTime: 10 * 60 * 1000,
   });

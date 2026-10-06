@@ -3,6 +3,8 @@ import { prisma } from "../db.js";
 
 export const chatMessageRepository = {
   create: (data: {
+    pendingActions?: unknown;
+    runProvider?: string | null;
     conversationId: string;
     agentSlug: string;
     userId: string;
@@ -18,12 +20,15 @@ export const chatMessageRepository = {
      *  JSON cast is localized here. */
     attachedContext?: unknown;
   }) => {
-    const { attachedContext, ...rest } = data;
+    const { attachedContext, pendingActions, ...rest } = data;
     return prisma.chatMessage.create({
       data: {
         ...rest,
         ...(attachedContext !== undefined
           ? { attachedContext: attachedContext as Prisma.InputJsonValue }
+          : {}),
+        ...(pendingActions !== undefined
+          ? { pendingActions: pendingActions as Prisma.InputJsonValue }
           : {}),
       },
     });
@@ -34,8 +39,70 @@ export const chatMessageRepository = {
    *  run completes (branching needs the assistant id reserved up-front). */
   update: (
     id: string,
-    data: { content?: string; status?: string; reasoning?: string | null; parentId?: string | null },
-  ) => prisma.chatMessage.update({ where: { id }, data }),
+    data: { content?: string; status?: string; reasoning?: string | null; parentId?: string | null; pendingActions?: unknown; runProvider?: string | null },
+  ) => {
+    const { pendingActions, ...rest } = data;
+    return prisma.chatMessage.update({
+      where: { id },
+      data: {
+        ...rest,
+        ...(pendingActions !== undefined
+          ? { pendingActions: pendingActions as Prisma.InputJsonValue }
+          : {}),
+      },
+    });
+  },
+
+  resolvePendingAction: async (
+    conversationId: string,
+    signature: string,
+    resolution: "approved" | "declined",
+  ): Promise<boolean> => {
+    const row = await prisma.chatMessage.findFirst({
+      where: { conversationId, pendingActions: { array_contains: [{ signature }] } },
+      select: { id: true, pendingActions: true },
+      orderBy: { createdAt: "desc" },
+    });
+    if (!row || !Array.isArray(row.pendingActions)) return false;
+    const next = (row.pendingActions as Array<Record<string, unknown>>).map((action) =>
+      action && typeof action === "object" && action["signature"] === signature ? { ...action, resolution } : action,
+    );
+    await prisma.chatMessage.update({ where: { id: row.id }, data: { pendingActions: next as Prisma.InputJsonValue } });
+    return true;
+  },
+
+  /** Append a FlowUI artifact card, deduped by screenId. */
+  appendUiFlow: async (id: string, flow: { screenId: string }): Promise<void> => {
+    await prisma.$transaction(async (tx) => {
+      const row = await tx.chatMessage.findUnique({ where: { id }, select: { uiFlows: true } });
+      if (!row) return;
+      const existing = Array.isArray(row.uiFlows)
+        ? (row.uiFlows as Array<Record<string, unknown>>)
+        : [];
+      if (existing.some((entry) => entry?.["screenId"] === flow.screenId)) return;
+      await tx.chatMessage.update({
+        where: { id },
+        data: { uiFlows: [...existing, flow] as unknown as Prisma.InputJsonValue },
+      });
+    });
+  },
+
+  /** Swap a stored card for a new version of itself (pending → answered /
+   *  declined). Returns false when the message or screenId is gone. */
+  replaceUiFlow: async (id: string, screenId: string, flow: unknown): Promise<boolean> => {
+    return prisma.$transaction(async (tx) => {
+      const row = await tx.chatMessage.findUnique({ where: { id }, select: { uiFlows: true } });
+      if (!row || !Array.isArray(row.uiFlows)) return false;
+      const existing = row.uiFlows as Array<Record<string, unknown>>;
+      if (!existing.some((entry) => entry?.["screenId"] === screenId)) return false;
+      const next = existing.map((entry) => (entry?.["screenId"] === screenId ? flow : entry));
+      await tx.chatMessage.update({
+        where: { id },
+        data: { uiFlows: next as unknown as Prisma.InputJsonValue },
+      });
+      return true;
+    });
+  },
 
   /** Persist mid-run PARTIAL content, but ONLY while the row is still "running".
    *  Conditional (updateMany + status guard) so a late/cross-pod debounced write
@@ -76,6 +143,33 @@ export const chatMessageRepository = {
     return row?.id ?? null;
   },
 
+  /** Newest user message in this conversation+agent whose attachedContext holds
+   *  a `local-folder` item, or null. Powers the sticky local folder: once a turn
+   *  attaches a folder, later turns in the same thread keep running in it. */
+  latestLocalFolderContext: async (
+    conversationId: string,
+    agentSlug: string,
+  ): Promise<unknown | null> => {
+    if (!conversationId || !agentSlug) return null;
+    const rows = await prisma.chatMessage.findMany({
+      where: { conversationId, agentSlug, role: "user" },
+      orderBy: { createdAt: "desc" },
+      take: 40,
+      select: { attachedContext: true },
+    });
+    for (const row of rows) {
+      const list = row.attachedContext;
+      if (!Array.isArray(list)) continue;
+      const hit = list.find(
+        (entry) =>
+          entry && typeof entry === "object" && !Array.isArray(entry) &&
+          (entry as Record<string, unknown>)["type"] === "local-folder",
+      );
+      if (hit) return hit;
+    }
+    return null;
+  },
+
   findByConversation: (conversationId: string) =>
     prisma.chatMessage.findMany({
       where: { conversationId },
@@ -105,6 +199,11 @@ export const chatMessageRepository = {
     const result = await prisma.chatMessage.deleteMany({
       where: { userId, agentSlug, conversationId },
     });
+    if (result.count > 0) {
+      await prisma.chatConversationMeta.deleteMany({
+        where: { conversationId, userId, agentSlug },
+      });
+    }
     return result.count;
   },
 };

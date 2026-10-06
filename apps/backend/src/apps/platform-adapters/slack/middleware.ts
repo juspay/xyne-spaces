@@ -42,6 +42,30 @@ export async function resolveSlackChannel(channel: string): Promise<string> {
 	throw new Error("Channel not found");
 }
 
+/**
+ * Resolve chat.postEphemeral's `user` argument to a Xyne user id.
+ *
+ * Accepts a Slack-native id (U…) the same way the channel resolver does, and
+ * falls back to treating the value as a Xyne id — apps written against the
+ * native API and apps written against a Slack SDK both reach this endpoint.
+ */
+export async function resolveSlackUserId(
+	user: string,
+	workspaceId: string,
+): Promise<string | null> {
+	const resolved = await resolveSlackIds(
+		[user],
+		config.slackBotToken,
+		"user",
+		workspaceId,
+	);
+	const dbUserId = resolved?.get(user)?.dbId;
+	if (dbUserId) return dbUserId;
+
+	const existing = await repositories.users.findById(user);
+	return existing?.id ?? null;
+}
+
 export async function resolveSlackChannelForUser(
 	channel: string,
 	botUserId: string,

@@ -4,13 +4,16 @@ import { handleExperimentCommand } from "./experiment.js";
 import { handleQueueClear, handleQueueShow } from "./queue.js";
 import { handleHelp } from "./help.js";
 import { handleStatus } from "./status.js";
+import { handleEval } from "./eval.js";
 import { handleDebug } from "./debug.js";
+import { handleChainDebug } from "./chain-debug.js";
 import { applyFastTaskCommand, handleFastModeToggle, handleFastModeUsage } from "./fast-mode.js";
 import { handleClear } from "./clear.js";
 import { handleStop } from "./stop.js";
 import { announceGoalStart, replyGoalControl, runGoalIntercept } from "./goal.js";
 import { buildCompactTask } from "./compact.js";
 import { stripLeadingAgentMention } from "../strip-agent-mention.js";
+import { preDispatchSessionKey } from "../../surfaces/spaces/agent-progress.js";
 import type { CommandOutcome, PendingGoalStart, WebhookCommandCtx } from "./context.js";
 
 export type {
@@ -48,7 +51,20 @@ export async function handleWebhookCommands(ctx: WebhookCommandCtx): Promise<Com
   }
 
   if (slash?.kind === "debug") {
-    await handleDebug(ctx, slash.scope ?? "latest");
+    if (slash.scope === "chain") {
+      await handleChainDebug(ctx);
+    } else {
+      await handleDebug(ctx, slash.scope ?? "latest");
+    }
+    return { kind: "handled" };
+  }
+
+  if (slash?.kind === "eval") {
+    if (ctx.isTwin) {
+      ctx.log.info("/eval ignored on digital-twin run — eval runs only on the agent itself");
+      return { kind: "handled" };
+    }
+    await handleEval(ctx, slash.question, slash.providers, slash.judges, slash.opts);
     return { kind: "handled" };
   }
 
@@ -107,7 +123,9 @@ export async function handleWebhookCommands(ctx: WebhookCommandCtx): Promise<Com
       ...(intercept.providerOverride ? { providerOverride: intercept.providerOverride } : {}),
     };
     task = intercept.firstTurnTask;
-    await announceGoalStart(ctx, intercept.replyToUser);
+    // Pre-dispatch: the run has no sessionId yet, so the pill is keyed on the
+    // conversation. The dispatch below re-lights it with the real one.
+    await announceGoalStart(ctx, intercept.replyToUser, preDispatchSessionKey(ctx.payload.conversationId));
   } else {
     task = ctx.immediateTaskCommand ? ctx.taskCommandText : ctx.userText;
   }

@@ -47,6 +47,9 @@ export interface CallableAgentSpec {
   description: string;
   systemPrompt: string;
   agentConfig: Record<string, unknown>;
+  /** Decides what an empty tools selection means for the callee's run
+   *  (resolveAgentToolsConfig) — claw's filter must agree with claw-auth's. */
+  delegationTier: "standard" | "orchestrator";
   paramName: string;
   paramDescription: string;
   model?: string;
@@ -133,6 +136,7 @@ export async function hydrateCallableAgentSpec(
     description: callee.description,
     systemPrompt: callee.systemPrompt,
     agentConfig,
+    delegationTier: callee.delegationTier === "orchestrator" ? "orchestrator" : "standard",
     paramName: "task",
     paramDescription: `The complete, self-contained task for ${callee.name}. Include all context it needs — it does not see this conversation.`,
     ...(callee.modelId ? { model: callee.modelId } : {}),

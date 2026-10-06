@@ -8,6 +8,7 @@ import type {
   KanbanTicketsPageRow,
   KanbanTicketsPageBaseArgs,
 } from '../routes/KanbanBoardScreen/useKanbanTicketsPage';
+import { kanbanPageQuery } from '../routes/KanbanBoardScreen/useKanbanTicketsPage';
 import { useTicketKeysetWindow } from './useTicketKeysetWindow';
 import { useBoardNavParams } from '../components/Tickets/boardNavStore';
 
@@ -43,13 +44,16 @@ export function useBoardTicketNav(ticketId: string): BoardTicketNavState {
   const [, setSearchParams] = useSearchParams();
   const goTo = useCallback(
     (row: { id: string; conversationId: string | null }): void => {
-      setSearchParams(prev => {
-        const next = new URLSearchParams(prev);
-        next.set('ticketId', row.id);
-        if (row.conversationId) next.set('conversationId', row.conversationId);
-        next.set('nofocus', '1');
-        return next;
-      });
+      setSearchParams(
+        prev => {
+          const next = new URLSearchParams(prev);
+          next.set('ticketId', row.id);
+          if (row.conversationId) next.set('conversationId', row.conversationId);
+          next.set('nofocus', '1');
+          return next;
+        },
+        { state: { trackSource: 'board_nav' } },
+      );
     },
     [setSearchParams],
   );
@@ -70,10 +74,9 @@ export function useBoardTicketNav(ticketId: string): BoardTicketNavState {
         dir,
         limit,
       };
+      // A track's view steps through the track's tickets only (kanbanPageQuery picks).
       const rows = (await zero.run(
-        queries.kanbanTicketsPageV3({
-          ...queryArgs,
-        } as Parameters<typeof queries.kanbanTicketsPageV3>[0]),
+        kanbanPageQuery(queryArgs as Parameters<typeof kanbanPageQuery>[0]),
         { type: 'complete' },
       )) as KanbanTicketsPageRow[];
       return rows.map(r => ({

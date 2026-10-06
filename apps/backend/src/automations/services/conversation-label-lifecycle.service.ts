@@ -3,6 +3,8 @@ import { db } from '@/database/client';
 import { repositories } from '@/database/repositories';
 import { AutomationStatus } from '../types/status';
 import { DESK_AUTOMATION_WORKFLOW_TYPE } from '../types/workflow-adapter';
+import { websocketService } from '@/services/websocketService';
+import { deleteLabelTx } from '@/bypassAcl/transactions/conversationLabelLifecycleService';
 
 export interface ConversationLabelDeleteImpact {
   label: {
@@ -32,7 +34,7 @@ export class ConversationLabelLifecycleError extends Error {
 
 type LabelLifecycleDbClient = typeof db | Prisma.TransactionClient;
 
-class ConversationLabelLifecycleService {
+export class ConversationLabelLifecycleService {
   async getDeleteImpact(
     auth: { userId: string; workspaceId: string },
     labelId: string,
@@ -45,53 +47,12 @@ class ConversationLabelLifecycleService {
     auth: { userId: string; workspaceId: string },
     labelId: string,
   ): Promise<ConversationLabelDeleteResult> {
-    await this.requireOwnedLabel(db, auth, labelId);
+    const ownedLabel = await this.requireOwnedLabel(db, auth, labelId);
 
     try {
-      return await db.$transaction(async tx => {
-        const label = await this.requireOwnedLabel(tx, auth, labelId);
-        const impact = await this.calculateImpact(tx, label);
-
-        const linkedRules = await tx.deskAutoLabelRuleReference.findMany({
-          where: this.linkedDeskRuleReferenceWhere(label),
-          select: { workflowId: true },
-        });
-        const archiveResult = await tx.workflow.updateMany({
-          where: {
-            id: { in: linkedRules.map(rule => rule.workflowId) },
-            workspaceId: label.workspaceId,
-            workflowType: DESK_AUTOMATION_WORKFLOW_TYPE,
-            status: { in: [AutomationStatus.ACTIVE, AutomationStatus.DISABLED] },
-          },
-          data: {
-            status: AutomationStatus.ARCHIVED,
-            updatedAt: new Date(),
-          },
-        });
-
-        await tx.deskAutoLabelRuleReference.deleteMany({
-          where: {
-            workspaceId: label.workspaceId,
-            labelId: label.id,
-          },
-        });
-
-        await tx.conversationLabelMapping.deleteMany({
-          where: {
-            labelId: label.id,
-            workspaceId: label.workspaceId,
-            createdBy: label.createdBy,
-          },
-        });
-
-        await tx.conversationLabel.delete({ where: { id: label.id } });
-
-        return {
-          ...impact,
-          archivedDeskRuleCount: archiveResult.count,
-          removedMappingCount: impact.mappingCount,
-        };
-      });
+      const result = await deleteLabelTx(this, auth, labelId);
+      websocketService.broadcastLabelUnreadCountsUpdate(ownedLabel.channelId);
+      return result;
     } catch (err) {
       if (err instanceof ConversationLabelLifecycleError) throw err;
       if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2003') {
@@ -106,7 +67,7 @@ class ConversationLabelLifecycleService {
     }
   }
 
-  private async requireOwnedLabel(
+  async requireOwnedLabel(
     client: LabelLifecycleDbClient,
     auth: { userId: string; workspaceId: string },
     labelId: string,
@@ -136,7 +97,7 @@ class ConversationLabelLifecycleService {
     return label;
   }
 
-  private async calculateImpact(
+  async calculateImpact(
     client: LabelLifecycleDbClient,
     label: ConversationLabel,
   ): Promise<ConversationLabelDeleteImpact> {
@@ -164,7 +125,7 @@ class ConversationLabelLifecycleService {
     };
   }
 
-  private linkedDeskRuleReferenceWhere(
+  linkedDeskRuleReferenceWhere(
     label: ConversationLabel,
   ): Prisma.DeskAutoLabelRuleReferenceWhereInput {
     return {
@@ -180,3 +141,4 @@ class ConversationLabelLifecycleService {
 }
 
 export const conversationLabelLifecycleService = new ConversationLabelLifecycleService();
+

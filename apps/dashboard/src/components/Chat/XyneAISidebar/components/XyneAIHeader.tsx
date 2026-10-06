@@ -175,6 +175,7 @@ export const XyneAIHeader = ({
               title='New chat'
               data-track-category='XyneAI'
               data-track-name='NEW_CHAT'
+              data-track-metadata={JSON.stringify({ surface: 'panel' })}
             >
               <PencilEditBox size={16} />
             </button>
@@ -245,6 +246,7 @@ export const XyneAIHeader = ({
             title='New chat'
             data-track-category='XyneAI'
             data-track-name='NEW_CHAT_DESKTOP'
+            data-track-metadata={JSON.stringify({ surface: 'panel' })}
           >
             <PencilEditBox size={16} />
           </Button>

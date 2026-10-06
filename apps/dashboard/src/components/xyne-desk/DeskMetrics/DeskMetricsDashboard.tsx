@@ -1,4 +1,4 @@
-import React, { ReactElement, useMemo, useState, useCallback, useEffect } from 'react';
+import React, { ReactElement, useMemo, useState, useCallback, useEffect, useRef } from 'react';
 import { useAuth } from '../../../hooks/useAuth';
 import {
   CHART_VIEW_LABELS,
@@ -31,6 +31,7 @@ import {
 import * as PopoverPrimitive from '@radix-ui/react-popover';
 import { Popover } from '../../ui/Popover';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../../ui/Select';
+import { Checkbox } from '../../ui/Checkbox/Checkbox';
 import {
   AICategorySubmenu,
   DynamicFieldSubmenu,
@@ -41,13 +42,16 @@ import {
 } from '../../Tickets/TicketFilters/Submenus';
 import { classificationApi } from '../../../api/classificationApi';
 import { getIconForFieldType } from '../../Tickets/TicketFilters/fieldTypeIcons';
-import { DeskMetricsDateRangePicker } from './DeskMetricsDateRangePicker';
+import { DeskMetricsDateRangePicker, matchPreset } from './DeskMetricsDateRangePicker';
+import { globalClickTracker } from '../../../services/Analytics/globalClickTracker';
 import {
   Bar,
   BarChart,
   CartesianGrid,
   Cell,
   Legend,
+  Line,
+  LineChart,
   Pie,
   PieChart,
   ResponsiveContainer,
@@ -60,15 +64,16 @@ import {
   DESK_METRICS_MAX_AGGREGATE_DESKS,
   FormFieldType,
   parseFieldOptionValues,
+  TicketStatusV2,
   WorkspaceRole,
   type DeskMetricsAgentRow,
+  type DeskMetricsDateBasis,
   type DeskMetricsPerDeskRow,
   type DeskMetricsSkippedDesk,
   type DeskMetricsTicketRow,
-  type TicketStatusV2,
 } from '@xyne/shared';
 import type { ResolvedDisplayFormField } from '../../../utils/board/resolveDisplayFormFields';
-import { Dialog } from '../../ui/Dialog/Dialog';
+import { DeskInsightsShell } from '../DeskInsights/DeskInsightsPanel';
 import { cn } from '../../../utils/classNames';
 import { getStageStatusMeta } from '../../../utils/board/stageStatusIcon';
 import { useAggregateDeskMetrics } from '../../../hooks/useDeskMetrics';
@@ -99,6 +104,10 @@ export interface DeskMetricsDashboardProps {
   customFieldDefinitions?: readonly ResolvedDisplayFormField[];
   availableStages?: readonly DeskMetricsStageOption[];
   onTicketClick: (ticket: DeskMetricsTicketRow) => void;
+  /** Which surface opened the dashboard — DESK_METRICS_VIEWED `source`. */
+  trackSource?: 'toolbar' | 'settings_tab';
+  /** Render inline inside the Insights panel instead of its own dialog. */
+  embedded?: boolean;
 }
 
 /** Shows a checklist of tags for a category, derived from already-fetched breakdown data. */
@@ -232,31 +241,194 @@ export const formatDuration = (seconds: number | null): string => {
 const ageInDays = (createdAtMs: number): number =>
   Math.max(0, Math.floor((Date.now() - createdAtMs) / DAY_MS));
 
+// Created At / Resolved At, likewise shared by the table and its CSV export.
+const formatTicketTimestamp = (epochMs: number): string =>
+  new Date(epochMs).toLocaleString(undefined, {
+    month: 'short',
+    day: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+
+const HOUR_S = 3600;
+const DAY_S = 86400;
+// Recharts spaces ticks evenly in seconds, landing on values like 45000 ("1d 13h").
+const DURATION_TICK_STEPS = [
+  60,
+  300,
+  900,
+  1800,
+  HOUR_S,
+  2 * HOUR_S,
+  3 * HOUR_S,
+  6 * HOUR_S,
+  12 * HOUR_S,
+  DAY_S,
+  2 * DAY_S,
+  3 * DAY_S,
+  7 * DAY_S,
+  14 * DAY_S,
+  30 * DAY_S,
+];
+
+/** Drops the zero remainder formatDuration keeps ("1d 0h" → "1d"). */
+const formatDurationTick = (seconds: number): string =>
+  formatDuration(seconds).replace(/ 0[hm]$/, '');
+
+const durationTicks = (maxValue: number): number[] => {
+  const peak = Math.max(maxValue, 1);
+  // Past the ladder (a months-old ticket closed today), round to whole days.
+  const step =
+    DURATION_TICK_STEPS.find(candidate => peak / candidate <= 4) ??
+    Math.ceil(peak / 4 / DAY_S) * DAY_S;
+  const ticks: number[] = [];
+  for (let tick = 0; tick < peak + step; tick += step) ticks.push(tick);
+  return ticks;
+};
+
+/** Thins x-axis labels so dense buckets (e.g. 6h steps across weeks) don't overlap. */
+const tickIntervalFor = (pointCount: number): number => {
+  if (pointCount <= 8) return 0;
+  if (pointCount <= 31) return 4;
+  return Math.floor(pointCount / 6);
+};
+
+// The same desk-wide number as the Avg Resolution KPI, just over time — so on desks saved
+// before this chart existed it follows whatever that KPI is set to. Resolved At follows RT
+// the same way, since Created At + RT gives it away.
+const inheritedVisibilityKey = (key: string): string | undefined => {
+  if (key === 'chart:resolutionTrend') return 'kpi:avgResolution';
+  if (key === 'column:resolvedAt') return 'column:rt';
+  return undefined;
+};
+
+interface SeriesChart {
+  rows: Array<Record<string, number | string>>;
+  series: Array<{ name: string; color: string }>;
+}
+
+const EMPTY_SERIES_CHART: SeriesChart = { rows: [], series: [] };
+
+const IST_TZ = 'Asia/Kolkata';
+
+type TrendGranularity = 'hour' | 'sixHour' | 'day';
+
+/** Mirrors the bucket strings trendByDay emits, so both charts share an x axis. */
+const istBucketKey = (epochMs: number, granularity: TrendGranularity): string => {
+  const at = new Date(epochMs);
+  const day = at.toLocaleDateString('en-CA', { timeZone: IST_TZ });
+  if (granularity === 'day') return day;
+  const hour = at
+    .toLocaleTimeString('en-GB', { timeZone: IST_TZ, hour: '2-digit', minute: '2-digit' })
+    .slice(0, 2);
+  if (granularity === 'hour') return `${day} ${hour}:00`;
+  const sixHourStart = String(Math.floor(Number(hour) / 6) * 6).padStart(2, '0');
+  return `${day} ${sixHourStart}:00`;
+};
+
+const SIX_HOUR_MS = 6 * HOUR_MS;
+// Fixed UTC+5:30, no DST — so a constant 6h step stays on IST 00/06/12/18 boundaries.
+const IST_OFFSET_MS = 5.5 * HOUR_MS;
+// Past this, 6h buckets are mostly empty flat line — the card falls back to daily.
+const SIX_HOURLY_MAX_RANGE_MS = 3 * DAY_MS;
+
+/** Client-built skeleton for 6h buckets — trendByDay only emits hourly/daily rows. */
+const sixHourlySkeleton = (startMs: number, endMs: number): Array<{ date: string }> => {
+  if (endMs < startMs) return [];
+  const alignedStart =
+    Math.floor((startMs + IST_OFFSET_MS) / SIX_HOUR_MS) * SIX_HOUR_MS - IST_OFFSET_MS;
+  const points: Array<{ date: string }> = [];
+  for (let t = alignedStart; t <= endMs; t += SIX_HOUR_MS) {
+    points.push({ date: istBucketKey(t, 'sixHour') });
+  }
+  return points;
+};
+
+const RESOLUTION_SERIES = 'Avg resolution time';
+
+/** One line, pooled across agents. Buckets with nothing resolved stay absent, not 0 — a
+ *  zero would read as "resolved instantly"; connectNulls bridges the gap instead. */
+const buildResolutionTrend = (
+  tickets: readonly DeskMetricsTicketRow[],
+  trend: ReadonlyArray<{ date: string }>,
+  granularity: TrendGranularity,
+): SeriesChart => {
+  const byBucket = new Map<string, { total: number; count: number }>();
+  const inRange = new Set(trend.map(point => point.date));
+  let resolved = 0;
+  for (const ticket of tickets) {
+    if (ticket.rtSeconds === null || ticket.rtSeconds < 0) continue;
+    // Tickets created before the range ("previously created" on) plot on their resolution date.
+    const createdInRange = inRange.has(istBucketKey(ticket.createdAt, granularity));
+    const plottedAt = createdInRange ? ticket.createdAt : ticket.resolvedAt;
+    if (plottedAt === null) continue;
+    const bucket = istBucketKey(plottedAt, granularity);
+    if (!inRange.has(bucket)) continue;
+    resolved += 1;
+    const cell = byBucket.get(bucket) ?? { total: 0, count: 0 };
+    cell.total += ticket.rtSeconds;
+    cell.count += 1;
+    byBucket.set(bucket, cell);
+  }
+  if (resolved === 0) return EMPTY_SERIES_CHART;
+
+  const labels = trendLabels(trend, granularity);
+  const rows = trend.map((point, i) => {
+    const row: Record<string, number | string> = { bucket: labels[i] ?? point.date };
+    const cell = byBucket.get(point.date);
+    if (cell) row[RESOLUTION_SERIES] = cell.total / cell.count;
+    return row;
+  });
+  return {
+    rows,
+    series: [{ name: RESOLUTION_SERIES, color: VIZ_CHART_COLORS.series[0] ?? '#6366f1' }],
+  };
+};
+
 const priorityLabel = (p: string): string =>
   p.charAt(0) + p.slice(1).toLowerCase().replace(/_/g, ' ');
 
-const formatTrendLabel = (dateStr: string, hourly: boolean): string => {
-  if (hourly) {
-    const hour = parseInt(dateStr.slice(11, 13), 10);
-    const suffix = hour >= 12 ? 'pm' : 'am';
-    return `${hour % 12 || 12}${suffix}`;
-  }
-  const [, month, day] = dateStr.split('-').map(Number);
-  const months = [
-    'Jan',
-    'Feb',
-    'Mar',
-    'Apr',
-    'May',
-    'Jun',
-    'Jul',
-    'Aug',
-    'Sep',
-    'Oct',
-    'Nov',
-    'Dec',
-  ];
-  return `${months[(month ?? 1) - 1]} ${day}`;
+const MONTH_NAMES = [
+  'Jan',
+  'Feb',
+  'Mar',
+  'Apr',
+  'May',
+  'Jun',
+  'Jul',
+  'Aug',
+  'Sep',
+  'Oct',
+  'Nov',
+  'Dec',
+];
+
+const formatMonthDay = (dateStr: string): string => {
+  // dateStr may carry a trailing " HH:00" (hour/sixHour buckets) — keep just the date part.
+  const [, month, day] = dateStr.slice(0, 10).split('-').map(Number);
+  return `${MONTH_NAMES[(month ?? 1) - 1]} ${day}`;
+};
+
+const formatTrendLabel = (dateStr: string, granularity: 'day' | 'hour'): string => {
+  if (granularity === 'day') return formatMonthDay(dateStr);
+  const hour = parseInt(dateStr.slice(11, 13), 10);
+  const suffix = hour >= 12 ? 'pm' : 'am';
+  return `${hour % 12 || 12}${suffix}`;
+};
+
+/** sixHour shows the date only where the day changes, so "Aug 11" isn't on every tick. */
+const trendLabels = (
+  points: ReadonlyArray<{ date: string }>,
+  granularity: TrendGranularity,
+): string[] => {
+  if (granularity !== 'sixHour') return points.map(p => formatTrendLabel(p.date, granularity));
+  let lastDay = '';
+  return points.map(p => {
+    const day = p.date.slice(0, 10);
+    const isNewDay = day !== lastDay;
+    lastDay = day;
+    return isNewDay ? formatMonthDay(p.date) : formatTrendLabel(p.date, 'hour');
+  });
 };
 
 const getCustomFieldKeys = (tickets: DeskMetricsTicketRow[]): string[] =>
@@ -278,6 +450,7 @@ const downloadCsv = (tickets: DeskMetricsTicketRow[]): string => {
     'Tags',
     ...customKeys,
     'Created At',
+    'Resolved At',
     'Age',
   ];
   const rows = tickets.map(t => [
@@ -295,7 +468,8 @@ const downloadCsv = (tickets: DeskMetricsTicketRow[]): string => {
       .join('; ')
       .replace(/"/g, '""')}"`,
     ...customKeys.map(k => `"${(t.customFields?.[k] ?? '').replace(/"/g, '""')}"`),
-    `"${new Date(t.createdAt).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}"`,
+    `"${formatTicketTimestamp(t.createdAt)}"`,
+    t.resolvedAt !== null ? `"${formatTicketTimestamp(t.resolvedAt)}"` : '—',
     `${ageInDays(t.createdAt)}d`,
   ]);
   const csv = [headers.join(','), ...rows.map(r => r.join(','))].join('\n');
@@ -448,32 +622,47 @@ const agentSortValue = (row: DeskMetricsAgentRow, key: AgentSortKey): string | n
 
 const MetricsAgentTable = ({
   agents,
+  dateBasis,
   onDownload,
   onAgentClick,
   canDownload,
+  trackMetadata,
 }: {
   agents: DeskMetricsAgentRow[];
+  dateBasis: DeskMetricsDateBasis;
   onDownload: () => void;
   onAgentClick: (assigneeId: string | null) => void;
   canDownload: boolean;
+  /** JSON dimensions (desk count, range) for the export click. */
+  trackMetadata?: string;
 }): ReactElement => {
   const [sortKey, setSortKey] = useState<AgentSortKey>('assigned');
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc');
   const [page, setPage] = useState(0);
 
   const stageNames = useMemo(() => getAgentStageNames(agents), [agents]);
+  const includesActive = dateBasis === 'active';
   const agentColumns = useMemo(
-    () => [
-      ...AGENT_COLUMNS.slice(0, 2),
-      ...stageNames.map(stageName => ({
-        key: `stage:${stageName}` as AgentSortKey,
-        label: stageName,
-        numeric: true,
-        title: `Tickets currently in the ${stageName} stage`,
-      })),
-      ...AGENT_COLUMNS.slice(2),
-    ],
-    [stageNames],
+    () =>
+      [
+        ...AGENT_COLUMNS.slice(0, 2),
+        ...stageNames.map(stageName => ({
+          key: `stage:${stageName}` as AgentSortKey,
+          label: stageName,
+          numeric: true,
+          title: `Tickets currently in the ${stageName} stage`,
+        })),
+        ...AGENT_COLUMNS.slice(2),
+      ].map(col =>
+        includesActive && col.key === 'assigned'
+          ? {
+              ...col,
+              title:
+                'Tickets created or active in this range that are currently assigned to this agent',
+            }
+          : col,
+      ),
+    [stageNames, includesActive],
   );
 
   const sorted = useMemo(() => {
@@ -521,6 +710,7 @@ const MetricsAgentTable = ({
             )}
             data-track-category='DeskMetrics'
             data-track-name='DownloadAgentCsv'
+            data-track-metadata={trackMetadata}
           >
             <Download size={12} />
             CSV
@@ -701,12 +891,15 @@ const MetricsTicketTable = ({
   onTicketClick,
   onAssigneeClick,
   canSee,
+  trackMetadata,
 }: {
   tickets: DeskMetricsTicketRow[];
   onDownload: () => void;
   onTicketClick: (ticket: DeskMetricsTicketRow) => void;
   onAssigneeClick: (assigneeId: string) => void;
   canSee: (key: string) => boolean;
+  /** JSON dimensions (desk count, range) for the export click. */
+  trackMetadata?: string;
 }): ReactElement => {
   const [page, setPage] = useState(0);
   const totalPages = Math.ceil(tickets.length / PAGE_SIZE);
@@ -732,6 +925,7 @@ const MetricsTicketTable = ({
             )}
             data-track-category='DeskMetrics'
             data-track-name='DownloadCsv'
+            data-track-metadata={trackMetadata}
           >
             <Download size={12} />
             CSV
@@ -778,7 +972,8 @@ const MetricsTicketTable = ({
             hide('rt') && '[&_td:nth-child(7)]:hidden [&_th:nth-child(7)]:hidden',
             hide('csat') && '[&_td:nth-child(8)]:hidden [&_th:nth-child(8)]:hidden',
             hide('tags') && '[&_td:nth-child(9)]:hidden [&_th:nth-child(9)]:hidden',
-            hide('createdAt') && '[&_td:nth-last-child(2)]:hidden [&_th:nth-last-child(2)]:hidden',
+            hide('createdAt') && '[&_td:nth-last-child(3)]:hidden [&_th:nth-last-child(3)]:hidden',
+            hide('resolvedAt') && '[&_td:nth-last-child(2)]:hidden [&_th:nth-last-child(2)]:hidden',
             hide('age') && '[&_td:nth-last-child(1)]:hidden [&_th:nth-last-child(1)]:hidden',
           )}
         >
@@ -822,6 +1017,9 @@ const MetricsTicketTable = ({
               ))}
               <th className='px-4 py-2 text-xs font-medium uppercase tracking-wide text-muted-foreground'>
                 Created At
+              </th>
+              <th className='px-4 py-2 text-xs font-medium uppercase tracking-wide text-muted-foreground'>
+                Resolved At
               </th>
               <th className='px-4 py-2 text-xs font-medium uppercase tracking-wide text-muted-foreground'>
                 Age
@@ -944,12 +1142,10 @@ const MetricsTicketTable = ({
                   </td>
                 ))}
                 <td className='whitespace-nowrap px-4 py-2 font-mono text-xs text-muted-foreground'>
-                  {new Date(row.createdAt).toLocaleString(undefined, {
-                    month: 'short',
-                    day: 'numeric',
-                    hour: '2-digit',
-                    minute: '2-digit',
-                  })}
+                  {formatTicketTimestamp(row.createdAt)}
+                </td>
+                <td className='whitespace-nowrap px-4 py-2 font-mono text-xs text-muted-foreground'>
+                  {row.resolvedAt !== null ? formatTicketTimestamp(row.resolvedAt) : '—'}
                 </td>
                 <td className='whitespace-nowrap px-4 py-2 font-mono text-xs text-muted-foreground'>
                   {ageInDays(row.createdAt)}d
@@ -963,15 +1159,7 @@ const MetricsTicketTable = ({
   );
 };
 
-const KpiCard = ({
-  label,
-  value,
-  sub,
-}: {
-  label: string;
-  value: string;
-  sub?: string;
-}): ReactElement => (
+const KpiCard = ({ label, value }: { label: string; value: string }): ReactElement => (
   <div className='flex flex-col gap-1 rounded-[12px] border border-desk-border bg-background p-4 dark:border-border'>
     <div className='text-[10px] font-medium uppercase tracking-[0.16em] text-muted-foreground'>
       {label}
@@ -979,7 +1167,191 @@ const KpiCard = ({
     <div className='font-mono text-2xl font-semibold leading-none tabular-nums text-foreground'>
       {value}
     </div>
-    {sub && <div className='text-xs text-muted-foreground'>{sub}</div>}
+  </div>
+);
+
+const SeriesLineChart = ({
+  rows,
+  series,
+  tickInterval,
+  fontSize,
+}: {
+  rows: Array<Record<string, number | string>>;
+  series: Array<{ name: string; color: string }>;
+  tickInterval: number;
+  fontSize: number;
+}): ReactElement => {
+  const peak = rows.reduce(
+    (max, row) =>
+      Object.entries(row).reduce(
+        (rowMax, [key, value]) =>
+          key !== 'bucket' && typeof value === 'number' && value > rowMax ? value : rowMax,
+        max,
+      ),
+    0,
+  );
+  const ticks = durationTicks(peak);
+  return (
+    <ResponsiveContainer width='100%' height='100%'>
+      <LineChart data={rows} margin={{ left: 4, right: 8 }}>
+        <CartesianGrid strokeDasharray='3 3' vertical={false} />
+        <XAxis dataKey='bucket' tick={{ fontSize }} interval={tickInterval} />
+        <YAxis
+          tick={{ fontSize }}
+          width={60}
+          allowDecimals={false}
+          ticks={ticks}
+          domain={[0, ticks[ticks.length - 1] ?? 0]}
+          tickFormatter={formatDurationTick}
+        />
+        <RechartsTooltip
+          formatter={(v: number, name: string): [string, string] => [formatDuration(v), name]}
+        />
+        {/* A lone series just repeats the card title, so only label multi-series charts. */}
+        {series.length > 1 && <Legend />}
+        {series.map(s => (
+          <Line
+            key={s.name}
+            type='monotone'
+            dataKey={s.name}
+            name={s.name}
+            stroke={s.color}
+            strokeWidth={2}
+            dot={{ r: 4, fill: s.color, strokeWidth: 0 }}
+            activeDot={{ r: 5 }}
+            connectNulls
+          />
+        ))}
+      </LineChart>
+    </ResponsiveContainer>
+  );
+};
+
+const FixedTrendCard = ({
+  title,
+  chart,
+  emptyLabel,
+  tickInterval,
+  onExpand,
+  trackMetadata,
+}: {
+  title: string;
+  chart: SeriesChart;
+  emptyLabel: string;
+  tickInterval: number;
+  onExpand: () => void;
+  trackMetadata?: string;
+}): ReactElement => (
+  <div className='flex flex-col rounded-[12px] border border-desk-border bg-background p-4 dark:border-border'>
+    <div className='mb-3 flex items-center justify-between gap-3'>
+      <div className='text-sm font-medium text-foreground'>{title}</div>
+      <button
+        type='button'
+        onClick={onExpand}
+        title='Expand'
+        data-track-category='DeskMetrics'
+        data-track-name='ExpandChart'
+        data-track-metadata={trackMetadata}
+        className='flex h-7 w-7 items-center justify-center rounded-[6px] text-muted-foreground hover:bg-accent hover:text-foreground'
+      >
+        <Maximize2 size={13} />
+      </button>
+    </div>
+    {chart.rows.length === 0 ? (
+      <div className='flex h-[220px] items-center justify-center text-xs text-muted-foreground'>
+        {emptyLabel}
+      </div>
+    ) : (
+      <div className='h-[220px]'>
+        <SeriesLineChart
+          rows={chart.rows}
+          series={chart.series}
+          tickInterval={tickInterval}
+          fontSize={11}
+        />
+      </div>
+    )}
+  </div>
+);
+
+interface AgentAverageRow {
+  id: string;
+  name: string;
+  seconds: number | null;
+  count: number;
+}
+
+/** Per-agent averages as a table, so every agent shows — no chart series cap. */
+const AgentAverageTable = ({
+  title,
+  rows,
+  countLabel,
+  countTitle,
+}: {
+  title: string;
+  rows: readonly AgentAverageRow[];
+  countLabel: string;
+  countTitle: string;
+}): ReactElement => (
+  <div className='flex flex-col rounded-[12px] border border-desk-border bg-background dark:border-border'>
+    <div className='flex items-center justify-between border-b border-desk-border px-4 py-3 dark:border-border'>
+      <span className='text-sm font-medium text-foreground'>{title}</span>
+      <span className='text-xs text-muted-foreground'>{rows.length}</span>
+    </div>
+    {rows.length === 0 ? (
+      <div className='px-4 py-8 text-center text-xs text-muted-foreground'>
+        No agent activity in range
+      </div>
+    ) : (
+      <div className='max-h-[320px] overflow-y-auto'>
+        <table className='w-full text-sm'>
+          <thead className='sticky top-0 z-10 bg-background'>
+            <tr className='border-b border-desk-border/60 text-left dark:border-border/60'>
+              <th className='px-4 py-2 text-xs font-medium uppercase tracking-wide text-muted-foreground'>
+                Agent
+              </th>
+              <th
+                className='px-4 py-2 text-right text-xs font-medium uppercase tracking-wide text-muted-foreground'
+                title={countTitle}
+              >
+                {countLabel}
+              </th>
+              <th className='px-4 py-2 text-right text-xs font-medium uppercase tracking-wide text-muted-foreground'>
+                Average
+              </th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((row, i) => (
+              <tr
+                key={row.id}
+                className={cn(
+                  'border-b border-desk-border/40 last:border-b-0 dark:border-border/40',
+                  i % 2 !== 0 && 'bg-muted/20',
+                )}
+              >
+                <td className='px-4 py-2 text-foreground'>
+                  <div className='flex items-center gap-2'>
+                    <span className='flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-muted text-[10px] font-semibold uppercase text-muted-foreground'>
+                      {row.name.slice(0, 2)}
+                    </span>
+                    <span className='max-w-[180px] truncate' title={row.name}>
+                      {row.name}
+                    </span>
+                  </div>
+                </td>
+                <td className='px-4 py-2 text-right font-mono text-xs tabular-nums text-muted-foreground'>
+                  {row.count}
+                </td>
+                <td className='px-4 py-2 text-right font-mono text-xs tabular-nums text-foreground'>
+                  {formatDuration(row.seconds)}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    )}
   </div>
 );
 
@@ -992,6 +1364,8 @@ export const DeskMetricsDashboard: React.FC<DeskMetricsDashboardProps> = ({
   customFieldDefinitions = [],
   availableStages = [],
   onTicketClick,
+  trackSource = 'toolbar',
+  embedded,
 }) => {
   const { user } = useAuth();
   const isGuest = user?.role === WorkspaceRole.GUEST;
@@ -1007,7 +1381,9 @@ export const DeskMetricsDashboard: React.FC<DeskMetricsDashboardProps> = ({
     selectedTagValues,
     selectedAiCategories,
     selectedCustomFieldValues,
+    dateBasis: storedDateBasis,
     setDateRange: persistDateRange,
+    setDateBasis,
     setSelectedAssigneeIds,
     setSelectedStageNames,
     setSelectedPriorities,
@@ -1023,6 +1399,8 @@ export const DeskMetricsDashboard: React.FC<DeskMetricsDashboardProps> = ({
     activeTab,
     setActiveTab,
   } = usePersistedDeskMetricsFilters(user?.id, channelId);
+  // Guests stay on created: the owner's guest visibility settings were chosen for that view.
+  const dateBasis: DeskMetricsDateBasis = isGuest ? 'created' : storedDateBasis;
 
   const [deskPickerOpen, setDeskPickerOpen] = useState(false);
   const [deskSearch, setDeskSearch] = useState('');
@@ -1183,10 +1561,17 @@ export const DeskMetricsDashboard: React.FC<DeskMetricsDashboardProps> = ({
     selectedUserGroupIds,
     selectedTagValues,
     isMultiDesk ? [] : selectedAiCategories,
+    dateBasis,
   );
 
   // Guests see what the desk owner didn't turn off (Desk Settings → Metrics); others see everything.
-  const canSee = (key: string): boolean => !isGuest || data?.guestVisibility?.[key] !== false;
+  const canSee = (key: string): boolean => {
+    if (!isGuest) return true;
+    const visibility = data?.guestVisibility;
+    if (visibility?.[key] !== undefined) return visibility[key] !== false;
+    const inherited = inheritedVisibilityKey(key);
+    return inherited ? visibility?.[inherited] !== false : true;
+  };
 
   useEffect(() => {
     if (selectedTagCategory === null) {
@@ -1248,6 +1633,7 @@ export const DeskMetricsDashboard: React.FC<DeskMetricsDashboardProps> = ({
   }, [channelId, channelName, availableDesks]);
 
   // Stage and custom fields differ per board; desk needs several desks; tag:* follows chart:tags.
+  // resolutionTrend lives outside this dropdown, as its own fixed card below the ticket table.
   const chartViewOptions: ChartView[] = [
     ...(['priority', 'trend', 'assignee', 'tags', 'csat'] as const),
     ...(isMultiDesk ? (['status', 'desk'] as const) : (['stage', 'status'] as const)),
@@ -1257,9 +1643,85 @@ export const DeskMetricsDashboard: React.FC<DeskMetricsDashboardProps> = ({
   const chartView = chartViewOptions.includes(persistedChartView)
     ? persistedChartView
     : (chartViewOptions[0] ?? 'priority');
+
+  // DESK_METRICS_VIEWED: the dashboard has 42 tracked clicks and no impression,
+  // so nothing said how often it is opened or over what range. One event per
+  // desk-set + range once the aggregate query has data; filter changes inside
+  // the same range are their own clicks and do not refire this.
+  const rangeDays = Math.max(1, Math.round((rangeEndMs - rangeStartMs) / DAY_MS));
+  const activeFilterKeys = useMemo(
+    () =>
+      [
+        selectedAssigneeIds.length > 0 && 'assignee',
+        selectedStageNames.length > 0 && 'stage',
+        selectedPriorities.length > 0 && 'priority',
+        selectedUserGroupIds.length > 0 && 'userGroup',
+        selectedTagValues.length > 0 && 'tags',
+        selectedAiCategories.length > 0 && 'aiCategory',
+        Object.keys(selectedCustomFieldValues).length > 0 && 'customField',
+      ].filter((k): k is string => typeof k === 'string'),
+    [
+      selectedAssigneeIds,
+      selectedStageNames,
+      selectedPriorities,
+      selectedUserGroupIds,
+      selectedTagValues,
+      selectedAiCategories,
+      selectedCustomFieldValues,
+    ],
+  );
+  const metricsViewedKeyRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!open || !data) return;
+    const key = `${[...selectedDeskIds].sort().join(',')}:${timeRangeParam}`;
+    if (metricsViewedKeyRef.current === key) return;
+    metricsViewedKeyRef.current = key;
+    globalClickTracker.trackManualEvent('DeskMetrics', 'DESK_METRICS_VIEWED', undefined, {
+      channelId,
+      deskCount: selectedDeskIds.length,
+      rangeDays,
+      rangePreset: matchPreset(dateRange) ?? 'custom',
+      dateBasis,
+      activeFilterKeys,
+      chartView,
+      isGuest,
+      source: trackSource,
+    });
+  }, [
+    open,
+    data,
+    selectedDeskIds,
+    timeRangeParam,
+    channelId,
+    rangeDays,
+    dateRange,
+    dateBasis,
+    activeFilterKeys,
+    chartView,
+    isGuest,
+    trackSource,
+  ]);
+  useEffect(() => {
+    if (!open) metricsViewedKeyRef.current = null;
+  }, [open]);
+  // Dimensions every filter / chart / export click in this dashboard carries.
+  const metricsClickMetadata = useMemo(
+    () =>
+      JSON.stringify({
+        channelId,
+        deskCount: selectedDeskIds.length,
+        rangeDays,
+        dateBasis,
+        chart: chartView,
+      }),
+    [channelId, selectedDeskIds.length, rangeDays, dateBasis, chartView],
+  );
   const chartViewLabel = (view: ChartView): string =>
     (CHART_VIEW_LABELS as Record<string, string>)[view] ?? view.slice(view.indexOf(':') + 1);
   const isBreakdownView = !['priority', 'trend', 'assignee', 'tags'].includes(chartView);
+  // The dropdown card expands as setExpandedChart(chartView); the fixed card passes its own id.
+  // Without this the overlay would render the dropdown's breakdown on top of the fixed chart.
+  const expandedIsDropdownChart = expandedChart !== null && expandedChart === chartView;
 
   useEffect(() => {
     if (open) void refetch();
@@ -1329,8 +1791,32 @@ export const DeskMetricsDashboard: React.FC<DeskMetricsDashboardProps> = ({
   }, [data?.tagBreakdown, selectedTagCategory, selectedTagValues]);
 
   const trendData = useMemo(
-    () => (data?.trend ?? []).map(d => ({ ...d, label: formatTrendLabel(d.date, isHourly) })),
+    () =>
+      (data?.trend ?? []).map(d => ({
+        ...d,
+        label: formatTrendLabel(d.date, isHourly ? 'hour' : 'day'),
+      })),
     [data?.trend, isHourly],
+  );
+
+  // 6h only while the range is short enough to stay readable; beyond that, plain daily.
+  const isSixHourly = !isHourly && rangeEndMs - rangeStartMs <= SIX_HOURLY_MAX_RANGE_MS;
+  const cardGranularity: TrendGranularity = isHourly ? 'hour' : isSixHourly ? 'sixHour' : 'day';
+  const cardGranularityLabel = isHourly ? '(hourly)' : isSixHourly ? '(every 6h)' : '(daily)';
+  const cardTrendSkeleton = useMemo(
+    () => (isSixHourly ? sixHourlySkeleton(rangeStartMs, rangeEndMs) : (data?.trend ?? [])),
+    [isSixHourly, data?.trend, rangeStartMs, rangeEndMs],
+  );
+  // sixHour caps at 13 labels, so skip thinning — it drops ticks by index and would eat
+  // the day-boundary tick that carries the date, leaving orphaned "6am"/"12pm".
+  const cardTickInterval = useMemo(
+    () => (isSixHourly ? 0 : tickIntervalFor(cardTrendSkeleton.length)),
+    [isSixHourly, cardTrendSkeleton.length],
+  );
+
+  const resolutionTrendChart = useMemo(
+    () => buildResolutionTrend(data?.tickets ?? [], cardTrendSkeleton, cardGranularity),
+    [data?.tickets, cardTrendSkeleton, cardGranularity],
   );
 
   const assigneeData = useMemo(() => {
@@ -1393,14 +1879,8 @@ export const DeskMetricsDashboard: React.FC<DeskMetricsDashboardProps> = ({
     [],
   );
 
-  const tickInterval = useMemo(() => {
-    const pointCount = trendData.length;
-    if (pointCount <= 8) return 0;
-    if (pointCount <= 31) return 4;
-    return Math.floor(pointCount / 6);
-  }, [trendData.length]);
+  const tickInterval = useMemo(() => tickIntervalFor(trendData.length), [trendData.length]);
 
-  const csatTotal = (data?.csat.good ?? 0) + (data?.csat.bad ?? 0);
   const isEmpty = !!data && data.tickets.length === 0 && data.counts.stageCounts.length === 0;
 
   const handleDownload = useCallback(() => {
@@ -1421,6 +1901,32 @@ export const DeskMetricsDashboard: React.FC<DeskMetricsDashboardProps> = ({
     }),
     [agents],
   );
+
+  // Slowest first; agents with no measurable average sort last rather than reading as fastest.
+  const agentAverageRows = useMemo(() => {
+    const toRows = (
+      secondsOf: (row: DeskMetricsAgentRow) => number | null,
+      countOf: (row: DeskMetricsAgentRow) => number,
+    ): AgentAverageRow[] =>
+      agents
+        .map(a => ({
+          id: a.assigneeId ?? '__unassigned__',
+          name: agentDisplayName(a),
+          seconds: secondsOf(a),
+          count: countOf(a),
+        }))
+        .sort((x, y) => (y.seconds ?? -1) - (x.seconds ?? -1) || x.name.localeCompare(y.name));
+    return {
+      rt: toRows(
+        a => a.avgRtSeconds,
+        a => a.resolved,
+      ),
+      frt: toRows(
+        a => a.avgFrtSeconds,
+        a => a.responded,
+      ),
+    };
+  }, [agents]);
 
   const AGENT_CHART_CAP = 12;
   const agentChartData = useMemo(
@@ -1461,7 +1967,8 @@ export const DeskMetricsDashboard: React.FC<DeskMetricsDashboardProps> = ({
   );
 
   return (
-    <Dialog
+    <DeskInsightsShell
+      embedded={embedded}
       open={open}
       onOpenChange={handleOpenChange}
       title='Desk Metrics'
@@ -1744,6 +2251,7 @@ export const DeskMetricsDashboard: React.FC<DeskMetricsDashboardProps> = ({
                         )}
                         data-track-category='DeskMetrics'
                         data-track-name='OpenCustomFieldFilters'
+                        data-track-metadata={metricsClickMetadata}
                       >
                         <ListFilter size={13} className='shrink-0' />
                         <span className='font-medium'>More Filters</span>
@@ -1788,6 +2296,7 @@ export const DeskMetricsDashboard: React.FC<DeskMetricsDashboardProps> = ({
                                 )}
                                 data-track-category='DeskMetrics'
                                 data-track-name='OpenPriorityFilterSubmenu'
+                                data-track-metadata={metricsClickMetadata}
                               >
                                 <div className='flex min-w-0 items-center gap-3'>
                                   <BarChart4 size={16} className='shrink-0' />
@@ -1836,6 +2345,7 @@ export const DeskMetricsDashboard: React.FC<DeskMetricsDashboardProps> = ({
                                 )}
                                 data-track-category='DeskMetrics'
                                 data-track-name='OpenUserGroupFilterSubmenu'
+                                data-track-metadata={metricsClickMetadata}
                               >
                                 <div className='flex min-w-0 items-center gap-3'>
                                   <Users size={16} className='shrink-0' />
@@ -1885,6 +2395,7 @@ export const DeskMetricsDashboard: React.FC<DeskMetricsDashboardProps> = ({
                                 )}
                                 data-track-category='DeskMetrics'
                                 data-track-name='OpenTagCategorySubmenu'
+                                data-track-metadata={metricsClickMetadata}
                               >
                                 <div className='flex min-w-0 items-center gap-3'>
                                   <Tag size={16} className='shrink-0' />
@@ -1977,6 +2488,7 @@ export const DeskMetricsDashboard: React.FC<DeskMetricsDashboardProps> = ({
                                   )}
                                   data-track-category='DeskMetrics'
                                   data-track-name='OpenTagsSubmenu'
+                                  data-track-metadata={metricsClickMetadata}
                                 >
                                   <div className='flex min-w-0 items-center gap-3'>
                                     <Tag size={16} className='shrink-0' />
@@ -2030,6 +2542,7 @@ export const DeskMetricsDashboard: React.FC<DeskMetricsDashboardProps> = ({
                                   )}
                                   data-track-category='DeskMetrics'
                                   data-track-name='OpenStageFilterSubmenu'
+                                  data-track-metadata={metricsClickMetadata}
                                 >
                                   <div className='flex min-w-0 items-center gap-3'>
                                     <Circle size={16} className='shrink-0' />
@@ -2080,6 +2593,7 @@ export const DeskMetricsDashboard: React.FC<DeskMetricsDashboardProps> = ({
                                   )}
                                   data-track-category='DeskMetrics'
                                   data-track-name='OpenAICategoryFilterSubmenu'
+                                  data-track-metadata={metricsClickMetadata}
                                 >
                                   <div className='flex min-w-0 items-center gap-3'>
                                     <Sparkles size={16} className='shrink-0' />
@@ -2146,7 +2660,12 @@ export const DeskMetricsDashboard: React.FC<DeskMetricsDashboardProps> = ({
                                       )}
                                       data-track-category='DeskMetrics'
                                       data-track-name='OpenCustomFieldFilterSubmenu'
-                                      data-track-metadata={JSON.stringify({ fieldName: key })}
+                                      data-track-metadata={JSON.stringify({
+                                        channelId,
+                                        deskCount: selectedDeskIds.length,
+                                        rangeDays,
+                                        fieldName: key,
+                                      })}
                                     >
                                       <div className='flex min-w-0 items-center gap-3'>
                                         <FieldIcon className='h-4 w-4 shrink-0' />
@@ -2240,6 +2759,20 @@ export const DeskMetricsDashboard: React.FC<DeskMetricsDashboardProps> = ({
                 >
                   <RefreshCw size={16} className={cn(isFetching && 'animate-spin')} />
                 </button>
+
+                {!isGuest && (
+                  <div title='Also include tickets created before this range whose stage or status changed in it (e.g. started, paused, resolved, closed)'>
+                    <Checkbox
+                      checked={dateBasis === 'active'}
+                      onChange={checked => setDateBasis(checked ? 'active' : 'created')}
+                      size='sm'
+                      label='Include previously created tickets'
+                      labelClassName='text-sm text-foreground'
+                      data-track-category='DeskMetrics'
+                      data-track-name='ToggleIncludeActiveTickets'
+                    />
+                  </div>
+                )}
               </div>
             </div>
           </div>
@@ -2309,7 +2842,7 @@ export const DeskMetricsDashboard: React.FC<DeskMetricsDashboardProps> = ({
                     <tr className='border-b border-desk-border bg-muted/30 text-left dark:border-border'>
                       <th className='px-4 py-2.5 font-medium text-muted-foreground'>Desk</th>
                       <th className='px-4 py-2.5 text-right font-medium text-muted-foreground'>
-                        Opened
+                        {dateBasis === 'active' ? 'Tickets' : 'Opened'}
                       </th>
                       <th className='px-4 py-2.5 text-right font-medium text-muted-foreground'>
                         Avg first response
@@ -2395,38 +2928,34 @@ export const DeskMetricsDashboard: React.FC<DeskMetricsDashboardProps> = ({
                       No agent activity in this time range
                     </p>
                     <p className='max-w-[420px] text-xs text-muted-foreground'>
-                      Agent performance is derived from tickets created in this range and replies
-                      sent within it.
+                      Agent performance is derived from tickets{' '}
+                      {dateBasis === 'active' ? 'created or active' : 'created'} in this range and
+                      replies sent within it.
                     </p>
                   </div>
                 ) : (
                   <>
                     <div className='grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-5'>
-                      <KpiCard
-                        label='Agents'
-                        value={String(agentTotals.count)}
-                        sub='with activity'
-                      />
-                      <KpiCard
-                        label='Total Tickets'
-                        value={String(data.counts.openedInRange)}
-                        sub='created in range'
-                      />
-                      <KpiCard
-                        label='Tickets Resolved'
-                        value={String(agentTotals.resolved)}
-                        {...(agentTotals.assigned > 0
-                          ? {
-                              sub: `${Math.round((agentTotals.resolved / agentTotals.assigned) * 100)}% of assigned`,
-                            }
-                          : {})}
-                      />
-                      <KpiCard
-                        label='Tickets Reopened'
-                        value={String(agentTotals.reopened)}
-                        sub='distinct tickets'
-                      />
+                      <KpiCard label='Agents' value={String(agentTotals.count)} />
+                      <KpiCard label='Total Tickets' value={String(data.counts.openedInRange)} />
+                      <KpiCard label='Tickets Resolved' value={String(agentTotals.resolved)} />
+                      <KpiCard label='Tickets Reopened' value={String(agentTotals.reopened)} />
                       <KpiCard label='Replies Sent' value={String(agentTotals.replies)} />
+                    </div>
+
+                    <div className='grid grid-cols-1 gap-3 lg:grid-cols-2'>
+                      <AgentAverageTable
+                        title='Avg full resolution time by agent'
+                        rows={agentAverageRows.rt}
+                        countLabel='Resolved'
+                        countTitle='Tickets resolved by this agent in range'
+                      />
+                      <AgentAverageTable
+                        title='Avg first response time by agent'
+                        rows={agentAverageRows.frt}
+                        countLabel='Responded'
+                        countTitle='Tickets this agent first responded to in range'
+                      />
                     </div>
 
                     <div className='flex flex-col rounded-[12px] border border-desk-border bg-background p-4 dark:border-border'>
@@ -2479,9 +3008,11 @@ export const DeskMetricsDashboard: React.FC<DeskMetricsDashboardProps> = ({
 
                     <MetricsAgentTable
                       agents={agents}
+                      dateBasis={dateBasis}
                       onDownload={handleDownloadAgents}
                       onAgentClick={handleAgentClick}
                       canDownload={canSee('csvDownload')}
+                      trackMetadata={metricsClickMetadata}
                     />
                   </>
                 )}
@@ -2491,36 +3022,22 @@ export const DeskMetricsDashboard: React.FC<DeskMetricsDashboardProps> = ({
                 {/* KPI row — FRT / RT / CSAT / Email Replies */}
                 <div className='grid grid-cols-2 gap-3 md:grid-cols-4'>
                   {isGuest && canSee('kpi:ticketsCreated') && (
-                    <KpiCard
-                      label='Tickets Created'
-                      value={String(data.counts.openedInRange)}
-                      sub='created in range'
-                    />
+                    <KpiCard label='Tickets Created' value={String(data.counts.openedInRange)} />
                   )}
                   {canSee('kpi:avgFirstResponse') && (
                     <KpiCard
                       label='Avg First Response'
                       value={formatDuration(data.frt.avgSeconds)}
-                      sub={`${data.frt.respondedTickets} responded`}
                     />
                   )}
                   {canSee('kpi:avgResolution') && (
-                    <KpiCard
-                      label='Avg Resolution'
-                      value={formatDuration(data.rt.avgSeconds)}
-                      sub={`${data.rt.resolvedTickets} resolved`}
-                    />
+                    <KpiCard label='Avg Resolution' value={formatDuration(data.rt.avgSeconds)} />
                   )}
                   {canSee('kpi:csat') && (
                     <KpiCard
                       label='CSAT'
                       value={
                         data.csat.avgScore !== null ? `${data.csat.avgScore.toFixed(1)}/5` : '—'
-                      }
-                      sub={
-                        csatTotal > 0
-                          ? `${data.csat.good} good · ${data.csat.bad} bad`
-                          : 'No responses'
                       }
                     />
                   )}
@@ -2610,6 +3127,7 @@ export const DeskMetricsDashboard: React.FC<DeskMetricsDashboardProps> = ({
                             title='Expand'
                             data-track-category='DeskMetrics'
                             data-track-name='ExpandChart'
+                            data-track-metadata={metricsClickMetadata}
                             className='flex h-7 w-7 items-center justify-center rounded-[6px] text-muted-foreground hover:bg-accent hover:text-foreground'
                           >
                             <Maximize2 size={13} />
@@ -2776,6 +3294,21 @@ export const DeskMetricsDashboard: React.FC<DeskMetricsDashboardProps> = ({
                         })()}
                     </div>
 
+                    {/* Fixed trend card: always shown, not behind the picker above */}
+                    {data.tickets.length > 0 && canSee('chart:resolutionTrend') && (
+                      <div className='flex flex-col gap-3'>
+                        <span className='text-sm font-medium text-foreground'>Trends</span>
+                        <FixedTrendCard
+                          title={`Avg full resolution time ${cardGranularityLabel}`}
+                          chart={resolutionTrendChart}
+                          emptyLabel='No resolved tickets in range'
+                          tickInterval={cardTickInterval}
+                          onExpand={() => setExpandedChart('resolutionTrend')}
+                          trackMetadata={metricsClickMetadata}
+                        />
+                      </div>
+                    )}
+
                     {/* Ticket table */}
                     {data.tickets.length > 0 && canSee('ticketTable') && (
                       <MetricsTicketTable
@@ -2784,6 +3317,7 @@ export const DeskMetricsDashboard: React.FC<DeskMetricsDashboardProps> = ({
                         onTicketClick={onTicketClick}
                         onAssigneeClick={handleAssigneeClick}
                         canSee={canSee}
+                        trackMetadata={metricsClickMetadata}
                       />
                     )}
                   </>
@@ -2816,12 +3350,16 @@ export const DeskMetricsDashboard: React.FC<DeskMetricsDashboardProps> = ({
                 {expandedChart === 'priority' && 'Tickets by priority'}
                 {expandedChart === 'trend' &&
                   `Tickets created vs resolved ${isHourly ? '(hourly)' : '(daily)'}`}
+                {expandedChart === 'resolutionTrend' &&
+                  `Avg full resolution time ${cardGranularityLabel}`}
                 {expandedChart === 'assignee' && 'Tickets by assignee'}
                 {expandedChart === 'tags' &&
                   (selectedTagCategory
                     ? `Tags in "${selectedTagCategory}"`
                     : 'Tickets by tag category')}
-                {isBreakdownView && `Tickets by ${chartViewLabel(chartView)}`}
+                {expandedIsDropdownChart &&
+                  isBreakdownView &&
+                  `Tickets by ${chartViewLabel(chartView)}`}
               </h2>
               <button
                 type='button'
@@ -2834,7 +3372,8 @@ export const DeskMetricsDashboard: React.FC<DeskMetricsDashboardProps> = ({
               </button>
             </div>
             <div className='min-h-0 flex-1'>
-              {(expandedChart === 'priority' || isBreakdownView) &&
+              {expandedIsDropdownChart &&
+                (chartView === 'priority' || isBreakdownView) &&
                 (pieData.length === 0 ? (
                   <div className='flex h-full items-center justify-center text-sm text-muted-foreground'>
                     No tickets in range
@@ -2876,6 +3415,19 @@ export const DeskMetricsDashboard: React.FC<DeskMetricsDashboardProps> = ({
                       <Bar dataKey='closed' name='Resolved' fill='#10b981' radius={[4, 4, 0, 0]} />
                     </BarChart>
                   </ResponsiveContainer>
+                ))}
+              {expandedChart === 'resolutionTrend' &&
+                (resolutionTrendChart.rows.length === 0 ? (
+                  <div className='flex h-full items-center justify-center text-sm text-muted-foreground'>
+                    No resolved tickets in range
+                  </div>
+                ) : (
+                  <SeriesLineChart
+                    rows={resolutionTrendChart.rows}
+                    series={resolutionTrendChart.series}
+                    tickInterval={cardTickInterval}
+                    fontSize={12}
+                  />
                 ))}
               {expandedChart === 'assignee' &&
                 (assigneeData.length === 0 ? (
@@ -2965,6 +3517,6 @@ export const DeskMetricsDashboard: React.FC<DeskMetricsDashboardProps> = ({
           </div>
         </div>
       )}
-    </Dialog>
+    </DeskInsightsShell>
   );
 };

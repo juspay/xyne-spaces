@@ -1,0 +1,17 @@
+apiVersion: v2
+name: xyne-vespa
+description: Vespa node - one install per role (configserver, content, feed, search)
+type: application
+version: 0.1.0
+appVersion: "0.0.0"
+keywords:
+  - xyne
+  - vespa
+  - search
+home: https://github.com/juspay/xyne-spaces
+sources:
+  - https://github.com/juspay/xyne-spaces/tree/main/vespa-core
+dependencies:
+  - name: xyne-common
+    version: 0.1.0
+    repository: file://../xyne-common

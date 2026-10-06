@@ -951,7 +951,10 @@ export default class BrowserSteps {
     const user = testContext.storedUsers.get(userAlias);
     assert.ok(user, `User ${userAlias} not found in stored users`);
 
-    const currentPath = new URL(testContext.activePage.url()).pathname;
+    // Include the query string: e.g. a canvas's id lives in `?canvasId=...`, so
+    // dropping it would break reload/persistence checks. `search` is '' for plain paths.
+    const url = new URL(testContext.activePage.url());
+    const currentPath = `${url.pathname}${url.search}`;
     // Store as a top-level field on the user object
     // biome-ignore lint/suspicious/noExplicitAny: dynamic field storage
     (user as any)[fieldName] = currentPath;

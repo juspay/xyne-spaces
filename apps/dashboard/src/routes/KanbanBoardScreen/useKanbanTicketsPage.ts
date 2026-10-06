@@ -22,13 +22,15 @@ export type KanbanTicketsPageRow = Ticket & {
   formEntityValues?: Array<FormEntityValues & { formField?: unknown }>;
 };
 
-export type KanbanViewMode = 'project' | 'board' | 'my-tickets' | 'user-tickets' | 'group-tickets';
+export type KanbanViewMode = 'project' | 'board' | 'my-tickets';
 
 export type KanbanPageGroupBy =
   | 'none'
   | 'assignee'
+  | 'createdBy'
   | 'status'
   | 'priority'
+  | 'merchantId'
   | {
       type: 'formField';
       fieldId: string;
@@ -39,11 +41,13 @@ export type KanbanPageGroupBy =
 export type KanbanTicketsPageBaseArgs = FlowStepVisibilityOptions & {
   viewMode: KanbanViewMode;
   channelId?: string;
+  /**
+   * Only the tickets this SDLC track holds, from every board (needs `channelId`, the
+   * track's hub). Pages come from the track queries rather than the board ones.
+   */
+  trackId?: string;
   projectId?: string;
   boardId?: string;
-  userId?: string;
-  groupId?: string;
-  searchTerm?: string;
   groupBy?: KanbanPageGroupBy;
   groupKey?: string;
   filters?: TicketFilters;
@@ -67,6 +71,7 @@ type KanbanTicketsPageQueryArgs = Omit<
   'start'
 > & {
   start: KanbanCursor | null;
+  trackId?: string;
   dynamicFieldDateRanges?: Record<string, { start?: number; end?: number }>;
 };
 
@@ -79,6 +84,17 @@ type UseKanbanTicketsPageOptions = KanbanTicketsPageBaseArgs & {
   stageName: string;
   enabled?: boolean;
   pageSize?: number;
+  /**
+   * This column's server-side total from the counts API, which applies the same filters
+   * but NOT the sliding `createdAfter` window. Used only to tell an empty page caused by
+   * a too-narrow window from a column that is genuinely empty — never to render.
+   *
+   * `undefined` means the count is unusable: still loading, or describing a different set
+   * than the page (a Vespa-narrowed search, or a dynamic-field filter the counts API does
+   * not model). The ladder falls back to probing in that case, so correctness never
+   * depends on the count being present or accurate.
+   */
+  expectedCount?: number;
 };
 
 type UseKanbanTicketsPageResult = {
@@ -185,17 +201,22 @@ const canRepresentGroupInVespa = (
   if (groupBy === 'priority') {
     return Boolean(groupKey) && groupKey !== 'No Priority';
   }
+  if (groupBy === 'createdBy') {
+    return Boolean(groupKey) && groupKey !== 'Unknown';
+  }
   if (groupBy === 'status') {
     return Boolean(groupKey);
   }
   if (typeof groupBy !== 'object' || groupBy.type !== 'formField') return false;
-  if (!groupKey) return false;
-  // All form field groups can be represented (MISSING_FORM_FIELD_GROUP_KEYS handled via
-  // __VESPA_MISSING__ token). DATE groupBy is not supported in the UI, so no special case.
-  return true;
+  // The __VESPA_MISSING__ / value token does select the group's rows, but which group a
+  // ticket is drawn in is decided client-side from its form values (groupTicketsByFormField),
+  // and a Vespa payload row carries none — those rows land in no group at all and the column
+  // renders empty under a correct badge. The Zero page loads the values as related rows, so
+  // form field grouping goes through it and the token only narrows which ids it reads.
+  return false;
 };
 
-const getDynamicFieldScalarFilters = (
+export const getDynamicFieldScalarFilters = (
   filters: TicketFilters | undefined,
   zeroOnlyDynamicFieldIds: string[] | undefined,
 ): DynamicFieldScalarFilter[] | undefined => {
@@ -217,7 +238,7 @@ const getDynamicFieldScalarFilters = (
   return scalarFilters.length > 0 ? scalarFilters : undefined;
 };
 
-const getFormFieldValue = (
+export const getFormFieldValue = (
   groupBy: KanbanPageGroupBy | undefined,
   groupKey: string | undefined,
 ): string | number | boolean | undefined => {
@@ -227,14 +248,20 @@ const getFormFieldValue = (
   if (MISSING_FORM_FIELD_GROUP_KEYS.has(groupKey)) return undefined;
   if (
     groupBy.fieldType === FormFieldType.MULTI_SELECT ||
-    groupBy.fieldType === FormFieldType.USER
+    groupBy.fieldType === FormFieldType.USER ||
+    // A STRING group key is folded to lower case so that it names one group per value
+    // regardless of spelling (getFormFieldGroupKeys). Zero's only comparison against the
+    // jsonb value is case-exact, so matching on it would drop every ticket stored with a
+    // different spelling. The Vespa token already restricts the page to the group — it is an
+    // uncased attribute match, which is what the fold was made to agree with.
+    groupBy.fieldType === FormFieldType.STRING
   ) {
     return undefined;
   }
   return groupKey;
 };
 
-const toQueryFilters = (
+export const toQueryFilters = (
   filters: TicketFilters | undefined,
 ): KanbanTicketsPageQueryArgs['filters'] => {
   if (!filters) return undefined;
@@ -255,8 +282,29 @@ const toQueryFilters = (
     created: filters.created,
     stages: filters.stages,
     ticketTypes: filters.ticketTypes,
+    merchantIds: filters.merchantIds,
     sourceChannels: filters.sourceChannels,
   };
+};
+
+type KanbanPageRequest = ReturnType<typeof queries.kanbanTicketsPageV3>;
+
+/**
+ * The page query for these args: a board's, or a track's when `trackId` and its hub
+ * `channelId` are set. Both return the same rows in the same order — only their
+ * arguments differ — so the track request is typed as the board one for the hooks
+ * and `zero.run` that take it.
+ */
+export const kanbanPageQuery = (args: KanbanTicketsPageQueryArgs): KanbanPageRequest => {
+  const { trackId, channelId } = args;
+  if (trackId && channelId) {
+    return queries.trackKanbanTicketsPage({
+      ...args,
+      channelId,
+      trackId,
+    } as Parameters<typeof queries.trackKanbanTicketsPage>[0]) as unknown as KanbanPageRequest;
+  }
+  return queries.kanbanTicketsPageV3(args as Parameters<typeof queries.kanbanTicketsPageV3>[0]);
 };
 
 export const buildKanbanTicketsPageArgs = (
@@ -268,8 +316,6 @@ export const buildKanbanTicketsPageArgs = (
       viewMode: options.viewMode,
       projectId: options.projectId,
       boardId: options.boardId,
-      userId: options.userId,
-      groupId: options.groupId,
       excludeFlowSteps: options.excludeFlowSteps,
       columnType: options.columnType,
       stageName: options.stageName,
@@ -291,12 +337,10 @@ export const buildKanbanTicketsPageArgs = (
       showOverdueOnly: options.showOverdueOnly,
       overdueReferenceTime: options.overdueReferenceTime ?? undefined,
       createdAfter: options.createdAfter ?? undefined,
+      ...(options.trackId ? { trackId: options.trackId } : {}),
     },
     options.channelId,
   );
-
-const normalizeIdentity = (value: string | null | undefined): string =>
-  (value ?? '').replace(/^user:/, '');
 
 /** The filter values this search actually pushed down into the Vespa query. */
 interface VespaPushdownFilters {
@@ -326,6 +370,8 @@ const hasFiltersVespaCannotApply = (
   // (ticketTypes is absent on purpose: it is not indexed in Vespa either, but the Zero
   // overlay in overlaidDirectVespaPage applies it on top of the search results instead.)
   if (filters?.sourceChannels?.length) return true;
+  // merchantId is not indexed in Vespa (search rows carry merchantId: null).
+  if (filters?.merchantIds?.length) return true;
   // Sent only in representable cases (single board, non-inverted assignee, ...); when the
   // pushdown value is undefined the filter is active but absent from the query.
   if (filters?.boards?.length && !pushdown.boardId) return true;
@@ -356,13 +402,11 @@ export const useKanbanTicketsPage = (
   // Mirrors ticketsState so the page merge can be computed in the effect body rather
   // than inside a setState updater (updaters must stay pure — StrictMode calls them twice).
   const ticketsStateRef = useRef<TicketsState>({ queryKey: '', tickets: [] });
+  const expectedCountRef = useRef<number | undefined>(undefined);
   const [nextCursor, setNextCursor] = useState<KanbanCursor | null>(null);
   const [hasMore, setHasMore] = useState(true);
   const isLoadingMoreRef = useRef(false);
   const overdueReferenceTimeRef = useRef<number | null>(null);
-  // Already the final query: any quotes were typed into the search box, and the backend
-  // reads exactness off them (`isExactMatch` in the Vespa searchService).
-  const trimmedSearchTerm = options.searchTerm?.trim() ?? '';
   const pageVespaTokensSet = new Set(options.dynamicFieldVespaTokens ?? []);
   const pageVespaDateRangeCount = Object.keys(options.dynamicFieldDateRanges ?? {}).length;
   if (typeof options.groupBy === 'object' && options.groupBy?.type === 'formField') {
@@ -378,9 +422,7 @@ export const useKanbanTicketsPage = (
     }
   }
   const pageVespaTokens = Array.from(pageVespaTokensSet).sort();
-  const hasSearchTerm = trimmedSearchTerm.length > 0;
-  const requiresVespaTicketIds =
-    pageVespaTokens.length > 0 || pageVespaDateRangeCount > 0 || hasSearchTerm;
+  const requiresVespaTicketIds = pageVespaTokens.length > 0 || pageVespaDateRangeCount > 0;
   const effectiveVespaBoardId =
     options.boardId ??
     (options.filters?.boards?.length === 1 ? options.filters.boards[0] : undefined);
@@ -424,7 +466,12 @@ export const useKanbanTicketsPage = (
 
   // Compute group-specific filter for Vespa based on groupBy/groupKey
   // This ensures search results are filtered to only show in the correct group
-  const vespaGroupFilter: { priority?: string; assignee?: string; status?: string } = (() => {
+  const vespaGroupFilter: {
+    priority?: string;
+    assignee?: string;
+    createdBy?: string;
+    status?: string;
+  } = (() => {
     if (!options.groupBy || options.groupBy === 'none' || !options.groupKey) {
       return {};
     }
@@ -440,6 +487,10 @@ export const useKanbanTicketsPage = (
       const bareId = options.groupKey.replace(/^(user:|group:|userGroup:)/, '');
       return { assignee: bareId };
     }
+    if (options.groupBy === 'createdBy') {
+      if (options.groupKey === 'Unknown') return {};
+      return { createdBy: options.groupKey.replace(/^(user:|group:|userGroup:)/, '') };
+    }
     if (options.groupBy === 'status') {
       // Filter by the group's status value
       return { status: options.groupKey };
@@ -447,12 +498,6 @@ export const useKanbanTicketsPage = (
     // For formField grouping, dynamic field tokens already handle it
     return {};
   })();
-
-  // When searching, skip stage/status/groupBy filters - fetch all results and segregate in frontend.
-  // For dynamic field grouping, keep the filters as-is.
-  const isFormFieldGroupBy =
-    typeof options.groupBy === 'object' && options.groupBy?.type === 'formField';
-  const skipColumnFiltersForSearch = hasSearchTerm && !isFormFieldGroupBy;
 
   // Stage filter, pushed into the YQL the same way userGroup/tags are (the backend binds
   // each value as `stage contains @stage_N`, OR-ed together).
@@ -463,8 +508,7 @@ export const useKanbanTicketsPage = (
   // vespaStage stays undefined and hasFiltersVespaCannotApply routes it to the Zero page
   // rather than sending no stage constraint at all (which would show every stage).
   const selectedStages = options.filters?.stages ?? [];
-  const pinnedColumnStage =
-    !skipColumnFiltersForSearch && options.columnType === 'stage' ? options.stageName : undefined;
+  const pinnedColumnStage = options.columnType === 'stage' ? options.stageName : undefined;
   const effectiveStages = pinnedColumnStage
     ? selectedStages.length === 0 || selectedStages.includes(pinnedColumnStage)
       ? [pinnedColumnStage]
@@ -474,7 +518,10 @@ export const useKanbanTicketsPage = (
 
   // Declared after every pushdown value above, since it requires that each active filter
   // made it into the Vespa query — direct-Vespa rows are rendered without re-filtering.
+  // Never for a track: its search hits go through the track query, which keeps only
+  // the track's tickets, instead of being rendered as Vespa returned them.
   const shouldUseDirectVespaRows =
+    !options.trackId &&
     requiresVespaTicketIds &&
     !hasZeroOnlyFilters(
       options.filters,
@@ -493,55 +540,15 @@ export const useKanbanTicketsPage = (
     canRepresentGroupInVespa(options.groupBy, options.groupKey) &&
     !options.showOverdueOnly;
 
-  // Create a search key that changes when the group context changes
-  // This forces the search to re-trigger when switching views
-  // When searching without column filters, use a shared key so all columns share one search call
-  // Include filter values in the key so that filter changes trigger a new search
-  const groupByKey =
-    typeof options.groupBy === 'object'
-      ? `${options.groupBy.type}:${options.groupBy.fieldId}`
-      : String(options.groupBy ?? 'none');
-  // Include ALL filter values in search key so all columns re-search when filters change
-  // Previously this only included priority, assignee, tags, createdBy - missing boards, stages, etc.
-  const filterKey = skipColumnFiltersForSearch
-    ? JSON.stringify({
-        priority: vespaPriority ?? '',
-        assignee: vespaAssignee ?? '',
-        tags: vespaTags ?? '',
-        createdBy: vespaCreatedBy ?? '',
-        userGroup: vespaUserGroup ?? '',
-        stage: vespaStage ?? '',
-        boards: options.filters?.boards ?? [],
-        stages: options.filters?.stages ?? [],
-        ticketTypes: options.filters?.ticketTypes ?? [],
-        sourceChannels: options.filters?.sourceChannels ?? [],
-        userGroups: options.filters?.userGroups ?? [],
-        dynamicFields: options.filters?.dynamicFields ?? {},
-        boardId: effectiveVespaBoardId ?? '',
-        projectId: options.projectId ?? '',
-      })
-    : '';
-  const vespaSearchKey = skipColumnFiltersForSearch
-    ? `search:${groupByKey}:${filterKey}` // Shared key includes filters
-    : `${groupByKey}:${options.groupKey ?? ''}:${options.stageName}`;
-
   const vespaTicketSearch = useVespaTicketSearch({
-    searchTerm: trimmedSearchTerm,
     dynamicFieldValues: pageVespaTokens,
     enabled: requiresVespaTicketIds,
-    limit: hasSearchTerm ? 400 : 200,
-    fetchAllDynamicFieldMatches: true,
-    maxFetchedResults: hasSearchTerm ? 800 : 400,
-    searchKey: vespaSearchKey,
     ...(options.dynamicFieldDateRanges
       ? { dynamicFieldDateRanges: options.dynamicFieldDateRanges }
       : {}),
     ...(options.projectId ? { projectId: options.projectId } : {}),
     ...(effectiveVespaBoardId ? { boardId: effectiveVespaBoardId } : {}),
-    // Skip column filters when searching (will segregate in frontend)
-    ...(!skipColumnFiltersForSearch && options.columnType === 'status'
-      ? { status: options.stageName }
-      : {}),
+    ...(options.columnType === 'status' ? { status: options.stageName } : {}),
     // Column stage intersected with the user's stage filter (see vespaStage above).
     ...(vespaStage ? { stage: vespaStage } : {}),
     ...(vespaPriority ? { priority: vespaPriority } : {}),
@@ -549,8 +556,7 @@ export const useKanbanTicketsPage = (
     ...(vespaTags ? { tags: vespaTags } : {}),
     ...(vespaCreatedBy ? { createdBy: vespaCreatedBy } : {}),
     ...(vespaUserGroup ? { userGroup: vespaUserGroup } : {}),
-    // Skip group filters when searching (will segregate in frontend)
-    ...(!skipColumnFiltersForSearch ? vespaGroupFilter : {}),
+    ...vespaGroupFilter,
   });
   const directVespaPage = useMemo(() => {
     if (!shouldUseDirectVespaRows) return null;
@@ -571,54 +577,10 @@ export const useKanbanTicketsPage = (
     // Render what Vespa returned. Every active filter was pushed down into the query
     // (shouldUseDirectVespaRows routes the rest to the Zero page), so re-filtering here
     // would only risk dropping correct rows on fields the lean summary omits.
-    const filtered = results as KanbanTicketsPageRow[];
-
-    // When searching without column filters, segregate by stage/status in frontend
-    if (skipColumnFiltersForSearch) {
-      const segregated = filtered.filter(ticket => {
-        // Filter by column stage/status
-        if (options.columnType === 'status' && (ticket.statusV2 as string) !== options.stageName) {
-          return false;
-        }
-        if (options.columnType === 'stage' && ticket.stageName !== options.stageName) {
-          return false;
-        }
-
-        // Filter by groupBy (assignee, priority, status)
-        if (options.groupBy === 'assignee' && options.groupKey) {
-          const ticketAssignee = normalizeIdentity(ticket.assignedTo);
-          if (options.groupKey === 'Unassigned') {
-            if (ticketAssignee) return false;
-          } else {
-            const groupAssignee = normalizeIdentity(options.groupKey);
-            if (ticketAssignee !== groupAssignee) return false;
-          }
-        }
-        if (options.groupBy === 'priority' && options.groupKey) {
-          if (options.groupKey === 'No Priority') {
-            if (ticket.priority) return false;
-          } else {
-            if ((ticket.priority as string) !== options.groupKey) return false;
-          }
-        }
-        if (options.groupBy === 'status' && options.groupKey) {
-          if ((ticket.statusV2 as string) !== options.groupKey) return false;
-        }
-
-        return true;
-      });
-      return segregated;
-    }
-
-    return filtered;
+    return results as KanbanTicketsPageRow[];
   }, [
     options.channelId,
-    options.columnType,
-    options.stageName,
-    options.groupBy,
-    options.groupKey,
     shouldUseDirectVespaRows,
-    skipColumnFiltersForSearch,
     vespaTicketSearch.isSearching,
     vespaTicketSearch.searchResults,
   ]);
@@ -646,6 +608,7 @@ export const useKanbanTicketsPage = (
   const fetchCursor = fetchCursorState?.queryKey === queryKey ? fetchCursorState.cursor : null;
   const tickets = ticketsState.queryKey === queryKey ? ticketsState.tickets : [];
   ticketsStateRef.current = ticketsState;
+  expectedCountRef.current = options.expectedCount;
 
   if (windowAnchorRef.current?.queryKey !== queryKey) {
     windowAnchorRef.current = {
@@ -667,9 +630,7 @@ export const useKanbanTicketsPage = (
     },
     fetchCursor,
   );
-  const pageQuery = queries.kanbanTicketsPageV3(
-    pageArgs as Parameters<typeof queries.kanbanTicketsPageV3>[0],
-  );
+  const pageQuery = kanbanPageQuery(pageArgs);
   const [page, pageDetails] = useCachedQuery(pageQuery, {
     enabled:
       (options.enabled ?? true) &&
@@ -737,8 +698,6 @@ export const useKanbanTicketsPage = (
       : 'complete'
     : pageDetails.type;
 
-  const preserveRelevanceOrder = shouldUseDirectVespaRows && hasSearchTerm;
-
   useEffect(() => {
     setTicketsState(prev =>
       prev.queryKey === queryKey && prev.tickets.length === 0 ? prev : { queryKey, tickets: [] },
@@ -761,9 +720,7 @@ export const useKanbanTicketsPage = (
     const visiblePageRows = options.excludeFlowSteps
       ? rawPageRows.filter(ticket => !isMaterializedFlowStep(ticket))
       : rawPageRows;
-    const pageRows = preserveRelevanceOrder
-      ? visiblePageRows
-      : sortByKanbanPosition(visiblePageRows);
+    const pageRows = sortByKanbanPosition(visiblePageRows);
     if (typeof window !== 'undefined') {
       const debugDynamicFieldIds = new Set<string>();
       if (options.filters?.dynamicFields) {
@@ -776,6 +733,26 @@ export const useKanbanTicketsPage = (
       }
     }
     if (rawPageRows.length === 0) {
+      // An empty page inside a bounded window does NOT mean the column is empty — its rows
+      // may simply all be older than the current rung. Concluding here is what left a
+      // column rendering nothing under a header count of N: the widening below is only
+      // reached by a page with at least one row, so a column whose entire matching set
+      // predates the 30d rung never climbed off it.
+      //
+      // The counts API applies the same filters without the window, so it separates the
+      // two cases for free: a positive count over an empty page is always a window that is
+      // too narrow. When it says zero the column really is empty and stops on this first
+      // probe, instead of climbing every rung to prove it.
+      //
+      // An absent count (loading, or a set the counts API does not model) falls back to
+      // climbing. The ladder is bounded and monotonic, so a count that over-reports costs
+      // a few no-op probes and never loops.
+      const expectedCount = expectedCountRef.current;
+      const countAllowsMoreRows = expectedCount === undefined || expectedCount > 0;
+      if (countAllowsMoreRows && !shouldUseDirectVespaRows && windowStep < WINDOW_STEPS_MS.length) {
+        setWindowStep(step => step + 1);
+        return;
+      }
       if (fetchCursor === null) {
         setTicketsState(prev =>
           prev.queryKey === queryKey && prev.tickets.length === 0
@@ -843,8 +820,22 @@ export const useKanbanTicketsPage = (
     effectivePage,
     effectivePageDetailsType,
     shouldUseDirectVespaRows,
-    preserveRelevanceOrder,
   ]);
+
+  const previousExpectedCountRef = useRef<number | undefined>(undefined);
+  useEffect(() => {
+    const previous = previousExpectedCountRef.current;
+    const next = options.expectedCount;
+    previousExpectedCountRef.current = next;
+
+    if (next === undefined || next <= 0) return;
+    if (previous !== undefined && previous > 0) return; // not a 0 -> positive transition
+    if (shouldUseDirectVespaRows) return;
+    // Anything still paging, or already holding rows, does not need re-entry.
+    if (hasMore || ticketsStateRef.current.tickets.length > 0) return;
+
+    setWindowStep(step => (step < WINDOW_STEPS_MS.length ? step + 1 : step));
+  }, [options.expectedCount, shouldUseDirectVespaRows, hasMore]);
 
   const loadMore = useCallback(() => {
     if (isLoadingMoreRef.current || !hasMore || !nextCursor) return;

@@ -6,18 +6,40 @@ import { config as appConfig } from '@/config/env';
 import { emailFetchQueue } from '@/queues/emailFetchQueue';
 import { InteractionReplyValidationError } from '../core/baseInteractionReplySender';
 import { ExternalSourcePlatform } from '../core/types';
+import { SOCIAL_MEDIA_PLATFORMS } from '../social-media/constants';
+import { toGooglePlayErrorResponse } from '../adapters/social-media/google-play/client';
 import { socialMediaService } from '../social-media/socialMediaService';
 import {
   authorizeSocialMediaManager,
   canAccessSocialMediaChannel,
 } from './social-media/access';
 import googlePlayRoutes from './social-media/google-play';
+import appStoreRoutes from './social-media/app-store';
+import instagramRoutes from './social-media/instagram';
 
 const TAG = '[SocialMediaRoutes]';
 const router = express.Router();
 
+/** Returns undefined when no range was asked for, 'invalid' when one was asked for badly. */
+function parseBackfill(
+  body: unknown,
+): { startDate: Date; endDate: Date } | 'invalid' | undefined {
+  const { startDate, endDate } = (body ?? {}) as { startDate?: unknown; endDate?: unknown };
+  if (startDate === undefined && endDate === undefined) return undefined;
+  if (typeof startDate !== 'string' || typeof endDate !== 'string') return 'invalid';
+  const start = new Date(startDate);
+  const end = new Date(endDate);
+  if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) return 'invalid';
+  if (start > end) return 'invalid';
+  return { startDate: start, endDate: end };
+}
+
 router.use(express.json());
+// Meta's data-deletion callback sends signed_request as application/x-www-form-urlencoded
+router.use(express.urlencoded({ extended: false }));
 router.use(googlePlayRoutes);
+router.use(appStoreRoutes);
+router.use(instagramRoutes);
 
 router.post(
   '/:conversationId/reply',
@@ -54,15 +76,23 @@ router.post(
         res.status(400).json({ error: error.message });
         return;
       }
+      const googlePlayError = toGooglePlayErrorResponse(error);
+      if (googlePlayError) {
+        res.status(googlePlayError.status).json({ error: googlePlayError.error });
+        return;
+      }
       logger.error(`${TAG} Failed to send review reply`, {
         conversationId: req.params.conversationId,
         error,
       });
-      res.status(500).json({ error: 'Failed to send review reply' });
+      res.status(500).json({ error: 'Failed to send reply' });
     }
-  }
+  },
 );
 
+// POST /:channelId/sync — manual sync trigger for polling sources (Google Play only).
+// Instagram does NOT use this endpoint — it is webhook-driven. The frontend hides the
+// refetch button for Instagram channels so this path is never reached for IG.
 router.post(
   '/:channelId/sync',
   authV2Middleware.authenticate,
@@ -70,13 +100,15 @@ router.post(
     try {
       const workspaceId = req.user!.workspaceId!;
       if (
-        !(await canAccessSocialMediaChannel(
-          req.params.channelId,
-          req.user!.id,
-          workspaceId
-        ))
+        !(await canAccessSocialMediaChannel(req.params.channelId, req.user!.id, workspaceId))
       ) {
         res.status(404).json({ error: 'Social media desk not found' });
+        return;
+      }
+
+      const backfill = parseBackfill(req.body);
+      if (backfill === 'invalid') {
+        res.status(400).json({ error: 'startDate and endDate must be ISO dates, start before end' });
         return;
       }
 
@@ -84,7 +116,7 @@ router.post(
         where: {
           channelId: req.params.channelId,
           workspaceId,
-          sourceType: ExternalSourcePlatform.GOOGLE_PLAY,
+          sourceType: { in: [...SOCIAL_MEDIA_PLATFORMS] },
           isActive: true,
         },
         select: { id: true },
@@ -101,6 +133,10 @@ router.post(
           channelId: req.params.channelId,
           requesterUserId: req.user!.id,
           workspaceId,
+          ...(backfill && {
+            startDate: backfill.startDate.toISOString(),
+            endDate: backfill.endDate.toISOString(),
+          }),
         });
         res.status(202).json({
           success: true,
@@ -114,39 +150,38 @@ router.post(
       for (const source of sources) {
         const result = await socialMediaService.syncSource(source.id, {
           ignoreSyncCursor: true,
+          ...(backfill && { backfill }),
         });
         synced += result.synced;
       }
       res.json({ synced, sourceCount: sources.length });
     } catch (error) {
+      const googlePlayError = toGooglePlayErrorResponse(error);
+      if (googlePlayError) {
+        res.status(googlePlayError.status).json({ error: googlePlayError.error });
+        return;
+      }
       logger.error(`${TAG} Manual source sync failed`, { error });
       res.status(500).json({ error: 'Failed to synchronize review source' });
     }
-  }
+  },
 );
 
+// POST /:channelId/disconnect — deactivate all sources on a channel
 router.post(
   '/:channelId/disconnect',
   authV2Middleware.authenticate,
   async (req: Request, res: Response): Promise<void> => {
     try {
       const workspaceId = req.user!.workspaceId!;
-      if (
-        !(await authorizeSocialMediaManager(
-          req.params.channelId,
-          req.user!.id,
-          workspaceId,
-          res
-        ))
-      ) {
+      if (!(await authorizeSocialMediaManager(req.params.channelId, req.user!.id, workspaceId, res))) {
         return;
       }
-
       const result = await db.externalSource.updateMany({
         where: {
           channelId: req.params.channelId,
           workspaceId,
-          sourceType: ExternalSourcePlatform.GOOGLE_PLAY,
+          sourceType: { in: [...SOCIAL_MEDIA_PLATFORMS] },
         },
         data: { isActive: false },
       });
@@ -155,15 +190,23 @@ router.post(
         return;
       }
 
-      res.json({
-        message: 'Social media desk disconnected',
-        sourceCount: result.count,
+      // App Store .p8 and Play service-account keys are long-lived and not revocable from here,
+      // so disconnecting a desk destroys our copy; "Replace key" restores it.
+      await db.externalSource.updateMany({
+        where: {
+          channelId: req.params.channelId,
+          workspaceId,
+          sourceType: { in: [ExternalSourcePlatform.APP_STORE, ExternalSourcePlatform.GOOGLE_PLAY] },
+        },
+        data: { credentials: '' },
       });
+
+      res.json({ message: 'Social media desk disconnected', sourceCount: result.count });
     } catch (error) {
-      logger.error(`${TAG} Failed to disconnect source`, { error });
+      logger.error(`${TAG} Failed to disconnect`, { error });
       res.status(500).json({ error: 'Failed to disconnect social media source' });
     }
-  }
+  },
 );
 
 export default router;

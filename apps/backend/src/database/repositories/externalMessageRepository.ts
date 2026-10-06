@@ -46,13 +46,19 @@ export class ExternalMessageRepository {
    */
   async findByExternalIds(externalSourceId: string, externalIds: string[]) {
     if (externalIds.length === 0) return [];
-    return await this.db.externalMessage.findMany({
-      where: {
-        externalSourceId,
-        externalId: { in: externalIds },
-      },
-      select: { externalId: true, direction: true },
-    });
+    // Postgres caps prepared-statement params at 32767; chunk the IN list so huge conversations don't overflow it.
+    const CHUNK = 20000;
+    const query = (ids: string[]) =>
+      this.db.externalMessage.findMany({
+        where: { externalSourceId, externalId: { in: ids } },
+        select: { externalId: true, direction: true },
+      });
+    if (externalIds.length <= CHUNK) return await query(externalIds);
+    const out: Awaited<ReturnType<typeof query>> = [];
+    for (let i = 0; i < externalIds.length; i += CHUNK) {
+      out.push(...(await query(externalIds.slice(i, i + CHUNK))));
+    }
+    return out;
   }
 
   /**
@@ -107,6 +113,7 @@ export class ExternalMessageRepository {
     entityId: string;
     direction: MessageDirection;
     entityType?: ExternalEntityType;
+    createdAt?: Date;
   }) {
     if (data.entityType && !data.entityId) {
       throw new Error('entityId is required when entityType is provided');
@@ -130,6 +137,7 @@ export class ExternalMessageRepository {
           direction: data.direction,
           entityId: data.entityId,
           ...(data.entityType && { entityType: data.entityType }),
+          ...(data.createdAt && { createdAt: data.createdAt }),
         }
       });
     } catch (error) {
@@ -139,6 +147,22 @@ export class ExternalMessageRepository {
       }
       throw error;
     }
+  }
+
+  /**
+   * Find the latest ExternalMessage for a source whose externalThreadId
+   * externalThreadId starts with "{igsid}:" (colon-suffix format written by transformer.ts).
+   * Used by the Instagram 24-hour messaging-window check to find the active thread.
+   */
+  async findLatestForIgsid(externalSourceId: string, igsid: string) {
+    return await this.db.externalMessage.findFirst({
+      where: {
+        externalSourceId,
+        externalThreadId: { startsWith: `${igsid}:` },
+        direction: 'INCOMING',
+      },
+      orderBy: { createdAt: 'desc' },
+    });
   }
 
   /**

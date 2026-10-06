@@ -14,6 +14,7 @@ interface StorageData {
   groupBy?: string;
   showOverdueOnly?: boolean;
   showSubStatus?: boolean;
+  activeViewId?: string;
 }
 
 export interface TicketFiltersContext {
@@ -37,6 +38,7 @@ export interface TicketFiltersContext {
   setSearchParams?: (
     params: URLSearchParams | ((prev: URLSearchParams) => URLSearchParams),
   ) => void;
+  activeViewId: string | null;
 }
 
 export type TicketFiltersEvent =
@@ -49,6 +51,14 @@ export type TicketFiltersEvent =
       viewId?: string | undefined;
       enabled?: boolean | undefined;
       selectedBoardIdFromDb?: string | null | undefined;
+      /**
+       * Board to fall back to when nothing else picks one. Channels pass their
+       * first linked board here so the tickets tab always has exactly one board
+       * selected — a channel has no "All Boards" state, and an empty
+       * `filters.boards` would leave the query with no scope at all now that
+       * channel.projectId is no longer read.
+       */
+      defaultBoardId?: string | null | undefined;
       searchParams: URLSearchParams;
       setSearchParams: (
         params: URLSearchParams | ((prev: URLSearchParams) => URLSearchParams),
@@ -59,14 +69,15 @@ export type TicketFiltersEvent =
   | { type: 'SET_GROUP_BY'; groupBy: string }
   | { type: 'SET_OVERDUE_ONLY'; showOverdueOnly: boolean }
   | { type: 'SET_SUB_STATUS'; showSubStatus: boolean }
-  | { type: 'URL_CHANGED'; searchParams: URLSearchParams };
+  | { type: 'URL_CHANGED'; searchParams: URLSearchParams }
+  | { type: 'SET_ACTIVE_VIEW_ID'; activeViewId: string | null };
 
 /* -------------------------- UTILITY FUNCTIONS -------------------------- */
 
 /**
  * Generate a unique storage key based on channelId or boardId or ProjectId or viewMode
  */
-const getStorageKey = (
+export const getStorageKey = (
   channelId?: string,
   viewMode?: string,
   projectId?: string,
@@ -144,6 +155,9 @@ const readFiltersFromUrl = (params: URLSearchParams): TicketFilters => {
 
   const ticketTypes = params.getAll('ticketTypes');
   if (ticketTypes.length) filters.ticketTypes = ticketTypes;
+
+  const merchantIds = params.getAll('merchantIds');
+  if (merchantIds.length) filters.merchantIds = merchantIds;
 
   const sourceChannels = params.getAll('sourceChannels');
   if (sourceChannels.length) filters.sourceChannels = sourceChannels;
@@ -233,6 +247,7 @@ const FILTER_PARAM_KEYS = [
   'tags',
   'stages',
   'ticketTypes',
+  'merchantIds',
   'sourceChannels',
   'aiCategory',
   'generatedTags',
@@ -278,6 +293,7 @@ const writeFiltersToUrl = (params: URLSearchParams, filters: TicketFilters): voi
   filters.tags?.forEach((t: string) => params.append('tags', t));
   filters.stages?.forEach((s: string) => params.append('stages', s));
   filters.ticketTypes?.forEach((t: string) => params.append('ticketTypes', t));
+  filters.merchantIds?.forEach((m: string) => params.append('merchantIds', m));
   filters.sourceChannels?.forEach((c: string) => params.append('sourceChannels', c));
   filters.aiCategory?.forEach((c: string) => params.append('aiCategory', c));
   filters.generatedTags?.forEach((t: string) => params.append('generatedTags', t));
@@ -363,6 +379,9 @@ const loadFromStorage = (key: string): StorageData => {
       if (typeof parsed.showSubStatus === 'boolean') {
         result.showSubStatus = parsed.showSubStatus;
       }
+      if (parsed.activeViewId) {
+        result.activeViewId = parsed.activeViewId;
+      }
       return result;
     }
   } catch {
@@ -381,6 +400,7 @@ const saveToStorage = (
   groupBy?: string,
   showOverdueOnly?: boolean,
   showSubStatus?: boolean,
+  activeViewId?: string | null,
 ): void => {
   try {
     const data: StorageData = { filters };
@@ -395,6 +415,9 @@ const saveToStorage = (
     }
     if (showSubStatus) {
       data.showSubStatus = true;
+    }
+    if (activeViewId) {
+      data.activeViewId = activeViewId;
     }
     sessionStorage.setItem(key, JSON.stringify(data));
   } catch {
@@ -465,9 +488,11 @@ export const ticketFiltersMachine = setup({
       let groupBy = 'none';
       let showOverdueOnly = false;
       let showSubStatus = false;
+      let activeViewId: string | null = null;
 
       if (enabled) {
         const storageData = loadFromStorage(storageKey);
+        activeViewId = storageData.activeViewId ?? null;
 
         const boardFromUrl = urlFilters.boards?.length ? urlFilters.boards : undefined;
         const boardFromDb = event.selectedBoardIdFromDb ? [event.selectedBoardIdFromDb] : undefined;
@@ -475,7 +500,10 @@ export const ticketFiltersMachine = setup({
         // the boardId is in the route params (not query params), so we use it as a fallback.
         const boardFromPath =
           event.viewMode === 'board' && event.boardId ? [event.boardId] : undefined;
-        const boardFilter = boardFromUrl ?? boardFromDb ?? boardFromPath;
+        // Last resort only: the URL, the user's persisted board, and the route
+        // path all outrank it, so seeding never overrides an explicit choice.
+        const boardFromDefault = event.defaultBoardId ? [event.defaultBoardId] : undefined;
+        const boardFilter = boardFromUrl ?? boardFromDb ?? boardFromPath ?? boardFromDefault;
 
         if (Object.keys(urlFilters).length > 0) {
           filters = { ...urlFilters };
@@ -520,6 +548,7 @@ export const ticketFiltersMachine = setup({
         urlFilters,
         currentSearchParams: event.searchParams,
         setSearchParams: event.setSearchParams,
+        activeViewId,
       };
 
       // Store optional properties only if they exist
@@ -553,6 +582,14 @@ export const ticketFiltersMachine = setup({
     updateFilters: assign(({ event, context }) => {
       if (event.type !== 'SET_FILTERS') return context;
       return { ...context, filters: event.filters };
+    }),
+
+    /**
+     * Update activeViewId in context
+     */
+    updateActiveViewId: assign(({ event, context }) => {
+      if (event.type !== 'SET_ACTIVE_VIEW_ID') return context;
+      return { ...context, activeViewId: event.activeViewId };
     }),
 
     /**
@@ -661,6 +698,7 @@ export const ticketFiltersMachine = setup({
         context.groupBy,
         context.showOverdueOnly,
         context.showSubStatus,
+        context.activeViewId,
       );
     },
 
@@ -733,6 +771,7 @@ export const ticketFiltersMachine = setup({
     enabled: true,
     storageKey: `${STORAGE_KEY_PREFIX}-default`,
     urlFilters: {},
+    activeViewId: null,
   },
   states: {
     /**
@@ -775,6 +814,9 @@ export const ticketFiltersMachine = setup({
         },
         URL_CHANGED: {
           actions: ['syncFromUrl', 'applyUrlFilters', 'saveToStorage'],
+        },
+        SET_ACTIVE_VIEW_ID: {
+          actions: ['updateActiveViewId', 'saveToStorage'],
         },
       },
     },

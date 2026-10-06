@@ -2,7 +2,7 @@ import path from "node:path";
 import { errMsg } from "../lib/errors.js";
 import { existsSync } from "node:fs";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
-import { AjvJsonSchemaValidator } from "@modelcontextprotocol/sdk/validation/ajv";
+import type { AjvJsonSchemaValidator } from "@modelcontextprotocol/sdk/validation/ajv";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import type { McpAdapter, McpCallResult, McpServerTools, McpToolInfo } from "./types.js";
@@ -10,45 +10,30 @@ import { extForMime, fileNameFromResource } from "./attachment-filename.js";
 import { STATIC_ADAPTERS } from "./static-adapters.js";
 import { resolveConnectorDefinition } from "./connector-definitions.js";
 import { getSpacesAuthForUser, getWorkspaceIdForUser } from "../lib/spaces-db.js";
+import { SPACES_SESSION_CREDENTIAL_SERVER_TYPES } from "../lib/spaces-session-server-types.js";
 import { provisionStdioCommand } from "./provision.js";
 import { prisma } from "../db.js";
 import { decrypt } from "../crypto.js";
 import { CONFIG } from "../config.js";
 
 import { createLogger } from "../logger.js";
+import { recordKnownMcpTools } from "../lib/mcp-tool-name-index.js";
 const log = createLogger("runner");
 
 /**
- * Tolerant JSON Schema validator for MCP tool output schemas.
+ * No-op validator for MCP tool output schemas.
  *
- * Since SDK ~1.28, Client.listTools() eagerly compiles an Ajv validator for
- * EVERY tool's outputSchema. A single non-self-contained schema — e.g. Google
- * Stitch's `$ref: "#/$defs/ScreenInstance"` with the $defs block living
- * outside the outputSchema document — makes Ajv throw MissingRefError
- * ("can't resolve reference ... from id #"), which fails the whole listTools
- * and bricks the entire connector, not just the one bad tool.
- *
- * One malformed third-party schema must degrade to "that tool's output isn't
- * validated", never to "the connector doesn't work". Compile failures are
- * logged once and replaced with a pass-through validator.
+ * Client.listTools() → cacheToolMetadata() calls getValidator() for every tool
+ * with an outputSchema, synchronously, on every list. With Ajv that compiled a
+ * validator per tool each time (CPU that scales with schema size) and retained
+ * each one in the shared Ajv instance, so the heap grew without bound
+ * (XYNE-65482). claw-auth never reads `structuredContent` — callTool forwards
+ * only `result.content` text/binaries — so output validation protects nothing
+ * here. A pass-through also covers non-self-contained schemas (e.g. Google
+ * Stitch `$ref: "#/$defs/..."`) that used to throw MissingRefError.
  */
-const strictSchemaValidator = new AjvJsonSchemaValidator();
-const warnedSchemaCompileFailures = new Set<string>();
-const tolerantSchemaValidator: Pick<AjvJsonSchemaValidator, "getValidator"> = {
-  getValidator: (schema) => {
-    try {
-      return strictSchemaValidator.getValidator(schema);
-    } catch (err) {
-      const message = errMsg(err);
-      if (!warnedSchemaCompileFailures.has(message)) {
-        warnedSchemaCompileFailures.add(message);
-        log.warn(
-          `[mcp/runner] tool outputSchema failed to compile — output validation disabled for this tool: ${message}`,
-        );
-      }
-      return (input: unknown) => ({ valid: true as const, data: input as never, errorMessage: undefined });
-    }
-  },
+const passThroughSchemaValidator: Pick<AjvJsonSchemaValidator, "getValidator"> = {
+  getValidator: () => (input: unknown) => ({ valid: true as const, data: input as never, errorMessage: undefined }),
 };
 
 /**
@@ -127,6 +112,23 @@ const inflight = new Map<string, Promise<Client>>();
  */
 const MCP_REQUEST_TIMEOUT_MS = 600_000;
 
+/**
+ * Timeout for the `initialize` handshake inside `client.connect()`. The SDK
+ * applies DEFAULT_REQUEST_TIMEOUT_MSEC (60s) to every request that does not
+ * pass one, and connect was the single call site still inheriting it — so a
+ * server that needed >60s to come up failed the handshake while the generous
+ * per-call ceiling above never got a chance to apply.
+ *
+ * 60s is not enough for a cold stdio server: the child may still be fetching
+ * its package (npx/uvx) or minting a first token. Sessions are evicted after
+ * SESSION_IDLE_TTL_MS, so this is paid on the first call after any idle gap,
+ * which is why the failures looked intermittent.
+ *
+ * Kept well under a typical caller-side budget (Birbal cuts off at 200s) so a
+ * genuinely stuck server surfaces OUR error, not theirs.
+ */
+const MCP_CONNECT_TIMEOUT_MS = Number(process.env["MCP_CONNECT_TIMEOUT_MS"] ?? 180_000);
+
 // Idle eviction. A cached session pins a child process (stdio) or an HTTP
 // client plus its buffers in claw-auth's heap. Previously sessions were only
 // dropped on token rotation / OAuth events / transport close — never on idle —
@@ -146,22 +148,41 @@ const SESSION_SWEEP_INTERVAL_MS = Number(process.env["MCP_SESSION_SWEEP_INTERVAL
  */
 const PER_AGENT_SERVER_TYPES = new Set<string>(["xyne-spaces-app-tools"]);
 
+/**
+ * Which caller family a session belongs to. `"app"` is a Spaces artifact app
+ * calling through routes/app-connectors-internal.ts with the VIEWER's own
+ * credential; everything else (agent runs, health, tool sync) is the default
+ * lane.
+ *
+ * The lanes never share a session. Keys are otherwise `${userId}:${serverType}`
+ * and a cached session is only replaced when token/accessToken/botToken/apiKey
+ * changes — so without this an app call could reuse a session an agent opened
+ * with its PINNED credential (e.g. a username/password connector, or the same
+ * token against a different url) and run as the agent. A suffix, not a
+ * prefix, so evictAllSessionsForUser's `${userId}:` sweep still covers it.
+ */
+export type SessionLane = "app";
+
+const APP_LANE_SUFFIX = "::app";
+
 function sessionKey(
   userId: string,
   serverType: string,
   agentSlug?: string,
   credentials?: Record<string, unknown>,
+  lane?: SessionLane,
 ): string {
+  const suffix = lane === "app" ? APP_LANE_SUFFIX : "";
   // Slack credentials can be supplied by the workspace that dispatched a
   // surface run. Keep each team's env-bound child process isolated.
   const slackTeamId = credentials?.["teamId"];
   if (serverType === "slack" && typeof slackTeamId === "string" && slackTeamId) {
-    return `${userId}:${serverType}:team:${slackTeamId}`;
+    return `${userId}:${serverType}:team:${slackTeamId}${suffix}`;
   }
   if (PER_AGENT_SERVER_TYPES.has(serverType) && agentSlug) {
-    return `${userId}:${serverType}:${agentSlug}`;
+    return `${userId}:${serverType}:${agentSlug}${suffix}`;
   }
-  return `${userId}:${serverType}`;
+  return `${userId}:${serverType}${suffix}`;
 }
 
 /** Close + drop sessions idle longer than the TTL. Best-effort; never throws. */
@@ -189,16 +210,11 @@ async function getOrCreateSession(
   serverType: string,
   credentials: Record<string, unknown>,
   agentSlug?: string,
+  lane?: SessionLane,
 ): Promise<Client> {
-  const key = sessionKey(userId, serverType, agentSlug, credentials);
+  const key = sessionKey(userId, serverType, agentSlug, credentials, lane);
 
-  // For xyne-spaces: ALWAYS read fresh creds from the Spaces DB FIRST, before
-  // any cache lookup. The cached child process has its token baked into env
-  // at spawn time; we must compare that against the live token and evict the
-  // session if Spaces' middleware has rotated the JWT. Without this, the
-  // creds-loader's "live-first hit" is computed and then thrown away — the
-  // child keeps calling Spaces with a stale env-baked token and 401s.
-  if (serverType === "xyne-spaces" || serverType === "xyne-dashboard") {
+  if (SPACES_SESSION_CREDENTIAL_SERVER_TYPES.has(serverType)) {
     // Benchmark lane: the onyx-ask-ai agent ALWAYS routes to the benchmark Vespa
     // cluster, regardless of whether a live login session exists. The agent's
     // app token is resolved so the spaces tools authenticate via /api/apps/*
@@ -358,10 +374,12 @@ async function spawnSession(
 
   const client = new Client(
     { name: "xyne-claw-auth", version: "0.1.0" },
-    { jsonSchemaValidator: tolerantSchemaValidator },
+    { jsonSchemaValidator: passThroughSchemaValidator },
   );
   try {
-    await client.connect(transport as Parameters<typeof client.connect>[0]);
+    await client.connect(transport as Parameters<typeof client.connect>[0], {
+      timeout: MCP_CONNECT_TIMEOUT_MS,
+    });
   } catch (err) {
     // Connect failed (timeout, server crash on startup, bad creds). The child
     // process is already spawned — reap it (close() does SIGTERM→SIGKILL) so a
@@ -384,14 +402,63 @@ async function spawnSession(
   return client;
 }
 
+const SHARED_TOOL_LIST_SERVER_TYPES = new Set<string>([
+  "xyne-spaces",
+  "xyne-spaces-app-tools",
+  "heisenberg",
+  "research-agent-mcp",
+]);
+const TOOL_LIST_CACHE_TTL_MS = Number(process.env["MCP_TOOL_LIST_CACHE_TTL_MS"] ?? 10 * 60 * 1000);
+const toolListCache = new Map<string, { tools: McpToolInfo[]; at: number }>();
+const toolListInflight = new Map<string, Promise<McpToolInfo[]>>();
+
+export function clearToolListCache(): void {
+  toolListCache.clear();
+  toolListInflight.clear();
+}
+
+async function sharedToolList(serverType: string, fetchTools: () => Promise<McpToolInfo[]>): Promise<McpToolInfo[]> {
+  const cached = toolListCache.get(serverType);
+  if (cached && Date.now() - cached.at < TOOL_LIST_CACHE_TTL_MS) return cached.tools;
+  const inflight = toolListInflight.get(serverType);
+  if (inflight) return inflight;
+  const started = fetchTools()
+    .then((tools) => {
+      if (tools.length > 0) toolListCache.set(serverType, { tools, at: Date.now() });
+      return tools;
+    })
+    .finally(() => toolListInflight.delete(serverType));
+  toolListInflight.set(serverType, started);
+  return started;
+}
+
 export async function listToolsForUser(
   userId: string,
   serverType: string,
   serverName: string,
   credentials: Record<string, unknown>,
   agentSlug?: string,
+  options: { fresh?: boolean; lane?: SessionLane } = {},
 ): Promise<McpServerTools> {
-  const client = await getOrCreateSession(userId, serverType, credentials, agentSlug);
+  const fetchTools = () => fetchToolsFromServer(userId, serverType, credentials, agentSlug, options.lane);
+  const useShared =
+    !options.fresh && TOOL_LIST_CACHE_TTL_MS > 0 && SHARED_TOOL_LIST_SERVER_TYPES.has(serverType);
+  const tools = useShared ? await sharedToolList(serverType, fetchTools) : await fetchTools();
+  void recordKnownMcpTools(userId, serverType, tools);
+
+  const definition = await resolveConnectorDefinition(serverType);
+  const writeTools = definition?.writeTools ?? [];
+  return { serverType, serverName, tools, writeTools };
+}
+
+async function fetchToolsFromServer(
+  userId: string,
+  serverType: string,
+  credentials: Record<string, unknown>,
+  agentSlug?: string,
+  lane?: SessionLane,
+): Promise<McpToolInfo[]> {
+  const client = await getOrCreateSession(userId, serverType, credentials, agentSlug, lane);
   // Must pass BOTH `timeout` AND `signal`: the SDK runs an independent
   // internal timer initialised from `options.timeout ?? DEFAULT_REQUEST_TIMEOUT_MSEC`
   // (60s, see @modelcontextprotocol/sdk shared/protocol.js:712). Without
@@ -402,15 +469,11 @@ export async function listToolsForUser(
     signal: AbortSignal.timeout(MCP_REQUEST_TIMEOUT_MS),
   });
 
-  const tools: McpToolInfo[] = result.tools.map((t) => ({
+  return result.tools.map((t) => ({
     name: t.name,
     description: t.description ?? "",
     inputSchema: t.inputSchema as Record<string, unknown>,
   }));
-
-  const definition = await resolveConnectorDefinition(serverType);
-  const writeTools = definition?.writeTools ?? [];
-  return { serverType, serverName, tools, writeTools };
 }
 
 // Servers whose tools' binary output should be forwarded to the user as a file
@@ -521,8 +584,9 @@ export async function callTool(
   tool: string,
   params: Record<string, unknown>,
   agentSlug?: string,
+  lane?: SessionLane,
 ): Promise<McpCallResult> {
-  const client = await getOrCreateSession(userId, serverType, credentials, agentSlug);
+  const client = await getOrCreateSession(userId, serverType, credentials, agentSlug, lane);
 
   // Same pattern as listToolsForUser above: pass BOTH `timeout` and `signal`
   // to override the SDK's 60s default. See protocol.js:712 in the MCP SDK.
@@ -594,6 +658,15 @@ export async function callTool(
 
 export async function evictSession(userId: string, serverType: string, agentSlug?: string): Promise<void> {
   const key = sessionKey(userId, serverType, agentSlug);
+  // The app lane's twin goes too: this runs on reconnect/disconnect/OAuth
+  // events, and an app session must not outlive the credential it was built on.
+  const appKey = `${key}${APP_LANE_SUFFIX}`;
+  const appSession = sessions.get(appKey);
+  if (appSession) {
+    log.info(`[mcp/runner] evicting cached session for ${appKey}`);
+    sessions.delete(appKey);
+    await appSession.transport.close().catch(() => {});
+  }
   if (serverType === "slack") {
     const keys = [...sessions.keys()].filter((candidate) => candidate === key || candidate.startsWith(`${key}:team:`));
     for (const candidate of keys) {

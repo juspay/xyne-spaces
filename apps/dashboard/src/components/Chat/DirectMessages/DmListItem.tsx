@@ -16,12 +16,12 @@ import { useAuthContextValues } from '../../../hooks/useAuth';
 import { useChannelDisplayName } from '../../../hooks/useChannelDisplayName';
 import { formatElapsedTime } from '../../../utils/dateUtils';
 import { usePlatform } from '../../../hooks/usePlatform';
-import { useUser } from '../../../hooks/useUsers';
+import { useUser, useUsersById } from '../../../hooks/useUsers';
 import { StatusIndicator } from '../../ui/StatusIndicator';
 import { getInitialMessageFromConversation } from '../../../utils/conversationMessageHelpers';
 import { RenderMessageWithHTML } from '../../Chat/RenderMessageWithHTML/RenderMessageWithHTML';
 import { sanitizeHtmlString, htmlToPlainText } from '../../../utils/sanitizer';
-import { getFlowJsonPreviewText } from '../../../utils/flowPreview';
+import { getFlowJsonPreviewText, stripFlowMarkup } from '../../../utils/flowPreview';
 import { getUserDisplayName } from '../../../utils/userDisplayName';
 import { getSlashCommandArtifactPreviewText } from '@xyne/shared';
 import { channelTrackingMetadata } from '../../../services/Analytics/channelTracking';
@@ -67,48 +67,63 @@ export const DmListItem = ({
   // Get the sender of the last message
   const lastMessageSender = useUser(lastMessage?.senderId ?? '');
 
-  // Memoize HTML sanitization for message preview (Issue #1)
-  const sanitizedHtml = useMemo(() => {
-    if (!lastMessage) return '';
+  // A forwarded message stores the original content inside an XML envelope. Unwrap it
+  // before deriving any preview so flow/artifact messages use the same compact summary
+  // as messages sent directly in the DM.
+  const previewSourceContent = useMemo(() => {
+    if (!lastMessage?.content) return '';
 
-    // Handle forwarded messages - content is XML, need to parse it
     if (
       'msgType' in lastMessage &&
       lastMessage.msgType === MessageType.FORWARDED &&
       isForwardedMessageXml(lastMessage.content)
     ) {
       const parsed = parseForwardedMessageXml(lastMessage.content);
-      if (parsed) {
-        const text = parsed.optionalText || parsed.content;
-        return sanitizeHtmlString(text || 'Forwarded a message');
-      }
+      if (parsed) return parsed.optionalText || parsed.content || 'Forwarded a message';
     }
+
+    return lastMessage.content;
+  }, [lastMessage]);
+
+  // Memoize HTML sanitization for message preview (Issue #1)
+  const sanitizedHtml = useMemo(() => {
+    if (!lastMessage) return '';
 
     // Attachment-only messages arrive as empty rich-text markup (e.g. '<p></p>'),
     // which is truthy but renders blank. Fall back to a label whenever the message
     // has no visible text, so an attachment preview is not shown as an empty line.
-    const hasVisibleText = htmlToPlainText(lastMessage.content).length > 0;
+    const hasVisibleText = htmlToPlainText(previewSourceContent).length > 0;
     const rawContent = hasVisibleText
-      ? lastMessage.content
+      ? previewSourceContent
       : lastMessage.hasAttachment
         ? 'Sent an attachment'
-        : lastMessage.content || 'Message';
+        : previewSourceContent || 'Message';
 
     return sanitizeHtmlString(rawContent);
-  }, [lastMessage]);
+  }, [lastMessage, previewSourceContent]);
 
   // FlowJSON messages carry the whole interactive flow in their content. Feeding
   // that to RenderMessageWithHTML mounts the full flow card (title, textarea,
   // buttons) inside the one-line preview, breaking row layout. Collapse it to a
   // short plain-text summary instead.
   const flowPreviewText = useMemo(
-    () => (lastMessage?.content ? getFlowJsonPreviewText(lastMessage.content) : null),
-    [lastMessage?.content],
+    () => (previewSourceContent ? getFlowJsonPreviewText(previewSourceContent) : null),
+    [previewSourceContent],
   );
-  const slashCommandArtifactPreviewText = useMemo(
-    () => (lastMessage?.content ? getSlashCommandArtifactPreviewText(lastMessage.content) : null),
-    [lastMessage?.content],
-  );
+  const usersById = useUsersById();
+  const slashCommandArtifactPreviewText = useMemo(() => {
+    const preview = previewSourceContent
+      ? getSlashCommandArtifactPreviewText(previewSourceContent)
+      : null;
+    // The artifact preview is the raw Flow body; resolve its tokens so the row
+    // never shows `<broadcast:channel>` / `<userid:…>` verbatim.
+    return preview
+      ? stripFlowMarkup(preview, userId => {
+          const user = usersById.get(userId);
+          return user ? getUserDisplayName(user) : undefined;
+        })
+      : null;
+  }, [previewSourceContent, usersById]);
 
   // Memoize message preview with RenderMessageWithHTML component
   const messagePreview = useMemo(() => {
@@ -212,6 +227,7 @@ export const DmListItem = ({
                   statusEmoji={targetUser?.statusEmoji}
                   statusContent={targetUser?.statusContent}
                   statusExpiryAt={targetUser?.statusExpiryAt}
+                  activityStatus={targetUser?.activityStatus}
                   size='sm'
                   className='text-[14px]'
                 />
@@ -280,6 +296,8 @@ export const DmListItem = ({
   }
 
   const isUnread = unreadCount > 0;
+  // The open DM is being read right now; don't flag it as unread in the list.
+  const showUnread = isUnread && !isSelected;
 
   return (
     <div
@@ -288,7 +306,7 @@ export const DmListItem = ({
       onKeyDown={handleKeyDown}
       className={cn(
         'group flex w-full font-normal items-center gap-3 px-3 py-2 text-left cursor-pointer transition-colors duration-150 h-auto rounded-[14px] border border-transparent',
-        isUnread ? 'bg-activity-sidebar-primary' : 'bg-transparent',
+        showUnread ? 'bg-activity-sidebar-primary' : 'bg-transparent',
         'hover:!bg-sidebar-accent',
         isSelected && '!bg-sidebar-accent border-sidebar-border',
       )}
@@ -322,7 +340,7 @@ export const DmListItem = ({
           <div
             className={cn(
               'flex items-center gap-1.5 min-w-0 flex-1 text-sm leading-snug',
-              isUnread ? 'text-foreground' : 'text-muted-foreground',
+              showUnread ? 'text-foreground' : 'text-muted-foreground',
             )}
           >
             <span className='font-semibold truncate min-w-0'>{displayName}</span>
@@ -331,6 +349,7 @@ export const DmListItem = ({
                 statusEmoji={targetUser?.statusEmoji}
                 statusContent={targetUser?.statusContent}
                 statusExpiryAt={targetUser?.statusExpiryAt}
+                activityStatus={targetUser?.activityStatus}
                 size='sm'
                 className='flex-shrink-0 text-[14px]'
               />
@@ -362,7 +381,7 @@ export const DmListItem = ({
             data-track-name='PREVIEW_LINK_CONTAINER'
             className={cn(
               'w-full min-w-0 overflow-hidden text-ellipsis whitespace-nowrap text-sm break-normal',
-              isUnread
+              showUnread
                 ? 'text-foreground [&_.message-html-root]:!text-foreground'
                 : 'text-muted-foreground [&_.message-html-root]:!text-muted-foreground',
               // Make RenderMessageWithHTML output inline and preserve link styles
@@ -385,7 +404,7 @@ export const DmListItem = ({
           >
             {renderMessagePreview()}
           </div>
-          {isUnread && (
+          {showUnread && (
             <span className='shrink-0 rounded-md bg-sidebar-primary px-1 text-[0.625rem] font-bold tabular-nums text-sidebar-primary-foreground'>
               {unreadCount > 9 ? '9+' : unreadCount}
             </span>

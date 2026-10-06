@@ -2,15 +2,21 @@ import { Router, type NextFunction, type Request, type Response } from 'express'
 import {
   UserType,
   createSdlcClawLinkSchema,
+  listSdlcEntityLinksSchema,
   sdlcRepoIds,
-  createSdlcClawArtifactSchema,
+  createSdlcClawDocumentSchema,
   createSdlcTrackSchema,
   createSdlcArtifactTypeSchema,
   renameSdlcArtifactTypeSchema,
   updateSdlcClawArtifactSchema,
+  editSdlcClawArtifactSectionSchema,
+  moveSdlcClawArtifactSchema,
+  archiveSdlcClawArtifactSchema,
+  createSdlcClawTrackFolderSchema,
 } from '@xyne/shared';
+import { ZodError } from 'zod';
 import { DatabaseClient } from '@/database/client';
-import { AppError } from '@/middleware/errorHandler';
+import { AppError, zodErrorToAppError } from '@/middleware/errorHandler';
 import { SdlcHubService, type SdlcActor } from '@/sdlc';
 
 const router = Router();
@@ -20,7 +26,9 @@ const sdlcHub = new SdlcHubService();
 function route(
   handler: (req: Request, res: Response) => Promise<void>,
 ): (req: Request, res: Response, next: NextFunction) => void {
-  return (req, res, next) => void handler(req, res).catch(next);
+  // A bad agent input is the caller's mistake: a 400 the model can read, not a 500.
+  return (req, res, next) =>
+    void handler(req, res).catch(error => next(error instanceof ZodError ? zodErrorToAppError(error) : error));
 }
 
 function channelIdFromBody(req: Request): string | undefined {
@@ -36,7 +44,7 @@ async function actorFromRequest(req: Request): Promise<SdlcActor> {
     where: { id: userId },
     select: { userType: true, workspaceId: true },
   });
-  if (user?.userType !== UserType.APP) return { userId, workspaceId };
+  if (user?.userType !== UserType.APP && user?.userType !== UserType.AGENT) return { userId, workspaceId };
 
   const actingUserHeader = req.headers['x-xyne-acting-user-id'];
   const actingUserId = typeof actingUserHeader === 'string' ? actingUserHeader.trim() : '';
@@ -47,7 +55,7 @@ async function actorFromRequest(req: Request): Promise<SdlcActor> {
     where: {
       id: actingUserId,
       workspaceId,
-      userType: { not: UserType.APP },
+      userType: { notIn: [UserType.APP, UserType.AGENT] },
     },
     select: { id: true },
   });
@@ -72,6 +80,15 @@ router.post(
       channelId
     );
     res.status(201).json({ success: true, link });
+  }),
+);
+
+router.post(
+  '/entity-links/list',
+  route(async (req, res) => {
+    const input = listSdlcEntityLinksSchema.parse(req.body);
+    const links = await sdlcHub.listEntityLinks(await actorFromRequest(req), input);
+    res.status(200).json({ success: true, links });
   }),
 );
 
@@ -106,6 +123,15 @@ router.post(
     const input = createSdlcTrackSchema.parse(req.body);
     const track = await sdlcHub.createTrack(await actorFromRequest(req), input);
     res.status(201).json({ success: true, track });
+  }),
+);
+
+router.post(
+  '/track-folders',
+  route(async (req, res) => {
+    const input = createSdlcClawTrackFolderSchema.parse(req.body);
+    const folder = await sdlcHub.createTrackFolderFromClaw(await actorFromRequest(req), input);
+    res.status(201).json({ success: true, folder });
   }),
 );
 
@@ -152,8 +178,12 @@ router.patch(
 router.post(
   '/artifacts',
   route(async (req, res) => {
-    const input = createSdlcClawArtifactSchema.parse(req.body);
-    const artifact = await sdlcHub.createArtifactFromClaw(await actorFromRequest(req), input);
+    const input = createSdlcClawDocumentSchema.parse(req.body);
+    const actor = await actorFromRequest(req);
+    const artifact =
+      'artifactType' in input
+        ? await sdlcHub.createWikiPage(actor, input)
+        : await sdlcHub.createArtifactFromClaw(actor, input);
     res.status(201).json({ success: true, artifact });
   }),
 );
@@ -163,6 +193,33 @@ router.post(
   route(async (req, res) => {
     const input = updateSdlcClawArtifactSchema.parse(req.body);
     const artifact = await sdlcHub.updateArtifactFromClaw(await actorFromRequest(req), input);
+    res.status(200).json({ success: true, artifact });
+  }),
+);
+
+router.post(
+  '/artifacts/section',
+  route(async (req, res) => {
+    const input = editSdlcClawArtifactSectionSchema.parse(req.body);
+    const artifact = await sdlcHub.editArtifactSectionFromClaw(await actorFromRequest(req), input);
+    res.status(200).json({ success: true, artifact });
+  }),
+);
+
+router.post(
+  '/artifacts/move',
+  route(async (req, res) => {
+    const input = moveSdlcClawArtifactSchema.parse(req.body);
+    const artifact = await sdlcHub.moveArtifactFromClaw(await actorFromRequest(req), input);
+    res.status(200).json({ success: true, artifact });
+  }),
+);
+
+router.post(
+  '/artifacts/archive',
+  route(async (req, res) => {
+    const input = archiveSdlcClawArtifactSchema.parse(req.body);
+    const artifact = await sdlcHub.archiveArtifactFromClaw(await actorFromRequest(req), input);
     res.status(200).json({ success: true, artifact });
   }),
 );

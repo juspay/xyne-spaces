@@ -1,6 +1,7 @@
 import type { ChatActionResponse } from "@/apps/types";
 import type {
 	SlackChatDeleteResponse,
+	SlackChatPostEphemeralResponse,
 	SlackChatPostMessageResponse,
 	SlackChatUpdateResponse,
 } from "../types";
@@ -25,6 +26,13 @@ export function transformPostMessageResponse(
 			...(username ? { username } : {}),
 		},
 	};
+}
+
+
+export function transformPostEphemeralResponse(
+	messageId: string,
+): SlackChatPostEphemeralResponse {
+	return { ok: true, message_ts: messageId };
 }
 
 export function transformUpdateResponse(

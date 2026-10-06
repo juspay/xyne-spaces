@@ -275,11 +275,12 @@ export const SearchUserV2: React.FC<SearchParticipantsProps> = ({
           ) : (
             <span className='w-1.5 h-1.5 border border-muted-foreground rounded-full'></span>
           )}
-          {(user.statusEmoji || user.statusContent) && (
+          {(user.activityStatus || user.statusEmoji || user.statusContent) && (
             <StatusIndicator
               statusEmoji={user.statusEmoji}
               statusContent={user.statusContent}
               statusExpiryAt={user.statusExpiryAt}
+              activityStatus={user.activityStatus}
               size='sm'
             />
           )}

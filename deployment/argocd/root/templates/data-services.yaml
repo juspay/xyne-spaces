@@ -1,0 +1,58 @@
+{{- $ns := .Values.global.namespace }}
+{{- $cnpg := .Values.addons.cnpg }}
+{{- if $cnpg.enabled }}
+{{- $values := include "xyne-root.merge" (dict "base" (dict "crds" (dict "create" true)) "layers" (list $cnpg.values)) | fromYaml }}
+{{- include "xyne-root.application" (dict "root" $ "name" "cnpg-operator" "namespace" $cnpg.namespace "wave" -2 "source" (include "xyne-root.helmSource" (dict "root" $ "repoURL" "https://cloudnative-pg.github.io/charts" "chart" "cloudnative-pg" "targetRevision" $cnpg.version "releaseName" "cnpg" "values" $values) | fromYaml)) }}
+{{- $pg := .Values.infra.postgres }}
+{{- $c := $cnpg.cluster }}
+{{- $clusterValues := dict
+  "namespace" $ns
+  "instances" $c.instances
+  "imageName" $c.imageName
+  "storage" $c.storage
+  "pooler" $c.pooler
+  "backup" $c.backup
+  "databases" $pg.databases
+  "owner" $pg.username
+  "appSecret" "xyne-pg-app"
+}}
+{{- $clusterValues = mergeOverwrite $clusterValues (include "xyne-root.pool" (dict "root" $ "pool" "general") | fromYaml) }}
+{{- include "xyne-root.application" (dict "root" $ "name" "pg-cluster" "namespace" $ns "wave" -1 "source" (include "xyne-root.helmSource" (dict "root" $ "path" "deployment/argocd/addons/pg-cluster" "targetRevision" .Values.platformRevision "releaseName" "pg-cluster" "values" $clusterValues) | fromYaml)) }}
+{{- end }}
+
+{{- $minio := .Values.addons.minio }}
+{{- if $minio.enabled }}
+{{- $buckets := list }}
+{{- range $k, $v := .Values.infra.storage.buckets }}
+{{- if $v }}
+{{- $buckets = append $buckets (dict "name" $v "policy" "none" "purge" false) }}
+{{- end }}
+{{- end }}
+{{- $base := dict
+  "fullnameOverride" "xyne-minio"
+  "mode" "standalone"
+  "replicas" 1
+  "existingSecret" "xyne-minio-root"
+  "persistence" (dict "enabled" true "size" $minio.persistence.size "storageClass" $minio.persistence.storageClass)
+  "resources" $minio.resources
+  "buckets" $buckets
+  "users" (list)
+  "podAnnotations" (dict "sidecar.istio.io/inject" "false")
+  "makeBucketJob" (dict "podAnnotations" (dict "sidecar.istio.io/inject" "false"))
+}}
+{{- $base = mergeOverwrite $base (include "xyne-root.pool" (dict "root" $ "pool" "general") | fromYaml) }}
+{{- $values := include "xyne-root.merge" (dict "base" $base "layers" (list $minio.values)) | fromYaml }}
+{{- include "xyne-root.application" (dict "root" $ "name" "minio" "namespace" $ns "wave" -2 "source" (include "xyne-root.helmSource" (dict "root" $ "repoURL" "https://charts.min.io/" "chart" "minio" "targetRevision" $minio.version "releaseName" "xyne-minio" "values" $values) | fromYaml)) }}
+{{- end }}
+
+{{- $redis := .Values.addons.redis }}
+{{- if $redis.enabled }}
+{{- $base := dict
+  "fullnameOverride" "xyne-redis"
+  "auth" (dict "existingSecret" "xyne-redis-auth" "existingSecretKey" "password")
+  "persistence" (dict "enabled" true "size" $redis.persistence.size "storageClass" $redis.persistence.storageClass)
+}}
+{{- $base = mergeOverwrite $base (include "xyne-root.pool" (dict "root" $ "pool" "general") | fromYaml) }}
+{{- $values := include "xyne-root.merge" (dict "base" $base "layers" (list $redis.values)) | fromYaml }}
+{{- include "xyne-root.application" (dict "root" $ "name" "xyne-redis" "namespace" $ns "wave" -2 "source" (include "xyne-root.helmSource" (dict "root" $ "path" "helm-charts/charts/xyne-redis" "releaseName" "xyne-redis" "values" $values) | fromYaml)) }}
+{{- end }}

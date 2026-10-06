@@ -186,6 +186,13 @@ export const shortcuts = {
     category: 'SDLC',
     preventDefault: true,
   },
+  'sdlc.switchHub': {
+    keys: 'mod+j',
+    scope: 'global',
+    description: 'Switch hub',
+    category: 'SDLC',
+    preventDefault: true,
+  },
   'sdlc.focusSidebar': {
     keys: 'mod+shift+s',
     scope: 'global',
@@ -207,125 +214,180 @@ export const shortcuts = {
     category: 'SDLC',
     preventDefault: true,
   },
+  'sdlc.toggleConversations': {
+    keys: 'mod+shift+d',
+    scope: 'global',
+    description: 'Show or hide discussions',
+    category: 'SDLC',
+    preventDefault: true,
+  },
   'sdlc.focusTickets': {
     keys: 'mod+shift+k',
     scope: 'global',
-    description: 'Focus the ticket list',
+    description: "Open the track's tickets",
     category: 'SDLC',
     preventDefault: true,
   },
-  'sdlc.focusFinder': {
+  'sdlc.focusFiles': {
     keys: 'mod+shift+e',
     scope: 'global',
-    description: 'Focus the artifact browser',
+    description: 'Focus the file list',
     category: 'SDLC',
     preventDefault: true,
   },
-  'finder.down': {
+  'files.down': {
     keys: ['down', 'j'],
-    scope: 'sdlc-finder',
+    scope: 'sdlc-files',
     description: 'Next item',
     category: 'SDLC',
     preventDefault: true,
   },
-  'finder.up': {
+  'files.up': {
     keys: ['up', 'k'],
-    scope: 'sdlc-finder',
+    scope: 'sdlc-files',
     description: 'Previous item',
     category: 'SDLC',
     preventDefault: true,
   },
-  'finder.into': {
+  'files.into': {
     keys: ['right', 'l'],
-    scope: 'sdlc-finder',
+    scope: 'sdlc-files',
     description: 'Go into folder',
     category: 'SDLC',
     preventDefault: true,
   },
-  'finder.out': {
+  'files.out': {
     keys: ['left', 'h'],
-    scope: 'sdlc-finder',
-    description: 'Back to parent folder',
+    scope: 'sdlc-files',
+    description: 'Up to the parent folder',
     category: 'SDLC',
     preventDefault: true,
   },
-  'finder.open': {
+  'files.open': {
     keys: 'enter',
-    scope: 'sdlc-finder',
-    description: 'Open without leaving this level',
+    scope: 'sdlc-files',
+    description: 'Open',
     category: 'SDLC',
     preventDefault: true,
   },
-  'finder.rename': {
+  'files.rename': {
     keys: 'r',
-    scope: 'sdlc-finder',
+    scope: 'sdlc-files',
     description: 'Rename folder',
     category: 'SDLC',
     preventDefault: true,
   },
-  'finder.preview': {
+  'files.preview': {
     keys: 'shift+enter',
-    scope: 'sdlc-finder',
+    scope: 'sdlc-files',
     description: 'Preview artifact',
     category: 'SDLC',
     preventDefault: true,
   },
-  'finder.closePreview': {
+  'files.closePreview': {
     keys: 'escape',
     scope: 'global',
     description: 'Close the artifact preview',
     category: 'SDLC',
     preventDefault: true,
   },
-  'finder.openInWindow': {
+  'files.openInWindow': {
     keys: 'mod+enter',
-    scope: 'sdlc-finder',
-    description: 'Open artifact in a new window',
+    scope: 'sdlc-files',
+    description: 'Open in a new tab or window',
     category: 'SDLC',
     preventDefault: true,
   },
-  'finder.newFolder': {
+  'explorer.down': {
+    keys: ['down', 'j'],
+    scope: 'sdlc-explorer',
+    description: 'Next item',
+    category: 'SDLC',
+    preventDefault: true,
+  },
+  'explorer.up': {
+    keys: ['up', 'k'],
+    scope: 'sdlc-explorer',
+    description: 'Previous item',
+    category: 'SDLC',
+    preventDefault: true,
+  },
+  'explorer.expand': {
+    keys: ['right', 'l'],
+    scope: 'sdlc-explorer',
+    description: 'Expand folder',
+    category: 'SDLC',
+    preventDefault: true,
+  },
+  'explorer.collapse': {
+    keys: ['left', 'h'],
+    scope: 'sdlc-explorer',
+    description: 'Collapse folder',
+    category: 'SDLC',
+    preventDefault: true,
+  },
+  'explorer.open': {
+    keys: 'enter',
+    scope: 'sdlc-explorer',
+    description: 'Open in a tab',
+    category: 'SDLC',
+    preventDefault: true,
+  },
+  'files.newFolder': {
     keys: 'n',
-    scope: 'sdlc-finder',
+    scope: 'sdlc-files',
     description: 'New folder here',
     category: 'SDLC',
   },
-  'finder.newArtifact': {
+  'files.newArtifact': {
     keys: 'shift+n',
-    scope: 'sdlc-finder',
+    scope: 'sdlc-files',
     description: 'New artifact here',
     category: 'SDLC',
   },
-  'finder.discuss': {
+  'files.discuss': {
     keys: 'd',
-    scope: 'sdlc-finder',
-    description: "Open the folder's conversations",
+    scope: 'sdlc-files',
+    description: "Open the item's discussions",
     category: 'SDLC',
   },
-  'finder.trackDiscuss': {
+  'files.trackDiscuss': {
     keys: 'shift+d',
-    scope: 'sdlc-finder',
-    description: "Open the track's conversations",
+    scope: 'sdlc-files',
+    description: "Open the track's discussions",
     category: 'SDLC',
   },
-  'tickets.down': {
-    keys: ['down', 'j'],
-    scope: 'sdlc-tickets',
-    description: 'Next ticket',
+  'files.select': {
+    keys: 'x',
+    scope: 'sdlc-files',
+    description: 'Select or deselect the item',
+    category: 'SDLC',
+  },
+  'files.selectAll': {
+    keys: 'mod+a',
+    scope: 'sdlc-files',
+    description: 'Select everything in the folder',
     category: 'SDLC',
     preventDefault: true,
   },
-  'tickets.up': {
-    keys: ['up', 'k'],
-    scope: 'sdlc-tickets',
-    description: 'Previous ticket',
+  'files.clearSelection': {
+    keys: 'escape',
+    scope: 'sdlc-files',
+    description: 'Clear the selection',
     category: 'SDLC',
     preventDefault: true,
   },
-  'tickets.open': {
-    keys: 'enter',
-    scope: 'sdlc-tickets',
-    description: 'Open ticket',
+  'files.cut': {
+    keys: 'mod+x',
+    scope: 'sdlc-files',
+    description: 'Cut, to paste in another folder',
+    category: 'SDLC',
+    preventDefault: true,
+  },
+  'files.paste': {
+    keys: 'mod+v',
+    scope: 'sdlc-files',
+    description: 'Paste what was cut into this folder',
     category: 'SDLC',
     preventDefault: true,
   },
@@ -384,6 +446,24 @@ export const shortcuts = {
     allowInInputs: true,
     priority: 20,
     preventDefault: true,
+  },
+
+  // ===== MESSAGE NAVIGATION =====
+  'message.selectPrevious': {
+    keys: 'up',
+    scope: 'channel',
+    description: 'Select previous message',
+    category: 'Messages',
+    allowInInputs: false,
+    priority: 30,
+  },
+  'message.selectNext': {
+    keys: 'down',
+    scope: 'channel',
+    description: 'Select next message',
+    category: 'Messages',
+    allowInInputs: false,
+    priority: 30,
   },
 
   // ===== MESSAGE ACTIONS =====

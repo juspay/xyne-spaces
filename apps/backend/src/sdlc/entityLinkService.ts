@@ -1,5 +1,10 @@
 import { Prisma, type PrismaClient } from '@prisma/client';
-import { SDLC_TRACK_FLAT_RELATION, type EntityLinkOwner } from '@xyne/shared';
+import {
+  SDLC_FOLDER_FLAT_RELATION,
+  SDLC_TRACK_FLAT_RELATION,
+  planSdlcFolderEdges,
+  type EntityLinkOwner,
+} from '@xyne/shared';
 import { logger } from '@/utils/logger';
 import { isCanvasInChannel, isTrackInChannel } from './sdlcChannelMembership';
 
@@ -31,21 +36,95 @@ export async function ensureLink(
   return { created: result.count > 0 };
 }
 
-export async function resolveFolderTrackId(
+/**
+ * Brings an item's folder edges, and those of everything under it, in line with where
+ * it is now filed: the Prisma side of the Zero mutators' refileSdlcFolderEdges, for
+ * the writers that file items outside Zero. Call it after writing or removing the
+ * item's containment edge, in the same transaction.
+ */
+export async function refileFolderEdges(
   db: Db,
-  folderId: string
+  input: {
+    channelId: string;
+    item: { type: string; id: string };
+    /** Where it sits now; null once it no longer sits anywhere. */
+    parent: { type: 'TRACK' | 'FOLDER'; id: string } | null;
+  },
+  actor: EntityLinkActor
+): Promise<void> {
+  const { channelId, item, parent } = input;
+  const folderEdges = { channelId, relationType: SDLC_FOLDER_FLAT_RELATION };
+  const ancestors =
+    parent?.type === 'FOLDER'
+      ? [
+          parent.id,
+          ...(
+            await db.sdlcEntityLink.findMany({
+              where: { ...folderEdges, targetType: 'FOLDER', targetId: parent.id },
+              select: { sourceId: true },
+            })
+          ).map(edge => edge.sourceId),
+        ]
+      : [];
+  const descendants =
+    item.type === 'FOLDER'
+      ? (
+          await db.sdlcEntityLink.findMany({
+            where: { ...folderEdges, sourceType: 'FOLDER', sourceId: item.id },
+            select: { targetType: true, targetId: true },
+          })
+        ).map(edge => ({ type: edge.targetType, id: edge.targetId }))
+      : [];
+  const existing = await db.sdlcEntityLink.findMany({
+    where: {
+      ...folderEdges,
+      targetId: { in: [item.id, ...descendants.map(descendant => descendant.id)] },
+    },
+    select: { id: true, sourceId: true, targetType: true, targetId: true },
+  });
+  const plan = planSdlcFolderEdges({ item, ancestors, descendants, existing });
+  if (plan.remove.length > 0) {
+    await db.sdlcEntityLink.deleteMany({ where: { id: { in: plan.remove } } });
+  }
+  if (plan.add.length > 0) {
+    await db.sdlcEntityLink.createMany({
+      data: plan.add.map(edge => ({
+        workspaceId: actor.workspaceId,
+        channelId,
+        sourceType: 'FOLDER',
+        ...edge,
+        relationType: SDLC_FOLDER_FLAT_RELATION,
+        createdBy: actor.userId,
+      })),
+      skipDuplicates: true,
+    });
+  }
+}
+
+/**
+ * The track an item belongs to, read off the flat edge every track item carries.
+ * One lookup whatever the item is and however deep it is filed, because the flat
+ * edge does not move when containment does.
+ */
+export async function resolveItemTrackId(
+  db: Db,
+  targetType: string,
+  targetId: string
 ): Promise<string | null> {
   const edge = await db.sdlcEntityLink.findFirst({
     where: {
       sourceType: 'TRACK',
-      targetType: 'FOLDER',
-      targetId: folderId,
+      targetType,
+      targetId,
       relationType: SDLC_TRACK_FLAT_RELATION,
     },
     select: { sourceId: true },
   });
   return edge?.sourceId ?? null;
 }
+
+export const resolveFolderTrackId = (db: Db, folderId: string): Promise<string | null> =>
+  resolveItemTrackId(db, 'FOLDER', folderId);
 
 export async function validateOwnerInChannel(
   db: Db,
@@ -55,8 +134,12 @@ export async function validateOwnerInChannel(
   if (owner.sourceType === 'TRACK') {
     return isTrackInChannel(db, owner.sourceId, channelId);
   }
-  if (owner.sourceType === 'FOLDER') {
-    const trackId = await resolveFolderTrackId(db, owner.sourceId);
+  if (
+    owner.sourceType === 'FOLDER' ||
+    owner.sourceType === 'ATTACHMENT' ||
+    owner.sourceType === 'LINK'
+  ) {
+    const trackId = await resolveItemTrackId(db, owner.sourceType, owner.sourceId);
     return trackId ? isTrackInChannel(db, trackId, channelId) : false;
   }
   return isCanvasInChannel(db, owner.sourceId, channelId);
@@ -64,10 +147,12 @@ export async function validateOwnerInChannel(
 
 export async function resolveInheritedOwner(
   db: Db,
-  conversationId: string
+  conversationId: string,
+  channelId?: string
 ): Promise<EntityLinkOwner | null> {
   const link = await db.sdlcEntityLink.findFirst({
     where: {
+      ...(channelId ? { channelId } : {}),
       targetType: 'CONVERSATION',
       targetId: conversationId,
       relationType: 'DISCUSSION',
@@ -77,7 +162,9 @@ export async function resolveInheritedOwner(
   return link &&
     (link.sourceType === 'CANVAS' ||
       link.sourceType === 'TRACK' ||
-      link.sourceType === 'FOLDER')
+      link.sourceType === 'FOLDER' ||
+      link.sourceType === 'ATTACHMENT' ||
+      link.sourceType === 'LINK')
     ? { sourceType: link.sourceType, sourceId: link.sourceId }
     : null;
 }
@@ -169,12 +256,14 @@ export async function linkCreatedEntities(
         );
       }
     } else {
-      if (owner.sourceType === 'FOLDER') {
+      // A folder, a file or a link owns the ticket it spawned, the same way an
+      // artifact does; only a track has no edge of its own to add.
+      if (owner.sourceType !== 'TRACK') {
         await ensureLink(
           db,
           {
             channelId,
-            sourceType: 'FOLDER',
+            sourceType: owner.sourceType,
             sourceId: owner.sourceId,
             targetType: 'TICKET',
             targetId: ticketId,
@@ -184,9 +273,9 @@ export async function linkCreatedEntities(
         );
       }
       const trackId =
-        owner.sourceType === 'FOLDER'
-          ? await resolveFolderTrackId(db, owner.sourceId)
-          : owner.sourceId;
+        owner.sourceType === 'TRACK'
+          ? owner.sourceId
+          : await resolveItemTrackId(db, owner.sourceType, owner.sourceId);
       if (trackId) {
         await ensureLink(
           db,

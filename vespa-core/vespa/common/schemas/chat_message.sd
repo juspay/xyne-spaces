@@ -124,6 +124,12 @@ schema chat_message {
       attribute: fast-search
     }
 
+    field groupMentions type array<string> {
+      # Filter-only — the response never reads it, so it's kept out of every document-summary.
+      indexing: attribute
+      attribute: fast-search
+    }
+
     field updatedAt type string {
       indexing: index | attribute | summary
       index: enable-bm25

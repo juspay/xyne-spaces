@@ -16,9 +16,18 @@ import {
   warmOwnershipClient,
 } from "./run-ownership.js";
 import { startRunControlSubscriber } from "./run-control.js";
+import { RUN_TIMED_OUT, maxRunMs, raceRunDeadline } from "./run-deadline.js";
 import { createLogger } from "./logger.js";
 import { metric } from "./metrics.js";
 import { SERVER } from "./config.js";
+import {
+  activeAutomationRuns,
+  automationConcurrencyLimit,
+  automationDeferMs,
+  isAutomationPayload,
+  releaseAutomationSlot,
+  tryAcquireAutomationSlot,
+} from "./automation-cap.js";
 import {
   PRESSURE_CHECK_INTERVAL_MS,
   describePressure,
@@ -99,6 +108,86 @@ async function notifyTerminalFailure(job: Job<InternalRunPayload> | undefined, e
   });
 }
 
+async function notifyRunTimeout(job: Job<InternalRunPayload>, limitMs: number): Promise<void> {
+  const { sessionId, sessionToken, callbackUrl, userId, conversationId, agentSlug, idempotencyKey } = job.data;
+  if (!sessionId?.trim() || !sessionToken?.trim() || !callbackUrl) return;
+  if ((await job.getState().catch(() => "unknown")) !== "active") return;
+  const marker = await gcsDownloadResultMarker(idempotencyKey ?? sessionId).catch(() => null);
+  if (marker) return;
+  await sendCallback(callbackUrl, sessionToken.trim(), {
+    sessionId,
+    userId: userId ?? null,
+    conversationId: conversationId ?? null,
+    agentSlug: agentSlug ?? null,
+    status: "failed",
+    error: `run_timed_out: the run did not finish within ${Math.round(limitMs / 60000)} minutes and was stopped — please retry`,
+  });
+}
+
+async function runClaimedJob(
+  job: Job<InternalRunPayload>,
+  token: string | undefined,
+  sessionId: string,
+  agent: string,
+  ownerToken: string,
+): Promise<void> {
+  metric.count("run_queue_claimed", { agent, session: sessionId, attempt: job.attemptsMade + 1 });
+  await postProgressLabel(job.data, "Working on it...").catch(() => {});
+  await claimOwnership(sessionId, ownerToken);
+  let fencedOut = false;
+  registerOwnedSession(sessionId, ownerToken, () => {
+    if (fencedOut) return;
+    fencedOut = true;
+    fenceSession(sessionId);
+    metric.count("run_queue_ownership_lost", { agent, session: sessionId });
+    clog.warn(`[run-queue] lost ownership of session=${sessionId} — fencing outputs and aborting`);
+    abortRunForOwnershipLoss(sessionId);
+  });
+  let outcome: RunOutcome;
+  let timedOut = false;
+  const limitMs = maxRunMs();
+  try {
+    const result = await raceRunDeadline(
+      executeRunFromPayload(job.data, {
+        onDrainRequested: async () => "reschedule",
+        isFencedOut: () => fencedOut,
+      }),
+      limitMs,
+    );
+    if (result === RUN_TIMED_OUT) {
+      timedOut = true;
+      fencedOut = true;
+      abortRunForOwnershipLoss(sessionId);
+      metric.count("run_queue_run_timeout", { agent, session: sessionId });
+      clog.error(`[run-queue] run exceeded ${Math.round(limitMs / 60000)}m — abandoning it and releasing ownership session=${sessionId} agent=${agent}`);
+      outcome = "failed";
+    } else {
+      outcome = result;
+    }
+  } finally {
+    unregisterOwnedSession(sessionId);
+    unfenceSession(sessionId);
+    if (!fencedOut || timedOut) await releaseOwnership(sessionId, ownerToken).catch(() => false);
+  }
+  if (timedOut) {
+    await notifyRunTimeout(job, limitMs).catch((err: Error) => {
+      clog.warn(`[run-queue] timeout notify failed session=${sessionId}: ${err.message}`);
+    });
+    return;
+  }
+  if (outcome === "rescheduled") {
+    metric.count("run_queue_rescheduled", { agent, session: sessionId });
+    await postProgressLabel(job.data, "🕒 Re-queued — will resume shortly").catch(() => {});
+    await job.moveToDelayed(Date.now() + 1_000, token);
+    throw new DelayedError();
+  }
+  if (outcome === "failed") {
+    metric.count("run_queue_failed", { agent, session: sessionId });
+    return;
+  }
+  metric.count("run_queue_completed", { agent, session: sessionId, outcome });
+}
+
 export const RUN_EXECUTION_QUEUE_NAME = "run-execution";
 
 function connectionOptions(): {
@@ -157,40 +246,20 @@ export function startRunQueueWorker(): Worker<InternalRunPayload> | null {
         metric.count("run_queue_owner_dead_takeover", { agent, session: sessionId });
         clog.warn(`[run-queue] owner pod ${deadPod ?? "unknown"} has no alive key — taking over session=${sessionId}`);
       }
-      metric.count("run_queue_claimed", { agent, session: sessionId, attempt: job.attemptsMade + 1 });
-      await postProgressLabel(job.data, "Working on it...").catch(() => {});
-      await claimOwnership(sessionId, ownerToken);
-      let fencedOut = false;
-      registerOwnedSession(sessionId, ownerToken, () => {
-        if (fencedOut) return;
-        fencedOut = true;
-        fenceSession(sessionId);
-        metric.count("run_queue_ownership_lost", { agent, session: sessionId });
-        clog.warn(`[run-queue] lost ownership of session=${sessionId} — fencing outputs and aborting`);
-        abortRunForOwnershipLoss(sessionId);
-      });
-      let outcome: RunOutcome;
+      const automation = isAutomationPayload(job.data);
+      if (automation) {
+        if (!tryAcquireAutomationSlot()) {
+          metric.count("run_queue_automation_deferred", { agent, session: sessionId, active: activeAutomationRuns() });
+          await job.moveToDelayed(Date.now() + automationDeferMs(), token);
+          throw new DelayedError();
+        }
+        metric.observe("run_queue_automation_wait_ms", Math.max(0, Date.now() - job.timestamp), { agent, active: activeAutomationRuns() });
+      }
       try {
-        outcome = await executeRunFromPayload(job.data, {
-          onDrainRequested: async () => "reschedule",
-          isFencedOut: () => fencedOut,
-        });
+        return await runClaimedJob(job, token, sessionId, agent, ownerToken);
       } finally {
-        unregisterOwnedSession(sessionId);
-        unfenceSession(sessionId);
-        if (!fencedOut) await releaseOwnership(sessionId, ownerToken).catch(() => false);
+        if (automation) releaseAutomationSlot();
       }
-      if (outcome === "rescheduled") {
-        metric.count("run_queue_rescheduled", { agent, session: sessionId });
-        await postProgressLabel(job.data, "🕒 Re-queued — will resume shortly").catch(() => {});
-        await job.moveToDelayed(Date.now() + 1_000, token);
-        throw new DelayedError();
-      }
-      if (outcome === "failed") {
-        metric.count("run_queue_failed", { agent, session: sessionId });
-        return;
-      }
-      metric.count("run_queue_completed", { agent, session: sessionId, outcome });
     },
     {
       connection,
@@ -237,6 +306,6 @@ export function startRunQueueWorker(): Worker<InternalRunPayload> | null {
     }
   }, PRESSURE_CHECK_INTERVAL_MS).unref();
 
-  clog.info(`[run-queue] worker started queue=${RUN_EXECUTION_QUEUE_NAME} redis=${connection.host}:${connection.port} concurrency=10000`);
+  clog.info(`[run-queue] worker started queue=${RUN_EXECUTION_QUEUE_NAME} redis=${connection.host}:${connection.port} concurrency=10000 automationConcurrency=${automationConcurrencyLimit() || "unlimited"}`);
   return worker;
 }

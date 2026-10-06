@@ -29,11 +29,14 @@ interface BulkActionToolbarProps {
   userGroups?: UserGroup[];
   stages?: StageOptionSource[];
   onAssigneeChange: (assignee: string | null) => void;
-  onStatusChange: (status: TicketStatusV2) => void;
+  /** Omit to hide the Status action where the stage drives status (the generic ticket list). */
+  onStatusChange?: (status: TicketStatusV2) => void;
   onPriorityChange: (priority: TicketPriority | null) => void;
   onStageChange: (stage: string) => void;
   onDueDateChange: (date: Date | null) => void;
   onClearSelection: () => void;
+  /** Shown as a "Select all" action when the host view has no header checkbox. */
+  onSelectAll?: () => void;
   availableTags: string[];
   onTagsChange: (tags: string[]) => void;
 }
@@ -49,6 +52,7 @@ export const BulkActionToolbar: React.FC<BulkActionToolbarProps> = ({
   onStageChange,
   onDueDateChange,
   onClearSelection,
+  onSelectAll,
   onTagsChange,
   availableTags,
 }) => {
@@ -93,6 +97,16 @@ export const BulkActionToolbar: React.FC<BulkActionToolbarProps> = ({
           <span className='text-xs sm:text-sm font-semibold text-foreground whitespace-nowrap overflow-hidden text-ellipsis'>
             {selectedCount} {selectedCount === 1 ? 'ticket' : 'tickets'} selected
           </span>
+          {onSelectAll && (
+            <button
+              onClick={onSelectAll}
+              className='text-xs sm:text-sm font-semibold text-muted-foreground hover:text-foreground transition-colors whitespace-nowrap flex-shrink-0'
+              data-track-category='Tickets'
+              data-track-name='ToggleSelectAll'
+            >
+              Select all
+            </button>
+          )}
         </div>
         <div className='flex flex-wrap items-center gap-3 sm:gap-1 justify-start w-full sm:w-auto'>
           {/* Assignee Selector */}
@@ -114,22 +128,24 @@ export const BulkActionToolbar: React.FC<BulkActionToolbarProps> = ({
           />
 
           {/* Status Selector */}
-          <EntitySelector
-            options={StatusOptions}
-            selectedValue={null}
-            onSelect={v => {
-              if (v) onStatusChange(v as TicketStatusV2);
-              setActiveMenu(null);
-            }}
-            placeholder='Status'
-            searchPlaceholder='Search status...'
-            variant='inline'
-            isOpen={activeMenu === 'status'}
-            onOpenChange={open => setActiveMenu(open ? 'status' : null)}
-            inputClassName='!bg-transparent placeholder:text-foreground text-foreground border-none hover:bg-background/5 text-xs sm:text-sm px-2 font-semibold'
-            inputIcon={<CircleCheckBig className='size-4 text-foreground' />}
-            showIndicator={false}
-          />
+          {onStatusChange && (
+            <EntitySelector
+              options={StatusOptions}
+              selectedValue={null}
+              onSelect={v => {
+                if (v) onStatusChange(v as TicketStatusV2);
+                setActiveMenu(null);
+              }}
+              placeholder='Status'
+              searchPlaceholder='Search status...'
+              variant='inline'
+              isOpen={activeMenu === 'status'}
+              onOpenChange={open => setActiveMenu(open ? 'status' : null)}
+              inputClassName='!bg-transparent placeholder:text-foreground text-foreground border-none hover:bg-background/5 text-xs sm:text-sm px-2 font-semibold'
+              inputIcon={<CircleCheckBig className='size-4 text-foreground' />}
+              showIndicator={false}
+            />
+          )}
 
           {/* Priority Selector */}
           <EntitySelector

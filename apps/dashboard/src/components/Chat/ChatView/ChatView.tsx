@@ -1,3 +1,4 @@
+import { readTrackSource } from '../../../services/Analytics/trackSource';
 import { ReactElement, useRef, useEffect } from 'react';
 import useMeasure from '../../../hooks/useMeasure';
 import { ResizableGroup, Panel, Separator } from '../../ui/Resizable/Resizable';
@@ -8,7 +9,6 @@ import {
   useParams,
   useLocation,
   useNavigationType,
-  NavigationType,
   useOutletContext,
   useSearchParams,
 } from 'react-router-dom';
@@ -22,6 +22,8 @@ import { useAuthContextValues } from '../../../hooks/useAuth';
 import { mutators } from '../../../zero/mutators';
 import { usePreviousChannelId } from '../../../hooks/usePreviousChannelId';
 import { useChannel, useChannelParticipation } from '../../../hooks/useChannels';
+import { useUser } from '../../../hooks/useUsers';
+import { isUserDeactivated } from '../../../utils/userDisplayName';
 import { setLastVisitedChannel } from '../../../hooks/useLastVisitedChannel';
 import { useRouteContext } from '../../../hooks/useRouteContext';
 import { usePlatform } from '../../../hooks/usePlatform';
@@ -102,12 +104,12 @@ const ChatView = (): ReactElement => {
   // re-renders and thread navigation inside the same channel don't refire.
   //
   // `source` is the attribution: the navigating surface sets `state.trackSource`
-  // (see useWorkspaceNavigate, which forwards NavigateOptions untouched). Two
-  // rules keep it honest:
-  //   - POP means back/forward. React Router replays the ORIGINAL state on history
-  //     navigation, so without this check a back button would re-report whichever
-  //     surface the user first arrived from and inflate it.
-  //   - No state at all means a deep link or an unattributed caller, not an error.
+  // (see useWorkspaceNavigate, which forwards NavigateOptions untouched) and
+  // readTrackSource applies the rules: POP after the first load is the back
+  // button (history_pop) — React Router replays the ORIGINAL state on history
+  // navigation, so without this a back button would re-report whichever surface
+  // the user first arrived from; the router's `default` key marks the first
+  // load itself (deep link, refresh), which is `direct`, not history.
   //
   // No event label: for a DM the display name is the other person's name, and
   // eventLabel is stored verbatim and unmasked. The channel dimensions below
@@ -118,16 +120,14 @@ const ChatView = (): ReactElement => {
     if (viewedChannelIdRef.current === channelId) return;
     viewedChannelIdRef.current = channelId;
 
-    const navState = location.state as { trackSource?: string } | null;
-    const source =
-      navigationType === NavigationType.Pop ? 'history_pop' : (navState?.trackSource ?? 'direct');
+    const source = readTrackSource(location.state, navigationType, location.key);
 
     globalClickTracker.trackManualEvent('CHANNEL', 'CHANNEL_VIEWED', undefined, {
       ...channelTrackingMetadata(channel),
       openedInThread: !!conversationId,
       source,
     });
-  }, [channel, channelId, conversationId, location.state, navigationType]);
+  }, [channel, channelId, conversationId, location.state, location.key, navigationType]);
 
   // Reopen a closed DM: its status loads async (absent from the channel-status map), so key on channelUserStatus with a per-channel ref rather than the single-shot navigation ref.
   const reopenAttemptedForRef = useRef<string | undefined>(undefined);
@@ -198,6 +198,16 @@ const ChatView = (): ReactElement => {
   const isFocusThread = isThreadActive && searchParams.get('focusThread') === '1';
   const isProfileActive = !!userId;
   const isThreadProfileActive = isThreadActive && isProfileActive;
+  // Deactivated-user profile: reached from Cmd+K's fallback when the target
+  // has no prior DM. Render the profile route full-viewport (like the
+  // focus-thread branch below), so the anchor channel behind is suppressed and
+  // the Slack-style layout inside ProfileSidebar owns the screen.
+  const deactivatedProfileUser = useUser(userId ?? '');
+  const isDeactivatedProfileActive =
+    isProfileActive &&
+    !isThreadActive &&
+    !!deactivatedProfileUser &&
+    isUserDeactivated(deactivatedProfileUser);
   const showSecondaryPanel =
     isThreadActive ||
     isCanvasActive ||
@@ -282,6 +292,21 @@ const ChatView = (): ReactElement => {
     );
   }
 
+  // Deactivated-user profile: render ProfileSidebar full-viewport (see
+  // isDeactivatedProfileActive above) — the anchor channel behind it is
+  // suppressed so the Slack-style layout inside ProfileSidebar owns the screen.
+  if (isDeactivatedProfileActive) {
+    return (
+      <div
+        ref={chatViewContainerRef}
+        data-component='ChatView'
+        className={`w-full h-full overflow-hidden relative ${isInPanelWebview ? '' : 'rounded-2xl'}`}
+      >
+        <Outlet />
+      </div>
+    );
+  }
+
   // Handler to close channel summary
   const handleCloseChannelSummary = (): void => {
     void navigate(`${baseRoute}/${channelId}`);
@@ -305,6 +330,13 @@ const ChatView = (): ReactElement => {
     void navigate(newUrl, { replace: true });
   };
 
+  const handleCloseCanvas = (): void => {
+    const newSearchParams = new URLSearchParams(searchParams);
+    newSearchParams.delete('canvasFullscreen');
+    const searchString = newSearchParams.toString();
+    void navigate(`${location.pathname}${searchString ? `?${searchString}` : ''}`);
+  };
+
   // Secondary panel content — defined once, reused for both overlay and
   // side-by-side layouts so there is no JSX duplication.
   const secondaryPanelContent = isExternalChatActive ? (
@@ -314,6 +346,7 @@ const ChatView = (): ReactElement => {
       canvasId={canvasId}
       isFullscreen={isCanvasFullscreen}
       onToggleFullscreen={toggleCanvasFullscreen}
+      onClose={handleCloseCanvas}
     />
   ) : isChannelSummaryActive ? (
     <ChannelSummary

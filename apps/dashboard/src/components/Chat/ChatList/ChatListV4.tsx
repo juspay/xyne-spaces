@@ -9,11 +9,13 @@ import React, {
   useRef,
   startTransition,
   useState,
+  useContext,
 } from 'react';
 import { useChannelParticipation, useVisibleChannel } from '../../../hooks/useChannels';
 import { useZero } from '../../../hooks/useZero';
 import { queries } from '../../../zero/queries';
 import { useQuery } from '../../../hooks/useQuery';
+import { messageInteractionModality } from '../ChatBubble/hoveredMessageRef';
 import { ChatListItem } from '../ChatListItem/ChatListItem';
 import { DatePill } from '../DatePill';
 import { useVirtualizer } from '@tanstack/react-virtual';
@@ -27,7 +29,11 @@ import { formatDatePill } from '../../../utils/dateUtils';
 import { standaloneNavigate } from '../../../utils/electronApp';
 import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import { useRouteContext } from '../../../hooks/useRouteContext';
-import { ArrowDown } from 'lucide-react';
+import { ArrowDown, MessagesSquare } from 'lucide-react';
+import {
+  DiscussionListContext,
+  type DiscussionScope,
+} from '../ConversationPannel/DiscussionListContext';
 import { mutators } from '../../../zero/mutators';
 import { queryCacheActor, flushQueryCachePersistence } from '../../../machines/queryCacheMachine';
 import { browserPanelActor } from '../../../machines/browserPanelMachine';
@@ -37,6 +43,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { withProfiler } from '../../../utils/withProfiler';
 import { getInitialMessageFromConversation } from '../../../utils/conversationMessageHelpers';
 import { usePendingForChannel, buildPendingChannelConversation } from '@xyne/shared/messages';
+import { useEphemeralChannelConversations } from '../../../hooks/useEphemeralMessages';
 import { MessageHoverToolbar } from '../HoverActionsToolbar/MessageHoverToolbar';
 
 export type ChatListProps = {
@@ -44,6 +51,8 @@ export type ChatListProps = {
   projectId?: string | undefined;
   cachedConversations: Conversation[];
   conversationIds?: string[] | undefined;
+  /** Scopes the list to SDLC discussions, joined in the query; paged as ever. */
+  discussionScope?: DiscussionScope | undefined;
   onOpenThread?: ((conversationId: string, e?: React.MouseEvent) => void) | undefined;
   linkedItemCreatedAt?: Anchor;
   linkedCutoffCreatedAt?: Anchor;
@@ -52,6 +61,18 @@ export type ChatListProps = {
   skipMarkAsReadRef: React.RefObject<boolean>;
   unreadsOnly?: boolean;
   onThreadClick?: (channelId: string, conversationId: string) => void;
+  /**
+   * What to show instead of the centred spinner while the first page loads.
+   *
+   * For hosts that already showed a placeholder before this mounted. The default
+   * overlay is opaque and full-bleed, so it replaces whatever the host had with a
+   * different loading language and then cuts to content — three states where the
+   * host only ever meant to show one. Handing the host's own placeholder down
+   * makes the middle state indistinguishable from the first.
+   */
+  loadingFallback?: React.ReactNode;
+  // Reports the virtualizer's real total content height (px) whenever it changes.
+  onTotalHeightChange?: (height: number) => void;
 };
 
 type Anchor = {
@@ -179,6 +200,14 @@ function reconcileConversationWindow(
 
 type CombinedMessage = ReturnType<typeof useCombinedMesseges>['combinedMessages'][number];
 const VISIBLE_CONVERSATION_EPSILON_PX = 1;
+/** Breathing room at both edges before a keyboard-selected row counts as visible. */
+const SELECTION_VIEWPORT_PADDING = 8;
+/**
+ * Where a selection that had to scroll comes to rest, measured from the top of
+ * the list: clear of the sticky date pill (its wrapper's py-2, the pill's own
+ * py-2, and the badge) rather than tucked behind it.
+ */
+const SELECTION_SCROLL_TOP_OFFSET = 56;
 
 function computeNewConvIdx(
   messages: CombinedMessage[],
@@ -201,6 +230,7 @@ const ChatListV4: React.FC<ChatListProps> = ({
   projectId,
   cachedConversations,
   conversationIds: conversationIdsFilter,
+  discussionScope,
   onOpenThread: onOpenThreadOverride,
   linkedItemCreatedAt,
   linkedCutoffCreatedAt,
@@ -209,7 +239,11 @@ const ChatListV4: React.FC<ChatListProps> = ({
   skipMarkAsReadRef,
   unreadsOnly,
   onThreadClick,
+  loadingFallback,
+  onTotalHeightChange,
 }) => {
+  // Set where these conversations are shown as discussions (the SDLC panel).
+  const discussionList = useContext(DiscussionListContext);
   // Save scroll position when unmounting due to /browser fullscreen navigation.
   useEffect(() => {
     return () => {
@@ -230,6 +264,16 @@ const ChatListV4: React.FC<ChatListProps> = ({
   const { baseRoute } = useRouteContext();
   const { isEditingMessage, requestEdit } = useMessageEdit();
   const channelParticipation = useChannelParticipation(channelId);
+  // lastViewedAt as it was when this channel opened. The list marks what is on
+  // screen as read while open, which moves the live value — the "New Messages"
+  // divider and unread scroll must keep pointing at where the user left off.
+  const lastViewedAtOnOpenRef = useRef<{ value: number | null } | null>(null);
+  if (!lastViewedAtOnOpenRef.current && channelParticipation) {
+    lastViewedAtOnOpenRef.current = { value: channelParticipation.lastViewedAt ?? null };
+  }
+  const lastViewedAtOnOpen = lastViewedAtOnOpenRef.current
+    ? lastViewedAtOnOpenRef.current.value
+    : channelParticipation?.lastViewedAt;
   const isDmScope =
     channelScopeType === ChannelScopeType.DM || channelScopeType === ChannelScopeType.GROUP_DM;
   // A closed DM isn't in the seeded status map at mount, so participation is briefly undefined;
@@ -279,6 +323,7 @@ const ChatListV4: React.FC<ChatListProps> = ({
   const latestConversationsListRef = useRef<Conversation[]>([]);
   const [stickyDate, setStickyDate] = useState<string | null>(null);
   const [showScrollButton, setShowScrollButton] = useState(false);
+  const [keyboardSelectedMessageId, setKeyboardSelectedMessageId] = useState<string | null>(null);
   const [isFirstItemScrolledOff, setIsFirstItemScrolledOff] = useState(false);
 
   const scrollStopTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
@@ -308,6 +353,7 @@ const ChatListV4: React.FC<ChatListProps> = ({
 
   // ── Scroll container ──────────────────────────────────────────────────────────
   const parentRef = useRef<HTMLDivElement>(null);
+  const messageListFocusRef = useRef<HTMLButtonElement>(null);
   const dateObserverRef = useRef<IntersectionObserver | null>(null);
   const visibleDatesRef = useRef<
     Map<Element, { timestamp: number; conversationId: string; rect: DOMRect }>
@@ -336,14 +382,18 @@ const ChatListV4: React.FC<ChatListProps> = ({
   // In unreads-only mode (the Unreads inbox), hide everything the user has
   // already seen; pending rows carry the newest timestamps so they survive.
   const filteredConversations = useMemo(() => {
-    if (!unreadsOnly || !channelParticipation?.lastViewedAt) return conversationsWithPending;
-    return conversationsWithPending.filter(
-      conv => conv.createdAt > channelParticipation.lastViewedAt,
-    );
-  }, [conversationsWithPending, unreadsOnly, channelParticipation?.lastViewedAt]);
+    if (!unreadsOnly || !lastViewedAtOnOpen) return conversationsWithPending;
+    return conversationsWithPending.filter(conv => conv.createdAt > lastViewedAtOnOpen);
+  }, [conversationsWithPending, unreadsOnly, lastViewedAtOnOpen]);
+
+  const ephemeralConversations = useEphemeralChannelConversations(channelId);
+  const conversationsWithEphemeral = useMemo(() => {
+    if (ephemeralConversations.length === 0) return filteredConversations;
+    return [...filteredConversations, ...ephemeralConversations];
+  }, [filteredConversations, ephemeralConversations]);
 
   const { combinedMessages, itemHeights } = useCombinedMesseges(
-    filteredConversations,
+    conversationsWithEphemeral,
     isMobile,
     newConversationBoundary?.index ?? -1,
   );
@@ -388,7 +438,8 @@ const ChatListV4: React.FC<ChatListProps> = ({
     // paddingEnd is baked into getTotalSize(), so scrollToEnd()/isAtEnd() and the
     // anchorTo:'end' prepend adjustment all account for it — no per-frame cost,
     // it's a constant added to the sized container.
-    paddingEnd: 28,
+    // Discussion cards carry their own spacing, so the list ends close to the composer.
+    paddingEnd: discussionList ? 12 : 28,
     anchorTo: 'end',
     followOnAppend: 'auto',
     scrollEndThreshold: 80,
@@ -416,6 +467,21 @@ const ChatListV4: React.FC<ChatListProps> = ({
     const isLastFewItems = item.index >= instance.options.count - 5;
     return (isNearBottom && isLastFewItems) || virtualizer.scrollDirection === 'backward';
   };
+
+  const lastReportedTotalHeightRef = useRef<number | null>(null);
+  useEffect(() => {
+    if (!onTotalHeightChange) return;
+    // Mirrors the loading-overlay guard at the bottom of this component: while
+    // there's no cached or loaded content yet, getTotalSize() reflects an empty
+    // list, not the row's real height. Reporting that would be indistinguishable
+    // from "genuinely short" to a caller sizing a collapsed row (UnreadsInbox),
+    // so hold off until there's something real to measure.
+    if (!isInitialLoadComplete && cachedConversations.length === 0) return;
+    const totalHeight = virtualizer.getTotalSize();
+    if (lastReportedTotalHeightRef.current === totalHeight) return;
+    lastReportedTotalHeightRef.current = totalHeight;
+    onTotalHeightChange(totalHeight);
+  });
 
   const virtualItems = virtualizer.getVirtualItems();
   const isConversationFullyVisible = useCallback(
@@ -450,6 +516,7 @@ const ChatListV4: React.FC<ChatListProps> = ({
       channelId,
       isMember,
       ...(conversationIdsFilter && { conversationIds: conversationIdsFilter }),
+      ...(discussionScope && { discussionScope }),
       start: inViewAnchor ? { createdAt: inViewAnchor.createdAt } : null,
       direction: inViewAnchor ? inViewAnchor.direction : 'forward',
       limit: PAGE_SIZE,
@@ -473,6 +540,7 @@ const ChatListV4: React.FC<ChatListProps> = ({
       channelId,
       isMember,
       ...(conversationIdsFilter && { conversationIds: conversationIdsFilter }),
+      ...(discussionScope && { discussionScope }),
       start: cutoffAnchor,
       direction: 'backward',
       limit: PAGE_SIZE,
@@ -487,6 +555,7 @@ const ChatListV4: React.FC<ChatListProps> = ({
       channelId,
       isMember,
       ...(conversationIdsFilter && { conversationIds: conversationIdsFilter }),
+      ...(discussionScope && { discussionScope }),
       limit: PAGE_SIZE / 2,
     }),
     { enabled: conversationFilterEnabled },
@@ -505,6 +574,7 @@ const ChatListV4: React.FC<ChatListProps> = ({
               channelId,
               isMember,
               ...(conversationIdsFilter && { conversationIds: conversationIdsFilter }),
+              ...(discussionScope && { discussionScope }),
               start: oldConversationsAnchorRef.current,
               direction: 'forward',
               limit: PAGE_SIZE,
@@ -517,6 +587,7 @@ const ChatListV4: React.FC<ChatListProps> = ({
           queries.channelConversationsPaginatedV3({
             channelId,
             isMember,
+            ...(discussionScope && { discussionScope }),
             start: newConversationsAnchor,
             direction: 'backward',
             limit: PAGE_SIZE / 2,
@@ -638,6 +709,7 @@ const ChatListV4: React.FC<ChatListProps> = ({
           channelId,
           isMember,
           ...(conversationIdsFilter && { conversationIds: conversationIdsFilter }),
+          ...(discussionScope && { discussionScope }),
           start: oldConversationsAnchorRef.current,
           direction: 'forward',
           limit: PAGE_SIZE,
@@ -689,6 +761,7 @@ const ChatListV4: React.FC<ChatListProps> = ({
           channelId,
           isMember,
           ...(conversationIdsFilter && { conversationIds: conversationIdsFilter }),
+          ...(discussionScope && { discussionScope }),
           start: newConversationsAnchor,
           direction: 'backward',
           limit: PAGE_SIZE,
@@ -729,11 +802,11 @@ const ChatListV4: React.FC<ChatListProps> = ({
 
   // ── New message boundary ──────────────────────────────────────────────────────
   useEffect(() => {
-    if (!channelParticipation?.lastViewedAt || !isInitialLoadComplete) {
+    if (!lastViewedAtOnOpen || !isInitialLoadComplete) {
       setNewConversationBoundary(null);
       return;
     }
-    const idx = computeNewConvIdx(combinedMessages, channelParticipation?.lastViewedAt, user?.id);
+    const idx = computeNewConvIdx(combinedMessages, lastViewedAtOnOpen, user?.id);
     setNewConversationBoundary(prev => {
       if (idx === -1) {
         return null;
@@ -745,7 +818,7 @@ const ChatListV4: React.FC<ChatListProps> = ({
       if (prev !== null && prev.index === idx) return prev;
       return { index: idx, seenConvId: null };
     });
-  }, [combinedMessages, isInitialLoadComplete, channelParticipation?.lastViewedAt, user?.id]);
+  }, [combinedMessages, isInitialLoadComplete, lastViewedAtOnOpen, user?.id]);
 
   // ── Initial scroll ────────────────────────────────────────────────────────────
   // Fires as soon as there is data to render (cache or fresh fetch). Runs before
@@ -781,7 +854,7 @@ const ChatListV4: React.FC<ChatListProps> = ({
       ? combinedMessages.findIndex(m => m.data.conversationId === linkedConversationId)
       : -1;
 
-    const p3Idx = computeNewConvIdx(combinedMessages, channelParticipation?.lastViewedAt, user?.id);
+    const p3Idx = computeNewConvIdx(combinedMessages, lastViewedAtOnOpen, user?.id);
 
     // ── Select winner by priority order ──
     let doScroll: () => void;
@@ -1054,9 +1127,25 @@ const ChatListV4: React.FC<ChatListProps> = ({
     };
   }, [channelId]);
 
+  // ── Mark as read once the list has loaded ─────────────────────────────────────
+  // Without this the channel only counts as read on unmount, so the sidebar badge
+  // keeps showing unread for a channel the user is looking at. The divider and
+  // unread scroll read lastViewedAtOnOpen, so moving lastViewedAt here is safe.
+  const hasMarkedOnOpenRef = useRef(false);
+  useEffect(() => {
+    if (!channelId || !isInitialLoadComplete || hasMarkedOnOpenRef.current) return;
+    if (skipMarkAsReadRef?.current || activitySkipMarkAsReadChannelRef.current) return;
+
+    hasMarkedOnOpenRef.current = true;
+    // No draft args: the composer may not have loaded the draft yet, and sending
+    // '' would delete it. The unmount call above still saves the draft on leave.
+    void zero.mutate(mutators.channel.markChannelAsViewed({ channelId, timestamp: Date.now() }));
+  }, [channelId, isInitialLoadComplete, skipMarkAsReadRef, zero]);
+
   // ── Persist conversations to query cache ──────────────────────────────────────
   useEffect(() => {
-    if (!channelId || conversationIdsFilter) return;
+    // A filtered list isn't the channel's, so it never stands in for it in the cache.
+    if (!channelId || conversationIdsFilter || discussionScope) return;
 
     const flushToCache = (): void => {
       const latest = conversationsRef.current;
@@ -1085,7 +1174,7 @@ const ChatListV4: React.FC<ChatListProps> = ({
       document.removeEventListener('visibilitychange', handleVisibilityChange);
       flushToCache();
     };
-  }, [channelId, conversationIdsFilter]);
+  }, [channelId, conversationIdsFilter, discussionScope]);
 
   // ── Thread opening scroll ──────────────────────────────────────────────────────
   const { conversationId: activeThreadConversationId } = useParams<{ conversationId?: string }>();
@@ -1187,6 +1276,170 @@ const ChatListV4: React.FC<ChatListProps> = ({
     enabled: conversations.length > 0,
     when: isEventFromChannelInput,
   });
+
+  const isMessageListNavigationEvent = useCallback((event: KeyboardEvent): boolean => {
+    const focusTarget = messageListFocusRef.current;
+    if (!focusTarget || event.target !== focusTarget) return false;
+    return document.activeElement === focusTarget;
+  }, []);
+
+  /**
+   * Where the next arrow press starts from. A ref, not state, because the
+   * anchor must never paint anything: only keyboard navigation highlights a
+   * row, while clicks and hovers just move the starting point. It outlives
+   * blur too, so refocusing the list resumes from where the user left off
+   * instead of jumping back to the newest message.
+   */
+  const navigationAnchorRef = useRef<string | null>(null);
+
+  const findSelectedMessageIndex = useCallback((): number => {
+    const anchorMessageId = keyboardSelectedMessageId ?? navigationAnchorRef.current;
+    if (!anchorMessageId) return -1;
+    return combinedMessages.findIndex(item => {
+      const message = getInitialMessageFromConversation(item.data);
+      return message?.messageId === anchorMessageId;
+    });
+  }, [combinedMessages, keyboardSelectedMessageId]);
+
+  /** Keyboard navigation: moves the anchor AND highlights the row it lands on. */
+  const selectMessage = useCallback((messageId: string): void => {
+    navigationAnchorRef.current = messageId;
+    setKeyboardSelectedMessageId(messageId);
+  }, []);
+
+  /**
+   * Scrolls only when the row the selection lands on is not already readable,
+   * then parks it at the top, just below the sticky date pill. Scrolling on
+   * every arrow press makes the whole list lurch under a selection that was
+   * perfectly visible where it was.
+   *
+   * A row taller than the viewport can never be "fully visible", so any
+   * overlap counts for those — otherwise every press on a long message would
+   * scroll.
+   */
+  const scrollSelectionIntoView = useCallback(
+    (index: number): void => {
+      const container = parentRef.current;
+      const row = container?.querySelector<HTMLElement>(`[data-index="${index}"]`);
+      if (container && row) {
+        const containerRect = container.getBoundingClientRect();
+        const rowRect = row.getBoundingClientRect();
+        // Leaves room for the sticky date pill, so a row tucked under it is
+        // treated as out of view rather than readable.
+        const top = containerRect.top + SELECTION_VIEWPORT_PADDING;
+        const bottom = containerRect.bottom - SELECTION_VIEWPORT_PADDING;
+        const isReadable =
+          rowRect.height >= containerRect.height
+            ? rowRect.top < bottom && rowRect.bottom > top
+            : rowRect.top >= top && rowRect.bottom <= bottom;
+        if (isReadable) return;
+      }
+      const offsetInfo = virtualizer.getOffsetForIndex(index, 'start');
+      if (!offsetInfo) return;
+      virtualizer.scrollToOffset(offsetInfo[0] - SELECTION_SCROLL_TOP_OFFSET);
+    },
+    [virtualizer],
+  );
+
+  const selectMessageAtIndex = useCallback(
+    (index: number, direction: -1 | 1): void => {
+      for (let i = index; i >= 0 && i < combinedMessages.length; i += direction) {
+        const item = combinedMessages[i];
+        if (!item) continue;
+        const message = getInitialMessageFromConversation(item.data);
+        if (!message) continue;
+        selectMessage(message.messageId);
+        scrollSelectionIntoView(i);
+        return;
+      }
+    },
+    [combinedMessages, scrollSelectionIntoView, selectMessage],
+  );
+
+  const selectPreviousMessage = useCallback((): void => {
+    // Claims the shortcuts back from a pointer the user has stopped moving.
+    messageInteractionModality.current = 'keyboard';
+    const selectedIndex = findSelectedMessageIndex();
+    selectMessageAtIndex(
+      selectedIndex === -1 ? combinedMessages.length - 1 : selectedIndex - 1,
+      -1,
+    );
+  }, [combinedMessages.length, findSelectedMessageIndex, selectMessageAtIndex]);
+
+  const selectNextMessage = useCallback((): void => {
+    messageInteractionModality.current = 'keyboard';
+    const selectedIndex = findSelectedMessageIndex();
+    // -1 means the selected message is gone (deleted, or no longer loaded).
+    // Both directions then fall back to the newest message, so neither key
+    // goes dead after the anchor disappears.
+    selectMessageAtIndex(selectedIndex === -1 ? combinedMessages.length - 1 : selectedIndex + 1, 1);
+  }, [combinedMessages.length, findSelectedMessageIndex, selectMessageAtIndex]);
+
+  useShortcutById('message.selectPrevious', selectPreviousMessage, {
+    enabled: combinedMessages.length > 0,
+    when: isMessageListNavigationEvent,
+  });
+  useShortcutById('message.selectNext', selectNextMessage, {
+    enabled: combinedMessages.length > 0,
+    // Down needs somewhere to start: a highlighted row, or a click anchor.
+    when: event =>
+      (keyboardSelectedMessageId !== null || navigationAnchorRef.current !== null) &&
+      isMessageListNavigationEvent(event),
+  });
+
+  useEffect(() => {
+    navigationAnchorRef.current = null;
+    setKeyboardSelectedMessageId(null);
+  }, [channelId]);
+
+  const handleMessageListClick = useCallback(
+    (event: React.MouseEvent<HTMLDivElement>) => {
+      // Mobile taps belong to the actions drawer, and there is no keyboard to
+      // hand the selection to.
+      if (isMobile) return;
+      if (!(event.target instanceof Element)) return;
+      if (
+        event.target.closest(
+          'a, button, input, textarea, select, [contenteditable="true"], [role="button"], [role="menuitem"]',
+        )
+      ) {
+        return;
+      }
+      // A click that ends a text drag must leave that text selected: moving
+      // focus to the nav button would collapse it.
+      const textSelection = window.getSelection();
+      if (textSelection !== null && !textSelection.isCollapsed) return;
+
+      // Move the anchor to the clicked row, so the next Up/Down continues from
+      // the message the user just pointed at. Nothing is highlighted here —
+      // the row keeps its ordinary hover treatment and loses it when the
+      // pointer leaves. Clicks on empty space — a date pill, the gap between
+      // rows, the padding under the last message — carry no row and leave the
+      // anchor where it was.
+      const row = event.target.closest<HTMLElement>('[data-conversation-id]');
+      const conversationId = row?.getAttribute('data-conversation-id');
+      if (conversationId !== null && conversationId !== undefined) {
+        // Resolved through the conversation rather than the clicked bubble's
+        // own id: a row can render more than one message, but only the
+        // conversation's initial message is a navigation stop.
+        const item = combinedMessages.find(entry => entry.data.conversationId === conversationId);
+        const message = item ? getInitialMessageFromConversation(item.data) : null;
+        if (message) {
+          navigationAnchorRef.current = message.messageId;
+          // A highlight left over from earlier arrow navigation would now be
+          // somewhere else entirely, so drop it.
+          setKeyboardSelectedMessageId(null);
+        }
+      }
+
+      messageListFocusRef.current?.focus({ preventScroll: true });
+    },
+    [combinedMessages, isMobile],
+  );
+
+  const handleMessageListBlur = useCallback((): void => {
+    setKeyboardSelectedMessageId(null);
+  }, []);
 
   // ── onScroll (replaces Virtuoso rangeChanged + atTopStateChange + atBottomStateChange) ──
   const handleScroll = useCallback(() => {
@@ -1374,14 +1627,27 @@ const ChatListV4: React.FC<ChatListProps> = ({
 
   // ── Empty / loading states ─────────────────────────────────────────────────────
   if (conversations.length === 0 && isInitialLoadComplete)
-    return (
+    return discussionList ? (
+      <div className='flex flex-1 flex-col items-center justify-start px-6 pt-[16vh] text-center'>
+        <span className='mb-3 flex size-10 items-center justify-center rounded-xl bg-muted text-muted-foreground'>
+          <MessagesSquare className='size-5' />
+        </span>
+        <p className='max-w-[18rem] text-[14px] font-medium text-foreground'>
+          No discussions about {discussionList.subject} yet
+        </p>
+      </div>
+    ) : (
       <div className='text-center text-muted-foreground flex-1 flex items-center justify-center'>
         <p className='text-muted-foreground'>No conversations in this channel yet</p>
       </div>
     );
 
   if (!isInitialLoadComplete && cachedConversations.length === 0)
-    return (
+    return loadingFallback !== undefined ? (
+      <div className='absolute inset-0 bg-background z-50' data-testid='chat-list-loading'>
+        {loadingFallback}
+      </div>
+    ) : (
       <div
         className='absolute inset-0 flex items-center justify-center bg-background z-50'
         data-testid='chat-list-loading'
@@ -1399,10 +1665,11 @@ const ChatListV4: React.FC<ChatListProps> = ({
       ref={hoverToolbarContainerRef}
       data-component='ChatListV11'
       data-testid='chat-message-list'
-      className='flex-1 relative no-scrollbar min-h-0'
+      className='flex-1 relative no-scrollbar min-h-0 isolate'
     >
       {/* Sticky date pill overlay */}
-      {stickyDate && isFirstItemScrolledOff && (
+      {/* Over discussion cards it covers the top one, and each card has its date. */}
+      {stickyDate && isFirstItemScrolledOff && !discussionList && (
         <div className='absolute top-0 left-0 right-0 z-10 pointer-events-none'>
           <div className='relative flex justify-center py-2'>
             <DatePill dateText={stickyDate} />
@@ -1410,10 +1677,22 @@ const ChatListV4: React.FC<ChatListProps> = ({
         </div>
       )}
 
+      <button
+        ref={messageListFocusRef}
+        type='button'
+        className='sr-only'
+        aria-label='Navigate messages with the up and down arrow keys'
+        data-track-category='CHAT_LIST'
+        data-track-name='FOCUS_MESSAGE_NAVIGATION'
+        onClick={selectPreviousMessage}
+        onBlur={handleMessageListBlur}
+      />
+
       {/* Scroll container — replaces <Virtuoso> */}
       <div
         ref={parentRef}
         onScroll={handleScroll}
+        onClickCapture={handleMessageListClick}
         style={{ height: '100%', overflow: 'auto', zIndex: 0, overflowAnchor: 'none' }}
         className='no-scrollbar'
         data-virtuoso-scroller='true'
@@ -1421,13 +1700,14 @@ const ChatListV4: React.FC<ChatListProps> = ({
         {/* Flex wrapper: when content is shorter than the viewport, justify-content: flex-end
                pushes it to the bottom. For full/overflowing lists it has no effect. This is a
                pure CSS solution — no state, no TanStack paddingStart — so item deletion and
-               addition never interfere with anchorTo:'end' scroll adjustments. */}
+               addition never interfere with anchorTo:'end' scroll adjustments. Discussions
+               start at the top instead: a short list of them reads down from the first. */}
         <div
           style={{
             minHeight: '100%',
             display: 'flex',
             flexDirection: 'column',
-            justifyContent: 'flex-end',
+            justifyContent: discussionList ? 'flex-start' : 'flex-end',
           }}
         >
           <div
@@ -1512,7 +1792,10 @@ const ChatListV4: React.FC<ChatListProps> = ({
         </div>
       </div>
 
-      <MessageHoverToolbar containerRef={hoverToolbarContainerRef} />
+      <MessageHoverToolbar
+        containerRef={hoverToolbarContainerRef}
+        keyboardSelectedMessageId={keyboardSelectedMessageId}
+      />
 
       {/* New messages pill */}
       {newConversationBoundary !== null && newConversationBoundary.seenConvId === null && (

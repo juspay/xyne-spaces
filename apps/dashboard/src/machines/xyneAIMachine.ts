@@ -2,6 +2,7 @@ import { logger, Event as LogEvent } from '../utils/logger';
 import { setup, createActor, assign } from 'xstate';
 import { RefObject } from 'react';
 import type { CanvasRole } from '../components/Chat/XyneAISidebar/utils/XyneAITypes';
+import { xyneCalendarActor } from './xyneCalendarMachine';
 
 // Available XyneAI states
 export type XyneAIState = 'closed' | 'open';
@@ -83,6 +84,7 @@ export interface AskAIInitialContextSelections {
     conversationId?: string;
     externalId?: string;
   }>;
+  calls?: Array<{ id: string; title: string; channelId?: string; conversationId?: string }>;
 }
 
 export interface WorkflowContext {
@@ -158,6 +160,8 @@ export interface XyneAIContext {
   // Parent-driven message submission (for contextual CTAs such as SDLC actions).
   initialQuery: string | null;
   autoSendNonce: number;
+  /** Which surface dispatched the last OPEN (analytics `source`). Not persisted. */
+  openSource: string | null;
 }
 
 // Event types for XyneAI machine
@@ -185,6 +189,8 @@ export type XyneAIEvent =
       initialContextSelections?: AskAIInitialContextSelections | null;
       researchContext?: XyneAIResearchContext | null;
       initialQuery?: string | null;
+      /** Analytics attribution for XYNE_AI_OPENED — which surface opened the panel. */
+      trackSource?: string;
     }
   | { type: 'CLOSE' }
   | { type: 'SET_FOCUS_SESSION'; sessionId: string | null }
@@ -484,12 +490,27 @@ export const clearOldMermaidDiagrams = async (): Promise<void> => {
   }
 };
 
+/**
+ * Screens that must not have the assistant open over them — the related-context
+ * popup, which is modal — hold it closed while they show. Returns the release.
+ */
+let askAIHolds = 0;
+export const holdAskAIClosed = (): (() => void) => {
+  askAIHolds += 1;
+  return () => {
+    askAIHolds -= 1;
+  };
+};
+
 export const xyneAIMachine = setup({
   types: {
     context: {} as XyneAIContext,
     events: {} as XyneAIEvent,
   },
   actions: {
+    closeCalendar: () => {
+      xyneCalendarActor.send({ type: 'CLOSE' });
+    },
     // Update context when transitioning to different states
     setOpen: assign(({ event, context }) => {
       if (event.type === 'OPEN') {
@@ -560,6 +581,7 @@ export const xyneAIMachine = setup({
           autoSendNonce: event.initialQuery?.trim()
             ? context.autoSendNonce + 1
             : context.autoSendNonce,
+          openSource: event.trackSource ?? null,
           // Bump the nonce on every KB-scoped OPEN (collection, file, OR
           // folder) so the sidebar re-attaches the right chip even if the
           // user previously removed it.
@@ -644,6 +666,7 @@ export const xyneAIMachine = setup({
           autoSendNonce: event.initialQuery?.trim()
             ? context.autoSendNonce + 1
             : context.autoSendNonce,
+          openSource: event.trackSource ?? context.openSource,
           // Re-bump on every KB-scoped OPEN (collection, file, OR folder).
           kbOpenNonce:
             event.kbCollectionId || event.kbDocId || event.kbFolderId
@@ -718,6 +741,7 @@ export const xyneAIMachine = setup({
         researchContext: null,
         initialQuery: null,
         autoSendNonce: context.autoSendNonce,
+        openSource: null,
       };
 
       // Clear from IndexedDB when closing
@@ -870,6 +894,7 @@ export const xyneAIMachine = setup({
     researchContext: null,
     initialQuery: null,
     autoSendNonce: 0,
+    openSource: null,
   }),
   id: 'xyneAIMachine',
   initial: 'closed',
@@ -877,8 +902,9 @@ export const xyneAIMachine = setup({
     closed: {
       on: {
         OPEN: {
+          guard: () => askAIHolds === 0,
           target: 'open',
-          actions: 'setOpen',
+          actions: ['setOpen', 'closeCalendar'],
         },
         SET_TICKET_CONTEXT: {
           actions: 'setTicketContext',
@@ -903,6 +929,8 @@ export const xyneAIMachine = setup({
     open: {
       on: {
         OPEN: {
+          // Nor may an already-open assistant be pointed somewhere else behind it.
+          guard: () => askAIHolds === 0,
           actions: 'updateOpen',
         },
         CLOSE: {
@@ -960,6 +988,7 @@ const initializeActor = async (): Promise<void> => {
       // Only include defined values in the send event
       xyneAIActor.send({
         type: 'OPEN',
+        trackSource: 'restored',
         ...(persistedContext.contextType !== undefined &&
           persistedContext.contextType !== null && {
             contextType: persistedContext.contextType,

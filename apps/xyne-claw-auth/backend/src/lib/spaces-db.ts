@@ -178,6 +178,7 @@ export type SpacesAuthCaller =
   | "artifact-apps"
   | "artifact-app-agents"
   | "artifact-app-storage"
+  | "conversation-artifacts"
   | "unknown";
 
 export async function getSpacesAuthForUser(
@@ -549,7 +550,7 @@ export function spacesDbAvailable(): boolean {
 
 type UserHit = { id: string; name: string };
 
-// Only ever resolve a mention to a real, active HUMAN — never a BOT/APP user
+// Only ever resolve a mention to a real, active HUMAN — never a BOT/APP/AGENT user
 // (they'd be tagged as "people" otherwise). `name` and `displayName` are both
 // candidates because agents emit either; we return the canonical `name` for the
 // chip label. LIMIT 2 preserves the resolver's "≥2 ⇒ ambiguous, skip" rule.

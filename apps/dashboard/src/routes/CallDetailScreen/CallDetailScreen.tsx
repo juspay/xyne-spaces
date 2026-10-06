@@ -1,20 +1,32 @@
 import { ReactElement, useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { useSelector } from '@xstate/react';
 import { useNavigate, useLocation, useParams } from 'react-router-dom';
+import { AnimatePresence } from 'framer-motion';
 import { ChevronLeft, ChevronRight, ChevronDown, Loader2, FileText } from 'lucide-react';
-import { Hashtag, EnvelopeDefault, File02Text } from '@xyne/icons';
+import { ORIGINAL_TRANSCRIPT_LANGUAGE, SUPPORTED_TRANSCRIPT_LANGUAGES } from '@xyne/shared';
+import {
+  SidebarRightClose,
+  SidebarRightOpen,
+  Hashtag,
+  EnvelopeDefault,
+  File02Text,
+} from '@xyne/icons';
 import { toast } from 'sonner';
 import { recordingService } from '../../services/Recording/recordingService';
-import { AudioPlayer } from '../../components/ui/AudioPlayer/AudioPlayer';
 import { useCallPRD } from '../../hooks/useCallPRD';
 import { useAskAiTicketContext } from '../../hooks/useAskAiTicketContext';
 import { useCachedQuery } from '../../hooks/useCachedQuery';
 import { queries } from '../../zero/queries';
 import { cn } from '../../utils/classNames';
 import Tooltip from '../../components/ui/Tooltip/Tooltip';
-import { type Call } from '../CallHistoryScreen/callHistoryItem.utils';
+import { hasCallEnded, type Call } from '../CallHistoryScreen/callHistoryItem.utils';
 import { xyneAIActor } from '../../machines/xyneAIMachine';
 import { usePlatform } from '../../hooks/usePlatform';
+import { useTranscriptTranslation } from '../../hooks/useTranscriptTranslation';
+import {
+  TranscriptSidePanel,
+  type TranscriptPanelTarget,
+} from '../../components/Chat/TranscriptCitationModal/TranscriptSidePanel';
 import { DetailedSummaryCanvasTab } from './DetailedSummaryCanvasTab';
 import { PrdCanvasTab } from './PrdCanvasTab';
 import { CallParticipantsPopover } from './CallParticipantsPopover';
@@ -39,6 +51,13 @@ import { PostRecordingToEmailModal } from '../RecordingDetailV2Screen/components
 import { GoogleDocPreviewModal } from '../RecordingDetailV2Screen/components/GoogleDocPreviewModal';
 import { useCallGoogleDocExport } from './useCallGoogleDocExport';
 import { globalClickTracker } from '../../services/Analytics/globalClickTracker';
+import { CallTimelineBar } from '../../components/CallTimeline/CallTimelineBar';
+import { buildParticipantEvents } from '../../components/CallTimeline/participantEvents';
+import { buildRecordedSpans } from '../../components/CallTimeline/recordingSpans';
+import { useCallRecordingSessions } from './useCallRecordingSessions';
+import { useCallParticipantRoster } from '../../hooks/useCallParticipantRoster';
+import { parseMarkedItems, type MarkedItem } from '../../components/CallTimeline/markedItems';
+import { transcriptCitationStore } from '../../components/Chat/TranscriptCitationModal';
 
 /** Matches the recording detail header's post button (POST_SPLIT_BUTTON_CLASS). */
 const POST_BUTTON_CLASS =
@@ -69,7 +88,7 @@ export default function CallDetailScreen(): ReactElement {
   // resolving it by the id in the route.
   const navigationCall = navState?.call;
   const [fetchedCall, fetchedCallDetails] = useCachedQuery(
-    queries.callById({ callId: callIdParam ?? '' }),
+    queries.callByExternalId({ callId: callIdParam ?? '' }),
     { enabled: Boolean(callIdParam) },
   );
   const call: Call | undefined = navigationCall ?? fetchedCall ?? undefined;
@@ -156,20 +175,123 @@ export default function CallDetailScreen(): ReactElement {
   const summaryFormat = callSummaryFormat(call?.aiSummary);
   const isOwner = Boolean(user?.id && call?.createdByUserId === user.id);
 
-  const hasRecording = useMemo<boolean>(() => {
-    if (!conversationMessages || !call?.externalId) return false;
-    return conversationMessages.some(m =>
-      (m.attachments ?? []).some(a => {
-        const meta = a.metadata as Record<string, unknown> | null;
-        return meta?.['type'] === 'recording' && meta?.['callId'] === call.externalId;
-      }),
-    );
-  }, [conversationMessages, call?.externalId]);
-
   const durationMs =
     call?.startedAt && call?.endedAt
       ? new Date(call.endedAt).getTime() - new Date(call.startedAt).getTime()
       : null;
+
+  // Drawn as dividers in the transcript panel, matching the timeline's flags.
+  // Memoised because the panel keys its own memos off this array.
+  const markedMomentSeconds = useMemo(
+    () =>
+      parseMarkedItems(call?.markedItems)
+        .filter(item => item.type === 'moment')
+        .map(item => item.timestampSeconds),
+    [call?.markedItems],
+  );
+
+  // Owned here, not in the popover: the timeline needs the same rows and draws them
+  // unprompted, so the roster resolves with the screen rather than on open.
+  const { participants: rosterParticipants, isLoading: isRosterLoading } = useCallParticipantRoster(
+    call,
+    true,
+    user?.id,
+  );
+
+  // The timeline's origin is the call's start. Joins and leaves are wall-clock, so
+  // they are measured onto it here.
+  const callStartedAtMs = call?.startedAt ?? null;
+
+  const participantEvents = useMemo(() => {
+    if (callStartedAtMs === null) return [];
+    return buildParticipantEvents(
+      rosterParticipants.map(participant => ({
+        name: participant.name,
+        joinedAt: participant.joinedAtMs,
+        leftAt: participant.leftAtMs,
+      })),
+      callStartedAtMs,
+    );
+  }, [rosterParticipants, callStartedAtMs]);
+
+  // Null while the call is live: its length and roster are still moving, so a bar
+  // drawn now would span nothing but the viewer's own arrival.
+  const timelineSpanMs =
+    call && hasCallEnded(call) ? new Date(call.endedAt).getTime() - call.startedAt : null;
+
+  // Not in Zero, so fetched — and only once the call has settled, which is also the
+  // only time the bar is drawn.
+  const recordingSessions = useCallRecordingSessions(call?.externalId, timelineSpanMs !== null);
+
+  // Fetched per recording, on the first press of play.
+  const handleLoadRecording = useCallback(
+    (recordingId: string, signal: AbortSignal): Promise<Blob> =>
+      recordingService.downloadCallRecordingBlob(call?.externalId ?? '', recordingId, signal),
+    [call?.externalId],
+  );
+
+  const recordedSpans = useMemo(
+    () => (callStartedAtMs === null ? [] : buildRecordedSpans(recordingSessions, callStartedAtMs)),
+    [recordingSessions, callStartedAtMs],
+  );
+
+  // Same side panel a summary citation opens. A moment already has a divider there,
+  // so only decisions and actions need the highlight to be findable.
+  const handleMarkerSelect = useCallback(
+    (item: MarkedItem): void => {
+      if (!call?.externalId) return;
+      transcriptCitationStore.open({
+        callId: call.externalId,
+        timestampSeconds: item.timestampSeconds,
+        markedTimestampsSeconds: markedMomentSeconds,
+        ...(item.type === 'moment' ? {} : { highlight: 'marker' as const }),
+      });
+    },
+    [call?.externalId, markedMomentSeconds],
+  );
+
+  // Transcript side panel
+  const [showTranscriptPanel, setShowTranscriptPanel] = useState(false);
+  const [selectedTranscriptLanguage, setSelectedTranscriptLanguage] = useState(
+    ORIGINAL_TRANSCRIPT_LANGUAGE,
+  );
+  const [citationNonce, setCitationNonce] = useState(0);
+  const [citationRef, setCitationRef] = useState<TranscriptPanelTarget | null>(null);
+  const hasTranscript = Boolean(call?.transcript);
+  const transcript = useTranscriptTranslation({
+    externalId: call?.externalId,
+    language: selectedTranscriptLanguage,
+    enabled: showTranscriptPanel,
+  });
+
+  // Deep link `?lang=…` opens the transcript panel on arrival
+  useEffect(() => {
+    const lang = new URLSearchParams(location.search).get('lang');
+    if (!lang) return;
+    const isValid =
+      lang === ORIGINAL_TRANSCRIPT_LANGUAGE ||
+      SUPPORTED_TRANSCRIPT_LANGUAGES.some(language => language.code === lang);
+    setShowTranscriptPanel(true);
+    setSelectedTranscriptLanguage(isValid ? lang : ORIGINAL_TRANSCRIPT_LANGUAGE);
+  }, [location.search]);
+
+  // Route canvas citations (detailed-summary pills carry callId = externalId) into this
+  // screen's own panel instead of the global TranscriptCitationModal.
+  const callExternalId = call?.externalId;
+  useEffect(() => {
+    if (!callExternalId) return;
+    return transcriptCitationStore.setHandler(ref => {
+      if (ref.callId !== callExternalId) return false;
+      setCitationRef({
+        ...(ref.timestamp ? { timestamp: ref.timestamp } : {}),
+        ...(ref.speaker ? { speaker: ref.speaker } : {}),
+        ...(ref.segment ? { segment: ref.segment } : {}),
+      });
+      setCitationNonce(value => value + 1);
+      setShowTranscriptPanel(true);
+      return true;
+    });
+  }, [callExternalId]);
 
   const { prdEntries } = useCallPRD({
     externalId: call?.externalId ?? '',
@@ -242,6 +364,7 @@ export default function CallDetailScreen(): ReactElement {
     _userClosedAIForCallId = null;
     xyneAIActor.send({
       type: 'OPEN',
+      trackSource: 'call_detail_auto',
       ...(call.channelId ? { channelId: call.channelId } : {}),
       threadInfo: callConversationId
         ? { conversationId: callConversationId, previewText: call.title ?? 'Call' }
@@ -251,25 +374,28 @@ export default function CallDetailScreen(): ReactElement {
     aiOpenedRef.current = true;
   }, [call, callConversationId]);
 
+  const callId = call?.id;
+
   useEffect(() => {
-    if (!call || isMobile) return;
-    if (_userClosedAIForCallId === call.id) {
+    if (!callId || isMobile) return;
+    if (_userClosedAIForCallId === callId) {
       _userClosedAIForCallId = null;
       return;
     }
     const subscription = xyneAIActor.subscribe(state => {
       if (state.matches('closed') && aiOpenedRef.current) {
-        _userClosedAIForCallId = call.id;
+        _userClosedAIForCallId = callId;
         aiOpenedRef.current = false;
       }
     });
-    openAI();
     return (): void => {
       subscription.unsubscribe();
-      xyneAIActor.send({ type: 'CLOSE' });
-      aiOpenedRef.current = false;
+      if (aiOpenedRef.current) {
+        xyneAIActor.send({ type: 'CLOSE' });
+        aiOpenedRef.current = false;
+      }
     };
-  }, [call, isMobile, openAI]);
+  }, [callId, isMobile]);
 
   // The call's host, anyone who took part, or a member of the channel it happened
   // in. Mirrors isCallAudience on the backend, which gates the same two actions.
@@ -413,7 +539,12 @@ export default function CallDetailScreen(): ReactElement {
     // sidebar. Mirrors the recording detail screen's root.
     <div className='relative flex h-full overflow-hidden bg-background rounded-2xl'>
       <div className='flex-1 flex flex-col overflow-hidden min-w-0'>
-        <div className='flex-1 overflow-y-auto'>
+        <div
+          className={cn(
+            'flex-1 overflow-y-auto transition-[padding] duration-300',
+            showTranscriptPanel && 'md:pr-[560px]',
+          )}
+        >
           <div className='mx-auto w-full max-w-[820px] px-6 pt-6 pb-24 sm:px-8'>
             {/* Breadcrumb + Ask AI */}
             <div className='flex items-center gap-[7px] mb-[18px]'>
@@ -490,7 +621,11 @@ export default function CallDetailScreen(): ReactElement {
 
             {/* Participants + labels — one row, as on the recording detail header */}
             <div className='mt-3.5 flex flex-wrap items-center gap-2'>
-              <CallParticipantsPopover call={call} currentUserId={user?.id} />
+              <CallParticipantsPopover
+                call={call}
+                participants={rosterParticipants}
+                isLoading={isRosterLoading}
+              />
               {(canEditLabels || labels.length > 0) && (
                 <CallLabelPicker
                   labels={labels}
@@ -501,16 +636,17 @@ export default function CallDetailScreen(): ReactElement {
               )}
             </div>
 
-            {/* Recording */}
-            {hasRecording && (
-              <div className='mt-3.5 max-w-md rounded-xl border border-border bg-muted/40 px-3 py-2'>
-                <AudioPlayer
-                  onLoad={signal => recordingService.downloadRecordingBlob(call.externalId, signal)}
-                  initialDurationSec={durationMs ? durationMs / 1000 : undefined}
-                  trackCategory='CallDetail'
-                  showToastOnError
-                />
-              </div>
+            {/* Decisions, actions and marked moments across the call */}
+            {timelineSpanMs !== null && (
+              <CallTimelineBar
+                markedItems={call.markedItems}
+                spanMs={timelineSpanMs}
+                participantEvents={participantEvents}
+                recordedSpans={recordedSpans}
+                onLoadRecording={handleLoadRecording}
+                onMarkerSelect={handleMarkerSelect}
+                className='mt-3.5'
+              />
             )}
 
             {/* Tabs + primary action */}
@@ -653,6 +789,33 @@ export default function CallDetailScreen(): ReactElement {
                   </DropdownMenuContent>
                 </DropdownMenu>
               )}
+              {hasTranscript && (
+                <Tooltip
+                  content={!showTranscriptPanel ? 'Open transcript' : 'Close transcript'}
+                  side='left'
+                >
+                  <Button
+                    onClick={(): void => {
+                      setShowTranscriptPanel(open => !open);
+                      setCitationRef(null);
+                    }}
+                    variant='ghost'
+                    className={cn(
+                      'inline-flex size-8 items-center justify-center rounded-xl border border-border/70 transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+                      showTranscriptPanel ? 'text-foreground' : 'text-muted-foreground',
+                    )}
+                    aria-label={!showTranscriptPanel ? 'Open transcript' : 'Close transcript'}
+                    data-track-category='CallDetail'
+                    data-track-name='open_transcript_panel'
+                  >
+                    {showTranscriptPanel ? (
+                      <SidebarRightClose className='size-4' aria-hidden='true' variant='Solid' />
+                    ) : (
+                      <SidebarRightOpen className='size-4' aria-hidden='true' variant='Solid' />
+                    )}
+                  </Button>
+                </Tooltip>
+              )}
             </div>
 
             {/* Tab content */}
@@ -704,7 +867,6 @@ export default function CallDetailScreen(): ReactElement {
           onOpenAutoFocus={event => event.preventDefault()}
         >
           <CallShareModal
-            callId={call.id}
             externalId={call.externalId}
             createdByUserId={call.createdByUserId}
             onClose={() => setShowShareModal(false)}
@@ -760,6 +922,29 @@ export default function CallDetailScreen(): ReactElement {
           />
         </Dialog>
       )}
+
+      {/* Transcript side panel */}
+      <AnimatePresence>
+        {showTranscriptPanel && (
+          <TranscriptSidePanel
+            transcript={transcript.text ?? ''}
+            isLoading={transcript.isLoading}
+            error={transcript.error ?? null}
+            onRetry={transcript.retry}
+            target={citationRef}
+            openNonce={citationNonce}
+            title={title}
+            selectedLanguage={selectedTranscriptLanguage}
+            onLanguageChange={setSelectedTranscriptLanguage}
+            isTranslating={transcript.isTranslating}
+            onClose={(): void => {
+              setShowTranscriptPanel(false);
+              setCitationRef(null);
+            }}
+            className='absolute inset-y-0 right-0 z-30 w-full md:w-[560px]'
+          />
+        )}
+      </AnimatePresence>
     </div>
   );
 }

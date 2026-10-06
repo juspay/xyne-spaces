@@ -1,210 +1,124 @@
-import { useEffect, useMemo, type ReactElement, type ReactNode } from 'react';
-import { ChevronDown, Hash, Lock, Plus } from 'lucide-react';
-import { Panel, Separator, usePanelRef } from '../../components/ui/Resizable/Resizable';
-import { cn } from '../../utils/classNames';
+/**
+ * The SDLC sidebar's parts, built to look and behave like Chat's sidebar: the same
+ * row height, type, radius and highlight tokens, sections that fold in place and are
+ * only as tall as their items, and "+ New …" rows for empty states.
+ */
+import type { MouseEvent, ReactElement, ReactNode } from 'react';
 import {
-  setUserPreference,
-  useUserPreference,
-  userPreferencesSnapshot,
-} from '../../machines/userPreferencesMachine';
-import { EntitySelector } from '../../components/ui/EntitySelector/EntitySelector';
-import type { SelectorOption } from '../../components/ui/EntitySelector/EntitySelector.types';
-
-const SECTION_HEADER_HEIGHT = 28;
-const DEFAULT_SECTION_HEIGHT = 170;
-const MIN_OPEN_SECTION_HEIGHT = 150;
-const SECTION_SEPARATOR_HEIGHT = 7;
-export const SDLC_SECTIONS: ReadonlyArray<{ id: string; defaultHeight: number }> = [
-  { id: 'sdlc-sidebar-tracks', defaultHeight: 200 },
-  { id: 'sdlc-sidebar-artifacts', defaultHeight: 180 },
-];
-
-export interface SdlcHubRepository {
-  id: string;
-  name: string;
-  url: string;
-  canonicalUrl?: string | null;
-}
+  ChevronDown,
+  ChevronRight,
+  PanelLeft,
+  Plus,
+  UserPlus,
+  type LucideIcon,
+} from 'lucide-react';
+import { cn } from '../../utils/classNames';
+import { setUserPreference, useUserPreference } from '../../machines/userPreferencesMachine';
+import { useScrollFade } from '../../hooks/useScrollFade';
+import { AppIcon } from '../../components/AppIcon/AppIcon';
+import { ActivityPill, type SdlcLiveCalls } from './ActivityPill';
 
 export interface SdlcHubOption {
   id: string;
   name: string;
   visibility: string;
-  repositories: SdlcHubRepository[];
 }
 
-export function SdlcHubPicker(props: {
-  hubs: SdlcHubOption[];
-  selectedHubId: string;
-  onSelect: (hubId: string) => void;
+/** Chat's sidebar row: 36px, 14px type, 10px radius, the sidebar accent for hover and active. */
+export const sdlcSidebarRowClass = (active: boolean, muted = false): string =>
+  cn(
+    'flex h-9 w-full items-center gap-3 rounded-[10px] border border-transparent px-3 text-sm transition-colors',
+    active
+      ? 'border-sidebar-border bg-sidebar-accent font-medium text-sidebar-accent-foreground'
+      : cn(
+          'hover:bg-sidebar-accent hover:text-sidebar-accent-foreground',
+          muted ? 'text-sidebar-foreground/60' : 'text-sidebar-foreground',
+        ),
+  );
+
+/** The row's icon slot, sized like Chat's. */
+export function SdlcSidebarRowIcon(props: {
+  icon: LucideIcon;
+  appIcon?: string | null | undefined;
 }): ReactElement {
-  const options = useMemo<SelectorOption[]>(
-    () =>
-      props.hubs.map(hub => ({
-        value: hub.id,
-        label: hub.name,
-        subtitle:
-          hub.repositories.map(repository => repository.name).join(', ') || 'No repositories',
-        // Channel semantics: a lock for private, a hash for public.
-        icon:
-          hub.visibility === 'PUBLIC' ? (
-            <Hash className='size-4 text-muted-foreground' />
-          ) : (
-            <Lock className='size-4 text-muted-foreground' />
-          ),
-      })),
-    [props.hubs],
-  );
-
+  const Icon = props.icon;
   return (
-    <EntitySelector
-      options={options}
-      selectedValue={props.selectedHubId}
-      onSelect={value => {
-        if (value) props.onSelect(value);
-      }}
-      placeholder='Select hub'
-      searchPlaceholder='Search hubs and repositories...'
-      width='100%'
-      dropdownMinWidth='22rem'
-    />
-  );
-}
-
-/** With every section folded the group shrinks to its headers, so they sit at the bottom. */
-export function sdlcFoldedGroupHeight(collapsedSections: Record<string, boolean>): number | null {
-  if (!SDLC_SECTIONS.every(section => collapsedSections[section.id])) return null;
-  return (
-    SDLC_SECTIONS.length * SECTION_HEADER_HEIGHT +
-    (SDLC_SECTIONS.length - 1) * SECTION_SEPARATOR_HEIGHT
-  );
-}
-
-export function sdlcSectionLayout(
-  groupHeight: number,
-  collapsedSections: Record<string, boolean>,
-  sectionHeights: Record<string, number>,
-): Record<string, number> {
-  const heights: Record<string, number> = {};
-  for (const section of SDLC_SECTIONS) {
-    if (collapsedSections[section.id]) heights[section.id] = SECTION_HEADER_HEIGHT;
-  }
-  const open = SDLC_SECTIONS.filter(section => !collapsedSections[section.id]);
-  if (open.length === 0) return heights;
-
-  const available =
-    groupHeight -
-    (SDLC_SECTIONS.length - 1) * SECTION_SEPARATOR_HEIGHT -
-    (SDLC_SECTIONS.length - open.length) * SECTION_HEADER_HEIGHT;
-  if (available <= 0) {
-    for (const section of open) heights[section.id] = SECTION_HEADER_HEIGHT;
-    return heights;
-  }
-
-  const wanted = new Map(
-    open.map(section => [
-      section.id,
-      Math.max(MIN_OPEN_SECTION_HEIGHT, sectionHeights[section.id] ?? section.defaultHeight),
-    ]),
-  );
-  const wantedTotal = open.reduce((total, section) => total + (wanted.get(section.id) ?? 0), 0);
-
-  if (wantedTotal <= available) {
-    const last = open[open.length - 1];
-    open.forEach(section => {
-      heights[section.id] = wanted.get(section.id) ?? section.defaultHeight;
-    });
-    if (last) heights[last.id] = (heights[last.id] ?? 0) + (available - wantedTotal);
-    return heights;
-  }
-
-  const settled = new Map<string, number>();
-  let pool = [...open];
-  let remaining = available;
-  for (;;) {
-    const poolTotal = pool.reduce((total, section) => total + (wanted.get(section.id) ?? 0), 0);
-    if (poolTotal <= 0) {
-      for (const section of pool) settled.set(section.id, remaining / pool.length);
-      break;
-    }
-    const starved = pool.filter(
-      section => ((wanted.get(section.id) ?? 0) / poolTotal) * remaining < MIN_OPEN_SECTION_HEIGHT,
-    );
-    if (starved.length === 0) {
-      for (const section of pool) {
-        settled.set(section.id, ((wanted.get(section.id) ?? 0) / poolTotal) * remaining);
-      }
-      break;
-    }
-    for (const section of starved) {
-      settled.set(section.id, MIN_OPEN_SECTION_HEIGHT);
-      remaining -= MIN_OPEN_SECTION_HEIGHT;
-    }
-    pool = pool.filter(section => !starved.includes(section));
-    if (pool.length === 0) break;
-  }
-
-  let used = 0;
-  open.forEach((section, index) => {
-    const exact = settled.get(section.id) ?? MIN_OPEN_SECTION_HEIGHT;
-    const height =
-      index === open.length - 1
-        ? Math.max(MIN_OPEN_SECTION_HEIGHT, available - used)
-        : Math.round(exact);
-    heights[section.id] = height;
-    used += height;
-  });
-  return heights;
-}
-
-interface SdlcSidebarSectionHeaderProps {
-  id: string;
-  title: string;
-  count?: number | undefined;
-  action?: { label: string; onClick: () => void; trackName: string } | undefined;
-}
-
-function SdlcSidebarSectionHeader(
-  props: SdlcSidebarSectionHeaderProps & { collapsed: boolean; onToggle: () => void },
-): ReactElement {
-  return (
-    <div
-      className='flex shrink-0 items-center gap-1 px-2'
-      style={{ height: SECTION_HEADER_HEIGHT }}
-    >
-      <button
-        type='button'
-        onClick={props.onToggle}
-        aria-expanded={!props.collapsed}
-        className='flex min-w-0 flex-1 items-center gap-1 rounded-[5px] py-1 pr-1 text-left text-[10.5px] font-bold uppercase tracking-[0.13em] text-foreground/45 transition-colors hover:text-foreground/70'
-        data-track-category='SdlcHub'
-        data-track-name='SidebarSectionToggled'
-        data-track-metadata={JSON.stringify({ section: props.id })}
-      >
-        <ChevronDown
-          className={cn('size-3 shrink-0 transition-transform', props.collapsed && '-rotate-90')}
-        />
-        <span className='truncate'>{props.title}</span>
-        {props.count !== undefined && (
-          <span className='ml-1 shrink-0 text-[10.5px] tabular-nums text-foreground/35'>
-            {props.count}
-          </span>
-        )}
-      </button>
-      {props.action && (
-        <button
-          type='button'
-          title={props.action.label}
-          aria-label={props.action.label}
-          onClick={props.action.onClick}
-          className='-mr-[7px] flex size-[22px] shrink-0 items-center justify-center rounded-[5px] text-foreground/45 transition-colors hover:bg-foreground/[0.06] hover:text-foreground'
-          data-track-category='SdlcHub'
-          data-track-name={props.action.trackName}
-        >
-          <Plus className='size-3.5' />
-        </button>
+    <span className='flex size-4 shrink-0 items-center justify-center'>
+      {props.appIcon ? (
+        <AppIcon name={props.appIcon} size={16} aria-hidden='true' />
+      ) : (
+        <Icon className='size-4' />
       )}
-    </div>
+    </span>
+  );
+}
+
+interface SdlcSidebarRowProps {
+  icon: LucideIcon;
+  /** A chosen @xyne/icons name, shown in place of `icon`. */
+  appIcon?: string | null | undefined;
+  label: string;
+  active?: boolean;
+  /** Top-level navigation reads medium weight, as Chat's Threads and Unreads do. */
+  emphasis?: boolean;
+  muted?: boolean;
+  /** Shown only when there is something to count. */
+  count?: number | undefined;
+  /** Calls in progress on it, or anywhere under it: one pill counts them all. */
+  liveCalls?: SdlcLiveCalls | undefined;
+  title?: string;
+  onClick: (event: MouseEvent<HTMLButtonElement>) => void;
+  trackName: string;
+  trackMetadata?: Record<string, unknown>;
+}
+
+export function SdlcSidebarRow(props: SdlcSidebarRowProps): ReactElement {
+  const active = props.active ?? false;
+  return (
+    <button
+      type='button'
+      onClick={props.onClick}
+      {...(active && { 'aria-current': 'page' as const })}
+      {...(props.title !== undefined && { title: props.title })}
+      className={cn(
+        sdlcSidebarRowClass(active, props.muted),
+        props.emphasis && 'font-medium tracking-[-0.14px]',
+      )}
+      data-track-category='SdlcHub'
+      data-track-name={props.trackName}
+      {...(props.trackMetadata && { 'data-track-metadata': JSON.stringify(props.trackMetadata) })}
+    >
+      <SdlcSidebarRowIcon icon={props.icon} appIcon={props.appIcon} />
+      <span className='min-w-0 flex-1 truncate text-left'>{props.label}</span>
+      <ActivityPill live={props.liveCalls} rollUp place={props.label} size='sm' />
+      {props.count !== undefined && props.count > 0 && (
+        <span className='shrink-0 text-xs tabular-nums text-sidebar-foreground/50'>
+          {props.count}
+        </span>
+      )}
+    </button>
+  );
+}
+
+/** Chat's "+ Add" row, for a section with nothing in it yet. */
+export function SdlcSidebarAddRow(props: {
+  label: string;
+  onClick: () => void;
+  trackName: string;
+}): ReactElement {
+  return (
+    <button
+      type='button'
+      onClick={props.onClick}
+      className='flex h-9 w-full items-center gap-3 rounded-[10px] border border-dashed border-transparent px-3 text-sm text-sidebar-foreground/60 transition-colors hover:border-sidebar-border hover:bg-sidebar-accent hover:text-sidebar-accent-foreground'
+      data-track-category='SdlcHub'
+      data-track-name={props.trackName}
+    >
+      <span className='flex size-4 shrink-0 items-center justify-center'>
+        <Plus className='size-4' />
+      </span>
+      <span className='min-w-0 flex-1 truncate text-left'>{props.label}</span>
+    </button>
   );
 }
 
@@ -215,110 +129,165 @@ function toggleSection(collapsedSections: Record<string, boolean>, id: string): 
   });
 }
 
-export function SdlcSidebarSection(
-  props: SdlcSidebarSectionHeaderProps & { children: ReactNode },
-): ReactElement {
-  const panel = usePanelRef();
-  const collapsedSections = useUserPreference('sdlcSidebarSectionsCollapsed');
-  const sectionHeights = useUserPreference('sdlcSidebarSectionHeights');
-  const defaultHeight =
-    sectionHeights[props.id] ??
-    SDLC_SECTIONS.find(section => section.id === props.id)?.defaultHeight ??
-    DEFAULT_SECTION_HEIGHT;
-
-  const collapsed = collapsedSections[props.id] ?? false;
-
-  useEffect(() => {
-    const apply = (): void => {
-      const element = document.getElementById(props.id);
-      const groupHeight = element?.parentElement?.clientHeight ?? 0;
-      if (!groupHeight) return;
-      const height = sdlcSectionLayout(groupHeight, collapsedSections, sectionHeights)[props.id];
-      if (height !== undefined) panel.current?.resize(`${height}px`);
-    };
-    apply();
-    const frame = requestAnimationFrame(apply);
-    return () => cancelAnimationFrame(frame);
-  }, [panel, props.id, collapsed, collapsedSections, sectionHeights]);
-
+/**
+ * A list that scrolls without a scrollbar, fading at an edge only while there is more
+ * past it — so a row cut off at the bottom reads as "more below", not as clipped.
+ */
+function FadingList(props: { children: ReactNode }): ReactElement {
+  const fade = useScrollFade<HTMLDivElement>('y');
   return (
-    <Panel
-      id={props.id}
-      panelRef={panel}
-      groupResizeBehavior='preserve-pixel-size'
-      minSize={`${collapsed ? SECTION_HEADER_HEIGHT : MIN_OPEN_SECTION_HEIGHT}px`}
-      defaultSize={`${collapsed ? SECTION_HEADER_HEIGHT : defaultHeight}px`}
-      className='flex min-h-0 flex-col'
+    <div
+      ref={fade.ref}
+      onScroll={fade.onScroll}
+      className='no-scrollbar min-h-0 overflow-y-auto'
+      style={fade.style}
     >
-      <SdlcSidebarSectionHeader
-        id={props.id}
-        title={props.title}
-        count={props.count}
-        action={props.action}
-        collapsed={collapsed}
-        onToggle={() => toggleSection(collapsedSections, props.id)}
-      />
-      {!collapsed && (
-        <div className='min-h-0 flex-1 overflow-y-auto px-2 pb-2'>{props.children}</div>
-      )}
-    </Panel>
-  );
-}
-
-export function SdlcSidebarFitSection(props: {
-  id: string;
-  title: string;
-  children: ReactNode;
-}): ReactElement {
-  const collapsedSections = useUserPreference('sdlcSidebarSectionsCollapsed');
-  const collapsed = collapsedSections[props.id] ?? false;
-
-  return (
-    <div id={props.id} className='shrink-0'>
-      <SdlcSidebarSectionHeader
-        id={props.id}
-        title={props.title}
-        collapsed={collapsed}
-        onToggle={() => toggleSection(collapsedSections, props.id)}
-      />
-      {!collapsed && <div className='px-2 pb-2'>{props.children}</div>}
+      <div>{props.children}</div>
     </div>
   );
 }
 
-export function persistSdlcSectionHeights(meta: { isUserInteraction: boolean }): void {
-  if (!meta.isUserInteraction) return;
-  const preferences = userPreferencesSnapshot();
-  const stored = { ...preferences.sdlcSidebarSectionHeights };
-  const collapsed = preferences.sdlcSidebarSectionsCollapsed;
-  let changed = false;
-  for (const { id } of SDLC_SECTIONS) {
-    const element = document.getElementById(id);
-    if (!element) continue;
-    if (collapsed[id]) continue;
-    const measured = Math.round(element.getBoundingClientRect().height);
-    const height = Math.max(MIN_OPEN_SECTION_HEIGHT, measured);
-    const previous = preferences.sdlcSidebarSectionHeights[id];
-    stored[id] = height;
-    if (measured < MIN_OPEN_SECTION_HEIGHT || previous !== height) changed = true;
-  }
-  if (changed) setUserPreference('sdlcSidebarSectionHeights', stored);
+const SECTION_HEADER_HEIGHT = 32;
+const SECTION_ROW_HEIGHT = 36;
+/** Rows a section keeps in view when the sections together don't fit. */
+const SECTION_MIN_ROWS = 3;
+
+/**
+ * A list section: a heading that folds it, then its rows. Sections share the sidebar's
+ * height. Each is as tall as its rows, so an empty one takes no room; once they don't
+ * all fit, each scrolls on its own and keeps at least SECTION_MIN_ROWS rows in view, so
+ * a long list can't push the next section off screen and every heading stays visible.
+ * Whether it is folded is remembered per device.
+ *
+ * The heading is set apart from the rows under it — a chevron rather than an item icon,
+ * smaller muted semibold type and a count — so it reads as the list's title.
+ */
+export function SdlcSidebarGroup(props: {
+  id: string;
+  title: string;
+  count?: number;
+  /** How many rows it shows: the height it keeps when space runs short. */
+  rows: number;
+  action?: { label: string; onClick: () => void; trackName: string };
+  children: ReactNode;
+}): ReactElement {
+  const collapsedSections = useUserPreference('sdlcSidebarSectionsCollapsed');
+  const collapsed = collapsedSections[props.id] ?? false;
+  const minHeight =
+    SECTION_HEADER_HEIGHT + Math.min(props.rows, SECTION_MIN_ROWS) * SECTION_ROW_HEIGHT;
+  return (
+    <section
+      id={props.id}
+      aria-label={props.title}
+      className={cn('flex flex-col', collapsed ? 'shrink-0' : 'shrink')}
+      {...(!collapsed && { style: { minHeight } })}
+    >
+      <div className='group flex h-8 shrink-0 items-center gap-1 pl-3 pr-1'>
+        <button
+          type='button'
+          onClick={() => toggleSection(collapsedSections, props.id)}
+          aria-expanded={!collapsed}
+          className='flex h-full min-w-0 flex-1 items-center gap-1.5 text-[13px] font-semibold text-sidebar-foreground/70 transition-colors hover:text-sidebar-accent-foreground focus:outline-none focus-visible:text-sidebar-accent-foreground'
+          data-track-category='SdlcHub'
+          data-track-name='SidebarSectionToggled'
+          data-track-metadata={JSON.stringify({ section: props.id })}
+        >
+          <ChevronRight
+            strokeWidth={2.5}
+            size={12}
+            className={cn('shrink-0 transition-transform duration-200', !collapsed && 'rotate-90')}
+          />
+          <span className='truncate text-left'>{props.title}</span>
+          {props.count !== undefined && props.count > 0 && (
+            <span className='shrink-0 rounded-md bg-sidebar-accent px-1.5 py-px text-[11px] font-medium tabular-nums text-sidebar-foreground/70'>
+              {props.count}
+            </span>
+          )}
+        </button>
+        {props.action && (
+          <button
+            type='button'
+            onClick={props.action.onClick}
+            title={props.action.label}
+            aria-label={props.action.label}
+            className='flex shrink-0 items-center justify-center rounded-md p-1 text-sidebar-foreground opacity-0 transition-opacity duration-150 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground focus:outline-none focus-visible:opacity-100 group-hover:opacity-100'
+            data-track-category='SdlcHub'
+            data-track-name={props.action.trackName}
+          >
+            <Plus size={14} className='shrink-0' />
+          </button>
+        )}
+      </div>
+      {!collapsed && <FadingList>{props.children}</FadingList>}
+    </section>
+  );
 }
 
-export function SdlcSidebarSectionSeparator(): ReactElement {
-  return (
-    <Separator
-      className='group relative shrink-0 cursor-row-resize'
-      style={{ height: SECTION_SEPARATOR_HEIGHT }}
+const HEADER_ICON_BUTTON =
+  'flex size-7 shrink-0 items-center justify-center rounded-md text-sidebar-foreground transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground focus:outline-none focus-visible:ring-1 focus-visible:ring-sidebar-accent-ring';
+
+/**
+ * The sidebar's title row, in the place of Chat's "Inbox": the hub's name, which opens
+ * the hub switcher, and adding people to the hub. The collapse toggle leads, so peeking
+ * at a folded sidebar puts it under the pointer and one click pins it open; folded, it
+ * is all the row shows.
+ */
+export function SdlcHubHeader(props: {
+  open: boolean;
+  collapsed: boolean;
+  hubName: string;
+  onToggleRail: () => void;
+  onOpenSwitcher: () => void;
+  onAddMembers: () => void;
+}): ReactElement {
+  const toggle = (
+    <button
+      type='button'
+      onClick={props.onToggleRail}
+      title={props.collapsed ? 'Pin the sidebar open' : 'Collapse to icons'}
+      aria-label={props.collapsed ? 'Pin the sidebar open' : 'Collapse to icons'}
+      className={cn(HEADER_ICON_BUTTON, 'text-sidebar-foreground/60')}
+      data-track-category='SdlcHub'
+      data-track-name='SidebarRailToggled'
     >
-      <div
-        className='pointer-events-none absolute inset-x-0 top-[3px] h-px bg-sidebar-border-muted'
-        aria-hidden='true'
-      />
-      <div
-        className='pointer-events-none absolute inset-x-2 top-[2px] h-[3px] rounded-full bg-gradient-to-r from-transparent via-primary to-transparent opacity-0 transition-opacity duration-150 group-hover:opacity-70 group-active:opacity-100'
-        aria-hidden='true'
-      />
-    </Separator>
+      <PanelLeft className='size-4' />
+    </button>
+  );
+
+  if (!props.open) {
+    return <div className='mb-2 flex h-10 shrink-0 items-center justify-center'>{toggle}</div>;
+  }
+
+  // The toggle's icon sits in the rows' icon column below it.
+  return (
+    <div className='mb-2 flex h-10 shrink-0 items-center gap-0.5 pl-2'>
+      {toggle}
+      <button
+        type='button'
+        onClick={props.onOpenSwitcher}
+        title={`${props.hubName} · Switch hub (⌘J)`}
+        className='flex h-8 min-w-0 flex-1 items-center gap-1 rounded-lg px-1.5 text-left transition-colors hover:bg-sidebar-accent focus:outline-none focus-visible:ring-1 focus-visible:ring-sidebar-accent-ring'
+        data-track-category='SdlcHub'
+        data-track-name='HubSwitcherOpened'
+        data-track-metadata={JSON.stringify({ via: 'title' })}
+      >
+        <span className='min-w-0 truncate text-base font-semibold leading-normal text-sidebar-accent-foreground'>
+          {props.hubName}
+        </span>
+        <ChevronDown className='size-3.5 shrink-0 text-sidebar-foreground/60' />
+      </button>
+      <button
+        type='button'
+        onClick={props.onAddMembers}
+        title='Add members'
+        aria-label='Add members'
+        className={HEADER_ICON_BUTTON}
+        data-track-category='SdlcHub'
+        data-track-name='HeaderMembersClicked'
+        data-track-metadata={JSON.stringify({ place: 'hub-header' })}
+      >
+        <UserPlus className='size-4' />
+      </button>
+    </div>
   );
 }

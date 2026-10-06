@@ -5,7 +5,12 @@
 
 import { apiInstance } from '../clients/apiClient';
 import { AxiosResponse } from 'axios';
-import type { DefaultOutlet, GrantableEntityUserAccess } from '@xyne/shared';
+import type {
+  DefaultOutlet,
+  GrantableEntityUserAccess,
+  RecordingStatus,
+  TranscriptTranslation,
+} from '@xyne/shared';
 import { CallType, CallVisibility, RecordingType } from '@xyne/shared';
 import { getSummaryModelPreference } from '../../hooks/useSummaryModelPreference';
 
@@ -74,6 +79,32 @@ export interface SummaryTemplateAiInput {
   name: string;
   meetingContext?: string | null;
   sections?: Array<Pick<SummaryTemplateSection, 'title' | 'description'>>;
+}
+
+export interface SummaryTemplateSelectionDraft {
+  id: string | null;
+  name: string;
+  autoTriggerPrompt: string | null;
+  sections: SummaryTemplateSection[];
+  systemPrompt: string;
+}
+
+export interface SummaryTemplateSelectionTestInput {
+  transcript: string;
+  draft: SummaryTemplateSelectionDraft;
+}
+
+export interface SummaryTemplateSelectionTestResult {
+  selectedDraft: boolean;
+  selectedTemplateId: string | null;
+  selectedTemplateName: string | null;
+  fellBack: boolean;
+  reason: string | null;
+}
+
+export interface SummaryTemplateOutputTestResult {
+  summary: string;
+  citationSegments: CitationSegment[];
 }
 
 export interface RecordingUpdate {
@@ -227,25 +258,21 @@ export interface RecordingDetail extends Recording {
   linkedTicketMessageId?: string | null;
 }
 
-/** A single in-call recording session (call_recordings row). */
-export interface CallRecording {
+/** A single in-call recording session (call_recordings row), as the list endpoint returns it. */
+export interface CallRecordingSession {
   id: string;
   name: string | null;
   recordingType: RecordingType;
-  status:
-    | 'RECORDING_ACTIVE'
-    | 'RECORDING_STOPPED'
-    | 'RECORDING_UPLOADED'
-    | 'RECORDING_FAILED'
-    | 'RECORDING_UPLOAD_FAILED'
-    | 'RECORDING_EXPIRED'
-    | 'RECORDING_DELETED';
-  startedBy: string | null;
+  status: RecordingStatus;
+  /** ISO wall-clock. The call timeline measures its band from this. */
   startedAt: string;
+  /**
+   * ISO wall-clock, null while the session is unfinished. On an uploaded recording
+   * this is when stitching finished, not when the user pressed stop — the band it
+   * draws runs slightly long.
+   */
   endedAt: string | null;
   durationMs: number | null;
-  messageId: string | null;
-  downloadUrl: string | null;
 }
 
 export interface StartRecordingResponse {
@@ -346,16 +373,33 @@ class RecordingService {
     return response.data;
   }
 
-  /**
-   * Get recording detail with transcript and summary
-   */
-  async getRecordingDetail(callId: string): Promise<RecordingDetail> {
+  // `scope: 'metadata'` skips the transcript-body GCS reads server-side; fetch text lazily
+  // via translateTranscript(callId, ORIGINAL_TRANSCRIPT_LANGUAGE) instead.
+  async getRecordingDetail(
+    callId: string,
+    opts?: { scope?: 'metadata' },
+  ): Promise<RecordingDetail> {
+    const query = opts?.scope ? `?scope=${opts.scope}` : '';
     const response: AxiosResponse<RecordingDetailResponse> = await apiInstance.get(
-      `/calls/recordings/${callId}`,
+      `/calls/recordings/${callId}${query}`,
     );
 
     const data: RecordingDetailResponse = response.data;
     return data.recording;
+  }
+
+  /** Lightweight poll target — only what's needed to detect post-call audio landing. */
+  async getRecordingStatus(callId: string) {
+    const response: AxiosResponse<{
+      success: true;
+      recording: {
+        hasRecording: boolean;
+        durationMs: number | null;
+        recordingType: RecordingType | null;
+        attachmentId: string | null;
+      };
+    }> = await apiInstance.get(`/calls/recordings/${callId}?scope=status`);
+    return response.data.recording;
   }
 
   /**
@@ -379,6 +423,13 @@ class RecordingService {
         summaryTemplateId,
         ...(modelType ? { modelType } : {}),
       });
+    return response.data;
+  }
+
+  /** Translate a call's transcript into the requested language. */
+  async translateTranscript(callId: string, language: string): Promise<TranscriptTranslation> {
+    const response: AxiosResponse<{ success: true } & TranscriptTranslation> =
+      await apiInstance.post(`/calls/${callId}/translate-transcript`, { language });
     return response.data;
   }
 
@@ -503,6 +554,13 @@ class RecordingService {
     return response.data.template;
   }
 
+  /** Scribe admins only. Creates every template, or none. */
+  async bulkCreateSummaryTemplates(templates: SummaryTemplateInput[]): Promise<SummaryTemplate[]> {
+    const response: AxiosResponse<{ success: boolean; templates: SummaryTemplate[] }> =
+      await apiInstance.post('/calls/summary-templates/bulk', { templates });
+    return response.data.templates;
+  }
+
   async updateSummaryTemplate(
     templateId: string,
     update: Partial<SummaryTemplateInput>,
@@ -583,6 +641,22 @@ class RecordingService {
     return response.data.systemPrompt;
   }
 
+  async testSummaryTemplateSelection(
+    input: SummaryTemplateSelectionTestInput,
+  ): Promise<SummaryTemplateSelectionTestResult> {
+    const response: AxiosResponse<{ success: boolean } & SummaryTemplateSelectionTestResult> =
+      await apiInstance.post('/calls/summary-templates/ai/test-selection', input);
+    return response.data;
+  }
+
+  async testSummaryTemplateOutput(
+    input: SummaryTemplateSelectionTestInput,
+  ): Promise<SummaryTemplateOutputTestResult> {
+    const response: AxiosResponse<{ success: boolean } & SummaryTemplateOutputTestResult> =
+      await apiInstance.post('/calls/summary-templates/ai/test-output', input);
+    return { summary: response.data.summary, citationSegments: response.data.citationSegments };
+  }
+
   /**
    * Delete a recording
    */
@@ -631,6 +705,15 @@ class RecordingService {
       ...(opts?.recordingId ? { recordingId: opts.recordingId } : {}),
       ...(opts?.name ? { name: opts.name } : {}),
     });
+  }
+
+  /** A call's recording sessions, newest first, minus soft-deleted ones. */
+  async listCallRecordings(callId: string, signal?: AbortSignal): Promise<CallRecordingSession[]> {
+    const response: AxiosResponse<{ recordings?: CallRecordingSession[] }> = await apiInstance.get(
+      `/calls/${callId}/recordings`,
+      { ...(signal ? { signal } : {}) },
+    );
+    return response.data.recordings ?? [];
   }
 
   /** Rename a recording (starter-only). */

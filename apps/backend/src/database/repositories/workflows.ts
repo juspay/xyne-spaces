@@ -1,4 +1,5 @@
 import { BaseRepository } from './base';
+import { Prisma } from '@prisma/client';
 import { TicketStatusV2 } from '@xyne/shared';
 import {
   Ticket,
@@ -24,6 +25,28 @@ import {
 } from './workflowExecutionStateUtils';
 import { syncConversationTicketMdFromPrismaTicket } from '@/utils/ticketMd';
 import { GENERIC_RECOVERY_EXCLUDED_WORKFLOW_TYPES } from '@/workflows/polling/workflowRecoveryPolicy';
+import { claimNextPendingExecutionRow } from '@/bypassAcl/workflowServices';
+import { deleteTx } from '@/bypassAcl/transactions/workflows';
+import { approveProposalTx } from '@/bypassAcl/transactions/workflows';
+
+function getDescriptionFromTicketUpdateInput(
+  description: Prisma.TicketUpdateInput['description'],
+): string | undefined {
+  if (typeof description === 'string') {
+    return description;
+  }
+
+  if (
+    description &&
+    typeof description === 'object' &&
+    'set' in description &&
+    typeof description.set === 'string'
+  ) {
+    return description.set;
+  }
+
+  return undefined;
+}
 
 function buildClaimQuery(workflowType?: string, tags?: string[]): string {
   const tagFilter = tags && tags.length > 0
@@ -96,14 +119,35 @@ export class TicketRepository extends BaseRepository<Ticket, CreateTicketInput, 
       data,
     });
 
+    const description = getDescriptionFromTicketUpdateInput(data.description);
+    if (description !== undefined) {
+      await this.db.ticketDescription.upsert({
+        where: { ticketId: updatedTicket.id },
+        update: { description, updatedAt: updatedTicket.updatedAt },
+        create: {
+          ticketId: updatedTicket.id,
+          workspaceId: updatedTicket.workspaceId,
+          channelId: updatedTicket.channelId,
+          description,
+          createdAt: updatedTicket.updatedAt,
+          updatedAt: updatedTicket.updatedAt,
+        },
+      });
+    }
+
     await syncConversationTicketMdFromPrismaTicket(this.db, updatedTicket);
     return updatedTicket;
   }
 
+  /**
+   * Hard-deletes a ticket. Ticket relations are app-level (relationMode="prisma"), and Prisma
+   * Client refuses (P2014) to delete a ticket while required children still exist. Read rows are
+   * cleared here; other required children (activities, tags, assignments, stage ETAs,
+   * workflows, ...) must be removed by the caller first — see the Jira purge in
+   * jiraMigrationController for the full ordering.
+   */
   async delete(id: string): Promise<Ticket> {
-    return await this.db.ticket.delete({
-      where: { id },
-    });
+    return await deleteTx(this, id);
   }
 
   async findWithWorkflows(id: string): Promise<Ticket | null> {
@@ -261,40 +305,7 @@ export class WorkflowRepository extends BaseRepository<Workflow, CreateWorkflowI
   async approveProposal(
     proposalId: string,
   ): Promise<{ approved: Workflow; autoRevoked: Workflow[] }> {
-    return await this.db.$transaction(async tx => {
-      const proposal = await tx.workflow.findUnique({ where: { id: proposalId } });
-      if (!proposal || proposal.workflowType !== 'Automations') {
-        throw new Error(`Cannot approve proposal ${proposalId}: not an automation row.`);
-      }
-      const rootId = proposal.automationSeriesId ?? proposal.id;
-
-      const approved =
-        proposal.status === 'DISABLED'
-          ? proposal
-          : await tx.workflow.update({
-              where: { id: proposal.id },
-              data: { status: 'DISABLED' },
-            });
-
-      const siblings = await tx.workflow.findMany({
-        where: {
-          workflowType: 'Automations',
-          automationSeriesId: rootId,
-          status: 'PENDING_APPROVAL',
-          id: { not: proposal.id },
-        },
-      });
-      const autoRevoked = await Promise.all(
-        siblings.map(s =>
-          tx.workflow.update({
-            where: { id: s.id },
-            data: { status: 'AUTO_REVOKED' },
-          }),
-        ),
-      );
-
-      return { approved, autoRevoked };
-    });
+    return await approveProposalTx(this, proposalId);
   }
 
   async archivePriorLiveInLineage(
@@ -477,9 +488,7 @@ export class WorkflowExecutionRepository extends BaseRepository<WorkflowExecutio
   }
 
   async claimNextPendingExecution(workflowType?: string, tags?: string[]): Promise<WorkflowExecutionWithState | null> {
-    const claimed = await this.db.$queryRawUnsafe<Array<{ id: string }>>(
-      buildClaimQuery(workflowType, tags)
-    )
+    const claimed = await claimNextPendingExecutionRow(this.db, buildClaimQuery(workflowType, tags))
 
     if (claimed.length === 0) return null
 
@@ -521,3 +530,5 @@ export class WorkflowExecutionRepository extends BaseRepository<WorkflowExecutio
     return execution?.createdBy ?? null;
   }
 }
+
+

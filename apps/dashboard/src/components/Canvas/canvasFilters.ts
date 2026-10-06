@@ -46,27 +46,24 @@ export function isExcludedRecordingGeneratedCanvas(canvas: Canvas): boolean {
   return source ? RECORDING_GENERATED_SOURCES.has(source) : false;
 }
 
-export function getRecordingCanvasCallId(canvas: Canvas): string | null {
-  if (!isExcludedRecordingGeneratedCanvas(canvas)) {
-    return null;
-  }
-
+export function getCanvasCallId(canvas: Canvas): string | null {
   const metadata = canvas.metadata;
   if (!metadata || typeof metadata !== 'object' || Array.isArray(metadata)) {
     return null;
   }
 
-  const meta = metadata as Record<string, unknown>;
-  const isRegularCallSummary =
-    meta['source'] === 'call_detailed_summary' &&
-    typeof meta['conversationId'] === 'string' &&
-    meta['conversationId'].length > 0;
-  if (isRegularCallSummary) {
-    return null;
-  }
-
-  const callId = meta['callId'];
+  const callId = (metadata as Record<string, unknown>)['callId'];
   return typeof callId === 'string' && callId ? callId : null;
+}
+
+export function isRecordingCanvas(canvas: Canvas): boolean {
+  const metadata = canvas.metadata;
+  return Boolean(
+    metadata &&
+    typeof metadata === 'object' &&
+    !Array.isArray(metadata) &&
+    (metadata as Record<string, unknown>)['isRecording'] === true,
+  );
 }
 
 export function filterExcludedRecordingGeneratedCanvases(

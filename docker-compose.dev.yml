@@ -52,7 +52,7 @@ services:
 
   # Redis
   redis:
-    image: public.ecr.aws/docker/library/redis:7-alpine
+    image: mirror.gcr.io/library/redis:7-alpine
     container_name: ${COMPOSE_PROJECT_NAME:-xyne}-redis
     ports:
       - "${REDIS_BIND_PORT:-6379}:6379"
@@ -63,6 +63,7 @@ services:
       interval: 5s
       timeout: 3s
       retries: 5
+      start_period: 60s
 
   # LiveKit Server
   livekit:
@@ -78,13 +79,17 @@ services:
     volumes:
       - ./docker/livekit.yaml:/etc/livekit.yaml
     environment:
-      - LIVEKIT_API_KEY=devkey
-      - LIVEKIT_API_SECRET=devsecret
+      - LIVEKIT_API_KEY=localdevkey
+      - LIVEKIT_API_SECRET=localdevsecret
+    depends_on:
+      redis:
+        condition: service_healthy
     healthcheck:
-      test: ["CMD", "wget", "--spider", "-q", "http://localhost:7880/"]
+      test: ["CMD", "wget", "-Y", "off", "--spider", "-q", "http://localhost:7880/"]
       interval: 5s
       timeout: 3s
       retries: 5
+      start_period: 60s
 
   # LiveKit Egress Service (audio recording)
   livekit-egress:
@@ -120,29 +125,38 @@ services:
     volumes:
       - fake_gcs_data:/data
     healthcheck:
-      test: ["CMD", "wget", "--spider", "-q", "http://localhost:4443/storage/v1/b"]
+      test: ["CMD", "wget", "-Y", "off", "--spider", "-q", "http://localhost:4443/storage/v1/b"]
       interval: 5s
       timeout: 3s
       retries: 5
+      start_period: 60s
 
-  # MinIO (local S3-compatible storage for testing)
+  # RustFS (local S3-compatible storage for testing).
+  # Replaces MinIO, whose binaries and images are no longer published
+  # (dl.min.io returns 410, minio/minio is gone from Docker Hub). The service
+  # keeps the `minio` name, ports and minioadmin credentials so S3_ENDPOINT /
+  # AWS_* settings and the `minio` container hostname keep working unchanged.
   minio:
-    image: mirror.gcr.io/minio/minio:latest
+    image: rustfs/rustfs:latest
     container_name: ${COMPOSE_PROJECT_NAME:-xyne}-minio
     ports:
       - "${MINIO_API_BIND_PORT:-9000}:9000"
       - "${MINIO_CONSOLE_BIND_PORT:-9001}:9001"
     environment:
-      - MINIO_ROOT_USER=minioadmin
-      - MINIO_ROOT_PASSWORD=minioadmin
-    command: server /data --console-address ":9001"
+      - RUSTFS_VOLUMES=/data
+      - RUSTFS_ADDRESS=0.0.0.0:9000
+      - RUSTFS_CONSOLE_ADDRESS=0.0.0.0:9001
+      - RUSTFS_CONSOLE_ENABLE=true
+      - RUSTFS_ACCESS_KEY=minioadmin
+      - RUSTFS_SECRET_KEY=minioadmin
     volumes:
       - minio_data:/data
     healthcheck:
-      test: ["CMD", "mc", "ready", "local"]
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:9000/health"]
       interval: 5s
       timeout: 3s
       retries: 5
+      start_period: 60s
 
   # Zero Cache Server
   zero-cache:
@@ -186,10 +200,11 @@ services:
     extra_hosts:
       - "host.containers.internal:host-gateway"
     healthcheck:
-      test: ["CMD", "wget", "--spider", "-q", "http://localhost:4848/"]
+      test: ["CMD", "wget", "-Y", "off", "--spider", "-q", "http://localhost:4848/"]
       interval: 5s
       timeout: 3s
       retries: 10
+      start_period: 60s
 
   # Python Transcription Agent
   transcription-agent:
@@ -207,8 +222,8 @@ services:
       # Override LIVEKIT_URL to use container hostname instead of localhost
       # The python agent will use AGENT_LIVEKIT_URL from .env.local (ws://livekit:7880)
       - LIVEKIT_URL=ws://livekit:7880
-      - LIVEKIT_API_KEY=devkey
-      - LIVEKIT_API_SECRET=devsecret
+      - LIVEKIT_API_KEY=localdevkey
+      - LIVEKIT_API_SECRET=localdevsecret
       - BACKEND_URL=http://host.containers.internal:3001
       - REDIS_URL=redis://redis:6379
       - REDIS_HOST=redis
@@ -334,7 +349,7 @@ services:
       redis:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      test: ["CMD", "curl", "-f", "--noproxy", "*", "http://localhost:8080/health"]
       interval: 10s
       timeout: 5s
       retries: 5

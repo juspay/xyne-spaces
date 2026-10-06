@@ -17,12 +17,12 @@ async function getValidateDbInstance() {
   let useReadReplica = false;
   try {
     useReadReplica = await superpositionClient.getBooleanValue(
-      'YSWEET_USE_READ_REPLICA',
+      'ysweet_use_read_replica',
       false,
       {}
     );
   } catch (error) {
-    logger.error('[YSweet] Failed to read YSWEET_USE_READ_REPLICA flag, defaulting to primary DB:', error);
+    logger.error('[YSweet] Failed to read ysweet_use_read_replica flag, defaulting to primary DB:', error);
   }
   if (!useReadReplica) {
     return DatabaseClient.getInstance();

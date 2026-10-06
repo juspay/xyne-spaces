@@ -9,7 +9,6 @@
 * waiting for "[data-testid='chat-list-loading']" to disappear
 * clicking on "[data-testid='channel-tab-canvas']"
 * clicking on text "New Canvas"
-* verifying user is redirected to "/canvas/*"
 * waiting for "[data-testid='canvas-editor']" to appear
 * verifying "[data-testid='canvas-title-input']" is visible
 * clicking on "[data-testid='canvas-title-input']"

@@ -37,6 +37,13 @@ const endOfDay = (date: Date): Date => {
   return d;
 };
 
+const atClock = (date: Date, clock: string, endOfMinute: boolean): Date => {
+  const [hours = 0, minutes = 0] = clock.split(':').map(Number);
+  const d = new Date(date);
+  d.setHours(hours, minutes, endOfMinute ? 59 : 0, endOfMinute ? 999 : 0);
+  return d;
+};
+
 const daysAgo = (days: number): Date => {
   const d = new Date();
   d.setDate(d.getDate() - days);
@@ -69,6 +76,14 @@ interface RefetchRangeDialogProps {
   onOpenChange: (open: boolean) => void;
   onConfirm: (range?: { startDate: string; endDate: string }) => void;
   isPending?: boolean;
+  /** Defaults to the email wording; review desks pass their own. */
+  title?: string;
+  subtitle?: string;
+  summaryLabel?: string;
+  /** Oldest day that can be fetched, counting today as day 1. */
+  maxDays?: number;
+  /** Lets a custom range start and end at a time of day, for sources that honour it. */
+  withTime?: boolean;
 }
 
 export const RefetchRangeDialog: React.FC<RefetchRangeDialogProps> = ({
@@ -76,29 +91,52 @@ export const RefetchRangeDialog: React.FC<RefetchRangeDialogProps> = ({
   onOpenChange,
   onConfirm,
   isPending = false,
+  title = 'Fetch emails',
+  subtitle = 'Pull new mail or backfill a specific time range from the connected inbox.',
+  summaryLabel = 'Will fetch emails received',
+  maxDays,
+  withTime = false,
 }) => {
-  const [mode, setMode] = useState<Mode>('last-7d');
+  const presets = maxDays ? PRESETS.filter(p => p.days < maxDays) : PRESETS;
+  const earliestDate = maxDays ? daysAgo(maxDays - 1) : undefined;
+  const [selectedMode, setMode] = useState<Mode>('last-7d');
+  // The dialog outlives desk switches, so a preset chosen on another desk may not exist here.
+  const mode: Mode =
+    selectedMode === 'custom' || presets.some(p => p.value === selectedMode)
+      ? selectedMode
+      : 'last-7d';
   const [customStart, setCustomStart] = useState<Date | null>(null);
   const [customEnd, setCustomEnd] = useState<Date | null>(null);
+  const [customStartTime, setCustomStartTime] = useState('00:00');
+  const [customEndTime, setCustomEndTime] = useState('23:59');
 
   // Resolved range for the current mode (used for both summary text and submit).
   const resolved = useMemo<{ startDate: Date; endDate: Date } | null>(() => {
     if (mode === 'custom') {
       if (!customStart || !customEnd) return null;
-      return { startDate: startOfDay(customStart), endDate: endOfDay(customEnd) };
+      return withTime
+        ? {
+            startDate: atClock(customStart, customStartTime, false),
+            endDate: atClock(customEnd, customEndTime, true),
+          }
+        : { startDate: startOfDay(customStart), endDate: endOfDay(customEnd) };
     }
     const preset = PRESETS.find(p => p.value === mode);
     if (!preset) return null;
     return { startDate: daysAgo(preset.days), endDate: endOfDay(new Date()) };
-  }, [mode, customStart, customEnd]);
+  }, [mode, customStart, customEnd, withTime, customStartTime, customEndTime]);
 
   const customRangeError = useMemo<string | null>(() => {
     if (mode !== 'custom' || !customStart || !customEnd) return null;
     if (customStart > customEnd) return 'Start date must be on or before end date';
+    if (resolved && resolved.startDate > resolved.endDate)
+      return 'Start time must be before end time';
+    if (earliestDate && startOfDay(customStart) < earliestDate)
+      return `Only the last ${maxDays} days can be fetched`;
     const span = endOfDay(customEnd).getTime() - startOfDay(customStart).getTime();
     if (span > MAX_RANGE_DAYS * MS_PER_DAY) return `Range cannot exceed ${MAX_RANGE_DAYS} days`;
     return null;
-  }, [mode, customStart, customEnd]);
+  }, [mode, customStart, customEnd, resolved, earliestDate, maxDays]);
 
   const isCustomReady = mode !== 'custom' || (!!customStart && !!customEnd && !customRangeError);
   const isConfirmDisabled = isPending || !isCustomReady;
@@ -142,17 +180,15 @@ export const RefetchRangeDialog: React.FC<RefetchRangeDialogProps> = ({
     <Dialog
       open={open}
       onOpenChange={onOpenChange}
-      title='Fetch emails'
-      description='Choose how much history to pull from the inbox.'
+      title={title}
+      description='Choose how much history to pull.'
       className='max-w-lg'
     >
       <div className='p-6 space-y-5'>
         {/* Header */}
         <div>
-          <div className='text-lg font-semibold text-foreground'>Fetch emails</div>
-          <p className='text-sm text-muted-foreground mt-0.5'>
-            Pull new mail or backfill a specific time range from the connected inbox.
-          </p>
+          <div className='text-lg font-semibold text-foreground'>{title}</div>
+          <p className='text-sm text-muted-foreground mt-0.5'>{subtitle}</p>
         </div>
 
         {/* Quick presets */}
@@ -161,7 +197,7 @@ export const RefetchRangeDialog: React.FC<RefetchRangeDialogProps> = ({
             Quick range
           </div>
           <div className='grid grid-cols-3 gap-2'>
-            {PRESETS.map(p => renderPreset(p.value, p.label))}
+            {presets.map(p => renderPreset(p.value, p.label))}
             {renderPreset('custom', 'Custom')}
           </div>
         </div>
@@ -178,6 +214,7 @@ export const RefetchRangeDialog: React.FC<RefetchRangeDialogProps> = ({
                 rangeForVisual={{ start: customStart, end: customEnd }}
                 onPick={d => setCustomStart(d)}
                 placeholder='Start date'
+                {...(earliestDate && { minDate: earliestDate })}
                 maxDate={customEnd ?? new Date()}
                 trackName='FetchRangeFromTrigger'
               />
@@ -191,6 +228,28 @@ export const RefetchRangeDialog: React.FC<RefetchRangeDialogProps> = ({
                 maxDate={new Date()}
                 trackName='FetchRangeToTrigger'
               />
+              {withTime && (
+                <>
+                  <input
+                    type='time'
+                    value={customStartTime}
+                    onChange={e => setCustomStartTime(e.target.value || '00:00')}
+                    aria-label='Start time'
+                    className='h-9 w-full rounded-md border border-border bg-background px-2.5 text-sm text-foreground focus:outline-none focus:border-primary focus:ring-2 focus:ring-primary/30'
+                    data-track-category='Support'
+                    data-track-name='FetchRangeFromTime'
+                  />
+                  <input
+                    type='time'
+                    value={customEndTime}
+                    onChange={e => setCustomEndTime(e.target.value || '23:59')}
+                    aria-label='End time'
+                    className='h-9 w-full rounded-md border border-border bg-background px-2.5 text-sm text-foreground focus:outline-none focus:border-primary focus:ring-2 focus:ring-primary/30'
+                    data-track-category='Support'
+                    data-track-name='FetchRangeToTime'
+                  />
+                </>
+              )}
             </div>
 
             {(customStart || customEnd || customRangeError) && (
@@ -198,7 +257,10 @@ export const RefetchRangeDialog: React.FC<RefetchRangeDialogProps> = ({
                 {!customStart && 'Pick a start date.'}
                 {customStart && !customEnd && 'Now pick the end date.'}
                 {customStart && customEnd && !customRangeError && (
-                  <span className='text-foreground'>{formatRange(customStart, customEnd)}</span>
+                  <span className='text-foreground'>
+                    {formatRange(customStart, customEnd)}
+                    {withTime && `, ${customStartTime} – ${customEndTime}`}
+                  </span>
                 )}
                 {customRangeError && <p className='text-destructive'>{customRangeError}</p>}
               </div>
@@ -209,7 +271,7 @@ export const RefetchRangeDialog: React.FC<RefetchRangeDialogProps> = ({
         {/* Resolved-range summary for presets */}
         {mode !== 'custom' && resolved && (
           <div className='rounded-md bg-muted/50 px-3 py-2 text-xs text-muted-foreground'>
-            Will fetch emails received{' '}
+            {summaryLabel}{' '}
             <span className='text-foreground font-medium'>
               {formatRange(resolved.startDate, resolved.endDate)}
             </span>

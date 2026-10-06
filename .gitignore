@@ -153,6 +153,8 @@ jspm_packages/
 
 # Output of 'npm pack'
 *.tgz
+# The spaces CLI is downloaded from the dashboard, so its tarball is served as a static file.
+!apps/dashboard/public/downloads/spaces-cli/*.tgz
 
 # Yarn Integrity file
 .yarn-integrity
@@ -170,6 +172,7 @@ dist
 
 # Gatsby files
 .cache/
+.venv/
 
 # Storybook build outputs
 .out

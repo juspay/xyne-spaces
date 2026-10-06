@@ -33,7 +33,6 @@ import {
 import { CanvasVisibility, ChannelScopeType, type User } from '@xyne/shared';
 import Input from '../../ui/Input';
 import { Tooltip } from '../../ui/Tooltip/Tooltip';
-import { Dialog } from '../../ui/Dialog';
 import { searchUsers, useActiveUsers, useUsers } from '../../../hooks/useUsers';
 import {
   DropdownMenu,
@@ -45,7 +44,6 @@ import {
   DropdownMenuSubTrigger,
   DropdownMenuTrigger,
 } from '../../ui/dropdown-menu';
-import { CanvasDeleteModal } from '../CanvasDeleteModal';
 import { usePlatform } from '../../../hooks/usePlatform';
 import { useAllVisibleChannels } from '../../../hooks/useChannels';
 import { queries } from '../../../zero/queries';
@@ -81,7 +79,6 @@ import {
   useCanvasLabelMapResult,
 } from '../useCanvasLabels';
 import { isElectronApp, toStandalonePath } from '../../../utils/electronApp';
-import { getCanvasDisplayTitle, useCanvasTitleIcon } from '../canvasTitleIcon';
 
 type FilterTab = 'all' | 'created_by_me' | 'shared';
 type CanvasCursor = { id: string; updatedAt: number };
@@ -93,39 +90,6 @@ type CanvasEmptyStateCopy = {
   title: string;
   description: string;
 };
-
-const CanvasListItemTitle: React.FC<{ canvas: Canvas; isSelected: boolean }> = ({
-  canvas,
-  isSelected,
-}) => {
-  const titleIcon = useCanvasTitleIcon(canvas);
-  const displayTitle = getCanvasDisplayTitle(canvas.title, titleIcon) || 'Untitled Canvas';
-
-  return (
-    <Tooltip
-      content={displayTitle}
-      side='top'
-      align='start'
-      delayDuration={400}
-      className='max-w-xs break-words'
-    >
-      <h3
-        className={cn(
-          'truncate text-[13px] font-semibold leading-4',
-          isSelected
-            ? 'text-sidebar-accent-foreground'
-            : 'text-sidebar-foreground/80 group-hover:text-sidebar-accent-foreground',
-        )}
-      >
-        {titleIcon && (
-          <span className='mr-1 inline-block text-xs leading-none align-[-1px]'>{titleIcon}</span>
-        )}
-        {displayTitle}
-      </h3>
-    </Tooltip>
-  );
-};
-
 type ChannelSourcePaginationState = {
   cursor: CanvasCursor | null;
   nextCursor: CanvasCursor | null;
@@ -981,8 +945,8 @@ export const CanvasList: React.FC<CanvasListProps> = ({
   const [scopeChannelSearchQuery, setScopeChannelSearchQuery] = useState('');
   const [selectedScopeChannelId, setSelectedScopeChannelId] = useState<string | null>(null);
   const [openCanvasMenuId, setOpenCanvasMenuId] = useState<string | null>(null);
-  const [deletingCanvasId, setDeletingCanvasId] = useState<string | null>(null);
-  const [internalActiveFilter, setInternalActiveFilter] = useState<FilterTab>('all');
+  const [locallyDeletedCanvasIds, setLocallyDeletedCanvasIds] = useState<Set<string>>(new Set());
+  const [internalActiveFilter, setInternalActiveFilter] = useState<FilterTab>('created_by_me');
   const [collapsedChannelFolderIds, setCollapsedChannelFolderIds] = useState<Set<string>>(
     new Set(),
   );
@@ -1081,8 +1045,11 @@ export const CanvasList: React.FC<CanvasListProps> = ({
     [canvasItems, channelCanvasItems],
   );
   const selectedChannelRootCanvasItems = useMemo(
-    () => toCanvasArray<Canvas>(selectedChannelRootCanvasesResult),
-    [selectedChannelRootCanvasesResult],
+    () =>
+      toCanvasArray<Canvas>(selectedChannelRootCanvasesResult).filter(
+        canvas => !locallyDeletedCanvasIds.has(canvas.id),
+      ),
+    [locallyDeletedCanvasIds, selectedChannelRootCanvasesResult],
   );
   const canvasLabelIds = useMemo(
     () => [
@@ -1127,13 +1094,15 @@ export const CanvasList: React.FC<CanvasListProps> = ({
 
   const rawItems = useMemo(
     () =>
-      rawMergedCanvasItems.map(canvas =>
-        mergeCanvasRestLabels(
-          mergeCanvasLabelSnapshot(canvas, selectedCanvasLabelSnapshot),
-          labelsByCanvasId,
+      rawMergedCanvasItems
+        .filter(canvas => !locallyDeletedCanvasIds.has(canvas.id))
+        .map(canvas =>
+          mergeCanvasRestLabels(
+            mergeCanvasLabelSnapshot(canvas, selectedCanvasLabelSnapshot),
+            labelsByCanvasId,
+          ),
         ),
-      ),
-    [labelsByCanvasId, rawMergedCanvasItems, selectedCanvasLabelSnapshot],
+    [labelsByCanvasId, locallyDeletedCanvasIds, rawMergedCanvasItems, selectedCanvasLabelSnapshot],
   );
   const archiveFilteredRawItems = useMemo(
     () => filterArchivedCanvases(rawItems, { includeArchived, onlyArchived }),
@@ -1254,11 +1223,15 @@ export const CanvasList: React.FC<CanvasListProps> = ({
     (
       sourceChannelId: string,
       page: Canvas[],
-      _previousPageIds: Set<string>,
+      previousPageIds: Set<string>,
       pageSize: number,
     ): void => {
       setChannelCanvasItems(previousItems => {
-        const mergedItems = mergeCanvasItems(previousItems, page);
+        const nextPageIds = new Set(page.map(canvas => canvas.id));
+        const retainedItems = previousItems.filter(
+          canvas => !previousPageIds.has(canvas.id) || nextPageIds.has(canvas.id),
+        );
+        const mergedItems = mergeCanvasItems(retainedItems, page);
         return areCanvasItemListsEqual(previousItems, mergedItems) ? previousItems : mergedItems;
       });
       setChannelSourcePagination(previous => {
@@ -1914,7 +1887,10 @@ export const CanvasList: React.FC<CanvasListProps> = ({
               key: 'delete',
               label: 'Delete',
               icon: <Trash2 className='size-3.5' strokeWidth={2.1} />,
-              onSelect: () => setDeletingCanvasId(canvas.id),
+              onSelect: () => {
+                setLocallyDeletedCanvasIds(previous => new Set(previous).add(canvas.id));
+                onDelete(canvas.id);
+              },
               variant: 'destructive' as const,
               separatorBefore: !onArchiveToggle,
               testId: 'canvas-delete-button',
@@ -2002,7 +1978,24 @@ export const CanvasList: React.FC<CanvasListProps> = ({
 
         <div className='min-w-0 flex-1 pr-10'>
           <div className='flex min-w-0 items-center gap-1 pt-0.5'>
-            <CanvasListItemTitle canvas={canvas} isSelected={isSelected} />
+            <Tooltip
+              content={canvas.title || 'Untitled Canvas'}
+              side='top'
+              align='start'
+              delayDuration={400}
+              className='max-w-xs break-words'
+            >
+              <h3
+                className={cn(
+                  'truncate text-[13px] font-semibold leading-4',
+                  isSelected
+                    ? 'text-sidebar-accent-foreground'
+                    : 'text-sidebar-foreground/80 group-hover:text-sidebar-accent-foreground',
+                )}
+              >
+                {canvas.title || 'Untitled Canvas'}
+              </h3>
+            </Tooltip>
             {canvas.visibility !== CanvasVisibility.PUBLIC && (
               <Lock className='size-3 shrink-0 text-sidebar-foreground/40' strokeWidth={2.1} />
             )}
@@ -2682,23 +2675,6 @@ export const CanvasList: React.FC<CanvasListProps> = ({
           />
         )}
       </div>
-
-      <Dialog
-        open={!!deletingCanvasId}
-        onOpenChange={open => !open && setDeletingCanvasId(null)}
-        title='Delete Canvas'
-      >
-        <CanvasDeleteModal
-          onClose={() => setDeletingCanvasId(null)}
-          onConfirm={() => {
-            if (deletingCanvasId && onDelete) {
-              onDelete(deletingCanvasId);
-              setDeletingCanvasId(null);
-            }
-          }}
-          canvasTitle={rawItems.find(c => c.id === deletingCanvasId)?.title}
-        />
-      </Dialog>
     </div>
   );
 };

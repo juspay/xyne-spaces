@@ -44,7 +44,7 @@
             sha256 = "sha256-wdwHQ3M2Lxif8LDI4LRcWdwcb2Wf7CtHImvJoi2qZR4=";
             ports = [ "7880:7880" ];
             environment = {
-              LIVEKIT_API_KEY = "devkey";
+              LIVEKIT_API_KEY = "localdevkey";
             };
           };
         }

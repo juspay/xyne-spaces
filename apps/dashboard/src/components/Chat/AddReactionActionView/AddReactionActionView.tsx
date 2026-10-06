@@ -2,18 +2,23 @@ import React, { useRef } from 'react';
 import EmojiPicker, { EmojiStyle, Theme } from 'emoji-picker-react';
 import { EmojiPickerEmoji } from '../../../hooks/useCustomEmojis';
 import { useTheme } from '../../../hooks/useTheme';
+import { FrequentEmojiRow } from '../FrequentEmojis/FrequentEmojiRow';
+import { toEmojiToken } from '../../../utils/customEmojiUtils';
+import { EMOJI_PICKER_CATEGORIES } from '../../../utils/emojiPickerCategories';
 
 interface AddReactionActionViewProps {
-  handleEmojiSelect: (emoji: {
-    emoji: string;
-    isCustom: boolean;
-    imageUrl?: string;
-    names?: string[];
-  }) => void;
+  /** Receives the stored reaction token — unicode char, or `custom:<emojiId>:<name>`. */
+  handleEmojiSelect: (emoji: string) => void;
   customEmojis: EmojiPickerEmoji[] | undefined;
+  /** Message the picker reacts to — carried on the analytics event. */
+  messageId?: string | undefined;
 }
 
-const AddReactionActionView = ({ handleEmojiSelect, customEmojis }: AddReactionActionViewProps) => {
+const AddReactionActionView = ({
+  handleEmojiSelect,
+  customEmojis,
+  messageId,
+}: AddReactionActionViewProps) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const { theme } = useTheme();
   const emojiPickerTheme = theme === 'midnight' ? Theme.DARK : Theme.LIGHT;
@@ -32,7 +37,8 @@ const AddReactionActionView = ({ handleEmojiSelect, customEmojis }: AddReactionA
   };
 
   return (
-    <div ref={containerRef} className='h-full' onTouchStart={handleTouchStart}>
+    <div ref={containerRef} className='flex h-full flex-col' onTouchStart={handleTouchStart}>
+      <FrequentEmojiRow onSelect={handleEmojiSelect} messageId={messageId} />
       <EmojiPicker
         emojiStyle={EmojiStyle.NATIVE}
         theme={emojiPickerTheme}
@@ -40,18 +46,12 @@ const AddReactionActionView = ({ handleEmojiSelect, customEmojis }: AddReactionA
           ['--epr-emoji-size' as string]: '22px',
           ['--epr-emoji-gap' as string]: '4px',
         }}
-        onEmojiClick={emoji => {
-          handleEmojiSelect({
-            emoji: emoji.emoji,
-            isCustom: emoji.isCustom,
-            imageUrl: emoji.imageUrl,
-            names: emoji.names,
-          });
-        }}
+        onEmojiClick={emoji => handleEmojiSelect(toEmojiToken(emoji))}
+        categories={EMOJI_PICKER_CATEGORIES}
         customEmojis={customEmojis || []}
         previewConfig={{ showPreview: true }}
         autoFocusSearch={false}
-        className='!w-full !h-full !rounded-[inherit] ![--epr-picker-border-color:transparent]'
+        className='!w-full !min-h-0 !flex-1 !rounded-[inherit] ![--epr-picker-border-color:transparent]'
       />
     </div>
   );

@@ -1,6 +1,8 @@
 import { useCallback, useRef, useState } from 'react';
 import { xyneAIStreamManager, type StreamState } from '../services/XyneAI';
 import type { Message } from '../components/Chat/XyneAISidebar/utils/XyneAITypes';
+import { globalClickTracker } from '../services/Analytics/globalClickTracker';
+import { lengthBucket } from '../services/Analytics/trackSource';
 
 export interface UseComposeSubjectAIReturn {
   isGenerating: boolean;
@@ -34,6 +36,8 @@ const sanitizeSubject = (raw: string): string => {
 
 export function useComposeSubjectAI(
   channelId: string | null | undefined,
+  /** Composer mount this suggestion belongs to, so SUBJECT_SUGGESTED joins the send. */
+  composerSessionId?: string | null,
 ): UseComposeSubjectAIReturn {
   const [isGenerating, setIsGenerating] = useState(false);
   // Tracks the latest in-flight generate() call. If two calls race (rapid
@@ -55,6 +59,7 @@ export function useComposeSubjectAI(
       const userMessageId = `user-${Date.now()}`;
       const botMessageId = `bot-${Date.now()}`;
       inflightRef.current = threadId;
+      const startedAt = Date.now();
 
       return new Promise<string>(resolve => {
         let resolved = false;
@@ -66,6 +71,14 @@ export function useComposeSubjectAI(
             inflightRef.current = null;
             setIsGenerating(false);
           }
+          // Outcome of the wand click (SuggestComposeSubject is the intent).
+          // Only the length leaves the client — the subject is user content.
+          globalClickTracker.trackManualEvent('Support', 'SUBJECT_SUGGESTED', undefined, {
+            ...(composerSessionId && { composerSessionId }),
+            succeeded: value.length > 0,
+            latencyMs: Date.now() - startedAt,
+            ...(value.length > 0 && { subjectLengthBucket: lengthBucket(value.length) }),
+          });
           resolve(value);
         };
 
@@ -119,7 +132,7 @@ export function useComposeSubjectAI(
           });
       });
     },
-    [channelId],
+    [channelId, composerSessionId],
   );
 
   return { isGenerating, generate };

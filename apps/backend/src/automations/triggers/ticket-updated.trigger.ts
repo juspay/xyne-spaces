@@ -1,31 +1,48 @@
+import { emitDomainEvent } from '@/events/emitDomainEvent';
 import { z } from 'zod';
 import { TicketPriority, TicketStatusV2 } from '@xyne/shared';
 import { BaseTrigger } from './base-trigger';
 import { TriggerCategory } from '../types/categories';
-import { eventRouter } from '../engine/event-router';
 import {
-  TicketContextSchema,
   matchTicketScopeFilters,
   hydrateTicketBoundPayload,
   type TicketLike,
 } from './ticket-context';
 import type { TicketUpdatedEventPayload } from '../types/automation-events';
+import {
+  TicketUpdatedFieldSchema,
+  FormFieldConditionSchema,
+  TicketUpdatedOutputSchema,
+  resolveFormFieldConditions,
+  matchesFormFieldCondition,
+  isTicketReopenTransition,
+  type TicketChanges,
+  type FormFieldChanges,
+} from './ticket-updated-schema';
+
+// Re-exported so every existing importer keeps its import path; the definitions
+// moved to a leaf that the engine cannot reach. See `ticket-updated-schema.ts`.
+export {
+  REOPENED_STATUSES,
+  isTicketReopenTransition,
+  TicketUpdatedFieldSchema,
+  FormFieldConditionMatchSchema,
+  FormFieldConditionSchema,
+  TicketChangeSchema,
+  TicketUpdatedOutputSchema,
+  resolveFormFieldConditions,
+  matchesFormFieldCondition,
+} from './ticket-updated-schema';
+export type {
+  TicketChange,
+  FormFieldCondition,
+  TicketChanges,
+  FormFieldChanges,
+  TicketUpdatedField,
+} from './ticket-updated-schema';
 import { logger } from '@/utils/logger';
 
 export const TICKET_UPDATED_EVENT = 'TICKET_UPDATED';
-
-export const TicketUpdatedFieldSchema = z.enum([
-  'statusV2',
-  'assignedTo',
-  'priority',
-  'stageName',
-  'title',
-  'description',
-  'eta',
-  'boardId',
-  'userGroupId',
-]);
-export type TicketUpdatedField = z.infer<typeof TicketUpdatedFieldSchema>;
 
 const FieldTransitionSchema = z.object({
   field: TicketUpdatedFieldSchema,
@@ -33,29 +50,11 @@ const FieldTransitionSchema = z.object({
   newValue: z.union([z.string(), z.number()]).nullable().optional(),
 });
 
-export const FormFieldConditionMatchSchema = z.enum(['changed', 'contains']);
-
-export const FormFieldConditionSchema = z
-  .object({
-    fieldId: z.string().min(1),
-    match: FormFieldConditionMatchSchema.default('changed'),
-    value: z
-      .string()
-      .optional()
-      .describe('Substring to look for in the new field value when match is "contains".'),
-  })
-  .superRefine((val, ctx) => {
-    if (val.match === 'contains' && !(val.value ?? '').trim()) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        message: 'A contains value is required when match is "contains".',
-        path: ['value'],
-      });
-    }
-  });
-export type FormFieldCondition = z.infer<typeof FormFieldConditionSchema>;
-
 const TicketUpdatedConfigSchema = z.object({
+  projectIds: z
+    .array(z.string())
+    .optional()
+    .describe('Limit to tickets on these projects. Empty matches every project.'),
   boardIds: z
     .array(z.string())
     .optional()
@@ -64,10 +63,6 @@ const TicketUpdatedConfigSchema = z.object({
     .array(z.string())
     .optional()
     .describe('Limit to tickets posted to these channels. Empty matches every channel.'),
-  projectIds: z
-    .array(z.string())
-    .optional()
-    .describe('Limit to tickets on these projects. Empty matches every project.'),
   transitions: z
     .array(FieldTransitionSchema)
     .optional()
@@ -88,56 +83,8 @@ const TicketUpdatedConfigSchema = z.object({
     ),
 });
 
-export const TicketChangeSchema = z.object({
-  previousValue: z.union([z.string(), z.number(), z.null()]).optional(),
-  newValue: z.union([z.string(), z.number(), z.null()]).optional(),
-});
-
-export const TicketUpdatedOutputSchema = TicketContextSchema.extend({
-  changes: z.record(TicketUpdatedFieldSchema, TicketChangeSchema),
-  formFieldChanges: z.record(z.string(), TicketChangeSchema).optional(),
-  performedBy: z.object({
-    id: z.string().nullable(),
-  }),
-});
-
 type TicketUpdatedConfig = z.infer<typeof TicketUpdatedConfigSchema>;
 type TicketUpdatedPayload = z.infer<typeof TicketUpdatedOutputSchema>;
-type TicketChange = z.infer<typeof TicketChangeSchema>;
-
-export type TicketChanges = Partial<Record<TicketUpdatedField, TicketChange>>;
-export type FormFieldChanges = Record<string, TicketChange>;
-
-/** Normalize legacy formFieldIds into formFieldConditions (match: changed). */
-export function resolveFormFieldConditions(cfg: TicketUpdatedConfig): FormFieldCondition[] {
-  if (cfg.formFieldConditions && cfg.formFieldConditions.length > 0) {
-    return cfg.formFieldConditions.map(c => ({
-      fieldId: c.fieldId,
-      match: c.match ?? 'changed',
-      value: c.value,
-    }));
-  }
-  if (cfg.formFieldIds && cfg.formFieldIds.length > 0) {
-    return cfg.formFieldIds.map(fieldId => ({ fieldId, match: 'changed' as const }));
-  }
-  return [];
-}
-
-export function matchesFormFieldCondition(
-  condition: FormFieldCondition,
-  formFieldChanges: FormFieldChanges | undefined,
-): boolean {
-  const change = formFieldChanges?.[condition.fieldId];
-  if (!change) return false;
-
-  const match = condition.match ?? 'changed';
-  if (match === 'changed') return true;
-
-  const needle = (condition.value ?? '').trim();
-  if (!needle) return false;
-  if (change.newValue === null || change.newValue === undefined) return false;
-  return String(change.newValue).toLowerCase().includes(needle.toLowerCase());
-}
 
 export class TicketUpdatedTrigger extends BaseTrigger<typeof TicketUpdatedConfigSchema> {
   readonly type = TICKET_UPDATED_EVENT;
@@ -274,17 +221,42 @@ export async function emitTicketUpdated(params: {
 }): Promise<void> {
   const { ticket, changes, formFieldChanges, performedById } = params;
   if (Object.keys(changes).length === 0 && Object.keys(formFieldChanges ?? {}).length === 0) return;
+
+  // Every path that changes statusV2 funnels through here, so this is the one place
+  // a reopen can be observed regardless of which writer produced it (Zero mutators,
+  // the ticket repository, the apps API, email ingestion, the classification worker).
+  //
+  // The cheap transition test runs inline so the common update — which is not a
+  // reopen — costs one comparison and nothing else. Only a genuine reopen pays for
+  // the module load, which is lazy because the reassignment helper reaches the ticket
+  // repository, which imports this module for emitTicketUpdated; a static import
+  // would close that loop.
+  if (isTicketReopenTransition(changes)) {
+    void import('@/utils/ticketReassignment')
+      .then(({ reassignReopenedTicketIfAssigneeInactive }) =>
+        reassignReopenedTicketIfAssigneeInactive(ticket, changes),
+      )
+      .catch(err =>
+        logger.error(`[automations] reopen reassignment hook failed for ${ticket.id}:`, err),
+      );
+  }
+
   try {
     // Lightweight payload: ticketId + the diff + performer id. The trigger's
     // hydratePayload fetches ticket + board + project + channel + ...
     // fresh from the DB when the automation actually runs.
     const payload = {
       ticketId: ticket.id,
+      scope: {
+        boardId: ticket.boardId ?? null,
+        projectId: ticket.projectId ?? null,
+        channelId: ticket.channelId ?? null,
+      },
       changes,
       formFieldChanges: formFieldChanges ?? {},
       performedBy: { id: performedById },
     };
-    await eventRouter.emit(
+    await emitDomainEvent(
       { type: TICKET_UPDATED_EVENT, payload },
       ticket.workspaceId,
     );

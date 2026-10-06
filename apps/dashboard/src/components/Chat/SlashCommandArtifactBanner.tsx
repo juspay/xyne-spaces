@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { ArrowRight, ChevronLeft, ChevronRight, Phone, TriangleAlert, X } from 'lucide-react';
+import { ArrowRight, ChevronLeft, ChevronRight, TriangleAlert, X } from 'lucide-react';
 import { useSelector } from '@xstate/react';
 import { useMatches, useNavigate } from 'react-router-dom';
 import { getSlashCommandArtifactDiagnosticKey } from '@xyne/shared';
@@ -8,7 +8,10 @@ import { useChannel } from '../../hooks/useChannels';
 import { useChannelDisplayName } from '../../hooks/useChannelDisplayName';
 import { useAuthContextValues } from '../../hooks/useAuth';
 import { useRouteContext } from '../../hooks/useRouteContext';
+import { useUsersById } from '../../hooks/useUsers';
 import { formatElapsedTime as formatMessageAge } from '../../utils/dateUtils';
+import { stripFlowMarkup } from '../../utils/flowPreview';
+import { getUserDisplayName } from '../../utils/userDisplayName';
 import { roomActor } from '../../machines/roomMachine';
 import { Event, logger } from '../../utils/logger';
 import {
@@ -17,6 +20,7 @@ import {
 } from './SlashCommandArtifactSideEffects';
 import { buildSlashCommandArtifactRoute } from './SlashCommandArtifacts';
 import { isDMChannel } from './ChatDirectory/ChatDirectory.utils';
+import { PhoneDefault } from '@xyne/icons';
 
 export const getVisibleSlashCommandArtifactBanners = (
   items: readonly SlashCommandArtifactBannerItem[],
@@ -67,6 +71,17 @@ export const SlashCommandArtifactBanner = (): React.JSX.Element | null => {
   const item = visibleItems[currentIndex];
   const channel = useChannel(item?.channelId ?? '');
   const { displayName: channelDisplayName } = useChannelDisplayName(channel, userID);
+  const usersById = useUsersById();
+  // The stored preview is the raw Flow body, so its mention/link tokens would
+  // otherwise render verbatim as `<broadcast:channel> <userid:…>`.
+  const messagePreview = useMemo(
+    () =>
+      stripFlowMarkup(item?.messagePreview ?? '', userId => {
+        const user = usersById.get(userId);
+        return user ? getUserDisplayName(user) : undefined;
+      }),
+    [item?.messagePreview, usersById],
+  );
   if (!item) return null;
 
   const isInThisCall = currentCallId === item.activeCallExternalId;
@@ -160,8 +175,8 @@ export const SlashCommandArtifactBanner = (): React.JSX.Element | null => {
             </button>
           </div>
 
-          <p className='mt-2 min-w-0 truncate text-sm text-foreground' title={item.messagePreview}>
-            {item.messagePreview}
+          <p className='mt-2 min-w-0 truncate text-sm text-foreground' title={messagePreview}>
+            {messagePreview}
           </p>
 
           <div className='mt-auto flex items-end justify-between gap-2'>
@@ -206,7 +221,7 @@ export const SlashCommandArtifactBanner = (): React.JSX.Element | null => {
                     callKey: getSlashCommandArtifactDiagnosticKey(item.activeCallExternalId),
                   })}
                 >
-                  <Phone className='size-3' />
+                  <PhoneDefault className='size-3' />
                   {isInThisCall ? 'In call' : 'Join call'}
                 </button>
               )}

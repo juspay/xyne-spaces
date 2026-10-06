@@ -1,6 +1,9 @@
 import { type ReactElement, useMemo, useEffect, useRef, useState, useCallback } from 'react';
 import { useForm, Controller } from 'react-hook-form';
 import { Button } from '../../ui/Button/Button';
+import { AppResourceSection } from './AppResourceSection';
+import { AppFetchSection } from '../AppFetchSection/AppFetchSection';
+import { ATTACHABLE_RESOURCES } from './attachableResources';
 import Input from '../../ui/Input/Input';
 import Textarea from '../../ui/Textarea/Textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../../ui/Select';
@@ -22,7 +25,9 @@ import {
   Info,
   Command,
   Shield,
+  Boxes,
   Link2,
+  DownloadCloud,
 } from 'lucide-react';
 import { cn } from '../../../utils/classNames';
 import { toast } from 'sonner';
@@ -858,7 +863,14 @@ function WebhookNameInput({
 
 // ─── Sectioned navigation ─────────────────────────────────────────────────────
 
-type EditAppSection = 'basic' | 'commands' | 'shortcuts' | 'permissions' | 'incoming';
+type EditAppSection =
+  | 'basic'
+  | 'commands'
+  | 'shortcuts'
+  | 'permissions'
+  | 'resources'
+  | 'incoming'
+  | 'fetch';
 
 interface EditAppNavItem {
   id: EditAppSection;
@@ -1258,12 +1270,32 @@ export const EditAppForm = ({
     { id: 'commands', label: 'Commands', icon: <Command className='size-4' /> },
     { id: 'shortcuts', label: 'Shortcuts', icon: <Zap className='size-4' /> },
     { id: 'permissions', label: 'Permissions', icon: <Shield className='size-4' /> },
+    // Attachments are per-install, like incoming webhooks — meaningless on the template.
+    ...(isInstallMode
+      ? [
+          {
+            id: 'resources' as const,
+            label: 'Workflow access',
+            icon: <Boxes className='size-4' />,
+          },
+        ]
+      : []),
     ...(showIncomingSection
       ? [
           {
             id: 'incoming' as const,
             label: 'Incoming Webhooks',
             icon: <Link2 className='size-4' />,
+          },
+        ]
+      : []),
+    // Outbound history pull — per-install, like incoming webhooks and attachments.
+    ...(isInstallMode && installedAppId
+      ? [
+          {
+            id: 'fetch' as const,
+            label: 'History fetch',
+            icon: <DownloadCloud className='size-4' />,
           },
         ]
       : []),
@@ -1957,6 +1989,26 @@ export const EditAppForm = ({
                 </div>
               )}
             </div>
+          )}
+
+          {activeSection === 'resources' && installedAppId && (
+            <div className='flex flex-col gap-6'>
+              {ATTACHABLE_RESOURCES.map(resource => (
+                <AppResourceSection
+                  key={resource.resourceType}
+                  installedAppId={installedAppId}
+                  resourceType={resource.resourceType}
+                  noun={resource.noun}
+                  requiredPermission={resource.requiredPermission}
+                  loadOptions={resource.loadOptions}
+                  readOnly={!canEditInstallSettings}
+                />
+              ))}
+            </div>
+          )}
+
+          {activeSection === 'fetch' && installedAppId && (
+            <AppFetchSection installedAppId={installedAppId} readOnly={!canEditInstallSettings} />
           )}
 
           {/* Permissions */}

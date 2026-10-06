@@ -19,6 +19,7 @@
 import { Agent } from "undici";
 import { errMsg } from "./errors.js";
 import { ClawSseParser, type ClawStreamEvent, type ClawDoneStatus, type Todo, type UiWidget } from "xyne-claw-shared";
+import { ingestArtifactSignals, ingestSandboxPreviewSignals } from "./conversation-artifact-signals.js";
 
 // An SSE run goes silent between frames while the model composes; undici's
 // default 300s bodyTimeout severs the socket mid-stream ("terminated"). Every
@@ -50,6 +51,14 @@ export interface ClawStreamHandlers {
   onAny?: (event: ClawStreamEvent) => void;
 }
 
+export interface StreamArtifactContext {
+  conversationId: string;
+  userId: string;
+  orgId?: string | null;
+  messageId?: string | null;
+  runId?: string | null;
+}
+
 export interface ConsumeClawStreamOptions {
   url: string;
   body: Record<string, unknown>;
@@ -61,6 +70,7 @@ export interface ConsumeClawStreamOptions {
    *  the expected next value). Default: log and continue. Override to fail
    *  the run hard if your caller needs strict ordering. */
   onSeqGap?: (expected: number, got: number) => void;
+  artifactContext?: StreamArtifactContext;
 }
 
 export interface ConsumeClawStreamResult {
@@ -108,7 +118,7 @@ export async function consumeClawStream(opts: ConsumeClawStreamOptions): Promise
     throw new Error("Claw SSE response has no body");
   }
 
-  return consumeAlreadyOpenStream(response.body as ReadableStream<Uint8Array>, opts.handlers, opts.onSeqGap);
+  return consumeAlreadyOpenStream(response.body as ReadableStream<Uint8Array>, opts.handlers, opts.onSeqGap, opts.artifactContext);
 }
 
 // Consume an already-open SSE body stream. Used when the caller already has
@@ -118,6 +128,7 @@ export async function consumeAlreadyOpenStream(
   body: ReadableStream<Uint8Array>,
   handlers: ClawStreamHandlers,
   onSeqGap?: (expected: number, got: number) => void,
+  artifactContext?: StreamArtifactContext,
 ): Promise<ConsumeClawStreamResult> {
   const parser = new ClawSseParser();
   const decoder = new TextDecoder("utf-8");
@@ -127,6 +138,7 @@ export async function consumeAlreadyOpenStream(
   let result: ClawDoneStatus | undefined;
   let errorReason: string | undefined;
   let lastEventName: string | undefined;
+  const ingestGate = { inFlight: 0, warned: false };
 
   const reader = body.getReader();
   try {
@@ -147,6 +159,7 @@ export async function consumeAlreadyOpenStream(
         lastEventName = event.event;
         try { handlers.onAny?.(event); } catch (err) { logHandlerError("onAny", err); }
         await dispatch(event, handlers);
+        if (artifactContext) scheduleIngest(event, artifactContext, ingestGate);
         if (event.event === "done") {
           result = event.result;
         } else if (event.event === "error") {
@@ -208,6 +221,45 @@ async function dispatch(event: ClawStreamEvent, handlers: ClawStreamHandlers): P
     }
   } catch (err) {
     logHandlerError(event.event, err);
+  }
+}
+
+const MAX_IN_FLIGHT_INGESTS = 32;
+
+interface IngestGate {
+  inFlight: number;
+  warned: boolean;
+}
+
+function scheduleIngest(event: ClawStreamEvent, ctx: StreamArtifactContext, gate: IngestGate): void {
+  if (event.event !== "invocation" && event.event !== "sandbox-preview") return;
+  if (gate.inFlight >= MAX_IN_FLIGHT_INGESTS) {
+    if (!gate.warned) {
+      gate.warned = true;
+      console.warn(
+        `[consume-claw-stream] artifact ingestion saturated at ${MAX_IN_FLIGHT_INGESTS} in flight; dropping further frames for this stream`,
+      );
+    }
+    return;
+  }
+  gate.inFlight++;
+  void ingestFrame(event, ctx).finally(() => {
+    gate.inFlight--;
+  });
+}
+
+async function ingestFrame(event: ClawStreamEvent, ctx: StreamArtifactContext): Promise<void> {
+  try {
+    if (event.event === "invocation") {
+      const inv = event.toolInvocation as { toolName?: unknown; result?: unknown; isError?: unknown } | null;
+      if (!inv || typeof inv !== "object" || inv.isError === true) return;
+      if (typeof inv.toolName !== "string") return;
+      await ingestArtifactSignals({ ...ctx, toolName: inv.toolName, toolResult: inv.result });
+    } else if (event.event === "sandbox-preview") {
+      await ingestSandboxPreviewSignals(ctx, event.payload);
+    }
+  } catch (err) {
+    logHandlerError(`${event.event}:artifact-ingest`, err);
   }
 }
 

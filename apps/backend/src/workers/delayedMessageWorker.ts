@@ -7,6 +7,7 @@ import { deliverDelayedMessage } from '@/zero/utils/delayedMessageDelivery';
 import { cleanupDelayedMessageAttachmentsPrisma } from '@/zero/utils/attachmentEntityCleanup';
 import { activityService } from '@/services/activity/activityService';
 import type { DelayedMessageJobData } from '@/queues/delayedMessageQueue';
+import { processJobTx } from '@/bypassAcl/transactions/delayedMessageWorker';
 
 const QUEUE_NAME = 'delayed-messages';
 
@@ -182,52 +183,7 @@ class DelayedMessageWorker {
       | { kind: 'delivery_blocked'; failureReason: string; log: string }
       | { kind: 'ready' };
 
-    const preflight: Preflight = await prisma.$transaction(async (ptx: any) => {
-      const msg = await ptx.delayedMessage.findUnique({ where: { id: delayedMessageId } });
-      if (!msg) {
-        return { kind: 'missing' as const };
-      }
-      if (msg.status === 'SENT' || msg.status === 'FAILED' || msg.status === 'CANCELLED') {
-        return { kind: 'terminal' as const, status: msg.status };
-      }
-
-      await ptx.delayedMessage.update({
-        where: { id: delayedMessageId },
-        data: { status: 'SENDING' },
-      });
-
-      const channel = await ptx.channel.findUnique({ where: { id: channelId } });
-      if (!channel || channel.isArchived) {
-        const failureReason = 'Channel deleted';
-        await ptx.delayedMessage.update({
-          where: { id: delayedMessageId },
-          data: { status: 'FAILED', failureReason },
-        });
-        return {
-          kind: 'delivery_blocked' as const,
-          failureReason,
-          log: `[DelayedMessageWorker] Channel ${channelId} not found or archived – permanent failure for delayedMessageId=${delayedMessageId}`,
-        };
-      }
-
-      const participant = await ptx.channelParticipant.findUnique({
-        where: { channelId_userId: { channelId, userId: senderId } },
-      });
-      if (!participant) {
-        const failureReason = 'Sender no longer has access';
-        await ptx.delayedMessage.update({
-          where: { id: delayedMessageId },
-          data: { status: 'FAILED', failureReason },
-        });
-        return {
-          kind: 'delivery_blocked' as const,
-          failureReason,
-          log: `[DelayedMessageWorker] Sender ${senderId} is no longer a member of channel ${channelId} – permanent failure for delayedMessageId=${delayedMessageId}`,
-        };
-      }
-
-      return { kind: 'ready' as const };
-    });
+    const preflight: Preflight = await processJobTx(prisma, delayedMessageId, channelId, senderId);
 
     if (preflight.kind === 'missing') {
       logger.warn(
@@ -321,3 +277,4 @@ class DelayedMessageWorker {
 }
 
 export const delayedMessageWorker = new DelayedMessageWorker();
+

@@ -1,7 +1,8 @@
 import type Bull from 'bull';
 import { logger } from '@/utils/logger';
+import { config } from '@/config/env';
 import { db } from '@/database/client';
-import { runAsServiceActor } from '@/database/tenant/context';
+import { runScheduledAutomation } from '@/bypassAcl/automationServices';
 import { stepRegistry } from '../steps/step-registry';
 import { AutomationExecutor } from '../engine/automation-executor';
 import {
@@ -26,9 +27,12 @@ class AutomationScheduleWorker {
 
     automationScheduleQueue
       .getQueue()
-      .process(async (job: Bull.Job<AutomationScheduleJobData>) => {
-        return this.processJob(job);
-      });
+      .process(
+        config.automations.workerConcurrency,
+        async (job: Bull.Job<AutomationScheduleJobData>) => {
+          return this.processJob(job);
+        },
+      );
 
     this.isInitialized = true;
     logger.info('[AUTOMATION-SCHEDULE-WORKER] Started');
@@ -57,9 +61,7 @@ class AutomationScheduleWorker {
       return;
     }
 
-    await runAsServiceActor('automation', workspaceId, () =>
-      this.executor!.runExecution(executionId),
-    );
+    await runScheduledAutomation(workspaceId, this.executor, executionId);
   }
 }
 

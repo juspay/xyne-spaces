@@ -12,6 +12,9 @@ import { useClawAgentDetail } from '../../../../hooks/useClawAgentDetail';
 import type { ChannelClawAgent } from '../../../../hooks/useChannelClawAgents';
 import { useUserGroups } from '../../../../hooks/useUserGroup';
 import { apiInstance } from '../../../../services/clients/apiClient';
+import { globalClickTracker } from '../../../../services/Analytics/globalClickTracker';
+import { ticketCountBucket } from '../../../../services/Analytics/ticketTracking';
+import { errorKindOf } from '../deskSettingsTracking';
 
 import KnowledgeTab from '../../../../routes/ClawAgentsScreen/tabs/KnowledgeTab';
 import type { useDeskSettingsForm } from '../useDeskSettingsForm';
@@ -529,6 +532,7 @@ const AiSyncSection: React.FC<AiSyncSectionProps> = ({
     if (syncLoading || inCooldown || !anySelected) return;
     setSyncLoading(true);
     const toastId = toast.loading('Running AI Sync…');
+    const syncStartedAt = Date.now();
     try {
       const res = await apiInstance.post<{
         enqueued: { classify: number; priority: number; draft: number };
@@ -545,6 +549,16 @@ const AiSyncSection: React.FC<AiSyncSectionProps> = ({
       const { enqueued, ticketsScanned, estimatedMinutes, cooldownSeconds } = res.data;
       const total = enqueued.classify + enqueued.priority + enqueued.draft;
       if (cooldownSeconds > 0) setSyncCooldownUntil(Date.now() + cooldownSeconds * 1000);
+      // Outcome of the RunAiSync click: what was asked for and how much work it queued.
+      globalClickTracker.trackManualEvent('DeskSettings', 'AI_SYNC_COMPLETED', undefined, {
+        channelId,
+        autoDraft: syncAutoDraft,
+        classification: syncClassification,
+        priority: syncPriority,
+        ticketCountBucket: ticketCountBucket(ticketsScanned),
+        enqueuedCount: total,
+        latencyMs: Date.now() - syncStartedAt,
+      });
 
       if (total === 0) {
         toast.success(`Scanned ${ticketsScanned} tickets — all up to date, nothing to sync.`, {
@@ -563,6 +577,14 @@ const AiSyncSection: React.FC<AiSyncSectionProps> = ({
     } catch (err: unknown) {
       const axiosErr = err as { response?: { status?: number; data?: { error?: string } } };
       if (axiosErr?.response?.status === 429) setSyncCooldownUntil(Date.now() + 10 * 60 * 1000);
+      globalClickTracker.trackManualEvent('DeskSettings', 'AI_SYNC_FAILED', undefined, {
+        channelId,
+        autoDraft: syncAutoDraft,
+        classification: syncClassification,
+        priority: syncPriority,
+        latencyMs: Date.now() - syncStartedAt,
+        errorKind: errorKindOf(err),
+      });
       toast.error(axiosErr?.response?.data?.error ?? 'AI Sync failed', { id: toastId });
     } finally {
       setSyncLoading(false);

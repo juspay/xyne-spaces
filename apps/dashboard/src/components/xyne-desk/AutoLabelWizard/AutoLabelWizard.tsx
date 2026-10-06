@@ -140,14 +140,17 @@ export function AutoLabelWizard({
 
   const canCreateLabel = !!labelSearch.trim() && !conflictingLabel;
 
-  const hasConfiguredEmailFilter = Object.values(emailFilters).some(value => {
+  const isConfiguredFilterValue = (value: unknown): boolean => {
     if (Array.isArray(value)) {
       return value.some(item => String(item).trim().length > 0);
     }
     if (typeof value === 'boolean') return value;
     if (typeof value === 'string') return value.trim().length > 0;
     return value !== undefined && value !== null;
-  });
+  };
+  const configuredEmailFilterCount =
+    Object.values(emailFilters).filter(isConfiguredFilterValue).length;
+  const hasConfiguredEmailFilter = configuredEmailFilterCount > 0;
   const canProceedFilters =
     !!emailSchema && !triggerSchemaQuery.isLoading && hasConfiguredEmailFilter;
   const canSave = labelName.trim().length > 0;
@@ -575,6 +578,14 @@ export function AutoLabelWizard({
             trackId='create_auto_label_rule'
             data-track-category='xyne-desk'
             data-track-name='auto-label-wizard-save'
+            data-track-metadata={JSON.stringify({
+              channelId,
+              labelId: labelId ?? null,
+              isNewLabel: !labelId,
+              ruleCount: ruleCounts.total,
+              applyToExisting,
+              filterCount: configuredEmailFilterCount,
+            })}
           >
             {saveMutation.isPending ? (
               <>

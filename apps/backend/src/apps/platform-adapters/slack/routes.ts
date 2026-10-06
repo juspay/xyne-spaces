@@ -32,6 +32,13 @@ router.post(
 );
 
 router.post(
+	"/chat.postEphemeral",
+	requirePermission("chat:write"),
+	slackChannelValidation("body"),
+	controller.chatPostEphemeral,
+);
+
+router.post(
 	"/chat.update",
 	requirePermission("chat:write"),
 	slackChannelValidation("body"),

@@ -71,6 +71,7 @@ import {
   SavedUserConfigurationsACL,
   TicketAssignmentsACL,
   TicketStageEtaACL,
+  TicketDescriptionsACL,
   TicketStageRequestsACL,
   UserProfilesACL,
   UserPreferencesACL,
@@ -125,6 +126,7 @@ import {
   StageApproversACL,
   SurfaceLinksACL,
   SdlcFoldersACL,
+  SdlcItemCommentsACL,
   SurfaceNudgeCountsACL,
   SurfaceNudgesACL,
   ToolsACL,
@@ -267,6 +269,8 @@ export class QueryACLFactory {
         return new TicketAssignmentsACL(ctx) as BaseQueryACL<TTable>;
       case 'ticket_stage_eta':
         return new TicketStageEtaACL(ctx) as BaseQueryACL<TTable>;
+      case 'ticket_descriptions':
+        return new TicketDescriptionsACL(ctx) as BaseQueryACL<TTable>;
       case 'ticket_stage_requests':
         return new TicketStageRequestsACL(ctx) as BaseQueryACL<TTable>;
       case 'user_workload_mappings':
@@ -283,6 +287,8 @@ export class QueryACLFactory {
         return new SdlcArtifactsACL(ctx) as BaseQueryACL<TTable>;
       case 'sdlc_folders':
         return new SdlcFoldersACL(ctx) as BaseQueryACL<TTable>;
+      case 'sdlc_item_comments':
+        return new SdlcItemCommentsACL(ctx) as BaseQueryACL<TTable>;
       case 'sdlc_tracks':
         return new SdlcTracksACL(ctx) as BaseQueryACL<TTable>;
       case 'saved_user_configurations':

@@ -6,6 +6,7 @@ import {
   type FlowStepVisibilityOptions,
 } from '@xyne/shared';
 import { parseAssigneeFilter } from '@xyne/shared/zero/queries';
+import { buildDeskFilterWhere, type LabelUnreadFilters } from '@/services/conversationLabelUnreadService';
 
 const SUPPORT_TICKET_TYPE = 'Support';
 
@@ -14,7 +15,8 @@ export type KanbanTicketViewMode =
   | 'board'
   | 'my-tickets'
   | 'user-tickets'
-  | 'group-tickets';
+  | 'group-tickets'
+  | 'desk';
 
 export type KanbanFormFieldGroup = {
   type: 'formField';
@@ -23,7 +25,14 @@ export type KanbanFormFieldGroup = {
   fieldType: string;
 };
 
-export type KanbanGroupBy = 'none' | 'assignee' | 'status' | 'priority' | KanbanFormFieldGroup;
+export type KanbanGroupBy =
+  | 'none'
+  | 'assignee'
+  | 'createdBy'
+  | 'status'
+  | 'priority'
+  | 'merchantId'
+  | KanbanFormFieldGroup;
 
 export type KanbanTicketFilters = {
   priority?: TicketPriority[];
@@ -44,8 +53,11 @@ export type KanbanTicketFilters = {
   created?: boolean;
   stages?: string[];
   ticketTypes?: string[];
+  merchantIds?: string[];
   dynamicFields?: Record<string, string[] | { start?: number; end?: number }>;
 };
+
+export type KanbanDeskFilters = LabelUnreadFilters & { conversationLabelId?: string };
 
 export type KanbanTicketQueryContext = FlowStepVisibilityOptions & {
   workspaceId: string;
@@ -57,6 +69,8 @@ export type KanbanTicketQueryContext = FlowStepVisibilityOptions & {
   boardIds?: string[];
   userId?: string;
   groupId?: string;
+  channelId?: string;
+  deskFilters?: KanbanDeskFilters;
   filters?: KanbanTicketFilters;
   groupBy?: KanbanGroupBy;
   showOverdueOnly?: boolean;
@@ -129,7 +143,9 @@ const buildChannelAccessFilter = (
 };
 
 const buildScopeFilter = (context: KanbanTicketQueryContext): Prisma.TicketWhereInput => {
-  const { viewMode, projectId, boardId, boardIds, userId, groupId } = context;
+  const { viewMode, projectId, boardId, boardIds, userId, groupId, channelId } = context;
+
+  if (viewMode === 'desk') return { channelId: channelId ?? '' };
 
   if (viewMode !== 'my-tickets') {
     if (boardId) return { boardId };
@@ -217,9 +233,17 @@ export const buildKanbanTicketWhere = (
       buildChannelAccessFilter(context.currentUserId),
       buildScopeFilter(context),
       context.excludeFlowSteps ? { rootId: null } : undefined,
-      {
-        OR: [{ ticketType: null }, { ticketType: { not: SUPPORT_TICKET_TYPE } }],
-      },
+      context.viewMode === 'desk'
+        ? undefined
+        : { OR: [{ ticketType: null }, { ticketType: { not: SUPPORT_TICKET_TYPE } }] },
+      ...(context.deskFilters ? buildDeskFilterWhere(context.deskFilters) : []),
+      context.deskFilters?.conversationLabelId
+        ? {
+            conversation: {
+              labelMappings: { some: { labelId: context.deskFilters.conversationLabelId } },
+            },
+          }
+        : undefined,
       buildCurrentUserFilter(context.currentUserId, filters),
       hasItems(filters.boards) ? { boardId: { in: [...filters.boards] } } : undefined,
       hasItems(filters.sourceChannels)
@@ -264,6 +288,7 @@ export const buildKanbanTicketWhere = (
       hasItems(filters.tags) ? { tags: { some: { name: { in: [...filters.tags] } } } } : undefined,
       hasItems(filters.stages) ? { stageName: { in: [...filters.stages] } } : undefined,
       hasItems(filters.ticketTypes) ? { ticketType: { in: [...filters.ticketTypes] } } : undefined,
+      hasItems(filters.merchantIds) ? { merchantId: { in: [...filters.merchantIds] } } : undefined,
       context.showOverdueOnly
         ? ({
             statusV2: { notIn: [TicketStatusV2.COMPLETED, TicketStatusV2.CANCELLED] },

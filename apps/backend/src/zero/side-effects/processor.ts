@@ -11,6 +11,18 @@ export async function processSideEffectJobs(
     return;
   }
 
+  // Membership first: someone added and mentioned in one action (the "not in
+  // channel" prompt) should hear they were added before the mention.
+  const isMembershipInsert = (job: SideEffectJobConfig): boolean =>
+    job.entityType === 'channel_participants' && job.operation === 'insert';
+  await runSideEffectJobs(jobs.filter(isMembershipInsert), context);
+  await runSideEffectJobs(jobs.filter(job => !isMembershipInsert(job)), context);
+}
+
+async function runSideEffectJobs(
+  jobs: SideEffectJobConfig[],
+  context: QueryContext
+): Promise<void> {
   await Promise.allSettled(
     jobs.map(async (job: SideEffectJobConfig) => {
       try {

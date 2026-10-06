@@ -44,24 +44,20 @@ function readSkillFile(name: string): string | null {
 }
 
 const SERVERS = [
+  // URL construction stays in adapters/kibana.ts, not here.
   {
     type: "kibana",
     name: "Kibana",
     url: "",
-    description: "Elasticsearch Kibana instance for log search and dashboards",
-    transport: "stdio",
+    description: "Kibana's built-in Agent Builder MCP server — search, dashboards, and knowledge base queries",
+    transport: "http",
     credentialForm: {
       fields: [
-        { name: "url", label: "Elasticsearch URL", type: "text", placeholder: "https://your-elasticsearch.example.com" },
-        { name: "apiKey", label: "API Key", type: "password", placeholder: "Enter your Elasticsearch API key" },
+        { name: "url", label: "Kibana URL", type: "text", placeholder: "https://your-kibana.example.com" },
+        { name: "apiKey", label: "API Key", type: "password", placeholder: "Needs feature_agentBuilder.read privilege" },
       ],
     },
-    launchConfigTemplate: {
-      cmd: "docker",
-      args: ["run", "--rm", "-i", "-e", "ES_URL", "-e", "ES_API_KEY", "docker.elastic.co/mcp/elasticsearch", "stdio"],
-      env: { ES_URL: "{{url}}", ES_API_KEY: "{{apiKey}}" },
-    },
-    healthcheckSpec: { name: "list_indices", params: {} },
+    healthcheckSpec: { name: "__list_tools__", params: {} },
     writeToolPolicy: { mode: "allowlist", tools: [] },
   },
   {
@@ -884,8 +880,8 @@ You have direct access to Spaces tools, a \`spaces\` subagent, and a \`google\` 
 - **generate-image** — image from a detailed text prompt.
 - **artifacts** subagent — polished PPTX/PDF generation. Give it a rich brief.
 - **spaces-create-canvas** / **spaces-edit-canvas** — collaborative docs inside Spaces.
-- **spaces-sdlc-mutate-artifact** — create or update a PRD or Tech Doc only when active Spaces context explicitly identifies an SDLC repository. Use action create/update, supplied SDLC repository id, and require a parent PRD for a Tech Doc.
-- **spaces-sdlc-list-artifact-versions** then **spaces-sdlc-read-artifact-version** — inspect bounded immutable history for a Wiki page, Repo Knowledge document, PRD, or Tech Doc in the selected repository. Read the current artifact first, retrieve only relevant versions, and treat old text as supporting context rather than current truth.
+- **spaces-sdlc-write-artifact** — create or update a PRD or Tech Doc only when active Spaces context explicitly identifies an SDLC repository. Use action create/update, supplied SDLC repository id, and require a parent PRD for a Tech Doc.
+- **spaces-sdlc-list-artifact-versions** then **spaces-sdlc-read-artifact** with versionId — inspect bounded immutable history for a Wiki page, Hub Knowledge document, PRD, or Tech Doc in the selected repository. Read the current artifact first, retrieve only relevant versions, and treat old text as supporting context rather than current truth.
 
 # Write actions need approval
 These return "Action queued for approval" — that's **normal**, not an error: \`spaces-create-ticket\`, \`spaces-update-ticket\`, \`spaces-schedule-call\`, \`user-send-message\`, \`spaces-create-canvas\`, \`spaces-edit-canvas\`. Tell the user to hit Approve. Do NOT retry.
@@ -958,7 +954,7 @@ You:
             // subagent round-trip. The `spaces` subagent is still in scope for
             // multi-step / fuzzy / cross-source questions.
             "spaces-whoami",
-            "spaces-search",
+            "spaces-vespa-search",
             "spaces-tickets",
             "spaces-messages",
             "spaces-message-detail",
@@ -984,7 +980,7 @@ You:
             "user-send-message",
             "spaces-create-canvas",
             "spaces-edit-canvas",
-            "spaces-sdlc-mutate-artifact",
+            "spaces-sdlc-write-artifact",
             ...WORKFLOW_TOOL_NAMES,
           ],
           custom: ["genius-analytics", "genius-investigation", "query-codebase", "review-pull-request", "web-search", "deep-research", "generate-image", "add-citations", "visualize"]
@@ -1018,7 +1014,7 @@ You:
         //     via skills.find(s => s.name === skillSlug)), and `when` must be
         //     "after" (the only branch implemented).
         skillTriggers: [
-          { toolName: "spaces-search", skillSlug: "Spaces Citations", when: "after", prompt: "These results carry [clf-…#n] citation tokens. Cite every claim you draw from them, verbatim." },
+          { toolName: "spaces-vespa-search", skillSlug: "Spaces Citations", when: "after", prompt: "These results carry [clf-…#n] citation tokens. Cite every claim you draw from them, verbatim." },
           { toolName: "kb-search", skillSlug: "Spaces Citations", when: "after", prompt: "These KB chunks carry [clf-…#n] citation tokens. Cite every claim you draw from them, verbatim." }
         ]
       }
@@ -1044,7 +1040,7 @@ You:
             // subagent round-trip. The `spaces` subagent is still in scope for
             // multi-step / fuzzy / cross-source questions.
             "spaces-whoami",
-            "spaces-search",
+            "spaces-vespa-search",
             "spaces-tickets",
             "spaces-messages",
             "spaces-message-detail",
@@ -1070,7 +1066,7 @@ You:
             "user-send-message",
             "spaces-create-canvas",
             "spaces-edit-canvas",
-            "spaces-sdlc-mutate-artifact",
+            "spaces-sdlc-write-artifact",
             ...WORKFLOW_TOOL_NAMES,
           ],
           custom: ["genius-analytics", "genius-investigation", "query-codebase", "review-pull-request", "web-search", "deep-research", "generate-image", "add-citations", "visualize"]
@@ -1090,7 +1086,7 @@ You:
         // for the full rationale and the toolName/skillSlug/when conventions.
         // The `update` block governs already-seeded DBs, so it must mirror it.
         skillTriggers: [
-          { toolName: "spaces-search", skillSlug: "Spaces Citations", when: "after", prompt: "These results carry [clf-…#n] citation tokens. Cite every claim you draw from them, verbatim." },
+          { toolName: "spaces-vespa-search", skillSlug: "Spaces Citations", when: "after", prompt: "These results carry [clf-…#n] citation tokens. Cite every claim you draw from them, verbatim." },
           { toolName: "kb-search", skillSlug: "Spaces Citations", when: "after", prompt: "These KB chunks carry [clf-…#n] citation tokens. Cite every claim you draw from them, verbatim." }
         ]
       }
@@ -2223,11 +2219,34 @@ DRILL-DOWN: Use this path ONLY when the user wants to EXPLORE a focused tile's d
         update: {},
       });
       console.log("[seed] Pinned xyne-workflows MCP server to ask-ai");
+      // xyne-workflows is registered as pinned / not user-connectable, so it
+      // only reaches a session through an AgentMcpConnection row. The SDLC
+      // agent is granted the workflow tools in its generated profile, so it
+      // needs the same pin or those grants resolve to a server it cannot see.
+      await prisma.agentMcpConnection.upsert({
+        where: {
+          agentId_mcpServerId_slug: {
+            agentId: sdlcAgent.id,
+            mcpServerId: workflowsServerRow.id,
+            slug: "default",
+          },
+        },
+        create: {
+          agentId: sdlcAgent.id,
+          mcpServerId: workflowsServerRow.id,
+          slug: "default",
+          encryptedCreds: workflowsCredsPayload.encryptedCreds,
+          iv: workflowsCredsPayload.iv,
+          authTag: workflowsCredsPayload.authTag,
+        },
+        update: {},
+      });
+      console.log("[seed] Pinned xyne-workflows MCP server to sdlc-agent");
     } else {
-      console.warn("[seed] Skipped ask-ai workflows pin: xyne-workflows server row not found");
+      console.warn("[seed] Skipped workflows pins: xyne-workflows server row not found");
     }
   } else {
-    console.warn("[seed] Skipped ask-ai workflows pin: ENCRYPTION_KEY not set");
+    console.warn("[seed] Skipped workflows pins: ENCRYPTION_KEY not set");
   }
 
   // ── Claw concierge agent ─────────────────────────────────────────────────

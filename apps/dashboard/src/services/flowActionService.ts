@@ -20,6 +20,12 @@ export const flowActionService = {
     messageId: string;
     conversationId: string;
   }): Promise<AppActionResponse> => {
+    // Ephemeral cards are never persisted, so the server cannot look up which app
+    // owns this one. It signs a token into the flow's `data` at post time and
+    // re-mints it on every screen advance; read it back out here so neither
+    // FlowRenderer nor any other caller has to know the mechanism exists.
+    const token = params.flowJSON.data?.['__xyneFlowToken'];
+
     const body: ActionRequest = {
       actionId: params.actionId,
       type: params.type,
@@ -28,6 +34,7 @@ export const flowActionService = {
         flowJSON: params.flowJSON,
         messageId: params.messageId,
         conversationId: params.conversationId,
+        ...(typeof token === 'string' && token ? { token } : {}),
       },
     };
 

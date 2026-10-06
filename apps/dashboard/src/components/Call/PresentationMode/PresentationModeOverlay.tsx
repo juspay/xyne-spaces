@@ -1,18 +1,98 @@
 import { motion, AnimatePresence } from 'framer-motion';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { X } from 'lucide-react';
-import { ParticipantTile } from '../ParticipantTile/ParticipantTile';
+import { Track } from 'livekit-client';
+import { VideoTrack } from '@livekit/components-react';
 import type { ParticipantInfo } from '../../../machines/roomMachine';
+import { ParticipantAvatar } from '../ParticipantAvatar/ParticipantAvatar';
+import { getAvatarColors } from '../ParticipantAvatar/avatarColors';
+import { useProfilePictureUrl } from '../../../hooks/useProfilePicture';
 import { XyneTelepresenceIcon } from '../../../assets/icons/XyneTelepresenceIcon';
 import { isTelepresenceToggleEnable } from '../telepresenceCacConfig';
 import { logger, Event } from '../../../utils/logger';
+
+/**
+ * The presenter, drawn as bare video.
+ *
+ * Deliberately NOT `ParticipantTile`: that component exists to render a tile in a
+ * grid — name pill, mic/network/hand badges, hover controls, speaking frame — and
+ * presentation mode wants none of it. Rendering the LiveKit `VideoTrack` directly
+ * (as ScreenShareFullscreenModal and SpotlightView already do for screen shares)
+ * keeps this view immune to tile chrome added later: there is no flag to remember
+ * and nothing to suppress, because the tile is simply not in this tree.
+ *
+ * Audio is untouched by this — `RoomAudioRenderer` is mounted once globally in
+ * GlobalCallOverlay, never per tile.
+ */
+function PresenterVideo({ participant }: { participant: ParticipantInfo }): React.ReactElement {
+  const cameraPublication = participant.participant?.getTrackPublication(Track.Source.Camera);
+  const hasVideo = participant.isCameraEnabled && cameraPublication?.isSubscribed;
+
+  // Memoized so the trackRef keeps a stable identity across unrelated re-renders.
+  // Without it VideoTrack re-attaches the <video> element every render, which flickers.
+  const trackRef = useMemo(
+    () =>
+      cameraPublication && participant.participant
+        ? {
+            participant: participant.participant,
+            source: Track.Source.Camera,
+            publication: cameraPublication,
+          }
+        : undefined,
+    [cameraPublication, participant.participant],
+  );
+
+  // Mirror our own camera, matching ParticipantTile. Presentation mode usually shows a
+  // remote presenter, but findPresentationParticipant falls back to the local
+  // participant when no remote human is in the call — and an un-mirrored view of
+  // yourself reads as wrong, because it is not what a mirror (or every other call UI)
+  // shows you. Remote feeds are never flipped. The tile also excluded screen shares
+  // here; presentation mode never renders one, so that half of the condition is moot.
+  const videoStyle = useMemo(
+    () => (participant.isLocal ? { transform: 'scaleX(-1)' } : undefined),
+    [participant.isLocal],
+  );
+
+  // Profile picture for the camera-off fallback (same metadata shape the tile reads).
+  let picturePath: string | null = null;
+  try {
+    const meta = participant.participant?.metadata;
+    if (meta) {
+      picturePath = (JSON.parse(meta) as { picture?: string }).picture ?? null;
+    }
+  } catch {
+    // ignore parse errors
+  }
+  const { url: pictureUrl } = useProfilePictureUrl(participant.identity, picturePath);
+
+  if (hasVideo && trackRef) {
+    // object-cover, identical to ParticipantTile's treatment of camera feeds: crop to
+    // fill the screen edge-to-edge. object-contain was tried and rejected — it keeps
+    // the whole frame but pillarboxes it with black bars whenever the camera and the
+    // display disagree on aspect ratio, which does not read as fullscreen.
+    return (
+      <VideoTrack trackRef={trackRef} className='h-full w-full object-cover' style={videoStyle} />
+    );
+  }
+
+  // Camera off — show who is on the call rather than a black rectangle, which on an
+  // unattended wall is indistinguishable from a dead screen.
+  return (
+    <div className='flex h-full w-full items-center justify-center'>
+      <ParticipantAvatar
+        name={participant.name || 'Unknown'}
+        size='xl'
+        backgroundColor={getAvatarColors(participant.identity).avatar}
+        pictureUrl={pictureUrl}
+      />
+    </div>
+  );
+}
 
 interface PresentationModeOverlayProps {
   callId: string;
   isOpen: boolean;
   participant: ParticipantInfo | null;
-  aiController: { id: string; name: string } | null;
-  requestedAiController: boolean;
   onExit: () => void;
 }
 
@@ -20,8 +100,6 @@ export function PresentationModeOverlay({
   callId,
   isOpen,
   participant,
-  aiController,
-  requestedAiController,
   onExit,
 }: PresentationModeOverlayProps): React.ReactElement {
   const overlayRef = useRef<HTMLDivElement>(null);
@@ -109,17 +187,7 @@ export function PresentationModeOverlay({
           data-track-name='EXIT_PRESENTATION_MODE'
         >
           {participant ? (
-            <ParticipantTile
-              participant={participant}
-              className='h-full w-full'
-              avatarSize='large'
-              aiController={aiController}
-              requestedAiController={requestedAiController}
-              // Presentation mode is a clean full-bleed view: no name label and no
-              // speaking/raised-hand ring (a coloured frame around the whole screen).
-              hideNameLabel={true}
-              hideSpeakingIndicator={true}
-            />
+            <PresenterVideo participant={participant} />
           ) : (
             <p className='text-white/40 text-sm'>Waiting for remote participant…</p>
           )}

@@ -1,13 +1,16 @@
 import { logger, Event as LogEvent } from '../utils/logger';
 import { useCallback } from 'react';
-import { toast } from 'sonner';
 import { EmailMergeMode, AutoDraftMode } from '@xyne/shared';
-import { useUpdateEmailChannelPreference } from './useEmailChannelPreference';
+import {
+  useUpdateEmailChannelPreference,
+  type DuplicateScopeConfig,
+} from './useEmailChannelPreference';
 
 export type ChannelPreferencePatch = {
   ownerUserId?: string;
   assigneeUserGroupId?: string | null;
   sendAsEmail?: string | null;
+  dlAliases?: string | null;
   defaultCc?: string | null;
   emailMergeMode?: EmailMergeMode;
   twoStepSendEnabled?: boolean;
@@ -20,6 +23,7 @@ export type ChannelPreferencePatch = {
   deskReportEnabled?: boolean;
   deskReportAgentSlug?: string | null;
   deskReportRangeDays?: number;
+  duplicateScopeConfig?: DuplicateScopeConfig | null;
 };
 
 /**
@@ -38,9 +42,6 @@ export function useDeskChannelPreferenceAutoSave(channelId: string | null) {
           type: 'migrated_console_error',
           message: String('Failed to save channel preference:'),
           error: error,
-        });
-        toast.error('Failed to save settings', {
-          description: 'Your change was not saved. Please try again.',
         });
         throw error;
       }

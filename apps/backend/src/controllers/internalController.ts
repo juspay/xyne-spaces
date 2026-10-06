@@ -1,12 +1,21 @@
 import { Request, Response } from 'express';
 import { db } from '@/database/client';
 import { verifyPassword } from '@/utils/passwordUtils';
+import {
+  accountDeactivationService,
+  UserDeactivationResult,
+} from '@/services/accountDeactivationService';
+import { logger } from '@/utils/logger';
 
 export interface OrgMemberCheckResponse {
   isActiveMember: boolean;
   memberId?: string;
   orgId?: string;
   orgName?: string;
+}
+interface InternalDeactivateUserResponse {
+  success: boolean;
+  users: UserDeactivationResult[];
 }
 interface InternalEmailLoginResponse {
   success: boolean;
@@ -168,6 +177,56 @@ export class InternalController {
         },
       } as InternalEmailLoginResponse);
     } catch (error) {
+      res.status(503).json({ error: 'Service Unavailable' });
+    }
+  };
+
+  /**
+   * Deactivate every user row owning an email: mark it INACTIVE through the
+   * user-management deactivation flow (status + leftAt, group / assignment /
+   * expertise teardown, ticket hand-off), then run the same access cleanup the
+   * auth middleware triggers when an identity provider reports the account is
+   * revoked (mTLS certificate revocation, session revocation, push-token
+   * unregistration).
+   * POST /internal/users/deactivate?email=:email
+   *
+   * Returns:
+   * - 200 { success: true, users: [{ userId, email, ok, steps }] } when every step succeeded
+   * - 207 { success: false, users: [...] } when a step failed — the cleanup is
+   *   idempotent, so the caller should retry; `steps[].ok` says what is left
+   * - 400 { error: "Bad Request", message: "email required" } if email is missing
+   * - 401 { error: "Unauthorized" } if authentication fails
+   * - 404 { error: "Not Found", message: "user not found" } if no user has that email
+   * - 503 { error: "Service Unavailable" } if the user lookup throws
+   */
+  deactivateUser = async (req: Request, res: Response): Promise<void> => {
+    const email = req.query.email?.toString().trim();
+
+    if (!email) {
+      res.status(400).json({
+        error: 'Bad Request',
+        message: 'email required',
+      });
+      return;
+    }
+
+    try {
+      // Awaited (unlike the middleware, which fires it off in the background)
+      // so the caller learns what the cleanup actually managed to revoke.
+      const users = await accountDeactivationService.handleDeactivatedEmail(email);
+
+      if (users.length === 0) {
+        res.status(404).json({ error: 'Not Found', message: 'user not found' });
+        return;
+      }
+
+      const success = users.every((user) => user.ok);
+      res.status(success ? 200 : 207).json({ success, users } as InternalDeactivateUserResponse);
+    } catch (error) {
+      logger.error('[Internal] User deactivation failed', {
+        email,
+        error: error instanceof Error ? error.message : String(error),
+      });
       res.status(503).json({ error: 'Service Unavailable' });
     }
   };

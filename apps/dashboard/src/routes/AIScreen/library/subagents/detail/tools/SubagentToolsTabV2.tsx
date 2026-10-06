@@ -19,6 +19,7 @@ import {
   type SubagentToolKind,
   type SubagentToolSectionData,
 } from '../../create/toolbox/subagentToolCatalog';
+import { useOptimisticSave } from '../../../shared/hooks/useOptimisticSave';
 import { useSaveSubagent } from '../knowledge/subagentUpdate';
 
 const LOCK_NOTE =
@@ -54,18 +55,20 @@ export function SubagentToolsTabV2({
   isBuiltIn: boolean;
 }): ReactElement {
   const tools = useClawAvailableTools();
-  const { save, saving } = useSaveSubagent(subagent);
+  const { save } = useSaveSubagent(subagent);
 
   const [manage, setManage] = useState<SubagentToolKind | null>(null);
-  const [draft, setDraft] = useState<SubagentSelection | null>(null);
 
   const direct = useMemo(() => subagent.tools?.direct ?? [], [subagent.tools?.direct]);
   const custom = useMemo(() => subagent.tools?.custom ?? [], [subagent.tools?.custom]);
 
-  const saved = useMemo<SubagentSelection>(
+  const committed = useMemo<SubagentSelection>(
     () => normalizeSelection({ subagents: [], direct, custom, gateway: [] }),
     [direct, custom],
   );
+  const selection = useOptimisticSave<SubagentSelection>(committed);
+  const saved = selection.value;
+  const saving = selection.saving;
 
   const sections = useMemo(() => buildSubagentToolSections(tools.data ?? null), [tools.data]);
 
@@ -79,18 +82,9 @@ export function SubagentToolsTabV2({
   );
 
   const persist = (next: SubagentSelection, message: string): void => {
-    void save({ tools: { direct: next.direct, custom: next.custom } }, message);
-  };
-
-  const closeManage = (): void => {
-    const next = draft;
-    setManage(null);
-    setDraft(null);
-    if (!next) return;
-    const same = (a: readonly string[], b: readonly string[]): boolean =>
-      a.length === b.length && a.every(value => b.includes(value));
-    if (same(next.direct, direct) && same(next.custom, custom)) return;
-    persist(next, 'Tools updated');
+    selection.save(next, () =>
+      save({ tools: { direct: next.direct, custom: next.custom } }, message),
+    );
   };
 
   const activeSection = manage ? sections.find(entry => entry.kind === manage) : undefined;
@@ -115,10 +109,7 @@ export function SubagentToolsTabV2({
               canEdit ? (
                 <ManageButton
                   label={`Manage ${section.title}`}
-                  onClick={() => {
-                    setDraft(saved);
-                    setManage(section.kind);
-                  }}
+                  onClick={() => setManage(section.kind)}
                 />
               ) : (
                 <ReadOnlyBadge />
@@ -157,11 +148,11 @@ export function SubagentToolsTabV2({
         <BrowseSubagentToolsDialog
           open
           onOpenChange={open => {
-            if (!open) closeManage();
+            if (!open) setManage(null);
           }}
           section={activeSection}
-          selection={draft ?? saved}
-          onSelectionChange={setDraft}
+          selection={saved}
+          onSelectionChange={next => persist(next, 'Tools updated')}
           loading={tools.isLoading}
         />
       )}

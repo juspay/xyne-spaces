@@ -161,6 +161,7 @@ export const parseInternalXyneLink = (href: string): ParsedInternalXyneLink | nu
     return {
       kind,
       href,
+      ...(linkWorkspaceId ? { workspaceId: linkWorkspaceId } : {}),
       channelId,
       ...(conversationId ? { conversationId } : {}),
       ...(ticketId ? { ticketId } : {}),
@@ -178,6 +179,18 @@ export const isExternalUrl = (url: string): boolean => {
     return new URL(url, window.location.origin).origin !== window.location.origin;
   } catch {
     return true;
+  }
+};
+
+export const isSandboxViewLink = (href: string): boolean => {
+  try {
+    const url = new URL(href, window.location.origin);
+    if (url.protocol !== 'http:' && url.protocol !== 'https:') return false;
+    const isOurHost =
+      INTERNAL_XYNE_HOSTS.has(url.hostname) || url.origin === window.location.origin;
+    return isOurHost && url.pathname.startsWith('/claw-');
+  } catch {
+    return false;
   }
 };
 

@@ -36,8 +36,10 @@ export class EmailDraftsACL extends BaseQueryACL<'email_drafts'> {
       return ownDrafts.whereExists('channel', scalarChannelBody(this.ctx, channelId, isMember), SCALAR);
     }
 
+    // Pin the join direction — see tickets-acl.ts for the full rationale.
     return ownDrafts.whereExists('channel', (ch) =>
-      ch.where(channelAccessWhere(this.ctx))
+      ch.where(channelAccessWhere(this.ctx)),
+      { flip: false },
     );
   }
 }

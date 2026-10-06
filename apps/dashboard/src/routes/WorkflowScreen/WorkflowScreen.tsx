@@ -90,7 +90,7 @@ const WorkflowScreen = (): ReactElement => {
   }, []);
 
   const openAskAi = useCallback((): void => {
-    xyneAIActor.send({ type: 'OPEN', workflowInfo: currentScope });
+    xyneAIActor.send({ type: 'OPEN', trackSource: 'workflow', workflowInfo: currentScope });
   }, [currentScope]);
 
   const askAiButton = (

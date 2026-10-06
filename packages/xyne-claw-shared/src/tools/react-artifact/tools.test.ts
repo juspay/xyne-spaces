@@ -154,7 +154,7 @@ describe("buildReactArtifact", () => {
     });
 
     it("too many files", () => {
-      const files = Array.from({ length: 21 }, (_, i) => ({
+      const files = Array.from({ length: 101 }, (_, i) => ({
         path: `/F${i}.tsx`,
         content: "x",
       }));
@@ -164,14 +164,14 @@ describe("buildReactArtifact", () => {
     });
 
     it("oversized single file", () => {
-      const files = [{ path: "/App.tsx", content: "x".repeat(64 * 1024 + 1) }];
+      const files = [{ path: "/App.tsx", content: "x".repeat(512 * 1024 + 1) }];
       expect(() => buildReactArtifact(validParams({ files }))).toThrow(/per-file limit/);
     });
 
     it("oversized project total", () => {
-      const files = Array.from({ length: 5 }, (_, i) => ({
+      const files = Array.from({ length: 11 }, (_, i) => ({
         path: `/F${i}.tsx`,
-        content: "x".repeat(60 * 1024),
+        content: "x".repeat(500 * 1024),
       }));
       expect(() => buildReactArtifact(validParams({ entry: "/F0.tsx", files }))).toThrow(
         /total limit/,
@@ -712,5 +712,47 @@ describe("S2S config is actually reachable at runtime", () => {
     const keys = Object.keys(readArtifactAppFileTool.configSchema ?? {});
     expect(keys).toContain("XYNE_CLAW_AUTH_URL");
     expect(keys).toContain("XYNE_CLAW_S2S_KEY");
+  });
+});
+
+
+describe("icon", () => {
+  it("accepts a real Xyne icon id and carries it on payload and manifest", () => {
+    const { payload, manifest } = buildReactArtifact(validParams({ icon: "kanban-board" }));
+    expect(payload.icon).toBe("kanban-board");
+    expect(manifest.icon).toBe("kanban-board");
+  });
+
+  it("is optional — omitted means no icon, not an error", () => {
+    const { payload, manifest } = buildReactArtifact(validParams());
+    expect(payload.icon).toBeUndefined();
+    expect(manifest.icon).toBeUndefined();
+  });
+
+  it("rejects an unknown name and names the closest real ones", () => {
+    // The model's most likely mistake: a plausible name that is not the id.
+    expect(() => buildReactArtifact(validParams({ icon: "bar-chart" }))).toThrow(
+      /not a Xyne icon.*barchart-default/,
+    );
+  });
+
+  it("normalises case so a capitalised guess still resolves", () => {
+    expect(buildReactArtifact(validParams({ icon: "Kanban-Board" })).payload.icon).toBe(
+      "kanban-board",
+    );
+  });
+
+  it("an update inherits the app's icon when the patch omits it", () => {
+    const merged = mergeArtifactParams(
+      { ...baseApp(), icon: "timer-default" },
+      { files: [{ path: "/App.tsx", content: "x" }] },
+    );
+    expect(merged["icon"]).toBe("timer-default");
+  });
+
+  it("the description teaches the model to pick for the subject, on the first build", () => {
+    expect(createReactArtifactTool.description).toMatch(/ICON — on the FIRST build/);
+    expect(createReactArtifactTool.description).toContain("kanban-board");
+    expect(createReactArtifactTool.description).toMatch(/theirs wins/);
   });
 });

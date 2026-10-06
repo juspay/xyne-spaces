@@ -1,6 +1,7 @@
 import { DatabaseClient } from '@/database/client';
 import { logger } from '@/utils/logger';
 import { normalize, type Mention } from '@/services/entityExtraction/pipeline';
+import { fuzzyMatchEntityAlias } from '@/bypassAcl/entityServices';
 
 /**
  * Turns raw typed mentions into entities in the registry — the "one entity,
@@ -166,14 +167,7 @@ class EntityResolver {
     type: string,
     normalizedForm: string,
   ): Promise<{ entityId: string; sim: number } | null> {
-    const rows = await this.prisma.$queryRaw<Array<{ entityId: string; sim: number }>>`
-      SELECT "entityId", similarity("normalizedForm", ${normalizedForm})::float AS sim
-      FROM "non_zero"."entity_aliases"
-      WHERE "workspaceId" = ${workspaceId}
-        AND "type" = ${type}
-        AND "normalizedForm" % ${normalizedForm}
-      ORDER BY sim DESC
-      LIMIT 1`;
+    const rows = await fuzzyMatchEntityAlias(this.prisma, workspaceId, type, normalizedForm);
     const top = rows[0];
     return top && top.sim >= FUZZY_THRESHOLD ? top : null;
   }

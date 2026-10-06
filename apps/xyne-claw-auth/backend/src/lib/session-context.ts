@@ -12,6 +12,9 @@ import { redisService } from "../redis.js";
 import { getRecoveryContextForSession } from "../queue/run-recovery-worker.js";
 import type { ExternalResultCallbackConfig } from "../surfaces/external-api/delivery.js";
 import type { SlackDeliveryTarget } from "../surfaces/slack/delivery.js";
+import type { ChannelDeliveryTarget, MessagingChannelKey } from "../surfaces/messaging/plugin.js";
+import type { RootAttachmentRef } from "./workflow-handoff.js";
+import { twinScopedKey } from "./twin-scope.js";
 
 
 export interface SessionContext {
@@ -43,10 +46,17 @@ export interface SessionContext {
    * whether the user's request is satisfied.
    */
   rootTask?: string;
+  rootAttachments?: RootAttachmentRef[];
   agentId?: string;
   agentOrgId?: string | null;
   agentSlug?: string | undefined;
+  /** Display name shown in Spaces transient progress surfaces. */
+  agentName?: string | undefined;
   responseMode: "conversation" | "approval";
+  /** Prepended to this run's delivered reply. Set when several runs answer the
+   *  same thread and the reader needs to tell them apart — /eval fans one
+   *  question out across providers, so each answer says which one produced it. */
+  replyPrefix?: string;
   /**
    * Suppress the thread reply for this run entirely.
    *
@@ -80,7 +90,7 @@ export interface SessionContext {
    */
   isExperiment?: boolean;
   /**
-   * MessageId of the "⏳ Working on it…" placeholder we posted at webhook-arrival
+   * MessageId of the "Working on it…" placeholder we posted at webhook-arrival
    * time. Used ONLY when USE_EPHEMERAL_PROGRESS=false — we edit this message
    * in-place as tools run, and replace its content with the final agent
    * response in the result handler. Undefined under the ephemeral path.
@@ -113,9 +123,12 @@ export interface SessionContext {
   externalResultCallback?: ExternalResultCallbackConfig;
   /** Terminal result target for a run dispatched from a per-agent Slack app. */
   slackDelivery?: SlackDeliveryTarget;
+  /** Terminal result target for a run dispatched from a messaging channel
+   *  account (WhatsApp, Telegram, …) — see surfaces/messaging. */
+  channelDelivery?: ChannelDeliveryTarget;
   /** Surface that dispatched this run. Used by MCP tool filtering to apply
    *  surface-scoped default tools without mutating the stored agent config. */
-  triggerSource?: "spaces" | "scheduled" | "chat" | "api" | "automation" | "slack" | "heartbeat" | "reflex";
+  triggerSource?: "spaces" | "scheduled" | "chat" | "api" | "automation" | "slack" | "heartbeat" | "reflex" | MessagingChannelKey;
   /**
    * When true, the result-forward branch resolves the agent's plain `@Name`
    * mentions into clickable/notifying Spaces mentions (name→userId via
@@ -171,15 +184,9 @@ const CONV_PREFIX = "session-by-conv:";
 // busy slot (tryAcquireSlot) + runtime session lock, not this key.
 export const AUTOMATION_RUN_DEDUP_TTL = Number(process.env["AUTOMATION_RUN_DEDUP_TTL_SEC"] ?? 30);
 
+// Digital-twin runs are PER-USER, so the conv index is user-scoped too (see twinScopedKey).
 export function convKey(conversationId: string, agentSlug: string, twinUserScopeId?: string): string {
-  const base = `${CONV_PREFIX}${conversationId}:${agentSlug}`;
-  // Digital-twin runs are PER-USER: one claw session per mentioned user in a
-  // thread (see buildSandboxStoreKey). So the conv index must be user-scoped
-  // too — otherwise two twins mentioned in ONE thread clobber each other's row
-  // and the /result conv-index fallback resolves the wrong user. Only the twin
-  // passes twinUserScopeId; every conversation-mode caller keeps the legacy 2-part
-  // key (backward compatible, unchanged).
-  return agentSlug === "digital-twin" && twinUserScopeId ? `${base}:${twinUserScopeId}` : base;
+  return twinScopedKey(`${CONV_PREFIX}${conversationId}:${agentSlug}`, agentSlug, twinUserScopeId);
 }
 
 export function automationRunDedupKey(conversationId: string, agentSlug: string): string {

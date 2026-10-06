@@ -9,7 +9,7 @@ const webhookSrc = readFileSync(resolve(here, "./webhook.ts"), "utf8");
 // Regression pin for the 2026-08-19 twin-slot leak: the session_locked branch
 // of /webhook/result released the conversation slot WITHOUT the twin user
 // scope, so a digital-twin run's 3-part busy key (conv:digital-twin:<userId>,
-// see scoped() in lib/message-queue.ts) was never deleted — it leaked for the
+// see twinScopedKey() in lib/twin-scope.ts) was never deleted — it leaked for the
 // full BUSY_TTL (20m) and every new twin tag queued behind a phantom "active
 // run". Every releaseSlot on a path a twin run can reach MUST pass the scope.
 

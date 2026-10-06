@@ -5,11 +5,9 @@
 * Using browser
 * Ensuring user "user-1" is logged in
 * clicking on "[data-testid='nav-recordings']"
-* waiting for "[data-testid='recordings-page']" to appear
-* verifying "Recordings" is visible in "[data-testid='recordings-page']"
-* verifying "Your audio recordings with automatic transcription" is visible in "[data-testid='recordings-page']"
-* verifying "STT:" is visible in "[data-testid='recordings-page']"
-* verifying "No recordings yet" is visible in "[data-testid='recordings-page']"
+* waiting for "[data-testid='recordings-v2-page']" to appear
+* verifying "Xyne Scribe" is visible in "[data-testid='recordings-v2-page']"
+* verifying "Start your first recording" is visible in "[data-testid='recordings-v2-page']"
 
 ## User navigates to Context page
 * Using browser

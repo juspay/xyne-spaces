@@ -1,7 +1,8 @@
-import { createHash, randomUUID } from 'crypto';
-import { Prisma, type PrismaClient } from '@prisma/client';
+
+import { ensureFolderPathTx, createTx, editTx, moveTx } from '@/bypassAcl/transactions/SdlcWikiPageStore';
+import {  type PrismaClient } from '@prisma/client';
 import {
-  CanvasVisibility,
+  
   SDLC_HUB_ITEM_FLAT_RELATION,
   SDLC_HUB_ITEM_RELATION,
   SDLC_MEMBERSHIP_RELATION,
@@ -12,15 +13,13 @@ import {
 import { DatabaseClient } from '@/database/client';
 import { AppError } from '@/middleware/errorHandler';
 import { vespaQueue } from '@/queues/vespaQueue';
-import { convertBlockNoteToMarkdown, convertMarkdownToBlockNote } from '@/services/canvasService';
-import type { BlockNoteBlock } from '@/types/blockNoteTypes';
+import { convertMarkdownToBlockNote } from '@/services/canvasService';
 import { logger } from '@/utils/logger';
-import { readFromYSweet, syncToYSweet } from '@/utils/ysweetUtils';
+import { syncToYSweet } from '@/utils/ysweetUtils';
 import { fileSchema, SubApp } from '@/vespa/src/types';
-import { commitAndSyncCanvasArtifact } from '../sdlcCanvasSync';
-import { sdlcChannelCanvasParticipant } from '../sdlcCanvasAccess';
-import { ensureHubWikiFolder, ensureRepositoryWikiFolder, placeHubItem } from '../hubFolders';
-import { mutateWikiMarkdownSection } from './wikiSectionMutation';
+import { commitAndSyncCanvasArtifact, readCanvasMarkdown } from '../sdlcCanvasSync';
+import { ensureHubWikiFolder, ensureRepositoryWikiFolder } from '../hubFolders';
+import { mutateMarkdownSection } from '../markdownSection';
 
 export interface WikiScopeInput {
   workspaceId: string;
@@ -29,7 +28,7 @@ export interface WikiScopeInput {
   repoId?: string;
 }
 
-interface WikiScope {
+export interface WikiScope {
   workspaceId: string;
   actorUserId: string;
   channelId: string;
@@ -46,7 +45,7 @@ export interface WikiPageEntry {
   updatedAt: string;
 }
 
-type PageAction<T extends SdlcWikiPageAction['action']> = Extract<SdlcWikiPageAction, { action: T }>;
+export type PageAction<T extends SdlcWikiPageAction['action']> = Extract<SdlcWikiPageAction, { action: T }>;
 
 function splitFolderPath(folderPath: string | undefined): string[] {
   return (folderPath ?? '')
@@ -55,15 +54,15 @@ function splitFolderPath(folderPath: string | undefined): string[] {
     .filter(Boolean);
 }
 
-function versionName(action: string, commitSha: string | undefined): string {
+export function versionName(action: string, commitSha: string | undefined): string {
   return commitSha ? `Wiki ${commitSha.slice(0, 12)}: ${action}` : `Wiki: ${action}`;
 }
 
 export class SdlcWikiPageStore {
-  constructor(private readonly prisma: PrismaClient = DatabaseClient.getInstance()) {}
+  constructor(readonly prisma: PrismaClient = DatabaseClient.getInstance()) {}
 
   async listPages(input: WikiScopeInput & { includeArchived?: boolean }): Promise<WikiPageEntry[]> {
-    return this.pagesIn(await this.scope(input), input.includeArchived ?? false);
+    return this.pagesIn(await this.scope(input, true), input.includeArchived ?? false);
   }
 
   private async pagesIn(scope: WikiScope, includeArchived: boolean): Promise<WikiPageEntry[]> {
@@ -103,21 +102,20 @@ export class SdlcWikiPageStore {
       case 'insert_section':
       case 'remove_section':
         return this.edit(scope, page, input.generationCommit);
-      case 'archive':
-      case 'restore':
-        return this.setArchived(scope, page.canvasId, page.action === 'archive');
       case 'move':
         return this.move(scope, page);
     }
   }
 
-  private async scope(input: WikiScopeInput): Promise<WikiScope> {
+  /** A public hub's Wiki is readable by the workspace; writing still needs membership. */
+  private async scope(input: WikiScopeInput, read = false): Promise<WikiScope> {
+    const member = { participants: { some: { userId: input.actorUserId } } };
     const channel = await this.prisma.channel.findFirst({
       where: {
         id: input.channelId,
         workspaceId: input.workspaceId,
         type: 'SDLC',
-        participants: { some: { userId: input.actorUserId } },
+        ...(read ? { OR: [{ visibility: 'PUBLIC' }, member] } : member),
       },
       select: { projectId: true },
     });
@@ -208,39 +206,7 @@ export class SdlcWikiPageStore {
     let parentId = scope.folderId;
     for (const name of splitFolderPath(folderPath)) {
       const parent = parentId;
-      parentId = await this.prisma.$transaction(async (tx) => {
-        // Parallel page writes into a new path would each create the folder.
-        await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`sdlc-wiki-folder:${parent}/${name}`}))`;
-        const children = await tx.sdlcEntityLink.findMany({
-          where: {
-            channelId: scope.channelId,
-            sourceType: 'FOLDER',
-            sourceId: parent,
-            targetType: 'FOLDER',
-            relationType: SDLC_HUB_ITEM_RELATION,
-          },
-          select: { targetId: true },
-        });
-        const existing = children.length
-          ? await tx.sdlcFolder.findFirst({
-              where: { id: { in: children.map((child) => child.targetId) }, name },
-              select: { id: true },
-            })
-          : null;
-        if (existing) return existing.id;
-        const folderId = randomUUID();
-        await tx.sdlcFolder.create({
-          data: { id: folderId, workspaceId: scope.workspaceId, name, createdBy: scope.actorUserId },
-        });
-        await placeHubItem(tx, actor, {
-          channelId: scope.channelId,
-          scopeFolderId: scope.folderId,
-          parentId: parent,
-          targetType: 'FOLDER',
-          targetId: folderId,
-        });
-        return folderId;
-      });
+      parentId = await ensureFolderPathTx(this, parent, name, scope, actor);
     }
     return parentId;
   }
@@ -301,49 +267,7 @@ export class SdlcWikiPageStore {
     const content = await convertMarkdownToBlockNote(page.markdown);
     const actor = { workspaceId: scope.workspaceId, userId: scope.actorUserId };
     const canvasId = await commitAndSyncCanvasArtifact(
-      () =>
-        this.prisma.$transaction(async (tx) => {
-          const canvas = await tx.canvas.create({
-            data: {
-              workspaceId: scope.workspaceId,
-              title: page.title,
-              content: content as unknown as Prisma.InputJsonValue,
-              channelId: scope.channelId,
-              folderId: typeFolderId,
-              projectId: scope.projectId,
-              createdBy: scope.actorUserId,
-              lastEditedBy: scope.actorUserId,
-              lastEditedAt: new Date(),
-              viewAccessId: randomUUID(),
-              visibility: CanvasVisibility.PRIVATE,
-              isCollaborative: true,
-              metadata: {} as Prisma.InputJsonValue,
-              participants: {
-                create: sdlcChannelCanvasParticipant(scope.workspaceId, scope.channelId),
-              },
-            },
-            select: { id: true },
-          });
-          await this.recordVersion(tx, scope, canvas.id, page.markdown, content, 'created', commitSha);
-          await tx.sdlcArtifact.create({
-            data: {
-              workspaceId: scope.workspaceId,
-              artifactId: canvas.id,
-              artifactType: 'WIKI',
-              artifactStatus: 'ACTIVE',
-              ...(commitSha ? { generationCommit: commitSha } : {}),
-              createdBy: scope.actorUserId,
-            },
-          });
-          await placeHubItem(tx, actor, {
-            channelId: scope.channelId,
-            scopeFolderId: scope.folderId,
-            parentId,
-            targetType: 'CANVAS',
-            targetId: canvas.id,
-          });
-          return { artifact: canvas.id, canvasId: canvas.id, content };
-        }),
+      () => createTx(this, scope, page, content, typeFolderId, commitSha, actor, parentId),
       syncToYSweet,
       scope.actorUserId
     );
@@ -361,45 +285,17 @@ export class SdlcWikiPageStore {
     if (page.action === 'update') {
       markdown = page.markdown;
     } else {
-      const live = await readFromYSweet(existing.id, existing.createdBy);
-      const current = await convertBlockNoteToMarkdown(
-        live.length > 0 ? live : (existing.content as unknown as BlockNoteBlock[])
-      );
-      try {
-        markdown = mutateWikiMarkdownSection({
-          markdown: current,
-          action: page.action,
-          heading: page.heading,
-          ...(page.action === 'remove_section' ? {} : { sectionMarkdown: page.markdown }),
-        });
-      } catch (error) {
-        const status = (error as { statusCode?: number }).statusCode;
-        throw new AppError(error instanceof Error ? error.message : String(error), status ?? 400);
-      }
+      markdown = mutateMarkdownSection({
+        markdown: await readCanvasMarkdown(existing),
+        action: page.action,
+        heading: page.heading,
+        ...(page.action === 'remove_section' ? {} : { sectionMarkdown: page.markdown }),
+      });
     }
     const content = await convertMarkdownToBlockNote(markdown);
     // Wiki canvases give the hub read-only access, so sync as the creator, who can edit.
     await commitAndSyncCanvasArtifact(
-      () =>
-        this.prisma.$transaction(async (tx) => {
-          await tx.canvas.update({
-            where: { id: existing.id },
-            data: {
-              ...(page.action === 'update' && page.title ? { title: page.title } : {}),
-              content: content as unknown as Prisma.InputJsonValue,
-              lastEditedBy: scope.actorUserId,
-              lastEditedAt: new Date(),
-            },
-          });
-          await this.recordVersion(tx, scope, existing.id, markdown, content, page.action, commitSha);
-          if (commitSha) {
-            await tx.sdlcArtifact.update({
-              where: { artifactId: existing.id },
-              data: { generationCommit: commitSha },
-            });
-          }
-          return { artifact: existing.id, canvasId: existing.id, content };
-        }),
+      () => editTx(this, existing, page, content, scope, markdown, commitSha),
       (canvasId, blocks) => syncToYSweet(canvasId, blocks, existing.createdBy),
       existing.createdBy
     );
@@ -407,69 +303,11 @@ export class SdlcWikiPageStore {
     return this.entry(scope, existing.id);
   }
 
-  private async setArchived(scope: WikiScope, canvasId: string, archived: boolean): Promise<WikiPageEntry> {
-    await this.requirePage(scope, canvasId);
-    await this.prisma.sdlcArtifact.update({
-      where: { artifactId: canvasId },
-      data: { artifactStatus: archived ? 'ARCHIVED' : 'ACTIVE' },
-    });
-    return this.entry(scope, canvasId);
-  }
-
   private async move(scope: WikiScope, page: PageAction<'move'>): Promise<WikiPageEntry> {
     const existing = await this.requirePage(scope, page.canvasId);
     const parentId = await this.ensureFolderPath(scope, page.folderPath);
-    await this.prisma.$transaction(async (tx) => {
-      await tx.sdlcEntityLink.deleteMany({
-        where: {
-          channelId: scope.channelId,
-          relationType: SDLC_HUB_ITEM_RELATION,
-          targetType: 'CANVAS',
-          targetId: existing.id,
-        },
-      });
-      await placeHubItem(
-        tx,
-        { workspaceId: scope.workspaceId, userId: scope.actorUserId },
-        {
-          channelId: scope.channelId,
-          scopeFolderId: scope.folderId,
-          parentId,
-          targetType: 'CANVAS',
-          targetId: existing.id,
-        }
-      );
-      if (page.title) {
-        await tx.canvas.update({ where: { id: existing.id }, data: { title: page.title } });
-      }
-    });
+    await moveTx(this, scope, existing, parentId, page);
     return this.entry(scope, existing.id);
-  }
-
-  private async recordVersion(
-    tx: Prisma.TransactionClient,
-    scope: WikiScope,
-    canvasId: string,
-    markdown: string,
-    content: BlockNoteBlock[],
-    action: string,
-    commitSha: string | undefined
-  ): Promise<void> {
-    const contentHash = createHash('sha256')
-      .update(`${markdown}\0${commitSha ?? ''}`)
-      .digest('hex');
-    await tx.canvasVersion.upsert({
-      where: { canvasId_contentHash: { canvasId, contentHash } },
-      create: {
-        workspaceId: scope.workspaceId,
-        canvasId,
-        name: versionName(action, commitSha),
-        content: content as unknown as Prisma.InputJsonValue,
-        contentHash,
-        createdBy: scope.actorUserId,
-      },
-      update: { name: versionName(action, commitSha) },
-    });
   }
 
   private async entry(scope: WikiScope, canvasId: string): Promise<WikiPageEntry> {

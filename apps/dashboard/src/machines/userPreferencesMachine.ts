@@ -5,26 +5,41 @@ import { indexedDBService } from '../services/indexedDBService';
 export interface UserPreferences {
   sdlcSidebarCollapsed: boolean;
   sdlcSidebarWidth: number;
-  sdlcFinderColumnWidths: Record<string, number>;
-  sdlcFinderGroupBy: 'none' | 'type';
-  sdlcFinderPathByTrack: Record<
+  /** Which tabs a folder page has open, per folder. The active one lives in the
+   *  URL instead, so a shared link opens the item you meant rather than a copy
+   *  of someone else's working set. */
+  sdlcFolderTabs: Record<
     string,
-    Array<{ type: 'TRACK' | 'FOLDER'; id: string; name: string }>
+    Array<{ kind: 'CANVAS' | 'LINK' | 'ATTACHMENT' | 'BROWSER'; id: string }>
   >;
+  sdlcFolderTreeExpanded: Record<string, boolean>;
+  /** The folder page's explorer, folded away to give the page its full width. */
+  sdlcExplorerCollapsed: boolean;
   sdlcSidebarSectionsCollapsed: Record<string, boolean>;
-  sdlcSidebarSectionHeights: Record<string, number>;
   sdlcShowClosedTracks: boolean;
+  // TODO: move relatedContextEnabled and relatedContextDebounceMs to the server-side
+  // user_preferences table (with the other Messaging preferences) once the
+  // related-context feature is confirmed; kept per device while it is on trial.
+  /**
+   * Suggest threads, tickets, canvases and calls related to the message being
+   * written, as chips in the composer. Off until turned on in Preferences →
+   * Messaging.
+   */
+  relatedContextEnabled: boolean;
+  /** How long after the last keystroke to look them up, in ms. Never below 1000. */
+  relatedContextDebounceMs: number;
 }
 
 export const DEFAULT_USER_PREFERENCES: UserPreferences = {
   sdlcSidebarCollapsed: false,
-  sdlcSidebarWidth: 260,
-  sdlcFinderColumnWidths: {},
-  sdlcFinderGroupBy: 'none',
-  sdlcFinderPathByTrack: {},
-  sdlcSidebarSectionsCollapsed: { 'sdlc-sidebar-artifacts': true },
-  sdlcSidebarSectionHeights: {},
+  sdlcSidebarWidth: 280,
+  sdlcFolderTabs: {},
+  sdlcFolderTreeExpanded: {},
+  sdlcExplorerCollapsed: false,
+  sdlcSidebarSectionsCollapsed: {},
   sdlcShowClosedTracks: false,
+  relatedContextEnabled: false,
+  relatedContextDebounceMs: 1000,
 };
 
 export interface UserPreferencesContext {

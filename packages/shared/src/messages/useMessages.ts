@@ -63,6 +63,10 @@ export type InViewAnchor = {
 export type UseChannelMessagesResult = {
   messages: Conversation[];
   latestConversationsList: Conversation[];
+  /** Serialized failure of the initial load, or null. Cleared on retry. */
+  initialLoadError: string | null;
+  /** Re-runs the initial load after `initialLoadError`. */
+  retryInitialLoad: () => void;
   loadOlder: () => void;
   loadNewer: () => void;
   setInViewAnchor: (anchor: InViewAnchor | null) => void;
@@ -183,6 +187,8 @@ function useChannelMessagesImpl(
   const latestConversationsListRef = useRef<Conversation[]>([]);
 
   const [isInitialLoadComplete, setIsInitialLoadComplete] = useState(false);
+  const [initialLoadError, setInitialLoadError] = useState<string | null>(null);
+  const [initialLoadAttempt, setInitialLoadAttempt] = useState(0);
   const isFetchingRef = useRef(false);
   const isFetchingOlderRef = useRef(false);
   const hasReachedChannelStartRef = useRef(false);
@@ -190,6 +196,11 @@ function useChannelMessagesImpl(
 
   const shouldUseCutoffQuery =
     conversationSeenCutoffAt !== null && isMember && !linkedConversationId;
+
+  const retryInitialLoad = useCallback((): void => {
+    if (!enabled || !channelId || shouldUseCutoffQuery) return;
+    setInitialLoadAttempt(attempt => attempt + 1);
+  }, [channelId, enabled, shouldUseCutoffQuery]);
 
   const activityCutoffCreatedAt = linkedCutoffCreatedAt?.createdAt ?? null;
   const channelSeenCutoffCreatedAt = !linkedConversationId
@@ -238,6 +249,9 @@ function useChannelMessagesImpl(
   useEffect(() => {
     if (!enabled || !channelId) return;
     if (shouldUseCutoffQuery) return;
+    // A retry supersedes this attempt; its late result must not be applied.
+    let cancelled = false;
+    setInitialLoadError(null);
 
     Promise.all([
       zero.run(
@@ -264,6 +278,7 @@ function useChannelMessagesImpl(
         : Promise.resolve<Conversation[] | null>(null),
     ])
       .then(([older, newerNullable]) => {
+        if (cancelled) return;
         const newer = newerNullable ?? [];
         const fetched = dedupeAndSortConversations(older, newer);
         const mergedWithCached = mergeCachedConversations(conversationsRef.current, fetched);
@@ -288,9 +303,16 @@ function useChannelMessagesImpl(
         setConversationsState(merged);
         setIsInitialLoadComplete(true);
       })
-      .catch(() => {});
+      .catch((err: unknown) => {
+        if (cancelled) return;
+        // Surfaced so callers can offer a retry; the list keeps its warm rows.
+        setInitialLoadError(serializeInitialLoadError(err));
+      });
+    return (): void => {
+      cancelled = true;
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [key]);
+  }, [key, initialLoadAttempt]);
 
   useEffect(() => {
     if (!enabled) return;
@@ -578,6 +600,8 @@ function useChannelMessagesImpl(
   return {
     messages: messagesWithPending,
     latestConversationsList,
+    initialLoadError,
+    retryInitialLoad,
     loadOlder,
     loadNewer,
     setInViewAnchor,

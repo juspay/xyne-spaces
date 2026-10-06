@@ -1,0 +1,44 @@
+#cloud-config
+write_files:
+  - path: /etc/xyne/join-cluster.sh
+    permissions: "0755"
+    content: |
+      #!/bin/bash
+      set -euo pipefail
+      labels="${labels}"
+      taints="${taints}"
+      extra_args="--node-labels=$labels"
+      if [ -n "$taints" ]; then
+        extra_args="$extra_args --register-with-taints=$taints"
+      fi
+      if command -v nodeadm >/dev/null 2>&1; then
+        mkdir -p /etc/eks
+        cat > /etc/eks/nodeconfig.yaml <<NODECONFIG
+      apiVersion: node.eks.aws/v1alpha1
+      kind: NodeConfig
+      spec:
+        cluster:
+          name: ${cluster_name}
+          apiServerEndpoint: ${endpoint}
+          certificateAuthority: ${ca}
+          cidr: ${service_cidr}
+        kubelet:
+          flags:
+            - --node-labels=$labels
+      NODECONFIG
+        if [ -n "$taints" ]; then
+          printf '      - --register-with-taints=%s\n' "$taints" >> /etc/eks/nodeconfig.yaml
+        fi
+        nodeadm init --config-source file:///etc/eks/nodeconfig.yaml
+      elif [ -x /etc/eks/bootstrap.sh ]; then
+        /etc/eks/bootstrap.sh "${cluster_name}" \
+          --apiserver-endpoint "${endpoint}" \
+          --b64-cluster-ca "${ca}" \
+          --dns-cluster-ip "${dns_ip}" \
+          --kubelet-extra-args "$extra_args"
+      else
+        echo "no EKS bootstrap (nodeadm or /etc/eks/bootstrap.sh) on this image" >&2
+        exit 1
+      fi
+runcmd:
+  - [/etc/xyne/join-cluster.sh]

@@ -20,6 +20,7 @@ import { Dialog } from '../../ui/Dialog';
 import { Tooltip } from '../../ui/Tooltip/Tooltip';
 import Input from '../../ui/Input';
 import { ChannelCanvasList } from '../ChannelCanvasList';
+import { CanvasDeleteModal } from '../CanvasDeleteModal';
 import { CanvasShareModal } from '../CanvasShareModal';
 import {
   CanvasVersionDiffPanel,
@@ -31,12 +32,15 @@ import {
   AudioLines,
   ArrowLeft,
   Archive,
+  Eye,
+  EyeOff,
   Folder,
   FolderPlus,
   GitCompare,
   History,
   Loader2,
   MessageSquare,
+  PhoneCall,
   Plus,
   RotateCcw,
   Star,
@@ -49,16 +53,16 @@ import { PresentToolbar } from 'blocknote-layout-extensions';
 import { mutators } from '../../../zero/mutators';
 import { useCachedQuery } from '../../../hooks/useCachedQuery';
 import { useChannel } from '../../../hooks/useChannels';
+import { useIsDmReadOnly } from '../../../hooks/useIsDmReadOnly';
 import { useCurrentUserGroupIds } from '../../../hooks/useUserGroup';
 import {
   filterExcludedCallGeneratedCanvases,
   filterExcludedRecordingGeneratedCanvases,
-  getRecordingCanvasCallId,
+  getCanvasCallId,
   isExcludedRecordingGeneratedCanvas,
+  isRecordingCanvas,
 } from '../canvasFilters';
 import { usePersistedCanvasPreferences } from '../../../hooks/usePersistedCanvasPreferences';
-import { Switch } from '@/components/ui/Switch';
-import { CanvasEditorHeader } from '../CanvasEditorHeader';
 import {
   createCanvasContentTextDiff,
   isVisibleCanvasContentDiffPart,
@@ -73,14 +77,6 @@ import {
 } from '../../../utils/canvasVersioning';
 import { useNavigate } from '../../../hooks/useWorkspaceNavigate';
 import { useCanvasArchiveToggle } from '../useCanvasArchiveToggle';
-import { SectionEmojiPicker } from '../../Chat/SectionEmojiPicker';
-import { cn } from '../../../utils/classNames';
-import {
-  buildCanvasTitleWithIcon,
-  getCanvasDisplayTitle,
-  getCanvasTitleIcon,
-  setOptimisticCanvasTitleIcon,
-} from '../canvasTitleIcon';
 
 interface CanvasTabProps {
   channelId: string;
@@ -142,6 +138,8 @@ const CanvasTab: React.FC<CanvasTabProps> = ({ channelId }): ReactElement => {
   const [onlyArchivedCanvases, setOnlyArchivedCanvases] = useState(false);
   const [view, setView] = useState<'list' | 'editor'>('list');
   const channel = useChannel(channelId);
+  // Deactivated 1:1 DM archive → no canvas creation (folder or file).
+  const isDmReadOnly = useIsDmReadOnly(channelId);
   const currentUserGroupIds = useCurrentUserGroupIds();
   const [adminParticipations] = useCachedQuery(queries.myChannelParticipations({}));
   const isChannelAdmin = useMemo(
@@ -181,7 +179,6 @@ const CanvasTab: React.FC<CanvasTabProps> = ({ channelId }): ReactElement => {
   useEffect(() => {
     setOpenCommentCount(0);
   }, [canvas?.id]);
-  const [currentTitleIcon, setCurrentTitleIcon] = useState<string | null>(null);
   const [currentTitle, setCurrentTitle] = useState('Untitled Canvas');
   const titleRef = useRef('Untitled Canvas'); // Track title synchronously to avoid race conditions
   const titleAutoFocusCanvasIdRef = useRef<string | null>(null);
@@ -194,6 +191,7 @@ const CanvasTab: React.FC<CanvasTabProps> = ({ channelId }): ReactElement => {
   const [showCreateFolderDialog, setShowCreateFolderDialog] = useState(false);
   const [newFolderName, setNewFolderName] = useState('');
   const [isCreatingFolder, setIsCreatingFolder] = useState(false);
+  const [deletingFolder, setDeletingFolder] = useState<CanvasFolder | null>(null);
   const [showVersionHistory, setShowVersionHistory] = useState(false);
   const [previewVersion, setPreviewVersion] = useState<CanvasVersionRecord | null>(null);
   const [showVersionDiff, setShowVersionDiff] = useState(false);
@@ -238,7 +236,6 @@ const CanvasTab: React.FC<CanvasTabProps> = ({ channelId }): ReactElement => {
   // Reset state when channelId changes
   useEffect(() => {
     setCanvas(null);
-    setCurrentTitleIcon(null);
     setCurrentTitle('Untitled Canvas');
     setCurrentContent(undefined);
     setView('list');
@@ -266,13 +263,6 @@ const CanvasTab: React.FC<CanvasTabProps> = ({ channelId }): ReactElement => {
   const queueTitleAutoFocus = useCallback((targetCanvasId: string): void => {
     if (titleAutoFocusConsumedCanvasIdRef.current === targetCanvasId) return;
     titleAutoFocusCanvasIdRef.current = targetCanvasId;
-  }, []);
-
-  const handleTitleAutoFocused = useCallback((): void => {
-    if (titleAutoFocusCanvasIdRef.current) {
-      titleAutoFocusConsumedCanvasIdRef.current = titleAutoFocusCanvasIdRef.current;
-    }
-    titleAutoFocusCanvasIdRef.current = null;
   }, []);
 
   const handleFileUpload = useCallback(
@@ -310,15 +300,19 @@ const CanvasTab: React.FC<CanvasTabProps> = ({ channelId }): ReactElement => {
 
   const isCanvasOwner = canvas?.createdBy === user?.id || effectiveAccessLevel === CanvasRole.OWNER;
   const isChannelArchived = !!channel?.isArchived;
-  const recordingCallId = canvas ? getRecordingCanvasCallId(canvas) : null;
+  const canvasIsRecording = canvas ? isRecordingCanvas(canvas) : false;
+  const canvasCallId = canvas ? getCanvasCallId(canvas) : null;
 
   const handleOpenRecordingNotes = useCallback((): void => {
-    if (!recordingCallId) return;
+    if (!canvasCallId) return;
+    const destination = canvasIsRecording
+      ? `/recordings/${encodeURIComponent(canvasCallId)}?tab=notes`
+      : `/calls/${encodeURIComponent(canvasCallId)}/detail`;
 
-    void navigate(`/recordings/${encodeURIComponent(recordingCallId)}?tab=notes`, {
+    void navigate(destination, {
       state: { from: `${location.pathname}${location.search}` },
     });
-  }, [location.pathname, location.search, navigate, recordingCallId]);
+  }, [canvasCallId, canvasIsRecording, location.pathname, location.search, navigate]);
 
   useEffect(() => {
     previewVersionRef.current = null;
@@ -345,14 +339,14 @@ const CanvasTab: React.FC<CanvasTabProps> = ({ channelId }): ReactElement => {
       z.mutate(
         mutators.canvas.update({
           id: canvasToSave.id,
-          title: buildCanvasTitleWithIcon(titleRef.current, currentTitleIcon),
+          title: titleRef.current,
           content: sanitizedBlocks,
           timestamp: Date.now(),
         }),
       );
       lastSavedContentRef.current = JSON.stringify(content);
     },
-    [currentTitleIcon, z],
+    [z],
   );
   const saveCanvasExitSnapshot = useCanvasExitSnapshot<Canvas, PartialBlock[]>({
     canvasRef,
@@ -486,6 +480,36 @@ const CanvasTab: React.FC<CanvasTabProps> = ({ channelId }): ReactElement => {
     })();
   }, [channelId, isChannelArchived, newFolderName, showArchivedChannelCreateError, z]);
 
+  const handleDeleteFolder = useCallback((folder: CanvasFolder, canvasCount: number): void => {
+    if (canvasCount > 0) {
+      toast.error('Move or delete canvases in this folder first');
+      return;
+    }
+
+    setDeletingFolder(folder);
+  }, []);
+
+  const handleConfirmDeleteFolder = useCallback((): void => {
+    if (!deletingFolder) return;
+
+    void (async (): Promise<void> => {
+      try {
+        const result = z.mutate(mutators.canvasFolder.delete({ id: deletingFolder.id }));
+        const serverResult = await result.server;
+        if (serverResult.type === 'error') {
+          throw new Error(serverResult.error.message || 'Failed to delete folder');
+        }
+
+        toast.success('Folder deleted');
+        setDeletingFolder(null);
+      } catch (error) {
+        toast.error('Failed to delete folder', {
+          description: error instanceof Error ? error.message : 'Please try again.',
+        });
+      }
+    })();
+  }, [deletingFolder, z]);
+
   const handleCreateCanvas = async (): Promise<void> => {
     if (isChannelArchived) {
       showArchivedChannelCreateError('canvas');
@@ -521,7 +545,6 @@ const CanvasTab: React.FC<CanvasTabProps> = ({ channelId }): ReactElement => {
 
       queueTitleAutoFocus(newCanvasId);
       setCanvas(newCanvas);
-      setCurrentTitleIcon(null);
       setCurrentTitle(newCanvas.title);
       titleRef.current = newCanvas.title;
       setCurrentContent([]);
@@ -595,7 +618,6 @@ const CanvasTab: React.FC<CanvasTabProps> = ({ channelId }): ReactElement => {
 
       queueTitleAutoFocus(newCanvasId);
       setCanvas(newCanvas);
-      setCurrentTitleIcon(null);
       setCurrentTitle(newCanvas.title);
       titleRef.current = newCanvas.title;
       setCurrentContent([]);
@@ -647,11 +669,8 @@ const CanvasTab: React.FC<CanvasTabProps> = ({ channelId }): ReactElement => {
       : selected;
 
     setCanvas(selectedCanvas);
-    const titleIcon = getCanvasTitleIcon(selectedCanvas.title);
-    const displayTitle = getCanvasDisplayTitle(selectedCanvas.title, titleIcon);
-    setCurrentTitleIcon(titleIcon);
-    setCurrentTitle(displayTitle);
-    titleRef.current = displayTitle;
+    setCurrentTitle(selectedCanvas.title);
+    titleRef.current = selectedCanvas.title;
     setCurrentContent(selectedCanvas.content);
     latestContentRef.current = selectedCanvas.content;
     lastSavedContentRef.current = JSON.stringify(selectedCanvas.content || []);
@@ -728,7 +747,7 @@ const CanvasTab: React.FC<CanvasTabProps> = ({ channelId }): ReactElement => {
         z.mutate(
           mutators.canvas.update({
             id: canvas.id,
-            title: buildCanvasTitleWithIcon(titleRef.current, currentTitleIcon),
+            title: titleRef.current,
             content: sanitizedBlocks,
             timestamp: Date.now(),
           }),
@@ -747,35 +766,16 @@ const CanvasTab: React.FC<CanvasTabProps> = ({ channelId }): ReactElement => {
   };
 
   const handleTitleSave = useCallback((): void => {
-    if (!canvas || !canEdit) return;
-    const titleToSave = buildCanvasTitleWithIcon(titleRef.current, currentTitleIcon);
-    if (titleToSave === canvas.title) return;
+    if (!canvas || !canEdit || currentTitle === canvas.title) return;
 
     z.mutate(
       mutators.canvas.update({
         id: canvas.id,
-        title: titleToSave,
+        title: titleRef.current,
         timestamp: Date.now(),
       }),
     );
-  }, [canEdit, canvas, currentTitleIcon, z]);
-
-  const handleTitleIconChange = useCallback(
-    (icon: string): void => {
-      if (!canvas?.id || !canEdit) return;
-
-      setCurrentTitleIcon(icon);
-      setOptimisticCanvasTitleIcon(canvas.id, icon);
-      z.mutate(
-        mutators.canvas.update({
-          id: canvas.id,
-          title: buildCanvasTitleWithIcon(titleRef.current, icon),
-          timestamp: Date.now(),
-        }),
-      );
-    },
-    [canEdit, canvas?.id, z],
-  );
+  }, [canEdit, canvas, currentTitle, z]);
 
   const handlePreviewVersion = (version: CanvasVersionRecord): void => {
     if (!previewVersionRef.current) {
@@ -794,6 +794,37 @@ const CanvasTab: React.FC<CanvasTabProps> = ({ channelId }): ReactElement => {
     setPreviewVersion(null);
     setShowVersionDiff(false);
   };
+
+  const handleMoveCanvas = useCallback(
+    async (targetCanvas: Canvas, folderId: string | null): Promise<void> => {
+      if (isChannelArchived) {
+        toast.error('Cannot move canvas', { description: 'This channel is archived.' });
+        return;
+      }
+
+      try {
+        const result = z.mutate(
+          mutators.canvas.update({
+            id: targetCanvas.id,
+            folderId,
+            channelId,
+            timestamp: Date.now(),
+          }),
+        );
+        const serverResult = await result.server;
+        if (serverResult.type === 'error') {
+          throw new Error(serverResult.error.message || 'Failed to move canvas');
+        }
+
+        toast.success(folderId ? 'Canvas moved to folder' : 'Canvas moved to channel root');
+      } catch (error) {
+        toast.error('Failed to move canvas', {
+          description: error instanceof Error ? error.message : 'Please try again.',
+        });
+      }
+    },
+    [channelId, isChannelArchived, z],
+  );
 
   const handleRestoreVersion = useCanvasVersionRestore<Canvas, PartialBlock[], CanvasVersionRecord>(
     {
@@ -827,20 +858,21 @@ const CanvasTab: React.FC<CanvasTabProps> = ({ channelId }): ReactElement => {
     return (
       <>
         <div className='flex flex-col h-full bg-background'>
-          <div className='p-4 border-b border-border flex justify-between items-center'>
+          <div className='flex items-center justify-between gap-4 border-b border-border p-4'>
             <h3 className='text-lg font-semibold text-foreground' data-testid='canvas-list-header'>
               Channel Canvases
             </h3>
-            <div className='flex items-center gap-2'>
+            <div className='flex h-9 max-w-full items-center gap-0.5 overflow-x-auto rounded-lg border border-border bg-background p-0.5 shadow-sm'>
               <Tooltip
                 content={showStarredOnly ? 'Show all items' : 'Show starred only'}
                 className='px-2 py-1 text-[10px]'
               >
                 <button
-                  className={`flex items-center justify-center rounded-md border p-1.5 transition-colors ${
+                  type='button'
+                  className={`flex size-7 shrink-0 items-center justify-center rounded-md transition-colors ${
                     showStarredOnly
-                      ? 'border-amber-200 bg-amber-50 text-amber-600'
-                      : 'border-border text-muted-foreground hover:bg-accent'
+                      ? 'bg-amber-50 text-amber-600'
+                      : 'text-muted-foreground hover:bg-accent'
                   }`}
                   onClick={() => setShowStarredOnly(prev => !prev)}
                   data-track-category='CANVAS'
@@ -852,66 +884,121 @@ const CanvasTab: React.FC<CanvasTabProps> = ({ channelId }): ReactElement => {
                   />
                 </button>
               </Tooltip>
-              <Tooltip content='Hide system generated' className='px-2 py-1 text-[10px]'>
-                <div className='origin-left scale-90'>
-                  <Switch
-                    id='exclude-channel-call-generated-canvases'
-                    checked={excludeCallGeneratedCanvases}
-                    onCheckedChange={setExcludeCallGeneratedCanvases}
-                  />
-                </div>
-              </Tooltip>
-              <Tooltip content='Only recording canvases' className='px-2 py-1 text-[10px]'>
-                <div className='origin-left scale-90'>
-                  <Switch
-                    id='only-channel-recording-generated-canvases'
-                    checked={onlyRecordingGeneratedCanvases}
-                    onCheckedChange={setOnlyRecordingGeneratedCanvases}
-                  />
-                </div>
-              </Tooltip>
-              <Tooltip content='Only archived' className='px-2 py-1 text-[10px]'>
-                <div className='flex origin-left scale-90 items-center gap-1.5 rounded-md border border-border px-2 py-1 text-muted-foreground'>
-                  <Archive size={14} />
-                  <Switch
-                    id='only-archived-channel-canvases'
-                    checked={onlyArchivedCanvases}
-                    onCheckedChange={setOnlyArchivedCanvases}
-                  />
-                </div>
-              </Tooltip>
-              <Button
-                variant='outline'
-                size='sm'
-                onClick={openCreateFolderDialog}
-                disabled={isCreatingFolder || isChannelArchived}
-                data-track-category='CANVAS'
-                data-track-name='Create_Channel_Folder'
-                data-track-metadata={JSON.stringify({ channelId })}
+              <Tooltip
+                content={
+                  excludeCallGeneratedCanvases ? 'Show system generated' : 'Hide system generated'
+                }
+                className='px-2 py-1 text-[10px]'
               >
-                {isCreatingFolder ? (
-                  <Loader2 size={16} className='animate-spin' />
-                ) : (
-                  <Plus size={16} />
-                )}
-                {isCreatingFolder ? 'Creating...' : 'New Folder'}
-              </Button>
-              <Button
-                variant='default'
-                size='sm'
-                onClick={() => void handleCreateCanvas()}
-                disabled={isCreatingCanvas || isChannelArchived}
-                data-track-category='CANVAS'
-                data-track-name='Create_Canvas'
-                data-track-metadata={JSON.stringify({ channelId })}
+                <button
+                  type='button'
+                  className={`flex size-7 shrink-0 items-center justify-center rounded-md transition-colors ${
+                    excludeCallGeneratedCanvases
+                      ? 'bg-muted text-foreground'
+                      : 'text-muted-foreground hover:bg-accent'
+                  }`}
+                  onClick={() => setExcludeCallGeneratedCanvases(prev => !prev)}
+                  aria-label={
+                    excludeCallGeneratedCanvases
+                      ? 'Show system generated canvases'
+                      : 'Hide system generated canvases'
+                  }
+                  aria-pressed={excludeCallGeneratedCanvases}
+                  data-track-category='CANVAS'
+                  data-track-name='TOGGLE_CHANNEL_SYSTEM_GENERATED_CANVAS_FILTER'
+                >
+                  {excludeCallGeneratedCanvases ? <EyeOff size={16} /> : <Eye size={16} />}
+                </button>
+              </Tooltip>
+              <Tooltip
+                content={
+                  onlyRecordingGeneratedCanvases
+                    ? 'Show all canvases'
+                    : 'Show only recording canvases'
+                }
+                className='px-2 py-1 text-[10px]'
               >
-                {isCreatingCanvas ? (
-                  <Loader2 size={16} className='animate-spin' />
-                ) : (
-                  <Plus size={16} />
-                )}
-                {isCreatingCanvas ? 'Creating...' : 'New Canvas'}
-              </Button>
+                <button
+                  type='button'
+                  className={`flex size-7 shrink-0 items-center justify-center rounded-md transition-colors ${
+                    onlyRecordingGeneratedCanvases
+                      ? 'bg-primary/10 text-primary'
+                      : 'text-muted-foreground hover:bg-accent'
+                  }`}
+                  onClick={() => setOnlyRecordingGeneratedCanvases(prev => !prev)}
+                  aria-label={
+                    onlyRecordingGeneratedCanvases
+                      ? 'Show all canvases'
+                      : 'Show only recording canvases'
+                  }
+                  aria-pressed={onlyRecordingGeneratedCanvases}
+                  data-track-category='CANVAS'
+                  data-track-name='TOGGLE_CHANNEL_RECORDING_CANVAS_FILTER'
+                >
+                  <AudioLines size={16} />
+                </button>
+              </Tooltip>
+              <Tooltip
+                content={onlyArchivedCanvases ? 'Show all canvases' : 'Show only archived canvases'}
+                className='px-2 py-1 text-[10px]'
+              >
+                <button
+                  type='button'
+                  className={`flex size-7 shrink-0 items-center justify-center rounded-md transition-colors ${
+                    onlyArchivedCanvases
+                      ? 'bg-primary/10 text-primary'
+                      : 'text-muted-foreground hover:bg-accent'
+                  }`}
+                  onClick={() => setOnlyArchivedCanvases(prev => !prev)}
+                  aria-label={
+                    onlyArchivedCanvases ? 'Show all canvases' : 'Show only archived canvases'
+                  }
+                  aria-pressed={onlyArchivedCanvases}
+                  data-track-category='CANVAS'
+                  data-track-name='TOGGLE_CHANNEL_ARCHIVED_CANVAS_FILTER'
+                >
+                  <Archive size={16} />
+                </button>
+              </Tooltip>
+              {!isDmReadOnly && (
+                <>
+                  <div className='mx-1 h-5 w-px shrink-0 bg-border' aria-hidden='true' />
+                  <Button
+                    variant='outline'
+                    size='sm'
+                    className='h-7 shrink-0 gap-1.5 px-2.5 text-xs'
+                    onClick={openCreateFolderDialog}
+                    disabled={isCreatingFolder || isChannelArchived}
+                    data-track-category='CANVAS'
+                    data-track-name='Create_Channel_Folder'
+                    data-track-metadata={JSON.stringify({ channelId })}
+                  >
+                    {isCreatingFolder ? (
+                      <Loader2 size={14} className='animate-spin' />
+                    ) : (
+                      <FolderPlus size={14} />
+                    )}
+                    {isCreatingFolder ? 'Creating...' : 'Folder'}
+                  </Button>
+                  <Button
+                    variant='default'
+                    size='sm'
+                    className='h-7 shrink-0 gap-1.5 px-2.5 text-xs'
+                    onClick={() => void handleCreateCanvas()}
+                    disabled={isCreatingCanvas || isChannelArchived}
+                    data-track-category='CANVAS'
+                    data-track-name='Create_Canvas'
+                    data-track-metadata={JSON.stringify({ channelId })}
+                  >
+                    {isCreatingCanvas ? (
+                      <Loader2 size={14} className='animate-spin' />
+                    ) : (
+                      <Plus size={14} />
+                    )}
+                    {isCreatingCanvas ? 'Creating...' : 'Canvas'}
+                  </Button>
+                </>
+              )}
             </div>
           </div>
           <div className='flex-1 overflow-hidden'>
@@ -936,13 +1023,19 @@ const CanvasTab: React.FC<CanvasTabProps> = ({ channelId }): ReactElement => {
               activeFilter={activeFilter}
               onFilterChange={setActiveFilter}
               selectedCanvasId={canvas?.id}
-              onCreateCanvasInFolder={folder => {
-                void handleCreateCanvasInFolder(folder);
-              }}
+              {...(!isDmReadOnly && {
+                onCreateCanvasInFolder: (folder: CanvasFolder) => {
+                  void handleCreateCanvasInFolder(folder);
+                },
+              })}
+              onDeleteFolder={handleDeleteFolder}
+              canManageAllFolders={isChannelAdmin}
               isCreatingCanvas={isCreatingCanvas}
               showStarredOnly={showStarredOnly}
               onToggleStar={handleToggleStar}
               onArchiveToggle={handleArchiveToggleCanvas}
+              onMoveCanvas={handleMoveCanvas}
+              moveDisabled={isChannelArchived}
             />
           </div>
         </div>
@@ -1027,6 +1120,20 @@ const CanvasTab: React.FC<CanvasTabProps> = ({ channelId }): ReactElement => {
             </div>
           </div>
         </Dialog>
+        <Dialog
+          open={!!deletingFolder}
+          onOpenChange={open => {
+            if (!open) setDeletingFolder(null);
+          }}
+          title='Delete Folder'
+        >
+          <CanvasDeleteModal
+            onClose={() => setDeletingFolder(null)}
+            onConfirm={handleConfirmDeleteFolder}
+            entityType='folder'
+            itemTitle={deletingFolder?.name}
+          />
+        </Dialog>
       </>
     );
   }
@@ -1053,65 +1160,8 @@ const CanvasTab: React.FC<CanvasTabProps> = ({ channelId }): ReactElement => {
         minute: '2-digit',
       })
     : null;
-  const shouldFocusCanvasTitleOnMount = Boolean(
-    canvas?.id && titleAutoFocusCanvasIdRef.current === canvas.id && !previewVersion,
-  );
-  const canvasTitleHeader = canvas?.id ? (
-    <div className='canvas-editor-title-column pb-6 pt-0 md:pt-2'>
-      <CanvasEditorHeader
-        canvas={canvas}
-        workspaceId={user?.workspaceId}
-        canEdit={canEdit && !isChannelArchived && !previewVersion}
-        title={currentTitle}
-        focusTitleOnMount={shouldFocusCanvasTitleOnMount}
-        onTitleChange={handleCanvasTitleChange}
-        onTitleSave={handleTitleSave}
-        onTitleAutoFocused={handleTitleAutoFocused}
-      />
-    </div>
-  ) : null;
-
-  const renderCanvasPageTitle = (editable: boolean): ReactElement => (
-    <div className='canvas-page-title-header mx-auto w-full max-w-[900px] px-6 pb-3 pt-8 md:px-14 lg:px-20'>
-      <div className='flex min-w-0 items-center gap-2'>
-        <SectionEmojiPicker
-          value={currentTitleIcon}
-          disabled={!editable}
-          onChange={handleTitleIconChange}
-          trackCategory='CANVAS'
-          trackName='OPEN_CANVAS_TITLE_ICON_PICKER'
-          ariaLabel={currentTitleIcon ? 'Change canvas icon' : 'Add canvas icon'}
-          triggerClassName='size-10'
-          iconClassName='text-2xl md:text-[28px]'
-          fallbackIcon={<Plus className='size-4' />}
-          allowCustomEmojis={false}
-        />
-        <h1 className='min-w-0 flex-1'>
-          <Input
-            type='text'
-            aria-label='Canvas page title'
-            value={currentTitle}
-            onChange={event => {
-              const newTitle = event.target.value;
-              setCurrentTitle(newTitle);
-              titleRef.current = newTitle;
-            }}
-            readOnly={!editable}
-            onBlur={handleTitleSave}
-            className={cn(
-              'h-auto min-w-0 border-none bg-transparent px-0 py-0 text-3xl font-bold leading-tight text-foreground shadow-none placeholder:text-muted-foreground/80 focus:ring-0 focus-visible:border-none focus-visible:ring-0 md:text-[40px] md:leading-[48px]',
-              !editable && 'cursor-default',
-            )}
-            placeholder='Add page title'
-            data-testid='canvas-page-title-input'
-            data-track-category='CANVAS'
-            data-track-name='EDIT_CANVAS_PAGE_TITLE'
-            data-track-metadata={JSON.stringify({ canvasId: canvas?.id, channelId })}
-          />
-        </h1>
-      </div>
-    </div>
-  );
+  // No title above the document — see the note in CanvasScreen.
+  const canvasTitleHeader = null;
 
   return (
     <div className='relative flex h-full bg-background'>
@@ -1129,9 +1179,6 @@ const CanvasTab: React.FC<CanvasTabProps> = ({ channelId }): ReactElement => {
           >
             <ArrowLeft size={16} />
           </Button>
-          {currentTitleIcon && (
-            <span className='shrink-0 text-sm leading-none'>{currentTitleIcon}</span>
-          )}
           <Input
             type='text'
             value={currentTitle}
@@ -1181,22 +1228,26 @@ const CanvasTab: React.FC<CanvasTabProps> = ({ channelId }): ReactElement => {
           {/* Share Button */}
           {canvas?.id && (
             <div className='ml-2 flex items-center gap-2'>
-              {recordingCallId && (
+              {canvasCallId && (
                 <Button
                   variant='secondary'
                   size='iconSm'
                   onClick={handleOpenRecordingNotes}
-                  title='Open recording notes'
-                  aria-label='Open recording notes'
+                  title={canvasIsRecording ? 'Open recording notes' : 'Open call notes'}
+                  aria-label={canvasIsRecording ? 'Open recording notes' : 'Open call notes'}
                   data-track-category='CANVAS'
                   data-track-name='Open_Recording_Notes_From_Channel_Canvas'
                   data-track-metadata={JSON.stringify({
                     canvasId: canvas.id,
-                    recordingId: recordingCallId,
+                    recordingId: canvasIsRecording ? canvasCallId : null,
                     channelId,
                   })}
                 >
-                  <AudioLines size={16} strokeWidth={2.2} />
+                  {canvasIsRecording ? (
+                    <AudioLines size={16} strokeWidth={2.2} />
+                  ) : (
+                    <PhoneCall size={16} strokeWidth={2.2} />
+                  )}
                 </Button>
               )}
               <Button
@@ -1320,8 +1371,6 @@ const CanvasTab: React.FC<CanvasTabProps> = ({ channelId }): ReactElement => {
           <CanvasVersionDiffPanel parts={versionDiffParts} className='mx-2 mb-2 md:mx-4' />
         )}
 
-        {canvas && renderCanvasPageTitle(canEdit && !previewVersion)}
-
         {/* Canvas Editor */}
         <div
           ref={canvasContentRef}
@@ -1354,7 +1403,7 @@ const CanvasTab: React.FC<CanvasTabProps> = ({ channelId }): ReactElement => {
                 onFileUpload={handleFileUpload}
                 onChange={handleCollaborativeContentChange}
                 onOpenCommentCountChange={setOpenCommentCount}
-                autoFocus={!shouldFocusCanvasTitleOnMount}
+                autoFocus
                 header={canvasTitleHeader}
               />
             ) : (
@@ -1370,7 +1419,7 @@ const CanvasTab: React.FC<CanvasTabProps> = ({ channelId }): ReactElement => {
                 canvasId={canvas?.id}
                 canvasTitle={currentTitle}
                 onOpenCommentCountChange={setOpenCommentCount}
-                autoFocus={!shouldFocusCanvasTitleOnMount}
+                autoFocus
                 header={canvasTitleHeader}
               />
             )}

@@ -1,6 +1,6 @@
 import { logger } from '@/utils/logger';
 import { db } from '@/database/client';
-import { runAsServiceActor } from '@/database/tenant/context';
+import { createAutomationExecutionForEvent, ticketScopeForAutomationEvent } from '@/bypassAcl/automationServices';
 import { currentUpstreamChain } from './automation-context-storage';
 import {
   AUTOMATION_WORKFLOW_TYPE,
@@ -9,7 +9,9 @@ import {
   parseAutomationMetadata,
   triggerTypeToEventType,
 } from '../types/workflow-adapter';
-import { AutomationStatus, AutomationRunStatus } from '../types/status';
+import { triggerRegistry } from '../triggers/trigger-registry';
+import type { TriggerType } from '../types/trigger-types';
+import { AutomationStatus } from '../types/status';
 import { automationQueue } from '../queue/automation.queue';
 import type { AutomationEvent } from '../types/automation-events';
 import { EMAIL_RECEIVED_EVENT } from '../triggers/email-received.trigger';
@@ -87,7 +89,7 @@ function isDefiniteScopeMismatch(
 }
 
 class EventRouter {
-  async emit(event: AutomationEvent, workspaceId: string): Promise<void> {
+  async emitToAutomations(event: AutomationEvent, workspaceId: string): Promise<void> {
     const { type: eventType, payload } = event;
     const chain = currentUpstreamChain();
 
@@ -121,41 +123,48 @@ class EventRouter {
       }
       try {
         const metadata = parseAutomationMetadata(workflow.metadata);
+
+        const triggerImpl = triggerRegistry.has(event.type as TriggerType)
+          ? triggerRegistry.get(event.type as TriggerType)
+          : null;
+        const triggerConfig = (parseAutomationConfig(workflow.context).trigger.config ?? {}) as Record<
+          string,
+          unknown
+        >;
+        const projected = triggerImpl?.projectPayload?.(
+          triggerConfig,
+          payload as unknown as Record<string, unknown>,
+        );
+        // null means the trigger doesn't want this event for this automation —
+        // skip before an execution row or queue job exists.
+        if (projected === null) continue;
+        // `_transient` never persists, projection or not: a registry miss must
+        // degrade to "no projection", never to writing transient data here.
+        const { _transient: _drop, ...data } = (projected ?? payload) as Record<string, unknown>;
         const initialContext = {
           automation: {
             id: workflow.id,
             workspaceId: workflow.workspaceId,
             createdById: metadata.createdById,
           },
-          trigger: { type: eventType, ...payload, data: payload },
+          trigger: { type: eventType, ...data, data },
           steps: {},
           __meta: { error: null, chain },
         };
 
-        const execution = await runAsServiceActor('automation', workspaceId,
-          () =>
-            db.$transaction(async tx => {
-              const created = await tx.workflowExecution.create({
-                data: {
-                  workflowId: workflow.id,
-                  workflowType: workflow.workflowType,
-                  status: AutomationRunStatus.PENDING,
-                  tag: 'root',
-                  workspaceId,
-                },
-              });
-              await tx.workflowExecutionState.create({
-                data: {
-                  workflowExecutionId: created.id,
-                  context: JSON.stringify(initialContext),
-                  workspaceId,
-                },
-              });
-              return created;
-            }),
-        );
+        const execution = await createAutomationExecutionForEvent({
+          workspaceId,
+          workflowId: workflow.id,
+          workflowType: workflow.workflowType,
+          initialContext,
+        });
 
-        await automationQueue.enqueueRun({ executionId: execution.id });
+        // Priority runs get put near the front of the queue. Normal runs pass no
+        // priority, so they just join the back of the line like always.
+        await automationQueue.enqueueRun(
+          { executionId: execution.id },
+          metadata.priority ? { priority: 1 } : {},
+        );
         enqueued += 1;
       } catch (err) {
         logger.error(
@@ -202,14 +211,7 @@ class EventRouter {
       const ticketId = payload['ticketId'];
       if (typeof ticketId !== 'string' || !ticketId) return skip;
       // Same tenant scope the worker hydrates under, so both see the same rows.
-      const ticket = await runAsServiceActor('automation', workspaceId, () =>
-        db.ticket
-          .findUnique({
-            where: { id: ticketId },
-            select: { boardId: true, projectId: true, channelId: true },
-          })
-          .catch(() => null),
-      );
+      const ticket = await ticketScopeForAutomationEvent(workspaceId, ticketId);
       scope = eventScope(eventType, { ...payload, ticket: ticket ?? {} });
     }
     if (!scope) return skip;

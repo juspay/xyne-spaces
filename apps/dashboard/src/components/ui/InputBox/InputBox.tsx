@@ -52,6 +52,12 @@ import { AttachmentPreview } from '../files';
 import { useOverlayZIndex } from '../../../contexts/OverlayZIndexContext';
 import type { UploadedFile } from '../files/Files.types';
 import { FilePreviewModal } from '../../FileViewer/FileViewerModal';
+import {
+  convertHeicFileToPreviewBlob,
+  isHeicAttachment,
+  sniffHeicFile,
+  toWebpFilename,
+} from '../../../services/heicAttachmentService';
 import type { MentionResult } from '@xyne/shared';
 import { MentionExtension, mentionPluginKey } from '../TipTapExtensions';
 import { CommandsExtension, commandPluginKey } from '../TipTapExtensions';
@@ -122,6 +128,8 @@ type SendTrigger =
   | 'mobile_editor'
   | 'unknown';
 import { useChannel } from '../../../hooks/useChannels';
+import { extractCallLinkFromInviteText } from '../../../utils/callControls';
+import { parseCallInviteLink } from '../../Chat/RenderMessageWithHTML/internalLinkUtils';
 
 const lowlight = createLowlight(all);
 
@@ -286,6 +294,8 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
       bottomLeftSlot,
       disableDraftUpload = false,
       dockSlot,
+      headerSlot,
+      borderActivity,
       slashCommandArtifactCommand,
       slashCommandArtifactChannelLabel,
       onCancelSlashCommandArtifact,
@@ -305,6 +315,8 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
     const [isPreferencesOpen, setIsPreferencesOpen] = useState(false);
     const [selectedFile, setSelectedFile] = useState<File | UploadedFile | null>(null);
     const [isViewerOpen, setIsViewerOpen] = useState(false);
+    const [heicPreviewId, setHeicPreviewId] = useState<string | null>(null);
+    const [heicPreviewName, setHeicPreviewName] = useState('image.heic');
 
     const alsoSendToChannelLabel = isDMThread ? 'Send as direct message' : 'Send to channel';
 
@@ -751,11 +763,6 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
       ],
       content: value || '',
       editable: !isSending,
-      onCreate: ({ editor }) => {
-        const initialText = editor.getText().trim();
-        setContent(initialText.length > 0 ? 'has-content' : '');
-        updateEmojiSizeClass(editor);
-      },
       autofocus: autoFocus ? autoFocus : null,
       onFocus: () => {
         setIsFocused(true);
@@ -1042,6 +1049,21 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
             }
           }
 
+          // A copied call invite ("Copy link" / "Copy joining info") is written for email and
+          // calendars. In chat, keep only its link: the message then renders as the call card.
+          const inviteCallLink = extractCallLinkFromInviteText(
+            clipboard?.getData('text/plain') ?? '',
+          );
+          if (inviteCallLink && parseCallInviteLink(inviteCallLink)) {
+            event.preventDefault();
+            editor?.commands.insertContent({
+              type: 'text',
+              text: inviteCallLink,
+              marks: [{ type: 'link', attrs: { href: inviteCallLink } }],
+            });
+            return true;
+          }
+
           /** Handle File Pasting */
           const files = clipboard?.files ?? [];
           if (features.fileAttachments && files.length > 0) {
@@ -1207,6 +1229,14 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
         },
       },
     });
+
+    // What the editor starts with, read once it exists. It is made during the first
+    // render, so onCreate would set this state before the component had mounted.
+    useEffect(() => {
+      if (!editor) return;
+      setContent(editor.getText().trim().length > 0 ? 'has-content' : '');
+      updateEmojiSizeClass(editor);
+    }, [editor, updateEmojiSizeClass]);
 
     useEffect(() => {
       editor?.setEditable(!disabled && !isSending, false);
@@ -1531,7 +1561,48 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
       [providerRemoveDroppedFile, disableDraftUpload],
     );
 
-    const handlePreview = (file: File | UploadedFile): void => {
+    const handlePreview = async (
+      file: File | UploadedFile,
+      attachmentId?: string,
+    ): Promise<void> => {
+      // Local Files: the ftyp brand beats the browser's type/extension guess
+      // (a renamed .jpg can carry HEIC bytes). UploadedFiles have no local
+      // bytes, so they stay on metadata — which upload-time sniffing has
+      // already corrected server-side.
+      const sniffedHeic = file instanceof File ? await sniffHeicFile(file) : null;
+      const isHeic =
+        sniffedHeic ??
+        isHeicAttachment(
+          file instanceof File ? file.type : file.mimeType,
+          file instanceof File ? file.name : file.originalName,
+        );
+      if (isHeic) {
+        // Local HEIC File: convert client-side (cached from the chip's preview)
+        // and open the local-file viewer — works before the upload finishes.
+        if (file instanceof File) {
+          void convertHeicFileToPreviewBlob(file)
+            .then(blob => {
+              setSelectedFile(new File([blob], toWebpFilename(file.name), { type: 'image/webp' }));
+              setIsViewerOpen(true);
+            })
+            .catch(() => {
+              if (attachmentId) {
+                setHeicPreviewId(attachmentId);
+                setHeicPreviewName(file.name);
+                setIsViewerOpen(true);
+              }
+            });
+          return;
+        }
+        // UploadedFile HEIC (restored draft): server-backed viewer with its
+        // WebP rendition
+        if (attachmentId) {
+          setHeicPreviewId(attachmentId);
+          setHeicPreviewName(file.originalName);
+          setIsViewerOpen(true);
+          return;
+        }
+      }
       setSelectedFile(file);
       setIsViewerOpen(true);
     };
@@ -1539,6 +1610,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
     const handleCloseViewer = (): void => {
       setIsViewerOpen(false);
       setSelectedFile(null);
+      setHeicPreviewId(null);
     };
 
     // Convert channelItems to MentionResult format for the MentionSelector
@@ -1672,12 +1744,19 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
         {dockSlot}
 
         <div
-          className={isVoiceRecording ? 'xyne-voice-border-wrap' : undefined}
+          className={
+            isVoiceRecording
+              ? 'xyne-voice-border-wrap'
+              : borderActivity !== undefined && !isMobile
+                ? 'xyne-related-scan'
+                : undefined
+          }
+          data-active={borderActivity && !isVoiceRecording ? 'true' : undefined}
           style={isVoiceRecording && isMobile ? { borderRadius: '28px' } : undefined}
         >
           <div
             className={`
-            overflow-hidden transition-all flex flex-col relative
+            overflow-hidden transition flex flex-col relative
             ${isMobile ? 'bg-background rounded-[26px] text-foreground shadow-sm' : 'bg-background rounded-2xl border text-foreground shadow-none'}
             ${
               !isMobile && artifactComposerDefinition
@@ -1717,6 +1796,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
                 </button>
               </div>
             )}
+            {!isMobile && headerSlot}
             {/* VoiceInput — always mounted so ref works on mobile too; headless on mobile since MobileEditor has its own mic button */}
             {isMobile && !hideVoiceInput && (
               <VoiceInput
@@ -1779,7 +1859,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
                           key={`file-${attachmentId}-${index}`}
                           file={file}
                           onRemove={() => void handleRemoveAttachment({ attachmentId, file })}
-                          onPreview={() => handlePreview(file)}
+                          onPreview={() => void handlePreview(file, attachmentId)}
                           isUploading={false}
                         />
                       ))}
@@ -1855,7 +1935,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
                     key={attachmentId}
                     file={file}
                     onRemove={() => void handleRemoveAttachment({ attachmentId, file })}
-                    onPreview={() => handlePreview(file)}
+                    onPreview={() => void handlePreview(file, attachmentId)}
                     isUploading={false}
                   />
                 ))}
@@ -1870,7 +1950,18 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
             )}
 
             {/* Full-screen Viewer - Use MediaViewer for File objects, FilePreviewModal for UploadedFile */}
-            {selectedFile && (
+            {isViewerOpen && heicPreviewId && (
+              <FilePreviewModal
+                isOpen={isViewerOpen}
+                onClose={handleCloseViewer}
+                fileName={heicPreviewName}
+                fileUrl={`/attachments/${heicPreviewId}/download`}
+                mimeType='image/heic'
+                fileSize={0}
+                attachmentId={heicPreviewId}
+              />
+            )}
+            {selectedFile && !heicPreviewId && (
               <>
                 {selectedFile instanceof File ? (
                   <MediaViewer
@@ -1946,7 +2037,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
                         <DropdownMenuTrigger asChild>
                           <button
                             type='button'
-                            className='p-1.5 rounded hover:bg-accent transition-all duration-200 ease-in-out'
+                            className='p-1.5 rounded hover:bg-accent transition duration-200 ease-in-out'
                             aria-label='Add content'
                             disabled={disabled || isSending}
                           >
@@ -2036,7 +2127,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
                         }}
                         data-track-category='CHAT_INPUT'
                         data-track-name='INSERT_USER_MENTION'
-                        className='p-1.5 rounded hover:bg-accent transition-all duration-200 ease-in-out'
+                        className='p-1.5 rounded hover:bg-accent transition duration-200 ease-in-out'
                         aria-label='Mention user'
                         data-testid='mention-user-btn'
                         disabled={disabled || isSending}
@@ -2060,7 +2151,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
                         }}
                         data-track-category='CHAT_INPUT'
                         data-track-name='INSERT_CHANNEL_MENTION'
-                        className='p-1.5 rounded hover:bg-accent transition-all duration-200 ease-in-out'
+                        className='p-1.5 rounded hover:bg-accent transition duration-200 ease-in-out'
                         aria-label='Mention channel'
                         disabled={disabled || isSending}
                       >
@@ -2149,7 +2240,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
                     <div className='relative flex items-center'>
                       {onCreateTicket ? (
                         <div
-                          className={`flex items-stretch rounded-md overflow-hidden transition-all duration-200 ease-in-out ${
+                          className={`flex items-stretch rounded-md overflow-hidden transition duration-200 ease-in-out ${
                             hasSendableContent && !sendDisabled
                               ? artifactComposerDefinition
                                 ? 'bg-orange-500 text-white'
@@ -2236,7 +2327,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
                       ) : onScheduleSend ? (
                         // No ticket creation but schedule send is available — split button
                         <div
-                          className={`flex items-stretch rounded-md overflow-hidden transition-all duration-200 ease-in-out ${
+                          className={`flex items-stretch rounded-md overflow-hidden transition duration-200 ease-in-out ${
                             hasSendableContent
                               ? artifactComposerDefinition
                                 ? 'bg-orange-500 text-white'

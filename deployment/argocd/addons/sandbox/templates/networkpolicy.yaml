@@ -1,0 +1,65 @@
+{{- if .Values.policy.enabled }}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: sandbox-workspaces
+  namespace: {{ .Values.namespace }}
+  labels:
+    {{- include "sandbox.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchExpressions:
+      - key: agents.x-k8s.io/sandbox-template-ref-hash
+        operator: Exists
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app: {{ .Values.router.name }}
+        - podSelector:
+            matchLabels:
+              app: {{ .Values.claw.name }}
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ .Values.policy.dns.namespace }}
+          podSelector:
+            matchLabels:
+              {{- toYaml .Values.policy.dns.podSelector | nindent 14 }}
+        {{- range .Values.policy.dns.cidrs }}
+        - ipBlock:
+            cidr: {{ . }}
+        {{- end }}
+      ports:
+        - port: 53
+          protocol: UDP
+        - port: 53
+          protocol: TCP
+    - to:
+        - podSelector:
+            matchLabels:
+              app: {{ .Values.egressProxy.name }}
+      ports:
+        - port: {{ .Values.egressProxy.port }}
+          protocol: TCP
+    {{- range .Values.policy.allowedEgress }}
+    - to:
+        - ipBlock:
+            cidr: {{ .cidr }}
+            {{- with .except }}
+            except:
+              {{- toYaml . | nindent 14 }}
+            {{- end }}
+      {{- with .ports }}
+      ports:
+        {{- range . }}
+        - port: {{ .port }}
+          protocol: {{ .protocol | default "TCP" }}
+        {{- end }}
+      {{- end }}
+    {{- end }}
+{{- end }}

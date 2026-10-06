@@ -624,7 +624,7 @@ router.post("/:sessionId/share", async (req: Request<{ sessionId: string }>, res
     const result = truncateForShare(run.result ?? "(Session completed with no result.)", 4_000, "Result truncated for sharing");
     const originalTask = truncateForShare(run.task, 500, "Original task truncated");
     const markdownText = [
-      `↪️ Continuing a session started offline with ${agent.name}`,
+      `Continuing a session started offline with ${agent.name}`,
       result,
       quoteMarkdown(`Original task\n${originalTask}`),
     ].join("\n\n");

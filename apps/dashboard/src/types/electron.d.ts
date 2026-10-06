@@ -56,7 +56,10 @@ export interface ElectronAPI {
   onBrowserFindInPage: (callback: () => void) => () => void;
   onNavigateToTicketThread: (callback: (data: { ticketId: string }) => void) => () => void;
   onAppWindowLimitReached: (callback: (limit: number) => void) => () => void;
-  onOpenInBrowserPanel: (callback: (url: string) => void) => () => void;
+  focusHostWebContents?: () => Promise<void>;
+  onOpenInBrowserPanel: (
+    callback: (url: string, sourceWebContentsId?: number) => void,
+  ) => () => void;
   // Optional: absent on Electron builds older than the one that added it.
   onLinkOpenedExternal?: (callback: (url: string) => void) => () => void;
   onReloadActiveBrowserTab: (callback: () => void) => () => void;
@@ -70,7 +73,7 @@ export interface ElectronAPI {
     }) => void,
   ) => () => void;
   onAuthSuccess: (callback: () => void) => void;
-  onTokenExpired: (callback: () => void) => void;
+  onTokenExpired: (callback: (payload?: { url?: string; resourceType?: string }) => void) => void;
   showBrowserView: (config: {
     url: string;
     userAgent: string;
@@ -94,6 +97,17 @@ export interface ElectronAPI {
     settings: Partial<{ popups: boolean; openLinksExternally: boolean }>,
   ) => Promise<{ popups: boolean; openLinksExternally: boolean }>;
   clearSiteData: () => Promise<{ success: boolean }>;
+  captureAppWindow?: (maxWidth?: number) => Promise<{ data: string }>;
+  readClipboardText?: () => Promise<string>;
+  writeClipboardText?: (text: string) => Promise<{ success: boolean }>;
+  browserImportAvailable?: () => Promise<{ available: boolean }>;
+  importChromeCookies?: () => Promise<{
+    success: boolean;
+    imported?: number;
+    skipped?: number;
+    hosts?: number;
+    error?: string;
+  }>;
   exportCanvasMarkdown?: (
     fileName: string,
     content: string,
@@ -105,6 +119,7 @@ export interface ElectronAPI {
   onWindowModeChanged: (callback: (data: { compact: boolean }) => void) => () => void;
   onRecordingSystemSuspend: (callback: () => void) => () => void;
   onRecordingStopForTeardown?: (callback: () => void) => () => void;
+  onCallStopForTeardown?: (callback: () => void) => () => void;
   onRecordingResumeRequest?: (callback: () => void) => () => void;
   onRecordingPauseRequest?: (callback: () => void) => () => void;
   onLog: (callback: (message: { data?: unknown[] }) => void) => () => void;
@@ -214,10 +229,21 @@ export interface ElectronAPI {
     detect: () => Promise<LocalHarnessInstallation[]>;
     connect: () => Promise<LocalHarnessStatus>;
     disconnect: () => Promise<LocalHarnessStatus>;
+    connectComputer?: () => Promise<LocalHarnessStatus>;
+    disconnectComputer?: () => Promise<LocalHarnessStatus>;
     setProviderEnabled: (
       provider: LocalHarnessInstallation['provider'],
       enabled: boolean,
     ) => Promise<LocalHarnessStatus>;
+    pickFolder?: () => Promise<LocalHarnessFolder | null>;
+    listFolders?: () => Promise<Array<{ path: string; name: string }>>;
+    onPageToolRequest?: (
+      listener: (req: { id: string; toolName: string; args: Record<string, unknown> }) => void,
+    ) => () => void;
+    sendPageToolResult?: (
+      id: string,
+      result: { ok: boolean; content: string; image?: { data: string; mimeType: string } },
+    ) => void;
   };
   saveErrorReportFile?(
     fileName: string,
@@ -230,6 +256,13 @@ export interface ElectronAPI {
   readErrorReportRecordingFile?(recordingToken: string): Promise<ArrayBuffer>;
   cleanupErrorReportRecording?(filePath: string): Promise<void>;
   onErrorReportRecordingProgress?(callback: (data: { elapsedSeconds: number }) => void): () => void;
+}
+
+export interface LocalHarnessFolder {
+  path: string;
+  name: string;
+  branch?: string;
+  remote?: string;
 }
 
 export interface LocalHarnessInstallation {
@@ -249,6 +282,33 @@ export interface LocalHarnessStatus {
   platform: string;
   installations: LocalHarnessInstallation[];
   lastError: string | null;
+  containerRuntime?: { available: boolean; reason?: string };
+  computerConnected?: boolean;
+}
+
+export interface ElectronWebviewElement extends HTMLElement {
+  src: string;
+  loadURL(url: string): Promise<void> | void;
+  getURL(): string;
+  getTitle(): string;
+  reload(): void;
+  stop(): void;
+  focus(): void;
+  copy(): void;
+  getWebContentsId?: () => number;
+  isLoading(): boolean;
+  executeJavaScript(code: string, userGesture?: boolean): Promise<unknown>;
+  sendInputEvent(event: Record<string, unknown>): Promise<void> | void;
+  capturePage(): Promise<{
+    toDataURL(): string;
+    toPNG(): Uint8Array;
+    getSize(): { width: number; height: number };
+    resize(options: { width?: number; height?: number }): {
+      toDataURL(): string;
+      getSize(): { width: number; height: number };
+    };
+  }>;
+  setZoomFactor?: (factor: number) => void;
 }
 
 declare global {

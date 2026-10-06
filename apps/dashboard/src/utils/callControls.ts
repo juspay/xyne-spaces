@@ -30,6 +30,38 @@ interface AiButtonActionParams {
   onToggleAIAssistant: () => void;
 }
 
+export interface AiControlState {
+  /** The local user currently controls the agent. */
+  isController: boolean;
+  /** Someone else controls the agent. */
+  isControlledByOther: boolean;
+  /** Another participant is waiting for control. */
+  hasPendingRequestFromOther: boolean;
+  /** The local user is the one waiting for control. */
+  isRequestingUser: boolean;
+}
+
+/** Who owns Xyne Automatic, from the local user's point of view. */
+export function getAiControlState({
+  localParticipantId,
+  aiController,
+  pendingControlRequest,
+}: {
+  localParticipantId: string | null;
+  aiController: AiControllerLike | null;
+  pendingControlRequest: PendingControlRequestLike | null;
+}): AiControlState {
+  const isController = !!localParticipantId && localParticipantId === aiController?.id;
+  return {
+    isController,
+    isControlledByOther: !!aiController && !isController,
+    hasPendingRequestFromOther:
+      !!pendingControlRequest && pendingControlRequest.requesterId !== localParticipantId,
+    isRequestingUser:
+      !!pendingControlRequest && pendingControlRequest.requesterId === localParticipantId,
+  };
+}
+
 export function getAiButtonDisabled({
   hasPendingRequestFromOther,
   isRequestingUser,
@@ -149,6 +181,17 @@ export function buildCallInviteText({
     `Video call link: ${roomLink}`,
   ];
   return lines.join('\n');
+}
+
+/**
+ * The call link inside a pasted buildCallInviteText block, or null when the text is not one.
+ * Keyed on the "Xyne Call joining info" heading plus the "Video call link:" line, so an
+ * ordinary paste that merely mentions a link is left alone.
+ */
+export function extractCallLinkFromInviteText(text: string): string | null {
+  if (!text.includes('Xyne Call joining info')) return null;
+  const match = /^Video call link:\s*(\S+)\s*$/m.exec(text);
+  return match?.[1] ?? null;
 }
 
 export function handleAiButtonClick({

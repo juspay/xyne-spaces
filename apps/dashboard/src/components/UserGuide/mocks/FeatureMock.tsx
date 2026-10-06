@@ -19,8 +19,6 @@ import {
   Megaphone,
   MessageCircle,
   Mic,
-  Phone,
-  PieChart,
   Search,
   Settings,
   Sparkles,
@@ -28,6 +26,7 @@ import {
   User,
 } from 'lucide-react';
 import { MockFrame } from './MockFrame';
+import { PhoneDefault } from '@xyne/icons';
 
 /* ─────────────────────────────────────────────────────────────────────────── */
 /*  Shared primitives — actual Xyne Spaces design tokens                       */
@@ -85,9 +84,8 @@ export const TBadge = ({ label }: { label: string }): ReactElement => {
 export const IconRail = ({ active }: { active: string }): ReactElement => {
   const items: Array<{ key: string; icon: ReactElement }> = [
     { key: 'chat', icon: <Inbox size={13} /> },
-    { key: 'calls', icon: <Phone size={13} /> },
+    { key: 'calls', icon: <PhoneDefault size={13} /> },
     { key: 'tickets', icon: <Ticket size={13} /> },
-    { key: 'insights', icon: <PieChart size={13} /> },
     { key: 'analytics', icon: <BarChart2 size={13} /> },
     { key: 'ai', icon: <Brain size={13} /> },
   ];
@@ -528,7 +526,7 @@ export const FeatureMock = ({ visualKey, title }: FeatureMockProps): ReactElemen
                   <div
                     className={`h-7 w-7 rounded-md flex items-center justify-center shrink-0 ${c.live ? 'bg-[#57ab02]/10 text-[#57ab02]' : 'bg-muted text-muted-foreground'}`}
                   >
-                    <Phone size={12} />
+                    <PhoneDefault size={12} />
                   </div>
                   <div className='flex-1 min-w-0'>
                     <p className='text-[10px] font-medium text-foreground'>{c.title}</p>
@@ -1133,30 +1131,6 @@ export const FeatureMock = ({ visualKey, title }: FeatureMockProps): ReactElemen
         </MockFrame>
       );
 
-    case 'memory':
-      return (
-        <MockFrame title={title}>
-          <Shell railActive='ai'>
-            <ScreenHeader title='Context Memory' />
-            <div className='flex-1 p-2 space-y-1.5 overflow-hidden'>
-              {[
-                {
-                  title: 'Platform migration decision',
-                  note: 'Postgres over MySQL decided Apr 2025',
-                },
-                { title: 'On-call rotation', note: 'Alice leads P0 response; Bob as backup' },
-                { title: 'Release cadence', note: 'Deploys every Tue & Thu at 14:00 UTC' },
-              ].map((m, i) => (
-                <div key={i} className='rounded-lg border border-border/60 p-2 space-y-0.5'>
-                  <p className='text-[10px] font-medium text-foreground'>{m.title}</p>
-                  <p className='text-[9px] text-muted-foreground leading-relaxed'>{m.note}</p>
-                </div>
-              ))}
-            </div>
-          </Shell>
-        </MockFrame>
-      );
-
     case 'ai-onboarding':
       return (
         <MockFrame title={title}>
@@ -1187,51 +1161,7 @@ export const FeatureMock = ({ visualKey, title }: FeatureMockProps): ReactElemen
         </MockFrame>
       );
 
-    /* GROUP G — Analytics & Insights ─────────────────────────────────────── */
-
-    case 'insights':
-      return (
-        <MockFrame title={title}>
-          <Shell railActive='insights'>
-            <ScreenHeader title='Product Insights' />
-            <div className='flex-1 p-2 space-y-2 overflow-hidden'>
-              <div className='grid grid-cols-3 gap-1.5'>
-                {[
-                  { label: 'Messages', value: '2,340', delta: '+12%', up: true },
-                  { label: 'Resolved', value: '87', delta: '+5%', up: true },
-                  { label: 'Call hrs', value: '14h', delta: '-2%', up: false },
-                ].map(m => (
-                  <div key={m.label} className='rounded-lg bg-muted/50 p-1.5 text-center'>
-                    <p className='text-[11px] font-semibold text-foreground'>{m.value}</p>
-                    <p className='text-[9px] text-muted-foreground'>{m.label}</p>
-                    <p
-                      className={`text-[9px] font-medium ${m.up ? 'text-[#57ab02]' : 'text-rose-500'}`}
-                    >
-                      {m.delta}
-                    </p>
-                  </div>
-                ))}
-              </div>
-              <div className='flex items-end gap-1 h-10'>
-                {[30, 55, 40, 70, 60, 80, 65].map((h, i) => (
-                  <div
-                    key={i}
-                    className='flex-1 rounded-t bg-[#57ab02]/25 min-h-[4px]'
-                    style={{ height: `${h}%` }}
-                  />
-                ))}
-              </div>
-              <div className='flex justify-between'>
-                {['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map(d => (
-                  <span key={d} className='text-[8px] text-muted-foreground'>
-                    {d}
-                  </span>
-                ))}
-              </div>
-            </div>
-          </Shell>
-        </MockFrame>
-      );
+    /* GROUP G — Analytics ──────────────────────────────────────────────── */
 
     case 'analytics':
       return (

@@ -7,7 +7,7 @@
  * in xyne-claw-shared. They mirror @xyne/shared/types/flowUI exactly.
  */
 
-import type { TwinDelivery, TwinReplyDestination } from "../types/twin-delivery.js";
+import { twinDeliveryParts, type TwinDelivery, type TwinReplyDestination } from "../types/twin-delivery.js";
 import type { UserQuestion } from "../tools/types.js";
 import { normalizeUnifiedPatch } from "./unified-patch.js";
 
@@ -33,6 +33,7 @@ type FlowComponentType =
   | 'agent'
   | 'agent_summary'
   | 'mcp_suggest'
+  | 'provider_suggest'
   | 'mcpConfigure'
   | 'pr'
   | 'user_question'
@@ -98,6 +99,12 @@ export interface FlowDefinition {
     history: string[];
     loadingComponentIds: string[];
   };
+}
+
+/** Stamp `data.spacesAppId` onto a flow (no-op when there is no app id) so card actions route back to the posting app. */
+export function withSpacesAppId<T extends { data?: Record<string, unknown> }>(flow: T, spacesAppId?: string | null): T {
+  if (!spacesAppId) return flow;
+  return { ...flow, data: { ...(flow.data ?? {}), spacesAppId } };
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -263,6 +270,8 @@ export class FlowBuilder {
       placeholder?: string;
       options: SelectOption[];
       required?: boolean;
+      /** true → multi-select; the submitted value is a string[] instead of a string */
+      multiple?: boolean;
       action?: FlowAction;
     },
   ): this {
@@ -486,8 +495,7 @@ export function buildTwinApprovalFlow(params: TwinApprovalFlowParams): FlowDefin
     agentSlug, dmChannelId, spacesBaseUrl,
   } = params;
 
-  const willReact = delivery.action === "react" || delivery.action === "react_and_reply";
-  const willReply = delivery.action === "reply" || delivery.action === "react_and_reply";
+  const { emoji: willReact, message: willReply } = twinDeliveryParts(delivery.action);
   const message = delivery.message ?? "";
   const dest = delivery.destination;
   const destLabel = twinDestinationLabel(dest, channelName, senderName);
@@ -1237,6 +1245,61 @@ export function buildChartFlow(chart: ChartArtifact): FlowDefinition {
       fallbackText: chart.caption?.trim()
         ? chart.caption.trim()
         : `${chart.type} chart · ${pointCount} point${pointCount === 1 ? '' : 's'}`,
+    })
+    .build();
+}
+
+export interface ProviderSuggestItem {
+  provider: string;
+  name: string;
+  description?: string;
+  connected?: boolean;
+  sharedName?: string;
+  connectMethod?: "oauth" | "device" | "api_key" | "none";
+}
+
+/**
+ * AI provider suggestions posted into a conversation. Same shape as the
+ * connector card, but the provider list is a fixed six defined in code rather
+ * than DB rows, so the server can answer "what do I have?" without the model.
+ */
+export function buildProviderSuggestFlow(context: {
+  providers: ProviderSuggestItem[];
+  title?: string;
+  reason?: string;
+  browseAll?: boolean;
+  totalCount?: number;
+  screenKey: string;
+  agentSlug?: string;
+  userId: string;
+  conversationId?: string;
+  channelId?: string;
+}): FlowDefinition {
+  return new FlowBuilder(`provider-suggest-${context.screenKey}`)
+    .addComponent({
+      id: "provider-suggest",
+      type: "provider_suggest",
+      props: {
+        ...(context.title ? { title: context.title } : {}),
+        ...(context.reason ? { reason: context.reason } : {}),
+        ...(context.browseAll ? { browseAll: true } : {}),
+        ...(context.totalCount !== undefined ? { totalCount: context.totalCount } : {}),
+        providers: context.providers.map((p) => ({
+          provider: p.provider,
+          name: p.name,
+          ...(p.description ? { description: p.description } : {}),
+          ...(p.connected !== undefined ? { connected: p.connected } : {}),
+          ...(p.sharedName ? { sharedName: p.sharedName } : {}),
+          ...(p.connectMethod ? { connectMethod: p.connectMethod } : {}),
+        })),
+      },
+    })
+    .setData({
+      actionType: "provider-suggest",
+      ...(context.agentSlug ? { agentSlug: context.agentSlug } : {}),
+      userId: context.userId,
+      ...(context.conversationId ? { conversationId: context.conversationId } : {}),
+      ...(context.channelId ? { channelId: context.channelId } : {}),
     })
     .build();
 }

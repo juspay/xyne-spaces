@@ -1,3 +1,5 @@
+import { pinRunJudgeBackend } from "./judge-backend.js";
+import { pinRunOptimizations, tierOptimizationDefaults } from "./optimizations.js";
 import {
   ensureActiveRun,
   finishActiveRun,
@@ -117,12 +119,9 @@ export interface InternalRunPayload {
   detached?: boolean;
   fastMode?: boolean;
   resumedFromHandoff?: boolean;
+  judgeBackend?: string;
+  optimizations?: unknown;
   memoryBankId?: string;
-  /** Digital Twin mention flow: real reply destinations the user can post in
-   *  (their accessible channels/threads), built by claw-auth from Spaces
-   *  memberships. Injected into the mandatory twin_deliver tool as a
-   *  provider-constrained enum so the model can't invent a channel id. */
-  twinDestinations?: import("xyne-claw-shared").TwinDestinationCandidate[];
   /** Digital Twin mention flow: who @mentioned the user, and the channel name.
    *  Fed into the twin_deliver mandate's who/where line in the SYSTEM prompt so
    *  the model knows who's asking and where — the thread history only carries a
@@ -215,8 +214,9 @@ export async function executeRunFromPayload(
     isRegenerate,
     fastMode,
     resumedFromHandoff,
+    judgeBackend,
+    optimizations,
     memoryBankId,
-    twinDestinations,
     senderName,
     channelName,
     mode,
@@ -236,6 +236,9 @@ export async function executeRunFromPayload(
   const experiment = normalizeExperimentContext(rawExperiment);
   const activeRun = ensureActiveRun(sessionId, payload);
   const state: RunExecutionState = hooks ? { hooks } : {};
+
+  pinRunJudgeBackend(judgeBackend);
+  pinRunOptimizations(optimizations, agentConfig?.["optimizations"], tierOptimizationDefaults(delegationMode));
 
   try {
     // Process in background
@@ -285,7 +288,6 @@ export async function executeRunFromPayload(
       fastMode,
       resumedFromHandoff,
       memoryBankId,
-      twinDestinations,
       senderName,
       channelName,
       effectiveMode,

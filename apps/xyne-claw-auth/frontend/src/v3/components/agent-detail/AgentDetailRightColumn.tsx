@@ -418,7 +418,12 @@ export function AgentDetailRightColumn({
             />
           )}
           {activeTab === "contributors" && (
-            <ContributorsTab agent={agent} userId={userId} permissions={permissions} />
+            <ContributorsTab
+              agent={agent}
+              userId={userId}
+              permissions={permissions}
+              onAgentUpdated={onAgentUpdated}
+            />
           )}
           {activeTab === "memory" && <MemoryTab agent={agent} canDelete={permissions.canEdit} />}
           {activeTab === "awakening" && (

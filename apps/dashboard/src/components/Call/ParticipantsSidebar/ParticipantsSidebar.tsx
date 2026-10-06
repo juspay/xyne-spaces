@@ -7,35 +7,45 @@ import {
   ChevronUp,
   ChevronDown,
   MicOff,
-  Mic,
   UserX,
   Check,
   XIcon,
   Hand,
+  Search,
+  MoreVertical,
+  ShieldCheck,
 } from 'lucide-react';
 import { useIsSpeaking } from '@livekit/components-react';
 import type { Participant } from 'livekit-client';
 import { roomActor, type ParticipantInfo } from '../../../machines/roomMachine';
 import { useUser } from '../../../hooks/useUsers';
 import { useAuth } from '../../../hooks/useAuth';
-import { InvitationResponse, type CallParticipantMetadata } from '@xyne/shared';
+import { InvitationResponse, RingStatus, type CallParticipantMetadata } from '@xyne/shared';
 import Avatar from '../../ui/Avatar/Avatar';
+import { Popover } from '../../ui/Popover/Popover';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '../../ui/dropdown-menu';
 
 import { InviteToCallModal } from '../CallModals/InviteToCallModal';
+import { AudioIndicator } from '../components/AudioIndicator';
+import {
+  HostControlsSection,
+  useActiveHostRestrictionCount,
+} from '../HostControlsSection/HostControlsSection';
+import { AgentCard, type AgentControls } from './AgentCard';
 import { callService } from '../../../services/Call/callService';
 import { getUserDisplayName, isUserDeactivated } from '../../../utils/userDisplayName';
 import { cn } from '../../../utils/classNames';
 import { logger, Event } from '../../../utils/logger';
+import { getRingStatusLabel, useIsBroadcastChannelCall } from '../ringStatus.utils';
 
-// Speaking indicator component (animated bars like Google Meet)
-function SpeakingIndicator(): React.ReactElement {
-  return (
-    <div className='flex items-center gap-[2px] h-4'>
-      <span className='w-[3px] h-2 bg-green-500 rounded-full animate-[speaking_0.5s_ease-in-out_infinite]' />
-      <span className='w-[3px] h-3 bg-green-500 rounded-full animate-[speaking_0.5s_ease-in-out_infinite_0.1s]' />
-      <span className='w-[3px] h-2 bg-green-500 rounded-full animate-[speaking_0.5s_ease-in-out_infinite_0.2s]' />
-    </div>
-  );
+function matchesSearch(name: string, query: string): boolean {
+  const q = query.trim().toLowerCase();
+  return !q || name.toLowerCase().includes(q);
 }
 
 interface ParticipantsSidebarProps {
@@ -55,6 +65,12 @@ interface ParticipantsSidebarProps {
   hideInvite?: boolean | undefined;
   /** Identities (userIds) of participants with hand raised */
   raisedHands?: string[] | undefined;
+  /** Lets the local user lower their own hand from the raised-hands queue */
+  onToggleHandRaise?: (() => void) | undefined;
+  /** Talk-back / control for Xyne Automatic; omit where it isn't offered */
+  agentControls?: AgentControls | undefined;
+  /** Host display name, for the "only the host can…" notes */
+  hostName?: string | null | undefined;
 }
 
 interface CallParticipant {
@@ -70,11 +86,14 @@ interface CallParticipant {
   metadata: unknown;
   displayName?: string | null | undefined;
   isExternal?: boolean | undefined;
+  ringStatus?: string | null | undefined;
 }
 
 interface ActiveCall {
   externalId: string;
   createdByUserId?: string;
+  channelId?: string | null;
+  callOrigin?: string | null;
   participants?: CallParticipant[];
 }
 
@@ -89,14 +108,15 @@ function isLiveKitExternalParticipant(participantInfo: ParticipantInfo): boolean
   }
 }
 
-function SpeakingStatus({
+function RowAudioStatus({
   livekitParticipant,
+  isMuted,
 }: {
   livekitParticipant: Participant | undefined;
+  isMuted: boolean;
 }): React.ReactElement | null {
   const isSpeaking = useIsSpeaking(livekitParticipant);
-  if (!isSpeaking) return null;
-  return <SpeakingIndicator />;
+  return <AudioIndicator isMuted={isMuted} isSpeaking={!isMuted && isSpeaking} />;
 }
 
 function SectionHeader({
@@ -106,21 +126,22 @@ function SectionHeader({
   onToggle,
 }: {
   title: string;
-  count: number;
+  count: number | string;
   isExpanded: boolean;
   onToggle: () => void;
 }): React.ReactElement {
   return (
     <button
       onClick={onToggle}
-      className='flex items-center justify-between w-full px-3 py-2.5 hover:bg-muted transition-colors'
+      className='flex w-full items-center justify-between px-4 py-3 text-left transition-colors hover:bg-muted/60'
+      aria-expanded={isExpanded}
       data-track-category='CALLS'
       data-track-name='Toggle_Participants_Section'
       data-track-metadata={JSON.stringify({ section: title, isExpanded: !isExpanded })}
     >
       <span className='text-sm font-medium text-foreground'>{title}</span>
-      <div className='flex items-center gap-4'>
-        <span className='text-sm text-muted-foreground'>{count}</span>
+      <div className='flex items-center gap-3'>
+        <span className='text-sm tabular-nums text-muted-foreground'>{count}</span>
         {isExpanded ? (
           <ChevronUp size={16} className='text-muted-foreground' />
         ) : (
@@ -144,6 +165,9 @@ interface ParticipantItemProps {
   removingParticipantId: string | null;
   onMuteParticipant: (participantUserId: string) => void | Promise<void>;
   onRemoveParticipant: (participantUserId: string, name: string) => void | Promise<void>;
+  searchQuery: string;
+  /** Channel broadcast calls never ring anyone, so invitees read "Invited". */
+  isBroadcastChannelCall: boolean;
 }
 
 // ParticipantItem component that uses useUser hook internally
@@ -160,7 +184,9 @@ function ParticipantItem({
   removingParticipantId,
   onMuteParticipant,
   onRemoveParticipant,
-}: ParticipantItemProps): React.ReactElement {
+  searchQuery,
+  isBroadcastChannelCall,
+}: ParticipantItemProps): React.ReactElement | null {
   const { response, userId, displayName } = participant;
   const wasRemovedByHost =
     (participant.metadata as CallParticipantMetadata | null)?.removedByHost === true;
@@ -196,127 +222,149 @@ function ParticipantItem({
   const fallbackInitial = participantName.charAt(0).toUpperCase();
 
   const isRaised = raisedHands.includes(userId);
+  const isSelf = !!currentUserId && userId === currentUserId;
+  const isHostRow = !!hostUserId && userId === hostUserId;
+
+  // Names resolve per row (some via a user lookup), so search filters here.
+  if (!matchesSearch(participantName, searchQuery)) {
+    return null;
+  }
+
+  const statusLine = wasRemovedByHost ? (
+    <span className='text-red-500'>Removed by host</span>
+  ) : response === InvitationResponse.LEFT ? (
+    'Left the call'
+  ) : response === InvitationResponse.INVITED ? (
+    // Neither external guests nor channel broadcast invitees are ever rung.
+    isExternal || isBroadcastChannelCall ? (
+      'Invited'
+    ) : (
+      <span className={participant.ringStatus === RingStatus.BUSY ? 'text-amber-600' : undefined}>
+        {getRingStatusLabel(participant.ringStatus)}
+      </span>
+    )
+  ) : response === InvitationResponse.MISSED ? (
+    'No answer'
+  ) : response === InvitationResponse.DECLINED ? (
+    <span className='text-red-500'>Declined</span>
+  ) : response === InvitationResponse.REQUESTED ? (
+    <span className='text-orange-500'>Requesting to join</span>
+  ) : isHostRow ? (
+    'Meeting host'
+  ) : null;
 
   return (
     <div
       className={cn(
-        'flex items-center gap-3 py-2 px-3 rounded-lg transition-colors',
-        isRaised ? 'bg-amber-50 ring-1 ring-amber-300' : 'hover:bg-muted',
+        'group/row flex items-center gap-3 px-4 py-2 transition-colors',
+        isRaised ? 'bg-amber-500/10' : 'hover:bg-muted/60',
       )}
     >
-      <div className='relative'>
-        {isExternal ? (
-          <div className='flex items-center justify-center w-5 h-5 bg-orange-400 text-white text-xs font-medium rounded-sm'>
-            {fallbackInitial}
-          </div>
-        ) : (
-          <Avatar userId={userId} size='sm' />
-        )}
-        {isInCall && (
-          <span className='absolute -bottom-0.5 -right-0.5 w-3 h-3 bg-green-500 rounded-full border-2 border-white' />
-        )}
-      </div>
-      <div className='flex-1 min-w-0'>
+      {isExternal ? (
+        <div className='flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full bg-orange-400 text-sm font-medium text-white'>
+          {fallbackInitial}
+        </div>
+      ) : (
+        <Avatar
+          userId={userId}
+          size='md'
+          rounded
+          showActiveStatus={false}
+          className='flex-shrink-0'
+        />
+      )}
+      <div className='min-w-0 flex-1'>
         <div className='flex items-center gap-1.5'>
           <p
-            className={`text-sm font-medium truncate ${isDeactivated ? 'text-muted-foreground' : 'text-foreground'}`}
+            className={cn(
+              'truncate text-sm font-medium',
+              isDeactivated || !isInCall ? 'text-muted-foreground' : 'text-foreground',
+            )}
           >
             {participantName}
+            {isSelf && <span className='font-normal text-muted-foreground'> (You)</span>}
           </p>
-          {hostUserId && userId === hostUserId && (
-            <span className='inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-blue-100 text-blue-700 shrink-0'>
-              Host
-            </span>
-          )}
           {isDeactivated && (
-            <span className='inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-muted text-muted-foreground shrink-0'>
+            <span className='inline-flex shrink-0 items-center rounded bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground'>
               Deactivated
             </span>
           )}
           {isExternal && (
-            <span className='inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-orange-100 text-orange-700 shrink-0'>
-              External
+            <span className='inline-flex shrink-0 items-center rounded bg-orange-500/15 px-1.5 py-0.5 text-[10px] font-medium text-orange-600 dark:text-orange-300'>
+              Guest
             </span>
           )}
         </div>
-        {wasRemovedByHost ? (
-          <p className='text-xs text-red-500'>Removed by host</p>
-        ) : (
-          <>
-            {response === InvitationResponse.LEFT && (
-              <p className='text-xs text-muted-foreground'>Left the call</p>
-            )}
-            {response === InvitationResponse.INVITED && (
-              <p className='text-xs text-yellow-600'>Invited</p>
-            )}
-            {response === InvitationResponse.DECLINED && (
-              <p className='text-xs text-red-500'>Declined</p>
-            )}
-            {response === InvitationResponse.REQUESTED && (
-              <p className='text-xs text-orange-500'>Requesting to join</p>
-            )}
-          </>
+        {statusLine && <p className='truncate text-xs text-muted-foreground'>{statusLine}</p>}
+      </div>
+
+      <div className='flex flex-shrink-0 items-center gap-1'>
+        {isRaised && (
+          <span
+            className='flex h-5 w-5 items-center justify-center rounded-full bg-amber-500 text-white'
+            title='Hand raised'
+          >
+            <Hand className='h-3 w-3' />
+          </span>
+        )}
+        {isInCall &&
+          (livekitParticipantObj ? (
+            <RowAudioStatus
+              livekitParticipant={livekitParticipantObj}
+              isMuted={!isMicrophoneEnabled}
+            />
+          ) : (
+            <AudioIndicator isMuted={!isMicrophoneEnabled} isSpeaking={false} />
+          ))}
+
+        {/* Host actions — tucked behind ⋮ like Meet, instead of always-on icons */}
+        {canMute && (
+          <DropdownMenu modal={false}>
+            <DropdownMenuTrigger asChild>
+              <button
+                type='button'
+                className='flex h-8 w-8 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-muted hover:text-foreground data-[state=open]:bg-muted'
+                aria-label={`More actions for ${participantName}`}
+                title='More actions'
+              >
+                {isMutingThis || isRemovingThis ? (
+                  <div className='h-4 w-4 animate-spin rounded-full border-2 border-muted-foreground border-t-transparent' />
+                ) : (
+                  <MoreVertical className='h-4 w-4' />
+                )}
+              </button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align='end' className='w-52'>
+              <DropdownMenuItem
+                onClick={() => void onMuteParticipant(userId)}
+                disabled={isMutingThis || !isMicrophoneEnabled}
+                className='cursor-pointer gap-2.5'
+                data-ph-capture-attribute-track-id='mute_participant'
+                data-track-category='CALLS'
+                data-track-name='MUTE_PARTICIPANT'
+                data-track-metadata={JSON.stringify({ callId, participantUserId: userId })}
+              >
+                <MicOff className='h-4 w-4' />
+                {!isMicrophoneEnabled ? `${participantName} is muted` : `Mute ${participantName}`}
+              </DropdownMenuItem>
+              {canRemove && (
+                <DropdownMenuItem
+                  onClick={() => void onRemoveParticipant(userId, participantName)}
+                  disabled={isRemovingThis}
+                  className='cursor-pointer gap-2.5 text-red-600 focus:text-red-600'
+                  data-ph-capture-attribute-track-id='remove_participant'
+                  data-track-category='CALLS'
+                  data-track-name='REMOVE_PARTICIPANT'
+                  data-track-metadata={JSON.stringify({ callId, participantUserId: userId })}
+                >
+                  <UserX className='h-4 w-4' />
+                  Remove from call
+                </DropdownMenuItem>
+              )}
+            </DropdownMenuContent>
+          </DropdownMenu>
         )}
       </div>
-      {/* Hand raise indicator */}
-      {isRaised && (
-        <div className='p-1.5 text-amber-500' title='Hand raised'>
-          <Hand size={16} className='fill-amber-400/30' />
-        </div>
-      )}
-      {/* Speaking indicator - only show when mic is enabled */}
-      {isInCall && livekitParticipantObj && isMicrophoneEnabled && (
-        <SpeakingStatus livekitParticipant={livekitParticipantObj} />
-      )}
-      {/* Mute status indicator (for non-host or when participant is muted) */}
-      {isInCall && !isMicrophoneEnabled && !canMute && (
-        <div className='p-1.5 text-red-500' title='Muted'>
-          <MicOff size={16} />
-        </div>
-      )}
-      {/* Mute/Unmute button - always visible for host */}
-      {canMute && (
-        <button
-          onClick={() => void onMuteParticipant(userId)}
-          disabled={isMutingThis || !isMicrophoneEnabled}
-          className={`p-1.5 rounded-md transition-colors disabled:cursor-not-allowed ${
-            !isMicrophoneEnabled
-              ? 'text-red-500 bg-red-50'
-              : 'hover:bg-secondary text-muted-foreground hover:text-foreground'
-          }`}
-          data-ph-capture-attribute-track-id='mute_participant'
-          data-track-category='CALLS'
-          data-track-name='MUTE_PARTICIPANT'
-          data-track-metadata={JSON.stringify({ callId, participantUserId: userId })}
-          title={!isMicrophoneEnabled ? `${participantName} is muted` : `Mute ${participantName}`}
-        >
-          {isMutingThis ? (
-            <div className='w-4 h-4 border-2 border-gray-400 border-t-transparent rounded-full animate-spin' />
-          ) : !isMicrophoneEnabled ? (
-            <MicOff size={16} />
-          ) : (
-            <Mic size={16} />
-          )}
-        </button>
-      )}
-      {canRemove && (
-        <button
-          onClick={() => void onRemoveParticipant(userId, participantName)}
-          disabled={isRemovingThis}
-          className='p-1.5 rounded-md transition-colors disabled:cursor-not-allowed text-muted-foreground hover:bg-red-50 hover:text-red-600'
-          data-ph-capture-attribute-track-id='remove_participant'
-          data-track-category='CALLS'
-          data-track-name='REMOVE_PARTICIPANT'
-          data-track-metadata={JSON.stringify({ callId, participantUserId: userId })}
-          title={`Remove ${participantName} from the call`}
-        >
-          {isRemovingThis ? (
-            <div className='w-4 h-4 border-2 border-gray-400 border-t-transparent rounded-full animate-spin' />
-          ) : (
-            <UserX size={16} />
-          )}
-        </button>
-      )}
     </div>
   );
 }
@@ -328,6 +376,7 @@ interface RequestedParticipantItemProps {
   rejectingId: string | null;
   onApprove: (participantId: string) => void;
   onReject: (participantId: string) => void;
+  searchQuery: string;
 }
 
 // Inner component for requested participants — looks up user name via useUser
@@ -338,14 +387,19 @@ function RequestedParticipantItem({
   rejectingId,
   onApprove,
   onReject,
-}: RequestedParticipantItemProps): React.ReactElement {
+  searchQuery,
+}: RequestedParticipantItemProps): React.ReactElement | null {
   const { userId, displayName, isExternal } = participant;
   const participantUser = useUser(!isExternal ? userId : '');
   const resolvedName = displayName || participantUser?.name || 'Guest';
   const initial = resolvedName.charAt(0).toUpperCase();
 
+  if (!matchesSearch(resolvedName, searchQuery)) {
+    return null;
+  }
+
   return (
-    <div className='flex items-center gap-3 py-2 px-3 hover:bg-orange-50/50 transition-colors'>
+    <div className='flex items-center gap-3 px-4 py-2 transition-colors hover:bg-muted/60'>
       <div className='relative'>
         <div className='flex items-center justify-center w-8 h-8 bg-orange-400 text-white text-xs font-semibold rounded-full'>
           {initial}
@@ -355,19 +409,19 @@ function RequestedParticipantItem({
         <div className='flex items-center gap-1.5'>
           <p className='text-sm font-medium text-foreground truncate'>{resolvedName}</p>
           {isExternal && (
-            <span className='inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-orange-100 text-orange-700 shrink-0'>
-              External
+            <span className='inline-flex shrink-0 items-center rounded bg-orange-500/15 px-1.5 py-0.5 text-[10px] font-medium text-orange-600 dark:text-orange-300'>
+              Guest
             </span>
           )}
         </div>
-        <p className='text-xs text-orange-500'>Requesting to join</p>
+        <p className='text-xs text-muted-foreground'>Wants to join</p>
       </div>
       {canActOnRequest && (
         <div className='flex items-center gap-1.5 shrink-0'>
           <button
             onClick={() => onApprove(participant.id)}
             disabled={approvingId === participant.id}
-            className='inline-flex items-center justify-center w-7 h-7 rounded-md bg-green-600 text-white hover:bg-green-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed'
+            className='inline-flex h-8 items-center justify-center gap-1 rounded-full bg-[#0b57d0] px-3 text-xs font-medium text-white transition-colors hover:bg-[#0a4ebb] disabled:cursor-not-allowed disabled:opacity-50'
             title='Admit'
             data-ph-capture-attribute-track-id='approve_lobby_request'
             data-track-category='CALLS'
@@ -376,13 +430,17 @@ function RequestedParticipantItem({
             {approvingId === participant.id ? (
               <div className='w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin' />
             ) : (
-              <Check size={14} />
+              <>
+                <Check size={14} />
+                Admit
+              </>
             )}
           </button>
           <button
             onClick={() => onReject(participant.id)}
             disabled={rejectingId === participant.id}
-            className='inline-flex items-center justify-center w-7 h-7 rounded-md bg-gray-200 text-gray-700 hover:bg-gray-300 transition-colors disabled:opacity-50 disabled:cursor-not-allowed'
+            className='inline-flex h-8 w-8 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50'
+            aria-label='Decline'
             title='Decline'
             data-ph-capture-attribute-track-id='reject_lobby_request'
             data-track-category='CALLS'
@@ -410,11 +468,17 @@ export function ParticipantsSidebar({
   onRejectLobbyRequest,
   hideInvite,
   raisedHands = [],
+  onToggleHandRaise,
+  agentControls,
+  hostName,
 }: ParticipantsSidebarProps): React.ReactElement {
   const [showInviteModal, setShowInviteModal] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
   const [isAttendeesExpanded, setIsAttendeesExpanded] = useState(true);
   const [isAlsoInvitedExpanded, setIsAlsoInvitedExpanded] = useState(true);
   const [isRequestedExpanded, setIsRequestedExpanded] = useState(true);
+  const [isRaisedExpanded, setIsRaisedExpanded] = useState(true);
+  const activeRestrictionCount = useActiveHostRestrictionCount();
   const [isMuting, setIsMuting] = useState(false);
   const [mutingParticipantId, setMutingParticipantId] = useState<string | null>(null);
   const [removingParticipantId, setRemovingParticipantId] = useState<string | null>(null);
@@ -429,6 +493,11 @@ export function ParticipantsSidebar({
   const currentCall = useMemo(
     () => (activeCalls as ActiveCall[] | undefined)?.find(call => call.externalId === callId),
     [activeCalls, callId],
+  );
+
+  const isBroadcastChannelCall = useIsBroadcastChannelCall(
+    currentCall?.channelId,
+    currentCall?.callOrigin,
   );
 
   // Get LiveKit participants from room state (for speaking detection)
@@ -617,50 +686,88 @@ export function ParticipantsSidebar({
   const canActOnLobbyRequests =
     (isHost || isAttendee) && !!onApproveLobbyRequest && !!onRejectLobbyRequest;
 
+  const sectionCardClass = 'overflow-hidden rounded-xl border border-border';
+  const canMuteAll = isHost && contributors.length > 1;
+
+  // Meet-style queue: people with a hand up, in the order they raised it.
+  const raisedQueue = raisedHands
+    .map(identity => contributors.find(p => p.userId === identity))
+    .filter((p): p is CallParticipant => !!p);
+  const isOwnHandRaised = !!resolvedCurrentUserId && raisedHands.includes(resolvedCurrentUserId);
+
+  // Props every participant row shares, whichever section it's listed in.
+  const participantItemProps = {
+    isBroadcastChannelCall,
+    showMuteButton: isHost,
+    currentUserId: resolvedCurrentUserId,
+    callId,
+    hostUserId,
+    raisedHands,
+    livekitParticipantMap,
+    mutingParticipantId,
+    removingParticipantId,
+    onMuteParticipant: handleMuteParticipant,
+    onRemoveParticipant: handleRemoveParticipant,
+    searchQuery,
+  };
+
   return (
     <>
-      <div className='flex flex-col h-full bg-background text-foreground'>
+      <div className='flex h-full flex-col bg-background text-foreground'>
         {/* Header */}
-        <div className='flex items-center justify-between px-4 py-3 border-b border-border'>
-          <div className='flex items-center gap-2'>
-            <Users size={20} className='text-muted-foreground' />
-            <h2 className='text-lg font-semibold'>Participants</h2>
-          </div>
-          <div className='flex items-center gap-2'>
-            {isHost && contributors.length > 1 && (
-              <button
-                onClick={() => void handleMuteAll()}
-                disabled={isMuting}
-                className='flex items-center gap-2 px-3 py-1.5 rounded-lg bg-card hover:bg-accent text-foreground border border-border transition-colors disabled:opacity-50 disabled:cursor-not-allowed'
-                title='Mute all participants'
-                data-testid='mute-all-button'
-                data-ph-capture-attribute-track-id='mute_all_participants'
-                data-track-category='CALLS'
-                data-track-name='MUTE_ALL_PARTICIPANTS'
-                data-track-metadata={JSON.stringify({ callId })}
+        <div className='flex items-center justify-between py-3 pl-6 pr-3'>
+          <h2 className='text-lg font-medium'>People</h2>
+          <div className='flex items-center gap-1'>
+            {/* Host controls — a popover off the header, so it's one click away no
+                matter how long the list gets and never pushes the list down. */}
+            {isHost && (
+              <Popover
+                side='bottom'
+                align='end'
+                sideOffset={6}
+                collisionPadding={12}
+                className='z-[80] w-80 overflow-hidden rounded-2xl border border-border bg-background p-0 text-foreground shadow-2xl'
+                trigger={
+                  <button
+                    type='button'
+                    className={cn(
+                      'relative flex h-10 w-10 items-center justify-center rounded-full transition-colors hover:bg-muted data-[state=open]:bg-muted',
+                      activeRestrictionCount > 0
+                        ? 'text-[#0b57d0] dark:text-[#a8c7fa]'
+                        : 'text-muted-foreground',
+                    )}
+                    title='Host controls'
+                    aria-label={
+                      activeRestrictionCount > 0
+                        ? `Host controls — ${activeRestrictionCount} restricted`
+                        : 'Host controls'
+                    }
+                    data-testid='host-controls-button'
+                    data-track-event='BUTTON_CLICK'
+                    data-track-category='CALLS'
+                    data-track-name='TOGGLE_HOST_CONTROLS'
+                  >
+                    <ShieldCheck size={20} />
+                    {activeRestrictionCount > 0 && (
+                      <span className='absolute right-1.5 top-1.5 h-2 w-2 rounded-full bg-[#0b57d0] ring-2 ring-background dark:bg-[#a8c7fa]' />
+                    )}
+                  </button>
+                }
               >
-                <MicOff size={16} />
-                <span className='text-sm font-medium'>{isMuting ? 'Muting...' : 'Mute All'}</span>
-              </button>
-            )}
-            {!hideInvite && (
-              <button
-                onClick={() => setShowInviteModal(true)}
-                className='flex items-center gap-2 px-3 py-1.5 rounded-lg bg-background hover:bg-muted text-foreground border border-input transition-colors'
-                title='Add People'
-                data-testid='add-people-button'
-                data-track-category='CALLS'
-                data-track-name='ADD_PEOPLE_TO_CALL'
-                data-track-metadata={JSON.stringify({ callId })}
-              >
-                <UserPlus size={16} />
-                <span className='text-sm font-medium'>Add People</span>
-              </button>
+                <div data-testid='host-controls-section'>
+                  <div className='px-4 pb-1 pt-4'>
+                    <p className='text-sm font-medium'>Host controls</p>
+                  </div>
+                  <HostControlsSection callId={callId} />
+                </div>
+              </Popover>
             )}
             <button
+              type='button'
               onClick={onClose}
-              className='p-1 hover:bg-muted rounded-full transition-colors'
+              className='flex h-10 w-10 items-center justify-center rounded-full transition-colors hover:bg-muted'
               title='Close'
+              aria-label='Close people panel'
               data-track-category='CALLS'
               data-track-name='Close_Participants_Sidebar'
             >
@@ -669,22 +776,97 @@ export function ParticipantsSidebar({
           </div>
         </div>
 
+        <div className='space-y-3 px-4 pb-3'>
+          {/* Primary actions, side by side above search */}
+          {(!hideInvite || canMuteAll) && (
+            <div className='flex items-center gap-2'>
+              {!hideInvite && (
+                <button
+                  type='button'
+                  onClick={() => setShowInviteModal(true)}
+                  className='flex h-9 items-center gap-2 rounded-full bg-[#0b57d0] pl-3 pr-4 text-sm font-medium text-white transition-colors hover:bg-[#0a4ebb] dark:bg-[#a8c7fa] dark:text-[#062e6f] dark:hover:bg-[#bcd4fb]'
+                  title='Add people'
+                  data-testid='add-people-button'
+                  data-track-category='CALLS'
+                  data-track-name='ADD_PEOPLE_TO_CALL'
+                  data-track-metadata={JSON.stringify({ callId })}
+                >
+                  <UserPlus size={16} />
+                  Add people
+                </button>
+              )}
+              {canMuteAll && (
+                <button
+                  type='button'
+                  onClick={() => void handleMuteAll()}
+                  disabled={isMuting}
+                  className='flex h-9 items-center gap-2 rounded-full border border-border pl-3 pr-4 text-sm font-medium text-foreground transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50'
+                  title='Mute everyone except you'
+                  data-testid='mute-all-button'
+                  data-ph-capture-attribute-track-id='mute_all_participants'
+                  data-track-category='CALLS'
+                  data-track-name='MUTE_ALL_PARTICIPANTS'
+                  data-track-metadata={JSON.stringify({ callId })}
+                >
+                  <MicOff size={16} />
+                  {isMuting ? 'Muting…' : 'Mute all'}
+                </button>
+              )}
+            </div>
+          )}
+
+          <label className='flex items-center gap-2 rounded-lg border border-border px-3 py-2 focus-within:border-[#0b57d0] focus-within:ring-1 focus-within:ring-[#0b57d0] dark:focus-within:border-[#a8c7fa] dark:focus-within:ring-[#a8c7fa]'>
+            <Search size={18} className='flex-shrink-0 text-muted-foreground' />
+            <input
+              type='text'
+              value={searchQuery}
+              onChange={e => setSearchQuery(e.target.value)}
+              placeholder='Search for people'
+              aria-label='Search for people'
+              data-track-category='CALLS'
+              data-track-name='SEARCH_CALL_PARTICIPANTS'
+              className='min-w-0 flex-1 bg-transparent text-sm text-foreground outline-none placeholder:text-muted-foreground'
+            />
+            {searchQuery && (
+              <button
+                type='button'
+                onClick={() => setSearchQuery('')}
+                className='text-muted-foreground hover:text-foreground'
+                aria-label='Clear search'
+                data-track-category='CALLS'
+                data-track-name='CLEAR_CALL_PARTICIPANT_SEARCH'
+              >
+                <X size={16} />
+              </button>
+            )}
+          </label>
+        </div>
+
         {/* Participants List */}
-        <div className='flex-1 overflow-y-auto p-3 space-y-3'>
+        <div className='flex-1 space-y-3 overflow-y-auto px-4 pb-4' data-testid='participants-list'>
+          {!searchQuery && (
+            <AgentCard
+              callId={callId}
+              isHost={isHost}
+              hostName={hostName}
+              agentControls={agentControls}
+            />
+          )}
+
           {/* Requested Section — participants waiting for approval (host or any attendee) */}
           {canActOnLobbyRequests && requested.length > 0 && (
             <div
-              className='border border-orange-200 rounded-lg overflow-hidden bg-orange-50/30'
+              className='overflow-hidden rounded-xl border border-orange-500/30 bg-orange-500/5'
               data-testid='requested-section'
             >
               <SectionHeader
-                title='Requested'
+                title='Waiting to join'
                 count={requested.length}
                 isExpanded={isRequestedExpanded}
                 onToggle={() => setIsRequestedExpanded(!isRequestedExpanded)}
               />
               {isRequestedExpanded && (
-                <div className='border-t border-orange-200'>
+                <div className='pb-1'>
                   {requested.map(participant => (
                     <RequestedParticipantItem
                       key={participant.id}
@@ -694,6 +876,7 @@ export function ParticipantsSidebar({
                       rejectingId={rejectingId}
                       onApprove={handleApprove}
                       onReject={handleReject}
+                      searchQuery={searchQuery}
                     />
                   ))}
                 </div>
@@ -701,35 +884,67 @@ export function ParticipantsSidebar({
             </div>
           )}
 
-          {/* Attendees Section */}
-          {contributors.length > 0 && (
+          {/* Raised hands — Meet's queue, oldest first */}
+          {raisedQueue.length > 0 && (
             <div
-              className='border border-border rounded-lg overflow-hidden'
-              data-testid='attendees-section'
+              className='overflow-hidden rounded-xl border border-amber-500/30 bg-amber-500/5'
+              data-testid='raised-hands-section'
             >
               <SectionHeader
-                title='Attendees'
+                title='Raised hands'
+                count={raisedQueue.length}
+                isExpanded={isRaisedExpanded}
+                onToggle={() => setIsRaisedExpanded(!isRaisedExpanded)}
+              />
+              {isRaisedExpanded && (
+                <div className='pb-1'>
+                  {raisedQueue.map(participant => (
+                    <ParticipantItem
+                      key={`raised-${participant.id}`}
+                      participant={participant}
+                      isExternal={participant.isExternal ?? false}
+                      {...participantItemProps}
+                    />
+                  ))}
+                  {isOwnHandRaised && onToggleHandRaise && (
+                    <div className='px-4 pb-2 pt-1'>
+                      <button
+                        type='button'
+                        onClick={onToggleHandRaise}
+                        className='rounded-full border border-border px-3 py-1.5 text-xs font-medium transition-colors hover:bg-muted'
+                        data-track-category='CALLS'
+                        data-track-name='TOGGLE_HAND_RAISE'
+                        data-track-metadata={JSON.stringify({
+                          raised: false,
+                          source: 'people_panel',
+                        })}
+                      >
+                        Lower my hand
+                      </button>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Attendees Section */}
+          {contributors.length > 0 && (
+            <div className={sectionCardClass} data-testid='attendees-section'>
+              <SectionHeader
+                title='Contributors'
                 count={contributors.length}
                 isExpanded={isAttendeesExpanded}
                 onToggle={() => setIsAttendeesExpanded(!isAttendeesExpanded)}
               />
               {isAttendeesExpanded && (
-                <div className='border-t border-border'>
+                <div className='pb-1'>
                   {contributors.map(participant => (
                     <ParticipantItem
                       key={participant.id}
                       participant={participant}
-                      showMuteButton={isHost}
-                      currentUserId={resolvedCurrentUserId}
                       isExternal={participant.isExternal ?? false}
-                      callId={callId}
-                      hostUserId={hostUserId}
-                      raisedHands={raisedHands}
-                      livekitParticipantMap={livekitParticipantMap}
-                      mutingParticipantId={mutingParticipantId}
-                      removingParticipantId={removingParticipantId}
-                      onMuteParticipant={handleMuteParticipant}
-                      onRemoveParticipant={handleRemoveParticipant}
+                      {...participantItemProps}
                     />
                   ))}
                 </div>
@@ -739,10 +954,7 @@ export function ParticipantsSidebar({
 
           {/* Also Invited Section */}
           {alsoInvited.length > 0 && (
-            <div
-              className='border border-border rounded-lg overflow-hidden'
-              data-testid='invited-section'
-            >
+            <div className={sectionCardClass} data-testid='invited-section'>
               <SectionHeader
                 title='Also invited'
                 count={alsoInvited.length}
@@ -750,21 +962,13 @@ export function ParticipantsSidebar({
                 onToggle={() => setIsAlsoInvitedExpanded(!isAlsoInvitedExpanded)}
               />
               {isAlsoInvitedExpanded && (
-                <div className='border-t border-border'>
+                <div className='pb-1'>
                   {alsoInvited.map(participant => (
                     <ParticipantItem
                       key={participant.id}
                       participant={participant}
-                      currentUserId={resolvedCurrentUserId}
                       isExternal={participant.isExternal ?? false}
-                      callId={callId}
-                      hostUserId={hostUserId}
-                      raisedHands={raisedHands}
-                      livekitParticipantMap={livekitParticipantMap}
-                      mutingParticipantId={mutingParticipantId}
-                      removingParticipantId={removingParticipantId}
-                      onMuteParticipant={handleMuteParticipant}
-                      onRemoveParticipant={handleRemoveParticipant}
+                      {...participantItemProps}
                     />
                   ))}
                 </div>
@@ -777,7 +981,7 @@ export function ParticipantsSidebar({
             <div className='flex flex-col items-center justify-center py-12 text-muted-foreground'>
               <Users size={48} className='mb-3 opacity-50' />
               <p className='text-sm'>No participants yet</p>
-              <p className='text-xs mt-1'>Invite people to join this call</p>
+              <p className='mt-1 text-xs'>Invite people to join this call</p>
             </div>
           )}
         </div>

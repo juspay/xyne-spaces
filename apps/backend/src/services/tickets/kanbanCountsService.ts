@@ -13,13 +13,17 @@ export const TICKET_ENTITY_TYPE = 'TICKET';
 export const NO_VALUE_GROUP = 'No Value';
 export const UNASSIGNED_GROUP = 'Unassigned';
 export const ALL_TICKETS_GROUP = 'All Tickets';
+export const UNKNOWN_CREATOR_GROUP = 'Unknown';
+export const NO_MERCHANT_GROUP = 'No Merchant';
 
 type KanbanCountTicket = {
   id: string;
   stageName: string;
   assignedTo: string | null;
+  createdBy: string;
   statusV2: string;
   priority: string;
+  merchantId?: string | null;
 };
 
 type KanbanCountGroupedRow = {
@@ -27,7 +31,9 @@ type KanbanCountGroupedRow = {
   stageName?: string;
   statusV2?: string;
   assignedTo: string | null;
+  createdBy: string;
   priority: string;
+  merchantId?: string | null;
   _count: {
     _all: number;
   };
@@ -108,12 +114,13 @@ const matchesDynamicFilter = (
     const normalizedValues = getJsonValueStrings(value);
     if (normalizedValues.length === 0) return false;
 
-    if (filterValue.length === 1) {
-      const needle = filterValue[0].toLowerCase();
-      return normalizedValues.some(item => item.toLowerCase().includes(needle));
-    }
-
-    return normalizedValues.some(item => filterValue.includes(item));
+    // Whole-value match against any selected value, case-insensitive — the rule the column
+    // itself is fetched with. `formFields.fieldValue` is an uncased Vespa attribute, so its
+    // token match folds case and compares the entire value; the substring rule a lone value
+    // used to get counted tickets no column could list. Mirrors matchesDynamicFieldValue in
+    // the dashboard and matchesRequest in useKanbanCounts, which applies the live deltas.
+    const needles = new Set(filterValue.map(value => value.toLowerCase()));
+    return normalizedValues.some(item => needles.has(item.toLowerCase()));
   }
 
   const scalarValue = getScalarValue(value);
@@ -176,19 +183,37 @@ export const getFormFieldGroupKeys = (
   }
 
   const scalarValue = getScalarValue(actualValue);
-  const groupKey = scalarValue || NO_VALUE_GROUP;
-  return [{ groupKey, displayName: groupKey }];
+  if (!scalarValue) return [{ groupKey: NO_VALUE_GROUP, displayName: NO_VALUE_GROUP }];
+
+  if (groupBy.fieldType === FormFieldType.STRING) {
+    // One group per value regardless of spelling. A column's page is selected by a Vespa
+    // token, and `formFields.fieldValue` is an uncased attribute, so the page for "MID 1"
+    // and the page for "mid 1" return the same rows — as two groups each ticket would show
+    // up in both columns and neither badge would match what is listed under it.
+    // groupTicketsByFormField in the dashboard folds the key the same way; the name shown
+    // keeps the spelling of the first ticket counted into the group.
+    return [{ groupKey: scalarValue.toLowerCase(), displayName: scalarValue }];
+  }
+
+  return [{ groupKey: scalarValue, displayName: scalarValue }];
 };
 
 const getBuiltInGroupKey = (
   ticket: Pick<KanbanCountTicket, 'assignedTo'> & {
+    createdBy?: string;
     statusV2?: string;
     priority?: string;
+    merchantId?: string | null;
   },
   groupBy: Exclude<KanbanGroupBy, KanbanFormFieldGroup> | undefined,
 ): { groupKey: string; displayName: string } => {
   if (groupBy === 'assignee') {
     const groupKey = ticket.assignedTo ?? UNASSIGNED_GROUP;
+    return { groupKey, displayName: groupKey };
+  }
+
+  if (groupBy === 'createdBy') {
+    const groupKey = ticket.createdBy || UNKNOWN_CREATOR_GROUP;
     return { groupKey, displayName: groupKey };
   }
 
@@ -199,6 +224,11 @@ const getBuiltInGroupKey = (
 
   if (groupBy === 'priority') {
     const groupKey = ticket.priority ?? '';
+    return { groupKey, displayName: groupKey };
+  }
+
+  if (groupBy === 'merchantId') {
+    const groupKey = ticket.merchantId ?? NO_MERCHANT_GROUP;
     return { groupKey, displayName: groupKey };
   }
 
@@ -256,10 +286,12 @@ const addAggregateRowToGroup = (
 
 const getBuiltInGroupByFields = (
   groupBy: Exclude<KanbanGroupBy, KanbanFormFieldGroup> | undefined,
-): Array<'assignedTo' | 'statusV2' | 'priority'> => {
+): Array<'assignedTo' | 'createdBy' | 'statusV2' | 'priority' | 'merchantId'> => {
   if (groupBy === 'assignee') return ['assignedTo'];
+  if (groupBy === 'createdBy') return ['createdBy'];
   if (groupBy === 'status') return ['statusV2'];
   if (groupBy === 'priority') return ['priority'];
+  if (groupBy === 'merchantId') return ['merchantId'];
   return [];
 };
 
@@ -274,8 +306,12 @@ const getCountField = (columnType: KanbanCountColumnType): KanbanCountField =>
 
 export const getKanbanCounts = async (
   context: KanbanTicketQueryContext,
+  /** Narrows the tickets counted beyond what the context describes — one track's. */
+  scope?: Prisma.TicketWhereInput,
 ): Promise<KanbanCountsResponse> => {
-  const where = buildKanbanTicketWhere(context);
+  const where = scope
+    ? { AND: [buildKanbanTicketWhere(context), scope] }
+    : buildKanbanTicketWhere(context);
   const dynamicFieldIds = Object.keys(context.filters?.dynamicFields ?? {});
   const groupBy = context.groupBy ?? 'none';
   const countColumnType = getCountColumnType(context);
@@ -297,7 +333,7 @@ export const getKanbanCounts = async (
   if (!isFormFieldGroup(groupBy) && dynamicFieldIds.length === 0) {
     const groupFields = getBuiltInGroupByFields(groupBy);
     const aggregateGroupFields = [...new Set([...groupFields, countField])] as Array<
-      'assignedTo' | 'stageName' | 'statusV2' | 'priority'
+      'assignedTo' | 'createdBy' | 'stageName' | 'statusV2' | 'priority' | 'merchantId'
     >;
 
     logger.info('[KanbanCountsService] Executing aggregate counts query', {
@@ -318,8 +354,10 @@ export const getKanbanCounts = async (
       const group = getBuiltInGroupKey(
         {
           assignedTo: row.assignedTo,
+          createdBy: row.createdBy,
           statusV2: row.statusV2,
           priority: row.priority,
+          merchantId: row.merchantId,
         },
         groupBy,
       );
@@ -342,7 +380,7 @@ export const getKanbanCounts = async (
     ? []
     : getBuiltInGroupByFields(groupBy);
   const fallbackFields = [...new Set(['id', countField, ...fallbackGroupFields])] as Array<
-    'id' | 'assignedTo' | 'stageName' | 'statusV2' | 'priority'
+    'id' | 'assignedTo' | 'createdBy' | 'stageName' | 'statusV2' | 'priority' | 'merchantId'
   >;
 
   const tickets = (await db.ticket.groupBy({

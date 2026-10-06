@@ -93,7 +93,9 @@ export const highlightMentionNames = (text: string, names: string[]): string => 
   // Word-boundary anchored so a name matches only as a whole token ("Test" must not bold
   // inside "Testing"); the lookbehind also rejects a word char before the @/# sigil.
   const alternation = uniq.map(n => n.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|');
-  const re = new RegExp(`(?<![\\w@#])([@#]?(?:${alternation}))(?![\\w])`, 'gi');
+  // Boundaries exclude '-' too, so a hyphenated handle only matches as a whole token — e.g.
+  // `@rock-team` must not bold inside `@rock-team-1` (a different group).
+  const re = new RegExp(`(?<![\\w@#-])([@#]?(?:${alternation}))(?![\\w-])`, 'gi');
   return outsideHi(text, s => s.replace(re, '<hi>$1</hi>'));
 };
 

@@ -17,6 +17,13 @@ import { CONFIG, CLAUDE_OAUTH, claudeOAuthConfigured } from "../config.js";
 import { oauthLimiter } from "../middleware/rate-limiters.js";
 import { redisService } from "../redis.js";
 import { fetchAnthropicModels } from "./agents.js";
+import {
+  extractProviderMessage,
+  modelServedBy,
+  providerNeedsKey,
+  verifyProviderCredential,
+} from "../lib/provider-credential-verify.js";
+import { assertSafeOutboundUrl } from "../mcpgateway/services/http-client.js";
 import { createLogger } from "../logger.js";
 
 const log = createLogger("settings");
@@ -81,6 +88,35 @@ router.put("/provider-credentials/:provider", asyncHandler(async (req: Request<{
     }
   }
 
+  if (baseUrl) {
+    try {
+      await assertSafeOutboundUrl(baseUrl);
+    } catch {
+      throw badRequest("baseUrl must be a public https endpoint");
+    }
+  }
+
+  if (apiKey && providerNeedsKey(provider)) {
+    const existing = await userProviderCredentialsRepository.findByUserAndProvider(userId, provider);
+    const verification = await verifyProviderCredential(
+      {
+        provider,
+        apiKey,
+        baseUrl: baseUrl ?? existing?.baseUrl ?? null,
+        authType: authType ?? existing?.authType ?? null,
+      },
+      CONFIG.litellmBaseUrl,
+    );
+    if (!verification.ok) {
+      throw new HttpError(verification.kind === "rejected" ? 400 : 502, verification.message);
+    }
+    if (!modelServedBy(verification.models, model ?? existing?.model ?? null)) {
+      throw badRequest(
+        `This key cannot serve the model "${model ?? existing?.model}". Pick one it has access to.`,
+      );
+    }
+  }
+
   if (apiKey) {
     const encrypted = encrypt(apiKey, CONFIG.encryptionKey);
     data.encryptedKey = encrypted.ciphertext;
@@ -96,6 +132,51 @@ router.put("/provider-credentials/:provider", asyncHandler(async (req: Request<{
     authType: row.authType,
     reasoningEffort: row.reasoningEffort,
     hasApiKey: Boolean(row.encryptedKey),
+  });
+}));
+
+// POST /settings/provider-credentials/:provider/verify
+router.post("/provider-credentials/:provider/verify", asyncHandler(async (req: Request<{ provider: string }>, res: Response) => {
+  const userId = requireRequester(req);
+  const { provider } = req.params;
+  if (!VALID_PROVIDERS.has(provider)) {
+    throw badRequest(`provider must be one of ${[...VALID_PROVIDERS].join(", ")}`);
+  }
+  if (!providerNeedsKey(provider)) {
+    ok(res, { provider, status: "ok", models: 0 });
+    return;
+  }
+
+  const cred = await userProviderCredentialsRepository.findByUserAndProvider(userId, provider);
+  if (!cred?.encryptedKey || !cred.iv || !cred.authTag) {
+    ok(res, { provider, status: "missing", message: "No key saved for this provider." });
+    return;
+  }
+
+  const stored = decrypt(cred.encryptedKey, cred.iv, cred.authTag, CONFIG.encryptionKey);
+  const apiKey =
+    provider === "claude" ? extractClaudeBearer(stored) :
+    provider === "codex" ? extractCodexBearer(stored) :
+    stored;
+  const verification = await verifyProviderCredential(
+    { provider, apiKey, baseUrl: cred.baseUrl, authType: cred.authType },
+    CONFIG.litellmBaseUrl,
+  );
+  if (verification.ok) {
+    ok(res, {
+      provider,
+      status: modelServedBy(verification.models, cred.model) ? "ok" : "model-unavailable",
+      models: verification.models.length,
+      ...(modelServedBy(verification.models, cred.model)
+        ? {}
+        : { message: `This key cannot serve "${cred.model}".` }),
+    });
+    return;
+  }
+  ok(res, {
+    provider,
+    status: verification.kind === "rejected" ? "invalid" : "unknown",
+    message: verification.message,
   });
 }));
 
@@ -453,7 +534,8 @@ router.get("/copilot/models", asyncHandler(async (req: Request, res: Response) =
   });
   if (!modelsRes.ok) {
     const text = await modelsRes.text().catch(() => "");
-    throw new HttpError(502, `Copilot /models failed: ${modelsRes.status} ${text.slice(0, 200)}`);
+    const detail = extractProviderMessage(text);
+    throw new HttpError(502, detail ? `GitHub Copilot: ${detail}` : `GitHub Copilot returned ${modelsRes.status}`);
   }
   const body = (await modelsRes.json()) as {
     data?: Array<{ id?: string; name?: string; model_picker_enabled?: boolean; capabilities?: { type?: string } }>;
@@ -535,7 +617,8 @@ router.get("/codex/models", asyncHandler(async (req: Request, res: Response) => 
   const upstream = await fetch(url, { headers, signal: AbortSignal.timeout(20_000) });
   if (!upstream.ok) {
     const text = await upstream.text().catch(() => "");
-    throw new HttpError(502, `Models endpoint ${upstream.status}: ${text.slice(0, 200)}`);
+    const detail = extractProviderMessage(text);
+    throw new HttpError(502, detail ? `OpenAI: ${detail}` : `OpenAI returned ${upstream.status}`);
   }
 
   if (isOauth) {
@@ -591,7 +674,8 @@ router.post("/provider-credentials/litellm/models", asyncHandler(async (req: Req
   if (!upstream.ok) {
     const text = await upstream.text().catch(() => "");
     log.warn(`[settings] litellm/models upstream ${upstream.status} at ${root}/v1/models: ${text.slice(0, 200)}`);
-    throw new HttpError(502, `Models endpoint ${upstream.status}: ${text.slice(0, 200)}`);
+    const detail = extractProviderMessage(text);
+    throw new HttpError(502, detail ? `LiteLLM: ${detail}` : `LiteLLM returned ${upstream.status}`);
   }
 
   const payload = (await upstream.json()) as { data?: Array<{ id?: string }> };

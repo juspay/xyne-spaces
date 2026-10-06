@@ -18,6 +18,7 @@ export function SkillsCapabilityRow({
   onChange,
 }: SkillsCapabilityRowProps): ReactElement {
   const [browseOpen, setBrowseOpen] = useState(false);
+  const [browseId, setBrowseId] = useState<string | null>(null);
   const { entries, loading, isError, refetch } = useSkillCatalog();
 
   const selectedEntries = useMemo(
@@ -48,7 +49,10 @@ export function SkillsCapabilityRow({
 
         <button
           type='button'
-          onClick={() => setBrowseOpen(true)}
+          onClick={() => {
+            setBrowseId(null);
+            setBrowseOpen(true);
+          }}
           aria-label='Browse skills'
           data-track-category='Claw Agents'
           data-track-name='Create agent v2: browse skills'
@@ -67,6 +71,10 @@ export function SkillsCapabilityRow({
               key={entry.id}
               label={entry.label}
               selected
+              onOpen={() => {
+                setBrowseId(entry.id);
+                setBrowseOpen(true);
+              }}
               onToggle={() => onChange(disableSkill(selectedIds, entry))}
             />
           ))}
@@ -75,7 +83,11 @@ export function SkillsCapabilityRow({
 
       <BrowseSkillsDialog
         open={browseOpen}
-        onOpenChange={setBrowseOpen}
+        onOpenChange={next => {
+          setBrowseOpen(next);
+          if (!next) setBrowseId(null);
+        }}
+        initialId={browseId}
         catalog={entries}
         loading={loading}
         isError={isError}

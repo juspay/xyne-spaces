@@ -61,6 +61,7 @@ export const CreateTicketWindow: React.FC = () => {
       initialPriority={(f.priority as TicketPriority | null) ?? null}
       isFromSubTicket={!!draft.isFromSubTicket}
       isFromAI={!!draft.isFromAI}
+      trackSource={draft.trackSource ?? 'popout'}
       {...(draft.sourceMessageId ? { sourceMessageId: draft.sourceMessageId } : {})}
       {...(draft.entityLinkContext ? { entityLinkContext: draft.entityLinkContext } : {})}
       standaloneSeed={{

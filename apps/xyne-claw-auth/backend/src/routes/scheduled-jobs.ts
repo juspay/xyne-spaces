@@ -15,7 +15,7 @@ import { CONFIG } from "../config.js";
 import { decrypt } from "../crypto.js";
 import { agentRunRepository, chatMessageRepository } from "../repositories/index.js";
 import { spacesAppFetch, spacesAppFetchMultipart } from "../lib/spaces-api.js";
-import { getRequesterId, getOrgId, isClawAdmin } from "../middleware/agent-acl.js";
+import { getRequesterId, getOrgId, isClawAdmin, getAgentEditAccess } from "../middleware/agent-acl.js";
 import { assertCanControlScheduledJob } from "./scheduled-jobs-auth.js";
 import { requireStrictS2S } from "../middleware/require-auth.js";
 import { getSpacesAuthForUser, getWorkspaceIdForUser } from "../lib/spaces-db.js";
@@ -31,7 +31,7 @@ import {
 import { handleRunCompletion } from "../queue/run-recovery-worker.js";
 import { isDashboardTask, refreshScheduledDashboardShare } from "../services/dashboardShareRefreshService.js";
 import { designShareUrl } from "./design-shares.js";
-import { buildScheduledJobApprovalFlow } from "xyne-claw-shared";
+import { buildScheduledJobApprovalFlow, withSpacesAppId } from "xyne-claw-shared";
 // cron-parser v4 is CJS (`module.exports = CronParser`). Node's native ESM
 // loader can't statically detect named exports from that pattern, so a
 // `import { parseExpression } from "cron-parser"` throws at runtime even
@@ -118,6 +118,27 @@ function validateCronExpression(
  *   Admins may pass `?userId=<other>` to look at someone else's jobs.
  * - S2S requests (no requesterId set): no implicit filter; the caller decides.
  */
+/**
+ * READ-ONLY visibility over every schedule configured on an agent.
+ *
+ * A ScheduledJob is keyed by its CREATING user, and resolveScopedUserId below
+ * clamps every list to the requester. That is right for "my schedules", but it
+ * meant an agent editor opening the agent's Schedules tab saw an empty list —
+ * the tab is rendered for anyone with canEdit (frontend agentPermissions), while
+ * the data was scoped to self. This grants the same set the UI assumes: owner,
+ * EDITOR/CONTRIBUTOR share, or CLAW_ADMIN.
+ *
+ * Deliberately READ-only. Mutations (pause/resume/patch/delete) still go through
+ * assertCanControlScheduledJob, because a scheduled run executes under its
+ * creator's identity and credentials — letting any editor re-point someone
+ * else's cron would run work as that person.
+ */
+async function canViewAgentSchedules(req: Request, agentSlug: string, requesterId: string): Promise<boolean> {
+  if (await isClawAdmin(requesterId)) return true;
+  const access = await getAgentEditAccess(requesterId, agentSlug, getOrgId(req)).catch(() => null);
+  return Boolean(access?.canEdit);
+}
+
 async function resolveScopedUserId(
   req: Request,
   explicitUserId?: string,
@@ -190,7 +211,7 @@ async function postScheduledFailureNotice(row: {
 
   const next = nextFireText(row);
   const message = [
-    `⚠️ Scheduled run failed: ${error?.trim() || "unknown error"}.`,
+    `Scheduled run failed: ${error?.trim() || "unknown error"}.`,
     ...(next ? [`Next run: ${next}.`] : []),
   ].join("\n");
   const appToken = decryptStoredField(agent.spacesAppToken);
@@ -232,11 +253,6 @@ async function postScheduledFailureNotice(row: {
   }, appToken);
 }
 
-function withSpacesAppIdFlow<T extends { data?: Record<string, unknown> }>(flow: T, spacesAppId?: string | null): T {
-  if (!spacesAppId) return flow;
-  return { ...flow, data: { ...(flow.data ?? {}), spacesAppId } };
-}
-
 /**
  * Post the channel-broadcast approval card for a `pending_approval` scheduled
  * job to the thread the request came from (falling back to a DM to the creator
@@ -266,7 +282,7 @@ async function postScheduledJobApprovalCard(opts: {
   const appToken = decryptStoredField(agent.spacesAppToken);
   const spacesAppUserId = agent.spacesAppUserId ?? "";
 
-  const flow = withSpacesAppIdFlow(buildScheduledJobApprovalFlow({
+  const flow = withSpacesAppId(buildScheduledJobApprovalFlow({
     scheduledJobId: row.id,
     creatorUserId: row.userId,
     scheduleSummary,
@@ -521,7 +537,12 @@ router.post("/", asyncHandler(async (req: Request, res: Response) => {
 
 router.get("/", asyncHandler(async (req: Request, res: Response) => {
   const { userId: qUserId, status, agentSlug } = req.query as { userId?: string; status?: string; agentSlug?: string };
-  const userId = await resolveScopedUserId(req, qUserId);
+  const requesterId = getRequesterId(req);
+  // Asking for ONE agent's schedules as a maintainer of that agent => show the
+  // agent's full set. Otherwise fall back to the self-scoped view.
+  const agentScoped =
+    Boolean(agentSlug) && Boolean(requesterId) && (await canViewAgentSchedules(req, agentSlug!, requesterId!));
+  const userId = agentScoped ? undefined : await resolveScopedUserId(req, qUserId);
   const where: Record<string, unknown> = {};
   if (userId) where["userId"] = userId;
   if (status) where["status"] = status;
@@ -547,7 +568,9 @@ router.get("/runs", asyncHandler(async (req: Request, res: Response) => {
     throw badRequest("agentSlug is required");
   }
 
-  const userId = await resolveScopedUserId(req, qUserId);
+  const requesterId = getRequesterId(req);
+  const agentScoped = Boolean(requesterId) && (await canViewAgentSchedules(req, agentSlug, requesterId!));
+  const userId = agentScoped ? undefined : await resolveScopedUserId(req, qUserId);
   const jobWhere: Record<string, unknown> = { agentSlug };
   if (userId) jobWhere["userId"] = userId;
 
@@ -587,7 +610,12 @@ router.get("/:id", asyncHandler(async (req: Request<{ id: string }>, res: Respon
   if (!requesterId) {
     throw unauthorized("Authentication required");
   }
-  if (row.userId !== requesterId && !(await isClawAdmin(requesterId))) {
+  // Own job, CLAW_ADMIN, or a maintainer of the agent the job belongs to.
+  if (
+    row.userId !== requesterId &&
+    !(await isClawAdmin(requesterId)) &&
+    !(await canViewAgentSchedules(req, row.agentSlug, requesterId))
+  ) {
     throw notFound("Not found");
   }
   ok(res, { ...row, delayMs: row.delayMs != null ? Number(row.delayMs) : null });
@@ -1183,7 +1211,7 @@ router.post("/:id/result", requireStrictS2S, async (req: Request<{ id: string }>
         const share = refreshed.share;
         if (share.linkChanged) {
           const link = designShareUrl(share.sharePath);
-          dashboardShareAnnouncement = `🔗 **Live dashboard:** ${link}\nThe same link updates after each successful refresh.`;
+          dashboardShareAnnouncement = `**Live dashboard:** ${link}\nThe same link updates after each successful refresh.`;
         }
         log.info(`[scheduled-jobs/result] Job ${id}: refreshed dashboard share=${share.id} conversation=${row.conversationId}`);
       } else {

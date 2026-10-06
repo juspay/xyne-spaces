@@ -1,6 +1,8 @@
 import { ReactElement, ReactNode } from 'react';
 import { CheckTickSingle } from '@xyne/icons';
 import { cn } from '../../../../utils/classNames';
+import type { ActionDefinition } from '../../../Assistant/actions/action';
+import { ActionCards } from '../../../Assistant/ActionCards';
 
 // Wavy squiggle path data lifted from the Figma "Agent Hub" empty-state cards.
 // Each squiggle stretches to fill its row (preserveAspectRatio='none'), so the
@@ -127,6 +129,14 @@ const Spark = ({ className }: { className?: string }): ReactElement => (
 interface XyneAIEmptyStateProps {
   // TODO: wire to input populate
   onSelect?: (prompt: string) => void;
+  /**
+   * Hide the tilted suggestion cards, keeping just the heading. The cards are a
+   * fixed 382px composition that only scales down to fit; in a narrow Streams
+   * column they dominate a panel meant to sit quietly beside five others.
+   */
+  hideSuggestions?: boolean;
+  starters?: readonly ActionDefinition[];
+  onSelectStarter?: (action: ActionDefinition) => void;
 }
 
 /**
@@ -134,7 +144,39 @@ interface XyneAIEmptyStateProps {
  * tilted suggestion cards sitting under a heading. Cards are clickable and will
  * later populate the chat input (onSelect is stubbed for now).
  */
-export const XyneAIEmptyState = ({ onSelect = () => {} }: XyneAIEmptyStateProps): ReactElement => {
+export const XyneAIEmptyState = ({
+  onSelect = () => {},
+  hideSuggestions = false,
+  starters = [],
+  onSelectStarter = () => {},
+}: XyneAIEmptyStateProps): ReactElement => {
+  if (hideSuggestions) {
+    return (
+      <div className='flex h-full w-full select-none items-center justify-center px-4'>
+        <div className='flex flex-col items-center gap-4'>
+          <Spark className='size-12' />
+          <h2 className='text-center text-[15px] font-semibold leading-[24px] tracking-[-0.3px] text-muted-foreground'>
+            What can Xyne help you with?
+          </h2>
+        </div>
+      </div>
+    );
+  }
+
+  if (starters.length > 0) {
+    return (
+      <div className='flex min-h-full w-full select-none items-center justify-center px-4 py-4'>
+        <div className='flex w-full max-w-[382px] flex-col items-center gap-[24px]'>
+          <Spark className='size-12' />
+          <h2 className='text-center text-[16px] font-semibold leading-[28px] tracking-[-0.32px] text-muted-foreground'>
+            Get started
+          </h2>
+          <ActionCards actions={starters} onSelect={onSelectStarter} />
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className='flex h-full w-full select-none items-center justify-center px-4'>
       <div className='flex w-full flex-col items-center gap-[24px]'>

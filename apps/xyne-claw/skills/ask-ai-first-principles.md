@@ -51,7 +51,7 @@ Turn the natural-language question into **effective, varied queries** — then f
 > Goal is *coverage*, not volume: 2–3 well-restructured angles **per source that applies** beat ten near-identical queries on one source. You want the right thread to be somewhere in what comes back.
 
 **Example (workspace + Google).** "What's the latest on the Apollo migration, and did anyone email me about it?"
-→ one turn: `spaces-search "Apollo migration status"` + a search scoped to the likely channel + a `google` mailbox lookup for recent "Apollo" mail. Restructured, varied, parallel.
+→ one turn: `spaces-vespa-search { searchArea: "message", query: "Apollo migration status" }` + a search scoped to the likely channel + a `google` mailbox lookup for recent "Apollo" mail. Restructured, varied, parallel.
 
 **Example (technical → include code).** "What changed in the payment retry logic and did it ship?"
 → one turn: `bitbucket` for PRs/commits touching retry logic + their merge state + `spaces` for the tracking ticket and #payments announcement + a `google` lookup for any release email. Code answers *what changed* and *did it ship*; chat/mail answer *who cares* and *was it announced*. Converge them.

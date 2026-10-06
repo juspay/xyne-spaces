@@ -5,6 +5,7 @@ import { callHostControlController } from '@/controllers/callHostControlControll
 import { scheduleCallController } from '@/controllers/scheduleCallController';
 import { callChatController, requireInternalCallParticipant } from '@/controllers/callChatController';
 import { uploadSingle } from '@/middleware/upload';
+import { workspaceScopedRoute } from '@/database/tenant/context';
 import { summaryTemplateController } from '@/controllers/summaryTemplateController';
 import { recordingSharingController } from '@/controllers/recordingSharingController';
 import { recordingGoogleDocController } from '@/controllers/recordingGoogleDocController';
@@ -16,7 +17,10 @@ router.post('/series', scheduleCallController.createRecurringSeries);
 router.patch('/series/:seriesId', scheduleCallController.updateRecurringSeries);
 router.delete('/series/:seriesId', scheduleCallController.cancelRecurringSeries);
 router.post('/initiate', callController.initiateCall);
-router.post('/join', callController.joinCall);
+// The call link is the invitation: anyone in the call's workspace may join, invited
+// or not. The per-user call ACL would hide an uninvited call and answer 404, so the
+// handler's lookups run at workspace scope. joinCall still checks the workspace itself.
+router.post('/join', workspaceScopedRoute, callController.joinCall);
 router.post('/schedule', scheduleCallController.scheduleCall);
 
 // Recordings endpoints (HEADLESS calls)
@@ -38,8 +42,11 @@ router.patch('/recordings/:callId', callController.updateRecordingTitle);
 router.delete('/recordings/:callId', callController.deleteRecording);
 router.get('/summary-templates', summaryTemplateController.list);
 router.post('/summary-templates', summaryTemplateController.create);
+router.post('/summary-templates/bulk', summaryTemplateController.bulkCreate);
 router.post('/summary-templates/ai/draft-context', summaryTemplateController.draftContext);
 router.post('/summary-templates/ai/suggest-sections', summaryTemplateController.suggestSections);
+router.post('/summary-templates/ai/test-selection', summaryTemplateController.testSelection);
+router.post('/summary-templates/ai/test-output', summaryTemplateController.testOutput);
 router.post(
   '/summary-templates/ai/generate-system-prompt',
   summaryTemplateController.generateSystemPrompt
@@ -75,10 +82,14 @@ router.post('/:callId/process-transcript', callController.processTranscript);
 // Download transcript endpoint (downloads transcript file from GCS)
 router.get('/:callId/download-transcript', callController.downloadTranscript);
 
+// Translate transcript endpoint (downloads transcript file from GCS)
+router.post('/:callId/translate-transcript', callController.translateTranscript);
+
 // Download recording endpoint (streams the call's latest recording — legacy/headless player)
 router.get('/:callId/download-recording', callController.downloadRecording);
 
-// In-call recordings (call_recordings table) — per-recording download, rename, delete
+// In-call recordings (call_recordings table) — list, per-recording download, rename, delete
+router.get('/:callId/recordings', callController.listCallRecordings);
 router.get('/:callId/recordings/:recordingId/download', callController.downloadCallRecording);
 router.patch('/:callId/recordings/:recordingId', callController.renameCallRecording);
 router.delete('/:callId/recordings/:recordingId', callController.deleteCallRecording);
@@ -93,6 +104,9 @@ router.post(
 // PRD Generation endpoint (generates PRD canvas from call transcript)
 router.post('/:callId/generate-prd', callController.generatePRD);
 
+// Get or create the collaborative notes canvas (shared across a recurring series)
+router.post('/:callId/notes-canvas', callController.getOrCreateNotesCanvas);
+
 // Detailed Summary Generation endpoint (generates comprehensive summary from call transcript)
 router.post('/:callId/generate-detailed-summary', callController.generateDetailedSummary);
 
@@ -104,6 +118,9 @@ router.post('/:callId/invite', callController.inviteUsers);
 
 // Decline call endpoint
 router.post('/:callId/decline', callController.declineCall);
+
+// Callee reports ring delivery (RINGING | BUSY) — HTTP twin of the Zero mutator
+router.post('/:callId/ring-status', callController.updateRingStatus);
 
 // RSVP endpoint for scheduled calls
 router.post('/:callId/rsvp', callController.updateMeetingStatus);
