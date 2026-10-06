@@ -1,7 +1,8 @@
 import { transaction } from '../base';
 import { UserGroupRepository, CreateUserGroupWithUsersInput } from '@/database/repositories/userGroups';
 import { aclAuditService } from '@/services/aclAuditService';
-import { UserRoleMappingEntityType } from '@xyne/shared';
+import { UserResponsibility, UserRoleMappingEntityType } from '@xyne/shared';
+import { DEFAULT_ROLE_NAME_TO_ENUM } from '@/utils/roleFrameworkUtils';
 
 
 export function createWithUsersTx(self: UserGroupRepository, data: CreateUserGroupWithUsersInput, actorUserId: string | undefined) {
@@ -27,34 +28,67 @@ export function createWithUsersTx(self: UserGroupRepository, data: CreateUserGro
           : [];
 
     if (memberUserIds.length > 0) {
-      await tx.userGroupMapping.createMany({
-        data: memberUserIds.map(userId => ({
-          userGroupId: userGroup.id,
-          workspaceId: userGroup.workspaceId,
-          userId,
-        })),
-      });
+      const now = new Date();
 
-      // Assign roles via user_role_mappings(entityType=USER_GROUP). One row per (user, role).
-      // Backward compatible: a value may be a single roleId (legacy) or an array of roleIds.
-      if (data.userRoleUpdates) {
-        const now = new Date();
-        const roleRows = memberUserIds.flatMap(userId => {
-          const raw = data.userRoleUpdates?.[userId];
-          const roleIds = raw === undefined ? [] : Array.isArray(raw) ? raw : [raw];
-          return roleIds.map(roleId => ({
+      // Normalize userRoleUpdates (value may be a single roleId or an array) to roleId[] per user.
+      const rolesByUser = new Map<string, string[]>();
+      for (const userId of memberUserIds) {
+        const raw = data.userRoleUpdates?.[userId];
+        rolesByUser.set(userId, raw === undefined ? [] : Array.isArray(raw) ? raw : [raw]);
+      }
+
+      // Dual-write: stamp the legacy ugm.roleId/responsibility with each member's PRIMARY role
+      // (first assigned) so the pre-multi-role dashboard - which reads only ugm.roleId - shows
+      // the role until it's deployed everywhere. The full set lives in user_role_mappings below;
+      // this dual-write can be dropped once the new dashboard is fully rolled out.
+      const primaryRoleIds = [
+        ...new Set(
+          [...rolesByUser.values()].map(ids => ids[0]).filter((id): id is string => Boolean(id)),
+        ),
+      ];
+      const primaryRoles = primaryRoleIds.length
+        ? await tx.role.findMany({
+            where: { id: { in: primaryRoleIds } },
+            select: { id: true, name: true },
+          })
+        : [];
+      const roleNameById = new Map(primaryRoles.map(r => [r.id, r.name]));
+
+      await tx.userGroupMapping.createMany({
+        data: memberUserIds.map(userId => {
+          const primaryRoleId = rolesByUser.get(userId)?.[0] ?? null;
+          const primaryRoleName = primaryRoleId ? roleNameById.get(primaryRoleId) ?? null : null;
+          return {
+            userGroupId: userGroup.id,
             workspaceId: userGroup.workspaceId,
             userId,
-            roleId,
-            entityType: UserRoleMappingEntityType.USER_GROUP,
-            entityId: userGroup.id,
-            createdAt: now,
-            updatedAt: now,
-          }));
-        });
-        if (roleRows.length > 0) {
-          await tx.userRoleMapping.createMany({ data: roleRows, skipDuplicates: true });
-        }
+            ...(primaryRoleId
+              ? {
+                  roleId: primaryRoleId,
+                  responsibility:
+                    (primaryRoleName && DEFAULT_ROLE_NAME_TO_ENUM[primaryRoleName]) ||
+                    UserResponsibility.MEMBER,
+                }
+              : {}),
+          };
+        }),
+      });
+
+      // All roles -> user_role_mappings(entityType=USER_GROUP). One row per (user, role).
+      const roleRows = memberUserIds.flatMap(userId => {
+        const roleIds = rolesByUser.get(userId) ?? [];
+        return roleIds.map(roleId => ({
+          workspaceId: userGroup.workspaceId,
+          userId,
+          roleId,
+          entityType: UserRoleMappingEntityType.USER_GROUP,
+          entityId: userGroup.id,
+          createdAt: now,
+          updatedAt: now,
+        }));
+      });
+      if (roleRows.length > 0) {
+        await tx.userRoleMapping.createMany({ data: roleRows, skipDuplicates: true });
       }
     }
 

@@ -7,7 +7,6 @@ ALTER TABLE "public"."user_role_mappings" ADD COLUMN "entityId" TEXT;
 
 DROP INDEX IF EXISTS "public"."user_role_mappings_userId_roleId_key";
 CREATE UNIQUE INDEX "user_role_mappings_userId_roleId_entityId_key" ON "public"."user_role_mappings"("userId", "roleId", "entityId");
-CREATE UNIQUE INDEX "user_role_mappings_userId_roleId_null_entity_key" ON "public"."user_role_mappings"("userId", "roleId") WHERE "entityId" IS NULL;
 
 -- CreateIndex
 CREATE INDEX "user_role_mappings_entityType_entityId_idx" ON "public"."user_role_mappings"("entityType", "entityId");

@@ -4811,7 +4811,8 @@ export const mutators = defineMutators({
           const validRoleIds = new Set(validRoles.map(r => r.id));
 
           for (const [userId, desiredRaw] of Object.entries(normalizedUpdates)) {
-            const desired = new Set(desiredRaw.filter(rid => validRoleIds.has(rid)));
+            const desiredList = desiredRaw.filter(rid => validRoleIds.has(rid));
+            const desired = new Set(desiredList);
 
             const mapping = await tx.run(
               zql.user_group_mappings
@@ -4848,22 +4849,38 @@ export const mutators = defineMutators({
               }
             }
 
-            // removals -> delete URM row and/or clear legacy ugm.roleId
+            // removals -> delete URM row only
             for (const roleId of current) {
               if (!desired.has(roleId)) {
                 const urm = urmByRole.get(roleId);
                 if (urm) {
                   await tx.mutate.user_role_mappings.delete({ id: urm.id });
                 }
-                if (mapping.roleId === roleId) {
-                  await tx.mutate.user_group_mappings.update({
-                    id: mapping.id,
-                    roleId: null,
-                    responsibility: null,
-                    updatedAt: timestamp,
-                  });
-                }
               }
+            }
+
+            // Dual-write the legacy user_group_mappings.roleId/responsibility to the member's
+            // PRIMARY role (first assigned) so the pre-multi-role dashboard - which reads only
+            // ugm.roleId - keeps displaying and syncing roles until it's deployed everywhere.
+            // The full multi-role set still lives in user_role_mappings; this dual-write can be
+            // dropped once the new dashboard is fully rolled out.
+            const primaryRoleId = desiredList[0] ?? null;
+            const primaryRoleName = primaryRoleId
+              ? validRoles.find(r => r.id === primaryRoleId)?.name ?? null
+              : null;
+            const nextResponsibility = primaryRoleName
+              ? DEFAULT_ROLE_NAME_TO_ENUM[primaryRoleName] ?? null
+              : null;
+            if (
+              (mapping.roleId ?? null) !== primaryRoleId ||
+              (mapping.responsibility ?? null) !== (nextResponsibility ?? null)
+            ) {
+              await tx.mutate.user_group_mappings.update({
+                id: mapping.id,
+                roleId: primaryRoleId,
+                responsibility: nextResponsibility,
+                updatedAt: timestamp,
+              });
             }
           }
         }
@@ -4996,27 +5013,37 @@ export const mutators = defineMutators({
           if (!mappingId) {
             throw new Error(`mappingId is required for user ${userId}`);
           }
-          // Membership row no longer carries the role — roles live in user_role_mappings.
+          // Optional role at add time -> user_role_mappings(USER_GROUP) row.
+          const index = userIds.indexOf(userId);
+          const roleId = roleIds?.[index];
+          const validRoleId = roleId && validRoleIds.has(roleId) ? roleId : null;
+          // Dual-write the legacy ugm.roleId/responsibility so the pre-multi-role dashboard
+          // (which reads only ugm.roleId) shows the role until it's deployed everywhere. The
+          // role also lives in user_role_mappings below; drop this dual-write post-rollout.
+          const roleName = validRoleId
+            ? roles.find(r => r.id === validRoleId)?.name ?? null
+            : null;
+          const responsibility = roleName
+            ? DEFAULT_ROLE_NAME_TO_ENUM[roleName] ?? UserResponsibility.MEMBER
+            : UserResponsibility.MEMBER;
           await tx.mutate.user_group_mappings.insert({
             workspaceId: ctx.workspaceId,
             id: mappingId,
             userGroupId,
             userId,
-            responsibility: UserResponsibility.MEMBER,
+            ...(validRoleId ? { roleId: validRoleId } : {}),
+            responsibility,
             onCallSetNumbers: [],
             isNotified: false,
             createdAt: timestamp,
             updatedAt: timestamp,
           });
-          // Optional role at add time -> user_role_mappings(USER_GROUP) row.
-          const index = userIds.indexOf(userId);
-          const roleId = roleIds?.[index];
-          if (roleId && validRoleIds.has(roleId)) {
+          if (validRoleId) {
             await tx.mutate.user_role_mappings.insert({
               workspaceId: ctx.workspaceId,
-              id: groupRoleMappingId(userGroupId, userId, roleId),
+              id: groupRoleMappingId(userGroupId, userId, validRoleId),
               userId,
-              roleId,
+              roleId: validRoleId,
               entityType: UserRoleMappingEntityType.USER_GROUP,
               entityId: userGroupId,
               createdAt: timestamp,
