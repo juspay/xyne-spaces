@@ -1,3 +1,10 @@
+## [1.460.5-release-20261006.2](https://github.com/juspay/xyne-spaces/compare/v1.460.5-release-20261006.1...v1.460.5-release-20261006.2) (2026-10-06)
+
+
+### Reverts
+
+* agent-no-host-control ([#2233](https://github.com/juspay/xyne-spaces/issues/2233)) ([#2694](https://github.com/juspay/xyne-spaces/issues/2694)) ([5a43db5](https://github.com/juspay/xyne-spaces/commit/5a43db562f9a68244ab8d6997538fbe1d97c998e)), closes [#2562](https://github.com/juspay/xyne-spaces/issues/2562)
+
 ## [1.460.5-release-20261006.1](https://github.com/juspay/xyne-spaces/compare/v1.460.4...v1.460.5-release-20261006.1) (2026-10-06)
 
 
