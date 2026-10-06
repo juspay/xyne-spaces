@@ -706,27 +706,6 @@ async function pendingActionTargetValidation(
 
 
 
-
-async function resolveAgentByAppUserId(appUserId: string): Promise<ResolvedAgent | null> {
-  const agent = await prisma.agent.findFirst({ where: { spacesAppUserId: appUserId } });
-
-  if (agent?.spacesAppToken && agent.spacesAppId) {
-    return {
-      id: agent.id,
-      slug: agent.slug,
-      name: agent.name ?? agent.slug,
-      orgId: agent.orgId,
-      appToken: decryptStoredField(agent.spacesAppToken),
-      spacesAppId: agent.spacesAppId,
-      spacesAppUserId: agent.spacesAppUserId ?? "",
-      isDefault: agent.isDefault,
-    };
-  }
-
-  return null;
-}
-
-
 export async function fetchConversationHistory(
   conversationId: string,
   appToken?: string,
@@ -972,31 +951,6 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
     }
 
     if (agentRow) agent = toResolvedAgent(agentRow);
-  } else if (eventType === "USER_MENTIONED") {
-    if (mentionedUserIds.length > 0) {
-      // First check if the mentioned user is an agent bot
-      agent = await resolveAgentByAppUserId(mentionedUserIds[0]!);
-
-      // If not an agent bot, check if the mentioned user is registered in claw-auth
-      // (i.e. they have a Digital Twin set up with MCP connections)
-      if (!agent) {
-        const mentionedSpacesUserId = mentionedUserIds[0]!;
-        const mentionedClawUserId = await resolveClawUserIdForSpacesIdentity(mentionedSpacesUserId).catch(() => undefined);
-        let mentionedUser = mentionedClawUserId ? await userRepository.findById(mentionedClawUserId) : null;
-        if (!mentionedUser) {
-          // JIT-mirror from Spaces — they may exist there but not here.
-          await ensureUserExists(mentionedSpacesUserId, "webhook").catch(() => {});
-          const resolvedUserId = await resolveClawUserIdForSpacesIdentity(mentionedSpacesUserId).catch(() => undefined);
-          mentionedUser = resolvedUserId ? await userRepository.findById(resolvedUserId) : null;
-        }
-        if (!mentionedUser) {
-          log.info(`Ignoring USER_MENTIONED — user ${mentionedUserIds[0]} not registered in claw-auth`);
-          res.json({ success: true });
-          return;
-        }
-        // User exists in claw-auth — fall through to default agent (Digital Twin)
-      }
-    }
   }
 
   if (!agent) {
