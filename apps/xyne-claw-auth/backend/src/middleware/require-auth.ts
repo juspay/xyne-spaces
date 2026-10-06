@@ -292,8 +292,14 @@ export async function optionalAuth(
       req.headers["x-user-id"] = userId;
       await attachOrgContext(req, userId);
     } else {
-      const pinnedUserId = typeof req.headers["x-user-id"] === "string" ? req.headers["x-user-id"].trim() : "";
-      if (pinnedUserId) await attachOrgContext(req, pinnedUserId);
+      // No verified identity: strip the client-supplied x-user-id so downstream
+      // getRequesterId()/getOrgId() see an anonymous caller instead of an
+      // attacker-chosen one. Mirrors stripClientOrgHeaders (fail-closed). The
+      // review_room org gate on the public design-share router relied on this
+      // header being trustworthy — it is client-controlled until a verified
+      // session/CLI token overwrites it, so an unauthenticated spoof must not
+      // survive optionalAuth.
+      delete req.headers["x-user-id"];
     }
   } catch (err) {
     log.warn("[optional-auth] identity resolution failed:", err instanceof Error ? err.message : err);
@@ -302,50 +308,15 @@ export async function optionalAuth(
 }
 
 /**
- * Lightweight middleware that checks x-s2s-key for internal service callbacks.
- * Also allows valid Spaces user cookie for admin testing from browser.
- */
-export async function requireS2S(
-  req: Request,
-  res: Response,
-  next: NextFunction,
-): Promise<void> {
-  stripClientOrgHeaders(req);
-  const s2sKey = req.headers["x-s2s-key"] as string | undefined;
-  if (s2sKeyMatches(s2sKey)) {
-    const pinnedUserId = typeof req.headers["x-user-id"] === "string" ? req.headers["x-user-id"].trim() : "";
-    if (pinnedUserId) {
-      await attachOrgContext(req, pinnedUserId);
-    }
-    next();
-    return;
-  }
-
-  const identity = await resolveSpacesIdentity(req);
-  const userId = identity.kind === "user" ? identity.userId : undefined;
-  if (userId) {
-    await ensureUserExists(userId, "require-auth").catch((err) => {
-      log.warn(`[require-auth/s2s] ensureUserExists(${userId}) failed:`, err instanceof Error ? err.message : err);
-    });
-    req.headers["x-user-id"] = userId;
-    await attachOrgContext(req, userId);
-    next();
-    return;
-  }
-
-  denyUnverified(res, identity, "s2s key required");
-}
-
-/**
- * Strictest S2S middleware: ONLY accepts a valid x-s2s-key. Unlike requireS2S
- * it does NOT fall back to a Spaces user cookie, so it can't be reached by an
- * ordinary logged-in browser user.
+ * Strictest S2S middleware: ONLY accepts a valid x-s2s-key. It does NOT fall
+ * back to a Spaces user cookie, so it can't be reached by an ordinary logged-in
+ * browser user.
  *
  * Use this on internal callback / data-plane routes whose only legitimate
  * caller is another service (xyne-claw posting run results, session
- * archive/restore, lock acquisition). The cookie fallback in requireS2S was
- * intended for manual admin testing but has no role check, so it effectively
- * downgraded these endpoints to "any authenticated user" — a cross-user data
+ * archive/restore, lock acquisition). The removed requireS2S middleware had a
+ * cookie fallback intended for manual admin testing but with no role check, so
+ * it effectively downgraded these endpoints to "any authenticated user" — a cross-user data
  * exposure for the session/result routes.
  */
 export function requireStrictS2S(

@@ -467,6 +467,16 @@ export const EntitySelector: React.FC<EntitySelectorProps> = ({
             e.preventDefault();
             inputRef.current?.focus();
           }}
+          onCloseAutoFocus={e => {
+            // Another picker opened while this one animated out — don't pull focus back from it.
+            const active = document.activeElement;
+            if (
+              active instanceof HTMLElement &&
+              active.closest('[data-radix-popper-content-wrapper]')
+            ) {
+              e.preventDefault();
+            }
+          }}
         >
           {/* ========== SEARCH INPUT ========== */}
           {variant === 'default' && showSearch && (

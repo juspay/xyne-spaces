@@ -18,7 +18,7 @@ export class ChannelUserStatusACL extends BaseACL<'channel_user_status'> {
   }
 
   async canInsert(args: InsertValue<TableSchema<'channel_user_status'>>, tx: Transaction<Schema>): Promise<void> {
-    // Fetch the channel to check workspace and addUserPolicy
+    // Fetch the channel to check workspace
     const channel = await tx.run(zql.channels.where('id', '=', args.channelId).one());
     if (!channel) throw new MutationACLError('Channel user status insert failed: channel does not exist', 'channel_user_status');
     await this.verifyChannelInWorkspace(args.channelId, tx, channel.workspaceId);
@@ -26,9 +26,12 @@ export class ChannelUserStatusACL extends BaseACL<'channel_user_status'> {
     // Verify requesting user is a channel participant and get their record
     const requestingParticipant = await this.verifyChannelParticipant(args.channelId, tx, 'insert');
 
-    // Check addUserPolicy: if ADMINS_ONLY, only admins can add users
-    const addUserPolicy = channel?.addUserPolicy ?? ChannelAddUserPolicy.EVERYONE;
-    if (addUserPolicy === ChannelAddUserPolicy.ADMINS_ONLY && requestingParticipant.role !== ChannelRole.ADMIN) {
+    // Check addUserPolicy: if ADMINS_ONLY, only admins can add others (joining yourself is not adding)
+    if (
+      args.userId !== this.ctx.userID &&
+      requestingParticipant.role !== ChannelRole.ADMIN &&
+      (await this.getAddUserPolicy(args.channelId, tx)) === ChannelAddUserPolicy.ADMINS_ONLY
+    ) {
       throw new MutationACLError('Channel user status insert failed: only channel admins can add users to this channel', 'channel_user_status');
     }
 
@@ -82,11 +85,13 @@ export class ChannelUserStatusACL extends BaseACL<'channel_user_status'> {
         throw new MutationACLError('Channel user status restore failed: invalid keys', 'channel_user_status');
       }
       
-      const channel = await tx.run(zql.channels.where('id', '=', status.channelId).one());
       const requestingParticipant = await this.verifyChannelParticipant(status.channelId, tx, 'update');
-      
-      const addUserPolicy = channel?.addUserPolicy ?? ChannelAddUserPolicy.EVERYONE;
-      if (addUserPolicy === ChannelAddUserPolicy.ADMINS_ONLY && requestingParticipant.role !== ChannelRole.ADMIN) {
+
+      if (
+        status.userId !== this.ctx.userID &&
+        requestingParticipant.role !== ChannelRole.ADMIN &&
+        (await this.getAddUserPolicy(status.channelId, tx)) === ChannelAddUserPolicy.ADMINS_ONLY
+      ) {
         throw new MutationACLError('Channel user status restore failed: only channel admins can restore users to this channel', 'channel_user_status');
       }
       return;
@@ -136,6 +141,12 @@ export class ChannelUserStatusACL extends BaseACL<'channel_user_status'> {
     }
 
     throw new MutationACLError('Channel user status delete failed: you can only delete your own status records or be a channel admin', 'channel_user_status');
+  }
+
+  // channel_stats holds the policy the channel settings edit; channels.addUserPolicy is never updated after create.
+  private async getAddUserPolicy(channelId: string, tx: Transaction<Schema>): Promise<string> {
+    const stats = await tx.run(zql.channel_stats.where('channelId', '=', channelId).one());
+    return stats?.addUserPolicy ?? ChannelAddUserPolicy.EVERYONE;
   }
 
   private async verifyChannelParticipant(channelId: string, tx: Transaction<Schema>, operation: 'insert' | 'update' | 'delete'): Promise<{ role: string }> {

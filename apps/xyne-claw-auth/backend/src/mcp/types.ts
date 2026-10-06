@@ -131,6 +131,10 @@ export interface ResolvedConnectorDefinition {
   readonly credentialFields: readonly CredentialField[];
   readonly healthCheck: PennyDropTool;
   readonly writeTools: readonly string[];
+  /** Parsed write-tool policy for dynamic (DB) connectors. When present it drives
+   *  write-tool gating by mode (allowlist/denylist/allAsk/allowAll); static
+   *  adapters leave it undefined and are gated by `writeTools`. */
+  readonly writePolicy?: WriteToolPolicy;
   /** Picker-only fallback list; see StdioMcpAdapter.staticTools. */
   readonly staticTools: readonly string[];
   /** When true, binary content (EmbeddedResource blob / image / audio) returned
