@@ -56,6 +56,7 @@ import { agentScopeAllows } from "./service-tokens.js";
 import { encryptSurfaceSecret } from "./surface-resolver.js";
 import { isClawAdmin } from "../middleware/agent-acl.js";
 import { isScheduledOrAutomationEvent } from "./run-bridge.js";
+import { conversationAccessError } from "./conversation-access.js";
 import { dispatchRun } from "./dispatch-run.js";
 import { toolUsageRankFor, wantsToolUsageRank } from "./tool-usage-rank.js";
 import { createLogger } from "../logger.js";
@@ -673,6 +674,32 @@ export async function prepareRun(
     const resolved = await resolveUserId(identityBody);
     if ("error" in resolved) {
       return { ok: false, status: 400, error: resolved.error };
+    }
+
+    // Conversation-ownership backstop. Claw sessions are keyed by conversationId
+    // (not userId), so a caller who supplies another user's conversationId would
+    // attach to that thread's shared session. userId is already pinned above;
+    // this stops the cross-user hijack. Only enforced on the interactive-user
+    // path — S2S/automation/scheduled/service-token runs legitimately act on
+    // conversations the authenticated caller doesn't "own". Non-existent/new
+    // conversations pass (verdict "unknown").
+    if (
+      authenticatedUserId &&
+      !isServiceTokenCaller &&
+      !isInternalS2SCaller &&
+      !isScheduledOrAutomationEvent(eventType) &&
+      (conversationId || piSessionConversationId)
+    ) {
+      const accessError = await conversationAccessError(resolved.userId, [
+        conversationId,
+        piSessionConversationId,
+      ]);
+      if (accessError) {
+        log.warn(
+          `[run] conversation access denied userId=${resolved.userId} conversationId=${conversationId ?? "none"} pi=${piSessionConversationId ?? "none"}`,
+        );
+        return { ok: false, status: 403, error: accessError };
+      }
     }
 
     const headerOrgId = input.headerOrgId;

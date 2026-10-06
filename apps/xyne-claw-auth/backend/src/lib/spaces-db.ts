@@ -610,6 +610,58 @@ export async function getSpacesUserWorkspaceId(userId: string): Promise<string |
   }
 }
 
+export type ConversationAccess = "ok" | "denied" | "unknown";
+
+/**
+ * Whether `userId` may access the Spaces conversation `conversationId`.
+ *
+ * Used to stop a cross-user agent-session hijack: claw sessions are keyed by
+ * conversationId (not userId), so a caller who supplies another user's
+ * conversationId lands on that thread's shared session. Access is granted when
+ * the user is a participant of the conversation's channel, or the channel is
+ * PUBLIC and in the user's own workspace. Returns "unknown" when the
+ * conversation row does not exist yet (brand-new thread) or the Spaces DB is
+ * unreachable — callers treat "unknown" as pass (defense-in-depth; userId is
+ * already pinned server-side).
+ */
+export async function canUserAccessConversation(
+  conversationId: string,
+  userId: string,
+): Promise<ConversationAccess> {
+  const client = getClient();
+  if (!client) return "unknown";
+  const convId = conversationId.trim();
+  const uid = userId.trim();
+  if (!convId || !uid) return "unknown";
+  try {
+    const rows = await client.$queryRawUnsafe<
+      Array<{ visibility: string | null; same_ws: boolean | null; is_member: boolean | null }>
+    >(
+      `SELECT ch.visibility AS visibility,
+              (conv."workspaceId" = caller."workspaceId") AS same_ws,
+              EXISTS(
+                SELECT 1 FROM public.channel_participants cp
+                WHERE cp."channelId" = conv."channelId" AND cp."userId" = $2
+              ) AS is_member
+       FROM public.conversations conv
+       JOIN public.channels ch ON ch.id = conv."channelId"
+       LEFT JOIN public.users caller ON caller.id = $2
+       WHERE conv."conversationId" = $1
+       LIMIT 1`,
+      convId,
+      uid,
+    );
+    const row = rows[0];
+    if (!row) return "unknown";
+    if (row.is_member) return "ok";
+    if (row.visibility === "PUBLIC" && row.same_ws) return "ok";
+    return "denied";
+  } catch (err) {
+    log.warn(`[spaces-db] conversation-access convId=${convId} userId=${uid} err=${errMsg(err)}`);
+    return "unknown";
+  }
+}
+
 /** Resolve `@email@domain` → the active user with that email (email is @unique). */
 export async function getSpacesUserByEmail(email: string, workspaceId?: string): Promise<UserHit[]> {
   const client = getClient();

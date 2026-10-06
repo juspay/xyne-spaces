@@ -3,7 +3,8 @@ import { errMsg } from "../lib/errors.js";
 import { randomUUID } from "node:crypto";
 import { CONFIG } from "../config.js";
 import type { FlowDefinition } from "xyne-claw-shared";
-import { requireAuth, requireNoAccessToken, requireResultToken } from "../middleware/require-auth.js";
+import { requireAuth, requireNoAccessToken, requireResultToken, s2sKeyMatches } from "../middleware/require-auth.js";
+import { conversationAccessError } from "../lib/conversation-access.js";
 import { getRequesterId, getAgentEditAccess, isClawAdmin } from "../middleware/agent-acl.js";
 import { prisma } from "../db.js";
 import { chatMessageRepository, agentRunRepository, chatAttachmentRepository, userAgentConfigRepository } from "../repositories/index.js";
@@ -724,6 +725,25 @@ publicRouter.post("/", requireAuth, requireNoAccessToken, async (req: Request, r
 
     const slug = typeof agentSlug === "string" && agentSlug ? agentSlug : "assistant";
     const convId = typeof conversationId === "string" && conversationId ? conversationId : `chat-${randomUUID()}`;
+
+    // Conversation-ownership guard, BEFORE any convId-keyed side effect (message
+    // persist, branch clone). Claw sessions are shared per thread (keyed by
+    // conversationId, not userId), so a caller supplying another user's
+    // conversationId could attach to and poison their session. Skip for genuine
+    // S2S callers; new conversations (no supplied conversationId) pass.
+    const authUserId =
+      typeof sessionUserId === "string" && sessionUserId ? sessionUserId : userId;
+    if (
+      typeof conversationId === "string" && conversationId &&
+      authUserId && !s2sKeyMatches(req.headers["x-s2s-key"] as string | undefined)
+    ) {
+      const accessError = await conversationAccessError(authUserId, [conversationId]);
+      if (accessError) {
+        log.warn(`[run-stream] conversation access denied userId=${authUserId} conversationId=${conversationId}`);
+        res.status(403).json({ success: false, error: accessError });
+        return;
+      }
+    }
     const requestOrgId = typeof req.headers["x-org-id"] === "string" && req.headers["x-org-id"].trim()
       ? req.headers["x-org-id"].trim()
       : undefined;
