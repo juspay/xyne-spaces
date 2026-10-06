@@ -6,6 +6,7 @@ import { createLogger } from "../logger.js";
 import { setSession } from "./session-context.js";
 import { resolveProvidersForDispatch } from "./provider-resolution.js";
 import type { ChannelDeliveryTarget } from "../surfaces/messaging/plugin.js";
+import { resolveUserLitellmApiKey } from "./agent-provider-config.js";
 
 const log = createLogger("eval-run");
 
@@ -236,6 +237,7 @@ export async function dispatchEvalRun(args: {
   channelDelivery?: ChannelDeliveryTarget;
 }): Promise<EvalDispatch> {
   const sessionKey = evalSessionKey(args.conversationId, args.traceId);
+  const evalLitellmApiKey = await resolveUserLitellmApiKey(args.userId).catch(() => undefined);
   const res = await fetch(`${CONFIG.internalUrl}/claw/api/v1/internal/run`, {
     method: "POST",
     headers: {
@@ -268,6 +270,7 @@ export async function dispatchEvalRun(args: {
             },
           }
         : {}),
+      ...(evalLitellmApiKey ? { litellmApiKey: evalLitellmApiKey } : {}),
     }),
   });
 

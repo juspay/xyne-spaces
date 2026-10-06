@@ -7,7 +7,7 @@
 import { isAgentInvocableBy } from "xyne-claw-shared";
 import { fetch as httpFetch } from "undici";
 import { CONFIG } from "../../config.js";
-import { resolveAgentProviderConfigs, resolveSubagentProviderMode } from "../../lib/agent-provider-config.js";
+import { resolveAgentProviderConfigs, resolveSubagentProviderMode, resolveUserLitellmApiKey } from "../../lib/agent-provider-config.js";
 import { runAttachmentRefsEnabled, uploadRunAttachment } from "../../lib/run-attachment-store.js";
 import { setSession, type SessionContext } from "../../lib/session-context.js";
 import { channelAgentTools } from "./agent-tools.js";
@@ -222,6 +222,9 @@ export async function buildChannelRun(input: ChannelRunInput): Promise<ChannelRu
   const runAttachments = await toRunAttachments(input.conversationId, input.idempotencyKey, input.attachments ?? []);
 
   const providers = await resolveAgentProviderConfigs({ id: input.agent.id, config: input.agent.config });
+
+  const channelLitellmApiKey = await resolveUserLitellmApiKey(input.userId).catch(() => undefined);
+
   return {
     body: {
       userId: input.userId,
@@ -245,6 +248,7 @@ export async function buildChannelRun(input: ChannelRunInput): Promise<ChannelRu
       subagentProviderMode: resolveSubagentProviderMode(input.agent.config),
       optimizations: CHANNEL_RUN_OPTIMIZATIONS,
       agentConfig: channelAgentConfig(input.agent.config, input.target.channel, input.agent.delegationTier),
+      ...(channelLitellmApiKey ? { litellmApiKey: channelLitellmApiKey } : {}),
     },
     sessionContext: {
       mentionedUserId: input.userId,

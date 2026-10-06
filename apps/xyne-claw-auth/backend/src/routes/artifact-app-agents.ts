@@ -39,7 +39,7 @@ import { redisService } from "../redis.js";
 import { getRequesterId, getOrgId, isClawAdmin } from "../middleware/agent-acl.js";
 import { getWorkspaceIdForUser, requestWorkspaceHint } from "../lib/spaces-db.js";
 import { visibleAgentWhereForRunningUser } from "../lib/callable-agent-resolver.js";
-import { resolveAgentProviderConfigs } from "../lib/agent-provider-config.js";
+import { resolveAgentProviderConfigs, resolveUserLitellmApiKey } from "../lib/agent-provider-config.js";
 import { resolveFastMode } from "../lib/fast-mode.js";
 import { agentRunRepository, chatMessageRepository, chatAttachmentRepository } from "../repositories/index.js";
 import { createLogger } from "../logger.js";
@@ -475,6 +475,7 @@ async function dispatchRun(input: {
     { headlessBulk: true },
   );
   const fastModeEnabled = await resolveFastMode(input.conversationId, input.agentSlug, input.agentRow.config);
+  const artifactLitellmApiKey = await resolveUserLitellmApiKey(input.userId).catch(() => undefined);
 
   // Pre-create the two rows a chat turn creates, because we reuse agent-chat's
   // callback: the placeholder's id is what the callback finalizes, and its
@@ -529,6 +530,7 @@ async function dispatchRun(input: {
     ...(Object.keys(providerConfigs).length > 0 ? { providerConfigs } : {}),
     ...(providerOrder.length > 1 ? { providerOrder } : {}),
     fastMode: fastModeEnabled,
+    ...(artifactLitellmApiKey ? { litellmApiKey: artifactLitellmApiKey } : {}),
   };
 
   const res = await fetch(`${CONFIG.internalUrl}/claw/api/v1/internal/run`, {

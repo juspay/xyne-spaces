@@ -53,7 +53,7 @@ import { prisma } from "../db.js";
 import { cancelRunRecovery } from "../queue/run-recovery-worker.js";
 import { decrypt } from "../crypto.js";
 import { CONFIG } from "../config.js";
-import { KNOWN_PROVIDERS, buildProviderConfig, agentDefaultSpeed, providerConfigForSpeed, applyFastModeModels } from "../lib/agent-provider-config.js";
+import { KNOWN_PROVIDERS, buildProviderConfig, agentDefaultSpeed, providerConfigForSpeed, applyFastModeModels, resolveUserLitellmApiKey } from "../lib/agent-provider-config.js";
 import { awaitTurnHandoff, isTurnControlCommand } from "../lib/run-turn-handoff.js";
 import { dispatchLocalHarnessRun, isLocalHarnessProvider, localHarnessProviderLabel, pinnedModelForProvider, resolveLocalHarnessTarget, resolveLocalHarnessTargetForProvider, resolveLocalSandbox } from "../lib/local-harness.js";
 
@@ -1999,6 +1999,7 @@ router.post("/:slug/chat", async (req: Request<{ slug: string }>, res: Response)
         }
       : runAgentConfig;
     const fastModeEnabled = await resolveFastMode(conversationId, slug, effectiveAgentConfig);
+    const agentChatLitellmApiKey = await resolveUserLitellmApiKey(userId).catch(() => undefined);
 
     const aiScreenCommand = applyAiScreenCommand(message);
     const forwardBody: Record<string, unknown> = {
@@ -2047,6 +2048,7 @@ router.post("/:slug/chat", async (req: Request<{ slug: string }>, res: Response)
       // /compact shrinks the session before answering, not just summarises it.
       ...(studioMode !== "design" && aiScreenCommand.compactBeforeRun ? { compactBeforeRun: true } : {}),
       ...evalRunSwitches(req, requestedOptimizations),
+      ...(agentChatLitellmApiKey ? { litellmApiKey: agentChatLitellmApiKey } : {}),
     };
 
     const forwardedTask = typeof forwardBody["task"] === "string" ? forwardBody["task"] as string : "";

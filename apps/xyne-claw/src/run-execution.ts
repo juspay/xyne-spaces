@@ -155,6 +155,10 @@ export interface InternalRunPayload {
    *  when it starts one (a first appearance, a new branch, a lost archive).
    *  Absent for every chat that never switched agents. */
   agentHandoff?: AgentHandoffNote;
+  /** Per-run LiteLLM key (user- or org-provisioned) threaded by claw-auth's
+   *  /internal/run proxy. Only honored on the default LiteLLM model branch —
+   *  premium-provider attempts run on their own credential. */
+  litellmApiKey?: string;
 }
 
 export interface AgentHandoffNote {
@@ -234,6 +238,7 @@ export async function executeRunFromPayload(
     awakening,
     generateFollowUpSuggestions: shouldGenerateFollowUpSuggestions,
     agentHandoff,
+    litellmApiKey,
   } = payload;
 
   const sessionId = (providedSessionId ?? "").trim();
@@ -308,6 +313,7 @@ export async function executeRunFromPayload(
       awakening,
       agentHandoff,
       state,
+      litellmApiKey,
     );
   } catch (err) {
     clog.error(

@@ -5,7 +5,7 @@
  */
 import { isAgentInvocableBy } from "xyne-claw-shared";
 import { CONFIG } from "../../config.js";
-import { resolveAgentProviderConfigs, resolveSubagentProviderMode } from "../../lib/agent-provider-config.js";
+import { resolveAgentProviderConfigs, resolveSubagentProviderMode, resolveUserLitellmApiKey } from "../../lib/agent-provider-config.js";
 import { setSession } from "../../lib/session-context.js";
 import { fetch as httpFetch } from "undici";
 
@@ -91,6 +91,7 @@ export async function dispatchSlackRun(input: {
     id: input.agent.id,
     config: input.agent.config,
   });
+  const slackLitellmApiKey = await resolveUserLitellmApiKey(input.userId).catch(() => undefined);
   const effectiveAgentConfig = withSlackSubagentInjected(input.agent.config);
   const response = await httpFetch(`${CONFIG.internalUrl}/claw/api/v1/internal/run`, {
     method: "POST",
@@ -119,6 +120,7 @@ export async function dispatchSlackRun(input: {
         : {}),
       subagentProviderMode: resolveSubagentProviderMode(input.agent.config),
       ...(effectiveAgentConfig ? { agentConfig: effectiveAgentConfig } : {}),
+      ...(slackLitellmApiKey ? { litellmApiKey: slackLitellmApiKey } : {}),
     }),
   });
   const body = (await response.json().catch(() => null)) as {

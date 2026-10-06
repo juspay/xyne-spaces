@@ -6,7 +6,7 @@ import { decrypt } from "../crypto.js";
 import { agentRunRepository, chatMessageRepository } from "../repositories/index.js";
 import { ensureUserExists, resolveCanonicalUserIdOrSelf } from "../lib/users-jit.js";
 import { resolveSpacesAppCreds } from "../lib/spaces-agent-install.js";
-import { resolveAgentProviderConfigs } from "../lib/agent-provider-config.js";
+import { resolveAgentProviderConfigs, resolveOrgLitellmApiKey } from "../lib/agent-provider-config.js";
 import { resolveFastMode } from "../lib/fast-mode.js";
 import { registerRunRecovery, type RecoverySessionContext } from "./run-recovery-worker.js";
 import type { ScheduledJobData } from "./scheduled-jobs-queue.js";
@@ -103,6 +103,7 @@ async function processJob(job: Job<ScheduledJobData>, token?: string): Promise<v
     ? await resolveAgentProviderConfigs(agentRow, { headlessBulk: true })
     : { providerConfigs: {}, providerOrder: [] as string[], parent: undefined as string | undefined };
   const fastModeEnabled = await resolveFastMode(runConversationId, agentSlug, agentRow?.config);
+  const scheduledOrgLitellmApiKey = await resolveOrgLitellmApiKey(row.orgId).catch(() => undefined);
 
   const progressUrl = `${CONFIG.internalUrl}/claw/api/v1/webhook/progress`;
   // A job set up from a WhatsApp chat answers there (scheduled-jobs.ts
@@ -144,6 +145,7 @@ async function processJob(job: Job<ScheduledJobData>, token?: string): Promise<v
     ...(providerParent ? { provider: providerParent } : {}),
     ...(Object.keys(providerConfigs).length > 0 ? { providerConfigs } : {}),
     ...(providerOrder.length > 1 ? { providerOrder } : {}),
+    ...(scheduledOrgLitellmApiKey ? { litellmApiKey: scheduledOrgLitellmApiKey } : {}),
     fastMode: fastModeEnabled,
   };
 

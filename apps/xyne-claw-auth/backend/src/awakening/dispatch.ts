@@ -25,7 +25,7 @@ import { ensureUserExists } from "../lib/users-jit.js";
 import { resolveSpacesAppCreds } from "../lib/spaces-agent-install.js";
 import { chatMessageRepository } from "../repositories/index.js";
 import { setSession } from "../lib/session-context.js";
-import { resolveAgentProviderConfigs } from "../lib/agent-provider-config.js";
+import { resolveAgentProviderConfigs, resolveOrgLitellmApiKey } from "../lib/agent-provider-config.js";
 import { renderWindow } from "./render.js";
 import { HEARTBEAT_SKILL, REFLEX_SKILL } from "./skills.js";
 import { buildWritePermissions } from "./write-policy.js";
@@ -151,6 +151,8 @@ export async function dispatchAwakening(
     { headlessBulk: true },
   ).catch(() => ({ providerConfigs: {}, providerOrder: [] as string[], parent: undefined as string | undefined }));
 
+  const awakeningOrgLitellmApiKey = await resolveOrgLitellmApiKey(window.orgId).catch(() => undefined);
+
   const dispatchPayload = {
     userId: identity.spacesAppUserId,
     task: buildTask(window),
@@ -189,6 +191,7 @@ export async function dispatchAwakening(
     ...(providerParent ? { provider: providerParent } : {}),
     ...(Object.keys(providerConfigs).length > 0 ? { providerConfigs } : {}),
     ...(providerOrder.length > 1 ? { providerOrder } : {}),
+    ...(awakeningOrgLitellmApiKey ? { litellmApiKey: awakeningOrgLitellmApiKey } : {}),
   };
 
   const res = await fetch(`${CONFIG.internalUrl}/claw/api/v1/internal/run`, {

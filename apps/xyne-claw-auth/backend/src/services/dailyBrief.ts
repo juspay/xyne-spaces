@@ -37,6 +37,7 @@ import {
   recordScheduledDeliveryDelay,
   type DailyBriefTrigger,
 } from "../otel/daily-brief-metrics.js";
+import { resolveOrgLitellmApiKey } from "../lib/agent-provider-config.js";
 
 const log = createLogger("daily-brief");
 
@@ -235,6 +236,8 @@ export async function generateDailyBrief(
     }
   };
 
+  const briefLitellmApiKey = await resolveOrgLitellmApiKey(orgId).catch(() => undefined);
+
   try {
     const streamResult = await consumeClawStream({
       url: `${CONFIG.internalUrl}/claw/api/v1/internal/run`,
@@ -251,6 +254,7 @@ export async function generateDailyBrief(
         // We already wrote the user row above, parented correctly.
         __skipUserMessagePersist: true,
         ...(briefInstructions ? { additionalInstructions: briefInstructions } : {}),
+        ...(briefLitellmApiKey ? { litellmApiKey: briefLitellmApiKey } : {}),
       },
       handlers: {
         onStarted: (sid) => {

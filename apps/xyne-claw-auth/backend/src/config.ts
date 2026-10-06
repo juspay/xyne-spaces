@@ -80,6 +80,12 @@ export const CONFIG = {
   // blank and hit this. Trailing slashes stripped so `${base}/v1/models` joins
   // cleanly.
   litellmBaseUrl: (process.env["LITELLM_BASE_URL"] ?? "https://grid.ai.juspay.net").replace(/\/+$/, ""),
+  /** Default model for provisioned LiteLLM credentials that carry no per-key model. */
+  litellmModel: process.env["LITELLM_MODEL"]?.trim() || null,
+  /** Platform-level LiteLLM API key — final fallback when no user/system-provisioned key is found. */
+  litellmApiKey: process.env["LITELLM_API_KEY"]?.trim() || null,
+  /** Provenance tag written into OrgProviderCredential / UserProviderCredential metadata. */
+  litellmChangedBy: process.env["LITELLM_CHANGED_BY"] ?? "external-system:xyne-spaces-external",
   /**
    * Flip the claw → claw-auth transport from per-chunk HTTP POSTs to a single
    * SSE stream. When on, run-stream.ts opens an SSE connection to claw's
