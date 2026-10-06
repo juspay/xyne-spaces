@@ -54,6 +54,21 @@ export class MigrationQueues {
   }
 
   /**
+   * Move every waiting job off `from` onto the queue `route` picks (null = drop), ahead of jobs already there and in
+   * the same order. Add-before-remove and a no-op add for an existing jobId make it safe to re-run after a crash.
+   */
+  async moveWaiting(from: string, route: (migrationId: string) => Promise<string | null>): Promise<number> {
+    const waiting = await this.queue(from).getWaiting(); // next-first
+    for (const job of [...waiting].reverse()) {
+      const { migrationId } = job.data;
+      const to = await route(migrationId);
+      if (to) await this.queue(to).add({ migrationId }, { jobId: migrationId, lifo: true });
+      await job.remove();
+    }
+    return waiting.length;
+  }
+
+  /**
    * Fan-out enqueue: one job per conversation. jobId dedups, so re-running the planner (resume) is idempotent.
    * attempts:3 lets a transient infra blip (Redis/DB) retry — safe because re-ingesting a conversation is idempotent
    * (done-set skip + per-message dedup), so a retry only back-fills what's missing.

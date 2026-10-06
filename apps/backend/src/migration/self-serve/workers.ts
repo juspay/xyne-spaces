@@ -22,6 +22,8 @@ const RETRYABLE_INGEST_ERROR = /batch-encrypt (?:failed with status 5\d\d|timed 
 // stallLimitMs (live heartbeat but no forward progress ⇒ worker wedged) is now live-tunable via Superposition — read per reconcile tick.
 // A job interrupted more often than this in a row without progress is failed, so it can't hold the front of its lane.
 const MAX_IDLE_RECLAIMS = 3;
+// The single pre-workspace collection queue; drained into the per-workspace lanes.
+const LEGACY_COLLECTION_QUEUE: string = QueueName.COLLECTION;
 // Never picked up from a queue: resume/backfill/reclaim set QUEUED before they enqueue.
 const SETTLED = [MigrationStatus.STOPPED, MigrationStatus.FAILED, MigrationStatus.COMPLETED];
 
@@ -125,6 +127,15 @@ export class MigrationWorkers {
     logger.info('[SlackMigration] collection lane opened', { workspaceId });
   }
 
+  /** Move jobs off the pre-workspace queue: the deploy cutover, and anything old pods add while a rollout overlaps. */
+  private async drainLegacyCollection(): Promise<void> {
+    const moved = await this.queues.moveWaiting(LEGACY_COLLECTION_QUEUE, async (id) => {
+      const job = await this.store.findById(id);
+      return job?.currentQueue === QueueName.COLLECTION ? queueFor(QueueName.COLLECTION, job.workspaceId) : null;
+    });
+    if (moved) logger.info('[SlackMigration] moved jobs from the legacy collection queue', { moved });
+  }
+
   private startReconcile(): void {
     if (this.reconcileTimer) return;
     this.reconcileTimer = setInterval(() => void this.reconcile().catch(() => undefined), RECONCILE_EVERY_MS);
@@ -149,6 +160,8 @@ export class MigrationWorkers {
   private async reconcile(): Promise<void> {
     const now = Date.now();
     const { stallLimitMs } = await getMigrationRuntimeConfig();
+    await this.drainLegacyCollection().catch((e: unknown) =>
+      logger.warn('[SlackMigration] legacy collection drain failed', { error: e instanceof Error ? e.message : String(e) }));
     const jobs = await this.store.list(1000, 0);
     for (const ws of new Set(jobs.map((j) => j.workspaceId))) this.openCollectionLane(ws);
     for (const job of jobs) {
