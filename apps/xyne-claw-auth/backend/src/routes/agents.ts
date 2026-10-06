@@ -1,6 +1,7 @@
 import { Router, type Request, type RequestHandler, type Response } from "express";
 import { errMsg } from "../lib/errors.js";
 import { assertSafeOutboundUrl } from "../mcpgateway/services/http-client.js";
+import { safeFetch } from "../lib/safe-fetch.js";
 import {
   extractProviderMessage,
   modelServedBy,
@@ -3001,12 +3002,7 @@ export async function fetchAnthropicModels(apiKey: string, baseUrl?: string, aut
   } else {
     headers["x-api-key"] = apiKey;
   }
-  await assertSafeOutboundUrl(`${root}/v1/models`);
-  const res = await fetch(`${root}/v1/models`, {
-    method: "GET",
-    headers,
-    signal: AbortSignal.timeout(10_000),
-  });
+  const res = await safeFetch(`${root}/v1/models`, { method: "GET", headers }, { timeoutMs: 10_000 });
 
   if (!res.ok) {
     const text = await res.text().catch(() => "");
@@ -4277,8 +4273,7 @@ router.get(
         headers["User-Agent"] = "codex-cli";
       }
 
-      await assertSafeOutboundUrl(url);
-      const upstream = await fetch(url, { headers, signal: AbortSignal.timeout(20_000) });
+      const upstream = await safeFetch(url, { headers }, { timeoutMs: 20_000 });
       if (!upstream.ok) {
         const text = await upstream.text().catch(() => "");
         res.status(502).json({ success: false, error: `Models endpoint ${upstream.status}: ${text.slice(0, 200)}` });
@@ -4344,11 +4339,11 @@ router.post(
 
       const root = (baseUrl || CONFIG.litellmBaseUrl).replace(/\/+$/, "");
       log.info(`[agents] litellm/models fetching ${root}/v1/models (keyLen=${apiKey.length}, source=${typedKey ? "typed" : "saved-cred"})`);
-      await assertSafeOutboundUrl(`${root}/v1/models`);
-      const upstream = await fetch(`${root}/v1/models`, {
-        headers: { Authorization: `Bearer ${apiKey}`, "User-Agent": "xyne-claw-auth" },
-        signal: AbortSignal.timeout(20_000),
-      });
+      const upstream = await safeFetch(
+        `${root}/v1/models`,
+        { headers: { Authorization: `Bearer ${apiKey}`, "User-Agent": "xyne-claw-auth" } },
+        { timeoutMs: 20_000 },
+      );
       if (!upstream.ok) {
         const text = await upstream.text().catch(() => "");
         log.warn(`[agents] litellm/models upstream ${upstream.status} at ${root}/v1/models: ${text.slice(0, 200)}`);
