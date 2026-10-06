@@ -169,7 +169,7 @@ export class MakeCallStep extends BaseActionStep<typeof MakeCallConfigSchema, Ma
       });
     }
 
-    // Drop bot/app users and anyone outside the automation workspace in a single
+    // Drop bot/app/agent users and anyone outside the automation workspace in a single
     // batch lookup. This prevents stale/crafted configs from ringing machines or
     // leaking across workspace boundaries.
     if (allInvitedUserIds.length > 0) {
@@ -179,7 +179,7 @@ export class MakeCallStep extends BaseActionStep<typeof MakeCallConfigSchema, Ma
       });
       const allowedUserIds = new Set(
         resolvedUsers
-          .filter((u) => u.userType !== UserType.BOT && u.userType !== UserType.APP)
+          .filter((u) => u.userType !== UserType.BOT && u.userType !== UserType.APP && u.userType !== UserType.AGENT)
           .map((u) => u.id)
       );
       const droppedCount = allInvitedUserIds.length - allowedUserIds.size;

@@ -11,12 +11,12 @@
  * never invents — and respects a hard char cap so the file can't blow context.
  */
 
-import { fetchLiteLLMWithRetry } from "@xyne/litellm-client";
+import type { SynthesizeFileRequest, SynthesizeFileResult, SynthesizeFileTrace } from "xyne-claw-shared";
+import { postChatCompletion, tokenUsage, type ChatCompletionResponse } from "./litellm-chat.js";
 import { createLogger } from "./logger.js";
 
 const log = createLogger("twin-soul-synthesizer");
 
-const LITELLM_URL = (process.env["LITELLM_URL"] ?? "https://grid.ai.example.com").replace(/\/$/, "");
 const LITELLM_API_KEY = process.env["LITELLM_API_KEY"] ?? "";
 const SYNTH_MODEL = process.env["LITELLM_MODEL"] ?? "claude-haiku-4-5-20251001";
 const SYNTH_TIMEOUT_MS = Number(process.env["TWIN_SYNTH_TIMEOUT_MS"] ?? 120_000);
@@ -34,73 +34,21 @@ const MAX_FACT_INPUT_CHARS = Math.max(
   Math.min(200_000, Number(process.env["TWIN_SYNTH_MAX_FACT_INPUT_CHARS"] ?? 200_000) || 200_000),
 );
 
-export interface SynthesizeFileRequest {
-  fileName: string;
-  description: string;
-  /** Approved fact texts in this file's subsystem(s). */
-  facts: string[];
-  /** Hard char cap for the produced file. */
-  maxChars: number;
-  /** Existing file content (folded in / preserved when preserveEdits). */
-  currentContent?: string;
-  /** True when the current file was hand-edited by the user — preserve it. */
-  preserveEdits?: boolean;
-}
-
-export interface SynthesizeFileResult {
-  content: string | null;
-  error?: string;
-  trace?: SynthesizeFileTrace;
-}
-
-/** Full per-file LLM exchange returned to claw-auth for pipeline observability. */
-export interface SynthesizeFileTrace {
-  model: string;
-  durationMs: number;
-  systemPrompt: string;
-  userPrompt: string;
-  rawOutput: string;
-  promptChars: number;
-  factsAvailable: number;
-  factsUsed: number;
-  factsDropped: number;
-  factsClipped: number;
-  factInputChars: number;
-  factInputBudgetChars: number;
-  contextLimited: boolean;
-  finishReason?: string;
-  usage?: { promptTokens?: number; completionTokens?: number };
-}
-
-function selectFactsForPrompt(input: string[]): {
-  facts: string[];
-  available: number;
-  dropped: number;
-  clipped: number;
-  chars: number;
-} {
+function selectFactsForPrompt(input: string[]): { facts: string[]; available: number; chars: number } {
   const normalized = (input ?? []).map((f) => (f ?? "").trim()).filter(Boolean);
-  const selected: string[] = [];
+  const facts: string[] = [];
   let chars = 0;
 
   for (const fact of normalized) {
-    if (selected.length >= MAX_FACTS) break;
+    if (facts.length >= MAX_FACTS) break;
     // Include the markdown bullet prefix + separating newline in the budget.
     const cost = fact.length + 3;
     if (chars + cost > MAX_FACT_INPUT_CHARS) continue;
-    selected.push(fact);
+    facts.push(fact);
     chars += cost;
   }
 
-  return {
-    facts: selected,
-    available: normalized.length,
-    dropped: normalized.length - selected.length,
-    // Retained for trace compatibility. Facts are no longer clipped
-    // individually; the aggregate prompt budget remains the context guard.
-    clipped: 0,
-    chars,
-  };
+  return { facts, available: normalized.length, chars };
 }
 
 export async function synthesizeMemoryFile(req: SynthesizeFileRequest): Promise<SynthesizeFileResult> {
@@ -142,6 +90,7 @@ export async function synthesizeMemoryFile(req: SynthesizeFileRequest): Promise<
   }
   userLines.push("", `Write ${req.fileName} now.`);
   const userPrompt = userLines.join("\n");
+  const factsDropped = selected.available - facts.length;
   const baseTrace: SynthesizeFileTrace = {
     model: SYNTH_MODEL,
     durationMs: 0,
@@ -151,84 +100,62 @@ export async function synthesizeMemoryFile(req: SynthesizeFileRequest): Promise<
     promptChars: system.length + userPrompt.length,
     factsAvailable: selected.available,
     factsUsed: facts.length,
-    factsDropped: selected.dropped,
-    factsClipped: selected.clipped,
+    factsDropped,
+    // Retained for trace compatibility. Facts are no longer clipped
+    // individually; the aggregate prompt budget remains the context guard.
+    factsClipped: 0,
     factInputChars: selected.chars,
     factInputBudgetChars: MAX_FACT_INPUT_CHARS,
-    contextLimited: selected.dropped > 0 || selected.clipped > 0,
+    contextLimited: factsDropped > 0,
   };
+  const traced = (extra: Partial<SynthesizeFileTrace> = {}): SynthesizeFileTrace => ({
+    ...baseTrace,
+    durationMs: Date.now() - startedAt,
+    ...extra,
+  });
 
-  if (!LITELLM_API_KEY) {
-    return {
-      content: null,
-      error: "no-api-key",
-      trace: { ...baseTrace, durationMs: Date.now() - startedAt },
-    };
-  }
+  if (!LITELLM_API_KEY) return { content: null, error: "no-api-key", trace: traced() };
 
   try {
-    const res = await fetchLiteLLMWithRetry(
-      `${LITELLM_URL}/v1/chat/completions`,
+    const res = await postChatCompletion(
+      LITELLM_API_KEY,
       {
-        method: "POST",
-        headers: { Authorization: `Bearer ${LITELLM_API_KEY}`, "Content-Type": "application/json" },
-        body: JSON.stringify({
-          model: SYNTH_MODEL,
-          messages: [
-            { role: "system", content: system },
-            { role: "user", content: userPrompt },
-          ],
-          temperature: 0.3,
-          // The file is character-capped below; this token cap prevents a
-          // disobedient model from consuming the rest of its context on output.
-          // The ceiling tracks the maxChars ceiling above (~3 chars/token) so a
-          // full-length file always fits in the output budget.
-          max_tokens: Math.max(256, Math.min(16_384, Math.ceil(maxChars / 3))),
-        }),
+        model: SYNTH_MODEL,
+        messages: [
+          { role: "system", content: system },
+          { role: "user", content: userPrompt },
+        ],
+        temperature: 0.3,
+        // The file is character-capped below; this token cap prevents a
+        // disobedient model from consuming the rest of its context on output.
+        // The ceiling tracks the maxChars ceiling above (~3 chars/token) so a
+        // full-length file always fits in the output budget.
+        max_tokens: Math.max(256, Math.min(16_384, Math.ceil(maxChars / 3))),
       },
       { timeoutMs: SYNTH_TIMEOUT_MS, label: `twin-soul-synth:${req.fileName}` },
     );
     if (!res.ok) {
       const body = await res.text().catch(() => "");
       log.warn(`[twin-soul-synth] LiteLLM ${res.status} file=${req.fileName}: ${body.slice(0, 200)}`);
-      return {
-        content: null,
-        error: `llm-http-${res.status}`,
-        trace: { ...baseTrace, durationMs: Date.now() - startedAt, rawOutput: body.slice(0, 20_000) },
-      };
+      return { content: null, error: `llm-http-${res.status}`, trace: traced({ rawOutput: body.slice(0, 20_000) }) };
     }
-    const data = (await res.json()) as {
-      choices?: Array<{ message?: { content?: string | null }; finish_reason?: string | null }>;
-      usage?: { prompt_tokens?: number; completion_tokens?: number };
-    };
+    const data = (await res.json()) as ChatCompletionResponse;
     const rawOutput = data.choices?.[0]?.message?.content ?? "";
     let content = rawOutput.trim();
-    const trace: SynthesizeFileTrace = {
-      ...baseTrace,
-      durationMs: Date.now() - startedAt,
+    const trace = traced({
       rawOutput,
       ...(data.choices?.[0]?.finish_reason
         ? { finishReason: data.choices[0].finish_reason }
         : {}),
-      ...(data.usage
-        ? {
-            usage: {
-              ...(typeof data.usage.prompt_tokens === "number" ? { promptTokens: data.usage.prompt_tokens } : {}),
-              ...(typeof data.usage.completion_tokens === "number" ? { completionTokens: data.usage.completion_tokens } : {}),
-            },
-          }
-        : {}),
-    };
+      ...(data.usage ? { usage: tokenUsage(data.usage) } : {}),
+    });
     // Strip accidental code fences.
     content = content.replace(/^```(?:markdown|md)?\s*/i, "").replace(/\s*```$/i, "").trim();
     if (!content) return { content: null, error: "empty", trace };
     return { content: content.slice(0, maxChars), trace };
   } catch (err) {
-    log.warn(`[twin-soul-synth] failed file=${req.fileName}: ${err instanceof Error ? err.message : String(err)}`);
-    return {
-      content: null,
-      error: err instanceof Error ? err.message : String(err),
-      trace: { ...baseTrace, durationMs: Date.now() - startedAt },
-    };
+    const error = err instanceof Error ? err.message : String(err);
+    log.warn(`[twin-soul-synth] failed file=${req.fileName}: ${error}`);
+    return { content: null, error, trace: traced() };
   }
 }

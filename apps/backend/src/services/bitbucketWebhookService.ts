@@ -14,6 +14,7 @@ import { prCheckApprovalService } from '@/services/prCheckApprovalService';
 import { syncReleaseOnPRMerge } from '@/services/release/releaseWebhookSync';
 import { VCSProviderType } from '@xyne/shared';
 import { runBitbucketWebhook } from '@/bypassAcl/webhookIngestServices';
+import { forwardPrCardStatus } from '@/services/prCardStatusForwarder';
 /**
  * Bitbucket Server webhook event types for pull requests
  * Based on Bitbucket Server 8.6 documentation
@@ -119,10 +120,8 @@ export class BitbucketWebhookService {
         }).catch(err => logger.error('[Bitbucket-Webhook] release sync failed:', err));
       }
 
-      let validationResult: { isValid: boolean; ticketId?: string };
-
         // PR doesn't exist or wasn't created by workflow - run full validation
-        validationResult = await this.validatePRTitle(context);
+        const validationResult = await this.validatePRTitle(context);
 
         if (!validationResult.isValid) {
           // Validation failed, already posted failed build status, skip further processing
@@ -677,49 +676,22 @@ export class BitbucketWebhookService {
     logger.info(`[Bitbucket-Webhook] ✅ Marked PR as DELETED in database: ${context.prUrl}`);
   }
 
-  /**
-   * Fire-and-forget forward of a PR status change to xyne-claw-auth, which posts
-   * a FRESH PR status card into the originating Spaces thread — but only if an
-   * agent originally opened a card for this PR (matched there via a durable
-   * AgentWidgetBinding keyed on the PR URL). Fully decoupled from the ticket
-   * sync: it must NEVER block or fail this webhook handler, so it swallows every
-   * error. A PR with no agent card ⇒ silent no-op on the claw-auth side.
-   */
+  /** Move the agent's PR card for this PR (if any) to `status` — see forwardPrCardStatus. */
   private forwardPrCardStatus(
     context: PREventContext,
     status: 'merged' | 'declined' | 'deleted',
   ): void {
-    const base = config.xyneClaw?.webhookUrl;
-    const s2sKey = config.xyneClaw?.s2sKey;
-    if (!base || !s2sKey) return; // not wired in this env → skip silently
-
-    const url = `${base.replace(/\/+$/, '')}/pr-event`;
-    const body = JSON.stringify({
-      provider: 'bitbucket',
-      status,
-      prUrl: context.prUrl,
-      number: context.prId,
-      repo: `${context.projectName}/${context.repoName}`,
-    });
-
-    void fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'x-s2s-key': s2sKey },
-      body,
-      signal: AbortSignal.timeout(10_000),
-    })
-      .then((res) => {
-        if (!res.ok) {
-          logger.warn(
-            `[Bitbucket-Webhook] pr-card forward non-OK (HTTP ${res.status}) for PR ${context.prUrl}`,
-          );
-        }
-      })
-      .catch((err) => {
-        logger.warn(
-          `[Bitbucket-Webhook] pr-card forward failed for PR ${context.prUrl}: ${err instanceof Error ? err.message : String(err)}`,
-        );
-      });
+    forwardPrCardStatus(
+      {
+        provider: 'bitbucket',
+        status,
+        prUrl: context.prUrl,
+        number: context.prId,
+        repo: `${context.projectName}/${context.repoName}`,
+        title: context.pr.title,
+      },
+      '[Bitbucket-Webhook]',
+    );
   }
 }
 

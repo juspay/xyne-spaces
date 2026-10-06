@@ -1647,7 +1647,9 @@ export function findSubagentDefinitionForServer(serverType: string): SubagentDef
  *   }
  * }
  *
- * If tools config is not set, agent gets ALL available tools (backwards compatible).
+ * What an agent gets when NOTHING is selected (no `tools` key; the agent UI
+ * shows "0 selected") depends on its delegation tier — see
+ * `resolveAgentToolsConfig` below, the one place that rule lives.
  */
 export interface AgentToolsConfig {
   /** Which subagent wrappers this agent can use (e.g. "spaces", "bitbucket", "grafana") */
@@ -1660,9 +1662,54 @@ export interface AgentToolsConfig {
   gateway?: string[];
 }
 
-/** Parse tools config from agent.config */
+/**
+ * Parse the STORED tools selection from agent.config. `undefined` means the
+ * agent has no selection at all — not "unrestricted". Anything that decides
+ * what a run may use must go through `resolveAgentToolsConfig` instead.
+ */
 export function parseToolsConfig(agentConfig: Record<string, unknown> | null | undefined): AgentToolsConfig | undefined {
   const tools = (agentConfig as Record<string, unknown> | null | undefined)?.["tools"];
   if (!tools || typeof tools !== "object") return undefined;
   return tools as AgentToolsConfig;
+}
+
+export type AgentDelegationTier = "standard" | "orchestrator";
+
+/**
+ * The tools selection a RUN enforces, given the stored config and the agent's
+ * delegation tier. Both enforcement gates call this — claw-auth's MCP
+ * listing/call routes and claw's agentConfig re-filter — so they can never
+ * disagree about what "nothing selected" means.
+ *
+ *   - A saved selection is enforced as-is, for every tier.
+ *   - No selection (the UI's "0 selected"):
+ *       standard     → `{}`: nothing is granted. The run keeps only the
+ *                      framework tools no selection gates (built-in file
+ *                      tools, plus per-run defaults such as the Spaces
+ *                      surface tools, plan tracking and mode terminal tools).
+ *       orchestrator → `undefined`: unrestricted. The run gets every tool it
+ *                      can resolve credentials for; orchestrators cap the
+ *                      always-active set to their top tools and reach the
+ *                      rest through search-tools / load-tools.
+ */
+export function resolveAgentToolsConfig(
+  agentConfig: Record<string, unknown> | null | undefined,
+  delegationTier: AgentDelegationTier | string | null | undefined,
+): AgentToolsConfig | undefined {
+  const stored = parseToolsConfig(agentConfig);
+  if (stored && !isEmptyToolsSelection(stored)) return stored;
+  return delegationTier === "orchestrator" ? undefined : (stored ?? {});
+}
+
+/**
+ * True when a stored selection selects nothing — every list empty and no open
+ * palette. Older saves wrote `{ subagents: [], direct: [], custom: [] }` for
+ * "0 selected"; the UI drops the key instead. Both must mean the same thing.
+ */
+export function isEmptyToolsSelection(config: AgentToolsConfig): boolean {
+  const raw = config as Record<string, unknown>;
+  const lists = ["subagents", "direct", "custom", "gateway", "callableAgents"];
+  const anyListed = lists.some((key) => Array.isArray(raw[key]) && (raw[key] as unknown[]).length > 0);
+  const palette = raw["openPalette"];
+  return !anyListed && palette !== "read" && palette !== "all";
 }

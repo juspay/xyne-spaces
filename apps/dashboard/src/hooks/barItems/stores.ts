@@ -3,6 +3,7 @@ import { setAppSnapshot } from './appSnapshotsStore';
 import { appItemId } from './appItemId';
 import {
   DEFAULT_TOOLBAR_PATHS,
+  LEGACY_TOOLBAR_PATH_ALIASES,
   NAVIGATION_ITEMS,
 } from '../../components/AppSidebar/navigationConfig';
 
@@ -64,6 +65,8 @@ export const toolbarItemsStore = createBarItemsStore({
   storageKey: 'xyne:toolbar-items-v2',
   defaults: DEFAULT_TOOLBAR_PATHS,
   migrate: migrateToolbar,
+  // Items folded into a combined screen; keep a user's pin on the rail.
+  aliases: LEGACY_TOOLBAR_PATH_ALIASES,
 });
 
 /**

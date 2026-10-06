@@ -116,6 +116,25 @@ export const getKanbanCounts = async (
   return response.data;
 };
 
+/** The same counts over one SDLC track's tickets, across every board they are on. */
+export interface TrackKanbanCountsRequest extends Omit<
+  KanbanCountsRequest,
+  'viewMode' | 'projectId' | 'boardId'
+> {
+  channelId: string;
+  trackId: string;
+}
+
+export const getTrackKanbanCounts = async (
+  payload: TrackKanbanCountsRequest,
+): Promise<KanbanCountsResponse> => {
+  const response = await apiInstance.post<KanbanCountsResponse>(
+    '/tickets/kanban/track-counts',
+    payload,
+  );
+  return response.data;
+};
+
 export interface Merchant {
   mid: string;
 }
@@ -143,4 +162,32 @@ export const getMerchants = async (
     },
   });
   return { merchants: response.data.merchants ?? [], hasMore: response.data.hasMore ?? false };
+};
+
+export interface FormFieldValuesResponse {
+  values: string[];
+  hasMore: boolean;
+}
+
+/**
+ * Values already stored for one custom form field, for its filter dropdown. Bounded by
+ * `limit` and searched with `q` server-side, like the merchant lookup.
+ */
+export const getFormFieldValues = async (params: {
+  fieldId: string;
+  q?: string;
+  limit?: number;
+}): Promise<FormFieldValuesResponse> => {
+  const response = await apiInstance.get<{
+    success: boolean;
+    values: string[];
+    hasMore: boolean;
+  }>('/form-field-values', {
+    params: {
+      fieldId: params.fieldId,
+      ...(params.q ? { q: params.q } : {}),
+      ...(params.limit ? { limit: params.limit } : {}),
+    },
+  });
+  return { values: response.data.values ?? [], hasMore: response.data.hasMore ?? false };
 };

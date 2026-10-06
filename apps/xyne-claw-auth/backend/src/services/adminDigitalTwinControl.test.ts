@@ -20,7 +20,7 @@ vi.mock("../db.js", () => ({
   },
 }));
 
-vi.mock("./userMemoryCuratorClient.js", () => ({ ensureTwinBank: mocks.ensureTwinBank }));
+vi.mock("./twinMemoryBank.js", () => ({ ensureTwinBank: mocks.ensureTwinBank }));
 vi.mock("./agentMemoryFiles.js", () => ({
   TWIN_AGENT_SLUG: "digital-twin",
   ensureDefaultFiles: mocks.ensureDefaultFiles,
@@ -37,10 +37,10 @@ import {
   AdminDigitalTwinControlError,
   adminDisableDigitalTwin,
   adminEnableDigitalTwin,
-  buildAdminBackfillState,
   parseAdminBackfillWindow,
   summarizeAdminBackfill,
 } from "./adminDigitalTwinControl.js";
+import { buildBackfillState } from "./digitalTwinBackfillState.js";
 
 describe("admin Digital Twin lifecycle controls", () => {
   beforeEach(() => {
@@ -59,7 +59,7 @@ describe("admin Digital Twin lifecycle controls", () => {
       { from: "2026-05-15T10:00:00.000Z", to: "2026-08-15T10:00:00.000Z" },
       now,
     );
-    const state = buildAdminBackfillState(window, now);
+    const state = buildBackfillState(window, now);
 
     expect(Object.keys(state)).toEqual(["messages", "calls", "canvases"]);
     for (const source of Object.values(state)) {
@@ -129,6 +129,6 @@ describe("admin Digital Twin lifecycle controls", () => {
       calls: { complete: false, from: "2026-01-01", to: "2026-02-01", progress: { windowsDone: 0, windowsTotal: 1, recordsSeen: 3, candidatesMade: 1 } },
       canvases: { complete: false, pausedAt: "2026-02-01", from: "2026-01-01", to: "2026-02-01", progress: { windowsDone: 0, windowsTotal: 1 } },
     });
-    expect(summary).toMatchObject({ status: "running", progressPct: 33, recordsSeen: 13, candidatesMade: 3 });
+    expect(summary).toMatchObject({ status: "running", from: "2026-01-01", to: "2026-02-01", progressPct: 33, recordsSeen: 13, candidatesMade: 3 });
   });
 });

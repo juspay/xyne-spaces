@@ -72,7 +72,7 @@ export class ReplyOnMessageStep extends BaseActionStep<
     const senderId =
       (config.senderId as string | undefined) ?? (await getAutomationsBotUserId(workspaceId));
 
-    // Automations may only post as a non-human (bot/app) identity. Posting as a
+    // Automations may only post as a non-human (bot/app/agent) identity. Posting as a
     // human user is disallowed (impersonation). Blank sender falls back to the
     // Automations bot above.
     if (config.senderId) {
@@ -84,7 +84,7 @@ export class ReplyOnMessageStep extends BaseActionStep<
       )[0];
       if (!sender || sender.userType === UserType.USER) {
         throw new Error(
-          `[ReplyOnMessageStep] Sender ${config.senderId} must be a bot or app identity in workspace ${workspaceId}. Automations cannot post as a human user; leave the sender empty to post as the Automations bot.`,
+          `[ReplyOnMessageStep] Sender ${config.senderId} must be a bot, app or agent identity in workspace ${workspaceId}. Automations cannot post as a human user; leave the sender empty to post as the Automations bot.`,
         );
       }
     }

@@ -16,6 +16,7 @@ const OWNER_CACHE_MS = 60_000;
 const PAGE_PANEL_TRIGGER_SOURCES = new Set(["chat"]);
 const OPEN_URL_TOOL = "open-url";
 const PANEL_OPEN_WAIT_MS = 8_000;
+const OPEN_URL_DEADLINE_MS = 15_000;
 
 export const PAGE_PANEL_TOOLS = new Set([
   "page-read",
@@ -100,6 +101,59 @@ async function runOwner(runId: string): Promise<RunOwner | null> {
   return entry;
 }
 
+export type BrowserSurface = "xyne-ai" | "sdlc";
+
+export interface BrowserAccess {
+  surface: BrowserSurface;
+  runId: string;
+  userId: string;
+  conversationId: string | null;
+  orgId: string;
+}
+
+export async function browserAccessForRun(
+  userId: string,
+  sessionId: string | null | undefined,
+): Promise<BrowserAccess | null> {
+  const runId = sessionId?.trim() ?? "";
+  if (!runId) return null;
+  const owner = await runOwner(runId).catch(() => null);
+  if (!owner || owner.userId !== userId) return null;
+  const base = { runId, userId, conversationId: owner.conversationId, orgId: owner.orgId };
+  if (owner.allowed) return { surface: "xyne-ai", ...base };
+  const sdlc = await redisService.getConnection().exists(`sdlc-run:${runId}`).catch(() => 0);
+  return sdlc ? { surface: "sdlc", ...base } : null;
+}
+
+export function pagePanelDeadlineMs(toolName: string): number {
+  if (toolName === OPEN_URL_TOOL) return OPEN_URL_DEADLINE_MS;
+  return DEADLINES_MS[toolName] ?? READ_DEADLINE_MS;
+}
+
+export async function recordOpenUrlPage(access: BrowserAccess, args: Record<string, unknown>): Promise<string | null> {
+  const raw = typeof args["url"] === "string" ? args["url"].trim() : "";
+  if (!/^https?:\/\//i.test(raw)) return "Error: url must be an absolute http(s) URL.";
+  if (!access.conversationId) return "This run has no conversation to open the page in.";
+  const { recordConversationArtifact, normalizeExternalUrl, detectLinkProvider } = await import("./conversation-artifacts.js");
+  const normalized = normalizeExternalUrl(raw);
+  if (!normalized) return "Error: url could not be parsed.";
+  const title = typeof args["title"] === "string" && args["title"].trim() ? args["title"].trim() : new URL(raw).host;
+  await recordConversationArtifact({
+    conversationId: access.conversationId,
+    runId: access.runId,
+    kind: "PAGE",
+    refService: "EXTERNAL",
+    refId: normalized,
+    url: raw,
+    provider: detectLinkProvider(normalized),
+    title,
+    createdByUserId: access.userId,
+    orgId: access.orgId,
+  });
+  log.info(`[page-panel] open-url run=${access.runId} host=${new URL(raw).host}`);
+  return null;
+}
+
 function tooBig(args: Record<string, unknown>): boolean {
   try {
     return JSON.stringify(args).length > MAX_ARG_CHARS;
@@ -169,25 +223,11 @@ function parsePresence(raw: string | null): { userId: string; panelOpen: boolean
 
 async function openInPanel(owner: RunOwner, runId: string, args: Record<string, unknown>): Promise<PagePanelResult> {
   const raw = typeof args["url"] === "string" ? args["url"].trim() : "";
-  if (!/^https?:\/\//i.test(raw)) return { ok: false, content: "Error: url must be an absolute http(s) URL." };
-  if (!owner.conversationId) return unavailable("This run has no conversation to open the page in.");
-  const { recordConversationArtifact, normalizeExternalUrl, detectLinkProvider } = await import("./conversation-artifacts.js");
-  const normalized = normalizeExternalUrl(raw);
-  if (!normalized) return { ok: false, content: "Error: url could not be parsed." };
-  const title = typeof args["title"] === "string" && args["title"].trim() ? args["title"].trim() : new URL(raw).host;
-  await recordConversationArtifact({
-    conversationId: owner.conversationId,
-    runId,
-    kind: "PAGE",
-    refService: "EXTERNAL",
-    refId: normalized,
-    url: raw,
-    provider: detectLinkProvider(normalized),
-    title,
-    createdByUserId: owner.userId,
-    orgId: owner.orgId,
-  });
-  log.info(`[page-panel] open-url run=${runId} host=${new URL(raw).host}`);
+  const failure = await recordOpenUrlPage(
+    { surface: "xyne-ai", runId, userId: owner.userId, conversationId: owner.conversationId, orgId: owner.orgId },
+    args,
+  );
+  if (failure) return failure.startsWith("Error") ? { ok: false, content: failure } : unavailable(failure);
 
   const redis = redisService.getConnection();
   const until = Date.now() + PANEL_OPEN_WAIT_MS;

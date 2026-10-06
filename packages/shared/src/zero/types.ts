@@ -527,6 +527,7 @@ export enum UserType {
   USER = 'USER',
   BOT = 'BOT',
   APP = 'APP',
+  AGENT = 'AGENT',
 }
 
 // @ts-ignore TS1294
@@ -700,6 +701,7 @@ export enum NotificationType {
   EMAIL_FETCH_FAILED = "EMAIL_FETCH_FAILED",
   EMAIL_BACKFILL_REQUIRED = "EMAIL_BACKFILL_REQUIRED",
   CANVAS_SHARED = "CANVAS_SHARED",
+  VIEW_SHARED = "VIEW_SHARED",
   RECORDING_SHARED = "RECORDING_SHARED",
   RECORDING_SUMMARY_READY = "RECORDING_SUMMARY_READY",
   TRANSCRIPT_TRANSLATION_READY = "TRANSCRIPT_TRANSLATION_READY",
@@ -850,6 +852,12 @@ export enum FormFieldType {
  * project-wide, so the three must agree.
  */
 export const MAX_DUPLICATE_SCOPE_FIELDS = 5;
+
+/**
+ * Max artifact apps on EmailChannelPreference.deskAppIds. Enforced by both Zero
+ * mutators and the desk's app picker; matches the per-bar cap on the other bars.
+ */
+export const MAX_DESK_APPS = 8;
 
 // @ts-ignore TS1294
 export enum FormContextType {
@@ -1055,10 +1063,12 @@ export enum SavedConfigEntityName {
   FORM_ENTITY_VALUE = 'FORM_ENTITY_VALUE',
 }
 
-// Who a saved-view share grant targets. USER today; USER_GROUP / CHANNEL slots reserved.
+// Who a saved-view share grant targets. USER shares with an individual; CHANNEL shares
+// with every current & future member of a channel. USER_GROUP slot reserved.
 // @ts-ignore TS1294
 export enum ViewAccessEntityType {
   USER = 'USER',
+  CHANNEL = 'CHANNEL',
 }
 
 // @ts-ignore TS1294

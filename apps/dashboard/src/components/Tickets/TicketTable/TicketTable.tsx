@@ -1,4 +1,13 @@
-import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import React, {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+} from 'react';
+import { createPortal } from 'react-dom';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import type { Ticket, TicketTag } from '@xyne/shared';
 import { isDeskChannelType, TicketStatusV2 } from '@xyne/shared';
@@ -8,6 +17,7 @@ import { queries } from '../../../zero/queries';
 import { useUserGroups } from '../../../hooks/useUserGroup';
 import { TicketListRow, type SubTicketProgress } from './TicketListRow';
 import { BulkActionToolbar } from './BulkActionToolbar';
+import { ExclusivePickerScope } from './ExclusivePickerScope';
 import {
   dueDateToEta,
   MAX_BULK_TICKETS,
@@ -43,6 +53,10 @@ interface TicketTableProps {
   /** 'scroll' (default) = infinite scroll; 'pages' = numbered pager (desk). */
   paginationMode?: 'scroll' | 'pages';
   pageSize?: number;
+  /** Extra per-row pills supplied by the hosting screen (see TicketListRow `extras`). */
+  renderRowExtras?: (ticket: Ticket) => ReactNode;
+  /** Renders the bulk-action toolbar here instead of inline, for lists inside a clipped or masked scroller. */
+  bulkActionsContainer?: HTMLElement | null;
 }
 
 // The registry already skips editable targets; these guards cover the rest.
@@ -87,6 +101,8 @@ export const TicketTable: React.FC<TicketTableProps> = ({
   scrollElement,
   paginationMode = 'scroll',
   pageSize = 25,
+  renderRowExtras,
+  bulkActionsContainer,
 }) => {
   const isPagesMode = paginationMode === 'pages';
   const navigate = useNavigate();
@@ -484,6 +500,7 @@ export const TicketTable: React.FC<TicketTableProps> = ({
               subProgress={subProgressByTicketId.get(ticket.id)}
               boardName={boardNameById.get(ticket.boardId)}
               isComfortView={isComfortView}
+              extras={renderRowExtras?.(ticket)}
               onOpen={onOpen}
             />
           </div>
@@ -532,6 +549,7 @@ export const TicketTable: React.FC<TicketTableProps> = ({
               subProgress={subProgressByTicketId.get(ticket.id)}
               boardName={boardNameById.get(ticket.boardId)}
               isComfortView={isComfortView}
+              extras={renderRowExtras?.(ticket)}
               onOpen={onOpen}
             />
           </div>
@@ -561,8 +579,28 @@ export const TicketTable: React.FC<TicketTableProps> = ({
     </>
   );
 
+  const bulkToolbar = selected.size > 0 && (
+    <BulkActionToolbar
+      selectedCount={selected.size}
+      onSelectAll={handleSelectAll}
+      users={bulkAssignableUsers}
+      userGroups={userGroups}
+      onAssigneeChange={val => handleBulkUpdate(assigneeOptionToTicketUpdate(val))}
+      onPriorityChange={val => handleBulkUpdate(val === null ? {} : { priority: val })}
+      onStageChange={val => handleBulkUpdate({ stage: { name: val } })}
+      onDueDateChange={date => {
+        // `ticket.update` has no way to null an eta, so only a picked
+        // date is applied — clearing in bulk isn't supported yet.
+        if (date) handleBulkUpdate({ eta: dueDateToEta(date) });
+      }}
+      onClearSelection={clearSelection}
+      availableTags={availableTags}
+      onTagsChange={handleBulkTagUpdate}
+    />
+  );
+
   return (
-    <div className='flex min-h-0 flex-1 flex-col'>
+    <ExclusivePickerScope className='flex min-h-0 flex-1 flex-col'>
       {isLoading && tickets.length === 0 ? (
         <div className='flex h-24 items-center justify-center text-sm text-muted-foreground'>
           Loading tickets…
@@ -581,26 +619,8 @@ export const TicketTable: React.FC<TicketTableProps> = ({
         </div>
       )}
 
-      {selected.size > 0 && (
-        <BulkActionToolbar
-          selectedCount={selected.size}
-          onSelectAll={handleSelectAll}
-          users={bulkAssignableUsers}
-          userGroups={userGroups}
-          onAssigneeChange={val => handleBulkUpdate(assigneeOptionToTicketUpdate(val))}
-          onStatusChange={val => handleBulkUpdate({ statusV2: val })}
-          onPriorityChange={val => handleBulkUpdate(val === null ? {} : { priority: val })}
-          onStageChange={val => handleBulkUpdate({ stage: { name: val } })}
-          onDueDateChange={date => {
-            // `ticket.update` has no way to null an eta, so only a picked
-            // date is applied — clearing in bulk isn't supported yet.
-            if (date) handleBulkUpdate({ eta: dueDateToEta(date) });
-          }}
-          onClearSelection={clearSelection}
-          availableTags={availableTags}
-          onTagsChange={handleBulkTagUpdate}
-        />
-      )}
-    </div>
+      {bulkToolbar &&
+        (bulkActionsContainer ? createPortal(bulkToolbar, bulkActionsContainer) : bulkToolbar)}
+    </ExclusivePickerScope>
   );
 };

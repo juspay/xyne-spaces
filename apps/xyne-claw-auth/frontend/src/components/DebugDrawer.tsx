@@ -770,6 +770,12 @@ function eventTitle(kind: string, data: Record<string, unknown>): string {
     return name ? `Tool · ${name}` : "Tool call";
   }
   if (kind === "session_prompt" || kind === "llm_request") return "LLM request";
+  if (kind === "judge_call") {
+    const purpose = asString(data.purpose);
+    const failed = data.ok === false ? " · failed → fallback" : "";
+    return `Classifier (Jev)${purpose ? ` · ${purpose}` : ""}${failed}`;
+  }
+  if (kind === "judge_outcome") return `Classifier decided${asString(data.purpose) ? ` · ${asString(data.purpose)}` : ""}`;
   if (kind === "tool_palette_change") return "Tool palette changed";
   if (kind === "skill_loaded") return "Skill loaded";
   if (kind === "subagent_start" || kind === "subagent_end") {

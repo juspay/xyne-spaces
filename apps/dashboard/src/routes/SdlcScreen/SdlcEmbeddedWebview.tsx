@@ -3,6 +3,8 @@ import { pickWebviewPartition } from '../../utils/browserPanelPartition';
 import { registerEmbeddedWebview } from '../../utils/embeddedWebviewRegistry';
 import { parseSdlcFrameMessage, SDLC_FRAME_MESSAGE } from './sdlcFrameMessages';
 import { ANNOTATE_SCRIPT } from '../../components/workspaceItems';
+import { registerSdlcWebviewGetter } from '../../components/AIScreen/Workspace/sdlcBrowserTarget';
+import type { ElectronWebviewElement } from '../../types/electron';
 
 /** The slice of Electron's webview element this file uses. */
 interface WebviewElement extends HTMLElement {
@@ -131,6 +133,20 @@ export function SdlcEmbeddedWebview(props: {
   const activeIdRef = useRef(activeId);
   tabsRef.current = tabs;
   activeIdRef.current = activeId;
+  const embedRef = useRef(embed);
+  embedRef.current = embed;
+
+  useEffect(
+    () =>
+      registerSdlcWebviewGetter(() =>
+        embedRef.current?.visible
+          ? ((viewRefs.current.get(activeIdRef.current) as unknown as
+              | ElectronWebviewElement
+              | undefined) ?? null)
+          : null,
+      ),
+    [],
+  );
 
   const postState = useCallback((): void => {
     const frame = props.getFrameWindow();

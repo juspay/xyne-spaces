@@ -129,4 +129,18 @@ describe("jev compaction selection", () => {
     expect(out!.scoredCalls).toBe(2);
     expect(out!.unscoredCalls).toBeGreaterThan(0);
   });
+
+  it("falls back instead of dropping when many calls come back unscored (partial batch failure)", async () => {
+    // Only c1 of 4 scorable calls got scores: 3 holes > 10% → fall back to pi compaction.
+    scoreItems.mockImplementation(async () => new Map([["c1", 0.1]]));
+    const out = await buildJevCompaction([
+      user("find the bug"),
+      assistant("a", [call("c1", "s1")]), result("c1", "s1", BULK),
+      assistant("b", [call("c2", "s2")]), result("c2", "s2", BULK),
+      assistant("c", [call("c3", "s3")]), result("c3", "s3", BULK),
+      assistant("d", [call("c4", "s4")]), result("c4", "s4", BULK),
+      user("thanks"),
+    ]);
+    expect(out).toBeNull();
+  });
 });

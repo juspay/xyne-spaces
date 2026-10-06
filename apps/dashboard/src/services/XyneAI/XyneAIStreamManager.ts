@@ -595,6 +595,13 @@ class XyneAIStreamManager {
       return;
     }
 
+    // Follow-ups land after `complete`, when no bot message is streaming any
+    // more, so they bypass the streaming-message lookup below.
+    if (data['type'] === 'follow_ups') {
+      this.applyLateFollowUps(streamState, data);
+      return;
+    }
+
     // Get or initialize stream data
     let streamData = this.streamDataMap.get(streamId);
     if (!streamData) {
@@ -661,6 +668,35 @@ class XyneAIStreamManager {
     if (result.traceId) {
       streamState.traceId = result.traceId;
     }
+
+    // The answer is final at `complete`, but the socket may stay open a while
+    // longer for late follow-ups. Finalize now so the run doesn't look active
+    // for the hold; the socket-close completion below is then a no-op.
+    if (eventType === 'complete' || eventType === 'done') {
+      this.completeStream(streamId, threadId, streamData.rawContent);
+    }
+  }
+
+  /** Late follow-up suggestions pushed down the held answer stream. */
+  private applyLateFollowUps(streamState: StreamState, data: Record<string, unknown>): void {
+    const suggestions = Array.isArray(data['followUpSuggestions'])
+      ? data['followUpSuggestions'].filter(
+          (suggestion): suggestion is string =>
+            typeof suggestion === 'string' && suggestion.trim().length > 0,
+        )
+      : [];
+    if (suggestions.length === 0) return;
+    const messageId = typeof data['messageId'] === 'string' ? data['messageId'] : undefined;
+    const target =
+      (messageId && streamState.messages.find(m => m.id === messageId)) ||
+      [...streamState.messages].reverse().find(m => m.type === 'bot');
+    if (!target) return;
+    streamState.followUpsPending = false;
+    streamState.messages = streamState.messages.map(m =>
+      m.id === target.id ? { ...m, followUpSuggestions: suggestions } : m,
+    );
+    this.notifySubscribers({ ...streamState });
+    void xyneAIStreamStorage.updateMessages(streamState.streamId, streamState.messages);
   }
 
   /**
@@ -695,6 +731,13 @@ class XyneAIStreamManager {
     const rawContent = streamData?.rawContent || '';
 
     this.completeStream(streamId, threadId, rawContent);
+
+    // The held stream closed without delivering follow-ups (hold lapsed, or
+    // they were persisted on a pod that couldn't reach this stream). They may
+    // be in history by now; read it once rather than polling.
+    if (this.activeStreams.get(threadId)?.followUpsPending === true) {
+      void this.refreshMessagesFromBackend(streamId, threadId);
+    }
 
     // Cleanup stream data
     this.streamDataMap.delete(streamId);
@@ -1037,6 +1080,13 @@ class XyneAIStreamManager {
         // subscriber notifications that clobber the new stream's React state)
         this.activeStreams.delete(threadId);
         this.abortControllers.delete(existingStream.streamId);
+        // Its socket may still be held open for late follow-ups to the previous
+        // answer; close the fetch directly so no orphaned chunks arrive.
+        const closeHeld: WorkerIncomingMessage = {
+          type: 'ABORT_STREAM',
+          payload: { streamId: existingStream.streamId },
+        };
+        this.worker.postMessage(closeHeld);
       } else if (
         existingStream.status === 'streaming' &&
         existingStream.streamId.startsWith('stream-')
@@ -1971,12 +2021,10 @@ class XyneAIStreamManager {
 
     // Re-fetch messages from backend to get authoritative final state
     // This fixes rendering misalignment issues caused by partial/broken markdown
-    // during streaming deltas (similar to refreshRuns pattern in claw chat)
-    void this.refreshMessagesFromBackend(
-      streamId,
-      threadId,
-      currentState.followUpsPending === true,
-    );
+    // during streaming deltas (similar to refreshRuns pattern in claw chat).
+    // Late follow-ups are not polled for: they arrive on this same stream
+    // (`follow_ups`), with one history read on socket close as the fallback.
+    void this.refreshMessagesFromBackend(streamId, threadId);
 
     const notifyKey = currentState.sessionId || currentState.streamSlotKey || threadId;
     const viewingThis = Boolean(
@@ -2387,13 +2435,29 @@ class XyneAIStreamManager {
     return close;
   }
 
+  /**
+   * The key a stream lives under now. A new chat's first turn completes under
+   * its draft slot key, then the page/sidebar immediately re-homes it onto the
+   * server session key (migrateThreadId), so a threadId captured at completion
+   * goes stale before the late follow-up reconcile retries run.
+   */
+  private currentThreadIdForStream(streamId: string, threadId: string): string | undefined {
+    if (this.activeStreams.get(threadId)?.streamId === streamId) return threadId;
+    for (const [tid, state] of this.activeStreams.entries()) {
+      if (state.streamId === streamId) return tid;
+    }
+    return undefined;
+  }
+
   private async refreshMessagesFromBackend(
     streamId: string,
     threadId: string,
     followUpsPending = false,
     followUpRetry = 0,
   ): Promise<void> {
-    const currentState = this.activeStreams.get(threadId);
+    const currentState = this.activeStreams.get(
+      this.currentThreadIdForStream(streamId, threadId) ?? threadId,
+    );
     if (!currentState) return;
 
     // Only refresh for v2 (claw-backed) streams that have a sessionId
@@ -2413,7 +2477,11 @@ class XyneAIStreamManager {
         .find(message => message.type === 'bot');
       // Merge refreshed messages with current state, preserving streaming state
       // and ensuring we don't overwrite messages that are still being processed
-      this.mergeRefreshedMessages(streamId, threadId, refreshedMessages);
+      this.mergeRefreshedMessages(
+        streamId,
+        this.currentThreadIdForStream(streamId, threadId) ?? threadId,
+        refreshedMessages,
+      );
 
       // The stream's done frame and AgentRun persistence finish on adjacent
       // async hops. A first history read can therefore see the assistant text
@@ -2426,9 +2494,9 @@ class XyneAIStreamManager {
       ) {
         const delayMs = FOLLOW_UP_RETRY_DELAYS_MS[followUpRetry];
         window.setTimeout(() => {
-          const latestState = this.activeStreams.get(threadId);
-          if (latestState?.streamId === streamId) {
-            void this.refreshMessagesFromBackend(streamId, threadId, true, followUpRetry + 1);
+          const latestThreadId = this.currentThreadIdForStream(streamId, threadId);
+          if (latestThreadId) {
+            void this.refreshMessagesFromBackend(streamId, latestThreadId, true, followUpRetry + 1);
           }
         }, delayMs);
       }

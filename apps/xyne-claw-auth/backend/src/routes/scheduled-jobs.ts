@@ -31,7 +31,7 @@ import {
 import { handleRunCompletion } from "../queue/run-recovery-worker.js";
 import { isDashboardTask, refreshScheduledDashboardShare } from "../services/dashboardShareRefreshService.js";
 import { designShareUrl } from "./design-shares.js";
-import { buildScheduledJobApprovalFlow } from "xyne-claw-shared";
+import { buildScheduledJobApprovalFlow, withSpacesAppId } from "xyne-claw-shared";
 // cron-parser v4 is CJS (`module.exports = CronParser`). Node's native ESM
 // loader can't statically detect named exports from that pattern, so a
 // `import { parseExpression } from "cron-parser"` throws at runtime even
@@ -253,11 +253,6 @@ async function postScheduledFailureNotice(row: {
   }, appToken);
 }
 
-function withSpacesAppIdFlow<T extends { data?: Record<string, unknown> }>(flow: T, spacesAppId?: string | null): T {
-  if (!spacesAppId) return flow;
-  return { ...flow, data: { ...(flow.data ?? {}), spacesAppId } };
-}
-
 /**
  * Post the channel-broadcast approval card for a `pending_approval` scheduled
  * job to the thread the request came from (falling back to a DM to the creator
@@ -287,7 +282,7 @@ async function postScheduledJobApprovalCard(opts: {
   const appToken = decryptStoredField(agent.spacesAppToken);
   const spacesAppUserId = agent.spacesAppUserId ?? "";
 
-  const flow = withSpacesAppIdFlow(buildScheduledJobApprovalFlow({
+  const flow = withSpacesAppId(buildScheduledJobApprovalFlow({
     scheduledJobId: row.id,
     creatorUserId: row.userId,
     scheduleSummary,

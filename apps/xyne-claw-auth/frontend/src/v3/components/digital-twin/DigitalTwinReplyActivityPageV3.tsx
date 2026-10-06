@@ -7,7 +7,7 @@ import {
   ArrowUpIcon,
   ArrowDownIcon,
 } from "@phosphor-icons/react";
-import { getTwinReplyMetrics, type TwinReplyMetrics, type AdminOrgScope } from "../../../lib/api";
+import { getTwinReplyMetrics, type TwinReplyMetrics, type TwinWeeklyReplyPoint, type AdminOrgScope } from "../../../lib/api";
 
 interface Props {
   userId: string;
@@ -306,6 +306,9 @@ export function DigitalTwinReplyActivityPageV3({ userId, isAdmin = false, onBack
               />
             </div>
 
+            {/* Weekly trend: is feedback improving the twin? */}
+            {metrics.replies.weekly && metrics.replies.weekly.length > 0 && <WeeklyTrendTable weeks={metrics.replies.weekly} />}
+
             {/* Tiles */}
             <div className="grid grid-cols-2 gap-[12px] md:grid-cols-4">
               <Tile
@@ -477,6 +480,43 @@ function ReplyPerUserTable({ rows }: { rows: TwinReplyMetrics["byUser"] }) {
           </table>
         </div>
       )}
+    </div>
+  );
+}
+
+/** Per-week approval trend: the one number that says whether feedback is improving the twin. */
+export function WeeklyTrendTable({ weeks }: { weeks: TwinWeeklyReplyPoint[] }) {
+  return (
+    <div className="rounded-xl border border-xyne-border bg-xyne-surface">
+      <div className="px-[12px] py-[8px] text-[12px] font-medium text-xyne-fg-primary">Weekly approval trend</div>
+      <table className="w-full text-[12px]">
+        <thead className="text-xyne-fg-tertiary">
+          <tr>
+            <th className="px-[10px] py-[6px] text-left font-normal">week of</th>
+            <th className="px-[10px] py-[6px] text-right font-normal">drafts</th>
+            <th className="px-[10px] py-[6px] text-right font-normal">sent as-is</th>
+            <th className="px-[10px] py-[6px] text-right font-normal">edited</th>
+            <th className="px-[10px] py-[6px] text-right font-normal">declined</th>
+            <th className="px-[10px] py-[6px] text-right font-normal">ignored</th>
+            <th className="px-[10px] py-[6px] text-right font-normal">approval</th>
+            <th className="px-[10px] py-[6px] text-right font-normal">sent untouched</th>
+          </tr>
+        </thead>
+        <tbody>
+          {weeks.map((w) => (
+            <tr key={w.weekStart} className="border-t border-xyne-border">
+              <td className="px-[10px] py-[6px] text-xyne-fg-primary">{w.weekStart}</td>
+              <td className="px-[10px] py-[6px] text-right tabular-nums">{w.proposed}</td>
+              <td className="px-[10px] py-[6px] text-right tabular-nums">{w.accepted}</td>
+              <td className="px-[10px] py-[6px] text-right tabular-nums">{w.acceptedEdited}</td>
+              <td className="px-[10px] py-[6px] text-right tabular-nums">{w.declined}</td>
+              <td className="px-[10px] py-[6px] text-right tabular-nums">{w.ignored}</td>
+              <td className="px-[10px] py-[6px] text-right tabular-nums text-xyne-fg-primary">{fmtPct(w.approvalRate)}</td>
+              <td className="px-[10px] py-[6px] text-right tabular-nums">{fmtPct(w.cleanApprovalRate)}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
     </div>
   );
 }

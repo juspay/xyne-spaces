@@ -33,6 +33,8 @@ import { ExternalSourceRepository } from '@/database/repositories/externalSource
 import { ExternalMessageRepository } from '@/database/repositories/externalMessageRepository';
 import { adapterRegistry } from '@/integrations/core/adapterRegistry';
 import { scopeExternalMessageIdToSource } from '@/integrations/core/deskSources';
+import { acquireLock, releaseLock, type LockHandle } from '@/utils/distributedLock';
+import type { CustomRequest } from '@/types/express';
 import { EmailChannelPreferenceRepository } from '@/database/repositories/emailChannelPreferenceRepository';
 import { createTicketCustomFieldActivity } from '@/services/ticketCustomFieldActivityService';
 
@@ -162,6 +164,7 @@ const AppDeskInboundBodySchema = z.object({
   senderName: z.string().trim().optional(),
   senderEmail: z.string().email('senderEmail must be a valid email when provided').trim().optional(),
   additionalFormFields: z.record(z.unknown()).optional(),
+  timestamp: z.string().datetime({ offset: true, message: 'timestamp must be an ISO 8601 timestamp' }).optional(),
 });
 
 const ListBySenderQuerySchema = z.object({
@@ -693,7 +696,7 @@ export class TicketController {
             // Full role assignment will be done after ticket creation
             pendingFullRoleAssignment = true;
           } else {
-          const assignmentResult = await evaluateAssignmentRule(userGroupId, boardId, undefined, undefined, projectId);
+          const assignmentResult = await evaluateAssignmentRule(userGroupId, boardId, undefined, undefined, projectId, resolvedChannelId);
           if (assignmentResult.assignedUserId) {
             resolvedAssignedTo = assignmentResult.assignedUserId;
             }
@@ -749,6 +752,7 @@ export class TicketController {
             boardId,
             createdBy: userId,
             projectId,
+            channelId: resolvedChannelId,
           });
           const primaryUserId = primaryUserIdOf(fullRoles);
           if (primaryUserId) {
@@ -858,6 +862,7 @@ export class TicketController {
           statusV2: true,
           userGroupId: true,
           assignedTo: true,
+          channelId: true,
         },
       });
       if (!ticket) {
@@ -1066,6 +1071,7 @@ export class TicketController {
               boardId: targetBoardId,
               createdBy: userId,
               projectId: ticket.projectId,
+              channelId: ticket.channelId,
             });
             const primaryUserId = primaryUserIdOf(fullRoles);
             if (primaryUserId) {
@@ -1082,6 +1088,7 @@ export class TicketController {
               undefined,
               undefined,
               ticket.projectId,
+              ticket.channelId ?? null,
             );
             if (assignmentResult.assignedUserId) {
               await ticketService.updateTicketAssignee(ticketId, userId, assignmentResult.assignedUserId);
@@ -2505,7 +2512,7 @@ export class TicketController {
           if (boardMetadata?.fullRoleAssignment === true) {
             pendingFullRoleAssignment = true;
           } else {
-            const assignmentResult = await evaluateAssignmentRule(userGroupId, ticket.boardId, undefined, undefined, ticket.projectId);
+            const assignmentResult = await evaluateAssignmentRule(userGroupId, ticket.boardId, undefined, undefined, ticket.projectId, ticket.channelId ?? null);
             if (assignmentResult.assignedUserId) {
               resolvedAssignedTo = assignmentResult.assignedUserId;
               const updatedTicket = await prismaClient.ticket.update({
@@ -2528,6 +2535,7 @@ export class TicketController {
             boardId: ticket.boardId,
             createdBy: userId,
             projectId: ticket.projectId,
+            channelId: ticket.channelId ?? null,
           });
           const primaryUserId = primaryUserIdOf(fullRoles);
           if (primaryUserId) {
@@ -2566,6 +2574,7 @@ export class TicketController {
   };
 
   appDeskInbound = async (req: Request, res: Response): Promise<void> => {
+    let creationLock: LockHandle | null = null;
     try {
       const additionalFormFieldValidationErrors: Array<{ error: string; code: 'VALIDATION_ERROR' }> = [];
 
@@ -2614,7 +2623,7 @@ export class TicketController {
       const {
         channelId, threadId, externalId: bodyExternalId, subject, body,
         senderEmail, senderName,
-        additionalFormFields,
+        additionalFormFields, timestamp,
       } = bodyResult.data;
 
       const userId = req.user!.id;
@@ -2695,6 +2704,9 @@ export class TicketController {
       }
 
       const externalThreadId = threadId;
+      // Prefer the app's send time; otherwise request arrival, not processing time, so
+      // lock waits and slow uploads can't reorder a thread.
+      const arrivedAt = timestamp ? new Date(timestamp) : new Date((req as CustomRequest).startTime ?? Date.now());
       const appExternalId = bodyExternalId || randomUUID();
       // Source-namespaced, and written to BOTH Email.externalMessageId and
       // ExternalMessage.externalId. Those two columns are the same identifier
@@ -2770,38 +2782,94 @@ export class TicketController {
         appUserId: userId,
       });
 
+      // `externalId` must identify a message uniquely within the source, not just
+      // within its thread. Email's unique is (externalMessageId, channelId), so an
+      // id reused under a second thread cannot be stored.
+      // Scoped first, then the raw id: source-scoping (#1248) is recent, so an id
+      // this app pushed before it is stored unscoped.
+      const existingLink =
+        (await externalMessageRepo.findByExternalId(externalSource.id, externalMessageId)) ??
+        (await externalMessageRepo.findByExternalId(externalSource.id, appExternalId));
+      if (existingLink && existingLink.externalThreadId !== externalThreadId) {
+        logger.warn('[AppDeskInbound] externalId reused across threads — rejecting', {
+          channelId,
+          externalId: appExternalId,
+          externalMessageId,
+          incomingThreadId: externalThreadId,
+          alreadyUsedByThreadId: existingLink.externalThreadId,
+          externalSourceId: externalSource.id,
+        });
+        res.status(409).json({
+          error:
+            `externalId "${appExternalId}" is already in use by thread "${existingLink.externalThreadId}". ` +
+            'externalId must be unique per app, not per thread — send a globally unique id ' +
+            '(for example your message id combined with your thread id).',
+          code: 'EXTERNAL_ID_NOT_UNIQUE',
+        });
+        return;
+      }
+
       // Thread continuation is source-scoped via the app's ExternalMessage link; the
       // channel-scoped fallback only covers pre-existing threads with a missing link
       // (self-healed by the externalSourceLink write below). Do not remove the fallback.
-      const linkedMessage = await externalMessageRepo.findByThreadId(externalSource.id, externalThreadId, ExternalEntityType.EMAIL);
-      let threadEmail = linkedMessage?.entityId ? await repositories.emails.findById(linkedMessage.entityId) : null;
-      if (!threadEmail) {
-        const candidate = await repositories.emails.findFirstByThreadAndChannel(externalThreadId, channelId);
-        if (candidate) {
-          // The candidate matched on (threadId, channelId) alone, which says nothing
-          // about who owns it. On a shared desk another app — or the mailbox — can
-          // already own that thread, and adopting it would file this app's message
-          // into someone else's ticket. Only adopt a thread no other source claims.
-          const conversationEmails = await repositories.emails.findByConversationId(candidate.conversationId);
-          const foreignLink = await externalMessageRepo.findForeignLinkByEmailIds(
-            conversationEmails.map(e => e.id),
-            externalSource.id,
-          );
-          if (foreignLink) {
-            logger.info('[AppDeskInbound] thread id collides with another source on this channel — starting a new ticket', {
-              channelId,
-              threadId: externalThreadId,
-              externalSourceId: externalSource.id,
-              ownedByExternalSourceId: foreignLink.externalSourceId,
-            });
-          } else {
-            threadEmail = candidate;
-            logger.warn('[AppDeskInbound] legacy channel-scoped thread fallback used (ExternalMessage link missing)', {
-              channelId,
-              threadId: externalThreadId,
-              externalSourceId: externalSource.id,
-            });
+      let collisionLogged = false;
+      const findThreadEmail = async () => {
+        const linkedMessage = await externalMessageRepo.findByThreadId(externalSource.id, externalThreadId, ExternalEntityType.EMAIL);
+        let threadEmail = linkedMessage?.entityId ? await repositories.emails.findById(linkedMessage.entityId) : null;
+        if (!threadEmail) {
+          const candidate = await repositories.emails.findFirstByThreadAndChannel(externalThreadId, channelId);
+          if (candidate) {
+            // The candidate matched on (threadId, channelId) alone, which says nothing
+            // about who owns it. On a shared desk another app — or the mailbox — can
+            // already own that thread, and adopting it would file this app's message
+            // into someone else's ticket. Only adopt a thread no other source claims.
+            const conversationEmails = await repositories.emails.findByConversationId(candidate.conversationId);
+            const foreignLink = await externalMessageRepo.findForeignLinkByEmailIds(
+              conversationEmails.map(e => e.id),
+              externalSource.id,
+            );
+            if (foreignLink) {
+              if (!collisionLogged) {
+                logger.info('[AppDeskInbound] thread id collides with another source on this channel — starting a new ticket', {
+                  channelId,
+                  threadId: externalThreadId,
+                  externalSourceId: externalSource.id,
+                  ownedByExternalSourceId: foreignLink.externalSourceId,
+                });
+                collisionLogged = true;
+              }
+            } else {
+              threadEmail = candidate;
+              logger.warn('[AppDeskInbound] legacy channel-scoped thread fallback used (ExternalMessage link missing)', {
+                channelId,
+                threadId: externalThreadId,
+                externalSourceId: externalSource.id,
+              });
+            }
           }
+        }
+        return threadEmail;
+      };
+
+      let threadEmail = await findThreadEmail();
+      if (!threadEmail) {
+        // Concurrent first messages of one thread would each create a ticket. Serialize
+        // creation per thread and re-check once the lock is held; appends stay unlocked.
+        creationLock = await acquireLock(`lock:app-desk-inbound:${externalSource.id}:${externalThreadId}`, {
+          ttlSeconds: 60,
+          waitTimeoutMs: 60_000,
+        });
+        if (!creationLock) {
+          logger.warn('[AppDeskInbound] thread creation lock not acquired - proceeding unlocked', {
+            channelId,
+            threadId: externalThreadId,
+            externalSourceId: externalSource.id,
+          });
+        }
+        threadEmail = await findThreadEmail();
+        if (threadEmail) {
+          await releaseLock(creationLock);
+          creationLock = null;
         }
       }
 
@@ -2817,7 +2885,7 @@ export class TicketController {
           externalMessageId,
           emailType: EmailType.DEFAULT,
           ...(uploadedFiles.length > 0 && { uploadedFiles }),
-          receivedAt: new Date(),
+          receivedAt: arrivedAt,
         });
         const existingTicket = await prismaClient.ticket.findFirst({
           where: { conversationId: threadEmail.conversationId },
@@ -2951,9 +3019,14 @@ export class TicketController {
             fromEmailAddress: senderEmail,
           }),
         },
-        receivedAt: new Date(),
+        receivedAt: arrivedAt,
         boardId: effectiveBoardId,
         scopeFieldValues,
+        // The thread link is committed here; waiters can find it, so stop holding them.
+        onThreadCommitted: async () => {
+          await releaseLock(creationLock);
+          creationLock = null;
+        },
       });
 
       if (result && 'blocked' in result && result.blocked) {
@@ -3019,6 +3092,8 @@ export class TicketController {
       });
       logger.error('[TicketController] appDeskInbound error:', error);
       res.status(500).json({ error: 'Internal server error', code: 'INTERNAL_ERROR' });
+    } finally {
+      await releaseLock(creationLock);
     }
   };
 

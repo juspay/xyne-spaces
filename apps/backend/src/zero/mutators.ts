@@ -127,8 +127,9 @@ import {
   parseSlashCommandArtifactMessage,
   withSlashCommandArtifactClosed,
 } from '@xyne/shared';
-import { SDLC_HUB_KNOWLEDGE_FOLDER, sdlcTrackStatusSchema } from '@xyne/shared';
-import { MAX_DUPLICATE_SCOPE_FIELDS } from '@xyne/shared';
+import { SDLC_HUB_KNOWLEDGE_FOLDER, sdlcIconNameSchema, sdlcTrackStatusSchema } from '@xyne/shared';
+import { isSdlcTreeItemType, refileSdlcFolderEdges } from '@xyne/shared';
+import { MAX_DESK_APPS, MAX_DUPLICATE_SCOPE_FIELDS, serializeDeskAppIds } from '@xyne/shared';
 import {
   evaluateEta,
   buildEtaActivityIntents,
@@ -783,7 +784,7 @@ async function assignFullRoles(
     boardId,
     createdBy,
     projectId,
-    channelId: channelId ?? undefined,
+    channelId: channelId ?? null,
   });
 
   const primaryUserId = primaryUserIdOf(fullResult);
@@ -1677,8 +1678,8 @@ export function createMutators(
           channelId: z.string(),
           conversationId: z.string().optional(),
           timestamp: z.number(),
-          draftMessage: z.string(),
-          draftMessageId: z.string(),
+          draftMessage: z.string().optional(),
+          draftMessageId: z.string().optional(),
         }),
         async ({ tx, args: { channelId, conversationId, timestamp, draftMessage, draftMessageId } }) => {
           const participant = await tx.run(zql.channel_user_status
@@ -1714,31 +1715,35 @@ export function createMutators(
             updatedAt: timestamp,
           });
 
-          const channelDrafts = await tx.run(
-            zql.draft_messages
-              .where('channelId', channelId)
-              .where('userId', authData.sub)
-              .where(({ or, cmp }) => or(cmp('origin', '=', DraftOrigin.user), cmp('origin', 'IS', null))),
-          );
+          // Draft args are only for callers that also save the channel draft. Omit them
+          // to just mark the channel read and leave the draft untouched.
+          if (draftMessage !== undefined && draftMessageId !== undefined) {
+            const channelDrafts = await tx.run(
+              zql.draft_messages
+                .where('channelId', channelId)
+                .where('userId', authData.sub)
+                .where(({ or, cmp }) => or(cmp('origin', '=', DraftOrigin.user), cmp('origin', 'IS', null))),
+            );
 
-          // Find the channel-level draft (conversationId === null)
-          const draft = channelDrafts.find(d => d.conversationId === null);
+            // Find the channel-level draft (conversationId === null)
+            const draft = channelDrafts.find(d => d.conversationId === null);
 
-          if (draft && draftMessage.trim() === '' && !draft.hasAttachment) {
-            await tx.mutate.draft_messages.delete({ id: draft.id });
-          } else if (draftMessage.trim() !== '') {
-            await tx.mutate.draft_messages.upsert({
-              workspaceId: authData.workspaceId,
-              id: draft?.id || draftMessageId,
-              conversationId: null,
-              channelId,
-              userId: authData.sub,
-              content: draftMessage,
-              hasAttachment: draft?.hasAttachment || false,
-              origin: DraftOrigin.user,
-              updatedAt: timestamp,
-              createdAt: draft?.createdAt || timestamp,
-            });
+            if (draft && draftMessage.trim() === '' && !draft.hasAttachment) {
+              await tx.mutate.draft_messages.delete({ id: draft.id });
+            } else if (draftMessage.trim() !== '') {
+              await tx.mutate.draft_messages.upsert({
+                workspaceId: authData.workspaceId,
+                id: draft?.id || draftMessageId,
+                conversationId: null,
+                channelId,
+                userId: authData.sub,
+                content: draftMessage,
+                hasAttachment: draft?.hasAttachment || false,
+                origin: DraftOrigin.user,
+                updatedAt: timestamp,
+                createdAt: draft?.createdAt || timestamp,
+              });
+            }
           }
 
           const unreadActivities = await tx.run(
@@ -6371,7 +6376,7 @@ export function createMutators(
                       channelId: ticket.channelId,
                     });
                   } else {
-                    const assignmentResult = await evaluateAssignmentRule(ticket.userGroupId!, newBoardId, undefined, undefined, ticket.projectId);
+                    const assignmentResult = await evaluateAssignmentRule(ticket.userGroupId!, newBoardId, undefined, undefined, ticket.projectId, ticket.channelId);
                     if (assignmentResult.assignedUserId) {
                       logger.info(`[MUTATOR-TICKET-UPDATE] Autoassignment result: assigning to ${assignmentResult.assignedUserId}`);
 
@@ -6922,7 +6927,8 @@ export function createMutators(
                   targetBoardId,
                   AssignmentType.TICKET_ASSIGNEE,
                   undefined,
-                  ticket.projectId
+                  ticket.projectId,
+                  ticket.channelId
                 );
 
                   if (assignmentResult.assignedUserId) {
@@ -8015,6 +8021,26 @@ export function createMutators(
             });
             await seedReleaseStages(mainBoardId, projectBoardTs);
             await ensureBoardFormMapping(mainBoardId);
+          }
+
+          // Create Release lists the boards linked to the chosen channel, so the release
+          // channel gets its main board linked here. Additive only, and never as the
+          // channel's default: everyday tickets in that channel must not land on it.
+          const channelMappings = await tx.run(
+            zql.channel_board_mappings.where('channelId', channelId),
+          );
+          if (!channelMappings.some(mapping => mapping.boardId === mainBoardId)) {
+            const linkedAt = Date.now();
+            await tx.mutate.channel_board_mappings.insert({
+              id: uuidv4(),
+              channelId,
+              boardId: mainBoardId,
+              workspaceId: authData.workspaceId,
+              isDefault: false,
+              createdBy: authData.sub,
+              createdAt: linkedAt,
+              updatedAt: linkedAt,
+            });
           }
 
           // Group-scoped edits only load applications owned by this main board.
@@ -11797,6 +11823,22 @@ export function createMutators(
             throw new Error('Structural SDLC edges are not deleted through the link API');
           }
           await tx.mutate.sdlc_entity_links.delete({ id: linkId });
+          // Unfiled from a folder: it leaves the folders it was under, and takes what
+          // is under it along.
+          if (
+            link.relationType === SDLC_CONTAINMENT_RELATION &&
+            isSdlcTreeItemType(link.targetType)
+          ) {
+            await refileSdlcFolderEdges(tx, {
+              channelId,
+              workspaceId: authData.workspaceId,
+              userId: authData.sub,
+              timestamp: Date.now(),
+              idSeed: linkId,
+              item: { type: link.targetType, id: link.targetId },
+              parent: null,
+            });
+          }
         },
       ),
 
@@ -11849,6 +11891,45 @@ export function createMutators(
           await tx.mutate.sdlc_folders.update({
             id: args.folderId,
             name: args.name,
+            updatedAt: args.timestamp,
+          });
+        }
+      ),
+
+      /** A folder's icon; null goes back to the folder mark. */
+      setSdlcFolderIcon: defineMutator(
+        z.object({
+          folderId: z.string(),
+          channelId: z.string(),
+          // Null goes back to the folder mark.
+          icon: sdlcIconNameSchema.nullable(),
+          timestamp: z.number(),
+        }),
+        async ({ tx, args }) => {
+          const participant = await tx.run(
+            zql.channel_participants
+              .where('channelId', args.channelId)
+              .where('userId', authData.sub)
+              .one(),
+          );
+          if (!participant) {
+            throw new Error('Hub membership required');
+          }
+          const placement = await tx.run(
+            zql.sdlc_entity_links
+              .where('channelId', args.channelId)
+              .where('sourceType', 'TRACK')
+              .where('targetType', 'FOLDER')
+              .where('targetId', args.folderId)
+              .where('relationType', SDLC_TRACK_FLAT_RELATION)
+              .one(),
+          );
+          if (!placement) {
+            throw new Error('Folder not found in this hub');
+          }
+          await tx.mutate.sdlc_folders.update({
+            id: args.folderId,
+            icon: args.icon,
             updatedAt: args.timestamp,
           });
         }
@@ -11950,6 +12031,16 @@ export function createMutators(
             createdBy: authData.sub,
             createdAt: args.timestamp,
           });
+          // Its folder edges, and those of everything under it, follow it.
+          await refileSdlcFolderEdges(tx, {
+            channelId: args.channelId,
+            workspaceId: authData.workspaceId,
+            userId: authData.sub,
+            timestamp: args.timestamp,
+            idSeed: args.linkId,
+            item: { type: args.itemType, id: args.itemId },
+            parent: { type: args.parentType, id: args.parentId },
+          });
         },
       ),
 
@@ -12033,6 +12124,16 @@ export function createMutators(
             relationType: SDLC_TRACK_FLAT_RELATION,
             createdBy: authData.sub,
             createdAt: args.timestamp,
+          });
+          // Under every folder above it as well, not only the one it is in.
+          await refileSdlcFolderEdges(tx, {
+            channelId: args.channelId,
+            workspaceId: authData.workspaceId,
+            userId: authData.sub,
+            timestamp: args.timestamp,
+            idSeed: args.containmentLinkId,
+            item: { type: 'FOLDER', id: args.id },
+            parent: { type: args.parentType, id: args.parentId },
           });
         }
       ),
@@ -12156,6 +12257,16 @@ export function createMutators(
             createdBy: authData.sub,
             createdAt: args.timestamp,
           });
+          // Under every folder above it as well, not only the one it is in.
+          await refileSdlcFolderEdges(tx, {
+            channelId: args.channelId,
+            workspaceId: authData.workspaceId,
+            userId: authData.sub,
+            timestamp: args.timestamp,
+            idSeed: args.containmentLinkId,
+            item: { type: args.itemType, id: args.itemId },
+            parent: { type: args.parentType, id: args.parentId },
+          });
         }
       ),
 
@@ -12210,6 +12321,8 @@ export function createMutators(
           name: z.string().trim().min(1).max(120).optional(),
           description: z.string().trim().max(2000).nullable().optional(),
           status: sdlcTrackStatusSchema.optional(),
+          // Null goes back to the track mark.
+          icon: sdlcIconNameSchema.nullable().optional(),
           timestamp: z.number(),
         }),
         async ({ tx, args }) => {
@@ -12242,6 +12355,7 @@ export function createMutators(
             ...(args.name !== undefined ? { name: args.name } : {}),
             ...(args.description !== undefined ? { description: args.description } : {}),
             ...(args.status !== undefined ? { status: args.status } : {}),
+            ...(args.icon !== undefined ? { icon: args.icon } : {}),
             updatedAt: args.timestamp,
           });
         },
@@ -16602,6 +16716,9 @@ export function createMutators(
           deskReportEnabled: z.boolean().optional(),
           deskReportAgentSlug: z.string().optional().nullable(),
           deskReportRangeDays: z.number().optional(),
+          // Artifact apps shown on this desk, in order (see EmailChannelPreference.deskAppIds).
+          // An empty list clears the column.
+          deskAppIds: z.array(z.string().min(1).max(64)).max(MAX_DESK_APPS).nullable().optional(),
           // Scoped duplicate detection config (see EmailChannelPreference.duplicateScopeConfig)
           duplicateScopeConfig: z
             .object({
@@ -16631,6 +16748,7 @@ export function createMutators(
             deskReportEnabled,
             deskReportAgentSlug,
             deskReportRangeDays,
+            deskAppIds,
             duplicateScopeConfig,
           },
         }) => {
@@ -16676,6 +16794,7 @@ export function createMutators(
               ...(deskReportEnabled !== undefined ? { deskReportEnabled } : {}),
               ...(deskReportAgentSlug !== undefined ? { deskReportAgentSlug } : {}),
               ...(deskReportRangeDays !== undefined ? { deskReportRangeDays } : {}),
+              ...(deskAppIds !== undefined ? { deskAppIds: serializeDeskAppIds(deskAppIds) } : {}),
               ...(duplicateScopeConfig !== undefined
                 ? { duplicateScopeConfig: duplicateScopeConfig == null ? null : JSON.stringify(duplicateScopeConfig) }
                 : {}),
@@ -16711,6 +16830,7 @@ export function createMutators(
               deskReportEnabled: deskReportEnabled ?? false,
               deskReportAgentSlug: deskReportAgentSlug ?? null,
               deskReportRangeDays: deskReportRangeDays ?? 1,
+              deskAppIds: serializeDeskAppIds(deskAppIds ?? null),
               duplicateScopeConfig: duplicateScopeConfig ? JSON.stringify(duplicateScopeConfig) : null,
             });
           }

@@ -12,9 +12,10 @@ import { usersRouter } from "../routes/users.js";
 import { gatewaysRouter } from "../routes/gateways.js";
 import { webhookRouter } from "../routes/webhook.js";
 import { flowActionRouter } from "../routes/flow-action.js";
-import { twinDraftInternalRouter } from "../routes/twin-draft.js";
+import { twinDraftInternalRouter } from "../routes/twin-draft-internal.js";
 import { attachmentsInternalRouter } from "../routes/attachments.js";
 import { appConnectorsInternalRouter } from "../routes/app-connectors-internal.js";
+import { agentsInternalRouter } from "../routes/agents-internal.js";
 import { agentsRouter } from "../routes/agents.js";
 import { chainWorkflowsRouter } from "../routes/chain-workflows.js";
 import { spacesRouter } from "../routes/spaces.js";
@@ -83,7 +84,7 @@ import { slackRouter } from "../surfaces/slack/routes/index.js";
 import { mcpGatewayRouter } from "../mcpgateway/index.js";
 import { requireAuth, requireNoAccessToken, allowReadAccessToken, allowScopedAccessToken, requireStrictS2S, requireInternalS2S, requireUserAuth, optionalAuth, s2sKeyMatches } from "../middleware/require-auth.js";
 import { requireClawAdmin, requireSearchEvalAccess } from "../middleware/agent-acl.js";
-import { apiLimiter } from "../middleware/rate-limiters.js";
+import { apiLimiter, sampleClientIp } from "../middleware/rate-limiters.js";
 
 const SIGNED_INGRESS_PREFIXES = ["/webhook"] as const;
 
@@ -126,6 +127,7 @@ function mountRequestContext(app: Express): void {
       next();
       return;
     }
+    sampleClientIp(req);
     apiLimiter(req, res, next);
   });
 }
@@ -199,6 +201,7 @@ function mountCoreApi(app: Express): void {
   app.use(`${BASE}/internal/agent-chat`, requireStrictS2S, agentChatInternalRouter); // progress/callback from xyne-claw
   app.use(`${BASE}/internal/twin-draft`, requireInternalS2S, twinDraftInternalRouter);  // Spaces → approve/decline an in-thread Twin reply draft (INTERNAL_S2S_KEY)
   app.use(`${BASE}/internal/attachments`, requireInternalS2S, attachmentsInternalRouter); // Spaces → extract document text via claw's converters (INTERNAL_S2S_KEY)
+  app.use(`${BASE}/internal/agents`, requireInternalS2S, agentsInternalRouter); // Spaces → is this app a Claw agent? decides AGENT vs APP at install (INTERNAL_S2S_KEY)
   app.use(`${BASE}/internal/app-connectors`, requireInternalS2S, appConnectorsInternalRouter); // Spaces → sdk.connectors: run the viewer's own MCP connection for an artifact app (INTERNAL_S2S_KEY)
   app.use(`${BASE}/internal/surface`, requireStrictS2S, surfaceInternalRouter);       // app-control calls from xyne-claw → the user's desktop window
   app.use(`${BASE}/internal/sessions`, requireStrictS2S, sessionsArchiveRouter);     // archive/restore session JSONLs to GCS — S2S only (transcripts)

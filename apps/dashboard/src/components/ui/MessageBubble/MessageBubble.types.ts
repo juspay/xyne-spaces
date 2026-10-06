@@ -78,6 +78,11 @@ export interface MessageBubbleProps {
   allThreadAttachments?: AttachmentRef[];
   workflowNumber?: number | undefined;
   showLinkPreview?: boolean;
+  /**
+   * With showLinkPreview=false the parent renders the preview card; this tells the bubble
+   * whether a call card is on screen there, so a bare call link's text can give way to it.
+   */
+  callLinkCardShown?: boolean;
   searchItemView?: boolean;
   afterTextContent?: React.ReactNode;
   /** Rendered on the sender/timestamp line, after the timestamp. */

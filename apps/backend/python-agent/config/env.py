@@ -42,7 +42,10 @@ class Config:
     google_voice_credentials_json: Optional[str]
     google_stt_model: str  # Model for Google STT (e.g., chirp_3)
     google_stt_stream_model: str  # Model for Google STT streaming (chirp_3 does not support streaming+adaptation)
-    google_stt_language: str
+    google_stt_language: str  # Global fallback language(s); per-use-case envs below override it
+    google_stt_realtime_language: str  # Live call (LiveKit) realtime transcription languages
+    google_stt_voice_input_language: str  # Voice-input dictation languages
+    google_stt_batch_language: str  # Recording BatchRecognize languages (Chirp 3 batch uses first 2)
     google_stt_location: str  # Region for Google STT (chirp models require e.g. us-central1, not global)
     google_stt_stream_location: str  # Region for streaming STT — chirp_2 is not in the "us" multi-region
     
@@ -50,7 +53,21 @@ class Config:
     deepgram_api_key: Optional[str]
     deepgram_model: str  # Model for Deepgram STT (e.g., nova-3, flux-general-en)
     deepgram_language: str
-    
+
+    # Recording Transcription (POST /transcribe-recording, called by the backend Bull job)
+    recording_max_bytes: int  # Hard cap on the downloaded recording size (Content-Length and streamed bytes)
+    recording_max_concurrent_jobs: int  # How many recording jobs may download+transcribe at the same time
+    recording_url_pattern: str  # Optional regex the recording URL must fully match (re.fullmatch); empty = disabled
+    # Recordings always go through Google BatchRecognize: the file is staged as a
+    # scratch GCS object for the duration of one job and deleted afterwards.
+    recording_gcs_bucket: Optional[str]  # Scratch bucket (defaults to GCS_BUCKET_NAME)
+    recording_gcs_prefix: str  # Object prefix inside that bucket; put a short lifecycle rule on it
+    recording_google_diarization: bool  # Speaker labels (Chirp 3, batch only, supported locales only)
+    recording_google_min_speakers: int
+    recording_google_max_speakers: int
+    recording_google_dynamic_batch: bool  # Google's discounted, higher-latency processing strategy
+    recording_google_batch_timeout_s: int  # Max wait for the long-running operation
+
     # Azure OpenAI TTS Configuration
     azure_tts_endpoint: str
     azure_tts_api_key: str
@@ -175,6 +192,11 @@ class Config:
             google_stt_model=os.getenv("GOOGLE_STT_MODEL", "chirp_3"),
             google_stt_stream_model=os.getenv("GOOGLE_STT_STREAM_MODEL", "chirp_2"),
             google_stt_language=os.getenv("GOOGLE_STT_LANGUAGE", "en-US"),
+            # Per-use-case language lists. Each falls back to GOOGLE_STT_LANGUAGE, then to its own default,
+            # so existing single-env deployments keep working until the per-mode envs are set.
+            google_stt_realtime_language=(os.getenv("GOOGLE_STT_REALTIME_LANGUAGE") or os.getenv("GOOGLE_STT_LANGUAGE") or "en-IN,hi-IN,ta-IN"),
+            google_stt_voice_input_language=(os.getenv("GOOGLE_STT_VOICE_INPUT_LANGUAGE") or os.getenv("GOOGLE_STT_LANGUAGE") or "en-IN,hi-IN"),
+            google_stt_batch_language=(os.getenv("GOOGLE_STT_BATCH_LANGUAGE") or os.getenv("GOOGLE_STT_LANGUAGE") or "en-IN,kn-IN"),
             google_stt_location=os.getenv("GOOGLE_STT_LOCATION", "us"),
             google_stt_stream_location=os.getenv("GOOGLE_STT_STREAM_LOCATION", "us-central1"),
             
@@ -182,7 +204,19 @@ class Config:
             deepgram_api_key=os.getenv("DEEPGRAM_API_KEY"),
             deepgram_model=os.getenv("DEEPGRAM_MODEL", "nova-3"),
             deepgram_language=os.getenv("DEEPGRAM_LANGUAGE", "en-US"),
-            
+
+            # Recording transcription (/transcribe-recording, Google BatchRecognize only)
+            recording_max_bytes=int(os.getenv("RECORDING_MAX_BYTES", str(500 * 1024 * 1024))),
+            recording_max_concurrent_jobs=int(os.getenv("RECORDING_MAX_CONCURRENT_JOBS", "2")),
+            recording_url_pattern=os.getenv("RECORDING_URL_PATTERN", ""),
+            recording_gcs_bucket=os.getenv("RECORDING_GCS_BUCKET") or None,
+            recording_gcs_prefix=os.getenv("RECORDING_GCS_PREFIX", "recording-scratch"),
+            recording_google_diarization=os.getenv("RECORDING_GOOGLE_DIARIZATION", "false").lower() == "true",
+            recording_google_min_speakers=int(os.getenv("RECORDING_GOOGLE_MIN_SPEAKERS", "2")),
+            recording_google_max_speakers=int(os.getenv("RECORDING_GOOGLE_MAX_SPEAKERS", "2")),
+            recording_google_dynamic_batch=os.getenv("RECORDING_GOOGLE_DYNAMIC_BATCH", "false").lower() == "true",
+            recording_google_batch_timeout_s=int(os.getenv("RECORDING_GOOGLE_BATCH_TIMEOUT_S", "1800")),
+
             # Azure OpenAI TTS
             azure_tts_endpoint=os.getenv("AZURE_OPENAI_TTS_ENDPOINT", ""),
             azure_tts_api_key=os.getenv("AZURE_OPENAI_TTS_API_KEY", ""),

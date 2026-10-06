@@ -97,7 +97,10 @@ import {
   SDLC_TRACK_MEMBERSHIP_RELATION,
   createSdlcLinkSchema,
   entityLinkContextSchema,
+  sdlcIconNameSchema,
 } from '../sdlc.js';
+import { isSdlcTreeItemType } from '../sdlcFolderAncestry.js';
+import { refileSdlcFolderEdges } from './sdlcFolderAncestry.js';
 import { parseFieldOptions, serializeFieldOptions } from '../utils/formFieldOptions.js';
 import {
   validateFieldBranches,
@@ -111,8 +114,8 @@ import {
   MAX_NOTIFICATION_KEYWORD_LENGTH,
   normalizeNotificationKeywords,
 } from '../utils/notificationKeywords.js';
-import { isDeskChannelType, deskTypeForChannelType } from '../utils/channel.js';
-import { MAX_DUPLICATE_SCOPE_FIELDS } from './types.js';
+import { isDeskChannelType, deskTypeForChannelType, serializeDeskAppIds } from '../utils/channel.js';
+import { MAX_DESK_APPS, MAX_DUPLICATE_SCOPE_FIELDS } from './types.js';
 import { DEFAULT_ROLE_NAME_TO_ENUM } from '../utils/roleFrameworkUtils.js';
 import { SUMMARY_PROMPT_MAX_LENGTH } from '../templates/callSummary.js';
 import { z } from 'zod';
@@ -998,8 +1001,8 @@ export const mutators = defineMutators({
         channelId: z.string(),
         conversationId: z.string().optional(),
         timestamp: z.number(),
-        draftMessageId: z.string(),
-        draftMessage: z.string(),
+        draftMessageId: z.string().optional(),
+        draftMessage: z.string().optional(),
       }),
       async ({
         tx,
@@ -1045,32 +1048,36 @@ export const mutators = defineMutators({
           updatedAt: timestamp,
         });
 
-        // Query for drafts in this channel for this user (follows backend logic)
-        const channelDrafts = await tx.run(
-          zql.draft_messages
-            .where('channelId', channelId)
-            .where('userId', ctx.userID)
-            .where(({ or, cmp }) => or(cmp('origin', '=', DraftOrigin.user), cmp('origin', 'IS', null))),
-        );
+        // Draft args are only for callers that also save the channel draft. Omit them
+        // to just mark the channel read and leave the draft untouched.
+        if (draftMessage !== undefined && draftMessageId !== undefined) {
+          // Query for drafts in this channel for this user (follows backend logic)
+          const channelDrafts = await tx.run(
+            zql.draft_messages
+              .where('channelId', channelId)
+              .where('userId', ctx.userID)
+              .where(({ or, cmp }) => or(cmp('origin', '=', DraftOrigin.user), cmp('origin', 'IS', null))),
+          );
 
-        // Find the channel-level draft (conversationId === null)
-        const draft = channelDrafts.find(d => d.conversationId === null);
+          // Find the channel-level draft (conversationId === null)
+          const draft = channelDrafts.find(d => d.conversationId === null);
 
-        if (draft && draftMessage.trim() === '' && !draft.hasAttachment) {
-          await tx.mutate.draft_messages.delete({ id: draft.id });
-        } else if (draftMessage.trim() !== '') {
-          await tx.mutate.draft_messages.upsert({
-            workspaceId: ctx.workspaceId,
-            id: draft?.id || draftMessageId,
-            conversationId: null,
-            channelId,
-            userId: ctx.userID,
-            content: draftMessage,
-            hasAttachment: draft?.hasAttachment || false,
-            origin: DraftOrigin.user,
-            updatedAt: timestamp,
-            createdAt: draft?.createdAt || timestamp,
-          });
+          if (draft && draftMessage.trim() === '' && !draft.hasAttachment) {
+            await tx.mutate.draft_messages.delete({ id: draft.id });
+          } else if (draftMessage.trim() !== '') {
+            await tx.mutate.draft_messages.upsert({
+              workspaceId: ctx.workspaceId,
+              id: draft?.id || draftMessageId,
+              conversationId: null,
+              channelId,
+              userId: ctx.userID,
+              content: draftMessage,
+              hasAttachment: draft?.hasAttachment || false,
+              origin: DraftOrigin.user,
+              updatedAt: timestamp,
+              createdAt: draft?.createdAt || timestamp,
+            });
+          }
         }
 
         const unreadActivities = await tx.run(
@@ -2050,22 +2057,12 @@ export const mutators = defineMutators({
           conversationParticipantId,
         },
       }) => {
-        // Verify target channel exists
-        const targetChannel = await tx.run(zql.channels.where('id', targetChannelId).one());
-        if (!targetChannel) {
-          throw new Error('Target channel not found');
-        }
-
-        // Verify user is a participant of the target channel
-        const participation = await tx.run(
-          zql.channel_participants
-            .where('channelId', targetChannelId)
-            .where('userId', ctx.userID)
-            .one(),
-        );
-        if (!participation) {
-          throw new Error('You are not a participant of the target channel');
-        }
+        // No channel/membership checks here: this mutator only runs on the client, whose
+        // local Zero cache holds the user's channel_participants row for a channel only once
+        // that channel has been loaded (e.g. opened), so checking here wrongly rejected members
+        // forwarding to a channel they hadn't opened yet. The server enforces these checks in
+        // its own forwardMessage (apps/backend/src/zero/mutators.ts); the forward modal shows
+        // a rejection as "Failed to forward message".
 
         // Get the original message
         const originalMessage = await resolveMessage(tx, originalMessageId);
@@ -2080,19 +2077,6 @@ export const mutators = defineMutators({
         const originalConversation = await tx.run(
           zql.conversations.where('conversationId', originalMessage.conversationId).one(),
         );
-
-        // Verify user is a participant of the origin channel (where the message is being forwarded from)
-        if (originalConversation?.channelId) {
-          const originParticipation = await tx.run(
-            zql.channel_participants
-              .where('channelId', originalConversation.channelId)
-              .where('userId', ctx.userID)
-              .one(),
-          );
-          if (!originParticipation) {
-            throw new Error('You are not a participant of the origin channel');
-          }
-        }
 
         // Handle re-forwarding: if the original message is already forwarded,
         // parse the XML to get the optionalText and use that as content (if exists)
@@ -8364,6 +8348,22 @@ export const mutators = defineMutators({
           throw new Error('Structural SDLC edges are not deleted through the link API');
         }
         await tx.mutate.sdlc_entity_links.delete({ id: linkId });
+        // Unfiled from a folder: it leaves the folders it was under, and takes what
+        // is under it along.
+        if (
+          link.relationType === SDLC_CONTAINMENT_RELATION &&
+          isSdlcTreeItemType(link.targetType)
+        ) {
+          await refileSdlcFolderEdges(tx, {
+            channelId,
+            workspaceId: ctx.workspaceId,
+            userId: ctx.userID,
+            timestamp: Date.now(),
+            idSeed: linkId,
+            item: { type: link.targetType, id: link.targetId },
+            parent: null,
+          });
+        }
       },
     ),
 
@@ -8416,6 +8416,45 @@ export const mutators = defineMutators({
         await tx.mutate.sdlc_folders.update({
           id: args.folderId,
           name: args.name,
+          updatedAt: args.timestamp,
+        });
+      },
+    ),
+
+    /** A folder's icon; null goes back to the folder mark. */
+    setSdlcFolderIcon: defineMutator(
+      z.object({
+        folderId: z.string(),
+        channelId: z.string(),
+        // Null goes back to the folder mark.
+        icon: sdlcIconNameSchema.nullable(),
+        timestamp: z.number(),
+      }),
+      async ({ tx, ctx, args }) => {
+        const participant = await tx.run(
+          zql.channel_participants
+            .where('channelId', args.channelId)
+            .where('userId', ctx.userID)
+            .one(),
+        );
+        if (!participant) {
+          throw new Error('Hub membership required');
+        }
+        const placement = await tx.run(
+          zql.sdlc_entity_links
+            .where('channelId', args.channelId)
+            .where('sourceType', 'TRACK')
+            .where('targetType', 'FOLDER')
+            .where('targetId', args.folderId)
+            .where('relationType', SDLC_TRACK_FLAT_RELATION)
+            .one(),
+        );
+        if (!placement) {
+          throw new Error('Folder not found in this hub');
+        }
+        await tx.mutate.sdlc_folders.update({
+          id: args.folderId,
+          icon: args.icon,
           updatedAt: args.timestamp,
         });
       },
@@ -8517,6 +8556,16 @@ export const mutators = defineMutators({
           createdBy: ctx.userID,
           createdAt: args.timestamp,
         });
+        // Its folder edges, and those of everything under it, follow it.
+        await refileSdlcFolderEdges(tx, {
+          channelId: args.channelId,
+          workspaceId: ctx.workspaceId,
+          userId: ctx.userID,
+          timestamp: args.timestamp,
+          idSeed: args.linkId,
+          item: { type: args.itemType, id: args.itemId },
+          parent: { type: args.parentType, id: args.parentId },
+        });
       },
     ),
 
@@ -8600,6 +8649,16 @@ export const mutators = defineMutators({
           relationType: SDLC_TRACK_FLAT_RELATION,
           createdBy: ctx.userID,
           createdAt: args.timestamp,
+        });
+        // Under every folder above it as well, not only the one it is in.
+        await refileSdlcFolderEdges(tx, {
+          channelId: args.channelId,
+          workspaceId: ctx.workspaceId,
+          userId: ctx.userID,
+          timestamp: args.timestamp,
+          idSeed: args.containmentLinkId,
+          item: { type: 'FOLDER', id: args.id },
+          parent: { type: args.parentType, id: args.parentId },
         });
       },
     ),
@@ -8723,6 +8782,16 @@ export const mutators = defineMutators({
           createdBy: ctx.userID,
           createdAt: args.timestamp,
         });
+        // Under every folder above it as well, not only the one it is in.
+        await refileSdlcFolderEdges(tx, {
+          channelId: args.channelId,
+          workspaceId: ctx.workspaceId,
+          userId: ctx.userID,
+          timestamp: args.timestamp,
+          idSeed: args.containmentLinkId,
+          item: { type: args.itemType, id: args.itemId },
+          parent: { type: args.parentType, id: args.parentId },
+        });
       },
     ),
 
@@ -8777,6 +8846,8 @@ export const mutators = defineMutators({
         name: z.string().trim().min(1).max(120).optional(),
         description: z.string().trim().max(2000).nullable().optional(),
         status: sdlcTrackStatusSchema.optional(),
+        // Null goes back to the track mark.
+        icon: sdlcIconNameSchema.nullable().optional(),
         timestamp: z.number(),
       }),
       async ({ tx, ctx, args }) => {
@@ -8809,6 +8880,7 @@ export const mutators = defineMutators({
           ...(args.name !== undefined ? { name: args.name } : {}),
           ...(args.description !== undefined ? { description: args.description } : {}),
           ...(args.status !== undefined ? { status: args.status } : {}),
+          ...(args.icon !== undefined ? { icon: args.icon } : {}),
           updatedAt: args.timestamp,
         });
       },
@@ -10471,6 +10543,9 @@ export const mutators = defineMutators({
         deskReportEnabled: z.boolean().optional(),
         deskReportAgentSlug: z.string().optional().nullable(),
         deskReportRangeDays: z.number().optional(),
+        // Artifact apps shown on this desk, in order (see EmailChannelPreference.deskAppIds).
+        // An empty list clears the column.
+        deskAppIds: z.array(z.string().min(1).max(64)).max(MAX_DESK_APPS).nullable().optional(),
         // Scoped duplicate detection config (see EmailChannelPreference.duplicateScopeConfig)
         duplicateScopeConfig: z
           .object({
@@ -10501,6 +10576,7 @@ export const mutators = defineMutators({
           deskReportEnabled,
           deskReportAgentSlug,
           deskReportRangeDays,
+          deskAppIds,
           duplicateScopeConfig,
         },
       }) => {
@@ -10526,6 +10602,7 @@ export const mutators = defineMutators({
             ...(deskReportEnabled !== undefined ? { deskReportEnabled } : {}),
             ...(deskReportAgentSlug !== undefined ? { deskReportAgentSlug } : {}),
             ...(deskReportRangeDays !== undefined ? { deskReportRangeDays } : {}),
+            ...(deskAppIds !== undefined ? { deskAppIds: serializeDeskAppIds(deskAppIds) } : {}),
             ...(duplicateScopeConfig !== undefined
               ? { duplicateScopeConfig: duplicateScopeConfig == null ? null : JSON.stringify(duplicateScopeConfig) }
               : {}),
@@ -10560,6 +10637,7 @@ export const mutators = defineMutators({
             deskReportEnabled: deskReportEnabled ?? false,
             deskReportAgentSlug: deskReportAgentSlug ?? null,
             deskReportRangeDays: deskReportRangeDays ?? 1,
+            deskAppIds: serializeDeskAppIds(deskAppIds ?? null),
             duplicateScopeConfig: duplicateScopeConfig ? JSON.stringify(duplicateScopeConfig) : null,
           });
         }

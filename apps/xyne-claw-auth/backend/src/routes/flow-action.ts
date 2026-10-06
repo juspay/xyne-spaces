@@ -20,7 +20,7 @@ import { CONFIG } from "../config.js";
 import { prisma } from "../db.js";
 import { decrypt } from "../crypto.js";
 import { isOAuthProvider, prepareOAuthCustomTool } from "../lib/oauth-custom-tool.js";
-import { executeTwinApprovalDelivery } from "../lib/twin-delivery.js";
+import { executeTwinApprovalDelivery, twinDeliveryContextFromFlowData } from "../lib/twin-approval-delivery.js";
 import { fetchTicketForCard, parseXyneIdFromToolResult } from "../lib/ticket-card.js";
 import { verifySpacesSignature } from "../middleware/verify-spaces-signature.js";
 import { agentRunRepository, chatMessageRepository } from "../repositories/index.js";
@@ -954,6 +954,52 @@ router.post("/action", pinAgentSlugFromHeader, verifySpacesSignature, async (req
           return r.json();
         };
 
+        // Xyne AI cards live on a chat-message row, not a Spaces message, so
+        // replaceFlowCardWithText can't swap them — route them through the
+        // shared write-result path (card swap, pending-action resolve, chat
+        // continuation, Retry on failure). Channel cards keep the code below.
+        if (xyneAiCard) {
+          let sent: string;
+          try {
+            if (!targetChannelId) {
+              const b = msgConversationId ? { conversationId: msgConversationId, text: content } : { channelId, text: content };
+              await spacesPost("/chat/postMessage", b);
+              sent = "Message sent.";
+            } else {
+              let channelName = targetChannelId;
+              try {
+                const joinRes = (await spacesPost(`/channel/${targetChannelId}/join`, {})) as { channelName?: string };
+                channelName = joinRes.channelName ?? targetChannelId;
+              } catch (e) {
+                if (errMsg(e).includes("private")) {
+                  const text = `Cannot post to #${targetChannelId} — private channel. Add me first.`;
+                  await finishTextWriteOnRow({ card: xyneAiCard, tool, ok: false, heading: `${tool} failed`, errorText: text });
+                  res.json({ type: "close_screen", finalMessage: text } satisfies AppActionResponse);
+                  return;
+                }
+              }
+              await spacesPost("/chat/postMessage", { channelId: targetChannelId, text: content });
+              sent = `Posted in #${channelName}.`;
+            }
+          } catch (e) {
+            const errorText = approvalToolFailureMessage(errMsg(e));
+            log.error(`[flow-action] xyne-ai spaces-send-message failed conversationId=${conversationId} userId=${writeUserId} err=${errMsg(e)}`);
+            await finishWriteFailure({
+              tool, serverType, params, writeUserId, signature, agentSlug, spacesAppId,
+              messageId, conversationId, channelId: continueChannelId, errorText,
+              xyneAi: xyneAiCard,
+            });
+            res.status(422).json({ type: "error", code: "TOOL_EXECUTION_FAILED", message: errorText } satisfies AppActionResponse);
+            return;
+          }
+          await completeWriteSuccess({
+            actionId, tool, serverType, params, writeUserId, signature, agentSlug, spacesAppId,
+            messageId, conversationId, channelId: continueChannelId, resultText: sent,
+            xyneAi: xyneAiCard,
+          }, { type: "close_screen", finalMessage: sent });
+          return;
+        }
+
         if (!targetChannelId) {
           const b = msgConversationId ? { conversationId: msgConversationId, text: content } : { channelId, text: content };
           await spacesPost("/chat/postMessage", b);
@@ -1230,38 +1276,27 @@ router.post("/action", pinAgentSlugFromHeader, verifySpacesSignature, async (req
     // learning loop (P4) — NOT fed back immediately (that old fire-and-forget
     // curator call fired on every accept and was too eager).
     if (actionType === "twin-approval") {
-      const mentionedUserId = data["mentionedUserId"] as string;
-      const workspaceId = data["workspaceId"] as string;
-      const targetChannelId = data["targetChannelId"] as string;
-      const targetConversationId = data["targetConversationId"] as string;
-      const sourceMessageId = data["sourceMessageId"] as string | undefined;
-      const messageContent = (data["messageContent"] as string | undefined) ?? "";
-      const deliveryAction = (data["deliveryAction"] as string | undefined) ?? "reply";
-      const deliveryEmoji = data["deliveryEmoji"] as string | undefined;
-      const destinationKind = (data["destinationKind"] as string | undefined) ?? "origin_thread";
-      const destinationChannelId = data["destinationChannelId"] as string | undefined;
-      const destinationConversationId = data["destinationConversationId"] as string | undefined;
-      // DM destinations: `dm_sender` → the person who mentioned the user (senderId);
-      // `dm` → a specific person the Twin chose (destinationUserId).
-      const destinationUserId = data["destinationUserId"] as string | undefined;
-      const senderId = data["senderId"] as string | undefined;
+      const ctx = twinDeliveryContextFromFlowData(data);
 
-      if (!mentionedUserId || !workspaceId) {
+      if (!ctx.mentionedUserId || !ctx.workspaceId) {
         res.status(400).json({ type: "error", message: "Missing twin-approval fields in flowJSON.data" } satisfies AppActionResponse);
         return;
       }
 
       // Verify caller is the intended user. Fail closed on missing callerUserId.
-      if (!callerUserId || callerUserId !== mentionedUserId) {
-        log.error(`[flow-action] Unauthorized: caller ${callerUserId ?? "(none)"} != expected ${mentionedUserId}`);
+      if (!callerUserId || callerUserId !== ctx.mentionedUserId) {
+        log.error(`[flow-action] Unauthorized: caller ${callerUserId ?? "(none)"} != expected ${ctx.mentionedUserId}`);
         res.status(403).json({ type: "error", message: "Unauthorized" } satisfies AppActionResponse);
         return;
       }
 
+      const closeCard = (text: string) =>
+        void replaceFlowCardWithText(messageId, data["agentSlug"] as string | undefined, text, conversationId, data["dmChannelId"] as string | undefined, data["spacesAppId"] as string | undefined);
+
       if (actionId === "twin-decline") {
         resp = { type: "close_screen", finalMessage: "Response declined." };
         res.json(resp);
-        void replaceFlowCardWithText(messageId, data["agentSlug"] as string | undefined, "**Response declined.**", conversationId, data["dmChannelId"] as string | undefined, data["spacesAppId"] as string | undefined);
+        closeCard("**Response declined.**");
         void recordTwinApprovalOutcome(data, "declined");
         return;
       }
@@ -1271,24 +1306,7 @@ router.post("/action", pinAgentSlugFromHeader, verifySpacesSignature, async (req
       // the outcome for the daily learning loop.
       const editedContent = (values["editedContent"] as string | undefined)?.trim();
       try {
-        const result = await executeTwinApprovalDelivery(
-          {
-            mentionedUserId,
-            workspaceId,
-            targetChannelId,
-            targetConversationId,
-            sourceMessageId,
-            messageContent,
-            deliveryAction,
-            deliveryEmoji,
-            destinationKind,
-            destinationChannelId,
-            destinationConversationId,
-            destinationUserId,
-            senderId,
-          },
-          { editedContent },
-        );
+        const result = await executeTwinApprovalDelivery(ctx, { editedContent });
         if (!result.ok) {
           resp = { type: "error", message: result.error };
           res.json(resp);
@@ -1296,7 +1314,7 @@ router.post("/action", pinAgentSlugFromHeader, verifySpacesSignature, async (req
         }
         resp = { type: "close_screen", finalMessage: result.doneMsg };
         res.json(resp);
-        void replaceFlowCardWithText(messageId, data["agentSlug"] as string | undefined, `**${result.doneMsg}**`, conversationId, data["dmChannelId"] as string | undefined, data["spacesAppId"] as string | undefined);
+        closeCard(`**${result.doneMsg}**`);
         void recordTwinApprovalOutcome(data, result.wasEdited ? "accepted_edited" : "accepted", result.finalContent);
       } catch (err) {
         log.error("[flow-action] Twin approval error:", err);

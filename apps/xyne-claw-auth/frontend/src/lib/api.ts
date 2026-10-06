@@ -4857,7 +4857,10 @@ export interface CuratorEmittedCandidate {
   signalScore?: number;
   groundedOnIds?: string[];
   verdict: "kept" | "dropped";
-  dropReason?: "empty" | "empty-or-too-long" | "bad-subsystem" | "low-signal" | "ungrounded" | "malformed";
+  dropReason?: "empty" | "empty-or-too-long" | "bad-subsystem" | "low-signal" | "ungrounded" | "malformed" | "classifier-duplicate" | "classifier-noise";
+  jevVerdict?: "new" | "duplicate" | "update" | "noise";
+  jevConfidence?: number;
+  jevScore?: number;
 }
 
 /** Full trace of one curator LLM call. Mirrors UserMemoryCuratorTrace in
@@ -4885,14 +4888,26 @@ export interface CuratorTrace {
    *  Guard (`trace?.emitted`) before reading `.length` / `.map`. */
   emitted?: CuratorEmittedCandidate[];
   error?: string;
+  /** Classifier (Jev) pass after the LLM (R8), stored with the LLM exchange. */
+  classifier?: CuratorClassifierTrace;
 }
 
 /** Per-file outcome of a soul-synthesis run (runType="synthesize"). */
 export interface SynthFileResult {
   name: string;
   factsUsed: number;
-  action: "updated" | "skipped" | "error";
+  /** "held" = rewrite generated, but the nightly update check kept the old file. */
+  action: "updated" | "skipped" | "error" | "held";
   chars?: number;
+  check?: {
+    verdict: "accept" | "review" | "reject";
+    keepsOld?: number;
+    supported?: number;
+    choice?: string;
+    source: "jev" | "fallback";
+    ms: number;
+    exchange?: ClassifierExchange;
+  };
   error?: string;
   model?: string;
   durationMs?: number;
@@ -4938,6 +4953,8 @@ export interface GateTrace {
   /** Set when the gate FAILED (timeout / HTTP error / bad response) and
    *  fail-opened — the event is recorded with status="error". */
   error?: string;
+  /** Every classifier (Jev) call the gate made, in full. */
+  classifier?: ClassifierExchange[];
 }
 
 export interface PipelineRecordPreview {
@@ -5817,6 +5834,19 @@ export interface TwinReplyAgg {
   responseTime: TwinReplyResponseTime;
   previousApprovalRate: number | null;
   previousEditRate: number | null;
+  /** Per-week approval trend, oldest first (absent on older backends). */
+  weekly?: TwinWeeklyReplyPoint[];
+}
+
+export interface TwinWeeklyReplyPoint {
+  weekStart: string;
+  proposed: number;
+  accepted: number;
+  acceptedEdited: number;
+  declined: number;
+  ignored: number;
+  approvalRate: number | null;
+  cleanApprovalRate: number | null;
 }
 
 export interface TwinGateAgg {
@@ -7687,4 +7717,32 @@ export async function deregisterGatewayService(serviceName: string): Promise<voi
     `${AUTH_API_URL}/api/v1/gateway-registry/${encodeURIComponent(serviceName)}`,
     { method: "DELETE" },
   );
+}
+
+/** One classifier (Jev) call in full: what it was told, asked, and answered. */
+export interface ClassifierExchange {
+  purpose: string;
+  backend: string;
+  ms: number;
+  ok: boolean;
+  error?: string;
+  state: string;
+  questionSpec: Record<string, unknown>;
+  answers: Record<string, unknown> | null;
+  at: string;
+}
+
+export interface CuratorClassifierTrace {
+  checked: number;
+  kept: number;
+  dropped: number;
+  unavailable: number;
+  ms: number;
+  calls: Array<{
+    text: string;
+    verdict?: "new" | "duplicate" | "update" | "noise";
+    confidence?: number;
+    worth?: number;
+    exchange: ClassifierExchange;
+  }>;
 }

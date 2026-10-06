@@ -23,12 +23,38 @@ export class SavedUserConfigurationsACL extends BaseQueryACL<
       return { userId: this.ctx.userId }
     }
 
+    // Channel grants store the channelId in view_access.entityId, so a member of
+    // that channel may read the shared view.
+    const channelIds = await this.getMemberChannelIds()
+
     return {
       // Hard workspace boundary: the row carries its own denormalized workspaceId.
       workspaceId: this.ctx.workspaceId,
-      // Within the workspace: your own views, plus PUBLIC (shared) views.
-      OR: [{ userId: this.ctx.userId }, { visibility: 'PUBLIC' }],
+      // Within the workspace: your own views, PUBLIC views, views shared directly
+      // with you, and views shared with a channel you belong to.
+      OR: [
+        { userId: this.ctx.userId },
+        { visibility: 'PUBLIC' },
+        { viewAccess: { some: { entityType: 'USER', entityId: this.ctx.userId } } },
+        ...(channelIds.length
+          ? [
+              {
+                viewAccess: {
+                  some: { entityType: 'CHANNEL', entityId: { in: channelIds } },
+                },
+              },
+            ]
+          : []),
+      ],
     }
+  }
+
+  private async getMemberChannelIds(): Promise<string[]> {
+    const memberships = await this.prisma.channelParticipant.findMany({
+      where: { userId: this.ctx.userId },
+      select: { channelId: true },
+    })
+    return memberships.map(m => m.channelId)
   }
 
   async getMutateWhere(): Promise<Prisma.SavedUserConfigurationWhereInput> {
