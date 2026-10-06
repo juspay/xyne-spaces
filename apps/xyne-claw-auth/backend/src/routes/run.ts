@@ -444,7 +444,6 @@ router.get(
         headers: {
           Authorization: `Bearer ${live.token}`,
           "x-session-id": live.sessionId,
-          "x-workspace-id": live.workspaceId,
           Cookie: cookie,
         },
       });
