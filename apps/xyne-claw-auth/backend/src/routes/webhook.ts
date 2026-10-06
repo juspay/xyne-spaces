@@ -53,7 +53,6 @@ import { runAttachmentRefsEnabled, uploadRunAttachment } from "../lib/run-attach
 import { findEligibleTwins, twinGateAllowsDispatch } from "../services/twinMentionIntake.js";
 import { handleTwinApprovalResult, withTwinSuffix } from "../services/twinResultDelivery.js";
 import { recordTwinApprovalPending } from "../services/twinResponseFeedback.js";
-import { getDigitalTwinAgent } from "../lib/digital-twin-agent.js";
 import { buildSpacesMentionLookups } from "../lib/mention-lookups.js";
 import { mintSessionToken } from "../lib/session-tokens.js";
 import { verifySpacesSignature } from "../middleware/verify-spaces-signature.js";
@@ -1258,12 +1257,6 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
         // User exists in claw-auth — fall through to default agent (Digital Twin)
       }
     }
-  }
-
-  const isTwinMentionFallthrough =
-    !agent && !spacesAppIdFromUrl && !agentSlugFromUrl && eventType === "USER_MENTIONED";
-  if (isTwinMentionFallthrough) {
-    agent = await getDigitalTwinAgent();
   }
 
   if (!agent) {

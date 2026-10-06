@@ -26,6 +26,7 @@ import { createLogger, createTraceId } from "../logger.js";
 import { requireAuth, requireUserAuth, s2sKeyMatches } from "../middleware/require-auth.js";
 import { resolveClawUserIdForSpacesIdentity } from "../lib/users-jit.js";
 import { isClawAdmin, requireClawAdmin, getAgentEditAccess, getOrgId, getRequesterId } from "../middleware/agent-acl.js";
+import { matchesAuthenticatedUserId } from "../middleware/pin-user-id-param.js";
 import { curateApprovedTranscript, persistSubsystemReviews, readSessionTranscript, type SessionTranscript } from "../services/memoryCronService.js";
 import { classifySessionSubsystemForBank, distillSessionFile, parseSessionFile } from "../services/sessionCurator.js";
 import { enqueueAgentBackfill, getAgentBackfillQueue } from "../queue/agent-backfill-queue.js";
@@ -65,22 +66,6 @@ const logger = createLogger("memory-review", createTraceId());
 // Default is HindsightProvider, swappable via the MEMORY_PROVIDER env var.
 const memory = getMemoryProvider();
 
-const DIGITAL_TWIN_SLUG = "digital-twin";
-const DIGITAL_TWIN_BANK = bankIdForAgent(DIGITAL_TWIN_SLUG);
-
-/**
- * Twin detection MUST key on the bank id, not the raw slug. bankIdForAgent
- * sanitizes (lowercase, collapse non-alphanumerics, truncate 44), so slugs
- * like "digital_twin" / "Digital-Twin" / "digital--twin" all resolve to the
- * twin's bank `xyne-digital-twin`. A raw `=== "digital-twin"` check would let
- * such an agent reach the shared twin bank WITHOUT the per-user `user:<id>`
- * scoping — exposing every user's personal memories. Anything that lands in
- * the twin bank gets twin treatment.
- */
-function isDigitalTwinAgent(agentSlug: string | undefined): boolean {
-  return !!agentSlug && bankIdForAgent(agentSlug) === DIGITAL_TWIN_BANK;
-}
-
 /**
  * Twin memories are STORED tagged `user:<canonical Claw id>`, but clients
  * address them with the only id they know — the raw (workspace-scoped) Spaces
@@ -106,7 +91,9 @@ async function assertMemoryUserAccess(
 ): Promise<boolean> {
   if (s2sKeyMatches(req.headers["x-s2s-key"])) return true;
   const requesterId = getRequesterId(req);
-  if (requesterId && requesterId === targetUserId) return true;
+  // targetUserId arrives as the raw Spaces id from the browser; match it against
+  // the caller's alias set (canonical x-user-id OR raw x-spaces-user-id).
+  if (matchesAuthenticatedUserId(req, targetUserId)) return true;
   if (requesterId && (await isClawAdmin(requesterId))) return true;
   res.status(403).json({ success: false, error: "You can only access your own memory files." });
   return false;

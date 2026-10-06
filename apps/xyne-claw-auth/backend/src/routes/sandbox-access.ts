@@ -16,6 +16,10 @@ export type SandboxAccessReason = "invalid-sandbox" | "unknown-sandbox" | "owner
 export async function resolveSandboxAccess(
   sandboxId: string,
   userId: string,
+  // Claw sandbox-owner rows are keyed by the CANONICAL id (`userId`); the Spaces
+  // conversation-access check matches channel_participants by the RAW Spaces id.
+  // Pass both so a non-owner collaborator is authorized against the right id.
+  spacesUserId: string = userId,
 ): Promise<{ allow: boolean; reason: SandboxAccessReason }> {
   if (!SANDBOX_ID_RE.test(sandboxId)) return { allow: false, reason: "invalid-sandbox" };
 
@@ -30,7 +34,7 @@ export async function resolveSandboxAccess(
 
   const conversationIds = [...new Set(rows.map((row) => row.conversationId))].slice(0, MAX_CONVERSATIONS_CHECKED);
   for (const conversationId of conversationIds) {
-    if ((await checkConversationAccess(conversationId, userId)) === "ok") {
+    if ((await checkConversationAccess(conversationId, spacesUserId)) === "ok") {
       return { allow: true, reason: "conversation" };
     }
   }
@@ -39,13 +43,16 @@ export async function resolveSandboxAccess(
 
 router.get("/", async (req: Request, res: Response) => {
   const userId = getRequesterId(req);
+  const spacesUserId = typeof req.headers["x-spaces-user-id"] === "string" && req.headers["x-spaces-user-id"]
+    ? (req.headers["x-spaces-user-id"] as string)
+    : userId;
   const sandboxId = typeof req.query["sandboxId"] === "string" ? req.query["sandboxId"].trim() : "";
   if (!userId) {
     res.status(401).json({ allow: false });
     return;
   }
   try {
-    const { allow, reason } = await resolveSandboxAccess(sandboxId, userId);
+    const { allow, reason } = await resolveSandboxAccess(sandboxId, userId, spacesUserId);
     if (!allow) log.warn(`[sandbox-access] deny sandbox=${sandboxId} user=${userId} reason=${reason}`);
     res.status(allow ? 200 : 403).json({ allow, reason });
   } catch (err) {

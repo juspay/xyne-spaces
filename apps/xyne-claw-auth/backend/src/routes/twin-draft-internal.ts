@@ -68,31 +68,6 @@ twinDraftInternalRouter.post("/action", async (req: Request, res: Response) => {
     return;
   }
 
-  // Feedback row shape read by recordTwinApprovalOutcome (mirrors flow-data keys).
-  // twinResponseFeedback is Claw-owned and keyed by the CANONICAL Claw user
-  // (recordTwinApprovalPending on the producer side); ownerId here is the raw
-  // Spaces id from the draft, so canonicalize before writing.
-  const feedbackData: Record<string, unknown> = {
-    mentionedUserId: await resolveCanonicalUserIdOrSelf(ownerId, draft.workspaceId),
-    sourceMessageId: draft.sourceMessageId,
-    targetConversationId: draft.conversationId,
-    targetChannelId: draft.channelId,
-    channelName: draft.channelName,
-    incomingTask: draft.incomingTask,
-    deliveryAction: draft.action,
-    deliveryEmoji: draft.emoji,
-    destinationKind: draft.destinationKind,
-    messageContent: draft.message,
-  };
-
-  if (action === "decline") {
-    void recordTwinApprovalOutcome(feedbackData, "declined");
-    log.info(`[twin-draft] declined by ${ownerId} (msg ${draft.sourceMessageId ?? "(none)"})`);
-    res.json({ ok: true });
-    return;
-  }
-
-  // approve — deliver, then record the outcome.
   const ctx: TwinDeliveryContext = {
     mentionedUserId: ownerId,
     workspaceId: draft.workspaceId,
@@ -109,9 +84,14 @@ twinDraftInternalRouter.post("/action", async (req: Request, res: Response) => {
     senderId: draft.senderId,
   };
   // Feedback row shape read by recordTwinApprovalOutcome (mirrors flow-data keys).
+  // twinResponseFeedback is Claw-owned and keyed by the CANONICAL Claw user
+  // (recordTwinApprovalPending on the producer side); ownerId here is the raw
+  // Spaces id from the draft, so canonicalize mentionedUserId before writing.
+  // ctx keeps the raw ownerId — it drives the Spaces-facing delivery.
   // destinationKind stays the draft's own so a draft without one records NULL.
   const feedbackData: Record<string, unknown> = {
     ...ctx,
+    mentionedUserId: await resolveCanonicalUserIdOrSelf(ownerId, draft.workspaceId),
     channelName: draft.channelName,
     incomingTask: draft.incomingTask,
     destinationKind: draft.destinationKind,

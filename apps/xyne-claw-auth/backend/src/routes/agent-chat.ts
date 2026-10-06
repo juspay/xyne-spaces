@@ -3684,7 +3684,11 @@ router.patch("/:slug/chat/:convId", async (req: Request<{ slug: string; convId: 
       req.params.convId,
       req.params.slug,
     );
-    const owned = messages.find((message) => message.userId === userId);
+    // Chat rows may be keyed under EITHER the canonical id or the raw Spaces id
+    // (pre/post canonicalization), so match against the caller's alias set and
+    // persist/read the meta under the id the rows actually use (owned.userId).
+    const userAliases = getRequesterAliases(req);
+    const owned = messages.find((message) => userAliases.includes(message.userId));
     if (!owned) {
       res.status(404).json({ success: false, error: "Conversation not found" });
       return;
@@ -3692,7 +3696,7 @@ router.patch("/:slug/chat/:convId", async (req: Request<{ slug: string; convId: 
 
     const target = {
       conversationId: req.params.convId,
-      userId,
+      userId: owned.userId,
       agentSlug: req.params.slug,
       orgId: owned.orgId,
     };
@@ -3708,7 +3712,7 @@ router.patch("/:slug/chat/:convId", async (req: Request<{ slug: string; convId: 
 
     const meta = await chatConversationMetaRepository.find({
       conversationId: req.params.convId,
-      userId,
+      userId: owned.userId,
       agentSlug: req.params.slug,
     });
     res.json({

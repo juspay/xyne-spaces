@@ -52,7 +52,7 @@ router.get("/:userId/connections", asyncHandler(async (req: Request<{ userId: st
 
 // GET /:userId/connections/availability
 router.get("/:userId/connections/availability", asyncHandler(async (req: Request<{ userId: string }>, res: Response) => {
-  const userId = req.params.userId;
+  const userId = canonicalUserId(req);
   const servers = await prisma.mcpServer.findMany({ where: { enabled: true }, select: { id: true, type: true } });
   const availability = await availabilityForServerIds(userId, servers.map((s) => s.id));
 
