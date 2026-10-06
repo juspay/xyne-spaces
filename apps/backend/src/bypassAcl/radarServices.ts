@@ -3,6 +3,7 @@ import { config } from '@/config/env';
 import { DatabaseClient } from '@/database/client';
 import { logger } from '@/utils/logger';
 import { radarExecutionService } from '@/services/radar/radarExecutionService';
+import { radarPrMergeResolver, type PrMergedEvent } from '@/services/radar/radarPrMergeResolver';
 import { asSystem, asService, rawQuery } from './base';
 
 const prisma = DatabaseClient.getInstance();
@@ -90,10 +91,27 @@ export function processRadarThread(
   scope: Parameters<typeof radarExecutionService.processThread>[0],
 ): ReturnType<typeof radarExecutionService.processThread> {
   return asService(
-    ['ExecutionItem', 'ExecutionThreadState', 'Message', 'MessageAttachment', 'Channel', 'ChannelParticipant', 'User'],
+    ['ExecutionItem', 'ExecutionThreadState', 'RadarPrLink', 'Message', 'MessageAttachment', 'Channel', 'ChannelParticipant', 'User'],
     'radar execution worker: Bull job has no HTTP tenant context, writes stamped from the conversation\'s own workspaceId',
     'radar-execution-worker',
     workspaceId,
     () => radarExecutionService.processThread(scope),
+  );
+}
+
+/**
+ * PR merge webhook → Radar. The webhook's own scope names only the PR/ticket tables, so the
+ * pass opens its own tenant context from the webhook URL's workspaceId, like the worker does.
+ */
+export function resolveRadarOnPrMerge(event: PrMergedEvent): Promise<void> {
+  // The legacy /github route carries no workspaceId; an undefined one would
+  // leave every workspace filter empty and resolve items across tenants.
+  if (!config.radar.enabled || !event.workspaceId) return Promise.resolve();
+  return asService(
+    ['ExecutionItem', 'ExecutionItemMutation', 'ExecutionRunLog', 'RadarPrLink', 'Message', 'Channel', 'User', 'PullRequests', 'WorkflowExecution', 'Workflow', 'Ticket'],
+    'radar pr-merge pass: webhook has no user context, reads and writes stamped from the webhook URL\'s workspaceId',
+    'radar-pr-merge',
+    event.workspaceId,
+    () => radarPrMergeResolver.onPrMerged(event),
   );
 }

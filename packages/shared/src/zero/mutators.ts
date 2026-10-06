@@ -2058,22 +2058,12 @@ export const mutators = defineMutators({
           conversationParticipantId,
         },
       }) => {
-        // Verify target channel exists
-        const targetChannel = await tx.run(zql.channels.where('id', targetChannelId).one());
-        if (!targetChannel) {
-          throw new Error('Target channel not found');
-        }
-
-        // Verify user is a participant of the target channel
-        const participation = await tx.run(
-          zql.channel_participants
-            .where('channelId', targetChannelId)
-            .where('userId', ctx.userID)
-            .one(),
-        );
-        if (!participation) {
-          throw new Error('You are not a participant of the target channel');
-        }
+        // No channel/membership checks here: this mutator only runs on the client, whose
+        // local Zero cache holds the user's channel_participants row for a channel only once
+        // that channel has been loaded (e.g. opened), so checking here wrongly rejected members
+        // forwarding to a channel they hadn't opened yet. The server enforces these checks in
+        // its own forwardMessage (apps/backend/src/zero/mutators.ts); the forward modal shows
+        // a rejection as "Failed to forward message".
 
         // Get the original message
         const originalMessage = await resolveMessage(tx, originalMessageId);
@@ -2088,19 +2078,6 @@ export const mutators = defineMutators({
         const originalConversation = await tx.run(
           zql.conversations.where('conversationId', originalMessage.conversationId).one(),
         );
-
-        // Verify user is a participant of the origin channel (where the message is being forwarded from)
-        if (originalConversation?.channelId) {
-          const originParticipation = await tx.run(
-            zql.channel_participants
-              .where('channelId', originalConversation.channelId)
-              .where('userId', ctx.userID)
-              .one(),
-          );
-          if (!originParticipation) {
-            throw new Error('You are not a participant of the origin channel');
-          }
-        }
 
         // Handle re-forwarding: if the original message is already forwarded,
         // parse the XML to get the optionalText and use that as content (if exists)

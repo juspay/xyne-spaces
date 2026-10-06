@@ -8,7 +8,7 @@ import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/
 import type { McpAdapter, McpCallResult, McpServerTools, McpToolInfo } from "./types.js";
 import { extForMime, fileNameFromResource } from "./attachment-filename.js";
 import { STATIC_ADAPTERS } from "./static-adapters.js";
-import { resolveConnectorDefinition } from "./connector-definitions.js";
+import { resolveConnectorDefinition, effectiveWriteTools } from "./connector-definitions.js";
 import { getSpacesAuthForUser, getWorkspaceIdForUser } from "../lib/spaces-db.js";
 import { SPACES_SESSION_CREDENTIAL_SERVER_TYPES } from "../lib/spaces-session-server-types.js";
 import { provisionStdioCommand } from "./provision.js";
@@ -447,7 +447,9 @@ export async function listToolsForUser(
   void recordKnownMcpTools(userId, serverType, tools);
 
   const definition = await resolveConnectorDefinition(serverType);
-  const writeTools = definition?.writeTools ?? [];
+  const writeTools = definition?.writePolicy
+    ? effectiveWriteTools(definition.writePolicy, tools.map((t) => t.name))
+    : (definition?.writeTools ?? []);
   return { serverType, serverName, tools, writeTools };
 }
 

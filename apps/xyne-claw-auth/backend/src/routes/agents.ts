@@ -1,6 +1,7 @@
 import { Router, type Request, type RequestHandler, type Response } from "express";
 import { errMsg } from "../lib/errors.js";
 import { assertSafeOutboundUrl } from "../mcpgateway/services/http-client.js";
+import { safeFetch } from "../lib/safe-fetch.js";
 import {
   extractProviderMessage,
   modelServedBy,
@@ -25,6 +26,7 @@ import { validateCredentials } from "../validation.js";
 import { fetchAndStoreSigningSecretFromSpacesApi } from "../lib/spaces-app-secret.js";
 import { extractCodexBearer } from "../lib/codex-creds.js";
 import { extractClaudeBearer } from "../lib/claude-creds.js";
+import { resolveClaudeModelsCredential } from "../lib/claude-models-credential.js";
 import { redisService } from "../redis.js";
 import {
   requireClawAdmin,
@@ -3001,12 +3003,7 @@ export async function fetchAnthropicModels(apiKey: string, baseUrl?: string, aut
   } else {
     headers["x-api-key"] = apiKey;
   }
-  await assertSafeOutboundUrl(`${root}/v1/models`);
-  const res = await fetch(`${root}/v1/models`, {
-    method: "GET",
-    headers,
-    signal: AbortSignal.timeout(10_000),
-  });
+  const res = await safeFetch(`${root}/v1/models`, { method: "GET", headers }, { timeoutMs: 10_000 });
 
   if (!res.ok) {
     const text = await res.text().catch(() => "");
@@ -3146,38 +3143,20 @@ router.post("/:slug/user-config/:userId/github-poll", pinUserIdParam, async (req
 router.post("/:slug/user-config/:userId/claude-models", pinUserIdParam, async (req: Request<{ slug: string; userId: string }>, res: Response) => {
   try {
     const { apiKey, baseUrl, authType } = req.body as { apiKey?: string; baseUrl?: string; authType?: string };
-    let resolvedApiKey = apiKey?.trim();
-    let resolvedAuthType: string | undefined = authType;
-    let resolvedBaseUrl: string | undefined = baseUrl;
-
-    // No key in the body → resolve a stored cred. Try the user's personal cred
-    // first, then fall back to the AGENT's cred (the /v1/models list is
-    // account-wide, so either works to populate the dropdown). Use
-    // extractClaudeBearer so an OAuth *bundle* ({access_token,…}) yields the
-    // bare token instead of the JSON blob.
-    if (!resolvedApiKey) {
-      const userCred = await userProviderCredentialsRepository.findByUserAndProvider(req.params.userId, "claude");
-      if (userCred?.encryptedKey && userCred.iv && userCred.authTag) {
-        resolvedApiKey = extractClaudeBearer(decrypt(userCred.encryptedKey, userCred.iv, userCred.authTag, CONFIG.encryptionKey));
-        if (!resolvedAuthType) resolvedAuthType = userCred.authType ?? undefined;
-        resolvedBaseUrl = resolvedBaseUrl ?? userCred.baseUrl ?? undefined;
-      } else {
-        const agentRow = await agentRepository.findBySlug(req.params.slug, getOrgId(req));
-        const agentCred = agentRow ? await agentProviderCredentialsRepository.findByAgentAndProvider(agentRow.id, "claude") : null;
-        if (agentCred?.encryptedKey && agentCred.iv && agentCred.authTag) {
-          resolvedApiKey = extractClaudeBearer(decrypt(agentCred.encryptedKey, agentCred.iv, agentCred.authTag, CONFIG.encryptionKey));
-          if (!resolvedAuthType) resolvedAuthType = agentCred.authType ?? undefined;
-          resolvedBaseUrl = resolvedBaseUrl ?? agentCred.baseUrl ?? undefined;
-        }
-      }
-    }
-
-    if (!resolvedApiKey) {
+    const cred = await resolveClaudeModelsCredential({
+      userId: req.params.userId,
+      agentSlug: req.params.slug,
+      orgId: getOrgId(req),
+      ...(apiKey !== undefined ? { apiKey } : {}),
+      ...(baseUrl !== undefined ? { baseUrl } : {}),
+      ...(authType !== undefined ? { authType } : {}),
+    });
+    if (!cred) {
       res.status(400).json({ success: false, error: "apiKey is required" });
       return;
     }
 
-    const models = await fetchAnthropicModels(resolvedApiKey, resolvedBaseUrl, resolvedAuthType);
+    const models = await fetchAnthropicModels(cred.apiKey, cred.baseUrl, cred.authType);
     res.json({ success: true, data: models });
   } catch (err) {
     log.error("[agents] claude-models error:", err);
@@ -4277,8 +4256,7 @@ router.get(
         headers["User-Agent"] = "codex-cli";
       }
 
-      await assertSafeOutboundUrl(url);
-      const upstream = await fetch(url, { headers, signal: AbortSignal.timeout(20_000) });
+      const upstream = await safeFetch(url, { headers }, { timeoutMs: 20_000 });
       if (!upstream.ok) {
         const text = await upstream.text().catch(() => "");
         res.status(502).json({ success: false, error: `Models endpoint ${upstream.status}: ${text.slice(0, 200)}` });
@@ -4344,11 +4322,11 @@ router.post(
 
       const root = (baseUrl || CONFIG.litellmBaseUrl).replace(/\/+$/, "");
       log.info(`[agents] litellm/models fetching ${root}/v1/models (keyLen=${apiKey.length}, source=${typedKey ? "typed" : "saved-cred"})`);
-      await assertSafeOutboundUrl(`${root}/v1/models`);
-      const upstream = await fetch(`${root}/v1/models`, {
-        headers: { Authorization: `Bearer ${apiKey}`, "User-Agent": "xyne-claw-auth" },
-        signal: AbortSignal.timeout(20_000),
-      });
+      const upstream = await safeFetch(
+        `${root}/v1/models`,
+        { headers: { Authorization: `Bearer ${apiKey}`, "User-Agent": "xyne-claw-auth" } },
+        { timeoutMs: 20_000 },
+      );
       if (!upstream.ok) {
         const text = await upstream.text().catch(() => "");
         log.warn(`[agents] litellm/models upstream ${upstream.status} at ${root}/v1/models: ${text.slice(0, 200)}`);

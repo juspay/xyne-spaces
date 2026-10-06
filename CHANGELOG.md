@@ -1,3 +1,80 @@
+## [1.464.2](https://github.com/juspay/xyne-spaces/compare/v1.464.1...v1.464.2) (2026-10-06)
+
+
+### Bug Fixes
+
+* check progressUrl before the run-queue worker sends the S2S key ([#2712](https://github.com/juspay/xyne-spaces/issues/2712)) ([4cfd2c3](https://github.com/juspay/xyne-spaces/commit/4cfd2c3a9efdeb987cc3799f700ee9572a93e295))
+* make run ownership claim a compare-and-set ([#2713](https://github.com/juspay/xyne-spaces/issues/2713)) ([d15e8bc](https://github.com/juspay/xyne-spaces/commit/d15e8bc71312cf71cfd046e41fd644fd6ecacc04))
+
+## [1.464.1](https://github.com/juspay/xyne-spaces/compare/v1.464.0...v1.464.1) (2026-10-06)
+
+
+### Bug Fixes
+
+* add conversation-ownership check on claw run endpoints (session IDOR) ([#2701](https://github.com/juspay/xyne-spaces/issues/2701)) ([477b907](https://github.com/juspay/xyne-spaces/commit/477b9076cc6ae7abc8faf9e2cd1f04e2ebbb067e)), closes [#2706](https://github.com/juspay/xyne-spaces/issues/2706)
+* block anonymous npm publish to in-cluster Verdaccio ([#2709](https://github.com/juspay/xyne-spaces/issues/2709)) ([db058d1](https://github.com/juspay/xyne-spaces/commit/db058d1c9aa19d7c8de4d517273452b82db789ee)), closes [juspay/xyne-spaces-private#420](https://github.com/juspay/xyne-spaces-private/issues/420)
+* never send an agent's Claude key to a caller-supplied baseUrl ([#2710](https://github.com/juspay/xyne-spaces/issues/2710)) ([01ba3f0](https://github.com/juspay/xyne-spaces/commit/01ba3f0651137658e07b1ede3bff498a35bb6259))
+* show "Saved by <user>" on saved call whiteboard messages ([#2679](https://github.com/juspay/xyne-spaces/issues/2679)) ([074f5cc](https://github.com/juspay/xyne-spaces/commit/074f5cc018d6f3fc5964f41602c1c57556786b93))
+
+## [1.464.0](https://github.com/juspay/xyne-spaces/compare/v1.463.1...v1.464.0) (2026-10-06)
+
+
+### Features
+
+* added email to user tagging and user impersonation f… ([#2607](https://github.com/juspay/xyne-spaces/issues/2607)) ([602a14d](https://github.com/juspay/xyne-spaces/commit/602a14df145719b1193d48035ea87cc033b850a2))
+* adding hubspot webhook support ([#2581](https://github.com/juspay/xyne-spaces/issues/2581)) ([07f6f36](https://github.com/juspay/xyne-spaces/commit/07f6f36291949ed0ccde3c5f1800a0841e734dc8))
+
+## [1.463.1](https://github.com/juspay/xyne-spaces/compare/v1.463.0...v1.463.1) (2026-10-06)
+
+
+### Bug Fixes
+
+* block SSRF via /run callbackUrl/progressUrl and pin model-probe fetches ([#2700](https://github.com/juspay/xyne-spaces/issues/2700)) ([7339ace](https://github.com/juspay/xyne-spaces/commit/7339ace030e97d230f45b999b30350052f8eb3d8))
+
+## [1.463.0](https://github.com/juspay/xyne-spaces/compare/v1.462.1...v1.463.0) (2026-10-06)
+
+
+### Features
+
+* resolve Radar items when a GitHub or Bitbucket PR merges ([#2665](https://github.com/juspay/xyne-spaces/issues/2665)) ([f45a14b](https://github.com/juspay/xyne-spaces/commit/f45a14bfd9e3107ebab4ec2bbd55f8d65051c5a6))
+
+
+### Bug Fixes
+
+* enforce HITL approval for writeToolPolicy allAsk/denylist modes ([#2698](https://github.com/juspay/xyne-spaces/issues/2698)) ([34da4e3](https://github.com/juspay/xyne-spaces/commit/34da4e311c9fce859531997ab6428248731b87f1))
+
+## [1.462.1](https://github.com/juspay/xyne-spaces/compare/v1.462.0...v1.462.1) (2026-10-06)
+
+
+### Bug Fixes
+
+* remove requireS2S cookie fallback (userId impersonation on chain-workflows trigger + siblings) ([#2691](https://github.com/juspay/xyne-spaces/issues/2691)) ([3d78465](https://github.com/juspay/xyne-spaces/commit/3d784656873a9fb87b211be5e5c67e2011d83506))
+
+## [1.462.0](https://github.com/juspay/xyne-spaces/compare/v1.461.3...v1.462.0) (2026-10-06)
+
+
+### Features
+
+* revert agent no control ([#2686](https://github.com/juspay/xyne-spaces/issues/2686)) ([c46d8d2](https://github.com/juspay/xyne-spaces/commit/c46d8d262692c77d0bdd4c3c8a27762d0823bb6d))
+
+
+### Bug Fixes
+
+* check workspaceId in checkAccess ([#1868](https://github.com/juspay/xyne-spaces/issues/1868)) ([262d44a](https://github.com/juspay/xyne-spaces/commit/262d44a714c77db6a6081b6f7099e10496eb4828))
+* forward message to unopened channels and show one res… ([#2668](https://github.com/juspay/xyne-spaces/issues/2668)) ([caa71df](https://github.com/juspay/xyne-spaces/commit/caa71dfabc3ca5e6b93c03600bf01b80649a09fd))
+* packages version bumps ([#2684](https://github.com/juspay/xyne-spaces/issues/2684)) ([5fa8c7a](https://github.com/juspay/xyne-spaces/commit/5fa8c7aca516fff0fc4bc89b49580682b7e549d1))
+* render agent, connector, PR, code and approval cards on Xyne AI ([#2651](https://github.com/juspay/xyne-spaces/issues/2651)) ([b1d33a9](https://github.com/juspay/xyne-spaces/commit/b1d33a910d20248c89c373b9b37656f064f0ae60))
+* resolve sidebar channel drops by pointer position so starred channels can be dragged back to Channels ([#2674](https://github.com/juspay/xyne-spaces/issues/2674)) ([e94b603](https://github.com/juspay/xyne-spaces/commit/e94b6036d641d7e478f0aa6078677412db9b34d0))
+* the pr created by the agent is synced with the webhooks ([#2656](https://github.com/juspay/xyne-spaces/issues/2656)) ([40f19c0](https://github.com/juspay/xyne-spaces/commit/40f19c0c1231b2cd55895d988ccc0ed3565e1b7f))
+
+## [1.461.3](https://github.com/juspay/xyne-spaces/compare/v1.461.2...v1.461.3) (2026-10-06)
+
+
+### Bug Fixes
+
+* key public-share and OAuth rate limits on verified user, not forgeable cookies ([#2689](https://github.com/juspay/xyne-spaces/issues/2689)) ([4418c38](https://github.com/juspay/xyne-spaces/commit/4418c387187a7ffc89b6ebda66c2f3282d326e3a))
+* require X-Xyne-Signature on all webhook callers, including s2s ([#2688](https://github.com/juspay/xyne-spaces/issues/2688)) ([3df7acc](https://github.com/juspay/xyne-spaces/commit/3df7accbc9ba8146a1d08c3097e38c833114c734))
+
 ## [1.461.2](https://github.com/juspay/xyne-spaces/compare/v1.461.1...v1.461.2) (2026-10-06)
 
 
