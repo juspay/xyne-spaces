@@ -146,23 +146,17 @@ export const useActiveCall = (externalId: string) => {
 };
 
 /**
- * Check if the current user holds host powers for a specific call: its creator, or
- * the acting host standing in while the creator is absent (backend-computed).
+ * Check if the current user is the host/creator of a specific call
  * @param externalId - The external ID of the call
  * @param userId - The current user's ID
- * @returns true if the user is the host or acting host, false otherwise
+ * @returns true if the user is the host, false otherwise
  */
 export const useIsCallHost = (externalId: string, userId: string | undefined) => {
   const activeCall = useActiveCall(externalId);
-  const isActingHost = useSelector(
-    roomActor,
-    state =>
-      !!userId && state.context.externalId === externalId && state.context.actingHostId === userId,
-  );
 
   return useMemo(() => {
-    return activeCall?.createdByUserId === userId || isActingHost;
-  }, [activeCall?.createdByUserId, userId, isActingHost]);
+    return activeCall?.createdByUserId === userId;
+  }, [activeCall?.createdByUserId, userId]);
 };
 
 /**
