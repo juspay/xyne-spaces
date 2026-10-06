@@ -666,8 +666,8 @@ export class SlackMigrationEngine {
     const channelId = isChannel
       ? job.channelInput!.xyneChannelId
       : isSelfDm
-        ? await channelService.ensureSelfDmExists(dmOwnerId!, job.workspaceId) // canonical self-DM (same as login)
-        : await channelRepo.findOrCreateDMChannel(dmOwnerId!, dmOtherIds, participantRepo, job.workspaceId);
+        ? await channelService.ensureSelfDmExists(dmOwnerId!, job.workspaceId, { indexInVespa: true }) // canonical self-DM (same as login)
+        : await channelRepo.findOrCreateDMChannel(dmOwnerId!, dmOtherIds, participantRepo, job.workspaceId, { indexInVespa: true });
 
     if (isChannel) {
       // Slack channel creator → Xyne ADMIN (matches /sync). First, because the member loop's
