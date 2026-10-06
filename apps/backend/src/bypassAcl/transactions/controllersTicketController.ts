@@ -10,6 +10,7 @@ import { syncStageOverdueFlag } from '@/services/tickets/syncStageOverdueFlag';
 import { calculateETADeadline } from '@/utils/etaCalculation';
 import { syncConversationTicketMdFromPrismaTicket } from '@/utils/ticketMd';
 import { Prisma } from '@prisma/client';
+import { GuestEntity } from '@xyne/shared';
 import { TicketStatusV2, parseTicketEtaManagement, mergeTicketEtaManagement, TicketPriority, MessageType, ConversationParticipation, type TicketCardSummary, serializeTicketMd, BoardType, AttachmentEntityType, TicketReferenceRelation, ActivityType } from '@xyne/shared';
 import { randomUUID } from 'crypto';
 import { generateKeyBetween } from 'fractional-indexing';
@@ -280,8 +281,101 @@ export function createTicketWithConversationTx(self: TicketController, conversat
     return ticket;
   });
 }
-export function createTicketTx(projectId: string, sourceConversationId: string | undefined, validatedConversation: any, self: TicketController, requestedTicketId: string | undefined, title: string, description: string, userId: string, finalAssignedTo: string | undefined, userGroupId: string | undefined, boardId: string, effectiveStatusV2: TicketStatusV2, priority: TicketPriority | undefined, eta: Date | undefined, metadata: Record<string, unknown> | undefined, closedAt: Date | undefined, closedBy: string | undefined, sourceMessageId: string | undefined, effectiveTicketType: string | undefined, effectiveStageName: string | undefined, dynamicFields: Record<string, string | string[]>, formFieldChangesForEmit: FormFieldChanges | undefined, channelId: string | undefined, excludedChatAttachmentIds: string[] | undefined, entityLinkOwner: { sourceId: string; sourceType: "CANVAS" | "ATTACHMENT" | "TRACK" | "FOLDER" | "LINK"; } | undefined, fromTicketsTab: boolean, initialMessageId: `${string}-${string}-${string}-${string}-${string}`, board: { name: string; boardType: BoardType; projectId: string; } | null, uploadedFiles: UploadedFileResult[], draftAttachmentIds: string[] | undefined) {
+export class TicketCreateAccessError extends Error {
+  constructor(
+    public readonly code: 'CHANNEL_NOT_ACCESSIBLE' | 'CHANNEL_ARCHIVED' | 'BOARD_NOT_ACCESSIBLE',
+    message: string,
+  ) {
+    super(message);
+    this.name = 'TicketCreateAccessError';
+  }
+}
+
+export interface TicketCreateAccessInput {
+  workspaceId: string;
+  channelIds: Array<string | null | undefined>;
+  boardId: string | null | undefined;
+  isGuest?: boolean;
+  trustedChannelId?: string;
+}
+
+/**
+ * Runs first inside createTicketTx. The transaction bypasses the tenant extension, and
+ * TicketsACL.canCreate only looks at isArchived, so nothing else checks the caller-supplied
+ * channel/board: every channel must exist in the caller's workspace (PRIVATE needs the caller as
+ * a participant, same rule the source-conversation path applies) and the board must be in the
+ * same workspace as the channel. Not-found and not-allowed throw the same error so ids cannot
+ * be probed.
+ */
+async function assertTicketCreateAccess(tx: Prisma.TransactionClient, userId: string, access: TicketCreateAccessInput) {
+  const channelDenied = () =>
+    new TicketCreateAccessError('CHANNEL_NOT_ACCESSIBLE', 'Access denied - you do not have permission to create tickets in this channel');
+  const boardDenied = () =>
+    new TicketCreateAccessError('BOARD_NOT_ACCESSIBLE', 'Access denied - you do not have permission to create tickets on this board');
+  const channelIds = [...new Set(access.channelIds.filter((id): id is string => !!id))];
+  let anchorWorkspaceId = access.workspaceId;
+  let usesTrustedChannel = false;
+
+  for (const channelId of channelIds) {
+    const channel = await tx.channel.findUnique({
+      where: { id: channelId },
+      select: { workspaceId: true, visibility: true, isArchived: true },
+    });
+    if (!channel) throw channelDenied();
+    if (access.trustedChannelId === channelId) {
+      usesTrustedChannel = true;
+      anchorWorkspaceId = channel.workspaceId;
+    } else {
+      if (channel.workspaceId !== access.workspaceId) throw channelDenied();
+      if (access.isGuest) {
+        const grant = await tx.guestAccess.findUnique({
+          where: {
+            userId_accessibleEntityId_accessibleEntityType: {
+              userId,
+              accessibleEntityId: channelId,
+              accessibleEntityType: GuestEntity.CHANNEL,
+            },
+          },
+          select: { workspaceId: true },
+        });
+        const hasGrant = grant?.workspaceId === access.workspaceId;
+        const participant = hasGrant
+          ? null
+          : await tx.channelParticipant.findUnique({ where: { channelId_userId: { channelId, userId } }, select: { id: true } });
+        if (!hasGrant && !participant) throw channelDenied();
+      } else if (channel.visibility === 'PRIVATE') {
+        const membership = await tx.channelParticipant.findUnique({
+          where: { channelId_userId: { channelId, userId } },
+          select: { id: true },
+        });
+        if (!membership) throw channelDenied();
+      }
+    }
+    if (channel.isArchived) {
+      throw new TicketCreateAccessError('CHANNEL_ARCHIVED', 'Cannot create tickets in an archived channel');
+    }
+  }
+
+  if (access.boardId) {
+    const board = await tx.board.findUnique({ where: { id: access.boardId }, select: { workspaceId: true, projectId: true } });
+    if (!board || board.workspaceId !== anchorWorkspaceId) throw boardDenied();
+
+    if (!access.isGuest && !usesTrustedChannel) {
+      const inProject = await tx.channel.findFirst({
+        where: { projectId: board.projectId, participants: { some: { userId } } },
+        select: { id: true },
+      });
+      if (!inProject) {
+        throw new TicketCreateAccessError('BOARD_NOT_ACCESSIBLE', 'Access denied - you must be a project participant to create tickets');
+      }
+    }
+  }
+}
+
+export function createTicketTx(projectId: string, sourceConversationId: string | undefined, validatedConversation: any, self: TicketController, requestedTicketId: string | undefined, title: string, description: string, userId: string, finalAssignedTo: string | undefined, userGroupId: string | undefined, boardId: string, effectiveStatusV2: TicketStatusV2, priority: TicketPriority | undefined, eta: Date | undefined, metadata: Record<string, unknown> | undefined, closedAt: Date | undefined, closedBy: string | undefined, sourceMessageId: string | undefined, effectiveTicketType: string | undefined, effectiveStageName: string | undefined, dynamicFields: Record<string, string | string[]>, formFieldChangesForEmit: FormFieldChanges | undefined, channelId: string | undefined, excludedChatAttachmentIds: string[] | undefined, entityLinkOwner: { sourceId: string; sourceType: "CANVAS" | "ATTACHMENT" | "TRACK" | "FOLDER" | "LINK"; } | undefined, fromTicketsTab: boolean, initialMessageId: `${string}-${string}-${string}-${string}-${string}`, board: { name: string; boardType: BoardType; projectId: string; } | null, uploadedFiles: UploadedFileResult[], draftAttachmentIds: string[] | undefined, access?: TicketCreateAccessInput) {
   return transaction(['Board', 'Channel', 'Conversation', 'ConversationParticipant', 'MessageAttachment', 'Project', 'SdlcEntityLink', 'Stage', 'StageTransition', 'Ticket', 'TicketActivity', 'TicketStageEta'], 'createTicket: ticket, conversation, participant, attachment and entity-link writes must commit atomically; tx is not ACL-wrapped', prisma, async (tx) => {
+    if (access) await assertTicketCreateAccess(tx, userId, access);
+
     // Generate xyneId using project-scoped format
     const xyneId = await generateTicketId(tx, projectId);
 
