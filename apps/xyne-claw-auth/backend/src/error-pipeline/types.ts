@@ -24,6 +24,7 @@ export interface ClassifyResult {
 
 /** A unit of work sitting in a bucket queue. */
 export interface WorkItem {
+  orgId: string;
   errorKey: string;
   error: IncomingError;
   classification: ClassifyResult;

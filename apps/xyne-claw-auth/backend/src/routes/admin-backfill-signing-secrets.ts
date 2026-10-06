@@ -30,7 +30,7 @@ import { Router, type Request, type Response } from "express";
 import { prisma } from "../db.js";
 import { CONFIG } from "../config.js";
 import { decrypt, decryptSpacesCbc } from "../crypto.js";
-import { getRequesterId, isClawAdmin } from "../middleware/agent-acl.js";
+import { getRequesterId, getOrgId, isClawAdmin } from "../middleware/agent-acl.js";
 import { backfillSigningSecretFromSpacesDb } from "../lib/spaces-app-secret.js";
 import { getInstalledAppSigningSecret } from "../lib/spaces-db.js";
 
@@ -63,14 +63,15 @@ router.get("/diagnose-signing-secret/:slug", async (req: Request<{ slug: string 
     res.status(401).json({ success: false, error: "x-user-id required" });
     return;
   }
-  if (!(await isClawAdmin(requesterId))) {
+  const orgId = getOrgId(req);
+  if (!orgId || !(await isClawAdmin(requesterId, orgId))) {
     res.status(403).json({ success: false, error: "admin only" });
     return;
   }
 
   const slug = req.params.slug;
   const agent = await prisma.agent.findFirst({
-    where: { slug },
+    where: { slug, orgId },
     select: { id: true, slug: true, spacesAppId: true, signingSecret: true },
   });
   if (!agent) {
@@ -153,7 +154,8 @@ router.post("/backfill-signing-secrets", async (req: Request, res: Response) => 
     res.status(401).json({ success: false, error: "x-user-id required" });
     return;
   }
-  if (!(await isClawAdmin(requesterId))) {
+  const orgId = getOrgId(req);
+  if (!orgId || !(await isClawAdmin(requesterId, orgId))) {
     res.status(403).json({ success: false, error: "admin only" });
     return;
   }
@@ -163,6 +165,7 @@ router.post("/backfill-signing-secrets", async (req: Request, res: Response) => 
 
   const agents = await prisma.agent.findMany({
     where: {
+      orgId,
       spacesAppId: { not: null },
       // Default only touches NULL rows; overwrite also re-syncs existing secrets.
       ...(overwrite ? {} : { signingSecret: null }),

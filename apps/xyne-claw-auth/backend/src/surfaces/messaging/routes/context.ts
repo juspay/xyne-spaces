@@ -36,7 +36,9 @@ async function resolveOrgAdmin(req: Request): Promise<OrgAdminResolution> {
   const fromBody = typeof body?.["orgId"] === "string" ? body["orgId"].trim() : "";
   const fromQuery = typeof req.query["orgId"] === "string" ? req.query["orgId"].trim() : "";
   const orgId = fromBody || fromQuery || sessionOrgId;
-  const platformAdmin = await isClawAdmin(userId);
+  // Org-scoped: a CLAW_ADMIN is admin ONLY of their own org, so the bypass
+  // holds iff the target org IS their org (isClawAdmin fails closed otherwise).
+  const platformAdmin = await isClawAdmin(userId, orgId);
   if (!platformAdmin && (orgId !== sessionOrgId || !(await isOrgAdmin(userId, orgId)))) {
     return { ok: false, status: 403, error: "Organization admin required" };
   }
@@ -77,7 +79,9 @@ export async function resolveAccountRequest(req: Request): Promise<AccountResolu
     parseAccountConfig(account.config).ownerUserId === userId;
   if (plugin.accountScope === "user" && !owned) return { ok: false, status: 404, error: "Account not found" };
   if (!owned) {
-    const platformAdmin = await isClawAdmin(userId);
+    // Org-scoped: the CLAW_ADMIN bypass only holds for accounts in the
+    // caller's own org (isClawAdmin fails closed against any other org).
+    const platformAdmin = await isClawAdmin(userId, account.orgId);
     if (!platformAdmin && (sessionOrgId !== account.orgId || !(await isOrgAdmin(userId, account.orgId)))) {
       return { ok: false, status: 404, error: "Account not found" };
     }

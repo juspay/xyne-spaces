@@ -71,7 +71,7 @@ export async function beginChatRun(input: BeginChatRunInput): Promise<void> {
     task: input.task,
     conversationId: input.conversationId,
   });
-  publishCc({ type: "agent_start", sessionId: input.sessionId, agentSlug: input.agentSlug });
+  publishCc({ type: "agent_start", sessionId: input.sessionId, agentSlug: input.agentSlug, orgId: input.orgId });
 }
 
 /**

@@ -12,6 +12,7 @@ export type FixStatus =
   | "failed";    // agent errored / timed out
 
 export interface FixRecord {
+  orgId: string;
   errorKey: string;
   bucket: string;
   status: FixStatus;
@@ -23,28 +24,34 @@ export interface FixRecord {
   updatedAt: number;
 }
 
-const KEY = (errorKey: string) => `errpipe:fix:${errorKey}`;
+const KEY = (orgId: string, errorKey: string) => `errpipe:fix:${orgId}:${errorKey}`;
 const INDEX = "errpipe:fix:index";
 const TTL_SECONDS = 7 * 24 * 60 * 60;
 
-export async function getFixRecord(errorKey: string): Promise<FixRecord | null> {
-  const raw = await redisService.getConnection().get(KEY(errorKey));
+export async function getFixRecord(orgId: string, errorKey: string): Promise<FixRecord | null> {
+  const raw = await redisService.getConnection().get(KEY(orgId, errorKey));
   return raw ? (JSON.parse(raw) as FixRecord) : null;
 }
 
 export async function saveFixRecord(rec: FixRecord): Promise<void> {
   const record = { ...rec, updatedAt: Date.now() };
   const r = redisService.getConnection();
-  await r.set(KEY(record.errorKey), JSON.stringify(record), "EX", TTL_SECONDS);
-  await r.zadd(INDEX, record.updatedAt, record.errorKey);
+  const indexKey = `${record.orgId}:${record.errorKey}`;
+  await r.set(KEY(record.orgId, record.errorKey), JSON.stringify(record), "EX", TTL_SECONDS);
+  await r.zadd(INDEX, record.updatedAt, indexKey);
   await r.zremrangebyscore(INDEX, "-inf", Date.now() - (TTL_SECONDS + 86_400) * 1000).catch(() => {});
 }
 
 /** Most-recently-updated fix records, newest first (for the admin UI). */
-export async function listFixRecords(limit = 200): Promise<FixRecord[]> {
+export async function listFixRecords(limit = 200, orgId?: string): Promise<FixRecord[]> {
   const r = redisService.getConnection();
   const keys = await r.zrevrange(INDEX, 0, limit - 1);
   if (keys.length === 0) return [];
-  const raws = await r.mget(keys.map(KEY));
-  return raws.filter((x): x is string => x !== null).map((x) => JSON.parse(x) as FixRecord);
+  const raws = await r.mget(keys.map((key) => {
+    const separator = key.indexOf(":");
+    return KEY(key.slice(0, separator), key.slice(separator + 1));
+  }));
+  return raws.filter((x): x is string => x !== null)
+    .map((x) => JSON.parse(x) as FixRecord)
+    .filter((record) => !orgId || record.orgId === orgId);
 }

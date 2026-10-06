@@ -2,7 +2,7 @@ import { Prisma } from "@prisma/client";
 import { errMsg } from "../lib/errors.js";
 import { Router, type Request, type Response } from "express";
 import { prisma } from "../db.js";
-import { requireClawAdmin, getRequesterId } from "../middleware/agent-acl.js";
+import { requireClawAdmin, getRequesterId, getOrgId } from "../middleware/agent-acl.js";
 import { resolveCanonicalUserIdOrSelf } from "../lib/users-jit.js";
 import { createLogger } from "../logger.js";
 import {
@@ -59,7 +59,10 @@ router.get("/users", async (req: Request, res: Response) => {
     const offset = Math.min(1_000_000, Math.max(0, Math.floor(Number(req.query["offset"] ?? 0) || 0)));
     const search = String(req.query["search"] ?? "").trim().slice(0, 200);
     const status = String(req.query["status"] ?? "all");
-    const orgId = String(req.query["orgId"] ?? "").trim();
+    // requireClawAdmin strips ?orgId and sets x-org-id from the authenticated
+    // session — read the org from there so the list is always scoped to the
+    // requester's org and can never be pointed at another org.
+    const orgId = getOrgId(req) ?? "";
     const sort = String(req.query["sort"] ?? "name_asc");
     if (!["all", "enabled", "disabled"].includes(status)) {
       res.status(400).json({ success: false, error: "status must be all, enabled, or disabled" });
@@ -112,6 +115,7 @@ router.get("/users", async (req: Request, res: Response) => {
       prisma.user.count({ where: { ...baseWhere, digitalTwinEnabled: true } }),
       prisma.user.count({ where: { ...baseWhere, digitalTwinEnabled: false } }),
       prisma.organization.findMany({
+        where: orgId ? { id: orgId } : {},
         orderBy: { name: "asc" },
         select: { id: true, name: true },
       }),
@@ -147,6 +151,13 @@ router.post("/users/:userId/enable", async (req: Request<{ userId: string }>, re
     // The URL parameter may be a canonical Claw id OR a Spaces alias —
     // normalize when resolvable; the service layer rejects unknown ids.
     const userId = await resolveCanonicalUserIdOrSelf(req.params.userId);
+    // Org boundary: an admin may only manage users in their own org.
+    const requesterOrgId = getOrgId(req);
+    const targetUser = await prisma.user.findUnique({ where: { id: userId }, select: { orgId: true } });
+    if (!targetUser || !requesterOrgId || targetUser.orgId !== requesterOrgId) {
+      res.status(403).json({ success: false, error: "User belongs to a different organization" });
+      return;
+    }
     const backfill = parseBackfill((req.body as { backfill?: unknown } | undefined)?.backfill, false);
     const result = await adminEnableDigitalTwin({
       userId,
@@ -166,6 +177,12 @@ router.post("/users/:userId/enable", async (req: Request<{ userId: string }>, re
 router.post("/users/:userId/disable", async (req: Request<{ userId: string }>, res: Response) => {
   try {
     const userId = await resolveCanonicalUserIdOrSelf(req.params.userId);
+    const requesterOrgId = getOrgId(req);
+    const targetUser = await prisma.user.findUnique({ where: { id: userId }, select: { orgId: true } });
+    if (!targetUser || !requesterOrgId || targetUser.orgId !== requesterOrgId) {
+      res.status(403).json({ success: false, error: "User belongs to a different organization" });
+      return;
+    }
     const result = await adminDisableDigitalTwin(userId);
     log.info("CLAW_ADMIN disabled Digital Twin for user", {
       actorUserId: getRequesterId(req),
@@ -181,6 +198,12 @@ router.post("/users/:userId/disable", async (req: Request<{ userId: string }>, r
 router.post("/users/:userId/backfill", async (req: Request<{ userId: string }>, res: Response) => {
   try {
     const userId = await resolveCanonicalUserIdOrSelf(req.params.userId);
+    const requesterOrgId = getOrgId(req);
+    const targetUser = await prisma.user.findUnique({ where: { id: userId }, select: { orgId: true } });
+    if (!targetUser || !requesterOrgId || targetUser.orgId !== requesterOrgId) {
+      res.status(403).json({ success: false, error: "User belongs to a different organization" });
+      return;
+    }
     const backfill = parseBackfill((req.body as { backfill?: unknown } | undefined)?.backfill, true)!;
     const result = await adminStartDigitalTwinBackfill({ userId, backfill });
     log.info("CLAW_ADMIN started Digital Twin backfill for user", {

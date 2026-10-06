@@ -10,6 +10,7 @@ import { findUserByAnyId } from "../lib/users-jit.js";
 import { encrypt, decrypt } from "../crypto.js";
 import { CONFIG } from "../config.js";
 import { evictSession } from "../mcp/runner.js";
+import { findMcpServer } from "../mcp/server-resolution.js";
 import { getDoctorBitbucketStats } from "../services/bitbucket-stats.js";
 import { getAdminOrgScope, getOrgNameMap, withOrgLabel } from "../lib/admin-org-scope.js";
 
@@ -42,8 +43,9 @@ function parseRole(raw: unknown): GrantableRole | null {
 router.get("/roles", requireClawAdmin, asyncHandler(async (req: Request, res: Response) => {
   const role = parseRole(req.query["role"]);
   if (!role) throw badRequest(`role must be one of: ${GRANTABLE_ROLES.join(", ")}`);
-  // TODO(admin-org-scope): user_roles has no orgId by design; keep grants platform-global.
-  const roles = await userRoleRepository.listByRole(role);
+  const requesterOrgId = getOrgId(req)!;
+  const roles = (await userRoleRepository.listByRole(role))
+    .filter((r) => r.user.orgId === requesterOrgId);
   const orgNames = await getOrgNameMap(roles.map((r) => r.user.orgId));
   ok(res, roles.map((r) => ({
     ...r,
@@ -65,11 +67,13 @@ router.post("/roles", requireClawAdmin, asyncHandler(async (req: Request, res: R
   // `raw` may be a canonical Claw id, a Spaces workspace-scoped alias, or an
   // email — resolve through all three ladders before giving up.
   let targetUser = await findUserByAnyId(raw);
-  const requesterOrgId = getOrgId(req);
-  if (!targetUser && requesterOrgId) {
+  const requesterOrgId = getOrgId(req)!;
+  if (!targetUser) {
     targetUser = await prisma.user.findFirst({ where: { email: raw, orgId: requesterOrgId } });
   }
   if (!targetUser) throw notFound(`No user matches "${raw}"`);
+
+  if (targetUser.orgId !== requesterOrgId) throw forbidden("Cannot grant roles to users outside your organization");
 
   const grantedRole = await userRoleRepository.upsert(targetUser.id, role, requesterId);
   await writeAuditLog({
@@ -98,6 +102,11 @@ router.delete("/roles/:userId", requireClawAdmin, async (req: Request<{ userId: 
     const targetUser = await findUserByAnyId(userId);
     if (!targetUser) { res.status(404).json({ success: false, error: "User not found" }); return; }
     if (targetUser.id === requesterId) { res.status(400).json({ success: false, error: `Cannot revoke your own ${role} role` }); return; }
+    const requesterOrgId = getOrgId(req)!;
+    if (targetUser.orgId !== requesterOrgId) {
+      res.status(403).json({ success: false, error: "Cannot revoke roles from users outside your organization" });
+      return;
+    }
 
     await userRoleRepository.delete(targetUser.id, role);
     await writeAuditLog({ actorUserId: requesterId, eventType: "ROLE_REVOKED", targetId: targetUser.id, description: `${role} revoked from ${targetUser.email}`, metadata: { targetEmail: targetUser.email, role } });
@@ -121,8 +130,8 @@ router.delete("/roles/:userId", requireClawAdmin, async (req: Request<{ userId: 
 router.get("/roles/check/:userId", asyncHandler(async (req: Request<{ userId: string }>, res: Response) => {
   const requesterId = requireRequester(req, "Unauthenticated");
   const [admin, searchEvalAccess] = await Promise.all([
-    isClawAdmin(requesterId),
-    hasSearchEvalAccess(requesterId),
+    isClawAdmin(requesterId, getOrgId(req)),
+    hasSearchEvalAccess(requesterId, getOrgId(req)),
   ]);
   ok(res, { isAdmin: admin, hasSearchEvalAccess: searchEvalAccess });
 }));
@@ -289,16 +298,17 @@ router.get("/scheduled-jobs", requireClawAdmin, asyncHandler(async (req: Request
 
 // ── Global MCP credentials (admin-only fallback creds) ──────────────────────
 
-router.get("/mcp-servers", requireClawAdmin, asyncHandler(async (_req: Request, res: Response) => {
-  // Platform-global by design: the Global MCP tab manages shared fallback registry/credentials.
+router.get("/mcp-servers", requireClawAdmin, asyncHandler(async (req: Request, res: Response) => {
+  const orgId = getOrgId(req)!;
   const servers = await prisma.mcpServer.findMany({
-    include: { globalCredentials: true },
+    where: { OR: [{ orgId }, { orgId: null }] },
+    include: {
+      globalCredentials: { where: { orgId } },
+    },
     orderBy: { name: "asc" },
   });
   ok(res, servers.map((s) => {
-    // Legacy top-level fields reflect the deployment-wide default row
-    // (orgId NULL); org overrides are listed separately.
-    const defaultCreds = s.globalCredentials.find((c) => c.orgId === null) ?? null;
+    const orgCreds = s.globalCredentials[0] ?? null;
     return {
       id: s.id,
       type: s.type,
@@ -306,12 +316,10 @@ router.get("/mcp-servers", requireClawAdmin, asyncHandler(async (_req: Request, 
       description: s.description,
       enabled: s.enabled,
       allowGlobalFallback: s.allowGlobalFallback,
-      hasGlobalCredentials: Boolean(defaultCreds),
-      globalCredentialsUpdatedAt: defaultCreds?.updatedAt ?? null,
-      globalCredentialsSetByUserId: defaultCreds?.setByUserId ?? null,
-      orgGlobalCredentials: s.globalCredentials
-        .filter((c) => c.orgId !== null)
-        .map((c) => ({ orgId: c.orgId, updatedAt: c.updatedAt, setByUserId: c.setByUserId })),
+      hasGlobalCredentials: Boolean(orgCreds),
+      globalCredentialsUpdatedAt: orgCreds?.updatedAt ?? null,
+      globalCredentialsSetByUserId: orgCreds?.setByUserId ?? null,
+      orgId,
     };
   }));
 }));
@@ -320,30 +328,32 @@ router.put("/mcp-servers/:type/global-fallback", requireClawAdmin, asyncHandler(
   const requesterId = getRequesterId(req)!;
   const { allow } = req.body as { allow?: boolean };
   if (typeof allow !== "boolean") throw badRequest("allow (boolean) is required");
-  const server = await prisma.mcpServer.findUnique({ where: { type: req.params.type } });
+  const server = await findMcpServer(req.params.type, getOrgId(req));
   if (!server) throw notFound("MCP server not found");
+  if (server.orgId === null) throw forbidden("Global MCP fallback is not available in org-scoped deployments");
 
-  await prisma.mcpServer.update({ where: { id: server.id }, data: { allowGlobalFallback: allow } });
+  await prisma.mcpServer.update({
+    where: { id: server.id },
+    data: { allowGlobalFallback: allow },
+  });
   await writeAuditLog({
     actorUserId: requesterId,
     eventType: allow ? "MCP_GLOBAL_FALLBACK_ENABLED" : "MCP_GLOBAL_FALLBACK_DISABLED",
     targetId: server.id,
     description: `Global fallback ${allow ? "enabled" : "disabled"} for MCP server ${server.type}`,
   });
-  ok(res, { type: server.type, allowGlobalFallback: allow });
+  ok(res, { type: server.type, orgId: getOrgId(req)!, allowGlobalFallback: allow });
 }));
 
 router.put("/mcp-servers/:type/global-credentials", requireClawAdmin, asyncHandler(async (req: Request<{ type: string }>, res: Response) => {
   const requesterId = getRequesterId(req)!;
-  const { credentials, orgId } = req.body as { credentials?: Record<string, unknown>; orgId?: string };
+  const { credentials } = req.body as { credentials?: Record<string, unknown> };
   if (!credentials || typeof credentials !== "object" || Array.isArray(credentials)) throw badRequest("credentials object is required");
-  // orgId omitted → deployment-wide default row (legacy behavior).
-  const credOrgId = typeof orgId === "string" && orgId.trim() ? orgId.trim() : null;
-  if (credOrgId) {
-    const org = await prisma.organization.findUnique({ where: { id: credOrgId } });
-    if (!org) throw notFound("Organization not found");
-  }
-  const server = await prisma.mcpServer.findUnique({ where: { type: req.params.type } });
+  // Org-scoped: use the requester's org (requireClawAdmin strips req.body.orgId).
+  const credOrgId = getOrgId(req)!;
+  const org = await prisma.organization.findUnique({ where: { id: credOrgId } });
+  if (!org) throw notFound("Organization not found");
+  const server = await findMcpServer(req.params.type, getOrgId(req));
   if (!server) throw notFound("MCP server not found");
 
   const enc = encrypt(JSON.stringify(credentials), CONFIG.encryptionKey);
@@ -389,9 +399,9 @@ router.put("/mcp-servers/:type/global-credentials", requireClawAdmin, asyncHandl
 
 router.delete("/mcp-servers/:type/global-credentials", requireClawAdmin, asyncHandler(async (req: Request<{ type: string }>, res: Response) => {
   const requesterId = getRequesterId(req)!;
-  // ?orgId=<id> deletes that org's override; omitted → the default row.
-  const orgIdParam = typeof req.query["orgId"] === "string" && req.query["orgId"].trim() ? req.query["orgId"].trim() : null;
-  const server = await prisma.mcpServer.findUnique({ where: { type: req.params.type } });
+  // Org-scoped: use the requester's org (requireClawAdmin strips req.query.orgId).
+  const orgIdParam = getOrgId(req)!;
+  const server = await findMcpServer(req.params.type, getOrgId(req));
   if (!server) throw notFound("MCP server not found");
 
   const { count } = await prisma.globalMcpCredentials.deleteMany({
@@ -402,15 +412,15 @@ router.delete("/mcp-servers/:type/global-credentials", requireClawAdmin, asyncHa
     actorUserId: requesterId,
     eventType: "MCP_GLOBAL_CREDENTIALS_REMOVED",
     targetId: server.id,
-    description: `Global credentials removed for MCP server ${server.type}${orgIdParam ? ` (org ${orgIdParam})` : " (default)"}`,
+    description: `Global credentials removed for MCP server ${server.type} (org ${orgIdParam})`,
   });
   ok(res);
 }));
 
 router.get("/mcp-servers/:type/global-credentials", requireClawAdmin, asyncHandler(async (req: Request<{ type: string }>, res: Response) => {
-  // ?orgId=<id> inspects that org's override; omitted → the default row.
-  const orgIdParam = typeof req.query["orgId"] === "string" && req.query["orgId"].trim() ? req.query["orgId"].trim() : null;
-  const server = await prisma.mcpServer.findUnique({ where: { type: req.params.type } });
+  // Org-scoped: use the requester's org (requireClawAdmin strips req.query.orgId).
+  const orgIdParam = getOrgId(req)!;
+  const server = await findMcpServer(req.params.type, getOrgId(req));
   if (!server) throw notFound("MCP server not found");
   const row = await prisma.globalMcpCredentials.findFirst({
     where: { mcpServerId: server.id, orgId: orgIdParam },
@@ -441,7 +451,7 @@ router.get("/mcp-servers/:type/global-credentials", requireClawAdmin, asyncHandl
 const SHAREABLE_PROVIDERS = new Set(["codex", "claude", "copilot", "openrouter", "litellm"]);
 
 router.get("/provider-credentials", requireClawAdmin, asyncHandler(async (req: Request, res: Response) => {
-  const orgId = (typeof req.query["orgId"] === "string" && req.query["orgId"].trim()) || getOrgId(req);
+  const orgId = getOrgId(req);
   if (!orgId) throw badRequest("No org context");
   const rows = await sharedProviderCredentialRepository.listByOrg(orgId);
   ok(res, rows.map((r) => ({
@@ -467,11 +477,12 @@ router.get("/provider-credentials", requireClawAdmin, asyncHandler(async (req: R
  *  the provider on one agent via the existing UI, then promote + bind others. */
 router.post("/provider-credentials/promote", requireClawAdmin, asyncHandler(async (req: Request, res: Response) => {
   const requesterId = getRequesterId(req)!;
-  const { agentId, provider, name, platform } = req.body as { agentId?: string; provider?: string; name?: string; platform?: boolean };
+  const { agentId, provider, name } = req.body as { agentId?: string; provider?: string; name?: string };
   if (!agentId || !provider || !name?.trim()) throw badRequest("agentId, provider and name are required");
   if (!SHAREABLE_PROVIDERS.has(provider)) throw badRequest(`provider must be one of: ${[...SHAREABLE_PROVIDERS].join(", ")}`);
   const agent = await prisma.agent.findUnique({ where: { id: agentId }, select: { id: true, orgId: true, slug: true } });
   if (!agent) throw notFound("Agent not found");
+  if (agent.orgId !== getOrgId(req)) throw forbidden("Agent belongs to a different org");
   // Read the RAW row (not the materialized view) — promoting a binding would
   // otherwise copy the other shared cred's material into a new row.
   const raw = await prisma.agentProviderCredentials.findUnique({
@@ -479,9 +490,7 @@ router.post("/provider-credentials/promote", requireClawAdmin, asyncHandler(asyn
   });
   if (!raw?.encryptedKey || raw.sharedCredentialId) throw badRequest("Agent has no dedicated credential for this provider to promote");
   const shared = await sharedProviderCredentialRepository.create({
-    // platform:true → orgId NULL: bindable across orgs (this route is
-    // already CLAW_ADMIN-gated, which is the required privilege).
-    orgId: platform ? null : agent.orgId,
+    orgId: agent.orgId,
     provider,
     name: name.trim(),
     encryptedKey: raw.encryptedKey,
@@ -514,8 +523,8 @@ router.post("/provider-credentials/:id/bind", requireClawAdmin, asyncHandler(asy
   if (!shared) throw notFound("Shared credential not found");
   const agent = await prisma.agent.findUnique({ where: { id: agentId }, select: { id: true, orgId: true, slug: true } });
   if (!agent) throw notFound("Agent not found");
-  // orgId NULL = platform-wide credential, bindable by any org's agents.
-  if (shared.orgId && agent.orgId !== shared.orgId) throw forbidden("Agent and credential belong to different orgs");
+  if (agent.orgId !== getOrgId(req)) throw forbidden("Agent belongs to a different org");
+  if (shared.orgId !== agent.orgId) throw forbidden("Agent and credential belong to different orgs");
   await agentProviderCredentialsRepository.bindShared(agentId, shared.provider, shared.id, {
     model: model?.trim() || null,
     reasoningEffort: reasoningEffort?.trim() || null,
@@ -535,6 +544,9 @@ router.post("/provider-credentials/:id/unbind", requireClawAdmin, asyncHandler(a
   if (!agentId) throw badRequest("agentId is required");
   const shared = await sharedProviderCredentialRepository.findById(req.params.id);
   if (!shared) throw notFound("Shared credential not found");
+  const agent = await prisma.agent.findUnique({ where: { id: agentId }, select: { orgId: true } });
+  if (!agent) throw notFound("Agent not found");
+  if (agent.orgId !== getOrgId(req)) throw forbidden("Agent belongs to a different org");
   const { count } = await prisma.agentProviderCredentials.deleteMany({
     where: { agentId, provider: shared.provider, sharedCredentialId: shared.id },
   });
@@ -562,6 +574,9 @@ router.post("/provider-credentials/:id/adopt", requireClawAdmin, asyncHandler(as
     where: { agentId_provider: { agentId, provider: shared.provider } },
   });
   if (!raw?.encryptedKey || raw.sharedCredentialId) throw badRequest("Agent has no fresh dedicated credential to adopt — reconnect the provider on it first");
+  const agent = await prisma.agent.findUnique({ where: { id: agentId }, select: { orgId: true } });
+  if (!agent) throw notFound("Agent not found");
+  if (agent.orgId !== getOrgId(req)) throw forbidden("Agent belongs to a different org");
   await sharedProviderCredentialRepository.updateCredential(shared.id, {
     encryptedKey: raw.encryptedKey,
     iv: raw.iv,
@@ -585,6 +600,7 @@ router.delete("/provider-credentials/:id", requireClawAdmin, asyncHandler(async 
   const requesterId = getRequesterId(req)!;
   const shared = await sharedProviderCredentialRepository.findById(req.params.id);
   if (!shared) throw notFound("Shared credential not found");
+  if (shared.orgId !== getOrgId(req)) throw forbidden("Credential belongs to a different org");
   const bindings = await sharedProviderCredentialRepository.countBindings(shared.id);
   if (bindings > 0) throw conflict(`Credential has ${bindings} bound agent(s) — unbind them first`);
   await sharedProviderCredentialRepository.delete(shared.id);
@@ -608,16 +624,18 @@ router.get("/dashboard", asyncHandler(async (req: Request, res: Response) => {
   const window = windowFromDays(req.query["days"] ?? "30");
   const cutoff = window?.start ?? null;
   const limit = Math.min(Number(req.query["topUsersLimit"] ?? 10), 50);
+  const orgId = getOrgId(req);
+  if (!orgId) throw badRequest("Organization context is required");
 
   const [agentStats, overview, agentRunStats, rawUserActivity, ratingStats, agentsForDashboard, skillUsage, subagentUsage] = await Promise.all([
-    agentRepository.dashboardStats(),
-    agentRunRepository.globalOverviewStats(cutoff),
-    agentRunRepository.runStatsByAgent(cutoff),
-    agentRunRepository.userActivityBreakdown(cutoff, limit),
-    agentRunRepository.ratingStatsByAgent(cutoff),
-    agentRepository.listForDashboard(),
-    agentRepository.skillUsageByGlobalAgents(),
-    agentRepository.subagentUsageByGlobalAgents(),
+    agentRepository.dashboardStats(orgId),
+    agentRunRepository.globalOverviewStats(cutoff, orgId),
+    agentRunRepository.runStatsByAgent(cutoff, orgId),
+    agentRunRepository.userActivityBreakdown(cutoff, limit, orgId),
+    agentRunRepository.ratingStatsByAgent(cutoff, orgId),
+    agentRepository.listForDashboard(orgId),
+    agentRepository.skillUsageByGlobalAgents(orgId),
+    agentRepository.subagentUsageByGlobalAgents(orgId),
   ]);
 
   const ratingBySlug = new Map(ratingStats.map((r) => [r.agentSlug, r] as const));
@@ -730,7 +748,9 @@ router.get("/dashboard", asyncHandler(async (req: Request, res: Response) => {
 router.get("/dashboard/projects", asyncHandler(async (req: Request, res: Response) => {
   const window = windowFromDays(req.query["days"] ?? "all");
   const cutoff = window?.start ?? null;
-  const projects = await agentRunRepository.listProjectsForDashboard(cutoff);
+  const orgId = getOrgId(req);
+  if (!orgId) throw badRequest("Organization context is required");
+  const projects = await agentRunRepository.listProjectsForDashboard(cutoff, orgId);
   ok(res, projects);
 }));
 
@@ -741,16 +761,18 @@ router.get("/dashboard/project-insights", asyncHandler(async (req: Request, res:
   if (!projectId) throw badRequest("projectId is required");
   const window = windowFromDays(req.query["days"] ?? "30");
   const cutoff = window?.start ?? null;
+  const orgId = getOrgId(req);
+  if (!orgId) throw badRequest("Organization context is required");
 
   const [agentUsage, topUsers, skillUsage, subagentUsage] = await Promise.all([
-    agentRunRepository.projectAgentUsage(projectId, cutoff),
-    agentRunRepository.projectTopUsers(projectId, cutoff, 10),
-    agentRunRepository.projectSkillUsage(projectId, cutoff),
-    agentRunRepository.projectSubagentUsage(projectId, cutoff),
+    agentRunRepository.projectAgentUsage(projectId, cutoff, orgId),
+    agentRunRepository.projectTopUsers(projectId, cutoff, 10, orgId),
+    agentRunRepository.projectSkillUsage(projectId, cutoff, orgId),
+    agentRunRepository.projectSubagentUsage(projectId, cutoff, orgId),
   ]);
 
   // Enrich agent rows with name / scope / enabled from agent metadata
-  const agentMeta = await agentRepository.listForDashboard();
+  const agentMeta = await agentRepository.listForDashboard(orgId);
   const metaBySlug = new Map(agentMeta.map((a) => [a.slug, a]));
   const enrichedAgentUsage = agentUsage.map((r) => ({
     ...r,
@@ -785,7 +807,7 @@ router.post("/error-pipeline/token", requireClawAdmin, asyncHandler(async (req: 
   const days = Number((req.body as { days?: unknown })?.days ?? 90);
   if (!Number.isFinite(days) || days <= 0 || days > 365) throw badRequest("days must be 1-365");
   const token = jwt.sign(
-    { iss: "xyne-claw-auth", sub: "grafana-webhook" },
+    { iss: "xyne-claw-auth", sub: "grafana-webhook", orgId: getOrgId(req) },
     ERROR_PIPELINE.jwtSecret,
     { algorithm: "HS256", audience: INGEST_JWT_AUDIENCE, expiresIn: `${days}d` },
   );
@@ -804,9 +826,11 @@ router.post("/error-pipeline/token", requireClawAdmin, asyncHandler(async (req: 
 // Error Pipeline page is viewable org-wide; every WRITE (rule save/delete,
 // flush, seed, token mint) stays CLAW_ADMIN-gated.
 router.get("/error-pipeline/items/:bucket", asyncHandler(async (req: Request, res: Response) => {
+  const orgId = getOrgId(req);
+  if (!orgId) throw badRequest("Organization context is required");
   const limit = Math.min(Number(req.query["limit"] ?? 100) || 100, 500);
   const bucket = String(req.params["bucket"] ?? "default");
-  const items = await epQueue().peekItems(bucket, limit);
+  const items = await epQueue().peekItems(orgId, bucket, limit);
   ok(res, { bucket, count: items.length, items });
 }));
 
@@ -816,15 +840,17 @@ router.get("/error-pipeline/items/:bucket", asyncHandler(async (req: Request, re
 // overwrites any markers/matchOrder/description edited via admin since.
 router.post("/error-pipeline/seed", requireClawAdmin, asyncHandler(async (req: Request, res: Response) => {
   const requesterId = getRequesterId(req)!;
+  const orgId = getOrgId(req);
+  if (!orgId) throw badRequest("Organization context is required");
   const { ERROR_BUCKET_SEED } = await import("../lib/error-bucket-seed.js");
   for (const b of ERROR_BUCKET_SEED) {
     await prisma.errorBucket.upsert({
-      where: { name: b.name },
-      create: { name: b.name, description: b.description, keywords: b.keywords ?? [], matchOrder: b.matchOrder, markers: b.markers ?? "" },
+      where: { orgId_name: { orgId, name: b.name } },
+      create: { orgId, name: b.name, description: b.description, keywords: b.keywords ?? [], matchOrder: b.matchOrder, markers: b.markers ?? "" },
       update: { description: b.description, keywords: b.keywords ?? [], matchOrder: b.matchOrder, markers: b.markers ?? "" },
     });
   }
-  const total = await prisma.errorBucket.count();
+  const total = await prisma.errorBucket.count({ where: { orgId } });
   log.info(`[admin] error-pipeline buckets seeded by ${requesterId} (${ERROR_BUCKET_SEED.length} upserted, ${total} total)`);
   ok(res, { upserted: ERROR_BUCKET_SEED.length, total });
 }));
@@ -832,16 +858,20 @@ router.post("/error-pipeline/seed", requireClawAdmin, asyncHandler(async (req: R
 router.post("/sdlc-agent/sync", requireClawAdmin, asyncHandler(async (req: Request, res: Response) => {
   const requesterId = getRequesterId(req)!;
   const apply = req.query["apply"] === "true";
-  const orgId = typeof req.query["orgId"] === "string" ? req.query["orgId"] : undefined;
+  // CLAW_ADMIN is org-scoped: always sync the requester's own org
+  // (requireClawAdmin strips any client-supplied ?orgId=).
+  const orgId = getOrgId(req)!;
   const { syncSdlcAgent } = await import("../lib/sdlc-agent-sync.js");
-  const rows = await syncSdlcAgent(prisma, { apply, requesterId, ...(orgId ? { orgId } : {}) });
+  const rows = await syncSdlcAgent(prisma, { apply, requesterId, orgId });
   const changed = rows.reduce((total, row) => total + row.changes.length, 0);
-  log.info(`[admin] sdlc-agent sync by ${requesterId} apply=${apply} orgId=${orgId ?? "(all)"} rows=${rows.length} changes=${changed}`);
+  log.info(`[admin] sdlc-agent sync by ${requesterId} apply=${apply} orgId=${orgId} rows=${rows.length} changes=${changed}`);
   ok(res, { applied: apply, rows: rows.length, changes: changed, results: rows });
 }));
 
-router.get("/error-pipeline/buckets", asyncHandler(async (_req: Request, res: Response) => {
-  ok(res, { buckets: await epBucketStats() });
+router.get("/error-pipeline/buckets", asyncHandler(async (req: Request, res: Response) => {
+  const orgId = getOrgId(req);
+  if (!orgId) throw badRequest("Organization context is required");
+  ok(res, { buckets: await epBucketStats(orgId) });
 }));
 
 // Flush a lane's queue — drops all queued/pending items + their dedup markers
@@ -849,10 +879,12 @@ router.get("/error-pipeline/buckets", asyncHandler(async (_req: Request, res: Re
 // needed). The taxonomy row stays; only the Redis stream is cleared.
 router.post("/error-pipeline/buckets/:name/flush", requireClawAdmin, asyncHandler(async (req: Request<{ name: string }>, res: Response) => {
   const requesterId = getRequesterId(req)!;
+  const orgId = getOrgId(req);
+  if (!orgId) throw badRequest("Organization context is required");
   const name = String(req.params.name).trim().toLowerCase();
   if (!/^[a-z0-9][a-z0-9-]*$/.test(name)) throw badRequest("Invalid bucket name");
-  const dropped = await epQueue().flushBucket(name);
-  log.warn(`[admin] error-pipeline bucket "${name}" flushed by ${requesterId} (${dropped} items)`);
+  const dropped = await epQueue().flushBucket(orgId, name);
+  log.warn(`[admin] error-pipeline bucket "${name}" flushed by ${requesterId} in ${orgId} (${dropped} items)`);
   ok(res, { bucket: name, dropped });
 }));
 
@@ -883,8 +915,11 @@ router.post("/error-pipeline/fork-conversation", asyncHandler(async (req: Reques
   // fork — letting them read someone else's private chat history through it.
   // A pipeline conversation is one owned by an automation run of the pipeline
   // agent, run as the pipeline's service user.
+  // Org boundary: the pipeline conversation must belong to the admin's org —
+  // otherwise a CLAW_ADMIN of org A could fork (and read the cloned session
+  // history of) org B's error-pipeline conversations.
   const pipelineRun = await prisma.agentRun.findFirst({
-    where: { conversationId, agentSlug: slug, triggerSource: "automation" },
+    where: { conversationId, agentSlug: slug, triggerSource: "automation", orgId: getOrgId(req)! },
     select: { id: true },
   });
   if (!pipelineRun) {
@@ -915,8 +950,10 @@ router.post("/error-pipeline/fork-conversation", asyncHandler(async (req: Reques
 }));
 
 router.get("/error-pipeline/fixes", asyncHandler(async (req: Request, res: Response) => {
+  const orgId = getOrgId(req);
+  if (!orgId) throw badRequest("Organization context is required");
   const limit = Math.min(Number(req.query["limit"] ?? 200) || 200, 500);
-  ok(res, { fixes: await listFixRecords(limit) });
+  ok(res, { fixes: await listFixRecords(limit, orgId) });
 }));
 
 // ── Error-pipeline bucket rule editing (CRUD on error_buckets) ───────
@@ -925,8 +962,11 @@ router.get("/error-pipeline/fixes", asyncHandler(async (req: Request, res: Respo
 // whole point of the DB-backed taxonomy: when a new subsystem merges, add a
 // lane or tune an existing lane's markers from the UI — no deploy.
 
-router.get("/error-pipeline/rules", asyncHandler(async (_req: Request, res: Response) => {
+router.get("/error-pipeline/rules", asyncHandler(async (req: Request, res: Response) => {
+  const orgId = getOrgId(req);
+  if (!orgId) throw badRequest("Organization context is required");
   const rules = await prisma.errorBucket.findMany({
+    where: { orgId },
     orderBy: { matchOrder: "asc" },
     select: { name: true, description: true, keywords: true, markers: true, matchOrder: true, enabled: true, updatedAt: true },
   });
@@ -935,6 +975,8 @@ router.get("/error-pipeline/rules", asyncHandler(async (_req: Request, res: Resp
 
 router.put("/error-pipeline/rules/:name", requireClawAdmin, asyncHandler(async (req: Request<{ name: string }>, res: Response) => {
   const requesterId = getRequesterId(req)!;
+  const orgId = getOrgId(req);
+  if (!orgId) throw badRequest("Organization context is required");
   const name = String(req.params.name).trim().toLowerCase();
   if (!/^[a-z0-9][a-z0-9-]*$/.test(name)) throw badRequest("Bucket name must be lowercase letters, digits and dashes (e.g. tickets-desk).");
 
@@ -955,8 +997,8 @@ router.put("/error-pipeline/rules/:name", requireClawAdmin, asyncHandler(async (
   const matchOrder = Number.isInteger(body.matchOrder) ? (body.matchOrder as number) : 20;
   const enabled = typeof body.enabled === "boolean" ? body.enabled : true;
   const saved = await prisma.errorBucket.upsert({
-    where: { name },
-    create: { name, description, keywords, markers, matchOrder, enabled },
+    where: { orgId_name: { orgId, name } },
+    create: { orgId, name, description, keywords, markers, matchOrder, enabled },
     update: { description, keywords, markers, matchOrder, enabled },
   });
   log.info(`[admin] error-pipeline rule "${name}" saved by ${requesterId}`);
@@ -966,6 +1008,8 @@ router.put("/error-pipeline/rules/:name", requireClawAdmin, asyncHandler(async (
 router.delete("/error-pipeline/rules/:name", requireClawAdmin, async (req: Request<{ name: string }>, res: Response) => {
   try {
     const requesterId = getRequesterId(req)!;
+    const orgId = getOrgId(req);
+    if (!orgId) { res.status(400).json({ success: false, error: "Organization context is required" }); return; }
     const name = String(req.params.name).trim().toLowerCase();
     if (name === "default") {
       res.status(400).json({ success: false, error: "The default bucket is the fallback lane and cannot be deleted." });
@@ -973,12 +1017,12 @@ router.delete("/error-pipeline/rules/:name", requireClawAdmin, async (req: Reque
     }
     // Refuse to strand queued work: after a restart no worker or stats row
     // would cover this lane's stream, silently losing the items.
-    const depth = (await epQueue().stats([name]))[name];
+    const depth = (await epQueue().stats(orgId, [name]))[name];
     if (depth && depth.queued + depth.pending > 0) {
       res.status(409).json({ success: false, error: `Bucket "${name}" still has ${depth.queued + depth.pending} queued/in-flight item(s) — let them drain (or reroute them) before deleting.` });
       return;
     }
-    await prisma.errorBucket.delete({ where: { name } });
+    await prisma.errorBucket.delete({ where: { orgId_name: { orgId, name } } });
     log.info(`[admin] error-pipeline rule "${name}" deleted by ${requesterId}`);
     res.json({ success: true });
   } catch (err: unknown) {

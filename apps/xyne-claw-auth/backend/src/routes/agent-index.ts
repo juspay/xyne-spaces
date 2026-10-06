@@ -47,7 +47,7 @@ function requireOrg(req: Request, res: Response): string | null {
 
 async function requireAdmin(req: Request, res: Response): Promise<boolean> {
   const requesterId = getRequesterId(req);
-  if (requesterId && (await isClawAdmin(requesterId))) return true;
+  if (requesterId && (await isClawAdmin(requesterId, getOrgId(req)))) return true;
   res.status(403).json({ success: false, error: "Admin access required" });
   return false;
 }

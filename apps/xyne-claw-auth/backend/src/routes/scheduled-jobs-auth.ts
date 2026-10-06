@@ -18,7 +18,7 @@
  */
 
 import type { Request } from "express";
-import { getRequesterId, isClawAdmin } from "../middleware/agent-acl.js";
+import { getRequesterId, isClawAdmin, getOrgId } from "../middleware/agent-acl.js";
 import { matchesAuthenticatedUserId } from "../middleware/pin-user-id-param.js";
 
 export type ScheduledJobControlAuthResult =
@@ -27,13 +27,22 @@ export type ScheduledJobControlAuthResult =
 
 export async function assertCanControlScheduledJob(
   req: Request,
-  row: { id: string; userId: string; agentSlug: string },
+  row: { id: string; userId: string; agentSlug: string; orgId?: string },
 ): Promise<ScheduledJobControlAuthResult> {
   const requesterId = getRequesterId(req);
   if (requesterId) {
     // The job row may be keyed by either verified id form of the owner
     // (canonical Claw id or the workspace's raw Spaces id) — match both.
-    if (matchesAuthenticatedUserId(req, row.userId) || (await isClawAdmin(requesterId))) {
+    const isOwner = matchesAuthenticatedUserId(req, row.userId);
+    if (isOwner || (await isClawAdmin(requesterId, row.orgId))) {
+      // Org boundary: an admin may control another user's scheduled job,
+      // but only within their own org.
+      if (!isOwner && row.orgId) {
+        const requesterOrgId = getOrgId(req);
+        if (!requesterOrgId || row.orgId !== requesterOrgId) {
+          return { ok: false, status: 403, error: "Scheduled job belongs to a different organization" };
+        }
+      }
       return { ok: true, actorUserId: requesterId };
     }
     return { ok: false, status: 404, error: "Not found" };

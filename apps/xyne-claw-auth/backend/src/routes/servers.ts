@@ -5,7 +5,7 @@ import { prisma } from "../db.js";
 import { isValidServerType } from "../validation.js";
 import type { CredentialField } from "../mcp/types.js";
 import { getCredentialFieldsByServerType } from "../mcp/connector-definitions.js";
-import { getRequesterId, isClawAdmin, requireClawAdmin } from "../middleware/agent-acl.js";
+import { getRequesterId, getOrgId, isClawAdmin, requireClawAdmin } from "../middleware/agent-acl.js";
 import { writeAuditLog } from "../lib/audit.js";
 import { isOAuthConnector } from "./oauth-token.js";
 import { type ConnectorMeta, isVisibleToUser, parseConnectorMeta } from "../lib/connector-visibility.js";
@@ -129,9 +129,7 @@ router.get("/credential-fields", asyncHandler(async (_req: Request, res: Respons
 
 router.get("/", asyncHandler(async (req: Request, res: Response) => {
   const requesterId = getRequesterId(req);
-  const servers = await mcpServerAny.findMany({
-    orderBy: { name: "asc" },
-  });
+  const servers = await mcpServerAny.findMany({ where: { OR: [{ orgId: null }, { orgId: getOrgId(req) }] }, orderBy: { name: "asc" } });
   const visible = servers.filter((s: any) => isVisibleToUser(parseConnectorMeta(s.connectorMeta), requesterId));
   // Decorate with `oauth` so the UI can tell OAuth connectors apart (they
   // need the browser flow, can't be pinned credential-less) without
@@ -148,7 +146,11 @@ router.post("/", asyncHandler(async (req: Request, res: Response) => {
   if (!requesterId) {
     throw unauthorized("x-user-id header is required");
   }
-  const requesterIsAdmin = await isClawAdmin(requesterId);
+  const requestOrgId = getOrgId(req);
+  if (!requestOrgId) {
+    throw forbidden("Organization context is required");
+  }
+  const requesterIsAdmin = await isClawAdmin(requesterId, requestOrgId);
 
   const { name, type, url, description, transport, credentialForm, credentialSchema, launchConfigTemplate, httpConfigTemplate, healthcheckSpec, writeToolPolicy, connectorMeta } = req.body as {
     name?: string;
@@ -242,11 +244,12 @@ router.post("/", asyncHandler(async (req: Request, res: Response) => {
   if (healthcheckSpec) data.healthcheckSpec = healthcheckSpec;
   if (writeToolPolicy) data.writeToolPolicy = writeToolPolicy;
 
-  const existing = await mcpServerAny.findUnique({ where: { type } });
+  const existing = await mcpServerAny.findFirst({ where: { type, orgId: requestOrgId } });
   if (!existing) {
     const server = await mcpServerAny.create({
       data: {
         ...data,
+        orgId: requestOrgId,
         connectorMeta: {
           ...(isRecord(data.connectorMeta) ? data.connectorMeta : {}),
           ownerType: "user",
@@ -283,12 +286,13 @@ router.post("/", asyncHandler(async (req: Request, res: Response) => {
     throw forbidden("Only connector author or CLAW_ADMIN can edit this definition");
   }
 
-  // Global-connector hardening: any change to a scope=global row goes
+  // Platform templates are immutable to org admins; their own templates are
+  // edited directly within the owning org.
   // through the admin review queue, regardless of requester role. This
   // includes CLAW_ADMIN edits — the queue is the single audit-able
   // surface for global mutations, no exceptions. (Post-ppi-grafana-v2
   // incident: 2026-05-22.)
-  if (existingMeta.scope === "global") {
+  if (existing.orgId === null) {
     const proposedFields: Record<string, unknown> = {
       name: data.name,
       url: data.url,
@@ -306,7 +310,7 @@ router.post("/", asyncHandler(async (req: Request, res: Response) => {
     // active proposal per (mcpServerId). Prior `pending` rows flip to
     // `superseded` so we keep the audit trail without ambiguous state.
     const prior = await prisma.mcpConnectorEditRequest.findMany({
-      where: { mcpServerId: existing.id, status: "pending" },
+      where: { mcpServerId: existing.id, orgId: requestOrgId, status: "pending" },
     });
     for (const p of prior) {
       await prisma.mcpConnectorEditRequest.update({
@@ -330,6 +334,7 @@ router.post("/", asyncHandler(async (req: Request, res: Response) => {
       data: {
         mcpServerId: existing.id,
         proposedByUserId: requesterId,
+        orgId: requestOrgId,
         proposedFields: proposedFields as Prisma.InputJsonValue,
         status: "pending",
       },
@@ -444,7 +449,6 @@ router.post("/:id/request-publish", asyncHandler(async (req, res) => {
 }));
 
 router.get("/publish-requests", requireClawAdmin, asyncHandler(async (_req, res) => {
-  // Platform-global by design: MCP Publish reviews promote connector definitions for all orgs.
   const servers = await mcpServerAny.findMany({ orderBy: { updatedAt: "desc" } });
   const pending = servers.filter((s: any) => parseConnectorMeta(s.connectorMeta).publishStatus === "pending");
   ok(res, pending);
@@ -512,10 +516,9 @@ router.post("/publish-requests/:id/reject", requireClawAdmin, asyncHandler(async
 //   admin rejects              → /edit-requests/:id/reject  (request closed, live row untouched)
 //   submitter cancels own      → /edit-requests/:id/cancel  (no admin needed)
 
-router.get("/edit-requests", requireClawAdmin, asyncHandler(async (_req: Request, res: Response) => {
-  // Platform-global by design: global MCP connector edits mutate shared registry rows.
+router.get("/edit-requests", requireClawAdmin, asyncHandler(async (req: Request, res: Response) => {
   const requests = await prisma.mcpConnectorEditRequest.findMany({
-    where: { status: "pending" },
+    where: { status: "pending", orgId: getOrgId(req)! },
     include: { mcpServer: { select: { id: true, type: true, name: true, launchConfigTemplate: true, httpConfigTemplate: true, credentialForm: true, transport: true } } },
     orderBy: { createdAt: "desc" },
   });
@@ -530,6 +533,9 @@ router.post("/edit-requests/:id/approve", requireClawAdmin, asyncHandler(async (
     include: { mcpServer: true },
   });
   if (!editRequest) {
+    throw notFound("Edit request not found");
+  }
+  if (editRequest.orgId !== getOrgId(req)) {
     throw notFound("Edit request not found");
   }
   if (editRequest.status !== "pending") {
@@ -597,6 +603,9 @@ router.post("/edit-requests/:id/reject", requireClawAdmin, asyncHandler(async (r
   if (!editRequest) {
     throw notFound("Edit request not found");
   }
+  if (editRequest.orgId !== getOrgId(req)) {
+    throw notFound("Edit request not found");
+  }
   if (editRequest.status !== "pending") {
     throw badRequest(`Edit request is ${editRequest.status}, not pending`);
   }
@@ -631,11 +640,14 @@ router.post("/edit-requests/:id/cancel", asyncHandler(async (req, res) => {
   if (!editRequest) {
     throw notFound("Edit request not found");
   }
+  if (editRequest.orgId !== getOrgId(req)) {
+    throw notFound("Edit request not found");
+  }
   if (editRequest.status !== "pending") {
     throw badRequest(`Edit request is ${editRequest.status}, not pending`);
   }
   // Only the proposer (or an admin) can cancel.
-  const requesterIsAdmin = await isClawAdmin(requesterId);
+  const requesterIsAdmin = await isClawAdmin(requesterId, getOrgId(req));
   if (!requesterIsAdmin && editRequest.proposedByUserId !== requesterId) {
     throw forbidden("Only the proposer or CLAW_ADMIN can cancel this request");
   }
@@ -671,12 +683,17 @@ router.delete("/:id", async (req: Request<{ id: string }>, res: Response) => {
       res.status(404).json({ success: false, error: "Server not found" });
       return;
     }
+    const requestOrgId = getOrgId(req);
+    if (existing.orgId !== requestOrgId) {
+      res.status(403).json({ success: false, error: "Connector belongs to a different organization" });
+      return;
+    }
     // Authorization: only the connector's owner or a CLAW_ADMIN may delete it.
     // Without this any authenticated user could delete global/shared
     // connectors (slack, grafana, …) and then re-register the type as their
     // own with an attacker-chosen config.
     const existingMeta = parseConnectorMeta(existing.connectorMeta);
-    const requesterIsAdmin = await isClawAdmin(requesterId);
+    const requesterIsAdmin = await isClawAdmin(requesterId, getOrgId(req));
     if (!requesterIsAdmin && existingMeta.ownerUserId !== requesterId) {
       res.status(403).json({ success: false, error: "Only the connector owner or a CLAW_ADMIN can delete it" });
       return;

@@ -312,7 +312,7 @@ export async function sendConnectorLink(input: {
   serverType: string;
   agentSlug?: string | undefined;
 }): Promise<void> {
-  const row = await prisma.mcpServer.findUnique({ where: { type: input.serverType }, select: { name: true, description: true } });
+  const row = await prisma.mcpServer.findFirst({ where: { type: input.serverType, orgId: null }, select: { name: true, description: true } });
   const offer = { serverType: input.serverType, name: row?.name ?? input.serverType, ...(row?.description ? { description: row.description } : {}) };
   const url = await linkFor({ target: input.target, userId: input.userId, agentSlug: input.agentSlug, offer });
   await enqueueOutbound(input.target.connectedSurfaceId, {

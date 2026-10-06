@@ -1,4 +1,5 @@
 import { errMsg } from "../errors.js";
+import { prisma } from "../../db.js";
 import { experimentRepository } from "../../repositories/index.js";
 import { isClawAdmin } from "../../middleware/agent-acl.js";
 import {
@@ -58,10 +59,17 @@ const handlers: ExperimentHandlers = {
       await ctx.reply("No active /experiment to stop.", REPLY_LABEL);
       return;
     }
-    const allowed = run.userId === payload.userId || await isClawAdmin(payload.userId);
-    if (!allowed) {
-      await ctx.reply("Only the requester or a claw admin can stop this /experiment.", REPLY_LABEL);
-      return;
+    // Org boundary: an admin may stop another user's experiment, but only
+    // within their own org.
+    if (run.userId !== payload.userId) {
+      const [adminUser, runUser] = await Promise.all([
+        prisma.user.findUnique({ where: { id: payload.userId }, select: { orgId: true } }),
+        prisma.user.findUnique({ where: { id: run.userId }, select: { orgId: true } }),
+      ]);
+      if (!(await isClawAdmin(payload.userId, runUser?.orgId)) || !adminUser || !runUser || adminUser.orgId !== runUser.orgId) {
+        await ctx.reply("Only the requester or a claw admin can stop this /experiment.", REPLY_LABEL);
+        return;
+      }
     }
     await experimentRepository.update(run.id, { status: "aborted", lastEpochEndedAt: new Date() });
     // Cancel in-flight CHECKER sessions too. They never claim
@@ -134,9 +142,12 @@ const handlers: ExperimentHandlers = {
         : "No /experiment has run in this thread.", REPLY_LABEL);
       return;
     }
-    if (experimentCommand.id && run.userId !== payload.userId && !(await isClawAdmin(payload.userId))) {
-      await ctx.reply("Not your experiment.", REPLY_LABEL);
-      return;
+    if (experimentCommand.id && run.userId !== payload.userId) {
+      const runUser = await prisma.user.findUnique({ where: { id: run.userId }, select: { orgId: true } });
+      if (!(await isClawAdmin(payload.userId, runUser?.orgId))) {
+        await ctx.reply("Not your experiment.", REPLY_LABEL);
+        return;
+      }
     }
     const [findings, reviews] = await Promise.all([
       experimentRepository.listFindings(run.id),

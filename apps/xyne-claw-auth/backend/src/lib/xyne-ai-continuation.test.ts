@@ -44,6 +44,7 @@ vi.mock("../repositories/index.js", () => ({
 
 vi.mock("./agent-provider-config.js", () => ({
   resolveAgentProviderConfigs: vi.fn(async () => null),
+  resolveUserLitellmApiKey: vi.fn(async () => undefined),
 }));
 
 vi.mock("./fast-mode.js", () => ({ resolveFastMode: vi.fn(async () => false) }));

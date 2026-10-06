@@ -181,6 +181,11 @@ const SPACES_WORKSPACE_SCOPED_SERVER_TYPES = new Set<string>([
   "xyne-spaces-app-tools",
 ]);
 
+async function resolveTemplateOrgId(userId: string, orgId?: string): Promise<string | undefined> {
+  if (orgId) return orgId;
+  return (await prisma.user.findUnique({ where: { id: userId }, select: { orgId: true } }))?.orgId ?? undefined;
+}
+
 function sessionKey(
   userId: string,
   serverType: string,
@@ -235,7 +240,9 @@ async function getOrCreateSession(
   agentSlug?: string,
   lane?: SessionLane,
   instance?: string,
+  orgId?: string,
 ): Promise<Client> {
+  orgId = await resolveTemplateOrgId(userId, orgId);
   if (SPACES_SESSION_CREDENTIAL_SERVER_TYPES.has(serverType)) {
     // Benchmark lane: the onyx-ask-ai agent ALWAYS routes to the benchmark Vespa
     // cluster, regardless of whether a live login session exists. The agent's
@@ -354,7 +361,7 @@ async function getOrCreateSession(
     return pending;
   }
 
-  const spawnPromise = spawnSession(key, serverType, credentials, incomingToken)
+  const spawnPromise = spawnSession(key, serverType, credentials, incomingToken, orgId)
     .finally(() => inflight.delete(key));
   inflight.set(key, spawnPromise);
   return spawnPromise;
@@ -368,8 +375,9 @@ async function spawnSession(
   serverType: string,
   credentials: Record<string, unknown>,
   incomingToken: string | undefined,
+  orgId?: string,
 ): Promise<Client> {
-  const definition = await resolveConnectorDefinition(serverType);
+  const definition = await resolveConnectorDefinition(serverType, orgId);
   if (!definition) {
     throw new Error(`No connector definition for server type: ${serverType}`);
   }
@@ -484,15 +492,16 @@ export async function listToolsForUser(
   serverName: string,
   credentials: Record<string, unknown>,
   agentSlug?: string,
-  options: { fresh?: boolean; lane?: SessionLane } = {},
+  options: { fresh?: boolean; lane?: SessionLane; orgId?: string } = {},
 ): Promise<McpServerTools> {
-  const fetchTools = () => fetchToolsFromServer(userId, serverType, credentials, agentSlug, options.lane);
+  const orgId = await resolveTemplateOrgId(userId, options.orgId);
+  const fetchTools = () => fetchToolsFromServer(userId, serverType, credentials, agentSlug, options.lane, orgId);
   const useShared =
     !options.fresh && TOOL_LIST_CACHE_TTL_MS > 0 && SHARED_TOOL_LIST_SERVER_TYPES.has(serverType);
   const tools = useShared ? await sharedToolList(serverType, fetchTools) : await fetchTools();
   void recordKnownMcpTools(userId, serverType, tools);
 
-  const definition = await resolveConnectorDefinition(serverType);
+  const definition = await resolveConnectorDefinition(serverType, orgId);
   const writeTools = definition?.writePolicy
     ? effectiveWriteTools(definition.writePolicy, tools.map((t) => t.name))
     : (definition?.writeTools ?? []);
@@ -505,8 +514,9 @@ async function fetchToolsFromServer(
   credentials: Record<string, unknown>,
   agentSlug?: string,
   lane?: SessionLane,
+  orgId?: string,
 ): Promise<McpToolInfo[]> {
-  const client = await getOrCreateSession(userId, serverType, credentials, agentSlug, lane);
+  const client = await getOrCreateSession(userId, serverType, credentials, agentSlug, lane, undefined, orgId);
   // Must pass BOTH `timeout` AND `signal`: the SDK runs an independent
   // internal timer initialised from `options.timeout ?? DEFAULT_REQUEST_TIMEOUT_MSEC`
   // (60s, see @modelcontextprotocol/sdk shared/protocol.js:712). Without
@@ -634,8 +644,10 @@ export async function callTool(
   agentSlug?: string,
   lane?: SessionLane,
   instance?: string,
+  orgId?: string,
 ): Promise<McpCallResult> {
-  const client = await getOrCreateSession(userId, serverType, credentials, agentSlug, lane, instance);
+  orgId = await resolveTemplateOrgId(userId, orgId);
+  const client = await getOrCreateSession(userId, serverType, credentials, agentSlug, lane, instance, orgId);
 
   // Same pattern as listToolsForUser above: pass BOTH `timeout` and `signal`
   // to override the SDK's 60s default. See protocol.js:712 in the MCP SDK.

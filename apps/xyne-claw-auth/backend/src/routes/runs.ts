@@ -58,7 +58,7 @@ router.get("/", asyncHandler(async (req: Request, res: Response) => {
       log.warn(`[runs/all] agent org-scoped miss userId=${userId} agentSlug=${agentSlug} orgId=${orgId}`);
       throw notFound("Agent not found");
     }
-    const admin = await isClawAdmin(userId);
+    const admin = await isClawAdmin(userId, orgId);
     if (!admin && !access.canEdit) {
       log.warn(`[runs/all] denied userId=${userId} agentSlug=${agentSlug} orgId=${orgId}`);
       throw forbidden("Only admins, the owner, or contributors can view all runs for this agent");
@@ -289,7 +289,7 @@ router.get("/paged", asyncHandler(async (req: Request, res: Response) => {
       log.warn(`[runs/paged] agent org-scoped miss userId=${requesterId} agentSlug=${agentSlug} orgId=${headerOrgId}`);
       throw notFound("Agent not found");
     }
-    admin = await isClawAdmin(requesterId);
+    admin = await isClawAdmin(requesterId, access.agent.orgId);
     if (!admin && !access.canEdit) {
       log.warn(`[runs/paged] denied userId=${requesterId} agentSlug=${agentSlug} orgId=${headerOrgId}`);
       throw forbidden("Only admins, the owner, or contributors can view all runs for this agent");
@@ -300,7 +300,7 @@ router.get("/paged", asyncHandler(async (req: Request, res: Response) => {
   } else if (scope === "all") {
     // R3 — cross-agent, all-user listing: CLAW_ADMIN only. There is no agent
     // to derive contributor access from, so admin is the only door.
-    if (!(await isClawAdmin(requesterId))) throw forbidden("CLAW_ADMIN role required for cross-agent all-user runs");
+    if (!(await isClawAdmin(requesterId, getOrgId(req)))) throw forbidden("CLAW_ADMIN role required for cross-agent all-user runs");
     admin = true;
     // getOrgId reads x-org-id, which requireAuth strips from the client and
     // re-stamps from user.orgId — trustworthy, but best-effort, and it can

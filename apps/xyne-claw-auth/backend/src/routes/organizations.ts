@@ -342,6 +342,16 @@ router.post("/:id/members", asyncHandler(async (req: Request, res: Response) => 
     throw notFound(`No user matches "${raw}"`);
   }
 
+  // Single-org phase 1: a user with an active membership elsewhere cannot be
+  // added here (User.orgId is a single denormalized pointer).
+  const activeMembership = await prisma.orgMember.findFirst({
+    where: { userId: targetUser.id, leftAt: null },
+    select: { orgId: true },
+  });
+  if (activeMembership && activeMembership.orgId !== orgId) {
+    throw conflict("User already belongs to another organization");
+  }
+
   const member = await prisma.orgMember.upsert({
     where: { userId_orgId: { userId: targetUser.id, orgId } },
     create: { orgId, userId: targetUser.id, role: requestedRole, invitedBy: requesterId },

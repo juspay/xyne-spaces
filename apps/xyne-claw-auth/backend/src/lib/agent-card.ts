@@ -921,7 +921,7 @@ export async function resolveAgentDraft(
 
     // Global agents are org-wide, so the same admin gate the REST create route
     // applies has to apply here — a drafted spec must not be a way around it.
-    const admin = await isClawAdmin(callerUserId).catch(() => false);
+    const admin = await isClawAdmin(callerUserId, request.orgId).catch(() => false);
     const effectiveScope = draft.scope === "global" && admin ? "global" : "personal";
     if (draft.scope === "global" && !admin) {
       log.info(`[agent-card] draft ${draft.slug} asked for global scope; downgraded to personal (approver is not an admin)`);

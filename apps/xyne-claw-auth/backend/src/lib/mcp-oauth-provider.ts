@@ -108,7 +108,7 @@ export function createMcpOAuthProvider(config: McpOAuthConfig): McpOAuthProvider
   }
 
   async function ensureServer() {
-    const existing = await prisma.mcpServer.findUnique({ where: { type } });
+    const existing = await prisma.mcpServer.findFirst({ where: { type, orgId: null } });
     if (existing) return existing;
     return prisma.mcpServer.create({
       data: {

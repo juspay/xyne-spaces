@@ -15,9 +15,9 @@ function haystack(e: IncomingError): string {
   return [e.message ?? "", e.normMessage ?? ""].join("  ");
 }
 
-export async function classify(e: IncomingError): Promise<ClassifyResult> {
+export async function classify(e: IncomingError, orgId: string): Promise<ClassifyResult> {
   const hay = haystack(e);
-  const rules = await getRules();
+  const rules = await getRules(orgId);
 
   if (rules) {
     // Keywords + advanced regex, by matchOrder — first bucket that matches wins.

@@ -57,7 +57,7 @@ vi.mock("../db.js", () => ({
         return null;
       }),
     },
-    mcpServer: { findUnique: vi.fn(async () => null) },
+    mcpServer: { findUnique: vi.fn(async () => null), findFirst: vi.fn(async () => null) },
     agentMcpConnection: {
       findFirst: vi.fn(async (args: any) => state.agentConnBySlug[args.where.slug ?? "default"] ?? null),
     },

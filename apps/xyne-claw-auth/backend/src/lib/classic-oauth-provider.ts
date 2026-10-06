@@ -52,7 +52,7 @@ export function createClassicOAuthProvider(config: ClassicOAuthConfig): ClassicO
   }
 
   async function ensureServer() {
-    const existing = await prisma.mcpServer.findUnique({ where: { type } });
+    const existing = await prisma.mcpServer.findFirst({ where: { type, orgId: null } });
     if (existing) return existing;
     return prisma.mcpServer.create({
       data: { type, name: config.server.name, url: config.server.url, description: config.server.description, isOauth: true },
