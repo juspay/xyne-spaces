@@ -278,7 +278,7 @@
     "tailwindcss-animate": "^1.0.7",
     "vite": "^7.1.5",
     "vite-plugin-static-copy": "^3.1.4",
-    "vitest": "^2.1.9"
+    "vitest": "^3.2.6"
   },
   "engines": {
     "node": ">=18.0.0",
