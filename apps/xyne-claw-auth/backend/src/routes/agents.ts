@@ -13,7 +13,7 @@ import crypto from "node:crypto";
 import { Prisma } from "@prisma/client";
 import { agentRepository, agentShareRepository, agentRequestRepository, userRepository, userAgentConfigRepository, userProviderCredentialsRepository, agentProviderCredentialsRepository, sharedProviderCredentialRepository, skillRepository } from "../repositories/index.js";
 import { validateSubagentInput, ValidationError as SubagentValidationError } from "../lib/subagent-resolver.js";
-import { getSubagentDefinition, buildCloneApprovalFlow, normalizeAgentPrivacy, parseAgentPrivacy } from "xyne-claw-shared";
+import { getSubagentDefinition, buildCloneApprovalFlow, normalizeAgentPrivacy, parseAgentPrivacy, OPTIMIZATION_GROUPS, OPTIMIZATION_TIER_DEFAULTS, optimizationCatalog } from "xyne-claw-shared";
 import { spacesAppFetch } from "../lib/spaces-api.js";
 import { getWorkspaceIdForUser } from "../lib/spaces-db.js";
 import { LOCAL_HARNESS_PROVIDERS } from "../lib/local-harness.js";
@@ -358,6 +358,24 @@ router.get("/check-name", asyncHandler(async (req: Request, res: Response, next)
 
   ok(res, { slugAvailable: !slugTaken, nameAvailable: !nameTaken });
 }));
+
+// ── Optimization catalog ─────────────────────────────────────────────
+
+/**
+ * Every claw optimization switch, for the agent page's Optimizations section.
+ * Static: the same xyne-claw-shared catalog claw decides each run from, so a
+ * new switch shows up here without a UI change. An agent's choices are stored
+ * in its `config.optimizations` and saved through the normal agent update.
+ *
+ * GET /api/v1/agents/optimizations → { success, data: { groups, optimizations, tierDefaults } }
+ */
+router.get("/optimizations", (_req: Request, res: Response) => {
+  ok(res, {
+    groups: OPTIMIZATION_GROUPS,
+    optimizations: optimizationCatalog(),
+    tierDefaults: OPTIMIZATION_TIER_DEFAULTS,
+  });
+});
 
 // ── Agent CRUD ───────────────────────────────────────────────────────
 
