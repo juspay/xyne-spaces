@@ -3,6 +3,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import { useQuery } from '@tanstack/react-query';
 import {
   getKanbanCounts,
+  getTrackKanbanCounts,
   type KanbanCountGroup,
   type KanbanCountsDeskFilters,
   type KanbanCountsFilters,
@@ -22,6 +23,8 @@ import type { TicketFilters } from '../../components/Tickets/TicketFilters/types
 
 interface UseKanbanCountsOptions extends FlowStepVisibilityOptions {
   viewMode: KanbanCountsViewMode;
+  /** Count one SDLC track's tickets, from every board, instead of a board's or a project's. */
+  track?: { channelId: string; trackId: string } | undefined;
   columnType?: 'stage' | 'status';
   projectId?: string;
   boardId?: string;
@@ -98,31 +101,28 @@ const stringifyFormFieldValue = (value: unknown): string | null => {
 
 const isStringValue = (value: string | null): value is string => value !== null;
 
-const getTicketCountsRoom = (
-  request: KanbanCountsRequest,
-  currentUserId?: string,
-): string | null => {
+const getTicketCountsRooms = (request: KanbanCountsRequest, currentUserId?: string): string[] => {
   if (request.viewMode === 'project') {
-    if (request.projectId) return `ticket-counts:project:${request.projectId}`;
-    if (request.boardId) return `ticket-counts:board:${request.boardId}`;
-    return null;
+    if (request.projectId) return [`ticket-counts:project:${request.projectId}`];
+    if (request.boardId) return [`ticket-counts:board:${request.boardId}`];
+    return (request.boardIds ?? []).map(boardId => `ticket-counts:board:${boardId}`);
   }
 
   if (request.viewMode === 'board') {
-    if (request.projectId) return `ticket-counts:project:${request.projectId}`;
-    if (request.boardId) return `ticket-counts:board:${request.boardId}`;
-    return null;
+    if (request.projectId) return [`ticket-counts:project:${request.projectId}`];
+    if (request.boardId) return [`ticket-counts:board:${request.boardId}`];
+    return [];
   }
 
   if (request.viewMode === 'my-tickets' && currentUserId) {
-    return `ticket-counts:user:${currentUserId}`;
+    return [`ticket-counts:user:${currentUserId}`];
   }
 
   if (request.viewMode === 'desk' && request.boardId) {
-    return `ticket-counts:board:${request.boardId}`;
+    return [`ticket-counts:board:${request.boardId}`];
   }
 
-  return null;
+  return [];
 };
 
 /**
@@ -635,13 +635,39 @@ const toRequest = (options: UseKanbanCountsOptions): KanbanCountsRequest => {
 
 export const useKanbanCounts = (options: UseKanbanCountsOptions): UseKanbanCountsResult => {
   const rawRequest = toRequest(options);
-  const requestKey = JSON.stringify(rawRequest);
+  const track = options.track;
+  const requestKey = JSON.stringify({ ...rawRequest, track });
   const request = useMemo(() => rawRequest, [requestKey]);
   const queryClient = useQueryClient();
+  // A board's or project's counts keep the key they have always had.
+  const queryKey = useMemo(
+    () =>
+      track ? ['tickets', 'kanban-counts', request, track] : ['tickets', 'kanban-counts', request],
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- track is part of requestKey
+    [request, requestKey],
+  );
+
+  const isTrack = Boolean(track);
+  const ticketCountsRooms = useMemo(
+    () =>
+      isTrack && !request.projectId && !request.boardId
+        ? []
+        : getTicketCountsRooms(request, options.currentUserId),
+    [isTrack, options.currentUserId, request],
+  );
+
+  // A track across all its boards has no single board's room to hear changes on, so
+  // its counts are refreshed on a timer instead.
+  const pollTrackCounts = isTrack && ticketCountsRooms.length === 0;
 
   const query = useQuery({
-    queryKey: ['tickets', 'kanban-counts', request],
-    queryFn: () => getKanbanCounts(request),
+    queryKey,
+    ...(pollTrackCounts ? { refetchInterval: 30_000 } : {}),
+    queryFn: () => {
+      if (!track) return getKanbanCounts(request);
+      const { viewMode: _viewMode, projectId: _projectId, boardId: _boardId, ...rest } = request;
+      return getTrackKanbanCounts({ ...rest, ...track });
+    },
     enabled: options.enabled ?? true,
     staleTime: 10 * 60 * 1000,
   });
@@ -651,34 +677,32 @@ export const useKanbanCounts = (options: UseKanbanCountsOptions): UseKanbanCount
     () => new Map(groups.map(group => [group.groupKey, group])),
     [groups],
   );
-  const ticketCountsRoom = useMemo(
-    () => getTicketCountsRoom(request, options.currentUserId),
-    [options.currentUserId, request],
-  );
 
   useEffect(() => {
     if (!(options.enabled ?? true)) return;
-    if (!ticketCountsRoom) return;
+    if (ticketCountsRooms.length === 0) return;
 
     let cancelled = false;
     const handleCountsUpdate = (event: TicketCountsUpdateEvent): void => {
       if (cancelled) return;
 
       // Live count snapshots do not carry rootId. Refetch aggregate-board
-      // counts so materialized flow steps cannot leak into the total.
-      if (request.excludeFlowSteps || hasUnmatchableDeskFilter(request.deskFilters)) {
-        void queryClient.invalidateQueries({ queryKey: ['tickets', 'kanban-counts', request] });
+      // counts so materialized flow steps cannot leak into the total. Nor do they
+      // say which track a ticket is in, so a track's counts are refetched too.
+      if (request.excludeFlowSteps || hasUnmatchableDeskFilter(request.deskFilters) || track) {
+        void queryClient.invalidateQueries({ queryKey });
         return;
       }
 
-      queryClient.setQueryData<{ groups: KanbanCountGroup[] }>(
-        ['tickets', 'kanban-counts', request],
-        current => applyTicketCountsUpdate(current, request, event, options.currentUserId),
+      queryClient.setQueryData<{ groups: KanbanCountGroup[] }>(queryKey, current =>
+        applyTicketCountsUpdate(current, request, event, options.currentUserId),
       );
     };
     const handleSocketConnect = (): void => {
       if (cancelled) return;
-      websocketService.emit('subscribe_to_ticket_counts', { room: ticketCountsRoom });
+      ticketCountsRooms.forEach(room =>
+        websocketService.emit('subscribe_to_ticket_counts', { room }),
+      );
     };
 
     const subscribe = async (): Promise<void> => {
@@ -692,7 +716,9 @@ export const useKanbanCounts = (options: UseKanbanCountsOptions): UseKanbanCount
           handleCountsUpdate,
         );
         websocketService.on('connect', handleSocketConnect);
-        websocketService.emit('subscribe_to_ticket_counts', { room: ticketCountsRoom });
+        ticketCountsRooms.forEach(room =>
+          websocketService.emit('subscribe_to_ticket_counts', { room }),
+        );
       } catch {
         // Ignore websocket failures; counts will continue to work from the API snapshot.
       }
@@ -707,9 +733,18 @@ export const useKanbanCounts = (options: UseKanbanCountsOptions): UseKanbanCount
         handleCountsUpdate,
       );
       websocketService.removeListener('connect', handleSocketConnect);
-      websocketService.emit('unsubscribe_from_ticket_counts', { room: ticketCountsRoom });
+      ticketCountsRooms.forEach(room =>
+        websocketService.emit('unsubscribe_from_ticket_counts', { room }),
+      );
     };
-  }, [options.currentUserId, options.enabled, queryClient, requestKey, ticketCountsRoom]);
+  }, [
+    options.currentUserId,
+    options.enabled,
+    queryClient,
+    requestKey,
+    ticketCountsRooms,
+    queryKey,
+  ]);
 
   return {
     groups,

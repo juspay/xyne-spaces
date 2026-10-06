@@ -49,6 +49,8 @@ import EmojiPicker, { EmojiStyle, Theme as EmojiTheme } from 'emoji-picker-react
 import { BotBubble } from '../../Chat/BotBubble';
 import { LinkPreview } from '../../Chat/LinkPreview/LinkPreview';
 import { InternalMessagePreview } from '../../Chat/LinkPreview/InternalMessagePreview';
+import { CallLinkPreview } from '../../Chat/LinkPreview/CallLinkPreview';
+import { CallLinkCaption, isCallLinkOnlyMessage } from '../../Chat/LinkPreview/CallLinkCaption';
 import { getEmojiFontSizeClass } from '../../../utils/emojiUtils';
 import { RenderMessageWithHTML } from '../../Chat/RenderMessageWithHTML/RenderMessageWithHTML';
 import { createMarkdownComponents } from '../../../utils/markdownComponents';
@@ -532,6 +534,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
   allThreadAttachments,
   workflowNumber,
   showLinkPreview: shouldRenderLinkPreview = true,
+  callLinkCardShown,
   searchItemView = false,
   afterTextContent,
   headerContent,
@@ -554,6 +557,14 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
   const isForwardedMessage = message.msgType === MessageType.FORWARDED;
   const metadata = message.metadata as MessageMetadata | null;
   const previewResult = parsePreviewMd(message.link_preview_md);
+  // A message that is nothing but a call link shows a status caption in place of the link;
+  // the link chip comes back only once its card is closed, so there's always a way in.
+  const callLinkOnlyExternalId =
+    previewResult?.type === 'call_preview' &&
+    isCallLinkOnlyMessage(message.content, previewResult.data.url)
+      ? previewResult.data.externalId
+      : null;
+  const isCallCardShown = callLinkCardShown ?? (shouldRenderLinkPreview && showLinkPreview);
 
   // Parse forwarded message XML content
   const forwardedMessageData = useMemo(() => {
@@ -946,7 +957,8 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                   }
                 />
               </div>
-            ) : showAvatar && sender?.userType === UserType.APP ? (
+            ) : showAvatar &&
+              (sender?.userType === UserType.APP || sender?.userType === UserType.AGENT) ? (
               <div
                 onClick={() => handleUserClick(sender.id)}
                 data-track-category='MESSAGE'
@@ -1248,7 +1260,11 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
               ) : null}
               {/* Host-supplied mark for where this conversation belongs. Null in
                   every surface that does not provide one. */}
-              {message.conversationId ? renderConversationBadge?.(message.conversationId) : null}
+              {message.conversationId
+                ? renderConversationBadge?.(
+                    conversation ?? { conversationId: message.conversationId },
+                  )
+                : null}
               {headerContent}
             </div>
           )}
@@ -1605,25 +1621,32 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                       className={`jp-message-html whitespace-pre-wrap break-all-words inline-block ${emojiFontSizeClass}`}
                       style={isSystemMessage ? systemMessageStyles : undefined}
                     >
-                      <ExpandableMessage maxHeight={500}>
-                        <div className='jp-message-html inline-block'>
-                          <RenderMessageWithHTML
-                            disableLinks={disableLinks}
-                            message={isWorkflowMessage ? 'Workflow created' : message.content}
-                            showEdited={message.edited}
-                            isSystemMessage={isSystemMessage}
-                            messageId={message.messageId}
-                            conversationId={message.conversationId}
-                            preserveThreadRoute={context === 'thread'}
-                            slashCommandArtifactContext={{
-                              ...(channelId && { channelId }),
-                              senderId: message.senderId,
-                              createdAt: message.createdAt,
-                              surface: context === 'thread' ? 'thread' : 'channel',
-                            }}
-                          />
-                        </div>
-                      </ExpandableMessage>
+                      {callLinkOnlyExternalId && (
+                        <CallLinkCaption externalId={callLinkOnlyExternalId} />
+                      )}
+                      {!(callLinkOnlyExternalId && isCallCardShown) && (
+                        <>
+                          <ExpandableMessage maxHeight={500}>
+                            <div className='jp-message-html inline-block'>
+                              <RenderMessageWithHTML
+                                disableLinks={disableLinks}
+                                message={isWorkflowMessage ? 'Workflow created' : message.content}
+                                showEdited={message.edited}
+                                isSystemMessage={isSystemMessage}
+                                messageId={message.messageId}
+                                conversationId={message.conversationId}
+                                preserveThreadRoute={context === 'thread'}
+                                slashCommandArtifactContext={{
+                                  ...(channelId && { channelId }),
+                                  senderId: message.senderId,
+                                  createdAt: message.createdAt,
+                                  surface: context === 'thread' ? 'thread' : 'channel',
+                                }}
+                              />
+                            </div>
+                          </ExpandableMessage>
+                        </>
+                      )}
                       {afterTextContent}
                     </div>
                   )}
@@ -1692,6 +1715,11 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                         type: 'internal_message',
                         ...previewResult.data,
                       }}
+                      onClose={() => setShowLinkPreview(false)}
+                    />
+                  ) : previewResult.type === 'call_preview' ? (
+                    <CallLinkPreview
+                      metadata={previewResult.data}
                       onClose={() => setShowLinkPreview(false)}
                     />
                   ) : (

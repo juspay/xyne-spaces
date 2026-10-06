@@ -31,7 +31,7 @@ import type { SlackAgentStatus } from '@/services/claw/clawSlackTypes';
 import type { AdminOrgScope } from '@/services/claw/clawAdminTypes';
 import { OrgBadge } from './components/AdminTable';
 import { TabMessage } from './components/TabMessage';
-import { RegistrationFlowCard } from './components/RegistrationFlowCard';
+import { RegistrationFlowDialog } from './components/RegistrationFlowDialog';
 import { adminAgentsKey, adminAgentsPrefix } from './hooks/adminQueryKeys';
 import { useSlackActions } from './hooks/useSlackActions';
 import { useSlackAgentStatuses } from './hooks/useSlackAgentStatuses';
@@ -384,15 +384,13 @@ export function AgentsTab({
     <div className='flex min-h-0 flex-1 flex-col gap-6 overflow-auto pb-6'>
       {searchBar}
 
-      {registration.flow && (
-        <RegistrationFlowCard
-          flow={registration.flow}
-          onRun={() => void registration.runStep()}
-          onPickPicture={registration.pickPicture}
-          onSkipUpload={registration.dismiss}
-          onDismiss={registration.dismiss}
-        />
-      )}
+      <RegistrationFlowDialog
+        flow={registration.flow}
+        onRun={() => void registration.runStep()}
+        onPickPicture={registration.pickPicture}
+        onSkipUpload={registration.dismiss}
+        onDismiss={registration.dismiss}
+      />
 
       <AgentSection
         query={query}

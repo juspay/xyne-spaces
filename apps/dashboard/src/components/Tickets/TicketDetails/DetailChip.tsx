@@ -42,6 +42,9 @@ export const DetailChip = ({
   </div>
 );
 
+export const detailChipButtonClass = (dashed = false): string =>
+  cn(baseChipClass, 'px-[11px]', chipToneClass(dashed), chipHoverClass);
+
 /** Interactive pill. A real button: keyboard, focus ring, press feedback. */
 export const DetailChipButton = ({
   children,

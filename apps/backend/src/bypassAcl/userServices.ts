@@ -47,6 +47,7 @@ export function createWorkspaceInOrgData(
     email: string;
     name: string;
     picture?: string | null;
+    authProvider: AuthProvider;
   },
   workspaceName: string,
   workspaceType: WorkspaceTypeValue,
@@ -111,7 +112,7 @@ export function createWorkspaceInOrgData(
           email: userData.email,
           name: userData.name,
           picture: userData.picture,
-          authProvider: AuthProvider.GOOGLE,
+          authProvider: userData.authProvider,
           workspace: { connect: { id: workspace.id } },
           role: WorkspaceRole.OWNER,
           orgMember: { connect: { memberId: orgMember.memberId } },

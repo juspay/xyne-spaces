@@ -89,6 +89,23 @@ describe("matchesDirectPick — the five historical conventions", () => {
   });
 });
 
+describe("matchesDirectPick — server-type picks", () => {
+  const alerts = tool("Juspay_Alerts_MCP_2_0__alert_data_juspay", {
+    mcpToolName: "alert_data_juspay",
+    serverToolKey: "Juspay Internal Alerts MCP 2.0__alert_data_juspay",
+  });
+
+  it("admits a pick saved under the server type when it differs from the display name", () => {
+    expect(matchesDirectPick(alerts, ["Juspay Internal Alerts MCP 2.0__alert_data_juspay"])).toBe(true);
+    expect(matchesDirectPick(alerts, ["alert_data_juspay"])).toBe(true);
+  });
+
+  it("does not admit another server's tool of the same name", () => {
+    expect(matchesDirectPick(alerts, ["Other Alerts MCP__alert_data_juspay"])).toBe(false);
+    expect(matchesDirectPick(alerts, ["Juspay Internal Alerts MCP 2.0__update_alert_metadata"])).toBe(false);
+  });
+});
+
 describe("presentAsFastCatalog — parity invariant", () => {
   it("direct ∪ catalog ≡ allowed, split exactly by isWrite", () => {
     const r = resolveTools({

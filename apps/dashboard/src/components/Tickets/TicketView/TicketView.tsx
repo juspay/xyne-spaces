@@ -1,7 +1,7 @@
 import { ReactElement, useRef } from 'react';
 import useMeasure from '../../../hooks/useMeasure';
 import { ResizableGroup, Panel, Separator } from '../../ui/Resizable/Resizable';
-import { Link, useNavigate, useParams } from 'react-router-dom';
+import { Link, useLocation, useNavigate, useParams } from 'react-router-dom';
 import { queries } from '../../../zero/queries';
 import { useCachedQuery } from '../../../hooks/useCachedQuery';
 import { TicketDetails } from '../TicketDetails/TicketDetails';
@@ -18,8 +18,11 @@ const TicketView = (): ReactElement => {
   }>();
 
   const navigate = useNavigate();
+  const location = useLocation();
+  const returnToUrl = (location.state as { returnToUrl?: string } | null)?.returnToUrl;
   // Only the SDLC route has :channelId; there this page stands in for the hub's board.
   const sdlcBoardPath = channelId ? `/sdlc/${channelId}/tickets` : null;
+  const sdlcBackPath = sdlcBoardPath && (returnToUrl ?? sdlcBoardPath);
   const sdlcThreadProps = sdlcBoardPath
     ? { showChannelLink: true, onChannelLinkClick: (): void => void navigate(sdlcBoardPath) }
     : {};
@@ -62,8 +65,8 @@ const TicketView = (): ReactElement => {
               size={16}
               className='cursor-pointer'
               onClick={() => {
-                if (sdlcBoardPath) {
-                  void navigate(sdlcBoardPath);
+                if (sdlcBackPath) {
+                  void navigate(sdlcBackPath);
                 } else if (projectId && boardId) {
                   void navigate(`/projects/${projectId}/${boardId}`);
                 } else {
@@ -77,7 +80,7 @@ const TicketView = (): ReactElement => {
           </div>
           <Link
             to={
-              sdlcBoardPath ??
+              sdlcBackPath ??
               (ticket.channelId
                 ? `/chat/dir/${ticket.channelId}?tab=tickets&layout=table`
                 : `/projects/${projectId}/${boardId}`)

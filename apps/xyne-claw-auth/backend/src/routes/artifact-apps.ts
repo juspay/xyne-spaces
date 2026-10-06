@@ -25,7 +25,7 @@ import { Prisma } from "@prisma/client";
 import { prisma } from "../db.js";
 import { gcsService } from "../services/storageService.js";
 import { getRequesterId } from "../middleware/agent-acl.js";
-import { getWorkspaceIdForUser } from "../lib/spaces-db.js";
+import { getWorkspaceIdForUser, requestWorkspaceHint } from "../lib/spaces-db.js";
 import { buildReactArtifact } from "xyne-claw-shared/tools/react-artifact";
 import { ICON_META } from "@xyne/icons/meta";
 import { createLogger } from "../logger.js";
@@ -218,7 +218,7 @@ artifactAppsRouter.post("/upload", async (req: Request, res: Response): Promise<
   const meta = uploadCreateMeta.safeParse(req.body);
   if (!meta.success) return badRequest(res, meta);
 
-  const workspaceId = await getWorkspaceIdForUser(requesterId, "artifact-apps");
+  const workspaceId = await getWorkspaceIdForUser(requesterId, "artifact-apps", requestWorkspaceHint(req));
   if (!workspaceId) {
     res.status(409).json({ success: false, error: "No Spaces workspace for this user" });
     return;
@@ -340,8 +340,9 @@ artifactAppsRouter.post("/:id/versions/upload", async (req: Request<{ id: string
         createdBy: requesterId,
       },
     });
-    // HEAD moves forward to the pushed build.
-    await prisma.artifactApp.update({ where: { id: app.id }, data: { headVersionId: version.id } });
+    // HEAD moves forward to the pushed build, and the app takes the build's title,
+    // so renaming is editing `title` in the project and pushing again.
+    await prisma.artifactApp.update({ where: { id: app.id }, data: { headVersionId: version.id, title: built.title } });
     res.status(201).json({ success: true, version });
   } catch (err) {
     // A concurrent/retried push can lose the check-then-insert race: the unique
@@ -375,7 +376,7 @@ artifactAppsRouter.post("/", async (req: Request, res: Response): Promise<void> 
   const parsed = saveBody.safeParse(req.body);
   if (!parsed.success) return badRequest(res, parsed);
 
-  const workspaceId = await getWorkspaceIdForUser(requesterId, "artifact-apps");
+  const workspaceId = await getWorkspaceIdForUser(requesterId, "artifact-apps", requestWorkspaceHint(req));
   if (!workspaceId) {
     res.status(409).json({ success: false, error: "No Spaces workspace for this user" });
     return;
@@ -662,7 +663,7 @@ artifactAppsRouter.get("/", async (req: Request, res: Response): Promise<void> =
     return;
   }
 
-  const workspaceId = await getWorkspaceIdForUser(requesterId, "artifact-apps");
+  const workspaceId = await getWorkspaceIdForUser(requesterId, "artifact-apps", requestWorkspaceHint(req));
   if (!workspaceId) {
     res.json({ success: true, apps: [] });
     return;
@@ -792,7 +793,7 @@ artifactAppsRouter.get("/:id", async (req: Request<{ id: string }>, res: Respons
 
   const isOwner = app.ownerUserId === requesterId;
   if (!isOwner) {
-    const workspaceId = await getWorkspaceIdForUser(requesterId, "artifact-apps");
+    const workspaceId = await getWorkspaceIdForUser(requesterId, "artifact-apps", requestWorkspaceHint(req));
     if (workspaceId !== app.workspaceId || app.visibility !== VISIBILITY_WORKSPACE) {
       res.status(404).json({ success: false, error: "App not found" });
       return;
@@ -862,7 +863,7 @@ artifactAppsRouter.get("/:id/payload", async (req: Request<{ id: string }>, res:
 
   const isOwner = app.ownerUserId === requesterId;
   if (!isOwner) {
-    const workspaceId = await getWorkspaceIdForUser(requesterId, "artifact-apps");
+    const workspaceId = await getWorkspaceIdForUser(requesterId, "artifact-apps", requestWorkspaceHint(req));
     const sameWorkspace = workspaceId !== null && workspaceId === app.workspaceId;
     if (!sameWorkspace || app.visibility !== VISIBILITY_WORKSPACE) {
       res.status(403).json({ success: false, error: "Forbidden" });

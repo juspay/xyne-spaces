@@ -1,7 +1,7 @@
-import React, { useMemo } from 'react';
+import React from 'react';
 import { useNavigate } from 'react-router-dom';
 import { ChannelScopeType, type ConversationAnchorType } from '@xyne/shared';
-import { useAllVisibleChannels } from '../../../hooks/useChannels';
+import { useChannel } from '../../../hooks/useChannels';
 import { Button } from '../Button/Button';
 
 const ANCHOR_LABELS: Record<ConversationAnchorType, string> = {
@@ -29,13 +29,9 @@ export const ThreadInfoIndicator: React.FC<ThreadInfoIndicatorProps> = ({
   messageId,
 }) => {
   const navigate = useNavigate();
-  const visibleChannels = useAllVisibleChannels();
   const targetChannelId = threadInfo.channelId ?? channelId;
-  const canOpen = useMemo(
-    () =>
-      !threadInfo.channelId || visibleChannels.some(channel => channel.id === threadInfo.channelId),
-    [threadInfo.channelId, visibleChannels],
-  );
+  const channel = useChannel(targetChannelId);
+  const canOpen = !threadInfo.channelId || !!channel;
 
   return (
     <div

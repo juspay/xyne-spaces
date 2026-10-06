@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useMemo } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import type { Agent, AgentLight, AgentShare, ScheduledJob } from "../../lib/types";
+import { isCurrentUser } from "../../lib/identity";
 import type {
   ClaudeModelInfo,
   AvailableTools,
@@ -1281,7 +1282,7 @@ export function AgentDetailPageV3({ userId, isAdmin }: Props) {
         onOpenChange={setCloneDialogOpen}
         sourceName={agent.name}
         needsApproval={!permissions?.canEdit}
-        isOwnAgent={agent.ownerUserId === userId}
+        isOwnAgent={isCurrentUser(agent.ownerUserId)}
         sourceEnabled={agent.enabled}
         submitting={cloning}
         onConfirm={(name) => void doClone(name)}

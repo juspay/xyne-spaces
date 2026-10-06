@@ -915,6 +915,11 @@ function eventVisual(kind: string, isError: boolean): EventVisual {
 
 function persistedFollowUpLifecycleEvents(diagnostic: FollowUpDiagnostic): unknown[] {
   if (diagnostic.enabled === false || diagnostic.outcome === 'disabled') return [];
+  // claw-auth reports a diagnostic for every agent_run row, including the one
+  // still in flight. Until claw records its follow-up step at the end of the
+  // run there is nothing to show; falling back to the RUN's startedAt here drew
+  // phantom start/end rows at the top of the live timeline.
+  if (diagnostic.outcome === 'not_recorded') return [];
   const startedAt = diagnostic.generationStartedAt ?? diagnostic.startedAt;
   const start = {
     kind: 'follow_up_generation_start',

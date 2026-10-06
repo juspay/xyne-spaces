@@ -1,4 +1,4 @@
-import { ReactElement, useMemo } from 'react';
+import { ReactElement, ReactNode, useMemo } from 'react';
 import type { Ticket, TicketTag } from '@xyne/shared';
 import { TicketTable } from '../../components/Tickets/TicketTable/TicketTable';
 import { useTableTicketsPage, type UseTableTicketsPageOptions } from './useTableTicketsPage';
@@ -16,6 +16,8 @@ interface TableGroupSectionProps {
   visibleColumns: Set<string>;
   isComfortView: boolean;
   availableTags: string[];
+  renderRowExtras?: (ticket: Ticket) => ReactNode;
+  bulkActionsContainer?: HTMLElement | null;
 }
 
 type RowTagMapping = { id: string; tagName: string; ticketId: string; workspaceId: string };
@@ -32,6 +34,8 @@ export const TableGroupSection = ({
   visibleColumns,
   isComfortView,
   availableTags,
+  renderRowExtras,
+  bulkActionsContainer,
 }: TableGroupSectionProps): ReactElement => {
   const { tickets, isLoading, isLoadingMore, hasMore, loadMore, isSearchMode } =
     useTableTicketsPage({ ...args, enabled, pageSize });
@@ -68,6 +72,8 @@ export const TableGroupSection = ({
       onLoadMore={loadMore}
       {...(totalCount !== undefined && !isSearchMode ? { totalCount } : {})}
       {...(onTicketOpen ? { onRowClick: onTicketOpen } : {})}
+      {...(renderRowExtras ? { renderRowExtras } : {})}
+      {...(bulkActionsContainer ? { bulkActionsContainer } : {})}
       {...(internalScroll ? {} : { scrollElement })}
     />
   );

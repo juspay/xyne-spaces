@@ -3,7 +3,11 @@ import { errMsg } from "../lib/errors.js";
 import { randomUUID } from "node:crypto";
 import { CONFIG } from "../config.js";
 import type { FlowDefinition } from "xyne-claw-shared";
-import { requireAuth, requireNoAccessToken, requireResultToken } from "../middleware/require-auth.js";
+import { requireAuth, requireNoAccessToken, requireResultToken, s2sKeyMatches } from "../middleware/require-auth.js";
+import { matchesAuthenticatedUserId } from "../middleware/pin-user-id-param.js";
+import { resolveCanonicalUserIdOrSelf } from "../lib/users-jit.js";
+import { requestWorkspaceHint } from "../lib/spaces-db.js";
+import { conversationAccessError } from "../lib/conversation-access.js";
 import { getRequesterId, getAgentEditAccess, isClawAdmin } from "../middleware/agent-acl.js";
 import { prisma } from "../db.js";
 import { chatMessageRepository, agentRunRepository, chatAttachmentRepository, userAgentConfigRepository } from "../repositories/index.js";
@@ -53,6 +57,7 @@ import {
   cloneBranchSession,
   type ChatTreeMessage,
 } from "./lib/branching.js";
+import { buildCallbackBodyFromDone } from "./lib/sse-done-callback.js";
 
 import { createLogger } from "../logger.js";
 const log = createLogger("run-stream");
@@ -190,7 +195,8 @@ type StreamBusEvent =
       toolInvocations?: unknown;
       followUpSuggestions?: string[];
       followUpsPending?: boolean;
-    };
+    }
+  | { kind: "follow_ups"; streamId: string; suggestions: string[] };
 
 let _streamSubReady = false;
 function ensureStreamEventsSubscriber(): void {
@@ -204,6 +210,12 @@ function ensureStreamEventsSubscriber(): void {
   sub.on("message", (_ch: string, raw: string) => {
     let msg: StreamBusEvent;
     try { msg = JSON.parse(raw) as StreamBusEvent; } catch { return; }
+    if (msg.kind === "follow_ups") {
+      // The answer's pendingStreams entry is gone by now; the held stream is
+      // tracked separately. Never republish — every pod already got this.
+      deliverLateFollowUpsLocally(msg.streamId, msg.suggestions);
+      return;
+    }
     const stream = pendingStreams.get(msg.streamId);
     if (!stream) return; // stream lives on another pod (or already resolved)
     if (msg.kind === "progress") {
@@ -238,6 +250,85 @@ function publishStreamEvent(event: StreamBusEvent): void {
   redisService.getConnection()
     .publish(STREAM_EVENTS_CHANNEL, JSON.stringify(event))
     .catch((err) => log.warn("[run-stream] events publish failed:", err instanceof Error ? err.message : err));
+}
+
+/* ─────────────────────────────────────────────────────────────────────
+   Late follow-ups ride the answer's own SSE stream.
+
+   claw generates follow-up suggestions AFTER the answer, so they reach
+   /callback/follow-ups seconds after `done`. Rather than closing on `done`
+   and having the dashboard poll conversation history, the route holds the
+   answer stream open (bounded by CONFIG.followUpStreamHoldMs), writes
+   `event: follow-ups` the moment they land, then closes. claw's POST can
+   land on any replica, so delivery reuses the bus above; only the pod
+   holding the stream writes. The callback persists BEFORE delivering, so a
+   missed hold (expired, Redis down) costs liveness only.
+   ───────────────────────────────────────────────────────────────────── */
+interface FollowUpHold {
+  res: Response;
+  messageId: string | undefined;
+}
+/** Plain data keyed by streamId — nothing looked up here is ever invoked. */
+const followUpHolds = new Map<string, FollowUpHold>();
+/** Follow-ups that beat their own answer's `done` on the owning pod (an
+ *  instant fallback when generation fails fast). Consumed when the hold starts. */
+const earlyFollowUps = new Map<string, string[]>();
+
+/** Write the follow-ups and end the answer stream; ending it releases the hold. */
+function writeLateFollowUps(hold: FollowUpHold, suggestions: string[]): void {
+  const { res, messageId } = hold;
+  if (res.writableEnded || res.destroyed) return;
+  try {
+    res.write(`event: follow-ups\ndata: ${JSON.stringify({ suggestions, ...(messageId ? { id: messageId } : {}) })}\n\n`);
+    res.end();
+  } catch { /* client already gone; its 'close' releases the hold */ }
+}
+
+/** True when this pod owns the stream (held now, or still running). */
+function deliverLateFollowUpsLocally(streamId: string, suggestions: string[]): boolean {
+  const hold = followUpHolds.get(streamId);
+  if (hold) {
+    writeLateFollowUps(hold, suggestions);
+    return true;
+  }
+  if (pendingStreams.has(streamId)) {
+    earlyFollowUps.set(streamId, suggestions);
+    setTimeout(() => earlyFollowUps.delete(streamId), CONFIG.followUpStreamHoldMs + 60_000).unref();
+    return true;
+  }
+  return false;
+}
+
+/** After `done`: wait until this answer's follow-ups are written as
+ *  `event: follow-ups` (which ends `res`), the hold lapses, or the client
+ *  leaves. The caller ends `res` if it is still open. */
+function holdForLateFollowUps(res: Response, streamId: string, messageId: string | undefined): Promise<void> {
+  if (CONFIG.followUpStreamHoldMs <= 0 || res.writableEnded || res.destroyed) return Promise.resolve();
+  return new Promise<void>((resolve) => {
+    const hold: FollowUpHold = { res, messageId };
+    let settled = false;
+    const finish = (): void => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      if (followUpHolds.get(streamId) === hold) followUpHolds.delete(streamId);
+      res.off("finish", finish);
+      res.off("close", finish);
+      resolve();
+    };
+    const timer = setTimeout(() => {
+      log.info(`[follow-ups] stream hold lapsed streamId=${streamId} after ${CONFIG.followUpStreamHoldMs}ms`);
+      finish();
+    }, CONFIG.followUpStreamHoldMs);
+    res.on("finish", finish);
+    res.on("close", finish);
+    followUpHolds.set(streamId, hold);
+    const early = earlyFollowUps.get(streamId);
+    if (early) {
+      earlyFollowUps.delete(streamId);
+      writeLateFollowUps(hold, early);
+    }
+  });
 }
 
 /**
@@ -431,7 +522,6 @@ publicRouter.post("/", requireAuth, requireNoAccessToken, async (req: Request, r
 
   try {
     const {
-      userId,
       userName,
       userEmail,
       task,
@@ -490,10 +580,14 @@ publicRouter.post("/", requireAuth, requireNoAccessToken, async (req: Request, r
       return;
     }
 
-    if (!userId || typeof userId !== "string") {
+    // Declared separately (typed `string`) so the canonicalization below can
+    // reassign it: a destructured `unknown` binding would lose its narrowing.
+    const rawUserId = (req.body as Record<string, unknown>)["userId"];
+    if (!rawUserId || typeof rawUserId !== "string") {
       res.status(400).json({ success: false, error: "userId is required" });
       return;
     }
+    let userId: string = rawUserId;
 
     if (studioMode !== undefined && studioMode !== "design") {
       res.status(400).json({ success: false, error: "Unknown studioMode" });
@@ -630,13 +724,50 @@ publicRouter.post("/", requireAuth, requireNoAccessToken, async (req: Request, r
       : applyAiScreenCommand(task).task;
 
     const sessionUserId = req.headers["x-user-id"];
-    if (typeof sessionUserId === "string" && sessionUserId && sessionUserId !== userId) {
+    // Spaces sends its workspace membership ID in the body while requireAuth
+    // resolves the verified session to Claw's canonical user ID. They are two
+    // representations of the same caller, not an attempted cross-user run.
+    if (typeof sessionUserId === "string" && sessionUserId && !matchesAuthenticatedUserId(req, userId)) {
       res.status(403).json({ success: false, error: "Body userId does not match authenticated session" });
       return;
     }
+    // Canonicalize once: everything downstream — ACL checks (isClawAdmin,
+    // getAgentEditAccess), user-agent config, local-harness device lookup and
+    // session-token minting, and every persisted chat/run/attachment row —
+    // keys on Claw's canonical user id. The verified session header already
+    // carries it; an S2S caller that pinned only the raw alias is resolved
+    // through the identity ladder (fail-open to the supplied id).
+    userId = typeof sessionUserId === "string" && sessionUserId
+      ? sessionUserId
+      : await resolveCanonicalUserIdOrSelf(userId, requestWorkspaceHint(req));
 
     const slug = typeof agentSlug === "string" && agentSlug ? agentSlug : "assistant";
     const convId = typeof conversationId === "string" && conversationId ? conversationId : `chat-${randomUUID()}`;
+
+    // Conversation-ownership guard, BEFORE any convId-keyed side effect (message
+    // persist, branch clone). Claw sessions are shared per thread (keyed by
+    // conversationId, not userId), so a caller supplying another user's
+    // conversationId could attach to and poison their session. Skip for genuine
+    // S2S callers; new conversations (no supplied conversationId) pass.
+    // The Spaces conversation-access check matches channel_participants by the
+    // workspace-scoped Spaces id, so pass the raw `x-spaces-user-id` (set by
+    // stampVerifiedIdentity) — NOT the canonical `x-user-id`, which Spaces can't resolve.
+    const spacesRequesterId = req.headers["x-spaces-user-id"];
+    const accessCheckUserId =
+      typeof spacesRequesterId === "string" && spacesRequesterId
+        ? spacesRequesterId
+        : (typeof sessionUserId === "string" && sessionUserId ? sessionUserId : userId);
+    if (
+      typeof conversationId === "string" && conversationId &&
+      accessCheckUserId && !s2sKeyMatches(req.headers["x-s2s-key"] as string | undefined)
+    ) {
+      const accessError = await conversationAccessError(accessCheckUserId, [conversationId]);
+      if (accessError) {
+        log.warn(`[run-stream] conversation access denied userId=${accessCheckUserId} conversationId=${conversationId}`);
+        res.status(403).json({ success: false, error: accessError });
+        return;
+      }
+    }
     const requestOrgId = typeof req.headers["x-org-id"] === "string" && req.headers["x-org-id"].trim()
       ? req.headers["x-org-id"].trim()
       : undefined;
@@ -654,6 +785,7 @@ publicRouter.post("/", requireAuth, requireNoAccessToken, async (req: Request, r
         description: true,
         config: true,
         systemPrompt: true,
+        delegationTier: true,
       },
     }).catch(() => null);
     if (!agentRow) {
@@ -677,6 +809,7 @@ publicRouter.post("/", requireAuth, requireNoAccessToken, async (req: Request, r
         ? researchContext as { type?: unknown; id?: unknown }
         : undefined,
       convId,
+      requestWorkspaceHint(req),
     );
     if (!sdlcResolution.ok) {
       res.status(sdlcResolution.status).json({ success: false, error: sdlcResolution.error });
@@ -685,7 +818,7 @@ publicRouter.post("/", requireAuth, requireNoAccessToken, async (req: Request, r
     const sdlcContext =
       sdlcResolution.repository?.agentContext ??
       (typeof channelId === "string"
-        ? await resolveSdlcHubContextForUser(userId, channelId, convId)
+        ? await resolveSdlcHubContextForUser(userId, channelId, convId, requestWorkspaceHint(req))
         : undefined);
 
     // Resolve the agent's provider credentials so this SSE run uses the agent's
@@ -1385,6 +1518,7 @@ publicRouter.post("/", requireAuth, requireNoAccessToken, async (req: Request, r
       agentConfig: withAiScreenPresentationTools(
         enrichedAgentConfig,
         (agentRow.config as Record<string, unknown> | null)?.["tools"],
+        agentRow.delegationTier,
       ),
       additionalInstructions: aiScreenInstructions,
       ...(designSelectionInstruction || pageSelectionInstruction || openItemsInstruction
@@ -1465,7 +1599,7 @@ publicRouter.post("/", requireAuth, requireNoAccessToken, async (req: Request, r
           "../services/agentChatContextService.js"
         );
         const { getSpacesAuthForUser } = await import("../lib/spaces-db.js");
-        const auth = await getSpacesAuthForUser(userId);
+        const auth = await getSpacesAuthForUser(userId, "agent-chat", requestWorkspaceHint(req));
         const normalized = normalizeAttachedContext(forwardedAttachedContext);
         if (auth && normalized.items.length > 0) {
           const payload = await buildAttachedContextPayload(normalized.items, auth);
@@ -1693,7 +1827,8 @@ publicRouter.post("/", requireAuth, requireNoAccessToken, async (req: Request, r
           ...(result.followUpSuggestions?.length ? { followUpSuggestions: result.followUpSuggestions } : {}),
           ...(result.followUpsPending === true ? { followUpsPending: true } : {}),
         })}\n\n`);
-        res.end();
+        if (result.followUpsPending === true) await holdForLateFollowUps(res, streamId, assistantMsg?.id);
+        if (!res.writableEnded) res.end();
       }
       return;
     }
@@ -1775,7 +1910,8 @@ publicRouter.post("/", requireAuth, requireNoAccessToken, async (req: Request, r
         ...(result.followUpSuggestions?.length ? { followUpSuggestions: result.followUpSuggestions } : {}),
         ...(result.followUpsPending === true ? { followUpsPending: true } : {}),
       })}\n\n`);
-      res.end();
+      if (result.followUpsPending === true) await holdForLateFollowUps(res, streamId, assistantMsg?.id);
+      if (!res.writableEnded) res.end();
     }
 
   } catch (err) {
@@ -1830,7 +1966,10 @@ publicRouter.post("/cancel", requireAuth, requireNoAccessToken, async (req: Requ
     }
 
     const run = await agentRunRepository.findBySessionId(sessionId);
-    if (!run || run.userId !== userId) {
+    // run.userId may be keyed by EITHER verified representation of the caller
+    // (canonical Claw id or the raw Spaces id the session was started under),
+    // so a strict equality check would 404 the legitimate owner.
+    if (!run || (run.userId !== userId && !matchesAuthenticatedUserId(req, run.userId))) {
       res.status(404).json({ success: false, error: "Run not found" });
       return;
     }
@@ -1843,12 +1982,14 @@ publicRouter.post("/cancel", requireAuth, requireNoAccessToken, async (req: Requ
       return;
     }
 
+    // Forward the run's stored owner id (not the requester): the pod compares
+    // x-user-id against the id the run was dispatched with.
     const cancelRes = await fetch(`${CONFIG.internalUrl}/claw/api/v1/internal/run/${encodeURIComponent(sessionId)}/cancel`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
         ...(CONFIG.xyneClawS2sKey ? { "x-s2s-key": CONFIG.xyneClawS2sKey } : {}),
-        "x-user-id": userId,
+        "x-user-id": run.userId,
       },
     });
 
@@ -2257,13 +2398,18 @@ internalRouter.post("/:streamId/callback", async (req: Request<{ streamId: strin
               }),
             );
           }
-          delivered.push(
-            await renderProviderSuggestCard({
-              taskText,
-              id: suggestIdentity,
-              target: suggestTarget,
-            }),
-          );
+          const providerSuggestions = body["pendingProviderSuggestions"] as
+            | { providers: string[]; listAll?: boolean; title?: string }
+            | undefined;
+          if (providerSuggestions) {
+            delivered.push(
+              await renderProviderSuggestCard({
+                suggestions: providerSuggestions,
+                id: suggestIdentity,
+                target: suggestTarget,
+              }),
+            );
+          }
           // Same reason as the agent cards: the terminal payload has no uiFlows
           // slot, so a card must go on the wire to paint without a refetch.
           for (const flow of delivered) {
@@ -2403,10 +2549,10 @@ internalRouter.post("/:streamId/callback", async (req: Request<{ streamId: strin
 });
 
 /**
- * Persists contextual follow-ups that finish after the main answer callback.
- * The answer stream is already closed at this point, so conversation history
- * is the durable delivery channel; the dashboard's bounded reconciliation
- * picks up the recorder without delaying the answer.
+ * Persists contextual follow-ups that finish after the main answer callback,
+ * then pushes them down the answer stream, which the route holds open after
+ * `done` for exactly this (see holdForLateFollowUps). Conversation history
+ * stays the durable channel when the hold has already lapsed.
  */
 internalRouter.post(
   "/:streamId/callback/follow-ups",
@@ -2459,6 +2605,10 @@ internalRouter.post(
       await agentRunRepository.flushToolInvocations(sessionId);
       await Promise.all(appended);
       log.info(`[follow-ups] persisted late suggestions streamId=${req.params.streamId} sessionId=${sessionId} count=${suggestions.length}`);
+      // Persisted first (durable); now push them down the held answer stream.
+      if (!deliverLateFollowUpsLocally(req.params.streamId, suggestions)) {
+        publishStreamEvent({ kind: "follow_ups", streamId: req.params.streamId, suggestions });
+      }
       res.json({ success: true });
     } catch (err) {
       log.warn(`[follow-ups] failed to persist late suggestions sessionId=${sessionId}:`, errMsg(err));
@@ -2597,6 +2747,26 @@ async function runViaSseTransport(opts: RunViaSseOpts): Promise<void> {
           }
         })();
       },
+      onPr: (_sid, pr) => {
+        void (async () => {
+          try {
+            const { readPrProgressFact, renderXyneAiPrCard } = await import("../lib/pr-card-render.js");
+            const fact = readPrProgressFact(pr);
+            if (!fact) return;
+            const { resolveXyneAiCardTarget } = await import("../lib/flow-card-delivery.js");
+            const target = await resolveXyneAiCardTarget({
+              assistantMessageId,
+              conversationId: convId,
+              agentSlug: slug,
+            });
+            if (!target) return;
+            const flow = await renderXyneAiPrCard({ pr: fact, target });
+            if (flow) stream.sendEvent("ui-flow", { flow });
+          } catch (err) {
+            log.warn(`[run-stream/sse] pr card emit failed: ${errMsg(err)}`);
+          }
+        })();
+      },
       onSandboxPreview: (sessionId, payload) => {
         // Sandbox preview today lands on /webhook/progress which posts the
         // noVNC link as a Spaces channel message. Replaying that POST keeps
@@ -2714,30 +2884,12 @@ async function runViaSseTransport(opts: RunViaSseOpts): Promise<void> {
       "Content-Type": "application/json",
       ...(CONFIG.xyneClawS2sKey ? { "x-s2s-key": CONFIG.xyneClawS2sKey } : {}),
     },
-    body: JSON.stringify({
+    body: JSON.stringify(buildCallbackBodyFromDone(r, {
       sessionId,
-      // Ship the meta explicitly so the receiving pod's /callback handler
-      // can persist without falling back to an agent_runs lookup when the
-      // POST load-balances away from the SSE pod.
       userId,
       conversationId: convId,
       agentSlug: slug,
-      status: r["status"],
-      // claw's sendCallback puts assistant text on `result` (both completed
-      // and cancelled paths). `.content` is kept as a forward-compat fallback.
-      result:
-        (r["result"] as string | undefined)
-        ?? (r["content"] as string | undefined)
-        ?? "",
-      ...(r["error"] ? { error: r["error"] } : {}),
-      ...(r["pendingActions"] ? { pendingActions: r["pendingActions"] } : {}),
-      ...(r["attachments"] ? { attachments: r["attachments"] } : {}),
-      ...(r["toolInvocations"] ? { toolInvocations: r["toolInvocations"] } : {}),
-      ...(r["pendingQuestions"] ? { pendingQuestions: r["pendingQuestions"] } : {}),
-      ...(r["toolsUsed"] ? { toolsUsed: r["toolsUsed"] } : {}),
-      ...(r["followUpsPending"] === true ? { followUpsPending: true } : {}),
-      ...((r["meta"] as Record<string, unknown> | undefined) ?? {}),
-    }),
+    })),
   });
   if (!cbRes.ok) {
     const text = await cbRes.text().catch(() => "");

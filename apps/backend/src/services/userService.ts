@@ -1000,6 +1000,7 @@ export class UserService {
       email: string;
       name: string;
       picture?: string | null;
+      authProvider: AuthProvider;
     },
     workspaceName: string,
     options?: {

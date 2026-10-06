@@ -1,5 +1,6 @@
 import { useState, useEffect, useMemo, useRef } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
+import { isCurrentUser } from "../../lib/identity";
 import {
   PlusIcon,
   RobotIcon,
@@ -109,7 +110,7 @@ type ScopeBadgeResult =
   | { type: "badge"; label: string; variant: "info" | "neutral" };
 
 function getScopeBadgeProps(agent: AgentLight, userId: string): ScopeBadgeResult {
-  const userShare = agent.shares?.find((s) => s.userId === userId);
+  const userShare = agent.shares?.find((s) => isCurrentUser(s.userId));
   if (userShare) {
     return { type: "brand", label: userShare.role };
   }
@@ -283,7 +284,7 @@ function AgentRow({
     : "bg-xyne-warning";
   const dimmed = !localEnabled ? "opacity-60" : "";
   const scopeBadge = getScopeBadgeProps(agent, userId);
-  const isOwner = agent.ownerUserId === userId;
+  const isOwner = isCurrentUser(agent.ownerUserId);
 
   const handleToggle = async (v: boolean) => {
     if (togglePending) return;
@@ -480,7 +481,7 @@ interface AgentsPageV3Props {
 }
 
 export function AgentsPageV3({ userId, isAdmin = false }: AgentsPageV3Props) {
-  const { agents, loading, reload } = useAgents(userId);
+  const { agents, loading, error, reload } = useAgents(userId);
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const { show: showSnackbar } = useSnackbar();
@@ -620,7 +621,7 @@ export function AgentsPageV3({ userId, isAdmin = false }: AgentsPageV3Props) {
         a.name.toLowerCase().includes(q) ||
         a.description.toLowerCase().includes(q);
       if (!matchesSearch) return false;
-      if (validScope === "mine") return a.ownerUserId === userId;
+      if (validScope === "mine") return isCurrentUser(a.ownerUserId);
       if (validScope === "global") return a.scope === "global";
       return true;
     });
@@ -690,7 +691,7 @@ export function AgentsPageV3({ userId, isAdmin = false }: AgentsPageV3Props) {
     const mine: AgentLight[] = [];
     const other: AgentLight[] = [];
     for (const a of displayedAgents) {
-      if (a.ownerUserId === userId) mine.push(a);
+      if (isCurrentUser(a.ownerUserId)) mine.push(a);
       else other.push(a);
     }
     return { myAgents: mine, otherAgents: other };
@@ -736,8 +737,8 @@ export function AgentsPageV3({ userId, isAdmin = false }: AgentsPageV3Props) {
             stats={[
               { value: loading ? undefined : agents.length, label: "Total" },
               { value: loading ? undefined : agents.filter((a) => a.enabled).length, label: "Active", highlight: "success" as const },
-              { value: loading ? undefined : agents.filter((a) => a.ownerUserId === userId).length, label: "Personal" },
-              { value: loading ? undefined : agents.filter((a) => a.ownerUserId !== userId).length, label: "Global" },
+              { value: loading ? undefined : agents.filter((a) => isCurrentUser(a.ownerUserId)).length, label: "Personal" },
+              { value: loading ? undefined : agents.filter((a) => !isCurrentUser(a.ownerUserId)).length, label: "Global" },
             ]}
             createLabel="New agent"
             onCreateClick={() => setCreateOpen(true)}
@@ -799,6 +800,20 @@ export function AgentsPageV3({ userId, isAdmin = false }: AgentsPageV3Props) {
                 className="flex items-center justify-center py-16 text-sm text-xyne-fg-tertiary"
               >
                 Loading…
+              </div>
+            ) : error ? (
+              <div
+                data-id="agents-error"
+                className="flex flex-col items-center gap-3 py-16 text-center"
+              >
+                <p className="text-sm text-xyne-fg-tertiary">Couldn't load agents.</p>
+                <button
+                  type="button"
+                  onClick={reload}
+                  className="text-sm font-medium text-xyne-accent underline underline-offset-2"
+                >
+                  Retry
+                </button>
               </div>
             ) : (
               <>

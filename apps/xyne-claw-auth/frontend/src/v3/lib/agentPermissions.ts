@@ -1,4 +1,5 @@
 import type { Agent, AgentShare } from "../../lib/types";
+import { isCurrentUser } from "../../lib/identity";
 
 export type AgentRole =
   | "owner"
@@ -22,10 +23,10 @@ export function getAgentPermissions(
 ): AgentPermissions {
   let role: AgentRole = "none";
 
-  if (agent.ownerUserId === userId || isAdmin) {
+  if (isCurrentUser(agent.ownerUserId) || isAdmin) {
     role = "owner";
   } else {
-    const myShare = shares.find((s) => s.userId === userId);
+    const myShare = shares.find((s) => isCurrentUser(s.userId));
     if (myShare) {
       switch (myShare.role) {
         case "EDITOR":

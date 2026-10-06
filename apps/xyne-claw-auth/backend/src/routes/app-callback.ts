@@ -18,6 +18,7 @@ import { CONFIG } from "../config.js";
 import { prisma } from "../db.js";
 import { decrypt } from "../crypto.js";
 import { expandSpacesMentions } from "../lib/mention-transform.js";
+import { resolveClawUserIdForSpacesIdentity } from "../lib/users-jit.js";
 import { agentRunRepository } from "../repositories/index.js";
 
 import { createLogger } from "../logger.js";
@@ -774,7 +775,11 @@ router.post("/callback", async (req: Request, res: Response) => {
 
   if (targetConversationId && messageContent && targetChannelId && mentionedUserId && workspaceId) {
     // Verify caller is the intended user (XYNE-12145). Fail closed.
-    if (!callerUserId || callerUserId !== mentionedUserId) {
+    // The card bakes the raw Spaces id (kept for the postAsUser body below),
+    // while callerUserId is the canonical Claw id — resolve before comparing
+    // or post-canonicalization users can never approve their own twin card.
+    const mentionedClawUserId = await resolveClawUserIdForSpacesIdentity(mentionedUserId).catch(() => undefined);
+    if (!callerUserId || (callerUserId !== mentionedUserId && callerUserId !== mentionedClawUserId)) {
       log.error(`[app-callback] Unauthorized: caller ${callerUserId ?? "(none)"} != expected ${mentionedUserId}`);
       return;
     }

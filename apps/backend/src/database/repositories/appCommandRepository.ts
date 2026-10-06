@@ -84,7 +84,7 @@ export class AppCommandRepository {
     filter: { commandType: CommandType; commandAccessibility?: CommandAccessibility },
   ): Promise<Array<AppCommand & { appId: string }>> {
     const participants = await db.channelParticipant.findMany({
-      where: { channelId, user: { userType: UserType.APP } },
+      where: { channelId, user: { userType: { in: [UserType.APP, UserType.AGENT] } } },
       select: { userId: true },
     });
 
@@ -139,7 +139,7 @@ export class AppCommandRepository {
     filter: { commandType: CommandType; commandAccessibility?: CommandAccessibility },
   ): Promise<AppCommandWithApp[]> {
     const participants = await db.channelParticipant.findMany({
-      where: { channelId, user: { userType: UserType.APP } },
+      where: { channelId, user: { userType: { in: [UserType.APP, UserType.AGENT] } } },
       select: { userId: true },
     });
 
@@ -300,7 +300,7 @@ export class AppCommandRepository {
     commandType: CommandType,
   ) {
     const participants = await db.channelParticipant.findMany({
-      where: { channelId, user: { userType: UserType.APP } },
+      where: { channelId, user: { userType: { in: [UserType.APP, UserType.AGENT] } } },
       select: { userId: true },
     });
 

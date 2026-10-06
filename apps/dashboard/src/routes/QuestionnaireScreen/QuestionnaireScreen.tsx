@@ -12,6 +12,7 @@ import {
   UserRound,
 } from 'lucide-react';
 import { useAuth } from '../../hooks/useAuth';
+import { markJustOnboarded } from '../../components/Assistant/newUser';
 import { useZero } from '../../hooks/useZero';
 import { useChannelByName } from '../../hooks/useChannels';
 import { useProfilePictureUrl } from '../../hooks/useProfilePicture';
@@ -30,8 +31,16 @@ import {
   platformNoun,
   type HarnessProvider,
 } from './LocalHarnessStep';
+import { InviteContactsStepPanel, InviteContactsPreview } from './InviteContactsStep';
+import { getUserContacts } from '../../services/clients/userContactsApi';
+import type { UserContact, UserContactsProvider } from '../../services/clients/userContactsApi';
 
-type StepKey = 'name' | 'company' | 'harness' | 'ai';
+type StepKey = 'name' | 'company' | 'invite' | 'harness' | 'ai';
+
+type ContactsStepState =
+  | { status: 'loading' }
+  | { status: 'skipped' }
+  | { status: 'ready'; contacts: UserContact[]; provider: UserContactsProvider };
 
 const TEAM_SIZE_OPTIONS = ['0-10', '11-100', '100-1000', '1000+'] as const;
 type TeamSize = (typeof TEAM_SIZE_OPTIONS)[number];
@@ -84,6 +93,8 @@ const QuestionnaireScreen = (): ReactElement | null => {
   const [harnessDevice, setHarnessDevice] = useState({ name: 'This machine', platform: '' });
   const [selectedHarness, setSelectedHarness] = useState<HarnessProvider | null>(null);
   const [connectedHarness, setConnectedHarness] = useState<HarnessProvider | null>(null);
+  const [contactsState, setContactsState] = useState<ContactsStepState>({ status: 'loading' });
+  const [invitedContactEmails, setInvitedContactEmails] = useState<Set<string>>(new Set());
 
   const { url: existingPictureUrl } = useProfilePictureUrl(user?.id || '', user?.picture);
   const effectivePhotoUrl = photoPreviewUrl || existingPictureUrl || null;
@@ -91,6 +102,7 @@ const QuestionnaireScreen = (): ReactElement | null => {
   const steps: StepKey[] = [
     'name',
     'company',
+    ...(contactsState.status === 'ready' ? (['invite'] as StepKey[]) : []),
     ...(harnesses.length > 0 ? (['harness'] as StepKey[]) : []),
     'ai',
   ];
@@ -156,6 +168,38 @@ const QuestionnaireScreen = (): ReactElement | null => {
         setHarnessDevice({ name: machineLabel(status.deviceName), platform: status.platform });
       })
       .catch(() => {});
+    return (): void => {
+      cancelled = true;
+    };
+  }, []);
+
+  /**
+   * Prefetch the user's contacts on mount so the invite step is ready by the time
+   * the user gets past the company step.
+   */
+  useEffect(() => {
+    let cancelled = false;
+    void getUserContacts()
+      .then(result => {
+        if (cancelled) return;
+        if (
+          result.connected &&
+          result.provider &&
+          result.contacts.length > 0 &&
+          currentStepRef.current <= 1
+        ) {
+          setContactsState({
+            status: 'ready',
+            contacts: result.contacts,
+            provider: result.provider,
+          });
+        } else {
+          setContactsState({ status: 'skipped' });
+        }
+      })
+      .catch(() => {
+        if (!cancelled) setContactsState({ status: 'skipped' });
+      });
     return (): void => {
       cancelled = true;
     };
@@ -238,6 +282,7 @@ const QuestionnaireScreen = (): ReactElement | null => {
       // Best-effort cleanup
     }
 
+    if (user?.id) markJustOnboarded(user.id);
     authActor.send({ type: 'COMPLETE_ONBOARDING' });
 
     const workspaceId = user?.workspaceId;
@@ -545,6 +590,26 @@ const QuestionnaireScreen = (): ReactElement | null => {
           </div>
         )}
 
+        {step === 'invite' && contactsState.status === 'ready' && (
+          <InviteContactsStepPanel
+            contacts={contactsState.contacts}
+            provider={contactsState.provider}
+            workspaceId={user?.workspaceId || ''}
+            invitedEmails={invitedContactEmails}
+            onInvited={emails =>
+              setInvitedContactEmails(previous => {
+                const next = new Set(previous);
+                for (const email of emails) {
+                  next.add(email);
+                }
+                return next;
+              })
+            }
+            onBack={() => setCurrentStep(currentStep - 1)}
+            onNext={handleNext}
+          />
+        )}
+
         {step === 'harness' && (
           <LocalHarnessStepPanel
             installations={harnesses}
@@ -633,6 +698,13 @@ const QuestionnaireScreen = (): ReactElement | null => {
               </div>
             </div>
           </div>
+        )}
+
+        {step === 'invite' && contactsState.status === 'ready' && (
+          <InviteContactsPreview
+            contacts={contactsState.contacts}
+            invitedEmails={invitedContactEmails}
+          />
         )}
 
         {step === 'harness' && (

@@ -2473,6 +2473,17 @@ export const sandboxRepoSetup: ToolDefinition = {
     // read-only). It ONLY relaxes the isReadOnlyJob force; `forceReadOnlySandbox`
     // (reviewer agents) still wins unconditionally. Default-off.
     const allowWriteInReadOnlyJob = context.meta?.["allowWriteInReadOnlyJob"] === "true";
+    const profile = pinnedRepo ? REPO_CONFIGS[pinnedRepo] : undefined;
+    if (profile && !profile.repoUrl && context.meta?.["forceReadOnlySandbox"] !== "true") {
+      try {
+        return await makeRepoSetupTool(profile).execute(
+          sessionDurationMs ? { sessionDurationMs } : {},
+          context,
+        );
+      } catch (err) {
+        return sandboxErr(err);
+      }
+    }
     const forcedReadOnly =
       (isReadOnlyJob(context.meta?.["eventType"], context.meta?.["conversationId"]) && !allowWriteInReadOnlyJob) ||
       context.meta?.["forceReadOnlySandbox"] === "true";
@@ -2607,9 +2618,11 @@ export const sdlcRepositoryAccess: ToolDefinition = {
     if (!workspaceId || !actorUserId) {
       return "Error: SDLC repository access is only available in a run started from an SDLC hub or with a repository selected.";
     }
-    if (actorUserId !== context.meta?.["userId"]?.trim()) {
-      return "Error: SDLC run context does not belong to this run's user.";
-    }
+    // actorUserId (workspace-scoped Spaces id from the hub context) and
+    // meta.userId (canonical Claw id) live in different id namespaces, so no
+    // equality check is possible here. The authoritative binding — actorUserId
+    // must be one of the session-token user's own ids — is enforced by
+    // claw-auth's runtime-credentials bootstrap route, which this call hits.
     // The tool's sessionId is the sandbox. claw-auth checks the run session the token was minted for.
     const runSessionId = context.sessionId;
     const sessionToken = context.sessionToken;

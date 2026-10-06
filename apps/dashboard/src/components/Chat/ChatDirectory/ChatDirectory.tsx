@@ -223,6 +223,7 @@ const CHAT_NAV_ROW_DEFAULT_CLASS = 'text-sidebar-foreground hover:text-sidebar-a
 const CHAT_NAV_TEST_IDS: Partial<Record<InboxItemKey, string>> = {
   bookmarks: 'open-bookmarks-button',
   'drafts-sent': 'open-drafts-and-sent-button',
+  'scheduled-messages': 'open-scheduled-messages-button',
 };
 
 const CHAT_NAV_SHORTCUTS: Partial<Record<InboxItemKey, ShortcutId>> = {
@@ -262,6 +263,15 @@ const ChatDirectory = ({
   const { unreadCount: recapUnreadCount } = useRecapUnreadCount();
   const prefetchRecap = usePrefetchRecap();
   const [showAddChannelForm, setShowAddChannelForm] = useState(false);
+  // Opened by the Ask AI assistant; the param is removed so a refresh does not reopen it.
+  const opensAddChannel = useRouterSelector(
+    snapshot => new URLSearchParams(snapshot.location.search).get('dialog') === 'add_channel',
+  );
+  useEffect(() => {
+    if (!opensAddChannel) return;
+    setShowAddChannelForm(true);
+    void navigate(pathname, { replace: true });
+  }, [opensAddChannel, navigate, pathname]);
   const [showAddSectionForm, setShowAddSectionForm] = useState(false);
   const [addSectionSource, setAddSectionSource] = useState<'channels' | 'dms'>('channels');
   const [sectionToRename, setSectionToRename] = useState<ChannelSection | null>(null);
@@ -668,6 +678,10 @@ const ChatDirectory = ({
           : CHAT_NAV_ROW_DEFAULT_CLASS;
       case 'drafts-sent':
         return pathname.endsWith('/chat/drafts-sent')
+          ? 'text-sidebar-accent-foreground'
+          : CHAT_NAV_ROW_DEFAULT_CLASS;
+      case 'scheduled-messages':
+        return location.pathname.endsWith('/scheduled-messages')
           ? 'text-sidebar-accent-foreground'
           : CHAT_NAV_ROW_DEFAULT_CLASS;
       case 'recap':

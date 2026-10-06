@@ -312,7 +312,7 @@ export class AuthV2Controller {
 
       const authUrl = this.getGoogleClient(isNy).generateAuthUrl({
         access_type: 'offline',
-        scope: ['openid', 'email', 'profile'],
+        scope: ['openid', 'email', 'profile', 'https://www.googleapis.com/auth/contacts.readonly', 'https://www.googleapis.com/auth/contacts.other.readonly'],
         prompt: 'consent',
         redirect_uri: redirectUri,
         state,
@@ -2173,6 +2173,16 @@ export class AuthV2Controller {
 
         logger.info(`[CREATE-WORKSPACE-PENDING] User ${oauthUserData.email} creating workspace "${workspaceName}" via ${provider}`);
 
+        // The pending-auth cookie is a plain string — normalize it into the enum
+        // we persist on the User row so a Microsoft login is not saved as GOOGLE.
+        const normalizedProvider = provider?.toUpperCase();
+        const signUpProvider =
+          normalizedProvider === 'MICROSOFT'
+            ? AuthProvider.MICROSOFT
+            : normalizedProvider === 'EMAIL'
+              ? AuthProvider.EMAIL
+              : AuthProvider.GOOGLE;
+
         const userData = {
           providerUserId: (oauthUserData.providerUserId || oauthUserData.googleId)!,
           email: oauthUserData.email.toLowerCase(),
@@ -2216,7 +2226,7 @@ export class AuthV2Controller {
         });
 
         const { organization, workspace, workspaceUser } = await this.userService.createWorkspaceInOrg(
-          { userId: '', providerUserId: userData.providerUserId, email: userData.email, name: userData.name, picture: userData.picture },
+          { userId: '', providerUserId: userData.providerUserId, email: userData.email, name: userData.name, picture: userData.picture, authProvider: signUpProvider },
           workspaceName,
           {
             workspaceType: (workspaceType ?? WorkspaceType.ENTERPRISE) as WorkspaceTypeValue,
@@ -2372,7 +2382,7 @@ export class AuthV2Controller {
       }
 
       const { organization, workspace, workspaceUser } = await this.userService.createWorkspaceInOrg(
-        { userId: fullUser.id, providerUserId: fullUser.providerUserId, email: fullUser.email, name: fullUser.name, picture: fullUser.picture },
+        { userId: fullUser.id, providerUserId: fullUser.providerUserId, email: fullUser.email, name: fullUser.name, picture: fullUser.picture, authProvider: fullUser.authProvider as AuthProvider },
         workspaceName,
         {
           workspaceType: (workspaceType ?? WorkspaceType.ENTERPRISE) as WorkspaceTypeValue,

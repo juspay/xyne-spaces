@@ -155,13 +155,15 @@ export function getCallPillVariant(
   currentUserId: string | undefined,
   currentTime: Date,
 ): XyneCalendarCallPillVariant {
-  if (currentUserId && call.createdByUserId === currentUserId) {
-    return 'highlighted';
-  }
+  const meetingStatus = getCurrentUserMeetingStatus(call, currentUserId);
+  const isOrganizerWithoutRsvp =
+    meetingStatus === MeetingStatus.PENDING &&
+    !!currentUserId &&
+    call.createdByUserId === currentUserId;
+
+  if (meetingStatus === MeetingStatus.ACCEPTED || isOrganizerWithoutRsvp) return 'highlighted';
 
   if (hasCallEnded(call, currentTime)) return 'past';
-
-  const meetingStatus = getCurrentUserMeetingStatus(call, currentUserId);
 
   if (meetingStatus === MeetingStatus.DECLINED || meetingStatus === MeetingStatus.HIDDEN) {
     return 'declined';
@@ -170,16 +172,9 @@ export function getCallPillVariant(
   return isScheduledCallJoinable(call, currentTime.getTime()) ? 'joinable' : 'scheduled';
 }
 
-export function isCallJoinableNow(
-  call: Call,
-  variant: XyneCalendarCallPillVariant,
-  currentTime: Date,
-): boolean {
-  return (
-    !hasCallEnded(call, currentTime) &&
-    (variant === 'joinable' ||
-      (variant === 'highlighted' && isScheduledCallJoinable(call, currentTime.getTime())))
-  );
+/** Join depends only on the call's time window, never on the user's RSVP. */
+export function isCallJoinableNow(call: Call, currentTime: Date): boolean {
+  return !hasCallEnded(call, currentTime) && isScheduledCallJoinable(call, currentTime.getTime());
 }
 
 /**
@@ -412,6 +407,7 @@ export function getVisibleMinutesForDay(
 export function computeEventPositions(
   dayCalls: PositionableEvent[],
   referenceDay: Date,
+  maxColumns: number = MAX_OVERLAP_COLUMNS,
 ): Map<string, EventPosition> {
   const result = new Map<string, EventPosition>();
   const valid = dayCalls.filter(c => c.startsAt);
@@ -455,7 +451,7 @@ export function computeEventPositions(
       }
       // If no column was found, create a new one (or double up in the last column if maxed out)
       if (!placed) {
-        if (columns.length < MAX_OVERLAP_COLUMNS) {
+        if (columns.length < maxColumns) {
           columns.push([item]);
         } else {
           columns[columns.length - 1]!.push(item);

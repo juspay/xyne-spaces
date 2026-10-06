@@ -63,8 +63,10 @@ export async function attachArtifactToSessionApp(input: {
   userId: string;
   /** Raw artifact JSON — the same bytes written to the chat attachment. */
   payload: Buffer;
+  /** Request's verified Spaces workspace — disambiguates two-membership users. */
+  workspaceId?: string;
 }): Promise<SessionAppResult | null> {
-  const { conversationId, userId, payload } = input;
+  const { conversationId, userId, payload, workspaceId: workspaceHint } = input;
   if (!isChatConversation(conversationId) || !userId) return null;
 
   // Re-validate rather than trust the bytes, exactly as the Save path does, and
@@ -84,7 +86,7 @@ export async function attachArtifactToSessionApp(input: {
     return null;
   }
 
-  const workspaceId = await getWorkspaceIdForUser(userId, "artifact-apps");
+  const workspaceId = await getWorkspaceIdForUser(userId, "artifact-apps", workspaceHint);
   if (!workspaceId) return null;
 
   const contentHash = createHash("sha256").update(canonical).digest("hex");

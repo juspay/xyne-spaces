@@ -2,7 +2,43 @@ import tseslint from "typescript-eslint";
 
 const slackFiles = ["src/surfaces/slack/**/*.ts"];
 
+const SSRF_SAFE_FETCH_MESSAGE =
+  "Raw fetch is not SSRF-safe: use safeFetch() for any URL a user, agent or stored config can influence, or internalFetch() for configured internal origins (lib/safe-fetch.ts)";
+
 export default [
+  {
+    ignores: ["dist/**", "**/*.test.ts", "**/*.spec.ts", "**/__tests__/**"],
+  },
+  {
+    files: ["src/**/*.ts"],
+    languageOptions: {
+      parser: tseslint.parser,
+      parserOptions: {
+        ecmaVersion: "latest",
+        sourceType: "module",
+      },
+    },
+    plugins: {
+      "@typescript-eslint": tseslint.plugin,
+    },
+    rules: {
+      // SSRF: every outbound HTTP call goes through lib/safe-fetch.ts, which
+      // resolves DNS once, blocks private/loopback/metadata addresses, pins the
+      // connection and re-validates redirects. Pre-existing raw calls are
+      // tracked in eslint-suppressions.json and may only shrink.
+      "no-restricted-globals": ["error", { name: "fetch", message: SSRF_SAFE_FETCH_MESSAGE }],
+      "no-restricted-properties": [
+        "error",
+        { object: "globalThis", property: "fetch", message: SSRF_SAFE_FETCH_MESSAGE },
+      ],
+    },
+  },
+  {
+    files: ["src/lib/safe-fetch.ts"],
+    rules: {
+      "no-restricted-globals": "off",
+    },
+  },
   {
     files: slackFiles,
     languageOptions: {
@@ -37,6 +73,7 @@ export default [
           message:
             "NO ENV OUTSIDE CONFIG: read Slack environment values through const.ts accessors",
         },
+        { object: "globalThis", property: "fetch", message: SSRF_SAFE_FETCH_MESSAGE },
       ],
 
       // NO MAGIC TENANT SENTINEL and NO ERROR-STRING MATCHING: named domain

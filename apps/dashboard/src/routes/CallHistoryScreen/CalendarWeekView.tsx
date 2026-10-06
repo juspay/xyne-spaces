@@ -29,6 +29,7 @@ import {
   getCurrentUserMeetingStatus,
   getCallPillVariant,
   getCallPillVariantClasses,
+  hasCallEnded,
   isCallJoinableNow,
   dayKey,
   computeEventPositions,
@@ -152,6 +153,10 @@ function WeekViewCallCard({
           className={cn(
             'group absolute right-1 overflow-hidden rounded-lg border text-left z-[5] transition-colors focus:outline-none',
             getCallPillVariantClasses(variant),
+            isMaybe && 'border-foreground/50',
+            variant === 'highlighted' &&
+              hasCallEnded(call, new Date()) &&
+              'opacity-60 hover:opacity-90',
           )}
           style={{
             top,
@@ -713,7 +718,7 @@ const CalendarWeekView = ({
                         if (!call) return null;
                         const draggable = isCallDraggable(call, currentUserId);
                         const variant = getCallPillVariant(call, currentUserId, now);
-                        const joinable = isCallJoinableNow(call, variant, now);
+                        const joinable = isCallJoinableNow(call, now);
                         const channel = call.channelId
                           ? channelPresentationsById?.get(call.channelId)
                           : undefined;
