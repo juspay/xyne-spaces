@@ -299,3 +299,14 @@ export function sdlcParentFolders(rows: readonly SdlcPlacingLink[]): Map<string,
   }
   return map;
 }
+
+/** A day and month, and the year when it isn't this one: the file list's Modified. */
+export function formatUpdated(value: number): string {
+  const date = new Date(value);
+  const sameYear = date.getFullYear() === new Date().getFullYear();
+  return date.toLocaleDateString(undefined, {
+    day: 'numeric',
+    month: 'short',
+    ...(!sameYear && { year: 'numeric' }),
+  });
+}
