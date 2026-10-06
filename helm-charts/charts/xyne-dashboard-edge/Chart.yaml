@@ -2,8 +2,8 @@ apiVersion: v2
 name: xyne-dashboard-edge
 description: Xyne Spaces dashboard edge - nginx disk cache in front of a rule resolver that serves dashboard bundles from object storage
 type: application
-version: 0.1.0-app.1.460.4
-appVersion: "1.460.4"
+version: 0.1.0-app.1.460.5-release-20261006.1
+appVersion: "1.460.5-release-20261006.1"
 keywords:
   - xyne
   - dashboard

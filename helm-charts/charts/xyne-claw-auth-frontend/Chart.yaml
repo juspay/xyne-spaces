@@ -2,8 +2,8 @@ apiVersion: v2
 name: xyne-claw-auth-frontend
 description: Xyne Claw auth frontend (React SPA) - static bundle served by nginx under /claw, proxying /claw/api/v1 to xyne-claw-auth
 type: application
-version: 0.1.0-app.1.460.4
-appVersion: "1.460.4"
+version: 0.1.0-app.1.460.5-release-20261006.1
+appVersion: "1.460.5-release-20261006.1"
 keywords:
   - xyne
   - claw
