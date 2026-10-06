@@ -1,3 +1,20 @@
+## [1.462.0](https://github.com/juspay/xyne-spaces/compare/v1.461.3...v1.462.0) (2026-10-06)
+
+
+### Features
+
+* revert agent no control ([#2686](https://github.com/juspay/xyne-spaces/issues/2686)) ([c46d8d2](https://github.com/juspay/xyne-spaces/commit/c46d8d262692c77d0bdd4c3c8a27762d0823bb6d))
+
+
+### Bug Fixes
+
+* check workspaceId in checkAccess ([#1868](https://github.com/juspay/xyne-spaces/issues/1868)) ([262d44a](https://github.com/juspay/xyne-spaces/commit/262d44a714c77db6a6081b6f7099e10496eb4828))
+* forward message to unopened channels and show one res… ([#2668](https://github.com/juspay/xyne-spaces/issues/2668)) ([caa71df](https://github.com/juspay/xyne-spaces/commit/caa71dfabc3ca5e6b93c03600bf01b80649a09fd))
+* packages version bumps ([#2684](https://github.com/juspay/xyne-spaces/issues/2684)) ([5fa8c7a](https://github.com/juspay/xyne-spaces/commit/5fa8c7aca516fff0fc4bc89b49580682b7e549d1))
+* render agent, connector, PR, code and approval cards on Xyne AI ([#2651](https://github.com/juspay/xyne-spaces/issues/2651)) ([b1d33a9](https://github.com/juspay/xyne-spaces/commit/b1d33a910d20248c89c373b9b37656f064f0ae60))
+* resolve sidebar channel drops by pointer position so starred channels can be dragged back to Channels ([#2674](https://github.com/juspay/xyne-spaces/issues/2674)) ([e94b603](https://github.com/juspay/xyne-spaces/commit/e94b6036d641d7e478f0aa6078677412db9b34d0))
+* the pr created by the agent is synced with the webhooks ([#2656](https://github.com/juspay/xyne-spaces/issues/2656)) ([40f19c0](https://github.com/juspay/xyne-spaces/commit/40f19c0c1231b2cd55895d988ccc0ed3565e1b7f))
+
 ## [1.461.3](https://github.com/juspay/xyne-spaces/compare/v1.461.2...v1.461.3) (2026-10-06)
 
 
