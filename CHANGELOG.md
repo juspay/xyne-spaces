@@ -1,3 +1,11 @@
+## [1.464.2](https://github.com/juspay/xyne-spaces/compare/v1.464.1...v1.464.2) (2026-10-06)
+
+
+### Bug Fixes
+
+* check progressUrl before the run-queue worker sends the S2S key ([#2712](https://github.com/juspay/xyne-spaces/issues/2712)) ([4cfd2c3](https://github.com/juspay/xyne-spaces/commit/4cfd2c3a9efdeb987cc3799f700ee9572a93e295))
+* make run ownership claim a compare-and-set ([#2713](https://github.com/juspay/xyne-spaces/issues/2713)) ([d15e8bc](https://github.com/juspay/xyne-spaces/commit/d15e8bc71312cf71cfd046e41fd644fd6ecacc04))
+
 ## [1.464.1](https://github.com/juspay/xyne-spaces/compare/v1.464.0...v1.464.1) (2026-10-06)
 
 
