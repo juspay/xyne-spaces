@@ -156,7 +156,7 @@
     "remove-markdown": "^0.6.3",
     "rrule": "^2.8.1",
     "sharp": "^0.35.4",
-    "simple-git": "^3.36.0",
+    "simple-git": "^4.0.2",
     "simple-oauth2": "^5.1.0",
     "socket.io": "^4.8.1",
     "sudo-query": "^1.0.0",
