@@ -179,6 +179,7 @@ export type SpacesAuthCaller =
   | "artifact-app-agents"
   | "artifact-app-storage"
   | "conversation-artifacts"
+  | "flow-action"
   | "unknown";
 
 export async function getSpacesAuthForUser(
@@ -318,6 +319,63 @@ export async function getSpacesUserById(
       `[spaces-db] user-lookup userId=${userId} caller=${caller} result=error ms=${elapsed} err=${errMsg(err)}`,
     );
     return null;
+  }
+}
+
+/**
+ * True when the Spaces user row is a BOT account (automation trigger identity).
+ * Used by flow-action to classify a question card's baked answerer: cards
+ * baked by a bot (automation-triggered agent runs) may be answered by any
+ * active human member of the card's channel — a human-baked card never may.
+ * Returns false (never throws) on missing user, unset SPACES_DB_URL or DB error.
+ */
+export async function isSpacesBotUser(userId: string): Promise<boolean> {
+  const client = getClient();
+  if (!client) return false;
+  if (!userId) return false;
+  try {
+    const rows = await client.$queryRaw<Array<{ ok: number }>>`
+      SELECT 1 AS ok
+      FROM public.users
+      WHERE id = ${userId} AND "userType" = 'BOT'
+      LIMIT 1
+    `;
+    return rows.length > 0;
+  } catch (err) {
+    log.warn(`[spaces-db] bot-lookup userId=${userId} caller=flow-action result=error err=${errMsg(err)}`);
+    return false;
+  }
+}
+
+/**
+ * True when the user is an ACTIVE HUMAN member of the channel (i.e. they can
+ * see the conversation the card was posted in). Joins users to require
+ * userType='USER' and status='ACTIVE' so bot/service accounts and disabled
+ * users can never ride this path. Returns false (never throws) on any error —
+ * callers must fail closed on false.
+ */
+export async function isActiveHumanChannelMember(
+  channelId: string,
+  userId: string,
+): Promise<boolean> {
+  const client = getClient();
+  if (!client) return false;
+  if (!channelId || !userId) return false;
+  try {
+    const rows = await client.$queryRaw<Array<{ ok: number }>>`
+      SELECT 1 AS ok
+      FROM public.channel_participants cp
+      JOIN public.users u ON u.id = cp."userId"
+      WHERE cp."channelId" = ${channelId}
+        AND cp."userId" = ${userId}
+        AND u."userType" = 'USER'
+        AND u.status = 'ACTIVE'
+      LIMIT 1
+    `;
+    return rows.length > 0;
+  } catch (err) {
+    log.warn(`[spaces-db] channel-member-lookup channelId=${channelId} userId=${userId} caller=flow-action result=error err=${errMsg(err)}`);
+    return false;
   }
 }
 
