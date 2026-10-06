@@ -17,6 +17,9 @@ export type CsvWorkerResponse =
  * at MAX_ROWS, as a preview reads no further.
  */
 self.onmessage = async (event: MessageEvent<CsvWorkerRequest>) => {
+  // Only the page that made a dedicated worker can message it, and its messages carry
+  // no origin: one that does came from elsewhere and is ignored.
+  if (event.origin !== '' && event.origin !== self.location.origin) return;
   try {
     const text = await event.data.file.text();
     const { data } = Papa.parse<string[]>(text, {
