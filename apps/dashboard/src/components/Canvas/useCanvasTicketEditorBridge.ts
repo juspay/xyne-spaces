@@ -4,6 +4,8 @@ import type {
   InlineContentSchema,
   StyleSchema,
 } from '@blocknote/core';
+import type { Node as ProseMirrorNode } from '@tiptap/pm/model';
+import { TextSelection, type EditorState, type Transaction } from '@tiptap/pm/state';
 import { CellSelection } from '@tiptap/pm/tables';
 import { useCallback, useEffect, useState, type RefObject } from 'react';
 import { useNavigate } from 'react-router-dom';
@@ -11,6 +13,7 @@ import { toast } from 'sonner';
 
 import { useChannel } from '../../hooks/useChannels';
 import { useRouteContext } from '../../hooks/useRouteContext';
+import { getCanvasMentionDisplayText } from '../../utils/canvasMentionUtils';
 import { standaloneNavigate } from '../../utils/electronApp';
 import { CANVAS_TICKET_SELECTOR } from './CanvasTicketStyleSpec/CanvasTicketStyleSpec';
 
@@ -20,6 +23,7 @@ export interface CanvasTicketAnchor {
   blockId: string;
   anchorText: string;
   blockText: string;
+  blockContentSignature: string;
   selectionFrom: number;
   selectionTo: number;
 }
@@ -41,34 +45,9 @@ interface UseCanvasTicketEditorBridgeResult {
   handleTicketCreated: (ticket: { id: string }) => void;
 }
 
-interface ResolvedSelectionPositionLike {
-  parent: { textContent: string };
-  sameParent: (other: ResolvedSelectionPositionLike) => boolean;
-  start: () => number;
-  end: () => number;
-}
-
 interface TiptapEditorLike {
-  state: {
-    selection: {
-      from: number;
-      to: number;
-      empty?: boolean;
-      $from: ResolvedSelectionPositionLike;
-      $to: ResolvedSelectionPositionLike;
-    };
-    doc: {
-      textBetween: (from: number, to: number, blockSeparator?: string) => string;
-      nodesBetween: (
-        from: number,
-        to: number,
-        callback: (node: { marks?: Array<{ type: { name: string } }> }) => void,
-      ) => void;
-    };
-  };
-  commands: {
-    setTextSelection: (range: { from: number; to: number }) => boolean;
-  };
+  state: EditorState;
+  view: { dispatch: (transaction: Transaction) => void };
 }
 
 const getTiptapEditor = (editor: CanvasEditorLike): TiptapEditorLike | null =>
@@ -104,6 +83,57 @@ const rangeHasLink = (editor: TiptapEditorLike, from: number, to: number): boole
     }
   });
   return hasLink;
+};
+
+const isMentionNode = (node: ProseMirrorNode): boolean => node.type.name === 'mention';
+
+const blockHasUnsupportedInlineContent = (block: ProseMirrorNode): boolean => {
+  let hasUnsupportedInlineContent = false;
+  block.descendants(node => {
+    if (node.isInline && !node.isText && !isMentionNode(node)) {
+      hasUnsupportedInlineContent = true;
+      return false;
+    }
+    return true;
+  });
+  return hasUnsupportedInlineContent;
+};
+
+const getPlainTextBlockContent = (block: ProseMirrorNode): string => {
+  let content = '';
+  block.forEach(node => {
+    if (node.isText) {
+      content += node.text ?? '';
+      return;
+    }
+    if (isMentionNode(node)) {
+      const displayName = getCanvasMentionDisplayText(node.attrs);
+      content += displayName ? `@${displayName}` : '@mention';
+    }
+  });
+  return content;
+};
+
+const getBlockContentSignature = (block: ProseMirrorNode): string =>
+  JSON.stringify(block.content.toJSON());
+
+const replaceBlockWithTicketText = (
+  editor: TiptapEditorLike,
+  block: ProseMirrorNode,
+  from: number,
+  to: number,
+  ticketId: string,
+): boolean => {
+  const plainText = getPlainTextBlockContent(block);
+  const ticketMarkType = editor.state.schema.marks['canvasTicket'];
+  if (!plainText || !ticketMarkType) return false;
+
+  const transaction = editor.state.tr.replaceWith(from, to, editor.state.schema.text(plainText));
+  const end = from + plainText.length;
+  transaction.addMark(from, end, ticketMarkType.create({ stringValue: ticketId }));
+  transaction.setSelection(TextSelection.create(transaction.doc, end));
+  editor.view.dispatch(transaction);
+  return true;
 };
 
 const getClosestCanvasBlock = (node: Node | null): HTMLElement | null => {
@@ -239,6 +269,12 @@ export function useCanvasTicketEditorBridge({
           toast.error('Ticket styles cannot be applied to linked text');
           return;
         }
+        if (blockHasUnsupportedInlineContent($from.parent)) {
+          toast.error(
+            'Tickets cannot be created or linked from blocks containing unsupported inline items',
+          );
+          return;
+        }
         if (rangeHasCodeStyle(tiptapEditor, from, to)) {
           toast.error('Ticket styles cannot be applied to code-formatted text');
           return;
@@ -257,12 +293,13 @@ export function useCanvasTicketEditorBridge({
           toast.error('This block is already linked to a ticket');
           return;
         }
-        const blockText = $from.parent.textContent.trim();
+        const blockText = getPlainTextBlockContent($from.parent).trim();
 
         setActiveTicketAnchor({
           blockId,
           anchorText,
           blockText: blockText || anchorText,
+          blockContentSignature: getBlockContentSignature($from.parent),
           selectionFrom: from,
           selectionTo: to,
         });
@@ -299,7 +336,6 @@ export function useCanvasTicketEditorBridge({
           const { from, to, $from, $to } = tiptapEditor.state.selection;
           const currentBlockId = editor.getTextCursorPosition().block?.id;
           const currentText = tiptapEditor.state.doc.textBetween(from, to, ' ').trim();
-          const currentBlockText = $from.parent.textContent.trim();
           const blockFrom = $from.start();
           const blockTo = $from.end();
 
@@ -307,13 +343,16 @@ export function useCanvasTicketEditorBridge({
             currentBlockId === anchor.blockId &&
             $from.sameParent($to) &&
             currentText === anchor.anchorText &&
-            currentBlockText === anchor.blockText &&
+            getBlockContentSignature($from.parent) === anchor.blockContentSignature &&
             !rangeHasTicketStyle(tiptapEditor, blockFrom, blockTo)
           ) {
-            tiptapEditor.commands.setTextSelection({ from: blockFrom, to: blockTo });
-            editor.addStyles({ canvasTicket: ticket.id } as never);
-            tiptapEditor.commands.setTextSelection({ from: blockTo, to: blockTo });
-            styleApplied = true;
+            styleApplied = replaceBlockWithTicketText(
+              tiptapEditor,
+              $from.parent,
+              blockFrom,
+              blockTo,
+              ticket.id,
+            );
           }
         } catch {
           styleApplied = false;

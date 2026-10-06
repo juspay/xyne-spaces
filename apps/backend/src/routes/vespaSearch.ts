@@ -39,6 +39,8 @@ export const relatedContextRouter = Router();
  * @param {string} priority - Filter by priority: HIGH|MEDIUM|LOW|CRITICAL (optional)
  * @param {string} board - Filter by board name (optional)
  * @param {string} tags - Filter by tags - comma-separated (optional)
+ * @param {string} entity - Filter by entity name(s) - comma-separated, AND-ed (optional)
+ * @param {string} hasLink - "true"|"false": chat messages with / without links (optional)
  * @param {string} before - Created before date (optional)
  * @param {string} after - Created after date (optional)
  * @param {string} on - Created on specific date (optional)

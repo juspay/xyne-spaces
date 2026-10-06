@@ -17,7 +17,7 @@ interface ClawAgentsResponse {
 }
 
 /**
- * Returns the Claw agents added to the given channel (its BOT/APP participants).
+ * Returns the Claw agents added to the given channel (its BOT/APP/AGENT participants).
  * Fetches fresh on every mount / channel change so the dropdown always reflects
  * live channel membership. Empty list on no channel, error, or no agents.
  */

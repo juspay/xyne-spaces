@@ -4550,7 +4550,7 @@ export const queries: AnyQueryRegistry = defineQueries({
     }
   ),
 
-  // All app/bot participants of a channel — used at the parent for the
+  // All app/agent/bot participants of a channel — used at the parent for the
   // Agents & Apps tab count.
   channelAppParticipants: defineQuery(
     z.object({ channelId: z.string() }),
@@ -4558,12 +4558,12 @@ export const queries: AnyQueryRegistry = defineQueries({
       return zql.channel_participants
         .where('channelId', channelId)
         .whereExists('user', (u) =>
-          u.where('userType', 'IN', [UserType.APP, UserType.BOT]),
+          u.where('userType', 'IN', [UserType.APP, UserType.AGENT, UserType.BOT]),
         );
     }
   ),
 
-  // Paginated human members of a channel — excludes apps/bots server-side so
+  // Paginated human members of a channel — excludes apps/agents/bots server-side so
   // the Members tab never leaks them into its list.
   channelHumanParticipantsPaginated: defineQuery(
     z.object({

@@ -45,6 +45,8 @@ import {
   openPaletteModeFromTools,
 } from "xyne-claw-shared";
 import { SessionLockedError } from "../session-lock.js";
+import { matchesDirectPick } from "../tool-resolution.js";
+import { describeFetchError } from "../run-deadline.js";
 import { SandboxUnavailableError } from "../sandbox-unavailable.js";
 import { isSafeId } from "../safe-id.js";
 import { sanitizeCitations } from "../citation-sanitizer.js";
@@ -2279,17 +2281,7 @@ export async function processTask(
       const rawName = extractRuntimeToolName(tool.name);
       return groups.some((group) => group.writeTools.map(String).includes(rawName));
     };
-    const selectedAsDirect = (tool: ToolDefinition, allowedDirect: string[]): boolean => {
-      const norm = (s: string): string => s.toLowerCase().replace(/_/g, "-");
-      const toolSelectionKey = (tool as { selectionKey?: string }).selectionKey;
-      return allowedDirect.some((d) =>
-        tool.name === d ||
-        tool.name.endsWith(d) ||
-        d.endsWith(`__${tool.name}`) ||
-        norm(tool.name) === norm(d) ||
-        (toolSelectionKey ? d === toolSelectionKey : false),
-      );
-    };
+    const selectedAsDirect = (tool: ToolDefinition, allowedDirect: string[]): boolean => matchesDirectPick(tool, allowedDirect);
     const applyAgentToolFilter = (
       tools: ToolDefinition[],
       cfg: ReturnType<typeof parseToolsConfig>,
@@ -2739,17 +2731,8 @@ export async function processTask(
           // matching across different servers — we compare the whole string,
           // not just the bare suffix, so a config entry from server A can't
           // accidentally grant tools from server B that share a bare name.
-          const norm = (s: string): string =>
-            s.toLowerCase().replace(/_/g, "-");
-          const tNorm = norm(t.name);
           const toolSelectionKey = (t as { selectionKey?: string }).selectionKey;
-          const isDirectPick = allowedDirect.some((d: string) =>
-            t.name === d ||
-            t.name.endsWith(d) ||
-            d.endsWith(`__${t.name}`) ||
-            tNorm === norm(d) ||
-            (toolSelectionKey ? d === toolSelectionKey : false),
-          );
+          const isDirectPick = matchesDirectPick(t, allowedDirect);
           // Gateway tools are exposed as direct tools; keep them when their
           // service name (e.g. "mettle") is selected in tools.gateway.
           // Use stable serviceName metadata instead of mutable display label.
@@ -3239,6 +3222,11 @@ export async function processTask(
         "sandbox-run", "sandbox-run-detached", "sandbox-write-file",
         "sandbox-create", "sandbox-destroy", "write",
       ]);
+      const pinnedProfile = meta["sandboxRepo"] ? REPO_CONFIGS[meta["sandboxRepo"]] : undefined;
+      if (!forceReadOnlySandbox && pinnedProfile && !pinnedProfile.repoUrl) {
+        RO_DISABLED.delete("sandbox-create");
+        RO_DISABLED.delete("sandbox-destroy");
+      }
       const before = allTools.length;
       allTools = allTools.filter((t) => !RO_DISABLED.has(t.name));
       if (allTools.length !== before) {
@@ -5344,7 +5332,7 @@ export async function sendCallback(
     } catch (err) {
       lastErr = err;
       clog.error(
-        `[run] Callback to ${url} threw (session=${sid}, attempt=${attempt}, bytes=${body.length}): ${err instanceof Error ? err.message : String(err)}`,
+        `[run] Callback to ${url} threw (session=${sid}, attempt=${attempt}, bytes=${body.length}): ${describeFetchError(err)}`,
       );
       if (attempt === maxAttempts) return false;
     }
