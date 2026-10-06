@@ -686,7 +686,7 @@ publicRouter.post("/", requireAuth, requireNoAccessToken, async (req: Request, r
     // Claw admin may watch a live debug trace. Resolved here (not in the
     // /progress forwarder) because that forwarder is an internal S2S POST with
     // no user identity.
-    const allowDebug = (await isClawAdmin(userId))
+    const allowDebug = (await isClawAdmin(userId, orgId))
       || Boolean((await getAgentEditAccess(userId, slug, orgId))?.canEdit);
 
     const sdlcResolution = await resolveSdlcRepositoryForUser(

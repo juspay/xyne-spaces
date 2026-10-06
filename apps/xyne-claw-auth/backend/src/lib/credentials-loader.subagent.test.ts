@@ -44,7 +44,7 @@ vi.mock("../db.js", () => ({
     // Cascade reads that run only on a soft-pin fallthrough — stubbed to null
     // so the resolver returns null instead of throwing.
     userMcpConnection: { findFirst: vi.fn(async () => null) },
-    mcpServer: { findUnique: vi.fn(async () => null) },
+    mcpServer: { findFirst: vi.fn(async () => null) },
     agentMcpConnection: { findFirst: vi.fn(async () => null) },
   },
 }));

@@ -202,7 +202,7 @@ router.post("/provider-credentials/:provider/share", asyncHandler(async (req: Re
   if (!VALID_PROVIDERS.has(provider) || provider === "spaces") {
     throw badRequest("Provider cannot be shared");
   }
-  const { name, agentIds, platform } = req.body as { name?: string; agentIds?: string[]; platform?: boolean };
+  const { name, agentIds } = req.body as { name?: string; agentIds?: string[] };
   const targetAgentIds = Array.isArray(agentIds) ? agentIds.filter((a): a is string => typeof a === "string" && !!a.trim()) : [];
   if (targetAgentIds.length === 0) {
     throw badRequest("agentIds (non-empty array) is required");
@@ -210,10 +210,7 @@ router.post("/provider-credentials/:provider/share", asyncHandler(async (req: Re
 
   const user = await prisma.user.findUnique({ where: { id: userId }, select: { orgId: true } });
   if (!user?.orgId) throw badRequest("No org context");
-  const admin = await isClawAdmin(userId);
-  if (platform && !admin) {
-    throw forbidden("Only CLAW_ADMIN can create platform-wide (cross-org) shared credentials");
-  }
+  const admin = await isClawAdmin(userId, user.orgId);
 
   // RAW row (not materialized): sharing a binding just reuses its shared cred.
   const raw = await prisma.userProviderCredentials.findUnique({
@@ -229,9 +226,7 @@ router.post("/provider-credentials/:provider/share", asyncHandler(async (req: Re
       throw badRequest(`Your ${provider} credential has no key material — reconnect it first`);
     }
     const shared = await sharedProviderCredentialRepository.create({
-      // platform:true (admin-only, checked above) → orgId NULL: bindable
-      // by agents of ANY org.
-      orgId: platform ? null : user.orgId,
+      orgId: user.orgId,
       provider,
       name: name?.trim() || `${provider} (shared)`,
       encryptedKey: raw.encryptedKey,
@@ -258,8 +253,6 @@ router.post("/provider-credentials/:provider/share", asyncHandler(async (req: Re
     });
   }
 
-  // Scope check depends on the SHARED credential (may be a reused
-  // platform-wide one), not the requester's org.
   const sharedRow = await sharedProviderCredentialRepository.findById(sharedId);
   const sharedOrgId = sharedRow?.orgId ?? null;
 
@@ -269,8 +262,7 @@ router.post("/provider-credentials/:provider/share", asyncHandler(async (req: Re
       where: { id: agentId },
       select: { id: true, slug: true, orgId: true, ownerUserId: true },
     });
-    // Platform-wide (orgId NULL) creds bind across orgs.
-    if (!agent || (sharedOrgId !== null && agent.orgId !== sharedOrgId)) {
+    if (!agent || agent.orgId !== sharedOrgId) {
       results.push({ agentId, ok: false, error: "Agent not found in the credential's org" });
       continue;
     }

@@ -43,7 +43,7 @@ async function assertSkillReadable(
   if (skill.scope === "global") return;
   const requesterId = getRequesterId(req);
   if (requesterId && skill.ownerUserId === requesterId) return;
-  if (requesterId && (await isClawAdmin(requesterId))) return;
+  if (requesterId && (await isClawAdmin(requesterId, getOrgId(req)))) return;
   log.warn(`[skills] private-skill read blocked slug=${skill.slug} owner=${skill.ownerUserId ?? "none"} viewer=${requesterId ?? "none"}`);
   throw notFound("Skill not found");
 }
@@ -66,7 +66,7 @@ export function canProposerPostAsAgent<T extends { canEdit: boolean; agent: { sc
 router.get("/", asyncHandler(async (req: Request, res: Response) => {
   const scopeUserId = (req.query["userId"] as string | undefined) ?? undefined;
   const authedUserId = String(req.headers["x-user-id"] ?? "");
-  const admin = authedUserId ? await isClawAdmin(authedUserId) : false;
+  const admin = authedUserId ? await isClawAdmin(authedUserId, getOrgId(req)) : false;
   // Gate the admin "see ALL (incl. others' private)" bypass behind ?scope=all,
   // mirroring GET /agents. Without this an admin's normal skill list leaks
   // every user's private skills (the same regression agents.ts already fixed).
@@ -165,7 +165,7 @@ router.put("/:slug", asyncHandler(async (req: Request<{ slug: string }>, res: Re
 
   const requesterId = getRequesterId(req);
   if (requesterId) {
-    const admin = await isClawAdmin(requesterId);
+    const admin = await isClawAdmin(requesterId, getOrgId(req));
     const isOwner = existing.ownerUserId === requesterId;
     if (!admin && !isOwner) {
       throw forbidden("Only the owner or admins can edit this skill");
@@ -201,7 +201,7 @@ router.delete("/:slug", async (req: Request<{ slug: string }>, res: Response) =>
 
     const requesterId = getRequesterId(req);
     if (requesterId) {
-      const admin = await isClawAdmin(requesterId);
+      const admin = await isClawAdmin(requesterId, getOrgId(req));
       const isOwner = existing.ownerUserId === requesterId;
       if (!admin && !isOwner) {
         res.status(403).json({ success: false, error: "Only the owner or admins can delete this skill" });
@@ -366,7 +366,7 @@ router.put("/:slug/files", asyncHandler(async (req: Request<{ slug: string }>, r
   const authz = authorizeSkillFileUpdate({
     ownerUserId: skill.ownerUserId,
     callerUserId: requesterId,
-    callerIsAdmin: await isClawAdmin(requesterId),
+    callerIsAdmin: await isClawAdmin(requesterId, getOrgId(req)),
   });
   if (!authz.ok) {
     throw new HttpError(authz.code, authz.reason);
@@ -692,7 +692,7 @@ export async function resolveSkillUpdateRequest(
     approverUserId: approver.approverUserId,
     requiresAdmin: approver.requiresAdmin,
     callerUserId,
-    callerIsAdmin: await isClawAdmin(callerUserId),
+    callerIsAdmin: await isClawAdmin(callerUserId, skill.orgId ?? undefined),
     currentContentHash: hashSkillContent(skill.content),
     baseContentHash: request.baseContentHash ?? "",
   });

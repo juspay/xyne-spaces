@@ -118,7 +118,7 @@ function authKind(row: ConnectorRow): "oauth" | "credentials" {
 /** The connector row, iff this user may use it through an app. */
 async function loadVisibleConnector(type: string, uid: string): Promise<ConnectorRow> {
   if (PLATFORM_INTERNAL_TYPES.has(type)) throw connectorNotFound(type);
-  const row = await prisma.mcpServer.findUnique({ where: { type }, select: connectorSelect });
+  const row = await prisma.mcpServer.findFirst({ where: { type, orgId: null }, select: connectorSelect });
   if (!row || !isUsableByUser(row, uid)) throw connectorNotFound(type);
   return row;
 }

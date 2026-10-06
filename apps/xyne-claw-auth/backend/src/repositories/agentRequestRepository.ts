@@ -34,9 +34,9 @@ export const agentRequestRepository = {
     }),
 
   /** All pending clone requests (owner/admin inbox filters by agent owner). */
-  listPendingClones: () =>
+  listPendingClones: (orgId?: string) =>
     prisma.agentRequest.findMany({
-      where: { requestType: "clone", status: "pending" },
+      where: { requestType: "clone", status: "pending", ...(orgId ? { orgId } : {}) },
       orderBy: { createdAt: "desc" },
     }),
 

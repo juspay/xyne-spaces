@@ -56,7 +56,7 @@ vi.mock("../lib/spaces-db.js", () => ({
   getWorkspaceIdForUser: vi.fn(async () => null),
 }));
 vi.mock("../lib/spaces-session-server-types.js", () => ({ SPACES_SESSION_CREDENTIAL_SERVER_TYPES: new Set<string>() }));
-vi.mock("../db.js", () => ({ prisma: {} }));
+vi.mock("../db.js", () => ({ prisma: { user: { findUnique: vi.fn(async () => null) } } }));
 vi.mock("../crypto.js", () => ({ decrypt: (v: string) => v }));
 vi.mock("../config.js", () => ({ CONFIG: {} }));
 vi.mock("../logger.js", () => ({

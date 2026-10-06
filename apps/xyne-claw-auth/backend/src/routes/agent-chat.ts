@@ -180,6 +180,20 @@ function extractSlideJsonByFilename(toolInvocations: unknown): Map<string, unkno
 }
 
 const router = Router();
+
+async function canAccessAttachment(
+  requesterId: string,
+  requesterOrgId: string | undefined,
+  attachment: { uploaderUserId: string },
+): Promise<boolean> {
+  if (attachment.uploaderUserId === requesterId) return true;
+  if (!requesterOrgId) return false;
+  const [admin, uploader] = await Promise.all([
+    isClawAdmin(requesterId, requesterOrgId),
+    prisma.user.findUnique({ where: { id: attachment.uploaderUserId }, select: { orgId: true } }),
+  ]);
+  return admin && uploader?.orgId === requesterOrgId;
+}
 const internalRouter = Router();
 
 // Placeholder shown to an admin viewing another user's run in place of a tool
@@ -825,8 +839,10 @@ router.get("/attachments/:id/download", async (req: Request<{ id: string }>, res
     if (!att) { res.status(404).json({ success: false, error: "Attachment not found" }); return; }
 
     // uploaderUserId may hold either verified representation of the caller —
-    // legacy rows predate canonicalization, so compare against both.
-    const allowed = matchesAuthenticatedUserId(req, att.uploaderUserId) || await isClawAdmin(requesterId);
+    // legacy rows predate canonicalization, so compare against both. Admin
+    // access goes through canAccessAttachment, which is org-scoped: the
+    // uploader must belong to the caller's own org.
+    const allowed = matchesAuthenticatedUserId(req, att.uploaderUserId) || await canAccessAttachment(requesterId, getOrgId(req), att);
     if (!allowed) { res.status(403).json({ success: false, error: "Forbidden" }); return; }
 
     res.setHeader("Content-Type", att.mimeType);
@@ -868,7 +884,11 @@ router.get("/attachments/:id/slide-json", async (req: Request<{ id: string }>, r
     const att = await chatAttachmentRepository.findById(req.params.id);
     if (!att) { res.status(404).json({ success: false, error: "Attachment not found" }); return; }
 
-    const allowed = matchesAuthenticatedUserId(req, att.uploaderUserId) || await isClawAdmin(requesterId);
+    // uploaderUserId may hold either verified representation of the caller —
+    // legacy rows predate canonicalization, so compare against both. Admin
+    // access goes through canAccessAttachment, which is org-scoped: the
+    // uploader must belong to the caller's own org.
+    const allowed = matchesAuthenticatedUserId(req, att.uploaderUserId) || await canAccessAttachment(requesterId, getOrgId(req), att);
     if (!allowed) { res.status(403).json({ success: false, error: "Forbidden" }); return; }
 
     const metadata = (att as unknown as { metadata?: Record<string, unknown> | null }).metadata;
@@ -893,7 +913,11 @@ router.get("/attachments/:id/thumbnail", async (req: Request<{ id: string }>, re
     const att = await chatAttachmentRepository.findById(req.params.id);
     if (!att) { res.status(404).json({ success: false, error: "Attachment not found" }); return; }
 
-    const allowed = matchesAuthenticatedUserId(req, att.uploaderUserId) || await isClawAdmin(requesterId);
+    // uploaderUserId may hold either verified representation of the caller —
+    // legacy rows predate canonicalization, so compare against both. Admin
+    // access goes through canAccessAttachment, which is org-scoped: the
+    // uploader must belong to the caller's own org.
+    const allowed = matchesAuthenticatedUserId(req, att.uploaderUserId) || await canAccessAttachment(requesterId, getOrgId(req), att);
     if (!allowed) { res.status(403).json({ success: false, error: "Forbidden" }); return; }
 
     if (!att.thumbnailUrl) { res.status(404).json({ success: false, error: "No thumbnail" }); return; }
@@ -918,7 +942,11 @@ router.get("/attachments/:id/stream", async (req: Request<{ id: string }>, res: 
     const att = await chatAttachmentRepository.findById(req.params.id);
     if (!att) { res.status(404).json({ success: false, error: "Attachment not found" }); return; }
 
-    const allowed = matchesAuthenticatedUserId(req, att.uploaderUserId) || await isClawAdmin(requesterId);
+    // uploaderUserId may hold either verified representation of the caller —
+    // legacy rows predate canonicalization, so compare against both. Admin
+    // access goes through canAccessAttachment, which is org-scoped: the
+    // uploader must belong to the caller's own org.
+    const allowed = matchesAuthenticatedUserId(req, att.uploaderUserId) || await canAccessAttachment(requesterId, getOrgId(req), att);
     if (!allowed) { res.status(403).json({ success: false, error: "Forbidden" }); return; }
 
     const total = att.size;
@@ -1644,7 +1672,7 @@ router.post("/:slug/chat", async (req: Request<{ slug: string }>, res: Response)
     // debug content live as it would on replay. Resolved here, before the SSE
     // promise, because the callback that forwards frames arrives on a separate
     // S2S request with no end-user identity of its own.
-    const debugIsAdmin = await isClawAdmin(userId);
+    const debugIsAdmin = await isClawAdmin(userId, getOrgId(req));
     const debugEditAccess = debugIsAdmin ? null : await getAgentEditAccess(userId, slug, getOrgId(req));
     const allowDebug = debugIsAdmin || Boolean(debugEditAccess?.canEdit);
 
@@ -2062,6 +2090,7 @@ router.post("/:slug/chat", async (req: Request<{ slug: string }>, res: Response)
         slug,
         conversationId,
         callbackUrl,
+        orgId: agent.orgId,
         assistantMessageId: assistantMsg.id,
       });
     } else {
@@ -2444,8 +2473,9 @@ internalRouter.post("/:slug/chat/:convId/progress", async (req: Request<{ slug: 
 
   if (sessionId && toolLabel) {
     agentRunRepository.updateProgress(sessionId, toolLabel).catch(() => {});
+    const eventOrgId = await resolveCallbackOrgId(req, sessionId).catch(() => undefined);
     redisService.getConnection()
-      .publish("cc:events", JSON.stringify({ type: "agent_progress", sessionId, toolLabel }))
+      .publish("cc:events", JSON.stringify({ type: "agent_progress", sessionId, toolLabel, ...(eventOrgId ? { orgId: eventOrgId } : {}) }))
       .catch(() => {});
     if (CONFIG.liveToolCallsEnabled) {
       liveUserIdForSession(sessionId)
@@ -2555,7 +2585,7 @@ internalRouter.post("/:slug/chat/:convId/callback", async (req: Request<{ slug: 
       log.warn("[agent-chat] finalize failed:", err instanceof Error ? err.message : err);
     }
     redisService.getConnection()
-      .publish("cc:events", JSON.stringify({ type: "agent_done", sessionId, status: finalStatus }))
+      .publish("cc:events", JSON.stringify({ type: "agent_done", sessionId, status: finalStatus, ...(callbackOrgId ? { orgId: callbackOrgId } : {}) }))
       .catch(() => {});
   }
 
@@ -2835,8 +2865,18 @@ router.get("/:slug/chat/:convId/messages", async (req: Request<{ slug: string; c
     // explicitly opened this conversation from the agent "All Runs" inspector,
     // which passes ?allRuns=1. Admins keep full cross-user access there — this
     // just stops it leaking into the normal chat view.
-    const isAdmin = await isClawAdmin(userId);
+    const isAdmin = await isClawAdmin(userId, getOrgId(req));
     const crossUser = isAdmin && req.query["allRuns"] === "1";
+    // Org boundary: an admin may view cross-user messages, but only within
+    // their own org.
+    if (crossUser) {
+      const orgId = getOrgId(req);
+      const ownOrgMessages = allMessages.filter((m) => m.orgId === orgId);
+      if (ownOrgMessages.length === 0 && allMessages.length > 0) {
+        res.status(403).json({ success: false, error: "Conversation belongs to a different organization" });
+        return;
+      }
+    }
     // Rows may be keyed by either verified representation of this caller
     // (canonical Claw id in x-user-id or the current workspace's raw Spaces
     // id in x-spaces-user-id) — match both so older/misscoordinated turns
@@ -3058,8 +3098,19 @@ router.get("/:slug/chat/:convId/live", async (req: Request<{ slug: string; convI
   // — even for admins — streams ONLY the requester's own runs, so a shared twin
   // thread doesn't leak other users' in-flight turns into the normal chat. The
   // agent "All Runs" inspector passes ?allRuns=1 for genuine cross-user viewing.
-  const isAdmin = await isClawAdmin(userId);
+  const isAdmin = await isClawAdmin(userId, getOrgId(req));
   const crossUser = isAdmin && req.query["allRuns"] === "1";
+  // Org boundary: cross-user live viewing only spans conversations in the
+  // admin's own org (mirrors the /messages canary). Must run BEFORE the SSE
+  // headers go out, otherwise a 403 can no longer be sent.
+  if (crossUser) {
+    const orgId = getOrgId(req);
+    const convMsgs = await chatMessageRepository.findByConversationAndAgent(convId, slug);
+    if (convMsgs.length > 0 && !convMsgs.some((m) => m.orgId === orgId)) {
+      res.status(403).json({ success: false, error: "Conversation belongs to a different organization" });
+      return;
+    }
+  }
 
   res.writeHead(200, {
     "Content-Type": "text/event-stream",
@@ -3222,7 +3273,14 @@ router.get("/:slug/chat/:convId/debug", async (req: Request<{ slug: string; conv
     // session key (`<userId>_<convId>_<agentSlug>`), not another agent's.
     const convMessages = await chatMessageRepository.findByConversationAndAgent(req.params.convId, req.params.slug);
     const ownerId = convMessages[0]?.userId; // first speaker — used only as the xyne-claw GCS-restore hint
-    const isAdmin = await isClawAdmin(requesterId);
+    const isAdmin = await isClawAdmin(requesterId, getOrgId(req));
+    // Org boundary: a CLAW_ADMIN's debug access only spans conversations in
+    // their own org (mirrors the /messages canary) — a guessed cross-org
+    // convId must not proxy that org's debug bundle.
+    if (isAdmin && convMessages.length > 0 && !convMessages.some((m) => m.orgId === getOrgId(req))) {
+      res.status(403).json({ success: false, error: "Conversation belongs to a different organization" });
+      return;
+    }
     const editAccess = isAdmin
       ? null
       : await getAgentEditAccess(requesterId, req.params.slug, getOrgId(req));
@@ -3677,7 +3735,7 @@ router.get("/:slug/conversations", async (req: Request<{ slug: string }>, res: R
     // org-wide fan-out: the alias pair is already workspace-scoped by auth.
     let userIds = userAliases;
     if (requestedUserId && !matchesAuthenticatedUserId(req, requestedUserId)) {
-      if (!(await isClawAdmin(callerId))) {
+      if (!(await isClawAdmin(callerId, getOrgId(req)))) {
         res.status(403).json({ success: false, error: "Cannot list another user's conversations" });
         return;
       }
@@ -3704,6 +3762,16 @@ router.get("/:slug/conversations", async (req: Request<{ slug: string }>, res: R
         })
         .catch(() => []);
       for (const alias of surfaceAliases) targetIds.add(alias.surfaceUserId);
+      // Org boundary: an admin may list another user's conversations, but
+      // only within their own org.
+      const targetUser = await prisma.user.findUnique({
+        where: { id: canonical ?? requestedUserId },
+        select: { orgId: true },
+      });
+      if (!targetUser || targetUser.orgId !== getOrgId(req)) {
+        res.status(403).json({ success: false, error: "Cannot list conversations for users outside your organization" });
+        return;
+      }
       userIds = [...targetIds];
     }
 
@@ -3893,12 +3961,13 @@ interface RunAgentChatViaSseOpts {
   /** Pre-created placeholder assistant row id — the live delta coalescer
    *  debounce-persists partial content onto it so a reload shows answer-so-far. */
   assistantMessageId?: string;
+  orgId?: string;
 }
 
 async function runAgentChatViaSse(
   opts: RunAgentChatViaSseOpts,
 ): Promise<{ success: boolean; sessionId?: string; error?: string; deferred?: boolean }> {
-  const { forwardBody, callbackId, slug, conversationId, callbackUrl, assistantMessageId } = opts;
+  const { forwardBody, callbackId, slug, conversationId, callbackUrl, assistantMessageId, orgId } = opts;
   // The triggering user — used to scope live events to /live viewers (same ACL
   // as /messages). v3-driven runs report via THIS path, not /webhook/*.
   const liveUserId = typeof forwardBody["userId"] === "string" ? (forwardBody["userId"] as string) : "";
@@ -3954,7 +4023,7 @@ async function runAgentChatViaSse(
                 pendingStreams.get(callbackId)?.sendEvent("progress", { toolLabel });
                 agentRunRepository.updateProgress(sessionId, toolLabel).catch(() => {});
                 redisService.getConnection()
-                  .publish("cc:events", JSON.stringify({ type: "agent_progress", sessionId, toolLabel }))
+                  .publish("cc:events", JSON.stringify({ type: "agent_progress", sessionId, toolLabel, ...(orgId ? { orgId } : {}) }))
                   .catch(() => {});
                 if (CONFIG.liveToolCallsEnabled && liveUserId) {
                   publishLiveEvent(conversationId, { type: "label", conversationId, agentSlug: slug, userId: liveUserId, toolLabel, ts: Date.now() });

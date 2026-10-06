@@ -228,7 +228,7 @@ async function listReachableAgents(
   orgId: string,
   declaredAgents: string[],
 ): Promise<Array<{ slug: string; name: string; description: string; color: string }>> {
-  const isAdmin = await isClawAdmin(userId);
+  const isAdmin = await isClawAdmin(userId, orgId);
   const agents = await prisma.agent.findMany({
     where: {
       AND: [

@@ -2558,6 +2558,13 @@ export async function handleAutomationWebhook(
     res.status(400).json({ success: false, error: "orgId is required" });
     return;
   }
+  // Org boundary: when the route pins the agent's org, the triggering user's
+  // org must match it — no cross-org dispatch.
+  if (pathAgentOrgId && automationOrgId !== pathAgentOrgId) {
+    clog.warn(`[webhook/automation-run] cross-org dispatch rejected userOrg=${automationOrgId} agentOrg=${pathAgentOrgId} agentSlug=${agentSlug} sessionId=${sessionId}`);
+    res.status(403).json({ success: false, error: "User and agent must belong to the same organization" });
+    return;
+  }
   // `payload.userId` is the raw, workspace-scoped Spaces membership id. Use
   // it only to resolve the tenant; every Claw-owned row and pod dispatch must
   // use the canonical local user id.

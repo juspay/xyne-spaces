@@ -11,7 +11,6 @@ import { getSpacesAuthForUser, getWorkspaceIdForUser, requestWorkspaceHint } fro
 import { resolveSpacesAppCreds } from "../lib/spaces-agent-install.js";
 import { setSession, type SessionContext } from "./webhook.js";
 import { spacesAppFetch } from "../lib/spaces-api.js";
-import { getAdminOrgScope, getOrgNameMap, withOrgLabel } from "../lib/admin-org-scope.js";
 import {
   parseChainWorkflowDefinition,
   validateChainWorkflowDefinition,
@@ -20,7 +19,7 @@ import {
   type ChainWorkflowNode,
 } from "../lib/chain-workflow.js";
 
-import { asyncHandler, ok, badRequest, unauthorized, forbidden, notFound, HttpError } from "../lib/http.js";
+import { asyncHandler, ok, badRequest, forbidden, notFound, HttpError } from "../lib/http.js";
 
 import { createLogger } from "../logger.js";
 const log = createLogger("chain-workflows");
@@ -95,9 +94,18 @@ function parseTriggers(raw: unknown): WorkflowTrigger[] {
     }));
 }
 
-async function canAccessWorkflow(requesterId: string, createdByUserId: string): Promise<boolean> {
+async function canAccessWorkflow(
+  requesterId: string,
+  createdByUserId: string,
+  requesterOrgId: string | undefined,
+): Promise<boolean> {
   if (requesterId === createdByUserId) return true;
-  return isClawAdmin(requesterId);
+  if (!requesterOrgId) return false;
+  const creator = await prisma.user.findUnique({
+    where: { id: createdByUserId },
+    select: { orgId: true },
+  });
+  return creator?.orgId === requesterOrgId && isClawAdmin(requesterId, requesterOrgId);
 }
 
 /* ------------------------------------------------------------------ */
@@ -516,10 +524,17 @@ router.get("/", asyncHandler(async (req: Request, res: Response) => {
   const channelId = typeof req.query["channelId"] === "string" ? req.query["channelId"] : undefined;
   if (channelId) {
     const rows = await agentChainWorkflowRepository.listByChannel(channelId);
-    const admin = await isClawAdmin(requesterId);
-    const visible = admin
-      ? rows
-      : rows.filter((row) => row.createdByUserId === requesterId || row.workflow.createdByUserId === requesterId);
+    const orgId = getOrgId(req);
+    const admin = await isClawAdmin(requesterId, orgId);
+    const creatorIds = Array.from(new Set(rows.map((row) => row.workflow.createdByUserId)));
+    const sameOrgCreatorIds = orgId && creatorIds.length > 0
+      ? new Set((await prisma.user.findMany({ where: { id: { in: creatorIds }, orgId }, select: { id: true } })).map((user) => user.id))
+      : new Set<string>();
+    const visible = rows.filter((row) =>
+      row.createdByUserId === requesterId
+      || row.workflow.createdByUserId === requesterId
+      || (admin && sameOrgCreatorIds.has(row.workflow.createdByUserId)),
+    );
     ok(res, visible);
     return;
   }
@@ -643,16 +658,27 @@ router.put("/bindings/upsert", async (req: Request, res: Response) => {
     // Default to the requester so a binding is per-user unless explicitly
     // scoped (e.g. an admin binding for another user, or "*" for any user).
     const targetUserId = userId?.trim() || requesterId;
-
-    if (targetUserId !== requesterId && !(await isClawAdmin(requesterId))) {
-      res.status(403).json({ success: false, error: "Only an admin can bind a workflow for another user" });
+    const requesterOrgId = getOrgId(req);
+    if (targetUserId === "*") {
+      res.status(403).json({ success: false, error: "Organization admins cannot create global workflow bindings" });
       return;
+    }
+    if (targetUserId !== requesterId) {
+      const targetUser = await prisma.user.findUnique({ where: { id: targetUserId }, select: { orgId: true } });
+      if (!targetUser || targetUser.orgId !== requesterOrgId) {
+        res.status(404).json({ success: false, error: "User not found" });
+        return;
+      }
+      if (!(await isClawAdmin(requesterId, requesterOrgId))) {
+        res.status(403).json({ success: false, error: "Only an admin can create a binding for another user" });
+        return;
+      }
     }
 
     const workflow = await agentChainWorkflowRepository.findWorkflowById(workflowId.trim());
     if (!workflow) { res.status(404).json({ success: false, error: "Workflow not found" }); return; }
 
-    const allowed = await canAccessWorkflow(requesterId, workflow.createdByUserId);
+    const allowed = await canAccessWorkflow(requesterId, workflow.createdByUserId, getOrgId(req));
     if (!allowed) { res.status(403).json({ success: false, error: "Not allowed to bind this workflow" }); return; }
 
     await agentChainWorkflowRepository.deleteStaleBindingsForWorkflow(
@@ -691,7 +717,7 @@ router.patch("/bindings/:id", asyncHandler(async (req: Request<{ id: string }>, 
   const binding = await agentChainWorkflowRepository.findBindingById(req.params.id);
   if (!binding) throw notFound("Binding not found");
 
-  const allowed = await canAccessWorkflow(requesterId, binding.workflow.createdByUserId);
+  const allowed = await canAccessWorkflow(requesterId, binding.workflow.createdByUserId, getOrgId(req));
   if (!allowed) throw forbidden("Not allowed to update this binding");
 
   const { enabled } = req.body as { enabled?: boolean };
@@ -707,7 +733,7 @@ router.delete("/bindings/:id", asyncHandler(async (req: Request<{ id: string }>,
   const binding = await agentChainWorkflowRepository.findBindingById(req.params.id);
   if (!binding) throw notFound("Binding not found");
 
-  const allowed = await canAccessWorkflow(requesterId, binding.workflow.createdByUserId);
+  const allowed = await canAccessWorkflow(requesterId, binding.workflow.createdByUserId, getOrgId(req));
   if (!allowed) throw forbidden("Not allowed to delete this binding");
 
   await agentChainWorkflowRepository.deleteBinding(req.params.id);
@@ -734,10 +760,8 @@ router.get("/bindings/resolve", asyncHandler(async (req: Request, res: Response)
     return;
   }
 
-  const admin = await isClawAdmin(requesterId);
-  if (!admin && row.createdByUserId !== requesterId && row.workflow.createdByUserId !== requesterId) {
-    throw forbidden("Not allowed to read this binding");
-  }
+  const allowed = await canAccessWorkflow(requesterId, row.workflow.createdByUserId, getOrgId(req));
+  if (!allowed) throw forbidden("Not allowed to read this binding");
 
   ok(res, row);
 }));
@@ -752,93 +776,28 @@ router.get("/bindings/resolve", asyncHandler(async (req: Request, res: Response)
 // "global-requests" path isn't captured as a workflow id.
 
 router.post("/:id/request-global", asyncHandler(async (req: Request<{ id: string }>, res: Response) => {
-  const requesterId = getRequesterId(req);
-  if (!requesterId) {
-    throw unauthorized("x-user-id required");
-  }
-  const workflow = await agentChainWorkflowRepository.findWorkflowById(req.params.id);
-  if (!workflow) {
-    throw notFound("Workflow not found");
-  }
-  if (!(await canAccessWorkflow(requesterId, workflow.createdByUserId))) {
-    throw forbidden("Not allowed to request promotion for this workflow");
-  }
-  if (workflow.global) {
-    ok(res, { alreadyGlobal: true });
-    return;
-  }
-  const request = await agentChainWorkflowRepository.createGlobalRequest(workflow.id, requesterId);
-  ok(res, request);
+  void req;
+  res.status(403).json({ success: false, error: "Global workflow promotion is not available to organization admins" });
 }));
 
 router.get("/global-requests", asyncHandler(async (req: Request, res: Response) => {
-  const requesterId = getRequesterId(req);
-  if (!requesterId || !(await isClawAdmin(requesterId))) {
-    throw forbidden("Admin access required");
-  }
-  const scope = getAdminOrgScope(req, "/chain-workflows/global-requests");
-  // TODO(admin-org-scope): workflow_global_requests has no orgId; scope through requestedByUserId.
-  const requestUserIds = scope.orgId
-    ? await prisma.user.findMany({
-      where: { orgId: scope.orgId },
-      select: { id: true },
-    }).then((users) => users.map((u) => u.id))
-    : undefined;
-  const rows = await agentChainWorkflowRepository.listPendingGlobalRequests(requestUserIds);
-  // Attach requester display info (plain id → name/email).
-  const userIds = Array.from(new Set(rows.map((r) => r.requestedByUserId)));
-  const users = userIds.length
-    ? await prisma.user.findMany({ where: { id: { in: userIds } }, select: { id: true, name: true, email: true, orgId: true } })
-    : [];
-  const userMap = new Map(users.map((u) => [u.id, u]));
-  const orgNames = scope.allOrgs ? await getOrgNameMap(users.map((u) => u.orgId)) : new Map();
-  ok(res, rows.map((r) => {
-    const user = userMap.get(r.requestedByUserId);
-    return {
-      ...r,
-      ...(scope.allOrgs ? withOrgLabel({ orgId: user?.orgId ?? null }, orgNames) : {}),
-      requestedByUser: user ?? null,
-    };
-  }));
+  void req;
+  res.status(403).json({ success: false, error: "Global workflow promotion is not available to organization admins" });
 }));
 
 router.post("/global-requests/:id/approve", asyncHandler(async (req: Request<{ id: string }>, res: Response) => {
-  const requesterId = getRequesterId(req);
-  if (!requesterId || !(await isClawAdmin(requesterId))) {
-    throw forbidden("Admin access required");
-  }
-  const result = await agentChainWorkflowRepository.approveGlobalRequest(req.params.id, requesterId);
-  if (!result) {
-    throw new HttpError(409, "Request not found or no longer pending");
-  }
-  ok(res, result);
+  void req;
+  res.status(403).json({ success: false, error: "Global workflow promotion is not available to organization admins" });
 }));
 
 router.post("/global-requests/:id/reject", asyncHandler(async (req: Request<{ id: string }>, res: Response) => {
-  const requesterId = getRequesterId(req);
-  if (!requesterId || !(await isClawAdmin(requesterId))) {
-    throw forbidden("Admin access required");
-  }
-  const note = typeof (req.body as { note?: unknown })?.note === "string" ? (req.body as { note: string }).note : undefined;
-  const result = await agentChainWorkflowRepository.rejectGlobalRequest(req.params.id, requesterId, note);
-  ok(res, result);
+  void req;
+  res.status(403).json({ success: false, error: "Global workflow promotion is not available to organization admins" });
 }));
 
 router.post("/global-requests/:id/cancel", asyncHandler(async (req: Request<{ id: string }>, res: Response) => {
-  const requesterId = getRequesterId(req);
-  if (!requesterId) {
-    throw unauthorized("x-user-id required");
-  }
-  const reqRow = await agentChainWorkflowRepository.findGlobalRequestById(req.params.id);
-  if (!reqRow) {
-    throw notFound("Request not found");
-  }
-  const isAdmin = await isClawAdmin(requesterId);
-  if (!isAdmin && reqRow.requestedByUserId !== requesterId) {
-    throw forbidden("Not allowed to cancel this request");
-  }
-  const result = await agentChainWorkflowRepository.cancelGlobalRequest(req.params.id);
-  ok(res, result);
+  void req;
+  res.status(403).json({ success: false, error: "Global workflow promotion is not available to organization admins" });
 }));
 
 router.get("/:id", asyncHandler(async (req: Request<{ id: string }>, res: Response) => {
@@ -847,7 +806,7 @@ router.get("/:id", asyncHandler(async (req: Request<{ id: string }>, res: Respon
   const row = await agentChainWorkflowRepository.findWorkflowById(req.params.id);
   if (!row) throw notFound("Workflow not found");
 
-  const allowed = await canAccessWorkflow(requesterId, row.createdByUserId);
+  const allowed = await canAccessWorkflow(requesterId, row.createdByUserId, getOrgId(req));
   if (!allowed) throw forbidden("Not allowed to read this workflow");
 
   ok(res, row);
@@ -859,7 +818,7 @@ router.put("/:id", asyncHandler(async (req: Request<{ id: string }>, res: Respon
   const existing = await agentChainWorkflowRepository.findWorkflowById(req.params.id);
   if (!existing) throw notFound("Workflow not found");
 
-  const allowed = await canAccessWorkflow(requesterId, existing.createdByUserId);
+  const allowed = await canAccessWorkflow(requesterId, existing.createdByUserId, getOrgId(req));
   if (!allowed) throw forbidden("Not allowed to update this workflow");
 
   const { name, definition, isPublished, triggers, useCreatorCredentials } = req.body as {
@@ -943,7 +902,7 @@ router.delete("/:id", async (req: Request<{ id: string }>, res: Response) => {
     const existing = await agentChainWorkflowRepository.findWorkflowById(req.params.id);
     if (!existing) { res.status(404).json({ success: false, error: "Workflow not found" }); return; }
 
-    const allowed = await canAccessWorkflow(requesterId, existing.createdByUserId);
+    const allowed = await canAccessWorkflow(requesterId, existing.createdByUserId, getOrgId(req));
     if (!allowed) { res.status(403).json({ success: false, error: "Not allowed to delete this workflow" }); return; }
 
     // Delete all linked Spaces automations BEFORE removing the workflow. If any

@@ -164,7 +164,9 @@ function gatewayDisplayLabel(serviceName: string, backendId: string): string {
 }
 
 export async function buildAvailableToolsCatalog(tenantUniqueId: string | undefined, orgId: string): Promise<AvailableToolsCatalog> {
-  const gatewayTenant = tenantUniqueId ?? DEFAULT_GATEWAY_TENANT;
+  // Gateway support is intentionally disconnected, so service-registry tools
+  // must not be advertised in the integration catalog.
+  const gatewayTenant: string | undefined = undefined;
   const { SUBAGENT_DEFINITIONS } = await import("xyne-claw-shared");
 
   // Get MCP servers (available integrations)
@@ -554,6 +556,7 @@ router.post("/sync", requireClawAdmin, asyncHandler(async (req: Request, res: Re
 
   // Find all connections grouped by server type, pick one per type
   const connections = await prisma.userMcpConnection.findMany({
+    where: { user: { orgId: getOrgId(req)! } },
     include: { mcpServer: true },
     distinct: ["mcpServerId"],
   });

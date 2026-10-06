@@ -47,12 +47,13 @@ async function workspaceOf(req: Request): Promise<string | null> {
   const body = (req.body ?? {}) as { workspaceId?: unknown };
   const explicit = typeof body.workspaceId === "string" ? body.workspaceId.trim() : "";
   const fromQuery = typeof req.query["workspaceId"] === "string" ? req.query["workspaceId"].trim() : "";
-  if (explicit) return explicit;
-  if (fromQuery) return fromQuery;
-
   const userId = getClawUserId(req);
-  if (!userId || !spacesDbAvailable()) return null;
-  return getSpacesUserWorkspaceId(userId).catch(() => null);
+  const callerWorkspace = userId && spacesDbAvailable()
+    ? await getSpacesUserWorkspaceId(userId).catch(() => null)
+    : null;
+  const requested = explicit || fromQuery || null;
+  if (requested && callerWorkspace && requested !== callerWorkspace) return null;
+  return callerWorkspace ?? requested;
 }
 
 /**
@@ -89,8 +90,9 @@ const RUN_STALE_MS = Number(process.env["ENTITY_RUN_STALE_MS"] ?? 4 * 60 * 60_00
  * The transition is guarded on `status = 'RUNNING'`, so it is idempotent and
  * safe under concurrent reads.
  */
-async function loadRun(runId: string) {
-  const run = await prisma.entityExtractionRun.findUnique({ where: { id: runId } });
+async function loadRun(runId: string, workspaceId: string | null) {
+  if (!workspaceId) return null;
+  const run = await prisma.entityExtractionRun.findFirst({ where: { id: runId, workspaceId } });
   if (!run || run.status !== "RUNNING") return run;
 
   if (Date.now() - run.startedAt.getTime() <= RUN_STALE_MS) return run;
@@ -103,7 +105,7 @@ async function loadRun(runId: string) {
       completedAt: new Date(),
     },
   });
-  return prisma.entityExtractionRun.findUnique({ where: { id: runId } });
+  return prisma.entityExtractionRun.findFirst({ where: { id: runId, workspaceId } });
 }
 
 const NO_WORKSPACE =
@@ -158,14 +160,14 @@ router.post("/channels/:channelId/runs", async (req: Request, res: Response) => 
 
 /** GET /runs/:runId — run status and progress. */
 router.get("/runs/:runId", async (req: Request, res: Response) => {
-  const run = await loadRun(String(req.params["runId"] ?? ""));
+  const run = await loadRun(String(req.params["runId"] ?? ""), await workspaceOf(req));
   if (!run) return res.status(404).json({ error: "Run not found" });
   return res.json(run);
 });
 
 /** GET /runs/:runId/types — types awaiting approval, plus what was dropped. */
 router.get("/runs/:runId/types", async (req: Request, res: Response) => {
-  const run = await loadRun(String(req.params["runId"] ?? ""));
+  const run = await loadRun(String(req.params["runId"] ?? ""), await workspaceOf(req));
   if (!run) return res.status(404).json({ error: "Run not found" });
   if (!run.proposedTypes) {
     return res.status(409).json({ error: "Types not proposed yet", status: run.status });
@@ -185,7 +187,7 @@ router.get("/runs/:runId/types", async (req: Request, res: Response) => {
  * Anything not named in `approve` is skipped, so approving is explicit.
  */
 router.post("/runs/:runId/types", async (req: Request, res: Response) => {
-  const run = await loadRun(String(req.params["runId"] ?? ""));
+  const run = await loadRun(String(req.params["runId"] ?? ""), await workspaceOf(req));
   if (!run) return res.status(404).json({ error: "Run not found" });
   const workspaceId = run.workspaceId;
   if (!workspaceId) return res.status(400).json({ error: "Run has no workspace" });

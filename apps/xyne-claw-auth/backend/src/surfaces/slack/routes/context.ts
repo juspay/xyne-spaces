@@ -43,7 +43,7 @@ export async function resolveSlackAgentRequest(req: Request): Promise<SlackAgent
   // guessing slugs. Do not "correct" this to 403.
   if (!agent) return { ok: false, status: 404, error: "Agent not found" };
 
-  const platformAdmin = await isClawAdmin(userId);
+  const platformAdmin = await isClawAdmin(userId, agent.orgId ?? undefined);
   if (!platformAdmin && (sessionOrgId !== agent.orgId || !(await isOrgAdmin(userId, agent.orgId)))) {
     return { ok: false, status: 404, error: "Agent not found" };
   }

@@ -198,7 +198,7 @@ async function updateAgent(params: Record<string, unknown>, userId: string): Pro
 
   // Edit rights re-checked against the row, not the card.
   const share = await agentShareRepository.findByAgentAndUser(agent.id, userId);
-  const mayEdit = agent.ownerUserId === userId || share?.role === "EDITOR" || (await isClawAdmin(userId));
+  const mayEdit = agent.ownerUserId === userId || share?.role === "EDITOR" || (await isClawAdmin(userId, orgId));
   if (!mayEdit) {
     return { ok: false, error: `You don't have permission to change the agent "${slug}".` };
   }
@@ -312,7 +312,7 @@ async function updateSubagent(params: Record<string, unknown>, userId: string): 
   // Mirrors canEditSubagent in routes/subagents.ts: creator, EDITOR share, admin.
   const share = await subagentShareRepository.findBySubagentAndUser(existing.id, userId);
   const mayEdit =
-    existing.createdByUserId === userId || share?.role === "EDITOR" || (await isClawAdmin(userId));
+    existing.createdByUserId === userId || share?.role === "EDITOR" || (await isClawAdmin(userId, orgId));
   if (!mayEdit) {
     return { ok: false, error: `You don't have permission to change the subagent "${name}".` };
   }

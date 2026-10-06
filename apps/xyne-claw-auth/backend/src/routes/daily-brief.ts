@@ -315,7 +315,7 @@ router.put("/settings", asyncHandler(async (req: Request, res: Response) => {
   const userId = getRequesterId(req);
   const orgId = getOrgId(req);
   if (!userId || !orgId) throw unauthorized();
-  const admin = (await isClawAdmin(userId)) || (await isOrgAdmin(userId, orgId));
+  const admin = (await isClawAdmin(userId, orgId)) || (await isOrgAdmin(userId, orgId));
   if (!admin) throw forbidden("Only an org admin can change the daily brief agent");
   const body = req.body as { agentSlug?: unknown };
   if (body.agentSlug !== undefined && body.agentSlug !== null && typeof body.agentSlug !== "string") {

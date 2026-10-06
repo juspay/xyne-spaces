@@ -37,7 +37,6 @@ import {
 } from "../lib/session-context.js";
 import { executeTool as executeGatewayTool } from "../mcpgateway/services/execution.js";
 import {
-  defaultGatewayTenant,
   formatGatewayApprovalExecutionError,
   parseGatewayServerTypeForApproval,
   sanitizeApprovalToolError,
@@ -79,7 +78,10 @@ function sanitizeForLog(value: unknown): string {
 }
 
 const router = Router();
-const resolveGatewayTenantForApproval = defaultGatewayTenant;
+function resolveGatewayTenantForApproval(): string | null {
+  // Gateway support is intentionally disconnected.
+  return null;
+}
 
 /**
  * Flag a conversation's most-recent run as having touched a user-scoped
@@ -1796,7 +1798,7 @@ router.post("/action", pinAgentSlugFromHeader, verifySpacesSignature, async (req
           orgId: proposer.orgId,
           slug: targetAgentSlug,
           enabled: true,
-          ...visibleAgentWhereForRunningUser(callerUserId, await isClawAdmin(callerUserId)),
+          ...visibleAgentWhereForRunningUser(callerUserId, await isClawAdmin(callerUserId, proposer.orgId ?? undefined)),
         },
         select: {
           id: true,

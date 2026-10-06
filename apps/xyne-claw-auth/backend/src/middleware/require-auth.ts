@@ -20,10 +20,8 @@ const accessTokenRegistry = new WeakMap<Response, VerifiedCliToken>();
  * is set. Read-only: looks up the user's `orgId` and their `OrgMember.role` and
  * stamps `x-org-id` / `x-user-role` for downstream handlers (getTenantContext).
  *
- * Non-breaking and best-effort: if the user has no org yet (should not happen
- * post-backfill — JIT attaches new users to the default org, see users-jit.ts)
- * or the lookup fails, we simply leave the headers unset. Nothing downstream
- * requires them this phase.
+ * If the user has no org yet, the authenticated request is rejected by
+ * `requireOrgContext` before it reaches a tenant-owned route.
  *
  * Called only after the caller's identity is authenticated: browser-cookie auth
  * derives `userId` from Spaces, and S2S callers may pin `x-user-id` after the
@@ -37,13 +35,14 @@ async function attachOrgContext(req: Request, userId: string): Promise<void> {
     });
     if (!user?.orgId) return;
 
-    req.headers["x-org-id"] = user.orgId;
-
     const member = await prisma.orgMember.findUnique({
       where: { userId_orgId: { userId, orgId: user.orgId } },
-      select: { role: true },
+      select: { role: true, leftAt: true },
     });
-    if (member?.role) req.headers["x-user-role"] = member.role;
+    if (!member || member.leftAt) return;
+
+    req.headers["x-org-id"] = user.orgId;
+    if (member.role) req.headers["x-user-role"] = member.role;
   } catch (err) {
     log.warn(`[require-auth] attachOrgContext(${userId}) failed:`, err instanceof Error ? err.message : err);
   }
@@ -89,6 +88,19 @@ function stripClientOrgHeaders(req: Request): void {
   delete req.headers["x-spaces-user-id"];
   delete req.headers["x-spaces-workspace-id"];
   delete req.headers["x-spaces-org-member-id"];
+}
+
+/**
+ * Require organization context derived by verified authentication. This never
+ * reads client-supplied body, query, or org headers.
+ */
+export function requireOrgContext(req: Request, res: Response, next: NextFunction): void {
+  const orgId = req.headers["x-org-id"];
+  if (typeof orgId !== "string" || !orgId.trim()) {
+    res.status(403).json({ success: false, error: "Organization context required" });
+    return;
+  }
+  next();
 }
 
 export function s2sKeyMatches(provided: string | string[] | undefined): boolean {
@@ -350,7 +362,8 @@ export async function requireAuth(
       log.warn(`[require-auth] ensureUserExists(${userId}) failed:`, err instanceof Error ? err.message : err);
     });
     await stampVerifiedIdentity(req, spacesIdentity, "[require-auth]");
-    next();
+    // Derived tenant context for every authenticated user request.
+    requireOrgContext(req, res, next);
     return;
   }
 
@@ -370,7 +383,7 @@ export async function requireAuth(
       res.locals = res.locals ?? {};
       res.locals["accessToken"] = token;
       accessTokenRegistry.set(res, token);
-      next();
+      requireOrgContext(req, res, next);
       return;
     }
   }
@@ -381,7 +394,11 @@ export async function requireAuth(
     const pinnedUserId = await canonicalizeS2SIdentity(req, pinnedS2S);
     if (pinnedUserId) {
       await attachOrgContext(req, pinnedUserId);
+      requireOrgContext(req, res, next);
+      return;
     }
+    // Unbound internal callbacks have no caller org. They must authorize from
+    // the persisted resource they reference, not from request context.
     next();
     return;
   }
@@ -562,7 +579,7 @@ export async function requireUserAuth(
     log.warn(`[require-user-auth] ensureUserExists(${userId}) failed:`, err instanceof Error ? err.message : err);
   });
   await stampVerifiedIdentity(req, spacesIdentity, "[require-user-auth]");
-  next();
+  requireOrgContext(req, res, next);
 }
 
 /**

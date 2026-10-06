@@ -94,6 +94,7 @@ vi.mock("../../../lib/surface-adapter.js", () => ({
 vi.mock("../../../lib/agent-provider-config.js", () => ({
   resolveAgentProviderConfigs: mocks.resolveProviders,
   resolveSubagentProviderMode: vi.fn(() => "spaces"),
+  resolveUserLitellmApiKey: vi.fn(async () => undefined),
 }));
 
 vi.mock("../../../lib/session-context.js", () => ({ setSession: mocks.setSession }));

@@ -17,10 +17,9 @@ export const sharedProviderCredentialRepository = {
   findById: (id: string) =>
     prisma.sharedProviderCredential.findUnique({ where: { id } }),
 
-  /** Org rows + platform-wide rows (orgId NULL) — both are usable by the org. */
   listByOrg: (orgId: string) =>
     prisma.sharedProviderCredential.findMany({
-      where: { OR: [{ orgId }, { orgId: null }] },
+      where: { orgId },
       include: {
         agentBindings: {
           select: { agentId: true, provider: true, model: true, agent: { select: { slug: true, name: true } } },
@@ -30,7 +29,6 @@ export const sharedProviderCredentialRepository = {
     }),
 
   create: (data: {
-    /** null = platform-wide (CLAW_ADMIN only — enforced at the routes). */
     orgId: string | null;
     provider: string;
     name: string;

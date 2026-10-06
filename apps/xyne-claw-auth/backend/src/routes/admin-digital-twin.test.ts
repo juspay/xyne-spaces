@@ -1,9 +1,12 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { NextFunction, Request, Response } from "express";
 
+const TEST_ORG = "test-org-1";
+
 const mocks = vi.hoisted(() => ({
   userFindMany: vi.fn(),
   userCount: vi.fn(),
+  userFindUnique: vi.fn(),
   organizationFindMany: vi.fn(),
   enable: vi.fn(),
   disable: vi.fn(),
@@ -12,7 +15,7 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock("../db.js", () => ({
   prisma: {
-    user: { findMany: mocks.userFindMany, count: mocks.userCount },
+    user: { findMany: mocks.userFindMany, count: mocks.userCount, findUnique: mocks.userFindUnique },
     organization: { findMany: mocks.organizationFindMany },
   },
 }));
@@ -23,9 +26,16 @@ vi.mock("../middleware/agent-acl.js", () => ({
       res.status(403).json({ success: false, error: "CLAW_ADMIN required" });
       return;
     }
+    // Simulate requireClawAdmin setting x-org-id (via requireAuth upstream)
+    if (!req.headers["x-org-id"]) req.headers["x-org-id"] = TEST_ORG;
     next();
   },
   getRequesterId: (req: Request) => req.headers["x-user-id"] as string | undefined,
+  getOrgId: (req: Request) => req.headers["x-org-id"] as string | undefined,
+}));
+
+vi.mock("../lib/users-jit.js", () => ({
+  resolveCanonicalUserIdOrSelf: vi.fn((id: string) => Promise.resolve(id)),
 }));
 
 vi.mock("../services/adminDigitalTwinControl.js", () => ({
@@ -47,6 +57,8 @@ describe("admin Digital Twin router security", () => {
     vi.clearAllMocks();
     mocks.userFindMany.mockResolvedValue([]);
     mocks.userCount.mockResolvedValue(0);
+    // Default: target user belongs to the same org as the admin (TEST_ORG).
+    mocks.userFindUnique.mockResolvedValue({ orgId: TEST_ORG });
     mocks.organizationFindMany.mockResolvedValue([]);
     mocks.enable.mockResolvedValue({ enabledAt: new Date("2026-08-15T00:00:00.000Z"), backfillJobIds: [] });
     mocks.disable.mockResolvedValue({ cancelledJobs: 0 });
@@ -94,7 +106,7 @@ describe("admin Digital Twin router security", () => {
     await handler!(
       {
         params: { userId: "user-1" },
-        headers: { "x-test-role": "claw-admin", "x-user-id": "admin-1" },
+        headers: { "x-test-role": "claw-admin", "x-user-id": "admin-1", "x-org-id": TEST_ORG },
         body: { name: "Changed name", email: "changed@example.com", role: "CLAW_ADMIN" },
       } as unknown as Request,
       response,
@@ -116,7 +128,7 @@ describe("admin Digital Twin router security", () => {
     await handler!(
       {
         params: { userId: "user-2" },
-        headers: { "x-test-role": "claw-admin", "x-user-id": "admin-1" },
+        headers: { "x-test-role": "claw-admin", "x-user-id": "admin-1", "x-org-id": TEST_ORG },
         body: {
           backfill: null,
           name: "Changed name",
@@ -156,7 +168,7 @@ describe("admin Digital Twin router security", () => {
     await handler!(
       {
         query: { limit: "25", offset: "25", status: "enabled", search: "Ada", sort: "name_asc" },
-        headers: { "x-test-role": "claw-admin" },
+        headers: { "x-test-role": "claw-admin", "x-org-id": TEST_ORG },
       } as unknown as Request,
       response,
       vi.fn(),

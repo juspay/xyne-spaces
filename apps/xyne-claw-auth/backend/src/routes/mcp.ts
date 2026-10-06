@@ -93,9 +93,6 @@ function sanitizeForLog(value: unknown): string {
   return String(value).replace(/[\r\n]+/g, " ");
 }
 
-const DEFAULT_GATEWAY_TENANT = process.env.ALLOWED_TENANTS?.split(",")
-  .map((tenant) => tenant.trim())
-  .find((tenant) => tenant.length > 0);
 const loggedGlobalServerExclusions = new Set<string>();
 
 // Tools implemented locally by xyne-spaces-app-tools-server.ts (not part of the
@@ -113,9 +110,9 @@ function isStrictAgentToolsEnabled(): boolean {
 }
 
 function resolveGatewayTenantForRequest(): string | null {
-  // Do not trust caller-provided tenant headers for gateway selection.
-  // Gateway tenant context is deployment-scoped for this backend instance.
-  return DEFAULT_GATEWAY_TENANT ?? null;
+  // Gateway support is intentionally disconnected. Keep the implementation in
+  // place, but do not expose service discovery or execution through MCP.
+  return null;
 }
 
 async function resolveSessionAgentOrgId(userId: string, spacesAppId?: string): Promise<string | undefined> {
@@ -425,11 +422,11 @@ async function resolveServerNameForMcpCall(serverType: string, backendId?: strin
   }
 
   if (serverType === "xyne-spaces") {
-    const server = await prisma.mcpServer.findUnique({ where: { type: serverType }, select: { name: true } });
+    const server = await prisma.mcpServer.findFirst({ where: { type: serverType, orgId: null }, select: { name: true } });
     return server?.name ?? "Xyne Spaces";
   }
 
-  const server = await prisma.mcpServer.findUnique({ where: { type: serverType }, select: { name: true } });
+  const server = await prisma.mcpServer.findFirst({ where: { type: serverType, orgId: null }, select: { name: true } });
   return server?.name ?? serverType;
 }
 
@@ -540,7 +537,7 @@ async function postAgentCallProposal(
       orgId: context.orgId,
       slug: targetSlug,
       enabled: true,
-      ...visibleAgentWhereForRunningUser(context.userId, await isClawAdmin(context.userId)),
+      ...visibleAgentWhereForRunningUser(context.userId, await isClawAdmin(context.userId, context.orgId)),
     },
     select: { slug: true, name: true },
   });
@@ -993,6 +990,7 @@ async function buildMcpResolutionEntries(args: {
   runCtx: Awaited<ReturnType<typeof import("./webhook.js").getSession>> | null;
 }> {
   const { userId, sessionId, agentSlug, spacesAppId, sessionAgentTools } = args;
+  const sessionAgentOrgId = await resolveSessionAgentOrgId(userId, spacesAppId);
   // User connections + global-fallback servers (servers with allowGlobalFallback
   // = true AND a global cred row, where this user has NO personal connection).
   // Resolve as the union: the user gets to call tools for any server they
@@ -1006,10 +1004,10 @@ async function buildMcpResolutionEntries(args: {
   const globalServers = await prisma.mcpServer.findMany({
     where: {
       allowGlobalFallback: true,
-      // Org-scoped global creds: ANY row (org override or NULL-org default)
-      // makes the server listable; the loader picks the right row at call
-      // time (org override first, default second).
-      globalCredentials: { some: {} },
+      OR: sessionAgentOrgId ? [{ orgId: sessionAgentOrgId }, { orgId: null }] : [{ orgId: null }],
+      globalCredentials: sessionAgentOrgId
+        ? { some: { OR: [{ orgId: sessionAgentOrgId }, { orgId: null }] } }
+        : { some: {} },
       id: { notIn: Array.from(userServerIds) },
     },
   });
@@ -1064,7 +1062,7 @@ async function buildMcpResolutionEntries(args: {
     // server row exists — otherwise we'd strip Spaces access and silently
     // break the run. Keep the user server and log loudly instead.
     const appCreds = await getAppTokenCredentials(userId);
-    const appToolsRow = await prisma.mcpServer.findUnique({ where: { type: "xyne-spaces-app-tools" } });
+    const appToolsRow = await prisma.mcpServer.findFirst({ where: { type: "xyne-spaces-app-tools", orgId: null } });
     if (appCreds && appToolsRow) {
       automationAppSwap = true;
       let dropped = 0;
@@ -1096,7 +1094,7 @@ async function buildMcpResolutionEntries(args: {
   // xyne-spaces-app-tools for those runs.
   const hasSpacesEntry = entries.some((e) => e.serverType === "xyne-spaces");
   if (!hasSpacesEntry && !automationAppSwap && CONFIG.spacesDbUrl) {
-    const spacesServer = await prisma.mcpServer.findUnique({ where: { type: "xyne-spaces" } });
+    const spacesServer = await prisma.mcpServer.findFirst({ where: { type: "xyne-spaces", orgId: null } });
     log.info(`[mcp/tools] spaces virtual-entry check: mcpServerRow=${!!spacesServer}`);
     if (spacesServer) {
       entries.push({
@@ -1117,7 +1115,7 @@ async function buildMcpResolutionEntries(args: {
   // the runtime listToolsForUser path would never spawn the MCP server.
   const hasAppToolsEntry = entries.some((e) => e.serverType === "xyne-spaces-app-tools");
   if (!hasAppToolsEntry) {
-    const appToolsServer = await prisma.mcpServer.findUnique({ where: { type: "xyne-spaces-app-tools" } });
+    const appToolsServer = await prisma.mcpServer.findFirst({ where: { type: "xyne-spaces-app-tools", orgId: null } });
     if (appToolsServer) {
       entries.push({
         type: "user",
@@ -1133,8 +1131,8 @@ async function buildMcpResolutionEntries(args: {
   // from RESEARCH_AGENT_MCP_API_KEY for every agent/user.
   const hasResearchAgentMcpEntry = entries.some((e) => e.serverType === "research-agent-mcp");
   if (!hasResearchAgentMcpEntry && CONFIG.researchAgentMcpApiKey) {
-    const researchAgentMcpServer = await prisma.mcpServer.findUnique({
-      where: { type: "research-agent-mcp" },
+    const researchAgentMcpServer = await prisma.mcpServer.findFirst({
+      where: { type: "research-agent-mcp", orgId: null },
     });
     if (researchAgentMcpServer) {
       entries.push({
@@ -1152,7 +1150,7 @@ async function buildMcpResolutionEntries(args: {
   // without creating a user_mcp_connections row.
   const hasHeisenbergEntry = entries.some((e) => e.serverType === "heisenberg");
   if (!hasHeisenbergEntry) {
-    const heisenbergServer = await prisma.mcpServer.findUnique({ where: { type: "heisenberg" } });
+    const heisenbergServer = await prisma.mcpServer.findFirst({ where: { type: "heisenberg", orgId: null } });
     if (heisenbergServer?.enabled) {
       entries.push({ type: "global", serverType: "heisenberg", serverName: heisenbergServer.name, enforcementType: "virtual" });
       log.info(`[mcp/tools] added virtual heisenberg entry for userId=${userId}`);
@@ -1165,7 +1163,7 @@ async function buildMcpResolutionEntries(args: {
   if (!hasSlackEntry) {
     // runCtx fetched once above (automation app-mode block).
     if (runCtx?.slackDelivery?.surfaceAgentId && runCtx.slackDelivery.teamId) {
-      const slackServer = await prisma.mcpServer.findUnique({ where: { type: "slack" } });
+      const slackServer = await prisma.mcpServer.findFirst({ where: { type: "slack", orgId: null } });
       if (slackServer) {
         entries.push({ type: "user", serverType: "slack", serverName: slackServer.name, enforcementType: "virtual" });
         log.info(`[mcp/tools] added virtual slack entry (surface bot token) for userId=${userId}`);
@@ -1256,7 +1254,7 @@ router.get("/:sessionId/mcp/tools", async (req: Request<{ sessionId: string }>, 
 
     const results = await Promise.allSettled(
       listingEntries.map(async (entry) => {
-        if (!(await hasConnectorDefinition(entry.serverType))) return null;
+        if (!(await hasConnectorDefinition(entry.serverType, sessionAgentOrgId))) return null;
         const effective = entry.serverType === "slack"
           ? await loadEffectiveCredentialsWithSpacesFallback(
               userId,
@@ -1273,6 +1271,7 @@ router.get("/:sessionId/mcp/tools", async (req: Request<{ sessionId: string }>, 
           entry.serverName,
           effective.credentials,
           agentSlug,
+          { ...(sessionAgentOrgId ? { orgId: sessionAgentOrgId } : {}) },
         );
         return { entry, serverTools };
       }),
@@ -1709,7 +1708,7 @@ router.post("/:sessionId/mcp/call", async (req: Request<{ sessionId: string }>, 
         parseGatewayServerType,
         // Connector is the source of record for write tools, so the call gate's
         // open-palette check matches what the listing already showed.
-        (await resolveConnectorDefinition(serverType).catch(() => undefined))?.writeTools?.includes(tool),
+        (await resolveConnectorDefinition(serverType, sessionAgentOrgId).catch(() => undefined))?.writeTools?.includes(tool),
       ) &&
       // Custom-subagent escape hatch: tools referenced by the agent's enabled
       // subagent definitions are callable even though the agent's own config
@@ -1898,7 +1897,7 @@ router.post("/:sessionId/mcp/call", async (req: Request<{ sessionId: string }>, 
       return;
     }
 
-    if (!(await hasConnectorDefinition(serverType))) {
+    if (!(await hasConnectorDefinition(serverType, sessionAgentOrgId))) {
       res.status(400).json({ success: false, error: `No adapter for server type: ${serverType}` });
       return;
     }
@@ -1987,7 +1986,7 @@ router.post("/:sessionId/mcp/call", async (req: Request<{ sessionId: string }>, 
     }
 
     // Write tools always require approval — cannot be overridden by agent config
-    const definition = await resolveConnectorDefinition(serverType);
+    const definition = await resolveConnectorDefinition(serverType, sessionAgentOrgId);
     const isWriteTool = definition?.writeTools?.includes(tool) ?? false;
     const effectivePermission = isWriteTool ? "ask" : (permission ?? "allow");
 
@@ -2276,7 +2275,7 @@ router.post("/:sessionId/mcp/call", async (req: Request<{ sessionId: string }>, 
     const upstreamResult =
       serverType === "bitbucket"
         ? await callBitbucketThrottled(userId, credentials, tool, effectiveParams, agentSlug)
-        : await callTool(userId, serverType, credentials, tool, effectiveParams, agentSlug);
+        : await callTool(userId, serverType, credentials, tool, effectiveParams, agentSlug, undefined, sessionAgentOrgId);
     let result = upstreamResult;
 
     // Upstream mcp-grafana query tools (query_elasticsearch, …) run through
@@ -2507,12 +2506,12 @@ router.post("/:sessionId/actions/sign", async (req: Request<{ sessionId: string 
         // Registry match is the validation; fall through to signing.
       } else {
         // Revalidate non-gateway actions before issuing a signature.
-        if (!(await hasConnectorDefinition(serverType))) {
+        if (!(await hasConnectorDefinition(serverType, sessionAgentOrgId))) {
           res.status(400).json({ success: false, error: `No adapter for server type: ${serverType}` });
           return;
         }
 
-        const definition = await resolveConnectorDefinition(serverType);
+        const definition = await resolveConnectorDefinition(serverType, sessionAgentOrgId);
         const isWriteTool = definition?.writeTools?.includes(tool) ?? false;
         if (!isWriteTool) {
           res.status(400).json({ success: false, error: "Only write actions can be signed" });

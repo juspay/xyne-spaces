@@ -116,9 +116,9 @@ function dbRowAsListItem(
  * Return true if `userId` may edit/delete/share-manage this subagent. Owner,
  * CLAW_ADMIN, or any EDITOR share row qualifies.
  */
-async function canEditSubagent(row: NonNullable<DbRow>, userId: string): Promise<boolean> {
+async function canEditSubagent(row: NonNullable<DbRow>, userId: string, orgId?: string): Promise<boolean> {
   if (row.createdByUserId === userId) return true;
-  if (await isClawAdmin(userId)) return true;
+  if (await isClawAdmin(userId, orgId)) return true;
   const share = await subagentShareRepository.findBySubagentAndUser(row.id, userId);
   return share?.role === "EDITOR";
 }
@@ -236,7 +236,7 @@ router.put("/:name", asyncHandler(async (req: Request, res: Response) => {
     throw notFound("subagent not found");
   }
 
-  if (!(await canEditSubagent(existing, requesterId))) {
+  if (!(await canEditSubagent(existing, requesterId, getOrgId(req)))) {
     throw forbidden("Only the owner, contributors, or admins can update this subagent");
   }
 
@@ -290,7 +290,7 @@ router.delete("/:name", asyncHandler(async (req: Request, res: Response) => {
     log.warn(`[subagents/delete] subagent org-scoped miss name=${name} orgId=${getOrgId(req) ?? "none"} userId=${requesterId}`);
     throw notFound("subagent not found");
   }
-  if (!(await canEditSubagent(existing, requesterId))) {
+  if (!(await canEditSubagent(existing, requesterId, getOrgId(req)))) {
     throw forbidden("Only the owner, contributors, or admins can disable this subagent");
   }
   await subagentDefinitionRepository.disable(name, existing.orgId);
@@ -313,7 +313,7 @@ router.post("/:name/enable", asyncHandler(async (req: Request, res: Response) =>
     log.warn(`[subagents/restore] subagent org-scoped miss name=${name} orgId=${getOrgId(req) ?? "none"} userId=${requesterId}`);
     throw notFound("subagent not found");
   }
-  if (!(await canEditSubagent(existing, requesterId))) {
+  if (!(await canEditSubagent(existing, requesterId, getOrgId(req)))) {
     throw forbidden("Only the owner, contributors, or admins can re-enable this subagent");
   }
   const updated = await subagentDefinitionRepository.enable(name, existing.orgId);
@@ -360,7 +360,7 @@ router.post("/:name/shares", asyncHandler(async (req: Request, res: Response) =>
     log.warn(`[subagents/share] subagent org-scoped miss name=${name} orgId=${getOrgId(req) ?? "none"} userId=${requesterId}`);
     throw notFound("subagent not found");
   }
-  if (!(await canEditSubagent(row, requesterId))) {
+  if (!(await canEditSubagent(row, requesterId, getOrgId(req)))) {
     throw forbidden("Only the owner, contributors, or admins can add a contributor");
   }
 
@@ -417,7 +417,7 @@ router.delete("/:name/shares/:userId", asyncHandler(async (req: Request, res: Re
     log.warn(`[subagents/unshare] subagent org-scoped miss name=${name} orgId=${getOrgId(req) ?? "none"} userId=${requesterId} targetUserId=${userId}`);
     throw notFound("subagent not found");
   }
-  if (!(await canEditSubagent(row, requesterId))) {
+  if (!(await canEditSubagent(row, requesterId, getOrgId(req)))) {
     throw forbidden("Only the owner, contributors, or admins can remove a contributor");
   }
   await subagentShareRepository.delete(row.id, userId).catch(() => undefined);
@@ -442,7 +442,7 @@ async function resolveEditableSubagent(req: Request): Promise<NonNullable<DbRow>
   if (!requesterId) throw unauthorized("authentication required");
   const row = await subagentDefinitionRepository.findByName(name, getOrgId(req));
   if (!row) throw notFound("subagent not found");
-  if (!(await canEditSubagent(row, requesterId))) {
+  if (!(await canEditSubagent(row, requesterId, getOrgId(req)))) {
     throw forbidden("you do not have edit access to this subagent");
   }
   return row;
@@ -495,7 +495,7 @@ router.post("/:name/mcp/connections", asyncHandler(async (req: Request, res: Res
   if (nonOverridable !== undefined && typeof nonOverridable !== "boolean") {
     throw badRequest("nonOverridable must be a boolean");
   }
-  const server = await prisma.mcpServer.findUnique({ where: { type: mcpServerType } });
+  const server = await prisma.mcpServer.findFirst({ where: { type: mcpServerType, orgId: null } });
   if (!server) throw notFound(`Unknown mcpServerType: ${mcpServerType}`);
 
   const shape = await validateCredentials(server.type, credentials as Record<string, unknown>);
@@ -578,7 +578,7 @@ router.delete(
     const requesterId = getRequesterId(req)!;
     const { mcpServerType, instanceSlug } = req.params as { mcpServerType: string; instanceSlug: string };
     if (!isValidInstanceSlug(instanceSlug)) throw badRequest("Invalid instance slug");
-    const server = await prisma.mcpServer.findUnique({ where: { type: mcpServerType } });
+    const server = await prisma.mcpServer.findFirst({ where: { type: mcpServerType, orgId: null } });
     if (!server) throw notFound(`Unknown mcpServerType: ${mcpServerType}`);
 
     // deleteMany is idempotent: it removes the row if present and reports the

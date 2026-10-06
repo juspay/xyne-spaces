@@ -490,7 +490,7 @@ export async function persistRunStart(prepared: PreparedRun, rowSessionId?: stri
       .getConnection()
       .publish(
         "cc:events",
-        JSON.stringify({ type: "agent_start", sessionId, agentSlug: agentSlug || "assistant" }),
+        JSON.stringify({ type: "agent_start", sessionId, agentSlug: agentSlug || "assistant", orgId }),
       )
       .catch(() => {});
   }
@@ -529,7 +529,7 @@ async function persistDetachedRunStart(prepared: PreparedRun): Promise<void> {
     .getConnection()
     .publish(
       "cc:events",
-      JSON.stringify({ type: "agent_start", sessionId: prepared.sessionId, agentSlug: prepared.agentSlug || "assistant" }),
+      JSON.stringify({ type: "agent_start", sessionId: prepared.sessionId, agentSlug: prepared.agentSlug || "assistant", orgId: prepared.orgId }),
     )
     .catch(() => {});
 }
@@ -1051,7 +1051,7 @@ export async function prepareRun(
     const requestedCalleeSlugs = Array.isArray(toolsCfg?.callableAgents)
       ? (toolsCfg!.callableAgents as unknown[]).filter((x): x is string => typeof x === "string")
       : [];
-    const runningUserIsAdmin = await isClawAdmin(resolved.userId);
+    const runningUserIsAdmin = await isClawAdmin(resolved.userId, agent.orgId);
     const callableAgents =
       agent.delegationTier === "orchestrator"
         ? await resolveOrchestratorCallableAgentsForRun(prisma, agent.id, agent.orgId, {

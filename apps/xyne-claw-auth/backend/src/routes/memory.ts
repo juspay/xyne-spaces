@@ -23,7 +23,7 @@ import type { MemoryRecord, EntityGraphEdge } from "xyne-claw-shared";
 import { prisma } from "../db.js";
 import { agentRepository } from "../repositories/index.js";
 import { createLogger, createTraceId } from "../logger.js";
-import { requireAuth, requireUserAuth, s2sKeyMatches } from "../middleware/require-auth.js";
+import { requireStrictS2S, requireUserAuth, s2sKeyMatches } from "../middleware/require-auth.js";
 import { resolveClawUserIdForSpacesIdentity } from "../lib/users-jit.js";
 import { isClawAdmin, requireClawAdmin, getAgentEditAccess, getOrgId, getRequesterId } from "../middleware/agent-acl.js";
 import { curateApprovedTranscript, persistSubsystemReviews, readSessionTranscript, type SessionTranscript } from "../services/memoryCronService.js";
@@ -84,7 +84,11 @@ async function assertMemoryUserAccess(
   if (s2sKeyMatches(req.headers["x-s2s-key"])) return true;
   const requesterId = getRequesterId(req);
   if (requesterId && requesterId === targetUserId) return true;
-  if (requesterId && (await isClawAdmin(requesterId))) return true;
+  // Org boundary: the admin bypass only spans users in the admin's own org.
+  if (requesterId && (await isClawAdmin(requesterId, getOrgId(req)))) {
+    const targetUser = await prisma.user.findUnique({ where: { id: targetUserId }, select: { orgId: true } });
+    if (targetUser?.orgId && targetUser.orgId === getOrgId(req)) return true;
+  }
   res.status(403).json({ success: false, error: "You can only access your own memory files." });
   return false;
 }
@@ -100,7 +104,7 @@ export const memoryRouter = Router();
  * router which accepts x-s2s-key. Degrades to an empty list on any error so a
  * missing/slow file store never breaks a run.
  */
-memoryRouter.get("/agent-prompt-files", requireAuth, async (req, res) => {
+memoryRouter.get("/agent-prompt-files", requireStrictS2S, async (req, res) => {
   try {
     const userId = typeof req.query["userId"] === "string" ? req.query["userId"].trim() : "";
     const agentSlug =
@@ -146,7 +150,7 @@ memoryRouter.get("/agent-prompt-files", requireAuth, async (req, res) => {
  * Internal (S2S): deterministic file read for the mid-chat read-memory-file
  * tool. With `name` → that file's content; without → the list of file names.
  */
-memoryRouter.get("/agent-file", requireAuth, async (req, res) => {
+memoryRouter.get("/agent-file", requireStrictS2S, async (req, res) => {
   try {
     const userId = typeof req.query["userId"] === "string" ? req.query["userId"].trim() : "";
     const agentSlug =
@@ -183,7 +187,7 @@ memoryRouter.get("/agent-file", requireAuth, async (req, res) => {
  * Internal (S2S): mid-chat write-memory-file tool. mode "append" (default)
  * concatenates to the existing file; "replace" overwrites. Provenance "agent".
  */
-memoryRouter.post("/agent-file", requireAuth, async (req, res) => {
+memoryRouter.post("/agent-file", requireStrictS2S, async (req, res) => {
   try {
     const body = (req.body ?? {}) as {
       agentSlug?: unknown;
@@ -343,6 +347,7 @@ memoryRouter.get("/reviews", requireUserAuth, requireClawAdmin, async (req, res)
 
     const reviews = await prisma.pendingMemoryReview.findMany({
       where: {
+        orgId: getOrgId(req)!,
         status,
         ...(agentSlug ? { agentSlug } : {}),
       },
@@ -377,7 +382,7 @@ memoryRouter.get("/reviews", requireUserAuth, requireClawAdmin, async (req, res)
  */
 memoryRouter.patch("/review/:id", requireUserAuth, requireClawAdmin, async (req, res) => {
   const { action } = req.body as { action?: string };
-  await handleReviewAction((req.params["id"] as string) ?? "", action ?? "", res);
+  await handleReviewAction((req.params["id"] as string) ?? "", action ?? "", res, getOrgId(req));
 });
 
 /**
@@ -395,7 +400,7 @@ memoryRouter.post("/reviews/approve-all", requireUserAuth, requireClawAdmin, asy
     const { agentSlug } = (req.body ?? {}) as { agentSlug?: string };
     const BATCH = 200;
     const rows = await prisma.pendingMemoryReview.findMany({
-      where: { status: "pending", ...(agentSlug ? { agentSlug } : {}) },
+      where: { orgId: getOrgId(req)!, status: "pending", ...(agentSlug ? { agentSlug } : {}) },
       orderBy: { createdAt: "asc" },
       take: BATCH,
     });
@@ -421,7 +426,7 @@ memoryRouter.post("/reviews/approve-all", requireUserAuth, requireClawAdmin, asy
     }
 
     const remaining = await prisma.pendingMemoryReview.count({
-      where: { status: "pending", ...(agentSlug ? { agentSlug } : {}) },
+      where: { orgId: getOrgId(req)!, status: "pending", ...(agentSlug ? { agentSlug } : {}) },
     });
 
     logger.info("[memory] approve-all complete", { agentSlug: agentSlug ?? "(all)", approved, failed, remaining, by: getRequesterId(req) });
@@ -444,7 +449,7 @@ memoryRouter.post("/reviews/reject-all", requireUserAuth, requireClawAdmin, asyn
   try {
     const { agentSlug } = (req.body ?? {}) as { agentSlug?: string };
     const result = await prisma.pendingMemoryReview.updateMany({
-      where: { status: "pending", ...(agentSlug ? { agentSlug } : {}) },
+      where: { orgId: getOrgId(req)!, status: "pending", ...(agentSlug ? { agentSlug } : {}) },
       data: { status: "rejected", updatedAt: new Date() },
     });
     logger.info("[memory] reject-all complete", { agentSlug: agentSlug ?? "(all)", rejected: result.count, by: getRequesterId(req) });
@@ -514,6 +519,7 @@ async function handleReviewAction(
   reviewId: string,
   action: string,
   res: import("express").Response,
+  orgId?: string,
 ): Promise<void> {
   if (!reviewId || (action !== "approve" && action !== "reject")) {
     res.status(400).json({ success: false, error: "action must be 'approve' or 'reject'" });
@@ -524,6 +530,10 @@ async function handleReviewAction(
     const review = await prisma.pendingMemoryReview.findUnique({ where: { id: reviewId } });
     if (!review) {
       res.status(404).json({ success: false, error: "Review not found" });
+      return;
+    }
+    if (orgId && review.orgId !== orgId) {
+      res.status(403).json({ success: false, error: "Review does not belong to your organization" });
       return;
     }
     if (review.status !== "pending") {
@@ -597,6 +607,11 @@ memoryRouter.post("/banks/:agentSlug/retention-sweep", requireClawAdmin, async (
     if (body.maxInvalidations !== undefined
       && (!Number.isInteger(body.maxInvalidations) || (body.maxInvalidations as number) < 1)) {
       res.status(400).json({ success: false, error: "maxInvalidations must be a positive integer" });
+      return;
+    }
+    const agent = await agentRepository.findBySlug(agentSlug, getOrgId(req));
+    if (!agent) {
+      res.status(404).json({ success: false, error: "Agent not found" });
       return;
     }
     const summary = await runRetentionSweep(agentSlug, {
@@ -758,7 +773,7 @@ memoryRouter.get("/banks/:agentSlug/memories", requireUserAuth, async (req, res)
     // so a caller must not read another user's personal records by passing an
     // arbitrary `userTag` (or scope=user). Only an admin may query across
     // users; everyone else is pinned to their own user-tag.
-    const isAdmin = requesterId ? await isClawAdmin(requesterId) : false;
+    const isAdmin = requesterId ? await isClawAdmin(requesterId, getOrgId(req)) : false;
     if (!isAdmin && userTag && userTag.startsWith("user:")) {
       const canonicalTag = await canonicalTwinTag(userTag, requesterId);
       if (!canonicalTag) {
@@ -766,6 +781,20 @@ memoryRouter.get("/banks/:agentSlug/memories", requireUserAuth, async (req, res)
         return;
       }
       userTag = canonicalTag;
+    } else if (isAdmin && userTag && userTag.startsWith("user:")) {
+      // Org boundary: an admin may inspect another user's memories, but
+      // only within their own org. Cross-org userTag lookups are blocked.
+      const targetUserId = userTag.slice(5);
+      if (targetUserId && targetUserId !== requesterId) {
+        const targetUser = await prisma.user.findUnique({
+          where: { id: targetUserId },
+          select: { orgId: true },
+        });
+        if (!targetUser || targetUser.orgId !== getOrgId(req)) {
+          res.status(403).json({ success: false, error: "userTag must belong to your organization" });
+          return;
+        }
+      }
     }
     const listFilter: { limit: number; offset: number; search?: string; tags?: string[] } = {
       limit: take,
@@ -1364,10 +1393,22 @@ memoryRouter.post("/banks/:agentSlug/recall", requireUserAuth, async (req, res) 
       // Pin to the requester's own user-scope unless they're an admin —
       // otherwise any logged-in user could probe another user's personal
       // memories stored in a shared bank by passing userId=<victim>.
-      const isAdmin = requesterId ? await isClawAdmin(requesterId) : false;
+      const isAdmin = requesterId ? await isClawAdmin(requesterId, getOrgId(req)) : false;
       if (!isAdmin && userId !== requesterId) {
         res.status(403).json({ success: false, error: "userId must match the requesting user" });
         return;
+      }
+      // Org boundary: an admin may recall another user's memories, but only
+      // within their own org.
+      if (isAdmin && userId !== requesterId) {
+        const targetUser = await prisma.user.findUnique({
+          where: { id: userId },
+          select: { orgId: true },
+        });
+        if (!targetUser || targetUser.orgId !== getOrgId(req)) {
+          res.status(403).json({ success: false, error: "userId must belong to your organization" });
+          return;
+        }
       }
       tags.push(`user:${userId}`);
     }
@@ -1551,7 +1592,7 @@ memoryRouter.post("/banks/:agentSlug/consolidate", requireUserAuth, async (req, 
         res.status(404).json({ success: false, error: "Agent not found" });
         return;
       }
-      const admin = await isClawAdmin(requesterId);
+      const admin = await isClawAdmin(requesterId, getOrgId(req));
       if (!admin && !(await canMaintainAgentMemory(req, agentSlug, requesterId))) {
         res.status(403).json({ success: false, error: "Only the agent owner, an editor, or an admin can trigger consolidation." });
         return;
@@ -1660,7 +1701,7 @@ memoryRouter.post("/banks/:agentSlug/memories/import", requireUserAuth, async (r
         res.status(404).json({ success: false, error: "Agent not found" });
         return;
       }
-      const admin = await isClawAdmin(requesterId);
+      const admin = await isClawAdmin(requesterId, getOrgId(req));
       if (!admin && !(await canMaintainAgentMemory(req, agentSlug, requesterId))) {
         res.status(403).json({ success: false, error: "Only the agent owner, an editor, or an admin can import memories." });
         return;
@@ -1813,7 +1854,7 @@ memoryRouter.post("/banks/:agentSlug/upload-md", requireUserAuth, async (req, re
       res.status(404).json({ success: false, error: "Agent not found" });
       return;
     }
-    const admin = await isClawAdmin(userId);
+    const admin = await isClawAdmin(userId, getOrgId(req));
     if (!admin && !(await canMaintainAgentMemory(req, agentSlug, userId))) {
       res.status(403).json({ success: false, error: "Only the agent owner, an editor, or an admin can upload memory documents." });
       return;
@@ -1981,6 +2022,10 @@ memoryRouter.get("/batches/:id", requireUserAuth, async (req, res) => {
       res.status(404).json({ success: false, error: "Batch not found" });
       return;
     }
+    if (batch.orgId !== getOrgId(req)) {
+      res.status(404).json({ success: false, error: "Batch not found" });
+      return;
+    }
 
     const previews: Array<{
       sessionId: string;
@@ -2034,6 +2079,10 @@ memoryRouter.post("/batches/:id/approve", requireUserAuth, requireClawAdmin, asy
       res.status(404).json({ success: false, error: "Batch not found" });
       return;
     }
+    if (batch.orgId !== getOrgId(req)) {
+      res.status(403).json({ success: false, error: "Batch does not belong to your organization" });
+      return;
+    }
     if (batch.status !== "pending") {
       // Idempotent: surface the current terminal state instead of relaunching.
       res.json({
@@ -2073,8 +2122,8 @@ memoryRouter.post("/batches/:id/approve", requireUserAuth, requireClawAdmin, asy
  * claw-auth had separate filesystems). Bulk-inserts with skipDuplicates so
  * a network retry can't double-count.
  *
- * Authenticated via the same requireAuth middleware as the rest of this
- * router — claw passes x-s2s-key (CONFIG.xyneClawS2sKey).
+ * Strict S2S only — claw passes x-s2s-key (CONFIG.xyneClawS2sKey). Browser
+ * requests must not be able to manufacture recall telemetry for other users.
  */
 interface RecallHitInput {
   agentSlug: string;
@@ -2086,7 +2135,7 @@ interface RecallHitInput {
   recalledAt: string;
 }
 
-memoryRouter.post("/recall-hits", requireAuth, async (req, res) => {
+memoryRouter.post("/recall-hits", requireStrictS2S, async (req, res) => {
   try {
     const body = (req.body ?? {}) as { hits?: RecallHitInput[] };
     const hits = Array.isArray(body.hits) ? body.hits : [];
@@ -2147,6 +2196,18 @@ memoryRouter.post("/recall-hits", requireAuth, async (req, res) => {
 memoryRouter.post("/batches/:id/reject", requireUserAuth, requireClawAdmin, async (req, res) => {
   try {
     const batchId = req.params["id"] as string;
+    const batch = await prisma.pendingBatchReview.findUnique({
+      where: { id: batchId },
+      select: { orgId: true },
+    });
+    if (!batch) {
+      res.status(404).json({ success: false, error: "Batch not found" });
+      return;
+    }
+    if (batch.orgId !== getOrgId(req)) {
+      res.status(403).json({ success: false, error: "Batch does not belong to your organization" });
+      return;
+    }
     const ok = await rejectBatch(batchId);
     if (!ok) {
       res.status(404).json({ success: false, error: "Batch not found" });
@@ -2560,7 +2621,7 @@ memoryRouter.post("/banks/:agentSlug/clear-all", requireUserAuth, async (req, re
     // Deliberately owner/admin-only (NOT canMaintainAgentMemory): clearing the
     // bank is irreversible and destroys work belonging to every user of the
     // agent, so an editor must not be able to do it.
-    const admin = await isClawAdmin(userId);
+    const admin = await isClawAdmin(userId, getOrgId(req));
     if (!admin && agent.ownerUserId !== userId) {
       res.status(403).json({ success: false, error: "Only the agent owner or an admin can clear all memories." });
       return;
@@ -2624,7 +2685,7 @@ memoryRouter.delete("/banks/:agentSlug/subsystems/:subsystem", requireUserAuth, 
     }
     // Deliberately owner/admin-only (NOT canMaintainAgentMemory) — same
     // rationale as clear-all: irreversible, and shared across the agent's users.
-    const admin = await isClawAdmin(userId);
+    const admin = await isClawAdmin(userId, getOrgId(req));
     if (!admin && agent.ownerUserId !== userId) {
       res.status(403).json({ success: false, error: "Only the agent owner or an admin can delete a subsystem." });
       return;
@@ -2686,7 +2747,7 @@ memoryRouter.post("/banks/:agentSlug/upload-session", requireUserAuth, async (re
       res.status(404).json({ success: false, error: "Agent not found" });
       return;
     }
-    const admin = await isClawAdmin(userId);
+    const admin = await isClawAdmin(userId, getOrgId(req));
     if (!admin && !(await canMaintainAgentMemory(req, agentSlug, userId))) {
       res.status(403).json({ success: false, error: "Only the agent owner, an editor, or an admin can upload sessions." });
       return;
