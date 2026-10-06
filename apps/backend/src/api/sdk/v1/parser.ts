@@ -255,9 +255,8 @@ export const V1_PARSERS: Readonly<Record<string, V1Parser>> = {
     // The controller resolves this as the call's external id.
     args: { callId: args.callId },
   }),
-  'calls.leave': (_args): V1Parsed => ({
-    // The call id travels in the path.
-    args: {},
+  'calls.leave': (args): V1Parsed => ({
+    args: { callId: args.callId },
   }),
   'calls.reject': (args): V1Parsed => ({
     args: { callId: args.callId, timestamp: now() },
@@ -550,7 +549,7 @@ export const V1_PARSERS: Readonly<Record<string, V1Parser>> = {
   }),
   'channels.linkBoards': (args): V1Parsed => {
     // Keyed by board id, so the caller can tell which mapping is which board's.
-    const mappingIds = newIdMap(args.boardIds);
+    const mappingIds = newIdMap(Array.isArray(args.boardIds) ? args.boardIds : []);
     return {
       args: {
         channelId: args.channelId,
