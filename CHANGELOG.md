@@ -1,3 +1,10 @@
+## [1.465.4](https://github.com/juspay/xyne-spaces/compare/v1.465.3...v1.465.4) (2026-10-06)
+
+
+### Bug Fixes
+
+* bump shell-quote override to 1.11.0 to clear CRITICAL Trivy gate (CVE-2026-102422) ([#2722](https://github.com/juspay/xyne-spaces/issues/2722)) ([15fe32b](https://github.com/juspay/xyne-spaces/commit/15fe32bb7554c601be83b1cbaf25078969d21cfb))
+
 ## [1.465.3](https://github.com/juspay/xyne-spaces/compare/v1.465.2...v1.465.3) (2026-10-06)
 
 
