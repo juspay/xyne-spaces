@@ -289,6 +289,44 @@ class SearchMetricsService {
     };
     logger.info(Event.VESPA_SEARCH_SHOW_RESULTS, event as unknown as Record<string, unknown>);
   }
+
+  /**
+   * Record the user's starred count when the palette opens, so the latest sample per user is
+   * their starred-item count. Sampled on open rather than on each star toggle: stars change
+   * from several surfaces (sidebar drag, header, info panel, support), and the count at open
+   * time is what the user actually sees in the palette.
+   */
+  trackStarredSnapshot(params: { userId: string; starredCount: number }): void {
+    const platform = detectPlatform();
+    logger.info(Event.CMDK_STARRED_SNAPSHOT, {
+      user_id: params.userId,
+      starred_count: params.starredCount,
+      platform,
+    });
+  }
+
+  /**
+   * Track a click on a starred channel from the palette.
+   */
+  trackStarredClick(params: {
+    userId: string;
+    channelId: string;
+    rankPosition: number;
+    starredCount: number;
+    hasQuery: boolean;
+    tab: TabType;
+  }): void {
+    const platform = detectPlatform();
+    logger.info(Event.CMDK_STARRED_CLICK, {
+      user_id: params.userId,
+      channel_id: params.channelId,
+      rank_position: params.rankPosition,
+      starred_count: params.starredCount,
+      has_query: params.hasQuery,
+      tab: params.tab,
+      platform,
+    });
+  }
 }
 
 // Singleton instance
