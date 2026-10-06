@@ -126,22 +126,30 @@ export const facebookGraphClient = {
     return response.data;
   },
 
-  // Link that opens the comment on Facebook. Comment ids are digits and underscores; validate
-  // before putting one in the URL.
-  async getCommentPermalink(pageAccessToken: string, commentId: string): Promise<string | null> {
-    if (!/^[0-9_]{1,128}$/.test(commentId)) return null;
+  // Permalink and author of a post or comment. Meta may withhold either for privacy, or refuse
+  // the read entirely for content on other people's timelines. Ids are digits and underscores;
+  // validate before putting one in the URL.
+  async getPostOrComment(
+    pageAccessToken: string,
+    objectId: string,
+  ): Promise<{ permalink_url?: string; from?: { id?: string; name?: string } } | null> {
+    if (!/^[0-9_]{1,128}$/.test(objectId)) return null;
     try {
-      const response = await axios.get<{ permalink_url?: string }>(`${FB_BASE_URL}/${commentId}`, {
-        params: { fields: 'permalink_url' },
+      const response = await axios.get<{
+        permalink_url?: string;
+        from?: { id?: string; name?: string };
+      }>(`${FB_BASE_URL}/${objectId}`, {
+        params: { fields: 'permalink_url,from' },
         ...bearer(pageAccessToken),
       });
-      return response.data.permalink_url ?? null;
+      return response.data;
     } catch {
       return null;
     }
   },
 
-  // Display name of a Messenger sender. PSIDs are numeric; validate before putting one in the URL.
+  // Display name of a person or Page by id (a Messenger sender, a post author). Ids are
+  // numeric; validate before putting one in the URL.
   async getSenderName(pageAccessToken: string, psid: string): Promise<string | null> {
     if (!/^[0-9]{1,64}$/.test(psid)) return null;
     try {

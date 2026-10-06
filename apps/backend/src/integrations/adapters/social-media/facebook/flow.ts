@@ -23,17 +23,8 @@ export function facebookPageIdsInPayload(rawPayload: unknown): string[] {
   return [...new Set((payload.entry ?? []).map((entry) => entry.id).filter(Boolean))];
 }
 
-/** Link to the comment, or to its post when there is no comment or Meta won't give its permalink. */
-async function commentPermalink(
-  pageAccessToken: string,
-  commentId: string | undefined,
-  postId: string | undefined,
-): Promise<string | undefined> {
-  const permalink = commentId
-    ? await facebookGraphClient.getCommentPermalink(pageAccessToken, commentId)
-    : null;
-  return permalink ?? (postId ? `https://www.facebook.com/${postId}` : undefined);
-}
+const postLink = (postId: string | undefined): string | undefined =>
+  postId ? `https://www.facebook.com/${postId}` : undefined;
 
 export class FacebookFlow extends BaseFlow {
   async preprocess(
@@ -126,18 +117,38 @@ export class FacebookFlow extends BaseFlow {
             commentId: isReply ? value.parent_id : value.comment_id,
             rawCommentId: value.comment_id,
             postId: value.post_id,
-            permalink: await commentPermalink(pageAccessToken, value.comment_id, value.post_id),
+            permalink:
+              (await facebookGraphClient.getPostOrComment(pageAccessToken, value.comment_id))
+                ?.permalink_url ?? postLink(value.post_id),
             timestamp: value.created_time ? value.created_time * 1000 : Date.now(),
           });
         } else if (change.field === 'mention') {
           const value = change.value as FacebookMentionValue;
           if (value.verb && value.verb !== 'add') continue;
-          if (!value.post_id || value.sender_id === pageId) continue;
+          if (!value.post_id) continue;
 
           const isComment = value.item === 'comment' && !!value.comment_id;
           // A comment on this Page's own post also arrives through `feed`, which threads it
           // correctly; taking the mention too would open a second ticket for the same comment.
           if (isComment && value.post_id.startsWith(`${pageId}_`)) continue;
+
+          // The mention webhook often carries no sender_id/sender_name, but the Graph API
+          // returns the author and permalink of the post or comment that did the mentioning.
+          const mentioning = await facebookGraphClient.getPostOrComment(
+            pageAccessToken,
+            isComment && value.comment_id ? value.comment_id : value.post_id,
+          );
+          // Last resort for a post: its id is "{authorId}_{postId}".
+          const senderId =
+            value.sender_id ??
+            mentioning?.from?.id ??
+            (isComment ? undefined : value.post_id.split('_')[0]);
+          if (senderId === pageId) continue;
+          const senderName =
+            value.sender_name ??
+            mentioning?.from?.name ??
+            (senderId ? await facebookGraphClient.getSenderName(pageAccessToken, senderId) : null) ??
+            'Facebook user';
 
           logger.info(`${TAG} Incoming mention`, {
             item: value.item,
@@ -147,12 +158,12 @@ export class FacebookFlow extends BaseFlow {
           });
           comments.push({
             type: 'mention',
-            senderName: value.sender_name ?? value.sender_id ?? 'unknown',
-            senderId: value.sender_id ?? '',
+            senderName,
+            senderId: senderId ?? '',
             text: value.message ?? '',
             ...(isComment && { commentId: value.comment_id, rawCommentId: value.comment_id }),
             postId: value.post_id,
-            permalink: await commentPermalink(pageAccessToken, value.comment_id, value.post_id),
+            permalink: mentioning?.permalink_url ?? postLink(value.post_id),
             timestamp: value.created_time ? value.created_time * 1000 : Date.now(),
           });
         }
