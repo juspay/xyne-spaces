@@ -28,6 +28,7 @@ import { BullSchedulerAdapter } from './adapters/scheduler';
 import { WorkflowStorageAdapter } from './adapters/storage';
 import { XyneWorkflowAuthorizer } from './authorizer';
 import { DEFAULT_CRON_TIMEZONE } from './constants';
+import { readNameFromMetadata } from './utils';
 import type { XyneCtx, XyneFilter } from './types';
 
 /** The SDK logs through the host's logger rather than owning one. */
@@ -145,6 +146,16 @@ export const workflowRuntime = new WorkflowRuntime<Record<string, unknown>, Xyne
     baseUrl: BASE_URL,
     defaultCronTimezone: DEFAULT_CRON_TIMEZONE,
     approval: APPROVAL_POLICY,
+    // The SDK's root scope is this host's workspace. Supplying this makes the
+    // runtime announce every run change on the root:<workspaceId> topic too —
+    // the feed behind the unscoped Executions list — carrying the workflow name
+    // so a new row renders without a refetch. The id comes from the workflow's
+    // own attributes (stamped at creation), so it needs no caller context.
+    rootScope: (workflow) => {
+      if (!workflow.attributes) return undefined;
+      const name = readNameFromMetadata(workflow.metadata);
+      return { id: workflow.attributes.workspaceId, ...(name !== null ? { name } : {}) };
+    },
   },
 });
 

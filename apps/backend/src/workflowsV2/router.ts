@@ -304,6 +304,7 @@ const mount = (
     authenticate: () => {
       throw Object.assign(new Error('Unauthorized'), { statusCode: 401 });
     },
+    rootId: (ctx) => ctx.workspaceId,
   });
 
   for (const route of routes) {
