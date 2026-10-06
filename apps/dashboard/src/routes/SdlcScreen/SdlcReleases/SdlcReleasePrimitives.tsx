@@ -3,6 +3,7 @@ import { GitBranch, Search } from 'lucide-react';
 import { Button } from '../../../components/ui/Button';
 import { Input } from '../../../components/ui/Input';
 import { Tooltip } from '../../../components/ui/Tooltip';
+import { getStageStatusMeta, StageStatusIcon } from '../../../utils/board/stageStatusIcon';
 import { cn } from '../../../utils/classNames';
 import { TRACK_CATEGORY } from './SdlcReleases.utils';
 
@@ -38,6 +39,22 @@ export function EllipsisText({
           <span aria-hidden className='absolute inset-y-0 right-0 w-[1.25em]' />
         </Tooltip>
       )}
+    </span>
+  );
+}
+
+export function StagePill({ name, status }: { name: string; status: string }): ReactElement {
+  const meta = getStageStatusMeta(status);
+  return (
+    <span
+      className={cn(
+        'inline-flex shrink-0 items-center gap-1 whitespace-nowrap rounded-[5px] px-1.5 py-[3px] text-[10.5px] font-bold uppercase tracking-[0.08em]',
+        meta.bgColor,
+      )}
+      style={{ color: meta.cssVar }}
+    >
+      <StageStatusIcon status={status} />
+      {name}
     </span>
   );
 }

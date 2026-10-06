@@ -1,17 +1,29 @@
-import { useCallback, useDeferredValue, useMemo, useState, type ReactElement } from 'react';
-import { ArrowLeft, Clock, ListChecks, SearchX, Sparkles } from 'lucide-react';
+import {
+  useCallback,
+  useDeferredValue,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactElement,
+  type SyntheticEvent,
+} from 'react';
+import { ArrowLeft, Clock, ListChecks, Plus, SearchX, Sparkles } from 'lucide-react';
 import {
   BoardType,
   ReleaseTrackingMode,
   TicketPriority,
   resolveTicketDescription,
+  type Ticket,
 } from '@xyne/shared';
 import { Button } from '../../../components/ui/Button';
 import { Tooltip } from '../../../components/ui/Tooltip';
 import { ThreadMessages } from '../../../components/Chat/ThreadPannel';
+import UserAvatar, { AvatarShape, AvatarSize } from '../../../components/UserAvatar/UserAvatar';
 import { ReleaseStagePicker } from '../../../components/Release/ReleaseStagePicker';
 import { ReleaseTimeline } from '../../../components/Release/ReleaseTimeline';
 import { buildStagesByBoard } from '../../../components/Release/releaseChanges.utils';
+import { UserSelector } from '../../../components/Tickets/CreateTicketModal/UserSelector';
 import type { TicketFilters } from '../../../components/Tickets/TicketFilters/types';
 import { TicketFilterChips } from '../../../components/Tickets/TicketsHeader/TicketFilterChips';
 import { TicketSearchInput } from '../../../components/Tickets/TicketsHeader/TicketSearchInput';
@@ -19,6 +31,7 @@ import { hasAnyFilterChip } from '../../../components/Tickets/TicketsHeader/filt
 import { useCachedQuery } from '../../../hooks/useCachedQuery';
 import { useAllChannels } from '../../../hooks/useChannels';
 import { useCanManageRelease } from '../../../hooks/usePermissions';
+import { usePlatform } from '../../../hooks/usePlatform';
 import { useScrollFade } from '../../../hooks/useScrollFade';
 import { useUserGroups } from '../../../hooks/useUserGroup';
 import { useUsersById } from '../../../hooks/useUsers';
@@ -36,13 +49,19 @@ import { TableGroupSection } from '../../KanbanBoardScreen/TableGroupSection';
 import { DEFAULT_VISIBLE_COLUMNS } from '../../KanbanBoardScreen/KanbanBoardScreen.utils';
 import type {
   ReleaseRepositoryRow,
+  ReleaseTicketQa,
   SdlcReleaseBreadcrumbProps,
   SdlcReleaseDetailProps,
   SdlcReleaseRepo,
   SdlcReleaseThreadProps,
 } from './SdlcReleases.types';
 import { TRACK_CATEGORY, formatReleaseDate, releaseTitle, repoPath } from './SdlcReleases.utils';
-import { useReleaseRepositories, useRerunReleaseAnalysis } from './useSdlcReleases';
+import {
+  useAssignReleaseQa,
+  useReleaseFieldEditor,
+  useReleaseRepositories,
+  useRerunReleaseAnalysis,
+} from './useSdlcReleases';
 import { InfoCard, RepoPill } from './SdlcReleasePrimitives';
 import { SdlcReleaseChanges } from './SdlcReleaseChanges';
 
@@ -50,9 +69,17 @@ type DetailTab = 'tickets' | 'changes' | 'timeline';
 
 const TICKET_PAGE_SIZE = 50;
 const TAG_PAGE_SIZE = 50;
-const TICKETS_FADE_PX = 48;
+const SCROLL_FADE_PX = 48;
 const PRIORITIES = Object.values(TicketPriority);
 const TICKET_COLUMNS = new Set([...DEFAULT_VISIBLE_COLUMNS, 'stage']);
+const QA_PICKER_ANALYTICS = {
+  category: TRACK_CATEGORY,
+  searchName: 'SearchReleaseQa',
+  optionName: 'SelectReleaseQa',
+  clearName: 'UnassignReleaseQa',
+  optionTrackId: 'release_qa_assign',
+  clearTrackId: 'release_qa_unassign',
+};
 
 export function SdlcReleaseDetail({
   releaseId,
@@ -76,6 +103,16 @@ export function SdlcReleaseDetail({
     () => [...new Set((devTicketLinks ?? []).map(link => link.ticketId))].sort(),
     [devTicketLinks],
   );
+  const qaByTicketId = useMemo(() => {
+    const map = new Map<string, ReleaseTicketQa>();
+    for (const link of devTicketLinks ?? []) {
+      const entry = map.get(link.ticketId) ?? { artIds: [], testedBy: null };
+      entry.artIds.push(link.id);
+      entry.testedBy ??= link.testedBy ?? null;
+      map.set(link.ticketId, entry);
+    }
+    return map;
+  }, [devTicketLinks]);
   const [devTickets, devTicketsStatus] = useCachedQuery(
     queries.ticketsByIds({ ticketIds: devTicketIds }),
     { enabled: devTicketIds.length > 0 },
@@ -99,6 +136,8 @@ export function SdlcReleaseDetail({
     [changes],
   );
 
+  const tabFade = useScrollFade<HTMLDivElement>('y', SCROLL_FADE_PX);
+
   if (!release) {
     if (releaseStatus.type !== 'complete') return <div className='flex-1' />;
     return (
@@ -115,7 +154,6 @@ export function SdlcReleaseDetail({
   }
 
   const creator = usersById.get(release.createdBy);
-  const summary = htmlToPlainText(resolveTicketDescription(release));
   const linksLoaded = devTicketLinksStatus.type === 'complete';
   const noTickets = linksLoaded && devTicketIds.length === 0;
   const ticketsLoaded = devTicketsStatus.type === 'complete';
@@ -141,10 +179,11 @@ export function SdlcReleaseDetail({
           </span>
           {repos.length > 1 && repo && <RepoPill name={repo.name} />}
         </div>
-        <h1 className='mb-2 mt-3 text-[30px] font-bold tracking-[-0.02em] text-foreground'>
-          {releaseTitle(release)}
-        </h1>
-        {summary && <p className='text-[15px] leading-normal text-muted-foreground'>{summary}</p>}
+        <ReleaseTitle releaseId={release.id} xyneId={release.xyneId} title={release.title} />
+        <ReleaseDescription
+          releaseId={release.id}
+          description={resolveTicketDescription(release)}
+        />
 
         <DetailTabs
           active={tab}
@@ -168,13 +207,19 @@ export function SdlcReleaseDetail({
                 releaseId={release.id}
                 canRerun={repo?.config?.mode !== ReleaseTrackingMode.VERSION}
                 tickets={activeDevTickets}
+                qaByTicketId={qaByTicketId}
                 projectId={release.projectId}
                 onOpenTicket={onOpenTicket}
               />
             )
           ))}
         {tab !== 'tickets' && (
-          <div className='-mx-0.5 mt-5 min-h-0 flex-1 overflow-y-auto px-0.5 pb-14'>
+          <div
+            ref={tabFade.ref}
+            onScroll={tabFade.onScroll}
+            style={tabFade.style}
+            className='no-scrollbar -mx-0.5 mt-5 min-h-0 flex-1 overflow-y-auto px-0.5 pb-14'
+          >
             {tab === 'changes' && (
               <SdlcReleaseChanges
                 release={release}
@@ -291,6 +336,222 @@ export function SdlcReleaseThread({
   );
 }
 
+function ReleaseTitle({
+  releaseId,
+  xyneId,
+  title,
+}: {
+  releaseId: string;
+  xyneId: string | null;
+  title: string;
+}): ReactElement {
+  const canManage = useCanManageRelease();
+  const { editing, draft, setDraft, start, finish, cancel } = useReleaseFieldEditor(
+    releaseId,
+    'title',
+    title,
+  );
+  const inputRef = useRef<HTMLInputElement>(null);
+  const prefix = xyneId ? `${xyneId}\u00A0·\u00A0` : '';
+
+  useEffect(() => {
+    const el = inputRef.current;
+    if (!editing || !el) return;
+    el.focus();
+    el.select();
+  }, [editing]);
+
+  const headingClass =
+    'mb-2 mt-3 break-words text-[30px] font-bold tracking-[-0.02em] text-foreground';
+  const lineClass = '-mx-2 rounded-lg px-2';
+
+  const headingText = (
+    <>
+      {xyneId && <span className='whitespace-nowrap'>{title ? prefix : xyneId}</span>}
+      {title}
+    </>
+  );
+
+  if (!canManage) return <h1 className={headingClass}>{headingText}</h1>;
+
+  if (editing) {
+    return (
+      <div
+        role='presentation'
+        onMouseDown={e => {
+          if (e.target === inputRef.current) return;
+          e.preventDefault();
+          inputRef.current?.focus();
+        }}
+        className={cn(
+          headingClass,
+          lineClass,
+          'flex cursor-text items-center bg-muted/50 ring-1 ring-inset ring-border',
+        )}
+      >
+        {prefix && (
+          <span className='shrink-0 select-none whitespace-pre text-muted-foreground'>
+            {prefix}
+          </span>
+        )}
+        <input
+          ref={inputRef}
+          type='text'
+          value={draft}
+          onChange={e => setDraft(e.target.value)}
+          onBlur={finish}
+          onKeyDown={e => {
+            if (e.key === 'Enter') finish();
+            if (e.key === 'Escape') cancel();
+          }}
+          aria-label='Release title'
+          className='min-w-0 flex-1 bg-transparent outline-none'
+          data-track-category={TRACK_CATEGORY}
+          data-track-name='EditReleaseTitle'
+        />
+      </div>
+    );
+  }
+
+  return (
+    <h1 className={headingClass}>
+      <span
+        role='button'
+        tabIndex={0}
+        onClick={start}
+        onKeyDown={e => {
+          if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault();
+            start();
+          }
+        }}
+        className={cn(lineClass, 'block cursor-text hover:bg-muted/50')}
+        data-track-category={TRACK_CATEGORY}
+        data-track-name='StartEditReleaseTitle'
+      >
+        {headingText}
+      </span>
+    </h1>
+  );
+}
+
+function ReleaseDescription({
+  releaseId,
+  description,
+}: {
+  releaseId: string;
+  description: string;
+}): ReactElement | null {
+  const canManage = useCanManageRelease();
+  const { isMac } = usePlatform();
+  const { editing, draft, setDraft, start, finish, cancel } = useReleaseFieldEditor(
+    releaseId,
+    'description',
+    description,
+  );
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const summary = useMemo(() => htmlToPlainText(description), [description]);
+
+  useEffect(() => {
+    const el = textareaRef.current;
+    if (!editing || !el) return;
+    el.focus();
+    el.setSelectionRange(el.value.length, el.value.length);
+  }, [editing]);
+
+  useEffect(() => {
+    const el = textareaRef.current;
+    if (!editing || !el) return;
+    el.style.height = '0px';
+    el.style.height = `${Math.min(el.scrollHeight, window.innerHeight * 0.4)}px`;
+  }, [editing, draft]);
+
+  if (!canManage) {
+    return summary ? (
+      <p className='whitespace-pre-wrap break-words text-[15px] leading-normal text-muted-foreground'>
+        {summary}
+      </p>
+    ) : null;
+  }
+
+  if (editing) {
+    return (
+      <div className='-mx-2.5 rounded-xl border border-border bg-background'>
+        <textarea
+          ref={textareaRef}
+          value={draft}
+          onChange={e => setDraft(e.target.value)}
+          onBlur={finish}
+          onKeyDown={e => {
+            if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
+              e.preventDefault();
+              finish();
+            } else if (e.key === 'Escape') {
+              cancel();
+            }
+          }}
+          placeholder='Add description'
+          className='min-h-[96px] w-full resize-none overflow-y-auto bg-transparent px-2.5 py-2 text-[15px] leading-normal text-foreground outline-none placeholder:text-muted-foreground'
+          data-track-category={TRACK_CATEGORY}
+          data-track-name='EditReleaseDescription'
+        />
+        <div className='flex items-center gap-[9px] border-t border-border/60 px-2.5 py-2'>
+          <Button
+            size='sm'
+            onMouseDown={e => e.preventDefault()}
+            onClick={finish}
+            data-track-category={TRACK_CATEGORY}
+            data-track-name='SaveReleaseDescription'
+          >
+            Save
+          </Button>
+          <button
+            type='button'
+            onMouseDown={e => e.preventDefault()}
+            onClick={cancel}
+            className='text-[12.5px] font-medium text-muted-foreground transition-colors hover:text-foreground'
+            data-track-category={TRACK_CATEGORY}
+            data-track-name='CancelReleaseDescription'
+          >
+            Cancel
+          </button>
+          <span className='ml-auto flex items-center gap-1.5 text-[11.5px] text-muted-foreground'>
+            <span className='rounded-[5px] border border-border bg-background px-[5px] py-0.5 font-mono text-[11px] font-medium'>
+              {isMac ? '⌘↵' : 'Ctrl↵'}
+            </span>
+            to save
+          </span>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div
+      role='button'
+      tabIndex={0}
+      onClick={start}
+      onKeyDown={e => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          start();
+        }
+      }}
+      className='-mx-2.5 cursor-text rounded-xl border border-transparent px-2.5 py-2 transition-colors hover:border-border'
+      data-track-category={TRACK_CATEGORY}
+      data-track-name='StartEditReleaseDescription'
+    >
+      {summary ? (
+        <p className='whitespace-pre-wrap break-words text-[15px] leading-normal text-muted-foreground'>
+          {summary}
+        </p>
+      ) : (
+        <p className='text-[15px] italic leading-normal text-muted-foreground'>Add description</p>
+      )}
+    </div>
+  );
+}
+
 function DetailTabs({
   tabs,
   active,
@@ -338,17 +599,20 @@ function TicketsTab({
   releaseId,
   canRerun,
   tickets,
+  qaByTicketId,
   projectId,
   onOpenTicket,
 }: {
   releaseId: string;
   canRerun: boolean;
   tickets: readonly { id: string; xyneId: string; title: string }[];
+  qaByTicketId: ReadonlyMap<string, ReleaseTicketQa>;
   projectId: string;
   onOpenTicket: (ticketId: string) => void;
 }): ReactElement {
   const [scroller, setScroller] = useState<HTMLDivElement | null>(null);
-  const fade = useScrollFade<HTMLDivElement>('y', TICKETS_FADE_PX);
+  const [tabElement, setTabElement] = useState<HTMLDivElement | null>(null);
+  const fade = useScrollFade<HTMLDivElement>('y', SCROLL_FADE_PX);
   const fadeRef = fade.ref;
   const scrollerRef = useCallback(
     (element: HTMLDivElement | null): void => {
@@ -365,6 +629,23 @@ function TicketsTab({
   const canManage = useCanManageRelease();
   const usersById = useUsersById();
   const userGroups = useUserGroups();
+  const assignQa = useAssignReleaseQa();
+  const renderQaPill = useCallback(
+    (ticket: Ticket): ReactElement | null => {
+      const qa = qaByTicketId.get(ticket.id);
+      if (!qa) return null;
+      const owner = qa.testedBy ? usersById.get(qa.testedBy) : undefined;
+      return (
+        <ReleaseQaPill
+          artIds={qa.artIds}
+          testedBy={qa.testedBy}
+          ownerName={owner ? getUserDisplayName(owner) : null}
+          onAssign={assignQa}
+        />
+      );
+    },
+    [qaByTicketId, usersById, assignQa],
+  );
   const channels = useAllChannels();
   const [projectTags] = useCachedQuery(
     queries.projectTagsByProjectId({ projectId, limit: TAG_PAGE_SIZE, start: null }),
@@ -414,7 +695,7 @@ function TicketsTab({
   const isFiltered = hasAnyFilterChip(filters, showOverdueOnly);
 
   return (
-    <div className='mt-5 flex min-h-0 flex-1 flex-col gap-3 pb-6'>
+    <div ref={setTabElement} className='relative mt-5 flex min-h-0 flex-1 flex-col gap-3 pb-6'>
       <div className='flex min-h-[30px] shrink-0 flex-wrap items-center gap-x-2 gap-y-[7px]'>
         <TicketSearchInput
           value={searchValue}
@@ -468,11 +749,65 @@ function TicketsTab({
               visibleColumns={TICKET_COLUMNS}
               isComfortView={false}
               availableTags={availableTags}
+              renderRowExtras={renderQaPill}
+              bulkActionsContainer={tabElement}
             />
           </div>
         </div>
       </div>
     </div>
+  );
+}
+
+function ReleaseQaPill({
+  artIds,
+  testedBy,
+  ownerName,
+  onAssign,
+}: ReleaseTicketQa & {
+  ownerName: string | null;
+  onAssign: (artIds: readonly string[], userId: string | null) => void;
+}): ReactElement {
+  const stopRowInteraction = (e: SyntheticEvent): void => e.stopPropagation();
+
+  return (
+    <UserSelector
+      selectedUserId={testedBy}
+      onUserSelect={userId => onAssign(artIds, userId)}
+      variant='compact'
+      placeholder='Assign QA'
+      triggerTooltip={testedBy ? `QA · ${ownerName ?? 'Unknown'}` : 'Assign QA'}
+      analytics={QA_PICKER_ANALYTICS}
+      renderTrigger={() => (
+        <button
+          type='button'
+          aria-label={testedBy ? 'Change QA' : 'Assign QA'}
+          onClick={stopRowInteraction}
+          onKeyDown={stopRowInteraction}
+          className={cn(
+            'flex h-6 max-w-[150px] shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full border text-xs transition-colors hover:bg-muted',
+            testedBy
+              ? 'border-border pl-0.5 pr-2.5 text-foreground'
+              : 'border-dashed border-border px-2.5 text-muted-foreground hover:text-foreground',
+          )}
+          data-track-category={TRACK_CATEGORY}
+          data-track-name='OpenReleaseQaPicker'
+        >
+          {testedBy ? (
+            <>
+              <UserAvatar userId={testedBy} size={AvatarSize.SM} shape={AvatarShape.CIRCULAR} />
+              <span className='text-muted-foreground'>QA</span>
+              <span className='truncate'>{ownerName?.split(' ')[0] ?? 'Unknown'}</span>
+            </>
+          ) : (
+            <>
+              <Plus className='size-3' />
+              QA
+            </>
+          )}
+        </button>
+      )}
+    />
   );
 }
 
