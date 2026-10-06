@@ -177,7 +177,20 @@ describe("forged session cookies cannot mint fresh buckets", () => {
     expect((await fetch(`${baseUrl}/ping`, { headers: { "x-test-viewer": "viewer-b" } })).status).toBe(200);
   });
 
-  it("sign-in limiter keys on the address, so rotating cookies does not reset it", async () => {
+  it("connector OAuth limiter gives each verified user their own bucket", async () => {
+    await startWith((m) => (req, res, next) => {
+      const user = req.headers["x-test-user"];
+      if (typeof user === "string") req.headers["x-user-id"] = user;
+      return m.oauthLimiter(req, res, next);
+    });
+    for (let i = 0; i < 10; i += 1) {
+      await fetch(`${baseUrl}/ping`, { headers: { "x-test-user": "user-a" } });
+    }
+    expect((await fetch(`${baseUrl}/ping`, { headers: { "x-test-user": "user-a" } })).status).toBe(429);
+    expect((await fetch(`${baseUrl}/ping`, { headers: { "x-test-user": "user-b" } })).status).toBe(200);
+  });
+
+  it("connector OAuth limiter is not reset by rotating forged cookies when no user is verified", async () => {
     await startWith((m) => m.oauthLimiter);
     const statuses: number[] = [];
     for (let i = 0; i < 11; i += 1) {
@@ -185,35 +198,5 @@ describe("forged session cookies cannot mint fresh buckets", () => {
     }
     expect(statuses.slice(0, 10).every((s) => s === 200)).toBe(true);
     expect(statuses[10]).toBe(429);
-  });
-
-  it("per-address flood limiter caps a caller that rotates cookies past the per-session limiter", async () => {
-    process.env["IP_FLOOD_LIMIT_PER_MIN"] = "3";
-    try {
-      await startWith((m) => (req, res, next) =>
-        m.ipFloodLimiter(req, res, (err?: unknown) => (err ? next(err) : m.apiLimiter(req, res, next))),
-      );
-      const statuses: number[] = [];
-      for (let i = 0; i < 5; i += 1) {
-        statuses.push((await fetch(`${baseUrl}/ping`, { headers: { cookie: fakeCookie(i) } })).status);
-      }
-      expect(statuses).toEqual([200, 200, 200, 429, 429]);
-    } finally {
-      delete process.env["IP_FLOOD_LIMIT_PER_MIN"];
-    }
-  });
-
-  it("flood limiter never limits a valid S2S caller", async () => {
-    process.env["IP_FLOOD_LIMIT_PER_MIN"] = "2";
-    try {
-      await startWith((m) => m.ipFloodLimiter);
-      const statuses: number[] = [];
-      for (let i = 0; i < 6; i += 1) {
-        statuses.push((await fetch(`${baseUrl}/ping`, { headers: { "x-s2s-key": "s2s-secret" } })).status);
-      }
-      expect(statuses.every((s) => s === 200)).toBe(true);
-    } finally {
-      delete process.env["IP_FLOOD_LIMIT_PER_MIN"];
-    }
   });
 });

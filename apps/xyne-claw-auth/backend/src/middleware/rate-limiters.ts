@@ -83,12 +83,6 @@ export function createRequesterLimiter(options: {
 export const apiLimiter: RateLimitRequestHandler = createRequesterLimiter({ windowMs: 60 * 1000, max: 600 });
 
 
-export const ipFloodLimiter: RateLimitRequestHandler = createRequesterLimiter({
-  windowMs: 60 * 1000,
-  max: Number(process.env["IP_FLOOD_LIMIT_PER_MIN"] ?? 3000),
-  keyGenerator: clientIpKey,
-});
-
 export const publicShareLimiter: RateLimitRequestHandler = createRequesterLimiter({
   windowMs: 60 * 1000,
   max: 60,
@@ -111,7 +105,7 @@ export function sampleClientIp(req: Request): void {
 export const oauthLimiter: RateLimitRequestHandler = rateLimit({
   windowMs: 60 * 1000,
   max: 10,
-  keyGenerator: clientIpKey,
+  keyGenerator: identityOrIpKey,
   message: {
     success: false,
     error: "Too many sign-in attempts. Please wait a moment and try again.",
