@@ -6,6 +6,7 @@
 import type { MouseEvent, ReactElement, ReactNode } from 'react';
 import {
   ChevronDown,
+  ChevronLeft,
   ChevronRight,
   PanelLeft,
   Plus,
@@ -287,6 +288,57 @@ export function SdlcHubHeader(props: {
         data-track-metadata={JSON.stringify({ place: 'hub-header' })}
       >
         <UserPlus className='size-4' />
+      </button>
+    </div>
+  );
+}
+
+/**
+ * The sidebar's head while it shows a folder's explorer: the same rail toggle the hub
+ * header leads with, then the way back to the track the folder is in — where the hub
+ * header has the hub's name.
+ */
+export function SdlcExplorerHeader(props: {
+  open: boolean;
+  collapsed: boolean;
+  trackName: string;
+  onToggleRail: () => void;
+  onBack: () => void;
+}): ReactElement {
+  const toggle = (
+    <button
+      type='button'
+      onClick={props.onToggleRail}
+      title={props.collapsed ? 'Pin the sidebar open' : 'Collapse to icons'}
+      aria-label={props.collapsed ? 'Pin the sidebar open' : 'Collapse to icons'}
+      className={cn(HEADER_ICON_BUTTON, 'text-sidebar-foreground/60')}
+      data-track-category='SdlcHub'
+      data-track-name='SidebarRailToggled'
+    >
+      <PanelLeft className='size-4' />
+    </button>
+  );
+
+  if (!props.open) {
+    return <div className='mb-2 flex h-10 shrink-0 items-center justify-center'>{toggle}</div>;
+  }
+
+  return (
+    <div className='mb-2 flex h-10 shrink-0 items-center gap-0.5 pl-2'>
+      {toggle}
+      <button
+        type='button'
+        onClick={props.onBack}
+        title={`Back to ${props.trackName}`}
+        aria-label={`Back to ${props.trackName}`}
+        className='flex h-8 min-w-0 flex-1 items-center gap-1 rounded-lg px-1.5 text-left transition-colors hover:bg-sidebar-accent focus:outline-none focus-visible:ring-1 focus-visible:ring-sidebar-accent-ring'
+        data-track-category='SdlcHub'
+        data-track-name='ExplorerBack'
+      >
+        <ChevronLeft className='size-4 shrink-0 text-sidebar-foreground/60' />
+        <span className='min-w-0 truncate text-base font-semibold leading-normal text-sidebar-accent-foreground'>
+          {props.trackName}
+        </span>
       </button>
     </div>
   );
