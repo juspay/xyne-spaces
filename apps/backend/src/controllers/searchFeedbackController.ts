@@ -86,7 +86,7 @@ export class SearchFeedbackController {
           ? sort.trim().slice(0, MAX_SORT_LENGTH)
           : undefined;
 
-      const result = await searchFeedbackService.postFeedback({
+      await searchFeedbackService.postFeedback({
         userId: user.id,
         workspaceId: user.workspaceId,
         query: safeQuery,
@@ -96,7 +96,7 @@ export class SearchFeedbackController {
         source: source as SearchFeedbackSource,
       });
 
-      res.json({ success: true, data: result });
+      res.json({ success: true });
     } catch (error) {
       if (error instanceof SearchFeedbackUnavailableError) {
         res.status(409).json({ success: false, error: error.message });

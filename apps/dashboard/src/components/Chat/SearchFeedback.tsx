@@ -169,8 +169,8 @@ const SearchFeedbackForm = ({
             , with your search query and filters included.
           </>
         ) : (
-          // Destination not loaded yet or unavailable; posting still works.
-          <>Posts to the search team, with your search query and filters included.</>
+          // No names: the channel is in another workspace (or not loaded yet). Posting still works.
+          <>Note: some extra information will be included, including your search query.</>
         )}
       </p>
     </>

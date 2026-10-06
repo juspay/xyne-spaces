@@ -1,5 +1,3 @@
-import { escapeHtml } from '@/utils/htmlEscape';
-
 /** Where the feedback was sent from. A fixed set, so the message never echoes client text here. */
 export type SearchFeedbackSource = 'cmdk' | 'search_results';
 
@@ -17,12 +15,15 @@ const FILTER_SEPARATOR = ' · ';
 const NO_FILTERS = 'None';
 
 export interface SearchFeedbackContentParams {
-  /** Group mention HTML, or null if the group wasn't found. */
-  groupMentionHtml: string | null;
-  /** Reporter mention HTML, or null if the user wasn't found. */
-  reporterMentionHtml: string | null;
-  /** Plain reporter name, used when there's no mention HTML. */
+  /** Xyne user group to tag, or null to post without a tag. */
+  userGroupId: string | null;
+  /**
+   * Reporter to mention, or null to name them in plain text. Only set when the reporter is in the
+   * channel's workspace: the webhook resolves `<@id>` there, so anyone else would show as unknown.
+   */
+  reporterMentionId: string | null;
   reporterName: string;
+  reporterEmail: string | null;
   query: string;
   feedback: string;
   /** Active filter labels as shown in the UI, e.g. `@Ch`, `from:alice`, `"ab"`. */
@@ -55,16 +56,27 @@ export function formatFeedbackTimestamp(when: Date, timeZone: string): string {
 }
 
 /**
- * Builds the HTML message posted to the feedback channel.
- *
- * All user input is escaped. The mention HTML is inserted as-is: it's built by the caller,
- * and the notification code needs the exact markup to detect the mentions.
+ * Slack's text escaping. The webhook passes raw `<…>` through as HTML and turns `<!subteam^…>` /
+ * `<@…>` into mentions, so every user value goes through this: typed text can't add markup or
+ * ping anyone.
  */
-export function buildSearchFeedbackContent(params: SearchFeedbackContentParams): string {
+function escapeSlackText(text: string): string {
+  return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+/**
+ * Builds the message sent to the incoming webhook, in Slack's text format (the webhook's format).
+ * The webhook turns `<!subteam^id>` into a group mention, `*x*` into bold and `> x` into a quote.
+ *
+ * The reporter is mentioned only when they're in the channel's workspace (see
+ * `reporterMentionId`); otherwise they're named in plain text with their email.
+ */
+export function buildSearchFeedbackText(params: SearchFeedbackContentParams): string {
   const {
-    groupMentionHtml,
-    reporterMentionHtml,
+    userGroupId,
+    reporterMentionId,
     reporterName,
+    reporterEmail,
     query,
     feedback,
     filters,
@@ -75,41 +87,43 @@ export function buildSearchFeedbackContent(params: SearchFeedbackContentParams):
     timeZone,
   } = params;
 
-  const reporter = reporterMentionHtml ?? `@${escapeHtml(reporterName)}`;
+  const reporter = reporterMentionId
+    ? `<@${reporterMentionId}>`
+    : reporterEmail
+      ? `*${escapeSlackText(reporterName)}* (${escapeSlackText(reporterEmail)})`
+      : `*${escapeSlackText(reporterName)}*`;
   const headline = `New search feedback from ${reporter}`;
   const lines: string[] = [];
 
-  lines.push(groupMentionHtml ? `${groupMentionHtml} ${headline}` : headline);
+  lines.push(userGroupId ? `<!subteam^${userGroupId}> ${headline}` : headline);
   lines.push('');
   // The comment is optional; without one the message goes straight to the details.
   if (feedback.trim()) {
-    lines.push(`<em>"${escapeHtml(feedback)}"</em>`);
+    for (const line of feedback.trim().split('\n')) {
+      lines.push(`> ${escapeSlackText(line)}`);
+    }
     lines.push('');
   }
-  lines.push(
-    query.trim()
-      ? `<strong>Query:</strong> ${escapeHtml(query)}`
-      : '<strong>Query:</strong> <em>(empty)</em>'
-  );
+  lines.push(`*Query:* ${query.trim() ? escapeSlackText(query.trim()) : '_(empty)_'}`);
 
   const appliedFilters = filters.map((f) => f.trim()).filter(Boolean);
   lines.push(
-    `<strong>Filters:</strong> ${
-      appliedFilters.length > 0 ? appliedFilters.map(escapeHtml).join(FILTER_SEPARATOR) : NO_FILTERS
+    `*Filters:* ${
+      appliedFilters.length > 0
+        ? appliedFilters.map(escapeSlackText).join(FILTER_SEPARATOR)
+        : NO_FILTERS
     }`
   );
 
   if (sort?.trim()) {
-    lines.push(`<strong>Sort:</strong> ${escapeHtml(sort.trim())}`);
+    lines.push(`*Sort:* ${escapeSlackText(sort.trim())}`);
   }
 
-  lines.push(`<strong>Surface:</strong> ${escapeHtml(SOURCE_LABELS[source])}`);
+  lines.push(`*Surface:* ${SOURCE_LABELS[source]}`);
   lines.push(
-    `<strong>Workspace:</strong> ${
-      workspaceName.trim() ? escapeHtml(workspaceName.trim()) : '<em>(unknown)</em>'
-    }`
+    `*Workspace:* ${workspaceName.trim() ? escapeSlackText(workspaceName.trim()) : '_(unknown)_'}`
   );
-  lines.push(`<strong>When:</strong> ${escapeHtml(formatFeedbackTimestamp(when, timeZone))}`);
+  lines.push(`*When:* ${formatFeedbackTimestamp(when, timeZone)}`);
 
-  return lines.join('<br/>');
+  return lines.join('\n');
 }

@@ -1,51 +1,46 @@
 import { db } from '@/database/client';
 import { logger } from '@/utils/logger';
+import { config } from '@/config/env';
 import { CacConfigService } from '@/services/cacConfigService';
-import {
-  formatGroupMention,
-  formatUserMention,
-} from '@/bots/implementations/qa-alert-bot/alert-formatting';
-import { buildUserQueryContext } from '@/utils/queryContext';
-import {
-  countFeedbackGroupMembers,
-  findFeedbackChannelById,
-  findFeedbackGroupByHandle,
-  findFeedbackGroupById,
-  findFeedbackWorkspaceName,
-  notifyFeedbackPosted,
-  postFeedbackMessage,
-} from '@/bypassAcl/searchFeedbackServices';
 import { UserRepository } from '@/database/repositories/users';
 import { sanitizeForLog } from '@/git-providers/github/apis';
 import {
-  buildSearchFeedbackContent,
+  buildSearchFeedbackText,
   type SearchFeedbackSource,
 } from '@/services/searchFeedbackMessage';
 
 /**
- * Superposition (CAC) key for where feedback is posted.
- * Value: `{ "channelId": "...", "userGroupId": "..." }`. Resolved per `workspaceId`, so a
- * workspace override wins and every other workspace gets the default config.
+ * Superposition (CAC) key for where feedback is posted. Resolved per `workspaceId`, so a
+ * workspace override wins and every other workspace gets the default config. Value:
+ * `{ "workspaceId", "appId", "userGroupId", "channelName", "groupHandle" }`.
+ *
+ * `workspaceId` + `appId` identify an incoming webhook: an app installed in the channel's
+ * workspace, with a webhook bound to the feedback channel. The webhook's secret is the env var
+ * SEARCH_FEEDBACK_WEBHOOK_SECRET, so config only holds ids. The webhook posts as the app, in the
+ * channel's own workspace, so the message, the group ping and notifications all resolve there.
  */
 const FEEDBACK_TARGET_CAC_KEY = 'search_feedback_target';
 
 interface SearchFeedbackTarget {
-  channelId?: string;
+  workspaceId?: string;
+  appId?: string;
   userGroupId?: string;
+  channelName?: string;
+  groupHandle?: string;
 }
 
-/**
- * Fallback names, looked up in the reporter's workspace when CAC has no config
- * (e.g. local dev) or can't be reached.
- */
+/** Shown in the form's "Posts to #x and tags @y" line when CAC doesn't set the names. */
 const FEEDBACK_CHANNEL_NAME = 'xyne-spaces';
 const FEEDBACK_GROUP = 'spaces-search';
 
 /** Timezone for the `When:` line. IST, same as recaps and desk metrics. */
 const FEEDBACK_TIMEZONE = 'Asia/Kolkata';
 
+/** How long to wait for the webhook before failing the post. */
+const WEBHOOK_TIMEOUT_MS = 10_000;
+
 export interface PostSearchFeedbackParams {
-  /** Reporter. The message is posted as this user and mentions them. */
+  /** Reporter. Named in the message. */
   userId: string;
   workspaceId: string;
   /** Search query on screen when Feedback was opened. */
@@ -59,209 +54,134 @@ export interface PostSearchFeedbackParams {
   source: SearchFeedbackSource;
 }
 
-export interface PostSearchFeedbackResult {
-  channelId: string;
-  conversationId: string;
-  messageId: string;
-}
-
-/** No feedback channel could be resolved. Returned to the client as 409 (config issue, not a crash). */
+/** Feedback isn't set up (or the webhook rejected it). Returned to the client as 409, not a crash. */
 export class SearchFeedbackUnavailableError extends Error {}
 
 export class SearchFeedbackService {
   private userRepository = new UserRepository();
 
-  /** Reads the CAC destination for this workspace. Returns `{}` if unset or CAC is unreachable. */
+  /** Reads the CAC target for this workspace. Returns `{}` if unset or CAC is unreachable. */
   private async resolveTarget(workspaceId: string): Promise<SearchFeedbackTarget> {
     const raw = await CacConfigService.fetch(FEEDBACK_TARGET_CAC_KEY, { workspaceId });
-    if (raw && typeof raw === 'object') {
-      // Keep only non-empty string ids; anything else in config is ignored, not passed to the DB.
-      const { channelId, userGroupId } = raw as Record<string, unknown>;
-      const target: SearchFeedbackTarget = {};
-      if (typeof channelId === 'string' && channelId.trim()) target.channelId = channelId.trim();
-      if (typeof userGroupId === 'string' && userGroupId.trim()) {
-        target.userGroupId = userGroupId.trim();
-      }
-      if ((channelId != null && !target.channelId) || (userGroupId != null && !target.userGroupId)) {
-        logger.warn('[SearchFeedback] CAC target has a non-string id; ignoring it', {
+    if (!raw || typeof raw !== 'object') {
+      if (raw !== null) {
+        logger.warn('[SearchFeedback] CAC target is not an object; ignoring', {
           cacKey: FEEDBACK_TARGET_CAC_KEY,
           workspaceId: sanitizeForLog(workspaceId),
         });
       }
-      return target;
+      return {};
     }
-    if (raw !== null) {
-      logger.warn('[SearchFeedback] CAC target is not an object; ignoring', {
-        cacKey: FEEDBACK_TARGET_CAC_KEY,
-        workspaceId: sanitizeForLog(workspaceId),
-      });
-    }
-    return {};
-  }
-
-  /**
-   * Channel to post into, plus the workspace it belongs to.
-   *
-   * The configured id is read across workspaces (see bypassAcl/searchFeedbackServices), since
-   * one shared default channel can serve every workspace. The id only ever comes from CAC, never
-   * the request. Without a configured id, falls back to `#xyne-spaces` in the reporter's workspace.
-   */
-  private async resolveChannel(
-    workspaceId: string,
-    target: SearchFeedbackTarget
-  ): Promise<{ id: string; name: string; workspaceId: string } | null> {
-    if (target.channelId) {
-      const byId = await findFeedbackChannelById(target.channelId);
-      if (byId) return byId;
-      logger.error(
-        '[SearchFeedback] Configured channel missing or archived; falling back to default',
-        {
+    // Keep only non-empty strings; anything else in config is ignored, not put in a URL.
+    const target: SearchFeedbackTarget = {};
+    const fields = ['workspaceId', 'appId', 'userGroupId', 'channelName', 'groupHandle'] as const;
+    for (const field of fields) {
+      const value = (raw as Record<string, unknown>)[field];
+      if (typeof value === 'string' && value.trim()) {
+        target[field] = value.trim();
+      } else if (value != null) {
+        logger.warn('[SearchFeedback] CAC target field is not a string; ignoring it', {
           cacKey: FEEDBACK_TARGET_CAC_KEY,
-          channelId: sanitizeForLog(target.channelId ?? ''),
-          fallbackChannelName: FEEDBACK_CHANNEL_NAME,
+          field,
           workspaceId: sanitizeForLog(workspaceId),
-        }
-      );
+        });
+      }
     }
-    // Public and not archived only: this path skips the membership check that the normal
-    // message API does, so it must not post into a private channel the reporter isn't in.
-    return db.channel.findFirst({
-      where: {
-        workspaceId,
-        name: { equals: FEEDBACK_CHANNEL_NAME, mode: 'insensitive' },
-        visibility: 'PUBLIC',
-        isArchived: false,
-      },
-      select: { id: true, name: true, workspaceId: true },
-    });
+    return target;
+  }
+
+  /** Webhook path, or null when CAC or the env secret is missing. */
+  private webhookPath(target: SearchFeedbackTarget): string | null {
+    const secret = config.searchFeedbackWebhookSecret;
+    if (!target.workspaceId || !target.appId || !secret) return null;
+    return `/api/apps/webhooks/${encodeURIComponent(target.workspaceId)}/${encodeURIComponent(
+      target.appId
+    )}/${encodeURIComponent(secret)}`;
   }
 
   /**
-   * User group to tag. Same rules as `resolveChannel`. `workspaceId` here is the channel's
-   * workspace, so the tag goes to the team that owns the channel. The fallback checks alias
-   * then name, since many groups have no alias set.
-   */
-  private async resolveGroup(
-    workspaceId: string,
-    target: SearchFeedbackTarget
-  ): Promise<{ id: string; name: string; alias: string | null } | null> {
-    if (target.userGroupId) {
-      const byId = await findFeedbackGroupById(target.userGroupId);
-      if (byId) return byId;
-      logger.error(
-        '[SearchFeedback] Configured user group does not exist; falling back to default',
-        {
-          cacKey: FEEDBACK_TARGET_CAC_KEY,
-          userGroupId: sanitizeForLog(target.userGroupId ?? ''),
-          fallbackGroup: FEEDBACK_GROUP,
-          workspaceId: sanitizeForLog(workspaceId),
-        }
-      );
-    }
-    return findFeedbackGroupByHandle(FEEDBACK_GROUP, workspaceId);
-  }
-
-  /**
-   * Channel and group names for the form's "Posts to #x and tags @y" line. Uses the same
-   * resolution as `postFeedback`, so the UI shows where the post will actually go.
-   * `null` means not resolvable.
+   * Channel and group names for the form's "Posts to #x and tags @y" line. `null` when feedback
+   * isn't set up, or when the channel is in another workspace: those users can't see it, so the
+   * form shows a general note instead of naming it.
    */
   async getTargetDisplay(
     workspaceId: string
   ): Promise<{ channelName: string | null; groupHandle: string | null }> {
     const target = await this.resolveTarget(workspaceId);
-    const channel = await this.resolveChannel(workspaceId, target);
-    const group = channel ? await this.resolveGroup(channel.workspaceId, target) : null;
+    if (!this.webhookPath(target) || target.workspaceId !== workspaceId) {
+      return { channelName: null, groupHandle: null };
+    }
     return {
-      channelName: channel?.name ?? null,
-      // Same label formatGroupMention uses: alias if set, else name.
-      groupHandle: group ? (group.alias ?? group.name) : null,
+      channelName: target.channelName ?? FEEDBACK_CHANNEL_NAME,
+      groupHandle: target.userGroupId ? (target.groupHandle ?? FEEDBACK_GROUP) : null,
     };
   }
 
-  /** Posts the feedback message to the resolved channel as the reporter, tagging the group. */
-  async postFeedback(params: PostSearchFeedbackParams): Promise<PostSearchFeedbackResult> {
+  /** Sends the feedback to the configured incoming webhook, tagging the group. */
+  async postFeedback(params: PostSearchFeedbackParams): Promise<void> {
     const { userId, workspaceId, query, feedback, filters, sort, source } = params;
 
     const target = await this.resolveTarget(workspaceId);
-
-    const channel = await this.resolveChannel(workspaceId, target);
-    if (!channel) {
-      logger.warn('[SearchFeedback] Feedback channel not found', {
-        channelName: FEEDBACK_CHANNEL_NAME,
+    const path = this.webhookPath(target);
+    if (!path) {
+      logger.warn('[SearchFeedback] Feedback webhook not configured', {
+        cacKey: FEEDBACK_TARGET_CAC_KEY,
+        hasWorkspaceId: !!target.workspaceId,
+        hasAppId: !!target.appId,
+        hasSecret: !!config.searchFeedbackWebhookSecret,
         workspaceId: sanitizeForLog(workspaceId),
       });
-      throw new SearchFeedbackUnavailableError(
-        `Feedback channel #${FEEDBACK_CHANNEL_NAME} is not available in this workspace`
-      );
+      throw new SearchFeedbackUnavailableError('Search feedback is not set up for this workspace');
     }
 
-    // Independent lookups, run together. Everything that can fail runs before the message is
-    // saved, so an error never leaves a posted message behind for the user to retry into a
-    // duplicate.
-    // - group: tagged in the channel's workspace
-    // - reporterWorkspace: for the `Workspace:` line (the channel can be shared)
-    // - reporter: for the headline mention, read before switching workspace
-    // - ctx: for the notification step after the save
-    const [group, reporterWorkspaceName, reporter, ctx] = await Promise.all([
-      this.resolveGroup(channel.workspaceId, target),
-      findFeedbackWorkspaceName(workspaceId),
+    // Both are the reporter's own rows, read under their normal request scope.
+    const [reporter, reporterWorkspace] = await Promise.all([
       this.userRepository.findById(userId),
-      buildUserQueryContext(userId),
+      db.workspace.findUnique({ where: { id: workspaceId }, select: { name: true } }),
     ]);
 
-    // If the group can't be found, still post the feedback, just without the tag.
-    let groupMentionHtml: string | null = null;
-    if (group) {
-      const memberCount = await countFeedbackGroupMembers(group.id);
-      groupMentionHtml = formatGroupMention(group.id, group.name, group.alias, memberCount);
-    } else {
-      logger.warn('[SearchFeedback] User group not found; posting without a mention', {
-        group: FEEDBACK_GROUP,
-        workspaceId: sanitizeForLog(channel.workspaceId),
-      });
-    }
-
-    const reporterName = reporter?.name || 'a teammate';
-    const reporterMentionHtml = reporter
-      ? formatUserMention(reporter.id, reporter.name, {
-          email: reporter.email,
-          picture: reporter.picture,
-        })
-      : null;
-
-    const content = buildSearchFeedbackContent({
-      groupMentionHtml,
-      reporterMentionHtml,
-      reporterName,
+    const text = buildSearchFeedbackText({
+      userGroupId: target.userGroupId ?? null,
+      // Tag the reporter only when they're in the channel's workspace; elsewhere the mention
+      // can't resolve, so they're named in plain text instead.
+      reporterMentionId: reporter && target.workspaceId === workspaceId ? reporter.id : null,
+      reporterName: reporter?.name || 'a teammate',
+      reporterEmail: reporter?.email ?? null,
       query,
       feedback,
       filters,
       ...(sort ? { sort } : {}),
       source,
-      workspaceName: reporterWorkspaceName ?? '',
+      workspaceName: reporterWorkspace?.name ?? '',
       when: new Date(),
       timeZone: FEEDBACK_TIMEZONE,
     });
 
-    // Written in the channel's workspace, which may differ from the reporter's.
-    const result = await postFeedbackMessage(userId, channel, content);
+    // Sent to this backend's own webhook route, the same as any outside system posting to it.
+    const response = await fetch(`http://localhost:${config.port}${path}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text }),
+      signal: AbortSignal.timeout(WEBHOOK_TIMEOUT_MS),
+    });
 
-    // Notifications (incl. the group ping), in the channel's workspace. Not awaited: the
-    // message is already posted, and failures are logged inside.
-    void notifyFeedbackPosted(ctx, channel.workspaceId, result.message.messageId);
+    if (!response.ok) {
+      // 400 is the webhook's answer for a wrong or revoked secret/app, i.e. a config problem.
+      logger.error('[SearchFeedback] Feedback webhook rejected the post', {
+        status: response.status,
+        targetWorkspaceId: sanitizeForLog(target.workspaceId ?? ''),
+        appId: sanitizeForLog(target.appId ?? ''),
+      });
+      if (response.status === 400) {
+        throw new SearchFeedbackUnavailableError('The search feedback channel is not available');
+      }
+      throw new Error(`Feedback webhook returned ${response.status}`);
+    }
 
     logger.info('[SearchFeedback] Posted feedback', {
       source: sanitizeForLog(source),
-      channelId: channel.id,
-      conversationId: sanitizeForLog(result.conversation.conversationId),
+      targetWorkspaceId: sanitizeForLog(target.workspaceId ?? ''),
     });
-
-    return {
-      channelId: channel.id,
-      conversationId: result.conversation.conversationId,
-      messageId: result.message.messageId,
-    };
   }
 }
 
