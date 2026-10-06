@@ -1,3 +1,10 @@
+## [1.465.3](https://github.com/juspay/xyne-spaces/compare/v1.465.2...v1.465.3) (2026-10-06)
+
+
+### Bug Fixes
+
+* spaces user resolution (reconciled with main) ([#2720](https://github.com/juspay/xyne-spaces/issues/2720)) ([77e8735](https://github.com/juspay/xyne-spaces/commit/77e873531279621616885c21ff03b15430ad2d76))
+
 ## [1.465.2](https://github.com/juspay/xyne-spaces/compare/v1.465.1...v1.465.2) (2026-10-06)
 
 
