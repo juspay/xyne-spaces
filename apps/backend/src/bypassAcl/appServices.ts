@@ -28,6 +28,14 @@ import {
 import type { SnsEnvelope } from '@/apps/controllers/amazonSnsWebhookParser';
 import { buildPingdomFlow, normalizePingdom, parsePingdomPayload } from '@/apps/controllers/pingdomWebhookParser';
 import { buildGcpFlow, normalizeGcp, parseGcpPayload } from '@/apps/controllers/gcpWebhookParser';
+import {
+  buildHubspotFlow,
+  hubspotEventDedupKey,
+  isSkippedChangeSource,
+  normalizeHubspotEvent,
+} from '@/apps/controllers/hubspotWebhookParser';
+import type { HubspotWebhookEvent } from '@/apps/controllers/hubspotWebhookParser';
+import { CacheManager } from '@/utils/cacheManager';
 import type { WebhookContext } from '@/apps/controllers/incomingWebhookController';
 import { db } from '@/database/client';
 import { asSystem, asService, rawQuery } from './base';
@@ -332,6 +340,99 @@ export function processPingdomIncoming(context: WebhookContext, res: Response, p
       );
 
       res.status(200).send('ok');
+    },
+  );
+}
+
+/**
+ * Events already posted, keyed `hubspot:<webhookId>:<subscriptionId>:<eventId>`.
+ *
+ * HubSpot redelivers a failed batch up to ten times across 24 hours carrying the
+ * same `eventId`, so the TTL matches that window — past it, no redelivery is
+ * possible and the entry is dead weight.
+ *
+ * In-memory, so the guarantee is per-process: several backend instances behind a
+ * load balancer can each post the same event once. Closing that needs a shared
+ * store (the notification-service Redis client, or a table keyed on the dedup
+ * key); until then this is the only incoming-webhook type for which duplicate
+ * delivery is normal rather than exceptional, which is why it is deduped at all.
+ */
+const hubspotPostedEvents = new CacheManager(24 * 60 * 60);
+
+/**
+ * HubSpot incoming webhook: posts one card per CRM change event into the channel.
+ * Unauthenticated webhook — no req.user, so an explicit tenant scope is opened from the validated
+ * :workspaceId URL param so the workspaceId stamper fills downstream writes.
+ *
+ * Takes no `res`, unlike every sibling here: the caller has already replied 200
+ * before this runs, because HubSpot counts a response slower than five seconds as
+ * a failure. Nothing in here can change the response, so per-event failures are
+ * logged and the rest of the batch continues.
+ */
+export function processHubspotIncoming(
+  context: WebhookContext,
+  events: HubspotWebhookEvent[],
+): Promise<void> {
+  return asService(
+    ['Conversation', 'Message', 'Ticket', 'Channel'],
+    'unauthenticated incoming webhook: no req.user, scope opened from the validated :workspaceId URL param',
+    'incoming-webhook',
+    context.workspaceId,
+    async () => {
+      for (const event of events) {
+        const dedupKey = hubspotEventDedupKey(event);
+        const cacheKey = `hubspot:${context.webhook.id}:${dedupKey}`;
+
+        if (hubspotPostedEvents.has(cacheKey)) {
+          logger.info('[Incoming-Webhook] Skipping HubSpot event already posted', {
+            workspaceId: context.workspaceId,
+            webhookId: context.webhook.id,
+            dedupKey,
+            attemptNumber: event.attemptNumber,
+          });
+          continue;
+        }
+
+        // Breeze enrichment and CSV imports fire one event per property per
+        // record, so they would bury the channel. See DEFAULT_SKIPPED_CHANGE_SOURCES.
+        if (isSkippedChangeSource(event)) {
+          logger.info('[Incoming-Webhook] Skipping HubSpot event by change source', {
+            workspaceId: context.workspaceId,
+            webhookId: context.webhook.id,
+            dedupKey,
+            changeSource: event.changeSource,
+          });
+          continue;
+        }
+
+        const content = encodeFlowContent(buildHubspotFlow(normalizeHubspotEvent(event)));
+        if (!content) {
+          continue;
+        }
+
+        try {
+          await findOrCreateConversation(
+            context.channelId,
+            context.installedApp.userId,
+            content,
+            false,
+            undefined,
+            undefined,
+            MessageType.BOT,
+            {},
+          );
+          // Marked only after a successful post, so a failed one stays replayable
+          // rather than being suppressed for the next 24 hours.
+          hubspotPostedEvents.set(cacheKey, true);
+        } catch (error) {
+          logger.error('[Incoming-Webhook] Failed to post a HubSpot event; continuing the batch', {
+            workspaceId: context.workspaceId,
+            webhookId: context.webhook.id,
+            dedupKey,
+            error,
+          });
+        }
+      }
     },
   );
 }

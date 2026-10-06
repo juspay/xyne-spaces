@@ -809,6 +809,7 @@ const WEBHOOK_TYPE_OPTIONS = [
   { value: 'AMAZON_SNS', label: 'Amazon SNS' },
   { value: 'PINGDOM', label: 'Pingdom' },
   { value: 'GCP', label: 'GCP Monitoring' },
+  { value: 'HUBSPOT', label: 'HubSpot' },
 ] as const;
 type IncomingWebhookType = (typeof WEBHOOK_TYPE_OPTIONS)[number]['value'];
 const WEBHOOK_TYPE_LABELS: Record<IncomingWebhookType, string> = Object.fromEntries(
