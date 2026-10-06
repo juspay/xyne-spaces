@@ -2,6 +2,7 @@ import { transaction } from '../base';
 import { CallWhiteboardRepository, SaveCallWhiteboardAttachmentInput } from '@/database/repositories/callWhiteboardRepository';
 import { AttachmentEntityType, MessageType, serializeRepliesMd, addReplyToData, parseRepliesMd } from '@xyne/shared';
 import { advisoryXactLock } from '@/bypassAcl/lockServices';
+import { escapeHtml } from '@/utils/htmlEscape';
 
 
 export function saveCallWhiteboardAttachmentTx(self: CallWhiteboardRepository, lockKey: string, data: SaveCallWhiteboardAttachmentInput) {
@@ -38,7 +39,9 @@ export function saveCallWhiteboardAttachmentTx(self: CallWhiteboardRepository, l
           conversationId: data.conversationId,
           workspaceId: data.workspaceId,
           senderId: data.botUserId,
-          content: '',
+          // Attribution comes from the authenticated session, not the request body, so a
+          // participant who uploads an arbitrary image is still named as the one who saved it.
+          content: `Saved by ${escapeHtml(data.savedByName)}`,
           msgType: MessageType.BOT,
           hasAttachment: true,
           showInChannel: false,
@@ -48,6 +51,7 @@ export function saveCallWhiteboardAttachmentTx(self: CallWhiteboardRepository, l
             messageSubtype: 'call_whiteboard',
             callMessageId: data.callMessageId,
             savedByUserId: data.savedByUserId,
+            savedByName: data.savedByName,
             ...(data.pageId && { pageId: data.pageId }),
             ...(data.pageLabel && { pageLabel: data.pageLabel }),
             ...(data.pageOrder !== undefined && { pageOrder: data.pageOrder }),
@@ -76,6 +80,7 @@ export function saveCallWhiteboardAttachmentTx(self: CallWhiteboardRepository, l
             callMessageId: data.callMessageId,
             messageId: whiteboardMessage.messageId,
             savedByUserId: data.savedByUserId,
+            savedByName: data.savedByName,
             ...(data.pageId && { pageId: data.pageId }),
             ...(data.pageLabel && { pageLabel: data.pageLabel }),
             ...(data.pageOrder !== undefined && { pageOrder: data.pageOrder }),

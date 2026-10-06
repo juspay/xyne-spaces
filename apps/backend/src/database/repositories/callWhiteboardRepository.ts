@@ -9,6 +9,8 @@ export interface SaveCallWhiteboardAttachmentInput {
   callMessageId: string;
   botUserId: string;
   savedByUserId: string;
+  /** Display name of the authenticated uploader (from the session, never the request body). */
+  savedByName: string;
   originalFilename: string;
   size: number;
   url: string;
