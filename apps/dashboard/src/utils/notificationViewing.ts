@@ -20,6 +20,7 @@ export interface ChatNotificationTarget {
 
 export interface ViewingState {
   pathname: string;
+  search: string;
   isAppFocused: boolean;
 }
 
@@ -27,19 +28,21 @@ interface OpenChat {
   workspaceId: string;
   channelId: string;
   conversationId?: string | undefined;
+  /** Only the thread is on screen (focused thread / Activity), not the channel's messages. */
+  threadOnly: boolean;
 }
 
-/** Channel (and open thread) from /:workspaceId/chat/(dir|dm)/:channelId/:conversationId?. */
-export function parseOpenChat(pathname: string): OpenChat | null {
+/** Open chat from /:workspaceId/chat/(dir|dm|activity)/:channelId/:conversationId?. */
+export function parseOpenChat(pathname: string, search = ''): OpenChat | null {
   const [workspaceId, section, kind, channelId, conversationId] = pathname
     .split('/')
     .filter(Boolean);
-  if (!workspaceId || section !== 'chat' || (kind !== 'dir' && kind !== 'dm') || !channelId) {
-    return null;
-  }
+  if (!workspaceId || section !== 'chat' || !channelId) return null;
+  if (kind !== 'dir' && kind !== 'dm' && kind !== 'activity') return null;
   // Literal child routes (profile, tickets, canvas, …) never equal a real id,
   // so an unrecognised view simply fails to match and the alert still fires.
-  return { workspaceId, channelId, conversationId };
+  const threadOnly = kind === 'activity' || new URLSearchParams(search).get('focusThread') === '1';
+  return { workspaceId, channelId, conversationId, threadOnly };
 }
 
 /**
@@ -59,12 +62,14 @@ export function isViewingNotificationTarget(
   if (!target.channelId || !target.messageId) return false;
 
   // 2. The same channel must be open, in the same workspace.
-  const open = parseOpenChat(viewing.pathname);
+  const open = parseOpenChat(viewing.pathname, viewing.search);
   if (!open || open.channelId !== target.channelId) return false;
   if (target.workspaceId && target.workspaceId !== open.workspaceId) return false;
 
-  // 3. Top-level message: the open channel shows it.
-  if (target.initialMessageId && target.messageId === target.initialMessageId) return true;
+  // 3. Top-level message: shown only when the channel's messages are on screen.
+  if (target.initialMessageId && target.messageId === target.initialMessageId) {
+    return !open.threadOnly;
+  }
 
   // 4. Thread reply: only an open panel for that thread shows it.
   const isThreadReply = !!target.initialMessageId || type === 'THREAD_REPLY';

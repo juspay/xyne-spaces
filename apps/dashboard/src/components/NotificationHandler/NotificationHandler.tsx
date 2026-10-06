@@ -138,11 +138,11 @@ export const NotificationHandler: React.FC = () => {
     activeWorkspaceIdRef.current = activeWorkspaceId;
   }, [activeWorkspaceId]);
   // Chat routes sit below this component, so read the open chat from the path.
-  const { pathname } = useLocation();
-  const pathnameRef = useRef(pathname);
+  const { pathname, search } = useLocation();
+  const locationRef = useRef({ pathname, search });
   useEffect(() => {
-    pathnameRef.current = pathname;
-  }, [pathname]);
+    locationRef.current = { pathname, search };
+  }, [pathname, search]);
   const isConnectedRef = useRef(false);
   const isElectron = typeof window !== 'undefined' && window.electronAPI !== undefined;
 
@@ -329,7 +329,7 @@ export const NotificationHandler: React.FC = () => {
             initialMessageId: data.notification.data?.conversation?.initialMessageId,
           },
           {
-            pathname: pathnameRef.current,
+            ...locationRef.current,
             isAppFocused: document.visibilityState === 'visible' && document.hasFocus(),
           },
         );
