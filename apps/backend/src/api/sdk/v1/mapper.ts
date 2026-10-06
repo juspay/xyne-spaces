@@ -21,12 +21,23 @@
 
 import type { V1Target } from './types';
 
+/**
+ * A retired id: one a released SDK still calls, whose catalog operation was
+ * removed with nothing that answers the same question. `reason` reaches the
+ * caller verbatim, so it says what to use instead where there is something.
+ */
+function retired(reason: string): V1Target {
+  return { kind: 'retired', reason };
+}
+
 export const V1_MAPPER: Readonly<Record<string, V1Target>> = {
   // ----- activities -----
   'activities.list': { kind: 'query', name: 'userActivitiesV2' },
   'activities.listPaginated': { kind: 'query', name: 'userActivitiesPaginatedV2' },
   'activities.listUnread': { kind: 'query', name: 'userUnreadActivities' },
-  'activities.listUnreadThreads': { kind: 'query', name: 'userUnreadThreadActivities' },
+  'activities.listUnreadThreads': retired(
+    'unread thread activities are no longer a separate list; use activities.listUnread, whose rows carry isThreadActivity',
+  ),
   'activities.listMissedCalls': { kind: 'query', name: 'userMissedCalls' },
   'activities.listBookmarks': { kind: 'query', name: 'userBookmarks' },
   'activities.markAsRead': { kind: 'mutator', name: 'activities.markAsRead' },
@@ -87,8 +98,8 @@ export const V1_MAPPER: Readonly<Record<string, V1Target>> = {
   'automations.archive': { kind: 'mutator', name: 'automations.archive' },
 
   // ----- boards -----
-  'boards.list': { kind: 'query', name: 'getAllBoards' },
-  'boards.listByProject': { kind: 'query', name: 'boardsByProject' },
+  'boards.list': { kind: 'query', name: 'getAllBoardsList' },
+  'boards.listByProject': { kind: 'query', name: 'boardsListByProject' },
   'boards.listByProjectLite': { kind: 'query', name: 'boardsListByProject' },
   'boards.getMany': { kind: 'query', name: 'boardsByIds' },
   'boards.get': { kind: 'query', name: 'getBoardById' },
@@ -117,6 +128,11 @@ export const V1_MAPPER: Readonly<Record<string, V1Target>> = {
   'calls.listActiveInChannel': { kind: 'query', name: 'activeCallsInChannel' },
   'calls.listScheduled': { kind: 'query', name: 'userScheduledCallsV2' },
   'calls.listHistory': { kind: 'query', name: 'userCallHistoryV2' },
+  'calls.listParticipatedHistory': { kind: 'query', name: 'userCallHistoryParticipantOnly' },
+  'calls.listInRange': { kind: 'query', name: 'userCallsInRange' },
+  'calls.listUpcomingScheduled': { kind: 'query', name: 'userUpcomingScheduledCalls' },
+  'calls.getById': { kind: 'query', name: 'callById' },
+  'calls.getByExternalId': { kind: 'query', name: 'callByExternalId' },
   'calls.listParticipants': { kind: 'query', name: 'callParticipantsByCallId' },
   'calls.getRecurringSeries': { kind: 'query', name: 'recurringSeriesById' },
   'calls.getSummaryTemplate': { kind: 'query', name: 'summaryTemplateById' },
@@ -126,9 +142,16 @@ export const V1_MAPPER: Readonly<Record<string, V1Target>> = {
   'calls.listSharedRecordings': { kind: 'query', name: 'sharedOatsRecordings' },
   'calls.getRecording': { kind: 'query', name: 'oatsRecordingByExternalId' },
   'calls.getConversation': { kind: 'query', name: 'getConversationByCallId' },
-  'calls.initiate': { kind: 'mutator', name: 'calls.initiate' },
-  'calls.join': { kind: 'mutator', name: 'calls.join' },
-  'calls.leave': { kind: 'mutator', name: 'calls.leave' },
+  // The catalog no longer starts, joins or leaves calls: the room is provisioned
+  // and the media token minted by the calls controller, so these go there.
+  'calls.initiate': { kind: 'direct', method: 'POST', path: () => '/calls/initiate' },
+  'calls.join': { kind: 'direct', method: 'POST', path: () => '/calls/join' },
+  'calls.leave': {
+    kind: 'direct',
+    method: 'POST',
+    path: (args) => `/calls/${encodeURIComponent(String(args['callId'] ?? ''))}/leave`,
+  },
+  'calls.updateRingStatus': { kind: 'mutator', name: 'calls.updateRingStatus' },
   'calls.reject': { kind: 'mutator', name: 'calls.reject' },
   'calls.cancel': { kind: 'mutator', name: 'calls.cancel' },
   'calls.invite': { kind: 'mutator', name: 'calls.invite' },
@@ -185,7 +208,9 @@ export const V1_MAPPER: Readonly<Record<string, V1Target>> = {
   'channels.list': { kind: 'query', name: 'userVisibleChannelsV3' },
   'channels.listAll': { kind: 'query', name: 'userAllChannels' },
   'channels.listEmail': { kind: 'query', name: 'userVisibleEmailChannels' },
-  'channels.listBrowsable': { kind: 'query', name: 'browsableChannels' },
+  'channels.listBrowsable': retired(
+    'the catalog no longer lists browsable channels; use channels.listAll',
+  ),
   'channels.getStats': { kind: 'query', name: 'channelStats' },
   'channels.getUserStatus': { kind: 'query', name: 'getChannelUserStatus' },
   'channels.listParticipants': { kind: 'query', name: 'channelParticipants' },
@@ -221,6 +246,11 @@ export const V1_MAPPER: Readonly<Record<string, V1Target>> = {
   'channels.listParticipantsPaginated': { kind: 'query', name: 'channelParticipantsPaginated' },
   'channels.listUserStatuses': { kind: 'query', name: 'getAllChannelsUserStatus' },
   'channels.listWithMyConversations': { kind: 'query', name: 'conversationOfUserChannels' },
+  'channels.listAppParticipants': { kind: 'query', name: 'channelAppParticipants' },
+  'channels.listHumanParticipants': { kind: 'query', name: 'channelHumanParticipantsPaginated' },
+  'channels.hasBoards': { kind: 'query', name: 'channelHasBoards' },
+  'channels.listDmsWithLatestMessage': { kind: 'query', name: 'dmChannelsLatestMessagesPaginated' },
+  'channels.linkBoards': { kind: 'mutator', name: 'channel.linkBoards' },
 
   // ----- collections -----
   'collections.list': { kind: 'query', name: 'scopedCollections' },
@@ -260,6 +290,7 @@ export const V1_MAPPER: Readonly<Record<string, V1Target>> = {
   'conversations.getByTimestamp': { kind: 'query', name: 'getConversationByTimestamp' },
   'conversations.listForUser': { kind: 'query', name: 'userConversationsPaginatedV2' },
   'conversations.setTagTypes': { kind: 'mutator', name: 'threadTag.setTypes' },
+  'conversations.update': { kind: 'mutator', name: 'conversations.update' },
 
   // ----- dashboards -----
   'dashboards.list': { kind: 'query', name: 'getAllDashboards' },
@@ -273,14 +304,18 @@ export const V1_MAPPER: Readonly<Record<string, V1Target>> = {
 
   // ----- email -----
   'email.listForConversations': { kind: 'query', name: 'getEmailsForConversationsV2' },
-  'email.listSent': { kind: 'query', name: 'userEmailsSent' },
-  'email.listDrafts': { kind: 'query', name: 'userEmailDrafts' },
+  'email.listSent': retired('the catalog no longer lists sent email'),
+  'email.listDrafts': retired(
+    'the catalog no longer lists every email draft in a channel; use email.listComposeDrafts for new emails and email.getDraftForConversation for a reply',
+  ),
   'email.getDraftForConversation': { kind: 'query', name: 'getDraftForConversationV2' },
   'email.listComposeDrafts': { kind: 'query', name: 'composeDraftsByChannel' },
   'email.listSignatures': { kind: 'query', name: 'userEmailSignatures' },
   'email.getChannelPreference': { kind: 'query', name: 'getEmailChannelPreference' },
   'email.listLabels': { kind: 'query', name: 'conversationLabelsByChannelIdV2' },
-  'email.listConversationsByLabel': { kind: 'query', name: 'conversationLabelMappingsByLabelId' },
+  'email.listConversationsByLabel': retired(
+    'the catalog no longer lists conversations by label; use supportTickets.listFiltered with conversationLabelId',
+  ),
   'email.saveDraft': { kind: 'mutator', name: 'emailDraft.upsert' },
   'email.deleteDraft': { kind: 'mutator', name: 'emailDraft.delete' },
   'email.saveComposeDraft': { kind: 'mutator', name: 'emailDraft.upsertComposeDraft' },
@@ -309,7 +344,9 @@ export const V1_MAPPER: Readonly<Record<string, V1Target>> = {
   'forms.getMapping': { kind: 'query', name: 'getFormMappingByContextId' },
   'forms.listMappingsForBoards': { kind: 'query', name: 'getFormMappingsByBoardIds' },
   'forms.listValues': { kind: 'query', name: 'getFormEntityValuesByEntityId' },
-  'forms.listAllTicketValues': { kind: 'query', name: 'getAllFormEntityValues' },
+  'forms.listAllTicketValues': retired(
+    'the catalog no longer lists every form value at once; use forms.listValues for one ticket',
+  ),
   'forms.update': { kind: 'mutator', name: 'form.update' },
   'forms.setMapping': { kind: 'mutator', name: 'formContextMapping.upsert' },
   'forms.deleteMapping': { kind: 'mutator', name: 'formContextMapping.delete' },
@@ -341,6 +378,9 @@ export const V1_MAPPER: Readonly<Record<string, V1Target>> = {
   'incidents.updateReleaseTicketStatus': { kind: 'mutator', name: 'applicationReleaseTicket.updateStatus' },
   'incidents.setReleaseTicketTestedBy': { kind: 'mutator', name: 'applicationReleaseTicket.setTestedBy' },
   'incidents.listReleaseEvents': { kind: 'query', name: 'releaseEventsByReleaseId' },
+  'incidents.listReleasesForDevTicket': { kind: 'query', name: 'applicationReleaseTicketsByDevTicketId' },
+  'incidents.listReleaseDevTicketLinks': { kind: 'query', name: 'releaseDevTicketLinksByReleaseId' },
+  'incidents.listReleaseTicketsForBoards': { kind: 'query', name: 'releaseTicketsByBoardIds' },
 
   // ----- messages -----
   'messages.listByConversation': { kind: 'query', name: 'conversationMessagesV2' },
@@ -348,7 +388,7 @@ export const V1_MAPPER: Readonly<Record<string, V1Target>> = {
   'messages.get': { kind: 'query', name: 'getMessageForActivityV2' },
   'messages.listByChannel': { kind: 'query', name: 'channelAndThreadMessagesV2' },
   'messages.listMine': { kind: 'query', name: 'userSentMessagesPaginated' },
-  'messages.getLatestInChannel': { kind: 'query', name: 'channelLatestMessageV2' },
+  'messages.getLatestInChannel': { kind: 'query', name: 'channelLatestMessage' },
   'messages.listNudges': { kind: 'query', name: 'messageNudges' },
   'messages.send': { kind: 'mutator', name: 'messages.send' },
   'messages.update': { kind: 'mutator', name: 'messages.update' },
@@ -397,6 +437,9 @@ export const V1_MAPPER: Readonly<Record<string, V1Target>> = {
   'preferences.createSavedView': { kind: 'mutator', name: 'savedUserConfiguration.create' },
   'preferences.updateSavedView': { kind: 'mutator', name: 'savedUserConfiguration.update' },
   'preferences.deleteSavedView': { kind: 'mutator', name: 'savedUserConfiguration.delete' },
+  'preferences.listSharedSavedViews': { kind: 'query', name: 'savedConfigsSharedWithUser' },
+  'preferences.shareSavedView': { kind: 'mutator', name: 'viewAccess.grant' },
+  'preferences.unshareSavedView': { kind: 'mutator', name: 'viewAccess.revoke' },
 
   // ----- projects -----
   'projects.list': { kind: 'query', name: 'getAllProjects' },
@@ -411,10 +454,18 @@ export const V1_MAPPER: Readonly<Record<string, V1Target>> = {
   'projects.update': { kind: 'mutator', name: 'project.update' },
   'projects.delete': { kind: 'mutator', name: 'project.delete' },
   'projects.saveReleaseBoardConfig': { kind: 'mutator', name: 'project.saveReleaseBoardConfig' },
+  'projects.listApplicationsForProjects': { kind: 'query', name: 'applicationsByProjectIds' },
+  'projects.listTagsForProjects': { kind: 'query', name: 'projectTagsByProjectIds' },
+  'projects.listRecaps': retired(
+    'the catalog has no project recap query; channel recaps are available through recaps.listForChannels',
+  ),
 
   // ----- recaps -----
   'recaps.listForChannels': { kind: 'query', name: 'channelRecaps' },
-  'recaps.listDaily': { kind: 'query', name: 'channelDailyRecaps' },
+  'recaps.listDaily': { kind: 'query', name: 'channelRecaps' },
+  'recaps.listForProjects': retired(
+    'the catalog has no project recap query; channel recaps are available through recaps.listForChannels',
+  ),
   'recaps.listEntityNudges': { kind: 'query', name: 'entityNudges' },
   'recaps.listNudgesByCountRows': { kind: 'query', name: 'surfaceNudgesByCountRowIds' },
   'recaps.saveSubscriptions': { kind: 'mutator', name: 'recap.saveSubscriptions' },
@@ -430,10 +481,13 @@ export const V1_MAPPER: Readonly<Record<string, V1Target>> = {
   'supportTickets.getByKey': { kind: 'query', name: 'supportTicketByXyneIdV4' },
   'supportTickets.getDetail': { kind: 'query', name: 'supportTicketDetailV2' },
   'supportTickets.listForEmailChannels': { kind: 'query', name: 'ticketsForEmailChannelsV2' },
+  'supportTickets.listKanban': { kind: 'query', name: 'supportKanbanTicketsPage' },
+  'supportTickets.listSavedViews': { kind: 'query', name: 'savedDeskTicketConfigsByChannel' },
 
   // ----- tickets -----
   'tickets.list': { kind: 'query', name: 'ticketsQueryV2' },
   'tickets.listKanban': { kind: 'query', name: 'kanbanTicketsPageV3' },
+  'tickets.listTable': { kind: 'query', name: 'tableTicketsPage' },
   'tickets.listByChannelInWindow': { kind: 'query', name: 'topicsExplorerTickets' },
   'tickets.get': { kind: 'query', name: 'ticketByIdV2' },
   'tickets.getDetails': { kind: 'query', name: 'ticketDetailsByIdV2' },
@@ -441,7 +495,7 @@ export const V1_MAPPER: Readonly<Record<string, V1Target>> = {
   'tickets.getMany': { kind: 'query', name: 'ticketsByIds' },
   'tickets.getRow': { kind: 'query', name: 'ticketRowById' },
   'tickets.search': { kind: 'query', name: 'ticketsSearch' },
-  'tickets.listByProject': { kind: 'query', name: 'ticketsByProjectV2' },
+  'tickets.listByProject': { kind: 'query', name: 'tableTicketsPage' },
   'tickets.listExports': { kind: 'query', name: 'ticketExportsForCurrentUser' },
   'tickets.listActivities': { kind: 'query', name: 'ticketActivities' },
   'tickets.listActivitiesForTickets': { kind: 'query', name: 'ticketActivitiesForTickets' },
@@ -462,6 +516,7 @@ export const V1_MAPPER: Readonly<Record<string, V1Target>> = {
   'tickets.assign': { kind: 'mutator', name: 'ticket.updateAssignment' },
   'tickets.archive': { kind: 'mutator', name: 'ticket.archiveDeskTicket' },
   'tickets.setStageEta': { kind: 'mutator', name: 'ticketStageEta.update' },
+  'tickets.acknowledgeEtaRisk': { kind: 'mutator', name: 'ticket.acknowledgeEtaRisk' },
   'tickets.listProjectTags': { kind: 'query', name: 'projectTagsByProjectId' },
   'tickets.addTag': { kind: 'mutator', name: 'ticketTagV2.create' },
   'tickets.removeTag': { kind: 'mutator', name: 'ticketTagV2.delete' },
@@ -480,9 +535,10 @@ export const V1_MAPPER: Readonly<Record<string, V1Target>> = {
 
   // ----- userGroups -----
   'userGroups.list': { kind: 'query', name: 'getAllUserGroups' },
-  'userGroups.getMany': { kind: 'query', name: 'getUserGroupsByIds' },
+  // The by-ids and search queries are gone; both narrow the full list in the parser.
+  'userGroups.getMany': { kind: 'query', name: 'getAllUserGroups' },
   'userGroups.get': { kind: 'query', name: 'getUserGroupById' },
-  'userGroups.search': { kind: 'query', name: 'searchUserGroups' },
+  'userGroups.search': { kind: 'query', name: 'getAllUserGroups' },
   'userGroups.listMembers': { kind: 'query', name: 'getUserGroupMembers' },
   'userGroups.listMembersForGroups': { kind: 'query', name: 'getUserGroupMembersByGroupIds' },
   'userGroups.listMine': { kind: 'query', name: 'getUserGroupMappingsByUserId' },
@@ -526,7 +582,9 @@ export const V1_MAPPER: Readonly<Record<string, V1Target>> = {
   'workspace.getEmojiByName': { kind: 'query', name: 'getCustomEmojiByName' },
   'workspace.listLookupValues': { kind: 'query', name: 'lookupValuesByType' },
   'workspace.listMerchants': { kind: 'query', name: 'getAllMerchants' },
-  'workspace.listTicketTags': { kind: 'query', name: 'getAllTicketTags' },
+  'workspace.listTicketTags': retired(
+    'tags are per project now; use tickets.listProjectTags or projects.listTagsForProjects',
+  ),
   'workspace.listClassificationMappings': { kind: 'query', name: 'getClassificationMappings' },
   'workspace.createClassificationMapping': { kind: 'mutator', name: 'classificationMapping.create' },
   'workspace.updateClassificationMapping': { kind: 'mutator', name: 'classificationMapping.update' },

@@ -67,7 +67,7 @@ Both are mounted *before* the auth middleware on purpose, so a probe can tell
 | `POST` | `/api/sdk/v1/query` | `{ op, args }` → `{ data }` |
 | `POST` | `/api/sdk/v1/mutate` | `{ op, args }` → `{ success: true, generated? }` |
 
-This pair is the bulk of the API: **468 operations** reachable by id. `op` is an
+This pair is the bulk of the API: **492 operation ids**, 9 of them retired. `op` is an
 **SDK operation id** — `tickets.listKanban`, `channels.join` — not the name of a
 Zero operation. `v1/mapper.ts` resolves it; `v1/parser.ts` shapes the arguments;
 the target's own zod schema validates the result.
@@ -83,6 +83,19 @@ a transaction.
 `generated` carries any row id the parser minted — Zero's optimistic-write model
 expects the writer to supply primary keys, so v1 mints them server-side and hands
 them back rather than making a caller invent them.
+
+Two other kinds of id:
+
+- **Retired** — a shipped id whose catalog operation was removed with no faithful
+  successor. It answers `404 not_found`, `Operation "<id>" was retired: <reason>`,
+  on either endpoint, and the reason says what to use instead.
+- **Direct** — an id that resolves to a route below (`calls.initiate`, `calls.join`,
+  `calls.leave`). Accepted on either endpoint; the request is re-entered into the
+  route with the parsed arguments as its body, and the response is the route's.
+
+`v1/catalog-coverage.test.ts` keeps the map honest: every catalog query and
+mutator is mapped or listed in `v1/exclusions.json` with a reason, every mapped
+target exists, and every `superseded-by:` names a mapped operation.
 
 ### Direct
 
@@ -100,6 +113,76 @@ multipart uploads, search, and identity:
 | `POST /api/sdk/v1/draft-attachments` | Upload draft attachments |
 | `GET /api/sdk/v1/search` | Vespa search |
 | `GET /api/sdk/v1/search/schema` | Field definitions for a search index |
+| `POST /api/sdk/v1/calls/initiate` | `{ channelId, callType, invitedUserIds?, conversationId? }` → `{ token, livekitUrl, externalId, callId, roomLink, channelId, scopeType }` or `{ pending: true }` |
+| `POST /api/sdk/v1/calls/join` | `{ callId }` (the external id) → `{ token, livekitUrl, externalId, roomLink, channelId, scopeType }` or `{ pending: true }`. Workspace-scoped, as `/api/calls/join` |
+| `POST /api/sdk/v1/calls/:callId/leave` | → `{}` (legacy no-op; the media webhook records leaving) |
+
+Responses are the product controller's body without its `success` flag (or its
+`{ success, data }` envelope). All run as the caller; the database ACL and tenant
+scope apply as they do for the dashboard.
+
+#### Users, DMs, channels, conversations
+
+| | |
+|---|---|
+| `GET /api/sdk/v1/me/affinity` | → `{ channelWeights, userWeights }` |
+| `GET /api/sdk/v1/users/search` | `?q&limit&offset` → `{ data, pagination }`; rows omit `authProvider` and `orgMemberId` |
+| `GET /api/sdk/v1/me/dms` | → `{ channels, total }` |
+| `POST /api/sdk/v1/me/dms` | `{ participantIds, message?, forwardedMessage?, silent? }` → the DM channel |
+| `GET /api/sdk/v1/channels/search` | `?q&limit&types` → `{ results, total, query, limit, types }` (mention search) |
+| `POST /api/sdk/v1/channels/member-counts` | `{ channelIds }` → `{ counts }` |
+| `GET /api/sdk/v1/channels/:channelId/members` | → `{ members }`; members only |
+| `GET /api/sdk/v1/conversations/threads` | `?limit&cursor&sort` → `{ threads, nextCursor, hasMore }` |
+| `GET /api/sdk/v1/conversations/recent-visited` | → `{ days, channels }` |
+| `GET /api/sdk/v1/conversations/by-message/:messageId` | → the conversation row. 404 unless the caller could read that message (workspace, private-channel membership, `visibleTo`) |
+
+#### Notifications and daily brief
+
+| | |
+|---|---|
+| `GET /api/sdk/v1/notifications` | `?page&limit&status` (limit ≤ 100) → `{ notifications, pagination }` |
+| `GET /api/sdk/v1/notifications/unread-count` | → `{ count }` |
+| `GET /api/sdk/v1/notifications/workspace-counts` | → `{ counts }` |
+| `PATCH /api/sdk/v1/notifications/mark-all-read` | → `{}` |
+| `PATCH /api/sdk/v1/notifications/:id/read` | `{ channelId?, conversationId? }` → `{}` |
+| `PATCH /api/sdk/v1/notifications/:id/dismiss` | → `{}` |
+| `GET`/`PUT /api/sdk/v1/notifications/preferences` | Per-type `{ browserEnabled, emailEnabled, slackEnabled }`; `PUT` → `{}` |
+| `GET /api/sdk/v1/daily-brief/latest` | Today's (or the latest) brief |
+| `GET /api/sdk/v1/daily-brief/history` | `?limit` |
+| `GET /api/sdk/v1/daily-brief/dates` | `?limit` |
+| `GET /api/sdk/v1/daily-brief/by-date/:date` | `:date` is `YYYY-MM-DD` |
+| `GET`/`PUT /api/sdk/v1/daily-brief/config` | `{ enabled?, instructions?, instructionsEnabled? }` |
+| `GET`/`PUT /api/sdk/v1/daily-brief/settings` | `{ agentSlug }`; the write is org-admin only, enforced by claw-auth |
+
+#### Radar
+
+| | |
+|---|---|
+| `GET /api/sdk/v1/radar/feed/pending-me` | → `{ threads }` |
+| `GET /api/sdk/v1/radar/feed/waiting-on` | → `{ threads }` |
+| `GET /api/sdk/v1/radar/feed/pending-others` | `?page&mutedPage&pageSize&holders&channels&createdFrom&createdTo` → a page; without `page`, `{ threads }` |
+| `POST /api/sdk/v1/radar/items/:itemId/resolve` | → the action result |
+| `POST /api/sdk/v1/radar/items/:itemId/dismiss` | → the action result |
+| `GET /api/sdk/v1/radar/rules` | → `{ rules }` |
+| `POST /api/sdk/v1/radar/rules` | `{ conditions }` → `{ rule }`; at most `MAX_RULES` |
+| `PATCH /api/sdk/v1/radar/rules/:ruleId` | `{ conditions }` → `{ rule }` |
+| `DELETE /api/sdk/v1/radar/rules/:ruleId` | → `{ id }` |
+
+#### Emojis, canvases, tickets
+
+| | |
+|---|---|
+| `GET /api/sdk/v1/emojis` | → the workspace's custom emojis |
+| `GET /api/sdk/v1/emojis/:emojiId` | → one emoji |
+| `POST /api/sdk/v1/emojis` | Multipart `file` (≤ 256 KB) + `name` → the emoji |
+| `DELETE /api/sdk/v1/emojis/:emojiId` | → `{}`; creator only |
+| `POST /api/sdk/v1/canvases/create` | `{ title, markdown, visibility?, channelId? }` → `{ id, title, url, visibility, channelId }`; a `channelId` must be one the caller belongs to |
+| `POST /api/sdk/v1/canvases/upload` | Multipart `file` + `canvasId`, `width?`, `height?` → `{ attachmentId, fileName, fileSize, mimeType, thumbnailUrl }`; edit access required |
+| `GET /api/sdk/v1/canvases/labels` | `?canvasIds` (comma-separated, ≤ 200) → `{ labels: { [canvasId]: Label[] } }` |
+| `GET /api/sdk/v1/canvases/labels/suggestions` | `?query&offset&limit` → `{ labels, offset, limit }` |
+| `POST /api/sdk/v1/canvases/:canvasId/labels` | `{ names }` → `{ labels }` |
+| `POST /api/sdk/v1/canvases/:canvasId/labels/remove` | `{ labelIds }` → `{}` (POST: the product route is a DELETE with a body) |
+| `PATCH /api/sdk/v1/tickets/:ticketId` | `{ assigneeId?, stage?, groupId?, title?, description?, priority?, status?, eta?, tags?, formFields? }` → `{ updated }`. Requires the `TICKETS` write grant and a ticket the caller can read in their workspace (404 otherwise) |
 
 ### Claw
 
@@ -247,6 +330,11 @@ drifted: the SDK's copy omitted the mutator name passed to
 write their own Express response, so the body is intercepted and re-emitted in
 the SDK envelope. The principal is presented on `req.user`, which is where both
 the controllers and `tenantScopeMiddleware` read identity from.
+
+A route may declare `query` and `body` schemas (the controller receives the parsed
+values, so unaccepted fields are stripped) and `guards`, which run first and
+restate protection the product route gets from somewhere that does not apply
+under `/api/sdk` — a URL-keyed ACL, or nothing.
 
 ---
 
