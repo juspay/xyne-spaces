@@ -23,6 +23,37 @@ const MATCH_LIMIT = 5000;
 const supportsHighlights = (): boolean => typeof CSS !== 'undefined' && 'highlights' in CSS;
 
 /**
+ * The query as a case-blind pattern over the text as it is. Lower-casing the text
+ * instead can change its length — "İ" lower-cases to two characters — and every match
+ * after it would land in the wrong place, or past the end.
+ */
+export function findPattern(query: string): RegExp {
+  return new RegExp(query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi');
+}
+
+/**
+ * Brings a match into view through every scrolling box between it and the page: a
+ * code block sideways, then the page down to it — not just its element, which may be
+ * a long block with the match far down inside it.
+ */
+export function scrollRangeIntoView(range: Range): void {
+  const match = range.getBoundingClientRect();
+  for (let element = range.startContainer.parentElement; element; element = element.parentElement) {
+    const style = getComputedStyle(element);
+    const box = element.getBoundingClientRect();
+    if (/(auto|scroll)/.test(style.overflowX) && element.scrollWidth > element.clientWidth) {
+      if (match.left < box.left || match.right > box.right) {
+        element.scrollLeft += match.left - box.left - box.width / 2;
+      }
+    }
+    if (/(auto|scroll)/.test(style.overflowY) && element.scrollHeight > element.clientHeight) {
+      element.scrollTop += match.top - box.top - box.height / 2;
+      return;
+    }
+  }
+}
+
+/**
  * A finder over a drawn page's text — rendered Markdown — marking matches with the
  * CSS Custom Highlight API, so the page's own markup is never touched. A match
  * spanning two elements (half in bold) is not found; one inside either is.
@@ -39,23 +70,20 @@ export function createDomFinder(root: () => HTMLElement | null): FindProvider {
     search(query) {
       clear();
       const element = root();
-      const needle = query.toLowerCase();
-      if (!element || !needle) return 0;
+      if (!element || !query) return 0;
+      const pattern = findPattern(query);
       const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT);
       for (
         let node = walker.nextNode();
         node && ranges.length < MATCH_LIMIT;
         node = walker.nextNode()
       ) {
-        const text = (node.textContent ?? '').toLowerCase();
-        for (
-          let at = text.indexOf(needle);
-          at !== -1;
-          at = text.indexOf(needle, at + needle.length)
-        ) {
+        const text = node.textContent ?? '';
+        pattern.lastIndex = 0;
+        for (let found = pattern.exec(text); found; found = pattern.exec(text)) {
           const range = document.createRange();
-          range.setStart(node, at);
-          range.setEnd(node, at + needle.length);
+          range.setStart(node, found.index);
+          range.setEnd(node, found.index + found[0].length);
           ranges.push(range);
         }
       }
@@ -72,7 +100,7 @@ export function createDomFinder(root: () => HTMLElement | null): FindProvider {
         current.priority = 1;
         CSS.highlights.set(CURRENT, current);
       }
-      range.startContainer.parentElement?.scrollIntoView({ block: 'center' });
+      scrollRangeIntoView(range);
     },
     clear,
   };

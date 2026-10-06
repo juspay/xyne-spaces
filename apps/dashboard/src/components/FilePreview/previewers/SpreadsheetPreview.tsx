@@ -4,6 +4,7 @@ import { cn } from '../../../utils/classNames';
 import { PreviewMessage, PreviewMeta, PreviewSkeletonView, usePreviewDownload } from '../chrome';
 import type { PreviewerProps } from '../types';
 import { DataGrid } from './grid/DataGrid';
+import { MAX_COLUMNS, MAX_ROWS } from './spreadsheet/limits';
 import SpreadsheetWorker from './spreadsheet/spreadsheet.worker?worker';
 import type { SpreadsheetSheet, SpreadsheetWorkerResponse } from './spreadsheet/spreadsheet.worker';
 
@@ -69,6 +70,8 @@ export default function SpreadsheetPreview(props: PreviewerProps): ReactElement 
         {sheets.length > 1 && `${sheets.length} sheets · `}
         {sheet.rows.length.toLocaleString()} {sheet.rows.length === 1 ? 'row' : 'rows'} ·{' '}
         {columns.toLocaleString()} {columns === 1 ? 'column' : 'columns'}
+        {sheet.truncated &&
+          ` · first ${MAX_ROWS.toLocaleString()} rows and ${MAX_COLUMNS.toLocaleString()} columns — download for all of it`}
       </PreviewMeta>
       <div className='min-h-0 flex-1'>
         {sheet.rows.length > 0 ? (

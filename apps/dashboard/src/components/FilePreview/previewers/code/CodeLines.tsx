@@ -4,7 +4,7 @@ import { injectMarks } from '../../../FileViewer/search/htmlHighlight';
 import type { HighlightRange } from '../../../FileViewer/search/types';
 import { cn } from '../../../../utils/classNames';
 import { usePreviewFind } from '../../chrome';
-import type { FindProvider } from '../../find';
+import { findPattern, type FindProvider } from '../../find';
 import { useCodeFontSize } from './codeFontSize';
 import { highlightLines } from './languages';
 
@@ -61,16 +61,14 @@ export function CodeLines(props: {
   const finder = useMemo<FindProvider>(
     () => ({
       search: query => {
-        const needle = query.toLowerCase();
+        // Case-blind on the line as it is, so offsets match the line drawn.
+        const pattern = findPattern(query);
         const matches: Match[] = [];
         for (let line = 0; line < plainLines.length && matches.length < MATCH_LIMIT; line += 1) {
-          const lower = (plainLines[line] ?? '').toLowerCase();
-          for (
-            let at = lower.indexOf(needle);
-            at !== -1;
-            at = lower.indexOf(needle, at + needle.length)
-          ) {
-            matches.push({ line, start: at, end: at + needle.length });
+          const text = plainLines[line] ?? '';
+          pattern.lastIndex = 0;
+          for (let found = pattern.exec(text); found; found = pattern.exec(text)) {
+            matches.push({ line, start: found.index, end: found.index + found[0].length });
           }
         }
         matchesRef.current = matches;

@@ -21,32 +21,49 @@ const PAGE_SCRIPT = `(() => {
     ranges = [];
     if (supported) { CSS.highlights.delete('xyne-find'); CSS.highlights.delete('xyne-find-active'); }
   };
+  // Case-blind on the text as it is: lower-casing it first can change its length.
+  const patternFor = (query) =>
+    new RegExp(String(query).replace(/[.*+?^\${}()|[\\]\\\\]/g, '\\\\$&'), 'gi');
   const search = (query) => {
     clear();
-    const needle = String(query || '').toLowerCase();
-    if (!needle || !document.body) return 0;
+    if (!query || !document.body) return 0;
+    const pattern = patternFor(query);
     const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT, {
       acceptNode: (node) => /^(SCRIPT|STYLE|NOSCRIPT)$/.test(node.parentNode && node.parentNode.nodeName)
         ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_ACCEPT,
     });
     for (let node = walker.nextNode(); node && ranges.length < 5000; node = walker.nextNode()) {
-      const text = (node.textContent || '').toLowerCase();
-      for (let at = text.indexOf(needle); at !== -1; at = text.indexOf(needle, at + needle.length)) {
+      const text = node.textContent || '';
+      pattern.lastIndex = 0;
+      for (let found = pattern.exec(text); found; found = pattern.exec(text)) {
         const range = document.createRange();
-        range.setStart(node, at);
-        range.setEnd(node, at + needle.length);
+        range.setStart(node, found.index);
+        range.setEnd(node, found.index + found[0].length);
         ranges.push(range);
       }
     }
     if (supported && ranges.length) CSS.highlights.set('xyne-find', new Highlight(...ranges));
     return ranges.length;
   };
+  // Through every scrolling box between the match and the page — a code block
+  // sideways, a panel down — and the page itself last.
   const reveal = (index) => {
     const range = ranges[index];
     if (!range) return;
     if (supported) { const current = new Highlight(range); current.priority = 1; CSS.highlights.set('xyne-find-active', current); }
-    const element = range.startContainer.parentElement;
-    if (element) element.scrollIntoView({ block: 'center' });
+    const match = range.getBoundingClientRect();
+    for (let element = range.startContainer.parentElement; element && element !== document.body; element = element.parentElement) {
+      const style = getComputedStyle(element);
+      const box = element.getBoundingClientRect();
+      if (/(auto|scroll)/.test(style.overflowX) && element.scrollWidth > element.clientWidth && (match.left < box.left || match.right > box.right)) {
+        element.scrollLeft += match.left - box.left - box.width / 2;
+      }
+      if (/(auto|scroll)/.test(style.overflowY) && element.scrollHeight > element.clientHeight) {
+        element.scrollTop += match.top - box.top - box.height / 2;
+        return;
+      }
+    }
+    window.scrollBy(0, match.top - window.innerHeight / 2);
   };
   window.addEventListener('message', (event) => {
     if (event.source !== window.parent) return;
@@ -68,7 +85,9 @@ const PAGE_SCRIPT = `(() => {
 export function withPageFind(html: string): string {
   const script = `<script>${PAGE_SCRIPT}</script>`;
   return /<\/body>/i.test(html)
-    ? html.replace(/<\/body>/i, `${script}</body>`)
+    ? // A function, not a string, as the replacement: a string's `$&` — which the
+      // script's own escaping uses — would be read as the matched `</body>`.
+      html.replace(/<\/body>/i, () => `${script}</body>`)
     : `${html}${script}`;
 }
 

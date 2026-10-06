@@ -8452,7 +8452,7 @@ export const mutators = defineMutators({
         itemType: z.enum(['LINK', 'ATTACHMENT']),
         itemId: z.string(),
         channelId: z.string(),
-        name: z.string().trim().min(1).max(200),
+        name: z.string().trim().min(1).max(300),
         timestamp: z.number(),
       }),
       async ({ tx, ctx, args }) => {

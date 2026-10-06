@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useState } from 'react';
-import { isAxiosError } from 'axios';
 import { fetchFile } from '../../services/clients/fileFetchService';
 import type { PreviewFile, Previewer } from './types';
 
@@ -16,13 +15,15 @@ const PREPARING_ATTEMPTS = 30;
 const PREPARING_RETRY_MS = 2000;
 
 /**
- * The server answers 503, with a Retry-After, for a rendition its worker hasn't
- * finished: the contract the HEIC WebP uses, and the one document previews will.
+ * The server answers 503 for a rendition its worker hasn't finished: the contract
+ * the HEIC WebP uses, and the one document previews will. The api client hands
+ * errors on as plain Errors carrying only `status` — its Retry-After doesn't come
+ * through — so the wait is the server's usual two seconds.
  */
 function preparingDelay(error: unknown): number | null {
-  if (!isAxiosError(error) || error.response?.status !== 503) return null;
-  const seconds = Number(error.response.headers['retry-after']);
-  return Number.isFinite(seconds) && seconds > 0 ? seconds * 1000 : PREPARING_RETRY_MS;
+  const preparing =
+    typeof error === 'object' && error !== null && 'status' in error && error.status === 503;
+  return preparing ? PREPARING_RETRY_MS : null;
 }
 
 const wait = (ms: number): Promise<void> => new Promise(resolve => setTimeout(resolve, ms));
