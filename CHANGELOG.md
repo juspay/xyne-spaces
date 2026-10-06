@@ -1,3 +1,11 @@
+## [1.464.0](https://github.com/juspay/xyne-spaces/compare/v1.463.1...v1.464.0) (2026-10-06)
+
+
+### Features
+
+* added email to user tagging and user impersonation f… ([#2607](https://github.com/juspay/xyne-spaces/issues/2607)) ([602a14d](https://github.com/juspay/xyne-spaces/commit/602a14df145719b1193d48035ea87cc033b850a2))
+* adding hubspot webhook support ([#2581](https://github.com/juspay/xyne-spaces/issues/2581)) ([07f6f36](https://github.com/juspay/xyne-spaces/commit/07f6f36291949ed0ccde3c5f1800a0841e734dc8))
+
 ## [1.463.1](https://github.com/juspay/xyne-spaces/compare/v1.463.0...v1.463.1) (2026-10-06)
 
 
