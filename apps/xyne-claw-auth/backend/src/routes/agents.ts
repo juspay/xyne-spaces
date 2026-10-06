@@ -26,6 +26,7 @@ import { validateCredentials } from "../validation.js";
 import { fetchAndStoreSigningSecretFromSpacesApi } from "../lib/spaces-app-secret.js";
 import { extractCodexBearer } from "../lib/codex-creds.js";
 import { extractClaudeBearer } from "../lib/claude-creds.js";
+import { resolveClaudeModelsCredential } from "../lib/claude-models-credential.js";
 import { redisService } from "../redis.js";
 import {
   requireClawAdmin,
@@ -3142,38 +3143,20 @@ router.post("/:slug/user-config/:userId/github-poll", pinUserIdParam, async (req
 router.post("/:slug/user-config/:userId/claude-models", pinUserIdParam, async (req: Request<{ slug: string; userId: string }>, res: Response) => {
   try {
     const { apiKey, baseUrl, authType } = req.body as { apiKey?: string; baseUrl?: string; authType?: string };
-    let resolvedApiKey = apiKey?.trim();
-    let resolvedAuthType: string | undefined = authType;
-    let resolvedBaseUrl: string | undefined = baseUrl;
-
-    // No key in the body → resolve a stored cred. Try the user's personal cred
-    // first, then fall back to the AGENT's cred (the /v1/models list is
-    // account-wide, so either works to populate the dropdown). Use
-    // extractClaudeBearer so an OAuth *bundle* ({access_token,…}) yields the
-    // bare token instead of the JSON blob.
-    if (!resolvedApiKey) {
-      const userCred = await userProviderCredentialsRepository.findByUserAndProvider(req.params.userId, "claude");
-      if (userCred?.encryptedKey && userCred.iv && userCred.authTag) {
-        resolvedApiKey = extractClaudeBearer(decrypt(userCred.encryptedKey, userCred.iv, userCred.authTag, CONFIG.encryptionKey));
-        if (!resolvedAuthType) resolvedAuthType = userCred.authType ?? undefined;
-        resolvedBaseUrl = resolvedBaseUrl ?? userCred.baseUrl ?? undefined;
-      } else {
-        const agentRow = await agentRepository.findBySlug(req.params.slug, getOrgId(req));
-        const agentCred = agentRow ? await agentProviderCredentialsRepository.findByAgentAndProvider(agentRow.id, "claude") : null;
-        if (agentCred?.encryptedKey && agentCred.iv && agentCred.authTag) {
-          resolvedApiKey = extractClaudeBearer(decrypt(agentCred.encryptedKey, agentCred.iv, agentCred.authTag, CONFIG.encryptionKey));
-          if (!resolvedAuthType) resolvedAuthType = agentCred.authType ?? undefined;
-          resolvedBaseUrl = resolvedBaseUrl ?? agentCred.baseUrl ?? undefined;
-        }
-      }
-    }
-
-    if (!resolvedApiKey) {
+    const cred = await resolveClaudeModelsCredential({
+      userId: req.params.userId,
+      agentSlug: req.params.slug,
+      orgId: getOrgId(req),
+      ...(apiKey !== undefined ? { apiKey } : {}),
+      ...(baseUrl !== undefined ? { baseUrl } : {}),
+      ...(authType !== undefined ? { authType } : {}),
+    });
+    if (!cred) {
       res.status(400).json({ success: false, error: "apiKey is required" });
       return;
     }
 
-    const models = await fetchAnthropicModels(resolvedApiKey, resolvedBaseUrl, resolvedAuthType);
+    const models = await fetchAnthropicModels(cred.apiKey, cred.baseUrl, cred.authType);
     res.json({ success: true, data: models });
   } catch (err) {
     log.error("[agents] claude-models error:", err);
