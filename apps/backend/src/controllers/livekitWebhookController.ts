@@ -778,7 +778,7 @@ export class LiveKitWebhookController {
           }
         }
       }
-      void userActivityStatusService.markInCall(participant.identity);
+      void userActivityStatusService.markInCall(participant.identity, roomName);
 
       // Notify all connected clients that participants changed
       if (roomName) {
@@ -885,7 +885,7 @@ export class LiveKitWebhookController {
 
       logger.info(`[LiveKit Webhook] Marked participant ${participant.identity} as left for call ${callId}`);
 
-      void userActivityStatusService.clearInCall(participant.identity);
+      void userActivityStatusService.clearInCall(participant.identity, callId);
 
       if (result.shouldEndCall) {
         logger.info(`[LiveKit Webhook] No active participants remaining for call ${callId}. Call ended.`);
