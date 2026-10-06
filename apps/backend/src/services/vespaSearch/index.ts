@@ -218,6 +218,7 @@ export const searchHandler = async (req: Request, res: Response): Promise<void> 
       tags,        // Comma-separated tags (ticket Tag framework — NOT thread types)
       threadType,  // Thread classification type(s) - comma-separated; matches thread roots
       entity,      // Entity name(s) - comma-separated; AND-ed across slack + ticket results
+      hasLink,     // 'true'|'false' - chat messages with / without links
       messageActs, // Thread type(s) a message was cited as evidence for - comma-separated
       dynamicFieldValues, // Dynamic field filters
       dynamicFieldDateRanges, // JSON string of fieldId -> { start, end }
@@ -884,6 +885,12 @@ export const searchHandler = async (req: Request, res: Response): Promise<void> 
       options.ticket.entityNames = entityNames;
     }
 
+    // Link filter — chat_message only (`hasLinks`). Unset means no filter, so only map it
+    // when sent. String() so the SDK route's zod-coerced booleans match too.
+    if (hasLink !== undefined) {
+      options.slack.hasLinks = String(hasLink) === 'true';
+    }
+
     if (dynamicFieldValues) {
       options.ticket.dynamicFieldValues = toFilterValues(dynamicFieldValues, 'dynamicFieldValues');
     }
@@ -957,13 +964,14 @@ export const searchHandler = async (req: Request, res: Response): Promise<void> 
 
     // Bot-message toggle: default OFF (exclude). Frontend opts-in by sending
     // includeBotMessages=true. Anything else → exclude bot messages.
-    if (includeBotMessages !== 'true') {
+    // String() so the SDK route's zod-coerced booleans match too.
+    if (String(includeBotMessages) !== 'true') {
       options.slack.excludeBotMessages = true;
     }
 
     // My-channels toggle: when true, scope chat results to channels the user is a
     // member of (drop the public-non-member access branch in YqlBuilder).
-    options.slack.onlyMyChannels = onlyMyChannels === 'true';
+    options.slack.onlyMyChannels = String(onlyMyChannels) === 'true';
 
     // Sort by timestamp: force flat (ungrouped) results so ORDER BY applies cleanly.
     if (orderBy === 'newest' || orderBy === 'oldest') {
