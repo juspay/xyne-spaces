@@ -170,6 +170,9 @@ export interface SlackFilters {
   // Entity filter: docs annotated with these entity names (chat_message/ticket `entityNames`).
   // AND-ed, not OR-ed — multiple entities narrow to docs mentioning every one of them.
   entityNames?: string[];
+  // Link filter: true → only messages containing a link, false → only messages without one.
+  // `hasLinks` exists only on chat_message.
+  hasLinks?: boolean;
   // Date filters
   createdBefore?: string; // Created before date (multiple formats)
   createdAfter?: string; // Created after date (multiple formats)
@@ -579,6 +582,7 @@ export class YqlBuilder {
    * may only be emitted when at least one selected schema declares the field.
    * Verified against vespa-core/vespa/common/schemas/*.sd (incl. imported fields):
    * - chat_message:    permissions, isPrivate, messageType, workspaceId  (acl fields imported from channelRef; messageType own)
+   *                    also entityNames, hasLinks (own)
    * - chat_container:  permissions, ownerId, isPrivate, workspaceId
    * - chat_attachment: permissions, workspaceId                          (permissions imported; no ownerId/isPrivate/messageType)
    * - ticket:          permissions, workspaceId                          (imported from channelRef)
@@ -597,6 +601,7 @@ export class YqlBuilder {
       isPrivate: boolean;
       messageType: boolean;
       entityNames: boolean;
+      hasLinks: boolean;
     }
   > = {
     [messageSchema]: {
@@ -607,6 +612,7 @@ export class YqlBuilder {
       isPrivate: true,
       messageType: true,
       entityNames: true,
+      hasLinks: true,
     },
     [channelSchema]: {
       ownerId: true,
@@ -616,6 +622,7 @@ export class YqlBuilder {
       isPrivate: true,
       messageType: false,
       entityNames: false,
+      hasLinks: false,
     },
     [attachmentSchema]: {
       ownerId: false,
@@ -625,6 +632,7 @@ export class YqlBuilder {
       isPrivate: false,
       messageType: false,
       entityNames: false,
+      hasLinks: false,
     },
     [ticketSchema]: {
       ownerId: false,
@@ -634,6 +642,7 @@ export class YqlBuilder {
       isPrivate: false,
       messageType: false,
       entityNames: true,
+      hasLinks: false,
     },
     [fileSchema]: {
       ownerId: true,
@@ -643,6 +652,7 @@ export class YqlBuilder {
       isPrivate: true,
       messageType: false,
       entityNames: false,
+      hasLinks: false,
     },
     [mailSchema]: {
       ownerId: false,
@@ -652,6 +662,7 @@ export class YqlBuilder {
       isPrivate: false,
       messageType: false,
       entityNames: false,
+      hasLinks: false,
     },
     [callSchema]: {
       ownerId: false,
@@ -661,6 +672,7 @@ export class YqlBuilder {
       isPrivate: false,
       messageType: false,
       entityNames: false,
+      hasLinks: false,
     },
   };
 
@@ -985,6 +997,15 @@ export class YqlBuilder {
         .map((entityName) => `entityNames contains ${params.bind('entityNames', entityName.trim())}`)
         .join(' and ');
       conditions.push(`(${entities})`);
+    }
+
+    // Link filter — hasLinks is a bool attribute only on chat_message; attachments lack it,
+    // so setting this narrows chat results to messages.
+    if (
+      typeof filters.hasLinks === 'boolean' &&
+      this.schemasHaveField(selectedSchemas, (f) => f.hasLinks)
+    ) {
+      conditions.push(`hasLinks = ${filters.hasLinks}`);
     }
 
     if (filters.createdBefore) {

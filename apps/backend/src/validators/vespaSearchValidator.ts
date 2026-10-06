@@ -247,6 +247,11 @@ export const vespaSearchQuerySchema = Joi.object({
       'alternatives.types': 'entity must be a string or array of entity names'
     }),
 
+  // Link filter: "true" → only chat messages with a link, "false" → only those without (`hasLinks`).
+  hasLink: Joi.string().valid('true', 'false').optional().messages({
+    'any.only': 'hasLink must be "true" or "false"'
+  }),
+
   dynamicFieldValues: Joi.alternatives()
     .try(
       Joi.array().items(Joi.string()),
