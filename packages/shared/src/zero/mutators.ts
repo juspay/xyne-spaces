@@ -2057,21 +2057,29 @@ export const mutators = defineMutators({
           conversationParticipantId,
         },
       }) => {
-        // Verify target channel exists
-        const targetChannel = await tx.run(zql.channels.where('id', targetChannelId).one());
-        if (!targetChannel) {
-          throw new Error('Target channel not found');
-        }
+        // Access checks are skipped on the client. Its local Zero cache holds the user's
+        // channel_participants row for a channel only once that channel has been loaded
+        // (e.g. opened), so checking there wrongly rejects members forwarding to a channel
+        // they haven't opened yet. The server enforces the same checks with full data in
+        // its own forwardMessage (apps/backend/src/zero/mutators.ts); the forward modal
+        // shows its rejection as "Failed to forward message".
+        if (tx.location === 'server') {
+          // Verify target channel exists
+          const targetChannel = await tx.run(zql.channels.where('id', targetChannelId).one());
+          if (!targetChannel) {
+            throw new Error('Target channel not found');
+          }
 
-        // Verify user is a participant of the target channel
-        const participation = await tx.run(
-          zql.channel_participants
-            .where('channelId', targetChannelId)
-            .where('userId', ctx.userID)
-            .one(),
-        );
-        if (!participation) {
-          throw new Error('You are not a participant of the target channel');
+          // Verify user is a participant of the target channel
+          const participation = await tx.run(
+            zql.channel_participants
+              .where('channelId', targetChannelId)
+              .where('userId', ctx.userID)
+              .one(),
+          );
+          if (!participation) {
+            throw new Error('You are not a participant of the target channel');
+          }
         }
 
         // Get the original message
@@ -2088,8 +2096,9 @@ export const mutators = defineMutators({
           zql.conversations.where('conversationId', originalMessage.conversationId).one(),
         );
 
-        // Verify user is a participant of the origin channel (where the message is being forwarded from)
-        if (originalConversation?.channelId) {
+        // Verify user is a participant of the origin channel (where the message is being
+        // forwarded from). Server only, for the same reason as the target checks above.
+        if (tx.location === 'server' && originalConversation?.channelId) {
           const originParticipation = await tx.run(
             zql.channel_participants
               .where('channelId', originalConversation.channelId)
