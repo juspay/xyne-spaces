@@ -40,8 +40,9 @@ test('no longer accepts the ambiguous messaging scenario name', () => {
 
 test('pins the k6 image and defines environment caps', () => {
   assert.equal(K6_IMAGE, 'grafana/k6:2.2.0');
-  assert.deepEqual(ENVIRONMENTS.sandbox, { maxVus: 50, maxDurationSeconds: 3600 });
-  assert.deepEqual(ENVIRONMENTS.preprod, { maxVus: 500, maxDurationSeconds: 28800 });
+  // Sandbox is isolated and carries the load; preprod rides production infrastructure.
+  assert.deepEqual(ENVIRONMENTS.sandbox, { maxVus: 300, maxDurationSeconds: 28800 });
+  assert.deepEqual(ENVIRONMENTS.preprod, { maxVus: 5, maxDurationSeconds: 600 });
 });
 
 test('rejects production and unknown environments', () => {
@@ -49,13 +50,9 @@ test('rejects production and unknown environments', () => {
   assert.throws(() => resolveRunConfig({ environment: 'local' }), /not allowed/i);
 });
 
-test('allows only short profiles in sandbox', () => {
-  assert.doesNotThrow(() => resolveRunConfig({ environment: 'sandbox', profile: 'release' }));
-  for (const profile of ['load', 'stress', 'soak']) {
-    assert.throws(
-      () => resolveRunConfig({ environment: 'sandbox', profile }),
-      /preprod/i,
-    );
+test('sandbox takes every profile, including the capacity ones', () => {
+  for (const profile of ['release', 'load', 'stress', 'spike', 'soak']) {
+    assert.doesNotThrow(() => resolveRunConfig({ environment: 'sandbox', profile }), profile);
   }
 });
 
@@ -67,14 +64,14 @@ test('rejects unknown profiles and scenarios', () => {
 test('accepts bounded VU and duration overrides', () => {
   assert.deepEqual(
     resolveRunConfig({
-      environment: 'preprod',
+      environment: 'sandbox',
       profile: 'load',
       scenario: 'zero-query-transform',
       vusOverride: '250',
       durationOverride: '45m',
     }),
     {
-      environment: 'preprod',
+      environment: 'sandbox',
       profile: 'load',
       scenario: 'zero-query-transform',
       vusOverride: 250,
@@ -91,8 +88,13 @@ test('rejects invalid VU overrides', () => {
 
 test('rejects a VU override above the environment cap', () => {
   assert.throws(
-    () => resolveRunConfig({ environment: 'preprod', vusOverride: '501' }),
-    /maximum 500/i,
+    () => resolveRunConfig({ environment: 'sandbox', vusOverride: '301' }),
+    /maximum 300/i,
+  );
+  // Preprod's cap is deliberately tiny, because it is production infrastructure.
+  assert.throws(
+    () => resolveRunConfig({ environment: 'preprod', vusOverride: '6' }),
+    /maximum 5/i,
   );
 });
 
@@ -101,8 +103,8 @@ test('rejects invalid or excessive duration overrides', () => {
     assert.throws(() => resolveRunConfig({ durationOverride: value }), /duration/i);
   }
   assert.throws(
-    () => resolveRunConfig({ environment: 'sandbox', durationOverride: '61m' }),
-    /maximum 1h/i,
+    () => resolveRunConfig({ environment: 'preprod', durationOverride: '11m' }),
+    /exceeds maximum/i,
   );
 });
 
@@ -177,5 +179,51 @@ test('no profile default exceeds the cap of an environment that allows it', asyn
       const peak = peakVus(buildExecutionProfile(profile));
       assert.ok(peak <= limits.maxVus, `${profile} peaks at ${peak} on ${environment}`);
     }
+  }
+});
+
+test('sandbox is the capacity target, because it is the only isolated deployment', () => {
+  // Sandbox has its own host, data and capacity, so heavy profiles belong there.
+  assert.equal(ENVIRONMENTS.sandbox.maxVus, 300);
+  for (const profile of ['smoke', 'release', 'load', 'stress', 'spike', 'soak']) {
+    assert.doesNotThrow(() => resolveRunConfig({ environment: 'sandbox', profile }), profile);
+  }
+});
+
+test('preprod is verification only, because it runs on production infrastructure', () => {
+  // Pre-production is the production host plus a feature-flag header: same backend, same
+  // database, same Vespa and Redis. Load there is load on production.
+  assert.equal(ENVIRONMENTS.preprod.maxVus, 5);
+  assert.doesNotThrow(() => resolveRunConfig({ environment: 'preprod', profile: 'smoke' }));
+
+  for (const profile of ['release', 'load', 'stress', 'spike', 'soak']) {
+    assert.throws(
+      () => resolveRunConfig({ environment: 'preprod', profile }),
+      /shares production/i,
+      profile,
+    );
+  }
+});
+
+test('preprod refuses write scenarios outright — the opt-in does not apply there', () => {
+  // On sandbox the opt-in is a reminder about cleanup. On preprod a write is a write to
+  // production data, so there is no flag that makes it acceptable.
+  for (const scenario of [...WRITE_SCENARIOS]) {
+    assert.throws(
+      () => resolveRunConfig({
+        environment: 'preprod', profile: 'smoke', scenario, allowWriteScenarios: true,
+      }),
+      /production data/i,
+      scenario,
+    );
+  }
+});
+
+test('preprod still allows the read scenarios', () => {
+  for (const scenario of ['smoke', 'zero-query-transform', 'search', 'attachments']) {
+    assert.doesNotThrow(
+      () => resolveRunConfig({ environment: 'preprod', profile: 'smoke', scenario }),
+      scenario,
+    );
   }
 });

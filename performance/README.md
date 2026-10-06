@@ -123,8 +123,28 @@ So two things are enforced. Every scenario sends the routing header for `preprod
 runner **refuses the production hosts by hostname**, whatever the run is called. The
 hostname is compared exactly, so a lookalike or a port cannot disguise one.
 
-Routine runs accept only `sandbox` and `preprod`. Production is deliberately rejected. Sandbox is
-restricted to the short `smoke` and `release` profiles; capacity profiles run only in pre-production.
+Routine runs accept only `sandbox` and `preprod`. Production is deliberately rejected.
+
+### The two targets are not peers
+
+| | sandbox | preprod |
+| --- | --- | --- |
+| Deployment | **its own** | **production's** |
+| Database | **its own** | **production's — the one customers use** |
+| Selected by | separate host | `x-route-env: playground` header |
+| Profiles allowed | **all six** | **`smoke` only** |
+| VU cap | **300** | **5** |
+| Max duration | 8h | 10m |
+| Write scenarios | allowed with opt-in | **refused — no opt-in exists** |
+
+Pre-production is not an environment in the usual sense. The desktop app's Beta toggle
+sends a header to the **same host**, and the backend passes it to Superposition as a
+config dimension (`cacConfigController.ts:14`), resolving a different feature set against
+the same backend, database, Vespa and Redis that serve customers. Load there is load on
+production, and a write there is a write to customer data.
+
+So preprod is kept as a **verification** target — enough to confirm the framework reaches
+the playground feature set — and nothing heavier. **Sandbox is where load actually runs.**
 
 ## Identity fixture sizing
 
