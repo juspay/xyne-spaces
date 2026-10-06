@@ -815,9 +815,10 @@ export default class BrowserSteps {
 
   @Step('verifying <selector> is visible')
   public async verifySelectorIsVisible(selector: string): Promise<void> {
-    await testContext.activePage.locator(selector).first().waitFor({
-      state: 'visible',
-    });
+    const element = testContext.activePage.locator(selector).first();
+    await element.waitFor({ state: 'attached' });
+    await element.scrollIntoViewIfNeeded().catch(() => {});
+    await element.waitFor({ state: 'visible' });
   }
 
   @Step('verifying <selector> is not visible')
