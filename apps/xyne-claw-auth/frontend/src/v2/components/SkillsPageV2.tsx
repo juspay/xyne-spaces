@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
+import { isCurrentUser } from "../../lib/identity";
 import {
   listSkills,
   createSkill,
@@ -172,7 +173,7 @@ export function SkillsPageV2({ userId, isAdmin }: Props) {
     }
   };
 
-  const mySkills = skills.filter((s) => s.ownerUserId === userId);
+  const mySkills = skills.filter((s) => isCurrentUser(s.ownerUserId));
   const globalSkills = skills.filter((s) => s.scope === "global");
 
   return (
@@ -287,7 +288,7 @@ export function SkillsPageV2({ userId, isAdmin }: Props) {
                   <SkillCard
                     key={skill.id}
                     skill={skill}
-                    canDelete={skill.ownerUserId === userId || !!isAdmin}
+                    canDelete={isCurrentUser(skill.ownerUserId) || !!isAdmin}
                     canRequestGlobal={false}
                     deletingSkill={deletingSkill}
                     onDelete={() => handleDelete(skill)}

@@ -4,7 +4,7 @@ import { prisma } from "../db.js";
 import { CONFIG } from "../config.js";
 import { decrypt } from "../crypto.js";
 import { agentRunRepository, chatMessageRepository } from "../repositories/index.js";
-import { ensureUserExists } from "../lib/users-jit.js";
+import { ensureUserExists, resolveCanonicalUserIdOrSelf } from "../lib/users-jit.js";
 import { resolveAgentProviderConfigs } from "../lib/agent-provider-config.js";
 import { resolveFastMode } from "../lib/fast-mode.js";
 import { registerRunRecovery, type RecoverySessionContext } from "./run-recovery-worker.js";
@@ -16,9 +16,14 @@ const log = createLogger("scheduled-jobs-worker");
 let worker: Worker<ScheduledJobData> | undefined;
 
 async function processJob(job: Job<ScheduledJobData>): Promise<void> {
-  const { scheduledJobId, userId, agentSlug, channelId, conversationId } = job.data;
+  const { scheduledJobId, userId: jobUserId, agentSlug, channelId, conversationId } = job.data;
 
   log.info(`[scheduler] Firing job ${scheduledJobId} (agent: ${agentSlug})`);
+
+  // Rows may predate canonicalization (keyed by the raw Spaces workspace id).
+  // Normalize once: the dispatch payload, run/chat persistence, and the
+  // session token the runtime mints all key on Claw's canonical id.
+  const userId = await resolveCanonicalUserIdOrSelf(jobUserId);
 
   // Verify the job is still active
   const row = await prisma.scheduledJob.findUnique({ where: { id: scheduledJobId } });
@@ -191,7 +196,10 @@ async function processJob(job: Job<ScheduledJobData>): Promise<void> {
     const recoveryCtx: RecoverySessionContext = {
       mentionedUserId: agentRow?.spacesAppUserId ?? "",
       senderId: userId,
-      senderName: userId,
+      // Display name, not the canonical id — senderName is rendered to humans.
+      senderName: await prisma.user.findUnique({ where: { id: userId }, select: { name: true, email: true } })
+        .then((u) => (u?.name ?? "").trim() || u?.email || userId)
+        .catch(() => userId),
       channelId: channelId ?? "",
       channelName: channelId ?? "",
       conversationId: conversationId ?? runConversationId,
