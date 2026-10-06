@@ -178,6 +178,14 @@ export class YSweetController {
       // y-sweet document under the legacy string.
       const canonicalDocId = authResult.canvas?.id ?? docId;
 
+      if (authResult.crossWorkspace) {
+        res.status(403).json({
+          error: 'Forbidden',
+          message: 'Access denied'
+        });
+        return;
+      }
+
       if (!authResult.canvas) {
         try {
           await canvasAuthService.createCanvasForUser(canonicalDocId, userId, {
