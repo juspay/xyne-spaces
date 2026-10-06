@@ -311,13 +311,19 @@ export class TranscriptService {
    * Create a fresh Agent instance for each request
    * This prevents state pollution and BUSY errors between concurrent requests
    */
-  private async createAgent(callId?: string, modelType?: SummaryModelType): Promise<Agent | null> {
+  private async createAgent(callId?: string, modelType?: SummaryModelType, workspaceId?: string): Promise<Agent | null> {
     try {
       const userId = await this.getCreatedByUserIdForCall(callId);
-      const credential = await orgLLMCredentialService.getCredentialByUserId(
-        userId,
-        OrgLLMServiceAccountPurpose.CALL_TRANSCRIPT,
-      );
+      // `workspaceId` is for callers with no Xyne call to resolve the org from (desk call recordings).
+      const credential = workspaceId
+        ? await orgLLMCredentialService.getCredentialByWorkspaceId(
+            workspaceId,
+            OrgLLMServiceAccountPurpose.CALL_TRANSCRIPT,
+          )
+        : await orgLLMCredentialService.getCredentialByUserId(
+            userId,
+            OrgLLMServiceAccountPurpose.CALL_TRANSCRIPT,
+          );
 
       // Prefer the org-provisioned credential; fall back to the env-configured
       // CALL_LITELLM_API_KEY/LITELLM_BASE_URL (config.llm) when no org credential
@@ -1079,14 +1085,19 @@ export class TranscriptService {
   /**
    * Generate AI summary from the formatted transcript with explicit retry loop.
    */
-  async generateCallSummary(transcript: string, callId?: string, modelType?: SummaryModelType): Promise<string | null> {
+  async generateCallSummary(
+    transcript: string,
+    callId?: string,
+    modelType?: SummaryModelType,
+    workspaceId?: string,
+  ): Promise<string | null> {
     const callCreator = await this.getCallCreatorName(callId);
     const prompt = CALL_SUMMARY_PROMPT
       .replace('{callCreator}', callCreator || 'Unknown')
       .replace('{transcript}', transcript);
 
     const extracted = await executeCallLlmWithRetry(
-      () => this.createAgent(callId, modelType),
+      () => this.createAgent(callId, modelType, workspaceId),
       () => prompt,
       'call_summary',
       callId || 'unknown',

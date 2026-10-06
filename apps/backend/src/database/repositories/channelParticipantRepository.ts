@@ -280,7 +280,7 @@ export class ChannelParticipantRepository extends BaseRepository<ChannelParticip
 
     const userIds = participants.map(p => p.userId);
     const botUsers = await this.db.user.findMany({
-      where: { id: { in: userIds }, userType: { in: [UserType.BOT, UserType.APP] } },
+      where: { id: { in: userIds }, userType: { in: [UserType.BOT, UserType.APP, UserType.AGENT] } },
       select: { id: true },
     });
     return botUsers.map(u => u.id);

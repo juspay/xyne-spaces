@@ -11,7 +11,9 @@
  * used by claw-auth's knowledge-base tooling (`includeChunkLevel`,
  * `startChunkIndex`, `chunkLimit`, `collectionId`, `fileId`, `searchId`,
  * `presentationSummary`, `includeDebugInfo`) are deliberately omitted — they
- * expose chunk-level index internals rather than product concepts.
+ * expose chunk-level index internals rather than product concepts. Also omitted:
+ * `rankProfile` (ranking internals), `mentionHighlights` (cmd+k snippet bolding
+ * only, never a filter) and `filterOnly` (the route sets it when `q` is empty).
  */
 
 import { z } from 'zod';
@@ -80,6 +82,23 @@ export const searchQuerySchema = z.object({
   tags: z.string().optional(),
   stage: z.string().optional(),
   assignee: z.string().optional(),
+  /** User-group id(s) a ticket is assigned to. */
+  userGroup: csv.optional(),
+  /** Form-field filters as `fieldId::value` tokens. */
+  dynamicFieldValues: csv.optional(),
+  /** JSON object of `fieldId -> { start?, end? }` epoch-ms bounds for date form fields. */
+  dynamicFieldDateRanges: z.string().optional(),
+
+  // Thread classification. `threadType` matches a thread's root message (one hit per
+  // thread); `messageActs` matches the individual messages cited as evidence for a type.
+  threadType: csv.optional(),
+  messageActs: csv.optional(),
+
+  // Content filters.
+  /** Entity name(s) annotated on messages and tickets; a result must match every one. */
+  entity: csv.optional(),
+  /** Chat messages with (true) or without (false) a link. */
+  hasLink: boolish.optional(),
 
   // Dates. `range` takes natural windows ("today", "last 7 days"); the rest are
   // explicit cutoffs.

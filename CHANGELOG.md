@@ -1,3 +1,72 @@
+## [1.460.4](https://github.com/juspay/xyne-spaces/compare/v1.460.3...v1.460.4) (2026-10-05)
+
+
+### Bug Fixes
+
+* use the shared direct-pick matcher in grantedByConfig ([#2663](https://github.com/juspay/xyne-spaces/issues/2663)) ([e8109fe](https://github.com/juspay/xyne-spaces/commit/e8109fe3770034b4a3d02f1e876d1482273ca476))
+
+## [1.460.3](https://github.com/juspay/xyne-spaces/compare/v1.460.2...v1.460.3) (2026-10-05)
+
+
+### Bug Fixes
+
+* fetch workspace counts only when switcher opens; use activity count for current workspace ([#2573](https://github.com/juspay/xyne-spaces/issues/2573)) ([16e6ede](https://github.com/juspay/xyne-spaces/commit/16e6ede05ce8ace2ec1ee3a92367f2775b0e9b5a))
+* time out hung queue runs and log callback failure causes ([#2643](https://github.com/juspay/xyne-spaces/issues/2643)) ([dff2c46](https://github.com/juspay/xyne-spaces/commit/dff2c4618f864a82414a4eddd59d75db8ea834e1))
+
+## [1.460.2](https://github.com/juspay/xyne-spaces/compare/v1.460.1...v1.460.2) (2026-10-05)
+
+
+### Bug Fixes
+
+* send updatedAt from the fallback-hydrated delta query ([#2585](https://github.com/juspay/xyne-spaces/issues/2585)) ([b390e72](https://github.com/juspay/xyne-spaces/commit/b390e72b19972d06577a0d166d1886bad3f479ea))
+
+## [1.460.1](https://github.com/juspay/xyne-spaces/compare/v1.460.0...v1.460.1) (2026-10-05)
+
+
+### Bug Fixes
+
+* calls v2 copy link, start-call position, and RSVP-based calendar pills ([#2631](https://github.com/juspay/xyne-spaces/issues/2631)) ([153a6ff](https://github.com/juspay/xyne-spaces/commit/153a6ffed7b51d9f387efa1aacd64be1c92d4637))
+
+## [1.460.0](https://github.com/juspay/xyne-spaces/compare/v1.459.1...v1.460.0) (2026-10-05)
+
+
+### Features
+
+* Feature/desk recordings asr ([#2353](https://github.com/juspay/xyne-spaces/issues/2353)) ([d533e27](https://github.com/juspay/xyne-spaces/commit/d533e270d2e8919a04e421809ff4e621cbe00f33))
+
+
+### Bug Fixes
+
+* removed multiple ticket style apply ([#2642](https://github.com/juspay/xyne-spaces/issues/2642)) ([4b92299](https://github.com/juspay/xyne-spaces/commit/4b92299e635b187a6c963020475bc85e14fcb453))
+
+## [1.459.1](https://github.com/juspay/xyne-spaces/compare/v1.459.0...v1.459.1) (2026-10-05)
+
+## [1.459.0](https://github.com/juspay/xyne-spaces/compare/v1.458.0...v1.459.0) (2026-10-05)
+
+
+### Features
+
+* fix admin agent approval and request section ([#2514](https://github.com/juspay/xyne-spaces/issues/2514)) ([bfd80d8](https://github.com/juspay/xyne-spaces/commit/bfd80d8f82d90230bf493ffdd9c0ef9602fe6eee))
+
+
+### Bug Fixes
+
+* allow the browser sandbox in automated runs for Browser-pinned agents ([#2634](https://github.com/juspay/xyne-spaces/issues/2634)) ([c16b7e6](https://github.com/juspay/xyne-spaces/commit/c16b7e6b8ea86355166ba4de44e30f2f3e1469c4))
+* filtering the channelType to display channelName only in default chan… ([#2632](https://github.com/juspay/xyne-spaces/issues/2632)) ([90658e6](https://github.com/juspay/xyne-spaces/commit/90658e6f415cf210239970abd753307437c75ce1))
+* match MCP tool picks saved under the server type ([#2636](https://github.com/juspay/xyne-spaces/issues/2636)) ([bd744c1](https://github.com/juspay/xyne-spaces/commit/bd744c10d6a1e272dff177db9df2e58fcc6468b2))
+
+## [1.458.0](https://github.com/juspay/xyne-spaces/compare/v1.457.1...v1.458.0) (2026-10-05)
+
+
+### Features
+
+* sdlc changes sync with latest main ([#2630](https://github.com/juspay/xyne-spaces/issues/2630)) ([840df62](https://github.com/juspay/xyne-spaces/commit/840df622011f26d4274be4279c94b3a583aef8ee)), closes [#2531](https://github.com/juspay/xyne-spaces/issues/2531) [#2532](https://github.com/juspay/xyne-spaces/issues/2532) [#2528](https://github.com/juspay/xyne-spaces/issues/2528)
+
+
+### Bug Fixes
+
+* show starred SDLC channels under Starred in chat sidebar ([#2598](https://github.com/juspay/xyne-spaces/issues/2598)) ([07f8842](https://github.com/juspay/xyne-spaces/commit/07f88422524380d679e10be684b99f63f738252b))
+
 ## [1.457.1](https://github.com/juspay/xyne-spaces/compare/v1.457.0...v1.457.1) (2026-10-05)
 
 

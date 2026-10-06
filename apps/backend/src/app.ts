@@ -74,6 +74,7 @@ import callRoutes from '@/routes/calls';
 import calendarSyncRoutes from '@/routes/calendarSync';
 import calendarOAuthRoutes from '@/routes/calendarOAuth';
 import driveOAuthRoutes from '@/routes/driveOAuth';
+import userContactsRoutes from '@/routes/userContacts';
 import calendarWatchRoutes from '@/routes/calendarWatch';
 import calendarWebhookRoutes from '@/routes/calendarWebhooks';
 import callLobbyRoutes from '@/routes/callLobby';
@@ -185,6 +186,7 @@ import { conversationIngestQueue } from '@/queues/conversationIngestQueue';
 import { documentIngestQueue } from '@/queues/documentIngestQueue';
 import { teamIntelligenceQueue } from '@/team-intelligence/queue';
 import { emailClassificationQueue } from '@/queues/emailClassificationQueue';
+import { callTranscriptionQueue } from '@/queues/callTranscriptionQueue';
 import { autoDraftQueue } from '@/queues/autoDraftQueue';
 import { entityExtractionQueue } from '@/queues/entityExtractionQueue';
 import { initStorage } from '@/services/storage';
@@ -538,6 +540,7 @@ export class App {
     this.app.use('/api/calls', authMiddleware.authenticate, callRoutes); // Calling feature routes
     this.app.use('/api/calendar/oauth', calendarOAuthRoutes); // Calendar-only OAuth (init is authenticated; callbacks use bound state)
     this.app.use('/api/drive/oauth', driveOAuthRoutes); // KB Drive import OAuth (init is authenticated; callback uses bound state)
+    this.app.use('/api/user-contacts', userContactsRoutes); // Per-user contacts import (invite dialog; init is authenticated, callbacks use bound state)
     this.app.use('/api/calendar/sync', authMiddleware.authenticate, calendarSyncRoutes); // Calendar manual sync
     this.app.use('/api/calendar/watch', authMiddleware.authenticate, calendarWatchRoutes); // Calendar watch setup
     this.app.use('/api/voice-input', authMiddleware.authenticate, voiceInputRoutes); // Low-latency chat voice input
@@ -905,6 +908,10 @@ export class App {
           logger.info('Initializing email classification queue...');
           await emailClassificationQueue.initialize();
         })(),
+        (async () => {
+          logger.info('Initializing call transcription queue...');
+          callTranscriptionQueue.startConsumer();
+        })(),
       ]);
 
       logger.info('[TEST MODE] All queues initialized');
@@ -950,6 +957,12 @@ export class App {
 
       logger.info('Initializing email classification queue...');
       await emailClassificationQueue.initialize();
+
+      // Ozonetel call-recording transcription (manual "Transcribe" button). The audio
+      // work runs in the Python agent; this consumer only holds the Bull job while it
+      // waits for the agent, then writes the transcript attachment.
+      logger.info('Initializing call transcription queue...');
+      callTranscriptionQueue.startConsumer();
 
       // Producer only — messages are enqueued here at ingest; the worker (a
       // separate process) drains each thread once its debounce window elapses.
@@ -1187,6 +1200,9 @@ export class App {
 
       // Close auto draft queue
       await autoDraftQueue.close();
+
+      // Close call transcription queue
+      await callTranscriptionQueue.close();
 
       // Close radar execution producer queue (initialized above when enabled)
       const { radarExecutionQueue: radarQueue } = await import('@/queues/radarExecutionQueue');
