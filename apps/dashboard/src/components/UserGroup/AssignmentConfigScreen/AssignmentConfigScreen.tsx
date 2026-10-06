@@ -602,9 +602,6 @@ export const AssignmentConfigScreen = ({
   };
 
   // Check if percentage is valid (sum = 100 per set) when usePercentage is enabled and rotation is enabled
-  // % share needs both a window length and a ticket basis; neither has a default
-  const isShareSettingsValid =
-    !localUsePercentage || (localShareWindowDays !== null && localShareBasis !== null);
 
   const isPercentageValid = useMemo(() => {
     if (!localUsePercentage) return true;
@@ -711,6 +708,22 @@ export const AssignmentConfigScreen = ({
       ? (savedBoardScore.percentageWindowStartAt ?? null)
       : null;
   const savedShareWindowDays = savedBoardScore?.percentageWindowDays ?? null;
+  const savedShareBasis =
+    savedBoardScore?.percentageShareBasis === 'ALL' ||
+    savedBoardScore?.percentageShareBasis === 'OPEN'
+      ? savedBoardScore.percentageShareBasis
+      : null;
+
+  const isShareSectionChanged =
+    localUsePercentage &&
+    (savedBoardScore?.usePercentage !== true ||
+      localShareWindowDays !== savedShareWindowDays ||
+      localShareBasis !== savedShareBasis);
+
+  // % share needs both a window length and a ticket basis (neither has a default), but only
+  // enforce it when the admin edits that section, so unrelated edits on such boards can save.
+  const isShareSettingsValid =
+    !isShareSectionChanged || (localShareWindowDays !== null && localShareBasis !== null);
 
   // Changing the window length mid-window: the admin chooses whether to restart counting today
   // or keep the current start date and apply the new length from it.
@@ -744,8 +757,9 @@ export const AssignmentConfigScreen = ({
   /** What to send for percentageWindowStartAt; undefined keeps the stored start. */
   const resolveShareWindowStartAt = (resetShareWindow: boolean): number | undefined => {
     if (!localUsePercentage) return undefined;
-    // First time % share is turned on (or it never had a start): the first window begins today
-    if (savedShareWindowStartAt === null) return startOfToday();
+    // First time % share is configured (or it never had a start): the first window begins today.
+    // Unrelated saves on a board without share settings leave the start unset.
+    if (savedShareWindowStartAt === null) return isShareSectionChanged ? startOfToday() : undefined;
     return resetShareWindow ? startOfToday() : undefined;
   };
 
