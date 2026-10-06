@@ -2,6 +2,9 @@ import rateLimit, { ipKeyGenerator, type RateLimitRequestHandler } from "express
 import type { Request, Response } from "express";
 import { createHash } from "node:crypto";
 import { s2sKeyMatches } from "./require-auth.js";
+import { createLogger } from "../logger.js";
+
+const log = createLogger("rate-limiters");
 
 /**
  * A stable per-caller identifier taken from the session cookie.
@@ -29,26 +32,44 @@ function sessionKey(req: Request): string | null {
   return null;
 }
 
-function requesterKey(req: Request): string {
+function clientIpKey(req: Request): string {
+  return ipKeyGenerator(req.ip ?? "unknown");
+}
+
+function verifiedUserKey(req: Request): string | null {
   const header = req.headers?.["x-user-id"];
   const userId = Array.isArray(header) ? header[0] : header;
   if (userId && userId.trim()) return `user:${userId.trim()}`;
   const sessionUserId = (req as Request & { session?: { userId?: string } }).session?.userId;
   if (sessionUserId && sessionUserId.trim()) return `user:${sessionUserId.trim()}`;
+  return null;
+}
+
+function identityOrIpKey(req: Request): string {
+  return verifiedUserKey(req) ?? clientIpKey(req);
+}
+
+function requesterKey(req: Request): string {
+  const verified = verifiedUserKey(req);
+  if (verified) return verified;
   const cookie = sessionKey(req);
   if (cookie) return `sess:${cookie}`;
-  return ipKeyGenerator(req.ip ?? "unknown");
+  return clientIpKey(req);
 }
 
 function isInternalCaller(req: Request, _res: Response): boolean {
   return s2sKeyMatches(req.headers?.["x-s2s-key"]);
 }
 
-export function createRequesterLimiter(options: { windowMs: number; max: number }): RateLimitRequestHandler {
+export function createRequesterLimiter(options: {
+  windowMs: number;
+  max: number;
+  keyGenerator?: (req: Request) => string;
+}): RateLimitRequestHandler {
   return rateLimit({
     windowMs: options.windowMs,
     max: options.max,
-    keyGenerator: requesterKey,
+    keyGenerator: options.keyGenerator ?? requesterKey,
     skip: isInternalCaller,
     message: {
       success: false,
@@ -62,12 +83,35 @@ export function createRequesterLimiter(options: { windowMs: number; max: number 
 export const apiLimiter: RateLimitRequestHandler = createRequesterLimiter({ windowMs: 60 * 1000, max: 600 });
 
 
-export const publicShareLimiter: RateLimitRequestHandler = createRequesterLimiter({ windowMs: 60 * 1000, max: 60 });
+export const ipFloodLimiter: RateLimitRequestHandler = createRequesterLimiter({
+  windowMs: 60 * 1000,
+  max: Number(process.env["IP_FLOOD_LIMIT_PER_MIN"] ?? 3000),
+  keyGenerator: clientIpKey,
+});
+
+export const publicShareLimiter: RateLimitRequestHandler = createRequesterLimiter({
+  windowMs: 60 * 1000,
+  max: 60,
+  keyGenerator: identityOrIpKey,
+});
+
+const CLIENT_IP_SAMPLE_LIMIT = 20;
+const sampledClientIps = new Set<string>();
+
+export function sampleClientIp(req: Request): void {
+  if (sampledClientIps.size >= CLIENT_IP_SAMPLE_LIMIT) return;
+  const ip = req.ip ?? "unknown";
+  if (sampledClientIps.has(ip)) return;
+  sampledClientIps.add(ip);
+  const forwarded = req.headers?.["x-forwarded-for"];
+  const entries = typeof forwarded === "string" ? forwarded.split(",").length : Array.isArray(forwarded) ? forwarded.length : 0;
+  log.info(`[rate-limit] client-ip sample ip=${ip} xff_entries=${entries} trust_proxy=${String(req.app?.get("trust proxy"))}`);
+}
 
 export const oauthLimiter: RateLimitRequestHandler = rateLimit({
   windowMs: 60 * 1000,
   max: 10,
-  keyGenerator: requesterKey,
+  keyGenerator: clientIpKey,
   message: {
     success: false,
     error: "Too many sign-in attempts. Please wait a moment and try again.",

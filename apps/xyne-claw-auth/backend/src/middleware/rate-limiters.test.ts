@@ -134,3 +134,86 @@ describe("createRequesterLimiter", () => {
     expect(res.headers.get("x-ratelimit-limit")).toBeNull();
   });
 });
+
+async function startWith(pick: (mod: typeof import("./rate-limiters.js")) => express.RequestHandler): Promise<void> {
+  const mod = await import("./rate-limiters.js");
+  const app = express();
+  app.use((req, _res, next) => {
+    if (req.headers["x-s2s-key"] !== "s2s-secret") delete req.headers["x-user-id"];
+    next();
+  });
+  app.use(pick(mod));
+  app.get("/ping", (_req, res) => {
+    res.json({ ok: true });
+  });
+  server = createServer(app);
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  baseUrl = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+}
+
+const fakeCookie = (i: number): string => `user_session_id=forged_${i}_${Math.random().toString(36).slice(2)}`;
+
+describe("forged session cookies cannot mint fresh buckets", () => {
+  it("public design-share limiter keys anonymous callers on the address, not the cookie", async () => {
+    await startWith((m) => m.publicShareLimiter);
+    const statuses: number[] = [];
+    for (let i = 0; i < 61; i += 1) {
+      statuses.push((await fetch(`${baseUrl}/ping`, { headers: { cookie: fakeCookie(i) } })).status);
+    }
+    expect(statuses.slice(0, 60).every((s) => s === 200)).toBe(true);
+    expect(statuses[60]).toBe(429);
+  });
+
+  it("public design-share limiter still gives a verified viewer their own bucket", async () => {
+    await startWith((m) => (req, res, next) => {
+      const viewer = req.headers["x-test-viewer"];
+      if (typeof viewer === "string") req.headers["x-user-id"] = viewer;
+      return m.publicShareLimiter(req, res, next);
+    });
+    for (let i = 0; i < 60; i += 1) {
+      await fetch(`${baseUrl}/ping`, { headers: { "x-test-viewer": "viewer-a" } });
+    }
+    expect((await fetch(`${baseUrl}/ping`, { headers: { "x-test-viewer": "viewer-a" } })).status).toBe(429);
+    expect((await fetch(`${baseUrl}/ping`, { headers: { "x-test-viewer": "viewer-b" } })).status).toBe(200);
+  });
+
+  it("sign-in limiter keys on the address, so rotating cookies does not reset it", async () => {
+    await startWith((m) => m.oauthLimiter);
+    const statuses: number[] = [];
+    for (let i = 0; i < 11; i += 1) {
+      statuses.push((await fetch(`${baseUrl}/ping`, { headers: { cookie: fakeCookie(i) } })).status);
+    }
+    expect(statuses.slice(0, 10).every((s) => s === 200)).toBe(true);
+    expect(statuses[10]).toBe(429);
+  });
+
+  it("per-address flood limiter caps a caller that rotates cookies past the per-session limiter", async () => {
+    process.env["IP_FLOOD_LIMIT_PER_MIN"] = "3";
+    try {
+      await startWith((m) => (req, res, next) =>
+        m.ipFloodLimiter(req, res, (err?: unknown) => (err ? next(err) : m.apiLimiter(req, res, next))),
+      );
+      const statuses: number[] = [];
+      for (let i = 0; i < 5; i += 1) {
+        statuses.push((await fetch(`${baseUrl}/ping`, { headers: { cookie: fakeCookie(i) } })).status);
+      }
+      expect(statuses).toEqual([200, 200, 200, 429, 429]);
+    } finally {
+      delete process.env["IP_FLOOD_LIMIT_PER_MIN"];
+    }
+  });
+
+  it("flood limiter never limits a valid S2S caller", async () => {
+    process.env["IP_FLOOD_LIMIT_PER_MIN"] = "2";
+    try {
+      await startWith((m) => m.ipFloodLimiter);
+      const statuses: number[] = [];
+      for (let i = 0; i < 6; i += 1) {
+        statuses.push((await fetch(`${baseUrl}/ping`, { headers: { "x-s2s-key": "s2s-secret" } })).status);
+      }
+      expect(statuses.every((s) => s === 200)).toBe(true);
+    } finally {
+      delete process.env["IP_FLOOD_LIMIT_PER_MIN"];
+    }
+  });
+});
