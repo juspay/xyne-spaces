@@ -72,15 +72,34 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-async function addItemViaCustomizeToolbar(page: Page, itemId: string): Promise<void> {
-  // Caller has already opened the More menu to look for the item and failed to find it.
+// Opens the "Customize toolbar" dialog from the More popover and returns once
+// the dialog is on-screen. The two toolbar-mutation helpers below (add / remove)
+// share this entry so changes to the entry sequence land in one place.
+async function openCustomizeToolbarDialog(page: Page): Promise<Locator> {
+  // The "Customize toolbar" button sits at the bottom of a max-h-[80vh] overflow-y-auto
+  // popover in AppSidebar, so when the user has many More-overflow items it starts
+  // below the fold. Attach + scroll before the visibility wait; otherwise the wait
+  // times out even though the button is rendered.
   const customizeTrigger = page.locator("[data-testid='more-customize-toolbar']").first();
+  await customizeTrigger.waitFor({ state: 'attached', timeout: SIDEBAR_NAVIGATION_TIMEOUT_MS });
+  await customizeTrigger.scrollIntoViewIfNeeded().catch(() => {});
   await customizeTrigger.waitFor({ state: 'visible', timeout: SIDEBAR_NAVIGATION_TIMEOUT_MS });
   await customizeTrigger.click();
   // Preferences opens via a custom event + lazy section mount; wait for the
   // dialog shell before poking at anything inside it.
   const closeButton = page.locator("button[aria-label='Close preferences']").first();
   await closeButton.waitFor({ state: 'visible', timeout: SIDEBAR_NAVIGATION_TIMEOUT_MS });
+  return closeButton;
+}
+
+async function closeCustomizeToolbarDialog(page: Page, closeButton: Locator): Promise<void> {
+  await closeButton.click({ timeout: 2000 }).catch(() => page.keyboard.press('Escape'));
+  await closeButton.waitFor({ state: 'hidden', timeout: SIDEBAR_NAVIGATION_TIMEOUT_MS });
+}
+
+async function addItemViaCustomizeToolbar(page: Page, itemId: string): Promise<void> {
+  // Caller has already opened the More menu to look for the item and failed to find it.
+  const closeButton = await openCustomizeToolbarDialog(page);
   const addRow = page.locator(`[data-testid='customize-add-${itemId}']`).first();
   try {
     // The "Available" list in BarCustomizer is long (NAVIGATION_ITEMS has 30+
@@ -93,7 +112,7 @@ async function addItemViaCustomizeToolbar(page: Page, itemId: string): Promise<v
     await addRow.scrollIntoViewIfNeeded().catch(() => {});
     await addRow.waitFor({ state: 'visible', timeout: SIDEBAR_NAVIGATION_TIMEOUT_MS });
   } catch (err) {
-    await closeButton.click({ timeout: 2000 }).catch(() => page.keyboard.press('Escape'));
+    await closeCustomizeToolbarDialog(page, closeButton);
     throw new Error(
       `Sidebar item "${itemId}" is not available in the Customize Toolbar picker — ` +
         `either the test references a label that no longer exists in NAVIGATION_ITEMS, ` +
@@ -102,8 +121,33 @@ async function addItemViaCustomizeToolbar(page: Page, itemId: string): Promise<v
     );
   }
   await addRow.click();
-  await closeButton.click({ timeout: 2000 }).catch(() => page.keyboard.press('Escape'));
-  await closeButton.waitFor({ state: 'hidden', timeout: SIDEBAR_NAVIGATION_TIMEOUT_MS });
+  await closeCustomizeToolbarDialog(page, closeButton);
+}
+
+async function removeItemViaCustomizeToolbar(page: Page, itemId: string): Promise<void> {
+  // Caller is responsible for having opened the More menu first (same shape as
+  // addItemViaCustomizeToolbar) so openCustomizeToolbarDialog can scroll the
+  // "Customize toolbar" button into view inside the already-open popover.
+  const closeButton = await openCustomizeToolbarDialog(page);
+  const removeRow = page.locator(`[data-testid='customize-remove-${itemId}']`).first();
+  try {
+    // "Shown" rows live in the same scroll container as "Available", so the
+    // attach + scroll + visible dance applies here too — a locked/always-shown
+    // item has no remove button and this will throw cleanly below.
+    await removeRow.waitFor({ state: 'attached', timeout: SIDEBAR_NAVIGATION_TIMEOUT_MS });
+    await removeRow.scrollIntoViewIfNeeded().catch(() => {});
+    await removeRow.waitFor({ state: 'visible', timeout: SIDEBAR_NAVIGATION_TIMEOUT_MS });
+  } catch (err) {
+    await closeCustomizeToolbarDialog(page, closeButton);
+    throw new Error(
+      `Sidebar item "${itemId}" is not currently shown in the Customize Toolbar list — ` +
+        `either it was never in the toolbar, it is locked ("Always shown"), ` +
+        `or the test references a label that no longer exists in NAVIGATION_ITEMS. ` +
+        `Underlying wait: ${errorMessage(err)}`
+    );
+  }
+  await removeRow.click();
+  await closeCustomizeToolbarDialog(page, closeButton);
 }
 
 export default class BrowserSteps {
@@ -285,87 +329,92 @@ export default class BrowserSteps {
     await element.click({ force: true }).catch(() => {});
   }
 
+  @Step('showing all sidebar items in toolbar')
+  public async showAllSidebarItemsInToolbar(): Promise<void> {
+    // Setup helper: moves every item from the Customize Toolbar "Available"
+    // list into "Shown" so the rail carries every nav item the current user
+    // can see. After this runs, downstream `navigating via sidebar to <id>`
+    // steps hit the rail-fast-path and never need to re-open Customize.
+    // Idempotent — if nothing is in Available the loop exits on the first
+    // count check.
+    const page = testContext.activePage;
+    const moreTrigger = page.locator("[data-testid='nav-more']").first();
+    await moreTrigger.waitFor({ state: 'visible' });
+    await moreTrigger.click();
+    const customizeInMore = page.locator("[data-testid='more-customize-toolbar']").first();
+    await customizeInMore.waitFor({
+      state: 'attached',
+      timeout: SIDEBAR_NAVIGATION_TIMEOUT_MS,
+    });
+    const closeButton = await openCustomizeToolbarDialog(page);
+    // Each +Add click moves one item from Available to Shown, which removes
+    // its customize-add-<slug> node, so re-querying every iteration lets the
+    // DOM mutations drive the loop. Hard cap at the current NAVIGATION_ITEMS
+    // size with headroom so a layout bug can't spin forever.
+    const addButtons = page.locator("[data-testid^='customize-add-']");
+    const MAX_ADDS = 60;
+    for (let i = 0; i < MAX_ADDS; i += 1) {
+      const remaining = await addButtons.count();
+      if (remaining === 0) {
+        break;
+      }
+      const next = addButtons.first();
+      await next.scrollIntoViewIfNeeded().catch(() => {});
+      await next.waitFor({ state: 'visible', timeout: SIDEBAR_NAVIGATION_TIMEOUT_MS });
+      await next.click();
+    }
+    await closeCustomizeToolbarDialog(page, closeButton);
+  }
+
+  @Step('removing sidebar item <itemId>')
+  public async removeSidebarItem(itemId: string): Promise<void> {
+    const page = testContext.activePage;
+    const moreTrigger = page.locator("[data-testid='nav-more']").first();
+    await moreTrigger.waitFor({ state: 'visible' });
+    await moreTrigger.click();
+    // Wait for the More popover's content to mount — the Customize button is
+    // the last node in the menu, so once it is attached everything above it is
+    // too. See navigateViaSidebar for the overflow-container rationale.
+    const customizeInMore = page.locator("[data-testid='more-customize-toolbar']").first();
+    await customizeInMore.waitFor({ state: 'attached', timeout: SIDEBAR_NAVIGATION_TIMEOUT_MS });
+    await removeItemViaCustomizeToolbar(page, itemId);
+  }
+
   @Step('navigating via sidebar to <itemId>')
   public async navigateViaSidebar(itemId: string): Promise<void> {
     const page = testContext.activePage;
-    // Wait for the sidebar to be mounted before deciding toolbar vs overflow.
+    // Wait for the sidebar to be mounted before deciding rail vs add-then-rail.
     const moreTrigger = page.locator("[data-testid='nav-more']").first();
     await moreTrigger.waitFor({ state: 'visible' });
 
     const toolbarItem = page.locator(`[data-testid='nav-${itemId}']`).first();
-    if (await toolbarItem.isVisible()) {
-      const expectedPath = await getSidebarDestinationPath(page, toolbarItem);
-      await toolbarItem.click();
-      await waitForPath(page, expectedPath);
-      return;
-    }
 
-    // Item is not in the toolbar — open the "More" overflow menu and click it there.
-    await moreTrigger.click();
-    // The More popover opens asynchronously (Radix animation + lazy render under
-    // CI load). Wait for the popover to actually be rendered before deciding
-    // whether `moreItem` is present — a bare isVisible() right after click races
-    // with the popover mount and will say "not visible" even when the item is
-    // about to appear, which pushes us into `addItemViaCustomizeToolbar` for no
-    // reason and then that step hits its own 10s timeout.
-    const customizeInMore = page.locator("[data-testid='more-customize-toolbar']").first();
-    await customizeInMore.waitFor({ state: 'visible', timeout: SIDEBAR_NAVIGATION_TIMEOUT_MS });
-    let moreItem = page.locator(`[data-testid='more-${itemId}']`).first();
-    // The More popover is max-h-[80vh] overflow-y-auto; items beyond the visible
-    // fold are attached but not "visible" for Playwright, which would make us
-    // detour into addItemViaCustomizeToolbar even though the item is in the
-    // overflow and just needs a scroll. Scroll it into view first.
-    if (await moreItem.count()) {
-      await moreItem.scrollIntoViewIfNeeded().catch(() => {});
-    }
-    // Not in rail or More overflow — try to add it via Customize Toolbar.
-    if (!(await moreItem.isVisible().catch(() => false))) {
-      await addItemViaCustomizeToolbar(page, itemId);
-      const railAfterAdd = page.locator(`[data-testid='nav-${itemId}']`).first();
-      if (await railAfterAdd.isVisible().catch(() => false)) {
-        const expectedPath = await getSidebarDestinationPath(page, railAfterAdd);
-        await railAfterAdd.click();
-        await waitForPath(page, expectedPath);
-        return;
-      }
+    // Ensure the item lives on the rail before clicking. If it is not already
+    // there, add it through Customize Toolbar — then click it from the rail.
+    // We deliberately avoid clicking the item from the More overflow popover:
+    // Radix auto-closes the popover on outside pointer events, items below the
+    // scroll fold are reported as not-visible intermittently, and the click
+    // sequence has to race the popover's own close animation. Routing through
+    // the Customize dialog instead is slower by one dialog round-trip but is
+    // deterministic — once added, nav-<itemId> is a plain button on the rail.
+    if (!(await toolbarItem.isVisible().catch(() => false))) {
       await moreTrigger.click();
-      moreItem = page.locator(`[data-testid='more-${itemId}']`).first();
+      // The Customize button is the last node in the More popover, so once it
+      // is attached the popover's content has finished mounting.
+      const customizeInMore = page.locator("[data-testid='more-customize-toolbar']").first();
+      await customizeInMore.waitFor({
+        state: 'attached',
+        timeout: SIDEBAR_NAVIGATION_TIMEOUT_MS,
+      });
+      await addItemViaCustomizeToolbar(page, itemId);
+      // After the dialog closes the item moves into the user's toolbarIds and
+      // renders on the rail — wait for that render before resolving its href.
+      await toolbarItem.waitFor({ state: 'visible', timeout: SIDEBAR_NAVIGATION_TIMEOUT_MS });
     }
-    await moreItem.waitFor({ state: 'attached' });
-    await moreItem.scrollIntoViewIfNeeded().catch(() => {});
-    await moreItem.waitFor({ state: 'visible' });
-    const expectedPath = await getSidebarDestinationPath(page, moreItem);
 
-    try {
-      await moreItem.click({ timeout: 2000 });
-      await waitForPath(page, expectedPath);
-      return;
-    } catch (initialError) {
-      // A click can close the Radix popover before Playwright dispatches the final
-      // click event. Treat it as successful only if the URL actually changed.
-      if (isAtPath(page, expectedPath)) {
-        return;
-      }
-
-      // The popover item may have been unmounted by the failed click. Reopen the
-      // menu if necessary and resolve a fresh locator before the forced retry.
-      if (!(await moreItem.isVisible())) {
-        await moreTrigger.click();
-      }
-
-      moreItem = page.locator(`[data-testid='more-${itemId}']`).first();
-      await moreItem.waitFor({ state: 'visible' });
-
-      try {
-        await moreItem.click({ force: true, timeout: 5000 });
-        await waitForPath(page, expectedPath);
-      } catch (retryError) {
-        throw new Error(
-          `Sidebar navigation to "${itemId}" did not reach "${expectedPath}". ` +
-            `Initial attempt: ${errorMessage(initialError)} Retry: ${errorMessage(retryError)}`
-        );
-      }
-    }
+    const expectedPath = await getSidebarDestinationPath(page, toolbarItem);
+    await toolbarItem.click();
+    await waitForPath(page, expectedPath);
   }
 
   @Step('typing <text> in <selector>')
