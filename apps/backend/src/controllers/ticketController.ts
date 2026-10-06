@@ -434,7 +434,6 @@ export class TicketController {
         excludedChatAttachmentIds,
         draftAttachmentIds,
         tags,
-        merchantId,
         parentTicketId,
         ticketType,
         stageName
@@ -792,7 +791,7 @@ export class TicketController {
       }
 
       // Wrap all database operations in a transaction for data integrity
-      const { ticket } = await createTicketTx(projectId, sourceConversationId, validatedConversation, this, requestedTicketId, title, description, userId, finalAssignedTo, userGroupId, boardId, effectiveStatusV2, priority, eta, metadata, closedAt, closedBy, merchantId, sourceMessageId, effectiveTicketType, effectiveStageName, dynamicFields, formFieldChangesForEmit, channelId, excludedChatAttachmentIds, entityLinkOwner, fromTicketsTab, initialMessageId, board, uploadedFiles, draftAttachmentIds);
+      const { ticket } = await createTicketTx(projectId, sourceConversationId, validatedConversation, this, requestedTicketId, title, description, userId, finalAssignedTo, userGroupId, boardId, effectiveStatusV2, priority, eta, metadata, closedAt, closedBy, sourceMessageId, effectiveTicketType, effectiveStageName, dynamicFields, formFieldChangesForEmit, channelId, excludedChatAttachmentIds, entityLinkOwner, fromTicketsTab, initialMessageId, board, uploadedFiles, draftAttachmentIds);
 
       // Ticket committed on its initial stage — auto-create the on-entry approval
       // request if that stage's single outgoing transition is configured for it.

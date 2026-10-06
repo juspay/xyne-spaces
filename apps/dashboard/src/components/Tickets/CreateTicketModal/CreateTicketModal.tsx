@@ -134,7 +134,6 @@ interface CreateTicketModalProps {
   initialStatus?: TicketStatusV2 | null;
   initialStageName?: string | null;
   initialTags?: string[];
-  initialMerchantId?: string | undefined;
   initialDynamicFields?: Record<string, string | string[]> | undefined;
   initialTicketKind?: 'task' | 'release';
   releaseOnly?: boolean;
@@ -174,7 +173,6 @@ export interface CreateTicketFormData {
   workflowType: string;
   files: File[];
   dynamicFields: Record<string, string | string[]>;
-  merchantId?: string;
   ticketType?: string;
 }
 
@@ -246,7 +244,6 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
   initialStatus = null,
   initialStageName = null,
   initialTags = EMPTY_TAGS,
-  initialMerchantId,
   initialDynamicFields,
   initialTicketKind = 'task',
   releaseOnly = false,
@@ -514,7 +511,6 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
       workflowType: standaloneSeed?.workflowType ?? '',
       files: [],
       dynamicFields: initialDynamicFields ?? {},
-      merchantId: initialMerchantId ?? '',
       ticketType: BaseTicketType.Fix,
     } as CreateTicketFormData,
     onSubmit: async ({ value }) => {
@@ -609,7 +605,6 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
   const showDueDate = ticketFormConfig?.dueDate?.enabled ?? true;
   const showTodo = ticketFormConfig?.todo?.enabled ?? true;
   const showLabels = ticketFormConfig?.labels?.enabled ?? true;
-  const showMerchantId = ticketFormConfig?.merchantId?.enabled ?? false;
   const showTicketType = ticketFormConfig?.ticketType?.enabled ?? true;
 
   // Determine which fields are mandatory
@@ -618,7 +613,6 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
   const mandatoryDueDate = ticketFormConfig?.dueDate?.mandatory ?? false;
   const mandatoryTodo = ticketFormConfig?.todo?.mandatory ?? false;
   const mandatoryLabels = ticketFormConfig?.labels?.mandatory ?? false;
-  const mandatoryMerchantId = ticketFormConfig?.merchantId?.mandatory ?? false;
   const mandatoryTicketType = ticketFormConfig?.ticketType?.mandatory ?? false;
 
   // Fetch form mapping for the selected board (TICKET entity type)
@@ -1188,14 +1182,12 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
         showTodo,
         showDueDate,
         showLabels,
-        showMerchantId,
         showTicketType,
         mandatoryUserGroupsOnly,
         mandatoryAssignee,
         mandatoryTodo,
         mandatoryDueDate,
         mandatoryLabels,
-        mandatoryMerchantId,
         mandatoryTicketType,
         isRelease: ticketKind === 'release',
         releaseOnly,
@@ -1210,14 +1202,12 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
       showTodo,
       showDueDate,
       showLabels,
-      showMerchantId,
       showTicketType,
       mandatoryUserGroupsOnly,
       mandatoryAssignee,
       mandatoryTodo,
       mandatoryDueDate,
       mandatoryLabels,
-      mandatoryMerchantId,
       mandatoryTicketType,
       releaseOnly,
     ],
@@ -1378,9 +1368,6 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
       ) {
         mandatoryFieldErrors.push('Labels are required');
       }
-      if (showMerchantId && mandatoryMerchantId && !formData.merchantId?.trim()) {
-        mandatoryFieldErrors.push('Merchant ID is required');
-      }
 
       if (mandatoryFieldErrors.length > 0) {
         toast.error('Missing Required Fields', {
@@ -1525,9 +1512,6 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
             formDataPayload.append('tags[]', tag);
           });
         }
-        if (formData.merchantId) {
-          formDataPayload.append('merchantId', formData.merchantId);
-        }
         if (parentTicketId) {
           formDataPayload.append('parentTicketId', parentTicketId);
         }
@@ -1624,7 +1608,6 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
             excludedChatAttachmentIds.size > 0 && {
               excludedChatAttachmentIds: Array.from(excludedChatAttachmentIds),
             }),
-          ...(formData.merchantId && { merchantId: formData.merchantId }),
           ...(parentTicketId && { parentTicketId }),
           // Include dynamic fields (pruned of any now-inactive branch field's stale value)
           dynamicFields: submitDynamicFields,
@@ -1787,7 +1770,6 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
         tags: values.tags,
         boardId: values.boardId || selectedBoardId || undefined,
         workflowType: values.workflowType || undefined,
-        merchantId: values.merchantId || undefined,
         ticketType: values.ticketType,
         dynamicFields: values.dynamicFields,
       },
@@ -3001,21 +2983,6 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
                     />
                   );
                 }}
-              </form.Field>
-            )}
-
-            {/* Merchant ID - conditionally rendered */}
-            {showMerchantId && (
-              <form.Field name='merchantId'>
-                {field => (
-                  <Input
-                    type='text'
-                    value={field.state.value || ''}
-                    onChange={e => field.handleChange(e.target.value)}
-                    placeholder={`Merchant ID${mandatoryMerchantId ? ' *' : ''}`}
-                    className='text-sm'
-                  />
-                )}
               </form.Field>
             )}
           </div>

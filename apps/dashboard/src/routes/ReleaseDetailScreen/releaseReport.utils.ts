@@ -28,7 +28,6 @@ interface ArtRowInput {
         readonly stageName: string;
         readonly priority?: string | null | undefined;
         readonly eta?: number | null | undefined;
-        readonly merchantId?: string | null | undefined;
         readonly pullRequests?:
           | readonly {
               readonly prId: number;
@@ -61,7 +60,6 @@ export const CORE_ADDABLE_DEV_TICKET_COLUMNS: readonly { key: string; label: str
   { key: 'core:priority', label: 'Priority' },
   { key: 'core:eta', label: 'Due Date' },
   { key: 'core:workflowType', label: 'Workflow' },
-  { key: 'core:merchantId', label: 'Merchant ID' },
   { key: 'core:tags', label: 'Labels' },
 ];
 
@@ -87,7 +85,6 @@ export interface ReleaseDetailDevTicketRow extends ReleaseReportDevTicket {
   priority: string;
   dueDate: string;
   workflow: string;
-  merchantId: string;
   labels: string;
   customValuesByFieldId: Map<string, string>;
 }
@@ -102,8 +99,6 @@ export function devTicketAddableCellValue(row: ReleaseDetailDevTicketRow, key: s
       return row.dueDate || '—';
     case 'core:workflowType':
       return row.workflow || '—';
-    case 'core:merchantId':
-      return row.merchantId || '—';
     case 'core:tags':
       return row.labels || '—';
     default:
@@ -197,7 +192,6 @@ export function buildReleaseDetailDevTicketRows(
       priority: devTicket?.priority ?? '',
       dueDate: devTicket?.eta ? new Date(devTicket.eta).toLocaleDateString() : '',
       workflow: (devTicket?.workflows ?? []).find(w => w.workflowType)?.workflowType ?? '',
-      merchantId: devTicket?.merchantId ?? '',
       labels: (devTicket?.tags ?? [])
         .map(t => t.name)
         .filter((n): n is string => !!n)

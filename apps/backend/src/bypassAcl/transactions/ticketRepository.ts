@@ -56,7 +56,6 @@ export async function createTicketWithClient(client: PrismaTransaction | PrismaC
       ...(data.rootId && { rootId: data.rootId }),
       closedAt: data.closedAt,
       closedBy: data.closedBy,
-      merchantId: data.merchantId,
       ticketType: data.ticketType,
       kanbanPosition,
       ...(data.createdAt && { createdAt: data.createdAt }),

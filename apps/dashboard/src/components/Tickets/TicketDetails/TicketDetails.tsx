@@ -4921,14 +4921,6 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
               />
             </DetailFieldRow>
 
-            <DetailFieldRow label='Merchant ID' locked>
-              {ticket.merchantId ? (
-                <span className='text-[13px] font-medium text-foreground'>{ticket.merchantId}</span>
-              ) : (
-                <span className='text-[13px] text-muted-foreground/60'>Empty</span>
-              )}
-            </DetailFieldRow>
-
             {visibleFormFields.map(fieldValue => (
               <EditableFormField
                 key={fieldValue.resolvedFieldId}
