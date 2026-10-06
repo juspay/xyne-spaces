@@ -29,7 +29,8 @@ interface BulkActionToolbarProps {
   userGroups?: UserGroup[];
   stages?: StageOptionSource[];
   onAssigneeChange: (assignee: string | null) => void;
-  onStatusChange: (status: TicketStatusV2) => void;
+  /** Omit to hide the Status action where the stage drives status (the generic ticket list). */
+  onStatusChange?: (status: TicketStatusV2) => void;
   onPriorityChange: (priority: TicketPriority | null) => void;
   onStageChange: (stage: string) => void;
   onDueDateChange: (date: Date | null) => void;
@@ -127,22 +128,24 @@ export const BulkActionToolbar: React.FC<BulkActionToolbarProps> = ({
           />
 
           {/* Status Selector */}
-          <EntitySelector
-            options={StatusOptions}
-            selectedValue={null}
-            onSelect={v => {
-              if (v) onStatusChange(v as TicketStatusV2);
-              setActiveMenu(null);
-            }}
-            placeholder='Status'
-            searchPlaceholder='Search status...'
-            variant='inline'
-            isOpen={activeMenu === 'status'}
-            onOpenChange={open => setActiveMenu(open ? 'status' : null)}
-            inputClassName='!bg-transparent placeholder:text-foreground text-foreground border-none hover:bg-background/5 text-xs sm:text-sm px-2 font-semibold'
-            inputIcon={<CircleCheckBig className='size-4 text-foreground' />}
-            showIndicator={false}
-          />
+          {onStatusChange && (
+            <EntitySelector
+              options={StatusOptions}
+              selectedValue={null}
+              onSelect={v => {
+                if (v) onStatusChange(v as TicketStatusV2);
+                setActiveMenu(null);
+              }}
+              placeholder='Status'
+              searchPlaceholder='Search status...'
+              variant='inline'
+              isOpen={activeMenu === 'status'}
+              onOpenChange={open => setActiveMenu(open ? 'status' : null)}
+              inputClassName='!bg-transparent placeholder:text-foreground text-foreground border-none hover:bg-background/5 text-xs sm:text-sm px-2 font-semibold'
+              inputIcon={<CircleCheckBig className='size-4 text-foreground' />}
+              showIndicator={false}
+            />
+          )}
 
           {/* Priority Selector */}
           <EntitySelector
