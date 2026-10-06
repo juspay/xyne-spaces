@@ -117,3 +117,28 @@ export async function acceptInvitationTx4(invitationId: string, userData: { id: 
   });
   return { result, upgradeCommunityMemberId };
 }
+
+export function approveInvitationTx(self: InvitationService, invitationId: string, invitation: any) {
+  return transaction(['Invitation', 'OrgMember'], 'approveInvitation: org-member creation and approval flag must commit atomically; tx is not ACL-wrapped', self.prisma, async (tx) => {
+    const existingOrgMember = await tx.orgMember.findUnique({
+      where: { email: invitation.email.toLowerCase() },
+      select: { memberId: true },
+    });
+
+    if (!existingOrgMember) {
+      await tx.orgMember.create({
+        data: {
+          orgId: invitation.orgId,
+          email: invitation.email.toLowerCase(),
+          role: self.toEnterpriseOrgRole(invitation.role as WorkspaceRole),
+        },
+        select: { memberId: true },
+      });
+    }
+
+    return tx.invitation.update({
+      where: { id: invitationId },
+      data: { isOrgApproved: true },
+    });
+  });
+}

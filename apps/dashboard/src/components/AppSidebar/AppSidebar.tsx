@@ -1,5 +1,5 @@
 import { ReactElement, useEffect, useMemo, useRef, useState } from 'react';
-import { Link, type Location } from 'react-router-dom';
+import { Link, useLocation, type Location } from 'react-router-dom';
 import { useRouterSelector, useStableNavigate } from '../../hooks/useStableRouter';
 import { Tooltip } from '../ui/Tooltip/Tooltip';
 import { XyneAIQuickMenu } from './XyneAIQuickMenu';
@@ -29,7 +29,7 @@ import {
   TicketToken,
   UserPlus,
 } from '@xyne/icons';
-import { WorkspaceRole } from '@xyne/shared';
+import { WorkspaceType } from '@xyne/shared';
 
 import Avatar from '../ui/Avatar/Avatar';
 import { Popover } from '../ui/Popover/Popover';
@@ -216,6 +216,7 @@ const isChannelOrThreadLocation = ({ pathname, hash }: Location): boolean =>
 
 const AppSidebar = (): ReactElement => {
   const navigate = useStableNavigate();
+  const location = useLocation();
   const workspaceId = useRouterSelector(snapshot => snapshot.params['workspaceId']);
   // Narrow selectors: the rail only changes with the section and whether a channel or thread
   // is open, not on every navigation inside a section (switching channels, threads, hashes).
@@ -229,10 +230,9 @@ const AppSidebar = (): ReactElement => {
   const { user } = useAuth();
   const currentUser = useSelf();
   const isCommunityWorkspace = useIsCommunityWorkspace();
-  const canInvitePeople =
-    isCommunityWorkspace ||
-    currentUser?.role === WorkspaceRole.ADMIN ||
-    currentUser?.role === WorkspaceRole.OWNER;
+  // Everyone except guests can invite — enterprise invites to non-org members
+  // land in the admin approval queue.
+  const canInvitePeople = !!user && user.role !== 'GUEST';
   const visibleNavigationItems = useVisibleNavigationItems();
   const toolbarIds = toolbarItemsStore.useItems();
   const appSnapshots = useAppSnapshots();
@@ -265,6 +265,9 @@ const AppSidebar = (): ReactElement => {
   const [isSettingsPopoverOpen, setIsSettingsPopoverOpen] = useState(false);
   const [isSupportOpen, setIsSupportOpen] = useState(false);
   const [isInviteDialogOpen, setIsInviteDialogOpen] = useState(false);
+  const [inviteDialogInitialView, setInviteDialogInitialView] = useState<'default' | 'contacts'>(
+    'default',
+  );
   const [isErrorReportOpen, setIsErrorReportOpen] = useState(false);
   const [isMoreOpen, setIsMoreOpen] = useState(false);
   const [isPreferencesOpen, setIsPreferencesOpen] = useState(false);
@@ -272,6 +275,45 @@ const AppSidebar = (): ReactElement => {
   const [preferencesInitialSection, setPreferencesInitialSection] = useState<
     PreferenceSection | undefined
   >(undefined);
+
+  // Contacts-import OAuth return: the backend redirects back with
+  // ?contactsImport=success (or contactsImportError=...). Strip the params and
+  // reopen the invite dialog straight into the contacts picker.
+  useEffect(() => {
+    const params = new URLSearchParams(location.search);
+    const contactsImport = params.get('contactsImport');
+    const contactsImportError = params.get('contactsImportError');
+    if (!contactsImport && !contactsImportError) return;
+
+    params.delete('contactsImport');
+    params.delete('contactsImportError');
+    const remainingSearch = params.toString();
+    void navigate(`${location.pathname}${remainingSearch ? `?${remainingSearch}` : ''}`, {
+      replace: true,
+    });
+
+    if (contactsImport === 'success') {
+      setInviteDialogInitialView('contacts');
+      setIsInviteDialogOpen(true);
+    } else {
+      toast.error('Failed to import contacts. Please try again.');
+    }
+  }, [location.pathname, location.search, navigate]);
+
+  const handleInviteDialogOpenChange = (nextOpen: boolean): void => {
+    setIsInviteDialogOpen(nextOpen);
+    if (!nextOpen) {
+      setInviteDialogInitialView('default');
+    }
+  };
+
+  // Fresh workspace: the switcher sets a one-shot sessionStorage flag before its
+  // full-page navigation. Consume it here to prompt the creator to invite people.
+  useEffect(() => {
+    if (sessionStorage.getItem('xyne-open-invite-dialog') !== 'true') return;
+    sessionStorage.removeItem('xyne-open-invite-dialog');
+    setIsInviteDialogOpen(true);
+  }, []);
 
   useEffect(() => {
     setOpenQuickMenu(null);
@@ -787,9 +829,10 @@ const AppSidebar = (): ReactElement => {
 
         <WorkspaceInviteDialog
           open={isInviteDialogOpen}
-          onOpenChange={setIsInviteDialogOpen}
+          onOpenChange={handleInviteDialogOpenChange}
           workspaceId={workspaceId}
-          isCommunityWorkspace={isCommunityWorkspace}
+          initialView={inviteDialogInitialView}
+          workspaceType={isCommunityWorkspace ? WorkspaceType.COMMUNITY : undefined}
         />
 
         {/* Status Update Modal */}
