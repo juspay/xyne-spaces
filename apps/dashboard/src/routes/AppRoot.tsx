@@ -1,3 +1,4 @@
+import { ReactElement, ReactNode, lazy, Suspense, useRef, useEffect, useState } from 'react';
 import {
   createBrowserRouter,
   Navigate,
@@ -62,7 +63,6 @@ const CanvasRedirectPage = lazy(() => import('./CanvasRedirect/CanvasRedirectPag
 import { ClawOverlay } from '../components/Claw/ClawOverlay';
 import { ArtifactAppHostRoute } from '../components/ArtifactApp/ArtifactAppHostRoute';
 import AppSidebar from '../components/AppSidebar/AppSidebar';
-import { ReactElement, ReactNode, lazy, Suspense, useRef, useEffect, useState } from 'react';
 import ZeroProvider from '../providers/ZeroProvider';
 import { EditProvider } from '../providers/EditProvider';
 import { EditWarningModal } from '../components/Chat/EditWarningModal/EditWarningModal';
