@@ -161,6 +161,7 @@ export const BarCustomizer = ({
                   variant='ghost'
                   size='sm'
                   onClick={() => store.add(item.id)}
+                  data-testid={`customize-add-${item.label.toLowerCase().replace(/\s+/g, '-')}`}
                   data-track-category={trackCategory}
                   data-track-name='AddBarItem'
                   data-track-metadata={JSON.stringify({ id: item.id })}

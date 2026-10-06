@@ -72,6 +72,29 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
+async function addItemViaCustomizeToolbar(page: Page, itemId: string): Promise<void> {
+  // Caller has already opened the More menu to look for the item and failed to find it.
+  const customizeTrigger = page.locator("[data-testid='more-customize-toolbar']").first();
+  await customizeTrigger.waitFor({ state: 'visible', timeout: SIDEBAR_NAVIGATION_TIMEOUT_MS });
+  await customizeTrigger.click();
+  const addRow = page.locator(`[data-testid='customize-add-${itemId}']`).first();
+  const closeButton = page.locator("button[aria-label='Close preferences']").first();
+  try {
+    await addRow.waitFor({ state: 'visible', timeout: SIDEBAR_NAVIGATION_TIMEOUT_MS });
+  } catch (err) {
+    await closeButton.click({ timeout: 2000 }).catch(() => page.keyboard.press('Escape'));
+    throw new Error(
+      `Sidebar item "${itemId}" is not available in the Customize Toolbar picker — ` +
+        `either the test references a label that no longer exists in NAVIGATION_ITEMS, ` +
+        `or permissions / toolbar overrides have hidden it for this user. ` +
+        `Underlying wait: ${errorMessage(err)}`
+    );
+  }
+  await addRow.click();
+  await closeButton.click({ timeout: 2000 }).catch(() => page.keyboard.press('Escape'));
+  await closeButton.waitFor({ state: 'hidden', timeout: SIDEBAR_NAVIGATION_TIMEOUT_MS });
+}
+
 export default class BrowserSteps {
   // ===========================================
   // BROWSER SESSION
@@ -269,6 +292,19 @@ export default class BrowserSteps {
     // Item is not in the toolbar — open the "More" overflow menu and click it there.
     await moreTrigger.click();
     let moreItem = page.locator(`[data-testid='more-${itemId}']`).first();
+    // Not in rail or More overflow — try to add it via Customize Toolbar.
+    if (!(await moreItem.isVisible().catch(() => false))) {
+      await addItemViaCustomizeToolbar(page, itemId);
+      const railAfterAdd = page.locator(`[data-testid='nav-${itemId}']`).first();
+      if (await railAfterAdd.isVisible().catch(() => false)) {
+        const expectedPath = await getSidebarDestinationPath(page, railAfterAdd);
+        await railAfterAdd.click();
+        await waitForPath(page, expectedPath);
+        return;
+      }
+      await moreTrigger.click();
+      moreItem = page.locator(`[data-testid='more-${itemId}']`).first();
+    }
     await moreItem.waitFor({ state: 'visible' });
     const expectedPath = await getSidebarDestinationPath(page, moreItem);
 
