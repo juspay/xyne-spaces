@@ -86,13 +86,16 @@ export const browserPanelMachine = setup({
     addTab: assign({
       tabs: ({ context, event }) => {
         if (event.type !== 'ADD_TAB') return context.tabs;
-        const exists = context.tabs.find(t => t.id === event.tab.id);
+        const exists = context.tabs.find(t => t.id === event.tab.id || t.url === event.tab.url);
         if (exists) return context.tabs;
         return [...context.tabs, event.tab];
       },
       activeTabId: ({ context, event }) => {
         if (event.type !== 'ADD_TAB') return context.activeTabId;
-        return event.tab.id;
+        // A deduped add (same id or same URL already open) must not steal
+        // active-tab state from the tab that actually exists.
+        const exists = context.tabs.find(t => t.id === event.tab.id || t.url === event.tab.url);
+        return exists ? context.activeTabId : event.tab.id;
       },
     }),
     closeTab: assign({
