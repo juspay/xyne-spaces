@@ -51,6 +51,7 @@ import {
   isInternalCallbackOrigin,
   type ExternalResultCallbackConfig,
 } from "../surfaces/external-api/delivery.js";
+import { assertSafeOutboundUrl } from "../mcpgateway/services/http-client.js";
 import type { VerifiedCliToken } from "./cli-tokens.js";
 import { agentScopeAllows } from "./service-tokens.js";
 import { encryptSurfaceSecret } from "./surface-resolver.js";
@@ -210,6 +211,15 @@ function normalizeRecordingRefs(value: unknown): RunRecordingRef[] | null {
 }
 
 /** Loose shape check for the /experiment epoch context forwarded to the runtime. */
+async function isPublicOutboundUrl(url: string): Promise<boolean> {
+  try {
+    await assertSafeOutboundUrl(url);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 function isExperimentContext(value: unknown): boolean {
   if (!value || typeof value !== "object") return false;
   const obj = value as Record<string, unknown>;
@@ -642,11 +652,21 @@ export async function prepareRun(
     if ((isMessagingChannelKey(triggerSource) || channelDelivery !== undefined) && !isInternalS2SCaller) {
       return { ok: false, status: 400, error: "channelDelivery requires internal service authentication" };
     }
-    if (callbackUrl && !isInternalCallbackOrigin(callbackUrl) && !isAllowedExternalCallbackUrl(callbackUrl)) {
-      return { ok: false, status: 400, error: "callbackUrl is not an allowed target" };
+    if (callbackUrl) {
+      const allowed = isInternalS2SCaller
+        ? isInternalCallbackOrigin(callbackUrl) || isAllowedExternalCallbackUrl(callbackUrl)
+        : !isInternalCallbackOrigin(callbackUrl) &&
+          isAllowedExternalCallbackUrl(callbackUrl) &&
+          (await isPublicOutboundUrl(callbackUrl));
+      if (!allowed) {
+        return { ok: false, status: 400, error: "callbackUrl is not an allowed target" };
+      }
     }
     if (progressUrl !== undefined && typeof progressUrl !== "string") {
       return { ok: false, status: 400, error: "progressUrl must be a string" };
+    }
+    if (progressUrl && !isInternalS2SCaller) {
+      return { ok: false, status: 400, error: "progressUrl requires internal service authentication" };
     }
     if (progressUrl && !isInternalCallbackOrigin(progressUrl) && !isAllowedExternalCallbackUrl(progressUrl)) {
       return { ok: false, status: 400, error: "progressUrl is not an allowed target" };
@@ -1169,7 +1189,9 @@ export async function prepareRun(
     }
 
     const acceptHeader = input.wantsSse ? "text/event-stream" : "";
-    const hasExternalCallback = Boolean(callbackUrl && !isInternalCallbackOrigin(callbackUrl));
+    const hasExternalCallback = Boolean(
+      callbackUrl && !(input.isInternalS2SCaller && isInternalCallbackOrigin(callbackUrl)),
+    );
     const externalResultCallback: ExternalResultCallbackConfig | undefined =
       hasExternalCallback && callbackUrl
         ? {
