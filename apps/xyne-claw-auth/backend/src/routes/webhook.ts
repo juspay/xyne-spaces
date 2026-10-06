@@ -5,6 +5,7 @@
  * POST /webhook/result — callback from xyne-claw, sends result to mentioned user's DM with approve/decline
  */
 
+import { ingestSandboxPreviewSignals } from "../lib/conversation-artifact-signals.js";
 import { Router, type Request, type Response } from "express";
 import { errMsg } from "../lib/errors.js";
 import { deliveredDesignCommand, recordDeliveredArtifacts } from "../lib/delivered-artifacts.js";
@@ -6473,7 +6474,16 @@ router.post("/progress", requireStrictS2S, async (req: Request, res: Response) =
     if (announcedSandboxPreviews.has(sessionId)) return;
     rememberAnnouncedPreview(sessionId);
     const ctx = await resolveSessionContext(sessionId, conversationId, agentSlug).catch(() => null);
-    if (!ctx || ctx.responseMode !== "conversation") return;
+    if (!ctx) return;
+    await ingestSandboxPreviewSignals(
+      { conversationId: ctx.conversationId, userId: ctx.senderId, orgId: ctx.agentOrgId ?? null, runId: sessionId },
+      {
+        sandboxId,
+        sandboxPreviewUrl,
+        ...(sandboxCodePreviewUrl ? { sandboxCodePreviewUrl } : {}),
+      },
+    );
+    if (ctx.responseMode !== "conversation") return;
     const log = createLogger("webhook/progress", ctx.traceId ?? sessionId.slice(0, 8));
     try {
       await postAgentMessage(
