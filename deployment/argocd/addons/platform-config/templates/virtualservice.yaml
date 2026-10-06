@@ -9,6 +9,15 @@ metadata:
 spec:
   hosts:
     - {{ .Values.domain }}
+    {{- /*
+    Extra hostnames the same route set should serve. Used by on-prem to accept
+    the public hostname that fronts the cluster via an external LB, alongside
+    the internal domain. One VirtualService with multiple hosts is enough —
+    Istio applies the routes below to any Host header matching the list.
+    */ -}}
+    {{- range (.Values.virtualService | default dict).extraHosts | default list }}
+    - {{ . }}
+    {{- end }}
   gateways:
     - {{ .Values.gateway.namespace }}/{{ .Values.gateway.name }}
   http:
