@@ -32,8 +32,8 @@ export interface DeskMetricsTicketRow {
   frtSeconds: number | null;
   rtSeconds: number | null;
   resolvedAt: number | null; // epoch ms; latest resolution, where rtSeconds ends
-  resolvedById: string | null; // who made the change resolvedAt marks
-  resolvedByName: string | null;
+  resolvedById: string | null; // who made the change resolvedAt marks; null for an automation
+  resolvedByName: string | null; // 'Automation' when an automation made that change
   stageMoves: DeskMetricsStageMove[] | null; // oldest first
   csatScore: number | null; // 1..5
   csatRating: string | null; // GOOD | BAD

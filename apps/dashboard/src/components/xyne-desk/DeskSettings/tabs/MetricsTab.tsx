@@ -8,6 +8,7 @@ import { useZero } from '../../../../hooks/useZero';
 import { queries } from '../../../../zero/queries';
 import { resolveDisplayFormFields } from '../../../../utils/board/resolveDisplayFormFields';
 import type { useDeskSettingsForm } from '../useDeskSettingsForm';
+import { isGuestVisible } from '../../DeskMetrics/guestVisibility';
 
 type DeskSettingsForm = ReturnType<typeof useDeskSettingsForm>;
 
@@ -234,7 +235,7 @@ export const MetricsTab: React.FC<MetricsTabProps> = ({ form }) => {
               {Object.entries(options).map(([key, label]) => (
                 <Checkbox
                   key={key}
-                  checked={guestVisibility[key] !== false}
+                  checked={isGuestVisible(guestVisibility, key)}
                   onChange={() => toggleGuestVisibility(key)}
                   size='sm'
                   label={label}

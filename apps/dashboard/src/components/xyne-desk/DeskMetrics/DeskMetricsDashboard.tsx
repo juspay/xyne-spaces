@@ -52,6 +52,7 @@ import {
   formatStageMoves,
   subIssueFields,
 } from './ticketColumns';
+import { isGuestVisible } from './guestVisibility';
 import { globalClickTracker } from '../../../services/Analytics/globalClickTracker';
 import {
   Bar,
@@ -300,18 +301,6 @@ const tickIntervalFor = (pointCount: number): number => {
   if (pointCount <= 8) return 0;
   if (pointCount <= 31) return 4;
   return Math.floor(pointCount / 6);
-};
-
-// The same desk-wide number as the Avg Resolution KPI, just over time — so on desks saved
-// before this chart existed it follows whatever that KPI is set to. Resolved At follows RT
-// the same way, since Created At + RT gives it away.
-const inheritedVisibilityKey = (key: string): string | undefined => {
-  if (key === 'chart:resolutionTrend') return 'kpi:avgResolution';
-  if (key === 'column:resolvedAt') return 'column:rt';
-  // Resolved By names an agent as Assignee does; Stage Movement is the Stage column's history.
-  if (key === 'column:resolvedBy') return 'column:assignee';
-  if (key === 'column:stageMoves') return 'column:stage';
-  return undefined;
 };
 
 /** Moves listed in a table cell before the rest collapse into "+N more". */
@@ -1187,10 +1176,8 @@ const MetricsTicketTable = ({
                       className='flex flex-col gap-0.5 whitespace-nowrap'
                       title={formatStageMoves(row.stageMoves)}
                     >
-                      {row.stageMoves.slice(0, MAX_STAGE_MOVES_SHOWN).map(move => (
-                        <span key={`${move.at}:${move.from}:${move.to}`}>
-                          {formatStageMove(move)}
-                        </span>
+                      {row.stageMoves.slice(0, MAX_STAGE_MOVES_SHOWN).map((move, i) => (
+                        <span key={`${i}:${move.at}`}>{formatStageMove(move)}</span>
                       ))}
                       {row.stageMoves.length > MAX_STAGE_MOVES_SHOWN && (
                         <span>+{row.stageMoves.length - MAX_STAGE_MOVES_SHOWN} more</span>
@@ -1618,13 +1605,7 @@ export const DeskMetricsDashboard: React.FC<DeskMetricsDashboardProps> = ({
   );
 
   // Guests see what the desk owner didn't turn off (Desk Settings → Metrics); others see everything.
-  const canSee = (key: string): boolean => {
-    if (!isGuest) return true;
-    const visibility = data?.guestVisibility;
-    if (visibility?.[key] !== undefined) return visibility[key] !== false;
-    const inherited = inheritedVisibilityKey(key);
-    return inherited ? visibility?.[inherited] !== false : true;
-  };
+  const canSee = (key: string): boolean => !isGuest || isGuestVisible(data?.guestVisibility, key);
 
   useEffect(() => {
     if (selectedTagCategory === null) {

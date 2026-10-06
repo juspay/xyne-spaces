@@ -52,6 +52,11 @@ const STAGE_CHANGE = Prisma.sql`(
   (ta."activityType" = 'STATUS' AND ta.value->>'field' = 'stageName') OR ta."activityType" = 'STAGE_NAME'
 )`;
 
+/** Stage moves for the timeline: STAGE_CHANGE plus PR-webhook moves, logged as activityType PR. */
+const STAGE_MOVE = Prisma.sql`(
+  ${STAGE_CHANGE} OR (ta."activityType" = 'PR' AND ta.value->>'field' = 'stageName')
+)`;
+
 const DAY_MS = 24 * 60 * 60 * 1000;
 const MAX_BREAKDOWN_VALUES_PER_FIELD = 25;
 
@@ -99,7 +104,7 @@ interface MetricsContext {
   cohortCte: Prisma.Sql;
   frtStop: Prisma.Sql;
   resolvedAtSql: Prisma.Sql;
-  resolvedBySql: Prisma.Sql;
+  latestResolutionSql: Prisma.Sql;
   resolvedPredicate: Prisma.Sql;
   reopenedSql: Prisma.Sql;
   ticketScopeExists: Prisma.Sql;
@@ -190,10 +195,13 @@ export class DeskMetricsRepository {
       AND ta."timestamp" >= ${gte}`;
     const resolvedAtSql = Prisma.sql`
       (SELECT MAX(ta."timestamp") FROM "public"."ticket_activities" ta WHERE ${resolutionWhere})`;
-    // Who made that same latest resolving change.
-    const resolvedBySql = Prisma.sql`
-      (SELECT ta."updatedBy" FROM "public"."ticket_activities" ta WHERE ${resolutionWhere}
-        ORDER BY ta."timestamp" DESC, ta.id DESC LIMIT 1)`;
+    // That same latest resolving change as one row: when, who, and whether an automation made it.
+    const latestResolutionSql = Prisma.sql`
+      SELECT ta."timestamp" AS resolved_at, ta."updatedBy" AS resolved_by,
+        COALESCE(ta.value->>'isAutomation' = 'true' OR ta.value->>'source' = 'AUTOMATION', false)
+          AS resolved_by_automation
+      FROM "public"."ticket_activities" ta WHERE ${resolutionWhere}
+      ORDER BY ta."timestamp" DESC, ta.id DESC LIMIT 1`;
 
     const reopenedPredicate = Prisma.sql`(
       ta."activityType" = 'STATUS'
@@ -387,7 +395,7 @@ export class DeskMetricsRepository {
       cohortCte,
       frtStop,
       resolvedAtSql,
-      resolvedBySql,
+      latestResolutionSql,
       resolvedPredicate,
       reopenedSql,
       ticketScopeExists,
@@ -408,7 +416,7 @@ export class DeskMetricsRepository {
       cohortCte,
       frtStop,
       resolvedAtSql,
-      resolvedBySql,
+      latestResolutionSql,
       resolvedPredicate,
       reopenedSql,
       ticketScopeExists,
@@ -430,7 +438,7 @@ export class DeskMetricsRepository {
       'desk metrics dashboard: window/aggregate SQL (FRT/RT, trend, tag and agent breakdowns) Prisma\'s query builder cannot express',
       () => Promise.all([
         this.frtRtAggregates(db, cohortCte, frtStop, resolvedAtSql),
-        this.ticketRows(db, cohortCte, frtStop, resolvedAtSql, resolvedBySql),
+        this.ticketRows(db, cohortCte, frtStop, latestResolutionSql, { withStageMoves: true }),
         this.emailRepliesCount(db, channelId, gte, lte, ticketScopeExists),
         this.stageCounts(db, cohortCte),
         this.priorityBreakdown(db, cohortCte),
@@ -493,7 +501,7 @@ export class DeskMetricsRepository {
       cohortCte,
       frtStop,
       resolvedAtSql,
-      resolvedBySql,
+      latestResolutionSql,
       resolvedPredicate,
       reopenedSql,
       ticketScopeExists,
@@ -531,7 +539,11 @@ export class DeskMetricsRepository {
       () => Promise.all([
         needsAggregate ? this.frtRtAggregates(db, cohortCte, frtStop, resolvedAtSql) : null,
         ticketLimit
-          ? this.ticketRows(db, cohortCte, frtStop, resolvedAtSql, resolvedBySql, ticketLimit + 1)
+          ? this.ticketRows(db, cohortCte, frtStop, latestResolutionSql, {
+              limit: ticketLimit + 1,
+              // Agent rows are capped to stay small, so they leave out stage history.
+              withStageMoves: false,
+            })
           : null,
         needsCounts ? this.emailRepliesCount(db, channelId, gte, lte, ticketScopeExists) : null,
         needsCounts ? this.stageCounts(db, cohortCte) : null,
@@ -939,7 +951,7 @@ export class DeskMetricsRepository {
             LAG(ta."timestamp") OVER (ORDER BY ta."timestamp", ta.id) AS prev_at
           FROM "public"."ticket_activities" ta
           WHERE ta."ticketId" = c."ticketId"
-            AND ${STAGE_CHANGE}
+            AND ${STAGE_MOVE}
             -- Same exclusions as the active cohort: no-op moves and reconstruction repairs.
             AND ta.value->>'oldValue' IS DISTINCT FROM ta.value->>'newValue'
             AND ta.value->>'source' IS DISTINCT FROM 'STAGE_RECONSTRUCTION'
@@ -953,13 +965,12 @@ export class DeskMetricsRepository {
     db: ReturnType<DeskMetricsRepository['getDbInstance']>,
     cohortCte: Prisma.Sql,
     frtStopSql: Prisma.Sql,
-    resolvedAtSql: Prisma.Sql,
-    resolvedBySql: Prisma.Sql,
-    limit?: number
+    latestResolutionSql: Prisma.Sql,
+    options: { limit?: number; withStageMoves: boolean }
   ): Promise<DeskMetricsTicketRow[]> {
     // The dashboard takes every cohort row; the agent surface caps it, because
     // each row carries custom fields and tags and would swamp a context window.
-    const limitSql = limit ? Prisma.sql` LIMIT ${limit}` : Prisma.sql``;
+    const limitSql = options.limit ? Prisma.sql` LIMIT ${options.limit}` : Prisma.sql``;
     const rows = await db.$queryRaw<
       Array<{
         ticket_id: string;
@@ -977,6 +988,7 @@ export class DeskMetricsRepository {
         resolved_at: Date | null;
         resolved_by_id: string | null;
         resolved_by_name: string | null;
+        resolved_by_automation: boolean | null;
         stage_moves: Array<{ from: string; to: string; at: number; seconds: number | null }> | null;
         csat_value: { rating?: string; score?: number | string | null } | null;
         custom_fields: Record<string, string> | null;
@@ -1039,7 +1051,8 @@ export class DeskMetricsRepository {
           ra.resolved_at,
           ra.resolved_by AS resolved_by_id,
           COALESCE(ru."displayName", ru.name) AS resolved_by_name,
-          sm.moves AS stage_moves,
+          ra.resolved_by_automation,
+          ${options.withStageMoves ? Prisma.sql`sm.moves` : Prisma.sql`NULL::jsonb`} AS stage_moves,
           (SELECT ta.value FROM "public"."ticket_activities" ta
             WHERE ta."ticketId" = c."ticketId" AND ta."activityType" = 'CSAT_RECEIVED'
             ORDER BY ta."timestamp" DESC LIMIT 1) AS csat_value,
@@ -1050,12 +1063,10 @@ export class DeskMetricsRepository {
         LEFT JOIN "public"."users" u ON u.id = t."assignedTo"
         LEFT JOIN form_vals fv ON fv.ticket_id = c."ticketId"
         LEFT JOIN ticket_tags_agg tta ON tta.ticket_id = c."ticketId"
-        -- OFFSET 0 stops Postgres inlining this into both uses, so the lookup runs once per row.
-        CROSS JOIN LATERAL (
-          SELECT ${resolvedAtSql} AS resolved_at, ${resolvedBySql} AS resolved_by OFFSET 0
-        ) ra
+        -- One lookup per row for the latest resolving change, behind RT, Resolved At and Resolved By.
+        LEFT JOIN LATERAL (${latestResolutionSql}) ra ON true
         LEFT JOIN "public"."users" ru ON ru.id = ra.resolved_by
-        ${this.stageMovesLateral()}
+        ${options.withStageMoves ? this.stageMovesLateral() : Prisma.sql``}
         ORDER BY c.created_at DESC${limitSql}
       `
     );
@@ -1065,6 +1076,8 @@ export class DeskMetricsRepository {
       const rtSeconds = r.rt_seconds !== null && r.rt_seconds >= 0 ? r.rt_seconds : null;
       // Same guard as RT, so createdAt + rtSeconds always lands on resolvedAt.
       const resolvedAt = rtSeconds !== null && r.resolved_at ? r.resolved_at.getTime() : null;
+      // Automations log their creator as the actor, so credit the automation instead.
+      const resolvedByAutomation = r.resolved_by_automation === true;
       return {
         ticketId: r.ticket_id,
         xyneId: r.xyne_id,
@@ -1080,8 +1093,9 @@ export class DeskMetricsRepository {
         rtSeconds,
         resolvedAt,
         // Only alongside resolvedAt: both describe the same resolving change.
-        resolvedById: resolvedAt !== null ? r.resolved_by_id : null,
-        resolvedByName: resolvedAt !== null ? r.resolved_by_name : null,
+        resolvedById: resolvedAt !== null && !resolvedByAutomation ? r.resolved_by_id : null,
+        resolvedByName:
+          resolvedAt === null ? null : resolvedByAutomation ? 'Automation' : r.resolved_by_name,
         stageMoves:
           r.stage_moves?.map((move) => ({
             from: move.from,

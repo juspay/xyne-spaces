@@ -11,7 +11,8 @@ export const formatHms = (seconds: number | null): string => {
 /** One column for the per-primary-issue "sub issue: …" form fields. */
 export const SUB_ISSUE_COLUMN = 'Sub Issue';
 
-const SUB_ISSUE_FIELD = /^\s*sub[\s_-]*issues?\b/i;
+// The colon is required, so fields like "Sub Issue Notes" keep their own column.
+const SUB_ISSUE_FIELD = /^\s*sub[\s_-]*issue\s*:/i;
 
 export const isSubIssueField = (field: string): boolean => SUB_ISSUE_FIELD.test(field);
 

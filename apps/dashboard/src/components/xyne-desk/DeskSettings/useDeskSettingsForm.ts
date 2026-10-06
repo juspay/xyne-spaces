@@ -26,6 +26,7 @@ import { useChannelClawAgents } from '../../../hooks/useChannelClawAgents';
 import { useCachedQuery } from '../../../hooks/useCachedQuery';
 import { queries } from '../../../zero/queries';
 import { DEFAULT_PRIORITY_PROMPT } from './constants';
+import { isGuestVisible } from '../DeskMetrics/guestVisibility';
 import type { SaveMappingPayload, ClassificationMapping } from '../../../types/classification';
 import {
   DESK_FEATURE_FIELDS,
@@ -348,10 +349,11 @@ export function useDeskSettingsForm(
       return JSON.stringify(nextArr);
     });
   };
+  // Flips what guests actually see, so a key inheriting a hidden column turns on in one click.
   const toggleGuestVisibility = (key: string) =>
     pref.setField(
       'metricsGuestVisibility',
-      JSON.stringify({ ...guestVisibility, [key]: guestVisibility[key] === false }),
+      JSON.stringify({ ...guestVisibility, [key]: !isGuestVisible(guestVisibility, key) }),
     );
 
   const setClassificationEnabled = (checked: boolean) => {
