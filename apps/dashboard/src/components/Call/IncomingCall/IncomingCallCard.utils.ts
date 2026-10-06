@@ -80,7 +80,7 @@ export function isRingableCall(input: {
 }
 
 /** Why a call that is ringing is doing so without a sound. */
-export type RingSilenceReason = 'in-call' | 'recording' | 'mic-busy';
+export type RingSilenceReason = 'paused' | 'in-call' | 'recording' | 'mic-busy';
 
 /**
  * Whether a ringing call should stay quiet, and why.
@@ -99,6 +99,12 @@ export type RingSilenceReason = 'in-call' | 'recording' | 'mic-busy';
  * cause in telemetry, and the nearest one wins.
  */
 export function getRingSilenceReason(input: {
+  /**
+   * The user paused notifications. First because it is the one cause they
+   * chose; the call then reaches nothing outside the app — no ringtone, no
+   * floating window, no OS banner — and the caller sees them as busy.
+   */
+  notificationsPaused: boolean;
   isInActiveCall: boolean;
   recordingStatus: RecordingStatus;
   /**
@@ -115,6 +121,7 @@ export function getRingSilenceReason(input: {
    */
   micBusy: boolean;
 }): RingSilenceReason | null {
+  if (input.notificationsPaused) return 'paused';
   if (input.isInActiveCall) return 'in-call';
   if (isRecordingSessionActive(input.recordingStatus)) return 'recording';
   if (input.micBusy) return 'mic-busy';
