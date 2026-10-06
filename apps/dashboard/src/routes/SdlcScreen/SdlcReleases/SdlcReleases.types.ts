@@ -43,7 +43,8 @@ export interface SdlcReleaseCardData {
   id: string;
   title: string;
   summary: string;
-  status: { label: string; className: string };
+  /** Current stage, with the status that stage is configured with on its board. */
+  stage: { name: string; status: string };
   date: string;
   repoName: string;
   ownerId: string;
@@ -86,6 +87,11 @@ export interface SdlcReleaseBreadcrumbProps {
 export interface SdlcReleaseThreadProps {
   releaseId: string;
   onClose: () => void;
+}
+
+export interface ReleaseTicketQa {
+  artIds: string[];
+  testedBy: string | null;
 }
 
 export type CodeLanguage = 'SQL' | 'TypeScript' | 'JavaScript' | 'YAML' | 'Dotenv' | 'Text';
