@@ -1931,7 +1931,7 @@ const SupportScreen = (): ReactElement => {
         { replace: true },
       );
     } else if (socialMediaError && socialMediaProvider === 'facebook') {
-      // mismatch error format: "facebook_page_mismatch:Page name"
+      // payload formats: "facebook_page_mismatch:Page name", "facebook_page_disconnected:<sentence>"
       const separator = socialMediaError.indexOf(':');
       const errorCode = separator === -1 ? socialMediaError : socialMediaError.slice(0, separator);
       const expectedPage = separator === -1 ? '' : socialMediaError.slice(separator + 1);
@@ -1940,6 +1940,7 @@ const SupportScreen = (): ReactElement => {
         facebook_auth_denied: 'Facebook authorization was denied. Please try again.',
         facebook_no_pages:
           'No Facebook Pages were shared. Select at least one Page in the Facebook dialog.',
+        facebook_page_disconnected: `${expectedPage || 'This Page is disconnected on another desk'}. Open that desk's settings and reconnect it there.`,
         facebook_page_already_connected:
           'The selected Facebook Pages are already connected to a desk.',
         facebook_connection_failed: 'Failed to connect Facebook. Please try again.',

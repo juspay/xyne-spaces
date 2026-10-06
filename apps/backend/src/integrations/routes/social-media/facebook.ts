@@ -327,12 +327,33 @@ router.get(
           sourceType: ExternalSourcePlatform.FACEBOOK,
           externalIdentifier: { in: pages.map(p => p.id) },
         },
-        select: { externalIdentifier: true },
+        select: {
+          externalIdentifier: true,
+          displayName: true,
+          isActive: true,
+          workspaceId: true,
+          channelId: true,
+        },
       });
       const connectedIds = new Set(alreadyConnected.map(s => s.externalIdentifier));
       const newPages = pages.filter(p => !connectedIds.has(p.id));
       if (newPages.length === 0) {
-        redirectToDesk(req, res, state, { error: 'facebook_page_already_connected' });
+        // A disconnected Page keeps its row on the desk it was connected to, so it can only be
+        // reconnected there. Name that desk — but only within this workspace.
+        const disconnected = alreadyConnected.find(
+          s => !s.isActive && s.workspaceId === state.workspaceId && s.channelId,
+        );
+        const desk = disconnected?.channelId
+          ? await db.channel.findFirst({
+              where: { id: disconnected.channelId, workspaceId: state.workspaceId },
+              select: { name: true },
+            })
+          : null;
+        redirectToDesk(req, res, state, {
+          error: desk
+            ? `facebook_page_disconnected:"${disconnected?.displayName}" is disconnected on the "${desk.name}" desk`
+            : 'facebook_page_already_connected',
+        });
         return;
       }
 

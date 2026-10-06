@@ -800,6 +800,12 @@ router.get(
 
       if (!extMsg) { res.json({ igsid: null, tickets: [] }); return; }
 
+      // Only DM threads are keyed by the customer ("{igsid}:{windowStart}"). Comment and mention
+      // threads are keyed by the comment/post, so their prefix would match every such thread.
+      if (/^(comment|post|media|mention):/.test(extMsg.externalThreadId)) {
+        res.json({ igsid: null, tickets: [] });
+        return;
+      }
       const igsid = extMsg.externalThreadId.split(':')[0];
       if (!igsid) { res.json({ igsid: null, tickets: [] }); return; }
 
