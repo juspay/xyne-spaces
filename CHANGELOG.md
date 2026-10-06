@@ -1,3 +1,10 @@
+## [1.461.1](https://github.com/juspay/xyne-spaces/compare/v1.461.0...v1.461.1) (2026-10-06)
+
+
+### Bug Fixes
+
+* browser sandbox in scheduled runs + XYNE-65725 clear CRITICAL Trivy gate ([#2680](https://github.com/juspay/xyne-spaces/issues/2680)) ([6a02e64](https://github.com/juspay/xyne-spaces/commit/6a02e64ebbb898c75445e5fd7bf50b7aaa86d4e1))
+
 ## [1.461.0](https://github.com/juspay/xyne-spaces/compare/v1.460.4...v1.461.0) (2026-10-06)
 
 
