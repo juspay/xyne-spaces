@@ -7,7 +7,7 @@ import {
   createOwnerToken,
   currentOwnerPod,
   fenceSession,
-  ownerStatus,
+  inspectOwner,
   refreshOwnership,
   releaseOwnership,
   registerOwnedSession,
@@ -134,10 +134,16 @@ async function runClaimedJob(
   sessionId: string,
   agent: string,
   ownerToken: string,
+  takeoverFrom: string | null,
 ): Promise<void> {
+  if (!(await claimOwnership(sessionId, ownerToken, takeoverFrom))) {
+    metric.count("run_queue_claim_lost", { agent, session: sessionId });
+    clog.warn(`[run-queue] another runner claimed session=${sessionId} first — deferring`);
+    await job.moveToDelayed(Date.now() + OWNER_DEFER_MS, token);
+    throw new DelayedError();
+  }
   metric.count("run_queue_claimed", { agent, session: sessionId, attempt: job.attemptsMade + 1 });
   await postProgressLabel(job.data, "Working on it...").catch(() => {});
-  await claimOwnership(sessionId, ownerToken);
   let fencedOut = false;
   registerOwnedSession(sessionId, ownerToken, () => {
     if (fencedOut) return;
@@ -238,7 +244,7 @@ export function startRunQueueWorker(): Worker<InternalRunPayload> | null {
         throw new DelayedError();
       }
       const ownerToken = createOwnerToken();
-      const status = await ownerStatus(sessionId, ownerToken);
+      const { status, holder } = await inspectOwner(sessionId, ownerToken);
       if (status === "alive-other") {
         metric.count("run_queue_owner_alive", { agent, session: sessionId });
         clog.warn(`[run-queue] previous runner still owns session=${sessionId} — deferring takeover`);
@@ -260,7 +266,7 @@ export function startRunQueueWorker(): Worker<InternalRunPayload> | null {
         metric.observe("run_queue_automation_wait_ms", Math.max(0, Date.now() - job.timestamp), { agent, active: activeAutomationRuns() });
       }
       try {
-        return await runClaimedJob(job, token, sessionId, agent, ownerToken);
+        return await runClaimedJob(job, token, sessionId, agent, ownerToken, status === "dead-other" ? holder : null);
       } finally {
         if (automation) releaseAutomationSlot();
       }
