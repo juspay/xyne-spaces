@@ -195,6 +195,7 @@ export interface RoomContext {
   callStartTime: number | null; // Track when the call started for duration calculation
   isAIAssistantEnabled: boolean; // Track Xyne Automatic state
   transcriptionAgentLeft: boolean; // Track if the transcription agent left mid-call
+  agentPresent: boolean; // Transcription agent actually in the room (drives the live indicator)
   isTranscriptionEnabled: boolean; // Host kill-switch: false = agent silenced (audio unsubscribed)
   transcriptionToggleNotice: { enabled: boolean; byName: string } | null; // Drives the toggle toast
   privacyPopoverOpen: boolean; // Shared open-state for the CallPrivacyIndicator popover
