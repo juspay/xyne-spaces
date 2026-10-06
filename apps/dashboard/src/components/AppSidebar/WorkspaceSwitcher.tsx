@@ -13,6 +13,7 @@ import {
   setLastActiveWorkspaceId,
 } from '../../machines/authMachine';
 import { queryClient } from '../../services/clients/queryClient';
+import { buildAuthHeaders } from '../../services/clients/authHeaders';
 import { useCanCreateWorkspace } from '../../hooks/usePermissions';
 import { confirmInterrupt } from '../InterruptGuard/InterruptGuard';
 import { useUnreadActivitiesCount } from '../../hooks/useUnreadActivitiesCount';
@@ -94,6 +95,7 @@ export const WorkspaceSwitcher: React.FC = () => {
     try {
       const res = await axios.get<WorkspacesResponse>(`${API_BASE_URL}/auth/workspaces`, {
         withCredentials: true,
+        headers: buildAuthHeaders(workspaceId),
       });
       setWorkspaces(res.data.workspaces);
     } catch {
@@ -107,7 +109,7 @@ export const WorkspaceSwitcher: React.FC = () => {
     try {
       const res = await axios.get<WorkspaceCountsResponse>(
         `${API_BASE_URL}/activity/workspace-counts`,
-        { withCredentials: true },
+        { withCredentials: true, headers: buildAuthHeaders(workspaceId) },
       );
       const counts = new Map<string, number>();
 
@@ -134,6 +136,7 @@ export const WorkspaceSwitcher: React.FC = () => {
       try {
         const res = await axios.get<WorkspacesResponse>(`${API_BASE_URL}/auth/workspaces`, {
           withCredentials: true,
+          headers: buildAuthHeaders(workspaceId),
         });
         const match = res.data.workspaces.find(w => w.id === workspaceId);
         if (match) {
@@ -190,10 +193,12 @@ export const WorkspaceSwitcher: React.FC = () => {
     setSwitching(targetWorkspaceId);
     try {
       // NEW: Call switch-workspace API instead of logout
+      // x-workspace-id is the CURRENT workspace: the switch resolves the session
+      // against it and grants the target from the body.
       await axios.post(
         `${API_BASE_URL}/auth/switch-workspace`,
         { workspaceId: targetWorkspaceId },
-        { withCredentials: true },
+        { withCredentials: true, headers: buildAuthHeaders(workspaceId) },
       );
 
       // Store the target workspace in localStorage (user-bound)
@@ -231,7 +236,7 @@ export const WorkspaceSwitcher: React.FC = () => {
       const res = await axios.post<CreateWorkspaceResponse>(
         `${API_BASE_URL}/auth/create-workspace`,
         { workspaceName: workspaceName.trim(), workspaceType: createWorkspaceType },
-        { withCredentials: true },
+        { withCredentials: true, headers: buildAuthHeaders(workspaceId) },
       );
       const newWorkspaceId = res.data.user.workspaceId;
       const email = res.data.user.email;

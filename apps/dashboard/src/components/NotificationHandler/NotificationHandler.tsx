@@ -3,6 +3,7 @@ import React, { useEffect, useCallback, useRef, useState } from 'react';
 import axios from 'axios';
 import { websocketService } from '../../services/clients/socketClient';
 import { hydrateDynamicHeaders } from '../../services/clients/dynamicHeaders';
+import { buildAuthHeaders } from '../../services/clients/authHeaders';
 import { useDeferredClientCommand, type ClientCommand } from '../../hooks/useDeferredClientCommand';
 import { toast } from 'sonner';
 import { useAuthContext } from '../../providers/AuthProvider';
@@ -160,7 +161,7 @@ export const NotificationHandler: React.FC = () => {
           await axios.post(
             `${API_BASE_URL}/auth/switch-workspace`,
             { workspaceId: targetWorkspaceId },
-            { withCredentials: true },
+            { withCredentials: true, headers: buildAuthHeaders(currentWorkspaceId) },
           );
           logger.info(LogEvent.INFO, {
             type: 'migrated_console_log',

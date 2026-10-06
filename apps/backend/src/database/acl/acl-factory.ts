@@ -59,6 +59,7 @@ import {
   NotificationsACL,
   OrganizationsACL,
   OrgMembersACL,
+  AuthSessionsACL,
   ProactiveNudgesACL,
   ProjectsACL,
   QuestionnaireResponsesACL,
@@ -514,6 +515,10 @@ export class ACLFactory {
     case 'userExternalToken':
       return new BaseQueryACL(ctx, prisma)
     case 'userSession':
+      return new BaseQueryACL(ctx, prisma)
+    case 'authSession':
+      return new AuthSessionsACL(ctx, prisma)
+    case 'sessionWorkspaceGrant':
       return new BaseQueryACL(ctx, prisma)
     case 'userSkill':
       return new BaseQueryACL(ctx, prisma)

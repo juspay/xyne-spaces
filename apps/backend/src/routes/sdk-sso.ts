@@ -1,11 +1,13 @@
 /**
  * SDK SSO Routes - Device flow endpoints for SDK authentication.
  *
- * On approval the SDK receives the user's session — the value of the
- * `xyne_ws_<workspaceId>_token` cookie the dashboard sets on login — which
- * `/api/sdk` then authenticates with the ordinary `authMiddleware`. The
- * session is returned in the poll body only; no cookie is set, so a poll made
- * from the Spaces origin never disturbs the dashboard's own cookies.
+ * On approval the SDK receives a workspace JWT shaped like the value of the
+ * `xyne_ws_<workspaceId>_token` cookie the dashboard sets on login, which
+ * `/api/sdk` then authenticates with the ordinary `authMiddleware`. It is
+ * backed by a real account session (platform SDK) and minted with
+ * `SDK_SSO_TOKEN_TTL_SECONDS`, independent of the browser JWT TTL. The token
+ * is returned in the poll body only; no cookie is set, so a poll made from the
+ * Spaces origin never disturbs the dashboard's own cookies.
  *
  * Endpoints:
  * - POST /api/sdk/auth/sso/init     - Initiate device flow (no auth required)
@@ -20,6 +22,7 @@ import { z } from 'zod';
 import { UserStatus } from '@xyne/shared';
 import { sdkSsoService } from '@/services/sdkSsoService';
 import { jwtService } from '@/services/jwtService';
+import { issueLogin } from '@/auth/sessionIssuer';
 import { authV2Middleware } from '@/middleware/authV2Middleware';
 import { sdkSsoInitLimiter, sdkSsoPollLimiter } from '@/middleware/rateLimiters';
 import { config } from '@/config/env';
@@ -193,7 +196,7 @@ router.get('/status', authV2Middleware.authenticate, async (req: Request, res: R
         user_agent: authRequest.origin?.userAgent ?? null,
       },
       // How long an approved session lasts, so the consent page need not guess
-      session_expires_in: config.jwt.expirationSeconds,
+      session_expires_in: config.sdkSso.tokenTtlSeconds,
     });
   } catch (error) {
     if (error instanceof z.ZodError) {
@@ -248,34 +251,60 @@ router.post('/approve', authV2Middleware.authenticate, async (req: Request, res:
           email: true,
           name: true,
           picture: true,
+          displayName: true,
           workspaceId: true,
+          role: true,
           orgMemberId: true,
+          authProvider: true,
+          providerUserId: true,
+          status: true,
+          leftAt: true,
+          orgMember: { select: { memberId: true, orgId: true } },
         },
       });
 
-      if (!targetUser?.workspaceId) {
+      if (!targetUser?.workspaceId || !targetUser.orgMember) {
         return res.status(403).json({
           error: 'access_denied',
           message: 'Your account is not active in this workspace.',
         });
       }
 
-      // The same session JWT login issues, so `authMiddleware` accepts it
-      const token = jwtService.generateToken({
-        sub: targetUser.id,
-        email: targetUser.email,
-        name: targetUser.name,
-        picture: targetUser.picture || undefined,
-        workspaceId: targetUser.workspaceId,
-        memberId: targetUser.orgMemberId,
+      // A real account session (platform SDK) so deactivation / logout-everywhere
+      // revokes SDK tokens too. Its cookies are discarded: the token travels in the
+      // poll body only, so a poll from the Spaces origin never disturbs the
+      // dashboard's own cookies.
+      const issuance = await issueLogin({
+        user: targetUser,
+        orgMember: targetUser.orgMember,
+        req,
+        platform: 'sdk',
+        loginMethod: 'SDK',
+        sameSite: 'strict',
       });
+
+      // The same claims login issues (so `authMiddleware` accepts it) plus `sid`,
+      // minted with the SDK TTL, which is decoupled from the browser JWT TTL.
+      const token = jwtService.generateToken(
+        {
+          sub: targetUser.id,
+          email: targetUser.email,
+          name: targetUser.name,
+          picture: targetUser.picture || undefined,
+          workspaceId: targetUser.workspaceId,
+          memberId: targetUser.orgMemberId,
+          sid: issuance.session?.id,
+          lsid: issuance.legacySessionId,
+        },
+        { expiresInSeconds: config.sdkSso.tokenTtlSeconds },
+      );
       const exp = jwtService.decodeToken(token)?.exp;
 
       session = {
         userId: targetUser.id,
         workspaceId: targetUser.workspaceId,
         token,
-        expiresAt: exp ? exp * 1000 : Date.now() + config.jwt.expirationSeconds * 1000,
+        expiresAt: exp ? exp * 1000 : Date.now() + config.sdkSso.tokenTtlSeconds * 1000,
       };
     }
 

@@ -1,14 +1,17 @@
 import { Request, Response } from 'express';
 import { AccessType, AuthProvider, OrgRole, ProjectType, WorkspaceRole } from '@xyne/shared';
-import { randomBytes } from 'crypto';
 import { logger } from '@/utils/logger';
 import { getEncryptionProvider } from '@/services/encryption';
 import { config } from '@/config/env';
 import { UserService } from '@/services/userService';
-import { UserSessionService } from '@/services/userSessionService';
-import { jwtService } from '@/services/jwtService';
 import { DatabaseClient } from '@/database/client';
 import { TestAuthSeeder } from '@/controllers/testAuthSeeder';
+import { completeLogin } from '@/auth/loginCompletion';
+import { resolveRequest } from '@/auth/sessionResolver';
+import { applyCookies, cookiesForLogout } from '@/auth/sessionCookies';
+import { LEGACY_SESSION_COOKIE } from '@/auth/constants';
+import { revokeByLegacySessionId, revokeSessionCascade } from '@/bypassAcl/authSessionServices';
+import { ONBOARDING_COOKIE_NAME } from '@/utils/onboardingCookie';
 
 interface TestUserData {
   googleId: string;
@@ -26,7 +29,6 @@ interface TestUserData {
  */
 export class TestAuthController {
   private userService: UserService;
-  private userSessionService: UserSessionService;
   private static readonly TEST_USER_EMAIL_REGEX = /^test-(user|admin)-email-(\d+)@xyne-test\.local$/;
 
   private static parseBooleanFlag(value: unknown): boolean | undefined {
@@ -72,7 +74,6 @@ export class TestAuthController {
 
   constructor() {
     this.userService = new UserService();
-    this.userSessionService = new UserSessionService();
   }
 
   private buildFixedTestUser(): TestUserData {
@@ -353,87 +354,20 @@ export class TestAuthController {
         throw new Error(`User ${user.email} is not a member of any organization`);
       }
 
-      const customToken = jwtService.generateToken({
-        sub: user.id,
-        email: user.email,
-        name: user.name,
-        picture: testUserData.picture,
-        workspaceId: user.workspaceId,
-        memberId: orgMember.memberId,
+      // Real login issuance (session + grant + legacy row + cookies), exactly like the
+      // production controllers; session creation failures propagate.
+      logger.info(`[${requestId}] Creating test user session`);
+      const login = await completeLogin({
+        req,
+        res,
+        workspaceUser: user,
+        loginMethod: 'TEST',
+        platform: 'web',
+        sameSite: 'strict',
+        isNewUser: effectiveIsNewUser,
       });
-
-      let sessionId = null;
-      try {
-        logger.info(`[${requestId}] Creating test user session`);
-
-        const refreshTokenExpiry = new Date();
-        refreshTokenExpiry.setDate(refreshTokenExpiry.getDate() + config.session.expiryDays);
-
-        const deviceInfo = JSON.stringify({
-          userAgent: req.headers['user-agent'] || 'Test Automation',
-          timestamp: new Date().toISOString(),
-          platform: 'test',
-        });
-
-        const refreshToken = `test-${randomBytes(32).toString('hex')}-${Date.now()}`;
-
-        const session = await this.userSessionService.createSession({
-          userId: user.id,
-          refreshToken,
-          refreshTokenExpiry,
-          deviceInfo,
-          ipAddress: req.ip || '127.0.0.1',
-          loginMethod: 'TEST',
-        });
-
-        sessionId = session.id;
-        logger.info(`[${requestId}] Session created`);
-      } catch (sessionError) {
-        logger.error(`[${requestId}] Session creation failed:`, sessionError);
-      }
-
-      const cookieOptions = {
-        httpOnly: true,
-        secure: false,
-        sameSite: 'strict' as const,
-        path: '/',
-      };
-
-      // Set workspace-scoped JWT token (matches authV2Middleware expectation)
-      res.cookie(`xyne_ws_${user.workspaceId}_token`, customToken, {
-        ...cookieOptions,
-        maxAge: 24 * 60 * 60 * 1000,
-      });
-
-      // Set last workspace pointer so authV2Middleware can find the right token
-      res.cookie('xyne_last_workspace', user.workspaceId, {
-        ...cookieOptions,
-        maxAge: config.session.expiryDays * 24 * 60 * 60 * 1000,
-      });
-
-      if (sessionId) {
-        res.cookie('xyne_session', sessionId, {
-          ...cookieOptions,
-          maxAge: config.session.expiryDays * 24 * 60 * 60 * 1000,
-        });
-
-        // Session cookie the auth middleware and session-scoped routes require
-        // (real login controllers set it too); without it session-gated routes 401.
-        res.cookie('user_session_id', sessionId, {
-          ...cookieOptions,
-          maxAge: config.session.expiryDays * 24 * 60 * 60 * 1000,
-        });
-      }
-
-      if (effectiveIsNewUser) {
-        res.cookie('is_new_user', 'true', {
-          httpOnly: false,
-          secure: false,
-          sameSite: 'strict',
-          path: '/',
-          maxAge: config.session.expiryDays * 24 * 60 * 60 * 1000,
-        });
-      }
+      const sessionId = login.legacySessionId;
+      logger.info(`[${requestId}] Session created`);
 
       logger.info(`[${requestId}] Test login successful for: ${user.email}`);
 
@@ -468,28 +402,47 @@ export class TestAuthController {
     try {
       logger.info(`[${requestId}] Test logout initiated`);
 
-      // Mirror the real logout: revoke the global session + its encryption key and clear the
-      // cookie, otherwise the browser keeps a valid user_session_id and re-login sees stale data.
-      const sessionId = req.cookies?.user_session_id;
-      if (sessionId) {
-        await this.userSessionService.revokeSession(sessionId, 'TEST_CLEANUP').catch((err: unknown) =>
+      // Mirror the real logout: revoke the account session (cascade) or the legacy row, drop
+      // the encryption keys and clear every auth cookie, otherwise the browser keeps a valid
+      // session and re-login sees stale data.
+      const legacyIds = new Set<string>();
+      const cookieLegacyId = req.cookies?.[LEGACY_SESSION_COOKIE] as string | undefined;
+      if (cookieLegacyId) legacyIds.add(cookieLegacyId);
+
+      const resolved = await resolveRequest(req, { allowBearer: false, allowAutoRefresh: true }).catch(
+        (err: unknown) => {
+          logger.warn(`[${requestId}] Session resolve failed: ${err instanceof Error ? err.message : String(err)}`);
+          return null;
+        },
+      );
+      if (resolved?.ok) {
+        const { session, legacySessionId } = resolved.auth;
+        if (legacySessionId) legacyIds.add(legacySessionId);
+        if (session) {
+          for (const grant of session.grants) if (grant.legacySessionId) legacyIds.add(grant.legacySessionId);
+          if (session.legacySessionId) legacyIds.add(session.legacySessionId);
+          await revokeSessionCascade(session.id, 'TEST_CLEANUP').catch((err: unknown) =>
+            logger.warn(`[${requestId}] Session revoke failed: ${err instanceof Error ? err.message : String(err)}`)
+          );
+        } else if (legacySessionId) {
+          await revokeByLegacySessionId(legacySessionId, 'TEST_CLEANUP').catch((err: unknown) =>
+            logger.warn(`[${requestId}] Session revoke failed: ${err instanceof Error ? err.message : String(err)}`)
+          );
+        }
+      } else if (cookieLegacyId) {
+        await revokeByLegacySessionId(cookieLegacyId, 'TEST_CLEANUP').catch((err: unknown) =>
           logger.warn(`[${requestId}] Session revoke failed: ${err instanceof Error ? err.message : String(err)}`)
         );
-        await getEncryptionProvider().revokeSessionKey(sessionId).catch((err: unknown) =>
+      }
+
+      for (const legacyId of legacyIds) {
+        await getEncryptionProvider().revokeSessionKey(legacyId).catch((err: unknown) =>
           logger.warn(`[${requestId}] Session key revoke failed: ${err instanceof Error ? err.message : String(err)}`)
         );
       }
-      res.clearCookie('user_session_id', { path: '/' });
 
-      // Clear all workspace-scoped token cookies
-      for (const cookieName of Object.keys(req.cookies || {})) {
-        if (cookieName.startsWith('xyne_ws_') && cookieName.endsWith('_token')) {
-          res.clearCookie(cookieName, { path: '/' });
-        }
-      }
-      res.clearCookie('xyne_last_workspace', { path: '/' });
-      res.clearCookie('xyne_session', { path: '/' });
-      res.clearCookie('is_new_user', { path: '/' });
+      applyCookies(res, cookiesForLogout(Object.keys(req.cookies ?? {})));
+      res.clearCookie(ONBOARDING_COOKIE_NAME, { path: '/' });
 
       res.status(200).json({
         success: true,

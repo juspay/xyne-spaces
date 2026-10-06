@@ -3,12 +3,16 @@ import { SessionStatus } from '@xyne/shared';
 import { DatabaseClient } from '@/database/client';
 import { getEncryptionProvider } from '@/services/encryption';
 import { logger } from '@/utils/logger';
+import { getClientSessionFingerprint } from '@/auth/sessionTokens';
 
 const router = Router();
 const prisma = DatabaseClient.getInstance();
 
+// The key store is keyed by the client fingerprint (user_session_id > x-session-id >
+// sha256(xyne_session)), the same value decryptionMiddleware derives before auth runs; the
+// dashboard echoes it back as x-session-id on encrypted bodies.
 router.get('/public-key', async (req: Request, res: Response) => {
-  const sessionId = req.authenticatedSessionId ?? req.cookies?.user_session_id;
+  const sessionId = getClientSessionFingerprint(req);
   if (!req.user || !sessionId) {
     res.status(401).json({ error: 'Unauthorized' });
     return;
@@ -23,7 +27,7 @@ router.get('/public-key', async (req: Request, res: Response) => {
 });
 
 router.post('/register-client-key', async (req: Request, res: Response) => {
-  const sessionId = req.authenticatedSessionId ?? req.cookies?.user_session_id;
+  const sessionId = getClientSessionFingerprint(req);
   if (!req.user || !sessionId) {
     res.status(401).json({ error: 'Unauthorized' });
     return;
@@ -35,18 +39,36 @@ router.post('/register-client-key', async (req: Request, res: Response) => {
     return;
   }
 
-  let orgId: string;
-  try {
-    const [session, workspace] = await prisma.$transaction([
-      prisma.userSession.findFirst({
+  // Prove the caller holds a live session for this workspace: the v3 grant when the request
+  // resolved through an auth session, else the legacy row the middleware attached (or the
+  // fingerprint itself, which IS the legacy id for legacy-cookie clients).
+  const authSession = req.authSession;
+  const legacySessionId = req.authenticatedSessionId ?? sessionId;
+  const sessionCheck = authSession
+    ? prisma.sessionWorkspaceGrant.findFirst({
         where: {
-          id: sessionId,
+          id: authSession.grantId,
+          sessionId: authSession.sessionId,
+          workspaceId: req.user.workspaceId,
+          userId: req.user.id,
+          revokedAt: null,
+        },
+        select: { id: true },
+      })
+    : prisma.userSession.findFirst({
+        where: {
+          id: legacySessionId,
           userId: req.user.id,
           status: SessionStatus.ACTIVE,
           refreshTokenExpiry: { gt: new Date() },
         },
         select: { id: true },
-      }),
+      });
+
+  let orgId: string;
+  try {
+    const [session, workspace] = await prisma.$transaction([
+      sessionCheck,
       prisma.workspace.findFirst({
         where: {
           id: req.user.workspaceId,

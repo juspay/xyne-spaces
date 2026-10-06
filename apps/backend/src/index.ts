@@ -2,7 +2,7 @@ import './profiling.js';
 import { App } from './app.js';
 import { describeRejection, logger } from '@/utils/logger';
 import { configureJAF } from '@juspay-jaf/jaf';
-import { warnIfNoGoogleClientsConfigured } from '@/services/googleOAuthClients';
+import { validateAuthSessionFlags } from '@/auth/flags';
 
 configureJAF({ verbose: false });
 
@@ -37,7 +37,8 @@ let app: App;
 
 async function startServer() {
   try {
-    warnIfNoGoogleClientsConfigured();
+    // Refuses to boot on an unsafe AUTH_SESSION_* / AUTH_COOKIE_MODE / SESSION_TOKEN_MODE combination.
+    validateAuthSessionFlags();
     app = new App();
     await app.listen();
   } catch (error) {

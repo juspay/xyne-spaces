@@ -1,5 +1,6 @@
 import { io, Socket } from 'socket.io-client';
 import { API_BASE_URL } from '../../config';
+import { buildAuthHeaders } from './authHeaders';
 import { logger, Logger, NotificationSocketState } from '../../utils/logger';
 import {
   socketConnectionAttemptDuration,
@@ -56,6 +57,9 @@ class WebSocketService {
       this.socket = io(serverUrl, {
         path: '/api/socket.io/',
         withCredentials: true, // Important: send cookies with socket connection
+        // Page JS cannot set headers on the ws handshake; the server copies
+        // handshake.auth keys to headers, so x-workspace-id etc. travel here.
+        auth: buildAuthHeaders(),
         transports: ['websocket', 'polling'],
         reconnection: true,
         reconnectionAttempts: Infinity,

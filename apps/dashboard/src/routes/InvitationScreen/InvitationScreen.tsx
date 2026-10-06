@@ -8,6 +8,7 @@ import { cn } from '../../utils/classNames';
 import { useCachedQuery } from '../../hooks/useCachedQuery';
 import { queries } from '../../zero/queries';
 import { API_BASE_URL } from '../../config';
+import { buildAuthHeaders } from '../../services/clients/authHeaders';
 import axios from 'axios';
 
 interface ApiErrorResponse {
@@ -87,7 +88,7 @@ export const InvitationScreen = (): ReactElement => {
       await axios.post(
         `${API_BASE_URL}/invitations`,
         { email, role: 'MEMBER', workspaceId, orgId },
-        { withCredentials: true },
+        { withCredentials: true, headers: buildAuthHeaders(workspaceId) },
       );
       toast.success(`Invitation sent to ${email}`);
     } catch (error) {
@@ -109,6 +110,7 @@ export const InvitationScreen = (): ReactElement => {
     try {
       await axios.delete(`${API_BASE_URL}/invitations/${invitationId}`, {
         withCredentials: true,
+        headers: buildAuthHeaders(workspaceId),
       });
       toast.success('Invitation revoked');
     } catch (error) {

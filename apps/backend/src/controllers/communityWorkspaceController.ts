@@ -1,5 +1,4 @@
 import { Request, Response } from 'express';
-import jwt from 'jsonwebtoken';
 import {
   CommunityJoinResultStatus,
   OrgRole,
@@ -9,14 +8,15 @@ import {
   AuthProvider,
 } from '@xyne/shared';
 import { communityWorkspaceService } from '@/services/communityWorkspaceService';
-import { UserSessionService } from '@/services/userSessionService';
 import { UserService } from '@/services/userService';
-import { jwtService } from '@/services/jwtService';
+import type { LoginMethod } from '@/services/userSessionService';
 import { channelService } from '@/services/channelService';
-import { config } from '@/config/env';
 import { logger } from '@/utils/logger';
-import { redisService } from '@/services/redisService';
-import { setOnboardingCookie } from '@/utils/onboardingCookie';
+import { completeLogin } from '@/auth/loginCompletion';
+import { readPendingAuth } from '@/auth/pendingAuth';
+import { resolveRequest } from '@/auth/sessionResolver';
+import { platformFromRequest } from '@/auth/platform';
+import type { ExistingSessionRef } from '@/auth/types';
 
 type PendingAuth = {
   userData: {
@@ -26,14 +26,13 @@ type PendingAuth = {
     picture?: string;
     authProvider: string;
   };
-  refreshToken?: string;
-  accessToken?: string;
-  accessTokenExpiry?: Date;
-  tokenKey?: string;
+  /** Set when the caller was already signed in: the join adds a grant to that session. */
+  existingSession: ExistingSessionRef | null;
+  /** True when identity came from the pending-auth cookie (cleared after login completes). */
+  pending: boolean;
 };
 
 export class CommunityWorkspaceController {
-  private userSessionService = new UserSessionService();
   private userService = new UserService();
 
   listCommunityWorkspaces = async (_req: Request, res: Response): Promise<void> => {
@@ -98,52 +97,22 @@ export class CommunityWorkspaceController {
         joinResult.workspaceUser.workspaceId
       );
 
-      const sessionId = await this.createSessionIfPossible(
+      // Already signed in ⇒ a grant on the existing session (WORKSPACE_JOINED); fresh
+      // pending-auth identity ⇒ a new login under its provider. Cookies, the onboarding
+      // cookie and the pending-cookie clear are all applied by completeLogin.
+      await completeLogin({
         req,
-        joinResult.workspaceUser.id,
-        pendingAuth
-      );
-      const token = jwtService.generateToken({
-        sub: joinResult.workspaceUser.id,
-        email: joinResult.workspaceUser.email,
-        name: joinResult.workspaceUser.name,
-        picture: joinResult.workspaceUser.picture || undefined,
-        workspaceId: joinResult.workspaceUser.workspaceId ?? undefined,
-        memberId: joinResult.workspaceUser.orgMemberId,
+        res,
+        workspaceUser: joinResult.workspaceUser,
+        loginMethod: pendingAuth.existingSession
+          ? 'WORKSPACE_JOINED'
+          : (pendingAuth.userData.authProvider.toUpperCase() as LoginMethod),
+        platform: platformFromRequest(req),
+        sameSite: 'strict',
+        isNewUser: Boolean(joinResult.isNewUser),
+        existingSession: pendingAuth.existingSession,
+        pending: pendingAuth.pending,
       });
-
-      const isProduction = process.env.NODE_ENV === 'production';
-      const cookieOptions = {
-        httpOnly: true,
-        secure: isProduction,
-        sameSite: 'strict' as const,
-        path: '/',
-      };
-
-      res.cookie(`xyne_ws_${workspaceId}_token`, token, {
-        ...cookieOptions,
-        maxAge: config.jwt.expirationSeconds * 1000,
-      });
-      res.cookie('xyne_last_workspace', workspaceId, {
-        ...cookieOptions,
-        maxAge: config.session.expiryDays * 24 * 60 * 60 * 1000,
-      });
-      if (sessionId) {
-        res.cookie('user_session_id', sessionId, {
-          ...cookieOptions,
-          maxAge: config.session.expiryDays * 24 * 60 * 60 * 1000,
-        });
-      }
-      setOnboardingCookie(res, Boolean(joinResult.isNewUser), {
-        secure: isProduction,
-        sameSite: 'strict' as const,
-      });
-      if (pendingAuth.tokenKey) {
-        await redisService.del(
-          `${config.pendingOAuthTokens.redisKeyPrefix}${pendingAuth.tokenKey}`,
-        );
-      }
-      res.clearCookie('google_access_token', { path: '/' });
 
       res.status(200).json({
         success: true,
@@ -265,131 +234,46 @@ export class CommunityWorkspaceController {
     }
   };
 
+  /**
+   * Identity for the join: the pending-auth cookie (fresh OAuth / email login, identity only)
+   * first, else the caller's existing session via the shared resolver (auto-login / already
+   * signed in). Nothing the resolver minted is written to the response here; completeLogin
+   * issues the target workspace's cookies.
+   */
   private async resolvePendingAuth(req: Request): Promise<PendingAuth | null> {
-    const pendingAuthCookie = req.cookies?.google_access_token;
-    if (pendingAuthCookie) {
-      return this.parsePendingAuthCookie(pendingAuthCookie);
-    }
-
-    const sessionId = req.cookies?.user_session_id;
-    if (!sessionId) return null;
-
-    const session = await this.userSessionService.getSessionById(sessionId);
-    if (
-      !session ||
-      !session.user ||
-      session.status !== 'ACTIVE' ||
-      new Date() > session.refreshTokenExpiry
-    ) {
-      return null;
-    }
-
-    return {
-      userData: {
-        providerUserId: session.user.providerUserId,
-        email: session.user.email,
-        name: session.user.name || '',
-        picture: session.user.picture || undefined,
-        authProvider: session.user.authProvider || AuthProvider.GOOGLE,
-      },
-      refreshToken: session.refreshToken,
-      accessToken: session.accessToken || undefined,
-      accessTokenExpiry: session.accessTokenExpiry || undefined,
-    };
-  }
-
-  private async parsePendingAuthCookie(cookie: string): Promise<PendingAuth | null> {
-    try {
-      const decoded = jwt.verify(cookie, process.env.JWT_SECRET!) as {
-        googleId?: string;
-        providerUserId?: string;
-        email?: string;
-        name?: string;
-        picture?: string;
-        provider?: string;
-        refreshToken?: string | null;
-        accessToken?: string | null;
-        accessTokenExpiry?: string | null;
-        tokenKey?: string;
-      };
-      const providerUserId = decoded.providerUserId || decoded.googleId;
-      if (!decoded.email || !providerUserId) return null;
-
-      let redisTokens: {
-        refreshToken?: string | null;
-        accessToken?: string | null;
-        accessTokenExpiry?: string | null;
-      } | null = null;
-
-      if (decoded.tokenKey) {
-        const storedTokens = await redisService.get(
-          `${config.pendingOAuthTokens.redisKeyPrefix}${decoded.tokenKey}`,
-        );
-        if (!storedTokens) return null;
-        redisTokens = JSON.parse(storedTokens);
-      }
-
-      const refreshToken = redisTokens?.refreshToken ?? decoded.refreshToken;
-      const accessToken = redisTokens?.accessToken ?? decoded.accessToken;
-      const accessTokenExpiryValue =
-        redisTokens?.accessTokenExpiry ?? decoded.accessTokenExpiry;
-      const accessTokenExpiry = accessTokenExpiryValue
-        ? new Date(accessTokenExpiryValue)
-        : undefined;
+    const pending = readPendingAuth(req);
+    if (pending) {
+      const providerUserId = pending.providerUserId || pending.googleId;
+      if (!providerUserId) return null;
       return {
         userData: {
           providerUserId,
-          email: decoded.email,
-          name: decoded.name || '',
-          picture: decoded.picture,
-          authProvider: decoded.provider || AuthProvider.GOOGLE,
+          email: pending.email,
+          name: pending.name,
+          picture: pending.picture,
+          authProvider: pending.provider || AuthProvider.GOOGLE,
         },
-        refreshToken: refreshToken || undefined,
-        accessToken: accessToken || undefined,
-        accessTokenExpiry:
-          accessTokenExpiry && !Number.isNaN(accessTokenExpiry.getTime())
-            ? accessTokenExpiry
-            : undefined,
-        tokenKey: decoded.tokenKey,
+        existingSession: null,
+        pending: true,
       };
-    } catch (_error) {
-      return null;
     }
-  }
 
-  private async createSessionIfPossible(
-    req: Request,
-    userId: string,
-    pendingAuth: PendingAuth
-  ): Promise<string | null> {
-    if (!pendingAuth.refreshToken) return null;
+    const resolved = await resolveRequest(req, { allowBearer: false, allowAutoRefresh: true });
+    if (!resolved.ok) return null;
+    const { user, session, legacySession, legacySessionId } = resolved.auth;
+    if (!user.googleId) return null;
 
-    try {
-      const refreshTokenExpiry = new Date();
-      refreshTokenExpiry.setDate(refreshTokenExpiry.getDate() + config.session.expiryDays);
-
-      const session = await this.userSessionService.createSession({
-        userId,
-        refreshToken: pendingAuth.refreshToken,
-        refreshTokenExpiry,
-        accessToken: pendingAuth.accessToken,
-        accessTokenExpiry: pendingAuth.accessTokenExpiry,
-        deviceInfo: JSON.stringify({
-          userAgent: req.headers['user-agent'],
-          acceptLanguage: req.headers['accept-language'],
-          timestamp: new Date().toISOString(),
-          appVersion: req.headers['x-app-version'],
-        }),
-        ipAddress: req.ip || req.connection.remoteAddress || undefined,
-        // Already signed in — a session for the community workspace they just joined.
-        loginMethod: 'WORKSPACE_JOINED',
-      });
-
-      return session.id;
-    } catch (error) {
-      logger.error('[CommunityWorkspaceController] Session creation failed:', error);
-      return null;
-    }
+    return {
+      userData: {
+        providerUserId: user.googleId,
+        email: user.email,
+        name: user.name || '',
+        picture: legacySession?.user.picture || undefined,
+        authProvider: user.authProvider || AuthProvider.GOOGLE,
+      },
+      existingSession: { sessionId: session?.id ?? null, legacySessionId },
+      pending: false,
+    };
   }
 }
 

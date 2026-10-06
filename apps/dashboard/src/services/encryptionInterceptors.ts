@@ -115,6 +115,14 @@ export async function encryptionRequestInterceptor(
 
   config.data = encryptedData;
 
+  // The server decrypts before auth, keyed by the client session fingerprint it
+  // handed out with /encryption/public-key. The httpOnly session cookie cannot be
+  // read here, so the fingerprint travels as x-session-id.
+  const sessionFingerprint = getEncryptionState().sessionFingerprint;
+  if (sessionFingerprint && config.headers) {
+    config.headers['x-session-id'] = sessionFingerprint;
+  }
+
   return config;
 }
 

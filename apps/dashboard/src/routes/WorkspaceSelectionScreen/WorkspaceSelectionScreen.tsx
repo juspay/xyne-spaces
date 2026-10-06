@@ -151,13 +151,14 @@ export const WorkspaceSelectionScreen = (): ReactElement => {
     }
   };
 
-  const handleTryDifferentAccount = (): void => {
+  const handleTryDifferentAccount = async (): Promise<void> => {
     Cookies.remove('user_data');
     Cookies.remove('user_name');
     Cookies.remove('user_email');
-    Cookies.remove('user_session_id');
     localStorage.clear();
-    logout();
+    // The session cookie is httpOnly: only the server's logout clears it, so
+    // wait for that before leaving or the next page finds the session alive.
+    await logout();
     window.location.href = '/auth';
   };
 
@@ -399,7 +400,7 @@ export const WorkspaceSelectionScreen = (): ReactElement => {
                 type='button'
                 data-track-category='WORKSPACE_SELECTION'
                 data-track-name='TryDifferentAccount'
-                onClick={handleTryDifferentAccount}
+                onClick={() => void handleTryDifferentAccount()}
                 className='inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors'
               >
                 <LogOut className='h-4 w-4' />

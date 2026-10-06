@@ -5,7 +5,7 @@ const AgentsScreen = (): ReactElement => {
   const { logout } = useAuth();
 
   const handleLogout = (): void => {
-    logout();
+    void logout();
   };
 
   return (

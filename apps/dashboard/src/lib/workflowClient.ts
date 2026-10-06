@@ -1,5 +1,6 @@
 import { createWorkflowClient } from '@xyne/workflow-ui';
 import { API_BASE_URL } from '../config';
+import { buildAuthHeaders } from '../services/clients/authHeaders';
 
 /**
  * HTTP client for the workflows surface, mounted at `/api/workflows-v2`.
@@ -9,7 +10,9 @@ import { API_BASE_URL } from '../config';
  *
  * Auth is the session cookie, the same as every other dashboard API call
  * (`apiClient` sets `withCredentials: true`; the backend reads the token from the
- * cookie rather than an Authorization header) — so `getHeaders` has nothing to add.
+ * cookie rather than an Authorization header). `getHeaders` adds the same
+ * `x-workspace-id` (+ correlation) headers `apiClient` sends, since the server
+ * resolves the workspace from that header rather than from a cookie it rewrites.
  *
  * The cookie does need asking for, though. `createWorkflowClient` never sets
  * `credentials` on its fetch, and in dev the dashboard (:5173) and backend (:3001) are
@@ -22,7 +25,7 @@ import { API_BASE_URL } from '../config';
  */
 export const workflowClient = createWorkflowClient({
   baseUrl: `${API_BASE_URL}/workflows-v2`,
-  getHeaders: () => ({}),
+  getHeaders: () => buildAuthHeaders(),
   // The SDK client is fetch-shaped by contract, and its execution stream is SSE read via
   // `res.body.getReader()` — axios cannot stream in the browser, so this cannot be the app's
   // axios instance. Same reason as liveConversationStream.ts and xyneAIStream.worker.ts.

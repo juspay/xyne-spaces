@@ -3,6 +3,7 @@ import { AppError } from '@/middleware/errorHandler';
 import { getCryptoOperations } from '@/services/otel/cryptoMetrics';
 import { logger } from '@/utils/logger';
 import { getEncryptionProvider } from '@/services/encryption';
+import { getClientSessionFingerprint } from '@/auth/sessionTokens';
 
 function sanitizeForLog(value: unknown): string {
   return String(value ?? '').replace(/[\r\n]+/g, '');
@@ -45,7 +46,8 @@ export async function decryptRequestBodyMiddleware(
       return next();
     }
 
-    const sessionId = req.cookies?.user_session_id ?? (req.headers['x-session-id'] as string | undefined);
+    // Pre-auth: the client-side key store is keyed by the same fingerprint /public-key handed out.
+    const sessionId = getClientSessionFingerprint(req);
 
     if (!sessionId) {
       logger.warn('[decryptionMiddleware] encrypted fields present but session ID missing', {
@@ -98,7 +100,7 @@ export function encryptResponseBodyMiddleware(
   const originalJson = res.json.bind(res);
 
   res.json = ((body?: unknown): Response => {
-    const sessionId = req.cookies?.user_session_id ?? (req.headers['x-session-id'] as string | undefined);
+    const sessionId = getClientSessionFingerprint(req);
     if (!sessionId || !body || typeof body !== 'object') {
       return originalJson(body);
     }

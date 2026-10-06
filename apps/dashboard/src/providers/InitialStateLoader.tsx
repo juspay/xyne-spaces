@@ -14,13 +14,13 @@ import {
 import { hydrateUserPreferences } from '../machines/userPreferencesMachine';
 import { UserPermission } from '../machines/stateMachine';
 import { apiInstance } from '../services/clients/apiClient';
+import { buildAuthHeaders } from '../services/clients/authHeaders';
 import { useFallbackHydratedQuery } from '@xyne/shared/hooks';
 import { ReadonlyJSONValue } from '@rocicorp/zero';
 import { websocketService } from '../services/clients/socketClient';
 import { DeferredLoader } from '../components/DeferredLoader';
 import axios from 'axios';
 import { API_BASE_URL } from '../config';
-import { v4 as uuidv4 } from 'uuid';
 import { dropZeroDatabases } from '../zero/dropZeroDatabases';
 import { clearAuthTokens } from '../services/clients/apiClient';
 import { logger, Event as LoggerEvent } from '../utils/logger';
@@ -129,24 +129,13 @@ const InitialStateLoader: React.FC<InitialStateLoaderProps> = ({ children }): Re
     isRefreshing.current = true;
     try {
       // Note: Using direct axios call instead of apiInstance
-      // Call refresh endpoint directly (browser receives Set-Cookie)
-      const refreshHeaders: Record<string, string> = {};
-      refreshHeaders['x-request-id'] = uuidv4();
-      if (logger.zeroClientId) {
-        refreshHeaders['x-client-id'] = logger.zeroClientId;
-      }
-      if (logger.zeroClientGroupId) {
-        refreshHeaders['x-zero-client-group-id'] = logger.zeroClientGroupId;
-      }
-      const userEmail = logger.emailId;
-      if (userEmail) {
-        refreshHeaders['x-user-email'] = userEmail;
-      }
+      // Call refresh endpoint directly (browser receives Set-Cookie). x-workspace-id
+      // picks the workspace: the server no longer rewrites the hint cookie on refresh.
       const refreshStartTime = Date.now();
 
       await axios.get(`${API_BASE_URL}/auth/refresh-session`, {
         withCredentials: true, // Send cookies (session ID)
-        headers: refreshHeaders,
+        headers: buildAuthHeaders(),
       });
 
       const refreshLatency = Date.now() - refreshStartTime;

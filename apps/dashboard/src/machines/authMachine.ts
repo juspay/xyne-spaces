@@ -1,11 +1,11 @@
 import { createMachine, createActor, fromPromise, assign } from 'xstate';
 import Cookies from 'js-cookie';
 import axios from 'axios';
-import { v4 as uuidv4 } from 'uuid';
 import { reactNativeBridge } from '../utils/reactNativeBridge';
 import { posthogService } from '../services/Analytics/posthogService';
 import { API_BASE_URL, isSdlcSurface, isTestEnv } from '../config';
 import { logger, Event as LoggerEvent } from '../utils/logger';
+import { buildAuthHeaders } from '../services/clients/authHeaders';
 import {
   CommunityJoinResultStatus,
   WorkspaceType,
@@ -1441,6 +1441,7 @@ export const authMachine = createMachine(
               headers: {
                 // eslint-disable-next-line @typescript-eslint/naming-convention
                 'Content-Type': 'application/json',
+                ...buildAuthHeaders(),
               },
             },
           );
@@ -1507,20 +1508,11 @@ export const authMachine = createMachine(
       }),
       loginWorkspace: fromPromise(async ({ input }: { input: { workspaceId: string } }) => {
         try {
+          // Target workspace, not the URL's: the session is being granted to it.
           const headers: Record<string, string> = {
             'Content-Type': 'application/json',
+            ...buildAuthHeaders(input.workspaceId),
           };
-          headers['x-request-id'] = uuidv4();
-          if (logger.zeroClientId) {
-            headers['x-client-id'] = logger.zeroClientId;
-          }
-          if (logger.zeroClientGroupId) {
-            headers['x-zero-client-group-id'] = logger.zeroClientGroupId;
-          }
-          const userEmail = logger.emailId;
-          if (userEmail) {
-            headers['x-user-email'] = userEmail;
-          }
 
           const response = await axios.post(
             `${API_BASE_URL}/auth/login-workspace`,
@@ -1557,20 +1549,11 @@ export const authMachine = createMachine(
         }
       }),
       joinWorkspace: fromPromise(async ({ input }: { input: { workspaceId: string } }) => {
+        // Target workspace, not the URL's: the session is being granted to it.
         const headers: Record<string, string> = {
           'Content-Type': 'application/json',
+          ...buildAuthHeaders(input.workspaceId),
         };
-        headers['x-request-id'] = uuidv4();
-        if (logger.zeroClientId) {
-          headers['x-client-id'] = logger.zeroClientId;
-        }
-        if (logger.zeroClientGroupId) {
-          headers['x-zero-client-group-id'] = logger.zeroClientGroupId;
-        }
-        const userEmail = logger.emailId;
-        if (userEmail) {
-          headers['x-user-email'] = userEmail;
-        }
 
         try {
           const typeResponse = await axios.get(
@@ -1660,18 +1643,8 @@ export const authMachine = createMachine(
           try {
             const headers: Record<string, string> = {
               'Content-Type': 'application/json',
+              ...buildAuthHeaders(),
             };
-            headers['x-request-id'] = uuidv4();
-            if (logger.zeroClientId) {
-              headers['x-client-id'] = logger.zeroClientId;
-            }
-            if (logger.zeroClientGroupId) {
-              headers['x-zero-client-group-id'] = logger.zeroClientGroupId;
-            }
-            const userEmail = logger.emailId;
-            if (userEmail) {
-              headers['x-user-email'] = userEmail;
-            }
 
             const response = await axios.post(
               `${API_BASE_URL}/auth/create-org`,
@@ -1710,25 +1683,13 @@ export const authMachine = createMachine(
       ),
       validateSession: fromPromise(async () => {
         try {
-          const headers: Record<string, string> = {};
-          headers['x-request-id'] = uuidv4();
-          if (logger.zeroClientId) {
-            headers['x-client-id'] = logger.zeroClientId;
-          }
-          if (logger.zeroClientGroupId) {
-            headers['x-zero-client-group-id'] = logger.zeroClientGroupId;
-          }
-          const userEmail = logger.emailId;
-          if (userEmail) {
-            headers['x-user-email'] = userEmail;
-          }
           // Note: Using direct axios call instead of apiInstance
           const response = await axios.get(`${API_BASE_URL}/auth/validate`, {
             withCredentials: true,
             headers: {
               // eslint-disable-next-line @typescript-eslint/naming-convention
               'content-type': 'application/json',
-              ...headers,
+              ...buildAuthHeaders(),
             },
           });
 
@@ -1784,6 +1745,7 @@ export const authMachine = createMachine(
               headers: {
                 // eslint-disable-next-line @typescript-eslint/naming-convention
                 'Content-Type': 'application/json',
+                ...buildAuthHeaders(),
               },
             },
           );

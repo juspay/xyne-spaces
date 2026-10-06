@@ -291,7 +291,7 @@ const AuthScreen = (): ReactElement | null => {
   };
 
   const handleTryDifferentAccount = (): void => {
-    logout();
+    void logout();
     window.location.reload();
   };
 

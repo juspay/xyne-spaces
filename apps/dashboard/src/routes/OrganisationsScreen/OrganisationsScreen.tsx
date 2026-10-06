@@ -42,6 +42,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { OrgRole, WorkspaceJoinPolicy, WorkspaceType } from '@xyne/shared';
 import axios from 'axios';
 import { API_BASE_URL } from '../../config';
+import { buildAuthHeaders } from '../../services/clients/authHeaders';
 import { usePlatform } from '../../hooks/usePlatform';
 import { setLastActiveWorkspaceId, setLastActiveWorkspaceName } from '../../machines/authMachine';
 import { apiInstance } from '../../services/clients/apiClient';
@@ -622,7 +623,7 @@ export const OrganisationsScreen = (): ReactElement => {
           workspaceName: newWorkspaceName.trim(),
           ownerEmail: newOwnerEmail.trim().toLowerCase(),
         },
-        { withCredentials: true },
+        { withCredentials: true, headers: buildAuthHeaders() },
       );
       toast.success(`Organisation created and invitation sent to ${newOwnerEmail.trim()}`);
       setNewOrgName('');
@@ -657,7 +658,7 @@ export const OrganisationsScreen = (): ReactElement => {
           workspaceType: WorkspaceType.COMMUNITY,
           joinPolicy: communityJoinPolicy,
         },
-        { withCredentials: true },
+        { withCredentials: true, headers: buildAuthHeaders() },
       );
 
       const email = response.data.user.email;

@@ -29,7 +29,7 @@ const NoOrganizationAccessScreen = (): ReactElement => {
   }, [navigate]);
 
   const handleGoBack = (): void => {
-    logout();
+    void logout();
     window.location.href = '/auth';
   };
 

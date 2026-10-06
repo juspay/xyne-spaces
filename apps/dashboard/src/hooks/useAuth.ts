@@ -50,7 +50,7 @@ export interface UseAuthReturn {
   resendVerificationCode: (
     email: string,
   ) => Promise<{ success: boolean; message?: string; error?: string }>;
-  logout: () => void;
+  logout: () => Promise<void>;
   clearError: () => void;
   startEnterpriseLogin: () => void;
   selectWorkspace: (workspaceId: string) => void;
@@ -64,8 +64,22 @@ export const useAuth = (): UseAuthReturn => {
     authActor.send(event);
   }, []);
 
-  const logout = useCallback(() => {
+  // Resolves once the machine has left `loggingOut` — i.e. after POST /auth/logout
+  // has cleared the httpOnly session cookie — so callers can redirect without
+  // racing it. States that handle LOGOUT synchronously resolve immediately.
+  const logout = useCallback((): Promise<void> => {
     send({ type: 'LOGOUT' });
+    if (!authActor.getSnapshot().matches('loggingOut')) {
+      return Promise.resolve();
+    }
+    return new Promise<void>(resolve => {
+      const subscription = authActor.subscribe(snapshot => {
+        if (!snapshot.matches('loggingOut')) {
+          subscription.unsubscribe();
+          resolve();
+        }
+      });
+    });
   }, [send]);
 
   const signInWithGoogle = useCallback(() => {
