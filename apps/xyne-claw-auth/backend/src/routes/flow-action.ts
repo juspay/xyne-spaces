@@ -1430,11 +1430,26 @@ router.post("/action", pinAgentSlugFromHeader, verifySpacesSignature, async (req
         return;
       }
 
-      // Verify caller is the intended user. Fail closed on missing callerUserId.
+      // Verify caller is the intended user. Human-baked cards keep the strict
+      // caller === answerer rule. Bot-baked cards (automation-triggered runs)
+      // carry the triggering bot's identity, which no human can ever match —
+      // those may be answered by an active human member of the card's channel.
+      // Fail closed on missing callerUserId and on any helper error.
+      let continuationUserId: string = callerUserId ?? "";
       if (!callerUserId || callerUserId !== answerUserId) {
-        log.error(`[flow-action] Unauthorized: caller ${callerUserId ?? "(none)"} != expected ${answerUserId}`);
-        res.status(403).json({ type: "error", message: "Unauthorized" } satisfies AppActionResponse);
-        return;
+        const { authorizeQuestionAnswerer } = await import("./question-auth.js");
+        const verdict = await authorizeQuestionAnswerer({
+          callerUserId: callerUserId ?? "",
+          answerUserId,
+          channelId: answerChannelId,
+        });
+        if (!verdict.allowed || !callerUserId) {
+          log.error(`[flow-action] Unauthorized: caller ${callerUserId ?? "(none)"} != expected ${answerUserId} (${verdict.reason})`);
+          res.status(403).json({ type: "error", message: "Unauthorized" } satisfies AppActionResponse);
+          return;
+        }
+        // Allowed bot-baked exception: the run continues as the human answerer.
+        continuationUserId = callerUserId;
       }
 
       // XYNE-55135: the card's identity + routing fields are HMAC-bound at
@@ -1584,7 +1599,7 @@ router.post("/action", pinAgentSlugFromHeader, verifySpacesSignature, async (req
           ? decrypt(...(agent.spacesAppToken.split(":") as [string, string, string]), CONFIG.encryptionKey)
           : "";
         const answerOrgId = agent?.orgId
-          ?? (await prisma.user.findUnique({ where: { id: answerUserId }, select: { orgId: true } }))?.orgId;
+          ?? (await prisma.user.findUnique({ where: { id: continuationUserId }, select: { orgId: true } }))?.orgId;
         if (!answerOrgId) {
           log.error(`[flow-action] answer: no orgId for user=${answerUserId} agent=${answerAgentSlug}`);
           return;
@@ -1595,7 +1610,7 @@ router.post("/action", pinAgentSlugFromHeader, verifySpacesSignature, async (req
             agent,
             agentSlug: answerAgentSlug,
             conversationId: answerConversationId,
-            userId: answerUserId,
+            userId: continuationUserId,
             orgId: answerOrgId,
             prompt: `The user answered your questions. Continue the task based on these answers:\n${answerSummary}`,
             idempotencyKey: `user_answer_${questionId}`,
@@ -1612,7 +1627,7 @@ router.post("/action", pinAgentSlugFromHeader, verifySpacesSignature, async (req
             ...(CONFIG.xyneClawS2sKey ? { "x-s2s-key": CONFIG.xyneClawS2sKey } : {}),
           },
           body: JSON.stringify({
-            userId: answerUserId,
+            userId: continuationUserId,
             task: `The user answered your questions. Continue the task based on these answers:\n${answerSummary}`,
             context: `User answers:\n${answerSummary}`,
             conversationId: answerConversationId,
@@ -1638,7 +1653,7 @@ router.post("/action", pinAgentSlugFromHeader, verifySpacesSignature, async (req
           });
           await setSession(runBody.sessionId, {
             mentionedUserId: agent.spacesAppUserId ?? "",
-            senderId: answerUserId,
+            senderId: continuationUserId,
             senderName: "",
             channelId: answerChannelId,
             channelName: answerChannelId,
