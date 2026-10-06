@@ -8,7 +8,7 @@ import { ChannelRepository } from '@/database/repositories/channelRepository';
 import { isMigrationEncryptionConfigured } from './migrationCrypto';
 import { config } from '@/config/env';
 import { getWorkspaceIdByTeamId, getBotConfigByWorkspaceId } from '@/migration/slack/slackMigrationBotConfig';
-import { getMigrationAnnouncement } from './migrationAnnouncementConfig';
+import { getMigrationWorkspaceConfig } from '@/migration/slack/migrationWorkspaceConfig';
 import { SlackMigrationEngine } from './engine';
 import { MigrationStore } from './store';
 import { MigrationQueues, queueFor } from './queues';
@@ -374,10 +374,10 @@ export class SlackMigrationService {
   }
 
   /** Free-text notice shown atop the dashboard Slack-migration page, resolved per workspace from
-   *  Superposition (SlackMigrationAnnouncements[ws].dashboard_announcement). Any member may read it;
+   *  Superposition (SlackMigrationWorkspaces[ws].dashboard_announcement). Any member may read it;
    *  empty string means "no banner". */
   async getAnnouncement(actor: Actor): Promise<{ text: string }> {
-    const { dashboard_announcement } = await getMigrationAnnouncement(actor.workspaceId);
+    const { dashboard_announcement } = await getMigrationWorkspaceConfig(actor.workspaceId);
     return { text: dashboard_announcement?.trim() ? dashboard_announcement : '' };
   }
 
