@@ -597,11 +597,11 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
   // Declared here rather than beside the other board queries because the filters
   // machine's INIT effect below reads channelDefaultBoardId in its dep array.
   const channelBoards = useChannelBoards(channelId);
-  // Channels have no "All Boards" state: exactly one board is always selected,
-  // seeded through the filters machine. Everything downstream (paged query,
-  // counts, Vespa pushdown) then scopes off that single board as it always has.
-  // A track spans boards, so it starts on all of them instead.
-  const channelDefaultBoardId = isTrackView ? null : (channelBoards.boards[0]?.id ?? null);
+  const channelDefaultBoardId =
+    !isTrackView && channelBoards.isSynced && channelBoards.boards.length === 1
+      ? (channelBoards.boards[0]?.id ?? null)
+      : null;
+  const channelScopeBoardIds = channelId && !isTrackView ? channelBoards.boardIds : undefined;
   // Gates the "Link Boards" control only; the mutator enforces the same rule.
   const canLinkChannelBoards = useCanLinkChannelBoards(channelId);
   const [isLinkBoardsOpen, setIsLinkBoardsOpen] = useState(false);
@@ -945,8 +945,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
       setSearchParams,
     });
     // channelDefaultBoardId lands one render after mount (the mapping query has to
-    // sync), so INIT must re-fire when it arrives — otherwise a channel with no
-    // persisted board never gets one selected and the view stays empty.
+    // sync), so INIT must re-fire when it arrives.
   }, [
     send,
     filtersScopeId,
@@ -977,11 +976,12 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
   // Don't query until:
   // 1. Machine is initialized (filters loaded from URL/storage)
   // 2. For workspace views: seeding is complete AND a board is picked
-  // A channel view carries no projectId, so its only scope is the selected board.
-  // Querying before one is seeded would send an unscoped request that returns
-  // every ticket in the workspace, so hold until a board is in the filters.
   // A track is scoped by the track itself, so it needs no board to be ready.
-  const channelScopeReady = !channelId || isTrackView || (filters.boards?.length ?? 0) > 0;
+  const channelScopeReady =
+    !channelId ||
+    isTrackView ||
+    (filters.boards?.length ?? 0) > 0 ||
+    (channelScopeBoardIds?.length ?? 0) > 0;
   const workspaceViewReady =
     isMachineInitialized &&
     channelScopeReady &&
@@ -1876,10 +1876,12 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
       params.boardId = boardId;
     }
 
+    const queryBoards = filters.boards?.length ? filters.boards : channelScopeBoardIds;
+
     // If a board is selected via filter, use that (overrides URL boardId if present).
     // my-tickets can still scope by boardId, but it should never receive projectId.
-    if (filters.boards && filters.boards.length === 1 && filters.boards[0]) {
-      params.boardId = filters.boards[0];
+    if (queryBoards && queryBoards.length === 1 && queryBoards[0]) {
+      params.boardId = queryBoards[0];
     }
 
     // A workspace view has no projectId, so several selected boards can only be
@@ -1887,7 +1889,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
     // A channel view is in the same position now that it carries no projectId: a URL
     // with repeated ?board= params yields several boards and no other scope, so it
     // needs the same treatment. Project/board views still scope by projectId.
-    const selectedBoards = filters.boards;
+    const selectedBoards = queryBoards;
     if (
       (isWorkspaceView || !!channelId) &&
       !params.boardId &&
@@ -1934,6 +1936,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
     filteredSingleBoardId,
     fevFieldIds,
     filters.boards,
+    channelScopeBoardIds,
   ]);
 
   const [allProjectTickets, ticketsDetails] = useCachedQuery(
@@ -1943,8 +1946,8 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
         legacyTicketsEnabled &&
         !isTrackView &&
         ((viewMode === 'board' && !!boardId) ||
-          // A channel is also a 'project' view, but with no projectId — its scope is
-          // the selected board, so it gates on that being seeded instead.
+          // A channel is also a 'project' view, but with no projectId, so it gates on
+          // channelScopeReady instead.
           (viewMode === 'project' && (!!projectIdParam || (!!channelId && channelScopeReady))) ||
           // A workspace view has no channel or project to key on; `workspaceViewReady`
           // is the equivalent guard (at least one board picked), the same one the
@@ -2373,6 +2376,14 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
       currentBoards.every((b, i) => b === deferredBoards[i])
     );
   }, [filters.boards, deferredFilters.boards]);
+
+  const queryFilters = useMemo(
+    () =>
+      !deferredFilters.boards?.length && channelScopeBoardIds?.length
+        ? { ...deferredFilters, boards: channelScopeBoardIds }
+        : deferredFilters,
+    [deferredFilters, channelScopeBoardIds],
+  );
 
   const filteredTickets = useMemo(() => {
     if (!legacyTicketsEnabled || !allProjectTickets) {
@@ -3421,7 +3432,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
   const navBaseArgs = useMemo<KanbanTicketsPageBaseArgs>(
     () => ({
       ...ticketsQueryParams,
-      filters: deferredFilters,
+      filters: queryFilters,
       formEntityValueFieldIds: fevFieldIds,
       dynamicFieldVespaTokens,
       dynamicFieldDateRanges,
@@ -3431,7 +3442,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
     }),
     [
       ticketsQueryParams,
-      deferredFilters,
+      queryFilters,
       fevFieldIds,
       dynamicFieldVespaTokens,
       dynamicFieldDateRanges,
@@ -3454,7 +3465,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
       JSON.stringify({
         ticketsQueryParams,
         columnType: shouldUseStatusColumns ? 'status' : 'stage',
-        filters: deferredFilters,
+        filters: queryFilters,
         groupBy,
         showOverdueOnly,
         dynamicFieldVespaTokens,
@@ -3463,7 +3474,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
         formEntityValueFieldIds: fevFieldIds,
       }),
     [
-      deferredFilters,
+      queryFilters,
       dynamicFieldVespaTokens,
       dynamicFieldDateRanges,
       zeroOnlyDynamicFieldIds,
@@ -3929,7 +3940,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
     ...ticketsQueryParams,
     track: isTrackView && trackId && channelId ? { channelId, trackId } : undefined,
     columnType: shouldUseStatusColumns ? 'status' : 'stage',
-    filters: deferredFilters,
+    filters: queryFilters,
     groupBy,
     showOverdueOnly,
     ...(user?.id ? { currentUserId: user.id } : {}),
@@ -4368,10 +4379,15 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
   const handleResetColumns = useCallback((): void => {
     setVisibleColumns(new Set(DEFAULT_VISIBLE_COLUMNS));
   }, []);
+  const reportProjectId =
+    scopedProjectId ??
+    (channelId && !isTrackView && sourceChannelProjectIds.length === 1
+      ? (sourceChannelProjectIds[0] ?? null)
+      : null);
   const handleOpenTicketReport = useCallback((): void => {
-    // scopedProjectId, not projectIdParam: a channel has no project of its own
+    // reportProjectId, not projectIdParam: a channel has no project of its own
     // any more, so the report's project comes from the board currently in view.
-    if (channelId && scopedProjectId) {
+    if (channelId && reportProjectId) {
       setSearchParams(previous => {
         const next = new URLSearchParams(previous);
         next.set('ticketReport', '1');
@@ -4380,14 +4396,14 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
       return;
     }
     const params = new URLSearchParams();
-    if (scopedProjectId) {
-      params.set('projectId', scopedProjectId);
+    if (reportProjectId) {
+      params.set('projectId', reportProjectId);
       params.set('lockProject', '1');
     }
     if (boardId) params.set('boardId', boardId);
     const prefix = user?.workspaceId ? `/${user.workspaceId}` : '';
     void navigate(`${prefix}/ticket-reports${params.size ? `?${params.toString()}` : ''}`);
-  }, [channelId, scopedProjectId, boardId, user?.workspaceId, navigate, setSearchParams]);
+  }, [channelId, reportProjectId, boardId, user?.workspaceId, navigate, setSearchParams]);
   const headerSavedFilters = useHeaderSavedFilters({
     savedConfigs,
     savedViewsBoardId,
@@ -4411,9 +4427,6 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
       availableBoards,
       availableBoardDetails,
       sourceChannelProjectIds,
-      // A channel always has exactly one board selected; "All boards" would clear
-      // the filter and leave the query with no scope. A track is its own scope.
-      allowAllBoards: !channelId || isTrackView,
       alwaysOfferAllBoards: isTrackView,
       availableTags,
       onLoadMoreTags: handleLoadMoreTags,
@@ -4464,7 +4477,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
   const ticketScreenState: TicketScreenState = {
     viewName: headerTitle,
     viewMode,
-    filters,
+    filters: queryFilters,
     projectId: projectIdParam,
     routeBoardId: boardId,
     userId: user?.id,
@@ -4505,13 +4518,13 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
     return <ChannelNoBoardsEmptyState channelId={channelId} />;
   }
 
-  // scopedProjectId, not projectIdParam: a channel no longer carries a project
+  // reportProjectId, not projectIdParam: a channel no longer carries a project
   // of its own, so the report's locked project comes from the board in view.
-  if (showTicketReport && channelId && scopedProjectId) {
+  if (showTicketReport && channelId && reportProjectId) {
     return (
       <TicketReportsScreen
         embedded
-        lockedProjectId={scopedProjectId}
+        lockedProjectId={reportProjectId}
         sourceChannelId={channelId}
         onClose={() => {
           setSearchParams(
@@ -4588,7 +4601,9 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
         onClearFilters={handleHeaderClearFilters}
         viewSave={headerViewSave}
         onExport={layoutView === 'table' && !isTrackView ? handleTicketExport : null}
-        onOpenTicketReport={canExportTickets ? handleOpenTicketReport : null}
+        onOpenTicketReport={
+          canExportTickets && !(channelId && !reportProjectId) ? handleOpenTicketReport : null
+        }
       />
 
       {/* Board-wise View for my-tickets, channel stage view, or multiple boards filter */}
@@ -5378,7 +5393,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
                   <TableGroupSection
                     args={{
                       ...ticketsQueryParams,
-                      filters: deferredFilters,
+                      filters: queryFilters,
                       formEntityValueFieldIds: fevFieldIds,
                       dynamicFieldVespaTokens,
                       dynamicFieldDateRanges,
@@ -5453,7 +5468,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
                       columnType: shouldUseStatusColumns ? ('status' as const) : ('stage' as const),
                       baseArgs: {
                         ...ticketsQueryParams,
-                        filters: deferredFilters,
+                        filters: queryFilters,
                         formEntityValueFieldIds: fevFieldIds,
                         dynamicFieldVespaTokens,
                         dynamicFieldDateRanges,
