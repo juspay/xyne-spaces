@@ -99,9 +99,18 @@ export async function deliverXyneAiFlow(
   target: XyneAiCardTarget,
 ): Promise<FlowDefinition> {
   const stamped = withXyneAiCardData(flow, target);
-  await chatMessageRepository.appendUiFlow(target.chatMessageId, stamped).catch((err: unknown) => {
-    log.warn(`[xyne-ai] persist failed for ${stamped.screenId}: ${errMsg(err)}`);
-  });
+  const persisted = await chatMessageRepository.appendUiFlow(target.chatMessageId, stamped).then(
+    () => true,
+    (err: unknown) => {
+      log.warn(`[xyne-ai] persist failed for ${stamped.screenId}: ${errMsg(err)}`);
+      return false;
+    },
+  );
+  // The success counterpart to the warns above — without it a delivered card
+  // leaves no trace, so "N cards painted on /ai" cannot be counted.
+  if (persisted) {
+    log.info(`[xyne-ai] card delivered screen=${stamped.screenId} conv=${target.conversationId} agent=${target.agentSlug}`);
+  }
   if (CONFIG.liveToolCallsEnabled && target.userId) {
     publishLiveEvent(target.conversationId, {
       type: "ui-flow",
