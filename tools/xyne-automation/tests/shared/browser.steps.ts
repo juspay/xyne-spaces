@@ -77,9 +77,20 @@ async function addItemViaCustomizeToolbar(page: Page, itemId: string): Promise<v
   const customizeTrigger = page.locator("[data-testid='more-customize-toolbar']").first();
   await customizeTrigger.waitFor({ state: 'visible', timeout: SIDEBAR_NAVIGATION_TIMEOUT_MS });
   await customizeTrigger.click();
-  const addRow = page.locator(`[data-testid='customize-add-${itemId}']`).first();
+  // Preferences opens via a custom event + lazy section mount; wait for the
+  // dialog shell before poking at anything inside it.
   const closeButton = page.locator("button[aria-label='Close preferences']").first();
+  await closeButton.waitFor({ state: 'visible', timeout: SIDEBAR_NAVIGATION_TIMEOUT_MS });
+  const addRow = page.locator(`[data-testid='customize-add-${itemId}']`).first();
   try {
+    // The "Available" list in BarCustomizer is long (NAVIGATION_ITEMS has 30+
+    // entries) and lives inside the dialog's own scroll container, so items
+    // like Context / Scheduled Messages / User Groups sit below the fold.
+    // waitFor({state:'attached'}) + scrollIntoViewIfNeeded brings it on screen
+    // before the visibility check — otherwise visible-wait can race with the
+    // dialog's internal layout and the click target is never reached.
+    await addRow.waitFor({ state: 'attached', timeout: SIDEBAR_NAVIGATION_TIMEOUT_MS });
+    await addRow.scrollIntoViewIfNeeded().catch(() => {});
     await addRow.waitFor({ state: 'visible', timeout: SIDEBAR_NAVIGATION_TIMEOUT_MS });
   } catch (err) {
     await closeButton.click({ timeout: 2000 }).catch(() => page.keyboard.press('Escape'));
@@ -291,7 +302,22 @@ export default class BrowserSteps {
 
     // Item is not in the toolbar — open the "More" overflow menu and click it there.
     await moreTrigger.click();
+    // The More popover opens asynchronously (Radix animation + lazy render under
+    // CI load). Wait for the popover to actually be rendered before deciding
+    // whether `moreItem` is present — a bare isVisible() right after click races
+    // with the popover mount and will say "not visible" even when the item is
+    // about to appear, which pushes us into `addItemViaCustomizeToolbar` for no
+    // reason and then that step hits its own 10s timeout.
+    const customizeInMore = page.locator("[data-testid='more-customize-toolbar']").first();
+    await customizeInMore.waitFor({ state: 'visible', timeout: SIDEBAR_NAVIGATION_TIMEOUT_MS });
     let moreItem = page.locator(`[data-testid='more-${itemId}']`).first();
+    // The More popover is max-h-[80vh] overflow-y-auto; items beyond the visible
+    // fold are attached but not "visible" for Playwright, which would make us
+    // detour into addItemViaCustomizeToolbar even though the item is in the
+    // overflow and just needs a scroll. Scroll it into view first.
+    if (await moreItem.count()) {
+      await moreItem.scrollIntoViewIfNeeded().catch(() => {});
+    }
     // Not in rail or More overflow — try to add it via Customize Toolbar.
     if (!(await moreItem.isVisible().catch(() => false))) {
       await addItemViaCustomizeToolbar(page, itemId);
@@ -305,6 +331,8 @@ export default class BrowserSteps {
       await moreTrigger.click();
       moreItem = page.locator(`[data-testid='more-${itemId}']`).first();
     }
+    await moreItem.waitFor({ state: 'attached' });
+    await moreItem.scrollIntoViewIfNeeded().catch(() => {});
     await moreItem.waitFor({ state: 'visible' });
     const expectedPath = await getSidebarDestinationPath(page, moreItem);
 
