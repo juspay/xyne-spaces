@@ -15,18 +15,40 @@ import Avatar from '../../../components/ui/Avatar/Avatar';
 import { CreateTicketModal } from '../../../components/Tickets/CreateTicketModal/CreateTicketModal';
 import { useCanManageRelease } from '../../../hooks/usePermissions';
 import { useScrollFade } from '../../../hooks/useScrollFade';
+import { useShortcut } from '../../../shortcuts';
+import { cn } from '../../../utils/classNames';
 import type { SdlcReleaseCardData, SdlcReleaseRepo, SdlcReleasesProps } from './SdlcReleases.types';
 import { TRACK_CATEGORY } from './SdlcReleases.utils';
 import { useSdlcReleaseRepos, useSdlcReleases } from './useSdlcReleases';
 import { SdlcReleaseConfigDialog } from './SdlcReleaseConfigDialog';
 import { SdlcReleaseDetail } from './SdlcReleaseDetail';
-import { EllipsisText, MenuItem, RepoPill, SearchInput, StatusPill } from './SdlcReleasePrimitives';
+import { EllipsisText, MenuItem, RepoPill, SearchInput, StagePill } from './SdlcReleasePrimitives';
 
 const ALL_REPOS = 'all';
+
 const CARD_ESTIMATE = 86;
 const CARD_GAP = 11;
 const LIST_FADE_PX = 48;
 const LOAD_MORE_THRESHOLD = 3;
+
+// The registry already skips editable targets; these guards cover the rest.
+// j/k must not fight an open overlay; Enter must never double-fire on a
+// focused control (the control's own activation wins).
+const isInsideOverlay = (): boolean => {
+  const el = document.activeElement;
+  return (
+    el instanceof HTMLElement &&
+    !!el.closest(
+      '[role="dialog"],[role="menu"],[role="listbox"],[data-radix-popper-content-wrapper]',
+    )
+  );
+};
+const isActivatableFocused = (): boolean => {
+  const el = document.activeElement;
+  if (!(el instanceof HTMLElement) || el === document.body) return false;
+  const tag = el.tagName;
+  return tag === 'BUTTON' || tag === 'A' || el.getAttribute('role') === 'button';
+};
 
 export function SdlcReleases({
   projectId,
@@ -147,10 +169,69 @@ function ReleaseList({
     count: releases.length + (hasMore || loadingMore ? 1 : 0),
     getScrollElement: () => scroller,
     estimateSize: () => CARD_ESTIMATE,
+    // Cache measured heights per release, not per position — releases shift as new ones land.
+    getItemKey: useCallback((index: number) => releases[index]?.id ?? 'loading', [releases]),
     gap: CARD_GAP,
     overscan: 6,
   });
   const lastVisibleIndex = virtualizer.range?.endIndex ?? -1;
+  const [highlightedIndex, setHighlightedIndex] = useState<number | null>(null);
+  const releaseCount = releases.length;
+  const activeIndex =
+    highlightedIndex !== null && highlightedIndex < releaseCount ? highlightedIndex : null;
+
+  const moveBy = useCallback(
+    (delta: number) => {
+      setHighlightedIndex(prev => {
+        const current = prev !== null && prev < releaseCount ? prev : null;
+        const next =
+          current === null
+            ? delta > 0
+              ? 0
+              : releaseCount - 1
+            : Math.max(0, Math.min(releaseCount - 1, current + delta));
+        virtualizer.scrollToIndex(next, { align: 'auto' });
+        return next;
+      });
+    },
+    [releaseCount, virtualizer],
+  );
+
+  useShortcut('j', () => moveBy(1), {
+    scope: 'global',
+    description: 'Next release in list',
+    category: 'Releases',
+    enabled: releaseCount > 0,
+    when: () => !isInsideOverlay(),
+  });
+  useShortcut('k', () => moveBy(-1), {
+    scope: 'global',
+    description: 'Previous release in list',
+    category: 'Releases',
+    enabled: releaseCount > 0,
+    when: () => !isInsideOverlay(),
+  });
+  useShortcut(
+    'enter',
+    () => {
+      const release = activeIndex === null ? undefined : releases[activeIndex];
+      if (release) onOpenRelease(release.id);
+    },
+    {
+      scope: 'global',
+      description: 'Open selected release',
+      category: 'Releases',
+      enabled: activeIndex !== null,
+      when: () => !isInsideOverlay() && !isActivatableFocused(),
+    },
+  );
+  useShortcut('escape', () => setHighlightedIndex(null), {
+    scope: 'global',
+    description: 'Clear release selection',
+    category: 'Releases',
+    enabled: activeIndex !== null,
+    when: () => !isInsideOverlay(),
+  });
 
   useEffect(() => {
     if (releases.length > 0 && lastVisibleIndex >= releases.length - LOAD_MORE_THRESHOLD) {
@@ -189,7 +270,10 @@ function ReleaseList({
           <RepoFilter
             repos={configuredRepos}
             value={filteredRepo?.id ?? ALL_REPOS}
-            onChange={setRepoFilter}
+            onChange={value => {
+              setRepoFilter(value);
+              setHighlightedIndex(null);
+            }}
             onConfigure={onConfigure}
           />
           <span className='flex-1' />
@@ -254,6 +338,7 @@ function ReleaseList({
                       <ReleaseCard
                         release={release}
                         showRepo={!filteredRepo}
+                        highlighted={activeIndex === item.index}
                         onOpen={() => onOpenRelease(release.id)}
                       />
                     ) : (
@@ -289,17 +374,22 @@ function ReleaseList({
 function ReleaseCard({
   release,
   showRepo,
+  highlighted,
   onOpen,
 }: {
   release: SdlcReleaseCardData;
   showRepo: boolean;
+  highlighted: boolean;
   onOpen: () => void;
 }): ReactElement {
   return (
     <button
       type='button'
       onClick={onOpen}
-      className='flex w-full gap-4 rounded-[10px] border border-border bg-background px-4 py-3.5 text-left transition-[border-color,box-shadow] hover:border-foreground/20 hover:shadow-sm'
+      className={cn(
+        'flex w-full gap-4 rounded-[10px] border border-border bg-background px-4 py-3.5 text-left transition-[border-color,box-shadow] hover:border-foreground/20 hover:shadow-sm',
+        highlighted && 'border-primary bg-primary/5 shadow-sm hover:border-primary',
+      )}
       data-track-category={TRACK_CATEGORY}
       data-track-name='ReleaseOpened'
     >
@@ -309,7 +399,7 @@ function ReleaseCard({
             text={release.title}
             className='min-w-0 text-base font-bold tracking-[-0.01em] text-foreground'
           />
-          <StatusPill label={release.status.label} className={release.status.className} />
+          <StagePill name={release.stage.name} status={release.stage.status} />
           {showRepo && <RepoPill name={release.repoName} />}
         </span>
         {release.summary && (

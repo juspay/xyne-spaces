@@ -7,7 +7,8 @@ import { TicketHoverCard } from './TicketHoverCard';
 import { PriorityPicker } from '../TicketListView/PriorityPicker';
 import { UserSelector } from '../CreateTicketModal/UserSelector';
 import { useTicketAssignee, resolveAssigneeRef } from '../../../hooks/useTicketAssignee';
-import { StatusPicker, DueDatePicker, LabelPicker } from './TicketListRowPickers';
+import { StagePicker } from '../TicketListView/StagePicker';
+import { DueDatePicker, LabelPicker } from './TicketListRowPickers';
 
 export type SubTicketProgress = { done: number; total: number };
 
@@ -22,6 +23,8 @@ type TicketListRowProps = {
   /** Board the ticket belongs to — shown as the row's capsule with a hover preview. */
   boardName?: string | undefined;
   isComfortView?: boolean;
+  /** Screen-specific pills (e.g. a release's QA owner), shown before the assignee. */
+  extras?: React.ReactNode;
   onOpen: (ticket: Ticket) => void;
 };
 
@@ -56,6 +59,7 @@ export const TicketListRow: React.FC<TicketListRowProps> = ({
   subProgress,
   boardName,
   isComfortView = false,
+  extras,
   onOpen,
 }) => {
   const createdShort = shortDate(ticket.createdAt);
@@ -130,7 +134,14 @@ export const TicketListRow: React.FC<TicketListRowProps> = ({
 
       {visibleColumns.has('status') && (
         <span className='flex w-5 flex-shrink-0 items-center justify-center'>
-          <StatusPicker ticketId={ticket.id} statusV2={ticket.statusV2 as string} />
+          <StagePicker
+            ticketId={ticket.id}
+            stageName={ticket.stageName}
+            stageLabel={ticket.stageName || '—'}
+            statusV2={ticket.statusV2}
+            boardId={ticket.boardId}
+            iconOnly
+          />
         </span>
       )}
 
@@ -211,6 +222,8 @@ export const TicketListRow: React.FC<TicketListRowProps> = ({
           />
         )}
 
+        {extras}
+
         {visibleColumns.has('assignee') && (
           <UserSelector
             selectedUserId={assignee.userId}
@@ -223,7 +236,9 @@ export const TicketListRow: React.FC<TicketListRowProps> = ({
 
         {createdShort && (
           <Tooltip content={`Created ${fullTimestamp(ticket.createdAt)}`}>
-            <span className='text-xs text-muted-foreground'>{createdShort}</span>
+            <span className='min-w-[7ch] whitespace-nowrap text-xs tabular-nums text-muted-foreground'>
+              {createdShort}
+            </span>
           </Tooltip>
         )}
       </span>
