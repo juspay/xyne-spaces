@@ -79,6 +79,12 @@ export type ChatListProps = {
    * target like a fresh deep link instead of jumping into freshly fetched rows.
    */
   onLinkedTargetNotLoaded?: () => void;
+  /**
+   * True while the host remounts this list for onLinkedTargetNotLoaded. That
+   * unmount/mount isn't the user leaving or opening the channel, so neither marks
+   * it as read nor consumes the skip-mark-as-read flags.
+   */
+  isReopeningForLinkedTargetRef?: React.RefObject<boolean>;
 };
 
 type Anchor = {
@@ -107,11 +113,24 @@ function isDeepLinkTargetOrNewer(conversation: Conversation, target: DeepLinkTar
   );
 }
 
-function dedupeAndSort(a: Conversation[], b: Conversation[]): Conversation[] {
+/**
+ * `lastAmongTiesId` sorts that conversation after any rows sharing its createdAt, so
+ * ties loaded above a deep-link target insert above it rather than below (a row
+ * landing below it would make the end-anchor push the target up).
+ */
+function dedupeAndSort(
+  a: Conversation[],
+  b: Conversation[],
+  lastAmongTiesId?: string,
+): Conversation[] {
   const map = new Map<string, Conversation>();
   for (const c of a) map.set(c.conversationId, c);
   for (const c of b) map.set(c.conversationId, c);
-  return Array.from(map.values()).sort((x, y) => x.createdAt - y.createdAt);
+  return Array.from(map.values()).sort(
+    (x, y) =>
+      x.createdAt - y.createdAt ||
+      (x.conversationId === lastAmongTiesId ? 1 : y.conversationId === lastAmongTiesId ? -1 : 0),
+  );
 }
 
 function mergeWithCached(
@@ -262,6 +281,7 @@ const ChatListV4: React.FC<ChatListProps> = ({
   loadingFallback,
   onTotalHeightChange,
   onLinkedTargetNotLoaded,
+  isReopeningForLinkedTargetRef,
 }) => {
   // Set where these conversations are shown as discussions (the SDLC panel).
   const discussionList = useContext(DiscussionListContext);
@@ -328,18 +348,26 @@ const ChatListV4: React.FC<ChatListProps> = ({
     () =>
       !!linkedConversationId &&
       !!linkedItemCreatedAt &&
-      !linkedCutoffCreatedAt &&
       !unreadsOnly &&
       !discussionScope &&
       (!conversationIdsFilter || conversationIdsFilter.includes(linkedConversationId)),
   );
   // The linked conversation, or null when this list didn't open from a deep link.
-  const [deepLinkTarget] = useState<DeepLinkTarget | null>(() =>
-    openedFromDeepLink && linkedConversationId && linkedItemCreatedAt
-      ? { conversationId: linkedConversationId, createdAt: linkedItemCreatedAt.createdAt }
-      : null,
-  );
+  // Its createdAt must be the conversation's own: linkedItemCreatedAt can be a reply's
+  // time (copied thread-reply links, slash-command banners), and using that as the
+  // boundary skips every conversation started between the root and the reply. So it
+  // comes from the cached row, else from the row fetched by id in the initial load;
+  // linkedItemCreatedAt is only the fallback when the target can't be read.
+  const deepLinkTargetRef = useRef<DeepLinkTarget | null>(null);
+  if (deepLinkTargetRef.current === null && openedFromDeepLink && linkedConversationId) {
+    const cachedTarget = cachedConversations.find(c => c.conversationId === linkedConversationId);
+    const createdAt = cachedTarget?.createdAt ?? linkedItemCreatedAt?.createdAt;
+    if (createdAt !== undefined) {
+      deepLinkTargetRef.current = { conversationId: linkedConversationId, createdAt };
+    }
+  }
   const [initialConversations] = useState<Conversation[]>(() => {
+    const deepLinkTarget = deepLinkTargetRef.current;
     // Normal opening: start from the cached rows as they are.
     if (!deepLinkTarget) return cachedConversations;
 
@@ -367,14 +395,12 @@ const ChatListV4: React.FC<ChatListProps> = ({
   // (cache, newer fetch, the real-time "latest" tail — which can contain rows older
   // than a target near the end of the channel) drops rows before it. Returns the
   // same array when nothing is dropped, so an unchanged list doesn't re-render.
-  const dropRowsBeforeDeepLinkTarget = useCallback(
-    (list: Conversation[]): Conversation[] => {
-      if (!deepLinkTarget || !isDeepLinkLandingRef.current) return list;
-      const kept = list.filter(c => isDeepLinkTargetOrNewer(c, deepLinkTarget));
-      return kept.length === list.length ? list : kept;
-    },
-    [deepLinkTarget],
-  );
+  const dropRowsBeforeDeepLinkTarget = useCallback((list: Conversation[]): Conversation[] => {
+    const deepLinkTarget = deepLinkTargetRef.current;
+    if (!deepLinkTarget || !isDeepLinkLandingRef.current) return list;
+    const kept = list.filter(c => isDeepLinkTargetOrNewer(c, deepLinkTarget));
+    return kept.length === list.length ? list : kept;
+  }, []);
   const setConversationsState = useCallback(
     (next: Conversation[] | ((prev: Conversation[]) => Conversation[])): void => {
       if (typeof next !== 'function') {
@@ -684,7 +710,7 @@ const ChatListV4: React.FC<ChatListProps> = ({
       return;
     }
 
-    Promise.all([
+    const loadOlder = (): Promise<Conversation[]> =>
       !unreadsOnly
         ? zero.run(
             queries.channelConversationsPaginatedV3({
@@ -702,23 +728,43 @@ const ChatListV4: React.FC<ChatListProps> = ({
             }),
             { type: 'complete' },
           )
-        : Promise.resolve([]),
-      newConversationsAnchor &&
-        zero.run(
-          queries.channelConversationsPaginatedV3({
-            channelId,
-            isMember,
-            ...(discussionScope && { discussionScope }),
-            start: newConversationsAnchor,
-            direction: 'backward',
-            limit: openedFromDeepLink ? PAGE_SIZE : PAGE_SIZE / 2,
-          }),
-          { type: 'complete' },
-        ),
-    ])
+        : Promise.resolve([]);
+    const loadNewer = (start: Anchor | null): Promise<Conversation[]> | null =>
+      start &&
+      zero.run(
+        queries.channelConversationsPaginatedV3({
+          channelId,
+          isMember,
+          ...(discussionScope && { discussionScope }),
+          start,
+          direction: 'backward',
+          limit: openedFromDeepLink ? PAGE_SIZE : PAGE_SIZE / 2,
+        }),
+        { type: 'complete' },
+      );
+    // Deep link at top: read the target first, then load newer rows from its own
+    // createdAt (see deepLinkTargetRef) — not from linkedItemCreatedAt.
+    const initialLoad: Promise<[Conversation[], Conversation[] | null]> = openedFromDeepLink
+      ? loadOlder().then(older => {
+          const target = older.find(c => c.conversationId === linkedConversationId);
+          if (target && deepLinkTargetRef.current) {
+            deepLinkTargetRef.current = {
+              ...deepLinkTargetRef.current,
+              createdAt: target.createdAt,
+            };
+          }
+          const newerStart = deepLinkTargetRef.current
+            ? { createdAt: deepLinkTargetRef.current.createdAt }
+            : newConversationsAnchor;
+          return Promise.all([Promise.resolve(older), loadNewer(newerStart)]);
+        })
+      : Promise.all([loadOlder(), loadNewer(newConversationsAnchor)]);
+
+    initialLoad
       .then(([older, newerNullable]) => {
         // Deep link at top: same rule as the cached rows — only rows strictly newer
         // than the target go below it; same-timestamp rows load with the older ones.
+        const deepLinkTarget = deepLinkTargetRef.current;
         const newer = (newerNullable ?? []).filter(
           c => !deepLinkTarget || isDeepLinkTargetOrNewer(c, deepLinkTarget),
         );
@@ -747,7 +793,14 @@ const ChatListV4: React.FC<ChatListProps> = ({
         setIsInitialLoadComplete(true);
         lifecycleRef.current.initialLoadComplete = true;
       })
-      .catch(() => {});
+      .catch(() => {
+        // Deep link load failed: release the hold and fall back to the full cache, as
+        // a normal opening would show — otherwise the list stays empty (or trimmed to
+        // the target) and older rows never load.
+        if (!isDeepLinkLandingRef.current) return;
+        isDeepLinkLandingRef.current = false;
+        setConversationsState(prev => dedupeAndSort(prev, cachedConversations));
+      });
   }, []);
 
   // ── Initial load (cutoff path) ────────────────────────────────────────────────
@@ -857,7 +910,7 @@ const ChatListV4: React.FC<ChatListProps> = ({
           // newItems=0 → items already loaded (cold cache) — no-op, retry on next scroll.
           if (newItems.length === 0) return prev;
 
-          const fetched = dedupeAndSort(older, prev);
+          const fetched = dedupeAndSort(older, prev, deepLinkTargetRef.current?.conversationId);
           const { merged, latestClear } = mergeWithLatest(
             fetched,
             latestConversationsListRef.current,
@@ -936,6 +989,13 @@ const ChatListV4: React.FC<ChatListProps> = ({
   useEffect(() => {
     if (!isInitialLoadComplete || !isDeepLinkLandingRef.current) return;
     isDeepLinkLandingRef.current = false;
+    // Start just past the target's createdAt so rows sharing it load too: a start
+    // cursor with no conversationId resolves to `createdAt < T`, which would skip
+    // them, and the newer fetch excluded them on purpose (see isDeepLinkTargetOrNewer).
+    const target = deepLinkTargetRef.current;
+    if (target && conversationsRef.current[0]?.conversationId === target.conversationId) {
+      oldConversationsAnchorRef.current = { createdAt: target.createdAt + 1 };
+    }
     fetchOlderMessages();
   }, [isInitialLoadComplete, fetchOlderMessages]);
 
@@ -1074,12 +1134,6 @@ const ChatListV4: React.FC<ChatListProps> = ({
     if (requestedFetchKeyRef.current === navigationKey) return;
     requestedFetchKeyRef.current = navigationKey;
 
-    if (linkedCutoffCreatedAt) {
-      setCutoffAnchor(prev =>
-        prev?.createdAt === linkedCutoffCreatedAt.createdAt ? prev : linkedCutoffCreatedAt,
-      );
-      return;
-    }
     // Ask the host to recreate the list so it opens at the target. Not when this list
     // was already created for this target (e.g. the target no longer exists) — that
     // would loop — and only where deep-link opening applies (see openedFromDeepLink).
@@ -1087,7 +1141,8 @@ const ChatListV4: React.FC<ChatListProps> = ({
       !unreadsOnly &&
       !discussionScope &&
       (!conversationIdsFilter || conversationIdsFilter.includes(linkedConversationId));
-    const listWasCreatedForTarget = deepLinkTarget?.conversationId === linkedConversationId;
+    const listWasCreatedForTarget =
+      deepLinkTargetRef.current?.conversationId === linkedConversationId;
     if (onLinkedTargetNotLoaded && canOpenAtTarget && !listWasCreatedForTarget) {
       onLinkedTargetNotLoaded();
       return;
@@ -1261,6 +1316,8 @@ const ChatListV4: React.FC<ChatListProps> = ({
     if (!channelId) return;
 
     return () => {
+      // Remounting for a linked target: not a real leave.
+      if (isReopeningForLinkedTargetRef?.current) return;
       if (skipMarkAsReadRef?.current || activitySkipMarkAsReadChannelRef.current) {
         skipMarkAsReadRef.current = false;
         activitySkipMarkAsReadChannelRef.current = false;
@@ -1283,15 +1340,23 @@ const ChatListV4: React.FC<ChatListProps> = ({
   // keeps showing unread for a channel the user is looking at. The divider and
   // unread scroll read lastViewedAtOnOpen, so moving lastViewedAt here is safe.
   const hasMarkedOnOpenRef = useRef(false);
+  // Created by a remount for a linked target: the channel was already marked when it
+  // first opened, and the user may have marked it unread since — don't mark it again.
+  const [reopenedForLinkedTarget] = useState(() => !!isReopeningForLinkedTargetRef?.current);
+  useEffect(() => {
+    if (isReopeningForLinkedTargetRef) isReopeningForLinkedTargetRef.current = false;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   useEffect(() => {
     if (!channelId || !isInitialLoadComplete || hasMarkedOnOpenRef.current) return;
+    if (reopenedForLinkedTarget) return;
     if (skipMarkAsReadRef?.current || activitySkipMarkAsReadChannelRef.current) return;
 
     hasMarkedOnOpenRef.current = true;
     // No draft args: the composer may not have loaded the draft yet, and sending
     // '' would delete it. The unmount call above still saves the draft on leave.
     void zero.mutate(mutators.channel.markChannelAsViewed({ channelId, timestamp: Date.now() }));
-  }, [channelId, isInitialLoadComplete, skipMarkAsReadRef, zero]);
+  }, [channelId, isInitialLoadComplete, reopenedForLinkedTarget, skipMarkAsReadRef, zero]);
 
   // ── Persist conversations to query cache ──────────────────────────────────────
   useEffect(() => {
