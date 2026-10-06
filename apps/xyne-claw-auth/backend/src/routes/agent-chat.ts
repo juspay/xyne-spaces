@@ -2643,6 +2643,7 @@ internalRouter.post("/:slug/chat/:convId/callback", async (req: Request<{ slug: 
   // user to "connect it with the card" and no card ever appeared.
   const callbackBody = req.body as {
     pendingConnectorSuggestions?: { serverTypes: string[]; listAll?: boolean; title?: string };
+    pendingProviderSuggestions?: { providers: string[]; listAll?: boolean; title?: string };
     blockedConnectors?: unknown;
   };
   if (finalStatus === "completed" && callbackBody.pendingConnectorSuggestions) {
@@ -2679,6 +2680,41 @@ internalRouter.post("/:slug/chat/:convId/callback", async (req: Request<{ slug: 
       }
     } catch (err) {
       log.warn(`[agent-chat] connector card delivery failed: ${errMsg(err)}`);
+    }
+  }
+
+  // AI provider card from the agent's suggest-providers call. Same transport
+  // gap as connectors above: this surface delivered no provider card at all.
+  if (finalStatus === "completed" && callbackBody.pendingProviderSuggestions) {
+    try {
+      const { resolveXyneAiCardTarget } = await import("../lib/flow-card-delivery.js");
+      const target = await resolveXyneAiCardTarget({
+        assistantMessageId: chatMessageId,
+        conversationId: req.params.convId,
+        agentSlug: req.params.slug,
+      });
+      const { renderProviderSuggestCard } = await import("../lib/connector-card-render.js");
+      if (target) {
+        const flow = await renderProviderSuggestCard({
+          suggestions: callbackBody.pendingProviderSuggestions,
+          id: {
+            agentSlug: target.agentSlug,
+            agentOrgId: target.orgId,
+            userId: target.userId,
+            conversationId: target.conversationId,
+            channelId: "",
+            spacesAppId: target.spacesAppId,
+          },
+          target,
+        });
+        if (flow && callbackId) {
+          const localStream = pendingStreams.get(callbackId);
+          if (localStream) localStream.sendEvent("ui-flow", { flow });
+          else publishChatEvent({ kind: "progress", callbackId, events: [{ event: "ui-flow", data: { flow } }] });
+        }
+      }
+    } catch (err) {
+      log.warn(`[agent-chat] provider card delivery failed: ${errMsg(err)}`);
     }
   }
 

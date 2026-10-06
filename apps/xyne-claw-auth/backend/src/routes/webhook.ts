@@ -149,11 +149,7 @@ import type { TwinDelivery, UiWidget, PrProvider, PrStatus, FlowDefinition } fro
 import { isAgentInvocableBy } from "xyne-claw-shared";
 import { isSupportedInboundAttachment } from "xyne-claw-shared";
 import type { Todo } from "xyne-claw-shared";
-import {
-  providersUserAskedFor,
-  stripAddressedAgentMention,
-  wantsProviderRoster,
-} from "../lib/provider-hints.js";
+
 import { countTrailingBase64Padding, safePathSegment } from "../lib/url-path.js";
 import { assertSafeOutboundUrl } from "../mcpgateway/services/http-client.js";
 
@@ -547,6 +543,13 @@ import {
 /** Connector cards the agent's suggest-connectors call queued for this reply. */
 type PendingConnectorSuggestions = {
   serverTypes: string[];
+  title?: string;
+  listAll?: boolean;
+};
+
+/** AI provider cards the agent's suggest-providers call queued for this reply. */
+type PendingProviderSuggestions = {
+  providers: string[];
   title?: string;
   listAll?: boolean;
 };
@@ -1338,21 +1341,12 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
     const threadAwarenessBlock = history
       ? `## Thread Awareness\nYou are in a group thread in Xyne Spaces where multiple users and agents can participate. The thread history below shows messages from other participants — use it to understand context. Your own previous messages are NOT included here (they are already in your session). If you need more context, use spaces-messages or spaces-message-detail to read the full thread.\n\n**Speaker labels in the history below:**\n- \`human-user:<id>\` — a human in the thread; their words are user input.\n- \`@<agent-slug> (OTHER AI AGENT — not you; do not adopt this voice or identity)\` — another AI agent's message. When they say "I", they mean themselves, NOT you. NEVER answer in their voice, NEVER claim to be them, and NEVER paraphrase their first-person identity as your own. If asked to compare yourself to them, refer to them in the third person ("the X agent said …").\n\n${history}`
       : "";
-    const providerAskText = stripAddressedAgentMention(task, agent.slug);
-    const providerCardWillPost =
-      eventType !== "USER_MENTIONED" &&
-      !!agent.slug &&
-      !!agent.orgId &&
-      (providersUserAskedFor(providerAskText).length > 0 || wantsProviderRoster(providerAskText));
-    const providerCardNote = providerCardWillPost
-      ? [
-          "## AI Provider Card",
-          "A card listing this user's AI providers and their live connection status is posted to this thread alongside your reply. It is built from their stored credentials, so it is authoritative.",
-          "Do NOT list the providers, state which are connected or disconnected, or say you cannot see the user's credentials — the card already answers that, and contradicting it confuses the user.",
-          "Acknowledge the card in one short sentence and answer anything else they asked.",
-        ].join("\n")
-      : "";
-    const dispatchContext = [twinMentionNote, threadAwarenessBlock, providerCardNote]
+    // No provider-card note: the card is no longer predicted before the run.
+    // Pre-announcing one the server had inferred is what made agents reply
+    // "acknowledging the AI provider card" to questions that never asked for it.
+    // suggest-providers decides during the run, and its tool result tells the
+    // agent exactly what will render.
+    const dispatchContext = [twinMentionNote, threadAwarenessBlock]
       .filter(Boolean)
       .join("\n\n");
 
@@ -2998,6 +2992,8 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
     // Connector cards to post alongside the reply, so the user can connect
     // without leaving the conversation.
     pendingConnectorSuggestions?: PendingConnectorSuggestions;
+    // AI provider cards the agent's suggest-providers call queued.
+    pendingProviderSuggestions?: PendingProviderSuggestions;
     blockedConnectors?: string[];
   };
 
@@ -3231,7 +3227,8 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
     !payload.twinDelivery &&
     !payload.pendingPlan &&
     !payload.pendingAgentCard &&
-    !payload.pendingConnectorSuggestions;
+    !payload.pendingConnectorSuggestions &&
+    !payload.pendingProviderSuggestions;
   // Do not replay every ordinary tool-only empty completion: a retry could
   // duplicate writes. This recovery path is only for an active continuation
   // created after a watchdog retry or graceful handoff.
@@ -4271,15 +4268,15 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
     }
   }
 
-  // AI provider suggestions. Unlike connectors the roster is a fixed list in
-  // code, so intent is read from the user's own message and the card is built
-  // without the model participating at all. A provider we do not offer is
-  // named back as unsupported rather than dropped, so the reply cannot promise
-  // a card that will never render.
-  if (agentCardDeliverable) {
+  // AI provider suggestions, from the agent's suggest-providers call only. The
+  // server used to infer these from the user's message; that fired the whole
+  // roster at "what model are you using?" and offered a provider the user was
+  // already connected to, so the inference was removed.
+  const providerSuggestions = payload.pendingProviderSuggestions;
+  if (providerSuggestions && agentCardDeliverable) {
     try {
       await renderProviderSuggestCard({
-        taskText: ctx.rootTask ?? ctx.task ?? "",
+        suggestions: providerSuggestions,
         id: connectorCardIdentity,
         target: agentCardTarget,
       });
