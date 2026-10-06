@@ -43,7 +43,7 @@ import { toResolvedAgent, type ResolvedAgent } from "../lib/resolved-agent.js";
 import { stripLeadingAgentMention } from "../lib/strip-agent-mention.js";
 import { resolveUserSpacesAuth } from "../surfaces/spaces/user-auth.js";
 import { IMMEDIATE_TASK_COMMAND_RE, RECORD_SKILL_COMMAND_RE, isVideoAttachment, videoFileExtension, SDLC_AGENT_SLUG } from "xyne-claw-shared";
-import { resolveAgentProviderConfigs } from "../lib/agent-provider-config.js";
+import { resolveAgentProviderConfigs, resolveUserLitellmApiKey, resolveOrgLitellmApiKey } from "../lib/agent-provider-config.js";
 import { resolveProvidersForDispatch } from "../lib/provider-resolution.js";
 import { dispatchLocalHarnessRun, pinnedModelForProvider, resolveLocalHarnessTarget } from "../lib/local-harness.js";
 import { expandSpacesMentions, resolveUnboundMentions } from "../lib/mention-transform.js";
@@ -1524,6 +1524,8 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
     // Twin runs carry the mentioned user's resolved workspace; it wins over the sender's.
     const effectiveWorkspaceId = twinWorkspaceId || userSpacesWorkspaceId;
 
+    const interactiveLitellmApiKey = await resolveUserLitellmApiKey(targetUserId).catch(() => undefined);
+
     const inboundAttachments: Array<{
       fileName: string;
       mimeType: string;
@@ -1767,6 +1769,7 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
       fastMode: fastModeEnabled,
       ...(compactBeforeRun ? { compactBeforeRun: true } : {}),
       ...planModeSpread,
+      ...(interactiveLitellmApiKey ? { litellmApiKey: interactiveLitellmApiKey } : {}),
     };
 
     const rootAttachmentRefs = toRootAttachmentRefs(payload.attachments);
@@ -2317,6 +2320,7 @@ async function redispatchQueuedMessage(msg: QueuedMessage): Promise<void> {
   const appBotUserId = appCreds.spacesAppUserId ?? "";
   const traceId = createTraceId();
   const fastModeEnabled = await resolveFastMode(msg.conversationId, msg.agentSlug, agentRow.config);
+  const queuedLitellmApiKey = await resolveUserLitellmApiKey(msg.userId).catch(() => undefined);
   const res = await fetch(runUrl, {
     method: "POST",
     headers: {
@@ -2348,6 +2352,7 @@ async function redispatchQueuedMessage(msg: QueuedMessage): Promise<void> {
       // persist normally on drain.
       ...(msg.alreadyPersisted ? { __skipUserMessagePersist: true } : {}),
       fastMode: fastModeEnabled,
+      ...(queuedLitellmApiKey ? { litellmApiKey: queuedLitellmApiKey } : {}),
     }),
   });
   if (!res.ok) {
@@ -2865,6 +2870,10 @@ export async function handleAutomationWebhook(
     `[webhook] AUTODBG ${sessionId}: provider configs resolved in ${__provMs}ms (configs=${Object.keys(providerConfigs).length}, order=${providerOrder.length}) — forwarding to ${CONFIG.internalUrl}/claw/api/v1/internal/run`,
   );
 
+  // Resolve the org's provisioned LiteLLM key for this automation run so it
+  // bills against the right org key rather than the platform default.
+  const automationOrgLitellmApiKey = await resolveOrgLitellmApiKey(automationOrgId).catch(() => undefined);
+
   let runRes: Response | undefined;
   try {
     runRes = (await fetch(`${CONFIG.internalUrl}/claw/api/v1/internal/run`, {
@@ -2898,6 +2907,7 @@ export async function handleAutomationWebhook(
         ...(providerParent ? { provider: providerParent } : {}),
         ...(Object.keys(providerConfigs).length > 0 ? { providerConfigs } : {}),
         ...(providerOrder.length > 1 ? { providerOrder } : {}),
+        ...(automationOrgLitellmApiKey ? { litellmApiKey: automationOrgLitellmApiKey } : {}),
         ...(context ? { context } : {}),
         ...(payload.conversationId ? { conversationId: payload.conversationId } : {}),
         ...(payload.channelId ? { channelId: payload.channelId } : {}),
@@ -2979,6 +2989,7 @@ export async function handleAutomationWebhook(
       // Primary provider must survive a recovery replay too — without it the
       // retried run silently downgrades to the platform default.
       ...(providerParent ? { provider: providerParent } : {}),
+      ...(automationOrgLitellmApiKey ? { litellmApiKey: automationOrgLitellmApiKey } : {}),
       ...(context ? { context } : {}),
     };
     // Bot token+user for the automation's workspace (inline columns = latest).
@@ -4034,6 +4045,7 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
           const failureTask = `The agent "${ctx.agentSlug}" failed with error: ${payload.error ?? "unknown"}. Original task was: ${ctx.task}. Please investigate and resolve.`;
           const failureAgentRow = await agentRepository.findBySlug(chain.onFailure.triggerAgent, ctx.agentOrgId);
           const failureOrgId = failureAgentRow?.orgId ?? ctx.agentOrgId;
+          const failureLitellmApiKey = await resolveOrgLitellmApiKey(failureOrgId).catch(() => undefined);
           const runRes = await fetch(runUrl, {
             method: "POST",
             headers: {
@@ -4048,6 +4060,7 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
               channelId: ctx.channelId,
               callbackUrl: `${CONFIG.internalUrl}/claw/api/v1/webhook/result`,
               progressUrl: `${CONFIG.internalUrl}/claw/api/v1/webhook/progress`,
+              ...(failureLitellmApiKey ? { litellmApiKey: failureLitellmApiKey } : {}),
             }),
           });
           if (!runRes.ok) { clog.error(`[webhook/result] Failure chain trigger HTTP ${runRes.status}`); return; }
@@ -4559,6 +4572,7 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
           ctx.agentSlug ?? "",
           undefined,
         ).catch(() => false);
+        const planTurn2LitellmApiKey = await resolveUserLitellmApiKey(planRunOwnerId).catch(() => undefined);
         const dispatchPayload: Record<string, unknown> = {
           userId: planRunOwnerId,
           task,
@@ -4574,6 +4588,7 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
           mode: "auto",
           planContinuation: true,
           fastMode: fastModeEnabled,
+          ...(planTurn2LitellmApiKey ? { litellmApiKey: planTurn2LitellmApiKey } : {}),
         };
         // Deterministic plan facts for Turn 2's live render, written BEFORE
         // dispatch so the very first todo-write sees them: trivial ⇒ auto-approved
@@ -5249,6 +5264,7 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
             previousOutput: resultText,
           });
           const forwardedAttachments = mergeHandoffAttachments(rootFiles.attachments, payload.attachments ?? []);
+          const handoffLitellmApiKey = await resolveOrgLitellmApiKey(targetAgentRow.orgId).catch(() => undefined);
 
           const runRes = await fetch(`${CONFIG.internalUrl}/claw/api/v1/internal/run`, {
             method: "POST",
@@ -5268,6 +5284,7 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
               ...(forwardedAttachments.length > 0 ? { attachments: forwardedAttachments } : {}),
               callbackUrl: `${CONFIG.internalUrl}/claw/api/v1/webhook/result`,
               progressUrl: `${CONFIG.internalUrl}/claw/api/v1/webhook/progress`,
+              ...(handoffLitellmApiKey ? { litellmApiKey: handoffLitellmApiKey } : {}),
             }),
           });
 

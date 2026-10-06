@@ -26,7 +26,7 @@ import {
 import { gcsService } from "../services/storageService.js";
 import { maybeGenerateConversationTitle } from "../services/chatTitleClient.js";
 import { appendCitations, hydrateInvocationIcons } from "../lib/citations.js";
-import { resolveAgentProviderConfigs, agentDefaultSpeed, parseFastModeProfile } from "../lib/agent-provider-config.js";
+import { resolveAgentProviderConfigs, agentDefaultSpeed, parseFastModeProfile, resolveUserLitellmApiKey } from "../lib/agent-provider-config.js";
 import { resolveFastMode } from "../lib/fast-mode.js";
 import { resolveSdlcHubContextForUser, resolveSdlcRepositoryForUser } from "../lib/sdlc-repository-context.js";
 import {
@@ -1370,6 +1370,8 @@ publicRouter.post("/", requireAuth, requireNoAccessToken, async (req: Request, r
       enrichedAgentConfig,
     );
 
+    const streamLitellmApiKey = await resolveUserLitellmApiKey(userId).catch(() => undefined);
+
     const runRequestBody: Record<string, unknown> = {
       // Pre-minted and already persisted as an AgentRun row above. prepareRun
       // honours a caller-supplied sessionId on internal runs, so the row, the
@@ -1419,6 +1421,7 @@ publicRouter.post("/", requireAuth, requireNoAccessToken, async (req: Request, r
       ...(generateFollowUpSuggestions === true ? { generateFollowUpSuggestions: true } : {}),
       __persistedByCaller: true,
       fastMode: fastModeEnabled,
+      ...(streamLitellmApiKey ? { litellmApiKey: streamLitellmApiKey } : {}),
     };
 
     try {

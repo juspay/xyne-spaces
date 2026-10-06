@@ -69,6 +69,7 @@ import { retryNowByToken, cancelProviderRetry } from "../queue/provider-retry-wo
 import { resolveClawUserIdForSpacesIdentity } from "../lib/users-jit.js";
 import { resolveSpacesAppCreds } from "../lib/spaces-agent-install.js";
 import { getWorkspaceIdForUser } from "../lib/spaces-db.js";
+import { resolveUserLitellmApiKey } from "../lib/agent-provider-config.js";
 
 import { createLogger } from "../logger.js";
 const log = createLogger("flow-action");
@@ -478,6 +479,7 @@ async function dispatchContinuationRun(opts: {
       ? decrypt(...(contCreds.spacesAppToken.split(":") as [string, string, string]), CONFIG.encryptionKey)
       : "";
     const trimmed = trimForPrompt(opts.resultText);
+    const continuationLitellmApiKey = await resolveUserLitellmApiKey(writeUserId).catch(() => undefined);
     const runRes = await fetch(`${CONFIG.internalUrl}/claw/api/v1/internal/run`, {
       method: "POST",
       headers: {
@@ -494,6 +496,7 @@ async function dispatchContinuationRun(opts: {
         agentSlug: opts.agentSlug,
         orgId,
         callbackUrl: `${CONFIG.internalUrl}/claw/api/v1/webhook/result`,
+        ...(continuationLitellmApiKey ? { litellmApiKey: continuationLitellmApiKey } : {}),
       }),
     });
     const runBody = (await runRes.json()) as { success: boolean; sessionId?: string };
@@ -1671,6 +1674,7 @@ router.post("/action", pinAgentSlugFromHeader, verifySpacesSignature, async (req
           return;
         }
 
+        const answerLitellmApiKey = await resolveUserLitellmApiKey(answerUserId).catch(() => undefined);
         const runRes = await fetch(`${CONFIG.internalUrl}/claw/api/v1/internal/run`, {
           method: "POST",
           headers: {
@@ -1686,6 +1690,7 @@ router.post("/action", pinAgentSlugFromHeader, verifySpacesSignature, async (req
             agentSlug: answerAgentSlug,
             orgId: answerOrgId,
             callbackUrl: `${CONFIG.internalUrl}/claw/api/v1/webhook/result`,
+            ...(answerLitellmApiKey ? { litellmApiKey: answerLitellmApiKey } : {}),
           }),
         });
 
@@ -1879,6 +1884,7 @@ router.post("/action", pinAgentSlugFromHeader, verifySpacesSignature, async (req
 
       const traceId = eventId;
       const fastModeEnabled = await resolveFastMode(proposalConversationId, targetAgent.slug, targetAgent.config);
+      const proposalLitellmApiKey = await resolveUserLitellmApiKey(callerUserId).catch(() => undefined);
       const dispatchPayload = {
         userId: callerUserId,
         task,
@@ -1892,6 +1898,7 @@ router.post("/action", pinAgentSlugFromHeader, verifySpacesSignature, async (req
         channelId: proposalChannelId,
         idempotencyKey: eventId,
         fastMode: fastModeEnabled,
+        ...(proposalLitellmApiKey ? { litellmApiKey: proposalLitellmApiKey } : {}),
       };
 
       const runRes = await fetch(`${CONFIG.internalUrl}/claw/api/v1/internal/run`, {
@@ -2364,6 +2371,7 @@ router.post("/action", pinAgentSlugFromHeader, verifySpacesSignature, async (req
           // the relooper replays this verbatim with `task` overwritten by
           // NEXT_TURN_TASK_TEMPLATE on each subsequent turn.
           const fastModeEnabled = await resolveFastMode(goalConversationId, goalAgentSlug, agent.config);
+          const goalLitellmApiKey = await resolveUserLitellmApiKey(goalUserId).catch(() => undefined);
           const dispatchPayload: Record<string, unknown> = {
             userId: goalUserId,
             task: intercept.firstTurnTask,
@@ -2373,6 +2381,7 @@ router.post("/action", pinAgentSlugFromHeader, verifySpacesSignature, async (req
             orgId: agent.orgId,
             callbackUrl: `${CONFIG.internalUrl}/claw/api/v1/webhook/result`,
             fastMode: fastModeEnabled,
+            ...(goalLitellmApiKey ? { litellmApiKey: goalLitellmApiKey } : {}),
           };
 
           const runRes = await fetch(`${CONFIG.internalUrl}/claw/api/v1/internal/run`, {
@@ -2688,6 +2697,7 @@ router.post("/action", pinAgentSlugFromHeader, verifySpacesSignature, async (req
             "Execute this approved plan:\n" +
             approved.map((t, i) => `${i + 1}. ${t.title}`).join("\n");
           const fastModeEnabled = await resolveFastMode(planConversationId, planAgentSlug, agent.config);
+          const planApprovalLitellmApiKey = await resolveUserLitellmApiKey(planUserId).catch(() => undefined);
           const dispatchPayload: Record<string, unknown> = {
             userId: planUserId,
             task,
@@ -2705,6 +2715,7 @@ router.post("/action", pinAgentSlugFromHeader, verifySpacesSignature, async (req
             mode: "auto",
             planContinuation: true,
             fastMode: fastModeEnabled,
+            ...(planApprovalLitellmApiKey ? { litellmApiKey: planApprovalLitellmApiKey } : {}),
           };
 
           // Deterministic plan facts for Turn 2's live render, written BEFORE

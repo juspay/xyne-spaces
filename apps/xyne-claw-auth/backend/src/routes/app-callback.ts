@@ -21,6 +21,7 @@ import { expandSpacesMentions } from "../lib/mention-transform.js";
 import { resolveClawUserIdForSpacesIdentity } from "../lib/users-jit.js";
 import { resolveSpacesAppCreds } from "../lib/spaces-agent-install.js";
 import { getWorkspaceIdForUser } from "../lib/spaces-db.js";
+import { resolveUserLitellmApiKey } from "../lib/agent-provider-config.js";
 import { agentRunRepository } from "../repositories/index.js";
 
 import { createLogger } from "../logger.js";
@@ -256,6 +257,7 @@ async function startWriteRetryRun(opts: {
     : `The write action ${tool} failed with error: ${errorReason}. Diagnose the failure and retry with corrected parameters, or explain why it cannot be retried.`;
 
   const retryContext = `Failed tool call: ${tool}(${paramsPreview}). Error: ${errorReason}.${originalTask ? ` Original task: ${originalTask}` : ""}`;
+  const retryLitellmApiKey = await resolveUserLitellmApiKey(writeUserId).catch(() => undefined);
 
   try {
     const runUrl = `${CONFIG.internalUrl}/claw/api/v1/internal/run`;
@@ -275,6 +277,7 @@ async function startWriteRetryRun(opts: {
         channelId: channelId ?? undefined,
         callbackUrl: `${CONFIG.internalUrl}/claw/api/v1/webhook/result`,
         progressUrl: `${CONFIG.internalUrl}/claw/api/v1/webhook/progress`,
+        ...(retryLitellmApiKey ? { litellmApiKey: retryLitellmApiKey } : {}),
       }),
     });
 
@@ -402,6 +405,7 @@ router.post("/callback", async (req: Request, res: Response) => {
         log.error(`[app-callback] answer: no orgId for user=${answerUserId} agent=${answerAgentSlug ?? "(default)"}`);
         return;
       }
+      const answerLitellmApiKey = await resolveUserLitellmApiKey(answerUserId).catch(() => undefined);
 
       const runUrl = `${CONFIG.internalUrl}/claw/api/v1/internal/run`;
       const runRes = await fetch(runUrl, {
@@ -419,6 +423,7 @@ router.post("/callback", async (req: Request, res: Response) => {
           agentSlug: answerAgentSlug,
           orgId: answerOrgId,
           callbackUrl: `${CONFIG.internalUrl}/claw/api/v1/webhook/result`,
+          ...(answerLitellmApiKey ? { litellmApiKey: answerLitellmApiKey } : {}),
         }),
       });
 

@@ -81,6 +81,10 @@ interface RecoveryDispatchPayload {
   workspaceId?: string;
   resultForwardUrl?: string;
   resolveMentions?: boolean;
+  /** Org-provisioned LiteLLM API key. Carried across retries so a recovered
+   *  run keeps using the org's key instead of falling back to the platform
+   *  default. */
+  litellmApiKey?: string;
 }
 
 export interface RecoverySessionContext {

@@ -214,7 +214,7 @@ router.post("/provider-credentials/:provider/share", asyncHandler(async (req: Re
 
   // RAW row (not materialized): sharing a binding just reuses its shared cred.
   const raw = await prisma.userProviderCredentials.findUnique({
-    where: { userId_provider: { userId, provider } },
+    where: { userId_provider_managedBy: { userId, provider, managedBy: "USER" } },
   });
   if (!raw) {
     throw notFound(`Connect ${provider} in your settings first`);

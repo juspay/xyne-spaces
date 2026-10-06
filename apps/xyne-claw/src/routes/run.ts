@@ -578,6 +578,7 @@ router.post("/run", validateS2SKey, async (req, res: Response) => {
     planContinuation,
     awakening,
     generateFollowUpSuggestions: shouldGenerateFollowUpSuggestions,
+    litellmApiKey,
   } = req.body as InternalRunPayload;
 
   const experiment = normalizeExperimentContext(rawExperiment);
@@ -836,6 +837,8 @@ router.post("/run", validateS2SKey, async (req, res: Response) => {
       shouldGenerateFollowUpSuggestions,
       typeof callbackUrl === "string" ? callbackUrl : undefined,
       awakening,
+      undefined,
+      litellmApiKey,
     ).finally(() => {
       if (activeRun.handoffCapTimer) clearTimeout(activeRun.handoffCapTimer);
       if (activeRun.gracefulInterruptSummaryTimer) clearTimeout(activeRun.gracefulInterruptSummaryTimer);
@@ -962,6 +965,8 @@ router.post("/run", validateS2SKey, async (req, res: Response) => {
         shouldGenerateFollowUpSuggestions,
         typeof callbackUrl === "string" ? callbackUrl : undefined,
         awakening,
+        undefined,
+        litellmApiKey,
       );
     } catch (err) {
       processTaskError = err;
@@ -1512,6 +1517,9 @@ export async function processTask(
     entryPath?: string;
   },
   execution?: RunExecutionState,
+  /** Per-run provisioned LiteLLM key (user/org) — forwarded to runTask for the
+   *  default LiteLLM branch; premium-provider attempts keep their own credential. */
+  litellmApiKey?: string,
 ): Promise<void> {
   // Started here so the extractor overlaps session restore + MCP listing;
   // awaited once the tool palette exists. Never rejects (see prefetch.ts).
@@ -4141,8 +4149,10 @@ export async function processTask(
         context: fullContext,
         // Automation/scheduled runs draw from the low-priority LiteLLM key so
         // batch fleets can't queue interactive mentions (same predicate as the
-        // read-only sandbox routing above).
+        // read-only sandbox routing above). A per-run provisioned key (user or
+        // org, from claw-auth's litellm-sync) outranks both — see agent.ts.
         automationRun: isReadOnlyJob,
+        ...(litellmApiKey ? { litellmApiKey } : {}),
         userName,
         userEmail,
         customTools: tools,

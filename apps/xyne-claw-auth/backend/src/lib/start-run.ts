@@ -1527,6 +1527,18 @@ export async function prepareRun(
       ...(isExperimentContext((body as { experiment?: unknown }).experiment)
         ? { experiment: (body as { experiment?: unknown }).experiment }
         : {}),
+      // Provisioned per-user / per-org LiteLLM key (litellm-sync). Resolved
+      // upstream by every dispatch site (agent-chat, run-stream, webhook,
+      // scheduled/retry workers, plan approvals) and attached to the
+      // /internal/run body as `litellmApiKey`. S2S-ONLY: this proxy is the
+      // trust boundary, so a browser or external caller must never force claw
+      // onto an arbitrary key — only honor it for trusted internal runs, same
+      // gate as caller-supplied skills above. Without this line the key is
+      // silently dropped here and the pod always falls back to the platform
+      // env key.
+      ...(isInternalS2SCaller && typeof (body as { litellmApiKey?: unknown }).litellmApiKey === "string"
+        ? { litellmApiKey: (body as { litellmApiKey?: string }).litellmApiKey }
+        : {}),
     };
     return {
       ok: true,

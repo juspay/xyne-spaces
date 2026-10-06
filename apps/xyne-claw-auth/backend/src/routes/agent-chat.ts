@@ -26,7 +26,7 @@ import { prisma } from "../db.js";
 import { cancelRunRecovery } from "../queue/run-recovery-worker.js";
 import { decrypt } from "../crypto.js";
 import { CONFIG } from "../config.js";
-import { KNOWN_PROVIDERS, buildProviderConfig, agentDefaultSpeed, providerConfigForSpeed, applyFastModeModels } from "../lib/agent-provider-config.js";
+import { KNOWN_PROVIDERS, buildProviderConfig, agentDefaultSpeed, providerConfigForSpeed, applyFastModeModels, resolveUserLitellmApiKey } from "../lib/agent-provider-config.js";
 import { awaitTurnHandoff, isTurnControlCommand } from "../lib/run-turn-handoff.js";
 import { dispatchLocalHarnessRun, isLocalHarnessProvider, localHarnessProviderLabel, pinnedModelForProvider, resolveLocalHarnessTarget, resolveLocalHarnessTargetForProvider, resolveLocalSandbox } from "../lib/local-harness.js";
 
@@ -1920,6 +1920,7 @@ router.post("/:slug/chat", async (req: Request<{ slug: string }>, res: Response)
         }
       : runAgentConfig;
     const fastModeEnabled = await resolveFastMode(conversationId, slug, effectiveAgentConfig);
+    const agentChatLitellmApiKey = await resolveUserLitellmApiKey(userId).catch(() => undefined);
 
     const forwardBody: Record<string, unknown> = {
       // Pre-minted above and already persisted as an AgentRun row. prepareRun
@@ -1965,6 +1966,7 @@ router.post("/:slug/chat", async (req: Request<{ slug: string }>, res: Response)
       ...(effectiveAgentConfig ? { agentConfig: effectiveAgentConfig } : {}),
       fastMode: fastModeEnabled,
       ...evalRunSwitches(req, requestedOptimizations, requestedJudgeBackend),
+      ...(agentChatLitellmApiKey ? { litellmApiKey: agentChatLitellmApiKey } : {}),
     };
 
     const forwardedTask = typeof forwardBody["task"] === "string" ? forwardBody["task"] as string : "";

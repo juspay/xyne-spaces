@@ -22,6 +22,7 @@ import { agentRepository } from "../repositories/index.js";
 import { decryptStoredField } from "../surfaces/spaces/client.js";
 import { resolveSpacesAppCreds } from "../lib/spaces-agent-install.js";
 import { getWorkspaceIdForUser } from "../lib/spaces-db.js";
+import { resolveOrgLitellmApiKey } from "../lib/agent-provider-config.js";
 import { buildCapacityRetryFlow } from "xyne-claw-shared";
 import { createLogger } from "../logger.js";
 
@@ -184,6 +185,7 @@ async function probe(job: ProviderRetryJob): Promise<"available" | "capacity" | 
  *  actually completed elsewhere isn't double-executed. */
 async function redispatch(job: ProviderRetryJob): Promise<boolean> {
   const r = job.redispatch;
+  const retryOrgLitellmApiKey = await resolveOrgLitellmApiKey(r.orgId).catch(() => undefined);
   try {
     const res = await fetch(`${CONFIG.internalUrl}/claw/api/v1/internal/run`, {
       method: "POST",
@@ -205,6 +207,7 @@ async function redispatch(job: ProviderRetryJob): Promise<boolean> {
         ...(typeof r.fastMode === "boolean" ? { fastMode: r.fastMode } : {}),
         ...(r.resultForwardUrl ? { resultForwardUrl: r.resultForwardUrl } : {}),
         ...(r.experiment ? { experiment: r.experiment } : {}),
+        ...(retryOrgLitellmApiKey ? { litellmApiKey: retryOrgLitellmApiKey } : {}),
       }),
       signal: AbortSignal.timeout(30_000),
     });

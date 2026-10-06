@@ -150,6 +150,10 @@ export interface InternalRunPayload {
    *  mode_switch debug event; behavior is identical to any other auto run. */
   planContinuation?: boolean;
   generateFollowUpSuggestions?: boolean;
+  /** Per-run LiteLLM key (user- or org-provisioned) threaded by claw-auth's
+   *  /internal/run proxy. Only honored on the default LiteLLM model branch —
+   *  premium-provider attempts run on their own credential. */
+  litellmApiKey?: string;
 }
 
 export type RunOutcome = "completed" | "failed" | "cancelled" | "rescheduled";
@@ -224,6 +228,7 @@ export async function executeRunFromPayload(
     planContinuation,
     awakening,
     generateFollowUpSuggestions: shouldGenerateFollowUpSuggestions,
+    litellmApiKey,
   } = payload;
 
   const sessionId = (providedSessionId ?? "").trim();
@@ -297,6 +302,7 @@ export async function executeRunFromPayload(
       typeof callbackUrl === "string" ? callbackUrl : undefined,
       awakening,
       state,
+      litellmApiKey,
     );
   } catch (err) {
     clog.error(

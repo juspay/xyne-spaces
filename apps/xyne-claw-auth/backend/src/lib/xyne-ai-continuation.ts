@@ -76,13 +76,14 @@ export async function dispatchXyneAiContinuationRun(input: {
     const base = `${CONFIG.internalUrl}/claw/api/v1/internal/agent-chat/${encodeURIComponent(input.agentSlug)}/chat/${encodeURIComponent(input.conversationId)}`;
     const query = `callbackId=${callbackId}&assistantMessageId=${assistantMsg.id}`;
 
-    const { resolveAgentProviderConfigs } = await import("./agent-provider-config.js");
+    const { resolveAgentProviderConfigs, resolveUserLitellmApiKey } = await import("./agent-provider-config.js");
     const providers = input.agent
       ? await resolveAgentProviderConfigs(
           { id: input.agent.id, config: input.agent.config ?? null },
           { headlessBulk: true },
         ).catch(() => null)
       : null;
+    const continuationLitellmApiKey = await resolveUserLitellmApiKey(input.userId).catch(() => undefined);
     const fastModeEnabled = await resolveFastMode(
       input.conversationId,
       input.agentSlug,
@@ -117,6 +118,7 @@ export async function dispatchXyneAiContinuationRun(input: {
           ? { providerOrder: providers.providerOrder }
           : {}),
         fastMode: fastModeEnabled,
+        ...(continuationLitellmApiKey ? { litellmApiKey: continuationLitellmApiKey } : {}),
       }),
     });
 

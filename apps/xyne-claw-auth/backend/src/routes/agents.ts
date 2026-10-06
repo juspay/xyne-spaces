@@ -2927,8 +2927,22 @@ router.post("/:slug/grant-permissions", requireAgentOwnerOrAdmin, async (req: Re
         } catch { /* keep prior appUserId */ }
       }
       const encToken = encrypt(body.jwtToken, CONFIG.encryptionKey);
+      const encBotToken = `${encToken.ciphertext}:${encToken.iv}:${encToken.authTag}`;
+      // Per-workspace credential: re-install issues a fresh JWT per workspace, so
+      // upsert the SurfaceAgentInstall row for this workspace too. Without this the
+      // per-workspace store holds the PRE-grant token and resolveSpacesAppCreds()
+      // returns a stale credential even though the inline columns are fresh.
+      if (workspaceId) {
+        await upsertSpacesInstall({
+          agentId: agent.id,
+          spacesAppId: agent.spacesAppId,
+          workspaceId,
+          botUserId: appUserId,
+          encryptedBotToken: encBotToken,
+        });
+      }
       await agentRepository.update(req.params.slug, agent.orgId, {
-        spacesAppToken: `${encToken.ciphertext}:${encToken.iv}:${encToken.authTag}`,
+        spacesAppToken: encBotToken,
         ...(appUserId ? { spacesAppUserId: appUserId } : {}),
       });
     }

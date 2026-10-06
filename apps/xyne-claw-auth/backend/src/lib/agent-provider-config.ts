@@ -1,7 +1,8 @@
-import { agentProviderCredentialsRepository, sharedProviderCredentialRepository, userProviderCredentialsRepository } from "../repositories/index.js";
+import { agentProviderCredentialsRepository, orgProviderCredentialsRepository, sharedProviderCredentialRepository, userProviderCredentialsRepository } from "../repositories/index.js";
 import { errMsg } from "./errors.js";
 import { decrypt } from "../crypto.js";
 import { CONFIG } from "../config.js";
+import { resolveClawUserIdForSpacesIdentity } from "./users-jit.js";
 import { createLogger } from "../logger.js";
 
 const log = createLogger("agent-provider-config");
@@ -183,7 +184,10 @@ export function buildProviderConfig(provider: string, row: CredRow): ProviderCon
       // 72h) — every defaulted call fell back to spaces.
       provider === "copilot" ? "claude-sonnet-4.6" :
       provider === "codex" ? "gpt-5.5" :
-      provider === "litellm" ? "private-large" :
+      // Provisioned LiteLLM credentials do not carry a per-key model. Honor
+      // the deployment's configured model so existing rows created before the
+      // config was set do not keep falling back to private-large.
+      provider === "litellm" ? (CONFIG.litellmModel ?? "private-large") :
       "claude-opus-4-8";
     return {
       apiKey,
@@ -301,4 +305,50 @@ export async function resolveAgentProviderConfigs(
     providerOrder,
     ...(primaryParent ? { provider: primaryParent, parent: primaryParent } : {}),
   };
+}
+
+/**
+ * Resolve a LiteLLM API key for a dispatch call.
+ * Priority: USER-managed → SYSTEM-provisioned → platform env key (LITELLM_API_KEY).
+ * The caller may pass a raw Spaces userId; provisioning stores the key under
+ * the canonical claw userId — translate first so the lookup matches.
+ * Returns undefined only when no key is found at any tier (claw uses its own default).
+ */
+export async function resolveUserLitellmApiKey(userId: string): Promise<string | undefined> {
+  const canonicalId = (await resolveClawUserIdForSpacesIdentity(userId).catch(() => undefined)) ?? userId;
+  for (const managedBy of ["USER", "SYSTEM"] as const) {
+    const row = await userProviderCredentialsRepository
+      .findByUserAndProvider(canonicalId, "litellm", managedBy)
+      .catch(() => null);
+    if (row) {
+      const cfg = buildProviderConfig("litellm", row);
+      if (cfg?.apiKey) return cfg.apiKey;
+    }
+  }
+  return CONFIG.litellmApiKey ?? undefined;
+}
+
+/**
+ * Resolve a LiteLLM API key for headless runs that have org context but no
+ * active user (scheduled jobs, daily brief, experiment runs, agent handoffs,
+ * failure-chain recovery).
+ * Priority: org-provisioned key → platform env key (LITELLM_API_KEY).
+ */
+export async function resolveOrgLitellmApiKey(orgId: string): Promise<string | undefined> {
+  const row = await orgProviderCredentialsRepository
+    .findByOrgAndProvider(orgId, "litellm")
+    .catch(() => null);
+  if (row) {
+    const cfg = buildProviderConfig("litellm", {
+      encryptedKey: row.encryptedKey,
+      iv: row.iv,
+      authTag: row.authTag,
+      model: null,
+      baseUrl: null,
+      authType: null,
+      reasoningEffort: null,
+    });
+    if (cfg?.apiKey) return cfg.apiKey;
+  }
+  return CONFIG.litellmApiKey ?? undefined;
 }

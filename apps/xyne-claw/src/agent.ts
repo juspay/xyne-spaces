@@ -1686,6 +1686,12 @@ export interface RunTaskOptions {
   /** Automation/scheduled run — the default LiteLLM branch uses the
    *  low-priority automation key so batch load never queues human mentions. */
   automationRun?: boolean | undefined;
+  /** Per-run LiteLLM key provisioned for this user/org (claw-auth litellm-sync).
+   *  Applies ONLY to the default LiteLLM branch (see resolveModel): when the run
+   *  rides a premium provider credential, that credential's key is used instead.
+   *  Precedence over the automation key: a provisioned key is per-tenant, the
+   *  automation key is platform-wide, so the provisioned key always wins. */
+  litellmApiKey?: string | undefined;
   // Optional fields use `| undefined` (not bare `?`) so call sites can pass
   // through possibly-undefined values under exactOptionalPropertyTypes.
   context?: string | undefined;
@@ -2016,7 +2022,9 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
       ? undefined
       : modelSettings?.model ?? (opts.automationRun ? LITELLM.automationModel : undefined),
     maxTokens: modelSettings?.maxTokens,
-    litellmApiKey: opts.automationRun ? LITELLM.automationApiKey : undefined,
+    // Precedence: per-run provisioned key (user/org) → low-priority automation
+    // key (batch) → platform key (fallback inside resolveModel).
+    litellmApiKey: opts.litellmApiKey ?? (opts.automationRun ? LITELLM.automationApiKey : undefined),
   });
 
   // Use persistent session if conversationId provided, otherwise in-memory

@@ -86,6 +86,7 @@ import {
   type SubagentToolRefs,
 } from "./mcp-agent-tools.js";
 import { keywordQueryWords, listTools, searchToolsWithFallback } from "../services/tool-index/index.js";
+import { resolveUserLitellmApiKey } from "../lib/agent-provider-config.js";
 
 const log = createLogger("mcp");
 
@@ -2190,6 +2191,7 @@ router.post("/:sessionId/mcp/call", async (req: Request<{ sessionId: string }>, 
           return;
         }
 
+        const mcpTriggerLitellmApiKey = await resolveUserLitellmApiKey(userId).catch(() => undefined);
         const runUrl = `${CONFIG.internalUrl}/claw/api/v1/internal/run`;
         const runRes = await fetch(runUrl, {
           method: "POST",
@@ -2206,6 +2208,7 @@ router.post("/:sessionId/mcp/call", async (req: Request<{ sessionId: string }>, 
             // Don't pass conversationId — it causes session resume with prior agent context.
             // Session Metadata is injected into the task text instead.
             callbackUrl: `${CONFIG.internalUrl}/claw/api/v1/webhook/result`,
+            ...(mcpTriggerLitellmApiKey ? { litellmApiKey: mcpTriggerLitellmApiKey } : {}),
           }),
         });
 

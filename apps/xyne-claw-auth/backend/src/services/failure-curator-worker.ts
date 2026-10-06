@@ -21,6 +21,7 @@ import { errMsg } from "../lib/errors.js";
 import { prisma } from "../db.js";
 import { CONFIG } from "../config.js";
 import { selectNegativeSessions, type NegativeSession } from "./failure-curator-detection.js";
+import { resolveOrgLitellmApiKey } from "../lib/agent-provider-config.js";
 
 import { createLogger } from "../logger.js";
 const log = createLogger("failure-curator-worker");
@@ -170,6 +171,7 @@ export async function processAgentRange(
 
   // 4. Resolve current systemPrompt so the curator doesn't propose duplicate rules
   // 5. Call claw curator
+  const orgLitellmApiKey = await resolveOrgLitellmApiKey(orgId).catch(() => undefined);
   const payload = {
     agentSlug,
     systemPrompt: agentRow?.systemPrompt ?? undefined,
@@ -187,6 +189,7 @@ export async function processAgentRange(
       llmRetries: c.llmRetries,
       lastRetryReason: c.lastRetryReason,
     })),
+    ...(orgLitellmApiKey ? { litellmApiKey: orgLitellmApiKey } : {}),
   };
 
   let candidates: CuratorCandidate[] = [];

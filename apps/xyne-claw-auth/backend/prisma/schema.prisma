@@ -267,12 +267,14 @@ model Organization {
   createdAt           DateTime  @default(now())
   updatedAt           DateTime  @updatedAt
 
-  members             OrgMember[]
-  users               User[]
-  agents              Agent[]
-  skills              Skill[]
-  subagentDefinitions SubagentDefinition[]
-  surfaceTenantLinks  SurfaceTenantLink[]
+  members               OrgMember[]
+  users                 User[]
+  agents                Agent[]
+  skills                Skill[]
+  subagentDefinitions   SubagentDefinition[]
+  surfaceTenantLinks    SurfaceTenantLink[]
+  orgProviderCredentials OrgProviderCredential[]
+  providerIntegrations   OrgProviderIntegration[]
   mcpConnectorEditRequests McpConnectorEditRequest[]
   mcpServers            McpServer[]
   errorBuckets          ErrorBucket[]
@@ -849,7 +851,12 @@ model ChannelAgentChainBinding {
 model UserProviderCredentials {
   userId             String
   user               User                      @relation(fields: [userId], references: [id], onDelete: Cascade)
-  provider           String /// "spaces" | "copilot" | "claude"
+  provider           String /// "spaces" | "copilot" | "claude" | "litellm"
+  /// "USER" = user-visible, user-managed credential (default).
+  /// "SYSTEM" = provisioned by an external system (e.g. LiteLLM provisioning
+  /// worker); hidden from the user's credentials UI but used as a fallback
+  /// when the user has no personal key.
+  managedBy          String                    @default("USER") /// "USER" | "SYSTEM"
   encryptedKey       String?                   @db.Text
   iv                 String?
   authTag            String?
@@ -865,12 +872,52 @@ model UserProviderCredentials {
   /// refreshes would invalidate each other's OAuth session.
   sharedCredentialId String?
   sharedCredential   SharedProviderCredential? @relation(fields: [sharedCredentialId], references: [id], onDelete: SetNull)
+  /// Provenance for SYSTEM rows: JSON object with source, litellmKeyId, etc.
+  metadata           Json?
   createdAt          DateTime                  @default(now())
   updatedAt          DateTime                  @updatedAt
 
-  @@id([userId, provider])
+  @@id([userId, provider, managedBy])
   @@index([sharedCredentialId])
   @@map("user_provider_credentials")
+}
+
+/// Org-level LiteLLM key provisioned externally (e.g. by the Spaces AI
+/// provisioning worker). Keyed by (orgId, provider). Used at call sites that
+/// run under the ORG's identity (no meaningful user context): failure curator,
+/// call transcript curation, admin tooling. NOT an automatic user fallback.
+model OrgProviderCredential {
+  id            String       @id @default(cuid())
+  orgId         String
+  organization  Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  provider      String
+  encryptedKey  String       @db.Text
+  iv            String
+  authTag       String
+  /// Provenance + LiteLLM-side ids: { source, litellmTeamId, litellmKeyId,
+  /// keyName, keyAlias, expires, provisionedAt, changedBy }.
+  metadata      Json
+  createdAt     DateTime     @default(now())
+  updatedAt     DateTime     @updatedAt
+
+  @@unique([orgId, provider])
+  @@map("org_provider_credentials")
+}
+
+model OrgProviderIntegration {
+  id            String       @id @default(cuid())
+  orgId         String
+  organization  Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  provider      String
+  externalId    String
+  externalAlias String?
+  status        String       @default("ACTIVE")
+  createdAt     DateTime     @default(now())
+  updatedAt     DateTime     @updatedAt
+
+  @@unique([orgId, provider])
+  @@index([provider, externalId])
+  @@map("org_provider_integrations")
 }
 
 model LocalHarnessDevice {

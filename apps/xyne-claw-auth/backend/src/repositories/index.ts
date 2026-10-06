@@ -27,3 +27,4 @@ export { evalRepository } from "./evalRepository.js";
 export type { EvalTurnInput, ImportConversationInput } from "./evalRepository.js";
 export { searchEvalRepository, computeSearchEvalSummary, toMetricsSummary } from "./searchEvalRepository.js";
 export type { SearchEvalQueryInput, SearchEvalTopResult, SearchEvalRunSummary } from "./searchEvalRepository.js";
+export { orgProviderCredentialsRepository } from "./orgProviderCredentialsRepository.js";

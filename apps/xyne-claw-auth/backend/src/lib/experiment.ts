@@ -9,6 +9,7 @@ import { createTraceId, createLogger } from "../logger.js";
 import { decryptStoredField, spacesAppFetch } from "../surfaces/spaces/client.js";
 import { resolveSpacesAppCreds } from "./spaces-agent-install.js";
 import { getWorkspaceIdForUser } from "./spaces-db.js";
+import { resolveOrgLitellmApiKey } from "./agent-provider-config.js";
 
 const log = createLogger("experiment");
 
@@ -422,6 +423,7 @@ async function dispatchExperimentRun(
   const expBotUserId = expCreds.spacesAppUserId ?? agent.spacesAppUserId;
   const appToken = decryptStoredField(expCreds.spacesAppToken ?? agent.spacesAppToken);
 
+  const experimentLitellmApiKey = await resolveOrgLitellmApiKey(run.orgId ?? agent.orgId).catch(() => undefined);
   const dispatchPayload = {
     userId: run.userId,
     task: opts.task,
@@ -448,6 +450,7 @@ async function dispatchExperimentRun(
         ? { kind: run.kind as "understanding" | "framework" | "security" | "repo-history" }
         : {}),
     },
+    ...(experimentLitellmApiKey ? { litellmApiKey: experimentLitellmApiKey } : {}),
   };
 
   const res = await fetch(`${CONFIG.internalUrl}/claw/api/v1/internal/run`, {

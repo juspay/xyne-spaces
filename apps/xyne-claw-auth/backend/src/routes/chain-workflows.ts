@@ -8,6 +8,7 @@ import { CONFIG } from "../config.js";
 import { prisma } from "../db.js";
 import { decrypt } from "../crypto.js";
 import { getSpacesAuthForUser, getWorkspaceIdForUser, requestWorkspaceHint } from "../lib/spaces-db.js";
+import { resolveUserLitellmApiKey } from "../lib/agent-provider-config.js";
 import { resolveSpacesAppCreds } from "../lib/spaces-agent-install.js";
 import { setSession, type SessionContext } from "./webhook.js";
 import { spacesAppFetch } from "../lib/spaces-api.js";
@@ -1087,6 +1088,8 @@ router.post("/:id/trigger", requireS2S, asyncHandler(async (req: Request<{ id: s
 
   log.info(`[chain-workflows/trigger] workflowId=${req.params.id} entryAgent=${entryAgentSlug} userId=${effectiveUserId}${workflow.credentialUserId ? " (creator-creds consent)" : ""} conversationId=${conversationId} channelId=${channelId}`);
 
+  const chainLitellmApiKey = await resolveUserLitellmApiKey(effectiveUserId).catch(() => undefined);
+
   const runUrl = `${CONFIG.internalUrl}/claw/api/v1/internal/run`;
   const runRes = await fetch(runUrl, {
     method: "POST",
@@ -1100,6 +1103,7 @@ router.post("/:id/trigger", requireS2S, asyncHandler(async (req: Request<{ id: s
       context: triggerPayload ?? {}, conversationId,
       callbackUrl: `${CONFIG.internalUrl}/claw/api/v1/webhook/result`,
       progressUrl: `${CONFIG.internalUrl}/claw/api/v1/webhook/progress`,
+      ...(chainLitellmApiKey ? { litellmApiKey: chainLitellmApiKey } : {}),
     }),
     signal: AbortSignal.timeout(15_000),
   });
