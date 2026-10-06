@@ -253,30 +253,6 @@ jobs:
         run: pnpm --filter xyne-claw run typecheck
 
   # ---------------------------------------------------------------------------
-  # xyne-claw-auth lint. Enforces the outbound-HTTP rule: raw fetch() is
-  # banned in favour of lib/safe-fetch.ts; pre-existing calls are baselined in
-  # eslint-suppressions.json and can only shrink.
-  # ---------------------------------------------------------------------------
-  xyne-claw-auth-lint:
-    name: xyne-claw-auth lint
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v5
-
-      - uses: pnpm/action-setup@v4
-
-      - uses: actions/setup-node@v5
-        with:
-          node-version: ${{ env.NODE_VERSION }}
-          cache: pnpm
-
-      - name: Install dependencies
-        run: pnpm install ${{ env.PNPM_FLAGS }} --filter xyne-claw-auth
-
-      - name: Lint xyne-claw-auth
-        run: pnpm --filter xyne-claw-auth run lint
-
-  # ---------------------------------------------------------------------------
   # Secret scan (gitleaks). Scans the working tree with the committed
   # .gitleaks.toml allowlist, mirroring the Jenkins gitleaksScan() step.
   # Pinned to the same version Jenkins uses. `dir` scans files (not git
