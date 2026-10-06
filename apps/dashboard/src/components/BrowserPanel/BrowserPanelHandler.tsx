@@ -4,6 +4,7 @@ import { useSelector } from '@xstate/react';
 import { isElectronApp } from '../../utils/electronApp';
 import { routePopupToEmbeddedWebview } from '../../utils/embeddedWebviewRegistry';
 import { browserPanelActor } from '../../machines/browserPanelMachine';
+import { sendUrlsToBrowserPanel } from '../../utils/openInBrowserPanel';
 import { xyneAIActor } from '../../machines/xyneAIMachine';
 import { logger, Event } from '../../utils/logger';
 
@@ -40,11 +41,7 @@ export function BrowserPanelHandler(): null {
 
       logger.info(Event.BROWSER_LINK_CLICK, { url, openedIn: 'in-app' });
 
-      if (browserPanelState === 'open' || isOnBrowserRoute) {
-        browserPanelActor.send({ type: 'OPEN_URLS', urls: [url] });
-      } else {
-        browserPanelActor.send({ type: 'OPEN', urls: [url] });
-      }
+      sendUrlsToBrowserPanel(browserPanelState === 'open' || isOnBrowserRoute ? 'OPEN_URLS' : 'OPEN', [url]);
     });
 
     return cleanup;
