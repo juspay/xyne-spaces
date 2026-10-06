@@ -8,7 +8,7 @@ import { useZero } from '../../../hooks/useZero';
 import type { Link } from '@xyne/shared';
 import { LinkVisibility } from '@xyne/shared';
 import Dialog from '../../ui/Dialog';
-import { browserPanelActor } from '../../../machines/browserPanelMachine';
+import { sendUrlsToBrowserPanel } from '../../../utils/openInBrowserPanel';
 import { xyneAIActor } from '../../../machines/xyneAIMachine';
 import { useSearchParams, useNavigate } from 'react-router-dom';
 import { useRouteContext } from '../../../hooks/useRouteContext';
@@ -45,7 +45,7 @@ const LinksTab: React.FC<LinksTabProps> = ({ channelId }) => {
 
       if (isElectronApp()) {
         xyneAIActor.send({ type: 'CLOSE' });
-        browserPanelActor.send({ type: 'OPEN', urls });
+        sendUrlsToBrowserPanel('OPEN', urls);
       } else {
         urls.forEach(url => window.open(url, '_blank'));
       }

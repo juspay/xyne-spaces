@@ -1,6 +1,7 @@
 import { isElectronApp } from './electronApp';
 import { detectReactNativeWebView, reactNativeBridge } from './reactNativeBridge';
 import { browserPanelActor } from '../machines/browserPanelMachine';
+import { sendUrlsToBrowserPanel } from './openInBrowserPanel';
 import { logger, Event } from './logger';
 
 const LINK_OPEN_EXTERNAL_KEY = 'xyne:link-open-external-default';
@@ -91,11 +92,7 @@ const openInApp = (url: string): void => {
   // routes to the real panel and applies the user's open-externally setting.
   if (isElectronApp() && window.parent === window) {
     const { browserPanelState } = browserPanelActor.getSnapshot().context;
-    if (browserPanelState === 'open') {
-      browserPanelActor.send({ type: 'OPEN_URLS', urls: [url] });
-    } else {
-      browserPanelActor.send({ type: 'OPEN', urls: [url] });
-    }
+    sendUrlsToBrowserPanel(browserPanelState === 'open' ? 'OPEN_URLS' : 'OPEN', [url]);
     return;
   }
   window.open(url, '_blank', 'noopener,noreferrer');
