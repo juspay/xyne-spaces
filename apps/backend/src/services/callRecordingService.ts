@@ -189,9 +189,9 @@ class CallRecordingService {
    * the egress worker to flush + upload; the egress_ended webhook finalises it.
    * Authorization (starter-only) is enforced in the controller.
    */
-  async stopRecording(recording: CallRecording): Promise<void> {
+  async stopRecording(recording: CallRecording, callExternalId: string): Promise<void> {
     await repositories.callRecordings.markStopped(recording.id);
-    await this.stopEgress(recording);
+    await this.stopEgress(recording, callExternalId);
 
     // Clear the active-recording indicator on every stop path (HTTP stop, call-end).
     // The egress_ended webhook still finalizes the file. Non-blocking; row is authoritative.
@@ -209,14 +209,14 @@ class CallRecordingService {
     if (!call) return;
     const active = await repositories.callRecordings.findActiveByCallId(call.id);
     if (!active) return;
-    await this.stopRecording(active);
+    await this.stopRecording(active, call.externalId);
   }
 
   /** Tell the egress worker to stop, if it is still running. */
-  private async stopEgress(recording: CallRecording): Promise<void> {
+  private async stopEgress(recording: CallRecording, callExternalId: string): Promise<void> {
     let egressId = this.activeEgress.get(recording.id) ?? recording.egressId ?? undefined;
     if (!egressId) {
-      logger.warn('[CallRecording] egress_tracking_lost', { recording: recording.id, call: recording.callId, reason: 'no_egressId_on_row' });
+      logger.warn('[CallRecording] egress_tracking_lost', { recording: recording.id, call: callExternalId, reason: 'no_egressId_on_row' });
       return;
     }
     this.activeEgress.delete(recording.id);

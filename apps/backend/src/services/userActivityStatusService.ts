@@ -59,16 +59,16 @@ class UserActivityStatusService {
     }
   }
 
-  async clearInCallForEndedCall(callId: string): Promise<void> {
+  async clearInCallForEndedCall(call: { id: string; externalId: string }): Promise<void> {
     try {
       const participants = await db.callParticipant.findMany({
-        where: { callId, response: InvitationResponse.ACCEPTED },
+        where: { callId: call.id, response: InvitationResponse.ACCEPTED },
         select: { userId: true },
       });
 
       await Promise.all(participants.map((participant) => this.clearInCall(participant.userId)));
     } catch (error) {
-      logger.error(`[UserActivityStatus] Failed to clear IN_CALL for ended call ${callId}:`, error);
+      logger.error(`[UserActivityStatus] Failed to clear IN_CALL for ended call ${call.externalId}:`, error);
     }
   }
 

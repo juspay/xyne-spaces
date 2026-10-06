@@ -291,7 +291,7 @@ export class LiveKitWebhookController {
       if (result.shouldEndCall) {
         logger.info(`[LiveKit Webhook] Marked call ${callId} as ENDED`);
 
-        void userActivityStatusService.clearInCallForEndedCall(result.call.id);
+        void userActivityStatusService.clearInCallForEndedCall(result.call);
 
         await this.emitCallEndedAutomation(result.call, now, 'room_finished');
 
@@ -614,14 +614,13 @@ export class LiveKitWebhookController {
                 await activityService.fillSdlcOwner(conversationId, channelId);
               }
               logger.info(
-                `[LiveKit Webhook] sdlc_link_created | call=${callId} owner=${sdlcLink.ownerType}:${sdlcLink.ownerId}`,
+                `[LiveKit Webhook] sdlc_link_created | call=${roomName} owner=${sdlcLink.ownerType}:${sdlcLink.ownerId}`,
               );
             }
           } catch (sdlcLinkError) {
             // Linking must never break call creation.
             logger.warn('[LiveKit Webhook] sdlc_link_failed', {
-              room: roomName,
-              call: callId,
+              call: roomName,
               error: sdlcLinkError,
             });
           }
@@ -649,14 +648,13 @@ export class LiveKitWebhookController {
                 skipDuplicates: true,
               });
               logger.info(
-                `[LiveKit Webhook] sdlc_call_link_inherited | call=${callId} owner=${owner.sourceType}:${owner.sourceId}`,
+                `[LiveKit Webhook] sdlc_call_link_inherited | call=${roomName} owner=${owner.sourceType}:${owner.sourceId}`,
               );
             }
           } catch (inheritError) {
             // Linking must never break call creation.
             logger.warn('[LiveKit Webhook] sdlc_call_link_inherit_failed', {
-              room: roomName,
-              call: callId,
+              call: roomName,
               error: inheritError,
             });
           }

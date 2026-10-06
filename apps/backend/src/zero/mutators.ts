@@ -5277,8 +5277,9 @@ export function createMutators(
           // Cancelling from the Calls screen goes through this mutator, not a REST
           // route, so the channel pill has to be refreshed from here too.
           const cancelledCallId = call.id;
+          const cancelledCallExternalId = call.externalId;
           asyncTasks.push(async () => {
-            queueScheduledCallPillSync(cancelledCallId, 'mutators.calls.cancel');
+            queueScheduledCallPillSync(cancelledCallId, cancelledCallExternalId, 'mutators.calls.cancel');
           });
           if (cancelEntireSeries && call.recurringSeriesId) {
             await tx.mutate.recurring_call_series.update({
