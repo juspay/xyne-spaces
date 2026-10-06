@@ -9,7 +9,7 @@ import type { Request } from "express";
  * from how auth resolved the request.
  *
  * NOTE (phase 1): only `requireAuth` attaches org context. Routes mounted under
- * `requireS2S` / `requireUserAuth` will see empty `orgId` / `role` — that's an
+ * `requireStrictS2S` / `requireUserAuth` will see empty `orgId` / `role` — that's an
  * accepted limitation this phase (see completeplan §7 decision). Do not rely on
  * org context from those paths yet.
  */
