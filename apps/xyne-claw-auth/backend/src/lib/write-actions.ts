@@ -40,6 +40,7 @@ export interface WriteActionResult {
   ok: boolean;
   content: string;
   error?: string;
+  createdSkillId?: string;
 }
 
 function parseGatewayActionTarget(serverType: string): { serviceName: string; backendId?: string } | null {
@@ -153,7 +154,7 @@ export async function executeWriteAction(action: SignedWriteAction): Promise<Wri
       if (isCreateSkillAction(serverType, tool)) {
         const outcome = await applyCreateSkill(params, userId);
         if (outcome.status !== "created") return { ok: false, content: "", error: outcome.error };
-        return { ok: true, content: outcome.message };
+        return { ok: true, content: outcome.message, createdSkillId: outcome.id };
       }
     }
 

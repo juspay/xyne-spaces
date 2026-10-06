@@ -1229,6 +1229,12 @@ router.post("/action", pinAgentSlugFromHeader, verifySpacesSignature, async (req
           void replaceFlowCardWithText(messageId, agentSlug, `${outcome.error}`, conversationId, undefined, spacesAppId);
           return;
         }
+        if (continueChannelId) {
+          const { linkSdlcHubSkill } = await import("../lib/sdlc-repository-context.js");
+          void linkSdlcHubSkill(continueChannelId, writeUserId, outcome.id).catch((err) =>
+            log.warn(`[flow-action] create-skill hub link failed slug=${outcome.slug}: ${err instanceof Error ? err.message : String(err)}`),
+          );
+        }
         resp = { type: "close_screen", finalMessage: `${outcome.message}` };
         if (xyneAiCard) {
           await finishTextWriteOnRow({

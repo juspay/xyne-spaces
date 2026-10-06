@@ -1,3 +1,4 @@
+import { SDLC_TOOL_NAMES } from "xyne-claw-shared";
 import { CONFIG } from "../config.js";
 import { errMsg } from "./errors.js";
 import { getSpacesAuthForUser } from "./spaces-db.js";
@@ -108,31 +109,72 @@ export async function resolveSdlcHubContextForUser(
   }
 }
 
-export async function loadSdlcHubKnowledge(channelId: string, userId: string): Promise<string | undefined> {
+// spacesFetch refuses a call with no bearer token; these routes check only the S2S key.
+function s2sAuth(): { token: string; s2sKey: string; baseUrl: string } | undefined {
   const s2sKey = process.env["INTERNAL_S2S_KEY"] ?? process.env["XYNE_CLAW_S2S_KEY"] ?? "";
-  if (!s2sKey) return undefined;
+  return s2sKey ? { token: s2sKey, s2sKey, baseUrl: CONFIG.spacesInternalUrl } : undefined;
+}
+
+export interface SdlcHubKnowledge {
+  /** Pinned Knowledge Files, in full. */
+  documents: Array<{ title: string; markdown: string }>;
+  files: Array<{ canvasId: string; title: string }>;
+  skills: Array<{ skillId: string; pinned: boolean }>;
+}
+
+export async function loadSdlcHubKnowledge(channelId: string, userId: string): Promise<SdlcHubKnowledge | undefined> {
+  const auth = s2sAuth();
+  if (!auth) return undefined;
   const response = (await spacesFetch(
     "/api/internal/sdlc/agent/hub-knowledge",
     // Runs at every SDLC run start, which the 30 s default would stall.
     { method: "POST", body: JSON.stringify({ channelId, actorUserId: userId }), signal: AbortSignal.timeout(5_000) },
-    { s2sKey, baseUrl: CONFIG.spacesInternalUrl },
-  )) as { documents?: Array<{ title: string; markdown: string }> };
-  const documents = response.documents ?? [];
-  if (documents.length === 0) return undefined;
+    auth,
+  )) as Partial<SdlcHubKnowledge>;
+  return { documents: response.documents ?? [], files: response.files ?? [], skills: response.skills ?? [] };
+}
+
+/** Pinned items in full, then the other Knowledge Files by name. Unpinned skills travel as skills, not here. */
+export function renderSdlcHubKnowledge(
+  knowledge: SdlcHubKnowledge,
+  pinnedSkills: Array<{ name: string; content: string }>,
+): string | undefined {
+  const pinned = [
+    ...knowledge.documents.map((document) => `## ${document.title}\n\n${document.markdown}`),
+    ...pinnedSkills.map((skill) => `## Skill: ${skill.name}\n\n${skill.content}`),
+  ];
+  if (pinned.length === 0 && knowledge.files.length === 0) return undefined;
   return [
     "# Hub Knowledge",
-    "Standing context for this SDLC hub, generated from its repositories. It can lag the code, so check the code before relying on a detail.",
-    ...documents.map((document) => `## ${document.title}\n\n${document.markdown}`),
+    "Knowledge for this SDLC hub. It can lag the code, so check the code before relying on a detail.",
+    ...pinned,
+    ...(knowledge.files.length > 0
+      ? [
+          `## Knowledge Files\n\nNot loaded. Read one with ${SDLC_TOOL_NAMES.readArtifact} and its canvasId when the request touches its subject.\n\n` +
+            knowledge.files.map((file) => `- ${file.title} (canvasId ${file.canvasId})`).join("\n"),
+        ]
+      : []),
   ].join("\n\n");
+}
+
+/** Links a skill made during a hub run to that hub. Spaces ignores a channel that is not a hub. */
+export async function linkSdlcHubSkill(channelId: string, userId: string, skillId: string): Promise<void> {
+  const auth = s2sAuth();
+  if (!auth) return;
+  await spacesFetch(
+    "/api/internal/sdlc/agent/hub-skill",
+    { method: "POST", body: JSON.stringify({ channelId, actorUserId: userId, skillId }), signal: AbortSignal.timeout(5_000) },
+    auth,
+  );
 }
 
 /** Tells Spaces an agent got its bot user, so an SDLC hub it was created in adds it right away. */
 export async function notifySdlcAgentRegistered(agentId: string, botUserId: string): Promise<void> {
-  const s2sKey = process.env["INTERNAL_S2S_KEY"] ?? process.env["XYNE_CLAW_S2S_KEY"] ?? "";
-  if (!s2sKey) return;
+  const auth = s2sAuth();
+  if (!auth) return;
   await spacesFetch(
     "/api/internal/sdlc/agent/registered",
     { method: "POST", body: JSON.stringify({ agentId, botUserId }), signal: AbortSignal.timeout(5_000) },
-    { s2sKey, baseUrl: CONFIG.spacesInternalUrl },
+    auth,
   );
 }

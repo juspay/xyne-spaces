@@ -12,7 +12,7 @@ export function isCreateSkillAction(serverType: string, tool: string): boolean {
 /** `invalid` leaves the card in place — malformed params, so no approval of
  *  them can succeed. `duplicate` is terminal. */
 export type SkillApplyOutcome =
-  | { status: "created"; name: string; slug: string; message: string }
+  | { status: "created"; id: string; name: string; slug: string; message: string }
   | { status: "invalid"; error: string }
   | { status: "duplicate"; error: string };
 
@@ -69,7 +69,7 @@ export async function applyCreateSkill(
     return { status: "duplicate", error: `A skill with slug "${slug}" already exists.` };
   }
 
-  await skillRepository.create({
+  const created = await skillRepository.create({
     slug,
     name,
     description,
@@ -80,5 +80,5 @@ export async function applyCreateSkill(
     org: { connect: { id: skillOrgId } },
   });
   log.info(`[skill-apply] create-skill approved slug=${slug} owner=${userId} org=${skillOrgId}`);
-  return { status: "created", name, slug, message: `Skill "${name}" created.` };
+  return { status: "created", id: created.id, name, slug, message: `Skill "${name}" created.` };
 }
