@@ -2,7 +2,7 @@ import { config } from '@/config/env';
 import { logger } from '@/utils/logger';
 import { acquireLeadership, releaseLock, renewLock, type LockHandle } from '@/utils/distributedLock';
 import { MigrationStore } from './store';
-import { MigrationQueues } from './queues';
+import { MigrationQueues, queueFor } from './queues';
 import { SlackMigrationEngine, type CollectedConversation, type DirUser } from './engine';
 import { MigrationJob, MigrationStatus, MigrationType, QueueName } from './types';
 import { getMigrationRuntimeConfig } from './migrationRuntimeConfig';
@@ -20,6 +20,14 @@ const INGEST_MAX_ATTEMPTS = 4;
 const INGEST_RETRY_BASE_MS = 2_000;
 const RETRYABLE_INGEST_ERROR = /batch-encrypt (?:failed with status 5\d\d|timed out)|Transaction already closed|expired transaction/i;
 // stallLimitMs (live heartbeat but no forward progress ⇒ worker wedged) is now live-tunable via Superposition — read per reconcile tick.
+// A job interrupted more often than this in a row without progress is failed, so it can't hold the front of its lane.
+const MAX_IDLE_RECLAIMS = 3;
+// Never picked up from a queue: resume/backfill/reclaim set QUEUED before they enqueue.
+const SETTLED = [MigrationStatus.STOPPED, MigrationStatus.FAILED, MigrationStatus.COMPLETED];
+
+/** Changes whenever a job advances in its current phase — equal marks across two reclaims mean no headway. */
+const progressMark = (j: MigrationJob): string =>
+  [j.status, j.stats.messages, j.checkpoint.collectedConversationIds.length, j.ingestedCount ?? 0, j.refreshDone ?? 0].join(':');
 
 /** Human-readable ingest duration for the completion log, e.g. "7m 12s". */
 function formatDuration(ms: number): string {
@@ -39,7 +47,8 @@ export class MigrationWorkers {
   ) {}
 
   private leaderHandle: LockHandle | null = null;
-  private singletonsRegistered = false;
+  private ingestionRegistered = false;
+  private readonly collectionLanes = new Set<string>(); // workspaceIds this process has a collection processor for
   private reconcileTimer: NodeJS.Timeout | null = null;
   private leaderTimer: NodeJS.Timeout | null = null;
 
@@ -49,9 +58,9 @@ export class MigrationWorkers {
     this.queues.processConv(config.slackMigration.ingestConcurrency, (mid, cid) => this.ingestConversation(mid, cid));
 
     // Collection, the ingestion planner and reconcile are SINGLETON duties — exactly one worker cluster-wide may run
-    // them (N collectors would blow Slack's rate limits). A Redis lease elects that one; the winner lazily subscribes
-    // to those queues on promote (so a follower never consumes them), and on its death the lease TTL-expires and
-    // another worker takes over.
+    // them (two collectors per workspace would blow Slack's rate limits). A Redis lease elects that one; the winner
+    // lazily subscribes to those queues on promote (so a follower never consumes them), and on its death the lease
+    // TTL-expires and another worker takes over.
     void this.runLeaderLoop();
 
     logger.info('[SlackMigration] workers registered', {
@@ -84,28 +93,36 @@ export class MigrationWorkers {
   private async promote(handle: LockHandle): Promise<void> {
     this.leaderHandle = handle;
     logger.info('[SlackMigration] acquired leadership — running collection, ingestion planner & reconcile');
-    if (!this.singletonsRegistered) {
-      // First time as leader: subscribe to the singleton queues. Bull's .process() is once-per-process, so followers
-      // that never win the lease never register these handlers and therefore never consume collection/planner jobs.
-      this.queues.process(QueueName.COLLECTION, (id) => this.guard(id, (j) => j.backfill ? this.collectMissingFiles(j) : j.refreshRequested ? this.refresh(j) : this.collect(j)));
-      this.queues.process(QueueName.INGESTION, (id) => this.guard(id, (j) => this.ingest(j)));
-      this.singletonsRegistered = true;
-    } else {
-      // Re-elected after a demotion: resume local consumption of the already-registered processors.
-      await this.queues.resumeLocal(QueueName.COLLECTION).catch(() => undefined);
-      await this.queues.resumeLocal(QueueName.INGESTION).catch(() => undefined);
+    // Re-elected after a demotion: resume local consumption of the already-registered processors.
+    for (const name of this.leaderQueues()) await this.queues.resumeLocal(name).catch(() => undefined);
+    if (!this.ingestionRegistered) {
+      // Bull's .process() is once-per-process, so followers that never win the lease never consume these queues.
+      this.queues.process(QueueName.INGESTION, (id) => this.guard(QueueName.INGESTION, id, (j) => this.ingest(j)));
+      this.ingestionRegistered = true;
     }
-    this.startReconcile();
+    this.startReconcile(); // its first tick opens a collection lane per workspace
   }
 
   private async demote(): Promise<void> {
     logger.warn('[SlackMigration] lost leadership — stepping down from singleton duties');
     this.leaderHandle = null;
     this.stopReconcile();
-    if (this.singletonsRegistered) {
-      await this.queues.pauseLocal(QueueName.COLLECTION).catch(() => undefined);
-      await this.queues.pauseLocal(QueueName.INGESTION).catch(() => undefined);
-    }
+    for (const name of this.leaderQueues()) await this.queues.pauseLocal(name).catch(() => undefined);
+  }
+
+  /** Singleton queues this process has a processor on. */
+  private leaderQueues(): string[] {
+    const lanes = [...this.collectionLanes].map((ws) => queueFor(QueueName.COLLECTION, ws));
+    return this.ingestionRegistered ? [...lanes, QueueName.INGESTION] : lanes;
+  }
+
+  /** One collection lane per workspace, drained one job at a time: tenants collect in parallel, never two per tenant. */
+  private openCollectionLane(workspaceId: string): void {
+    if (!this.leaderHandle || !workspaceId || this.collectionLanes.has(workspaceId)) return;
+    this.collectionLanes.add(workspaceId);
+    this.queues.process(queueFor(QueueName.COLLECTION, workspaceId), (id) =>
+      this.guard(QueueName.COLLECTION, id, (j) => j.backfill ? this.collectMissingFiles(j) : j.refreshRequested ? this.refresh(j) : this.collect(j)));
+    logger.info('[SlackMigration] collection lane opened', { workspaceId });
   }
 
   private startReconcile(): void {
@@ -132,13 +149,16 @@ export class MigrationWorkers {
   private async reconcile(): Promise<void> {
     const now = Date.now();
     const { stallLimitMs } = await getMigrationRuntimeConfig();
-    for (const job of await this.store.list(1000, 0)) {
+    const jobs = await this.store.list(1000, 0);
+    for (const ws of new Set(jobs.map((j) => j.workspaceId))) this.openCollectionLane(ws);
+    for (const job of jobs) {
+      const queue = queueFor(job.currentQueue, job.workspaceId);
       // Queued/submitted jobs live in Bull, not here — but recover one whose Bull entry was lost (e.g. a crash
       // between the store write and enqueue) so it can't sit stranded forever. Only re-enqueue if genuinely absent.
       if (job.status === MigrationStatus.QUEUED || job.status === MigrationStatus.SUBMITTED) {
-        if (now - job.updatedAt >= RECLAIM_STALE_MS && !(await this.queues.hasJob(job.currentQueue, job.id))) {
+        if (now - job.updatedAt >= RECLAIM_STALE_MS && !(await this.queues.hasJob(queue, job.id))) {
           logger.warn('[SlackMigration] re-enqueuing stranded job (no queue entry)', { id: job.id, status: job.status });
-          await this.queues.enqueue(job.currentQueue, job.id, job.backfill ? 'front' : 'end').catch(() => undefined); // a backfill keeps its priority
+          await this.queues.enqueue(queue, job.id, job.backfill ? 'front' : 'end').catch(() => undefined); // a backfill keeps its priority
         }
         continue;
       }
@@ -147,7 +167,7 @@ export class MigrationWorkers {
       // Status says running — but is a worker actually processing it? If Bull has it sitting in the wait/delayed
       // queue (bumped back by a restart/stall, or a resume jumped ahead), the "Collecting/Ingesting" status is
       // stale. Show it as QUEUED so two jobs never both look like they're running.
-      const bstate = await this.queues.jobState(job.currentQueue, job.id);
+      const bstate = await this.queues.jobState(queue, job.id);
       if (bstate && bstate !== 'active') {
         await this.store.update(job.id, { status: MigrationStatus.QUEUED }).catch(() => undefined);
         continue;
@@ -177,12 +197,26 @@ export class MigrationWorkers {
         await this.store.update(job.id, { status: MigrationStatus.STOPPED });
         continue;
       }
-      logger.warn('[SlackMigration] reclaiming orphaned migration after restart', {
-        id: job.id, status: job.status, queue: job.currentQueue,
-      });
-      await this.store.update(job.id, { status: MigrationStatus.QUEUED }).catch(() => undefined); // waiting to resume, not running
-      await this.queues.enqueue(job.currentQueue, job.id, job.backfill ? 'front' : 'end'); // a backfill keeps its priority
+      await this.reclaim(job, queue);
     }
+  }
+
+  /** A pod died mid-run: the job was interrupted, not failed, so it resumes at the FRONT of its queue. */
+  private async reclaim(job: MigrationJob, queue: string): Promise<void> {
+    const progress = progressMark(job);
+    const count = job.reclaims?.progress === progress ? job.reclaims.count + 1 : 1;
+    if (count > MAX_IDLE_RECLAIMS) {
+      logger.error('[SlackMigration] migration keeps dying without progress — marking failed (resumable)', { id: job.id, status: job.status, reclaims: count });
+      await this.store.update(job.id, {
+        status: MigrationStatus.FAILED,
+        reclaims: undefined,
+        error: `Interrupted ${count} times in a row without progress. Resume to retry from the last checkpoint.`,
+      }).catch(() => undefined);
+      return;
+    }
+    logger.warn('[SlackMigration] reclaiming orphaned migration after restart', { id: job.id, status: job.status, queue, reclaims: count });
+    await this.store.update(job.id, { status: MigrationStatus.QUEUED, reclaims: { count, progress } }).catch(() => undefined); // waiting to resume, not running
+    await this.queues.enqueue(queue, job.id, 'front');
   }
 
   private async collect(job: MigrationJob): Promise<void> {
@@ -504,9 +538,14 @@ export class MigrationWorkers {
   }
 
   /** Loads the record, runs a heartbeat ticker, and centralizes failure marking. */
-  private async guard(id: string, work: (job: MigrationJob) => Promise<void>): Promise<void> {
+  private async guard(phase: QueueName, id: string, work: (job: MigrationJob) => Promise<void>): Promise<void> {
     const job = await this.store.findById(id);
     if (!job) return;
+    // A leftover copy (cutover / rollout overlap) must not re-run a phase the job has left, or a job that's settled.
+    if (job.currentQueue !== phase || SETTLED.includes(job.status)) {
+      logger.warn('[SlackMigration] skipping stale delivery', { id, phase, currentQueue: job.currentQueue, status: job.status });
+      return;
+    }
     logger.info('[SlackMigration] worker picked up job', { id, queue: job.currentQueue, status: job.status });
     await this.store.markProgress(id).catch(() => undefined); // fresh stall window on pickup — don't inherit a prior attempt's stale progressAt
     const heartbeat = setInterval(() => void this.store.heartbeat(id).catch(() => undefined), HEARTBEAT_MS);

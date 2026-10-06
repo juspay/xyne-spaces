@@ -15,6 +15,7 @@ export enum MigrationStatus {
   COMPLETED = 'COMPLETED',
 }
 
+/** A job's phase. Each maps to a Bull queue via queueFor() — collection is per workspace. */
 export enum QueueName {
   COLLECTION = 'slack-migration-collection',
   INGESTION = 'slack-migration-ingestion',
@@ -86,6 +87,7 @@ export interface MigrationJob {
   stopReason?: 'admin' | 'system';
   heartbeatAt: number;          // liveness: bumped by the heartbeat ticker AND every write
   progressAt?: number;          // forward progress: bumped only when a page/conversation actually advances — drives the stall watchdog
+  reclaims?: { count: number; progress: string }; // consecutive restarts survived without progress (see reconcile)
   createdAt: number;
   updatedAt: number;
   completedAt?: number;

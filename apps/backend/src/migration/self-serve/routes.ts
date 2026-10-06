@@ -90,10 +90,10 @@ export function buildRouter(service: SlackMigrationService): Router {
   router.post('/migration-jobs/:id/prioritize', admin, wrap(async (req, res) => { res.json(ok(await service.prioritize(req.params.id, actorOf(req)))); }));
   router.delete('/migration-jobs/:id', admin, wrap(async (req, res) => { await service.remove(req.params.id, actorOf(req)); res.json(ok({ deleted: true })); }));
   router.post('/queues/:queue/pause', admin, wrap(async (req, res) => {
-    await service.pauseQueue(req.params.queue as QueueName); res.json(ok({ paused: req.params.queue }));
+    await service.pauseQueue(actorOf(req), req.params.queue as QueueName); res.json(ok({ paused: req.params.queue }));
   }));
   router.post('/queues/:queue/resume', admin, wrap(async (req, res) => {
-    await service.resumeQueue(req.params.queue as QueueName); res.json(ok({ resumed: req.params.queue }));
+    await service.resumeQueue(actorOf(req), req.params.queue as QueueName); res.json(ok({ resumed: req.params.queue }));
   }));
 
   // Scoped error handler → consistent envelope

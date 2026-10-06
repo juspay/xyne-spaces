@@ -1,7 +1,7 @@
 import { metrics } from '@opentelemetry/api';
 import { config } from '@/config/env';
 import { logger } from '@/utils/logger';
-import { MigrationQueues } from './queues';
+import { MigrationQueues, queueFor } from './queues';
 import { MigrationStore } from './store';
 import { MigrationStatus, MigrationType, QueueName } from './types';
 
@@ -9,18 +9,20 @@ import { MigrationStatus, MigrationType, QueueName } from './types';
  * OpenTelemetry gauges for the self-serve Slack migration, mirroring the Vespa backfill queue metrics
  * (services/otel/vespaMetrics.ts). Each is an observable gauge sampled at scrape time:
  *
- *   slack_migration_queue_{waiting,active,completed,failed,delayed,total}{queue="<name>"}
- *   slack_migration_jobs{status="<MigrationStatus>"}
+ *   slack_migration_queue_{waiting,active,completed,failed,delayed,total}{queue="<name>"[, workspace="<id>"]}
+ *   slack_migration_{jobs,messages,conversations}{status="<MigrationStatus>", type="<MigrationType>", workspace="<id>"}
+ *
+ * Collection queues are per workspace, so they carry a `workspace` label; ingestion is shared and has none.
  *
  * Register on the primary instance only (the counts are Redis/DB-global, so one reporter avoids N× series).
  */
 const QUEUE_STATES = ['waiting', 'active', 'completed', 'failed', 'delayed', 'total'] as const;
-const QUEUE_NAMES = [QueueName.COLLECTION, QueueName.INGESTION, QueueName.CONV_INGEST];
+const GLOBAL_QUEUES = [QueueName.INGESTION, QueueName.CONV_INGEST];
 
 // Short cache so many scrapes (or multiple scrapers) don't each run a store.list(). The cached promise is shared
 // by concurrent scrapes, and dropped on failure so the next scrape retries.
 const JOB_AGG_TTL_MS = 15_000;
-type Bucket = { status: string; type: string; jobs: number; messages: number; conversations: number };
+type Bucket = { workspace: string; status: string; type: string; jobs: number; messages: number; conversations: number };
 type JobAggregate = Record<string, Bucket>;
 let _aggCache: { at: number; value: Promise<JobAggregate> } | null = null;
 
@@ -29,11 +31,14 @@ function sampleJobAggregate(store: MigrationStore): Promise<JobAggregate> {
   if (_aggCache && now - _aggCache.at < JOB_AGG_TTL_MS) return _aggCache.value;
   const value = (async () => {
     const agg: JobAggregate = {};
-    // Pre-seed every status×type so absent combinations report 0 (stable series, no gaps).
-    for (const s of Object.values(MigrationStatus))
-      for (const t of Object.values(MigrationType)) agg[`${s}::${t}`] = { status: s, type: t, jobs: 0, messages: 0, conversations: 0 };
-    for (const j of await store.list(5000, 0)) {
-      const a = (agg[`${j.status}::${j.type}`] ??= { status: j.status, type: j.type, jobs: 0, messages: 0, conversations: 0 });
+    const jobs = await store.list(5000, 0);
+    // Pre-seed every status×type per workspace so absent combinations report 0 (stable series, no gaps).
+    for (const workspace of new Set(jobs.map((j) => j.workspaceId)))
+      for (const status of Object.values(MigrationStatus))
+        for (const type of Object.values(MigrationType))
+          agg[`${workspace}::${status}::${type}`] = { workspace, status, type, jobs: 0, messages: 0, conversations: 0 };
+    for (const j of jobs) {
+      const a = (agg[`${j.workspaceId}::${j.status}::${j.type}`] ??= { workspace: j.workspaceId, status: j.status, type: j.type, jobs: 0, messages: 0, conversations: 0 });
       a.jobs += 1;
       a.messages += j.stats?.messages ?? 0;
       a.conversations += j.stats?.conversations ?? 0;
@@ -43,6 +48,15 @@ function sampleJobAggregate(store: MigrationStore): Promise<JobAggregate> {
   _aggCache = { at: now, value };
   value.catch(() => { if (_aggCache?.value === value) _aggCache = null; });
   return value;
+}
+
+/** One collection lane per workspace that has jobs, plus the shared ingestion queues. */
+async function queueSeries(store: MigrationStore): Promise<{ name: string; attrs: Record<string, string> }[]> {
+  const workspaces = new Set(Object.values(await sampleJobAggregate(store)).map((a) => a.workspace));
+  return [
+    ...[...workspaces].map((workspace) => ({ name: queueFor(QueueName.COLLECTION, workspace), attrs: { queue: QueueName.COLLECTION, workspace } })),
+    ...GLOBAL_QUEUES.map((name) => ({ name, attrs: { queue: name } })),
+  ];
 }
 
 let _registered = false;
@@ -63,10 +77,14 @@ export function registerMigrationMetrics(queues: MigrationQueues, store: Migrati
       })
       .addCallback(async (result) => {
         if (!isLeader()) return;
-        for (const name of QUEUE_NAMES) {
+        const series = await queueSeries(store).catch((e: unknown) => {
+          logger.warn('[SlackMigration] queue metric sample failed', { state, error: e instanceof Error ? e.message : String(e) });
+          return [];
+        });
+        for (const { name, attrs } of series) {
           try {
             const stats = await queues.getStats(name);
-            result.observe(stats[state], { queue: name });
+            result.observe(stats[state], attrs);
           } catch (e) {
             logger.warn('[SlackMigration] queue metric sample failed', { queue: name, state, error: e instanceof Error ? e.message : String(e) });
           }
@@ -88,7 +106,7 @@ export function registerMigrationMetrics(queues: MigrationQueues, store: Migrati
       try {
         const agg = await sampleJobAggregate(store);
         for (const a of Object.values(agg)) {
-          const attrs = { status: a.status, type: a.type };
+          const attrs = { status: a.status, type: a.type, workspace: a.workspace };
           result.observe(jobsGauge, a.jobs, attrs);
           result.observe(messagesGauge, a.messages, attrs);
           result.observe(conversationsGauge, a.conversations, attrs);

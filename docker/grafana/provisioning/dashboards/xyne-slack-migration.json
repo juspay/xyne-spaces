@@ -34,6 +34,21 @@
         "current": {},
         "hide": 0,
         "refresh": 1
+      },
+      {
+        "name": "workspace",
+        "label": "Workspace",
+        "type": "query",
+        "datasource": { "type": "prometheus", "uid": "${DS_PROM}" },
+        "definition": "label_values(slack_migration_jobs, workspace)",
+        "query": { "query": "label_values(slack_migration_jobs, workspace)", "refId": "workspace" },
+        "multi": true,
+        "includeAll": true,
+        "allValue": ".*",
+        "current": {},
+        "hide": 0,
+        "refresh": 2,
+        "sort": 1
       }
     ]
   },
@@ -45,7 +60,7 @@
       "gridPos": { "h": 4, "w": 4, "x": 0, "y": 0 },
       "fieldConfig": { "defaults": { "unit": "short", "color": { "mode": "fixed", "fixedColor": "green" } }, "overrides": [] },
       "options": { "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "colorMode": "value", "graphMode": "area", "textMode": "value" },
-      "targets": [{ "instant": true, "refId": "A", "expr": "sum(slack_migration_messages{status=\"COMPLETED\"})" }]
+      "targets": [{ "instant": true, "refId": "A", "expr": "sum(slack_migration_messages{status=\"COMPLETED\", workspace=~\"$workspace\"})" }]
     },
     {
       "type": "stat",
@@ -54,7 +69,7 @@
       "gridPos": { "h": 4, "w": 4, "x": 4, "y": 0 },
       "fieldConfig": { "defaults": { "unit": "short", "color": { "mode": "fixed", "fixedColor": "blue" } }, "overrides": [] },
       "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "colorMode": "value", "graphMode": "none", "textMode": "value" },
-      "targets": [{ "instant": true, "refId": "A", "expr": "sum(slack_migration_jobs{status=\"COMPLETED\", type=\"CHANNEL\"})" }]
+      "targets": [{ "instant": true, "refId": "A", "expr": "sum(slack_migration_jobs{status=\"COMPLETED\", type=\"CHANNEL\", workspace=~\"$workspace\"})" }]
     },
     {
       "type": "stat",
@@ -63,7 +78,7 @@
       "gridPos": { "h": 4, "w": 4, "x": 8, "y": 0 },
       "fieldConfig": { "defaults": { "unit": "short", "color": { "mode": "fixed", "fixedColor": "purple" } }, "overrides": [] },
       "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "colorMode": "value", "graphMode": "none", "textMode": "value" },
-      "targets": [{ "instant": true, "refId": "A", "expr": "sum(slack_migration_jobs{status=\"COMPLETED\", type=\"DM\"})" }]
+      "targets": [{ "instant": true, "refId": "A", "expr": "sum(slack_migration_jobs{status=\"COMPLETED\", type=\"DM\", workspace=~\"$workspace\"})" }]
     },
     {
       "type": "stat",
@@ -72,7 +87,7 @@
       "gridPos": { "h": 4, "w": 4, "x": 12, "y": 0 },
       "fieldConfig": { "defaults": { "unit": "short", "color": { "mode": "fixed", "fixedColor": "green" } }, "overrides": [] },
       "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "colorMode": "value", "graphMode": "none", "textMode": "value" },
-      "targets": [{ "instant": true, "refId": "A", "expr": "sum(slack_migration_conversations{status=\"COMPLETED\"})" }]
+      "targets": [{ "instant": true, "refId": "A", "expr": "sum(slack_migration_conversations{status=\"COMPLETED\", workspace=~\"$workspace\"})" }]
     },
     {
       "type": "stat",
@@ -81,7 +96,7 @@
       "gridPos": { "h": 4, "w": 4, "x": 16, "y": 0 },
       "fieldConfig": { "defaults": { "unit": "short", "color": { "mode": "fixed", "fixedColor": "orange" } }, "overrides": [] },
       "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "colorMode": "value", "graphMode": "none", "textMode": "value" },
-      "targets": [{ "instant": true, "refId": "A", "expr": "sum(slack_migration_jobs{status=\"AWAITING_APPROVAL\"})" }]
+      "targets": [{ "instant": true, "refId": "A", "expr": "sum(slack_migration_jobs{status=\"AWAITING_APPROVAL\", workspace=~\"$workspace\"})" }]
     },
     {
       "type": "stat",
@@ -90,7 +105,7 @@
       "gridPos": { "h": 4, "w": 4, "x": 20, "y": 0 },
       "fieldConfig": { "defaults": { "unit": "short", "color": { "mode": "thresholds" }, "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": 0 }, { "color": "red", "value": 1 }] } }, "overrides": [] },
       "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "colorMode": "background", "graphMode": "none", "textMode": "value" },
-      "targets": [{ "instant": true, "refId": "A", "expr": "sum(slack_migration_jobs{status=\"FAILED\"})" }]
+      "targets": [{ "instant": true, "refId": "A", "expr": "sum(slack_migration_jobs{status=\"FAILED\", workspace=~\"$workspace\"})" }]
     },
     {
       "type": "timeseries",
@@ -99,7 +114,7 @@
       "gridPos": { "h": 8, "w": 12, "x": 0, "y": 4 },
       "fieldConfig": { "defaults": { "unit": "short", "color": { "mode": "palette-classic" }, "custom": { "drawStyle": "line", "fillOpacity": 10, "stacking": { "mode": "none" } } }, "overrides": [] },
       "options": { "legend": { "displayMode": "table", "placement": "right", "calcs": ["lastNotNull"] }, "tooltip": { "mode": "multi" } },
-      "targets": [{ "refId": "A", "expr": "sum by (status) (slack_migration_jobs)", "legendFormat": "{{status}}" }]
+      "targets": [{ "refId": "A", "expr": "sum by (status) (slack_migration_jobs{workspace=~\"$workspace\"})", "legendFormat": "{{status}}" }]
     },
     {
       "type": "timeseries",
@@ -109,8 +124,8 @@
       "fieldConfig": { "defaults": { "unit": "short", "color": { "mode": "palette-classic" }, "custom": { "drawStyle": "line", "fillOpacity": 10 } }, "overrides": [] },
       "options": { "legend": { "displayMode": "table", "placement": "right", "calcs": ["lastNotNull", "max"] }, "tooltip": { "mode": "multi" } },
       "targets": [
-        { "refId": "A", "expr": "sum by (queue) (slack_migration_queue_waiting)", "legendFormat": "wait · {{queue}}" },
-        { "refId": "B", "expr": "sum by (queue) (slack_migration_queue_active)", "legendFormat": "active · {{queue}}" }
+        { "refId": "A", "expr": "sum by (queue, workspace) (slack_migration_queue_waiting{workspace=~\"$workspace|\"})", "legendFormat": "wait · {{queue}} {{workspace}}" },
+        { "refId": "B", "expr": "sum by (queue, workspace) (slack_migration_queue_active{workspace=~\"$workspace|\"})", "legendFormat": "active · {{queue}} {{workspace}}" }
       ]
     },
     {
@@ -120,7 +135,7 @@
       "gridPos": { "h": 8, "w": 8, "x": 0, "y": 12 },
       "fieldConfig": { "defaults": { "unit": "short", "color": { "mode": "palette-classic" } }, "overrides": [] },
       "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "pieType": "donut", "legend": { "displayMode": "list", "placement": "right", "values": ["value"] } },
-      "targets": [{ "instant": true, "refId": "A", "expr": "sum by (type) (slack_migration_jobs{status=\"COMPLETED\"})", "legendFormat": "{{type}}" }]
+      "targets": [{ "instant": true, "refId": "A", "expr": "sum by (type) (slack_migration_jobs{status=\"COMPLETED\", workspace=~\"$workspace\"})", "legendFormat": "{{type}}" }]
     },
     {
       "type": "logs",

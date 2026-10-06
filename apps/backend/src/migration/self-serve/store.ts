@@ -46,6 +46,7 @@ function encodePatch(patch: Partial<MigrationJob>): { set: Record<string, string
       case 'channelProgress':
       case 'issues':
       case 'filesCollected':
+      case 'reclaims':
         set[k] = JSON.stringify(v);
         break;
       default:
@@ -300,6 +301,7 @@ function decode(h: Record<string, string>): MigrationJob {
     stopReason: opt('stopReason') as MigrationJob['stopReason'],
     heartbeatAt: numReq('heartbeatAt'),
     progressAt: numOpt('progressAt'),
+    reclaims: h.reclaims ? (JSON.parse(h.reclaims) as MigrationJob['reclaims']) : undefined,
     createdAt: numReq('createdAt'),
     updatedAt: numReq('updatedAt'),
     completedAt: numOpt('completedAt'),
