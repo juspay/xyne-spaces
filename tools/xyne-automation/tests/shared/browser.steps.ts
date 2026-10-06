@@ -79,11 +79,20 @@ async function openCustomizeToolbarDialog(page: Page): Promise<Locator> {
   // The "Customize toolbar" button sits at the bottom of a max-h-[80vh] overflow-y-auto
   // popover in AppSidebar, so when the user has many More-overflow items it starts
   // below the fold. Attach + scroll before the visibility wait; otherwise the wait
-  // times out even though the button is rendered.
+  // times out even though the button is rendered. The More popover can also
+  // auto-close on focus loss between the caller's open-click and our wait, so
+  // re-open via nav-more if the Customize row is attached but not visible.
   const customizeTrigger = page.locator("[data-testid='more-customize-toolbar']").first();
   await customizeTrigger.waitFor({ state: 'attached', timeout: SIDEBAR_NAVIGATION_TIMEOUT_MS });
   await customizeTrigger.scrollIntoViewIfNeeded().catch(() => {});
-  await customizeTrigger.waitFor({ state: 'visible', timeout: SIDEBAR_NAVIGATION_TIMEOUT_MS });
+  try {
+    await customizeTrigger.waitFor({ state: 'visible', timeout: 2000 });
+  } catch {
+    await page.locator("[data-testid='nav-more']").first().click();
+    await customizeTrigger.waitFor({ state: 'attached', timeout: SIDEBAR_NAVIGATION_TIMEOUT_MS });
+    await customizeTrigger.scrollIntoViewIfNeeded().catch(() => {});
+    await customizeTrigger.waitFor({ state: 'visible', timeout: SIDEBAR_NAVIGATION_TIMEOUT_MS });
+  }
   await customizeTrigger.click();
   // Preferences opens via a custom event + lazy section mount; wait for the
   // dialog shell before poking at anything inside it.

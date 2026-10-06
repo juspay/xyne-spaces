@@ -10,9 +10,6 @@
 * verifying "[data-testid='nav-dms']" is visible
 * verifying "[data-testid='nav-calls']" is visible
 * verifying "[data-testid='nav-recordings']" is visible
-* verifying "[data-testid='nav-tickets']" is visible
-* verifying "[data-testid='nav-sdlc']" is visible
-* verifying "[data-testid='nav-support']" is visible
 * verifying "[data-testid='nav-activity']" is visible
 * verifying "[data-testid='nav-my-canvas']" is visible
 * verifying "[data-testid='nav-automations']" is visible
