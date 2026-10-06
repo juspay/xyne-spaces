@@ -32,7 +32,7 @@ import {
 import { db } from '@/database/client';
 import { repositories } from '@/database/repositories';
 import { withWorkspaceScope } from '@/database/tenant/context';
-import { mutateTicketUpdatesCardTx } from '@/bypassAcl/transactions/callTicketUpdateService';
+import { mutateTicketUpdatesCard } from '@/services/callTicketUpdateCard';
 import { logger } from '@/utils/logger';
 import { unifiedBotUserService } from '@/bots/unified/services/unified-bot-user-service.js';
 import { executeCallLlmWithRetry } from './callLlmRetry';
@@ -576,7 +576,7 @@ export class CallTicketUpdateService {
       // rest of the pending rows are replaced by the new proposals. A proposal
       // for a ticket that already has a pending row keeps that row's updateId,
       // so a draft or an Approve on an open card still finds its row.
-      const merged = await mutateTicketUpdatesCardTx(existing.messageId, (doc) => {
+      const merged = await mutateTicketUpdatesCard(existing.messageId, (doc) => {
         const inFlight = doc.updates.filter((u) => isTicketUpdateClaimFresh(u.claim));
         const settled = new Set([...doc.applied, ...doc.ignored, ...inFlight].map((x) => x.ticketId));
         const pendingIds = new Map(doc.updates.map((u) => [u.ticketId, u.updateId]));
@@ -741,14 +741,18 @@ export class CallTicketUpdateService {
     }
 
     // Claim the row before any side effect. Two approvals of the same row race
-    // here, under the card's row lock, and only one gets past. A live claim
-    // blocks its own author too, so a double submit cannot apply twice; a claim
-    // is released on failure and otherwise expires.
-    const claim = await mutateTicketUpdatesCardTx(message.messageId, (doc) => {
+    // here and only one gets past: the card write is retried on a lost race, and
+    // the claim's token tells a retry its own claim from another's. A live claim
+    // blocks its own author too (a double submit carries a new token), so it
+    // cannot apply twice; a claim is released on failure and otherwise expires.
+    const claimToken = randomUUID();
+    const claim = await mutateTicketUpdatesCard(message.messageId, (doc) => {
       const row = doc.updates.find((u) => u.updateId === updateId);
       if (!row) return { result: 'handled' as const };
-      if (isTicketUpdateClaimFresh(row.claim)) return { result: 'claimed' as const };
-      row.claim = { by: userId, at: new Date().toISOString() };
+      if (isTicketUpdateClaimFresh(row.claim)) {
+        return { result: row.claim.token === claimToken ? ('ok' as const) : ('claimed' as const) };
+      }
+      row.claim = { by: userId, at: new Date().toISOString(), token: claimToken };
       return { doc, result: 'ok' as const };
     });
     if (!claim.found || claim.result === 'handled') {
@@ -759,9 +763,9 @@ export class CallTicketUpdateService {
     }
 
     const releaseClaim = () =>
-      mutateTicketUpdatesCardTx(message.messageId, (doc) => {
+      mutateTicketUpdatesCard(message.messageId, (doc) => {
         const row = doc.updates.find((u) => u.updateId === updateId);
-        if (!row || row.claim?.by !== userId) return { result: null };
+        if (!row || row.claim?.token !== claimToken) return { result: null };
         row.claim = null;
         return { doc, result: null };
       }).catch((error) => logger.error(`[${callExternalId}] ticket_update_claim_release_failed`, { update_id: updateId, error }));
@@ -810,7 +814,7 @@ export class CallTicketUpdateService {
         newStatusV2,
         stagePendingApproval,
       };
-      const finalised = await mutateTicketUpdatesCardTx(message.messageId, (doc) => ({
+      const finalised = await mutateTicketUpdatesCard(message.messageId, (doc) => ({
         doc: {
           updates: doc.updates.filter((u) => u.updateId !== updateId),
           applied: [...doc.applied.filter((a) => a.updateId !== updateId), applied],
@@ -967,9 +971,13 @@ export class CallTicketUpdateService {
       ignoredBy: userId,
       ignoredAt: new Date().toISOString(),
     };
-    const written = await mutateTicketUpdatesCardTx(message.messageId, (doc) => {
+    const written = await mutateTicketUpdatesCard(message.messageId, (doc) => {
       const row = doc.updates.find((u) => u.updateId === updateId);
-      if (!row) return { result: 'handled' as const };
+      // Gone because our own retried write already landed, or handled by someone else.
+      if (!row) {
+        const ours = doc.ignored.some((i) => i.updateId === updateId && i.ignoredBy === userId);
+        return { result: ours ? ('ok' as const) : ('handled' as const) };
+      }
       if (isTicketUpdateClaimFresh(row.claim)) return { result: 'claimed' as const };
       return {
         doc: {

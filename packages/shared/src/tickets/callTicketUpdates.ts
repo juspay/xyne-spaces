@@ -20,6 +20,8 @@ export type TicketUpdateMatchedBy = 'xyne-id' | 'title' | 'number-only';
 export interface TicketUpdateClaim {
   by: string;
   at: string;
+  /** Set by the approval that made the claim, so a retried write can tell its own claim from another's. */
+  token?: string;
 }
 
 export interface TicketUpdateProposal {
@@ -103,7 +105,8 @@ function toClaim(raw: unknown): TicketUpdateClaim | null {
   const claim = raw as Record<string, unknown>;
   const by = str(claim['by']);
   const at = str(claim['at']);
-  return by && at ? { by, at } : null;
+  const token = str(claim['token']);
+  return by && at ? { by, at, ...(token ? { token } : {}) } : null;
 }
 
 function toProposal(raw: Record<string, unknown>): TicketUpdateProposal | null {
