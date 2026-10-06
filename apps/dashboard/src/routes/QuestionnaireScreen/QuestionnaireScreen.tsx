@@ -23,6 +23,7 @@ import {
   uploadProfilePicture as uploadProfilePictureViaApi,
 } from '../../services/userProfile/userProfileService';
 import { v4 as uuidv4 } from 'uuid';
+import { clearOrgCreator, getCreatedOrgName } from '../../utils/onboardingOrgCreator';
 import type { LocalHarnessInstallation } from '../../types/electron';
 import {
   LocalHarnessStepPanel,
@@ -48,7 +49,6 @@ type TeamSize = (typeof TEAM_SIZE_OPTIONS)[number];
 interface OnboardingDraft {
   displayName?: string;
   role?: string;
-  companyName?: string;
   companySize?: TeamSize | '';
   photoFileName?: string;
 }
@@ -80,7 +80,11 @@ const QuestionnaireScreen = (): ReactElement | null => {
 
   const [displayName, setDisplayName] = useState(user?.['displayName'] || user?.name || '');
   const [role, setRole] = useState('');
-  const [companyName, setCompanyName] = useState('');
+  const createdOrgName = getCreatedOrgName(user?.email);
+  const hasCompanyStep = createdOrgName !== null;
+  // Steps fetched async (invite, harness) slot in after this index; skip them once the user is past it
+  const lastFixedStepIndexRef = useRef(0);
+  lastFixedStepIndexRef.current = hasCompanyStep ? 1 : 0;
   const [companySize, setCompanySize] = useState<TeamSize | ''>('');
   const [photoPreviewUrl, setPhotoPreviewUrl] = useState<string | null>(null);
   const [photoFileName, setPhotoFileName] = useState('');
@@ -101,7 +105,7 @@ const QuestionnaireScreen = (): ReactElement | null => {
 
   const steps: StepKey[] = [
     'name',
-    'company',
+    ...(hasCompanyStep ? (['company'] as StepKey[]) : []),
     ...(contactsState.status === 'ready' ? (['invite'] as StepKey[]) : []),
     ...(harnesses.length > 0 ? (['harness'] as StepKey[]) : []),
     'ai',
@@ -118,7 +122,6 @@ const QuestionnaireScreen = (): ReactElement | null => {
       const draft = JSON.parse(raw) as OnboardingDraft;
       if (draft.displayName) setDisplayName(draft.displayName);
       if (draft.role) setRole(draft.role);
-      if (draft.companyName) setCompanyName(draft.companyName);
       if (draft.companySize && (TEAM_SIZE_OPTIONS as readonly string[]).includes(draft.companySize))
         setCompanySize(draft.companySize);
       if (draft.photoFileName) setPhotoFileName(draft.photoFileName);
@@ -133,7 +136,6 @@ const QuestionnaireScreen = (): ReactElement | null => {
       const draft: OnboardingDraft = {
         displayName,
         role,
-        companyName,
         companySize,
         photoFileName,
       };
@@ -141,7 +143,7 @@ const QuestionnaireScreen = (): ReactElement | null => {
     } catch {
       // Storage may be unavailable (e.g. private mode); persistence is best-effort
     }
-  }, [draftStorageKey, displayName, role, companyName, companySize, photoFileName]);
+  }, [draftStorageKey, displayName, role, companySize, photoFileName]);
 
   useEffect(() => {
     const hash = `#${clampedStep + 1}`;
@@ -163,7 +165,7 @@ const QuestionnaireScreen = (): ReactElement | null => {
     let cancelled = false;
     void Promise.all([api.detect(), api.getStatus()])
       .then(([found, status]) => {
-        if (cancelled || currentStepRef.current > 1) return;
+        if (cancelled || currentStepRef.current > lastFixedStepIndexRef.current) return;
         setHarnesses(found.filter(install => install.authenticated));
         setHarnessDevice({ name: machineLabel(status.deviceName), platform: status.platform });
       })
@@ -175,7 +177,7 @@ const QuestionnaireScreen = (): ReactElement | null => {
 
   /**
    * Prefetch the user's contacts on mount so the invite step is ready by the time
-   * the user gets past the company step.
+   * the user gets past the name/company steps.
    */
   useEffect(() => {
     let cancelled = false;
@@ -186,7 +188,7 @@ const QuestionnaireScreen = (): ReactElement | null => {
           result.connected &&
           result.provider &&
           result.contacts.length > 0 &&
-          currentStepRef.current <= 1
+          currentStepRef.current <= lastFixedStepIndexRef.current
         ) {
           setContactsState({
             status: 'ready',
@@ -254,15 +256,15 @@ const QuestionnaireScreen = (): ReactElement | null => {
       await saveQuestionnaireResponse({
         questionnaireType: 'onboarding',
         payload: {
-          ...(companyName.trim()
+          ...(createdOrgName?.trim()
             ? {
                 company_name: {
                   question: 'Company name',
-                  answer: companyName.trim(),
+                  answer: createdOrgName.trim(),
                 },
               }
             : {}),
-          ...(companySize
+          ...(hasCompanyStep && companySize
             ? {
                 company_size: {
                   question: 'Company size',
@@ -281,6 +283,7 @@ const QuestionnaireScreen = (): ReactElement | null => {
     } catch {
       // Best-effort cleanup
     }
+    clearOrgCreator(user?.email);
 
     if (user?.id) markJustOnboarded(user.id);
     authActor.send({ type: 'COMPLETE_ONBOARDING' });
@@ -294,7 +297,7 @@ const QuestionnaireScreen = (): ReactElement | null => {
 
   const canAdvance = (): boolean => {
     if (step === 'name') return displayName.trim().length > 0;
-    if (step === 'company') return companyName.trim().length > 0 && companySize !== '';
+    if (step === 'company') return companySize !== '';
     return true;
   };
 
@@ -517,22 +520,6 @@ const QuestionnaireScreen = (): ReactElement | null => {
 
             <div className='mt-[54px]'>
               <p className='text-[14px] leading-[20px] font-semibold text-[#272B35]'>
-                Company name
-              </p>
-              <input
-                type='text'
-                value={companyName}
-                onChange={e => setCompanyName(e.target.value)}
-                placeholder='Ex: Nike'
-                autoComplete='organization'
-                className='mt-[12px] h-[44px] w-full px-[13px] border border-[#DDE3EC] rounded-[9px] bg-white text-[#272B35] text-[14px] placeholder:text-[#B2B6BE] focus:outline-none focus:border-[#AEB7C5] transition-colors'
-                data-track-category='Questionnaire'
-                data-track-name='CompanyNameInput'
-              />
-            </div>
-
-            <div className='mt-[28px]'>
-              <p className='text-[14px] leading-[20px] font-semibold text-[#272B35]'>
                 Company size
               </p>
               <div
@@ -578,7 +565,7 @@ const QuestionnaireScreen = (): ReactElement | null => {
               <button
                 type='button'
                 onClick={handleNext}
-                disabled={!companyName.trim() || !companySize}
+                disabled={!companySize}
                 className='inline-flex h-[48px] items-center gap-2.5 px-5 bg-[#FF6868] text-white text-[15px] font-semibold rounded-[10px] hover:bg-[#FF5A5A] disabled:bg-[#B9B9B9] disabled:opacity-100 disabled:cursor-not-allowed transition-colors'
                 data-track-category='Questionnaire'
                 data-track-name='Step2Next'
@@ -661,7 +648,7 @@ const QuestionnaireScreen = (): ReactElement | null => {
 
             <div className='absolute left-[11%] top-[164px] z-10 flex h-[84px] w-[468px] max-w-[68%] -translate-y-1/2 items-center rounded-[16px] border border-[#DDE3EC] bg-white px-[22px] shadow-[0_16px_34px_rgba(25,35,55,0.16)]'>
               <span className='max-w-[350px] truncate text-[22px] leading-none font-bold text-[#172032]'>
-                {companyName.trim() || 'Company name'}
+                {createdOrgName?.trim() || 'Company name'}
               </span>
               <span className='ml-4 flex flex-col items-center justify-center gap-0.5 text-[#8B95A6]'>
                 <ChevronUp className='size-4' strokeWidth={2.25} />
