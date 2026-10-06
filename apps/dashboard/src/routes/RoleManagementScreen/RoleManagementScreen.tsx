@@ -17,6 +17,7 @@ import { Panel, ResizableGroup, Separator } from '../../components/ui/Resizable/
 import { cn } from '../../utils/classNames';
 import { getUserDisplayNameById } from '../../utils/userDisplayName';
 import type { Role, UserRoleMapping } from '@xyne/shared';
+import { UserRoleMappingEntityType } from '@xyne/shared';
 import {
   ROLES_SIDEBAR_DEFAULT_WIDTH,
   ROLES_SIDEBAR_MAX_WIDTH,
@@ -499,7 +500,16 @@ export const RoleManagementScreen = (): ReactElement => {
   );
   const displayName = selectedRole?.name ?? listRole?.name ?? '';
   const displayDesc = selectedRole?.description ?? listRole?.description ?? null;
-  const members = useMemo(() => selectedRole?.userMappings ?? [], [selectedRole]);
+  // Role Management manages workspace-level role members; group-scoped bindings
+  // (entityType='USER_GROUP') are managed from the user group screen, so exclude them here.
+  // Workspace rows have a null entityType (legacy/default), so match "not group" to keep them.
+  const members = useMemo(
+    () =>
+      (selectedRole?.userMappings ?? []).filter(
+        m => m.entityType !== UserRoleMappingEntityType.USER_GROUP,
+      ),
+    [selectedRole],
+  );
 
   // ── Inline edit (name + description) ───────────────────────────────────────
   const [editing, setEditing] = useState(false);

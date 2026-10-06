@@ -6,6 +6,7 @@ import Input from '../../ui/Input/Input';
 import Textarea from '../../ui/Textarea/Textarea';
 import { UserManagement } from '../UserManagement';
 import type { UserGroup, User } from '@xyne/shared';
+import { UserRoleMappingEntityType } from '@xyne/shared';
 import { queries } from '../../../zero/queries';
 import { useCachedQuery } from '../../../hooks/useCachedQuery';
 import { usePlatform } from '../../../hooks/usePlatform';
@@ -23,7 +24,7 @@ interface UserGroupFormProps {
     alias?: string;
     description?: string;
     userIds?: string[];
-    userRoleUpdates?: Record<string, string>;
+    userRoleUpdates?: Record<string, string[]>;
   }) => Promise<{ id: string }> | Promise<void> | void;
   onCancel: () => void;
   loading?: boolean;
@@ -40,29 +41,64 @@ export const UserGroupForm = ({
   const [error, setError] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<'about' | 'members'>('about');
   const { isMobile } = usePlatform();
-  // ONE Map - mutate directly
-  const roleIdsRef = useRef<Map<string, string>>(new Map());
+  // ONE Map - mutate directly. userId -> the full set of role ids that user holds in the group.
+  const roleIdsRef = useRef<Map<string, string[]>>(new Map());
   const roleIds = roleIdsRef.current;
+  // Bumped once the map is seeded from server data, so children re-render with it.
+  const [, bumpRoleInit] = useState(0);
+  // Roles are batched and only persisted on submit, so seed from the server exactly ONCE.
+  // Rebuilding on every query change would wipe pending local selections mid-edit.
+  const roleInitDoneRef = useRef(false);
+  // Snapshot of the seeded (server) role sets, so submit can send ONLY the members whose
+  // roles actually changed instead of the whole group.
+  const seededRolesRef = useRef<Map<string, string[]>>(new Map());
 
   // Load server data
-  const [userGroupMembers] = useCachedQuery(
+  const [userGroupMembers, membersDetails] = useCachedQuery(
     userGroup
       ? queries.getUserGroupMembers({ userGroupId: userGroup.id })
       : queries.getUserGroupMembers({ userGroupId: '' }),
     { enabled: isEdit && !!userGroup },
   );
 
-  // Initialize from server data
+  // Group-scoped role bindings (user_role_mappings, entityType=USER_GROUP).
+  const [groupRoleMappings, groupRolesDetails] = useCachedQuery(
+    queries.getRoleMappingsByEntity({
+      entityType: UserRoleMappingEntityType.USER_GROUP,
+      entityId: userGroup?.id ?? '',
+    }),
+    { enabled: isEdit && !!userGroup },
+  );
+
+  // Seed once from server data: each member's roles = union of the new user_role_mappings
+  // rows and the legacy user_group_mappings.roleId (when non-null). Gated on BOTH queries
+  // being FRESH (server-synced, not a stale cache hit) so reopening right after an edit can't
+  // seed — and then re-submit — the pre-edit roles.
   useEffect(() => {
-    if (isEdit && userGroupMembers) {
-      roleIdsRef.current.clear();
-      userGroupMembers.forEach(mapping => {
-        if (mapping.roleId) {
-          roleIdsRef.current.set(mapping.userId, mapping.roleId);
-        }
-      });
-    }
-  }, [isEdit, userGroupMembers]);
+    if (!isEdit) return;
+    if (roleInitDoneRef.current) return;
+    if (membersDetails.type !== 'complete' || groupRolesDetails.type !== 'complete') return;
+    if (userGroupMembers === undefined || groupRoleMappings === undefined) return;
+
+    const next = new Map<string, string[]>();
+    const add = (userId: string, roleId: string): void => {
+      const existing = next.get(userId);
+      if (!existing) {
+        next.set(userId, [roleId]);
+      } else if (!existing.includes(roleId)) {
+        existing.push(roleId);
+      }
+    };
+    userGroupMembers.forEach(mapping => {
+      if (mapping.roleId) add(mapping.userId, mapping.roleId);
+    });
+    groupRoleMappings.forEach(m => add(m.userId, m.roleId));
+    roleIdsRef.current = next;
+    // Deep-copy the seeded state so we can diff against it on submit.
+    seededRolesRef.current = new Map([...next].map(([userId, roles]) => [userId, [...roles]]));
+    roleInitDoneRef.current = true;
+    bumpRoleInit(n => n + 1);
+  }, [isEdit, userGroupMembers, groupRoleMappings, membersDetails.type, groupRolesDetails.type]);
 
   const {
     control,
@@ -94,7 +130,7 @@ export const UserGroupForm = ({
           alias?: string;
           description?: string;
           userIds?: string[];
-          userRoleUpdates?: Record<string, string>;
+          userRoleUpdates?: Record<string, string[]>;
         } = {};
 
         if (name.trim() !== userGroup.name) {
@@ -116,9 +152,25 @@ export const UserGroupForm = ({
         // Always include userIds for update
         updateData.userIds = selectedUsers.map(user => user.id);
 
-        // Send ALL role assignments (like form sends all fields)
-        if (roleIds.size > 0) {
-          updateData.userRoleUpdates = Object.fromEntries(roleIds);
+        // Send ONLY the members whose role set changed vs the seeded server state, so a save
+        // is proportional to what was edited rather than the whole group.
+        const seeded = seededRolesRef.current;
+        const sameRoleSet = (a: string[], b: string[]): boolean => {
+          if (a.length !== b.length) return false;
+          const bSet = new Set(b);
+          return a.every(id => bSet.has(id));
+        };
+        const changedRoleUpdates: Record<string, string[]> = {};
+        const affectedUserIds = new Set<string>([...seeded.keys(), ...roleIds.keys()]);
+        for (const userId of affectedUserIds) {
+          const before = seeded.get(userId) ?? [];
+          const after = roleIds.get(userId) ?? [];
+          if (!sameRoleSet(before, after)) {
+            changedRoleUpdates[userId] = after;
+          }
+        }
+        if (Object.keys(changedRoleUpdates).length > 0) {
+          updateData.userRoleUpdates = changedRoleUpdates;
         }
 
         await onSubmit(updateData);
@@ -129,7 +181,7 @@ export const UserGroupForm = ({
           alias?: string;
           description?: string;
           userIds?: string[];
-          userRoleUpdates?: Record<string, string>;
+          userRoleUpdates?: Record<string, string[]>;
         } = {
           name: name.trim(),
         };

@@ -130,6 +130,7 @@ import {
 import { SDLC_HUB_KNOWLEDGE_FOLDER, sdlcIconNameSchema, sdlcTrackStatusSchema } from '@xyne/shared';
 import { isSdlcTreeItemType, refileSdlcFolderEdges } from '@xyne/shared';
 import { MAX_DESK_APPS, MAX_DUPLICATE_SCOPE_FIELDS, serializeDeskAppIds } from '@xyne/shared';
+import { UserRoleMappingEntityType } from '@xyne/shared';
 import {
   evaluateEta,
   buildEtaActivityIntents,
@@ -191,7 +192,7 @@ import { evaluateAssignmentRule, AssignmentType } from '@/utils/assignmentEngine
 import { syncUserWorkload } from '@/utils/workloadUtils';
 import { ticketAssignmentService, primaryUserIdOf } from '@/services/ticketAssignmentService';
 import { calculateETADeadline, calculateWorkingDurationMs } from '@/utils/etaCalculation';
-import { DEFAULT_ROLE_NAME_TO_ENUM } from '@/utils/roleFrameworkUtils';
+import { groupRoleMappingId, DEFAULT_ROLE_NAME_TO_ENUM } from '@/utils/roleFrameworkUtils';
 import { grantPermissionsForRole, syncResourceAdminAccess, syncOrgResourceAdminAccess } from '@/services/permissionMatrix';
 import {
   deleteDraftEntityAttachments,
@@ -277,6 +278,32 @@ async function updateCallParticipantPreview(
     participantCount: participants.length,
     participantPreviewUserIds,
   });
+}
+
+// Legacy responsibilities (MANAGER/TEAM_LEAD/QA/...) a user effectively holds in a group,
+// derived from their user_role_mappings USER_GROUP roles mapped to the 5-enum by role name.
+// The new multi-role UI no longer stamps user_group_mappings.responsibility, so the legacy
+// isAllowedToTransfer ticket-control gate must union these in (see etaPermissions.ts).
+async function getUserGroupResponsibilitiesFromTx(
+  tx: Transaction<Schema>,
+  userId: string,
+  userGroupId: string,
+): Promise<string[]> {
+  const roleRows = await tx.run(
+    zql.user_role_mappings
+      .where('userId', userId)
+      .where('entityType', UserRoleMappingEntityType.USER_GROUP)
+      .where('entityId', userGroupId),
+  );
+  const roleIds = roleRows.map(r => r.roleId);
+  if (roleIds.length === 0) return [];
+  const roles = await tx.run(zql.roles.where('id', 'IN', roleIds));
+  const responsibilities: string[] = [];
+  for (const role of roles) {
+    const responsibility = DEFAULT_ROLE_NAME_TO_ENUM[role.name];
+    if (responsibility) responsibilities.push(responsibility);
+  }
+  return responsibilities;
 }
 
 const storageService = getStorageService();
@@ -6198,6 +6225,19 @@ export function createMutators(
                     ? { roleId: mapping.roleId ?? null, responsibility: mapping.responsibility ?? null }
                     : null;
                 },
+                // Union in the multi-role bindings (user_role_mappings) so roles assigned via
+                // the new UI count toward ticket-control permission, not just legacy roleId.
+                getUserGroupRoleIds: async (userId, userGroupId) => {
+                  const roleRows = await tx.run(
+                    zql.user_role_mappings
+                      .where('userId', userId)
+                      .where('entityType', 'USER_GROUP')
+                      .where('entityId', userGroupId),
+                  );
+                  return roleRows.map(r => r.roleId);
+                },
+                getUserGroupResponsibilities: async (userId, userGroupId) =>
+                  getUserGroupResponsibilitiesFromTx(tx, userId, userGroupId),
               },
             );
             if (!permission.allowed) {
@@ -7132,6 +7172,19 @@ export function createMutators(
                   ? { roleId: mapping.roleId ?? null, responsibility: mapping.responsibility ?? null }
                   : null;
               },
+              // Union in the multi-role bindings (user_role_mappings) so roles assigned via
+              // the new UI count toward ticket-control permission, not just legacy roleId.
+              getUserGroupRoleIds: async (userId, userGroupId) => {
+                const roleRows = await tx.run(
+                  zql.user_role_mappings
+                    .where('userId', userId)
+                    .where('entityType', 'USER_GROUP')
+                    .where('entityId', userGroupId),
+                );
+                return roleRows.map(r => r.roleId);
+              },
+              getUserGroupResponsibilities: async (userId, userGroupId) =>
+                getUserGroupResponsibilitiesFromTx(tx, userId, userGroupId),
             },
           );
           if (!permission.allowed) {
@@ -7366,6 +7419,19 @@ export function createMutators(
                     ? { roleId: mapping.roleId ?? null, responsibility: mapping.responsibility ?? null }
                     : null;
                 },
+                // Union in the multi-role bindings (user_role_mappings) so roles assigned via
+                // the new UI count toward ticket-control permission, not just legacy roleId.
+                getUserGroupRoleIds: async (userId, userGroupId) => {
+                  const roleRows = await tx.run(
+                    zql.user_role_mappings
+                      .where('userId', userId)
+                      .where('entityType', 'USER_GROUP')
+                      .where('entityId', userGroupId),
+                  );
+                  return roleRows.map(r => r.roleId);
+                },
+                getUserGroupResponsibilities: async (userId, userGroupId) =>
+                  getUserGroupResponsibilitiesFromTx(tx, userId, userGroupId),
               },
             );
             if (!permission.allowed) {
@@ -8170,7 +8236,12 @@ export function createMutators(
           userResponsibilityUpdates: z
             .record(z.string(), z.nativeEnum(UserResponsibility))
             .optional(),
-          userRoleUpdates: z.record(z.string(), z.string()).optional(),
+          // Full desired set of group roles per user (multi-role -> user_role_mappings rows).
+          // Backward compatible: accepts the legacy single-role shape (userId -> roleId) and the
+          // new multi-role shape (userId -> roleId[]); both are normalized to an array below.
+          userRoleUpdates: z
+            .record(z.string(), z.union([z.string(), z.array(z.string())]))
+            .optional(),
           timestamp: z.number(),
         }),
         async ({
@@ -8227,21 +8298,86 @@ export function createMutators(
           });
 
           if (userRoleUpdates) {
-            const roleIdsToUpdate = [...new Set(Object.values(userRoleUpdates))];
-            const roles = await tx.run(
-              zql.roles.where('id', 'IN', roleIdsToUpdate).where('workspaceId', userGroup.workspaceId),
-            );
-            for (const [userId, roleId] of Object.entries(userRoleUpdates)) {
+            // Reconcile each user's group roles: adds -> user_role_mappings(USER_GROUP);
+            // removes -> delete the URM row AND clear a matching legacy ugm.roleId so it can't
+            // linger in the union read as a ghost role.
+            // Normalize both the legacy (string) and new (string[]) shapes to an array.
+            const normalizedUpdates: Record<string, string[]> = {};
+            for (const [uid, val] of Object.entries(userRoleUpdates)) {
+              normalizedUpdates[uid] = Array.isArray(val) ? val : [val];
+            }
+            const allDesiredRoleIds = [...new Set(Object.values(normalizedUpdates).flat())];
+            const validRoles = allDesiredRoleIds.length
+              ? await tx.run(
+                  zql.roles.where('id', 'IN', allDesiredRoleIds).where('workspaceId', userGroup.workspaceId),
+                )
+              : [];
+            const validRoleIds = new Set(validRoles.map(r => r.id));
+
+            for (const [userId, desiredRaw] of Object.entries(normalizedUpdates)) {
+              const desiredList = desiredRaw.filter(rid => validRoleIds.has(rid));
+              const desired = new Set(desiredList);
+
               const mapping = await tx.run(
                 zql.user_group_mappings.where('userGroupId', userGroupId).where('userId', userId).one(),
               );
-              if (mapping) {
-                const role = roles.find(r => r.id === roleId);
-                const responsibility = role ? DEFAULT_ROLE_NAME_TO_ENUM[role.name] : null;
+              if (!mapping) continue;
+
+              const urmRows = await tx.run(
+                zql.user_role_mappings
+                  .where('userId', userId)
+                  .where('entityType', UserRoleMappingEntityType.USER_GROUP)
+                  .where('entityId', userGroupId),
+              );
+              const urmByRole = new Map(urmRows.map(r => [r.roleId, r]));
+              const legacyRoleId = mapping.roleId ?? null;
+              const current = new Set<string>(urmByRole.keys());
+              if (legacyRoleId) current.add(legacyRoleId);
+
+              for (const roleId of desired) {
+                if (!current.has(roleId)) {
+                  await tx.mutate.user_role_mappings.insert({
+                    workspaceId: userGroup.workspaceId,
+                    id: groupRoleMappingId(userGroupId, userId, roleId),
+                    userId,
+                    roleId,
+                    entityType: UserRoleMappingEntityType.USER_GROUP,
+                    entityId: userGroupId,
+                    createdAt: timestamp,
+                    updatedAt: timestamp,
+                  });
+                }
+              }
+
+              for (const roleId of current) {
+                if (!desired.has(roleId)) {
+                  const urm = urmByRole.get(roleId);
+                  if (urm) {
+                    await tx.mutate.user_role_mappings.delete({ id: urm.id });
+                  }
+                }
+              }
+
+              // Dual-write the legacy user_group_mappings.roleId/responsibility to the member's
+              // PRIMARY role (first assigned) so the pre-multi-role dashboard - which reads only
+              // ugm.roleId - keeps displaying and syncing roles until it's deployed everywhere.
+              // The full multi-role set still lives in user_role_mappings; this dual-write can be
+              // dropped once the new dashboard is fully rolled out.
+              const primaryRoleId = desiredList[0] ?? null;
+              const primaryRoleName = primaryRoleId
+                ? validRoles.find(r => r.id === primaryRoleId)?.name ?? null
+                : null;
+              const nextResponsibility = primaryRoleName
+                ? DEFAULT_ROLE_NAME_TO_ENUM[primaryRoleName] ?? null
+                : null;
+              if (
+                (mapping.roleId ?? null) !== primaryRoleId ||
+                (mapping.responsibility ?? null) !== (nextResponsibility ?? null)
+              ) {
                 await tx.mutate.user_group_mappings.update({
                   id: mapping.id,
-                  roleId,
-                  ...(responsibility ? { responsibility } : {}),
+                  roleId: primaryRoleId,
+                  responsibility: nextResponsibility,
                   updatedAt: timestamp,
                 });
               }
@@ -8294,6 +8430,16 @@ export function createMutators(
             throw new Error(
               'Cannot delete user group with tickets in terminal status (CANCELLED or COMPLETED)',
             );
+          }
+
+          // Purge group-scoped role bindings first so deleting the group can't orphan grants.
+          const groupRoleRows = await tx.run(
+            zql.user_role_mappings
+              .where('entityType', UserRoleMappingEntityType.USER_GROUP)
+              .where('entityId', userGroupId),
+          );
+          for (const row of groupRoleRows) {
+            await tx.mutate.user_role_mappings.delete({ id: row.id });
           }
 
           // First, delete all mappings associated with the user group
@@ -8382,29 +8528,50 @@ export function createMutators(
           const roles = distinctRoleIds.length
             ? await tx.run(zql.roles.where('id', 'IN', distinctRoleIds).where('workspaceId', userGroup.workspaceId))
             : [];
+          const validRoleIds = new Set(roles.map(r => r.id));
 
           for (const userId of userIdsToAdd) {
             const mappingId = mappingIds[userId];
             if (!mappingId) {
               throw new Error(`mappingId is required for user ${userId}`);
             }
+            // Optional role at add time -> user_role_mappings(USER_GROUP) row.
             const index = userIds.indexOf(userId);
             const roleId = roleIds?.[index];
-            const role = roleId ? roles.find(r => r.id === roleId) : undefined;
-            const responsibility = role ? DEFAULT_ROLE_NAME_TO_ENUM[role.name] : undefined;
+            const validRoleId = roleId && validRoleIds.has(roleId) ? roleId : null;
+            // Dual-write the legacy ugm.roleId/responsibility so the pre-multi-role dashboard
+            // (which reads only ugm.roleId) shows the role until it's deployed everywhere. The
+            // role also lives in user_role_mappings below; drop this dual-write post-rollout.
+            const roleName = validRoleId
+              ? roles.find(r => r.id === validRoleId)?.name ?? null
+              : null;
+            const responsibility = roleName
+              ? DEFAULT_ROLE_NAME_TO_ENUM[roleName] ?? UserResponsibility.MEMBER
+              : UserResponsibility.MEMBER;
             await tx.mutate.user_group_mappings.insert({
               workspaceId: authData.workspaceId,
               id: uuidv4(),
               userGroupId,
               userId,
-              ...(roleId
-                ? { roleId, ...(responsibility ? { responsibility } : {}) }
-                : { responsibility: UserResponsibility.MEMBER }),
+              ...(validRoleId ? { roleId: validRoleId } : {}),
+              responsibility,
               onCallSetNumbers: [],
               isNotified: false,
               createdAt: timestamp,
               updatedAt: timestamp,
             });
+            if (validRoleId) {
+              await tx.mutate.user_role_mappings.insert({
+                workspaceId: userGroup.workspaceId,
+                id: groupRoleMappingId(userGroupId, userId, validRoleId),
+                userId,
+                roleId: validRoleId,
+                entityType: UserRoleMappingEntityType.USER_GROUP,
+                entityId: userGroupId,
+                createdAt: timestamp,
+                updatedAt: timestamp,
+              });
+            }
           }
         },
       ),
@@ -8439,6 +8606,19 @@ export function createMutators(
                 id: mapping.id,
               });
               removedUserIds.push(mapping.userId);
+            }
+          }
+
+          // Purge each removed member's group-scoped role bindings so no grant is orphaned.
+          for (const removedUserId of removedUserIds) {
+            const roleRows = await tx.run(
+              zql.user_role_mappings
+                .where('userId', removedUserId)
+                .where('entityType', UserRoleMappingEntityType.USER_GROUP)
+                .where('entityId', userGroupId),
+            );
+            for (const row of roleRows) {
+              await tx.mutate.user_role_mappings.delete({ id: row.id });
             }
           }
 
@@ -18419,6 +18599,19 @@ export function createMutators(
                     ? { roleId: mapping.roleId ?? null, responsibility: mapping.responsibility ?? null }
                     : null;
                 },
+                // Union in the multi-role bindings (user_role_mappings) so roles assigned via
+                // the new UI count toward ticket-control permission, not just legacy roleId.
+                getUserGroupRoleIds: async (userId, userGroupId) => {
+                  const roleRows = await tx.run(
+                    zql.user_role_mappings
+                      .where('userId', userId)
+                      .where('entityType', 'USER_GROUP')
+                      .where('entityId', userGroupId),
+                  );
+                  return roleRows.map(r => r.roleId);
+                },
+                getUserGroupResponsibilities: async (userId, userGroupId) =>
+                  getUserGroupResponsibilitiesFromTx(tx, userId, userGroupId),
               },
             );
             if (!permission.allowed) {
@@ -18897,10 +19090,15 @@ export function createMutators(
             throw new Error('Cannot add members to an inactive role');
           }
 
+          // De-dup against existing WORKSPACE bindings only — a USER_GROUP row for the same
+          // (user, role) must not suppress a direct workspace-role assignment. Workspace rows
+          // have a null entityType, so filter those out in JS (null == workspace).
           const existing = await tx.run(
             zql.user_role_mappings.where('roleId', roleId).where('userId', 'IN', userIds),
           );
-          const existingUserIds = new Set(existing.map(m => m.userId));
+          const existingUserIds = new Set(
+            existing.filter(m => m.entityType !== UserRoleMappingEntityType.USER_GROUP).map(m => m.userId),
+          );
           const toAdd = userIds.filter(userId => !existingUserIds.has(userId));
 
           await Promise.all(
@@ -18914,6 +19112,8 @@ export function createMutators(
                 id: mappingId,
                 roleId,
                 userId,
+                entityType: UserRoleMappingEntityType.WORKSPACE,
+                entityId: authData.workspaceId,
                 createdAt: timestamp,
                 updatedAt: timestamp,
               });

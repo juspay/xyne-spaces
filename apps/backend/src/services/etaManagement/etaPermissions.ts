@@ -22,6 +22,15 @@ export interface EtaPermissionDataSource {
     userId: string,
     userGroupId: string,
   ): Promise<TicketControlUserGroupMapping | null>;
+  /**
+   * All roleIds the user holds within the group, unioned across
+   * user_role_mappings (entityType='USER_GROUP') and the legacy
+   * user_group_mappings.roleId. Optional so existing callers that only supply the
+   * single legacy mapping keep working (they degrade to legacy-roleId matching);
+   * callers that provide it get the multi-role union honored.
+   */
+  getUserGroupRoleIds?(userId: string, userGroupId: string): Promise<string[]>;
+  getUserGroupResponsibilities?(userId: string, userGroupId: string): Promise<string[]>;
 }
 
 export interface EtaPermissionResult {
@@ -62,8 +71,16 @@ export async function canUserModifyTicketControl(
   }
 
   if (controlRoleIds.length > 0) {
-    // Role-driven: raw roleId membership, so custom roles work.
-    if (!mapping.roleId || !controlRoleIds.includes(mapping.roleId)) {
+    // Role-driven: raw roleId membership, so custom roles work. A user qualifies
+    // if EITHER the legacy user_group_mappings.roleId is configured, OR any of
+    // their user_role_mappings USER_GROUP roles for this group is configured.
+    const legacyMatch = !!mapping.roleId && controlRoleIds.includes(mapping.roleId);
+    let urmMatch = false;
+    if (!legacyMatch && dataSource.getUserGroupRoleIds) {
+      const groupRoleIds = await dataSource.getUserGroupRoleIds(userId, userGroupId);
+      urmMatch = groupRoleIds.some(id => controlRoleIds.includes(id));
+    }
+    if (!legacyMatch && !urmMatch) {
       return {
         allowed: false,
         reason: 'Only users with a configured role can modify Assignee, ETA, Stage, or Board on this board',
@@ -73,9 +90,22 @@ export async function canUserModifyTicketControl(
   }
 
   // Legacy enum fallback (only reachable when isAllowedToTransfer === true).
+  // Union the legacy user_group_mappings.responsibility with role-derived responsibilities:
+  // the new multi-role UI never sets `responsibility`, so a MANAGER/TEAM_LEAD assigned through
+  // it is only visible via user_role_mappings. Without this union such users would be denied.
+  const effectiveResponsibilities = new Set<string>();
+  if (mapping.responsibility) {
+    effectiveResponsibilities.add(mapping.responsibility);
+  }
+  if (dataSource.getUserGroupResponsibilities) {
+    const roleResponsibilities = await dataSource.getUserGroupResponsibilities(userId, userGroupId);
+    for (const responsibility of roleResponsibilities) {
+      effectiveResponsibilities.add(responsibility);
+    }
+  }
   if (
-    mapping.responsibility !== UserResponsibility.MANAGER &&
-    mapping.responsibility !== UserResponsibility.TEAM_LEAD
+    !effectiveResponsibilities.has(UserResponsibility.MANAGER) &&
+    !effectiveResponsibilities.has(UserResponsibility.TEAM_LEAD)
   ) {
     return {
       allowed: false,
