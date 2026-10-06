@@ -48,6 +48,22 @@ const MAX_SHARE_WINDOW_DAYS = 90;
 type ShareBasis = 'ALL' | 'OPEN';
 const DAY_MS = 24 * 60 * 60 * 1000;
 
+/** Preset window lengths; any other 1–90 day value is entered as Custom. Stored as days. */
+const SHARE_WINDOW_PRESETS: { days: number; label: string }[] = [
+  { days: 1, label: '1 day' },
+  { days: 7, label: '1 week (7 days)' },
+  { days: 14, label: '2 weeks (14 days)' },
+  { days: 30, label: '1 month (30 days)' },
+  { days: 90, label: '3 months (90 days)' },
+];
+const CUSTOM_SHARE_WINDOW = 'CUSTOM';
+
+/** Select value for a stored window length: its preset, Custom for any other value, or none. */
+const shareWindowChoiceFor = (days: number | null): string | null => {
+  if (days === null) return null;
+  return SHARE_WINDOW_PRESETS.some(p => p.days === days) ? String(days) : CUSTOM_SHARE_WINDOW;
+};
+
 /** Local midnight today — share windows start at the beginning of the day they are (re)started. */
 const startOfToday = (): number => {
   const d = new Date();
@@ -123,6 +139,8 @@ export const AssignmentConfigScreen = ({
   const [shareWindowDaysInput, setShareWindowDaysInput] = useState<string>('');
   const [localShareWindowDays, setLocalShareWindowDays] = useState<number | null>(null);
   const [localShareBasis, setLocalShareBasis] = useState<ShareBasis | null>(null);
+  // Preset ('1', '7', …) or 'CUSTOM' selected for the window length
+  const [shareWindowChoice, setShareWindowChoice] = useState<string | null>(null);
 
   // Group-level rotation state
   const [localAutoRotationEnabled, setLocalAutoRotationEnabled] = useState<boolean>(false);
@@ -337,6 +355,7 @@ export const AssignmentConfigScreen = ({
       const windowDays = score?.percentageWindowDays ?? null;
       setShareWindowDaysInput(windowDays === null ? '' : String(windowDays));
       setLocalShareWindowDays(windowDays);
+      setShareWindowChoice(shareWindowChoiceFor(windowDays));
       const basis = score?.percentageShareBasis;
       setLocalShareBasis(basis === 'ALL' || basis === 'OPEN' ? basis : null);
     } else {
@@ -345,6 +364,7 @@ export const AssignmentConfigScreen = ({
       setLocalUsePercentage(false);
       setShareWindowDaysInput('');
       setLocalShareWindowDays(null);
+      setShareWindowChoice(null);
       setLocalShareBasis(null);
     }
     setHasChanges(false);
@@ -659,6 +679,16 @@ export const AssignmentConfigScreen = ({
       setLocalBoardWeight(numValue);
       setHasChanges(true);
     }
+  };
+
+  const handleShareWindowChoiceChange = (choice: string): void => {
+    setShareWindowChoice(choice);
+    setHasChanges(true);
+    // Custom keeps the current length so the admin can edit it in the input below
+    if (choice === CUSTOM_SHARE_WINDOW) return;
+    const days = parseInt(choice, 10);
+    setLocalShareWindowDays(days);
+    setShareWindowDaysInput(String(days));
   };
 
   const handleShareWindowDaysChange = (value: string): void => {
@@ -1476,17 +1506,12 @@ export const AssignmentConfigScreen = ({
 
                   {localUsePercentage && (
                     <div className='mt-4 flex flex-col gap-2 border-t border-border pt-4'>
-                      <label
-                        htmlFor='share-window-days'
-                        className='text-[13px] font-medium text-foreground'
-                      >
-                        Share window (days)
-                      </label>
+                      <span className='text-[13px] font-medium text-foreground'>Share window</span>
                       <p className='text-xs leading-[1.4] text-muted-foreground'>
                         New tickets go to whoever is furthest below their % share of the tickets
-                        assigned on this board in the current window. Counts reset to zero every
-                        this many days, starting from the day % share was turned on. Range: 1 to{' '}
-                        {MAX_SHARE_WINDOW_DAYS}.
+                        assigned on this board in the current window. Counts reset to zero at the
+                        end of each window, starting from the day % share was turned on. Pick a
+                        preset or a custom length of 1 to {MAX_SHARE_WINDOW_DAYS} days.
                       </p>
                       {savedShareWindowStartAt !== null && savedShareWindowDays !== null && (
                         <p className='text-xs leading-[1.4] text-muted-foreground'>
@@ -1502,26 +1527,50 @@ export const AssignmentConfigScreen = ({
                           .
                         </p>
                       )}
-                      <Input
-                        type='text'
-                        inputMode='numeric'
-                        id='share-window-days'
-                        value={shareWindowDaysInput}
-                        onChange={e => handleShareWindowDaysChange(e.target.value)}
-                        onBlur={() => {
-                          // Restore the last valid value if left empty
-                          if (shareWindowDaysInput === '') {
-                            setShareWindowDaysInput(
-                              localShareWindowDays === null ? '' : String(localShareWindowDays),
-                            );
-                          }
-                        }}
-                        placeholder='e.g. 7'
-                        className='mt-1 w-24 text-sm'
-                        data-track-event='change'
-                        data-track-category='UserGroups'
-                        data-track-name='SetShareWindowDays'
-                      />
+                      <Select
+                        value={shareWindowChoice ?? ''}
+                        onValueChange={handleShareWindowChoiceChange}
+                      >
+                        <SelectTrigger
+                          className='mt-1 w-full max-w-[240px]'
+                          aria-label='Share window'
+                          data-track-category='UserGroups'
+                          data-track-name='SelectShareWindow'
+                        >
+                          <SelectValue placeholder='Select…' />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {SHARE_WINDOW_PRESETS.map(preset => (
+                            <SelectItem key={preset.days} value={String(preset.days)}>
+                              {preset.label}
+                            </SelectItem>
+                          ))}
+                          <SelectItem value={CUSTOM_SHARE_WINDOW}>Custom…</SelectItem>
+                        </SelectContent>
+                      </Select>
+                      {shareWindowChoice === CUSTOM_SHARE_WINDOW && (
+                        <Input
+                          type='text'
+                          inputMode='numeric'
+                          id='share-window-days'
+                          aria-label='Custom share window in days'
+                          value={shareWindowDaysInput}
+                          onChange={e => handleShareWindowDaysChange(e.target.value)}
+                          onBlur={() => {
+                            // Restore the last valid value if left empty
+                            if (shareWindowDaysInput === '') {
+                              setShareWindowDaysInput(
+                                localShareWindowDays === null ? '' : String(localShareWindowDays),
+                              );
+                            }
+                          }}
+                          placeholder='e.g. 7'
+                          className='mt-1 w-24 text-sm'
+                          data-track-event='change'
+                          data-track-category='UserGroups'
+                          data-track-name='SetShareWindowDays'
+                        />
+                      )}
                     </div>
                   )}
 
