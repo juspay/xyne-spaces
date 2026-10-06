@@ -1,3 +1,15 @@
+## [1.463.0](https://github.com/juspay/xyne-spaces/compare/v1.462.1...v1.463.0) (2026-10-06)
+
+
+### Features
+
+* resolve Radar items when a GitHub or Bitbucket PR merges ([#2665](https://github.com/juspay/xyne-spaces/issues/2665)) ([f45a14b](https://github.com/juspay/xyne-spaces/commit/f45a14bfd9e3107ebab4ec2bbd55f8d65051c5a6))
+
+
+### Bug Fixes
+
+* enforce HITL approval for writeToolPolicy allAsk/denylist modes ([#2698](https://github.com/juspay/xyne-spaces/issues/2698)) ([34da4e3](https://github.com/juspay/xyne-spaces/commit/34da4e311c9fce859531997ab6428248731b87f1))
+
 ## [1.462.1](https://github.com/juspay/xyne-spaces/compare/v1.462.0...v1.462.1) (2026-10-06)
 
 
