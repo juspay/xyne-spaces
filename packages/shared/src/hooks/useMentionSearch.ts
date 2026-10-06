@@ -20,6 +20,7 @@ import {
   getMentionDisplayName,
   userToMentionResult,
 } from "../utils/mentionUser.js";
+import { resolveChannelMemberIds } from "../utils/channelMembership.js";
 import { useChannel } from "./useChannels.js";
 import { useActiveUsers, useActiveUserSearch } from "./useUsers.js";
 import { useUserGroupSearch } from "./useUserGroupSearch.js";
@@ -221,20 +222,26 @@ export const useMentionSearch = (
     isMentionRequested &&
     vespaParticipantIds !== null &&
     vespaParticipantIds.length === 0;
-  const [dbParticipantRows] = useCachedQuery(
+  const [dbParticipantRows, dbParticipantDetails] = useCachedQuery(
     queries.channelParticipants({
       channelId: vespaEmpty ? (channel?.id ?? "") : "",
     }),
     { enabled: vespaEmpty },
   );
+  // Zero returns [] for a disabled or still-hydrating query; only trust the
+  // fallback rows once the query has actually completed.
+  const dbParticipantsComplete =
+    vespaEmpty && dbParticipantDetails?.type === "complete";
   const dbParticipantIds = useMemo(
     () => (dbParticipantRows ? dbParticipantRows.map((p) => p.userId) : null),
     [dbParticipantRows],
   );
-  const channelMemberIds =
-    vespaParticipantIds && vespaParticipantIds.length > 0
-      ? vespaParticipantIds
-      : dbParticipantIds;
+  // `null` = membership unknown (no "Not in channel" pill), not "no members".
+  const channelMemberIds = resolveChannelMemberIds(
+    usesLocalParticipants ? null : vespaParticipantIds,
+    dbParticipantIds,
+    dbParticipantsComplete,
+  );
 
   // Unified member set: local participants for DM/group-DM, Vespa→DB fallback for channels.
   const memberIds = useMemo(
