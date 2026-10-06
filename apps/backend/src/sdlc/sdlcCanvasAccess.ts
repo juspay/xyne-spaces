@@ -14,6 +14,6 @@ export const sdlcChannelCanvasParticipant = (
     channelId,
     role: SDLC_CHANNEL_CANVAS_ROLE,
     // Slack Connect: inherit the parent canvas's connectId when known.
-    ...(connectId ? { connectId } : {}),
+    ...(connectId ? { canvasConnectId: connectId } : {}),
   };
 };

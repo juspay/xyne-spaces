@@ -990,7 +990,7 @@ async function persistNewAnalysisCanvas(args: {
       role: CanvasRole.VIEWER,
       joinedAt: now,
       updatedAt: now,
-      connectId,
+      canvasConnectId: connectId,
     },
   });
 

@@ -341,8 +341,8 @@ async function createCanvas(cv: ChannelCanvas, createdBy: string, target: Migrat
   // Creator is OWNER; the channel is an EDITOR so every member can open/edit it.
   await db.canvasParticipant.createMany({
     data: [
-      { id: createId(), canvasId, workspaceId: target.workspaceId, userId: createdBy, role: CanvasRole.OWNER, joinedAt: now, updatedAt: now, connectId },
-      { id: createId(), canvasId, workspaceId: target.workspaceId, channelId: target.xyneChannelId, role: CanvasRole.EDITOR, joinedAt: now, updatedAt: now, connectId },
+      { id: createId(), canvasId, workspaceId: target.workspaceId, userId: createdBy, role: CanvasRole.OWNER, joinedAt: now, updatedAt: now, canvasConnectId: connectId },
+      { id: createId(), canvasId, workspaceId: target.workspaceId, channelId: target.xyneChannelId, role: CanvasRole.EDITOR, joinedAt: now, updatedAt: now, canvasConnectId: connectId },
     ],
     skipDuplicates: true,
   });

@@ -11,7 +11,7 @@ export class CanvasVersionsACL extends BaseACL<'canvas_versions'> {
     await assertConnectMutateAllowed(
       this.ctx,
       tx,
-      { connectId: args.connectId as string | undefined, workspaceId: args.workspaceId as string },
+      { connectId: args.canvasConnectId as string | undefined, workspaceId: args.workspaceId as string },
       'canvas_versions',
     );
   }
@@ -21,7 +21,7 @@ export class CanvasVersionsACL extends BaseACL<'canvas_versions'> {
     if (!row) {
       throw new MutationACLError('Canvas version update failed: version does not exist', 'canvas_versions');
     }
-    await assertConnectMutateAllowed(this.ctx, tx, row, 'canvas_versions');
+    await assertConnectMutateAllowed(this.ctx, tx, { connectId: row.canvasConnectId, workspaceId: row.workspaceId }, 'canvas_versions');
   }
 
   async canDelete(args: DeleteID<TableSchema<'canvas_versions'>>, tx: Transaction<Schema>): Promise<void> {
@@ -29,7 +29,7 @@ export class CanvasVersionsACL extends BaseACL<'canvas_versions'> {
     if (!row) {
       throw new MutationACLError('Canvas version delete failed: version does not exist', 'canvas_versions');
     }
-    await assertConnectMutateAllowed(this.ctx, tx, row, 'canvas_versions');
+    await assertConnectMutateAllowed(this.ctx, tx, { connectId: row.canvasConnectId, workspaceId: row.workspaceId }, 'canvas_versions');
   }
 
   async canUpsert(_args: UpsertValue<TableSchema<'canvas_versions'>>, _tx: Transaction<Schema>): Promise<void> {

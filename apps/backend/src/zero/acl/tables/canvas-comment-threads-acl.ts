@@ -43,7 +43,7 @@ export class CanvasCommentThreadsACL extends BaseACL<'canvas_comment_threads'> {
     await assertConnectMutateAllowed(
       this.ctx,
       tx,
-      { connectId: args.connectId as string | undefined, workspaceId: args.workspaceId as string },
+      { connectId: args.canvasConnectId as string | undefined, workspaceId: args.workspaceId as string },
       'canvas_comment_threads',
     );
 
@@ -58,7 +58,7 @@ export class CanvasCommentThreadsACL extends BaseACL<'canvas_comment_threads'> {
       throw new MutationACLError('Canvas comment thread update failed: thread not found', 'canvas_comment_threads');
     }
     // Slack Connect: connectId present → connect_group reach; else legacy workspaceId match.
-    await assertConnectMutateAllowed(this.ctx, tx, thread, 'canvas_comment_threads');
+    await assertConnectMutateAllowed(this.ctx, tx, { connectId: thread.canvasConnectId, workspaceId: thread.workspaceId }, 'canvas_comment_threads');
 
     if (thread.createdBy === this.ctx.userID) {
      return;

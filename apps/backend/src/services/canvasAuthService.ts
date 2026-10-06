@@ -478,7 +478,7 @@ class CanvasAuthService {
             userId,
             workspaceId,
             role: CanvasRole.OWNER,
-            connectId,
+            canvasConnectId: connectId,
           },
           update: {
             workspaceId,

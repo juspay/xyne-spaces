@@ -43,7 +43,7 @@ export class CanvasCommentsACL extends BaseACL<'canvas_comments'> {
     await assertConnectMutateAllowed(
       this.ctx,
       tx,
-      { connectId: args.connectId as string | undefined, workspaceId: args.workspaceId as string },
+      { connectId: args.canvasConnectId as string | undefined, workspaceId: args.workspaceId as string },
       'canvas_comments',
     );
 
@@ -64,7 +64,7 @@ export class CanvasCommentsACL extends BaseACL<'canvas_comments'> {
       throw new MutationACLError('Canvas comment update failed: comment not found', 'canvas_comments');
     }
     // Slack Connect: connectId present → connect_group reach; else legacy workspaceId match.
-    await assertConnectMutateAllowed(this.ctx, tx, comment, 'canvas_comments');
+    await assertConnectMutateAllowed(this.ctx, tx, { connectId: comment.canvasConnectId, workspaceId: comment.workspaceId }, 'canvas_comments');
 
     if (comment.createdBy !== this.ctx.userID) {
       throw new MutationACLError('Canvas comment update failed: only the author can edit this comment', 'canvas_comments');

@@ -196,15 +196,22 @@ export async function resolveReachableEntity(
   }
 }
 
-/** connectId IS NULL (un-backfilled) → legacy workspace scope; matches Zero's `legacy` branch. */
+/** connectId IS NULL (un-backfilled) → legacy workspace scope; matches Zero's `legacy` branch. (Parent only.) */
 type ConnectNullFallback = { AND: [{ connectId: null }, { workspaceId: string }] };
-export type ConnectReachWhere =
-  | { workspaceId: string }
-  | Record<string, never> // gate ALLOW: the query already isolates the one entity; add no restriction
-  | { connectId: { in: string[] } } // gate DENY (empty `in`) — every child table has connectId
-  | { OR: [{ id: { in: string[] } }, ConnectNullFallback] }; // parent reachable id-set
+/**
+ * Only the shapes assignable to EVERY canvas table's WhereInput (all carry `workspaceId`):
+ * `{ workspaceId }` (legacy/fallback) and `{}` (gate ALLOW). The child DENY
+ * (`{ canvasConnectId: { in: [] } }` — child column) and the PARENT id-set are table-specific and
+ * cast past this type at their return sites, since the canvas parent and its children no longer
+ * share a connect column name (parent `connectId`, children `canvasConnectId`).
+ */
+export type ConnectReachWhere = { workspaceId: string } | Record<string, never>;
 
-/** What the query is scoped to, so a child read can authorize by its single connectId (not a list). */
+/**
+ * What the query is scoped to, so a child read can authorize by its single connect handle (not a list).
+ * `connectId` here is the VALUE (the canvas's connect handle); for canvas children it comes from the
+ * `canvasConnectId` column, for the parent from `connectId` — the ACL reads whichever its table has.
+ */
 export interface ConnectReachScope {
   connectId?: string;
   canvasId?: string;
@@ -247,20 +254,26 @@ export async function connectReachWhere(
 
   // CHILD: always-on per-connectId gate (no flag — self-correcting via the missing-connectId fallback).
   if (isChild) {
-    let connectId = scope?.connectId;
-    if (!connectId && scope?.canvasId) {
-      connectId = (await resolveCanvasConnectId(client, scope.canvasId)) ?? undefined;
-    }
-    // No connectId to gate on (un-backfilled canvas, or an unscoped child list) → legacy scope.
-    if (!connectId) {
-      recordConnectAcl(table, op, 'workspace', 'connect_id_missing');
-      return { workspaceId };
-    }
+    // Only a single string id is a usable scope; a relational filter (e.g. `{ in: [...] }`, a
+    // multi-canvas list read) is not one entity to gate on — ignore it (→ workspace) rather than
+    // feeding an object into resolveCanvasConnectId / findUnique.
+    const scopeConnectId = typeof scope?.connectId === 'string' ? scope.connectId : undefined;
+    const scopeCanvasId = typeof scope?.canvasId === 'string' ? scope.canvasId : undefined;
     try {
+      let connectId = scopeConnectId;
+      if (!connectId && scopeCanvasId) {
+        connectId = (await resolveCanvasConnectId(client, scopeCanvasId)) ?? undefined;
+      }
+      // No connectId to gate on (un-backfilled canvas, or an unscoped/multi-entity list) → legacy scope.
+      if (!connectId) {
+        recordConnectAcl(table, op, 'workspace', 'connect_id_missing');
+        return { workspaceId };
+      }
       const allowed = await canWorkspaceReachConnect(client, workspaceId, connectId);
       recordConnectAcl(table, op, 'connect_group', 'connect_group');
-      // Pass → no extra restriction (the query's connectId already isolates). Fail → match nothing.
-      return allowed ? {} : { connectId: { in: [] } };
+      // Pass → no extra restriction (the query's connect column already isolates). Fail → match nothing
+      // via the child's connect column (renamed to canvasConnectId).
+      return allowed ? {} : ({ canvasConnectId: { in: [] } } as unknown as ConnectReachWhere);
     } catch {
       recordConnectAcl(table, op, 'workspace', 'error_fallback');
       return { workspaceId };
@@ -268,7 +281,7 @@ export async function connectReachWhere(
   }
 
   // PARENT (canvases list): flag-gated until the backfill is complete.
-  if (!(await isConnectCanvasReachEnabled())) {
+  if (!isConnectCanvasReachEnabled()) {
     recordConnectAcl(table, op, 'workspace', 'flag_off');
     return { workspaceId };
   }
@@ -279,7 +292,8 @@ export async function connectReachWhere(
   }
   recordConnectAcl(table, op, 'connect_group', 'connect_group');
   const nullFallback: ConnectNullFallback = { AND: [{ connectId: null }, { workspaceId }] };
-  return { OR: [{ id: { in: entityIds } }, nullFallback] };
+  // Parent (canvases) id-set + its own `connectId IS NULL` fallback — cast past the child-safe type.
+  return { OR: [{ id: { in: entityIds } }, nullFallback] } as unknown as ConnectReachWhere;
 }
 
 /** Resolve the connectId of an existing channel (for channel-scoped folders). */

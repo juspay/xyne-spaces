@@ -90,9 +90,9 @@ class CallNotesCanvasService {
     // Channel members edit through the channel share; invitees outside the channel get a direct share.
     await db.canvasParticipant.createMany({
       data: [
-        { id: uuidv4(), canvasId, connectId: canvasConnectId, workspaceId: call.workspaceId, userId, role: CanvasRole.EDITOR },
+        { id: uuidv4(), canvasId, canvasConnectId, workspaceId: call.workspaceId, userId, role: CanvasRole.EDITOR },
         ...(call.channelId
-          ? [{ id: uuidv4(), canvasId, connectId: canvasConnectId, workspaceId: call.workspaceId, channelId: call.channelId, role: CanvasRole.EDITOR }]
+          ? [{ id: uuidv4(), canvasId, canvasConnectId, workspaceId: call.workspaceId, channelId: call.channelId, role: CanvasRole.EDITOR }]
           : []),
       ],
       skipDuplicates: true,

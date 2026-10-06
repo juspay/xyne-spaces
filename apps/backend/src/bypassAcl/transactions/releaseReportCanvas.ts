@@ -89,7 +89,7 @@ export function createOrUpdateTx(existingCanvas: any, title: string, report: Rel
         role: CanvasRole.VIEWER,
         joinedAt: now,
         updatedAt: now,
-        connectId,
+        canvasConnectId: connectId,
       },
     });
 

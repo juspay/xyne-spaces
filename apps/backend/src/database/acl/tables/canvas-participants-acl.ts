@@ -16,7 +16,7 @@ export class CanvasParticipantsACL extends BaseQueryACL<
     const ctx = this.ctx
     // Slack Connect: single-entity gate keyed off the query's connectId/canvasId (one opened canvas).
     const reachScope = {
-      connectId: queryWhere?.connectId as string | undefined,
+      connectId: queryWhere?.canvasConnectId as string | undefined,
       canvasId: queryWhere?.canvasId as string | undefined,
     }
     if (isGuestContext(ctx)) {
@@ -125,7 +125,7 @@ export class CanvasParticipantsACL extends BaseQueryACL<
       AND: [
         // Slack Connect: update/delete scope follows the same single-entity gate as reads.
         await connectReachWhere(this.prisma, workspaceId, 'canvas_participants', 'write', {
-          connectId: queryWhere?.connectId as string | undefined,
+          connectId: queryWhere?.canvasConnectId as string | undefined,
           canvasId: queryWhere?.canvasId as string | undefined,
         }),
         {

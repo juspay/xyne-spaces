@@ -6101,7 +6101,7 @@ export const mutators = defineMutators({
           role: CanvasRole.OWNER,
           joinedAt: now,
           updatedAt: now,
-          ...(connectId ? { connectId } : {}),
+          ...(connectId ? { canvasConnectId: connectId } : {}),
         });
       },
     ),
@@ -6344,7 +6344,7 @@ export const mutators = defineMutators({
             role,
             joinedAt: now,
             updatedAt: now,
-            ...(canvas?.connectId ? { connectId: canvas.connectId } : {}),
+            ...(canvas?.connectId ? { canvasConnectId: canvas.connectId } : {}),
           });
         }
       },
@@ -6385,7 +6385,7 @@ export const mutators = defineMutators({
           role,
           joinedAt: timestamp,
           updatedAt: timestamp,
-          ...(canvas?.connectId ? { connectId: canvas.connectId } : {}),
+          ...(canvas?.connectId ? { canvasConnectId: canvas.connectId } : {}),
         });
       },
     ),
@@ -6437,7 +6437,7 @@ export const mutators = defineMutators({
           role,
           joinedAt: timestamp,
           updatedAt: timestamp,
-          ...(canvas?.connectId ? { connectId: canvas.connectId } : {}),
+          ...(canvas?.connectId ? { canvasConnectId: canvas.connectId } : {}),
         });
       },
     ),
@@ -6731,7 +6731,7 @@ export const mutators = defineMutators({
           isStarred: true,
           createdAt: timestamp,
           updatedAt: timestamp,
-          ...(canvas?.connectId ? { connectId: canvas.connectId } : {}),
+          ...(canvas?.connectId ? { canvasConnectId: canvas.connectId } : {}),
         });
       },
     ),
@@ -6767,7 +6767,7 @@ export const mutators = defineMutators({
           statusUpdatedAt: null,
           createdBy: ctx.userID,
           createdAt: timestamp,
-          ...(canvas?.connectId ? { connectId: canvas.connectId } : {}),
+          ...(canvas?.connectId ? { canvasConnectId: canvas.connectId } : {}),
         });
 
         await tx.mutate.canvas_comments.insert({
@@ -6782,7 +6782,7 @@ export const mutators = defineMutators({
           editedAt: null,
           deletedAt: null,
           createdAt: timestamp,
-          ...(canvas?.connectId ? { connectId: canvas.connectId } : {}),
+          ...(canvas?.connectId ? { canvasConnectId: canvas.connectId } : {}),
         });
       },
     ),
@@ -6823,7 +6823,7 @@ export const mutators = defineMutators({
           editedAt: null,
           deletedAt: null,
           createdAt: timestamp,
-          ...(canvas?.connectId ? { connectId: canvas.connectId } : {}),
+          ...(canvas?.connectId ? { canvasConnectId: canvas.connectId } : {}),
         });
 
         const commentCount = await getCanvasThreadCommentCount(tx, threadId, ctx.workspaceId);
@@ -6999,7 +6999,7 @@ export const mutators = defineMutators({
           createdBy: ctx.userID,
           createdAt: timestamp,
           updatedAt: timestamp,
-          ...(canvas?.connectId ? { connectId: canvas.connectId } : {}),
+          ...(canvas?.connectId ? { canvasConnectId: canvas.connectId } : {}),
         });
       },
     ),

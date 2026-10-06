@@ -92,6 +92,10 @@ const envSchema = Joi.object({
   MIGRATION_ENC_KEYS: Joi.string().allow('').default('{}'),
   MIGRATION_ENC_ACTIVE: Joi.string().allow('').default(''),
   RUN_SLACK_MIGRATION_WORKERS: Joi.boolean().default(false),
+  // Slack Connect: gate the canvas connect_group reach (Prisma ACL parent list + Zero query builder).
+  // Default OFF — flip ON (redeploy) only after the prod backfill. Env, not CAC: it changes rarely
+  // (once, post-backfill) and a static value is predictable, so a redeploy to flip is acceptable.
+  CONNECT_QUERY_ENABLED_CANVAS: Joi.boolean().default(false),
   MIGRATION_INGEST_CONCURRENCY: Joi.number().default(3),          // conversations one worker ingests in parallel; total in-flight = processes × this. RESTART-required (Bull binds concurrency at .process())
   MIGRATION_WORKER_PROCESSES: Joi.number().default(1),            // worker PROCESSES forked inside the pod (the real CPU-parallelism knob). RESTART-required; 1 = single process (no fork)
   MIGRATION_INGEST_CONTROL: Joi.boolean().default(false), // kill-switch: gates the start/stop-ingestion routes (and the dashboard button). Off = ingestion queue can't be toggled.
@@ -783,6 +787,8 @@ export const config = {
     activeKeyId: envVars.MIGRATION_ENC_ACTIVE,
   },
   runSlackMigrationWorkers: envVars.RUN_SLACK_MIGRATION_WORKERS,
+  // Slack Connect — canvas connect_group reach switch (see CONNECT_QUERY_ENABLED_CANVAS above).
+  connectQueryEnabledCanvas: envVars.CONNECT_QUERY_ENABLED_CANVAS as boolean,
   slackMigration: {
     ingestConcurrency: envVars.MIGRATION_INGEST_CONCURRENCY, // RESTART-required (Bull concurrency bound at .process())
     workerProcesses: envVars.MIGRATION_WORKER_PROCESSES,     // RESTART-required (fork count at boot)

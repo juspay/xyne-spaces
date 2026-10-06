@@ -755,7 +755,7 @@ export async function syncCanvasAccess(self: RecordingSharingService, tx: Prisma
         workspaceId,
         role,
         ...targetFields,
-        ...(connectId ? { connectId } : {}),
+        ...(connectId ? { canvasConnectId: connectId } : {}),
       },
       update: { role },
     });

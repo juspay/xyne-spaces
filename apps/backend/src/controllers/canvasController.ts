@@ -678,7 +678,7 @@ export class CanvasController {
             role: CanvasRole.OWNER,
             joinedAt: now,
             updatedAt: now,
-            connectId,
+            canvasConnectId: connectId,
           },
         }),
       ]);

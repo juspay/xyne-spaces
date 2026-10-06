@@ -15,7 +15,7 @@ export class CanvasCommentsACL extends BaseQueryACL<
     // Slack Connect: single-entity gate on the query's connectId/canvasId (comments are usually keyed
     // by threadId — then neither is present and this degrades to the row's own workspaceId).
     return connectReachWhere(this.prisma, this.ctx.workspaceId, 'canvas_comments', 'read', {
-      connectId: queryWhere?.connectId as string | undefined,
+      connectId: queryWhere?.canvasConnectId as string | undefined,
       canvasId: queryWhere?.canvasId as string | undefined,
     })
   }
@@ -23,7 +23,7 @@ export class CanvasCommentsACL extends BaseQueryACL<
   async getMutateWhere(queryWhere?: Record<string, unknown>): Promise<Prisma.CanvasCommentWhereInput> {
     // Slack Connect: update/delete scope follows the same single-entity gate as reads.
     return connectReachWhere(this.prisma, this.ctx.workspaceId, 'canvas_comments', 'write', {
-      connectId: queryWhere?.connectId as string | undefined,
+      connectId: queryWhere?.canvasConnectId as string | undefined,
       canvasId: queryWhere?.canvasId as string | undefined,
     })
   }

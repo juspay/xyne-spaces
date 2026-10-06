@@ -263,7 +263,7 @@ Release notes have been generated for **${ticket.title}**
           role: CanvasRole.VIEWER,
           joinedAt: now,
           updatedAt: now,
-          connectId,
+          canvasConnectId: connectId,
         },
       });
 

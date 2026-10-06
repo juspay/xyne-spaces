@@ -163,7 +163,7 @@ export async function recordVersion(tx: Prisma.TransactionClient, scope: WikiSco
         content: content as unknown as Prisma.InputJsonValue,
         contentHash,
         createdBy: scope.actorUserId,
-        ...(connectId ? { connectId } : {}),
+        ...(connectId ? { canvasConnectId: connectId } : {}),
       },
       update: { name: versionName(action, commitSha) },
     });

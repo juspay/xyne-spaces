@@ -3256,14 +3256,14 @@ model CanvasVersion {
   createdBy   String?
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
-  connectId   String?  // Slack Connect: resolved from parent canvas (null until backfilled)
+  canvasConnectId   String?  // Slack Connect: resolved from parent canvas (null until backfilled)
 
   canvas      Canvas   @relation(fields: [canvasId], references: [id], onDelete: Cascade)
 
   @@unique([canvasId, contentHash])
   @@index([canvasId, updatedAt])
   @@index([createdBy])
-  @@index([connectId])
+  @@index([canvasConnectId])
 
   @@map("canvas_versions")
   @@schema("public")
@@ -3282,7 +3282,7 @@ model CanvasCommentThread {
   statusUpdatedAt DateTime?
   createdBy       String
   createdAt       DateTime                  @default(now())
-  connectId       String?                   // Slack Connect: resolved from parent canvas (null until backfilled)
+  canvasConnectId       String?                   // Slack Connect: resolved from parent canvas (null until backfilled)
 
   canvas              Canvas          @relation(fields: [canvasId], references: [id], onDelete: Cascade)
   comments            CanvasComment[] @relation("CanvasCommentThreadComments")
@@ -3291,7 +3291,7 @@ model CanvasCommentThread {
   statusUpdatedByUser User?           @relation("CanvasCommentThreadStatusUpdatedBy", fields: [statusUpdatedBy], references: [id])
 
   @@index([workspaceId, canvasId, createdAt])
-  @@index([connectId])
+  @@index([canvasConnectId])
   @@map("canvas_comment_threads")
   @@schema("public")
 }
@@ -3308,13 +3308,13 @@ model CanvasComment {
   editedAt         DateTime?
   deletedAt        DateTime?
   createdAt        DateTime @default(now())
-  connectId        String?  // Slack Connect: resolved from parent canvas (null until backfilled)
+  canvasConnectId        String?  // Slack Connect: resolved from parent canvas (null until backfilled)
 
   thread       CanvasCommentThread  @relation("CanvasCommentThreadComments", fields: [threadId], references: [id], onDelete: Cascade)
   initialForThreads CanvasCommentThread[] @relation("CanvasCommentThreadInitialComment")
   createdByUser User               @relation("CanvasCommentCreatedBy", fields: [createdBy], references: [id])
 
-  @@index([connectId])
+  @@index([canvasConnectId])
   @@index([workspaceId, threadId, createdAt])
   @@map("canvas_comments")
   @@schema("public")
@@ -3330,7 +3330,7 @@ model CanvasParticipant {
   role        String     @default("VIEWER") // OWNER | EDITOR | VIEWER
   joinedAt    DateTime   @default(now())
   updatedAt   DateTime   @updatedAt
-  connectId   String?    // Slack Connect: resolved from parent canvas (null until backfilled)
+  canvasConnectId   String?    // Slack Connect: resolved from parent canvas (null until backfilled)
 
   // Relations (no FK constraints - consistent with userId and canvasId)
   canvas    Canvas     @relation(fields: [canvasId], references: [id])
@@ -3342,7 +3342,7 @@ model CanvasParticipant {
   @@index([userId])
   @@index([userGroupId])
   @@index([channelId])
-  @@index([connectId])
+  @@index([canvasConnectId])
   @@map("canvas_participants")
   @@schema("public")
 }
@@ -3355,7 +3355,7 @@ model CanvasUserStatus {
   isStarred  Boolean   @default(false)
   createdAt  DateTime  @default(now())
   updatedAt  DateTime?
-  connectId  String?   // Slack Connect: resolved from parent canvas (null until backfilled)
+  canvasConnectId  String?   // Slack Connect: resolved from parent canvas (null until backfilled)
 
   canvas Canvas @relation(fields: [canvasId], references: [id])
   user   User   @relation("CanvasUserStatusUser", fields: [userId], references: [id])
@@ -3364,7 +3364,7 @@ model CanvasUserStatus {
   @@index([canvasId])
   @@index([userId])
   @@index([userId, isStarred])
-  @@index([connectId])
+  @@index([canvasConnectId])
   @@map("canvas_user_status")
   @@schema("public")
 }

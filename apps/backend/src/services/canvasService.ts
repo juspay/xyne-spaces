@@ -285,7 +285,7 @@ export async function createKnowledgeCanvas(
         role: CanvasRole.OWNER,
         joinedAt: now,
         updatedAt: now,
-        connectId,
+        canvasConnectId: connectId,
       },
     });
 

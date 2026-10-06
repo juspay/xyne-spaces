@@ -163,13 +163,13 @@ export async function createCallCanvasAccess(tx: Prisma.TransactionClient, param
     await tx.canvasParticipant.create({
       data: {
         id: uuidv4(), canvasId, workspaceId, userId: createdByUserId, role: CanvasRole.OWNER,
-        joinedAt: now, updatedAt: now, ...(connectId ? { connectId } : {}),
+        joinedAt: now, updatedAt: now, ...(connectId ? { canvasConnectId: connectId } : {}),
       },
     });
     await tx.canvasParticipant.create({
       data: {
         id: uuidv4(), canvasId, workspaceId, userId: callCreatorUserId, role: CanvasRole.OWNER,
-        joinedAt: now, updatedAt: now, ...(connectId ? { connectId } : {}),
+        joinedAt: now, updatedAt: now, ...(connectId ? { canvasConnectId: connectId } : {}),
       },
     });
 
@@ -184,7 +184,7 @@ export async function createCallCanvasAccess(tx: Prisma.TransactionClient, param
         await tx.canvasParticipant.createMany({
           data: editorUserIds.map((userId) => ({
             id: uuidv4(), canvasId, workspaceId, userId, role: CanvasRole.EDITOR,
-            joinedAt: now, updatedAt: now, ...(connectId ? { connectId } : {}),
+            joinedAt: now, updatedAt: now, ...(connectId ? { canvasConnectId: connectId } : {}),
           })),
         });
       }
@@ -195,7 +195,7 @@ export async function createCallCanvasAccess(tx: Prisma.TransactionClient, param
         data: {
           id: uuidv4(), canvasId, workspaceId, channelId,
           role: isChannelThreadCall ? CanvasRole.VIEWER : CanvasRole.EDITOR,
-          joinedAt: now, updatedAt: now, ...(connectId ? { connectId } : {}),
+          joinedAt: now, updatedAt: now, ...(connectId ? { canvasConnectId: connectId } : {}),
         },
       });
     }

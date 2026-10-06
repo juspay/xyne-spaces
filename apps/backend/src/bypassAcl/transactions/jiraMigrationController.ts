@@ -134,7 +134,7 @@ export function createMigrationReportCanvasTx(canvasId: string, canvasChannel: a
         role: CanvasRole.OWNER,
         joinedAt: now,
         updatedAt: now,
-        connectId,
+        canvasConnectId: connectId,
       },
     });
     await createConnectGroupForEntity(tx, {

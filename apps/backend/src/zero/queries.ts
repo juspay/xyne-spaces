@@ -4311,7 +4311,7 @@ export const queries: AnyQueryRegistry = defineQueries({
       // Mode counted server-side in the backend's handleQueries (connect_query_mode metric).
       const useConnect = getConnectQueryEnabledCanvas() && !!connectId;
       return useConnect
-        ? zql.canvas_participants.where('connectId', connectId as string).related('canvas')
+        ? zql.canvas_participants.where('canvasConnectId', connectId as string).related('canvas')
         : zql.canvas_participants.where('canvasId', canvasId).related('canvas');
     },
   ),
@@ -4321,7 +4321,7 @@ export const queries: AnyQueryRegistry = defineQueries({
     ({ args: { canvasId, connectId } }) => {
       const useConnect = getConnectQueryEnabledCanvas() && !!connectId;
       const base = useConnect
-        ? zql.canvas_comment_threads.where('connectId', connectId as string)
+        ? zql.canvas_comment_threads.where('canvasConnectId', connectId as string)
         : zql.canvas_comment_threads.where('canvasId', canvasId);
       return base.orderBy('createdAt', 'asc').related('initialComment');
     },
@@ -4367,7 +4367,7 @@ export const queries: AnyQueryRegistry = defineQueries({
     ({ ctx, args: { canvasId, connectId } }) => {
       const useConnect = getConnectQueryEnabledCanvas() && !!connectId;
       const base = useConnect
-        ? zql.canvas_versions.where('connectId', connectId as string)
+        ? zql.canvas_versions.where('canvasConnectId', connectId as string)
         : zql.canvas_versions.where('canvasId', canvasId);
       return base
         .whereExists('canvas', canvas =>

@@ -62,24 +62,12 @@ const isQueryDisabled = async (name: string): Promise<boolean> => {
   }
 };
 
-// Slack Connect — canvas query-mode switch, owned by Superposition CAC so it can be flipped at
-// runtime (no redeploy). Resolved once per query request and pushed into the shared Zero query
-// builder, which cannot import the Superposition SDK itself (backend-only). Defaults false on
-// any error, keeping the legacy canvasId lookup.
-const CONNECT_QUERY_ENABLED_CANVAS_KEY = 'connect_query_enabled_canvas';
-
-const syncConnectQueryFlag = async (): Promise<void> => {
-  try {
-    const enabled = await superpositionClient.getBooleanValue(
-      CONNECT_QUERY_ENABLED_CANVAS_KEY,
-      false,
-      {},
-    );
-    setConnectQueryEnabledCanvas(enabled);
-  } catch (error) {
-    logger.error('Failed to read connect query flag from superposition', { error });
-    setConnectQueryEnabledCanvas(false);
-  }
+// Slack Connect — canvas query-mode switch, backed by the CONNECT_QUERY_ENABLED_CANVAS env var
+// (see config/env.ts), not CAC. The shared Zero query builder can't read backend env itself, so we
+// push the static value into its cell. Flipping requires a redeploy — acceptable for a once-off
+// post-backfill switch, and more predictable than a per-request CAC read that didn't reflect live.
+const syncConnectQueryFlag = (): void => {
+  setConnectQueryEnabledCanvas(config.connectQueryEnabledCanvas);
 };
 
 // Create database connection pool
@@ -443,17 +431,17 @@ function recordConnectQueryMode(queryName: string, args: unknown): void {
   if (!table) return;
   // The two independent inputs to the decision — exposed as labels so Grafana shows exactly
   // which one is off when mode stays "legacy":
-  //   flag           = did CAC resolve connect_query_enabled_canvas=true this request?
+  //   flag           = is CONNECT_QUERY_ENABLED_CANVAS (env) true?
   //   has_connect_id = did the client send a connectId in the query args?
   // canvasThreadComments is keyed by threadId (never connectId), so it's always legacy.
   const threadScoped = queryName === 'canvasThreadComments';
-  // Same value the query builder saw — syncConnectQueryFlag() set it from CAC earlier this request.
+  // Same value the query builder saw — syncConnectQueryFlag() set it from env earlier this request.
   const flagOn = getConnectQueryEnabledCanvas();
   const hasConnectId = !!(args as { connectId?: string } | undefined)?.connectId;
   const usedConnectId = !threadScoped && flagOn && hasConnectId;
   // `reason` is the single field to group by in Grafana to see WHY a query stayed legacy:
   //   used_connect_id   → filtered by connectId (the goal)
-  //   flag_off          → CAC connect_query_enabled_canvas is false
+  //   flag_off          → CONNECT_QUERY_ENABLED_CANVAS (env) is false
   //   connect_id_missing→ flag on but the row/args had no connectId (a data/plumbing gap)
   //   threadid_scoped   → canvasThreadComments, keyed by threadId by design (never connectId)
   const reason = threadScoped
@@ -500,7 +488,7 @@ export async function handleQueries(request: Request): Promise<any> {
   }
 
   // Refresh the canvas query-mode switch from CAC before any query builds this request.
-  await syncConnectQueryFlag();
+  syncConnectQueryFlag();
 
   try {
     const result = await handleQueryRequest(

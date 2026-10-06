@@ -14,7 +14,7 @@ export class CanvasCommentThreadsACL extends BaseQueryACL<
   async getWhereClause(queryWhere?: Record<string, unknown>): Promise<Prisma.CanvasCommentThreadWhereInput> {
     // Slack Connect: single-entity gate on the query's connectId/canvasId; else the row's own workspaceId.
     return connectReachWhere(this.prisma, this.ctx.workspaceId, 'canvas_comment_threads', 'read', {
-      connectId: queryWhere?.connectId as string | undefined,
+      connectId: queryWhere?.canvasConnectId as string | undefined,
       canvasId: queryWhere?.canvasId as string | undefined,
     })
   }
@@ -22,7 +22,7 @@ export class CanvasCommentThreadsACL extends BaseQueryACL<
   async getMutateWhere(queryWhere?: Record<string, unknown>): Promise<Prisma.CanvasCommentThreadWhereInput> {
     // Slack Connect: update/delete scope follows the same single-entity gate as reads.
     return connectReachWhere(this.prisma, this.ctx.workspaceId, 'canvas_comment_threads', 'write', {
-      connectId: queryWhere?.connectId as string | undefined,
+      connectId: queryWhere?.canvasConnectId as string | undefined,
       canvasId: queryWhere?.canvasId as string | undefined,
     })
   }
