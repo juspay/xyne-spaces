@@ -11,7 +11,6 @@ import { useAgentLeftWarning } from '../hooks/useAgentLeftWarning';
 import { useTranscriptionToggleNotice } from '../hooks/useTranscriptionToggleNotice';
 import { useTranscriptionHostToast } from '../hooks/useTranscriptionHostToast';
 import { useTranscriptionPendingTimeout } from '../hooks/useTranscriptionPendingTimeout';
-import { useActingHostNotice } from '../hooks/useActingHostNotice';
 import { usePlatform } from '../../../hooks/usePlatform';
 import { AIInviteDialog } from '../CallModals/AIInviteDialog';
 import { CreateTicketModal } from '../../Tickets/CreateTicketModal/CreateTicketModal';
@@ -217,8 +216,6 @@ export function CustomLiveKitRoom({
   useTranscriptionToggleNotice(transcriptionToggleNotice, isHost);
   // Fail-safe: clear pending + error if the agent never confirms a toggle.
   useTranscriptionPendingTimeout(transcriptionPending);
-  // Tell me when I start/stop standing in for an absent host.
-  useActingHostNotice();
   // Mirror the host's transcription on/off into room metadata (on change) so
   // participants who join later stay in sync — LiveKit data messages don't reach
   // participants who weren't present when the host toggled.
