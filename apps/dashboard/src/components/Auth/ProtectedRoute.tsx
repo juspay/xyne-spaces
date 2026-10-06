@@ -1,3 +1,4 @@
+import { Suspense } from 'react';
 import { ReactElement } from 'react';
 import { Navigate, Outlet, useLocation } from 'react-router-dom';
 import { useAuth } from '../../hooks/useAuth';
@@ -22,7 +23,7 @@ const ProtectedRoute = (): ReactElement => {
 
   return (
     <>
-      <Outlet></Outlet>
+      <Suspense fallback={null}><Outlet /></Suspense>
     </>
   );
 };

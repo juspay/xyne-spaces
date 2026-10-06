@@ -1,3 +1,4 @@
+import { Suspense } from 'react';
 import { Outlet, useLocation } from 'react-router-dom';
 import { useAuth } from '../../hooks/useAuth';
 import { ReactElement } from 'react';
@@ -18,7 +19,7 @@ const SplashScreen = (): ReactElement => {
       />
     );
   }
-  return <Outlet></Outlet>;
+  return <Suspense fallback={null}><Outlet /></Suspense>;
 };
 
 interface SplashLoadingScreenProps {
