@@ -3226,6 +3226,10 @@ export async function processTask(
       if (!forceReadOnlySandbox && pinnedProfile && !pinnedProfile.repoUrl) {
         RO_DISABLED.delete("sandbox-create");
         RO_DISABLED.delete("sandbox-destroy");
+        RO_DISABLED.delete("sandbox-run");
+        RO_DISABLED.delete("sandbox-run-detached");
+        RO_DISABLED.delete("sandbox-write-file");
+        RO_DISABLED.delete("write");
       }
       const before = allTools.length;
       allTools = allTools.filter((t) => !RO_DISABLED.has(t.name));
