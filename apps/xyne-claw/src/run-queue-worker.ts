@@ -19,7 +19,7 @@ import { startRunControlSubscriber } from "./run-control.js";
 import { RUN_TIMED_OUT, maxRunMs, raceRunDeadline } from "./run-deadline.js";
 import { createLogger } from "./logger.js";
 import { metric } from "./metrics.js";
-import { SERVER } from "./config.js";
+import { SERVER, isAllowedCallbackUrl } from "./config.js";
 import {
   activeAutomationRuns,
   automationConcurrencyLimit,
@@ -56,10 +56,14 @@ function pressureBackoffMs(job: Job<InternalRunPayload>): number {
   return Math.floor(base * (1 + Math.random() * 0.25));
 }
 
-async function postProgressLabel(payload: InternalRunPayload, toolLabel: string): Promise<void> {
+export async function postProgressLabel(payload: InternalRunPayload, toolLabel: string): Promise<void> {
   const dest = payload.progressUrl;
   const sessionId = payload.sessionId;
   if (!dest || !sessionId) return;
+  if (!isAllowedCallbackUrl(dest)) {
+    clog.warn(`[run-queue] ignoring non-allowlisted progressUrl session=${sessionId}`);
+    return;
+  }
   const res = await fetch(dest, {
     method: "POST",
     headers: {
