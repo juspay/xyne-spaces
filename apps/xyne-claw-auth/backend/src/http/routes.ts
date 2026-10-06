@@ -84,7 +84,7 @@ import { slackRouter } from "../surfaces/slack/routes/index.js";
 import { mcpGatewayRouter } from "../mcpgateway/index.js";
 import { requireAuth, requireNoAccessToken, allowReadAccessToken, allowScopedAccessToken, requireStrictS2S, requireInternalS2S, requireUserAuth, optionalAuth, s2sKeyMatches } from "../middleware/require-auth.js";
 import { requireClawAdmin, requireSearchEvalAccess } from "../middleware/agent-acl.js";
-import { apiLimiter } from "../middleware/rate-limiters.js";
+import { apiLimiter, sampleClientIp } from "../middleware/rate-limiters.js";
 
 const SIGNED_INGRESS_PREFIXES = ["/webhook"] as const;
 
@@ -127,6 +127,7 @@ function mountRequestContext(app: Express): void {
       next();
       return;
     }
+    sampleClientIp(req);
     apiLimiter(req, res, next);
   });
 }
