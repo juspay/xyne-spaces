@@ -1,3 +1,11 @@
+## [1.460.5-release-20261006.1](https://github.com/juspay/xyne-spaces/compare/v1.460.4...v1.460.5-release-20261006.1) (2026-10-06)
+
+
+### Bug Fixes
+
+* adding vespa filters ([#2648](https://github.com/juspay/xyne-spaces/issues/2648)) ([3bd2067](https://github.com/juspay/xyne-spaces/commit/3bd2067c529b916e12e12a86011e67eda941a9fa))
+* bump proxy-addr, simple-git and tinypool to clear critical CVEs ([#2670](https://github.com/juspay/xyne-spaces/issues/2670)) ([afa6d65](https://github.com/juspay/xyne-spaces/commit/afa6d65b2e4ce87d65764ef0b8c17c6268953c86))
+
 ## [1.460.4](https://github.com/juspay/xyne-spaces/compare/v1.460.3...v1.460.4) (2026-10-05)
 
 
