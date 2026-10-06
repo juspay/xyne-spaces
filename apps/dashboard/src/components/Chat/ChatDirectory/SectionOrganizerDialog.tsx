@@ -18,10 +18,12 @@ import {
 } from '@xyne/shared';
 import ChatLock from '../../icons/ChatLock';
 import { Button } from '../../ui/Button';
+import { Virtuoso } from 'react-virtuoso';
 import { Checkbox } from '../../ui/Checkbox/Checkbox';
 import {
+  GROUPED_SELECT_LIST_HEIGHT,
   GroupedSelectList,
-  GroupedSelectGroup,
+  GroupedSelectGroupHeader,
   GroupedSelectRow,
 } from '../../ui/GroupedSelectList/GroupedSelectList';
 import {
@@ -63,6 +65,17 @@ export interface OrganizerGroup {
 }
 
 export type OrganizerMode = 'project' | 'activity' | 'dms';
+
+type OrganizerRow =
+  | {
+      kind: 'header';
+      group: OrganizerGroup;
+      selectedInGroup: number;
+      expanded: boolean;
+      hasNameError: boolean;
+    }
+  | { kind: 'all'; group: OrganizerGroup; selectedInGroup: number }
+  | { kind: 'channel'; group: OrganizerGroup; channel: VisibleChannel };
 
 interface SectionOrganizerDialogProps {
   suggestions: readonly SectionSuggestion[];
@@ -230,6 +243,29 @@ export const SectionOrganizerDialog = ({
     seen.add(normalized);
   }
 
+  const rows = useMemo((): OrganizerRow[] => {
+    const out: OrganizerRow[] = [];
+    for (const group of visibleGroups) {
+      const selectedInGroup = group.channelIds.filter(
+        id => !group.excludedChannelIds.includes(id) && channelsById.has(id),
+      ).length;
+      out.push({
+        kind: 'header',
+        group,
+        selectedInGroup,
+        expanded: group.expanded || !!query,
+        hasNameError: invalidNames.has(group.id),
+      });
+      if (!(group.expanded || !!query)) continue;
+      out.push({ kind: 'all', group, selectedInGroup });
+      for (const channelId of group.channelIds) {
+        const channel = channelsById.get(channelId);
+        if (channel) out.push({ kind: 'channel', group, channel });
+      }
+    }
+    return out;
+  }, [visibleGroups, query, channelsById, invalidNames]);
+
   const canConfirm = selectedGroups.length > 0 && invalidNames.size === 0;
   const selectedChannelCount = selectedGroups.reduce((sum, g) => sum + g.channelIds.length, 0);
 
@@ -310,58 +346,66 @@ export const SectionOrganizerDialog = ({
         trackCategory='CHAT_SIDEBAR'
         trackName='ORGANIZER_SEARCH'
         className='rounded-md border border-border'
+        scrollable={false}
       >
-        {visibleGroups.map(group => {
-          const isOpen = group.expanded || !!query;
-          const hasNameError = invalidNames.has(group.id);
-          const selectedInGroup = includedCount(group);
-          return (
-            <GroupedSelectGroup
-              key={group.id}
-              expanded={isOpen}
-              onToggleExpand={() => updateGroup(group.id, { expanded: !group.expanded })}
-              count={selectedInGroup}
-              trackCategory='CHAT_SIDEBAR'
-              trackName='ORGANIZER_TOGGLE_EXPAND'
-              header={
-                <input
-                  value={group.name}
-                  onChange={e => updateGroup(group.id, { name: e.target.value })}
-                  maxLength={SECTION_NAME_MAX_LENGTH}
-                  data-track-category='CHAT_SIDEBAR'
-                  data-track-name='ORGANIZER_RENAME_SECTION'
-                  className={cn(
-                    'min-w-0 flex-1 border-0 border-b border-transparent bg-transparent px-0.5 py-0.5 text-[13px] font-medium text-foreground outline-none focus:border-b-primary',
-                    hasNameError && 'border-b-destructive focus:border-b-destructive',
-                  )}
-                />
-              }
-            >
-              <GroupedSelectRow>
-                <Checkbox
-                  checked={selectedInGroup > 0 && selectedInGroup === group.channelIds.length}
-                  indeterminate={selectedInGroup > 0 && selectedInGroup < group.channelIds.length}
-                  onChange={checked => toggleAllChannels(group.id, checked)}
-                  label='All channels'
-                  data-track-category='CHAT_SIDEBAR'
-                  data-track-name='ORGANIZER_TOGGLE_SECTION'
-                />
-              </GroupedSelectRow>
-              {group.channelIds.map(channelId => {
-                const channel = channelsById.get(channelId);
-                if (!channel) return null;
-                return (
-                  <ChannelLine
-                    key={channelId}
-                    channel={channel}
-                    excluded={group.excludedChannelIds.includes(channelId)}
-                    onToggle={() => toggleChannel(group.id, channelId)}
+        <Virtuoso
+          data={rows}
+          style={{ height: GROUPED_SELECT_LIST_HEIGHT }}
+          overscan={200}
+          defaultItemHeight={30}
+          itemContent={(_, row) => {
+            if (row.kind === 'header') {
+              return (
+                <GroupedSelectGroupHeader
+                  expanded={row.expanded}
+                  onToggleExpand={() =>
+                    updateGroup(row.group.id, { expanded: !row.group.expanded })
+                  }
+                  count={row.selectedInGroup}
+                  trackCategory='CHAT_SIDEBAR'
+                  trackName='ORGANIZER_TOGGLE_EXPAND'
+                >
+                  <input
+                    value={row.group.name}
+                    onChange={e => updateGroup(row.group.id, { name: e.target.value })}
+                    maxLength={SECTION_NAME_MAX_LENGTH}
+                    data-track-category='CHAT_SIDEBAR'
+                    data-track-name='ORGANIZER_RENAME_SECTION'
+                    className={cn(
+                      'min-w-0 flex-1 border-0 border-b border-transparent bg-transparent px-0.5 py-0.5 text-[13px] font-medium text-foreground outline-none focus:border-b-primary',
+                      row.hasNameError && 'border-b-destructive focus:border-b-destructive',
+                    )}
                   />
-                );
-              })}
-            </GroupedSelectGroup>
-          );
-        })}
+                </GroupedSelectGroupHeader>
+              );
+            }
+            if (row.kind === 'all') {
+              return (
+                <GroupedSelectRow indented>
+                  <Checkbox
+                    checked={
+                      row.selectedInGroup > 0 && row.selectedInGroup === row.group.channelIds.length
+                    }
+                    indeterminate={
+                      row.selectedInGroup > 0 && row.selectedInGroup < row.group.channelIds.length
+                    }
+                    onChange={checked => toggleAllChannels(row.group.id, checked)}
+                    label='All channels'
+                    data-track-category='CHAT_SIDEBAR'
+                    data-track-name='ORGANIZER_TOGGLE_SECTION'
+                  />
+                </GroupedSelectRow>
+              );
+            }
+            return (
+              <ChannelLine
+                channel={row.channel}
+                excluded={row.group.excludedChannelIds.includes(row.channel.id)}
+                onToggle={() => toggleChannel(row.group.id, row.channel.id)}
+              />
+            );
+          }}
+        />
       </GroupedSelectList>
 
       <div className='flex items-center justify-between gap-3'>

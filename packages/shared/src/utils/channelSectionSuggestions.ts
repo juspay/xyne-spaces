@@ -1,5 +1,5 @@
-import { ChannelScopeType, ProjectType } from './zero/types.js';
-import { isDeskChannelType } from './utils/channel.js';
+import { ChannelScopeType, ProjectType } from '../zero/types.js';
+import { isDeskChannelType } from './channel.js';
 
 export const SECTION_NAME_MAX_LENGTH = 50;
 export const DEFAULT_MIN_CHANNELS = 2;
