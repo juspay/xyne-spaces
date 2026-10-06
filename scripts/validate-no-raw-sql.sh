@@ -112,7 +112,13 @@ RAW_RE='\$(query|execute)Raw(Unsafe)?'
 # scripts/validate-no-acl-bypass.sh (which blocks raw primitives OUTSIDE this
 # folder) and by a CODEOWNERS requirement on the folder. Counting raw calls
 # inside it would fight the framework the guard exists to push code toward.
-EXCLUDED_RE='(^|/)(node_modules|dist|build|generated)/|(^|/)apps/backend/src/bypassAcl/'
+# apps/xyne-claw-auth/backend/src/lib/spaces-db.ts is also excluded: it is the
+# claw-auth read-only client for a SEPARATE, external Spaces database, reached
+# through its own PrismaClient with no tenant ACL/workspace extension. The
+# claw-auth Prisma schema has no Conversation/Channel/ChannelParticipant models,
+# so those Spaces tables can ONLY be read via raw SQL; the query builder is not
+# an option and the tenant-isolation rationale above does not apply to this DB.
+EXCLUDED_RE='(^|/)(node_modules|dist|build|generated)/|(^|/)apps/backend/src/bypassAcl/|(^|/)apps/xyne-claw-auth/backend/src/lib/spaces-db\.ts$'
 
 # This script is the one file that must spell the guarded names out in full —
 # it cannot be subject to its own rule. Nothing else is exempt.
