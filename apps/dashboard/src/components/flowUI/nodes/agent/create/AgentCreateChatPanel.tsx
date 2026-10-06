@@ -38,7 +38,6 @@ import {
 } from './agentDraftStream';
 import {
   createModeQuery,
-  decideCreateCanvasAction,
   parseCreateChatAction,
   shouldHoldDraftChatAck,
   visibleCreateReply,
@@ -591,61 +590,6 @@ function LiveAgentCreateChatPanel({
       setCanvasError(clawErrorText(err, 'Could not draft from chat. Try again.'));
     });
   }, [messages, streaming, runCanvasTurn]);
-
-  // DEV proof hook: seed user/bot rows then run canvas-first pipeline (no live LLM).
-  useEffect(() => {
-    if (!import.meta.env.DEV) return undefined;
-    const host = window as Window & {
-      __xyneCreateProofTurn?: (userText: string, visibleReply?: string) => Promise<void>;
-    };
-    host.__xyneCreateProofTurn = async (userText, visibleReply) => {
-      setCanvasError(null);
-      const raw = visibleReply ?? userText;
-      const marker = parseCreateChatAction(raw);
-      const action = decideCreateCanvasAction({
-        userText,
-        canvasEmpty: canvasRef.current.empty,
-        marker,
-      });
-      const userId = `proof-user-${Date.now()}`;
-      const botId = `proof-bot-${Date.now()}`;
-      const holdAck =
-        action.type === 'draft' || action.type === 'rename' || shouldHoldDraftChatAck(raw);
-      const replyOnly = !holdAck;
-      setMessages([
-        {
-          id: userId,
-          type: 'user',
-          content: userText,
-          timestamp: new Date(),
-        },
-        {
-          id: botId,
-          type: 'bot',
-          content: replyOnly ? marker.visible : '',
-          streamingContent: replyOnly ? marker.visible : '',
-          isStreaming: false,
-          timestamp: new Date(),
-        },
-      ]);
-      handledUserIdsRef.current.add(userId);
-      canvasStartedForUserRef.current = userId;
-      await onTurnCompleteRef.current({
-        userText,
-        marker,
-        ...(holdAck
-          ? {
-              announceSection: (line: string) => {
-                announceOnBot(botId, line);
-              },
-            }
-          : {}),
-      });
-    };
-    return (): void => {
-      delete host.__xyneCreateProofTurn;
-    };
-  }, [announceOnBot]);
 
   const handleSubmit = useCallback(
     async (

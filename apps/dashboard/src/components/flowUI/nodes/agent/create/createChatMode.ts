@@ -208,8 +208,6 @@ export async function revealCreatePatchFields(args: {
   ) => AgentCreateField[];
   sleep: (ms: number) => Promise<void>;
   onFieldComplete?: (field: CreateTurnField, hubRow: AgentCreateHubRow | null) => void;
-  /** Fires right after a hub slice lands on the canvas (before the settle pause). */
-  onFieldApplied?: (field: CreateTurnField) => void;
 }): Promise<void> {
   const patch = pickPatch(args.incoming, [...args.fields]);
   const reveal = CREATE_REVEAL_FIELD_ORDER.filter(field => args.fields.includes(field));
@@ -306,7 +304,6 @@ export async function revealCreatePatchFields(args: {
       args.setWritingField(null);
       continue;
     }
-    args.onFieldApplied?.(field);
     await args.sleep(args.writeMs);
     args.setWritingField(null);
     args.onFieldComplete?.(field, hubRow);
@@ -321,7 +318,7 @@ const PARTIAL_MARKER_TAIL = /\n?\s*XYNE_CREATE_[A-Z]*\s*:?\s*[^\n]*$/i;
 const PARTIAL_DRAFT_MARKER = /\bXYNE_CREATE_DRAFT\b/i;
 
 /**
- * Hub-adapted Xyne Agent authoring brain (from seed-xyne-agent AUTHORING_PROMPT_APPENDIX).
+ * Hub-adapted Xyne Agent authoring brain.
  * Tools stay disabled on Hub create — markers drive the canvas instead of propose-agent cards.
  */
 export const HUB_AUTHORING_PROMPT_APPENDIX = `
@@ -732,8 +729,6 @@ export async function applyCreateHubDraft(args: {
   onHubSuggestions?:
     | ((suggestions: CreateHubSuggestions, hubs: readonly HubPlanField[]) => void)
     | undefined;
-  /** Dev-only timing hook. */
-  onPerfMark?: ((mark: 'tools-filled' | 'prompt-done') => void) | undefined;
   toolsHubRow?: AgentCreateHubRow;
   /** Chat announces after each section write settles (canvas-first). */
   onSectionComplete?: (line: string) => void;
@@ -769,11 +764,7 @@ export async function applyCreateHubDraft(args: {
     Promise.resolve()
       .then(() => args.generateAgentPrompt(promptIntent, existingPrompt))
       // Keep drafting from chat-stated Instructions/Rules or an intent fallback.
-      .catch(() => '')
-      .then(text => {
-        args.onPerfMark?.('prompt-done');
-        return text;
-      });
+      .catch(() => '');
 
   // Resolve the plan into a patch the moment it lands (overlaps the identity
   // prelude) and start the instructions prompt from its richer summary.
@@ -938,12 +929,6 @@ export async function applyCreateHubDraft(args: {
   }
 
   // --- Reveal hub chips -------------------------------------------------------
-  let toolsMarked = false;
-  const markToolsFilled = (): void => {
-    if (toolsMarked) return;
-    toolsMarked = true;
-    args.onPerfMark?.('tools-filled');
-  };
   const announced = new Set<CreateTurnField>();
   const hubLine = (field: CreateTurnField, hubRow: AgentCreateHubRow | null): string | null =>
     sectionCompleteChatLine({
@@ -968,9 +953,6 @@ export async function applyCreateHubDraft(args: {
     setWritingField: args.setWritingField,
     applyChatPatch: args.applyChatPatch,
     sleep: args.sleep,
-    onFieldApplied: field => {
-      if (field === 'tools') markToolsFilled();
-    },
   };
   if (args.setAttentionField) hubTailArgs.setAttentionField = args.setAttentionField;
   if (args.setProgressLabel) hubTailArgs.setProgressLabel = args.setProgressLabel;
@@ -993,7 +975,6 @@ export async function applyCreateHubDraft(args: {
       if (line) args.onSectionComplete?.(line);
     }
   }
-  markToolsFilled();
 
   // --- Instructions -----------------------------------------------------------
   if (generateInstructions) {

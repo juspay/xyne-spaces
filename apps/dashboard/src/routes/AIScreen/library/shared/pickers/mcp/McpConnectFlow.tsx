@@ -1,6 +1,4 @@
-import { useEffect, useRef, type ReactElement } from 'react';
-import { Loader2 } from 'lucide-react';
-import { FAKE_MCP_CONNECT } from '@/services/claw/fakeMcpConnect';
+import { type ReactElement } from 'react';
 import { McpConnectForm } from './McpConnectForm';
 import type { McpConnect } from './useMcpConnect';
 
@@ -21,7 +19,6 @@ export function McpConnectFlow({
   /** Analytics name prefix, e.g. "Create agent v2". */
   trackPrefix: string;
 }): ReactElement {
-  if (FAKE_MCP_CONNECT) return <FakeConnectStep label={label} connect={connect} />;
   if (connect.strategy !== 'oauth') {
     return (
       <McpConnectForm
@@ -61,20 +58,5 @@ export function McpConnectFlow({
         </button>
       </div>
     </>
-  );
-}
-
-/** Local development (fakeMcpConnect.ts): no sign-in or form, it just connects. */
-function FakeConnectStep({ label, connect }: { label: string; connect: McpConnect }): ReactElement {
-  // Once, when the step opens: `connect.connect` is a new function every render.
-  const start = useRef(connect.connect);
-  useEffect(() => {
-    start.current({});
-  }, []);
-  return (
-    <p className='flex items-center gap-1.5 text-xs leading-4 tracking-[-0.24px] text-muted-foreground'>
-      <Loader2 className='size-3 animate-spin' aria-hidden />
-      Connecting {label}…
-    </p>
   );
 }

@@ -17,7 +17,6 @@ import {
   startMcpOAuth,
 } from '../../../services/claw/clawMcpService';
 import type { McpServer } from '../../../services/claw/clawMcpTypes';
-import { FAKE_MCP_CONNECT, fakeConnect } from '../../../services/claw/fakeMcpConnect';
 import { CardShell } from './cardPrimitives';
 
 /**
@@ -116,15 +115,6 @@ export function McpSuggestCard({
       // Before any sign-in, which may leave the page and come back.
       if (!attach.isAttached(server)) attach.onAttach(server);
       if (accountReady(server)) return;
-    }
-
-    // Local development: no sign-in or form, just a short wait (fakeMcpConnect.ts).
-    if (FAKE_MCP_CONNECT) {
-      setBusyType(serverType);
-      await fakeConnect(user.id, server.id);
-      refetch();
-      setBusyType(null);
-      return;
     }
 
     // Resolved from the registry, not the connector's DB columns: those are

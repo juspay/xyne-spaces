@@ -150,9 +150,8 @@ import { createScheduledJob } from '../detail/activity/createScheduledJob';
 import {
   CHAT_OVERLAY_WIDTH_MAX,
   CHAT_OVERLAY_WIDTH_MIN,
-  chatOverlayShadow,
-  useChatOverlayDial,
-} from '@/components/flowUI/nodes/agent/create/chatOverlayDial';
+  useChatOverlayWidth,
+} from '@/components/flowUI/nodes/agent/create/chatOverlay';
 
 /** Settle beat after a hub section lands, long enough for its pills to pop in. */
 const WRITE_MS = 300;
@@ -164,40 +163,6 @@ const WRITE_MS = 300;
  */
 const DRAFT_STREAM_ENABLED = import.meta.env['VITE_CREATE_DRAFT_STREAM'] !== 'off';
 const DRAFT_STREAM_DOWN_STATUSES = new Set([404, 502, 503]);
-
-type CreateMark = 'send' | 'turn' | 'plan-ready' | 'tools-filled' | 'prompt-done' | 'ready';
-
-const CREATE_MARKS: readonly CreateMark[] = [
-  'send',
-  'turn',
-  'plan-ready',
-  'tools-filled',
-  'prompt-done',
-  'ready',
-];
-
-/**
- * Dev-only timing marks (`create:send` … `create:ready`) for the create pipeline.
- * On `ready` it logs each stage as ms since send, then clears the marks, so one
- * console table per turn shows where the time went (the chat model ≈ send→turn).
- */
-function markCreate(mark: CreateMark): void {
-  if (!import.meta.env.DEV) return;
-  performance.mark(`create:${mark}`);
-  if (mark !== 'ready') return;
-  const at = (name: CreateMark): number | undefined =>
-    performance.getEntriesByName(`create:${name}`, 'mark').at(-1)?.startTime;
-  const start = at('send') ?? at('turn');
-  if (start !== undefined) {
-    const rows = CREATE_MARKS.flatMap(name => {
-      const time = at(name);
-      return time === undefined ? [] : [{ stage: name, msSinceSend: Math.round(time - start) }];
-    });
-    // eslint-disable-next-line no-console -- dev-only per-turn timing table
-    console.table(rows);
-  }
-  for (const name of CREATE_MARKS) performance.clearMarks(`create:${name}`);
-}
 
 function sleep(ms: number): Promise<void> {
   return new Promise(resolve => {
@@ -558,7 +523,6 @@ function AgentCreateCanvasPage({
 
   const onTurnComplete = useCallback(
     (turn: CreateChatTurn): Promise<void> => {
-      markCreate('turn');
       turnsInFlightRef.current += 1;
       setDrafting(true);
       const run = canvasTurnChainRef.current.then(async (): Promise<void> => {
@@ -655,7 +619,6 @@ function AgentCreateCanvasPage({
               })
             ).then(plan => {
               planRef.current = plan;
-              if (plan) markCreate('plan-ready');
               return plan;
             })
           : undefined;
@@ -689,7 +652,6 @@ function AgentCreateCanvasPage({
             applyChatPatch: createForm.applyChatPatch,
             sleep,
             ...(turn.announceSection ? { onSectionComplete: turn.announceSection } : {}),
-            onPerfMark: markCreate,
             onHubSuggestions: (next, hubs) =>
               setHubSuggestions(prev => replaceHubSuggestions(prev, next, hubs)),
             ...(hubPlan && planContext
@@ -838,7 +800,6 @@ function AgentCreateCanvasPage({
           // The plan is settled by now (hard 4s ceiling). No word-match "heal" pass and no
           // Save block on capabilities: the plan and the chips decide what is bound.
           if (hubPlan) await hubPlan;
-          markCreate('ready');
           createForm.setWritingField(null);
           createForm.setAttentionField(null);
           setProgressLabel(null);
@@ -866,7 +827,6 @@ function AgentCreateCanvasPage({
 
   const onSend = useCallback(
     (userText: string): void => {
-      markCreate('send');
       // Only when this turn is likely to touch hubs: an empty canvas (first draft)
       // or words that name a tool, skill or knowledge. Chit-chat costs no XOR call.
       const form = createForm.getForm();
@@ -928,7 +888,6 @@ function AgentCreateCanvasPage({
    */
   const onDraftTurn = useCallback(
     async (turn: DraftTurnArgs): Promise<void> => {
-      markCreate('send');
       setDrafting(true);
       setCreateError(null);
       createForm.clearHighlightMarks();
@@ -953,7 +912,6 @@ function AgentCreateCanvasPage({
       let overrideEdits = false;
       const apply = (patch: AgentCreateChatPatch): void => {
         if (Object.keys(patch).length === 0) return;
-        if (applied === 0) markCreate('turn');
         applied += 1;
         createForm.applyChatPatch(`draft-${turnId}-${applied}`, patch, {
           highlight: false,
@@ -1008,7 +966,6 @@ function AgentCreateCanvasPage({
             await instructionsChanged();
           }
           if (finalInstructions !== null) apply({ systemPrompt: finalInstructions });
-          markCreate('prompt-done');
           return;
         }
         // Land what has streamed a few lines at a time (instructionsChunks.ts).
@@ -1034,7 +991,6 @@ function AgentCreateCanvasPage({
         }
         // The final text can differ from the stream: a repaired section, late tools.
         if (finalInstructions !== null) apply({ systemPrompt: finalInstructions });
-        markCreate('prompt-done');
       };
       const queueInstructions = (): void => {
         if (instructionsQueued) return;
@@ -1166,8 +1122,6 @@ function AgentCreateCanvasPage({
                   );
                 }
               }
-              markCreate('plan-ready');
-              markCreate('tools-filled');
             });
             return;
           }
@@ -1295,7 +1249,6 @@ function AgentCreateCanvasPage({
         createForm.setAttentionField(null);
         setProgressLabel(null);
         setDrafting(false);
-        markCreate('ready');
       }
     },
     [agent, clearCanvasFromChat, createForm, draftContext],
@@ -1555,7 +1508,7 @@ function AgentCreateCanvasPage({
     />
   );
 
-  const overlay = useChatOverlayDial();
+  const overlay = useChatOverlayWidth();
   const [sideCardDragging, setSideCardDragging] = useState(false);
   const sideCardRef = useRef<HTMLDivElement | null>(null);
   // Arriving from the profile, the Build chat slides in as the canvas moves over.
@@ -1611,42 +1564,11 @@ function AgentCreateCanvasPage({
             ref={sideCardRef}
             className='relative m-3 flex min-h-0 shrink-0 flex-col self-stretch overflow-hidden rounded-[20px] border border-border bg-background shadow-[0px_4px_4px_rgba(0,0,0,0.03),0px_14px_7px_rgba(0,0,0,0.03),0px_32px_9.5px_rgba(0,0,0,0.02)]'
             data-testid='create-agent-side-card'
-            data-overlay-version={overlay.version}
-            style={
-              overlay.version === 'Figma'
-                ? {
-                    width: overlay.width,
-                    flexBasis: overlay.width,
-                    height: '100%',
-                    alignSelf: 'stretch',
-                    marginTop: 0,
-                    marginBottom: 0,
-                    marginLeft: overlay.margin,
-                    // Left stroke only, so a right margin would read as extra padding
-                    // inside the card. It sits flush with the window edge instead.
-                    marginRight: 0,
-                    borderRadius: overlay.radius,
-                    borderStyle: 'solid',
-                    borderTopWidth: 0,
-                    borderRightWidth: 0,
-                    borderBottomWidth: 0,
-                    borderLeftWidth: 1,
-                    borderLeftColor: 'hsl(var(--border))',
-                    boxShadow: 'none',
-                    padding: overlay.inset === 12 ? undefined : overlay.inset,
-                    transition: sideCardDragging ? 'none' : undefined,
-                  }
-                : {
-                    width: overlay.width,
-                    flexBasis: overlay.width,
-                    margin: overlay.margin,
-                    borderRadius: overlay.radius,
-                    borderColor: 'hsl(var(--border))',
-                    boxShadow: chatOverlayShadow(overlay.shadow),
-                    padding: overlay.inset === 12 ? undefined : overlay.inset,
-                    transition: sideCardDragging ? 'none' : undefined,
-                  }
-            }
+            style={{
+              width: overlay.width,
+              flexBasis: overlay.width,
+              transition: sideCardDragging ? 'none' : undefined,
+            }}
           >
             <SideCardWidthEdge
               width={overlay.width}

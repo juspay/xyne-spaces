@@ -62,7 +62,7 @@ The main path: build with the Build chat, test as you go, connect GitHub from th
 | A10 | Test chat: `try again` | The answer now includes your GitHub review requests. No GitHub row this time. |
 | A11 | Test chat: `reply to the first one saying I'll look after lunch` | It doesn't send anything. A row **Writes are off while testing**. |
 | A12 | Test chat: `also check my Gmail for anything waiting on a reply, and my calendar for meetings before noon` | A **Connect to unlock this** card with Google and **Connect** (no Add row: connectors are connected, not added). |
-| A13 | Click **Connect** | Google lands in the MCP row with its Gmail and Calendar read tools straight away, then the Google sign-in runs (or the dummy wait locally). The card reads **Connected** and **Ask again** appears. |
+| A13 | Click **Connect** | Google lands in the MCP row with its Gmail and Calendar read tools straight away, then the Google sign-in runs. The card reads **Connected** and **Ask again** appears. |
 | A13b | **Connect** on the Google card | Google's account chooser, then its consent page listing Gmail, Calendar, Drive and the rest. (External/Testing shows "Google hasn't verified this app" first: Continue.) |
 | A13c | Allow | Back on the draft with a *Google connected* toast and the card showing it connected. |
 | A13d | Test chat: `try again` | The brief now has emails that need a reply and your meetings before noon, alongside Spaces and GitHub. |

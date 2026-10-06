@@ -16,12 +16,6 @@ import {
 import { useIsClawAdmin } from '@/hooks/useIsClawAdmin';
 import Tooltip from '@/components/ui/Tooltip';
 import { openOAuthConsent } from '../../shared/pickers/mcp/openOAuthConsent';
-import {
-  FAKE_MCP_CONNECT,
-  fakeConnect,
-  fakeDisconnect,
-  isFakeConnection,
-} from '@/services/claw/fakeMcpConnect';
 import { McpConnectDialog } from './McpConnectDialog';
 import { McpDefinitionDialog } from './McpDefinitionDialog';
 import { Pill } from '../../shared/primitives/Pill';
@@ -107,8 +101,7 @@ const ClawMcpDetailV2 = (): ReactElement => {
     setConnectError(null);
     setConnecting(true);
     try {
-      if (isFakeConnection(connection.id)) fakeDisconnect(user.id, connection.id);
-      else await deleteMcpConnection(user.id, connection.id);
+      await deleteMcpConnection(user.id, connection.id);
       refetch();
     } catch (err) {
       setConnectError(err instanceof Error ? err.message : 'Could not disconnect. Try again.');
@@ -126,15 +119,6 @@ const ClawMcpDetailV2 = (): ReactElement => {
   const handleConnect = async (): Promise<void> => {
     if (!server || !user?.id) return;
     setConnectError(null);
-
-    // Local development: no sign-in or form, just a short wait (fakeMcpConnect.ts).
-    if (FAKE_MCP_CONNECT) {
-      setConnecting(true);
-      await fakeConnect(user.id, server.id);
-      refetch();
-      setConnecting(false);
-      return;
-    }
 
     // Credential connectors collect their fields first; everything else can
     // connect straight away. Re-resolved here rather than trusting the render

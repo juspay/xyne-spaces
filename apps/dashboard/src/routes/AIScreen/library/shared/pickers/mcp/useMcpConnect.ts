@@ -2,7 +2,6 @@ import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { useAuth } from '@/hooks/useAuth';
 import { useMcpCredentialFields } from './useMcpCredentialFields';
 import { clawErrorText } from '@/services/claw/clawRequest';
-import { FAKE_MCP_CONNECT, fakeConnect } from '@/services/claw/fakeMcpConnect';
 import type { CredentialField, McpServer } from '@/services/claw/clawMcpTypes';
 import { connectMcpServer } from './mcpConnectionService';
 import { connectStrategyFor, needsMcpKey, type ConnectStrategy } from './mcpConnectStrategy';
@@ -31,10 +30,6 @@ export function useMcpConnect(server: McpServer | undefined, onConnected: () => 
   const mutation = useMutation({
     mutationFn: async (credentials: Record<string, string>) => {
       if (!userId || !server) throw new Error('Not signed in');
-      if (FAKE_MCP_CONNECT) {
-        await fakeConnect(userId, server.id);
-        return { redirected: false };
-      }
       return connectMcpServer(userId, server, credentials);
     },
     onSuccess: async result => {

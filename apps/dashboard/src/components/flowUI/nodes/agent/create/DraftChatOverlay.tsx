@@ -29,8 +29,7 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { cn } from '@/utils/classNames';
-import { DRAFT_CHAT_EASE_OUT } from './draftChatMotion';
-import { useDraftChatMotion } from './draftChatMotionDial';
+import { DRAFT_CHAT_CARD_MOTION, DRAFT_CHAT_EASE_OUT } from './draftChatMotion';
 import { useExclusiveMenu } from './useExclusiveMenu';
 import './draft-chat.css';
 
@@ -141,10 +140,12 @@ export function DraftChatOverlay({
   const showSession = variant === 'session';
   const sessionCard = showSession && !closing;
   const instant = reduceMotion === true;
-  // The card's rise and fold (see draftChatMotionDial.ts).
-  const cardMotion = useDraftChatMotion();
   const toward = (target: number): Transition =>
-    instant ? { duration: 0 } : target > 0 ? cardMotion.open : cardMotion.fold;
+    instant
+      ? { duration: 0 }
+      : target > 0
+        ? DRAFT_CHAT_CARD_MOTION.open
+        : DRAFT_CHAT_CARD_MOTION.fold;
   const resize: Transition = instant
     ? { duration: 0 }
     : { type: 'tween', ease: DRAFT_CHAT_EASE_OUT, duration: RESIZE_S };
