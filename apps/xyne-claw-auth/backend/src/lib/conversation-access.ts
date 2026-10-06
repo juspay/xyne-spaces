@@ -17,7 +17,7 @@ export function baseConversationId(id: string | undefined | null): string | unde
   return trimmed || undefined;
 }
 
-type Verdict = "ok" | "denied" | "unknown";
+export type ConversationAccessVerdict = "ok" | "denied" | "unknown";
 
 /**
  * Ask Spaces (the ACL owner) whether `userId` may access `conversationId`.
@@ -25,7 +25,10 @@ type Verdict = "ok" | "denied" | "unknown";
  * any transport failure — this is a defense-in-depth layer; userId is already
  * pinned server-side.
  */
-async function checkConversationAccess(conversationId: string, userId: string): Promise<Verdict> {
+export async function checkConversationAccess(
+  conversationId: string,
+  userId: string,
+): Promise<ConversationAccessVerdict> {
   if (!CONFIG.spacesInternalUrl) return "unknown";
   try {
     const res = await fetch(`${CONFIG.spacesInternalUrl}/api/internal/conversation-access`, {
