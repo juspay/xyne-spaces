@@ -17,8 +17,9 @@ import {
 } from '@/services/orgLLMCredentialService';
 import { vespaQueue } from '@/queues/vespaQueue';
 import { messageSchema } from '@/vespa/src/types';
-import { buildClassifierPrompt } from './prompt';
+import { buildClassifierPrompt, MAX_SOURCES_PER_TYPE } from './prompt';
 import { getThreadTypeVocabulary } from './vocabulary';
+import { runJevBeforeLlm } from './jev';
 
 const TAG = '[MessageClassification]';
 
@@ -286,6 +287,7 @@ export async function classifyAndTagThread(conversationId: string): Promise<Clas
     channel.workspaceId,
     modelName,
     vocabulary,
+    conversationId,
   );
 
   const now = Date.now();
@@ -521,7 +523,7 @@ interface ClassifierMessage {
   timestamp_iso: string;
 }
 
-interface ClassifierInput {
+export interface ClassifierInput {
   thread_messages: ClassifierMessage[];
   /** True when a bot or automated system opened the thread. Gates the ALERT type. */
   root_is_bot: boolean;
@@ -541,13 +543,11 @@ export interface ClassifiedType {
   sourceMessageIds: string[];
 }
 
-interface Classification {
+export interface Classification {
   /** The thread as a whole — a thread can be several things at once. */
   threadTypes: ClassifiedType[];
 }
 
-/** No more than this many citations per type, matching what the prompt asks for. */
-const MAX_SOURCES_PER_TYPE = 3;
 
 // Lenient on purpose: the model's raw shape is untrusted. Anything unrecognised is dropped
 // rather than failing the whole job. Both the current object form and a bare list of names
@@ -590,6 +590,32 @@ const dedicatedCredential = (): OrgLLMCredential | null => {
 };
 
 async function classifyThread(
+  input: ClassifierInput,
+  projectId: string | null,
+  workspaceId: string,
+  modelName: string,
+  vocabulary: readonly ThreadTypeEntry[],
+  /** For the Jev log only. */
+  conversationId: string,
+): Promise<Classification> {
+  // Jev, right before the model and on the very input the model is about to get. In
+  // replace mode its answer stands in for the model's; otherwise it is only compared.
+  const jev = await runJevBeforeLlm(input, vocabulary, { conversationId, workspaceId });
+  if (jev?.answer) return jev.answer;
+
+  const classification = await classifyThreadWithLlm(
+    input,
+    projectId,
+    workspaceId,
+    modelName,
+    vocabulary,
+  );
+  jev?.afterLlm(classification);
+  return classification;
+}
+
+/** The model call itself, and the clean-up of what it returns. */
+async function classifyThreadWithLlm(
   input: ClassifierInput,
   projectId: string | null,
   workspaceId: string,

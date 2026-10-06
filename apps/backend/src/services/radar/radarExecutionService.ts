@@ -428,7 +428,10 @@ class RadarExecutionService {
               }
               return feedback.length > 0 ? feedback.join('\n\n') : null;
             },
+            { conversationId: scope.key },
           );
+          // Jev answering in the model's place (CAC radar_jev_replace) means no parse ran.
+          run.parserRan = transitions.decidedBy !== 'jev';
           run.proposedOps = transitions.operations;
           run.assessment = transitions.assessment;
           const { valid, dropped } = validateTransitions(transitions.operations, validationCtx);
