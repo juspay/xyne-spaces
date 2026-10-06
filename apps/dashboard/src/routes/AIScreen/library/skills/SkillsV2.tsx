@@ -99,7 +99,6 @@ const SkillsV2 = ({ query }: { query: string }): ReactElement => {
               testId='claw-skill-card'
               dimmed={!skill.enabled}
               variant='flat'
-              chevron
               icon={
                 <LibraryIconTile size='lg'>
                   <Staroflife variant='Solid' className='size-6 text-foreground/40' />

@@ -116,7 +116,6 @@ const SubagentsV2 = ({ query }: { query: string }): ReactElement => {
                 testId='claw-subagent-card'
                 dimmed={!subagent.enabled}
                 variant='flat'
-                chevron
                 icon={
                   <LibraryIconTile size='lg'>
                     <Bot variant='Solid' className='size-6 text-foreground/40' />

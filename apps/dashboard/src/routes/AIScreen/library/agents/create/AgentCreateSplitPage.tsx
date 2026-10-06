@@ -1560,9 +1560,11 @@ function AgentCreateCanvasPage({
       ) : (
         <div className='flex h-full min-h-0 w-full bg-background'>
           <div className='min-h-0 min-w-0 flex-1'>{canvas}</div>
+          {/* Figma 1941:36346: full height, no corners or shadow, a left stroke only.
+              No right margin, so it sits flush with the window edge. */}
           <div
             ref={sideCardRef}
-            className='relative m-3 flex min-h-0 shrink-0 flex-col self-stretch overflow-hidden rounded-[20px] border border-border bg-background shadow-[0px_4px_4px_rgba(0,0,0,0.03),0px_14px_7px_rgba(0,0,0,0.03),0px_32px_9.5px_rgba(0,0,0,0.02)]'
+            className='relative ml-3 flex min-h-0 shrink-0 flex-col self-stretch overflow-hidden border-l border-border bg-background'
             data-testid='create-agent-side-card'
             style={{
               width: overlay.width,

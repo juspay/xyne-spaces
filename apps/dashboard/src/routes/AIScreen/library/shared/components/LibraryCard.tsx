@@ -1,6 +1,5 @@
 import { type ReactElement, type ReactNode } from 'react';
 import { Link } from 'react-router-dom';
-import { ChevronRight } from '@xyne/icons';
 import { cn } from '@/utils/classNames';
 import { Skeleton } from '@/components/ui/Skeleton';
 import { Tooltip } from '@/components/ui/Tooltip/Tooltip';
@@ -85,8 +84,6 @@ export interface LibraryCardProps {
   dimmed?: boolean;
   /** Borderless card that only tints on hover (Figma 1959:34563, 1338:41838). */
   variant?: 'outlined' | 'flat';
-  /** Flat only: a chevron at the end of the name row. */
-  chevron?: boolean;
   /** Flat only: green tint and border, for items you already have (a connected MCP). */
   highlighted?: boolean;
 }
@@ -102,7 +99,6 @@ export function LibraryCard({
   footer,
   dimmed = false,
   variant = 'outlined',
-  chevron = false,
   highlighted = false,
 }: LibraryCardProps): ReactElement {
   const flat = variant === 'flat';
@@ -145,9 +141,6 @@ export function LibraryCard({
             )
           ) : null}
           {statusDot}
-          {flat && chevron ? (
-            <ChevronRight className='ml-auto size-4 shrink-0 text-muted-foreground' aria-hidden />
-          ) : null}
         </div>
         {footer ?? (
           <p

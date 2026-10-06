@@ -106,7 +106,6 @@ const McpV2 = ({ query }: { query: string }): ReactElement => {
                 testId='claw-mcp-card'
                 dimmed={server.enabled === false}
                 variant='flat'
-                chevron
                 highlighted={connected}
                 icon={<McpServerIcon server={server} size='tile' />}
                 name={server.name}
