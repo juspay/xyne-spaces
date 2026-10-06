@@ -14,7 +14,7 @@
     "build:prototypes": "node scripts/build-prototypes.mjs",
     "eval:intents": "node scripts/eval-intents.mjs",
     "prebuild": "node scripts/fetch-model.mjs",
-    "build": "tsc --noEmit && vite build",
+    "build": "tsc --noEmit && NODE_OPTIONS=--max-old-space-size=8192 vite build",
     "build:sdlc": "tsc --noEmit && vite build --mode sdlc",
     "preview": "vite preview",
     "lint": "eslint . --cache --cache-location node_modules/.cache/eslint/ --cache-strategy content",

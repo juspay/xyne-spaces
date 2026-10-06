@@ -127,6 +127,16 @@ export default defineConfig(({ command, mode }) => {
     build: {
       manifest: true,
       reportCompressedSize: false,
+      rollupOptions: {
+        output: {
+          // Split every node_modules dependency into one vendor chunk. App code
+          // churn no longer invalidates the vendor payload, and the entry chunk
+          // collapses to first-party code only. Refine into groups later.
+          manualChunks(id: string) {
+            if (id.includes('node_modules')) return 'vendor';
+          },
+        },
+      },
     },
     optimizeDeps: {
       exclude: ['@terrastruct/d2'],
