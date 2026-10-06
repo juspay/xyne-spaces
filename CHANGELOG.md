@@ -1,3 +1,27 @@
+## [1.461.1](https://github.com/juspay/xyne-spaces/compare/v1.461.0...v1.461.1) (2026-10-06)
+
+
+### Bug Fixes
+
+* browser sandbox in scheduled runs + XYNE-65725 clear CRITICAL Trivy gate ([#2680](https://github.com/juspay/xyne-spaces/issues/2680)) ([6a02e64](https://github.com/juspay/xyne-spaces/commit/6a02e64ebbb898c75445e5fd7bf50b7aaa86d4e1))
+
+## [1.461.0](https://github.com/juspay/xyne-spaces/compare/v1.460.4...v1.461.0) (2026-10-06)
+
+
+### Features
+
+* invite workspace members from Google/Microsoft contacts ([#2373](https://github.com/juspay/xyne-spaces/issues/2373)) ([f533b76](https://github.com/juspay/xyne-spaces/commit/f533b76eaa510796054fbad4635189c06bdf3e18))
+* sdlc main sync ([#2673](https://github.com/juspay/xyne-spaces/issues/2673)) ([e74e6be](https://github.com/juspay/xyne-spaces/commit/e74e6be63f92f27c32f221fc1923059b23ecff2e))
+
+
+### Bug Fixes
+
+* adding vespa filters ([#2648](https://github.com/juspay/xyne-spaces/issues/2648)) ([3bd2067](https://github.com/juspay/xyne-spaces/commit/3bd2067c529b916e12e12a86011e67eda941a9fa))
+* bump proxy-addr, simple-git and tinypool to clear critical CVEs ([#2667](https://github.com/juspay/xyne-spaces/issues/2667)) ([59f7155](https://github.com/juspay/xyne-spaces/commit/59f71559db2f1c3c0edbf3be04f13702760fbd63))
+* cap instant call modal height and scroll selected participants ([#2666](https://github.com/juspay/xyne-spaces/issues/2666)) ([b3e01a3](https://github.com/juspay/xyne-spaces/commit/b3e01a3e9ab6962d4c1fae1de4886e525f2d10a3))
+* codeowners modifications ([#2654](https://github.com/juspay/xyne-spaces/issues/2654)) ([2393628](https://github.com/juspay/xyne-spaces/commit/239362814e320c4bd170e715a7e0691e9a4b6b6d))
+* notify personal mentions when message also has @channel/[@here](https://github.com/here) ([#2523](https://github.com/juspay/xyne-spaces/issues/2523)) ([30fc437](https://github.com/juspay/xyne-spaces/commit/30fc437fffada772828d82be23d6436e4bb359c2))
+
 ## [1.460.4](https://github.com/juspay/xyne-spaces/compare/v1.460.3...v1.460.4) (2026-10-05)
 
 
