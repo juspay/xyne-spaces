@@ -116,7 +116,7 @@ type ActorFilter = 'all' | 'user' | 'agent';
 const ACTOR_FILTER_TYPES: Record<ActorFilter, UserType[] | undefined> = {
   all: undefined,
   user: [UserType.USER],
-  agent: [UserType.BOT, UserType.APP],
+  agent: [UserType.BOT, UserType.APP, UserType.AGENT],
 };
 
 const ACTOR_FILTER_OPTIONS: Array<{

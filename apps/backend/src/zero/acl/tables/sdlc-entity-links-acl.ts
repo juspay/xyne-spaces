@@ -1,5 +1,6 @@
 import type { DeleteID, InsertValue, Transaction, UpdateValue, UpsertValue } from '@rocicorp/zero';
 import {
+  SDLC_FOLDER_FLAT_RELATION,
   SDLC_HUB_ITEM_FLAT_RELATION,
   SDLC_HUB_ITEM_RELATION,
   SDLC_MEMBERSHIP_RELATION,
@@ -70,7 +71,12 @@ export class SdlcEntityLinksACL extends BaseACL<'sdlc_entity_links'> {
       throw new MutationACLError('SDLC entity link does not exist', 'sdlc_entity_links');
     }
     assertWorkspaceMatch(this.ctx, row.workspaceId, 'sdlc_entity_links');
-    if ((SDLC_STRUCTURAL_RELATIONS as readonly string[]).includes(row.relationType)) {
+    // Folder edges follow an item whenever it is moved or unfiled, and those
+    // mutators are what delete them. The link API still refuses them as structural.
+    if (
+      row.relationType !== SDLC_FOLDER_FLAT_RELATION &&
+      (SDLC_STRUCTURAL_RELATIONS as readonly string[]).includes(row.relationType)
+    ) {
       throw new MutationACLError(
         'Structural SDLC edges are not deleted through the link API',
         'sdlc_entity_links',

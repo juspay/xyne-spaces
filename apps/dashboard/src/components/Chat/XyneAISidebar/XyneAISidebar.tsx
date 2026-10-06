@@ -10,6 +10,7 @@ import {
   type MouseEvent as ReactMouseEvent,
 } from 'react';
 import { toast } from 'sonner';
+import { useSelector } from '@xstate/react';
 import { useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { useQuery as useZeroQuery } from '../../../hooks/useQuery';
@@ -48,6 +49,10 @@ import { trackCitationClicked, trackAskAIOpened } from '../../../services/otel/x
 import { globalClickTracker } from '../../../services/Analytics/globalClickTracker';
 import { AILandingHero, AILandingHeroErrorBoundary } from './components/AILandingHero';
 import { XyneAIEmptyState } from './components/XyneAIEmptyState';
+import { isAssistantMessage } from '../../Assistant/turns';
+import { useTranscript } from '../../Assistant/useTranscript';
+import { useAssistantActions } from '../../Assistant/useAssistantActions';
+import { useRoutedSubmit } from '../../Assistant/useRoutedSubmit';
 import { cn } from '../../../utils/classNames';
 import { type Attachment } from './components/XyneAIInputBox';
 import { XyneAIInputSection } from './components/XyneAIInputSection';
@@ -76,6 +81,7 @@ import { AskAIDebugPanel } from './components/AskAIDebugPanel';
 import type { UserActivity } from '../../../hooks/useUserActivity';
 import { usePlatform } from '../../../hooks/usePlatform';
 import { useSelectedAgent } from '../../../hooks/useSelectedAgent';
+import { useAskAIAuto } from '../../../hooks/useAskAIAuto';
 import { fetchAccessibleClawAgents } from '../../../services/clawAgentListService';
 import { fetchClawAgentModels } from '../../../services/clawAgentModelsService';
 import {
@@ -90,7 +96,9 @@ import {
   type XyneAIResearchContext,
   flattenCanvasContexts,
 } from '../../../machines/xyneAIMachine';
-import { xyneAIStreamManager } from '../../../services/XyneAI';
+import { xyneAIStreamManager, type StreamState } from '../../../services/XyneAI';
+import { useVoiceMode } from '../../Voice/useVoiceMode';
+import { VoiceModeBar } from '../../Voice/VoiceModeBar';
 import { useFlowActionComplete } from '../../../hooks/useFlowActionComplete';
 import {
   buildXyneAIStreamThreadId,
@@ -394,6 +402,14 @@ const XyneAISidebar = ({
     () => resolveActivePath(messages, branchSelections),
     [messages, branchSelections],
   );
+  const assistant = useAssistantActions({ enabled: !isFullscreen });
+  // Starter cards only on the panel opened for a user who just finished onboarding.
+  const openedForOnboarding = useSelector(xyneAIActor, s => s.context.openSource === 'setup');
+  const { messages: assistantMessages, reset: resetAssistant, cancel: cancelRouting } = assistant;
+  const { messages: transcriptMessages, serverIndexById } = useTranscript(
+    displayMessages,
+    assistantMessages,
+  );
 
   const isActiveSessionStreaming = useMemo(
     () => messages.some((m: Message) => m.isStreaming),
@@ -542,6 +558,7 @@ const XyneAISidebar = ({
     if (newConvId && prevThreadConversationIdRef.current !== newConvId) {
       prevThreadConversationIdRef.current = newConvId;
       hasLoadedInitialConversationRef.current = false;
+      resetAssistant();
       setMessages([]);
       setConversationId('');
       setBranchSelections({});
@@ -549,7 +566,7 @@ const XyneAISidebar = ({
       setStreamThreadKey(newStreamSlotKey());
       usesDraftStreamKeyRef.current = true;
     }
-  }, [threadInfo]);
+  }, [threadInfo, resetAssistant]);
 
   // Track processed selection keys to avoid duplicates
   const processedSelectionKeysRef = useRef<Set<string>>(new Set());
@@ -825,6 +842,9 @@ const XyneAISidebar = ({
   const isV2 = true;
 
   const effectiveAgentSlug = selectedAgentSlug;
+  const { isAuto: isAutoStored, setAuto } = useAskAIAuto();
+  // An agent restored from an earlier visit wins over Auto.
+  const isAuto = isAutoStored && !isAgentForced && selectedAgentSlug === null;
   // Same key the sidebar's own streams register under (see the adopt/attach
   // sites below), so the shared handler targets this surface's stream.
   const flowThreadId = useMemo(
@@ -1003,6 +1023,7 @@ const XyneAISidebar = ({
       }
 
       // Reset to fresh state (keeps threadInfo but clears messages/conversation)
+      resetAssistant();
       setMessages([]);
       setBranchSelections({});
       setConversationId('');
@@ -1044,6 +1065,7 @@ const XyneAISidebar = ({
     researchContext,
     isFullscreen,
     isAgentForced,
+    resetAssistant,
   ]);
 
   // Scroll to bottom function
@@ -1054,6 +1076,10 @@ const XyneAISidebar = ({
       block: 'nearest',
     });
   }, []);
+
+  useEffect(() => {
+    if (assistantMessages.length > 0) scrollToBottom();
+  }, [assistantMessages, scrollToBottom]);
 
   // AI Onboarding: derive answered count and visible suggestions from messages
   // No context dispatches — avoids re-renders that interfere with streaming
@@ -1251,6 +1277,7 @@ const XyneAISidebar = ({
   };
 
   const handleLoadConversation = async (conversation: ConversationHistoryType): Promise<void> => {
+    resetAssistant();
     setLoadingHistorySessionId(conversation.sessionId);
     setStreamThreadKey(conversation.sessionId);
     setConversationId(conversation.sessionId);
@@ -1382,6 +1409,7 @@ const XyneAISidebar = ({
       invalidateV2Sessions(effectiveAgentSlug);
       // If deleted conversation was active, clear messages
       if (conversation.sessionId === conversationId) {
+        resetAssistant();
         setMessages([]);
         setBranchSelections({});
         setConversationId('');
@@ -1414,6 +1442,7 @@ const XyneAISidebar = ({
     setDebugArtifactsReadyVersion(0);
     setShowDebugger(false);
     setInputValue('');
+    resetAssistant();
     setAttachments([]);
     setSelectedActivities([]);
     setActiveSelectionInfos([]);
@@ -1422,28 +1451,37 @@ const XyneAISidebar = ({
     setShowUserActivityPanel(false);
 
     processedSelectionKeysRef.current.clear();
-  }, []);
+  }, [resetAssistant]);
 
   // When user selects a different agent from the global selector,
   // reset to a fresh conversation scoped to that agent.
   const handleSelectAgent = useCallback(
     (slug: string | null): void => {
       if (!isV2) return;
+      cancelRouting();
+      setAuto(false);
       if (slug === selectedAgentSlug) return;
       setSelectedAgentSlug(slug);
       handleNewChat();
     },
-    [isV2, selectedAgentSlug, setSelectedAgentSlug, handleNewChat],
+    [isV2, selectedAgentSlug, setSelectedAgentSlug, handleNewChat, setAuto, cancelRouting],
   );
+
+  const handleSelectAuto = useCallback((): void => {
+    handleSelectAgent(null);
+    setAuto(true);
+  }, [handleSelectAgent, setAuto]);
 
   // When user selects an agent from the history page, stay on history
   // and refresh the conversation list for that agent.
   const handleSelectAgentFromHistory = useCallback(
     (slug: string | null): void => {
       if (!isV2) return;
+      setAuto(false);
       if (slug === selectedAgentSlug) return;
       setSelectedAgentSlug(slug);
       // Clear active conversation but stay on history page
+      resetAssistant();
       setConversationId('');
       setMessages([]);
       setBranchSelections({});
@@ -1452,7 +1490,7 @@ const XyneAISidebar = ({
       // Refresh sessions list for the new agent
       void refetchV2Sessions();
     },
-    [isV2, selectedAgentSlug, setSelectedAgentSlug, refetchV2Sessions],
+    [isV2, selectedAgentSlug, setSelectedAgentSlug, refetchV2Sessions, setAuto, resetAssistant],
   );
 
   const handleLoadConversationRef = useRef(handleLoadConversation);
@@ -2105,6 +2143,8 @@ const XyneAISidebar = ({
     ],
   );
 
+  // Bumped by a voice transcript, which may equal the current input and so not change inputValue.
+  const [autoSendRequest, setAutoSendRequest] = useState(0);
   // Submits once the auto-send seed effect above has landed in inputValue (handleSubmit closes over it).
   useEffect(() => {
     if (
@@ -2115,7 +2155,47 @@ const XyneAISidebar = ({
       autoSendTriggerRef.current = 'auto_send';
       void handleSubmit();
     }
-  }, [inputValue, handleSubmit]);
+  }, [inputValue, handleSubmit, autoSendRequest]);
+
+  const routedSubmit = useRoutedSubmit<'button' | 'enter' | undefined>({
+    assistant,
+    value: inputValue,
+    clear: () => setInputValue(''),
+    submit: trigger => void handleSubmit(trigger),
+  });
+
+  const canRoute =
+    isAuto &&
+    assistant.actions.length > 0 &&
+    !aiOnboarding.isActive &&
+    !editingMessageId &&
+    attachments.length === 0 &&
+    selectedActivities.length === 0 &&
+    activeSelectionInfos.length === 0;
+
+  // Not in handleSubmit, so auto-send, suggestion and follow-up sends are never routed.
+  const handleComposerSubmit = (trigger?: 'button' | 'enter'): void => {
+    if (canRoute && inputValue.trim() !== '' && routedSubmit.route(trigger)) return;
+    void handleSubmit(trigger);
+  };
+
+  const [voiceMode, setVoiceMode] = useState(false);
+  const submitTranscript = useCallback((text: string): void => {
+    autoSendPendingQueryRef.current = text;
+    setInputValue(text);
+    setAutoSendRequest(request => request + 1);
+  }, []);
+  const answerTranscript = canRoute ? assistant.answer : undefined;
+  const ownsStream = useCallback(
+    (state: StreamState): boolean => state.streamSlotKey === streamThreadKey,
+    [streamThreadKey],
+  );
+  const voice = useVoiceMode({
+    enabled: voiceMode,
+    submit: submitTranscript,
+    ownsStream,
+    ...(answerTranscript && { answer: answerTranscript }),
+  });
 
   const hasBackgroundStreamingElsewhere = useMemo(() => {
     if (streamingSessionIds.length === 0) return false;
@@ -2158,7 +2238,7 @@ const XyneAISidebar = ({
     selectionInfos: activeSelectionInfos,
     inputValue,
     onInputChange: setInputValue,
-    onSubmit: (trigger?: 'button' | 'enter') => void handleSubmit(trigger),
+    onSubmit: handleComposerSubmit,
     onThreadInfoChange: setActiveThreadInfo,
     onSelectionInfosChange: setActiveSelectionInfos,
     onAttachmentsChange: setAttachments,
@@ -2190,6 +2270,7 @@ const XyneAISidebar = ({
     selectedActivities,
     onActivitiesChange: setSelectedActivities,
     onAbort: () => {
+      if (routedSubmit.stop()) return;
       abortCurrentRequest();
     },
     webSearchEnabled,
@@ -2400,7 +2481,7 @@ const XyneAISidebar = ({
                       </div>
                     </div>
                   </div>
-                ) : messages.length === 0 ? (
+                ) : messages.length === 0 && assistantMessages.length === 0 ? (
                   isFullscreen ? (
                     <AILandingHeroErrorBoundary>
                       <AILandingHero
@@ -2448,7 +2529,11 @@ const XyneAISidebar = ({
                       </div>
                     </div>
                   ) : (
-                    <XyneAIEmptyState hideSuggestions={hideEmptyStateSuggestions} />
+                    <XyneAIEmptyState
+                      hideSuggestions={hideEmptyStateSuggestions}
+                      starters={openedForOnboarding ? assistant.starters : []}
+                      onSelectStarter={assistant.choose}
+                    />
                   )
                 ) : (
                   <div className={cn(isFullscreen ? 'flex justify-center' : '')}>
@@ -2479,7 +2564,25 @@ const XyneAISidebar = ({
                             // lastBotIndex / lastUserIndex / siblingIndexById are
                             // computed in the memo above; just consume here so this
                             // IIFE doesn't re-walk both lists on every render.
-                            return displayMessages.map((message: Message, index: number) => {
+                            return transcriptMessages.map((message: Message) => {
+                              if (isAssistantMessage(message.id)) {
+                                return (
+                                  <MessageItem
+                                    key={message.id}
+                                    message={message}
+                                    readOnly
+                                    onFeedback={() => undefined}
+                                    onCitationClick={handleCitationClick}
+                                    onSummarizerCitationClick={handleSummarizerCitationClick}
+                                    feedbackValue={null}
+                                    isLatestBotMessage={message.type === 'bot'}
+                                    onFollowUpSuggestionClick={label => {
+                                      assistant.openPill(message.id, label);
+                                    }}
+                                  />
+                                );
+                              }
+                              const index = serverIndexById.get(message.id) ?? -1;
                               const isLatestBotMessage =
                                 message.type === 'bot' && index === lastBotIndex;
                               const isLatestUserMessage =
@@ -2624,21 +2727,34 @@ const XyneAISidebar = ({
                 )}
               >
                 <div className={cn(isFullscreen && 'w-full max-w-2xl')}>
-                  <XyneAIInputSection
-                    ref={xyneAIInputRef}
-                    isOnboarding={aiOnboarding.isActive}
-                    showChannelTag={true}
-                    isStreaming={isActiveSessionStreaming}
-                    contextPanelPosition='bottom'
-                    selectedAgentSlug={effectiveAgentSlug}
-                    agents={isV2 ? accessibleAgents : []}
-                    {...(isV2 && !isAgentForced ? { onSelectAgent: handleSelectAgent } : {})}
-                    compactToolbar={isCompactSidebar}
-                    {...sharedInputSectionProps}
-                    kbCollectionId={kbCollectionIdProp}
-                    kbOpenNonce={kbOpenNonce}
-                    onSelectedCollectionsChange={setSelectedCollectionIds}
-                  />
+                  {voiceMode ? (
+                    <VoiceModeBar
+                      phase={voice.phase}
+                      onHoldStart={voice.startRecording}
+                      onHoldEnd={voice.stopRecording}
+                      onExit={() => setVoiceMode(false)}
+                    />
+                  ) : (
+                    <XyneAIInputSection
+                      ref={xyneAIInputRef}
+                      isOnboarding={aiOnboarding.isActive}
+                      showChannelTag={true}
+                      isStreaming={isActiveSessionStreaming || assistant.isRouting}
+                      contextPanelPosition='bottom'
+                      selectedAgentSlug={effectiveAgentSlug}
+                      agents={isV2 ? accessibleAgents : []}
+                      {...(isV2 && !isAgentForced ? { onSelectAgent: handleSelectAgent } : {})}
+                      {...(isV2 && !isAgentForced && !isFullscreen
+                        ? { isAuto, onSelectAuto: handleSelectAuto }
+                        : {})}
+                      compactToolbar={isCompactSidebar}
+                      {...(!isFullscreen && { onEnterVoiceMode: () => setVoiceMode(true) })}
+                      {...sharedInputSectionProps}
+                      kbCollectionId={kbCollectionIdProp}
+                      kbOpenNonce={kbOpenNonce}
+                      onSelectedCollectionsChange={setSelectedCollectionIds}
+                    />
+                  )}
                 </div>
               </div>
             )}

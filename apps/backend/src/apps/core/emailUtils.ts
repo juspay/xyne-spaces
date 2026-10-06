@@ -113,7 +113,7 @@ export async function dispatchEmailEventForEmailId(emailId: string): Promise<voi
     if (participantUserIds.length === 0) return;
 
     const appUsers = await repositories.users.findMany({
-      where: { id: { in: participantUserIds }, userType: UserType.APP },
+      where: { id: { in: participantUserIds }, userType: { in: [UserType.APP, UserType.AGENT] } },
     });
     const appUserIds = appUsers.map(u => u.id);
     if (appUserIds.length === 0) return;

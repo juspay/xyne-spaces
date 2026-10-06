@@ -200,7 +200,10 @@ import { getOzonetelConfig } from '../../services/clients/telephonyApi';
 import { AnimatePresence, motion } from 'framer-motion';
 import { parseFromField, stripHtml } from '../../components/xyne-desk/EmailComposer/helpers';
 import { EmailBodyRenderer } from '../../components/xyne-desk/EmailBody/EmailBodyRenderer';
-import CallThread from '../../components/xyne-desk/CallThread/CallThread';
+import CallThread, {
+  CallEmailRow,
+  isCallEmailBody,
+} from '../../components/xyne-desk/CallThread/CallThread';
 import { SlackThread, SlackComposer } from '../../components/xyne-desk/SlackThread';
 import { SocialMediaReplyComposer } from '../../components/xyne-desk/DeskReplyComposer';
 import {
@@ -234,6 +237,9 @@ import { apiInstance } from '../../services/clients/apiClient';
 import { attachmentViewerActor, type AttachmentRef } from '../../machines/attachmentViewerMachine';
 
 import { DeskSettings } from '../../components/xyne-desk/DeskSettings';
+import { DeskAppsMenu } from '../../components/xyne-desk/DeskApps/DeskAppsMenu';
+import { ArtifactAppHost } from '../../components/ArtifactApp/ArtifactAppHost';
+import { useDeskApps } from '../../components/xyne-desk/DeskApps/useDeskApps';
 import { DeskMetricsDashboard } from '../../components/xyne-desk/DeskMetrics';
 import { TopicsExplorer } from '../../components/xyne-desk/TopicsExplorer';
 import { AutoLabelWizard } from '../../components/xyne-desk/AutoLabelWizard/AutoLabelWizard';
@@ -307,7 +313,7 @@ const ChannelInfoModal = ({
   if (!channel) return null;
   return (
     <Dialog
-      className='max-w-[620px] rounded-2xl overflow-hidden'
+      className='max-w-[760px] rounded-2xl overflow-hidden'
       open={isOpen}
       onOpenChange={open => {
         if (!open) onClose();
@@ -2179,6 +2185,29 @@ const SupportScreen = (): ReactElement => {
   const isInstagramDesk = selectedChannelIntegration.sourceType === 'instagram';
   const isCallDesk = selectedChannelFull?.type === ChannelType.CALL;
 
+  // Artifact apps added to this desk (EmailChannelPreference.deskAppIds). Every
+  // member sees and opens them; the desk owner and channel admins add/remove
+  // them — the same rule the preference ACL enforces on the write.
+  const deskApps = useDeskApps(channelPreference?.deskAppIds);
+  const canManageDeskApps =
+    canManageDeskInsights && isSelectedChannelJoined && selectedChannelId !== ALL_CHANNELS_ID;
+  const requestedDeskAppId = searchParams.get('deskApp');
+  // A stale or foreign id in the URL (removed from the desk, or not visible to
+  // this viewer) opens nothing rather than an error panel.
+  const openDeskAppId =
+    requestedDeskAppId && deskApps.apps.some(app => app.id === requestedDeskAppId)
+      ? requestedDeskAppId
+      : null;
+  // Same URL discipline as showInsights: swap only our param, keep the filters.
+  const showDeskApp = (appId: string | null, replace = true): void => {
+    const params = new URLSearchParams(searchParams);
+    params.delete('deskApp');
+    if (appId) params.set('deskApp', appId);
+    const qs = params.toString();
+    const path = `${supportBase}/${selectedChannelId}`;
+    void navigate(qs ? `${path}?${qs}` : path, { replace });
+  };
+
   // Manual fetch for the selected desk. Social-media desks fetch every review
   // currently available from Google; email desks open the range picker.
   const refetchChannelId =
@@ -3393,6 +3422,17 @@ const SupportScreen = (): ReactElement => {
                     <div className='flex items-center gap-2 shrink-0'>
                       {selectedChannelId &&
                         selectedChannelId !== ALL_CHANNELS_ID &&
+                        isSelectedChannelJoined && (
+                          <DeskAppsMenu
+                            channelId={selectedChannelId}
+                            deskApps={deskApps}
+                            canManage={canManageDeskApps}
+                            activeAppId={openDeskAppId}
+                            onOpenApp={appId => showDeskApp(appId, false)}
+                          />
+                        )}
+                      {selectedChannelId &&
+                        selectedChannelId !== ALL_CHANNELS_ID &&
                         selectedChannelFull && (
                           <Button
                             variant='outline'
@@ -3655,7 +3695,11 @@ const SupportScreen = (): ReactElement => {
                   </div>
                   <div
                     ref={filterRowRef}
-                    className='relative flex h-14 shrink-0 items-center justify-between gap-2 px-4 min-w-0'
+                    className={cn(
+                      'relative flex h-14 shrink-0 items-center justify-between gap-2 px-4 min-w-0',
+                      // Ticket filters mean nothing while a desk app stands in for the list.
+                      openDeskAppId && 'hidden',
+                    )}
                   >
                     {isSelectedChannelJoined && (
                       <div
@@ -4456,176 +4500,198 @@ const SupportScreen = (): ReactElement => {
                   )}
                 </DeskInsightsPanel>
               )}
-              <div className='h-full flex-1 min-h-0 overflow-y-auto no-scrollbar'>
-                {!selectedChannelId ? (
-                  <div className='h-full flex flex-col items-center justify-center gap-2 text-center text-muted-foreground px-6'>
-                    <Inbox size={28} className='text-muted-foreground/70' />
-                    <p className='text-sm font-medium text-foreground'>
-                      Select a channel to preview tickets
-                    </p>
-                    <p className='text-xs text-muted-foreground max-w-sm'>
-                      Pick a Desk channel from the sidebar to see its tickets here.
-                    </p>
-                  </div>
-                ) : !isSelectedChannelKnown ? (
-                  <div className='h-full flex flex-col items-center justify-center gap-2 text-center text-muted-foreground px-6'>
-                    <Inbox size={28} className='text-muted-foreground/70' />
-                    <p className='text-sm font-medium text-foreground'>Channel not found</p>
-                    <p className='text-xs text-muted-foreground max-w-sm'>
-                      This channel either doesn&apos;t exist or is private and you don&apos;t have
-                      access. Pick a different channel from the sidebar.
-                    </p>
-                  </div>
-                ) : !isSelectedChannelJoined ? (
-                  <div className='h-full flex items-center justify-center'>
-                    <JoinChannel
-                      channelId={selectedChannelId}
-                      {...(selectedChannelName && selectedChannelName !== 'Xyne Desk'
-                        ? { channelTitle: selectedChannelName }
-                        : {})}
-                    />
-                  </div>
-                ) : (
-                  <>
-                    {/* Drafts banner — visible when there are saved-but-closed drafts */}
-                    {savedDrafts.length > 0 && userID && (
-                      <div className='flex-shrink-0 border-b border-border'>
-                        <div className='px-4 py-2 flex items-center gap-1.5'>
-                          <span className='text-xs font-semibold text-muted-foreground uppercase tracking-wide mr-1'>
-                            Drafts
-                          </span>
-                          <div className='flex items-center gap-2 flex-wrap'>
-                            {savedDrafts.map(draft => {
-                              const label = composeDraftLabel(draft);
-                              return (
-                                <div
-                                  key={draft.id}
-                                  className='flex items-center gap-1 bg-muted/60 border border-border rounded-full pl-3 pr-1 py-0.5 max-w-[280px] group'
-                                >
-                                  <button
-                                    type='button'
-                                    onClick={() => reopenDraft(draft.id)}
-                                    className='text-xs text-foreground truncate hover:text-primary transition-colors'
-                                    title={`Reopen draft: ${label}`}
-                                    data-track-category='Support'
-                                    data-track-name='ReopenDraft'
+              {selectedChannelId && openDeskAppId ? (
+                // A desk app replaces the ticket list. Keyed on the app so switching
+                // apps boots a fresh sandbox; the host's back arrow returns to tickets.
+                // Apps see the `channel` surface with this desk, so a channel-scoped
+                // app scopes itself to the desk unchanged.
+                <div className='flex-1 min-h-0'>
+                  <ArtifactAppHost
+                    key={openDeskAppId}
+                    appId={openDeskAppId}
+                    onBack={() => showDeskApp(null)}
+                    placement={{
+                      surface: 'channel',
+                      channel: {
+                        id: selectedChannelId,
+                        name: selectedChannelFull?.name ?? '',
+                        scopeType: selectedChannelFull?.scopeType ?? '',
+                      },
+                    }}
+                  />
+                </div>
+              ) : (
+                <div className='h-full flex-1 min-h-0 overflow-y-auto no-scrollbar'>
+                  {!selectedChannelId ? (
+                    <div className='h-full flex flex-col items-center justify-center gap-2 text-center text-muted-foreground px-6'>
+                      <Inbox size={28} className='text-muted-foreground/70' />
+                      <p className='text-sm font-medium text-foreground'>
+                        Select a channel to preview tickets
+                      </p>
+                      <p className='text-xs text-muted-foreground max-w-sm'>
+                        Pick a Desk channel from the sidebar to see its tickets here.
+                      </p>
+                    </div>
+                  ) : !isSelectedChannelKnown ? (
+                    <div className='h-full flex flex-col items-center justify-center gap-2 text-center text-muted-foreground px-6'>
+                      <Inbox size={28} className='text-muted-foreground/70' />
+                      <p className='text-sm font-medium text-foreground'>Channel not found</p>
+                      <p className='text-xs text-muted-foreground max-w-sm'>
+                        This channel either doesn&apos;t exist or is private and you don&apos;t have
+                        access. Pick a different channel from the sidebar.
+                      </p>
+                    </div>
+                  ) : !isSelectedChannelJoined ? (
+                    <div className='h-full flex items-center justify-center'>
+                      <JoinChannel
+                        channelId={selectedChannelId}
+                        {...(selectedChannelName && selectedChannelName !== 'Xyne Desk'
+                          ? { channelTitle: selectedChannelName }
+                          : {})}
+                      />
+                    </div>
+                  ) : (
+                    <>
+                      {/* Drafts banner — visible when there are saved-but-closed drafts */}
+                      {savedDrafts.length > 0 && userID && (
+                        <div className='flex-shrink-0 border-b border-border'>
+                          <div className='px-4 py-2 flex items-center gap-1.5'>
+                            <span className='text-xs font-semibold text-muted-foreground uppercase tracking-wide mr-1'>
+                              Drafts
+                            </span>
+                            <div className='flex items-center gap-2 flex-wrap'>
+                              {savedDrafts.map(draft => {
+                                const label = composeDraftLabel(draft);
+                                return (
+                                  <div
+                                    key={draft.id}
+                                    className='flex items-center gap-1 bg-muted/60 border border-border rounded-full pl-3 pr-1 py-0.5 max-w-[280px] group'
                                   >
-                                    {label}
-                                  </button>
-                                  <button
-                                    type='button'
-                                    onClick={() => discardDraft(draft.id)}
-                                    className='p-0.5 rounded-full text-muted-foreground hover:text-destructive transition-colors shrink-0'
-                                    title='Discard draft'
-                                    aria-label='Discard draft'
-                                    data-track-category='Support'
-                                    data-track-name='DiscardDraft'
-                                  >
-                                    <X size={12} />
-                                  </button>
-                                </div>
-                              );
-                            })}
+                                    <button
+                                      type='button'
+                                      onClick={() => reopenDraft(draft.id)}
+                                      className='text-xs text-foreground truncate hover:text-primary transition-colors'
+                                      title={`Reopen draft: ${label}`}
+                                      data-track-category='Support'
+                                      data-track-name='ReopenDraft'
+                                    >
+                                      {label}
+                                    </button>
+                                    <button
+                                      type='button'
+                                      onClick={() => discardDraft(draft.id)}
+                                      className='p-0.5 rounded-full text-muted-foreground hover:text-destructive transition-colors shrink-0'
+                                      title='Discard draft'
+                                      aria-label='Discard draft'
+                                      data-track-category='Support'
+                                      data-track-name='DiscardDraft'
+                                    >
+                                      <X size={12} />
+                                    </button>
+                                  </div>
+                                );
+                              })}
+                            </div>
                           </div>
                         </div>
-                      </div>
-                    )}
-                    {viewMode === 'kanban' ? (
-                      <SupportKanbanBoard
-                        channelId={selectedChannelId}
-                        boardId={channelBoardId}
-                        onBoardIdResolved={handleChannelBoardIdResolved}
-                        ticketFilter={ticketFilter}
-                        dynamicFieldEntries={dynamicFieldEntries}
-                        onTicketClick={(e, ticket) => handleTicketClick(e, ticket, 'kanban_card')}
-                        onTicketsLoaded={handleTicketsLoaded}
-                        {...(ticketId !== undefined && { activeTicketId: ticketId })}
-                      />
-                    ) : viewMode === 'calendar' && selectedChannelId ? (
-                      <DeskCalendarView
-                        channelId={selectedChannelId}
-                        isMember={isSelectedChannelJoined}
-                        ticketFilter={ticketFilter}
-                        onTicketClick={ticket => {
-                          void navigate(`${supportBase}/${ticket.channelId}/${ticket.xyneId}`, {
-                            state: {
-                              conversationId: ticket.conversationId,
-                              ticketId: ticket.id,
-                              shouldNavigateBack: true,
-                              trackSource: 'calendar',
-                            },
-                          });
-                        }}
-                        onTicketsLoaded={handleTicketsLoaded}
-                      />
-                    ) : viewMode === 'table' ? (
-                      <SupportTicketTable
-                        channelId={selectedChannelId}
-                        ticketFilter={ticketFilter}
-                        dynamicFieldEntries={dynamicFieldEntries}
-                        visibleColumns={tableVisibleColumns}
-                        dynamicFieldColumns={tableDynamicFieldColumns}
-                        onBoardIdResolved={handleChannelBoardIdResolved}
-                        onTicketsLoaded={handleTicketsLoaded}
-                        selectedIds={selectedTicketIds}
-                        onSelectionChange={handleTableSelectionChange}
-                        onTicketClick={ticket => {
-                          void navigate(`${supportBase}/${ticket.channelId}/${ticket.xyneId}`, {
-                            state: {
-                              conversationId: ticket.conversationId,
-                              ticketId: ticket.id,
-                              shouldNavigateBack: true,
-                              trackSource: 'table_row',
-                            },
-                          });
-                        }}
-                      />
-                    ) : (
-                      <TicketListView
-                        isMember={isSelectedChannelJoined}
-                        mailboxFolder={
-                          selectedLabel || !selectedChannelHasMailboxFolders
-                            ? undefined
-                            : selectedFolder.key
-                        }
-                        filter={{
-                          channelId: selectedChannelId,
-                          ...ticketFilter,
-                        }}
-                        dynamicFieldEntries={dynamicFieldEntries}
-                        showExtraFields={true}
-                        activeTicketId={ticketId}
-                        {...(channelPreference?.deskType !== undefined && {
-                          deskType: channelPreference.deskType,
-                        })}
-                        selectedIds={selectedTicketIds}
-                        onToggleSelect={toggleTicketSelected}
-                        onBoardIdReady={handleChannelBoardIdResolved}
-                        onPageChange={clearTicketSelection}
-                        onToggleSelectAll={handleToggleSelectAll}
-                        onTicketsLoaded={handleTicketsLoaded}
-                        visibleColumnKeys={listColumnKeys}
-                        dynamicFieldColumns={listDynamicFieldColumns}
-                        columnOrder={listColumnOrder}
-                        initialPageIndex={cachedListPagination?.pageIndex}
-                        initialPageCursors={cachedListPagination?.pageCursors}
-                        initialFetchLimit={cachedListPagination?.fetchLimit}
-                        onPaginationChange={handleListPaginationChange}
-                        onTicketClick={ticket => {
-                          void navigate(`${supportBase}/${ticket.channelId}/${ticket.xyneId}`, {
-                            state: {
-                              conversationId: ticket.conversationId,
-                              ticketId: ticket.id,
-                              shouldNavigateBack: true,
-                              trackSource: 'inbox_row',
-                            },
-                          });
-                        }}
-                      />
-                    )}
-                  </>
-                )}
-              </div>
+                      )}
+                      {viewMode === 'kanban' ? (
+                        <SupportKanbanBoard
+                          channelId={selectedChannelId}
+                          boardId={channelBoardId}
+                          onBoardIdResolved={handleChannelBoardIdResolved}
+                          ticketFilter={ticketFilter}
+                          dynamicFieldEntries={dynamicFieldEntries}
+                          onTicketClick={(e, ticket) => handleTicketClick(e, ticket, 'kanban_card')}
+                          onTicketsLoaded={handleTicketsLoaded}
+                          {...(ticketId !== undefined && { activeTicketId: ticketId })}
+                        />
+                      ) : viewMode === 'calendar' && selectedChannelId ? (
+                        <DeskCalendarView
+                          channelId={selectedChannelId}
+                          isMember={isSelectedChannelJoined}
+                          ticketFilter={ticketFilter}
+                          onTicketClick={ticket => {
+                            void navigate(`${supportBase}/${ticket.channelId}/${ticket.xyneId}`, {
+                              state: {
+                                conversationId: ticket.conversationId,
+                                ticketId: ticket.id,
+                                shouldNavigateBack: true,
+                                trackSource: 'calendar',
+                              },
+                            });
+                          }}
+                          onTicketsLoaded={handleTicketsLoaded}
+                        />
+                      ) : viewMode === 'table' ? (
+                        <SupportTicketTable
+                          channelId={selectedChannelId}
+                          ticketFilter={ticketFilter}
+                          dynamicFieldEntries={dynamicFieldEntries}
+                          visibleColumns={tableVisibleColumns}
+                          dynamicFieldColumns={tableDynamicFieldColumns}
+                          onBoardIdResolved={handleChannelBoardIdResolved}
+                          onTicketsLoaded={handleTicketsLoaded}
+                          selectedIds={selectedTicketIds}
+                          onSelectionChange={handleTableSelectionChange}
+                          onTicketClick={ticket => {
+                            void navigate(`${supportBase}/${ticket.channelId}/${ticket.xyneId}`, {
+                              state: {
+                                conversationId: ticket.conversationId,
+                                ticketId: ticket.id,
+                                shouldNavigateBack: true,
+                                trackSource: 'table_row',
+                              },
+                            });
+                          }}
+                        />
+                      ) : (
+                        <TicketListView
+                          isMember={isSelectedChannelJoined}
+                          mailboxFolder={
+                            selectedLabel || !selectedChannelHasMailboxFolders
+                              ? undefined
+                              : selectedFolder.key
+                          }
+                          filter={{
+                            channelId: selectedChannelId,
+                            ...ticketFilter,
+                          }}
+                          dynamicFieldEntries={dynamicFieldEntries}
+                          showExtraFields={true}
+                          activeTicketId={ticketId}
+                          {...(channelPreference?.deskType !== undefined && {
+                            deskType: channelPreference.deskType,
+                          })}
+                          selectedIds={selectedTicketIds}
+                          onToggleSelect={toggleTicketSelected}
+                          onBoardIdReady={handleChannelBoardIdResolved}
+                          onPageChange={clearTicketSelection}
+                          onToggleSelectAll={handleToggleSelectAll}
+                          onTicketsLoaded={handleTicketsLoaded}
+                          visibleColumnKeys={listColumnKeys}
+                          dynamicFieldColumns={listDynamicFieldColumns}
+                          columnOrder={listColumnOrder}
+                          initialPageIndex={cachedListPagination?.pageIndex}
+                          initialPageCursors={cachedListPagination?.pageCursors}
+                          initialFetchLimit={cachedListPagination?.fetchLimit}
+                          onPaginationChange={handleListPaginationChange}
+                          onTicketClick={ticket => {
+                            void navigate(`${supportBase}/${ticket.channelId}/${ticket.xyneId}`, {
+                              state: {
+                                conversationId: ticket.conversationId,
+                                ticketId: ticket.id,
+                                shouldNavigateBack: true,
+                                trackSource: 'inbox_row',
+                              },
+                            });
+                          }}
+                        />
+                      )}
+                    </>
+                  )}
+                </div>
+              )}
               {/* Bulk field actions for the list view — the table view already gets
                   the same bar from TicketTable, driven by its own grid selection. */}
               {viewMode === 'list' && selectedTicketIds.size > 0 && (
@@ -6883,6 +6949,20 @@ const EmailThread = ({
   return (
     <div className='divide-y divide-gray-200 relative'>
       {sortedEmails.map((email, emailIndex) => {
+        // A call dialled from this ticket is a JSON call record, not mail: show the
+        // call card (recording + transcript controls) instead of the raw body.
+        if (isCallEmailBody(email.body)) {
+          return (
+            <CallEmailRow
+              key={email.id}
+              emailId={email.id}
+              body={email.body}
+              ticketId={ticketId}
+              attachments={email.attachments}
+              className='py-4'
+            />
+          );
+        }
         const mergedSource = mergedRootEmailSource.get(email.id);
         return (
           <EmailThreadItem

@@ -1,16 +1,22 @@
-import { useState, type ReactElement } from 'react';
-import { useQueryClient } from '@tanstack/react-query';
+import { useMemo, useState, type ReactElement } from 'react';
+import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
+import { SearchDefault } from '@xyne/icons';
 import { Button } from '@/components/ui/Button/index';
 import { clawErrorText } from '@/services/claw/clawRequest';
 import { V2Dialog } from '../../../shared/primitives/V2Dialog';
 import { BehaviourRow, BehaviourToggle } from '../behaviour/BehaviourRows';
 import { DetailCard } from '../../../shared/primitives/DetailPrimitives';
+import { DetailListCard, type DetailListItem } from '../../../shared/primitives/DetailListCard';
+import { Pill } from '../../../shared/primitives/Pill';
 import {
   agentMemoryKey,
   agentMemoryStatusKey,
   clearAgentMemories,
+  deleteAgentMemory,
   setAgentMemoryEnabled,
+  useAgentMemories,
+  type AgentMemory,
   type AgentMemoryStatus,
 } from './agentMemoryService';
 
@@ -19,6 +25,24 @@ const APPROVAL_LABELS: Record<AgentMemoryStatus['memoryApprovalStrategy'], strin
   EVALS_ONLY: 'Auto via evals',
   EVALS_THEN_HUMAN: 'Evals, then human',
 };
+
+// Mirrors AgentActivityTabV2's relative-date convention: recent as "Nd ago",
+// older as a localized date.
+function formatMemoryDate(iso: string | null): string | null {
+  if (!iso) return null;
+  const parsed = new Date(iso);
+  if (Number.isNaN(parsed.getTime())) return null;
+  const days = Math.floor((Date.now() - parsed.getTime()) / 86_400_000);
+  return days < 14 ? `${days}d ago` : parsed.toLocaleDateString();
+}
+
+function memoryMeta(memory: AgentMemory): string {
+  const parts: string[] = [];
+  const date = formatMemoryDate(memory.createdAt);
+  if (date) parts.push(date);
+  if (memory.recallHits7d > 0) parts.push(`${memory.recallHits7d} recalls in 7d`);
+  return parts.join(' · ');
+}
 
 interface MemoryManageDialogProps {
   open: boolean;
@@ -40,8 +64,38 @@ export function MemoryManageDialog({
   const queryClient = useQueryClient();
   const [busy, setBusy] = useState(false);
   const [confirmClear, setConfirmClear] = useState(false);
+  const [search, setSearch] = useState('');
 
   const enabled = status?.memoryEnabled ?? false;
+  const memories = useAgentMemories(slug);
+
+  const filtered = useMemo(() => {
+    const all = memories.data ?? [];
+    const q = search.trim().toLowerCase();
+    if (!q) return all;
+    return all.filter(
+      memory =>
+        memory.content.toLowerCase().includes(q) ||
+        (memory.category ?? '').toLowerCase().includes(q),
+    );
+  }, [memories.data, search]);
+
+  const memoryItems: DetailListItem[] = filtered.map(memory => ({
+    key: memory.id,
+    name: memory.category ?? 'Memory',
+    description: memory.content,
+    ...(memory.scope === 'shared' ? { badge: <Pill tone='neutral'>Shared</Pill> } : {}),
+    meta: memoryMeta(memory),
+  }));
+
+  const deleteOne = useMutation({
+    mutationFn: (memory: AgentMemory) => deleteAgentMemory(slug, memory.hindsightMemoryId),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: agentMemoryKey(slug) });
+      toast.success('Memory deleted');
+    },
+    onError: err => toast.error(clawErrorText(err, 'Could not delete the memory')),
+  });
 
   const toggleEnabled = async (next: boolean): Promise<void> => {
     if (busy) return;
@@ -77,11 +131,13 @@ export function MemoryManageDialog({
       open={open}
       onOpenChange={next => {
         setConfirmClear(false);
+        setSearch('');
         onOpenChange(next);
       }}
       title='Memory'
       description='What this agent remembers between sessions.'
       testId='memory-manage-dialog'
+      width='wide'
       footer={
         <Button
           variant='ghost'
@@ -114,16 +170,58 @@ export function MemoryManageDialog({
           />
         </BehaviourRow>
 
-        <BehaviourRow
-          title='Approval'
-          hint='How a curated memory gets accepted into the bank.'
-          last
-        >
+        <BehaviourRow title='Approval' hint='How a curated memory gets accepted into the bank.'>
           <span className='text-sm font-normal leading-5 text-foreground'>
             {APPROVAL_LABELS[status?.memoryApprovalStrategy ?? 'HUMAN_ONLY']}
           </span>
         </BehaviourRow>
+
+        <BehaviourRow
+          title='Shared memory'
+          hint='Whether a memory learned from one user is visible to everyone who runs this agent.'
+          last
+        >
+          <span className='text-sm font-normal leading-5 text-foreground'>
+            {status?.memorySharedAllowed ? 'Allowed across users' : 'Private to the running user'}
+          </span>
+        </BehaviourRow>
       </DetailCard>
+
+      <section className='flex w-full flex-col gap-3'>
+        <span className='text-sm font-medium leading-[1.2] tracking-[-0.1px] text-foreground'>
+          Stored memories
+        </span>
+
+        <div className='relative'>
+          <SearchDefault className='pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground' />
+          <input
+            type='text'
+            value={search}
+            onChange={e => setSearch(e.target.value)}
+            data-track-category='Claw Agents'
+            data-track-name='Agent detail v2: search memories'
+            placeholder='Search memories…'
+            className='h-9 w-full rounded-[10px] border border-border bg-background pl-9 pr-3 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring'
+          />
+        </div>
+
+        <DetailListCard
+          items={memoryItems}
+          loading={memories.isLoading}
+          emptyLabel={search ? 'No matching memories' : 'Approved memories will appear here.'}
+          canEdit={canEdit}
+          removeLabel={() => 'Delete memory'}
+          onRemove={item => {
+            const memory = filtered.find(m => m.id === item.key);
+            if (
+              memory &&
+              window.confirm('Delete this memory permanently? Recall history is kept.')
+            ) {
+              deleteOne.mutate(memory);
+            }
+          }}
+        />
+      </section>
 
       {canEdit && (
         <section className='flex w-full flex-col gap-3'>

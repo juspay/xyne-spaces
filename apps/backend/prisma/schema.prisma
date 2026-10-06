@@ -1705,6 +1705,8 @@ model Invitation {
   entityId     String?        // projectId | channelId | canvasId
   entityType   String?   // PROJECT | CHANNEL | CANVAS
   channelId    String?       // For PROJECT guests: the specific channel to grant access to
+  isOrgApproved Boolean?
+  inviteEmailSentAt DateTime?  // Approval flow: when the invite email actually went out. null on an approved invite = email failed, resend needed
   createdAt    DateTime      @default(now())
   updatedAt    DateTime      @updatedAt
 
@@ -1718,6 +1720,7 @@ model Invitation {
   @@index([invitationId])
   @@index([entityId])
   @@index([createdAt(sort: Desc), id])
+  @@index([orgId, isOrgApproved])
   @@map("invitations")
   @@schema("public")
 }
@@ -2387,6 +2390,7 @@ model EmailChannelPreference {
   deskReportRangeDays    Int?     @default(1) // 1 = "Last 1 day", 7 = "Last 1 week"
   duplicateScopeConfig   String?    // Scoped duplicate detection: JSON-serialized { enabled, scopeFieldGlobalIds }; stored as string for Zero compatibility, parsed at code level (null = project-wide legacy behavior)
   slackDeskTriggerMode   String?  // ALL_MESSAGES | MENTION_ONLY; null == ALL_MESSAGES
+  deskAppIds             String?  // JSON-serialised string[] of artifact app ids shown on this desk, in order; set by the desk owner or a channel admin
   @@index([ownerUserId])
   @@index([assigneeUserGroupId])
   @@index([boardId])
@@ -2944,6 +2948,10 @@ model Call {
 
   @@index([status, startedAt(sort: Desc), externalId])
   @@index([status, startsAt, externalId])
+  // A hub's or track's calls, a page at a time: the ended ones newest first, and the
+  // scheduled ones by when they start.
+  @@index([channelId, status, endedAt(sort: Desc)])
+  @@index([channelId, status, startsAt])
   @@map("calls")
   @@schema("public")
 }
@@ -3561,6 +3569,8 @@ model SdlcFolder {
   workspaceId String
   id          String   @id @default(cuid())
   name        String
+  /// An @xyne/icons name shown in place of the folder mark; null shows the mark.
+  icon        String?
   createdBy   String
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
@@ -3577,6 +3587,8 @@ model SdlcTrack {
   repoId      String?
   name        String
   description String?
+  /// An @xyne/icons name shown in place of the track mark; null shows the mark.
+  icon        String?
   status      String   @default("ACTIVE") // ACTIVE | COMPLETED | ARCHIVED
   createdBy   String
   createdAt   DateTime @default(now())

@@ -306,8 +306,12 @@ const getCountField = (columnType: KanbanCountColumnType): KanbanCountField =>
 
 export const getKanbanCounts = async (
   context: KanbanTicketQueryContext,
+  /** Narrows the tickets counted beyond what the context describes — one track's. */
+  scope?: Prisma.TicketWhereInput,
 ): Promise<KanbanCountsResponse> => {
-  const where = buildKanbanTicketWhere(context);
+  const where = scope
+    ? { AND: [buildKanbanTicketWhere(context), scope] }
+    : buildKanbanTicketWhere(context);
   const dynamicFieldIds = Object.keys(context.filters?.dynamicFields ?? {});
   const groupBy = context.groupBy ?? 'none';
   const countColumnType = getCountColumnType(context);

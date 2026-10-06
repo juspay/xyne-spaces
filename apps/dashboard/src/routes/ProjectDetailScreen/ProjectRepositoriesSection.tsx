@@ -129,8 +129,8 @@ export function ProjectRepositoriesSection(props: {
           onSettings={() =>
             void navigate(
               workspaceId
-                ? `/${workspaceId}/workspace-management?tab=repository-credentials`
-                : '/workspace-management?tab=repository-credentials',
+                ? `/${workspaceId}/organisations/repository-credentials`
+                : '/organisations/repository-credentials',
             )
           }
         />

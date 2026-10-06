@@ -12,6 +12,10 @@ import { ChannelParticipantRepository } from '../database/repositories/channelPa
 import { MessageRepository } from '../database/repositories/messageRepository';
 import { MessageAttachmentRepository } from '../database/repositories/messageAttachmentRepository';
 import { EmailRepository } from '../database/repositories/emailRepository';
+import { telephonyEmailService } from '@/services/ozonetel/telephonyEmailService';
+import { findCallTranscriptAttachment } from '@/services/ozonetel/callTranscript';
+import { callTranscriptionService } from '@/services/ozonetel/callTranscriptionService';
+import { callTranscriptionQueue } from '@/queues/callTranscriptionQueue';
 import { ReleaseRepository } from '../database/repositories/releaseRepository';
 import { getGroupedTagsWithConfig, DESK_EMAIL_SOURCE_TYPE, deskEmailConfigKey } from '@/tags';
 import {
@@ -1509,6 +1513,150 @@ export class TicketController {
     } catch (error) {
       logger.error('[TicketController] getLatestEmailTags failed:', error);
       res.status(500).json({ error: 'Failed to fetch email tags' });
+    }
+  };
+
+  /**
+   * POST /api/tickets/:ticketId/emails/:emailId/transcribe
+   * Manual trigger: transcribe the Ozonetel recording attached to a call email in
+   * this ticket's thread. Enqueues a `call-transcription` job (consumed in this API
+   * process, see app.ts) and returns 202. Progress is written into the call email body (`transcription`)
+   * and the finished transcript arrives as an EMAIL attachment; both sync via Zero.
+   */
+  transcribeCallRecording = async (req: Request, res: Response): Promise<void> => {
+    const { ticketId, emailId } = req.params;
+    const userId = req.user?.id;
+    const workspaceId = req.user?.workspaceId;
+    if (!userId || !workspaceId) {
+      res.status(401).json({ error: 'Unauthorized' });
+      return;
+    }
+
+    try {
+      const ticket = await prisma.ticket.findUnique({
+        where: { id: ticketId },
+        select: { conversationId: true, channelId: true, workspaceId: true },
+      });
+      if (!ticket || ticket.workspaceId !== workspaceId) {
+        res.status(404).json({ error: 'Ticket not found' });
+        return;
+      }
+
+      // ACL: Private channels require membership; public channels are open
+      const channel = await this.channelRepository.findById(ticket.channelId);
+      if (channel && channel.visibility === 'PRIVATE') {
+        const isParticipant = await this.channelParticipantRepository.isParticipant(ticket.channelId, userId);
+        if (!isParticipant) {
+          res.status(403).json({ error: 'Access denied - you do not have permission to access this conversation' });
+          return;
+        }
+      }
+
+      const email = await telephonyEmailService.getCallEmailWithPayload(emailId, workspaceId);
+      if (!email || email.conversationId !== ticket.conversationId) {
+        res.status(404).json({ error: 'Call not found in this ticket' });
+        return;
+      }
+      if (!email.payload.recording?.trim()) {
+        res.status(400).json({ error: 'This call has no recording to transcribe' });
+        return;
+      }
+
+      const attachments = await this.messageAttachmentRepository.findByEntityIdAndType(
+        emailId,
+        AttachmentEntityType.EMAIL,
+      );
+      const existing = findCallTranscriptAttachment(attachments);
+      if (existing) {
+        res.status(409).json({ error: 'This call already has a transcript', attachmentId: existing.id });
+        return;
+      }
+
+      // Bull is the source of truth for "in progress"; the body status is only for the UI.
+      if (await callTranscriptionQueue.isInProgress(emailId)) {
+        res.status(409).json({ error: 'Transcription is already in progress' });
+        return;
+      }
+
+      await telephonyEmailService.setTranscriptionState(emailId, workspaceId, { status: 'queued' });
+      let enqueued: boolean;
+      try {
+        enqueued = await callTranscriptionQueue.enqueue({ emailId, workspaceId, userId });
+      } catch (enqueueError) {
+        // Enqueue failed (e.g. Redis down): don't leave the body stuck at "queued" with no job behind it.
+        await telephonyEmailService.setTranscriptionState(emailId, workspaceId, { status: 'failed', error: 'Could not start transcription. Please try again.' });
+        throw enqueueError;
+      }
+      if (!enqueued) {
+        res.status(409).json({ error: 'Transcription is already in progress' });
+        return;
+      }
+
+      logger.info(`[TicketController] call transcription queued | ticketId=${ticketId} | emailId=${emailId} | userId=${userId}`);
+      res.status(202).json({ status: 'queued' });
+    } catch (error) {
+      logger.error('[TicketController] transcribeCallRecording failed:', error);
+      res.status(500).json({ error: 'Failed to start transcription' });
+    }
+  };
+
+  /**
+   * POST /api/tickets/:ticketId/emails/:emailId/summarize
+   * Manual trigger: generate the AI summary for a call that already has a
+   * transcript (transcribed before summaries existed, or whose automatic summary
+   * failed). Synchronous: one LLM round trip, the summary is written into the call
+   * email body (`transcription.summary`) and returned.
+   */
+  summarizeCallTranscript = async (req: Request, res: Response): Promise<void> => {
+    const { ticketId, emailId } = req.params;
+    const userId = req.user?.id;
+    const workspaceId = req.user?.workspaceId;
+    if (!userId || !workspaceId) {
+      res.status(401).json({ error: 'Unauthorized' });
+      return;
+    }
+
+    try {
+      const ticket = await prisma.ticket.findUnique({
+        where: { id: ticketId },
+        select: { conversationId: true, channelId: true, workspaceId: true },
+      });
+      if (!ticket || ticket.workspaceId !== workspaceId) {
+        res.status(404).json({ error: 'Ticket not found' });
+        return;
+      }
+      const channel = await this.channelRepository.findById(ticket.channelId);
+      if (channel && channel.visibility === 'PRIVATE') {
+        const isParticipant = await this.channelParticipantRepository.isParticipant(ticket.channelId, userId);
+        if (!isParticipant) {
+          res.status(403).json({ error: 'Access denied - you do not have permission to access this conversation' });
+          return;
+        }
+      }
+      const email = await telephonyEmailService.getCallEmailWithPayload(emailId, workspaceId);
+      if (!email || email.conversationId !== ticket.conversationId) {
+        res.status(404).json({ error: 'Call not found in this ticket' });
+        return;
+      }
+
+      const outcome = await callTranscriptionService.summarizeExistingTranscript(emailId, workspaceId);
+      if (!outcome.ok) {
+        const responses: Record<typeof outcome.code, { status: number; error: string }> = {
+          call_not_found: { status: 404, error: 'Call not found in this ticket' },
+          no_transcript: { status: 409, error: 'Transcribe the call before summarizing it' },
+          empty_transcript: { status: 409, error: 'The transcript is empty, nothing to summarize' },
+          generation_failed: { status: 502, error: 'Summary could not be generated right now' },
+        };
+        const { status, error } = responses[outcome.code];
+        res.status(status).json({ error });
+        return;
+      }
+
+      logger.info(`[TicketController] call summary ${outcome.alreadyExisted ? 'reused' : 'generated'} | ticketId=${ticketId} | emailId=${emailId} | userId=${userId}`);
+      res.status(200).json({ summary: outcome.summary });
+    } catch (error) {
+      logger.error('[TicketController] summarizeCallTranscript failed:', error);
+      res.status(500).json({ error: 'Failed to generate summary' });
     }
   };
 

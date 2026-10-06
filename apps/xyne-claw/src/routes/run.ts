@@ -45,6 +45,8 @@ import {
   openPaletteModeFromTools,
 } from "xyne-claw-shared";
 import { SessionLockedError } from "../session-lock.js";
+import { matchesDirectPick } from "../tool-resolution.js";
+import { describeFetchError } from "../run-deadline.js";
 import { SandboxUnavailableError } from "../sandbox-unavailable.js";
 import { isSafeId } from "../safe-id.js";
 import { sanitizeCitations } from "../citation-sanitizer.js";
@@ -89,6 +91,7 @@ import {
   asFollowUpPendingQuestion,
   buildFollowUpGenerationEndEvent,
   buildFollowUpGenerationStartEvent,
+  describeFollowUpGenerationInput,
   generateFollowUpSuggestions,
   normalizeFollowUpAgentContext,
   normalizeFollowUpConversationHistory,
@@ -1603,17 +1606,15 @@ export async function processTask(
   const followUpConversationHistory = normalizeFollowUpConversationHistory(
     agentConfig?.["followUpConversationHistory"],
   );
-  const followUpGenerationInput = followUpConversationHistory.length > 0
-    ? "conversation_history_and_prompt"
-    : "prompt_only";
-  const parallelFollowUpStartedAt = new Date().toISOString();
-  const parallelFollowUpDebugSeq = Date.now();
-  let parallelFollowUpResult:
-    | { generation: FollowUpGenerationResult; completedAt: string }
-    | undefined;
-  let parallelFollowUpPromise:
-    | Promise<{ generation: FollowUpGenerationResult; completedAt: string }>
-    | undefined;
+  // Follow-ups are generated AFTER the agent loop finishes so the model sees
+  // the user's request AND the agent's final answer. Suggestions grounded in
+  // the actual answer ("drill into item X it listed", "apply the fix it
+  // proposed") are far more useful than ones guessed from the question alone.
+  const followUpGenerationInput = describeFollowUpGenerationInput(
+    followUpConversationHistory.length,
+    true,
+  );
+  const runDebugStartedAt = new Date().toISOString();
 
   try {
     // SSRF guard: progressUrl is caller-supplied and gets POSTed to on every
@@ -1630,49 +1631,6 @@ export async function processTask(
     log(
       `Session ${sessionId}: starting for user ${userId}, progressUrl=${progressUrlLabel}`,
     );
-    if (followUpsEnabled) {
-      // Follow-ups use prior conversation plus the current user prompt, but
-      // never wait for the current assistant response. This fast-model request
-      // overlaps the main agent run and stays off the answer's critical path.
-      pushDebugProgress(
-        progressUrl,
-        sessionId,
-        buildFollowUpGenerationStartEvent({
-          seq: parallelFollowUpDebugSeq,
-          at: parallelFollowUpStartedAt,
-          sessionId,
-          model: LITELLM.fastModel,
-          generationInput: followUpGenerationInput,
-          conversationMessageCount: followUpConversationHistory.length,
-          ...(followUpAgentContext ? { agentContext: followUpAgentContext } : {}),
-        }),
-      );
-      parallelFollowUpPromise = generateFollowUpSuggestions(
-        task,
-        followUpAgentContext,
-        followUpConversationHistory,
-        abortSignal,
-      ).then((generation) => {
-        const settled = { generation, completedAt: new Date().toISOString() };
-        pushDebugProgress(
-          progressUrl,
-          sessionId,
-          buildFollowUpGenerationEndEvent({
-            seq: parallelFollowUpDebugSeq + 1,
-            at: settled.completedAt,
-            startedAt: parallelFollowUpStartedAt,
-            sessionId,
-            model: LITELLM.fastModel,
-            generationInput: followUpGenerationInput,
-            conversationMessageCount: followUpConversationHistory.length,
-            ...(followUpAgentContext ? { agentContext: followUpAgentContext } : {}),
-            generation,
-          }),
-        );
-        parallelFollowUpResult = settled;
-        return settled;
-      });
-    }
 
     // All per-type attachment ingestion (filter → decode → convert to a
     // `.context/` markdown sibling, plus the pdf/video/zip side effects) lives
@@ -2323,17 +2281,7 @@ export async function processTask(
       const rawName = extractRuntimeToolName(tool.name);
       return groups.some((group) => group.writeTools.map(String).includes(rawName));
     };
-    const selectedAsDirect = (tool: ToolDefinition, allowedDirect: string[]): boolean => {
-      const norm = (s: string): string => s.toLowerCase().replace(/_/g, "-");
-      const toolSelectionKey = (tool as { selectionKey?: string }).selectionKey;
-      return allowedDirect.some((d) =>
-        tool.name === d ||
-        tool.name.endsWith(d) ||
-        d.endsWith(`__${tool.name}`) ||
-        norm(tool.name) === norm(d) ||
-        (toolSelectionKey ? d === toolSelectionKey : false),
-      );
-    };
+    const selectedAsDirect = (tool: ToolDefinition, allowedDirect: string[]): boolean => matchesDirectPick(tool, allowedDirect);
     const applyAgentToolFilter = (
       tools: ToolDefinition[],
       cfg: ReturnType<typeof parseToolsConfig>,
@@ -2783,17 +2731,8 @@ export async function processTask(
           // matching across different servers — we compare the whole string,
           // not just the bare suffix, so a config entry from server A can't
           // accidentally grant tools from server B that share a bare name.
-          const norm = (s: string): string =>
-            s.toLowerCase().replace(/_/g, "-");
-          const tNorm = norm(t.name);
           const toolSelectionKey = (t as { selectionKey?: string }).selectionKey;
-          const isDirectPick = allowedDirect.some((d: string) =>
-            t.name === d ||
-            t.name.endsWith(d) ||
-            d.endsWith(`__${t.name}`) ||
-            tNorm === norm(d) ||
-            (toolSelectionKey ? d === toolSelectionKey : false),
-          );
+          const isDirectPick = matchesDirectPick(t, allowedDirect);
           // Gateway tools are exposed as direct tools; keep them when their
           // service name (e.g. "mettle") is selected in tools.gateway.
           // Use stable serviceName metadata instead of mutable display label.
@@ -3283,6 +3222,11 @@ export async function processTask(
         "sandbox-run", "sandbox-run-detached", "sandbox-write-file",
         "sandbox-create", "sandbox-destroy", "write",
       ]);
+      const pinnedProfile = meta["sandboxRepo"] ? REPO_CONFIGS[meta["sandboxRepo"]] : undefined;
+      if (!forceReadOnlySandbox && pinnedProfile && !pinnedProfile.repoUrl) {
+        RO_DISABLED.delete("sandbox-create");
+        RO_DISABLED.delete("sandbox-destroy");
+      }
       const before = allTools.length;
       allTools = allTools.filter((t) => !RO_DISABLED.has(t.name));
       if (allTools.length !== before) {
@@ -4173,7 +4117,7 @@ export async function processTask(
           : {}),
         ...(twinPersonaBlock ? { twinPersona: twinPersonaBlock } : {}),
         abortSignal,
-        debugStartedAt: parallelFollowUpStartedAt,
+        debugStartedAt: runDebugStartedAt,
         // Raw Spaces identity for progress callbacks → lets /webhook/progress fall
         // back to claw-auth's conv-keyed session index (mirrors the /result body).
         progressMeta: {
@@ -4308,9 +4252,77 @@ export async function processTask(
       result.text,
       pendingQuestions,
     );
-    const inlineFollowUps = shouldAttachGeneratedFollowUps
-      ? parallelFollowUpResult
-      : undefined;
+    // End-of-loop follow-up generation: the agent's final answer is now known,
+    // so the fast model gets (history, user request, final answer). When a
+    // late-delivery callback exists, generation runs in the background after
+    // the answer is posted, so the answer's latency is unchanged. Without one,
+    // we await it inline (bounded by the generator's own timeout).
+    // NOTE: the "parallel_pending" outcome name is kept for wire compatibility
+    // with claw-auth / the dashboard debug panel; it now means "generating
+    // after the answer, delivered via the late follow-ups callback".
+    const lateFollowUpDeliveryUrl =
+      shouldAttachGeneratedFollowUps && lateFollowUpCallbackUrl
+        ? buildLateFollowUpCallbackUrl(lateFollowUpCallbackUrl)
+        : undefined;
+    const followUpStartedAt = new Date().toISOString();
+    const followUpDebugSeq = Date.now();
+    const startFollowUpGeneration = (
+      signal: AbortSignal | undefined,
+    ): Promise<{ generation: FollowUpGenerationResult; completedAt: string }> => {
+      const lifecycle = {
+        sessionId,
+        model: LITELLM.fastModel,
+        generationInput: followUpGenerationInput,
+        conversationMessageCount: followUpConversationHistory.length,
+        ...(followUpAgentContext ? { agentContext: followUpAgentContext } : {}),
+      };
+      pushDebugProgress(
+        progressUrl,
+        sessionId,
+        buildFollowUpGenerationStartEvent({
+          seq: followUpDebugSeq,
+          at: followUpStartedAt,
+          ...lifecycle,
+        }),
+      );
+      return generateFollowUpSuggestions({
+        task,
+        finalResponse: result.text,
+        agentContext: followUpAgentContext,
+        conversationHistory: followUpConversationHistory,
+        abortSignal: signal,
+      }).then((generation) => {
+        const settled = { generation, completedAt: new Date().toISOString() };
+        pushDebugProgress(
+          progressUrl,
+          sessionId,
+          buildFollowUpGenerationEndEvent({
+            seq: followUpDebugSeq + 1,
+            at: settled.completedAt,
+            startedAt: followUpStartedAt,
+            ...lifecycle,
+            generation,
+          }),
+        );
+        return settled;
+      });
+    };
+    let followUpPromise:
+      | Promise<{ generation: FollowUpGenerationResult; completedAt: string }>
+      | undefined;
+    let inlineFollowUps:
+      | { generation: FollowUpGenerationResult; completedAt: string }
+      | undefined;
+    if (shouldAttachGeneratedFollowUps) {
+      if (lateFollowUpDeliveryUrl) {
+        // The run's abort signal is deliberately NOT passed: the answer has
+        // already been produced, and tearing down the run must not cancel
+        // suggestions for it. The generator enforces its own timeout.
+        followUpPromise = startFollowUpGeneration(undefined);
+      } else {
+        inlineFollowUps = await startFollowUpGeneration(abortSignal);
+      }
+    }
     const followUpOutcome:
       | "delivered_inline"
       | "parallel_pending"
@@ -4375,12 +4387,12 @@ export async function processTask(
         },
         result: `Follow-up generation ${followUpOutcome}.`,
         isError: false,
-        startedAt: parallelFollowUpStartedAt,
+        startedAt: followUpStartedAt,
         durationMs: inlineFollowUps
           ? Math.max(
               0,
               new Date(inlineFollowUps.completedAt).getTime() -
-                new Date(parallelFollowUpStartedAt).getTime(),
+                new Date(followUpStartedAt).getTime(),
             )
           : 0,
         status: followUpOutcome === "parallel_pending" ? ("running" as const) : ("completed" as const),
@@ -4764,18 +4776,16 @@ export async function processTask(
       provider: completedProvider,
       model: completedModel,
     });
-    if (
-      followUpOutcome === "parallel_pending" &&
-      parallelFollowUpPromise &&
-      lateFollowUpCallbackUrl
-    ) {
-      const lateCallbackUrl = buildLateFollowUpCallbackUrl(lateFollowUpCallbackUrl);
-      if (lateCallbackUrl) {
-        void parallelFollowUpPromise.then(async ({ generation, completedAt }) => {
+    if (followUpOutcome === "parallel_pending" && followUpPromise && lateFollowUpDeliveryUrl) {
+      // Attached only after the main result callback above has been sent, so
+      // claw-auth always sees the answer before its follow-up suggestions.
+      const lateCallbackUrl = lateFollowUpDeliveryUrl;
+      void followUpPromise
+        .then(async ({ generation, completedAt }) => {
           const delivered = await sendCallback(lateCallbackUrl, sessionToken, {
             sessionId,
             suggestions: generation.suggestions,
-            startedAt: parallelFollowUpStartedAt,
+            startedAt: followUpStartedAt,
             completedAt,
             answerLength: result.text.length,
             enabledByV2Flag: followUpsEnabledByFlag,
@@ -4794,8 +4804,12 @@ export async function processTask(
           if (!delivered) {
             clog.warn(`[follow-ups] late callback was not delivered sessionId=${sessionId}`);
           }
+        })
+        .catch((err: unknown) => {
+          clog.warn(
+            `[follow-ups] late generation failed sessionId=${sessionId}: ${err instanceof Error ? err.message : String(err)}`,
+          );
         });
-      }
     }
   } catch (err) {
     if (err instanceof RunHandoffError) {
@@ -5318,7 +5332,7 @@ export async function sendCallback(
     } catch (err) {
       lastErr = err;
       clog.error(
-        `[run] Callback to ${url} threw (session=${sid}, attempt=${attempt}, bytes=${body.length}): ${err instanceof Error ? err.message : String(err)}`,
+        `[run] Callback to ${url} threw (session=${sid}, attempt=${attempt}, bytes=${body.length}): ${describeFetchError(err)}`,
       );
       if (attempt === maxAttempts) return false;
     }

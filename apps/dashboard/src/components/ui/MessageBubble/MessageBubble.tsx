@@ -957,7 +957,8 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                   }
                 />
               </div>
-            ) : showAvatar && sender?.userType === UserType.APP ? (
+            ) : showAvatar &&
+              (sender?.userType === UserType.APP || sender?.userType === UserType.AGENT) ? (
               <div
                 onClick={() => handleUserClick(sender.id)}
                 data-track-category='MESSAGE'
@@ -1259,7 +1260,11 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
               ) : null}
               {/* Host-supplied mark for where this conversation belongs. Null in
                   every surface that does not provide one. */}
-              {message.conversationId ? renderConversationBadge?.(message.conversationId) : null}
+              {message.conversationId
+                ? renderConversationBadge?.(
+                    conversation ?? { conversationId: message.conversationId },
+                  )
+                : null}
               {headerContent}
             </div>
           )}
