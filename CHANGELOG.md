@@ -1,3 +1,10 @@
+## [1.461.2](https://github.com/juspay/xyne-spaces/compare/v1.461.1...v1.461.2) (2026-10-06)
+
+
+### Bug Fixes
+
+* strip unverified x-user-id in optionalAuth to close design-shares review_room spoof ([#1872](https://github.com/juspay/xyne-spaces/issues/1872)) ([0e57add](https://github.com/juspay/xyne-spaces/commit/0e57add02774243350448f18e9ae8a0132ed752b))
+
 ## [1.461.1](https://github.com/juspay/xyne-spaces/compare/v1.461.0...v1.461.1) (2026-10-06)
 
 
