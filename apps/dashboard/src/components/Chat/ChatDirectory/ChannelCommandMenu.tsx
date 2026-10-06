@@ -139,7 +139,7 @@ import { resolveDateKeyword } from '../../../search/filterModel';
 import { hasExactSearchQuotes } from '../../../utils/exactSearch';
 import { apiInstance } from '../../../services/clients/apiClient';
 import { MergeTicketsDialog } from '../../Tickets/MergeTicketsDialog/MergeTicketsDialog';
-import { CmdkFeedbackView } from '../SearchFeedback';
+import { CmdkFeedbackView, useCanPostSearchFeedback } from '../SearchFeedback';
 import { toast } from 'sonner';
 import Button from '../../ui/Button';
 import { AiAnswerCard } from './AiAnswerCard';
@@ -1524,6 +1524,7 @@ const ChannelCommandMenuContent = ({
 
   // Whether the search feedback view is showing in place of the results.
   const [feedbackOpen, setFeedbackOpen] = useState(false);
+  const canPostFeedback = useCanPostSearchFeedback();
 
   // Only the real search palette keeps history — not the context picker or desk-merge mode.
   const recentSearchesEnabled = !contextSelectionMode && !deskMergeMode;
@@ -5545,17 +5546,19 @@ const ChannelCommandMenuContent = ({
               </span>
               <span>Ask AI</span>
             </span>
-            <button
-              type='button'
-              onClick={() => setFeedbackOpen(true)}
-              title='Tell the search team about these results'
-              data-track-category='COMMAND_MENU'
-              data-track-name='OPEN_SEARCH_FEEDBACK'
-              className='flex items-center gap-2.5 text-muted-foreground hover:text-foreground transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-0'
-            >
-              <MessageSquare size={14} />
-              <span>Feedback</span>
-            </button>
+            {canPostFeedback && (
+              <button
+                type='button'
+                onClick={() => setFeedbackOpen(true)}
+                title='Tell the search team about these results'
+                data-track-category='COMMAND_MENU'
+                data-track-name='OPEN_SEARCH_FEEDBACK'
+                className='flex items-center gap-2.5 text-muted-foreground hover:text-foreground transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-0'
+              >
+                <MessageSquare size={14} />
+                <span>Feedback</span>
+              </button>
+            )}
           </span>
           <div className='flex items-center gap-6'>
             {deskMergeEnabled &&

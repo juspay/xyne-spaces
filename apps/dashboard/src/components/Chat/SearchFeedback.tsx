@@ -3,15 +3,21 @@ import * as Popover from '@radix-ui/react-popover';
 import { useQuery } from '@tanstack/react-query';
 import { ArrowLeft, Loader2, X } from 'lucide-react';
 import { toast } from 'sonner';
+import { WorkspaceRole } from '@xyne/shared';
 import { cn } from '../../utils/classNames';
 import { logger, Event as LogEvent } from '../../utils/logger';
-import { useAuthContextValues } from '../../hooks/useAuth';
+import { useAuth, useAuthContextValues } from '../../hooks/useAuth';
 import { apiInstance } from '../../services/clients/apiClient';
 
 /**
  * Search feedback UI: a view inside the Cmd+K palette and a popover on the search results
  * page. Both use the same form. The backend decides which channel and group to post to.
  */
+
+/** Guests can't post feedback (the backend returns 403), so the Feedback buttons are hidden for them. */
+export function useCanPostSearchFeedback(): boolean {
+  return useAuth().user?.role !== WorkspaceRole.GUEST;
+}
 
 /** Same limit as the backend. */
 const MAX_FEEDBACK_LENGTH = 2000;
@@ -219,57 +225,74 @@ export const CmdkFeedbackView = ({
   filters,
   onBack,
   onPosted,
-}: CmdkFeedbackViewProps): ReactElement => (
-  <SearchFeedbackForm
-    query={query}
-    filters={filters}
-    source='cmdk'
-    onPosted={onPosted}
-    // Fills the full-screen palette on mobile; at least 200px on desktop.
-    textareaClassName='flex-1 min-h-[200px]'
-    trackCategory='COMMAND_MENU'
-  >
-    {({ body, postButton }) => (
-      <div
-        role='presentation'
-        className='flex flex-col h-full min-h-0'
-        // Keep keystrokes from reaching the palette's result navigation. Esc still closes.
-        onKeyDown={(e): void => e.stopPropagation()}
-        data-testid='cmdk-feedback-view'
-      >
-        <div className='flex items-center gap-3 px-6 py-4 border-b border-border shrink-0'>
-          <button
-            type='button'
-            onClick={onBack}
-            aria-label='Back to results'
-            className='p-1.5 rounded-lg text-foreground bg-muted hover:bg-accent transition-colors focus-visible:outline-none focus-visible:ring-0'
-            data-track-category='COMMAND_MENU'
-            data-track-name='SEARCH_FEEDBACK_BACK'
-          >
-            <ArrowLeft size={16} />
-          </button>
-          <h2 className='text-base font-semibold text-foreground'>Feedback on search</h2>
-        </div>
+}: CmdkFeedbackViewProps): ReactElement => {
+  // Esc goes back to the results, not out of the palette. Several listeners close the palette
+  // on Esc (its close shortcut, the dialog), so take it first: window capture runs before them.
+  const onBackRef = useRef(onBack);
+  onBackRef.current = onBack;
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent): void => {
+      if (e.key !== 'Escape') return;
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      onBackRef.current();
+    };
+    window.addEventListener('keydown', onKeyDown, true);
+    return (): void => window.removeEventListener('keydown', onKeyDown, true);
+  }, []);
 
-        <div className='flex-1 min-h-0 flex flex-col px-6 py-5'>{body}</div>
+  return (
+    <SearchFeedbackForm
+      query={query}
+      filters={filters}
+      source='cmdk'
+      onPosted={onPosted}
+      // Fills the full-screen palette on mobile; at least 200px on desktop.
+      textareaClassName='flex-1 min-h-[200px]'
+      trackCategory='COMMAND_MENU'
+    >
+      {({ body, postButton }) => (
+        <div
+          role='presentation'
+          className='flex flex-col h-full min-h-0'
+          // Keep keystrokes from reaching the palette's result navigation (Esc is handled above).
+          onKeyDown={(e): void => e.stopPropagation()}
+          data-testid='cmdk-feedback-view'
+        >
+          <div className='flex items-center gap-3 px-6 py-4 border-b border-border shrink-0'>
+            <button
+              type='button'
+              onClick={onBack}
+              aria-label='Back to results'
+              className='p-1.5 rounded-lg text-foreground bg-muted hover:bg-accent transition-colors focus-visible:outline-none focus-visible:ring-0'
+              data-track-category='COMMAND_MENU'
+              data-track-name='SEARCH_FEEDBACK_BACK'
+            >
+              <ArrowLeft size={16} />
+            </button>
+            <h2 className='text-base font-semibold text-foreground'>Feedback on search</h2>
+          </div>
 
-        <div className='flex items-center justify-between px-6 py-4 border-t border-border shrink-0 text-sm'>
-          <button
-            type='button'
-            onClick={onBack}
-            className='flex items-center gap-2 text-muted-foreground hover:text-foreground transition-colors focus-visible:outline-none focus-visible:ring-0'
-            data-track-category='COMMAND_MENU'
-            data-track-name='SEARCH_FEEDBACK_CANCEL'
-          >
-            <span>Back</span>
-            <span className='px-1.5 py-0.5 bg-muted rounded text-xs leading-none'>esc</span>
-          </button>
-          {postButton}
+          <div className='flex-1 min-h-0 flex flex-col px-6 py-5'>{body}</div>
+
+          <div className='flex items-center justify-between px-6 py-4 border-t border-border shrink-0 text-sm'>
+            <button
+              type='button'
+              onClick={onBack}
+              className='flex items-center gap-2 text-muted-foreground hover:text-foreground transition-colors focus-visible:outline-none focus-visible:ring-0'
+              data-track-category='COMMAND_MENU'
+              data-track-name='SEARCH_FEEDBACK_CANCEL'
+            >
+              <span>Back</span>
+              <span className='px-1.5 py-0.5 bg-muted rounded text-xs leading-none'>esc</span>
+            </button>
+            {postButton}
+          </div>
         </div>
-      </div>
-    )}
-  </SearchFeedbackForm>
-);
+      )}
+    </SearchFeedbackForm>
+  );
+};
 
 export interface SearchFeedbackPopoverProps {
   open: boolean;
@@ -297,6 +320,8 @@ export const SearchFeedbackPopover = ({
         align='end'
         sideOffset={8}
         collisionPadding={12}
+        // Ignore outside clicks so a typed comment isn't lost; close with ×, Esc or by posting.
+        onInteractOutside={e => e.preventDefault()}
         className={cn(
           'z-50 w-[460px] max-w-[calc(100vw-2rem)] rounded-2xl border border-border bg-popover shadow-lg',
           'data-[state=open]:animate-in data-[state=closed]:animate-out',

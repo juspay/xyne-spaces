@@ -74,7 +74,22 @@ export class SearchFeedbackService {
   /** Reads the CAC destination for this workspace. Returns `{}` if unset or CAC is unreachable. */
   private async resolveTarget(workspaceId: string): Promise<SearchFeedbackTarget> {
     const raw = await CacConfigService.fetch(FEEDBACK_TARGET_CAC_KEY, { workspaceId });
-    if (raw && typeof raw === 'object') return raw as SearchFeedbackTarget;
+    if (raw && typeof raw === 'object') {
+      // Keep only non-empty string ids; anything else in config is ignored, not passed to the DB.
+      const { channelId, userGroupId } = raw as Record<string, unknown>;
+      const target: SearchFeedbackTarget = {};
+      if (typeof channelId === 'string' && channelId.trim()) target.channelId = channelId.trim();
+      if (typeof userGroupId === 'string' && userGroupId.trim()) {
+        target.userGroupId = userGroupId.trim();
+      }
+      if ((channelId != null && !target.channelId) || (userGroupId != null && !target.userGroupId)) {
+        logger.warn('[SearchFeedback] CAC target has a non-string id; ignoring it', {
+          cacKey: FEEDBACK_TARGET_CAC_KEY,
+          workspaceId: sanitizeForLog(workspaceId),
+        });
+      }
+      return target;
+    }
     if (raw !== null) {
       logger.warn('[SearchFeedback] CAC target is not an object; ignoring', {
         cacKey: FEEDBACK_TARGET_CAC_KEY,

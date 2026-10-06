@@ -89,7 +89,7 @@ import { AnimatePresence, motion } from 'framer-motion';
 import { cn } from '../../../utils/classNames';
 import { CompareSelectRow } from './compare/CompareSelectRow';
 import { SearchCompareDialog } from './compare/SearchCompareDialog';
-import { SearchFeedbackPopover } from '../SearchFeedback';
+import { SearchFeedbackPopover, useCanPostSearchFeedback } from '../SearchFeedback';
 import { hasRankingData } from './compare/rankingFeatures';
 import {
   TicketSearchHighlightContext,
@@ -212,6 +212,7 @@ const SearchResults = (): ReactElement => {
 
   // —— Search feedback popover ——
   const [feedbackOpen, setFeedbackOpen] = useState(false);
+  const canPostFeedback = useCanPostSearchFeedback();
 
   // —— Compare mode (ranking comparison) ——
   const [compareMode, setCompareMode] = useState(false);
@@ -956,7 +957,7 @@ const SearchResults = (): ReactElement => {
         </div>
         {/* Shown for any query or active filter so Feedback is available even with no results.
             The result count and Compare still need results. */}
-        {(hasResultsRow || !!displayQuery || filtersActive) && (
+        {(hasResultsRow || (canPostFeedback && (!!displayQuery || filtersActive))) && (
           <div className='flex items-center justify-between gap-3 pb-2'>
             {hasResultsRow && (
               <p className='text-xs text-muted-foreground tabular-nums'>
@@ -964,28 +965,30 @@ const SearchResults = (): ReactElement => {
               </p>
             )}
             <div className='flex items-center gap-2 ml-auto'>
-              <SearchFeedbackPopover
-                open={feedbackOpen}
-                onOpenChange={setFeedbackOpen}
-                query={displayQuery}
-                filters={feedbackFilters}
-                sort={sortSummary(filters)}
-              >
-                <button
-                  title='Tell the search team about these results'
-                  data-track-category='SEARCH_RESULTS'
-                  data-track-name='OPEN_FEEDBACK'
-                  className={cn(
-                    'inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium rounded-md active:scale-[0.96] transition',
-                    feedbackOpen
-                      ? 'bg-primary text-primary-foreground shadow-sm'
-                      : 'text-muted-foreground hover:text-foreground hover:bg-muted/60 border border-border',
-                  )}
+              {canPostFeedback && (
+                <SearchFeedbackPopover
+                  open={feedbackOpen}
+                  onOpenChange={setFeedbackOpen}
+                  query={displayQuery}
+                  filters={feedbackFilters}
+                  sort={sortSummary(filters)}
                 >
-                  <MessageSquare size={13} />
-                  Feedback
-                </button>
-              </SearchFeedbackPopover>
+                  <button
+                    title='Tell the search team about these results'
+                    data-track-category='SEARCH_RESULTS'
+                    data-track-name='OPEN_FEEDBACK'
+                    className={cn(
+                      'inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium rounded-md active:scale-[0.96] transition',
+                      feedbackOpen
+                        ? 'bg-primary text-primary-foreground shadow-sm'
+                        : 'text-muted-foreground hover:text-foreground hover:bg-muted/60 border border-border',
+                    )}
+                  >
+                    <MessageSquare size={13} />
+                    Feedback
+                  </button>
+                </SearchFeedbackPopover>
+              )}
               {hasResultsRow && (
                 <button
                   onClick={() => setCompareMode(v => !v)}

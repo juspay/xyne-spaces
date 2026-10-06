@@ -1,4 +1,5 @@
 import { Request, Response } from 'express';
+import { WorkspaceRole } from '@xyne/shared';
 import { logger } from '@/utils/logger';
 import {
   SearchFeedbackUnavailableError,
@@ -47,6 +48,12 @@ export class SearchFeedbackController {
       const user = req.user;
       if (!user?.id || !user.workspaceId) {
         res.status(401).json({ success: false, error: 'Unauthorized' });
+        return;
+      }
+
+      // Guests can't post: feedback goes to an internal channel and pings the whole group.
+      if (user.role === WorkspaceRole.GUEST) {
+        res.status(403).json({ success: false, error: 'Guests cannot post search feedback' });
         return;
       }
 
