@@ -3512,7 +3512,6 @@ export class CallController {
           callMessageId,
           botUserId: xyneAutomaticBot.id,
           savedByUserId: userId,
-          savedByName: req.user?.displayName || req.user?.name || req.user?.email || 'A call participant',
           originalFilename:
             file.originalname || `whiteboard-${callId}${pageLabel ? `-${pageLabel}` : ''}.png`,
           size: file.size || 0,
