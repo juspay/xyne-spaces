@@ -1446,7 +1446,7 @@ export function SdlcFileList(props: {
                       <input
                         autoFocus
                         value={renameDraft}
-                        maxLength={row.kind === 'FOLDER' ? 120 : 200}
+                        maxLength={row.kind === 'FOLDER' ? 120 : 300}
                         onChange={event => setRenameDraft(event.target.value)}
                         // A file's name is picked without its extension, which it keeps.
                         onFocus={event => {

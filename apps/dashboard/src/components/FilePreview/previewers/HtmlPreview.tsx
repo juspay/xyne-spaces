@@ -22,19 +22,12 @@ const VIEWS = [
 
 /**
  * Scripts run, but from an opaque origin: the page can't reach the app, its session
- * or its storage. Links and window.open go to a new tab rather than replacing the
- * preview.
+ * or its storage. A link the page itself opens in a new window opens sandboxed too —
+ * never `allow-popups-to-escape-sandbox`, which would let an uploaded page open
+ * itself unsandboxed — and the page is given as srcdoc rather than a blob: address,
+ * which would carry the app's own origin wherever it was opened.
  */
-const SANDBOX = 'allow-scripts allow-popups allow-popups-to-escape-sandbox';
-
-/** Links leave the preview for a tab of their own, unless the page says otherwise. */
-function withLinksInNewTabs(html: string): string {
-  if (/<base\s/i.test(html)) return html;
-  const base = '<base target="_blank">';
-  return /<head[^>]*>/i.test(html)
-    ? html.replace(/<head[^>]*>/i, head => `${head}${base}`)
-    : `${base}${html}`;
-}
+const SANDBOX = 'allow-scripts allow-popups';
 
 /**
  * The page the file is, drawn in a sandboxed frame — on white, as pages are written
@@ -62,13 +55,13 @@ export default function HtmlPreview(props: PreviewerProps): ReactElement {
 
 function RenderedPage(props: { html: string; title: string }): ReactElement {
   const frameRef = useRef<HTMLIFrameElement | null>(null);
-  const [pageUrl, setPageUrl] = useState<string | null>(null);
+  // The page as the frame is given it: its images inline, and the find script in it.
+  const [page, setPage] = useState<string | null>(null);
   const openFind = usePreviewOpenFind();
   const [finder, setFinder] = useState<FindProvider | null>(null);
 
   useEffect(() => {
     let cancelled = false;
-    let url: string | null = null;
     void (async () => {
       // A sandboxed page sends no cookies, so images on the app's own, signed-in
       // addresses would fail: they are brought inline first.
@@ -78,21 +71,16 @@ function RenderedPage(props: { html: string; title: string }): ReactElement {
       } catch {
         // The page as it is, then.
       }
-      if (cancelled) return;
-      url = URL.createObjectURL(
-        new Blob([withPageFind(withLinksInNewTabs(html))], { type: 'text/html;charset=utf-8' }),
-      );
-      setPageUrl(url);
+      if (!cancelled) setPage(withPageFind(html));
     })();
     return () => {
       cancelled = true;
-      if (url) URL.revokeObjectURL(url);
     };
   }, [props.html]);
 
   // The page answers find from inside its own frame.
   useEffect(() => {
-    if (!pageUrl) return;
+    if (page === null) return;
     const { finder: pageFinder, dispose } = createPageFinder(
       () => frameRef.current?.contentWindow ?? null,
       openFind,
@@ -102,13 +90,13 @@ function RenderedPage(props: { html: string; title: string }): ReactElement {
       dispose();
       setFinder(null);
     };
-  }, [pageUrl, openFind]);
+  }, [page, openFind]);
   usePreviewFind(finder);
 
-  return pageUrl ? (
+  return page !== null ? (
     <iframe
       ref={frameRef}
-      src={pageUrl}
+      srcDoc={page}
       title={props.title}
       sandbox={SANDBOX}
       referrerPolicy='no-referrer'

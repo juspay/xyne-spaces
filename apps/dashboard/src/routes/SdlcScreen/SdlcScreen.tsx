@@ -68,7 +68,11 @@ import {
   sdlcSidebarRowClass,
 } from './SdlcHubSidebar';
 import { SdlcHubSwitcher } from './SdlcHubSwitcher';
-import { setUserPreference, useUserPreference } from '../../machines/userPreferencesMachine';
+import {
+  setUserPreference,
+  useUserPreference,
+  userPreferencesSnapshot,
+} from '../../machines/userPreferencesMachine';
 import { isSdlcDocumentWindow } from './useSdlcFrameBridge';
 import { toast } from 'sonner';
 import AppNavigator from '../../components/AppNavigator/AppNavigator';
@@ -453,7 +457,6 @@ export default function SdlcScreen(): ReactElement {
   const [hoveredTypeId, setHoveredTypeId] = useState<string | null>(null);
   const [trackDialog, setTrackDialog] = useState(false);
   const showClosedTracks = useUserPreference('sdlcShowClosedTracks');
-  const folderTabsByFolder = useUserPreference('sdlcFolderTabs');
   const [hubSwitcherOpen, setHubSwitcherOpen] = useState(false);
   const setShowClosedTracks = (next: boolean): void =>
     setUserPreference('sdlcShowClosedTracks', next);
@@ -837,6 +840,10 @@ export default function SdlcScreen(): ReactElement {
   );
   const selectedTrackId = routeSearchParams.get('track');
   const openFolderId = routeSearchParams.get('folder');
+  // The folder page and url as they are now, for work that finishes after an await —
+  // an upload, a save — and must not act on the render it began in.
+  const routeNow = useRef({ openFolderId, search: routeSearchParams.toString() });
+  routeNow.current = { openFolderId, search: routeSearchParams.toString() };
   const browsingScratchTab = routeSearchParams.get('browse') === '1';
   const openFileId = routeSearchParams.get('file');
   const openLinkId = routeSearchParams.get('link');
@@ -1620,7 +1627,8 @@ export default function SdlcScreen(): ReactElement {
    */
   const openFolderTab = (tab: FolderTab | null): void => {
     if (!channelId) return;
-    const search = new URLSearchParams(routeSearchParams);
+    // The url as it is now: this can run after an upload or a save has been awaited.
+    const search = new URLSearchParams(routeNow.current.search);
     setFolderTabParams(search, tab);
     // Straight there rather than through navigateWithinSdlc, which lets go of the
     // open conversation: the panel isn't the tab's to change.
@@ -1632,19 +1640,28 @@ export default function SdlcScreen(): ReactElement {
    * in tabs, the last of them in front, the panel beside it as it was. Off the
    * folder page there are no tabs to open it in; says whether it opened.
    */
-  const openCreatedOnFolderPage = (created: readonly FolderTab[]): boolean => {
+  const openCreatedOnFolderPage = (
+    created: readonly FolderTab[],
+    /** The folder page it was made from, read when the action began. */
+    folderId: string | null,
+  ): boolean => {
     const front = created.at(-1);
-    if (!openFolderId || !front) return false;
-    const stored = folderTabsByFolder[openFolderId] ?? [];
+    if (!folderId || !front) return false;
+    // Read now, not from when the upload began: tabs opened, closed or moved since
+    // are kept.
+    const tabsByFolder = userPreferencesSnapshot().sdlcFolderTabs;
+    const stored = tabsByFolder[folderId] ?? [];
     const known = new Set(stored.map(tab => `${tab.kind}:${tab.id}`));
     const added = created.filter(tab => !known.has(`${tab.kind}:${tab.id}`));
     if (added.length > 0) {
       setUserPreference(
         'sdlcFolderTabs',
-        withFolderEntry(folderTabsByFolder, openFolderId, [...stored, ...added]),
+        withFolderEntry(tabsByFolder, folderId, [...stored, ...added]),
       );
     }
-    openFolderTab(front);
+    // Brought to the front only if that page is still the one open: someone who has
+    // gone elsewhere meanwhile isn't pulled back.
+    if (routeNow.current.openFolderId === folderId) openFolderTab(front);
     return true;
   };
 
@@ -2189,6 +2206,8 @@ export default function SdlcScreen(): ReactElement {
     if (!channel || !artifactDialog || !canSubmitArtifactDialog) return;
     const folder = artifactDialog;
     const title = artifactTitle.trim();
+    // The folder page this was started from, before anything is awaited.
+    const startedOn = openFolderId;
     if (folder.kind === 'wiki') {
       const folderPath = artifactFolderPath.trim();
       const wikiResponse = await apiInstance.post<{ artifact: { canvasId: string } }>(
@@ -2233,7 +2252,7 @@ export default function SdlcScreen(): ReactElement {
     setRelatedSourceId(null);
     // Created from inside a folder, it opens as a tab there: leaving for the
     // artifacts section would close the folder you were working in.
-    if (openCreatedOnFolderPage([{ kind: 'CANVAS', id: newCanvasId }])) return;
+    if (openCreatedOnFolderPage([{ kind: 'CANVAS', id: newCanvasId }], startedOn)) return;
     // Same search as opening an artifact from the list, so a new artifact lands
     // with its discussion open rather than only doing so once reopened.
     const search = canvasSearch(newCanvasId, true);
@@ -2668,6 +2687,7 @@ export default function SdlcScreen(): ReactElement {
   const addLinkAction = async (): Promise<void> => {
     if (!channel || !selectedTrack || !addItemParent) return;
     const linkId = uuidv4();
+    const startedOn = openFolderId;
     await runTrackMutation(
       zero.mutate(
         mutators.sdlc.addSdlcFolderItem({
@@ -2693,7 +2713,9 @@ export default function SdlcScreen(): ReactElement {
     setLinkUrl('');
     setLinkTitle('');
     setLinkPreview(null);
-    if (!openCreatedOnFolderPage([{ kind: 'LINK', id: linkId }])) returnFocusToFileList();
+    if (!openCreatedOnFolderPage([{ kind: 'LINK', id: linkId }], startedOn)) {
+      returnFocusToFileList();
+    }
   };
 
   const addBrowsedLink = (url: string, title: string): void => {
@@ -2717,6 +2739,7 @@ export default function SdlcScreen(): ReactElement {
   const uploadFilesAction = async (files: readonly File[]): Promise<void> => {
     const parent = addItemParent;
     if (!channel || !selectedTrack || !parent || files.length === 0) return;
+    const startedOn = openFolderId;
     const form = new FormData();
     form.append('entityType', 'SDLC_HUB');
     form.append('entityId', channel.id);
@@ -2737,7 +2760,7 @@ export default function SdlcScreen(): ReactElement {
     const uploaded = (response.data.attachments ?? []).map(
       (attachment): FolderTab => ({ kind: 'ATTACHMENT', id: attachment.id }),
     );
-    if (!openCreatedOnFolderPage(uploaded)) returnFocusToFileList();
+    if (!openCreatedOnFolderPage(uploaded, startedOn)) returnFocusToFileList();
   };
 
   const setTrackNameAction = async (trackId: string, name: string): Promise<void> => {
@@ -3756,8 +3779,22 @@ export default function SdlcScreen(): ReactElement {
                 ) : null}
                 {section === 'tracks' && openFolder ? (
                   <>
-                    {/* The folder page's tabs; the way back to the track is the
-                        explorer's, in the sidebar. */}
+                    {/* The way back to the track is the explorer's, in the sidebar — but
+                        a folder in a window of its own has no sidebar, so it is here. */}
+                    {isDocumentWindow && (
+                      <button
+                        type='button'
+                        onClick={closeFolderPage}
+                        title={`Back to ${selectedTrack?.name ?? 'the track'}`}
+                        aria-label={`Back to ${selectedTrack?.name ?? 'the track'}`}
+                        className='flex size-7 shrink-0 items-center justify-center rounded-[7px] text-muted-foreground transition-colors hover:bg-muted hover:text-foreground'
+                        data-track-category='SdlcHub'
+                        data-track-name='FolderPageClosed'
+                      >
+                        <ChevronRight size={16} className='rotate-180' />
+                      </button>
+                    )}
+                    {/* The folder page's tabs. */}
                     <div
                       ref={setFolderTabsSlot}
                       className='flex h-full min-w-0 flex-1 items-center'

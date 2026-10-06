@@ -43,6 +43,7 @@ import {
   FolderOpen,
   Link2,
   MessageCircle,
+  MessageSquare,
   Paperclip,
   Plus,
   RotateCw,
@@ -88,6 +89,7 @@ import { ActivityPill, type SdlcLiveCalls } from './ActivityPill';
 import {
   CommentsPanel,
   ItemView,
+  commentStoreFor,
   itemFromSdlc,
   onCommentsRequested,
   publishOpenItems,
@@ -301,9 +303,19 @@ function pinnedFoldersIn(tree: HTMLElement): PinnedFolder[] {
   return pinned.sort((left, right) => left.depth - right.depth);
 }
 
+/** The same stack, drawn the same: a renamed or re-iconed folder is a change too. */
 const samePinned = (left: readonly PinnedFolder[], right: readonly PinnedFolder[]): boolean =>
   left.length === right.length &&
-  left.every((folder, index) => folder.id === right[index]?.id && folder.top === right[index]?.top);
+  left.every((folder, index) => {
+    const other = right[index];
+    return (
+      other !== undefined &&
+      folder.id === other.id &&
+      folder.top === other.top &&
+      folder.name === other.name &&
+      folder.icon === other.icon
+    );
+  });
 
 /**
  * An open folder's own calls, without the ones inside it: what is inside is on show
@@ -331,6 +343,8 @@ const TREE_PINNED_DEPTH = 5;
 function RenameField(props: {
   name: string;
   isFile: boolean;
+  /** A folder's name is up to 120 characters; anything else's, 300, as a link's title. */
+  maxLength: number;
   onDone: (name: string | null) => void;
 }): ReactElement {
   const [draft, setDraft] = useState(props.name);
@@ -340,7 +354,7 @@ function RenameField(props: {
       // eslint-disable-next-line jsx-a11y/no-autofocus -- it is opened to be typed in
       autoFocus
       value={draft}
-      maxLength={200}
+      maxLength={props.maxLength}
       aria-label={`Rename ${props.name}`}
       onChange={event => setDraft(event.target.value)}
       onFocus={event => {
@@ -486,6 +500,7 @@ function TreeRow(
             <RenameField
               name={node.name}
               isFile={node.kind === 'ATTACHMENT'}
+              maxLength={node.kind === 'FOLDER' ? 120 : 300}
               onDone={name => {
                 props.onRenameDone();
                 if (name) props.onRenameItem({ type: node.kind, id: node.id }, name);
@@ -1073,11 +1088,19 @@ export function SdlcFolderPage(props: {
     // Folders opening, closing and filling in change what is under the stack.
     const resize = new ResizeObserver(measure);
     resize.observe(treeElement);
+    // A pinned folder renamed or given an icon is drawn again from its row.
+    const renamed = new MutationObserver(measure);
+    renamed.observe(treeElement, {
+      subtree: true,
+      attributes: true,
+      attributeFilter: ['data-explorer-name', 'data-explorer-icon'],
+    });
     if (treeElement.firstElementChild) resize.observe(treeElement.firstElementChild);
     return () => {
       cancelAnimationFrame(frame);
       treeElement.removeEventListener('scroll', measure);
       resize.disconnect();
+      renamed.disconnect();
     };
   }, [treeElement]);
   // Where the stack ends: the tree is hidden above it, so the rows it covers don't
@@ -1264,6 +1287,12 @@ export function SdlcFolderPage(props: {
   const activeItem = useMemo(
     () => (active ? tabItem(active, tabItems.get(tabKey(active))) : null),
     [active, tabItems],
+  );
+  // The scratch tab is ad-hoc browsing, not an item of the hub: it has no entity id of
+  // its own (every folder would share SCRATCH_TAB_ID), so a comment left there would
+  // show in every other folder's scratch tab.
+  const canComment = Boolean(
+    activeItem && active?.id !== SCRATCH_TAB_ID && commentStoreFor(activeItem),
   );
 
   useEffect(
@@ -1452,6 +1481,33 @@ export function SdlcFolderPage(props: {
               <Globe className='size-4' />
             </button>
           )}
+          {/* Comments on the open tab: one toggle, which also puts the panel away.
+              Pointing at a passage to comment on it comes beside it while they show. */}
+          {canComment && commentsOpen && annotate.toggle}
+          {canComment && (
+            <button
+              type='button'
+              title={commentsOpen ? 'Hide comments' : 'Comments'}
+              aria-label='Comments'
+              aria-pressed={commentsOpen}
+              onClick={() =>
+                setCommentsOpen(open => {
+                  if (open) setDraftAnchor(null);
+                  return !open;
+                })
+              }
+              className={cn(
+                'flex size-7 shrink-0 items-center justify-center rounded-md transition-colors',
+                commentsOpen
+                  ? 'bg-muted text-foreground'
+                  : 'text-muted-foreground hover:bg-foreground/[0.08] hover:text-foreground',
+              )}
+              data-track-category='SdlcHub'
+              data-track-name='FolderCommentsToggled'
+            >
+              <MessageSquare className='size-4' />
+            </button>
+          )}
           {/* Every open tab in one list, findable by name: the strip only shows what
               fits. The menu's trigger can't also be the tooltip's, so the tooltip
               holds the whole menu. */}
@@ -1484,7 +1540,19 @@ export function SdlcFolderPage(props: {
                   </button>
                 }
               >
-                <Command loop label='Open tabs'>
+                <Command
+                  loop
+                  label='Open tabs'
+                  // By the tab's name alone: its value is its kind and id, which
+                  // would otherwise match "re" or "1" in a uuid.
+                  filter={(_value, search, keywords) =>
+                    (keywords ?? []).some(keyword =>
+                      keyword.toLowerCase().includes(search.trim().toLowerCase()),
+                    )
+                      ? 1
+                      : 0
+                  }
+                >
                   <div className='flex items-center gap-2 border-b border-border px-3'>
                     <Search className='size-3.5 shrink-0 text-muted-foreground' />
                     <Command.Input
@@ -1644,7 +1712,9 @@ export function SdlcFolderPage(props: {
   // The folder's tree. Beside a hub sidebar it takes the sidebar's place; in a window
   // of its own it keeps a panel beside the page.
   /** What a right-clicked row can do: what it is, then its conversations and name. */
-  const RowMenuItems = ({ node }: { node: TreeNode }): ReactElement => {
+  // A function rather than a component: one defined in render is a new component
+  // each time, and the open menu would be remounted under the pointer.
+  const rowMenuItems = (node: TreeNode): ReactElement => {
     const parent = { id: node.id, name: node.name };
     const tabKind = node.kind === 'FOLDER' ? null : node.kind;
     const item = (
@@ -1877,7 +1947,7 @@ export function SdlcFolderPage(props: {
           className='w-52'
           onCloseAutoFocus={event => event.preventDefault()}
         >
-          {rowMenu && <RowMenuItems node={rowMenu.node} />}
+          {rowMenu && rowMenuItems(rowMenu.node)}
         </DropdownMenuContent>
       </DropdownMenu>
     </div>
@@ -2167,6 +2237,9 @@ function TabContent(props: {
     const kind = fileKind(found.mimetype, found.name);
     return (
       <FilePreview
+        // One preview per file: a tab for another file starts afresh, never with the
+        // last one's player, zoom or parsed rows.
+        key={found.id}
         file={{ id: found.id, name: found.name, mimetype: found.mimetype, size: found.size }}
         icon={<FileTypeIcon kind={kind} size='lg' />}
         // The list's own name for it — Excel, Word — unless that is only "File" or

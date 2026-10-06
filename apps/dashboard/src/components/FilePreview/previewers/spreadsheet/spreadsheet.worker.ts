@@ -1,4 +1,5 @@
 import * as XLSX from 'xlsx';
+import { MAX_COLUMNS, MAX_ROWS } from './limits';
 
 export interface SpreadsheetSheet {
   name: string;
@@ -6,6 +7,8 @@ export interface SpreadsheetSheet {
   rows: string[][];
   /** Column widths the file sets, in pixels. */
   columnWidths: (number | undefined)[];
+  /** True when the sheet goes on past what is read: MAX_ROWS rows, MAX_COLUMNS columns. */
+  truncated: boolean;
 }
 
 export type SpreadsheetWorkerResponse =
@@ -14,6 +17,23 @@ export type SpreadsheetWorkerResponse =
 
 /** Excel's own character width, in pixels, for a width set in characters. */
 const PIXELS_PER_CHARACTER = 7;
+
+/**
+ * The cells that hold something, as a range from A1. A sheet's own `!ref` is no guide:
+ * formatting a whole column stretches it to row 1,048,576, and reading that densely
+ * would build a billion empty strings. Only cells that exist count.
+ */
+function filledRange(sheet: XLSX.WorkSheet): { lastRow: number; lastColumn: number } | null {
+  let lastRow = -1;
+  let lastColumn = -1;
+  for (const address of Object.keys(sheet)) {
+    if (address.startsWith('!')) continue;
+    const cell = XLSX.utils.decode_cell(address);
+    if (cell.r > lastRow) lastRow = cell.r;
+    if (cell.c > lastColumn) lastColumn = cell.c;
+  }
+  return lastRow < 0 ? null : { lastRow, lastColumn };
+}
 
 /**
  * Reads a workbook — xlsx, xls, xlsm, ods — off the page's thread, so a large one
@@ -26,22 +46,30 @@ self.onmessage = (event: MessageEvent<ArrayBuffer>) => {
     const workbook = XLSX.read(event.data, { type: 'array', cellDates: true, cellNF: true });
     const sheets = workbook.SheetNames.map((name): SpreadsheetSheet => {
       const sheet = workbook.Sheets[name];
-      const ref = sheet?.['!ref'];
-      if (!sheet || !ref) return { name, rows: [], columnWidths: [] };
-      const range = XLSX.utils.decode_range(ref);
+      const filled = sheet ? filledRange(sheet) : null;
+      if (!sheet || !filled) return { name, rows: [], columnWidths: [], truncated: false };
+      const lastRow = Math.min(filled.lastRow, MAX_ROWS - 1);
+      const lastColumn = Math.min(filled.lastColumn, MAX_COLUMNS - 1);
       const rows = XLSX.utils.sheet_to_json<string[]>(sheet, {
         header: 1,
         raw: false,
         defval: '',
         blankrows: true,
-        range: XLSX.utils.encode_range({ s: { r: 0, c: 0 }, e: range.e }),
+        range: XLSX.utils.encode_range({ s: { r: 0, c: 0 }, e: { r: lastRow, c: lastColumn } }),
       });
-      const columnWidths = (sheet['!cols'] ?? []).map(
-        column =>
-          column?.wpx ??
-          (column?.wch !== undefined ? column.wch * PIXELS_PER_CHARACTER + 10 : undefined),
-      );
-      return { name, rows, columnWidths };
+      const columnWidths = (sheet['!cols'] ?? [])
+        .slice(0, lastColumn + 1)
+        .map(
+          column =>
+            column?.wpx ??
+            (column?.wch !== undefined ? column.wch * PIXELS_PER_CHARACTER + 10 : undefined),
+        );
+      return {
+        name,
+        rows,
+        columnWidths,
+        truncated: filled.lastRow >= MAX_ROWS || filled.lastColumn >= MAX_COLUMNS,
+      };
     });
     const response: SpreadsheetWorkerResponse = { ok: true, sheets };
     self.postMessage(response);

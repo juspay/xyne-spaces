@@ -66,7 +66,12 @@ export default function VideoPreview(props: PreviewerProps): ReactElement {
   const stageRef = useRef<HTMLDivElement | null>(null);
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const [video, setVideo] = useState<HTMLVideoElement | null>(null);
-  const [unplayable, setUnplayable] = useState(false);
+  // Why the video isn't showing, when it isn't: a format the browser can't decode is
+  // offered for download; anything else — the network, an expired session — can be
+  // tried again.
+  const [failure, setFailure] = useState<'unplayable' | 'unreachable' | null>(null);
+  const [attempt, setAttempt] = useState(0);
+  const unplayable = failure !== null;
   const [natural, setNatural] = useState<{ width: number; height: number } | null>(null);
   const [pane, setPane] = useState({ width: 0, height: 0 });
   const [zoom, setZoom] = useState<Zoom>('fit');
@@ -175,13 +180,34 @@ export default function VideoPreview(props: PreviewerProps): ReactElement {
     else void stageRef.current?.requestFullscreen();
   };
 
-  if (unplayable) {
+  if (failure === 'unplayable') {
     return (
       <PreviewMessage
         icon={<Film className='size-10 text-muted-foreground' />}
         title="This video can't play in this browser"
         body='Its format isn’t one the browser can decode. Download it to watch it in a video player.'
         actions={[
+          { label: 'Download', onClick: download, primary: true, trackName: 'PreviewDownloaded' },
+        ]}
+      />
+    );
+  }
+  if (failure === 'unreachable') {
+    return (
+      <PreviewMessage
+        icon={<Film className='size-10 text-muted-foreground' />}
+        title="Couldn't load this video"
+        body='The connection dropped, or the session needs a refresh. Try again, or download it.'
+        actions={[
+          {
+            label: 'Try again',
+            onClick: () => {
+              setNatural(null);
+              setFailure(null);
+              setAttempt(current => current + 1);
+            },
+            trackName: 'PreviewVideoRetried',
+          },
           { label: 'Download', onClick: download, primary: true, trackName: 'PreviewDownloaded' },
         ]}
       />
@@ -299,7 +325,7 @@ export default function VideoPreview(props: PreviewerProps): ReactElement {
           >
             <video
               ref={setVideo}
-              key={props.file.id}
+              key={`${props.file.id}:${attempt}`}
               src={getAttachmentStreamUrl(props.file.id)}
               // The stream may be another origin's; its cookies still have to go.
               crossOrigin='use-credentials'
@@ -329,7 +355,15 @@ export default function VideoPreview(props: PreviewerProps): ReactElement {
                 setVolume({ level: event.currentTarget.volume, muted: event.currentTarget.muted })
               }
               onRateChange={event => setSpeed(event.currentTarget.playbackRate)}
-              onError={() => setUnplayable(true)}
+              onError={event => {
+                const code = event.currentTarget.error?.code;
+                setFailure(
+                  code === MediaError.MEDIA_ERR_SRC_NOT_SUPPORTED ||
+                    code === MediaError.MEDIA_ERR_DECODE
+                    ? 'unplayable'
+                    : 'unreachable',
+                );
+              }}
             >
               <track kind='captions' />
             </video>
