@@ -63,6 +63,7 @@ import { resolveSdlcRepositoryForUser } from "../lib/sdlc-repository-context.js"
 
 import { attachArtifactToSessionApp } from "../lib/artifact-app-session.js";
 import { createLogger } from "../logger.js";
+import { safeFetch } from "../lib/safe-fetch.js";
 const log = createLogger("agent-chat");
 
 const XYNE_CHAT_SURFACE_PRIMER = [
@@ -1146,10 +1147,11 @@ router.get("/:slug/litellm-models", async (req: Request<{ slug: string }>, res: 
     }
     const apiKey = decrypt(cred.encryptedKey, cred.iv, cred.authTag, CONFIG.encryptionKey);
     const root = (cred.baseUrl || CONFIG.litellmBaseUrl).replace(/\/+$/, "");
-    const upstream = await fetch(`${root}/v1/models`, {
-      headers: { Authorization: `Bearer ${apiKey}`, "User-Agent": "xyne-claw-auth" },
-      signal: AbortSignal.timeout(20_000),
-    });
+    const upstream = await safeFetch(
+      `${root}/v1/models`,
+      { headers: { Authorization: `Bearer ${apiKey}`, "User-Agent": "xyne-claw-auth" } },
+      { timeoutMs: 20_000 },
+    );
     if (!upstream.ok) {
       const text = await upstream.text().catch(() => "");
       res.status(502).json({ success: false, error: `Models endpoint ${upstream.status}: ${text.slice(0, 200)}` });
@@ -2669,6 +2671,7 @@ internalRouter.post("/:slug/chat/:convId/callback", async (req: Request<{ slug: 
   // user to "connect it with the card" and no card ever appeared.
   const callbackBody = req.body as {
     pendingConnectorSuggestions?: { serverTypes: string[]; listAll?: boolean; title?: string };
+    pendingProviderSuggestions?: { providers: string[]; listAll?: boolean; title?: string };
     blockedConnectors?: unknown;
   };
   if (finalStatus === "completed" && callbackBody.pendingConnectorSuggestions) {
@@ -2705,6 +2708,41 @@ internalRouter.post("/:slug/chat/:convId/callback", async (req: Request<{ slug: 
       }
     } catch (err) {
       log.warn(`[agent-chat] connector card delivery failed: ${errMsg(err)}`);
+    }
+  }
+
+  // AI provider card from the agent's suggest-providers call. Same transport
+  // gap as connectors above: this surface delivered no provider card at all.
+  if (finalStatus === "completed" && callbackBody.pendingProviderSuggestions) {
+    try {
+      const { resolveXyneAiCardTarget } = await import("../lib/flow-card-delivery.js");
+      const target = await resolveXyneAiCardTarget({
+        assistantMessageId: chatMessageId,
+        conversationId: req.params.convId,
+        agentSlug: req.params.slug,
+      });
+      const { renderProviderSuggestCard } = await import("../lib/connector-card-render.js");
+      if (target) {
+        const flow = await renderProviderSuggestCard({
+          suggestions: callbackBody.pendingProviderSuggestions,
+          id: {
+            agentSlug: target.agentSlug,
+            agentOrgId: target.orgId,
+            userId: target.userId,
+            conversationId: target.conversationId,
+            channelId: "",
+            spacesAppId: target.spacesAppId,
+          },
+          target,
+        });
+        if (flow && callbackId) {
+          const localStream = pendingStreams.get(callbackId);
+          if (localStream) localStream.sendEvent("ui-flow", { flow });
+          else publishChatEvent({ kind: "progress", callbackId, events: [{ event: "ui-flow", data: { flow } }] });
+        }
+      }
+    } catch (err) {
+      log.warn(`[agent-chat] provider card delivery failed: ${errMsg(err)}`);
     }
   }
 

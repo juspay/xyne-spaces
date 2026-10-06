@@ -54,7 +54,7 @@ import { callNotesCanvasService } from '@/services/callNotesCanvasService';
 import { noteTakerTranscriptService } from '@/services/noteTakerTranscriptService';
 import { summaryTemplateService } from '@/services/summaryTemplateService';
 import { canvasAuthService } from '@/services/canvasAuthService';
-import { isTrackInChannel } from '@/sdlc/sdlcChannelMembership';
+import { validateOwnerInChannel } from '@/sdlc/entityLinkService';
 import { buildCallInviteUrl } from '@/utils/urlUtils';
 import { readRecordingGoogleDocLinks } from '@/utils/recordingGoogleDocs';
 import { hideCallTx } from '@/bypassAcl/transactions/callController';
@@ -747,15 +747,14 @@ export class CallController {
         const parsedSdlcLink = sdlcCallLinkSchema.safeParse(sdlcLink);
         if (parsedSdlcLink.success) {
           const link = parsedSdlcLink.data;
-          const linkTargetValid =
-            link.ownerType === 'CANVAS'
-              ? Boolean(
-                  await db.canvas.findFirst({
-                    where: { id: link.ownerId, channelId: channel.id },
-                    select: { id: true },
-                  }),
-                )
-              : await isTrackInChannel(db, link.ownerId, channel.id);
+          // The check the webhook makes before filing the call: an artifact or a track
+          // in this hub, or an item on one of its tracks. Checking every owner as a
+          // track dropped the link for folders, files and links.
+          const linkTargetValid = await validateOwnerInChannel(
+            db,
+            { sourceType: link.ownerType, sourceId: link.ownerId },
+            channel.id,
+          );
           if (linkTargetValid) {
             validatedSdlcLink = link;
           } else {
@@ -1913,7 +1912,7 @@ export class CallController {
         return;
       }
 
-      if (!(await callShareService.isCallAudience(call, userId))) {
+      if (call.callType !== CallType.HEADLESS && !(await callShareService.isCallAudience(call, userId))) {
         res.status(403).json({ success: false, error: 'You do not have access to this call' });
         return;
       }
@@ -1999,7 +1998,7 @@ export class CallController {
         return;
       }
 
-      if (!(await callShareService.isCallAudience(call, userId))) {
+      if (call.callType !== CallType.HEADLESS && !(await callShareService.isCallAudience(call, userId))) {
         res.status(403).json({ success: false, error: 'You do not have access to this call' });
         return;
       }
@@ -2029,7 +2028,7 @@ export class CallController {
         return;
       }
 
-      const basePath = isRecording(call) ? `/recordings/${call.externalId}` : `/calls/${call.id}/detail`;
+      const basePath = isRecording(call) ? `/recordings/${call.externalId}` : `/calls/${call.externalId}/detail`;
       const actionUrl = `${basePath}?${new URLSearchParams({ lang: languageCode })}`;
       transcriptService.translateTranscriptInBackground(
         call.externalId,

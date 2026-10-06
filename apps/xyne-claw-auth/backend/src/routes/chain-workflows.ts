@@ -3,7 +3,7 @@ import { errMsg } from "../lib/errors.js";
 import { Router, type Request, type Response } from "express";
 import { agentChainWorkflowRepository, agentRepository } from "../repositories/index.js";
 import { getRequesterId, getOrgId, isClawAdmin , requireRequester} from "../middleware/agent-acl.js";
-import { requireS2S } from "../middleware/require-auth.js";
+import { requireStrictS2S } from "../middleware/require-auth.js";
 import { CONFIG } from "../config.js";
 import { prisma } from "../db.js";
 import { decrypt } from "../crypto.js";
@@ -997,7 +997,7 @@ function buildTriggerInitialMessage(triggerPayload: Record<string, unknown> | un
   return `Automation event triggered: ${type ?? "unknown"}`;
 }
 
-router.post("/:id/trigger", requireS2S, asyncHandler(async (req: Request<{ id: string }>, res: Response) => {
+router.post("/:id/trigger", requireStrictS2S, asyncHandler(async (req: Request<{ id: string }>, res: Response) => {
   const { userId, triggerPayload, conversationId: bodyConversationId, targetChannelId } = req.body as {
     userId?: string;
     triggerPayload?: Record<string, unknown>;

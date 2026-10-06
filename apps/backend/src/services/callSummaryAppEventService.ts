@@ -47,7 +47,10 @@ function readStringKey(metadata: Record<string, unknown>, key: string): string |
  * never fail summary generation. Note there is no delivery retry: an app whose
  * webhook is down when this runs does not get that summary pushed again.
  */
-export async function emitCallSummaryReadyToApp(callExternalId: string): Promise<void> {
+export async function emitCallSummaryReadyToApp(
+  callExternalId: string,
+  rawSummary?: string,
+): Promise<void> {
   try {
     const call = await repositories.calls.findByExternalId(callExternalId);
     if (!call) return;
@@ -72,10 +75,15 @@ export async function emitCallSummaryReadyToApp(callExternalId: string): Promise
       return;
     }
 
-    // Strict read: the lenient variant answers [] when Y-Sweet is unreachable,
-    // which would deliver an empty summary as though the call had nothing in it.
-    const blocks = await readFromYSweetStrict(canvasId, call.createdByUserId);
-    const summary = blocks.length > 0 ? await convertBlockNoteToMarkdown(blocks) : '';
+    // A bot-created call's summary is in its template's own format, so the model output is
+    // delivered untouched: the canvas round trip would re-render it as Markdown.
+    let summary = rawSummary ?? '';
+    if (!summary.trim()) {
+      // Strict read: the lenient variant answers [] when Y-Sweet is unreachable,
+      // which would deliver an empty summary as though the call had nothing in it.
+      const blocks = await readFromYSweetStrict(canvasId, call.createdByUserId);
+      summary = blocks.length > 0 ? await convertBlockNoteToMarkdown(blocks) : '';
+    }
     if (!summary.trim()) {
       logger.warn(`${TAG} [${callExternalId}] skipped | reason=empty_summary`, { installedAppId, canvasId });
       return;

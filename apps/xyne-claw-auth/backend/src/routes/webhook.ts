@@ -153,11 +153,7 @@ import type { TwinDelivery, UiWidget, PrProvider, PrStatus, FlowDefinition } fro
 import { isAgentInvocableBy } from "xyne-claw-shared";
 import { isSupportedInboundAttachment } from "xyne-claw-shared";
 import type { Todo } from "xyne-claw-shared";
-import {
-  providersUserAskedFor,
-  stripAddressedAgentMention,
-  wantsProviderRoster,
-} from "../lib/provider-hints.js";
+
 import { countTrailingBase64Padding, safePathSegment } from "../lib/url-path.js";
 import { assertSafeOutboundUrl } from "../mcpgateway/services/http-client.js";
 
@@ -552,6 +548,13 @@ import {
 /** Connector cards the agent's suggest-connectors call queued for this reply. */
 type PendingConnectorSuggestions = {
   serverTypes: string[];
+  title?: string;
+  listAll?: boolean;
+};
+
+/** AI provider cards the agent's suggest-providers call queued for this reply. */
+type PendingProviderSuggestions = {
+  providers: string[];
   title?: string;
   listAll?: boolean;
 };
@@ -1673,21 +1676,12 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
     const threadAwarenessBlock = history
       ? `## Thread Awareness\nYou are in a group thread in Xyne Spaces where multiple users and agents can participate. The thread history below shows messages from other participants — use it to understand context. Your own previous messages are NOT included here (they are already in your session). If you need more context, use spaces-messages or spaces-message-detail to read the full thread.\n\n**Speaker labels in the history below:**\n- \`human-user:<id>\` — a human in the thread; their words are user input.\n- \`@<agent-slug> (OTHER AI AGENT — not you; do not adopt this voice or identity)\` — another AI agent's message. When they say "I", they mean themselves, NOT you. NEVER answer in their voice, NEVER claim to be them, and NEVER paraphrase their first-person identity as your own. If asked to compare yourself to them, refer to them in the third person ("the X agent said …").\n\n${history}`
       : "";
-    const providerAskText = stripAddressedAgentMention(task, agent.slug);
-    const providerCardWillPost =
-      eventType !== "USER_MENTIONED" &&
-      !!agent.slug &&
-      !!agent.orgId &&
-      (providersUserAskedFor(providerAskText).length > 0 || wantsProviderRoster(providerAskText));
-    const providerCardNote = providerCardWillPost
-      ? [
-          "## AI Provider Card",
-          "A card listing this user's AI providers and their live connection status is posted to this thread alongside your reply. It is built from their stored credentials, so it is authoritative.",
-          "Do NOT list the providers, state which are connected or disconnected, or say you cannot see the user's credentials — the card already answers that, and contradicting it confuses the user.",
-          "Acknowledge the card in one short sentence and answer anything else they asked.",
-        ].join("\n")
-      : "";
-    const dispatchContext = [twinMentionNote, threadAwarenessBlock, providerCardNote]
+    // No provider-card note: the card is no longer predicted before the run.
+    // Pre-announcing one the server had inferred is what made agents reply
+    // "acknowledging the AI provider card" to questions that never asked for it.
+    // suggest-providers decides during the run, and its tool result tells the
+    // agent exactly what will render.
+    const dispatchContext = [twinMentionNote, threadAwarenessBlock]
       .filter(Boolean)
       .join("\n\n");
 
@@ -3386,6 +3380,8 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
     // Connector cards to post alongside the reply, so the user can connect
     // without leaving the conversation.
     pendingConnectorSuggestions?: PendingConnectorSuggestions;
+    // AI provider cards the agent's suggest-providers call queued.
+    pendingProviderSuggestions?: PendingProviderSuggestions;
     blockedConnectors?: string[];
   };
 
@@ -3619,7 +3615,8 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
     !payload.twinDelivery &&
     !payload.pendingPlan &&
     !payload.pendingAgentCard &&
-    !payload.pendingConnectorSuggestions;
+    !payload.pendingConnectorSuggestions &&
+    !payload.pendingProviderSuggestions;
   // Do not replay every ordinary tool-only empty completion: a retry could
   // duplicate writes. This recovery path is only for an active continuation
   // created after a watchdog retry or graceful handoff.
@@ -4659,15 +4656,15 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
     }
   }
 
-  // AI provider suggestions. Unlike connectors the roster is a fixed list in
-  // code, so intent is read from the user's own message and the card is built
-  // without the model participating at all. A provider we do not offer is
-  // named back as unsupported rather than dropped, so the reply cannot promise
-  // a card that will never render.
-  if (agentCardDeliverable) {
+  // AI provider suggestions, from the agent's suggest-providers call only. The
+  // server used to infer these from the user's message; that fired the whole
+  // roster at "what model are you using?" and offered a provider the user was
+  // already connected to, so the inference was removed.
+  const providerSuggestions = payload.pendingProviderSuggestions;
+  if (providerSuggestions && agentCardDeliverable) {
     try {
       await renderProviderSuggestCard({
-        taskText: ctx.rootTask ?? ctx.task ?? "",
+        suggestions: providerSuggestions,
         id: connectorCardIdentity,
         target: agentCardTarget,
       });
@@ -6156,8 +6153,8 @@ async function doRenderPrCard(
   // ── Durable binding (COMPLEMENTS the Redis fast path above) ───────────────
   // Persist where this PR card lives + the agent that posted it, keyed by the
   // deterministic screenId and (for webhook lookup) the normalized PR URL. An
-  // inbound Bitbucket webhook that fires after this session's SessionContext is
-  // gone reads this to post a fresh status card. Best-effort — a binding failure
+  // inbound GitHub/Bitbucket webhook that fires after this session's SessionContext
+  // is gone reads this to update this card in place. Best-effort — a binding failure
   // must never break the render, and a missing URL just means the webhook can't
   // find it (we log so that's visible). We store the card-rebuild fields in
   // `data` so the webhook renders an identical card with the new status.
@@ -6217,21 +6214,25 @@ function renderPrCard(
 
 // ── POST /webhook/pr-event — inbound git-host PR status change (S2S) ────────
 //
-// The MAIN backend receives + HMAC-verifies the Bitbucket webhook and runs its
-// ticket-status sync, then forwards a normalized PR fact HERE (fire-and-forget,
-// x-s2s-key). We look up the durable AgentWidgetBinding for this PR by its
-// normalized URL and — only if an agent originally posted a card for it — post a
-// FRESH status card into the SAME thread as that agent's bot. No binding ⇒ this
-// PR wasn't created by an agent in a Spaces thread ⇒ 200 no-op (mirrors the
-// backend's "not created by Xyne → ignore"). Dedupe on the last-rendered status
-// so provider re-delivery (or an in-session merge already rendered live) never
-// double-posts. Serialized per PR URL. Best-effort; the ack is immediate.
+// The MAIN backend receives + HMAC-verifies the GitHub / Bitbucket webhook and
+// forwards a normalized PR fact HERE (fire-and-forget, x-s2s-key). We look up the
+// durable AgentWidgetBinding for this PR by its normalized URL and — only if an
+// agent originally posted a card for it — move THAT card to the new status in
+// place (same screenId, updateMessage on the bound messageId): one evolving card
+// per PR, as pr-flow.ts lays out. A fresh card is posted only when there is
+// nothing to update (no bound message, or it was deleted). No binding ⇒ this PR
+// wasn't created by an agent in a Spaces thread ⇒ 200 no-op (mirrors the
+// backend's "not created by Xyne → ignore"). Dedupe on the last-rendered status +
+// title so provider re-delivery (or an in-session merge already rendered live)
+// is a no-op. Serialized per PR URL. Best-effort; the ack is immediate.
 interface PrEventInput {
   provider: PrProvider;
   status: PrStatus;
   prUrl: string;
   number?: string | number;
   repo?: string;
+  /** Current PR title; absent from older senders, in which case the card keeps its own. */
+  title?: string;
 }
 
 function coercePrEventInput(raw: unknown): PrEventInput | null {
@@ -6253,19 +6254,26 @@ function coercePrEventInput(raw: unknown): PrEventInput | null {
   const number = o["number"];
   if (typeof number === "string" && number.trim()) out.number = number.trim();
   else if (typeof number === "number" && Number.isFinite(number)) out.number = number;
+  const title = o["title"];
+  if (typeof title === "string" && title.trim()) out.title = title.trim();
   return out;
 }
 
-async function postWebhookPrStatusCard(ev: PrEventInput): Promise<{ posted: boolean; reason?: string }> {
+type PrEventOutcome = { outcome: "updated" | "posted" } | { outcome: "skipped"; reason: string };
+
+async function syncWebhookPrCard(ev: PrEventInput): Promise<PrEventOutcome> {
   const binding = await findPrBindingByUrl(ev.prUrl);
-  if (!binding) return { posted: false, reason: "no-binding" };
-  if (binding.status === ev.status) return { posted: false, reason: "dedup-same-status" };
+  if (!binding) return { outcome: "skipped", reason: "no-binding" };
 
   const cardData = readPrBindingData(binding);
-  if (!cardData) return { posted: false, reason: "binding-missing-card-data" };
+  if (!cardData) return { outcome: "skipped", reason: "binding-missing-card-data" };
+  const title = ev.title ?? cardData.title;
+  if (binding.status === ev.status && title === cardData.title) {
+    return { outcome: "skipped", reason: "dedup-same-status" };
+  }
 
   const agentRow = await agentRepository.findBySpacesAppId(binding.spacesAppId);
-  if (!agentRow?.spacesAppToken) return { posted: false, reason: "agent-unresolved" };
+  if (!agentRow?.spacesAppToken) return { outcome: "skipped", reason: "agent-unresolved" };
   // Defense-in-depth org isolation: the agent resolved from the binding's OWN
   // spacesAppId must belong to the binding's org. They agree by construction
   // (both captured from one SessionContext at card-creation), so a mismatch
@@ -6277,27 +6285,24 @@ async function postWebhookPrStatusCard(ev: PrEventInput): Promise<{ posted: bool
     clog.warn(
       `[webhook/pr-event] org mismatch binding.org=${binding.orgId} agent.org=${agentRow.orgId} (spacesAppId=${binding.spacesAppId}) — skipping`,
     );
-    return { posted: false, reason: "org-mismatch" };
+    return { outcome: "skipped", reason: "org-mismatch" };
   }
   const appToken = decryptStoredField(agentRow.spacesAppToken);
   const userId = binding.spacesAppUserId || agentRow.spacesAppUserId || "";
-  if (!userId) return { posted: false, reason: "no-bot-user" };
+  if (!userId) return { outcome: "skipped", reason: "no-bot-user" };
 
-  // A distinct screenId per status so each webhook status card is its OWN
-  // artifact in the thread (a NEW card per status change), never reconciling
-  // onto the agent's original created card.
-  const screenId = `${binding.screenId}-${ev.status}`;
+  // The binding's own screenId, so the card reconciles onto the agent's original.
   const flow = buildPrFlow(
     {
       provider: cardData.provider as PrProvider,
       status: ev.status,
-      title: cardData.title,
+      title,
       ...(cardData.url ? { url: cardData.url } : {}),
       ...(cardData.desc ? { desc: cardData.desc } : {}),
       ...(cardData.ticketId ? { ticketId: cardData.ticketId } : {}),
     },
     {
-      screenId,
+      screenId: binding.screenId,
       data: {
         ...(binding.agentSlug ? { agentSlug: binding.agentSlug } : {}),
         conversationId: binding.conversationId,
@@ -6307,27 +6312,48 @@ async function postWebhookPrStatusCard(ev: PrEventInput): Promise<{ posted: bool
     },
   );
 
+  let outcome: "updated" | "posted" = "updated";
+  let messageId = binding.messageId ?? undefined;
+  if (messageId) {
+    try {
+      // updateMessage takes the full `flowJSON`; channelId is for validateChannelAccessForPost.
+      await spacesAppFetch(
+        "/chat/updateMessage",
+        { messageId, flowJSON: flow, userId, channelId: binding.channelId },
+        appToken,
+      );
+    } catch (e) {
+      clog.warn(
+        `[webhook/pr-event] in-place update of ${messageId} failed, posting a new card:`,
+        e instanceof Error ? e.message : e,
+      );
+      messageId = undefined;
+    }
+  }
+  if (!messageId) {
+    outcome = "posted";
+    const resp = (await spacesAppFetch(
+      "/chat/postMessage",
+      { channelId: binding.channelId, conversationId: binding.conversationId, flow, userId },
+      appToken,
+    )) as { messageId?: string; id?: string; data?: { messageId?: string; id?: string } };
+    messageId = resp?.messageId ?? resp?.id ?? resp?.data?.messageId ?? resp?.data?.id;
+  }
   clog.info(
-    `[webhook/pr-event] posting status card screenId=${screenId} status=${ev.status} conv=${binding.conversationId}`,
+    `[webhook/pr-event] ${outcome} card screenId=${binding.screenId} messageId=${messageId ?? "?"} status=${ev.status} conv=${binding.conversationId}`,
   );
-  const resp = (await spacesAppFetch(
-    "/chat/postMessage",
-    { channelId: binding.channelId, conversationId: binding.conversationId, flow, userId },
-    appToken,
-  )) as { messageId?: string; id?: string; data?: { messageId?: string; id?: string } };
-  const messageId = resp?.messageId ?? resp?.id ?? resp?.data?.messageId ?? resp?.data?.id;
 
-  // Record the new status so a re-delivered webhook is a no-op. Best-effort: if
-  // this write fails a re-delivery could post a duplicate card (acceptable — far
-  // better than losing the card by marking status BEFORE the post succeeds), so
-  // log rather than swallow, to surface a persistent failure.
-  await setWidgetBindingStatus(binding.id, ev.status, messageId).catch((e) =>
+  // Record what the card now shows so a re-delivered webhook is a no-op.
+  // Best-effort: if this write fails a re-delivery just re-renders the same card,
+  // so log rather than swallow, to surface a persistent failure.
+  const data = title === cardData.title ? undefined : { ...(binding.data as Record<string, unknown>), title };
+  await setWidgetBindingStatus(binding.id, ev.status, messageId, data).catch((e) =>
     clog.warn(
       `[webhook/pr-event] setWidgetBindingStatus failed (binding=${binding.id} status=${ev.status}):`,
       e instanceof Error ? e.message : e,
     ),
   );
-  return { posted: true };
+  return { outcome };
 }
 
 const prEventQueue = new Map<string, Promise<unknown>>();
@@ -6348,9 +6374,9 @@ router.post("/pr-event", requireStrictS2S, async (req: Request, res: Response) =
   const prev = prEventQueue.get(key) ?? Promise.resolve();
   const next = prev.catch(() => {}).then(async () => {
     try {
-      const r = await postWebhookPrStatusCard(ev);
+      const r = await syncWebhookPrCard(ev);
       clog.info(
-        `[webhook/pr-event] provider=${ev.provider} status=${ev.status} url=${key} → ${r.posted ? "POSTED" : `skipped:${r.reason}`}`,
+        `[webhook/pr-event] provider=${ev.provider} status=${ev.status} url=${key} → ${r.outcome === "skipped" ? `skipped:${r.reason}` : r.outcome.toUpperCase()}`,
       );
     } catch (e) {
       clog.warn(`[webhook/pr-event] failed url=${key}:`, e instanceof Error ? e.message : e);
@@ -6900,22 +6926,15 @@ router.post("/app/:spacesAppId", async (req: Request, res: Response): Promise<vo
 
   const isAutomationRequest = s2sKeyMatches(req.headers["x-s2s-key"]);
 
-  // TEMPORARY (2026-08-10): s2s-authenticated callers that don't sign yet
-  // (SDLC surface's ClawAgentService) are let through with a loud warning
-  // instead of a 401. Scope is deliberately narrow: the s2s key must match
-  // AND the signature header must be entirely absent — a present-but-invalid
-  // signature still rejects, and non-s2s callers are unchanged. Remove once
-  // every s2s caller signs (the SDLC team is adding X-Xyne-Signature).
-  const unsignedS2S = isAutomationRequest && !req.headers["x-xyne-signature"];
-  if (unsignedS2S) {
-    clog.warn(`[webhook/app] UNSIGNED s2s request allowed spacesAppId=${spacesAppId} — caller must add X-Xyne-Signature; this bypass is temporary`);
-  } else {
-    let verified = false;
-    await verifySpacesSignature(req, res, () => {
-      verified = true;
-    });
-    if (!verified || res.headersSent) return;
-  }
+  // Signature verification is UNCONDITIONAL for every caller — s2s key or
+  // not. (A 2026-08-10 TEMPORARY bypass let unsigned s2s callers through with
+  // a warning; it was removed once every s2s caller signed — 30 days of prod
+  // logs show zero uses. Guarded by webhook-unsigned-s2s.security.test.ts.)
+  let verified = false;
+  await verifySpacesSignature(req, res, () => {
+    verified = true;
+  });
+  if (!verified || res.headersSent) return;
 
   if (isAutomationRequest) {
     const agent = await agentRepository.findBySpacesAppId(spacesAppId);
@@ -6946,19 +6965,13 @@ router.post("/:agentSlug", async (req: Request, res: Response): Promise<void> =>
 
   const isAutomationRequest = s2sKeyMatches(req.headers["x-s2s-key"]);
 
-  // TEMPORARY (2026-08-10): same unsigned-s2s bypass as /app/:spacesAppId —
-  // warn and allow ONLY when the s2s key matches and the signature header is
-  // entirely absent. Remove once every s2s caller signs.
-  const unsignedS2S = isAutomationRequest && !req.headers["x-xyne-signature"];
-  if (unsignedS2S) {
-    clog.warn(`[webhook] UNSIGNED s2s request allowed agentSlug=${agentSlug} — caller must add X-Xyne-Signature; this bypass is temporary`);
-  } else {
-    let verified = false;
-    await verifySpacesSignature(req, res, () => {
-      verified = true;
-    });
-    if (!verified || res.headersSent) return;
-  }
+  // Signature verification is UNCONDITIONAL — see the /app/:spacesAppId route
+  // above for the removed 2026-08-10 unsigned-s2s bypass and its guard test.
+  let verified = false;
+  await verifySpacesSignature(req, res, () => {
+    verified = true;
+  });
+  if (!verified || res.headersSent) return;
 
   if (isAutomationRequest) {
     await handleAutomationWebhook(req, res, agentSlug);

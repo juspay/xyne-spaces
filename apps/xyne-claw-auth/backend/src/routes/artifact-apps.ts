@@ -340,8 +340,9 @@ artifactAppsRouter.post("/:id/versions/upload", async (req: Request<{ id: string
         createdBy: requesterId,
       },
     });
-    // HEAD moves forward to the pushed build.
-    await prisma.artifactApp.update({ where: { id: app.id }, data: { headVersionId: version.id } });
+    // HEAD moves forward to the pushed build, and the app takes the build's title,
+    // so renaming is editing `title` in the project and pushing again.
+    await prisma.artifactApp.update({ where: { id: app.id }, data: { headVersionId: version.id, title: built.title } });
     res.status(201).json({ success: true, version });
   } catch (err) {
     // A concurrent/retried push can lose the check-then-insert race: the unique

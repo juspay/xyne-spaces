@@ -31,6 +31,7 @@ import {
   type AccountRuntimeContext,
   type AccountStatePatch,
   type AnyChannelPlugin,
+  type AuthStateStore,
   type ChannelAccount,
   type ClosedInfo,
   type StopReason,
@@ -49,9 +50,15 @@ interface Runtime {
    *  not proof the lease is gone — Redis blips — so ownership is judged by
    *  this clock instead. */
   lastRenewOk: number;
+  /** Another pod owns the account now; nothing more may be written for it. */
+  leaseLost: boolean;
 }
 
 const MAX_SEND_ATTEMPTS = 3;
+/** A pod younger than this is taken to be from the rollout in progress. */
+const FRESH_POD_S = 10 * 60;
+/** How long an older pod waits before claiming a handed-off account. */
+const HANDOFF_DEFER_MS = 5_000;
 
 function loginArtifactKey(accountId: string): string {
   return `${REDIS_PREFIX}:login:${accountId}`;
@@ -109,8 +116,8 @@ class AccountManager {
    * The groups this account is in, for the admin UI's allowlist picker.
    *
    * Only the pod holding the account's lease has the live socket to ask, so
-   * this returns null elsewhere and the caller says "try again" rather than
-   * pretending the account is in no groups.
+   * this returns null elsewhere and the caller asks the owner through the
+   * outbox rather than pretending the account is in no groups.
    */
   async listGroups(accountId: string): Promise<Array<{ id: string; name: string; participants: number }> | null> {
     const runtime = this.runtimes.get(accountId);
@@ -130,7 +137,22 @@ class AccountManager {
       await this.stopRuntime(message.accountId, "logout");
       return;
     }
+    // In a rolling deploy the other old pods are about to be stopped too, and
+    // an account they claim reconnects twice. Fresh pods claim first; an older
+    // one still takes over if no fresh pod exists.
+    if (message.op === "handoff" && process.uptime() > FRESH_POD_S) await sleep(HANDOFF_DEFER_MS);
     await this.sweep();
+  }
+
+  /**
+   * Whether this pod may still write for the account. Judged by our own clock:
+   * a pod that stalled past the TTL has lost its key whether or not it has
+   * heard yet, and the new owner is already connected. Anything the old pod
+   * writes from here — "disconnected", stale Signal keys — lands on top of the
+   * new owner's state.
+   */
+  private holdsLease(runtime: Runtime): boolean {
+    return !runtime.leaseLost && Date.now() - runtime.lastRenewOk < LEASE_TTL_MS;
   }
 
   private async sweep(): Promise<void> {
@@ -173,9 +195,25 @@ class AccountManager {
       await releaseLease(account.id);
       return;
     }
-    const authState = authStateFor(account.id);
-    const runtime: Runtime = { account, plugin, handle: null, renewTimer: null, stopping: false, lastRenewOk: Date.now() };
+    const store = authStateFor(account.id);
+    const runtime: Runtime = { account, plugin, handle: null, renewTimer: null, stopping: false, lastRenewOk: Date.now(), leaseLost: false };
     this.runtimes.set(account.id, runtime);
+    const authState: AuthStateStore = {
+      get: (category, keyId) => store.get(category, keyId),
+      getMany: (category, keyIds) => store.getMany(category, keyIds),
+      set: async (category, keyId, value) => {
+        if (this.holdsLease(runtime)) await store.set(category, keyId, value);
+      },
+      setMany: async (entries) => {
+        if (this.holdsLease(runtime)) await store.setMany(entries);
+      },
+      delete: async (category, keyId) => {
+        if (this.holdsLease(runtime)) await store.delete(category, keyId);
+      },
+      clear: async () => {
+        if (this.holdsLease(runtime)) await store.clear();
+      },
+    };
 
     const ctx: AccountRuntimeContext = {
       // A getter, not the snapshot `account` bound at connect time: a plugin
@@ -189,7 +227,9 @@ class AccountManager {
         handleInbound({ account: runtime.account, plugin }, msg).catch((err) => {
           log.error(`[channels] inbound failed account=${account.id}: ${errMsg(err)}`);
         }),
-      setState: (patch) => this.applyState(runtime, patch),
+      setState: async (patch) => {
+        if (this.holdsLease(runtime)) await this.applyState(runtime, patch);
+      },
       onClosed: (info) => void this.onPluginClosed(runtime, info),
       authState,
       logger: log,
@@ -221,6 +261,11 @@ class AccountManager {
     }
 
     runtime.renewTimer = setInterval(() => {
+      if (!runtime.stopping && !this.holdsLease(runtime)) {
+        log.warn(`[channels] lease expired while this pod was stalled account=${account.id}; stopping locally`);
+        void this.stopRuntime(account.id, "lease_lost");
+        return;
+      }
       void renewLease(account.id).then((outcome) => {
         if (runtime.stopping) return;
         if (outcome === "renewed") {
@@ -256,6 +301,7 @@ class AccountManager {
     const runtime = this.runtimes.get(accountId);
     if (!runtime || runtime.stopping) return;
     runtime.stopping = true;
+    if (reason === "lease_lost") runtime.leaseLost = true;
     if (runtime.renewTimer) clearInterval(runtime.renewTimer);
     runtime.renewTimer = null;
     try {
@@ -267,6 +313,10 @@ class AccountManager {
     }
     this.runtimes.delete(accountId);
     if (reason !== "lease_lost") await releaseLease(accountId);
+    // Before the DB write below, which can be slow on a pod that is going
+    // away: without it the next owner only notices on its own sweep, up to
+    // SWEEP_MS later, and the number is offline for that long.
+    if (this.stopped && reason === "shutdown") await publishControl({ op: "handoff", accountId });
     if (reason === "logout" || reason === "shutdown") {
       // A pod shutting down leaves connState alone (another pod picks the
       // account up), but an account the admin paused or logged out is really
@@ -282,6 +332,10 @@ class AccountManager {
 
   private async onPluginClosed(runtime: Runtime, info: ClosedInfo): Promise<void> {
     const accountId = runtime.account.id;
+    if (!this.holdsLease(runtime)) {
+      await this.stopRuntime(accountId, "lease_lost");
+      return;
+    }
     if (info.loggedOut) {
       log.warn(`[channels] account=${accountId} logged out by the messenger (${info.reason ?? "no reason"})`);
       await updateAccountConfig(accountId, {

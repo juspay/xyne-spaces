@@ -3,6 +3,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import { useQuery } from '@tanstack/react-query';
 import {
   getKanbanCounts,
+  getTrackKanbanCounts,
   type KanbanCountGroup,
   type KanbanCountsDeskFilters,
   type KanbanCountsFilters,
@@ -22,6 +23,8 @@ import type { TicketFilters } from '../../components/Tickets/TicketFilters/types
 
 interface UseKanbanCountsOptions extends FlowStepVisibilityOptions {
   viewMode: KanbanCountsViewMode;
+  /** Count one SDLC track's tickets, from every board, instead of a board's or a project's. */
+  track?: { channelId: string; trackId: string } | undefined;
   columnType?: 'stage' | 'status';
   projectId?: string;
   boardId?: string;
@@ -98,72 +101,90 @@ const stringifyFormFieldValue = (value: unknown): string | null => {
 
 const isStringValue = (value: string | null): value is string => value !== null;
 
-const getTicketCountsRoom = (
-  request: KanbanCountsRequest,
-  currentUserId?: string,
-): string | null => {
+const getTicketCountsRooms = (request: KanbanCountsRequest, currentUserId?: string): string[] => {
   if (request.viewMode === 'project') {
-    if (request.projectId) return `ticket-counts:project:${request.projectId}`;
-    if (request.boardId) return `ticket-counts:board:${request.boardId}`;
-    return null;
+    if (request.projectId) return [`ticket-counts:project:${request.projectId}`];
+    if (request.boardId) return [`ticket-counts:board:${request.boardId}`];
+    return (request.boardIds ?? []).map(boardId => `ticket-counts:board:${boardId}`);
   }
 
   if (request.viewMode === 'board') {
-    if (request.projectId) return `ticket-counts:project:${request.projectId}`;
-    if (request.boardId) return `ticket-counts:board:${request.boardId}`;
-    return null;
+    if (request.projectId) return [`ticket-counts:project:${request.projectId}`];
+    if (request.boardId) return [`ticket-counts:board:${request.boardId}`];
+    return [];
   }
 
   if (request.viewMode === 'my-tickets' && currentUserId) {
-    return `ticket-counts:user:${currentUserId}`;
+    return [`ticket-counts:user:${currentUserId}`];
   }
 
   if (request.viewMode === 'desk' && request.boardId) {
-    return `ticket-counts:board:${request.boardId}`;
+    return [`ticket-counts:board:${request.boardId}`];
   }
 
-  return null;
+  return [];
 };
+
+/**
+ * A group a delta belongs to. The key is what the group is matched and created by; the name is
+ * what a group created by a delta is labelled with, which is the key for everything except a
+ * folded STRING value (see getFormFieldGroupKeys below).
+ */
+type DeltaGroup = { groupKey: string; displayName: string };
+
+const toDeltaGroup = (groupKey: string): DeltaGroup => ({ groupKey, displayName: groupKey });
 
 const getFormFieldGroupKeys = (
   snapshot: TicketCountsSnapshot,
   groupBy: Extract<KanbanCountsGroupBy, { type: 'formField' }>,
-): string[] => {
+): DeltaGroup[] => {
   const value = snapshot.formFieldValues[groupBy.fieldId] ?? null;
 
   if (groupBy.fieldType === FormFieldType.MULTI_SELECT) {
     const values = Array.isArray(value) ? value : [];
     const stringValues = values.map(stringifyFormFieldValue).filter(isStringValue);
-    return stringValues.length > 0 ? stringValues : ['No Value'];
+    return stringValues.length > 0 ? stringValues.map(toDeltaGroup) : [toDeltaGroup('No Value')];
   }
 
   if (groupBy.fieldType === FormFieldType.USER) {
     const values = Array.isArray(value) ? value : [];
     const stringValues = values.map(stringifyFormFieldValue).filter(isStringValue);
-    return stringValues.length > 0 ? stringValues : ['Unassigned'];
+    return stringValues.length > 0 ? stringValues.map(toDeltaGroup) : [toDeltaGroup('Unassigned')];
   }
+
+  // A STRING group is keyed by the folded value, the way the server keys it
+  // (getFormFieldGroupKeys in kanbanCountsService): a column's page is fetched with an uncased
+  // Vespa token, so "MID 1" and "mid 1" are one group. A delta keyed by the raw spelling would
+  // match no existing group, open a duplicate column and count itself into the wrong one. The
+  // spelling is kept as the name, so a value first seen through a delta is still labelled the
+  // way it was typed rather than lower-cased.
+  const toGroup = (stringValue: string): DeltaGroup =>
+    groupBy.fieldType === FormFieldType.STRING
+      ? { groupKey: stringValue.toLowerCase(), displayName: stringValue }
+      : toDeltaGroup(stringValue);
 
   if (Array.isArray(value)) {
     const stringValues = value.map(stringifyFormFieldValue).filter(isStringValue);
-    return stringValues.length > 0 ? stringValues : ['No Value'];
+    return stringValues.length > 0 ? stringValues.map(toGroup) : [toDeltaGroup('No Value')];
   }
 
-  if (value === null || value === undefined || value === '') return ['No Value'];
+  if (value === null || value === undefined || value === '') return [toDeltaGroup('No Value')];
   const stringValue = stringifyFormFieldValue(value);
-  return stringValue ? [stringValue] : ['No Value'];
+  return stringValue ? [toGroup(stringValue)] : [toDeltaGroup('No Value')];
 };
 
 const getGroupKeys = (
   snapshot: TicketCountsSnapshot,
   groupBy: KanbanCountsGroupBy | undefined,
-): string[] => {
-  if (!groupBy || groupBy === 'none') return [ALL_TICKETS_GROUP];
-  if (groupBy === 'assignee') return [normalizeIdentity(snapshot.assignedTo) ?? UNASSIGNED_GROUP];
+): DeltaGroup[] => {
+  if (!groupBy || groupBy === 'none') return [toDeltaGroup(ALL_TICKETS_GROUP)];
+  if (groupBy === 'assignee')
+    return [toDeltaGroup(normalizeIdentity(snapshot.assignedTo) ?? UNASSIGNED_GROUP)];
   if (groupBy === 'createdBy')
-    return [normalizeIdentity(snapshot.createdBy) ?? UNKNOWN_CREATOR_GROUP];
-  if (groupBy === 'status') return [snapshot.statusV2 ?? ''];
-  if (groupBy === 'priority') return [snapshot.priority ?? ''];
-  if (groupBy === 'merchantId') return [snapshot.merchantId ?? NO_MERCHANT_GROUP];
+    return [toDeltaGroup(normalizeIdentity(snapshot.createdBy) ?? UNKNOWN_CREATOR_GROUP)];
+  if (groupBy === 'status') return [toDeltaGroup(snapshot.statusV2 ?? '')];
+  if (groupBy === 'priority') return [toDeltaGroup(snapshot.priority ?? '')];
+  if (groupBy === 'merchantId') return [toDeltaGroup(snapshot.merchantId ?? NO_MERCHANT_GROUP)];
   if (typeof groupBy === 'object' && groupBy.type === 'formField') {
     return getFormFieldGroupKeys(snapshot, groupBy);
   }
@@ -328,8 +349,13 @@ const matchesRequest = (
       const value = snapshot.formFieldValues[fieldId] ?? null;
 
       if (Array.isArray(filterValue)) {
+        // Whole-value match against any selected value, case-insensitive. This decides which
+        // live updates move a badge, so it has to be the rule the counts it adjusts were
+        // computed with — matchesDynamicFilter in kanbanCountsService. Fold case on both
+        // sides: a ticket written as "mid 1" belongs to the same count as "MID 1".
+        const needles = new Set(filterValue.map(filter => filter.toLowerCase()));
         if (Array.isArray(value)) {
-          if (!value.some(item => typeof item === 'string' && filterValue.includes(item)))
+          if (!value.some(item => typeof item === 'string' && needles.has(item.toLowerCase())))
             return false;
         } else {
           const scalarValue =
@@ -337,11 +363,7 @@ const matchesRequest = (
               ? String(value)
               : null;
           if (!scalarValue) return false;
-          if (filterValue.length === 1) {
-            if (!scalarValue.toLowerCase().includes(filterValue[0]!.toLowerCase())) return false;
-          } else if (!filterValue.includes(scalarValue)) {
-            return false;
-          }
+          if (!needles.has(scalarValue.toLowerCase())) return false;
         }
       } else {
         const scalarValue =
@@ -392,14 +414,14 @@ const applyCountDelta = (
 
 const applyGroupDelta = (
   groups: KanbanCountGroup[],
-  groupKeys: string[],
+  deltaGroups: DeltaGroup[],
   stageKeys: string[],
   statusKeys: string[],
   delta: number,
   columnType: 'stage' | 'status',
 ): KanbanCountGroup[] => {
   const nextGroups = groups.map(cloneGroup);
-  for (const groupKey of groupKeys) {
+  for (const { groupKey, displayName } of deltaGroups) {
     // Snapshot keys may be `user:`-prefixed while deltas are bare — match both.
     const groupIndex = nextGroups.findIndex(
       group => group.groupKey === groupKey || normalizeIdentity(group.groupKey) === groupKey,
@@ -410,7 +432,7 @@ const applyGroupDelta = (
       if (delta <= 0) continue;
       group = {
         groupKey,
-        displayName: groupKey,
+        displayName,
         totalCount: 0,
         stages: {},
         statuses: {},
@@ -462,13 +484,13 @@ const applyTicketCountsUpdate = (
   const columnType = request.columnType ?? 'stage';
 
   if (previousMatches && event.previousTicket) {
-    const previousGroupKeys = getGroupKeys(event.previousTicket, request.groupBy);
-    if (previousGroupKeys.length > 0) {
+    const previousGroups = getGroupKeys(event.previousTicket, request.groupBy);
+    if (previousGroups.length > 0) {
       const previousStageKeys = getStageKeys(event.previousTicket);
       const previousStatusKeys = getStatusKeys(event.previousTicket);
       nextGroups = applyGroupDelta(
         nextGroups,
-        previousGroupKeys,
+        previousGroups,
         previousStageKeys,
         previousStatusKeys,
         -1,
@@ -478,13 +500,13 @@ const applyTicketCountsUpdate = (
   }
 
   if (currentMatches) {
-    const currentGroupKeys = getGroupKeys(event.ticket, request.groupBy);
-    if (currentGroupKeys.length > 0) {
+    const currentGroups = getGroupKeys(event.ticket, request.groupBy);
+    if (currentGroups.length > 0) {
       const currentStageKeys = getStageKeys(event.ticket);
       const currentStatusKeys = getStatusKeys(event.ticket);
       nextGroups = applyGroupDelta(
         nextGroups,
-        currentGroupKeys,
+        currentGroups,
         currentStageKeys,
         currentStatusKeys,
         1,
@@ -613,13 +635,39 @@ const toRequest = (options: UseKanbanCountsOptions): KanbanCountsRequest => {
 
 export const useKanbanCounts = (options: UseKanbanCountsOptions): UseKanbanCountsResult => {
   const rawRequest = toRequest(options);
-  const requestKey = JSON.stringify(rawRequest);
+  const track = options.track;
+  const requestKey = JSON.stringify({ ...rawRequest, track });
   const request = useMemo(() => rawRequest, [requestKey]);
   const queryClient = useQueryClient();
+  // A board's or project's counts keep the key they have always had.
+  const queryKey = useMemo(
+    () =>
+      track ? ['tickets', 'kanban-counts', request, track] : ['tickets', 'kanban-counts', request],
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- track is part of requestKey
+    [request, requestKey],
+  );
+
+  const isTrack = Boolean(track);
+  const ticketCountsRooms = useMemo(
+    () =>
+      isTrack && !request.projectId && !request.boardId
+        ? []
+        : getTicketCountsRooms(request, options.currentUserId),
+    [isTrack, options.currentUserId, request],
+  );
+
+  // A track across all its boards has no single board's room to hear changes on, so
+  // its counts are refreshed on a timer instead.
+  const pollTrackCounts = isTrack && ticketCountsRooms.length === 0;
 
   const query = useQuery({
-    queryKey: ['tickets', 'kanban-counts', request],
-    queryFn: () => getKanbanCounts(request),
+    queryKey,
+    ...(pollTrackCounts ? { refetchInterval: 30_000 } : {}),
+    queryFn: () => {
+      if (!track) return getKanbanCounts(request);
+      const { viewMode: _viewMode, projectId: _projectId, boardId: _boardId, ...rest } = request;
+      return getTrackKanbanCounts({ ...rest, ...track });
+    },
     enabled: options.enabled ?? true,
     staleTime: 10 * 60 * 1000,
   });
@@ -629,34 +677,32 @@ export const useKanbanCounts = (options: UseKanbanCountsOptions): UseKanbanCount
     () => new Map(groups.map(group => [group.groupKey, group])),
     [groups],
   );
-  const ticketCountsRoom = useMemo(
-    () => getTicketCountsRoom(request, options.currentUserId),
-    [options.currentUserId, request],
-  );
 
   useEffect(() => {
     if (!(options.enabled ?? true)) return;
-    if (!ticketCountsRoom) return;
+    if (ticketCountsRooms.length === 0) return;
 
     let cancelled = false;
     const handleCountsUpdate = (event: TicketCountsUpdateEvent): void => {
       if (cancelled) return;
 
       // Live count snapshots do not carry rootId. Refetch aggregate-board
-      // counts so materialized flow steps cannot leak into the total.
-      if (request.excludeFlowSteps || hasUnmatchableDeskFilter(request.deskFilters)) {
-        void queryClient.invalidateQueries({ queryKey: ['tickets', 'kanban-counts', request] });
+      // counts so materialized flow steps cannot leak into the total. Nor do they
+      // say which track a ticket is in, so a track's counts are refetched too.
+      if (request.excludeFlowSteps || hasUnmatchableDeskFilter(request.deskFilters) || track) {
+        void queryClient.invalidateQueries({ queryKey });
         return;
       }
 
-      queryClient.setQueryData<{ groups: KanbanCountGroup[] }>(
-        ['tickets', 'kanban-counts', request],
-        current => applyTicketCountsUpdate(current, request, event, options.currentUserId),
+      queryClient.setQueryData<{ groups: KanbanCountGroup[] }>(queryKey, current =>
+        applyTicketCountsUpdate(current, request, event, options.currentUserId),
       );
     };
     const handleSocketConnect = (): void => {
       if (cancelled) return;
-      websocketService.emit('subscribe_to_ticket_counts', { room: ticketCountsRoom });
+      ticketCountsRooms.forEach(room =>
+        websocketService.emit('subscribe_to_ticket_counts', { room }),
+      );
     };
 
     const subscribe = async (): Promise<void> => {
@@ -670,7 +716,9 @@ export const useKanbanCounts = (options: UseKanbanCountsOptions): UseKanbanCount
           handleCountsUpdate,
         );
         websocketService.on('connect', handleSocketConnect);
-        websocketService.emit('subscribe_to_ticket_counts', { room: ticketCountsRoom });
+        ticketCountsRooms.forEach(room =>
+          websocketService.emit('subscribe_to_ticket_counts', { room }),
+        );
       } catch {
         // Ignore websocket failures; counts will continue to work from the API snapshot.
       }
@@ -685,9 +733,18 @@ export const useKanbanCounts = (options: UseKanbanCountsOptions): UseKanbanCount
         handleCountsUpdate,
       );
       websocketService.removeListener('connect', handleSocketConnect);
-      websocketService.emit('unsubscribe_from_ticket_counts', { room: ticketCountsRoom });
+      ticketCountsRooms.forEach(room =>
+        websocketService.emit('unsubscribe_from_ticket_counts', { room }),
+      );
     };
-  }, [options.currentUserId, options.enabled, queryClient, requestKey, ticketCountsRoom]);
+  }, [
+    options.currentUserId,
+    options.enabled,
+    queryClient,
+    requestKey,
+    ticketCountsRooms,
+    queryKey,
+  ]);
 
   return {
     groups,

@@ -52,11 +52,13 @@ import {
   isInternalCallbackOrigin,
   type ExternalResultCallbackConfig,
 } from "../surfaces/external-api/delivery.js";
+import { assertSafeOutboundUrl } from "../mcpgateway/services/http-client.js";
 import type { VerifiedCliToken } from "./cli-tokens.js";
 import { agentScopeAllows } from "./service-tokens.js";
 import { encryptSurfaceSecret } from "./surface-resolver.js";
 import { isClawAdmin } from "../middleware/agent-acl.js";
 import { isScheduledOrAutomationEvent } from "./run-bridge.js";
+import { conversationAccessError } from "./conversation-access.js";
 import { dispatchRun } from "./dispatch-run.js";
 import { toolUsageRankFor, wantsToolUsageRank } from "./tool-usage-rank.js";
 import { createLogger } from "../logger.js";
@@ -211,6 +213,15 @@ function normalizeRecordingRefs(value: unknown): RunRecordingRef[] | null {
 }
 
 /** Loose shape check for the /experiment epoch context forwarded to the runtime. */
+async function isPublicOutboundUrl(url: string): Promise<boolean> {
+  try {
+    await assertSafeOutboundUrl(url);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 function isExperimentContext(value: unknown): boolean {
   if (!value || typeof value !== "object") return false;
   const obj = value as Record<string, unknown>;
@@ -654,11 +665,21 @@ export async function prepareRun(
     if ((isMessagingChannelKey(triggerSource) || channelDelivery !== undefined) && !isInternalS2SCaller) {
       return { ok: false, status: 400, error: "channelDelivery requires internal service authentication" };
     }
-    if (callbackUrl && !isInternalCallbackOrigin(callbackUrl) && !isAllowedExternalCallbackUrl(callbackUrl)) {
-      return { ok: false, status: 400, error: "callbackUrl is not an allowed target" };
+    if (callbackUrl) {
+      const allowed = isInternalS2SCaller
+        ? isInternalCallbackOrigin(callbackUrl) || isAllowedExternalCallbackUrl(callbackUrl)
+        : !isInternalCallbackOrigin(callbackUrl) &&
+          isAllowedExternalCallbackUrl(callbackUrl) &&
+          (await isPublicOutboundUrl(callbackUrl));
+      if (!allowed) {
+        return { ok: false, status: 400, error: "callbackUrl is not an allowed target" };
+      }
     }
     if (progressUrl !== undefined && typeof progressUrl !== "string") {
       return { ok: false, status: 400, error: "progressUrl must be a string" };
+    }
+    if (progressUrl && !isInternalS2SCaller) {
+      return { ok: false, status: 400, error: "progressUrl requires internal service authentication" };
     }
     if (progressUrl && !isInternalCallbackOrigin(progressUrl) && !isAllowedExternalCallbackUrl(progressUrl)) {
       return { ok: false, status: 400, error: "progressUrl is not an allowed target" };
@@ -693,6 +714,41 @@ export async function prepareRun(
     const resolved = await resolveUserId(identityBody);
     if ("error" in resolved) {
       return { ok: false, status: 400, error: resolved.error };
+    }
+
+    // Conversation-ownership backstop. Claw sessions are keyed by conversationId
+    // (not userId), so a caller who supplies another user's conversationId would
+    // attach to that thread's shared session. userId is already pinned above;
+    // this stops the cross-user hijack. Only enforced on the interactive-user
+    // path — S2S/automation/scheduled/service-token runs legitimately act on
+    // conversations the authenticated caller doesn't "own". Non-existent/new
+    // conversations pass (verdict "unknown").
+    if (
+      authenticatedUserId &&
+      !isServiceTokenCaller &&
+      !isInternalS2SCaller &&
+      !isScheduledOrAutomationEvent(eventType) &&
+      (conversationId || piSessionConversationId)
+    ) {
+      // The Spaces conversation-access check matches channel_participants by the
+      // workspace-scoped Spaces id, so translate the canonical resolved.userId
+      // back to the Spaces id first. No workspace hint is available this early,
+      // so a multi-workspace user resolves to their most-recent membership —
+      // acceptable for a fail-open defense-in-depth backstop (the interactive
+      // run-stream guard enforces with the request's exact x-spaces-user-id).
+      // TODO(identity): thread the request workspace hint into StartRunInput so
+      // this resolves the exact membership for multi-workspace /run callers.
+      const spacesCheckId = await spacesUserIdForClawUser(resolved.userId).catch(() => resolved.userId);
+      const accessError = await conversationAccessError(spacesCheckId, [
+        conversationId,
+        piSessionConversationId,
+      ]);
+      if (accessError) {
+        log.warn(
+          `[run] conversation access denied userId=${spacesCheckId} conversationId=${conversationId ?? "none"} pi=${piSessionConversationId ?? "none"}`,
+        );
+        return { ok: false, status: 403, error: accessError };
+      }
     }
 
     const headerOrgId = input.headerOrgId;
@@ -1204,7 +1260,9 @@ export async function prepareRun(
     }
 
     const acceptHeader = input.wantsSse ? "text/event-stream" : "";
-    const hasExternalCallback = Boolean(callbackUrl && !isInternalCallbackOrigin(callbackUrl));
+    const hasExternalCallback = Boolean(
+      callbackUrl && !(input.isInternalS2SCaller && isInternalCallbackOrigin(callbackUrl)),
+    );
     const externalResultCallback: ExternalResultCallbackConfig | undefined =
       hasExternalCallback && callbackUrl
         ? {

@@ -41,6 +41,11 @@ export type KanbanPageGroupBy =
 export type KanbanTicketsPageBaseArgs = FlowStepVisibilityOptions & {
   viewMode: KanbanViewMode;
   channelId?: string;
+  /**
+   * Only the tickets this SDLC track holds, from every board (needs `channelId`, the
+   * track's hub). Pages come from the track queries rather than the board ones.
+   */
+  trackId?: string;
   projectId?: string;
   boardId?: string;
   groupBy?: KanbanPageGroupBy;
@@ -66,6 +71,7 @@ type KanbanTicketsPageQueryArgs = Omit<
   'start'
 > & {
   start: KanbanCursor | null;
+  trackId?: string;
   dynamicFieldDateRanges?: Record<string, { start?: number; end?: number }>;
 };
 
@@ -202,10 +208,12 @@ const canRepresentGroupInVespa = (
     return Boolean(groupKey);
   }
   if (typeof groupBy !== 'object' || groupBy.type !== 'formField') return false;
-  if (!groupKey) return false;
-  // All form field groups can be represented (MISSING_FORM_FIELD_GROUP_KEYS handled via
-  // __VESPA_MISSING__ token). DATE groupBy is not supported in the UI, so no special case.
-  return true;
+  // The __VESPA_MISSING__ / value token does select the group's rows, but which group a
+  // ticket is drawn in is decided client-side from its form values (groupTicketsByFormField),
+  // and a Vespa payload row carries none — those rows land in no group at all and the column
+  // renders empty under a correct badge. The Zero page loads the values as related rows, so
+  // form field grouping goes through it and the token only narrows which ids it reads.
+  return false;
 };
 
 export const getDynamicFieldScalarFilters = (
@@ -240,7 +248,13 @@ export const getFormFieldValue = (
   if (MISSING_FORM_FIELD_GROUP_KEYS.has(groupKey)) return undefined;
   if (
     groupBy.fieldType === FormFieldType.MULTI_SELECT ||
-    groupBy.fieldType === FormFieldType.USER
+    groupBy.fieldType === FormFieldType.USER ||
+    // A STRING group key is folded to lower case so that it names one group per value
+    // regardless of spelling (getFormFieldGroupKeys). Zero's only comparison against the
+    // jsonb value is case-exact, so matching on it would drop every ticket stored with a
+    // different spelling. The Vespa token already restricts the page to the group — it is an
+    // uncased attribute match, which is what the fold was made to agree with.
+    groupBy.fieldType === FormFieldType.STRING
   ) {
     return undefined;
   }
@@ -273,6 +287,26 @@ export const toQueryFilters = (
   };
 };
 
+type KanbanPageRequest = ReturnType<typeof queries.kanbanTicketsPageV3>;
+
+/**
+ * The page query for these args: a board's, or a track's when `trackId` and its hub
+ * `channelId` are set. Both return the same rows in the same order — only their
+ * arguments differ — so the track request is typed as the board one for the hooks
+ * and `zero.run` that take it.
+ */
+export const kanbanPageQuery = (args: KanbanTicketsPageQueryArgs): KanbanPageRequest => {
+  const { trackId, channelId } = args;
+  if (trackId && channelId) {
+    return queries.trackKanbanTicketsPage({
+      ...args,
+      channelId,
+      trackId,
+    } as Parameters<typeof queries.trackKanbanTicketsPage>[0]) as unknown as KanbanPageRequest;
+  }
+  return queries.kanbanTicketsPageV3(args as Parameters<typeof queries.kanbanTicketsPageV3>[0]);
+};
+
 export const buildKanbanTicketsPageArgs = (
   options: UseKanbanTicketsPageOptions,
   start: KanbanTicketsPageQueryArgs['start'],
@@ -303,6 +337,7 @@ export const buildKanbanTicketsPageArgs = (
       showOverdueOnly: options.showOverdueOnly,
       overdueReferenceTime: options.overdueReferenceTime ?? undefined,
       createdAfter: options.createdAfter ?? undefined,
+      ...(options.trackId ? { trackId: options.trackId } : {}),
     },
     options.channelId,
   );
@@ -483,7 +518,10 @@ export const useKanbanTicketsPage = (
 
   // Declared after every pushdown value above, since it requires that each active filter
   // made it into the Vespa query — direct-Vespa rows are rendered without re-filtering.
+  // Never for a track: its search hits go through the track query, which keeps only
+  // the track's tickets, instead of being rendered as Vespa returned them.
   const shouldUseDirectVespaRows =
+    !options.trackId &&
     requiresVespaTicketIds &&
     !hasZeroOnlyFilters(
       options.filters,
@@ -592,9 +630,7 @@ export const useKanbanTicketsPage = (
     },
     fetchCursor,
   );
-  const pageQuery = queries.kanbanTicketsPageV3(
-    pageArgs as Parameters<typeof queries.kanbanTicketsPageV3>[0],
-  );
+  const pageQuery = kanbanPageQuery(pageArgs);
   const [page, pageDetails] = useCachedQuery(pageQuery, {
     enabled:
       (options.enabled ?? true) &&

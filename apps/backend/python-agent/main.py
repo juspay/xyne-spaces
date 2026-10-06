@@ -191,7 +191,7 @@ async def entrypoint(ctx: JobContext):
         stt_model=config.stt_model,
         google_voice_credentials_json=config.google_voice_credentials_json,
         google_stt_model=config.google_stt_model,
-        google_stt_language=config.google_stt_language,
+        google_stt_language=config.google_stt_realtime_language,
         deepgram_api_key=config.deepgram_api_key,
         deepgram_model=config.deepgram_model,
         deepgram_language=config.deepgram_language,

@@ -20,11 +20,10 @@ import {
   MessageSquareMore,
   Smartphone,
   Phone,
-  Share2,
   Plus,
+  Share2,
   Trash2,
 } from 'lucide-react';
-
 import { Button } from '../../ui/Button';
 import { Tooltip } from '../../ui/Tooltip';
 import {
@@ -103,7 +102,7 @@ const DESK_SOURCES: ReadonlyArray<{
   {
     value: DeskType.SOCIAL_MEDIA,
     label: 'Social media',
-    description: 'Create support tickets from Google Play and App Store reviews',
+    description: 'Create support tickets from Google Play, App Store reviews, or Instagram DMs',
     icon: Share2,
   },
 ];
@@ -141,7 +140,7 @@ function areGooglePlayApplicationsValid(applications: GooglePlayApplicationInput
   );
 }
 
-export type SocialProvider = 'GOOGLE_PLAY' | 'APP_STORE';
+export type SocialProvider = 'GOOGLE_PLAY' | 'APP_STORE' | 'INSTAGRAM';
 
 export interface AppStoreDeskInput {
   keyId: string;
@@ -230,6 +229,7 @@ export const AddChannelForm: React.FC<AddChannelFormProps> = ({
   const [appStorePrivateKey, setAppStorePrivateKey] = useState('');
 
   const isSocialMediaDeskValid = (boardId?: string): boolean => {
+    if (socialProvider === 'INSTAGRAM') return true;
     if (!boardId) return false;
     return socialProvider === 'GOOGLE_PLAY'
       ? Boolean(getServiceAccountEmail(googlePlayServiceAccountKey)) &&
@@ -391,15 +391,17 @@ export const AddChannelForm: React.FC<AddChannelFormProps> = ({
                   })),
                   serviceAccountKey: googlePlayServiceAccountKey,
                 }
-              : {
-                  appStore: {
-                    keyId: appStoreKeyId.trim(),
-                    privateKey: appStorePrivateKey.trim(),
-                    applications: appStoreApplications.map(application => ({
-                      bundleId: application.bundleId.trim(),
-                    })),
-                  },
-                }),
+              : socialProvider === 'APP_STORE'
+                ? {
+                    appStore: {
+                      keyId: appStoreKeyId.trim(),
+                      privateKey: appStorePrivateKey.trim(),
+                      applications: appStoreApplications.map(application => ({
+                        bundleId: application.bundleId.trim(),
+                      })),
+                    },
+                  }
+                : {}),
             assigneeUserGroupId: value.assigneeUserGroupId,
           });
         } else if (deskType === DeskType.DL) {
@@ -879,6 +881,7 @@ export const AddChannelForm: React.FC<AddChannelFormProps> = ({
               <SelectContent>
                 <SelectItem value='GOOGLE_PLAY'>Google Play reviews</SelectItem>
                 <SelectItem value='APP_STORE'>App Store reviews</SelectItem>
+                <SelectItem value='INSTAGRAM'>Instagram DMs</SelectItem>
               </SelectContent>
             </Select>
           </div>
@@ -1138,6 +1141,16 @@ export const AddChannelForm: React.FC<AddChannelFormProps> = ({
         </div>
       )}
 
+      {requireConnector && deskType === DeskType.SOCIAL_MEDIA && socialProvider === 'INSTAGRAM' && (
+        <div className='space-y-2 rounded-lg border border-border bg-muted/20 p-3'>
+          <p className='text-sm text-foreground font-medium'>Connect via Instagram</p>
+          <p className='text-xs text-muted-foreground'>
+            You&apos;ll be redirected to Instagram to authorize your Business account. No extra
+            details needed here.
+          </p>
+        </div>
+      )}
+
       {/* Connector Selection (for personal mailbox desks) */}
       {requireConnector && deskType === DeskType.EMAIL && (
         <div className='space-y-2'>
@@ -1296,6 +1309,9 @@ export const AddChannelForm: React.FC<AddChannelFormProps> = ({
             <div className='space-y-1.5'>
               <label htmlFor='board-select' className='text-sm font-medium text-foreground'>
                 Board
+                {deskType === DeskType.SOCIAL_MEDIA && socialProvider !== 'INSTAGRAM' && (
+                  <span className='text-destructive'> *</span>
+                )}
               </label>
               <Select
                 value={field.state.value || ''}

@@ -433,8 +433,19 @@ export class MicrosoftDeskService {
   /**
    * Get a valid access token, refreshing if expired (5-min buffer).
    * Used by webhook preprocessing, email sending, and manual reload.
+   *
+   * `refreshScope` controls the scope sent on the refresh grant:
+   *   undefined → desk default (MICROSOFT_OAUTH_SCOPES)
+   *   string    → a custom, narrower scope list
+   *   null      → omit the parameter so the refresh inherits the token's
+   *               originally granted scopes (required for sources whose grant
+   *               does not include the full desk scope set, e.g. contacts-only)
    */
-  static async getValidAccessToken(encryptedCredentials: string, sourceId: string): Promise<string> {
+  static async getValidAccessToken(
+    encryptedCredentials: string,
+    sourceId: string,
+    refreshScope?: string | null
+  ): Promise<string> {
     const credentials = JSON.parse(decrypt(encryptedCredentials)) as MicrosoftCredentials;
     const externalSourceRepo = new ExternalSourceRepository();
 
@@ -471,7 +482,11 @@ export class MicrosoftDeskService {
           client_secret: clientSecret,
           refresh_token: credentials.refreshToken,
           grant_type: 'refresh_token',
-          scope: MICROSOFT_OAUTH_SCOPES.join(' '),
+          ...(refreshScope === undefined
+            ? { scope: MICROSOFT_OAUTH_SCOPES.join(' ') }
+            : refreshScope
+              ? { scope: refreshScope }
+              : {}),
         }),
       }
     );
@@ -508,10 +523,12 @@ export class MicrosoftDeskService {
   static async listContacts(
     encryptedCredentials: string,
     sourceId: string,
+    refreshScope?: string | null,
   ): Promise<Array<{ name: string | null; email: string }>> {
     const accessToken = await MicrosoftDeskService.getValidAccessToken(
       encryptedCredentials,
       sourceId,
+      refreshScope,
     );
     const seen = new Map<string, { name: string | null; email: string }>();
 

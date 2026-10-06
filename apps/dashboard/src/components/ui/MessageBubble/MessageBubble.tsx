@@ -27,6 +27,8 @@ import UserAvatar from '../../UserAvatar/UserAvatar';
 import { UserHoverWrapper } from '../UserMentionPopover/UserMentionPopover';
 import MessageAttachment from '../../Chat/MessageAttachment/MessageAttachment';
 import { FilePill, HtmlPreviewCard } from '../files';
+import { InlineCsvFile } from '../../Chat/MessageAttachment/InlineCsvFile';
+import { isCsvFile } from '../../Chat/MessageAttachment/csvPreview';
 import { useReactions } from '../../../hooks/useReaction';
 import { MessageBubbleProps } from './MessageBubble.types';
 import { useAuth } from '../../../hooks/useAuth';
@@ -47,6 +49,8 @@ import EmojiPicker, { EmojiStyle, Theme as EmojiTheme } from 'emoji-picker-react
 import { BotBubble } from '../../Chat/BotBubble';
 import { LinkPreview } from '../../Chat/LinkPreview/LinkPreview';
 import { InternalMessagePreview } from '../../Chat/LinkPreview/InternalMessagePreview';
+import { CallLinkPreview } from '../../Chat/LinkPreview/CallLinkPreview';
+import { CallLinkCaption, isCallLinkOnlyMessage } from '../../Chat/LinkPreview/CallLinkCaption';
 import { getEmojiFontSizeClass } from '../../../utils/emojiUtils';
 import { RenderMessageWithHTML } from '../../Chat/RenderMessageWithHTML/RenderMessageWithHTML';
 import { createMarkdownComponents } from '../../../utils/markdownComponents';
@@ -189,10 +193,18 @@ const AttachmentsBlock: React.FC<AttachmentsBlockProps> = ({
   // every sibling attachment to a pill.
   const htmlAttachments = activeAttachments.filter(a => isHtmlAttachment(a));
 
+  const csvAttachments = isMobile
+    ? []
+    : activeAttachments.filter(a => isCsvFile(a.mimetype, a.originalFilename));
+  const isInlineCsv = (a: AttachmentType): boolean => csvAttachments.includes(a);
+
   // Files - separate into those with thumbnails (PDFs, Office docs) and those without
   const fileAttachments = activeAttachments.filter(
     a =>
-      !a.mimetype.startsWith('image/') && !a.mimetype.startsWith('video/') && !isHtmlAttachment(a),
+      !a.mimetype.startsWith('image/') &&
+      !a.mimetype.startsWith('video/') &&
+      !isHtmlAttachment(a) &&
+      !isInlineCsv(a),
   );
 
   const previewableFiles = fileAttachments.filter(a => hasDocumentThumbnail(a));
@@ -362,6 +374,20 @@ const AttachmentsBlock: React.FC<AttachmentsBlockProps> = ({
             </div>
           )}
 
+          {csvAttachments.length > 0 && (
+            <div className='flex flex-col gap-2'>
+              {csvAttachments.map(attachment => (
+                <InlineCsvFile
+                  key={attachment.id}
+                  attachmentId={attachment.id}
+                  fileName={attachment.originalFilename}
+                  fileSize={attachment.size}
+                  onOpen={() => handleFileClick(attachment)}
+                />
+              ))}
+            </div>
+          )}
+
           {/* Non-previewable files - use FilePill component */}
           {/* If useFilePillForAllFiles is true, show ALL files in FilePill format */}
           {(useFilePillForAllFiles ? fileAttachments : nonPreviewableFiles).length > 0 && (
@@ -508,6 +534,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
   allThreadAttachments,
   workflowNumber,
   showLinkPreview: shouldRenderLinkPreview = true,
+  callLinkCardShown,
   searchItemView = false,
   afterTextContent,
   headerContent,
@@ -530,6 +557,14 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
   const isForwardedMessage = message.msgType === MessageType.FORWARDED;
   const metadata = message.metadata as MessageMetadata | null;
   const previewResult = parsePreviewMd(message.link_preview_md);
+  // A message that is nothing but a call link shows a status caption in place of the link;
+  // the link chip comes back only once its card is closed, so there's always a way in.
+  const callLinkOnlyExternalId =
+    previewResult?.type === 'call_preview' &&
+    isCallLinkOnlyMessage(message.content, previewResult.data.url)
+      ? previewResult.data.externalId
+      : null;
+  const isCallCardShown = callLinkCardShown ?? (shouldRenderLinkPreview && showLinkPreview);
 
   // Parse forwarded message XML content
   const forwardedMessageData = useMemo(() => {
@@ -922,7 +957,8 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                   }
                 />
               </div>
-            ) : showAvatar && sender?.userType === UserType.APP ? (
+            ) : showAvatar &&
+              (sender?.userType === UserType.APP || sender?.userType === UserType.AGENT) ? (
               <div
                 onClick={() => handleUserClick(sender.id)}
                 data-track-category='MESSAGE'
@@ -1224,7 +1260,11 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
               ) : null}
               {/* Host-supplied mark for where this conversation belongs. Null in
                   every surface that does not provide one. */}
-              {message.conversationId ? renderConversationBadge?.(message.conversationId) : null}
+              {message.conversationId
+                ? renderConversationBadge?.(
+                    conversation ?? { conversationId: message.conversationId },
+                  )
+                : null}
               {headerContent}
             </div>
           )}
@@ -1581,25 +1621,32 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                       className={`jp-message-html whitespace-pre-wrap break-all-words inline-block ${emojiFontSizeClass}`}
                       style={isSystemMessage ? systemMessageStyles : undefined}
                     >
-                      <ExpandableMessage maxHeight={500}>
-                        <div className='jp-message-html inline-block'>
-                          <RenderMessageWithHTML
-                            disableLinks={disableLinks}
-                            message={isWorkflowMessage ? 'Workflow created' : message.content}
-                            showEdited={message.edited}
-                            isSystemMessage={isSystemMessage}
-                            messageId={message.messageId}
-                            conversationId={message.conversationId}
-                            preserveThreadRoute={context === 'thread'}
-                            slashCommandArtifactContext={{
-                              ...(channelId && { channelId }),
-                              senderId: message.senderId,
-                              createdAt: message.createdAt,
-                              surface: context === 'thread' ? 'thread' : 'channel',
-                            }}
-                          />
-                        </div>
-                      </ExpandableMessage>
+                      {callLinkOnlyExternalId && (
+                        <CallLinkCaption externalId={callLinkOnlyExternalId} />
+                      )}
+                      {!(callLinkOnlyExternalId && isCallCardShown) && (
+                        <>
+                          <ExpandableMessage maxHeight={500}>
+                            <div className='jp-message-html inline-block'>
+                              <RenderMessageWithHTML
+                                disableLinks={disableLinks}
+                                message={isWorkflowMessage ? 'Workflow created' : message.content}
+                                showEdited={message.edited}
+                                isSystemMessage={isSystemMessage}
+                                messageId={message.messageId}
+                                conversationId={message.conversationId}
+                                preserveThreadRoute={context === 'thread'}
+                                slashCommandArtifactContext={{
+                                  ...(channelId && { channelId }),
+                                  senderId: message.senderId,
+                                  createdAt: message.createdAt,
+                                  surface: context === 'thread' ? 'thread' : 'channel',
+                                }}
+                              />
+                            </div>
+                          </ExpandableMessage>
+                        </>
+                      )}
                       {afterTextContent}
                     </div>
                   )}
@@ -1668,6 +1715,11 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                         type: 'internal_message',
                         ...previewResult.data,
                       }}
+                      onClose={() => setShowLinkPreview(false)}
+                    />
+                  ) : previewResult.type === 'call_preview' ? (
+                    <CallLinkPreview
+                      metadata={previewResult.data}
                       onClose={() => setShowLinkPreview(false)}
                     />
                   ) : (

@@ -977,6 +977,52 @@ router.post("/action", pinAgentSlugFromHeader, verifySpacesSignature, async (req
           return r.json();
         };
 
+        // Xyne AI cards live on a chat-message row, not a Spaces message, so
+        // replaceFlowCardWithText can't swap them — route them through the
+        // shared write-result path (card swap, pending-action resolve, chat
+        // continuation, Retry on failure). Channel cards keep the code below.
+        if (xyneAiCard) {
+          let sent: string;
+          try {
+            if (!targetChannelId) {
+              const b = msgConversationId ? { conversationId: msgConversationId, text: content } : { channelId, text: content };
+              await spacesPost("/chat/postMessage", b);
+              sent = "Message sent.";
+            } else {
+              let channelName = targetChannelId;
+              try {
+                const joinRes = (await spacesPost(`/channel/${targetChannelId}/join`, {})) as { channelName?: string };
+                channelName = joinRes.channelName ?? targetChannelId;
+              } catch (e) {
+                if (errMsg(e).includes("private")) {
+                  const text = `Cannot post to #${targetChannelId} — private channel. Add me first.`;
+                  await finishTextWriteOnRow({ card: xyneAiCard, tool, ok: false, heading: `${tool} failed`, errorText: text });
+                  res.json({ type: "close_screen", finalMessage: text } satisfies AppActionResponse);
+                  return;
+                }
+              }
+              await spacesPost("/chat/postMessage", { channelId: targetChannelId, text: content });
+              sent = `Posted in #${channelName}.`;
+            }
+          } catch (e) {
+            const errorText = approvalToolFailureMessage(errMsg(e));
+            log.error(`[flow-action] xyne-ai spaces-send-message failed conversationId=${conversationId} userId=${writeUserId} err=${errMsg(e)}`);
+            await finishWriteFailure({
+              tool, serverType, params, writeUserId, signature, agentSlug, spacesAppId,
+              messageId, conversationId, channelId: continueChannelId, errorText,
+              xyneAi: xyneAiCard,
+            });
+            res.status(422).json({ type: "error", code: "TOOL_EXECUTION_FAILED", message: errorText } satisfies AppActionResponse);
+            return;
+          }
+          await completeWriteSuccess({
+            actionId, tool, serverType, params, writeUserId, signature, agentSlug, spacesAppId,
+            messageId, conversationId, channelId: continueChannelId, resultText: sent,
+            xyneAi: xyneAiCard,
+          }, { type: "close_screen", finalMessage: sent });
+          return;
+        }
+
         if (!targetChannelId) {
           const b = msgConversationId ? { conversationId: msgConversationId, text: content } : { channelId, text: content };
           await spacesPost("/chat/postMessage", b);

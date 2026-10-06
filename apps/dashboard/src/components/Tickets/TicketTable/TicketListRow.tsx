@@ -7,7 +7,8 @@ import { TicketHoverCard } from './TicketHoverCard';
 import { PriorityPicker } from '../TicketListView/PriorityPicker';
 import { UserSelector } from '../CreateTicketModal/UserSelector';
 import { useTicketAssignee, resolveAssigneeRef } from '../../../hooks/useTicketAssignee';
-import { StatusPicker, DueDatePicker, LabelPicker } from './TicketListRowPickers';
+import { StagePicker } from '../TicketListView/StagePicker';
+import { DueDatePicker, LabelPicker } from './TicketListRowPickers';
 
 export type SubTicketProgress = { done: number; total: number };
 
@@ -22,6 +23,8 @@ type TicketListRowProps = {
   /** Board the ticket belongs to — shown as the row's capsule with a hover preview. */
   boardName?: string | undefined;
   isComfortView?: boolean;
+  /** Screen-specific pills (e.g. a release's QA owner), shown before the assignee. */
+  extras?: React.ReactNode;
   onOpen: (ticket: Ticket) => void;
 };
 
@@ -56,6 +59,7 @@ export const TicketListRow: React.FC<TicketListRowProps> = ({
   subProgress,
   boardName,
   isComfortView = false,
+  extras,
   onOpen,
 }) => {
   const createdShort = shortDate(ticket.createdAt);
@@ -93,7 +97,8 @@ export const TicketListRow: React.FC<TicketListRowProps> = ({
       >
         {isSelected ? (
           <button
-            className='flex h-4 w-4 cursor-pointer items-center justify-center rounded bg-blue-600'
+            // The app's checkbox colours (see ui/Checkbox): primary fill, primary-foreground tick.
+            className='flex h-4 w-4 cursor-pointer items-center justify-center rounded border border-primary bg-primary'
             onClick={e => {
               e.stopPropagation();
               onToggleSelect(ticket);
@@ -101,12 +106,12 @@ export const TicketListRow: React.FC<TicketListRowProps> = ({
             data-track-category='Tickets'
             data-track-name='DeselectRow'
           >
-            <Check className='h-3 w-3 text-white' strokeWidth={3} />
+            <Check className='h-3 w-3 text-primary-foreground' strokeWidth={3} />
           </button>
         ) : (
           <button
             aria-label='Select ticket'
-            className='h-4 w-4 cursor-pointer rounded border border-border bg-transparent transition-colors hover:border-muted-foreground'
+            className='h-4 w-4 cursor-pointer rounded border border-border bg-card transition-colors hover:border-muted-foreground'
             onClick={e => {
               e.stopPropagation();
               onToggleSelect(ticket);
@@ -129,7 +134,14 @@ export const TicketListRow: React.FC<TicketListRowProps> = ({
 
       {visibleColumns.has('status') && (
         <span className='flex w-5 flex-shrink-0 items-center justify-center'>
-          <StatusPicker ticketId={ticket.id} statusV2={ticket.statusV2 as string} />
+          <StagePicker
+            ticketId={ticket.id}
+            stageName={ticket.stageName}
+            stageLabel={ticket.stageName || '—'}
+            statusV2={ticket.statusV2}
+            boardId={ticket.boardId}
+            iconOnly
+          />
         </span>
       )}
 
@@ -210,6 +222,8 @@ export const TicketListRow: React.FC<TicketListRowProps> = ({
           />
         )}
 
+        {extras}
+
         {visibleColumns.has('assignee') && (
           <UserSelector
             selectedUserId={assignee.userId}
@@ -222,7 +236,9 @@ export const TicketListRow: React.FC<TicketListRowProps> = ({
 
         {createdShort && (
           <Tooltip content={`Created ${fullTimestamp(ticket.createdAt)}`}>
-            <span className='text-xs text-muted-foreground'>{createdShort}</span>
+            <span className='min-w-[7ch] whitespace-nowrap text-xs tabular-nums text-muted-foreground'>
+              {createdShort}
+            </span>
           </Tooltip>
         )}
       </span>

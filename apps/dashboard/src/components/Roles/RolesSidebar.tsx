@@ -3,7 +3,6 @@ import { ChevronDown, PlusDefault, ShieldCheck, UserThree } from '@xyne/icons';
 import type { Role } from '@xyne/shared';
 import { cn } from '../../utils/classNames';
 import { usePlatform } from '../../hooks/usePlatform';
-import AppNavigator from '../AppNavigator/AppNavigator';
 
 interface RolesSidebarProps {
   roles: Role[];
@@ -16,9 +15,8 @@ interface RolesSidebarProps {
 }
 
 /**
- * Left rail for the roles screen. Mirrors the chat directory sidebar — app navigator
- * strip on top, transparent background so the wallpaper shows through, and rows sized
- * like channel items.
+ * Role list for the roles screen, shown inside the Organisations module (which owns
+ * the app navigator strip). Rows are sized like channel items.
  */
 const RolesSidebar = ({
   roles,
@@ -33,10 +31,7 @@ const RolesSidebar = ({
 
   return (
     <div className={cn('h-full w-full flex flex-col', isMobile && 'bg-sidebar')}>
-      <div className='w-full h-[52px] shrink-0'>
-        <AppNavigator />
-      </div>
-      <div className='flex-1 min-h-0 px-3 pt-3 pb-12 sm:pb-0 flex flex-col border-t border-border'>
+      <div className='flex-1 min-h-0 px-3 pt-3 pb-12 sm:pb-0 flex flex-col'>
         <div className='flex pt-2 pb-3 px-2 h-10 items-center justify-between mb-2'>
           <h2 className='text-base font-semibold leading-normal text-sidebar-accent-foreground'>
             Roles

@@ -4,7 +4,7 @@ import { agentRunRepository, agentRepository } from "../repositories/index.js";
 import { getRequesterId, getOrgId, getAgentEditAccess, isClawAdmin , requireRequester} from "../middleware/agent-acl.js";
 import { getRequesterAliases, matchesAuthenticatedUserId } from "../middleware/pin-user-id-param.js";
 import { userIdAliasesFor } from "../lib/users-jit.js";
-import { requireS2S } from "../middleware/require-auth.js";
+import { requireStrictS2S } from "../middleware/require-auth.js";
 import { renderClaudeCodeJsonl, renderMarkdown, renderClaudeProjectZip, type SessionExportRun } from "../lib/session-export.js";
 import { prisma } from "../db.js";
 import { CONFIG } from "../config.js";
@@ -352,7 +352,7 @@ router.get("/paged", asyncHandler(async (req: Request, res: Response) => {
 //   - status: optional filter (running / completed / failed / cancelled)
 //
 // Must be declared BEFORE /:sessionId so the literal path takes precedence.
-router.get("/by-agent/:slug", requireS2S, async (req: Request<{ slug: string }>, res: Response) => {
+router.get("/by-agent/:slug", requireStrictS2S, async (req: Request<{ slug: string }>, res: Response) => {
   try {
     const slug = req.params.slug;
     if (!slug || typeof slug !== "string") {

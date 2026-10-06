@@ -16,6 +16,7 @@ import { flowActionRouter } from "../routes/flow-action.js";
 import { twinDraftInternalRouter } from "../routes/twin-draft-internal.js";
 import { attachmentsInternalRouter } from "../routes/attachments.js";
 import { appConnectorsInternalRouter } from "../routes/app-connectors-internal.js";
+import { agentsInternalRouter } from "../routes/agents-internal.js";
 import { agentsRouter } from "../routes/agents.js";
 import { chainWorkflowsRouter } from "../routes/chain-workflows.js";
 import { spacesRouter } from "../routes/spaces.js";
@@ -26,6 +27,7 @@ import { gatewayRegistryUiRouter } from "../routes/gateway-registry-ui.js";
 import { knowledgeBaseRouter } from "../routes/knowledge-base.js";
 import subagentsRouter from "../routes/subagents.js";
 import sandboxRouter from "../routes/sandbox.js";
+import sandboxAccessRouter from "../routes/sandbox-access.js";
 import { adminRouter } from "../routes/admin.js";
 import { adminDigitalTwinRouter } from "../routes/admin-digital-twin.js";
 import { organizationsRouter } from "../routes/organizations.js";
@@ -46,6 +48,7 @@ import { experimentsInternalRouter } from "../routes/experiments-internal.js";
 import { artifactAppsInternalRouter } from "../routes/artifact-apps-internal.js";
 import { errorPipelineIngestRouter, errorPipelineInternalRouter } from "../routes/error-pipeline.js";
 import { connectorsInternalRouter } from "../routes/connectors-internal.js";
+import { providersInternalRouter } from "../routes/providers-internal.js";
 import { googleOAuthRouter, googleCallbackRouter } from "../routes/google-oauth.js";
 import { microsoftOAuthRouter, microsoftCallbackRouter } from "../routes/microsoft-oauth.js";
 import { calendlyOAuthRouter, calendlyCallbackRouter } from "../routes/calendly-oauth.js";
@@ -84,7 +87,7 @@ import { slackRouter } from "../surfaces/slack/routes/index.js";
 import { mcpGatewayRouter } from "../mcpgateway/index.js";
 import { requireAuth, requireNoAccessToken, allowReadAccessToken, allowScopedAccessToken, requireStrictS2S, requireInternalS2S, requireUserAuth, optionalAuth, s2sKeyMatches } from "../middleware/require-auth.js";
 import { requireClawAdmin, requireSearchEvalAccess } from "../middleware/agent-acl.js";
-import { apiLimiter } from "../middleware/rate-limiters.js";
+import { apiLimiter, sampleClientIp } from "../middleware/rate-limiters.js";
 
 const SIGNED_INGRESS_PREFIXES = ["/webhook"] as const;
 
@@ -127,6 +130,7 @@ function mountRequestContext(app: Express): void {
       next();
       return;
     }
+    sampleClientIp(req);
     apiLimiter(req, res, next);
   });
 }
@@ -180,6 +184,7 @@ function mountCoreApi(app: Express): void {
   app.use(`${BASE}/gateway-registry`, requireAuth, requireNoAccessToken, gatewayRegistryUiRouter);
   app.use(`${BASE}/knowledge-base`, requireAuth, requireNoAccessToken, knowledgeBaseRouter);
   app.use(`${BASE}/subagents`, requireAuth, allowScopedAccessToken({ write: "subagents:write" }), subagentsRouter);
+  app.use(`${BASE}/sandbox-access`, requireUserAuth, sandboxAccessRouter); // sandbox-router → may this Spaces session open /claw-preview|code|term/<sandboxId>?
   app.use(`${BASE}/sandbox`, requireAuth, requireNoAccessToken, sandboxRouter);
   app.use(`${BASE}/organizations`, requireAuth, requireNoAccessToken, organizationsRouter);
   app.use(`${BASE}/admin/digital-twin`, requireAuth, requireNoAccessToken, requireClawAdmin, adminDigitalTwinRouter);
@@ -200,6 +205,7 @@ function mountCoreApi(app: Express): void {
   app.use(`${BASE}/internal/agent-chat`, requireStrictS2S, agentChatInternalRouter); // progress/callback from xyne-claw
   app.use(`${BASE}/internal/twin-draft`, requireInternalS2S, twinDraftInternalRouter);  // Spaces → approve/decline an in-thread Twin reply draft (INTERNAL_S2S_KEY)
   app.use(`${BASE}/internal/attachments`, requireInternalS2S, attachmentsInternalRouter); // Spaces → extract document text via claw's converters (INTERNAL_S2S_KEY)
+  app.use(`${BASE}/internal/agents`, requireInternalS2S, agentsInternalRouter); // Spaces → is this app a Claw agent? decides AGENT vs APP at install (INTERNAL_S2S_KEY)
   app.use(`${BASE}/internal/app-connectors`, requireInternalS2S, appConnectorsInternalRouter); // Spaces → sdk.connectors: run the viewer's own MCP connection for an artifact app (INTERNAL_S2S_KEY)
   app.use(`${BASE}/internal/surface`, requireStrictS2S, surfaceInternalRouter);       // app-control calls from xyne-claw → the user's desktop window
   app.use(`${BASE}/internal/sessions`, requireStrictS2S, sessionsArchiveRouter);     // archive/restore session JSONLs to GCS — S2S only (transcripts)
@@ -213,6 +219,7 @@ function mountCoreApi(app: Express): void {
   app.use(`${BASE}/internal/error-pipeline`, requireStrictS2S, errorPipelineInternalRouter); // run-result callback from xyne-claw (S2S only)
   app.use(`${BASE}/internal/tts`, requireStrictS2S, ttsRouter);
   app.use(`${BASE}/internal/connectors`, requireStrictS2S, connectorsInternalRouter); // connector availability lookup for xyne-claw (S2S only)
+  app.use(`${BASE}/internal/providers`, requireStrictS2S, providersInternalRouter); // AI provider availability lookup for xyne-claw (S2S only)
 }
 
 function mountOAuthProviders(app: Express): void {
