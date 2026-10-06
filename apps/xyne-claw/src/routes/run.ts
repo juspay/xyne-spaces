@@ -572,7 +572,6 @@ router.post("/run", validateS2SKey, async (req, res: Response) => {
     recordingRefs,
     contextFiles,
     additionalInstructions,
-    teamGuidance,
     researchContext,
     customSubagents,
     callableAgents,
@@ -836,7 +835,6 @@ router.post("/run", validateS2SKey, async (req, res: Response) => {
       recordingRefs,
       contextFiles,
       additionalInstructions,
-      teamGuidance,
       researchContext,
       customSubagents,
       callableAgents,
@@ -960,7 +958,6 @@ router.post("/run", validateS2SKey, async (req, res: Response) => {
         recordingRefs,
         contextFiles,
         additionalInstructions,
-        teamGuidance,
         researchContext,
         customSubagents,
         callableAgents,
@@ -1494,7 +1491,6 @@ export async function processTask(
     | undefined,
   contextFiles: Array<{ path: string; content: string }> | undefined,
   additionalInstructions: string | undefined,
-  teamGuidance: string | undefined,
   researchContext:
     | {
         type: string;
@@ -3322,31 +3318,6 @@ export async function processTask(
       }
     }
 
-    // Deterministic tool order keeps the prompt prefix stable when MCP lists change.
-    {
-      const { sortToolSlugsForPrefix } = await import("xyne-claw-shared");
-      const order = new Map(sortToolSlugsForPrefix(allTools.map((t) => t.name)).map((name, i) => [name, i]));
-      allTools = [...allTools].sort(
-        (a, b) => (order.get(a.name) ?? 0) - (order.get(b.name) ?? 0),
-      );
-    }
-
-    // Phase 3/6: after tool schemas are fixed, append team guidance as the next
-    // static tier. Persona (systemPrompt) stays persona-only; Vespa/tool output
-    // stays in dynamic context below.
-    let personaWithGuidance = systemPrompt;
-    if (typeof teamGuidance === "string" && teamGuidance.trim()) {
-      const { assembleStaticPrefix } = await import("xyne-claw-shared");
-      const withGuidance = assembleStaticPrefix({
-        platform: (systemPrompt ?? "").trim(),
-        tools: "",
-        guidance: `## Team guidance\n${teamGuidance.trim()}`,
-      });
-      if (withGuidance) {
-        personaWithGuidance = withGuidance;
-      }
-    }
-
     // Daily brief is read-only: the agent GATHERS and EMITS, it must never mutate
     // (post a message, create a ticket, write a doc). Strip every write-flagged
     // tool + mutating sandbox tool, but KEEP all read tools and subagents so the
@@ -4000,13 +3971,10 @@ export async function processTask(
     // bracket+resolve-ID format, which confused agents into guessing IDs or, per
     // its own rule, refusing to emit `@Name` at all — starving the resolver.
     // Only relevant in a chat thread (channelId present).
-    // Prompt tiers: platform persona → sorted tool schemas (above) → P3
-    // teamGuidance (folded into personaWithGuidance) → dynamic Vespa/tools in
-    // fullContext. compactBeforeRun is the compaction switch — no second service.
     // An empty override sends runTask to its Digital Twin prompt, which a draft
     // test run must never get: it would answer as the user.
     const basePrompt =
-      (personaWithGuidance ?? "").trimEnd() || (isDraftTestRun(agentConfig) ? DRAFT_FALLBACK_PERSONA : "");
+      (systemPrompt ?? "").trimEnd() || (isDraftTestRun(agentConfig) ? DRAFT_FALLBACK_PERSONA : "");
     const citationGuide =
       agentSlug && CITATION_GUIDE_AGENT_SLUGS.has(agentSlug)
         ? CITATION_GUIDE

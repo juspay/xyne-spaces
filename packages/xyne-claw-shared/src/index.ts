@@ -8,17 +8,6 @@ export {
   SYSTEM_PROMPT_SECTION_HINTS,
 } from "./agent-prompt-contract.js";
 export type { AgentPermissionMode, SystemPromptContractResult } from "./agent-prompt-contract.js";
-export {
-  parseAgentToml,
-  renderAgentToml,
-  hashAgentProjection,
-  AGENT_TOML_FORBIDDEN_KEYS,
-} from "./agent-toml.js";
-export type { AgentTomlProjection, AgentTomlParseResult } from "./agent-toml.js";
-export { compileGuidanceChain, SPACE_DOC_MAX_BYTES } from "./guidance-chain.js";
-export type { GuidanceLayer, CompiledGuidance } from "./guidance-chain.js";
-export { assembleStaticPrefix, sortToolSlugsForPrefix } from "./prompt-prefix.js";
-export type { PromptPrefixTiers } from "./prompt-prefix.js";
 export type { ToolDefinition, ToolInputSchema, ConfigField, ToolExecutionContext, PendingQuestion, PendingResponse, UserQuestion, UserQuestionType } from "./tools/types.js";
 export { isUiWidget, userQuestionOptionLabel } from "./types/ui-widget.js";
 export type { UiWidget, UiWidgetType, UserQuestionOption } from "./types/ui-widget.js";

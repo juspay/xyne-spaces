@@ -2,7 +2,6 @@ import {
   isEntryEnabled,
   type McpCatalogEntry,
 } from '@/routes/AIScreen/library/shared/pickers/mcp/mcpCatalog';
-import type { McpKeyState } from '@/routes/AIScreen/library/shared/pickers/mcp/McpConnectCard';
 import { SPACES_SESSION_SERVER_TYPES } from '@/routes/AIScreen/library/shared/pickers/mcp/mcpConnectStrategy';
 import type { ToolboxSelection } from '@/services/claw/clawToolsTypes';
 
@@ -30,15 +29,4 @@ export function connectorsToConnect(
         !personal.has(entry.server.id),
     )
     .map(entry => entry.slug);
-}
-
-export function mcpKeyState(
-  entry: McpCatalogEntry,
-  personal: ReadonlySet<string>,
-  orgCovered: ReadonlySet<string>,
-): McpKeyState {
-  const id = entry.server?.id;
-  if (id && personal.has(id)) return 'personal';
-  if (id && orgCovered.has(id)) return 'org';
-  return 'none';
 }

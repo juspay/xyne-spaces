@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { McpCatalogEntry } from '@/routes/AIScreen/library/shared/pickers/mcp/mcpCatalog';
 import type { McpServer } from '@/services/claw/clawMcpTypes';
-import { connectorsToConnect, mcpKeyState } from './buildConnect';
+import { connectorsToConnect } from './buildConnect';
 import { EMPTY_TOOLS } from './types';
 
 function entry(slug: string, tool: string, extra: Partial<McpCatalogEntry> = {}): McpCatalogEntry {
@@ -44,13 +44,5 @@ describe('connectorsToConnect', () => {
     const after = { ...EMPTY_TOOLS, direct: ['list_prs', 'gateway:jira:j1-search'] };
     expect(connectorsToConnect(CATALOG, after, after, new Set())).toEqual([]);
     expect(connectorsToConnect([gateway], EMPTY_TOOLS, after, new Set())).toEqual([]);
-  });
-});
-
-describe('mcpKeyState', () => {
-  it('prefers the personal key, then the org one', () => {
-    expect(mcpKeyState(github, new Set(['srv-github']), new Set(['srv-github']))).toBe('personal');
-    expect(mcpKeyState(github, new Set(), new Set(['srv-github']))).toBe('org');
-    expect(mcpKeyState(github, new Set(), new Set())).toBe('none');
   });
 });

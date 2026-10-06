@@ -87,11 +87,6 @@ export interface InternalRunPayload {
     entryPath?: string;
   };
   additionalInstructions?: string;
-  /**
-   * Compiled org→space→leaf guidance (Phase 3). Injected after sorted tool
-   * schemas; kept out of systemPrompt so persona stays persona.
-   */
-  teamGuidance?: string;
   researchContext?: {
     type: string;
     id?: string;
@@ -210,7 +205,6 @@ export async function executeRunFromPayload(
     recordingRefs,
     contextFiles,
     additionalInstructions,
-    teamGuidance,
     researchContext,
     customSubagents,
     callableAgents,
@@ -287,7 +281,6 @@ export async function executeRunFromPayload(
       recordingRefs,
       contextFiles,
       additionalInstructions,
-      teamGuidance,
       researchContext,
       customSubagents,
       callableAgents,
