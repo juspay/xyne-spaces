@@ -75,6 +75,7 @@
   "overrides": {
     "@opentelemetry/otlp-transformer": {
       "protobufjs": "^8.0.1"
-    }
+    },
+    "proxy-addr": "2.0.8"
   }
 }
