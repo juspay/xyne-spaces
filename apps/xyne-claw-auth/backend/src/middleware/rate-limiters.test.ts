@@ -134,3 +134,69 @@ describe("createRequesterLimiter", () => {
     expect(res.headers.get("x-ratelimit-limit")).toBeNull();
   });
 });
+
+async function startWith(pick: (mod: typeof import("./rate-limiters.js")) => express.RequestHandler): Promise<void> {
+  const mod = await import("./rate-limiters.js");
+  const app = express();
+  app.use((req, _res, next) => {
+    if (req.headers["x-s2s-key"] !== "s2s-secret") delete req.headers["x-user-id"];
+    next();
+  });
+  app.use(pick(mod));
+  app.get("/ping", (_req, res) => {
+    res.json({ ok: true });
+  });
+  server = createServer(app);
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  baseUrl = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+}
+
+const fakeCookie = (i: number): string => `user_session_id=forged_${i}_${Math.random().toString(36).slice(2)}`;
+
+describe("forged session cookies cannot mint fresh buckets", () => {
+  it("public design-share limiter keys anonymous callers on the address, not the cookie", async () => {
+    await startWith((m) => m.publicShareLimiter);
+    const statuses: number[] = [];
+    for (let i = 0; i < 61; i += 1) {
+      statuses.push((await fetch(`${baseUrl}/ping`, { headers: { cookie: fakeCookie(i) } })).status);
+    }
+    expect(statuses.slice(0, 60).every((s) => s === 200)).toBe(true);
+    expect(statuses[60]).toBe(429);
+  });
+
+  it("public design-share limiter still gives a verified viewer their own bucket", async () => {
+    await startWith((m) => (req, res, next) => {
+      const viewer = req.headers["x-test-viewer"];
+      if (typeof viewer === "string") req.headers["x-user-id"] = viewer;
+      return m.publicShareLimiter(req, res, next);
+    });
+    for (let i = 0; i < 60; i += 1) {
+      await fetch(`${baseUrl}/ping`, { headers: { "x-test-viewer": "viewer-a" } });
+    }
+    expect((await fetch(`${baseUrl}/ping`, { headers: { "x-test-viewer": "viewer-a" } })).status).toBe(429);
+    expect((await fetch(`${baseUrl}/ping`, { headers: { "x-test-viewer": "viewer-b" } })).status).toBe(200);
+  });
+
+  it("connector OAuth limiter gives each verified user their own bucket", async () => {
+    await startWith((m) => (req, res, next) => {
+      const user = req.headers["x-test-user"];
+      if (typeof user === "string") req.headers["x-user-id"] = user;
+      return m.oauthLimiter(req, res, next);
+    });
+    for (let i = 0; i < 10; i += 1) {
+      await fetch(`${baseUrl}/ping`, { headers: { "x-test-user": "user-a" } });
+    }
+    expect((await fetch(`${baseUrl}/ping`, { headers: { "x-test-user": "user-a" } })).status).toBe(429);
+    expect((await fetch(`${baseUrl}/ping`, { headers: { "x-test-user": "user-b" } })).status).toBe(200);
+  });
+
+  it("connector OAuth limiter is not reset by rotating forged cookies when no user is verified", async () => {
+    await startWith((m) => m.oauthLimiter);
+    const statuses: number[] = [];
+    for (let i = 0; i < 11; i += 1) {
+      statuses.push((await fetch(`${baseUrl}/ping`, { headers: { cookie: fakeCookie(i) } })).status);
+    }
+    expect(statuses.slice(0, 10).every((s) => s === 200)).toBe(true);
+    expect(statuses[10]).toBe(429);
+  });
+});
