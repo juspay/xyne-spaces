@@ -42,6 +42,9 @@ function filledRange(sheet: XLSX.WorkSheet): { lastRow: number; lastColumn: numb
  * column letters match the file's own.
  */
 self.onmessage = (event: MessageEvent<ArrayBuffer>) => {
+  // Only the page that made a dedicated worker can message it, and its messages carry
+  // no origin: one that does came from elsewhere and is ignored.
+  if (event.origin !== '' && event.origin !== self.location.origin) return;
   try {
     const workbook = XLSX.read(event.data, { type: 'array', cellDates: true, cellNF: true });
     const sheets = workbook.SheetNames.map((name): SpreadsheetSheet => {
