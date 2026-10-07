@@ -151,6 +151,7 @@ import {
 import { stringFromFormValue } from '@xyne/shared/zero';
 import {
   ATTACHMENT_STILL_UPLOADING,
+  COLLECTION_ERROR_CODES,
   isAttachmentUploaded,
   isAttachmentUploadInFlight,
 } from '@xyne/shared/zero/mutators';
@@ -17097,17 +17098,23 @@ export function createMutators(
                 .one(),
             );
             if (!isParticipant) {
-              throw new Error('Collection creation failed: you must be a channel participant');
+              throw new ApplicationError('Collection creation failed: you must be a channel participant', {
+                details: { code: COLLECTION_ERROR_CODES.NOT_CHANNEL_PARTICIPANT },
+              });
             }
           }
 
-          // Check for existing non-deleted collection with same name in this scope
+          // Check for existing non-deleted collection with same name in this scope.
+          // Exclude `id` so a replayed push of the same mutation never conflicts
+          // with the row it created itself.
           const existingCollection = await db.collection.findFirst({
-            where: { ownerId: authData.sub, name, scopeType, scopeId, deletedAt: null },
+            where: { ownerId: authData.sub, name, scopeType, scopeId, deletedAt: null, id: { not: id } },
             select: { id: true },
           });
           if (existingCollection) {
-            throw new Error(`Collection "${name}" already exists`);
+            throw new ApplicationError(`Collection "${name}" already exists`, {
+              details: { code: COLLECTION_ERROR_CODES.NAME_EXISTS, name },
+            });
           }
 
           await tx.mutate.collections.insert({

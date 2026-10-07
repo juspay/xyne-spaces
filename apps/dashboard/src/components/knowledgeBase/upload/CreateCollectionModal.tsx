@@ -7,6 +7,7 @@ import Input from '../../ui/Input/Input';
 import { useAuth } from '../../../hooks/useAuth';
 import type { CollectionSummary } from '../../../services/Knowledge/collectionService';
 import { CollectionRole } from '@xyne/shared';
+import { COLLECTION_ERROR_CODES, COLLECTION_NAME_MAX_LENGTH } from '@xyne/shared/zero/mutators';
 import { useZero } from '../../../hooks/useZero';
 import { mutators } from '../../../zero/mutators';
 import { EntitySelector } from '../../ui/EntitySelector/EntitySelector';
@@ -27,6 +28,30 @@ interface CreateCollectionModalProps {
 }
 
 const FOCUS_DELAY_MS = 50;
+const GENERIC_CREATE_ERROR = "Couldn't create the collection. Please try again.";
+
+/**
+ * Translate a createCollection failure into user-facing copy. Known failures
+ * carry an `ApplicationError` code; anything else (Zero transport/poke errors,
+ * unexpected server errors) gets a generic message rather than leaking raw
+ * internals such as "Poke processing error: ..." into the toast.
+ */
+const getCreateCollectionErrorMessage = (
+  error: { message?: string; details?: unknown } | undefined,
+  name: string,
+  channelName: string | undefined,
+): string => {
+  const details = error?.details as { code?: string } | undefined;
+  const where = channelName ? ` in #${channelName}` : '';
+  switch (details?.code) {
+    case COLLECTION_ERROR_CODES.NAME_EXISTS:
+      return `You already have a collection named "${name}"${where}. Choose a different name.`;
+    case COLLECTION_ERROR_CODES.NOT_CHANNEL_PARTICIPANT:
+      return `You need to be a member of ${channelName ? `#${channelName}` : 'this channel'} to create a collection there.`;
+    default:
+      return GENERIC_CREATE_ERROR;
+  }
+};
 
 const CreateCollectionModal = ({
   isOpen,
@@ -46,6 +71,10 @@ const CreateCollectionModal = ({
   const [selectedChannelId, setSelectedChannelId] = useState<string | null>(initialScopeId ?? null);
 
   const effectiveScopeId = selectedChannelId;
+  const channelName = useMemo(
+    () => (effectiveScopeId ? channels.find(ch => ch.id === effectiveScopeId)?.name : undefined),
+    [channels, effectiveScopeId],
+  );
 
   const resetForm = useCallback(() => {
     setTitle('');
@@ -72,6 +101,10 @@ const CreateCollectionModal = ({
   const handleCreateCollection = useCallback(async () => {
     const finalTitle = title.trim();
     if (!finalTitle) return;
+    if (finalTitle.length > COLLECTION_NAME_MAX_LENGTH) {
+      toast.error(`Collection name must be ${COLLECTION_NAME_MAX_LENGTH} characters or fewer.`);
+      return;
+    }
     if (!user) {
       toast.error('You must be logged in to create a collection');
       return;
@@ -102,12 +135,8 @@ const CreateCollectionModal = ({
 
       if (serverRes.type === 'error') {
         setIsCreating(false);
-        const msg = serverRes.error.message || '';
-        if (msg.includes('already exists')) {
-          toast.error(msg);
-        } else {
-          toast.error(msg || 'Failed to create collection. Please try again.');
-        }
+        console.error('[CreateCollectionModal] createCollection failed', serverRes.error);
+        toast.error(getCreateCollectionErrorMessage(serverRes.error, finalTitle, channelName));
         return;
       }
 
@@ -125,14 +154,10 @@ const CreateCollectionModal = ({
       onClose();
     } catch (error) {
       setIsCreating(false);
-      const msg = error instanceof Error ? error.message : '';
-      if (msg.includes('already exists')) {
-        toast.error(msg);
-      } else {
-        toast.error(msg || 'Failed to create collection. Please try again.');
-      }
+      console.error('[CreateCollectionModal] createCollection threw', error);
+      toast.error(GENERIC_CREATE_ERROR);
     }
-  }, [zero, title, scopeType, effectiveScopeId, isPrivate, user, onSuccess, onClose, resetForm]);
+  }, [zero, title, scopeType, effectiveScopeId, channelName, isPrivate, user, onSuccess, onClose, resetForm]);
 
   const canSubmit = title.trim().length > 0 && !isCreating;
 
@@ -175,6 +200,7 @@ const CreateCollectionModal = ({
               value={title}
               onChange={event => setTitle(event.target.value)}
               placeholder='e.g. Product docs'
+              maxLength={COLLECTION_NAME_MAX_LENGTH}
               disabled={isCreating}
               data-track-category='knowledge-base'
               data-track-name='collection-name-input'
