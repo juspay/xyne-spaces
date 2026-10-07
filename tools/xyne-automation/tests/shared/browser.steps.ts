@@ -406,7 +406,16 @@ export default class BrowserSteps {
     // sequence has to race the popover's own close animation. Routing through
     // the Customize dialog instead is slower by one dialog round-trip but is
     // deterministic — once added, nav-<itemId> is a plain button on the rail.
-    if (!(await toolbarItem.isVisible().catch(() => false))) {
+    // Give zero-sync a short grace window to hydrate the user's toolbarIds
+    // into the rail before deciding the item is missing. Without this, a fresh
+    // browser session that has the item in Shown on the backend loses the race
+    // against the rail's first render and falls through to the Customize add
+    // path, which fails because the item isn't in Available either.
+    const railVisible = await toolbarItem
+      .waitFor({ state: 'visible', timeout: 2500 })
+      .then(() => true)
+      .catch(() => false);
+    if (!railVisible) {
       await moreTrigger.click();
       // The Customize button is the last node in the More popover, so once it
       // is attached the popover's content has finished mounting.
