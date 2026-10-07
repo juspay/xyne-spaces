@@ -9,6 +9,7 @@ import { authActor } from '../../machines/authMachine';
 import Confetti from 'react-confetti';
 import LocalHarnessOnboardingStep from './LocalHarnessOnboardingStep';
 import type { LocalHarnessInstallation } from '../../types/electron';
+import { DEFAULT_LANDING_CHANNEL_NAME } from '../../constants/channels';
 
 const OnboardingScreen: React.FC = () => {
   const navigate = useNavigate();
@@ -21,9 +22,14 @@ const OnboardingScreen: React.FC = () => {
   // Get migrated channels using the hook
   const migratedChannels = useMigratedChannels();
 
-  // Resolve the default "general" channel so first-time users land there after
-  // onboarding instead of the user guide.
+  // Resolve the default landing channel (falling back to "general") so first-time
+  // users land there after onboarding instead of the user guide.
   const generalChannel = useChannelByName('general');
+  const defaultLandingChannel = useChannelByName(DEFAULT_LANDING_CHANNEL_NAME);
+  const landingChannel =
+    defaultLandingChannel && !defaultLandingChannel.isArchived
+      ? defaultLandingChannel
+      : generalChannel;
 
   const [localHarnesses, setLocalHarnesses] = useState<LocalHarnessInstallation[]>([]);
   const currentStepRef = useRef(0);
@@ -138,9 +144,9 @@ const OnboardingScreen: React.FC = () => {
 
     const workspaceId = currentUser?.workspaceId;
     if (workspaceId) {
-      // After onboarding, land directly in the chat directory on the general
-      // channel instead of the user guide.
-      const landing = generalChannel?.id ? `/chat/dir/${generalChannel.id}` : '/chat/dir';
+      // After onboarding, land directly in the chat directory on the default
+      // landing channel instead of the user guide.
+      const landing = landingChannel?.id ? `/chat/dir/${landingChannel.id}` : '/chat/dir';
       void navigate(`/${workspaceId}${landing}`);
     }
   };

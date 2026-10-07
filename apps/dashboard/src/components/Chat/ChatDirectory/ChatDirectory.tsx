@@ -106,6 +106,7 @@ import { useOverdueRemindersCount } from '../../../hooks/useOverdueRemindersCoun
 import { useRecapUnreadCount, usePrefetchRecap } from '../../../hooks/useRecapData';
 import { stateMachineActor, type VisibleChannel } from '../../../machines/stateMachine';
 import { usePendingDelayedMessagesCount } from '../../../hooks/useUserDelayedMessages';
+import { DEFAULT_LANDING_CHANNEL_NAME } from '../../../constants/channels';
 
 const ContainerDropZone = ({
   id,
@@ -517,9 +518,17 @@ const ChatDirectory = ({
     const isAtChatDirRoot =
       pathname === '/chat/dir' || (workspaceId && pathname === `/${workspaceId}/chat/dir`);
     if (!isAtChatDirRoot) return;
+    // Visible channels hydrate after the first render; wait for them so the
+    // default landing channel lookup does not fall through to general.
+    if (!lastVisitedChannelId && !channelData?.length) return;
+
+    const defaultLandingChannelId = [...starred, ...channels].find(
+      channel => !channel.isArchived && channel.name.toLowerCase() === DEFAULT_LANDING_CHANNEL_NAME,
+    )?.id;
 
     const targetChannelId =
       lastVisitedChannelId ||
+      defaultLandingChannelId ||
       landingChannelId ||
       selfDmChannelId ||
       starred[0]?.id ||
@@ -532,6 +541,7 @@ const ChatDirectory = ({
   }, [
     pathname,
     lastVisitedChannelId,
+    channelData,
     starred,
     channels,
     directMessages,
