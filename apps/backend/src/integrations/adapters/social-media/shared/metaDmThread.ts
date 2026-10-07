@@ -31,18 +31,27 @@ export async function resolveMetaDmThread(
 }
 
 /**
- * Whether a DM thread can still be replied to. Reads externalMessage (not email) because its
+ * When the customer last wrote on a DM thread. Reads externalMessage (not email) because its
  * createdAt is the real Meta event time, set in core.ts.
  */
-export async function getMetaReplyWindowState(
+export async function getLastInboundAt(
   sourceId: string,
   externalThreadId: string,
-): Promise<'open' | 'expired' | 'no-inbound'> {
+): Promise<Date | null> {
   const lastInbound = await db.externalMessage.findFirst({
     where: { externalSourceId: sourceId, externalThreadId, direction: 'INCOMING' },
     orderBy: { createdAt: 'desc' },
     select: { createdAt: true },
   });
-  if (!lastInbound) return 'no-inbound';
-  return Date.now() - lastInbound.createdAt.getTime() > META_REPLY_WINDOW_MS ? 'expired' : 'open';
+  return lastInbound?.createdAt ?? null;
+}
+
+/** Whether a DM thread is still inside the standard 24h reply window. */
+export async function getMetaReplyWindowState(
+  sourceId: string,
+  externalThreadId: string,
+): Promise<'open' | 'expired' | 'no-inbound'> {
+  const lastInboundAt = await getLastInboundAt(sourceId, externalThreadId);
+  if (!lastInboundAt) return 'no-inbound';
+  return Date.now() - lastInboundAt.getTime() > META_REPLY_WINDOW_MS ? 'expired' : 'open';
 }

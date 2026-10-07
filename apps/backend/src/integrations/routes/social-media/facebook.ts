@@ -22,7 +22,7 @@ import {
 } from '../../adapters/social-media/facebook/oauthStateService';
 import type { FacebookCredentials } from '../../adapters/social-media/facebook/types';
 import { authorizeSocialMediaManager } from './access';
-import { oauthDeskStartSchema, validateOAuthDeskSetup } from './deskSetup';
+import { oauthDeskStartSchema, parseOAuthPlatform, validateOAuthDeskSetup } from './deskSetup';
 
 const TAG = '[FacebookRoutes]';
 const router = express.Router();
@@ -166,7 +166,8 @@ router.post(
       const { channelId } = req.params;
       const userId = req.user!.id;
       const workspaceId = req.user!.workspaceId!;
-      const platform = (req.body?.platform ?? 'web') as 'web' | 'electron';
+      const platform = parseOAuthPlatform(req, res);
+      if (!platform) return;
 
       if (!(await authorizeSocialMediaManager(channelId, userId, workspaceId, res))) return;
 
@@ -200,7 +201,8 @@ router.post(
       const { channelId, sourceId } = req.params;
       const userId = req.user!.id;
       const workspaceId = req.user!.workspaceId!;
-      const platform = (req.body?.platform ?? 'web') as 'web' | 'electron';
+      const platform = parseOAuthPlatform(req, res);
+      if (!platform) return;
 
       if (!(await authorizeSocialMediaManager(channelId, userId, workspaceId, res))) return;
 
@@ -303,7 +305,7 @@ router.get(
           return;
         }
         const metaSource = toMetaSource(page, fbUserId);
-        await db.externalSource.updateMany({
+        const updated = await db.externalSource.updateMany({
           where: {
             id: state.sourceId,
             channelId: state.channelId,
@@ -316,6 +318,11 @@ router.get(
             isActive: true,
           },
         });
+        // The source was deleted or moved to another desk while the user was logging in.
+        if (updated.count === 0) {
+          redirectToDesk(req, res, state, { error: 'facebook_connection_failed' });
+          return;
+        }
         redirectToDesk(req, res, state);
         return;
       }
@@ -479,26 +486,33 @@ router.post(
         where: { sourceType: ExternalSourcePlatform.FACEBOOK, NOT: { credentials: '' } },
         select: { id: true, credentials: true },
       });
-      const matchingIds = sources
-        .filter(source => {
-          try {
-            return (JSON.parse(decrypt(source.credentials)) as FacebookCredentials).fbUserId === payload.user_id;
-          } catch {
-            return false;
-          }
-        })
-        .map(source => source.id);
-      if (matchingIds.length > 0) {
+      const matching = sources.flatMap(source => {
+        try {
+          const creds = JSON.parse(decrypt(source.credentials)) as FacebookCredentials;
+          return creds.fbUserId === payload.user_id ? [{ id: source.id, creds }] : [];
+        } catch {
+          return [];
+        }
+      });
+      if (matching.length > 0) {
         await db.externalSource.updateMany({
-          where: { id: { in: matchingIds } },
+          where: { id: { in: matching.map(source => source.id) } },
           data: { isActive: false, credentials: '' },
         });
+        // Best-effort, as on disconnect: stop Meta delivering events for these Pages.
+        for (const { creds } of matching) {
+          try {
+            await facebookGraphClient.unsubscribePage(creds.pageAccessToken, creds.pageId);
+          } catch (unsubErr) {
+            logger.warn(`${TAG} Failed to remove Page webhook subscription (non-fatal)`, { error: unsubErr });
+          }
+        }
       }
-      logger.info(`${TAG} Data deletion: deactivated ${matchingIds.length} source(s)`);
+      logger.info(`${TAG} Data deletion: deactivated ${matching.length} source(s)`);
 
       const confirmationCode = `xyne-del-${Date.now()}`;
       res.json({
-        url: `${getBackendUrl(req)}/api/integrations/social-media/instagram/data-deletion-status?code=${confirmationCode}`,
+        url: `${getBackendUrl(req)}/api/integrations/social-media/facebook/data-deletion-status?code=${confirmationCode}`,
         confirmation_code: confirmationCode,
       });
     } catch (error) {

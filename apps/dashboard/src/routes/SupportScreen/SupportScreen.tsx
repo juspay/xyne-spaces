@@ -2226,10 +2226,9 @@ const SupportScreen = (): ReactElement => {
       ? selectedChannelId
       : null,
   );
-  // Instagram and Facebook are webhook-driven, so there is nothing to refetch.
-  const isInstagramDesk =
-    selectedChannelIntegration.sourceType === 'instagram' ||
-    selectedChannelIntegration.sourceType === 'facebook';
+  const isInstagramDesk = selectedChannelIntegration.sourceType === 'instagram';
+  // Facebook is webhook-driven too, but its history can be pulled for a chosen time range.
+  const isFacebookDesk = selectedChannelIntegration.sourceType === 'facebook';
   const isCallDesk = selectedChannelFull?.type === ChannelType.CALL;
 
   // Artifact apps added to this desk (EmailChannelPreference.deskAppIds). Every
@@ -2263,6 +2262,7 @@ const SupportScreen = (): ReactElement => {
     refetchChannelId,
     isSocialMediaDesk,
     isCallDesk,
+    isFacebookDesk ? 'Facebook activity' : 'reviews',
   );
   const canRefetch = !!refetchChannelId;
   const {
@@ -3608,7 +3608,7 @@ const SupportScreen = (): ReactElement => {
                             leadingAction={
                               isSocialMediaDesk
                                 ? {
-                                    label: 'Fetch reviews',
+                                    label: isFacebookDesk ? 'Fetch from Facebook' : 'Fetch reviews',
                                     // No sourceId => the hook routes to the
                                     // review sync; the dialog supplies the range.
                                     onSelect: () => {
@@ -3644,11 +3644,13 @@ const SupportScreen = (): ReactElement => {
                             content={
                               isRefetching
                                 ? 'Fetching latest…'
-                                : isSocialMediaDesk
-                                  ? 'Fetch reviews'
-                                  : isCallDesk
-                                    ? 'Fetch missed calls'
-                                    : 'Fetch latest emails'
+                                : isFacebookDesk
+                                  ? 'Fetch from Facebook'
+                                  : isSocialMediaDesk
+                                    ? 'Fetch reviews'
+                                    : isCallDesk
+                                      ? 'Fetch missed calls'
+                                      : 'Fetch latest emails'
                             }
                             side='bottom'
                           >
@@ -4887,14 +4889,21 @@ const SupportScreen = (): ReactElement => {
                 title: `Fetch from ${fetchTarget.sourceName}`,
                 subtitle: 'Choose how much history to pull from this source.',
               }
-            : isSocialMediaDesk
+            : isFacebookDesk
               ? {
-                  title: 'Fetch reviews',
+                  title: 'Fetch from Facebook',
                   subtitle:
-                    'Pull new reviews or backfill a specific time range from the connected apps.',
-                  summaryLabel: 'Will fetch reviews posted',
+                    'Pull messages, comments and mentions from the connected Pages for a time range. Anything already on the desk is skipped. Messenger returns at most the 20 latest messages per conversation.',
+                  summaryLabel: 'Will fetch Facebook activity from',
                 }
-              : {})}
+              : isSocialMediaDesk
+                ? {
+                    title: 'Fetch reviews',
+                    subtitle:
+                      'Pull new reviews or backfill a specific time range from the connected apps.',
+                    summaryLabel: 'Will fetch reviews posted',
+                  }
+                : {})}
           {...(isCallDesk && {
             ...(!fetchTarget?.sourceName && {
               title: 'Fetch calls',

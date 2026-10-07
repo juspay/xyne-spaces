@@ -5,13 +5,26 @@ import type { NormalizedData, ParseResult } from '@/integrations/core/types';
 import { SOCIAL_MEDIA_INTERACTION_TYPES } from '@/integrations/social-media/constants';
 import { ExternalMessageRepository } from '@/database/repositories/externalMessageRepository';
 import {
-  FACEBOOK_COMMENT_ID_FIELD,
   FACEBOOK_LINK_FIELD,
-  FACEBOOK_POST_ID_FIELD,
 } from './constants';
 import { metaDmBody, toDownloadableMetaAttachments } from '../shared/metaDmAttachments';
 import { resolveMetaDmThread } from '../shared/metaDmThread';
 import type { FacebookWebhookComment, FacebookWebhookMessaging } from './types';
+
+// The ids below are also used by the manual fetch (flow.ts) to skip items already stored.
+
+export const dmExternalId = (sourceId: string, mid: string): string => `${sourceId}:${mid}`;
+
+/**
+ * A post id is "{ownerId}_{postId}" and Meta spells the owner differently in webhooks and in
+ * the Graph API, so a post is keyed by the part after the underscore.
+ */
+const postKey = (postId: string): string => postId.split('_').pop() ?? postId;
+
+export function commentExternalId(sourceId: string, comment: FacebookWebhookComment): string | null {
+  const key = comment.rawCommentId ?? (comment.postId ? postKey(comment.postId) : undefined);
+  return key ? `${sourceId}:${comment.type}:${key}` : null;
+}
 
 export class FacebookTransformer extends BaseTransformer<unknown, NormalizedData[]> {
   private externalMessageRepo = new ExternalMessageRepository();
@@ -40,7 +53,7 @@ export class FacebookTransformer extends BaseTransformer<unknown, NormalizedData
     if (messaging.isContentUpdate) {
       const existing = await this.externalMessageRepo.findByExternalId(
         source.id,
-        `${source.id}:${mid}`,
+        dmExternalId(source.id, mid),
       );
       // The original was never ingested (sent before the Page was connected). Failing here
       // would 500 the whole webhook and make Meta redeliver it forever, so drop the edit.
@@ -51,7 +64,7 @@ export class FacebookTransformer extends BaseTransformer<unknown, NormalizedData
         success: true,
         data: [
           {
-            externalId: `${source.id}:${mid}`,
+            externalId: dmExternalId(source.id, mid),
             externalThreadId: existing.externalThreadId,
             author: { name: senderName, externalId: psid },
             content: text,
@@ -83,7 +96,7 @@ export class FacebookTransformer extends BaseTransformer<unknown, NormalizedData
       success: true,
       data: [
         {
-          externalId: `${source.id}:${mid}`,
+          externalId: dmExternalId(source.id, mid),
           externalThreadId,
           author: { name: senderName, externalId: psid },
           content: text,
@@ -114,15 +127,15 @@ export class FacebookTransformer extends BaseTransformer<unknown, NormalizedData
     if (!source) {
       return { success: false, error: 'Missing source for comment/mention transform' };
     }
-    const dedupId = comment.rawCommentId ?? comment.postId;
-    if (!dedupId) {
+    const externalId = commentExternalId(source.id, comment);
+    if (!externalId) {
       return { success: false, error: 'Facebook comment/mention has no comment or post id' };
     }
 
     // comment:/post: prefixes let replySender tell these apart from DM threads (psid:timestamp).
     const externalThreadId = comment.commentId
       ? `comment:${comment.commentId}`
-      : `post:${comment.postId}`;
+      : `post:${postKey(comment.postId ?? '')}`;
     const subjectVerb =
       comment.type === 'comment' ? 'comment' : comment.commentId ? 'mention' : 'post mention';
 
@@ -130,7 +143,7 @@ export class FacebookTransformer extends BaseTransformer<unknown, NormalizedData
       success: true,
       data: [
         {
-          externalId: `${source.id}:${comment.type}:${dedupId}`,
+          externalId,
           externalThreadId,
           author: { name: comment.senderName, externalId: comment.senderId || undefined },
           content: comment.text,
@@ -149,35 +162,15 @@ export class FacebookTransformer extends BaseTransformer<unknown, NormalizedData
             ...(comment.commentId ? { commentId: comment.commentId } : {}),
             ...(comment.postId ? { postId: comment.postId } : {}),
           },
-          ticketCustomFields: [
-            ...(comment.commentId
-              ? [
-                  {
-                    fieldName: FACEBOOK_COMMENT_ID_FIELD,
-                    fieldType: FormFieldType.STRING,
-                    value: comment.commentId,
-                  },
-                ]
-              : []),
-            ...(comment.postId
-              ? [
-                  {
-                    fieldName: FACEBOOK_POST_ID_FIELD,
-                    fieldType: FormFieldType.STRING,
-                    value: comment.postId,
-                  },
-                ]
-              : []),
-            ...(comment.permalink
-              ? [
-                  {
-                    fieldName: FACEBOOK_LINK_FIELD,
-                    fieldType: FormFieldType.STRING,
-                    value: comment.permalink,
-                  },
-                ]
-              : []),
-          ],
+          ...(comment.permalink && {
+            ticketCustomFields: [
+              {
+                fieldName: FACEBOOK_LINK_FIELD,
+                fieldType: FormFieldType.STRING,
+                value: comment.permalink,
+              },
+            ],
+          }),
         },
       ],
     };

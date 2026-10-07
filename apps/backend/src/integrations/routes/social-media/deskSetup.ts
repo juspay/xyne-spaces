@@ -1,4 +1,4 @@
-import type { Response } from 'express';
+import type { Request, Response } from 'express';
 import { z } from 'zod';
 import { db } from '@/database/client';
 
@@ -11,6 +11,19 @@ export const oauthDeskStartSchema = z.object({
   visibility: z.enum(['PUBLIC', 'PRIVATE', 'public', 'private']).default('PUBLIC'),
   platform: z.enum(['web', 'electron']).default('web'),
 });
+
+/**
+ * Add-account and reconnect take only a platform. Reject a bad one here: otherwise it fails the
+ * OAuth state check after the user has gone through the whole provider login. Sends the error itself.
+ */
+export function parseOAuthPlatform(req: Request, res: Response): 'web' | 'electron' | null {
+  const parsed = oauthDeskStartSchema.shape.platform.safeParse(req.body?.platform);
+  if (!parsed.success) {
+    res.status(400).json({ error: 'platform must be "web" or "electron"' });
+    return null;
+  }
+  return parsed.data;
+}
 
 /** Checks the chosen project/board/group exist and the channel name is free. Sends the error response itself. */
 export async function validateOAuthDeskSetup(

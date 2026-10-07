@@ -15,7 +15,7 @@ import { metaGraphClient } from '../../adapters/social-media/instagram/metaGraph
 import { instagramOAuthStateService } from '../../adapters/social-media/instagram/oauthStateService';
 import type { InstagramCredentials } from '../../adapters/social-media/instagram/types';
 import { authorizeSocialMediaManager, canAccessSocialMediaChannel } from './access';
-import { oauthDeskStartSchema, validateOAuthDeskSetup } from './deskSetup';
+import { oauthDeskStartSchema, parseOAuthPlatform, validateOAuthDeskSetup } from './deskSetup';
 
 const TAG = '[InstagramRoutes]';
 const router = express.Router();
@@ -106,7 +106,8 @@ router.post(
       const { channelId } = req.params;
       const userId = req.user!.id;
       const workspaceId = req.user!.workspaceId!;
-      const platform = (req.body?.platform ?? 'web') as 'web' | 'electron';
+      const platform = parseOAuthPlatform(req, res);
+      if (!platform) return;
 
       if (!(await authorizeSocialMediaManager(channelId, userId, workspaceId, res))) return;
 
@@ -176,7 +177,8 @@ router.post(
       const { channelId } = req.params;
       const userId = req.user!.id;
       const workspaceId = req.user!.workspaceId!;
-      const platform = (req.body?.platform ?? 'web') as 'web' | 'electron';
+      const platform = parseOAuthPlatform(req, res);
+      if (!platform) return;
 
       if (!(await authorizeSocialMediaManager(channelId, userId, workspaceId, res))) return;
 
@@ -388,7 +390,7 @@ router.get(
           });
         } else {
           // Legacy channel-level reconnect (single-account channels only).
-          await db.externalSource.updateMany({
+          const updated = await db.externalSource.updateMany({
             where: {
               channelId: state.channelId,
               workspaceId: state.workspaceId,
@@ -402,6 +404,16 @@ router.get(
               isActive: true,
             },
           });
+          // The source was deleted or moved to another desk while the user was logging in.
+          if (updated.count === 0) {
+            redirectToDesk(req, res, {
+              workspaceId: state.workspaceId,
+              channelId: state.channelId,
+              platform: state.platform,
+              error: 'instagram_connection_failed',
+            });
+            return;
+          }
         }
         redirectToDesk(req, res, {
           workspaceId: state.workspaceId,
@@ -498,11 +510,11 @@ router.get(
   },
 );
 
-// GET /instagram/data-deletion-status?code=...
+// GET /instagram/data-deletion-status?code=... (also served as /facebook/data-deletion-status)
 // Public page Meta's App Review will load after POSTing to /instagram/data-deletion.
 // Returns a minimal HTML confirmation so the reviewer sees a real response.
 router.get(
-  '/instagram/data-deletion-status',
+  ['/instagram/data-deletion-status', '/facebook/data-deletion-status'],
   (_req: Request, res: Response): void => {
     const code = typeof _req.query.code === 'string' ? _req.query.code : '';
     res.setHeader('Content-Type', 'text/html; charset=utf-8');
@@ -575,7 +587,8 @@ router.post(
     try {
       const { channelId, sourceId } = req.params;
       const workspaceId = req.user!.workspaceId!;
-      const platform = (req.body?.platform ?? 'web') as 'web' | 'electron';
+      const platform = parseOAuthPlatform(req, res);
+      if (!platform) return;
 
       if (!(await authorizeSocialMediaManager(channelId, req.user!.id, workspaceId, res))) return;
 

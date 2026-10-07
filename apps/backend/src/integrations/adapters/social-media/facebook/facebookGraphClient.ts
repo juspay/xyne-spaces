@@ -1,6 +1,7 @@
 import axios from 'axios';
 import { config } from '@/config/env';
 import { logger } from '@/utils/logger';
+import { SenderNameCache } from '../shared/senderNameCache';
 
 const FB_API_VERSION = 'v25.0';
 const FB_REQUEST_TIMEOUT_MS = 10_000;
@@ -15,8 +16,94 @@ export interface FacebookPage {
   access_token: string;
 }
 
+// Upper bound on follow-up pages per list, so one fetch cannot run away on a very busy Page.
+const MAX_HISTORY_PAGES = 40;
+
+interface Paged<T> {
+  data?: T[];
+  paging?: { next?: string };
+}
+
+export interface FacebookHistoryMessage {
+  id: string;
+  created_time: string;
+  from?: { id?: string; name?: string };
+  message?: string;
+  attachments?: {
+    data?: Array<{
+      mime_type?: string;
+      image_data?: { url?: string };
+      video_data?: { url?: string };
+      file_url?: string;
+    }>;
+  };
+}
+
+export interface FacebookHistoryComment {
+  id: string;
+  created_time: string;
+  from?: { id?: string; name?: string };
+  message?: string;
+  parent?: { id: string };
+  permalink_url?: string;
+}
+
+export interface FacebookTaggedPost {
+  id: string;
+  created_time: string;
+  from?: { id?: string; name?: string };
+  message?: string;
+  permalink_url?: string;
+}
+
+/**
+ * Yields one page at a time, following paging.next (a full URL that already carries the query
+ * string) until `done` says the latest page reached far enough back, or the page cap is hit.
+ */
+async function* iteratePages<T>(
+  accessToken: string,
+  first: Paged<T> | undefined,
+  done: (page: T[]) => boolean,
+): AsyncGenerator<T[]> {
+  let page = first;
+  for (let fetched = 0; page; fetched++) {
+    const data = page.data ?? [];
+    yield data;
+    if (!page.paging?.next || done(data) || fetched >= MAX_HISTORY_PAGES) return;
+    page = (await axios.get<Paged<T>>(page.paging.next, bearer(accessToken))).data;
+  }
+}
+
+async function collectPages<T>(
+  accessToken: string,
+  first: Paged<T> | undefined,
+  done: (page: T[]) => boolean,
+): Promise<T[]> {
+  const items: T[] = [];
+  for await (const page of iteratePages(accessToken, first, done)) items.push(...page);
+  return items;
+}
+
+const olderThan =
+  <T>(since: Date, time: (item: T) => string | undefined) =>
+  (page: T[]): boolean => {
+    const last = page[page.length - 1];
+    const lastTime = last ? time(last) : undefined;
+    return !lastTime || Date.parse(lastTime) < since.getTime();
+  };
+
 function bearer(accessToken: string) {
   return { headers: { Authorization: `Bearer ${accessToken}` }, timeout: FB_REQUEST_TIMEOUT_MS };
+}
+
+const senderNameCache = new SenderNameCache();
+
+// Page tokens have no expiry date, but Meta invalidates them when the admin who connected the
+// Page changes their password, loses their Page role, or removes the app (Graph error 190).
+export function isFacebookTokenRejected(error: unknown): boolean {
+  const code = (error as { response?: { data?: { error?: { code?: number } } } })?.response?.data
+    ?.error?.code;
+  return code === 190;
 }
 
 export const facebookGraphClient = {
@@ -100,13 +187,17 @@ export const facebookGraphClient = {
     pageId: string,
     recipientPsid: string,
     text: string,
+    // Outside the 24h window a reply must carry the Human Agent tag.
+    humanAgent = false,
   ): Promise<{ recipient_id: string; message_id: string }> {
     const response = await axios.post<{ recipient_id: string; message_id: string }>(
       `${FB_BASE_URL}/${pageId}/messages`,
       {
         recipient: { id: recipientPsid },
         message: { text },
-        messaging_type: 'RESPONSE',
+        ...(humanAgent
+          ? { messaging_type: 'MESSAGE_TAG', tag: 'HUMAN_AGENT' }
+          : { messaging_type: 'RESPONSE' }),
       },
       bearer(pageAccessToken),
     );
@@ -124,6 +215,88 @@ export const facebookGraphClient = {
       bearer(pageAccessToken),
     );
     return response.data;
+  },
+
+  // Messenger conversations touched since `since`, newest first, one page (25) at a time, each
+  // with its latest messages. Meta only returns details for the 20 most recent messages of a
+  // conversation and errors on older ones, so messages are capped there and never paged.
+  async *conversationPages(
+    pageAccessToken: string,
+    pageId: string,
+    since: Date,
+  ): AsyncGenerator<Array<{ id: string; messages: FacebookHistoryMessage[] }>> {
+    type Conversation = { id: string; updated_time?: string; messages?: Paged<FacebookHistoryMessage> };
+    const first = await axios.get<Paged<Conversation>>(`${FB_BASE_URL}/${pageId}/conversations`, {
+      params: {
+        platform: 'messenger',
+        fields:
+          'id,updated_time,messages.limit(20){id,created_time,from,message,attachments{mime_type,image_data,video_data,file_url}}',
+        limit: '25',
+      },
+      ...bearer(pageAccessToken),
+    });
+    const pages = iteratePages(
+      pageAccessToken,
+      first.data,
+      olderThan<Conversation>(since, (conversation) => conversation.updated_time),
+    );
+    for await (const page of pages) {
+      yield page
+        .filter(
+          (conversation) =>
+            !conversation.updated_time || Date.parse(conversation.updated_time) >= since.getTime(),
+        )
+        .map((conversation) => ({
+          id: conversation.id,
+          messages: conversation.messages?.data ?? [],
+        }));
+    }
+  },
+
+  // The Page's posts, one page (25) at a time, with every comment and reply on them
+  // (filter=stream includes replies). A comment's date is unrelated to its post's, so posts are
+  // not cut off by date — only by the page cap, or to the newest 25 when `recentOnly` is set.
+  async *postPages(
+    pageAccessToken: string,
+    pageId: string,
+    recentOnly = false,
+  ): AsyncGenerator<Array<{ id: string; comments: FacebookHistoryComment[] }>> {
+    type Post = { id: string; comments?: Paged<FacebookHistoryComment> };
+    const first = await axios.get<Paged<Post>>(`${FB_BASE_URL}/${pageId}/feed`, {
+      params: {
+        fields:
+          'id,comments.filter(stream).limit(100){id,created_time,from,message,parent{id},permalink_url}',
+        limit: '25',
+      },
+      ...bearer(pageAccessToken),
+    });
+    for await (const page of iteratePages(pageAccessToken, first.data, () => recentOnly)) {
+      const posts: Array<{ id: string; comments: FacebookHistoryComment[] }> = [];
+      for (const post of page) {
+        posts.push({
+          id: post.id,
+          comments: await collectPages(pageAccessToken, post.comments, () => false),
+        });
+      }
+      yield posts;
+    }
+  },
+
+  // Posts that tag the Page, newest first, back to `since`.
+  async listTaggedPosts(
+    pageAccessToken: string,
+    pageId: string,
+    since: Date,
+  ): Promise<FacebookTaggedPost[]> {
+    const first = await axios.get<Paged<FacebookTaggedPost>>(`${FB_BASE_URL}/${pageId}/tagged`, {
+      params: { fields: 'id,created_time,from,message,permalink_url', limit: '50' },
+      ...bearer(pageAccessToken),
+    });
+    return collectPages(
+      pageAccessToken,
+      first.data,
+      olderThan<FacebookTaggedPost>(since, (post) => post.created_time),
+    );
   },
 
   // Permalink and author of a post or comment. Meta may withhold either for privacy, or refuse
@@ -148,16 +321,25 @@ export const facebookGraphClient = {
     }
   },
 
-  // Display name of a person or Page by id (a Messenger sender, a post author). Ids are
+  // Display name of a Messenger sender, cached per Page (PSIDs are Page-scoped). PSIDs are
   // numeric; validate before putting one in the URL.
-  async getSenderName(pageAccessToken: string, psid: string): Promise<string | null> {
+  async getSenderName(
+    pageAccessToken: string,
+    pageId: string,
+    psid: string,
+  ): Promise<string | null> {
     if (!/^[0-9]{1,64}$/.test(psid)) return null;
+    const cacheKey = `${pageId}:${psid}`;
+    const cached = senderNameCache.get(cacheKey);
+    if (cached !== undefined) return cached;
     try {
       const response = await axios.get<{ name?: string }>(`${FB_BASE_URL}/${psid}`, {
         params: { fields: 'name' },
         ...bearer(pageAccessToken),
       });
-      return response.data.name ?? null;
+      const name = response.data.name ?? null;
+      if (name) senderNameCache.set(cacheKey, name);
+      return name;
     } catch {
       return null;
     }
