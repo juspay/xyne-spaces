@@ -152,7 +152,7 @@ const HTML_MIME = "text/html";
 /** A complete HTML document (doctype or <html> root). Must NOT go through
  *  marked: any 4-space-indented line after a blank line becomes an escaped
  *  <pre><code> block, which is how whole report sections rendered as raw tags. */
-const FULL_HTML_DOC_RE = /^\s*(?:<!--[\s\S]*?-->\s*)*(?:<!doctype\s+html|<html[\s>])/i;
+const FULL_HTML_DOC_RE = /^\s*(?:<!--(?:[^-]|-(?!-))*-->\s*)*(?:<!doctype\s+html|<html[\s>])/i;
 
 export function isFullHtmlDocument(input: string): boolean {
   return FULL_HTML_DOC_RE.test(input);
