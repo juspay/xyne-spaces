@@ -1112,6 +1112,9 @@ model BoardComplexityScore {
   boardId         String
   weight          Int      @default(1)
   usePercentage   Boolean  @default(false)
+  percentageWindowDays Int? // Length (days) of each % share window; required for % share assignment
+  percentageShareBasis String? // ALL | OPEN — which tickets in the window count toward a member's % share
+  percentageWindowStartAt DateTime? // Start of the first % share window; counts reset every percentageWindowDays from here
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
   createdBy       String

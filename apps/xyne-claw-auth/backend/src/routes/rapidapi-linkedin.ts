@@ -26,6 +26,7 @@ import { syncToolsForServer } from "../tool-sync.js";
 import { evictSession } from "../mcp/runner.js";
 import { pinUserIdParam } from "../middleware/pin-user-id-param.js";
 import { requireSessionTokenForUserParam } from "../middleware/require-session-token.js";
+import { resolveCanonicalUserIdOrSelf } from "../lib/users-jit.js";
 
 import { createLogger } from "../logger.js";
 const log = createLogger("rapidapi-linkedin");
@@ -158,9 +159,12 @@ router.post(
       throw unauthorized("The provided X-RapidAPI-Key was rejected by RapidAPI (HTTP 403).");
     }
 
-    await storeApiKey(userId, trimmedKey);
+    // Connection rows key on Claw's canonical id; the URL param may be the
+    // caller's raw Spaces alias.
+    const canonicalUserId = await resolveCanonicalUserIdOrSelf(userId);
+    await storeApiKey(canonicalUserId, trimmedKey);
 
-    log.info(`[rapidapi-linkedin] Stored API key for user ${userId}`);
+    log.info(`[rapidapi-linkedin] Stored API key for user ${canonicalUserId}`);
     ok(res, { message: "LinkedIn (RapidAPI) connected successfully." });
   }),
 );

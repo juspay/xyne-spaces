@@ -1,6 +1,7 @@
 import { useEffect, useState, useCallback } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { ArrowLeft, X } from "lucide-react";
+import { isCurrentUser } from "../lib/identity";
 import {
   getSubagent,
   createSubagent,
@@ -147,8 +148,8 @@ export function SubagentDetailPage({ userId, isAdmin, mode }: Props) {
     ? true
     : !isBuiltin && (
         isAdmin
-        || row?.createdByUserId === userId
-        || (row?.shares ?? []).some((s) => s.userId === userId && s.role === "EDITOR")
+        || isCurrentUser(row?.createdByUserId)
+        || (row?.shares ?? []).some((s) => isCurrentUser(s.userId) && s.role === "EDITOR")
       );
 
   const save = async () => {

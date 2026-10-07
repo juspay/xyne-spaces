@@ -101,31 +101,28 @@ const stringifyFormFieldValue = (value: unknown): string | null => {
 
 const isStringValue = (value: string | null): value is string => value !== null;
 
-const getTicketCountsRoom = (
-  request: KanbanCountsRequest,
-  currentUserId?: string,
-): string | null => {
+const getTicketCountsRooms = (request: KanbanCountsRequest, currentUserId?: string): string[] => {
   if (request.viewMode === 'project') {
-    if (request.projectId) return `ticket-counts:project:${request.projectId}`;
-    if (request.boardId) return `ticket-counts:board:${request.boardId}`;
-    return null;
+    if (request.projectId) return [`ticket-counts:project:${request.projectId}`];
+    if (request.boardId) return [`ticket-counts:board:${request.boardId}`];
+    return (request.boardIds ?? []).map(boardId => `ticket-counts:board:${boardId}`);
   }
 
   if (request.viewMode === 'board') {
-    if (request.projectId) return `ticket-counts:project:${request.projectId}`;
-    if (request.boardId) return `ticket-counts:board:${request.boardId}`;
-    return null;
+    if (request.projectId) return [`ticket-counts:project:${request.projectId}`];
+    if (request.boardId) return [`ticket-counts:board:${request.boardId}`];
+    return [];
   }
 
   if (request.viewMode === 'my-tickets' && currentUserId) {
-    return `ticket-counts:user:${currentUserId}`;
+    return [`ticket-counts:user:${currentUserId}`];
   }
 
   if (request.viewMode === 'desk' && request.boardId) {
-    return `ticket-counts:board:${request.boardId}`;
+    return [`ticket-counts:board:${request.boardId}`];
   }
 
-  return null;
+  return [];
 };
 
 /**
@@ -650,10 +647,18 @@ export const useKanbanCounts = (options: UseKanbanCountsOptions): UseKanbanCount
     [request, requestKey],
   );
 
+  const isTrack = Boolean(track);
+  const ticketCountsRooms = useMemo(
+    () =>
+      isTrack && !request.projectId && !request.boardId
+        ? []
+        : getTicketCountsRooms(request, options.currentUserId),
+    [isTrack, options.currentUserId, request],
+  );
+
   // A track across all its boards has no single board's room to hear changes on, so
   // its counts are refreshed on a timer instead.
-  const pollTrackCounts =
-    Boolean(track) && getTicketCountsRoom(request, options.currentUserId) === null;
+  const pollTrackCounts = isTrack && ticketCountsRooms.length === 0;
 
   const query = useQuery({
     queryKey,
@@ -672,14 +677,10 @@ export const useKanbanCounts = (options: UseKanbanCountsOptions): UseKanbanCount
     () => new Map(groups.map(group => [group.groupKey, group])),
     [groups],
   );
-  const ticketCountsRoom = useMemo(
-    () => getTicketCountsRoom(request, options.currentUserId),
-    [options.currentUserId, request],
-  );
 
   useEffect(() => {
     if (!(options.enabled ?? true)) return;
-    if (!ticketCountsRoom) return;
+    if (ticketCountsRooms.length === 0) return;
 
     let cancelled = false;
     const handleCountsUpdate = (event: TicketCountsUpdateEvent): void => {
@@ -699,7 +700,9 @@ export const useKanbanCounts = (options: UseKanbanCountsOptions): UseKanbanCount
     };
     const handleSocketConnect = (): void => {
       if (cancelled) return;
-      websocketService.emit('subscribe_to_ticket_counts', { room: ticketCountsRoom });
+      ticketCountsRooms.forEach(room =>
+        websocketService.emit('subscribe_to_ticket_counts', { room }),
+      );
     };
 
     const subscribe = async (): Promise<void> => {
@@ -713,7 +716,9 @@ export const useKanbanCounts = (options: UseKanbanCountsOptions): UseKanbanCount
           handleCountsUpdate,
         );
         websocketService.on('connect', handleSocketConnect);
-        websocketService.emit('subscribe_to_ticket_counts', { room: ticketCountsRoom });
+        ticketCountsRooms.forEach(room =>
+          websocketService.emit('subscribe_to_ticket_counts', { room }),
+        );
       } catch {
         // Ignore websocket failures; counts will continue to work from the API snapshot.
       }
@@ -728,9 +733,18 @@ export const useKanbanCounts = (options: UseKanbanCountsOptions): UseKanbanCount
         handleCountsUpdate,
       );
       websocketService.removeListener('connect', handleSocketConnect);
-      websocketService.emit('unsubscribe_from_ticket_counts', { room: ticketCountsRoom });
+      ticketCountsRooms.forEach(room =>
+        websocketService.emit('unsubscribe_from_ticket_counts', { room }),
+      );
     };
-  }, [options.currentUserId, options.enabled, queryClient, requestKey, ticketCountsRoom, queryKey]);
+  }, [
+    options.currentUserId,
+    options.enabled,
+    queryClient,
+    requestKey,
+    ticketCountsRooms,
+    queryKey,
+  ]);
 
   return {
     groups,

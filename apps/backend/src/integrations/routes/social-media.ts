@@ -16,6 +16,7 @@ import {
 import googlePlayRoutes from './social-media/google-play';
 import appStoreRoutes from './social-media/app-store';
 import instagramRoutes from './social-media/instagram';
+import facebookRoutes from './social-media/facebook';
 
 const TAG = '[SocialMediaRoutes]';
 const router = express.Router();
@@ -40,6 +41,7 @@ router.use(express.urlencoded({ extended: false }));
 router.use(googlePlayRoutes);
 router.use(appStoreRoutes);
 router.use(instagramRoutes);
+router.use(facebookRoutes);
 
 router.post(
   '/:conversationId/reply',
@@ -91,8 +93,8 @@ router.post(
 );
 
 // POST /:channelId/sync — manual sync trigger for polling sources (Google Play only).
-// Instagram does NOT use this endpoint — it is webhook-driven. The frontend hides the
-// refetch button for Instagram channels so this path is never reached for IG.
+// Instagram and Facebook do NOT use this endpoint — they are webhook-driven. The frontend hides
+// the refetch button for those channels so this path is never reached for them.
 router.post(
   '/:channelId/sync',
   authV2Middleware.authenticate,
