@@ -187,6 +187,13 @@ class AIProvisioningWorker {
   private async provisionOrg(orgId: string): Promise<void> {
     const orgPayload = await this.buildOrgPayload(orgId);
     await clawSpacesSyncClient.syncOrg(orgPayload);
+    if (!config.aiProvisioning.enableUserProvisioning) {
+      logger.info('[AI-PROVISIONING-WORKER] User provisioning disabled — skipping LiteLLM team and org key creation', {
+        subjectType: AIProvisioningSubjectType.ORG,
+        subjectId: orgId,
+      });
+      return;
+    }
     const teamId = await this.ensureLiteLLMTeamForOrg(orgPayload);
     await this.ensureOrgLiteLLMServiceAccountCredentials(orgPayload, teamId);
   }
@@ -197,6 +204,13 @@ class AIProvisioningWorker {
 
     await clawSpacesSyncClient.syncOrg(orgPayload);
     await clawSpacesSyncClient.syncWorkspace(workspacePayload);
+    if (!config.aiProvisioning.enableUserProvisioning) {
+      logger.info('[AI-PROVISIONING-WORKER] User provisioning disabled — skipping LiteLLM team and org key creation', {
+        subjectType: AIProvisioningSubjectType.WORKSPACE,
+        subjectId: workspaceId,
+      });
+      return;
+    }
     const teamId = await this.ensureLiteLLMTeamForOrg(orgPayload);
     await this.ensureOrgLiteLLMServiceAccountCredentials(orgPayload, teamId);
   }
