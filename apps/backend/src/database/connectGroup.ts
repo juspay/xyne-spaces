@@ -169,8 +169,6 @@ const CANVAS_CHILD_TABLES = new Set<string>([
 ]);
 
 
-/** connectId IS NULL (un-backfilled) → legacy workspace scope; matches Zero's `legacy` branch. (Parent only.) */
-type ConnectNullFallback = { AND: [{ connectId: null }, { workspaceId: string }] };
 /**
  * Only the shapes assignable to EVERY canvas table's WhereInput (all carry `workspaceId`):
  * `{ workspaceId }` (legacy/fallback) and `{}` (gate ALLOW). The child DENY
@@ -202,13 +200,13 @@ export interface ConnectReachScope {
  *    `{ workspaceId }`, so it works incrementally during backfill without a switch. Gate pass → add no
  *    restriction (the query already pins the entity); gate fail → match nothing.
  *
- *  - PARENT (canvases list) — FLAG-GATED (`connect_query_enabled_canvas`, default OFF). Listing "all
- *    canvases I can reach" via `id IN (reachable entityIds)` is only complete once EVERY canvas has a
- *    connect_group row (the backfill), and it materialises the reachable id-set; so until the flag is
- *    flipped (post-backfill) the parent stays on the legacy `{ workspaceId }` list. Flag ON →
- *    `id IN entityIds` OR the `connectId IS NULL` legacy fallback.
+ *  - PARENT (canvases list) — FLAG-GATED (`connect_query_enabled_canvas`, default OFF). Flag OFF (the
+ *    pre-backfill state) → legacy `{ workspaceId }` list. Flag ON (flipped only AFTER the backfill
+ *    stamps every canvas) → a correlated EXISTS on the `connectGroups` relation (host/invited), with
+ *    NO `connectId IS NULL` fallback: by then no null-handle canvas should exist, and a straggler is
+ *    fixed by re-running the backfill rather than by widening the ACL.
  *
- * On a connect_group lookup failure either half degrades to plain `{ workspaceId }`.
+ * On a child connect_group lookup failure the gate degrades to plain `{ workspaceId }`.
  */
 export async function connectReachWhere(
   client: Prisma.TransactionClient,
@@ -259,25 +257,17 @@ export async function connectReachWhere(
     return { workspaceId };
   }
   recordConnectAcl(table, op, 'connect_group', 'connect_group');
-  const nullFallback: ConnectNullFallback = { AND: [{ connectId: null }, { workspaceId }] };
   // Correlated EXISTS, NOT a materialised id-set. A canvas is reachable when its OWN connect_group
   // (connect_group.entityId == canvas.id) has an ACTIVE row with this workspace as host or invited —
   // Postgres evaluates it per candidate row through the `connectGroups` relation, so there is no
-  // `id IN (…)` list and no 32,767 bind-variable ceiling on large workspaces. A not-yet-backfilled
-  // canvas (connectId NULL, no group row) still shows via the `connectId IS NULL → workspaceId`
-  // fallback until the backfill runs. Cast past the child-safe type (parent-only shape).
+  // `id IN (…)` list and no 32,767 bind-variable ceiling on large workspaces. Cast past the child-safe type (parent-only).
   return {
-    OR: [
-      {
-        connectGroups: {
-          some: {
-            status: 'ACTIVE',
-            OR: [{ hostWorkspaceId: workspaceId }, { invitedWorkspaceId: workspaceId }],
-          },
-        },
+    connectGroups: {
+      some: {
+        status: 'ACTIVE',
+        OR: [{ hostWorkspaceId: workspaceId }, { invitedWorkspaceId: workspaceId }],
       },
-      nullFallback,
-    ],
+    },
   } as unknown as ConnectReachWhere;
 }
 
