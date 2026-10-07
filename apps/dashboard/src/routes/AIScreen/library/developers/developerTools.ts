@@ -4,6 +4,8 @@
  * not rows a workspace creates, so there is nothing to fetch.
  */
 
+import { API_BASE_URL } from '@/config';
+
 export type DeveloperToolId = 'mcp' | 'sdk' | 'cli';
 
 export interface DeveloperTool {
@@ -60,13 +62,20 @@ export function findDeveloperTool(id: string | undefined): DeveloperTool | undef
   return DEVELOPER_TOOLS.find(tool => tool.id === id);
 }
 
-const SPACES_URL = 'https://spaces.xyne.juspay.net';
-
-export function spacesBaseUrl(): string {
-  return SPACES_URL;
+function withoutAppPrefix(url: URL): string {
+  url.hostname = url.hostname.replace(/^app\./, '');
+  return url.origin;
 }
 
-/** Where the CLI tarball is served from (the web dashboard's `public/downloads/`). */
+export function spacesBaseUrl(): string {
+  const api = new URL(API_BASE_URL, window.location.origin);
+  const path = api.pathname.replace(/\/api\/?$/, '').replace(/\/+$/, '');
+  return `${withoutAppPrefix(api)}${path}`;
+}
+
 export function cliDownloadUrl(): string {
-  return `${SPACES_URL}/downloads/spaces-cli/${CLI_TARBALL}`;
+  const page = /^https?:$/.test(window.location.protocol)
+    ? new URL(window.location.origin)
+    : new URL(API_BASE_URL, window.location.origin);
+  return `${withoutAppPrefix(page)}/downloads/spaces-cli/${CLI_TARBALL}`;
 }
