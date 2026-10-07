@@ -1,3 +1,10 @@
+## [1.474.3](https://github.com/juspay/xyne-spaces/compare/v1.474.2...v1.474.3) (2026-10-07)
+
+
+### Bug Fixes
+
+* run opt-in setup steps when sandbox-repo-setup reuses a live session ([#2742](https://github.com/juspay/xyne-spaces/issues/2742)) ([ed24cf2](https://github.com/juspay/xyne-spaces/commit/ed24cf29388b73f690744b179f6154833ee9d7a5))
+
 ## [1.474.2](https://github.com/juspay/xyne-spaces/compare/v1.474.1...v1.474.2) (2026-10-07)
 
 ## [1.474.1](https://github.com/juspay/xyne-spaces/compare/v1.474.0...v1.474.1) (2026-10-07)
