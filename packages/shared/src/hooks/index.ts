@@ -41,12 +41,14 @@ export {
   useUsers,
   useUsersById,
   useUser,
+  useUserLookup,
   useSelf,
   useUserSearch,
   useActiveUsers,
   useActiveUserSearch,
   invalidateUsersMapCache,
 } from "./useUsers.js";
+export type { UserLookup } from "./useUsers.js";
 
 export {
   searchChannels,
