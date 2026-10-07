@@ -2,7 +2,7 @@
 
 ## Member in three DLs receives all DL mails and stops receiving removed DL mails
 * using browser
-* logging in as user "admin-1"
+* Ensuring user "admin-1" is logged in
 * resetting mock DL provider state
 * creating mock DL "mock-dl-a"
 * creating mock DL "mock-dl-b"

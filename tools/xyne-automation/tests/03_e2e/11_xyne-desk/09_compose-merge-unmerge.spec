@@ -2,7 +2,7 @@
 
 ## Compose mail creates a Desk ticket and the ticket can be merged and unmerged
 * using browser
-* logging in as user "admin-1"
+* Ensuring user "admin-1" is logged in
 * Creating personal Desk channel "channel-desk-compose-merge-flow" for user "admin-1" in project "project-1"
 * clearing mock Desk sent mails for channel "channel-desk-compose-merge-flow" user "admin-1"
 * composing mock Desk email "compose-mail-1" from channel "channel-desk-compose-merge-flow" for user "admin-1"

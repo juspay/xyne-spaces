@@ -2,7 +2,7 @@
 
 ## Desk ticket exposes compose Ask AI and rewrite controls without invoking external AI
 * using browser
-* logging in as user "admin-1"
+* Ensuring user "admin-1" is logged in
 * Creating personal Desk channel "channel-desk-ai-rewrite-controls" for user "admin-1" in project "project-1"
 * generating mock incoming Desk email "ai-rewrite-mail-1"
 * injecting mock incoming Desk email "ai-rewrite-mail-1" into channel "channel-desk-ai-rewrite-controls" for user "admin-1"

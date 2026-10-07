@@ -2,7 +2,7 @@
 
 ## Create personal mailbox desk, receive customer mail, and send a reply through the mock provider
 * using browser
-* logging in as user "admin-1"
+* Ensuring user "admin-1" is logged in
 * Creating personal Desk channel "channel-desk-personal-happy-flow" for user "admin-1" in project "project-1"
 * clearing mock Desk sent mails for channel "channel-desk-personal-happy-flow" user "admin-1"
 * generating mock incoming Desk email "personal-customer-mail-1"
