@@ -30,7 +30,6 @@ const DmSearchBoxComponent = ({
     setDmSearchQuery,
     peopleResults,
     groupDmResults,
-    isSearchStale,
     showDmSearchDropdown,
     setShowDmSearchDropdown,
     selectedDmSearchIndex,
@@ -130,7 +129,6 @@ const DmSearchBoxComponent = ({
         peopleResults={peopleResults}
         groupDmResults={groupDmResults}
         selectedIndex={selectedDmSearchIndex}
-        isStale={isSearchStale}
         queryLength={dmSearchQuery.length}
         trackedResultCount={trackedDmCount}
         currentUserId={currentUserId}

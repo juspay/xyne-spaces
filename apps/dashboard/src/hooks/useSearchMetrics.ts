@@ -360,11 +360,12 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
   const channelQuery = shownOnTab([TabType.ALL, TabType.CHANNELS]) ? cleanedSearchText : '';
 
   // Fuzzy matching runs in web workers so typing stays responsive in large workspaces.
-  const { results: filteredLocalUsers } = useWorkerUserSearch(peopleQuery, CMDK_USER_LIMIT);
-  const { results: filteredLocalChannels } = useWorkerChannelSearch(
-    options.allChannels ?? NO_CHANNELS,
-    channelQuery,
-  );
+  const filteredLocalUsers = useWorkerUserSearch(peopleQuery, CMDK_USER_LIMIT);
+  const filteredLocalChannels: Array<{
+    channel: Channel;
+    category: ChannelCategory;
+    searchableNames?: string[];
+  }> = useWorkerChannelSearch(options.allChannels ?? NO_CHANNELS, channelQuery);
 
   const [currentSearchContext, setCurrentSearchContext] = useState<{
     query: string;

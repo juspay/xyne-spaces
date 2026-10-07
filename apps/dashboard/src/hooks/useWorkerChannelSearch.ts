@@ -17,7 +17,7 @@ type Found = { query: string; matches?: WorkerMatch[] };
 export function useWorkerChannelSearch<T extends ChannelSearchItem>(
   items: T[],
   query: string,
-): { results: T[]; settledQuery: string } {
+): T[] {
   const [found, setFound] = useState<Found | null>(null);
   const workerRef = useRef<FuseWorker<ChannelDoc> | null>(null);
 
@@ -76,7 +76,7 @@ export function useWorkerChannelSearch<T extends ChannelSearchItem>(
   // Ranked here rather than stored, so channel updates re-rank in the same render. Until the
   // workers answer, the previous query's results stay on screen.
   const hasQuery = query.trim() !== '';
-  const results = useMemo(() => {
+  return useMemo(() => {
     if (!hasQuery || !found) return filterChannelsBySearchableNames(items, '');
     return filterChannelsBySearchableNames(
       items,
@@ -84,6 +84,4 @@ export function useWorkerChannelSearch<T extends ChannelSearchItem>(
       found.matches ? { regularFuseMatches: found.matches } : {},
     );
   }, [items, hasQuery, found]);
-
-  return { results, settledQuery: found?.query ?? '' };
 }

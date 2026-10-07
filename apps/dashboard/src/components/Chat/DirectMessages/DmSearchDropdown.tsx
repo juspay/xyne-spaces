@@ -78,8 +78,6 @@ interface DmSearchDropdownProps {
   groupDmResults: Channel[];
   /** Combined selection index over people then groups (same scheme as the key handler). */
   selectedIndex: number;
-  /** True while deferred results lag the typed query: suppress the no-results flash. */
-  isStale: boolean;
   queryLength: number;
   /** Pre-computed analytics count (the page's filtered DM list length). */
   trackedResultCount: number;
@@ -93,7 +91,6 @@ const DmSearchDropdownComponent = ({
   peopleResults,
   groupDmResults,
   selectedIndex,
-  isStale,
   queryLength,
   trackedResultCount,
   currentUserId,
@@ -120,6 +117,7 @@ const DmSearchDropdownComponent = ({
   const virtualizedHeight = Math.min(items.length * ROW_HEIGHT, MAX_HEIGHT);
 
   const virtuosoRef = useRef<VirtuosoHandle>(null);
+  const virtuosoContainerRef = useRef<HTMLDivElement>(null);
   const plainListRef = useRef<HTMLUListElement>(null);
 
   useEffect(() => {
@@ -135,8 +133,6 @@ const DmSearchDropdownComponent = ({
   if (!isVisible) return null;
 
   const noResults = items.length === 0;
-  // While deferred results lag the typed query, don't flash "No results found".
-  const showNoResults = noResults && !isStale;
 
   const renderItem = (item: SearchItem, visualIndex: number): ReactElement => {
     if (item.type === 'groupsHeader') {
@@ -198,21 +194,21 @@ const DmSearchDropdownComponent = ({
 
   return (
     <div className='absolute top-full left-0 right-0 z-50 mt-2 max-h-80 overflow-hidden rounded-xl border border-border bg-background p-1.5 shadow-lg'>
-      {showNoResults ? (
+      {noResults ? (
         <div className='px-2 py-1.5 text-sm text-muted-foreground'>No results found</div>
-      ) : noResults ? (
-        <div className='px-2 py-1.5 text-sm text-muted-foreground'>Searching…</div>
       ) : isVirtualized ? (
-        <Virtuoso
-          ref={virtuosoRef}
-          data={items}
-          data-testid='dm-search-results'
-          style={{ height: virtualizedHeight, width: '100%', overflowX: 'hidden' }}
-          defaultItemHeight={ROW_HEIGHT}
-          overscan={200}
-          computeItemKey={(_, item) => getItemKey(item)}
-          itemContent={(index, item) => <>{renderItem(item, index)}</>}
-        />
+        <div ref={virtuosoContainerRef}>
+          <Virtuoso
+            ref={virtuosoRef}
+            data={items}
+            data-testid='dm-search-results'
+            style={{ height: virtualizedHeight, width: '100%', overflowX: 'hidden' }}
+            defaultItemHeight={ROW_HEIGHT}
+            overscan={200}
+            computeItemKey={(_, item) => getItemKey(item)}
+            itemContent={(index, item) => <>{renderItem(item, index)}</>}
+          />
+        </div>
       ) : (
         <ul
           ref={plainListRef}

@@ -4,15 +4,14 @@ import { useUsers } from './useUsers';
 import { useAuthContextValues } from './useAuth';
 import { useAffinityCallback } from './useAffinityCallback';
 import { useDmContactRecency } from './useRankedPeopleSearch';
-import { rankUsers } from '../utils/rankingUtils';
+import { filterChannelsBySearchableNames, rankUsers } from '../utils/rankingUtils';
+import { getUserDisplayName, matchesUserQuery } from '../utils/userDisplayName';
 import {
   isGroupDMChannel,
   isOneToOneDMChannel,
   parseDMParticipantIds,
 } from '../components/Chat/ChatDirectory/ChatDirectory.utils';
 import { Channel, User, UserStatus, UserType } from '@xyne/shared';
-import { useWorkerUserSearch } from './useWorkerUserSearch';
-import { useWorkerChannelSearch } from './useWorkerChannelSearch';
 
 const PEOPLE_LIMIT = 20;
 
@@ -29,8 +28,6 @@ interface UseDmsSearchReturn {
   groupDmResults: Channel[];
   /** Combined count for keyboard navigation */
   totalResultCount: number;
-  /** True while the workers haven't yet replied for the current query. */
-  isSearchStale: boolean;
   showDmSearchDropdown: boolean;
   setShowDmSearchDropdown: (show: boolean) => void;
   selectedDmSearchIndex: number;
@@ -76,30 +73,34 @@ export const useDmsSearch = (): UseDmsSearchReturn => {
     return map;
   }, [allChannels, currentUserId]);
 
-  // Worker-based user search: fuzzy matching runs off the main thread.
-  // Use a generous limit so DM contacts are not accidentally sliced out before
-  // the DM-specific filter below runs.
-  const { results: workerUserResults, settledQuery: userSettledQuery } = useWorkerUserSearch(
-    dmSearchQuery,
-    500,
+  // People match with the plain token-AND predicate (same as the pickers) — synchronous, so
+  // results are always in sync with the typed query. Sorted once per user-list change so
+  // rankUsers' stable sort keeps non-DM users in a stable alphabetical order.
+  const hasQuery = trimmedQuery.length > 0;
+  const peoplePool = useMemo(
+    () =>
+      hasQuery
+        ? [...allUsers].sort((a, b) => getUserDisplayName(a).localeCompare(getUserDisplayName(b)))
+        : [],
+    [allUsers, hasQuery],
   );
 
   const peopleResults = useMemo((): DmPersonResult[] => {
     void affinityVersion;
     if (!trimmedQuery) return [];
     const isSelfSearch = trimmedQuery.toLowerCase() === 'self';
-    const eligible = workerUserResults.filter(
+    const matched = peoplePool.filter(
       user =>
-        oneToOneDmByUserId.has(user.id) ||
-        (user.status === UserStatus.ACTIVE && user.userType === UserType.USER) ||
-        (isSelfSearch && user.id === currentUserId),
+        (oneToOneDmByUserId.has(user.id) ||
+          (user.status === UserStatus.ACTIVE && user.userType === UserType.USER)) &&
+        (matchesUserQuery(user, trimmedQuery) || (isSelfSearch && user.id === currentUserId)),
     );
     let newPeopleLeft = PEOPLE_LIMIT;
-    return rankUsers(eligible, trimmedQuery, dmContactRecency)
+    return rankUsers(matched, trimmedQuery, dmContactRecency)
       .filter(user => oneToOneDmByUserId.has(user.id) || newPeopleLeft-- > 0)
       .map(user => ({ user, channelId: oneToOneDmByUserId.get(user.id)?.id ?? null }));
   }, [
-    workerUserResults,
+    peoplePool,
     trimmedQuery,
     dmContactRecency,
     oneToOneDmByUserId,
@@ -130,33 +131,32 @@ export const useDmsSearch = (): UseDmsSearchReturn => {
     [allChannels, usersById, currentUserId],
   );
 
-  // Worker-based channel search: regular-channel Fuse runs in a web worker;
-  // group-DM participant matching still runs on the main thread inside the hook
-  // (same as filterChannelsBySearchableNames) since DM docs are excluded from the worker.
-  const { results: workerChannelResults, settledQuery: channelSettledQuery } =
-    useWorkerChannelSearch(groupItems, dmSearchQuery);
-
-  const groupDmResults = useMemo(() => {
+  // Group-DM participant matching runs on the main thread with the same matcher cmd+k uses
+  // (filterChannelsBySearchableNames — one Fuse over participant-name docs, AND across query
+  // tokens). DM channels match on participant names, not channel names, so the channel-search
+  // worker (built for regular channels) has nothing to index here.
+  const groupDmResults = useMemo((): Channel[] => {
     if (!trimmedQuery) return [];
 
     // Referenced so this memo re-runs when affinity weights land (read imperatively inside
     // filterChannelsBySearchableNames).
     void affinityVersion;
 
-    const query = trimmedQuery.toLowerCase();
-    const nameMatchedIds = new Set(workerChannelResults.map(item => item.channel.id));
+    const nameMatched = filterChannelsBySearchableNames(groupItems, trimmedQuery);
+    const nameMatchedIds = new Set(nameMatched.map(item => item.channel.id));
 
     // Email-only matches (participant email substring, no name match): cmd+k finds emails via People,
     // which the DM screen can't fall back to for existing contacts, so keep them here — appended
     // after the relevance-ranked name matches, ordered by recency.
+    const query = trimmedQuery.toLowerCase();
     const byRecency = (a: Channel, b: Channel): number => b.lastActivityAt - a.lastActivityAt;
     const emailMatched = groupItems
       .filter(item => !nameMatchedIds.has(item.channel.id) && item.emailHaystack.includes(query))
       .map(item => item.channel)
       .sort(byRecency);
 
-    return [...workerChannelResults.map(item => item.channel), ...emailMatched];
-  }, [workerChannelResults, groupItems, trimmedQuery, affinityVersion]);
+    return [...nameMatched.map(item => item.channel), ...emailMatched];
+  }, [groupItems, trimmedQuery, affinityVersion]);
 
   // Autofocus search input when navigating to DM page
   useEffect(() => {
@@ -164,11 +164,6 @@ export const useDmsSearch = (): UseDmsSearchReturn => {
   }, []);
 
   const totalResultCount = peopleResults.length + groupDmResults.length;
-
-  // Stale until both workers have replied for the current raw query.
-  const isSearchStale =
-    trimmedQuery.length > 0 &&
-    (userSettledQuery !== dmSearchQuery || channelSettledQuery !== dmSearchQuery);
 
   // Reset selection on every query change.
   useEffect(() => {
@@ -189,8 +184,6 @@ export const useDmsSearch = (): UseDmsSearchReturn => {
         setSelectedDmSearchIndex(prev => (prev > 0 ? prev - 1 : 0));
       } else if (e.key === 'Enter' && totalResultCount > 0) {
         e.preventDefault();
-        // Don't act on stale results while the deferred render lags the typed query.
-        if (isSearchStale) return;
         if (selectedDmSearchIndex < peopleResults.length) {
           const person = peopleResults[selectedDmSearchIndex];
           if (person?.channelId) onSelectChannel(person.channelId);
@@ -204,7 +197,7 @@ export const useDmsSearch = (): UseDmsSearchReturn => {
         dmSearchInputRef.current?.blur();
       }
     },
-    [peopleResults, groupDmResults, selectedDmSearchIndex, totalResultCount, isSearchStale],
+    [peopleResults, groupDmResults, selectedDmSearchIndex, totalResultCount],
   );
 
   // Close dropdown when clicking outside the search container
@@ -226,7 +219,6 @@ export const useDmsSearch = (): UseDmsSearchReturn => {
     peopleResults,
     groupDmResults,
     totalResultCount,
-    isSearchStale,
     showDmSearchDropdown,
     setShowDmSearchDropdown,
     selectedDmSearchIndex,

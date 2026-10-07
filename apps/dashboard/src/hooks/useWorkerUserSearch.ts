@@ -14,10 +14,7 @@ type Found = { query: string; matches?: WorkerMatch[] };
  * Cmd+K people search. The fuzzy match runs in web workers so long queries don't stall typing;
  * results are the same as `useUserSearch`.
  */
-export function useWorkerUserSearch(
-  query: string,
-  limit: number,
-): { results: User[]; settledQuery: string } {
+export function useWorkerUserSearch(query: string, limit: number): User[] {
   const users = useUsers();
   const [found, setFound] = useState<Found | null>(null);
   const workerRef = useRef<FuseWorker<UserDoc> | null>(null);
@@ -72,7 +69,7 @@ export function useWorkerUserSearch(
   // Ranked here rather than stored, so user updates re-rank in the same render. Until the
   // workers answer, the previous query's results stay on screen.
   const hasQuery = query.trim() !== '';
-  const results = useMemo(() => {
+  return useMemo(() => {
     if (!hasQuery || !found) return searchUsers(users, '', limit);
     if (!found.matches) return searchUsers(users, found.query, limit);
     const byId = new Map(users.map(user => [user.id, user]));
@@ -82,6 +79,4 @@ export function useWorkerUserSearch(
     });
     return searchUsers(users, found.query, limit, fuseMatches);
   }, [users, hasQuery, limit, found]);
-
-  return { results, settledQuery: found?.query ?? '' };
 }
