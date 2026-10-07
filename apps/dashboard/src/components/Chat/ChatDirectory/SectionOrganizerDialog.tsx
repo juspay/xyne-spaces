@@ -338,7 +338,7 @@ export const SectionOrganizerDialog = ({
           query
             ? 'No channels found'
             : mode === 'activity'
-              ? `Everything falls on one side of ${activeWindowDays} days. Try a shorter window.`
+              ? `Everything falls on one side of ${activeWindowDays} ${activeWindowDays === 1 ? 'day' : 'days'}. Try a shorter window.`
               : mode === 'dms'
                 ? 'No app, bot or group DMs to group.'
                 : 'No channels found'
