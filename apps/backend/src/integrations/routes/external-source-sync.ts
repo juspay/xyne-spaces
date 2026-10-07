@@ -223,12 +223,19 @@ router.post(
       // FacebookFlow keeps each source to its own entries.
       if (source?.sourceType === ExternalSourcePlatform.FACEBOOK) {
         const repo = new ExternalSourceRepository();
-        for (const pageId of facebookPageIdsInPayload(req.body)) {
-          if (pageId === source.externalIdentifier) continue;
-          const other = await repo.findByName(`facebook-${pageId}`);
-          if (!other?.isActive) continue;
-          results.push(...(await ingestExternalSource(other.workspaceId, adapter, other.name, req.body, other)));
-        }
+        const otherPageIds = facebookPageIdsInPayload(req.body).filter(
+          pageId => pageId !== source.externalIdentifier,
+        );
+        // Pages are independent sources, so run them side by side: Meta redelivers the whole
+        // batch if this request is slow to answer.
+        const otherResults = await Promise.all(
+          otherPageIds.map(async pageId => {
+            const other = await repo.findByName(`facebook-${pageId}`);
+            if (!other?.isActive) return [];
+            return ingestExternalSource(other.workspaceId, adapter, other.name, req.body, other);
+          }),
+        );
+        results.push(...otherResults.flat());
       }
 
       const duration = Date.now() - startTime;

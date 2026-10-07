@@ -55,6 +55,10 @@ const escapeHtml = (value: string): string =>
 /**
  * Meta's link is the only copy of an attachment until we store the file. When a download failed,
  * append that link to the body so the agent can still open it (it expires on Meta's side).
+ *
+ * The desk renders a body as HTML once it contains any tag (EmailBodyRenderer), and does not
+ * render markdown, so the link is an anchor. The customer's own text is plain text and is
+ * escaped first: otherwise adding the anchor would make their text be read as HTML too.
  */
 export function appendFailedAttachmentLinks(
   content: string,
@@ -67,5 +71,6 @@ export function appendFailedAttachmentLinks(
     (attachment) =>
       `<a href="${escapeHtml(attachment.fileUrl)}" target="_blank" rel="noopener noreferrer">Open ${escapeHtml(attachment.fileName)}</a>`,
   );
-  return `${content}<br>Could not save ${failed.length === 1 ? 'this attachment' : 'these attachments'}: ${links.join(', ')}`;
+  const text = escapeHtml(content).replace(/\r?\n/g, '<br>');
+  return `${text}<br>Could not save ${failed.length === 1 ? 'this attachment' : 'these attachments'}: ${links.join(', ')}`;
 }
