@@ -4391,6 +4391,11 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
     onRequestDelete: item =>
       setDeleteViewConfirm({ configId: item.id, name: item.name, isPublic: !item.isPrivate }),
   });
+  const recentLabelsBoardIds = useMemo(() => {
+    if (filteredSingleBoardId) return [filteredSingleBoardId];
+    if (filters.boards?.length) return filters.boards;
+    return availableBoards ?? scopeBoards?.map(board => board.id) ?? [];
+  }, [filteredSingleBoardId, filters.boards, availableBoards, scopeBoards]);
   const headerPickerContext = useMemo(
     () => ({
       projectId: isMyTicketsView ? '' : projectIdParam || '',
@@ -4405,6 +4410,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
       onLoadMoreTags: handleLoadMoreTags,
       hasMoreTags: !tagsSearchQuery.trim() && hasMoreZeroTags,
       onSearchTags: handleSearchTags,
+      recentLabelsBoardIds,
       availableStages,
       formMappings:
         filters.boards?.length === 1 && selectedBoardDetail
@@ -4431,6 +4437,7 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
       tagsSearchQuery,
       hasMoreZeroTags,
       handleSearchTags,
+      recentLabelsBoardIds,
       availableStages,
       filters.boards,
       selectedBoardDetail,

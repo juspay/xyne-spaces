@@ -47,6 +47,7 @@ export interface FilterPickerContext {
   onLoadMoreTags?: () => void;
   hasMoreTags?: boolean;
   onSearchTags?: (query: string) => void;
+  recentLabelsBoardIds?: string[] | undefined;
   availableStages?: { name: string; status?: TicketStatusV2 | undefined }[] | undefined;
   formMappings?: readonly FormContextMapping[] | undefined;
   selectedBoardName?: string | undefined;

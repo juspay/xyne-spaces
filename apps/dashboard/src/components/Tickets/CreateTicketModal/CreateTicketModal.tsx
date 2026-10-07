@@ -60,6 +60,7 @@ import { apiInstance } from '../../../services/clients/apiClient';
 import { cn } from '../../../utils/classNames';
 import { mutators } from '../../../zero/mutators';
 import { surfaceMutationError } from '../../../utils/zeroMutationToast';
+import { loadRecentLabels, saveRecentLabels } from '../../../utils/recentLabels';
 import {
   useDuplicateTicketCheck,
   type DuplicateSuggestion,
@@ -196,8 +197,6 @@ type SubTicketDraft = {
 };
 
 const EMPTY_TAGS: string[] = [];
-const RECENT_LABELS_STORAGE_KEY = 'xyne_recent_labels';
-const RECENT_LABELS_LIMIT = 20;
 
 const PRIMARY_RANGE_FIELD_NAMES = ['branch', 'deployedCommitId', 'newCommitId'];
 // Rendered inline in the release repository rows instead of the fields panel.
@@ -1689,18 +1688,7 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
         trackCreateSucceeded(formData, response.data, effectiveChannelId);
       }
       if (formData.tags && formData.tags.length > 0) {
-        const recentLabelsKey = `${RECENT_LABELS_STORAGE_KEY}:${user.id}:${formData.boardId}`;
-        try {
-          const stored = JSON.parse(localStorage.getItem(recentLabelsKey) ?? '[]') as string[];
-          const recent = [...new Set([...formData.tags, ...stored])].slice(0, RECENT_LABELS_LIMIT);
-          localStorage.setItem(recentLabelsKey, JSON.stringify(recent));
-        } catch (error) {
-          logger.warn(LogEvent.FRONTEND_ERROR, {
-            type: 'recent_labels_save_failed',
-            message: 'Failed to save recent labels',
-            error: error,
-          });
-        }
+        saveRecentLabels(user.id, formData.boardId, formData.tags);
       }
       const subticketsToCreate = normalizeSubTicketDrafts(subTickets);
       if (createdTicketResponse?.id && subticketsToCreate.length > 0) {
@@ -2197,12 +2185,7 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
 
   const recentTags = useMemo(() => {
     if (!isOpen || !user?.id || !formValues.boardId) return EMPTY_TAGS;
-    const recentLabelsKey = `${RECENT_LABELS_STORAGE_KEY}:${user.id}:${formValues.boardId}`;
-    try {
-      return JSON.parse(localStorage.getItem(recentLabelsKey) ?? '[]') as string[];
-    } catch {
-      return EMPTY_TAGS;
-    }
+    return loadRecentLabels(user.id, [formValues.boardId]);
   }, [isOpen, user?.id, formValues.boardId]);
 
   // Get tag options
