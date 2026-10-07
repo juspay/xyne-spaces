@@ -25,6 +25,7 @@ import {
 import { v4 as uuidv4 } from 'uuid';
 import { clearOrgCreator, getCreatedOrgName } from '../../utils/onboardingOrgCreator';
 import type { LocalHarnessInstallation } from '../../types/electron';
+import { DEFAULT_LANDING_CHANNEL_NAME } from '../../constants/channels';
 import {
   LocalHarnessStepPanel,
   LocalHarnessStepPreview,
@@ -64,6 +65,11 @@ const QuestionnaireScreen = (): ReactElement | null => {
   const z = useZero();
 
   const generalChannel = useChannelByName('general');
+  const defaultLandingChannel = useChannelByName(DEFAULT_LANDING_CHANNEL_NAME);
+  const landingChannel =
+    defaultLandingChannel && !defaultLandingChannel.isArchived
+      ? defaultLandingChannel
+      : generalChannel;
 
   const [currentStep, setCurrentStep] = useState(getInitialStepIndex);
   const [isCompleting, setIsCompleting] = useState(false);
@@ -247,7 +253,7 @@ const QuestionnaireScreen = (): ReactElement | null => {
 
     const workspaceId = user?.workspaceId;
     if (workspaceId) {
-      const landing = generalChannel?.id ? `/chat/dir/${generalChannel.id}` : '/chat/dir';
+      const landing = landingChannel?.id ? `/chat/dir/${landingChannel.id}` : '/chat/dir';
       void navigate(`/${workspaceId}${landing}`);
     }
   };

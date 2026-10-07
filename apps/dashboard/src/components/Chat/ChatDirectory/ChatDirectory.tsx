@@ -106,6 +106,7 @@ import { useOverdueRemindersCount } from '../../../hooks/useOverdueRemindersCoun
 import { useRecapUnreadCount, usePrefetchRecap } from '../../../hooks/useRecapData';
 import { stateMachineActor, type VisibleChannel } from '../../../machines/stateMachine';
 import { usePendingDelayedMessagesCount } from '../../../hooks/useUserDelayedMessages';
+import { DEFAULT_LANDING_CHANNEL_NAME } from '../../../constants/channels';
 
 const ContainerDropZone = ({
   id,
@@ -232,8 +233,6 @@ const CHAT_NAV_SHORTCUTS: Partial<Record<InboxItemKey, ShortcutId>> = {
 };
 
 const NO_SECTIONS: ChannelSection[] = [];
-// Hardcoded default landing channel; falls back to the workspace landing (general) channel when absent.
-const DEFAULT_LANDING_CHANNEL_NAME = 'streamgres';
 
 const ChatDirectory = ({
   channelData,
