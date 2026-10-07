@@ -11,6 +11,7 @@ import { useSelectedAgent } from '../../hooks/useSelectedAgent';
 import { useAskAIAuto } from '../../hooks/useAskAIAuto';
 import { SELECTOR_ROW_CLASS, SELECTOR_ROW_SELECTED_CLASS } from './selectorStyles';
 import { AutoAgentRow } from './AutoAgentRow';
+import { ASK_AI_LABEL, AUTO_LABEL, matchesText, rankAgentsByQuery } from './agentSearch';
 
 export interface AIAgentSelectorProps {
   /** Whether the selector is disabled (e.g. while streaming). */
@@ -90,15 +91,19 @@ export function AIAgentSelector({
     staleTime: 5 * 60 * 1000,
   });
 
-  const filteredAgents = useMemo(() => {
-    const withoutAskAI = agents.filter((a: AccessibleClawAgent) => a.slug !== 'ask-ai');
-    if (!query.trim()) return withoutAskAI;
-    const q = query.toLowerCase();
-    return withoutAskAI.filter(
-      (a: AccessibleClawAgent) =>
-        a.name.toLowerCase().includes(q) || (a.description ?? '').toLowerCase().includes(q),
-    );
-  }, [agents, query]);
+  const trimmedQuery = query.trim();
+  const filteredAgents = useMemo(
+    () =>
+      rankAgentsByQuery(
+        agents.filter((a: AccessibleClawAgent) => a.slug !== 'ask-ai'),
+        trimmedQuery,
+      ),
+    [agents, trimmedQuery],
+  );
+  // The pinned Auto / Ask AI rows are regular options, so they obey the search too.
+  const showAutoRow =
+    onSelectAuto !== undefined && (!trimmedQuery || matchesText(AUTO_LABEL, trimmedQuery));
+  const showAskAIRow = !trimmedQuery || matchesText(ASK_AI_LABEL, trimmedQuery);
 
   const selectedAgent = useMemo(
     () => agents.find((a: AccessibleClawAgent) => a.slug === selectedAgentSlug) ?? null,
@@ -186,7 +191,7 @@ export function AIAgentSelector({
         {/* Scrollable list */}
         {!isLoading && (
           <div className='overflow-auto p-1.5'>
-            {onSelectAuto && (
+            {showAutoRow && (
               <AutoAgentRow
                 selected={isAutoShown}
                 onSelect={() => {
@@ -204,33 +209,39 @@ export function AIAgentSelector({
 
             {/* First, as it was before the restyle: Ask AI is the default and
                 must not be something you scroll a long agent list to reach. */}
-            <button
-              onClick={() => {
-                setAuto(false);
-                clearAgent();
-                setOpen(false);
-              }}
-              className={cn(
-                SELECTOR_ROW_CLASS,
-                'justify-between',
-                selectedAgentSlug === null && !isAutoShown && SELECTOR_ROW_SELECTED_CLASS,
-              )}
-              data-track-category='XyneAI'
-              data-track-name='SELECT_AGENT'
-              data-track-metadata={JSON.stringify({ agentSlug: 'ask-ai' })}
-            >
-              <span className='flex min-w-0 items-center gap-2.5'>
-                <span className='grid size-6 shrink-0 place-items-center text-primary'>
-                  <Bot className='size-[18px]' aria-hidden />
+            {showAskAIRow && (
+              <button
+                onClick={() => {
+                  setAuto(false);
+                  clearAgent();
+                  setOpen(false);
+                }}
+                className={cn(
+                  SELECTOR_ROW_CLASS,
+                  'justify-between',
+                  selectedAgentSlug === null && !isAutoShown && SELECTOR_ROW_SELECTED_CLASS,
+                )}
+                data-track-category='XyneAI'
+                data-track-name='SELECT_AGENT'
+                data-track-metadata={JSON.stringify({ agentSlug: 'ask-ai' })}
+              >
+                <span className='flex min-w-0 items-center gap-2.5'>
+                  <span className='grid size-6 shrink-0 place-items-center text-primary'>
+                    <Bot className='size-[18px]' aria-hidden />
+                  </span>
+                  <span className='font-normal'>{ASK_AI_LABEL}</span>
                 </span>
-                <span className='font-normal'>Ask AI</span>
-              </span>
-              {selectedAgentSlug === null && !isAutoShown && (
-                <Check className='h-3.5 w-3.5 shrink-0' aria-hidden />
-              )}
-            </button>
+                {selectedAgentSlug === null && !isAutoShown && (
+                  <Check className='h-3.5 w-3.5 shrink-0' aria-hidden />
+                )}
+              </button>
+            )}
 
-            {filteredAgents.length === 0 && agents.length > 0 && query.trim() ? (
+            {filteredAgents.length === 0 &&
+            agents.length > 0 &&
+            trimmedQuery &&
+            !showAskAIRow &&
+            !showAutoRow ? (
               <div className='px-3 py-4 text-sm text-muted-foreground text-center'>
                 No agents match &ldquo;{query}&rdquo;
               </div>
