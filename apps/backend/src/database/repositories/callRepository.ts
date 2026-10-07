@@ -1373,6 +1373,21 @@ export class CallRepository {
   }
 
   /**
+   * The detailed-summary canvas of a call, scoped to the call's workspace when
+   * it has one. Only the persisted BlockNote snapshot; live Y-Sweet content is
+   * read by the caller.
+   */
+  async findSummaryCanvas(
+    canvasId: string,
+    workspaceId: string | null
+  ): Promise<{ id: string; content: Prisma.JsonValue } | null> {
+    return DatabaseClient.getInstance().canvas.findFirst({
+      where: { id: canvasId, ...(workspaceId ? { workspaceId } : {}) },
+      select: { id: true, content: true },
+    });
+  }
+
+  /**
    * Participants shaped for the app API / app events: keeps `isExternal` (which
    * getParticipantsInfo drops) and nulls `userId` on external rows, where the
    * stored value is a synthetic id that resolves to no real user.

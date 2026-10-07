@@ -22,6 +22,7 @@ router.get(
 
 router.get('/:callId', requirePermission('calls:read'), callController.getCall);
 router.get('/:callId/transcript', requirePermission('calls:read'), callController.getTranscript);
+router.get('/:callId/summary', requirePermission('summaries:read'), callController.getSummary);
 router.post(
   '/:callId/regenerate-summary',
   requirePermission('summaries:write'),
