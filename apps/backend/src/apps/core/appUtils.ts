@@ -9,6 +9,7 @@ import { db } from '@/database/client';
 import { withWorkspaceScope } from '@/database/tenant/context';
 import { claimAppSigningSecret } from '@/bypassAcl/appServices';
 import { syncInstalledCommandsTx } from '@/bypassAcl/transactions/appUtils';
+import { isSpacesAppClawAgent } from '@/services/clawAgentService';
 
 /**
  * Install an external app
@@ -26,6 +27,24 @@ async function syncInstalledCommands(installedAppId: string, appId: string, work
   // One transaction so the install never ends up with a half-synced command snapshot if the
   // process dies mid-loop (partial create/update/delete).
   await syncInstalledCommandsTx(appId, installedAppId, workspaceId);
+}
+
+/**
+ * Email of an app's per-workspace user. Suffixed with the workspace id because
+ * OrgMember.email is globally unique, so the same app installs across workspaces/orgs.
+ */
+export function appUserEmail(appName: string, workspaceId: string): string {
+  const botName = appName
+    .toLowerCase()
+    .trim()
+    .replace(/[^a-z0-9-]/g, '-')
+    .replace(/-+/g, '-')
+    .replace(/^-|-$/g, '');
+  return `${botName}-${workspaceId}@app.xyne.ai`;
+}
+
+export function appUserProviderId(appId: string): string {
+  return `xyne-app-${appId}`;
 }
 
 /**
@@ -69,39 +88,36 @@ export async function installApp(appId: string, workspaceId: string) {
       return { jwtToken };
     }
 
-    // 2. New install — dedicated per-workspace app user. Email is suffixed with the workspace id
-    // because OrgMember.email is globally unique, so the same app installs across workspaces/orgs.
-    const botName = app.name
-      .toLowerCase()
-      .trim()
-      .replace(/[^a-z0-9-]/g, '-')
-      .replace(/-+/g, '-')
-      .replace(/^-|-$/g, '');
-    const email = `${botName}-${workspaceId}@app.xyne.ai`;
+    // 2. New install — dedicated per-workspace app user.
+    const email = appUserEmail(app.name, workspaceId);
 
     const workspace = await db.workspace.findUnique({ where: { id: workspaceId }, select: { orgId: true } });
     if (!workspace) {
       throw new Error(`[INSTALL-APP] Workspace ${workspaceId} not found`);
     }
 
-    // Reuse an existing orgMember/app-user if present (idempotent — survives prior manual cleanup).
-    // Resolves the app's own bot membership, not the installer's.
-    const orgMember = await withWorkspaceScope(async () => {
-      const existing = await db.orgMember.findUnique({ where: { email }, select: { memberId: true } });
-      if (existing) return existing;
-      return db.orgMember.create({
-        data: { email, orgId: workspace.orgId, role: OrgRole.MEMBER },
-        select: { memberId: true },
-      });
-    });
+    // Reuse an existing app user if present (idempotent — survives prior manual cleanup); it
+    // keeps the type it was created with, so claw-auth is only asked when one is created.
     let appUser = await repositories.users.findByEmail(email, workspaceId);
     if (!appUser) {
+      // AGENT vs APP, decided before any write: the type is set once, so a lookup that
+      // cannot answer fails the install (retryable, nothing left behind) instead of guessing.
+      const userType = (await isSpacesAppClawAgent(appId)) ? UserType.AGENT : UserType.APP;
+      // Resolves the app's own bot membership, not the installer's.
+      const orgMember = await withWorkspaceScope(async () => {
+        const existing = await db.orgMember.findUnique({ where: { email }, select: { memberId: true } });
+        if (existing) return existing;
+        return db.orgMember.create({
+          data: { email, orgId: workspace.orgId, role: OrgRole.MEMBER },
+          select: { memberId: true },
+        });
+      });
       appUser = await repositories.users.create({
         name: app.name,
         email,
-        providerUserId: `xyne-app-${appId}`,
+        providerUserId: appUserProviderId(appId),
         authProvider: AuthProvider.API_KEY,
-        userType: UserType.APP,
+        userType,
         status: 'ACTIVE',
         workspace: { connect: { id: workspaceId } },
         orgMember: { connect: { memberId: orgMember.memberId } },
