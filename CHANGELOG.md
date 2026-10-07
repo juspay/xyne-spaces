@@ -1,3 +1,16 @@
+## [1.474.0](https://github.com/juspay/xyne-spaces/compare/v1.473.0...v1.474.0) (2026-10-07)
+
+
+### Features
+
+* allow multiple Slack channels per desk with per-chan… ([#2646](https://github.com/juspay/xyne-spaces/issues/2646)) ([2d328dd](https://github.com/juspay/xyne-spaces/commit/2d328dd1a0b71e93834633ca13d72d3be3e68cf6))
+* move canvases to a connectGroup ([#2020](https://github.com/juspay/xyne-spaces/issues/2020)) ([1991932](https://github.com/juspay/xyne-spaces/commit/19919321cbca53d5db74eab96648c0975ba333cf))
+
+
+### Bug Fixes
+
+* skip false-positive agent_failed_to_join when call ended within 30s ([#2747](https://github.com/juspay/xyne-spaces/issues/2747)) ([964288f](https://github.com/juspay/xyne-spaces/commit/964288ff9b0ef8cfff75d9575d1acb5fb88ff365))
+
 ## [1.473.0](https://github.com/juspay/xyne-spaces/compare/v1.472.0...v1.473.0) (2026-10-07)
 
 
