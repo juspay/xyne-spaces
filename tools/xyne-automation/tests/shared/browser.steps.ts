@@ -415,6 +415,21 @@ export default class BrowserSteps {
         state: 'attached',
         timeout: SIDEBAR_NAVIGATION_TIMEOUT_MS,
       });
+      // Middle path: if the item is already in the user's Shown list but just
+      // happens to render in the More overflow (zero-sync lag, long rail, etc.),
+      // click it directly from the popover — faster and deterministic. Only fall
+      // through to the Customize add round-trip when the item genuinely isn't
+      // reachable from either slot yet.
+      const moreItem = page.locator(`[data-testid='more-${itemId}']`).first();
+      try {
+        await moreItem.waitFor({ state: 'visible', timeout: 2000 });
+        const moreExpectedPath = await getSidebarDestinationPath(page, moreItem);
+        await moreItem.click();
+        await waitForPath(page, moreExpectedPath);
+        return;
+      } catch {
+        // Not in More popover — add via Customize and continue.
+      }
       await addItemViaCustomizeToolbar(page, itemId);
       // After the dialog closes the item moves into the user's toolbarIds and
       // renders on the rail — wait for that render before resolving its href.
