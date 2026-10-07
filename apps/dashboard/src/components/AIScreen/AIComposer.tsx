@@ -10,14 +10,15 @@ import {
   type ChangeEvent,
   type ReactElement,
 } from 'react';
+import { createPortal } from 'react-dom';
 import { Lock, MousePointerClick, Sparkles, TextQuote, Box } from 'lucide-react';
 import { toast } from 'sonner';
 import { keepPreviousData, useQuery } from '@tanstack/react-query';
 import { DANGEROUS_EXTENSIONS } from '@xyne/shared';
 import { commandsForSurface } from '@xyne/shared/commands';
 import { fetchClawAgentModels } from '../../services/clawAgentModelsService';
-import { useVoiceMode } from '../Voice/useVoiceMode';
-import { VoiceModeBar } from '../Voice/VoiceModeBar';
+import { useVoiceHost } from '../Voice/voiceSession';
+import { VoiceStage } from '../Voice/VoiceStage';
 import type { StreamState } from '../../services/XyneAI';
 import { detectStudioIntent } from './voice/studioIntent';
 import { apiInstance } from '../../services/clients/apiClient';
@@ -112,6 +113,7 @@ interface AIComposerProps {
   /** Which edge stays put: 'top' on the landing page (grows and opens menus
    *  downward), 'bottom' in a chat. See the Composer's `anchor`. */
   anchor?: 'top' | 'bottom';
+  voiceStageHost: HTMLElement | null;
 }
 
 interface XyneAIConfigResponse {
@@ -157,6 +159,7 @@ export const AIComposer = forwardRef<AIComposerHandle, AIComposerProps>(function
     initialExtras,
     onContextChange,
     anchor = 'bottom',
+    voiceStageHost,
   },
   ref,
 ): ReactElement {
@@ -513,6 +516,12 @@ export const AIComposer = forwardRef<AIComposerHandle, AIComposerProps>(function
     onStop?.();
   };
 
+  // Voice bypasses routedSubmit, so its routing is cancelled directly.
+  const handleVoiceStop = (): void => {
+    assistant?.cancel();
+    handleStop();
+  };
+
   useImperativeHandle(
     ref,
     () => ({
@@ -583,11 +592,12 @@ export const AIComposer = forwardRef<AIComposerHandle, AIComposerProps>(function
         : undefined,
     [isAutoOn, assistant],
   );
-  const voice = useVoiceMode({
-    enabled: voiceMode,
+  useVoiceHost(voiceMode, {
     submit: submitTranscript,
     ownsStream: startedOnAIPage,
-    ...(answerTranscript && { answer: answerTranscript }),
+    answer: answerTranscript,
+    onStop: handleVoiceStop,
+    onExit: () => setVoiceMode(false),
   });
 
   // ── Context: picks, pills ──────────────────────────────────────────────────
@@ -685,15 +695,17 @@ export const AIComposer = forwardRef<AIComposerHandle, AIComposerProps>(function
 
   if (voiceMode) {
     return (
-      <div className='relative'>
-        <VoiceModeBar
-          phase={voice.phase}
-          studioMode={voiceStudioMode}
-          onHoldStart={voice.startRecording}
-          onHoldEnd={voice.stopRecording}
-          onExit={() => setVoiceMode(false)}
-        />
-      </div>
+      <>
+        {voiceStageHost &&
+          createPortal(
+            <div className='absolute inset-0 z-30 bg-background'>
+              <div className='mx-auto flex h-full max-w-xl'>
+                <VoiceStage studioMode={voiceStudioMode} />
+              </div>
+            </div>,
+            voiceStageHost,
+          )}
+      </>
     );
   }
 

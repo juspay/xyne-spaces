@@ -107,8 +107,8 @@ import {
   flattenCanvasContexts,
 } from '../../../machines/xyneAIMachine';
 import { xyneAIStreamManager, type StreamState } from '../../../services/XyneAI';
-import { useVoiceMode } from '../../Voice/useVoiceMode';
-import { VoiceModeBar } from '../../Voice/VoiceModeBar';
+import { useVoiceHost } from '../../Voice/voiceSession';
+import { VoiceStage } from '../../Voice/VoiceStage';
 import { useFlowActionComplete } from '../../../hooks/useFlowActionComplete';
 import {
   buildXyneAIStreamThreadId,
@@ -2174,6 +2174,13 @@ const XyneAISidebar = ({
     submit: trigger => void handleSubmit(trigger),
   });
 
+  // Voice routes through assistant.answer rather than routedSubmit, so its routing is cancelled directly.
+  const handleAbort = (): void => {
+    if (routedSubmit.stop()) return;
+    assistant.cancel();
+    abortCurrentRequest();
+  };
+
   const canRoute =
     isAuto &&
     assistant.actions.length > 0 &&
@@ -2202,11 +2209,12 @@ const XyneAISidebar = ({
     (state: StreamState): boolean => state.streamSlotKey === streamThreadKey,
     [streamThreadKey],
   );
-  const voice = useVoiceMode({
-    enabled: voiceMode,
+  useVoiceHost(voiceMode, {
     submit: submitTranscript,
     ownsStream,
-    ...(answerTranscript && { answer: answerTranscript }),
+    answer: answerTranscript,
+    onStop: handleAbort,
+    onExit: () => setVoiceMode(false),
   });
 
   const hasBackgroundStreamingElsewhere = useMemo(() => {
@@ -2260,10 +2268,7 @@ const XyneAISidebar = ({
     selectedApps,
     selectedActivities,
     onActivitiesChange: setSelectedActivities,
-    onAbort: () => {
-      if (routedSubmit.stop()) return;
-      abortCurrentRequest();
-    },
+    onAbort: handleAbort,
     webSearchEnabled,
     webSearchAccessible,
     onWebSearchToggle: () => setWebSearchEnabled(!webSearchEnabled),
@@ -2452,7 +2457,8 @@ const XyneAISidebar = ({
               </div>
             ) : null}
 
-            <div className='min-h-0 flex-1 overflow-hidden'>
+            {/* Kept mounted in voice mode so the transcript and its scroll position survive. */}
+            <div className={cn('min-h-0 flex-1 overflow-hidden', voiceMode && 'hidden')}>
               <div className='flex h-full min-h-0 flex-col overflow-y-auto overflow-x-hidden'>
                 {isLoadingConversation ? (
                   <div className='px-3 py-4'>
@@ -2693,6 +2699,8 @@ const XyneAISidebar = ({
               </div>
             </div>
 
+            {voiceMode && <VoiceStage />}
+
             {aiOnboarding.isActive && onboardingAnsweredCount >= 3 && (
               <div className='px-3 py-2'>
                 <button
@@ -2707,7 +2715,7 @@ const XyneAISidebar = ({
             )}
 
             {/* composer-container — owns the gutter around the composer */}
-            {!(isFullscreen && messages.length === 0) && (
+            {!voiceMode && !(isFullscreen && messages.length === 0) && (
               <div
                 className={cn(
                   isFullscreen ? 'flex justify-center px-4 pb-6' : roomyContent ? 'px-6' : 'px-3',
@@ -2715,31 +2723,22 @@ const XyneAISidebar = ({
                 )}
               >
                 <div className={cn(isFullscreen && 'w-full max-w-2xl')}>
-                  {voiceMode ? (
-                    <VoiceModeBar
-                      phase={voice.phase}
-                      onHoldStart={voice.startRecording}
-                      onHoldEnd={voice.stopRecording}
-                      onExit={() => setVoiceMode(false)}
-                    />
-                  ) : (
-                    <XyneAIInputBox
-                      ref={xyneAIInputRef}
-                      isOnboarding={aiOnboarding.isActive}
-                      isStreaming={isActiveSessionStreaming || assistant.isRouting}
-                      selectedAgentSlug={effectiveAgentSlug}
-                      agents={isV2 ? accessibleAgents : []}
-                      {...(isV2 && !isAgentForced ? { onSelectAgent: handleSelectAgent } : {})}
-                      {...(isV2 && !isAgentForced && !isFullscreen
-                        ? { isAuto, onSelectAuto: handleSelectAuto }
-                        : {})}
-                      {...(!isFullscreen && { onEnterVoiceMode: () => setVoiceMode(true) })}
-                      {...sharedInputSectionProps}
-                      kbCollectionId={kbCollectionIdProp}
-                      kbOpenNonce={kbOpenNonce}
-                      onSelectedCollectionsChange={setSelectedCollectionIds}
-                    />
-                  )}
+                  <XyneAIInputBox
+                    ref={xyneAIInputRef}
+                    isOnboarding={aiOnboarding.isActive}
+                    isStreaming={isActiveSessionStreaming || assistant.isRouting}
+                    selectedAgentSlug={effectiveAgentSlug}
+                    agents={isV2 ? accessibleAgents : []}
+                    {...(isV2 && !isAgentForced ? { onSelectAgent: handleSelectAgent } : {})}
+                    {...(isV2 && !isAgentForced && !isFullscreen
+                      ? { isAuto, onSelectAuto: handleSelectAuto }
+                      : {})}
+                    {...(!isFullscreen && { onEnterVoiceMode: () => setVoiceMode(true) })}
+                    {...sharedInputSectionProps}
+                    kbCollectionId={kbCollectionIdProp}
+                    kbOpenNonce={kbOpenNonce}
+                    onSelectedCollectionsChange={setSelectedCollectionIds}
+                  />
                 </div>
               </div>
             )}

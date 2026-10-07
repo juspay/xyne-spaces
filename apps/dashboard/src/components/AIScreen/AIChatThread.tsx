@@ -1490,6 +1490,8 @@ export const AIChatThread = forwardRef<AIChatThreadHandle, AIChatThreadProps>(fu
     initialQuery && initialExtras ? withoutPickedContext(initialExtras) : initialExtras,
   );
   const dropZoneRef = useRef<HTMLDivElement | null>(null);
+  // Voice mode covers the transcript, so the composer shows it there.
+  const [voiceStageHost, setVoiceStageHost] = useState<HTMLDivElement | null>(null);
   const dragCounterRef = useRef(0);
   const [isDragging, setIsDragging] = useState(false);
 
@@ -2548,7 +2550,7 @@ export const AIChatThread = forwardRef<AIChatThreadHandle, AIChatThreadProps>(fu
           as a sibling of the scroll area rather than inside it — anything
           positioned inside an overflow container scrolls away with the content,
           so the rail has to be anchored to the frame that stays put. */}
-        <div className='relative min-h-0 flex-1'>
+        <div ref={setVoiceStageHost} className='relative min-h-0 flex-1'>
           <PromptMarkerRail markers={promptMarkers} scrollRef={scrollRef} />
           {/* Messages area — tabIndex enables keyboard scroll (PageUp/Home/ArrowUp)
             which the auto-scroll effect listens for to unstick from bottom. */}
@@ -2760,6 +2762,7 @@ export const AIChatThread = forwardRef<AIChatThreadHandle, AIChatThreadProps>(fu
               pending={isAnyMessageStreaming || (assistant?.isRouting ?? false)}
               onStop={handleStop}
               assistant={assistant && assistant.actions.length > 0 ? assistant : undefined}
+              voiceStageHost={voiceStageHost}
             />
           </div>
         </div>
