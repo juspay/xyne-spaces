@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { runReuseSteps, type SetupStep } from "./tools.js";
+import { runReuseSteps, stepOutputTail, type SetupStep } from "./tools.js";
 
 function fakeSession(exitCodes: Record<string, number | null> = {}) {
   const ran: string[] = [];
@@ -69,5 +69,25 @@ describe("runReuseSteps", () => {
     const log: string[] = [];
     await expect(runReuseSteps(session, steps, "/w", log, 1)).resolves.toBeUndefined();
     expect(log[1]).toContain("sync node_modules: WARN failed on reuse (exit 1)");
+  });
+});
+
+describe("stepOutputTail", () => {
+  it("keeps the last 20 lines, trimmed", () => {
+    const out = Array.from({ length: 30 }, (_, i) => `line ${i + 1}`).join("\n") + "\n\n";
+    const tail = stepOutputTail(out)!;
+    expect(tail.split("\n")).toHaveLength(20);
+    expect(tail.startsWith("line 11")).toBe(true);
+    expect(tail.endsWith("line 30")).toBe(true);
+  });
+
+  it("returns null for empty output", () => {
+    expect(stepOutputTail("")).toBeNull();
+    expect(stepOutputTail("  \n ")).toBeNull();
+    expect(stepOutputTail(undefined)).toBeNull();
+  });
+
+  it("redacts secrets in the output", () => {
+    expect(stepOutputTail("token ghp_abcdefghijklmnopqrstuvwxyz0123456789")).not.toContain("ghp_abcdefghijklmnopqrstuvwxyz0123456789");
   });
 });
