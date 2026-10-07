@@ -1,3 +1,10 @@
+## [1.469.2](https://github.com/juspay/xyne-spaces/compare/v1.469.1...v1.469.2) (2026-10-07)
+
+
+### Bug Fixes
+
+* give pre-commit hook the same Node heap as CI to stop OOM ([#2696](https://github.com/juspay/xyne-spaces/issues/2696)) ([4baac28](https://github.com/juspay/xyne-spaces/commit/4baac28a7c3dca858f2298f470ebcc47e0430848))
+
 ## [1.469.1](https://github.com/juspay/xyne-spaces/compare/v1.469.0...v1.469.1) (2026-10-07)
 
 
