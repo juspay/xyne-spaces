@@ -514,72 +514,6 @@ export class SlackMigrationEngine {
     return set;
   }
 
-  /** Uncached view of files/ — this worker's cached set can predate a backfill's downloads. */
-  private freshUploadedFileSet(gcsPrefix: string): Promise<Set<string>> {
-    this.uploadedFiles.delete(gcsPrefix);
-    return this.uploadedFileSet(gcsPrefix);
-  }
-
-  /** Point a dumped message's (and its replies') files at copies already stored under files/. */
-  private linkStoredFiles(raw: unknown, gcsPrefix: string, stored: Set<string>): void {
-    for (const m of [raw, ...((raw as { _replies?: unknown[] })._replies ?? [])]) {
-      for (const f of collectRawFiles(m)) {
-        const dest = f?.id ? paths.file(gcsPrefix, f.id) : undefined;
-        if (dest && !f.prefetchedStoragePath && stored.has(dest)) f.prefetchedStoragePath = this.storage.buildStorageUri(dest);
-      }
-    }
-  }
-
-  /** Backfill eligibility: does the dump hold messages, and are any of its files stored? */
-  async dumpState(gcsPrefix: string): Promise<{ hasMessages: boolean; hasFiles: boolean }> {
-    const [convs, files] = await Promise.all([
-      this.storage.listFiles(paths.conversationsDir(gcsPrefix)).catch(() => []),
-      this.storage.listFiles(paths.filesDir(gcsPrefix)).catch(() => []),
-    ]);
-    return { hasMessages: convs.length > 0, hasFiles: files.length > 0 };
-  }
-
-  /**
-   * Attachment backfill: download the files an already-collected dump references but never stored (e.g. collected
-   * with a token that couldn't fetch them). Reads only the dump — no Slack history calls — and skips stored copies, so
-   * a restart resumes. Uses the same downloader as collection (streamed, encrypted, retries, timeouts).
-   */
-  async collectMissingFiles(job: MigrationJob, touch: () => Promise<void>, isStopped: () => Promise<boolean>): Promise<{ messages: number; withFiles: number; files: number; stored: number; stopped: boolean }> {
-    const token = getBotConfigByWorkspaceId(job.workspaceId).slackBotToken; // channel jobs use the workspace bot
-    this.uploadedFiles.delete(job.gcsPrefix);
-    const r = { messages: 0, withFiles: 0, files: 0, stored: 0, stopped: false };
-    let lines = 0;
-    for (const conv of await this.readManifest(job.gcsPrefix)) {
-      for (const file of await this.listConversationDataFiles(job.gcsPrefix, conv.id)) {
-        try {
-          const rl = readline.createInterface({ input: decryptStream(await this.storage.createReadStream(file)), crlfDelay: Infinity });
-          for await (const line of rl) {
-            if (!line.trim()) continue;
-            if (++lines % 100 === 0) {
-              await touch(); // keeps the stall watchdog quiet through long runs of file-less messages
-              if (await isStopped()) return { ...r, stopped: true };
-            }
-            let raw: { _replies?: unknown[] };
-            try { raw = JSON.parse(line); } catch { continue; }
-            for (const m of [raw, ...(raw._replies ?? [])]) {
-              r.messages += 1;
-              const files = collectRawFiles(m).filter(isDownloadableSlackFile);
-              if (files.length === 0) continue;
-              r.withFiles += 1;
-              r.files += files.length;
-              await this.prefetchFiles(token, m, job.gcsPrefix, touch);
-              r.stored += files.filter((f) => f.prefetchedStoragePath).length;
-            }
-          }
-        } catch (e) {
-          // A missing/unreadable snapshot shouldn't sink the rest of the dump.
-          logger.warn('[SlackMigration] backfill: dump file unreadable — skipping', { id: job.id, file, error: e instanceof Error ? e.message : String(e) });
-        }
-      }
-    }
-    return r;
-  }
-
   private async streamFileToGcs(token: string, file: { id: string; url_private: string; url_private_download?: string; mimetype?: string }, gcsPrefix: string): Promise<string | undefined> {
     const cfg = await getMigrationRuntimeConfig();
     const dest = paths.file(gcsPrefix, file.id);
@@ -729,8 +663,6 @@ export class SlackMigrationEngine {
     // Read base dump + any refresh snapshots as a union (per-message dedup downstream drops overlaps; union means a
     // partial refresh can't lose data). Offline reference active so mentions/authors resolve from the dumps, never Slack.
     const dataFiles = await this.listConversationDataFiles(job.gcsPrefix, conv.id);
-    // Backfill: the dump predates the file re-collection, so point its files at the copies now stored under files/.
-    const stored = job.backfill ? await this.freshUploadedFileSet(job.gcsPrefix) : undefined;
     const messages: SlackMessage[] = await runWithSlackOfflineReference(ref, async () => {
       const out: SlackMessage[] = [];
       for (const file of dataFiles) {
@@ -742,7 +674,6 @@ export class SlackMigrationEngine {
           try { raw = JSON.parse(line); } catch { continue; }
           // Drop Slack system messages and env-ignored bots (matches /sync isHumanMessage); real bot content is kept.
           if (!isHumanMessage(raw, 'channel', [], true)) continue;
-          if (stored) this.linkStoredFiles(raw, job.gcsPrefix, stored);
           out.push(await transformMessage(raw as never, (raw as { _replies?: never[] })._replies, cache, true, true, true, pinnedTs, job.workspaceId, ''));
         }
       }
@@ -796,11 +727,9 @@ export class SlackMigrationEngine {
       botToken: 'slack-migration-offline',
       interMessageDelayMs: cfg.messageDelayMs,
       onProgress,
-      backfillAttachments: !!job.backfill,
     };
     // Opt-in bulk path (createMany) — off by default; A/B against the per-message path before trusting it.
-    // A backfill always takes the per-message path: it upserts onto existing messages, the bulk path only inserts.
-    const ingestResult = cfg.bulk && !job.backfill
+    const ingestResult = cfg.bulk
       ? await bulkIngestConversationSlack(ingestInput)
       : await ingestConversationSlack(ingestInput);
     await channelRepo.recalculateLastActivityFromMessages(channelId);

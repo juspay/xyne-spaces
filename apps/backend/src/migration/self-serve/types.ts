@@ -43,16 +43,6 @@ export interface MigrationIssue {
   label?: string; // human-readable conversation identifier captured at issue time (e.g. "DM with Jane Doe" / "#general")
 }
 
-/** Attachment backfill, phase 1 result. failed = files - stored (deleted in Slack, no access, or download error). */
-export interface FilesCollected {
-  messages: number;  // messages scanned in the dump (incl. thread replies)
-  withFiles: number; // of those, messages that reference downloadable files
-  files: number;
-  stored: number;
-  failed: number;
-  at: number;        // when phase 1 finished
-}
-
 export interface MigrationJob {
   id: string;
   type: MigrationType;
@@ -80,8 +70,6 @@ export interface MigrationJob {
   refreshCount?: number;
   refreshDone?: number;         // conversations processed so far in the current refresh
   refreshTotal?: number;        // conversations to process in the current refresh
-  backfill?: 'silent' | 'announce'; // attachment backfill run: re-collect missing files, then re-ingest (upsert); 'silent' = skip the Slack final message
-  filesCollected?: FilesCollected; // attachment backfill result: files found in the dump vs stored (failed = deleted/no access in Slack)
   stats: { conversations: number; messages: number };
   stopRequested: boolean;
   stopReason?: 'admin' | 'system';
@@ -121,8 +109,6 @@ export interface MigrationJobView {
   refreshDone?: number;
   refreshTotal?: number;
   canRefresh: boolean;       // awaiting approval AND token still held → "Get latest messages" available
-  backfill?: 'silent' | 'announce'; // set while an attachment backfill is running
-  filesCollected?: FilesCollected;
   error?: string;
   queuePosition?: number;    // turn in its queue: 0 = running now, N = Nth in line (waiting jobs only)
   queueTotal?: number;       // jobs waiting in that queue
@@ -166,8 +152,6 @@ export const toView = (j: MigrationJob): MigrationJobView => ({
   refreshDone: j.refreshDone,
   refreshTotal: j.refreshTotal,
   canRefresh: j.status === MigrationStatus.AWAITING_APPROVAL && !!j.encryptedToken,
-  backfill: j.backfill,
-  filesCollected: j.filesCollected,
   error: j.error,
   issues: j.issues,
 });

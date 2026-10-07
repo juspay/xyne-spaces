@@ -123,7 +123,6 @@ export interface UpdateMessageParams {
   files?: Express.Multer.File[];
   uploadedFiles?: UploadedFileResult[]; // For pre-uploaded files (external sources)
   metadata?: Record<string, unknown>;
-  isMigrationImport?: boolean; // Slack migration backfill → metadata-only attachment indexing (as at ingest)
 }
 
 export class ConversationService {
@@ -893,7 +892,7 @@ export class ConversationService {
    * Similar to addMessageToConversation but updates instead of creating
    */
   async updateMessageContent(params: UpdateMessageParams) {
-    const { messageId, content, files = [], uploadedFiles = [], metadata, isMigrationImport = false } = params;
+    const { messageId, content, files = [], uploadedFiles = [], metadata } = params;
 
     // 1. Validate message exists
     const message = await this.messageRepository.findById(messageId);
@@ -991,7 +990,7 @@ export class ConversationService {
 
       if (savedAttachments.length > 0) {
         const attachments = savedAttachments.map(a => ({ id: a.id, mimetype: a.mimetype }));
-        this.pushVespaJobForAttachments(attachments, message.senderId, channel?.workspaceId, message.createdAt, isMigrationImport).catch(error => {
+        this.pushVespaJobForAttachments(attachments, message.senderId, channel?.workspaceId, message.createdAt).catch(error => {
           logger.error(`[ConversationService] Error pushing Vespa job for attachments in message ${message.messageId}:`, error);
         });
       }
