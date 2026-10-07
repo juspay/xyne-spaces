@@ -1,6 +1,10 @@
 import { Prisma, PrismaClient } from '@prisma/client';
 import { sanitizeProjectCode, ProjectType, ChannelRole, ChannelScopeType, ChannelVisibility } from '@xyne/shared';
 import { repositories } from '@/database/repositories';
+import { logger } from '@/utils/logger';
+
+// Hardcoded channel every user joins alongside general; the dashboard lands users on it.
+const DEFAULT_LANDING_CHANNEL_NAME = 'streamgres';
 
 type PrismaClientLike = PrismaClient | Prisma.TransactionClient;
 
@@ -105,6 +109,7 @@ export async function ensureGeneralChannelForWorkspace(
 
   if (userId) {
     await repositories.channelParticipants.addParticipant(channel.id, userId, role as ChannelRole);
+    await joinUserToDefaultLandingChannel(db, workspaceId, userId);
   }
 
   return {
@@ -138,7 +143,42 @@ export async function ensureUserInGeneralChannel(
   }
 
   await repositories.channelParticipants.addParticipant(generalChannel.id, userId, role);
+  await joinUserToDefaultLandingChannel(db, workspaceId, userId);
   return generalChannel.id;
+}
+
+/**
+ * Join a user to the workspace's public default landing channel when it exists.
+ * Never throws: a missing or failing landing channel must not block the general join.
+ */
+async function joinUserToDefaultLandingChannel(
+  db: PrismaClientLike,
+  workspaceId: string,
+  userId: string,
+): Promise<void> {
+  try {
+    const landingChannel = await db.channel.findFirst({
+      where: {
+        workspaceId,
+        name: { equals: DEFAULT_LANDING_CHANNEL_NAME, mode: 'insensitive' },
+        visibility: ChannelVisibility.PUBLIC,
+        isArchived: false,
+      },
+      select: { id: true },
+    });
+
+    if (!landingChannel) {
+      return;
+    }
+
+    await repositories.channelParticipants.addParticipant(landingChannel.id, userId, ChannelRole.MEMBER);
+  } catch (error) {
+    logger.error('[DEFAULT_LANDING_CHANNEL] Failed to add user to default landing channel', {
+      workspaceId,
+      userId,
+      error,
+    });
+  }
 }
 
 async function generateUniqueDefaultProjectCode(

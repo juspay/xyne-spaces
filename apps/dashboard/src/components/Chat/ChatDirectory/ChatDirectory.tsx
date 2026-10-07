@@ -232,6 +232,8 @@ const CHAT_NAV_SHORTCUTS: Partial<Record<InboxItemKey, ShortcutId>> = {
 };
 
 const NO_SECTIONS: ChannelSection[] = [];
+// Hardcoded default landing channel; falls back to the workspace landing (general) channel when absent.
+const DEFAULT_LANDING_CHANNEL_NAME = 'streamgres';
 
 const ChatDirectory = ({
   channelData,
@@ -517,9 +519,17 @@ const ChatDirectory = ({
     const isAtChatDirRoot =
       pathname === '/chat/dir' || (workspaceId && pathname === `/${workspaceId}/chat/dir`);
     if (!isAtChatDirRoot) return;
+    // Visible channels hydrate after the first render; wait for them so the
+    // default landing channel lookup does not fall through to general.
+    if (!lastVisitedChannelId && !channelData?.length) return;
+
+    const defaultLandingChannelId = [...starred, ...channels].find(
+      channel => !channel.isArchived && channel.name.toLowerCase() === DEFAULT_LANDING_CHANNEL_NAME,
+    )?.id;
 
     const targetChannelId =
       lastVisitedChannelId ||
+      defaultLandingChannelId ||
       landingChannelId ||
       selfDmChannelId ||
       starred[0]?.id ||
@@ -532,6 +542,7 @@ const ChatDirectory = ({
   }, [
     pathname,
     lastVisitedChannelId,
+    channelData,
     starred,
     channels,
     directMessages,
