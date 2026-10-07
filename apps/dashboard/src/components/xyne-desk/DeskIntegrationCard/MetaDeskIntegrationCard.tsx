@@ -5,6 +5,9 @@ import {
   disconnectInstagramAccount,
   reconnectInstagramAccount,
   addInstagramAccount,
+  disconnectFacebookPage,
+  reconnectFacebookPage,
+  addFacebookPage,
 } from '../../../services/clients/socialMediaDeskApi';
 import {
   useChannelIntegrationInfo,
@@ -14,30 +17,69 @@ import { useConfirmDialog } from '../../../hooks/useConfirmDialog';
 import { DeskConnectionCard } from './DeskConnectionCard';
 import Button from '../../ui/Button';
 
-interface InstagramDeskIntegrationCardProps {
+type MetaProvider = 'instagram' | 'facebook';
+
+const PROVIDERS = {
+  instagram: {
+    name: 'Instagram',
+    account: 'Instagram account',
+    accounts: 'Instagram accounts',
+    accountSlug: 'instagram-account',
+    handlePrefix: '@',
+    history: 'DM history',
+    stopBullet: 'New Instagram DMs will stop creating tickets immediately.',
+    reconnectHint: (label: string) =>
+      `Make sure you are logged into ${label} on instagram.com before continuing. Instagram will use whichever account is currently active in your browser.`,
+    disconnect: disconnectInstagramAccount,
+    reconnect: reconnectInstagramAccount,
+    add: addInstagramAccount,
+  },
+  facebook: {
+    name: 'Facebook',
+    account: 'Facebook Page',
+    accounts: 'Facebook Pages',
+    accountSlug: 'facebook-page',
+    handlePrefix: '',
+    history: 'message history',
+    stopBullet:
+      'New Facebook messages, comments and mentions will stop creating tickets immediately.',
+    reconnectHint: (label: string) =>
+      `Make sure you are logged into the Facebook account that manages ${label}, and keep that Page selected when Facebook asks which Pages to share.`,
+    disconnect: disconnectFacebookPage,
+    reconnect: reconnectFacebookPage,
+    add: addFacebookPage,
+  },
+} as const;
+
+interface MetaDeskIntegrationCardProps {
+  provider: MetaProvider;
   channelId: string;
   canManage: boolean;
 }
 
-export const InstagramDeskIntegrationCard = ({
+export const MetaDeskIntegrationCard = ({
+  provider,
   channelId,
   canManage,
-}: InstagramDeskIntegrationCardProps): ReactElement | null => {
+}: MetaDeskIntegrationCardProps): ReactElement | null => {
   const [isAddingAccount, setIsAddingAccount] = useState(false);
   const [accountAction, setAccountAction] = useState<string | null>(null);
   const { isConnected, hasSource, sourceType, connectedLabel, deskApps } =
     useChannelIntegrationInfo(channelId);
   const { confirm, ConfirmDialog } = useConfirmDialog();
 
-  if (sourceType !== 'instagram' || !hasSource) return null;
+  if (sourceType !== provider || !hasSource) return null;
   if (!canManage) return null;
+
+  const p = PROVIDERS[provider];
+  const trackCategory = `${provider}-desk-integration`;
 
   const handleDisconnectAll = async (): Promise<void> => {
     try {
       for (const account of deskApps) {
-        await disconnectInstagramAccount(channelId, account.id);
+        await p.disconnect(channelId, account.id);
       }
-      toast.success('Instagram accounts disconnected. DM history is preserved.');
+      toast.success(`${p.accounts} disconnected. ${p.history} is preserved.`);
       clearChannelConnectedEmailCache(channelId);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Failed to disconnect — please try again.');
@@ -54,36 +96,32 @@ export const InstagramDeskIntegrationCard = ({
     setAccountAction(key);
     try {
       if (reconnect) {
-        const accountLabel = displayName ? `@${displayName}` : 'this Instagram account';
+        const accountLabel = displayName ? `${p.handlePrefix}${displayName}` : `this ${p.account}`;
         const confirmed = await confirm({
-          title: 'Reconnect Instagram account',
-          description: `Make sure you are logged into ${accountLabel} on instagram.com before continuing. Instagram will use whichever account is currently active in your browser.`,
-          confirmLabel: 'Continue to Instagram',
+          title: `Reconnect ${p.account}`,
+          description: p.reconnectHint(accountLabel),
+          confirmLabel: `Continue to ${p.name}`,
           cancelLabel: 'Cancel',
         });
         if (!confirmed) return;
 
         const isElectron = typeof window.electronAPI?.openExternal === 'function';
-        const authUrl = await reconnectInstagramAccount(
-          channelId,
-          sourceId,
-          isElectron ? 'electron' : 'web',
-        );
+        const authUrl = await p.reconnect(channelId, sourceId, isElectron ? 'electron' : 'web');
         if (isElectron && window.electronAPI?.openExternal) {
           window.electronAPI.openExternal(authUrl);
         } else {
           window.location.href = authUrl;
         }
       } else {
-        await disconnectInstagramAccount(channelId, sourceId);
+        await p.disconnect(channelId, sourceId);
         clearChannelConnectedEmailCache(channelId);
-        toast.success('Instagram account disconnected.');
+        toast.success(`${p.account} disconnected.`);
       }
     } catch (err) {
       toast.error(
         err instanceof Error
           ? err.message
-          : `Failed to ${reconnect ? 'reconnect' : 'disconnect'} Instagram account.`,
+          : `Failed to ${reconnect ? 'reconnect' : 'disconnect'} ${p.account}.`,
       );
     } finally {
       setAccountAction(null);
@@ -94,14 +132,14 @@ export const InstagramDeskIntegrationCard = ({
     setIsAddingAccount(true);
     try {
       const isElectron = typeof window.electronAPI?.openExternal === 'function';
-      const authUrl = await addInstagramAccount(channelId, isElectron ? 'electron' : 'web');
+      const authUrl = await p.add(channelId, isElectron ? 'electron' : 'web');
       if (isElectron && window.electronAPI?.openExternal) {
         window.electronAPI.openExternal(authUrl);
       } else {
         window.location.href = authUrl;
       }
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Failed to add Instagram account.');
+      toast.error(err instanceof Error ? err.message : `Failed to add ${p.account}.`);
     } finally {
       setIsAddingAccount(false);
     }
@@ -110,19 +148,19 @@ export const InstagramDeskIntegrationCard = ({
   return (
     <div className='flex flex-col gap-3'>
       <DeskConnectionCard
-        label='Connected Instagram accounts'
+        label={`Connected ${p.accounts}`}
         value={connectedLabel}
         isConnected={isConnected}
         onDisconnect={handleDisconnectAll}
-        disconnectTitle='Disconnect Instagram integration'
-        disconnectPrompt='Disconnect all Instagram accounts from this desk?'
+        disconnectTitle={`Disconnect ${p.name} integration`}
+        disconnectPrompt={`Disconnect all ${p.accounts} from this desk?`}
         disconnectBullets={[
-          'New Instagram DMs will stop creating tickets immediately.',
-          'Your existing DM history on this desk is kept.',
-          'You can reconnect the same Instagram accounts later.',
+          p.stopBullet,
+          `Your existing ${p.history} on this desk is kept.`,
+          `You can reconnect the same ${p.accounts} later.`,
         ]}
-        trackCategory='instagram-desk-integration'
-        provider='instagram'
+        trackCategory={trackCategory}
+        provider={provider}
       />
 
       {deskApps.length > 0 && (
@@ -137,8 +175,8 @@ export const InstagramDeskIntegrationCard = ({
                 <div className='min-w-0'>
                   <p className='truncate text-sm font-medium text-foreground'>
                     {account.displayName
-                      ? `@${account.displayName}`
-                      : (account.externalIdentifier ?? 'Instagram account')}
+                      ? `${p.handlePrefix}${account.displayName}`
+                      : (account.externalIdentifier ?? p.account)}
                   </p>
                   <p className='truncate text-xs text-muted-foreground'>
                     {account.isActive ? 'Connected' : 'Disconnected'}
@@ -154,8 +192,8 @@ export const InstagramDeskIntegrationCard = ({
                     onClick={() =>
                       void handleAccountAction(account.id, account.displayName, !account.isActive)
                     }
-                    data-track-category='instagram-desk-integration'
-                    data-track-name='toggle-instagram-account-connection'
+                    data-track-category={trackCategory}
+                    data-track-name={`toggle-${p.accountSlug}-connection`}
                   >
                     {account.isActive ? <Unplug size={14} /> : <Plug size={14} />}
                     {account.isActive ? 'Disconnect' : 'Reconnect'}
@@ -175,11 +213,11 @@ export const InstagramDeskIntegrationCard = ({
             size='sm'
             loading={isAddingAccount}
             onClick={() => void handleAddAccount()}
-            data-track-category='instagram-desk-integration'
-            data-track-name='add-instagram-account'
+            data-track-category={trackCategory}
+            data-track-name={`add-${p.accountSlug}`}
           >
             <Plus size={14} />
-            Add Instagram account
+            Add {p.account}
           </Button>
         </div>
       )}
