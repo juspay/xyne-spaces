@@ -1,4 +1,4 @@
-import type { BrowserContext } from 'playwright';
+import type { BrowserContext } from '@playwright/test';
 import { config } from '@/config';
 
 interface HeaderEntry {

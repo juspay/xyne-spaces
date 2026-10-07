@@ -720,7 +720,7 @@ export default class XyneDeskSteps {
     assertValidUserAlias(userAlias);
     assert.ok(enabled === 'on' || enabled === 'off', 'Auto-merge must be "on" or "off".');
     const channelId = this.getStoredChannelId(channelAlias, userAlias);
-    const response = await withDevAuthenticatedApiContext(userAlias, apiContext =>
+    const response = await withDevAuthenticatedApiContext(userAlias, (apiContext) =>
       apiContext.patch(`/api/test/desk/channel/${channelId}/auto-merge`, {
         data: { enabled: enabled === 'on' },
       })
@@ -735,18 +735,26 @@ export default class XyneDeskSteps {
   ): Promise<void> {
     const first = assertFixture(firstMailAlias);
     const second = assertFixture(secondMailAlias);
-    assert.ok(first.conversationId && second.conversationId, 'Expected both emails to be ingested.');
+    assert.ok(
+      first.conversationId && second.conversationId,
+      'Expected both emails to be ingested.'
+    );
     assert.equal(second.conversationId, first.conversationId);
   }
 
-  @Step('verifying mock Desk emails <firstMailAlias> and <secondMailAlias> have separate conversations')
+  @Step(
+    'verifying mock Desk emails <firstMailAlias> and <secondMailAlias> have separate conversations'
+  )
   public async verifyMockDeskEmailsHaveSeparateConversations(
     firstMailAlias: string,
     secondMailAlias: string
   ): Promise<void> {
     const first = assertFixture(firstMailAlias);
     const second = assertFixture(secondMailAlias);
-    assert.ok(first.conversationId && second.conversationId, 'Expected both emails to be ingested.');
+    assert.ok(
+      first.conversationId && second.conversationId,
+      'Expected both emails to be ingested.'
+    );
     assert.notEqual(second.conversationId, first.conversationId);
   }
 
@@ -821,57 +829,69 @@ export default class XyneDeskSteps {
     mockPubSubMessages.set(batchAlias, messages);
   }
 
-  @Step('publishing deterministic Pub/Sub batch <batchAlias> to Desk channel <channelAlias> for user <userAlias>')
+  @Step(
+    'publishing deterministic Pub/Sub batch <batchAlias> to Desk channel <channelAlias> for user <userAlias>'
+  )
   public async publishDeterministicPubSubBatch(
     batchAlias: string,
     channelAlias: string,
-    userAlias: string,
+    userAlias: string
   ): Promise<void> {
     const batch = mockPubSubBatches.get(batchAlias);
     assert.ok(batch, `Expected Pub/Sub batch "${batchAlias}" to be generated.`);
     const channelId = this.getStoredChannelId(channelAlias, userAlias);
     const messages = mockPubSubMessages.get(batchAlias);
     assert.ok(messages, `Expected Pub/Sub messages for batch "${batchAlias}".`);
-    const response = await withDevAuthenticatedApiContext(userAlias, apiContext =>
+    const response = await withDevAuthenticatedApiContext(userAlias, (apiContext) =>
       apiContext.post('/api/test/desk/pubsub/bulk-gmail', {
         data: { channelId, historyId: batch.historyId, messages },
-      }),
+      })
     );
     await assertOkResponse(response, 'Deterministic Pub/Sub Gmail batch');
-    const result = (await response.json()) as { published?: number; processed?: number; created?: number; duplicates?: number; skipped?: number };
+    const result = (await response.json()) as {
+      published?: number;
+      processed?: number;
+      created?: number;
+      duplicates?: number;
+      skipped?: number;
+    };
     assert.equal(result.published, batch.messageIds.length);
     assert.equal(result.processed, batch.messageIds.length);
     assert.equal(result.created, batch.messageIds.length);
     assert.equal(result.duplicates, 0);
     assert.equal(result.skipped, 0);
-    const ticketsResponse = await withDevAuthenticatedApiContext(userAlias, apiContext =>
-      apiContext.get(`/api/test/desk/channel/${channelId}/tickets`),
+    const ticketsResponse = await withDevAuthenticatedApiContext(userAlias, (apiContext) =>
+      apiContext.get(`/api/test/desk/channel/${channelId}/tickets`)
     );
     await assertOkResponse(ticketsResponse, 'Desk Pub/Sub ticket verification');
     const ticketsBody = (await ticketsResponse.json()) as { tickets?: Array<{ title?: string }> };
     const expectedTitles = new Set(
-      (mockPubSubMessages.get(batchAlias) ?? []).map(message => String(message.subject)),
+      (mockPubSubMessages.get(batchAlias) ?? []).map((message) => String(message.subject))
     );
-    const actualTitles = (ticketsBody.tickets ?? []).filter(ticket => expectedTitles.has(String(ticket.title)));
+    const actualTitles = (ticketsBody.tickets ?? []).filter((ticket) =>
+      expectedTitles.has(String(ticket.title))
+    );
     assert.equal(actualTitles.length, expectedTitles.size);
-    assert.equal(new Set(actualTitles.map(ticket => ticket.title)).size, expectedTitles.size);
+    assert.equal(new Set(actualTitles.map((ticket) => ticket.title)).size, expectedTitles.size);
   }
 
-  @Step('republishing deterministic Pub/Sub batch <batchAlias> to Desk channel <channelAlias> for user <userAlias>')
+  @Step(
+    'republishing deterministic Pub/Sub batch <batchAlias> to Desk channel <channelAlias> for user <userAlias>'
+  )
   public async republishDeterministicPubSubBatch(
     batchAlias: string,
     channelAlias: string,
-    userAlias: string,
+    userAlias: string
   ): Promise<void> {
     const batch = mockPubSubBatches.get(batchAlias);
     assert.ok(batch, `Expected Pub/Sub batch "${batchAlias}" to be generated.`);
     const channelId = this.getStoredChannelId(channelAlias, userAlias);
     const messages = mockPubSubMessages.get(batchAlias);
     assert.ok(messages, `Expected Pub/Sub messages for batch "${batchAlias}".`);
-    const response = await withDevAuthenticatedApiContext(userAlias, apiContext =>
+    const response = await withDevAuthenticatedApiContext(userAlias, (apiContext) =>
       apiContext.post('/api/test/desk/pubsub/bulk-gmail', {
         data: { channelId, historyId: batch.historyId, messages },
-      }),
+      })
     );
     await assertOkResponse(response, 'Deterministic Pub/Sub duplicate batch');
     const result = (await response.json()) as { created?: number; duplicates?: number };
@@ -997,7 +1017,9 @@ export default class XyneDeskSteps {
       .waitFor({ state: 'visible', timeout: DESK_UI_TIMEOUT_MS });
   }
 
-  @Step('verifying Desk priority and status filters work for channel <channelAlias> user <userAlias>')
+  @Step(
+    'verifying Desk priority and status filters work for channel <channelAlias> user <userAlias>'
+  )
   public async verifyDeskFiltersWork(channelAlias: string, userAlias: string): Promise<void> {
     await this.openStoredDeskChannelUrl(channelAlias, userAlias);
     const page = testContext.activePage;
@@ -1080,7 +1102,9 @@ export default class XyneDeskSteps {
     }
   }
 
-  @Step('verifying Desk channel <channelAlias> does not contain email <mailAlias> for user <userAlias>')
+  @Step(
+    'verifying Desk channel <channelAlias> does not contain email <mailAlias> for user <userAlias>'
+  )
   public async verifyDeskChannelDoesNotContainEmail(
     channelAlias: string,
     mailAlias: string,
@@ -1088,13 +1112,13 @@ export default class XyneDeskSteps {
   ): Promise<void> {
     const mail = assertFixture(mailAlias);
     const channelId = this.getStoredChannelId(channelAlias, userAlias);
-    const response = await withDevAuthenticatedApiContext(userAlias, apiContext =>
+    const response = await withDevAuthenticatedApiContext(userAlias, (apiContext) =>
       apiContext.get(`/api/test/desk/channel/${channelId}/tickets`)
     );
     await assertOkResponse(response, 'Desk channel ticket listing');
     const body = (await response.json()) as { tickets?: Array<{ title?: string }> };
     assert.ok(
-      !(body.tickets ?? []).some(ticket => ticket.title === mail.subject),
+      !(body.tickets ?? []).some((ticket) => ticket.title === mail.subject),
       `Expected channel "${channelAlias}" not to contain email "${mailAlias}".`
     );
   }
@@ -1382,7 +1406,7 @@ export default class XyneDeskSteps {
     assert.ok(ticket?.xyneId && channelId, `Expected ticket details for "${sourceMailAlias}".`);
     await testContext.activePage.goto(
       `${config.dashboard.baseUrl}/${user.workspaceId}/support/${channelId}/${ticket.xyneId}`,
-      { waitUntil: 'domcontentloaded', timeout: DESK_UI_TIMEOUT_MS },
+      { waitUntil: 'domcontentloaded', timeout: DESK_UI_TIMEOUT_MS }
     );
     await waitForDeskPageToSettle();
     const unmerge = testContext.activePage.locator("[data-track-name='UnmergeTicket']").first();
