@@ -1,3 +1,11 @@
+## [1.468.0](https://github.com/juspay/xyne-spaces/compare/v1.467.0...v1.468.0) (2026-10-07)
+
+
+### Features
+
+* drag kanban columns by their header ([#2736](https://github.com/juspay/xyne-spaces/issues/2736)) ([16d465d](https://github.com/juspay/xyne-spaces/commit/16d465de99cfaddf0969346586a288340d503e87))
+* facebook integration in desk ([#2640](https://github.com/juspay/xyne-spaces/issues/2640)) ([bff8939](https://github.com/juspay/xyne-spaces/commit/bff89393ad40d50c0774b0abb1df2be4c3fba8fb))
+
 ## [1.467.0](https://github.com/juspay/xyne-spaces/compare/v1.466.0...v1.467.0) (2026-10-07)
 
 
