@@ -1,4 +1,4 @@
-import { ReadonlyJSONValue, Transaction, defineMutators, defineMutator } from '@rocicorp/zero';
+import { ReadonlyJSONValue, Transaction, defineMutators, defineMutator, ApplicationError } from '@rocicorp/zero';
 import {
   ChannelRole,
   ChannelType,
@@ -187,6 +187,18 @@ async function resolveCollectionPermissionRole(
 }
 
 export const ATTACHMENT_STILL_UPLOADING = 'Attachment is still uploading';
+
+/**
+ * Error codes surfaced by `collection.createCollection` via
+ * `ApplicationError.details.code`. The dashboard maps these to user-facing
+ * copy instead of rendering raw mutator messages.
+ */
+export const COLLECTION_ERROR_CODES = {
+  NAME_EXISTS: 'COLLECTION_NAME_EXISTS',
+  NOT_CHANNEL_PARTICIPANT: 'COLLECTION_NOT_CHANNEL_PARTICIPANT',
+} as const;
+export type CollectionErrorCode = (typeof COLLECTION_ERROR_CODES)[keyof typeof COLLECTION_ERROR_CODES];
+export const COLLECTION_NAME_MAX_LENGTH = 255;
 
 /**
  * An attachment row is created the moment a file is picked, and its bytes land later over
@@ -12830,17 +12842,26 @@ export const mutators = defineMutators({
         timestamp: z.number(),
       }),
       async ({ tx, ctx, args: { id, scopeType, scopeId, name, description, isPrivate, permissionId, timestamp } }) => {
-        // Check for existing non-deleted collection with same name in this scope
+        // Check for existing non-deleted collection with same name in this scope.
+        // Mirrors the server rule (per owner + scope). Excludes `id` itself:
+        // Zero re-runs this optimistic mutator while processing the server poke
+        // that already contains the newly inserted row, and without the
+        // self-exclusion the rebase fails with a bogus "already exists" even
+        // though the server created the collection successfully.
         const existingCollection = await tx.run(
           zql.collections
+            .where('ownerId', ctx.userID)
             .where('scopeType', scopeType)
             .where('scopeId', scopeId)
             .where('name', name)
             .where('deletedAt', 'IS', null)
+            .where('id', '!=', id)
             .one(),
         );
         if (existingCollection) {
-          throw new Error(`Collection "${name}" already exists`);
+          throw new ApplicationError(`Collection "${name}" already exists`, {
+            details: { code: COLLECTION_ERROR_CODES.NAME_EXISTS, name },
+          });
         }
 
         await tx.mutate.collections.insert({
