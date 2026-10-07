@@ -72,14 +72,18 @@ export const useCallAutoJoin = ({ channelId, isMember }: UseCallAutoJoinOptions)
   const callUrlOverridesKey = JSON.stringify(parseCallUrlOverrides(searchParams));
 
   const [activeCalls] = useCachedQuery(queries.activeCallsInChannel({ channelId }));
-  const stateSnapshot = useSelector(roomActor, state => state);
-  const machineState = stateSnapshot.value;
-  const currentCallId = stateSnapshot.context.externalId;
-  const isInCall =
-    stateSnapshot.matches('initiating') ||
-    stateSnapshot.matches('joining') ||
-    stateSnapshot.matches('connecting') ||
-    stateSnapshot.matches('connected');
+  // Select only what this hook consumes (see useCallJoinOrInitiate: whole-snapshot
+  // selectors re-render every consumer on each roomActor update).
+  const machineState = useSelector(roomActor, state => state.value);
+  const currentCallId = useSelector(roomActor, state => state.context.externalId);
+  const isInCall = useSelector(
+    roomActor,
+    state =>
+      state.matches('initiating') ||
+      state.matches('joining') ||
+      state.matches('connecting') ||
+      state.matches('connected'),
+  );
 
   // roomMachine only leaves the 'connected' state for two specific LiveKit disconnect
   // reasons (host ended call, evicted by another device) — a generic network-caused
@@ -98,9 +102,11 @@ export const useCallAutoJoin = ({ channelId, isMember }: UseCallAutoJoinOptions)
   // entire life of a healthy call that never has an intermediate reconnect blip
   // (confirmed by testing). room.state has no such gap — it's a live property read,
   // always accurate regardless of which events our listener did or didn't catch.
-  const isStuckAfterFailedReconnect =
-    stateSnapshot.matches('connected') &&
-    stateSnapshot.context.room?.state === ConnectionState.Disconnected;
+  const isStuckAfterFailedReconnect = useSelector(
+    roomActor,
+    state =>
+      state.matches('connected') && state.context.room?.state === ConnectionState.Disconnected,
+  );
 
   const { joinCall, initiateCall } = useCallJoinOrInitiate();
 

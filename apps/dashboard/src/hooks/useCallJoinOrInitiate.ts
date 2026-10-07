@@ -66,15 +66,20 @@ export const useCallJoinOrInitiate = (): UseCallJoinOrInitiateReturn => {
   >(null);
 
   // Get state from roomActor
-  const stateSnapshot = useSelector(roomActor, state => state);
-  const machineState = stateSnapshot.value;
+  // Select only what this hook consumes. A whole-snapshot selector re-renders every consumer
+  // (call-link previews / scheduled-call pills in message bubbles) on every roomActor update,
+  // e.g. each UPDATE_ACTIVE_CALLS sync from GlobalCallOverlay.
+  const machineState = useSelector(roomActor, state => state.value);
 
   // Check if user is in any call
-  const isInCall =
-    stateSnapshot.matches('initiating') ||
-    stateSnapshot.matches('joining') ||
-    stateSnapshot.matches('connecting') ||
-    stateSnapshot.matches('connected');
+  const isInCall = useSelector(
+    roomActor,
+    state =>
+      state.matches('initiating') ||
+      state.matches('joining') ||
+      state.matches('connecting') ||
+      state.matches('connected'),
+  );
 
   // Watch for machine state changes and execute pending action when idle
   useEffect(() => {

@@ -60,20 +60,26 @@ export const useCallActions = ({
   const pendingActionRef = useRef<PendingAction | null>(null);
 
   // Get state from roomActor
-  const stateSnapshot = useSelector(roomActor, state => state);
-  const machineState = stateSnapshot.value;
+  // Select only what this hook consumes (see useCallJoinOrInitiate: whole-snapshot
+  // selectors re-render every consumer on each roomActor update).
+  const machineState = useSelector(roomActor, state => state.value);
 
   // Handle both simple states ('initiating') and nested states ({connected: 'webMode'})
-  const isInCall =
-    stateSnapshot.matches('initiating') ||
-    stateSnapshot.matches('joining') ||
-    stateSnapshot.matches('connecting') ||
-    stateSnapshot.matches('connected');
+  const isInCall = useSelector(
+    roomActor,
+    state =>
+      state.matches('initiating') ||
+      state.matches('joining') ||
+      state.matches('connecting') ||
+      state.matches('connected'),
+  );
 
-  const isCurrentChannelOnCall = isInCall && stateSnapshot.context.channelId === channelId;
+  const activeChannelId = useSelector(roomActor, state => state.context.channelId);
+  const isCurrentChannelOnCall = isInCall && activeChannelId === channelId;
 
   // Get active calls from roomActor context
   const activeCalls = useSelector(roomActor, state => state.context.activeCalls) as ActiveCall[];
+  const activeExternalId = useSelector(roomActor, state => state.context.externalId);
 
   // Find active call in the current channel
   const currentChannelCall = activeCalls?.find(
@@ -85,7 +91,7 @@ export const useCallActions = ({
   const isUserInCurrentChannelCall = !!(
     isInCall &&
     currentChannelCall &&
-    (isCurrentChannelOnCall || stateSnapshot.context.externalId === currentChannelCall.externalId)
+    (isCurrentChannelOnCall || activeExternalId === currentChannelCall.externalId)
   );
 
   // Check cross-device active status via DB participant record
