@@ -31,6 +31,9 @@ export const customFieldColumns = (tickets: DeskMetricsTicketRow[]): string[] =>
 export const subIssueFields = (tickets: DeskMetricsTicketRow[]): string[] =>
   [...fieldNames(tickets)].filter(isSubIssueField).sort();
 
+/** "sub issue: Driver Related" → "Driver Related". */
+const subIssueBranch = (field: string): string => field.replace(SUB_ISSUE_FIELD, '').trim();
+
 /** A column's value; the sub-issue column joins every set sub-issue field the viewer may see. */
 export const customFieldValue = (
   customFields: Record<string, string> | null,
@@ -38,12 +41,14 @@ export const customFieldValue = (
   canSeeField: (field: string) => boolean = () => true,
 ): string => {
   if (column !== SUB_ISSUE_COLUMN) return customFields?.[column] ?? '';
-  return Object.keys(customFields ?? {})
+  const set = Object.keys(customFields ?? {})
     .filter(field => isSubIssueField(field) && canSeeField(field))
     .sort()
-    .map(field => customFields?.[field]?.trim() ?? '')
-    .filter(value => value !== '')
-    .join('; ');
+    .map(field => ({ field, value: customFields?.[field]?.trim() ?? '' }))
+    .filter(({ value }) => value !== '');
+  // One value matches the Primary Issue column; with several, name each one's branch.
+  if (set.length === 1) return set[0]!.value;
+  return set.map(({ field, value }) => `${subIssueBranch(field)}: ${value}`).join('; ');
 };
 
 /** "OPEN → IN_PROGRESS (00:05:12)": the move, and how long the ticket sat in `from`. */

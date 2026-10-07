@@ -544,8 +544,8 @@ const downloadAgentCsv = (agents: DeskMetricsAgentRow[]): string => {
       a.resolved,
       a.reopened,
       rate !== null ? `${Math.round(rate * 100)}%` : '',
-      formatDuration(a.avgFrtSeconds),
-      formatDuration(a.avgRtSeconds),
+      formatHms(a.avgFrtSeconds),
+      formatHms(a.avgRtSeconds),
       a.csatAvgScore !== null ? a.csatAvgScore.toFixed(1) : '',
       a.csatGood,
       a.csatBad,
@@ -860,10 +860,10 @@ const MetricsAgentTable = ({
                     )}
                   </td>
                   <td className='whitespace-nowrap px-4 py-2 text-right font-mono text-xs tabular-nums'>
-                    {formatDuration(row.avgFrtSeconds)}
+                    {formatHms(row.avgFrtSeconds)}
                   </td>
                   <td className='whitespace-nowrap px-4 py-2 text-right font-mono text-xs tabular-nums'>
-                    {formatDuration(row.avgRtSeconds)}
+                    {formatHms(row.avgRtSeconds)}
                   </td>
                   <td className='whitespace-nowrap px-4 py-2 text-right text-xs'>
                     {row.csatAvgScore !== null ? (
@@ -1384,7 +1384,7 @@ const AgentAverageTable = ({
                   {row.count}
                 </td>
                 <td className='px-4 py-2 text-right font-mono text-xs tabular-nums text-foreground'>
-                  {formatDuration(row.seconds)}
+                  {formatHms(row.seconds)}
                 </td>
               </tr>
             ))}
@@ -3059,13 +3059,10 @@ export const DeskMetricsDashboard: React.FC<DeskMetricsDashboardProps> = ({
                     <KpiCard label='Tickets Created' value={String(data.counts.openedInRange)} />
                   )}
                   {canSee('kpi:avgFirstResponse') && (
-                    <KpiCard
-                      label='Avg First Response'
-                      value={formatDuration(data.frt.avgSeconds)}
-                    />
+                    <KpiCard label='Avg First Response' value={formatHms(data.frt.avgSeconds)} />
                   )}
                   {canSee('kpi:avgResolution') && (
-                    <KpiCard label='Avg Resolution' value={formatDuration(data.rt.avgSeconds)} />
+                    <KpiCard label='Avg Resolution' value={formatHms(data.rt.avgSeconds)} />
                   )}
                   {canSee('kpi:csat') && (
                     <KpiCard
