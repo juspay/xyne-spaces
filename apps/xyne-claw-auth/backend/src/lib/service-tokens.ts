@@ -96,6 +96,9 @@ export const EXTERNAL_RUN_BODY_FIELDS = [
   "detached",
   "triggerSource",
   "userId",
+  // Identifies the run's user by email instead of a userId. If present
+  // (and userId isn't), /run resolves the user row by email.
+  "userEmail",
 ] as const;
 
 export function sanitizeExternalRunBody(

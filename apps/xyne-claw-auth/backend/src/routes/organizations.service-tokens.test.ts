@@ -99,7 +99,7 @@ async function request(
   requesterId = "admin-1",
 ): Promise<{ status: number; body: Record<string, unknown> }> {
   const { organizationsRouter } = await import("./organizations.js");
-  return await new Promise((resolve, reject) => {
+  return await new Promise((resolve) => {
     let statusCode = 200;
     const req = {
       method,
@@ -114,7 +114,23 @@ async function request(
       json(payload: Record<string, unknown>) { resolve({ status: statusCode, body: payload }); return this; },
     } as unknown as Response;
     (organizationsRouter as unknown as { handle: (req: Request, res: Response, next: (err?: unknown) => void) => void })
-      .handle(req, res, (err?: unknown) => err ? reject(err) : resolve({ status: 404, body: {} }));
+      .handle(req, res, (err?: unknown) => {
+        if (!err) {
+          resolve({ status: 404, body: {} });
+          return;
+        }
+        // Express' asyncHandler turns HttpError throws into an error-middleware
+        // call. Drilling into the router without a real error middleware stack
+        // would otherwise reject the promise, so mimic a minimal error handler
+        // here: HttpError → its status + message, anything else → 500.
+        if (err instanceof Error && err.name === "HttpError" && "status" in err) {
+          const httpErr = err as { status: number; message: string };
+          resolve({ status: httpErr.status, body: { success: false, error: httpErr.message } });
+          return;
+        }
+        const message = err instanceof Error ? err.message : "Internal server error";
+        resolve({ status: 500, body: { success: false, error: message } });
+      });
   });
 }
 

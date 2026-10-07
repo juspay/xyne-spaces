@@ -53,4 +53,13 @@ describe("sanitizeExternalRunBody", () => {
     expect(dropped).toContain("provider");
     expect(sanitized).not.toHaveProperty("provider");
   });
+
+  it("admits userEmail into the external contract", () => {
+    const { sanitized, dropped } = sanitizeExternalRunBody({
+      ...body,
+      userEmail: "someone@example.com",
+    });
+    expect(sanitized["userEmail"]).toBe("someone@example.com");
+    expect(dropped).not.toContain("userEmail");
+  });
 });

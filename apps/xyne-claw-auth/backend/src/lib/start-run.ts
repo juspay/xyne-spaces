@@ -232,8 +232,9 @@ function triggerSourceForEventType(eventType: unknown, requested: unknown): Agen
 async function resolveUserId(
   body: Record<string, unknown>,
 ): Promise<{ userId: string; userName: string; userEmail: string; orgId?: string } | { error: string }> {
-  const { userId, userName, gatewayType, externalUserId } = body as {
+  const { userId, userEmail, userName, gatewayType, externalUserId } = body as {
     userId?: string;
+    userEmail?: string;
     userName?: string;
     gatewayType?: string;
     externalUserId?: string;
@@ -250,6 +251,28 @@ async function resolveUserId(
       userName: userName?.trim() ?? user?.name ?? "",
       userEmail: user?.email ?? "",
       ...(user?.orgId ? { orgId: user.orgId } : {}),
+    };
+  }
+
+  // Identify the run by email instead of an in-cluster userId (external
+  // callers typically know emails, not ids). Simple: `userEmail` present →
+  // resolve by email; otherwise the normal flow below.
+  if (userEmail && typeof userEmail === "string" && userEmail.trim().length > 0) {
+    const user = await prisma.user.findFirst({
+      where: { email: userEmail.trim() },
+      // Deterministic when an email exists in multiple orgs — the run acts as
+      // the earliest-created row for that email.
+      orderBy: { createdAt: "asc" },
+      select: { id: true, name: true, email: true, orgId: true },
+    });
+    if (!user) {
+      return { error: "No user with that email" };
+    }
+    return {
+      userId: user.id,
+      userName: userName?.trim() ?? user.name,
+      userEmail: user.email,
+      orgId: user.orgId,
     };
   }
 
