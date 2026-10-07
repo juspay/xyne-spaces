@@ -21,9 +21,7 @@ import { useZero } from '../../hooks/useZero';
 import { mutators } from '../../zero/mutators';
 import { cn } from '../../utils/classNames';
 import type { User as UserType } from '../../machines/stateMachine';
-
-const isWorkspaceAdmin = (role: WorkspaceRole | null | undefined): boolean =>
-  role === WorkspaceRole.ADMIN || role === WorkspaceRole.OWNER;
+import { isLastAdmin as isLastAdminOf, isWorkspaceAdmin } from './workspaceRules';
 
 const WorkspaceRoleBadge = ({ role }: { role: WorkspaceRole | null }): ReactElement => {
   const isAdmin = isWorkspaceAdmin(role);
@@ -78,9 +76,7 @@ export const MembersTab = (): ReactElement => {
     return (): void => cancelAnimationFrame(rafId);
   }, [isMobile, editingUser]);
 
-  // The last admin can be neither demoted nor removed.
-  const isLastAdmin = (user: UserType): boolean =>
-    user.role === WorkspaceRole.ADMIN && adminCount <= 1;
+  const isLastAdmin = (user: UserType): boolean => isLastAdminOf(user, users);
 
   const handleUpdateRole = (
     user: UserType,

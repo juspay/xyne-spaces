@@ -100,6 +100,7 @@ import {
   useInboxBuiltIns,
 } from '../../BarCustomize';
 import ChannelCommandMenu from './ChannelCommandMenu';
+import { useAddChannelDialog } from './useAddChannelDialog';
 import AppNavigator from '../../AppNavigator/AppNavigator';
 import { useThreadSidebarState } from '../../../hooks/useUnreadThreadsCount';
 import { useOverdueRemindersCount } from '../../../hooks/useOverdueRemindersCount';
@@ -262,16 +263,7 @@ const ChatDirectory = ({
   const overdueRemindersCount = useOverdueRemindersCount();
   const { unreadCount: recapUnreadCount } = useRecapUnreadCount();
   const prefetchRecap = usePrefetchRecap();
-  const [showAddChannelForm, setShowAddChannelForm] = useState(false);
-  // Opened by the Ask AI assistant; the param is removed so a refresh does not reopen it.
-  const opensAddChannel = useRouterSelector(
-    snapshot => new URLSearchParams(snapshot.location.search).get('dialog') === 'add_channel',
-  );
-  useEffect(() => {
-    if (!opensAddChannel) return;
-    setShowAddChannelForm(true);
-    void navigate(pathname, { replace: true });
-  }, [opensAddChannel, navigate, pathname]);
+  const [showAddChannelForm, setShowAddChannelForm] = useAddChannelDialog();
   const [showAddSectionForm, setShowAddSectionForm] = useState(false);
   const [addSectionSource, setAddSectionSource] = useState<'channels' | 'dms'>('channels');
   const [sectionToRename, setSectionToRename] = useState<ChannelSection | null>(null);
@@ -542,9 +534,8 @@ const ChatDirectory = ({
     workspaceId,
   ]);
 
-  const handleAddChannelSubmit = (data: CreateChannelFormData): void => {
-    createChannelMutation.mutate(data);
-  };
+  const handleAddChannelSubmit = (data: CreateChannelFormData): Promise<unknown> =>
+    createChannelMutation.mutateAsync(data);
 
   // Persist collapse for custom sections (base groups stay local-only).
   const handleSectionsOpenChange = (next: string[]): void => {

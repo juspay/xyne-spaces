@@ -8,7 +8,7 @@ import {
 import { xyneAIStreamManager, type StreamState } from '../../services/XyneAI';
 import { splitSentences, flushRemainder, toSpokenText } from './voiceSentences';
 import { voiceLevel } from './voiceLevel';
-import { DIAGNOSE_ENABLED, type VoiceDiagnostic } from './diagnoseLog';
+import { diagnose as log, startRequest } from './diagnoseLog';
 import { getVoiceSettings, subscribeVoiceSettings } from './voiceSettings';
 import { createSpeechQueue } from './speechQueue';
 
@@ -34,8 +34,6 @@ export interface VoiceSessionState {
   // The current line: what you are saying while listening, then Xyne's reply as it streams in and is spoken.
   liveText: string;
   turns: VoiceTurn[];
-  // What happened, step by step; empty unless diagnostics are enabled (see diagnoseLog).
-  diagnostics: VoiceDiagnostic[];
   // The browser refused to start audio without a user gesture; resumePlayback retries inside a click.
   playbackBlocked: boolean;
 }
@@ -46,6 +44,16 @@ export interface VoiceHost {
   ownsStream: (state: StreamState) => boolean;
   // A reply to speak, '' when the assistant took the text but has nothing to say, or null to submit it.
   answer?: ((text: string) => Promise<string | null>) | undefined;
+  // Lines this surface may speak, read when it claims the session and synthesized ahead so that
+  // they start without waiting.
+  phrases?: (() => readonly string[]) | undefined;
+  // A line to say once this surface has the session (the welcome, or a question handed over),
+  // read when it claims it.
+  greeting?: (() => string | null) | undefined;
+  // The question still open for the user, to say again once Ask AI has answered a detour; null when none.
+  resumePrompt?: (() => string | null) | undefined;
+  // The user started speaking: whatever the surface is still working out for the last turn is dropped.
+  onInterrupt?: (() => void) | undefined;
   // Cancels what lives outside the session when the user taps Stop: Auto routing and the LLM request.
   onStop?: (() => void) | undefined;
   // Leaves voice mode: the user went back to chat, or another surface took the session over.
@@ -53,7 +61,6 @@ export interface VoiceHost {
 }
 
 const MAX_TURNS = 20;
-const MAX_DIAGNOSTICS = 200;
 // Ask AI gets 15s to start answering and 45s between updates before the turn is given up.
 const START_TIMEOUT_MS = 15_000;
 const STALL_TIMEOUT_MS = 45_000;
@@ -65,7 +72,6 @@ const IDLE: VoiceSessionState = {
   phase: 'idle',
   liveText: '',
   turns: [],
-  diagnostics: [],
   playbackBlocked: false,
 };
 
@@ -91,8 +97,8 @@ let host: VoiceHost | null = null;
 let unsubscribe: (() => void) | null = null;
 let utterance: Utterance | null = null;
 let turnSeq = 0;
-let diagnosticSeq = 0;
-let holdStart: number | null = null;
+// Bumped by every transcript and every new hold, so a slower older transcript is dropped.
+let transcriptSeq = 0;
 
 // The turn being followed: when it was submitted, what has been spoken of the streamed reply, and
 // which stream it is. `watchdog` gives the turn up when Ask AI goes quiet.
@@ -102,30 +108,21 @@ let gotText = false;
 let consumed = 0;
 let activeStreamId: string | null = null;
 let watchdog: ReturnType<typeof setTimeout> | undefined;
+// The caption of the reply being streamed, which its later sentences join.
+let streamCaption: string | null = null;
 
-function log(step: string, detail = ''): void {
-  if (!DIAGNOSE_ENABLED) return;
-  const now = performance.now();
-  holdStart ??= now;
-  const event = {
-    id: diagnosticSeq++,
-    at: new Date(),
-    ms: Math.round(now - holdStart),
-    step,
-    detail,
-  };
-  setState({ diagnostics: [...state.diagnostics, event].slice(-MAX_DIAGNOSTICS) });
-}
-
-function appendTurn(speaker: VoiceTurn['speaker'], text: string): void {
+// Adds a caption, or adds to the caption `joins` when it is still the last; returns its id. Only a
+// streamed reply's sentences join one: two replies are two captions, as in the chat.
+function appendTurn(speaker: VoiceTurn['speaker'], text: string, joins?: string | null): string {
   const { turns } = state;
   const last = turns[turns.length - 1];
-  // Reply sentences arrive one by one and read as a single caption.
-  if (speaker === 'xyne' && last?.speaker === 'xyne') {
+  if (last && joins && last.id === joins) {
     setState({ turns: [...turns.slice(0, -1), { ...last, text: `${last.text} ${text}` }] });
-    return;
+    return last.id;
   }
-  setState({ turns: [...turns, { id: `turn-${turnSeq++}`, speaker, text }].slice(-MAX_TURNS) });
+  const id = `turn-${turnSeq++}`;
+  setState({ turns: [...turns, { id, speaker, text }].slice(-MAX_TURNS) });
+  return id;
 }
 
 const speech = createSpeechQueue({
@@ -170,10 +167,12 @@ function watch(ms: number): void {
   );
 }
 
-function enqueue(sentences: string[]): void {
+// `streamed`: the sentences are the next of the reply being streamed.
+function enqueue(sentences: string[], streamed = false): void {
   if (sentences.length === 0) return;
   const text = sentences.join(' ');
-  appendTurn('xyne', text);
+  const caption = appendTurn('xyne', text, streamed ? streamCaption : null);
+  if (streamed) streamCaption = caption;
   log('Reply queued', `“${text}”`);
   // Muted: the reply only shows as a caption. While a reply streams, its end resets the phase.
   if (!getVoiceSettings().speakReplies) {
@@ -183,24 +182,29 @@ function enqueue(sentences: string[]): void {
   speech.enqueue(sentences);
 }
 
+// The sentences `text` is spoken as.
+function sentencesOf(text: string): string[] {
+  const { sentences, rest } = splitSentences(toSpokenText(text));
+  return [...sentences, ...flushRemainder(rest)];
+}
+
 // Queues text to be spoken like an assistant reply.
 function speak(text: string): void {
-  const { sentences, rest } = splitSentences(toSpokenText(text));
-  enqueue([...sentences, ...flushRemainder(rest)]);
+  enqueue(sentencesOf(text));
 }
 
 function processReply(fullText: string, done: boolean): void {
   if (done) {
     const tail = flushRemainder(fullText.slice(consumed));
     consumed = fullText.length;
-    enqueue(tail);
+    enqueue(tail, true);
     if (!speech.isBusy()) setPhase('idle');
     return;
   }
   const { sentences, rest } = splitSentences(fullText.slice(consumed));
   if (sentences.length > 0) {
     consumed = fullText.length - rest.length;
-    enqueue(sentences);
+    enqueue(sentences, true);
   }
 }
 
@@ -233,6 +237,7 @@ function followReply(stream: StreamState): void {
   if (activeStreamId === null) {
     if (stream.startedAt < askedAt || !host.ownsStream(stream)) return;
     activeStreamId = stream.streamId;
+    log('Ask AI', `reply started after ${Date.now() - askedAt}ms`);
   } else if (stream.streamId !== activeStreamId) {
     return;
   }
@@ -261,6 +266,9 @@ function followReply(stream: StreamState): void {
   if (done) {
     log('Ask AI', 'done');
     endTurn();
+    // The answer was a detour: the question it interrupted is put again, once.
+    const back = host.resumePrompt?.();
+    if (back) speak(back);
   }
 }
 
@@ -272,6 +280,7 @@ function followReply(stream: StreamState): void {
  */
 async function handleTranscript(rawText: string): Promise<void> {
   const current = session;
+  const mine = ++transcriptSeq;
   try {
     const text = rawText.trim();
     if (!text) {
@@ -283,10 +292,13 @@ async function handleTranscript(rawText: string): Promise<void> {
     appendTurn('you', text);
     setPhase('understanding');
     const reply = (await host?.answer?.(text)) ?? null;
-    if (session !== current || !host) return;
+    // Spoken over meanwhile: this answer is old, and must not touch the newer turn.
+    if (session !== current || !host || mine !== transcriptSeq) return;
     if (reply === '') {
       log('Routing', 'handled locally, nothing to say');
-      setPhase('idle');
+      // A card tapped meanwhile may already be speaking its reply, or the surface handed the
+      // request to Ask AI itself: that phase is not cut short.
+      if (!speech.isBusy() && !turnActive) setPhase('idle');
       return;
     }
     if (reply !== null) {
@@ -294,18 +306,9 @@ async function handleTranscript(rawText: string): Promise<void> {
       speak(reply);
       return;
     }
-    log('Routing', 'sent to Ask AI');
-    consumed = 0;
-    activeStreamId = null;
-    turnActive = true;
-    gotText = false;
-    askedAt = Date.now();
-    setPhase('asking');
-    log('Ask AI', 'request sent');
-    watch(START_TIMEOUT_MS);
-    host.submit(text);
+    askAI(text);
   } catch (err) {
-    if (session !== current) return;
+    if (session !== current || mine !== transcriptSeq) return;
     const description = err instanceof Error ? err.message : 'Unknown error';
     log('Error', `transcription failed: ${description}`);
     toast.error('Voice transcription failed', { description });
@@ -313,14 +316,36 @@ async function handleTranscript(rawText: string): Promise<void> {
   }
 }
 
+// Submits `text` to Ask AI and follows its reply, which is spoken as it streams.
+function askAI(text: string): void {
+  if (!host) return;
+  log('Routing', 'sent to Ask AI');
+  consumed = 0;
+  activeStreamId = null;
+  streamCaption = null;
+  turnActive = true;
+  gotText = false;
+  askedAt = Date.now();
+  setPhase('asking');
+  log('Ask AI', 'request sent');
+  watch(START_TIMEOUT_MS);
+  host.submit(text);
+}
+
 function startRecording(): void {
   if (utterance) return;
-  holdStart = null;
+  startRequest();
   log('Hold start');
   // Talking over the answer ends that turn, so the rest of it is not spoken.
+  if (turnActive) log('Ask AI', gotText ? 'interrupted' : 'interrupted before any text');
   interrupt();
+  transcriptSeq++;
+  host?.onInterrupt?.();
   const mine = startUtterance({
     commit: 'manual',
+    // Left to detect each phrase, it hears English as Hindi, Dutch or Portuguese. The browser's
+    // language is the hint ('en-IN' is sent as 'en'): Hinglish then comes back romanised.
+    language: navigator.language,
     deviceId: getVoiceSettings().micId,
     onLevel: voiceLevel.set,
     onPartial: (text, committed) => {
@@ -364,6 +389,8 @@ function stopRecording(): void {
   if (state.phase !== 'listening') {
     utterance.cancel();
     utterance = null;
+    // The turn this hold interrupted is dropped, so nothing else will end the phase it was in.
+    setPhase('idle');
     return;
   }
   log('Release');
@@ -385,7 +412,7 @@ function reset(): void {
   utterance?.cancel();
   utterance = null;
   interrupt();
-  holdStart = null;
+  startRequest();
   state = IDLE;
   listeners.forEach(listener => listener());
 }
@@ -421,10 +448,17 @@ function claim(next: VoiceHost): () => void {
   const previous = host;
   host = next;
   activate();
+  // Split as speak() does, so the audio is found under the sentences later queued.
+  if (getVoiceSettings().speakReplies && next.phrases) {
+    void speech.warm(next.phrases().flatMap(sentencesOf));
+  }
   if (previous && previous !== next) {
     previous.onExit();
     reset();
   }
+  // Said only now: before the claim, the surface that just let go would end the session and drop it.
+  const greeting = next.greeting?.();
+  if (greeting) speak(greeting);
   return (): void => {
     if (host !== next) return;
     host = null;
@@ -439,8 +473,11 @@ export const voiceSession = {
   stopRecording,
   stop,
   speak,
+  askAI,
   resumePlayback: (): void => speech.resume(),
+  speaking: (): boolean => state.phase === 'speaking',
   exit: (): void => host?.onExit(),
+  active: (): boolean => host !== null,
 };
 
 const subscribe = (listener: () => void): (() => void) => {
@@ -465,6 +502,10 @@ export function useVoiceHost(enabled: boolean, surface: VoiceHost): void {
       submit: text => surfaceRef.current.submit(text),
       ownsStream: stream => surfaceRef.current.ownsStream(stream),
       answer: async text => (await surfaceRef.current.answer?.(text)) ?? null,
+      phrases: surfaceRef.current.phrases,
+      greeting: () => surfaceRef.current.greeting?.() ?? null,
+      resumePrompt: () => surfaceRef.current.resumePrompt?.() ?? null,
+      onInterrupt: () => surfaceRef.current.onInterrupt?.(),
       onStop: () => surfaceRef.current.onStop?.(),
       onExit: () => surfaceRef.current.onExit(),
     });

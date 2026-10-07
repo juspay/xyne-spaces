@@ -39,12 +39,34 @@ export const pickVoice = (
   catalog?.voices.find(voice => voice.id === savedId) ??
   catalog?.voices.find(voice => voice.id === catalog.defaultVoiceId);
 
+// Spoken lines repeat (Buddy's questions) and are synthesized ahead of time, so the audio is kept.
+const CACHE_SIZE = 40;
+
 class TtsService {
+  // Keyed by voice and text. Holds the request, so a call made while one is in flight shares it;
+  // Map order is insertion order, so the oldest entry goes first.
+  private cache = new Map<string, Promise<SynthesizedSpeech>>();
+
   async voices(): Promise<TtsVoices> {
     return queryClient.fetchQuery(ttsVoicesQuery).catch(() => NO_VOICES);
   }
 
-  async synthesize(text: string, voice?: string): Promise<SynthesizedSpeech> {
+  synthesize(text: string, voice?: string): Promise<SynthesizedSpeech> {
+    const key = `${voice ?? ''}|${text}`;
+    const cached = this.cache.get(key);
+    if (cached) return cached;
+    const request = this.request(text, voice);
+    this.cache.set(key, request);
+    const oldest = this.cache.keys().next().value;
+    if (this.cache.size > CACHE_SIZE && oldest !== undefined) this.cache.delete(oldest);
+    // A failure is not worth keeping: the next call tries again.
+    request.catch(() => {
+      if (this.cache.get(key) === request) this.cache.delete(key);
+    });
+    return request;
+  }
+
+  private async request(text: string, voice?: string): Promise<SynthesizedSpeech> {
     const response = await apiInstance.post('/tts', {
       text,
       ...(voice ? { voice } : {}),

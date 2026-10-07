@@ -488,3 +488,21 @@ export const formatDurationMs = (ms: number): string => {
   const s = Math.round((ms % 60_000) / 1000);
   return `${m}m ${s}s`;
 };
+
+/** A search result's backend time, written in UTC ("Sep 30, 2026, 8:00 AM"), as shown in IST. */
+export const utcToIst = (utcString?: string): string => {
+  // The backend writes the literal 'N/A' when a doc has no usable timestamp, so
+  // treat it as absent — otherwise it parses to an Invalid Date and every card
+  // that doesn't pre-guard renders the string "Invalid Date".
+  if (!utcString || utcString === 'N/A') return '';
+  const dateUtc = new Date(`${utcString} UTC`);
+  return dateUtc.toLocaleString('en-IN', {
+    timeZone: 'Asia/Kolkata',
+    day: 'numeric',
+    month: 'short',
+    year: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+    hour12: true,
+  });
+};

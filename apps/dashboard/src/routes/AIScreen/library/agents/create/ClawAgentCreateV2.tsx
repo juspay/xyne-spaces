@@ -7,7 +7,13 @@ import { Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/Button/index';
 import { useAuth } from '@/hooks/useAuth';
 import { useAgentNameCheck } from '@/hooks/useAgentNameCheck';
-import { useCreateClawAgent } from '@/hooks/useCreateClawAgent';
+import { useCreateClawAgent, type WizardSubmission } from '@/hooks/useCreateClawAgent';
+import {
+  useFilling,
+  useOperableForm,
+  type OperableForm,
+} from '@/components/Assistant/forms/operableForm';
+import { cn } from '@/utils/classNames';
 import { generateAgentPrompt } from '@/services/claw/clawAgentWizardService';
 import {
   INITIAL_WIZARD_STATE,
@@ -78,6 +84,9 @@ const ClawAgentCreateV2 = ({ agent }: ClawAgentCreateV2Props = {}): ReactElement
   const intent = state.systemPrompt.trim();
   const canImprove = intent.length > 0 && !generate.isPending;
 
+  const setName = (name: string): void =>
+    update({ name, ...(state.slugManual ? {} : { slug: slugify(name) }) });
+
   const runGenerate = (): void => {
     if (!canImprove) return;
     generate.mutate({ intent, agentName: state.name });
@@ -102,6 +111,54 @@ const ClawAgentCreateV2 = ({ agent }: ClawAgentCreateV2Props = {}): ReactElement
         ...(nameCheck.slugError ? { slug: nameCheck.slugError } : {}),
       };
 
+  const submission = (): WizardSubmission => ({
+    slug,
+    name: state.name.trim(),
+    description: state.description.trim(),
+    systemPrompt: state.systemPrompt.trim(),
+    color: state.color,
+    kbScope: state.selectedKbScope,
+    knowledgeBase: state.selectedKbResources,
+    tools: state.tools,
+    skillIds: state.selectedSkillIds,
+    research: {
+      productId: state.researchAgentProductId,
+      repositoryId: state.researchAgentRepositoryId,
+    },
+  });
+
+  // The assistant fills and submits this form for the user, through the same state and mutations.
+  const operableForm: OperableForm | null = isEdit
+    ? null
+    : {
+        id: 'agent_create',
+        fields: {
+          name: {
+            get: () => state.name,
+            set: value => setName(value ?? ''),
+            validate: () => errors.name ?? errors.slug ?? null,
+            checking: () => nameCheck.checking,
+          },
+          instructions: {
+            get: () => state.systemPrompt,
+            set: value => update({ systemPrompt: value ?? '' }),
+            validate: () => errors.systemPrompt ?? null,
+          },
+        },
+        actions: {
+          improve: async (): Promise<void> => {
+            if (canImprove) await generate.mutateAsync({ intent, agentName: state.name });
+          },
+        },
+        busy: () => createMutation.isPending,
+        submit: async (): Promise<void> => {
+          await createMutation.mutateAsync(submission());
+        },
+      };
+  useOperableForm(operableForm);
+  const fillingName = useFilling('agent_create', 'name');
+  const fillingInstructions = useFilling('agent_create', 'instructions');
+
   const handleSubmit = (): void => {
     if (Object.keys(errors).length > 0) {
       setShowErrors(true);
@@ -113,21 +170,7 @@ const ClawAgentCreateV2 = ({ agent }: ClawAgentCreateV2Props = {}): ReactElement
       void saveMutation.save(state);
       return;
     }
-    createMutation.mutate({
-      slug,
-      name: state.name.trim(),
-      description: state.description.trim(),
-      systemPrompt: state.systemPrompt.trim(),
-      color: state.color,
-      kbScope: state.selectedKbScope,
-      knowledgeBase: state.selectedKbResources,
-      tools: state.tools,
-      skillIds: state.selectedSkillIds,
-      research: {
-        productId: state.researchAgentProductId,
-        repositoryId: state.researchAgentRepositoryId,
-      },
-    });
+    createMutation.mutate(submission());
   };
 
   return (
@@ -144,15 +187,15 @@ const ClawAgentCreateV2 = ({ agent }: ClawAgentCreateV2Props = {}): ReactElement
         <div className='flex w-full flex-col gap-4'>
           <div className='flex w-full items-start gap-4 py-4'>
             <div className='flex min-w-0 flex-1 flex-col gap-1.5'>
-              <div className='flex w-full items-center gap-2'>
+              <div
+                className={cn(
+                  'flex w-full items-center gap-2 rounded-md',
+                  fillingName && 'ring-2 ring-primary',
+                )}
+              >
                 <AutoWidthInput
                   value={state.name}
-                  onChange={next =>
-                    update({
-                      name: next,
-                      ...(state.slugManual ? {} : { slug: slugify(next) }),
-                    })
-                  }
+                  onChange={setName}
                   placeholder='Name your agent'
                   aria-label='Agent name'
                   aria-invalid={visibleErrors.name !== undefined}
@@ -240,7 +283,12 @@ const ClawAgentCreateV2 = ({ agent }: ClawAgentCreateV2Props = {}): ReactElement
                 What it does
               </label>
 
-              <div className='w-full overflow-hidden rounded-2xl border border-border bg-card'>
+              <div
+                className={cn(
+                  'w-full overflow-hidden rounded-2xl border border-border bg-card',
+                  fillingInstructions && 'ring-2 ring-primary',
+                )}
+              >
                 <textarea
                   id='agent-v2-prompt'
                   value={state.systemPrompt}

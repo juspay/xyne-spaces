@@ -8,6 +8,8 @@ const FORCE_CLOSE_MS = 12000;
 export interface UtteranceOptions {
   /** 'manual' ends the utterance only when stopped; by default the server also ends phrases on silence. */
   commit?: 'manual';
+  /** The language spoken, e.g. 'en'; detected for every phrase when omitted. */
+  language?: string;
   /** Microphone to use; the default one when omitted or no longer available. */
   deviceId?: string | null | undefined;
   /** Live text of the phrase being spoken, and everything finalized so far. */
@@ -115,6 +117,7 @@ export function startUtterance(options: UtteranceOptions = {}): Utterance {
     const open = voiceInputService.openStreamSession({
       format: 'pcm16',
       ...(options.commit && { commit: options.commit }),
+      ...(options.language && { language: options.language }),
     });
     session = open;
     open.onMessage(msg => {

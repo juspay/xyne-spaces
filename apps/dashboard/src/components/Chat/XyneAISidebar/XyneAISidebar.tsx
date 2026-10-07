@@ -1,6 +1,7 @@
 import type { XyneAiSendTrigger } from '../../../services/Analytics/xyneAiTracking';
 import { logger, Event as LogEvent } from '../../../utils/logger';
 import {
+  Fragment,
   ReactElement,
   useState,
   useRef,
@@ -49,6 +50,9 @@ import { trackCitationClicked, trackAskAIOpened } from '../../../services/otel/x
 import { globalClickTracker } from '../../../services/Analytics/globalClickTracker';
 import { AILandingHero, AILandingHeroErrorBoundary } from './components/AILandingHero';
 import { XyneAIEmptyState } from './components/XyneAIEmptyState';
+import { AssistantCard } from '../../Assistant/AssistantCard';
+import { assistantSession } from '../../Assistant/assistantSession';
+import { openQuestion } from '../../Assistant/engine/dialogue';
 import { isAssistantMessage } from '../../Assistant/turns';
 import { useTranscript } from '../../Assistant/useTranscript';
 import { useAssistantActions } from '../../Assistant/useAssistantActions';
@@ -98,8 +102,10 @@ import {
 } from '../../../machines/xyneAIMachine';
 import { xyneAIStreamManager, type StreamState } from '../../../services/XyneAI';
 import { useVoiceHost, voiceSession } from '../../Voice/voiceSession';
+import { useHasOverlay } from '../../../machines/stateMachine';
 import { VoiceStage } from '../../Voice/VoiceStage';
-import { onboardingGreeting, shouldGreet } from '../../Voice/onboardingGreeting';
+import { useRaiseAboveDialogs } from '../../ui/Dialog/Dialog';
+import { onboardingGreeting } from '../../Voice/onboardingGreeting';
 import { useFlowActionComplete } from '../../../hooks/useFlowActionComplete';
 import {
   buildXyneAIStreamThreadId,
@@ -403,7 +409,11 @@ const XyneAISidebar = ({
     () => resolveActivePath(messages, branchSelections),
     [messages, branchSelections],
   );
-  const assistant = useAssistantActions({ enabled: !isFullscreen });
+  const assistant = useAssistantActions({
+    enabled: !isFullscreen,
+    // Sent as a voice transcript is: not routed again. Called on a tap, after this render.
+    askAI: text => submitTranscript(text),
+  });
   // Starter cards only on the panel opened for a user who just finished onboarding.
   const openedForOnboarding = useSelector(xyneAIActor, s => s.context.openSource === 'setup');
   const { messages: assistantMessages, reset: resetAssistant, cancel: cancelRouting } = assistant;
@@ -2161,6 +2171,8 @@ const XyneAISidebar = ({
   const routedSubmit = useRoutedSubmit<'button' | 'enter' | undefined>({
     assistant,
     value: inputValue,
+    // The chips' own people, so Buddy never searches for them by name.
+    tagged: Object.values(currentUserTags).map(({ userId, name }) => ({ id: userId, label: name })),
     clear: () => setInputValue(''),
     submit: trigger => void handleSubmit(trigger),
   });
@@ -2188,6 +2200,11 @@ const XyneAISidebar = ({
   };
 
   const [voiceMode, setVoiceMode] = useState(false);
+  // In voice mode the panel stays above an open dialog, so the user can keep talking, scrolling
+  // and holding Space while it is open. The dialog still blurs the rest and closes as before.
+  const dialogOpen = useHasOverlay();
+  const aboveDialogs = voiceMode && dialogOpen;
+  useRaiseAboveDialogs(voiceMode);
   const submitTranscript = useCallback((text: string): void => {
     autoSendPendingQueryRef.current = text;
     setInputValue(text);
@@ -2198,21 +2215,49 @@ const XyneAISidebar = ({
     (state: StreamState): boolean => state.streamSlotKey === streamThreadKey,
     [streamThreadKey],
   );
+  // The line to say when the panel next claims voice mode; taken once, so a later claim is silent.
+  const voiceGreetingRef = useRef<string | null>(null);
+  const takeVoiceGreeting = useCallback((): string | null => {
+    const line = voiceGreetingRef.current;
+    voiceGreetingRef.current = null;
+    return line;
+  }, []);
   useVoiceHost(voiceMode, {
     submit: submitTranscript,
     ownsStream,
     answer: answerTranscript,
+    phrases: canRoute ? assistant.phrases : undefined,
+    greeting: takeVoiceGreeting,
+    resumePrompt: canRoute ? assistant.resumePrompt : undefined,
+    onInterrupt: assistant.cancel,
     onStop: handleAbort,
     onExit: () => setVoiceMode(false),
   });
 
-  // The onboarding panel opens in voice mode and greets the user once.
+  // The panel opens in voice mode when asked to (onboarding, or a dialogue handed over from /ai).
+  // The request is consumed here, so a remount never repeats it and the next OPEN can ask again.
   const openInVoiceMode = useSelector(xyneAIActor, s => s.context.openInVoiceMode);
   useEffect(() => {
-    if (!shouldGreet(openInVoiceMode)) return;
+    // Read from the machine, not this render, so an effect that runs twice acts once.
+    if (!xyneAIActor.getSnapshot().context.openInVoiceMode) return;
+    xyneAIActor.send({ type: 'VOICE_MODE_STARTED' });
+    // A dialogue handed over from the /ai page asks its open question again, not the welcome.
+    const { dialogue, turns } = assistantSession.get();
+    const last = turns.at(-1);
+    const spoken = dialogue
+      ? openQuestion(dialogue)?.prompt
+      : last?.role === 'assistant'
+        ? last.text
+        : onboardingGreeting(currentUser?.name);
+    // Already in voice mode, the panel has the session. Otherwise the claim says it: spoken here,
+    // the /ai composer letting go would end the session before the panel claims it, and drop it.
+    if (voiceMode) {
+      if (spoken) voiceSession.speak(spoken);
+      return;
+    }
+    voiceGreetingRef.current = spoken ?? null;
     setVoiceMode(true);
-    voiceSession.speak(onboardingGreeting(currentUser?.name));
-  }, [openInVoiceMode, currentUser?.name]);
+  }, [openInVoiceMode, currentUser?.name, voiceMode]);
 
   const hasBackgroundStreamingElsewhere = useMemo(() => {
     if (streamingSessionIds.length === 0) return false;
@@ -2326,9 +2371,11 @@ const XyneAISidebar = ({
 
   return (
     <div
+      data-above-dialogs={aboveDialogs ? '' : undefined}
       className={cn(
         'grid h-full min-h-0 w-full overflow-hidden',
         isMobile && 'border bg-background',
+        aboveDialogs && 'pointer-events-auto relative z-[56] bg-background',
         isFullscreen
           ? isMobile
             ? 'min-h-full pb-[calc(6rem+env(safe-area-inset-bottom))]'
@@ -2582,19 +2629,26 @@ const XyneAISidebar = ({
                             return transcriptMessages.map((message: Message) => {
                               if (isAssistantMessage(message.id)) {
                                 return (
-                                  <MessageItem
-                                    key={message.id}
-                                    message={message}
-                                    readOnly
-                                    onFeedback={() => undefined}
-                                    onCitationClick={handleCitationClick}
-                                    onSummarizerCitationClick={handleSummarizerCitationClick}
-                                    feedbackValue={null}
-                                    isLatestBotMessage={message.type === 'bot'}
-                                    onFollowUpSuggestionClick={label => {
-                                      assistant.openPill(message.id, label);
-                                    }}
-                                  />
+                                  <Fragment key={message.id}>
+                                    <MessageItem
+                                      message={message}
+                                      readOnly
+                                      onFeedback={() => undefined}
+                                      onCitationClick={handleCitationClick}
+                                      onSummarizerCitationClick={handleSummarizerCitationClick}
+                                      feedbackValue={null}
+                                      isLatestBotMessage={message.type === 'bot'}
+                                      onFollowUpSuggestionClick={label => {
+                                        assistant.openPill(message.id, label);
+                                      }}
+                                    />
+                                    {assistant.card?.messageId === message.id && (
+                                      <AssistantCard
+                                        card={assistant.card}
+                                        onPick={id => assistant.pick(id)}
+                                      />
+                                    )}
+                                  </Fragment>
                                 );
                               }
                               const index = serverIndexById.get(message.id) ?? -1;
@@ -2720,7 +2774,9 @@ const XyneAISidebar = ({
               </div>
             </div>
 
-            {voiceMode && <VoiceStage />}
+            {voiceMode && (
+              <VoiceStage card={assistant.card} onPick={id => assistant.pick(id, true)} />
+            )}
 
             {aiOnboarding.isActive && onboardingAnsweredCount >= 3 && (
               <div className='px-3 py-2'>

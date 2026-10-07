@@ -13,6 +13,11 @@ import { toast } from 'sonner';
 import { cn } from '../../utils/classNames';
 import { usePlatform } from '../../hooks/usePlatform';
 import { WorkspaceChannelEmailCard } from '../../components/xyne-desk/WorkspaceChannelEmailCard/WorkspaceChannelEmailCard';
+import {
+  useFilling,
+  useOperableForm,
+  type OperableForm,
+} from '../../components/Assistant/forms/operableForm';
 
 const Card = ({
   children,
@@ -100,18 +105,20 @@ export const GeneralTab = ({ isActive = false }: GeneralTabProps): ReactElement 
     return () => cancelAnimationFrame(rafId);
   }, [isActive, isMobile]);
 
-  const handleSaveGeneral = (): void => {
+  // Saves as Save Changes always has, and hands back the server's answer, which only Xyne Buddy
+  // waits on; null when there was nothing it could save.
+  const saveGeneral = (): Promise<{ type: string; error?: { message: string } }> | null => {
     if (!workspaceId) {
       toast.error('No workspace selected');
-      return;
+      return null;
     }
 
     if (!name.trim()) {
       toast.error('Workspace name is required');
-      return;
+      return null;
     }
 
-    z.mutate(
+    const change = z.mutate(
       mutators.workspace.update({
         workspaceId,
         timestamp: Date.now(),
@@ -123,7 +130,38 @@ export const GeneralTab = ({ isActive = false }: GeneralTabProps): ReactElement 
     );
     toast.success('Workspace settings saved');
     setHasChanges(false);
+    return change.server;
   };
+
+  const handleSaveGeneral = (): void => {
+    void saveGeneral();
+  };
+
+  // Xyne Buddy fills and saves the name and description through the same state and mutation. A
+  // value as saved is not an answer: only a change is.
+  const operableForm: OperableForm = {
+    id: 'workspace_general',
+    fields: {
+      name: {
+        get: () => (workspace && name !== (workspace.name || '') ? name : null),
+        set: value => setName(value ?? ''),
+        validate: () => (name.trim() ? null : 'Workspace name is required'),
+      },
+      description: {
+        get: () =>
+          workspace && description !== (workspace.description || '') ? description : null,
+        set: value => setDescription(value ?? ''),
+      },
+    },
+    submit: async () => {
+      const answer = await saveGeneral();
+      if (!answer) throw new Error('The workspace settings were not saved.');
+      if (answer.type === 'error') throw new Error(answer.error?.message ?? 'It was refused.');
+    },
+  };
+  useOperableForm(operableForm);
+  const fillingName = useFilling('workspace_general', 'name');
+  const fillingDescription = useFilling('workspace_general', 'description');
 
   return (
     <div className='space-y-6'>
@@ -155,7 +193,7 @@ export const GeneralTab = ({ isActive = false }: GeneralTabProps): ReactElement 
                 placeholder='Enter workspace name...'
                 value={name}
                 onChange={e => setName(e.target.value)}
-                className='w-full max-w-lg'
+                className={cn('w-full max-w-lg', fillingName && 'ring-2 ring-primary')}
               />
               <p className='text-xs text-muted-foreground mt-1.5'>
                 This is the name that will be displayed to all workspace members.
@@ -183,6 +221,7 @@ export const GeneralTab = ({ isActive = false }: GeneralTabProps): ReactElement 
                   'text-sm text-foreground placeholder:text-muted-foreground',
                   'focus:outline-none focus:ring-2 focus:ring-ring focus:border-ring',
                   'resize-none',
+                  fillingDescription && 'ring-2 ring-primary',
                 )}
               />
               <p className='text-xs text-muted-foreground mt-1.5'>

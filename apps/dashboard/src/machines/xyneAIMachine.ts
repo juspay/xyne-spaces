@@ -123,7 +123,7 @@ export interface XyneAIContext {
   threadInfo: ThreadInfo | null;
   // Flag to indicate a fresh chat should be started
   startFreshChat: boolean;
-  // Open with voice mode on (the onboarding greeting)
+  // Open with voice mode on (the onboarding greeting); the sidebar clears it once it has acted on it
   openInVoiceMode: boolean;
   // Canvas context (legacy - kept for backward compatibility)
   canvasInfo: CanvasInfo | null;
@@ -196,6 +196,8 @@ export type XyneAIEvent =
       trackSource?: string;
     }
   | { type: 'CLOSE' }
+  /** The sidebar took up the request to open in voice mode, so the next OPEN can ask again. */
+  | { type: 'VOICE_MODE_STARTED' }
   | { type: 'SET_FOCUS_SESSION'; sessionId: string | null }
   | { type: 'CLEAR_KB_CONTEXT' }
   | { type: 'SET_KB_CONTEXT'; kbCollectionId: string | null; kbChannelId?: string | null }
@@ -699,6 +701,7 @@ export const xyneAIMachine = setup({
       return newContext;
     }),
     dismissWorkflowContext: assign(() => ({ workflowDismissed: true })),
+    voiceModeStarted: assign(() => ({ openInVoiceMode: false })),
     setWorkflowContext: assign(({ context, event }) => {
       if (event.type !== 'SET_WORKFLOW_CONTEXT') return {};
       const next = event.workflowInfo;
@@ -943,6 +946,9 @@ export const xyneAIMachine = setup({
         CLOSE: {
           target: 'closed',
           actions: 'setClosed',
+        },
+        VOICE_MODE_STARTED: {
+          actions: 'voiceModeStarted',
         },
         CLEAR_KB_CONTEXT: {
           actions: 'clearKbContext',

@@ -707,6 +707,9 @@ export const AIComposer = forwardRef<AIComposerHandle, AIComposerProps>(function
     submit: submitTranscript,
     ownsStream: startedOnAIPage,
     answer: answerTranscript,
+    phrases: isAutoOn ? assistant?.phrases : undefined,
+    resumePrompt: isAutoOn ? assistant?.resumePrompt : undefined,
+    onInterrupt: assistant?.cancel,
     onStop: handleVoiceStop,
     onExit: () => setVoiceMode(false),
   });
@@ -842,7 +845,11 @@ export const AIComposer = forwardRef<AIComposerHandle, AIComposerProps>(function
           createPortal(
             <div className='absolute inset-0 z-30 bg-background'>
               <div className='mx-auto flex h-full max-w-xl'>
-                <VoiceStage studioMode={voiceStudioMode} />
+                <VoiceStage
+                  studioMode={voiceStudioMode}
+                  card={assistant?.card ?? null}
+                  onPick={id => assistant?.pick(id, true) ?? false}
+                />
               </div>
             </div>,
             voiceStageHost,

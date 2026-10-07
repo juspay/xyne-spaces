@@ -20,6 +20,8 @@ interface SpeechQueueOptions {
 
 export interface SpeechQueue {
   enqueue: (sentences: string[]) => void;
+  // Synthesizes sentences in the background so that enqueueing them later starts at once; plays nothing.
+  warm: (sentences: string[]) => Promise<void>;
   cancel: () => void;
   // True while sentences are queued or playing.
   isBusy: () => boolean;
@@ -140,6 +142,10 @@ export function createSpeechQueue({
     enqueue(sentences): void {
       pending.push(...sentences);
       void pump();
+    },
+    async warm(sentences): Promise<void> {
+      // One at a time: this is not worth crowding out the request for a reply being spoken.
+      for (const sentence of sentences) await synthesize(sentence);
     },
     cancel(): void {
       const wasBusy = isBusy();

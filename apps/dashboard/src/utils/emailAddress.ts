@@ -179,3 +179,6 @@ export const parseFirstEmailAddress = (raw: string | null | undefined): ParsedEm
   const [first] = splitEmailAddressList(raw);
   return first ? parseSingleEmailAddress(first) : EMPTY;
 };
+
+/** One address as a user enters it in a form: what the workspace invite dialog accepts. */
+export const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;

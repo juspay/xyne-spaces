@@ -256,6 +256,8 @@ export class App {
       cors({
         origin: config.cors.origin,
         credentials: true,
+        // Not CORS-safelisted: readable across origins only when exposed.
+        exposedHeaders: ['Server-Timing'],
       })
     );
 

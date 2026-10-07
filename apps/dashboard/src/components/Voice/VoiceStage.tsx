@@ -10,14 +10,19 @@ import {
   VoiceOrbButton,
   canStop,
 } from './VoiceControls';
+import { AssistantCard } from '../Assistant/AssistantCard';
+import type { CurrentCard } from '../Assistant/turns';
 import { DiagnosePanel } from './DiagnosePanel';
 import { VoiceSettingsPopover } from './VoiceSettingsPopover';
-import { DIAGNOSE_ENABLED } from './diagnoseLog';
+import { DIAGNOSE_ENABLED, useDiagnostics } from './diagnoseLog';
 import { useVoiceSession, voiceSession, type VoicePhase } from './voiceSession';
 
 interface VoiceStageProps {
   /** The studio the spoken request was routed to, when it was one. */
   studioMode?: string | null;
+  /** What the assistant asks the user to tap, and what a tap does. */
+  card?: CurrentCard | null;
+  onPick?: (optionId: string) => boolean;
 }
 
 const PHASE_LABEL: Record<VoicePhase, string> = {
@@ -31,10 +36,16 @@ const PHASE_LABEL: Record<VoicePhase, string> = {
 
 type Panel = 'transcript' | 'diagnose';
 
-/** Voice mode for the sidebar and the /ai page: the orb centered with its status and current line, the transcript or diagnostics in a panel below on request. */
-export function VoiceStage({ studioMode }: VoiceStageProps): ReactElement {
-  const { phase, liveText, turns, diagnostics, playbackBlocked } = useVoiceSession();
-  const [panel, setPanel] = useState<Panel | null>(null);
+/**
+ * Voice mode for the sidebar and the /ai page: the orb centered with its status and current line;
+ * once the transcript (open at first, so what was said and answered is always in view) or
+ * diagnostics have something to show, the orb moves up and they take the room below, with the card
+ * to tap under them.
+ */
+export function VoiceStage({ studioMode, card, onPick }: VoiceStageProps): ReactElement {
+  const { phase, liveText, turns, playbackBlocked } = useVoiceSession();
+  const diagnostics = useDiagnostics();
+  const [panel, setPanel] = useState<Panel | null>('transcript');
   const toggle = (next: Panel): void => setPanel(open => (open === next ? null : next));
   const stageRef = useRef<HTMLElement>(null);
   const stoppable = canStop(phase);
@@ -60,26 +71,50 @@ export function VoiceStage({ studioMode }: VoiceStageProps): ReactElement {
     return (): void => stage.removeEventListener('keydown', onKeyDown);
   }, [stoppable]);
 
-  const endRef = useRef<HTMLDivElement>(null);
+  // The panel takes the room once it has something to show; until then the orb stays centered.
+  const docked = panel === 'diagnose' || (panel === 'transcript' && turns.length > 0);
+
+  // The transcript follows the newest turn, unless the user has scrolled up to read. It is kept at
+  // the bottom whenever its box (docking, a card below it) or its turns change size.
+  const transcriptRef = useRef<HTMLDivElement>(null);
+  const turnsRef = useRef<HTMLDivElement>(null);
+  const following = useRef(true);
   useEffect(() => {
-    endRef.current?.scrollIntoView({ block: 'nearest' });
-  }, [turns, panel]);
+    const transcript = transcriptRef.current;
+    const content = turnsRef.current;
+    if (!transcript || !content) return undefined;
+    const observer = new ResizeObserver(() => {
+      if (following.current) transcript.scrollTop = transcript.scrollHeight;
+    });
+    observer.observe(transcript);
+    observer.observe(content);
+    return (): void => observer.disconnect();
+  }, [panel]);
 
   return (
     <section
       ref={stageRef}
       tabIndex={-1}
       aria-label='Voice mode'
-      className='flex min-h-0 flex-1 flex-col items-center px-4 pb-3 pt-4 outline-none'
+      className='flex min-h-0 flex-1 flex-col items-center gap-3 px-4 py-3 outline-none'
     >
-      <div className='flex min-h-0 w-full flex-[3] flex-col items-center justify-center'>
+      {/* Its share of the free space eases from all to none as the panel docks, so the orb glides
+          up instead of jumping. */}
+      <div
+        className={cn(
+          'flex w-full shrink-0 basis-auto flex-col items-center justify-center',
+          'transition-[flex-grow] duration-300 ease-out motion-reduce:transition-none',
+          docked ? 'grow-0' : 'grow',
+        )}
+      >
         <VoiceOrbButton
           phase={phase}
           scope={stageRef}
+          compact={docked}
           onHoldStart={voiceSession.startRecording}
           onHoldEnd={voiceSession.stopRecording}
         />
-        <div className='flex h-7 items-center gap-2'>
+        <div className='-mt-2 flex h-7 items-center gap-2'>
           <p
             role='status'
             className={cn(
@@ -96,8 +131,11 @@ export function VoiceStage({ studioMode }: VoiceStageProps): ReactElement {
             </span>
           )}
         </div>
-        <p className='line-clamp-2 h-10 max-w-xs text-center text-sm text-foreground'>{liveText}</p>
-        <div className='flex h-8 items-center'>
+        {/* Only takes room while there is something live to show, so the status and hint stay together. */}
+        {liveText && (
+          <p className='line-clamp-2 max-w-xs text-center text-sm text-foreground'>{liveText}</p>
+        )}
+        <div className='flex h-6 items-center'>
           {playbackBlocked ? (
             <TapToHearButton onClick={voiceSession.resumePlayback} />
           ) : (
@@ -107,38 +145,55 @@ export function VoiceStage({ studioMode }: VoiceStageProps): ReactElement {
       </div>
 
       {panel === 'diagnose' && (
-        <div className='mt-2 flex min-h-0 w-full flex-[2] flex-col'>
+        <div className='flex min-h-0 w-full flex-1 basis-0 flex-col'>
           <DiagnosePanel events={diagnostics} />
         </div>
       )}
       {panel === 'transcript' && (
         <div
+          ref={transcriptRef}
           aria-label='Conversation'
-          className='mt-2 flex min-h-0 w-full flex-[2] flex-col gap-2 overflow-y-auto'
+          onScroll={({ currentTarget: { scrollHeight, scrollTop, clientHeight } }) => {
+            following.current = scrollHeight - scrollTop - clientHeight < 24;
+          }}
+          className={cn(
+            'min-h-0 w-full basis-0 overflow-y-auto overscroll-contain',
+            'transition-[flex-grow] duration-300 ease-out motion-reduce:transition-none',
+            docked ? 'grow' : 'grow-0',
+          )}
         >
-          {turns.map(turn => (
-            <p
-              key={turn.id}
-              className={cn(
-                'max-w-[85%] rounded-2xl px-3 py-1.5 text-sm leading-snug',
-                turn.speaker === 'you'
-                  ? 'self-end rounded-br-sm bg-primary text-primary-foreground'
-                  : 'self-start rounded-bl-sm bg-secondary text-secondary-foreground',
-              )}
-            >
-              {turn.text}
-            </p>
-          ))}
-          <div ref={endRef} />
+          <div ref={turnsRef} className='flex flex-col gap-2'>
+            {turns.map(turn => (
+              <p
+                key={turn.id}
+                className={cn(
+                  'max-w-[85%] rounded-2xl px-3 py-1.5 text-sm leading-snug',
+                  turn.speaker === 'you'
+                    ? 'self-end rounded-br-sm bg-primary text-primary-foreground'
+                    : 'self-start rounded-bl-sm bg-secondary text-secondary-foreground',
+                )}
+              >
+                {turn.text}
+              </p>
+            ))}
+          </div>
         </div>
       )}
 
-      <div className='flex items-center justify-center gap-1 pt-3'>
+      {/* Under what was said, so what is to be confirmed is read in its place. */}
+      {card && onPick && (
+        <div className='w-full max-w-xs shrink-0'>
+          <AssistantCard key={card.messageId} card={card} onPick={onPick} />
+        </div>
+      )}
+
+      <div className='flex shrink-0 items-start justify-center'>
         <BackButton onExit={voiceSession.exit} />
         <MuteButton />
         <VoiceSettingsPopover />
         <IconButton
           label={panel === 'transcript' ? 'Hide transcript' : 'Show transcript'}
+          caption='Transcript'
           className={cn(panel === 'transcript' && 'bg-accent text-foreground')}
           onClick={() => toggle('transcript')}
         >
@@ -147,6 +202,7 @@ export function VoiceStage({ studioMode }: VoiceStageProps): ReactElement {
         {DIAGNOSE_ENABLED && (
           <IconButton
             label={panel === 'diagnose' ? 'Hide diagnostics' : 'Diagnose'}
+            caption='Diagnose'
             className={cn(panel === 'diagnose' && 'bg-accent text-foreground')}
             onClick={() => toggle('diagnose')}
           >

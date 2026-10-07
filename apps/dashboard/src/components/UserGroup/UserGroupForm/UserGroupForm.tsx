@@ -9,6 +9,8 @@ import type { UserGroup, User } from '@xyne/shared';
 import { queries } from '../../../zero/queries';
 import { useCachedQuery } from '../../../hooks/useCachedQuery';
 import { usePlatform } from '../../../hooks/usePlatform';
+import { cn } from '../../../utils/classNames';
+import { useFilling, useOperableForm, type OperableForm } from '../../Assistant/forms/operableForm';
 
 interface UserGroupFormData {
   name: string;
@@ -66,6 +68,8 @@ export const UserGroupForm = ({
 
   const {
     control,
+    getValues,
+    setValue,
     handleSubmit: handleFormSubmit,
     formState: { isSubmitting },
   } = useForm<UserGroupFormData>({
@@ -76,12 +80,14 @@ export const UserGroupForm = ({
     },
   });
 
-  const handleSubmit = async (formData: UserGroupFormData): Promise<void> => {
+  // Shows why it was not saved, and throws it, so Xyne Buddy hears the refusal too.
+  const save = async (formData: UserGroupFormData): Promise<void> => {
     const { name, alias, description } = formData;
 
     if (alias && !/^[a-z0-9_-]+$/.test(alias)) {
-      setError('Alias can only contain lowercase letters, numbers, hyphens, and underscores');
-      return;
+      const message = 'Alias can only contain lowercase letters, numbers, hyphens, and underscores';
+      setError(message);
+      throw new Error(message);
     }
 
     try {
@@ -156,8 +162,37 @@ export const UserGroupForm = ({
       setError(
         err instanceof Error ? err.message : `Failed to ${isEdit ? 'update' : 'create'} user group`,
       );
+      throw err;
     }
   };
+
+  const handleSubmit = (formData: UserGroupFormData): Promise<void> =>
+    save(formData).catch(() => undefined);
+
+  // Xyne Buddy fills and creates a new group through the same form and request; members are
+  // added on the Members tab.
+  const operableForm: OperableForm | null = isEdit
+    ? null
+    : {
+        id: 'user_group_create',
+        fields: {
+          name: {
+            get: () => getValues('name'),
+            set: value => setValue('name', value ?? ''),
+            validate: () => (getValues('name').trim() ? null : 'User group name is required'),
+          },
+          description: {
+            // Optional: an empty box is not an answer.
+            get: () => getValues('description') || null,
+            set: value => setValue('description', value ?? ''),
+          },
+        },
+        busy: () => isSubmitting,
+        submit: () => save(getValues()),
+      };
+  useOperableForm(operableForm);
+  const fillingName = useFilling('user_group_create', 'name');
+  const fillingDescription = useFilling('user_group_create', 'description');
 
   const isLoading = loading || isSubmitting;
 
@@ -248,6 +283,7 @@ export const UserGroupForm = ({
                     disabled={isLoading}
                     data-testid='user-group-name-input'
                     autoFocus={!isMobile}
+                    className={cn(fillingName && 'ring-2 ring-primary')}
                   />
                 )}
               />
@@ -288,7 +324,7 @@ export const UserGroupForm = ({
                 render={({ field: { onChange, value } }) => (
                   <Textarea
                     id='description'
-                    className='text-foreground'
+                    className={cn('text-foreground', fillingDescription && 'ring-2 ring-primary')}
                     value={value}
                     onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) =>
                       onChange(e.target.value)

@@ -12,16 +12,7 @@ export function onboardingGreeting(name: string | undefined): string {
   const who = firstName(name);
   return (
     `Hi${who ? ` ${who}` : ''}, welcome to Xyne! I can help you get set up, like creating a channel ` +
-    'or building an agent. Hold the orb or press Space and tell me what you would like to do.'
+    'or building an agent. Hold the orb or press Space and tell me what you would like to do, ' +
+    'or ask me what I can do.'
   );
-}
-
-// Whether the greeting was already spoken for this open of the panel; outlives the sidebar remounting.
-let greeted = false;
-
-/** True once per open: when `open` turns on, until it turns off again. */
-export function shouldGreet(open: boolean): boolean {
-  const first = open && !greeted;
-  greeted = open;
-  return first;
 }

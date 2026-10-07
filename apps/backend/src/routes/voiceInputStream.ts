@@ -7,6 +7,7 @@ import { config } from '@/config/env';
 import { logger } from '@/utils/logger';
 import { bridgeToElevenLabs } from '@/services/voiceInputElevenLabsStream';
 import type { VoiceInputUser } from '@/services/voiceInputKeyterms';
+import { warmJev } from '@/services/queryIntent/jevClient';
 
 const VOICE_STREAM_PATH = '/api/voice-input/stream';
 const MAX_PENDING_FRAMES = 100;
@@ -199,12 +200,27 @@ export function attachVoiceInputStreamHandler(httpServer: HttpServer): void {
           socket.destroy();
           return;
         }
-        if ((openSessions.get(authed.userId) ?? 0) >= MAX_SESSIONS_PER_USER) {
+        // The client left while it was being authenticated: there is no socket to hold a slot.
+        if (socket.destroyed) return;
+        const userSessions = openSessions.get(authed.userId) ?? 0;
+        if (userSessions >= MAX_SESSIONS_PER_USER) {
           logger.warn('[VoiceInputStream] Rejected upgrade: too many open sessions for user');
           socket.write('HTTP/1.1 429 Too Many Requests\r\n\r\n');
           socket.destroy();
           return;
         }
+        // Reserved now, not once upgraded, so handshakes authenticating at the same time cannot
+        // all pass the check. Released once: when the socket closes, or the handshake fails.
+        openSessions.set(authed.userId, userSessions + 1);
+        let released = false;
+        const release = (): void => {
+          if (released) return;
+          released = true;
+          const remaining = (openSessions.get(authed.userId) ?? 1) - 1;
+          if (remaining > 0) openSessions.set(authed.userId, remaining);
+          else openSessions.delete(authed.userId);
+        };
+        socket.once('close', release);
         // ElevenLabs only accepts raw PCM; older clients still send WebM/Opus and stay on
         // the Python agent.
         const params = new URL(req.url ?? '/', 'http://localhost').searchParams;
@@ -212,18 +228,18 @@ export function attachVoiceInputStreamHandler(httpServer: HttpServer): void {
           params.get('format') === 'pcm16' &&
           config.voiceInputStream.provider === 'elevenlabs' &&
           !!config.elevenLabs.apiKey;
+        // Only voice mode's hold-to-talk commits manually; chat dictation streams here too.
+        const holdToTalk = params.get('commit') === 'manual';
         wss.handleUpgrade(req, socket, head, ws => {
-          openSessions.set(authed.userId, (openSessions.get(authed.userId) ?? 0) + 1);
-          ws.once('close', () => {
-            const remaining = (openSessions.get(authed.userId) ?? 1) - 1;
-            if (remaining > 0) openSessions.set(authed.userId, remaining);
-            else openSessions.delete(authed.userId);
-          });
+          ws.once('close', release);
+          // In voice mode Buddy's routing call follows when the user lets go: open its
+          // connection to Jev now so that call does not pay for the handshake.
+          if (holdToTalk) warmJev();
           if (useElevenLabs) {
             bridgeToElevenLabs(
               ws,
               params.get('language') ?? '',
-              params.get('commit') === 'manual' ? 'manual' : 'vad',
+              holdToTalk ? 'manual' : 'vad',
               authed
             );
           } else {

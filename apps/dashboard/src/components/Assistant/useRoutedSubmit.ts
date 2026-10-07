@@ -1,16 +1,22 @@
 import { useRef } from 'react';
+import type { Resolved } from './engine/resolve';
 import type { AssistantActions } from './useAssistantActions';
 
-export type AssistantRouting = Pick<AssistantActions, 'ask' | 'answer' | 'cancel'>;
+export type AssistantRouting = Pick<
+  AssistantActions,
+  'ask' | 'answer' | 'cancel' | 'card' | 'pick' | 'phrases' | 'resumePrompt'
+>;
 
 export const useRoutedSubmit = <Trigger>({
   assistant,
   value,
+  tagged,
   clear,
   submit,
 }: {
   assistant: AssistantRouting | undefined;
   value: string;
+  tagged?: readonly Resolved[]; // the @mention chips in `value`
   clear: () => void;
   submit: (trigger: Trigger) => void;
 }): { route: (trigger: Trigger) => boolean; stop: () => boolean } => {
@@ -23,14 +29,16 @@ export const useRoutedSubmit = <Trigger>({
 
   const route = (trigger: Trigger): boolean => {
     if (!assistant) return false;
-    if (inFlightRef.current) return true;
+    // A newer submit supersedes one still routing: `ask` cancels that, and its outcome is dropped.
     const token = {};
     inFlightRef.current = token;
     const asked = value;
-    void assistant.ask(asked).then(outcome => {
+    void assistant.ask(asked, tagged).then(outcome => {
       if (inFlightRef.current !== token) return;
       inFlightRef.current = null;
-      if (outcome.outcome === 'cancelled' || valueRef.current !== asked) return;
+      // Handed over: the sentence a card was about was already sent to Ask AI.
+      const settled = outcome.outcome === 'cancelled' || outcome.outcome === 'handed_over';
+      if (settled || valueRef.current !== asked) return;
       if (outcome.outcome === 'replied') clear();
       else submitRef.current(trigger);
     });

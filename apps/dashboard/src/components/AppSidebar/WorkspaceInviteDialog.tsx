@@ -7,6 +7,7 @@ import Dialog from '../ui/Dialog';
 
 import { apiInstance } from '../../services/clients/apiClient';
 import { cn } from '../../utils/classNames';
+import { EMAIL_PATTERN } from '../../utils/emailAddress';
 
 interface WorkspaceInviteDialogProps {
   open: boolean;
@@ -16,7 +17,6 @@ interface WorkspaceInviteDialogProps {
 }
 
 const EMAIL_SPLIT_PATTERN = /[\s,;]+/;
-const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 const getWorkspaceInviteUrl = (workspaceId: string): string =>
   `${window.location.origin}/auth?workspaceId=${encodeURIComponent(workspaceId)}`;

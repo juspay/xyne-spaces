@@ -5,6 +5,7 @@ import { Plus, Check, X, Users, Search, UserPlus } from 'lucide-react';
 import { useZero } from '../../hooks/useZero';
 import { useCachedQuery } from '../../hooks/useCachedQuery';
 import { useUsers } from '../../hooks/useUsers';
+import { useDialogParam } from '../../hooks/useDialogParam';
 import { queries } from '../../zero/queries';
 import { mutators } from '../../zero/mutators';
 import { Button } from '../../components/ui/Button/Button';
@@ -17,6 +18,11 @@ import { Panel, ResizableGroup, Separator } from '../../components/ui/Resizable/
 import { cn } from '../../utils/classNames';
 import { getUserDisplayNameById } from '../../utils/userDisplayName';
 import type { Role, UserRoleMapping } from '@xyne/shared';
+import {
+  useFilling,
+  useOperableForm,
+  type OperableForm,
+} from '../../components/Assistant/forms/operableForm';
 import {
   ROLES_SIDEBAR_DEFAULT_WIDTH,
   ROLES_SIDEBAR_MAX_WIDTH,
@@ -87,9 +93,10 @@ const CreateRoleDialog = ({
   const cleanedName = cleanRoleName(name);
   const canSubmit = cleanedName.length > 0 && !saving;
 
-  const handleCreate = async (): Promise<void> => {
+  // Throws when the role was not created, so Xyne Buddy hears the server's refusal.
+  const create = async (): Promise<void> => {
     const cleanedName = cleanRoleName(name);
-    if (!cleanedName) return;
+    if (!cleanedName) throw new Error('A role needs a name of letters.');
     setSaving(true);
     const id = uuidv4();
     const timestamp = Date.now();
@@ -108,12 +115,38 @@ const CreateRoleDialog = ({
         description: res.error.message,
         duration: 5000,
       });
-      return;
+      throw new Error(res.error.message);
     }
     toast.success(`Role "${cleanedName}" created`);
     onOpenChange(false);
     onCreated(id);
   };
+
+  const handleCreate = (): Promise<void> => create().catch(() => undefined);
+
+  // Xyne Buddy fills and creates the role through the same state and mutation.
+  const operableForm: OperableForm | null = open
+    ? {
+        id: 'role_create',
+        fields: {
+          name: {
+            get: () => name,
+            set: value => setName(formatRoleName(value ?? '')),
+            validate: () => (cleanRoleName(name) ? null : 'A role name needs letters.'),
+          },
+          description: {
+            // Optional: an empty box is not an answer.
+            get: () => description || null,
+            set: value => setDescription(value ?? ''),
+          },
+        },
+        busy: () => saving,
+        submit: create,
+      }
+    : null;
+  useOperableForm(operableForm);
+  const fillingName = useFilling('role_create', 'name');
+  const fillingDescription = useFilling('role_create', 'description');
 
   return (
     <Dialog
@@ -149,6 +182,7 @@ const CreateRoleDialog = ({
           maxLength={40}
           placeholder='e.g. XYNE_PM'
           autoFocus
+          className={cn(fillingName && 'ring-2 ring-primary')}
         />
         <p className='text-xs text-muted-foreground mt-1.5'>
           Uppercase letters and underscores only. Spaces become underscores; other characters are
@@ -167,6 +201,7 @@ const CreateRoleDialog = ({
           onChange={(e: React.ChangeEvent<HTMLInputElement>) => setDescription(e.target.value)}
           maxLength={80}
           placeholder='What is this role for?'
+          className={cn(fillingDescription && 'ring-2 ring-primary')}
         />
 
         <div className='flex justify-end gap-2 mt-5'>
@@ -551,7 +586,7 @@ export const RoleManagementScreen = (): ReactElement => {
   };
 
   // ── Create dialog ──────────────────────────────────────────────────────────
-  const [showCreate, setShowCreate] = useState(false);
+  const [showCreate, setShowCreate] = useDialogParam('create');
 
   // ── Add members dialog + remove ────────────────────────────────────────────
   const [showAddMembers, setShowAddMembers] = useState(false);

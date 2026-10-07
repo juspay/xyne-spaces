@@ -172,7 +172,12 @@ const AIScreen = (): ReactElement => {
   const effectiveAgentSlug = selectedAgentSlug;
   const { invalidateSessions: invalidateV2Sessions } = useV2SessionInvalidator();
   // Above the thread, whose remounts would otherwise drop the local turns.
-  const assistant = useAssistantActions({ enabled: true });
+  const assistant = useAssistantActions({
+    enabled: true,
+    surface: 'page',
+    // A question picked for Ask AI on Buddy's card starts a chat with it, as the landing composer does.
+    askAI: text => handleComposerSubmit(text),
+  });
   const { reset: resetAssistant } = assistant;
 
   useEffect(() => {
@@ -446,6 +451,10 @@ const AIScreen = (): ReactElement => {
             return reply;
           },
           cancel: assistant.cancel,
+          card: assistant.card,
+          pick: assistant.pick,
+          phrases: assistant.phrases,
+          resumePrompt: assistant.resumePrompt,
         }
       : undefined;
   const handleConversationChange = useCallback(

@@ -14,22 +14,34 @@ const isWorking = (phase: VoicePhase): boolean => phase === 'understanding' || p
 // Stop applies while the assistant is working out or speaking an answer.
 export const canStop = (phase: VoicePhase): boolean => isWorking(phase) || phase === 'speaking';
 
-/** A round icon button with its name as tooltip; forwards props so a popover can use it as trigger. */
+/**
+ * A round icon button with its name as tooltip; forwards props so a popover can use it as trigger.
+ * With a `caption` the short name is also shown under the icon, so it needs no hovering to find out.
+ */
 export function IconButton({
   label,
+  caption,
   className,
+  children,
   ...props
-}: ComponentProps<typeof Button> & { label: string }): ReactElement {
+}: ComponentProps<typeof Button> & { label: string; caption?: string }): ReactElement {
   return (
     <Tooltip content={label} side='top'>
       <Button
         type='button'
         variant='ghost'
-        size='icon'
+        size={caption ? 'default' : 'icon'}
         aria-label={label}
-        className={cn('rounded-full text-muted-foreground hover:text-foreground', className)}
+        className={cn(
+          'rounded-full text-muted-foreground hover:text-foreground',
+          caption && 'h-auto min-w-14 flex-col gap-1 rounded-xl px-1 py-1.5 has-[>svg]:px-1',
+          className,
+        )}
         {...props}
-      />
+      >
+        {children}
+        {caption && <span className='text-[11px] font-normal leading-none'>{caption}</span>}
+      </Button>
     </Tooltip>
   );
 }
@@ -38,6 +50,8 @@ interface VoiceOrbButtonProps {
   phase: VoicePhase;
   /** The stage: Space only talks while focus is inside it (or nowhere). */
   scope: RefObject<HTMLElement | null>;
+  /** Smaller, to leave the room to the transcript. */
+  compact?: boolean;
   onHoldStart: () => void;
   onHoldEnd: () => void;
 }
@@ -46,6 +60,7 @@ interface VoiceOrbButtonProps {
 export function VoiceOrbButton({
   phase,
   scope,
+  compact = false,
   onHoldStart,
   onHoldEnd,
 }: VoiceOrbButtonProps): ReactElement {
@@ -72,7 +87,12 @@ export function VoiceOrbButton({
       onPointerCancel={onHoldEnd}
       aria-label={speaking ? 'Hold to interrupt and reply' : 'Hold to talk'}
       aria-pressed={phase === 'listening'}
-      className='flex h-40 w-40 shrink-0 select-none items-center justify-center rounded-full disabled:cursor-default'
+      // Its height gives up the room and the scale shrinks the orb, so nothing jumps.
+      className={cn(
+        'flex h-40 w-40 shrink-0 select-none items-center justify-center rounded-full disabled:cursor-default',
+        'transition-[height,transform] duration-300 ease-out motion-reduce:transition-none',
+        compact && 'h-28 scale-75',
+      )}
       data-track-category='XyneAI'
       data-track-name={speaking ? 'VOICE_MODE_BARGE_IN' : 'VOICE_MODE_PTT'}
     >
@@ -85,6 +105,7 @@ export function BackButton({ onExit }: { onExit: () => void }): ReactElement {
   return (
     <IconButton
       label='Back to chat'
+      caption='Type'
       onClick={onExit}
       data-track-category='XyneAI'
       data-track-name='VOICE_MODE_EXIT'
@@ -104,6 +125,7 @@ export function StopButton({
   return (
     <IconButton
       label='Stop'
+      caption='Stop'
       onClick={onStop}
       className={cn('text-destructive hover:text-destructive', className)}
       data-track-category='XyneAI'
@@ -119,6 +141,7 @@ export function MuteButton(): ReactElement {
   return (
     <IconButton
       label={speakReplies ? 'Mute replies' : 'Unmute replies'}
+      caption={speakReplies ? 'Sound' : 'Muted'}
       onClick={() => updateVoiceSettings({ speakReplies: !speakReplies })}
       data-track-category='XyneAI'
       data-track-name='VOICE_MODE_MUTE'

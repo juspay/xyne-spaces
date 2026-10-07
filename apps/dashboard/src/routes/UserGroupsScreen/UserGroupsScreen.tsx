@@ -15,6 +15,7 @@ import { useUserGroups, useUserGroupsHydrated } from '../../hooks/useUserGroup';
 import { usePlatform } from '../../hooks/usePlatform';
 import { useHasResourceAccess, usePermissions } from '../../hooks/usePermissions';
 import { useAuth } from '../../hooks/useAuth';
+import { useDialogParam } from '../../hooks/useDialogParam';
 import { searchUserGroups } from './UserGroupsScreen.utils';
 import { AccessType } from '@xyne/shared';
 
@@ -22,7 +23,7 @@ const UserGroupsScreen = (): ReactElement => {
   const zero = useZero();
   const { user } = useAuth();
   const { isMobile } = usePlatform();
-  const [showCreateModal, setShowCreateModal] = useState(false);
+  const [showCreateModal, setShowCreateModal] = useDialogParam('create');
   const [editingUserGroup, setEditingUserGroup] = useState<ZeroUserGroup | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const searchInputRef = useRef<HTMLInputElement>(null);

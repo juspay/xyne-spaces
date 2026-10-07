@@ -5,7 +5,7 @@ import { convertTrailingEmoticonsInHtml } from '../../../utils/emojiLookup';
  * Escapes special HTML characters to prevent XSS attacks.
  * Must be applied to all user-provided data before inserting into HTML.
  */
-const escapeHtml = (unsafe: string): string => {
+export const escapeHtml = (unsafe: string): string => {
   return unsafe
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')

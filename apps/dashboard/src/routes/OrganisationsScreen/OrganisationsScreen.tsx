@@ -46,6 +46,13 @@ import { usePlatform } from '../../hooks/usePlatform';
 import { setLastActiveWorkspaceId, setLastActiveWorkspaceName } from '../../machines/authMachine';
 import { apiInstance } from '../../services/clients/apiClient';
 import { JoinRequestsSection } from './JoinRequestsSection';
+import { useDialogParam } from '../../hooks/useDialogParam';
+import { EMAIL_PATTERN } from '../../utils/emailAddress';
+import {
+  useFilling,
+  useOperableForm,
+  type OperableForm,
+} from '../../components/Assistant/forms/operableForm';
 
 // ─── types ───────────────────────────────────────────────────────────────────
 
@@ -577,7 +584,7 @@ export const OrganisationsScreen = (): ReactElement => {
   });
 
   const [expandedOrgId, setExpandedOrgId] = useState<string | null>(null);
-  const [showCreateDialog, setShowCreateDialog] = useState(false);
+  const [showCreateDialog, setShowCreateDialog] = useDialogParam('create');
   const [newOrgName, setNewOrgName] = useState('');
   const [newWorkspaceName, setNewWorkspaceName] = useState('');
   const [newOwnerEmail, setNewOwnerEmail] = useState('');
@@ -599,18 +606,20 @@ export const OrganisationsScreen = (): ReactElement => {
     setExpandedOrgId(prev => (prev === orgId ? null : orgId));
   };
 
-  const handleCreateOrg = async (): Promise<void> => {
-    if (!newOrgName.trim()) {
-      toast.error('Organisation name is required');
-      return;
-    }
-    if (!newWorkspaceName.trim()) {
-      toast.error('Workspace name is required');
-      return;
-    }
-    if (!newOwnerEmail.trim()) {
-      toast.error('Owner email is required');
-      return;
+  // Why the organisation cannot be created as the dialog stands; null when it can.
+  const orgInvalidReason = (): string | null => {
+    if (!newOrgName.trim()) return 'Organisation name is required';
+    if (!newWorkspaceName.trim()) return 'Workspace name is required';
+    if (!newOwnerEmail.trim()) return 'Owner email is required';
+    return null;
+  };
+
+  // Throws when it was not created, so Xyne Buddy hears the refusal rather than reporting it done.
+  const createOrg = async (): Promise<void> => {
+    const reason = orgInvalidReason();
+    if (reason) {
+      toast.error(reason);
+      throw new Error(reason);
     }
 
     setIsCreatingOrg(true);
@@ -635,17 +644,19 @@ export const OrganisationsScreen = (): ReactElement => {
       } else {
         toast.error('Failed to create organisation');
       }
+      throw error;
     } finally {
       setIsCreatingOrg(false);
     }
   };
 
-  const handleCreateCommunityWorkspace = async (event: React.FormEvent): Promise<void> => {
-    event.preventDefault();
+  const handleCreateOrg = (): Promise<void> => createOrg().catch(() => undefined);
 
+  // Throws when it was not created, as `createOrg` does. Once created, the new workspace opens.
+  const createCommunityWorkspace = async (): Promise<void> => {
     if (!communityWorkspaceName.trim()) {
       toast.error('Community workspace name is required');
-      return;
+      throw new Error('Community workspace name is required');
     }
 
     setIsCreatingCommunityWorkspace(true);
@@ -673,13 +684,82 @@ export const OrganisationsScreen = (): ReactElement => {
       if (axios.isAxiosError(error)) {
         const message = (error.response?.data as { message?: string } | undefined)?.message;
         toast.error(message ?? 'Failed to create community workspace');
-        return;
+      } else {
+        toast.error('Failed to create community workspace');
       }
-      toast.error('Failed to create community workspace');
+      throw error;
     } finally {
       setIsCreatingCommunityWorkspace(false);
     }
   };
+
+  const handleCreateCommunityWorkspace = (event: React.FormEvent): Promise<void> => {
+    event.preventDefault();
+    return createCommunityWorkspace().catch(() => undefined);
+  };
+
+  // Xyne Buddy fills and submits the community workspace form and the create organisation
+  // dialog through the same state and requests, each while the page shows it.
+  const workspaceForm: OperableForm | null =
+    canCreateCommunityWorkspace && !orgMismatch
+      ? {
+          id: 'workspace_create',
+          fields: {
+            name: {
+              get: () => communityWorkspaceName,
+              set: value => setCommunityWorkspaceName(value ?? ''),
+              validate: () =>
+                communityWorkspaceName.trim() ? null : 'Community workspace name is required',
+            },
+            joining: {
+              get: () =>
+                COMMUNITY_JOIN_POLICY_OPTIONS.find(option => option.value === communityJoinPolicy)
+                  ?.label ?? null,
+              set: value => {
+                const option = COMMUNITY_JOIN_POLICY_OPTIONS.find(({ label }) => label === value);
+                if (option) setCommunityJoinPolicy(option.value);
+              },
+            },
+          },
+          busy: () => isCreatingCommunityWorkspace,
+          submit: createCommunityWorkspace,
+        }
+      : null;
+  useOperableForm(workspaceForm);
+  const orgForm: OperableForm | null =
+    showCreateDialog && !orgMismatch
+      ? {
+          id: 'organisation_create',
+          fields: {
+            name: {
+              get: () => newOrgName,
+              set: value => setNewOrgName(value ?? ''),
+              validate: () => (newOrgName.trim() ? null : 'Organisation name is required'),
+            },
+            workspace: {
+              get: () => newWorkspaceName,
+              set: value => setNewWorkspaceName(value ?? ''),
+              validate: () => (newWorkspaceName.trim() ? null : 'Workspace name is required'),
+            },
+            owner: {
+              get: () => newOwnerEmail,
+              set: value => setNewOwnerEmail(value ?? ''),
+              validate: () =>
+                EMAIL_PATTERN.test(newOwnerEmail.trim())
+                  ? null
+                  : `“${newOwnerEmail}” isn't an email address.`,
+            },
+          },
+          busy: () => isCreatingOrg,
+          submit: createOrg,
+        }
+      : null;
+  useOperableForm(orgForm);
+  const fillingWorkspaceName = useFilling('workspace_create', 'name');
+  const fillingJoining = useFilling('workspace_create', 'joining');
+  const fillingOrgName = useFilling('organisation_create', 'name');
+  const fillingOrgWorkspace = useFilling('organisation_create', 'workspace');
+  const fillingOwner = useFilling('organisation_create', 'owner');
 
   const handleProvisionEncryption = async (): Promise<void> => {
     setIsProvisioningEncryption(true);
@@ -803,12 +883,18 @@ export const OrganisationsScreen = (): ReactElement => {
                         onChange={event => setCommunityWorkspaceName(event.target.value)}
                         placeholder='Enter community workspace name...'
                         disabled={isCreatingCommunityWorkspace}
+                        className={cn(fillingWorkspaceName && 'ring-2 ring-primary')}
                       />
                     </div>
 
                     <div className='space-y-3'>
                       <p className='text-sm font-medium text-foreground'>Joining Policy</p>
-                      <div className='grid gap-3 md:grid-cols-3'>
+                      <div
+                        className={cn(
+                          'grid gap-3 md:grid-cols-3',
+                          fillingJoining && 'rounded-lg ring-2 ring-primary',
+                        )}
+                      >
                         {COMMUNITY_JOIN_POLICY_OPTIONS.map(option => {
                           const Icon = option.icon;
                           const isSelected = communityJoinPolicy === option.value;
@@ -1000,6 +1086,7 @@ export const OrganisationsScreen = (): ReactElement => {
                   value={newOrgName}
                   onChange={e => setNewOrgName(e.target.value)}
                   disabled={isCreatingOrg}
+                  className={cn(fillingOrgName && 'ring-2 ring-primary')}
                 />
               </div>
 
@@ -1015,6 +1102,7 @@ export const OrganisationsScreen = (): ReactElement => {
                   value={newWorkspaceName}
                   onChange={e => setNewWorkspaceName(e.target.value)}
                   disabled={isCreatingOrg}
+                  className={cn(fillingOrgWorkspace && 'ring-2 ring-primary')}
                 />
               </div>
 
@@ -1030,6 +1118,7 @@ export const OrganisationsScreen = (): ReactElement => {
                   value={newOwnerEmail}
                   onChange={e => setNewOwnerEmail(e.target.value)}
                   disabled={isCreatingOrg}
+                  className={cn(fillingOwner && 'ring-2 ring-primary')}
                 />
               </div>
 

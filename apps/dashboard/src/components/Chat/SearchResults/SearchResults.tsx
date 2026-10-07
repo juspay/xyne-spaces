@@ -13,22 +13,6 @@ import {
   X,
 } from 'lucide-react';
 
-const utcToIst = (utcString?: string): string => {
-  // The backend writes the literal 'N/A' when a doc has no usable timestamp, so
-  // treat it as absent — otherwise it parses to an Invalid Date and every card
-  // that doesn't pre-guard renders the string "Invalid Date".
-  if (!utcString || utcString === 'N/A') return '';
-  const dateUtc = new Date(`${utcString} UTC`);
-  return dateUtc.toLocaleString('en-IN', {
-    timeZone: 'Asia/Kolkata',
-    day: 'numeric',
-    month: 'short',
-    year: 'numeric',
-    hour: 'numeric',
-    minute: '2-digit',
-    hour12: true,
-  });
-};
 import { usePlatform } from '../../../hooks/usePlatform';
 import { useAuthContextValues } from '../../../hooks/useAuth';
 import {
@@ -102,9 +86,12 @@ import {
 } from '@xyne/shared';
 import { TicketCardV2 } from '../../Tickets/TicketCardV2/TicketCardV2';
 import { isUserDeactivated } from '../../../utils/userDisplayName';
+import { utcToIst } from '../../../utils/dateUtils';
 import type { SidePanelState } from './SidePanel/PanelTypes';
 import { SearchResultsSidePanel } from './SidePanel/SidePanel';
 import { resolveResultClick } from './SidePanel/ResultClickResolver';
+import { useOnScreenList, useOnScreenThread } from '../../Assistant/onScreen';
+import { listItemOf } from './listItem';
 import ChannelIcon from '../ChannelIcon/ChannelIcon';
 
 function parseDocTypeParam(value: string | null): SearchResultsFilters['docType'] | null {
@@ -195,11 +182,25 @@ function writeFiltersToParams(filters: SearchResultsFilters, params: URLSearchPa
   else params.delete('rank');
 }
 
+const KIND_OF_DOC: Partial<Record<SearchResultsFilters['docType'], string>> = {
+  messages: 'message',
+  tickets: 'ticket',
+  channels: 'channel',
+};
+
 const SearchResults = (): ReactElement => {
   const [searchParams, setSearchParams] = useSearchParams();
   const navigate = useNavigate();
   const { isMobile } = usePlatform();
   const [selectedPanel, setSelectedPanel] = useState<SidePanelState>(null);
+  // The thread or channel open in the side panel is "here" to Xyne Buddy.
+  const shownInPanel =
+    selectedPanel?.kind === 'thread'
+      ? selectedPanel.thread
+      : selectedPanel?.kind === 'channel'
+        ? selectedPanel
+        : null;
+  useOnScreenThread(shownInPanel?.channelId, shownInPanel?.conversationId);
   const scrollRef = useRef<HTMLDivElement>(null);
 
   const query = searchParams.get('query')?.trim() ?? '';
@@ -858,6 +859,28 @@ const SearchResults = (): ReactElement => {
   const totalCount = isChannelsMode
     ? localChannelResults.length
     : (paginationState[currentTab]?.total ?? 0);
+
+  // The search key whose results are on screen: a search ran for it, and has finished.
+  const searchBusy = isLoading || isSearchPending;
+  const searchedKeyRef = useRef<string | null>(null);
+  const [settledKey, setSettledKey] = useState<string | null>(null);
+  useEffect(() => {
+    if (searchBusy) searchedKeyRef.current = fullSearchKey;
+    else if (searchedKeyRef.current === fullSearchKey) setSettledKey(fullSearchKey);
+  }, [searchBusy, fullSearchKey]);
+  // The results as Xyne Buddy reads them out and opens them, in on-screen order.
+  const listItems = useMemo(() => results.map(listItemOf), [results]);
+  useOnScreenList({
+    key: fullSearchKey,
+    kind: KIND_OF_DOC[filters.docType] ?? 'result',
+    total: totalCount,
+    items: listItems,
+    ready: settledKey === fullSearchKey,
+    open: id => {
+      const result = results.find(candidate => candidate.id === id);
+      if (result) openResult(result);
+    },
+  });
 
   // Highlighted ticket strings (subject + id, with `<hi>` match markers) keyed
   // by xyneId, so the ticket widget embedded in each result card can highlight

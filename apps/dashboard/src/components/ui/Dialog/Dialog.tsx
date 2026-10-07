@@ -1,9 +1,43 @@
-import React, { ReactNode, RefObject, useState, useEffect } from 'react';
+import React, { ReactNode, RefObject, useState, useEffect, useSyncExternalStore } from 'react';
 import * as DialogPrimitive from '@radix-ui/react-dialog';
 import Drawer from '../Drawer';
 import { cn } from '../../../utils/classNames';
 import { useOverlayEffect } from '../../../machines/stateMachine';
 import { useScope } from '../../../shortcuts';
+
+// Surfaces raised above dialogs: Ask AI in voice mode, which the user keeps talking to while a
+// dialog is open. A modal dialog would lock their scrolling and trap the focus that Space-to-talk
+// needs, so while one is up a dialog opens non-modal, looking and closing just the same.
+let raisedSurfaces = 0;
+const raisedListeners = new Set<() => void>();
+const subscribeRaised = (listener: () => void): (() => void) => {
+  raisedListeners.add(listener);
+  return (): void => {
+    raisedListeners.delete(listener);
+  };
+};
+const changeRaised = (by: number): void => {
+  raisedSurfaces += by;
+  raisedListeners.forEach(listener => listener());
+};
+// A click, focus or Escape there belongs to that surface, not to the dialog under it.
+const isInRaised = (target: EventTarget | null): boolean =>
+  target instanceof Element && target.closest('[data-above-dialogs]') !== null;
+
+/** While `active`, the caller is a surface marked `data-above-dialogs`, so dialogs open non-modal. */
+export function useRaiseAboveDialogs(active: boolean): void {
+  useEffect(() => {
+    if (!active) return undefined;
+    changeRaised(1);
+    return (): void => changeRaised(-1);
+  }, [active]);
+}
+
+const OVERLAY_CLASS_NAME = cn(
+  'fixed inset-0 bg-black/50 backdrop-blur-sm',
+  'data-[state=open]:animate-in data-[state=closed]:animate-out',
+  'data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0',
+);
 
 export interface DialogProps {
   trigger?: ReactNode;
@@ -79,6 +113,12 @@ export const Dialog = ({
   // Claims the keyboard for as long as the dialog is up, so shortcuts belonging
   // to the page behind it stay out of the way.
   useScope('modal', open ?? false);
+  // Settled while the dialog is closed, since switching an open one would remount its content. One
+  // the page does not control stays modal: when it opens is not known here.
+  const raised = useSyncExternalStore(subscribeRaised, () => raisedSurfaces > 0);
+  const wantsModal = !(raised && open !== undefined);
+  const [modal, setModal] = useState(wantsModal);
+  if (!open && modal !== wantsModal) setModal(wantsModal);
 
   // Detect screen size changes
   useEffect(() => {
@@ -114,19 +154,21 @@ export const Dialog = ({
     <DialogPrimitive.Root
       {...(open !== undefined && { open })}
       {...(onOpenChange !== undefined && { onOpenChange })}
-      modal={true}
+      modal={modal}
     >
       {trigger && <DialogPrimitive.Trigger asChild>{trigger}</DialogPrimitive.Trigger>}
 
       <DialogPrimitive.Portal>
-        <DialogPrimitive.Overlay
-          className={cn(
-            'fixed inset-0 bg-black/50 backdrop-blur-sm',
-            zIndexClassName,
-            'data-[state=open]:animate-in data-[state=closed]:animate-out',
-            'data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0',
-          )}
-        />
+        {modal ? (
+          <DialogPrimitive.Overlay className={cn(OVERLAY_CLASS_NAME, zIndexClassName)} />
+        ) : (
+          // Radix draws none for a non-modal dialog. A click on this one is outside the dialog,
+          // which closes it as the modal overlay does.
+          <div
+            data-state={open ? 'open' : 'closed'}
+            className={cn(OVERLAY_CLASS_NAME, zIndexClassName)}
+          />
+        )}
 
         <DialogPrimitive.Content
           {...(onOpenAutoFocus
@@ -147,13 +189,23 @@ export const Dialog = ({
               })}
           onInteractOutside={event => {
             const target = (event.detail?.originalEvent?.target ?? null) as Element | null;
-            if (target?.closest?.('[data-sonner-toast], [data-sonner-toaster]')) {
+            // A toast, or a surface raised above dialogs (Ask AI in voice mode), is not outside.
+            if (
+              isInRaised(target) ||
+              target?.closest?.('[data-sonner-toast], [data-sonner-toaster]')
+            ) {
               event.preventDefault();
               return;
             }
             onInteractOutside?.(event);
           }}
-          {...(onEscapeKeyDown && { onEscapeKeyDown })}
+          onEscapeKeyDown={event => {
+            if (isInRaised(event.target)) {
+              event.preventDefault();
+              return;
+            }
+            onEscapeKeyDown?.(event);
+          }}
           {...(onPointerDownOutside && { onPointerDownOutside })}
           data-testid={testId ?? 'dialog-content'}
           className={cn(

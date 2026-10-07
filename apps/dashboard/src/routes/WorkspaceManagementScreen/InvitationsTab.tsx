@@ -32,6 +32,13 @@ import { mutators } from '../../zero/mutators';
 import { apiInstance } from '../../services/clients/apiClient';
 import Dialog from '../../components/ui/Dialog';
 import { usePlatform } from '../../hooks/usePlatform';
+import { EMAIL_PATTERN } from '../../utils/emailAddress';
+import { isInvitationRevocable } from './workspaceRules';
+import {
+  useFilling,
+  useOperableForm,
+  type OperableForm,
+} from '../../components/Assistant/forms/operableForm';
 
 const Card = ({
   children,
@@ -44,6 +51,13 @@ const Card = ({
     {children}
   </div>
 );
+
+// The roles the role menu offers, as it names them.
+const ROLE_LABELS: Partial<Record<WorkspaceRole, string>> = {
+  [WorkspaceRole.ADMIN]: 'Admin',
+  [WorkspaceRole.MEMBER]: 'Member',
+  [WorkspaceRole.GUEST]: 'Guest',
+};
 
 interface InvitationsTabProps {
   isActive?: boolean;
@@ -67,21 +81,26 @@ export const InvitationsTab = ({ isActive = false }: InvitationsTabProps): React
     enabled: entityType === 'CANVAS',
   });
 
+  // The channels a guest may be invited to.
+  const guestChannels = useMemo(
+    () =>
+      allChannels.filter(
+        c =>
+          c.scopeType !== ChannelScopeType.DM &&
+          c.scopeType !== ChannelScopeType.GROUP_DM &&
+          !c.isArchived,
+      ),
+    [allChannels],
+  );
+
   const entityOptions = useMemo(() => {
     switch (entityType) {
       case 'CHANNEL':
-        return allChannels
-          .filter(
-            c =>
-              c.scopeType !== ChannelScopeType.DM &&
-              c.scopeType !== ChannelScopeType.GROUP_DM &&
-              !c.isArchived,
-          )
-          .map(c => ({
-            value: c.id,
-            label: c.name,
-            icon: <Hash className='w-4 h-4 text-muted-foreground' />,
-          }));
+        return guestChannels.map(c => ({
+          value: c.id,
+          label: c.name,
+          icon: <Hash className='w-4 h-4 text-muted-foreground' />,
+        }));
       case 'CANVAS':
         return (
           (openCanvases as unknown as Array<{ id: string; title: string }> | undefined) ?? []
@@ -93,7 +112,7 @@ export const InvitationsTab = ({ isActive = false }: InvitationsTabProps): React
       default:
         return [];
     }
-  }, [entityType, allChannels, openCanvases]);
+  }, [entityType, guestChannels, openCanvases]);
 
   const [allInvitations] = useCachedQuery(queries.getAllInvitations({}));
 
@@ -102,26 +121,29 @@ export const InvitationsTab = ({ isActive = false }: InvitationsTabProps): React
     return allInvitations.filter((inv: Invitation) => inv.workspaceId === self?.workspaceId);
   }, [allInvitations, self?.workspaceId]);
 
-  const validateForm = (): boolean => {
-    if (!email.trim()) {
-      toast.error('Please enter an email address');
-      return false;
-    }
-    if (!self?.workspaceId) {
-      toast.error('No workspace selected');
-      return false;
-    }
+  // Why the invitation cannot be sent as it stands; null when it can.
+  const invalidReason = (): string | null => {
+    if (!email.trim()) return 'Please enter an email address';
+    if (!self?.workspaceId) return 'No workspace selected';
     if (role === WorkspaceRole.GUEST) {
-      if (!entityType) {
-        toast.error('Please select an entity type');
-        return false;
-      }
-      if (!entityId.trim()) {
-        toast.error('Please select an entity');
-        return false;
-      }
+      if (!entityType) return 'Please select an entity type';
+      if (!entityId.trim()) return 'Please select an entity';
     }
-    return true;
+    return null;
+  };
+
+  const validateForm = (): boolean => {
+    const reason = invalidReason();
+    if (reason) toast.error(reason);
+    return !reason;
+  };
+
+  // As the role menu picks one: only a guest is invited to a channel or canvas.
+  const chooseRole = (next: WorkspaceRole): void => {
+    setRole(next);
+    if (next === WorkspaceRole.GUEST) return;
+    setEntityType('');
+    setEntityId('');
   };
 
   const openConfirmDialog = (): void => {
@@ -129,8 +151,13 @@ export const InvitationsTab = ({ isActive = false }: InvitationsTabProps): React
     setShowConfirmDialog(true);
   };
 
-  const handleSendInvitation = async (): Promise<void> => {
-    if (!validateForm()) return;
+  // Throws when nothing was sent, so Xyne Buddy hears the refusal rather than reporting it sent.
+  const sendInvitation = async (): Promise<void> => {
+    const reason = invalidReason();
+    if (reason) {
+      toast.error(reason);
+      throw new Error(reason);
+    }
 
     setIsSubmitting(true);
     try {
@@ -156,10 +183,59 @@ export const InvitationsTab = ({ isActive = false }: InvitationsTabProps): React
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Failed to send invitation';
       toast.error(message);
+      throw error;
     } finally {
       setIsSubmitting(false);
     }
   };
+
+  const handleSendInvitation = (): Promise<void> => sendInvitation().catch(() => undefined);
+
+  // Xyne Buddy fills and sends an invitation through the same state and request. Its own confirm
+  // card stands in for this page's confirm dialog, so it sends directly.
+  const operableForm: OperableForm = {
+    id: 'invite',
+    fields: {
+      email: {
+        get: () => email,
+        set: value => setEmail(value ?? ''),
+        validate: () =>
+          EMAIL_PATTERN.test(email.trim()) ? null : `“${email}” isn't an email address.`,
+      },
+      role: {
+        get: () => ROLE_LABELS[role] ?? null,
+        set: value => {
+          const picked = Object.entries(ROLE_LABELS).find(([, label]) => label === value)?.[0];
+          if (picked) chooseRole(picked as WorkspaceRole);
+        },
+      },
+      // A guest's channel, by name as the page lists it; a canvas is picked on the page.
+      channel: {
+        get: () =>
+          entityType === 'CHANNEL'
+            ? (guestChannels.find(c => c.id === entityId)?.name ?? null)
+            : null,
+        set: value => {
+          const picked = guestChannels.find(c => c.name === value);
+          if (!picked) return;
+          setEntityType('CHANNEL');
+          setEntityId(picked.id);
+        },
+      },
+    },
+    busy: () => isSubmitting,
+    submit: async () => {
+      // A guest joins one channel or canvas, which only the page offers to pick.
+      if (role === WorkspaceRole.GUEST && (!entityType || !entityId.trim())) {
+        throw new Error('A guest needs a channel or canvas to join. Pick it on the page');
+      }
+      await sendInvitation();
+    },
+  };
+  useOperableForm(operableForm);
+  const fillingEmail = useFilling('invite', 'email');
+  const fillingRole = useFilling('invite', 'role');
+  const fillingChannel = useFilling('invite', 'channel');
 
   const handleRevokeInvitation = (invitationId: string): void => {
     z.mutate(mutators.invitation.revoke({ invitationId, timestamp: Date.now() }));
@@ -172,22 +248,6 @@ export const InvitationsTab = ({ isActive = false }: InvitationsTabProps): React
       month: 'short',
       day: 'numeric',
     });
-  };
-
-  const isInvitationRevocable = (invitation: Invitation): boolean => {
-    if (invitation.acceptedAt) return false;
-    if (!invitation.expiredAt) return true;
-
-    const now = Date.now();
-    const expiredAt = invitation.expiredAt;
-    const createdAt = invitation.createdAt;
-
-    if (expiredAt < now) return false;
-
-    const fifteenDaysInMs = 15 * 24 * 60 * 60 * 1000;
-    if (expiredAt - createdAt + 1000 < fifteenDaysInMs) return false;
-
-    return true;
   };
 
   useEffect((): (() => void) | void => {
@@ -231,14 +291,17 @@ export const InvitationsTab = ({ isActive = false }: InvitationsTabProps): React
                   void handleSendInvitation();
                 }
               }}
-              className='flex-1 min-w-[200px]'
+              className={cn('flex-1 min-w-[200px]', fillingEmail && 'ring-2 ring-primary')}
             />
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <Button
                   variant='outline'
                   size='default'
-                  className='gap-2 min-w-[100px] justify-between'
+                  className={cn(
+                    'gap-2 min-w-[100px] justify-between',
+                    fillingRole && 'ring-2 ring-primary',
+                  )}
                 >
                   <span className='capitalize'>{role.toLowerCase()}</span>
                   <ChevronDown className='w-4 h-4' />
@@ -246,11 +309,7 @@ export const InvitationsTab = ({ isActive = false }: InvitationsTabProps): React
               </DropdownMenuTrigger>
               <DropdownMenuContent align='start'>
                 <DropdownMenuItem
-                  onClick={() => {
-                    setRole(WorkspaceRole.ADMIN);
-                    setEntityType('');
-                    setEntityId('');
-                  }}
+                  onClick={() => chooseRole(WorkspaceRole.ADMIN)}
                   data-track-category='workspace-management'
                   data-track-name='SELECT_INVITE_ROLE_ADMIN'
                   className={cn(role === WorkspaceRole.ADMIN && 'bg-accent')}
@@ -258,11 +317,7 @@ export const InvitationsTab = ({ isActive = false }: InvitationsTabProps): React
                   Admin
                 </DropdownMenuItem>
                 <DropdownMenuItem
-                  onClick={() => {
-                    setRole(WorkspaceRole.MEMBER);
-                    setEntityType('');
-                    setEntityId('');
-                  }}
+                  onClick={() => chooseRole(WorkspaceRole.MEMBER)}
                   data-track-category='workspace-management'
                   data-track-name='SELECT_INVITE_ROLE_MEMBER'
                   className={cn(role === WorkspaceRole.MEMBER && 'bg-accent')}
@@ -270,7 +325,7 @@ export const InvitationsTab = ({ isActive = false }: InvitationsTabProps): React
                   Member
                 </DropdownMenuItem>
                 <DropdownMenuItem
-                  onClick={() => setRole(WorkspaceRole.GUEST)}
+                  onClick={() => chooseRole(WorkspaceRole.GUEST)}
                   data-track-category='workspace-management'
                   data-track-name='SELECT_INVITE_ROLE_GUEST'
                   className={cn(role === WorkspaceRole.GUEST && 'bg-accent')}
@@ -312,7 +367,12 @@ export const InvitationsTab = ({ isActive = false }: InvitationsTabProps): React
                 <option value='CANVAS'>Canvas</option>
               </select>
               {entityType && (
-                <div className='flex-1 min-w-[200px]'>
+                <div
+                  className={cn(
+                    'flex-1 min-w-[200px]',
+                    fillingChannel && 'rounded-md ring-2 ring-primary',
+                  )}
+                >
                   <EntitySelector
                     options={entityOptions}
                     selectedValue={entityId || null}

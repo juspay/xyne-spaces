@@ -44,6 +44,7 @@ import { usePlatform } from '../../../hooks/usePlatform';
 import { getWorkspaceSharedMailboxStatus } from '../../../services/clients/workspaceDeskApi';
 import { getOzonetelConfig } from '../../../services/clients/telephonyApi';
 import { DeskType } from '@xyne/shared';
+import { useFilling, useOperableForm, type OperableForm } from '../../Assistant/forms/operableForm';
 import {
   GooglePlayServiceAccountKeyInput,
   getServiceAccountEmail,
@@ -187,7 +188,7 @@ interface AddChannelFormProps {
       serviceAccountKey?: string;
       appStore?: AppStoreDeskInput;
     },
-  ) => void;
+  ) => unknown; // plain create awaits a returned promise
   onCancel: () => void;
   loading?: boolean;
   title?: string;
@@ -312,7 +313,7 @@ export const AddChannelForm: React.FC<AddChannelFormProps> = ({
     [userGroups],
   );
 
-  const { data: duplicateCheck } = useQuery({
+  const { data: duplicateCheck, isFetching: isCheckingDuplicate } = useQuery({
     queryKey: ['checkDuplicateChannel', debouncedChannelName],
     queryFn: () => channelService.checkDuplicateChannel(debouncedChannelName),
     enabled: Boolean(debouncedChannelName.trim()),
@@ -331,9 +332,9 @@ export const AddChannelForm: React.FC<AddChannelFormProps> = ({
       assigneeUserGroupId: '',
       boardId: '',
     } as CreateChannelFormData & { assigneeUserGroupId?: string },
-    onSubmit: ({ value }) => {
+    onSubmit: async ({ value }) => {
       if (duplicateCheck?.isDuplicate) {
-        return;
+        throw new Error('Channel name already exists');
       }
       if (requireConnector) {
         if (deskType === DeskType.EMAIL && !selectedConnector) return;
@@ -432,7 +433,8 @@ export const AddChannelForm: React.FC<AddChannelFormProps> = ({
           });
         }
       } else {
-        onSubmit?.({ ...value, connector: selectedConnector });
+        // Awaited, so the assistant's submit learns whether the channel was created.
+        await onSubmit?.({ ...value, connector: selectedConnector });
       }
     },
   });
@@ -554,9 +556,9 @@ export const AddChannelForm: React.FC<AddChannelFormProps> = ({
     }
   }, [projectIdValue, selectedProject, boardIdValue, form]);
 
-  // Debounce the channel name for duplicate checking
+  // Debounce the channel name for duplicate checking, from the shortest name that is valid
   useEffect(() => {
-    if (channelName.length > 2) {
+    if (channelName.length >= 2) {
       const timeoutId = setTimeout(() => {
         setDebouncedChannelName(channelName);
       }, 500);
@@ -572,11 +574,72 @@ export const AddChannelForm: React.FC<AddChannelFormProps> = ({
     }
   }, [duplicateCheck, form]);
 
-  const handleNameChange = (e: React.ChangeEvent<HTMLInputElement>): void => {
-    const cleanValue = normalizeChannelName(e.target.value);
+  const changeName = (raw: string): void => {
+    const cleanValue = normalizeChannelName(raw);
     form.setFieldValue('name', cleanValue);
     setChannelName(cleanValue);
   };
+
+  const handleNameChange = (e: React.ChangeEvent<HTMLInputElement>): void =>
+    changeName(e.target.value);
+
+  const validateChannelName = (value: string): string | undefined => {
+    if (!value) return 'Channel name is required';
+    if (value.length < 2) return 'Channel name must be at least 2 characters';
+    if (value.length > 80) return 'Channel name must be 80 characters or less';
+    if (duplicateCheck?.isDuplicate) return 'Channel name already exists';
+    return undefined;
+  };
+
+  // The assistant fills and submits the plain create form for the user, through the same state.
+  // Desk creation and group-DM promotion are not offered to it.
+  const operableForm: OperableForm | null =
+    mode === 'create' && !requireConnector
+      ? {
+          id: 'channel_create',
+          fields: {
+            name: {
+              get: () => form.getFieldValue('name'),
+              set: value => changeName(value ?? ''),
+              validate: () => validateChannelName(form.getFieldValue('name')) ?? null,
+              // The name is checked once typing has paused, so a fresh name is unchecked until then.
+              checking: () =>
+                channelName.length >= 2 &&
+                (debouncedChannelName !== channelName || isCheckingDuplicate),
+            },
+            visibility: {
+              // The form starts on private; that default is not the user's answer, so it is asked.
+              get: () =>
+                form.getFieldMeta('visibility')?.isDirty
+                  ? form.getFieldValue('visibility') === 'public'
+                    ? 'Public'
+                    : 'Private'
+                  : null,
+              set: value =>
+                form.setFieldValue('visibility', value === 'Public' ? 'public' : 'private'),
+            },
+            description: {
+              // Optional: an empty box is not an answer.
+              get: () => form.getFieldValue('description') || null,
+              set: value => form.setFieldValue('description', value ?? ''),
+            },
+          },
+          busy: () => form.state.isSubmitting,
+          // Rejects when the form refuses, so Buddy never reports a channel that was not created.
+          submit: async () => {
+            await form.handleSubmit();
+            if (!form.state.isSubmitSuccessful) {
+              throw new Error(
+                validateChannelName(form.getFieldValue('name')) ?? 'The channel was not created.',
+              );
+            }
+          },
+        }
+      : null;
+  useOperableForm(operableForm);
+  const fillingName = useFilling('channel_create', 'name');
+  const fillingVisibility = useFilling('channel_create', 'visibility');
+  const fillingDescription = useFilling('channel_create', 'description');
 
   const getCharacterCount = (): number => {
     const name = form.getFieldValue('name');
@@ -1202,24 +1265,13 @@ export const AddChannelForm: React.FC<AddChannelFormProps> = ({
       )}
 
       {/* Channel Name */}
-      <form.Field
-        name='name'
-        validators={{
-          onChange: ({ value }) => {
-            if (!value) return 'Channel name is required';
-            if (value.length < 2) return 'Channel name must be at least 2 characters';
-            if (value.length > 80) return 'Channel name must be 80 characters or less';
-            if (duplicateCheck?.isDuplicate) return 'Channel name already exists';
-            return undefined;
-          },
-        }}
-      >
+      <form.Field name='name' validators={{ onChange: ({ value }) => validateChannelName(value) }}>
         {field => (
           <div className='space-y-1.5'>
             <label htmlFor='channel-name' className='text-sm font-medium text-foreground'>
               Channel Name <span className='text-muted-foreground'>*</span>
             </label>
-            <div className='relative'>
+            <div className={cn('relative', fillingName && 'rounded-md ring-2 ring-primary')}>
               <div className='absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground'>
                 {hideVisibility ? (
                   <Hash size={14} />
@@ -1403,7 +1455,7 @@ export const AddChannelForm: React.FC<AddChannelFormProps> = ({
             <Textarea
               id='channel-description'
               value={field.state.value}
-              className='text-foreground'
+              className={cn('text-foreground', fillingDescription && 'ring-2 ring-primary')}
               onChange={e => field.handleChange(e.target.value)}
               placeholder='What is this channel about?'
               rows={4}
@@ -1418,7 +1470,7 @@ export const AddChannelForm: React.FC<AddChannelFormProps> = ({
       {!hideVisibility && (
         <form.Field name='visibility'>
           {field => (
-            <div>
+            <div className={cn(fillingVisibility && 'rounded-md ring-2 ring-primary')}>
               <RadioGroup
                 name='visibility'
                 label='Channel Visibility'
@@ -1531,7 +1583,8 @@ export const AddChannelForm: React.FC<AddChannelFormProps> = ({
       onSubmit={e => {
         e.preventDefault();
         e.stopPropagation();
-        void form.handleSubmit();
+        // A failed create is for the assistant's submit to report; the user sees what they saw before.
+        form.handleSubmit().catch(() => undefined);
       }}
     >
       {renderFormComponent()}

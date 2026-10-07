@@ -22,6 +22,8 @@ import { useUserChannelStatuses } from '../../hooks/useChannels';
 import { TypingStateProvider } from '../../contexts/TypingStateContext';
 import { cn } from '../../utils/classNames';
 import { usePath } from '../../hooks/usePath';
+import { useRouterSelector } from '../../hooks/useStableRouter';
+import { useOnScreenThread } from '../../components/Assistant/onScreen';
 
 interface ChatScreenProps {
   shouldStackThread?: boolean;
@@ -33,6 +35,10 @@ const ChatScreen = ({ shouldStackThread = false }: ChatScreenProps): ReactElemen
   const channelData = useAllVisibleChannels();
   const allChannelsUserStatus = useUserChannelStatuses();
   const pathnameWithoutWorkspace = usePath();
+  // The conversation the route opens, a channel, a DM or a thread in one, is "here" to Xyne Buddy.
+  const channelId = useRouterSelector(({ params }) => params['channelId']);
+  const conversationId = useRouterSelector(({ params }) => params['conversationId']);
+  useOnScreenThread(channelId, conversationId);
 
   const isFullScreenPage =
     pathnameWithoutWorkspace === '/chat/activity' ||

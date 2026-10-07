@@ -1,5 +1,13 @@
 import type { Message } from '../Chat/XyneAISidebar/utils/XyneAITypes';
 import type { ActionDefinition } from './actions/action';
+import { listOf } from './engine/dialogue';
+
+// What the assistant puts in front of the user to tap, besides saying it.
+export type AssistantCardData =
+  | { kind: 'confirm'; summary: string }
+  | { kind: 'choose'; options: readonly { id: string; label: string }[] };
+
+export type CurrentCard = AssistantCardData & { messageId: string };
 
 export interface AssistantTurn {
   id: string;
@@ -8,39 +16,80 @@ export interface AssistantTurn {
   at: Date;
   actions?: ActionDefinition[];
   opened?: string[];
+  card?: AssistantCardData;
 }
 
 const MESSAGE_ID_PREFIX = 'assistant-';
 
-const ADMIN_STARTER_IDS = ['invite_people', 'create_agent', 'create_channel'];
-const MEMBER_STARTER_IDS = ['start_chat', 'create_agent', 'create_channel'];
+const rank = (action: ActionDefinition): number => action.starter ?? Number.MAX_SAFE_INTEGER;
 
+const byRank = (visible: readonly ActionDefinition[]): ActionDefinition[] =>
+  [...visible].sort((a, b) => rank(a) - rank(b));
+
+// Actions that share a rank are alternatives for one card: the first visible one is shown.
 export const starterActions = (
   visible: readonly ActionDefinition[],
-  isAdmin: boolean,
   limit = 3,
-): ActionDefinition[] => {
-  const ids = isAdmin ? ADMIN_STARTER_IDS : MEMBER_STARTER_IDS;
-  const starters = ids.flatMap(id => visible.filter(action => action.id === id));
-  const rest = visible.filter(action => !starters.includes(action));
-  return [...starters, ...rest].slice(0, limit);
+): ActionDefinition[] =>
+  byRank(visible)
+    .filter(
+      (action, index, sorted) =>
+        action.starter === undefined || action.starter !== sorted[index - 1]?.starter,
+    )
+    .slice(0, limit);
+
+export const say = (
+  role: AssistantTurn['role'],
+  text: string,
+  newId: () => string,
+  card?: AssistantCardData,
+): AssistantTurn => ({ id: newId(), role, text, at: new Date(), ...(card && { card }) });
+
+// A card can be tapped only while its question is open, so a new reply takes the old ones back.
+export const withoutCards = (turns: readonly AssistantTurn[]): AssistantTurn[] =>
+  turns.map(({ card: _card, ...turn }) => turn);
+
+export const currentCard = (turns: readonly AssistantTurn[]): CurrentCard | null => {
+  const last = turns.at(-1);
+  return last?.card ? { ...last.card, messageId: `${MESSAGE_ID_PREFIX}${last.id}` } : null;
 };
 
 const lowerFirst = (text: string): string => text.charAt(0).toLowerCase() + text.slice(1);
 
+// One action is opened right away, its pill ticked; several are left to pick from. `how`: the
+// user asked how to do it, so its steps are said.
 const replyTo = (
   actions: readonly ActionDefinition[],
-): { text: string; actions: ActionDefinition[] } => {
+  how = false,
+): Pick<AssistantTurn, 'text' | 'actions' | 'opened'> => {
   const [only] = actions;
-  if (actions.length !== 1 || !only) {
-    return { text: 'Here is where to do each of these:', actions: [...actions] };
-  }
-  const steps = (only.guide ?? []).map((step, index) => `${index + 1}. ${step}`);
-  const lead =
-    steps.length > 0
-      ? `To ${lowerFirst(only.title)}, ${lowerFirst(only.summarize)}:`
-      : `${only.summarize}.`;
-  return { text: [lead, ...steps].join('\n\n'), actions: [only] };
+  return only && actions.length === 1
+    ? {
+        text:
+          how && only.guide
+            ? `Here's how to ${lowerFirst(only.title)}: ${only.guide.join(' ')}`
+            : `Opening the page to ${lowerFirst(only.title)}.`,
+        actions: [only],
+        opened: [only.id],
+      }
+    : { text: 'Here is where to do each of these:', actions: [...actions] };
+};
+
+// It is said aloud, so it stays short.
+const MAX_CAPABILITIES = 6;
+
+// What the assistant says it can do, with those actions as pills to tap or say: the ranked ones
+// the role sees, in rank order. Actions sharing a rank compete for a starter card, not for being
+// listed. `back` is the open question of a request under way, put again in place of asking anew.
+export const capabilities = (
+  visible: readonly ActionDefinition[],
+  back: string | null = null,
+): Required<Pick<AssistantTurn, 'text' | 'actions'>> => {
+  const actions = byRank(visible)
+    .filter(action => action.starter !== undefined)
+    .slice(0, MAX_CAPABILITIES);
+  const listed = listOf(actions.map(({ title }) => lowerFirst(title)));
+  return { text: `I can ${listed}. ${back ?? 'What would you like to do?'}`, actions };
 };
 
 export const exchange = (
@@ -48,19 +97,11 @@ export const exchange = (
   actions: readonly ActionDefinition[],
   now: Date,
   newId: () => string,
-): [AssistantTurn, AssistantTurn] => {
-  const reply = replyTo(actions);
-  return [
-    { id: newId(), role: 'user', text: userText, at: now },
-    {
-      id: newId(),
-      role: 'assistant',
-      text: reply.text,
-      at: new Date(now.getTime() + 1),
-      actions: reply.actions,
-    },
-  ];
-};
+  how = false,
+): [AssistantTurn, AssistantTurn] => [
+  { id: newId(), role: 'user', text: userText, at: now },
+  { id: newId(), role: 'assistant', at: new Date(now.getTime() + 1), ...replyTo(actions, how) },
+];
 
 const VISITED = '✓ ';
 

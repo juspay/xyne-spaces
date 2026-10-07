@@ -1,5 +1,9 @@
 import { Request, Response } from 'express';
-import { routeAssistantMessage, type AssistantRouteAction } from './index';
+import {
+  routeAssistantMessage,
+  type AssistantRouteAction,
+  type AssistantRoutePending,
+} from './index';
 
 // Always 200 once validated: a Jev failure is `{ route: 'unavailable' }`, never a 5xx.
 export const assistantRouteHandler = async (req: Request, res: Response): Promise<void> => {
@@ -19,13 +23,14 @@ export const assistantRouteHandler = async (req: Request, res: Response): Promis
     if (!res.writableFinished) abandoned.abort();
   });
 
-  const { text, actions } = req.body as { text: string; actions: AssistantRouteAction[] };
+  const startedAt = performance.now();
   const result = await routeAssistantMessage(
-    text,
-    actions,
+    req.body as { text: string; actions: AssistantRouteAction[]; pending?: AssistantRoutePending },
     { userId, workspaceId },
     abandoned.signal
   );
   if (abandoned.signal.aborted) return;
+  // Lets the client tell this time from the network, auth and proxy time around it.
+  res.setHeader('Server-Timing', `route;dur=${Math.round(performance.now() - startedAt)}`);
   res.json(result);
 };

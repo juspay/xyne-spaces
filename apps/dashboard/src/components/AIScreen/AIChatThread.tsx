@@ -52,6 +52,7 @@ import type {
 import { buildXyneAIStreamThreadId } from '../../utils/xyneAIStreamThreadId';
 import { cn } from '../../utils/classNames';
 import { AskAiRatingButtons } from './AskAiRatingButtons';
+import { AssistantCard } from '../Assistant/AssistantCard';
 import { isAssistantMessage } from '../Assistant/turns';
 import { useTranscript } from '../Assistant/useTranscript';
 import type { AssistantActions } from '../Assistant/useAssistantActions';
@@ -2675,14 +2676,18 @@ export const AIChatThread = forwardRef<AIChatThreadHandle, AIChatThreadProps>(fu
                 {transcriptMessages.map(message => {
                   if (isAssistantMessage(message.id)) {
                     return (
-                      <ChatMessageBubble
-                        key={message.id}
-                        message={message}
-                        readOnly
-                        onFollowUpSuggestionClick={label => {
-                          assistant?.openPill(message.id, label);
-                        }}
-                      />
+                      <Fragment key={message.id}>
+                        <ChatMessageBubble
+                          message={message}
+                          readOnly
+                          onFollowUpSuggestionClick={label => {
+                            assistant?.openPill(message.id, label);
+                          }}
+                        />
+                        {assistant?.card?.messageId === message.id && (
+                          <AssistantCard card={assistant.card} onPick={id => assistant.pick(id)} />
+                        )}
+                      </Fragment>
                     );
                   }
                   const idx = serverIndexById.get(message.id) ?? -1;

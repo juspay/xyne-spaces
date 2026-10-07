@@ -39,6 +39,7 @@ import { ChannelSortOrder } from '@xyne/shared';
 import { Accordion } from 'radix-ui';
 import MobileChannelItem from './MobileChannelItem';
 import Tooltip from '../../ui/Tooltip';
+import { useAddChannelDialog } from './useAddChannelDialog';
 
 const MobileChatDirectory = ({
   channelData,
@@ -51,7 +52,7 @@ const MobileChatDirectory = ({
   const { starred, channels, directMessages, channelSortOrder, setChannelSortOrder } =
     useChannelSort(channelData, allChannelsUserStatus, context.userID);
 
-  const [showAddChannelForm, setShowAddChannelForm] = useState(false);
+  const [showAddChannelForm, setShowAddChannelForm] = useAddChannelDialog();
   const [showAddDmForm, setShowAddDmForm] = useState(false);
   const [isCommandMenuOpen, setIsCommandMenuOpen] = useState(false);
   const [showAddPeopleDialog, setShowAddPeopleDialog] = useState(false);
@@ -82,9 +83,8 @@ const MobileChatDirectory = ({
     },
   });
 
-  const handleAddChannelSubmit = (data: CreateChannelFormData): void => {
-    createChannelMutation.mutate(data);
-  };
+  const handleAddChannelSubmit = (data: CreateChannelFormData): Promise<unknown> =>
+    createChannelMutation.mutateAsync(data);
 
   const handleAddDirectMessage = (): void => {
     setShowAddDmForm(true);

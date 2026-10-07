@@ -31,6 +31,7 @@ import {
   previewLowerBound,
 } from './AddPeopleForm.utils';
 import { channelTrackingMetadata } from '../../../services/Analytics/channelTracking';
+import { onPeopleAdded } from '../../Assistant/tasks';
 
 export const AddPeopleForm: React.FC<AddPeopleFormProps> = ({
   channelId,
@@ -91,6 +92,15 @@ export const AddPeopleForm: React.FC<AddPeopleFormProps> = ({
   useEffect(() => {
     onContextChange?.({ step, isDirectConversation });
   }, [step, isDirectConversation, onContextChange]);
+
+  // Xyne Buddy adding people to this channel is what this form is for: it closes as after its own add.
+  useEffect(
+    () =>
+      onPeopleAdded(added => {
+        if (added === channelId) onSuccess?.();
+      }),
+    [channelId, onSuccess],
+  );
 
   const addParticipantsMutation = useMutation({
     mutationFn: (payload: { userIds: string[]; historyScope: HistoryScope }) =>

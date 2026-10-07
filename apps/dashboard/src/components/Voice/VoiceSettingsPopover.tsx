@@ -8,6 +8,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '.
 import { Switch } from '../ui/Switch';
 import { IconButton } from './VoiceControls';
 import { updateVoiceSettings, useVoiceSettings } from './voiceSettings';
+import { voiceSession } from './voiceSession';
 
 // Select items need a non-empty value, so the default microphone gets one.
 const DEFAULT_MIC = 'default';
@@ -54,6 +55,15 @@ function SettingsPanel(): ReactElement {
   const voice = pickVoice(catalog, voiceId);
   const micValue = mics.find(mic => mic.deviceId === micId)?.deviceId ?? DEFAULT_MIC;
   const previewRef = useRef<HTMLAudioElement | null>(null);
+  // The preview ends with the panel, and one still being synthesized does not start after it.
+  const closedRef = useRef(false);
+  useEffect(() => {
+    closedRef.current = false;
+    return (): void => {
+      closedRef.current = true;
+      previewRef.current?.pause();
+    };
+  }, []);
 
   const chooseVoice = async (id: string): Promise<void> => {
     updateVoiceSettings({ voiceId: id });
@@ -64,6 +74,8 @@ function SettingsPanel(): ReactElement {
         id,
       );
       previewRef.current?.pause();
+      // Not over a reply being spoken: the voice chosen is heard in the next one.
+      if (closedRef.current || voiceSession.speaking()) return;
       previewRef.current = new Audio(`data:${mimeType};base64,${audioBase64}`);
       await previewRef.current.play();
     } catch {
@@ -129,6 +141,7 @@ export function VoiceSettingsPopover(): ReactElement {
       trigger={
         <IconButton
           label='Voice settings'
+          caption='Settings'
           data-track-category='XyneAI'
           data-track-name='VOICE_MODE_SETTINGS'
         >

@@ -1,3 +1,4 @@
+import { Agent } from 'undici';
 import { logger } from '@/utils/logger';
 import { config as envConfig } from '@/config/env';
 
@@ -48,6 +49,36 @@ export type JevFailure =
   | { kind: 'unusable' };
 
 export const isJevConfigured = (): boolean => Boolean(envConfig.jev.apiKey);
+
+// Node's fetch drops an idle connection after ~4 s, so a call after a pause pays a new TCP+TLS
+// handshake (+100–400 ms). Keeping it open for 30 s covers a conversation's pauses.
+const jevAgent = new Agent({ keepAliveTimeout: 30_000, keepAliveMaxTimeout: 60_000 });
+
+const WARM_EVERY_MS = 20_000;
+const WARM_TIMEOUT_MS = 5000;
+let lastWarmAt = 0;
+
+/**
+ * Opens the connection to Jev ahead of a call, e.g. while the user is still speaking. A HEAD
+ * does no model work (the endpoint answers 405 without auth), and at most one goes out per
+ * 20 s. Fire and forget: a failure only means the real call opens the connection itself.
+ */
+export const warmJev = (): void => {
+  const { apiKey, url } = envConfig.jev;
+  const now = Date.now();
+  if (!apiKey || now - lastWarmAt < WARM_EVERY_MS) return;
+  lastWarmAt = now;
+  fetch(url, {
+    method: 'HEAD',
+    dispatcher: jevAgent,
+    signal: AbortSignal.timeout(WARM_TIMEOUT_MS),
+  } as unknown as RequestInit)
+    .then((response) => {
+      logger.debug('Jev connection warmed', { status: response.status, ms: Date.now() - now });
+      return response.body?.cancel();
+    })
+    .catch(() => undefined);
+};
 
 const isProbability = (p: unknown): p is number => typeof p === 'number' && p >= 0 && p <= 1;
 
@@ -122,6 +153,37 @@ export const askJevNouls = async (
   return probabilities;
 };
 
+type Attempt = { answers: Record<string, JevAnswer> | null; failure?: JevFailure };
+
+/** The first attempt to give an answer wins; when none does, the last to finish is the outcome. */
+const firstUsable = (attempts: Promise<Attempt>[]): Promise<Attempt> =>
+  new Promise((resolve) => {
+    let pending = attempts.length;
+    for (const attempt of attempts) {
+      void attempt.then((outcome) => {
+        pending -= 1;
+        if (outcome.answers || pending === 0) resolve(outcome);
+      });
+    }
+  });
+
+/** `first`, and once it has been pending for `afterMs`, a second identical attempt beside it. */
+const hedged = async (
+  first: Promise<Attempt>,
+  second: () => Promise<Attempt>,
+  afterMs: number
+): Promise<Attempt> => {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const slow = new Promise<null>((resolve) => {
+    timer = setTimeout(resolve, afterMs, null);
+  });
+  const early = await Promise.race([first, slow]);
+  clearTimeout(timer);
+  if (early) return early;
+  logger.info('Jev request hedged', { afterMs });
+  return firstUsable([first, second()]);
+};
+
 /**
  * Answers to any mix of questions about one `state`, in a single request. `state` is
  * a string or a JSON object; questions can point into an object with backticked paths
@@ -130,6 +192,10 @@ export const askJevNouls = async (
  * unusable answer is left out instead, for a batch of independent questions where
  * one bad answer should not cost the rest; null then only when none is usable.
  * `signal` cancels the request early, e.g. when the caller's own client has gone.
+ * `hedgeAfterMs`: when the first attempt is still pending after that long, an identical
+ * second one starts beside it; the first to answer wins and the other is aborted. A call
+ * that is usually fast but sometimes slow finishes sooner this way, at the cost of the
+ * occasional duplicate request. `timeoutMs` and `signal` bound both attempts together.
  * Never throws.
  */
 export const askJev = async (
@@ -140,62 +206,84 @@ export const askJev = async (
   {
     partial = false,
     onFailure,
-  }: { partial?: boolean; onFailure?: (failure: JevFailure) => void } = {}
+    hedgeAfterMs,
+  }: {
+    partial?: boolean;
+    onFailure?: (failure: JevFailure) => void;
+    hedgeAfterMs?: number;
+  } = {}
 ): Promise<Record<string, JevAnswer> | null> => {
   const { apiKey, url, model } = envConfig.jev;
   if (!apiKey) return null;
 
-  try {
-    const response = await fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
-      body: JSON.stringify({ model, state, questions }),
-      signal: signal
-        ? AbortSignal.any([AbortSignal.timeout(timeoutMs), signal])
-        : AbortSignal.timeout(timeoutMs),
-    });
-    if (!response.ok) {
-      // Status only: an error body can echo the request, which carries user text. The
-      // body is still released, so the connection goes back to the pool.
-      logger.warn('Jev request failed', { status: response.status });
-      await response.body?.cancel();
-      onFailure?.({ kind: 'status', status: response.status });
-      return null;
-    }
+  // Aborted once the call is over, which stops the attempt that did not win.
+  const over = new AbortController();
+  const bound = AbortSignal.any(
+    signal
+      ? [AbortSignal.timeout(timeoutMs), signal, over.signal]
+      : [AbortSignal.timeout(timeoutMs), over.signal]
+  );
 
-    const body = (await response.json()) as { answers?: Record<string, unknown> };
-    const answers: Record<string, JevAnswer> = {};
-    const unusable: string[] = [];
-    for (const [key, question] of Object.entries(questions)) {
-      const answer = readAnswer(question, body.answers?.[key]);
-      if (answer) {
-        answers[key] = answer;
-      } else {
-        unusable.push(key);
+  const attempt = async (): Promise<Attempt> => {
+    try {
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
+        body: JSON.stringify({ model, state, questions }),
+        signal: bound,
+        // `dispatcher` is an undici extension not in the DOM RequestInit type.
+        dispatcher: jevAgent,
+      } as unknown as RequestInit);
+      if (!response.ok) {
+        // Status only: an error body can echo the request, which carries user text. The
+        // body is still released, so the connection goes back to the pool.
+        await response.body?.cancel();
+        return { answers: null, failure: { kind: 'status', status: response.status } };
       }
-    }
-    if (unusable.length > 0) {
-      logger.warn('Jev answered with no usable probability', {
-        questions: unusable.slice(0, 5),
-        unusable: unusable.length,
-        of: Object.keys(questions).length,
-      });
-      if (!partial || unusable.length === Object.keys(questions).length) {
-        onFailure?.({ kind: 'unusable' });
-        return null;
+
+      const body = (await response.json()) as { answers?: Record<string, unknown> };
+      const answers: Record<string, JevAnswer> = {};
+      const unusable: string[] = [];
+      for (const [key, question] of Object.entries(questions)) {
+        const answer = readAnswer(question, body.answers?.[key]);
+        if (answer) {
+          answers[key] = answer;
+        } else {
+          unusable.push(key);
+        }
       }
+      if (unusable.length > 0) {
+        if (!partial || unusable.length === Object.keys(questions).length) {
+          return { answers: null, failure: { kind: 'unusable' } };
+        }
+        // Question keys only: they name fields, never what the user said.
+        logger.warn('Jev left some questions unanswered', {
+          questions: unusable.slice(0, 5),
+          of: Object.keys(questions).length,
+        });
+      }
+      return { answers };
+    } catch (error) {
+      // Cancelled by the caller, or by the other attempt winning: nothing went wrong, so
+      // nothing to report.
+      if (signal?.aborted || over.signal.aborted) return { answers: null };
+      const timedOut = error instanceof Error && error.name === 'TimeoutError';
+      return { answers: null, failure: { kind: timedOut ? 'timeout' : 'network' } };
     }
-    return answers;
-  } catch (error) {
-    // Cancelled by the caller: nothing went wrong, so nothing to report.
-    if (signal?.aborted) return null;
-    const timedOut = error instanceof Error && error.name === 'TimeoutError';
-    // The error's name only: a reply that isn't JSON fails with a message quoting it,
-    // and it can echo the request.
-    logger.warn(`Jev request ${timedOut ? `timed out after ${timeoutMs}ms` : 'errored'}`, {
-      error: error instanceof Error ? error.name : 'unknown',
-    });
-    onFailure?.({ kind: timedOut ? 'timeout' : 'network' });
-    return null;
+  };
+
+  try {
+    const first = attempt();
+    const outcome =
+      hedgeAfterMs === undefined ? await first : await hedged(first, attempt, hedgeAfterMs);
+    // Logged once, from the final outcome, so hedged attempts do not each report the same failure.
+    // The failure kind and status only: an error's message can echo the request, which carries user text.
+    if (!outcome.answers && outcome.failure) {
+      logger.warn('Jev request failed', { ...outcome.failure, timeoutMs });
+      onFailure?.(outcome.failure);
+    }
+    return outcome.answers;
+  } finally {
+    over.abort();
   }
 };
