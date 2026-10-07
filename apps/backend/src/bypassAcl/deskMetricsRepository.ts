@@ -154,10 +154,7 @@ export class DeskMetricsRepository {
         AND ta.value->>'newValue' IN (${Prisma.join(names)})
       )`;
 
-    // A status change. The generic ticket-update mutator wrote statusV2 changes without
-    // `field` until it was fixed; stage changes always carry field = 'stageName'. Field-less
-    // rows also include legacy `status` values (RESOLVED, IN_PROGRESS, …) from older code —
-    // callers match statusV2 values (COMPLETED, TODO, STARTED, PAUSED), which those never equal.
+    // Older UI status changes were saved without `field`.
     const statusV2Change = Prisma.sql`(
       ta."activityType" = 'STATUS'
       AND (ta.value->>'field' = 'statusV2' OR ta.value->>'field' IS NULL)
