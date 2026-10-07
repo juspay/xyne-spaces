@@ -1,6 +1,5 @@
 import { PageSelectionPreview } from './PageSelectionPreview';
 import { logger, Event as LogEvent } from '../../../../utils/logger';
-import { lengthBucket } from '../../../../services/Analytics/trackSource';
 import {
   ReactElement,
   useState,
@@ -94,6 +93,8 @@ import {
   requirePendingActionIndex,
   unpresentedPendingActions,
 } from '../utils/XyneAITypes';
+import { AgentRecipient } from '../../../AIScreen/ConversationAgents';
+import { FollowUpSuggestions } from '../../../AIScreen/FollowUpSuggestions';
 import { PendingActionBlock } from './PendingActionBlock';
 import { respondToPendingAction } from '../../../../services/XyneAI/XyneAIPendingActionService';
 import { Link2 } from 'lucide-react';
@@ -1308,6 +1309,9 @@ export const MessageItem = React.memo(
               : 'flex-1 max-w-full overflow-hidden'
           }
         >
+          {isV2 && message.type === 'user' && !isEditing && message.agentSlug && (
+            <AgentRecipient slug={message.agentSlug} className='pr-1' />
+          )}
           {/* The legacy "displayStatus + bouncing dots" loading state lived
               here as the TRUE branch of a ternary. Removed in favor of the
               single thinking indicator on ActivityBlock — when there's no
@@ -1669,26 +1673,12 @@ export const MessageItem = React.memo(
           !message.isStreaming &&
           onFollowUpSuggestionClick &&
           message.followUpSuggestions?.length ? (
-            <div className='mt-3 flex flex-wrap gap-2' data-testid='ask-ai-follow-ups'>
-              {message.followUpSuggestions.map((suggestion, suggestionIndex) => (
-                <button
-                  key={suggestion}
-                  type='button'
-                  onClick={() => onFollowUpSuggestionClick(suggestion)}
-                  className='rounded-full border border-border bg-card px-3 py-1.5 text-left text-xs font-medium leading-5 text-muted-foreground transition-colors hover:bg-accent'
-                  data-track-category='AskAI'
-                  data-track-name='FollowUpSuggestion'
-                  data-track-metadata={JSON.stringify({
-                    ...trackContext,
-                    messageId: message.id,
-                    index: suggestionIndex,
-                    lengthBucket: lengthBucket(suggestion.length),
-                  })}
-                >
-                  {suggestion}
-                </button>
-              ))}
-            </div>
+            <FollowUpSuggestions
+              suggestions={message.followUpSuggestions}
+              onSelect={onFollowUpSuggestionClick}
+              messageId={message.id}
+              trackContext={trackContext}
+            />
           ) : null}
 
           {/* User timestamp — right-aligned below the user bubble. Shown
@@ -1759,6 +1749,7 @@ export const MessageItem = React.memo(
       return (
         prev.message.id === next.message.id &&
         prev.message.content === next.message.content &&
+        prev.message.agentSlug === next.message.agentSlug &&
         prev.message.errorInfo === next.message.errorInfo &&
         prev.message.followUpSuggestions === next.message.followUpSuggestions &&
         prev.isLatestBotMessage === next.isLatestBotMessage &&

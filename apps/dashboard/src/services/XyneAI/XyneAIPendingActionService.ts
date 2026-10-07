@@ -15,11 +15,14 @@ export async function respondToPendingAction(
   fallbackAgentSlug = 'ask-ai',
 ): Promise<PendingActionResolution> {
   let sessionId = message.sessionId;
-  let agentSlug = fallbackAgentSlug;
+  // The message's own agent wins: a chat can switch agents mid-conversation,
+  // so the thread's latest stream may belong to a different agent than the
+  // one that proposed this action (and approving runs the proposer's tool).
+  let agentSlug = message.agentSlug || fallbackAgentSlug;
   for (const state of xyneAIStreamManager.getAllActiveStreams().values()) {
     if (!state.messages.some(candidate => candidate.id === message.id)) continue;
     sessionId ||= state.sessionId;
-    agentSlug = state.agentSlug || agentSlug;
+    agentSlug = message.agentSlug || state.agentSlug || agentSlug;
     break;
   }
   if (!sessionId) throw new Error('Could not find sessionId for this message');

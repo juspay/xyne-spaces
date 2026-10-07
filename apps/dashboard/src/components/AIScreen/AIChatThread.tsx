@@ -58,6 +58,8 @@ import type { AssistantActions } from '../Assistant/useAssistantActions';
 import { AIComposer, type AIComposerAttachment, type AIComposerHandle } from './AIComposer';
 import { ReadonlyContextPills } from './ReadonlyContextPills';
 import { type ComposerContext, toStreamOverrides } from './composerContext';
+import { AgentRecipient } from './ConversationAgents';
+import { FollowUpSuggestions } from './FollowUpSuggestions';
 import {
   anchorFromArgs,
   documentIdFromArgs,
@@ -73,7 +75,6 @@ import {
 } from './Workspace';
 import { fetchV2ConversationMessages } from '../../services/XyneAI/XyneAISessionsV2Service';
 import { useV2SessionsList, useV2SessionInvalidator } from '../../hooks/useAskAISessionsV2';
-import { lengthBucket } from '../../services/Analytics/trackSource';
 import { xyneAIStreamManager } from '../../services/XyneAI/XyneAIStreamManager';
 import { BASE_URL } from '../../services/clients/apiClient';
 import { BrailleLoader, AnimatedLabel, useStableLabel } from './ReasoningLoader';
@@ -826,6 +827,7 @@ function ChatMessageBubble({
   onRatingChange,
   trackContext,
   agentSlug,
+  recipientAgentSlug,
   onPendingActionResolved,
   conversationId,
   onFlowActionComplete,
@@ -839,6 +841,8 @@ function ChatMessageBubble({
   /** Run dimensions merged into every act-on-answer click (joins to the run). */
   trackContext?: Record<string, unknown> | undefined;
   agentSlug?: string | undefined;
+  /** Agent a user message was sent to — shown as "To <agent>" above it. */
+  recipientAgentSlug?: string | undefined;
   onPendingActionResolved?: (() => void) | undefined;
   onCopy?: () => void;
   onFeedback?: (messageId: string, feedbackType: 'LIKE' | 'DISLIKE') => void;
@@ -1220,6 +1224,9 @@ function ChatMessageBubble({
             isEditing ? 'w-full max-w-[90%]' : 'max-w-[78%]',
           )}
         >
+          {recipientAgentSlug && !isEditing && (
+            <AgentRecipient slug={recipientAgentSlug} className='pr-2' />
+          )}
           <div className='flex w-full items-start justify-end gap-1'>
             <div
               className={cn(
@@ -1468,26 +1475,13 @@ function ChatMessageBubble({
           !message.isStreaming &&
           onFollowUpSuggestionClick &&
           message.followUpSuggestions?.length ? (
-            <div className='mt-1 flex flex-wrap gap-2' data-testid='ask-ai-follow-ups'>
-              {message.followUpSuggestions.map((suggestion, suggestionIndex) => (
-                <button
-                  key={suggestion}
-                  type='button'
-                  onClick={() => onFollowUpSuggestionClick(suggestion)}
-                  className='rounded-full border border-border bg-card px-3 py-1.5 text-left text-xs font-medium leading-5 text-muted-foreground transition-colors hover:bg-accent'
-                  data-track-category='AskAI'
-                  data-track-name='FollowUpSuggestion'
-                  data-track-metadata={JSON.stringify({
-                    ...trackContext,
-                    messageId: message.id,
-                    index: suggestionIndex,
-                    lengthBucket: lengthBucket(suggestion.length),
-                  })}
-                >
-                  {suggestion}
-                </button>
-              ))}
-            </div>
+            <FollowUpSuggestions
+              suggestions={message.followUpSuggestions}
+              onSelect={onFollowUpSuggestionClick}
+              messageId={message.id}
+              trackContext={trackContext}
+              className='mt-2'
+            />
           ) : null}
 
           {!isUser && onDebug && (
@@ -1787,10 +1781,29 @@ export const AIChatThread = forwardRef<AIChatThreadHandle, AIChatThreadProps>(fu
 
   void threadId; // Used by stream manager via useXyneAIStream internally
 
-  const { selectedAgentSlug } = useSelectedAgent();
+  const { selectedAgentSlug, setSelectedAgentSlug } = useSelectedAgent();
   const { askAIVersion } = useAskAIVersion();
   const isV2 = askAIVersion === 'v2';
   const effectiveAgentSlug = isV2 ? selectedAgentSlug : null;
+  // Opening a conversation (history click, link, back/forward) continues it
+  // with the agent it was last with — once per conversation, so a switch the
+  // user makes afterwards is never undone by a later reload of the thread.
+  const agentSyncedForSessionRef = useRef<string | null>(null);
+  const continueWithLastAgent = useCallback(
+    (forSessionId: string, loaded: Message[]): void => {
+      if (!isV2 || agentSyncedForSessionRef.current === forSessionId) return;
+      agentSyncedForSessionRef.current = forSessionId;
+      const lastAgentSlug = [...loaded].reverse().find(m => m.agentSlug)?.agentSlug;
+      if (!lastAgentSlug) return;
+      setSelectedAgentSlug(lastAgentSlug === 'ask-ai' ? null : lastAgentSlug);
+    },
+    [isV2, setSelectedAgentSlug],
+  );
+  // Read by the session loader without being one of its deps: the user can
+  // switch agents mid-conversation, and the thread (read conversation-wide)
+  // must not reload — or re-seed the composer — when they do.
+  const effectiveAgentSlugRef = useRef(effectiveAgentSlug);
+  effectiveAgentSlugRef.current = effectiveAgentSlug;
 
   const { submitQuery, abortCurrentRequest } = useXyneAIStream({
     channelIds: [],
@@ -1830,24 +1843,25 @@ export const AIChatThread = forwardRef<AIChatThreadHandle, AIChatThreadProps>(fu
   );
 
   const queryClient = useQueryClient();
-  const { data: v2Sessions } = useV2SessionsList(
-    effectiveAgentSlug,
-    isV2 && Boolean(conversationId),
-  );
+  // The newest chats are on the first page — where a chat awaiting its
+  // generated title always is.
+  const { conversations: v2Sessions } = useV2SessionsList({
+    enabled: isV2 && Boolean(conversationId),
+  });
   const { invalidateSessions } = useV2SessionInvalidator();
   const generatedTitle = useMemo(() => {
     if (!conversationId) return undefined;
-    const session = v2Sessions?.find(s => s.sessionId === conversationId);
+    const session = v2Sessions.find(s => s.sessionId === conversationId);
     return session?.titleGenerated ? session.title : undefined;
   }, [v2Sessions, conversationId]);
   useEffect(() => {
     if (!isV2 || !conversationId) return;
     if (generatedTitle) return;
     const timers = [4_000, 10_000, 20_000, 35_000, 60_000, 90_000].map(delay =>
-      window.setTimeout(() => invalidateSessions(effectiveAgentSlug), delay),
+      window.setTimeout(() => invalidateSessions(), delay),
     );
     return () => timers.forEach(id => window.clearTimeout(id));
-  }, [isV2, conversationId, effectiveAgentSlug, invalidateSessions, generatedTitle]);
+  }, [isV2, conversationId, invalidateSessions, generatedTitle]);
   const designStudio = useDesignStudio();
   const revealedEditsRef = useRef<Set<string>>(new Set());
 
@@ -1933,6 +1947,11 @@ export const AIChatThread = forwardRef<AIChatThreadHandle, AIChatThreadProps>(fu
 
     abortCurrentRequest();
 
+    // A chat can switch agents mid-conversation: regenerate re-runs this turn
+    // with the agent that answered it, not the one picked now.
+    const lastBotMessage = [...displayMessages].reverse().find(m => m.type === 'bot');
+    const turnAgentSlug = lastBotMessage?.agentSlug ?? lastUserMessage.agentSlug;
+
     // parentId = the user message itself → the new bot response branches from it.
     await submitQuery(
       lastUserMessage.content,
@@ -1942,6 +1961,10 @@ export const AIChatThread = forwardRef<AIChatThreadHandle, AIChatThreadProps>(fu
       undefined, // userTags
       lastUserMessage.id, // parentMessageId
       true, // isRegenerate
+      undefined, // isEditUserMessage
+      undefined, // editedUserMessageId
+      undefined, // parentAssistantMessageId
+      turnAgentSlug ? { agentSlug: turnAgentSlug } : undefined,
     );
   }, [isActiveSessionStreaming, displayMessages, abortCurrentRequest, submitQuery]);
 
@@ -1971,6 +1994,8 @@ export const AIChatThread = forwardRef<AIChatThreadHandle, AIChatThreadProps>(fu
         true, // isEditUserMessage
         messageToEdit.id, // editedUserMessageId
         editedParentAssistant, // parentAssistantMessageId
+        // Editing re-asks that turn, so it goes to the agent it was sent to.
+        messageToEdit.agentSlug ? { agentSlug: messageToEdit.agentSlug } : undefined,
       );
     },
     [isActiveSessionStreaming, messages, abortCurrentRequest, submitQuery],
@@ -2086,6 +2111,7 @@ export const AIChatThread = forwardRef<AIChatThreadHandle, AIChatThreadProps>(fu
           );
           setMessages(normalized);
           seedComposerFromLastUserTurn(normalized);
+          continueWithLastAgent(sessionId, normalized);
           setConversationId(live.sessionId || sessionId);
           setDebugEvents(live.debugEvents);
           setDebugArtifactsReadyVersion(live.debugArtifactsReadyVersion);
@@ -2101,7 +2127,10 @@ export const AIChatThread = forwardRef<AIChatThreadHandle, AIChatThreadProps>(fu
         setDebugSessionId(null);
 
         if (isV2) {
-          const messages = await fetchV2ConversationMessages(sessionId, effectiveAgentSlug);
+          const messages = await fetchV2ConversationMessages(
+            sessionId,
+            effectiveAgentSlugRef.current,
+          );
           const loadedMessages = messages.map(msg => ({
             ...msg,
             isStreaming: false,
@@ -2125,6 +2154,7 @@ export const AIChatThread = forwardRef<AIChatThreadHandle, AIChatThreadProps>(fu
 
           setMessages(loadedMessages);
           seedComposerFromLastUserTurn(loadedMessages);
+          continueWithLastAgent(sessionId, loadedMessages);
           setConversationId(sessionId);
           onConversationChange?.(sessionId);
           // Reload mid-run: no in-memory stream was adopted above, so attach a
@@ -2140,7 +2170,7 @@ export const AIChatThread = forwardRef<AIChatThreadHandle, AIChatThreadProps>(fu
               detach: xyneAIStreamManager.attachLiveViewer(
                 threadId,
                 sessionId,
-                effectiveAgentSlug || 'ask-ai',
+                effectiveAgentSlugRef.current || 'ask-ai',
                 loadedMessages,
               ),
             };
@@ -2167,7 +2197,7 @@ export const AIChatThread = forwardRef<AIChatThreadHandle, AIChatThreadProps>(fu
     return () => {
       cancelled = true;
     };
-  }, [sessionId, threadId, onConversationChange, effectiveAgentSlug, isV2]);
+  }, [sessionId, threadId, onConversationChange, isV2, continueWithLastAgent]);
 
   // Auto-submit initialQuery once, applying the landing composer's chosen
   // context/toggles to this first turn. The ref guard resets on remount, so the
@@ -2723,8 +2753,13 @@ export const AIChatThread = forwardRef<AIChatThreadHandle, AIChatThreadProps>(fu
                       <ChatMessageBubble
                         trackContext={messageTrackContext}
                         message={message}
+                        recipientAgentSlug={
+                          isV2 && message.type === 'user' ? message.agentSlug : undefined
+                        }
                         conversationId={conversationId || undefined}
-                        agentSlug={effectiveAgentSlug ?? undefined}
+                        // A pending action belongs to the agent that proposed
+                        // it, which after a switch may not be the one picked.
+                        agentSlug={message.agentSlug ?? effectiveAgentSlug ?? undefined}
                         onPendingActionResolved={() => {
                           if (!conversationId) return;
                           const refreshArtifacts = (): void => {
@@ -2844,7 +2879,11 @@ export const AIChatThread = forwardRef<AIChatThreadHandle, AIChatThreadProps>(fu
               onSubmit={(text, attachments, context, trigger): void => {
                 void handleSubmit(text, attachments, context, trigger);
               }}
-              onAgentChange={onAgentChange}
+              // Mid-conversation switch: once this thread has a conversation,
+              // picking another agent keeps it — the selector already moved the
+              // selected agent, so the next turn goes to it in THIS chat. Only
+              // an empty thread hands the pick up (fresh chat for that agent).
+              onAgentChange={conversationId ? undefined : onAgentChange}
               showAgentSelector={isV2}
               initialExtras={initialExtras}
               onContextChange={onContextChange}

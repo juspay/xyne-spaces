@@ -150,6 +150,17 @@ export interface InternalRunPayload {
    *  mode_switch debug event; behavior is identical to any other auto run. */
   planContinuation?: boolean;
   generateFollowUpSuggestions?: boolean;
+  /** Multi-agent direct chat: the turns other agents answered that this
+   *  agent's own session has not seen, as a text note in two variants. The
+   *  runtime sends `resume` when it resumes the agent's session and `fresh`
+   *  when it starts one (a first appearance, a new branch, a lost archive).
+   *  Absent for every chat that never switched agents. */
+  agentHandoff?: AgentHandoffNote;
+}
+
+export interface AgentHandoffNote {
+  resume?: string | null;
+  fresh?: string | null;
 }
 
 export type RunOutcome = "completed" | "failed" | "cancelled" | "rescheduled";
@@ -224,6 +235,7 @@ export async function executeRunFromPayload(
     planContinuation,
     awakening,
     generateFollowUpSuggestions: shouldGenerateFollowUpSuggestions,
+    agentHandoff,
   } = payload;
 
   const sessionId = (providedSessionId ?? "").trim();
@@ -296,6 +308,7 @@ export async function executeRunFromPayload(
       shouldGenerateFollowUpSuggestions,
       typeof callbackUrl === "string" ? callbackUrl : undefined,
       awakening,
+      agentHandoff,
       state,
     );
   } catch (err) {

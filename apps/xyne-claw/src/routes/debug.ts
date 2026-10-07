@@ -783,6 +783,9 @@ function dedupeSubagents(items: readonly SubagentArtifact[]): SubagentArtifact[]
 
 // ── GET /internal/sessions/:convId/debug ────────────────────────────────────
 
+/** Cap on `agentSlugs` — each one multiplies the GCS keys probed. */
+const MAX_AGENT_SLUGS = 20;
+
 function fail(res: Response, status: number, error: string, code: "invalid_id" | "not_found" | "internal", extra?: Record<string, unknown>): void {
   metric.count("debug_bundle", { result: code });
   res.status(status).json({ success: false, error, code, ...(extra ?? {}) });
@@ -793,9 +796,21 @@ router.get("/internal/sessions/:convId/debug", validateS2SKey, async (req: Reque
     const { convId } = req.params;
     const agentSlug = typeof req.query["agentSlug"] === "string" ? req.query["agentSlug"] : undefined;
     const userId = typeof req.query["userId"] === "string" ? req.query["userId"] : undefined;
-    // All three ids end up in filesystem paths under the sessions root —
+    // A direct chat can switch agents mid-conversation, and each agent's runs
+    // live under its own `<convId>_<slug>` key. Once those sessions are
+    // archived off the PVC, the only way to find them is to guess each key, so
+    // the caller names every agent that answered.
+    const extraAgentSlugs = typeof req.query["agentSlugs"] === "string"
+      ? req.query["agentSlugs"].split(",").map((s) => s.trim()).filter(Boolean).slice(0, MAX_AGENT_SLUGS)
+      : [];
+    // All of these ids end up in filesystem paths under the sessions root —
     // reject anything outside the safe charset before touching the disk.
-    if (!isSafeId(convId) || (agentSlug !== undefined && !isSafeId(agentSlug)) || (userId !== undefined && !isSafeId(userId))) {
+    if (
+      !isSafeId(convId) ||
+      (agentSlug !== undefined && !isSafeId(agentSlug)) ||
+      (userId !== undefined && !isSafeId(userId)) ||
+      extraAgentSlugs.some((s) => !isSafeId(s))
+    ) {
       fail(res, 400, "Invalid conversation id, agent slug, or user id", "invalid_id");
       return;
     }
@@ -820,7 +835,9 @@ router.get("/internal/sessions/:convId/debug", validateS2SKey, async (req: Reque
     const index = await collectIndexLocations(convId, warnings);
 
     // 3. GCS runs for every key anyone knows about.
-    const guessedKeys = candidateStoreKeys(convId, agentSlug, userId);
+    const guessedKeys = unique(
+      [agentSlug, ...extraAgentSlugs].flatMap((slug) => candidateStoreKeys(convId, slug, userId)),
+    );
     const gcsKeys = unique([...index.storeKeys, ...guessedKeys, ...dirNames]);
     const gcsLocations = (await Promise.all(gcsKeys.map((k) => collectGcsLocations(k, warnings)))).flat();
 

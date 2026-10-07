@@ -289,6 +289,12 @@ export interface ConversationHistory {
   isStarred?: boolean;
   branchSelections?: Record<string, string>; // parentId → selected childId for branching
   lastInputContext?: LastInputContext;
+  /** Every agent that answered, in first-use order. The all-agents history
+   *  always sets it; the legacy per-agent list only for a switched chat. */
+  agentSlugs?: string[];
+  /** The agent to open and continue this conversation with — the one active
+   *  most recently. Set by the all-agents history. */
+  agentSlug?: string;
 }
 
 // ============================================================================
@@ -545,6 +551,9 @@ export interface PlanTodo {
 }
 
 export interface Message {
+  /** Agent this turn was sent to / answered by. A chat can switch agents
+   *  mid-conversation, so identity is per message. Absent on v1 rows. */
+  agentSlug?: string;
   planTodos?: PlanTodo[];
   planTitle?: string;
   /** FlowUI artifact cards posted on this message, deduped by `screenId`. */

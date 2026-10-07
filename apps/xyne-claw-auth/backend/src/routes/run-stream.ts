@@ -12,6 +12,8 @@ import { awaitTurnHandoff, isTurnControlCommand } from "../lib/run-turn-handoff.
 import { dispatchLocalHarnessRun, localHarnessProviderLabel, pinnedModelForProvider, resolveLocalHarnessTarget, resolveLocalHarnessTargetForProvider, resolveLocalSandbox } from "../lib/local-harness.js";
 import { isLocalHarnessProvider, IMMEDIATE_TASK_COMMAND_RE, parseLocalSandboxCommand } from "xyne-claw-shared";
 import { planServerContinuation } from "../lib/local-harness-continuation.js";
+import { buildAgentHandoff, conversationPath, handoffMessagesFrom } from "../lib/multi-agent-chat.js";
+import { isDirectChatConversation } from "../lib/conversation-kind.js";
 import { applyAiScreenCommand } from "../lib/ai-screen-commands.js";
 import { parseSlashCommand } from "../lib/parseSlashCommand.js";
 import { localHarnessSessionRepository } from "../repositories/localHarnessSessionRepository.js";
@@ -871,6 +873,12 @@ publicRouter.post("/", requireAuth, requireNoAccessToken, async (req: Request, r
           parentId: (m as { parentId?: string | null }).parentId ?? null,
           createdAt: m.createdAt,
         }));
+    // Multi-agent direct chat: the tip of the selected path this turn answers
+    // after (hand-off note), and the agent whose session a regenerate/edit
+    // would clone. A turn owned by ANOTHER agent has no session of this agent
+    // to clone — that branch starts fresh and the note carries the path.
+    let handoffLeafId: string | null = null;
+    let cloneOwnerSlug: string | null = null;
 
     let assistantParentId: string | null = null;
     let createdUserMessageId: string | undefined;
@@ -919,6 +927,8 @@ publicRouter.post("/", requireAuth, requireNoAccessToken, async (req: Request, r
         convId,
       );
       cloneBranchMode = "beforeLastUser";
+      handoffLeafId = followUpHistoryLeafId;
+      cloneOwnerSlug = existingMessageRows.find((m) => m.id === (existingAssistantId ?? resolvedParentUserMessageId))?.agentSlug ?? null;
     } else if (isEditUserMessageFlag && editedUserMessageIdStr) {
       const requestedParent = parentAssistantMessageIdStr
         ? existingMessages.find((m) => m.id === parentAssistantMessageIdStr && m.role === "assistant")
@@ -935,6 +945,8 @@ publicRouter.post("/", requireAuth, requireNoAccessToken, async (req: Request, r
       );
       cloneBranchMode = "beforeLastUser";
       followUpHistoryLeafId = requestedParent?.id ?? null;
+      handoffLeafId = requestedParent?.id ?? null;
+      cloneOwnerSlug = existingMessageRows.find((m) => m.id === editedUserMessageIdStr)?.agentSlug ?? null;
 
       if (convId && userId) {
         try {
@@ -971,6 +983,7 @@ publicRouter.post("/", requireAuth, requireNoAccessToken, async (req: Request, r
             (message) => message.role === "assistant" && message.agentSlug === slug,
           )?.id ?? null;
       piConversationId = resolvePiConversationIdForPath(existingMessages, userParentId, convId);
+      handoffLeafId = userParentId;
 
       if (convId && userId) {
         try {
@@ -1056,7 +1069,12 @@ publicRouter.post("/", requireAuth, requireNoAccessToken, async (req: Request, r
     }
 
     // Branched PI session clone (regenerate / edit-user).
-    if (cloneSourcePiConversationId && assistantMsg) {
+    if (cloneSourcePiConversationId && assistantMsg && cloneOwnerSlug && cloneOwnerSlug !== slug) {
+      piConversationId = branchPiConversationId(convId, assistantMsg.id);
+      log.info(
+        `[run-stream] branch turn owned by ${cloneOwnerSlug}, answered by ${slug} — fresh branch session conv=${convId}`,
+      );
+    } else if (cloneSourcePiConversationId && assistantMsg) {
       piConversationId = branchPiConversationId(convId, assistantMsg.id);
       const cloneSourceSessionKey = piSessionStoreKey(cloneSourcePiConversationId, slug);
       const cloneTargetSessionKey = piSessionStoreKey(piConversationId, slug);
@@ -1446,7 +1464,7 @@ publicRouter.post("/", requireAuth, requireNoAccessToken, async (req: Request, r
     let localFolderItem: LocalFolderContextItem | null = splitContext.localFolders[0] ?? null;
     if (!localFolderItem && convId) {
       const sticky = await chatMessageRepository
-        .latestLocalFolderContext(convId, slug)
+        .latestLocalFolderContext(convId, isDirectChatConversation(convId) ? null : slug)
         .catch(() => null);
       const stickySplit = splitLocalFolderContext(sticky ? [sticky] : []);
       localFolderItem = stickySplit.localFolders[0] ?? null;
@@ -1511,8 +1529,23 @@ publicRouter.post("/", requireAuth, requireNoAccessToken, async (req: Request, r
       fastMode: fastModeEnabled,
     };
 
+    // Multi-agent direct chat: hand this agent the turns its own session has
+    // not seen. Null whenever the path holds a single agent — those turns run
+    // exactly as before. When present it already covers the local-harness
+    // turns the provider catch-up below would add, so that one is skipped.
+    const handoffMessages = isDirectChatConversation(convId) ? handoffMessagesFrom(existingMessageRows) : [];
+    const agentHandoff = buildAgentHandoff({
+      path: conversationPath(handoffMessages, handoffLeafId),
+      agentSlug: slug,
+      isOwnSessionTurn: (m) => !isLocalHarnessProvider(m.runProvider),
+    });
+    if (agentHandoff) {
+      runRequestBody["agentHandoff"] = agentHandoff;
+      log.info(`[run-stream] multi-agent hand-off note conv=${convId} agent=${slug}`);
+    }
+
     try {
-      const serverCatchUp = await planServerContinuation({
+      const serverCatchUp = agentHandoff ? null : await planServerContinuation({
         conversationId: convId,
         agentSlug: slug,
         excludeMessageIds: [createdUserMessageId, assistantMsg?.id].filter((id): id is string => Boolean(id)),
@@ -1721,6 +1754,7 @@ publicRouter.post("/", requireAuth, requireNoAccessToken, async (req: Request, r
         continuation: {
           agentSlug: slug,
           excludeMessageIds: [createdUserMessageId, assistantMsg?.id].filter((id): id is string => Boolean(id)),
+          ...(agentHandoff ? { multiAgent: { messages: handoffMessages, leafId: handoffLeafId } } : {}),
         },
       });
 

@@ -70,6 +70,7 @@ import { activeToolCap, demotedCatalogItem, planActiveToolCap, readToolUsageRank
 import { buildExperimentTools, buildExperimentReviewTools, type ExperimentContext } from "../experiment.js";
 import {
   executeRunFromPayload,
+  type AgentHandoffNote,
   type InternalRunPayload,
   type RunExecutionState,
 } from "../run-execution.js";
@@ -581,6 +582,7 @@ router.post("/run", validateS2SKey, async (req, res: Response) => {
     planContinuation,
     awakening,
     generateFollowUpSuggestions: shouldGenerateFollowUpSuggestions,
+    agentHandoff,
   } = req.body as InternalRunPayload;
 
   const experiment = normalizeExperimentContext(rawExperiment);
@@ -839,6 +841,7 @@ router.post("/run", validateS2SKey, async (req, res: Response) => {
       shouldGenerateFollowUpSuggestions,
       typeof callbackUrl === "string" ? callbackUrl : undefined,
       awakening,
+      agentHandoff,
     ).finally(() => {
       if (activeRun.handoffCapTimer) clearTimeout(activeRun.handoffCapTimer);
       if (activeRun.gracefulInterruptSummaryTimer) clearTimeout(activeRun.gracefulInterruptSummaryTimer);
@@ -965,6 +968,7 @@ router.post("/run", validateS2SKey, async (req, res: Response) => {
         shouldGenerateFollowUpSuggestions,
         typeof callbackUrl === "string" ? callbackUrl : undefined,
         awakening,
+        agentHandoff,
       );
     } catch (err) {
       processTaskError = err;
@@ -1514,6 +1518,7 @@ export async function processTask(
     windowEndMs?: number;
     entryPath?: string;
   },
+  agentHandoff?: AgentHandoffNote,
   execution?: RunExecutionState,
 ): Promise<void> {
   // Started here so the extractor overlaps session restore + MCP listing;
@@ -4087,6 +4092,7 @@ export async function processTask(
         userId,
         task,
         context: fullContext,
+        ...(agentHandoff ? { agentHandoff } : {}),
         // Automation/scheduled runs draw from the low-priority LiteLLM key so
         // batch fleets can't queue interactive mentions (same predicate as the
         // read-only sandbox routing above).

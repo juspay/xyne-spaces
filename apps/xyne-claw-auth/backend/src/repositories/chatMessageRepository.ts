@@ -145,14 +145,16 @@ export const chatMessageRepository = {
 
   /** Newest user message in this conversation+agent whose attachedContext holds
    *  a `local-folder` item, or null. Powers the sticky local folder: once a turn
-   *  attaches a folder, later turns in the same thread keep running in it. */
+   *  attaches a folder, later turns in the same thread keep running in it.
+   *  `agentSlug` null = any agent: a direct chat keeps its folder when the user
+   *  switches agents mid-conversation. */
   latestLocalFolderContext: async (
     conversationId: string,
-    agentSlug: string,
+    agentSlug: string | null,
   ): Promise<unknown | null> => {
-    if (!conversationId || !agentSlug) return null;
+    if (!conversationId || agentSlug === "") return null;
     const rows = await prisma.chatMessage.findMany({
-      where: { conversationId, agentSlug, role: "user" },
+      where: { conversationId, ...(agentSlug ? { agentSlug } : {}), role: "user" },
       orderBy: { createdAt: "desc" },
       take: 40,
       select: { attachedContext: true },
@@ -189,8 +191,48 @@ export const chatMessageRepository = {
       include: { attachments: true },
     }),
 
-  findByUserAndAgent: (userId: string, agentSlug: string) =>
-    prisma.chatMessage.findMany({ where: { userId, agentSlug }, orderBy: { createdAt: "asc" } }),
+  /** Every (conversation, agent) pair one user has rows in, with first/last
+   *  activity and row counts — the whole all-agents history in one aggregate
+   *  query instead of loading every message. */
+  conversationAgentGroupsForUser: async (
+    userId: string,
+  ): Promise<Array<{ conversationId: string; agentSlug: string; firstAt: Date; lastAt: Date; count: number }>> => {
+    const rows = await prisma.chatMessage.groupBy({
+      by: ["conversationId", "agentSlug"],
+      where: { userId },
+      _min: { createdAt: true },
+      _max: { createdAt: true },
+      _count: { _all: true },
+    });
+    return rows
+      .filter((row) => row._min.createdAt && row._max.createdAt)
+      .map((row) => ({
+        conversationId: row.conversationId,
+        agentSlug: row.agentSlug,
+        firstAt: row._min.createdAt!,
+        lastAt: row._max.createdAt!,
+        count: row._count._all,
+      }));
+  },
+
+  /** The earliest user message per (conversation, agent) for one user, oldest
+   *  first, clipped to a title's worth of text. DISTINCT ON keeps it to one row
+   *  per pair rather than every user message in every conversation. */
+  firstUserMessagesPerAgent: async (
+    conversationIds: string[],
+    userId: string,
+  ): Promise<Array<{ conversationId: string; agentSlug: string; content: string }>> => {
+    if (conversationIds.length === 0) return [];
+    const rows = await prisma.$queryRaw<Array<{ conversationId: string; agentSlug: string; content: string; createdAt: Date }>>`
+      SELECT DISTINCT ON ("conversationId", "agentSlug")
+        "conversationId", "agentSlug", left("content", 200) AS "content", "createdAt"
+      FROM "chat_messages"
+      WHERE "userId" = ${userId} AND "role" = 'user' AND "conversationId" = ANY(${conversationIds})
+      ORDER BY "conversationId", "agentSlug", "createdAt" ASC`;
+    return rows
+      .sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime())
+      .map(({ conversationId, agentSlug, content }) => ({ conversationId, agentSlug, content }));
+  },
 
   /** Delete every message in a conversation belonging to this user+agent.
    *  Scoped by all three to prevent one user from deleting another's chat
@@ -203,6 +245,18 @@ export const chatMessageRepository = {
       await prisma.chatConversationMeta.deleteMany({
         where: { conversationId, userId, agentSlug },
       });
+    }
+    return result.count;
+  },
+
+  /** Delete ONE user's rows in a direct chat across every agent that answered
+   *  in it. A chat the user switched agents in is one conversation: deleting
+   *  only the requesting agent's rows would leave the other agents' turns
+   *  hanging off parents that no longer exist. Same user scoping as above. */
+  deleteConversationAllAgents: async (userId: string, conversationId: string) => {
+    const result = await prisma.chatMessage.deleteMany({ where: { userId, conversationId } });
+    if (result.count > 0) {
+      await prisma.chatConversationMeta.deleteMany({ where: { conversationId, userId } });
     }
     return result.count;
   },

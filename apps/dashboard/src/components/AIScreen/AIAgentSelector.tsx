@@ -11,6 +11,8 @@ import { useSelectedAgent } from '../../hooks/useSelectedAgent';
 import { useAskAIAuto } from '../../hooks/useAskAIAuto';
 import { SELECTOR_ROW_CLASS, SELECTOR_ROW_SELECTED_CLASS } from './selectorStyles';
 import { AutoAgentRow } from './AutoAgentRow';
+import Avatar from '../ui/Avatar/Avatar';
+import { useUser } from '../../hooks/useUsers';
 
 export interface AIAgentSelectorProps {
   /** Whether the selector is disabled (e.g. while streaming). */
@@ -32,16 +34,33 @@ export function AgentGlyph({
   color,
   name,
   size = 20,
+  userId,
 }: {
   color?: string | undefined;
   name: string;
   size?: number;
+  /** The agent's Spaces bot user: when it is known here, draw the avatar a
+   *  channel shows for the agent (its picture, or Spaces' letter fallback). */
+  userId?: string | undefined;
 }): ReactElement {
+  const botUser = useUser(userId ?? '');
+  if (userId && botUser) {
+    return (
+      <span aria-hidden className='inline-flex shrink-0' style={{ width: size, height: size }}>
+        <Avatar
+          userId={userId}
+          size={size < 18 ? 'xs' : size < 24 ? 'sm' : 'rg'}
+          showActiveStatus={false}
+          className='size-full'
+        />
+      </span>
+    );
+  }
   return (
     <span
       aria-hidden
       className={cn(
-        'inline-flex shrink-0 items-center justify-center rounded-full font-medium uppercase text-white',
+        'inline-flex shrink-0 items-center justify-center rounded-sm font-medium uppercase text-white',
         !color && 'bg-muted-foreground',
       )}
       style={{
@@ -135,7 +154,12 @@ export function AIAgentSelector({
       data-track-name='OPEN_AGENT_SELECTOR'
     >
       {selectedAgent && !isAutoShown ? (
-        <AgentGlyph color={selectedAgent.color} name={selectedAgent.name} size={18} />
+        <AgentGlyph
+          color={selectedAgent.color}
+          name={selectedAgent.name}
+          userId={selectedAgent.botUserId}
+          size={18}
+        />
       ) : (
         <Bot className='w-4 h-4 text-primary shrink-0' />
       )}
@@ -256,7 +280,12 @@ export function AIAgentSelector({
                   data-track-metadata={JSON.stringify({ agentSlug: agent.slug })}
                 >
                   <span className='flex min-w-0 items-center gap-2.5'>
-                    <AgentGlyph color={agent.color} name={agent.name} size={24} />
+                    <AgentGlyph
+                      color={agent.color}
+                      name={agent.name}
+                      userId={agent.botUserId}
+                      size={24}
+                    />
                     <span className='min-w-0 truncate font-normal'>{agent.name}</span>
                   </span>
                   {selectedAgentSlug === agent.slug && !isAutoShown && (

@@ -1782,6 +1782,10 @@ export interface RunTaskOptions {
    *  was approved (or a trivial plan auto-continued). Debug-telemetry only —
    *  emits a mode_switch (plan→auto) event at session start. */
   planContinuation?: boolean | undefined;
+  /** Multi-agent direct chat hand-off note (claw-auth lib/agent-handoff.ts):
+   *  `resume` when this run resumes the agent's own session, `fresh` when it
+   *  starts one. Picked here because only runTask knows which it is. */
+  agentHandoff?: { resume?: string | null; fresh?: string | null } | undefined;
   /** Opt-in citation reflection (agentConfig.citationReflection). When true and
    *  the run pulled citeable sources (a tool result carried [clf-…#n] tokens)
    *  yet the final prose cites none, runTask nudges the model once to rewrite
@@ -1954,6 +1958,7 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
     twinDeliverRef,
     mode,
     planContinuation,
+    agentHandoff,
     citationReflection,
     autoToolCitations,
     isRegenerate,
@@ -3543,7 +3548,14 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
         "Read these files from disk before answering.",
       ].join("\n")
     : "";
-  const mergedContext = [context, attachmentContext].filter(Boolean).join("\n\n");
+  // Multi-agent direct chat: the other agents' turns this session has not
+  // seen. A resumed session already holds this agent's own earlier turns, so it
+  // only needs what came after its last reply; a fresh one needs the whole path.
+  const handoffNote = (isResume ? agentHandoff?.resume : agentHandoff?.fresh) ?? "";
+  if (handoffNote) {
+    log.info(`[agent] multi-agent hand-off note (${isResume ? "resume" : "fresh"}, ${handoffNote.length} chars)`);
+  }
+  const mergedContext = [context, handoffNote, attachmentContext].filter(Boolean).join("\n\n");
   const contextBlock = mergedContext ? `\n\n## Additional Context\n${mergedContext}` : "";
 
   if (isResume) {

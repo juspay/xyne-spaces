@@ -451,10 +451,13 @@ const AIScreen = (): ReactElement => {
       setActiveSessionId(sessionId);
       // A new chat just acquired its server sessionId — refresh the recents
       // list so this conversation shows up immediately, without needing a
-      // page reload or a navigate-away-and-back.
-      invalidateV2Sessions(effectiveAgentSlug);
+      // page reload or a navigate-away-and-back. No agent here on purpose:
+      // the history spans every agent, and depending on the picked agent gave
+      // this callback a new identity on every switch, which re-ran the
+      // thread's session loader mid-conversation.
+      invalidateV2Sessions();
     },
-    [effectiveAgentSlug, invalidateV2Sessions],
+    [invalidateV2Sessions],
   );
 
   const handleAccount = useCallback((): void => {

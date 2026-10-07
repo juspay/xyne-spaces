@@ -1,3 +1,4 @@
+import type { HandoffMessage } from "./multi-agent-chat.js";
 import { randomUUID } from "node:crypto";
 import type { LocalHarnessDevice, LocalHarnessRun } from "@prisma/client";
 import type {
@@ -201,7 +202,12 @@ export async function dispatchLocalHarnessRun(args: {
   workspace?: LocalHarnessRunEnvelope["workspace"];
   noServerFallback?: boolean;
   resumeSessionId?: string | null;
-  continuation?: { agentSlug: string; excludeMessageIds?: string[] } | false;
+  continuation?: {
+    agentSlug: string;
+    excludeMessageIds?: string[];
+    /** Set when the selected path holds turns from more than one agent. */
+    multiAgent?: { messages: HandoffMessage[]; leafId: string | null };
+  } | false;
   localSandbox?: LocalHarnessRunEnvelope["localSandbox"];
   /** Pre-minted session id. The interactive chat surfaces write their AgentRun
    *  row BEFORE dispatch, so the row and the harness envelope have to agree on
@@ -220,6 +226,7 @@ export async function dispatchLocalHarnessRun(args: {
       agentSlug: args.continuation.agentSlug,
       provider: args.target.provider,
       ...(args.continuation.excludeMessageIds ? { excludeMessageIds: args.continuation.excludeMessageIds } : {}),
+      ...(args.continuation.multiAgent ? { multiAgent: args.continuation.multiAgent } : {}),
     }).catch(() => ({ resumeSessionId: null, context: null }));
     resumeSessionId = plan.resumeSessionId;
     if (plan.context) context = context ? `${context}\n\n${plan.context}` : plan.context;
