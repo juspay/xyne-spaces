@@ -266,11 +266,16 @@ const SearchToolbar = memo(function SearchToolbar({
   }, []);
 
   const applyFilters = useCallback(
-    (next: { structured: StructuredSearchFilters; chips: readonly SearchFilterChip[] }) => {
+    (next: {
+      structured: StructuredSearchFilters;
+      chips: readonly SearchFilterChip[];
+      onlyMyChannels: boolean;
+    }) => {
       dispatch({
         type: 'structuredApplied',
         structured: next.structured,
         chips: next.chips,
+        onlyMyChannels: next.onlyMyChannels,
       });
     },
     [dispatch],
@@ -347,8 +352,6 @@ const SearchToolbar = memo(function SearchToolbar({
             <Animated.View style={filterRowStyle}>
               <GlobalSearchFilterBar
                 tab={tab}
-                chips={chips}
-                onlyMyChannels={onlyMyChannels}
                 includeBotMessages={includeBotMessages}
                 exactMatch={exactMatch}
                 dispatch={dispatch}

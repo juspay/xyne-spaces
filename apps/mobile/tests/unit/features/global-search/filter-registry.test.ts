@@ -28,6 +28,7 @@ describe('global search filter registry', () => {
     assert.deepEqual(ids, [
       'from',
       'in',
+      'onlyMyChannels',
       'with',
       'mentions',
       'date',
@@ -39,7 +40,7 @@ describe('global search filter registry', () => {
     ]);
   });
 
-  it('excludes From/In from the Filters badge', () => {
+  it('counts From, In, and Only my channels in the Filters badge', () => {
     const filters = toSearchResultsFilters({
       tab: 'messages',
       chips: [
@@ -52,7 +53,7 @@ describe('global search filter registry', () => {
       exactMatch: false,
     });
 
-    assert.equal(countActiveFilters(filters), 0);
+    assert.equal(countActiveFilters(filters), 3);
   });
 
   it('counts modal-only filters in the badge', () => {

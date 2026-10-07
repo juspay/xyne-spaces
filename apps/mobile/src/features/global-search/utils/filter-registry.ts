@@ -1,6 +1,6 @@
 /**
  * Mobile port of dashboard `filterRegistry` — modal fields, visibility, badge count.
- * Mode toggles stay on the filter bar and are excluded from the sheet.
+ * Bot / Exact stay on the filter bar; From / In / Only my channels live here.
  */
 
 import type { SearchFilterChip } from '../types';
@@ -30,12 +30,12 @@ export type FilterControl =
     }
   | { kind: 'text'; placeholder: string; field: 'tags' | 'entities' }
   | { kind: 'date' }
-  | { kind: 'checkbox'; field: 'showArchived' };
+  | { kind: 'checkbox'; field: 'showArchived' | 'onlyMyChannels' };
 
 export type ModalFilterEntry = {
   id: string;
   label: string;
-  /** When false, excluded from the Filters badge (has its own bar control). */
+  /** When false, excluded from the Filters badge. */
   hidden?: boolean;
   appliesTo: (docType: SearchDocType) => boolean;
   isActive: (f: SearchResultsFilters) => boolean;
@@ -87,7 +87,6 @@ export const FILTER_MODAL_ENTRIES: readonly ModalFilterEntry[] = [
     id: 'from',
     label: 'From',
     appliesTo: notLocal,
-    hidden: false,
     isActive: f => f.fromUsers.length > 0,
     control: {
       kind: 'people',
@@ -113,13 +112,19 @@ export const FILTER_MODAL_ENTRIES: readonly ModalFilterEntry[] = [
     id: 'in',
     label: 'In',
     appliesTo: notLocal,
-    hidden: false,
     isActive: f => f.inChannels.length > 0,
     control: {
       kind: 'channels',
       placeholder: 'e.g. #project-unicorn',
       field: 'inChannels',
     },
+  },
+  {
+    id: 'onlyMyChannels',
+    label: 'Only my channels',
+    appliesTo: isMessageType,
+    isActive: f => f.onlyMyChannels,
+    control: { kind: 'checkbox', field: 'onlyMyChannels' },
   },
   {
     id: 'with',
@@ -234,7 +239,7 @@ export function modalFieldEntries(docType: SearchDocType): ModalFilterEntry[] {
 }
 
 /**
- * Badge = active modal filters, excluding From/In (`hidden: false`) and bar toggles.
+ * Badge = active modal filters. Bot / Exact stay on the bar and are not counted.
  */
 export function countActiveFilters(filters: SearchResultsFilters): number {
   return entriesFor(filters.docType).filter(

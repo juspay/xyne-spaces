@@ -38,7 +38,12 @@ export type SearchAction =
   | { type: 'chipRemoved'; chip: Pick<SearchFilterChip, 'id' | 'prefix'> }
   | { type: 'lastChipRemoved' }
   | { type: 'chipsReplaced'; prefix: SearchFilterPrefix; chips: readonly SearchFilterChip[] }
-  | { type: 'structuredApplied'; structured: StructuredSearchFilters; chips: readonly SearchFilterChip[] }
+  | {
+      type: 'structuredApplied';
+      structured: StructuredSearchFilters;
+      chips: readonly SearchFilterChip[];
+      onlyMyChannels: boolean;
+    }
   | { type: 'onlyMyChannelsToggled' }
   | { type: 'includeBotMessagesToggled' }
   | { type: 'exactMatchToggled' }
@@ -128,11 +133,13 @@ export function searchReducer(state: SearchState, action: SearchAction): SearchS
     case 'structuredApplied': {
       const chipsSame = chipsEqual(state.chips, action.chips);
       const structuredSame = structuredFiltersEqual(state.structured, action.structured);
-      if (chipsSame && structuredSame) return state;
+      const onlyMySame = state.onlyMyChannels === action.onlyMyChannels;
+      if (chipsSame && structuredSame && onlyMySame) return state;
       return {
         ...state,
         chips: chipsSame ? state.chips : action.chips,
         structured: structuredSame ? state.structured : action.structured,
+        onlyMyChannels: action.onlyMyChannels,
       };
     }
 

@@ -65,6 +65,7 @@ type FiltersSheetProps = {
   onApply: (next: {
     structured: StructuredSearchFilters;
     chips: readonly SearchFilterChip[];
+    onlyMyChannels: boolean;
   }) => void;
 };
 
@@ -78,7 +79,7 @@ function chipsToEntities(chips: readonly SearchFilterChip[]): FilterEntity[] {
 
 /**
  * Dashboard FiltersModal equivalent: draft on open, Apply commits, dismiss discards.
- * Mode toggles stay on the bar and are never edited here.
+ * Bot / Exact stay on the bar; From / In / Only my channels are edited here.
  */
 export function FiltersSheet({
   isOpen,
@@ -220,6 +221,7 @@ function FiltersSheetBody({
         ...entitiesToFromChips(committed.fromUsers),
         ...entitiesToInChips(committed.inChannels),
       ],
+      onlyMyChannels: committed.onlyMyChannels,
     });
     onOpenChange(false);
   }, [commitTextFields, draft, onApply, onOpenChange, structuredFromDraft]);
@@ -231,6 +233,7 @@ function FiltersSheetBody({
       ...clearStructuredDraft(),
       fromUsers: [],
       inChannels: [],
+      onlyMyChannels: false,
     }));
     setTextDrafts({});
     setDateMode('');
@@ -435,21 +438,23 @@ function FiltersSheetBody({
             ) : null}
           </View>
         );
-      case 'checkbox':
+      case 'checkbox': {
+        const field = control.field;
         return (
           <View className='mb-4 flex-row items-center justify-between py-1'>
             <Text className='text-[15px]' style={{ color: fieldText }}>
               {entry.label}
             </Text>
             <Switch
-              value={draft.showArchived}
+              value={draft[field]}
               onValueChange={value => {
                 void (value ? haptics.toggleOn() : haptics.toggleOff());
-                patch({ showArchived: value });
+                patch({ [field]: value });
               }}
             />
           </View>
         );
+      }
       default:
         return null;
     }
