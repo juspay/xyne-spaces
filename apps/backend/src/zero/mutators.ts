@@ -6486,8 +6486,10 @@ export function createMutators(
 
               activities.push({
                 activityType,
-                value: field === 'stageName'
-                  ? { field: 'stageName', oldValue: previousValue, newValue: params[field] }
+                // stageName and statusV2 share activityType STATUS, so `field` is what tells
+                // them apart (desk metrics' resolved/reopened match on field = 'statusV2').
+                value: field === 'stageName' || field === 'statusV2'
+                  ? { field, oldValue: previousValue, newValue: params[field] }
                   : { oldValue: previousValue, newValue: params[field] },
               });
             }
