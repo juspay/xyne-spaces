@@ -91,7 +91,7 @@ interface WebviewTabProps {
   popupsEnabled: boolean;
 }
 
-function WebviewTab({
+export function WebviewTab({
   tab,
   isActive,
   webviewRefs,
@@ -102,6 +102,10 @@ function WebviewTab({
 }: WebviewTabProps) {
   const ref = useRef<WebviewTag>(null);
   const initialUrlRef = useRef(tab.url);
+  // Guest renderer crash tracking: without this a crashed webview is a silent,
+  // permanently dead tab (no message, no way back). did-start-loading clears it
+  // so any reload/navigation attempt makes the tab recoverable again.
+  const [guestCrashed, setGuestCrashed] = useState(false);
 
   useEffect(() => {
     const wv = ref.current;
@@ -134,7 +138,10 @@ function WebviewTab({
       });
       onUrlUpdate(tab.id, wv.getURL());
     };
-    const onStart = () => onUpdate(tab.id, { isLoading: true });
+    const onStart = () => {
+      setGuestCrashed(false); // a reload/navigation attempt recovers a crashed tab
+      onUpdate(tab.id, { isLoading: true });
+    };
     const onStop = () => onUpdate(tab.id, { isLoading: false });
 
     // Handle Ask AI requests from webview
@@ -186,6 +193,12 @@ function WebviewTab({
       onFindResults?.(tab.id, detail);
     };
 
+    // Guest renderer died: surface it. Electron emits both the legacy `crashed`
+    // and the newer `render-process-gone`; listen to either.
+    const onCrashed = () => {
+      setGuestCrashed(true);
+    };
+
     wv.addEventListener('page-title-updated', onTitle);
     wv.addEventListener('page-favicon-updated', onFavicon);
     wv.addEventListener('did-navigate', onNav);
@@ -194,6 +207,8 @@ function WebviewTab({
     wv.addEventListener('did-stop-loading', onStop);
     wv.addEventListener('ipc-message', onAskAI);
     wv.addEventListener('found-in-page', onFoundInPage);
+    wv.addEventListener('crashed', onCrashed);
+    wv.addEventListener('render-process-gone', onCrashed);
 
     return () => {
       wv.removeEventListener('page-title-updated', onTitle);
@@ -204,6 +219,8 @@ function WebviewTab({
       wv.removeEventListener('did-stop-loading', onStop);
       wv.removeEventListener('ipc-message', onAskAI);
       wv.removeEventListener('found-in-page', onFoundInPage);
+      wv.removeEventListener('crashed', onCrashed);
+      wv.removeEventListener('render-process-gone', onCrashed);
       delete webviewRefs.current[tab.id];
     };
   }, [tab.id]);
@@ -236,8 +253,34 @@ function WebviewTab({
   };
 
   return (
-    // eslint-disable-next-line react/no-unknown-property
-    <webview {...webviewProps} />
+    <>
+      {/* eslint-disable-next-line react/no-unknown-property */}
+      <webview {...webviewProps} />
+      {guestCrashed && (
+        <div
+          data-testid={`webview-crashed-${tab.id}`}
+          className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-3 bg-background text-center"
+          style={{
+            visibility: isActive ? ('visible' as const) : ('hidden' as const),
+            pointerEvents: isActive ? ('auto' as const) : ('none' as const),
+          }}
+        >
+          <p className="text-sm text-muted-foreground">This page crashed and can&apos;t be displayed.</p>
+          <button
+            type="button"
+            data-testid={`webview-reload-${tab.id}`}
+            className="inline-flex items-center gap-2 rounded-md bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground hover:bg-primary/90"
+            onClick={() => {
+              setGuestCrashed(false);
+              ref.current?.reload();
+            }}
+          >
+            <RotateCw className="h-3.5 w-3.5" />
+            Reload page
+          </button>
+        </div>
+      )}
+    </>
   );
 }
 
