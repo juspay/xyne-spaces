@@ -536,7 +536,7 @@ export const V1_MAPPER: Readonly<Record<string, V1Target>> = {
   // ----- userGroups -----
   'userGroups.list': { kind: 'query', name: 'getAllUserGroups' },
   // The by-ids and search queries are gone; both narrow the full list in the parser.
-  'userGroups.getMany': { kind: 'query', name: 'getAllUserGroups' },
+  'userGroups.getMany': { kind: 'query', name: 'getUserGroupsByIds' },
   'userGroups.get': { kind: 'query', name: 'getUserGroupById' },
   'userGroups.search': { kind: 'query', name: 'getAllUserGroups' },
   'userGroups.listMembers': { kind: 'query', name: 'getUserGroupMembers' },

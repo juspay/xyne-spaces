@@ -34,6 +34,8 @@ import { notificationController } from '@/controllers/notificationController';
 import * as dailyBriefController from '@/controllers/dailyBriefController';
 import { customEmojiController } from '@/controllers/customEmojiController';
 import { CanvasController } from '@/controllers/canvasController';
+import { deskMetricsController } from '@/controllers/deskMetricsController';
+import { deskReportPanelController } from '@/controllers/deskReportPanelController';
 import { workspaceScopedRoute } from '@/database/tenant/context';
 import { repositories } from '@/database/repositories/index';
 import { MessageAttachmentRepository } from '@/database/repositories/messageAttachmentRepository';
@@ -175,6 +177,50 @@ interface BaseRoute {
 type DirectRoute =
   | (BaseRoute & { readonly controller: Controller; readonly service?: never })
   | (BaseRoute & { readonly service: Service; readonly controller?: never });
+
+/** A query-string parameter the desk metrics controller decodes as a JSON array of strings. */
+const jsonStringArrayParam = z
+  .string()
+  .refine((raw) => {
+    try {
+      const parsed: unknown = JSON.parse(raw);
+      return Array.isArray(parsed) && parsed.every((v) => typeof v === 'string');
+    } catch {
+      return false;
+    }
+  }, 'Must be a JSON-encoded array of strings.')
+  .optional();
+
+/**
+ * The desk metrics filters, as `parseMetricsQuery` reads them from the query
+ * string. The controller silently drops malformed JSON; this refuses it, so a
+ * filter the caller meant is never ignored.
+ */
+const deskMetricsQuery = z.object({
+  timeRange: z
+    .string()
+    .regex(/^\d+_\d+$/, 'Use startMs_endMs.')
+    .optional(),
+  dateBasis: z.enum(['created', 'active']).optional(),
+  assigneeIds: jsonStringArrayParam,
+  stageNames: jsonStringArrayParam,
+  priorities: jsonStringArrayParam,
+  userGroupIds: jsonStringArrayParam,
+  tagValues: jsonStringArrayParam,
+  aiCategories: jsonStringArrayParam,
+  customFieldKeys: jsonStringArrayParam,
+  customFieldPerKeyFilters: z
+    .string()
+    .refine((raw) => {
+      try {
+        const parsed: unknown = JSON.parse(raw);
+        return typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed);
+      } catch {
+        return false;
+      }
+    }, 'Must be a JSON-encoded object.')
+    .optional(),
+});
 
 /**
  * A Claw run request.
@@ -859,6 +905,68 @@ const ROUTES: readonly DirectRoute[] = [
     guards: [middlewareGuard(authorize('TICKETS', AccessType.WRITE)), ticketVisibleGuard],
     unwrap: unwrapEnvelope,
   },
+
+  /*
+   * Desk metrics and the desk report. The controllers enforce access
+   * themselves — channel membership, the desk's metricsEnabled preference on
+   * the dashboard handlers, and desk owner / channel admin — so nothing is
+   * restated here. Metrics responses carry no envelope and pass through as-is.
+   */
+  {
+    method: 'get',
+    path: '/channels/:channelId/metrics',
+    controller: deskMetricsController.getMetrics,
+    query: deskMetricsQuery,
+  },
+  {
+    method: 'get',
+    path: '/desk-metrics/aggregate',
+    controller: deskMetricsController.getAggregateMetrics,
+    query: deskMetricsQuery.extend({ channelIds: z.string().min(1) }),
+  },
+  {
+    method: 'get',
+    path: '/desk-metrics/desks',
+    controller: deskMetricsController.listDesks,
+  },
+  {
+    method: 'get',
+    path: '/desk-report/:channelId/latest',
+    controller: deskReportPanelController.getLatest,
+    unwrap: unwrapDeskReportLatest,
+  },
+  {
+    // HTML, not JSON: the controller sets a text/html Content-Type, so the
+    // router passes the body through untouched (see createDirectRouter).
+    method: 'get',
+    path: '/desk-report/:channelId/view',
+    controller: deskReportPanelController.serveReport,
+    // The controller reads `download === '1'`; anything else is inline.
+    query: z.object({ download: z.enum(['0', '1']).optional() }),
+  },
+  {
+    // Starts an agent run; owner / channel admin only, checked by the controller.
+    method: 'post',
+    path: '/desk-report/:channelId/generate',
+    controller: deskReportPanelController.generateNow,
+    unwrap: unwrapDeskReportGenerate,
+  },
+
+  /*
+   * The agent-facing desk metrics surface (the product's
+   * /api/desk-metrics/claw mount). The query body is validated by the
+   * controller's own strict schema, whose 400s name the offending field.
+   */
+  {
+    method: 'get',
+    path: '/claw/desk-metrics/desks',
+    controller: deskMetricsController.listDesks,
+  },
+  {
+    method: 'post',
+    path: '/claw/desk-metrics/query',
+    controller: deskMetricsController.queryMetrics,
+  },
 ];
 
 /** Build the router for every direct operation. */
@@ -897,6 +1005,14 @@ export function createDirectRouter(): Router {
         }
         if (result.status === 204 || result.body === undefined) {
           res.status(result.status).end();
+          return;
+        }
+        // A controller that declared a non-JSON Content-Type (the desk report's
+        // HTML) is passed through as written. Every other controller writes
+        // JSON without setting one, so this is the only branch they take.
+        const contentType = headerValue(result.headers, 'content-type');
+        if (contentType && !/\bjson\b/i.test(contentType)) {
+          res.status(result.status).send(result.body);
           return;
         }
         res.status(result.status).json(result.body);
@@ -977,6 +1093,11 @@ export async function callController(
       headers.set(name, Array.isArray(value) ? value.join(', ') : String(value));
       return stub;
     },
+    removeHeader(name: string) {
+      for (const key of [...headers.keys()]) {
+        if (key.toLowerCase() === name.toLowerCase()) headers.delete(key);
+      }
+    },
     get headersSent() {
       return settled;
     },
@@ -994,6 +1115,15 @@ export async function callController(
     body: route.unwrap ? route.unwrap(body) : body,
     headers: Object.fromEntries(headers),
   };
+}
+
+/** A captured header, looked up case-insensitively as HTTP names are. */
+function headerValue(headers: Record<string, string>, name: string): string | undefined {
+  const wanted = name.toLowerCase();
+  for (const [key, value] of Object.entries(headers)) {
+    if (key.toLowerCase() === wanted) return value;
+  }
+  return undefined;
 }
 
 /** One field of a `{ success, <field> }` envelope. */
@@ -1173,6 +1303,32 @@ function unwrapEnvelope(raw: unknown): unknown {
   return body;
 }
 
+/**
+ * The latest desk report: `{ success, data, canGenerate }` becomes
+ * `{ report, canGenerate }`, keeping the flag `unwrapEnvelope` would drop.
+ * `report` is null when the desk has never had one.
+ */
+function unwrapDeskReportLatest(raw: unknown): unknown {
+  const body = raw as { success?: boolean; data?: unknown; canGenerate?: unknown; error?: string } | undefined;
+  if (body?.success === false) {
+    throw new SdkApiError('internal', body.error ?? 'The request failed.');
+  }
+  return { report: body?.data ?? null, canGenerate: body?.canGenerate === true };
+}
+
+/**
+ * "Generate now" reports a refusal — no desk owner, a run already in flight, the
+ * agent not installed — as HTTP 200 with `success: false`. Each is a business
+ * rule the caller can act on, so it is a 400 carrying the controller's message.
+ */
+function unwrapDeskReportGenerate(raw: unknown): unknown {
+  const body = raw as { success?: boolean; error?: string } | undefined;
+  if (body?.success !== true) {
+    throw new SdkApiError('validation_failed', body?.error ?? 'The desk report could not be started.');
+  }
+  return { started: true };
+}
+
 // API KEY AUTH (COMMENTED OUT) - principalOf was used to build AuthenticatedUser from authData
 // For cookie-based auth, req.user is already set by authMiddleware
 // function principalOf(authData: {
@@ -1209,6 +1365,8 @@ function unwrapEnvelope(raw: unknown): unknown {
 function controllerError(status: number, body: unknown): SdkApiError {
   const payload = body as { error?: unknown; message?: unknown } | undefined;
   const message =
+    // Plain-text controllers (the desk report's HTML route) fail with a string body.
+    (typeof body === 'string' && body) ||
     (typeof payload?.message === 'string' && payload.message) ||
     (typeof payload?.error === 'string' && payload.error) ||
     'Request failed.';

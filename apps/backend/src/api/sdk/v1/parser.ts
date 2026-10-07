@@ -29,6 +29,9 @@ function now(): number {
   return Date.now();
 }
 
+/** Most rows one ticket-table page may ask for; deeper reads follow the `start` cursor. */
+const TICKET_PAGE_MAX = 500;
+
 /**
  * One fresh id per key, for mutators that create a row per element of a list —
  * inviting five people to a call needs five participant ids.
@@ -1115,7 +1118,7 @@ export const V1_PARSERS: Readonly<Record<string, V1Parser>> = {
   'tickets.listTable': (args): V1Parsed => ({
     args: {
       ...args,
-      limit: args.limit ?? 50,
+      limit: Math.min(args.limit ?? 50, TICKET_PAGE_MAX),
       start: args.start ?? null,
     },
   }),
@@ -1126,7 +1129,7 @@ export const V1_PARSERS: Readonly<Record<string, V1Parser>> = {
     args: {
       viewMode: 'project',
       projectId: args.projectId,
-      limit: args.limit ?? 500,
+      limit: Math.min(args.limit ?? TICKET_PAGE_MAX, TICKET_PAGE_MAX),
       start: args.start ?? null,
     },
   }),
@@ -1229,13 +1232,9 @@ export const V1_PARSERS: Readonly<Record<string, V1Parser>> = {
   // ----- userGroups -----
   // Both retargeted onto the full list, which is one row per group in the
   // workspace, and narrowed here.
-  'userGroups.getMany': (args): V1Parsed => {
-    const ids = new Set<string>(args.groupIds ?? []);
-    return {
-      args: {},
-      mapResult: (data) => (data as Array<{ id: string }>).filter((group) => ids.has(group.id)),
-    };
-  },
+  'userGroups.getMany': (args): V1Parsed => ({
+    args: { userGroupIds: Array.isArray(args.groupIds) ? args.groupIds : [] },
+  }),
   'userGroups.search': (args): V1Parsed => {
     const needle = String(args.query ?? '').trim().toLowerCase();
     const limit: number | undefined = args.limit ?? undefined;

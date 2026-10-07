@@ -1,9 +1,8 @@
 {
   "$comment": [
     "Catalog operations the SDK deliberately does not expose, each with a reason.",
-    "catalog-coverage.test.ts requires every Zero query and mutator to be either mapped in",
-    "mapper.ts or listed here. A new backend operation therefore fails the check until",
-    "someone decides what to do with it.",
+    "Every Zero query and mutator should be either mapped in mapper.ts or listed here,",
+    "so a new backend operation needs a decision in one of the two.",
     "Reason grammar: superseded-by:<name> | legacy-unused | internal | deferred:<why>"
   ],
   "exclusions": [

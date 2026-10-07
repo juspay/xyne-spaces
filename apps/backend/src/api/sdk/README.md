@@ -93,9 +93,22 @@ Two other kinds of id:
   `calls.leave`). Accepted on either endpoint; the request is re-entered into the
   route with the parsed arguments as its body, and the response is the route's.
 
-`v1/catalog-coverage.test.ts` keeps the map honest: every catalog query and
-mutator is mapped or listed in `v1/exclusions.json` with a reason, every mapped
-target exists, and every `superseded-by:` names a mapped operation.
+Every catalog query and mutator should be mapped here or listed in
+`v1/exclusions.json` with a reason. Nothing enforces this automatically, so a
+change to the catalog needs a matching change to one of the two.
+
+Retargets that change what an existing id returns:
+
+- `boards.list` (now `getAllBoardsList`) and `boards.listByProject` (now
+  `boardsListByProject`) return **board columns only**. The queries they used
+  to target also returned each board's stages; fetch those with
+  `boards.listStagesForBoards`. `boards.listByProject` and
+  `boards.listByProjectLite` now run the same query.
+- `tickets.listByProject` returns **one page** of the project's non-archived
+  tickets (`tableTicketsPage`), newest first: `limit` rows after the optional
+  `start` cursor. It used to return the whole project. `limit` is capped at 500
+  (as is `tickets.listTable`'s); read further with `start`, the last row's
+  `{ id, createdAt }`.
 
 ### Direct
 
@@ -183,6 +196,24 @@ scope apply as they do for the dashboard.
 | `POST /api/sdk/v1/canvases/:canvasId/labels` | `{ names }` → `{ labels }` |
 | `POST /api/sdk/v1/canvases/:canvasId/labels/remove` | `{ labelIds }` → `{}` (POST: the product route is a DELETE with a body) |
 | `PATCH /api/sdk/v1/tickets/:ticketId` | `{ assigneeId?, stage?, groupId?, title?, description?, priority?, status?, eta?, tags?, formFields? }` → `{ updated }`. Requires the `TICKETS` write grant and a ticket the caller can read in their workspace (404 otherwise) |
+
+#### Desk metrics and desk report
+
+Access is the controllers' own: channel membership, desk owner or channel
+admin (guests keep trend-only reads on the two dashboard metrics routes), and
+— on the dashboard routes — the desk's `metricsEnabled` preference. Filter
+params are JSON-encoded string arrays, as the dashboard sends them.
+
+| | |
+|---|---|
+| `GET /api/sdk/v1/channels/:channelId/metrics` | `?timeRange&dateBasis&assigneeIds&stageNames&priorities&userGroupIds&tagValues&aiCategories&customFieldKeys&customFieldPerKeyFilters` → `DeskMetricsResponse` (`timeRange` is `startMs_endMs`, ≤ 90 days, default last 7) |
+| `GET /api/sdk/v1/desk-metrics/aggregate` | The same filters + `?channelIds` (comma-separated, ≤ 20) → `DeskMetricsAggregateResponse` (`perDesk`, `skipped`) |
+| `GET /api/sdk/v1/desk-metrics/desks` | → `{ desks }`, trimmed to desks the caller manages |
+| `GET /api/sdk/v1/desk-report/:channelId/latest` | → `{ report, canGenerate }`; `report` is null if none was ever generated |
+| `GET /api/sdk/v1/desk-report/:channelId/view` | `?download=1` → the latest completed report as **`text/html`**, not JSON (passed through with the controller's `Content-Type`, `Content-Disposition` and CSP) |
+| `POST /api/sdk/v1/desk-report/:channelId/generate` | → `{ started: true }`. **Starts an agent run**; owner / channel admin only. A refusal (run already in flight, no owner, agent not installed, report disabled) is `validation_failed` |
+| `GET /api/sdk/v1/claw/desk-metrics/desks` | → `{ desks }` (the agent-facing mount) |
+| `POST /api/sdk/v1/claw/desk-metrics/query` | `{ channelIds, timeRange?, lastDays?, metrics?, includeTickets?, customFieldBreakdown?, …filters }` → `DeskMetricsQueryResponse` (`desks`, `skipped`, `perDesk?`, `notes`). No `metricsEnabled` gate |
 
 ### Claw
 
