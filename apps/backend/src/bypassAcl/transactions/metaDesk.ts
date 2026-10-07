@@ -1,6 +1,7 @@
 import { transaction } from '../base';
 import type { ExternalSourcePlatform } from '@/integrations/core/types';
 import { db } from '@/database/client';
+import { newConnectId, createConnectGroupForEntity, ConnectEntityType } from '@/database/connectGroup';
 import {
   ChannelType,
   ChannelScopeType,
@@ -36,10 +37,12 @@ export function createMetaDeskTx(
   now: Date,
 ) {
   return transaction(
-    ['Board', 'Channel', 'ChannelBoardMapping', 'ChannelParticipant', 'ChannelStats', 'ChannelUserStatus', 'EmailChannelPreference', 'ExternalSource'],
-    'createMetaDesk: channel, participant, status, preference, board-mapping and external-source rows must commit atomically; tx is not ACL-wrapped',
+    ['Board', 'Channel', 'ChannelBoardMapping', 'ChannelParticipant', 'ChannelStats', 'ChannelUserStatus', 'EmailChannelPreference', 'ExternalSource', 'ConnectGroup'],
+    'getInstagramOauthCallback: channel, participant, status, preference, board-mapping and external-source rows must commit atomically; tx is not ACL-wrapped',
     db,
     async (tx) => {
+      // Slack Connect: the channel is a shareable entity → its own connectId + a private connect_group row.
+      const connectId = newConnectId();
       const channel = await tx.channel.create({
         data: {
           name: state.channelName,
@@ -51,7 +54,14 @@ export function createMetaDeskTx(
           workspaceId: state.workspaceId,
           participantCount: 1,
           lastActivityAt: now,
+          connectId,
         },
+      });
+      await createConnectGroupForEntity(tx, {
+        entityType: ConnectEntityType.CHANNEL,
+        entityId: channel.id,
+        hostWorkspaceId: state.workspaceId,
+        connectId,
       });
       await tx.channelParticipant.create({
         data: {

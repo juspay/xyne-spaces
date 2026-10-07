@@ -11,7 +11,10 @@ export class CanvasCommentsACL extends BaseQueryACL<'canvas_comments'> {
   canSelect<TReturn>(
     query: Query<'canvas_comments', Schema, TReturn>,
   ): Query<'canvas_comments', Schema, TReturn> {
-    return query.where('workspaceId', this.ctx.workspaceId).whereExists('thread', thread =>
+    // Slack Connect: tenancy comes from the defineQuery backstop (connect_group reach) — no
+    // `workspaceId` filter here, so comments on a canvas shared from another workspace stay visible.
+    // The canvas-visibility check below still gates which canvas's comments the caller can see.
+    return query.whereExists('thread', thread =>
       thread.whereExists('canvas', canvas =>
         canvas.where(({ or, cmp, exists }) =>
           or(

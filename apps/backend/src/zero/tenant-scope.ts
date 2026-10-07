@@ -1,6 +1,6 @@
 // Zero internal API (mapped via #imports in package.json)
 import { asQueryInternals } from '#zero-internal/query-internals';
-import { Context, schema } from '@xyne/shared';
+import { Context, schema, CONNECT_SCOPED_TABLES } from '@xyne/shared';
 import { logger } from '@/utils/logger';
 
 // The tenant boundary is applied here, to every query, rather than trusting each
@@ -55,6 +55,13 @@ export function scopeQueryToTenant<T>(query: T, ctx: Context, queryName: string)
   const table = String(asQueryInternals(query).ast.table);
   const scopable = query as unknown as ScopableQuery;
 
+  // Slack Connect: connect-scoped tables are tenant-scoped by the defineQuery backstop (connectReach),
+  // which runs inside queryDef.fn before this. Don't re-apply it here — that would add a second
+  // connect_group subquery per row. Checked before the workspaceId-column gate so these tables don't
+  // fall through to the "unscoped table" error once workspaceId is dropped from them.
+  if (CONNECT_SCOPED_TABLES.has(table)) {
+    return query;
+  }
   if (zeroTables[table] && 'workspaceId' in zeroTables[table].columns) {
     // Not expected on the read path — real callers carry a workspaceId. An absent
     // one still fails closed (Zero compiles `.where('workspaceId', undefined)` to

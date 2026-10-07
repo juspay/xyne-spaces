@@ -9,6 +9,7 @@ import {
 } from '@xyne/shared';
 import { BaseACL } from '../core/base-acl';
 import { MutationACLError, TableSchema } from '../core/types';
+import { assertConnectMutateAllowed } from '../core/connect-mutation-reach';
 import { zql } from '../../queries';
 import {
   hasGuestChannelAccess,
@@ -45,12 +46,20 @@ export class CanvasesACL extends BaseACL<'canvases'> {
 
   private async verifyCanvasInWorkspace(
     canvas: {
+      connectId?: string | null;
+      workspaceId?: string | null;
       channelId?: string | null;
       projectId?: string | null;
       createdBy: string;
     },
     tx: Transaction<Schema>,
   ): Promise<void> {
+    // Slack Connect: connectId present → connect_group reach is the workspace-truth; else legacy below.
+    if (canvas.connectId) {
+      await assertConnectMutateAllowed(this.ctx, tx, canvas, 'canvases');
+      return;
+    }
+
     if (canvas.channelId) {
       await this.verifyWorkspace(canvas.channelId, tx);
       return;
@@ -210,7 +219,12 @@ export class CanvasesACL extends BaseACL<'canvases'> {
     if (!canvas) {
       throw new MutationACLError('Canvas delete failed: canvas not found', 'canvases');
     }
-    await this.verifyWorkspace(canvas.channelId, tx);
+    // Slack Connect: connectId present → connect_group reach; else legacy channel-workspace check.
+    if (canvas.connectId) {
+      await assertConnectMutateAllowed(this.ctx, tx, canvas, 'canvases');
+    } else {
+      await this.verifyWorkspace(canvas.channelId, tx);
+    }
 
     if (canvas.channel?.isArchived) {
       throw new MutationACLError('Canvas delete failed: cannot delete canvases in archived channel', 'canvases');

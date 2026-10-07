@@ -92,6 +92,7 @@ const envSchema = Joi.object({
   MIGRATION_ENC_KEYS: Joi.string().allow('').default('{}'),
   MIGRATION_ENC_ACTIVE: Joi.string().allow('').default(''),
   RUN_SLACK_MIGRATION_WORKERS: Joi.boolean().default(false),
+  CONNECT_QUERY_ENABLED_CANVAS: Joi.boolean().default(false),
   MIGRATION_INGEST_CONCURRENCY: Joi.number().default(3),          // conversations one worker ingests in parallel; total in-flight = processes × this. RESTART-required (Bull binds concurrency at .process())
   MIGRATION_WORKER_PROCESSES: Joi.number().default(1),            // worker PROCESSES forked inside the pod (the real CPU-parallelism knob). RESTART-required; 1 = single process (no fork)
   MIGRATION_INGEST_CONTROL: Joi.boolean().default(false), // kill-switch: gates the start/stop-ingestion routes (and the dashboard button). Off = ingestion queue can't be toggled.
@@ -108,6 +109,7 @@ const envSchema = Joi.object({
   ENABLE_WORKFLOW_STEP_GCS_SYNC: Joi.boolean().default(false),
   ENABLE_CONVERSATION_INGESTION_QUEUE: Joi.boolean().default(false),
   ENABLE_CONVERSATION_INGESTION_WORKER: Joi.boolean().default(false),
+  ENABLE_EXTERNAL_SOURCE_REGISTRATION: Joi.boolean().default(true),
   ENABLE_SCHEDULED_MESSAGE_WORKER: Joi.boolean().default(false),
   ENABLE_STAGE_ETA_DEADLINE_WORKER: Joi.boolean().default(false),
   ENABLE_ETA_DEADLINE_WORKER: Joi.boolean().default(false),
@@ -783,6 +785,7 @@ export const config = {
     activeKeyId: envVars.MIGRATION_ENC_ACTIVE,
   },
   runSlackMigrationWorkers: envVars.RUN_SLACK_MIGRATION_WORKERS,
+  connectQueryEnabledCanvas: envVars.CONNECT_QUERY_ENABLED_CANVAS as boolean,
   slackMigration: {
     ingestConcurrency: envVars.MIGRATION_INGEST_CONCURRENCY, // RESTART-required (Bull concurrency bound at .process())
     workerProcesses: envVars.MIGRATION_WORKER_PROCESSES,     // RESTART-required (fork count at boot)
@@ -806,6 +809,7 @@ export const config = {
   enableWorkflowStepGcsSync: envVars.ENABLE_WORKFLOW_STEP_GCS_SYNC,
   enableConversationIngestionQueue: envVars.ENABLE_CONVERSATION_INGESTION_QUEUE,
   enableConversationIngestionWorker: envVars.ENABLE_CONVERSATION_INGESTION_WORKER,
+  enableExternalSourceRegistration: envVars.ENABLE_EXTERNAL_SOURCE_REGISTRATION,
   enableScheduledMessageWorker: envVars.ENABLE_SCHEDULED_MESSAGE_WORKER,
   enableStageEtaDeadlineWorker: envVars.ENABLE_STAGE_ETA_DEADLINE_WORKER,
   enableEtaDeadlineWorker: envVars.ENABLE_ETA_DEADLINE_WORKER,

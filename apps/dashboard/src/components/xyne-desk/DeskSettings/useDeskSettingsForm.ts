@@ -118,7 +118,6 @@ export function useDeskSettingsForm(
   const selectedChannelForSettings = useVisibleChannel(channelId ?? '');
   const channelType = selectedChannelForSettings?.type;
   const isEmail = channelType === ChannelType.EMAIL;
-  const isSlack = channelType === ChannelType.SLACK;
   const isApp = channelType === ChannelType.APP;
   const isSocial = channelType === ChannelType.SOCIAL_MEDIA;
   const isCall = channelType === ChannelType.CALL;
@@ -584,7 +583,6 @@ export function useDeskSettingsForm(
   return {
     canManage,
     isEmail,
-    isSlack,
     isApp,
     isSocial,
     isCall,

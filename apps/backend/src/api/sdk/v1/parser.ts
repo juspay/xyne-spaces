@@ -29,6 +29,9 @@ function now(): number {
   return Date.now();
 }
 
+/** Most rows one ticket-table page may ask for; deeper reads follow the `start` cursor. */
+const TICKET_PAGE_MAX = 500;
+
 /**
  * One fresh id per key, for mutators that create a row per element of a list —
  * inviting five people to a call needs five participant ids.
@@ -232,32 +235,31 @@ export const V1_PARSERS: Readonly<Record<string, V1Parser>> = {
       participantId: args.participantId ?? null,
     },
   }),
+  'calls.listParticipatedHistory': (args): V1Parsed => ({
+    args: { limit: args.limit ?? 50, start: args.start ?? null },
+  }),
+  'calls.getByExternalId': (args): V1Parsed => ({
+    // The catalog names the external id `callId`; the SDK names it for what it is.
+    args: { callId: args.externalId ?? args.callId },
+  }),
+  // initiate / join / leave are direct routes onto the calls controller, which
+  // provisions the room and mints its own ids. A caller-supplied callId,
+  // externalId or roomLink from the old mutator has nothing left to bind to and
+  // is dropped; the response carries the ids the server chose.
   'calls.initiate': (args): V1Parsed => ({
     args: {
-      callId: args.callId,
       channelId: args.channelId,
       callType: args.callType,
-      externalId: args.externalId,
-      roomLink: args.roomLink,
-      timestamp: now(),
-      creatorParticipantId: newId(),
-      ...(args.targetUserIds
-        ? {
-            targetUserIds: args.targetUserIds,
-            targetParticipantIds: newIdMap(args.targetUserIds),
-          }
-        : {}),
+      ...(args.targetUserIds ? { invitedUserIds: args.targetUserIds } : {}),
+      ...(args.conversationId ? { conversationId: args.conversationId } : {}),
     },
   }),
   'calls.join': (args): V1Parsed => ({
-    args: {
-      callId: args.callId,
-      timestamp: now(),
-      participantId: newId(),
-    },
+    // The controller resolves this as the call's external id.
+    args: { callId: args.callId },
   }),
   'calls.leave': (args): V1Parsed => ({
-    args: { callId: args.callId, timestamp: now() },
+    args: { callId: args.callId },
   }),
   'calls.reject': (args): V1Parsed => ({
     args: { callId: args.callId, timestamp: now() },
@@ -529,6 +531,37 @@ export const V1_PARSERS: Readonly<Record<string, V1Parser>> = {
       start: args.start ?? null,
     },
   }),
+  'channels.listHumanParticipants': (args): V1Parsed => ({
+    args: {
+      channelId: args.channelId,
+      limit: args.limit ?? 50,
+      start: args.start ?? null,
+    },
+  }),
+  'channels.hasBoards': (args): V1Parsed => ({
+    args: { channelId: args.channelId },
+    // The query is a one-row probe; the caller asked a yes-or-no question.
+    mapResult: (data) => Array.isArray(data) ? data.length > 0 : Boolean(data),
+  }),
+  'channels.listDmsWithLatestMessage': (args): V1Parsed => ({
+    args: {
+      limit: args.limit ?? 50,
+      start: args.start ?? null,
+      ...(args.direction ? { direction: args.direction } : {}),
+    },
+  }),
+  'channels.linkBoards': (args): V1Parsed => {
+    // Keyed by board id, so the caller can tell which mapping is which board's.
+    const mappingIds = newIdMap(Array.isArray(args.boardIds) ? args.boardIds : []);
+    return {
+      args: {
+        channelId: args.channelId,
+        boards: Object.entries(mappingIds).map(([boardId, mappingId]) => ({ mappingId, boardId })),
+        timestamp: now(),
+      },
+      generated: mappingIds,
+    };
+  },
 
   // ----- collections -----
   'collections.list': (args): V1Parsed => ({
@@ -791,8 +824,20 @@ export const V1_PARSERS: Readonly<Record<string, V1Parser>> = {
         limit: Math.min(args.limit ?? 50, 100),
       },
   }),
+  'incidents.listReleaseTicketsForBoards': (args): V1Parsed => ({
+    args: {
+      boardIds: args.boardIds,
+      limit: Math.min(args.limit ?? 100, 1000),
+    },
+  }),
 
   // ----- messages -----
+  'messages.getLatestInChannel': (args): V1Parsed => ({
+    args: { channelId: args.channelId, isMember: args.isMember ?? true },
+    // The successor returns the latest conversation with its opening message
+    // attached; the operation has always answered with the message itself.
+    mapResult: (data) => (data as { initialMessage?: unknown } | null | undefined)?.initialMessage ?? null,
+  }),
   'messages.listMine': (args): V1Parsed => ({
     args: {
         limit: args.limit ?? 50,
@@ -947,6 +992,22 @@ export const V1_PARSERS: Readonly<Record<string, V1Parser>> = {
   'preferences.updateSavedView': (args): V1Parsed => ({
     args: { ...args, timestamp: now() },
   }),
+  'preferences.shareSavedView': (args): V1Parsed => {
+    const accessId = newId();
+    return {
+      args: {
+        id: accessId,
+        viewId: args.viewId,
+        entityType: args.entityType,
+        entityId: args.entityId,
+        timestamp: now(),
+      },
+      generated: { accessId },
+    };
+  },
+  'preferences.unshareSavedView': (args): V1Parsed => ({
+    args: { id: args.accessId },
+  }),
 
   // ----- projects -----
   'projects.update': (args): V1Parsed => ({
@@ -1018,6 +1079,13 @@ export const V1_PARSERS: Readonly<Record<string, V1Parser>> = {
   'supportTickets.listForEmailChannels': (args): V1Parsed => ({
     args: { ...(args ?? {}) },
   }),
+  'supportTickets.listKanban': (args): V1Parsed => ({
+    args: {
+      ...args,
+      isMember: args.isMember ?? true,
+      limit: args.limit ?? 50,
+    },
+  }),
 
   // ----- tickets -----
   'tickets.listKanban': (args): V1Parsed => ({
@@ -1045,6 +1113,24 @@ export const V1_PARSERS: Readonly<Record<string, V1Parser>> = {
       ...(args.excludeFlowSteps !== undefined
         ? { excludeFlowSteps: args.excludeFlowSteps }
         : {}),
+    },
+  }),
+  'tickets.listTable': (args): V1Parsed => ({
+    args: {
+      ...args,
+      limit: Math.min(args.limit ?? 50, TICKET_PAGE_MAX),
+      start: args.start ?? null,
+    },
+  }),
+  'tickets.listByProject': (args): V1Parsed => ({
+    // The project list is gone; the table page scoped to one project is the same
+    // rows, newest first and without archived tickets. A page rather than the
+    // whole project, so it takes an optional cursor.
+    args: {
+      viewMode: 'project',
+      projectId: args.projectId,
+      limit: Math.min(args.limit ?? TICKET_PAGE_MAX, TICKET_PAGE_MAX),
+      start: args.start ?? null,
     },
   }),
   'tickets.listByChannelInWindow': (args): V1Parsed => ({
@@ -1095,6 +1181,14 @@ export const V1_PARSERS: Readonly<Record<string, V1Parser>> = {
   'tickets.setStageEta': (args): V1Parsed => ({
     args: { ...args, updatedAt: now() },
   }),
+  'tickets.acknowledgeEtaRisk': (args): V1Parsed => ({
+    args: {
+      ticketId: args.ticketId,
+      expectedFingerprint: args.expectedFingerprint,
+      reason: args.reason,
+      clientTimestamp: now(),
+    },
+  }),
   'tickets.addTag': (args): V1Parsed => ({
     args: {
         ticketId: args.ticketId,
@@ -1136,9 +1230,26 @@ export const V1_PARSERS: Readonly<Record<string, V1Parser>> = {
   }),
 
   // ----- userGroups -----
-  'userGroups.search': (args): V1Parsed => ({
-    args: { query: args.query, limit: args.limit ?? null },
+  // Both retargeted onto the full list, which is one row per group in the
+  // workspace, and narrowed here.
+  'userGroups.getMany': (args): V1Parsed => ({
+    args: { userGroupIds: Array.isArray(args.groupIds) ? args.groupIds : [] },
   }),
+  'userGroups.search': (args): V1Parsed => {
+    const needle = String(args.query ?? '').trim().toLowerCase();
+    const limit: number | undefined = args.limit ?? undefined;
+    return {
+      args: {},
+      mapResult: (data) => {
+        const matches = (data as Array<{ name: string; alias?: string | null }>).filter(
+          (group) =>
+            group.name.toLowerCase().includes(needle) ||
+            (group.alias ?? '').toLowerCase().includes(needle),
+        );
+        return limit === undefined ? matches : matches.slice(0, limit);
+      },
+    };
+  },
   'userGroups.update': (args): V1Parsed => ({
     args: { ...args, timestamp: now() },
   }),

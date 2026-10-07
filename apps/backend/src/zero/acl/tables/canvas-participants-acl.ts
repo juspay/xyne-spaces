@@ -2,6 +2,7 @@ import type { DeleteID, InsertValue, Transaction, UpdateValue } from '@rocicorp/
 import { CanvasRole, CanvasVisibility, Schema } from '@xyne/shared';
 import { BaseACL } from '../core/base-acl';
 import { MutationACLError, TableSchema } from '../core/types';
+import { assertConnectMutateAllowed } from '../core/connect-mutation-reach';
 import { zql } from '../../queries';
 
 
@@ -58,7 +59,13 @@ export class CanvasParticipantsACL extends BaseACL<'canvas_participants'> {
   private async verifyWorkspace(canvasId: string, tx: Transaction<Schema>): Promise<void> {
     const canvas = await tx.run(zql.canvases.where('id', canvasId).one());
     if (!canvas) throw new MutationACLError('Canvas participant not found: canvas does not exist', 'canvas_participants');
-    
+
+    // Slack Connect: connectId present → connect_group reach is the workspace-truth; else legacy check below.
+    if (canvas.connectId) {
+      await assertConnectMutateAllowed(this.ctx, tx, canvas, 'canvas_participants');
+      return;
+    }
+
     // If canvas has channel, verify through channel
     if (canvas.channelId) {
       const channel = await tx.run(zql.channels.where('id', canvas.channelId).one());

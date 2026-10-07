@@ -8,7 +8,6 @@ import { randomUUID } from 'crypto';
 import { DatabaseClient } from '@/database/client';
 import { ConversationRepository } from '@/database/repositories/conversationRepository';
 import { EmailRepository } from '@/database/repositories/emailRepository';
-import { ExternalSourceRepository } from '@/database/repositories/externalSourceRepository';
 import { decrypt } from '@/services/encryptionService';
 import { syncTicketEmailCount } from '@/database/syncTicketEmailCount';
 import { extractSlackChannelId } from '@/integrations/core/deskSources';
@@ -24,7 +23,6 @@ export class SlackDeskService {
   prisma = DatabaseClient.getInstance();
   private conversationRepo = new ConversationRepository();
   private emailRepo = new EmailRepository();
-  private externalSourceRepo = new ExternalSourceRepository();
 
   async sendSlackReply(params: {
     conversationId: string;
@@ -46,19 +44,36 @@ export class SlackDeskService {
     const threadTs = initialEmail.externalThreadId;
     if (!threadTs) throw new Error(`No thread_ts found for conversation ${conversationId}`);
 
-    // Reply via the Slack channel this thread came from; the desk may have since switched channels.
+    // Reply via the Slack channel this thread came from: a desk can hold several, and any email in
+    // the conversation identifies it (a merge or an agent-started thread leaves the first one unlinked).
     const origin = await this.prisma.externalMessage.findFirst({
-      where: { entityId: initialEmail.id, externalThreadId: threadTs },
+      where: { entityId: { in: emails.map(e => e.id) }, externalThreadId: threadTs },
       select: { externalSourceId: true },
+      orderBy: { createdAt: 'asc' },
     });
-    const externalSource =
-      (origin &&
-        (await this.prisma.externalSource.findFirst({
-          where: { id: origin.externalSourceId, sourceType: 'slack-desk' },
-        }))) ||
-      (await this.externalSourceRepo.findChannelSource(conversation.channelId, {
-        sourceTypes: ['slack-desk'],
-      }));
+    // Scoped to this desk: a channel rebound elsewhere must not keep receiving this desk's replies.
+    let externalSource = origin
+      ? await this.prisma.externalSource.findFirst({
+          where: {
+            id: origin.externalSourceId,
+            channelId: conversation.channelId,
+            sourceType: 'slack-desk',
+          },
+        })
+      : null;
+    if (!externalSource) {
+      // Unlinked thread: only one Slack channel on the desk, ever, makes the guess safe.
+      const candidates = await this.prisma.externalSource.findMany({
+        where: { channelId: conversation.channelId, sourceType: 'slack-desk' },
+        take: 2,
+      });
+      if (candidates.length > 1) {
+        throw new Error(
+          `Cannot route reply: conversation ${conversationId} is not linked to one of this desk's Slack channels`,
+        );
+      }
+      externalSource = candidates[0] ?? null;
+    }
     if (!externalSource) throw new Error(`No external source for channel ${conversation.channelId}`);
 
     // 2. Get Slack channel ID and bot token from credentials

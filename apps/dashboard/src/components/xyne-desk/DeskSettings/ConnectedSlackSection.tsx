@@ -66,7 +66,7 @@ export const ConnectedSlackSection: React.FC<ConnectedSlackSectionProps> = ({
   });
 
   const disconnectMutation = useMutation({
-    mutationFn: () => disconnectSlackDesk(channelId),
+    mutationFn: (slackChannelId: string) => disconnectSlackDesk(channelId, slackChannelId),
     onSuccess: () => {
       setPendingDisconnect(null);
       toast.success('Slack channel disconnected.');
@@ -98,7 +98,7 @@ export const ConnectedSlackSection: React.FC<ConnectedSlackSectionProps> = ({
         <div className='text-desk-label'>Connected Slack channels</div>
         <div className='text-desk-helper w-full max-w-[500px]'>
           Messages in these Slack channels create tickets on this desk, and replies post back into
-          the Slack thread. Email on this desk is unaffected.
+          the Slack thread. Other sources on this desk are unaffected.
         </div>
       </div>
 
@@ -170,41 +170,36 @@ export const ConnectedSlackSection: React.FC<ConnectedSlackSectionProps> = ({
         </div>
       )}
 
-      {/* One binding per desk — hide the picker rather than offer a rejected choice. */}
-      {!isLoading &&
-        !isError &&
-        !pickerUnavailable &&
-        !connected?.length &&
-        connectable.length > 0 && (
-          <div className='flex w-full max-w-[480px] items-center gap-2'>
-            <Select value={selected} onValueChange={setSelected}>
-              <SelectTrigger className='w-full'>
-                <SelectValue placeholder='Select a Slack channel' />
-              </SelectTrigger>
-              <SelectContent>
-                {connectable.map(slack => (
-                  <SelectItem key={slack.id} value={slack.id}>
-                    #{slack.name}
-                    {slack.is_private && (
-                      <span className='ml-2 text-xs text-muted-foreground'>private</span>
-                    )}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            <button
-              type='button'
-              onClick={() => selected && connectMutation.mutate(selected)}
-              disabled={!selected || connectMutation.isPending}
-              className='inline-flex h-[32px] shrink-0 items-center gap-1.5 rounded-[10px] border border-border bg-background px-3 py-1.5 text-desk-label text-foreground shadow-sm transition-colors hover:bg-muted/40 disabled:cursor-not-allowed disabled:opacity-50'
-              data-track-category='DeskSettings'
-              data-track-name='ConnectDeskSlackChannel'
-            >
-              <Plus size={14} />
-              <span>{connectMutation.isPending ? 'Connecting…' : 'Connect'}</span>
-            </button>
-          </div>
-        )}
+      {!isLoading && !isError && !pickerUnavailable && connectable.length > 0 && (
+        <div className='flex w-full max-w-[480px] items-center gap-2'>
+          <Select value={selected} onValueChange={setSelected}>
+            <SelectTrigger className='w-full'>
+              <SelectValue placeholder='Select a Slack channel' />
+            </SelectTrigger>
+            <SelectContent>
+              {connectable.map(slack => (
+                <SelectItem key={slack.id} value={slack.id}>
+                  #{slack.name}
+                  {slack.is_private && (
+                    <span className='ml-2 text-xs text-muted-foreground'>private</span>
+                  )}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <button
+            type='button'
+            onClick={() => selected && connectMutation.mutate(selected)}
+            disabled={!selected || connectMutation.isPending}
+            className='inline-flex h-[32px] shrink-0 items-center gap-1.5 rounded-[10px] border border-border bg-background px-3 py-1.5 text-desk-label text-foreground shadow-sm transition-colors hover:bg-muted/40 disabled:cursor-not-allowed disabled:opacity-50'
+            data-track-category='DeskSettings'
+            data-track-name='ConnectDeskSlackChannel'
+          >
+            <Plus size={14} />
+            <span>{connectMutation.isPending ? 'Connecting…' : 'Connect'}</span>
+          </button>
+        </div>
+      )}
 
       <DisconnectConfirmDialog
         open={!!pendingDisconnect}
@@ -213,11 +208,11 @@ export const ConnectedSlackSection: React.FC<ConnectedSlackSectionProps> = ({
         prompt={`Disconnect ${label(pendingDisconnect)} from this desk?`}
         bullets={[
           'New Slack messages will stop creating tickets immediately.',
-          'Email and other sources on this desk are unaffected.',
+          'Other Slack channels and sources on this desk are unaffected.',
           'Existing tickets are kept, but anything sent while disconnected is lost — reconnecting does not backfill it.',
         ]}
         isPending={disconnectMutation.isPending}
-        onConfirm={() => disconnectMutation.mutate()}
+        onConfirm={() => pendingDisconnect && disconnectMutation.mutate(pendingDisconnect)}
         trackCategory='DeskSettings'
       />
     </div>

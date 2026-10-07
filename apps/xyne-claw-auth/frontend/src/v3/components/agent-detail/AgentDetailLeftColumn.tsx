@@ -16,6 +16,7 @@ import {
   CheckIcon,
   ArrowDownIcon,
   PencilSimpleIcon,
+  LightningIcon,
 } from "@phosphor-icons/react";
 import type { Agent, AgentLight } from "../../../lib/types";
 import { PromptVersionHistory } from "../../../components/PromptVersionHistory";
@@ -28,6 +29,7 @@ import { useSnackbar } from "../ui/Snackbar";
 import { Dialog } from "../ui/Dialog";
 import { IntegrationCard } from "./IntegrationCard";
 import { SettingGroup, SettingRow } from "./SettingRow";
+import { OptimizationsSection, changedOptimizationKeys, useOptimizationCatalog } from "./OptimizationsSection";
 import { Switch } from "../ui/Switch";
 import { ToolboxPicker } from "../ToolboxPicker";
 import { KnowledgeBasePicker } from "../KnowledgeBasePicker";
@@ -49,7 +51,8 @@ type ConfigTabKey =
   | "persona"
   | "knowledge"
   | "toolbox"
-  | "behavior";
+  | "behavior"
+  | "optimizations";
 
 /* ── constants ─────────────────────────────────────────────────────── */
 
@@ -80,103 +83,6 @@ const TOOL_TAB_LABELS = {
 } as const;
 
 type ToolTabKey = keyof typeof TOOL_TAB_LABELS;
-
-const TOOL_DISCOVERY_OPTIMIZATIONS = [
-  {
-    key: "catalog_full_index",
-    label: "Full tool index",
-    description: "List every loadable tool by name in the prompt, so the agent loads the right one directly instead of guessing with searches.",
-  },
-  {
-    key: "subagent_read_tools",
-    label: "Direct subagent tools",
-    description: "Let the agent search and load its subagents' tools, writes included, and call them itself first instead of waiting on a slow nested subagent run. Writes keep their approval settings.",
-  },
-  {
-    key: "active_tool_cap",
-    label: "Top-25 active tools",
-    description: "Start each run with only the agent's 25 most-used tools of the last 7 days. The rest stay listed by name and load with one call, so every request is smaller. Nothing is removed from the agent.",
-  },
-] as const;
-
-/**
- * Optimizations that default ON for a delegation tier. Mirrors claw's
- * `tierOptimizationDefaults` (xyne-claw/src/optimizations.ts): a stored `true`/
- * `false` always wins; an absent key falls back to this, then off.
- */
-const TIER_OPTIMIZATION_DEFAULTS: Record<string, Record<string, boolean>> = {
-  orchestrator: { active_tool_cap: true },
-};
-
-// Jev (fast classifier) behaviours an agent can opt into. Both are off by
-// default fleet-wide, so "off" here = the default raw behaviour.
-export const CLASSIFIER_OPTIMIZATIONS = [
-  {
-    key: "jev_result_sift",
-    label: "Classify tool results",
-    description: "Large list results from search tools are filtered to the items relevant to this conversation before the agent reads them. The full result is always saved, and the agent can ask for the raw result on any call.",
-  },
-  {
-    key: "jev_context_gate",
-    label: "Check context before answering",
-    description: "Before an answer is accepted, a fast classifier checks whether the gathered evidence supports it. If it clearly does not, the agent is nudged once to fetch more context.",
-  },
-] as const;
-
-type OptimizationOption = { readonly key: string; readonly label: string; readonly description: string };
-
-export function OptimizationSwitchRow(props: {
-  title: string;
-  summary: string;
-  detail: string;
-  options: readonly OptimizationOption[];
-  draft: Record<string, boolean>;
-  onChange: (next: Record<string, boolean>) => void;
-  canEdit: boolean;
-  /** Value an absent key falls back to (e.g. TIER_OPTIMIZATION_DEFAULTS); otherwise off. */
-  defaults?: Record<string, boolean>;
-}) {
-  const { title, summary, detail, options, draft, onChange, canEdit, defaults = {} } = props;
-  if (!canEdit && !options.some((o) => draft[o.key] !== undefined)) return null;
-  const isOn = (key: string): boolean => draft[key] ?? defaults[key] ?? false;
-  return (
-    <SettingRow
-      title={title}
-      summary={summary}
-      detail={detail}
-      enabled={options.some((o) => isOn(o.key))}
-      control={
-        <span className="rounded-full bg-xyne-surface-sunken px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide text-xyne-fg-tertiary">
-          beta
-        </span>
-      }
-    >
-      <div className="flex flex-col gap-3">
-        {options.map((o) => (
-          <div key={o.key} className="flex items-start justify-between gap-4">
-            <div className="min-w-0 flex-1">
-              <div className="text-[12px] font-medium text-xyne-fg-primary">{o.label}</div>
-              <p className="text-[12px] leading-relaxed text-xyne-fg-secondary">{o.description}</p>
-            </div>
-            <Switch
-              checked={isOn(o.key)}
-              onChange={(v) => {
-                // Store only a departure from the default, so an agent that
-                // never touched this keeps following it.
-                const next = { ...draft };
-                if (v === (defaults[o.key] ?? false)) delete next[o.key];
-                else next[o.key] = v;
-                onChange(next);
-              }}
-              disabled={!canEdit}
-              ariaLabel={o.label}
-            />
-          </div>
-        ))}
-      </div>
-    </SettingRow>
-  );
-}
 
 function kindToTab(kind: string): Exclude<ToolTabKey, "subagents"> {
   const map: Record<string, Exclude<ToolTabKey, "subagents">> = {
@@ -1984,7 +1890,10 @@ export function AgentDetailLeftColumn({
     : isOrchestratorTier
       ? "All tools"
       : "File tools only";
-  const tierOptimizationDefaults = TIER_OPTIMIZATION_DEFAULTS[agent.delegationTier ?? "standard"] ?? {};
+  const { catalog: optimizationCatalog } = useOptimizationCatalog();
+  const changedOptimizationCount = optimizationCatalog
+    ? changedOptimizationKeys(optimizationCatalog, draftOptimizations, agent.delegationTier).length
+    : Object.keys(draftOptimizations).length;
 
 
   // Filtered lists for search — narrows integration cards (Subagents tab has its own search).
@@ -2776,7 +2685,7 @@ export function AgentDetailLeftColumn({
         label="Behaviour"
         tech="rules & autonomy"
         subtitle="extra rules applied on every turn"
-        summary={behaviorCount > 0 || draftSuggestGoal || draftPrefetchContext || draftAutoGoal || draftPlanMode || Object.keys(draftOptimizations).length > 0 || !draftPostTodos || draftMaxDelegations !== MAX_DELEGATIONS_PER_RUN_BOUNDS.DEFAULT ? "Customised" : "Defaults"}
+        summary={behaviorCount > 0 || draftSuggestGoal || draftPrefetchContext || draftAutoGoal || draftPlanMode || !draftPostTodos || draftMaxDelegations !== MAX_DELEGATIONS_PER_RUN_BOUNDS.DEFAULT ? "Customised" : "Defaults"}
         open={activeTab === "behavior"}
         onToggle={() => toggleSection("behavior")}
       />
@@ -3214,30 +3123,6 @@ export function AgentDetailLeftColumn({
             }
           />
         )}
-
-        <OptimizationSwitchRow
-          title="Tool discovery"
-          summary="How the agent finds tools it has not loaded yet."
-          detail={
-            isOrchestratorTier
-              ? "Orchestrators start with Top-25 active tools on. Grants no new access: only tools this agent already has are affected."
-              : "Off = fleet default. Grants no new access: only tools this agent already has are affected."
-          }
-          options={TOOL_DISCOVERY_OPTIMIZATIONS}
-          draft={draftOptimizations}
-          onChange={onDraftOptimizationsChange}
-          canEdit={canEdit}
-          defaults={tierOptimizationDefaults}
-        />
-        <OptimizationSwitchRow
-          title="Fast classifier"
-          summary="Let a fast classifier (Jev) trim tool results and check the evidence before answering."
-          detail="Off = the default raw behaviour. If the classifier is unavailable, the agent behaves exactly as when this is off."
-          options={CLASSIFIER_OPTIMIZATIONS}
-          draft={draftOptimizations}
-          onChange={onDraftOptimizationsChange}
-          canEdit={canEdit}
-        />
       </SettingGroup>
 
       {(canEdit
@@ -3371,6 +3256,30 @@ export function AgentDetailLeftColumn({
         </SettingGroup>
       )}
 
+      </div>
+      )}
+      </div>
+
+      {/* Optimizations card */}
+      <div className={`rounded-xl border bg-xyne-surface transition-colors ${activeTab === "optimizations" ? "border-xyne-border-strong" : "border-xyne-border-subtle"}`}>
+      <DisclosureHeader
+        icon={LightningIcon}
+        label="Optimizations"
+        tech="runtime switches"
+        subtitle="speed and answer-quality switches, each with a platform default"
+        summary={changedOptimizationCount > 0 ? `${changedOptimizationCount} changed` : "Defaults"}
+        open={activeTab === "optimizations"}
+        onToggle={() => toggleSection("optimizations")}
+      />
+
+      {activeTab === "optimizations" && (
+      <div className="border-t border-xyne-border-subtle px-4 py-4">
+        <OptimizationsSection
+          draft={draftOptimizations}
+          onChange={onDraftOptimizationsChange}
+          canEdit={canEdit}
+          delegationTier={agent.delegationTier}
+        />
       </div>
       )}
       </div>

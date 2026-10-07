@@ -11,6 +11,7 @@ import { useSelectedAgent } from '../../hooks/useSelectedAgent';
 import { useAskAIAuto } from '../../hooks/useAskAIAuto';
 import { SELECTOR_ROW_CLASS, SELECTOR_ROW_SELECTED_CLASS } from './selectorStyles';
 import { AutoAgentRow } from './AutoAgentRow';
+import { rankAgentsByQuery } from './agentSearch';
 
 export interface AIAgentSelectorProps {
   /** Whether the selector is disabled (e.g. while streaming). */
@@ -90,15 +91,14 @@ export function AIAgentSelector({
     staleTime: 5 * 60 * 1000,
   });
 
-  const filteredAgents = useMemo(() => {
-    const withoutAskAI = agents.filter((a: AccessibleClawAgent) => a.slug !== 'ask-ai');
-    if (!query.trim()) return withoutAskAI;
-    const q = query.toLowerCase();
-    return withoutAskAI.filter(
-      (a: AccessibleClawAgent) =>
-        a.name.toLowerCase().includes(q) || (a.description ?? '').toLowerCase().includes(q),
-    );
-  }, [agents, query]);
+  const filteredAgents = useMemo(
+    () =>
+      rankAgentsByQuery(
+        agents.filter((a: AccessibleClawAgent) => a.slug !== 'ask-ai'),
+        query,
+      ),
+    [agents, query],
+  );
 
   const selectedAgent = useMemo(
     () => agents.find((a: AccessibleClawAgent) => a.slug === selectedAgentSlug) ?? null,
