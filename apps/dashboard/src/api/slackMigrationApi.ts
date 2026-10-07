@@ -52,7 +52,7 @@ export interface MigrationJobView {
   canRefresh: boolean;
   error?: string;
   queuePosition?: number; // turn in its queue: 0 = running now, N = Nth in line (waiting jobs only)
-  queueTotal?: number;    // jobs waiting in that queue
+  queueTotal?: number; // jobs waiting in that queue
   issues?: {
     conversationId: string;
     kind: 'skipped' | 'truncated' | 'ingest-error';
@@ -109,8 +109,11 @@ export const slackMigrationApi = {
   // Admin: jump a queued job to the front of its queue (collection or ingestion).
   prioritize: async (id: string): Promise<MigrationJobView> =>
     unwrap(
-      (await apiInstance.post<Envelope<MigrationJobView>>(`${BASE}/migration-jobs/${id}/prioritize`))
-        .data,
+      (
+        await apiInstance.post<Envelope<MigrationJobView>>(
+          `${BASE}/migration-jobs/${id}/prioritize`,
+        )
+      ).data,
     ),
 
   stop: async (id: string): Promise<MigrationJobView> =>
