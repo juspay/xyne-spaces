@@ -4,7 +4,7 @@
  * Channel creation is handled by POST /api/channels with type: 'SLACK'.
  * These routes provide Slack-specific operations:
  * 1. GET  /channels              — list Slack channels the bot is a member of
- * 2. POST /:channelId/disconnect — deactivate ExternalSource
+ * 2. POST /:channelId/disconnect — deactivate one of the desk's Slack ExternalSources
  */
 
 import express, { Request, Response } from 'express';
@@ -161,20 +161,29 @@ router.post(
 router.post(
   '/:channelId/disconnect',
   authV2Middleware.authenticate,
-  validateZod(z.object({ slackChannelId: z.string().trim().min(1) })),
+  validateZod(z.object({ slackChannelId: z.string().trim().min(1).optional() })),
   async (req: Request, res: Response): Promise<void> => {
     try {
       const { channelId } = req.params;
-      const { slackChannelId } = req.body as { slackChannelId: string };
+      const { slackChannelId } = req.body as { slackChannelId?: string };
 
       if (!(await authorizeAppDeskManager(channelId, req.user!.id, req.user!.workspaceId!, res)))
         return;
 
-      // Deactivate ExternalSource
-      const source = await db.externalSource.findFirst({
-        where: { channelId, isActive: true, sourceType: 'slack-desk', name: buildSlackDeskSourceName(slackChannelId) },
+      // Deactivate ExternalSource. The name is unique, so with an id this matches at most one row;
+      // clients from before per-channel disconnect send none, and could only ever show one channel —
+      // honour them while the desk still has a single binding rather than dropping an arbitrary one.
+      const matches = await db.externalSource.findMany({
+        where: {
+          channelId,
+          isActive: true,
+          sourceType: 'slack-desk',
+          ...(slackChannelId && { name: buildSlackDeskSourceName(slackChannelId) }),
+        },
         select: { id: true },
+        take: 2,
       });
+      const source = matches.length === 1 ? matches[0] : undefined;
 
       if (!source) {
         res.status(404).json({ error: 'No active integration found for this channel' });

@@ -1,7 +1,7 @@
 /**
- * Slack desk management — disconnect for the Slack channel attached to a
- * desk. The endpoint is gated server-side to the desk owner (channel creator
- * OR email-channel-preference owner) and soft-deactivates the channel's
+ * Slack desk management — connect and disconnect the Slack channels attached to a
+ * desk. The endpoints are gated server-side to the desk owner (channel creator
+ * OR email-channel-preference owner); disconnect soft-deactivates one channel's
  * ExternalSource (isActive = false).
  */
 

@@ -171,9 +171,9 @@ export const InboxTab: React.FC<InboxTabProps> = ({ channelId, form, signatures 
       {isSocial && <AppStoreDeskIntegrationCard channelId={channelId} canManage={canManage} />}
       {isSocial && <InstagramDeskIntegrationCard channelId={channelId} canManage={canManage} />}
       {/*
-        Single owner of app connections on every desk type, APP included. Apps are the
-        one source type that went 1:N per channel, so unlike Slack/social they cannot be
-        managed by a single-connection card.
+        Single owner of app connections on every desk type, APP included. Apps and Slack both
+        went 1:N per channel, so unlike social they cannot be managed by a
+        single-connection card.
       */}
       {isDeskChannel && <ConnectedAppsSection channelId={channelId} canManage={canManage} />}
       {isDeskChannel && <ConnectedSlackSection channelId={channelId} canManage={canManage} />}
