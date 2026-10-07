@@ -1,3 +1,10 @@
+## [1.461.0-release-20261006.4](https://github.com/juspay/xyne-spaces/compare/v1.461.0-release-20261006.3...v1.461.0-release-20261006.4) (2026-10-07)
+
+
+### Features
+
+* facebook integration in desk ([#2640](https://github.com/juspay/xyne-spaces/issues/2640)) ([#2758](https://github.com/juspay/xyne-spaces/issues/2758)) ([6d477fb](https://github.com/juspay/xyne-spaces/commit/6d477fb17c22d273a1811d7a16178b89f54c84c8))
+
 ## [1.461.0-release-20261006.3](https://github.com/juspay/xyne-spaces/compare/v1.461.0-release-20261006.2...v1.461.0-release-20261006.3) (2026-10-07)
 
 ## [1.461.0-release-20261006.2](https://github.com/juspay/xyne-spaces/compare/v1.461.0-release-20261006.1...v1.461.0-release-20261006.2) (2026-10-07)
