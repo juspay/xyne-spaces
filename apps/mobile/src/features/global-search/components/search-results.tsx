@@ -28,7 +28,7 @@ export function SearchResults({
   onLeave,
   ...chrome
 }: SearchResultsProps): ReactElement {
-  const { tab, query, chips, onlyMyChannels, trigger } = state;
+  const { tab, query, chips, onlyMyChannels, includeBotMessages, exactMatch, trigger } = state;
   const { scrollOffset } = chrome;
   const showsSuggestions = trigger !== null;
 
@@ -39,8 +39,17 @@ export function SearchResults({
   }, [query, scrollOffset, showsSuggestions, tab]);
 
   const request = useMemo(
-    () => buildSearchRequest({ tab, query, chips, onlyMyChannels, scope }),
-    [chips, onlyMyChannels, query, scope, tab],
+    () =>
+      buildSearchRequest({
+        tab,
+        query,
+        chips,
+        onlyMyChannels,
+        includeBotMessages,
+        exactMatch,
+        scope,
+      }),
+    [chips, exactMatch, includeBotMessages, onlyMyChannels, query, scope, tab],
   );
 
   if (trigger) {

@@ -1,6 +1,7 @@
 import type { VespaSearchFilters } from '@/src/types/search';
 import { buildVespaSearchParams, sanitizeSearchQuery } from '@/src/utils/search';
 import type { SearchFilterChip, SearchFilterPrefix, SearchScope } from '../types';
+import { toSearchQuery } from './exact-search';
 import { effectiveInputsForScope } from './scope';
 import type { GlobalSearchTab } from './search-tabs';
 
@@ -14,6 +15,8 @@ export type SearchRequest = {
   freeText: string;
   chips: readonly SearchFilterChip[];
   onlyMyChannels: boolean;
+  includeBotMessages: boolean;
+  exactMatch: boolean;
 };
 
 export type SearchRequestInput = {
@@ -23,6 +26,8 @@ export type SearchRequestInput = {
   /** Filters the user picked. Never the locked scope. */
   chips: readonly SearchFilterChip[];
   onlyMyChannels: boolean;
+  includeBotMessages: boolean;
+  exactMatch: boolean;
   scope: SearchScope | null;
 };
 
@@ -57,6 +62,8 @@ export function buildSearchRequest({
   query,
   chips,
   onlyMyChannels,
+  includeBotMessages,
+  exactMatch,
   scope,
 }: SearchRequestInput): SearchRequest | null {
   // Scoped search is a single messages surface with no tabs.
@@ -65,12 +72,19 @@ export function buildSearchRequest({
 
   const freeText = query.trim();
   // A locked scope narrows the request; it is not something the user asked for.
-  // `onlyMyChannels` does not count either: alone it would mean "every message in
-  // every channel I am in".
+  // Mode toggles alone do not count either: alone they would mean "every hit in
+  // every channel I am in" / "every bot message".
   const hasUserInput = scope ? freeText.length > 0 : freeText.length > 0 || chips.length > 0;
   if (!hasUserInput) return null;
 
-  return { category, freeText, ...effectiveInputsForScope({ chips, onlyMyChannels }, scope) };
+  return {
+    category,
+    freeText,
+    ...effectiveInputsForScope(
+      { chips, onlyMyChannels, includeBotMessages, exactMatch },
+      scope,
+    ),
+  };
 }
 
 /** Comma-joined chip ids for one prefix — the backend ORs them. */
@@ -83,12 +97,13 @@ function chipIds(
 }
 
 export function buildSearchFilters(request: SearchRequest): VespaSearchFilters {
-  const { category, freeText, chips, onlyMyChannels } = request;
+  const { category, freeText, chips, onlyMyChannels, includeBotMessages, exactMatch } = request;
   const from = chipIds(chips, 'from:');
   const inside = chipIds(chips, 'in:');
+  const sanitized = sanitizeSearchQuery(freeText);
 
   return {
-    query: sanitizeSearchQuery(freeText),
+    query: toSearchQuery(sanitized, exactMatch),
     limit: RESULTS_LIMIT,
     offset: 0,
     presentationSummary: 'lean',
@@ -100,6 +115,8 @@ export function buildSearchFilters(request: SearchRequest): VespaSearchFilters {
     // `in:` carries an implicit `false` so the backend does not re-narrow an explicit
     // channel list to joined channels. The toggle, when on, overrides it.
     ...(onlyMyChannels ? { onlyMyChannels: true } : inside ? { onlyMyChannels: false } : {}),
+    // Bot inclusion only applies to message search (dashboard `appliesTo: isMessageType`).
+    ...(category === 'messages' ? { includeBotMessages } : {}),
     ...(!freeText && (from || inside) ? { filterOnly: true } : {}),
   };
 }

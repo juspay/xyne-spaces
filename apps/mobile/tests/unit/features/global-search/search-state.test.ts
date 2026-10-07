@@ -35,6 +35,8 @@ describe('global search state', () => {
       query: '',
       chips: [],
       onlyMyChannels: false,
+      includeBotMessages: false,
+      exactMatch: false,
       trigger: null,
     });
   });
@@ -191,6 +193,34 @@ describe('global search state', () => {
     });
   });
 
+  describe('bot and exact mode toggles', () => {
+    it('toggles include bot messages', () => {
+      const on = searchReducer(initial, { type: 'includeBotMessagesToggled' });
+      const off = searchReducer(on, { type: 'includeBotMessagesToggled' });
+
+      assert.equal(on.includeBotMessages, true);
+      assert.equal(off.includeBotMessages, false);
+    });
+
+    it('toggles exact match', () => {
+      const on = searchReducer(initial, { type: 'exactMatchToggled' });
+      const off = searchReducer(on, { type: 'exactMatchToggled' });
+
+      assert.equal(on.exactMatch, true);
+      assert.equal(off.exactMatch, false);
+    });
+
+    it('turns exact match on when the user types quotes', () => {
+      const state = searchReducer(initial, {
+        type: 'queryCommitted',
+        query: '"payment failed"',
+      });
+
+      assert.equal(state.exactMatch, true);
+      assert.equal(state.query, '"payment failed"');
+    });
+  });
+
   describe('clearing', () => {
     const busy = reduce(
       initial,
@@ -199,6 +229,8 @@ describe('global search state', () => {
       { type: 'chipAdded', chip: chip('u1') },
       { type: 'triggerChanged', trigger: trigger('al') },
       { type: 'onlyMyChannelsToggled' },
+      { type: 'includeBotMessagesToggled' },
+      { type: 'exactMatchToggled' },
     );
 
     it('empties the query, the chips and the trigger together', () => {
@@ -209,11 +241,13 @@ describe('global search state', () => {
       assert.equal(state.trigger, null);
     });
 
-    it('keeps the tab and the toggle', () => {
+    it('keeps the tab and the mode toggles', () => {
       const state = searchReducer(busy, { type: 'cleared' });
 
       assert.equal(state.tab, 'files');
       assert.equal(state.onlyMyChannels, true);
+      assert.equal(state.includeBotMessages, true);
+      assert.equal(state.exactMatch, true);
     });
   });
 });

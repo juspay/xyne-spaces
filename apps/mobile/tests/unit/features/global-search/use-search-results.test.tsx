@@ -28,7 +28,15 @@ const mockedApiGet = apiGet as jest.MockedFunction<typeof apiGet>;
 let calls: Call[] = [];
 
 function requestFor(query: string, tab: GlobalSearchTab = 'messages'): SearchRequest {
-  const request = buildSearchRequest({ tab, query, chips: [], onlyMyChannels: false, scope: null });
+  const request = buildSearchRequest({
+    tab,
+    query,
+    chips: [],
+    onlyMyChannels: false,
+    includeBotMessages: false,
+    exactMatch: false,
+    scope: null,
+  });
   if (!request) throw new Error('expected a request');
   return request;
 }

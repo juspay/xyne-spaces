@@ -66,6 +66,12 @@ describe('buildVespaSearchParams', () => {
     assert.equal(params['onlyMyChannels'], 'false');
   });
 
+  it('serializes includeBotMessages when set', () => {
+    const filters: VespaSearchFilters = { query: 'q', includeBotMessages: true };
+    const params = buildVespaSearchParams(filters);
+    assert.equal(params['includeBotMessages'], 'true');
+  });
+
   it('serializes onlyMyChannels true for the "Only my channels" toggle', () => {
     const filters: VespaSearchFilters = { query: 'q', onlyMyChannels: true };
     assert.equal(buildVespaSearchParams(filters)['onlyMyChannels'], 'true');

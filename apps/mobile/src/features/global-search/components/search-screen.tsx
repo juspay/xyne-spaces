@@ -174,6 +174,8 @@ export function GlobalSearchScreen({
         tab={state.tab}
         chips={state.chips}
         onlyMyChannels={state.onlyMyChannels}
+        includeBotMessages={state.includeBotMessages}
+        exactMatch={state.exactMatch}
         dispatch={dispatch}
         inputRef={inputRef}
         topInset={insets.top}
@@ -195,6 +197,8 @@ const SearchToolbar = memo(function SearchToolbar({
   tab,
   chips,
   onlyMyChannels,
+  includeBotMessages,
+  exactMatch,
   dispatch,
   inputRef,
   topInset,
@@ -208,6 +212,8 @@ const SearchToolbar = memo(function SearchToolbar({
   chips: readonly SearchFilterChip[];
   onlyMyChannels: boolean;
   fieldHostedElsewhere: boolean;
+  includeBotMessages: boolean;
+  exactMatch: boolean;
   dispatch: SearchDispatch;
   inputRef: RefObject<SearchInputHandle | null>;
   topInset: number;
@@ -312,6 +318,8 @@ const SearchToolbar = memo(function SearchToolbar({
                 tab={tab}
                 chips={chips}
                 onlyMyChannels={onlyMyChannels}
+                includeBotMessages={includeBotMessages}
+                exactMatch={exactMatch}
                 dispatch={dispatch}
               />
             </Animated.View>

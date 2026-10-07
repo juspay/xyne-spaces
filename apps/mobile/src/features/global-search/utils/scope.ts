@@ -25,6 +25,8 @@ export function effectiveChipsForScope(
 export type ScopedInputs = {
   chips: SearchFilterChip[];
   onlyMyChannels: boolean;
+  includeBotMessages: boolean;
+  exactMatch: boolean;
 };
 
 /**
@@ -33,12 +35,19 @@ export type ScopedInputs = {
  * silently reshape a locked query either.
  */
 export function effectiveInputsForScope(
-  inputs: { chips: readonly SearchFilterChip[]; onlyMyChannels: boolean },
+  inputs: {
+    chips: readonly SearchFilterChip[];
+    onlyMyChannels: boolean;
+    includeBotMessages: boolean;
+    exactMatch: boolean;
+  },
   scope: SearchScope | null,
 ): ScopedInputs {
   return {
     chips: effectiveChipsForScope(inputs.chips, scope),
     onlyMyChannels: scope ? false : inputs.onlyMyChannels,
+    includeBotMessages: inputs.includeBotMessages,
+    exactMatch: inputs.exactMatch,
   };
 }
 

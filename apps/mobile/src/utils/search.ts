@@ -187,6 +187,10 @@ export function buildVespaSearchParams(filters: VespaSearchFilters): Record<stri
     params['onlyMyChannels'] = filters.onlyMyChannels.toString();
   }
 
+  if (filters.includeBotMessages !== undefined) {
+    params['includeBotMessages'] = filters.includeBotMessages.toString();
+  }
+
   return params;
 }
 

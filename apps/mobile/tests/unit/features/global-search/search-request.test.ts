@@ -26,6 +26,8 @@ function input(overrides: Partial<SearchRequestInput> = {}): SearchRequestInput 
     query: '',
     chips: [],
     onlyMyChannels: false,
+    includeBotMessages: false,
+    exactMatch: false,
     scope: null,
     ...overrides,
   };
@@ -202,6 +204,37 @@ describe('global search request', () => {
       const sent = params({ query: '  dep\u0000loy  ' });
 
       assert.equal(sent['q'], 'deploy');
+    });
+
+    it('wraps q in quotes when exact match is on', () => {
+      const sent = params({ query: 'payment failed', exactMatch: true });
+
+      assert.equal(sent['q'], '"payment failed"');
+    });
+
+    it('passes user-typed quotes through when exact match is off', () => {
+      const sent = params({ query: '"payment failed"', exactMatch: false });
+
+      assert.equal(sent['q'], '"payment failed"');
+    });
+
+    it('sends includeBotMessages on message searches', () => {
+      const off = params({ query: 'deploy', includeBotMessages: false });
+      const on = params({ query: 'deploy', includeBotMessages: true });
+
+      assert.equal(off['includeBotMessages'], 'false');
+      assert.equal(on['includeBotMessages'], 'true');
+    });
+
+    it('omits includeBotMessages on non-message tabs', () => {
+      const sent = params({ tab: 'tickets', query: 'deploy', includeBotMessages: true });
+
+      assert.equal(sent['includeBotMessages'], undefined);
+    });
+
+    it('does not treat bot or exact toggles alone as a query', () => {
+      assert.equal(buildSearchRequest(input({ includeBotMessages: true })), null);
+      assert.equal(buildSearchRequest(input({ exactMatch: true })), null);
     });
 
     it('gives equal requests equal params, so they share one cache entry', () => {

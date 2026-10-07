@@ -187,6 +187,11 @@ export interface VespaSearchFilters {
   presentationSummary?: string;
   /** When false with `in:`, don't further constrain to membership-only channels. */
   onlyMyChannels?: boolean;
+  /**
+   * When true, include BOT messageType hits. Default / omitted / false → backend
+   * excludes bot messages. Meaningful for message search.
+   */
+  includeBotMessages?: boolean;
 }
 
 export interface VespaSearchGroup {

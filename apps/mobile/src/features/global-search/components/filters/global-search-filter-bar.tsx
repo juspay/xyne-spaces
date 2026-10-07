@@ -14,6 +14,10 @@ import {
   SEARCH_SIDE_MARGIN,
 } from '../../constants';
 import {
+  BOT_CHIP_A11Y_LABEL,
+  BOT_CHIP_LABEL,
+  EXACT_CHIP_A11Y_LABEL,
+  EXACT_CHIP_LABEL,
   fromFilterTitleForTab,
   IN_CHIP_EMPTY_LABEL,
   multiSelectChipLabel,
@@ -30,6 +34,8 @@ type GlobalSearchFilterBarProps = {
   tab: GlobalSearchTab;
   chips: readonly SearchFilterChip[];
   onlyMyChannels: boolean;
+  includeBotMessages: boolean;
+  exactMatch: boolean;
   dispatch: SearchDispatch;
 };
 
@@ -38,7 +44,7 @@ const GLYPH_STROKE = 2.5;
 
 /**
  * Dropdown filter row. The category lives in the tag strip above this row; what
- * is left is the two multi-select filters plus the toggle.
+ * is left is the multi-select filters plus the mode toggles.
  *
  * Built from the same Badge as that tag strip, so the two rows are one visual
  * family in both themes and both states — a dropdown badge just carries a
@@ -51,6 +57,8 @@ export function GlobalSearchFilterBar({
   tab,
   chips,
   onlyMyChannels,
+  includeBotMessages,
+  exactMatch,
   dispatch,
 }: GlobalSearchFilterBarProps): ReactElement {
   const [openSheet, setOpenSheet] = useState<OpenSheet>(null);
@@ -70,6 +78,7 @@ export function GlobalSearchFilterBar({
   const fromChips = useMemo(() => chips.filter(chip => chip.prefix === 'from:'), [chips]);
   const inChips = useMemo(() => chips.filter(chip => chip.prefix === 'in:'), [chips]);
   const fromTitle = fromFilterTitleForTab(tab);
+  const showBotToggle = tab === 'messages';
 
   const applyFromChips = useCallback(
     (next: readonly SearchFilterChip[]) =>
@@ -105,6 +114,16 @@ export function GlobalSearchFilterBar({
     void (onlyMyChannels ? haptics.toggleOff() : haptics.toggleOn());
     dispatch({ type: 'onlyMyChannelsToggled' });
   }, [dispatch, onlyMyChannels]);
+
+  const toggleIncludeBotMessages = useCallback(() => {
+    void (includeBotMessages ? haptics.toggleOff() : haptics.toggleOn());
+    dispatch({ type: 'includeBotMessagesToggled' });
+  }, [dispatch, includeBotMessages]);
+
+  const toggleExactMatch = useCallback(() => {
+    void (exactMatch ? haptics.toggleOff() : haptics.toggleOn());
+    dispatch({ type: 'exactMatchToggled' });
+  }, [dispatch, exactMatch]);
 
   return (
     <>
@@ -158,7 +177,7 @@ export function GlobalSearchFilterBar({
           accessibilityLabel='In filter'
           onPress={openInSheet}
         />
-        {/* A toggle, not a dropdown — it gets a check when set and no glyph otherwise. */}
+        {/* Toggles — check when set, no chevron. */}
         <Badge
           className='max-w-55'
           label={ONLY_MY_CHANNELS_CHIP_LABEL}
@@ -172,6 +191,38 @@ export function GlobalSearchFilterBar({
           accessibilityState={{ selected: onlyMyChannels }}
           accessibilityLabel={ONLY_MY_CHANNELS_CHIP_LABEL}
           onPress={toggleOnlyMyChannels}
+        />
+        {showBotToggle ? (
+          <Badge
+            className='max-w-55'
+            label={BOT_CHIP_LABEL}
+            variant={includeBotMessages ? 'active' : 'default'}
+            {...(includeBotMessages
+              ? {
+                  trailing: (
+                    <Check size={GLYPH_SIZE} color={accentText} strokeWidth={GLYPH_STROKE} />
+                  ),
+                }
+              : {})}
+            accessibilityRole='button'
+            accessibilityState={{ selected: includeBotMessages }}
+            accessibilityLabel={BOT_CHIP_A11Y_LABEL}
+            onPress={toggleIncludeBotMessages}
+          />
+        ) : null}
+        <Badge
+          className='max-w-55'
+          label={EXACT_CHIP_LABEL}
+          variant={exactMatch ? 'active' : 'default'}
+          {...(exactMatch
+            ? {
+                trailing: <Check size={GLYPH_SIZE} color={accentText} strokeWidth={GLYPH_STROKE} />,
+              }
+            : {})}
+          accessibilityRole='button'
+          accessibilityState={{ selected: exactMatch }}
+          accessibilityLabel={EXACT_CHIP_A11Y_LABEL}
+          onPress={toggleExactMatch}
         />
       </ScrollView>
 

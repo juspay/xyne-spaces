@@ -1,6 +1,7 @@
 import { useReducer, type Dispatch } from 'react';
 
 import type { SearchFilterChip, SearchFilterPrefix } from '../types';
+import { isExactSearchQuery } from '../utils/exact-search';
 import { triggersEqual, type FilterTrigger } from '../utils/filter-trigger';
 import type { GlobalSearchTab } from '../utils/search-tabs';
 
@@ -11,6 +12,13 @@ export type SearchState = {
   /** Filters the user picked. A locked conversation scope is never in here. */
   chips: readonly SearchFilterChip[];
   onlyMyChannels: boolean;
+  /** Include BOT messageType hits. Messages tab only; default off. */
+  includeBotMessages: boolean;
+  /**
+   * Exact phrase mode. Folded into `q` as quotes on the way out — not shown in
+   * the input. Also turns on when the user types quotes by hand.
+   */
+  exactMatch: boolean;
   /** Live, not debounced. Non-null only inside an unfinished `from:` / `in:`. */
   trigger: FilterTrigger | null;
 };
@@ -24,12 +32,22 @@ export type SearchAction =
   | { type: 'lastChipRemoved' }
   | { type: 'chipsReplaced'; prefix: SearchFilterPrefix; chips: readonly SearchFilterChip[] }
   | { type: 'onlyMyChannelsToggled' }
+  | { type: 'includeBotMessagesToggled' }
+  | { type: 'exactMatchToggled' }
   | { type: 'cleared' };
 
 export type SearchDispatch = Dispatch<SearchAction>;
 
 export function createSearchState(tab: GlobalSearchTab): SearchState {
-  return { tab, query: '', chips: [], onlyMyChannels: false, trigger: null };
+  return {
+    tab,
+    query: '',
+    chips: [],
+    onlyMyChannels: false,
+    includeBotMessages: false,
+    exactMatch: false,
+    trigger: null,
+  };
 }
 
 function sameChip(
@@ -58,8 +76,14 @@ export function searchReducer(state: SearchState, action: SearchAction): SearchS
     case 'tabChanged':
       return state.tab === action.tab ? state : { ...state, tab: action.tab };
 
-    case 'queryCommitted':
-      return state.query === action.query ? state : { ...state, query: action.query };
+    case 'queryCommitted': {
+      if (state.query === action.query) return state;
+      // Typed quotes enable exact mode; the pill stays on until toggled off.
+      if (isExactSearchQuery(action.query)) {
+        return { ...state, query: action.query, exactMatch: true };
+      }
+      return { ...state, query: action.query };
+    }
 
     case 'triggerChanged':
       return triggersEqual(state.trigger, action.trigger)
@@ -92,6 +116,12 @@ export function searchReducer(state: SearchState, action: SearchAction): SearchS
 
     case 'onlyMyChannelsToggled':
       return { ...state, onlyMyChannels: !state.onlyMyChannels };
+
+    case 'includeBotMessagesToggled':
+      return { ...state, includeBotMessages: !state.includeBotMessages };
+
+    case 'exactMatchToggled':
+      return { ...state, exactMatch: !state.exactMatch };
 
     case 'cleared':
       return state.query === '' && state.chips.length === 0 && state.trigger === null
