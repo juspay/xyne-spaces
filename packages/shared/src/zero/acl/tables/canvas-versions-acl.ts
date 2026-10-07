@@ -10,6 +10,6 @@ export class CanvasVersionsACL extends BaseQueryACL<'canvas_versions'> {
 
   canSelect<TReturn>(query: Query<'canvas_versions', Schema, TReturn>): Query<'canvas_versions', Schema, TReturn> {
     // Slack Connect: connectId → connect_group workspace truth; else workspaceId.
-    return query.where(connectReach(this.ctx));
+    return query.where(connectReach(this.ctx, undefined, 'canvasConnectId'));
   }
 }

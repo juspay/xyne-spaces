@@ -1,6 +1,6 @@
 // Zero internal API (mapped via #imports in package.json)
 import { asQueryInternals } from '#zero-internal/query-internals';
-import { Context, schema, connectReach, CONNECT_SCOPED_TABLES } from '@xyne/shared';
+import { Context, schema, connectReach, connectColumnForTable, CONNECT_SCOPED_TABLES } from '@xyne/shared';
 import { logger } from '@/utils/logger';
 
 // The tenant boundary is applied here, to every query, rather than trusting each
@@ -66,7 +66,7 @@ export function scopeQueryToTenant<T>(query: T, ctx: Context, queryName: string)
     // Slack Connect: connectId-bearing tables resolve tenancy via connect_group; rows with no
     // connectId still fall back to workspaceId inside connectReach.
     if (CONNECT_SCOPED_TABLES.has(table)) {
-      return scopable.where(connectReach(ctx)) as unknown as T;
+      return scopable.where(connectReach(ctx, undefined, connectColumnForTable(table))) as unknown as T;
     }
     return scopable.where('workspaceId', ctx.workspaceId) as unknown as T;
   }

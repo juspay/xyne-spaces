@@ -5,7 +5,7 @@ import {
 } from '@rocicorp/zero';
 import { schema, type Schema, type Context } from '../schema';
 import { QueryACLFactory } from './core/query-acl-factory';
-import { connectReach, CONNECT_SCOPED_TABLES } from './core/connect-reach';
+import { connectReach, connectColumnForTable, CONNECT_SCOPED_TABLES } from './core/connect-reach';
 import type { TableName, SelectArgs } from './core/types';
 import type { StandardSchemaV1 } from '@standard-schema/spec';
 import type { ReadonlyJSONValue } from '@rocicorp/zero';
@@ -114,7 +114,7 @@ function applyQueryACL<TQuery>(
     // workspace), falling back to workspaceId for rows that have no connectId yet.
     if (CONNECT_SCOPED_TABLES.has(tableName)) {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      return (scoped as any).where(connectReach(ctx)) as TQuery;
+      return (scoped as any).where(connectReach(ctx, undefined, connectColumnForTable(tableName))) as TQuery;
     }
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     return (scoped as any).where('workspaceId', '=', ctx.workspaceId) as TQuery;

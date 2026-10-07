@@ -1,5 +1,5 @@
 export { defineQuery } from './define-query';
-export { connectReach, CONNECT_SCOPED_TABLES } from './core/connect-reach';
+export { connectReach, connectColumnForTable, CONNECT_SCOPED_TABLES } from './core/connect-reach';
 
 export { BaseQueryACL, QueryACLFactory } from './core';
 export type {TableName, TableQuery } from './core';
