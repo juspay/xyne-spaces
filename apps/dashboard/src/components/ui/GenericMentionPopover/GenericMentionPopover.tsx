@@ -60,14 +60,16 @@ export const GenericMentionHoverPopover: React.FC<GenericMentionHoverPopoverProp
       closeDelay={200}
       open={isOpen}
       onOpenChange={setIsOpen}
-      className='min-w-[300px] bg-transparent p-0 border-0 shadow-none'
+      className='min-w-[300px] max-w-[360px] bg-transparent p-0 border-0 shadow-none'
     >
-      <div className='bg-popover rounded-lg shadow-lg min-w-[300px] border border-border'>
+      <div className='bg-popover rounded-lg shadow-lg min-w-[300px] max-w-[360px] border border-border'>
         <div className='p-4'>
           {/* Title row */}
-          <div className='flex items-center gap-2 mb-2'>
-            {data.icon && <span className='text-lg'>{data.icon}</span>}
-            <div className='font-semibold text-foreground'>{data.title}</div>
+          <div className='flex items-center gap-2 mb-2 min-w-0'>
+            {data.icon && <span className='text-lg shrink-0'>{data.icon}</span>}
+            <div className='font-semibold text-foreground min-w-0 line-clamp-2 break-words [overflow-wrap:anywhere]'>
+              {data.title}
+            </div>
           </div>
 
           {data.subtitle && (
