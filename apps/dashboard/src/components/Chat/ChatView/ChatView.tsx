@@ -32,6 +32,10 @@ import { useChannelDisplayName } from '../../../hooks/useChannelDisplayName';
 import { CallExternalChatPanel } from '../../Call/CallExternalChatPanel/CallExternalChatPanel';
 import { globalClickTracker } from '../../../services/Analytics/globalClickTracker';
 import { channelTrackingMetadata } from '../../../services/Analytics/channelTracking';
+import {
+  clearChatScreenVisibility,
+  setChatScreenVisibility,
+} from '../../../stores/chatScreenVisibilityStore';
 
 interface ChatScreenContext {
   shouldStackThread?: boolean;
@@ -229,6 +233,39 @@ const ChatView = (): ReactElement => {
   const minConversationPannelSize = '25%';
   const defaultSecondaryPanelSize = '50%';
   const minSecondaryPanelSize = '40%';
+
+  // Publish what this screen actually shows, mirroring the render branches below,
+  // so NotificationHandler only silences messages the user can see.
+  const listTab = searchParams.get('tab');
+  const threadTab = searchParams.get('selectedTab');
+  const isListReplaced =
+    isFocusThread || isThreadSummaryActive || isCanvasFullscreen || isDeactivatedProfileActive;
+  const isListCovered = showSecondaryPanel && shouldStack;
+  const isChannelListVisible =
+    !isListReplaced && !isListCovered && (!listTab || listTab === 'messages');
+
+  const sidePanelShowsThread =
+    !isProfileActive && !isCanvasActive && !isChannelSummaryActive && !isExternalChatActive;
+  const isThreadCovered =
+    (isThreadSummaryActive || (isFocusThread && isThreadProfileActive)) && shouldStack;
+  const isThreadPanelVisible =
+    !!conversationId &&
+    (!threadTab || threadTab === 'thread') &&
+    !isThreadCovered &&
+    (isFocusThread || isThreadSummaryActive || sidePanelShowsThread);
+  const visibleListChannelId = isChannelListVisible && channelId ? channelId : null;
+  const visibleThreadId = isThreadPanelVisible && conversationId ? conversationId : null;
+  const visibilityWriterRef = useRef(Symbol('ChatView'));
+  useEffect(() => {
+    setChatScreenVisibility(visibilityWriterRef.current, {
+      listChannelId: visibleListChannelId,
+      threadId: visibleThreadId,
+    });
+  }, [visibleListChannelId, visibleThreadId]);
+  useEffect(() => {
+    const writer = visibilityWriterRef.current;
+    return (): void => clearChatScreenVisibility(writer);
+  }, []);
 
   if (channelId === undefined) {
     void navigate('/chat', { replace: true });

@@ -6,7 +6,7 @@ import { hydrateDynamicHeaders } from '../../services/clients/dynamicHeaders';
 import { useDeferredClientCommand, type ClientCommand } from '../../hooks/useDeferredClientCommand';
 import { toast } from 'sonner';
 import { useAuthContext } from '../../providers/AuthProvider';
-import { useLocation, useNavigate, useParams } from 'react-router-dom';
+import { useNavigate, useParams } from 'react-router-dom';
 import { API_BASE_URL } from '../../config';
 import { queryClient } from '../../services/clients/queryClient';
 import { NativeInboundMessageType, reactNativeBridge } from '../../utils/reactNativeBridge';
@@ -28,6 +28,7 @@ import {
 } from '../../hooks/useRecordingStore';
 import { getRecordingDefaultLayout } from '../../hooks/useRecordingDefaultLayout';
 import { isViewingNotificationTarget } from '../../utils/notificationViewing';
+import { getChatScreenVisibility } from '../../stores/chatScreenVisibilityStore';
 import { sendSosAlertEvent } from '../../stores/sosAlertStore';
 import { globalClickTracker } from '../../services/Analytics/globalClickTracker';
 import { setExternalMeeting, setMicBusy } from '../../stores/externalMeetingStore';
@@ -137,12 +138,6 @@ export const NotificationHandler: React.FC = () => {
   useEffect(() => {
     activeWorkspaceIdRef.current = activeWorkspaceId;
   }, [activeWorkspaceId]);
-  // Chat routes sit below this component, so read the open chat from the path.
-  const { pathname, search } = useLocation();
-  const locationRef = useRef({ pathname, search });
-  useEffect(() => {
-    locationRef.current = { pathname, search };
-  }, [pathname, search]);
   const isConnectedRef = useRef(false);
   const isElectron = typeof window !== 'undefined' && window.electronAPI !== undefined;
 
@@ -321,7 +316,6 @@ export const NotificationHandler: React.FC = () => {
         const isViewingTarget = isViewingNotificationTarget(
           {
             type: data.notification.type,
-            workspaceId: notificationWorkspaceId,
             relatedEntityType: data.notification.data?.relatedEntityType,
             channelId: data.notification.data?.channelId,
             conversationId: data.notification.data?.conversationId,
@@ -329,7 +323,7 @@ export const NotificationHandler: React.FC = () => {
             initialMessageId: data.notification.data?.conversation?.initialMessageId,
           },
           {
-            ...locationRef.current,
+            ...getChatScreenVisibility(),
             isAppFocused: document.visibilityState === 'visible' && document.hasFocus(),
           },
         );
