@@ -2,10 +2,11 @@ import { transaction } from '../base';
 import { CallWhiteboardRepository, SaveCallWhiteboardAttachmentInput } from '@/database/repositories/callWhiteboardRepository';
 import { AttachmentEntityType, MessageType, serializeRepliesMd, addReplyToData, parseRepliesMd } from '@xyne/shared';
 import { advisoryXactLock } from '@/bypassAcl/lockServices';
+import { escapeHtml } from '@/utils/htmlEscape';
 
 
 export function saveCallWhiteboardAttachmentTx(self: CallWhiteboardRepository, lockKey: string, data: SaveCallWhiteboardAttachmentInput) {
-  return transaction(['Conversation', 'ConversationParticipant', 'Message', 'MessageAttachment'], 'saveCallWhiteboardAttachment: whiteboard message, attachment and conversation counters must commit atomically; tx is not ACL-wrapped', self.db, 
+  return transaction(['Conversation', 'ConversationParticipant', 'Message', 'MessageAttachment', 'User'], 'saveCallWhiteboardAttachment: whiteboard message, attachment and conversation counters must commit atomically; tx is not ACL-wrapped', self.db,
     async tx => {
       await advisoryXactLock(tx, ['MessageAttachment'],
         'call whiteboard: serialize get-or-create of the whiteboard attachment for a call page',
@@ -32,13 +33,21 @@ export function saveCallWhiteboardAttachmentTx(self: CallWhiteboardRepository, l
         };
       }
 
+      const uploader = await tx.user.findUnique({
+        where: { id: data.savedByUserId },
+        select: { displayName: true, name: true, email: true },
+      });
+      const savedByName = uploader?.displayName || uploader?.name || uploader?.email || 'A call participant';
+
       const now = new Date();
       const whiteboardMessage = await tx.message.create({
         data: {
           conversationId: data.conversationId,
           workspaceId: data.workspaceId,
           senderId: data.botUserId,
-          content: '',
+          // Resolve the display name from the authenticated caller's user ID on the server.
+          // No caller-controlled name is accepted by the endpoint or repository contract.
+          content: `Saved by ${escapeHtml(savedByName)}`,
           msgType: MessageType.BOT,
           hasAttachment: true,
           showInChannel: false,
@@ -48,6 +57,7 @@ export function saveCallWhiteboardAttachmentTx(self: CallWhiteboardRepository, l
             messageSubtype: 'call_whiteboard',
             callMessageId: data.callMessageId,
             savedByUserId: data.savedByUserId,
+            savedByName,
             ...(data.pageId && { pageId: data.pageId }),
             ...(data.pageLabel && { pageLabel: data.pageLabel }),
             ...(data.pageOrder !== undefined && { pageOrder: data.pageOrder }),
@@ -76,6 +86,7 @@ export function saveCallWhiteboardAttachmentTx(self: CallWhiteboardRepository, l
             callMessageId: data.callMessageId,
             messageId: whiteboardMessage.messageId,
             savedByUserId: data.savedByUserId,
+            savedByName,
             ...(data.pageId && { pageId: data.pageId }),
             ...(data.pageLabel && { pageLabel: data.pageLabel }),
             ...(data.pageOrder !== undefined && { pageOrder: data.pageOrder }),

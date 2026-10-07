@@ -220,11 +220,11 @@ export const InstantCallModal: React.FC<InstantCallModalProps> = ({
     <Dialog
       open={isOpen}
       onOpenChange={open => !open && handleClose()}
-      className='max-w-[584px] rounded-xl overflow-hidden'
+      className='max-w-[584px] max-h-[85vh] rounded-xl overflow-hidden flex flex-col'
       {...(!isMobile ? { focusRef: selectorInputFocusRef } : {})}
     >
-      <div className='flex flex-col w-full'>
-        <div className='flex items-start justify-between px-5 py-3.5 border-b border-border h-14'>
+      <div className='flex flex-col w-full min-h-0 flex-1'>
+        <div className='flex items-start justify-between px-5 py-3.5 border-b border-border h-14 shrink-0'>
           <h2 className='text-[15px] font-semibold text-foreground leading-5'>
             {callDisplayName ? `Start a call in ${callDisplayName}` : 'Start an Instant Call'}
           </h2>
@@ -239,8 +239,8 @@ export const InstantCallModal: React.FC<InstantCallModalProps> = ({
             <X className='size-4' />
           </Button>
         </div>
-        <div className='p-5 space-y-5'>
-          <div className='space-y-2'>
+        <div className='p-5 space-y-5 flex flex-col min-h-0 flex-1'>
+          <div className='space-y-2 flex flex-col min-h-0'>
             <div className='flex items-center justify-between'>
               <p className='text-[#788187] text-[13px] leading-5'>Add Participants</p>
               {selectedUsers.length > 0 && (
@@ -266,7 +266,7 @@ export const InstantCallModal: React.FC<InstantCallModalProps> = ({
             </div>
             {/* Selected participants list - horizontal with wrap */}
             {selectedUsers.length > 0 && (
-              <div className='flex flex-wrap gap-2 mb-3'>
+              <div className='flex flex-wrap gap-2 mb-3 max-h-40 overflow-y-auto pr-1'>
                 {selectedUsers.map(user => (
                   <div
                     key={user.id}
@@ -322,7 +322,7 @@ export const InstantCallModal: React.FC<InstantCallModalProps> = ({
               />
             </div>
           </div>
-          <div className='flex items-center justify-between'>
+          <div className='flex items-center justify-between shrink-0'>
             <Button
               variant='outline'
               size='sm'

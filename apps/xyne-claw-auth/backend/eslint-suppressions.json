@@ -1,0 +1,462 @@
+{
+  "src/awakening/dispatch.ts": {
+    "no-restricted-globals": {
+      "count": 1
+    }
+  },
+  "src/lib/azure-tts.ts": {
+    "no-restricted-globals": {
+      "count": 1
+    }
+  },
+  "src/lib/classic-oauth-provider.ts": {
+    "no-restricted-globals": {
+      "count": 2
+    }
+  },
+  "src/lib/claude-oauth-refresh.ts": {
+    "no-restricted-globals": {
+      "count": 1
+    }
+  },
+  "src/lib/claw-fetch.ts": {
+    "no-restricted-globals": {
+      "count": 1
+    }
+  },
+  "src/lib/codex-oauth-refresh.ts": {
+    "no-restricted-globals": {
+      "count": 1
+    }
+  },
+  "src/lib/consume-claw-stream.ts": {
+    "no-restricted-globals": {
+      "count": 4
+    }
+  },
+  "src/lib/conversation-gate.ts": {
+    "no-restricted-globals": {
+      "count": 1
+    }
+  },
+  "src/lib/credentials-refresh.ts": {
+    "no-restricted-globals": {
+      "count": 11
+    }
+  },
+  "src/lib/eval-run.ts": {
+    "no-restricted-globals": {
+      "count": 1
+    }
+  },
+  "src/lib/experiment.ts": {
+    "no-restricted-globals": {
+      "count": 2
+    }
+  },
+  "src/lib/local-harness-approval.ts": {
+    "no-restricted-globals": {
+      "count": 1
+    }
+  },
+  "src/lib/local-harness.ts": {
+    "no-restricted-globals": {
+      "count": 6
+    }
+  },
+  "src/lib/mcp-oauth-provider.ts": {
+    "no-restricted-globals": {
+      "count": 4
+    }
+  },
+  "src/lib/oauth-custom-tool.ts": {
+    "no-restricted-globals": {
+      "count": 1
+    }
+  },
+  "src/lib/provider-credential-verify.ts": {
+    "no-restricted-globals": {
+      "count": 1
+    }
+  },
+  "src/lib/run-bridge.ts": {
+    "no-restricted-globals": {
+      "count": 3
+    }
+  },
+  "src/lib/run-turn-handoff.ts": {
+    "no-restricted-globals": {
+      "count": 1
+    }
+  },
+  "src/lib/spaces-api.ts": {
+    "no-restricted-globals": {
+      "count": 3
+    }
+  },
+  "src/lib/spaces-app-secret.ts": {
+    "no-restricted-globals": {
+      "count": 1
+    }
+  },
+  "src/lib/spaces-db.ts": {
+    "no-restricted-globals": {
+      "count": 1
+    }
+  },
+  "src/lib/twin-approval-delivery.ts": {
+    "no-restricted-globals": {
+      "count": 1
+    }
+  },
+  "src/lib/webhook-commands/clear.ts": {
+    "no-restricted-globals": {
+      "count": 1
+    }
+  },
+  "src/lib/webhook-commands/debug.ts": {
+    "no-restricted-globals": {
+      "count": 1
+    }
+  },
+  "src/lib/workflow-handoff.ts": {
+    "no-restricted-globals": {
+      "count": 1
+    }
+  },
+  "src/lib/write-actions.ts": {
+    "no-restricted-globals": {
+      "count": 2
+    }
+  },
+  "src/lib/xyne-ai-continuation.ts": {
+    "no-restricted-globals": {
+      "count": 1
+    }
+  },
+  "src/mcp/adapters/bitbucket.ts": {
+    "no-restricted-globals": {
+      "count": 5
+    }
+  },
+  "src/mcp/adapters/github-insights.ts": {
+    "no-restricted-globals": {
+      "count": 1
+    }
+  },
+  "src/mcp/adapters/github.ts": {
+    "no-restricted-globals": {
+      "count": 3
+    }
+  },
+  "src/mcp/adapters/grafana.ts": {
+    "no-restricted-globals": {
+      "count": 1
+    }
+  },
+  "src/mcp/adapters/postman.ts": {
+    "no-restricted-globals": {
+      "count": 1
+    }
+  },
+  "src/mcp/adapters/slack.ts": {
+    "no-restricted-globals": {
+      "count": 1
+    }
+  },
+  "src/mcp/adapters/webfetch.ts": {
+    "no-restricted-globals": {
+      "count": 1
+    }
+  },
+  "src/mcp/bitbucket-throttle.ts": {
+    "no-restricted-globals": {
+      "count": 1
+    }
+  },
+  "src/mcp/servers/bitbot-server.ts": {
+    "no-restricted-globals": {
+      "count": 1
+    }
+  },
+  "src/mcp/servers/heisenberg-tools.ts": {
+    "no-restricted-globals": {
+      "count": 1
+    }
+  },
+  "src/mcp/servers/jenkins-tools.ts": {
+    "no-restricted-globals": {
+      "count": 1
+    }
+  },
+  "src/mcp/servers/linkedin-rapidapi-server.ts": {
+    "no-restricted-globals": {
+      "count": 1
+    }
+  },
+  "src/mcp/servers/neo4j-http-server.ts": {
+    "no-restricted-globals": {
+      "count": 1
+    }
+  },
+  "src/mcp/servers/query-routing-server.ts": {
+    "no-restricted-globals": {
+      "count": 1
+    }
+  },
+  "src/mcp/servers/reddit-server.ts": {
+    "no-restricted-globals": {
+      "count": 1
+    }
+  },
+  "src/mcp/servers/research-agent-mcp-server.ts": {
+    "no-restricted-globals": {
+      "count": 1
+    }
+  },
+  "src/mcp/servers/twitter-server.ts": {
+    "no-restricted-globals": {
+      "count": 1
+    }
+  },
+  "src/mcp/servers/vespa-direct.ts": {
+    "no-restricted-globals": {
+      "count": 1
+    }
+  },
+  "src/mcp/servers/vespa-schema-profiles.ts": {
+    "no-restricted-globals": {
+      "count": 1
+    }
+  },
+  "src/mcp/servers/x-news-server.ts": {
+    "no-restricted-globals": {
+      "count": 1
+    }
+  },
+  "src/mcp/servers/xyne-spaces-app-tools-server.ts": {
+    "no-restricted-globals": {
+      "count": 1
+    }
+  },
+  "src/mcp/servers/xyne-spaces-client.ts": {
+    "no-restricted-globals": {
+      "count": 5
+    }
+  },
+  "src/mcp/servers/xyne-spaces-tools.ts": {
+    "no-restricted-globals": {
+      "count": 3
+    }
+  },
+  "src/mcpgateway/services/http-client.ts": {
+    "no-restricted-globals": {
+      "count": 1
+    }
+  },
+  "src/middleware/require-auth.ts": {
+    "no-restricted-globals": {
+      "count": 1
+    }
+  },
+  "src/queue/provider-retry-worker.ts": {
+    "no-restricted-globals": {
+      "count": 3
+    }
+  },
+  "src/queue/run-recovery-worker.ts": {
+    "no-restricted-globals": {
+      "count": 1
+    }
+  },
+  "src/queue/scheduled-jobs-worker.ts": {
+    "no-restricted-globals": {
+      "count": 1
+    }
+  },
+  "src/routes/agent-chat.ts": {
+    "no-restricted-globals": {
+      "count": 7
+    }
+  },
+  "src/routes/agents.ts": {
+    "no-restricted-globals": {
+      "count": 18
+    }
+  },
+  "src/routes/app-callback.ts": {
+    "no-restricted-globals": {
+      "count": 6
+    }
+  },
+  "src/routes/artifact-app-agents.ts": {
+    "no-restricted-globals": {
+      "count": 2
+    }
+  },
+  "src/routes/attachments.ts": {
+    "no-restricted-globals": {
+      "count": 1
+    }
+  },
+  "src/routes/chain-workflows.ts": {
+    "no-restricted-globals": {
+      "count": 2
+    }
+  },
+  "src/routes/connections.ts": {
+    "no-restricted-globals": {
+      "count": 2
+    }
+  },
+  "src/routes/docusign-oauth.ts": {
+    "no-restricted-globals": {
+      "count": 3
+    }
+  },
+  "src/routes/flow-action.ts": {
+    "no-restricted-globals": {
+      "count": 9
+    }
+  },
+  "src/routes/lib/branching.ts": {
+    "no-restricted-globals": {
+      "count": 1
+    }
+  },
+  "src/routes/mcp.ts": {
+    "no-restricted-globals": {
+      "count": 2
+    }
+  },
+  "src/routes/rapidapi-linkedin.ts": {
+    "no-restricted-globals": {
+      "count": 1
+    }
+  },
+  "src/routes/research-agent.ts": {
+    "no-restricted-globals": {
+      "count": 1
+    }
+  },
+  "src/routes/run-stream.ts": {
+    "no-restricted-globals": {
+      "count": 6
+    }
+  },
+  "src/routes/run.ts": {
+    "no-restricted-globals": {
+      "count": 5
+    }
+  },
+  "src/routes/sdlc-runtime-credentials.ts": {
+    "no-restricted-globals": {
+      "count": 1
+    }
+  },
+  "src/routes/settings.ts": {
+    "no-restricted-globals": {
+      "count": 5
+    }
+  },
+  "src/routes/spaces.ts": {
+    "no-restricted-globals": {
+      "count": 2
+    }
+  },
+  "src/routes/webhook.ts": {
+    "no-restricted-globals": {
+      "count": 12
+    }
+  },
+  "src/services/bitbucket-stats.ts": {
+    "no-restricted-globals": {
+      "count": 1
+    }
+  },
+  "src/services/chatTitleClient.ts": {
+    "no-restricted-globals": {
+      "count": 1
+    }
+  },
+  "src/services/entityExtraction/channelTypeSync.ts": {
+    "no-restricted-globals": {
+      "count": 1
+    }
+  },
+  "src/services/entityExtraction/entityLlmClient.ts": {
+    "no-restricted-globals": {
+      "count": 1
+    }
+  },
+  "src/services/evalGenerationReplay.ts": {
+    "no-restricted-globals": {
+      "count": 1
+    }
+  },
+  "src/services/evalJudgeClient.ts": {
+    "no-restricted-globals": {
+      "count": 3
+    }
+  },
+  "src/services/failure-curator-worker.ts": {
+    "no-restricted-globals": {
+      "count": 1
+    }
+  },
+  "src/services/goalJudgeClient.ts": {
+    "no-restricted-globals": {
+      "count": 1
+    }
+  },
+  "src/services/memoryHygieneService.ts": {
+    "no-restricted-globals": {
+      "count": 1
+    }
+  },
+  "src/services/memoryRetentionService.ts": {
+    "no-restricted-globals": {
+      "count": 1
+    }
+  },
+  "src/services/sessionCurator.ts": {
+    "no-restricted-globals": {
+      "count": 4
+    }
+  },
+  "src/services/twinRespondGate.ts": {
+    "no-restricted-globals": {
+      "count": 1
+    }
+  },
+  "src/services/twinSoulSynthesizer.ts": {
+    "no-restricted-globals": {
+      "count": 1
+    }
+  },
+  "src/services/usage-patterns/synthesize.ts": {
+    "no-restricted-globals": {
+      "count": 1
+    }
+  },
+  "src/services/userMemoryCuratorClient.ts": {
+    "no-restricted-globals": {
+      "count": 1
+    }
+  },
+  "src/surfaces/external-api/api.ts": {
+    "no-restricted-globals": {
+      "count": 1
+    }
+  },
+  "src/surfaces/messaging/commands.ts": {
+    "no-restricted-globals": {
+      "count": 2
+    }
+  },
+  "src/surfaces/spaces/client.ts": {
+    "no-restricted-globals": {
+      "count": 3
+    }
+  }
+}

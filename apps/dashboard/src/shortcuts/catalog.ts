@@ -273,7 +273,7 @@ export const shortcuts = {
   'files.rename': {
     keys: 'r',
     scope: 'sdlc-files',
-    description: 'Rename folder',
+    description: 'Rename',
     category: 'SDLC',
     preventDefault: true,
   },
@@ -332,6 +332,33 @@ export const shortcuts = {
     description: 'Open in a tab',
     category: 'SDLC',
     preventDefault: true,
+  },
+  'explorer.rename': {
+    keys: ['r', 'f2'],
+    scope: 'sdlc-explorer',
+    description: 'Rename',
+    category: 'SDLC',
+    preventDefault: true,
+  },
+  'explorer.cut': {
+    keys: 'mod+x',
+    scope: 'sdlc-explorer',
+    description: 'Cut, to paste into another folder',
+    category: 'SDLC',
+    preventDefault: true,
+  },
+  'explorer.paste': {
+    keys: 'mod+v',
+    scope: 'sdlc-explorer',
+    description: 'Paste what was cut into this folder',
+    category: 'SDLC',
+    preventDefault: true,
+  },
+  'explorer.cancelCut': {
+    keys: 'esc',
+    scope: 'sdlc-explorer',
+    description: 'Let go of what was cut',
+    category: 'SDLC',
   },
   'files.newFolder': {
     keys: 'n',
@@ -640,6 +667,37 @@ export const shortcuts = {
   'viewer.findPrevious': {
     keys: 'mod+shift+g',
     scope: 'viewer',
+    priority: 200,
+    allowInInputs: true,
+    preventDefault: true,
+    description: 'Find previous match',
+    category: 'Viewer',
+  },
+
+  // A file previewed in a tab — the SDLC folder page's — pushes `file-preview` while
+  // one with something to search is on screen, so mod+f finds in the file rather
+  // than in the channel; it lets go when the file is an image or video.
+  'preview.find': {
+    keys: 'mod+f',
+    scope: 'file-preview',
+    priority: 200,
+    allowInInputs: true,
+    preventDefault: true,
+    description: 'Find in file',
+    category: 'Viewer',
+  },
+  'preview.findNext': {
+    keys: 'mod+g',
+    scope: 'file-preview',
+    priority: 200,
+    allowInInputs: true,
+    preventDefault: true,
+    description: 'Find next match',
+    category: 'Viewer',
+  },
+  'preview.findPrevious': {
+    keys: 'mod+shift+g',
+    scope: 'file-preview',
     priority: 200,
     allowInInputs: true,
     preventDefault: true,

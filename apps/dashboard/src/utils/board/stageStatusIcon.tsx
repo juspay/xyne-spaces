@@ -67,7 +67,7 @@ export const StageStatusIcon = ({
   return <Icon strokeWidth={2.5} className='w-3.5 h-3.5 shrink-0' style={{ color: cssVar }} />;
 };
 
-const resolveStageStatus = (
+export const resolveStageStatus = (
   stages: readonly StageIndicatorStage[] | null | undefined,
   stageName: string | null | undefined,
   fallbackStatus?: string | null,

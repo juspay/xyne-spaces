@@ -7,7 +7,7 @@ import {
   createOwnerToken,
   currentOwnerPod,
   fenceSession,
-  ownerStatus,
+  inspectOwner,
   refreshOwnership,
   releaseOwnership,
   registerOwnedSession,
@@ -19,7 +19,7 @@ import { startRunControlSubscriber } from "./run-control.js";
 import { RUN_TIMED_OUT, maxRunMs, raceRunDeadline } from "./run-deadline.js";
 import { createLogger } from "./logger.js";
 import { metric } from "./metrics.js";
-import { SERVER } from "./config.js";
+import { SERVER, isAllowedCallbackUrl } from "./config.js";
 import {
   activeAutomationRuns,
   automationConcurrencyLimit,
@@ -56,10 +56,14 @@ function pressureBackoffMs(job: Job<InternalRunPayload>): number {
   return Math.floor(base * (1 + Math.random() * 0.25));
 }
 
-async function postProgressLabel(payload: InternalRunPayload, toolLabel: string): Promise<void> {
+export async function postProgressLabel(payload: InternalRunPayload, toolLabel: string): Promise<void> {
   const dest = payload.progressUrl;
   const sessionId = payload.sessionId;
   if (!dest || !sessionId) return;
+  if (!isAllowedCallbackUrl(dest)) {
+    clog.warn(`[run-queue] ignoring non-allowlisted progressUrl session=${sessionId}`);
+    return;
+  }
   const res = await fetch(dest, {
     method: "POST",
     headers: {
@@ -130,10 +134,16 @@ async function runClaimedJob(
   sessionId: string,
   agent: string,
   ownerToken: string,
+  takeoverFrom: string | null,
 ): Promise<void> {
+  if (!(await claimOwnership(sessionId, ownerToken, takeoverFrom))) {
+    metric.count("run_queue_claim_lost", { agent, session: sessionId });
+    clog.warn(`[run-queue] another runner claimed session=${sessionId} first — deferring`);
+    await job.moveToDelayed(Date.now() + OWNER_DEFER_MS, token);
+    throw new DelayedError();
+  }
   metric.count("run_queue_claimed", { agent, session: sessionId, attempt: job.attemptsMade + 1 });
   await postProgressLabel(job.data, "Working on it...").catch(() => {});
-  await claimOwnership(sessionId, ownerToken);
   let fencedOut = false;
   registerOwnedSession(sessionId, ownerToken, () => {
     if (fencedOut) return;
@@ -234,7 +244,7 @@ export function startRunQueueWorker(): Worker<InternalRunPayload> | null {
         throw new DelayedError();
       }
       const ownerToken = createOwnerToken();
-      const status = await ownerStatus(sessionId, ownerToken);
+      const { status, holder } = await inspectOwner(sessionId, ownerToken);
       if (status === "alive-other") {
         metric.count("run_queue_owner_alive", { agent, session: sessionId });
         clog.warn(`[run-queue] previous runner still owns session=${sessionId} — deferring takeover`);
@@ -256,7 +266,7 @@ export function startRunQueueWorker(): Worker<InternalRunPayload> | null {
         metric.observe("run_queue_automation_wait_ms", Math.max(0, Date.now() - job.timestamp), { agent, active: activeAutomationRuns() });
       }
       try {
-        return await runClaimedJob(job, token, sessionId, agent, ownerToken);
+        return await runClaimedJob(job, token, sessionId, agent, ownerToken, status === "dead-other" ? holder : null);
       } finally {
         if (automation) releaseAutomationSlot();
       }

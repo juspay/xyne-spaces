@@ -1,5 +1,6 @@
 import { Prisma, type ChatConversationMeta } from "@prisma/client";
 import { prisma } from "../db.js";
+import { userIdFilter } from "./userIdFilter.js";
 
 interface MetaKey {
   conversationId: string;
@@ -19,14 +20,16 @@ export const chatConversationMetaRepository = {
   find: (key: MetaKey): Promise<ChatConversationMeta | null> =>
     prisma.chatConversationMeta.findUnique({ where: byKey(key) }),
 
+  /** Meta rows may be keyed by either of the caller's verified ids, so reads
+   *  accept the same alias set as the chat-message reads that pair with them. */
   byConversationIds: async (
     conversationIds: string[],
-    userId: string,
+    userIds: string | string[],
     agentSlug: string,
   ): Promise<Map<string, { title: string | null; pinned: boolean }>> => {
     if (conversationIds.length === 0) return new Map();
     const rows = await prisma.chatConversationMeta.findMany({
-      where: { conversationId: { in: conversationIds }, userId, agentSlug },
+      where: { conversationId: { in: conversationIds }, ...userIdFilter(userIds), agentSlug },
       select: { conversationId: true, title: true, pinned: true },
     });
     return new Map(

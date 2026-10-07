@@ -96,6 +96,26 @@ export class UserRepository extends BaseRepository<User, CreateUserInput, Update
     });
   }
 
+  /**
+   * Find every user in a workspace whose email local part matches `localPart`
+   * (the segment before `@`), e.g. 'harimohan.sharma' → harimohan.sharma@juspay.in.
+   *
+   * This is the Xyne equivalent of Slack's per-workspace `user.name` handle, which
+   * Slack auto-derives from the email local part at signup — it is what lets Slack
+   * resolve a legacy `<@handle>` mention. Unlike Slack's handle, an email local part
+   * is NOT unique within a workspace (harry@a.com and harry@b.com both match
+   * 'harry'), so this returns all matches and leaves the ambiguity decision to the
+   * caller rather than silently picking one.
+   */
+  async findManyByEmailLocalPart(localPart: string, workspaceId: string): Promise<User[]> {
+    return await this.db.user.findMany({
+      where: {
+        email: { startsWith: `${localPart}@`, mode: 'insensitive' },
+        workspaceId,
+      },
+    });
+  }
+
   async findByProviderUserId(providerUserId: string, workspaceId: string): Promise<User | null> {
     return await this.db.user.findUnique({
       where: { providerUserId_workspaceId: { providerUserId, workspaceId } },
