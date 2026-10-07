@@ -527,7 +527,12 @@ type ReuseStepSession = {
   };
 };
 
-const REUSE_STEP_OUTPUT_LINES = 20;
+const STEP_OUTPUT_TAIL_LINES = 20;
+
+export function stepOutputTail(stdout: string | null | undefined): string | null {
+  const output = redactSecrets(stdout ?? "").trim();
+  return output ? output.split("\n").slice(-STEP_OUTPUT_TAIL_LINES).join("\n") : null;
+}
 
 export async function runReuseSteps(
   session: ReuseStepSession,
@@ -554,8 +559,8 @@ export async function runReuseSteps(
         } else {
           log.push(`${step.label} done.`);
         }
-        const output = redactSecrets(status.stdout ?? "").trim();
-        if (output) log.push(output.split("\n").slice(-REUSE_STEP_OUTPUT_LINES).join("\n"));
+        const tail = stepOutputTail(status.stdout);
+        if (tail) log.push(tail);
         break;
       }
       if (!finished) log.push(`${step.label}: WARN still running after ${timeoutMs / 1000}s on reuse; continuing.`);
@@ -2269,7 +2274,9 @@ export function makeRepoSetupTool(config: RepoSetupConfig): ToolDefinition {
             log.push(`Running: ${step.label}...`);
             const cwd = step.cwd || config.workDir;
             const jobId = await session.commands.runDetached(`cd ${cwd} && ${step.cmd}`);
-            await pollUntilDone(jobId, step.label, step.timeoutMs || 5 * 60_000);
+            const status = await pollUntilDone(jobId, step.label, step.timeoutMs || 5 * 60_000);
+            const tail = stepOutputTail(status.stdout);
+            if (tail) log.push(tail);
             break;
           }
         }
