@@ -689,6 +689,8 @@ export class SlackMigrationEngine {
         }
         if (participantId) await participantRepo.addParticipant(channelId, participantId).catch(() => undefined);
       }
+      // Members are the channel doc's search permissions; the adds above are DB writes Zero never sees, so re-feed.
+      await channelRepo.queueVespaFeed(channelId, job.workspaceId);
     } else {
       // Place the new DM at its real last-message time so it never jumps to the top.
       const newest = newestMessageDate(messages);
