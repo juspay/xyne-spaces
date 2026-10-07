@@ -92,6 +92,55 @@ export const createAgentTool: ToolDefinition = {
       modelId: { type: "string", description: "Optional model id to pin, e.g. 'claude-sonnet-5'. Omit to inherit the workspace default." },
       color: { type: "string", description: "Optional hex accent colour for the agent's avatar, e.g. '#6366f1'." },
       tools: toolsProperty,
+      mcps: {
+        type: "array",
+        description:
+          "Integrations to grant by NAME when the user asks for one — 'github', 'bitbucket', 'grafana'. " +
+          "Several integrations also ship a subagent under the SAME name, and a name in `tools` always resolves " +
+          "to the subagent, so put integrations here rather than in `tools`.",
+        items: { type: "string" },
+      },
+      skills: {
+        type: "array",
+        description: "Skill names to attach, matched against the org's skills. Only when the user asked for them.",
+        items: { type: "string" },
+      },
+      knowledge: {
+        type: "object",
+        description: "Knowledge-base access. Only when the user asked for it; omit to leave the org default.",
+        properties: {
+          scope: { type: "string", enum: ["COLLECTIONS", "USER"] },
+          collections: { type: "array", items: { type: "string" } },
+        },
+      },
+      providerOrder: {
+        type: "array",
+        description:
+          "AI providers in preference order, e.g. ['claude','codex']. Only when the user named one — an " +
+          "unrequested provider is worse than the org default.",
+        items: { type: "string" },
+      },
+      memory: {
+        type: "object",
+        description: "Agent memory. Only when the user asked for it.",
+        properties: {
+          enabled: { type: "boolean" },
+          requiresApproval: { type: "boolean" },
+        },
+        required: ["enabled"],
+      },
+      scope: {
+        type: "string",
+        enum: ["personal", "global"],
+        description: "'personal' (default) belongs to the requester; 'global' is org-wide. Only set when asked.",
+      },
+      summary: {
+        type: "string",
+        description:
+          "One or two sentences posted next to the card, in your own voice: what you built and WHY you made the " +
+          "key calls — which tools you granted and anything you deliberately left out. The card already lists the " +
+          "name, description and tools, so do NOT restate them.",
+      },
     },
     required: ["name", "description", "systemPrompt"],
   },
