@@ -52,6 +52,22 @@ export interface EffectiveCredentials {
    *  avoid mutating global creds on a per-user code path). False for both
    *  agent-pinned and global creds. */
   isUserOwned: boolean;
+  instance?: string;
+}
+
+async function subagentInstanceFor(
+  subagentId: string,
+  serverType: string,
+  orgId: string,
+): Promise<string | undefined> {
+  const row = await prisma.subagentDefinition.findFirst({
+    where: { id: subagentId, orgId },
+    select: { mcpInstanceMap: true },
+  });
+  const map = row?.mcpInstanceMap;
+  if (!map || typeof map !== "object" || Array.isArray(map)) return undefined;
+  const slug = (map as Record<string, unknown>)[serverType];
+  return typeof slug === "string" && slug.trim() ? slug.trim() : undefined;
 }
 
 /**
@@ -261,6 +277,8 @@ export async function loadEffectiveCredentials(
   }
 
 
+  let agentInstance = instanceSlug;
+  let instanceFromSubagent = false;
   if (subagentId) {
     const subagentOrgScope = agentOrgId
       ?? (await prisma.user.findUnique({ where: { id: userId }, select: { orgId: true } }))?.orgId
@@ -308,6 +326,7 @@ export async function loadEffectiveCredentials(
           connectionId: subConn.id,
           credentials: JSON.parse(decrypted) as Record<string, unknown>,
           isUserOwned: false,
+          instance: `subagent:${subConn.id}`,
         };
       } catch (err) {
         // A pinned-but-undecryptable credential is a config error. When the pin
@@ -317,6 +336,10 @@ export async function loadEffectiveCredentials(
         log.error(`[creds-loader] ${serverType} subagent=${subagentId} → decrypt failed: ${errMsg(err)}`);
         if (subConn.nonOverridable) return null;
       }
+    }
+    if (!subConn && !agentInstance && subagentOrgScope) {
+      agentInstance = await subagentInstanceFor(subagentId, serverType, subagentOrgScope);
+      instanceFromSubagent = agentInstance !== undefined;
     }
   }
 
@@ -337,12 +360,12 @@ export async function loadEffectiveCredentials(
     // to the oldest row, so legacy callers keep working until they're
     // explicitly migrated to pass instance slugs.
     let agentConn = null;
-    if (instanceSlug) {
+    if (agentInstance) {
       agentConn = await prisma.agentMcpConnection.findFirst({
         where: {
           agent: agentWhere,
           mcpServer: { type: serverType },
-          slug: instanceSlug,
+          slug: agentInstance,
         },
       });
     } else {
@@ -375,7 +398,14 @@ export async function loadEffectiveCredentials(
         connectionId: agentConn.id,
         credentials: JSON.parse(decrypted) as Record<string, unknown>,
         isUserOwned: false,
+        instance: agentConn.slug,
       };
+    }
+    if (instanceFromSubagent) {
+      log.warn(
+        `[creds-loader] ${serverType} userId=${userId} agent=${agentSlug} subagent=${subagentId} instance=${agentInstance} → mapped connection not found`,
+      );
+      return null;
     }
   }
 
