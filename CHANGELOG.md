@@ -1,3 +1,10 @@
+## [1.461.0-release-20261006.1](https://github.com/juspay/xyne-spaces/compare/v1.460.5-release-20261006.2...v1.461.0-release-20261006.1) (2026-10-07)
+
+
+### Features
+
+* show org size onboarding step only to org creator ([#2749](https://github.com/juspay/xyne-spaces/issues/2749)) ([4516c96](https://github.com/juspay/xyne-spaces/commit/4516c967433064addd5aa21f00343463cb0ccc5c))
+
 ## [1.460.5-release-20261006.2](https://github.com/juspay/xyne-spaces/compare/v1.460.5-release-20261006.1...v1.460.5-release-20261006.2) (2026-10-06)
 
 
