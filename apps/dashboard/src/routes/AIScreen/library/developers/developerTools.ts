@@ -4,8 +4,6 @@
  * not rows a workspace creates, so there is nothing to fetch.
  */
 
-import { API_BASE_URL } from '@/config';
-
 export type DeveloperToolId = 'mcp' | 'sdk' | 'cli';
 
 export interface DeveloperTool {
@@ -62,17 +60,13 @@ export function findDeveloperTool(id: string | undefined): DeveloperTool | undef
   return DEVELOPER_TOOLS.find(tool => tool.id === id);
 }
 
-/**
- * The Spaces server this dashboard talks to — what the SDK, MCP and CLI need as
- * their base URL. Derived from the dashboard's own API URL rather than the page
- * origin: locally the dashboard (Vite) and the backend run on different ports.
- */
+const SPACES_URL = 'https://spaces.xyne.juspay.net';
+
 export function spacesBaseUrl(): string {
-  const api = new URL(API_BASE_URL, window.location.origin);
-  return `${api.origin}${api.pathname.replace(/\/api\/?$/, '')}`.replace(/\/+$/, '');
+  return SPACES_URL;
 }
 
-/** Where this dashboard serves the CLI tarball from. */
+/** Where the CLI tarball is served from (the web dashboard's `public/downloads/`). */
 export function cliDownloadUrl(): string {
-  return `${window.location.origin}/downloads/spaces-cli/${CLI_TARBALL}`;
+  return `${SPACES_URL}/downloads/spaces-cli/${CLI_TARBALL}`;
 }
