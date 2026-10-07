@@ -194,6 +194,11 @@ export type XyneAIEvent =
     }
   | { type: 'CLOSE' }
   | { type: 'SET_FOCUS_SESSION'; sessionId: string | null }
+  /**
+   * The sidebar has acted on `startFreshChat`; clear it so a later remount of
+   * the panel does not wipe the conversation the user has since started.
+   */
+  | { type: 'CONSUME_FRESH_CHAT' }
   | { type: 'CLEAR_KB_CONTEXT' }
   | { type: 'SET_KB_CONTEXT'; kbCollectionId: string | null; kbChannelId?: string | null }
   | { type: 'SET_WORKFLOW_CONTEXT'; workflowInfo: WorkflowInfo | null }
@@ -861,6 +866,11 @@ export const xyneAIMachine = setup({
       }
       return {};
     }),
+    consumeFreshChat: assign(({ context }) => {
+      if (!context.startFreshChat) return {};
+      void saveContextToIndexedDB({ ...context, startFreshChat: false });
+      return { startFreshChat: false };
+    }),
     setFocusSession: assign(({ event }) => {
       if (event.type === 'SET_FOCUS_SESSION') {
         return { focusSessionId: event.sessionId };
@@ -905,6 +915,9 @@ export const xyneAIMachine = setup({
           guard: () => askAIHolds === 0,
           target: 'open',
           actions: ['setOpen', 'closeCalendar'],
+        },
+        CONSUME_FRESH_CHAT: {
+          actions: 'consumeFreshChat',
         },
         SET_TICKET_CONTEXT: {
           actions: 'setTicketContext',
@@ -972,6 +985,9 @@ export const xyneAIMachine = setup({
         },
         SET_FOCUS_SESSION: {
           actions: 'setFocusSession',
+        },
+        CONSUME_FRESH_CHAT: {
+          actions: 'consumeFreshChat',
         },
       },
     },
