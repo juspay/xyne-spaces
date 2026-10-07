@@ -17,7 +17,7 @@ vi.mock("../logger.js", () => ({
   createLogger: () => ({ warn: vi.fn(), info: vi.fn(), error: vi.fn(), debug: vi.fn() }),
 }));
 
-import { isSlotBusy, releaseSlot, tryAcquireSlot, getSlotOwner, attachSlotSession } from "./message-queue.js";
+import { isSlotBusy, releaseSlot, tryAcquireSlot, getSlotOwner, attachSlotSession, dequeueBatch } from "./message-queue.js";
 
 describe("releaseSlot key scoping (twin-slot leak regression, 2026-08-19)", () => {
   beforeEach(() => {
@@ -146,5 +146,37 @@ describe("slot owner metadata (same-user interrupt source of truth)", () => {
     await attachSlotSession("conv-1", "ask-ai", "sess-9");
     expect(setLocal).not.toHaveBeenCalled();
     expect(pexpireLocal).toHaveBeenCalledWith("claw:busymeta:conv-1:ask-ai", expect.any(Number));
+  });
+});
+
+describe("dequeueBatch (chat buffering)", () => {
+  const msg = (eventId: string, userId = "u1", task = eventId) =>
+    JSON.stringify({ eventId, conversationId: "c", channelId: "ch", userId, agentSlug: "a", task, eventType: "APP_MENTIONED", ts: 1 });
+
+  it("pops the leading same-sender run as one merged message via compare-and-pop", async () => {
+    const raws = [msg("e1"), msg("e2"), msg("e3", "u2")];
+    const evalMock = vi.fn(async () => 1);
+    getConnMock.mockReset();
+    getConnMock.mockReturnValue({ lrange: vi.fn(async () => raws), eval: evalMock, lpop: vi.fn() });
+    const out = await dequeueBatch("c", "a");
+    expect(out?.size).toBe(2);
+    expect(out?.eventIds).toEqual(["e1", "e2"]);
+    expect(out?.message.task).toContain("[2/2] e2");
+    expect(evalMock.mock.calls[0]?.slice(2)).toEqual(["claw:mq:c:a", raws[0], raws[1]]);
+  });
+
+  it("retries when a concurrent drain changed the head, then falls back to LPOP", async () => {
+    const lpop = vi.fn(async () => msg("e1"));
+    getConnMock.mockReset();
+    getConnMock.mockReturnValue({ lrange: vi.fn(async () => [msg("e1"), msg("e2")]), eval: vi.fn(async () => 0), lpop });
+    const out = await dequeueBatch("c", "a");
+    expect(lpop).toHaveBeenCalledTimes(1);
+    expect(out).toMatchObject({ size: 1, eventIds: ["e1"] });
+  });
+
+  it("returns null on an empty queue", async () => {
+    getConnMock.mockReset();
+    getConnMock.mockReturnValue({ lrange: vi.fn(async () => []) });
+    await expect(dequeueBatch("c", "a")).resolves.toBeNull();
   });
 });

@@ -69,9 +69,12 @@ import {
   attachSlotSession,
   enqueueMessage,
   dequeueMessage,
+  dequeueBatch,
+  requeueAtHead,
   clearQueue,
   type QueuedMessage,
 } from "../lib/message-queue.js";
+import { isChatBufferingEnabled } from "../lib/message-buffer.js";
 import { createTraceId, createLogger } from "../logger.js";
 import { prisma } from "../db.js";
 import { redisService } from "../redis.js";
@@ -2043,7 +2046,14 @@ async function redispatchQueuedMessage(msg: QueuedMessage): Promise<void> {
 // `token` is supplied, so a late finalizer can't delete a newer run's slot.
 export async function drainNextQueued(conversationId: string, agentSlug: string, token?: string | null, twinUserScopeId?: string): Promise<void> {
   if (!conversationId || !agentSlug) return;
-  const next = await dequeueMessage(conversationId, agentSlug, twinUserScopeId);
+  // Chat buffering (CLAW_MSG_BUFFER_ENABLED): merge consecutive same-sender
+  // follow-ups into ONE run instead of one run per message. Off → legacy FIFO.
+  const buffering = isChatBufferingEnabled();
+  const batch = buffering ? await dequeueBatch(conversationId, agentSlug, twinUserScopeId) : null;
+  const next = buffering ? batch?.message ?? null : await dequeueMessage(conversationId, agentSlug, twinUserScopeId);
+  if (batch && batch.size > 1) {
+    clog.info(`[msg-queue] conv ${conversationId} agent ${agentSlug}: coalesced n=${batch.size} eventIds=${batch.eventIds.join(",")}`);
+  }
   if (!next) {
     await releaseSlot(conversationId, agentSlug, token ?? undefined, twinUserScopeId);
     return;
@@ -2066,6 +2076,13 @@ export async function drainNextQueued(conversationId: string, agentSlug: string,
     clog.info(`[msg-queue] conv ${conversationId} agent ${agentSlug}${twinUserScopeId ? ` owner ${twinUserScopeId}` : ""}: dispatched queued eventId=${next.eventId}`);
   } catch (err) {
     clog.warn(`[msg-queue] conv ${conversationId} agent ${agentSlug}: redispatch failed, releasing slot: ${errMsg(err)}`);
+    // Buffered drains may hold several user messages; don't drop them on a
+    // transient /internal/run failure. Put them back once (bounded) so the
+    // next run in this conversation picks them up.
+    if (buffering && (next.drainAttempts ?? 0) < 1) {
+      const requeued = await requeueAtHead({ ...next, drainAttempts: (next.drainAttempts ?? 0) + 1 });
+      clog.warn(`[msg-queue] conv ${conversationId} agent ${agentSlug}: requeued failed drain at head requeued=${requeued}`);
+    }
     await releaseSlot(conversationId, agentSlug, token ?? undefined, twinUserScopeId);
   }
 }
