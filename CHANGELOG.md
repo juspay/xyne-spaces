@@ -1,3 +1,16 @@
+## [1.467.0](https://github.com/juspay/xyne-spaces/compare/v1.466.0...v1.467.0) (2026-10-07)
+
+
+### Features
+
+* suggest duplicate tickets while creating, scored by Jev ([#2672](https://github.com/juspay/xyne-spaces/issues/2672)) ([1a77ef4](https://github.com/juspay/xyne-spaces/commit/1a77ef4ed2b50441c79565f1211a46548e90fcd0))
+
+
+### Bug Fixes
+
+* active calls and no transcript summmsry failed state ([#2505](https://github.com/juspay/xyne-spaces/issues/2505)) ([1c0dd70](https://github.com/juspay/xyne-spaces/commit/1c0dd704c9a004693944fae20fa54042d306a8bd))
+* percentage share auto assignment ([#2420](https://github.com/juspay/xyne-spaces/issues/2420)) ([a0693d8](https://github.com/juspay/xyne-spaces/commit/a0693d87589c30b2b3cfdc342b5dca0e41360c8e))
+
 ## [1.466.0](https://github.com/juspay/xyne-spaces/compare/v1.465.6...v1.466.0) (2026-10-07)
 
 
