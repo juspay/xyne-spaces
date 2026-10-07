@@ -62,6 +62,8 @@ import {
   isAttachmentUploaded,
   isAttachmentUploadInFlight,
 } from '@xyne/shared/zero/mutators';
+import { useAttachmentUploadStore } from '../../../store/useAttachmentUploadStore';
+import { describeUploadBlock, summarizeUploads } from '../../../utils/attachmentUploadProgress';
 import { useShortcutById } from '../../../shortcuts';
 import { isTestEnv } from '../../../config';
 import { createTicket, CreateTicketRequest } from '../../../services/ticketService';
@@ -601,6 +603,19 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
         ),
       [messageId, channelDraftForSend?.attachments],
     );
+    const attachmentUploads = useAttachmentUploadStore(state => state.uploads);
+    const attachmentUploadSummary = useMemo(
+      () =>
+        summarizeUploads(
+          attachmentUploads,
+          messageId ? [] : (channelDraftForSend?.attachments ?? []).map(a => a.id),
+        ),
+      [attachmentUploads, messageId, channelDraftForSend?.attachments],
+    );
+    const hasFailedAttachmentUpload = attachmentUploadSummary.failed > 0;
+    const isAttachmentSendBlocked = isAttachmentUploading || hasFailedAttachmentUpload;
+    const attachmentSendBlockedReason =
+      describeUploadBlock(attachmentUploadSummary) ?? 'Finishing attachment upload…';
 
     // Load draft for current channel on mount (only if not editing a message)
     const editorValue = React.useMemo(() => {
@@ -807,10 +822,17 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
 
         // Backstop for callers that reach the send handler with the button bypassed
         // (the send mutators reject it too — this is only so the user is told why).
-        if (isAttachmentUploading) {
-          toast.warning('Attachment is still uploading', {
-            description: 'It will be ready in a moment — try sending again.',
-          });
+        if (isAttachmentSendBlocked) {
+          toast.warning(
+            hasFailedAttachmentUpload
+              ? 'Attachment failed to upload'
+              : 'Attachment is still uploading',
+            {
+              description: hasFailedAttachmentUpload
+                ? attachmentSendBlockedReason
+                : `${attachmentSendBlockedReason} — it will send once the upload finishes.`,
+            },
+          );
           throw new Error(ATTACHMENT_STILL_UPLOADING);
         }
         // Past every check that can stop the send. Clearing the editor after a send
@@ -1119,7 +1141,9 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
         allUsersForMentionResolution,
         onMessageChange,
         isOffline,
-        isAttachmentUploading,
+        isAttachmentSendBlocked,
+        hasFailedAttachmentUpload,
+        attachmentSendBlockedReason,
         user?.id,
         context.workspaceId,
         allowThreadBroadcastMentions,
@@ -1441,9 +1465,9 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
               }}
               onCreateCanvas={handleCreateCanvasFromComposer}
               hasTicket={hasTicket}
-              sendDisabled={isOffline || isAttachmentUploading}
-              {...(isAttachmentUploading && {
-                sendDisabledReason: 'Attachment is still uploading',
+              sendDisabled={isOffline || isAttachmentSendBlocked}
+              {...(isAttachmentSendBlocked && {
+                sendDisabledReason: attachmentSendBlockedReason,
               })}
               onScheduleSend={handleScheduleSend}
               showSchedulePresets={!!isDM && !conversationId}
