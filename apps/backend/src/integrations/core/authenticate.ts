@@ -6,6 +6,8 @@
 import { Request, Response, NextFunction } from 'express';
 import { ExternalSource } from '@prisma/client';
 import { ExternalSourcePlatform } from './types';
+import { isMetaMessagingPlatform } from '../social-media/constants';
+import { facebookPageIdsInPayload } from '../adapters/social-media/facebook/flow';
 import { logger } from '../../utils/logger';
 import { ExternalSourceRepository } from '../../database/repositories/externalSourceRepository';
 import { decrypt, encrypt } from '../../services/encryptionService';
@@ -53,7 +55,7 @@ export async function authenticate(
         return;
       }
     }
-    const resolvedSourceName = adapter.getSourceNameFromDB?.(rawBodyReq.body) || sourceName;
+    let resolvedSourceName = adapter.getSourceNameFromDB?.(rawBodyReq.body) || sourceName;
     logger.info('[authenticate] Resolving source', { resolvedSourceName, routeSourceName: sourceName });
 
     let source = await externalSourceRepository.findByName(resolvedSourceName);
@@ -70,6 +72,19 @@ export async function authenticate(
         logger.warn('[authenticate] Instagram source not found by externalIdentifier', {
           incomingEntryId: webhookEntryId,
         });
+      }
+    }
+
+    // Meta batches several Pages into one POST. If the first Page is unknown or disconnected,
+    // authenticate against any connected Page in the batch so the route can still ingest the rest.
+    if (!source?.isActive && adapter.name === ExternalSourcePlatform.FACEBOOK) {
+      for (const pageId of facebookPageIdsInPayload(rawBodyReq.body)) {
+        const candidate = await externalSourceRepository.findByName(`facebook-${pageId}`);
+        if (candidate?.isActive) {
+          source = candidate;
+          resolvedSourceName = candidate.name;
+          break;
+        }
       }
     }
 
@@ -110,12 +125,12 @@ export async function authenticate(
       logger.warn(
         `Skipping ingest for disconnected source: ${resolvedSourceName} (isActive=false)`,
       );
-      // Meta retries on non-2xx indefinitely; return 200 for Instagram so a disconnected
+      // Meta retries on non-2xx indefinitely; return 200 for Instagram/Facebook so a disconnected
       // account doesn't trigger a retry storm. Other providers keep the original 504
       // so their own retry semantics are unaffected.
-      const isInstagram = source.sourceType === ExternalSourcePlatform.INSTAGRAM;
-      res.status(isInstagram ? 200 : 504).json({
-        success: isInstagram,
+      const isMeta = isMetaMessagingPlatform(source.sourceType);
+      res.status(isMeta ? 200 : 504).json({
+        success: isMeta,
         skipped: true,
         reason: 'inactive_source',
         sourceName: resolvedSourceName,

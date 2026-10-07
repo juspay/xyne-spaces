@@ -8,6 +8,7 @@ import { db } from '@/database/client';
 import { recapWorker } from './recapWorker';
 import { deskReportWorker } from './deskReportWorker';
 import { instagramTokenRefreshWorker } from './instagramTokenRefreshWorker';
+import { facebookCatchUpWorker } from './facebookCatchUpWorker';
 
 /**
  * Worker Scheduler
@@ -23,6 +24,7 @@ export class WorkerScheduler {
     private deskReportGenerationQueue: Bull.Queue | null = null;
     private deskReportCleanupQueue: Bull.Queue | null = null;
     private instagramTokenRefreshQueue: Bull.Queue | null = null;
+    private facebookCatchUpQueue: Bull.Queue | null = null;
 
     /**
      * Start all workers
@@ -389,6 +391,33 @@ export class WorkerScheduler {
             logger.info('[WORKER_SCHEDULER] Instagram token refresh worker is disabled (ENABLE_INSTAGRAM_TOKEN_REFRESH_WORKER=false)');
         }
 
+        // Facebook Page catch-up — runs hourly at minute 7; pulls what a webhook missed
+        if (config.enableSocialMediaSyncWorker) {
+            this.facebookCatchUpQueue = new Bull('facebook-catch-up', { redis: workerRedisConfig });
+            this.facebookCatchUpQueue.process(async (job) => {
+                logger.info(`[WORKER_SCHEDULER] Processing Facebook catch-up job ${job.id}...`);
+                try {
+                    await facebookCatchUpWorker.run();
+                    logger.info(`[WORKER_SCHEDULER] Facebook catch-up job ${job.id} completed`);
+                } catch (error) {
+                    logger.error(`[WORKER_SCHEDULER] Facebook catch-up job ${job.id} failed:`, error);
+                    throw error;
+                }
+            });
+            await this.facebookCatchUpQueue.add(
+                {},
+                {
+                    repeat: { cron: '7 * * * *' },
+                    jobId: 'facebook-catch-up-repeatable',
+                    removeOnComplete: true,
+                    removeOnFail: true,
+                },
+            );
+            logger.info('[WORKER_SCHEDULER] Facebook catch-up scheduled via Bull (hourly at minute 7)');
+        } else {
+            logger.info('[WORKER_SCHEDULER] Facebook catch-up is disabled (ENABLE_SOCIAL_MEDIA_SYNC_WORKER=false)');
+        }
+
         this.isRunning = true;
         logger.info('[WORKER_SCHEDULER] All workers started');
     }
@@ -438,6 +467,11 @@ export class WorkerScheduler {
         if (this.instagramTokenRefreshQueue) {
             await this.instagramTokenRefreshQueue.close();
             this.instagramTokenRefreshQueue = null;
+        }
+
+        if (this.facebookCatchUpQueue) {
+            await this.facebookCatchUpQueue.close();
+            this.facebookCatchUpQueue = null;
         }
 
         this.isRunning = false;

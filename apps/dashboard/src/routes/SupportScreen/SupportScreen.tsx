@@ -207,6 +207,7 @@ import {
   connectAppStoreDesk,
   connectGooglePlayDesk,
   startInstagramOAuth,
+  startFacebookOAuth,
 } from '../../services/clients/socialMediaDeskApi';
 import { InstagramCustomerHistory } from '../../components/xyne-desk/InstagramCustomerHistory/InstagramCustomerHistory';
 import { EmailThreadHeader } from '../../components/xyne-desk/EmailBody/EmailThreadHeader';
@@ -250,7 +251,10 @@ import {
   clearChannelConnectedEmailCache,
   fetchConnectedEmail,
 } from '../../hooks/useChannelConnectedEmail';
-import AddChannelForm from '../../components/Chat/AddChannelForm/AddChannelForm';
+import AddChannelForm, {
+  isOAuthSocialProvider,
+  type SocialProvider,
+} from '../../components/Chat/AddChannelForm/AddChannelForm';
 import Info, { ChannelTab } from '../../components/Chat/Info/Info';
 import { useVisibleChannel } from '../../hooks/useChannels';
 import { API_BASE_URL } from '../../config';
@@ -1909,6 +1913,46 @@ const SupportScreen = (): ReactElement => {
         },
         { replace: true },
       );
+    } else if (socialMediaOAuth === 'success' && socialMediaProvider === 'facebook') {
+      toast.success('Facebook Page connected successfully');
+      setSearchParams(
+        prev => {
+          const p = new URLSearchParams(prev);
+          p.delete('socialMediaOAuth');
+          p.delete('socialMediaProvider');
+          return p;
+        },
+        { replace: true },
+      );
+    } else if (socialMediaError && socialMediaProvider === 'facebook') {
+      // payload formats: "facebook_page_mismatch:Page name", "facebook_page_disconnected:<sentence>"
+      const separator = socialMediaError.indexOf(':');
+      const errorCode = separator === -1 ? socialMediaError : socialMediaError.slice(0, separator);
+      const expectedPage = separator === -1 ? '' : socialMediaError.slice(separator + 1);
+      const facebookErrorMessages: Record<string, string> = {
+        facebook_page_mismatch: `This connection belongs to ${expectedPage || 'a different Page'}. Select that Page in the Facebook dialog and try reconnecting.`,
+        facebook_auth_denied: 'Facebook authorization was denied. Please try again.',
+        facebook_no_pages:
+          'No Facebook Pages were shared. Select at least one Page in the Facebook dialog.',
+        facebook_page_disconnected: `${expectedPage || 'This Page is disconnected on another desk'}. Open that desk's settings and reconnect it there.`,
+        facebook_page_already_connected:
+          'The selected Facebook Pages are already connected to a desk.',
+        facebook_connection_failed: 'Failed to connect Facebook. Please try again.',
+        facebook_subscription_failed:
+          'Facebook did not allow this app to receive events for the selected Pages, so they were not connected. Check the app permissions and try again.',
+      };
+      toast.error(
+        facebookErrorMessages[errorCode] ?? 'Facebook connection error. Please try again.',
+      );
+      setSearchParams(
+        prev => {
+          const p = new URLSearchParams(prev);
+          p.delete('socialMediaError');
+          p.delete('socialMediaProvider');
+          return p;
+        },
+        { replace: true },
+      );
     } else if (socialMediaError && socialMediaProvider === 'instagram') {
       // mismatch error format: "instagram_account_mismatch:@handle"
       const [errorCode, errorPayload] = socialMediaError.split(':');
@@ -2177,6 +2221,8 @@ const SupportScreen = (): ReactElement => {
       : null,
   );
   const isInstagramDesk = selectedChannelIntegration.sourceType === 'instagram';
+  // Facebook is webhook-driven too, but its history can be pulled for a chosen time range.
+  const isFacebookDesk = selectedChannelIntegration.sourceType === 'facebook';
   const isCallDesk = selectedChannelFull?.type === ChannelType.CALL;
 
   // Manual fetch for the selected desk. Social-media desks fetch every review
@@ -2187,6 +2233,7 @@ const SupportScreen = (): ReactElement => {
     refetchChannelId,
     isSocialMediaDesk,
     isCallDesk,
+    isFacebookDesk ? 'Facebook activity' : 'reviews',
   );
   const canRefetch = !!refetchChannelId;
   const {
@@ -2599,7 +2646,7 @@ const SupportScreen = (): ReactElement => {
       dlEmail?: string;
       slackChannelId?: string;
       installedAppId?: string;
-      socialProvider?: 'GOOGLE_PLAY' | 'APP_STORE' | 'INSTAGRAM';
+      socialProvider?: SocialProvider;
       applications?: Array<{ displayName: string; packageName: string }>;
       serviceAccountKey?: string;
       appStore?: {
@@ -2626,7 +2673,7 @@ const SupportScreen = (): ReactElement => {
     const isElectron = typeof window.electronAPI?.openExternal === 'function';
 
     if (deskType === 'SOCIAL_MEDIA') {
-      if (socialProvider !== 'INSTAGRAM' && !rest.boardId) {
+      if (!isOAuthSocialProvider(socialProvider) && !rest.boardId) {
         toast.error('A board is required');
         return;
       }
@@ -2701,8 +2748,9 @@ const SupportScreen = (): ReactElement => {
         return;
       }
 
-      if (socialProvider === 'INSTAGRAM') {
-        void startInstagramOAuth({
+      if (socialProvider === 'INSTAGRAM' || socialProvider === 'FACEBOOK') {
+        const isFacebook = socialProvider === 'FACEBOOK';
+        void (isFacebook ? startFacebookOAuth : startInstagramOAuth)({
           channelName: rest.name,
           projectId: rest.projectId,
           ...(rest.boardId ? { boardId: rest.boardId } : {}),
@@ -2722,7 +2770,9 @@ const SupportScreen = (): ReactElement => {
           })
           .catch(error => {
             toast.error(
-              error instanceof Error ? error.message : 'Failed to start Instagram authorization',
+              error instanceof Error
+                ? error.message
+                : `Failed to start ${isFacebook ? 'Facebook' : 'Instagram'} authorization`,
             );
           });
         return;
@@ -3014,10 +3064,16 @@ const SupportScreen = (): ReactElement => {
                   label: 'Instagram',
                   className: 'bg-pink-100 text-pink-700 dark:bg-pink-500/20 dark:text-pink-200',
                 }
-              : {
-                  label: 'Social',
-                  className: 'bg-amber-100 text-amber-700 dark:bg-amber-500/20 dark:text-amber-200',
-                }
+              : socialSourceTypes[c.id] === 'facebook'
+                ? {
+                    label: 'Facebook',
+                    className: 'bg-blue-100 text-blue-700 dark:bg-blue-500/20 dark:text-blue-200',
+                  }
+                : {
+                    label: 'Social',
+                    className:
+                      'bg-amber-100 text-amber-700 dark:bg-amber-500/20 dark:text-amber-200',
+                  }
             : c.type === ChannelType.CALL
               ? {
                   label: 'Call',
@@ -3512,7 +3568,7 @@ const SupportScreen = (): ReactElement => {
                             leadingAction={
                               isSocialMediaDesk
                                 ? {
-                                    label: 'Fetch reviews',
+                                    label: isFacebookDesk ? 'Fetch from Facebook' : 'Fetch reviews',
                                     // No sourceId => the hook routes to the
                                     // review sync; the dialog supplies the range.
                                     onSelect: () => {
@@ -3548,11 +3604,13 @@ const SupportScreen = (): ReactElement => {
                             content={
                               isRefetching
                                 ? 'Fetching latest…'
-                                : isSocialMediaDesk
-                                  ? 'Fetch reviews'
-                                  : isCallDesk
-                                    ? 'Fetch missed calls'
-                                    : 'Fetch latest emails'
+                                : isFacebookDesk
+                                  ? 'Fetch from Facebook'
+                                  : isSocialMediaDesk
+                                    ? 'Fetch reviews'
+                                    : isCallDesk
+                                      ? 'Fetch missed calls'
+                                      : 'Fetch latest emails'
                             }
                             side='bottom'
                           >
@@ -4765,14 +4823,21 @@ const SupportScreen = (): ReactElement => {
                 title: `Fetch from ${fetchTarget.sourceName}`,
                 subtitle: 'Choose how much history to pull from this source.',
               }
-            : isSocialMediaDesk
+            : isFacebookDesk
               ? {
-                  title: 'Fetch reviews',
+                  title: 'Fetch from Facebook',
                   subtitle:
-                    'Pull new reviews or backfill a specific time range from the connected apps.',
-                  summaryLabel: 'Will fetch reviews posted',
+                    'Pull messages, comments and mentions from the connected Pages for a time range. Anything already on the desk is skipped. Messenger returns at most the 20 latest messages per conversation.',
+                  summaryLabel: 'Will fetch Facebook activity from',
                 }
-              : {})}
+              : isSocialMediaDesk
+                ? {
+                    title: 'Fetch reviews',
+                    subtitle:
+                      'Pull new reviews or backfill a specific time range from the connected apps.',
+                    summaryLabel: 'Will fetch reviews posted',
+                  }
+                : {})}
           {...(isCallDesk && {
             ...(!fetchTarget?.sourceName && {
               title: 'Fetch calls',
@@ -6485,15 +6550,18 @@ export const SupportTicketDetail = ({
                 </div>
               )}
             </div>
-            {channelIntegrationInfo.sourceType === 'instagram' && channelId && conversationId && (
-              <InstagramCustomerHistory
-                channelId={channelId}
-                conversationId={conversationId}
-                onTicketClick={xyneId => {
-                  void navigate(`${navBasePath ?? supportBase}/${channelId}/${xyneId}`);
-                }}
-              />
-            )}
+            {(channelIntegrationInfo.sourceType === 'instagram' ||
+              channelIntegrationInfo.sourceType === 'facebook') &&
+              channelId &&
+              conversationId && (
+                <InstagramCustomerHistory
+                  channelId={channelId}
+                  conversationId={conversationId}
+                  onTicketClick={xyneId => {
+                    void navigate(`${navBasePath ?? supportBase}/${channelId}/${xyneId}`);
+                  }}
+                />
+              )}
             <div
               className='absolute inset-x-0 bottom-0 z-20 bg-background'
               ref={composerOverlayRef}
@@ -6522,14 +6590,18 @@ export const SupportTicketDetail = ({
                     placeholder={
                       channelIntegrationInfo.sourceType === 'instagram'
                         ? 'Reply to this DM…'
-                        : 'Reply to this review…'
+                        : channelIntegrationInfo.sourceType === 'facebook'
+                          ? 'Reply to this message…'
+                          : 'Reply to this review…'
                     }
                     // Play caps replies at 350; Apple documents no maximum, so do not invent one.
                     {...(channelIntegrationInfo.sourceType === SOCIAL_MEDIA_SOURCE_TYPE.INSTAGRAM
                       ? { maxLength: 1000 }
-                      : channelIntegrationInfo.sourceType === SOCIAL_MEDIA_SOURCE_TYPE.GOOGLE_PLAY
-                        ? { maxLength: 350 }
-                        : {})}
+                      : channelIntegrationInfo.sourceType === SOCIAL_MEDIA_SOURCE_TYPE.FACEBOOK
+                        ? { maxLength: 2000 }
+                        : channelIntegrationInfo.sourceType === SOCIAL_MEDIA_SOURCE_TYPE.GOOGLE_PLAY
+                          ? { maxLength: 350 }
+                          : {})}
                     trackingCategory='social-media-composer'
                   />
                 ) : null
