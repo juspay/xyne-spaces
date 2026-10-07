@@ -2,7 +2,7 @@ apiVersion: v2
 name: xyne-lighton-model
 description: Xyne Spaces LightOnOCR model server - vLLM serving lightonai/LightOnOCR-2-1B-bbox on one GPU behind an OpenAI-compatible API, used by xyne-lighton-ocr
 type: application
-version: 0.1.0-app.1.465.6-release-20261007.1
+version: 0.1.0-app.1.468.0
 appVersion: "v0.29.0"
 keywords:
   - xyne
