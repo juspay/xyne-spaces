@@ -1,3 +1,10 @@
+## [1.468.1](https://github.com/juspay/xyne-spaces/compare/v1.468.0...v1.468.1) (2026-10-07)
+
+
+### Bug Fixes
+
+* open sub-tickets from the desk thread panel ([#2737](https://github.com/juspay/xyne-spaces/issues/2737)) ([76a8dc0](https://github.com/juspay/xyne-spaces/commit/76a8dc0d7fb6b2524773ba9a0c9a22ff26167488))
+
 ## [1.468.0](https://github.com/juspay/xyne-spaces/compare/v1.467.0...v1.468.0) (2026-10-07)
 
 
