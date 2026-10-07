@@ -4482,6 +4482,16 @@ export const queries = defineQueries({
       return zql.user_groups.where('id', userGroupId).one();
     },
   ),
+  // Several groups in one read, for callers that already hold the ids.
+  getUserGroupsByIds: defineQuery(
+    z.object({ userGroupIds: z.array(z.string()).max(500) }),
+    ({ args: { userGroupIds } }) => {
+      if (userGroupIds.length === 0) {
+        return zql.user_groups.where('id', 'nonexistent').limit(0);
+      }
+      return zql.user_groups.where('id', 'IN', userGroupIds).orderBy('createdAt', 'desc');
+    },
+  ),
   // Query for board by ID with related project
   getBoardById: defineQuery(z.object({ boardId: z.string() }), ({ args: { boardId } }) => {
     return zql.boards.where('id', boardId).related('project').one();
