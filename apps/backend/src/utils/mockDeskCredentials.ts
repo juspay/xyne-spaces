@@ -31,14 +31,25 @@ export function captureMockDeskSentMail(
   return { threadId: captured.threadId, messageId: captured.messageId };
 }
 
+// Mock Slack bot token. The real slack-desk channel create flow copies only
+// signingSecret/botOauthToken into the channel source (dropping `mock: true`),
+// so this token is how a channel-level mock Slack source is recognised.
+export const MOCK_SLACK_BOT_OAUTH_TOKEN = 'xoxb-mock-token';
+
 export function parseMockDeskCredentials(
   encryptedCredentials: string | null | undefined
 ): { isMock: boolean; error?: Error } {
   if (!encryptedCredentials) return { isMock: false };
 
   try {
-    const credentials = JSON.parse(decrypt(encryptedCredentials)) as { mock?: unknown };
-    return { isMock: credentials.mock === true };
+    const credentials = JSON.parse(decrypt(encryptedCredentials)) as {
+      mock?: unknown;
+      botOauthToken?: unknown;
+    };
+    return {
+      isMock:
+        credentials.mock === true || credentials.botOauthToken === MOCK_SLACK_BOT_OAUTH_TOKEN,
+    };
   } catch (error) {
     return { isMock: false, error: error instanceof Error ? error : new Error(String(error)) };
   }

@@ -19,6 +19,7 @@ import { ChannelExternalSourceResolver } from '@/services/channelExternalSourceR
 import { logger } from '@/utils/logger';
 import {
   buildMockDeskCredentials as buildMockDeskCredentialsPayload,
+  MOCK_SLACK_BOT_OAUTH_TOKEN,
   parseMockDeskCredentials,
 } from '@/utils/mockDeskCredentials';
 
@@ -411,7 +412,9 @@ router.post('/desk/channel-source', async (req, res, next) => {
     }
 
     const sourceType = getMockDeskChannelSourceType(req.body?.sourceType);
-    const persistedSourceType = `mock-${sourceType}-${channelId}`;
+    // Persist the real provider sourceType (as the OAuth connect flow does) so
+    // ChannelExternalSourceResolver and Pub/Sub delivery resolve this source.
+    const persistedSourceType = sourceType;
     const email = getOptionalEmailOrDefault(
       req.body?.email,
       `mock-personal-${channelId}@${config.deskMockDefaultEmailDomain}`
@@ -623,19 +626,21 @@ router.post('/desk/slack-workspace', async (req, res, next) => {
         sourceType: 'slack',
         displayName: 'Mock Slack Workspace',
         workspaceId,
-        ownerUserId: userId,
+        // Workspace-level (no channel/owner) like a real Slack install; the
+        // slack-desk routes look it up with WORKSPACE_LEVEL.
+        ownerUserId: null,
         credentials: buildMockDeskCredentials({
           signingSecret: 'mock-slack-signing-secret',
-          botOauthToken: 'xoxb-mock-token',
+          botOauthToken: MOCK_SLACK_BOT_OAUTH_TOKEN,
         }),
         isActive: true,
       },
       update: {
         displayName: 'Mock Slack Workspace',
-        ownerUserId: userId,
+        ownerUserId: null,
         credentials: buildMockDeskCredentials({
           signingSecret: 'mock-slack-signing-secret',
-          botOauthToken: 'xoxb-mock-token',
+          botOauthToken: MOCK_SLACK_BOT_OAUTH_TOKEN,
         }),
         isActive: true,
       },
