@@ -171,14 +171,12 @@ async function initializeApp(): Promise<void> {
   void hydrateCachedUserFromCookies();
   setupIpcHandlers();
 
-  // Clear network cache on app start to ensure fresh assets
-  try {
-    const { session } = await import('electron');
-    await session.defaultSession.clearCache();
-    log.info('[App] Network cache cleared on startup');
-  } catch (error) {
-    log.error('[App] Failed to clear cache on startup:', error);
-  }
+  // Intentionally NOT clearing the HTTP cache on startup. Vite emits
+  // content-hashed asset filenames, so changed assets get new URLs and stale
+  // cache entries are harmless. Clearing the cache here forced a full
+  // re-download of the ~39MB entry bundle on every launch (measured: entry
+  // bundle completion +15.9s at 20 Mbps with clearCache vs +1.0s without,
+  // 39,150,975 bytes over the network vs 0 with the cache intact).
 
   await createMainWindow();
   setWindowReferences();
