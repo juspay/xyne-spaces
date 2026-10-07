@@ -102,7 +102,8 @@ const DESK_SOURCES: ReadonlyArray<{
   {
     value: DeskType.SOCIAL_MEDIA,
     label: 'Social media',
-    description: 'Create support tickets from Google Play, App Store reviews, or Instagram DMs',
+    description:
+      'Create support tickets from Google Play, App Store reviews, Instagram DMs, or Facebook Pages',
     icon: Share2,
   },
 ];
@@ -140,7 +141,11 @@ function areGooglePlayApplicationsValid(applications: GooglePlayApplicationInput
   );
 }
 
-export type SocialProvider = 'GOOGLE_PLAY' | 'APP_STORE' | 'INSTAGRAM';
+export type SocialProvider = 'GOOGLE_PLAY' | 'APP_STORE' | 'INSTAGRAM' | 'FACEBOOK';
+
+/** Providers connected by an OAuth redirect: no extra fields here and the board is optional. */
+export const isOAuthSocialProvider = (provider: SocialProvider | undefined): boolean =>
+  provider === 'INSTAGRAM' || provider === 'FACEBOOK';
 
 export interface AppStoreDeskInput {
   keyId: string;
@@ -229,7 +234,7 @@ export const AddChannelForm: React.FC<AddChannelFormProps> = ({
   const [appStorePrivateKey, setAppStorePrivateKey] = useState('');
 
   const isSocialMediaDeskValid = (boardId?: string): boolean => {
-    if (socialProvider === 'INSTAGRAM') return true;
+    if (isOAuthSocialProvider(socialProvider)) return true;
     if (!boardId) return false;
     return socialProvider === 'GOOGLE_PLAY'
       ? Boolean(getServiceAccountEmail(googlePlayServiceAccountKey)) &&
@@ -882,6 +887,7 @@ export const AddChannelForm: React.FC<AddChannelFormProps> = ({
                 <SelectItem value='GOOGLE_PLAY'>Google Play reviews</SelectItem>
                 <SelectItem value='APP_STORE'>App Store reviews</SelectItem>
                 <SelectItem value='INSTAGRAM'>Instagram DMs</SelectItem>
+                <SelectItem value='FACEBOOK'>Facebook Page</SelectItem>
               </SelectContent>
             </Select>
           </div>
@@ -1151,6 +1157,16 @@ export const AddChannelForm: React.FC<AddChannelFormProps> = ({
         </div>
       )}
 
+      {requireConnector && deskType === DeskType.SOCIAL_MEDIA && socialProvider === 'FACEBOOK' && (
+        <div className='space-y-2 rounded-lg border border-border bg-muted/20 p-3'>
+          <p className='text-sm text-foreground font-medium'>Connect via Facebook</p>
+          <p className='text-xs text-muted-foreground'>
+            You&apos;ll be redirected to Facebook to choose the Pages to connect. Messages, comments
+            and mentions on those Pages will create tickets.
+          </p>
+        </div>
+      )}
+
       {/* Connector Selection (for personal mailbox desks) */}
       {requireConnector && deskType === DeskType.EMAIL && (
         <div className='space-y-2'>
@@ -1309,7 +1325,7 @@ export const AddChannelForm: React.FC<AddChannelFormProps> = ({
             <div className='space-y-1.5'>
               <label htmlFor='board-select' className='text-sm font-medium text-foreground'>
                 Board
-                {deskType === DeskType.SOCIAL_MEDIA && socialProvider !== 'INSTAGRAM' && (
+                {deskType === DeskType.SOCIAL_MEDIA && !isOAuthSocialProvider(socialProvider) && (
                   <span className='text-destructive'> *</span>
                 )}
               </label>

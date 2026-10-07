@@ -236,16 +236,40 @@ export const ForwardMessageForm: React.FC<ForwardMessageFormProps> = ({
             }),
           );
 
-          // Show success message
-          logger.info(Event.MESSAGE_FORWARDED, {
-            originalMessageId: message.messageId,
-            targetType: 'channel',
-            targetChannelId: firstTarget.id,
-          });
-          toast.success('Message forwarded', {
-            description: `Message sent to #${firstTarget.name}`,
-            duration: 3000,
-          });
+          // One toast for the whole forward: "Forwarding…" until the server answers, then
+          // replaced in place by success or failure, so a rejected forward never shows
+          // "Message forwarded" first.
+          const toastId = toast.loading(`Forwarding to #${firstTarget.name}…`);
+          let settled = false;
+          let timedOut = false;
+          const slowTimer = setTimeout(() => {
+            if (settled) return;
+            timedOut = true;
+            toast.message('Still forwarding…', {
+              id: toastId,
+              description: 'It will be delivered once the connection recovers.',
+              duration: 5000,
+            });
+          }, 10_000);
+
+          void mutation.server
+            .then(result => {
+              if (result.type === 'error' || settled) return;
+              settled = true;
+              clearTimeout(slowTimer);
+              logger.info(Event.MESSAGE_FORWARDED, {
+                originalMessageId: message.messageId,
+                targetType: 'channel',
+                targetChannelId: firstTarget.id,
+              });
+              if (timedOut) return; // already told the user it's on its way
+              toast.success('Message forwarded', {
+                id: toastId,
+                description: `Message sent to #${firstTarget.name}`,
+                duration: 3000,
+              });
+            })
+            .catch(() => undefined); // rejections are handled by subscribeSendLifecycle below
 
           // Reset form and close modal
           form.reset();
@@ -259,12 +283,16 @@ export const ForwardMessageForm: React.FC<ForwardMessageFormProps> = ({
           // Surface a real mutator rejection; transient zero errors are ignored
           // since Zero still persists those on reconnect.
           subscribeSendLifecycle(mutation, () => {
+            if (settled) return;
+            settled = true;
+            clearTimeout(slowTimer);
             logger.error(Event.MESSAGE_FORWARD_FAILED, {
               originalMessageId: message.messageId,
               targetType: 'channel',
               targetChannelId: firstTarget.id,
             });
             toast.error('Failed to forward message', {
+              id: toastId,
               description: `Please try again.`,
               duration: 3000,
             });

@@ -211,7 +211,7 @@ const dateParam = (value: unknown): Date | null => {
 
 /** Query string -> a Pending Others page request. Anything malformed falls back
  *  to "no narrowing" rather than failing the feed. */
-const parsePageQuery = (query: Request['query']): PendingOthersPageQuery => ({
+export const parsePageQuery = (query: Request['query']): PendingOthersPageQuery => ({
   page: intParam(query.page, 0),
   mutedPage: intParam(query.mutedPage, 0),
   pageSize: Math.min(MAX_PAGE_SIZE, Math.max(1, intParam(query.pageSize, DEFAULT_PAGE_SIZE))),
@@ -259,7 +259,7 @@ type CleanResult = { conditions: CleanCondition[] } | { error: string };
 
 /** Client input is untrusted and this JSON decides what a reader sees, so the
  *  shape is rebuilt rather than checked and passed along. */
-function cleanConditions(raw: unknown): CleanResult {
+export function cleanConditions(raw: unknown): CleanResult {
   if (!Array.isArray(raw)) return { error: 'A rule needs at least one condition' };
   const byScope = new Map<string, string[]>();
   // Both bounds are refusals, never trims. A rule stored with one of its values

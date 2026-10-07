@@ -20,6 +20,7 @@ import {
   LookupType,
   ReleaseTrackingMode,
   TicketPriority,
+  TicketReferenceRelation,
   TicketStatusV2,
   isFieldActive,
   orderFieldsWithBranchChildrenAfterParent,
@@ -59,6 +60,11 @@ import { apiInstance } from '../../../services/clients/apiClient';
 import { cn } from '../../../utils/classNames';
 import { mutators } from '../../../zero/mutators';
 import { surfaceMutationError } from '../../../utils/zeroMutationToast';
+import {
+  useDuplicateTicketCheck,
+  type DuplicateSuggestion,
+} from '../../../hooks/useDuplicateTicketCheck';
+import { DuplicateSuggestions } from './DuplicateSuggestions';
 import { queries } from '../../../zero/queries';
 import { SubTicketCountIcon } from '../../../assets/icons';
 import Avatar from '../../ui/Avatar/Avatar';
@@ -766,6 +772,48 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
     }
   }, [isOpen]);
 
+  const {
+    likely: likelyDuplicates,
+    similar: similarDuplicates,
+    checkId: duplicateCheckId,
+    duplicateCheck,
+    isCheckingDuplicate,
+    isDuplicateCheckInFlight,
+  } = useDuplicateTicketCheck({
+    title: formValues.title ?? '',
+    description: formValues.description ?? '',
+    projectId: selectedBoard?.projectId ?? '',
+    ...(formValues.boardId ? { boardId: formValues.boardId } : {}),
+    isOpen: isOpen && !isReleaseLine,
+  });
+  const duplicateProjectId = selectedBoard?.projectId ?? '';
+  const [duplicateChoice, setDuplicateChoice] = useState<{
+    suggestion: DuplicateSuggestion;
+    projectId: string;
+  } | null>(null);
+  const [duplicateNotSame, setDuplicateNotSame] = useState<ReadonlySet<string>>(() => new Set());
+  useEffect(() => {
+    if (!isOpen) {
+      setDuplicateChoice(null);
+      setDuplicateNotSame(new Set());
+    }
+  }, [isOpen]);
+  const duplicateSameAs =
+    duplicateChoice &&
+    duplicateChoice.projectId === duplicateProjectId &&
+    duplicateCheck?.candidates?.some(
+      candidate => candidate.id === duplicateChoice.suggestion.candidate.id,
+    )
+      ? duplicateChoice.suggestion
+      : null;
+  const duplicateDecisions =
+    duplicateSameAs || duplicateNotSame.size > 0
+      ? {
+          ...(duplicateSameAs ? { sameAs: duplicateSameAs.candidate.id } : {}),
+          ...(duplicateNotSame.size > 0 ? { notSame: [...duplicateNotSame] } : {}),
+        }
+      : undefined;
+
   // Project-level tags — lazy-loaded when the label dropdown is first opened
   const [tagsQueried, setTagsQueried] = useState(false);
   const [tagSearch, setTagSearch] = useState('');
@@ -921,6 +969,9 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
       }
       if (initialDescription) {
         form.setFieldValue('description', initialDescription);
+      }
+      if (descriptionTextareaRef.current) {
+        descriptionTextareaRef.current.value = initialDescription;
       }
       if (initialPriority) {
         form.setFieldValue('priority', initialPriority);
@@ -1177,10 +1228,10 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
     }
   };
 
-  const missingMandatoryFieldMessage = useMemo(
-    () =>
+  const getMandatoryFieldMessage = useCallback(
+    (valuesSnapshot: CreateTicketFormData): string | null =>
       getMissingMandatoryFieldMessage({
-        formValues,
+        formValues: valuesSnapshot,
         boards,
         formMapping: { formFields: resolvedFormFields },
         showUserGroupsOnly,
@@ -1201,10 +1252,10 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
         releaseOnly,
       }),
     [
-      formValues,
       boards,
       resolvedFormFields,
       ticketKind,
+      releaseOnly,
       showUserGroupsOnly,
       showAssignee,
       showTodo,
@@ -1219,7 +1270,6 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
       mandatoryLabels,
       mandatoryMerchantId,
       mandatoryTicketType,
-      releaseOnly,
     ],
   );
 
@@ -1593,6 +1643,9 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
         }
 
         formDataPayload.append('fromTicketsTab', String(isFromTicketsTab));
+        if (duplicateDecisions) {
+          formDataPayload.append('duplicateDecisions', JSON.stringify(duplicateDecisions));
+        }
         response = await apiInstance.post<TicketResponse>('/tickets', formDataPayload);
         createdTicketResponse = response.data;
         processTicketCreationResponse(response, formData.workflowType, effectiveChannelId);
@@ -1628,6 +1681,7 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
           ...(parentTicketId && { parentTicketId }),
           // Include dynamic fields (pruned of any now-inactive branch field's stale value)
           dynamicFields: submitDynamicFields,
+          ...(duplicateDecisions && { duplicateDecisions }),
         });
 
         createdTicketResponse = response.data;
@@ -1671,6 +1725,21 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
         });
       }
 
+      if (createdTicketResponse?.id && duplicateSameAs) {
+        void surfaceMutationError(
+          zero.mutate(
+            mutators.ticketReference.create({
+              sourceTicketId: createdTicketResponse.id,
+              targetTicketId: duplicateSameAs.candidate.id,
+              relationType: TicketReferenceRelation.DUPLICATE_CONFIRMED,
+              timestamp: Date.now(),
+              referenceId: uuidv4(),
+            }),
+          ),
+          'Failed to link the duplicate ticket',
+        );
+      }
+
       // Don't auto-close if part of a sequence - let the parent handle it
       if (!ticketSequence || ticketSequence.current === ticketSequence.total) {
         onClose();
@@ -1709,7 +1778,11 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
     const seed = seedSnapshotRef.current;
     if (!seed) return false;
 
-    if (!ticketFormSnapshotsEqual(snapshotTicketForm(form.state.values), seed)) return true;
+    const currentValues = {
+      ...form.state.values,
+      description: descriptionTextareaRef.current?.value ?? form.state.values.description,
+    };
+    if (!ticketFormSnapshotsEqual(snapshotTicketForm(currentValues), seed)) return true;
 
     const seededSubTickets = normalizeSubTicketDrafts(initialSubTickets);
     if (JSON.stringify(normalizeSubTicketDrafts(subTickets)) !== JSON.stringify(seededSubTickets)) {
@@ -1779,7 +1852,7 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
         excludedChatAttachmentIds.size > 0 ? Array.from(excludedChatAttachmentIds) : undefined,
       form: {
         title: values.title || undefined,
-        description: values.description || undefined,
+        description: descriptionTextareaRef.current?.value || values.description || undefined,
         priority: values.priority ?? undefined,
         status: values.status,
         assignee: values.assignee ?? undefined,
@@ -2214,6 +2287,10 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
   }, []);
 
   const handleSubmitAttempt = useCallback((): void => {
+    // Uncontrolled textarea — sync DOM value into form store before validating/submitting.
+    const currentDescription = descriptionTextareaRef.current?.value ?? '';
+    form.setFieldValue('description', currentDescription);
+
     const values = form.state.values;
 
     const missing: Record<string, string> = {};
@@ -2234,7 +2311,7 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
       titleInputRef.current?.focus();
       return;
     }
-    if (!values.description || values.description.trim().length < 5) {
+    if (!currentDescription || currentDescription.trim().length < 5) {
       void form.validateAllFields('submit');
       descriptionTextareaRef.current?.focus();
       return;
@@ -2254,14 +2331,16 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
       return;
     }
 
-    const gateMessage = missingMandatoryFieldMessage ?? releaseGateMessage;
+    const gateMessage =
+      getMandatoryFieldMessage({ ...values, description: currentDescription }) ??
+      releaseGateMessage;
     if (gateMessage) {
       toast.error(gateMessage);
       return;
     }
 
     void form.handleSubmit();
-  }, [form, visibleDynamicFields, missingMandatoryFieldMessage, releaseGateMessage]);
+  }, [form, visibleDynamicFields, getMandatoryFieldMessage, releaseGateMessage]);
 
   // Field error
 
@@ -2408,48 +2487,83 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
                       </TextShimmer>
                     </div>
                   ) : (
-                    <Input
-                      ref={titleInputRef}
-                      value={field.state.value}
-                      required={true}
-                      onChange={e => {
-                        // If user starts typing, cancel the ongoing generation
-                        if (isTitleGenerating) {
-                          cancelGeneration();
+                    <div className='relative'>
+                      <Input
+                        ref={titleInputRef}
+                        value={field.state.value}
+                        required={true}
+                        onChange={e => {
+                          // If user starts typing, cancel the ongoing generation
+                          if (isTitleGenerating) {
+                            cancelGeneration();
+                          }
+                          field.handleChange(e.target.value);
+                        }}
+                        aria-label='Ticket Title'
+                        placeholder={
+                          ticketKind === 'release'
+                            ? 'Enter Release Title...'
+                            : 'Enter Ticket Title...'
                         }
-                        field.handleChange(e.target.value);
-                      }}
-                      aria-label='Ticket Title'
-                      placeholder={
-                        ticketKind === 'release'
-                          ? 'Enter Release Title...'
-                          : 'Enter Ticket Title...'
-                      }
-                      data-testid='ticket-title-input'
-                      data-track-category='Tickets'
-                      data-track-name='EDIT_TICKET_TITLE'
-                      data-track-metadata={JSON.stringify({ boardId: selectedBoardId, channelId })}
-                      className={cn(
-                        '!text-[21px] !leading-tight truncate tracking-[-0.4px]',
-                        'rounded-none border-0 border-b-[1.5px] px-0 pb-0.5 focus-visible:ring-0',
-                        'font-semibold text-foreground placeholder:text-[21px] placeholder:text-muted-foreground/50',
-                        'transition-colors duration-150',
-                        field.state.meta.errors.length > 0
-                          ? '!border-b-destructive'
-                          : '!border-b-transparent',
-                      )}
-                    />
+                        data-testid='ticket-title-input'
+                        data-track-category='Tickets'
+                        data-track-name='EDIT_TICKET_TITLE'
+                        data-track-metadata={JSON.stringify({
+                          boardId: selectedBoardId,
+                          channelId,
+                        })}
+                        className={cn(
+                          '!text-[21px] !leading-tight truncate tracking-[-0.4px]',
+                          'rounded-none border-0 border-b-[1.5px] px-0 pb-0.5 focus-visible:ring-0',
+                          'font-semibold text-foreground placeholder:text-[21px] placeholder:text-muted-foreground/50',
+                          'transition-colors duration-150',
+                          field.state.meta.errors.length > 0
+                            ? '!border-b-destructive'
+                            : '!border-b-transparent',
+                        )}
+                      />
+                      <div
+                        aria-hidden
+                        className='xyne-duplicate-scan'
+                        data-active={isDuplicateCheckInFlight ? 'true' : undefined}
+                      >
+                        <span className='xyne-duplicate-scan-track' />
+                        <span className='shrink-0 text-[11px] leading-3 text-muted-foreground'>
+                          Checking for duplicates
+                        </span>
+                      </div>
+                    </div>
                   )}
                   <FieldError error={field.state.meta.errors[0]} />
                 </div>
               )}
             </form.Field>
 
+            <DuplicateSuggestions
+              likely={likelyDuplicates.filter(
+                suggestion => suggestion.candidate.id !== parentTicketId,
+              )}
+              similar={similarDuplicates.filter(
+                suggestion => suggestion.candidate.id !== parentTicketId,
+              )}
+              checkId={duplicateCheckId}
+              checking={isCheckingDuplicate}
+              sameAs={duplicateSameAs}
+              notSame={duplicateNotSame}
+              onSame={suggestion =>
+                setDuplicateChoice({ suggestion, projectId: duplicateProjectId })
+              }
+              onUndoSame={() => setDuplicateChoice(null)}
+              onNotSame={suggestion =>
+                setDuplicateNotSame(current => new Set([...current, suggestion.candidate.id]))
+              }
+            />
+
             {/* Description Field */}
             <form.Field
               name='description'
               validators={{
-                onChange: ({ value }) => {
+                onSubmit: ({ value }) => {
                   if (!value?.trim()) return 'Description is required';
                   if (value.length < 5) return 'Description must be at least 5 characters';
                   return undefined;
@@ -2464,7 +2578,7 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
                     required={true}
                     aria-required='true'
                     id='ticket-description'
-                    value={field.state.value || ''}
+                    defaultValue={field.state.value || ''}
                     aria-invalid={field.state.meta.errors.length > 0}
                     placeholder='Enter Ticket Description...'
                     aria-label='Ticket Description'
@@ -2473,12 +2587,22 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
                     data-track-name='EDIT_TICKET_DESCRIPTION'
                     data-track-metadata={JSON.stringify({ boardId: selectedBoardId, channelId })}
                     onChange={e => {
-                      const newValue = e.target.value;
-                      field.handleChange(newValue);
-                      // Dynamically adjust the height
                       const target = e.target;
-                      target.style.height = 'auto'; // Reset height to recalculate
-                      target.style.height = `${target.scrollHeight}px`; // Set to scroll height
+                      target.style.height = 'auto';
+                      target.style.height = `${target.scrollHeight}px`;
+                      // Validation runs at submit time only. While an error is
+                      // showing, re-evaluate it live against the typed value so
+                      // it clears as soon as the text is fixed — without writing
+                      // the value into the form store (which is what made typing
+                      // laggy). Mirrors the onSubmit validator's rules.
+                      if (field.state.meta.errors.length > 0) {
+                        const nextError = !target.value.trim()
+                          ? 'Description is required'
+                          : target.value.length < 5
+                            ? 'Description must be at least 5 characters'
+                            : undefined;
+                        field.setErrorMap({ onSubmit: nextError });
+                      }
                     }}
                     className={cn(
                       'rounded-[10px] border px-0 py-1 focus-visible:ring-0 min-h-[150px] transition-colors duration-150',

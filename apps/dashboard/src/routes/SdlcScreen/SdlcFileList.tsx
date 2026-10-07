@@ -21,7 +21,6 @@ import {
 import { defaultRangeExtractor, useVirtualizer } from '@tanstack/react-virtual';
 import { PhoneDefault } from '@xyne/icons';
 import {
-  ChevronDown,
   ChevronRight,
   ClipboardPaste,
   FileText,
@@ -31,6 +30,7 @@ import {
   Link2,
   MessageCircle,
   MoreHorizontal,
+  PanelsTopLeft,
   Paperclip,
   Pencil,
   Plus,
@@ -50,7 +50,9 @@ import { IconPicker } from '../../components/AppIcon/IconPicker';
 import { ActivityPill, type SdlcLiveCalls } from './ActivityPill';
 import { SdlcItemInfoDialog } from './SdlcItemInfoDialog';
 import { compareTreeNodes } from './SdlcFolderPage';
+import { FilesEmptyState } from './SdlcFilesEmptyState';
 import {
+  formatUpdated,
   sdlcItemName,
   targetItemOf,
   type SdlcFilesLocation,
@@ -65,6 +67,8 @@ import { cn } from '../../utils/classNames';
 import { Button } from '../../components/ui/Button';
 import { Checkbox } from '../../components/ui/Checkbox/Checkbox';
 import { Popover } from '../../components/ui/Popover';
+import { Tooltip } from '../../components/ui/Tooltip';
+import { ShortcutTooltip } from '../../components/ui/ShortcutTooltip';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -136,16 +140,6 @@ const DOUBLE_CLICK_MS = 800;
  */
 const TYPE_COLUMN_MIN_WIDTH = 520;
 const SIZE_COLUMN_MIN_WIDTH = 620;
-
-function formatUpdated(value: number): string {
-  const date = new Date(value);
-  const sameYear = date.getFullYear() === new Date().getFullYear();
-  return date.toLocaleDateString(undefined, {
-    day: 'numeric',
-    month: 'short',
-    ...(!sameYear && { year: 'numeric' }),
-  });
-}
 
 function RowIcon(props: { row: FileRow; brokenFavicon: boolean; onFaviconError: () => void }) {
   const { row } = props;
@@ -470,10 +464,16 @@ function Breadcrumbs(props: {
 }
 
 /** The ticket board header's buttons, so the two tabs of a track look alike. */
-const TOOLBAR_PRIMARY =
-  'flex h-[30px] shrink-0 items-center gap-1.5 whitespace-nowrap rounded-lg bg-foreground px-3 text-[12.5px] font-semibold text-background transition-opacity hover:opacity-90';
-const TOOLBAR_OUTLINE =
-  'flex h-[30px] shrink-0 items-center gap-1.5 whitespace-nowrap rounded-lg border border-border px-3 text-[12.5px] font-semibold text-foreground transition-colors hover:bg-muted';
+/** How long the pointer rests on an icon before its name shows: passing over it
+ *  on the way somewhere else shouldn't. */
+const TOOLTIP_DELAY_MS = 600;
+
+// The toolbar's actions are icons, named by their tooltips: the place's name is
+// already in the breadcrumbs beside them.
+const TOOLBAR_ICON =
+  'flex size-[30px] shrink-0 items-center justify-center rounded-lg border border-border text-foreground transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring';
+const TOOLBAR_ICON_PRIMARY =
+  'flex size-[30px] shrink-0 items-center justify-center rounded-lg bg-foreground text-background transition-opacity hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1';
 
 const MENU_ITEM =
   'flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-[13px] transition-colors hover:bg-muted';
@@ -497,88 +497,6 @@ function FilesMenuItem({
 
 const ROW_ACTION =
   'flex size-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-background hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring';
-
-/** An empty folder, or a track with nothing in it yet, and the ways to add to it. */
-function FilesEmptyState(props: {
-  here: SdlcFilesLocation;
-  onNewArtifact: () => void;
-  onUploadFile: () => void;
-  onAddLink: () => void;
-  onNewFolder: () => void;
-}): ReactElement {
-  const atTrack = props.here.type === 'TRACK';
-  return (
-    // A third of the way down rather than centred: it sits where the eye lands first,
-    // and stays put however tall the window is.
-    <div className='flex h-full min-h-[320px] flex-col items-center justify-start px-6 pb-12 pt-[12vh] text-center'>
-      <div className='mb-5 grid size-14 place-items-center rounded-2xl border border-border bg-muted/40'>
-        {atTrack ? (
-          <FileText className='size-6 text-muted-foreground' aria-hidden='true' />
-        ) : (
-          <FolderOpen className='size-6 text-muted-foreground' aria-hidden='true' />
-        )}
-      </div>
-      <h3 className='text-[15px] font-semibold text-foreground'>
-        {atTrack ? `No files in ${props.here.name} yet` : `${props.here.name} is empty`}
-      </h3>
-      {/* Four ways in, weighed the same: none of them is the one you're meant to pick. */}
-      <div className='mt-5 grid w-full max-w-[680px] grid-cols-[repeat(auto-fit,minmax(148px,1fr))] gap-2.5'>
-        {(
-          [
-            {
-              label: 'New artifact',
-              hint: 'A doc, PRD or spec',
-              icon: FileText,
-              run: props.onNewArtifact,
-              track: 'NewArtifactOpened',
-            },
-            {
-              label: 'Upload file',
-              hint: 'PDFs, docs, sheets, images',
-              icon: Upload,
-              run: props.onUploadFile,
-              track: 'UploadFileOpened',
-            },
-            {
-              label: 'Add link',
-              hint: 'Jira, Figma, dashboards',
-              icon: Link2,
-              run: props.onAddLink,
-              track: 'AddLinkOpened',
-            },
-            {
-              label: 'New folder',
-              hint: 'Group related items',
-              icon: Folder,
-              run: props.onNewFolder,
-              track: 'NewFolderOpened',
-            },
-          ] as const
-        ).map(option => (
-          <button
-            key={option.label}
-            type='button'
-            onClick={option.run}
-            className='group flex flex-col items-start gap-3 rounded-xl border border-border p-3.5 text-left transition-colors hover:border-foreground/20 hover:bg-muted/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring'
-            data-track-category='SdlcHub'
-            data-track-name={option.track}
-            data-track-metadata={JSON.stringify({ place: 'files-empty' })}
-          >
-            <span className='grid size-8 place-items-center rounded-lg bg-muted text-muted-foreground transition-colors group-hover:text-foreground'>
-              <option.icon className='size-4' />
-            </span>
-            <span>
-              <span className='block text-[13px] font-semibold text-foreground'>
-                {option.label}
-              </span>
-              <span className='mt-0.5 block text-xs text-muted-foreground'>{option.hint}</span>
-            </span>
-          </button>
-        ))}
-      </div>
-    </div>
-  );
-}
 
 type MovingItem = { type: SdlcItemKind; id: string };
 
@@ -618,7 +536,8 @@ export function SdlcFileList(props: {
   onStartCall?: (item: { kind: SdlcItemKind; id: string; name: string }) => void;
   /** The item whose conversations the panel is showing, if any. */
   discussingId: string | null;
-  onRenameFolder: (folderId: string, name: string) => void;
+  /** Renames a folder, artifact, link or uploaded file; a file keeps its extension. */
+  onRenameItem: (item: { kind: SdlcItemKind; id: string }, name: string) => void;
   onMoveItems: (items: MovingItem[], parent: { type: 'TRACK' | 'FOLDER'; id: string }) => void;
   listRef: Ref<HTMLDivElement>;
 }): ReactElement {
@@ -933,7 +852,7 @@ export function SdlcFileList(props: {
   useShortcutById(
     'files.rename',
     () => {
-      if (focusedRow?.kind === 'FOLDER') startRename(focusedRow);
+      if (focusedRow) startRename(focusedRow);
     },
     bind,
   );
@@ -982,13 +901,12 @@ export function SdlcFileList(props: {
       trigger={
         <button
           type='button'
-          className={TOOLBAR_PRIMARY}
+          aria-label='New'
+          className={TOOLBAR_ICON_PRIMARY}
           data-track-category='SdlcHub'
           data-track-name='FilesAddOpened'
         >
-          <Plus className='size-[14px]' strokeWidth={2} />
-          New
-          <ChevronDown className='size-3.5 opacity-70' />
+          <Plus className='size-4' strokeWidth={2} />
         </button>
       }
     >
@@ -1101,11 +1019,12 @@ export function SdlcFileList(props: {
           {many ? `Cut ${targets.length} items` : 'Cut'}
           <ShortcutHint shortcut='files.cut' className='ml-auto text-xs' />
         </FilesMenuItem>
-        {row.kind === 'FOLDER' && !many && (
+        {!many && (
           <FilesMenuItem
             onSelect={() => startRename(row)}
             data-track-category='SdlcHub'
-            data-track-name='FolderRenameOpened'
+            data-track-name='FilesRenameOpened'
+            data-track-metadata={JSON.stringify({ kind: row.kind })}
           >
             <Pencil className='size-4 text-muted-foreground' />
             Rename
@@ -1251,23 +1170,43 @@ export function SdlcFileList(props: {
             openRow(row, undefined, location);
           }}
         />
+        {/* Wherever you are, in the editor: the explorer and tabs, as double-clicking
+          a folder opens it. At the top, the track's own. */}
+        <Tooltip content='Open in editor' delayDuration={TOOLTIP_DELAY_MS}>
+          <button
+            type='button'
+            aria-label={`Open ${here.name} in the editor`}
+            onClick={event => props.onOpenFolderPage({ id: here.id, name: here.name }, event)}
+            className={TOOLBAR_ICON}
+            data-track-category='SdlcHub'
+            data-track-name='FolderPageOpenedFromToolbar'
+          >
+            <PanelsTopLeft className='size-4' />
+          </button>
+        </Tooltip>
         {/* The conversations about wherever you are: this folder's, or at the top
           the track's own. */}
-        <button
-          type='button'
-          aria-pressed={props.discussingId === here.id}
-          onClick={() =>
-            here.type === 'FOLDER'
-              ? props.onDiscussItem({ kind: 'FOLDER', id: here.id, name: here.name }, here)
-              : props.onDiscussTrack()
-          }
-          className={cn(TOOLBAR_OUTLINE, props.discussingId === here.id && 'bg-muted')}
-          data-track-category='SdlcHub'
-          data-track-name='FolderConversationsOpened'
+        <ShortcutTooltip
+          label='Discussions'
+          delayDuration={TOOLTIP_DELAY_MS}
+          shortcut={here.type === 'FOLDER' ? 'files.discuss' : 'files.trackDiscuss'}
         >
-          <MessageCircle className='size-[14px]' />
-          Discussions
-        </button>
+          <button
+            type='button'
+            aria-label='Discussions'
+            aria-pressed={props.discussingId === here.id}
+            onClick={() =>
+              here.type === 'FOLDER'
+                ? props.onDiscussItem({ kind: 'FOLDER', id: here.id, name: here.name }, here)
+                : props.onDiscussTrack()
+            }
+            className={cn(TOOLBAR_ICON, props.discussingId === here.id && 'bg-muted')}
+            data-track-category='SdlcHub'
+            data-track-name='FolderConversationsOpened'
+          >
+            <MessageCircle className='size-4' />
+          </button>
+        </ShortcutTooltip>
         {clipboard && (
           // While something is cut: where to put it, or to change your mind.
           <div className='flex h-[30px] shrink-0 items-center rounded-lg border border-border'>
@@ -1297,7 +1236,11 @@ export function SdlcFileList(props: {
             </button>
           </div>
         )}
-        {addMenu}
+        {/* The menu's own trigger can't also be the tooltip's, so the tooltip holds
+          the whole menu. */}
+        <Tooltip content='New' delayDuration={TOOLTIP_DELAY_MS} {...(addOpen && { open: false })}>
+          <span className='flex shrink-0'>{addMenu}</span>
+        </Tooltip>
       </div>
 
       <div
@@ -1503,11 +1446,17 @@ export function SdlcFileList(props: {
                       <input
                         autoFocus
                         value={renameDraft}
-                        maxLength={120}
+                        maxLength={row.kind === 'FOLDER' ? 120 : 300}
                         onChange={event => setRenameDraft(event.target.value)}
-                        onFocus={event =>
-                          event.target.setSelectionRange(0, event.target.value.length)
-                        }
+                        // A file's name is picked without its extension, which it keeps.
+                        onFocus={event => {
+                          const dot =
+                            row.kind === 'ATTACHMENT' ? event.target.value.lastIndexOf('.') : -1;
+                          event.target.setSelectionRange(
+                            0,
+                            dot > 0 ? dot : event.target.value.length,
+                          );
+                        }}
                         onKeyDown={event => {
                           if (event.key === 'Escape') {
                             renameAbandoned.current = true;
@@ -1523,12 +1472,12 @@ export function SdlcFileList(props: {
                             return;
                           }
                           if (next.length > 0 && next !== row.name) {
-                            props.onRenameFolder(row.id, next);
+                            props.onRenameItem({ kind: row.kind, id: row.id }, next);
                           }
                         }}
                         className='relative z-10 min-w-0 flex-1 rounded border-0 bg-background px-1 text-sm font-medium text-foreground outline-none ring-1 ring-ring'
                         data-track-category='SdlcHub'
-                        data-track-name='FolderRenamed'
+                        data-track-name='FilesItemRenamed'
                       />
                     ) : (
                       // The row's one control, stretched over the whole row, so a click

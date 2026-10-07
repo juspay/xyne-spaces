@@ -74,6 +74,7 @@ import callRoutes from '@/routes/calls';
 import calendarSyncRoutes from '@/routes/calendarSync';
 import calendarOAuthRoutes from '@/routes/calendarOAuth';
 import driveOAuthRoutes from '@/routes/driveOAuth';
+import userContactsRoutes from '@/routes/userContacts';
 import calendarWatchRoutes from '@/routes/calendarWatch';
 import calendarWebhookRoutes from '@/routes/calendarWebhooks';
 import callLobbyRoutes from '@/routes/callLobby';
@@ -102,7 +103,6 @@ import boardConfigCopyRoutes from '@/routes/boardConfigCopy';
 import auditLogRoutes from '@/routes/auditLogs';
 import recordingPointerBackfillRoutes from '@/routes/recordingPointerBackfill';
 import sdlcRepoCredentialBackfillRoutes from '@/routes/sdlcRepoCredentialBackfill';
-import sdlcFolderEdgeBackfillRoutes from '@/routes/sdlcFolderEdgeBackfill';
 import searchMetricsRoutes from '@/routes/searchMetrics';
 import knowledgeRoutes from '@/routes/knowledge';
 import vespaSearchRoutes, { relatedContextRouter } from '@/routes/vespaSearch';
@@ -185,6 +185,7 @@ import { conversationIngestQueue } from '@/queues/conversationIngestQueue';
 import { documentIngestQueue } from '@/queues/documentIngestQueue';
 import { teamIntelligenceQueue } from '@/team-intelligence/queue';
 import { emailClassificationQueue } from '@/queues/emailClassificationQueue';
+import { callTranscriptionQueue } from '@/queues/callTranscriptionQueue';
 import { autoDraftQueue } from '@/queues/autoDraftQueue';
 import { entityExtractionQueue } from '@/queues/entityExtractionQueue';
 import { initStorage } from '@/services/storage';
@@ -456,7 +457,6 @@ export class App {
     // '-backfill' path suffix also puts it behind backfillMountGuard above.
     this.app.use('/api/admin/recording-pointer-backfill', recordingPointerBackfillRoutes);
     this.app.use('/api/admin/sdlc-repo-credential-backfill', sdlcRepoCredentialBackfillRoutes);
-    this.app.use('/api/admin/sdlc-folder-edge-backfill', sdlcFolderEdgeBackfillRoutes);
     // Same shape: the one-off SDLC multi-repo data migration spans every workspace,
     // so it opens its own runAsSystem scope rather than taking workspaceScopedRoute.
 
@@ -538,6 +538,7 @@ export class App {
     this.app.use('/api/calls', authMiddleware.authenticate, callRoutes); // Calling feature routes
     this.app.use('/api/calendar/oauth', calendarOAuthRoutes); // Calendar-only OAuth (init is authenticated; callbacks use bound state)
     this.app.use('/api/drive/oauth', driveOAuthRoutes); // KB Drive import OAuth (init is authenticated; callback uses bound state)
+    this.app.use('/api/user-contacts', userContactsRoutes); // Per-user contacts import (invite dialog; init is authenticated, callbacks use bound state)
     this.app.use('/api/calendar/sync', authMiddleware.authenticate, calendarSyncRoutes); // Calendar manual sync
     this.app.use('/api/calendar/watch', authMiddleware.authenticate, calendarWatchRoutes); // Calendar watch setup
     this.app.use('/api/voice-input', authMiddleware.authenticate, voiceInputRoutes); // Low-latency chat voice input
@@ -610,6 +611,48 @@ export class App {
         res.json({ ok: true });
       } catch (err) {
         logger.error('[twin-reply-draft] create failed', err);
+        res.status(500).json({ error: 'Internal error' });
+      }
+    });
+    // Conversation-access check for claw: claw sessions are keyed by
+    // conversationId (not userId), so claw must verify the caller may access a
+    // conversation before binding its session. Returns whether the conversation
+    // exists and whether the user is a member of its channel (or it is a PUBLIC
+    // channel in the user's workspace). Spaces owns this ACL.
+    this.app.post('/api/internal/conversation-access', validateS2SKey, async (req: Request, res: Response) => {
+      try {
+        const { conversationId, userId } = (req.body ?? {}) as { conversationId?: string; userId?: string };
+        if (!conversationId || !userId) {
+          res.status(400).json({ error: 'conversationId and userId are required' });
+          return;
+        }
+        const prisma = DatabaseClient.getInstance();
+        const conv = await prisma.conversation.findUnique({
+          where: { conversationId },
+          select: { channelId: true },
+        });
+        if (!conv) {
+          res.json({ exists: false, canAccess: false });
+          return;
+        }
+        const participant = await prisma.channelParticipant.findUnique({
+          where: { channelId_userId: { channelId: conv.channelId, userId } },
+          select: { id: true },
+        });
+        let canAccess = participant !== null;
+        if (!canAccess) {
+          const channel = await prisma.channel.findUnique({
+            where: { id: conv.channelId },
+            select: { visibility: true, workspaceId: true },
+          });
+          if (channel?.visibility === 'PUBLIC') {
+            const user = await prisma.user.findUnique({ where: { id: userId }, select: { workspaceId: true } });
+            canAccess = !!user?.workspaceId && user.workspaceId === channel.workspaceId;
+          }
+        }
+        res.json({ exists: true, canAccess });
+      } catch (err) {
+        logger.error('[conversation-access] failed', err);
         res.status(500).json({ error: 'Internal error' });
       }
     });
@@ -905,6 +948,10 @@ export class App {
           logger.info('Initializing email classification queue...');
           await emailClassificationQueue.initialize();
         })(),
+        (async () => {
+          logger.info('Initializing call transcription queue...');
+          callTranscriptionQueue.startConsumer();
+        })(),
       ]);
 
       logger.info('[TEST MODE] All queues initialized');
@@ -950,6 +997,12 @@ export class App {
 
       logger.info('Initializing email classification queue...');
       await emailClassificationQueue.initialize();
+
+      // Ozonetel call-recording transcription (manual "Transcribe" button). The audio
+      // work runs in the Python agent; this consumer only holds the Bull job while it
+      // waits for the agent, then writes the transcript attachment.
+      logger.info('Initializing call transcription queue...');
+      callTranscriptionQueue.startConsumer();
 
       // Producer only — messages are enqueued here at ingest; the worker (a
       // separate process) drains each thread once its debounce window elapses.
@@ -1044,11 +1097,15 @@ export class App {
       );
     }
 
-    try {
-      await registerAllExternalSources();
-    } catch (error) {
-      logger.error('Failed to register external sources:', error);
-      logger.warn('Continuing startup without external sources...');
+    if (config.enableExternalSourceRegistration) {
+      try {
+        await registerAllExternalSources();
+      } catch (error) {
+        logger.error('Failed to register external sources:', error);
+        logger.warn('Continuing startup without external sources...');
+      }
+    } else {
+      logger.info('Skipping external-source bot registration (ENABLE_EXTERNAL_SOURCE_REGISTRATION=false)');
     }
 
     // Register workflow definitions
@@ -1187,6 +1244,9 @@ export class App {
 
       // Close auto draft queue
       await autoDraftQueue.close();
+
+      // Close call transcription queue
+      await callTranscriptionQueue.close();
 
       // Close radar execution producer queue (initialized above when enabled)
       const { radarExecutionQueue: radarQueue } = await import('@/queues/radarExecutionQueue');

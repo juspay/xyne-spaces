@@ -51,6 +51,17 @@ export interface ElectronAPI {
     callback: (data: { callId: string; action: 'accept' | 'reject' }) => void,
   ) => () => void;
   focusApp: () => void;
+  /**
+   * The floating incoming-call card. Present only on desktop builds that turn
+   * `window.open('', 'xyne-incoming-call:…')` into an always-on-top panel.
+   */
+  incomingCallWindow?: {
+    bringAppToFront: () => void;
+    isAppFocused: () => Promise<boolean>;
+    /** Whether this window floats the card, and whether a main window exists to. */
+    getHost: () => Promise<{ isMain: boolean; mainExists: boolean }>;
+    onAppFocusChanged: (callback: (focused: boolean) => void) => () => void;
+  };
   onNavigateTo: (callback: (url: string, workspaceId?: string) => void) => () => void;
   onBrowserNewTab: (callback: () => void) => () => void;
   onBrowserFindInPage: (callback: () => void) => () => void;

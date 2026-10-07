@@ -15,6 +15,7 @@ import {
 import { queryClient } from '../../services/clients/queryClient';
 import { useCanCreateWorkspace } from '../../hooks/usePermissions';
 import { confirmInterrupt } from '../InterruptGuard/InterruptGuard';
+import { useUnreadActivitiesCount } from '../../hooks/useUnreadActivitiesCount';
 
 type CreateWorkspaceType = (typeof WorkspaceType)[keyof typeof WorkspaceType];
 
@@ -47,6 +48,10 @@ interface CreateWorkspaceResponse {
 export const WorkspaceSwitcher: React.FC = () => {
   const { workspaceId } = useParams<{ workspaceId?: string }>();
   const canCreateWorkspace = useCanCreateWorkspace();
+  // Active workspace's unread count comes from the same live source as the
+  // sidebar Activity badge, so we don't need to hit /activity/workspace-counts
+  // just to render the switcher trigger.
+  const currentWorkspaceUnread = useUnreadActivitiesCount();
 
   // Read initial name from user-bound localStorage so the button renders immediately without an API call
   const [localWorkspaceName, setLocalWorkspaceName] = useState<string>(() => {
@@ -159,19 +164,6 @@ export const WorkspaceSwitcher: React.FC = () => {
     }
   }, [isOpen]);
 
-  // Fetch activity counts on mount so badge is visible immediately
-  useEffect(() => {
-    void fetchActivityCounts();
-  }, []);
-
-  // Poll activity counts every 30s to keep badge fresh
-  useEffect(() => {
-    const interval = setInterval(() => {
-      void fetchActivityCounts();
-    }, 30000);
-    return () => clearInterval(interval);
-  }, []);
-
   // Close on outside click
   useEffect(() => {
     if (!isOpen) return;
@@ -250,6 +242,9 @@ export const WorkspaceSwitcher: React.FC = () => {
       }
       localStorage.setItem('user_id', res.data.user.id);
       setIsOpen(false);
+      // Prompt the creator to invite people into their fresh workspace. The
+      // AppSidebar consumes this one-shot flag after the reload.
+      sessionStorage.setItem('xyne-open-invite-dialog', 'true');
       window.location.href = `/${newWorkspaceId}/chat/dir`;
     } catch (err) {
       if (axios.isAxiosError(err)) {
@@ -288,7 +283,11 @@ export const WorkspaceSwitcher: React.FC = () => {
   const bgColor = displayName ? getInitialColor(displayName) : '#607d8b';
 
   // Show only the active workspace's unread count on the switcher trigger.
-  const totalUnread = workspaceId ? (activityCounts.get(workspaceId) ?? 0) : 0;
+  // Cross-workspace counts (/activity/workspace-counts) are fetched only when
+  // the switcher is opened; the active workspace always uses the live count.
+  const totalUnread = workspaceId ? currentWorkspaceUnread : 0;
+  const getWorkspaceCount = (id: string): number =>
+    id === workspaceId ? currentWorkspaceUnread : (activityCounts.get(id) ?? 0);
   const createLabel = 'Create enterprise workspace';
 
   // Always rendered so community members in community workspaces see the action
@@ -359,7 +358,7 @@ export const WorkspaceSwitcher: React.FC = () => {
               workspaces.map(ws => {
                 const isActive = ws.id === workspaceId;
                 const isSwitching = switching === ws.id;
-                const count = activityCounts.get(ws.id) || 0;
+                const count = getWorkspaceCount(ws.id);
                 return (
                   <button
                     key={ws.id}
@@ -444,7 +443,7 @@ export const WorkspaceSwitcher: React.FC = () => {
                       workspaces.map(ws => {
                         const isActive = ws.id === workspaceId;
                         const isSwitching = switching === ws.id;
-                        const count = activityCounts.get(ws.id) || 0;
+                        const count = getWorkspaceCount(ws.id);
                         return (
                           <button
                             key={ws.id}

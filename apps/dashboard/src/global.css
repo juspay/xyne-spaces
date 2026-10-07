@@ -5023,6 +5023,76 @@ img.inline-emoji,
   }
 }
 
+@keyframes xyne-duplicate-sweep {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(250%);
+  }
+}
+
+.xyne-duplicate-scan {
+  position: absolute;
+  inset-inline: 0;
+  bottom: 0;
+  height: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  pointer-events: none;
+  opacity: 0;
+  visibility: hidden;
+  transition:
+    opacity 320ms cubic-bezier(0.22, 1, 0.36, 1),
+    visibility 0s linear 320ms;
+}
+
+.xyne-duplicate-scan-track {
+  position: relative;
+  flex: 1;
+  height: 1.5px;
+  overflow: hidden;
+  background: hsl(var(--border));
+}
+
+.xyne-duplicate-scan-track::after {
+  content: "";
+  position: absolute;
+  inset-block: 0;
+  left: 0;
+  width: 40%;
+  background: linear-gradient(
+    90deg,
+    rgba(139, 92, 246, 0) 0%,
+    rgba(139, 92, 246, 0.85) 30%,
+    rgba(59, 130, 246, 0.85) 55%,
+    rgba(20, 184, 166, 0.8) 80%,
+    rgba(20, 184, 166, 0) 100%
+  );
+  animation: xyne-duplicate-sweep 1.6s cubic-bezier(0.65, 0, 0.35, 1) infinite;
+  animation-play-state: paused;
+}
+
+.xyne-duplicate-scan[data-active="true"] {
+  opacity: 1;
+  visibility: visible;
+  transition:
+    opacity 320ms cubic-bezier(0.22, 1, 0.36, 1) 200ms,
+    visibility 0s linear 200ms;
+}
+
+.xyne-duplicate-scan[data-active="true"] .xyne-duplicate-scan-track::after {
+  animation-play-state: running;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .xyne-duplicate-scan-track::after {
+    width: 100%;
+    animation: none;
+  }
+}
+
 /* ================================================================
    Xyne semantic tokens (mirrors claw's tokens.css)
    Power the shared Ask AI debugger panel's xyne-* utilities. Light

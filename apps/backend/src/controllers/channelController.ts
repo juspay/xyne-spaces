@@ -4,6 +4,7 @@ import { ExternalSourcePlatform } from '@/integrations/core/types';
 import {
   SOCIAL_MEDIA_PLATFORMS,
   isSocialMediaPlatform,
+  isMetaMessagingPlatform,
 } from '@/integrations/social-media/constants';
 import {
   buildSlackDeskSourceName,
@@ -60,7 +61,8 @@ import { hasProjectAdminAccess } from '@/database/acl/admin-access';
 import { NAMESPACE } from '@/vespa/vespaConfig';
 import {logger} from '@/utils/logger';
 import { messageMetadataService } from '@/services/messageMetadataService';
-import { extractSpecialMentions, getChannelParticipantsForMention, getOnlineChannelParticipants } from '@/utils/mentionUtils';
+import { extractAllUsersForNotification, extractSpecialMentions, getChannelParticipantsForMention, getOnlineChannelParticipants } from '@/utils/mentionUtils';
+import { mentionRecipients } from '@/zero/side-effects/tables/mention-delivery';
 import { activityService } from '@/services/activity/activityService';
 import { encrypt, decrypt } from '@/services/encryptionService';
 import { vespaService } from '@/services/vespaSearch';
@@ -335,23 +337,37 @@ export class ChannelController {
 
         if (isGroupDm && mentionType) {
           const channel = await this.channelRepository.findById(channelId);
-          await notificationService.createMentionNotifications(
-            recipientIds,
-            createdMessage.messageId,
-            conversation.conversationId,
-            channelId,
-            channel?.name ?? channelId,
-            senderId,
-            senderInfo.name,
-            cleanContent,
-            workspaceId,
-            mentionType,
-            false, // isDMChannel
-            false, // isThreadMessage
-            senderInfo.picture ?? '',
-            undefined, // prefetchedData
-            true, // isGroupDM
-          );
+          // Personally mentioned members are sent without mentionType so the
+          // @channel/@here toggle can't suppress their mention.
+          const personalIds = mentionRecipients(
+            await extractAllUsersForNotification(messageContent, workspaceId),
+            { participantIds: new Set(recipientIds), senderId },
+          ).map(u => u.userId);
+          const personalSet = new Set(personalIds);
+          const sendMentions = (userIds: string[], groupMentionType: '@channel' | '@here' | undefined) =>
+            userIds.length === 0
+              ? Promise.resolve()
+              : notificationService.createMentionNotifications(
+                  userIds,
+                  createdMessage.messageId,
+                  conversation.conversationId,
+                  channelId,
+                  channel?.name ?? channelId,
+                  senderId,
+                  senderInfo.name,
+                  cleanContent,
+                  workspaceId,
+                  groupMentionType,
+                  false, // isDMChannel
+                  false, // isThreadMessage
+                  senderInfo.picture ?? '',
+                  undefined, // prefetchedData
+                  true, // isGroupDM
+                );
+          await Promise.all([
+            sendMentions(personalIds, undefined),
+            sendMentions(recipientIds.filter(id => !personalSet.has(id)), mentionType),
+          ]);
 
           // Mirror MessagesSideEffectHandler.handleSpecialMentionActivities: create
           // the activity-feed records for the @channel/@here audience so the mention
@@ -1395,7 +1411,7 @@ export class ChannelController {
         );
       } else if (source?.sourceType === ExternalSourcePlatform.SLACK_DESK) {
         connectedLabel = extractSlackChannelId(source.name);
-      } else if (sourceType && isSocialMediaPlatform(sourceType) && sourceType !== ExternalSourcePlatform.INSTAGRAM) {
+      } else if (sourceType && isSocialMediaPlatform(sourceType) && !isMetaMessagingPlatform(sourceType)) {
         const reviewSources = await db.externalSource.findMany({
           where: { channelId, workspaceId, sourceType: { in: [...SOCIAL_MEDIA_PLATFORMS] } },
           select: {
@@ -1418,9 +1434,9 @@ export class ChannelController {
         connectedLabel = activeReviewSources
           .map(reviewSource => reviewSource.displayName)
           .join(', ') || 'No active apps';
-      } else if (source?.sourceType === ExternalSourcePlatform.INSTAGRAM) {
+      } else if (source && isMetaMessagingPlatform(source.sourceType)) {
         const igSources = await db.externalSource.findMany({
-          where: { channelId, workspaceId, sourceType: ExternalSourcePlatform.INSTAGRAM },
+          where: { channelId, workspaceId, sourceType: source.sourceType },
           select: {
             id: true,
             displayName: true,
@@ -1438,7 +1454,8 @@ export class ChannelController {
           packageName: s.externalIdentifier,
           isActive: s.isActive,
         }));
-        connectedLabel = activeIgSources.map(s => s.displayName ? `@${s.displayName}` : s.externalIdentifier).join(', ') || null;
+        const handlePrefix = source.sourceType === ExternalSourcePlatform.INSTAGRAM ? '@' : '';
+        connectedLabel = activeIgSources.map(s => s.displayName ? `${handlePrefix}${s.displayName}` : s.externalIdentifier).join(', ') || null;
       }
 
       const fromDisplay = (source?.displayName ?? '').match(/[\w.+-]+@[\w.-]+\.[\w.-]+/)?.[0];

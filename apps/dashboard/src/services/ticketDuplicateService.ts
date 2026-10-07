@@ -20,6 +20,17 @@ export interface TicketDuplicateCandidate {
   createdAt?: string;
 }
 
+export type TicketDuplicateTier = 'likely' | 'similar';
+
+export type TicketDuplicateRelation = 'duplicate' | 'regression' | 'related' | 'unrelated';
+
+export interface TicketDuplicateMatch {
+  id: string;
+  tier: TicketDuplicateTier;
+  score: number;
+  relation?: TicketDuplicateRelation;
+}
+
 export interface TicketDuplicateCheckAnalysis {
   isDuplicate: boolean;
   duplicateTicketId?: string | null;
@@ -27,6 +38,7 @@ export interface TicketDuplicateCheckAnalysis {
   reason?: string;
   model?: string;
   error?: string;
+  matches?: TicketDuplicateMatch[];
 }
 
 export interface TicketDuplicateCheckResponse {

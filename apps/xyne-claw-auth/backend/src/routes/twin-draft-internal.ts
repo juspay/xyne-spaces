@@ -1,6 +1,7 @@
 import { Router, type Request, type Response } from "express";
 import { executeTwinApprovalDelivery, type TwinDeliveryContext } from "../lib/twin-approval-delivery.js";
 import { recordTwinApprovalOutcome } from "../services/twinResponseFeedback.js";
+import { resolveCanonicalUserIdOrSelf } from "../lib/users-jit.js";
 import { createLogger } from "../logger.js";
 
 const log = createLogger("twin-draft");
@@ -83,9 +84,14 @@ twinDraftInternalRouter.post("/action", async (req: Request, res: Response) => {
     senderId: draft.senderId,
   };
   // Feedback row shape read by recordTwinApprovalOutcome (mirrors flow-data keys).
+  // twinResponseFeedback is Claw-owned and keyed by the CANONICAL Claw user
+  // (recordTwinApprovalPending on the producer side); ownerId here is the raw
+  // Spaces id from the draft, so canonicalize mentionedUserId before writing.
+  // ctx keeps the raw ownerId — it drives the Spaces-facing delivery.
   // destinationKind stays the draft's own so a draft without one records NULL.
   const feedbackData: Record<string, unknown> = {
     ...ctx,
+    mentionedUserId: await resolveCanonicalUserIdOrSelf(ownerId, draft.workspaceId),
     channelName: draft.channelName,
     incomingTask: draft.incomingTask,
     destinationKind: draft.destinationKind,

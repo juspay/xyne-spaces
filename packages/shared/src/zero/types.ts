@@ -527,6 +527,7 @@ export enum UserType {
   USER = 'USER',
   BOT = 'BOT',
   APP = 'APP',
+  AGENT = 'AGENT',
 }
 
 // @ts-ignore TS1294
@@ -536,6 +537,7 @@ export enum AppIncomingWebhookType {
   AMAZON_SNS = 'AMAZON_SNS',
   PINGDOM = 'PINGDOM',
   GCP = 'GCP',
+  HUBSPOT = 'HUBSPOT',
 }
 
 // @ts-ignore TS1294

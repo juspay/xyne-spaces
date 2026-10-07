@@ -203,21 +203,18 @@ export function FullCallView({
     state => state.context.isTranscriptionEnabled,
   );
 
-  const actingHostId = useSelector(roomActor, state => state.context.actingHostId);
-
-  // Display name of whoever holds host powers (creator, else the acting host) for
-  // the non-host "who can remove the agent" note in the transcription popover.
+  // Host display name (from room-metadata `createdBy`) for the non-host "who can
+  // remove the agent" note in the transcription popover.
   const hostName = useMemo(() => {
     if (!room?.metadata) return null;
     try {
       const createdBy = (JSON.parse(room.metadata) as { createdBy?: string }).createdBy;
-      const inControl = actingHostId ?? createdBy;
-      if (!inControl) return null;
-      return participants.find(p => p.identity === inControl)?.name ?? null;
+      if (!createdBy) return null;
+      return participants.find(p => p.identity === createdBy)?.name ?? null;
     } catch {
       return null;
     }
-  }, [room?.metadata, participants, actingHostId]);
+  }, [room?.metadata, participants]);
 
   // Active-recording state is driven by room metadata so every participant (incl.
   // late joiners) sees the indicator. `isRecordingProp`/optimistic local state are
@@ -610,8 +607,10 @@ export function FullCallView({
           lights in Electron. */}
       <div
         className={cn(
-          'relative flex h-14 shrink-0 items-center justify-between gap-3 pr-3 sm:pr-4',
-          isElectron && isMac ? 'pl-24' : 'pl-3 sm:pl-4',
+          'relative flex shrink-0 items-center justify-between gap-3 pr-3 sm:pr-4',
+          isElectron && isMac
+            ? 'h-14 pl-24 [[data-fs]_&]:pl-3 sm:[[data-fs]_&]:pl-4'
+            : 'h-16 pl-3 pt-4 sm:pl-4',
         )}
       >
         <div className='flex min-w-0 items-center gap-2 sm:gap-3'>

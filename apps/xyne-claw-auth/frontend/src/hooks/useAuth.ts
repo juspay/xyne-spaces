@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from "react";
-import { getMe, getLoginUrl, upsertUser } from "../lib/api";
+import { getClawIdentity, getMe, getLoginUrl, upsertUser } from "../lib/api";
 import { frontendConfig } from "../lib/config";
+import { setCurrentUserIds } from "../lib/identity";
 import type { User } from "../lib/types";
 
 type AuthState =
@@ -74,8 +75,13 @@ export function useAuth() {
       try {
         const user = await getMe();
         await upsertUser(user).catch(() => {});
+        // Both id forms of "me" (canonical Claw id + raw Spaces id) — Claw-owned
+        // rows may store either, so ownership comparisons check the whole set.
+        const identity = await getClawIdentity();
+        setCurrentUserIds([user.id, identity?.userId, identity?.spacesUserId]);
         setState({ status: "authenticated", user });
       } catch {
+        setCurrentUserIds([]);
         setState({ status: "unauthenticated" });
       }
     })();
@@ -88,6 +94,7 @@ export function useAuth() {
   const logout = useCallback(() => {
     document.cookie = "google_access_token=; Max-Age=0; path=/";
     document.cookie = "user_session_id=; Max-Age=0; path=/";
+    setCurrentUserIds([]);
     setState({ status: "unauthenticated" });
   }, []);
 

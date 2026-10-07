@@ -8,6 +8,7 @@ export interface UseAgentsReturn {
   agents: AgentLight[];
   providerMap: Record<string, AgentProvider>;
   loading: boolean;
+  error: string | null;
   reload: () => void;
 }
 
@@ -15,10 +16,12 @@ export function useAgents(userId: string): UseAgentsReturn {
   const [agents, setAgents] = useState<AgentLight[]>([]);
   const [providerMap, setProviderMap] = useState<Record<string, AgentProvider>>({});
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
     try {
+      setError(null);
       const fetched = await listAgents(userId);
       setAgents(fetched);
 
@@ -33,6 +36,7 @@ export function useAgents(userId: string): UseAgentsReturn {
       setProviderMap(map);
     } catch (err) {
       console.error("useAgents: failed to load agents", err);
+      setError(err instanceof Error ? err.message : "Failed to load agents");
     } finally {
       setLoading(false);
     }
@@ -42,5 +46,5 @@ export function useAgents(userId: string): UseAgentsReturn {
     void load();
   }, [load]);
 
-  return { agents, providerMap, loading, reload: load };
+  return { agents, providerMap, loading, error, reload: load };
 }

@@ -9,7 +9,7 @@ import { CONFIG } from "../config.js";
 import { listToolsForUser, callTool } from "../mcp/runner.js";
 import { agentRunRepository } from "../repositories/index.js";
 import type { McpToolInfo, McpServerTools } from "../mcp/types.js";
-import { hasConnectorDefinition, resolveConnectorDefinition } from "../mcp/connector-definitions.js";
+import { hasConnectorDefinition, resolveConnectorDefinition, isWriteToolUnderPolicy } from "../mcp/connector-definitions.js";
 import { BITBUCKET_CUSTOM_TOOLS, handleUploadPrScreenshot, handleGetPrComments, handleGetPrTemplate, handleListPullRequests, buildUpstreamBitbucketCitation } from "../mcp/adapters/bitbucket.js";
 import { GITHUB_CUSTOM_TOOLS, handleUploadPrAttachment } from "../mcp/adapters/github.js";
 import { GITHUB_INSIGHTS_TOOLS, isGithubInsightsTool, handleGithubInsightsTool } from "../mcp/adapters/github-insights.js";
@@ -1998,7 +1998,9 @@ router.post("/:sessionId/mcp/call", async (req: Request<{ sessionId: string }>, 
 
     // Write tools always require approval — cannot be overridden by agent config
     const definition = await resolveConnectorDefinition(serverType);
-    const isWriteTool = definition?.writeTools?.includes(tool) ?? false;
+    const isWriteTool = definition?.writePolicy
+      ? isWriteToolUnderPolicy(definition.writePolicy, tool)
+      : (definition?.writeTools?.includes(tool) ?? false);
 
     // Agent-level deny list and read-only mode beat the approval card.
     const denied = sessionAgentTools?.deniedTools ?? [];

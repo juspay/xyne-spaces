@@ -2,14 +2,15 @@ import path from "node:path";
 import { errMsg } from "../lib/errors.js";
 import { existsSync } from "node:fs";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
-import { AjvJsonSchemaValidator } from "@modelcontextprotocol/sdk/validation/ajv";
+import type { AjvJsonSchemaValidator } from "@modelcontextprotocol/sdk/validation/ajv";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import type { McpAdapter, McpCallResult, McpServerTools, McpToolInfo } from "./types.js";
 import { extForMime, fileNameFromResource } from "./attachment-filename.js";
 import { STATIC_ADAPTERS } from "./static-adapters.js";
-import { resolveConnectorDefinition } from "./connector-definitions.js";
+import { resolveConnectorDefinition, effectiveWriteTools } from "./connector-definitions.js";
 import { getSpacesAuthForUser, getWorkspaceIdForUser } from "../lib/spaces-db.js";
+import { spacesUserIdForClawUser } from "../lib/users-jit.js";
 import { SPACES_SESSION_CREDENTIAL_SERVER_TYPES } from "../lib/spaces-session-server-types.js";
 import { provisionStdioCommand } from "./provision.js";
 import { prisma } from "../db.js";
@@ -21,36 +22,19 @@ import { recordKnownMcpTools } from "../lib/mcp-tool-name-index.js";
 const log = createLogger("runner");
 
 /**
- * Tolerant JSON Schema validator for MCP tool output schemas.
+ * No-op validator for MCP tool output schemas.
  *
- * Since SDK ~1.28, Client.listTools() eagerly compiles an Ajv validator for
- * EVERY tool's outputSchema. A single non-self-contained schema — e.g. Google
- * Stitch's `$ref: "#/$defs/ScreenInstance"` with the $defs block living
- * outside the outputSchema document — makes Ajv throw MissingRefError
- * ("can't resolve reference ... from id #"), which fails the whole listTools
- * and bricks the entire connector, not just the one bad tool.
- *
- * One malformed third-party schema must degrade to "that tool's output isn't
- * validated", never to "the connector doesn't work". Compile failures are
- * logged once and replaced with a pass-through validator.
+ * Client.listTools() → cacheToolMetadata() calls getValidator() for every tool
+ * with an outputSchema, synchronously, on every list. With Ajv that compiled a
+ * validator per tool each time (CPU that scales with schema size) and retained
+ * each one in the shared Ajv instance, so the heap grew without bound
+ * (XYNE-65482). claw-auth never reads `structuredContent` — callTool forwards
+ * only `result.content` text/binaries — so output validation protects nothing
+ * here. A pass-through also covers non-self-contained schemas (e.g. Google
+ * Stitch `$ref: "#/$defs/..."`) that used to throw MissingRefError.
  */
-const strictSchemaValidator = new AjvJsonSchemaValidator();
-const warnedSchemaCompileFailures = new Set<string>();
-const tolerantSchemaValidator: Pick<AjvJsonSchemaValidator, "getValidator"> = {
-  getValidator: (schema) => {
-    try {
-      return strictSchemaValidator.getValidator(schema);
-    } catch (err) {
-      const message = errMsg(err);
-      if (!warnedSchemaCompileFailures.has(message)) {
-        warnedSchemaCompileFailures.add(message);
-        log.warn(
-          `[mcp/runner] tool outputSchema failed to compile — output validation disabled for this tool: ${message}`,
-        );
-      }
-      return (input: unknown) => ({ valid: true as const, data: input as never, errorMessage: undefined });
-    }
-  },
+const passThroughSchemaValidator: Pick<AjvJsonSchemaValidator, "getValidator"> = {
+  getValidator: () => (input: unknown) => ({ valid: true as const, data: input as never, errorMessage: undefined }),
 };
 
 /**
@@ -182,6 +166,20 @@ export type SessionLane = "app";
 
 const APP_LANE_SUFFIX = "::app";
 
+/**
+ * Server types whose spawned child is bound to ONE Spaces workspace — its
+ * session token and workspace-scoped Spaces id live in the child's env. A
+ * two-workspace user still has ONE canonical Claw id, so keying by userId
+ * alone would let a run in workspace B reuse workspace A's cached child (and
+ * act with A's token and Spaces id — e.g. a ticket lands in the wrong
+ * tenant) or, when runs alternate, keep evicting the sibling workspace's
+ * in-flight child. These keys therefore carry the loaded workspaceId.
+ */
+const SPACES_WORKSPACE_SCOPED_SERVER_TYPES = new Set<string>([
+  ...SPACES_SESSION_CREDENTIAL_SERVER_TYPES,
+  "xyne-spaces-app-tools",
+]);
+
 function sessionKey(
   userId: string,
   serverType: string,
@@ -190,16 +188,21 @@ function sessionKey(
   lane?: SessionLane,
 ): string {
   const suffix = lane === "app" ? APP_LANE_SUFFIX : "";
+  const credsWorkspaceId = credentials?.["workspaceId"];
+  const wsSegment =
+    SPACES_WORKSPACE_SCOPED_SERVER_TYPES.has(serverType) && typeof credsWorkspaceId === "string" && credsWorkspaceId.trim()
+      ? `:ws:${credsWorkspaceId.trim()}`
+      : "";
   // Slack credentials can be supplied by the workspace that dispatched a
   // surface run. Keep each team's env-bound child process isolated.
   const slackTeamId = credentials?.["teamId"];
   if (serverType === "slack" && typeof slackTeamId === "string" && slackTeamId) {
-    return `${userId}:${serverType}:team:${slackTeamId}${suffix}`;
+    return `${userId}:${serverType}:team:${slackTeamId}${wsSegment}${suffix}`;
   }
   if (PER_AGENT_SERVER_TYPES.has(serverType) && agentSlug) {
-    return `${userId}:${serverType}:${agentSlug}${suffix}`;
+    return `${userId}:${serverType}:${agentSlug}${wsSegment}${suffix}`;
   }
-  return `${userId}:${serverType}${suffix}`;
+  return `${userId}:${serverType}${wsSegment}${suffix}`;
 }
 
 /** Close + drop sessions idle longer than the TTL. Best-effort; never throws. */
@@ -229,8 +232,6 @@ async function getOrCreateSession(
   agentSlug?: string,
   lane?: SessionLane,
 ): Promise<Client> {
-  const key = sessionKey(userId, serverType, agentSlug, credentials, lane);
-
   if (SPACES_SESSION_CREDENTIAL_SERVER_TYPES.has(serverType)) {
     // Benchmark lane: the onyx-ask-ai agent ALWAYS routes to the benchmark Vespa
     // cluster, regardless of whether a live login session exists. The agent's
@@ -253,14 +254,27 @@ async function getOrCreateSession(
         ...(appToken ? { token: appToken } : {}),
       };
     } else {
-      const live = await getSpacesAuthForUser(userId, "mcp-runner");
+      // Scope the identity resolution with the workspace the credentials
+      // were loaded for (a two-workspace user otherwise hits the ambiguity
+      // guard in resolveSpacesIdentity and silently gets null).
+      const credsWorkspaceId = typeof credentials["workspaceId"] === "string" && credentials["workspaceId"].trim()
+        ? (credentials["workspaceId"] as string).trim()
+        : undefined;
+      const live = await getSpacesAuthForUser(userId, "mcp-runner", credsWorkspaceId);
       if (live) {
+        // The child's ctx.userId powers Spaces-facing headers
+        // (x-user-id / x-xyne-acting-user-id), createdBy, whoami and every
+        // Vespa ACL filter — all keyed by the workspace-scoped Spaces id.
+        // A canonical Claw id is a guaranteed miss in Spaces' users table, so
+        // hand the child the Spaces id; the Claw-canonical `userId` argument
+        // still keys the session cache and every Claw-side lookup.
+        const spacesUserId = await spacesUserIdForClawUser(userId, live.workspaceId).catch(() => userId);
         credentials = {
           ...credentials,
           token: live.token,
           sessionId: live.sessionId,
           workspaceId: live.workspaceId,
-          userId,
+          userId: spacesUserId,
         };
       } else {
         // No login session for this userId. If it's an agent's app user, fall
@@ -268,15 +282,26 @@ async function getOrCreateSession(
         // headlessly via /api/apps/* (no user session needed).
         const appToken = await resolveAppTokenForAppUser(userId);
         if (appToken) {
-          const workspaceId = await getWorkspaceIdForUser(userId, "mcp-runner").catch(() => null);
+          const workspaceId = await getWorkspaceIdForUser(userId, "mcp-runner", credsWorkspaceId).catch(() => null);
           log.info(`[mcp/runner] xyne-spaces app-mode for app user ${userId} (no session, using app token)`);
           credentials = { ...credentials, token: appToken, authMode: "app", userId, ...(workspaceId ? { workspaceId } : {}) };
         } else {
-          credentials = { ...credentials, userId };
+          // Cached-credentials path (no live session): same Claw→Spaces id
+          // translation as the live branch so the child's Spaces-facing
+          // identity stays correct.
+          const spacesUserId = await spacesUserIdForClawUser(userId, credsWorkspaceId).catch(() => userId);
+          credentials = { ...credentials, userId: spacesUserId };
         }
       }
     }
   }
+
+  // Compute the session key AFTER the credential enrichment above so the
+  // loaded workspaceId (live session, app token, or bench route) lands in the
+  // key — the Spaces-family sessions are keyes per (user × server ×
+  // workspace); keying on the pre-enrichment creds would collapse two
+  // workspaces back into one shared child process.
+  const key = sessionKey(userId, serverType, agentSlug, credentials, lane);
 
   // For xyne-spaces the rotating credential is `token`; for OAuth-based HTTP
   // adapters (customerio, honeycomb, egnyte, …) it is `accessToken`; for
@@ -391,7 +416,7 @@ async function spawnSession(
 
   const client = new Client(
     { name: "xyne-claw-auth", version: "0.1.0" },
-    { jsonSchemaValidator: tolerantSchemaValidator },
+    { jsonSchemaValidator: passThroughSchemaValidator },
   );
   try {
     await client.connect(transport as Parameters<typeof client.connect>[0], {
@@ -464,7 +489,9 @@ export async function listToolsForUser(
   void recordKnownMcpTools(userId, serverType, tools);
 
   const definition = await resolveConnectorDefinition(serverType);
-  const writeTools = definition?.writeTools ?? [];
+  const writeTools = definition?.writePolicy
+    ? effectiveWriteTools(definition.writePolicy, tools.map((t) => t.name))
+    : (definition?.writeTools ?? []);
   return { serverType, serverName, tools, writeTools };
 }
 
@@ -675,35 +702,21 @@ export async function callTool(
 
 export async function evictSession(userId: string, serverType: string, agentSlug?: string): Promise<void> {
   const key = sessionKey(userId, serverType, agentSlug);
-  // The app lane's twin goes too: this runs on reconnect/disconnect/OAuth
-  // events, and an app session must not outlive the credential it was built on.
-  const appKey = `${key}${APP_LANE_SUFFIX}`;
-  const appSession = sessions.get(appKey);
-  if (appSession) {
-    log.info(`[mcp/runner] evicting cached session for ${appKey}`);
-    sessions.delete(appKey);
-    await appSession.transport.close().catch(() => {});
+  // Match the base key AND every scoping suffix — ":ws:…" (Spaces workspace),
+  // ":team:…" (Slack), "::app" (app lane) and their combinations — because a
+  // reconnect / disconnect / OAuth event must not outlive the credential ANY
+  // scoped session was built on. `${key}:` covers all of them ("::app" is a
+  // suffix of the same form: key + ':' + ':app'); nested server types cannot
+  // false-match since the character after the type in the prefix is ':'.
+  const keys = [...sessions.keys()].filter((candidate) => candidate === key || candidate.startsWith(`${key}:`));
+  for (const candidate of keys) {
+    const scopedSession = sessions.get(candidate);
+    if (!scopedSession) continue;
+    log.info(`[mcp/runner] evicting cached session for ${candidate}`);
+    sessions.delete(candidate);
+    await scopedSession.transport.close().catch(() => {});
   }
-  if (serverType === "slack") {
-    const keys = [...sessions.keys()].filter((candidate) => candidate === key || candidate.startsWith(`${key}:team:`));
-    for (const candidate of keys) {
-      const scopedSession = sessions.get(candidate);
-      if (!scopedSession) continue;
-      log.info(`[mcp/runner] evicting cached session for ${candidate}`);
-      sessions.delete(candidate);
-      await scopedSession.transport.close().catch(() => {});
-    }
-    if (keys.length === 0) log.info(`[mcp/runner] evictSession no-op for ${key} (not cached)`);
-    return;
-  }
-  const session = sessions.get(key);
-  if (session) {
-    log.info(`[mcp/runner] evicting cached session for ${key}`);
-    sessions.delete(key);
-    await session.transport.close().catch(() => {});
-  } else {
-    log.info(`[mcp/runner] evictSession no-op for ${key} (not cached)`);
-  }
+  if (keys.length === 0) log.info(`[mcp/runner] evictSession no-op for ${key} (not cached)`);
 }
 
 export async function evictAllSessionsForUser(userId: string): Promise<void> {

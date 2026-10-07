@@ -75,6 +75,7 @@ export interface TicketDuplicateCheckRequest {
 
 export interface TicketDuplicateCandidate {
   id: string;
+  xyneId?: string;
   title: string;
   description: string;
   boardId?: string;
@@ -92,6 +93,12 @@ export interface TicketDuplicateCheckAnalysis {
   confidence?: number;
   reason?: string;
   error?: string;
+  matches?: Array<{
+    id: string;
+    tier: 'likely' | 'similar';
+    score: number;
+    relation?: 'duplicate' | 'regression' | 'related' | 'unrelated';
+  }>;
 }
 
 export interface TicketDuplicateCheckResponse {

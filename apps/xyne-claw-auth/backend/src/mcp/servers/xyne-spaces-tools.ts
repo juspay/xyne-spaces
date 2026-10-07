@@ -7572,7 +7572,8 @@ async function directVespaIdentity(
   // XYNE_SPACES_WORKSPACE_ID when the adapter is bound — bench + session modes.
   // Falls back to the Spaces-DB user row when no env set.
   const envWorkspace = (process.env["XYNE_SPACES_WORKSPACE_ID"] ?? "").trim();
-  const workspaceId = devWorkspace || envWorkspace || (await getWorkspaceIdForUser(userId));
+  const workspaceId =
+    devWorkspace || envWorkspace || (await getWorkspaceIdForUser(userId, "mcp-runner", envWorkspace || undefined));
   if (devUser || devWorkspace) {
     log.warn(
       `[xyne-spaces-tools] DEV vespa identity override: user ${ctxUserId} -> ${userId}, workspace -> ${workspaceId}`,

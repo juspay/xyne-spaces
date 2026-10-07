@@ -158,38 +158,44 @@ export const SummaryGenerationPanel = ({
                 <AlertCircle size={17} strokeWidth={1.8} />
               </span>
               <div className='min-w-0 flex-1'>
-                <p className='font-semibold text-foreground'>Something went wrong</p>
-                <p className='mt-1 text-pretty text-sm text-muted-foreground'>
-                  Scribe couldn&rsquo;t generate a summary for this recording. Your notes and
-                  transcript are untouched.
+                <p className='font-semibold text-foreground'>
+                  {canGenerate
+                    ? 'Failed to generate summary'
+                    : 'Transcript required to generate summary'}
                 </p>
-                <div className='mt-3 flex flex-wrap items-center gap-2.5'>
-                  <Button
-                    variant='default'
-                    size={null}
-                    onClick={onRetry}
-                    disabled={!canGenerate}
-                    className='shrink-0 gap-1.5 bg-foreground py-2 px-3 text-sm rounded-xl font-medium text-background transition-opacity duration-150 hover:bg-foreground hover:opacity-90'
-                    data-track-category='RecordingDetailV2'
-                    data-track-name='retry_summary'
-                  >
-                    <XyneAIStar size={12} />
-                    Try again
-                  </Button>
-                  {onReadTranscript && (
+                <p className='mt-1 text-pretty text-sm text-muted-foreground'>
+                  {canGenerate
+                    ? 'Scribe couldn’t generate a summary for this recording. Your notes and transcript are untouched.'
+                    : 'No transcript was captured for this recording, so a summary can’t be generated.'}
+                </p>
+                {canGenerate && (
+                  <div className='mt-3 flex flex-wrap items-center gap-2.5'>
                     <Button
-                      type='button'
+                      variant='default'
                       size={null}
-                      variant='outline'
-                      onClick={onReadTranscript}
-                      className='shrink-0 rounded-xl border-border bg-background px-3 py-2 text-sm font-semibold text-foreground shadow-none transition-[border-color,color] duration-150 hover:bg-background hover:text-foreground'
+                      onClick={onRetry}
+                      className='shrink-0 gap-1.5 bg-foreground py-2 px-3 text-sm rounded-xl font-medium text-background transition-opacity duration-150 hover:bg-foreground hover:opacity-90'
                       data-track-category='RecordingDetailV2'
-                      data-track-name='read_transcript_after_summary_failure'
+                      data-track-name='retry_summary'
                     >
-                      Read the transcript
+                      <XyneAIStar size={12} />
+                      Try again
                     </Button>
-                  )}
-                </div>
+                    {onReadTranscript && (
+                      <Button
+                        type='button'
+                        size={null}
+                        variant='outline'
+                        onClick={onReadTranscript}
+                        className='shrink-0 rounded-xl border-border bg-background px-3 py-2 text-sm font-semibold text-foreground shadow-none transition-[border-color,color] duration-150 hover:bg-background hover:text-foreground'
+                        data-track-category='RecordingDetailV2'
+                        data-track-name='read_transcript_after_summary_failure'
+                      >
+                        Read the transcript
+                      </Button>
+                    )}
+                  </div>
+                )}
               </div>
             </motion.div>
           )}

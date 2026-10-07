@@ -451,6 +451,9 @@ export const boardComplexityScoreTable = table('board_complexity_scores')
     boardId: string(),
     weight: number(),
     usePercentage: boolean(),
+    percentageWindowDays: number().optional(),
+    percentageShareBasis: string().optional(),
+    percentageWindowStartAt: number().optional(),
     createdAt: number(),
     updatedAt: number(),
     createdBy: string(),
@@ -750,6 +753,8 @@ export const invitationTable = table('invitations')
     entityId: string().optional(),
     entityType: string().optional(),
     channelId: string().optional(),
+    isOrgApproved: boolean().optional(),
+    inviteEmailSentAt: number().optional(),
     createdAt: number(),
     updatedAt: number(),
   })

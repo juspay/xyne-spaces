@@ -2675,7 +2675,7 @@ export const queries = defineQueries({
         );
     },
   ),
-  // All app/bot participants of a channel — used at the parent for the
+  // All app/agent/bot participants of a channel — used at the parent for the
   // Agents & Apps tab count.
   channelAppParticipants: defineQuery(
     z.object({ channelId: z.string() }),
@@ -2683,11 +2683,11 @@ export const queries = defineQueries({
       return zql.channel_participants
         .where('channelId', channelId)
         .whereExists('user', u =>
-          u.where('userType', 'IN', [UserType.APP, UserType.BOT]),
+          u.where('userType', 'IN', [UserType.APP, UserType.AGENT, UserType.BOT]),
         );
     },
   ),
-  // Paginated human members of a channel — excludes apps/bots server-side so
+  // Paginated human members of a channel — excludes apps/agents/bots server-side so
   // the Members tab never leaks them into its list.
   channelHumanParticipantsPaginated: defineQuery(
     z.object({
@@ -2774,6 +2774,12 @@ export const queries = defineQueries({
       query = query.where('updatedAt', '>', args.updatedAt);
     }
     return query;
+  }),
+  // Point lookup used by `useUser` when an id is missing from the hydrated
+  // workspace users set (e.g. user added after the initial load). Scoped by
+  // UsersACL like every other `users` read, so it never widens visibility.
+  getUserById: defineQuery(z.object({ userId: z.string() }), ({ args: { userId } }) => {
+    return zql.users.where('id', userId).one();
   }),
   getUserProfilesByIds: defineQuery(
     z.object({ userIds: z.array(z.string()) }),
@@ -4480,6 +4486,16 @@ export const queries = defineQueries({
     z.object({ userGroupId: z.string() }),
     ({ args: { userGroupId } }) => {
       return zql.user_groups.where('id', userGroupId).one();
+    },
+  ),
+  // Several groups in one read, for callers that already hold the ids.
+  getUserGroupsByIds: defineQuery(
+    z.object({ userGroupIds: z.array(z.string()).max(500) }),
+    ({ args: { userGroupIds } }) => {
+      if (userGroupIds.length === 0) {
+        return zql.user_groups.where('id', 'nonexistent').limit(0);
+      }
+      return zql.user_groups.where('id', 'IN', userGroupIds).orderBy('createdAt', 'desc');
     },
   ),
   // Query for board by ID with related project

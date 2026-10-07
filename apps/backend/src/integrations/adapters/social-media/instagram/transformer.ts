@@ -8,9 +8,10 @@ import {
   INSTAGRAM_COMMENT_ID_FIELD,
   INSTAGRAM_MEDIA_ID_FIELD,
   INSTAGRAM_MESSAGE_ID_FIELD,
-  INSTAGRAM_REPLY_WINDOW_MS,
   INSTAGRAM_SENDER_FIELD,
 } from './constants';
+import { metaDmBody, toDownloadableMetaAttachments } from '../shared/metaDmAttachments';
+import { resolveMetaDmThread } from '../shared/metaDmThread';
 import type { InstagramWebhookComment, InstagramWebhookMessaging } from './types';
 
 export class InstagramTransformer extends BaseTransformer<unknown, NormalizedData[]> {
@@ -35,12 +36,9 @@ export class InstagramTransformer extends BaseTransformer<unknown, NormalizedDat
     const igsid = messaging.sender.id;
     const senderName = messaging.sender.username ?? igsid;
     const mid = messaging.message.mid;
-    // Use a descriptive fallback when a message has attachments but no text body
-    // (e.g. images, videos, audio) — prevents blank ticket bodies.
-    const hasAttachments = (messaging.message.attachments?.length ?? 0) > 0;
-    const text =
-      messaging.message.text ||
-      (hasAttachments ? '[Attachment received — open Instagram to view]' : '');
+    const rawAttachments = messaging.message.attachments ?? [];
+    const attachments = toDownloadableMetaAttachments(rawAttachments);
+    const text = metaDmBody(messaging.message.text, rawAttachments, attachments.length, 'Instagram');
 
     // For content updates (customer edited a sent message), find the existing
     // thread by the mid and update the email body in-place — no window logic needed.
@@ -49,8 +47,10 @@ export class InstagramTransformer extends BaseTransformer<unknown, NormalizedDat
         source.id,
         `${source.id}:${mid}`
       );
+      // The original was never ingested (sent before the account was connected). Failing here
+      // would 500 the whole webhook and make Meta redeliver it forever, so drop the edit.
       if (!existing?.externalThreadId) {
-        return { success: false, error: `Cannot update message ${mid}: original not found` };
+        return { success: true, data: [] };
       }
       const result: NormalizedData = {
         externalId: `${source.id}:${mid}`,
@@ -75,30 +75,13 @@ export class InstagramTransformer extends BaseTransformer<unknown, NormalizedDat
       return { success: true, data: [result] };
     }
 
-    // Determine which ticket/thread this message belongs to using the 24h window.
-    // If the customer last messaged > 24h ago the window has expired; treat this
-    // DM as the start of a new conversation so a new ticket is created.
-    const latest = await this.externalMessageRepo.findLatestForIgsid(source.id, igsid);
-    const latestTime = latest?.createdAt;
-    // messaging.timestamp is Unix ms (Meta sends 13-digit ms timestamps, not seconds)
-    const newMessageTime = messaging.timestamp;
-    // Math.abs handles out-of-order delivery: late-arriving webhooks can have
-    // newMessageTime < latestTime.getTime(), making the raw delta negative and
-    // incorrectly skipping the expiry check.
-    const windowExpired =
-      !latestTime || Math.abs(newMessageTime - latestTime.getTime()) > INSTAGRAM_REPLY_WINDOW_MS;
-
-    // A unique suffix creates a new thread (new ticket); the bare IGSID
-    // appends to the existing active thread.
-    // Round to the start of the current 24h window so concurrent webhooks
-    // for the same customer always produce the same thread ID (avoids race-condition
-    // duplicates when Meta delivers multiple events in rapid succession).
-    // Anchor to the message's own timestamp so two messages sent in the same
-    // 24h window always hash to the same thread ID, regardless of server time.
-    const windowStart =
-      Math.floor(messaging.timestamp / INSTAGRAM_REPLY_WINDOW_MS) * INSTAGRAM_REPLY_WINDOW_MS;
-    const externalThreadId =
-      latest && !windowExpired ? latest.externalThreadId : `${igsid}:${windowStart}`;
+    // A DM more than 24h after the customer's last one starts a new thread, so a new ticket.
+    const { externalThreadId, windowExpired } = await resolveMetaDmThread(
+      this.externalMessageRepo,
+      source.id,
+      igsid,
+      messaging.timestamp,
+    );
 
     const result: NormalizedData = {
       externalId: `${source.id}:${mid}`,
@@ -108,6 +91,7 @@ export class InstagramTransformer extends BaseTransformer<unknown, NormalizedDat
         externalId: igsid,
       },
       content: text,
+      ...(attachments.length > 0 && { attachments }),
       emailData: {
         subject: `Instagram DM from ${senderName}`,
         from: senderName,

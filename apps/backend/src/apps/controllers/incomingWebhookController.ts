@@ -9,6 +9,7 @@ import {
   processAmazonSnsIncoming,
   processPingdomIncoming,
   processGcpIncoming,
+  processHubspotIncoming,
 } from '@/bypassAcl/appServices';
 import { logger } from '@/utils/logger';
 import { encrypt, decrypt } from '@/services/encryptionService';
@@ -19,6 +20,7 @@ import {
 } from './amazonSnsWebhookParser';
 import {   parsePingdomPayload } from './pingdomWebhookParser';
 import {   parseGcpPayload } from './gcpWebhookParser';
+import { parseHubspotPayload } from './hubspotWebhookParser';
 
 const WEBHOOK_NAME_MAX_LENGTH = 84;
 type IncomingWebhookType = AppIncomingWebhookType;
@@ -101,6 +103,9 @@ class IncomingWebhookController {
     }
     if (type === AppIncomingWebhookType.GCP) {
       return `/api/apps/webhooks/gcp/${safeWorkspaceId}/${installedAppId}/${secret}`;
+    }
+    if (type === AppIncomingWebhookType.HUBSPOT) {
+      return `/api/apps/webhooks/hubspot/${safeWorkspaceId}/${installedAppId}/${secret}`;
     }
 
     return `/api/apps/webhooks/${safeWorkspaceId}/${installedAppId}/${secret}`;
@@ -364,6 +369,63 @@ class IncomingWebhookController {
         error,
       });
       res.status(500).send('rollup_error');
+    }
+  };
+
+  handleHubspotIncoming = async (req: Request, res: Response): Promise<void> => {
+    try {
+      const context = await this.resolveWebhookContext(req, AppIncomingWebhookType.HUBSPOT);
+      if (!context) {
+        res.status(400).send('invalid_payload');
+        return;
+      }
+
+      // A batch, not a single notification: HubSpot POSTs a JSON array and one
+      // request can carry many CRM change events.
+      const events = parseHubspotPayload(context.body);
+      if (!events) {
+        logger.warn('[Incoming-Webhook] Body is not a HubSpot event batch', {
+          workspaceId: context.workspaceId,
+          appId: context.appId,
+        });
+        res.status(400).send('invalid_payload');
+        return;
+      }
+
+      // No signature check: the encrypted secret in the URL is the only
+      // credential here, as it is for the Slack, Pingdom and GCP webhook types.
+      // Verifying X-HubSpot-Signature-v3 would additionally need the HubSpot
+      // app's client secret stored per webhook; the raw body it hashes is
+      // already preserved by this route's express.text() parser.
+
+      // Ack before doing any work. HubSpot treats a response slower than five
+      // seconds as a failure and redelivers the whole batch up to ten times
+      // across 24 hours, growing it each round — so posting first and replying
+      // afterwards turns one slow channel write into a retry storm.
+      res.status(200).send('ok');
+
+      if (events.length === 0) {
+        return;
+      }
+
+      try {
+        await processHubspotIncoming(context, events);
+      } catch (error) {
+        // The 200 is already on the wire, so this can only be logged.
+        logger.error('[Incoming-Webhook] Error processing HubSpot batch after ack', {
+          params: req.params,
+          eventCount: events.length,
+          error,
+        });
+      }
+    } catch (error) {
+      logger.error('[Incoming-Webhook] Error handling HubSpot webhook', {
+        params: req.params,
+        error,
+      });
+      if (!res.headersSent) {
+        res.status(500).send('rollup_error');
+      }
     }
   };
 

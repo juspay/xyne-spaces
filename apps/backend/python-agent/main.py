@@ -34,13 +34,13 @@ import tempfile
 setup_logging()
 logger = get_logger(__name__)
 
-# Suppress livekit-agents internal logging - only show CRITICAL errors
+# Show livekit-agents worker connection logs (registration, retries) at INFO
 # This must be done at module level (before cli.run_app) to catch all logs
 import logging as _logging
-_logging.getLogger("livekit").setLevel(_logging.CRITICAL)
-_logging.getLogger("livekit.agents").setLevel(_logging.CRITICAL)
-_logging.getLogger("livekit.plugins").setLevel(_logging.CRITICAL)
-_logging.getLogger("livekit.agents.ipc").setLevel(_logging.CRITICAL)
+_logging.getLogger("livekit").setLevel(_logging.INFO)
+_logging.getLogger("livekit.agents").setLevel(_logging.INFO)
+_logging.getLogger("livekit.plugins").setLevel(_logging.INFO)
+_logging.getLogger("livekit.agents.ipc").setLevel(_logging.INFO)
 
 # Load configuration
 config = Config.load()
@@ -191,7 +191,7 @@ async def entrypoint(ctx: JobContext):
         stt_model=config.stt_model,
         google_voice_credentials_json=config.google_voice_credentials_json,
         google_stt_model=config.google_stt_model,
-        google_stt_language=config.google_stt_language,
+        google_stt_language=config.google_stt_realtime_language,
         deepgram_api_key=config.deepgram_api_key,
         deepgram_model=config.deepgram_model,
         deepgram_language=config.deepgram_language,
@@ -324,22 +324,6 @@ async def entrypoint(ctx: JobContext):
     event_bus.subscribe("AI_ACTION", handle_ai_action)
     logger.info(f"event_bus_subscribed | event=AI_ACTION, handler=handle_ai_action")
 
-    # Declared before `data_received` is registered so an early command reads an
-    # empty dict (fail-closed) instead of raising NameError. Real parse is below,
-    # post-connect; `room_metadata_changed` keeps it live afterwards.
-    room_metadata: dict = {}
-
-    def _is_authorized_transcription_controller(sender_id: str | None, metadata: dict) -> bool:
-        """True iff sender is the host (createdBy) or the acting host
-        (actingHostId, backend-computed). Fail closed if neither is set."""
-        if not sender_id or not isinstance(metadata, dict):
-            return False
-        host_id = metadata.get("createdBy")
-        acting_host_id = metadata.get("actingHostId")
-        if not host_id and not acting_host_id:
-            return False
-        return sender_id == host_id or sender_id == acting_host_id
-
     # Handle AI voice toggle and control requests from frontend
     @ctx.room.on("data_received")
     def on_data_received(data_packet: rtc.DataPacket):  # pyright: ignore[reportUnusedFunction]
@@ -358,9 +342,16 @@ async def entrypoint(ctx: JobContext):
                 ai_manager.handle_voice_toggle(new_state, participant_id, participant_name)
 
             elif payload.get("type") == "transcription_toggle":
-                # Kill-switch, host or acting host only — see _is_authorized_transcription_controller.
-                # Agent is authoritative: always broadcasts its ACTUAL state (unchanged
-                # on reject) so clients never show "off" unless it really stopped.
+                # Host kill-switch. SECURITY: only the call host (createdBy in room
+                # metadata) may toggle, verified against the authenticated sender
+                # identity — never the payload. FAIL CLOSED: if the host id is
+                # unavailable (older room metadata) or the sender is not the host,
+                # reject rather than trusting client-side gating.
+                #
+                # The AGENT is authoritative: it always broadcasts `transcription_state`
+                # with its ACTUAL state so clients never show "off" unless the agent
+                # really stopped. On apply we confirm only AFTER the teardown completes;
+                # on reject we confirm the (unchanged) current state so the UI reverts.
                 def _publish_transcription_state(enabled_now: bool):
                     try:
                         state = json.dumps(
@@ -374,12 +365,15 @@ async def entrypoint(ctx: JobContext):
                     except Exception as e:  # noqa: BLE001
                         logger.error(f"publish transcription_state failed: {e}")
 
-                if not _is_authorized_transcription_controller(participant_id, room_metadata):
-                    host_id = room_metadata.get("createdBy") if isinstance(room_metadata, dict) else None
-                    acting_host_id = room_metadata.get("actingHostId") if isinstance(room_metadata, dict) else None
+                host_id = room_metadata.get("createdBy") if isinstance(room_metadata, dict) else None
+                if not host_id:
                     logger.warning(
-                        f"transcription_toggle rejected: sender={participant_id} is neither "
-                        f"host={host_id} nor acting_host={acting_host_id} (fail-closed)"
+                        "transcription_toggle rejected: host id unavailable in room metadata (fail-closed)"
+                    )
+                    _publish_transcription_state(multi_user_transcriber.is_enabled())
+                elif participant_id != host_id:
+                    logger.warning(
+                        f"transcription_toggle rejected: sender={participant_id} is not host={host_id}"
                     )
                     _publish_transcription_state(multi_user_transcriber.is_enabled())
                 else:
@@ -427,16 +421,6 @@ async def entrypoint(ctx: JobContext):
         except Exception as e:
             logger.error(f"Error handling data message: {e}")
 
-    @ctx.room.on("room_metadata_changed")
-    def on_room_metadata_changed(old_metadata: str, new_metadata: str):  # pyright: ignore[reportUnusedFunction]
-        """Keep room_metadata live (was previously parsed once and never refreshed,
-        so a mid-call acting-host change was invisible until agent restart)."""
-        nonlocal room_metadata
-        try:
-            room_metadata = json.loads(new_metadata) if new_metadata else {}
-        except json.JSONDecodeError:
-            logger.warning("room_metadata_changed: failed to parse new metadata, keeping previous value")
-
     # Connect to room with auto-subscribe to audio only
     await ctx.connect(auto_subscribe=AutoSubscribe.AUDIO_ONLY)
     logger.info(f"room_connected | auto_subscribe=AUDIO_ONLY")
@@ -447,6 +431,7 @@ async def entrypoint(ctx: JobContext):
     # and to notify transcript-ready later.
     webhook = WebhookNotifier(config.backend_url, config.transcription_agent_api_key)
 
+    room_metadata = {}
     try:
         if ctx.room.metadata:
             room_metadata = json.loads(ctx.room.metadata)
