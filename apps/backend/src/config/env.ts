@@ -296,6 +296,10 @@ const envSchema = Joi.object({
   WORKFLOWS_WORKER_CONCURRENCY: Joi.number().integer().min(1).default(3),
   WORKFLOWS_LOCK_DURATION_MS: Joi.number().integer().min(60_000).default(15 * 60 * 1000),
   WORKFLOWS_BASE_URL: Joi.string().allow('').default(''),
+  // Workflow AI builder / "Ask AI" chat (POST /api/workflows-v2/ai-builder/chat).
+  // Blank key falls back to LITELLM_API_KEY; blank model uses the SDK default.
+  WORKFLOWS_AI_BUILDER_LITELLM_API_KEY: Joi.string().allow('').default(''),
+  WORKFLOWS_AI_BUILDER_MODEL: Joi.string().allow('').default(''),
   ENABLE_RECAP_SCHEDULER: Joi.boolean().default(true),
   RECAP_GENERATION_CRON: Joi.string().default('15 0 * * *'), //5:45 IST daily
   RECAP_CLEANUP_CRON: Joi.string().default('30 23 * * *'), //5:00 IST daily
@@ -1094,6 +1098,11 @@ export const config = {
     workerConcurrency: envVars.WORKFLOWS_WORKER_CONCURRENCY as number,
     lockDurationMs: envVars.WORKFLOWS_LOCK_DURATION_MS as number,
     baseUrl: (envVars.WORKFLOWS_BASE_URL || envVars.BACKEND_URL) as string,
+    aiBuilder: {
+      litellmBaseUrl: envVars.LITELLM_BASE_URL as string,
+      litellmApiKey: (envVars.WORKFLOWS_AI_BUILDER_LITELLM_API_KEY || envVars.LITELLM_API_KEY) as string,
+      model: envVars.WORKFLOWS_AI_BUILDER_MODEL as string,
+    },
   },
   ticketCleanupWorkerEnabled: envVars.ENABLE_TICKET_CLEANUP_WORKER,
   notificationWorkerEnabled: envVars.ENABLE_NOTIFICATION_WORKER,
