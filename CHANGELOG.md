@@ -1,3 +1,10 @@
+## [1.469.1](https://github.com/juspay/xyne-spaces/compare/v1.469.0...v1.469.1) (2026-10-07)
+
+
+### Bug Fixes
+
+* render full HTML documents in create-html-report without markdown parsing ([#2664](https://github.com/juspay/xyne-spaces/issues/2664)) ([0d1d964](https://github.com/juspay/xyne-spaces/commit/0d1d964ab2879416a75093e9b8767c1de669dab4))
+
 ## [1.469.0](https://github.com/juspay/xyne-spaces/compare/v1.468.3...v1.469.0) (2026-10-07)
 
 
