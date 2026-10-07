@@ -1,3 +1,15 @@
+## [1.466.0](https://github.com/juspay/xyne-spaces/compare/v1.465.6...v1.466.0) (2026-10-07)
+
+
+### Features
+
+* fall back to getUserById in useUser when id is missing from users set ([#2635](https://github.com/juspay/xyne-spaces/issues/2635)) ([73546ff](https://github.com/juspay/xyne-spaces/commit/73546ffc737d72462d2ad8b97bd258de56468632))
+
+
+### Bug Fixes
+
+* show livekit-agents worker connection logs at INFO ([#2731](https://github.com/juspay/xyne-spaces/issues/2731)) ([d91653b](https://github.com/juspay/xyne-spaces/commit/d91653b61a6d114b78412d2079593c19a228cf39))
+
 ## [1.465.6](https://github.com/juspay/xyne-spaces/compare/v1.465.5...v1.465.6) (2026-10-07)
 
 
