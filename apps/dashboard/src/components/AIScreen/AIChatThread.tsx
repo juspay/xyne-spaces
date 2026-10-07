@@ -73,6 +73,7 @@ import { useV2SessionsList, useV2SessionInvalidator } from '../../hooks/useAskAI
 import { lengthBucket } from '../../services/Analytics/trackSource';
 import { xyneAIStreamManager } from '../../services/XyneAI/XyneAIStreamManager';
 import { BASE_URL } from '../../services/clients/apiClient';
+import { buildAuthHeaders } from '../../services/clients/authHeaders';
 import { BrailleLoader, AnimatedLabel, useStableLabel } from './ReasoningLoader';
 import { createMarkdownComponents } from '../../utils/markdownComponents';
 import { StreamingMarkdownBlocks, rehypeStreamWordFade } from '../utils/StreamingMarkdownBlocks';
@@ -2471,6 +2472,7 @@ export const AIChatThread = forwardRef<AIChatThreadHandle, AIChatThreadProps>(fu
           headers: {
             // eslint-disable-next-line @typescript-eslint/naming-convention
             'Content-Type': 'application/json',
+            ...buildAuthHeaders(),
           },
           credentials: 'include',
           body: JSON.stringify({

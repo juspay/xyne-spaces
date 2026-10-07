@@ -26,6 +26,7 @@ import { useChannel, useAllVisibleChannels } from '../../../hooks/useChannels';
 import { useXyneAIStream } from '../../../hooks/useXyneAIStream';
 import { ChannelScopeType } from '@xyne/shared';
 import { BASE_URL } from '../../../services/clients/apiClient';
+import { buildAuthHeaders } from '../../../services/clients/authHeaders';
 import type { ConversationHistory as ConversationHistoryType } from './utils/XyneAITypes';
 import { resolveActivePath, getSiblings, BRANCH_ROOT_KEY } from './utils/XyneAIUtils';
 import { useV2SessionsList, useV2SessionInvalidator } from '../../../hooks/useAskAISessionsV2';
@@ -1658,6 +1659,7 @@ const XyneAISidebar = ({
             headers: {
               // eslint-disable-next-line @typescript-eslint/naming-convention
               'Content-Type': 'application/json',
+              ...buildAuthHeaders(),
             },
             credentials: 'include',
             body: JSON.stringify({

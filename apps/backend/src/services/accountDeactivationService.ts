@@ -1,6 +1,5 @@
-import { UserSessionService } from '@/services/userSessionService';
-import { fcmPushService } from '@/services/fcmService';
 import { mtlsCertificateService } from '@/services/mtlsCertificateService';
+import { revokeAccountSessions } from '@/bypassAcl/authSessionServices';
 import { logger } from '@/utils/logger';
 import { db } from '@/database/client';
 import { UserStatus } from '@xyne/shared';
@@ -9,6 +8,8 @@ import { userActivationService } from '@/services/userActivationService';
 interface DeactivatedUser {
   userId: string;
   email: string;
+  /** `org_members.memberId` — the session principal. Looked up by email when not supplied. */
+  orgMemberId?: string | null;
 }
 
 export interface DeactivationStepResult {
@@ -33,8 +34,6 @@ export interface UserDeactivationResult {
  * down as much access as possible.
  */
 class AccountDeactivationService {
-  private userSessionService = new UserSessionService();
-
   /**
    * Resolve every user row owning `email` and clean each one up.
    *
@@ -45,7 +44,7 @@ class AccountDeactivationService {
   async handleDeactivatedEmail(email: string): Promise<UserDeactivationResult[]> {
     const users = await db.user.findMany({
       where: { email: { equals: email, mode: 'insensitive' } },
-      select: { id: true, email: true, workspaceId: true },
+      select: { id: true, email: true, workspaceId: true, orgMemberId: true },
     });
 
     // Mark every row INACTIVE through the same function the user-management
@@ -76,7 +75,11 @@ class AccountDeactivationService {
 
     const results: UserDeactivationResult[] = [];
     for (const user of users) {
-      const result = await this.handleDeactivatedUser({ userId: user.id, email: user.email });
+      const result = await this.handleDeactivatedUser({
+        userId: user.id,
+        email: user.email,
+        orgMemberId: user.orgMemberId,
+      });
       // Reported as a step like the others, so a failed row write shows up in the
       // response (and the 207) instead of being hidden behind revoked sessions.
       const markInactive: DeactivationStepResult = {
@@ -92,16 +95,16 @@ class AccountDeactivationService {
     return results;
   }
 
-  async handleDeactivatedUser({ userId, email }: DeactivatedUser): Promise<UserDeactivationResult> {
+  async handleDeactivatedUser({ userId, email, orgMemberId }: DeactivatedUser): Promise<UserDeactivationResult> {
     logger.warn('[Deactivation] Cleaning up deactivated user', { userId });
 
     const steps: Array<{ name: string; run: () => Promise<unknown> }> = [
       // Revoke any mTLS certificates issued to the user (s2s call).
       { name: 'revokeCertificates', run: () => mtlsCertificateService.revokeUserCertificates(email) },
-      // Revoke every session so the user cannot refresh into a new token.
-      { name: 'revokeSessions', run: () => this.userSessionService.revokeAllUserSessions(userId, 'PROVIDER_REVOKED') },
-      // Stop notifications: clear mobile push tokens and browser subscriptions.
-      { name: 'unregisterPushTokens', run: () => fcmPushService.unregisterUserTokens(userId) },
+      // Revoke every device session of the account (auth_sessions + unconverted legacy rows), so
+      // no cookie or `sid`-bound token survives. Push tokens live on those rows and REVOKED rows
+      // are excluded from delivery, so there is no separate push unregister step.
+      { name: 'revokeSessions', run: () => this.revokeSessions({ userId, email, orgMemberId }) },
     ];
 
     const results = await Promise.allSettled(steps.map((step) => step.run()));
@@ -122,6 +125,21 @@ class AccountDeactivationService {
     // Steps stay best-effort — this never throws — but the outcome is reported
     // so a caller that can retry (the internal endpoint) knows to.
     return { userId, email, ok, steps: stepResults };
+  }
+
+  private async revokeSessions({ userId, email, orgMemberId }: DeactivatedUser): Promise<number> {
+    let accountId = orgMemberId ?? null;
+    if (!accountId) {
+      const orgMember = await db.orgMember.findFirst({
+        where: { email: { equals: email, mode: 'insensitive' } },
+        select: { memberId: true },
+      });
+      accountId = orgMember?.memberId ?? null;
+    }
+    if (!accountId) {
+      throw new Error(`No organization membership found for deactivated user ${userId}`);
+    }
+    return revokeAccountSessions(accountId, 'PROVIDER_REVOKED');
   }
 }
 

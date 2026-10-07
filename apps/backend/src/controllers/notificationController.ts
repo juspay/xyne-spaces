@@ -57,10 +57,11 @@ const preferencesSchema = z.record(
 );
 
 export class NotificationController {
-  private resolveSessionId(req: Request): string | undefined {
-    return req.authenticatedSessionId;
-  }
-
+  /**
+   * Push tokens are stored on the caller's own `auth_sessions` row and delivered by account, so
+   * both handlers need the resolved auth session (API-key / dev-mode / `sid`-less JWT requests
+   * without a session cookie have none → 401).
+   */
   registerMobilePushToken = async (req: Request, res: Response): Promise<void> => {
     try {
       const userId = req.user?.id;
@@ -70,17 +71,17 @@ export class NotificationController {
       }
 
       const validated = mobileRegisterSchema.parse(req.body);
-      const sessionId = this.resolveSessionId(req);
+      const session = req.authSession;
 
-      if (!sessionId) {
-        logger.error('Failed to register mobile push token: No session ID found');
+      if (!session) {
+        logger.error('Failed to register mobile push token: no auth session on request');
         res.status(401).json({ error: 'Unauthorized' });
         return;
       }
 
-      await notificationService.registerMobilePushToken(userId, {
+      await notificationService.registerMobilePushToken(session.accountId, {
         ...validated,
-        sessionId,
+        sessionId: session.sessionId,
         appVersion: req.headers['x-app-version'] as string | undefined,
       });
 
@@ -106,9 +107,15 @@ export class NotificationController {
       }
 
       mobileUnregisterSchema.parse(req.body ?? {});
-      const sessionId = this.resolveSessionId(req);
+      const session = req.authSession;
 
-      await notificationService.unregisterMobilePushToken(userId, sessionId ?? undefined);
+      if (!session) {
+        logger.error('Failed to unregister mobile push token: no auth session on request');
+        res.status(401).json({ error: 'Unauthorized' });
+        return;
+      }
+
+      await notificationService.unregisterMobilePushToken(session.sessionId);
 
       res.json({ success: true });
     } catch (error) {

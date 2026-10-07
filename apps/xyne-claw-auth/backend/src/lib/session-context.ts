@@ -149,7 +149,7 @@ export interface SessionContext {
   isAutomation?: boolean;
   /**
    * Workspace ID of the mentioned user for Digital Twin (USER_MENTIONED)
-   * flows. Captured at webhook-receive time via getSpacesAuthForUser and
+   * flows. Captured at webhook-receive time via mintSpacesToken and
    * threaded all the way to the Flow UI data context so flow-action.ts can
    * forward it to Spaces' /api/internal/postAsUser — which REQUIRES
    * workspaceId to mint a JWT for the user. Without this, the Twin's

@@ -5,7 +5,7 @@ import { prisma } from "../db.js";
 import { decrypt } from "../crypto.js";
 import { CONFIG } from "../config.js";
 import { getRequesterId, getOrgId } from "../middleware/agent-acl.js";
-import { getSpacesAuthForUser, getWorkspaceIdForUser } from "../lib/spaces-db.js";
+import { mintSpacesToken, spacesAuthHeaders, type SpacesUserAuth } from "../lib/spaces-auth.js";
 
 import { createLogger } from "../logger.js";
 const log = createLogger("spaces");
@@ -55,59 +55,21 @@ interface SpacesBoardRow {
 
 const router = Router();
 
-async function resolveUserSpacesAuth(userId: string): Promise<SpacesAuthContext | null> {
-  // Prefer a LIVE token from the Spaces session DB. getSpacesAuthForUser reads
-  // the user's active session and, if the access token has expired, refreshes
-  // it via Spaces' /api/auth/refresh-session — the same mechanism the MCP
-  // runner uses. Without this we decrypt the token cached in userMcpConnection
-  // at connect-time and use it verbatim; once it expires (Spaces JWTs are
-  // short-lived) every call here 401s with "Invalid or expired session" until
-  // the user re-connects. This is why some users hit that error on the channel
-  // picker "always".
-  const live = await getSpacesAuthForUser(userId, "require-auth").catch(() => null);
-  if (live?.token) {
-    return {
-      token: live.token,
-      baseUrl: CONFIG.spacesInternalUrl,
-      ...(live.sessionId ? { sessionId: live.sessionId } : {}),
-      workspaceId: live.workspaceId,
-    };
-  }
-
-  // Fallback: the cached MCP-connection credentials (works until they expire).
-  const connection = await prisma.userMcpConnection.findFirst({
-    where: { userId, mcpServer: { type: "xyne-spaces" } },
-  });
-  if (!connection) return null;
-
-  const decrypted = decrypt(
-    connection.encryptedCreds,
-    connection.iv,
-    connection.authTag,
-    CONFIG.encryptionKey,
-  );
-  const credentials = JSON.parse(decrypted) as Record<string, unknown>;
-  const tokenRaw = credentials["token"];
-  const urlRaw = credentials["url"];
-  const sessionIdRaw = credentials["sessionId"];
-  const workspaceIdRaw = credentials["workspaceId"];
-
-  const token = typeof tokenRaw === "string" ? tokenRaw.trim() : "";
-  if (!token) return null;
-
-  const baseUrl = typeof urlRaw === "string" && urlRaw.trim() ? urlRaw.trim() : CONFIG.spacesInternalUrl;
-  const sessionId = typeof sessionIdRaw === "string" && sessionIdRaw.trim() ? sessionIdRaw.trim() : undefined;
-  const workspaceIdFromCreds = typeof workspaceIdRaw === "string" && workspaceIdRaw.trim() ? workspaceIdRaw.trim() : undefined;
-  const workspaceId = workspaceIdFromCreds ?? await getWorkspaceIdForUser(userId, "require-auth").catch(() => null) ?? undefined;
-  if (!workspaceIdFromCreds && workspaceId) {
-    log.info(`[spaces] resolved workspaceId=${workspaceId} from user row for cached auth userId=${userId}`);
-  }
-
+/**
+ * The user's Spaces credential for the proxies below, MINTED over S2S
+ * (lib/spaces-auth.ts) — a short-lived JWT sent as Bearer + x-workspace-id.
+ * The token cached in `userMcpConnection` is never used: it is a JWT that
+ * dies on expiry/logout, which is exactly the "Invalid or expired session"
+ * users used to hit on the channel picker. `null` = no live Spaces session.
+ */
+async function resolveUserSpacesAuth(userId: string): Promise<(SpacesAuthContext & { live: SpacesUserAuth }) | null> {
+  const live = await mintSpacesToken({ userId }, "require-auth").catch(() => null);
+  if (!live) return null;
   return {
-    token,
-    baseUrl,
-    ...(sessionId ? { sessionId } : {}),
-    ...(workspaceId ? { workspaceId } : {}),
+    token: live.token,
+    baseUrl: CONFIG.spacesInternalUrl,
+    workspaceId: live.workspaceId,
+    live,
   };
 }
 
@@ -413,7 +375,7 @@ router.get("/automations-schema/triggers", async (req: Request, res: Response) =
   try {
     const url = `${userAuth.baseUrl}/api/automations/schema/triggers`;
     const spacesRes = await fetch(url, {
-      headers: { Authorization: `Bearer ${userAuth.token}` },
+      headers: spacesAuthHeaders(userAuth.live),
       signal: AbortSignal.timeout(10_000),
     });
 
@@ -453,7 +415,7 @@ router.get("/automations-schema/triggers/:type", async (req: Request, res: Respo
     const triggerType = req.params.type as string;
     const url = `${userAuth.baseUrl}/api/automations/schema/triggers/${encodeURIComponent(triggerType)}`;
     const spacesRes = await fetch(url, {
-      headers: { Authorization: `Bearer ${userAuth.token}` },
+      headers: spacesAuthHeaders(userAuth.live),
       signal: AbortSignal.timeout(10_000),
     });
 

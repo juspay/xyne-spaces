@@ -2,13 +2,14 @@ import { GoogleAuth } from 'google-auth-library';
 import type { Redis } from 'ioredis';
 
 import { config } from '@/config/env';
-import { db } from '@/database/client';
 import { logger } from '@/utils/logger';
 import { redisService } from './redisService';
 import { sendLocalIosPush } from './localIosPush';
 import { getNotificationFcmPayloadTruncated } from '@/services/otel';
-import { Prisma } from '@prisma/client';
-import { SessionStatus } from '@xyne/shared';
+import { recordPushTargets } from '@/services/otel/authMetrics';
+import { normalizePushPlatform } from '@/auth/legacyPushToken';
+import type { PushTarget, PushTargetRef, SessionRepository } from '@/auth/types';
+import * as authSessionRepo from '@/bypassAcl/authSessionServices';
 
 type CachedAccessToken = {
   accessToken: string;
@@ -154,14 +155,37 @@ class FcmAccessTokenManager {
   }
 }
 
+/**
+ * Body of `POST /notifications/mobile/register` plus the caller's own `auth_sessions.id`.
+ * Tokens are stored raw on that row (`pushPlatform` / `appVersion` are separate columns).
+ */
 export type MobilePushRegistration = {
-  fcmToken: string;
-  voipToken?: string;
-  platform?: string;
-  deviceId?: string;
   sessionId: string;
-  appVersion?: string;
+  fcmToken: string;
+  voipToken?: string | null;
+  platform?: string | null;
+  deviceId?: string | null;
+  appVersion?: string | null;
 };
+
+/** DB seam: the push subset of the auth-session repository (faked in fcmService.test.ts). */
+export type FcmSessionRepo = Pick<
+  SessionRepository,
+  'setPushTokens' | 'clearPushTokens' | 'findPushTargetsForAccount' | 'nullLegacyPushColumns' | 'findUserById'
+>;
+
+// Late-bound so a jest.mock / spy on the module is honoured after the singleton is built.
+const defaultRepo: FcmSessionRepo = {
+  setPushTokens: (input) => authSessionRepo.setPushTokens(input),
+  clearPushTokens: (sessionId) => authSessionRepo.clearPushTokens(sessionId),
+  findPushTargetsForAccount: (accountId, now) => authSessionRepo.findPushTargetsForAccount(accountId, now),
+  nullLegacyPushColumns: (legacyId) => authSessionRepo.nullLegacyPushColumns(legacyId),
+  findUserById: (userId) => authSessionRepo.findUserById(userId),
+};
+
+function previewToken(token?: string | null): string | null {
+  return token ? `${token.slice(0, 10)}...${token.slice(-8)}` : null;
+}
 
 export type FcmNotificationPayload = {
   title: string;
@@ -179,16 +203,8 @@ export type FcmNotificationPayload = {
   prefetchOnly?: boolean;
 };
 
-type SessionPushTarget = {
-  sessionId: string;
-  userId: string;
-  token: string;
-  platform: string;
-  deviceId?: string | null;
-  appVersion?: string | null;
-};
-
-class FcmPushService {
+export class FcmPushService {
+  private readonly repo: FcmSessionRepo;
   private accessTokenManager?: FcmAccessTokenManager;
   private accessTokenManagerNew?: FcmAccessTokenManager;
   private redis?: Redis;
@@ -196,7 +212,8 @@ class FcmPushService {
   private projectIdNew?: string;
   private sendEnabled = false;
 
-  constructor() {
+  constructor(deps?: { repo?: FcmSessionRepo }) {
+    this.repo = deps?.repo ?? defaultRepo;
     try {
       this.redis = redisService.getClient();
     } catch {
@@ -235,197 +252,105 @@ class FcmPushService {
     return this.sendEnabled && !!this.projectId && !!this.accessTokenManager;
   }
 
-  async registerToken(userId: string, payload: MobilePushRegistration): Promise<void> {
-    const fcmTokenPreview = payload.fcmToken
-      ? `${payload.fcmToken.slice(0, 10)}...${payload.fcmToken.slice(-8)}`
-      : null;
-    const voipTokenPreview = payload.voipToken
-      ? `${payload.voipToken.slice(0, 10)}...${payload.voipToken.slice(-8)}`
-      : null;
+  /**
+   * Store push tokens on the caller's own `auth_sessions` row (guarded by accountId). The repo
+   * nulls the same tokens on other ACTIVE rows and adopts `deviceId` as the row's deviceKey.
+   */
+  async registerToken(accountId: string, reg: MobilePushRegistration): Promise<void> {
+    const fcmTokenPreview = previewToken(reg.fcmToken);
+    const voipTokenPreview = previewToken(reg.voipToken);
+    const pushPlatform = normalizePushPlatform(reg.platform);
 
     logger.info('[FCM] registerToken step=enter', {
-      userId,
-      platform: payload.platform ?? null,
-      deviceId: payload.deviceId ?? null,
-      fcmTokenPresent: !!payload.fcmToken,
+      accountId,
+      sessionId: reg.sessionId,
+      platform: reg.platform ?? null,
+      pushPlatform,
+      deviceId: reg.deviceId ?? null,
+      appVersion: reg.appVersion ?? null,
+      fcmTokenPresent: !!reg.fcmToken,
       fcmTokenPreview,
-      voipTokenPresent: !!payload.voipToken,
+      voipTokenPresent: !!reg.voipToken,
       voipTokenPreview,
     });
 
-    if (!payload.fcmToken) {
+    if (!reg.fcmToken) {
       logger.warn('[FCM] registerToken step=missing_token', {
-        userId,
-        platform: payload.platform ?? null,
-        deviceId: payload.deviceId ?? null,
+        accountId,
+        sessionId: reg.sessionId,
+        platform: reg.platform ?? null,
+        deviceId: reg.deviceId ?? null,
       });
       return;
     }
 
-    logger.info('[FCM] registerToken step=find_session', {
-      userId,
+    logger.info('[FCM] registerToken step=set_push_tokens', {
+      accountId,
+      sessionId: reg.sessionId,
+      pushPlatform,
+      deviceId: reg.deviceId ?? null,
       fcmTokenPreview,
-    });
-    const sessionEntry = await db.userSession.findFirst({
-      where: { id: payload.sessionId, userId },
-      select: {
-        id: true,
-        deviceId: true,
-      },
+      voipTokenPreview,
     });
 
-    if (!sessionEntry) {
+    const updated = await this.repo.setPushTokens({
+      sessionId: reg.sessionId,
+      accountId,
+      fcmToken: reg.fcmToken,
+      voipToken: reg.voipToken?.trim() || null,
+      pushPlatform,
+      appVersion: reg.appVersion,
+      deviceId: reg.deviceId,
+    });
+
+    if (!updated) {
       logger.warn('[FCM] registerToken step=session_not_found', {
-        userId,
+        accountId,
+        sessionId: reg.sessionId,
         fcmTokenPreview,
         voipTokenPreview,
       });
       return;
     }
 
-    logger.info('[FCM] registerToken step=session_resolved', {
-      userId,
-      sessionDeviceId: sessionEntry.deviceId ?? null,
-    });
-
-    const composedToken = this.composeStoredToken(payload.platform, payload.fcmToken);
-    const composedVoipToken = payload.voipToken
-      ? this.composeStoredToken(payload.platform, payload.voipToken)
-      : null;
-
-    const composedTokenPreview = `${composedToken.slice(0, 10)}...${composedToken.slice(-8)}`;
-    const composedVoipTokenPreview = composedVoipToken
-      ? `${composedVoipToken.slice(0, 10)}...${composedVoipToken.slice(-8)}`
-      : null;
-
-    logger.info('[FCM] registerToken step=compose_tokens', {
-      userId,
-      platform: payload.platform ?? null,
-      fcmTokenPreview,
-      composedTokenPreview,
-      voipTokenPreview,
-      composedVoipTokenPreview,
-    });
-
-    const nextDeviceId = payload.deviceId ?? sessionEntry.deviceId ?? null;
-
-    // Merge appVersion into deviceInfo if provided
-    let deviceInfoUpdate: string | undefined;
-    if (payload.appVersion) {
-      try {
-        const existing = await db.userSession.findUnique({
-          where: { id: sessionEntry.id },
-          select: { deviceInfo: true },
-        });
-        const parsed = existing?.deviceInfo ? JSON.parse(existing.deviceInfo) : {};
-        deviceInfoUpdate = JSON.stringify({ ...parsed, appVersion: payload.appVersion });
-      } catch {
-        // ignore, proceed without updating deviceInfo
-      }
-    }
-
-    logger.info('[FCM] registerToken step=update_target_session', {
-      userId,
-      nextDeviceId,
-      composedTokenPreview,
-      composedVoipTokenPreview,
-    });
-    await db.userSession.update({
-      where: { id: sessionEntry.id },
-      data: {
-        fcmToken: composedToken,
-        voipToken: composedVoipToken,
-        deviceId: nextDeviceId,
-        ...(deviceInfoUpdate ? { deviceInfo: deviceInfoUpdate } : {}),
-        updatedAt: new Date(),
-      },
-    });
-
-    const duplicateConditions: Prisma.UserSessionWhereInput[] = [{ fcmToken: composedToken }];
-
-    if (composedVoipToken) {
-      logger.info('[FCM] registerToken step=add_duplicate_condition_voip', {
-        userId,
-        composedVoipTokenPreview,
-      });
-      duplicateConditions.push({ voipToken: composedVoipToken });
-    }
-
-    logger.info('[FCM] registerToken step=clear_duplicates', {
-      userId,
-      duplicateConditionCount: duplicateConditions.length,
-      nextDeviceId,
-      composedTokenPreview,
-      composedVoipTokenPreview,
-    });
-    const duplicateCleanupResult = await db.userSession.updateMany({
-      where: {
-        userId,
-        id: { not: sessionEntry.id },
-        OR: duplicateConditions,
-      },
-      data: {
-        fcmToken: null,
-        voipToken: null,
-        deviceId: null,
-      },
-    });
-
     logger.info('[FCM] registerToken step=complete', {
-      userId,
-      nextDeviceId,
-      duplicateConditionCount: duplicateConditions.length,
-      duplicateCleanupCount: duplicateCleanupResult.count,
-      composedTokenPreview,
-      composedVoipTokenPreview,
+      accountId,
+      sessionId: reg.sessionId,
+      pushPlatform,
+      deviceId: reg.deviceId ?? null,
+      fcmTokenPreview,
+      voipTokenPreview,
     });
   }
 
-  async unregisterToken(userId: string, token: string, sessionId?: string): Promise<void> {
-    if (!token) return;
-
-    this.buildTokenCandidates(token);
-
-    await db.userSession.updateMany({
-      where: {
-        userId,
-        ...(sessionId ? { id: sessionId } : {}),
-        OR: [
-          { fcmToken: token },
-          { fcmToken: { endsWith: `:${token}` } },
-          { voipToken: token },
-          { voipToken: { endsWith: `:${token}` } },
-        ],
-      },
-      data: {
-        fcmToken: null,
-        voipToken: null,
-        deviceId: null,
-      },
-    });
-  }
-
-  async unregisterUserTokens(userId: string): Promise<void> {
-    await db.userSession.updateMany({
-      where: { userId },
-      data: {
-        fcmToken: null,
-        voipToken: null,
-        deviceId: null,
-      },
-    });
+  /** Clear both push tokens on one `auth_sessions` row (user-initiated unregister). */
+  async unregisterToken(sessionId: string): Promise<void> {
+    await this.repo.clearPushTokens(sessionId);
+    logger.info('[FCM] unregisterToken step=complete', { sessionId });
   }
 
   async hasActiveTokens(userId: string): Promise<boolean> {
-    const activeCount = await db.userSession.count({
-      where: {
-        userId,
-        status: SessionStatus.ACTIVE,
-        refreshTokenExpiry: { gt: new Date() },
-        OR: [{ fcmToken: { not: null } }, { voipToken: { not: null } }],
-      },
-    });
-    return activeCount > 0;
+    return (await this.findTargets(userId)).length > 0;
+  }
+
+  /**
+   * Deliverable push endpoints of the ACCOUNT behind `userId` (every workspace of the member):
+   * `auth_sessions` rows with a token plus the read-only legacy fallback. Used by
+   * notificationService to queue mobile push jobs; each target is a `PushTarget`.
+   */
+  async getActiveSessionsWithTokens(userId: string): Promise<PushTarget[]> {
+    const targets = await this.findTargets(userId);
+    const sessionCount = targets.filter((t) => t.source === 'session').length;
+    recordPushTargets({ source: 'session', count: sessionCount });
+    recordPushTargets({ source: 'legacy', count: targets.length - sessionCount });
+    return targets;
+  }
+
+  /** Target lookup without metrics, so `hasActiveTokens` + `getActiveSessionsWithTokens` count once. */
+  private async findTargets(userId: string): Promise<PushTarget[]> {
+    const accountId = (await this.repo.findUserById(userId))?.orgMemberId;
+    if (!accountId) return [];
+    return this.repo.findPushTargetsForAccount(accountId);
   }
 
   async sendNotification(userId: string, payload: FcmNotificationPayload): Promise<void> {
@@ -433,67 +358,17 @@ class FcmPushService {
       return;
     }
 
-    const sessions = await db.userSession.findMany({
-      where: {
-        userId,
-        status: SessionStatus.ACTIVE,
-        refreshTokenExpiry: { gt: new Date() },
-        fcmToken: { not: null },
-      },
-      select: {
-        id: true,
-        userId: true,
-        fcmToken: true,
-        deviceId: true,
-      },
-      orderBy: { updatedAt: 'desc' },
-    });
-
-    const targets = sessions
-      .map((session) => {
-        const parsed = this.parseStoredToken(session.fcmToken);
-        if (!parsed) {
-          return null;
-        }
-        return {
-          sessionId: session.id,
-          userId: session.userId,
-          token: parsed.token,
-          platform: parsed.platform,
-          deviceId: session.deviceId,
-        } as SessionPushTarget;
-      })
-      .filter((target): target is SessionPushTarget => target !== null);
-
+    const targets = await this.getActiveSessionsWithTokens(userId);
     if (targets.length === 0) {
       return;
     }
 
-    const successfulSessionIds: string[] = [];
-
-    await Promise.all(
-      targets.map(async (target) => {
-        const delivered = await this.sendToSession(target, payload);
-        if (delivered) {
-          successfulSessionIds.push(target.sessionId);
-        }
-      })
-    );
-
-    if (successfulSessionIds.length > 0) {
-      await db.userSession.updateMany({
-        where: { id: { in: successfulSessionIds } },
-        data: { updatedAt: new Date() },
-      });
-    }
+    await Promise.all(targets.map((target) => this.sendToTarget(target, payload)));
   }
 
-  private async sendToSession(
-    target: SessionPushTarget,
-    payload: FcmNotificationPayload
-  ): Promise<boolean> {
+  private async sendToTarget(target: PushTarget, payload: FcmNotificationPayload): Promise<boolean> {
     try {
-      await this.dispatchToFcm(target.token, payload);
+      await this.dispatchToFcm(target.token, payload, target.platform, target.appVersion);
       return true;
     } catch (error) {
       const errorCode = extractFcmErrorCode(error);
@@ -510,6 +385,7 @@ class FcmPushService {
 
       logger.warn('FCM delivery failure', {
         platform: target.platform,
+        source: target.source,
         errorCode,
         status,
         responseBody,
@@ -524,16 +400,26 @@ class FcmPushService {
       ];
 
       if (invalidTokenErrorCodes.includes(errorCode)) {
-        try {
-          await this.clearSessionPushToken(target.sessionId);
-        } catch (cleanupError) {
-          logger.debug('Failed to clear session token after delivery failure', {
-            cleanupError,
-          });
-        }
+        await this.clearPushToken({ id: target.id, source: target.source });
       }
 
       return false;
+    }
+  }
+
+  /**
+   * Null the push columns of the store a dead token came from: `auth_sessions` for `session`,
+   * legacy `workflow.user_sessions` for `legacy` (exception (b)). Never throws.
+   */
+  async clearPushToken(ref: PushTargetRef): Promise<void> {
+    try {
+      if (ref.source === 'session') {
+        await this.repo.clearPushTokens(ref.id);
+      } else {
+        await this.repo.nullLegacyPushColumns(ref.id);
+      }
+    } catch (error) {
+      logger.debug('Failed to clear push token after delivery failure', { source: ref.source, error });
     }
   }
 
@@ -712,111 +598,6 @@ class FcmPushService {
     return typeof value === 'string' && value.trim() ? value : undefined;
   }
 
-  private composeStoredToken(platform: string | undefined, token: string): string {
-    const normalized = this.normalizePlatformName(platform);
-    return `${normalized}:${token}`;
-  }
-
-  private normalizePlatformName(platform?: string): 'ios' | 'android' | 'unknown' {
-    switch ((platform ?? '').toLowerCase()) {
-      case 'ios':
-        return 'ios';
-      case 'android':
-        return 'android';
-      default:
-        return 'unknown';
-    }
-  }
-
-  private parseStoredToken(stored?: string | null): { platform: string; token: string } | null {
-    if (!stored || stored.trim().length === 0) {
-      return null;
-    }
-
-    const delimiterIndex = stored.indexOf(':');
-    if (delimiterIndex === -1) {
-      return {
-        platform: this.normalizePlatformName(undefined),
-        token: stored,
-      };
-    }
-
-    const platform = stored.slice(0, delimiterIndex) || this.normalizePlatformName(undefined);
-    const token = stored.slice(delimiterIndex + 1);
-
-    if (!token) {
-      return null;
-    }
-
-    return { platform, token };
-  }
-
-  private buildTokenCandidates(token: string): string[] {
-    const trimmed = token.trim();
-    if (trimmed.length === 0) {
-      return [];
-    }
-    return ['ios', 'android', 'unknown'].map((platform) => `${platform}:${trimmed}`);
-  }
-
-  async clearSessionPushToken(sessionId: string): Promise<void> {
-    try {
-      await db.userSession.update({
-        where: { id: sessionId },
-        data: { fcmToken: null, voipToken: null, deviceId: null },
-      });
-    } catch (error) {
-      logger.debug('Failed to clear session push token', { error });
-    }
-  }
-
-  /**
-   * Get active sessions with FCM tokens for a user
-   * Used by notification service to queue mobile push jobs
-   */
-  async getActiveSessionsWithTokens(
-    userId: string
-  ): Promise<Array<{ id: string; token: string; voipToken?: string; platform: string; appVersion?: string }>> {
-    const sessions = await db.userSession.findMany({
-      where: {
-        userId,
-        status: SessionStatus.ACTIVE,
-        refreshTokenExpiry: { gt: new Date() },
-        OR: [{ fcmToken: { not: null } }, { voipToken: { not: null } }],
-      },
-      select: { id: true, fcmToken: true, voipToken: true, deviceInfo: true },
-      orderBy: { updatedAt: 'desc' },
-    });
-
-    const results: Array<{ id: string; token: string; voipToken?: string; platform: string; appVersion?: string }> = [];
-
-    for (const session of sessions) {
-      const parsedFcm = session.fcmToken ? this.parseStoredToken(session.fcmToken) : null;
-      const parsedVoip = session.voipToken ? this.parseStoredToken(session.voipToken) : null;
-
-      if (!parsedFcm) continue;
-
-      let appVersion: string | undefined;
-      if (session.deviceInfo) {
-        try {
-          const deviceInfo = JSON.parse(session.deviceInfo);
-          appVersion = deviceInfo.appVersion;
-        } catch {
-          // ignore malformed deviceInfo
-        }
-      }
-
-      results.push({
-        id: session.id,
-        token: parsedFcm?.token || '',
-        voipToken: parsedVoip?.token,
-        platform: parsedFcm?.platform || parsedVoip?.platform || 'unknown',
-        appVersion,
-      });
-    }
-
-    return results;
-  }
   /**
    * Direct dispatch to FCM - exposed for worker usage
    * @throws Error if FCM call fails

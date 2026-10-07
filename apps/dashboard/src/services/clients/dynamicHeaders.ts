@@ -1,5 +1,6 @@
 import axios from 'axios';
 import { API_BASE_URL, VITE_ZERO_SERVER } from '../../config';
+import { buildAuthHeaders } from './authHeaders';
 
 const STORAGE_KEY = 'xyne_dynamic_headers';
 
@@ -113,6 +114,7 @@ export async function hydrateDynamicHeaders(): Promise<void> {
   try {
     const { data } = await axios.get<Record<string, string>>(`${API_BASE_URL}/client-events/me`, {
       withCredentials: true,
+      headers: buildAuthHeaders(),
     });
     await applyDynamicHeaders(data ?? {});
   } catch {

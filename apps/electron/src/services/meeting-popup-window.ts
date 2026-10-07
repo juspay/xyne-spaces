@@ -4,6 +4,7 @@ import log from 'electron-log/main';
 import { Logger } from './logger/Logger';
 import ElectronEvent from './logger/electron-events';
 import { isMicOwnedByXyne } from './recording-controller';
+import { AUTH_SESSION_COOKIE } from './cookies';
 
 let popupWindow: BrowserWindow | null = null;
 let autoDismissTimer: ReturnType<typeof setTimeout> | null = null;
@@ -16,7 +17,8 @@ const AUTO_DISMISS_MS = 15_000;
 
 async function isUserLoggedIn(): Promise<boolean> {
   const cookies = await session.defaultSession.cookies.get({});
-  return cookies.some((c) => c.name === 'google_access_token' && c.value);
+  // Presence of the opaque session cookie is the login signal; the value is never read.
+  return cookies.some((c) => c.name === AUTH_SESSION_COOKIE && c.value);
 }
 
 export async function showMeetingPopup(meetingData: { app: string; startedAt: string }): Promise<void> {

@@ -10,7 +10,7 @@
 
 import { spacesFetch, type SpacesAuthContext } from "../mcp/servers/xyne-spaces-client.js";
 import { errMsg } from "./errors.js";
-import { getSpacesAuthForUser } from "./spaces-db.js";
+import { mintSpacesToken } from "./spaces-auth.js";
 import { createLogger } from "../logger.js";
 
 const log = createLogger("spaces-kb");
@@ -47,13 +47,13 @@ export interface KbCollectionNode {
 }
 
 /**
- * Build a SpacesAuthContext for `userId` from the live spaces session DB.
- * Returns null if the user has no active session (no read possible).
+ * Build a SpacesAuthContext for `userId` from a freshly minted Spaces token.
+ * Returns null if the user has no live session (no read possible).
  */
 async function authForUser(userId: string): Promise<SpacesAuthContext | null> {
-  const auth = await getSpacesAuthForUser(userId, "agent-chat");
+  const auth = await mintSpacesToken({ userId }, "agent-chat");
   if (!auth) return null;
-  return { token: auth.token, sessionId: auth.sessionId, workspaceId: auth.workspaceId };
+  return { token: auth.token, workspaceId: auth.workspaceId };
 }
 
 /**

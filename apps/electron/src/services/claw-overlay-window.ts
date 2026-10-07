@@ -595,7 +595,9 @@ export function setClawOverlayEnabled(enabled: boolean): void {
   }
 }
 
-const AUTH_COOKIE_NAME = "user_session_id";
+// The backend's opaque session cookie. Only its presence matters here; the
+// value is never parsed (it may be a fresh credential or a converted legacy id).
+const AUTH_COOKIE_NAME = "xs";
 
 let authGateInitialized = false;
 

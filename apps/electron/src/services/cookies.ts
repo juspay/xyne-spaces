@@ -4,6 +4,45 @@ import { Logger } from './logger/Logger';
 import ElectronEvent from './logger/electron-events';
 
 /**
+ * Opaque session cookie set by the backend. Its value is never parsed here:
+ * it may be a fresh `xs1_...` credential or, for sessions converted from the
+ * previous model, the legacy session id. Presence is the only thing the
+ * desktop app checks.
+ */
+export const AUTH_SESSION_COOKIE = 'xs';
+
+/** Per-workspace JWT cookie written by the backend for every workspace visited. */
+export function workspaceTokenCookieName(workspaceId: string): string {
+  return `xw_${workspaceId}`;
+}
+
+/**
+ * Previous name of the per-workspace JWT cookie. The backend no longer writes
+ * it; it is read for one release so a jar that was filled before the update
+ * keeps working until the next response converts it.
+ */
+export function legacyWorkspaceTokenCookieName(workspaceId: string): string {
+  return `xyne_ws_${workspaceId}_token`;
+}
+
+/**
+ * Finds the workspace JWT for `workspaceId` in a cookie list: the current
+ * `xw_<workspaceId>` name first, then the legacy `xyne_ws_<workspaceId>_token`
+ * name as a one-release read fallback.
+ */
+export function readWorkspaceJwt(
+  cookies: Electron.Cookie[],
+  workspaceId: string,
+): string | undefined {
+  const currentName = workspaceTokenCookieName(workspaceId);
+  const legacyName = legacyWorkspaceTokenCookieName(workspaceId);
+  const current = cookies.find((cookie) => cookie.name === currentName)?.value;
+  if (current) return current;
+  const legacy = cookies.find((cookie) => cookie.name === legacyName)?.value;
+  return legacy || undefined;
+}
+
+/**
  * Removes every cookie from a single session's jar and returns how many were
  * cleared. Names are logged by the caller; never values.
  */
@@ -86,7 +125,8 @@ export async function setCookiesFromHeaders(
       }
     }
 
-    log.info(`Setting cookie: ${name}=${value}, Max-Age=${maxAge}, Expires=${expires}`);
+    // Name and expiry only; cookie values are credentials and never logged.
+    log.info(`Setting cookie: ${name}, Max-Age=${maxAge}, Expires=${expires}`);
     // Calculate expirationDate
     let expirationDate: number | undefined;
 

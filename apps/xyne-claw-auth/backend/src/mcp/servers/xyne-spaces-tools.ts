@@ -5399,18 +5399,16 @@ const SDLC_CANVAS_ID = {
 
 // SDLC claw routes (/api/sdlc/claw/*) can be pointed at a dedicated SDLC backend
 // via SDLC_BACKEND_URL, mirroring the iframe's VITE_SDLC_BACKEND_URL. Unset -> the
-// call falls through to the default Spaces backend. token/session/workspace are
+// call falls through to the default Spaces backend. token/workspace are
 // re-supplied from env because passing an auth object otherwise blanks them.
 function sdlcSpacesAuth(): SpacesAuthContext | undefined {
   const baseUrl = process.env["SDLC_BACKEND_URL"];
   if (!baseUrl) return undefined;
   const token = process.env["XYNE_SPACES_TOKEN"];
-  const sessionId = process.env["XYNE_SPACES_SESSION_ID"];
   const workspaceId = process.env["XYNE_SPACES_WORKSPACE_ID"];
   return {
     baseUrl,
     ...(token !== undefined && { token }),
-    ...(sessionId !== undefined && { sessionId }),
     ...(workspaceId !== undefined && { workspaceId }),
   };
 }
@@ -6621,8 +6619,8 @@ const spacesUploadToKb: ToolDef = {
       //    in the batch. spacesFetch forces a JSON Content-Type, so build the
       //    request directly and let FormData set
       //    its own multipart boundary. Auth is replicated from the client:
-      //    bearer + session/workspace via both header AND cookie (the refresh
-      //    middleware reads user_session_id).
+      //    bearer + x-workspace-id (the per-user JWT the runner minted for
+      //    this child; no session cookie exists any more).
       const baseUrl = (process.env["XYNE_SPACES_URL"] ?? process.env["SPACES_BACKEND_URL"] ?? "").replace(
         /\/+$/,
         "",
@@ -6632,22 +6630,12 @@ const spacesUploadToKb: ToolDef = {
       // the per-user Spaces token this stdio server was spawned with.
       const tokenEnvKey = ["XYNE", "SPACES", "TOKEN"].join("_");
       const token = process.env[tokenEnvKey] ?? "";
-      const sessionId = process.env["XYNE_SPACES_SESSION_ID"] ?? "";
       const workspaceId = process.env["XYNE_SPACES_WORKSPACE_ID"] ?? "";
       if (!baseUrl || !token) return err("Spaces base URL or token is not configured for upload.");
-      const cookieParts: string[] = [];
-      if (sessionId) {
-        cookieParts.push(`xyne_session=${sessionId}`);
-        cookieParts.push(`user_session_id=${sessionId}`);
-      }
-      if (workspaceId) cookieParts.push(`xyne_last_workspace=${workspaceId}`);
-      const cookieHeader = cookieParts.join("; ");
       const uploadUrl = `${baseUrl}/api/collections/${encodeURIComponent(collectionId)}/upload`;
       const uploadHeaders: Record<string, string> = {
         Authorization: `Bearer ${token}`,
-        ...(sessionId ? { "x-session-id": sessionId } : {}),
         ...(workspaceId ? { "x-workspace-id": workspaceId } : {}),
-        ...(cookieHeader ? { Cookie: cookieHeader } : {}),
       };
       const targetDesc = collectionLabel ? `${collectionLabel} (${collectionId})` : collectionId;
 

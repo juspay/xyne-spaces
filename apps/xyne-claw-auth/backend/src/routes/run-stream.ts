@@ -1464,8 +1464,8 @@ publicRouter.post("/", requireAuth, requireNoAccessToken, async (req: Request, r
         const { buildAttachedContextPayload, normalizeAttachedContext } = await import(
           "../services/agentChatContextService.js"
         );
-        const { getSpacesAuthForUser } = await import("../lib/spaces-db.js");
-        const auth = await getSpacesAuthForUser(userId);
+        const { mintSpacesToken } = await import("../lib/spaces-auth.js");
+        const auth = await mintSpacesToken({ userId }, "agent-chat");
         const normalized = normalizeAttachedContext(forwardedAttachedContext);
         if (auth && normalized.items.length > 0) {
           const payload = await buildAttachedContextPayload(normalized.items, auth);

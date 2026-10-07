@@ -2,26 +2,35 @@ import { Request, Response } from 'express';
 import { ValidatedActivityPayload } from '@/validators/activityValidator';
 import { ActivityLogEntry } from '@xyne/shared';
 import { logger } from '@/utils/logger';
-import { UserSessionService } from '@/services/userSessionService';
 import { activityService } from '@/services/activity/activityService';
 import { sudoQueryService } from '@/services/hyperAnalytics/sudoQueryService';
 import { resolveModule } from '@/services/hyperAnalytics/moduleRoutes';
 
+/**
+ * Client platform for an activity event: the auth session's platform (`web` | `electron` |
+ * `mobile` | `sdk`), falling back to the user agent for requests that carry no session
+ * (API keys, pre-deploy JWTs).
+ */
+function platformFor(req: Request): string | undefined {
+  const fromSession = req.authSession?.platform;
+  if (fromSession) return fromSession.toLowerCase();
+
+  const ua = (req.headers['user-agent'] ?? '').toString().toLowerCase();
+  if (!ua) return undefined;
+  if (ua.includes('electron')) return 'electron';
+  if (ua.includes('mobile')) return 'mobile';
+  return 'web';
+}
+
 export class ActivityController {
-  private userSessionService: UserSessionService;
-
-  constructor() {
-    this.userSessionService = new UserSessionService();
-  }
-
   /**
    * POST /api/activity/log
    * Receives activity log from frontend and logs to stdout
-   * 
+   *
    * Note: Validation is handled by validateZod middleware in the route.
    * By the time we reach here, req.body is already validated.
-   * 
-   * 1. Enriches payload with server-side data (including platform from UserSession.deviceInfo)
+   *
+   * 1. Enriches payload with server-side data (platform from the auth session)
    * 2. Logs to stdout as JSON
    * 3. Returns success response
    */
@@ -30,23 +39,7 @@ export class ActivityController {
       // req.body is already validated by middleware
       const validated = req.body as ValidatedActivityPayload;
 
-      // Fetch platform from UserSession.deviceInfo
-      let platform: string | undefined;
-      const sessionId = req.authenticatedSessionId;
-      if (sessionId) {
-        try {
-          const session = await this.userSessionService.getSessionById(sessionId);
-          if (session?.deviceInfo) {
-            // deviceInfo is stored as JSON string, parse and extract platform
-            const deviceInfoObj = typeof session.deviceInfo === 'string' 
-              ? JSON.parse(session.deviceInfo) 
-              : session.deviceInfo;
-            platform = deviceInfoObj?.platform;
-          }
-        } catch (err) {
-          logger.warn('Failed to fetch platform from session', { error: err });
-        }
-      }
+      const platform = platformFor(req);
 
       const logEntry: ActivityLogEntry = {
         ...validated,

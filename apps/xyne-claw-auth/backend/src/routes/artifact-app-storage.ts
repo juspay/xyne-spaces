@@ -57,12 +57,14 @@ export const artifactAppStorageRouter: Router = Router();
  * path (see http/routes.ts) and nowhere else — requireAuth itself is shared
  * by every route in the service and stays untouched.
  *
- * An SDK client sends only `Authorization: Bearer <workspace JWT>`. Spaces'
- * auth wants that token in a cookie whose NAME embeds the workspaceId
- * (`xyne_ws_<id>_token`), so this synthesizes the cookie header from the
- * token's own workspaceId claim and lets requireAuth's normal cookie path do
- * the rest. The claim is decoded WITHOUT verification — safe, because it is
- * only a routing hint: it selects which cookie slot Spaces verifies, and the
+ * An SDK client sends only `Authorization: Bearer <workspace JWT>`. requireAuth
+ * identifies callers by forwarding the raw `Cookie` to Spaces' `/api/auth/me`,
+ * and Spaces accepts a JWT presented as the per-workspace `xw_<id>` cookie
+ * (the same cookie browsers carry next to the opaque `xs` session cookie).
+ * So this synthesizes that cookie header from the token's own workspaceId
+ * claim and lets requireAuth's normal cookie path do the rest.
+ * The claim is decoded WITHOUT verification — safe, because it is only a
+ * routing hint: it selects which cookie slot Spaces verifies, and the
  * signature check still happens there. A tampered claim just misroutes the
  * caller's own request into a slot that fails verification.
  *
@@ -76,7 +78,7 @@ export function storageBearerAuthBridge(req: Request, _res: Response, next: Next
     const token = match?.[1];
     const workspaceId = token ? workspaceIdFromJwt(token) : undefined;
     if (token && workspaceId) {
-      req.headers.cookie = `xyne_last_workspace=${workspaceId}; xyne_ws_${workspaceId}_token=${token}`;
+      req.headers.cookie = `xyne_last_workspace=${workspaceId}; xw_${workspaceId}=${token}`;
       if (typeof req.headers["x-workspace-id"] !== "string" || !req.headers["x-workspace-id"].trim()) {
         req.headers["x-workspace-id"] = workspaceId;
       }

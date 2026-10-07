@@ -11,7 +11,7 @@
  */
 
 import { userRepository } from "../repositories/index.js";
-import { getSpacesAuthForUser } from "../lib/spaces-db.js";
+import { mintSpacesToken } from "../lib/spaces-auth.js";
 import type { Logger } from "../logger.js";
 import { shouldTwinRespond, recordTwinSilence, FAIL_CLOSED } from "./twinRespondGate.js";
 
@@ -49,7 +49,7 @@ export async function findEligibleTwins(
       log.info(`Twin: skipping ${uid} — Digital Twin disabled`);
       continue;
     }
-    const twinAuth = await getSpacesAuthForUser(uid, "webhook").catch(() => null);
+    const twinAuth = await mintSpacesToken({ userId: uid }, "webhook").catch(() => null);
     if (!twinAuth?.workspaceId) {
       log.info(`Twin: skipping ${uid} — no resolvable workspaceId (no active Spaces session)`);
       continue;

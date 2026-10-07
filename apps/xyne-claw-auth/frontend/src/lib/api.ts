@@ -122,7 +122,6 @@ export async function getMe(): Promise<User> {
 }
 
 export async function upsertUser(user: User): Promise<void> {
-  const spacesToken = getGoogleToken();
   await request<{ success: boolean }>(
     `${AUTH_API_URL}/api/v1/users`,
     {
@@ -131,7 +130,6 @@ export async function upsertUser(user: User): Promise<void> {
         id: user.id,
         email: user.email,
         name: user.name,
-        ...(spacesToken ? { spacesToken } : {}),
       }),
     },
   );
@@ -1397,45 +1395,21 @@ export async function listClaudeModels(
   return data.data;
 }
 
-function readCookie(name: string): string | undefined {
-  const match = document.cookie.match(new RegExp(`(?:^|;\\s*)${name}=([^;]*)`));
-  return match?.[1] ? decodeURIComponent(match[1]) : undefined;
-}
-
-// Get the active Spaces user JWT from cookies.
-// Spaces authV2 stores the JWT in `xyne_ws_<workspaceId>_token`, selected by
-// the `xyne_last_workspace` cookie. `google_access_token` is a legacy fallback
-// but during the pending-auth window it holds a JSON blob — skip it unless
-// it looks like a JWT.
-function getGoogleToken(): string | undefined {
-  const lastWorkspace = readCookie("xyne_last_workspace");
-  if (lastWorkspace) {
-    const wsToken = readCookie(`xyne_ws_${lastWorkspace}_token`);
-    if (wsToken) return wsToken;
-  }
-  const legacy = readCookie("google_access_token");
-  if (legacy && legacy.split(".").length === 3) return legacy;
-  return undefined;
-}
+// The Spaces session cookies are httpOnly, so the browser sends them on its
+// own and this code never reads them. The claw backend identifies the caller
+// from those cookies and mints its own Spaces token for every call below.
 
 export async function registerAgentApp(slug: string): Promise<void> {
-  const userToken = getGoogleToken();
   await request<{ success: boolean }>(
     `${AUTH_API_URL}/api/v1/agents/${slug}/register-app`,
-    {
-      method: "POST",
-      body: JSON.stringify({ userToken }),
-    },
+    { method: "POST", body: JSON.stringify({}) },
   );
 }
 
 export async function autoConnectSpaces(userId: string): Promise<void> {
-  // Token is sent automatically via httpOnly cookie through the proxy
-  // Also try reading from JS cookie as fallback (non-httpOnly setups)
-  const token = getGoogleToken();
   await request<{ success: boolean }>(
     `${AUTH_API_URL}/api/v1/users/${userId}/connections/auto-connect-spaces`,
-    { method: "POST", body: JSON.stringify(token ? { spacesToken: token } : {}) },
+    { method: "POST", body: JSON.stringify({}) },
   );
 }
 
@@ -1632,34 +1606,30 @@ export async function connectLinkedInRapidApi(
 }
 
 export async function createAgentApp(slug: string): Promise<void> {
-  const userToken = getGoogleToken();
   await request<{ success: boolean }>(
     `${AUTH_API_URL}/api/v1/agents/${slug}/create-app`,
-    { method: "POST", body: JSON.stringify({ userToken }) },
+    { method: "POST", body: JSON.stringify({}) },
   );
 }
 
 export async function installAgentApp(slug: string): Promise<void> {
-  const userToken = getGoogleToken();
   await request<{ success: boolean }>(
     `${AUTH_API_URL}/api/v1/agents/${slug}/install-app`,
-    { method: "POST", body: JSON.stringify({ userToken }) },
+    { method: "POST", body: JSON.stringify({}) },
   );
 }
 
 export async function configureAgentWebhook(slug: string): Promise<void> {
-  const userToken = getGoogleToken();
   await request<{ success: boolean }>(
     `${AUTH_API_URL}/api/v1/agents/${slug}/configure-webhook`,
-    { method: "POST", body: JSON.stringify({ userToken }) },
+    { method: "POST", body: JSON.stringify({}) },
   );
 }
 
 export async function grantAgentPermissions(slug: string): Promise<void> {
-  const userToken = getGoogleToken();
   await request<{ success: boolean }>(
     `${AUTH_API_URL}/api/v1/agents/${slug}/grant-permissions`,
-    { method: "POST", body: JSON.stringify({ userToken }) },
+    { method: "POST", body: JSON.stringify({}) },
   );
 }
 

@@ -152,7 +152,10 @@ class WebSocketService {
           hostname: socket.handshake.headers.host?.split(':')[0] || 'unknown',
           get: (header: string) => headers[header.toLowerCase()],
           method: 'GET',
-          path: '/api/socket.io/'
+          path: '/api/socket.io/',
+          // Set-Cookie cannot reach a socket client: an about-to-expire `xw_<ws>` is accepted as
+          // is, and a missing one falls to the `xs` session path without minting a cookie.
+          inlineRefresh: false,
         } as any;
 
         // Create Express-compatible response object
@@ -180,6 +183,8 @@ class WebSocketService {
             (socket as any).userEmail = req.user.email;
             (socket as any).userName = req.user.displayName || req.user.name;
             (socket as any).user = req.user;
+            // Session platform from the resolved credential (`auth_sessions.platform` or the JWT claim).
+            (socket as any).authSession = req.authSession;
 
             logger.info(`WebSocket authenticated: ${req.user.email} (${req.user.id})`);
             logger.info(`Socket ${socket.id} assigned user: ${req.user.name} (${req.user.email})`);
@@ -219,6 +224,13 @@ class WebSocketService {
    * Helper to detect platform from socket headers
    */
   private getPlatformFromSocket(socket: AuthenticatedSocket): string {
+    // The session's own platform is authoritative for Electron; mobile still needs the user agent
+    // to tell iOS from Android, and web falls through to the default below.
+    const sessionPlatform = (socket as any).authSession?.platform as string | undefined;
+    if (sessionPlatform === 'ELECTRON') {
+      return 'electron';
+    }
+
     const userAgent = socket.handshake.headers['user-agent']?.toLowerCase() || '';
     
     if (userAgent.includes('electron')) {

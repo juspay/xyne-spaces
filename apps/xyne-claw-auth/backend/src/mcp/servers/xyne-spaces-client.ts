@@ -4,9 +4,15 @@
  * Default auth/base URL are read from env:
  * - XYNE_SPACES_URL (legacy)
  * - SPACES_BACKEND_URL (preferred fallback)
- * - XYNE_SPACES_TOKEN
- * - XYNE_SPACES_SESSION_ID
+ * - XYNE_SPACES_TOKEN     — short-lived per-user Spaces JWT the runner minted
+ *                            for this child (lib/spaces-auth.ts), or an app token
  * - XYNE_SPACES_WORKSPACE_ID
+ *
+ * Auth is `Authorization: Bearer <token>` + `x-workspace-id` — nothing else.
+ * There is no session cookie to forward any more (Spaces sessions are opaque
+ * and hashed; the JWT already carries the session binding), so no Cookie /
+ * x-session-id headers are synthesized. When the token expires the runner
+ * respawns the child with a freshly minted one.
  *
  * Callers can override auth per request for user-scoped routes.
  */
@@ -15,7 +21,6 @@ import { errMsg } from "../../lib/errors.js";
 
 export interface SpacesAuthContext {
   token?: string;
-  sessionId?: string;
   workspaceId?: string;
   baseUrl?: string;
   s2sKey?: string;
@@ -86,7 +91,6 @@ export const CURRENT_USER_ID = extractUserIdFromToken(DEFAULT_TOKEN);
 
 export async function spacesFetch(path: string, init?: RequestInit, auth?: SpacesAuthContext): Promise<unknown> {
   const token = auth?.token ?? process.env["XYNE_SPACES_TOKEN"] ?? "";
-  const sessionId = auth?.sessionId ?? process.env["XYNE_SPACES_SESSION_ID"] ?? "";
   const workspaceId = auth ? (auth.workspaceId ?? "") : (process.env["XYNE_SPACES_WORKSPACE_ID"] ?? "");
   const baseUrl = resolveBaseUrl(auth?.baseUrl);
 
@@ -97,34 +101,13 @@ export async function spacesFetch(path: string, init?: RequestInit, auth?: Space
     throw new Error("Spaces auth token is missing for this request.");
   }
 
-  // Spaces' auth middleware reads session ID from multiple cookie names
-  // depending on which middleware variant is mounted:
-  //   - `auth.ts` (legacy):           reads `xyne_session`
-  //   - `auth.ts` (newer refresh path): reads `user_session_id` ← REQUIRED for
-  //     proactive token refresh. Without this, when our token is within ~60s
-  //     of expiring (always true in tight TTL setups), the middleware tries
-  //     to refresh, fails because the cookie is missing, and returns 401
-  //     ("Token expired and no session provided for refresh"). Sending it
-  //     unconditionally is harmless on other paths.
-  //   - `authV2Middleware.ts`:        reads `x-session-id` header or
-  //                                   `user_session_id` cookie.
-  // Workspace id (legacy: `xyne_last_workspace` cookie, authV2: `x-workspace-id`
-  // header) is sent through both channels for the same reason.
-  const cookieParts: string[] = [];
-  if (sessionId) {
-    cookieParts.push(`xyne_session=${sessionId}`);
-    cookieParts.push(`user_session_id=${sessionId}`);
-  }
-  if (workspaceId) cookieParts.push(`xyne_last_workspace=${workspaceId}`);
-  const cookieHeader = cookieParts.join("; ");
-
+  // Workspace is a per-request claim on the Spaces side: `x-workspace-id`
+  // selects the membership the Bearer acts under.
   const headers: Record<string, string> = {
     Authorization: `Bearer ${token}`,
     "Content-Type": "application/json",
-    ...(sessionId ? { "x-session-id": sessionId } : {}),
     ...(workspaceId ? { "x-workspace-id": workspaceId } : {}),
     ...(auth?.s2sKey ? { "x-s2s-key": auth.s2sKey } : {}),
-    ...(cookieHeader ? { Cookie: cookieHeader } : {}),
     ...(init?.headers as Record<string, string> | undefined),
   };
 
@@ -204,27 +187,16 @@ export async function spacesFetchBuffer(
   auth?: SpacesAuthContext,
 ): Promise<{ buffer: Buffer; contentType: string }> {
   const token = auth?.token ?? process.env["XYNE_SPACES_TOKEN"] ?? "";
-  const sessionId = auth?.sessionId ?? process.env["XYNE_SPACES_SESSION_ID"] ?? "";
   const workspaceId = auth ? (auth.workspaceId ?? "") : (process.env["XYNE_SPACES_WORKSPACE_ID"] ?? "");
   const baseUrl = resolveBaseUrl(auth?.baseUrl);
   if (!baseUrl) throw new Error("Spaces base URL not configured");
   if (!token) throw new Error("Spaces auth token missing");
 
-  const cookieParts: string[] = [];
-  if (sessionId) {
-    cookieParts.push(`xyne_session=${sessionId}`);
-    cookieParts.push(`user_session_id=${sessionId}`);
-  }
-  if (workspaceId) cookieParts.push(`xyne_last_workspace=${workspaceId}`);
-  const cookieHeader = cookieParts.join("; ");
-
   const url = new URL(path, `${baseUrl}/`).toString();
   const response = await fetch(url, {
     headers: {
       Authorization: `Bearer ${token}`,
-      ...(sessionId ? { "x-session-id": sessionId } : {}),
       ...(workspaceId ? { "x-workspace-id": workspaceId } : {}),
-      ...(cookieHeader ? { Cookie: cookieHeader } : {}),
     },
     signal: AbortSignal.timeout(30_000),
   });
@@ -240,27 +212,16 @@ export async function spacesFetchBuffer(
 /** Plain-text variant of spacesFetch — returns the response body as a string. */
 export async function spacesFetchText(path: string, auth?: SpacesAuthContext): Promise<string> {
   const token = auth?.token ?? process.env["XYNE_SPACES_TOKEN"] ?? "";
-  const sessionId = auth?.sessionId ?? process.env["XYNE_SPACES_SESSION_ID"] ?? "";
   const workspaceId = auth ? (auth.workspaceId ?? "") : (process.env["XYNE_SPACES_WORKSPACE_ID"] ?? "");
   const baseUrl = resolveBaseUrl(auth?.baseUrl);
   if (!baseUrl) throw new Error("Spaces base URL not configured");
   if (!token) throw new Error("Spaces auth token missing");
 
-  const cookieParts: string[] = [];
-  if (sessionId) {
-    cookieParts.push(`xyne_session=${sessionId}`);
-    cookieParts.push(`user_session_id=${sessionId}`);
-  }
-  if (workspaceId) cookieParts.push(`xyne_last_workspace=${workspaceId}`);
-  const cookieHeader = cookieParts.join("; ");
-
   const url = new URL(path, `${baseUrl}/`).toString();
   const response = await fetch(url, {
     headers: {
       Authorization: `Bearer ${token}`,
-      ...(sessionId ? { "x-session-id": sessionId } : {}),
       ...(workspaceId ? { "x-workspace-id": workspaceId } : {}),
-      ...(cookieHeader ? { Cookie: cookieHeader } : {}),
     },
     signal: AbortSignal.timeout(30_000),
   });

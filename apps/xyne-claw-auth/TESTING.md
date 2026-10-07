@@ -109,7 +109,7 @@ Vite proxies automatically:
 The claw-auth frontend re-uses the xyne-spaces Google OAuth session cookie. Auth flow:
 
 1. Sign into xyne-spaces at `http://localhost:5173` (or via the test auth endpoint below).
-2. The `xyne_ws_<workspaceId>_token` cookie is set on the `:3001` origin.
+2. The `xs` session cookie (and `xyne_last_workspace`) are set on the `:3001` origin.
 3. Navigate to `http://localhost:5174/claw/` — the Vite proxy forwards cookie-authenticated requests to `:3001` for session validation.
 
 **Test auth shortcut (no real Google account needed):**

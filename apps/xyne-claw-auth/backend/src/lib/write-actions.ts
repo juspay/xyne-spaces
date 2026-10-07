@@ -167,8 +167,8 @@ export async function executeWriteAction(action: SignedWriteAction): Promise<Wri
 
     let credentials: Record<string, unknown>;
     if (AMBIENT_USER_CREDENTIAL_SERVER_TYPES.has(serverType)) {
-      const { getSpacesAuthForUser } = await import("../lib/spaces-db.js");
-      const live = await getSpacesAuthForUser(userId, "write-action");
+      const { mintSpacesToken } = await import("../lib/spaces-auth.js");
+      const live = await mintSpacesToken({ userId }, "write-action");
       if (live) {
         credentials = {
           // Server-to-server call from the claw-auth pod: use the in-cluster
@@ -176,7 +176,6 @@ export async function executeWriteAction(action: SignedWriteAction): Promise<Wri
           // public spacesAppUrl is not reachable from here ("fetch failed").
           url: CONFIG.spacesInternalUrl,
           token: live.token,
-          sessionId: live.sessionId,
           workspaceId: live.workspaceId,
           userId,
         };

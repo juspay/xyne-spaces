@@ -1,6 +1,6 @@
 import { CONFIG } from "../config.js";
 import { errMsg } from "./errors.js";
-import { getSpacesAuthForUser } from "./spaces-db.js";
+import { mintSpacesToken } from "./spaces-auth.js";
 import { spacesFetch } from "../mcp/servers/xyne-spaces-client.js";
 
 export interface SdlcRepositoryContext {
@@ -29,7 +29,7 @@ export async function resolveSdlcRepositoryForUser(
     return { ok: true };
   }
 
-  const auth = await getSpacesAuthForUser(userId, "agent-chat");
+  const auth = await mintSpacesToken({ userId }, "agent-chat");
   if (!auth) {
     return { ok: false, status: 401, error: "Spaces credentials are required to resolve the SDLC repository" };
   }
@@ -38,7 +38,7 @@ export async function resolveSdlcRepositoryForUser(
     const response = await spacesFetch(
       `/api/sdlc/repositories/${encodeURIComponent(researchContext.id.trim())}/context?conversationId=${encodeURIComponent(conversationId)}`,
       undefined,
-      { ...auth, baseUrl: CONFIG.spacesInternalUrl },
+      { token: auth.token, workspaceId: auth.workspaceId, baseUrl: CONFIG.spacesInternalUrl },
     ) as {
       success?: boolean;
       context?: {
@@ -91,14 +91,14 @@ export async function resolveSdlcHubContextForUser(
   conversationId: string | undefined,
 ): Promise<Record<string, unknown> | undefined> {
   if (!channelId || !conversationId) return undefined;
-  const auth = await getSpacesAuthForUser(userId, "agent-chat");
+  const auth = await mintSpacesToken({ userId }, "agent-chat");
   if (!auth) return undefined;
   try {
     const response = (await spacesFetch(
       `/api/sdlc/channels/${encodeURIComponent(channelId)}/context?conversationId=${encodeURIComponent(conversationId)}`,
       // Runs at the start of every channel run, which the 30 s default would stall.
       { signal: AbortSignal.timeout(5_000) },
-      { ...auth, baseUrl: CONFIG.spacesInternalUrl },
+      { token: auth.token, workspaceId: auth.workspaceId, baseUrl: CONFIG.spacesInternalUrl },
     )) as { context?: Record<string, unknown> | null };
     return response.context ?? undefined;
   } catch {

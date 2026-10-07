@@ -1,16 +1,25 @@
 import log from 'electron-log/main';
 import { session, BrowserWindow, app } from 'electron';
 import { config } from '../app/config';
-import { clearAllCookies } from './cookies';
+import { clearAllCookies, readWorkspaceJwt } from './cookies';
 import path from 'path';
 import { existsSync, mkdirSync } from 'fs';
 import Logger from 'electron-log';
+import { Logger as AppLogger } from './logger/Logger';
 import { EnrollmentEvent } from './logger/enrollment-events';
 import { showScreenPicker } from './screen-picker';
 import Store from 'electron-store';
 
 let mainWindow: BrowserWindow | null = null;
 const store = new Store();
+
+/**
+ * Header the backend reads as the stable device identity at login and
+ * refresh. Electron sends its persistent client session id (electron-store
+ * key `clientSessionId`, owned by the Logger singleton) so one desktop
+ * install maps to one auth session row.
+ */
+const DEVICE_ID_HEADER = 'x-device-id';
 
 export function setMainWindow(window: BrowserWindow | null): void {
   mainWindow = window;
@@ -35,8 +44,7 @@ export async function hydrateCachedUserFromCookies(): Promise<void> {
     const workspaceId = workspaceCookies[0]?.value;
     if (!workspaceId) return;
 
-    const tokenCookies = await session.defaultSession.cookies.get({ name: `xyne_ws_${workspaceId}_token` });
-    const token = tokenCookies[0]?.value;
+    const token = readWorkspaceJwt(await session.defaultSession.cookies.get({}), workspaceId);
     if (!token) return;
 
     // Decode JWT payload (no verification needed — trusted main process)
@@ -308,16 +316,20 @@ export function setupRequestInterceptor(): void {
   setupDownloadHandler();
   setupMediaPermissionGuard();
   installFrontendCsp();
-  
+
+  // Computed once: the id is persisted and never changes for an install.
+  const deviceId = AppLogger.getClientSessionId();
+
   session.defaultSession.webRequest.onBeforeSendHeaders(
     { urls: [
       `${config.BACKEND_URL}/*`,
       `${config.FRONTEND_URL}/*`,
       config.BACKEND_URL.replace(/^https/, 'wss') + '/*',
-      ], 
+      ],
     },
     (details, callback) => {
       details.requestHeaders['X-Platform'] = 'electron';
+      details.requestHeaders[DEVICE_ID_HEADER] = deviceId;
       const preProdEnabled = store.get(config.preProdKey);
       if (preProdEnabled === true) {
         details.requestHeaders['x-route-env'] = 'playground';

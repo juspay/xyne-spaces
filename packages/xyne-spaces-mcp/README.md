@@ -114,8 +114,10 @@ To use a session you already have instead, set it as the cookie string, exactly 
 browser holds it. It takes precedence over the saved session:
 
 ```bash
-export XYNE_SPACES_COOKIE="xyne_ws_<workspaceId>_token=<token>"
+export XYNE_SPACES_COOKIE="xw_<workspaceId>=<token>"
 ```
+
+The previous cookie name, `xyne_ws_<workspaceId>_token=<token>`, is still accepted.
 
 **4. Check it works.** Ask the agent to run `spaces_whoami`. It should name you, your
 workspace, and when the session expires.

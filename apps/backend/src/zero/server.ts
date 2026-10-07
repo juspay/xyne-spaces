@@ -38,6 +38,8 @@ import { config } from '@/config/env';
 import { checkRateLimit } from '@/services/zeroRateLimiter';
 import { superpositionClient } from '@/services/superpositionClient';
 import { runCompiledZqlSql } from '@/bypassAcl/zeroServices';
+import { redisRevocationStore } from '@/auth/revocation';
+import { isSessionJwt, type JwtPayload } from '@/services/jwtService';
 
 const mustGetBackendQuery = (name: string): AnyCustomQuery =>
   mustGetQuery(queries as never, name) as AnyCustomQuery;
@@ -111,7 +113,7 @@ export async function extractAuthDataFromJWT(encodedJWT?: string): Promise<AuthD
     const decoded = jwt.verify(encodedJWT, secret, {
       issuer: 'xyne',
       audience: 'xyne-user',
-    }) as AuthData & { iat?: number };
+    }) as JwtPayload;
 
     const forceLogoutBefore = config.jwt.forceLogoutBefore;
     if (forceLogoutBefore && decoded.iat && decoded.iat < forceLogoutBefore) {
@@ -122,6 +124,39 @@ export async function extractAuthDataFromJWT(encodedJWT?: string): Promise<AuthD
       return undefined;
     }
 
+    // A token minted from an auth session (`sid`) dies with it: logout / password reset /
+    // device reuse write a Redis tombstone for the sid, and the token must stop working before
+    // it expires. Same check as the HTTP resolver, no DB read. Pre-deploy tokens carry no `sid`
+    // and are accepted on signature + expiry alone.
+    if (decoded.sid && (await redisRevocationStore.isRevoked(decoded.sid))) {
+      logger.warn('JWT rejected: bound session is revoked', { sid: decoded.sid });
+      return undefined;
+    }
+
+    if (isSessionJwt(decoded)) {
+      // Roles and org travel as claims; only `displayName` (rendered by mutators) needs the row.
+      const user = await db.user.findUnique({
+        where: { id: decoded.sub },
+        select: { displayName: true },
+      });
+      if (!user) {
+        logger.error('Auth data inconsistency: JWT valid but user row missing', { userId: decoded.sub });
+        throw new Error('User authentication data inconsistent');
+      }
+      return {
+        sub: decoded.sub,
+        email: decoded.email,
+        name: decoded.name,
+        displayName: user.displayName,
+        workspaceId: decoded.workspaceId,
+        memberId: decoded.memberId,
+        orgId: decoded.orgId,
+        role: decoded.role,
+        orgRole: decoded.orgRole,
+      };
+    }
+
+    // Pre-deploy token (no session claims): roles and org come from the DB as before.
     const [user, orgMember] = await Promise.all([
       db.user.findUnique({
         where: { id: decoded.sub },
@@ -129,10 +164,10 @@ export async function extractAuthDataFromJWT(encodedJWT?: string): Promise<AuthD
       }),
       db.orgMember.findUnique({
         where: { memberId: decoded.memberId },
-        select: { role: true },
+        select: { role: true, orgId: true },
       }),
     ]);
-  
+
     // If JWT is valid but DB records missing, that's a data inconsistency - fail fast
     if (!user || !orgMember) {
       logger.error('Auth data inconsistency: JWT valid but DB records missing', {
@@ -151,9 +186,10 @@ export async function extractAuthDataFromJWT(encodedJWT?: string): Promise<AuthD
       displayName: user.displayName,
       workspaceId: decoded.workspaceId,
       memberId: decoded.memberId,
+      orgId: orgMember.orgId,
       role: user.role,
       orgRole: orgMember.role,
-    } as AuthData;
+    };
     
   } catch (error) {
     logger.error('JWT verification failed:', error);

@@ -1,20 +1,53 @@
 import jwt from 'jsonwebtoken';
 import { logger } from '../utils/logger';
 import { config } from '../config/env';
+import type { SessionPlatform } from '@/auth/types';
 
-export interface JwtPayload {
+/**
+ * Everything a session access JWT carries. Minted ONLY by `mintWorkspaceJwt` (src/auth/sessionIssuer.ts)
+ * so every token has the same field set; verified statelessly by the resolver (signature + Redis
+ * tombstone on `sid`), so the claims must be enough to build `req.user` and `req.authSession`
+ * without a DB read. Readers outside the backend: Zero (`sub`, `email`, `name`, `memberId`,
+ * `workspaceId`, `sid`), Electron (`email`), mobile (`sub`, `workspaceId`, `exp`), claw (`sub`,
+ * `workspaceId`, `exp`). No `picture`, `provider` or `providerUserId`: nothing reads them.
+ */
+export interface SessionJwtClaims {
+  /** Workspace `users.id`. */
   sub: string;
   email: string;
   name: string;
-  picture?: string;
   workspaceId: string;
+  /** `org_members.memberId` — the account (`auth_sessions.accountId`). */
   memberId: string;
-  providerUserId?: string;
-  provider?: string;
-  iat?: number;
-  exp?: number;
-  iss?: string;
-  aud?: string;
+  /** `auth_sessions.id` the token was minted from. */
+  sid: string;
+  /** Workspace role (`users.role`). */
+  role: string;
+  /** Org role (`org_members.role`). */
+  orgRole: string;
+  orgId: string;
+  platform: SessionPlatform;
+}
+
+/** Session claims optional: tokens minted before the session stack carry only the first five. */
+export type JwtPayload = Pick<SessionJwtClaims, 'sub' | 'email' | 'name' | 'workspaceId' | 'memberId'> &
+  Partial<Pick<SessionJwtClaims, 'sid' | 'role' | 'orgRole' | 'orgId' | 'platform'>> & {
+    iat?: number;
+    exp?: number;
+    iss?: string;
+    aud?: string;
+  };
+
+/** A token minted from an auth session: carries everything needed for a stateless resolve. */
+export function isSessionJwt(payload: JwtPayload): payload is JwtPayload & SessionJwtClaims {
+  return (
+    typeof payload.sid === 'string' &&
+    payload.sid.length > 0 &&
+    typeof payload.role === 'string' &&
+    typeof payload.orgRole === 'string' &&
+    typeof payload.orgId === 'string' &&
+    typeof payload.platform === 'string'
+  );
 }
 
 export class JwtService {
@@ -31,30 +64,33 @@ export class JwtService {
   }
 
   /**
-   * Generate a JWT token with the specified payload
+   * Sign a session access JWT. Exactly the `SessionJwtClaims` field set, nothing else.
    */
-  generateToken(payload: Omit<JwtPayload, 'iat' | 'exp' | 'iss' | 'aud'>): string {
+  generateToken(payload: SessionJwtClaims, opts?: { expiresInSeconds?: number }): string {
     try {
       const token = jwt.sign(
         {
           sub: payload.sub,
           email: payload.email,
           name: payload.name,
-          picture: payload.picture,
           workspaceId: payload.workspaceId,
           memberId: payload.memberId,
-          providerUserId: payload.providerUserId,
-          provider: payload.provider,
+          sid: payload.sid,
+          role: payload.role,
+          orgRole: payload.orgRole,
+          orgId: payload.orgId,
+          platform: payload.platform,
         },
         this.secret,
         {
-          expiresIn: config.jwt.expirationSeconds,
+          expiresIn: opts?.expiresInSeconds ?? config.jwt.expirationSeconds,
           issuer: this.issuer,
           audience: this.audience,
         }
       );
 
-      logger.info(`JWT token generated for user: ${payload.email}`);
+      // Debug: inline refresh mints on ordinary API calls; info would flood the log.
+      logger.debug('JWT token generated', { userId: payload.sub, workspaceId: payload.workspaceId, sid: payload.sid });
       return token;
     } catch (error) {
       logger.error('Error generating JWT token:', error);
@@ -111,7 +147,7 @@ export class JwtService {
       if (!decoded || !decoded.exp) {
         return true;
       }
-      
+
       const now = Math.floor(Date.now() / 1000);
       return decoded.exp < now;
     } catch (error) {

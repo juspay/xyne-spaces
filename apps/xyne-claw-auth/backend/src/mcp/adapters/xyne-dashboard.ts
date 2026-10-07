@@ -39,7 +39,6 @@ export const xyneDashboardAdapter: StdioMcpAdapter = {
       env: {
         XYNE_SPACES_URL: url,
         XYNE_SPACES_TOKEN: String(credentials["token"] ?? ""),
-        XYNE_SPACES_SESSION_ID: String(credentials["sessionId"] ?? ""),
         XYNE_SPACES_WORKSPACE_ID: String(credentials["workspaceId"] ?? ""),
         INTERNAL_S2S_KEY: process.env["INTERNAL_S2S_KEY"] ?? "",
         XYNE_USER_ID: String(credentials["userId"] ?? ""),

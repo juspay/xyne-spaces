@@ -19,7 +19,7 @@ import { errMsg } from "../lib/errors.js";
 import { prisma } from "../db.js";
 import { fetchAccessibleKb, indexKbTree, type KbCollectionNode } from "../lib/spaces-kb.js";
 import { spacesFetchBuffer, search as spacesVespaSearch } from "./servers/xyne-spaces-client.js";
-import { getSpacesAuthForUser } from "../lib/spaces-db.js";
+import { getSpacesAuthForUser } from "../lib/spaces-auth.js";
 import { createLogger } from "../logger.js";
 import { extractXlsxText, isXlsxFile } from "./kb-xlsx.js";
 
@@ -718,7 +718,6 @@ export async function handleKbSearch(args: {
   try {
     raw = await spacesVespaSearch(params, {
       token: auth.token,
-      sessionId: auth.sessionId,
       workspaceId: auth.workspaceId,
     });
   } catch (err) {
@@ -1031,7 +1030,7 @@ export async function handleKbReadFile(args: {
   try {
     const { buffer, contentType } = await spacesFetchBuffer(
       `/api/collections/items/${encodeURIComponent(args.fileId)}/download`,
-      { token: auth.token, sessionId: auth.sessionId, workspaceId: auth.workspaceId },
+      { token: auth.token, workspaceId: auth.workspaceId },
     );
 
     // Best-effort text extraction: if the response is plain text / markdown /
@@ -1206,7 +1205,6 @@ export async function handleKbGetChunks(args: {
   try {
     raw = await spacesVespaSearch(params, {
       token: auth.token,
-      sessionId: auth.sessionId,
       workspaceId: auth.workspaceId,
     });
   } catch (err) {
@@ -1342,7 +1340,6 @@ export async function handleKbSearchWithinDoc(args: {
   try {
     raw = await spacesVespaSearch(params, {
       token: auth.token,
-      sessionId: auth.sessionId,
       workspaceId: auth.workspaceId,
     });
   } catch (err) {

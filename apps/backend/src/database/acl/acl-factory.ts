@@ -2,6 +2,7 @@ import { PrismaClient, Prisma } from '@prisma/client'
 import { BaseQueryACL, ACLContext } from './base-acl'
 import {
   ActivitiesACL,
+  AuthSessionsACL,
   AppsACL,
   AppCommandACL,
   AppPermissionACL,
@@ -515,6 +516,8 @@ export class ACLFactory {
       return new BaseQueryACL(ctx, prisma)
     case 'userSession':
       return new BaseQueryACL(ctx, prisma)
+    case 'authSession':
+      return new AuthSessionsACL(ctx, prisma)
     case 'userSkill':
       return new BaseQueryACL(ctx, prisma)
     case 'vespaInsertionLogs':

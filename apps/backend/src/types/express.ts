@@ -1,4 +1,5 @@
 import { Request, Response } from 'express';
+import type { AuthSessionInfo } from '@/auth/types';
 
 export interface ApiResponse<T = any> {
   success: boolean;
@@ -60,7 +61,14 @@ declare global {
   namespace Express {
     interface Request {
       user?: AuthenticatedUser;
+      /** `auth_sessions.id` of the resolved session (same as `authSession.sessionId`); undefined for API-key / dev users. */
       authenticatedSessionId?: string;
+      /** Present when the request resolved through an auth session (cookie, or a JWT carrying `sid`). */
+      authSession?: AuthSessionInfo;
+      /** The workspace access JWT this request is trusted under (verified cookie / Bearer, or minted inline). */
+      accessToken?: string;
+      /** Set by callers whose response cannot carry Set-Cookie (socket handshake): the resolver never mints inline. */
+      inlineRefresh?: boolean;
     }
   }
 }

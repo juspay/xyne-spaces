@@ -4,11 +4,13 @@
  * Implements the OAuth 2.0 Device Authorization Grant (RFC 8628) pattern:
  * 1. SDK calls init → gets device_code + user_code
  * 2. User visits the verification URL, logs in, approves
- * 3. SDK polls with device_code → gets the user's session cookie when approved
+ * 3. SDK polls with device_code → gets a workspace JWT when approved
  *
- * The session handed out is the same `xyne_ws_<workspaceId>_token` JWT the
- * dashboard runs on, so `/api/sdk` authenticates it with the ordinary
- * `authMiddleware` — there is no SDK-specific credential.
+ * The token handed out is a workspace JWT bound (`sid`) to an SDK
+ * `auth_sessions` row issued at approval, presented to `/api/sdk` as a Bearer
+ * or under the `xw_<workspaceId>` access cookie name (older SDK builds still
+ * use `xyne_ws_<workspaceId>_token`, which stays readable) — there is no
+ * SDK-specific credential format.
  *
  * The weakness of this flow is phishing (RFC 8628 §5.4): anyone can start a
  * request and send the approval link to someone else. The defence is the user
@@ -75,13 +77,13 @@ const TAKE_LUA = `
 /** Status of a device authorization request */
 export type DeviceAuthStatus = 'pending' | 'approved' | 'denied';
 
-/** The session issued to the SDK on approval */
+/** The credential issued to the SDK on approval */
 export interface SdkSsoSession {
   userId: string;
   workspaceId: string;
-  /** Session JWT — the value of the `xyne_ws_<workspaceId>_token` cookie */
+  /** Workspace JWT (`sid`-bound) — presented under the `xw_<workspaceId>` access cookie name */
   token: string;
-  /** When the token expires, in epoch milliseconds */
+  /** When the token (and its SDK session) expires, in epoch milliseconds */
   expiresAt: number;
 }
 

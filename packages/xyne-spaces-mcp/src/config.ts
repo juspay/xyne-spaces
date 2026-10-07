@@ -1,8 +1,9 @@
 /**
  * Where the server gets its session, and how it builds an SDK client.
  *
- * The credential is a Spaces session — the `xyne_ws_<workspaceId>_token` cookie
- * Xyne SSO issues — sent as a `Cookie` header by `@xyne/spaces-sdk`. Resolution
+ * The credential is a Spaces session — the `xw_<workspaceId>` cookie Xyne SSO
+ * issues (or its legacy `xyne_ws_<workspaceId>_token` name) — sent as a
+ * `Cookie` header by `@xyne/spaces-sdk`. Resolution
  * is env → `~/.xyne/agent/spaces.json` → none, sharing the agent directory the
  * Xyne CLI and xyne-claw-mcp already use. `spaces_login` and `xyne-spaces-mcp
  * login` write the file; `XYNE_SPACES_COOKIE` overrides it.
@@ -102,14 +103,18 @@ function jwtClaims(token: string): Record<string, unknown> {
 
 /**
  * `XYNE_SPACES_COOKIE` is the cookie exactly as the browser holds it:
- * `xyne_ws_<workspaceId>_token=<jwt>`. The workspace comes from the name, and
+ * `xw_<workspaceId>=<jwt>`, or the legacy `xyne_ws_<workspaceId>_token=<jwt>`
+ * name, which the backend still reads. The workspace comes from the name, and
  * the expiry and user from the token's own claims, so the one variable is a
- * whole session. Anything else — including an unexpanded `${…}` — is ignored.
+ * whole session. The cookie is forwarded under whichever name was supplied.
+ * Anything else — including an unexpanded `${…}` — is ignored.
  */
 function sessionFromCookie(raw: string | undefined): SsoSession | undefined {
-	const match = raw?.trim().match(/^(xyne_ws_(.+)_token)=(.+)$/);
+	const match = raw?.trim().match(/^(xw_([^=]+)|xyne_ws_(.+)_token)=(.+)$/);
 	if (!match) return undefined;
-	const [, name, workspaceId, value] = match as unknown as [string, string, string, string];
+	const name = match[1] as string;
+	const workspaceId = (match[2] ?? match[3]) as string;
+	const value = match[4] as string;
 	const claims = jwtClaims(value);
 	if (typeof claims["exp"] !== "number" || typeof claims["sub"] !== "string") return undefined;
 	return {

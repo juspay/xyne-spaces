@@ -124,7 +124,7 @@ export class NotificationProducer {
 
   async queueMobilePush(
     userId: string,
-    session: { id: string; token: string; voipToken?: string; platform: string; appVersion?: string },
+    session: { id: string; token: string; voipToken?: string; platform: string; appVersion?: string; source?: 'session' | 'legacy' },
     payload: MobilePushPayload
   ): Promise<void> {
     try {
@@ -132,6 +132,7 @@ export class NotificationProducer {
         channel: DeliveryChannel.MOBILE_PUSH,
         userId,
         sessionId: session.id,
+        source: session.source ?? 'legacy',
         token: session.token,
         voipToken: session.voipToken,
         platform: session.platform,

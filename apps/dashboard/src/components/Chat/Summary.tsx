@@ -8,6 +8,7 @@ import { useNavigate } from 'react-router-dom';
 import { X, Users, MessageSquare, Hash, Sparkles, Check } from 'lucide-react';
 import { Button } from '../ui/Button';
 import { BASE_URL } from '../../services/clients/apiClient';
+import { buildAuthHeaders } from '../../services/clients/authHeaders';
 import { useSummaryCache } from '../../hooks/useSummaryQuery';
 import { globalClickTracker } from '../../services/Analytics/globalClickTracker';
 import { sanitizeHtmlString } from '../../utils/sanitizer';
@@ -385,7 +386,7 @@ export const Summary = (props: SummaryProps): ReactElement => {
         // eslint-disable-next-line local-rules/no-fetch-use-axios
         const response = await fetch(url, {
           method: 'GET',
-          headers: { Accept: 'text/event-stream' },
+          headers: { Accept: 'text/event-stream', ...buildAuthHeaders() },
           credentials: 'include',
           signal: abortController.signal,
         });

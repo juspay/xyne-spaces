@@ -100,7 +100,6 @@ export async function prepareAgentResultForPosting(
      *  When absent (no user context — e.g. cron-triggered runs), we
      *  skip resolution and behave as today. */
     senderSpacesToken?: string;
-    senderSpacesSessionId?: string;
     /** Workspace scope for the user-search call. Required when senderSpacesToken
      *  is set — otherwise the search isn't workspace-scoped and could leak. */
     senderWorkspaceId?: string;
@@ -122,7 +121,6 @@ export async function prepareAgentResultForPosting(
   const lookups = meta.senderSpacesToken
     ? buildSpacesMentionLookups({
         token: meta.senderSpacesToken,
-        ...(meta.senderSpacesSessionId ? { sessionId: meta.senderSpacesSessionId } : {}),
         ...(meta.senderWorkspaceId ? { workspaceId: meta.senderWorkspaceId } : {}),
       })
     : spacesDbAvailable()

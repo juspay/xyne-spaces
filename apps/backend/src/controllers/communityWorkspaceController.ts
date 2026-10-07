@@ -1,5 +1,4 @@
 import { Request, Response } from 'express';
-import jwt from 'jsonwebtoken';
 import {
   CommunityJoinResultStatus,
   OrgRole,
@@ -8,33 +7,20 @@ import {
   WorkspaceJoinRequestStatus,
   AuthProvider,
 } from '@xyne/shared';
-import { communityWorkspaceService } from '@/services/communityWorkspaceService';
-import { UserSessionService } from '@/services/userSessionService';
+import { communityWorkspaceService, type CommunityJoinUserData } from '@/services/communityWorkspaceService';
 import { UserService } from '@/services/userService';
-import { jwtService } from '@/services/jwtService';
 import { channelService } from '@/services/channelService';
-import { config } from '@/config/env';
+import { DatabaseClient } from '@/database/client';
 import { logger } from '@/utils/logger';
-import { redisService } from '@/services/redisService';
-import { setOnboardingCookie } from '@/utils/onboardingCookie';
-
-type PendingAuth = {
-  userData: {
-    providerUserId: string;
-    email: string;
-    name: string;
-    picture?: string;
-    authProvider: string;
-  };
-  refreshToken?: string;
-  accessToken?: string;
-  accessTokenExpiry?: Date;
-  tokenKey?: string;
-};
+import { completeLogin } from '@/auth/loginCompletion';
+import { readPendingAuth } from '@/auth/pendingAuth';
+import { platformFromRequest } from '@/auth/platform';
+import { resolveSessionFromRequest } from '@/auth/sessionResolver';
+import { findOrgMember } from '@/bypassAcl/authSessionServices';
 
 export class CommunityWorkspaceController {
-  private userSessionService = new UserSessionService();
   private userService = new UserService();
+  private prisma = DatabaseClient.getInstance();
 
   listCommunityWorkspaces = async (_req: Request, res: Response): Promise<void> => {
     try {
@@ -61,8 +47,8 @@ export class CommunityWorkspaceController {
         return;
       }
 
-      const pendingAuth = await this.resolvePendingAuth(req);
-      if (!pendingAuth) {
+      const userData = await this.resolveJoinIdentity(req);
+      if (!userData) {
         res.status(401).json({
           error: 'Unauthorized',
           message: 'Login is required before joining a community workspace',
@@ -74,7 +60,7 @@ export class CommunityWorkspaceController {
         workspaceId,
         channelId,
         workspaceType,
-        userData: pendingAuth.userData,
+        userData,
       });
 
       if (joinResult.status !== CommunityJoinResultStatus.JOINED) {
@@ -98,52 +84,26 @@ export class CommunityWorkspaceController {
         joinResult.workspaceUser.workspaceId
       );
 
-      const sessionId = await this.createSessionIfPossible(
+      const orgMember = await findOrgMember(joinResult.workspaceUser.orgMemberId);
+      if (!orgMember || orgMember.leftAt) {
+        res.status(500).json({ error: 'Failed to join community workspace' });
+        return;
+      }
+
+      // Reuses the caller's device session when one is present (already signed in elsewhere),
+      // otherwise issues one; writes the workspace hint and clears the pending identity cookie.
+      const platform = platformFromRequest(req);
+      const login = await completeLogin({
         req,
-        joinResult.workspaceUser.id,
-        pendingAuth
-      );
-      const token = jwtService.generateToken({
-        sub: joinResult.workspaceUser.id,
-        email: joinResult.workspaceUser.email,
-        name: joinResult.workspaceUser.name,
-        picture: joinResult.workspaceUser.picture || undefined,
-        workspaceId: joinResult.workspaceUser.workspaceId ?? undefined,
-        memberId: joinResult.workspaceUser.orgMemberId,
+        res,
+        workspaceUser: joinResult.workspaceUser,
+        orgMember: { memberId: orgMember.memberId, orgId: orgMember.orgId, role: orgMember.role },
+        platform,
+        loginMethod: 'WORKSPACE_JOINED',
+        sameSite: platform === 'mobile' ? 'none' : 'strict',
+        isNewUser: Boolean(joinResult.isNewUser),
+        clearPending: true,
       });
-
-      const isProduction = process.env.NODE_ENV === 'production';
-      const cookieOptions = {
-        httpOnly: true,
-        secure: isProduction,
-        sameSite: 'strict' as const,
-        path: '/',
-      };
-
-      res.cookie(`xyne_ws_${workspaceId}_token`, token, {
-        ...cookieOptions,
-        maxAge: config.jwt.expirationSeconds * 1000,
-      });
-      res.cookie('xyne_last_workspace', workspaceId, {
-        ...cookieOptions,
-        maxAge: config.session.expiryDays * 24 * 60 * 60 * 1000,
-      });
-      if (sessionId) {
-        res.cookie('user_session_id', sessionId, {
-          ...cookieOptions,
-          maxAge: config.session.expiryDays * 24 * 60 * 60 * 1000,
-        });
-      }
-      setOnboardingCookie(res, Boolean(joinResult.isNewUser), {
-        secure: isProduction,
-        sameSite: 'strict' as const,
-      });
-      if (pendingAuth.tokenKey) {
-        await redisService.del(
-          `${config.pendingOAuthTokens.redisKeyPrefix}${pendingAuth.tokenKey}`,
-        );
-      }
-      res.clearCookie('google_access_token', { path: '/' });
 
       res.status(200).json({
         success: true,
@@ -152,6 +112,7 @@ export class CommunityWorkspaceController {
         landingChannelId: joinResult.landingChannelId,
         selfDmChannelId,
         isNewUser: joinResult.isNewUser,
+        ...(platform !== 'web' ? { sessionId: login.sessionToken, token: login.token } : {}),
         user: {
           id: joinResult.workspaceUser.id,
           googleId: joinResult.workspaceUser.providerUserId,
@@ -265,131 +226,41 @@ export class CommunityWorkspaceController {
     }
   };
 
-  private async resolvePendingAuth(req: Request): Promise<PendingAuth | null> {
-    const pendingAuthCookie = req.cookies?.google_access_token;
-    if (pendingAuthCookie) {
-      return this.parsePendingAuthCookie(pendingAuthCookie);
+  /**
+   * Who is joining: the pending (pre-workspace) identity cookie from a fresh login, else the
+   * caller's live device session — any ACTIVE membership of that account carries the identity
+   * (email / provider subject are the same in every workspace of the account).
+   */
+  private async resolveJoinIdentity(req: Request): Promise<CommunityJoinUserData | null> {
+    const pending = readPendingAuth(req);
+    if (pending) {
+      if (!pending.providerUserId) return null;
+      return {
+        providerUserId: pending.providerUserId,
+        email: pending.email,
+        name: pending.name,
+        picture: pending.picture,
+        authProvider: pending.provider || AuthProvider.GOOGLE,
+      };
     }
 
-    const sessionId = req.cookies?.user_session_id;
-    if (!sessionId) return null;
+    const resolved = await resolveSessionFromRequest(req);
+    if (!resolved.ok) return null;
 
-    const session = await this.userSessionService.getSessionById(sessionId);
-    if (
-      !session ||
-      !session.user ||
-      session.status !== 'ACTIVE' ||
-      new Date() > session.refreshTokenExpiry
-    ) {
-      return null;
-    }
+    const membership = await this.prisma.user.findFirst({
+      where: { orgMemberId: resolved.session.session.accountId, status: 'ACTIVE', leftAt: null },
+      orderBy: { createdAt: 'desc' },
+      select: { providerUserId: true, email: true, name: true, picture: true, authProvider: true },
+    });
+    if (!membership) return null;
 
     return {
-      userData: {
-        providerUserId: session.user.providerUserId,
-        email: session.user.email,
-        name: session.user.name || '',
-        picture: session.user.picture || undefined,
-        authProvider: session.user.authProvider || AuthProvider.GOOGLE,
-      },
-      refreshToken: session.refreshToken,
-      accessToken: session.accessToken || undefined,
-      accessTokenExpiry: session.accessTokenExpiry || undefined,
+      providerUserId: membership.providerUserId,
+      email: membership.email,
+      name: membership.name || '',
+      picture: membership.picture || undefined,
+      authProvider: membership.authProvider || AuthProvider.GOOGLE,
     };
-  }
-
-  private async parsePendingAuthCookie(cookie: string): Promise<PendingAuth | null> {
-    try {
-      const decoded = jwt.verify(cookie, process.env.JWT_SECRET!) as {
-        googleId?: string;
-        providerUserId?: string;
-        email?: string;
-        name?: string;
-        picture?: string;
-        provider?: string;
-        refreshToken?: string | null;
-        accessToken?: string | null;
-        accessTokenExpiry?: string | null;
-        tokenKey?: string;
-      };
-      const providerUserId = decoded.providerUserId || decoded.googleId;
-      if (!decoded.email || !providerUserId) return null;
-
-      let redisTokens: {
-        refreshToken?: string | null;
-        accessToken?: string | null;
-        accessTokenExpiry?: string | null;
-      } | null = null;
-
-      if (decoded.tokenKey) {
-        const storedTokens = await redisService.get(
-          `${config.pendingOAuthTokens.redisKeyPrefix}${decoded.tokenKey}`,
-        );
-        if (!storedTokens) return null;
-        redisTokens = JSON.parse(storedTokens);
-      }
-
-      const refreshToken = redisTokens?.refreshToken ?? decoded.refreshToken;
-      const accessToken = redisTokens?.accessToken ?? decoded.accessToken;
-      const accessTokenExpiryValue =
-        redisTokens?.accessTokenExpiry ?? decoded.accessTokenExpiry;
-      const accessTokenExpiry = accessTokenExpiryValue
-        ? new Date(accessTokenExpiryValue)
-        : undefined;
-      return {
-        userData: {
-          providerUserId,
-          email: decoded.email,
-          name: decoded.name || '',
-          picture: decoded.picture,
-          authProvider: decoded.provider || AuthProvider.GOOGLE,
-        },
-        refreshToken: refreshToken || undefined,
-        accessToken: accessToken || undefined,
-        accessTokenExpiry:
-          accessTokenExpiry && !Number.isNaN(accessTokenExpiry.getTime())
-            ? accessTokenExpiry
-            : undefined,
-        tokenKey: decoded.tokenKey,
-      };
-    } catch (_error) {
-      return null;
-    }
-  }
-
-  private async createSessionIfPossible(
-    req: Request,
-    userId: string,
-    pendingAuth: PendingAuth
-  ): Promise<string | null> {
-    if (!pendingAuth.refreshToken) return null;
-
-    try {
-      const refreshTokenExpiry = new Date();
-      refreshTokenExpiry.setDate(refreshTokenExpiry.getDate() + config.session.expiryDays);
-
-      const session = await this.userSessionService.createSession({
-        userId,
-        refreshToken: pendingAuth.refreshToken,
-        refreshTokenExpiry,
-        accessToken: pendingAuth.accessToken,
-        accessTokenExpiry: pendingAuth.accessTokenExpiry,
-        deviceInfo: JSON.stringify({
-          userAgent: req.headers['user-agent'],
-          acceptLanguage: req.headers['accept-language'],
-          timestamp: new Date().toISOString(),
-          appVersion: req.headers['x-app-version'],
-        }),
-        ipAddress: req.ip || req.connection.remoteAddress || undefined,
-        // Already signed in — a session for the community workspace they just joined.
-        loginMethod: 'WORKSPACE_JOINED',
-      });
-
-      return session.id;
-    } catch (error) {
-      logger.error('[CommunityWorkspaceController] Session creation failed:', error);
-      return null;
-    }
   }
 }
 

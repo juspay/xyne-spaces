@@ -24,7 +24,7 @@ function authHeaders(userToken: string, sessionId?: string, workspaceId?: string
   if (sessionId) headers["x-session-id"] = sessionId;
   if (workspaceId) headers["x-workspace-id"] = workspaceId;
   const cookieParts: string[] = [];
-  if (sessionId) cookieParts.push(`xyne_session=${sessionId}`);
+  if (sessionId) cookieParts.push(`xs=${sessionId}`);
   if (workspaceId) cookieParts.push(`xyne_last_workspace=${workspaceId}`);
   if (cookieParts.length > 0) headers["Cookie"] = cookieParts.join("; ");
   return headers;

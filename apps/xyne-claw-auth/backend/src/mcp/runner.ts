@@ -9,7 +9,8 @@ import type { McpAdapter, McpCallResult, McpServerTools, McpToolInfo } from "./t
 import { extForMime, fileNameFromResource } from "./attachment-filename.js";
 import { STATIC_ADAPTERS } from "./static-adapters.js";
 import { resolveConnectorDefinition } from "./connector-definitions.js";
-import { getSpacesAuthForUser, getWorkspaceIdForUser } from "../lib/spaces-db.js";
+import { getWorkspaceIdForUser } from "../lib/spaces-db.js";
+import { mintSpacesToken } from "../lib/spaces-auth.js";
 import { SPACES_SESSION_CREDENTIAL_SERVER_TYPES } from "../lib/spaces-session-server-types.js";
 import { provisionStdioCommand } from "./provision.js";
 import { prisma } from "../db.js";
@@ -55,7 +56,7 @@ const tolerantSchemaValidator: Pick<AjvJsonSchemaValidator, "getValidator"> = {
 
 /**
  * Resolve the app token for an agent's app user. App users have no Spaces login
- * session (so getSpacesAuthForUser returns null for them), but the agent row
+ * session (so mintSpacesToken returns null for them), but the agent row
  * carries a `spacesAppToken` (GCM-encrypted "ciphertext:iv:authTag"). When the
  * spaces MCP runs for such a userId we hand it this token + APP MODE so its
  * tools hit the /api/apps/* routes instead of /api/query.
@@ -253,12 +254,19 @@ async function getOrCreateSession(
         ...(appToken ? { token: appToken } : {}),
       };
     } else {
-      const live = await getSpacesAuthForUser(userId, "mcp-runner");
+      // Mint a fresh user token for the child's env. Stored userMcpConnection
+      // rows (old shape `{url, token, sessionId, workspaceId}` or new shape
+      // `{url, authMode:'session', userId, workspaceId}`) only contribute the
+      // identity; their token/sessionId are never forwarded. The user's own
+      // workspace (public.users.workspaceId) is authoritative, so no stored
+      // hint is passed.
+      const live = await mintSpacesToken({ userId }, "mcp-runner");
       if (live) {
+        const rest: Record<string, unknown> = { ...credentials };
+        delete rest["sessionId"];
         credentials = {
-          ...credentials,
+          ...rest,
           token: live.token,
-          sessionId: live.sessionId,
           workspaceId: live.workspaceId,
           userId,
         };

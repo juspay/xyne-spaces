@@ -2,7 +2,6 @@ import './profiling.js';
 import { App } from './app.js';
 import { describeRejection, logger } from '@/utils/logger';
 import { configureJAF } from '@juspay-jaf/jaf';
-import { warnIfNoGoogleClientsConfigured } from '@/services/googleOAuthClients';
 
 configureJAF({ verbose: false });
 
@@ -37,7 +36,6 @@ let app: App;
 
 async function startServer() {
   try {
-    warnIfNoGoogleClientsConfigured();
     app = new App();
     await app.listen();
   } catch (error) {

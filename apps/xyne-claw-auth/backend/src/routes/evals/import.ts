@@ -5,7 +5,7 @@
 import { Router, type Request, type Response } from "express";
 import { evalRepository } from "../../repositories/index.js";
 import { getRequesterId } from "../../middleware/agent-acl.js";
-import { getSpacesAuthForUser } from "../../lib/spaces-db.js";
+import { getSpacesAuthForUser } from "../../lib/spaces-auth.js";
 import { listSpacesChannels, type ImportKind } from "../../services/spacesEvalImport.js";
 import {
   enqueueEvalImport,
@@ -35,7 +35,6 @@ router.get("/spaces-channels", async (req: Request, res: Response) => {
     }
     const channels = await listSpacesChannels({
       token: spacesAuth.token,
-      sessionId: spacesAuth.sessionId,
       workspaceId: spacesAuth.workspaceId,
     });
     res.json({ success: true, channels, spacesAuth: true });
@@ -153,7 +152,6 @@ router.post("/import-from-channel", async (req: Request, res: Response) => {
     // Resolve the channel's display name for the folder label (best-effort).
     const channels = await listSpacesChannels({
       token: spacesAuth.token,
-      sessionId: spacesAuth.sessionId,
       workspaceId: spacesAuth.workspaceId,
     });
     const name = channels.find((c) => c.id === channelId)?.name?.trim() || channelId;

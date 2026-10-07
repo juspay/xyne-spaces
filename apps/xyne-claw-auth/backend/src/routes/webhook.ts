@@ -101,7 +101,8 @@ import {
   type ChainWorkflowNode,
 } from "../lib/chain-workflow.js";
 import { persistBase64ChatAttachments } from "../services/chatAttachmentService.js";
-import { getSpacesAuthForUser, getSpacesUserWorkspaceId, getWorkspaceIdForUser } from "../lib/spaces-db.js";
+import { getSpacesUserWorkspaceId, getWorkspaceIdForUser } from "../lib/spaces-db.js";
+import { mintSpacesToken } from "../lib/spaces-auth.js";
 import { ensureUserExists, orgIdForSpacesUser } from "../lib/users-jit.js";
 import { finalizeOrphanedRun } from "../services/orphan-run-finalizer.js";
 import { requireStrictS2S, s2sKeyMatches, requireResultToken } from "../middleware/require-auth.js";
@@ -1144,9 +1145,7 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
 
     const userSpacesAuth = await resolveUserSpacesAuth(payload.userId, "webhook");
     const userSpacesToken = userSpacesAuth?.token;
-    const userSpacesSessionId = userSpacesAuth?.sessionId;
     const userSpacesWorkspaceId = userSpacesAuth?.workspaceId;
-    const userCookieHeader = userSpacesAuth?.cookieHeader;
     // Twin runs carry the mentioned user's resolved workspace; it wins over the sender's.
     const effectiveWorkspaceId = twinWorkspaceId || userSpacesWorkspaceId;
 
@@ -1233,7 +1232,7 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
           continue;
         }
         log.info(
-          `Attachment ${att.attachmentId}: fileUrl=${att.fileUrl ? `"${att.fileUrl.slice(0, 120)}"` : "(empty)"} hasUserToken=${!!userSpacesToken} hasSessionId=${!!userSpacesSessionId}`,
+          `Attachment ${att.attachmentId}: fileUrl=${att.fileUrl ? `"${att.fileUrl.slice(0, 120)}"` : "(empty)"} hasUserToken=${!!userSpacesToken}`,
         );
 
         const safeAttachmentId = safePathSegment(att.attachmentId);
@@ -1241,15 +1240,11 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
         if (att.fileUrl && /^https?:\/\//i.test(att.fileUrl)) {
           sources.push({ label: "fileUrl", url: att.fileUrl, external: true });
         }
-        if (userSpacesToken && safeAttachmentId) {
+        if (userSpacesAuth && safeAttachmentId) {
           sources.push({
             label: "user-token",
             url: `${CONFIG.spacesInternalUrl}/api/attachments/${safeAttachmentId}/download`,
-            headers: {
-              Authorization: `Bearer ${userSpacesToken}`,
-              ...(userSpacesWorkspaceId ? { "x-workspace-id": userSpacesWorkspaceId } : {}),
-              ...(userCookieHeader ? { Cookie: userCookieHeader } : {}),
-            },
+            headers: userSpacesAuth.headers,
           });
         }
         if (safeAttachmentId) {
@@ -4605,7 +4600,7 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
     // fall back to the agent's bot token. Fail-open — return the text unchanged
     // on any error so the reply still posts.
     const pendingSenderAuth = payload.pendingResponses?.length
-      ? await getSpacesAuthForUser(ctx.senderId, "webhook").catch(() => null)
+      ? await mintSpacesToken({ userId: ctx.senderId }, "webhook").catch(() => null)
       : null;
     const resolvePendingMentions = async (text: string): Promise<string> => {
       const lookupToken = pendingSenderAuth?.token ?? ctx.appToken;
@@ -4618,7 +4613,6 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
           text,
           buildSpacesMentionLookups({
             token: lookupToken,
-            ...(pendingSenderAuth?.sessionId ? { sessionId: pendingSenderAuth.sessionId } : {}),
             ...(wsId ? { workspaceId: wsId } : {}),
           }),
         );
@@ -5059,7 +5053,7 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
       // can do name → userId lookups for plain `@Name` mentions the LLM emitted
       // without brackets. Falls back to null on lookup failure — the prepare
       // function gracefully skips resolution when senderSpacesToken is absent.
-      const senderAuth = await getSpacesAuthForUser(ctx.senderId, "webhook").catch(() => null);
+      const senderAuth = await mintSpacesToken({ userId: ctx.senderId }, "webhook").catch(() => null);
 
       // Apply the 10K-char + attachment-count guards. When the result is
       // too long, this swaps the body for a stub + a PDF attachment, which
@@ -5077,7 +5071,6 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
         {
           ...(ctx.agentSlug ? { agentSlug: ctx.agentSlug } : {}),
           ...(senderAuth?.token ? { senderSpacesToken: senderAuth.token } : {}),
-          ...(senderAuth?.sessionId ? { senderSpacesSessionId: senderAuth.sessionId } : {}),
           ...(senderAuth?.workspaceId ? { senderWorkspaceId: senderAuth.workspaceId } : {}),
           ...(agentWsId ? { agentWorkspaceId: agentWsId } : {}),
         },

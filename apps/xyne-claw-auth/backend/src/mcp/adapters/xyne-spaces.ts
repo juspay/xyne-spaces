@@ -20,12 +20,16 @@ export const xyneSpacesAdapter: StdioMcpAdapter = {
   writeTools: ["spaces-create-ticket", "spaces-create-bulk-tickets", "spaces-update-ticket", "spaces-update-bulk-tickets", "spaces-schedule-call", "spaces-start-call", "spaces-create-canvas", "spaces-edit-canvas", "user-send-message", "spaces-upload-to-kb", "spaces-automation-submit", "spaces-automation-webhook-issue"],
   credentialFields: [
     { name: "url", label: "Xyne Spaces URL", type: "text", placeholder: "https://app.spaces.xyne.juspay.net" },
-    { name: "token", label: "Google Auth Token", type: "password", placeholder: "Paste your google_access_token" },
+    // Optional: the runner mints a per-user Spaces token from the live session
+    // at spawn time (lib/spaces-auth.ts); a pasted JWT is only a manual override.
+    { name: "token", label: "Spaces user token (optional)", type: "password", placeholder: "Leave blank — minted from your Spaces session", optional: true },
   ],
   buildCommand(credentials) {
     const url = (credentials["url"] as string).replace(/\/+$/, "");
-    const token = credentials["token"] as string;
-    const sessionId = (credentials["sessionId"] as string | undefined) ?? "";
+    // `token` is the short-lived Spaces JWT the runner minted for this user
+    // (lib/spaces-auth.ts) or the agent's app token in app mode. There is no
+    // session id any more — Spaces accepts the Bearer + x-workspace-id alone.
+    const token = (credentials["token"] as string | undefined) ?? "";
     const workspaceId = (credentials["workspaceId"] as string | undefined) ?? "";
     const userId = (credentials["userId"] as string | undefined) ?? "";
     // "app" when the run is an agent's app user (no login session): `token` is
@@ -39,7 +43,6 @@ export const xyneSpacesAdapter: StdioMcpAdapter = {
       env: {
         XYNE_SPACES_URL: url,
         XYNE_SPACES_TOKEN: token,
-        XYNE_SPACES_SESSION_ID: sessionId,
         XYNE_SPACES_WORKSPACE_ID: workspaceId,
         XYNE_SPACES_AUTH_MODE: authMode,
         INTERNAL_S2S_KEY: process.env["INTERNAL_S2S_KEY"] ?? "",

@@ -1,11 +1,12 @@
 /**
  * SDK SSO Routes - Device flow endpoints for SDK authentication.
  *
- * On approval the SDK receives the user's session — the value of the
- * `xyne_ws_<workspaceId>_token` cookie the dashboard sets on login — which
- * `/api/sdk` then authenticates with the ordinary `authMiddleware`. The
- * session is returned in the poll body only; no cookie is set, so a poll made
- * from the Spaces origin never disturbs the dashboard's own cookies.
+ * On approval an SDK `auth_sessions` row is issued for the approving user's
+ * account (no cookies are written) and a workspace JWT bound to it (`sid`) is
+ * handed to the SDK under the access cookie name `xw_<workspaceId>`, which
+ * `/api/sdk` accepts (Bearer, that cookie, or the legacy `xyne_ws_<ws>_token`
+ * name for older SDK builds). The token is returned in the poll body only, so a
+ * poll made from the Spaces origin never disturbs the dashboard's own cookies.
  *
  * Endpoints:
  * - POST /api/sdk/auth/sso/init     - Initiate device flow (no auth required)
@@ -19,12 +20,14 @@ import { Router, type Request, type Response } from 'express';
 import { z } from 'zod';
 import { UserStatus } from '@xyne/shared';
 import { sdkSsoService } from '@/services/sdkSsoService';
-import { jwtService } from '@/services/jwtService';
 import { authV2Middleware } from '@/middleware/authV2Middleware';
 import { sdkSsoInitLimiter, sdkSsoPollLimiter } from '@/middleware/rateLimiters';
 import { config } from '@/config/env';
 import { logger } from '@/utils/logger';
 import { db } from '@/database/client';
+import { issueSession, mintWorkspaceJwt } from '@/auth/sessionIssuer';
+import { accessCookieName } from '@/auth/constants';
+import { recordTokenMinted } from '@/services/otel/authMetrics';
 
 const router = Router();
 
@@ -41,8 +44,8 @@ const approveRequestSchema = z.object({
   approved: z.boolean(),
 });
 
-/** Name of the per-workspace session cookie `authMiddleware` reads. */
-const sessionCookieName = (workspaceId: string): string => `xyne_ws_${workspaceId}_token`;
+/** Per-workspace access cookie name (`xw_<workspaceId>`) the SDK presents the token under. */
+const sessionCookieName = (workspaceId: string): string => accessCookieName(workspaceId);
 
 /**
  * GET /api/sdk/auth/sso/consent
@@ -193,7 +196,7 @@ router.get('/status', authV2Middleware.authenticate, async (req: Request, res: R
         user_agent: authRequest.origin?.userAgent ?? null,
       },
       // How long an approved session lasts, so the consent page need not guess
-      session_expires_in: config.jwt.expirationSeconds,
+      session_expires_in: config.sdkSso.tokenTtlSeconds,
     });
   } catch (error) {
     if (error instanceof z.ZodError) {
@@ -247,35 +250,49 @@ router.post('/approve', authV2Middleware.authenticate, async (req: Request, res:
           id: true,
           email: true,
           name: true,
-          picture: true,
+          role: true,
           workspaceId: true,
           orgMemberId: true,
+          orgMember: { select: { orgId: true, role: true, leftAt: true } },
         },
       });
 
-      if (!targetUser?.workspaceId) {
+      if (!targetUser?.workspaceId || !targetUser.orgMember || targetUser.orgMember.leftAt) {
         return res.status(403).json({
           error: 'access_denied',
           message: 'Your account is not active in this workspace.',
         });
       }
 
-      // The same session JWT login issues, so `authMiddleware` accepts it
-      const token = jwtService.generateToken({
-        sub: targetUser.id,
-        email: targetUser.email,
-        name: targetUser.name,
-        picture: targetUser.picture || undefined,
-        workspaceId: targetUser.workspaceId,
-        memberId: targetUser.orgMemberId,
+      // A dedicated SDK session row for the account (no cookies written: the SDK has no jar)
+      // and a workspace JWT bound to it, both living SDK_SSO_TOKEN_TTL_SECONDS. Revoking the
+      // row (logout-everywhere, password reset) invalidates the token immediately.
+      const ttlSeconds = config.sdkSso.tokenTtlSeconds;
+      const absoluteExpiry = new Date(Date.now() + ttlSeconds * 1000);
+      const issued = await issueSession({
+        accountId: targetUser.orgMemberId,
+        orgId: targetUser.orgMember.orgId,
+        platform: 'SDK',
+        req,
+        absoluteExpiry,
       });
-      const exp = jwtService.decodeToken(token)?.exp;
+      const token = mintWorkspaceJwt({
+        user: targetUser,
+        memberId: targetUser.orgMemberId,
+        workspaceId: targetUser.workspaceId,
+        sid: issued.session.id,
+        orgId: targetUser.orgMember.orgId,
+        orgRole: targetUser.orgMember.role,
+        platform: 'SDK',
+        expiresInSeconds: ttlSeconds,
+      });
+      recordTokenMinted({ audience: 'sdk' });
 
       session = {
         userId: targetUser.id,
         workspaceId: targetUser.workspaceId,
         token,
-        expiresAt: exp ? exp * 1000 : Date.now() + config.jwt.expirationSeconds * 1000,
+        expiresAt: absoluteExpiry.getTime(),
       };
     }
 

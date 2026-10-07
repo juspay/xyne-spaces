@@ -51,7 +51,8 @@ import {
   s2sKeyMatches,
 } from "../middleware/require-auth.js";
 import { handleRunCompletion } from "../queue/run-recovery-worker.js";
-import { getDmChannelForUserAndApp, getSpacesAuthForUser, getWorkspaceIdForUser } from "../lib/spaces-db.js";
+import { getDmChannelForUserAndApp } from "../lib/spaces-db.js";
+import { mintSpacesToken, spacesAuthHeaders, spacesCredentialsFor } from "../lib/spaces-auth.js";
 import { isAllowedExternalCallbackUrl, isInternalCallbackOrigin, type ExternalResultCallbackConfig } from "../surfaces/external-api/delivery.js";
 import type { VerifiedCliToken } from "../lib/cli-tokens.js";
 import { agentScopeAllows, canPostToChannels, sanitizeExternalRunBody } from "../lib/service-tokens.js";
@@ -96,77 +97,24 @@ function requireRunCaller(req: Request, res: Response, next: NextFunction): void
 
 
 // ── Resolve Spaces auth from request (for service-to-service calls) ──
+//
+// An explicit JWT (`body.userToken` / JWT-shaped `Authorization: Bearer`, the
+// SDK/CLI path) is honoured as-is. Otherwise the run's user gets a short-lived
+// token MINTED over S2S (lib/spaces-auth.ts), scoped to `x-workspace-id` →
+// `xyne_last_workspace` → the user's own workspace. Browser cookies no longer
+// carry a `xyne_ws_*` JWT and there is no session id to forward: the identity
+// came from requireAuth (/api/auth/me) or the trusted S2S body.
 
 async function resolveSpacesAuthFromRequest(
   req: Request,
   userId?: string,
 ): Promise<SpacesAuthContext | undefined> {
   try {
-    // Parse cookies — may be absent, header/Authorization fallbacks still apply.
-    const cookieMap = new Map<string, string>();
-    const cookies = req.headers.cookie;
-    if (cookies) {
-      for (const cookie of cookies.split(";")) {
-        const [name, ...rest] = cookie.trim().split("=");
-        if (name && rest.length > 0) {
-          cookieMap.set(name, rest.join("="));
-        }
-      }
-    }
-
-    // Workspace id: x-workspace-id header → xyne_last_workspace cookie
-    const workspaceHeader = req.headers["x-workspace-id"];
-    const workspaceId =
-      typeof workspaceHeader === "string" && workspaceHeader.trim()
-        ? workspaceHeader.trim()
-        : cookieMap.get("xyne_last_workspace");
-
-    // Token: workspace-scoped JWT → legacy google_access_token JWT → Authorization Bearer
-    let token: string | undefined;
-    if (workspaceId) {
-      const wsToken = cookieMap.get(`xyne_ws_${workspaceId}_token`);
-      if (wsToken && wsToken.split(".").length === 3) {
-        token = wsToken;
-      }
-    }
-    if (!token) {
-      const legacy = cookieMap.get("google_access_token");
-      if (legacy && legacy.split(".").length === 3) {
-        token = legacy;
-      }
-    }
-    if (!token) {
-      const authHeader = req.headers.authorization;
-      if (typeof authHeader === "string" && authHeader.startsWith("Bearer ")) {
-        token = authHeader.slice(7);
-      }
-    }
-
-    // Session id: x-session-id header → xyne_session cookie → user_session_id cookie.
-    // Spaces' authV2 sets `user_session_id`, not `xyne_session` — checking both
-    // keeps legacy callers working while fixing the dominant miss.
-    const sessionHeader = req.headers["x-session-id"];
-    const sessionId =
-      typeof sessionHeader === "string" && sessionHeader.trim()
-        ? sessionHeader.trim()
-        : (cookieMap.get("xyne_session") ?? cookieMap.get("user_session_id"));
-
-    if (!token && !sessionId) return undefined;
-
-    const effectiveWorkspaceId =
-      workspaceId ??
-      (userId ? await getWorkspaceIdForUser(userId, "require-auth").catch(() => null) : null) ??
-      undefined;
-    if (!workspaceId && effectiveWorkspaceId) {
-      log.info(
-        `[run] resolved Spaces workspaceId=${effectiveWorkspaceId} from user row for userId=${userId ?? "unknown"}`,
-      );
-    }
-
+    const auth = await spacesCredentialsFor(req, "require-auth", { userId });
+    if (!auth) return undefined;
     return {
-      ...(token ? { token } : {}),
-      ...(sessionId ? { sessionId } : {}),
-      ...(effectiveWorkspaceId ? { workspaceId: effectiveWorkspaceId } : {}),
+      token: auth.token,
+      ...(auth.workspaceId ? { workspaceId: auth.workspaceId } : {}),
     };
   } catch (err) {
     log.warn("[run] Failed to resolve Spaces auth from request:", err);
@@ -430,23 +378,12 @@ router.get(
     }
 
     const sources: Array<{ label: string; url: string; headers: Record<string, string> }> = [];
-    const live = await getSpacesAuthForUser(token.uid, "webhook").catch(() => null);
+    const live = await mintSpacesToken({ userId: token.uid }, "webhook").catch(() => null);
     if (live) {
-      const cookie = [
-        `google_access_token=${live.token}`,
-        `user_session_id=${live.sessionId}`,
-        `xyne_session=${live.sessionId}`,
-        `xyne_last_workspace=${live.workspaceId}`,
-      ].join("; ");
       sources.push({
         label: "user-token",
         url: `${CONFIG.spacesInternalUrl}/api/attachments/${encodeURIComponent(attachmentId)}/download`,
-        headers: {
-          Authorization: `Bearer ${live.token}`,
-          "x-session-id": live.sessionId,
-          "x-workspace-id": live.workspaceId,
-          Cookie: cookie,
-        },
+        headers: spacesAuthHeaders(live),
       });
     }
     if (token.appid) {

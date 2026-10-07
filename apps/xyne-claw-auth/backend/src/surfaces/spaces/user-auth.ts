@@ -1,43 +1,36 @@
-import { getSpacesAuthForUser, getWorkspaceIdForUser, type SpacesAuthCaller } from "../../lib/spaces-db.js";
+import { mintSpacesToken, spacesAuthHeaders, type SpacesAuthCaller } from "../../lib/spaces-auth.js";
 import { createLogger } from "../../logger.js";
 
 const log = createLogger("spaces-user-auth");
 
 export interface UserSpacesAuth {
+  /** Short-lived Spaces workspace JWT for the user. */
   token: string;
-  sessionId?: string;
-  workspaceId?: string;
-  cookieHeader: string;
+  workspaceId: string;
+  /** `Authorization: Bearer` + `x-workspace-id` — everything a Spaces user
+   *  route needs. Spread into the outbound request's headers. */
+  headers: Record<string, string>;
 }
 
-// Spaces auth middleware (backend/src/middleware/auth.ts) needs the JWT
-// AND a session cookie to silently refresh expired JWTs. Pure Bearer-only
-// 401s the moment the JWT TTL elapses. We cover all three cookie name
-// aliases (legacy + workspace + V2) so any of Spaces' middleware variants
-// can find what it needs.
+/**
+ * The credential to call Spaces user routes as `userId`, minted over S2S
+ * (lib/spaces-auth.ts). There is no cookie to forge any more: Spaces sessions
+ * are opaque + hashed, and the minted JWT is accepted as a plain Bearer with
+ * `x-workspace-id`. `null` = the user has no live Spaces session anywhere.
+ */
 export async function resolveUserSpacesAuth(
   userId: string,
   caller: SpacesAuthCaller = "unknown",
 ): Promise<UserSpacesAuth | null> {
-  const live = await getSpacesAuthForUser(userId, caller).catch(() => null);
+  const live = await mintSpacesToken({ userId }, caller).catch(() => null);
   if (!live) {
     log.info(`No live Spaces session for user ${userId} (caller=${caller})`);
     return null;
   }
-  let workspaceId: string | undefined = live.workspaceId;
-  if (!workspaceId) {
-    workspaceId = (await getWorkspaceIdForUser(userId, caller).catch(() => null)) ?? undefined;
-  }
-  const parts = [`google_access_token=${live.token}`];
-  if (live.sessionId) {
-    parts.push(`user_session_id=${live.sessionId}`, `xyne_session=${live.sessionId}`);
-  }
-  if (workspaceId) parts.push(`xyne_last_workspace=${workspaceId}`);
-  log.info(`Resolved Spaces creds from live DB for user ${userId} workspaceId=${workspaceId ?? "(none)"}`);
+  log.info(`Minted Spaces credential for user ${userId} workspaceId=${live.workspaceId} (caller=${caller})`);
   return {
     token: live.token,
-    ...(live.sessionId ? { sessionId: live.sessionId } : {}),
-    ...(workspaceId ? { workspaceId } : {}),
-    cookieHeader: parts.join("; "),
+    workspaceId: live.workspaceId,
+    headers: spacesAuthHeaders(live),
   };
 }

@@ -51,7 +51,7 @@ import {
   type ContextSearchType,
 } from "../services/agentChatContextService.js";
 import { appendCitations, collectCitationIconUrls } from "../lib/citations.js";
-import { getSpacesAuthForUser, getWorkspaceIdForUser } from "../lib/spaces-db.js";
+import { spacesCredentialsFor } from "../lib/spaces-auth.js";
 import { consumeClawStream } from "../lib/consume-claw-stream.js";
 import { cancelRunSession } from "../lib/experiment.js";
 import { redisService } from "../redis.js";
@@ -626,109 +626,22 @@ async function resolveCallbackOrgId(req: Request, sessionId?: string, userId?: s
   return undefined;
 }
 
-function getCookieValue(req: Request, name: string): string | undefined {
-  const cookie = req.headers["cookie"] ?? "";
-  const match = cookie.match(new RegExp(`(?:^|;\\s*)${name}=([^;]*)`));
-  return match?.[1] ? decodeURIComponent(match[1]) : undefined;
-}
-
-function extractSpacesUserToken(req: Request): string | undefined {
-  const bodyToken = (req.body as { userToken?: string } | undefined)?.userToken;
-  if (bodyToken) return bodyToken;
-
-  const authHeader = req.headers["authorization"];
-  if (authHeader?.startsWith("Bearer ")) return authHeader.slice(7);
-
-  const lastWorkspace = getCookieValue(req, "xyne_last_workspace");
-  if (lastWorkspace) {
-    const workspaceToken = getCookieValue(req, `xyne_ws_${lastWorkspace}_token`);
-    if (workspaceToken) return workspaceToken;
-  }
-
-  const legacy = getCookieValue(req, "google_access_token");
-  if (legacy && legacy.split(".").length === 3) return legacy;
-
-  return undefined;
-}
-
-function extractSpacesSessionId(req: Request): string | undefined {
-  const header = req.headers["x-session-id"];
-  if (typeof header === "string" && header.trim()) return header.trim();
-  return getCookieValue(req, "xyne_session") ?? getCookieValue(req, "user_session_id");
-}
-
-function extractSpacesWorkspaceId(req: Request): string | undefined {
-  const header = req.headers["x-workspace-id"];
-  if (typeof header === "string" && header.trim()) return header.trim();
-  return getCookieValue(req, "xyne_last_workspace");
-}
-
+/**
+ * The Spaces credential for attached-context reads on this request: an
+ * explicit JWT the caller supplied (`body.userToken` / JWT Bearer) is honoured
+ * as-is; otherwise a short-lived token is MINTED for `userId` over S2S
+ * (lib/spaces-auth.ts), scoped to `x-workspace-id` → `xyne_last_workspace`
+ * → the user's own workspace. Browser cookies carry no JWT any more, and the
+ * token cached in `userMcpConnection` is never used (it dies on expiry /
+ * logout). `undefined` = no live Spaces session for the user.
+ */
 async function resolveSpacesAuth(req: Request, userId: string): Promise<SpacesAuthContext | undefined> {
-  // Prefer the live Spaces DB read when SPACES_DB_URL is configured — the
-  // userMcpConnection cache below goes stale every time Spaces' middleware
-  // refreshes the user's JWT, and that drift is the dominant 401 root cause.
-  const live = await getSpacesAuthForUser(userId, "agent-chat");
-  if (live) {
-    return {
-      token: live.token,
-      baseUrl: CONFIG.spacesInternalUrl,
-      sessionId: live.sessionId,
-      workspaceId: live.workspaceId,
-    };
-  }
-
-  try {
-    const connection = await prisma.userMcpConnection.findFirst({
-      where: { userId, mcpServer: { type: "xyne-spaces" } },
-    });
-
-    if (connection) {
-      const decrypted = decrypt(
-        connection.encryptedCreds,
-        connection.iv,
-        connection.authTag,
-        CONFIG.encryptionKey,
-      );
-      const credentials = JSON.parse(decrypted) as Record<string, unknown>;
-      const tokenRaw = credentials["token"];
-      const urlRaw = credentials["url"];
-      const sessionIdRaw = credentials["sessionId"];
-      const workspaceIdRaw = credentials["workspaceId"];
-
-      const token = typeof tokenRaw === "string" ? tokenRaw.trim() : "";
-      if (token) {
-        const baseUrl = typeof urlRaw === "string" && urlRaw.trim() ? urlRaw.trim() : CONFIG.spacesInternalUrl;
-        const sessionId = typeof sessionIdRaw === "string" && sessionIdRaw.trim() ? sessionIdRaw.trim() : undefined;
-        const workspaceIdFromCreds = typeof workspaceIdRaw === "string" && workspaceIdRaw.trim() ? workspaceIdRaw.trim() : undefined;
-        const workspaceId = workspaceIdFromCreds ?? await getWorkspaceIdForUser(userId, "agent-chat").catch(() => null) ?? undefined;
-        if (!workspaceIdFromCreds && workspaceId) {
-          log.info(`[agent-chat] resolved workspaceId=${workspaceId} from user row for cached Spaces auth userId=${userId}`);
-        }
-        return {
-          token,
-          baseUrl,
-          ...(sessionId ? { sessionId } : {}),
-          ...(workspaceId ? { workspaceId } : {}),
-        };
-      }
-    }
-  } catch (err) {
-    log.error("[agent-chat] failed to load xyne-spaces MCP credentials:", err);
-  }
-
-  const token = extractSpacesUserToken(req);
-  if (!token) return undefined;
-  const sessionId = extractSpacesSessionId(req);
-  const workspaceIdFromRequest = extractSpacesWorkspaceId(req);
-  const workspaceId = workspaceIdFromRequest ?? await getWorkspaceIdForUser(userId, "agent-chat").catch(() => null) ?? undefined;
-  if (!workspaceIdFromRequest && workspaceId) {
-    log.info(`[agent-chat] resolved workspaceId=${workspaceId} from user row for request Spaces auth userId=${userId}`);
-  }
+  const auth = await spacesCredentialsFor(req, "agent-chat", { userId }).catch(() => null);
+  if (!auth) return undefined;
   return {
-    token,
+    token: auth.token,
     baseUrl: CONFIG.spacesInternalUrl,
-    ...(sessionId ? { sessionId } : {}),
-    ...(workspaceId ? { workspaceId } : {}),
+    ...(auth.workspaceId ? { workspaceId: auth.workspaceId } : {}),
   };
 }
 

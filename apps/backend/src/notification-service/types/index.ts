@@ -53,7 +53,13 @@ export interface MobilePushPayload {
 export interface MobilePushJobData {
   channel: DeliveryChannel.MOBILE_PUSH;
   userId: string;
+  /**
+   * The PushTarget id: `auth_sessions.id` when `source === 'session'`, the legacy
+   * `workflow.user_sessions.id` when `source === 'legacy'`. Used to null a dead token.
+   */
   sessionId: string;
+  /** Store the token came from. Jobs queued before this field existed are legacy. */
+  source?: 'session' | 'legacy';
   token: string;
   voipToken?: string;
   platform: string;

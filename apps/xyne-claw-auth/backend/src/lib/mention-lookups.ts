@@ -42,8 +42,6 @@ export function buildSpacesMentionLookupsDb(workspaceId?: string): MentionLookup
 export interface SpacesMentionAuth {
   /** Spaces user JWT of the human on whose behalf we search. */
   token: string;
-  /** Session row id — sent as cookie for Spaces' legacy session checks. */
-  sessionId?: string;
   /** Workspace scope for the searches. */
   workspaceId?: string;
 }

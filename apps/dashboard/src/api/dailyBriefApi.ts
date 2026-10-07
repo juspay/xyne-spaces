@@ -1,4 +1,5 @@
 import { apiInstance, BASE_URL } from '../services/clients/apiClient';
+import { buildAuthHeaders } from '../services/clients/authHeaders';
 
 /**
  * Daily Brief API (proxied by the backend to xyne-claw-auth).
@@ -170,7 +171,11 @@ export const dailyBriefApi = {
     // eslint-disable-next-line local-rules/no-fetch-use-axios
     const response = await fetch(`${BASE_URL}/daily-brief/regenerate`, {
       method: 'POST',
-      headers: { Accept: 'text/event-stream', 'Content-Type': 'application/json' },
+      headers: {
+        Accept: 'text/event-stream',
+        'Content-Type': 'application/json',
+        ...buildAuthHeaders(),
+      },
       body: '{}',
       credentials: 'include',
       ...(signal ? { signal } : {}),

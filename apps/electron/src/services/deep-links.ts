@@ -442,6 +442,9 @@ function exchangeAuthCode(code: string, state: string, invitationId: string | nu
       });
 
       request.setHeader('Content-Type', 'application/json');
+      // Main-process requests bypass the webRequest hook, so the device id
+      // header is set explicitly; the backend binds the new session to it.
+      request.setHeader('x-device-id', Logger.getClientSessionId());
 
       request.on('response', async (response) => {
         if (response.headers['set-cookie']) {
@@ -547,6 +550,8 @@ function exchangeMTLSAuthCode(code: string, state: string, invitationId: string 
     });
 
     request.setHeader('Content-Type', 'application/json');
+    // Same device id as the webRequest hook sends on renderer traffic.
+    request.setHeader('x-device-id', Logger.getClientSessionId());
 
     request.on('response', async (response) => {
 

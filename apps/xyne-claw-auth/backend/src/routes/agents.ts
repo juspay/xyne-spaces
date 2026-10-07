@@ -15,6 +15,7 @@ import { validateSubagentInput, ValidationError as SubagentValidationError } fro
 import { getSubagentDefinition, buildCloneApprovalFlow, normalizeAgentPrivacy, parseAgentPrivacy } from "xyne-claw-shared";
 import { spacesAppFetch } from "../lib/spaces-api.js";
 import { getWorkspaceIdForUser } from "../lib/spaces-db.js";
+import { spacesCredentialsFor } from "../lib/spaces-auth.js";
 import { LOCAL_HARNESS_PROVIDERS } from "../lib/local-harness.js";
 import { prisma } from "../db.js";
 import { CONFIG } from "../config.js";
@@ -2388,184 +2389,71 @@ router.delete("/:slug/tools/:toolId", requireAgentOwnerOrAdmin, async (req: Requ
 
 // ── POST /:slug/register-app (manual) ────────────────────────────────
 
-function getCookieValue(req: Request, name: string): string | undefined {
-  const cookie = req.headers["cookie"] ?? "";
-  const match = cookie.match(new RegExp(`(?:^|;\\s*)${name}=([^;]*)`));
-  return match?.[1] ? decodeURIComponent(match[1]) : undefined;
-}
-
-/** Claims we care about from a Spaces authV2 workspace JWT. Payload only —
- *  this is never a trust decision, Spaces verifies the signature. We read it
- *  solely to keep the token, the workspace and the session pointing at the
- *  same identity before forwarding them. */
-interface WorkspaceTokenClaims {
-  sub?: string;
-  workspaceId?: string;
-}
-
-function decodeWorkspaceToken(token: string): WorkspaceTokenClaims | null {
-  const parts = token.split(".");
-  if (parts.length !== 3 || !parts[1]) return null;
-  try {
-    const json = Buffer.from(parts[1], "base64url").toString("utf8");
-    const claims = JSON.parse(json) as WorkspaceTokenClaims;
-    return typeof claims === "object" && claims !== null ? claims : null;
-  } catch {
-    return null;
-  }
-}
-
-/** Every `xyne_ws_<workspaceId>_token` cookie on the request. */
-function workspaceTokenCookies(req: Request): Array<{ workspaceId: string; token: string }> {
-  const cookie = req.headers["cookie"] ?? "";
-  const out: Array<{ workspaceId: string; token: string }> = [];
-  for (const match of cookie.matchAll(/(?:^|;\s*)xyne_ws_([^=;]+)_token=([^;]*)/g)) {
-    const workspaceId = match[1];
-    const raw = match[2];
-    if (!workspaceId || !raw) continue;
-    out.push({ workspaceId, token: decodeURIComponent(raw) });
-  }
-  return out;
-}
-
 /**
- * The Spaces credentials to forward, resolved as ONE consistent triple.
+ * The Spaces credentials to forward for the app-registration proxies below.
  *
- * Why this is not three independent lookups: a browser holds a SEPARATE
- * `xyne_ws_<id>_token` per workspace but only ONE `user_session_id`. When the
- * same human has two Spaces user rows (observed live: one email owning both
- * `cmgjk5fcz…` and `cmqsf2vlq…`, in different orgs), picking the bearer by
- * `xyne_last_workspace` while taking the session from its own cookie forwards a
- * token for user A alongside a session for user B. Spaces then resolves an
- * inconsistent principal and `req.user.workspaceId` comes back unusable —
- * surfacing downstream as a misleading `ORG_REQUIRED`, with every workspace row
- * involved perfectly healthy.
+ * An explicit JWT the caller supplied (`body.userToken` / JWT-shaped
+ * `Authorization: Bearer`, the SDK/CLI path) is honoured as-is; otherwise a
+ * short-lived token is MINTED over S2S for the user requireAuth identified
+ * (`x-user-id`), scoped to `x-workspace-id` → `xyne_last_workspace` → the
+ * user's own workspace (lib/spaces-auth.ts). Browser cookies carry no JWT any
+ * more — web sessions are the opaque `xs` cookie — so there are no cookie or
+ * legacy `google_access_token` branches, and no session id to forward.
  *
- * So: the workspace is taken FROM the chosen token's own claims (falling back
- * to the cookie name that carried it), never from an independent cookie read,
- * and a token whose `sub` disagrees with the other workspace tokens is logged
- * rather than silently forwarded.
+ * The token, workspace and `sub` come from ONE credential, so the pair can
+ * never disagree (the old multi-`xyne_ws_*`-cookie ambiguity that surfaced as
+ * a misleading `ORG_REQUIRED` from Spaces is gone by construction).
  */
-function resolveSpacesUserAuth(req: Request): {
+async function resolveSpacesUserAuth(req: Request): Promise<{
   token?: string | undefined;
   workspaceId?: string | undefined;
   sub?: string | undefined;
-} {
+}> {
   const explicitWorkspace = typeof req.headers["x-workspace-id"] === "string" && req.headers["x-workspace-id"]
     ? (req.headers["x-workspace-id"] as string)
     : undefined;
-
-  // An explicitly supplied token wins — the caller has already decided.
-  const bodyToken = (req.body as { userToken?: string } | undefined)?.userToken;
-  const authHeader = req.headers["authorization"];
-  const explicitToken = bodyToken
-    ?? (authHeader?.startsWith("Bearer ") ? authHeader.slice(7) : undefined);
-  if (explicitToken) {
-    const claims = decodeWorkspaceToken(explicitToken);
-    return {
-      token: explicitToken,
-      ...(explicitWorkspace ?? claims?.workspaceId ? { workspaceId: explicitWorkspace ?? claims?.workspaceId } : {}),
-      ...(claims?.sub ? { sub: claims.sub } : {}),
-    };
-  }
-
-  const wsTokens = workspaceTokenCookies(req);
-  if (wsTokens.length > 0) {
-    const preferred = explicitWorkspace ?? getCookieValue(req, "xyne_last_workspace");
-    const chosen = wsTokens.find((t) => t.workspaceId === preferred) ?? wsTokens[0]!;
-    const claims = decodeWorkspaceToken(chosen.token);
-
-    // Two workspace tokens for two DIFFERENT users is the ambiguity above. We
-    // cannot tell from here which one `user_session_id` belongs to, so forward
-    // the chosen one but make the situation visible instead of mysterious.
-    const subs = new Set(
-      wsTokens.map((t) => decodeWorkspaceToken(t.token)?.sub).filter((v): v is string => Boolean(v)),
-    );
-    if (subs.size > 1) {
-      log.warn(
-        `[agents] multiple Spaces identities on one request — forwarding sub=${claims?.sub ?? "unknown"} ` +
-        `for workspace=${claims?.workspaceId ?? chosen.workspaceId}; all subs=[${[...subs].join(", ")}]. ` +
-        `If Spaces rejects this (e.g. ORG_REQUIRED), the session cookie likely belongs to a different one.`,
-      );
-    }
-
-    // Workspace comes from the token we are actually sending, so the pair can
-    // never disagree — the cookie name is only a fallback for a malformed JWT.
-    return {
-      token: chosen.token,
-      workspaceId: claims?.workspaceId ?? chosen.workspaceId,
-      ...(claims?.sub ? { sub: claims.sub } : {}),
-    };
-  }
-
-  // Fall back to legacy google_access_token — but ONLY if it looks like a JWT.
-  // During the authV2 pending-auth window this cookie holds a JSON blob, which
-  // is not a valid bearer token.
-  const legacy = getCookieValue(req, "google_access_token");
-  if (legacy && legacy.split(".").length === 3) {
-    const claims = decodeWorkspaceToken(legacy);
-    return {
-      token: legacy,
-      ...(explicitWorkspace ?? claims?.workspaceId ? { workspaceId: explicitWorkspace ?? claims?.workspaceId } : {}),
-      ...(claims?.sub ? { sub: claims.sub } : {}),
-    };
-  }
-
-  return { ...(explicitWorkspace ? { workspaceId: explicitWorkspace } : {}) };
+  const auth = await spacesCredentialsFor(req, "agents").catch((err) => {
+    log.warn(`[agents] Spaces credential resolution failed: ${errMsg(err)}`);
+    return null;
+  });
+  if (!auth) return { ...(explicitWorkspace ? { workspaceId: explicitWorkspace } : {}) };
+  return {
+    token: auth.token,
+    ...(auth.workspaceId ? { workspaceId: auth.workspaceId } : {}),
+    ...(auth.userId ? { sub: auth.userId } : {}),
+  };
 }
 
-function extractUserToken(req: Request): string | undefined {
-  return resolveSpacesUserAuth(req).token;
-}
-
-function extractSessionId(req: Request): string | undefined {
-  const header = req.headers["x-session-id"];
-  if (typeof header === "string" && header) return header;
-  return getCookieValue(req, "xyne_session") ?? getCookieValue(req, "user_session_id");
-}
-
-function extractWorkspaceId(req: Request): string | undefined {
-  // Derived from the SAME resolution as the bearer token, so the two can never
-  // point at different workspaces. See resolveSpacesUserAuth.
-  return resolveSpacesUserAuth(req).workspaceId ?? getCookieValue(req, "xyne_last_workspace");
-}
-
-// /api/apps/* routes are mounted on Spaces' legacy `auth.ts` middleware, which
-// reads the session ONLY from the `xyne_session` cookie (gated behind a
-// truthy workspaceId). Send both Cookie + headers so we work on both legacy
-// and authV2 routes; otherwise these calls 401 ~15min after the JWT issues.
+// /api/apps/* routes accept the user's Bearer + x-workspace-id; the minted JWT
+// already binds the user's session, so nothing else is needed.
 function spacesUserAuthHeaders(
   userToken: string,
-  sessionId: string | undefined,
   workspaceId: string | undefined,
 ): Record<string, string> {
   const headers: Record<string, string> = { Authorization: `Bearer ${userToken}` };
-  if (sessionId) headers["x-session-id"] = sessionId;
   if (workspaceId) headers["x-workspace-id"] = workspaceId;
-  const cookieParts: string[] = [];
-  if (sessionId) cookieParts.push(`xyne_session=${sessionId}`);
-  if (workspaceId) cookieParts.push(`xyne_last_workspace=${workspaceId}`);
-  if (cookieParts.length > 0) headers["Cookie"] = cookieParts.join("; ");
   return headers;
 }
+
+const NO_SPACES_SESSION = "No live Spaces session for this user — sign in to Spaces and retry";
 
 // ── Step-by-step Spaces App registration (3 separate buttons) ────────
 
 router.post("/:slug/create-app", requireAgentOwnerOrAdmin, async (req: Request<{ slug: string }>, res: Response) => {
   try {
-    const userToken = extractUserToken(req);
-    if (!userToken) { res.status(401).json({ success: false, error: "User token required" }); return; }
+    const auth = await resolveSpacesUserAuth(req);
+    const userToken = auth.token;
+    if (!userToken) { res.status(401).json({ success: false, error: NO_SPACES_SESSION }); return; }
 
     const agent = await agentRepository.findBySlug(req.params.slug, getOrgId(req));
     if (!agent) { logAgentScopedMiss(req, "agents/create-app", req.params.slug); res.status(404).json({ success: false, error: "Agent not found" }); return; }
     if (agent.spacesAppId) { res.status(400).json({ success: false, error: "Agent already has a Spaces App" }); return; }
 
     const spacesUrl = CONFIG.spacesInternalUrl;
-    const sessionId = extractSessionId(req);
-    const workspaceId = extractWorkspaceId(req);
+    const workspaceId = auth.workspaceId;
     const createRes = await fetch(`${spacesUrl}/api/apps/create`, {
       method: "POST",
-      headers: { "Content-Type": "application/json", ...spacesUserAuthHeaders(userToken, sessionId, workspaceId) },
+      headers: { "Content-Type": "application/json", ...spacesUserAuthHeaders(userToken, workspaceId) },
       body: JSON.stringify({ name: agent.name, description: agent.description }),
     });
 
@@ -2577,17 +2465,14 @@ router.post("/:slug/create-app", requireAgentOwnerOrAdmin, async (req: Request<{
       // here: chasing this from the Spaces-side message alone leads through the
       // workspace, its orgId and the org mapping, all of which look fine.
       if (text.includes("ORG_REQUIRED")) {
-        const auth = resolveSpacesUserAuth(req);
         log.warn(
           `[agents] create-app ORG_REQUIRED slug=${req.params.slug} ` +
-          `forwardedSub=${auth.sub ?? "unknown"} forwardedWorkspace=${auth.workspaceId ?? "none"} ` +
-          `sessionId=${sessionId ? "present" : "MISSING"}`,
+          `forwardedSub=${auth.sub ?? "unknown"} forwardedWorkspace=${auth.workspaceId ?? "none"}`,
         );
         res.status(400).json({
           success: false,
           error:
             `Spaces could not resolve an organization for workspace ${auth.workspaceId ?? "(none sent)"}. ` +
-            `This usually means the workspace token and the login session belong to different Spaces users. ` +
             `Switch to the workspace you normally work in and retry.`,
         });
         return;
@@ -2611,8 +2496,9 @@ router.post("/:slug/create-app", requireAgentOwnerOrAdmin, async (req: Request<{
 
 router.post("/:slug/install-app", requireAgentOwnerOrAdmin, async (req: Request<{ slug: string }>, res: Response) => {
   try {
-    const userToken = extractUserToken(req);
-    if (!userToken) { res.status(401).json({ success: false, error: "User token required" }); return; }
+    const auth = await resolveSpacesUserAuth(req);
+    const userToken = auth.token;
+    if (!userToken) { res.status(401).json({ success: false, error: NO_SPACES_SESSION }); return; }
 
     const agent = await agentRepository.findBySlug(req.params.slug, getOrgId(req));
     if (!agent) { logAgentScopedMiss(req, "agents/install-app", req.params.slug); res.status(404).json({ success: false, error: "Agent not found" }); return; }
@@ -2620,11 +2506,10 @@ router.post("/:slug/install-app", requireAgentOwnerOrAdmin, async (req: Request<
     if (agent.spacesAppToken) { res.status(400).json({ success: false, error: "App already installed" }); return; }
 
     const spacesUrl = CONFIG.spacesInternalUrl;
-    const sessionId = extractSessionId(req);
-    const workspaceId = extractWorkspaceId(req);
+    const workspaceId = auth.workspaceId;
     const installRes = await fetch(`${spacesUrl}/api/apps/install/${agent.spacesAppId}`, {
       method: "POST",
-      headers: { "Content-Type": "application/json", ...spacesUserAuthHeaders(userToken, sessionId, workspaceId) },
+      headers: { "Content-Type": "application/json", ...spacesUserAuthHeaders(userToken, workspaceId) },
     });
 
     if (!installRes.ok) {
@@ -2662,21 +2547,21 @@ router.post("/:slug/install-app", requireAgentOwnerOrAdmin, async (req: Request<
 
 router.post("/:slug/configure-webhook", requireAgentOwnerOrAdmin, async (req: Request<{ slug: string }>, res: Response) => {
   try {
-    const userToken = extractUserToken(req);
-    if (!userToken) { res.status(401).json({ success: false, error: "User token required" }); return; }
+    const auth = await resolveSpacesUserAuth(req);
+    const userToken = auth.token;
+    if (!userToken) { res.status(401).json({ success: false, error: NO_SPACES_SESSION }); return; }
 
     const agent = await agentRepository.findBySlug(req.params.slug, getOrgId(req));
     if (!agent) { logAgentScopedMiss(req, "agents/configure-webhook", req.params.slug); res.status(404).json({ success: false, error: "Agent not found" }); return; }
     if (!agent.spacesAppId) { res.status(400).json({ success: false, error: "Create app first" }); return; }
 
     const spacesUrl = CONFIG.spacesInternalUrl;
-    const sessionId = extractSessionId(req);
-    const workspaceId = extractWorkspaceId(req);
+    const workspaceId = auth.workspaceId;
     const webhookUrl = `${CONFIG.selfUrl}/claw/api/v1/webhook/app/${agent.spacesAppId}`;
 
     const configRes = await fetch(`${spacesUrl}/api/apps/configureWebhook/${agent.spacesAppId}`, {
       method: "POST",
-      headers: { "Content-Type": "application/json", ...spacesUserAuthHeaders(userToken, sessionId, workspaceId) },
+      headers: { "Content-Type": "application/json", ...spacesUserAuthHeaders(userToken, workspaceId) },
       body: JSON.stringify({ webhookUrl }),
     });
 
@@ -2697,7 +2582,7 @@ router.post("/:slug/configure-webhook", requireAgentOwnerOrAdmin, async (req: Re
     await fetchAndStoreSigningSecretFromSpacesApi({
       agentId: agent.id,
       spacesAppId: agent.spacesAppId,
-      userAuthHeaders: spacesUserAuthHeaders(userToken, sessionId, workspaceId),
+      userAuthHeaders: spacesUserAuthHeaders(userToken, workspaceId),
     }).catch((err) => {
       log.warn(`[agents] signing-secret fetch swallowed for ${req.params.slug}: ${errMsg(err)}`);
       return false;
@@ -2737,17 +2622,17 @@ const CLAW_APP_PERMISSIONS = [
 // the moment it tries to post a result back to the thread.
 router.post("/:slug/grant-permissions", requireAgentOwnerOrAdmin, async (req: Request<{ slug: string }>, res: Response) => {
   try {
-    const userToken = extractUserToken(req);
-    if (!userToken) { res.status(401).json({ success: false, error: "User token required" }); return; }
+    const auth = await resolveSpacesUserAuth(req);
+    const userToken = auth.token;
+    if (!userToken) { res.status(401).json({ success: false, error: NO_SPACES_SESSION }); return; }
 
     const agent = await agentRepository.findBySlug(req.params.slug, getOrgId(req));
     if (!agent) { logAgentScopedMiss(req, "agents/grant-permissions", req.params.slug); res.status(404).json({ success: false, error: "Agent not found" }); return; }
     if (!agent.spacesAppId) { res.status(400).json({ success: false, error: "Create app first" }); return; }
 
     const spacesUrl = CONFIG.spacesInternalUrl;
-    const sessionId = extractSessionId(req);
-    const workspaceId = extractWorkspaceId(req);
-    const headers = { "Content-Type": "application/json", ...spacesUserAuthHeaders(userToken, sessionId, workspaceId) };
+    const workspaceId = auth.workspaceId;
+    const headers = { "Content-Type": "application/json", ...spacesUserAuthHeaders(userToken, workspaceId) };
 
     // 1. Grant the bot its permissions. The set of AVAILABLE permissions is
     //    environment-specific — the Spaces `availableAppPermission` registry may
@@ -2840,8 +2725,9 @@ router.post(
   pictureUpload.single("picture") as unknown as RequestHandler<{ slug: string }>,
   async (req: Request<{ slug: string }>, res: Response) => {
     try {
-      const userToken = extractUserToken(req);
-      if (!userToken) { res.status(401).json({ success: false, error: "User token required" }); return; }
+      const auth = await resolveSpacesUserAuth(req);
+      const userToken = auth.token;
+      if (!userToken) { res.status(401).json({ success: false, error: NO_SPACES_SESSION }); return; }
 
       const agent = await agentRepository.findBySlug(req.params.slug, getOrgId(req));
       if (!agent) { logAgentScopedMiss(req, "agents/upload-picture", req.params.slug); res.status(404).json({ success: false, error: "Agent not found" }); return; }
@@ -2855,11 +2741,10 @@ router.post(
       form.append("picture", blob, file.originalname);
 
       const spacesUrl = CONFIG.spacesInternalUrl;
-      const sessionId = extractSessionId(req);
-      const workspaceId = extractWorkspaceId(req);
+      const workspaceId = auth.workspaceId;
       const uploadRes = await fetch(`${spacesUrl}/api/apps/upload-picture/${agent.spacesAppId}`, {
         method: "POST",
-        headers: spacesUserAuthHeaders(userToken, sessionId, workspaceId),
+        headers: spacesUserAuthHeaders(userToken, workspaceId),
         body: form,
       });
 

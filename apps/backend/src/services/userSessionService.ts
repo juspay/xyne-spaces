@@ -4,13 +4,23 @@ import { logger } from '../utils/logger';
 import { DatabaseClient } from '@/database/client';
 import { userActivityTrackingService } from './userActivityTrackingService';
 
+/**
+ * LEGACY `workflow.user_sessions` access. The table is read-only since the move to
+ * `non_zero.auth_sessions` (src/auth/): no row is ever created or refreshed here any more.
+ * The only writes left are status flips to REVOKED (account-wide revokes must also kill legacy
+ * rows that were never converted) — see bypassAcl/authSessionServices.revokeAccountSessions.
+ */
+
 // Why a session ended — stored as the AUTH/LOGOUT activity event's label.
 export type LogoutReason =
   | 'USER_LOGOUT'
+  | 'DEVICE_REUSED'
   | 'PASSWORD_CHANGED'
   | 'PASSWORD_RESET'
   | 'PROVIDER_REVOKED'
+  | 'ACCOUNT_LEFT'
   | 'TOKEN_EXPIRED'
+  | 'EXPIRED'
   | 'TEST_CLEANUP';
 
 // How the session was minted — stored as the AUTH/LOGIN activity event's
@@ -21,34 +31,12 @@ export type LoginMethod =
   | 'TEST'
   | 'WORKSPACE_CREATED' // already signed in — a session for a workspace they just created
   | 'WORKSPACE_JOINED' // already signed in — a session for a community workspace they just joined
+  | 'WORKSPACE_SWITCHED' // already signed in — switched the active workspace on the same session
   | 'AUTO_LOGIN'; // reused an existing session to auto-log into a single workspace
 
-export interface CreateSessionData {
-  userId: string;
-  refreshToken: string;
-  refreshTokenExpiry: Date;
-  accessToken?: string;
-  accessTokenExpiry?: Date;
-  deviceInfo?: string;
-  deviceId?: string;
-  fcmToken?: string;
-  ipAddress?: string;
-  // Reported on the AUTH/LOGIN activity event; defaults to the user's authProvider.
-  loginMethod?: LoginMethod;
-}
-
-export interface UpdateSessionData {
-  accessToken?: string;
-  accessTokenExpiry?: Date;
-  lastActivity?: Date;
-  status?: SessionStatus;
-  deviceId?: string;
-  fcmToken?: string;
-}
-
-// Sessions don't store a platform column; recover it from the deviceInfo JSON
+// Legacy rows don't store a platform column; recover it from the deviceInfo JSON
 // (explicit `platform` key first, then the user agent).
-function resolveSessionPlatform(deviceInfo?: string | null): Platform {
+export function resolveSessionPlatform(deviceInfo?: string | null): Platform {
   let hint = '';
   let userAgent = '';
   if (deviceInfo) {
@@ -67,6 +55,8 @@ function resolveSessionPlatform(deviceInfo?: string | null): Platform {
 
 type SessionCandidate = Pick<UserSession, 'id' | 'userId' | 'deviceInfo' | 'createdAt'>;
 
+export type LegacyPushRow = Pick<UserSession, 'id' | 'fcmToken' | 'voipToken' | 'deviceInfo'>;
+
 export class UserSessionService {
   private prisma: PrismaClient;
 
@@ -75,8 +65,8 @@ export class UserSessionService {
   }
 
   // Public so callers that observe a session ending without themselves being
-  // the one to end it (e.g. a denied refresh) can log it without touching the
-  // session row — this never writes to UserSession, only to the activity log.
+  // the one to end it can log it without touching the session row — this never
+  // writes to UserSession, only to the activity log.
   trackLogout(session: SessionCandidate, reason: LogoutReason): void {
     void userActivityTrackingService.trackLogout(session.userId, {
       sessionId: session.id,
@@ -89,108 +79,7 @@ export class UserSessionService {
   }
 
   /**
-   * Create a new user session
-   */
-  async createSession(sessionData: CreateSessionData): Promise<UserSession> {
-    const sessionCreateId = `SESSION_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`;
-    const startTime = Date.now();
-    
-    try {
-      logger.info(`🔍 [${sessionCreateId}] === Session Creation Started ===`);
-      logger.info(`🔍 [${sessionCreateId}] UserId: ${sessionData.userId}`);
-      logger.info(`🔍 [${sessionCreateId}] IP: ${sessionData.ipAddress}`);
-      logger.info(`🔍 [${sessionCreateId}] Device: ${sessionData.deviceInfo?.substring(0, 100)}...`);
-      
-      // Check for existing active sessions first
-      logger.info(`🔍 [${sessionCreateId}] 🔍 Checking existing active sessions...`);
-      const existingActiveSessions = await this.prisma.userSession.count({
-        where: {
-          userId: sessionData.userId,
-          status: SessionStatus.ACTIVE,
-          refreshTokenExpiry: {
-            gt: new Date()
-          }
-        }
-      });
-      logger.info(`🔍 [${sessionCreateId}] Found ${existingActiveSessions} existing active sessions`);
-      
-      logger.info(`🔍 [${sessionCreateId}] 💾 Creating session in database...`);
-      const sessionUser = await this.prisma.user.findUnique({
-        where: { id: sessionData.userId },
-        select: { workspaceId: true },
-      });
-      if (!sessionUser) {
-        throw new Error(`workspaceId required: user ${sessionData.userId} not found`);
-      }
-      const session = await this.prisma.userSession.create({
-        data: {
-          userId: sessionData.userId,
-          workspaceId: sessionUser.workspaceId,
-          refreshToken: sessionData.refreshToken,
-          refreshTokenExpiry: sessionData.refreshTokenExpiry,
-          accessToken: sessionData.accessToken,
-          accessTokenExpiry: sessionData.accessTokenExpiry,
-          deviceInfo: sessionData.deviceInfo,
-          deviceId: sessionData.deviceId,
-          fcmToken: sessionData.fcmToken,
-          ipAddress: sessionData.ipAddress,
-          status: SessionStatus.ACTIVE,
-          lastActivity: new Date(),
-        },
-        include: {
-          user: true,
-        },
-      });
-
-      const endTime = Date.now();
-      logger.info(`✅ [${sessionCreateId}] Session created successfully in ${endTime - startTime}ms`);
-      logger.info(`✅ [${sessionCreateId}] === Session Creation Complete ===`);
-      
-      logger.info(`Created new session for user: ${session.userId}`);
-
-      const loginMethod = sessionData.loginMethod ?? (session.user.authProvider as LoginMethod);
-      void userActivityTrackingService.trackLogin(session.userId, {
-        sessionId: session.id,
-        method: loginMethod,
-        platform: resolveSessionPlatform(session.deviceInfo),
-        metadata: { authProvider: session.user.authProvider },
-      });
-
-      return session;
-    } catch (error) {
-      const endTime = Date.now();
-      logger.info(`❌ [${sessionCreateId}] === Session Creation FAILED ===`);
-      logger.info(`❌ [${sessionCreateId}] Error after ${endTime - startTime}ms:`, error);
-      logger.info(`❌ [${sessionCreateId}] Error message: ${error instanceof Error ? error.message : 'Unknown error'}`);
-      logger.info(`❌ [${sessionCreateId}] Error stack:`, error instanceof Error ? error.stack : 'No stack trace');
-      
-      logger.error('Error creating user session:', error);
-      throw new Error('Failed to create user session');
-    }
-  }
-
-  /**
-   * Get session by refresh token
-   */
-  async getSessionByRefreshToken(refreshToken: string): Promise<(UserSession & { user: any }) | null> {
-    try {
-      return await this.prisma.userSession.findUnique({
-        where: {
-          refreshToken,
-          status: SessionStatus.ACTIVE,
-        },
-        include: {
-          user: true,
-        },
-      });
-    } catch (error) {
-      logger.error('Error getting session by refresh token:', error);
-      throw new Error('Failed to get session by refresh token');
-    }
-  }
-
-  /**
-   * Get session by ID
+   * Get a legacy session by ID (read-only).
    */
   async getSessionById(sessionId: string): Promise<(UserSession & { user: any }) | null> {
     try {
@@ -211,72 +100,24 @@ export class UserSessionService {
   }
 
   /**
-   * Get all active sessions for a user
+   * ACTIVE, unexpired legacy rows with a push token for every workspace user of the account.
+   * Push delivery's legacy fallback until those rows are converted or expire.
    */
-  async getActiveSessionsForUser(userId: string): Promise<UserSession[]> {
-    try {
-      return await this.prisma.userSession.findMany({
-        where: {
-          userId,
-          status: SessionStatus.ACTIVE,
-          refreshTokenExpiry: {
-            gt: new Date(), // Only get non-expired sessions
-          },
-        },
-        orderBy: {
-          lastActivity: 'desc',
-        },
-      });
-    } catch (error) {
-      logger.error('Error getting active sessions for user:', error);
-      throw new Error('Failed to get active sessions for user');
-    }
+  async findLegacyPushRowsForAccount(accountId: string, now: Date = new Date()): Promise<LegacyPushRow[]> {
+    return this.prisma.userSession.findMany({
+      where: {
+        status: SessionStatus.ACTIVE,
+        refreshTokenExpiry: { gt: now },
+        fcmToken: { not: null },
+        user: { orgMemberId: accountId },
+      },
+      select: { id: true, fcmToken: true, voipToken: true, deviceInfo: true },
+      orderBy: { updatedAt: 'desc' },
+    });
   }
 
   /**
-   * Update session data
-   */
-  async updateSession(sessionId: string, updateData: UpdateSessionData): Promise<UserSession> {
-    try {
-      const session = await this.prisma.userSession.update({
-        where: { id: sessionId },
-        data: {
-          ...updateData,
-          updatedAt: new Date(),
-        },
-        include: {
-          user: true,
-        },
-      });
-
-      logger.info(`Updated session`);
-      return session;
-    } catch (error) {
-      logger.error('Error updating session:', error);
-      throw new Error('Failed to update session');
-    }
-  }
-
-  /**
-   * Update session activity (touch session)
-   */
-  async updateSessionActivity(sessionId: string): Promise<void> {
-    try {
-      await this.prisma.userSession.update({
-        where: { id: sessionId },
-        data: {
-          lastActivity: new Date(),
-          updatedAt: new Date(),
-        },
-      });
-    } catch (error) {
-      logger.error('Error updating session activity:', error);
-      throw new Error('Failed to update session activity');
-    }
-  }
-
-  /**
-   * Revoke a specific session
+   * Revoke a specific legacy session (status only).
    */
   async revokeSession(sessionId: string, reason: LogoutReason): Promise<void> {
     try {
@@ -286,6 +127,7 @@ export class UserSessionService {
         where: { id: sessionId },
         select: { status: true },
       });
+      if (!previous) return;
 
       const session = await this.prisma.userSession.update({
         where: { id: sessionId },
@@ -295,11 +137,11 @@ export class UserSessionService {
         },
       });
 
-      if (previous?.status === SessionStatus.ACTIVE) {
+      if (previous.status === SessionStatus.ACTIVE) {
         this.trackLogout(session, reason);
       }
 
-      logger.info(`Revoked session`);
+      logger.info(`Revoked legacy session`);
     } catch (error) {
       logger.error('Error revoking session:', error);
       throw new Error('Failed to revoke session');
@@ -307,34 +149,7 @@ export class UserSessionService {
   }
 
   /**
-   * Revoke session by refresh token
-   */
-  async revokeSessionByRefreshToken(refreshToken: string, reason: LogoutReason): Promise<void> {
-    try {
-      const liveSessions = await this.prisma.userSession.findMany({
-        where: { refreshToken, status: SessionStatus.ACTIVE },
-        select: { id: true, userId: true, deviceInfo: true, createdAt: true },
-      });
-
-      await this.prisma.userSession.updateMany({
-        where: { refreshToken },
-        data: {
-          status: SessionStatus.REVOKED,
-          updatedAt: new Date(),
-        },
-      });
-
-      liveSessions.forEach((session) => this.trackLogout(session, reason));
-
-      logger.info(`Revoked session by refresh token`);
-    } catch (error) {
-      logger.error('Error revoking session by refresh token:', error);
-      throw new Error('Failed to revoke session by refresh token');
-    }
-  }
-
-  /**
-   * Revoke all sessions for a user
+   * Revoke all legacy sessions for a workspace user (status only).
    */
   async revokeAllUserSessions(userId: string, reason: LogoutReason): Promise<void> {
     try {
@@ -344,9 +159,10 @@ export class UserSessionService {
         where: { userId, status: SessionStatus.ACTIVE },
         select: { id: true, userId: true, deviceInfo: true, createdAt: true },
       });
+      if (liveSessions.length === 0) return;
 
       await this.prisma.userSession.updateMany({
-        where: { userId },
+        where: { userId, status: SessionStatus.ACTIVE },
         data: {
           status: SessionStatus.REVOKED,
           updatedAt: new Date(),
@@ -355,105 +171,10 @@ export class UserSessionService {
 
       liveSessions.forEach((session) => this.trackLogout(session, reason));
 
-      logger.info(`Revoked all sessions for user: ${userId}`);
+      logger.info(`Revoked all legacy sessions for user: ${userId}`);
     } catch (error) {
       logger.error('Error revoking all user sessions:', error);
       throw new Error('Failed to revoke all user sessions');
     }
-  }
-
-  /**
-   * Check if refresh token is valid and not expired
-   */
-  async isRefreshTokenValid(refreshToken: string): Promise<boolean> {
-    try {
-      const session = await this.prisma.userSession.findUnique({
-        where: { refreshToken },
-        select: {
-          status: true,
-          refreshTokenExpiry: true,
-        },
-      });
-
-      if (!session) {
-        return false;
-      }
-
-      const now = new Date();
-      return session.status === SessionStatus.ACTIVE && session.refreshTokenExpiry > now;
-    } catch (error) {
-      logger.error('Error checking refresh token validity:', error);
-      return false;
-    }
-  }
-
-  /**
-   * Clean up expired sessions
-   */
-  async cleanupExpiredSessions(): Promise<number> {
-    try {
-      const result = await this.prisma.userSession.updateMany({
-        where: {
-          refreshTokenExpiry: {
-            lt: new Date(),
-          },
-          status: SessionStatus.ACTIVE,
-        },
-        data: {
-          status: SessionStatus.EXPIRED,
-          updatedAt: new Date(),
-        },
-      });
-
-      logger.info(`Marked ${result.count} expired sessions`);
-      return result.count;
-    } catch (error) {
-      logger.error('Error cleaning up expired sessions:', error);
-      throw new Error('Failed to clean up expired sessions');
-    }
-  }
-
-  /**
-   * Get session statistics for a user
-   */
-  async getUserSessionStats(userId: string) {
-    try {
-      const stats = await this.prisma.userSession.groupBy({
-        by: ['status'],
-        where: { userId },
-        _count: {
-          status: true,
-        },
-      });
-
-      const totalSessions = await this.prisma.userSession.count({
-        where: { userId },
-      });
-
-      const lastActivity = await this.prisma.userSession.findFirst({
-        where: { userId },
-        orderBy: { lastActivity: 'desc' },
-        select: { lastActivity: true },
-      });
-
-      return {
-        totalSessions,
-        statusDistribution: stats.reduce((acc, stat) => {
-          acc[stat.status] = stat._count.status;
-          return acc;
-        }, {} as Record<string, number>),
-        lastActivity: lastActivity?.lastActivity,
-      };
-    } catch (error) {
-      logger.error('Error getting user session stats:', error);
-      throw new Error('Failed to get user session statistics');
-    }
-  }
-
-  /**
-   * Clean up - close Prisma connection
-   */
-  async disconnect(): Promise<void> {
-    await this.prisma.$disconnect();
   }
 }

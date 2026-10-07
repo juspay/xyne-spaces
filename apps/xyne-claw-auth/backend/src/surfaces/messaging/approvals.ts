@@ -22,7 +22,7 @@ import { chatMessageRepository } from "../../repositories/index.js";
 import { resolveIdentity } from "./identity.js";
 import { getSpacesPostTarget, looksLikeMemberIdList, type SpacesPostTarget } from "../../lib/spaces-post-target.js";
 import { mentionShorthandToText } from "../../lib/mention-transform.js";
-import { getSpacesAuthForUser } from "../../lib/spaces-db.js";
+import { mintSpacesToken } from "../../lib/spaces-auth.js";
 import type { ChannelAccount, ChannelDeliveryTarget, InteractiveCard } from "./plugin.js";
 
 const log = createLogger("channel-approvals");
@@ -163,14 +163,14 @@ function parseSignedAction(raw: unknown): SignedWriteAction | null {
 }
 
 async function lookupPostTarget(action: SignedWriteAction): Promise<SpacesPostTarget | null> {
-  const auth = await getSpacesAuthForUser(action.userId, "write-action").catch(() => null);
+  const auth = await mintSpacesToken({ userId: action.userId }, "write-action").catch(() => null);
   if (!auth) return null;
   return getSpacesPostTarget(
     {
       ...(str(action.params["channelId"]) ? { channelId: str(action.params["channelId"]) } : {}),
       ...(str(action.params["conversationId"]) ? { conversationId: str(action.params["conversationId"]) } : {}),
     },
-    auth,
+    { token: auth.token, workspaceId: auth.workspaceId },
     action.userId,
   ).catch(() => null);
 }

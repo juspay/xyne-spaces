@@ -1,7 +1,7 @@
 import { Response, type Request } from 'express';
 import { EncryptedFieldQueryError } from '@xyne/shared';
-import { 
-  handleMutate, 
+import {
+  handleMutate,
   handleQueries,
   handleQueriesFallback,
   handleMutateFallback,
@@ -34,110 +34,76 @@ function handleZeroError(res: Response, error: unknown, rateLimitMessage: string
   });
 }
 
+function hasBearer(req: Request): boolean {
+  const h = req.headers.authorization;
+  const value = Array.isArray(h) ? h[0] : h;
+  return typeof value === 'string' && /^Bearer\s+\S+/i.test(value) && !/^Bearer\s+(null|undefined)$/i.test(value);
+}
+
+/**
+ * Express request → Web API Request for the Zero server handlers.
+ *
+ * The route's auth middleware has already resolved the caller into `req.user` / `req.authSession`
+ * and left the access JWT the request is trusted under on `req.accessToken`: the verified
+ * `xw_<ws>` cookie, or the one it just minted inline from the `xs` session. Zero's own verifier
+ * (`extractAuthDataFromJWT`) only understands a Bearer JWT, so that token is forwarded as
+ * `Authorization: Bearer` when the request did not already carry one. A Bearer already on the
+ * request is passed through unchanged. Nothing is minted here.
+ */
+export function toZeroRequest(req: Request): globalThis.Request {
+  const url = `${req.protocol}://${req.get('host')}${req.originalUrl}`;
+  const headers = new Headers();
+
+  Object.entries(req.headers).forEach(([key, value]) => {
+    if (typeof value === 'string') {
+      headers.set(key, value);
+    } else if (Array.isArray(value)) {
+      headers.set(key, value.join(', '));
+    }
+  });
+
+  if (!hasBearer(req) && req.accessToken) {
+    headers.set('authorization', `Bearer ${req.accessToken}`);
+  }
+
+  return new globalThis.Request(url, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify(req.body),
+  });
+}
+
 export const handlePush = async (req: Request, res: Response): Promise<void> => {
-    try {
-      // Convert Express request to Web API Request
-      const url = `${req.protocol}://${req.get('host')}${req.originalUrl}`;
-      const headers = new Headers();
-
-      Object.entries(req.headers).forEach(([key, value]) => {
-        if (typeof value === 'string') {
-          headers.set(key, value);
-        } else if (Array.isArray(value)) {
-          headers.set(key, value.join(', '));
-        }
-      });
-
-      // Add token from workspace-specific cookie to Authorization header for Zero
-      const workspaceId = req.cookies?.xyne_last_workspace;
-      if (workspaceId && req.cookies?.[`xyne_ws_${workspaceId}_token`]) {
-        headers.set('authorization', `Bearer ${req.cookies[`xyne_ws_${workspaceId}_token`]}`);
-      }
-
-      const webRequest = new Request(url, {
-        method: 'POST',
-        headers,
-        body: JSON.stringify(req.body),
-      });
-
-    const result = await handleMutate(webRequest);
+  try {
+    const result = await handleMutate(toZeroRequest(req));
 
     res.json(result);
   } catch (error) {
-      handleZeroError(
-        res,
-        error,
-        'You have exceeded the maximum number of allowed mutations. Please try again later.',
-      );
-    }
+    handleZeroError(
+      res,
+      error,
+      'You have exceeded the maximum number of allowed mutations. Please try again later.',
+    );
   }
-
+};
 
 export const handleGetQueries = async (req: Request, res: Response): Promise<void> => {
-    try {
-      // Convert Express request to Web API Request
-      const url = `${req.protocol}://${req.get('host')}${req.originalUrl}`;
-      const headers = new Headers();
-
-      Object.entries(req.headers).forEach(([key, value]) => {
-        if (typeof value === 'string') {
-          headers.set(key, value);
-        } else if (Array.isArray(value)) {
-          headers.set(key, value.join(', '));
-        }
-      });
-
-      // Add token from workspace-specific cookie to Authorization header for Zero
-      const workspaceId = req.cookies?.xyne_last_workspace;
-      if (workspaceId && req.cookies?.[`xyne_ws_${workspaceId}_token`]) {
-        headers.set('authorization', `Bearer ${req.cookies[`xyne_ws_${workspaceId}_token`]}`);
-      }
-
-      const webRequest = new Request(url, {
-        method: 'POST',
-        headers,
-        body: JSON.stringify(req.body),
-      });
-
-    const result = await handleQueries(webRequest);
+  try {
+    const result = await handleQueries(toZeroRequest(req));
 
     res.json(result);
   } catch (error) {
-      handleZeroError(
-        res,
-        error,
-        'You have exceeded the maximum number of allowed queries. Please try again later.',
-      );
-    }
+    handleZeroError(
+      res,
+      error,
+      'You have exceeded the maximum number of allowed queries. Please try again later.',
+    );
   }
+};
 
 export const handleGetQueriesFallback = async (req: Request, res: Response): Promise<void> => {
   try {
-    // Convert Express request to Web API Request
-    const url = `${req.protocol}://${req.get('host')}${req.originalUrl}`;
-    const headers = new Headers();
-
-    Object.entries(req.headers).forEach(([key, value]) => {
-      if (typeof value === 'string') {
-        headers.set(key, value);
-      } else if (Array.isArray(value)) {
-        headers.set(key, value.join(', '));
-      }
-    });
-
-      // Add token from workspace-specific cookie to Authorization header for Zero
-      const workspaceId = req.cookies?.xyne_last_workspace;
-      if (workspaceId && req.cookies?.[`xyne_ws_${workspaceId}_token`]) {
-        headers.set('authorization', `Bearer ${req.cookies[`xyne_ws_${workspaceId}_token`]}`);
-      }
-
-    const webRequest = new Request(url, {
-      method: 'POST',
-      headers,
-      body: JSON.stringify(req.body),
-    });
-
-    const result = await handleQueriesFallback(webRequest);
+    const result = await handleQueriesFallback(toZeroRequest(req));
 
     res.json(result);
   } catch (error) {
@@ -147,7 +113,7 @@ export const handleGetQueriesFallback = async (req: Request, res: Response): Pro
       message: error instanceof Error ? error.message : 'Unknown error'
     });
   }
-}
+};
 
 export const handlePushFallback = async (req: Request, res: Response): Promise<void> => {
   try {
@@ -161,30 +127,7 @@ export const handlePushFallback = async (req: Request, res: Response): Promise<v
       return;
     }
 
-    const url = `${req.protocol}://${req.get('host')}${req.originalUrl}`;
-    const headers = new Headers();
-
-    Object.entries(req.headers).forEach(([key, value]) => {
-      if (typeof value === 'string') {
-        headers.set(key, value);
-      } else if (Array.isArray(value)) {
-        headers.set(key, value.join(', '));
-      }
-    });
-
-    // Add token from workspace-specific cookie to Authorization header
-    const workspaceId = req.cookies?.xyne_last_workspace;
-    if (workspaceId && req.cookies?.[`xyne_ws_${workspaceId}_token`]) {
-      headers.set('authorization', `Bearer ${req.cookies[`xyne_ws_${workspaceId}_token`]}`);
-    }
-
-    const webRequest = new Request(url, {
-      method: 'POST',
-      headers,
-      body: JSON.stringify(req.body),
-    });
-
-    const result = await handleMutateFallback(webRequest);
+    const result = await handleMutateFallback(toZeroRequest(req));
 
     res.json(result);
   } catch (error) {
@@ -198,31 +141,7 @@ export const handlePushFallback = async (req: Request, res: Response): Promise<v
 
 export const handleQueryZqlToSql = async (req: Request, res: Response): Promise<void> => {
   try {
-    // Convert Express request to Web API Request
-    const url = `${req.protocol}://${req.get('host')}${req.originalUrl}`;
-    const headers = new Headers();
-
-    Object.entries(req.headers).forEach(([key, value]) => {
-      if (typeof value === 'string') {
-        headers.set(key, value);
-      } else if (Array.isArray(value)) {
-        headers.set(key, value.join(', '));
-      }
-    });
-
-    // Add token from workspace-specific cookie to Authorization header
-    const workspaceId = req.cookies?.xyne_last_workspace;
-    if (workspaceId && req.cookies?.[`xyne_ws_${workspaceId}_token`]) {
-      headers.set('authorization', `Bearer ${req.cookies[`xyne_ws_${workspaceId}_token`]}`);
-    }
-
-    const webRequest = new Request(url, {
-      method: 'POST',
-      headers,
-      body: JSON.stringify(req.body),
-    });
-
-    const result = await handleQueriesZqlToSql(webRequest);
+    const result = await handleQueriesZqlToSql(toZeroRequest(req));
 
     res.json(result);
   } catch (error) {

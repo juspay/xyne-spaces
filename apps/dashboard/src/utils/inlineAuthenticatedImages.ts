@@ -1,6 +1,7 @@
 import axios from 'axios';
 import { logger } from './logger';
 import { API_BASE_URL } from '../config';
+import { buildAuthHeaders } from '../services/clients/authHeaders';
 
 // Sandboxed iframes without `allow-same-origin` run from an opaque origin:
 // their subresource loads carry no cookies, so an <img> pointing at an
@@ -102,6 +103,7 @@ export async function inlineAuthenticatedImages(
         const response = await axios.get<Blob>(resolved, {
           responseType: 'blob',
           withCredentials: true,
+          headers: buildAuthHeaders(),
         });
         const blob = response.data;
         if (!blob.type.startsWith('image/')) {

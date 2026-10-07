@@ -531,65 +531,6 @@ export class UserService {
   }
 
   /**
-   * Store refresh token for a user (deprecated - use UserSessionService instead)
-   * @deprecated Use UserSessionService.createSession() instead
-   */
-  async storeRefreshToken(
-    userId: string,
-    _refreshToken: string | null,
-    _expiryDate?: Date
-  ): Promise<User> {
-    try {
-      // Update user's last activity time
-      const user = await this.prisma.user.update({
-        where: { id: userId },
-        data: {
-          updatedAt: new Date(),
-        },
-      });
-
-      logger.info(
-        `storeRefreshToken called for user: ${user.email} (${user.id}) - use UserSessionService instead`
-      );
-      return user;
-    } catch (error) {
-      logger.error('Error in storeRefreshToken:', error);
-      throw new Error('Failed to store refresh token');
-    }
-  }
-
-  /**
-   * Get user by refresh token (deprecated - use UserSessionService instead)
-   * @deprecated Use UserSessionService.getSessionByRefreshToken() instead
-   */
-  async getUserByRefreshToken(_refreshToken: string): Promise<User | null> {
-    try {
-      logger.info(
-        'getUserByRefreshToken called - use UserSessionService.getSessionByRefreshToken() instead'
-      );
-      return null;
-    } catch (error) {
-      logger.error('Error getting user by refresh token:', error);
-      throw new Error('Failed to get user by refresh token');
-    }
-  }
-
-  /**
-   * Invalidate refresh token for a user (deprecated - use UserSessionService instead)
-   * @deprecated Use UserSessionService.revokeAllUserSessions() instead
-   */
-  async invalidateRefreshToken(userId: string): Promise<void> {
-    try {
-      logger.info(
-        `invalidateRefreshToken called for user ID: ${userId} - use UserSessionService.revokeAllUserSessions() instead`
-      );
-    } catch (error) {
-      logger.error('Error invalidating refresh token:', error);
-      throw new Error('Failed to invalidate refresh token');
-    }
-  }
-
-  /**
    * Get all workspaces for an email address
    * Used during workspace selection flow (no auth user yet)
    */

@@ -1,30 +1,38 @@
 import { Router, type Request, type Response } from 'express';
-import { SessionStatus } from '@xyne/shared';
 import { DatabaseClient } from '@/database/client';
 import { getEncryptionProvider } from '@/services/encryption';
 import { logger } from '@/utils/logger';
+import { getClientSessionFingerprint } from '@/auth/sessionTokens';
+import { findById as findAuthSessionById } from '@/bypassAcl/authSessionServices';
 
 const router = Router();
 const prisma = DatabaseClient.getInstance();
 
+/*
+ * The encryption key store is keyed by the client's session FINGERPRINT (sha256 of the opaque
+ * `xs` token, or the legacy `user_sessions.id` for sessions converted from it), never the raw
+ * token. The dashboard receives it as `sessionFingerprint` and echoes it back in `x-session-id`
+ * on encrypted bodies; `getClientSessionFingerprint` accepts both forms.
+ */
+
 router.get('/public-key', async (req: Request, res: Response) => {
-  const sessionId = req.authenticatedSessionId ?? req.cookies?.user_session_id;
-  if (!req.user || !sessionId) {
+  const fingerprint = getClientSessionFingerprint(req);
+  if (!req.user || !fingerprint) {
     res.status(401).json({ error: 'Unauthorized' });
     return;
   }
 
   try {
     const data = await getEncryptionProvider().getPublicConfig();
-    res.json({ ...data, sessionFingerprint: sessionId });
+    res.json({ ...data, sessionFingerprint: fingerprint });
   } catch (err) {
     res.status(502).json({ error: 'Encryption service unavailable' });
   }
 });
 
 router.post('/register-client-key', async (req: Request, res: Response) => {
-  const sessionId = req.authenticatedSessionId ?? req.cookies?.user_session_id;
-  if (!req.user || !sessionId) {
+  const fingerprint = getClientSessionFingerprint(req);
+  if (!req.user || !req.authSession || !fingerprint) {
     res.status(401).json({ error: 'Unauthorized' });
     return;
   }
@@ -37,16 +45,10 @@ router.post('/register-client-key', async (req: Request, res: Response) => {
 
   let orgId: string;
   try {
-    const [session, workspace] = await prisma.$transaction([
-      prisma.userSession.findFirst({
-        where: {
-          id: sessionId,
-          userId: req.user.id,
-          status: SessionStatus.ACTIVE,
-          refreshTokenExpiry: { gt: new Date() },
-        },
-        select: { id: true },
-      }),
+    // Liveness: the session the request resolved through must still be ACTIVE and unexpired
+    // (it may have been revoked between the middleware read and this write).
+    const [session, workspace] = await Promise.all([
+      findAuthSessionById(req.authSession.sessionId),
       prisma.workspace.findFirst({
         where: {
           id: req.user.workspaceId,
@@ -56,7 +58,12 @@ router.post('/register-client-key', async (req: Request, res: Response) => {
       }),
     ]);
 
-    if (!session) {
+    const sessionLive =
+      !!session &&
+      session.accountId === req.authSession.accountId &&
+      session.status === 'ACTIVE' &&
+      session.absoluteExpiry.getTime() > Date.now();
+    if (!sessionLive) {
       res.status(401).json({ error: 'Unauthorized', message: 'Active session not found' });
       return;
     }
@@ -79,7 +86,7 @@ router.post('/register-client-key', async (req: Request, res: Response) => {
   try {
     const result = await getEncryptionProvider().registerSessionKey({
       wrappedKey,
-      sessionId,
+      sessionId: fingerprint,
       userId: req.user.id,
       orgId,
     });

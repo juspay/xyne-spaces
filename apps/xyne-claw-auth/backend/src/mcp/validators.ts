@@ -106,11 +106,9 @@ async function validateTargetConversationId(
 
   const auth: SpacesAuthContext = {};
   const token = stringField(credentials["token"]);
-  const sessionId = stringField(credentials["sessionId"]);
   const workspaceId = stringField(credentials["workspaceId"]);
   const baseUrl = stringField(credentials["url"]);
   if (token) auth.token = token;
-  if (sessionId) auth.sessionId = sessionId;
   if (workspaceId) auth.workspaceId = workspaceId;
   if (baseUrl) auth.baseUrl = baseUrl;
 

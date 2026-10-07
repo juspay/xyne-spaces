@@ -18,7 +18,8 @@ import { spacesAppFetch, spacesAppFetchMultipart } from "../lib/spaces-api.js";
 import { getRequesterId, getOrgId, isClawAdmin, getAgentEditAccess } from "../middleware/agent-acl.js";
 import { assertCanControlScheduledJob } from "./scheduled-jobs-auth.js";
 import { requireStrictS2S } from "../middleware/require-auth.js";
-import { getSpacesAuthForUser, getWorkspaceIdForUser } from "../lib/spaces-db.js";
+import { getWorkspaceIdForUser } from "../lib/spaces-db.js";
+import { mintSpacesToken } from "../lib/spaces-auth.js";
 import { expandSpacesMentions, resolveUnboundMentions } from "../lib/mention-transform.js";
 import { buildSpacesMentionLookups, buildSpacesMentionLookupsDb } from "../lib/mention-lookups.js";
 import {
@@ -390,7 +391,7 @@ router.post("/", asyncHandler(async (req: Request, res: Response) => {
   // Without this fallback the row gets workspaceId=NULL and Spaces rejects
   // the result-delivery call when the job fires.
   if (!workspaceId) {
-    const live = await getSpacesAuthForUser(userId, "scheduled-job");
+    const live = await mintSpacesToken({ userId }, "scheduled-job");
     if (live?.workspaceId) {
       workspaceId = live.workspaceId;
       log.info(`[scheduled-jobs] resolved workspaceId=${workspaceId} from Spaces session for userId=${userId}`);
@@ -398,7 +399,7 @@ router.post("/", asyncHandler(async (req: Request, res: Response) => {
   }
 
   // Final fallback: read workspaceId straight off the user row (no live
-  // session required). getSpacesAuthForUser only resolves for currently
+  // session required). mintSpacesToken only resolves for currently
   // logged-in users, so reminders typed hours earlier / S2S / automation
   // triggers previously fell through to a NULL workspaceId — and Spaces then
   // silently rejected result delivery when the job fired ("missing
@@ -1300,14 +1301,13 @@ router.post("/:id/result", requireStrictS2S, async (req: Request<{ id: string }>
   let resultText = payload.result ?? "";
   try {
     const senderAuth = row.userId
-      ? await getSpacesAuthForUser(row.userId, "scheduled-job").catch(() => null)
+      ? await mintSpacesToken({ userId: row.userId }, "scheduled-job").catch(() => null)
       : null;
     if (senderAuth?.token) {
       resultText = await resolveUnboundMentions(
         resultText,
         buildSpacesMentionLookups({
           token: senderAuth.token,
-          sessionId: senderAuth.sessionId,
           workspaceId: senderAuth.workspaceId,
         }),
       );

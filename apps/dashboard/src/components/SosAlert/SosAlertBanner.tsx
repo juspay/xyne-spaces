@@ -6,6 +6,7 @@ import { useNavigate, useParams } from 'react-router-dom';
 import { useAuthContext } from '../../providers/AuthProvider';
 import { API_BASE_URL } from '../../config';
 import { queryClient } from '../../services/clients/queryClient';
+import { buildAuthHeaders } from '../../services/clients/authHeaders';
 import { websocketService } from '../../services/clients/socketClient';
 import { sendSosAlertEvent, useSosAlertStore, type SosAlert } from '../../stores/sosAlertStore';
 import { globalClickTracker } from '../../services/Analytics/globalClickTracker';
@@ -148,7 +149,7 @@ export const SosAlertBanner: React.FC = () => {
           await axios.post(
             `${API_BASE_URL}/auth/switch-workspace`,
             { workspaceId: alert.workspaceId },
-            { withCredentials: true },
+            { withCredentials: true, headers: buildAuthHeaders(activeWorkspaceId) },
           );
           acknowledge(alert.id);
           queryClient.clear();

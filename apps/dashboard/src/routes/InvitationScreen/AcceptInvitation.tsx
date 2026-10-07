@@ -5,6 +5,7 @@ import { Button } from '../../components/ui/Button/Button';
 import axios from 'axios';
 import Cookies from 'js-cookie';
 import { API_BASE_URL } from '../../config';
+import { buildAuthHeaders } from '../../services/clients/authHeaders';
 import {
   authActor,
   PENDING_WORKSPACE_ID_KEY,
@@ -156,7 +157,7 @@ export const AcceptInvitation = (): ReactElement => {
       const acceptResponse = await axios.post<AcceptResponse>(
         `${API_BASE_URL}/invitations/${invitationId}/accept`,
         {},
-        { withCredentials: true },
+        { withCredentials: true, headers: buildAuthHeaders() },
       );
 
       const { workspaceId, redirectPath } = acceptResponse.data;
@@ -165,7 +166,7 @@ export const AcceptInvitation = (): ReactElement => {
       const loginResponse = await axios.post<LoginWorkspaceResponse>(
         `${API_BASE_URL}/auth/login-workspace`,
         { workspaceId },
-        { withCredentials: true },
+        { withCredentials: true, headers: buildAuthHeaders(workspaceId) },
       );
 
       const { user } = loginResponse.data;

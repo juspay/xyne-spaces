@@ -8,6 +8,7 @@ import { db } from '@/database/client';
 import { recapWorker } from './recapWorker';
 import { deskReportWorker } from './deskReportWorker';
 import { instagramTokenRefreshWorker } from './instagramTokenRefreshWorker';
+import { authSessionCleanupWorker } from './authSessionCleanupWorker';
 
 /**
  * Worker Scheduler
@@ -23,6 +24,7 @@ export class WorkerScheduler {
     private deskReportGenerationQueue: Bull.Queue | null = null;
     private deskReportCleanupQueue: Bull.Queue | null = null;
     private instagramTokenRefreshQueue: Bull.Queue | null = null;
+    private authSessionCleanupQueue: Bull.Queue | null = null;
 
     /**
      * Start all workers
@@ -389,6 +391,73 @@ export class WorkerScheduler {
             logger.info('[WORKER_SCHEDULER] Instagram token refresh worker is disabled (ENABLE_INSTAGRAM_TOKEN_REFRESH_WORKER=false)');
         }
 
+        // Auth session cleanup: expire auth_sessions past absoluteExpiry (+grants), grants past
+        // expiresAt, and legacy workflow.user_sessions past refreshTokenExpiry, in batches.
+        if (config.session.cleanupWorkerEnabled) {
+            this.authSessionCleanupQueue = new Bull('auth-session-cleanup', {
+                redis: { ...redisService.getRedisConfig(), lazyConnect: false },
+                defaultJobOptions: {
+                    removeOnComplete: true,
+                    removeOnFail: false,
+                    attempts: 3,
+                    backoff: {
+                        type: 'exponential',
+                        delay: 5000,
+                    },
+                },
+                settings: {
+                    stalledInterval: 10 * 60 * 1000, // 10 minutes for cleanup jobs
+                    maxStalledCount: 1,
+                },
+            });
+
+            this.authSessionCleanupQueue.process(async (job) => {
+                logger.info(`[WORKER_SCHEDULER] Processing auth session cleanup job ${job.id}...`);
+                try {
+                    const totals = await authSessionCleanupWorker.run();
+                    logger.info(`[WORKER_SCHEDULER] Auth session cleanup job ${job.id} completed successfully`, totals);
+                } catch (error) {
+                    logger.error(`[WORKER_SCHEDULER] Auth session cleanup job ${job.id} failed:`, error);
+                    throw error;
+                }
+            });
+
+            // Remove existing repeatable job to allow CRON updates
+            try {
+                await this.authSessionCleanupQueue.removeRepeatableByKey('auth-session-cleanup-repeatable');
+                logger.info('[WORKER_SCHEDULER] Removed existing auth session cleanup repeatable job');
+            } catch (error) {
+                // Ignore error if job doesn't exist
+                logger.debug('[WORKER_SCHEDULER] No existing auth session cleanup repeatable job to remove');
+            }
+
+            const sessionCleanupCron = config.session.cleanupCron;
+            logger.info(`[WORKER_SCHEDULER] Scheduling auth session cleanup with cron: "${sessionCleanupCron}"`);
+
+            try {
+                await this.authSessionCleanupQueue.add(
+                    {},
+                    {
+                        repeat: { cron: sessionCleanupCron },
+                        jobId: 'auth-session-cleanup-repeatable',
+                        attempts: 3,
+                        backoff: {
+                            type: 'exponential',
+                            delay: 5000,
+                        },
+                        removeOnComplete: true,
+                    }
+                );
+                logger.info(`[WORKER_SCHEDULER] Auth session cleanup scheduled via Bull (${sessionCleanupCron})`);
+            } catch (cronError) {
+                logger.error(`[WORKER_SCHEDULER] Failed to schedule auth session cleanup with cron "${sessionCleanupCron}":`, cronError);
+                logger.warn(`[WORKER_SCHEDULER] Auth session cleanup will not be automatically scheduled. Manual triggers will still work.`);
+                // Continue without crashing the entire worker
+            }
+        } else {
+            logger.info('[WORKER_SCHEDULER] Auth session cleanup worker is disabled (ENABLE_SESSION_CLEANUP_WORKER=false)');
+        }
+
         this.isRunning = true;
         logger.info('[WORKER_SCHEDULER] All workers started');
     }
@@ -438,6 +507,11 @@ export class WorkerScheduler {
         if (this.instagramTokenRefreshQueue) {
             await this.instagramTokenRefreshQueue.close();
             this.instagramTokenRefreshQueue = null;
+        }
+
+        if (this.authSessionCleanupQueue) {
+            await this.authSessionCleanupQueue.close();
+            this.authSessionCleanupQueue = null;
         }
 
         this.isRunning = false;

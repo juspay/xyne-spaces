@@ -118,13 +118,11 @@ export async function resolveAuthForUser(userId: string): Promise<SpacesAuthCont
   }
   const c = eff.credentials as Record<string, unknown>;
   const token = typeof c["token"] === "string" ? (c["token"] as string) : "";
-  const sessionId = typeof c["sessionId"] === "string" ? (c["sessionId"] as string) : "";
   const workspaceId = typeof c["workspaceId"] === "string" ? (c["workspaceId"] as string) : "";
   const baseUrl = typeof c["url"] === "string" ? (c["url"] as string) : "";
   if (!token) return null;
   return {
     token,
-    ...(sessionId ? { sessionId } : {}),
     ...(workspaceId ? { workspaceId } : {}),
     ...(baseUrl ? { baseUrl } : {}),
   };

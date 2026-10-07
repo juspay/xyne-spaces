@@ -31,7 +31,8 @@ import { errMsg } from "./errors.js";
 import { decrypt } from "../crypto.js";
 import { CONFIG } from "../config.js";
 import { getFreshCredentials } from "./credentials-refresh.js";
-import { getSpacesAuthForUser, getWorkspaceIdForUser } from "./spaces-db.js";
+import { getWorkspaceIdForUser } from "./spaces-db.js";
+import { mintSpacesToken } from "./spaces-auth.js";
 import { resolveFreshOAuthCreds, TokenRefreshError } from "./oauth-token-endpoint.js";
 import { getOAuthProvider } from "../routes/oauth-token.js";
 
@@ -120,11 +121,12 @@ async function resolveSpacesAppToolsWorkspaceId(
   return null;
 }
 
-/** Synthesize EffectiveCredentials from the user's live Spaces session —
+/** Synthesize EffectiveCredentials from a freshly minted Spaces user token —
  *  the ambient operating credential for the Spaces-session-backed server
- *  types (xyne-spaces, xyne-dashboard). Returns null when no session. */
+ *  types (xyne-spaces, xyne-dashboard). Returns null when the user has no
+ *  live Spaces session anywhere. */
 async function liveSpacesCredentials(userId: string): Promise<EffectiveCredentials | null> {
-  const live = await getSpacesAuthForUser(userId, "mcp-runner");
+  const live = await mintSpacesToken({ userId }, "mcp-runner");
   if (!live) return null;
   return {
     source: "user",
@@ -132,7 +134,6 @@ async function liveSpacesCredentials(userId: string): Promise<EffectiveCredentia
     credentials: {
       url: CONFIG.spacesInternalUrl,
       token: live.token,
-      sessionId: live.sessionId,
       workspaceId: live.workspaceId,
       userId,
     },
@@ -374,15 +375,14 @@ export async function loadEffectiveCredentials(
     }
   }
 
-  // xyne-spaces priority order: live Spaces DB FIRST, cached
-  // userMcpConnection SECOND, global last. Rationale: the cached row in
-  // userMcpConnection goes stale every time Spaces' middleware refreshes
-  // the user's JWT, and that drift is the dominant 401 root cause. The
-  // live read either returns a hit or auto-refreshes via Spaces'
-  // /api/auth/refresh-session before returning. Falling through to the
-  // cached path only happens when SPACES_DB_URL is unset, the user has
-  // no active session, or the refresh hop itself failed — at which point
-  // the cached creds are no worse than nothing.
+  // xyne-spaces priority order: a freshly MINTED user token FIRST, the
+  // cached userMcpConnection row SECOND, global last. Rationale: a stored
+  // token is a short-lived JWT that dies on expiry or logout, so the
+  // S2S-minted credential (lib/spaces-auth.ts, cached until shortly before
+  // expiry) is the only reliable one. Falling through to the cached row
+  // happens when the user has no live Spaces session or the mint hop failed;
+  // the runner then re-mints from the row's `userId` anyway (mcp/runner.ts),
+  // so the row mostly contributes the `url`/`authMode` shape.
   if (serverType === "xyne-spaces") {
     const live = await liveSpacesCredentials(userId);
     if (live) return live;

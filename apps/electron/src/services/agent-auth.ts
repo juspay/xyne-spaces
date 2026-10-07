@@ -9,6 +9,13 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { resolvePeerProcess, describePeer, PeerProcess } from './peer-process';
 import { showAgentConsentWindow } from './agent-consent-window';
+import { readWorkspaceJwt } from './cookies';
+
+/** The signed-in user's workspace JWT plus the workspace it was minted for. */
+interface UserWorkspaceCredential {
+  token: string;
+  workspaceId: string;
+}
 
 const DEFAULT_PORT = 49231;
 
@@ -390,8 +397,8 @@ class AgentAuthService {
     }
 
     try {
-      const accessToken = await this.getUserAccessTokenFromSession();
-      if (!accessToken) {
+      const userCredential = await this.getUserAccessTokenFromSession();
+      if (!userCredential) {
         this.sendJson(res, 401, { 
           error: 'Unauthorized',
           message: 'No user access token found in session' 
@@ -409,7 +416,7 @@ class AgentAuthService {
         url: backendUrl,
         method: 'GET',
         headers: {
-          'Authorization': `Bearer ${accessToken}`,
+          ...this.userAuthHeaders(userCredential),
           'Content-Type': 'application/json'
         }
       });
@@ -461,8 +468,8 @@ class AgentAuthService {
     }
 
     try {
-      const accessToken = await this.getUserAccessTokenFromSession();
-      if (!accessToken) {
+      const userCredential = await this.getUserAccessTokenFromSession();
+      if (!userCredential) {
         this.sendJson(res, 401, {
           error: 'Unauthorized',
           message: 'No user access token found in session',
@@ -481,7 +488,7 @@ class AgentAuthService {
         url: backendUrl,
         method: 'POST',
         headers: {
-          Authorization: `Bearer ${accessToken}`,
+          ...this.userAuthHeaders(userCredential),
           'Content-Type': 'application/json',
         },
         bodyBuffer,
@@ -531,8 +538,8 @@ class AgentAuthService {
     }
 
     try {
-      const accessToken = await this.getUserAccessTokenFromSession();
-      if (!accessToken) {
+      const userCredential = await this.getUserAccessTokenFromSession();
+      if (!userCredential) {
         this.sendJson(res, 401, {
           error: 'Unauthorized',
           message: 'No user access token found in session',
@@ -551,7 +558,7 @@ class AgentAuthService {
         url: backendUrl,
         method: 'POST',
         headers: {
-          Authorization: `Bearer ${accessToken}`,
+          ...this.userAuthHeaders(userCredential),
           'Content-Type': 'application/json',
         },
         bodyBuffer,
@@ -591,8 +598,8 @@ class AgentAuthService {
     }
 
     try {
-      const accessToken = await this.getUserAccessTokenFromSession();
-      if (!accessToken) {
+      const userCredential = await this.getUserAccessTokenFromSession();
+      if (!userCredential) {
         this.sendJson(res, 401, {
           error: 'Unauthorized',
           message: 'No user access token found in session',
@@ -619,7 +626,7 @@ class AgentAuthService {
       );
 
       const headers: Record<string, string> = {
-        Authorization: `Bearer ${accessToken}`,
+        ...this.userAuthHeaders(userCredential),
         'Content-Type': contentType,
       };
 
@@ -917,8 +924,8 @@ class AgentAuthService {
 
     try {
       // 3. Retrieve the user's active access token from workspace-scoped cookies
-      const accessToken = await this.getUserAccessTokenFromSession();
-      if (!accessToken) {
+      const userCredential = await this.getUserAccessTokenFromSession();
+      if (!userCredential) {
         this.sendJson(res, 401, { error: 'Unauthorized: no active user session' });
         return;
       }
@@ -931,7 +938,7 @@ class AgentAuthService {
         url: backendUrl,
         method: 'POST',
         headers: {
-          'Authorization': `Bearer ${accessToken}`,
+          ...this.userAuthHeaders(userCredential),
           'Content-Type': 'application/json'
         },
         data: body
@@ -952,7 +959,7 @@ class AgentAuthService {
    */
   private async fetchMessageAttachments(
     id: string,
-    accessToken: string
+    userCredential: UserWorkspaceCredential
   ): Promise<{ messageId: string; conversationId: string; attachments: any[] } | null> {
     let actualMessageId = id;
     let conversationId: string | null = null;
@@ -964,7 +971,7 @@ class AgentAuthService {
       url: conversationByMessageUrl,
       method: 'GET',
       headers: {
-        'Authorization': `Bearer ${accessToken}`,
+        ...this.userAuthHeaders(userCredential),
         'Content-Type': 'application/json'
       }
     });
@@ -982,7 +989,7 @@ class AgentAuthService {
         url: conversationUrl,
         method: 'GET',
         headers: {
-          'Authorization': `Bearer ${accessToken}`,
+          ...this.userAuthHeaders(userCredential),
           'Content-Type': 'application/json'
         }
       });
@@ -1004,7 +1011,7 @@ class AgentAuthService {
       url: messageUrl,
       method: 'GET',
       headers: {
-        'Authorization': `Bearer ${accessToken}`,
+        ...this.userAuthHeaders(userCredential),
         'Content-Type': 'application/json'
       }
     });
@@ -1042,14 +1049,14 @@ class AgentAuthService {
 
     try {
       // 2. Retrieve the user's active access token from workspace-scoped cookies
-      const accessToken = await this.getUserAccessTokenFromSession();
-      if (!accessToken) {
+      const userCredential = await this.getUserAccessTokenFromSession();
+      if (!userCredential) {
         this.sendJson(res, 401, { error: 'Unauthorized: no active user session' });
         return;
       }
 
       // 3. Fetch attachments using common logic
-      const result = await this.fetchMessageAttachments(id, accessToken);
+      const result = await this.fetchMessageAttachments(id, userCredential);
 
       if (!result) {
         this.sendJson(res, 404, {
@@ -1087,7 +1094,7 @@ class AgentAuthService {
           const downloadUrl = `${config.BACKEND_URL}/api/attachments/${attachment.id}/download`;
           log.info(`[AgentAuth] Downloading attachment: ${filename} from ${downloadUrl}`);
 
-          await this.downloadAttachmentToFile(downloadUrl, filePath, accessToken);
+          await this.downloadAttachmentToFile(downloadUrl, filePath, userCredential);
 
           const stats = await fs.promises.stat(filePath);
           downloadedFiles.push({
@@ -1137,14 +1144,14 @@ class AgentAuthService {
 
     try {
       // 2. Retrieve the user's active access token from workspace-scoped cookies
-      const accessToken = await this.getUserAccessTokenFromSession();
-      if (!accessToken) {
+      const userCredential = await this.getUserAccessTokenFromSession();
+      if (!userCredential) {
         this.sendJson(res, 401, { error: 'Unauthorized: no active user session' });
         return;
       }
 
       // 3. Fetch attachments using common logic
-      const result = await this.fetchMessageAttachments(id, accessToken);
+      const result = await this.fetchMessageAttachments(id, userCredential);
 
       if (!result) {
         this.sendJson(res, 404, {
@@ -1187,7 +1194,7 @@ class AgentAuthService {
   private async downloadAttachmentToFile(
     url: string,
     filePath: string,
-    accessToken: string
+    userCredential: UserWorkspaceCredential
   ): Promise<void> {
     return new Promise((resolve, reject) => {
       const request = net.request({
@@ -1196,7 +1203,9 @@ class AgentAuthService {
         useSessionCookies: false
       });
 
-      request.setHeader('Authorization', `Bearer ${accessToken}`);
+      for (const [name, value] of Object.entries(this.userAuthHeaders(userCredential))) {
+        request.setHeader(name, value);
+      }
 
       request.on('response', (response) => {
         if (response.statusCode !== 200) {
@@ -1387,30 +1396,30 @@ class AgentAuthService {
     res.end(backendResponse.body);
   }
 
-  private async getUserAccessTokenFromSession(): Promise<string | null> {
+  /**
+   * The signed-in user's workspace JWT, taken from the cookie jar:
+   * 1) the `xyne_last_workspace` hint names the active workspace
+   * 2) `readWorkspaceJwt` finds that workspace's token cookie
+   * Returns the workspace id too, because the backend expects the Bearer
+   * token to be accompanied by `x-workspace-id`.
+   */
+  private async getUserAccessTokenFromSession(): Promise<UserWorkspaceCredential | null> {
     const cookies = await session.defaultSession.cookies.get({});
-    const readCookie = (name: string): string | undefined =>
-      cookies.find((cookie) => cookie.name === name)?.value;
+    const workspaceId = cookies.find((cookie) => cookie.name === 'xyne_last_workspace')?.value;
+    if (!workspaceId) return null;
 
-    // Prefer authV2 workspace cookies:
-    // 1) pointer cookie `xyne_last_workspace`
-    // 2) token cookie `xyne_ws_<workspaceId>_token`
-    const lastWorkspace = readCookie('xyne_last_workspace');
-    if (lastWorkspace) {
-      const workspaceToken = readCookie(`xyne_ws_${lastWorkspace}_token`);
-      if (workspaceToken) {
-        return workspaceToken;
-      }
-    }
+    const token = readWorkspaceJwt(cookies, workspaceId);
+    if (!token) return null;
 
-    // Backward compatibility fallback: old `google_access_token` cookie.
-    // Accept only JWT-shaped values to avoid using pending-auth JSON blobs.
-    const legacy = readCookie('google_access_token');
-    if (legacy && legacy.split('.').length === 3) {
-      return legacy;
-    }
+    return { token, workspaceId };
+  }
 
-    return null;
+  /** Headers that authenticate a proxied backend call as the signed-in user. */
+  private userAuthHeaders(credential: UserWorkspaceCredential): Record<string, string> {
+    return {
+      'Authorization': `Bearer ${credential.token}`,
+      'x-workspace-id': credential.workspaceId,
+    };
   }
 
   /**

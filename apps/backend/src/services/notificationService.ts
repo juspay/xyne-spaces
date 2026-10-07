@@ -783,13 +783,15 @@ class NotificationService {
     }
   }
 
+  /** `accountId` = org_members.memberId of the caller; tokens land on `registration.sessionId` (its own auth_sessions row). */
   async registerMobilePushToken(
-    userId: string,
+    accountId: string,
     registration: MobilePushRegistration,
   ): Promise<void> {
     try {
-      await fcmPushService.registerToken(userId, registration);
-      logger.info(`Registered mobile push token for user ${userId}`, {
+      await fcmPushService.registerToken(accountId, registration);
+      logger.info(`Registered mobile push token for account ${accountId}`, {
+        sessionId: registration.sessionId,
         deviceId: registration.deviceId ?? null,
         platform: registration.platform ?? 'unknown',
       });
@@ -799,20 +801,11 @@ class NotificationService {
     }
   }
 
-  async unregisterMobilePushToken(
-    userId: string,
-    sessionId?: string
-  ): Promise<void> {
+  /** Clears the push tokens of the caller's own auth session only; account-wide clears happen via session revocation. */
+  async unregisterMobilePushToken(sessionId: string): Promise<void> {
     try {
-      if (sessionId) {
-        await fcmPushService.clearSessionPushToken(sessionId);
-      } else {
-        await fcmPushService.unregisterUserTokens(userId);
-      }
-      logger.info('Unregistered mobile push token', {
-        userId,
-        scope: sessionId ? 'single_session' : 'all_sessions',
-      });
+      await fcmPushService.unregisterToken(sessionId);
+      logger.info('Unregistered mobile push token', { sessionId });
     } catch (error) {
       logger.error('Failed to unregister mobile push token:', error);
       throw error;

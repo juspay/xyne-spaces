@@ -211,6 +211,7 @@ import sdlcAgentInternalRoutes from '@/routes/sdlcAgentInternal';
 import { createSdkPublicRouter, createSdkRouter } from '@/api/sdk';
 import { errorHandler as sdkErrorHandler } from '@/api/sdk/handler';
 import sdkSsoRoutes from '@/routes/sdk-sso';
+import internalAuthRoutes from '@/routes/internalAuth';
 
 
 export class App {
@@ -554,6 +555,9 @@ export class App {
       }
       next();
     };
+
+    // Workspace JWT for a user/account with a live session (claw-auth; replaces its user_sessions reads).
+    this.app.use('/api/internal/auth', validateS2SKey, internalAuthRoutes);
 
     this.app.post('/api/internal/postAsUser', validateS2SKey, (req: Request, res: Response) => {
       // Mark this request so ChatController.postMessage persists the message as a

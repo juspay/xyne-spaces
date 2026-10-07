@@ -10,7 +10,7 @@ generator client {
 
 generator zero {
   provider      = "prisma-generator-zero"
-  excludeTables = ["WorkspaceJoinRequest", "AiProvisioningStatus", "OrgLLMServiceAccountCredential", "OrganizationDomain", "QuestionnaireResponse", "ExternalSource", "WorkflowFolder", "WorkflowCredential", "AgentConversationShare"]
+  excludeTables = ["WorkspaceJoinRequest", "AiProvisioningStatus", "OrgLLMServiceAccountCredential", "OrganizationDomain", "QuestionnaireResponse", "ExternalSource", "WorkflowFolder", "WorkflowCredential", "AgentConversationShare", "AuthSession"]
 }
 
 datasource db {
@@ -872,6 +872,41 @@ model UserSession {
   @@schema("workflow")
 }
 
+// One row per device/browser. Principal = OrgMember (accountId); workspace is a per-request claim
+// (x-workspace-id -> public.users membership). Client holds the opaque `xs1_<random>` token; only
+// its sha256 is stored. workflow.user_sessions is read-only legacy: a legacy cookie converts into a
+// row here on first use (legacySessionId) and resolves by tokenHash from then on.
+// SQL-only partial uniques (Prisma cannot express them; precedent draft_messages):
+//   UNIQUE (deviceKey) WHERE status='ACTIVE'; UNIQUE (fcmToken) / (voipToken) WHERE ACTIVE AND NOT NULL.
+model AuthSession {
+  id              String    @id @default(uuid())
+  accountId       String    // org_members.memberId
+  orgId           String    // denormalized tenant key
+  tokenHash       String    @unique
+  legacySessionId String?   @unique
+  deviceKey       String    // `xd` cookie value (web/mobile jar) or mobile deviceId; one ACTIVE row per key
+  status          String    @default("ACTIVE") // ACTIVE | REVOKED | EXPIRED
+  platform        String    @default("WEB")    // WEB | ELECTRON | MOBILE | SDK
+  absoluteExpiry  DateTime
+  deviceInfo      String?   // encryptionService.encrypt(JSON)
+  fcmToken        String?   // raw
+  voipToken       String?   // raw
+  pushPlatform    String?   // ios | android | unknown
+  appVersion      String?
+  revokedAt       DateTime?
+  revokeReason    String?   // USER_LOGOUT | DEVICE_REUSED | PASSWORD_CHANGED | PASSWORD_RESET | PROVIDER_REVOKED | ACCOUNT_LEFT | EXPIRED | TEST_CLEANUP
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  orgMember OrgMember @relation(fields: [accountId], references: [memberId])
+
+  @@index([accountId, status])
+  @@index([status, absoluteExpiry])
+  @@index([deviceKey])
+  @@map("auth_sessions")
+  @@schema("non_zero")
+}
+
 model User {
   id             String       @id @default(cuid())
   name           String
@@ -949,6 +984,7 @@ model User {
   @@index([workspaceId, id])
   @@index([activityStatus])
   @@index([orgMemberId])
+  @@index([orgMemberId, workspaceId]) // membership read: account x workspace
   @@map("users")
   @@schema("public")
 }
@@ -1577,6 +1613,7 @@ model OrgMember {
   // Relations
   organization Organization @relation(fields: [orgId], references: [orgId])
   users        User[]
+  authSessions AuthSession[]
 
   @@index([orgId])
   @@index([orgId, joinedAt])

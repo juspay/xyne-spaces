@@ -36,7 +36,7 @@ export class MobilePushChannel {
   }
 
   private async deliverFcm(job: MobilePushJobData): Promise<NotificationDeliveryResult> {
-    const { sessionId, token, platform, payload, userId, appVersion } = job;
+    const { sessionId, source, token, platform, payload, userId, appVersion } = job;
     const isIncomingCall = payload.type === 'INCOMING_CALL';
 
     try {
@@ -119,8 +119,9 @@ export class MobilePushChannel {
         try {
           // Only clear token if it's definitely invalid
           if (errorCode === 'UNREGISTERED' || errorCode === 'NOT_FOUND') {
-            await fcmPushService.clearSessionPushToken(sessionId);
-            logger.info('[MobilePush] Cleared invalid token for push notification');
+            // Jobs queued before `source` existed carry a legacy user_sessions id.
+            await fcmPushService.clearPushToken({ id: sessionId, source: source ?? 'legacy' });
+            logger.info('[MobilePush] Cleared invalid token for push notification', { source: source ?? 'legacy' });
           }
         } catch (clearError) {
           logger.error(`[MobilePush] Failed to clear session token`, {

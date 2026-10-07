@@ -20,12 +20,15 @@ const USE_AUTH_V2 = true;
 
 /**
  * authV2 callback redirects here with `?success=true&email=...&workspaces=[...]`
- * AND a 10-min HttpOnly `google_access_token` cookie holding pending Google auth.
- * To complete login we must POST workspaceId to /api/auth/login-workspace, which
- * exchanges the pending cookie for a real `xyne_ws_<id>_token` session cookie.
+ * AND a 10-min HttpOnly pending-identity cookie holding the pending Google
+ * identity. To complete login we must POST workspaceId to
+ * /api/auth/login-workspace, which exchanges the pending cookie for the real
+ * session: the httpOnly session cookie `xs`, the per-workspace JWT cookie
+ * `xw_<workspaceId>`, and the `xyne_last_workspace` hint. The workspace is
+ * still a per-request claim (`x-workspace-id` / the hint cookie).
  *
- * Without this step, /api/auth/validate keeps returning 401 because no session
- * row exists yet (we saw "No workspace session cookie present" in prod logs).
+ * Without this step, /api/auth/me keeps returning 401 because no session row
+ * exists yet.
  */
 async function completeAuthV2HandshakeIfNeeded(): Promise<void> {
   if (!USE_AUTH_V2) return;
@@ -86,8 +89,11 @@ export function useAuth() {
   }, []);
 
   const logout = useCallback(() => {
-    document.cookie = "google_access_token=; Max-Age=0; path=/";
-    document.cookie = "user_session_id=; Max-Age=0; path=/";
+    // The httpOnly session cookie `xs` (and the `xw_*` workspace cookies)
+    // cannot be cleared from `document.cookie`. Spaces' logout revokes the
+    // session row and clears every auth cookie server-side; the local state
+    // flips regardless so the UI never waits on the network.
+    fetch(`${AUTH_BASE_URL}/logout`, { method: "POST", credentials: "include" }).catch(() => {});
     setState({ status: "unauthenticated" });
   }, []);
 

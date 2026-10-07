@@ -1,7 +1,8 @@
 import { PrismaClient } from '@prisma/client';
 import { logger, loggerContext } from '@/utils/logger';
 
-const SENSITIVE_FIELDS = ['refreshToken', 'accessToken', 'fcmToken', 'voipToken'] as const;
+const SENSITIVE_FIELDS = ['refreshToken', 'accessToken', 'fcmToken', 'voipToken', 'tokenHash', 'deviceKey'] as const;
+const LOGGED_MODELS = ['UserSession', 'AuthSession'] as const;
 const WRITE_OPERATIONS = ['create', 'createMany', 'update', 'updateMany', 'delete', 'deleteMany'] as const;
 
 type LoggableData = Record<string, unknown> | Record<string, unknown>[] | null | undefined;
@@ -40,10 +41,11 @@ export function setupUserSessionLogging(prisma: PrismaClient, enabled: boolean =
   if (!enabled) return;
 
   prisma.$use(async (params, next) => {
-    const isUserSession = params.model === 'UserSession';
+    const model = params.model as (typeof LOGGED_MODELS)[number] | undefined;
+    const isSessionModel = !!model && LOGGED_MODELS.includes(model);
     const isWriteOperation = WRITE_OPERATIONS.includes(params.action as typeof WRITE_OPERATIONS[number]);
 
-    if (!isUserSession || !isWriteOperation) {
+    if (!isSessionModel || !isWriteOperation) {
       return next(params);
     }
 
@@ -62,6 +64,7 @@ export function setupUserSessionLogging(prisma: PrismaClient, enabled: boolean =
         params.args?.where,
         affectedRows,
         identifiers.userId,
+        model,
       );
     } else if (params.args?.data) {
       logDataOperation(
@@ -72,6 +75,7 @@ export function setupUserSessionLogging(prisma: PrismaClient, enabled: boolean =
         params.args.where,
         affectedRows,
         identifiers.userId,
+        model,
       );
     }
 
@@ -146,6 +150,7 @@ function logDeleteOperation(
   where: Record<string, unknown> = {},
   affectedRows: number | 'unknown' = 'unknown',
   userId: string = 'unknown',
+  model: string = 'UserSession',
 ): void {
   logger.info('UserSession operation', {
     module: 'UserSessionLogging',
@@ -153,7 +158,7 @@ function logDeleteOperation(
     requestId,
     email,
     operation,
-    model: 'UserSession',
+    model,
     userId,
     affectedRows,
     changes: { deleted: true, criteria: where },
@@ -168,6 +173,7 @@ function logDataOperation(
   where: Record<string, unknown> = {},
   affectedRows: number | 'unknown' = 'unknown',
   userId: string = 'unknown',
+  model: string = 'UserSession',
 ): void {
   const maskedData = maskSensitiveFields(data);
 
@@ -177,7 +183,7 @@ function logDataOperation(
     requestId,
     email,
     operation,
-    model: 'UserSession',
+    model,
     userId,
     affectedRows,
     changes: maskedData,

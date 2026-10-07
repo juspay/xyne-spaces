@@ -68,6 +68,11 @@ export const CONFIG = {
     return configured.endsWith("/") ? configured : `${configured}/`;
   })(),
   xyneClawS2sKey: process.env["XYNE_CLAW_S2S_KEY"] ?? "",
+  // `INTERNAL_S2S_KEY` (read directly from process.env where used) is the
+  // Spaces↔claw-auth shared key: claw-auth sends it as `x-s2s-key` to Spaces'
+  // `/api/internal/*` routes — including `POST /api/internal/auth/token`, which
+  // mints the per-user Spaces JWTs in lib/spaces-auth.ts — and Spaces sends it
+  // back to claw-auth's `requireInternalS2S` routes.
   azureTtsEndpoint: (process.env["AZURE_TTS_ENDPOINT"] ?? "").replace(/\/+$/, ""),
   azureTtsApiKey: process.env["AZURE_TTS_API_KEY"] ?? "",
   azureTtsApiVersion: process.env["AZURE_TTS_API_VERSION"] ?? "",
@@ -118,17 +123,23 @@ export const CONFIG = {
   spacesInternalUrl: process.env["SPACES_INTERNAL_URL"] ?? process.env["SPACES_BACKEND_URL"] ?? "http://localhost:3001",
   /**
    * Read-only Postgres connection string to the Spaces DB. When set, claw-auth
-   * fetches fresh user session credentials (token, sessionId, workspaceId)
-   * directly from `workflow.user_sessions` at MCP-spawn time instead of relying
-   * on the stale cached copy in `userMcpConnection`. Recommended Postgres role:
+   * resolves Spaces directory facts (a user's workspace / profile, DM channels,
+   * installed-app signing secrets, user groups) straight from `public.*`
+   * (lib/spaces-db.ts). It never reads session state: Spaces sessions are
+   * stored hashed, so user credentials are MINTED over S2S instead
+   * (lib/spaces-auth.ts → `POST /api/internal/auth/token`, authorised by the
+   * same `INTERNAL_S2S_KEY` claw-auth already sends to Spaces' `/api/internal`
+   * routes). Recommended Postgres role:
    *
    *   CREATE ROLE claw_readonly WITH LOGIN PASSWORD '…';
    *   GRANT CONNECT ON DATABASE spaces TO claw_readonly;
-   *   GRANT USAGE ON SCHEMA public, workflow TO claw_readonly;
-   *   GRANT SELECT ON public.users, workflow.user_sessions TO claw_readonly;
+   *   GRANT USAGE ON SCHEMA public TO claw_readonly;
+   *   GRANT SELECT ON public.users, public.installed_apps, public.user_groups,
+   *     public.channels, public.channel_participants, public.apps TO claw_readonly;
    *
-   * If unset, claw-auth falls back to the stored credentials path (same
-   * behavior as today). Empty value = feature off.
+   * (No `workflow` schema / `workflow.user_sessions` grant any more — revoke it.)
+   * If unset, the directory lookups return null and callers fall back to the
+   * claw-side `SurfaceTenantLink` mapping. Empty value = feature off.
    */
   spacesDbUrl: process.env["SPACES_DB_URL"] ?? "",
   // Public user-facing Spaces URL — used for citation links + ticket deep links

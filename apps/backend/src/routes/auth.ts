@@ -6,10 +6,26 @@ import { channelService } from '../services/channelService';
 import { canCreateWorkspace } from '../middleware/workspaceAuth';
 import { logger } from '../utils/logger';
 import { DatabaseClient } from '../database/client';
+import { findUserById } from '@/bypassAcl/authSessionServices';
 
 const prisma = DatabaseClient.getInstance();
 const router = express.Router();
 const authV2Controller = new AuthV2Controller();
+
+/**
+ * `req.user` is built from the access JWT claims on the stateless path, which do not carry the
+ * provider identity. One `users` read fills `googleId` / `authProvider`; the claims stay the
+ * fallback (API-key and dev users have no row behind them).
+ */
+async function providerIdentity(req: express.Request): Promise<{ googleId: string; authProvider?: string }> {
+  const user = req.user!;
+  if (user.isApiKeyUser) return { googleId: user.googleId, authProvider: user.authProvider };
+  const row = await findUserById(user.id);
+  return {
+    googleId: row?.providerUserId ?? user.googleId,
+    authProvider: row?.authProvider ?? user.authProvider,
+  };
+}
 
 router.get('/login', authV2Controller.initiateLogin);
 
@@ -23,19 +39,20 @@ router.post('/logout', authV2Middleware.authenticate, authV2Controller.logout);
 
 router.get('/logout', authV2Middleware.authenticate, authV2Controller.logout);
 
-router.get('/me', authV2Middleware.authenticate, (req, res) => {
+router.get('/me', authV2Middleware.authenticate, async (req, res) => {
+  const identity = await providerIdentity(req);
   return res.json({
     success: true,
     user: {
       id: req.user!.id,
-      googleId: req.user!.googleId,
+      googleId: identity.googleId,
       email: req.user!.email,
       name: req.user!.name,
       workspaceId: req.user!.workspaceId,
       role: req.user!.role,
       orgRole: req.user!.orgRole,
       memberId: req.user!.memberId,
-      authProvider: req.user!.authProvider,
+      authProvider: identity.authProvider,
     }
   });
 });
@@ -48,23 +65,26 @@ router.get('/validate', authV2Middleware.authenticate, async (req, res) => {
   if (pendingInvitation) {
     logger.warn(`[DEBUG] [/validate] ⚠️ User already has a session but pending_invitation_id cookie exists (${pendingInvitation}). OAuth callback will be skipped — invitation will NOT be auto-accepted via callback flow.`);
   }
-  const selfDmChannelId = await channelService.getSelfDmId(req.user!.id);
-  const workspace = await prisma.workspace.findUnique({
-    where: { id: req.user!.workspaceId },
-    select: { landingChannelId: true },
-  });
+  const [selfDmChannelId, workspace, identity] = await Promise.all([
+    channelService.getSelfDmId(req.user!.id),
+    prisma.workspace.findUnique({
+      where: { id: req.user!.workspaceId },
+      select: { landingChannelId: true },
+    }),
+    providerIdentity(req),
+  ]);
   return res.json({
     success: true,
     user: {
       id: req.user!.id,
-      googleId: req.user!.googleId,
+      googleId: identity.googleId,
       email: req.user!.email,
       name: req.user!.name,
       workspaceId: req.user!.workspaceId,
       role: req.user!.role,
       orgRole: req.user!.orgRole,
       memberId: req.user!.memberId,
-      authProvider: req.user!.authProvider,
+      authProvider: identity.authProvider,
     },
     selfDmChannelId,
     landingChannelId: workspace?.landingChannelId ?? null,

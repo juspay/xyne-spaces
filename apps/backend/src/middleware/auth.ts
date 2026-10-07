@@ -1,21 +1,16 @@
 import { Request, Response, NextFunction } from 'express';
 import { OrgRole, WorkspaceRole } from '@xyne/shared';
 import { createHash } from 'crypto';
-// import { OAuth2Client } from 'google-auth-library';
 import { logger } from '../utils/logger';
 import { loggerContext, LogContext } from '@/utils/logger';
 import { UserService } from '../services/userService';
-import { UserSessionService } from '../services/userSessionService';
 import { apiKeyService } from '../services/apiKeyService';
-import { jwtService } from '../services/jwtService';
 import '../types/express'; // Import the Express type extensions
 import { config } from '@/config/env';
-import { isRefreshAllowed } from '../services/sessionRefreshValidator';
+import { attachResolvedAuth, hasAuthCredential, resolveRequest } from '@/auth/sessionResolver';
 
 export class AuthMiddleware {
-  // private googleClient?: OAuth2Client;
   private userService?: UserService;
-  private userSessionService?: UserSessionService;
   private googleAuthEnabled: boolean;
 
   constructor() {
@@ -26,9 +21,7 @@ export class AuthMiddleware {
     this.googleAuthEnabled = !!(clientId && clientSecret);
 
     if (this.googleAuthEnabled) {
-      // this.googleClient = new OAuth2Client(clientId, clientSecret);
       this.userService = new UserService();
-      this.userSessionService = new UserSessionService();
       logger.info('[AUTH] Google OAuth authentication enabled');
     } else {
       logger.info('[AUTH] Google OAuth authentication disabled - API key only mode');
@@ -36,26 +29,22 @@ export class AuthMiddleware {
   }
 
   /**
-   * Middleware to authenticate requests using Google JWT tokens
-   * Supports multi-workspace cookies (workspace-specific tokens)
+   * Middleware to authenticate requests: API key → dev mode → session resolver.
+   * The resolver accepts `Authorization: Bearer <jwt>`, the per-workspace access cookie
+   * `xw_<ws>` (verified statelessly), or the opaque session cookie `xs` (legacy names still
+   * read). When `xw_<ws>` is missing or about to expire and a live `xs` travels with the
+   * request, a fresh `xw_<ws>` is minted inline and set on this response.
    */
   authenticate = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
     const authHeader = req.headers.authorization;
-    
-    // Get workspace ID from header or last_workspace cookie
-    const workspaceId = (req.headers['x-workspace-id'] as string) || req.cookies?.xyne_last_workspace;
-    const workspaceToken = workspaceId ? req.cookies?.[`xyne_ws_${workspaceId}_token`] : undefined;
-    const workspaceSession = req.cookies?.['user_session_id'];
-    
+
     logger.info(`[AUTH] Auth middleware called for ${req.method} ${req.path}`, {
       method: req.method,
       path: req.path,
       authHeaderPresent: !!authHeader,
-      workspaceId,
-      workspaceTokenPresent: !!workspaceToken,
+      workspaceHeader: req.headers['x-workspace-id'],
       clientIp: req.ip,
     });
-
     try {
       // Try API Key authentication first
       if (authHeader) {
@@ -217,322 +206,27 @@ export class AuthMiddleware {
         });
       }
 
-      // Normal Google JWT authentication
-      // Extract token from Authorization header OR HTTP-only cookie
-      // Also get session ID from header or cookie
-      if (workspaceSession) {
-        req.authenticatedSessionId = workspaceSession;
-      }
-
-      logger.info(
-        `[AUTH] Auth header: ${authHeader ? 'Present' : 'Missing'}, Workspace: ${workspaceId ? 'Present' : 'Missing'}`,
-        {
-          workspaceId,
-          workspaceTokenPresent: !!workspaceToken,
-          workspaceSessionPresent: !!workspaceSession,
+      // Session / JWT authentication (one decision path shared with v2, sockets, Zero, token endpoints).
+      const resolved = await resolveRequest(req, { allowBearer: true, middleware: 'v1' });
+      if (!resolved.ok) {
+        logger.warn(`[AUTH] Authentication failed: ${resolved.reason}`, {
+          method: req.method,
+          path: req.path,
           authHeaderPresent: !!authHeader,
-        }
-      );
-
-      // Try to get token from Authorization header first, then from workspace-specific cookie
-      let token: string | undefined;
-      let tokenSource: 'authorization_header' | 'workspace_cookie' | 'session_refresh' | 'none' = 'none';
-      let tokenPreview: string | undefined;
-
-      if (authHeader && authHeader.startsWith('Bearer ')) {
-        token = authHeader.split(' ')[1];
-        tokenSource = 'authorization_header';
-        tokenPreview = token ? `${token.slice(0, 8)}...${token.slice(-6)}` : undefined;
-        logger.info(`[AUTH] Token extracted from Authorization header`, {
-          tokenSource,
-          tokenPresent: !!token,
-          tokenPreview,
         });
-      } else if (workspaceToken) {
-        token = workspaceToken;
-        tokenSource = 'workspace_cookie';
-        tokenPreview = token ? `${token.slice(0, 8)}...${token.slice(-6)}` : undefined;
-        logger.info(`[AUTH] Token extracted from workspace cookie [workspaceId=${workspaceId}]`, {
-          tokenSource,
-          workspaceId,
-          tokenPresent: !!token,
-          tokenPreview,
-        });
-      }
-
-      // If no token but workspace session exists, try to refresh instead of rejecting
-      if (!token && workspaceSession) {
-        logger.info(`[AUTH] No token found but workspace session exists, attempting refresh`, {
-          tokenSource,
-          tokenPresent: !!token,
-          workspaceId,
-        });
-        try {
-          logger.info(`[AUTH] Calling refreshTokenBySession from authenticate: missing token with session fallback`, {
-            method: req.method,
-            path: req.path,
-          });
-          const refreshResult = await this.refreshTokenBySession(workspaceSession);
-
-          if (refreshResult.success && refreshResult.customToken) {
-            token = refreshResult.customToken;
-            tokenSource = 'session_refresh';
-            tokenPreview = token ? `${token.slice(0, 8)}...${token.slice(-6)}` : undefined;
-
-            // Set new token in workspace-specific cookie
-            const isProduction = process.env.NODE_ENV === 'production';
-            if (workspaceId) {
-              res.cookie(`xyne_ws_${workspaceId}_token`, refreshResult.customToken, {
-                httpOnly: true,
-                secure: isProduction,
-                sameSite: 'strict',
-                path: '/',
-                maxAge: config.jwt.expirationSeconds * 1000,
-              });
-
-              // Update req.cookies for downstream handlers
-              if (!req.cookies) {
-                req.cookies = {};
-              }
-              req.cookies[`xyne_ws_${workspaceId}_token`] = refreshResult.customToken;
-            }
-
-            logger.info(`[AUTH] Token successfully created via session refresh`, {
-              tokenSource,
-              tokenPresent: !!token,
-              tokenPreview,
-            });
-          } else {
-            throw new Error('Session refresh failed');
-          }
-        } catch (refreshError) {
-          logger.error(`[AUTH] Failed to refresh via session:`, {
-            tokenSource,
-            error: refreshError instanceof Error ? refreshError.message : 'Unknown error',
-            stack: refreshError instanceof Error ? refreshError.stack : undefined,
-          });
-          res.status(401).json({
-            error: 'Invalid or expired session',
-            message: 'Please re-authenticate',
-          });
-          return;
-        }
-      }
-
-      // If still no token, reject
-      if (!token) {
-        logger.warn(`[AUTH] Authentication failed: No token and no valid session`, {
-          tokenSource,
-          authHeaderPresent: !!authHeader,
-          cookieTokenPresent: !!req.cookies?.google_access_token,
-        });
-        res.status(401).json({
-          error: 'Authentication required',
-          message: 'Please provide a valid Google authentication token',
-        });
+        res.status(resolved.status).json(resolved.body);
         return;
       }
 
-      // Verify custom JWT token
-      let payload: any;
-      let isTokenExpired = false;
-      try {
-        payload = jwtService.verifyToken(token);
-
-        // Check if token is about to expire (within 5 minutes for 15-min tokens)
-        const now = Math.floor(Date.now() / 1000);
-        const timeUntilExpiry = payload.exp - now;
-
-        if (timeUntilExpiry < 5 * 60) {
-          // Less than 5 minutes
-          logger.info(`[AUTH] Token is about to expire in ${timeUntilExpiry}s, considering refresh`, {
-            tokenSource,
-            tokenPreview,
-            tokenSub: payload?.sub,
-            tokenExp: payload?.exp,
-          });
-          isTokenExpired = true;
-        }
-      } catch (verifyError) {
-        logger.info(
-          `[AUTH] JWT token verification failed`,
-          {
-            tokenSource,
-            tokenPreview,
-            error: verifyError instanceof Error ? verifyError.message : 'Unknown error',
-          }
-        );
-        isTokenExpired = true;
-      }
-
-      // If token is expired or about to expire, try to refresh using session
-      if (isTokenExpired && workspaceSession) {
-        logger.info(`[AUTH] Attempting to refresh token using session ID`, {
-          tokenSource,
-          tokenPreview,
-          tokenSub: payload?.sub,
-        });
-
-        try {
-          logger.info(`[AUTH] Calling refreshTokenBySession from authenticate: expired token refresh path`, {
-            method: req.method,
-            path: req.path,
-          });
-          const refreshResult = await this.refreshTokenBySession(workspaceSession);
-
-          if (refreshResult.success && refreshResult.customToken) {
-            // Verify the new custom JWT token
-            payload = jwtService.verifyToken(refreshResult.customToken);
-
-            // Set new token in HTTP-only cookie
-            const isProduction = process.env.NODE_ENV === 'production';
-            res.cookie('google_access_token', refreshResult.customToken, {
-              httpOnly: true,
-              secure: isProduction,
-              sameSite: 'strict',
-              path: '/',
-              maxAge: config.jwt.expirationSeconds * 1000,
-            });
-
-            // IMPORTANT: Update req.cookies so downstream handlers get the new token
-            if (!req.cookies) {
-              req.cookies = {};
-            }
-            req.cookies.google_access_token = refreshResult.customToken;
-
-            logger.info(`[AUTH] Token successfully refreshed via session and cookie updated`, {
-              tokenSource: 'session_refresh',
-              tokenPresent: true,
-              tokenPreview: refreshResult.customToken
-                ? `${refreshResult.customToken.slice(0, 8)}...${refreshResult.customToken.slice(-6)}`
-                : undefined,
-              tokenSub: payload?.sub,
-            });
-          } else {
-            throw new Error('Token refresh failed');
-          }
-        } catch (refreshError) {
-          logger.error(`[AUTH] Failed to refresh token:`, {
-            tokenSource,
-            tokenPreview,
-            error: refreshError instanceof Error ? refreshError.message : 'Unknown error',
-            stack: refreshError instanceof Error ? refreshError.stack : undefined,
-          });
-          res.status(401).json({
-            error: 'Invalid or expired session',
-            message: 'Please re-authenticate',
-          });
-          return;
-        }
-      } else if (isTokenExpired) {
-        // No session ID provided and token is expired
-        res.status(401).json({
-          error: 'Invalid or expired session',
-          message: 'Token expired and no session provided for refresh',
-        });
-        return;
-      }
-
-      if (!payload) {
-        logger.warn(`[AUTH] JWT payload missing after verification`, {
-          tokenSource,
-          tokenPreview,
-        });
-        res.status(401).json({
-          error: 'Invalid token',
-          message: 'JWT token payload is invalid',
-        });
-        return;
-      }
-
-      // Extract user information from custom JWT token
-      // Since we're using our own JWT, we can directly get user from database using the sub (user ID)
-      logger.info(`[AUTH] Looking up user from verified token payload`, {
-        tokenSource,
-        tokenPreview,
-        tokenSub: payload.sub,
-        tokenEmail: payload.email,
-      });
-      const user = await this.userService!.getUserById(payload.sub);
-
-      if (!user) {
-        logger.warn(`[AUTH] User not found for verified token payload`, {
-          tokenSource,
-          tokenPreview,
-          tokenSub: payload.sub,
-        });
-        res.status(401).json({
-          error: 'User not found',
-          message: 'User associated with this token no longer exists',
-        });
-        return;
-      }
-
-      /**
-       * BACKWARD COMPATIBILITY SUPPORT
-       *
-       * Old JWTs contain only { sub: userId }. New JWTs include
-       * { workspaceId, memberId, role, orgRole }.
-       *
-       * For old tokens: look up workspace context from DB so the request
-       * can proceed without requiring re-login.
-       */
-      const hasWorkspaceClaims = payload.memberId && payload.workspaceId;
-
-      let effectiveWorkspaceId: string | undefined = payload.workspaceId;
-      let effectiveMemberId: string | undefined = payload.memberId;
-      let effectiveOrgRole: string = user.orgMember.role;
-
-      if (!hasWorkspaceClaims) {
-        logger.info(`[AUTH] LEGACY JWT FORMAT - User ${payload.sub} using pre-workspace client`, {
-          userId: payload.sub,
-          tokenSource,
-          tokenPreview,
-        });
-
-        // Use user's workspace and orgMember from DB (already fetched at line 456)
-        effectiveWorkspaceId = user.workspaceId ?? undefined;
-        effectiveMemberId = user.orgMemberId ?? undefined;
-        effectiveOrgRole = user.orgMember.role;
-      }
-
-      if (!effectiveWorkspaceId || !effectiveMemberId) {
-        logger.warn(`[AUTH] No workspace context resolved for user ${payload.sub}`, {
-          tokenSource,
-          tokenPreview,
-          effectiveWorkspaceId,
-          effectiveMemberId,
-        });
-        res.status(401).json({
-          error: 'Workspace context missing',
-          message: 'Unable to determine workspace for this session. Please log in again.',
-        });
-        return;
-      }
-      // END BACKWARD COMPAT
-
-      // Attach user to request object
-      req.user = {
-        id: user.id,
-        googleId: user.providerUserId,
-        email: user.email,
-        name: user.name,
-        displayName: user.displayName,
-        workspaceId: effectiveWorkspaceId,
-        isApiKeyUser: false,
-        scopes: [],
-        role: user.role,
-        orgRole: effectiveOrgRole,
-        memberId: effectiveMemberId,
-      };
+      attachResolvedAuth(req, res, resolved.auth);
+      const user = resolved.auth.user;
 
       logger.info(`[AUTH] Authenticated user: ${user.email} (${user.id})`, {
-        tokenSource,
-        tokenPreview,
-        tokenSub: payload.sub,
+        path: resolved.auth.path,
         userId: user.id,
-        googleId: user.providerUserId,
         email: user.email,
+        workspaceId: user.workspaceId,
+        sessionId: resolved.auth.session?.id,
       });
 
       const cohort = String(
@@ -569,100 +263,9 @@ export class AuthMiddleware {
   };
 
   /**
-   * Helper method to refresh token using session ID
-   */
-  private async refreshTokenBySession(
-    sessionId: string
-  ): Promise<{ success: boolean; customToken?: string; error?: string }> {
-    try {
-      logger.info(`[AUTH] refreshTokenBySession started`);
-
-      if (!this.userSessionService) {
-         return { success: false, error: 'Session service not configured' };
-      }
-      // Find session by ID
-      logger.info(`[AUTH] refreshTokenBySession fetching session`);
-      const session = await this.userSessionService.getSessionById(sessionId);
-
-      if (!session || !session.user) {
-        logger.warn(`[AUTH] refreshTokenBySession failed: session or session user not found`, {
-          sessionFound: !!session,
-          userFound: !!session?.user,
-        });
-        return { success: false, error: 'Invalid session' };
-      }
-
-      // ENABLE_PROVIDER_REVOCATION_CHECK gates the refresh-validity decision.
-      // Disabled → v1's original inline check (session status + expiry only)
-      // runs verbatim, calling nothing new. Enabled → the shared isRefreshAllowed
-      // decision (status/expiry/leftAt + provider revocation + deactivation
-      // cleanup), same as v2 authV2Middleware.
-      if (!config.enableProviderRevocationCheck) {
-        // Check if session is still active and not expired
-        const now = new Date();
-        const isSessionExpired = now > session.refreshTokenExpiry;
-        logger.info(`[AUTH] refreshTokenBySession validating session state`, {
-          userId: session.user.id,
-          sessionStatus: session.status,
-          refreshTokenExpiry: session.refreshTokenExpiry.toISOString(),
-          isSessionExpired,
-        });
-
-        if (session.status !== 'ACTIVE' || isSessionExpired) {
-          logger.warn(`[AUTH] refreshTokenBySession failed: session inactive or expired`, {
-            userId: session.user.id,
-            sessionStatus: session.status,
-            refreshTokenExpiry: session.refreshTokenExpiry.toISOString(),
-            now: now.toISOString(),
-          });
-          return { success: false, error: 'Session expired' };
-        }
-      } else if (!(await isRefreshAllowed(session))) {
-        return { success: false, error: 'Session invalid or revoked' };
-      }
-
-      // Generate a new custom JWT token for the user
-      logger.info(`[AUTH] refreshTokenBySession generating custom token`, {
-        userId: session.user.id,
-        email: session.user.email,
-      });
-      
-      const customToken = jwtService.generateToken({
-        sub: session.user.id,
-        email: session.user.email,
-        name: session.user.name,
-        picture: session.user.picture,
-        workspaceId: session.user.workspaceId,
-        memberId: session.user.orgMemberId,
-        providerUserId: session.user.providerUserId,
-        provider: session.user.authProvider,
-      });
-
-      // Update session activity
-      logger.info(`[AUTH] refreshTokenBySession updating session activity`, {
-        userId: session.user.id,
-      });
-      await this.userSessionService.updateSession(session.id, {
-        lastActivity: new Date(),
-      });
-
-      logger.info(`[AUTH] refreshTokenBySession completed successfully`, {
-        userId: session.user.id,
-        email: session.user.email,
-      });
-      return { success: true, customToken };
-    } catch (error) {
-      logger.error(`[AUTH] refreshTokenBySession failed with exception:`, {
-        error: error instanceof Error ? error.message : 'Unknown error',
-        stack: error instanceof Error ? error.stack : undefined,
-      });
-      return { success: false, error: error instanceof Error ? error.message : 'Unknown error' };
-    }
-  }
-
-  /**
-   * Optional middleware - allows authenticated or unauthenticated requests
-   * If token is provided and valid, user will be attached to request
+   * Optional middleware - allows authenticated or unauthenticated requests.
+   * If a credential is present and valid, the user is attached; on failure the request
+   * continues without a user.
    */
   optionalAuthenticate = async (req: Request, res: Response, next: NextFunction) => {
     try {
@@ -683,14 +286,23 @@ export class AuthMiddleware {
         return;
       }
 
-      const authHeader = req.headers.authorization;
-      if (!authHeader || !authHeader.startsWith('Bearer ')) {
-        // No token provided, continue without authentication
+      // Bearer, `xs` (or a legacy session name), or an `xw_<ws>` / legacy per-workspace JWT
+      // cookie for the claimed workspace all count: a browser holding only `xw_<ws>` is not anonymous.
+      if (!hasAuthCredential(req)) {
+        // No credential provided, continue without authentication
         return next();
       }
 
-      // If token is provided, validate it
-      await this.authenticate(req, res, next);
+      const resolved = await resolveRequest(req, { allowBearer: true, middleware: 'v1' });
+      if (resolved.ok) {
+        attachResolvedAuth(req, res, resolved.auth);
+      } else {
+        logger.debug('[AUTH] Optional authentication failed, continuing unauthenticated', {
+          reason: resolved.reason,
+          path: req.path,
+        });
+      }
+      next();
     } catch (error) {
       // If optional auth fails, log but continue
       logger.warn('[AUTH] Optional authentication failed:', error);
@@ -787,95 +399,23 @@ export class AuthMiddleware {
   };
 
   /**
-   * Middleware for Zero endpoints - NO auto-refresh
-   * Returns 401 if token is missing or expired, forcing frontend to refresh explicitly
+   * Middleware for Zero endpoints: Bearer JWT, `xw_<ws>` access cookie or the `xs` session
+   * cookie, same resolver as `authenticate`, minus API-key / dev-mode handling. The verified or
+   * freshly minted access JWT lands on `req.accessToken` for the Zero proxy to forward.
    */
   authenticateZero = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
     logger.info(`[AUTH] Zero auth middleware called for ${req.method} ${req.path}`);
 
     try {
-      // Get workspace ID from header or cookie
-      const workspaceId = (req.headers['x-workspace-id'] as string) || req.cookies?.xyne_last_workspace;
-      
-      // Get JWT token from workspace-specific cookie
-      let token = workspaceId ? req.cookies?.[`xyne_ws_${workspaceId}_token`] : undefined;
-
-      // Try API Key authentication first
-      const authHeader = req.headers.authorization;
-
-      if (!token && authHeader) {
-        // Check for Bearer token format
-        if (authHeader.startsWith('Bearer ')) {
-          token = authHeader.split(' ')[1];
-        }
-      }
-
-      // If no token, return 401 immediately (NO auto-refresh for Zero endpoints)
-      if (!token) {
-        logger.warn('[AUTH] Zero auth failed: No token provided', {
-          workspaceId,
-          workspaceTokenPresent: !!req.cookies?.[`xyne_ws_${workspaceId}_token`],
-        });
-        res.status(401).json({
-          error: 'Authentication required',
-          message: 'No token provided',
-        });
+      const resolved = await resolveRequest(req, { allowBearer: true, middleware: 'zero' });
+      if (!resolved.ok) {
+        logger.warn(`[AUTH] Zero auth failed: ${resolved.reason}`);
+        res.status(resolved.status).json(resolved.body);
         return;
       }
 
-      // Verify custom JWT token (will throw if expired/invalid)
-      let payload: any;
-      try {
-        payload = jwtService.verifyToken(token);
-        logger.info(
-          `[AUTH] Zero auth: Token valid, expires at ${new Date(payload.exp * 1000).toISOString()}`
-        );
-      } catch (verifyError) {
-        logger.warn('[AUTH] Zero auth failed: JWT token expired/invalid - returning 401');
-        logger.info(
-          '[AUTH] Error details:',
-          verifyError instanceof Error ? verifyError.message : 'Unknown error'
-        );
-        res.status(401).json({
-          error: 'Invalid or expired token',
-          message: 'Token verification failed',
-        });
-        return;
-      }
-
-      if (!payload) {
-        res.status(401).json({
-          error: 'Invalid token',
-          message: 'JWT token payload is invalid',
-        });
-        return;
-      }
-
-      // Get user from database
-      const user = await this.userService!.getUserById(payload.sub);
-
-      if (!user) {
-        res.status(401).json({
-          error: 'User not found',
-          message: 'User associated with this token no longer exists',
-        });
-        return;
-      }
-
-      // Attach user to request object
-      req.user = {
-        id: user.id,
-        googleId: user.providerUserId,
-        email: user.email,
-        name: user.name,
-        displayName: user.displayName,
-        workspaceId: user.workspaceId,
-        isApiKeyUser: false,
-        scopes: [],
-        role: user.role,
-        orgRole: user.orgMember!.role,
-        memberId: payload.memberId,
-      };
+      attachResolvedAuth(req, res, resolved.auth);
+      const user = resolved.auth.user;
 
       const existingContext = loggerContext.getStore();
       const context: LogContext = {

@@ -211,7 +211,7 @@ showMeetingPopup({ app: "zoom", ... })
   │
   ▼
 MeetingPopupWindow
-  │  checks session cookies → google_access_token present → user is logged in
+  │  checks session cookies → `xs` session cookie present → user is logged in
   │  creates frameless BrowserWindow, loads meeting-popup.html
   │  webContents "did-finish-load" → sends "meeting-popup:show" to popup
   │  popup renderer reports its height via IPC "meeting-popup:content-height"

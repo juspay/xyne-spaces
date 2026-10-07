@@ -17,7 +17,8 @@
  */
 
 import { prisma } from "../db.js";
-import { getSpacesUserById, type SpacesAuthCaller, type SpacesUserProfile } from "./spaces-db.js";
+import { getSpacesUserById, type SpacesUserProfile } from "./spaces-db.js";
+import type { SpacesAuthCaller } from "./spaces-auth.js";
 
 import { createLogger } from "../logger.js";
 const log = createLogger("users-jit");

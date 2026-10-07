@@ -115,9 +115,7 @@ router.post("/:userId/connections", asyncHandler(async (req: Request<{ userId: s
 
   // Auto-register tools from this MCP server. First evict any cached MCP
   // child process for this user+server — its env was baked at spawn time
-  // and won't pick up the new credentials we just wrote (token, sessionId,
-  // etc.) without a respawn. Without this, Spaces' x-session-id refresh
-  // path silently breaks because the cached child has the OLD env.
+  // and won't pick up the new credentials we just wrote without a respawn.
   await evictSession(userId, serverExists.type).catch((err) => {
     log.error(`[connections] evictSession failed for ${serverExists.type}:`, err);
   });
@@ -287,34 +285,16 @@ router.get("/:userId/connections/:id/health", async (req: Request<{ userId: stri
 
 router.post("/:userId/connections/auto-connect-spaces", asyncHandler(async (req: Request<{ userId: string }>, res: Response) => {
   const userId = req.params.userId;
-  const { spacesToken: bodyToken } = req.body as { spacesToken?: string };
 
-  // Accept token from body OR from httpOnly cookie (forwarded by proxy).
-  // Spaces authV2 puts the JWT in `xyne_ws_<workspaceId>_token` (picked via
-  // `xyne_last_workspace`). The legacy `google_access_token` cookie is a
-  // fallback — only use it if it looks like a JWT, since during the
-  // pending-auth window it holds a JSON blob.
-  const cookie = req.headers.cookie ?? "";
-  const readCookie = (name: string): string | undefined => {
-    const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-    const m = cookie.match(new RegExp(`(?:^|;[ \t]*)${escaped}=([^;]*)`));
-    return m?.[1] ? decodeURIComponent(m[1]) : undefined;
-  };
-  const lastWorkspace = readCookie("xyne_last_workspace");
-  const workspaceToken = lastWorkspace ? readCookie(`xyne_ws_${lastWorkspace}_token`) : undefined;
-  const legacyRaw = readCookie("google_access_token");
-  const legacyJwt = legacyRaw && legacyRaw.split(".").length === 3 ? legacyRaw : undefined;
-  const cookieToken = workspaceToken ?? legacyJwt;
-  const sessionId = readCookie("user_session_id");
-  const spacesToken = bodyToken || cookieToken;
-
-  // TEMP [sid-debug] — remove after verifying sessionId flows end-to-end
-  const cookieNames = cookie.split(";").map((c) => c.trim().split("=")[0]).filter(Boolean);
-  const tokenSource = bodyToken ? "body" : workspaceToken ? "workspace-cookie" : legacyJwt ? "legacy-jwt" : "NONE";
-
-  if (!spacesToken || typeof spacesToken !== "string") {
-    throw badRequest("spacesToken is required (via body or cookie)");
-  }
+  // No token is required (or stored) any more. Web sessions are the opaque
+  // httpOnly `xs` cookie, so the browser carries no JWT to forward; the user
+  // was already identified by requireAuth (/api/auth/me). The connection row
+  // only records WHO the Spaces tools act as — the runner mints a short-lived
+  // token for that user at spawn time (lib/spaces-auth.ts).
+  const workspaceHeader = req.headers["x-workspace-id"];
+  const hintCookie = /(?:^|;\s*)xyne_last_workspace=([^;]*)/.exec(req.headers.cookie ?? "")?.[1];
+  const requestedWorkspaceId =
+    (typeof workspaceHeader === "string" && workspaceHeader.trim()) || (hintCookie ? decodeURIComponent(hintCookie) : undefined);
 
   const serverType = "xyne-spaces";
   let server = await prisma.mcpServer.findFirst({ where: { type: serverType } });
@@ -324,16 +304,9 @@ router.post("/:userId/connections/auto-connect-spaces", asyncHandler(async (req:
     });
   }
 
-  const credentials: Record<string, string> = { url: CONFIG.spacesInternalUrl, token: spacesToken };
-  if (sessionId) credentials["sessionId"] = sessionId;
-  // workspaceId is required by Spaces' legacy auth.ts middleware: it only
-  // looks at `req.cookies.xyne_session` *after* confirming `workspaceId` is
-  // present (header or `xyne_last_workspace` cookie). Without it the
-  // session-refresh path is skipped entirely → 401 once the JWT expires.
-  const resolvedWorkspaceId = lastWorkspace ?? await getWorkspaceIdForUser(userId, "require-auth").catch(() => null);
+  const credentials: Record<string, string> = { url: CONFIG.spacesInternalUrl, authMode: "session", userId };
+  const resolvedWorkspaceId = requestedWorkspaceId ?? await getWorkspaceIdForUser(userId, "require-auth").catch(() => null);
   if (resolvedWorkspaceId) credentials["workspaceId"] = resolvedWorkspaceId;
-  // TEMP [sid-debug] — remove after verifying
-  log.info(`[sid-debug] auto-connect-spaces storing credentials keys=[${Object.keys(credentials).join(",")}] (no values)`);
   const encrypted = encrypt(JSON.stringify(credentials), CONFIG.encryptionKey);
 
   const connection = await prisma.userMcpConnection.upsert({
@@ -343,11 +316,9 @@ router.post("/:userId/connections/auto-connect-spaces", asyncHandler(async (req:
     include: { mcpServer: true },
   });
 
-  // Evict the cached MCP child so its baked-in env (XYNE_SPACES_SESSION_ID,
-  // XYNE_SPACES_TOKEN) is replaced with the freshly stored creds on the
-  // next mcp/call. Without this, the child keeps its original env forever
-  // and Spaces 401s once the original token expires (sessionId never gets
-  // sent because the child was spawned with an empty/stale one).
+  // Evict the cached MCP child so its baked-in env (XYNE_SPACES_TOKEN,
+  // XYNE_SPACES_WORKSPACE_ID) is rebuilt from the freshly stored identity on
+  // the next mcp/call.
   await evictSession(userId, serverType).catch((err) => {
     log.error(`[connections] evictSession failed for ${serverType}:`, err);
   });

@@ -15,13 +15,18 @@ import { s2sKeyMatches } from "./require-auth.js";
  * The cookie is the one caller identity available synchronously at that point,
  * with no /me round trip. It is not proof of identity, and it does not need to
  * be: this only decides which counter to increment, and every route still
- * authenticates for real downstream. Hashed so a live session id never becomes
- * a store key or turns up in a log line.
+ * authenticates for real downstream. Hashed so a live session token never
+ * becomes a store key or turns up in a log line.
+ *
+ * Precedence mirrors Spaces' own credential order: `xs` (the session cookie),
+ * then `user_session_id` (present only on pre-migration browsers until their
+ * first converted response, when Spaces replaces it with `xs`), then the
+ * `xyne_last_workspace` hint as a coarse last resort.
  */
 function sessionKey(req: Request): string | null {
   const raw = req.headers?.cookie;
   if (!raw) return null;
-  for (const name of ["user_session_id", "xyne_last_workspace"]) {
+  for (const name of ["xs", "user_session_id", "xyne_last_workspace"]) {
     const match = new RegExp(`(?:^|;\\s*)${name}=([^;]+)`).exec(raw);
     const value = match?.[1]?.trim();
     if (value) return createHash("sha256").update(`${name}:${value}`).digest("hex").slice(0, 24);

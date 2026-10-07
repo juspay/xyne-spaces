@@ -1,10 +1,11 @@
 import crypto from 'crypto';
 import { AuthProvider, OrgRole, WorkspaceRole } from '@xyne/shared';
-import jwt from 'jsonwebtoken';
 import { Request, Response } from 'express';
-import { UserSessionService } from '../services/userSessionService';
 import { UserService } from '../services/userService';
-import { jwtService } from '../services/jwtService';
+import { completeLogin } from '@/auth/loginCompletion';
+import { setPendingAuthCookie, type PendingAuthIdentity } from '@/auth/pendingAuth';
+import { platformFromRequest } from '@/auth/platform';
+import { revokeAccountSessions } from '@/bypassAcl/authSessionServices';
 import {
   hashPassword,
   validatePasswordComplexity,
@@ -15,7 +16,6 @@ import {
   DUMMY_PASSWORD_HASH,
 } from '../utils/passwordUtils';
 import { DatabaseClient } from '@/database/client';
-import { config } from '@/config/env';
 import { emailService } from '@/services/email/factory';
 import { redisService } from '@/services/redisService';
 import {
@@ -56,13 +56,16 @@ const REGISTER_MAX_VERIFY_ATTEMPTS = 3;
 const EMAIL_REGEX = /^[a-zA-Z0-9.!#$%&'*+/=?^_`{|}~-]+@[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(?:\.[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)+$/;
 const NAME_REGEX = /^[a-zA-Z][a-zA-Z\s]*$/;
 
+/** Pending (pre-workspace) identity for an email account. Identity only — never tokens. */
+function emailPendingIdentity(email: string, name: string): PendingAuthIdentity {
+  return { email, name, provider: AuthProvider.EMAIL, providerUserId: `email-${email}` };
+}
+
 export class EmailAuthController {
-  private userSessionService: UserSessionService;
   private userService: UserService;
   private prisma = DatabaseClient.getInstance();
 
   constructor() {
-    this.userSessionService = new UserSessionService();
     this.userService = new UserService();
   }
 
@@ -246,33 +249,7 @@ export class EmailAuthController {
           const approvedJoinRequest = approvedJoinRequests[0];
           const userName = normalizedEmail.split('@')[0];
 
-          const isProduction = process.env.NODE_ENV === 'production';
-          const cookieBase = {
-            httpOnly: true,
-            secure: isProduction,
-            sameSite: 'strict' as const,
-            path: '/',
-          };
-
-          res.cookie(
-            'google_access_token',
-            jwt.sign(
-              {
-                email: normalizedEmail,
-                name: userName,
-                providerUserId: `email-${normalizedEmail}`,
-                provider: 'EMAIL',
-                refreshToken: null,
-                accessToken: null,
-              },
-              process.env.JWT_SECRET!,
-              { expiresIn: '10m' },
-            ),
-            {
-              ...cookieBase,
-              maxAge: 10 * 60 * 1000,
-            },
-          );
+          setPendingAuthCookie(res, emailPendingIdentity(normalizedEmail, userName), 'strict');
 
           logger.info(`${tag()} Email login succeeded (outcome=approved_join, count=0)`);
           res.status(200).json({
@@ -295,33 +272,7 @@ export class EmailAuthController {
           const workspaceMap = new Map(workspaces.map(w => [w.id, w.name]));
           const userName = normalizedEmail.split('@')[0];
 
-          const isProduction = process.env.NODE_ENV === 'production';
-          const cookieBase = {
-            httpOnly: true,
-            secure: isProduction,
-            sameSite: 'strict' as const,
-            path: '/',
-          };
-
-          res.cookie(
-            'google_access_token',
-            jwt.sign(
-              {
-                email: normalizedEmail,
-                name: userName,
-                providerUserId: `email-${normalizedEmail}`,
-                provider: 'EMAIL',
-                refreshToken: null,
-                accessToken: null,
-              },
-              process.env.JWT_SECRET!,
-              { expiresIn: '10m' },
-            ),
-            {
-              ...cookieBase,
-              maxAge: 10 * 60 * 1000,
-            },
-          );
+          setPendingAuthCookie(res, emailPendingIdentity(normalizedEmail, userName), 'strict');
 
           logger.info(`${tag()} Email login succeeded (outcome=approved_join_selection, count=${approvedJoinRequests.length})`);
           res.status(200).json({
@@ -360,39 +311,12 @@ export class EmailAuthController {
         return;
       }
 
-      // Cookie base (used below for both invitation-pending and normal flows)
-      const isProduction = process.env.NODE_ENV === 'production';
-      const cookieBase = {
-        httpOnly: true,
-        secure: isProduction,
-        sameSite: 'strict' as const,
-        path: '/',
-      };
-
       if (pendingInvitation) {
         // Invited user hasn't accepted yet — set pending auth cookie (mirrors OAuth flow)
         // and return a signal so the frontend redirects to the invite page.
         const userName = normalizedEmail.split('@')[0];
 
-        res.cookie(
-          'google_access_token',
-          jwt.sign(
-            {
-              email: normalizedEmail,
-              name: userName,
-              providerUserId: `email-${normalizedEmail}`,
-              provider: 'EMAIL',
-              refreshToken: null,
-              accessToken: null,
-            },
-            process.env.JWT_SECRET!,
-            { expiresIn: '10m' },
-          ),
-          {
-            ...cookieBase,
-            maxAge: 10 * 60 * 1000, // 10 minutes pending auth window
-          },
-        );
+        setPendingAuthCookie(res, emailPendingIdentity(normalizedEmail, userName), 'strict');
 
         logger.info(`${tag()} Email login succeeded (outcome=pending_invitation, invitationId=${pendingInvitation.invitationId})`);
         res.status(200).json({
@@ -409,25 +333,7 @@ export class EmailAuthController {
       const workspaceUser = workspaceUsers[0];
       const userName = workspaceUser.name || normalizedEmail.split('@')[0];
 
-      res.cookie(
-        'google_access_token',
-        jwt.sign(
-          {
-            email: normalizedEmail,
-            name: userName,
-            providerUserId: `email-${normalizedEmail}`,
-            provider: 'EMAIL',
-            refreshToken: null,
-            accessToken: null,
-          },
-          process.env.JWT_SECRET!,
-          { expiresIn: '10m' },
-        ),
-        {
-          ...cookieBase,
-          maxAge: 10 * 60 * 1000, // 10 minutes pending auth window
-        },
-      );
+      setPendingAuthCookie(res, emailPendingIdentity(normalizedEmail, userName), 'strict');
 
       // Build workspaces array for frontend auth machine
       const workspaces = workspaceUsers.map(u => ({
@@ -437,53 +343,29 @@ export class EmailAuthController {
       }));
 
       if (workspaceUsers.length === 1) {
-        const refreshToken = crypto.randomUUID();
-        const refreshTokenExpiry = new Date();
-        refreshTokenExpiry.setDate(refreshTokenExpiry.getDate() + config.session.expiryDays);
-
-        const session = await this.userSessionService.createSession({
-          userId: workspaceUser.id,
-          refreshToken,
-          refreshTokenExpiry,
-          deviceInfo: JSON.stringify({
-            userAgent: req.headers['user-agent'],
-            timestamp: new Date().toISOString(),
-          }),
-          ipAddress: req.ip || req.connection.remoteAddress || undefined,
-          // The user row may still say GOOGLE/MICROSOFT for an SSO account that set a password.
+        const platform = platformFromRequest(req);
+        // The user row may still say GOOGLE/MICROSOFT for an SSO account that set a password;
+        // the login method recorded is EMAIL regardless.
+        const login = await completeLogin({
+          req,
+          res,
+          workspaceUser,
+          orgMember: { memberId: orgMember.memberId, orgId: orgMember.orgId, role: orgMember.role },
+          platform,
           loginMethod: AuthProvider.EMAIL,
+          sameSite: platform === 'mobile' ? 'none' : 'strict',
+          isNewUser: false,
         });
 
-        const jwtToken = jwtService.generateToken({
-          sub: workspaceUser.id,
-          email: workspaceUser.email,
-          name: workspaceUser.name,
-          workspaceId: workspaceUser.workspaceId,
-          memberId: workspaceUser.orgMemberId,
-          providerUserId: `email-${workspaceUser.email}`,
-          provider: AuthProvider.EMAIL,
-        });
-
-        res.cookie(`xyne_ws_${workspaceUser.workspaceId}_token`, jwtToken, {
-          ...cookieBase,
-          maxAge: config.jwt.expirationSeconds * 1000,
-        });
-        res.cookie('user_session_id', session.id, {
-          ...cookieBase,
-          maxAge: config.session.expiryDays * 24 * 60 * 60 * 1000,
-        });
-        res.cookie('xyne_last_workspace', workspaceUser.workspaceId, {
-          ...cookieBase,
-          maxAge: config.session.expiryDays * 24 * 60 * 60 * 1000,
-        });
-
-        logger.info(`${tag()} Email login succeeded (outcome=single_workspace, count=1)`);
+        logger.info(`${tag()} Email login succeeded (outcome=single_workspace, count=1, platform=${platform})`);
         res.status(200).json({
           success: true,
           workspaces,
           pendingUserData: { email: normalizedEmail, name: userName },
           userExistsButRemoved: false,
           autoLoginWorkspace: workspaceUser.workspaceId,
+          // Native clients keep the session token + workspace JWT outside the cookie jar.
+          ...(platform !== 'web' ? { sessionId: login.sessionToken, token: login.token } : {}),
         });
         return;
       }
@@ -574,8 +456,9 @@ export class EmailAuthController {
         data: { passwordHash: newHash },
       });
 
-      // Revoke all active sessions for this user — forces re-auth everywhere
-      await this.userSessionService.revokeAllUserSessions(userId, 'PASSWORD_CHANGED');
+      // Revoke every session of the account (auth_sessions + unconverted legacy rows) — forces
+      // re-auth on every device, in every workspace.
+      await revokeAccountSessions(orgMember.memberId, 'PASSWORD_CHANGED');
 
       res.status(200).json({ success: true, message: 'Password changed successfully. Please log in again.' });
     } catch (error) {
@@ -752,14 +635,9 @@ export class EmailAuthController {
         data: { passwordHash: newHash },
       });
 
-      // Find all workspace users tied to this orgMember and revoke their sessions
-      const affectedUsers = await this.prisma.user.findMany({
-        where: { orgMemberId: orgMember.memberId },
-        select: { id: true },
-      });
-      for (const u of affectedUsers) {
-        await this.userSessionService.revokeAllUserSessions(u.id, 'PASSWORD_RESET');
-      }
+      // Revoke every session of the account (auth_sessions + unconverted legacy rows of all its
+      // workspace users).
+      await revokeAccountSessions(orgMember.memberId, 'PASSWORD_RESET');
 
       // Delete the code from Redis (it's been consumed)
       await Promise.all([
@@ -1170,33 +1048,7 @@ export class EmailAuthController {
       // Issue pending-auth cookie — same mechanism as OAuth callback.
       const userName = name || normalizedEmail.split('@')[0];
 
-      const isProduction = process.env.NODE_ENV === 'production';
-      const cookieBase = {
-        httpOnly: true,
-        secure: isProduction,
-        sameSite: 'strict' as const,
-        path: '/',
-      };
-
-      res.cookie(
-        'google_access_token',
-        jwt.sign(
-          {
-            email: normalizedEmail,
-            name: userName,
-            providerUserId: `email-${normalizedEmail}`,
-            provider: 'EMAIL',
-            refreshToken: null,
-            accessToken: null,
-          },
-          process.env.JWT_SECRET!,
-          { expiresIn: '10m' },
-        ),
-        {
-          ...cookieBase,
-          maxAge: 10 * 60 * 1000,
-        },
-      );
+      setPendingAuthCookie(res, emailPendingIdentity(normalizedEmail, userName), 'strict');
 
       // Build response — mirrors OAuth callback structure.
       // If workspaceId was provided, return empty workspaces so the frontend
