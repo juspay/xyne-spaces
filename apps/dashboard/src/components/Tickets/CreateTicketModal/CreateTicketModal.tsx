@@ -970,6 +970,9 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
       if (initialDescription) {
         form.setFieldValue('description', initialDescription);
       }
+      if (descriptionTextareaRef.current) {
+        descriptionTextareaRef.current.value = initialDescription;
+      }
       if (initialPriority) {
         form.setFieldValue('priority', initialPriority);
       }
@@ -1225,10 +1228,10 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
     }
   };
 
-  const missingMandatoryFieldMessage = useMemo(
-    () =>
+  const getMandatoryFieldMessage = useCallback(
+    (valuesSnapshot: CreateTicketFormData): string | null =>
       getMissingMandatoryFieldMessage({
-        formValues,
+        formValues: valuesSnapshot,
         boards,
         formMapping: { formFields: resolvedFormFields },
         showUserGroupsOnly,
@@ -1249,10 +1252,10 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
         releaseOnly,
       }),
     [
-      formValues,
       boards,
       resolvedFormFields,
       ticketKind,
+      releaseOnly,
       showUserGroupsOnly,
       showAssignee,
       showTodo,
@@ -1267,7 +1270,6 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
       mandatoryLabels,
       mandatoryMerchantId,
       mandatoryTicketType,
-      releaseOnly,
     ],
   );
 
@@ -1776,7 +1778,11 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
     const seed = seedSnapshotRef.current;
     if (!seed) return false;
 
-    if (!ticketFormSnapshotsEqual(snapshotTicketForm(form.state.values), seed)) return true;
+    const currentValues = {
+      ...form.state.values,
+      description: descriptionTextareaRef.current?.value ?? form.state.values.description,
+    };
+    if (!ticketFormSnapshotsEqual(snapshotTicketForm(currentValues), seed)) return true;
 
     const seededSubTickets = normalizeSubTicketDrafts(initialSubTickets);
     if (JSON.stringify(normalizeSubTicketDrafts(subTickets)) !== JSON.stringify(seededSubTickets)) {
@@ -1846,7 +1852,7 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
         excludedChatAttachmentIds.size > 0 ? Array.from(excludedChatAttachmentIds) : undefined,
       form: {
         title: values.title || undefined,
-        description: values.description || undefined,
+        description: descriptionTextareaRef.current?.value || values.description || undefined,
         priority: values.priority ?? undefined,
         status: values.status,
         assignee: values.assignee ?? undefined,
@@ -2281,6 +2287,10 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
   }, []);
 
   const handleSubmitAttempt = useCallback((): void => {
+    // Uncontrolled textarea — sync DOM value into form store before validating/submitting.
+    const currentDescription = descriptionTextareaRef.current?.value ?? '';
+    form.setFieldValue('description', currentDescription);
+
     const values = form.state.values;
 
     const missing: Record<string, string> = {};
@@ -2301,7 +2311,7 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
       titleInputRef.current?.focus();
       return;
     }
-    if (!values.description || values.description.trim().length < 5) {
+    if (!currentDescription || currentDescription.trim().length < 5) {
       void form.validateAllFields('submit');
       descriptionTextareaRef.current?.focus();
       return;
@@ -2321,14 +2331,16 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
       return;
     }
 
-    const gateMessage = missingMandatoryFieldMessage ?? releaseGateMessage;
+    const gateMessage =
+      getMandatoryFieldMessage({ ...values, description: currentDescription }) ??
+      releaseGateMessage;
     if (gateMessage) {
       toast.error(gateMessage);
       return;
     }
 
     void form.handleSubmit();
-  }, [form, visibleDynamicFields, missingMandatoryFieldMessage, releaseGateMessage]);
+  }, [form, visibleDynamicFields, getMandatoryFieldMessage, releaseGateMessage]);
 
   // Field error
 
@@ -2551,7 +2563,7 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
             <form.Field
               name='description'
               validators={{
-                onChange: ({ value }) => {
+                onSubmit: ({ value }) => {
                   if (!value?.trim()) return 'Description is required';
                   if (value.length < 5) return 'Description must be at least 5 characters';
                   return undefined;
@@ -2566,7 +2578,7 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
                     required={true}
                     aria-required='true'
                     id='ticket-description'
-                    value={field.state.value || ''}
+                    defaultValue={field.state.value || ''}
                     aria-invalid={field.state.meta.errors.length > 0}
                     placeholder='Enter Ticket Description...'
                     aria-label='Ticket Description'
@@ -2575,12 +2587,22 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
                     data-track-name='EDIT_TICKET_DESCRIPTION'
                     data-track-metadata={JSON.stringify({ boardId: selectedBoardId, channelId })}
                     onChange={e => {
-                      const newValue = e.target.value;
-                      field.handleChange(newValue);
-                      // Dynamically adjust the height
                       const target = e.target;
-                      target.style.height = 'auto'; // Reset height to recalculate
-                      target.style.height = `${target.scrollHeight}px`; // Set to scroll height
+                      target.style.height = 'auto';
+                      target.style.height = `${target.scrollHeight}px`;
+                      // Validation runs at submit time only. While an error is
+                      // showing, re-evaluate it live against the typed value so
+                      // it clears as soon as the text is fixed — without writing
+                      // the value into the form store (which is what made typing
+                      // laggy). Mirrors the onSubmit validator's rules.
+                      if (field.state.meta.errors.length > 0) {
+                        const nextError = !target.value.trim()
+                          ? 'Description is required'
+                          : target.value.length < 5
+                            ? 'Description must be at least 5 characters'
+                            : undefined;
+                        field.setErrorMap({ onSubmit: nextError });
+                      }
                     }}
                     className={cn(
                       'rounded-[10px] border px-0 py-1 focus-visible:ring-0 min-h-[150px] transition-colors duration-150',
