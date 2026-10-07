@@ -6,6 +6,7 @@ import { searchUsersWithScores } from '../../../hooks/useUsers';
 import { isResolvableDateKeyword } from '../../../search/filterModel';
 import type { FieldDefinition, FieldKind } from '../actions/action';
 import { emailResolution } from './email';
+import { listOf, lower } from './text';
 
 /**
  * Turns the words a user said for a person, a channel or a date into the record they mean,
@@ -27,9 +28,11 @@ export type Resolved = {
 // aloud, and a reply narrows the rest. `named`: the one name several people share, when it is one
 // of several names said ("Sara" in "Sara and Rahul"). `guess`: none fits the words, but these
 // have the first name said, so the user is asked whether one of them was meant.
+// `some`: of several names, these were found (`pick`) and those `missing` fit no one.
 export type Resolution =
   | { kind: 'one'; pick: Resolved }
   | { kind: 'many'; options: Resolved[]; named?: string; guess?: boolean }
+  | { kind: 'some'; pick: Resolved; missing: string[] }
   | { kind: 'none' };
 
 // The conversation the user is looking at; `label` is how it is named to them, and `channel` how
@@ -63,8 +66,6 @@ export const MAX_OPTIONS = 3;
 // within a tier scores differ by less than Fuse's own threshold (0.3), between tiers by well over
 // 1. So a gap of 1 is a different kind of match, and a smaller one is a tie.
 const CLEAR_MARGIN = 1;
-
-const lower = (text: string): string => text.trim().toLowerCase();
 
 // The `exact` tests are tried in order, and the first that fits exactly one candidate settles it.
 // Otherwise a clear lead settles it, unless `guess` is false: then the close ones are asked about,
@@ -105,7 +106,17 @@ const EVERYONE =
 export const isEveryone = (words: string): boolean => EVERYONE.test(lower(words));
 
 // Said for the user themself.
-const SELF = new Set(['me', 'myself', 'mujhe']);
+const SELF = new Set(['me', 'myself', 'i', 'mujhe']);
+
+// Said for someone not yet named: "add the member to #random" says who is still to be asked.
+const PLACEHOLDER =
+  /^(?:(?:a|an|the|some|this|that)\s+)?(?:member|user|person|people|guy|teammate|colleague)s?$|^(?:someone|somebody|anyone|anybody|them|him|her)$/;
+
+/** Whether the words stand for someone not yet named, so the field is still to be asked. */
+export const isPlaceholder = (words: string): boolean => PLACEHOLDER.test(lower(words));
+
+// Said before a list of people without being one of them: "between me, Sara and Daniel".
+const PEOPLE_LEAD = /^(?:between|with|among|amongst|for|to)\s+/i;
 
 // Whether two first names differ by at most one letter, as speech to text spells a name: "Sarah"
 // for Sara. Short names must be equal: "Al" is not Ali.
@@ -221,17 +232,19 @@ function person(spoken: string, { people, tagged, selfId }: Directory, exact = f
 
 // "Priya, Rahul and Sara": the names of several people, and how they are said back.
 const NAMES_SPLIT = /\s*(?:,|&|\band\b|\baur\b)\s*/i;
-const andList = (labels: string[]): string =>
-  labels.length > 1 ? `${labels.slice(0, -1).join(', ')} and ${labels.at(-1)}` : labels.join('');
 
-const groupOf = (picks: Resolved[]): Resolved => {
+/** One pick standing for all these people, or the one person. */
+export const groupOf = (picks: Resolved[]): Resolved => {
   const group = [...new Map(picks.map(pick => [pick.id, pick])).values()];
   const [only] = group;
   return group.length === 1 && only
     ? only
     : {
         id: group.map(({ id }) => id).join(','),
-        label: andList(group.map(({ label }) => label)),
+        label: listOf(
+          group.map(({ label }) => label),
+          'and',
+        ),
         group,
       };
 };
@@ -242,10 +255,21 @@ const groupOf = (picks: Resolved[]): Resolved => {
  * so the card always names everyone the request is for. The user is in the group anyway, so "me"
  * among others adds no one.
  */
-function people(words: string, directory: Directory, exact = false): Resolution {
+function people(said: string, directory: Directory, exact = false): Resolution {
+  const words = said.trim().replace(PEOPLE_LEAD, '');
   const names = words.split(NAMES_SPLIT).filter(name => name.trim());
   if (names.length < 2) return person(words, directory, exact);
   const found = names.map(name => person(name, directory, exact));
+  // Some names fit no one: those found are kept, and only the others are asked about.
+  const missing = names.filter((_, at) => found[at]?.kind === 'none');
+  const known = found.flatMap(resolution =>
+    resolution.kind === 'one' && resolution.pick.id !== directory.selfId ? [resolution.pick] : [],
+  );
+  if (missing.length > 0 && missing.length < names.length && found.every(r => r.kind !== 'many')) {
+    return known.length > 0
+      ? { kind: 'some', pick: groupOf(known), missing: missing.map(name => name.trim()) }
+      : NONE;
+  }
   const choices = found.flatMap(resolution =>
     resolution.kind === 'one'
       ? resolution.pick.id === directory.selfId
@@ -268,10 +292,11 @@ function people(words: string, directory: Directory, exact = false): Resolution 
 }
 
 // Said for the conversation the user is in, which is also a channel just created: creating one
-// opens it. "the particular thread", "everyone in the thread", "in it", and what may run on after
-// it: "this thread and ask it…". A closed set of words: anything else is a channel's name.
+// opens it. "the particular thread", "in the chat", "everyone in the thread", "in it", and what
+// may run on after it: "this thread and ask it…". A closed set of words: anything else is a
+// channel's name.
 const HERE =
-  /^(?:everyone\s+)?(?:in\s+)?(?:it|here|(?:(?:the|this|that|same|particular|current|new)\s+)+(?:thread|channel|conversation)|the channel i just created)(?:\s+and\b.*)?$/;
+  /^(?:everyone\s+)?(?:in\s+)?(?:it|here|there|(?:(?:the|this|that|same|particular|current|new)\s+)+(?:thread|channel|conversation|chat|group|dm)|(?:(?:the|this|our|a)\s+)?group\s+(?:dm|chat)(?:\s+(?:between|with)\b.*)?|the channel i just created)(?:\s+and\b.*)?$/;
 
 // "This channel" with a thread open is the channel, not the thread.
 function hereOf(current: Here | null | undefined, words: string): Resolution {
@@ -297,15 +322,27 @@ const channelName = (words: string): string =>
 const joinable = (channels: Channel[]): Channel[] =>
   channels.filter(c => c.scopeType === ChannelScopeType.DEFAULT && !c.isArchived);
 
+const sameName = (a: string, b: string): boolean =>
+  lower(normalizeChannelName(a)) === lower(normalizeChannelName(b));
+
 const named = (name: string): ((c: Channel) => boolean) => {
-  const said = lower(normalizeChannelName(name));
-  return c => lower(normalizeChannelName(c.name)) === said;
+  return c => sameName(c.name, name);
 };
+
+// A channel just created is open before the store lists it, so its name is the one on screen.
+function namesHere(name: string, current: Here | null | undefined): Resolution | null {
+  if (!current) return null;
+  const { channelId, label, channel: shown } = current;
+  const same = [shown, label].some(on => on && sameName(channelName(on), name));
+  return same ? { kind: 'one', pick: { id: channelId, label: shown ?? label } } : null;
+}
 
 // `exact`: only a channel of that very name, never a near match ("eng" for engineering).
 function channel(words: string, { channels, here: current }: Directory, exact = false): Resolution {
   if (HERE.test(lower(words))) return hereOf(current, lower(words));
   const name = channelName(words);
+  const here = namesHere(name, current);
+  if (here) return here;
   const found = searchChannelsWithScores(joinable(channels), name, MAX_CANDIDATES);
   return decide(
     exact ? found.filter(({ item }) => named(name)(item)) : found,
@@ -340,7 +377,7 @@ export function resolve(
 ): Resolution | null {
   switch (kind) {
     case 'person':
-      return person(words, directory, exact);
+      return person(words.trim().replace(PEOPLE_LEAD, ''), directory, exact);
     case 'people':
       return people(words, directory, exact);
     case 'channel':

@@ -391,6 +391,7 @@ export const ADMINISTRATION_ACTIONS: readonly ActionDefinition[] = [
       description: {
         kind: 'longtext',
         ask: 'What should its description say?',
+        content: true,
         label: 'description',
         describe: "the workspace's new description, in the user's words",
       },
@@ -668,8 +669,15 @@ export const ADMINISTRATION_ACTIONS: readonly ActionDefinition[] = [
       description: {
         kind: 'longtext',
         ask: 'What is the group for?',
+        content: true,
         label: 'description',
         describe: "what the group is for, in the user's words; not its name",
+      },
+      alias: {
+        kind: 'text',
+        ask: 'What alias should it have?',
+        label: 'alias',
+        describe: 'the short alias to @mention the group by',
       },
     },
     plan: [
@@ -816,6 +824,7 @@ export const ADMINISTRATION_ACTIONS: readonly ActionDefinition[] = [
       description: {
         kind: 'longtext',
         ask: 'What is the role for?',
+        content: true,
         label: 'description',
         describe: "what the role is for, in the user's words; not its name",
       },

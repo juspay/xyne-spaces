@@ -43,6 +43,7 @@ export const AGENT_ACTIONS: readonly ActionDefinition[] = [
         kind: 'longtext',
         required: true,
         ask: 'What should it do?',
+        content: true,
         label: 'instructions',
         describe: "what the agent should do, in the user's words",
       },

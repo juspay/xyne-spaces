@@ -100,7 +100,7 @@ import {
   useInboxBuiltIns,
 } from '../../BarCustomize';
 import ChannelCommandMenu from './ChannelCommandMenu';
-import { useAddChannelDialog } from './useAddChannelDialog';
+import { useDialogParam } from '../../../hooks/useDialogParam';
 import AppNavigator from '../../AppNavigator/AppNavigator';
 import { useThreadSidebarState } from '../../../hooks/useUnreadThreadsCount';
 import { useOverdueRemindersCount } from '../../../hooks/useOverdueRemindersCount';
@@ -263,7 +263,8 @@ const ChatDirectory = ({
   const overdueRemindersCount = useOverdueRemindersCount();
   const { unreadCount: recapUnreadCount } = useRecapUnreadCount();
   const prefetchRecap = usePrefetchRecap();
-  const [showAddChannelForm, setShowAddChannelForm] = useAddChannelDialog();
+  // Xyne Buddy opens it with `?dialog=add_channel`.
+  const [showAddChannelForm, setShowAddChannelForm] = useDialogParam('add_channel');
   const [showAddSectionForm, setShowAddSectionForm] = useState(false);
   const [addSectionSource, setAddSectionSource] = useState<'channels' | 'dms'>('channels');
   const [sectionToRename, setSectionToRename] = useState<ChannelSection | null>(null);

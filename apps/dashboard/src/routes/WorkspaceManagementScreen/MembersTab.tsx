@@ -76,7 +76,7 @@ export const MembersTab = (): ReactElement => {
     return (): void => cancelAnimationFrame(rafId);
   }, [isMobile, editingUser]);
 
-  const isLastAdmin = (user: UserType): boolean => isLastAdminOf(user, users);
+  const isLastAdmin = (user: UserType): boolean => isLastAdminOf(user, adminCount);
 
   const handleUpdateRole = (
     user: UserType,

@@ -40,6 +40,15 @@ export const sanitizeHtmlContent = (html: string): string => {
 };
 
 /**
+ * A user's mention span as the composer sends it, by its original name casing. Escaped, since the
+ * name and id are user data.
+ */
+export const userMentionHtml = (user: MentionResult): string => {
+  const name = escapeHtml(user.name.replace(/ \(you\)$/, ''));
+  return `<span data-mention="" data-mention-type="user" data-user-id="${escapeHtml(user.id)}" data-username="${name}" class="chat-input-mention">@${name}</span>`;
+};
+
+/**
  * Converts plain text @mentions to proper mention spans by matching against known users.
  * Only matches @Name patterns that are NOT already inside a data-mention span.
  * Uses a single regex pass for O(M) complexity instead of O(N*M).
@@ -95,12 +104,7 @@ const convertPlainTextMentionsToSpans = (htmlContent: string, users: MentionResu
       const user = userMap.get(capturedName.toLowerCase());
       if (!user) return match; // Safe fallback
 
-      // Create the new mention span (use original name casing from user object)
-      // Apply HTML escaping to prevent XSS attacks
-      const originalName = user.name.replace(/ \(you\)$/, '');
-      const escapedName = escapeHtml(originalName);
-      const escapedId = escapeHtml(user.id);
-      return `${leadingChar}<span data-mention="" data-mention-type="user" data-user-id="${escapedId}" data-username="${escapedName}" class="chat-input-mention">@${escapedName}</span>`;
+      return `${leadingChar}${userMentionHtml(user)}`;
     },
   );
 };

@@ -1,3 +1,4 @@
+import type { ActionDefinition } from '../actions/action';
 import type { DialogueEvent, EngineState, ListItem, Phase } from './dialogue';
 import { MAX_OPTIONS, type Resolved } from './resolve';
 
@@ -17,6 +18,10 @@ const NO = words("no|nope|no thanks|not now|skip|none|that's all|thats all|nahi"
 const CANCEL = words('cancel|never mind|nevermind|forget it|stop|abort|rehne do');
 // Said while thinking: it answers nothing, so it must never be taken for an answer.
 const HESITATION = words('hmm|umm|uh|wait|hold on|one sec|let me think');
+// The question was not heard: it is put again.
+const AGAIN = words(
+  'what|sorry|come again|repeat|repeat that|say that again|say again|pardon|huh|kya|kya bola|what was that',
+);
 // A short sentence that starts with one of these is a question, not an answer.
 const QUESTION_STARTS = words(
   'what|why|how|who|when|where|which|can|could|is|are|do|does|should|would|will',
@@ -99,6 +104,19 @@ export const isYes = (text: string): boolean => says(YES, normalize(text));
 
 export const isHesitation = (text: string): boolean => says(HESITATION, normalize(text));
 
+/** "What?", "come again?": the question is to be put again. */
+export const asksAgain = (text: string): boolean => says(AGAIN, normalize(text));
+
+// Hindi asks at the end: "aaj ka weather kaisa hai".
+const ASKS_IN_HINDI = /\b(?:kya|kaisa|kaisi|kaise|kab|kahan|kyun|kaun)\b/;
+
+/** Whether the text asks something: "what can an agent do?", "who are you". */
+export function isQuestion(text: string): boolean {
+  const said = normalize(text);
+  const [first = ''] = said.split(' ');
+  return text.includes('?') || QUESTION_STARTS.has(first) || ASKS_IN_HINDI.test(said);
+}
+
 // Short and not a question: for a text question, that is the answer as said. Code decides this,
 // so Ask AI is not woken for "Marketing launch".
 export function isShortAnswer(text: string): boolean {
@@ -167,7 +185,7 @@ export const itemAt = (items: readonly ListItem[], text: string): ListItem | und
  * their name ("Khan", "sara k") or by a part of their email ("sara.k@"). None when it names none
  * of them, or all of them: then it says nothing about which.
  */
-export function narrowedBy(options: readonly Resolved[], text: string): Resolved[] {
+function narrowedBy(options: readonly Resolved[], text: string): Resolved[] {
   const said = text
     .trim()
     .toLowerCase()
@@ -333,5 +351,90 @@ export function quickEvent(state: EngineState, text: string): DialogueEvent | nu
     // "Yes" to a question that wants a value means go on: the question is put again.
     return phase.kind === 'collecting' && field ? { type: 'resume' } : null;
   }
-  return phase.kind === 'collecting' && !phase.field ? namedField(state, text) : null;
+  if (phase.kind === 'collecting' && !phase.field) return namedField(state, text);
+  return phase.kind === 'confirming' ? changeAsked(state, text) : null;
+}
+
+// "I want to change the project": a field named at the confirm card is asked; "change the
+// project to Platform" is its new value, as said.
+const CHANGE =
+  /^(?:(?:i|we)\s+(?:want|need|would like|'d like)\s+to\s+|(?:can|could)\s+(?:you|we|i)\s+|let(?:'s| me)\s+|please\s+)?(?:change|edit|update|fix|set)\s+(.+?)[.!?]*$/i;
+const NEW_VALUE = /^(.+?)\s+to\s+(.+)$/i;
+function changeAsked(state: EngineState, text: string): DialogueEvent | null {
+  const named = CHANGE.exec(text.trim())?.[1];
+  if (!named) return null;
+  const [, field = '', value = ''] = NEW_VALUE.exec(named) ?? [];
+  const valued = value ? namedField(state, field) : null;
+  if (valued?.type === 'ask') return { type: 'fields', values: { [valued.field]: value } };
+  return namedField(state, named);
+}
+
+// Each verb that asks Buddy to do something, with the first title words of the actions it asks for.
+const VERBS: ReadonlyMap<string, readonly string[]> = new Map(
+  Object.entries({
+    send: ['send'],
+    message: ['send'],
+    post: ['send'],
+    mention: ['send'],
+    tag: ['send'],
+    reply: ['send'],
+    dm: ['send'],
+    ping: ['send'],
+    find: ['find'],
+    search: ['find'],
+    add: ['add'],
+    invite: ['invite'],
+    create: ['create'],
+    make: ['create', 'change'],
+    remove: ['remove'],
+    kick: ['remove'],
+    rename: ['rename'],
+    open: ['browse', 'manage', 'start'],
+  }),
+);
+// Said before a request without adding to it: "uh, okay so can you…".
+const LEAD =
+  /^(?:(?:uh+|um+|hmm+|okay|ok|so|and|then|now|also|haan|achha|just|please|pls|(?:can|could|would|will) you)\b[\s,.]*)*/i;
+
+/** The text without what is said before a request: "Uh, message…" is "message…". */
+export const withoutLead = (text: string): string => text.trim().replace(LEAD, '');
+
+// Said in a question ("what does mention do?"), a verb asks for nothing.
+const QUESTION = /^(?:what|why|how|who|when|where|which)\b/i;
+const titleWords = (text: string): string[] =>
+  (text.toLowerCase().match(/[a-z]+/g) ?? []).map(word => word.replace(/s$/, ''));
+
+/** The action a verb in the text asks for, by the most other title words said; none when tied. */
+export function verbAction(
+  text: string,
+  actions: readonly ActionDefinition[],
+): ActionDefinition | undefined {
+  if (QUESTION.test(text.trim())) return undefined;
+  const said = new Set(titleWords(text));
+  const verbs = new Set([...said].flatMap(word => VERBS.get(word) ?? []));
+  const scored = actions
+    .map(action => {
+      const [verb = '', ...rest] = titleWords(action.title);
+      return { action, verb, score: rest.filter(word => said.has(word)).length };
+    })
+    .filter(({ verb }) => verbs.has(verb))
+    .sort((a, b) => b.score - a.score);
+  const [best, next] = scored;
+  return best && (!next || best.score > next.score) ? best.action : undefined;
+}
+
+/** Whether the text starts with a verb that asks Buddy for something: "message Priya too". */
+export const startsRequest = (text: string): boolean => {
+  const [first = ''] = titleWords(withoutLead(text));
+  return VERBS.has(first) && !QUESTION.test(text.trim());
+};
+
+/** The words that name an action: its title's, and the verbs that ask for it ("message", "dm"). */
+export function nameWordsOf(action: ActionDefinition): Set<string> {
+  const title = titleWords(action.title);
+  const [verb] = title;
+  const synonyms = [...VERBS]
+    .filter(([, verbs]) => verb && verbs.includes(verb))
+    .map(([word]) => word);
+  return new Set([...title, ...synonyms]);
 }

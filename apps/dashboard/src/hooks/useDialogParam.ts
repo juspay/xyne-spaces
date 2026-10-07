@@ -19,3 +19,24 @@ export function useDialogParam(name: string): [boolean, Dispatch<SetStateAction<
   }, [opens, navigate, pathname]);
   return [open, setOpen];
 }
+
+/**
+ * A page's state that Xyne Buddy may set with `?<key>=<value>`, like which row is expanded; the
+ * param is then removed, so a refresh does not set it again.
+ */
+export function useParamState(
+  key: string,
+): [string | null, Dispatch<SetStateAction<string | null>>] {
+  const [value, setValue] = useState<string | null>(null);
+  const navigate = useStableNavigate();
+  const pathname = useRouterSelector(snapshot => snapshot.location.pathname);
+  const asked = useRouterSelector(snapshot =>
+    new URLSearchParams(snapshot.location.search).get(key),
+  );
+  useEffect(() => {
+    if (asked === null) return;
+    setValue(asked);
+    void navigate(pathname, { replace: true });
+  }, [asked, navigate, pathname]);
+  return [value, setValue];
+}

@@ -1,4 +1,8 @@
 import { useSyncExternalStore } from 'react';
+import type { RouteTiming } from '../../services/assistantRouteService';
+import { createStore } from '../../utils/createStore';
+import type { Decision } from '../Assistant/engine/interpret';
+import type { Route } from '../Assistant/router';
 
 // The Diagnose log is local only: it holds what was said, so it is never sent anywhere.
 // Always on in development builds; staging can opt in with localStorage['xyne:voice-debug'] = '1'.
@@ -32,14 +36,7 @@ const MAX_EVENTS = 200;
 let events: VoiceDiagnostic[] = [];
 let sequence = 0;
 let startedAt: number | null = null;
-const listeners = new Set<() => void>();
-
-const subscribe = (listener: () => void): (() => void) => {
-  listeners.add(listener);
-  return (): void => {
-    listeners.delete(listener);
-  };
-};
+const { subscribe, notify } = createStore();
 
 /** The next event starts a new request: timings count from it. */
 export function startRequest(): void {
@@ -52,11 +49,36 @@ export function diagnose(step: string, detail = ''): void {
   startedAt ??= now;
   const event = { id: sequence++, at: new Date(), ms: Math.round(now - startedAt), step, detail };
   events = [...events, event].slice(-MAX_EVENTS);
-  listeners.forEach(listener => listener());
+  notify();
 }
 
 export const useDiagnostics = (): VoiceDiagnostic[] =>
   useSyncExternalStore(subscribe, () => events);
+
+/** What Jev chose for a sentence, and the values it read. */
+export const describeRoute = (route: Route): string => {
+  const chosen =
+    'actions' in route
+      ? ` ${route.actions.map(a => a.id).join(', ')}`
+      : 'action' in route
+        ? ` ${route.action.id}`
+        : '';
+  const fields = 'fields' in route ? ` ${JSON.stringify(route.fields)}` : '';
+  return `${route.kind}${chosen}${fields}`;
+};
+
+/** A sentence settled without Jev: the event, and the fields it fills. */
+export const describeLocal = (decision: Decision): string => {
+  if (decision.kind !== 'event') return decision.kind;
+  const { event } = decision;
+  return event.type === 'fields' ? `fields ${JSON.stringify(event.values)}` : event.type;
+};
+
+/** How long routing took, with the server's share when it said. */
+export const describeTiming = (timing: RouteTiming | undefined): string =>
+  timing
+    ? ` · ${timing.ms} ms${timing.serverMs === undefined ? '' : ` (server ${timing.serverMs} ms)`}`
+    : '';
 
 // Typed requests have no Diagnose panel: in DevTools, copy(xyneDiagnose()) copies the log.
 if (DIAGNOSE_ENABLED) Object.assign(window, { xyneDiagnose: () => formatDiagnostics(events) });

@@ -31,6 +31,9 @@ export interface FieldDefinition {
   // juspay dot in"), read on the client since Jev reads every text field as the words said.
   // 'message': the words to send, without what asks for them ("say", "ask them to").
   parse?: 'email' | 'message';
+  // The user's own words (a message, what an agent does): any reply to its question is taken as
+  // the value, with no model asked, unless it is a quick word or a request of its own.
+  content?: boolean;
 }
 
 type IntentDefinition = {
@@ -74,7 +77,7 @@ export type ActionDefinition = {
   outcome?: 'list';
 };
 
-export function intentCriteria(action: Pick<ActionDefinition, 'intent'>): string {
+function intentCriteria(action: Pick<ActionDefinition, 'intent'>): string {
   const { description, examples, notFor = [] } = action.intent;
   const quoted = examples.map(example => `"${example}"`).join(', ');
   const exclusions = notFor.map(({ when, instead }) => `${when} (${instead})`).join('; ');

@@ -1,64 +1,72 @@
 import { useCallback, useEffect, useMemo, useRef } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { ChannelScopeType, ChannelVisibility, UserStatus } from '@xyne/shared';
 import { stateMachineActor } from '../../machines/stateMachine';
 import { xyneAIActor } from '../../machines/xyneAIMachine';
 import { getAllChannels } from '../../hooks/useChannels';
 import { useStableRouter, type StableRouter } from '../../hooks/useStableRouter';
+import { useHasResourceAccess } from '../../hooks/usePermissions';
 import { useSelf } from '../../hooks/useUsers';
 import { useZeroWithFallback as useZero } from '../../hooks/useZeroWithFallback';
 import { useOrganisationsAccess } from '../../routes/OrganisationsModule/organisationsSections';
-import { resolveChannelLabel } from '../Chat/ChatDirectory/ChatDirectory.utils';
 import type { Message } from '../Chat/XyneAISidebar/utils/XyneAITypes';
-import type { PendingField, RouteTiming } from '../../services/assistantRouteService';
-import { diagnose, startRequest } from '../Voice/diagnoseLog';
+import type { PendingField } from '../../services/assistantRouteService';
+import {
+  describeLocal,
+  describeRoute,
+  describeTiming,
+  diagnose,
+  startRequest,
+} from '../Voice/diagnoseLog';
 import { voiceSession } from '../Voice/voiceSession';
-import { fillTemplate, hasValue, type ActionDefinition, type FieldValue } from './actions/action';
+import { hasValue, type ActionDefinition, type FieldValue } from './actions/action';
 import { assistantSession, useAssistantSession, type Run } from './assistantSession';
-import { onScreen, snapshotOf, type PublishedList } from './onScreen';
 import { ACTIONS } from './catalog';
+import { conversationOf, joinedChannelIds, readDirectory } from './directory';
+import { droppedText, nextAfter, type QueuedStep } from './engine/chain';
 import {
   advance,
-  afterList,
   ALREADY_SENT,
   endsDialogue,
-  FIXED_REPLIES,
   LIST_GONE,
-  opening,
   openQuestion,
   replyFor,
-  retryable,
-  spokenItem,
   startDialogue,
   SOMEONE_ELSE,
   STOPPED,
   TELL_ME_MORE,
-  withShownList,
   type DialogueEvent,
   type EngineState,
   type ListItem,
   type Step,
 } from './engine/dialogue';
-import {
-  interpretLocally,
-  interpretRead,
-  interpretRoute,
-  interpretTap,
-  isOperable,
-  offerAfterRefusal,
-  type Decision,
-  type InterpretContext,
-} from './engine/interpret';
-import type { Directory, Here, Resolved } from './engine/resolve';
-import { runPlan, showProgress, type RunResult } from './engine/runner';
+import { interpretLocally, interpretRoute, interpretTap, type Decision } from './engine/interpret';
+import type { Directory, Resolved } from './engine/resolve';
+import { afterList, opening, spokenItem } from './engine/results';
+import { runPlan, showProgress } from './engine/runner';
+import { begin, isOperable } from './engine/start';
+import { sentences } from './engine/text';
+import { interpretRead, offerAfterRefusal } from './engine/unsureCard';
 import { operableForms } from './forms/operableForm';
+import { onScreen, snapshotOf, type PublishedList, type ShownThread } from './onScreen';
 import { APP_PAGES, askingPage, firstPage, visibleActions, type PageId } from './pages';
-import { routeText, type Route } from './router';
-import { TASKS, type TaskId, type ZeroClient } from './tasks';
+import { routeText } from './router';
+import {
+  append,
+  closeUnsure,
+  dropQueue,
+  endDialogue,
+  newId,
+  outcomeOf,
+  post,
+  readContext,
+  resumePrompt,
+  setTurns,
+  warmPhrases,
+} from './sessionTurns';
+import { TASKS, type TaskId, type TaskOutcome, type ZeroClient } from './tasks';
 import {
   capabilities,
   currentCard,
-  exchange,
   markOpened,
   pillAction,
   say,
@@ -66,7 +74,6 @@ import {
   toChatMessages,
   withoutCards,
   type AssistantCardData,
-  type AssistantTurn,
   type CurrentCard,
 } from './turns';
 
@@ -87,7 +94,7 @@ export interface AssistantActions {
   pick: (optionId: string, spoken?: boolean) => boolean;
   // Voice: the reply to speak, '' when the text was handled with nothing to say, null to send it to Ask AI.
   answer: (text: string) => Promise<string | null>;
-  // What voice mode may say that is known ahead of time: the fixed replies and the open question.
+  // What voice mode synthesizes ahead of time: the open question and the likeliest replies.
   phrases: () => readonly string[];
   // The open question put again, for voice mode to say after a detour; null when none is open.
   resumePrompt: () => string | null;
@@ -100,8 +107,6 @@ export type AskOutcome =
   | { outcome: 'handed_over' }
   | { outcome: 'cancelled' };
 
-const newId = (): string => `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
-
 // What the form of the action holds right now: what the user typed there counts as answered.
 const fieldReader = (action: ActionDefinition): ((field: string) => FieldValue) => {
   const form = action.plan.flatMap(step => ('form' in step ? [step.form] : []))[0];
@@ -113,30 +118,6 @@ const pendingOf = (state: EngineState): PendingField | undefined => {
   const question = openQuestion(state);
   return question ? { action: state.action.id, ...question } : undefined;
 };
-
-// A routing result as the Diagnose log shows it: what Jev chose and the values it read.
-const describeRoute = (route: Route): string => {
-  const chosen =
-    'actions' in route
-      ? ` ${route.actions.map(a => a.id).join(', ')}`
-      : 'action' in route
-        ? ` ${route.action.id}`
-        : '';
-  const fields = 'fields' in route ? ` ${JSON.stringify(route.fields)}` : '';
-  return `${route.kind}${chosen}${fields}`;
-};
-
-// A sentence settled without Jev, as the Diagnose log shows it: the event and the fields it fills.
-const describeLocal = (decision: Decision): string => {
-  if (decision.kind !== 'event') return decision.kind;
-  const { event } = decision;
-  return event.type === 'fields' ? `fields ${JSON.stringify(event.values)}` : event.type;
-};
-
-const describeTiming = (timing: RouteTiming | undefined): string =>
-  timing
-    ? ` · ${timing.ms} ms${timing.serverMs === undefined ? '' : ` (server ${timing.serverMs} ms)`}`
-    : '';
 
 // An item of a list as its card button reads: who or what, where, and when.
 const cardItem = (item: ListItem): { id: string; label: string } => ({
@@ -174,6 +155,51 @@ const moved = (router: StableRouter, from: unknown): Promise<void> =>
     if (router.getSnapshot().location !== from) done();
   });
 
+// How long the next step of a chain waits for the conversation the step before opened: "it".
+const HERE_WAIT_MS = 1000;
+
+// Resolves once a page shows another conversation than `from`, or after HERE_WAIT_MS.
+const opened = (from: ShownThread | null): Promise<void> =>
+  new Promise(resolve => {
+    const done = (): void => {
+      stop();
+      clearTimeout(timer);
+      resolve();
+    };
+    const timer = setTimeout(done, HERE_WAIT_MS);
+    const stop = onScreen.thread.onOpen(done);
+    const shown = onScreen.thread.get();
+    if (shown && shown !== from) done();
+  });
+
+// What a turn carries besides its event: the request it was switched to from, the steps of its
+// sentence still to come, and what the step before it came to.
+interface Carried {
+  aside?: EngineState;
+  queue?: QueuedStep[];
+  done?: string;
+}
+
+// The next step of a chain, started once the one before it is done.
+type Follow = Carried & { state: EngineState; event: DialogueEvent };
+
+// A chain's step follows what was done; steps let go of are said after a request that ended, or
+// before the question of the one that replaced them.
+const replyOf = (step: Step, done: string | undefined, dropped: string): string => {
+  const reply = done ? nextAfter(done, replyFor(step)) : replyFor(step);
+  return endsDialogue(step) ? sentences(reply, dropped) : sentences(dropped, reply);
+};
+
+const speak = (spoken: boolean, text: string): void => {
+  if (spoken && voiceSession.active()) voiceSession.speak(text);
+};
+
+// A run's outcome, posted and said on its own: the first reply was already given.
+const tell = (text: string, spoken: boolean, card?: AssistantCardData): void => {
+  post(null, text, card);
+  speak(spoken, text);
+};
+
 // Opens an item of the list on screen; false when the page no longer shows it.
 const openItem = ({ id }: ListItem): boolean => {
   const list = onScreen.list.get();
@@ -186,144 +212,6 @@ const openItem = ({ id }: ListItem): boolean => {
 // only reply; changing or sending takes seconds and is answered at first.
 const isInstant = (action: ActionDefinition): boolean =>
   action.effect === 'read' || action.effect === 'navigate';
-
-const sentence = (text: string): string => (/[.!?…]$/.test(text) ? text : `${text}.`);
-
-// The helpers below work on the store, not on a component, so a run that finishes after its
-// page has gone still posts its outcome.
-const setTurns = (change: (turns: AssistantTurn[]) => AssistantTurn[]): void =>
-  assistantSession.update({ turns: change(assistantSession.get().turns) });
-
-const append = (userText: string, chosen: readonly ActionDefinition[], how = false): string => {
-  const pair = exchange(userText, chosen, new Date(), newId, how);
-  setTurns(prev => [...prev, ...pair]);
-  return pair[1].text;
-};
-
-const post = (
-  said: string | null,
-  text: string,
-  card?: AssistantCardData,
-  pills?: ActionDefinition[],
-): void =>
-  setTurns(prev => [
-    ...withoutCards(prev),
-    ...(said ? [say('user', said, newId)] : []),
-    { ...say('assistant', text, newId, card), ...(pills && { actions: pills }) },
-  ]);
-
-const endDialogue = (): void => {
-  const { turns } = assistantSession.get();
-  assistantSession.update({
-    dialogue: null,
-    turns: turns.some(turn => turn.card) ? withoutCards(turns) : turns,
-  });
-};
-
-// What the user may be answering, as the interpreter reads it. A list the page shows anew is the
-// one picked from.
-const readContext = (): InterpretContext => {
-  const { dialogue, aside, unsure } = assistantSession.get();
-  const shown = onScreen.list.get();
-  const list = shown?.ready ? snapshotOf(shown) : null;
-  return {
-    dialogue: dialogue && list ? withShownList(dialogue, list) : dialogue,
-    aside,
-    unsure,
-    list,
-  };
-};
-
-// The "did you mean" card is dropped, buttons and all, so a tap on it is never left dead.
-const closeUnsure = (): void => {
-  const { unsure, turns } = assistantSession.get();
-  if (unsure) assistantSession.update({ unsure: null, turns: withoutCards(turns) });
-};
-
-// What the run came to, said to the user, and the dialogue it leaves. A refused field puts the
-// dialogue back to asking for it; a failure that is no field's own leaves what was shown to be run
-// again with "yes". `current`: the dialogue is still the one that ran, so it can be. `next`: the
-// step the run's task offers after it.
-const outcomeOf = (
-  result: RunResult,
-  state: EngineState,
-  current: boolean,
-  next?: string | void,
-): { text: string; dialogue: EngineState | null } => {
-  if (result.ok) {
-    const done = fillTemplate(state.action.done ?? 'Done.', state.values);
-    return { text: next ? `${sentence(done)} ${next}` : done, dialogue: null };
-  }
-  const ask = result.field ? state.action.fields[result.field]?.ask : undefined;
-  if (!result.field || !ask) {
-    // A refusal is not offered again: another try would be refused the same way. The request stays
-    // open, so "continue" shows it again once the user has done what it needs.
-    const retry = current && !result.refused ? ' Say yes to try again.' : '';
-    return { text: `${sentence(result.error)}${retry}`, dialogue: retryable(state) };
-  }
-  return {
-    text: `${sentence(result.error)} ${ask}`,
-    dialogue: { ...state, phase: { kind: 'collecting', field: result.field } },
-  };
-};
-
-// What voice mode synthesizes ahead of time.
-const warmPhrases = (): readonly string[] => {
-  const { dialogue } = assistantSession.get();
-  const question = dialogue && openQuestion(dialogue);
-  return question ? [...FIXED_REPLIES, question.prompt] : FIXED_REPLIES;
-};
-
-const resumePrompt = (): string | null => {
-  const { dialogue } = assistantSession.get();
-  const question = dialogue && openQuestion(dialogue);
-  return dialogue && question ? `Back to ${dialogue.action.title}: ${question.prompt}` : null;
-};
-
-// The channels the user is a participant of, as far as the store knows.
-const joinedChannelIds = (): Set<string> =>
-  new Set(
-    stateMachineActor
-      .getSnapshot()
-      .context.userChannelStatuses.filter(s => !s.isClosed && !s.isDeleted)
-      .map(s => s.channelId),
-  );
-
-// The conversation the user is looking at, as the page shows it: a channel, a DM, or a thread in
-// one. None where no page shows one, where "this thread" means nothing.
-const conversationOf = (selfId: string | null): Here | null => {
-  const { channelId, conversationId } = onScreen.thread.get() ?? {};
-  const channel = getAllChannels().find(({ id }) => id === channelId);
-  if (!channelId || !channel) return null;
-  const { users } = stateMachineActor.getSnapshot().context;
-  // Named as the search page names where a result is: "#onboarding", or a DM by its people.
-  const name =
-    channel.scopeType === ChannelScopeType.DEFAULT
-      ? `#${channel.name}`
-      : resolveChannelLabel(channel, selfId ?? '', users);
-  return {
-    channelId,
-    ...(conversationId ? { conversationId } : {}),
-    label: conversationId ? `this thread in ${name}` : name,
-    channel: name,
-  };
-};
-
-// The people and channels the user may pick, read from the store when a name is resolved, so
-// presence and channel changes do not re-render the sidebar. Channels are filtered as
-// `useEmailChannels` does: a private one only when the user has joined it. People of every type
-// are kept, so a bot or an agent can be mentioned.
-const readDirectory = (here: Here | null): Directory => {
-  const { users } = stateMachineActor.getSnapshot().context;
-  const joined = joinedChannelIds();
-  return {
-    people: users.filter(user => user.status === UserStatus.ACTIVE),
-    channels: getAllChannels().filter(
-      channel => channel.visibility !== ChannelVisibility.PRIVATE || joined.has(channel.id),
-    ),
-    here,
-  };
-};
 
 interface AssistantOptions {
   enabled: boolean;
@@ -354,6 +242,8 @@ export const useAssistantActions = ({
   );
   const starters = useMemo(() => starterActions(actions), [actions]);
   const selfId = useSelf()?.id ?? null;
+  // As the User Groups page reads it, so Buddy changes only the groups that page lists.
+  const userGroupsAdmin = useHasResourceAccess('USER-GROUPS');
   // Read when a name is resolved, not rendered from: following every navigation would re-render
   // the sidebar for nothing.
   const readHere = useCallback(
@@ -369,13 +259,13 @@ export const useAssistantActions = ({
   askAIRef.current = askAI;
   const owner = `${selfId ?? ''}:${workspaceId ?? ''}`;
   useEffect(() => assistantSession.ownedBy(owner), [owner]);
-  const session = useAssistantSession();
+  // Only what is rendered: the rest of the session is read through assistantSession.get().
+  const sessionOwner = useAssistantSession(current => current.owner);
+  const turns = useAssistantSession(current => current.turns);
+  const routing = useAssistantSession(current => current.routing !== null);
   // Until the effect above has run, the session may still be another user's or workspace's.
-  const shown = enabled && session.owner === owner;
-  const messages = useMemo(
-    () => (shown ? toChatMessages(session.turns) : []),
-    [shown, session.turns],
-  );
+  const shown = enabled && sessionOwner === owner;
+  const messages = useMemo(() => (shown ? toChatMessages(turns) : []), [shown, turns]);
 
   const goTo = useCallback(
     (page: PageId, params: Record<string, string> = {}): void => {
@@ -417,7 +307,7 @@ export const useAssistantActions = ({
   // Tasks are done in code; where one leads is a path, not a page of the catalog, but leaving /ai
   // is handed over just the same.
   const perform = useCallback(
-    async (task: TaskId, { values, resolved }: EngineState): Promise<string | void> => {
+    async (task: TaskId, { values, resolved }: EngineState): Promise<TaskOutcome | void> => {
       if (!selfId) throw new Error("I can't tell who you are yet.");
       return TASKS[task]({
         values,
@@ -429,14 +319,16 @@ export const useAssistantActions = ({
           channels: getAllChannels(),
           joined: joinedChannelIds(),
           userGroups: stateMachineActor.getSnapshot().context.allUserGroups,
+          userGroupsAdmin,
           navigate: path => {
             if (surface === 'page') handOff.current = { voice: voiceSession.active() };
             void router.navigate(path);
           },
+          openPage,
         },
       });
     },
-    [selfId, surface, zero, router],
+    [selfId, surface, zero, router, userGroupsAdmin, openPage],
   );
 
   // A lone page-only action is opened at once, as its reply says: text alone would leave the
@@ -447,24 +339,33 @@ export const useAssistantActions = ({
       const [only] = chosen;
       const page = chosen.length === 1 && only ? firstPage(only) : undefined;
       if (page) openPage(page);
-      return append(userText, chosen, how);
+      const reply = append(userText, chosen, how);
+      const dropped = dropQueue();
+      if (dropped) post(null, dropped);
+      return sentences(reply, dropped);
     },
     [openPage],
   );
 
+  // Runs the plan and tells what it came to; with a step of the sentence still to come, that
+  // step is returned to be started, and the outcome is said with its question.
   const execute = useCallback(
-    async (state: EngineState, spoken: boolean): Promise<void> => {
+    async (state: EngineState, spoken: boolean): Promise<Follow | null> => {
       const startedFor = assistantSession.get().owner;
       const run: Run = { controller: new AbortController(), submitted: false };
       assistantSession.update({ run });
       const seen = onScreen.list.version();
-      const before = { list: onScreen.list.get(), at: router.getSnapshot().location };
-      let next: string | void = undefined;
+      const before = {
+        list: onScreen.list.get(),
+        at: router.getSnapshot().location,
+        thread: onScreen.thread.get(),
+      };
+      let told: TaskOutcome | void = undefined;
       const result = await runPlan(
         state,
         openPage,
         async (task, performed) => {
-          next = await perform(task, performed);
+          told = await perform(task, performed);
         },
         run.controller.signal,
         () => {
@@ -488,18 +389,37 @@ export const useAssistantActions = ({
       if (assistantSession.get().run === run) assistantSession.update({ run: null });
       diagnose('Buddy run', result.ok ? 'done' : `failed ${result.field ?? ''}: ${result.error}`);
       // Another user's or workspace's conversation now: this outcome is not theirs to hear.
-      if (assistantSession.get().owner !== startedFor) return;
+      if (assistantSession.get().owner !== startedFor) return null;
       // Reset or replaced while it ran: what was sent is still told, but a run that sent nothing
       // is of no interest any more.
       const current = assistantSession.get().dialogue === state;
-      if (!run.submitted && !current) return;
+      if (!run.submitted && !current) return null;
       // A list is said by how many were found, and waits on the user's pick; one is opened, which
       // ends the request.
       const listed = list && current ? afterList(state, snapshotOf(list)) : null;
       if (listed?.step.kind === 'results' && listed.step.open) list?.open(listed.step.open.id);
+      const { queued } = assistantSession.get();
+      const [following, ...rest] = queued;
+      const chained = result.ok && current && following !== undefined;
       const outcome = listed
         ? { text: replyFor(listed.step), dialogue: endsDialogue(listed.step) ? null : listed.state }
-        : outcomeOf(result, state, current, next);
+        : outcomeOf(result, state, current, told, chained);
+      if (current) assistantSession.update({ dialogue: outcome.dialogue, acted: result.ok });
+      if (chained) {
+        // "It" in the next step is what this one made, once its page has opened.
+        await moved(router, before.at);
+        await opened(before.thread);
+        // A request made meanwhile let the steps go, and said so.
+        if (assistantSession.get().queued !== queued) {
+          tell(outcome.text, spoken);
+          return null;
+        }
+        assistantSession.update({ queued: rest });
+        const next = begin(following.action, following.fields, readHere(), following.said);
+        return { ...next, queue: rest, done: outcome.text };
+      }
+      // Any other outcome of the request in hand lets the steps still to come go.
+      const dropped = current && !result.ok ? dropQueue() : '';
       // Refused for a reason another action of the user's deals with: that is offered on a card.
       const offer =
         !result.ok && result.refused && current
@@ -509,19 +429,17 @@ export const useAssistantActions = ({
       const { aside } = assistantSession.get();
       const back =
         result.ok && !listed && aside ? ` Say continue to go back to ${aside.action.title}.` : '';
-      const text = offer ? offer.text : `${outcome.text}${back}`;
-      if (current) assistantSession.update({ dialogue: outcome.dialogue, acted: result.ok });
+      const text = sentences(offer ? offer.text : `${outcome.text}${back}`, dropped);
       if (offer) assistantSession.update({ unsure: offer.unsure });
       const card: AssistantCardData | undefined = listed
         ? cardOf(listed.step)
         : offer
           ? { kind: 'choose', options: offer.options }
           : undefined;
-      post(null, text, card);
-      // The first reply was already given, so the outcome is said on its own.
-      if (spoken && voiceSession.active()) voiceSession.speak(text);
+      tell(text, spoken, card);
+      return null;
     },
-    [openPage, perform, router, actions],
+    [openPage, perform, router, actions, readHere],
   );
 
   // One turn of a dialogue: advance it, show the step as the reply, and start the run when ready.
@@ -531,7 +449,7 @@ export const useAssistantActions = ({
       event: DialogueEvent,
       said: string | null,
       spoken: boolean,
-      aside?: EngineState,
+      { aside, queue, done }: Carried = {},
     ): string => {
       const { state: next, step } = advance(state, event, fieldReader(state.action));
       diagnose(
@@ -551,18 +469,24 @@ export const useAssistantActions = ({
       }
       // A request just started, or switched to: its page is opened while Buddy asks.
       const starting = assistantSession.get().dialogue?.action.id !== next.action.id;
+      const ends = endsDialogue(step);
+      const { aside: held, queued: before } = assistantSession.get();
+      // A request that ends, or another that starts, lets go of the steps that were to follow.
+      const queued = queue ?? (starting || ends ? [] : before);
       // The request is the one in hand again, so whatever was put on hold is let go; but one
       // switched to from a card keeps the request it replaced aside, for "continue".
       assistantSession.update({
-        dialogue: endsDialogue(step) ? null : next,
-        aside: aside ?? (starting ? null : assistantSession.get().aside),
+        dialogue: ends ? null : next,
+        aside: aside ?? (starting ? null : held),
+        queued,
         acted: step.kind === 'results' && !!step.open,
       });
       const instant = step.kind === 'run' && isInstant(next.action);
-      const reply = instant ? '' : replyFor(step);
-      if (instant)
-        setTurns(prev => [...withoutCards(prev), ...(said ? [say('user', said, newId)] : [])]);
-      else post(said, reply, cardOf(step));
+      const dropped = queued === before ? '' : droppedText(before);
+      // An instant action says only its outcome, once it is done.
+      const reply = instant ? dropped : replyOf(step, done, dropped);
+      if (reply) post(said, reply, cardOf(step));
+      else setTurns(prev => [...withoutCards(prev), ...(said ? [say('user', said, newId)] : [])]);
       // The page the request is done on is opened as it starts, while Buddy asks. A form's preview
       // below opens its page itself, only when it is not open yet.
       const page = askingPage(next.action);
@@ -570,7 +494,9 @@ export const useAssistantActions = ({
       const previews = next.action.plan.some(({ op }) => op === 'fill');
       if (page && starting && asking && !previews) openPage(page);
       if (step.kind === 'run') {
-        const running = execute(next, spoken);
+        const running = execute(next, spoken).then(follow => {
+          if (follow) speak(spoken, turn(follow.state, follow.event, null, spoken, follow));
+        });
         if (instant) instantRun.current = running;
       }
       // The question did not get through: the form is left open, filled as far as it got.
@@ -646,7 +572,7 @@ export const useAssistantActions = ({
       else if (decision.kind !== 'wait' && decision.kind !== 'busy') closeUnsure();
       switch (decision.kind) {
         case 'event':
-          return replied(turn(decision.state, decision.event, said, spoken, decision.aside));
+          return replied(turn(decision.state, decision.event, said, spoken, decision));
         // Read again before it is applied (see `reread`), so never here.
         case 'read':
           return { outcome: 'cancelled' };
@@ -676,7 +602,7 @@ export const useAssistantActions = ({
           // its outcome is still announced.
           const stopped = assistantSession.stopRun();
           if (stopped) endDialogue();
-          const reply = stopped ? STOPPED : ALREADY_SENT;
+          const reply = sentences(stopped ? STOPPED : ALREADY_SENT, dropQueue());
           post(said, reply);
           return replied(reply);
         }
@@ -702,10 +628,11 @@ export const useAssistantActions = ({
           diagnose('Buddy', 'off topic again, request put on hold');
           const { dialogue } = assistantSession.get();
           assistantSession.update({ aside: dialogue, dialogue: null });
-          post(null, decision.text);
+          const text = sentences(decision.text, dropQueue());
+          post(null, text);
           // Only Ask AI's answer is spoken after this, so the hold is said first: the speech
           // queue keeps it ahead of the streamed reply.
-          if (spoken && voiceSession.active()) voiceSession.speak(decision.text);
+          speak(spoken, text);
           return { outcome: 'ask_ai' };
         }
         case 'ask_ai': {
@@ -777,6 +704,7 @@ export const useAssistantActions = ({
       turns: [],
       dialogue: null,
       aside: null,
+      queued: [],
       unsure: null,
       acted: false,
     });
@@ -809,12 +737,13 @@ export const useAssistantActions = ({
       const { acted } = assistantSession.get();
       if (acted) assistantSession.update({ acted: false });
       const context = { ...readContext(), ...((spoken || acted) && { engaged: actions }) };
+      const directory = readHere(tagged);
       if (!spoken) startRequest();
       diagnose(
         'Buddy heard',
         `“${said}”${context.dialogue ? ` (open: ${context.dialogue.action.id})` : ''}`,
       );
-      const local = interpretLocally(context, said, readHere(tagged));
+      const local = interpretLocally(context, said, directory);
       if (local) {
         diagnose('Buddy local', describeLocal(local));
         const decided = await reread(local);
@@ -833,7 +762,7 @@ export const useAssistantActions = ({
         );
         if (controller.signal.aborted) return { outcome: 'cancelled' };
         diagnose('Buddy route', `${describeRoute(route)}${describeTiming(timing)}`);
-        return apply(interpretRoute(context, said, route, readHere(tagged)), said, spoken);
+        return apply(interpretRoute(context, said, route, directory), said, spoken);
       } catch (error) {
         diagnose('Buddy route', `failed: ${String(error)}`);
         return { outcome: 'ask_ai' };
@@ -865,13 +794,13 @@ export const useAssistantActions = ({
     [converse],
   );
 
-  const card = useMemo(() => (shown ? currentCard(session.turns) : null), [shown, session.turns]);
+  const card = useMemo(() => (shown ? currentCard(turns) : null), [shown, turns]);
 
   return {
     actions,
     starters,
     messages,
-    isRouting: shown && session.routing !== null,
+    isRouting: shown && routing,
     choose,
     openPill,
     reset,

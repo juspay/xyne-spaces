@@ -46,7 +46,7 @@ import { usePlatform } from '../../hooks/usePlatform';
 import { setLastActiveWorkspaceId, setLastActiveWorkspaceName } from '../../machines/authMachine';
 import { apiInstance } from '../../services/clients/apiClient';
 import { JoinRequestsSection } from './JoinRequestsSection';
-import { useDialogParam } from '../../hooks/useDialogParam';
+import { useDialogParam, useParamState } from '../../hooks/useDialogParam';
 import { EMAIL_PATTERN } from '../../utils/emailAddress';
 import {
   useFilling,
@@ -583,7 +583,8 @@ export const OrganisationsScreen = (): ReactElement => {
     enabled: !!workspaceId && !orgMismatch,
   });
 
-  const [expandedOrgId, setExpandedOrgId] = useState<string | null>(null);
+  // Xyne Buddy opens an organisation with `?org=<orgId>`, so the member it added is seen.
+  const [expandedOrgId, setExpandedOrgId] = useParamState('org');
   const [showCreateDialog, setShowCreateDialog] = useDialogParam('create');
   const [newOrgName, setNewOrgName] = useState('');
   const [newWorkspaceName, setNewWorkspaceName] = useState('');

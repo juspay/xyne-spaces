@@ -1,5 +1,6 @@
 import { useEffect, useRef, useSyncExternalStore } from 'react';
 import type { FieldValue } from '../actions/action';
+import { createStore } from '../../../utils/createStore';
 import type { PageId } from '../pages';
 
 // The forms the assistant can operate, and the page each one lives on.
@@ -33,17 +34,8 @@ export interface OperableForm {
 }
 
 const mounted = new Map<FormId, { current: OperableForm | null }>();
-const listeners = new Set<() => void>();
+const { subscribe, notify } = createStore();
 let filling: { form: FormId; field: string } | null = null;
-
-const notify = (): void => listeners.forEach(listener => listener());
-
-const subscribe = (listener: () => void): (() => void) => {
-  listeners.add(listener);
-  return (): void => {
-    listeners.delete(listener);
-  };
-};
 
 const get = (id: FormId): OperableForm | undefined => mounted.get(id)?.current ?? undefined;
 

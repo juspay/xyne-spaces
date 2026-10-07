@@ -1,4 +1,5 @@
 import { useEffect, useRef } from 'react';
+import { createStore } from '../../utils/createStore';
 import type { ListItem, ShownResults } from './engine/dialogue';
 
 /**
@@ -23,19 +24,10 @@ let thread: ShownThread | null = null;
 let list: { ref: { current: ShownList | null }; version: number } | null = null;
 // Raised for each new list, so a run can tell the list it asked for from an older one.
 let versions = 0;
-const listeners = new Set<() => void>();
-const notify = (): void => listeners.forEach(listener => listener());
+const changes = createStore();
 // Told each time a page opens a conversation, and each time a list leaves the screen.
-const openings = new Set<() => void>();
-const departures = new Set<() => void>();
-const subscribe =
-  (to: Set<() => void>) =>
-  (listener: () => void): (() => void) => {
-    to.add(listener);
-    return (): void => {
-      to.delete(listener);
-    };
-  };
+const openings = createStore();
+const departures = createStore();
 
 const current = (): PublishedList | null => {
   const shown = list?.ref.current;
@@ -54,9 +46,9 @@ export const onScreen = {
     get: (): ShownThread | null => thread,
     set: (shown: ShownThread | null): void => {
       thread = shown;
-      if (shown) openings.forEach(listener => listener());
+      if (shown) openings.notify();
     },
-    onOpen: subscribe(openings),
+    onOpen: openings.subscribe,
   },
   list: {
     get: current,
@@ -65,19 +57,19 @@ export const onScreen = {
       versions += 1;
       const entry = { ref: source, version: versions };
       list = entry;
-      notify();
+      changes.notify();
       return (): void => {
         if (list !== entry) return;
         list = null;
-        notify();
+        changes.notify();
         // A new search on the same page puts its list up in the same commit: only a list still
         // gone after it has left the screen.
         queueMicrotask(() => {
-          if (!list) departures.forEach(listener => listener());
+          if (!list) departures.notify();
         });
       };
     },
-    onGone: subscribe(departures),
+    onGone: departures.subscribe,
     // The newest version so far, to wait for a list newer than it.
     version: (): number => versions,
     /**
@@ -102,13 +94,13 @@ export const onScreen = {
           if (!shown) return;
           clearTimeout(timer);
           clearTimeout(settling);
-          listeners.delete(check);
+          stop();
           resolve(shown);
         };
-        listeners.add(check);
+        const stop = changes.subscribe(check);
         const timer = setTimeout(() => {
           clearTimeout(settling);
-          listeners.delete(check);
+          stop();
           resolve(null);
         }, ms);
         const settling = kept
@@ -132,7 +124,7 @@ export function useOnScreenList(shown: ShownList | null): void {
   // A list becomes ready without a new key: a run waiting for it is told.
   const ready = shown?.ready;
   useEffect(() => {
-    if (ready) notify();
+    if (ready) changes.notify();
   }, [ready]);
 }
 

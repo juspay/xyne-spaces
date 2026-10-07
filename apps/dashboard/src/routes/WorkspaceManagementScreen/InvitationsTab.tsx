@@ -224,13 +224,8 @@ export const InvitationsTab = ({ isActive = false }: InvitationsTabProps): React
       },
     },
     busy: () => isSubmitting,
-    submit: async () => {
-      // A guest joins one channel or canvas, which only the page offers to pick.
-      if (role === WorkspaceRole.GUEST && (!entityType || !entityId.trim())) {
-        throw new Error('A guest needs a channel or canvas to join. Pick it on the page');
-      }
-      await sendInvitation();
-    },
+    // Refuses as the page does, a guest with no channel or canvas included.
+    submit: sendInvitation,
   };
   useOperableForm(operableForm);
   const fillingEmail = useFilling('invite', 'email');

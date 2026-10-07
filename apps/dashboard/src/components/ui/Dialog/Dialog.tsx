@@ -2,6 +2,7 @@ import React, { ReactNode, RefObject, useState, useEffect, useSyncExternalStore 
 import * as DialogPrimitive from '@radix-ui/react-dialog';
 import Drawer from '../Drawer';
 import { cn } from '../../../utils/classNames';
+import { createStore } from '../../../utils/createStore';
 import { useOverlayEffect } from '../../../machines/stateMachine';
 import { useScope } from '../../../shortcuts';
 
@@ -9,16 +10,10 @@ import { useScope } from '../../../shortcuts';
 // dialog is open. A modal dialog would lock their scrolling and trap the focus that Space-to-talk
 // needs, so while one is up a dialog opens non-modal, looking and closing just the same.
 let raisedSurfaces = 0;
-const raisedListeners = new Set<() => void>();
-const subscribeRaised = (listener: () => void): (() => void) => {
-  raisedListeners.add(listener);
-  return (): void => {
-    raisedListeners.delete(listener);
-  };
-};
+const raisedChanges = createStore();
 const changeRaised = (by: number): void => {
   raisedSurfaces += by;
-  raisedListeners.forEach(listener => listener());
+  raisedChanges.notify();
 };
 // A click, focus or Escape there belongs to that surface, not to the dialog under it.
 const isInRaised = (target: EventTarget | null): boolean =>
@@ -115,7 +110,7 @@ export const Dialog = ({
   useScope('modal', open ?? false);
   // Settled while the dialog is closed, since switching an open one would remount its content. One
   // the page does not control stays modal: when it opens is not known here.
-  const raised = useSyncExternalStore(subscribeRaised, () => raisedSurfaces > 0);
+  const raised = useSyncExternalStore(raisedChanges.subscribe, () => raisedSurfaces > 0);
   const wantsModal = !(raised && open !== undefined);
   const [modal, setModal] = useState(wantsModal);
   if (!open && modal !== wantsModal) setModal(wantsModal);

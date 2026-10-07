@@ -196,6 +196,10 @@ interface AddChannelFormProps {
   requireConnector?: boolean;
 }
 
+// Said to Xyne Buddy for no project ("none", "no project"), and tags said as a list.
+const NO_PROJECT = /^(?:none|no(?:\s+project)?|without (?:a )?project)$/;
+const TAGS_SPLIT = /\s*(?:,|\band\b)\s*/;
+
 export const AddChannelForm: React.FC<AddChannelFormProps> = ({
   mode = 'create',
   onSubmit,
@@ -622,6 +626,29 @@ export const AddChannelForm: React.FC<AddChannelFormProps> = ({
               // Optional: an empty box is not an answer.
               get: () => form.getFieldValue('description') || null,
               set: value => form.setFieldValue('description', value ?? ''),
+            },
+            // By name, from the page's own list; the project picked first is not the user's answer.
+            project: {
+              get: () =>
+                form.getFieldMeta('projectId')?.isDirty
+                  ? (projects?.find(({ id }) => id === form.getFieldValue('projectId'))?.name ??
+                    'None')
+                  : null,
+              set: (value): void => {
+                const said = value?.trim().toLowerCase() ?? '';
+                const picked = projects?.find(({ name }) => name.toLowerCase() === said);
+                if (picked || NO_PROJECT.test(said)) {
+                  form.setFieldValue('projectId', picked?.id ?? '');
+                }
+              },
+            },
+            // As the tag box adds them, each said one after another.
+            tags: {
+              get: () => form.getFieldValue('topicTags').join(', ') || null,
+              set: (value): void => {
+                form.setFieldValue('topicTags', []);
+                (value ?? '').split(TAGS_SPLIT).forEach(handleTagAdd);
+              },
             },
           },
           busy: () => form.state.isSubmitting,

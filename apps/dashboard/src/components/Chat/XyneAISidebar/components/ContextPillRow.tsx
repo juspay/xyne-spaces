@@ -213,6 +213,13 @@ export interface ContextPillRowProps {
 
   activities: UserActivity[];
   onActivitiesChange?: (activities: UserActivity[]) => void;
+
+  /**
+   * Told how far the pills reach up over what is behind the composer (0 with none), so a list
+   * there can keep its end clear of them. The picker is left out: it is open only while context
+   * is being chosen.
+   */
+  onOverhangChange?: (height: number) => void;
 }
 
 /** One rendered pill, keyed so the visible slice and the measuring layer agree. */
@@ -281,6 +288,7 @@ export const ContextPillRow = ({
   onRecordingClick,
   activities,
   onActivitiesChange,
+  onOverhangChange,
 }: ContextPillRowProps): ReactElement | null => {
   const contentRef = useRef<HTMLDivElement>(null);
   const { height: contentHeight } = useMeasure({ ref: contentRef, observeResize: true });
@@ -843,6 +851,8 @@ export const ContextPillRow = ({
   // label does — using it as an effect dep re-runs the fit maths on content
   // changes, not just container resizes.
   const { width: measuredWidth } = useMeasure({ ref: measureRef, observeResize: true });
+  const pillsRef = useRef<HTMLDivElement>(null);
+  const { height: pillsHeight } = useMeasure({ ref: pillsRef, observeResize: true });
 
   const [visibleCount, setVisibleCount] = useState(pills.length);
   // Expanded, the track wraps to as many lines as the pills need; the card's
@@ -899,6 +909,14 @@ export const ContextPillRow = ({
   const expand = (): void => setExpanded(true);
   const toggleExpanded = (): void => setExpanded(!expanded);
 
+  // The card's 1px top border sits above its pills; the rest of it overlaps the composer.
+  const overhang = !isOnboarding && hasPills ? pillsHeight + 1 : 0;
+  useEffect(() => {
+    if (!onOverhangChange) return undefined;
+    onOverhangChange(overhang);
+    return (): void => onOverhangChange(0);
+  }, [overhang, onOverhangChange]);
+
   // The picker keeps the card open on its own — it can be opened before any
   // context is attached.
   if (isOnboarding || (!hasPills && !showContextPicker)) return null;
@@ -938,7 +956,7 @@ export const ContextPillRow = ({
             height to its own content. */}
         <div ref={contentRef} className='absolute bottom-0 mb-[12px] left-0 right-0'>
           {hasPills && (
-            <div className='flex items-start justify-between min-w-0 px-3 pt-2 pb-1'>
+            <div ref={pillsRef} className='flex items-start justify-between min-w-0 px-3 pt-2 pb-1'>
               <div
                 ref={trackRef}
                 className={`relative flex items-center flex-1 min-w-0 ${

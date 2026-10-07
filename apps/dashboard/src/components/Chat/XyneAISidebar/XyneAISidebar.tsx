@@ -6,6 +6,7 @@ import {
   useState,
   useRef,
   useEffect,
+  useLayoutEffect,
   useCallback,
   useMemo,
   type MouseEvent as ReactMouseEvent,
@@ -51,6 +52,7 @@ import { globalClickTracker } from '../../../services/Analytics/globalClickTrack
 import { AILandingHero, AILandingHeroErrorBoundary } from './components/AILandingHero';
 import { XyneAIEmptyState } from './components/XyneAIEmptyState';
 import { AssistantCard } from '../../Assistant/AssistantCard';
+import { SuggestionPill } from '../../ui/SuggestionPill';
 import { assistantSession } from '../../Assistant/assistantSession';
 import { openQuestion } from '../../Assistant/engine/dialogue';
 import { isAssistantMessage } from '../../Assistant/turns';
@@ -1091,6 +1093,18 @@ const XyneAISidebar = ({
   useEffect(() => {
     if (assistantMessages.length > 0) scrollToBottom();
   }, [assistantMessages, scrollToBottom]);
+
+  // The composer's context pills float over the end of the list, which keeps that much room clear
+  // under its last message. As they grow the list moves up by as much, so a list at its end stays
+  // there and whatever was in view above them still is.
+  const messagesScrollRef = useRef<HTMLDivElement>(null);
+  const [contextRowOverhang, setContextRowOverhang] = useState(0);
+  const clearedOverhang = useRef(0);
+  useLayoutEffect(() => {
+    const grown = contextRowOverhang - clearedOverhang.current;
+    clearedOverhang.current = contextRowOverhang;
+    if (grown > 0 && messagesScrollRef.current) messagesScrollRef.current.scrollTop += grown;
+  }, [contextRowOverhang]);
 
   // AI Onboarding: derive answered count and visible suggestions from messages
   // No context dispatches — avoids re-renders that interfere with streaming
@@ -2527,7 +2541,10 @@ const XyneAISidebar = ({
 
             {/* Kept mounted in voice mode so the transcript and its scroll position survive. */}
             <div className={cn('min-h-0 flex-1 overflow-hidden', voiceMode && 'hidden')}>
-              <div className='flex h-full min-h-0 flex-col overflow-y-auto overflow-x-hidden'>
+              <div
+                ref={messagesScrollRef}
+                className='flex h-full min-h-0 flex-col overflow-y-auto overflow-x-hidden'
+              >
                 {isLoadingConversation ? (
                   <div className='px-3 py-4'>
                     <div className='space-y-4'>
@@ -2578,15 +2595,14 @@ const XyneAISidebar = ({
                       </div>
                       <div className='mt-6 flex flex-wrap gap-2'>
                         {visibleSuggestions.map(suggestion => (
-                          <button
+                          <SuggestionPill
                             key={suggestion}
                             onClick={() => handleSuggestionClick(suggestion)}
-                            className='rounded-full border border-border bg-card px-3 py-1.5 text-xs font-medium leading-5 text-muted-foreground transition-colors hover:bg-accent'
                             data-track-category='AIOnboarding'
                             data-track-name='SuggestionChip'
                           >
                             {suggestion}
-                          </button>
+                          </SuggestionPill>
                         ))}
                       </div>
                     </div>
@@ -2749,15 +2765,14 @@ const XyneAISidebar = ({
                         {aiOnboarding.isActive && visibleSuggestions.length > 0 && (
                           <div className='mt-4 flex flex-wrap gap-2'>
                             {visibleSuggestions.map(suggestion => (
-                              <button
+                              <SuggestionPill
                                 key={suggestion}
                                 onClick={() => handleSuggestionClick(suggestion)}
-                                className='rounded-full border border-border bg-card px-3 py-1.5 text-xs font-medium leading-5 text-muted-foreground transition-colors hover:bg-accent'
                                 data-track-category='AIOnboarding'
                                 data-track-name='SuggestionChip'
                               >
                                 {suggestion}
-                              </button>
+                              </SuggestionPill>
                             ))}
                           </div>
                         )}
@@ -2766,7 +2781,7 @@ const XyneAISidebar = ({
                             You can also ask me anything else!
                           </p>
                         )}
-                        <div ref={messagesEndRef} />
+                        <div ref={messagesEndRef} style={{ height: contextRowOverhang }} />
                       </div>
                     </div>
                   </div>
@@ -2813,6 +2828,7 @@ const XyneAISidebar = ({
                       ? { isAuto, onSelectAuto: handleSelectAuto }
                       : {})}
                     compactToolbar={isCompactSidebar}
+                    onContextRowOverhangChange={setContextRowOverhang}
                     {...(!isFullscreen && { onEnterVoiceMode: () => setVoiceMode(true) })}
                     {...sharedInputSectionProps}
                     kbCollectionId={kbCollectionIdProp}

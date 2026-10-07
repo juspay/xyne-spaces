@@ -132,6 +132,7 @@ export const MESSAGING_ACTIONS: readonly ActionDefinition[] = [
         kind: 'longtext',
         required: true,
         ask: 'What should it say?',
+        content: true,
         label: 'message',
         parse: 'message',
         describe:
@@ -220,8 +221,21 @@ export const MESSAGING_ACTIONS: readonly ActionDefinition[] = [
         kind: 'longtext',
         label: 'description',
         ask: 'What is the channel about?',
+        content: true,
         describe:
           "what the channel is about, in the user's words; not its name, nor a request of its own",
+      },
+      project: {
+        kind: 'text',
+        ask: 'Which project should it be in?',
+        label: 'project',
+        describe: 'the project to put the channel in, named after the word "project", or "none"',
+      },
+      tags: {
+        kind: 'text',
+        ask: 'Which topic tags should it have?',
+        label: 'tags',
+        describe: 'the topic tags to add to the channel',
       },
     },
     plan: [

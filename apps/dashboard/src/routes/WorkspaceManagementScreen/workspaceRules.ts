@@ -9,12 +9,9 @@ export const isWorkspaceAdmin = (role: WorkspaceRole | null | undefined): boolea
   role === WorkspaceRole.ADMIN || role === WorkspaceRole.OWNER;
 
 // The last admin can be neither demoted nor removed.
-export const isLastAdmin = (
-  user: { role: WorkspaceRole | null },
-  users: readonly { role: WorkspaceRole | null }[],
-): boolean =>
-  user.role === WorkspaceRole.ADMIN &&
-  users.filter(u => u.role === WorkspaceRole.ADMIN).length <= 1;
+// `adminCount` is counted once by the caller, not per member, as the Members page asks per row.
+export const isLastAdmin = (user: { role: WorkspaceRole | null }, adminCount: number): boolean =>
+  user.role === WorkspaceRole.ADMIN && adminCount <= 1;
 
 export const isInvitationRevocable = (invitation: Invitation): boolean => {
   if (invitation.acceptedAt) return false;

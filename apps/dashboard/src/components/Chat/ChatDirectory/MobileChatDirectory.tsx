@@ -39,7 +39,7 @@ import { ChannelSortOrder } from '@xyne/shared';
 import { Accordion } from 'radix-ui';
 import MobileChannelItem from './MobileChannelItem';
 import Tooltip from '../../ui/Tooltip';
-import { useAddChannelDialog } from './useAddChannelDialog';
+import { useDialogParam } from '../../../hooks/useDialogParam';
 
 const MobileChatDirectory = ({
   channelData,
@@ -52,7 +52,8 @@ const MobileChatDirectory = ({
   const { starred, channels, directMessages, channelSortOrder, setChannelSortOrder } =
     useChannelSort(channelData, allChannelsUserStatus, context.userID);
 
-  const [showAddChannelForm, setShowAddChannelForm] = useAddChannelDialog();
+  // Xyne Buddy opens it with `?dialog=add_channel`.
+  const [showAddChannelForm, setShowAddChannelForm] = useDialogParam('add_channel');
   const [showAddDmForm, setShowAddDmForm] = useState(false);
   const [isCommandMenuOpen, setIsCommandMenuOpen] = useState(false);
   const [showAddPeopleDialog, setShowAddPeopleDialog] = useState(false);

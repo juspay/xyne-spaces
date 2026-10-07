@@ -17,11 +17,13 @@ import {
 import type { PageId } from '../pages';
 import type { TaskId } from '../tasks';
 import type { EngineState } from './dialogue';
+import { lowerFirst } from './text';
 
 /**
  * Runs an action's plan on the page, as the user would: open it, fill the fields in front of
- * them, press the page's own buttons. The only module that acts. It stops at the first failure,
- * never retries, and never submits twice; what it could not do is told, not thrown.
+ * them, press the page's own buttons; a step with no page is handed to its task (tasks.ts). It
+ * stops at the first failure, never retries, and never submits twice; what it could not do is
+ * told, not thrown.
  */
 // `refused`: the server or the page turned it down (a 4xx, a rule, a permission), which trying
 // again cannot change; otherwise it may have been a passing failure, worth another try.
@@ -123,7 +125,7 @@ const STOPPED: RunResult = { ok: false, error: 'Stopped. Nothing more was done.'
 // What a failure is told as. The server refusing the user's role reads as that, whatever its words.
 const failureOf = (error: unknown, { title }: ActionDefinition): string =>
   statusOf(error) === 403
-    ? `You don't have permission to ${title.charAt(0).toLowerCase()}${title.slice(1)}.`
+    ? `You don't have permission to ${lowerFirst(title)}.`
     : getApiErrorMessage(error, 'Something went wrong.');
 
 const statusOf = (error: unknown): number | undefined =>
@@ -140,7 +142,7 @@ const TRY_LATER = new Set([408, 429]);
  * or a page's or task's own refusal (a rule, a permission). A request that got no answer (the
  * network, a timeout) and the run's own troubles may pass.
  */
-export function isRefusal(error: unknown): boolean {
+function isRefusal(error: unknown): boolean {
   if ((error as { passing?: boolean } | null)?.passing) return false;
   const status = statusOf(error);
   if (status !== undefined) return status < 500 && !TRY_LATER.has(status);

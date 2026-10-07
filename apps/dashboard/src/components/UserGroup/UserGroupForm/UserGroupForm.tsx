@@ -186,6 +186,10 @@ export const UserGroupForm = ({
             get: () => getValues('description') || null,
             set: value => setValue('description', value ?? ''),
           },
+          alias: {
+            get: () => getValues('alias') || null,
+            set: value => setValue('alias', value?.trim().replace(/^@/, '') ?? ''),
+          },
         },
         busy: () => isSubmitting,
         submit: () => save(getValues()),

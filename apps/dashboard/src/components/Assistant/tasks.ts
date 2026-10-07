@@ -20,9 +20,14 @@ import {
   isWorkspaceAdmin,
 } from '../../routes/WorkspaceManagementScreen/workspaceRules';
 import { userToMentionResult } from '../../utils/userDisplayName';
-import { escapeHtml, processMessageForSending } from '../Chat/ChatInput/ChatInput.utils';
+import {
+  escapeHtml,
+  processMessageForSending,
+  userMentionHtml,
+} from '../Chat/ChatInput/ChatInput.utils';
 import { hasValue, type FieldValue } from './actions/action';
 import type { Resolved } from './engine/resolve';
+import type { PageId } from './pages';
 
 /**
  * What an action does in code when there is no page to do it on: a plan step of `perform`. A task
@@ -37,7 +42,16 @@ export interface TaskEnv {
   channels: readonly Channel[]; // all the user is in, DMs included
   joined: ReadonlySet<string>; // the channels the user is a participant of
   userGroups: readonly UserGroup[];
+  userGroupsAdmin: boolean; // USER-GROUPS admin access: the User Groups page lists every group
   navigate: (path: string) => void;
+  // Where a change is seen: the user is left on that page once it is done.
+  openPage: (page: PageId, params?: Record<string, string>) => void;
+}
+
+// What a task says once done: `done` in place of the action's own, `next` the step it offers.
+export interface TaskOutcome {
+  done?: string;
+  next?: string;
 }
 
 export interface TaskInput {
@@ -87,20 +101,26 @@ function checkCanPost({ channelId }: ConversationRef, { channels, joined }: Task
   }
 }
 
-// The message as the composer would send it. What the user said is text, never markup; the @Name
-// becomes the mention the composer makes. A person named alongside a channel ("tell Priya in
-// #design…") is posted there, so is mentioned. One who cannot be found is never left out quietly.
+// The message as the composer would send it. What the user said is text, never markup. Each
+// person mentioned is the composer's own mention span, built here rather than matched back from
+// "@Name" text, which misses names with "&", "<" or ">". A person named alongside a channel ("tell
+// Priya in #design…") is posted there, so is mentioned; a group, each of its people. One who
+// cannot be found is never left out quietly.
 function contentOf({
   values: { message },
   resolved: { mention: tagged, channel, person },
   env,
 }: TaskInput): string {
   const said = tagged ?? (channel ? person : undefined);
-  const mentioned = env.people.find(({ id }) => id === said?.id);
-  if (said && !mentioned) throw new Error(`I can't find ${said.label} to mention.`);
-  const mention = mentioned ? userToMentionResult(mentioned, false) : null;
-  const text = [mention && `@${mention.name}`, message?.trim()].filter(hasValue).join(' ');
-  return processMessageForSending(`<p>${escapeHtml(text)}</p>`, mention ? [mention] : undefined);
+  const mentions = (said ? everyoneIn(said) : []).map(pick => {
+    const mentioned = env.people.find(({ id }) => id === pick.id);
+    if (!mentioned) throw new Error(`I can't find ${pick.label} to mention.`);
+    return userMentionHtml(userToMentionResult(mentioned, false));
+  });
+  const text = message?.trim();
+  return processMessageForSending(
+    `<p>${[...mentions, text && escapeHtml(text)].filter(hasValue).join(' ')}</p>`,
+  );
 }
 
 async function sendTo(input: TaskInput): Promise<void> {
@@ -132,7 +152,10 @@ export const onPeopleAdded = (listener: (channelId: string) => void): (() => voi
 // As the channel's Add people dialog does it, and only when it would offer to: a member of the
 // channel, and an admin of it when only admins may add people. A DM grows into a group with its
 // history asked about, so that is left to its dialog. Those already in it are left as they are.
-async function addToChannel({ resolved: { person, channel }, env }: TaskInput): Promise<string> {
+async function addToChannel({
+  resolved: { person, channel },
+  env,
+}: TaskInput): Promise<TaskOutcome> {
   if (!person || !channel) throw new Error("I don't know who to add, or where.");
   const { zero, selfId, channels } = env;
   const target = channels.find(({ id }) => id === channel.id);
@@ -170,7 +193,7 @@ async function addToChannel({ resolved: { person, channel }, env }: TaskInput): 
   // they can see it and post there.
   addedTo.forEach(listener => listener(channelId));
   env.navigate(chatPath(channelId));
-  return `Want me to post something in #${target.name}?`;
+  return { next: `Want me to post something in #${target.name}?` };
 }
 
 // The server's answer to a change: its refusal is told, never shown as done.
@@ -208,7 +231,8 @@ function memberToChange(
   if (member.role === WorkspaceRole.OWNER) {
     throw new Error(`${name} owns the workspace, so ${change.refused}.`);
   }
-  if (change.demotes && isLastAdmin(member, people)) {
+  const adminCount = people.filter(({ role }) => role === WorkspaceRole.ADMIN).length;
+  if (change.demotes && isLastAdmin(member, adminCount)) {
     throw new Error(`${name} is the last admin, so ${change.refused}.`);
   }
   return { member, workspaceId: self.workspaceId };
@@ -238,6 +262,7 @@ async function changeMemberRole(input: TaskInput): Promise<void> {
       }),
     ),
   );
+  input.env.openPage('admin_members');
 }
 
 // As the Members page's Remove from workspace does it.
@@ -253,6 +278,7 @@ async function removeMember(input: TaskInput): Promise<void> {
       mutators.users.remove({ workspaceId, userId: member.id, timestamp: Date.now() }),
     ),
   );
+  input.env.openPage('admin_members');
 }
 
 // "the Finance group", "finance team": a user group by its name or alias, said exactly, since a
@@ -267,15 +293,17 @@ const groupName = (words: string): string =>
 
 // As the User Groups page edits a group: renamed as its form saves it, and people added as its
 // Members tab adds them. Taking people out asks about their open tickets, so it stays on the page.
+// Only a group the page lists is found: to a non-admin, those they created. The server checks again.
 async function updateUserGroup({
   values: { group: said, name },
   resolved: { add },
-  env: { zero, userGroups },
+  env: { zero, userGroups, userGroupsAdmin, selfId, openPage },
 }: TaskInput): Promise<void> {
   const wanted = groupName(said ?? '');
   const group = userGroups.find(
     candidate =>
       candidate.isActive &&
+      (userGroupsAdmin || candidate.createdBy === selfId) &&
       [candidate.name, candidate.alias].some(known => known?.toLowerCase() === wanted),
   );
   if (!group) throw new Error(`I can't find a user group called ${said?.trim() ?? ''}.`);
@@ -303,6 +331,7 @@ async function updateUserGroup({
       ),
     );
   }
+  openPage('admin_user_groups');
 }
 
 // As the Invitations page's Revoke does it, for an invitation it would offer to revoke.
@@ -325,11 +354,13 @@ async function revokeInvitation({ values: { email }, env }: TaskInput): Promise<
       mutators.invitation.revoke({ invitationId: invitation.id, timestamp: Date.now() }),
     ),
   );
+  env.openPage('admin_invitations');
 }
 
 // As the organisation's Add Member by Email does it, in the organisation the user belongs to, by
 // its admins, and only from a workspace of that organisation, as the page allows.
-async function addToOrganisation({ values: { email }, env }: TaskInput): Promise<void> {
+// Members are listed inside the organisation's row, so it is opened expanded.
+async function addToOrganisation({ values: { email }, env }: TaskInput): Promise<TaskOutcome> {
   const { zero, people, selfId } = env;
   const self = people.find(({ id }) => id === selfId);
   const [membership, workspace] = await Promise.all([
@@ -367,6 +398,10 @@ async function addToOrganisation({ values: { email }, env }: TaskInput): Promise
       }),
     ),
   );
+  env.openPage('admin_organisations', { org: membership.orgId });
+  const organisations = await zero.run(queries.availableOrganizations({}), { type: 'complete' });
+  const organisation = organisations.find(({ orgId }) => orgId === membership.orgId);
+  return { done: `Added ${address} to ${organisation?.name ?? 'your organisation'}.` };
 }
 
 export type TaskId =
@@ -379,8 +414,7 @@ export type TaskId =
   | 'updateUserGroup'
   | 'addToOrganisation';
 
-// A task may resolve to the next step to offer, said after the action's `done`.
-export const TASKS: Record<TaskId, (input: TaskInput) => Promise<string | void>> = {
+export const TASKS: Record<TaskId, (input: TaskInput) => Promise<TaskOutcome | void>> = {
   sendMessage: sendTo,
   openChat,
   addToChannel,

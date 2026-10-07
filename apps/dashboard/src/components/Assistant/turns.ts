@@ -1,6 +1,6 @@
 import type { Message } from '../Chat/XyneAISidebar/utils/XyneAITypes';
 import type { ActionDefinition } from './actions/action';
-import { listOf } from './engine/dialogue';
+import { listOf, lowerFirst } from './engine/text';
 
 // What the assistant puts in front of the user to tap, besides saying it.
 export type AssistantCardData =
@@ -53,8 +53,6 @@ export const currentCard = (turns: readonly AssistantTurn[]): CurrentCard | null
   const last = turns.at(-1);
   return last?.card ? { ...last.card, messageId: `${MESSAGE_ID_PREFIX}${last.id}` } : null;
 };
-
-const lowerFirst = (text: string): string => text.charAt(0).toLowerCase() + text.slice(1);
 
 // One action is opened right away, its pill ticked; several are left to pick from. `how`: the
 // user asked how to do it, so its steps are said.

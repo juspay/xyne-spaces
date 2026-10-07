@@ -53,6 +53,7 @@ import { buildXyneAIStreamThreadId } from '../../utils/xyneAIStreamThreadId';
 import { cn } from '../../utils/classNames';
 import { AskAiRatingButtons } from './AskAiRatingButtons';
 import { AssistantCard } from '../Assistant/AssistantCard';
+import { SuggestionPill } from '../ui/SuggestionPill';
 import { isAssistantMessage } from '../Assistant/turns';
 import { useTranscript } from '../Assistant/useTranscript';
 import type { AssistantActions } from '../Assistant/useAssistantActions';
@@ -1471,11 +1472,9 @@ function ChatMessageBubble({
           message.followUpSuggestions?.length ? (
             <div className='mt-1 flex flex-wrap gap-2' data-testid='ask-ai-follow-ups'>
               {message.followUpSuggestions.map((suggestion, suggestionIndex) => (
-                <button
+                <SuggestionPill
                   key={suggestion}
-                  type='button'
                   onClick={() => onFollowUpSuggestionClick(suggestion)}
-                  className='rounded-full border border-border bg-card px-3 py-1.5 text-left text-xs font-medium leading-5 text-muted-foreground transition-colors hover:bg-accent'
                   data-track-category='AskAI'
                   data-track-name='FollowUpSuggestion'
                   data-track-metadata={JSON.stringify({
@@ -1486,7 +1485,7 @@ function ChatMessageBubble({
                   })}
                 >
                   {suggestion}
-                </button>
+                </SuggestionPill>
               ))}
             </div>
           ) : null}

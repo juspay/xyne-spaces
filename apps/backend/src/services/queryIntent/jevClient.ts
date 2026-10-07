@@ -1,5 +1,6 @@
 import { Agent } from 'undici';
 import { logger } from '@/utils/logger';
+import { isProbability } from '@/utils/probability';
 import { config as envConfig } from '@/config/env';
 
 /**
@@ -79,8 +80,6 @@ export const warmJev = (): void => {
     })
     .catch(() => undefined);
 };
-
-const isProbability = (p: unknown): p is number => typeof p === 'number' && p >= 0 && p <= 1;
 
 /** The answer to `question`, or null when Jev's reply for it is unusable. */
 const readAnswer = (question: JevQuestion, raw: unknown): JevAnswer | null => {

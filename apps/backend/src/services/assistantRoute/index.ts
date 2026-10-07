@@ -1,5 +1,6 @@
 import type { JsonValue } from '@openfeature/server-sdk';
 import { logger } from '@/utils/logger';
+import { isProbability } from '@/utils/probability';
 import { superpositionClient } from '@/services/superpositionClient';
 import { ASSISTANT_ROUTE_NONE_ID as NONE_ID } from '@/validators/assistantRouteValidator';
 import {
@@ -8,8 +9,10 @@ import {
   type JevAnswer,
   type JevChoiceQuestion,
   type JevNoulQuestion,
+  type JevFailure,
   type JevQuestion,
 } from '@/services/queryIntent/jevClient';
+import { clearCandidates, isBareName, namedAction } from './candidates';
 import { fieldReading, type AssistantRouteField, type FieldFloor } from './fields';
 
 export interface AssistantRouteAction {
@@ -45,7 +48,15 @@ type AssistantRouteResult =
   | { route: 'ask_ai'; reason: 'none' | 'low_confidence' | 'not_request'; answering?: number }
   // The action meant is one the user's role hides.
   | { route: 'no_access'; actionId: string }
-  | { route: 'unavailable' };
+  // `reason`: why nothing was routed, for the logs and the eval; never user content.
+  | { route: 'unavailable'; reason: UnavailableReason };
+
+type UnavailableReason =
+  | 'not_configured'
+  | 'switched_off'
+  | 'no_choice'
+  | JevFailure['kind']
+  | `status_${number}`;
 
 interface AssistantRouteContext {
   userId: string;
@@ -139,19 +150,31 @@ const DEFAULT_CONFIG: AssistantRouteConfig = {
   requestFloor: REQUEST_FLOOR,
 };
 
-const isProbability = (value: unknown): value is number =>
-  typeof value === 'number' && value >= 0 && value <= 1;
+// Said once per process: a config outage must not fill the logs, nor switch Buddy off.
+let configOutageLogged = false;
+const configOutage = (why: string): AssistantRouteConfig => {
+  if (!configOutageLogged)
+    logger.warn('assistant route config unavailable, using defaults', { why });
+  configOutageLogged = true;
+  return DEFAULT_CONFIG;
+};
 
-// Null when Superposition never initialised: retrying its init here would hold the request for
-// its full network timeout. Remote fields are checked one by one, so a mistyped value cannot turn
-// the kill switch off or make every message match.
-const getConfig = async (ctx: AssistantRouteContext): Promise<AssistantRouteConfig | null> => {
-  if (!superpositionClient.isReady()) return null;
-  const remote = await superpositionClient.getObjectValue(
-    CONFIG_KEY,
-    DEFAULT_CONFIG as unknown as JsonValue,
-    { userId: ctx.userId, workspaceId: ctx.workspaceId }
-  );
+// The defaults when Superposition is not ready or fails: retrying its init here would hold the
+// request for its full network timeout. Only its answer can switch Buddy off. Remote fields are
+// checked one by one, so a mistyped value cannot turn the kill switch off or make every message
+// match.
+const getConfig = async (ctx: AssistantRouteContext): Promise<AssistantRouteConfig> => {
+  if (!superpositionClient.isReady()) return configOutage('not ready');
+  let remote: unknown;
+  try {
+    remote = await superpositionClient.getObjectValue(
+      CONFIG_KEY,
+      DEFAULT_CONFIG as unknown as JsonValue,
+      { userId: ctx.userId, workspaceId: ctx.workspaceId }
+    );
+  } catch {
+    return configOutage('failed');
+  }
   if (!remote || typeof remote !== 'object' || Array.isArray(remote)) return DEFAULT_CONFIG;
   const { enabled, actionThreshold, unsureThreshold, alsoThreshold, requestFloor } =
     remote as Record<string, unknown>;
@@ -303,6 +326,7 @@ export const routeAssistantMessage = async (
           : 0;
     logger.info('assistant route', {
       route: result.route,
+      ...(result.route === 'unavailable' ? { reason: result.reason } : {}),
       ...(chosen ? { chosen } : {}),
       ...(confidence !== undefined ? { confidence } : {}),
       ...(requested !== undefined ? { request: requested } : {}),
@@ -314,9 +338,9 @@ export const routeAssistantMessage = async (
     return result;
   };
 
-  if (!isJevConfigured()) return finish({ route: 'unavailable' });
+  if (!isJevConfigured()) return finish({ route: 'unavailable', reason: 'not_configured' });
   const config = await getConfig(ctx);
-  if (!config?.enabled) return finish({ route: 'unavailable' });
+  if (!config.enabled) return finish({ route: 'unavailable', reason: 'switched_off' });
 
   // Shuffled against position bias. Built with fromEntries, not `criteria[id] =`: ids come from
   // the request, and fromEntries defines own keys without going through prototype setters.
@@ -331,6 +355,7 @@ export const routeAssistantMessage = async (
   const fields = readFields(text, fieldActions(text, offerable, pending?.action), pending);
 
   // `partial`: one unusable field answer must not cost the turn.
+  let failure: UnavailableReason = 'no_choice';
   const answers = await askJev(
     // The request the question belongs to: "the checkout outage" answers "What was it about?"
     // only once Jev knows it is about finding messages.
@@ -344,10 +369,18 @@ export const routeAssistantMessage = async (
     },
     TIMEOUT_MS,
     signal,
-    { partial: true, hedgeAfterMs: HEDGE_AFTER_MS }
+    {
+      partial: true,
+      hedgeAfterMs: HEDGE_AFTER_MS,
+      onFailure: (why) => {
+        failure = why.kind === 'status' ? `status_${why.status}` : why.kind;
+      },
+    }
   );
   const answer = answers?.action;
-  if (!answer || answer.type !== 'choice') return finish({ route: 'unavailable' });
+  if (!answer || answer.type !== 'choice') {
+    return finish({ route: 'unavailable', reason: failure });
+  }
 
   const scored = Object.entries(answer.probabilities)
     .filter(([id]) => id !== NONE_ID && Object.prototype.hasOwnProperty.call(criteria, id))
@@ -384,6 +417,9 @@ export const routeAssistantMessage = async (
           by: 'span',
         };
       })[pending.action] ?? {};
+    // Offered alone, the action was picked on a card: whatever Jev thinks of the sentence, it is
+    // read for that action, free text and all.
+    const picked = offerable.length === 1;
     // Any sentence can be read as a description or a topic, so "tell me a joke" would fill what
     // the agent should do. Free text therefore counts only for the question asked (any, when what
     // to change is asked), and only when the sentence is not clearly about something else.
@@ -391,6 +427,7 @@ export const routeAssistantMessage = async (
     const read = Object.fromEntries(
       Object.entries(readAll).filter(
         ([field]) =>
+          picked ||
           !FREE_TEXT_KINDS.has(pendingFields[field]?.kind ?? 'text') ||
           ((!pending.field || field === pending.field) && confidence >= FREE_TEXT_MIN_CONFIDENCE)
       )
@@ -398,13 +435,29 @@ export const routeAssistantMessage = async (
     // A value for any field of the pending action is an answer, or a correction ("yes but call
     // it Zed"): "make it private" answers a question about the name.
     const evidence = Object.keys(read).length > 0;
-    if (evidence || (noul ?? 0) >= STRONG_ANSWER) {
+    if (picked || evidence || (noul ?? 0) >= STRONG_ANSWER) {
       return finish({ route: 'answer', fields: read }, pending.action, noul);
     }
     // About the pending action with no value in it is a question about it ("what is an agent?"):
     // Ask AI answers it, and the open question stays.
     if (top === pending.action)
       return finish({ route: 'ask_ai', reason: 'none', ...answering }, top);
+  }
+
+  const values = fields.read(answers, () => ({ floor: FIELD_FLOOR, by: 'span' }));
+  const asksNow = requested === undefined || requested >= config.requestFloor;
+  // An action's bare name ("Send message.") asks for it, however unsure Jev is of so few words.
+  const bare = pending ? undefined : namedAction(text, actions);
+  if (bare && asksNow && isBareName(text, bare)) {
+    const hidden = actions.find((action) => action.id === bare)?.unavailable;
+    if (hidden) return finish({ route: 'no_access', actionId: bare }, bare, confidence, requested);
+    const read = values[bare] ? { fields: { [bare]: values[bare] } } : {};
+    return finish(
+      { route: 'actions', actionIds: [bare], confidence, ...read },
+      bare,
+      confidence,
+      requested
+    );
   }
 
   if (answer.choice === NONE_ID) {
@@ -419,7 +472,7 @@ export const routeAssistantMessage = async (
   }
   // Which action fits says nothing of whether it is asked for: "rahul built an agent" is about
   // creating one. Without an answer to this the choice alone decides, as before.
-  if (requested !== undefined && requested < config.requestFloor) {
+  if (!asksNow) {
     return finish({ route: 'ask_ai', reason: 'not_request' }, answer.choice, confidence, requested);
   }
 
@@ -428,15 +481,22 @@ export const routeAssistantMessage = async (
   if (definition?.unavailable) {
     return finish({ route: 'no_access', actionId: chosen }, chosen, confidence, requested);
   }
-  const acting = confidence >= config.actionThreshold;
-
   const offered = scored
     .filter(([id, p]) => p >= config.alsoThreshold && offerable.some((action) => action.id === id))
     .map(([id]) => id);
-  const candidates = offered.length > 0 ? offered : [chosen];
+  const candidates = clearCandidates(offered.length > 0 ? offered : [chosen], {
+    text,
+    actions: offerable,
+    values,
+    probability,
+  });
+  // The one action left, asked for by its own name with something in it ("send a message to
+  // Sarah"), is acted on however unsure Jev is: a change is still confirmed before it is done.
+  const [only] = candidates;
+  const asked =
+    candidates.length === 1 && !!only && !!values[only] && namedAction(text, offerable) === only;
+  const acting = confidence >= config.actionThreshold || asked;
   const actionIds = acting ? candidates : candidates.slice(0, MAX_UNSURE_ACTIONS);
-
-  const values = fields.read(answers, () => ({ floor: FIELD_FLOOR, by: 'span' }));
   const found = Object.fromEntries(
     actionIds.filter((id) => values[id]).map((id) => [id, values[id]])
   );

@@ -99,6 +99,7 @@ import { respondToPendingAction } from '../../../../services/XyneAI/XyneAIPendin
 import { Link2 } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { AskAiRatingButtons } from '../../../AIScreen/AskAiRatingButtons';
+import { SuggestionPill } from '../../../ui/SuggestionPill';
 
 /**
  * v3-style inline citation chip for `[clf-<toolCallId>#<chunkIndex>]` tokens.
@@ -1671,11 +1672,9 @@ export const MessageItem = React.memo(
           message.followUpSuggestions?.length ? (
             <div className='mt-3 flex flex-wrap gap-2' data-testid='ask-ai-follow-ups'>
               {message.followUpSuggestions.map((suggestion, suggestionIndex) => (
-                <button
+                <SuggestionPill
                   key={suggestion}
-                  type='button'
                   onClick={() => onFollowUpSuggestionClick(suggestion)}
-                  className='rounded-full border border-border bg-card px-3 py-1.5 text-left text-xs font-medium leading-5 text-muted-foreground transition-colors hover:bg-accent'
                   data-track-category='AskAI'
                   data-track-name='FollowUpSuggestion'
                   data-track-metadata={JSON.stringify({
@@ -1686,7 +1685,7 @@ export const MessageItem = React.memo(
                   })}
                 >
                   {suggestion}
-                </button>
+                </SuggestionPill>
               ))}
             </div>
           ) : null}

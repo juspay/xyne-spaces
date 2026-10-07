@@ -6,7 +6,9 @@ import {
 } from '../actions/action';
 import { emailResolution } from './email';
 import { askedField, isYes } from './quickReplies';
-import { MAX_OPTIONS, type Resolution, type Resolved } from './resolve';
+import { groupOf, MAX_OPTIONS, type Resolution, type Resolved } from './resolve';
+import { inResults, RESULTS_PROMPT } from './results';
+import { clip, listOf, lower } from './text';
 
 /**
  * Decides the next step of a request that takes several turns. Pure: no page, no network.
@@ -89,7 +91,18 @@ export type Step =
 
 type Values = Record<string, FieldValue>;
 
-const MAX_QUOTED = 60;
+const everyone = (pick: Resolved): Resolved[] => pick.group ?? [pick];
+
+// "Sara Iyer and Elena Petrov" and the DM "Sara Iyer, Elena Petrov" are the same people.
+const namesOf = (label: string): string =>
+  label
+    .split(/\s*,\s*|\s+and\s+/)
+    .map(lower)
+    .sort()
+    .join('|');
+const sameNames = (a: string | undefined, b: string | undefined): boolean =>
+  !!a && !!b && namesOf(a) === namesOf(b);
+
 const REVISE_PROMPT = 'What should I change?';
 // The third time the same question is asked, the user is better served by the form itself.
 const MAX_ATTEMPTS = 3;
@@ -104,8 +117,6 @@ export const startDialogue = (action: ActionDefinition): EngineState => ({
   misses: 0,
   phase: { kind: 'collecting', field: null },
 });
-
-const lower = (text: string): string => text.trim().toLowerCase();
 
 // What asks for a message rather than being part of it: "and say, “…”", "saying …", "ask them
 // to …". A lowercase "that" too ("that lunch is here"); "That was quick" is the message itself.
@@ -124,9 +135,6 @@ const wordsToSend = (words: string): string => {
   }
   return rest || words.trim();
 };
-
-const clip = (text: string): string =>
-  text.length > MAX_QUOTED ? `${text.slice(0, MAX_QUOTED - 1)}…` : text;
 
 // The ids too, so "yes" never runs with another person than the one shown.
 const fingerprintOf = (
@@ -165,10 +173,6 @@ const chooseQuestion = (
     : `Which ${words?.trim() ?? 'one'}?`;
 };
 
-// "A, B or C": readable when spoken.
-export const listOf = (labels: string[]): string =>
-  labels.length > 1 ? `${labels.slice(0, -1).join(', ')} or ${labels.at(-1)}` : labels.join('');
-
 export const replyFor = (step: Step): string => {
   switch (step.kind) {
     case 'ask':
@@ -204,10 +208,6 @@ export const replyFor = (step: Step): string => {
 export const STOPPED = 'Stopped. Nothing was submitted.';
 export const ALREADY_SENT = "That was already sent; I can't undo it.";
 
-// The question put while a list is on screen. Fixed, as Jev reads it and voice warms it.
-export const RESULTS_PROMPT =
-  'Can you tell me more, like a channel, a person or when? Or pick one from the list.';
-const REFINE_PROMPT = 'Tell me more, like a channel, a person or when.';
 // The card's way to say none of these, beside the items.
 export const TELL_ME_MORE = { id: 'tell_me_more', label: 'Tell me more' } as const;
 // A pick from a list the page no longer shows.
@@ -219,26 +219,11 @@ export const SOMEONE_ELSE = { id: 'someone_else', label: 'Someone else' } as con
 const NARROW_PERSON = 'Say their surname or email.';
 const NARROW_CHANNEL = 'Say more of its name.';
 
-// What the dialogue says whatever the action, so voice mode can synthesize it ahead of time.
-export const FIXED_REPLIES: readonly string[] = [
-  ...(
-    [
-      { kind: 'run' },
-      { kind: 'revise' },
-      { kind: 'left_open', form: true },
-      { kind: 'left_open', form: false },
-      { kind: 'cancelled' },
-      { kind: 'busy' },
-      { kind: 'dismissed' },
-    ] as const
-  ).map(step => replyFor(step)),
-  STOPPED,
-  ALREADY_SENT,
-  REFINE_PROMPT,
-  LIST_GONE,
-  NARROW_PERSON,
-  NARROW_CHANNEL,
-];
+// The likeliest next replies whatever the action, which voice mode synthesizes ahead of time; any
+// other is synthesized when said, so a claim of voice mode costs few /tts calls.
+export const LIKELY_REPLIES: readonly string[] = (
+  [{ kind: 'run' }, { kind: 'revise' }, { kind: 'cancelled' }, { kind: 'busy' }] as const
+).map(step => replyFor(step));
 
 // The dialogue is over: cancelled, left to the user's own hands, or an item of its list opened.
 // What is open is then what the next request is about; the list stays on screen to pick again.
@@ -290,7 +275,7 @@ export function openQuestion(state: EngineState): { field?: string; prompt: stri
   }
 }
 
-type Advance = { state: EngineState; step: Step };
+export type Advance = { state: EngineState; step: Step };
 
 // Puts the question of a field, which then waits for its answer.
 const ask = (
@@ -321,7 +306,7 @@ function nextStep(state: EngineState): Advance {
       const guess = !more && resolution.guess === true;
       const words = (named ?? values[field] ?? '').trim().replace(/^@/, '');
       const prompt = !more
-        ? chooseQuestion(values[field], definition, guess ? options : undefined)
+        ? chooseQuestion(named ?? values[field], definition, guess ? options : undefined)
         : definition.kind === 'channel'
           ? `${options.length} channels match “${words}”. Which one? ${NARROW_CHANNEL}`
           : `There are ${options.length} people named ${words}. Which one? ${NARROW_PERSON}`;
@@ -336,6 +321,10 @@ function nextStep(state: EngineState): Advance {
           ...(guess && { guess }),
         },
       };
+    }
+    if (resolution?.kind === 'some') {
+      const missing = listOf(resolution.missing.map(name => `“${name}”`));
+      return ask(state, field, `I couldn't find ${missing}. Who else, or say that's all?`);
     }
     const words = values[field]?.trim() ?? '';
     const why =
@@ -413,7 +402,8 @@ function escalate(
     return { state: counted, step: { kind: 'left_open', form } };
   }
   // "I couldn't find…" already says why the question is asked again.
-  if (attempt === 1 || state.unsettled[field]?.kind === 'none') return { state: counted, step };
+  const unfound = state.unsettled[field]?.kind;
+  if (attempt === 1 || unfound === 'none' || unfound === 'some') return { state: counted, step };
   const options = state.action.fields[field]?.options;
   const choices = step.kind === 'ask' && options ? ` ${listOf(options.map(o => o.label))}?` : '';
   return {
@@ -443,13 +433,18 @@ function settle(
   for (const field of Object.keys(state.action.fields)) {
     const words = said[field];
     if (!hasValue(words)) continue;
-    // New words: what the old ones were resolved to no longer holds.
+    // New words: what the old ones were resolved to no longer holds, but for those of a list
+    // found before, to which they add the people still to be named.
+    const before = unsettled[field];
     delete resolved[field];
     delete unsettled[field];
     const { kind, parse } = state.action.fields[field] ?? {};
     // An address taken as said (Jev was not asked) is still read as one.
+    const heard = resolutions[field] ?? (parse === 'email' ? emailResolution(words) : undefined);
     const resolution =
-      resolutions[field] ?? (parse === 'email' ? emailResolution(words) : undefined);
+      before?.kind === 'some' && heard?.kind === 'one'
+        ? { kind: 'one' as const, pick: groupOf([before.pick, heard.pick].flatMap(everyone)) }
+        : heard;
     // An address that cannot be read is asked for again, never left to an earlier one or the form's.
     const named = kind === 'person' || kind === 'people' || kind === 'channel' || parse === 'email';
     if (resolution?.kind === 'one') {
@@ -478,163 +473,25 @@ function settle(
     }
   }
   // The same words found as a channel and as someone ("design", and a person called Design) name
-  // one place, not a place and a person to mention there: the channel is kept.
+  // one place, not a place and a person to mention there: the channel is kept. So do the people
+  // of a DM and the DM itself.
   const place = oneOf.find(
     field => state.action.fields[field]?.kind === 'channel' && resolved[field],
   );
   const placeWords = place ? lower(said[place] ?? '') : '';
   for (const field of oneOf) {
     if (
+      place &&
       field !== place &&
-      placeWords &&
       resolved[field] &&
-      lower(said[field] ?? '') === placeWords
+      ((placeWords && lower(said[field] ?? '') === placeWords) ||
+        sameNames(resolved[field]?.label, resolved[place]?.label))
     ) {
       delete resolved[field];
       values[field] = null;
     }
   }
   return { ...state, values, resolved, unsettled };
-}
-
-// The most items on the card, and of those the most said aloud.
-const CARD_ITEMS = 5;
-const SPOKEN_ITEMS = 3;
-
-// How an item is said: who or what, and where. Never a message's words.
-export const spokenItem = ({ label, group }: ListItem): string =>
-  group ? `${label} in ${group}` : label;
-
-// The two places most of the items are in: "#android and #mobile-perf". The items are one page of
-// the results, so this is "mostly", never a count.
-const mostlyIn = (items: readonly ListItem[]): string => {
-  const counts = new Map<string, number>();
-  items.forEach(({ group }) => group && counts.set(group, (counts.get(group) ?? 0) + 1));
-  const top = [...counts].sort((a, b) => b[1] - a[1]).slice(0, 2);
-  return top.length > 0 ? `, mostly in ${top.map(([group]) => group).join(' and ')}` : '';
-};
-
-/** An item of the list on screen opened, as it is said. */
-export const opening = (item: ListItem): Step => ({
-  kind: 'results',
-  prompt: `Opened ${spokenItem(item)}.`,
-  options: [],
-  open: item,
-});
-
-const showing = (state: EngineState, list: ShownResults, start: number): EngineState => ({
-  ...state,
-  phase: { kind: 'results', list, start },
-});
-
-/**
- * What is said of a list from `start`: by how many were found. None asks for other words, or to
- * widen a narrowing back; one is opened (`opening`); a few are named; more ask for more detail.
- * The card has the items from `start`, in on-screen order, so "the third one" is the third there.
- */
-function listed(state: EngineState, list: ShownResults, start: number, opening: boolean): Advance {
-  const { items } = list;
-  const count = Math.max(list.total, items.length);
-  const page = items.slice(start, start + CARD_ITEMS);
-  const said = (prompt: string, options: ListItem[] = page, open?: ListItem): Advance => ({
-    state: showing(state, list, start),
-    step: { kind: 'results', prompt, options, ...(open && { open }) },
-  });
-  const [first] = items;
-  if (!first) {
-    if (state.earlier?.length) {
-      return said('Nothing matches that. Want me to widen the search back, or tell me more?');
-    }
-    const topic = state.values['topic']?.trim();
-    return said(
-      `Nothing${topic ? ` for “${clip(topic)}”` : ''}. Try other words, a person, or when it was.`,
-    );
-  }
-  if (count === 1) {
-    return opening
-      ? said(`One match: ${spokenItem(first)}. It's open.`, [], first)
-      : said(`That was the only match: ${spokenItem(first)}. Tell me more to search again.`, []);
-  }
-  const names = page.slice(0, SPOKEN_ITEMS).map(spokenItem);
-  if (count <= CARD_ITEMS) {
-    return said(
-      page.length > SPOKEN_ITEMS
-        ? `I found ${count}. The first three are ${names.join(', ')}. Which one?`
-        : `I found ${count}: ${listOf(names)}. Which one?`,
-    );
-  }
-  if (start > 0) return said(`Next: ${listOf(names)}. Which one?`);
-  return said(`I found ${count}${mostlyIn(items)}. ${RESULTS_PROMPT}`);
-}
-
-/**
- * The dialogue picking from `list` when the page shows a newer one than was said (the user
- * searched again by hand): "the first one" is what is first on screen.
- */
-export function withShownList(state: EngineState, list: ShownResults | null): EngineState {
-  if (state.phase.kind !== 'results' || !list || list.version === state.phase.list.version) {
-    return state;
-  }
-  return showing(state, list, 0);
-}
-
-/** The reply once a run has found a list: the dialogue then waits on the user's pick. */
-export const afterList = (state: EngineState, list: ShownResults): Advance =>
-  listed(state, list, 0, true);
-
-// Anything but more words for the search, while a list is on screen. Nothing here ever opens an
-// item but a pick of one: "yes" puts the question again.
-function inResults(
-  state: EngineState,
-  { list, start }: Extract<Phase, { kind: 'results' }>,
-  event: DialogueEvent,
-): Advance {
-  const again = (): Advance => listed(state, list, start, false);
-  const widening = list.items.length === 0 && !!state.earlier?.length;
-  switch (event.type) {
-    case 'cancel':
-      return { state, step: { kind: 'dismissed' } };
-    case 'open':
-      return { state, step: opening(event.item) };
-    case 'more':
-      return start + CARD_ITEMS < list.items.length
-        ? listed(state, list, start + CARD_ITEMS, false)
-        : {
-            state,
-            step: {
-              kind: 'results',
-              prompt: "That's all of them. Pick one, or tell me more.",
-              options: list.items.slice(start, start + CARD_ITEMS),
-            },
-          };
-    case 'no':
-    case 'refine':
-      return { state, step: { kind: 'results', prompt: REFINE_PROMPT, options: [] } };
-    // "Yes" to widening a search that found nothing.
-    case 'yes':
-      return widening ? back(state, again) : again();
-    case 'back':
-      return back(state, again);
-    default:
-      return again();
-  }
-}
-
-// The search as it was before the last narrowing, run again; with none, the question again.
-function back(state: EngineState, again: () => Advance): Advance {
-  const earlier = state.earlier ?? [];
-  const previous = earlier.at(-1);
-  if (!previous) return again();
-  return {
-    state: {
-      ...state,
-      ...previous,
-      unsettled: {},
-      earlier: earlier.slice(0, -1),
-      phase: { kind: 'submitting' },
-    },
-    step: { kind: 'run' },
-  };
 }
 
 /** Takes the user's event and says what happens next; `read` is what the form on screen holds. */
@@ -684,6 +541,14 @@ function advanceOnce(
   const asking = askedField(phase);
   const definition = asking ? action.fields[asking] : undefined;
   // "Skip" to a field the request cannot do without: it is said what is needed.
+  // "That's all" to the names not found: the people found are the ones meant.
+  const partly = asking ? state.unsettled[asking] : undefined;
+  if (event.type === 'no' && asking && partly?.kind === 'some') {
+    const { [asking]: _settled, ...unsettled } = state.unsettled;
+    const values = { ...state.values, [asking]: partly.pick.label };
+    const resolved = { ...state.resolved, [asking]: partly.pick };
+    return escalate(state, nextStep({ ...state, values, resolved, unsettled }));
+  }
   if (event.type === 'no' && definition?.required) {
     return { state, step: { kind: 'needed', label: definition.label } };
   }

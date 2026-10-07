@@ -214,6 +214,8 @@ export interface XyneAIInputBoxProps {
   folderScopes?: { id: string; name: string }[];
   onFolderScopesChange?: (folderScopes: { id: string; name: string }[]) => void;
   compactToolbar?: boolean;
+  /** See ContextPillRow: how far its pills reach up over what is behind the composer. */
+  onContextRowOverhangChange?: (height: number) => void;
 }
 
 // Interface for the XyneAIInputBox imperative API (matches InputBoxHandle pattern)
@@ -307,6 +309,7 @@ export const XyneAIInputBox = forwardRef<XyneAIInputBoxHandle, XyneAIInputBoxPro
       collectionsList: collectionsListProp = [],
       agentKbGrants,
       compactToolbar = false,
+      onContextRowOverhangChange,
     },
     ref,
   ): ReactElement => {
@@ -1836,6 +1839,7 @@ export const XyneAIInputBox = forwardRef<XyneAIInputBoxHandle, XyneAIInputBoxPro
           onRecordingClick={handleRecordingContextClick}
           activities={selectedActivities}
           {...(onActivitiesChange && { onActivitiesChange })}
+          {...(onContextRowOverhangChange && { onOverhangChange: onContextRowOverhangChange })}
         />
 
         <RecordingTranscriptModal

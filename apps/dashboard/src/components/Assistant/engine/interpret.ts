@@ -1,53 +1,51 @@
-import { fillTemplate, hasValue, type ActionDefinition, type FieldKind } from '../actions/action';
+import { hasValue, type ActionDefinition, type FieldKind } from '../actions/action';
 import { ACTIONS } from '../catalog';
 import type { Route } from '../router';
 import {
-  listOf,
   openQuestion,
   putAgain,
   SOMEONE_ELSE,
-  startDialogue,
   TELL_ME_MORE,
   type DialogueEvent,
   type EngineState,
   type ListItem,
   type ShownResults,
 } from './dialogue';
+import { chainOf, confirms, type QueuedStep } from './chain';
+import { narrowing } from './narrowing';
 import {
+  asksAgain,
   isHesitation,
+  isQuestion,
   isShortAnswer,
   itemAt,
   quickEvent,
   quickWord,
   replyTo,
+  startsRequest,
+  verbAction,
   verbatim,
+  withoutLead,
   type Option,
 } from './quickReplies';
-import { emailsIn } from './email';
 import { holdsSecret, NO_SECRETS } from './secrets';
+import { fieldsEvent, start, takesHere } from './start';
+import { isEveryone, resolveField, type Directory, type Resolution } from './resolve';
+import { lowerFirst } from './text';
 import {
-  channelNamed,
-  isEveryone,
-  resolve,
-  resolveField,
-  type Directory,
-  type Resolution,
-} from './resolve';
+  answerCard,
+  cardActionOf,
+  chosen,
+  optionsOf,
+  questionOf,
+  switchTo,
+  type Unsure,
+} from './unsureCard';
 
 /**
  * Decides what a sentence amounts to, before Jev is asked and after. Pure: no page, no store, no
  * network. It never acts; it says what should happen, and the caller does it.
  */
-
-// The actions Jev could not choose between, put to the user as a card to tap. `said`: the
-// sentence, when the card offers to hand it to Ask AI instead. `offer`: the card asks whether to
-// do its one action ("Want me to add them to the organisation first?"), so yes takes it.
-export interface Unsure {
-  actions: ActionDefinition[]; // those that can be switched to
-  fields: Record<string, Record<string, string>>;
-  said?: string;
-  offer?: boolean;
-}
 
 export interface InterpretContext {
   dialogue: EngineState | null; // the request under way
@@ -61,8 +59,14 @@ export interface InterpretContext {
 
 export type Decision =
   // Advance this state, which may be new. `aside`: the request it was switched to from, which
-  // waits to be picked up with "continue".
-  | { kind: 'event'; state: EngineState; event: DialogueEvent; aside?: EngineState }
+  // waits to be picked up with "continue". `queue`: the steps of the sentence still to come.
+  | {
+      kind: 'event';
+      state: EngineState;
+      event: DialogueEvent;
+      aside?: EngineState;
+      queue?: QueuedStep[];
+    }
   | { kind: 'say'; text: string } // a reply of its own; the question about which action is closed
   | { kind: 'no_access'; action: ActionDefinition; text: string } // hidden by role: said, never done
   | { kind: 'wait'; text: string } // a reply that changes nothing, the cards on screen included
@@ -73,7 +77,14 @@ export type Decision =
   // The action picked on the card that offered it for a sentence Jev read no field from: the
   // sentence is read again for that action alone, with the card's question pending, and then
   // `interpretRead` starts it.
-  | { kind: 'read'; action: ActionDefinition; said: string; question: string }
+  // `fields`: what the reply that picked it said besides ("send a message to Sara").
+  | {
+      kind: 'read';
+      action: ActionDefinition;
+      said: string;
+      question: string;
+      fields?: Record<string, string>;
+    }
   | { kind: 'busy' } // the run is under way
   | { kind: 'cancel_run' } // "cancel" while it is: stopped if nothing was sent yet
   | { kind: 'open'; item: ListItem } // an item of the list on screen, picked with no request open
@@ -93,10 +104,6 @@ export const SHORT_ANSWER_FLOOR = 0.65;
 // The most actions the user is asked to choose between: the likeliest first.
 const MAX_CHOICES = 3;
 
-const KEEP = 'keep';
-const ELSE = 'else';
-const ASK_AI = 'ask_ai';
-
 const TAKE_YOUR_TIME = 'Take your time.';
 const NOT_CAUGHT = "Sorry, I didn't catch that.";
 
@@ -104,101 +111,17 @@ const NOT_CAUGHT = "Sorry, I didn't catch that.";
 const MAX_CUT_OFF_WORDS = 3;
 const isCutOff = (said: string): boolean =>
   /(?:[-–—…]|\.\.\.)$/.test(said) && said.split(/\s+/).length <= MAX_CUT_OFF_WORDS;
-const TELL_ME = "Okay, tell me what you'd like to do.";
 
 // "How do I…", "where can I…", "…kaise": a question about how to do it, not a request to.
 // "Where did we talk about…" is a search, so only "where" with "can", "do" or "should I" counts.
 const HOW_TO =
   /\b(?:how (?:do|can|could|would|should) (?:i|we|you)|how to|where (?:do|can|could|should) (?:i|we)|kaise)\b/i;
 
-// Verbs that ask Buddy to do something, each as the first word of the titles of the actions it
-// may ask for: "message Sara" sends a message. Said in a question ("what does mention do?"), they
-// ask nothing.
-const VERBS: ReadonlyMap<string, readonly string[]> = new Map(
-  Object.entries({
-    send: ['send'],
-    message: ['send'],
-    post: ['send'],
-    mention: ['send'],
-    tag: ['send'],
-    reply: ['send'],
-    dm: ['send'],
-    ping: ['send'],
-    find: ['find'],
-    search: ['find'],
-    add: ['add'],
-    invite: ['invite'],
-    create: ['create'],
-    make: ['create', 'change'],
-    remove: ['remove'],
-    kick: ['remove'],
-    rename: ['rename'],
-    open: ['browse', 'manage', 'start'],
-  }),
-);
-const QUESTION = /^(?:what|why|how|who|when|where|which)\b/i;
-const wordsOf = (text: string): string[] =>
-  (text.toLowerCase().match(/[a-z]+/g) ?? []).map(word => word.replace(/s$/, ''));
-
-/**
- * The action a verb in the text most likely asks for: of the actions whose title starts with it,
- * the one more of whose other title words were said ("create an agent"). None when no such verb
- * is said, when the text is a question, or when several fit and nothing tells them apart.
- */
-export function verbAction(
-  text: string,
-  actions: readonly ActionDefinition[],
-): ActionDefinition | undefined {
-  if (QUESTION.test(text.trim())) return undefined;
-  const said = new Set(wordsOf(text));
-  const verbs = new Set([...said].flatMap(word => VERBS.get(word) ?? []));
-  const scored = actions
-    .map(action => {
-      const [verb = '', ...rest] = wordsOf(action.title);
-      return { action, verb, score: rest.filter(word => said.has(word)).length };
-    })
-    .filter(({ verb }) => verbs.has(verb))
-    .sort((a, b) => b.score - a.score);
-  const [best, next] = scored;
-  return best && (!next || best.score > next.score) ? best.action : undefined;
-}
-
-// Said before the verb of a request: "can you", "please".
-const POLITE = /^(?:(?:can|could|would|will) you\s+|please\s+|pls\s+|just\s+|now\s+)*/i;
-
 // Whether the sentence starts by asking for this action by its verb: "Can you invite a user?".
 const asksFirst = (text: string, action: ActionDefinition): boolean => {
-  const [first = ''] = text.trim().replace(POLITE, '').split(/\s+/);
+  const [first = ''] = withoutLead(text).split(/\s+/);
   return verbAction(first, [action]) === action;
 };
-
-// An action with fields to read, or that does more than open a page, is carried out through a
-// dialogue. One that only opens a page is opened, with its pill to open it again.
-export const isOperable = (action: ActionDefinition): boolean =>
-  Object.keys(action.fields).length > 0 || action.plan.some(step => step.op !== 'open_page');
-
-// The words said for each person, channel or date, matched to the records they mean. `said`: the
-// whole sentence, from which an email address is read, since one said aloud ("vinit dot khandal
-// at juspay dot in") runs longer than the words Jev reads as a value.
-export function fieldsEvent(
-  action: ActionDefinition,
-  values: Record<string, string>,
-  directory: Directory,
-  said?: string,
-): DialogueEvent {
-  const addresses = said ? emailsIn(said) : [];
-  const read = { ...values };
-  const email = Object.entries(action.fields).find(([, { parse }]) => parse === 'email')?.[0];
-  if (email && addresses.length > 0) read[email] = addresses.join(', ');
-  const resolutions: Record<string, Resolution> = {};
-  for (const [field, words] of Object.entries(read)) {
-    const definition = action.fields[field];
-    const resolution =
-      definition && hasValue(words) ? resolveField(definition, words, directory) : null;
-    if (resolution) resolutions[field] = resolution;
-  }
-  return { type: 'fields', values: read, resolutions };
-}
 
 // "dm everyone in the company": a request for one person, said for a group, is not one any action
 // does, so Ask AI answers it. "Tell everyone in #general …" still goes to the channel said.
@@ -213,271 +136,6 @@ function forEveryone(action: ActionDefinition, values: Record<string, string>): 
   );
 }
 
-// The action carried out with what was read for it; one that only opens a page is just shown, and
-// listing the actions leaves the open request as it is. The same action as the open one continues
-// it.
-function start(
-  action: ActionDefinition,
-  fields: Record<string, Record<string, string>>,
-  directory: Directory,
-  current: EngineState | null = null,
-  said?: string,
-): Decision {
-  if (action.plan.some(step => step.op === 'list_actions')) return { kind: 'list_actions' };
-  if (!isOperable(action)) return { kind: 'show', actions: [action] };
-  const values = fields[action.id] ?? {};
-  if (current?.action.id === action.id) {
-    return { kind: 'event', state: current, event: fieldsEvent(action, values, directory, said) };
-  }
-  return {
-    kind: 'event',
-    state: startDialogue(action),
-    event: fieldsEvent(action, withHere(action, values, directory), directory, said),
-  };
-}
-
-// Where a request goes, when it was not said, is the conversation the user is looking at: "ask Ask
-// AI to do an RCA" in the thread on screen. The confirm card names it, so it is never a guess.
-function withHere(
-  action: ActionDefinition,
-  values: Record<string, string>,
-  { here }: Directory,
-): Record<string, string> {
-  const place = Object.entries(action.fields).find(
-    ([field, { kind, required }]) =>
-      kind === 'channel' && (required || action.requireOneOf?.includes(field)),
-  )?.[0];
-  const said = (action.requireOneOf ?? [place]).some(field => field && hasValue(values[field]));
-  return place && here && !said ? { ...values, [place]: 'here' } : values;
-}
-
-const say = (text: string): Decision => ({ kind: 'say', text });
-
-const lowerFirst = (text: string): string => `${text.charAt(0).toLowerCase()}${text.slice(1)}`;
-
-const optionsOf = ({ actions, said }: Unsure, dialogue: EngineState | null): Option[] =>
-  dialogue
-    ? [
-        ...actions.map(({ id, title }) => ({ id, label: `Switch to ${title}` })),
-        { id: KEEP, label: `Keep going with ${dialogue.action.title}` },
-      ]
-    : [
-        ...actions.map(({ id, title }) => ({ id, label: title })),
-        said ? { id: ASK_AI, label: 'Ask Xyne AI' } : { id: ELSE, label: 'Something else' },
-      ];
-
-// What one option of the card comes to; null when it is not one of them.
-function chosen(
-  context: InterpretContext,
-  optionId: string,
-  directory: Directory,
-): Decision | null {
-  const { dialogue, unsure } = context;
-  if (!unsure) return null;
-  if (optionId === KEEP) {
-    return dialogue ? { kind: 'event', state: dialogue, event: { type: 'resume' } } : null;
-  }
-  if (optionId === ELSE) return say(TELL_ME);
-  if (optionId === ASK_AI && unsure.said) return { kind: 'ask_ai', text: unsure.said };
-  const action = unsure.actions.find(({ id }) => id === optionId);
-  if (!action) return null;
-  // Offered for a sentence Jev read as Ask AI's, so with nothing read for it: it is read again.
-  if (unsure.said && isOperable(action) && Object.keys(action.fields).length > 0) {
-    return { kind: 'read', action, said: unsure.said, question: questionOf(unsure, dialogue) };
-  }
-  return switchTo(dialogue, action, unsure.fields, directory, unsure.said);
-}
-
-// A request started from the card. One switched to from a request still open leaves that one
-// aside, to pick up with "continue" once this one is done: an invitation after adding the person
-// to the organisation.
-function switchTo(
-  dialogue: EngineState | null,
-  action: ActionDefinition,
-  fields: Record<string, Record<string, string>>,
-  directory: Directory,
-  said?: string,
-): Decision {
-  const started = start(action, fields, directory, null, said);
-  return dialogue && started.kind === 'event' ? { ...started, aside: dialogue } : started;
-}
-
-/**
- * What a refused run offers next: the action its `onRefused` names for these words, when the
- * user may do it, as a card that asks whether to, with the values the two actions share. Null
- * when there is none.
- */
-export function offerAfterRefusal(
-  state: EngineState,
-  error: string,
-  actions: readonly ActionDefinition[],
-): { text: string; unsure: Unsure; options: Option[] } | null {
-  const rule = state.action.onRefused?.find(({ when }) => when.test(error));
-  const offered = rule && actions.find(({ id }) => id === rule.offer);
-  if (!rule || !offered) return null;
-  const shared = Object.keys(offered.fields).flatMap(field => {
-    const value = state.values[field];
-    return hasValue(value) ? [[field, value] as const] : [];
-  });
-  const unsure: Unsure = {
-    actions: [offered],
-    fields: { [offered.id]: Object.fromEntries(shared) },
-    offer: true,
-  };
-  return {
-    text: fillTemplate(rule.say, state.values),
-    unsure,
-    options: optionsOf(unsure, state),
-  };
-}
-
-// The card's question, as it was put.
-function questionOf(unsure: Unsure, dialogue: EngineState | null): string {
-  const [only] = unsure.actions;
-  if (unsure.said && only) return `Do you want me to ${lowerFirst(only.title)}, or ask Xyne AI?`;
-  return `Did you mean ${listOf(optionsOf(unsure, dialogue).map(({ label }) => label))}?`;
-}
-
-/**
- * The action picked on the card, started with what Jev read for it alone (`route`), and where the
- * user is: "No message in test V2 channel mentioning Sara Iyer…" names who to mention.
- */
-export function interpretRead(
-  { action, said }: Extract<Decision, { kind: 'read' }>,
-  route: Route,
-  directory: Directory,
-): Decision {
-  const values =
-    route.kind === 'answer'
-      ? route.fields
-      : route.kind === 'actions' || route.kind === 'unsure'
-        ? (route.fields[action.id] ?? {})
-        : {};
-  return start(action, { [action.id]: values }, directory, null, said);
-}
-
-// The card is answered by an option's title or number; "continue" keeps going, and "no" or
-// "cancel" leaves the choice open to anything else. Anything more is left to the usual rules.
-function answerCard(
-  context: InterpretContext,
-  text: string,
-  directory: Directory,
-): Decision | null {
-  const { dialogue, unsure } = context;
-  if (!unsure) return null;
-  const reply = replyTo(text, optionsOf(unsure, dialogue));
-  const [offered] = unsure.actions;
-  if (reply === 'yes' && unsure.offer && offered) return chosen(context, offered.id, directory);
-  if (reply === 'cancel' || reply === 'no') return chosen(context, ELSE, directory);
-  if (reply === 'resume') return chosen(context, KEEP, directory);
-  return reply && typeof reply === 'object' ? chosen(context, reply.option.id, directory) : null;
-}
-
-// The words that bring in who, where or when a list on screen is narrowed to: "in #ops", "from
-// Rahul". A date needs none: "last week", "from yesterday".
-const NARROWED_BY: Readonly<Record<string, FieldKind>> = {
-  in: 'channel',
-  from: 'person',
-  with: 'person',
-  by: 'person',
-};
-// Said around a narrowing without adding to it: "okay, in #sales", "no, in #ops", "the one from
-// yesterday", "the ops one", "it's from Tom".
-const NARROWING_LEAD = new Set(
-  `ok okay no nah actually and also just only now then so maybe the one ones messages
-  it it's its was`.split(/\s+/),
-);
-const NARROWING_TAIL = new Set('one ones only please instead then'.split(' '));
-// The longest date keyword, in words: "last 24 hours".
-const MAX_DATE_WORDS = 3;
-
-/**
- * A narrowing of the list on screen made only of people, channels and dates the action searches
- * by, each named exactly as said, found here with no Jev call. Null when anything else is said, a topic or a question: the
- * sentence then goes to Jev as before. Words without "in", "from", "with" or "by" count only as a
- * date, a channel said as one ("onboarding channel", "#ops"), or a channel named exactly ("ops")
- * and not yet in the search: alone they may as well be the topic.
- */
-function narrowing(
-  dialogue: EngineState,
-  text: string,
-  directory: Directory,
-): DialogueEvent | null {
-  const words = text
-    .replace(/[,.!?;]/g, ' ')
-    .split(/\s+/)
-    .filter(Boolean);
-  const word = (at: number): string => (words[at] ?? '').toLowerCase();
-  const said = (from: number, to: number): string => words.slice(from, to).join(' ');
-  let start = 0;
-  let end = words.length;
-  while (start < end && NARROWING_LEAD.has(word(start))) start += 1;
-  // "Open with Tom" narrows by Tom; "open #ops" may mean the channel itself, so Jev reads it.
-  if (word(start) === 'open' && NARROWED_BY[word(start + 1)]) start += 1;
-  while (end > start && NARROWING_TAIL.has(word(end - 1))) end -= 1;
-  // Where the date keyword starting at `at` ends; `at` itself when none starts there.
-  const dateEnd = (at: number): number => {
-    for (let to = Math.min(end, at + MAX_DATE_WORDS); to > at; to -= 1) {
-      if (resolve('date', said(at, to), directory)?.kind === 'one') return to;
-    }
-    return at;
-  };
-  // One part of the narrowing: a date, or "in", "from", "with" or "by" and the words up to the
-  // next part, or words that name a channel exactly.
-  const part = (
-    at: number,
-  ): { kind: FieldKind; from: number; to: number; found: Resolution | null } => {
-    const marked = NARROWED_BY[word(at)];
-    const from = marked ? at + 1 : at;
-    const dated = dateEnd(from);
-    if (dated > from) {
-      return {
-        kind: 'date',
-        from,
-        to: dated,
-        found: resolve('date', said(from, dated), directory),
-      };
-    }
-    let to = from;
-    while (to < end && !NARROWED_BY[word(to)] && dateEnd(to) === to) to += 1;
-    if (marked) {
-      return {
-        kind: marked,
-        from,
-        to,
-        found: to > from ? resolve(marked, said(from, to), directory, true) : null,
-      };
-    }
-    // Words said as a channel ("onboarding channel", "#ops") are found as any channel is.
-    if (/^#|\bchannel$/i.test(said(from, to))) {
-      const found = resolve('channel', said(from, to), directory, true);
-      return { kind: 'channel', from, to, found };
-    }
-    // Words the search already holds are no narrowing: "onboarding" again, with that the topic.
-    const again = Object.values(dialogue.values).some(value =>
-      value?.toLowerCase().includes(said(from, to).toLowerCase()),
-    );
-    const pick = again ? null : channelNamed(said(from, to), directory);
-    return { kind: 'channel', from, to, found: pick && { kind: 'one', pick } };
-  };
-
-  const values: Record<string, string> = {};
-  const resolutions: Record<string, Resolution> = {};
-  for (let at = start; at < end; ) {
-    const { kind, from, to, found } = part(at);
-    const field = Object.entries(dialogue.action.fields).find(
-      ([, definition]) => definition.kind === kind,
-    )?.[0];
-    // Anything that is not a person, channel or date the search takes is for Jev, as is the same
-    // field said twice.
-    if (!field || field in values || !found || found.kind === 'none') return null;
-    values[field] = said(from, to);
-    resolutions[field] = found;
-    at = to;
-  }
-  return Object.keys(values).length > 0 ? { type: 'fields', values, resolutions } : null;
-}
-
 // Said around a person, channel, date or address without being part of it: "it's with Tom", "in
 // the onboarding channel", "from last week", "to Priya please".
 const ANSWER_LEAD =
@@ -490,9 +148,65 @@ const answerWords = (text: string): string =>
     .replace(ANSWER_LEAD, '')
     .replace(ANSWER_TAIL, '');
 
+// The most words a name said at the start of a message may have: "Sara Iyer".
+const MAX_NAME_WORDS = 3;
+
+// A name the message starts with, for an optional person field still empty (the mention): "Sara
+// Iyer can do RCA". Only one person found exactly by those words.
+function leadingPerson(
+  { action, values }: EngineState,
+  text: string,
+  directory: Directory,
+): { field: string; words: string; found: Resolution } | null {
+  const field = Object.entries(action.fields).find(
+    ([id, { kind, required }]) =>
+      kind === 'person' && !required && !action.requireOneOf?.includes(id) && !hasValue(values[id]),
+  )?.[0];
+  const definition = field ? action.fields[field] : undefined;
+  if (!field || !definition) return null;
+  const words = text.trim().split(/\s+/);
+  for (let count = Math.min(MAX_NAME_WORDS, words.length - 1); count > 0; count -= 1) {
+    const name = words
+      .slice(0, count)
+      .join(' ')
+      .replace(/[,.:;!?]+$/, '');
+    const found = resolveField(definition, name, directory, true);
+    if (found?.kind === 'one') return { field, words: name, found };
+  }
+  return null;
+}
+
+// The reply to a question whose answer is the user's own words (the message) is that answer, as
+// said; a request of its own or a cut-off fragment is not.
+function contentAnswer(
+  dialogue: EngineState,
+  text: string,
+  directory: Directory,
+): DialogueEvent | null {
+  const field = dialogue.phase.kind === 'collecting' ? dialogue.phase.field : null;
+  const definition = field ? dialogue.action.fields[field] : undefined;
+  if (!field || !definition?.content) return null;
+  if (startsRequest(text) || isCutOff(text.trim())) return null;
+  // A message may ask something; what an agent does or a description never does.
+  if (definition.parse !== 'message' && isQuestion(text)) return null;
+  const person = leadingPerson(dialogue, text, directory);
+  if (!person) return { type: 'fields', values: { [field]: text.trim() } };
+  const message = text
+    .trim()
+    .slice(person.words.length)
+    .replace(/^[\s,.:;!?]+/, '');
+  return {
+    type: 'fields',
+    values: { [field]: message, [person.field]: person.words },
+    resolutions: { [person.field]: person.found },
+  };
+}
+
 function withDialogue(dialogue: EngineState, text: string, directory: Directory): Decision | null {
   const quick = quickEvent(dialogue, text);
   if (quick) return { kind: 'event', state: dialogue, event: quick };
+  const content = contentAnswer(dialogue, text, directory);
+  if (content) return { kind: 'event', state: dialogue, event: content };
   // A sentence that asks for something Buddy does ("message Priya…") is a request of its own,
   // never an answer: Jev reads it.
   if (verbAction(text, ACTIONS)) return null;
@@ -558,6 +272,11 @@ export function interpretLocally(
   // Only something open is waited on; with nothing open, "hmm" is for Ask AI like any other text.
   if ((dialogue || aside || unsure) && isHesitation(said)) {
     return { kind: 'wait', text: TAKE_YOUR_TIME };
+  }
+  if (asksAgain(said)) {
+    if (dialogue && dialogue.phase.kind !== 'results')
+      return { kind: 'wait', text: putAgain(dialogue) };
+    if (unsure) return { kind: 'wait', text: questionOf(unsure, dialogue) };
   }
   const answered = answerCard(context, said, directory);
   if (answered) return answered;
@@ -691,6 +410,26 @@ function toAsked(
   return asked && asked === familyOf(action.fields[only[0]]?.kind) ? { [field]: only[1] } : fields;
 }
 
+// A reply to the card that asks for one of its actions ("add him to the organisation first")
+// picks it, with the card's values where Jev read none that fit. One offered for a sentence Jev
+// read nothing from has that sentence read again, with what the reply adds.
+function pickedOnCard(
+  { dialogue, unsure }: InterpretContext,
+  said: string,
+  route: Extract<Route, { kind: 'actions' | 'unsure' }>,
+  directory: Directory,
+): Decision | null {
+  const onCard = unsure && cardActionOf(unsure, route.actions, said);
+  if (!unsure || !onCard) return null;
+  const read = route.fields[onCard.id] ?? {};
+  if (unsure.said && Object.keys(onCard.fields).length > 0) {
+    const question = questionOf(unsure, dialogue);
+    return { kind: 'read', action: onCard, said: unsure.said, question, fields: read };
+  }
+  const fields = withCard(onCard, unsure.fields[onCard.id], read, directory);
+  return switchTo(dialogue, onCard, { [onCard.id]: fields }, directory, said);
+}
+
 // Off the open question: kept, until twice in a row, then put aside, so Ask AI can be asked. A
 // list on screen is kept however often: the request is done, and only waits on a pick.
 function miss(dialogue: EngineState): Decision {
@@ -733,25 +472,26 @@ export function interpretRoute(
     if (route.actions.length === 1 && first?.guide && HOW_TO.test(said)) {
       return { kind: 'show', actions: [first], how: true };
     }
-    // An action the card offers, asked for in words ("add him to the organisation first"): the
-    // card's option, with its values where Jev read none that fit.
-    const onCard = first && context.unsure?.actions.find(({ id }) => id === first.id);
-    if (route.actions.length === 1 && onCard && context.unsure) {
-      const fields = withCard(
-        onCard,
-        context.unsure.fields[onCard.id],
-        route.fields[onCard.id],
-        directory,
-      );
-      return switchTo(dialogue, onCard, { [onCard.id]: fields }, directory, said);
-    }
+    const picked = pickedOnCard(context, said, route, directory);
+    if (picked) return picked;
     if (route.actions.length === 1 && first) {
       return start(first, route.fields, directory, dialogue, said);
+    }
+    // Several requests in one sentence: the first is started, and the rest wait their turn.
+    const chain = chainOf(route, said);
+    if (chain) {
+      const { action, fields } = chain.first;
+      const started = start(action, { [action.id]: fields }, directory, dialogue, said);
+      return started.kind === 'event' ? { ...started, queue: chain.rest } : started;
     }
     // Several are never shown as pills: by voice nobody could use them. The user is asked which.
     return askWhich(context, said, { ...route, kind: 'unsure' }, directory);
   }
-  if (route.kind === 'unsure') return askWhich(context, said, route, directory);
+  if (route.kind === 'unsure') {
+    return (
+      pickedOnCard(context, said, route, directory) ?? askWhich(context, said, route, directory)
+    );
+  }
   if (!dialogue) {
     // Buddy is working with the user, and they named something it does: they are asked, with the
     // likeliest action, rather than answered by Ask AI out of the blue.
@@ -759,6 +499,11 @@ export function interpretRoute(
       route.kind === 'ask_ai' && context.engaged ? verbAction(said, context.engaged) : undefined;
     if (!likeliest) return { kind: 'ask_ai' };
     const unsure = { actions: [likeliest], fields: {}, said };
+    // Something to send or change right where the user is: read for it at once, as its confirm
+    // card asks before anything is done.
+    if (directory.here && confirms(likeliest) && takesHere(likeliest)) {
+      return { kind: 'read', action: likeliest, said, question: questionOf(unsure, null) };
+    }
     return {
       kind: 'unsure',
       unsure,
