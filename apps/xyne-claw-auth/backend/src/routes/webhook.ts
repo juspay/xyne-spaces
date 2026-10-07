@@ -26,6 +26,7 @@ import {
 import { hashSkillContent } from "xyne-claw-shared";
 import { agentRequestRepository } from "../repositories/agentRequestRepository.js";
 import { buildAvailableToolsCatalog } from "./tools.js";
+import { postAgentDraftCard, draftSpecFromCreateAgentParams } from "../lib/agent-draft-card.js";
 import {
   identityFromDraftSpec,
   isValidAgentSlug,
@@ -779,9 +780,37 @@ async function postWriteApprovalAction(args: {
   ctx: SessionContext;
   token: string;
   targetValidation: { channelName?: string };
+  runOwnerId?: string | undefined;
 }): Promise<void> {
   const { action, ctx, token, targetValidation } = args;
   const params = action["params"] as Record<string, unknown>;
+
+  // create-agent renders the agent draft card, not the generic write card: it
+  // is the same decision propose-agent raises, and the generic card truncates
+  // the system prompt at 200 chars — the one thing a reviewer must read.
+  if (action["tool"] === "create-agent" && ctx.agentSlug && ctx.agentOrgId) {
+    const spec = draftSpecFromCreateAgentParams(params);
+    if (spec) {
+      await postAgentDraftCard({
+        spec,
+        ctx: {
+          agentSlug: ctx.agentSlug,
+          agentOrgId: ctx.agentOrgId,
+          requesterId: ctx.senderId,
+          channelId: ctx.channelId,
+          conversationId: ctx.conversationId,
+          spacesAppUserId: ctx.spacesAppUserId,
+          spacesAppId: ctx.spacesAppId,
+          appToken: token,
+        },
+        runOwnerId: args.runOwnerId ?? ctx.senderId,
+        log: clog,
+      });
+      return;
+    }
+    clog.warn(`[agent-card] create-agent params were not a usable draft; falling back to the write card`);
+  }
+
   const actionDesc = formatActionDescription(action["tool"] as string, params, targetValidation);
 
   // The pending-action signature is minted before the Spaces delivery target is
@@ -4387,186 +4416,22 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
     ctx.agentSlug &&
     ctx.agentOrgId
   ) {
-    const token = ctx.appToken;
-    const spec = pendingAgentCard.agent;
-    try {
-      const orgId = ctx.agentOrgId;
-      const requesterId = ctx.senderId;
-
-      // Fail loudly on the card rather than silently creating a mis-slugged
-      // agent: the pod normalizes, so an invalid slug here means drift.
-      if (!isValidAgentSlug(spec.slug)) {
-        await postAgentMessage(
-          { spacesAppUserId: ctx.spacesAppUserId, appToken: token },
-          {
-            channelId: ctx.channelId,
-            conversationId: ctx.conversationId,
-            markdownText: `I drafted an agent but \`${spec.slug}\` isn't a usable identifier. Ask me again with a simple name like "ticket triage".`,
-            metadata: { contentFormat: "markdown" },
-          }
-        );
-        log.warn(`[agent-card] rejected draft with invalid slug "${spec.slug}" conv=${ctx.conversationId}`);
-        await deleteSession(sessionId).catch(() => {});
-        return;
-      }
-
-      // Duplicate slug: catch it NOW, while the agent can still be re-asked,
-      // instead of at approval time when the user has already committed.
-      const existing = await agentRepository.findBySlug(spec.slug, orgId);
-      if (existing) {
-        await postAgentMessage(
-          { spacesAppUserId: ctx.spacesAppUserId, appToken: token },
-          {
-            channelId: ctx.channelId,
-            conversationId: ctx.conversationId,
-            markdownText: `An agent called **${existing.name}** (\`${spec.slug}\`) already exists here, so I didn't create a draft. Ask me again with a different name, or edit the existing agent.`,
-            metadata: { contentFormat: "markdown" },
-          }
-        );
-        log.info(`[agent-card] draft dropped — slug ${spec.slug} already exists in org ${orgId}`);
-        await deleteSession(sessionId).catch(() => {});
-        return;
-      }
-
-      // Resolve the requested tools against THIS org's catalog. Unmatched
-      // tokens are reported on the card and never persisted.
-      const catalog = await buildAvailableToolsCatalog(undefined, orgId);
-      const callableOptions = await listCallableAgentOptions(orgId, requesterId, spec.slug);
-      const expandedMcps = expandMcpRequests(spec.mcps, catalog);
-      if (expandedMcps.unknown.length > 0) {
-        log.info(`[agent-card] draft ${spec.slug}: unmatched MCPs [${expandedMcps.unknown.join(", ")}]`);
-      }
-      const resolved = await resolveAgentCapabilities(
-        [...(spec.tools ?? []), ...expandedMcps.tokens],
-        catalog,
-        requesterId,
-        callableOptions,
-      );
-      const note = unknownToolsNote(resolved.unknown);
-      if (resolved.unknown.length > 0) {
-        log.info(`[agent-card] draft ${spec.slug}: unmatched tools [${resolved.unknown.join(", ")}]`);
-      }
-
-      // The draft itself lives server-side. proposedContent is what the approve
-      // path re-reads and creates — the card is display only.
-      const proposedContent = JSON.stringify(spec);
-      const outcome = await agentRequestRepository.supersedeAndCreateAgentCreate({
-        agentSlug: spec.slug,
-        requesterId,
-        orgId,
-        proposedContent,
-        proposedContentHash: hashSkillContent(proposedContent),
-      });
-      if (outcome.supersededCount > 0) {
-        log.info(`[agent-card] superseded ${outcome.supersededCount} stale draft(s) for ${spec.slug} by ${requesterId}`);
-      }
-
-      // A lead-in line so the card isn't dropped into the thread wordlessly. The
-      // agent's own `summary` (why it made these calls) when it wrote one;
-      // otherwise a neutral line — never a restatement of the card, which would
-      // just be the same content twice.
-      const leadIn =
-        spec.summary?.trim() ||
-        `I've drafted an agent for this — have a look and approve it below if it's right.`;
-      try {
-        await postAgentMessage(
-          { spacesAppUserId: ctx.spacesAppUserId, appToken: token },
-          {
-            channelId: ctx.channelId,
-            conversationId: ctx.conversationId,
-            markdownText: leadIn,
-            metadata: { contentFormat: "markdown" },
-          }
-        );
-      } catch (e) {
-        // Non-fatal: the card is the deliverable and still posts below.
-        log.warn("Failed to post agent-draft lead-in (non-fatal)", {
-          error: errMsg(e),
-        });
-      }
-
-      const draftExtras = await resolveDraftExtras(spec, orgId, requesterId);
-      const cardNote = draftNote(
-        note,
-        unknownMcpsNote(expandedMcps.unknown),
-        unknownProvidersNote(draftExtras.unknownProviders ?? []),
-      );
-      const identity = identityFromDraftSpec(spec, resolved, ctx.agentSlug, draftExtras);
-      const flow = withSpacesAppId(
-        buildAgentCardFlow(
-          {
-            variant: "draft",
-            phase: "pending",
-            agent: identity,
-            toolSelection: toConfigTools(resolved),
-            ...(cardNote ? { note: cardNote } : {}),
-          },
-          {
-            requestId: outcome.request.id,
-            agentSlug: ctx.agentSlug,
-            userId: requesterId,
-            conversationId: ctx.conversationId,
-            channelId: ctx.channelId,
-          },
-        ),
-        ctx.spacesAppId,
-      );
-
-      await postFlowCard(flow, {
-        kind: "spaces",
+    await postAgentDraftCard({
+      spec: pendingAgentCard.agent,
+      ctx: {
+        agentSlug: ctx.agentSlug,
+        agentOrgId: ctx.agentOrgId,
+        requesterId: ctx.senderId,
         channelId: ctx.channelId,
         conversationId: ctx.conversationId,
         spacesAppUserId: ctx.spacesAppUserId,
-        appToken: token,
-      });
-      log.info(`[agent-card] posted draft card slug=${spec.slug} request=${outcome.request.id} conv=${ctx.conversationId}`);
-
-      // Persist an assistant transcript row: the interactive card exists only in
-      // Spaces, so without this the claw chat shows nothing for this turn and the
-      // next user message groups as a sibling branch. Same reasoning as the plan
-      // card's transcript row above.
-      try {
-        const capabilityLine = identity.capabilities?.length
-          ? `\n\n**Capabilities:** ${identity.capabilities.map((c) => c.label).join(", ")}`
-          : "";
-        const parentId = await chatMessageRepository
-          .latestMessageId(ctx.conversationId, ctx.agentSlug)
-          .catch(() => null);
-        await chatMessageRepository.create({
-          conversationId: ctx.conversationId,
-          agentSlug: ctx.agentSlug,
-          userId: runOwnerId,
-          orgId,
-          ...(parentId ? { parentId } : {}),
-          role: "assistant",
-          content: `**🤖 Drafted an agent — ${identity.name}** (\`${identity.slug}\`)\n\n${identity.description ?? ""}${capabilityLine}\n\n_Approve the card to create it._`,
-          status: "completed",
-          ...(payload.reasoning ? { reasoning: payload.reasoning } : {}),
-        });
-      } catch (e) {
-        log.warn("Failed to persist agent-draft assistant transcript row (non-fatal)", {
-          error: errMsg(e),
-        });
-      }
-    } catch (err) {
-      log.error("Failed to post agent draft card", {
-        error: errMsg(err),
-        slug: spec.slug,
-      });
-      try {
-        await postAgentMessage(
-          { spacesAppUserId: ctx.spacesAppUserId, appToken: token },
-          {
-            channelId: ctx.channelId,
-            conversationId: ctx.conversationId,
-            markdownText: "I drafted the agent but couldn't post it for approval. Please try again.",
-            metadata: { contentFormat: "markdown" },
-          }
-        );
-      } catch {
-        // The user already lost this turn; don't compound it with a throw.
-      }
-    }
+        spacesAppId: ctx.spacesAppId,
+        appToken: ctx.appToken,
+      },
+      runOwnerId,
+      ...(payload.reasoning ? { reasoning: payload.reasoning } : {}),
+      log,
+    });
     await deleteSession(sessionId).catch(() => {});
     return;
   }
@@ -5115,7 +4980,7 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
             continue;
           }
 
-          await postWriteApprovalAction({ action, ctx, token, targetValidation });
+          await postWriteApprovalAction({ action, ctx, token, targetValidation, runOwnerId });
           copilotApprovalCardsSent += 1;
         }
         log.info(`Copilot: posted ${copilotApprovalCardsSent}/${copilotPendingActions.length} write action approval(s)`);
@@ -5472,7 +5337,7 @@ router.post("/result", requireStrictS2S, requireResultToken((req) => (req.body a
           continue;
         }
 
-        await postWriteApprovalAction({ action, ctx, token, targetValidation });
+        await postWriteApprovalAction({ action, ctx, token, targetValidation, runOwnerId });
         approvalCardsSent += 1;
       }
 
