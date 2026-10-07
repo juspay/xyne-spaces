@@ -1,3 +1,10 @@
+## [1.473.0](https://github.com/juspay/xyne-spaces/compare/v1.472.0...v1.473.0) (2026-10-07)
+
+
+### Features
+
+* expose call detailed summary to apps ([#2728](https://github.com/juspay/xyne-spaces/issues/2728)) ([b946743](https://github.com/juspay/xyne-spaces/commit/b94674376a782902f8385fea4f7b22cbb72a5766))
+
 ## [1.472.0](https://github.com/juspay/xyne-spaces/compare/v1.471.0...v1.472.0) (2026-10-07)
 
 
