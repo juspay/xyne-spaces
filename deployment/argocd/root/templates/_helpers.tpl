@@ -375,6 +375,14 @@ LIVEKIT_SERVER_URL: {{ $lk.url | quote }}
 {{- if (index $root.Values.apps "xyne-claw-auth").enabled }}
 {{- $_ := set $env "XYNE_CLAW_AUTH_URL" "http://xyne-claw-auth:3003" }}
 {{- $_ := set $env "XYNE_CLAW_AUTH_INTERNAL_URL" "http://xyne-claw-auth:3003" }}
+{{- /*
+Claw agent apps register their webhook on the public host
+(https://<domain>/claw/api/v1/webhook/app/<appId>). Map that host to the
+in-cluster claw-auth Service so app-event dispatch stays inside the cluster
+instead of hairpinning through NAT and the public load balancer. The path is
+preserved by the resolver, and claw-auth serves /claw/api/v1 itself.
+*/}}
+{{- $_ := set $env "INTERNAL_APP_HOST_MAP" (dict $root.Values.global.domain "http://xyne-claw-auth:3003" | toJson) }}
 {{- end }}
 {{- if (index $root.Values.apps "xyne-lighton-ocr").enabled }}
 {{- $_ := set $env "DOCLING_SERVICE_URL" "http://xyne-lighton-ocr:80" }}
