@@ -504,6 +504,40 @@ const electronAPI = {
     },
   },
 
+  // Calls hosted in their own window. The main window opens and commands it;
+  // the call window takes the handoff and reports status back.
+  callWindow: {
+    open: (payload: { handoff: Record<string, unknown>; workspaceId: string | null }): Promise<number> =>
+      ipcRenderer.invoke('call-window:open', payload),
+    getStatus: (): Promise<unknown> => ipcRenderer.invoke('call-window:get-status'),
+    prepare: (payload: { workspaceId: string | null }) =>
+      ipcRenderer.send('call-window:prepare', payload),
+    cancelPrepare: () => ipcRenderer.send('call-window:cancel-prepare'),
+    sendCommand: (command: { type: string; endForAll?: boolean }) =>
+      ipcRenderer.send('call-window:command', command),
+    focus: () => ipcRenderer.send('call-window:focus'),
+    onStatus: (callback: (status: unknown) => void) => {
+      const listener = (_event: unknown, status: unknown) => callback(status);
+      ipcRenderer.on('call-window:status', listener);
+      return () => ipcRenderer.removeListener('call-window:status', listener);
+    },
+    takeHandoff: (): Promise<unknown> => ipcRenderer.invoke('call-window:take-handoff'),
+    onHandoffReady: (callback: () => void) => {
+      const listener = () => callback();
+      ipcRenderer.on('call-window:handoff-ready', listener);
+      return () => ipcRenderer.removeListener('call-window:handoff-ready', listener);
+    },
+    reportStatus: (status: Record<string, unknown>) =>
+      ipcRenderer.send('call-window:status', status),
+    onCommand: (callback: (command: { type: string; endForAll?: boolean }) => void) => {
+      const listener = (_event: unknown, command: { type: string; endForAll?: boolean }) =>
+        callback(command);
+      ipcRenderer.on('call-window:command', listener);
+      return () => ipcRenderer.removeListener('call-window:command', listener);
+    },
+    openInMain: (appPath: string) => ipcRenderer.send('call-window:open-in-main', appPath),
+  },
+
   clawOverlay: {
     setIgnoreMouse: (ignore: boolean) => ipcRenderer.send('claw:set-ignore-mouse', ignore),
     setExpanded: (expanded: boolean) => ipcRenderer.send('claw:set-expanded', expanded),

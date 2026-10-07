@@ -6,6 +6,8 @@ import './styles/workflow-ui-theme.css';
 import { globalClickTracker } from './services/Analytics/globalClickTracker';
 import { installErrorReportLogCollector } from './utils/errorReportLogCollector';
 import { maybeOpenInDesktopApp } from './utils/openInDesktopApp';
+import { isCallWindowRoute } from './utils/callWindow';
+import { startCallWindowHost } from './routes/CallWindowScreen/callWindowHost';
 import { logger, Event } from './utils/logger';
 
 // Expose app version to window for Electron access
@@ -122,5 +124,11 @@ globalClickTracker.initialize();
 // running it before createRoot only avoids a flash of the app before the
 // interstitial paints.
 maybeOpenInDesktopApp();
+
+// The desktop call window starts its call before React renders: connecting
+// needs only the token the main window handed over, not the app's data.
+if (isCallWindowRoute()) {
+  startCallWindowHost();
+}
 
 ReactDOM.createRoot(document.getElementById('root')!).render(<App />);

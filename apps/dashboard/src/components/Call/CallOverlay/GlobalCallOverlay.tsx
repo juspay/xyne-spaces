@@ -9,6 +9,12 @@ import { queries } from '../../../zero/queries';
 import { useCachedQuery } from '../../../hooks/useCachedQuery';
 import { useAuth } from '../../../hooks/useAuth';
 import { useGlobalAutoJoinOnAccept } from '../../../hooks/useCallJoinState';
+import {
+  getCallWindowStatus,
+  isCallWindowRoute,
+  isCallWindowSupported,
+} from '../../../utils/callWindow';
+import { isStandaloneWindow } from '../../../utils/electronApp';
 
 interface GlobalCallOverlayProps {
   autoJoinOnAccept?: boolean;
@@ -41,6 +47,7 @@ export function GlobalCallOverlay({
       state.matches('disconnecting'),
   );
   const isNativeMode = useSelector(roomActor, state => state.context.isNativeMode);
+  const isCallWindowMode = useSelector(roomActor, state => state.context.isCallWindowMode);
   const token = useSelector(roomActor, state => state.context.token);
   const serverUrl = useSelector(roomActor, state => state.context.serverUrl);
   const callType = useSelector(roomActor, state => state.context.callType);
@@ -57,7 +64,8 @@ export function GlobalCallOverlay({
         snapshot.matches('connecting') ||
         snapshot.matches('connected');
 
-      if (isInCall) {
+      // A call in the call window outlives this window reloading.
+      if (isInCall && !snapshot.context.isCallWindowMode) {
         // Send disconnect event to clean up properly
         roomActor.send({ type: 'DISCONNECT' });
       }
@@ -70,8 +78,24 @@ export function GlobalCallOverlay({
     };
   }, []);
 
-  // Don't render WebView call UI when in native mode
-  if (isNativeMode) {
+  // The main window (re)loaded while a call runs in the call window: pick it
+  // back up, so the rest of the app knows there is a call.
+  useEffect(() => {
+    if (!isCallWindowSupported() || isStandaloneWindow()) return undefined;
+    let cancelled = false;
+    void getCallWindowStatus().then(status => {
+      if (cancelled || !status) return;
+      if (!roomActor.getSnapshot().matches('idle')) return;
+      roomActor.send({ type: 'ATTACH_CALL_WINDOW', status });
+    });
+    return (): void => {
+      cancelled = true;
+    };
+  }, []);
+
+  // Don't render WebView call UI when in native mode, or when the call
+  // window renders it
+  if (isNativeMode || isCallWindowMode) {
     return null;
   }
 
@@ -88,7 +112,8 @@ export function GlobalCallOverlay({
   return createPortal(
     <div className={`fixed inset-0 pointer-events-none z-[50]`}>
       {/* Global Audio Renderer - attaches all audio tracks independently of UI rendering */}
-      {room && <RoomAudioRenderer room={room} />}
+      {/* The call window renders audio from its shell, ahead of this. */}
+      {room && !isCallWindowRoute() && <RoomAudioRenderer room={room} />}
 
       <div className='pointer-events-auto'>
         <CustomLiveKitRoom

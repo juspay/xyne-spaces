@@ -42,6 +42,7 @@ import UserGroupsScreen from './UserGroupsScreen/UserGroupsScreen';
 import ProjectDetailScreen from './ProjectDetailScreen/ProjectDetailScreen';
 import SdlcScreen from './SdlcScreen/SdlcScreen';
 import SdlcWindow from './SdlcScreen/SdlcWindow';
+import CallWindowScreen, { CallWindowRoot } from './CallWindowScreen/CallWindowScreen';
 import { APP_BASE_PATH, isSdlcSurface } from '../config';
 import SdlcFrameHost from './SdlcScreen/SdlcFrameHost';
 import SdlcFrameViewport from './SdlcScreen/SdlcFrameViewport';
@@ -1111,6 +1112,32 @@ export const router = createBrowserRouter(
           element: <ClawOverlay />,
         },
       ],
+    },
+    {
+      // Desktop call window (see utils/callWindow). Electron opens it; the call
+      // UI and the LiveKit room live here for the length of the call. Outside
+      // SplashScreen so its own placeholder shows from the first frame.
+      path: '/newWindow/call',
+      errorElement: <RouterErrorFallback />,
+      element: (
+        <CallWindowRoot>
+          <EncryptionBootstrapProvider>
+            <ZeroProvider>
+              <ZeroFallbackProvider>
+                <InitialStateLoader>
+                  <EditProvider>
+                    <CallWindowScreen />
+                    <AttachmentGalleryModal />
+                    <AttachmentCitationPreview />
+                    <ThreadCitationModal />
+                    <TranscriptCitationModal />
+                  </EditProvider>
+                </InitialStateLoader>
+              </ZeroFallbackProvider>
+            </ZeroProvider>
+          </EncryptionBootstrapProvider>
+        </CallWindowRoot>
+      ),
     },
     {
       element: <SplashScreen />,

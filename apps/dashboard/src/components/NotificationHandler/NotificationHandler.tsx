@@ -743,13 +743,16 @@ export const NotificationHandler: React.FC = () => {
 
   // Same states useCallJoinOrInitiate treats as "in a call"; `initiating` lands
   // before the mic is enabled, so main knows the upcoming activation is ours.
+  // Main hears about calls in the call window from that window instead (and a
+  // reload here does not end those), so they are not reported from here.
   const isInXyneCall = useSelector(
     roomActor,
     s =>
-      s.matches('initiating') ||
-      s.matches('joining') ||
-      s.matches('connecting') ||
-      s.matches('connected'),
+      (s.matches('initiating') ||
+        s.matches('joining') ||
+        s.matches('connecting') ||
+        s.matches('connected')) &&
+      !(s.context.isCallWindowMode && (s.matches('connecting') || s.matches('connected'))),
   );
   useEffect(() => {
     if (!isElectron) return;

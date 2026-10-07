@@ -55,6 +55,19 @@ import {
 import { logger, Event } from '../utils/logger';
 import { getCallJoinSettings } from '../hooks/useCallJoinSettings';
 import {
+  cancelPreparedCallWindow,
+  focusCallWindow,
+  openCallWindow,
+  prepareCallWindow,
+  sendCallWindowCommand,
+  shouldUseCallWindow,
+  onCallWindowStatus,
+  waitForCallWindowPhase,
+  CallWindowClosedError,
+  type CallWindowHandoff,
+  type CallWindowStatus,
+} from '../utils/callWindow';
+import {
   isHostControlTurnedOffForLocal,
   isHostControlTurnedOffForLocalWithControls,
   parseHostControlsFromMetadata,
@@ -65,6 +78,11 @@ setLogLevel('warn');
 
 // Auto-mute threshold: mute the joining user when more than this many remote participants are already in the call
 const DEFAULT_MUTE_THRESHOLD = 5;
+
+// The call window boots a whole app before it can connect, then runs the same
+// connect retries the overlay does — allow for both.
+const CALL_WINDOW_CONNECT_TIMEOUT_MS = 90_000;
+const CALL_WINDOW_DISCONNECT_TIMEOUT_MS = 5_000;
 
 const logRoomMachineEvent = (
   callId: string | null | undefined,
@@ -239,6 +257,12 @@ export interface RoomContext {
   // scoped to one call and clears with the rest of the context on disconnect.
   // Every consumer re-checks the CAC flag before acting on it.
   callUrlOverrides: CallUrlOverrides | null;
+  // The call runs in the desktop call window (see utils/callWindow): this
+  // machine fetched the token and mirrors the window's state, and has no Room.
+  // Decided once per join, so flipping the preference mid-call changes nothing.
+  isCallWindowMode: boolean;
+  // Which handoff the call window is running; its status reports echo it.
+  callWindowHandoffId: number | null;
 }
 
 // Events for Room operations
@@ -250,6 +274,9 @@ export type RoomMachineEvent =
       callType: CallType;
       externalId: string;
       zero: Zero | null;
+      // Set when the call window takes over a call the main window joined:
+      // the rest of the context that join produced.
+      handoff?: CallWindowHandoff;
     }
   | {
       type: 'INITIATE_CALL';
@@ -365,7 +392,29 @@ export type RoomMachineEvent =
       durationMs: number;
       initiatedBy: 'user' | 'callkit' | 'error';
     }
-  | { type: 'NATIVE_DISCONNECTED' };
+  | { type: 'NATIVE_DISCONNECTED' }
+  // Call window events (main window side, see utils/callWindow)
+  | { type: 'CALL_WINDOW_STATUS'; status: CallWindowStatus }
+  | { type: 'ATTACH_CALL_WINDOW'; status: CallWindowStatus };
+
+/** What the call window needs to take over a call this machine joined. */
+const buildCallWindowHandoff = (context: RoomContext): CallWindowHandoff => ({
+  token: context.token ?? '',
+  serverUrl: context.serverUrl ?? '',
+  callType: context.callType,
+  externalId: context.externalId ?? '',
+  callId: context.callId,
+  channelId: context.channelId,
+  roomLink: context.roomLink,
+  scopeType: context.scopeType,
+  conversationId: context.conversationId,
+  artifactMessageId: context.artifactMessageId,
+  sdlcLink: context.sdlcLink,
+  targetUserIds: context.targetUserIds,
+  callDisplayName: context.callDisplayName,
+  isInitiator: context.isInitiator,
+  callUrlOverrides: context.callUrlOverrides,
+});
 
 export const roomMachine = setup({
   types: {
@@ -900,8 +949,18 @@ export const roomMachine = setup({
           conversationId?: string | null;
           callDisplayName?: string | null;
           scopeType?: string | null; // Channel scope type for CallKit filtering
+          callWindowHandoff: CallWindowHandoff | null;
         };
-      }) => {
+      }): Promise<{ callWindowHandoffId: number } | void> => {
+        // Call window mode: hand the token to the call window and wait for it
+        // to report the room connected. Its own connect retries run there.
+        if (input.callWindowHandoff) {
+          const handoffId = await openCallWindow(input.callWindowHandoff);
+          logRoomMachineEvent(input.externalId, 'call_window_handoff_sent', { handoffId });
+          await waitForCallWindowPhase(handoffId, 'connected', CALL_WINDOW_CONNECT_TIMEOUT_MS);
+          return { callWindowHandoffId: handoffId };
+        }
+
         const {
           room,
           token,
@@ -1046,9 +1105,23 @@ export const roomMachine = setup({
           zero: Zero | null;
           isNativeMode: boolean;
           endForAll: boolean;
+          isCallWindowMode: boolean;
+          callWindowHandoffId: number | null;
         };
       }) => {
         const { room, externalId, isNativeMode, endForAll } = input;
+
+        // The call window owns the room, including ending it for everyone.
+        if (input.isCallWindowMode) {
+          logRoomMachineEvent(externalId, 'call_window_disconnect_sent', { endForAll });
+          sendCallWindowCommand({ type: 'DISCONNECT', endForAll });
+          await waitForCallWindowPhase(
+            input.callWindowHandoffId,
+            'ended',
+            CALL_WINDOW_DISCONNECT_TIMEOUT_MS,
+          );
+          return;
+        }
 
         logRoomMachineEvent(externalId, 'disconnect_cleanup_started', {
           hasRoom: !!room,
@@ -1166,12 +1239,31 @@ export const roomMachine = setup({
         };
       },
     ),
+
+    // Call window status listener - mirrors the call window into this machine
+    callWindowEventListener: fromCallback(
+      ({
+        sendBack,
+        input,
+      }: {
+        sendBack: (event: RoomMachineEvent) => void;
+        input: { handoffId: number | null };
+      }) =>
+        onCallWindowStatus(status => {
+          if (input.handoffId !== null && status.handoffId !== input.handoffId) return;
+          sendBack({ type: 'CALL_WINDOW_STATUS', status });
+        }),
+    ),
   },
   actions: {
     createRoom: assign({
-      room: () => {
+      room: ({ context }) => {
         // Check dynamically - context.isNativeMode is stale from module init
         if (isNativeCallSupported()) {
+          return null;
+        }
+        // The call window creates its own.
+        if (context.isCallWindowMode) {
           return null;
         }
 
@@ -1214,6 +1306,8 @@ export const roomMachine = setup({
 
     updateParticipants: assign({
       participants: ({ context }) => {
+        // Mirrored from the call window instead (CALL_WINDOW_STATUS).
+        if (context.isCallWindowMode) return context.participants;
         const room = context.room;
         if (!room) return [];
 
@@ -1336,6 +1430,57 @@ export const roomMachine = setup({
       zero: ({ event }) => (event.type === 'CONNECT' ? event.zero : null),
     }),
 
+    // The call window's CONNECT carries what the main window's join produced.
+    storeCallWindowHandoff: assign(({ event, context }) => {
+      if (event.type !== 'CONNECT' || !event.handoff) return {};
+      const { handoff } = event;
+      return {
+        callId: handoff.callId,
+        channelId: handoff.channelId,
+        roomLink: handoff.roomLink,
+        scopeType: handoff.scopeType,
+        conversationId: handoff.conversationId,
+        artifactMessageId: handoff.artifactMessageId,
+        sdlcLink: handoff.sdlcLink,
+        targetUserIds: handoff.targetUserIds,
+        callDisplayName: handoff.callDisplayName,
+        isInitiator: handoff.isInitiator,
+        callUrlOverrides: handoff.callUrlOverrides,
+        viewMode: 'full' as const,
+        externalLobbyUrl: context.externalLobbyUrl,
+      };
+    }),
+
+    mirrorCallWindowStatus: assign(({ event, context }) => {
+      if (event.type !== 'CALL_WINDOW_STATUS' && event.type !== 'ATTACH_CALL_WINDOW') return {};
+      const { status } = event;
+      return {
+        isCallWindowMode: true,
+        callWindowHandoffId: status.handoffId,
+        externalId: status.externalId ?? context.externalId,
+        callId: status.callId ?? context.callId,
+        channelId: status.channelId ?? context.channelId,
+        callType: status.callType ?? context.callType,
+        roomLink: status.roomLink ?? context.roomLink,
+        scopeType: status.scopeType ?? context.scopeType,
+        conversationId: status.conversationId ?? context.conversationId,
+        callStartTime: status.callStartTime ?? context.callStartTime,
+        connectionState:
+          (status.connectionState as ConnectionState | null) ?? context.connectionState,
+        participants: status.participants.map(p => ({ ...p })),
+      };
+    }),
+
+    showCallWindowErrorToast: ({ context, event }) => {
+      if (!context.isCallWindowMode) return;
+      const error = (event as { error?: unknown }).error;
+      if (error instanceof CallWindowClosedError) return;
+      toast.error('Could not open the call window', {
+        description: error instanceof Error ? error.message : 'Please try joining again.',
+        duration: 5000,
+      });
+    },
+
     cleanupRoom: ({ context }) => {
       if (context.room) {
         void context.room.disconnect();
@@ -1389,6 +1534,8 @@ export const roomMachine = setup({
       isBackgroundBlurEnabled: () => false,
       hostControls: () => DEFAULT_HOST_CONTROLS,
       callUrlOverrides: () => null,
+      isCallWindowMode: () => false,
+      callWindowHandoffId: () => null,
     }),
 
     enableLocalTracks: ({ context }) => {
@@ -1526,6 +1673,15 @@ export const roomMachine = setup({
         reactNativeBridge.livekitToggleScreenShare(false);
       }
     },
+    // Open the call window as the join starts, so it boots alongside the token
+    // request rather than after it.
+    prepareCallWindowIfNeeded: ({ context }) => {
+      if (context.isCallWindowMode) prepareCallWindow();
+    },
+    // The join ended before anything was handed over (lobby, error).
+    cancelPreparedCallWindowIfNeeded: ({ context }) => {
+      if (context.isCallWindowMode) cancelPreparedCallWindow();
+    },
     showRequestingAdmissionToast: () => {
       toast.info('Requesting to join', {
         description: 'Waiting for the host to let you in.',
@@ -1595,6 +1751,8 @@ export const roomMachine = setup({
     isBackgroundBlurEnabled: false,
     hostControls: DEFAULT_HOST_CONTROLS,
     callUrlOverrides: null,
+    isCallWindowMode: false,
+    callWindowHandoffId: null,
   },
   id: 'roomMachine',
   on: {
@@ -1627,7 +1785,19 @@ export const roomMachine = setup({
       on: {
         CONNECT: {
           target: 'connecting',
-          actions: ['createRoom', 'storeConnectionParams', 'clearError'],
+          actions: ['storeConnectionParams', 'storeCallWindowHandoff', 'createRoom', 'clearError'],
+        },
+        // The main window (re)loaded while a call runs in the call window.
+        ATTACH_CALL_WINDOW: {
+          target: 'connected',
+          actions: [
+            ({ event }): void => {
+              logRoomMachineEvent(event.status.externalId, 'call_window_attached', {
+                handoffId: event.status.handoffId,
+              });
+            },
+            'mirrorCallWindowStatus',
+          ],
         },
         INITIATE_CALL: {
           target: 'initiating',
@@ -1654,6 +1824,8 @@ export const roomMachine = setup({
             callUrlOverrides: ({ event }) =>
               event.type === 'INITIATE_CALL' ? (event.callUrlOverrides ?? null) : null,
             isInitiator: () => true,
+            isCallWindowMode: () => shouldUseCallWindow(),
+            callWindowHandoffId: () => null,
           }),
         },
         JOIN_CALL: {
@@ -1673,6 +1845,8 @@ export const roomMachine = setup({
               externalLobbyUrl: ({ event }) =>
                 event.type === 'JOIN_CALL' ? (event.externalLobbyUrl ?? null) : null,
               isInitiator: () => false,
+              isCallWindowMode: () => shouldUseCallWindow(),
+              callWindowHandoffId: () => null,
             }),
           ],
         },
@@ -1680,6 +1854,7 @@ export const roomMachine = setup({
     },
     initiating: {
       entry: [
+        'prepareCallWindowIfNeeded',
         // Send CALL_INITIATING to native app before API call (only if native calls are enabled)
         ({ context }): void => {
           if (isNativeCallSupported() && reactNativeBridge.isAvailable()) {
@@ -1755,7 +1930,7 @@ export const roomMachine = setup({
           {
             guard: ({ event }): boolean => event.output.pending === true,
             target: 'idle',
-            actions: ['showRequestingAdmissionToast'],
+            actions: ['cancelPreparedCallWindowIfNeeded', 'showRequestingAdmissionToast'],
           },
           {
             target: 'connecting',
@@ -1786,6 +1961,7 @@ export const roomMachine = setup({
     },
     joining: {
       entry: [
+        'prepareCallWindowIfNeeded',
         // Send CALL_INITIATING to native app for incoming call overlay (only if native calls are enabled)
         ({ context }): void => {
           logRoomMachineEvent(context.externalId ?? context.callId, 'joining_state_entered', {
@@ -1813,7 +1989,7 @@ export const roomMachine = setup({
           {
             guard: ({ event }): boolean => event.output.pending === true,
             target: 'idle',
-            actions: ['showRequestingAdmissionToast'],
+            actions: ['cancelPreparedCallWindowIfNeeded', 'showRequestingAdmissionToast'],
           },
           {
             target: 'connecting',
@@ -1889,13 +2065,28 @@ export const roomMachine = setup({
           conversationId: context.conversationId,
           callDisplayName: context.callDisplayName,
           scopeType: context.scopeType,
+          callWindowHandoff: context.isCallWindowMode ? buildCallWindowHandoff(context) : null,
         }),
         onDone: {
           target: 'connected',
+          actions: assign({
+            callWindowHandoffId: ({ event, context }) =>
+              (event.output as { callWindowHandoffId?: number } | undefined)
+                ?.callWindowHandoffId ?? context.callWindowHandoffId,
+          }),
         },
         onError: {
           target: 'idle',
           actions: [
+            ({ context, event }): void => {
+              if (!context.isCallWindowMode) return;
+              logger.error(Event.LIVEKIT_ROOM_EVENT, {
+                callId: context.externalId,
+                eventName: 'call_window_connect_failed',
+                error: event.error instanceof Error ? event.error.message : String(event.error),
+              });
+            },
+            'showCallWindowErrorToast',
             'cleanupRoom',
             'clearContext',
             assign({
@@ -1916,6 +2107,10 @@ export const roomMachine = setup({
       states: {
         determineMode: {
           always: [
+            {
+              guard: ({ context }): boolean => context.isCallWindowMode,
+              target: 'windowMode',
+            },
             {
               guard: ({ context }): boolean => context.isNativeMode,
               target: 'nativeMode',
@@ -1939,6 +2134,59 @@ export const roomMachine = setup({
             }),
           },
         },
+        // The call runs in the call window. Media controls are forwarded to it;
+        // anything that needs the call UI brings the window forward instead.
+        windowMode: {
+          entry: [
+            ({ context }): void => {
+              logRoomMachineEvent(
+                context.externalId ?? context.callId,
+                'connected_call_window_mode_entered',
+                { handoffId: context.callWindowHandoffId },
+              );
+            },
+            // The full call view is the call window. Here the call is never
+            // "full", so nothing in this window hides itself to make room.
+            assign({ viewMode: 'mini' as const }),
+          ],
+          invoke: {
+            src: 'callWindowEventListener',
+            input: ({ context }) => ({ handoffId: context.callWindowHandoffId }),
+          },
+          on: {
+            CALL_WINDOW_STATUS: [
+              {
+                guard: ({ event }): boolean => event.status.phase === 'ended',
+                target: '#roomMachine.idle',
+                actions: [
+                  ({ context }): void => {
+                    logRoomMachineEvent(
+                      context.externalId ?? context.callId,
+                      'call_window_ended_transition_to_idle',
+                    );
+                  },
+                  'clearContext',
+                ],
+              },
+              { actions: 'mirrorCallWindowStatus' },
+            ],
+            TOGGLE_MIC: { actions: () => sendCallWindowCommand({ type: 'TOGGLE_MIC' }) },
+            TOGGLE_CAMERA: { actions: () => sendCallWindowCommand({ type: 'TOGGLE_CAMERA' }) },
+            TOGGLE_CALL_CHAT: {
+              actions: (): void => {
+                sendCallWindowCommand({ type: 'TOGGLE_CALL_CHAT' });
+                focusCallWindow();
+              },
+            },
+            // Screen capture needs a gesture in the window that asks for it.
+            TOGGLE_SCREEN_SHARE: { actions: () => focusCallWindow() },
+            TOGGLE_VIEW: { actions: () => focusCallWindow() },
+            TOGGLE_CHAT: { actions: () => focusCallWindow() },
+            // Held keys do not survive a hop between windows.
+            PUSH_TO_TALK_START: {},
+            PUSH_TO_TALK_END: {},
+          },
+        },
         webMode: {
           invoke: {
             src: 'roomEventListener',
@@ -1953,10 +2201,12 @@ export const roomMachine = setup({
         'enableLocalTracks',
         'updateParticipants',
         assign({
-          callStartTime: () => Date.now(),
+          callStartTime: ({ context }) =>
+            context.isCallWindowMode && context.callStartTime ? context.callStartTime : Date.now(),
         }),
-        // Play sound when successfully joined the call
-        (): void => {
+        // Play sound when successfully joined the call (the call window plays its own)
+        ({ context }): void => {
+          if (context.isCallWindowMode) return;
           playAudio(AUDIO_PATHS.CALL_JOIN);
         },
       ],
@@ -2538,8 +2788,9 @@ export const roomMachine = setup({
         ({ context }): void => {
           logRoomMachineEvent(context.externalId ?? context.callId, 'disconnecting_state_entered');
         },
-        // Play sound when exiting the call
-        (): void => {
+        // Play sound when exiting the call (the call window plays its own)
+        ({ context }): void => {
+          if (context.isCallWindowMode) return;
           playAudio(AUDIO_PATHS.CALL_EXIT);
         },
       ],
@@ -2551,6 +2802,8 @@ export const roomMachine = setup({
           zero: context.zero,
           isNativeMode: isNativeCallSupported(), // Check dynamically - context.isNativeMode is stale from module init
           endForAll: event.type === 'DISCONNECT' ? (event.endForAll ?? false) : false,
+          isCallWindowMode: context.isCallWindowMode,
+          callWindowHandoffId: context.callWindowHandoffId,
         }),
         onDone: {
           target: 'idle',
@@ -2584,6 +2837,8 @@ export const roomMachine = setup({
     },
     failed: {
       entry: [
+        // Runs before `always` clears the context, so the mode is still known.
+        'cancelPreparedCallWindowIfNeeded',
         // Notify native app of failure so it can show error and reset UI
         ({ context }): void => {
           if (detectReactNativeWebView() && reactNativeBridge.isAvailable()) {

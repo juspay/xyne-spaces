@@ -78,6 +78,10 @@ function isRecordingInterruptible(): boolean {
 
 function isCallInterruptible(): boolean {
   const snapshot = roomActor.getSnapshot();
+  // A call in the call window survives this window reloading or switching
+  // workspace (its own requests carry its workspace), so there is nothing to
+  // warn about or tear down.
+  if (snapshot.context.isCallWindowMode) return false;
   return (
     snapshot.matches('initiating') ||
     snapshot.matches('joining') ||

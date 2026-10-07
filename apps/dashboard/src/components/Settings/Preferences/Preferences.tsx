@@ -58,6 +58,7 @@ import { logger } from '../../../utils/logger';
 import { MeetingDetectionToggle } from '../MeetingDetectionToggle';
 import { MenuBarIconToggle } from '../MenuBarIconToggle';
 import { RecordingPillToggle } from '../RecordingPillToggle';
+import { CallWindowToggle } from '../CallWindowToggle';
 import { ClawOverlayToggle } from '../ClawOverlayToggle';
 import { DailyBriefToggle } from '../DailyBriefToggle';
 import { IntentSuggestionsToggle } from '../IntentSuggestionsToggle';
@@ -670,6 +671,8 @@ const CallsSection: FC<{ state: PreferencesState }> = ({ state }) => {
           onCheckedChange={checked => state.setCallsVersion(checked ? 'v2' : 'v1')}
         />
       </div>
+
+      <CallWindowToggle />
 
       <MenuBarIconToggle />
 

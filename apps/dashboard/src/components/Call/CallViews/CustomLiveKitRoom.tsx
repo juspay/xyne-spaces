@@ -37,6 +37,7 @@ import { isParticipantScreenShareEnabled } from '../../../utils/livekitScreenSha
 import { logger, Logger } from '../../../utils/logger';
 import { CallWhiteboardSync } from '../CallWhiteboard';
 import { callService } from '../../../services/Call/callService';
+import { isCallWindowRoute } from '../../../utils/callWindow';
 import {
   createCallWhiteboardPngBlobs,
   getCallWhiteboardState,
@@ -128,6 +129,8 @@ export function CustomLiveKitRoom({
           localParticipant as NonNullable<typeof room>['localParticipant'],
         )
     : false;
+
+  const isInCallWindow = isCallWindowRoute();
 
   // Determine simple machine state string for child components
   // Handle nested states like { connected: 'nativeMode' }
@@ -507,8 +510,9 @@ export function CustomLiveKitRoom({
     return <></>;
   }
 
-  // Route to appropriate view based on viewMode
-  if (machineViewMode === 'mini') {
+  // Route to appropriate view based on viewMode. The desktop call window is
+  // the whole call, always full size; the OS window controls minimize it.
+  if (machineViewMode === 'mini' && !isInCallWindow) {
     // Mobile call UI is in AppRoot; keep whiteboard sync alive. Desktop shows mini view.
     if (isMobile) {
       return <CallWhiteboardSync room={room} />;
@@ -633,6 +637,7 @@ export function CustomLiveKitRoom({
         onToggleScreenShare={toggleScreenShare}
         onDisconnect={handleDisconnectClick}
         onMinimize={() => roomActor.send({ type: 'TOGGLE_VIEW' })}
+        hideMinimize={isInCallWindow}
         onToggleThread={handleToggleThread}
         onRequestControl={handleRequestControl}
         requestedAiController={isAiControlRequested}

@@ -1,6 +1,7 @@
 import { isElectronApp } from './electronApp';
 import { detectReactNativeWebView, reactNativeBridge } from './reactNativeBridge';
 import { browserPanelActor } from '../machines/browserPanelMachine';
+import { isCallWindowRoute } from './callWindow';
 import { logger, Event } from './logger';
 
 const LINK_OPEN_EXTERNAL_KEY = 'xyne:link-open-external-default';
@@ -89,7 +90,9 @@ const openInApp = (url: string): void => {
   // behind it, so sending to it would drop the link on the floor. window.open
   // reaches Electron's window-open handler on the host webContents, which
   // routes to the real panel and applies the user's open-externally setting.
-  if (isElectronApp() && window.parent === window) {
+  // The call window has no panel either; Electron forwards its window.open to
+  // the main window's.
+  if (isElectronApp() && window.parent === window && !isCallWindowRoute()) {
     const { browserPanelState } = browserPanelActor.getSnapshot().context;
     if (browserPanelState === 'open') {
       browserPanelActor.send({ type: 'OPEN_URLS', urls: [url] });
