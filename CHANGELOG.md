@@ -1,3 +1,10 @@
+## [1.465.6-release-20261007.1](https://github.com/juspay/xyne-spaces/compare/v1.465.5...v1.465.6-release-20261007.1) (2026-10-07)
+
+
+### Bug Fixes
+
+* add public schema to invitations org approval migration ([#2734](https://github.com/juspay/xyne-spaces/issues/2734)) ([b7bdd9f](https://github.com/juspay/xyne-spaces/commit/b7bdd9f7b5c228b86ae61cadfdf2d67585597c51))
+
 ## [1.465.5](https://github.com/juspay/xyne-spaces/compare/v1.465.4...v1.465.5) (2026-10-06)
 
 
