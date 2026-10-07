@@ -1,3 +1,10 @@
+## [1.474.1](https://github.com/juspay/xyne-spaces/compare/v1.474.0...v1.474.1) (2026-10-07)
+
+
+### Bug Fixes
+
+* rank agent picker search results by name match ([#2761](https://github.com/juspay/xyne-spaces/issues/2761)) ([6b8e942](https://github.com/juspay/xyne-spaces/commit/6b8e942f3d3f51b4a152a002c3a16641e0ab3326))
+
 ## [1.474.0](https://github.com/juspay/xyne-spaces/compare/v1.473.0...v1.474.0) (2026-10-07)
 
 
