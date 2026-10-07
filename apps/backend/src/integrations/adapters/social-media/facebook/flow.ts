@@ -6,7 +6,11 @@ import { decrypt } from '@/services/encryptionService';
 import { logger } from '@/utils/logger';
 import { verifyMetaWebhookSubscription } from '../shared/metaWebhookVerification';
 import { FACEBOOK_TEXTLESS_COMMENT, FACEBOOK_UNKNOWN_AUTHOR } from './constants';
-import { facebookGraphClient, isFacebookTokenRejected } from './facebookGraphClient';
+import {
+  facebookGraphClient,
+  isFacebookRateLimited,
+  isFacebookTokenRejected,
+} from './facebookGraphClient';
 import { fetchFacebookHistory } from './historyFetcher';
 import { commentExternalId, dmExternalId } from './transformer';
 import type {
@@ -70,6 +74,9 @@ export async function disconnectSourceWithDeadToken(sourceId: string): Promise<v
 }
 
 export class FacebookFlow extends BaseFlow {
+  // Per source: whether the fetch that just ran may move lastSyncCursor (read by resolveNextCursor).
+  private advanceCursor = new Map<string, boolean>();
+
   async preprocess(
     rawPayload: unknown,
     source?: ExternalSource,
@@ -104,10 +111,15 @@ export class FacebookFlow extends BaseFlow {
         (isCatchUp
           ? catchUpRange(source, now)
           : { startDate: new Date(now.getTime() - DEFAULT_FETCH_WINDOW_MS), endDate: now });
-      return this.newHistoryItems(
+      if (isCatchUp) await this.ensureSubscribed(source.id, creds);
+      const { items, complete } = await this.newHistoryItems(
         source.id,
         fetchFacebookHistory(creds, range, { recentPostsOnly: isCatchUp }),
       );
+      // Only a catch-up that read its whole window may move the cursor. A backfill of an old
+      // range says nothing about recent activity, and a cut-short read must be repeated.
+      this.advanceCursor.set(source.id, isCatchUp && complete);
+      return items;
     }
 
     const messages: FacebookWebhookMessaging[] = [];
@@ -231,11 +243,33 @@ export class FacebookFlow extends BaseFlow {
     return [...messages, ...comments];
   }
 
+  /** Null means "leave the cursor where it is"; see where advanceCursor is set. */
+  resolveNextCursor(source: ExternalSource, syncStartedAt: Date): string | null {
+    const advance = this.advanceCursor.get(source.id);
+    this.advanceCursor.delete(source.id);
+    return advance ? syncStartedAt.toISOString() : null;
+  }
+
+  /**
+   * Re-asserts the Page's webhook subscription on each catch-up (the call is idempotent). If
+   * Meta ever drops it, the desk would otherwise fall back to hourly polling without anyone
+   * noticing.
+   */
+  private async ensureSubscribed(sourceId: string, creds: FacebookCredentials): Promise<void> {
+    try {
+      await facebookGraphClient.subscribePage(creds.pageAccessToken, creds.pageId);
+    } catch (error) {
+      if (!isFacebookTokenRejected(error)) return; // already logged by the client; fetch anyway
+      await disconnectSourceWithDeadToken(sourceId);
+      throw error;
+    }
+  }
+
   /** Reads the fetched history a page of Meta results at a time, keeping only what is new. */
   private async newHistoryItems(
     sourceId: string,
     batches: AsyncGenerator<FacebookItem[]>,
-  ): Promise<FacebookItem[]> {
+  ): Promise<{ items: FacebookItem[]; complete: boolean }> {
     const items: FacebookItem[] = [];
     try {
       for await (const batch of batches) items.push(...(await this.withoutStored(sourceId, batch)));
@@ -243,9 +277,15 @@ export class FacebookFlow extends BaseFlow {
       // Every fetch (manual or hourly) reads with the Page token, so this is where a dead one
       // shows up. The fetch still fails; the Page is left ready to reconnect.
       if (isFacebookTokenRejected(error)) await disconnectSourceWithDeadToken(sourceId);
+      // Throttled part-way through: keep what was read so far so a large fetch still makes
+      // progress, and report the read as incomplete.
+      if (isFacebookRateLimited(error)) {
+        logger.warn(`${TAG} Rate-limited by Meta mid-fetch — ingesting the ${items.length} item(s) read so far`, { sourceId });
+        return { items, complete: false };
+      }
       throw error;
     }
-    return items;
+    return { items, complete: true };
   }
 
   /**

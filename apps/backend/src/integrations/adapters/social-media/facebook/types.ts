@@ -19,6 +19,8 @@ export interface FacebookWebhookMessaging {
   };
   /** Set by flow.ts for message_edit events — tells the transformer to update the existing message body. */
   isContentUpdate?: boolean;
+  /** Set by historyFetcher.ts — a fetched item (manual fetch or hourly catch-up), not a live webhook. */
+  fromFetch?: boolean;
 }
 
 // `feed` webhook field, item=comment.
@@ -60,6 +62,7 @@ export interface FacebookWebhookComment {
   rawCommentId?: string; // actual comment id — unique externalId per reply
   postId?: string;
   permalink?: string; // opens the comment (or the post) on Facebook
+  fromFetch?: boolean; // see FacebookWebhookMessaging.fromFetch
   timestamp: number; // Unix ms
 }
 

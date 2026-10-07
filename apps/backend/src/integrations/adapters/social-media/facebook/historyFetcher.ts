@@ -11,6 +11,20 @@ const TAG = '[FacebookHistory]';
 
 type HistoryItem = FacebookWebhookMessaging | FacebookWebhookComment;
 
+// Fetched history is written to the desk at no more than 20 items a second. The pacer is shared
+// by everything in this process, so a manual fetch and the hourly catch-up running together
+// still stay under the cap. Live webhooks are not paced.
+const HISTORY_WRITE_INTERVAL_MS = 1000 / 20;
+let nextWriteAt = 0;
+
+/** Waits until the next write slot. The transformer calls this once per fetched item. */
+export async function paceHistoryWrite(): Promise<void> {
+  const now = Date.now();
+  const wait = Math.max(0, nextWriteAt - now);
+  nextWriteAt = Math.max(now, nextWriteAt) + HISTORY_WRITE_INTERVAL_MS;
+  if (wait > 0) await new Promise((resolve) => setTimeout(resolve, wait));
+}
+
 /**
  * Manual fetch and hourly catch-up: reads the Page's Messenger conversations, post comments and
  * tagged posts for a time range, in the same shape flow.ts produces from webhooks. Yields one
@@ -45,6 +59,7 @@ export async function* fetchFacebookHistory(
         const timestamp = Date.parse(message.created_time);
         if (!message.from?.id || message.from.id === pageId || !inRange(timestamp)) continue;
         items.push({
+          fromFetch: true,
           sender: { id: message.from.id, name: message.from.name },
           recipient: { id: pageId },
           timestamp,
@@ -66,13 +81,19 @@ export async function* fetchFacebookHistory(
     yield oldestFirst(items);
   }
 
-  for await (const posts of facebookGraphClient.postPages(pageAccessToken, pageId, recentPostsOnly)) {
+  for await (const posts of facebookGraphClient.postPages(
+    pageAccessToken,
+    pageId,
+    range.startDate,
+    recentPostsOnly,
+  )) {
     const items: HistoryItem[] = [];
     for (const post of posts) {
       for (const comment of post.comments) {
         const timestamp = Date.parse(comment.created_time);
         if (comment.from?.id === pageId || !inRange(timestamp)) continue;
         items.push({
+          fromFetch: true,
           type: 'comment',
           senderName: comment.from?.name ?? comment.from?.id ?? FACEBOOK_UNKNOWN_AUTHOR,
           senderId: comment.from?.id ?? '',
@@ -97,6 +118,7 @@ export async function* fetchFacebookHistory(
     const timestamp = Date.parse(post.created_time);
     if (post.from?.id === pageId || !inRange(timestamp)) continue;
     mentions.push({
+      fromFetch: true,
       type: 'mention',
       senderName: post.from?.name ?? FACEBOOK_UNKNOWN_AUTHOR,
       senderId: post.from?.id ?? '',

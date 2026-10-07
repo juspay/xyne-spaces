@@ -7,7 +7,11 @@ import {
 import type { NormalizedData } from '@/integrations/core/types';
 import { SOCIAL_MEDIA_INTERACTION_TYPES } from '@/integrations/social-media/constants';
 import { decrypt } from '@/services/encryptionService';
-import { facebookGraphClient, isFacebookTokenRejected } from './facebookGraphClient';
+import {
+  facebookGraphClient,
+  isFacebookTagRejected,
+  isFacebookTokenRejected,
+} from './facebookGraphClient';
 import type { FacebookCredentials } from './types';
 import { disconnectSourceWithDeadToken } from './flow';
 import { FACEBOOK_HUMAN_AGENT_WINDOW_MS, FACEBOOK_MAX_REPLY_LENGTH } from './constants';
@@ -109,7 +113,7 @@ export class FacebookReplySender extends BaseInteractionReplySender {
       .catch(onTokenRejected(source.id))
       .catch((error: unknown) => {
         // Meta refuses the tag when the app does not have the Human Agent feature approved.
-        if (humanAgent && !(error instanceof InteractionReplyValidationError)) {
+        if (humanAgent && isFacebookTagRejected(error)) {
           const metaMessage = (error as { response?: { data?: { error?: { message?: string } } } })
             ?.response?.data?.error?.message;
           throw new InteractionReplyValidationError(

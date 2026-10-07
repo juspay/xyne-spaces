@@ -9,6 +9,7 @@ import {
 } from './constants';
 import { metaDmBody, toDownloadableMetaAttachments } from '../shared/metaDmAttachments';
 import { resolveMetaDmThread } from '../shared/metaDmThread';
+import { paceHistoryWrite } from './historyFetcher';
 import type { FacebookWebhookComment, FacebookWebhookMessaging } from './types';
 
 // The ids below are also used by the manual fetch (flow.ts) to skip items already stored.
@@ -33,6 +34,9 @@ export class FacebookTransformer extends BaseTransformer<unknown, NormalizedData
     payload: unknown,
     source?: ExternalSource,
   ): Promise<ParseResult<NormalizedData[]>> {
+    // Core writes each item right after this returns, so pacing here caps fetched writes.
+    if ((payload as { fromFetch?: boolean } | undefined)?.fromFetch) await paceHistoryWrite();
+
     const maybeComment = payload as FacebookWebhookComment;
     if (maybeComment?.type === 'mention' || maybeComment?.type === 'comment') {
       return this.transformComment(maybeComment, source);

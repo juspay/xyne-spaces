@@ -98,12 +98,24 @@ function bearer(accessToken: string) {
 
 const senderNameCache = new SenderNameCache();
 
+const graphErrorCode = (error: unknown): number | undefined =>
+  (error as { response?: { data?: { error?: { code?: number } } } })?.response?.data?.error?.code;
+
 // Page tokens have no expiry date, but Meta invalidates them when the admin who connected the
 // Page changes their password, loses their Page role, or removes the app (Graph error 190).
 export function isFacebookTokenRejected(error: unknown): boolean {
-  const code = (error as { response?: { data?: { error?: { code?: number } } } })?.response?.data
-    ?.error?.code;
-  return code === 190;
+  return graphErrorCode(error) === 190;
+}
+
+// Meta's throttling codes: app (4), user (17), Page (32) and custom (613) rate limits.
+export function isFacebookRateLimited(error: unknown): boolean {
+  return [4, 17, 32, 613].includes(graphErrorCode(error) ?? -1);
+}
+
+// Codes Meta returns when a tagged send is refused: outside the allowed window (10) or the
+// app lacks the permission/feature (200).
+export function isFacebookTagRejected(error: unknown): boolean {
+  return [10, 200].includes(graphErrorCode(error) ?? -1);
 }
 
 export const facebookGraphClient = {
@@ -253,19 +265,21 @@ export const facebookGraphClient = {
     }
   },
 
-  // The Page's posts, one page (25) at a time, with every comment and reply on them
-  // (filter=stream includes replies). A comment's date is unrelated to its post's, so posts are
-  // not cut off by date — only by the page cap, or to the newest 25 when `recentOnly` is set.
+  // The Page's posts, one page (25) at a time, with the comments and replies made on them since
+  // `since` (filter=stream includes replies; newest first, so paging stops at the cutoff).
+  // A comment's date is unrelated to its post's, so posts are not cut off by date — only by
+  // the page cap, or to the newest 25 when `recentOnly` is set.
   async *postPages(
     pageAccessToken: string,
     pageId: string,
+    since: Date,
     recentOnly = false,
   ): AsyncGenerator<Array<{ id: string; comments: FacebookHistoryComment[] }>> {
     type Post = { id: string; comments?: Paged<FacebookHistoryComment> };
     const first = await axios.get<Paged<Post>>(`${FB_BASE_URL}/${pageId}/feed`, {
       params: {
         fields:
-          'id,comments.filter(stream).limit(100){id,created_time,from,message,parent{id},permalink_url}',
+          'id,comments.filter(stream).order(reverse_chronological).limit(100){id,created_time,from,message,parent{id},permalink_url}',
         limit: '25',
       },
       ...bearer(pageAccessToken),
@@ -275,7 +289,11 @@ export const facebookGraphClient = {
       for (const post of page) {
         posts.push({
           id: post.id,
-          comments: await collectPages(pageAccessToken, post.comments, () => false),
+          comments: await collectPages(
+            pageAccessToken,
+            post.comments,
+            olderThan<FacebookHistoryComment>(since, (comment) => comment.created_time),
+          ),
         });
       }
       yield posts;
