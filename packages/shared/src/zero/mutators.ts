@@ -143,6 +143,9 @@ async function getCanvasThreadCommentCount(
   return comments.filter(comment => comment.deletedAt == null).length;
 }
 
+/** Max length of a collection/folder remark (stored in collections.description). */
+const COLLECTION_REMARK_MAX_LENGTH = 1000;
+
 const COLLECTION_ROLE_RANK: Record<CollectionRole, number> = {
   [CollectionRole.VIEWER]: 1,
   [CollectionRole.EDITOR]: 2,
@@ -12978,9 +12981,10 @@ export const mutators = defineMutators({
         id: z.string(),
         parentId: z.string(),
         name: z.string(),
+        description: z.string().max(COLLECTION_REMARK_MAX_LENGTH).nullable().optional(),
         timestamp: z.number(),
       }),
-      async ({ tx, ctx, args: { id, parentId, name, timestamp } }) => {
+      async ({ tx, ctx, args: { id, parentId, name, description, timestamp } }) => {
         const parentCollection = await tx.run(zql.collections.where('id', parentId).one());
         if (!parentCollection) {
           throw new Error('Collection not found');
@@ -13005,8 +13009,48 @@ export const mutators = defineMutators({
           scopeType: parentCollection.scopeType,
           scopeId: parentCollection.scopeId,
           isPrivate: parentCollection.isPrivate,
+          ...(description?.trim() ? { description: description.trim() } : {}),
           rootCollectionId: parentCollection.rootCollectionId ?? parentId,
           createdAt: timestamp,
+          updatedAt: timestamp,
+        });
+      },
+    ),
+
+    updateRemark: defineMutator(
+      z.object({
+        id: z.string(),
+        remark: z.string().max(COLLECTION_REMARK_MAX_LENGTH).nullable(),
+        timestamp: z.number(),
+      }),
+      async ({ tx, ctx, args: { id, remark, timestamp } }) => {
+        // Remarks live in `collections.description` and apply to BOTH root
+        // collections and sub-folders (both are Collection rows). Permissions
+        // only exist on the root collection, so resolve the role there —
+        // updateCollection resolves against the row itself, which would wrongly
+        // reject editors on sub-folders.
+        const target = await tx.run(zql.collections.where('id', id).where('deletedAt', 'IS', null).one());
+        if (!target) {
+          throw new Error('Collection or folder not found');
+        }
+        const rootCollectionId = target.rootCollectionId ?? target.id;
+        const root =
+          rootCollectionId === target.id
+            ? target
+            : await tx.run(zql.collections.where('id', rootCollectionId).one());
+        const isRootOwner = root?.ownerId === ctx.userID;
+        if (!isRootOwner) {
+          const permissionRole = await resolveCollectionPermissionRole(tx, rootCollectionId, ctx.userID);
+          if (!permissionRole || permissionRole === CollectionRole.VIEWER) {
+            throw new Error('Remark update failed: requires EDITOR or OWNER permission');
+          }
+        }
+
+        const trimmed = remark?.trim() ?? '';
+        await tx.mutate.collections.update({
+          id,
+          // Empty / whitespace-only remark clears the column.
+          description: trimmed === '' ? null : trimmed,
           updatedAt: timestamp,
         });
       },

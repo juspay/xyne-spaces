@@ -4,7 +4,7 @@ import { FileCardPreviewV2 } from './FileCardPreviewV2';
 import { IngestStatusV2 } from './IngestStatusV2';
 import { CollectionStatusBadgeV2 } from './CollectionStatusBadgeV2';
 import { CollectionChild } from '../../../services/Knowledge/collectionService';
-import { Folder, Pencil, Share2, Trash2 } from 'lucide-react';
+import { Folder, MessageSquareText, Pencil, Share2, Trash2 } from 'lucide-react';
 import { useInlineEdit } from './useInlineEdit';
 import { XyneAIStar } from '../../icons/xyne-ai';
 import { FileFailedBadgeV2 } from './FileFailedBadgeV2';
@@ -229,6 +229,8 @@ interface FolderCardV2Props {
   caption?: string;
   onDelete?: (() => void) | undefined;
   onRename?: (() => void) | undefined;
+  /** Opens the remark editor for this collection / folder. */
+  onEditRemark?: (() => void) | undefined;
   /** Opens the share dialog for this entry — the full access-management
    *  dialog at the KB root (a collection card), or the copy-link-only
    *  dialog for a regular subfolder. See KnowledgeBaseV2Screen's onShare. */
@@ -251,6 +253,7 @@ export const FolderCardV2: React.FC<FolderCardV2Props> = ({
   caption,
   onDelete,
   onRename,
+  onEditRemark,
   onShare,
   onAskAI,
   onOpenStatus,
@@ -320,9 +323,18 @@ export const FolderCardV2: React.FC<FolderCardV2Props> = ({
           >
             {caption ?? 'Folder'}
           </span>
+          {folder.description ? (
+            <span
+              className='line-clamp-2 whitespace-pre-line break-words text-[11.5px] text-muted-foreground/90'
+              title={folder.description}
+              data-testid='kb-folder-remark'
+            >
+              {folder.description}
+            </span>
+          ) : null}
         </span>
       </div>
-      {!isRenaming && (onAskAI || onShare || onRename || onDelete) ? (
+      {!isRenaming && (onAskAI || onShare || onRename || onEditRemark || onDelete) ? (
         <div className='absolute right-2 top-2 z-10 flex gap-1'>
           {onAskAI ? (
             <HoverAction
@@ -358,6 +370,18 @@ export const FolderCardV2: React.FC<FolderCardV2Props> = ({
               }}
             >
               <Pencil className='h-3.5 w-3.5' strokeWidth={1.75} />
+            </HoverAction>
+          ) : null}
+          {onEditRemark ? (
+            <HoverAction
+              label={`Edit remark for ${folder.name}`}
+              trackName='edit-remark-folder-card'
+              onClick={ev => {
+                ev.stopPropagation();
+                onEditRemark();
+              }}
+            >
+              <MessageSquareText className='h-3.5 w-3.5' strokeWidth={1.75} />
             </HoverAction>
           ) : null}
           {onDelete ? (

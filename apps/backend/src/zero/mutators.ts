@@ -1,4 +1,9 @@
 import { ReadonlyJSONValue, Transaction, defineMutator, defineMutators, ApplicationError } from '@rocicorp/zero';
+import {
+  COLLECTION_REMARK_MAX_LENGTH,
+  canEditCollectionRemark,
+  normalizeCollectionRemark,
+} from './collectionRemark';
 import { AutomationStatus } from '../automations/types/status';
 import {
   ChannelRole,
@@ -487,6 +492,8 @@ async function reopenClosedDmParticipants(
     });
   }
 }
+
+/** Max length of a collection/folder remark (stored in collections.description). */
 
 const COLLECTION_ROLE_RANK: Record<CollectionRole, number> = {
   [CollectionRole.VIEWER]: 1,
@@ -17265,9 +17272,10 @@ export function createMutators(
           id: z.string(),
           parentId: z.string(),
           name: z.string(),
+          description: z.string().max(COLLECTION_REMARK_MAX_LENGTH).nullable().optional(),
           timestamp: z.number(),
         }),
-        async ({ tx, args: { id, parentId, name, timestamp } }) => {
+        async ({ tx, args: { id, parentId, name, description, timestamp } }) => {
           const parentCollection = await tx.run(zql.collections.where('id', parentId).one());
           if (!parentCollection) {
             throw new Error('Collection not found');
@@ -17292,8 +17300,47 @@ export function createMutators(
             scopeType: parentCollection.scopeType,
             scopeId: parentCollection.scopeId,
             isPrivate: parentCollection.isPrivate,
+            description: normalizeCollectionRemark(description),
             rootCollectionId: parentCollection.rootCollectionId ?? parentId,
             createdAt: timestamp,
+            updatedAt: timestamp,
+          });
+        },
+      ),
+
+      updateRemark: defineMutator(
+        z.object({
+          id: z.string(),
+          remark: z.string().max(COLLECTION_REMARK_MAX_LENGTH).nullable(),
+          timestamp: z.number(),
+        }),
+        async ({ tx, args: { id, remark, timestamp } }) => {
+          // Remarks live in `collections.description` and apply to BOTH root
+          // collections and sub-folders (both are Collection rows). Permissions
+          // only exist on the root collection, so resolve the role there —
+          // updateCollection resolves against the row itself, which would wrongly
+          // reject editors on sub-folders.
+          const target = await tx.run(zql.collections.where('id', id).where('deletedAt', 'IS', null).one());
+          if (!target) {
+            throw new Error('Collection or folder not found');
+          }
+          const rootCollectionId = target.rootCollectionId ?? target.id;
+          const root =
+            rootCollectionId === target.id
+              ? target
+              : await tx.run(zql.collections.where('id', rootCollectionId).one());
+          const isRootOwner = root?.ownerId === authData.sub;
+          const permissionRole = isRootOwner
+            ? null
+            : await resolveCollectionPermissionRole(tx, rootCollectionId, authData.sub);
+          if (!canEditCollectionRemark({ isRootOwner, role: permissionRole })) {
+            throw new Error('Remark update failed: requires EDITOR or OWNER permission');
+          }
+
+          await tx.mutate.collections.update({
+            id,
+            // Empty / whitespace-only remark clears the column.
+            description: normalizeCollectionRemark(remark),
             updatedAt: timestamp,
           });
         },
