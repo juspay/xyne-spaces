@@ -214,7 +214,15 @@ async function install(name: string, version: string | undefined, dir: string): 
 
     publish(tmp, dir, name);
   } finally {
-    await rm(tmp, { recursive: true, force: true }).catch(() => {});
+    // Cleanup failure must not fail the install, but a persistent EBUSY/EPERM
+    // would silently leak install-* dirs under TMP_ROOT — so surface it.
+    await rm(tmp, { recursive: true, force: true }).catch((err: unknown) => {
+      log.warn(
+        `[mcp/provision] failed to clean up temp dir ${tmp} — ${
+          err instanceof Error ? err.message : String(err)
+        }`,
+      );
+    });
   }
 }
 
@@ -236,7 +244,12 @@ async function ensureProvisioned(
   }
 
   const job = install(name, version, dir);
-  inflight.set(key, job.then(() => pkgDir));
+  const shared = job.then(() => pkgDir);
+  // Waiters re-await `shared` and handle its rejection themselves; without this
+  // no-op handler a failed install with no concurrent waiter becomes an
+  // unhandledRejection (logged as an error by both apps' process handlers).
+  shared.catch(() => {});
+  inflight.set(key, shared);
   try {
     await job;
   } finally {
