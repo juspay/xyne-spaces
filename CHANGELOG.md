@@ -1,3 +1,10 @@
+## [1.465.6](https://github.com/juspay/xyne-spaces/compare/v1.465.5...v1.465.6) (2026-10-07)
+
+
+### Bug Fixes
+
+* incoming call card centred from the first frame, floats over other apps on desktop, and respects paused notifications ([#2671](https://github.com/juspay/xyne-spaces/issues/2671)) ([f609f25](https://github.com/juspay/xyne-spaces/commit/f609f25cc951ae02d9d78ac53c48079c5afb60e6))
+
 ## [1.465.5](https://github.com/juspay/xyne-spaces/compare/v1.465.4...v1.465.5) (2026-10-06)
 
 
