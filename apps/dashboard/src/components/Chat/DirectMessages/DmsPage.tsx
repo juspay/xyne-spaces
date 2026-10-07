@@ -25,6 +25,7 @@ import { useAuthContextValues } from '../../../hooks/useAuth';
 import { useWalkthrough } from '../../../hooks/useWalkthrough';
 import { DirectMessagesIcon } from '../../icons';
 import AppNavigator from '../../AppNavigator/AppNavigator';
+import XyneHomeLogo from '../../XyneHomeLogo/XyneHomeLogo';
 import {
   ResizableGroup,
   Panel,
@@ -342,7 +343,7 @@ const DmsPage = (): ReactElement => {
           {/* Top Row: Logo + Avatar */}
           <div className='flex items-center justify-between mb-4'>
             <div className='flex items-center gap-1'>
-              <img src='/svgs/xyne.svg' alt='Xyne Logo' className='h-5 w-auto' />
+              <XyneHomeLogo source='dms_mobile' imgClassName='h-5 w-auto' />
             </div>
             <div className='flex items-center gap-3'>
               <button

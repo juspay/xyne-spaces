@@ -101,6 +101,7 @@ import {
 } from '../../BarCustomize';
 import ChannelCommandMenu from './ChannelCommandMenu';
 import AppNavigator from '../../AppNavigator/AppNavigator';
+import XyneHomeLogo from '../../XyneHomeLogo/XyneHomeLogo';
 import { useThreadSidebarState } from '../../../hooks/useUnreadThreadsCount';
 import { useOverdueRemindersCount } from '../../../hooks/useOverdueRemindersCount';
 import { useRecapUnreadCount, usePrefetchRecap } from '../../../hooks/useRecapData';
@@ -730,7 +731,7 @@ const ChatDirectory = ({
         <div className='block sm:hidden -mx-2 px-2 bg-background/70 backdrop-blur-md rounded-b-3xl border-b border-black/10'>
           <div className='px-2 pt-2 pb-3 flex items-center justify-between'>
             <div className='flex items-center gap-2'>
-              <img src='/svgs/xyne.svg' alt='Xyne Logo' className='h-3 w-auto' />
+              <XyneHomeLogo source='chat_directory_mobile' imgClassName='h-3 w-auto' />
             </div>
             <div className='flex items-center gap-2'>
               <button
