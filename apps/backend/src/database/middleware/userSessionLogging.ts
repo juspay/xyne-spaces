@@ -23,10 +23,17 @@ function maskSensitiveFields(data: LoggableData): LoggableData {
     return data.map((item) => maskSensitiveFields(item) as Record<string, unknown>);
   }
 
-  const masked = { ...data };
+  // The masked value is logged under `<field>Preview` (e.g. `fcmTokenPreview`)
+  // and the raw key is dropped, so the shared log shredder keeps the preview
+  // (`ios:eN****`) instead of replacing it with [REDACTED].
+  const masked: Record<string, unknown> = { ...data };
   for (const field of SENSITIVE_FIELDS) {
-    if (field in masked && masked[field] !== undefined) {
-      masked[field] = maskToken(masked[field] as string | null | undefined);
+    if (field in masked) {
+      const raw = masked[field];
+      delete masked[field];
+      if (raw !== undefined) {
+        masked[`${field}Preview`] = maskToken(raw as string | null | undefined);
+      }
     }
   }
   return masked;

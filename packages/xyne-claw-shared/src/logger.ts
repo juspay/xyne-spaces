@@ -1,7 +1,7 @@
 import winston from "winston";
 import { AsyncLocalStorage } from "node:async_hooks";
 import crypto from "node:crypto";
-import { shredRecordInPlace } from "@xyne/logger";
+import { describeRedactAllowList, shredRecordInPlace } from "@xyne/logger";
 
 /**
  * Structured JSON logger shared across the claw backend services
@@ -123,6 +123,13 @@ export const logger = winston.createLogger({
     service: process.env.SERVICE_NAME || "xyne-claw",
   },
 });
+
+// Report the resolved LOG_REDACT_ALLOW_PATHS once per process (only when set),
+// so SRE can confirm in Grafana what the deployed value turned into.
+const redactAllowList = describeRedactAllowList();
+if (redactAllowList) {
+  logger.info("LOG_REDACT_ALLOW_PATHS active", { module: "logger", ...redactAllowList });
+}
 
 export type Logger = winston.Logger;
 

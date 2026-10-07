@@ -2,6 +2,10 @@
 // Redacts secret VALUES only (field names kept => frozen Grafana contract intact)
 // via two detectors: by KEY (secret-named field) and by VALUE (secret-shaped
 // string). Cycle-safe, size-capped, control-char scrubbed, and never throws.
+// Per-service exceptions to the KEY detector come from LOG_REDACT_ALLOW_PATHS
+// (see policy.ts); nothing is allow-listed in code.
+
+import { allowedPathsFor } from "./policy.js";
 
 export interface ShredOptions {
   /**
@@ -163,7 +167,24 @@ function serializeError(err: Error, max: number): Record<string, LogValueOut> {
 
 type LogValueOut = string | number | boolean | null | LogValueOut[] | { [k: string]: LogValueOut };
 
-function shredNode(value: unknown, seen: WeakSet<object>, depth: number, opts: Required<ShredOptions>): LogValueOut {
+/** Dotted path of `key` under `parent` (array indices are not part of the path). */
+function childPath(parent: string, key: string): string {
+  return parent === "" ? key : `${parent}.${key}`;
+}
+
+/** KEY detector, minus fields allow-listed for this record's module. */
+function redactByKey(key: string, value: unknown, path: string, allow: ReadonlySet<string> | undefined): boolean {
+  return isSecretField(key, value) && !(allow !== undefined && allow.has(path));
+}
+
+function shredNode(
+  value: unknown,
+  seen: WeakSet<object>,
+  depth: number,
+  opts: Required<ShredOptions>,
+  path: string,
+  allow: ReadonlySet<string> | undefined,
+): LogValueOut {
   // Primitives.
   if (value === null || value === undefined) return null;
   const t = typeof value;
@@ -185,13 +206,13 @@ function shredNode(value: unknown, seen: WeakSet<object>, depth: number, opts: R
   if (depth >= opts.maxDepth) return Array.isArray(value) ? "[Array]" : "[Object]";
   seen.add(obj);
   try {
-    if (value instanceof Map) return shredNode(Object.fromEntries(value), seen, depth, opts);
-    if (value instanceof Set) return shredNode([...value], seen, depth, opts);
+    if (value instanceof Map) return shredNode(Object.fromEntries(value), seen, depth, opts, path, allow);
+    if (value instanceof Set) return shredNode([...value], seen, depth, opts, path, allow);
 
     if (Array.isArray(value)) {
       const arr: LogValueOut[] = [];
       const n = Math.min(value.length, opts.maxEntries);
-      for (let i = 0; i < n; i++) arr.push(shredNode(value[i], seen, depth + 1, opts));
+      for (let i = 0; i < n; i++) arr.push(shredNode(value[i], seen, depth + 1, opts, path, allow));
       if (value.length > n) arr.push(`…[${value.length - n} more]`);
       return arr;
     }
@@ -211,8 +232,11 @@ function shredNode(value: unknown, seen: WeakSet<object>, depth: number, opts: R
       }
       count++;
       if (key === "__proto__" || key === "constructor" || key === "prototype") continue;
-      // KEY detector: secret-named field redacted wholesale (don't recurse into it).
-      entries.push([key, isSecretField(key, (value as Record<string, unknown>)[key]) ? REDACTED : shredNode((value as Record<string, unknown>)[key], seen, depth + 1, opts)]);
+      // KEY detector: secret-named field redacted wholesale (don't recurse into it),
+      // unless this exact path is allow-listed for the record's module.
+      const v = (value as Record<string, unknown>)[key];
+      const p = childPath(path, key);
+      entries.push([key, redactByKey(key, v, p, allow) ? REDACTED : shredNode(v, seen, depth + 1, opts, p, allow)]);
     }
     return Object.fromEntries(entries);
   } finally {
@@ -220,14 +244,29 @@ function shredNode(value: unknown, seen: WeakSet<object>, depth: number, opts: R
   }
 }
 
-/** Deep-redact a value into a JSON-safe clone. Never throws. */
-export function shred(value: unknown, opts?: ShredOptions): LogValueOut {
-  const o = { ...DEFAULTS, ...opts };
+function shredAt(value: unknown, o: Required<ShredOptions>, path: string, allow: ReadonlySet<string> | undefined): LogValueOut {
   try {
-    return shredNode(value, new WeakSet(), 0, o);
+    return shredNode(value, new WeakSet(), 0, o, path, allow);
   } catch {
     return "[unserializable]";
   }
+}
+
+/**
+ * Deep-redact a value into a JSON-safe clone. Never throws. When the value is
+ * a record with a string `module`, that module's LOG_REDACT_ALLOW_PATHS entries apply.
+ */
+export function shred(value: unknown, opts?: ShredOptions): LogValueOut {
+  const o = { ...DEFAULTS, ...opts };
+  let allow: ReadonlySet<string> | undefined;
+  try {
+    if (value !== null && typeof value === "object" && !Array.isArray(value)) {
+      allow = allowedPathsFor((value as Record<string, unknown>).module);
+    }
+  } catch {
+    allow = undefined;
+  }
+  return shredAt(value, o, "", allow);
 }
 
 /** Redact secrets from a plain string (a message/log line). Returns a string. Never throws. */
@@ -251,16 +290,17 @@ export function shredRecordInPlace<T extends Record<string, unknown>>(
   // be indexed for reading). Symbol keys are untouched since we iterate Object.keys.
   const rec = record as Record<string, unknown>;
   try {
+    const allow = allowedPathsFor(rec.module);
     for (const key of Object.keys(rec)) {
       if (key === "level" || key === "timestamp") continue;
       // Property-injection / prototype-pollution guard.
       if (key === "__proto__" || key === "constructor" || key === "prototype") continue;
       const value = rec[key];
       if (key === "message") {
-        rec[key] = typeof value === "string" ? redactString(value, o.maxStringLength) : shred(value, o);
+        rec[key] = typeof value === "string" ? redactString(value, o.maxStringLength) : shredAt(value, o, key, allow);
         continue;
       }
-      rec[key] = isSecretField(key, value) ? REDACTED : shred(value, o);
+      rec[key] = redactByKey(key, value, key, allow) ? REDACTED : shredAt(value, o, key, allow);
     }
   } catch {
     /* never throw from the logging path */

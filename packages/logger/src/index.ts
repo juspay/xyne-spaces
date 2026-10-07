@@ -19,4 +19,13 @@ export {
   type ShredOptions,
 } from "./shredder.js";
 
+export {
+  REDACT_ALLOW_ENV,
+  parseRedactAllowList,
+  getRedactAllowList,
+  setRedactAllowList,
+  describeRedactAllowList,
+  type RedactAllowList,
+} from "./policy.js";
+
 export { SetOnceContext, emptyContext } from "./context.js";

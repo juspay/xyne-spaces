@@ -437,7 +437,7 @@ async function fetchContentMentions(
     queryMentionMessages(auth, t.token, userId, window)
       .then((rows) => rows.map((m) => contentMentionRow(m, t.action)))
       .catch((e) => {
-        logger.info("[assembler] content-mention query failed", { token: t.token, err: String(e) });
+        logger.info("[assembler] content-mention query failed", { mentionTarget: t.token, err: String(e) });
         return [] as ActivityRow[];
       }),
   );
