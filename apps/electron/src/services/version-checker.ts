@@ -116,33 +116,23 @@ function notifyUpdateAvailable(currentVersion: string, latestVersion: string): v
 }
 
 /**
- * Perform a hard reload of the main window without cache (called when user clicks update button or on auto-update)
- * Clears network cache before reloading for a fresh start
+ * Reload the main window to pick up a new deployment (called when the user clicks the
+ * update button, or on an admin-pushed `reload` client command).
+ *
+ * Deliberately a plain reload: index.html is served no-cache/no-store and every bundle
+ * asset is content-hashed, so a normal reload always fetches the new build while reusing
+ * unchanged chunks. Clearing the HTTP cache / reloadIgnoringCache forced a full re-download
+ * of the entire bundle (~39MB) on every update, with no freshness benefit.
  */
-export async function performHardReload(): Promise<void> {
+export function performHardReload(): void {
   const mainWindow = getMainWindow();
-  if (!mainWindow) {
+  if (!mainWindow || mainWindow.isDestroyed()) {
     log.warn('[VersionChecker] Cannot reload - main window not available');
     return;
   }
 
-  log.info('[VersionChecker] Performing hard reload of main window (clearing cache)...');
-  
-  try {
-    const session = mainWindow.webContents.session;
-    
-    // Clear network cache (where bundles and assets are cached)
-    await session.clearCache();
-    log.info('[VersionChecker] Network cache cleared');
-    
-    // Reload ignoring any remaining cache
-    mainWindow.webContents.reloadIgnoringCache();
-    log.info('[VersionChecker] Hard reload initiated');
-  } catch (error) {
-    log.error('[VersionChecker] Error during hard reload:', error);
-    // Fallback to simple reload if cache clearing fails
-    mainWindow.webContents.reloadIgnoringCache();
-  }
+  log.info('[VersionChecker] Reloading main window to apply update');
+  mainWindow.webContents.reload();
 }
 
 /**
