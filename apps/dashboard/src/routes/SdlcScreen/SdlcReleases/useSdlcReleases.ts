@@ -1,10 +1,12 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { toast } from 'sonner';
 import { v4 as uuidv4 } from 'uuid';
-import { ReleaseTrackingMode, TicketStatusV2, resolveTicketDescription } from '@xyne/shared';
+import { BoardType, ReleaseTrackingMode, resolveTicketDescription } from '@xyne/shared';
+import { buildStagesByBoard } from '../../../components/Release/releaseChanges.utils';
 import { useCachedQuery } from '../../../hooks/useCachedQuery';
 import { useChannelParticipation } from '../../../hooks/useChannels';
 import { useUsersById } from '../../../hooks/useUsers';
+import { resolveStageStatus } from '../../../utils/board/stageStatusIcon';
 import { useZero } from '../../../hooks/useZero';
 import { queries } from '../../../zero/queries';
 import { mutators } from '../../../zero/mutators';
@@ -12,6 +14,7 @@ import { apiInstance } from '../../../services/clients/apiClient';
 import { getApiErrorMessage } from '../../../utils/apiError';
 import { htmlToPlainText } from '../../../utils/sanitizer';
 import { getUserDisplayName } from '../../../utils/userDisplayName';
+import { surfaceMutationError } from '../../../utils/zeroMutationToast';
 import {
   buildApplicationReleaseBoardName,
   buildMainReleaseBoardName,
@@ -24,7 +27,6 @@ import type {
   SdlcReleaseRepo,
 } from './SdlcReleases.types';
 import {
-  RELEASE_STATUS,
   firstBranch,
   formatReleaseDate,
   jsonStringArray,
@@ -165,6 +167,12 @@ export function useSdlcReleases(repos: readonly SdlcReleaseRepo[]): {
   );
   const rows = useMemo(() => tickets ?? [], [tickets]);
   const usersById = useUsersById();
+  const projectId = repos[0]?.projectId ?? '';
+  const [stageRows] = useCachedQuery(
+    queries.stagesByBoards({ projectId, boardType: BoardType.RELEASE }),
+    { enabled: !!projectId },
+  );
+  const stagesByBoard = useMemo(() => buildStagesByBoard(stageRows), [stageRows]);
 
   const complete = ticketsStatus.type === 'complete';
   const hasMore = rows.length >= limit;
@@ -179,7 +187,11 @@ export function useSdlcReleases(repos: readonly SdlcReleaseRepo[]): {
           id: row.id,
           title: releaseTitle(row),
           summary: htmlToPlainText(resolveTicketDescription(row)),
-          status: RELEASE_STATUS[row.statusV2] ?? RELEASE_STATUS[TicketStatusV2.TODO],
+          stage: {
+            name: row.stageName,
+            status:
+              resolveStageStatus(stagesByBoard.get(row.boardId), row.stageName) ?? row.statusV2,
+          },
           date: formatReleaseDate(row.createdAt),
           repoName: repo.name,
           ownerId: row.createdBy,
@@ -187,7 +199,7 @@ export function useSdlcReleases(repos: readonly SdlcReleaseRepo[]): {
         },
       ];
     });
-  }, [rows, repoByBoardId, usersById]);
+  }, [rows, repoByBoardId, usersById, stagesByBoard]);
 
   const loadMore = useCallback(() => {
     if (complete && hasMore) setPage({ scopeKey, limit: limit + PAGE_SIZE });
@@ -229,6 +241,80 @@ export function useRerunReleaseAnalysis(releaseId: string): {
   }, [releaseId]);
 
   return { rerunning, rerun };
+}
+
+const FIELD_AUTOSAVE_MS = 600;
+
+export function useReleaseFieldEditor(
+  releaseId: string,
+  field: 'title' | 'description',
+  value: string,
+): {
+  editing: boolean;
+  draft: string;
+  setDraft: (next: string) => void;
+  start: () => void;
+  finish: () => void;
+  cancel: () => void;
+} {
+  const zero = useZero();
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(value);
+
+  const save = useCallback(
+    (input: string): void => {
+      const next = input.trim();
+      if (next === value || (field === 'title' && !next)) return;
+      void surfaceMutationError(
+        zero.mutate(
+          mutators.ticket.update({
+            id: releaseId,
+            ...(field === 'title' ? { title: next } : { description: next }),
+            updatedAt: Date.now(),
+          }),
+        ),
+        `Failed to update ${field}`,
+      );
+    },
+    [zero, releaseId, field, value],
+  );
+
+  useEffect(() => {
+    if (!editing) return undefined;
+    const timeoutId = setTimeout(() => save(draft), FIELD_AUTOSAVE_MS);
+    return (): void => clearTimeout(timeoutId);
+  }, [editing, draft, save]);
+
+  return {
+    editing,
+    draft,
+    setDraft,
+    start: (): void => {
+      setDraft(value);
+      setEditing(true);
+    },
+    finish: (): void => {
+      save(draft);
+      setEditing(false);
+    },
+    cancel: (): void => setEditing(false),
+  };
+}
+
+export function useAssignReleaseQa(): (artIds: readonly string[], userId: string | null) => void {
+  const zero = useZero();
+  return useCallback(
+    (artIds: readonly string[], userId: string | null): void => {
+      const timestamp = Date.now();
+      for (const id of artIds) {
+        void surfaceMutationError(
+          zero.mutate(mutators.applicationReleaseTicket.setTestedBy({ id, userId, timestamp })),
+          'Failed to update QA',
+        );
+      }
+    },
+    [zero],
+  );
 }
 
 export function useReleaseThreadAccess(releaseId: string | null): boolean {

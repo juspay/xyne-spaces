@@ -48,7 +48,7 @@ export interface ApplyParams {
    * reaction resolve must not swallow messages nobody has parsed yet.
    */
   watermark?: { createdAt: Date; messageId: string };
-  actorType: 'llm' | 'manual' | 'reaction';
+  actorType: 'llm' | 'manual' | 'reaction' | 'pr_merge';
   actorId?: string;
 }
 
@@ -106,7 +106,9 @@ export class RadarApplier {
       op: op.op,
       actorType: params.actorType,
       actorId: params.actorId ?? null,
-      sourceMessageId: op.sourceMessageId ?? null,
+      // No stored message to point at — a PR merge's synthetic one, or a manual
+      // action on a thread with no watermark yet — is recorded as null, not ''.
+      sourceMessageId: op.sourceMessageId || null,
       payload: {
         title: op.title,
         contextSummary: op.contextSummary,

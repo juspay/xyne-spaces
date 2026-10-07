@@ -103,6 +103,7 @@ import {
   SDLC_TRACK_MEMBERSHIP_RELATION,
   createSdlcLinkSchema,
   entityLinkContextSchema,
+  withKeptExtension,
   updateSubTicketsMdFromZero,
   linkSubTicketConversationToParentFromZero,
   parseBoardEtaManagement,
@@ -11910,6 +11911,61 @@ export function createMutators(
             updatedAt: args.timestamp,
           });
         }
+      ),
+
+      /**
+       * Rename a link or an uploaded file in a hub — what the explorer and the file list
+       * call it. Any member can, as with folders; a file keeps its extension, so it
+       * still opens and previews as what it is. Artifacts are renamed through
+       * canvas.update, under their own edit access.
+       */
+      renameSdlcItem: defineMutator(
+        z.object({
+          itemType: z.enum(['LINK', 'ATTACHMENT']),
+          itemId: z.string(),
+          channelId: z.string(),
+          name: z.string().trim().min(1).max(300),
+          timestamp: z.number(),
+        }),
+        async ({ tx, args }) => {
+          const participant = await tx.run(
+            zql.channel_participants
+              .where('channelId', args.channelId)
+              .where('userId', authData.sub)
+              .one(),
+          );
+          if (!participant) {
+            throw new Error('Hub membership required');
+          }
+          const placement = await tx.run(
+            zql.sdlc_entity_links
+              .where('channelId', args.channelId)
+              .where('sourceType', 'TRACK')
+              .where('targetType', args.itemType)
+              .where('targetId', args.itemId)
+              .where('relationType', SDLC_TRACK_FLAT_RELATION)
+              .one(),
+          );
+          if (!placement) {
+            throw new Error('Not found in this hub');
+          }
+          if (args.itemType === 'LINK') {
+            await tx.mutate.links.update({
+              id: args.itemId,
+              title: args.name,
+              updatedAt: args.timestamp,
+            });
+            return;
+          }
+          const attachment = await tx.run(zql.message_attachments.where('id', args.itemId).one());
+          if (!attachment) {
+            throw new Error('File not found');
+          }
+          await tx.mutate.message_attachments.update({
+            id: args.itemId,
+            originalFilename: withKeptExtension(attachment.originalFilename, args.name),
+          });
+        },
       ),
 
       /** A folder's icon; null goes back to the folder mark. */

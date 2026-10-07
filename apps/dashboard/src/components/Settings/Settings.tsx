@@ -28,6 +28,7 @@ import { useZero } from '../../hooks/useZero';
 import { Popover } from '../ui/Popover/Popover';
 import { useUserPresence } from '../../hooks/usePresence';
 import { usePath } from '../../hooks/usePath';
+import { notificationsArePaused } from '../../utils/notificationsPause';
 
 interface SettingsProps {
   onClose: () => void;
@@ -92,9 +93,10 @@ const Settings = ({
   };
 
   const notificationsPausedUntil = user?.notificationsPausedUntil;
-  const isNotificationsPaused = useMemo(() => {
-    return notificationsPausedUntil ? notificationsPausedUntil > Date.now() : false;
-  }, [notificationsPausedUntil]);
+  const isNotificationsPaused = useMemo(
+    () => notificationsArePaused(notificationsPausedUntil),
+    [notificationsPausedUntil],
+  );
 
   const pauseOptions = useMemo(
     () => [

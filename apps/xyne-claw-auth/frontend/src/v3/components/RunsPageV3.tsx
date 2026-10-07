@@ -30,6 +30,7 @@ import { RunDateRangeFilter } from "./runs/RunDateRangeFilter";
 import { RunListFooter } from "./runs/RunListFooter";
 import { looksLikeSessionId, runOwnerLabel, rangeToIso, type RunRangePreset } from "../lib/runFormat";
 import { runReplayPath } from "../../lib/runReplay";
+import { isCurrentUser } from "../../lib/identity";
 import {
   listAgents,
   listRunsPaged,
@@ -431,7 +432,7 @@ export function RunsPageV3({ userId }: { userId: string }) {
                 // user's run carries &allRuns=1 so the chat view opts into the
                 // cross-user read path (the backend gates that on admin + flag).
                 onOpen={(() => {
-                  const path = runReplayPath(run, { allRuns: run.userId !== userId });
+                  const path = runReplayPath(run, { allRuns: !isCurrentUser(run.userId) });
                   return path ? () => navigate(path) : undefined;
                 })()}
               />

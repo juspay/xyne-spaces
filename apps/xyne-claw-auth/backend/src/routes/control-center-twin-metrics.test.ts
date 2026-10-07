@@ -67,7 +67,7 @@ vi.mock("../db.js", () => ({
 vi.mock("../config.js", () => ({ CONFIG: {} }));
 vi.mock("../redis.js", () => ({ redisService: { getConnection: vi.fn() } }));
 vi.mock("../lib/redis-scan.js", () => ({ scanKeys: vi.fn() }));
-vi.mock("../middleware/require-auth.js", () => ({ requireS2S: vi.fn() }));
+vi.mock("../middleware/require-auth.js", () => ({ requireStrictS2S: vi.fn() }));
 vi.mock("../middleware/agent-acl.js", () => ({
   requireClawAdmin: function requireClawAdmin(_req: Request, _res: Response, next: NextFunction) {
     next();

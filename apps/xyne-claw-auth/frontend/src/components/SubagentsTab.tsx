@@ -1,5 +1,6 @@
 import { useEffect, useState, useCallback } from "react";
 import { Link, useNavigate } from "react-router-dom";
+import { isCurrentUser } from "../lib/identity";
 import {
   listSubagents,
   deleteSubagent,
@@ -67,8 +68,8 @@ export function SubagentsTab({ userId, isAdmin }: SubagentsTabProps) {
       {items.map((row) => {
         const canEdit = row.source === "custom" && (
           isAdmin
-          || row.createdByUserId === userId
-          || (row.shares ?? []).some((s) => s.userId === userId && s.role === "EDITOR")
+          || isCurrentUser(row.createdByUserId)
+          || (row.shares ?? []).some((s) => isCurrentUser(s.userId) && s.role === "EDITOR")
         );
         return (
           <SubagentCard

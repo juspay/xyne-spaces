@@ -1,6 +1,6 @@
 import { format } from 'date-fns';
 import { v4 as uuidv4 } from 'uuid';
-import { ReleaseTrackingMode, TicketStatusV2 } from '@xyne/shared';
+import { ReleaseTrackingMode } from '@xyne/shared';
 import {
   buildCommitUrl,
   cleanDiff,
@@ -26,14 +26,6 @@ export const TONE = {
   red: 'bg-[color-mix(in_srgb,var(--status-failure)_10%,transparent)] text-status-failure',
   neutral: 'bg-muted text-muted-foreground',
 } as const;
-
-export const RELEASE_STATUS: Record<TicketStatusV2, { label: string; className: string }> = {
-  [TicketStatusV2.TODO]: { label: 'Todo', className: TONE.amber },
-  [TicketStatusV2.STARTED]: { label: 'In progress', className: TONE.blue },
-  [TicketStatusV2.PAUSED]: { label: 'Paused', className: TONE.purple },
-  [TicketStatusV2.COMPLETED]: { label: 'Done', className: TONE.green },
-  [TicketStatusV2.CANCELLED]: { label: 'Cancelled', className: TONE.neutral },
-};
 
 export const REPO_CONFIG_STATE: Record<RepoConfigState, { label: string; className: string }> = {
   configured: { label: 'Configured', className: TONE.green },

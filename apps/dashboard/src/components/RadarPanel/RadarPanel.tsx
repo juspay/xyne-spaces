@@ -3911,7 +3911,11 @@ const RadarPanel = (): ReactElement => {
                               <span className='font-semibold text-foreground'>
                                 {m.actorType === 'llm'
                                   ? 'LLM parser'
-                                  : `${nameOf(m.actorId ?? '')} · by hand`}
+                                  : m.actorType === 'pr_merge'
+                                    ? 'PR merged'
+                                    : m.actorType === 'reaction'
+                                      ? `${nameOf(m.actorId ?? '')} · by reaction`
+                                      : `${nameOf(m.actorId ?? '')} · by hand`}
                               </span>
                               <span className='ml-auto text-muted-foreground'>
                                 {formatDistanceToNow(new Date(m.createdAt), { addSuffix: true })}

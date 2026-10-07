@@ -5,6 +5,8 @@
  * `tools.custom` otherwise cannot post a card here. Applied on run/stream only.
  */
 
+import { resolveAgentToolsConfig } from "xyne-claw-shared";
+
 /** `visualize` is excluded: no presentation `source`, no UiWidget of its own. */
 export const AI_SCREEN_PRESENTATION_TOOL_SLUGS = [
   "ask-user-question",
@@ -16,14 +18,25 @@ export const AI_SCREEN_PRESENTATION_TOOL_SLUGS = [
 /**
  * `storedTools` is separate because the config Spaces forwards has no `tools`
  * key: startRun merges stored-then-body, so the widened copy must ride in on
- * the body to win. No stored `tools` means unrestricted — none is created.
+ * the body to win.
+ *
+ * The grant follows the same rule claw enforces (resolveAgentToolsConfig):
+ * only an orchestrator with nothing selected is unrestricted, so only it is
+ * left alone. A standard agent with nothing selected is granted NOTHING by
+ * claw, so it must get an explicit `{ custom: [...] }` here — otherwise the
+ * cards are filtered out before the model ever sees them.
  */
 export function withAiScreenPresentationTools(
   config: Record<string, unknown>,
   storedTools: unknown,
+  delegationTier?: string | null,
 ): Record<string, unknown> {
-  if (!storedTools || typeof storedTools !== "object" || Array.isArray(storedTools)) return config;
-  const toolsObj = storedTools as Record<string, unknown>;
+  const stored = storedTools && typeof storedTools === "object" && !Array.isArray(storedTools)
+    ? storedTools as Record<string, unknown>
+    : undefined;
+  const enforced = resolveAgentToolsConfig(stored ? { tools: stored } : {}, delegationTier ?? "standard");
+  if (!enforced) return config;
+  const toolsObj = enforced as Record<string, unknown>;
   const custom = Array.isArray(toolsObj["custom"])
     ? (toolsObj["custom"] as unknown[]).filter((value): value is string => typeof value === "string")
     : [];
@@ -52,14 +65,18 @@ export const AI_SCREEN_PRESENTATION_INSTRUCTIONS = [
   "  related questions into ONE card, and stop your turn there — the answer",
   "  arrives as a new message and a fresh run continues the task. Don't spend a",
   "  card on something you could look up yourself.",
-  "- Code the reader will copy or apply (a patch, a config, a query) →",
-  "  `post-code-block`. A change to an existing file → `post-diff`.",
+  "- Multi-line code ALWAYS goes in a card — this is not a judgement call. If you",
+  "  are about to type a ``` fence in your reply, stop: call `load-tools` and post",
+  "  it with `post-code-block` instead. A change to an existing file →",
+  "  `post-diff`. This holds even for a short answer or a question outside your",
+  "  usual scope.",
   "- Numbers worth comparing — a trend, a breakdown, a ranking → `post-chart`.",
   "- Short expressions, names, paths and single values → inline backticks in your",
   "  reply. Do NOT spend a card on them.",
   "- After posting a card, do NOT repeat its contents in your text. Write only",
   "  what the card cannot say: what it shows and what to do about it.",
-  "- Prose is still the default. A card has to earn its place.",
+  "- Prose is the default for everything else (explanations, names, paths, single",
+  "  values). Code blocks are the exception above, not a card to be earned.",
 ].join("\n");
 
 export function withAiScreenPresentationInstructions(

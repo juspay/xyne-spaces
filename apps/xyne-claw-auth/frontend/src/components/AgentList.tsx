@@ -2,6 +2,7 @@ import { useState, useCallback, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { Trash2, Globe } from "lucide-react";
 import type { AgentLight } from "../lib/types";
+import { isCurrentUser } from "../lib/identity";
 import {
   updateAgent,
   deleteAgent,
@@ -179,11 +180,11 @@ export function AgentList({ agents, loading, onUpdate, userId, isAdmin }: Props)
   }
 
   const globalAgents = agents.filter((a) => a.scope === "global");
-  const myAgents = agents.filter((a) => a.ownerUserId === userId);
-  const sharedAgents = agents.filter((a) => a.scope !== "global" && a.ownerUserId !== userId && a.ownerUserId !== null);
+  const myAgents = agents.filter((a) => isCurrentUser(a.ownerUserId));
+  const sharedAgents = agents.filter((a) => a.scope !== "global" && !isCurrentUser(a.ownerUserId) && a.ownerUserId !== null);
 
   const shareRoleBadge = (agent: AgentLight) => {
-    const share = agent.shares?.find((s) => s.userId === userId);
+    const share = agent.shares?.find((s) => isCurrentUser(s.userId));
     if (!share) return null;
     const styles: Record<string, string> = {
       CONTRIBUTOR: "bg-blue-950 text-blue-400",

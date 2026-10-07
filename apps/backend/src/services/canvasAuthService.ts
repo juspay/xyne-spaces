@@ -25,6 +25,7 @@ export interface CanvasAuthResult {
     createdBy: string;
     visibility: string;
   };
+  crossWorkspace?: boolean;
 }
 
 class CanvasAuthService {
@@ -180,10 +181,21 @@ class CanvasAuthService {
     dbClient: typeof db = db
   ): Promise<CanvasAuthResult> {
     try {
+      const currentUserContext = await this.getCurrentUserContext(userId, dbClient);
+      if (!currentUserContext) {
+        logger.warn(`[CanvasAuth] User ${userId} has no workspace; denying canvas ${canvasId}`);
+        return {
+          hasAccess: false,
+          canEdit: false,
+          canView: false,
+        };
+      }
+
       let canvas = await dbClient.canvas.findUnique({
         where: { id: canvasId },
         select: {
           id: true,
+          workspaceId: true,
           createdBy: true,
           visibility: true,
           channelId: true,
@@ -203,10 +215,12 @@ class CanvasAuthService {
       if (!canvas) {
         canvas = await dbClient.canvas.findFirst({
           where: {
+            workspaceId: currentUserContext.workspaceId,
             OR: [{ viewAccessId: canvasId }, { editAccessId: canvasId }],
           },
           select: {
             id: true,
+            workspaceId: true,
             createdBy: true,
             visibility: true,
             channelId: true,
@@ -227,8 +241,23 @@ class CanvasAuthService {
         };
       }
 
+      if (canvas.workspaceId !== currentUserContext.workspaceId) {
+        logger.warn('[CanvasAuth] Cross-workspace canvas access denied', {
+          userId,
+          canvasId: canvas.id,
+          requestedAs: canvasId,
+          userWorkspaceId: currentUserContext.workspaceId,
+          canvasWorkspaceId: canvas.workspaceId,
+        });
+        return {
+          hasAccess: false,
+          canEdit: false,
+          canView: false,
+          crossWorkspace: true,
+        };
+      }
+
       const isCreator = canvas.createdBy === userId;
-      const currentUserContext = await this.getCurrentUserContext(userId, dbClient);
       const isHubKnowledge = canvas.folderId
         ? Boolean(
             await dbClient.canvasFolder.findFirst({

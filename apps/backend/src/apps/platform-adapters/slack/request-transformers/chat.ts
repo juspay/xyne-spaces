@@ -5,6 +5,7 @@ import {
 	resolveSlackText,
 } from "@/integrations/adapters/slack-webhook-tickets/utils/slackUtils";
 import { config } from "@/config/env";
+import { resolveSlackHandleMentions } from "./handleMentions";
 import type { TransformContext } from "../../types";
 import type {
 	SlackChatDeleteRequest,
@@ -108,7 +109,10 @@ export async function transformPostMessage(
 	slackReq: SlackChatPostMessageRequest,
 	context: TransformContext,
 ): Promise<PostMessageArgs> {
-	const { content, isMarkdown } = await processContent(slackReq, config.slackBotToken, context.workspaceId ?? config.defaultWorkspaceId);
+	const workspaceId = context.workspaceId ?? config.defaultWorkspaceId;
+	const resolvedReq = await resolveSlackHandleMentions(slackReq, workspaceId);
+
+	const { content, isMarkdown } = await processContent(resolvedReq, config.slackBotToken, workspaceId);
 
 	return {
 		channelId: slackReq.channel,

@@ -22,7 +22,9 @@
  *
  * Redelivery therefore asks ownerStatus(): free → claim; mine → claim; held by a
  * pod whose alive key EXISTS → FROZEN, defer and never steal; held by a pod with
- * no alive key → DEAD, take over immediately. Owner tokens are `<pod>:<uuid>` so
+ * no alive key → DEAD, take over immediately. The claim itself is a compare-and-set
+ * that only replaces the exact dead holder that was inspected, so two workers
+ * racing for the same session cannot both win. Owner tokens are `<pod>:<uuid>` so
  * the holder's pod name is recoverable from the token alone.
  *
  * Fail-open on every Redis error: a registry outage must never block execution.
@@ -167,12 +169,27 @@ export function createOwnerToken(): string {
   return `${podName()}:${randomUUID()}`;
 }
 
-export async function claimOwnership(sessionId: string, ownerToken: string): Promise<boolean> {
+export const OWNERSHIP_CLAIM_SCRIPT = `
+local current = redis.call('GET', KEYS[1])
+if current == false or current == ARGV[1] or (ARGV[3] ~= '' and current == ARGV[3]) then
+  redis.call('SET', KEYS[1], ARGV[1], 'EX', ARGV[2])
+  return 1
+end
+return 0`;
+
+export async function claimOwnership(sessionId: string, ownerToken: string, takeoverFrom?: string | null): Promise<boolean> {
   const c = getClient();
   if (!c) return true;
   try {
-    await c.set(keyFor(sessionId), ownerToken, "EX", OWNERSHIP_TTL_SECONDS);
-    return true;
+    const res = await c.eval(
+      OWNERSHIP_CLAIM_SCRIPT,
+      1,
+      keyFor(sessionId),
+      ownerToken,
+      String(OWNERSHIP_TTL_SECONDS),
+      takeoverFrom ?? "",
+    );
+    return Number(res) === 1;
   } catch (err) {
     warnFailOpen("claim", err);
     return true;
@@ -213,21 +230,30 @@ export async function isOwnedByOther(sessionId: string, ownerToken: string): Pro
 
 export type OwnerStatus = "free" | "mine" | "alive-other" | "dead-other";
 
-export async function ownerStatus(sessionId: string, myToken: string): Promise<OwnerStatus> {
+export interface OwnerSnapshot {
+  status: OwnerStatus;
+  holder: string | null;
+}
+
+export async function inspectOwner(sessionId: string, myToken: string): Promise<OwnerSnapshot> {
   const c = getClient();
-  if (!c) return "free";
+  if (!c) return { status: "free", holder: null };
   try {
     const current = await c.get(keyFor(sessionId));
-    if (typeof current !== "string" || current.length === 0) return "free";
-    if (current === myToken) return "mine";
+    if (typeof current !== "string" || current.length === 0) return { status: "free", holder: null };
+    if (current === myToken) return { status: "mine", holder: current };
     const pod = ownerPodFromToken(current);
-    if (!pod) return "dead-other";
+    if (!pod) return { status: "dead-other", holder: current };
     const alive = await c.exists(podAliveKey(pod));
-    return Number(alive) > 0 ? "alive-other" : "dead-other";
+    return { status: Number(alive) > 0 ? "alive-other" : "dead-other", holder: current };
   } catch (err) {
     warnFailOpen("owner-status", err);
-    return "free";
+    return { status: "free", holder: null };
   }
+}
+
+export async function ownerStatus(sessionId: string, myToken: string): Promise<OwnerStatus> {
+  return (await inspectOwner(sessionId, myToken)).status;
 }
 
 export async function currentOwnerPod(sessionId: string): Promise<string | null> {

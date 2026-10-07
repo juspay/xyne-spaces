@@ -59,6 +59,7 @@ import { SdlcArchiveMenu } from './SdlcArchiveMenu';
 import { SdlcHubDialog } from './SdlcHubDialog';
 import { SdlcHubRepositoriesDialog } from './SdlcHubRepositoriesDialog';
 import {
+  SdlcExplorerHeader,
   SdlcHubHeader,
   SdlcSidebarAddRow,
   SdlcSidebarGroup,
@@ -67,7 +68,11 @@ import {
   sdlcSidebarRowClass,
 } from './SdlcHubSidebar';
 import { SdlcHubSwitcher } from './SdlcHubSwitcher';
-import { setUserPreference, useUserPreference } from '../../machines/userPreferencesMachine';
+import {
+  setUserPreference,
+  useUserPreference,
+  userPreferencesSnapshot,
+} from '../../machines/userPreferencesMachine';
 import { isSdlcDocumentWindow } from './useSdlcFrameBridge';
 import { toast } from 'sonner';
 import AppNavigator from '../../components/AppNavigator/AppNavigator';
@@ -150,7 +155,7 @@ import { Tooltip } from '../../components/ui/Tooltip';
 import { fileKind } from './fileKind';
 import { FileTypeIcon } from './FileTypeIcon';
 import { getLastSdlcLocation, sdlcHubIdOf } from './lastSdlcLocation';
-import { SdlcFolderPage, SCRATCH_TAB_ID, type FolderTab } from './SdlcFolderPage';
+import { SdlcFolderPage, SCRATCH_TAB_ID, withFolderEntry, type FolderTab } from './SdlcFolderPage';
 import { setSdlcCommentContext } from './sdlcCommentStore';
 import { publishPendingPassage, registerSelectionSink } from '../../components/workspaceItems';
 
@@ -212,8 +217,6 @@ const DISCUSSION_ITEM_FALLBACK_NAME: Record<SdlcItemDiscussion['type'], string> 
 };
 /** A scope nothing belongs to, for a panel whose subject hasn't resolved yet. */
 const NO_DISCUSSIONS: DiscussionScope = { ownerIds: [] };
-/** Set on the history entry a conversation opened onto, so leaving it steps back. */
-const THREAD_STEP_STATE = { sdlcThreadStep: true } as const;
 import { SdlcFileList } from './SdlcFileList';
 import { SdlcCalls } from './SdlcCalls';
 import { ActivityPill, isPartOfCall, type SdlcLiveCalls } from './ActivityPill';
@@ -331,6 +334,15 @@ function actionErrorMessage(error: unknown): string {
     if (typeof response?.data?.error === 'string') return response.data.error;
   }
   return error instanceof Error ? error.message : 'Action failed';
+}
+
+/** Which tab the folder page shows, in its url: one of these, or none. */
+function setFolderTabParams(search: URLSearchParams, tab: FolderTab | null): void {
+  for (const key of ['canvas', 'file', 'link', 'browse']) search.delete(key);
+  if (tab?.kind === 'CANVAS') search.set('canvas', tab.id);
+  if (tab?.kind === 'ATTACHMENT') search.set('file', tab.id);
+  if (tab?.kind === 'LINK') search.set('link', tab.id);
+  if (tab?.kind === 'BROWSER') search.set('browse', '1');
 }
 
 export default function SdlcScreen(): ReactElement {
@@ -453,6 +465,8 @@ export default function SdlcScreen(): ReactElement {
   const [railHovered, setRailHovered] = useState(false);
   const fileListRef = useRef<HTMLDivElement | null>(null);
   const sidebarRef = useRef<HTMLDivElement | null>(null);
+  // The sidebar's explorer pane, where an open folder's tree is drawn.
+  const explorerPaneRef = useRef<HTMLDivElement | null>(null);
   const [sidebarFocused, setSidebarFocused] = useState(false);
   // A dialog or the reader opened from the file list hands the keyboard back to it
   // when it closes, so the cursor is where it was.
@@ -629,6 +643,8 @@ export default function SdlcScreen(): ReactElement {
   const [pendingArtifactFolder, setPendingArtifactFolder] = useState<string | null>(null);
   // State, not a ref: the folder page only portals its tabs once the node exists.
   const [folderTabsSlot, setFolderTabsSlot] = useState<HTMLElement | null>(null);
+  // Likewise its explorer, which takes the hub sidebar's place while the page is open.
+  const [explorerSlot, setExplorerSlot] = useState<HTMLElement | null>(null);
   const [createTicketOpen, setCreateTicketOpen] = useState(false);
   // The call being set up, and where: fixed when the picker opens, so what's on screen
   // moving underneath it can't change where the call goes.
@@ -824,6 +840,10 @@ export default function SdlcScreen(): ReactElement {
   );
   const selectedTrackId = routeSearchParams.get('track');
   const openFolderId = routeSearchParams.get('folder');
+  // The folder page and url as they are now, for work that finishes after an await —
+  // an upload, a save — and must not act on the render it began in.
+  const routeNow = useRef({ openFolderId, search: routeSearchParams.toString() });
+  routeNow.current = { openFolderId, search: routeSearchParams.toString() };
   const browsingScratchTab = routeSearchParams.get('browse') === '1';
   const openFileId = routeSearchParams.get('file');
   const openLinkId = routeSearchParams.get('link');
@@ -1166,6 +1186,11 @@ export default function SdlcScreen(): ReactElement {
     selectedTrackId,
   ]);
   const discussionOwner = discussionContext?.owner ?? null;
+  // The artifact whose conversations the panel shows for being open. Not on a folder's
+  // page: there the panel and the tabs are chosen apart, so an artifact open in a tab
+  // doesn't take the panel over; it shows the one asked for (`?about=`), else the
+  // track. The page's own call still goes to the artifact on screen.
+  const panelCanvasOwner = openFolderId ? null : discussionOwner;
   const discussionSurface = discussionContext?.surface ?? null;
   // On the hub's Calls page, a call's discussion opens beside the list on its own.
   const hubCallThreadOwner =
@@ -1199,12 +1224,14 @@ export default function SdlcScreen(): ReactElement {
         rollUpTrackId: selectedTrack.id,
       };
     }
-    if (discussionOwner) return { sourceType: 'CANVAS', sourceId: discussionOwner.canvasId };
+    if (panelCanvasOwner) {
+      return { sourceType: 'CANVAS', sourceId: panelCanvasOwner.canvasId };
+    }
     if (section === 'tracks' && selectedTrack) {
       return { sourceType: 'TRACK', sourceId: selectedTrack.id };
     }
     return null;
-  }, [activeFolderDiscussion, discussionOwner, section, selectedTrack]);
+  }, [activeFolderDiscussion, panelCanvasOwner, section, selectedTrack]);
   const relatedCanvas = canvases.find(canvas => canvas.id === relatedSourceId);
   // Hub Knowledge's workflow, which only Overview and Hub Knowledge show.
   const knowledgeWorkflowShown = section === 'overview' || section === 'knowledge';
@@ -1470,7 +1497,7 @@ export default function SdlcScreen(): ReactElement {
       : null,
     name:
       activeFolderDiscussion?.name ??
-      discussionOwner?.title ??
+      panelCanvasOwner?.title ??
       (entityLinkScope?.sourceType === 'TRACK' ? selectedTrack?.name : undefined) ??
       channel?.name ??
       'this hub',
@@ -1576,14 +1603,11 @@ export default function SdlcScreen(): ReactElement {
       search.set(SDLC_FILES_FOLDER_PARAM, filesFolderId);
     }
     search.set('folder', folderId);
-    if (tab?.kind === 'CANVAS') search.set('canvas', tab.id);
-    if (tab?.kind === 'ATTACHMENT') search.set('file', tab.id);
-    if (tab?.kind === 'LINK') search.set('link', tab.id);
-    if (tab?.kind === 'BROWSER') search.set('browse', '1');
-    // The panel's subject: a link or file tab is its own, and the folder itself is
-    // when no tab is open. An artifact carries its own through the canvas.
+    setFolderTabParams(search, tab);
+    // The panel's subject on arriving: what was opened, or the folder itself when no
+    // tab is. From then on the page changes it only when asked (see openFolderTab).
     const about: SdlcDiscussionItemRef | null =
-      tab?.kind === 'LINK' || tab?.kind === 'ATTACHMENT'
+      tab?.kind === 'LINK' || tab?.kind === 'ATTACHMENT' || tab?.kind === 'CANVAS'
         ? { type: tab.kind, id: tab.id }
         : !tab && folderId !== trackId
           ? { type: 'FOLDER', id: folderId }
@@ -1594,6 +1618,51 @@ export default function SdlcScreen(): ReactElement {
       search.set('chat', 'conversations');
     }
     return search.toString();
+  };
+
+  /**
+   * Opens a tab on the folder page, and nothing else: the panel beside it keeps what
+   * it is showing, open or shut. What is open and what is being discussed are chosen
+   * apart, from the row and from its chat icon.
+   */
+  const openFolderTab = (tab: FolderTab | null): void => {
+    if (!channelId) return;
+    // The url as it is now: this can run after an upload or a save has been awaited.
+    const search = new URLSearchParams(routeNow.current.search);
+    setFolderTabParams(search, tab);
+    // Straight there rather than through navigateWithinSdlc, which lets go of the
+    // open conversation: the panel isn't the tab's to change.
+    void navigate(`/sdlc/${channelId}/tracks?${search.toString()}`);
+  };
+
+  /**
+   * What was just made on the folder page — uploaded, linked, written — opens there
+   * in tabs, the last of them in front, the panel beside it as it was. Off the
+   * folder page there are no tabs to open it in; says whether it opened.
+   */
+  const openCreatedOnFolderPage = (
+    created: readonly FolderTab[],
+    /** The folder page it was made from, read when the action began. */
+    folderId: string | null,
+  ): boolean => {
+    const front = created.at(-1);
+    if (!folderId || !front) return false;
+    // Read now, not from when the upload began: tabs opened, closed or moved since
+    // are kept.
+    const tabsByFolder = userPreferencesSnapshot().sdlcFolderTabs;
+    const stored = tabsByFolder[folderId] ?? [];
+    const known = new Set(stored.map(tab => `${tab.kind}:${tab.id}`));
+    const added = created.filter(tab => !known.has(`${tab.kind}:${tab.id}`));
+    if (added.length > 0) {
+      setUserPreference(
+        'sdlcFolderTabs',
+        withFolderEntry(tabsByFolder, folderId, [...stored, ...added]),
+      );
+    }
+    // Brought to the front only if that page is still the one open: someone who has
+    // gone elsewhere meanwhile isn't pulled back.
+    if (routeNow.current.openFolderId === folderId) openFolderTab(front);
+    return true;
   };
 
   /** The track's page in a window of its own — the same thing a folder gets. */
@@ -1664,6 +1733,18 @@ export default function SdlcScreen(): ReactElement {
     // Where it sits arrives with the lookup.
     if (!placement.parent) return;
     setPendingOpen(null);
+    // A file on the folder page already open — under it, however deep — opens there
+    // as a tab: the explorer stays as it is, and the panel with the conversation.
+    const tabKind = item.type === 'FOLDER' ? null : item.type;
+    const onOpenPage =
+      openFolderId !== null &&
+      (placement.trackId === openFolderId ||
+        placement.parent.id === openFolderId ||
+        placement.folders.some(folder => folder.id === openFolderId));
+    if (tabKind && onOpenPage) {
+      openFolderTab({ kind: tabKind, id: item.id });
+      return;
+    }
     const pageId = item.type === 'FOLDER' ? item.id : placement.parent.id;
     const tab: FolderTab | null = item.type === 'FOLDER' ? null : { kind: item.type, id: item.id };
     const search = new URLSearchParams(
@@ -1787,7 +1868,7 @@ export default function SdlcScreen(): ReactElement {
       else if (input.threadOnly) next.set(SDLC_THREAD_ONLY_PARAM, '1');
       const search = next.toString();
       const url = `${location.pathname}${search ? `?${search}` : ''}`;
-      void navigate(url, input.push ? { state: THREAD_STEP_STATE } : { replace: true });
+      void navigate(url, { replace: !input.push });
     },
     [location.pathname, location.search, navigate],
   );
@@ -1887,19 +1968,10 @@ export default function SdlcScreen(): ReactElement {
     });
   });
 
-  // Whether the conversation on show was opened onto a history entry of its own,
-  // which leaving it should step back from rather than write over.
-  const threadStepped =
-    typeof location.state === 'object' &&
-    location.state !== null &&
-    'sdlcThreadStep' in location.state;
   const selectDiscussionConversation = useCallback(
     (conversationId: string | null, options?: { selectedTab?: 'details' }): void => {
-      if (conversationId === null && threadStepped) {
-        void navigate(-1);
-        return;
-      }
-      // Opening one is a step the browser's Back undoes, as leaving it here is.
+      // Leaving never steps history back: the frame shares it with the host app, so
+      // the previous entry can be a screen outside SDLC.
       setDiscussionUrl({
         open: true,
         conversationId,
@@ -1907,7 +1979,7 @@ export default function SdlcScreen(): ReactElement {
         push: conversationId !== null,
       });
     },
-    [navigate, setDiscussionUrl, threadStepped],
+    [setDiscussionUrl],
   );
 
   const openSdlcAssistant = useCallback(
@@ -2134,6 +2206,8 @@ export default function SdlcScreen(): ReactElement {
     if (!channel || !artifactDialog || !canSubmitArtifactDialog) return;
     const folder = artifactDialog;
     const title = artifactTitle.trim();
+    // The folder page this was started from, before anything is awaited.
+    const startedOn = openFolderId;
     if (folder.kind === 'wiki') {
       const folderPath = artifactFolderPath.trim();
       const wikiResponse = await apiInstance.post<{ artifact: { canvasId: string } }>(
@@ -2178,10 +2252,7 @@ export default function SdlcScreen(): ReactElement {
     setRelatedSourceId(null);
     // Created from inside a folder, it opens as a tab there: leaving for the
     // artifacts section would close the folder you were working in.
-    if (openFolderId) {
-      openFolderPage(openFolderId, { kind: 'CANVAS', id: newCanvasId });
-      return;
-    }
+    if (openCreatedOnFolderPage([{ kind: 'CANVAS', id: newCanvasId }], startedOn)) return;
     // Same search as opening an artifact from the list, so a new artifact lands
     // with its discussion open rather than only doing so once reopened.
     const search = canvasSearch(newCanvasId, true);
@@ -2424,6 +2495,9 @@ export default function SdlcScreen(): ReactElement {
   };
 
   const isDocumentWindow = isSdlcDocumentWindow();
+  // A folder's page is open: its explorer takes the hub sidebar's place. A window of
+  // its own has no sidebar, and keeps the explorer beside the page.
+  const explorerShown = Boolean(openFolder && channel) && !isDocumentWindow;
 
   const setTrackStatusAction = async (trackId: string, status: string): Promise<void> => {
     await runTrackMutation(
@@ -2435,6 +2509,45 @@ export default function SdlcScreen(): ReactElement {
         }),
       ),
     );
+  };
+
+  /**
+   * Renames anything filed in a track, as each kind is named: a folder and an
+   * artifact by their own mutators — an artifact under its edit access — a link and
+   * an uploaded file by the hub's, which keeps a file's extension.
+   */
+  const renameItemAction = async (
+    item: { type: 'FOLDER' | 'CANVAS' | 'LINK' | 'ATTACHMENT'; id: string },
+    name: string,
+  ): Promise<void> => {
+    if (!channel) return;
+    if (item.type === 'FOLDER') {
+      await renameFolderAction(item.id, name);
+      return;
+    }
+    if (item.type === 'CANVAS') {
+      await runTrackMutation(
+        zero.mutate(mutators.canvas.update({ id: item.id, title: name, timestamp: Date.now() })),
+      );
+      return;
+    }
+    await runTrackMutation(
+      zero.mutate(
+        mutators.sdlc.renameSdlcItem({
+          itemType: item.type,
+          itemId: item.id,
+          channelId: channel.id,
+          name,
+          timestamp: Date.now(),
+        }),
+      ),
+    );
+  };
+  const renameItem = (
+    item: { type: 'FOLDER' | 'CANVAS' | 'LINK' | 'ATTACHMENT'; id: string },
+    name: string,
+  ): void => {
+    void call(`sdlc-rename-${item.id}`, () => renameItemAction(item, name), 'Renamed');
   };
 
   const renameFolderAction = async (folderId: string, name: string): Promise<void> => {
@@ -2573,11 +2686,13 @@ export default function SdlcScreen(): ReactElement {
 
   const addLinkAction = async (): Promise<void> => {
     if (!channel || !selectedTrack || !addItemParent) return;
+    const linkId = uuidv4();
+    const startedOn = openFolderId;
     await runTrackMutation(
       zero.mutate(
         mutators.sdlc.addSdlcFolderItem({
           itemType: 'LINK',
-          itemId: uuidv4(),
+          itemId: linkId,
           containmentLinkId: uuidv4(),
           flatLinkId: uuidv4(),
           channelId: channel.id,
@@ -2595,10 +2710,12 @@ export default function SdlcScreen(): ReactElement {
       ),
     );
     setAddItemParent(null);
-    returnFocusToFileList();
     setLinkUrl('');
     setLinkTitle('');
     setLinkPreview(null);
+    if (!openCreatedOnFolderPage([{ kind: 'LINK', id: linkId }], startedOn)) {
+      returnFocusToFileList();
+    }
   };
 
   const addBrowsedLink = (url: string, title: string): void => {
@@ -2622,6 +2739,7 @@ export default function SdlcScreen(): ReactElement {
   const uploadFilesAction = async (files: readonly File[]): Promise<void> => {
     const parent = addItemParent;
     if (!channel || !selectedTrack || !parent || files.length === 0) return;
+    const startedOn = openFolderId;
     const form = new FormData();
     form.append('entityType', 'SDLC_HUB');
     form.append('entityId', channel.id);
@@ -2632,11 +2750,17 @@ export default function SdlcScreen(): ReactElement {
     form.append('sdlcParentId', parent.id);
     form.append('sdlcTrackId', selectedTrack.id);
     for (const file of files) form.append('files', file);
-    await apiInstance.post('/attachments/upload', form);
+    const response = await apiInstance.post<{ attachments?: { id: string }[] }>(
+      '/attachments/upload',
+      form,
+    );
     setPendingUploads([]);
     setRefusedUploads([]);
     setAddItemParent(null);
-    returnFocusToFileList();
+    const uploaded = (response.data.attachments ?? []).map(
+      (attachment): FolderTab => ({ kind: 'ATTACHMENT', id: attachment.id }),
+    );
+    if (!openCreatedOnFolderPage(uploaded, startedOn)) returnFocusToFileList();
   };
 
   const setTrackNameAction = async (trackId: string, name: string): Promise<void> => {
@@ -3193,13 +3317,7 @@ export default function SdlcScreen(): ReactElement {
               ? (activeFolderDiscussion?.id ?? (discussionOwner ? null : selectedTrack.id))
               : null
           }
-          onRenameFolder={(folderId, name) =>
-            void call(
-              `sdlc-folder-rename-${folderId}`,
-              () => renameFolderAction(folderId, name),
-              'Folder renamed',
-            )
-          }
+          onRenameItem={(item, name) => renameItem({ type: item.kind, id: item.id }, name)}
           onSetFolderIcon={(folderId, icon) =>
             void call(
               `sdlc-folder-icon-${folderId}`,
@@ -3327,7 +3445,9 @@ export default function SdlcScreen(): ReactElement {
         style={{ width: railCollapsed ? SIDEBAR_RAIL_WIDTH : railWidth }}
         onMouseEnter={() => railCollapsed && setRailHovered(true)}
         onMouseLeave={() => setRailHovered(false)}
-        onFocusCapture={() => setSidebarFocused(true)}
+        onFocusCapture={event =>
+          setSidebarFocused(!explorerPaneRef.current?.contains(event.target))
+        }
         onBlurCapture={event => {
           if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {
             setSidebarFocused(false);
@@ -3358,205 +3478,239 @@ export default function SdlcScreen(): ReactElement {
           <div className='h-[52px] w-full shrink-0 overflow-hidden'>
             {railOpen && <AppNavigator />}
           </div>
-          <div
-            className={cn(
-              'flex min-h-0 flex-1 flex-col border-t border-sidebar-border-muted pt-3',
-              railOpen ? 'px-3' : 'px-2',
-            )}
-          >
-            <SdlcHubHeader
-              open={railOpen}
-              collapsed={railCollapsed}
-              hubName={channel.name}
-              onToggleRail={toggleRail}
-              onOpenSwitcher={() => setHubSwitcherOpen(true)}
-              onAddMembers={() => setMembersDialog(true)}
-            />
-            {railOpen && (
-              // The hub's pages stay put; Tracks and Artifacts share what is left, each
-              // scrolling on its own once they don't both fit.
-              <nav
-                aria-label='Hub'
-                className='no-scrollbar flex min-h-0 flex-1 flex-col overflow-y-auto px-0.5 pb-3'
-              >
-                <div className='shrink-0'>{sectionNavRows}</div>
-                <div className='h-5 shrink-0' />
-                <div className='flex min-h-0 flex-1 flex-col gap-3'>
-                  <SdlcSidebarGroup
-                    id='sdlc-sidebar-tracks'
-                    title='Tracks'
-                    count={openTracks.length}
-                    rows={
-                      Math.max(openTracks.length, 1) +
-                      (closedTracks.length > 0 ? 1 : 0) +
-                      (showClosedTracks ? closedTracks.length : 0)
-                    }
-                    action={{
-                      label: 'New track',
-                      trackName: 'NewTrackOpened',
-                      onClick: () => setTrackDialog(true),
-                    }}
-                  >
-                    {openTracks.map(track => (
-                      <SdlcSidebarRow
-                        key={track.id}
-                        icon={Layers}
-                        appIcon={track.icon}
-                        liveCalls={liveCallCounts.get(track.id)}
-                        label={track.name}
-                        active={selectedTrackId === track.id}
-                        title={track.description || track.name}
-                        onClick={event => openTrack(track.id, event)}
-                        trackName='TrackOpened'
-                        trackMetadata={{ trackId: track.id }}
-                      />
-                    ))}
-                    {openTracks.length === 0 && (
-                      <SdlcSidebarAddRow
-                        label='New track'
-                        onClick={() => setTrackDialog(true)}
-                        trackName='NewTrackOpened'
-                      />
-                    )}
-                    {/* Finished work is out of the way but not gone — the same place it
+          {/* Two panes in one place: the hub's, and while a folder is open its explorer,
+              which slides in over it from the right as the hub's slides out. */}
+          <div className='relative min-h-0 flex-1 overflow-hidden border-t border-sidebar-border-muted'>
+            <div
+              {...(explorerShown && { inert: true, 'aria-hidden': true })}
+              className={cn(
+                'absolute inset-0 flex flex-col pt-3 transition-transform duration-200 ease-out motion-reduce:transition-none',
+                railOpen ? 'px-3' : 'px-2',
+                explorerShown && '-translate-x-full',
+              )}
+            >
+              <SdlcHubHeader
+                open={railOpen}
+                collapsed={railCollapsed}
+                hubName={channel.name}
+                onToggleRail={toggleRail}
+                onOpenSwitcher={() => setHubSwitcherOpen(true)}
+                onAddMembers={() => setMembersDialog(true)}
+              />
+              {railOpen && (
+                // The hub's pages stay put; Tracks and Artifacts share what is left, each
+                // scrolling on its own once they don't both fit.
+                <nav
+                  aria-label='Hub'
+                  className='no-scrollbar flex min-h-0 flex-1 flex-col overflow-y-auto px-0.5 pb-3'
+                >
+                  <div className='shrink-0'>{sectionNavRows}</div>
+                  <div className='h-5 shrink-0' />
+                  <div className='flex min-h-0 flex-1 flex-col gap-3'>
+                    <SdlcSidebarGroup
+                      id='sdlc-sidebar-tracks'
+                      title='Tracks'
+                      count={openTracks.length}
+                      rows={
+                        Math.max(openTracks.length, 1) +
+                        (closedTracks.length > 0 ? 1 : 0) +
+                        (showClosedTracks ? closedTracks.length : 0)
+                      }
+                      action={{
+                        label: 'New track',
+                        trackName: 'NewTrackOpened',
+                        onClick: () => setTrackDialog(true),
+                      }}
+                    >
+                      {openTracks.map(track => (
+                        <SdlcSidebarRow
+                          key={track.id}
+                          icon={Layers}
+                          appIcon={track.icon}
+                          liveCalls={liveCallCounts.get(track.id)}
+                          label={track.name}
+                          active={selectedTrackId === track.id}
+                          title={track.description || track.name}
+                          onClick={event => openTrack(track.id, event)}
+                          trackName='TrackOpened'
+                          trackMetadata={{ trackId: track.id }}
+                        />
+                      ))}
+                      {openTracks.length === 0 && (
+                        <SdlcSidebarAddRow
+                          label='New track'
+                          onClick={() => setTrackDialog(true)}
+                          trackName='NewTrackOpened'
+                        />
+                      )}
+                      {/* Finished work is out of the way but not gone — the same place it
                       would be looked for. */}
-                    {closedTracks.length > 0 && (
-                      <>
-                        <button
-                          type='button'
-                          onClick={() => setShowClosedTracks(!showClosedTracks)}
-                          className='flex h-8 w-full items-center rounded-[10px] px-3 text-left text-xs text-sidebar-foreground/60 transition-colors hover:text-sidebar-accent-foreground'
-                          data-track-category='SdlcHub'
-                          data-track-name='ClosedTracksToggled'
-                        >
-                          {showClosedTracks
-                            ? 'Hide completed & parked'
-                            : `Show ${closedTracks.length} completed & parked`}
-                        </button>
-                        {showClosedTracks &&
-                          closedTracks.map(track => (
-                            <SdlcSidebarRow
-                              key={track.id}
-                              icon={Layers}
-                              appIcon={track.icon}
-                              liveCalls={liveCallCounts.get(track.id)}
-                              label={track.name}
-                              muted
-                              active={selectedTrackId === track.id}
-                              title={track.description || track.name}
-                              onClick={event => openTrack(track.id, event)}
-                              trackName='TrackOpened'
-                              trackMetadata={{ trackId: track.id }}
-                            />
-                          ))}
-                      </>
-                    )}
-                  </SdlcSidebarGroup>
-                  <SdlcSidebarGroup
-                    id='sdlc-sidebar-artifacts'
-                    title='Artifacts'
-                    count={typeFolders.length}
-                    rows={Math.max(typeFolders.length, 1)}
-                    action={{
-                      label: 'New artifact type',
-                      trackName: 'NewArtifactTypeClicked',
-                      onClick: openNewArtifactType,
-                    }}
-                  >
-                    {typeFolders.map(folder => {
-                      const isActive =
-                        section === 'artifacts' && activeTypeFolder?.id === folder.id;
-                      const isRenaming = renameTypeId === folder.id;
-                      return (
-                        <div
-                          key={folder.id}
-                          className='group relative'
-                          onMouseEnter={() => setHoveredTypeId(folder.id)}
-                          onMouseLeave={() =>
-                            setHoveredTypeId(current => (current === folder.id ? null : current))
-                          }
-                        >
-                          {isRenaming ? (
-                            <div className='flex h-9 w-full items-center gap-3 rounded-[10px] border border-sidebar-border bg-sidebar-accent px-3'>
-                              <SdlcSidebarRowIcon icon={Folder} />
-                              <input
-                                autoFocus
-                                onFocus={event => event.currentTarget.select()}
-                                value={renameTypeName}
-                                onChange={event => setRenameTypeName(event.target.value)}
-                                onBlur={() => void renameArtifactType(folder.id, renameTypeName)}
-                                onKeyDown={event => {
-                                  if (event.key === 'Enter')
-                                    void renameArtifactType(folder.id, renameTypeName);
-                                  if (event.key === 'Escape') {
-                                    setRenameTypeId(null);
-                                    setRenameTypeName('');
-                                  }
-                                }}
-                                className='h-6 min-w-0 flex-1 rounded-[6px] border border-sidebar-accent-ring bg-background px-1.5 text-sm outline-none'
-                                data-track-category='SdlcHub'
-                                data-track-name='ArtifactTypeRenamed'
+                      {closedTracks.length > 0 && (
+                        <>
+                          <button
+                            type='button'
+                            onClick={() => setShowClosedTracks(!showClosedTracks)}
+                            className='flex h-8 w-full items-center rounded-[10px] px-3 text-left text-xs text-sidebar-foreground/60 transition-colors hover:text-sidebar-accent-foreground'
+                            data-track-category='SdlcHub'
+                            data-track-name='ClosedTracksToggled'
+                          >
+                            {showClosedTracks
+                              ? 'Hide completed & parked'
+                              : `Show ${closedTracks.length} completed & parked`}
+                          </button>
+                          {showClosedTracks &&
+                            closedTracks.map(track => (
+                              <SdlcSidebarRow
+                                key={track.id}
+                                icon={Layers}
+                                appIcon={track.icon}
+                                liveCalls={liveCallCounts.get(track.id)}
+                                label={track.name}
+                                muted
+                                active={selectedTrackId === track.id}
+                                title={track.description || track.name}
+                                onClick={event => openTrack(track.id, event)}
+                                trackName='TrackOpened'
+                                trackMetadata={{ trackId: track.id }}
                               />
-                            </div>
-                          ) : (
-                            <>
-                              <button
-                                type='button'
-                                onClick={() =>
-                                  navigateWithinSdlc(
-                                    `/sdlc/${channelId}/artifacts`,
-                                    `?type=${encodeURIComponent(folder.id)}`,
-                                  )
-                                }
-                                {...(isActive && { 'aria-current': 'page' as const })}
-                                className={cn(
-                                  sdlcSidebarRowClass(isActive),
-                                  !isActive &&
-                                    'group-hover:bg-sidebar-accent group-hover:text-sidebar-accent-foreground',
-                                )}
-                                data-track-category='SdlcHub'
-                                data-track-name='SectionChanged'
-                                data-track-metadata={JSON.stringify({
-                                  type: folder.id,
-                                  channelId: channel.id,
-                                })}
-                              >
+                            ))}
+                        </>
+                      )}
+                    </SdlcSidebarGroup>
+                    <SdlcSidebarGroup
+                      id='sdlc-sidebar-artifacts'
+                      title='Artifacts'
+                      count={typeFolders.length}
+                      rows={Math.max(typeFolders.length, 1)}
+                      action={{
+                        label: 'New artifact type',
+                        trackName: 'NewArtifactTypeClicked',
+                        onClick: openNewArtifactType,
+                      }}
+                    >
+                      {typeFolders.map(folder => {
+                        const isActive =
+                          section === 'artifacts' && activeTypeFolder?.id === folder.id;
+                        const isRenaming = renameTypeId === folder.id;
+                        return (
+                          <div
+                            key={folder.id}
+                            className='group relative'
+                            onMouseEnter={() => setHoveredTypeId(folder.id)}
+                            onMouseLeave={() =>
+                              setHoveredTypeId(current => (current === folder.id ? null : current))
+                            }
+                          >
+                            {isRenaming ? (
+                              <div className='flex h-9 w-full items-center gap-3 rounded-[10px] border border-sidebar-border bg-sidebar-accent px-3'>
                                 <SdlcSidebarRowIcon icon={Folder} />
-                                <span className='min-w-0 flex-1 truncate text-left'>
-                                  {folder.name}
-                                </span>
-                              </button>
-                              <button
-                                type='button'
-                                title='Rename (F2)'
-                                aria-label={`Rename ${folder.name}`}
-                                onClick={event => {
-                                  event.stopPropagation();
-                                  setRenameTypeId(folder.id);
-                                  setRenameTypeName(folder.name);
-                                }}
-                                className='absolute right-2 top-1/2 hidden size-6 -translate-y-1/2 items-center justify-center rounded-md text-sidebar-foreground/70 hover:bg-sidebar-border hover:text-sidebar-accent-foreground group-hover:flex'
-                                data-track-category='SdlcHub'
-                                data-track-name='ArtifactTypeRenameStarted'
-                              >
-                                <Pencil size={13} />
-                              </button>
-                            </>
-                          )}
-                        </div>
-                      );
-                    })}
-                    {typeFolders.length === 0 && (
-                      <SdlcSidebarAddRow
-                        label='New artifact type'
-                        onClick={openNewArtifactType}
-                        trackName='NewArtifactTypeClicked'
-                      />
-                    )}
-                  </SdlcSidebarGroup>
+                                <input
+                                  autoFocus
+                                  onFocus={event => event.currentTarget.select()}
+                                  value={renameTypeName}
+                                  onChange={event => setRenameTypeName(event.target.value)}
+                                  onBlur={() => void renameArtifactType(folder.id, renameTypeName)}
+                                  onKeyDown={event => {
+                                    if (event.key === 'Enter')
+                                      void renameArtifactType(folder.id, renameTypeName);
+                                    if (event.key === 'Escape') {
+                                      setRenameTypeId(null);
+                                      setRenameTypeName('');
+                                    }
+                                  }}
+                                  className='h-6 min-w-0 flex-1 rounded-[6px] border border-sidebar-accent-ring bg-background px-1.5 text-sm outline-none'
+                                  data-track-category='SdlcHub'
+                                  data-track-name='ArtifactTypeRenamed'
+                                />
+                              </div>
+                            ) : (
+                              <>
+                                <button
+                                  type='button'
+                                  onClick={() =>
+                                    navigateWithinSdlc(
+                                      `/sdlc/${channelId}/artifacts`,
+                                      `?type=${encodeURIComponent(folder.id)}`,
+                                    )
+                                  }
+                                  {...(isActive && { 'aria-current': 'page' as const })}
+                                  className={cn(
+                                    sdlcSidebarRowClass(isActive),
+                                    !isActive &&
+                                      'group-hover:bg-sidebar-accent group-hover:text-sidebar-accent-foreground',
+                                  )}
+                                  data-track-category='SdlcHub'
+                                  data-track-name='SectionChanged'
+                                  data-track-metadata={JSON.stringify({
+                                    type: folder.id,
+                                    channelId: channel.id,
+                                  })}
+                                >
+                                  <SdlcSidebarRowIcon icon={Folder} />
+                                  <span className='min-w-0 flex-1 truncate text-left'>
+                                    {folder.name}
+                                  </span>
+                                </button>
+                                <button
+                                  type='button'
+                                  title='Rename (F2)'
+                                  aria-label={`Rename ${folder.name}`}
+                                  onClick={event => {
+                                    event.stopPropagation();
+                                    setRenameTypeId(folder.id);
+                                    setRenameTypeName(folder.name);
+                                  }}
+                                  className='absolute right-2 top-1/2 hidden size-6 -translate-y-1/2 items-center justify-center rounded-md text-sidebar-foreground/70 hover:bg-sidebar-border hover:text-sidebar-accent-foreground group-hover:flex'
+                                  data-track-category='SdlcHub'
+                                  data-track-name='ArtifactTypeRenameStarted'
+                                >
+                                  <Pencil size={13} />
+                                </button>
+                              </>
+                            )}
+                          </div>
+                        );
+                      })}
+                      {typeFolders.length === 0 && (
+                        <SdlcSidebarAddRow
+                          label='New artifact type'
+                          onClick={openNewArtifactType}
+                          trackName='NewArtifactTypeClicked'
+                        />
+                      )}
+                    </SdlcSidebarGroup>
+                  </div>
+                </nav>
+              )}
+            </div>
+            <div
+              ref={explorerPaneRef}
+              {...(!explorerShown && { inert: true, 'aria-hidden': true })}
+              className={cn(
+                'absolute inset-0 flex flex-col pt-3 transition-transform duration-200 ease-out motion-reduce:transition-none',
+                railOpen ? 'px-3' : 'px-2',
+                !explorerShown && 'translate-x-full',
+              )}
+            >
+              <SdlcExplorerHeader
+                open={railOpen}
+                collapsed={railCollapsed}
+                trackName={selectedTrack?.name ?? 'Track'}
+                onToggleRail={toggleRail}
+                onBack={closeFolderPage}
+              />
+              {railOpen && (
+                // Titled as the hub sidebar's groups are.
+                <div className='flex h-8 shrink-0 items-center pl-3 text-[13px] font-semibold text-sidebar-foreground/70'>
+                  Explorer
                 </div>
-              </nav>
-            )}
+              )}
+              {/* Kept in the page while the rail is folded, so the tree keeps its place. */}
+              <div
+                ref={setExplorerSlot}
+                className={cn('-mx-1 flex min-h-0 flex-1 flex-col', !railOpen && 'hidden')}
+              />
+            </div>
           </div>
         </div>
         {!railCollapsed && (
@@ -3600,7 +3754,12 @@ export default function SdlcScreen(): ReactElement {
                 'z-10 flex h-[52px] shrink-0 items-center justify-between gap-4 border-b bg-background/95 backdrop-blur',
                 // On a track's page the bar is the page's heading, so it lines up with
                 // the page, and the tab row under it draws the rule.
-                onTrackPage ? 'border-transparent px-7' : 'px-5',
+                onTrackPage
+                  ? 'border-transparent px-7'
+                  : section === 'tracks' && openFolder
+                    ? // The tabs run close to both edges, as an editor's do.
+                      'px-3'
+                    : 'px-5',
               )}
             >
               <div className='flex min-w-0 flex-1 items-center gap-2'>
@@ -3620,20 +3779,25 @@ export default function SdlcScreen(): ReactElement {
                 ) : null}
                 {section === 'tracks' && openFolder ? (
                   <>
-                    <button
-                      type='button'
-                      onClick={closeFolderPage}
-                      title={`Back to ${selectedTrack?.name ?? 'the track'}`}
-                      aria-label={`Back to ${selectedTrack?.name ?? 'the track'}`}
-                      className='-ml-1.5 flex size-7 shrink-0 items-center justify-center rounded-[7px] text-muted-foreground transition-colors hover:bg-muted hover:text-foreground'
-                      data-track-category='SdlcHub'
-                      data-track-name='FolderPageClosed'
-                    >
-                      <ChevronRight size={16} className='rotate-180' />
-                    </button>
+                    {/* The way back to the track is the explorer's, in the sidebar — but
+                        a folder in a window of its own has no sidebar, so it is here. */}
+                    {isDocumentWindow && (
+                      <button
+                        type='button'
+                        onClick={closeFolderPage}
+                        title={`Back to ${selectedTrack?.name ?? 'the track'}`}
+                        aria-label={`Back to ${selectedTrack?.name ?? 'the track'}`}
+                        className='flex size-7 shrink-0 items-center justify-center rounded-[7px] text-muted-foreground transition-colors hover:bg-muted hover:text-foreground'
+                        data-track-category='SdlcHub'
+                        data-track-name='FolderPageClosed'
+                      >
+                        <ChevronRight size={16} className='rotate-180' />
+                      </button>
+                    )}
+                    {/* The folder page's tabs. */}
                     <div
                       ref={setFolderTabsSlot}
-                      className='-mr-[10px] flex h-[52px] min-w-0 flex-1 items-stretch'
+                      className='flex h-full min-w-0 flex-1 items-center'
                     />
                   </>
                 ) : section === 'releases' && openReleaseId ? (
@@ -3707,7 +3871,9 @@ export default function SdlcScreen(): ReactElement {
                   </h1>
                 )}
               </div>
-              <div className='flex shrink-0 items-center gap-1.5'>
+              {/* Empty while the discussion panel holds these: gone then, so the header's
+                  gap doesn't leave a hole at the end of the bar. */}
+              <div className='flex shrink-0 items-center gap-1.5 empty:hidden'>
                 {selectedCanvasId && !openFolder && isElectronApp() && !isDocumentWindow ? (
                   <Button
                     size='icon'
@@ -3760,31 +3926,35 @@ export default function SdlcScreen(): ReactElement {
                   folder={openFolder}
                   rootType={openFolderIsTrack ? 'TRACK' : 'FOLDER'}
                   activeTab={activeFolderTab}
-                  onOpenTab={tab => openFolderPage(openFolder.id, tab)}
+                  onOpenTab={openFolderTab}
+                  onRenameItem={renameItem}
                   onDiscuss={item => {
-                    // The chat icon means the same thing on every row: open this
-                    // and show its conversations.
-                    if (item.type === 'FOLDER') {
-                      // The root row of a track's page is the track itself, and
-                      // a track's conversations are not a folder's.
-                      if (item.id === selectedTrackId) {
-                        openConversations();
-                        return;
-                      }
-                      openItemConversations({ type: 'FOLDER', id: item.id, name: item.name });
+                    // The chat icon is the panel's, and leaves the tabs alone: on the
+                    // row it is showing, it puts the panel away.
+                    const about =
+                      item.type === 'FOLDER' && item.id === selectedTrackId ? null : item;
+                    const showing = showRightPanel
+                      ? (activeFolderDiscussion?.id ?? selectedTrackId)
+                      : null;
+                    if (showing === item.id) {
+                      closeConversations();
                       return;
                     }
-                    const kind = item.type;
-                    openFolderPage(openFolder.id, { kind, id: item.id }, undefined, true);
+                    // The root row of a track's page is the track itself, and a
+                    // track's conversations are not a folder's.
+                    if (!about) {
+                      openConversations();
+                      return;
+                    }
+                    openItemConversations({ type: about.type, id: about.id, name: about.name });
                   }}
                   discussingId={
-                    showRightPanel
-                      ? (activeFolderDiscussion?.id ?? discussionOwner?.canvasId ?? null)
-                      : null
+                    showRightPanel ? (activeFolderDiscussion?.id ?? selectedTrackId ?? null) : null
                   }
                   onNewFolder={parent => setNewFolderParent(folderPageParent(parent))}
                   onAddItem={(tab, parent) => openAddItemDialog(tab, folderPageParent(parent))}
                   tabsContainer={folderTabsSlot}
+                  explorerContainer={isDocumentWindow ? null : explorerSlot}
                   onAddLink={addBrowsedLink}
                   onMoveItem={(item, parentFolderId) =>
                     void call(
@@ -4128,14 +4298,14 @@ export default function SdlcScreen(): ReactElement {
                       }}
                       threadSubject={threadSubject}
                     />
-                  ) : discussionOwner && discussionSurface ? (
+                  ) : panelCanvasOwner && discussionSurface ? (
                     <SdlcChatPanel
-                      key={`discussion-${discussionOwner.canvasId}`}
+                      key={`discussion-${panelCanvasOwner.canvasId}`}
                       channelId={channel.id}
                       discussion={{
                         ...(repo && { repoId: repo.id }),
                         ownerType: 'CANVAS',
-                        ownerId: discussionOwner.canvasId,
+                        ownerId: panelCanvasOwner.canvasId,
                         surfaceType: discussionSurface.type,
                         surfaceId: discussionSurface.id,
                       }}
@@ -4147,7 +4317,7 @@ export default function SdlcScreen(): ReactElement {
                       onAskAI={openSdlcAssistant}
                       onClose={closeConversations}
                       listActions={panelScopeActions('panel')}
-                      title={discussionOwner.title}
+                      title={panelCanvasOwner.title}
                       threadSubject={threadSubject}
                     />
                   ) : hubCallThreadOwner ? (

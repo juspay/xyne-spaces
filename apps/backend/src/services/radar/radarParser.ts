@@ -69,6 +69,23 @@ export interface ParserOperation {
   reason?: string;
 }
 
+/** A merged pull request, as the PR-merge pass hands it to the model. */
+export interface ParserPrMerged {
+  url: string;
+  number: number;
+  title: string;
+  repo: string;
+  merged_by: string;
+  base_branch: string;
+}
+
+/**
+ * The single-signal passes. Each is keyed by the field the model reads, so the
+ * value is spread into the input as-is and the prompt section for that key is
+ * the one that applies. Absent on an ordinary window parse.
+ */
+export type ParserPass = { reaction: { by: string; emoji: string } } | { pr_merged: ParserPrMerged };
+
 export interface ParsedTransitions {
   operations: ParserOperation[];
   /** The model's one-sentence read of the window — why these ops, or why none. */
@@ -143,6 +160,7 @@ You receive one thread's current state as a JSON object with these keys:
 - context_messages: the last few ALREADY-PROCESSED messages from just before new_messages, oldest first. Read them to understand what the thread is about, but they were handled in earlier passes: never cite one as a sourceMessageId, and never create an item for an ask that appears only there.
 - known_users: id -> name for everyone involved so far (authors, mentions, item participants). Use it to match a name in prose to an id.
 - reaction: present ONLY on a reaction pass (see REACTION PASS). Absent on an ordinary window parse.
+- pr_merged: present ONLY on a PR merge pass (see PR MERGE PASS). Absent on an ordinary window parse.
 
 ### THREADS
 Messages and open items may carry a "thread" label (T1, T2 …). Messages sharing a label are replies within one thread; "thread_role" marks the one that opened it. A message with thread null was posted into the main flow, not into any thread. The transcript is ordered by TIME ALONE, so a reply can be separated from the rest of its thread by unrelated messages sent in between — two adjacent messages are not necessarily about the same thing. When a short message carries no subject of its own ("done", "approved", "not needed", "ok that works"), attach it to the open item and the messages sharing ITS thread label, never to whatever merely precedes it in time. An item carrying a thread label was raised in that thread. If such a message's thread has no matching open item and nothing in context explains it, produce NO operation and say so in the assessment — do not attach it to the nearest open item. The labels are internal bookkeeping and are rebuilt every parse, so NEVER name one in the assessment: identify a thread by what it is about ("the PR review thread", "the thread about the branch cut") or by its opening message, never as "T1".
@@ -177,6 +195,16 @@ The only legal operation on a reaction pass is "resolve", and an empty operation
   - the emoji asserts COMPLETION — a tick, a check mark, "done", "shipped", "fixed". An emoji meaning seen, received or in progress ("eyes", "on-it", "checking", "reviewing", a thumbs-up) is NOT completion; nor is a celebration, a joke or a heart. Beware negations: "not-done" is not a completion. When an emoji could plausibly mean either, treat it as acknowledgement and emit nothing.
   - the reacted message settles ONE specific open item, per the resolve rule above. An item whose source_message_id equals the reacted message's id was RAISED BY that message: a completion emoji there is not a comment on a delivery, it is the reactor asserting that item is now finished — resolve it.
 Topical overlap is not settlement: a tick on a lunch plan settles nothing, even when the reactor holds open work in the thread. If two items fit equally well, emit nothing — a wrong close costs more than a missed one.
+
+### PR MERGE PASS
+When "pr_merged" is present, nobody typed anything: a pull request was merged, and new_messages holds ONE synthetic message describing that merge. It is not from a person. open_items has already been narrowed to ONE thread tied to that PR (a thread where its link was posted, or the ticket it was raised for), and context_messages holds the message each item was raised from plus the messages that posted the PR's link — use those to tell which PR an ask like "review this" meant.
+
+The only legal operation on a PR merge pass is "resolve", citing the synthetic message as sourceMessageId, and an empty operations array is the normal answer. Resolve an item only when the merge of THIS pull request is itself the delivery, per the resolve rule above:
+  - the ask was to merge, land or get in this specific PR or the change it carries ("merge PR 42", "can you get the fix for the login bug merged", "raise and merge the PR for this ticket"), and the merged PR is that change; or
+  - the ask was to review or approve THIS PR — once it is merged there is nothing left to review.
+Judge every open item on its own: one merge often settles several at once (the ask to merge it AND the ask to review it), and resolving one never rules out another.
+Match an item by what it is ABOUT, never by where it was asked. An item is settled only when it is about THIS pull request: its title or context names this PR's number or link, or plainly describes the change named in the merged PR's title. People often ask about several PRs in one message; an item about another PR ("review my cache warmup PR" when the merged PR is "bump ci image") is NOT settled because it was asked in the same message as this PR's link. If no open item is about this PR, emit nothing.
+An ask that merely mentions the PR but wants something beyond the merge is NOT settled: deploying it, releasing it, testing or verifying it in an environment, back-porting it, writing docs or notes about it, or answering a question about it. Merging is not deploying. An ask about a DIFFERENT PR, or about work the PR title does not plainly cover, is not settled either. If it is unclear whether the merge delivers the ask, emit nothing — a wrong close costs more than a missed one.
 
 ### CHATTER VS. REAL ASKS
 Be conservative about chatter: greetings, acknowledgements, thanks, FYIs and status updates someone volunteers produce NO operations — an empty operations array is the normal answer for such windows. One exception, and it is not chatter: when an open item on that subject is OWNERLESS (pending_on: []), an author saying they are handling it is claiming work nobody held — reassign it to them. "I am looking into this" against an ownerless item is a claim; the same words against an item that already has an owner are a status update and produce nothing. A bare @mention with no request text is a HANDOFF, not noise: tagging someone under shared content (a report, a table, a log, an error) or into a thread puts that content in front of them — create an item pending on the mentioned user, titled from what the content or thread is about (e.g. "Review the tagging coverage report"). The ONLY exception is an explicit cc: when the message itself marks the mention as informational — "cc @x", "fyi @x", "looping in @x for visibility" — it is not an ask, create nothing. This holds even when the rest of the message carries real content — a diagnosis, a plan, a "Fix:" line: a user the message cc's is never pendingOn for anything that message raises, and an author describing work they will do themselves is claiming the existing item (leave it on them), not opening a new one on the people cc'd. But do not confuse conservatism with dropping real asks: a request or question directed at a mentioned user is never chatter.
@@ -321,7 +349,7 @@ class RadarParser {
     newMessages: ParserWindowMessage[],
     knownUsers: Record<string, string> = {},
     contextMessages: ParserWindowMessage[] = [],
-    reaction?: { by: string; emoji: string },
+    pass?: ParserPass,
     semanticCheck?: SemanticCheck,
   ): Promise<ParsedTransitions> {
     const { apiKey, baseUrl, keyName } = this.resolveAuth();
@@ -342,7 +370,7 @@ class RadarParser {
         text: m.text.slice(0, MAX_MESSAGE_TEXT_CHARS),
       })),
       known_users: knownUsers,
-      ...(reaction ? { reaction } : {}),
+      ...(pass ?? {}),
     };
 
     const messages = [
