@@ -209,7 +209,7 @@ export const ConnectedSlackSection: React.FC<ConnectedSlackSectionProps> = ({
         bullets={[
           'New Slack messages will stop creating tickets immediately.',
           'Other Slack channels and sources on this desk are unaffected.',
-          'Existing tickets are kept but can’t be replied to until you reconnect, and anything sent while disconnected is lost — reconnecting does not backfill it.',
+          'Existing tickets are kept, but anything sent while disconnected is lost — reconnecting does not backfill it.',
         ]}
         isPending={disconnectMutation.isPending}
         onConfirm={() => pendingDisconnect && disconnectMutation.mutate(pendingDisconnect)}
