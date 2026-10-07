@@ -2,6 +2,7 @@ import crypto from 'crypto';
 import axios from 'axios';
 import { config } from '@/config/env';
 import { logger } from '@/utils/logger';
+import { SenderNameCache } from '../shared/senderNameCache';
 
 const IG_API_VERSION = 'v25.0';
 const IG_REQUEST_TIMEOUT_MS = 10_000;
@@ -33,6 +34,8 @@ export interface ExchangeTokenResult {
   token_type: string;
   expires_in: number;
 }
+
+const usernameCache = new SenderNameCache();
 
 export const metaGraphClient = {
   // Send a DM from the business IG account to a customer.
@@ -172,43 +175,19 @@ export const metaGraphClient = {
     return response.data;
   },
 
-  // In-process cache so we don't call Meta's profile API on every single DM.
-  // Key: `${businessIgsid}:${senderIgsid}`, value: { username, expiresAt }. Capped at 500 entries.
-  // Eviction is approximate LRU: Map preserves insertion order; on a cache hit we
-  // delete + re-insert so the entry moves to the tail (most-recently-used). On overflow
-  // we delete the head (least-recently-used).
-  // TTL is 24h so a username change is picked up on the next DM after expiry.
-  _usernameCache: new Map<string, { username: string; expiresAt: number }>(),
-  _usernameCacheMaxSize: 500,
-  _usernameCacheTtlMs: 24 * 60 * 60 * 1000,
-
+  // Cached per business account (see SenderNameCache) so the profile API is not hit on every DM.
   async getSenderUsername(
     accessToken: string,
     businessIgsid: string,
     senderIgsid: string
   ): Promise<string | null> {
     const cacheKey = `${businessIgsid}:${senderIgsid}`;
-    const cached = this._usernameCache.get(cacheKey);
-    if (cached !== undefined && cached.expiresAt > Date.now()) {
-      // Refresh LRU position: move to tail so this entry is the last evicted.
-      this._usernameCache.delete(cacheKey);
-      this._usernameCache.set(cacheKey, cached);
-      return cached.username;
-    }
+    const cached = usernameCache.get(cacheKey);
+    if (cached !== undefined) return cached;
     try {
       const profile = await this.getUserProfile(accessToken, senderIgsid);
       const username = profile.username ?? null;
-      if (username) {
-        if (this._usernameCache.size >= this._usernameCacheMaxSize) {
-          // Evict least-recently-used (head of Map iteration order).
-          const firstKey = this._usernameCache.keys().next().value;
-          if (firstKey !== undefined) this._usernameCache.delete(firstKey);
-        }
-        this._usernameCache.set(cacheKey, {
-          username,
-          expiresAt: Date.now() + this._usernameCacheTtlMs,
-        });
-      }
+      if (username) usernameCache.set(cacheKey, username);
       return username;
     } catch {
       return null;
