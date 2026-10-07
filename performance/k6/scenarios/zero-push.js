@@ -1,6 +1,6 @@
-// Write load for POST /api/zero/push — the mutation path behind the chat send action, and
-// the Wave 1 first milestone in docs/performance-testing-priority-decision.md. Production
-// carries ~1.1M pushes per fortnight at a p95 near 976ms.
+// Write load for POST /api/zero/push — the mutation path behind the chat send action.
+// Production carries roughly 1.1M pushes per fortnight at a p95 near 976ms, making this
+// the highest-value write path to measure.
 //
 // WHAT THIS MEASURES: authentication, the per-user Zero rate limiter, ACL wrapping, the
 // `messages.send` mutator itself, and the work it schedules — Vespa indexing jobs, unread

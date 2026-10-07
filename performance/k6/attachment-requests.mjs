@@ -1,7 +1,6 @@
-// Read-only load for attachment retrieval — Wave 2 in
-// docs/performance-testing-priority-decision.md: 1.0M downloads over fourteen days at a
-// p99 of roughly 2.5s, where the cost is GCS retrieval and access checking rather than
-// application logic.
+// Read-only load for attachment retrieval. Production carried roughly 1.0M downloads over
+// fourteen days at a p99 near 2.5s, where the cost is object-storage retrieval and access
+// checking rather than application logic.
 //
 // Pure data and functions only — no k6 globals — so the k6 scenario and the Node test
 // suite can both import it.

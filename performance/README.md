@@ -50,12 +50,12 @@ It writes a message row per iteration and no reset exists yet, so `pnpm perf:run
 named `messaging`: the chat UI does not use this endpoint, so its numbers must not be read as the
 user-facing send path.
 
-## Coverage against the approved priority
+## Coverage
 
-`docs/performance-testing-priority-decision.md` approved **Wave 1** as the connected pipeline —
-`/api/zero/push`, `/api/zero/query`, `POST /api/conversations/:id/messages`, Socket.IO, Redis
-pub/sub, typing/presence, unread counts and message side effects — with steady-state **message
-send** as the first implementation milestone.
+The highest-risk area identified from production telemetry is the connected real-time
+pipeline — `/api/zero/push`, `/api/zero/query`, `POST /api/conversations/:id/messages`,
+Socket.IO, Redis pub/sub, typing and presence, unread counts and message side effects —
+with steady-state message send as the first milestone.
 
 What is built here covers a slice of that, and the gap is deliberate, not forgotten:
 
