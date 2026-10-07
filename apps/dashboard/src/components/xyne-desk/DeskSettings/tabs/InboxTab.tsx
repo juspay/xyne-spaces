@@ -14,7 +14,7 @@ import { DeskIntegrationCard } from '../../DeskIntegrationCard/DeskIntegrationCa
 import { SlackDeskIntegrationCard } from '../../DeskIntegrationCard/SlackDeskIntegrationCard';
 import { SocialMediaDeskIntegrationCard } from '../../DeskIntegrationCard/SocialMediaDeskIntegrationCard';
 import { AppStoreDeskIntegrationCard } from '../../DeskIntegrationCard/AppStoreDeskIntegrationCard';
-import { InstagramDeskIntegrationCard } from '../../DeskIntegrationCard/InstagramDeskIntegrationCard';
+import { MetaDeskIntegrationCard } from '../../DeskIntegrationCard/MetaDeskIntegrationCard';
 import { ConnectedAppsSection } from '../ConnectedAppsSection';
 import { ConnectedSlackSection } from '../ConnectedSlackSection';
 import { InlineSignatureEditor } from '../InlineSignatureEditor';
@@ -172,7 +172,12 @@ export const InboxTab: React.FC<InboxTabProps> = ({ channelId, form, signatures 
       {isSlack && <SlackDeskIntegrationCard channelId={channelId} canManage={canManage} />}
       {isSocial && <SocialMediaDeskIntegrationCard channelId={channelId} canManage={canManage} />}
       {isSocial && <AppStoreDeskIntegrationCard channelId={channelId} canManage={canManage} />}
-      {isSocial && <InstagramDeskIntegrationCard channelId={channelId} canManage={canManage} />}
+      {isSocial && (
+        <MetaDeskIntegrationCard provider='instagram' channelId={channelId} canManage={canManage} />
+      )}
+      {isSocial && (
+        <MetaDeskIntegrationCard provider='facebook' channelId={channelId} canManage={canManage} />
+      )}
       {/*
         Single owner of app connections on every desk type, APP included. Apps are the
         one source type that went 1:N per channel, so unlike Slack/social they cannot be
