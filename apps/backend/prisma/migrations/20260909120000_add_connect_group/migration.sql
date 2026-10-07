@@ -19,3 +19,5 @@ CREATE TABLE "public"."connect_group" (
 -- via its leftmost prefix, so no standalone connectId index is created. entityId / hostWorkspaceId
 -- indexes are intentionally omitted — nothing queries connect_group by them in Phase 1.
 CREATE UNIQUE INDEX "connect_group_connectId_invitedWorkspaceId_key" ON "public"."connect_group"("connectId", "invitedWorkspaceId");
+CREATE INDEX CONCURRENTLY IF NOT EXISTS "connect_group_hostWorkspaceId_idx" ON "public"."connect_group"("hostWorkspaceId");
+CREATE INDEX CONCURRENTLY IF NOT EXISTS "connect_group_invitedWorkspaceId_idx" ON "public"."connect_group"("invitedWorkspaceId");
