@@ -1,3 +1,11 @@
+## [1.470.0](https://github.com/juspay/xyne-spaces/compare/v1.469.2...v1.470.0) (2026-10-07)
+
+
+### Features
+
+* suggest to users to use more ([#1096](https://github.com/juspay/xyne-spaces/issues/1096)) ([d31017b](https://github.com/juspay/xyne-spaces/commit/d31017bdb8ebab46c3ed138785f3e99f56752c77))
+* Update mapper and add new sdk routes ([#2677](https://github.com/juspay/xyne-spaces/issues/2677)) ([396d4f8](https://github.com/juspay/xyne-spaces/commit/396d4f888daf970284df563c30e7f6e720f0cd00))
+
 ## [1.469.2](https://github.com/juspay/xyne-spaces/compare/v1.469.1...v1.469.2) (2026-10-07)
 
 
