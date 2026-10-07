@@ -1,7 +1,7 @@
 # Xyne Desk recipients and filters
 
 ## Reply recipients and Desk filters remain correct
-* using browser
+* using a browser with viewport "1920"x"1080"
 * Ensuring user "admin-1" is logged in
 * Creating personal Desk channel "channel-desk-recipients-filters" for user "admin-1" in project "project-1"
 * generating mock incoming Desk email "recipient-filter-mail-1" with reply-all recipients and attachment

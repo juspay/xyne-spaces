@@ -14,6 +14,9 @@ export interface MockDeskMailFixture {
   messageId: string;
   channelAlias?: string;
   conversationId?: string;
+  // Set for mails sent through the Desk composer UI: the visible text typed.
+  // The composer decorates the stored HTML, so ingestion compares text only.
+  composedText?: string;
   ticketId?: string;
   xyneId?: string;
 }

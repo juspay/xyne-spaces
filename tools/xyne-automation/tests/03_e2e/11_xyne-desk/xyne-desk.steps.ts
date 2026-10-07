@@ -82,6 +82,10 @@ interface ConnectedDeskSourceStatus {
 
 const DEFAULT_DESK_API_USER_ALIAS = 'admin-1';
 const DESK_UI_TIMEOUT_MS = config.timeout * 2;
+// The bulk Pub/Sub route ingests messages through the real pipeline one by one;
+// without Vespa/LLM in the Docker stack each one spends several seconds in
+// timeouts, so the request budget scales with the batch size.
+const PUBSUB_PER_MESSAGE_TIMEOUT_MS = 15_000;
 
 function assertFixture(alias: string): MockDeskMailFixture {
   const fixture = mockDeskMails.get(alias);
@@ -186,6 +190,81 @@ async function ensureBrowserAuthenticatedForDesk(
 
   await mirrorBackendAuthCookiesToDashboard(testContext.currentSession.context, response);
   await assertDashboardAuthCookieForWorkspace(storedUser.workspaceId, userAlias);
+}
+
+// The ticket page also hosts the internal-thread chat editor, so a bare
+// [contenteditable] can resolve to it. Scope to the innermost container that
+// holds both an editor and the "Send email" button: the email composer.
+function getDeskEmailComposer(): Locator {
+  const page = testContext.activePage;
+  return page
+    .locator('div')
+    .filter({ has: page.getByRole('button', { name: 'Send email' }) })
+    .filter({ has: page.locator('[contenteditable="true"]') })
+    .last();
+}
+
+async function sendDeskEmailFromComposer(body: string): Promise<void> {
+  const composer = getDeskEmailComposer();
+  await composer.waitFor({ state: 'visible', timeout: DESK_UI_TIMEOUT_MS });
+  const editor = composer.locator('[contenteditable="true"]').last();
+  await editor.click();
+  await editor.fill(body);
+  await composer.getByRole('button', { name: 'Send email' }).last().click();
+}
+
+// Reply / Reply all anchor recipients on the email they are opened from. Older
+// emails carry their own per-email actions (behind a collapsed header); the
+// latest email only has the footer reply pill, which anchors on it (Gmail
+// semantics). Choosing a mode from the pill's menu sets the mode and opens the
+// composer (ReplyPill.selectMode).
+async function openDeskReplyComposer(
+  mode: 'Reply' | 'Reply all',
+  externalMessageId?: string
+): Promise<void> {
+  const page = testContext.activePage;
+  if (externalMessageId) {
+    const card = page.locator(`[data-external-message-id="${externalMessageId}"]`).first();
+    await card.waitFor({ state: 'visible', timeout: DESK_UI_TIMEOUT_MS });
+    const expand = card.locator('[data-track-name="ExpandEmail"]').first();
+    if ((await expand.count()) > 0) await expand.click();
+    const trackName = mode === 'Reply' ? 'ReplyToSpecificEmail' : 'ReplyAllToSpecificEmail';
+    const emailAction = card.locator(`[data-track-name="${trackName}"]`).first();
+    if ((await emailAction.count()) > 0) {
+      await emailAction.click();
+      return;
+    }
+  }
+  const modeButton = page.locator('[data-track-name="ReplyPillModeDropdown"]').first();
+  await modeButton.waitFor({ state: 'visible', timeout: DESK_UI_TIMEOUT_MS });
+  await modeButton.click();
+  await page.getByRole('menuitem', { name: mode, exact: true }).click();
+}
+
+// Composed mail is captured before its conversation exists, so the capture
+// carries no conversationId; resolve it from the ticket the compose created.
+async function waitForComposedConversationId(
+  userAlias: string,
+  channelId: string,
+  subject: string
+): Promise<string> {
+  const deadline = Date.now() + DESK_UI_TIMEOUT_MS;
+  while (Date.now() < deadline) {
+    const response = await withDevAuthenticatedApiContext(userAlias, (apiContext) =>
+      apiContext.get(`/api/test/desk/channel/${channelId}/tickets`)
+    );
+    if (response.ok()) {
+      const body = (await response.json()) as {
+        tickets?: Array<{ title?: string; conversationId?: string }>;
+      };
+      const ticket = (body.tickets ?? []).find((candidate) => candidate.title === subject);
+      if (ticket?.conversationId) return ticket.conversationId;
+    }
+    await testContext.activePage.waitForTimeout(500);
+  }
+  throw new Error(
+    `Composed Desk mail "${subject}" did not create a ticket in channel ${channelId}.`
+  );
 }
 
 async function waitForDeskPageToSettle(): Promise<void> {
@@ -837,6 +916,8 @@ export default class XyneDeskSteps {
     channelAlias: string,
     userAlias: string
   ): Promise<void> {
+    assertValidChannelAlias(channelAlias);
+    assertValidUserAlias(userAlias);
     const batch = mockPubSubBatches.get(batchAlias);
     assert.ok(batch, `Expected Pub/Sub batch "${batchAlias}" to be generated.`);
     const channelId = this.getStoredChannelId(channelAlias, userAlias);
@@ -845,6 +926,7 @@ export default class XyneDeskSteps {
     const response = await withDevAuthenticatedApiContext(userAlias, (apiContext) =>
       apiContext.post('/api/test/desk/pubsub/bulk-gmail', {
         data: { channelId, historyId: batch.historyId, messages },
+        timeout: DESK_UI_TIMEOUT_MS + messages.length * PUBSUB_PER_MESSAGE_TIMEOUT_MS,
       })
     );
     await assertOkResponse(response, 'Deterministic Pub/Sub Gmail batch');
@@ -883,6 +965,8 @@ export default class XyneDeskSteps {
     channelAlias: string,
     userAlias: string
   ): Promise<void> {
+    assertValidChannelAlias(channelAlias);
+    assertValidUserAlias(userAlias);
     const batch = mockPubSubBatches.get(batchAlias);
     assert.ok(batch, `Expected Pub/Sub batch "${batchAlias}" to be generated.`);
     const channelId = this.getStoredChannelId(channelAlias, userAlias);
@@ -891,6 +975,7 @@ export default class XyneDeskSteps {
     const response = await withDevAuthenticatedApiContext(userAlias, (apiContext) =>
       apiContext.post('/api/test/desk/pubsub/bulk-gmail', {
         data: { channelId, historyId: batch.historyId, messages },
+        timeout: DESK_UI_TIMEOUT_MS + messages.length * PUBSUB_PER_MESSAGE_TIMEOUT_MS,
       })
     );
     await assertOkResponse(response, 'Deterministic Pub/Sub duplicate batch');
@@ -1012,7 +1097,7 @@ export default class XyneDeskSteps {
     await this.openStoredDeskChannelUrl(channelAlias, userAlias);
 
     await testContext.activePage
-      .locator("[data-testid='desk-compose-button']")
+      .locator('[data-track-name="OpenComposeEmail"]')
       .first()
       .waitFor({ state: 'visible', timeout: DESK_UI_TIMEOUT_MS });
   }
@@ -1021,6 +1106,8 @@ export default class XyneDeskSteps {
     'verifying Desk priority and status filters work for channel <channelAlias> user <userAlias>'
   )
   public async verifyDeskFiltersWork(channelAlias: string, userAlias: string): Promise<void> {
+    assertValidChannelAlias(channelAlias);
+    assertValidUserAlias(userAlias);
     await this.openStoredDeskChannelUrl(channelAlias, userAlias);
     const page = testContext.activePage;
     await page.locator("[data-testid='desk-filter-priority']").click();
@@ -1029,6 +1116,7 @@ export default class XyneDeskSteps {
     await high.click();
     assert.match((await high.getAttribute('class')) ?? '', /bg-accent/);
 
+    await page.keyboard.press('Escape');
     await page.locator("[data-testid='desk-filter-status']").click();
     const statusSearch = page.getByPlaceholder('Search status...');
     await statusSearch.waitFor({ state: 'visible', timeout: DESK_UI_TIMEOUT_MS });
@@ -1036,7 +1124,8 @@ export default class XyneDeskSteps {
     await statusOption.waitFor({ state: 'visible', timeout: DESK_UI_TIMEOUT_MS });
     await statusOption.click();
 
-    const clear = page.locator("[data-testid='desk-filter-clear']");
+    await page.keyboard.press('Escape');
+    const clear = page.locator('[data-track-name="CLEAR_SUPPORT_FILTERS"]');
     await clear.waitFor({ state: 'visible', timeout: DESK_UI_TIMEOUT_MS });
     await clear.click();
     await clear.waitFor({ state: 'hidden', timeout: DESK_UI_TIMEOUT_MS });
@@ -1054,35 +1143,31 @@ export default class XyneDeskSteps {
     await ticketSubject.click();
 
     await page
-      .locator("[data-testid='desk-ticket-ask-ai-button']")
+      .locator('[data-track-name="OPEN_XYNE_AI"]')
       .first()
       .waitFor({ state: 'visible', timeout: DESK_UI_TIMEOUT_MS });
 
-    const replyButton = page
-      .locator("[data-testid='desk-email-reply-button'], [data-testid='desk-open-reply-button']")
-      .first();
-    await replyButton.waitFor({ state: 'visible', timeout: DESK_UI_TIMEOUT_MS });
-    await replyButton.click();
-
-    const editor = page.locator("[data-testid='desk-email-editor']").first();
-    await editor.waitFor({ state: 'visible', timeout: DESK_UI_TIMEOUT_MS });
+    await openDeskReplyComposer('Reply', mail.messageId);
+    const composer = getDeskEmailComposer();
+    await composer.waitFor({ state: 'visible', timeout: DESK_UI_TIMEOUT_MS });
+    const editor = composer.locator('[contenteditable="true"]').last();
     await editor.click();
     await page.keyboard.insertText('Please rewrite this Desk automation reply.');
 
-    const refineButton = page.locator("[data-testid='desk-ai-refine-button']").first();
+    // Only opens the refine menu and checks its entries; no rewrite is invoked,
+    // so the scenario never calls an external AI provider.
+    const refineButton = composer.locator('[data-track-name="ToggleAIRefineDropdown"]').first();
     await refineButton.waitFor({ state: 'visible', timeout: DESK_UI_TIMEOUT_MS });
     await refineButton.click();
 
+    for (const action of ['polish', 'shorten']) {
+      await page
+        .locator(`[data-track-name="QuickRewrite"][data-track-metadata*='"${action}"']`)
+        .first()
+        .waitFor({ state: 'visible', timeout: DESK_UI_TIMEOUT_MS });
+    }
     await page
-      .locator("[data-testid='desk-quick-rewrite-polish']")
-      .first()
-      .waitFor({ state: 'visible', timeout: DESK_UI_TIMEOUT_MS });
-    await page
-      .locator("[data-testid='desk-quick-rewrite-shorten']")
-      .first()
-      .waitFor({ state: 'visible', timeout: DESK_UI_TIMEOUT_MS });
-    await page
-      .locator("[data-testid='desk-ask-ai-from-composer-button']")
+      .locator('[data-track-name="OpenAskAIFromDropdown"]')
       .first()
       .waitFor({ state: 'visible', timeout: DESK_UI_TIMEOUT_MS });
   }
@@ -1094,7 +1179,15 @@ export default class XyneDeskSteps {
     assert.ok(details.ticket?.id, `Expected mock Desk email "${mailAlias}" to create a ticket.`);
     assert.equal(details.emails?.[0]?.subject, mail.subject);
     assert.equal(details.emails?.[0]?.from, mail.from);
-    assert.equal(details.emails?.[0]?.body, mail.body);
+    if (mail.composedText) {
+      const visibleText = String(details.emails?.[0]?.body ?? '').replace(/<[^>]*>/g, ' ');
+      assert.ok(
+        visibleText.includes(mail.composedText),
+        `Expected composed mail body to contain "${mail.composedText}". Actual: ${visibleText}`
+      );
+    } else {
+      assert.equal(details.emails?.[0]?.body, mail.body);
+    }
     if (mail.channelAlias) {
       const user = getStoredUser(DEFAULT_DESK_API_USER_ALIAS);
       const channel = user.channels[mail.channelAlias];
@@ -1110,6 +1203,8 @@ export default class XyneDeskSteps {
     mailAlias: string,
     userAlias: string
   ): Promise<void> {
+    assertValidChannelAlias(channelAlias);
+    assertValidUserAlias(userAlias);
     const mail = assertFixture(mailAlias);
     const channelId = this.getStoredChannelId(channelAlias, userAlias);
     const response = await withDevAuthenticatedApiContext(userAlias, (apiContext) =>
@@ -1235,17 +1330,8 @@ export default class XyneDeskSteps {
     await this.openStoredDeskChannelUrl(channelAlias, userAlias);
     const page = testContext.activePage;
     await page.getByText(mail.subject, { exact: false }).first().click();
-    const pill = page.locator('[data-slot="reply-pill"]').first();
-    if (await pill.isVisible().catch(() => false)) await pill.click();
-    const modeButton = page.locator('[data-track-name="ReplyPillModeDropdown"]').first();
-    if (await modeButton.isVisible().catch(() => false)) {
-      await modeButton.click();
-      await page.getByText('Reply', { exact: true }).last().click();
-    }
-    const editor = page.locator('[contenteditable="true"]').last();
-    await editor.waitFor({ state: 'visible', timeout: DESK_UI_TIMEOUT_MS });
-    await editor.fill('Thanks, we are checking this from Xyne Desk automation.');
-    await page.getByRole('button', { name: 'Send email' }).last().click();
+    await openDeskReplyComposer('Reply', mail.messageId);
+    await sendDeskEmailFromComposer('Thanks, we are checking this from Xyne Desk automation.');
     await page.waitForTimeout(500);
   }
 
@@ -1269,17 +1355,8 @@ export default class XyneDeskSteps {
     await this.openStoredDeskChannelUrl(channelAlias, userAlias);
     const page = testContext.activePage;
     await page.getByText(mail.subject, { exact: false }).first().click();
-    const pill = page.locator('[data-slot="reply-pill"]').first();
-    if (await pill.isVisible().catch(() => false)) await pill.click();
-    const modeButton = page.locator('[data-track-name="ReplyPillModeDropdown"]').first();
-    if (await modeButton.isVisible().catch(() => false)) {
-      await modeButton.click();
-      await page.getByText('Reply all', { exact: true }).last().click();
-    }
-    const editor = page.locator('[contenteditable="true"]').last();
-    await editor.waitFor({ state: 'visible', timeout: DESK_UI_TIMEOUT_MS });
-    await editor.fill('Reply-all response from Xyne Desk automation.');
-    await page.getByRole('button', { name: 'Send email' }).last().click();
+    await openDeskReplyComposer('Reply all', mail.messageId);
+    await sendDeskEmailFromComposer('Reply-all response from Xyne Desk automation.');
     await page.waitForTimeout(500);
   }
 
@@ -1297,6 +1374,7 @@ export default class XyneDeskSteps {
       alias: mailAlias,
       subject: `Desk compose flow ${suffix}`,
       body: `<p>New composed Desk mail from automation ${suffix}.</p>`,
+      composedText: `New composed Desk mail from automation ${suffix}.`,
       from: deskChannelDlEmails.get(channelAlias) ?? config.desk.mockDlEmail,
       to: `compose.recipient.${suffix}@example.test`,
       // The compose UI step below enters only To/Subject/body, so the captured
@@ -1310,14 +1388,21 @@ export default class XyneDeskSteps {
 
     await this.openStoredDeskChannelUrl(channelAlias, userAlias);
     const page = testContext.activePage;
-    await page.getByRole('button', { name: 'Compose' }).first().click();
-    const toInput = page.locator('[data-track-name="EditToField"]').first();
+    const composeButton = page.locator('[data-track-name="OpenComposeEmail"]').first();
+    await composeButton.waitFor({ state: 'visible', timeout: DESK_UI_TIMEOUT_MS });
+    await composeButton.click();
+    const composer = getDeskEmailComposer();
+    await composer.waitFor({ state: 'visible', timeout: DESK_UI_TIMEOUT_MS });
+    const toInput = composer.locator('[data-track-name="EditToField"]').first();
     await toInput.fill(mail.to);
     await toInput.press('Enter');
-    await page.getByLabel('Subject').fill(mail.subject);
-    const editor = page.locator('[contenteditable="true"]').last();
-    await editor.fill('New composed Desk mail from automation.');
-    await page.getByRole('button', { name: 'Send email' }).last().click();
+    await composer.locator('input[aria-label="Subject"]').fill(mail.subject);
+    await sendDeskEmailFromComposer(mail.composedText ?? '');
+    mail.conversationId = await waitForComposedConversationId(
+      userAlias,
+      this.getStoredChannelId(channelAlias, userAlias),
+      mail.subject
+    );
     await page.waitForTimeout(500);
     mockDeskMails.set(mailAlias, mail);
   }
@@ -1401,9 +1486,21 @@ export default class XyneDeskSteps {
     assertValidUserAlias(userAlias);
     const source = await this.fetchAndStoreDeskTicketDetails(sourceMailAlias);
     const user = getStoredUser(userAlias);
-    const ticket = source.ticket;
+    const targetTicketId = source.ticket?.mergedIntoTicketId;
+    assert.ok(targetTicketId, `Expected ticket for "${sourceMailAlias}" to be merged.`);
+    // The merged source ticket is archived; its email (with the Unmerge action)
+    // is rendered inside the target ticket.
+    const targetAlias = [...mockDeskMails.values()].find(
+      (candidate) => candidate.ticketId === targetTicketId
+    )?.alias;
+    assert.ok(
+      targetAlias,
+      `Expected a stored mock mail for merge target ticket ${targetTicketId}.`
+    );
+    const target = await this.fetchAndStoreDeskTicketDetails(targetAlias);
+    const ticket = target.ticket;
     const channelId = ticket?.channelId;
-    assert.ok(ticket?.xyneId && channelId, `Expected ticket details for "${sourceMailAlias}".`);
+    assert.ok(ticket?.xyneId && channelId, `Expected ticket details for "${targetAlias}".`);
     await testContext.activePage.goto(
       `${config.dashboard.baseUrl}/${user.workspaceId}/support/${channelId}/${ticket.xyneId}`,
       { waitUntil: 'domcontentloaded', timeout: DESK_UI_TIMEOUT_MS }

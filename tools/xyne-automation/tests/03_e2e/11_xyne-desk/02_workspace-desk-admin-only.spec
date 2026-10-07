@@ -4,5 +4,6 @@
 * using browser
 * Ensuring user "admin-1" is logged in
 * configuring mock Desk shared mailbox for user "admin-1"
-* Ensuring user "user-1" is logged in
-* verifying user "user-1" cannot configure mock Desk shared mailbox
+user-1 is the baseline workspace OWNER (first login creates the org); user-2 is a plain MEMBER.
+* Ensuring user "user-2" is logged in
+* verifying user "user-2" cannot configure mock Desk shared mailbox
