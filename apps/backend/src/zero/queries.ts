@@ -5257,8 +5257,9 @@ dmChannelsLatestMessagesPaginated: defineQuery(
       limit: z.number().optional(),
       start: z.object({ name: z.string(), id: z.string() }).nullish(),
       direction: z.enum(['forward', 'backward']).optional(),
+      search: z.string().optional(),
     }),
-    ({ args: { projectIds, limit = 100, start, direction = 'forward' } }) => {
+    ({ args: { projectIds, limit = 100, start, direction = 'forward', search } }) => {
       if (projectIds.length === 0) {
         return zql.project_tags.where('id', 'nonexistent').limit(0);
       }
@@ -5267,6 +5268,9 @@ dmChannelsLatestMessagesPaginated: defineQuery(
         .where('projectId', 'IN', projectIds)
         .orderBy('name', isBackward ? 'desc' : 'asc')
         .orderBy('id', isBackward ? 'desc' : 'asc');
+      if (search) {
+        q = q.where('name', 'ILIKE', `%${search}%`);
+      }
       if (start) {
         q = q.start({ name: start.name, id: start.id }, { inclusive: false });
       }
