@@ -18,7 +18,7 @@
  * Re-running with the same email resets that account's password rather than failing.
  */
 
-import { PrismaClient } from '@prisma/client';
+import { PrismaClient, Prisma } from '@prisma/client';
 import { AuthProvider, UserStatus, WorkspaceRole, OrgRole } from '@xyne/shared';
 import { hashPassword } from '../src/utils/passwordUtils';
 
@@ -78,19 +78,34 @@ async function main() {
     select: { memberId: true, orgId: true },
   });
 
+  // OrgMember and its OrgMemberCredential row are written together so the two stay in step.
+  const upsertCredential = (tx: Prisma.TransactionClient, id: string, ownerOrgId: string) =>
+    tx.orgMemberCredential.upsert({
+      where: { memberId: id },
+      create: { memberId: id, orgId: ownerOrgId, passwordHash },
+      update: { orgId: ownerOrgId, passwordHash },
+    });
+
   let memberId: string;
   if (existingMember) {
-    await prisma.orgMember.update({
-      where: { memberId: existingMember.memberId },
-      data: { passwordHash },
+    await prisma.$transaction(async (tx) => {
+      await tx.orgMember.update({
+        where: { memberId: existingMember.memberId },
+        data: { passwordHash },
+      });
+      await upsertCredential(tx, existingMember.memberId, existingMember.orgId);
     });
     memberId = existingMember.memberId;
     console.log(`  ℹ️  ${email} already exists — password updated`);
   } else {
     try {
-      const member = await prisma.orgMember.create({
-        data: { email, orgId, role: OrgRole.OWNER, passwordHash },
-        select: { memberId: true },
+      const member = await prisma.$transaction(async (tx) => {
+        const created = await tx.orgMember.create({
+          data: { email, orgId, role: OrgRole.OWNER, passwordHash },
+          select: { memberId: true },
+        });
+        await upsertCredential(tx, created.memberId, orgId);
+        return created;
       });
       memberId = member.memberId;
       console.log(`  ✅ Created org member for ${email}`);
@@ -100,12 +115,15 @@ async function main() {
       if (!isUniqueViolation(error)) throw error;
       const raced = await prisma.orgMember.findFirst({
         where: { email },
-        select: { memberId: true },
+        select: { memberId: true, orgId: true },
       });
       if (!raced) throw error;
-      await prisma.orgMember.update({
-        where: { memberId: raced.memberId },
-        data: { passwordHash },
+      await prisma.$transaction(async (tx) => {
+        await tx.orgMember.update({
+          where: { memberId: raced.memberId },
+          data: { passwordHash },
+        });
+        await upsertCredential(tx, raced.memberId, raced.orgId);
       });
       memberId = raced.memberId;
       console.log(`  ℹ️  ${email} already exists — password updated`);

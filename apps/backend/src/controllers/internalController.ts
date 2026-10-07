@@ -1,5 +1,6 @@
 import { Request, Response } from 'express';
 import { db } from '@/database/client';
+import { getPasswordHash } from '@/services/orgMemberCredentialService';
 import { verifyPassword } from '@/utils/passwordUtils';
 import {
   accountDeactivationService,
@@ -135,7 +136,6 @@ export class InternalController {
           email: true,
           role: true,
           leftAt: true,
-          passwordHash: true,
           orgId: true,
           organization: {
             select: { name: true },
@@ -153,12 +153,13 @@ export class InternalController {
         return;
       }
 
-      if (!member.passwordHash) {
+      const storedHash = await getPasswordHash(member.memberId);
+      if (!storedHash) {
         res.status(200).json({ success: false } as InternalEmailLoginResponse);
         return;
       }
 
-      const isValid = await verifyPassword(password, member.passwordHash);
+      const isValid = await verifyPassword(password, storedHash);
       if (!isValid) {
         res.status(200).json({ success: false } as InternalEmailLoginResponse);
         return;

@@ -27,6 +27,7 @@ import { createCommunityWorkspaceDefaults } from '@/utils/communityWorkspaceDefa
 import { ensureGeneralChannelForWorkspace } from '@/utils/workspaceGeneralChannel';
 import { ensureUserInGeneralChannel as joinUserToGeneralChannel } from '@/utils/workspaceGeneralChannel';
 import { redisService } from '@/services/redisService';
+import { getPasswordHash } from '@/services/orgMemberCredentialService';
 import { createId } from '@paralleldrive/cuid2';
 import { getEncryptionProvider } from '@/services/encryption';
 import { createOrganizationWithUserTx } from '@/bypassAcl/transactions/userService';
@@ -880,6 +881,10 @@ export class UserService {
         throw new Error(`User ${userData.email} already belongs to an organization`);
       }
 
+      const existingPasswordHash = existingOrgMember ? await getPasswordHash(existingOrgMember.memberId) : null;
+
+      const verifiedPasswordHash = existingPasswordHash ? {} : await this.getVerifiedPasswordHash(userData.email);
+
       const orgMember = existingOrgMember
         ? await this.prisma.orgMember.update({
             where: { memberId: existingOrgMember.memberId },
@@ -887,7 +892,7 @@ export class UserService {
               orgId: organization.orgId,
               role: OrgRole.OWNER,
               leftAt: null,
-              ...(existingOrgMember.passwordHash ? {} : await this.getVerifiedPasswordHash(userData.email)),
+              ...verifiedPasswordHash,
             },
           })
         : await this.prisma.orgMember.create({
@@ -895,9 +900,16 @@ export class UserService {
               orgId: organization.orgId,
               email: userData.email,
               role: OrgRole.OWNER,
-              ...(await this.getVerifiedPasswordHash(userData.email)),
-            }
+              ...verifiedPasswordHash,
+            },
           });
+      if (orgMember.passwordHash) {
+        await this.prisma.orgMemberCredential.upsert({
+          where: { memberId: orgMember.memberId },
+          create: { memberId: orgMember.memberId, orgId: orgMember.orgId, passwordHash: orgMember.passwordHash },
+          update: { passwordHash: orgMember.passwordHash },
+        });
+      }
 
       if (existingOrgMember?.role === (OrgRole.COMMUNITY_MEMBER as any)) {
         await aiProvisioningService.upgradeCommunityToEnterpriseBudget(orgMember.memberId);

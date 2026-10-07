@@ -48,6 +48,7 @@ import {
   InvitationsACL,
   OrganizationDomainsACL,
   OrgLLMServiceAccountCredentialsACL,
+  OrgMemberCredentialsACL,
   LinkAccessACL,
   LinksACL,
   LookupValuesACL,
@@ -543,6 +544,8 @@ export class ACLFactory {
       return new UnscopedACL(ctx, prisma)
     case 'orgLLMServiceAccountCredential':
       return new OrgLLMServiceAccountCredentialsACL(ctx, prisma)
+    case 'orgMemberCredential':
+      return new OrgMemberCredentialsACL(ctx, prisma)
     case 'guestAccess':
       return new BaseQueryACL(ctx, prisma)
     case 'entity':

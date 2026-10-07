@@ -28,6 +28,7 @@ import { acceptInvitationTx } from '@/bypassAcl/transactions/invitationService';
 import { acceptInvitationTx2 } from '@/bypassAcl/transactions/invitationService';
 import { acceptInvitationTx3 } from '@/bypassAcl/transactions/invitationService';
 import { approveInvitationTx } from '@/bypassAcl/transactions/invitationService';
+import { setPasswordHash } from '@/services/orgMemberCredentialService';
 
 type TxClient = Parameters<Parameters<PrismaClient['$transaction']>[0]>[0];
 
@@ -378,7 +379,7 @@ export class InvitationService {
     return withWorkspaceScope(async () => {
       const orgMember = await this.prisma.orgMember.findUnique({
         where: { email: email.toLowerCase() },
-        select: { memberId: true, passwordHash: true },
+        select: { memberId: true, orgId: true },
       });
 
       if (!orgMember) {
@@ -388,10 +389,7 @@ export class InvitationService {
       const tempPassword = crypto.randomBytes(12).toString('base64url'); // ~16 chars
       const hashed = await hashPassword(tempPassword);
 
-      await this.prisma.orgMember.update({
-        where: { memberId: orgMember.memberId },
-        data: { passwordHash: hashed },
-      });
+      await setPasswordHash({ memberId: orgMember.memberId, orgId: orgMember.orgId, passwordHash: hashed });
 
       return tempPassword;
     });
