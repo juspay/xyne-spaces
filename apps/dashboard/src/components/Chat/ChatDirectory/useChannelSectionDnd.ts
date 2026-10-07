@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   PointerSensor,
   closestCenter,
+  pointerWithin,
   useSensor,
   useSensors,
   type CollisionDetection,
@@ -294,6 +295,12 @@ export const useChannelSectionDnd = ({
       const t = (c.data.current as { type?: string } | undefined)?.type;
       return activeType === 'section' ? t === 'section' : t === 'container';
     });
+    if (activeType === 'channel') {
+      // Group containers are large and nested, so centre distance can pick the wrong
+      // one (e.g. Starred beats a tall Channels list). Prefer what's under the pointer.
+      const hits = pointerWithin({ ...args, droppableContainers });
+      if (hits.length > 0) return hits;
+    }
     return closestCenter({ ...args, droppableContainers });
   };
 

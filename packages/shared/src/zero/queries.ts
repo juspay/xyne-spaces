@@ -2775,6 +2775,12 @@ export const queries = defineQueries({
     }
     return query;
   }),
+  // Point lookup used by `useUser` when an id is missing from the hydrated
+  // workspace users set (e.g. user added after the initial load). Scoped by
+  // UsersACL like every other `users` read, so it never widens visibility.
+  getUserById: defineQuery(z.object({ userId: z.string() }), ({ args: { userId } }) => {
+    return zql.users.where('id', userId).one();
+  }),
   getUserProfilesByIds: defineQuery(
     z.object({ userIds: z.array(z.string()) }),
     ({ args: { userIds } }) => {

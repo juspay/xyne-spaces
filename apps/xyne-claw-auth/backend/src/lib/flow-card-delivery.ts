@@ -5,7 +5,7 @@ import { createLogger } from "../logger.js";
 import { chatMessageRepository } from "../repositories/chatMessageRepository.js";
 import { errMsg } from "./errors.js";
 import { publishLiveEvent } from "./live-conversation-bus.js";
-import { spacesAppFetch } from "./spaces-api.js";
+import { spacesAppFetch } from "../surfaces/spaces/client.js";
 
 const log = createLogger("flow-card");
 
@@ -99,9 +99,18 @@ export async function deliverXyneAiFlow(
   target: XyneAiCardTarget,
 ): Promise<FlowDefinition> {
   const stamped = withXyneAiCardData(flow, target);
-  await chatMessageRepository.appendUiFlow(target.chatMessageId, stamped).catch((err: unknown) => {
-    log.warn(`[xyne-ai] persist failed for ${stamped.screenId}: ${errMsg(err)}`);
-  });
+  const persisted = await chatMessageRepository.appendUiFlow(target.chatMessageId, stamped).then(
+    () => true,
+    (err: unknown) => {
+      log.warn(`[xyne-ai] persist failed for ${stamped.screenId}: ${errMsg(err)}`);
+      return false;
+    },
+  );
+  // The success counterpart to the warns above — without it a delivered card
+  // leaves no trace, so "N cards painted on /ai" cannot be counted.
+  if (persisted) {
+    log.info(`[xyne-ai] card delivered screen=${stamped.screenId} conv=${target.conversationId} agent=${target.agentSlug}`);
+  }
   if (CONFIG.liveToolCallsEnabled && target.userId) {
     publishLiveEvent(target.conversationId, {
       type: "ui-flow",
@@ -158,7 +167,9 @@ export async function replaceFlowCardOnRow(input: {
 
 /**
  * The one delivery seam for FlowUI cards. The Spaces branch is the pre-existing
- * `/chat/postMessage` call verbatim; the Xyne AI branch goes through uiFlows.
+ * `/chat/postMessage` call, through the same client webhook.ts posts with, so a
+ * card still retries once on a Spaces 5xx; the Xyne AI branch goes through
+ * uiFlows.
  */
 export async function postFlowCard(
   flow: FlowDefinition,

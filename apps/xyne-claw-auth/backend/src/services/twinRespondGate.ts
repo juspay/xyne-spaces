@@ -18,6 +18,7 @@ import { errMsg } from "../lib/errors.js";
 import { CONFIG } from "../config.js";
 import { prisma } from "../db.js";
 import { interact } from "../mcp/servers/xyne-spaces-client.js";
+import { spacesUserIdForClawUser } from "../lib/users-jit.js";
 import { resolveAuthForUser } from "./userMemoryFetcher.js";
 import { recordGateEvent } from "./digitalTwinPipelineEvents.js";
 import { createLogger, createTraceId } from "../logger.js";
@@ -92,11 +93,13 @@ async function isThreadParticipant(userId: string, conversationId: string): Prom
   return bestEffort(async () => {
     const auth = await resolveAuthForUser(userId);
     if (!auth) return false;
+    // Message.senderId is Spaces' workspace-scoped id; userId here is canonical.
+    const spacesUserId = await spacesUserIdForClawUser(userId, auth.workspaceId).catch(() => userId);
     const data = await interact(
       {
         model: "message",
         operation: "findMany",
-        where: { senderId: { equals: userId }, conversationId: { equals: conversationId } },
+        where: { senderId: { equals: spacesUserId }, conversationId: { equals: conversationId } },
         take: 1,
       },
       auth,

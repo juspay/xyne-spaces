@@ -7,6 +7,7 @@ import { signOAuthState, verifyOAuthState, OAuthStateError } from "./oauth-state
 import { defaultOAuthReturn, resolveOAuthReturn, withOAuthResult } from "./oauth-return.js";
 import { oauthLimiter } from "../middleware/rate-limiters.js";
 import { pinUserIdParam } from "../middleware/pin-user-id-param.js";
+import { resolveCanonicalUserIdOrSelf } from "./users-jit.js";
 import { asyncHandler, ok, badRequest, HttpError } from "./http.js";
 import { createLogger } from "../logger.js";
 
@@ -145,7 +146,9 @@ export function createClassicOAuthProvider(config: ClassicOAuthConfig): ClassicO
   router.post(`/:userId/oauth/${type}/authorize`, oauthLimiter, asyncHandler(async (req: Request<{ userId: string }>, res: Response) => {
     const { userId } = req.params;
     const { redirectUri, returnTo } = req.body as { redirectUri?: string; returnTo?: string };
-    ok(res, { authUrl: await authorize(userId, { redirectUri, returnTo }) });
+    // Sign the CANONICAL Claw id into the state: connection rows are keyed by
+    // it, while the URL param may carry the user's raw Spaces alias.
+    ok(res, { authUrl: await authorize(await resolveCanonicalUserIdOrSelf(userId), { redirectUri, returnTo }) });
   }));
 
   router.post(`/:userId/oauth/${type}/callback`, asyncHandler(async (req: Request<{ userId: string }>, res: Response) => {
@@ -157,9 +160,10 @@ export function createClassicOAuthProvider(config: ClassicOAuthConfig): ClassicO
     }
 
     const creds = await exchangeCode(code, redirectUri);
-    await storeTokens(userId, creds);
+    const canonicalUserId = await resolveCanonicalUserIdOrSelf(userId);
+    await storeTokens(canonicalUserId, creds);
 
-    log.info(`[${type}-oauth] Stored ${label} credentials for user ${userId}`);
+    log.info(`[${type}-oauth] Stored ${label} credentials for user ${canonicalUserId}`);
     ok(res, { message: `${label} account connected successfully` });
   }));
 
@@ -207,20 +211,24 @@ export function createClassicOAuthProvider(config: ClassicOAuthConfig): ClassicO
         return;
       }
 
+      // Tolerate states minted before canonical signing: resolve the (possibly
+      // raw Spaces) id so the row lands under the canonical Claw id.
+      const canonicalUserId = await resolveCanonicalUserIdOrSelf(userId);
+
       const server = await ensureServer();
-      const existing = await prisma.userMcpConnection.findFirst({ where: { userId, mcpServerId: server.id } });
+      const existing = await prisma.userMcpConnection.findFirst({ where: { userId: canonicalUserId, mcpServerId: server.id } });
       if (!existing) {
-        const user = await prisma.user.findUnique({ where: { id: userId } });
+        const user = await prisma.user.findUnique({ where: { id: canonicalUserId } });
         if (!user) {
-          log.error(`[${type}-oauth] User not found: ${userId}`);
+          log.error(`[${type}-oauth] User not found: ${canonicalUserId}`);
           res.redirect(withOAuthResult(frontendUrl, `${type}_error`, "user_not_found"));
           return;
         }
       }
 
-      await storeTokens(userId, creds);
+      await storeTokens(canonicalUserId, creds);
 
-      log.info(`[${type}-oauth] Stored ${label} credentials for user ${userId} via browser callback`);
+      log.info(`[${type}-oauth] Stored ${label} credentials for user ${canonicalUserId} via browser callback`);
       res.redirect(withOAuthResult(frontendUrl, `${type}_connected`, "true"));
     } catch (err) {
       log.error(`[${type}-oauth] browser callback error:`, err);

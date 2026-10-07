@@ -46,6 +46,7 @@ import { usePlatform } from '../../hooks/usePlatform';
 import { setLastActiveWorkspaceId, setLastActiveWorkspaceName } from '../../machines/authMachine';
 import { apiInstance } from '../../services/clients/apiClient';
 import { JoinRequestsSection } from './JoinRequestsSection';
+import { PendingInvitationsSection } from './PendingInvitationsSection';
 
 // ─── types ───────────────────────────────────────────────────────────────────
 
@@ -873,6 +874,10 @@ export const OrganisationsScreen = (): ReactElement => {
               ) : null}
 
               {canCreateCommunityWorkspace ? <JoinRequestsSection orgId={workspaceOrgId} /> : null}
+
+              {canCreateCommunityWorkspace ? (
+                <PendingInvitationsSection orgId={workspaceOrgId} />
+              ) : null}
 
               {/* ── Linked orgs accordion list ── */}
               <Card>

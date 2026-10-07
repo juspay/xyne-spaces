@@ -13,6 +13,12 @@ export interface IncomingCallCardProps {
   vm: IncomingCallViewModel;
   onAccept: () => void;
   onReject: () => void;
+  /**
+   * Render into this element instead of the page: the desktop app's floating
+   * incoming-call window. There the card stands alone, without the dimmed
+   * backdrop or the modal behaviour that only make sense over the app.
+   */
+  container?: HTMLElement;
 }
 
 /**
@@ -21,21 +27,30 @@ export interface IncomingCallCardProps {
  * Composed from Radix primitives rather than the shared `Dialog` for reasons
  * that a prop could not fix: that component swaps to a bottom-sheet Drawer
  * below 600px, which a fixed 400x520 card cannot live in, and its baked-in
- * zoom/slide entry classes survive `twMerge` and would fight this one's.
+ * zoom/slide entry classes survive `twMerge` and would undo its centring.
  *
  * Everything it renders comes from `vm` — no Zero, no XState, no router — which
  * is what lets `IncomingCallCard.dev.tsx` render every state from fixtures.
  */
-export function IncomingCallCard({ vm, onAccept, onReject }: IncomingCallCardProps): ReactElement {
+export function IncomingCallCard({
+  vm,
+  onAccept,
+  onReject,
+  container,
+}: IncomingCallCardProps): ReactElement {
   const prefersReducedMotion = useReducedMotion();
+  const isFloating = !!container;
 
   // The shared Dialog does this for us; done by hand here because other
   // features read the global overlay stack to decide whether they are covered.
-  useOverlayEffect(true);
+  // The floating window covers nothing in the app, so it does not count.
+  useOverlayEffect(!isFloating);
 
   return (
-    <DialogPrimitive.Root open modal>
-      <DialogPrimitive.Portal>
+    // Non-modal when floating: no backdrop, and no focus trap or scroll lock
+    // reaching into the app's own page.
+    <DialogPrimitive.Root open modal={!isFloating}>
+      <DialogPrimitive.Portal container={container}>
         <DialogPrimitive.Overlay
           className={cn(
             'fixed inset-0 z-50 bg-[var(--call-modal-overlay)]',
@@ -51,6 +66,11 @@ export function IncomingCallCard({ vm, onAccept, onReject }: IncomingCallCardPro
           onEscapeKeyDown={event => event.preventDefault()}
           onPointerDownOutside={event => event.preventDefault()}
           onInteractOutside={event => event.preventDefault()}
+          // Appearing over another app must not move the user's focus.
+          {...(isFloating && { onOpenAutoFocus: (event: Event) => event.preventDefault() })}
+          // No entry animation: any keyframe `transform` replaces the translate
+          // that centres the card, so it would sit off-centre until the
+          // animation ended, and a fade lets the page show through it.
           className={cn(
             'incoming-call-card fixed left-1/2 top-1/2 z-50 -translate-x-1/2 -translate-y-1/2',
             'flex w-[400px] max-w-[calc(100vw-32px)] flex-col rounded-[18px]',
@@ -59,7 +79,6 @@ export function IncomingCallCard({ vm, onAccept, onReject }: IncomingCallCardPro
             'min-h-[520px] max-h-[calc(100vh-32px)] overflow-y-auto px-7 pb-6 pt-[26px]',
             'bg-popover text-popover-foreground ring-1 ring-border',
             'shadow-[var(--call-modal-shadow)] outline-none focus:outline-none',
-            prefersReducedMotion ? 'animate-call-overlay-in' : 'animate-call-card-in',
           )}
         >
           <DialogPrimitive.Title className='hidden'>Incoming call</DialogPrimitive.Title>

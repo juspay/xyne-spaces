@@ -1,13 +1,25 @@
-import { useMemo, useState, type MouseEvent, type KeyboardEvent, type ReactElement } from 'react';
+import {
+  useMemo,
+  useState,
+  type MouseEvent,
+  type KeyboardEvent,
+  type ReactElement,
+  type ReactNode,
+} from 'react';
 import { UserPlus } from '@xyne/icons';
 import UserAvatar, { AvatarShape, AvatarSize } from '../../UserAvatar/UserAvatar';
 import { EntitySelector } from '../../ui/EntitySelector/EntitySelector';
-import type { SelectorOption, TriggerState } from '../../ui/EntitySelector/EntitySelector.types';
+import type {
+  EntitySelectorAnalytics,
+  SelectorOption,
+  TriggerState,
+} from '../../ui/EntitySelector/EntitySelector.types';
 import { useActiveUsers, useSelf, useUser } from '../../../hooks/useUsers';
 import { getUserDisplayName, matchesUserQuery, withYouLabel } from '../../../utils/userDisplayName';
 import { useChannelAssignGate } from '../../../hooks/useChannelAssignGate';
 import { useUserGroupById } from '../../../hooks/useUserGroup';
 import { channelMembersFirst, currentUserFirst } from '../../../utils/channelMembersFirst';
+import { useExclusivePicker } from '../TicketTable/ExclusivePickerScope';
 
 interface UserSelectorProps {
   selectedUserId: string | null;
@@ -25,6 +37,9 @@ interface UserSelectorProps {
   noBorder?: boolean;
   placeholder?: string;
   renderTrigger?: (state: TriggerState) => ReactElement;
+  /** Compact-only overrides for surfaces that pick a user for something other than the assignee. */
+  triggerTooltip?: ReactNode;
+  analytics?: EntitySelectorAnalytics;
 }
 
 /**
@@ -44,8 +59,11 @@ export function UserSelector({
   noBorder,
   placeholder = 'Assign User',
   renderTrigger,
+  triggerTooltip,
+  analytics,
 }: UserSelectorProps): ReactElement {
   const [open, setOpen] = useState(false);
+  useExclusivePicker(open, setOpen);
   const [searchValue, setSearchValue] = useState('');
   const { shouldGate, memberIds, gatedAssign } = useChannelAssignGate(channelId);
   const activeUsers = useActiveUsers();
@@ -188,11 +206,15 @@ export function UserSelector({
       {...(renderTrigger ? { renderTrigger, dropdownMinWidth: '16rem' } : {})}
       {...(variant === 'compact'
         ? {
-            renderTrigger: renderCompactTrigger,
-            ...(showLabel ? {} : { triggerTooltip: assigneeTooltip }),
+            renderTrigger: renderTrigger ?? renderCompactTrigger,
+            ...(triggerTooltip !== undefined
+              ? { triggerTooltip }
+              : showLabel
+                ? {}
+                : { triggerTooltip: assigneeTooltip }),
             align: 'end' as const,
             dropdownMinWidth: '16rem',
-            analytics: {
+            analytics: analytics ?? {
               category: 'Tickets',
               searchName: 'SearchAssigneePicker',
               optionName: 'SelectRowAssignee',

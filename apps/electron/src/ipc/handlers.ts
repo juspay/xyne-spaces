@@ -5,7 +5,13 @@ import * as path from 'path';
 import { clearAllCookies, clearBrowserTabsData, syncXyneCookiesToBrowserPanel } from '../services/cookies';
 import { chromeProfileAvailable, importChromeCookies } from '../services/browser-import';
 import { showNotification, NotificationData, showCallNotification, closeCallNotification, CallNotificationData } from '../services/notifications';
-import { getMainWindow, loadApp, toggleWindowCompactMode } from '../window/manager';
+import {
+  getMainWindow,
+  isAppWindowFocused,
+  loadApp,
+  toggleWindowCompactMode,
+  watchAppFocus,
+} from '../window/manager';
 import { setupMTLSIpcHandlers } from './mtls-handlers';
 import { config, ENABLE_LOCAL_HARNESS } from '../app/config';
 import { performHardReload } from '../services/version-checker';
@@ -17,6 +23,7 @@ import {
 } from '../services/media-permission';
 import { setCustomScreenPickerEnabled, setCachedUser } from '../services/request-interceptor';
 import { hideMeetingPopup, hideMeetingPopupAfter } from '../services/meeting-popup-window';
+import { bringMainWindowToFront } from '../services/incoming-call-window';
 import {
   isPillSender,
   isRecordingPillEnabled,
@@ -484,6 +491,29 @@ export function setupIpcHandlers(): void {
 
   ipcMain.on('close-call-notification', (_event, callId: string) => {
     closeCallNotification(callId);
+  });
+
+  ipcMain.on('incoming-call-window:bring-app-to-front', (event) => {
+    const mainWindow = getMainWindow();
+    // Only the main window answers calls; nothing else gets to steal focus.
+    if (!mainWindow || mainWindow.isDestroyed() || event.sender !== mainWindow.webContents) return;
+    bringMainWindowToFront(mainWindow);
+  });
+
+  ipcMain.handle('incoming-call-window:is-app-focused', () => isAppWindowFocused());
+
+  ipcMain.on('incoming-call-window:watch-focus', (event, watch: unknown) => {
+    watchAppFocus(event.sender, watch === true);
+  });
+
+  // Every app window runs the incoming-call UI; only the main one floats the
+  // card, so two windows never open (and fight over) the same floating window.
+  // `mainExists` lets the others fall back to the OS banner when there is no
+  // main window left to float it (Windows/Linux, main closed, another open).
+  ipcMain.handle('incoming-call-window:get-host', (event) => {
+    const mainWindow = getMainWindow();
+    const mainExists = !!mainWindow && !mainWindow.isDestroyed();
+    return { isMain: mainExists && event.sender === mainWindow.webContents, mainExists };
   });
 
   ipcMain.on('reload-app', () => {

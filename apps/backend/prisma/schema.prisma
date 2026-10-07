@@ -1357,6 +1357,7 @@ model PullRequests {
   @@index([workflowExecutionId])
   @@index([date])
   @@index([ticketId, date(sort: Desc)], map: "pull_requests_ticketId_date_idx")
+  @@index([prUrl])
   @@map("pull_requests")
   @@schema("public")
 }
@@ -1705,6 +1706,8 @@ model Invitation {
   entityId     String?        // projectId | channelId | canvasId
   entityType   String?   // PROJECT | CHANNEL | CANVAS
   channelId    String?       // For PROJECT guests: the specific channel to grant access to
+  isOrgApproved Boolean?
+  inviteEmailSentAt DateTime?  // Approval flow: when the invite email actually went out. null on an approved invite = email failed, resend needed
   createdAt    DateTime      @default(now())
   updatedAt    DateTime      @updatedAt
 
@@ -1718,6 +1721,7 @@ model Invitation {
   @@index([invitationId])
   @@index([entityId])
   @@index([createdAt(sort: Desc), id])
+  @@index([orgId, isOrgApproved])
   @@map("invitations")
   @@schema("public")
 }
@@ -5102,6 +5106,28 @@ model ExecutionRunLog {
   // the rightmost leaf.
   @@index([createdAt])
   @@map("execution_run_logs")
+  @@schema("non_zero")
+}
+
+// Where each pull request link was posted, so a merge can find the Radar
+// threads to judge with one lookup instead of searching chat. Written by the
+// Radar worker as it reads each window; read by the PR-merge pass.
+model RadarPrLink {
+  workspaceId    String // denormalized tenant key (stamped on insert)
+  id             String   @id @default(cuid())
+  prUrl          String // canonical, lowercased: https://<host>/<owner>/<repo>/pull/<n> (GitHub) or https://<host>/projects/<KEY>/repos/<slug>/pull-requests/<n> (Bitbucket)
+  scopeKey       String // the Radar scope the link was posted in (conversationId, or dm:<channelId>)
+  channelId      String
+  conversationId String // the conversation of the message itself (no FK constraint, as elsewhere here)
+  messageId      String
+  postedAt       DateTime // the message's createdAt
+  createdAt      DateTime @default(now())
+
+  // A replayed window writes nothing twice.
+  @@unique([messageId, prUrl])
+  // The only read: every link to one PR in a workspace.
+  @@index([workspaceId, prUrl])
+  @@map("radar_pr_links")
   @@schema("non_zero")
 }
 
