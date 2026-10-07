@@ -1,3 +1,10 @@
+## [1.461.0-release-20261006.2](https://github.com/juspay/xyne-spaces/compare/v1.461.0-release-20261006.1...v1.461.0-release-20261006.2) (2026-10-07)
+
+
+### Features
+
+* Update community onboarding flow ([#2763](https://github.com/juspay/xyne-spaces/issues/2763)) ([e927b7d](https://github.com/juspay/xyne-spaces/commit/e927b7da5146b637bc3c5e2f5b664a02e3ce62e3))
+
 ## [1.461.0-release-20261006.1](https://github.com/juspay/xyne-spaces/compare/v1.460.5-release-20261006.2...v1.461.0-release-20261006.1) (2026-10-07)
 
 
