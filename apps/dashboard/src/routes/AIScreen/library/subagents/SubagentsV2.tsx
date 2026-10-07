@@ -1,6 +1,6 @@
 import { ReactElement, useMemo } from 'react';
 import { useParams, useSearchParams } from 'react-router-dom';
-import { Network } from 'lucide-react';
+import { Bot } from '@xyne/icons';
 import { searchByNameThenDescription } from '../shared/librarySearch';
 import { useClawSubagents } from '@/hooks/useClawSubagents';
 import type { SubagentDef, SubagentSource } from '@/services/claw/clawSubagentsTypes';
@@ -100,6 +100,7 @@ const SubagentsV2 = ({ query }: { query: string }): ReactElement => {
         isError ? { message: "Couldn't load subagents.", onRetry: () => void refetch() } : undefined
       }
       emptyState={emptyState}
+      cardVariant='flat'
     >
       <LibrarySections
         sections={sections.map(section => ({
@@ -114,9 +115,10 @@ const SubagentsV2 = ({ query }: { query: string }): ReactElement => {
                 )}
                 testId='claw-subagent-card'
                 dimmed={!subagent.enabled}
+                variant='flat'
                 icon={
-                  <LibraryIconTile>
-                    <Network className='size-4' />
+                  <LibraryIconTile size='lg'>
+                    <Bot variant='Solid' className='size-6 text-foreground/40' />
                   </LibraryIconTile>
                 }
                 name={subagent.name}

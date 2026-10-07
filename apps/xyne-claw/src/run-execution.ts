@@ -1,5 +1,6 @@
 import { pinRunJudgeBackend } from "./judge-backend.js";
 import { pinRunOptimizations, tierOptimizationDefaults } from "./optimizations.js";
+import { pinRunFlags } from "./run-context.js";
 import {
   ensureActiveRun,
   finishActiveRun,
@@ -121,6 +122,10 @@ export interface InternalRunPayload {
   resumedFromHandoff?: boolean;
   judgeBackend?: string;
   optimizations?: unknown;
+  /** Create-page chat turn: skip pre-run deliberation (the mode router). Set by claw-auth. */
+  instant?: boolean;
+  /** Create-page chat turn: no tools at all. Set by claw-auth. */
+  disableTools?: boolean;
   memoryBankId?: string;
   /** Digital Twin mention flow: who @mentioned the user, and the channel name.
    *  Fed into the twin_deliver mandate's who/where line in the SYSTEM prompt so
@@ -216,6 +221,8 @@ export async function executeRunFromPayload(
     resumedFromHandoff,
     judgeBackend,
     optimizations,
+    instant,
+    disableTools,
     memoryBankId,
     senderName,
     channelName,
@@ -239,6 +246,7 @@ export async function executeRunFromPayload(
 
   pinRunJudgeBackend(judgeBackend);
   pinRunOptimizations(optimizations, agentConfig?.["optimizations"], tierOptimizationDefaults(delegationMode));
+  pinRunFlags({ instant, disableTools });
 
   try {
     // Process in background

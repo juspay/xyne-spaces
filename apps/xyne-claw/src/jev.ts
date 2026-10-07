@@ -12,10 +12,12 @@
  * decision; it is never the only way to make one.
  */
 
+import { validateSystemOneRequest, type SystemOneRequest } from "xyne-claw-shared";
 import { createLogger } from "./logger.js";
 import { metric } from "./metrics.js";
 import {
   activeJudgeBackend,
+  isExplicitOnlyBackend,
   recordJudgeExchange,
   recordJudgeShadow,
   shadowJudgeBackends,
@@ -25,6 +27,7 @@ import {
   type SystemOneBackendSpec,
 } from "./judge-backend.js";
 import { llmJudgeConfig, llmJudgePost } from "./judge-llm.js";
+import { withXorSlot } from "./xor-slot.js";
 
 const log = createLogger("jev");
 
@@ -87,11 +90,17 @@ function systemOneConfig(backend: SystemOneBackendName) {
   };
 }
 
+/** XOR_SUGGEST=off is the master switch: XOR then counts as not configured. */
+function xorSwitchedOff(): boolean {
+  return ["off", "0", "false", "no"].includes(env("XOR_SUGGEST").toLowerCase());
+}
+
 export function judgeBackendConfigured(backend: JudgeBackendName): boolean {
   if (backend === "llm") {
     const cfg = llmJudgeConfig();
     return Boolean(cfg.url && cfg.key && cfg.model);
   }
+  if (backend === "xor" && xorSwitchedOff()) return false;
   const cfg = systemOneConfig(backend);
   return Boolean(cfg.url && cfg.key && cfg.distinct);
 }
@@ -104,6 +113,40 @@ export function jevEnabled(): boolean {
 export function jevThreshold(name: string, fallback: number): number {
   const raw = Number(process.env[name]);
   return Number.isFinite(raw) ? raw : fallback;
+}
+
+class SystemOneHttpError extends Error {
+  constructor(
+    backend: JudgeBackendName,
+    readonly status: number,
+  ) {
+    super(`${backend} ${status}`);
+  }
+}
+
+// XOR circuit breaker. Grid's key holds only a few parallel requests and a
+// rejected request has been seen to pin a slot for a long time, so after a
+// client error XOR is skipped outright and callers stay on their fallback.
+const XOR_BREAKER_CLIENT_ERROR_MS = 15 * 60_000;
+const XOR_BREAKER_RATE_LIMIT_MS = 60_000;
+let xorBreaker: { until: number; status: number } | null = null;
+
+function xorBreakerOpen(): boolean {
+  if (!xorBreaker) return false;
+  if (Date.now() < xorBreaker.until) return true;
+  log.info(`[jev] xor circuit breaker closed (was open after HTTP ${xorBreaker.status}) — trying XOR again`);
+  xorBreaker = null;
+  return false;
+}
+
+function tripXorBreaker(status: number): void {
+  const until = Date.now() + (status === 429 ? XOR_BREAKER_RATE_LIMIT_MS : XOR_BREAKER_CLIENT_ERROR_MS);
+  if (xorBreaker && xorBreaker.until >= until) return;
+  if (!xorBreaker) {
+    const seconds = Math.round((until - Date.now()) / 1000);
+    log.warn(`[jev] xor circuit breaker open after HTTP ${status} — skipping XOR for ${seconds}s`);
+  }
+  xorBreaker = { until, status };
 }
 
 async function post(
@@ -123,7 +166,7 @@ async function post(
     },
     body: JSON.stringify({ state, ...(cfg.model ? { model: cfg.model } : {}), questions }),
   });
-  if (!res.ok) throw new Error(`${backend} ${res.status}`);
+  if (!res.ok) throw new SystemOneHttpError(backend, res.status);
   const body = (await res.json()) as { answers?: Record<string, JevAnswer> };
   return normaliseScores(body.answers ?? {}, questions);
 }
@@ -239,11 +282,13 @@ export async function jevAskOn(
   if (!judgeBackendConfigured(backend) || !state.trim() || Object.keys(questions).length === 0) return null;
   const purpose = opts.purpose ?? "ask";
   const count = Object.keys(questions).length;
+  if (backend === "xor" && !xorRequestAllowed(state, questions, purpose)) return null;
   const started = Date.now();
   const controller = new AbortController();
   const onAbort = (): void => controller.abort();
   opts.signal?.addEventListener("abort", onAbort, { once: true });
-  const timer = setTimeout(() => controller.abort(), backendTimeoutMs(backend, opts.timeoutMs));
+  const timeoutMs = backendTimeoutMs(backend, opts.timeoutMs);
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
   const record = (ms: number, answers: Record<string, JevAnswer> | null, error?: string): void =>
     recordJudgeExchange({
       backend, purpose, ms, questions: count, ok: answers !== null,
@@ -252,17 +297,31 @@ export async function jevAskOn(
       at: new Date(started).toISOString(),
     });
   try {
-    const answers = await post(backend, state, questions, controller.signal);
+    const answers =
+      backend === "xor"
+        ? await withXorSlot(() => post(backend, state, questions, controller.signal), { timeoutMs })
+        : await post(backend, state, questions, controller.signal);
+    if (!answers) {
+      // No cluster-wide XOR slot free: an expected condition, not a failure to warn about.
+      metric.count("jev_failed", { purpose, backend, reason: "no_slot" });
+      return null;
+    }
     const elapsed = Date.now() - started;
     metric.observe("jev_ms", elapsed, { purpose, backend, result: "ok", questions: count });
     record(elapsed, answers);
-    for (const shadow of shadowJudgeBackends(backend)) {
-      if (!judgeBackendConfigured(shadow)) continue;
-      void runShadow(backend, shadow, state, questions, answers, elapsed, purpose);
+    // Explicit-only backends are never mirrored: a shadow would double the load on a rate-limited key.
+    if (!isExplicitOnlyBackend(backend)) {
+      for (const shadow of shadowJudgeBackends(backend)) {
+        if (!judgeBackendConfigured(shadow)) continue;
+        void runShadow(backend, shadow, state, questions, answers, elapsed, purpose);
+      }
     }
     return answers;
   } catch (err) {
     const elapsed = Date.now() - started;
+    if (backend === "xor" && err instanceof SystemOneHttpError && err.status >= 400 && err.status < 500) {
+      tripXorBreaker(err.status);
+    }
     const reason = controller.signal.aborted ? "timeout" : "error";
     const msg = err instanceof Error ? err.message : String(err);
     metric.count("jev_failed", { purpose, backend, reason });
@@ -273,6 +332,29 @@ export async function jevAskOn(
     clearTimeout(timer);
     opts.signal?.removeEventListener("abort", onAbort);
   }
+}
+
+/**
+ * Pre-flight for XOR only: the breaker, then the exact question shape Grid
+ * accepts. A rejected request can hold one of the key's few parallel slots for
+ * a long time, so a malformed one is dropped here rather than sent. Logs the
+ * reason and question ids, never the state.
+ */
+function xorRequestAllowed(state: string, questions: Record<string, JevQuestion>, purpose: string): boolean {
+  if (xorBreakerOpen()) {
+    metric.count("jev_failed", { purpose, backend: "xor", reason: "breaker" });
+    return false;
+  }
+  const verdict = validateSystemOneRequest({
+    state,
+    questions: questions as SystemOneRequest["questions"],
+  });
+  if (verdict.ok) return true;
+  metric.count("jev_failed", { purpose, backend: "xor", reason: "invalid" });
+  log.warn(
+    `[jev] ${purpose} via xor dropped as invalid (${verdict.reason}); questions=${Object.keys(questions).join(",")}`,
+  );
+  return false;
 }
 
 export interface JevScoreOptions<T> extends JevOptions {

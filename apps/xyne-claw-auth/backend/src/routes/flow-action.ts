@@ -1427,7 +1427,7 @@ router.post("/action", pinAgentSlugFromHeader, verifySpacesSignature, async (req
           await prisma.scheduledJob.update({ where: { id: row.id }, data: { status: "active", bullJobId } });
         } else {
           const schedulerId = `cron-${row.id}`;
-          await enqueueCronJob(schedulerId, jobData, row.cronExpression!);
+          await enqueueCronJob(schedulerId, jobData, row.cronExpression!, row.timezone);
           await prisma.scheduledJob.update({ where: { id: row.id }, data: { status: "active", bullSchedulerId: schedulerId } });
         }
         resp = { type: "close_screen", finalMessage: "✓ Scheduled." };
@@ -2058,18 +2058,13 @@ router.post("/action", pinAgentSlugFromHeader, verifySpacesSignature, async (req
       }
 
       const decision = actionId === "agent-draft-approve" ? "approve" : "reject";
-      // The chips the user kept, from the node's own flow-state key.
-      const keptCapabilityIds = Array.isArray(values[AGENT_COMPONENT_ID])
-        ? (values[AGENT_COMPONENT_ID] as unknown[]).filter((v): v is string => typeof v === "string")
-        : undefined;
-
       const { resolveAgentDraft, parseAgentDraftEdits } = await import("../lib/agent-card.js");
       const edits = parseAgentDraftEdits(values[AGENT_EDITS_STATE_KEY]);
       const result = await resolveAgentDraft(
         requestId,
         callerUserId,
         decision,
-        keptCapabilityIds,
+        values[AGENT_COMPONENT_ID],
         cardAgentSlug,
         edits,
       );

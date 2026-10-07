@@ -1,4 +1,5 @@
 import { type ReactElement } from 'react';
+import { UserBot } from '@xyne/icons';
 import { CapabilityChip } from '../CapabilityChip';
 
 interface SubagentChipProps {
@@ -18,6 +19,7 @@ export function SubagentChip({
     <CapabilityChip
       label={label}
       selected={selected}
+      icon={<UserBot className='size-4' aria-hidden />}
       {...(onOpen ? { onOpen } : {})}
       onToggle={onToggle}
       trackName='Create agent v2: toggle subagent chip'

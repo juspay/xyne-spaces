@@ -12,10 +12,14 @@ const MCP_ICON_BASE = '/assets/mcp';
 const MCP_SVG_ONLY = new Set(['gmail', 'google-drive', 'sequentialthinking', 'xyne-spaces']);
 const MCP_ICON_BG: Record<string, string> = { 'xyne-spaces': 'bg-transparent' };
 
-const SIZE: Record<'sm' | 'md' | 'lg', string> = {
+type McpIconSize = 'sm' | 'md' | 'lg' | 'tile';
+
+const SIZE: Record<McpIconSize, string> = {
   sm: 'size-8 rounded-lg p-1 text-[10px]',
   md: 'size-10 rounded-lg p-1.5 text-xs',
   lg: 'size-12 rounded-xl p-2 text-sm',
+  // The 44px tile on Agent Hub's flat cards.
+  tile: 'size-11 rounded-xl p-2.5 text-xs',
 };
 
 /** Initials from a name, e.g. "Google Drive" -> "GD". */
@@ -33,7 +37,7 @@ export const McpServerIcon = ({
   size = 'md',
 }: {
   server: McpServer;
-  size?: 'sm' | 'md' | 'lg';
+  size?: McpIconSize;
 }): ReactElement => {
   const [errored, setErrored] = useState(false);
   // `bg-card` (white), not `bg-muted` (grey), so brand logos sit on the same

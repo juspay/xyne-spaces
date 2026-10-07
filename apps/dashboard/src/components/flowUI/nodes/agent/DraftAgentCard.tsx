@@ -8,42 +8,38 @@ import { AuditLine, CardShell, Mention, StatusChip } from '../cardPrimitives';
 import Avatar from '../../../ui/Avatar/Avatar';
 import { AgentPreview, InsideAgentPreviewContext } from './AgentPreview';
 import { ChatWithAgentButton } from './ChatWithAgentButton';
+import { AgentCreateFooter } from './create/AgentCreateFooter';
+import { DiscardDraftDialog } from './create/DiscardDraftDialog';
+import { formFromIdentity, patchFromIdentity } from './create/canvasFromIdentity';
+import { toCanvasValue } from './create/types';
+import { useAgentCreateForm } from './create/useAgentCreateForm';
+import { useAgentCreateSession } from './create/AgentCreateSessionContext';
+import { useAgentNameCheck } from '../../../../hooks/useAgentNameCheck';
+import { slugify } from '../../../../routes/ClawAgentsScreen/create/wizardState';
 import { useDraftAgentEditor } from './useDraftAgentEditor';
 
 /**
  * The `agent` artifact's DRAFT variant — an agent an agent proposed, awaiting
  * the requester's decision.
  *
- *   pending  → Decline / Edit / Create Agent in the footer.
- *   created  → Created chip, audit footer.
- *   rejected → Declined chip, audit footer.
- *
- * Laid out to the "Agent Create" frame: a white inset panel carrying the
- * identity (kind + state, name, @slug, description) over a flat footer of
- * controls. The identity here is deliberately INLINE rather than the shared
- * AgentIdentityBlock — that block is the richer profile/preview presentation
- * (blue mention slug, model, capability chips, detail rows), and this frame
- * draws a plainer subset. AgentIdentityBlock still backs the expanded preview,
- * so the detailed view stays in one place.
- *
- * Capability chips are NOT rendered on the card for now (see AgentPreview for
- * the full list). Selection state is still seeded into flow-state below so the
- * server receives the complete capability set on approve — hiding the chips
- * must not silently narrow the grant.
+ * Compact thread card briefs the pending agent. Expand opens AgentPreview with
+ * chat left / whole-agent canvas right. Create Agent lives on the preview
+ * sticky footer; the nested thread card is a brief only.
  */
 export const DraftAgentCard: React.FC<{ node: FlowComponent; props: AgentDraftProps }> = ({
   node,
   props,
 }) => {
-  const { state, updateFieldValue, executeAction, conversationId } = useFlow();
+  const { state, updateFieldValue, executeAction, conversationId, messageId } = useFlow();
   const [pending, setPending] = useState<'approve' | 'reject' | null>(null);
   const [expanded, setExpanded] = useState(false);
-  // A copy of this card lives inside its own AgentPreview thread panel; hide the
-  // expand control there so it can't open a nested preview.
+  const [discardOpen, setDiscardOpen] = useState(false);
+  const [createError, setCreateError] = useState<string | null>(null);
   const insidePreview = useContext(InsideAgentPreviewContext);
+  const createSession = useAgentCreateSession();
 
-  const capabilities = props.agent.capabilities ?? [];
   const decided = props.phase !== 'pending';
+  const createForm = useAgentCreateForm(formFromIdentity(props.agent));
   const editor = useDraftAgentEditor(props, node.id);
 
   // The identity the user last saved in the preview. Equal to props while the
@@ -52,11 +48,23 @@ export const DraftAgentCard: React.FC<{ node: FlowComponent; props: AgentDraftPr
   const agent = { ...props.agent, ...editor.identity };
 
   useEffect(() => {
-    if (state.values[node.id] === undefined) {
-      updateFieldValue(node.id, props.selected ?? capabilities.map(c => c.id));
+    if (createSession && props.phase === 'pending') {
+      createSession.applyChatDraft(messageId, patchFromIdentity(props.agent));
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [node.id]);
+  }, [createSession, messageId, props.agent, props.phase]);
+
+  useEffect(() => {
+    if (insidePreview || decided) return;
+    updateFieldValue(node.id, toCanvasValue(createForm.form));
+  }, [createForm.form, decided, insidePreview, node.id, updateFieldValue]);
+
+  const slug = createForm.form.slugManual
+    ? createForm.form.slug
+    : slugify(createForm.form.name) || createForm.form.slug;
+  const nameCheck = useAgentNameCheck(decided ? '' : createForm.form.name.trim(), slug);
+  const handleError = nameCheck.slugError
+    ? `@${slug} is taken. Rename the handle to create a new agent.`
+    : nameCheck.nameError;
 
   const locked = state.submitting || decided || pending !== null;
 
@@ -64,15 +72,33 @@ export const DraftAgentCard: React.FC<{ node: FlowComponent; props: AgentDraftPr
     if (locked) {
       return;
     }
+    setCreateError(null);
     setPending(actionId === 'agent-draft-approve' ? 'approve' : 'reject');
     try {
+      updateFieldValue(node.id, toCanvasValue({ ...createForm.form, slug }));
       // Only on a decision that landed. A rejected create (a taken identifier,
-      // say) leaves the card live and the reason in a toast, so the preview has
-      // to stay open — that is where the fields it names are edited.
-      if (await executeAction({ type: 'submit', actionId })) setExpanded(false);
+      // say) leaves the card live, so the preview has to stay open, because
+      // that is where the fields it names are edited.
+      const landed = await executeAction({ type: 'submit', actionId });
+      if (landed) {
+        setExpanded(false);
+      } else if (actionId === 'agent-draft-approve') {
+        setCreateError(
+          `Couldn't create @${slug}. Check the handle is unique and try Create Agent again. Your draft is still here.`,
+        );
+        setExpanded(true);
+      }
     } finally {
       setPending(null);
     }
+  };
+
+  const requestDiscard = (): void => {
+    if (createForm.canvasDirty) {
+      setDiscardOpen(true);
+      return;
+    }
+    void submit('agent-draft-decline');
   };
 
   const statePill =
@@ -84,13 +110,8 @@ export const DraftAgentCard: React.FC<{ node: FlowComponent; props: AgentDraftPr
       <StatusChip label='Draft' tone='muted' />
     );
 
-  // Built as nodes, not a string, so the actor renders as a mention. No decision
-  // time — the chin names who decided, not when; the message's own timestamp in
-  // the thread already places it.
   const auditNode = (
     <div className='flex min-w-0 items-center gap-1.5'>
-      {/* Same avatar treatment as the reply tray — the decider is a person, so
-          they read as one rather than as a name in prose. */}
       {props.decidedById && (
         <Avatar userId={props.decidedById} size='xs' rounded showActiveStatus={false} />
       )}
@@ -115,8 +136,6 @@ export const DraftAgentCard: React.FC<{ node: FlowComponent; props: AgentDraftPr
 
   const approveLabel = pending === 'approve' ? 'Creating…' : 'Create Agent';
 
-  // Footer button shapes from the frame: text-only for the secondary actions, a
-  // bordered surface for the primary one.
   const ghostButton = cn(
     'inline-flex h-7 items-center gap-1.5 rounded-[10px] px-1.5',
     'text-sm font-semibold leading-5 text-foreground',
@@ -128,14 +147,20 @@ export const DraftAgentCard: React.FC<{ node: FlowComponent; props: AgentDraftPr
     'hover:bg-foreground/[0.04] disabled:cursor-not-allowed disabled:opacity-60',
   );
 
-  // Decline / Edit / Create Agent — shared by the compact footer AND the
-  // expanded preview footer (submit() closes the preview on a decision).
-  const actionControls = (
+  const canCreate =
+    createForm.form.name.trim().length > 0 &&
+    slug.length > 0 &&
+    createForm.form.systemPrompt.trim().length > 0 &&
+    !nameCheck.checking &&
+    nameCheck.nameValid &&
+    createForm.conflicts.length === 0;
+
+  const compactActions = (
     <div className='flex w-full items-center justify-end gap-3'>
       <div className='flex shrink-0 items-center gap-2'>
         <button
           type='button'
-          onClick={() => void submit('agent-draft-decline')}
+          onClick={requestDiscard}
           disabled={locked}
           className={cn(ghostButton, 'px-2.5')}
           data-track-category='AGENT_ARTIFACT'
@@ -148,7 +173,7 @@ export const DraftAgentCard: React.FC<{ node: FlowComponent; props: AgentDraftPr
         <button
           type='button'
           onClick={() => void submit('agent-draft-approve')}
-          disabled={locked}
+          disabled={locked || !canCreate}
           className={cn(primaryButton, 'px-2.5')}
           data-track-category='AGENT_ARTIFACT'
           data-track-name='CLICK_APPROVE'
@@ -161,17 +186,25 @@ export const DraftAgentCard: React.FC<{ node: FlowComponent; props: AgentDraftPr
     </div>
   );
 
+  const previewFooter = decided ? (
+    decidedFooter
+  ) : (
+    <AgentCreateFooter
+      phase='pending'
+      canCreate={canCreate}
+      creating={pending === 'approve' || state.submitting}
+      discarding={pending === 'reject'}
+      onCreate={() => void submit('agent-draft-approve')}
+      onDiscard={requestDiscard}
+      createError={createError}
+    />
+  );
+
+  const createPhase =
+    props.phase === 'created' ? 'created' : props.phase === 'rejected' ? 'rejected' : 'draft';
+
   return (
     <CardShell style={node.style}>
-      {/* Inset panel — the frame's white card sitting on the shell's fill.
-          Bottom edge only: the shell already draws the outline, so bordering all
-          four sides stacks two 1px strokes on every edge and reads as a heavy
-          double rule. What is left is a single hairline dividing the body from
-          the chin. Bottom radius stays 11px (the shell's 12px minus its 1px
-          border) so the panel's curve sits concentric with the shell's. */}
-      {/* Identical in every phase — the state reads from the chip and the chin
-          (footer) alone, so a declined agent is presented exactly as a pending
-          one rather than dimmed into a different-looking card. */}
       <div className='flex flex-col gap-4 rounded-b-[11px] border-b border-border bg-card/80 p-3'>
         <div className='flex h-6 items-center gap-1.5 pl-1'>
           <div className='flex min-w-0 flex-1 items-center gap-1.5'>
@@ -182,9 +215,6 @@ export const DraftAgentCard: React.FC<{ node: FlowComponent; props: AgentDraftPr
           </div>
           {!insidePreview &&
             (props.phase === 'created' ? (
-              // The agent exists now, so its detail page shows everything the
-              // preview dialog only summarises. While still a draft there is no
-              // page to open, so the dialog stays the way to see the spec.
               <Link
                 to={`/ai/library/agent/${encodeURIComponent(props.agent.slug)}?tab=persona`}
                 className='shrink-0 rounded-[10px] px-2 py-1 text-sm font-medium leading-5 !text-muted-foreground !no-underline transition-colors hover:bg-accent hover:!text-foreground'
@@ -231,36 +261,40 @@ export const DraftAgentCard: React.FC<{ node: FlowComponent; props: AgentDraftPr
               </span>
             </div>
           )}
-
-          {/* `props.note` (the server's "not granted — no such tool" footnote) is
-              intentionally NOT rendered here for now, alongside the hidden
-              capability chips. The server still sends it and the expanded
-              preview still shows it — this is a display choice, not a change to
-              the wire contract. */}
         </div>
       </div>
 
-      {/* min-h pins the chin to its tallest state — the pending buttons (h-7 + the
-          16px of py-2). Without it the card contracts by ~12px the moment a
-          decision lands (an audit line is shorter than a button row, and shorter
-          again when there is no decider avatar), reflowing the thread under it. */}
       <div className='flex min-h-[44px] items-center justify-between gap-3 px-3 py-2'>
-        {/* A decided card shows the audit line, plus the chat entry point once the
-            agent exists. No connect prompt in either phase — it belongs with the
-            capability chips, which this card no longer renders; the expanded
-            preview still surfaces both. */}
-        {decided ? decidedFooter : actionControls}
+        {decided ? decidedFooter : insidePreview ? null : compactActions}
       </div>
 
-      <AgentPreview
-        open={expanded}
-        onOpenChange={setExpanded}
-        agent={agent}
-        editor={editor}
-        note={props.note}
-        statePill={statePill}
-        conversationId={conversationId ?? undefined}
-        footer={decided ? decidedFooter : actionControls}
+      {!insidePreview && (
+        <AgentPreview
+          open={expanded}
+          onOpenChange={setExpanded}
+          messageId={messageId ?? ''}
+          agent={agent}
+          editor={editor}
+          note={props.note}
+          statePill={statePill}
+          conversationId={conversationId ?? undefined}
+          footer={previewFooter}
+          mode='create'
+          createForm={createForm}
+          createPhase={createPhase}
+          handleError={handleError}
+          checkingHandle={nameCheck.checking}
+          builtBy={props.agent.builtBy}
+        />
+      )}
+
+      <DiscardDraftDialog
+        open={discardOpen}
+        onOpenChange={setDiscardOpen}
+        onConfirm={() => {
+          setDiscardOpen(false);
+          void submit('agent-draft-decline');
+        }}
       />
     </CardShell>
   );

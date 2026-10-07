@@ -11,6 +11,7 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import { dirname, isAbsolute, join } from "node:path";
 import { createLogger } from "./logger.js";
+import { createChunkSender } from "./stream-chunk-queue.js";
 import { buildTwinSystemPrompt, TWIN_DELIVER_NUDGE } from "./twin-prompts.js";
 import { installStopAfterDelivery, recoverTwinDeliveryFromText, TWIN_DELIVER_TOOL_NAME, type TwinDeliverRef } from "./twin-deliver.js";
 import { checkTwinDelivery } from "./twin-delivery-check.js";
@@ -1526,6 +1527,20 @@ export function pushSandboxPreview(
   });
 }
 
+// Over HTTP, deltas go one POST at a time per session so they land in order
+// (see stream-chunk-queue.ts); the ones produced meanwhile ride the next POST.
+const streamChunkSender = createChunkSender((destination, body) =>
+  fetch(destination, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      ...(SERVER.s2sKey ? { "x-s2s-key": SERVER.s2sKey } : {}),
+    },
+    body: JSON.stringify(body),
+    signal: AbortSignal.timeout(5_000),
+  }),
+);
+
 // Stream raw text fragments (reasoning deltas, assistant text deltas) to the progress endpoint.
 // These are fired on every pi-ai text_delta / thinking_delta event — high-frequency, keep it lean.
 function pushStreamChunk(
@@ -1540,17 +1555,7 @@ function pushStreamChunk(
     }
     return;
   }
-  fetch(progressUrl, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      ...(SERVER.s2sKey ? { "x-s2s-key": SERVER.s2sKey } : {}),
-    },
-    body: JSON.stringify({ sessionId, ...payload }),
-    signal: AbortSignal.timeout(5_000),
-  }).catch(() => {
-    // Best-effort — don't spam logs on every chunk
-  });
+  streamChunkSender.push(progressUrl, sessionId, payload);
 }
 
 export function pushDebugProgress(

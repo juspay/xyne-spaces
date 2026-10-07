@@ -1,6 +1,4 @@
 import { useState, type ReactElement } from 'react';
-import { useQueryClient } from '@tanstack/react-query';
-import { toast } from 'sonner';
 import { PencilEditLine } from '@xyne/icons';
 import { Loader2 } from 'lucide-react';
 import {
@@ -10,11 +8,8 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/Select/index';
-import { clawAgentDetailKey } from '@/hooks/useClawAgentDetail';
-import { updateClawAgent } from '@/services/claw/clawAuthAgentsService';
-import { clawErrorText } from '@/services/claw/clawRequest';
 import { PROVIDER_DISPLAY } from '@/services/claw/modelProviderConfig';
-import type { Agent } from '@/services/claw/clawAuthAgentTypes';
+import type { AgentConfigTarget } from '../../settings/agentConfigTarget';
 import {
   DetailCard,
   DetailRow,
@@ -71,26 +66,27 @@ const RowSelect = <T extends string>({
     </Select>
   );
 
-export function ModelCard({ agent, canEdit }: { agent: Agent; canEdit: boolean }): ReactElement {
-  const queryClient = useQueryClient();
+export function ModelCard({
+  target,
+  canEdit,
+}: {
+  target: AgentConfigTarget;
+  canEdit: boolean;
+}): ReactElement {
   const [saving, setSaving] = useState(false);
   const [orderOpen, setOrderOpen] = useState(false);
 
-  const draft = readModelCardDraft(agent.config);
+  const draft = readModelCardDraft(target.config);
 
   const persist = async (next: ModelCardDraft, successMessage: string): Promise<void> => {
     if (saving) return;
     setSaving(true);
-    const previous = agent;
-    const config = applyModelCard(agent.config, next);
-    queryClient.setQueryData(clawAgentDetailKey(agent.slug), { ...agent, config });
     try {
-      const updated = await updateClawAgent(agent.slug, { config });
-      queryClient.setQueryData(clawAgentDetailKey(agent.slug), updated);
-      toast.success(successMessage);
-    } catch (err) {
-      queryClient.setQueryData(clawAgentDetailKey(agent.slug), previous);
-      toast.error(clawErrorText(err, 'Could not update the model settings'));
+      await target.save(
+        applyModelCard(target.config, next),
+        successMessage,
+        'Could not update the model settings',
+      );
     } finally {
       setSaving(false);
     }

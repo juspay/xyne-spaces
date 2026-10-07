@@ -12,9 +12,12 @@ const SERVER_PATH = resolve(
 // approval gate stays in lockstep with the tool implementations — no hand-kept
 // allowlist to drift. (Gmail draft/trash, Calendar create/delete, Drive upload/
 // share, Sheets/Docs/Slides/Forms mutations, Tasks create/update/delete, …)
-const googleWriteTools = getAllCustomTools()
-  .filter((t) => t.source === "custom:google" && t.isWriteTool)
-  .map((t) => t.slug);
+const googleTools = getAllCustomTools().filter((t) => t.source === "custom:google");
+const googleWriteTools = googleTools.filter((t) => t.isWriteTool).map((t) => t.slug);
+// The read side (Gmail search/read, Calendar events, Drive, …) is listed up
+// front too: these tools only reach the `tools` table through a per-user sync,
+// so without them an agent couldn't pick "read my Gmail" before connecting.
+const googleReadTools = googleTools.filter((t) => !t.isWriteTool).map((t) => t.slug);
 
 export const googleAdapter: StdioMcpAdapter = {
   transport: "stdio",
@@ -22,6 +25,7 @@ export const googleAdapter: StdioMcpAdapter = {
   // Cheap no-arg read to verify the spawned server + token are live.
   healthCheck: { name: "google-calendar-list", params: {} },
   writeTools: googleWriteTools,
+  staticTools: googleReadTools,
   // No user-entered secret: the OAuth access token is auto-resolved + refreshed
   // by the credential-loader and injected as GOOGLE_ACCESS_TOKEN below.
   credentialFields: [],

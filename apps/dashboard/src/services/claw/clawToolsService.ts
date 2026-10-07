@@ -1,5 +1,5 @@
 import { clawRequest } from './clawRequest';
-import type { AvailableTools, ToolSuggestion } from './clawToolsTypes';
+import type { AvailableTools, SuggestHub, ToolSuggestion } from './clawToolsTypes';
 
 /** The full tool catalog (subagents, MCP tools, write tools, custom groups). */
 export async function getAvailableTools(): Promise<AvailableTools> {
@@ -13,6 +13,8 @@ export async function getAvailableTools(): Promise<AvailableTools> {
 export async function suggestTools(payload: {
   systemPrompt?: string | undefined;
   description?: string | undefined;
+  /** Hubs the caller wants decided — omit to let auth infer. */
+  emptyHubs?: SuggestHub[] | undefined;
 }): Promise<ToolSuggestion> {
   const data = await clawRequest<{ success: boolean; data: ToolSuggestion }>(
     '/api/v1/agents/suggest-tools',

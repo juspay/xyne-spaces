@@ -102,6 +102,7 @@ export function SlashCommandPalette({
         <Command.Item
           value={`command-${commandKind}`}
           data-item-label={activeDef.title}
+          data-command-word={commandKind}
           onSelect={() => onRunAction(commandKind)}
           onMouseDownCapture={onItemMouseDown}
           className='flex items-center gap-3 p-3 rounded-lg cursor-pointer hover:bg-accent aria-selected:bg-accent mt-1.5'

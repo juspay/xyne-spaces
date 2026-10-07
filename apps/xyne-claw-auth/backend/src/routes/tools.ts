@@ -103,6 +103,8 @@ export type Integration = {
   label: string;
   kind: "mcp" | "builtin" | "custom" | "gateway";
   connected: boolean;
+  /** What the product is for (the MCP server's own description). */
+  description?: string;
   /** Populated only for kind=="gateway". Lists every backendId registered under this serviceName. */
   backendIds?: string[];
   readTools: IntegrationToolEntry[];
@@ -280,7 +282,10 @@ export async function buildAvailableToolsCatalog(tenantUniqueId: string | undefi
     // read/write/destructive tool lists with descriptions.
     const descriptionByName = new Map<string, string>();
     for (const t of tools) {
-      if (t.description) descriptionByName.set(t.name, t.description);
+      if (!t.description) continue;
+      descriptionByName.set(t.name, t.description);
+      // Adapter-declared tools are listed by slug (google-gmail-search, not "Gmail Search").
+      if (!descriptionByName.has(t.slug)) descriptionByName.set(t.slug, t.description);
     }
 
     const integrations: Integration[] = [];
@@ -306,6 +311,7 @@ export async function buildAvailableToolsCatalog(tenantUniqueId: string | undefi
         label: server.name || humanise(type),
         kind: "mcp",
         connected: true,
+        ...(server.description?.trim() ? { description: server.description.trim() } : {}),
         readTools: entries.filter((e) => e.riskLevel === "read"),
         writeTools: entries.filter((e) => e.riskLevel !== "read"),
         usageCount: 0,

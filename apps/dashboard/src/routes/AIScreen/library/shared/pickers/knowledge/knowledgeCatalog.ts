@@ -6,26 +6,36 @@ export interface KbGrantLabel {
   key: string;
   label: string;
   detail: string | null;
+  /** Dimmed trailing text on the pill, e.g. "3 files" for a whole-collection grant. */
+  meta?: string | null;
   selection: KbSelection;
 }
 
 interface KbIndexEntry {
   name: string;
   files: Map<string, string>;
+  /** Files in this collection and every sub-folder (a whole-collection grant covers them all). */
+  fileCount: number;
 }
 
 export function buildKbIndex(tree: readonly KbCollectionNode[]): Map<string, KbIndexEntry> {
   const index = new Map<string, KbIndexEntry>();
 
-  const walk = (node: KbCollectionNode): void => {
+  const walk = (node: KbCollectionNode): number => {
     const files = new Map<string, string>();
     for (const item of node.items ?? []) files.set(item.id, item.name);
-    index.set(node.id, { name: node.name, files });
-    for (const child of node.children ?? []) walk(child);
+    const entry: KbIndexEntry = { name: node.name, files, fileCount: files.size };
+    index.set(node.id, entry);
+    for (const child of node.children ?? []) entry.fileCount += walk(child);
+    return entry.fileCount;
   };
 
   for (const root of tree) walk(root);
   return index;
+}
+
+function fileCountLabel(count: number): string {
+  return `${count} ${count === 1 ? 'file' : 'files'}`;
 }
 
 export function describeGrants(
@@ -41,6 +51,7 @@ export function describeGrants(
         key,
         label: collection?.name ?? 'Collection',
         detail: 'Whole collection',
+        meta: collection && collection.fileCount > 0 ? fileCountLabel(collection.fileCount) : null,
         selection,
       };
     }

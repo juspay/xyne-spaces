@@ -1,4 +1,5 @@
 import { ReactElement, useMemo } from 'react';
+import { Staroflife } from '@xyne/icons';
 import { useParams } from 'react-router-dom';
 import { searchByNameThenDescription } from '../shared/librarySearch';
 import { useAuth } from '@/hooks/useAuth';
@@ -85,6 +86,7 @@ const SkillsV2 = ({ query }: { query: string }): ReactElement => {
         isError ? { message: "Couldn't load skills.", onRetry: () => void refetch() } : undefined
       }
       emptyState={emptyState}
+      cardVariant='flat'
     >
       <LibrarySections
         sections={sections.map(section => ({
@@ -96,7 +98,12 @@ const SkillsV2 = ({ query }: { query: string }): ReactElement => {
               to={prefixWs(`/ai/library/skill/${encodeURIComponent(skill.slug)}?tab=overview`)}
               testId='claw-skill-card'
               dimmed={!skill.enabled}
-              icon={<LibraryIconTile name={skill.name || skill.slug} />}
+              variant='flat'
+              icon={
+                <LibraryIconTile size='lg'>
+                  <Staroflife variant='Solid' className='size-6 text-foreground/40' />
+                </LibraryIconTile>
+              }
               name={skill.name || skill.slug}
               description={skill.description}
             />

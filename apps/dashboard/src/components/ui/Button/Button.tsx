@@ -44,6 +44,10 @@ const buttonVariants = cva(
         ghost:
           'text-foreground hover:bg-accent hover:text-accent-foreground dark:hover:bg-accent/50',
         link: 'text-primary underline-offset-4 hover:underline',
+        // The black CTA (Figma 1338:41812): our darkest black (xyne-gray-1000), 8px
+        // corners, medium label, no shadow. White on the dark theme so it still
+        // reads as the main action.
+        ink: 'rounded-lg bg-xyne-gray-1000 font-medium leading-[1.2] text-white hover:bg-xyne-gray-800 focus-visible:ring-xyne-gray-1000/30 [[data-theme=midnight]_&]:bg-white [[data-theme=midnight]_&]:text-xyne-gray-1000 [[data-theme=midnight]_&]:hover:bg-xyne-gray-200',
       },
       size: {
         default: 'h-9 px-4 py-2 has-[>svg]:px-3',
@@ -59,6 +63,8 @@ const buttonVariants = cva(
         inline: 'h-auto justify-start',
       },
     },
+    // The sizes round their corners (rounded-md); the black CTA keeps its 8px.
+    compoundVariants: [{ variant: 'ink', class: 'rounded-lg' }],
     defaultVariants: {
       variant: 'default',
       size: 'default',

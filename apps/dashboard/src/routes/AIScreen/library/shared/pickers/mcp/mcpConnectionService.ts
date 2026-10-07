@@ -2,6 +2,7 @@ import { clawApiRequest } from '@/services/claw/clawRequest';
 import { currentOAuthReturnTo } from './oauthReturnTo';
 import type { CredentialField, McpServer, UserConnection } from '@/services/claw/clawMcpTypes';
 import { openOAuthConsent } from './openOAuthConsent';
+import { connectStrategyFor } from './mcpConnectStrategy';
 
 export function getCredentialFields(): Promise<Record<string, CredentialField[]>> {
   return clawApiRequest<Record<string, CredentialField[]>>('/servers/credential-fields');
@@ -23,14 +24,6 @@ function startOAuth(userId: string, serverType: string): Promise<{ authUrl: stri
     `/users/${encodeURIComponent(userId)}/oauth/${encodeURIComponent(serverType)}/authorize`,
     { method: 'POST', userId, body: JSON.stringify({ returnTo: currentOAuthReturnTo() }) },
   );
-}
-
-export type ConnectStrategy = 'auto' | 'oauth' | 'credentials';
-
-export function connectStrategyFor(server: McpServer): ConnectStrategy {
-  if (server.type === 'xyne-spaces') return 'auto';
-  if (server.type === 'google' || server.type === 'microsoft' || server.oauth) return 'oauth';
-  return 'credentials';
 }
 
 export async function connectMcpServer(

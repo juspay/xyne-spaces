@@ -1,0 +1,58 @@
+/* Write cue on the create canvas, from the Transitions.dev "Thinking states"
+   shimmer: while chat writes a field, its text dims and a soft band sweeps
+   across it, left to right.
+
+   The snippet paints its band on a ::before copy of the text; inputs and
+   textareas can't have one, so here the text itself is painted with the
+   gradient (background-clip: text). The gradient is 400% wide, so the band is
+   over the text for a third of each loop and off-stage for the rest, which
+   reads as a pause between sweeps. Base and highlight come from the theme, so
+   light and dark both work; 0.6 of the foreground matches the snippet's grey. */
+
+.t-think-field {
+  --think-shimmer: 2000ms;
+  --think-base: hsl(var(--foreground) / 0.6);
+  --think-highlight: hsl(var(--foreground));
+}
+
+/* Labels are already muted, so they dim from, and sweep back to, that. */
+.t-think-field label {
+  --think-base: hsl(var(--muted-foreground) / 0.6);
+  --think-highlight: hsl(var(--muted-foreground));
+}
+
+.t-think-field :is(input, textarea, label, [data-shimmer-text]) {
+  background-image: linear-gradient(
+    90deg,
+    var(--think-base) 0%,
+    var(--think-base) 40%,
+    var(--think-highlight) 50%,
+    var(--think-base) 60%,
+    var(--think-base) 100%
+  );
+  background-size: 400% 100%;
+  background-repeat: no-repeat;
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  caret-color: hsl(var(--foreground));
+  animation: t-think-shimmer var(--think-shimmer) linear infinite;
+}
+
+@keyframes t-think-shimmer {
+  0% {
+    background-position: 100% 0;
+  }
+  100% {
+    background-position: 0% 0;
+  }
+}
+
+/* No sweep; the dimmed text alone marks the field. */
+@media (prefers-reduced-motion: reduce) {
+  .t-think-field :is(input, textarea, label, [data-shimmer-text]) {
+    animation: none;
+    background-image: none;
+    -webkit-text-fill-color: var(--think-base);
+  }
+}

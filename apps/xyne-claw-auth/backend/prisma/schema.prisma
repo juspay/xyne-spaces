@@ -1857,6 +1857,33 @@ model Tool {
   @@map("tools")
 }
 
+
+/// Selection decisions from Hub /suggest-tools: which path decided (xor|judge|shortlist) and each candidate's XOR score.
+model AgentToolDecision {
+  id           String   @id @default(cuid())
+  orgId        String
+  userId       String?
+  surface      String   @default("hub")
+  intent       String   @db.Text
+  emptyHubs    String[] @default([])
+  shortlistIds String[] @default([])
+  closedPick   Json     @default("{}")
+  latencyMs    Int      @default(0)
+  fallback     String   @default("none")
+  mode         String   @default("shadow")
+  packVersion  String   @default("authoring-pack-v2")
+  /// xor | judge | shortlist
+  source       String   @default("judge")
+  /// { candidates: [{ hub, id, p }] } — raw XOR probabilities for offline threshold tuning.
+  scores       Json     @default("{}")
+  createdAt    DateTime @default(now())
+
+  @@index([orgId, createdAt])
+  @@index([mode, createdAt])
+  @@index([source, createdAt])
+  @@map("agent_tool_decisions")
+}
+
 model AgentTool {
   id         String @id @default(cuid())
   agentId    String
@@ -2087,6 +2114,9 @@ model ScheduledJob {
   type            String
   delayMs         BigInt?
   cronExpression  String?
+  // IANA zone the cron is read in ("0 9 * * *" = 9am there). NULL keeps the
+  // original Asia/Kolkata behaviour for rows created before this column.
+  timezone        String?
   maxRuns         Int?
   runCount        Int               @default(0)
   status          String            @default("active")

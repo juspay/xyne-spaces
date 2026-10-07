@@ -557,6 +557,10 @@ publicRouter.post("/", requireAuth, requireNoAccessToken, async (req: Request, r
       /** Per-message thinking level (Spaces composer dropdown). Merged over the
        *  agent's modelSettings for this run; invalid values are ignored. */
       thinkingLevel: rawThinkingLevel,
+      /** Skip the agentic tool loop (Ask AI Instant / agent-create). Same
+       *  empty-tools pin as agent-chat.ts `disableTools`. */
+      instant,
+      disableTools,
       agentConfig,
       additionalInstructions,
       generateFollowUpSuggestions,
@@ -800,8 +804,11 @@ publicRouter.post("/", requireAuth, requireNoAccessToken, async (req: Request, r
     // Claw admin may watch a live debug trace. Resolved here (not in the
     // /progress forwarder) because that forwarder is an internal S2S POST with
     // no user identity.
-    const allowDebug = (await isClawAdmin(userId))
-      || Boolean((await getAgentEditAccess(userId, slug, orgId))?.canEdit);
+    const [isAdmin, editAccess] = await Promise.all([
+      isClawAdmin(userId),
+      getAgentEditAccess(userId, slug, orgId).catch(() => null),
+    ]);
+    const allowDebug = isAdmin || Boolean(editAccess?.canEdit);
 
     const sdlcResolution = await resolveSdlcRepositoryForUser(
       userId,
@@ -1389,10 +1396,17 @@ publicRouter.post("/", requireAuth, requireNoAccessToken, async (req: Request, r
     // + agent ride in on the widget body instead.
     const internalProgressUrl = `${CONFIG.internalUrl}/claw/api/v1/internal/run-stream/${streamId}/progress` +
       (assistantMsg ? `?assistantMessageId=${encodeURIComponent(assistantMsg.id)}` : "");
+    // Instant / no-tools runs get an empty palette (pinned below), so they get
+    // neither the presentation tools nor the instructions that point at them.
+    const noToolPalette = instant === true || disableTools === true;
     // Composed here so both the base field and the design/page override use it.
-    const aiScreenInstructions = withAiScreenPresentationInstructions(
-      typeof additionalInstructions === "string" ? additionalInstructions : undefined,
-    );
+    const aiScreenInstructions = noToolPalette
+      ? typeof additionalInstructions === "string"
+        ? additionalInstructions
+        : undefined
+      : withAiScreenPresentationInstructions(
+          typeof additionalInstructions === "string" ? additionalInstructions : undefined,
+        );
     const incomingAgentConfig = agentConfig && typeof agentConfig === "object" && !Array.isArray(agentConfig)
       ? agentConfig as Record<string, unknown>
       : {};
@@ -1464,6 +1478,27 @@ publicRouter.post("/", requireAuth, requireNoAccessToken, async (req: Request, r
       }
     }
 
+    // Instant / no-tools: pin an empty tools config so tool-resolution
+    // grants nothing (absent tools = all tools). Mirrors agent-chat.ts.
+    if (noToolPalette) {
+      enrichedAgentConfig["tools"] = { subagents: [], direct: [], custom: [], gateway: [] };
+      enrichedAgentConfig["toolPermissions"] = {};
+      log.info(`[run-stream] instant/no-tools for ${slug}`);
+    }
+
+    if (instant === true || thinkingOverride === "off") {
+      const prev = enrichedAgentConfig["modelSettings"];
+      const base =
+        prev && typeof prev === "object" && !Array.isArray(prev)
+          ? (prev as Record<string, unknown>)
+          : {};
+      enrichedAgentConfig["modelSettings"] = {
+        ...base,
+        thinkingLevel: thinkingOverride ?? "off",
+        reasoning_effort: "none",
+      };
+    }
+
     const splitContext = splitLocalFolderContext(attachedContext);
     const forwardedAttachedContext = Array.isArray(attachedContext)
       ? splitContext.rest
@@ -1515,11 +1550,15 @@ publicRouter.post("/", requireAuth, requireNoAccessToken, async (req: Request, r
       researchContext,
       webSearchEnabled,
       deepResearchEnabled,
-      agentConfig: withAiScreenPresentationTools(
-        enrichedAgentConfig,
-        (agentRow.config as Record<string, unknown> | null)?.["tools"],
-        agentRow.delegationTier,
-      ),
+      // Widening the stored tools with presentation slugs would replace the
+      // empty no-tools pin with the agent's full palette, so skip it there.
+      agentConfig: noToolPalette
+        ? enrichedAgentConfig
+        : withAiScreenPresentationTools(
+            enrichedAgentConfig,
+            (agentRow.config as Record<string, unknown> | null)?.["tools"],
+            agentRow.delegationTier,
+          ),
       additionalInstructions: aiScreenInstructions,
       ...(designSelectionInstruction || pageSelectionInstruction || openItemsInstruction
         ? {
@@ -1532,6 +1571,9 @@ publicRouter.post("/", requireAuth, requireNoAccessToken, async (req: Request, r
           }
         : {}),
       ...(generateFollowUpSuggestions === true ? { generateFollowUpSuggestions: true } : {}),
+      ...(instant === true ? { instant: true } : {}),
+      ...(disableTools === true ? { disableTools: true } : {}),
+      ...(thinkingOverride ? { thinkingLevel: thinkingOverride } : {}),
       __persistedByCaller: true,
       fastMode: fastModeEnabled,
     };

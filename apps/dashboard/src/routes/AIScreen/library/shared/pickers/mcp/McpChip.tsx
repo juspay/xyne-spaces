@@ -21,10 +21,17 @@ export function McpChip({
     <CapabilityChip
       label={label}
       selected={selected}
-      content={<McpIdentity label={label} iconType={iconType} gap='tight' muted={!selected} />}
+      content={
+        <McpIdentity
+          label={label}
+          iconType={iconType}
+          gap='tight'
+          weight='pill'
+          muted={!selected}
+        />
+      }
       {...(onOpen ? { onOpen } : {})}
       onToggle={onToggle}
-      shellClassName='py-1 pl-1 pr-2'
       trackName='Create agent v2: toggle MCP chip'
     />
   );

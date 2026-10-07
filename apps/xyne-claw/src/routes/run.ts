@@ -66,6 +66,7 @@ import { loadCustomTools } from "../custom-tools.js";
 import { buildCopilotTool } from "../copilot.js";
 import { pinRunJudgeBackend } from "../judge-backend.js";
 import { optEnabled, pinRunOptimizations, tierOptimizationDefaults } from "../optimizations.js";
+import { getRunFlags, pinRunFlags } from "../run-context.js";
 import { activeToolCap, demotedCatalogItem, planActiveToolCap, readToolUsageRank } from "../active-tool-cap.js";
 import { buildExperimentTools, buildExperimentReviewTools, type ExperimentContext } from "../experiment.js";
 import {
@@ -158,9 +159,17 @@ import { buildMemoryFileTools } from "../memory-file-tools.js";
 import { buildTwinDeliverTool, type TwinDeliverRef } from "../twin-deliver.js";
 import { buildTwinDeliverMandate } from "../twin-prompts.js";
 import { buildTwinPersonaBlock } from "../twin-persona.js";
+import {
+  buildCapabilityGapTool,
+  CAPABILITY_GAP_TOOL_NAME,
+  DRAFT_FALLBACK_PERSONA,
+  draftTestModelSettings,
+  isDraftTestRun,
+} from "../draft-capability-gap.js";
 import { buildProposePlanTool, PROPOSE_PLAN_TOOL_NAME, type ProposePlanRef } from "../propose-plan.js";
 import { presentationCatalogDefaultOn, isFreePresentationTool, buildPresentationPrimer } from "../presentation-catalog.js";
 import { buildProposeAgentTool, type ProposeAgentRef } from "../propose-agent.js";
+import { fetchAuthoringPreflight } from "../authoring-preflight.js";
 import { buildDescribeAgentTool, type DescribeAgentRef } from "../describe-agent.js";
 import { buildSuggestConnectorsTool, SUGGEST_CONNECTORS_TOOL_NAME, type SuggestConnectorsRef } from "../suggest-connectors.js";
 import { buildSuggestProvidersTool, SUGGEST_PROVIDERS_TOOL_NAME, type SuggestProvidersRef } from "../suggest-providers.js";
@@ -197,6 +206,15 @@ import {
   startPrefetchExtraction,
   type ExecutableTool,
 } from "../prefetch.js";
+
+/** MCP load result for a run with an empty tool palette: nothing listed, nothing to clean up. */
+const NO_MCP_TOOLS: Awaited<ReturnType<typeof loadMcpToolsForUser>> = {
+  groups: [],
+  unresolvedConfigured: [],
+  cleanup: async () => {},
+  getPendingActions: () => [],
+  getAttachments: () => [],
+};
 
 const clog = createLogger("run");
 const XYNE_CLAW_PACKAGE_DIR = fileURLToPath(new URL("../../", import.meta.url));
@@ -574,6 +592,8 @@ router.post("/run", validateS2SKey, async (req, res: Response) => {
     resumedFromHandoff,
     judgeBackend,
     optimizations,
+    instant,
+    disableTools,
     memoryBankId,
     senderName,
     channelName,
@@ -587,6 +607,7 @@ router.post("/run", validateS2SKey, async (req, res: Response) => {
   const experiment = normalizeExperimentContext(rawExperiment);
   pinRunJudgeBackend(judgeBackend);
   pinRunOptimizations(optimizations, agentConfig?.["optimizations"], tierOptimizationDefaults(delegationMode));
+  pinRunFlags({ instant, disableTools });
 
   // [AUTODBG] claw-side receipt of every /run forward (esp. automations). Confirms
   // the request crossed claw-auth → claw and which session id it arrived under
@@ -1644,7 +1665,7 @@ export async function processTask(
     const explicitTaskCommand = parseTaskCommand(task);
     const routedMode = await routeTaskMode(task, explicitTaskCommand, abortSignal);
     const taskCommand = routedMode.command;
-    if ((routedMode.source === "model" || routedMode.source === "jev") && taskCommand) {
+    if ((routedMode.source === "model" || routedMode.source === "xor" || routedMode.source === "jev") && taskCommand) {
       log(`[task-command] ${taskCommand.command} selected by the mode router (${routedMode.source})`);
     }
     const recordSkillCommand = taskCommand?.command === "/record-skill";
@@ -1746,23 +1767,29 @@ export async function processTask(
     // the workspace is still used for binary attachments. See toolOutputBaseDir.
     const mcpOutputDir = toolOutputBaseDir(conversationId, workspaceDir);
     const trustedSdlcBindings = trustedSdlcToolBindings(agentConfig?.["sdlcContext"]);
+    // An empty tool palette (the create-agent chat) never calls an MCP tool, so
+    // don't list every connected server just to throw the result away.
+    const noToolPalette = getRunFlags().disableTools;
+    if (noToolPalette) log("[run] disableTools — skipping MCP tool listing");
     const {
       groups: mcpGroups,
       unresolvedConfigured,
       cleanup,
       getPendingActions,
       getAttachments: getMcpAttachments,
-    } = await loadMcpToolsForUser(
-      sessionId,
-      sessionToken,
-      workspaceDir,
-      toolPermissions,
-      agentSlug,
-      mcpOutputDir,
-      (att) => pushAttachment(progressUrl, sessionId, att),
-      trustedSdlcBindings,
-      (serverType) => blockedConnectors.add(serverType),
-    );
+    } = noToolPalette
+      ? NO_MCP_TOOLS
+      : await loadMcpToolsForUser(
+          sessionId,
+          sessionToken,
+          workspaceDir,
+          toolPermissions,
+          agentSlug,
+          mcpOutputDir,
+          (att) => pushAttachment(progressUrl, sessionId, att),
+          trustedSdlcBindings,
+          (serverType) => blockedConnectors.add(serverType),
+        );
     mcpGetAttachments = getMcpAttachments;
     // Expose the MCP-layer pendingActions getter to the catch handler so
     // copilot-mode respond-to-user terminations can still recover signed
@@ -2874,6 +2901,8 @@ export async function processTask(
       agentConfig?.["planTracking"] !== false && agentConfig?.["planTracking"] !== "false";
     const planGateEligible =
       planTrackingEnabled &&
+      // No tools means no plan tools to gate; skip the XOR round trip.
+      !getRunFlags().disableTools &&
       (!!channelId || (progressUrl && typeof progressUrl !== "string")) &&
       !isScheduledOrAutomationRun(eventType, conversationId) &&
       !isTwinMentionFlow &&
@@ -2959,9 +2988,17 @@ export async function processTask(
       !isTwinMentionFlow &&
       !isPlanMode &&
       !isDailyBrief;
+    let authoringPreflightNote: string | undefined;
     if (agentAuthoringEnabled) {
       allTools.push(buildProposeAgentTool(proposeAgentRef, abortRun));
       log("Agent authoring enabled — injected terminal propose-agent tool");
+      const preflight = await fetchAuthoringPreflight({ intent: task, userId });
+      if (preflight) {
+        authoringPreflightNote = preflight.note;
+        log(
+          `Agent authoring preflight — ${preflight.tools.length} tool(s), ${preflight.skillSlugs.length} skill(s), permission=${preflight.permissionMode}`,
+        );
+      }
     }
 
     // describe-agent: EVERY agent gets this, no config. "What can you do?" is a
@@ -3037,7 +3074,10 @@ export async function processTask(
     // respond-to-user, and verifyResponses owns it via submit-response — when
     // outputFormat is set it wins over verifyResponses and is skipped in
     // copilot mode.
-    const modelSettings = parseModelSettings(agentConfig);
+    const agentModelSettings = parseModelSettings(agentConfig);
+    const modelSettings = isDraftTestRun(agentConfig)
+      ? draftTestModelSettings(agentModelSettings)
+      : agentModelSettings;
     if (modelSettings) {
       log(`Per-agent modelSettings: ${JSON.stringify(modelSettings)}`);
     }
@@ -3089,6 +3129,12 @@ export async function processTask(
       // twin_deliver's explicit id fields.
       allTools.push(buildTwinDeliverTool(agentSlug, twinDeliverRef));
       log(`Digital Twin mention flow — injected MANDATORY twin_deliver tool`);
+    }
+    // Test run of an unsaved draft: the model reports what the draft is missing
+    // with this tool, and the create page shows each report under the reply.
+    if (isDraftTestRun(agentConfig)) {
+      allTools.push(buildCapabilityGapTool());
+      log(`Draft test run — injected ${CAPABILITY_GAP_TOOL_NAME}`);
     }
 
     const verifyResponses =
@@ -3839,6 +3885,10 @@ export async function processTask(
         ? `${fullContext}${instructionsNote}`
         : instructionsNote;
     }
+    if (authoringPreflightNote) {
+      const note = `\n\n${authoringPreflightNote}`;
+      fullContext = fullContext ? `${fullContext}${note}` : note;
+    }
 
     // Inject ticket/canvas/call IDs from the frontend into context metadata
     // so the agent knows which specific items the user is asking about
@@ -3924,7 +3974,10 @@ export async function processTask(
     // bracket+resolve-ID format, which confused agents into guessing IDs or, per
     // its own rule, refusing to emit `@Name` at all — starving the resolver.
     // Only relevant in a chat thread (channelId present).
-    const basePrompt = (systemPrompt ?? "").trimEnd();
+    // An empty override sends runTask to its Digital Twin prompt, which a draft
+    // test run must never get: it would answer as the user.
+    const basePrompt =
+      (systemPrompt ?? "").trimEnd() || (isDraftTestRun(agentConfig) ? DRAFT_FALLBACK_PERSONA : "");
     const citationGuide =
       agentSlug && CITATION_GUIDE_AGENT_SLUGS.has(agentSlug)
         ? CITATION_GUIDE
@@ -5467,6 +5520,11 @@ router.post("/generate-prompt", validateS2SKey, async (req, res: Response) => {
     ? `Here is the current system prompt for an agent${agentName ? ` called "${agentName}"` : ""}:\n\n---\n${existingPrompt}\n---\n\nThe user wants to update it with the following instructions:\n\n"${intent}"\n\nApply the requested changes to the existing prompt. Keep the parts that are not affected by the update. Return the full updated prompt.`
     : `Generate a system prompt for an agent${agentName ? ` called "${agentName}"` : ""}. The user described it as:\n\n"${intent}"\n\nThe prompt should:\n- Define the agent's role and personality\n- List what the agent can and cannot do\n- Include guidelines for response style\n- Be concise but thorough (200-400 words)`;
 
+  const callerGone = new AbortController();
+  res.on("close", () => {
+    if (!res.writableEnded) callerGone.abort();
+  });
+
   try {
     const llmRes = await fetch(litellmEndpoint("/v1/chat/completions"), {
       method: "POST",
@@ -5489,14 +5547,23 @@ router.post("/generate-prompt", validateS2SKey, async (req, res: Response) => {
         ],
         max_tokens: 2000,
         temperature: 0.7,
+        // kimi-latest otherwise spends the 30s budget on reasoning_content
+        // and generate-prompt returns empty / times out.
+        reasoning_effort: "none",
+        thinking: { type: "disabled" },
       }),
-      signal: AbortSignal.timeout(30_000),
+      signal: AbortSignal.any([AbortSignal.timeout(30_000), callerGone.signal]),
     });
 
     if (!llmRes.ok) {
-      res
-        .status(500)
-        .json({ success: false, error: `LLM returned ${llmRes.status}` });
+      if (llmRes.status === 429) {
+        res.status(429).json({
+          success: false,
+          error: "Rate-limited right now. Try again in a moment.",
+        });
+        return;
+      }
+      res.status(500).json({ success: false, error: "Failed to generate prompt" });
       return;
     }
 
@@ -5780,7 +5847,7 @@ router.post(
 // proposal and the UI renders it as a diff for the user to accept.
 
 router.post("/suggest-tools", validateS2SKey, async (req, res: Response) => {
-  const { intent, catalog } = req.body as {
+  const { intent, catalog, emptyHubs: rawEmptyHubs, skillCandidates } = req.body as {
     intent?: string;
     catalog?: {
       subagents: Array<{ name: string; description: string }>;
@@ -5799,6 +5866,8 @@ router.post("/suggest-tools", validateS2SKey, async (req, res: Response) => {
         }>;
       }>;
     };
+    emptyHubs?: string[];
+    skillCandidates?: Array<{ slug: string; name: string; description: string }>;
   };
 
   if (!intent || typeof intent !== "string" || intent.trim().length === 0) {
@@ -5810,12 +5879,14 @@ router.post("/suggest-tools", validateS2SKey, async (req, res: Response) => {
     return;
   }
 
-  // Compress the catalog into a token-cheap form. Tool descriptions are
-  // truncated; an LLM doesn't need 500 chars per tool to recognise intent.
   const truncate = (s: string, n: number) => {
     const trimmed = (s ?? "").trim();
     return trimmed.length <= n ? trimmed : trimmed.slice(0, n - 1) + "…";
   };
+
+  const knownSubagentIds = new Set((catalog.subagents ?? []).map((s) => s.name));
+  const knownIntegrationIds = new Set((catalog.integrations ?? []).map((i) => i.slug));
+  const knownSkillIds = new Set((skillCandidates ?? []).map((s) => s.slug));
 
   const subagentList = (catalog.subagents ?? [])
     .map((s) => `- ${s.name}: ${truncate(s.description, 120)}`)
@@ -5845,63 +5916,92 @@ router.post("/suggest-tools", validateS2SKey, async (req, res: Response) => {
     })
     .join("\n\n");
 
+  const skillList = (skillCandidates ?? [])
+    .map((s) => `- ${s.slug}: ${truncate(s.name + " — " + (s.description || ""), 120)}`)
+    .join("\n");
+
+  const hubsHint =
+    Array.isArray(rawEmptyHubs) && rawEmptyHubs.length > 0
+      ? rawEmptyHubs.join(", ")
+      : "mcp, builtin, subagent, skill";
+
   const userMessage = [
-    "Select an appropriate, minimal set of tools for this agent based on its purpose.",
+    "Judge which catalog items this agent needs. One call covers every empty hub.",
     "",
     "Agent intent / system prompt:",
     "---",
     intent,
     "---",
     "",
-    "Available subagents (specialists this agent can delegate to):",
+    `Empty hubs to judge: ${hubsHint}`,
+    "",
+    "Available subagents (ids = name):",
     subagentList || "(none)",
     "",
-    "Available integrations and their tools:",
+    "Available integrations (ids = slug):",
     integrationBlocks || "(none)",
     "",
+    "Available skills (ids = slug):",
+    skillList || "(none)",
+    "",
     "Rules:",
-    "- Be conservative. Prefer read-only tools. Only include write/destructive tools when the intent clearly demands them.",
-    "- Prefer subagents (delegation) over a long list of raw integration tools when a matching specialist exists.",
-    "- Aim for under 15 individual tools across all integrations unless intent demands more.",
-    "- For each pick, give a one-sentence reason citing what in the intent justifies it.",
+    "- Choose ONLY from the ids listed above. Never invent ids.",
+    "- Prefer none when the job does not clearly need that hub.",
+    "- Be conservative. Prefer read-only tools. Only include write tools when intent demands them.",
+    "- Cap subagents at 2. Cap skills at 3.",
+    "- confidence is 0-1. Named catalog mentions should be 1.0.",
+    "- For each pick give a short reason (under 12 words).",
+    "- Keep the JSON compact. Prefer hubs picks; omit integrations/skillSlugs arrays if hubs cover them.",
     "",
     "Return a strict JSON object matching this shape (no prose, no markdown wrapping):",
     `{
-  "subagents": ["subagent-name", ...],
-  "integrations": [
-    { "slug": "integration-slug", "readTools": ["tool_name", ...], "writeTools": ["tool_name", ...] },
-    ...
-  ],
-  "reasoning": { "subagent-or-tool-name": "one-sentence why", ... }
+  "hubs": {
+    "mcp": { "picks": [{"id":"integration-slug","confidence":0.0,"reason":"..."}], "none": false },
+    "builtin": { "picks": [{"id":"custom:...","confidence":0.0,"reason":"..."}], "none": true },
+    "subagent": { "picks": [{"id":"subagent-name","confidence":0.0,"reason":"..."}], "none": true },
+    "skill": { "picks": [{"id":"skill-slug","confidence":0.0,"reason":"..."}], "none": true }
+  },
+  "reasoning": { "id": "short why", "...": "..." }
 }`,
   ].join("\n");
 
+  // claw-auth gives up at its own budget (20s) well before this call's timeout;
+  // stop the LLM call when the caller hangs up instead of letting it run on.
+  const callerGone = new AbortController();
+  res.on("close", () => {
+    if (!res.writableEnded) callerGone.abort();
+  });
+
   try {
-    const llmRes = await fetch(litellmEndpoint("/v1/chat/completions"), {
+    const llmRes = await fetch(litellmEndpoint("/v1/chat/completions", LITELLM.suggestUrl), {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        Authorization: `Bearer ${LITELLM.apiKey}`,
+        Authorization: `Bearer ${LITELLM.suggestApiKey}`,
       },
       body: JSON.stringify({
-        model: LITELLM.model,
+        model: LITELLM.suggestModel,
         messages: [
           {
             role: "system",
             content:
-              "You select tools for AI agents. You return ONLY a JSON object — no prose, no markdown fences. Be conservative and prefer read-only tools.",
+              "You judge catalog picks for AI agents. Return ONLY compact JSON. Prefer none over guessing. Never invent catalog ids.",
           },
           { role: "user", content: userMessage },
         ],
-        // Response is a small JSON object; cap is mainly a safety bound.
-        max_tokens: 2000,
+        max_tokens: 4096,
         temperature: 0.2,
         response_format: { type: "json_object" },
       }),
-      signal: AbortSignal.timeout(45_000),
+      // Suggest uses a dedicated fast model/proxy; claw-auth still wraps a budget.
+      signal: AbortSignal.any([AbortSignal.timeout(LITELLM.suggestTimeoutMs), callerGone.signal]),
     });
 
     if (!llmRes.ok) {
+      const errBody = await llmRes.text().catch(() => "");
+      clog.error(
+        `[suggest-tools] LLM ${llmRes.status} model=${LITELLM.suggestModel} url=${LITELLM.suggestUrl} body=${errBody.slice(0, 200)}`,
+      );
       res
         .status(500)
         .json({ success: false, error: `LLM returned ${llmRes.status}` });
@@ -5911,16 +6011,111 @@ router.post("/suggest-tools", validateS2SKey, async (req, res: Response) => {
     const data = (await llmRes.json()) as {
       choices?: Array<{ message?: { content?: string } }>;
     };
-    const raw = data.choices?.[0]?.message?.content?.trim() ?? "";
-    let parsed: unknown;
+    let raw = data.choices?.[0]?.message?.content?.trim() ?? "";
+    // Fast models (gemini) often wrap JSON in ```json fences despite response_format.
+    if (raw.startsWith("```")) {
+      raw = raw.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/i, "").trim();
+    }
+    // Recover when the model adds prose around the object.
+    if (!raw.startsWith("{")) {
+      const start = raw.indexOf("{");
+      const end = raw.lastIndexOf("}");
+      if (start >= 0 && end > start) raw = raw.slice(start, end + 1);
+    }
+    let parsed: Record<string, unknown>;
     try {
-      parsed = JSON.parse(raw);
+      parsed = JSON.parse(raw) as Record<string, unknown>;
     } catch {
+      clog.error(`[suggest-tools] non-JSON content preview=${raw.slice(0, 180)}`);
       res.status(502).json({ success: false, error: "LLM returned non-JSON" });
       return;
     }
 
-    res.json({ success: true, data: parsed });
+    // Reject unknown ids from hubs / legacy arrays.
+    const hubsIn = (parsed["hubs"] ?? {}) as Record<
+      string,
+      { picks?: Array<{ id?: string; confidence?: number; reason?: string }>; none?: boolean; reason?: string }
+    >;
+    const scrubbedHubs: Record<string, unknown> = {};
+    for (const hub of ["mcp", "builtin", "subagent", "skill"] as const) {
+      const row = hubsIn[hub] ?? { picks: [], none: true };
+      const allowed =
+        hub === "subagent"
+          ? knownSubagentIds
+          : hub === "skill"
+            ? knownSkillIds
+            : knownIntegrationIds;
+      const picks = (row.picks ?? []).filter(
+        (p) => typeof p.id === "string" && (allowed.size === 0 || allowed.has(p.id)),
+      );
+      scrubbedHubs[hub] = {
+        picks: picks.map((p) => ({
+          id: p.id,
+          confidence: typeof p.confidence === "number" ? p.confidence : 0.5,
+          reason: typeof p.reason === "string" ? p.reason : "",
+        })),
+        none: picks.length === 0 ? true : Boolean(row.none),
+        ...(typeof row.reason === "string" ? { reason: row.reason } : {}),
+      };
+    }
+
+    const subagents = (Array.isArray(parsed["subagents"]) ? parsed["subagents"] : [])
+      .filter((n): n is string => typeof n === "string" && knownSubagentIds.has(n));
+    const integrations = (
+      Array.isArray(parsed["integrations"]) ? parsed["integrations"] : []
+    ).filter(
+      (row): row is { slug: string; readTools: string[]; writeTools: string[] } =>
+        !!row &&
+        typeof row === "object" &&
+        typeof (row as { slug?: string }).slug === "string" &&
+        knownIntegrationIds.has((row as { slug: string }).slug),
+    );
+    const skillSlugs = (Array.isArray(parsed["skillSlugs"]) ? parsed["skillSlugs"] : [])
+      .filter((s): s is string => typeof s === "string" && (knownSkillIds.size === 0 || knownSkillIds.has(s)));
+
+    // Derive legacy arrays from hubs when judge omitted them.
+    const hubSub = (scrubbedHubs["subagent"] as { picks: Array<{ id: string }> }).picks.map(
+      (p) => p.id,
+    );
+    const hubMcp = [
+      ...((scrubbedHubs["mcp"] as { picks: Array<{ id: string }> }).picks.map((p) => p.id)),
+      ...((scrubbedHubs["builtin"] as { picks: Array<{ id: string }> }).picks.map((p) => p.id)),
+    ];
+    const hubSkills = (scrubbedHubs["skill"] as { picks: Array<{ id: string }> }).picks.map(
+      (p) => p.id,
+    );
+
+    const reasoning =
+      parsed["reasoning"] && typeof parsed["reasoning"] === "object"
+        ? (parsed["reasoning"] as Record<string, string>)
+        : {};
+
+    const wantsWrites = /\b(create|update|edit|send|post|schedule|upload|write|triage|reply|comment|draft)\b/i.test(
+      intent,
+    );
+
+    res.json({
+      success: true,
+      data: {
+        hubs: scrubbedHubs,
+        subagents: subagents.length > 0 ? subagents : hubSub,
+        integrations:
+          integrations.length > 0
+            ? integrations
+            : hubMcp.map((slug) => {
+                const integ = (catalog.integrations ?? []).find((i) => i.slug === slug);
+                return {
+                  slug,
+                  readTools: (integ?.readTools ?? []).map((t) => t.name),
+                  writeTools: wantsWrites
+                    ? (integ?.writeTools ?? []).map((t) => t.name).slice(0, 8)
+                    : [],
+                };
+              }),
+        skillSlugs: skillSlugs.length > 0 ? skillSlugs : hubSkills,
+        reasoning,
+      },
+    });
   } catch (err) {
     clog.error("[suggest-tools] Failed:", err);
     res.status(500).json({ success: false, error: "Failed to suggest tools" });

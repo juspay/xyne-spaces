@@ -21,6 +21,32 @@ export interface McpCatalogEntry {
   isGateway: boolean;
   scope: McpScope;
   selectable: boolean;
+  /**
+   * Its tool names that another connector has too (GitHub's and Bitbucket's
+   * merge_pull_request). Those are picked with the connector in front, so
+   * picking one doesn't pick both.
+   */
+  sharedToolNames?: ReadonlySet<string>;
+}
+
+/** A tool picked with its connector in front, which claw-auth and claw read as that connector's only. */
+export function scopedToolKey(serverType: string, toolName: string): string {
+  return `${serverType}__${toolName}`;
+}
+
+/** Tool names more than one MCP connector has. */
+export function sharedMcpToolNames(
+  integrations: AvailableTools['integrations'],
+): ReadonlySet<string> {
+  const owners = new Map<string, number>();
+  for (const integration of integrations) {
+    if (integration.kind !== 'mcp') continue;
+    const names = new Set(
+      [...integration.readTools, ...integration.writeTools].map(tool => tool.name),
+    );
+    for (const name of names) owners.set(name, (owners.get(name) ?? 0) + 1);
+  }
+  return new Set([...owners].filter(([, count]) => count > 1).map(([name]) => name));
 }
 
 function metaString(server: McpServer, key: string): string | undefined {
@@ -65,6 +91,7 @@ export function buildMcpCatalog(
 ): McpCatalogEntry[] {
   if (!availableTools) return [];
   const serverByType = new Map(servers.map(server => [server.type, server]));
+  const shared = sharedMcpToolNames(availableTools.integrations);
 
   return availableTools.integrations
     .filter(integration => integration.kind === 'mcp' || integration.kind === 'gateway')
@@ -72,6 +99,9 @@ export function buildMcpCatalog(
       const isGateway = integration.kind === 'gateway';
       const server = serverByType.get(integration.slug);
       const tools = [...integration.readTools, ...integration.writeTools];
+      const sharedToolNames = isGateway
+        ? undefined
+        : new Set(tools.filter(tool => shared.has(tool.name)).map(tool => tool.name));
       return {
         slug: integration.slug,
         label: integration.label,
@@ -84,12 +114,48 @@ export function buildMcpCatalog(
         isGateway,
         scope: connectorScope(server),
         selectable: tools.length > 0,
+        ...(sharedToolNames?.size ? { sharedToolNames } : {}),
       };
     });
 }
 
 export function toolSelectionKey(entry: McpCatalogEntry, tool: IntegrationToolEntry): string {
-  return entry.isGateway ? tool.slug : tool.name;
+  if (entry.isGateway) return tool.slug;
+  return entry.sharedToolNames?.has(tool.name) ? scopedToolKey(entry.slug, tool.name) : tool.name;
+}
+
+/**
+ * Agents saved before shared names carried their connector hold the bare name.
+ * It belongs to a connector that has another of its own tools picked: an
+ * agent with GitHub on still shows GitHub, and Bitbucket stays off.
+ */
+function ownsBareSharedName(selection: ToolboxSelection, entry: McpCatalogEntry): boolean {
+  return entry.tools.some(
+    tool => !entry.sharedToolNames?.has(tool.name) && selection.direct.includes(tool.name),
+  );
+}
+
+/**
+ * Rewrites bare shared names as their owners' keys before a change, so
+ * turning one connector off doesn't take the tool from another. Names no
+ * connector owns stay as they are.
+ */
+function scopeBareSharedNames(
+  catalog: readonly McpCatalogEntry[],
+  selection: McpSelection,
+): McpSelection {
+  const owners = new Map<string, string[]>();
+  for (const entry of catalog) {
+    if (entry.isGateway || !entry.sharedToolNames?.size) continue;
+    if (!ownsBareSharedName(selection, entry)) continue;
+    for (const name of entry.sharedToolNames) {
+      if (!selection.direct.includes(name)) continue;
+      owners.set(name, [...(owners.get(name) ?? []), scopedToolKey(entry.slug, name)]);
+    }
+  }
+  if (owners.size === 0) return selection;
+  const direct = selection.direct.flatMap(key => owners.get(key) ?? [key]);
+  return { ...selection, direct: [...new Set(direct)] };
 }
 
 function gatewayServiceOf(entry: McpCatalogEntry): string | null {
@@ -109,6 +175,13 @@ export function isToolSelected(
   tool: IntegrationToolEntry,
 ): boolean {
   if (selection.direct.includes(toolSelectionKey(entry, tool))) return true;
+  if (
+    entry.sharedToolNames?.has(tool.name) &&
+    selection.direct.includes(tool.name) &&
+    ownsBareSharedName(selection, entry)
+  ) {
+    return true;
+  }
   const service = gatewayServiceOf(entry);
   return !!service && (selection.gateway ?? []).includes(service);
 }
@@ -141,9 +214,10 @@ export function setToolsSelected(
 
   const service = gatewayServiceOf(entry);
   if (!service) {
-    const touched = new Set(tools.map(tool => tool.name));
-    const rest = base.direct.filter(key => !touched.has(key));
-    return { ...base, direct: next ? [...rest, ...touched] : rest };
+    const scoped = scopeBareSharedNames(catalog, base);
+    const touched = new Set(tools.map(tool => toolSelectionKey(entry, tool)));
+    const rest = scoped.direct.filter(key => !touched.has(key));
+    return { ...scoped, direct: next ? [...rest, ...touched] : rest };
   }
 
   const serviceKeys = gatewayKeysForService(catalog, service);

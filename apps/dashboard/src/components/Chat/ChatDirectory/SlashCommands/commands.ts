@@ -9,7 +9,7 @@
  * value; behaviour lives in the consumer (`useSlashCommands`), which owns the hooks each command
  * needs. To add a command, add one entry here (+ one dispatch arm if its behaviour is new).
  */
-import { Phone, MessageSquare, Sparkles, Mic, Compass, type LucideIcon } from 'lucide-react';
+import { Phone, MessageSquare, Sparkles, Mic, Compass, Bot, type LucideIcon } from 'lucide-react';
 
 // Value = metadata + structural family. No `kind`/`word`/`action` field — the KEY is the identity.
 type CommandDef =
@@ -46,6 +46,14 @@ export const COMMAND_CATALOG = {
     heading: 'Ask AI',
     title: 'Ask Xyne AI',
     description: 'Open the Xyne AI panel',
+  },
+  create: {
+    type: 'action',
+    label: 'Create agent',
+    icon: Bot,
+    heading: 'Create',
+    title: 'Create agent',
+    description: 'Open the agent setup canvas',
   },
   record: {
     type: 'action',

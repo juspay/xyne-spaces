@@ -91,17 +91,17 @@ export function frameSseEvent(event: ClawStreamEvent): string {
 // Intentionally minimal — no Last-Event-ID, no retry directive, no
 // multi-line data fields. We're consuming streams we produce, so the parser
 // only has to handle what `frameSseEvent` emits.
-export class ClawSseParser {
+export class SseParser<T extends { event: string }> {
   private buffer = "";
 
-  feed(chunk: string): ClawStreamEvent[] {
+  feed(chunk: string): T[] {
     this.buffer += chunk;
-    const out: ClawStreamEvent[] = [];
+    const out: T[] = [];
     let idx: number;
     while ((idx = this.buffer.indexOf("\n\n")) !== -1) {
       const block = this.buffer.slice(0, idx);
       this.buffer = this.buffer.slice(idx + 2);
-      const parsed = parseBlock(block);
+      const parsed = parseBlock<T>(block);
       if (parsed) out.push(parsed);
     }
     return out;
@@ -115,7 +115,10 @@ export class ClawSseParser {
   }
 }
 
-function parseBlock(block: string): ClawStreamEvent | null {
+/** The run stream's parser. */
+export class ClawSseParser extends SseParser<ClawStreamEvent> {}
+
+function parseBlock<T extends { event: string }>(block: string): T | null {
   if (block.startsWith(":")) return null;
   let eventName: string | null = null;
   let dataLine: string | null = null;
@@ -130,7 +133,7 @@ function parseBlock(block: string): ClawStreamEvent | null {
   if (!eventName || dataLine === null) return null;
   try {
     const data = JSON.parse(dataLine) as Record<string, unknown>;
-    return { event: eventName, ...data } as ClawStreamEvent;
+    return { event: eventName, ...data } as unknown as T;
   } catch {
     return null;
   }

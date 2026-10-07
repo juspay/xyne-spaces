@@ -17,9 +17,12 @@
 
 import {
   agentIdentity,
+  normalizePermissionMode,
+  permissionModeLabel,
   type AgentCapability,
   type AgentIdentity,
   type AgentKnowledge,
+  type AgentPermissionMode,
   type AgentSkill,
 } from "xyne-claw-shared";
 import { errMsg } from "./errors.js";
@@ -344,6 +347,10 @@ export interface DraftAgentSpec {
   modelId?: string;
   color?: string;
   tools: string[];
+  permissionMode?: AgentPermissionMode;
+  /** Skill slugs from propose-agent; resolved to ids on approve. */
+  skillSlugs?: string[];
+  deniedTools?: string[];
   mcps?: string[];
   skills?: string[];
   knowledge?: { scope?: "COLLECTIONS" | "USER"; collections?: string[] };
@@ -443,6 +450,16 @@ export function identityFromDraftSpec(
   builtBy?: string,
   extras?: ResolvedDraftExtras,
 ): AgentIdentity {
+  const permissionMode = normalizePermissionMode(spec.permissionMode);
+  const details: NonNullable<AgentIdentity["details"]> = [
+    { label: "Permission", value: permissionModeLabel(permissionMode) },
+  ];
+  if (spec.skillSlugs && spec.skillSlugs.length > 0) {
+    details.push({ label: "Skills", value: spec.skillSlugs.join(", ") });
+  }
+  if (spec.deniedTools && spec.deniedTools.length > 0) {
+    details.push({ label: "Denied tools", value: spec.deniedTools.join(", ") });
+  }
   const knowledge: AgentKnowledge = {
     ...(spec.knowledge?.scope ? { scope: spec.knowledge.scope } : {}),
     ...(extras?.knowledgeSources && extras.knowledgeSources.length > 0
@@ -466,6 +483,7 @@ export function identityFromDraftSpec(
     ...(extras?.skills && extras.skills.length > 0 ? { skills: extras.skills } : {}),
     ...(Object.keys(knowledge).length > 0 ? { knowledge } : {}),
     capabilities: resolved.capabilities,
+    details,
     // No Identifier/Model rows: the card renders slug + model in its header line,
     // and repeating them here showed the same two facts twice. `details` stays as
     // the extension point for rows that have nowhere else to go.
@@ -717,14 +735,23 @@ export function parseDraftSpec(raw: string | null): DraftAgentSpec | null {
     const parsed = JSON.parse(raw) as Partial<DraftAgentSpec>;
     if (!parsed || typeof parsed.name !== "string" || typeof parsed.slug !== "string") return null;
     if (typeof parsed.systemPrompt !== "string" || parsed.systemPrompt.trim().length === 0) return null;
+    const skillSlugs = Array.isArray(parsed.skillSlugs)
+      ? parsed.skillSlugs.filter((t): t is string => typeof t === "string" && t.trim().length > 0).map((t) => t.trim())
+      : [];
+    const deniedTools = Array.isArray(parsed.deniedTools)
+      ? parsed.deniedTools.filter((t): t is string => typeof t === "string" && t.trim().length > 0).map((t) => t.trim())
+      : [];
     return {
       name: parsed.name,
       slug: parsed.slug,
       description: typeof parsed.description === "string" ? parsed.description : "",
       systemPrompt: parsed.systemPrompt,
+      permissionMode: normalizePermissionMode(parsed.permissionMode),
       ...(typeof parsed.modelId === "string" ? { modelId: parsed.modelId } : {}),
       ...(typeof parsed.color === "string" ? { color: parsed.color } : {}),
       tools: Array.isArray(parsed.tools) ? parsed.tools.filter((t): t is string => typeof t === "string") : [],
+      ...(skillSlugs.length > 0 ? { skillSlugs } : {}),
+      ...(deniedTools.length > 0 ? { deniedTools } : {}),
       ...(Array.isArray(parsed.mcps)
         ? { mcps: parsed.mcps.filter((v): v is string => typeof v === "string") }
         : {}),
@@ -767,6 +794,102 @@ export function parseDraftSpec(raw: string | null): DraftAgentSpec | null {
   }
 }
 
+/** Dual-control canvas payload from the dashboard (flow-state `values.agent`). */
+export interface AgentCreateCanvasOverlay {
+  name?: string;
+  slug?: string;
+  description?: string;
+  systemPrompt?: string;
+  toolIds?: string[];
+  skillIds?: string[];
+  permissionMode?: AgentPermissionMode;
+  kbScope?: "COLLECTIONS" | "USER";
+  knowledgeBase?: Array<{ collectionId: string; fileId?: string | null }>;
+}
+
+export function parseAgentCanvasValue(raw: unknown): {
+  keptCapabilityIds?: string[];
+  overlay?: AgentCreateCanvasOverlay;
+} {
+  if (Array.isArray(raw)) {
+    return {
+      keptCapabilityIds: raw.filter((value): value is string => typeof value === "string"),
+    };
+  }
+  if (!raw || typeof raw !== "object") return {};
+  const record = raw as Record<string, unknown>;
+  const selected = Array.isArray(record["selected"])
+    ? record["selected"].filter((value): value is string => typeof value === "string")
+    : undefined;
+  const overlay: AgentCreateCanvasOverlay = {};
+  if (typeof record["name"] === "string") overlay.name = record["name"];
+  if (typeof record["slug"] === "string") overlay.slug = record["slug"];
+  if (typeof record["description"] === "string") overlay.description = record["description"];
+  if (typeof record["systemPrompt"] === "string") overlay.systemPrompt = record["systemPrompt"];
+  const toolIds = Array.isArray(record["toolIds"])
+    ? record["toolIds"].filter((value): value is string => typeof value === "string")
+    : selected;
+  if (toolIds) overlay.toolIds = toolIds;
+  if (Array.isArray(record["skillIds"])) {
+    overlay.skillIds = record["skillIds"].filter((value): value is string => typeof value === "string");
+  }
+  if (record["kbScope"] === "USER" || record["kbScope"] === "COLLECTIONS") {
+    overlay.kbScope = record["kbScope"];
+  }
+  if (
+    record["permissionMode"] === "ask-first" ||
+    record["permissionMode"] === "read-only" ||
+    record["permissionMode"] === "can-write"
+  ) {
+    overlay.permissionMode = record["permissionMode"];
+  }
+  if (Array.isArray(record["knowledgeBase"])) {
+    overlay.knowledgeBase = record["knowledgeBase"].flatMap((item) => {
+      if (!item || typeof item !== "object") return [];
+      const row = item as Record<string, unknown>;
+      if (typeof row["collectionId"] !== "string" || !row["collectionId"].trim()) return [];
+      return [
+        {
+          collectionId: row["collectionId"].trim(),
+          fileId: typeof row["fileId"] === "string" ? row["fileId"] : null,
+        },
+      ];
+    });
+  }
+  return { ...(selected ? { keptCapabilityIds: selected } : {}), overlay };
+}
+
+export function applyCanvasOverlay(
+  spec: DraftAgentSpec,
+  overlay: AgentCreateCanvasOverlay | undefined,
+): DraftAgentSpec {
+  if (!overlay) return spec;
+  const next: DraftAgentSpec = { ...spec, tools: [...spec.tools] };
+  if (typeof overlay.name === "string" && overlay.name.trim()) {
+    next.name = overlay.name.trim().slice(0, 80);
+  }
+  if (typeof overlay.slug === "string" && overlay.slug.trim()) {
+    const slug = overlay.slug.trim().toLowerCase();
+    if (isValidAgentSlug(slug)) next.slug = slug;
+  }
+  if (typeof overlay.description === "string") {
+    next.description = overlay.description.trim().slice(0, 300);
+  }
+  if (typeof overlay.systemPrompt === "string" && overlay.systemPrompt.trim()) {
+    next.systemPrompt = overlay.systemPrompt.trim().slice(0, 20_000);
+  }
+  if (overlay.permissionMode) {
+    next.permissionMode = normalizePermissionMode(overlay.permissionMode);
+  }
+  if (Array.isArray(overlay.toolIds)) {
+    next.tools = overlay.toolIds
+      .filter((token): token is string => typeof token === "string" && token.trim().length > 0)
+      .map((token) => token.trim())
+      .filter((token, index, list) => list.indexOf(token) === index);
+  }
+  return next;
+}
+
 /**
  * Approve or reject a drafted agent.
  *
@@ -786,7 +909,7 @@ export async function resolveAgentDraft(
   requestId: string,
   callerUserId: string,
   decision: "approve" | "reject",
-  keptCapabilityIds?: string[],
+  canvasValue?: unknown,
   /** Drafting agent's slug, so the decided card keeps its "Built by" credit. */
   builtBy?: string,
   edits?: AgentDraftEdits,
@@ -807,10 +930,12 @@ export async function resolveAgentDraft(
     };
   }
 
-  const spec = parseDraftSpec(request.proposedContent);
-  if (!spec) {
+  const parsedSpec = parseDraftSpec(request.proposedContent);
+  if (!parsedSpec) {
     return { ok: false, code: 400, error: "This draft is unreadable and can't be created. Ask for the agent again." };
   }
+  const parsedCanvas = parseAgentCanvasValue(canvasValue);
+  const spec = applyCanvasOverlay(parsedSpec, parsedCanvas.overlay);
 
   // Approve only, and before the claim: a malformed edit must leave the draft
   // approvable rather than burning the claim, and must never block a decline.
@@ -902,21 +1027,26 @@ export async function resolveAgentDraft(
       return {
         ok: false,
         code: 409,
-        error: `The identifier "${draft.slug}" is already taken — rename it and create again.`,
+        error: `@${draft.slug} is taken. Rename the handle to create a new agent.`,
         retryable: true,
       };
     }
 
+    const denied = new Set((spec.deniedTools ?? []).map((t) => t.trim()).filter(Boolean));
     const full = await buildIdentity(specTools, applied);
-    const grantedIds =
+    const keptCapabilityIds = parsedCanvas.keptCapabilityIds;
+    const baseGrantedIds =
       applied.requestedTools ??
       narrowToKeptCapabilities(
         specTools,
         keptCapabilityIds,
         (full.identity.capabilities ?? []).map((c) => c.id),
       );
+    const grantedIds = baseGrantedIds.filter((token) => !denied.has(token));
     const unchanged =
-      applied.requestedTools === undefined && grantedIds.length === specTools.length;
+      applied.requestedTools === undefined &&
+      denied.size === 0 &&
+      grantedIds.length === specTools.length;
     const { identity, resolved } = unchanged ? full : await buildIdentity(grantedIds, applied);
 
     // Global agents are org-wide, so the same admin gate the REST create route
@@ -928,8 +1058,33 @@ export async function resolveAgentDraft(
     }
     // Anything other than USER falls back to COLLECTIONS, matching the route —
     // a typo must not hand the agent the approver's whole knowledge base.
-    const effectiveKbScope = draft.knowledge?.scope === "USER" ? "USER" : "COLLECTIONS";
+    const effectiveKbScope =
+      parsedCanvas.overlay?.kbScope === "USER" || draft.knowledge?.scope === "USER"
+        ? "USER"
+        : "COLLECTIONS";
     const providerOrder = applied.providerOrder;
+
+    const permissionMode = normalizePermissionMode(spec.permissionMode);
+    if (permissionMode === "read-only") {
+      // read-only agents keep tools for reading; write tools are stripped at
+      // runtime via config.permissionMode — still store resolved tools so the
+      // agent can list them, but mark the mode for the gateway deny path.
+    }
+
+    const skillSlugs = [...new Set([...(spec.skillSlugs ?? [])])];
+    const skillIdsFromSlugs: string[] = [];
+    for (const skillSlug of skillSlugs) {
+      const skill = await skillRepository.findBySlug(skillSlug, request.orgId);
+      if (!skill) {
+        await agentRequestRepository.revertAgentCreateToPending(requestId).catch(() => {});
+        return {
+          ok: false,
+          code: 400,
+          error: `Skill @${skillSlug} was not found. Create the skill first, or remove it from the draft.`,
+        };
+      }
+      skillIdsFromSlugs.push(skill.id);
+    }
 
     const created = await agentRepository.create({
       slug: draft.slug,
@@ -942,6 +1097,8 @@ export async function resolveAgentDraft(
       modelId: applied.modelId?.trim() ?? "",
       config: {
         tools: toConfigTools(resolved),
+        permissionMode,
+        ...(denied.size > 0 ? { deniedTools: [...denied] } : {}),
         ...(providerOrder.length > 0 ? { providerOrder } : {}),
       },
       owner: { connect: { id: request.requesterId } },
@@ -958,6 +1115,33 @@ export async function resolveAgentDraft(
     }
 
     await agentRequestRepository.recordAgentCreateResult(requestId, created.id).catch(() => {});
+
+    const overlay = parsedCanvas.overlay;
+    const skillIds = [
+      ...skillIdsFromSlugs,
+      ...(overlay?.skillIds ?? []).filter((id) => typeof id === "string" && id.length > 0),
+    ];
+    const uniqueSkillIds = [...new Set(skillIds)];
+    for (const skillId of uniqueSkillIds) {
+      await agentRepository.upsertSkill(created.id, skillId).catch((err) => {
+        log.error(`[agent-card] skill attach failed for ${spec.slug} skill=${skillId}: ${errMsg(err)}`);
+      });
+    }
+    if (
+      overlay?.kbScope === "COLLECTIONS" &&
+      overlay.knowledgeBase &&
+      overlay.knowledgeBase.length > 0
+    ) {
+      try {
+        const { validateKbGrants } = await import("./spaces-kb.js");
+        const { accepted } = await validateKbGrants(callerUserId, overlay.knowledgeBase);
+        if (accepted.length > 0) {
+          await agentRepository.replaceCollections(created.id, accepted);
+        }
+      } catch (err) {
+        log.error(`[agent-card] knowledge attach failed for ${spec.slug}: ${errMsg(err)}`);
+      }
+    }
     await writeAuditLog({
       actorUserId: callerUserId,
       eventType: "AGENT_CREATED",
@@ -968,6 +1152,7 @@ export async function resolveAgentDraft(
         ...(draft.slug !== spec.slug || draft.name !== spec.name ? { renamedFrom: { name: spec.name, slug: spec.slug } } : {}),
         subagents: resolved.subagents,
         custom: resolved.custom,
+        permissionMode,
         callableAgents: resolved.callableAgents,
         skills: (extras.skills ?? []).map((skill) => skill.id),
         scope: effectiveScope,
@@ -975,7 +1160,7 @@ export async function resolveAgentDraft(
       },
     });
     log.info(
-      `[agent-card] created agent ${draft.slug} (id=${created.id}) owner=${request.requesterId} org=${request.orgId} tools=${resolved.subagents.length + resolved.custom.length}`,
+      `[agent-card] created agent ${draft.slug} (id=${created.id}) owner=${request.requesterId} org=${request.orgId} tools=${resolved.subagents.length + resolved.custom.length} permission=${permissionMode}`,
     );
 
     const note = draftNote(
@@ -1001,7 +1186,7 @@ export async function resolveAgentDraft(
     return {
       ok: false,
       code: 500,
-      error: "Couldn't create the agent just now — please try again.",
+      error: `Couldn't create @${spec.slug}. Check the handle is unique and try Create Agent again. Your draft is still here.`,
       retryable: true,
     };
   }

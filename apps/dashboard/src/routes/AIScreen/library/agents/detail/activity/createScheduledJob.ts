@@ -7,6 +7,8 @@ export interface NewScheduledJob {
   type: 'once' | 'cron';
   delayMs?: number;
   cronExpression?: string;
+  /** IANA zone the cron is read in. Omitted = the server default (Asia/Kolkata). */
+  timezone?: string;
   label?: string;
 }
 

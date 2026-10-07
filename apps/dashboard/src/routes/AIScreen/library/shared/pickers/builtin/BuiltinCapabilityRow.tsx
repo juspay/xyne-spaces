@@ -1,7 +1,11 @@
 import { useMemo, useState, type ReactElement } from 'react';
 import { Ai01, InformationCircle, PlusDefault } from '@xyne/icons';
+import type { CreateHubSuggestions } from '@/components/flowUI/nodes/agent/create/types';
 import { Tooltip } from '@/components/ui/Tooltip/Tooltip';
+import { matchSuggestedTools, suggestionFromPicks } from '../../primitives/suggestionMatch';
 import { DotGridLoader } from '../mcp/DotGridLoader';
+import { PropertyAddButton } from '@/components/flowUI/nodes/agent/create/PropertyAddButton';
+import { CapabilityPillList } from '../CapabilityPillList';
 import { BrowseBuiltinToolsDialog } from './BrowseBuiltinToolsDialog';
 import { BuiltinChip } from './BuiltinChip';
 import { disableEntry, enableEntry, isEntryEnabled, type BuiltinSelection } from './builtinCatalog';
@@ -14,12 +18,22 @@ interface BuiltinCapabilityRowProps {
   selection: BuiltinSelection;
   onSelectionChange: (next: BuiltinSelection) => void;
   suggestContext: { systemPrompt: string; description: string };
+  layout?: 'profile';
+  /** Create page: mid-confidence picks shown as dashed chips (profile layout). */
+  hubSuggestions?: CreateHubSuggestions | undefined;
+  onSuggestionAccepted?: ((source: string) => void) | undefined;
+  /** A chip was removed: the caller never re-adds it this session. */
+  onPickDismissed?: ((source: string) => void) | undefined;
 }
 
 export function BuiltinCapabilityRow({
   selection,
   onSelectionChange,
   suggestContext,
+  layout,
+  hubSuggestions,
+  onSuggestionAccepted,
+  onPickDismissed,
 }: BuiltinCapabilityRowProps): ReactElement {
   const [browseOpen, setBrowseOpen] = useState(false);
   const [browseSource, setBrowseSource] = useState<string | null>(null);
@@ -33,6 +47,20 @@ export function BuiltinCapabilityRow({
   const suggestedChips = useMemo(
     () => suggestions.suggested.filter(match => !isEntryEnabled(selection, match.entry)),
     [suggestions.suggested, selection],
+  );
+
+  const planChips = useMemo(
+    () =>
+      hubSuggestions && hubSuggestions.builtin.length > 0
+        ? matchSuggestedTools(
+            suggestionFromPicks(hubSuggestions.builtin),
+            entries,
+            entry => entry.source,
+            entry => entry.tools,
+            entry => entry.label,
+          ).filter(match => !isEntryEnabled(selection, match.entry))
+        : [],
+    [hubSuggestions, entries, selection],
   );
 
   const renderSuggestAction = (): ReactElement => {
@@ -50,9 +78,7 @@ export function BuiltinCapabilityRow({
     if (suggestions.status === 'error') {
       return (
         <span className='flex items-center gap-2 text-xs leading-5 tracking-[-0.24px]'>
-          <span className='text-muted-foreground'>
-            Couldn&apos;t suggest tools{suggestions.error ? ` — ${suggestions.error}` : ''}
-          </span>
+          <span className='text-muted-foreground'>None suggested</span>
           <button
             type='button'
             onClick={suggestions.run}
@@ -88,6 +114,73 @@ export function BuiltinCapabilityRow({
       </Tooltip>
     );
   };
+
+  if (layout === 'profile') {
+    return (
+      <>
+        <CapabilityPillList
+          className='items-start'
+          add={
+            <PropertyAddButton
+              label='Add built-in tool'
+              trackName='Create agent v2: browse built-in tools'
+              onClick={() => {
+                setBrowseSource(null);
+                setBrowseOpen(true);
+              }}
+            />
+          }
+          pills={[
+            ...selectedEntries.map(entry => ({
+              key: entry.source,
+              node: (
+                <BuiltinChip
+                  label={entry.label}
+                  selected
+                  onOpen={() => {
+                    setBrowseSource(entry.source);
+                    setBrowseOpen(true);
+                  }}
+                  onToggle={() => {
+                    onSelectionChange(disableEntry(selection, entry));
+                    onPickDismissed?.(entry.source);
+                  }}
+                />
+              ),
+            })),
+            ...planChips.map(match => ({
+              key: match.entry.source,
+              node: (
+                <BuiltinChip
+                  label={match.entry.label}
+                  selected={false}
+                  onToggle={() => {
+                    onSelectionChange(enableEntry(selection, match.entry, match.tools));
+                    onSuggestionAccepted?.(match.entry.source);
+                  }}
+                />
+              ),
+            })),
+          ]}
+        />
+        <BrowseBuiltinToolsDialog
+          open={browseOpen}
+          onOpenChange={next => {
+            setBrowseOpen(next);
+            if (!next) setBrowseSource(null);
+          }}
+          initialSource={browseSource}
+          catalog={entries}
+          loading={loading}
+          isError={isError}
+          onRetry={refetch}
+          selection={selection}
+          onSelectionChange={onSelectionChange}
+          suggested={suggestions.suggested}
+        />
+      </>
+    );
+  }
 
   return (
     <div className='flex w-full flex-col gap-1.5'>
@@ -125,6 +218,11 @@ export function BuiltinCapabilityRow({
 
       {(selectedEntries.length > 0 || suggestedChips.length > 0) && (
         <div className='flex flex-wrap items-start gap-2 pt-1'>
+          {selectedEntries.length > 0 && (
+            <span className='w-full text-[11px] uppercase tracking-wide text-muted-foreground'>
+              Bound
+            </span>
+          )}
           {selectedEntries.map(entry => (
             <BuiltinChip
               key={`selected-${entry.source}`}
@@ -137,6 +235,11 @@ export function BuiltinCapabilityRow({
               onToggle={() => onSelectionChange(disableEntry(selection, entry))}
             />
           ))}
+          {suggestedChips.length > 0 && (
+            <span className='w-full text-[11px] uppercase tracking-wide text-muted-foreground'>
+              Suggested
+            </span>
+          )}
           {suggestedChips.map(match => (
             <BuiltinChip
               key={`suggested-${match.entry.source}`}
@@ -148,9 +251,41 @@ export function BuiltinCapabilityRow({
         </div>
       )}
 
-      {suggestions.status === 'ready' && suggestions.suggested.length === 0 && (
+      {suggestions.status === 'ready' &&
+        suggestions.suggested.length === 0 &&
+        selectedEntries.length === 0 && (
+          <p className='text-xs text-muted-foreground'>
+            None needed —{' '}
+            <button
+              type='button'
+              onClick={() => {
+                setBrowseSource(null);
+                setBrowseOpen(true);
+              }}
+              data-track-category='Claw Agents'
+              data-track-name='Create agent v2: browse built-in tools'
+              className='underline underline-offset-2 hover:text-foreground'
+            >
+              Browse
+            </button>
+          </p>
+        )}
+
+      {suggestions.status === 'error' && (
         <p className='text-xs text-muted-foreground'>
-          No built-in tool matched this agent — browse the full list to pick one yourself.
+          {suggestions.error ?? 'None suggested'} —{' '}
+          <button
+            type='button'
+            onClick={() => {
+              setBrowseSource(null);
+              setBrowseOpen(true);
+            }}
+            data-track-category='Claw Agents'
+            data-track-name='Create agent v2: browse built-in tools'
+            className='underline underline-offset-2 hover:text-foreground'
+          >
+            Browse
+          </button>
         </p>
       )}
 

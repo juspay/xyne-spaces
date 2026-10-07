@@ -1,6 +1,9 @@
 import { useMemo, useState, type ReactElement } from 'react';
 import { InformationCircle, PlusDefault } from '@xyne/icons';
+import { PropertyAddButton } from '@/components/flowUI/nodes/agent/create/PropertyAddButton';
+import type { CreateHubSuggestions } from '@/components/flowUI/nodes/agent/create/types';
 import { Tooltip } from '@/components/ui/Tooltip/Tooltip';
+import { CapabilityPillList } from '../CapabilityPillList';
 import { BrowseSkillsDialog } from './BrowseSkillsDialog';
 import { SkillChip } from './SkillChip';
 import { disableSkill, isSkillSelected } from './skillCatalog';
@@ -11,11 +14,21 @@ const CAPTION = 'Add reusable instructions for specialized workflows.';
 interface SkillsCapabilityRowProps {
   selectedIds: readonly string[];
   onChange: (next: string[]) => void;
+  layout?: 'profile';
+  /** Create page: mid-confidence picks shown as dashed chips (profile layout). */
+  hubSuggestions?: CreateHubSuggestions | undefined;
+  onSuggestionAccepted?: ((skillId: string) => void) | undefined;
+  /** A chip was removed: the caller never re-adds it this session. */
+  onPickDismissed?: ((skillId: string) => void) | undefined;
 }
 
 export function SkillsCapabilityRow({
   selectedIds,
   onChange,
+  layout,
+  hubSuggestions,
+  onSuggestionAccepted,
+  onPickDismissed,
 }: SkillsCapabilityRowProps): ReactElement {
   const [browseOpen, setBrowseOpen] = useState(false);
   const [browseId, setBrowseId] = useState<string | null>(null);
@@ -25,6 +38,77 @@ export function SkillsCapabilityRow({
     () => entries.filter(entry => isSkillSelected(selectedIds, entry)),
     [entries, selectedIds],
   );
+
+  const planChips = useMemo(
+    () => (hubSuggestions?.skills ?? []).filter(pick => !selectedIds.includes(pick.id)),
+    [hubSuggestions, selectedIds],
+  );
+
+  if (layout === 'profile') {
+    return (
+      <>
+        <CapabilityPillList
+          className='items-start'
+          add={
+            <PropertyAddButton
+              label='Add skill'
+              trackName='Create agent v2: browse skills'
+              onClick={() => {
+                setBrowseId(null);
+                setBrowseOpen(true);
+              }}
+            />
+          }
+          pills={[
+            ...selectedEntries.map(entry => ({
+              key: entry.id,
+              node: (
+                <SkillChip
+                  label={entry.label}
+                  selected
+                  onOpen={() => {
+                    setBrowseId(entry.id);
+                    setBrowseOpen(true);
+                  }}
+                  onToggle={() => {
+                    onChange(disableSkill(selectedIds, entry));
+                    onPickDismissed?.(entry.id);
+                  }}
+                />
+              ),
+            })),
+            ...planChips.map(pick => ({
+              key: pick.id,
+              node: (
+                <SkillChip
+                  label={pick.label}
+                  selected={false}
+                  onToggle={() => {
+                    onChange([...selectedIds, pick.id]);
+                    onSuggestionAccepted?.(pick.id);
+                  }}
+                />
+              ),
+            })),
+          ]}
+        />
+        <BrowseSkillsDialog
+          open={browseOpen}
+          onOpenChange={next => {
+            setBrowseOpen(next);
+            if (!next) setBrowseId(null);
+          }}
+          initialId={browseId}
+          catalog={entries}
+          loading={loading}
+          isError={isError}
+          onRetry={refetch}
+          selectedIds={selectedIds}
+          onChange={onChange}
+        />
+      </>
+    );
+  }
 
   return (
     <div className='flex w-full flex-col gap-1.5'>

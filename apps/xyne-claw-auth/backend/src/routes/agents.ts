@@ -43,6 +43,7 @@ import { findUserByAnyId, resolveCanonicalUserIdOrSelf, spacesUserIdForClawUser 
 import { s2sKeyMatches } from "../middleware/require-auth.js";
 import { writeAuditLog } from "../lib/audit.js";
 import { buildAvailableToolsCatalog } from "./tools.js";
+import { availabilityForServerIds } from "../lib/connector-availability.js";
 import { validateAgentModelConfig, validateAwakeningConfig } from "../lib/agent-config-validation.js";
 import { syncAwakeningState } from "../awakening/lifecycle.js";
 import { removeAgentFromIndex, syncAgentToIndexBestEffort } from "../services/agent-index/index.js";
@@ -51,8 +52,41 @@ import { validateKbGrants } from "../lib/spaces-kb.js";
 import { ORG_SCOPED_SLUGS } from "../lib/org-scoped-slugs.js";
 import { getAdminOrgScope, getOrgNameMap, withOrgLabel } from "../lib/admin-org-scope.js";
 import { asyncHandler, ok, badRequest, unauthorized, forbidden, notFound, conflict, HttpError } from "../lib/http.js";
+import {
+  buildDraftRunBody,
+  draftAgentSlug,
+  parseDraftAttachments,
+  parseDraftSnapshot,
+  type DraftCapabilityCatalog,
+} from "../lib/draft-chat.js";
+import { mintSessionToken } from "../lib/session-tokens.js";
+import { createAgentRecord } from "../lib/agent-create.js";
+import { fetchClawRunWithRetry } from "../lib/claw-fetch.js";
+import { parseToolsConfig } from "xyne-claw-shared";
 
 import { createLogger } from "../logger.js";
+import { fetchAccessibleKb } from "../lib/spaces-kb.js";
+import {
+  PACK_VERSION,
+  availableHubs,
+  resolveHubs,
+  resolveIntent,
+  runSuggestTools,
+  type DecisionRecord,
+} from "../lib/suggest-tools-service.js";
+import type { KnowledgeCandidate } from "../lib/tool-selection.js";
+import { xorAsk, xorEnabled } from "../lib/xor-client.js";
+import {
+  buildClawDraftRequest,
+  cronIntervalProblem,
+  frameSse,
+  freeHandle,
+  parseAgentDraftRequest,
+  planFromCapabilities,
+  readSseMessages,
+  type SseMessage,
+} from "../lib/agent-draft-proxy.js";
+import type { DraftPick } from "xyne-claw-shared";
 const log = createLogger("agents");
 
 const router = Router();
@@ -277,21 +311,59 @@ router.post("/generate-output-format", async (req: Request, res: Response) => {
   }
 });
 
-// ── Suggest tools (proxy to xyne-claw, with catalog from this DB) ────
+// ── Suggest tools ────────────────────────────────────────────────────
 //
-// Frontend sends { systemPrompt | description }. We attach a compressed
-// catalog so xyne-claw doesn't need DB access, then forward to its
-// /suggest-tools route which does the LLM call. The response is a
-// proposal; the UI renders it as a diff for the user to accept.
+// Frontend sends { description?, systemPrompt?, emptyHubs? } (emptyHubs = the
+// hubs to decide; default every hub that has candidates). We attach this
+// org's catalog, the visible skills and the user's KB collections, then decide
+// with XOR in one batched call. The claw LLM judge and finally a BM25
+// shortlist are fallbacks. The response is a proposal: `integrations`,
+// `subagents`, `skillSlugs` and `knowledgeIds` are auto-bound picks, while
+// `suggested` holds one-click chips (see lib/tool-selection.ts).
+
+const KB_BUDGET_MS = 800;
+
+/** Root KB collections the user can see, or [] when Spaces is slow or unreachable. */
+async function loadKnowledgeCandidates(userId: string | undefined): Promise<KnowledgeCandidate[]> {
+  if (!userId) return [];
+  let timer: NodeJS.Timeout | undefined;
+  try {
+    const tree = await Promise.race([
+      fetchAccessibleKb(userId, { includeItems: false }),
+      new Promise<null>((resolve) => {
+        timer = setTimeout(() => resolve(null), KB_BUDGET_MS);
+      }),
+    ]);
+    return (tree ?? []).map((c) => ({
+      id: c.id,
+      name: c.name,
+      description: c.description,
+      ...(c.channelName ? { channelName: c.channelName } : {}),
+      ...(c.projectName ? { projectName: c.projectName } : {}),
+    }));
+  } catch {
+    return [];
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
+function pickIds(data: Record<string, unknown>): string[] {
+  const hubs = data["hubs"] as Record<string, { picks?: Array<{ id: string }> }> | undefined;
+  if (!hubs) return [];
+  return Object.entries(hubs).flatMap(([hub, h]) => (h.picks ?? []).map((p) => `${hub}:${p.id}`));
+}
 
 router.post("/suggest-tools", async (req: Request, res: Response) => {
+  const started = Date.now();
   try {
-    const { systemPrompt, description } = req.body as {
+    const { systemPrompt, description, emptyHubs: rawHubs } = req.body as {
       systemPrompt?: string;
       description?: string;
+      emptyHubs?: string[];
     };
-    const intent = (systemPrompt && systemPrompt.trim()) || (description && description.trim());
-    if (!intent) {
+    const resolved = resolveIntent(description, systemPrompt);
+    if (!resolved) {
       res.status(400).json({ success: false, error: "systemPrompt or description is required" });
       return;
     }
@@ -307,9 +379,15 @@ router.post("/suggest-tools", async (req: Request, res: Response) => {
       return;
     }
 
-    const full = await buildAvailableToolsCatalog(undefined, orgId);
-    // Compress: drop fields the LLM doesn't need (mcpServers, customGroups,
-    // serverTools, writeTools — all derivable from `integrations`).
+    const wantsKnowledge = !Array.isArray(rawHubs) || rawHubs.length === 0 || rawHubs.includes("knowledge");
+    const [full, skillRows, knowledge] = await Promise.all([
+      buildAvailableToolsCatalog(undefined, orgId),
+      skillRepository.listVisible({
+        ...(requesterId ? { userId: requesterId } : {}),
+        orgId,
+      }),
+      wantsKnowledge ? loadKnowledgeCandidates(requesterId) : Promise.resolve([]),
+    ]);
     const catalog = {
       subagents: full.subagents.map((s) => ({ name: s.name, description: s.description })),
       integrations: full.integrations.map((i) => ({
@@ -323,24 +401,262 @@ router.post("/suggest-tools", async (req: Request, res: Response) => {
         })),
       })),
     };
+    const skills = skillRows.map((s) => ({
+      slug: s.slug,
+      name: s.name,
+      description: s.description ?? "",
+      // content summary for enriched docs (truncated for BM25)
+      content: typeof s.content === "string" ? s.content.slice(0, 400) : "",
+    }));
+    const hubs = resolveHubs(rawHubs, availableHubs(catalog, skills, knowledge));
 
-    const clawRes = await fetch(`${CONFIG.xyneClawUrl}/suggest-tools`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        ...(CONFIG.xyneClawS2sKey ? { "x-s2s-key": CONFIG.xyneClawS2sKey } : {}),
+    const outcome = await runSuggestTools(
+      { resolved, hubs, catalog, skills, knowledge, startedAt: started },
+      {
+        ask: xorAsk,
+        xorEnabled,
+        judge: async ({ intent, catalog: judgedCatalog, skills: judgedSkills, hubs: judgedHubs, timeoutMs }) => {
+          try {
+            const clawRes = await fetch(`${CONFIG.xyneClawUrl}/suggest-tools`, {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                ...(CONFIG.xyneClawS2sKey ? { "x-s2s-key": CONFIG.xyneClawS2sKey } : {}),
+              },
+              body: JSON.stringify({
+                intent,
+                catalog: judgedCatalog,
+                emptyHubs: judgedHubs,
+                skillCandidates: judgedSkills.map((s) => ({ slug: s.slug, name: s.name, description: s.description })),
+              }),
+              signal: AbortSignal.timeout(timeoutMs),
+            });
+            const body = (await clawRes.json().catch(() => ({}))) as {
+              success?: boolean;
+              data?: Record<string, unknown>;
+              error?: string;
+            };
+            const ok = clawRes.ok && body.success === true && !!body.data && typeof body.data === "object";
+            return {
+              ok,
+              status: clawRes.status,
+              ...(body.data ? { data: body.data } : {}),
+              ...(body.error ? { error: body.error } : {}),
+            };
+          } catch (err) {
+            return { ok: false, status: 0, error: errMsg(err) };
+          }
+        },
+        persist: (record: DecisionRecord) => persistToolDecision({ orgId, userId: requesterId ?? null, record }),
       },
-      body: JSON.stringify({ intent, catalog }),
-      signal: AbortSignal.timeout(50_000),
-    });
-
-    const data = await clawRes.json();
-    res.status(clawRes.status).json(data);
+    );
+    res.status(outcome.status).json(outcome.body);
   } catch (err) {
     log.error("[agents] suggest-tools proxy error:", err);
     res.status(500).json({ success: false, error: "Failed to suggest tools" });
   }
 });
+
+const DRAFT_KEEPALIVE_MS = 15_000;
+
+/**
+ * Streamed create-canvas draft. One call drafts or edits the whole canvas and
+ * answers as SSE (see packages/xyne-claw-shared/src/stream/agent-draft-events.ts):
+ * this route adds the org's catalog, skills and knowledge, proxies xyne-claw's
+ * POST /agents/draft, and rewrites capabilities and taken handles on the way back.
+ */
+router.post("/draft", async (req: Request, res: Response) => {
+  const parsed = parseAgentDraftRequest(req.body);
+  if (typeof parsed === "string") {
+    res.status(400).json({ success: false, error: parsed });
+    return;
+  }
+  const requesterId = getRequesterId(req);
+  if (!requesterId) {
+    res.status(401).json({ success: false, error: "Sign in to draft an agent" });
+    return;
+  }
+  const orgId = getOrgId(req)
+    ?? (await prisma.user.findUnique({ where: { id: requesterId }, select: { orgId: true } }))?.orgId;
+  if (!orgId) {
+    res.status(400).json({ success: false, error: "orgId is required" });
+    return;
+  }
+
+  const started = Date.now();
+  let clawBody;
+  try {
+    const [full, skillRows, knowledge] = await Promise.all([
+      buildAvailableToolsCatalog(undefined, orgId),
+      skillRepository.listVisible({ userId: requesterId, orgId }),
+      loadKnowledgeCandidates(requesterId),
+    ]);
+    clawBody = buildClawDraftRequest({
+      request: parsed,
+      userId: requesterId,
+      now: new Date(),
+      catalog: {
+        subagents: full.subagents.map((s) => ({ name: s.name, description: s.description })),
+        integrations: full.integrations.map((i) => ({
+          slug: i.slug,
+          label: i.label,
+          kind: i.kind,
+          ...(i.kind === "mcp" && !i.connected ? { requiresConnection: i.label } : {}),
+          ...(i.description ? { description: i.description.slice(0, 200) } : {}),
+          readTools: i.readTools.map((t) => ({ name: t.name, description: t.description, riskLevel: t.riskLevel })),
+          writeTools: i.writeTools.map((t) => ({ name: t.name, description: t.description, riskLevel: t.riskLevel })),
+        })),
+      },
+      skills: skillRows.map((s) => ({ slug: s.slug, name: s.name, description: s.description ?? "" })),
+      knowledge,
+    });
+  } catch (err) {
+    log.error("[agents/draft] catalog load failed:", err);
+    res.status(503).json({ success: false, error: "Couldn't load your tools. Try again." });
+    return;
+  }
+
+  // A closed browser tab stops the upstream turn (and every LLM call in it).
+  const abort = new AbortController();
+  res.on("close", () => {
+    if (!res.writableEnded) abort.abort();
+  });
+
+  let upstream: globalThis.Response;
+  try {
+    upstream = await fetch(`${CONFIG.xyneClawUrl}/agents/draft`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        ...(CONFIG.xyneClawS2sKey ? { "x-s2s-key": CONFIG.xyneClawS2sKey } : {}),
+      },
+      body: JSON.stringify(clawBody),
+      signal: abort.signal,
+    });
+  } catch (err) {
+    log.warn(`[agents/draft] xyne-claw unreachable: ${errMsg(err)}`);
+    res.status(502).json({ success: false, error: "The draft service is unavailable." });
+    return;
+  }
+  if (!upstream.ok || !upstream.body) {
+    const detail = await upstream.text().catch(() => "");
+    log.warn(`[agents/draft] xyne-claw ${upstream.status}: ${detail.slice(0, 200)}`);
+    res.status(upstream.status === 503 ? 503 : 502).json({ success: false, error: "The draft service is unavailable." });
+    return;
+  }
+
+  res.status(200);
+  res.setHeader("Content-Type", "text/event-stream");
+  res.setHeader("Cache-Control", "no-cache, no-transform");
+  res.setHeader("Connection", "keep-alive");
+  res.setHeader("X-Accel-Buffering", "no");
+  res.flushHeaders();
+  const keepalive = setInterval(() => {
+    if (!res.writableEnded) res.write(": keepalive\n\n");
+  }, DRAFT_KEEPALIVE_MS);
+
+  const handleTaken = async (candidate: string): Promise<boolean> =>
+    Boolean(await agentRepository.findBySlug(candidate, orgId).catch(() => null));
+  const rewrite = async (message: SseMessage): Promise<SseMessage> => {
+    const data = message.data;
+    if (message.event === "capabilities") {
+      return {
+        event: "plan",
+        data: {
+          seq: data["seq"],
+          turnId: data["turnId"],
+          op: data["op"],
+          remove: data["remove"] ?? [],
+          plan: planFromCapabilities(
+            {
+              bound: (data["bound"] as DraftPick[] | undefined) ?? [],
+              suggested: (data["suggested"] as DraftPick[] | undefined) ?? [],
+            },
+            { intent: parsed.message, catalog: clawBody.catalog, knowledge: clawBody.knowledgeCandidates },
+          ),
+        },
+      };
+    }
+    if (message.event === "identity" && typeof data["handle"] === "string" && data["handle"]) {
+      const requested = data["handle"];
+      const handle = requested === parsed.canvas.handle ? requested : await freeHandle(requested, handleTaken);
+      return handle === requested
+        ? message
+        : { event: "identity", data: { ...data, handle, handleAdjusted: { requested, reason: "taken" } } };
+    }
+    if (message.event === "schedule" && data["op"] === "set" && data["kind"] === "repeat" && typeof data["cron"] === "string") {
+      const problem = cronIntervalProblem(data["cron"], CONFIG.minCronIntervalMinutes);
+      if (problem) {
+        return {
+          event: "schedule",
+          data: { seq: data["seq"], turnId: data["turnId"], op: "invalid", text: data["label"] ?? data["cron"], error: problem },
+        };
+      }
+    }
+    return message;
+  };
+
+  const reader = upstream.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const { messages, rest } = readSseMessages(buffer);
+      buffer = rest;
+      for (const message of messages) {
+        const out = await rewrite(message);
+        if (res.writableEnded) break;
+        res.write(frameSse(out.event, out.data));
+      }
+    }
+    log.info(`[agents/draft] turn ${parsed.turnId} streamed in ${Date.now() - started}ms`);
+  } catch (err) {
+    if (!abort.signal.aborted) {
+      log.warn(`[agents/draft] stream broke: ${errMsg(err)}`);
+      if (!res.writableEnded) {
+        res.write(frameSse("error", {
+          turnId: parsed.turnId,
+          seq: -1,
+          code: "internal",
+          message: "The draft stream broke. What landed is on the canvas; try again for the rest.",
+          retryable: true,
+        }));
+      }
+    }
+  } finally {
+    clearInterval(keepalive);
+    if (!res.writableEnded) res.end();
+  }
+});
+
+/** Best-effort audit row for every suggest, whichever path decided. */
+async function persistToolDecision(args: {
+  orgId: string;
+  userId: string | null;
+  record: DecisionRecord;
+}): Promise<void> {
+  const { record } = args;
+  await prisma.agentToolDecision.create({
+    data: {
+      orgId: args.orgId,
+      userId: args.userId,
+      surface: "hub",
+      intent: record.intent.slice(0, 4000),
+      emptyHubs: record.hubs,
+      shortlistIds: pickIds(record.data),
+      closedPick: record.data as Prisma.InputJsonValue,
+      latencyMs: record.latencyMs,
+      fallback: record.fallback,
+      mode: record.mode,
+      packVersion: PACK_VERSION,
+      source: record.source,
+      scores: { candidates: record.scored } as Prisma.InputJsonValue,
+    },
+  });
+}
 
 // ── Name availability check ──────────────────────────────────────────
 
@@ -538,7 +854,8 @@ router.post("/", asyncHandler(async (req: Request, res: Response) => {
     color?: string;
     modelId?: string;
     config?: Record<string, unknown>;
-    skills?: { name: string; content: string }[];
+    /** Skill ids to attach. */
+    skills?: unknown[];
     knowledgeBase?: Array<{ collectionId: string; fileId?: string | null }>;
     kbScope?: string;
   };
@@ -557,9 +874,21 @@ router.post("/", asyncHandler(async (req: Request, res: Response) => {
     throw badRequest("systemPrompt is required");
   }
 
+  const { validateSystemPromptContract, normalizePermissionMode } = await import("xyne-claw-shared");
+  const promptCheck = validateSystemPromptContract(systemPrompt);
+  if (!promptCheck.ok) {
+    throw badRequest(promptCheck.error ?? "systemPrompt failed the authoring contract");
+  }
+
   const configCheck = validateAgentModelConfig(config);
   if (!configCheck.ok) {
     throw badRequest(configCheck.error);
+  }
+  if (normalizedConfig) {
+    const awakeningCheck = validateAwakeningConfig(normalizedConfig);
+    if (!awakeningCheck.ok) {
+      throw badRequest(awakeningCheck.error);
+    }
   }
 
   // Determine scope: only admins can create global agents
@@ -596,6 +925,21 @@ router.post("/", asyncHandler(async (req: Request, res: Response) => {
     throw badRequest("orgId is required");
   }
 
+  const mergedConfig: Record<string, unknown> = {
+    ...(normalizedConfig ?? {}),
+  };
+  if (mergedConfig["permissionMode"] === undefined) {
+    mergedConfig["permissionMode"] = normalizePermissionMode(undefined);
+  } else {
+    mergedConfig["permissionMode"] = normalizePermissionMode(mergedConfig["permissionMode"]);
+  }
+  // Same privacy canonicalization as PUT: junk never gets stored.
+  if ("privacy" in mergedConfig) {
+    const normalizedPrivacy = normalizeAgentPrivacy(mergedConfig["privacy"]);
+    if (normalizedPrivacy) mergedConfig["privacy"] = normalizedPrivacy;
+    else delete mergedConfig["privacy"];
+  }
+
   const data: Prisma.AgentCreateInput = {
     slug: slug.trim(),
     name: name.trim(),
@@ -604,29 +948,39 @@ router.post("/", asyncHandler(async (req: Request, res: Response) => {
     scope: effectiveScope,
     color: color ?? "#6366f1",
     modelId: modelId ?? "",
-    config: (normalizedConfig ?? {}) as Prisma.InputJsonValue,
+    config: mergedConfig as Prisma.InputJsonValue,
     kbScope: effectiveKbScope,
     org: { connect: { id: createOrgId } },
   };
   if (effectiveOwner) {
     data.owner = { connect: { id: effectiveOwner } };
   }
-  const agent = await agentRepository.create(data);
 
-  // Attach skills by ID if provided
-  if (skills && Array.isArray(skills) && skills.length > 0) {
-    for (const skillId of skills) {
-      if (typeof skillId === "string") {
-        await agentRepository.upsertSkill(agent.id, skillId);
-      }
+  // Skills by id, limited to what the creator can see in the skill picker.
+  const requestedSkillIds = Array.isArray(skills)
+    ? skills.filter((id): id is string => typeof id === "string" && id.trim().length > 0)
+    : [];
+  let skillIds: string[] = [];
+  if (requestedSkillIds.length > 0) {
+    const visible = await skillRepository.listVisible({
+      ...(requesterId ? { userId: requesterId } : {}),
+      isAdmin: admin,
+      orgId: createOrgId,
+    });
+    const visibleIds = new Set(visible.map((skill) => skill.id));
+    skillIds = requestedSkillIds.filter((id) => visibleIds.has(id));
+    const dropped = requestedSkillIds.length - skillIds.length;
+    if (dropped > 0) {
+      log.warn(`[agents/create] dropped ${dropped} skill id(s) not visible to ${requesterId ?? "none"} slug=${slug.trim()}`);
     }
   }
 
-  // Attach KB grants — only meaningful in COLLECTIONS scope. USER scope
-  // means the agent inherits the caller's full KB at runtime, so we
-  // intentionally ignore any knowledgeBase[] payload (a USER-scoped agent
-  // never has stored grants — see PUT for the clear-on-mode-flip path).
+  // KB grants — only meaningful in COLLECTIONS scope. USER scope means the
+  // agent inherits the caller's full KB at runtime, so we intentionally ignore
+  // any knowledgeBase[] payload (a USER-scoped agent never has stored grants —
+  // see PUT for the clear-on-mode-flip path).
   let rejectedKb: Array<{ collectionId: string; fileId: string | null; reason: string }> = [];
+  let acceptedKb: Array<{ collectionId: string; fileId: string | null }> = [];
   if (
     effectiveKbScope === "COLLECTIONS" &&
     knowledgeBase &&
@@ -636,13 +990,40 @@ router.post("/", asyncHandler(async (req: Request, res: Response) => {
   ) {
     const { accepted, rejected } = await validateKbGrants(requesterId, knowledgeBase);
     rejectedKb = rejected;
-    if (accepted.length > 0) {
-      await agentRepository.replaceCollections(agent.id, accepted);
-    }
+    acceptedKb = accepted;
   }
 
+  const agent = await createAgentRecord({
+    data,
+    skillIds,
+    collections: acceptedKb,
+    createdByUserId: requesterId ?? null,
+  });
+
+  syncAgentToIndexBestEffort(agent.id, createOrgId, agent.slug);
+  await syncAwakeningState(agent.id, createOrgId, mergedConfig).catch((e) =>
+    log.warn(`[agents] syncAwakeningState failed for ${agent.slug}:`, e instanceof Error ? e.message : e),
+  );
+  await writeAuditLog({
+    ...(requesterId ? { actorUserId: requesterId } : {}),
+    eventType: "AGENT_CREATED",
+    targetId: agent.id,
+    description: `Agent "${agent.name}" (${agent.slug}) created`,
+    metadata: {
+      orgId: createOrgId,
+      scope: effectiveScope,
+      permissionMode: mergedConfig["permissionMode"],
+      skills: skillIds.length,
+      knowledgeGrants: acceptedKb.length,
+    },
+  });
+
   res.status(201);
-  ok(res, agent, rejectedKb.length > 0 ? { rejectedKnowledgeBase: rejectedKb } : {});
+  ok(
+    res,
+    sanitizeAgent(agent as unknown as Record<string, unknown>),
+    rejectedKb.length > 0 ? { rejectedKnowledgeBase: rejectedKb } : {},
+  );
 }));
 
 router.patch("/:slug/design-system", asyncHandler(async (req: Request<{ slug: string }>, res: Response, next) => {
@@ -783,6 +1164,13 @@ router.put("/:slug", async (req: Request<{ slug: string }>, res: Response) => {
       if (normalizedPrivacy) normalizedConfig["privacy"] = normalizedPrivacy;
       else delete normalizedConfig["privacy"];
     }
+    // No UI clears permissionMode; a config sent without it (older callers
+    // that build config from scratch) must not silently widen a read-only
+    // agent to the ask-first default.
+    const existingPermission = (existing.config as Record<string, unknown> | null)?.["permissionMode"];
+    if (normalizedConfig && normalizedConfig["permissionMode"] === undefined && existingPermission !== undefined) {
+      normalizedConfig["permissionMode"] = existingPermission;
+    }
 
     const data: Prisma.AgentUpdateInput = {};
 
@@ -852,12 +1240,10 @@ router.put("/:slug", async (req: Request<{ slug: string }>, res: Response) => {
 
     // If skills provided, replace all attached skills with new set
     if (skills !== undefined && Array.isArray(skills)) {
-      await agentRepository.deleteAllSkills(existing.id);
-      for (const skillId of skills) {
-        if (typeof skillId === "string") {
-          await agentRepository.upsertSkill(existing.id, skillId);
-        }
-      }
+      await agentRepository.replaceSkills(
+        existing.id,
+        skills.filter((id): id is string => typeof id === "string"),
+      );
     }
 
     // KB scope mode flip. Anything other than the two known literals is
@@ -4882,5 +5268,261 @@ router.delete(
     }
   },
 );
+
+/** Idle gap after which a draft test run is abandoned (no bytes from claw). */
+const DRAFT_CHAT_IDLE_MS = 90_000;
+const DRAFT_CHAT_TOKEN_TTL_S = 30 * 60;
+/** A test chat sends a message every few seconds; the catalog doesn't change that fast. */
+const DRAFT_CATALOG_TTL_MS = 60_000;
+const draftCatalogCache = new Map<
+  string,
+  { at: number; catalog: Promise<Omit<DraftCapabilityCatalog, "connections"> | null> }
+>();
+
+/**
+ * What the caller's org offers, for the test run's capability summary. A
+ * failure only costs the summary its labels, so it resolves to null.
+ */
+function draftCapabilityCatalog(orgId: string, userId: string): Promise<DraftCapabilityCatalog | null> {
+  return Promise.all([cachedDraftCatalog(orgId, userId), draftConnections(userId)]).then(
+    ([catalog, connections]) => (catalog ? { ...catalog, connections } : null),
+  );
+}
+
+/**
+ * Which MCP servers this user can use right now. Read on every message, not
+ * cached: connecting an account and asking again should just work.
+ */
+async function draftConnections(userId: string): Promise<DraftCapabilityCatalog["connections"]> {
+  try {
+    const servers = await prisma.mcpServer.findMany({ where: { enabled: true }, select: { id: true, type: true } });
+    const availability = await availabilityForServerIds(userId, servers.map(server => server.id));
+    return {
+      serverTypes: servers.map(server => server.type),
+      connected: servers
+        .filter(server => availability.personal.has(server.id) || availability.org.has(server.id))
+        .map(server => server.type),
+    };
+  } catch (err) {
+    log.warn(`[agents] draft-chat connections unavailable: ${err instanceof Error ? err.message : String(err)}`);
+    return null;
+  }
+}
+
+function cachedDraftCatalog(orgId: string, userId: string): Promise<Omit<DraftCapabilityCatalog, "connections"> | null> {
+  const key = `${orgId}:${userId}`;
+  const cached = draftCatalogCache.get(key);
+  if (cached && Date.now() - cached.at < DRAFT_CATALOG_TTL_MS) return cached.catalog;
+  const catalog = Promise.all([
+    buildAvailableToolsCatalog(undefined, orgId),
+    skillRepository.listVisible({ userId, orgId }),
+  ])
+    .then(([full, skills]): Omit<DraftCapabilityCatalog, "connections"> => ({
+      integrations: full.integrations.map(integration => ({
+        slug: integration.slug,
+        label: integration.label,
+        kind: integration.kind,
+        readTools: integration.readTools.map(tool => ({ slug: tool.slug, name: tool.name })),
+        writeTools: integration.writeTools.map(tool => ({ slug: tool.slug, name: tool.name })),
+      })),
+      subagents: full.subagents.map(subagent => ({
+        name: subagent.name,
+        description: subagent.description,
+        serverType: subagent.serverType,
+      })),
+      skillNames: skills.map(skill => skill.name),
+    }))
+    .catch((err: unknown) => {
+      log.warn(`[agents] draft-chat catalog unavailable: ${err instanceof Error ? err.message : String(err)}`);
+      draftCatalogCache.delete(key);
+      return null;
+    });
+  for (const [stale, entry] of draftCatalogCache) {
+    if (Date.now() - entry.at >= DRAFT_CATALOG_TTL_MS) draftCatalogCache.delete(stale);
+  }
+  draftCatalogCache.set(key, { at: Date.now(), catalog });
+  return catalog;
+}
+
+/** Short, user-facing text for a failed draft test run. Raw upstream bodies stay in logs. */
+function draftChatErrorText(status: number): string {
+  if (status === 429) return "Too many test messages right now. Wait a moment and try again.";
+  if (status === 503) return "The agent runtime is busy. Try again in a few seconds.";
+  if (status >= 500) return "The test run failed to start. Try again.";
+  return "The test run was rejected. Check the draft and try again.";
+}
+
+router.post("/draft-chat", asyncHandler(async (req: Request, res: Response) => {
+  const userId = getRequesterId(req);
+  if (!userId) {
+    res.status(401).json({ success: false, error: "unauthorized" });
+    return;
+  }
+  const message = typeof req.body?.message === "string" ? req.body.message.trim() : "";
+  const draftConversationId = typeof req.body?.draftConversationId === "string"
+    ? req.body.draftConversationId.trim()
+    : "";
+  if (!message || !draftConversationId) {
+    res.status(400).json({ success: false, error: "message and draftConversationId are required" });
+    return;
+  }
+  const snapshot = parseDraftSnapshot(req.body?.snapshot);
+  if (!snapshot) {
+    res.status(400).json({ success: false, error: "snapshot is required" });
+    return;
+  }
+  const attachments = parseDraftAttachments(req.body?.attachments);
+  if (!attachments) {
+    res.status(400).json({
+      success: false,
+      error: "Attach up to 20 files, 25MB in total, as base64.",
+    });
+    return;
+  }
+
+  const orgId = getOrgId(req);
+  const catalogPromise = orgId ? draftCapabilityCatalog(orgId, userId) : Promise.resolve(null);
+  const loaded = snapshot.skillIds.length > 0
+    ? await skillRepository.findByIds(snapshot.skillIds)
+    : [];
+  // Same visibility as the skill picker: the caller's org, and global or owned.
+  const skills = loaded
+    .filter(skill => (orgId ? skill.orgId === orgId : skill.ownerUserId === userId))
+    .filter(skill => skill.scope === "global" || skill.ownerUserId === userId)
+    .map(skill => ({
+      slug: skill.slug,
+      name: skill.name,
+      description: skill.description,
+      content: skill.content,
+    }));
+  const [user, catalog] = await Promise.all([
+    userRepository.findById(userId).catch(() => null),
+    catalogPromise,
+  ]);
+
+  const sessionId = crypto.randomUUID();
+  const forwardBody = buildDraftRunBody({
+    sessionId,
+    sessionToken: mintSessionToken({
+      sessionId,
+      userId,
+      agentSlug: draftAgentSlug(userId),
+      ttlSeconds: DRAFT_CHAT_TOKEN_TTL_S,
+    }),
+    userId,
+    userName: user?.name ?? undefined,
+    userEmail: user?.email ?? undefined,
+    orgId,
+    message,
+    draftConversationId,
+    snapshot,
+    skills,
+    attachments,
+    webSearch: req.body?.webSearchEnabled === true,
+    deepResearch: req.body?.deepResearchEnabled === true,
+    catalog,
+    timeZone: typeof req.body?.timeZone === "string" ? req.body.timeZone.slice(0, 64) : undefined,
+  });
+
+  const controller = new AbortController();
+  const abortUpstream = (): void => controller.abort();
+  res.on("close", abortUpstream);
+  let idleTimer: ReturnType<typeof setTimeout> | undefined;
+  const armIdle = (): void => {
+    if (idleTimer) clearTimeout(idleTimer);
+    idleTimer = setTimeout(() => controller.abort(), DRAFT_CHAT_IDLE_MS);
+  };
+
+  try {
+    armIdle();
+    let upstream: globalThis.Response;
+    try {
+      upstream = await fetchClawRunWithRetry({
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Accept: "text/event-stream",
+          ...(CONFIG.xyneClawS2sKey ? { "x-s2s-key": CONFIG.xyneClawS2sKey } : {}),
+        },
+        body: JSON.stringify(forwardBody),
+        signal: controller.signal,
+      }, "draft-chat");
+    } catch (err) {
+      log.warn(`[agents] draft-chat upstream unreachable: ${err instanceof Error ? err.message : String(err)}`);
+      if (!res.headersSent) {
+        res.status(502).json({ success: false, error: "The agent runtime is unreachable. Try again." });
+      }
+      return;
+    }
+
+    if (!upstream.ok || !upstream.body) {
+      const text = await upstream.text().catch(() => "");
+      log.warn(`[agents] draft-chat upstream ${upstream.status}: ${text.slice(0, 300)}`);
+      res.status(upstream.status || 502).json({
+        success: false,
+        error: draftChatErrorText(upstream.status || 502),
+      });
+      return;
+    }
+
+    res.status(200);
+    res.setHeader("Content-Type", "text/event-stream");
+    res.setHeader("Cache-Control", "no-cache, no-transform");
+    res.setHeader("Connection", "keep-alive");
+    res.setHeader("X-Accel-Buffering", "no");
+
+    const reader = upstream.body.getReader();
+    try {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        armIdle();
+        if (!res.write(Buffer.from(value))) {
+          await new Promise<void>(resolve => res.once("drain", () => resolve()));
+        }
+      }
+    } catch (err) {
+      if (!controller.signal.aborted) log.error("[agents] draft-chat stream error:", err);
+      reader.cancel().catch(() => {});
+    }
+  } finally {
+    if (idleTimer) clearTimeout(idleTimer);
+    res.off("close", abortUpstream);
+    if (!res.writableEnded) res.end();
+  }
+}));
+
+router.post("/draft-chat/clear", asyncHandler(async (req: Request, res: Response) => {
+  const userId = getRequesterId(req);
+  if (!userId) {
+    res.status(401).json({ success: false, error: "unauthorized" });
+    return;
+  }
+  const draftConversationId = typeof req.body?.draftConversationId === "string"
+    ? req.body.draftConversationId.trim()
+    : "";
+  if (!draftConversationId) {
+    res.status(400).json({ success: false, error: "draftConversationId is required" });
+    return;
+  }
+  const clawRes = await fetch(`${CONFIG.xyneClawUrl}/clear-session`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      ...(CONFIG.xyneClawS2sKey ? { "x-s2s-key": CONFIG.xyneClawS2sKey } : {}),
+    },
+    body: JSON.stringify({
+      userId,
+      conversationId: draftConversationId,
+      agentSlug: draftAgentSlug(userId),
+    }),
+  });
+  const body = (await clawRes.json().catch(() => null)) as Record<string, unknown> | null;
+  if (!clawRes.ok) {
+    res.status(clawRes.status).json(body ?? { success: false, error: "clear-session failed" });
+    return;
+  }
+  res.json(body ?? { success: true });
+}));
 
 export { router as agentsRouter };

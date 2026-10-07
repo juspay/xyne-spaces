@@ -88,6 +88,8 @@ export interface ClawRunRequest {
   /** Single search + single answer pass instead of the full agentic tool
    *  loop — see xyne-claw-auth's run-stream.ts POST / instant branch. */
   instant?: boolean;
+  /** Same empty-tools pin as claw-auth agent-chat `disableTools`. */
+  disableTools?: boolean;
   /** cmd+K AI overview: the palette tab claw searches before answering (its `agentConfig.answerScope`). */
   answerScope?: string;
   researchContext?: { type: string; id?: string; name: string } | null;
@@ -577,6 +579,7 @@ export async function runClawAgentStream(
     ...(request.webSearchEnabled && { webSearchEnabled: true }),
     ...(request.deepResearchEnabled && { deepResearchEnabled: true }),
     ...(request.instant && { instant: true }),
+    ...(request.disableTools && { disableTools: true }),
     ...(request.researchContext && { researchContext: request.researchContext }),
     ...(request.thinkingLevel && { thinkingLevel: request.thinkingLevel }),
     ...(request.studioMode && { studioMode: request.studioMode }),

@@ -1,3 +1,13 @@
+export {
+  validateSystemPromptContract,
+  normalizePermissionMode,
+  permissionModeLabel,
+  MIN_SYSTEM_PROMPT_CHARS,
+  MAX_SYSTEM_PROMPT_CHARS,
+  DEFAULT_PERMISSION_MODE,
+  SYSTEM_PROMPT_SECTION_HINTS,
+} from "./agent-prompt-contract.js";
+export type { AgentPermissionMode, SystemPromptContractResult } from "./agent-prompt-contract.js";
 export type { ToolDefinition, ToolInputSchema, ConfigField, ToolExecutionContext, PendingQuestion, PendingResponse, UserQuestion, UserQuestionType } from "./tools/types.js";
 export { isUiWidget, userQuestionOptionLabel } from "./types/ui-widget.js";
 export type { UiWidget, UiWidgetType, UserQuestionOption } from "./types/ui-widget.js";
@@ -137,10 +147,63 @@ export type {
 export type * from "./memory/user-memory-types.js";
 export { USER_MEMORY_SUBSYSTEMS, isUserMemorySubsystem } from "./memory/index.js";
 export {
+  SHORTLIST_TOP_K,
+  SUGGEST_BUDGET_MS,
+  SELECTION_THRESHOLDS,
+  BUILTIN_RULE_TABLE,
+  selectionThreshold,
+  namedItemConfidence,
+  applySkillThresholds,
+  applyKnowledgeThresholds,
+  applySubagentThresholds,
+  applyBuiltinThresholds,
+  applyMcpThresholds,
+} from "./selection-thresholds.js";
+export type {
+  HubPickKind,
+  JudgedPick,
+  HubJudgement,
+  AppliedHubResult,
+} from "./selection-thresholds.js";
+export {
   ClawSseParser,
+  SseParser,
   KEEPALIVE_FRAME,
   frameSseEvent,
 } from "./stream/events.js";
+export {
+  ensurePromptContract,
+  isReadOnlyMode,
+} from "./agent-prompt-contract.js";
+export {
+  DRAFT_HISTORY_TURNS,
+  DRAFT_HISTORY_TURN_CHARS,
+  frameDraftEvent,
+} from "./stream/agent-draft-events.js";
+export type {
+  AgentDraftBody,
+  DraftActivity,
+  DraftQuestion,
+  DraftSuggestion,
+  AgentDraftEvent,
+  AgentDraftRequest,
+  AgentDraftCanvas,
+  ClawDraftRequest,
+  DraftCatalog,
+  DraftCapabilityRef,
+  DraftCapabilityRemoval,
+  DraftErrorCode,
+  DraftField,
+  DraftHub,
+  DraftMode,
+  DraftPick,
+  DraftSchedule,
+  DraftCustomProperty,
+  DraftPropertyOp,
+  DraftPropertyType,
+  DraftTimings,
+  DraftToolPlan,
+} from "./stream/agent-draft-events.js";
 export type {
   ClawStreamEvent,
   ClawStreamEventName,
@@ -187,3 +250,11 @@ export {
   videoFileExtension,
 } from "./attachment-types.js";
 export type { AttachmentFamily, InboundAttachmentFamily } from "./attachment-types.js";
+export { validateSystemOneRequest, clipForQuestion, SYSTEM_ONE_LIMITS } from "./system-one.js";
+export type {
+  SystemOneQuestion,
+  SystemOneAnswer,
+  SystemOneRequest,
+  SystemOneLimits,
+  SystemOneValidation,
+} from "./system-one.js";

@@ -3,6 +3,7 @@ import { useMutation } from '@tanstack/react-query';
 import { ClawApiError } from '@/services/claw/clawRequest';
 import { suggestTools } from '@/services/claw/clawToolsService';
 import type { ToolSuggestion } from '@/services/claw/clawToolsTypes';
+import { withSuggestedPicks } from '../../primitives/suggestionMatch';
 import type { SubagentCatalogEntry } from './subagentCatalog';
 
 export interface SubagentSuggestions {
@@ -25,7 +26,12 @@ function resolveSuggestion(
 
 function describeError(error: Error | null): string | null {
   if (!error) return null;
-  if (error instanceof ClawApiError && error.status >= 500) return 'the suggestion service is busy';
+  if (error instanceof ClawApiError && error.status >= 500) {
+    return 'No suggestions — browse to pick manually';
+  }
+  if (/timed out|abort/i.test(error.message)) {
+    return 'No suggestions — browse to pick manually';
+  }
   return error.message;
 }
 
@@ -50,11 +56,12 @@ export function useSubagentSuggestions(
     mutate({
       systemPrompt: systemPrompt || undefined,
       description: systemPrompt ? undefined : description || undefined,
+      emptyHubs: ['subagent'],
     });
   }, [canRun, isPending, mutate, systemPrompt, description]);
 
   const suggested = useMemo(
-    () => resolveSuggestion(mutation.data, catalog),
+    () => resolveSuggestion(withSuggestedPicks(mutation.data), catalog),
     [mutation.data, catalog],
   );
 

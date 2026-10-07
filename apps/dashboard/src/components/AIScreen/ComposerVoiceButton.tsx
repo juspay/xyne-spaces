@@ -1,4 +1,11 @@
-import { useCallback, useEffect, useRef, useState, type ReactElement } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type CSSProperties,
+  type ReactElement,
+} from 'react';
 import { Mic, Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { voiceInputService } from '../../services/VoiceInput/voiceInputService';
@@ -9,6 +16,8 @@ interface ComposerVoiceButtonProps {
   onStateChange?: (state: { isRecording: boolean; isTranscribing: boolean }) => void;
   disabled?: boolean;
   className?: string;
+  icon?: ReactElement;
+  style?: CSSProperties;
 }
 
 /**
@@ -23,6 +32,8 @@ export function ComposerVoiceButton({
   onStateChange,
   disabled = false,
   className,
+  icon,
+  style,
 }: ComposerVoiceButtonProps): ReactElement {
   const [isRecording, setIsRecording] = useState(false);
   const [isTranscribing, setIsTranscribing] = useState(false);
@@ -140,6 +151,7 @@ export function ComposerVoiceButton({
       disabled={disabled || isTranscribing}
       aria-label={isRecording ? 'Stop voice input' : 'Start voice input'}
       title={isTranscribing ? 'Transcribing…' : isRecording ? 'Stop voice input' : 'Voice input'}
+      style={style}
       className={cn(
         'inline-flex h-8 w-8 items-center justify-center rounded-full transition',
         isRecording
@@ -154,7 +166,7 @@ export function ComposerVoiceButton({
       {isTranscribing ? (
         <Loader2 className='h-4 w-4 animate-spin' aria-hidden />
       ) : (
-        <Mic className='h-4 w-4' aria-hidden strokeWidth={1.75} />
+        (icon ?? <Mic className='h-4 w-4' aria-hidden strokeWidth={1.75} />)
       )}
     </button>
   );
