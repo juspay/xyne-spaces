@@ -235,6 +235,7 @@ export const V1_MAPPER: Readonly<Record<string, V1Target>> = {
   'collections.delete': { kind: 'mutator', name: 'collection.deleteCollection' },
   'collections.createFolder': { kind: 'mutator', name: 'collection.createFolder' },
   'collections.renameItem': { kind: 'mutator', name: 'collection.renameItem' },
+  'collections.updateRemark': { kind: 'mutator', name: 'collection.updateRemark' },
   'collections.deleteItem': { kind: 'mutator', name: 'collection.deleteItem' },
   'collections.grantPermission': { kind: 'mutator', name: 'collection.grantPermission' },
   'collections.revokePermission': { kind: 'mutator', name: 'collection.revokePermission' },

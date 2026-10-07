@@ -11,6 +11,11 @@ interface EntryGridV2Props {
    *  Same predicate applies as `onDelete`: passing a handler enables it
    *  for the entry. */
   onRename?: (entry: CollectionChild) => void;
+  /** Opens the remark editor — only rendered on collection / folder cards. */
+  onEditRemark?: (entry: CollectionChild) => void;
+  /** Per-entry gate for the remark action (e.g. hide it on collections the
+   *  viewer can only read). Defaults to allowed. */
+  canEditRemark?: (entry: CollectionChild) => boolean;
   /** Surfaces a hover-revealed share button on every card, folder or file.
    *  At root this opens the full collection access-management dialog;
    *  inside a collection it opens a copy-link-only dialog. */
@@ -66,6 +71,8 @@ export const EntryGridV2: React.FC<EntryGridV2Props> = ({
   onOpen,
   onDelete,
   onRename,
+  onEditRemark,
+  canEditRemark,
   onShare,
   onAskAI,
   editingId,
@@ -123,6 +130,11 @@ export const EntryGridV2: React.FC<EntryGridV2Props> = ({
                       {...(folderCaption ? { caption: folderCaption(e) } : {})}
                       onDelete={onDelete ? () => onDelete(e) : undefined}
                       onRename={onRename ? () => onRename(e) : undefined}
+                      onEditRemark={
+                        onEditRemark && (canEditRemark?.(e) ?? true)
+                          ? () => onEditRemark(e)
+                          : undefined
+                      }
                       onShare={onShare ? () => onShare(e) : undefined}
                       onAskAI={onAskAI ? () => onAskAI(e) : undefined}
                       onOpenStatus={onOpenStatus}

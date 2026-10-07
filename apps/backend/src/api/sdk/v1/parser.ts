@@ -552,6 +552,9 @@ export const V1_PARSERS: Readonly<Record<string, V1Parser>> = {
   'collections.renameItem': (args): V1Parsed => ({
     args: { ...args, timestamp: now() },
   }),
+  'collections.updateRemark': (args): V1Parsed => ({
+    args: { ...args, timestamp: now() },
+  }),
   'collections.deleteItem': (args): V1Parsed => ({
     args: { ...args, timestamp: now() },
   }),

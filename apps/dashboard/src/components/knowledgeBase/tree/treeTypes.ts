@@ -25,6 +25,8 @@ export interface CollectionTreeNode {
   size: number;
   updatedAt: string;
   mimeType: string;
+  /** Remark on a FOLDER node (collections.description). Unset for files. */
+  description?: string | null;
   childrenIds: string[];
   isLoaded: boolean;
   isLoading: boolean;

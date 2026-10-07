@@ -3,7 +3,7 @@ import { useVirtualizer } from '@tanstack/react-virtual';
 import { CollectionChild } from '../../../services/Knowledge/collectionService';
 import { StatusBadgeV2 } from './StatusBadgeV2';
 import { IngestStatusV2 } from './IngestStatusV2';
-import { Folder, Pencil, Share2, Trash2 } from 'lucide-react';
+import { Folder, MessageSquareText, Pencil, Share2, Trash2 } from 'lucide-react';
 import { useInlineEdit } from './useInlineEdit';
 import { XyneAIStar } from '../../icons/xyne-ai';
 import { CollectionStatusBadgeV2 } from './CollectionStatusBadgeV2';
@@ -24,6 +24,11 @@ interface EntryListV2Props {
   onOpen: (entry: CollectionChild) => void;
   onDelete?: (entry: CollectionChild) => void;
   onRename?: (entry: CollectionChild) => void;
+  /** Opens the remark editor — only rendered on collection / folder rows. */
+  onEditRemark?: (entry: CollectionChild) => void;
+  /** Per-entry gate for the remark action (e.g. hide it on collections the
+   *  viewer can only read). Defaults to allowed. */
+  canEditRemark?: (entry: CollectionChild) => boolean;
   /** When provided, every row renders a Share button. At root this opens
    *  the full collection access-management dialog; inside a collection it
    *  opens a copy-link-only dialog for the folder/file. */
@@ -82,6 +87,8 @@ export const EntryListV2: React.FC<EntryListV2Props> = ({
   onOpen,
   onDelete,
   onRename,
+  onEditRemark,
+  canEditRemark,
   onShare,
   onAskAI,
   onOpenStatus,
@@ -95,7 +102,11 @@ export const EntryListV2: React.FC<EntryListV2Props> = ({
   // grid columns don't shift between rows with/without actions. Each button
   // is 36 px wide.
   const actionCount =
-    (onAskAI ? 1 : 0) + (onShare ? 1 : 0) + (onRename ? 1 : 0) + (onDelete ? 1 : 0);
+    (onAskAI ? 1 : 0) +
+    (onShare ? 1 : 0) +
+    (onRename ? 1 : 0) +
+    (onEditRemark ? 1 : 0) +
+    (onDelete ? 1 : 0);
   const actionsWidth = actionCount > 0 ? `${String(actionCount * 36)}px` : null;
   const template = [
     '1fr',
@@ -263,8 +274,19 @@ export const EntryListV2: React.FC<EntryListV2Props> = ({
                           </span>
                         )}
                       </span>
-                      <span className='min-w-0 flex-1 truncate text-[13.5px] font-medium text-foreground'>
-                        {e.name}
+                      <span className='flex min-w-0 flex-1 flex-col'>
+                        <span className='truncate text-[13.5px] font-medium text-foreground'>
+                          {e.name}
+                        </span>
+                        {e.type === 'FOLDER' && e.description ? (
+                          <span
+                            className='truncate text-[11.5px] text-muted-foreground'
+                            title={e.description}
+                            data-testid='kb-folder-remark'
+                          >
+                            {e.description}
+                          </span>
+                        ) : null}
                       </span>
                       {e.type === 'FILE' ? <IngestStatusV2 status={e.ingestionStatus} /> : null}
                     </div>
@@ -338,6 +360,24 @@ export const EntryListV2: React.FC<EntryListV2Props> = ({
                       >
                         <Pencil className='h-3.5 w-3.5' strokeWidth={1.75} />
                       </button>
+                    ) : null}
+                    {onEditRemark && e.type === 'FOLDER' && (canEditRemark?.(e) ?? true) ? (
+                      <button
+                        type='button'
+                        aria-label={`Edit remark for ${e.name}`}
+                        title='Edit remark'
+                        onClick={ev => {
+                          ev.stopPropagation();
+                          onEditRemark(e);
+                        }}
+                        className='grid h-7 w-7 place-items-center rounded-md text-muted-foreground opacity-0 transition group-hover:opacity-100 hover:bg-muted hover:text-foreground focus-visible:opacity-100'
+                        data-track-category='knowledge-base'
+                        data-track-name='edit-remark-entry'
+                      >
+                        <MessageSquareText className='h-3.5 w-3.5' strokeWidth={1.75} />
+                      </button>
+                    ) : onEditRemark ? (
+                      <span className='h-7 w-7' aria-hidden />
                     ) : null}
                     {onDelete ? (
                       <button

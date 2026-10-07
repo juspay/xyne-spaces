@@ -61,6 +61,7 @@ import { StatusBadgeV2 } from '../../components/knowledgeBaseV2/components/Statu
 import { CrumbsV2 } from '../../components/knowledgeBaseV2/components/CrumbsV2';
 import { resolveKbBasePath } from './utils/kbRoutePaths';
 import { NameDialogV2 } from '../../components/knowledgeBaseV2/components/NameDialogV2';
+import { RemarkDialogV2 } from '../../components/knowledgeBaseV2/components/RemarkDialogV2';
 import { toast } from 'sonner';
 import { useGlobalCollections } from './hooks/useGlobalCollections';
 import { xyneAIActor } from '../../machines/xyneAIMachine';
@@ -249,6 +250,8 @@ export const KnowledgeBaseV2Screen: React.FC = () => {
   // pre-fill and route the mutation to the right mutator (collection vs.
   // collection_item) after the user submits.
   const [renameTarget, setRenameTarget] = useState<CollectionChild | null>(null);
+  // Collection / folder whose remark is being edited (RemarkDialogV2).
+  const [remarkTarget, setRemarkTarget] = useState<CollectionChild | null>(null);
   // Open share target. ShareCollectionModal reads role+canShare off of the
   // `activeCollection` machine slot, so opening the modal also seeds that
   // slot from the chosen card and we restore it on close.
@@ -385,6 +388,7 @@ export const KnowledgeBaseV2Screen: React.FC = () => {
         fileTotal: c.fileTotal,
         fileIngested: c.fileIngested,
         fileFailed: c.fileFailed,
+        description: c.description ?? null,
       }));
     }
 
@@ -403,6 +407,7 @@ export const KnowledgeBaseV2Screen: React.FC = () => {
           ingestionStatus: node.uploadStatus,
           mimeType: node.mimeType ?? '',
           parentId: node.parentId,
+          ...(node.type === 'FOLDER' ? { description: node.description ?? null } : {}),
         };
         // Give subfolders the same rolled-up status badge as root collections.
         if (node.type === 'FOLDER') {
@@ -657,7 +662,7 @@ export const KnowledgeBaseV2Screen: React.FC = () => {
   );
 
   // ── Mutations ─────────────────────────────────────────────────────────
-  const submitNewFolder = async (name: string): Promise<void> => {
+  const submitNewFolder = async (name: string, remark?: string): Promise<void> => {
     if (!collectionId) return;
     if (!user) {
       toast.error('You must be logged in');
@@ -680,6 +685,7 @@ export const KnowledgeBaseV2Screen: React.FC = () => {
           id,
           parentId,
           name,
+          ...(remark ? { description: remark } : {}),
           timestamp,
         }),
       ).server;
@@ -813,6 +819,56 @@ export const KnowledgeBaseV2Screen: React.FC = () => {
       toast.error(msg);
     }
   };
+
+  // ── Remark ───────────────────────────────────────────────────────────
+  // Remarks are free-text notes on collections (KB root) and folders
+  // (inside a collection), stored in collections.description. Editing needs
+  // EDITOR+ on the root collection — the same bar as creating folders — and
+  // is enforced server-side by `collection.updateRemark`.
+  const canEditRemarkOf = (entry: CollectionChild): boolean => {
+    if (entry.type !== 'FOLDER') return false;
+    if (isAtRoot) {
+      const role = globalCollections.byId(entry.id)?.role;
+      return role === 'OWNER' || role === 'EDITOR';
+    }
+    return canEdit;
+  };
+
+  const onEditRemark = (entry: CollectionChild): void => {
+    if (!canEditRemarkOf(entry)) {
+      toast.error("You don't have permission to edit this remark");
+      return;
+    }
+    setRemarkTarget(entry);
+  };
+
+  const submitRemark = async (remark: string): Promise<void> => {
+    if (!remarkTarget) return;
+    const serverRes = await zero.mutate(
+      mutators.collection.updateRemark({
+        id: remarkTarget.id,
+        remark: remark === '' ? null : remark,
+        timestamp: Date.now(),
+      }),
+    ).server;
+    if (serverRes.type === 'error') {
+      const msg = serverRes.error.message || 'Failed to save remark';
+      toast.error(msg);
+      throw new Error(msg);
+    }
+    toast.success(remark === '' ? 'Remark removed' : 'Remark saved');
+    setRemarkTarget(null);
+  };
+
+  // Remark of the collection / folder currently open, shown under the
+  // breadcrumb so it stays visible while browsing its contents.
+  const currentRemark: string | null = isAtRoot
+    ? null
+    : spParentId
+      ? (nodes[spParentId]?.description ?? null)
+      : collectionId
+        ? (globalCollections.byId(collectionId)?.description ?? null)
+        : null;
 
   // ── Rename ───────────────────────────────────────────────────────────
   // Inline rename, mirroring xyne-search's InlineRenameField. Clicking the
@@ -1406,6 +1462,7 @@ export const KnowledgeBaseV2Screen: React.FC = () => {
                   onRename,
                 }
               : {})}
+            {...(isAtRoot || canEdit ? { onEditRemark, canEditRemark: canEditRemarkOf } : {})}
             editingId={renameTarget?.id ?? null}
             onRenameCommit={onRenameCommit}
             onRenameCancel={onRenameCancel}
@@ -1428,6 +1485,7 @@ export const KnowledgeBaseV2Screen: React.FC = () => {
                   onRename,
                 }
               : {})}
+            {...(isAtRoot || canEdit ? { onEditRemark, canEditRemark: canEditRemarkOf } : {})}
             editingId={renameTarget?.id ?? null}
             onRenameCommit={onRenameCommit}
             onRenameCancel={onRenameCancel}
@@ -1465,6 +1523,14 @@ export const KnowledgeBaseV2Screen: React.FC = () => {
     >
       {header}
       {breadcrumbRow}
+      {currentRemark ? (
+        <p
+          className='-mt-1 whitespace-pre-line break-words px-5 pb-2 text-[12.5px] text-muted-foreground'
+          data-testid='kb-current-remark'
+        >
+          {currentRemark}
+        </p>
+      ) : null}
       {mainContent}
 
       <NameDialogV2
@@ -1479,8 +1545,17 @@ export const KnowledgeBaseV2Screen: React.FC = () => {
         placeholder='e.g. Drafts'
         helper='Up to 255 characters.'
         submitLabel='Create folder'
+        withRemark
         onSubmit={submitNewFolder}
         onClose={() => setDialog(null)}
+      />
+
+      <RemarkDialogV2
+        open={remarkTarget !== null}
+        targetName={remarkTarget?.name ?? ''}
+        initialValue={remarkTarget?.description ?? null}
+        onSubmit={submitRemark}
+        onClose={() => setRemarkTarget(null)}
       />
 
       <CreateCollectionModal
