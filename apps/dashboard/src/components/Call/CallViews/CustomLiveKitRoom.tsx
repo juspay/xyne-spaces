@@ -65,39 +65,39 @@ export function CustomLiveKitRoom({
   const isSavingWhiteboardRef = useRef(false);
 
   // Subscribe to room state from global XState machine using a single snapshot
-  const snapshot = useSelector(roomActor, state => state);
+  // Narrow per-field subscriptions: the component re-renders only when a field it
+  // actually uses changes identity, not on every roomActor context assign.
+  // (Was: one whole-snapshot useSelector(roomActor, state => state).)
   const { isMobile } = usePlatform();
   const { user } = useAuth();
 
   // Extract values from snapshot
-  const {
-    participants,
-    connectionState,
-    isAIAssistantEnabled,
-    transcriptionAgentLeft,
-    isTranscriptionEnabled,
-    transcriptionToggleNotice,
-    transcriptionPending,
-    aiController,
-    pendingControlRequest,
-    isAiControlRequested,
-    viewMode: machineViewMode,
-    roomLink,
-    channelId,
-    isChatOpen,
-    room,
-    activeCalls,
-    inviteDialogOpen,
-    inviteUsers,
-    inviteSuggestedMessage,
-    ticketDialogOpen,
-    ticketTitle,
-    ticketDescription,
-    ticketBoardId,
-    isNativeMode,
-    isCallChatOpen,
-    unreadCallChatCount,
-  } = snapshot.context;
+  const participants = useSelector(roomActor, state => state.context.participants);
+  const connectionState = useSelector(roomActor, state => state.context.connectionState);
+  const isAIAssistantEnabled = useSelector(roomActor, state => state.context.isAIAssistantEnabled);
+  const transcriptionAgentLeft = useSelector(roomActor, state => state.context.transcriptionAgentLeft);
+  const isTranscriptionEnabled = useSelector(roomActor, state => state.context.isTranscriptionEnabled);
+  const transcriptionToggleNotice = useSelector(roomActor, state => state.context.transcriptionToggleNotice);
+  const transcriptionPending = useSelector(roomActor, state => state.context.transcriptionPending);
+  const aiController = useSelector(roomActor, state => state.context.aiController);
+  const pendingControlRequest = useSelector(roomActor, state => state.context.pendingControlRequest);
+  const isAiControlRequested = useSelector(roomActor, state => state.context.isAiControlRequested);
+  const roomLink = useSelector(roomActor, state => state.context.roomLink);
+  const channelId = useSelector(roomActor, state => state.context.channelId);
+  const isChatOpen = useSelector(roomActor, state => state.context.isChatOpen);
+  const room = useSelector(roomActor, state => state.context.room);
+  const activeCalls = useSelector(roomActor, state => state.context.activeCalls);
+  const inviteDialogOpen = useSelector(roomActor, state => state.context.inviteDialogOpen);
+  const inviteUsers = useSelector(roomActor, state => state.context.inviteUsers);
+  const inviteSuggestedMessage = useSelector(roomActor, state => state.context.inviteSuggestedMessage);
+  const ticketDialogOpen = useSelector(roomActor, state => state.context.ticketDialogOpen);
+  const ticketTitle = useSelector(roomActor, state => state.context.ticketTitle);
+  const ticketDescription = useSelector(roomActor, state => state.context.ticketDescription);
+  const ticketBoardId = useSelector(roomActor, state => state.context.ticketBoardId);
+  const isNativeMode = useSelector(roomActor, state => state.context.isNativeMode);
+  const isCallChatOpen = useSelector(roomActor, state => state.context.isCallChatOpen);
+  const unreadCallChatCount = useSelector(roomActor, state => state.context.unreadCallChatCount);
+  const machineViewMode = useSelector(roomActor, state => state.context.viewMode);
 
   // Hand raise state, synced over the data channel. Lifted here (always mounted for
   // the call) so it persists and keeps receiving across mini/PIP <-> full view switches.
@@ -131,17 +131,21 @@ export function CustomLiveKitRoom({
 
   // Determine simple machine state string for child components
   // Handle nested states like { connected: 'nativeMode' }
-  const machineState = snapshot.matches('connected')
-    ? 'connected'
-    : snapshot.matches('connecting')
-      ? 'connecting'
-      : snapshot.matches('initiating')
-        ? 'initiating'
-        : snapshot.matches('joining')
-          ? 'joining'
-          : snapshot.matches('disconnecting')
-            ? 'disconnecting'
-            : 'idle';
+  const machineState = useSelector(
+    roomActor,
+    state =>
+      state.matches('connected')
+        ? 'connected'
+        : state.matches('connecting')
+          ? 'connecting'
+          : state.matches('initiating')
+            ? 'initiating'
+            : state.matches('joining')
+              ? 'joining'
+              : state.matches('disconnecting')
+                ? 'disconnecting'
+                : 'idle',
+  );
 
   const activeCall = useMemo(
     () => findActiveCall(activeCalls, externalId),

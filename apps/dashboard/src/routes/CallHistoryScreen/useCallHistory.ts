@@ -330,12 +330,14 @@ export function useCallHistory(
   }, [recentCalls, userId]);
 
   // Check if user is currently in any call
-  const roomSnapshot = useSelector(roomActor, state => state);
-  const isInCall =
-    roomSnapshot.matches('initiating') ||
-    roomSnapshot.matches('joining') ||
-    roomSnapshot.matches('connecting') ||
-    roomSnapshot.matches('connected');
+  const isInCall = useSelector(
+    roomActor,
+    state =>
+      state.matches('initiating') ||
+      state.matches('joining') ||
+      state.matches('connecting') ||
+      state.matches('connected'),
+  );
   const currentCallId = useSelector(roomActor, state => state.context.callId);
 
   // Get active calls to check if channel has ongoing call

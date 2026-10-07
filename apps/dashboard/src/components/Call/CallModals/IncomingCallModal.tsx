@@ -55,12 +55,14 @@ export function IncomingCallModal(): React.ReactElement | null {
 
   // Check if user is currently in an active call (reactive)
   const roomState = useSelector(roomActor, state => state.value);
-  const roomSnapshot = useSelector(roomActor, state => state);
-  const isInActiveCall =
-    roomSnapshot.matches('initiating') ||
-    roomSnapshot.matches('joining') ||
-    roomSnapshot.matches('connecting') ||
-    roomSnapshot.matches('connected');
+  const isInActiveCall = useSelector(
+    roomActor,
+    state =>
+      state.matches('initiating') ||
+      state.matches('joining') ||
+      state.matches('connecting') ||
+      state.matches('connected'),
+  );
 
   // Only allow incoming call notifications in stable states (idle or connected)
   const canShowIncomingCalls =

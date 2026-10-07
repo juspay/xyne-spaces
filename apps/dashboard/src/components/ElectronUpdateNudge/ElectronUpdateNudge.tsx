@@ -187,17 +187,23 @@ export const ElectronUpdateNudge = (): ReactElement | null => {
   const [updateNudgeSlot, setUpdateNudgeSlot] = useState<HTMLElement | null>(null);
   const applyingRef = useRef(false);
   const { isTyping, isTypingNow } = useRecentTyping();
-  const roomState = useSelector(roomActor, state => state);
-  const callState = useSelector(callActor, state => state);
-  const callBlocking =
-    callState.matches('ringing') ||
-    callState.matches('accepting') ||
-    callState.matches('switching') ||
-    roomState.matches('initiating') ||
-    roomState.matches('joining') ||
-    roomState.matches('connecting') ||
-    roomState.matches('connected') ||
-    roomState.matches('disconnecting');
+  const isRoomBusy = useSelector(
+    roomActor,
+    state =>
+      state.matches('initiating') ||
+      state.matches('joining') ||
+      state.matches('connecting') ||
+      state.matches('connected') ||
+      state.matches('disconnecting'),
+  );
+  const isCallBusy = useSelector(
+    callActor,
+    state =>
+      state.matches('ringing') ||
+      state.matches('accepting') ||
+      state.matches('switching'),
+  );
+  const callBlocking = isCallBusy || isRoomBusy;
   const activationBlocked = callBlocking || isTyping || !updateNudgeSlot;
 
   useEffect(() => {
