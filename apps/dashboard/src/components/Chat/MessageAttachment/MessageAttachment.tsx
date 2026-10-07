@@ -57,6 +57,7 @@ import { CopyCopied, CopyDefault } from '@xyne/icons';
 import { useClipboard } from '../../../hooks/useClipboard';
 import { cn } from '../../../utils/classNames';
 import { useSelector } from '@xstate/react';
+import { useInlineVideoModalState } from './useInlineVideoModalState';
 import {
   attachmentViewerActor,
   AttachmentViewerState,
@@ -904,14 +905,7 @@ const InlineVideoPlayer: React.FC<{
   const [pendingVideoTime, setPendingVideoTime] = useState<number | undefined>(undefined);
 
   // check if the video is open in modal
-  const { isOpenInModal, modalVideoTime } = useSelector(
-    attachmentViewerActor,
-    (s: AttachmentViewerState) => {
-      const current = s.context.attachments[s.context.currentIndex];
-      const isOpen = s.value !== 'closed' && current?.attachmentId === attachmentId;
-      return { isOpenInModal: isOpen, modalVideoTime: s.context.currentVideoTime };
-    },
-  );
+  const { isOpenInModal, readModalVideoTime } = useInlineVideoModalState(attachmentId);
 
   // Pause inline player when modal opens for THIS video.
   // Resume from the exact modal time only when THIS video's modal closes.
@@ -926,6 +920,7 @@ const InlineVideoPlayer: React.FC<{
     } else if (wasOpenInModalRef.current) {
       // Only runs when transitioning open→closed for THIS video
       wasOpenInModalRef.current = false;
+      const modalVideoTime = readModalVideoTime();
       if (modalVideoTime !== undefined) {
         if (videoRef.current) {
           // Inline video is already mounted, resume from modal time
@@ -941,7 +936,7 @@ const InlineVideoPlayer: React.FC<{
         }
       }
     }
-  }, [isOpenInModal, modalVideoTime]);
+  }, [isOpenInModal, readModalVideoTime]);
 
   const { canDelete, handleDelete } = useAttachmentDelete(attachmentId, fileName, uploadedBy);
 
