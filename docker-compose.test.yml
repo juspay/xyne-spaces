@@ -14,7 +14,13 @@ services:
     env_file:
       - ./apps/backend/.env.test
     restart: "no"
-    command: sh -c "pnpm run db:push && pnpm exec prisma db push --schema prisma-common/schema.prisma --accept-data-loss --skip-generate && pnpm exec prisma db execute --file prisma/migrations/20251127175400_add_ticket_xyne_id_sequence/migration.sql --schema prisma/schema.prisma"
+    # Pre-seed essential ACL resources (USER-GROUPS, TICKETS, etc.) after
+    # db:push so admin test users get granted access on first login — without
+    # this, testAuthController's grant loop can race under parallel Gauge
+    # workers and leave admin-1 without USER-GROUPS, hiding /user-groups
+    # from the sidebar entirely (nav-user-groups + more-user-groups + the
+    # Customize Add button all absent → navigation test times out).
+    command: sh -c "pnpm run db:push && pnpm exec prisma db push --schema prisma-common/schema.prisma --accept-data-loss --skip-generate && pnpm exec prisma db execute --file prisma/migrations/20251127175400_add_ticket_xyne_id_sequence/migration.sql --schema prisma/schema.prisma && pnpm exec tsx scripts/seed-acl.ts"
     depends_on:
       postgres:
         condition: service_healthy

@@ -440,9 +440,31 @@ export default class BrowserSteps {
         // Not in More popover — add via Customize and continue.
       }
       await addItemViaCustomizeToolbar(page, itemId);
-      // After the dialog closes the item moves into the user's toolbarIds and
-      // renders on the rail — wait for that render before resolving its href.
-      await toolbarItem.waitFor({ state: 'visible', timeout: SIDEBAR_NAVIGATION_TIMEOUT_MS });
+      // After the dialog closes the item is in the user's toolbarIds. It may
+      // render on the rail directly, OR overflow back into the More popover
+      // when the rail is already full. Try the rail first (short wait); if it
+      // doesn't appear there, re-open More and click from the popover.
+      const railAfterAdd = await toolbarItem
+        .waitFor({ state: 'visible', timeout: 2500 })
+        .then(() => true)
+        .catch(() => false);
+      if (!railAfterAdd) {
+        await moreTrigger.click();
+        const moreItemAfterAdd = page.locator(`[data-testid='more-${itemId}']`).first();
+        await moreItemAfterAdd.waitFor({
+          state: 'attached',
+          timeout: SIDEBAR_NAVIGATION_TIMEOUT_MS,
+        });
+        await moreItemAfterAdd.scrollIntoViewIfNeeded().catch(() => {});
+        await moreItemAfterAdd.waitFor({
+          state: 'visible',
+          timeout: SIDEBAR_NAVIGATION_TIMEOUT_MS,
+        });
+        const moreExpectedPathAfterAdd = await getSidebarDestinationPath(page, moreItemAfterAdd);
+        await moreItemAfterAdd.click();
+        await waitForPath(page, moreExpectedPathAfterAdd);
+        return;
+      }
     }
 
     const expectedPath = await getSidebarDestinationPath(page, toolbarItem);
