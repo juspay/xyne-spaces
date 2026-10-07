@@ -40,7 +40,7 @@ export function createOrUpdateTx(existingCanvas: any, title: string, report: Rel
           role: CanvasRole.VIEWER,
           joinedAt: now,
           updatedAt: now,
-          ...(existingConnectId ? { connectId: existingConnectId } : {}),
+          ...(existingConnectId ? { canvasConnectId: existingConnectId } : {}),
         },
         update: {
           role: CanvasRole.VIEWER,

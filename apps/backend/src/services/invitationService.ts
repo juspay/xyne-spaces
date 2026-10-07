@@ -577,7 +577,7 @@ export class InvitationService {
           userId,
           workspaceId,
           role: CanvasRole.VIEWER,
-          ...(canvasConnectId ? { connectId: canvasConnectId } : {}),
+          ...(canvasConnectId ? { canvasConnectId } : {}),
         },
       });
       return `/${workspaceId}/chat/canvas/${entityId}`;

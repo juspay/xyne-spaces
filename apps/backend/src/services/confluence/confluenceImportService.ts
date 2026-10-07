@@ -1293,7 +1293,7 @@ export class ConfluenceImportService {
           joinedAt: new Date(),
           updatedAt: new Date(),
           workspaceId,
-          connectId,
+          canvasConnectId: connectId,
         })),
         skipDuplicates: true,
       }),
