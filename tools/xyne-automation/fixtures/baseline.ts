@@ -839,7 +839,10 @@ export async function bootstrapBaselineFixture(): Promise<void> {
           path: path.resolve(artifactDir, 'baseline-failure.png'),
           fullPage: true,
         });
-        const body = await page.locator('body').innerText().catch(() => '');
+        const body = await page
+          .locator('body')
+          .innerText()
+          .catch(() => '');
         baselineLogger.error(
           `Baseline bootstrap failed at ${page.url()}. Body(0..300): ${body.slice(0, 300)}`
         );
