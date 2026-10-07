@@ -27,6 +27,8 @@ import { Platform,
   serializeLinkPreviewMd,
   parseLinkPreviewMd,
   serializeCallPreviewMd,
+  serializeXPostPreviewMd,
+  type XPostPreviewData,
   parseForwardedMessageXml,
   type MessagePreviewData,
   type TicketPreviewSnapshot,
@@ -47,6 +49,8 @@ import { ChannelRepository } from '@/database/repositories/channelRepository';
 import { InstalledAppsRepository } from '@/database/repositories/installedAppsRepository';
 import { extractInternalUrl, parseInternalUrl, extractFirstUrl, extractCallLink } from '@/utils/urlUtils';
 import { linkPreviewService, type ExternalLinkMetadata } from '@/services/linkPreviewService';
+import { parseXPostUrl, fetchXPost } from '@/services/xPostPreviewService';
+import { xPostTldrQueue, type XPostTldrJobData } from '@/queues/xPostTldrQueue';
 import { botCatalog } from '@/bots/unified/catalog/bot-catalog';
 import { extractBotMentions, executeBotForMention, CHAT_ENABLED_BOT_IDS } from '@/services/bots';
 import { getSlackRecipientEmails } from '@/utils/notificationHelper';
@@ -1159,10 +1163,90 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
         url,
       );
       if (resolvedBitbucket) return;
+
+      // 4) X (x.com / twitter.com) post — oEmbed text + optional background AI TLDR
+      const resolvedXPost = await this.resolveXPostPreview(messageId, conversationId, url);
+      if (resolvedXPost) return;
     }
 
-    // 4) Fall through to external OG-based preview
+    // 5) Fall through to external OG-based preview
     await this.resolveExternalLinkPreview(messageId, conversationId, contentWithoutMentions);
+  }
+
+  /**
+   * X post preview. Reads the post via the public oEmbed endpoint (no API key, no login) and
+   * writes an `x_post_preview` block. Long posts get `tldrStatus: pending` and a background
+   * TLDR job; short posts are their own TLDR (`skipped`).
+   *
+   * Returns false when the feature is off or oEmbed is unreachable, so the link degrades to
+   * the normal OG preview. A deleted/protected post is claimed with an "unavailable" card.
+   */
+  private async resolveXPostPreview(
+    messageId: string,
+    conversationId: string,
+    url: string,
+  ): Promise<boolean> {
+    if (!config.xPostTldr.enabled) return false;
+
+    const ref = parseXPostUrl(url);
+    if (!ref) return false;
+
+    logger.info('[MessagesSideEffect] Detected X post URL:', { url, postId: ref.postId });
+
+    const result = await fetchXPost(ref);
+
+    let preview: XPostPreviewData;
+    if (!result.ok) {
+      logger.warn('[MessagesSideEffect] metric=x_post_oembed_failure', {
+        postId: ref.postId,
+        reason: result.reason,
+        unavailable: result.unavailable,
+      });
+      if (!result.unavailable) return false; // transient — fall back to OG preview
+      preview = { url: ref.url, postId: ref.postId, tldrStatus: 'failed', unavailable: true };
+    } else {
+      const isLong = result.post.text.length >= config.xPostTldr.minChars;
+      preview = {
+        url: ref.url,
+        postId: ref.postId,
+        text: result.post.text,
+        tldrStatus: isLong ? 'pending' : 'skipped',
+        ...(result.post.author && { author: result.post.author }),
+        ...(result.post.authorUrl && { authorUrl: result.post.authorUrl }),
+      };
+    }
+
+    // Enqueue before writing: if the queue is unavailable we never show "Summarising…".
+    if (preview.tldrStatus === 'pending') {
+      const enqueued = await this.enqueueXPostTldr({ messageId, conversationId, postId: ref.postId });
+      if (!enqueued) preview = { ...preview, tldrStatus: 'skipped' };
+    }
+
+    const md = serializeXPostPreviewMd(preview);
+    if (!md) return false;
+
+    await withWorkspaceScope(() => db.message.update({
+      where: { messageId },
+      data: { link_preview_md: md },
+    }));
+
+    await this.syncConversationMessageMetadata(conversationId);
+
+    logger.info(`[MessagesSideEffect] Updated message ${messageId} with X post preview (tldr: ${preview.tldrStatus})`);
+    return true;
+  }
+
+  private async enqueueXPostTldr(data: XPostTldrJobData): Promise<boolean> {
+    try {
+      await xPostTldrQueue.initialize();
+      if (!xPostTldrQueue.isReady) return false;
+      // The worker re-reads the row, so a slight delay lets this write land first.
+      await xPostTldrQueue.getQueue().add('summarise', data, { delay: 500 });
+      return true;
+    } catch (error) {
+      logger.warn('[MessagesSideEffect] Failed to enqueue X post TLDR', { messageId: data.messageId, error });
+      return false;
+    }
   }
 
   /**

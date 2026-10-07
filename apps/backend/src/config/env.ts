@@ -122,6 +122,10 @@ const envSchema = Joi.object({
 
   DESK_TICKET_DEBUG: Joi.boolean().default(false),
   ENABLE_EMAIL_CLASSIFICATION_WORKER: Joi.boolean().default(false),
+  // X (x.com / twitter.com) post previews via public oEmbed + background AI TLDR.
+  ENABLE_X_POST_TLDR: Joi.boolean().default(false),
+  X_POST_TLDR_MIN_CHARS: Joi.number().integer().min(0).default(400),
+  X_POST_TLDR_MODEL: Joi.string().allow('').default(''),
   // One switch for the whole feature, read by both processes: the API gates
   // its producer on it, the worker gates its drain loop on it. A separate
   // worker flag only bought states that are a no-op or actively bad (enqueuing
@@ -820,6 +824,12 @@ export const config = {
   enableSocialMediaSyncWorker: envVars.ENABLE_SOCIAL_MEDIA_SYNC_WORKER,
   deskTicketDebug: envVars.DESK_TICKET_DEBUG as boolean,
   enableEmailClassificationWorker: envVars.ENABLE_EMAIL_CLASSIFICATION_WORKER,
+  xPostTldr: {
+    enabled: envVars.ENABLE_X_POST_TLDR as boolean,
+    minChars: envVars.X_POST_TLDR_MIN_CHARS as number,
+    /** Empty = fall back to DEFAULT_MODEL_NAME. */
+    model: envVars.X_POST_TLDR_MODEL as string,
+  },
   // Radar execution engine. Two switches: enqueue on message insert, and run
   // the drain worker. A gated window always goes to the parser and a valid
   // transition is always applied — there is no separate dry-run mode.

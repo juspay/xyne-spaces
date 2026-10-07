@@ -185,6 +185,7 @@ import { conversationIngestQueue } from '@/queues/conversationIngestQueue';
 import { documentIngestQueue } from '@/queues/documentIngestQueue';
 import { teamIntelligenceQueue } from '@/team-intelligence/queue';
 import { emailClassificationQueue } from '@/queues/emailClassificationQueue';
+import { xPostTldrQueue } from './queues/xPostTldrQueue';
 import { callTranscriptionQueue } from '@/queues/callTranscriptionQueue';
 import { autoDraftQueue } from '@/queues/autoDraftQueue';
 import { entityExtractionQueue } from '@/queues/entityExtractionQueue';
@@ -949,6 +950,11 @@ export class App {
           await emailClassificationQueue.initialize();
         })(),
         (async () => {
+          if (!config.xPostTldr.enabled) return;
+          logger.info('Initializing X post TLDR queue...');
+          await xPostTldrQueue.initialize();
+        })(),
+        (async () => {
           logger.info('Initializing call transcription queue...');
           callTranscriptionQueue.startConsumer();
         })(),
@@ -997,6 +1003,11 @@ export class App {
 
       logger.info('Initializing email classification queue...');
       await emailClassificationQueue.initialize();
+
+      if (config.xPostTldr.enabled) {
+        logger.info('Initializing X post TLDR queue...');
+        await xPostTldrQueue.initialize();
+      }
 
       // Ozonetel call-recording transcription (manual "Transcribe" button). The audio
       // work runs in the Python agent; this consumer only holds the Bull job while it
@@ -1241,6 +1252,9 @@ export class App {
 
       // Close email classification queue
       await emailClassificationQueue.close();
+
+      // Close X post TLDR queue
+      await xPostTldrQueue.close();
 
       // Close auto draft queue
       await autoDraftQueue.close();

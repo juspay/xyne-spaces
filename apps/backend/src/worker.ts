@@ -43,6 +43,7 @@ import { microsoftCalendarSyncQueue } from '@/queues/microsoftCalendarSyncQueue'
 import { callCalendarPushQueue } from '@/queues/callCalendarPushQueue';
 import { teamIntelligenceWorker } from '@/workers/teamIntelligenceWorker';
 import { emailClassificationWorker } from '@/workers/emailClassificationWorker';
+import { xPostTldrWorker } from './workers/xPostTldrWorker';
 import { emailClassificationQueue } from '@/queues/emailClassificationQueue';
 import { radarExecutionWorker } from '@/workers/radarExecutionWorker';
 import { autoDraftWorker } from '@/workers/autoDraftWorker';
@@ -336,6 +337,11 @@ class WorkerService {
         await emailClassificationWorker.start();
       }
 
+      if (appConfig.xPostTldr.enabled) {
+        logger.info('Starting X post TLDR worker...');
+        await xPostTldrWorker.start();
+      }
+
       if (appConfig.radar.enabled) {
         logger.info('Starting radar execution worker...');
         // Guarded, unlike its neighbours: an unguarded throw reaches the outer
@@ -546,6 +552,10 @@ class WorkerService {
 
       if (appConfig.enableEmailClassificationWorker) {
         await emailClassificationWorker.shutdown();
+      }
+
+      if (appConfig.xPostTldr.enabled) {
+        await xPostTldrWorker.shutdown();
       }
 
       if (appConfig.radar.enabled) {
