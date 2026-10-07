@@ -118,6 +118,69 @@ export async function setAppStoreAppConnection(
   );
 }
 
+/** Initiates Instagram Business OAuth — returns authorization URL for redirect. */
+export async function startInstagramOAuth(input: {
+  channelName: string;
+  projectId: string;
+  boardId?: string;
+  assigneeUserGroupId?: string;
+  visibility: 'PUBLIC' | 'PRIVATE';
+  platform: 'web' | 'electron';
+}): Promise<string> {
+  const response = await apiInstance.post<{ authorizationUrl: string }>(
+    '/integrations/social-media/instagram/oauth/start',
+    { name: input.channelName, ...input },
+  );
+  return response.data.authorizationUrl;
+}
+
+export async function disconnectInstagramDesk(channelId: string): Promise<void> {
+  await apiInstance.post(`/integrations/social-media/${channelId}/instagram/disconnect`);
+}
+
+export async function disconnectInstagramAccount(
+  channelId: string,
+  sourceId: string,
+): Promise<void> {
+  await apiInstance.post(
+    `/integrations/social-media/${channelId}/instagram/${sourceId}/disconnect`,
+  );
+}
+
+export async function reconnectInstagramAccount(
+  channelId: string,
+  sourceId: string,
+  platform: 'web' | 'electron',
+): Promise<string> {
+  const response = await apiInstance.post<{ authorizationUrl: string }>(
+    `/integrations/social-media/${channelId}/instagram/${sourceId}/reconnect`,
+    { platform },
+  );
+  return response.data.authorizationUrl;
+}
+
+export async function addInstagramAccount(
+  channelId: string,
+  platform: 'web' | 'electron',
+): Promise<string> {
+  const response = await apiInstance.post<{ authorizationUrl: string }>(
+    `/integrations/social-media/${channelId}/instagram/add-account`,
+    { platform },
+  );
+  return response.data.authorizationUrl;
+}
+
+export async function reconnectInstagramDesk(
+  channelId: string,
+  platform: 'web' | 'electron',
+): Promise<string> {
+  const response = await apiInstance.post<{ authorizationUrl: string }>(
+    `/integrations/social-media/${channelId}/instagram/reconnect`,
+    { platform },
+  );
+  return response.data.authorizationUrl;
+}
+
 /** Apple keys are rotated by pasting a new .p8, not by re-running a consent redirect. */
 export async function rotateAppStoreCredentials(
   channelId: string,

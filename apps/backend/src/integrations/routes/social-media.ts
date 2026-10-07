@@ -15,6 +15,7 @@ import {
 } from './social-media/access';
 import googlePlayRoutes from './social-media/google-play';
 import appStoreRoutes from './social-media/app-store';
+import instagramRoutes from './social-media/instagram';
 
 const TAG = '[SocialMediaRoutes]';
 const router = express.Router();
@@ -34,8 +35,10 @@ function parseBackfill(
 }
 
 router.use(express.json());
+router.use(express.urlencoded({ extended: false })); // needed for Meta data-deletion callbacks
 router.use(googlePlayRoutes);
 router.use(appStoreRoutes);
+router.use(instagramRoutes);
 
 router.post(
   '/:conversationId/reply',
