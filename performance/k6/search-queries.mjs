@@ -1,6 +1,6 @@
-// Read-only load for GET /api/vespaSearch/ — Wave 2's top item in
-// docs/performance-testing-priority-decision.md: the second-slowest endpoint group
-// (p95 ~2.0s) and the one whose cost is ACL-filtered retrieval rather than raw IO.
+// Read-only load for GET /api/vespaSearch/. The second-slowest endpoint group in
+// production (p95 ~2.0s across 555K requests over fourteen days), and the one whose cost
+// is ACL-filtered retrieval rather than raw IO.
 //
 // Pure data and functions only — no k6 globals — so the k6 scenario and the Node test
 // suite can both import it.

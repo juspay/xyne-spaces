@@ -10,8 +10,7 @@
 //   - No Postgres execution. The endpoint answers with compiled ASTs; rows reach clients
 //     over the Zero sync socket, which k6 does not touch here.
 //   - No push/mutation path, no Socket.IO or Redis fan-out, no unread recomputation, no
-//     message side effects. Those are the Wave-1 pipeline in
-//     docs/performance-testing-priority-decision.md and remain uncovered.
+//     message side effects. Those remain uncovered — see performance/README.md.
 //
 // Reads only, so a run leaves no rows behind and needs no fixture reset.
 
