@@ -20,6 +20,7 @@ import {
   LookupType,
   ReleaseTrackingMode,
   TicketPriority,
+  TicketReferenceRelation,
   TicketStatusV2,
   isFieldActive,
   orderFieldsWithBranchChildrenAfterParent,
@@ -59,6 +60,11 @@ import { apiInstance } from '../../../services/clients/apiClient';
 import { cn } from '../../../utils/classNames';
 import { mutators } from '../../../zero/mutators';
 import { surfaceMutationError } from '../../../utils/zeroMutationToast';
+import {
+  useDuplicateTicketCheck,
+  type DuplicateSuggestion,
+} from '../../../hooks/useDuplicateTicketCheck';
+import { DuplicateSuggestions } from './DuplicateSuggestions';
 import { queries } from '../../../zero/queries';
 import { SubTicketCountIcon } from '../../../assets/icons';
 import Avatar from '../../ui/Avatar/Avatar';
@@ -765,6 +771,48 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
       setBoardSelectorOpen(false);
     }
   }, [isOpen]);
+
+  const {
+    likely: likelyDuplicates,
+    similar: similarDuplicates,
+    checkId: duplicateCheckId,
+    duplicateCheck,
+    isCheckingDuplicate,
+    isDuplicateCheckInFlight,
+  } = useDuplicateTicketCheck({
+    title: formValues.title ?? '',
+    description: formValues.description ?? '',
+    projectId: selectedBoard?.projectId ?? '',
+    ...(formValues.boardId ? { boardId: formValues.boardId } : {}),
+    isOpen: isOpen && !isReleaseLine,
+  });
+  const duplicateProjectId = selectedBoard?.projectId ?? '';
+  const [duplicateChoice, setDuplicateChoice] = useState<{
+    suggestion: DuplicateSuggestion;
+    projectId: string;
+  } | null>(null);
+  const [duplicateNotSame, setDuplicateNotSame] = useState<ReadonlySet<string>>(() => new Set());
+  useEffect(() => {
+    if (!isOpen) {
+      setDuplicateChoice(null);
+      setDuplicateNotSame(new Set());
+    }
+  }, [isOpen]);
+  const duplicateSameAs =
+    duplicateChoice &&
+    duplicateChoice.projectId === duplicateProjectId &&
+    duplicateCheck?.candidates?.some(
+      candidate => candidate.id === duplicateChoice.suggestion.candidate.id,
+    )
+      ? duplicateChoice.suggestion
+      : null;
+  const duplicateDecisions =
+    duplicateSameAs || duplicateNotSame.size > 0
+      ? {
+          ...(duplicateSameAs ? { sameAs: duplicateSameAs.candidate.id } : {}),
+          ...(duplicateNotSame.size > 0 ? { notSame: [...duplicateNotSame] } : {}),
+        }
+      : undefined;
 
   // Project-level tags — lazy-loaded when the label dropdown is first opened
   const [tagsQueried, setTagsQueried] = useState(false);
@@ -1593,6 +1641,9 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
         }
 
         formDataPayload.append('fromTicketsTab', String(isFromTicketsTab));
+        if (duplicateDecisions) {
+          formDataPayload.append('duplicateDecisions', JSON.stringify(duplicateDecisions));
+        }
         response = await apiInstance.post<TicketResponse>('/tickets', formDataPayload);
         createdTicketResponse = response.data;
         processTicketCreationResponse(response, formData.workflowType, effectiveChannelId);
@@ -1628,6 +1679,7 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
           ...(parentTicketId && { parentTicketId }),
           // Include dynamic fields (pruned of any now-inactive branch field's stale value)
           dynamicFields: submitDynamicFields,
+          ...(duplicateDecisions && { duplicateDecisions }),
         });
 
         createdTicketResponse = response.data;
@@ -1669,6 +1721,21 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
             `Failed to create sub-ticket "${subTicket.title}"`,
           );
         });
+      }
+
+      if (createdTicketResponse?.id && duplicateSameAs) {
+        void surfaceMutationError(
+          zero.mutate(
+            mutators.ticketReference.create({
+              sourceTicketId: createdTicketResponse.id,
+              targetTicketId: duplicateSameAs.candidate.id,
+              relationType: TicketReferenceRelation.DUPLICATE_CONFIRMED,
+              timestamp: Date.now(),
+              referenceId: uuidv4(),
+            }),
+          ),
+          'Failed to link the duplicate ticket',
+        );
       }
 
       // Don't auto-close if part of a sequence - let the parent handle it
@@ -2408,42 +2475,77 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
                       </TextShimmer>
                     </div>
                   ) : (
-                    <Input
-                      ref={titleInputRef}
-                      value={field.state.value}
-                      required={true}
-                      onChange={e => {
-                        // If user starts typing, cancel the ongoing generation
-                        if (isTitleGenerating) {
-                          cancelGeneration();
+                    <div className='relative'>
+                      <Input
+                        ref={titleInputRef}
+                        value={field.state.value}
+                        required={true}
+                        onChange={e => {
+                          // If user starts typing, cancel the ongoing generation
+                          if (isTitleGenerating) {
+                            cancelGeneration();
+                          }
+                          field.handleChange(e.target.value);
+                        }}
+                        aria-label='Ticket Title'
+                        placeholder={
+                          ticketKind === 'release'
+                            ? 'Enter Release Title...'
+                            : 'Enter Ticket Title...'
                         }
-                        field.handleChange(e.target.value);
-                      }}
-                      aria-label='Ticket Title'
-                      placeholder={
-                        ticketKind === 'release'
-                          ? 'Enter Release Title...'
-                          : 'Enter Ticket Title...'
-                      }
-                      data-testid='ticket-title-input'
-                      data-track-category='Tickets'
-                      data-track-name='EDIT_TICKET_TITLE'
-                      data-track-metadata={JSON.stringify({ boardId: selectedBoardId, channelId })}
-                      className={cn(
-                        '!text-[21px] !leading-tight truncate tracking-[-0.4px]',
-                        'rounded-none border-0 border-b-[1.5px] px-0 pb-0.5 focus-visible:ring-0',
-                        'font-semibold text-foreground placeholder:text-[21px] placeholder:text-muted-foreground/50',
-                        'transition-colors duration-150',
-                        field.state.meta.errors.length > 0
-                          ? '!border-b-destructive'
-                          : '!border-b-transparent',
-                      )}
-                    />
+                        data-testid='ticket-title-input'
+                        data-track-category='Tickets'
+                        data-track-name='EDIT_TICKET_TITLE'
+                        data-track-metadata={JSON.stringify({
+                          boardId: selectedBoardId,
+                          channelId,
+                        })}
+                        className={cn(
+                          '!text-[21px] !leading-tight truncate tracking-[-0.4px]',
+                          'rounded-none border-0 border-b-[1.5px] px-0 pb-0.5 focus-visible:ring-0',
+                          'font-semibold text-foreground placeholder:text-[21px] placeholder:text-muted-foreground/50',
+                          'transition-colors duration-150',
+                          field.state.meta.errors.length > 0
+                            ? '!border-b-destructive'
+                            : '!border-b-transparent',
+                        )}
+                      />
+                      <div
+                        aria-hidden
+                        className='xyne-duplicate-scan'
+                        data-active={isDuplicateCheckInFlight ? 'true' : undefined}
+                      >
+                        <span className='xyne-duplicate-scan-track' />
+                        <span className='shrink-0 text-[11px] leading-3 text-muted-foreground'>
+                          Checking for duplicates
+                        </span>
+                      </div>
+                    </div>
                   )}
                   <FieldError error={field.state.meta.errors[0]} />
                 </div>
               )}
             </form.Field>
+
+            <DuplicateSuggestions
+              likely={likelyDuplicates.filter(
+                suggestion => suggestion.candidate.id !== parentTicketId,
+              )}
+              similar={similarDuplicates.filter(
+                suggestion => suggestion.candidate.id !== parentTicketId,
+              )}
+              checkId={duplicateCheckId}
+              checking={isCheckingDuplicate}
+              sameAs={duplicateSameAs}
+              notSame={duplicateNotSame}
+              onSame={suggestion =>
+                setDuplicateChoice({ suggestion, projectId: duplicateProjectId })
+              }
+              onUndoSame={() => setDuplicateChoice(null)}
+              onNotSame={suggestion =>
+                setDuplicateNotSame(current => new Set([...current, suggestion.candidate.id]))
+              }
+            />
 
             {/* Description Field */}
             <form.Field

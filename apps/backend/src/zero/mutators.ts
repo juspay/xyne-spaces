@@ -11417,6 +11417,10 @@ export function createMutators(
             boardId: z.string(),
             weight: z.number(),
             usePercentage: z.boolean(),
+            percentageWindowDays: z.number().int().min(1).max(90).optional(),
+            percentageShareBasis: z.enum(['ALL', 'OPEN']).optional(),
+            // Start of the first share window (ms); null clears it. Omit to keep the current start.
+            percentageWindowStartAt: z.number().nullable().optional(),
           }).optional(),
           expertiseMappings: z.object({
             boardId: z.string(),
@@ -11526,6 +11530,15 @@ export function createMutators(
                 id: existingScore.id,
                 weight: boardWeight.weight,
                 usePercentage: boardWeight.usePercentage,
+                ...(boardWeight.percentageWindowDays !== undefined && {
+                  percentageWindowDays: boardWeight.percentageWindowDays,
+                }),
+                ...(boardWeight.percentageShareBasis !== undefined && {
+                  percentageShareBasis: boardWeight.percentageShareBasis,
+                }),
+                ...(boardWeight.percentageWindowStartAt !== undefined && {
+                  percentageWindowStartAt: boardWeight.percentageWindowStartAt,
+                }),
                 updatedAt: now,
               });
             } else {
@@ -11539,6 +11552,9 @@ export function createMutators(
                 boardId: boardWeight.boardId,
                 weight: boardWeight.weight,
                 usePercentage: boardWeight.usePercentage,
+                percentageWindowDays: boardWeight.percentageWindowDays ?? null,
+                percentageShareBasis: boardWeight.percentageShareBasis ?? null,
+                percentageWindowStartAt: boardWeight.percentageWindowStartAt ?? null,
                 createdBy: authData.sub,
                 createdAt: now,
                 updatedAt: now,

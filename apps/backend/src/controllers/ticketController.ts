@@ -112,6 +112,27 @@ type MyTicketBoardOption = {
   projectId?: string;
 };
 
+const MAX_DUPLICATE_DECISIONS = 20;
+
+const duplicateDecisionsOf = (raw: unknown): { sameAs: string | null; notSame: string[] } => {
+  let value = raw;
+  if (typeof value === 'string') {
+    try {
+      value = JSON.parse(value);
+    } catch {
+      return { sameAs: null, notSame: [] };
+    }
+  }
+  if (!value || typeof value !== 'object') return { sameAs: null, notSame: [] };
+  const { sameAs, notSame } = value as { sameAs?: unknown; notSame?: unknown };
+  return {
+    sameAs: typeof sameAs === 'string' && sameAs.length > 0 ? sameAs : null,
+    notSame: (Array.isArray(notSame) ? notSame : [])
+      .filter((id): id is string => typeof id === 'string' && id.length > 0)
+      .slice(0, MAX_DUPLICATE_DECISIONS),
+  };
+};
+
 export class TicketController {
   ticketRepository: TicketRepository;
   conversationRepository: ConversationRepository;
@@ -981,22 +1002,26 @@ export class TicketController {
         userName: req.user?.name ?? null,
       });
 
-      ticketDuplicateService.persistDuplicateReferences({
-        ticketId: ticket.id,
-        ticketCreatedBy: ticket.createdBy,
-        title,
-        description,
-        projectId,
-        userId,
-        parentTicketId,
-        channelId: ticket.channelId,
-        scopeFieldValues: duplicateScopeValues,
-      }).catch(error => {
-        logger.error('Failed to persist duplicate references for ticket', {
+      const duplicateDecisions = duplicateDecisionsOf(req.body.duplicateDecisions);
+      if (!duplicateDecisions.sameAs) {
+        ticketDuplicateService.persistDuplicateReferences({
           ticketId: ticket.id,
-          error,
+          ticketCreatedBy: ticket.createdBy,
+          title,
+          description,
+          projectId,
+          userId,
+          parentTicketId,
+          channelId: ticket.channelId,
+          scopeFieldValues: duplicateScopeValues,
+          excludeTicketIds: duplicateDecisions.notSame,
+        }).catch(error => {
+          logger.error('Failed to persist duplicate references for ticket', {
+            ticketId: ticket.id,
+            error,
+          });
         });
-      });
+      }
 
       const response: GetTicketDetailsResponse = {
         id: ticket.id,
@@ -1360,6 +1385,7 @@ export class TicketController {
         projectId,
         userId,
         limit,
+        jevOnly: true,
       });
 
       const response: TicketDuplicateCheckResponse = {

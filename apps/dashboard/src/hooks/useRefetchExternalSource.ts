@@ -60,6 +60,8 @@ export const useRefetchExternalSource = (
   channelId: string | undefined,
   isSocialMedia = false,
   isCallDesk = false,
+  /** What a social-media desk fetches, for the toasts: reviews, or Facebook activity. */
+  socialItems: 'reviews' | 'Facebook activity' = 'reviews',
 ): {
   refetch: (range?: RefetchRange, target?: RefetchTarget) => void;
   isPending: boolean;
@@ -114,10 +116,13 @@ export const useRefetchExternalSource = (
               });
             }
             if ('synced' in result) {
+              const interaction = socialItems === 'reviews' ? 'review interaction' : 'new item';
               toast.success(
                 result.synced > 0
-                  ? `Processed ${result.synced} review interaction${result.synced === 1 ? '' : 's'}`
-                  : 'Reviews are up to date',
+                  ? `Processed ${result.synced} ${interaction}${result.synced === 1 ? '' : 's'}`
+                  : socialItems === 'reviews'
+                    ? 'Reviews are up to date'
+                    : 'Already up to date',
               );
               return;
             }
@@ -129,7 +134,7 @@ export const useRefetchExternalSource = (
                   : target?.sourceName
                     ? `Fetching from ${target.sourceName} in background`
                     : isSocialMedia
-                      ? 'Fetching reviews in background'
+                      ? `Fetching ${socialItems} in background`
                       : isCallDesk
                         ? 'Fetching calls in background'
                         : 'Fetching emails in background';

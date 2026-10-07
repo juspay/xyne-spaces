@@ -6,9 +6,12 @@ import { repositories } from '@/database/repositories';
 import { syncSocialMediaTicketCustomFields } from '../ticketCustomFields';
 import { logger } from '@/utils/logger';
 
-const TAG = '[InstagramPostprocessor]';
+/** Shared by the Instagram and Facebook adapters; `tag` only labels the logs. */
+export class MetaPostprocessor extends BasePostprocessor {
+  constructor(private readonly tag: string) {
+    super();
+  }
 
-export class InstagramPostprocessor extends BasePostprocessor {
   async process(context: PostprocessContext): Promise<void> {
     // Auto-create form field definitions on the board if missing, then write values.
     // Uses the same shared helper as Google Play so field definitions are never
@@ -16,16 +19,17 @@ export class InstagramPostprocessor extends BasePostprocessor {
     try {
       await syncSocialMediaTicketCustomFields(context);
     } catch (error) {
-      logger.error(`${TAG} Failed to sync ticket custom fields`, {
+      logger.error(`${this.tag} Failed to sync ticket custom fields`, {
         sourceId: context.sourceId,
         conversationId: context.conversationId,
         error,
       });
     }
 
-    // Reopen logic only applies to new inbound DMs (ticketCustomFields present),
-    // not to content-update edits.
-    if (!context.normalizedData.ticketCustomFields?.length) return;
+    // Reopen logic only applies to new inbound messages, not to the desk's own replies
+    // or to content-update edits.
+    const { metadata, emailData } = context.normalizedData;
+    if (metadata.isReply || emailData?.updateExisting) return;
 
     const ticket = await db.ticket.findFirst({
       where: { conversationId: context.conversationId },
@@ -57,11 +61,11 @@ export class InstagramPostprocessor extends BasePostprocessor {
               select: { ownerUserId: true },
             })
           : null;
-        // Prefer the channel owner; fall back to the source owner for IG accounts
+        // Prefer the channel owner; fall back to the source owner for accounts
         // not bound to a desk channel yet.
         const updatedBy = preference?.ownerUserId ?? source?.ownerUserId;
         if (!updatedBy) {
-          logger.warn(`${TAG} Cannot reopen ticket — ownerUserId missing for channel and source`, {
+          logger.warn(`${this.tag} Cannot reopen ticket — ownerUserId missing for channel and source`, {
             ticketId: ticket.id,
             channelId: source?.channelId,
           });
@@ -71,13 +75,13 @@ export class InstagramPostprocessor extends BasePostprocessor {
         await repositories.tickets
           .updateTicketStage(ticket.id, firstStage.name, updatedBy)
           .catch((err: unknown) => {
-            logger.warn(`${TAG} Could not reopen ticket on new DM`, {
+            logger.warn(`${this.tag} Could not reopen ticket on new DM`, {
               ticketId: ticket.id,
               error: err,
             });
           });
 
-        logger.info(`${TAG} Reopened resolved ticket on new DM`, {
+        logger.info(`${this.tag} Reopened resolved ticket on new DM`, {
           ticketId: ticket.id,
           previousStage: ticket.stageName,
           newStage: firstStage.name,
