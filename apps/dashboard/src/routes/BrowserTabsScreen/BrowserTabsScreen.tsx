@@ -134,6 +134,14 @@ function WebviewTab({
       });
       onUrlUpdate(tab.id, wv.getURL());
     };
+    // A remount (panel<->fullscreen switch, docked panel reopen) creates a fresh
+    // webview with empty history while the machine still holds the pre-remount
+    // canGoBack/canGoForward. Re-sync from the live webview at attach so the
+    // back/forward buttons are not left enabled-but-dead until the first
+    // did-navigate (or forever, if the reload fails).
+    const onAttach = () => {
+      onUpdate(tab.id, { canGoBack: wv.canGoBack(), canGoForward: wv.canGoForward() });
+    };
     const onStart = () => onUpdate(tab.id, { isLoading: true });
     const onStop = () => onUpdate(tab.id, { isLoading: false });
 
@@ -188,6 +196,7 @@ function WebviewTab({
 
     wv.addEventListener('page-title-updated', onTitle);
     wv.addEventListener('page-favicon-updated', onFavicon);
+    wv.addEventListener('did-attach', onAttach);
     wv.addEventListener('did-navigate', onNav);
     wv.addEventListener('did-navigate-in-page', onNav);
     wv.addEventListener('did-start-loading', onStart);
@@ -198,6 +207,7 @@ function WebviewTab({
     return () => {
       wv.removeEventListener('page-title-updated', onTitle);
       wv.removeEventListener('page-favicon-updated', onFavicon);
+      wv.removeEventListener('did-attach', onAttach);
       wv.removeEventListener('did-navigate', onNav);
       wv.removeEventListener('did-navigate-in-page', onNav);
       wv.removeEventListener('did-start-loading', onStart);
