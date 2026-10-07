@@ -1,3 +1,10 @@
+## [1.468.3](https://github.com/juspay/xyne-spaces/compare/v1.468.2...v1.468.3) (2026-10-07)
+
+
+### Bug Fixes
+
+* fixing lag in dm search and virtualising results and fixing ticket description typing lag ([#2385](https://github.com/juspay/xyne-spaces/issues/2385)) ([43bf860](https://github.com/juspay/xyne-spaces/commit/43bf860dbae3ce8f1298f3a091bde56ee712a8d1))
+
 ## [1.468.2](https://github.com/juspay/xyne-spaces/compare/v1.468.1...v1.468.2) (2026-10-07)
 
 
