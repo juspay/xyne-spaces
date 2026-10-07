@@ -1,5 +1,6 @@
 import type { D2, RenderOptions } from '@terrastruct/d2';
 import { logger, Event as LogEvent } from '../../../utils/logger';
+import { sanitizeD2Svg } from './D2Block.sanitize';
 
 let d2Promise: Promise<D2> | null = null;
 
@@ -132,7 +133,8 @@ export async function renderD2Diagram({
       if (typeof rendered !== 'string') {
         throw new Error('D2 render returned a non-string result');
       }
-      return makeSvgResponsive(rendered);
+      // Sanitize before the SVG is cached or reaches dangerouslySetInnerHTML.
+      return sanitizeD2Svg(makeSvgResponsive(rendered));
     });
     svgCache.set(cacheKey(source, isDark), svg);
     onSuccess(svg);

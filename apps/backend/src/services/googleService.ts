@@ -627,6 +627,12 @@ export class GoogleService {
    * payload's emailAddress in GoogleFlow.getSourceNameFromDB.
    */
   static async setupPubSubSubscription(): Promise<string> {
+    const webhookUrl = GoogleService.generateWebhookUrl();
+    if (webhookUrl.includes('localhost') || webhookUrl.includes('127.0.0.1')) {
+      logger.warn(`${TAG} Skipping Pub/Sub subscription setup — push endpoint is localhost and cannot be reached by Google Cloud (local dev mode)`);
+      return 'local-dev-no-subscription';
+    }
+
     const credentials = GoogleService.loadPubSubServiceAccount();
     const pubsub = new PubSub({
       projectId: process.env.GOOGLE_CLOUD_PROJECT_ID,
@@ -635,7 +641,6 @@ export class GoogleService {
 
     const topicName = process.env.GOOGLE_PUBSUB_TOPIC || DEFAULT_PUBSUB_TOPIC;
     const subscriptionName = GoogleService.getSharedSubscriptionName();
-    const webhookUrl = GoogleService.generateWebhookUrl();
 
     const topic = pubsub.topic(topicName);
     const subscription = topic.subscription(subscriptionName);

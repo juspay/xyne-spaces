@@ -214,8 +214,11 @@ const electronAPI = {
     ipcRenderer.on('auth:mtls-success', listener);
   },
 
-  onTokenExpired: (callback: () => void) => {
-    ipcRenderer.on('auth:token-expired', callback);
+  onTokenExpired: (callback: (payload?: { url?: string; resourceType?: string }) => void) => {
+    ipcRenderer.on(
+      'auth:token-expired',
+      (_event: unknown, payload?: { url?: string; resourceType?: string }) => callback(payload),
+    );
   },
   showBrowserView: (config: {
     url: string;
@@ -517,6 +520,8 @@ const electronAPI = {
     detect: () => ipcRenderer.invoke('local-harness:detect'),
     connect: () => ipcRenderer.invoke('local-harness:connect'),
     disconnect: () => ipcRenderer.invoke('local-harness:disconnect'),
+    connectComputer: () => ipcRenderer.invoke('local-harness:connect-computer'),
+    disconnectComputer: () => ipcRenderer.invoke('local-harness:disconnect-computer'),
     setProviderEnabled: (provider: string, enabled: boolean) =>
       ipcRenderer.invoke('local-harness:set-provider', provider, enabled),
     pickFolder: (): Promise<{ path: string; name: string; branch?: string; remote?: string } | null> =>

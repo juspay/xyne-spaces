@@ -4,6 +4,11 @@ import type { StepType } from './step-types';
 import { ControlFlowStepType } from './known-types';
 import { ConditionOperator, ConditionOperatorSchema } from './operators';
 import { TAG_FORMAT_REGEX } from '@xyne/shared';
+import {
+  addBusinessTime,
+  BusinessHoursSchema,
+  DEFAULT_BUSINESS_HOURS,
+} from '../util/business-hours';
 
 function isValidHasTagValue(value: unknown): boolean {
   if (typeof value !== 'string') return false;
@@ -116,7 +121,7 @@ export interface SwitchStepConfig {
 
 export type AutomationStepConfig = ActionStepConfig | ConditionalStepConfig | SwitchStepConfig;
 
-export const ScheduleOffsetUnitSchema = z.enum(['minutes', 'hours', 'days']);
+export const ScheduleOffsetUnitSchema = z.enum(['seconds', 'minutes', 'hours', 'days']);
 export type ScheduleOffsetUnit = z.infer<typeof ScheduleOffsetUnitSchema>;
 
 export const ScheduleOffsetSchema = z.object({
@@ -133,6 +138,8 @@ export const ScheduledScheduleSchema = z.object({
   type: z.literal('SCHEDULED'),
   field: z.string().min(1),
   offset: ScheduleOffsetSchema,
+  businessHoursOnly: z.boolean().default(false),
+  businessHours: BusinessHoursSchema.default(DEFAULT_BUSINESS_HOURS),
 });
 
 export const ScheduleConfigSchema = z.discriminatedUnion('type', [
@@ -144,6 +151,7 @@ export type ScheduleConfig = z.infer<typeof ScheduleConfigSchema>;
 export const MAX_SCHEDULE_OFFSET_MINUTES = 30 * 24 * 60;
 
 export function scheduleOffsetMs(offset: ScheduleOffset): number {
+  if (offset.unit === 'seconds') return offset.amount * 1000;
   const minutes =
     offset.unit === 'minutes'
       ? offset.amount
@@ -183,7 +191,12 @@ export function computeScheduleRunAt(
   const fieldValue = readDottedPath(payload, schedule.field);
   const fieldDate = coerceToDate(fieldValue);
   if (!fieldDate) return null;
-  return fieldDate.getTime() + scheduleOffsetMs(schedule.offset);
+
+  const offsetMs = scheduleOffsetMs(schedule.offset);
+  if (schedule.businessHoursOnly) {
+    return addBusinessTime(fieldDate, offsetMs, schedule.businessHours).getTime();
+  }
+  return fieldDate.getTime() + offsetMs;
 }
 
 export interface AutomationConfig {

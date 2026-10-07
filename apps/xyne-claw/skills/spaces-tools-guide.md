@@ -7,7 +7,7 @@ description: Complete reference for calling Xyne Spaces tools correctly — per-
 
 Most wrong answers come from one of three failures:
 
-1. Picking the wrong tool (e.g. `spaces-search` for tickets).
+1. Picking the wrong tool (e.g. `spaces-vespa-search` for tickets).
 2. Forgetting to scope (no `channelId`, no `conversationId`).
 3. Passing a name or email where the tool wants an ID — or worse, inventing an ID.
 
@@ -27,8 +27,8 @@ For multi-part user tasks, mix — do simple parts yourself, farm deep sub-queri
 |---|---|
 | Who am I / what's my user ID | `spaces-whoami` |
 | Resolving a person's name → ID | `spaces-users` |
-| A specific topic/keyword across messages, files, tickets | `spaces-search` |
-| Tickets — status, assignee, priority, board, stage, dates | `spaces-tickets` — NOT spaces-search |
+| A specific topic/keyword across messages, files, tickets | `spaces-vespa-search` |
+| Tickets — status, assignee, priority, board, stage, dates | `spaces-tickets` — NOT spaces-vespa-search |
 | Desk metrics — response/resolution times, CSAT, ticket volumes, per-agent/priority/stage/tag breakdowns, opened-vs-closed trends | `spaces-desk-metrics` — NOT spaces-tickets |
 | Reading a specific thread | `spaces-messages` |
 | One message's reactions / attachments / metadata | `spaces-message-detail` |
@@ -40,7 +40,7 @@ For multi-part user tasks, mix — do simple parts yourself, farm deep sub-queri
 | Finding a doc | `spaces-canvases` |
 | Reading a doc's contents | `spaces-read-canvas` |
 | A call/meeting list — titles/times/status | `spaces-calls` |
-| Meeting/call content — decisions, action items, what someone said | `spaces-meeting-insights` — NOT spaces-search |
+| Meeting/call content — decisions, action items, what someone said | `spaces-meeting-insights` — NOT spaces-vespa-search |
 | Email threads on a desk ticket | `spaces-emails` |
 | Files on a thread | `spaces-thread-attachments`, then `spaces-fetch-attachment` |
 | Automation run counts / success rates | `spaces-workflow-stats` |
@@ -91,7 +91,7 @@ When the user attaches a channel/thread/ticket/canvas/call to their message, a "
 
 Always pass the attached IDs explicitly:
 
-- **Channel** attached → `channelId=<id>` for `spaces-tickets` / `spaces-activity` / `spaces-canvases` / `spaces-calls`; `in=<id>` for `spaces-search`.
+- **Channel** attached → `channelId=<id>` for `spaces-tickets` / `spaces-activity` / `spaces-canvases` / `spaces-calls`; `filters={ channelId: { contains: <id> } }` for `spaces-vespa-search`.
 - **Thread** attached → `conversationId=<tid>` for `spaces-messages` / `spaces-emails` / `spaces-thread-attachments`.
 - **Ticket** attached → read its `conversationId` with `spaces-messages`; narrow further with `spaces-tickets` if the user asks about related work.
 - **Canvas** attached → `spaces-read-canvas` with its `viewAccessId` **before** answering.
@@ -147,7 +147,7 @@ Look up users by name or email, **or list the members of a user group (team)**. 
 
 - Departed/deactivated users are **included by default** (tagged) — set `status=ACTIVE` to hide them.
 - For name/email search, results aren't sorted by relevance — if the first hit isn't the right person, scan the rest, or set `orderBy`.
-- Always call this **before** `spaces-tickets`, `spaces-search`, `spaces-create-ticket`, `spaces-schedule-call` when you need a `userId` from a name.
+- Always call this **before** `spaces-tickets`, `spaces-vespa-search`, `spaces-create-ticket`, `spaces-schedule-call` when you need a `userId` from a name.
 
 **When to use `groupId`:** the user names a team/on-call group and asks who's in it, or asks for that team's tickets — resolve the group's members here, then feed the userIDs into `spaces-tickets` (`assignedToIn`/`createdByIn`). You need the group's ID first (from the ticket/user-group context or a prior lookup); `spaces-users` filters by group **ID**, not name.
 
@@ -156,37 +156,65 @@ Look up users by name or email, **or list the members of a user group (team)**. 
 
 ---
 
-## spaces-search
+## spaces-vespa-search
 
-Fast Vespa-powered search across messages, tickets, files, channels, users. Use it for keyword/topic/person lookups. **Not** the tool for structured ticket queries — use `spaces-tickets` for those.
+The general search tool across Xyne content. You **declare what you want** — you
+do not write YQL, the tool builds it. (`spaces-search` / `spaces-search-v2` were
+retired on 2026-09-26; this replaced both.) **Not** the tool for structured
+ticket queries — use `spaces-tickets` for those.
 
-**Required:** `query` (unless `filterOnly=true`).
+**How it works:** pick a `searchArea` (the scope), narrow with `filters`, add
+free text in `query`. The area resolves the Vespa source, the baseline
+docType/subApp constraints, the access-control guard and the timestamp field.
 
 **Args:**
 
-- **query** (string) — Search query text. Can be empty when `filterOnly=true`.
-- **type** (string) — Narrow to one surface: `messages | attachments | channels | tickets | files`. **Set this** — without it, results are grouped across surfaces and you get noise.
-- **in** (string) — Channel ID(s) to scope into, comma-separated. **ALWAYS set this when the user is asking about a specific channel or has a channel attached as context.**
-- **from** (string) — Filter by sender userID(s), comma-separated. Resolve names via `spaces-users` first. **NOT email, NOT name.**
-- **apps** (string) — Comma-separated apps: `chat, ticket, user, file` (default: all). Prefer `type` over this.
-- **status** (string) — Comma-separated ticket statuses. Prefer `spaces-tickets`.
-- **priority** (string, enum: `HIGH | MEDIUM | LOW | CRITICAL`) — Ticket priority. Prefer `spaces-tickets`.
-- **board** (string) — Board name. Prefer `spaces-tickets`.
-- **stage** (string) — Ticket stage. Prefer `spaces-tickets`.
-- **assignee** (string) — Assigned userID. Prefer `spaces-tickets`.
-- **tags** (string) — Comma-separated tags.
-- **before** (string) — Created before — ISO 8601 or `15 Mar 26`. Prefer `range`.
-- **after** (string) — Created after — ISO 8601 or `15 Mar 26`. Prefer `range`.
-- **range** (string) — Natural window: `today | yesterday | this week | last 7 days | last 30 days`.
-- **limit** (number, 1–100, default 100) — Page size. In the default grouped mode each surface is capped at a fixed 10 regardless of this; `limit` only acts as a real page size once you narrow to a single `type` (ungrouped) or page with `offset`.
-- **offset** (number, ≥0, default 0) — Pagination offset. Setting `offset>0` drops grouping and returns a flat ranked list.
+- **searchArea** (string) — the scope, e.g. `message`, `ticket`, `canvas`. Pick
+  this first; each area accepts only its own fields and operators, and an
+  invalid one errors with the allowed set listed.
+- **query** (string, optional) — free text for topical keyword/semantic match.
+  **Omit it entirely for pure filter lookups** — unlike the old tool, no query is
+  needed for a filter-only search.
+- **filters** (object) — a nested operator bag: `{ <field>: { <op>: <value> } }`.
+  Different fields are ANDed; a list under `in` / `containsAny` means OR.
+- **groupBy / groupOrder / maxGroups / hitsPerGroup** — aggregate instead of
+  listing. `groupBy` with `hits: 0` answers "who filed the most" style questions
+  without paging anything.
+- **sort**, **hits**, **offset**, **properties**, **rankProfile**, **docType**.
+
+**Operators**
+
+- string fields — `contains` (single token), `in` / `containsAny` (OR), `nin` (NOT).
+- number fields — `eq`, `in`, `nin`, `gt` / `gte` / `lt` / `lte`.
+- date fields — `gt` / `gte` / `lt` / `lte`, values as **dd/mm/yy** in IST
+  (`01/06/26`), optionally with `HH:MM`.
+
+**Scoping to a channel** is a filter, not a top-level arg:
+`filters: { channelId: { contains: "<channelId>" } }`.
 
 **Common mistakes:**
 
-- No `in=` when scoped to a channel → global noise. (Note: `in` does NOT scope file results — see `spaces-vespa-schema`.)
-- No `type=` → results grouped across surfaces and capped at 10 each; pass `type` to go flat and get real counts.
-- `from=sarah@…` → wrong — pass userID. `from` means authored-by (sender/creator), not assignee.
-- Counting visible rows of a grouped result → undercount; narrow to one `type` and read "Found N" / paginate.
+- Reaching for a `type` / `in` / `from` / `range` argument — those were the old
+  tool's. Everything except `query` is expressed through `searchArea` + `filters`.
+- Writing a date as ISO. Use **dd/mm/yy** (IST).
+- Passing an email or a name where a field wants a userID — resolve with
+  `spaces-users` first.
+- Counting rows of a capped page. To count, use `groupBy` with `hits: 0`, or
+  paginate with `offset` to exhaustion. For ticket counts prefer `spaces-tickets`.
+
+**Examples**
+
+- Open tickets assigned to someone:
+  `{ "searchArea": "ticket", "filters": { "status": { "in": ["TODO","STARTED"] }, "assignedTo": { "contains": "<userId>" } } }`
+- Canvases in a channel since a date:
+  `{ "searchArea": "canvas", "filters": { "channelId": { "contains": "<channelId>" }, "createdDate": { "gte": "01/06/26" } } }`
+- Messages on a topic in a channel:
+  `{ "searchArea": "message", "query": "launch checklist", "filters": { "channelId": { "contains": "<channelId>" } } }`
+
+Sibling tools for questions search cannot answer: **`spaces-corpus-scan`**
+(bucketed counts over everything you can see — trends, "how many per year") and
+**`spaces-evidence-pack`** (deterministic dated evidence rows for a written
+analysis).
 
 **Worked examples — diverge, converge, re-query.**
 
@@ -195,9 +223,9 @@ The move: turn the intent into a few **divergent** angles, fire them **in parall
 *1 — Open-ended status → diverge across angles, converge on the live thread.*
 User: "How's the Apollo migration going?"
 - Diverge (one turn, parallel — the asker's sentence is never the query):
-  - `spaces-search { query: "Apollo migration status", type: "messages" }`
-  - `spaces-search { query: "Apollo cutover blockers", type: "messages" }`
-  - `spaces-search { query: "Apollo migration", type: "tickets" }`
+  - `spaces-vespa-search { searchArea: "message", query: "Apollo migration status" }`
+  - `spaces-vespa-search { searchArea: "message", query: "Apollo cutover blockers" }`
+  - `spaces-vespa-search { searchArea: "ticket", query: "Apollo migration" }`
 - Results surface `#apollo-billing`, a hot thread (`conversationId: cm_t1`), and an in-progress ticket (`xyneId: APL-42`).
 - Converge — read the real sources, never answer from the snippet:
   - `spaces-messages { conversationId: "cm_t1" }` + `spaces-tickets { … }` then `spaces-messages` on the ticket's thread. Cite the chunks.
@@ -207,34 +235,34 @@ User: "What has Priya raised about refund failures?"
 - `from` takes a userID, never a name — resolve first:
   - `spaces-users { nameOrEmail: "Priya" }` → `userId: cm_u9`
 - Then the authored-by search:
-  - `spaces-search { query: "refund failures", from: "cm_u9", type: "messages" }` → open the top hit's `conversationId` with `spaces-messages`.
+  - `spaces-vespa-search { searchArea: "message", query: "refund failures", filters: { senderId: { contains: "cm_u9" } } }` → open the top hit's `conversationId` with `spaces-messages`.
 
 *3 — Re-query on a prior result: surfaced channel → scope with `in`.*
 User: "What's the latest on the checkout outage?"
-- Diverge globally first: `spaces-search { query: "checkout outage", type: "messages" }`
+- Diverge globally first: `spaces-vespa-search { searchArea: "message", query: "checkout outage" }`
 - Hits cluster in a channel called `#checkout-incidents`. Converge by scoping into it:
   - `spaces-channels { name: "checkout-incidents" }` → `channelId: cm_c3`
-  - `spaces-search { query: "checkout outage root cause", type: "messages", in: "cm_c3", range: "last 7 days" }`
+  - `spaces-vespa-search { searchArea: "message", query: "checkout outage root cause", filters: { channelId: { contains: "cm_c3" }, createdDate: { gte: "<dd/mm/yy>" } } }`
 - (`in` cuts cross-channel noise — but it does **not** scope `type=files`; see `spaces-vespa-schema`.)
 
 *4 — Converge by surface to COUNT a concept that spans surfaces.*
 User: "How many onboarding issues came up this month?"
 - "Issues" = tickets AND in-channel reports. Count each surface, never tally a grouped page:
   - `spaces-tickets { tags: "onboarding", createdAfter: "<month-start>", summary: true }` (exact ticket count)
-  - `spaces-search { query: "onboarding issue", type: "messages", range: "last 30 days" }` → read "Found N", `offset`-paginate to exhaustion.
+  - `spaces-vespa-search { searchArea: "message", query: "onboarding issue", filters: { createdDate: { gte: "<dd/mm/yy>" } } }` → read "Found N", `offset`-paginate to exhaustion.
 - Sum, and report both numbers with their source.
 
 *5 — Empty result → widen, then re-narrow (don't conclude "none").*
 User: "Did anyone mention the SOC2 audit in #security last week?"
-- `spaces-search { query: "SOC2 audit", type: "messages", in: "cm_sec", range: "last 7 days" }` → empty.
+- `spaces-vespa-search { searchArea: "message", query: "SOC2 audit", filters: { channelId: { contains: "cm_sec" }, createdDate: { gte: "<dd/mm/yy>" } } }` → empty.
 - Empty under a filter is ambiguous. Drop the time window first:
-  - `spaces-search { query: "SOC2 audit", type: "messages", in: "cm_sec" }` → hits from ~3 weeks ago.
+  - `spaces-vespa-search { searchArea: "message", query: "SOC2 audit", filters: { channelId: { contains: "cm_sec" } } }` → hits from ~3 weeks ago.
 - Now answer truthfully: nothing *last week*, but there was discussion on `<date>` — with the source.
 
 *6 — Filter-only browse (no query text).*
 User: "Show me the latest files shared in #design."
 - Omit `query` entirely → filter-only mode:
-  - `spaces-search { type: "attachments", in: "cm_design", range: "last 7 days" }`
+  - `spaces-vespa-search { searchArea: "attachment", filters: { channelId: { contains: "cm_design" }, createdDate: { gte: "<dd/mm/yy>" } } }`
 - (`type: "attachments"` is channel-scoped; `type: "files"` would ignore `in`.)
 
 ---
@@ -639,7 +667,7 @@ Search the shared memory for business knowledge, past mistakes, debugging approa
 **Notes:**
 
 - Returns a numbered list of up to N memories.
-- Empty result = nothing in the bank — don't re-query the same thing. Fall through to `spaces-search` / `spaces-canvases` / `spaces-meeting-insights`.
+- Empty result = nothing in the bank — don't re-query the same thing. Fall through to `spaces-vespa-search` / `spaces-canvases` / `spaces-meeting-insights`.
 - Memory contents are authoritative — but they CAN go stale. If a memory contradicts something the user just said or just happened in Spaces, trust the live data.
 
 ---
@@ -740,7 +768,7 @@ Post a message to a **DIFFERENT** thread or channel — NOT the one the user is 
 
 **When NOT to use:** Normal answers to the current question — just return the text; the framework posts it.
 
-**Notes:** `@Name[userId]` shorthand is server-expanded — resolve userIDs via `spaces-users` / `spaces-search` / `spaces-whoami` first; never invent one.
+**Notes:** `@Name[userId]` shorthand is server-expanded — resolve userIDs via `spaces-users` / `spaces-vespa-search` / `spaces-whoami` first; never invent one.
 
 ---
 
@@ -795,7 +823,7 @@ Replace canvas contents. Requires edit access (owner/editor/edit-link).
 
 - `spaces-tickets` + `spaces-meeting-insights` (different surfaces, same topic)
 - `spaces-users` + `spaces-channels` (resolving identities for a follow-up call)
-- `spaces-canvases` + `spaces-emails` + `spaces-search` (broad sweep across surfaces)
+- `spaces-canvases` + `spaces-emails` + `spaces-vespa-search` (broad sweep across surfaces)
 
 **Sequential — must wait:**
 

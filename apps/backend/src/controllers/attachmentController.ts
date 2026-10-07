@@ -15,12 +15,12 @@ import { MessageAttachment } from '@prisma/client';
 import { AttachmentEntityType, ChannelVisibility } from '@xyne/shared';
 import {
   isAllowedSdlcUpload,
-  SDLC_CONTAINMENT_RELATION,
   SDLC_TRACK_FLAT_RELATION,
   SDLC_TRACK_MEMBERSHIP_RELATION,
 } from '@xyne/shared/sdlc';
 import { assertAttachmentAccess as assertAttachmentAccessShared, type AttachmentAccessResult } from '../services/attachmentAccessService';
 import { uploadFiles } from '../services/fileUploadService';
+import { fileTrackItemsTx } from '@/bypassAcl/transactions/sdlcTrackItemFiling';
 import { config } from '../config/env';
 import { vespaQueue } from '@/queues/vespaQueue';
 import { fileSchema, SubApp } from '@/vespa/src/types';
@@ -809,6 +809,7 @@ export class AttachmentController {
         createdBy: userId,
         storageProvider: config.fileStorage.provider,
         conversationId: null,
+        channelId: null,
         workspaceId,
         metadata: file.metadata || {},
       }));
@@ -830,31 +831,19 @@ export class AttachmentController {
       const responseAttachments = savedAttachments;
 
       if (placement && responseAttachments.length > 0) {
-        await db.sdlcEntityLink.createMany({
-          data: responseAttachments.flatMap(attachment => [
-            {
-              workspaceId,
-              channelId: entityId,
-              sourceType: placement.parentType,
-              sourceId: placement.parentId,
-              targetType: 'ATTACHMENT',
-              targetId: attachment.id,
-              relationType: SDLC_CONTAINMENT_RELATION,
-              createdBy: userId,
-            },
-            {
-              workspaceId,
-              channelId: entityId,
-              sourceType: 'TRACK',
-              sourceId: placement.trackId,
-              targetType: 'ATTACHMENT',
-              targetId: attachment.id,
-              relationType: SDLC_TRACK_FLAT_RELATION,
-              createdBy: userId,
-            },
-          ]),
-          skipDuplicates: true,
-        });
+        await fileTrackItemsTx(
+          db,
+          {
+            channelId: entityId,
+            trackId: placement.trackId,
+            parent: { type: placement.parentType, id: placement.parentId },
+            items: responseAttachments.map(attachment => ({
+              type: 'ATTACHMENT' as const,
+              id: attachment.id,
+            })),
+          },
+          { workspaceId, userId },
+        );
       }
 
       if (responseAttachments.length > 0) {

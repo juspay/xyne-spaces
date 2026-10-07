@@ -17,12 +17,12 @@ async function getValidateDbInstance() {
   let useReadReplica = false;
   try {
     useReadReplica = await superpositionClient.getBooleanValue(
-      'YSWEET_USE_READ_REPLICA',
+      'ysweet_use_read_replica',
       false,
       {}
     );
   } catch (error) {
-    logger.error('[YSweet] Failed to read YSWEET_USE_READ_REPLICA flag, defaulting to primary DB:', error);
+    logger.error('[YSweet] Failed to read ysweet_use_read_replica flag, defaulting to primary DB:', error);
   }
   if (!useReadReplica) {
     return DatabaseClient.getInstance();
@@ -177,6 +177,14 @@ export class YSweetController {
       // y-sweet doc key so we don't fork a duplicate row or a duplicate
       // y-sweet document under the legacy string.
       const canonicalDocId = authResult.canvas?.id ?? docId;
+
+      if (authResult.crossWorkspace) {
+        res.status(403).json({
+          error: 'Forbidden',
+          message: 'Access denied'
+        });
+        return;
+      }
 
       if (!authResult.canvas) {
         try {

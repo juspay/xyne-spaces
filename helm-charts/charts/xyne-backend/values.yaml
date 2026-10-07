@@ -245,4 +245,28 @@ serviceMonitor:
   interval: 30s
   scrapeTimeout: ""
 
+migrations:
+  enabled: true
+  workingDir: /repo/apps/backend
+  secretEnv:
+    - name: DATABASE_URL
+      secret: xyne-backend-secrets
+    - name: COMMON_DATABASE_URL
+      secret: xyne-backend-secrets
+  env:
+    NODE_ENV: production
+    DEFAULT_ADMIN_EMAIL: ""
+  schemas:
+    - path: prisma/schema.prisma
+      seeds:
+        - scripts/seed-acl.ts
+        - scripts/seed-app-permissions.ts
+    - path: prisma-common/schema.prisma
+  backoffLimit: 2
+  activeDeadlineSeconds: 1800
+  resources:
+    requests:
+      cpu: 250m
+      memory: 512Mi
+
 extraObjects: []

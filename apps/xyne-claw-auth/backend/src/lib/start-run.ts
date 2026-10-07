@@ -1,4 +1,5 @@
 import { randomUUID } from "crypto";
+import { isMessagingChannelKey, type MessagingChannelKey } from "../surfaces/messaging/plugin.js";
 import { prisma } from "../db.js";
 import { CONFIG } from "../config.js";
 import { decrypt } from "../crypto.js";
@@ -28,14 +29,15 @@ import {
   resolveOrchestratorCallableAgentsForRun,
 } from "./callable-agent-resolver.js";
 import {
-  sdlcAgentToolProfile,
+  mergeSdlcToolProfile,
   parseToolsConfig,
   stripPlatformConfigKeys,
   isAgentInvocableBy,
-  SDLC_AGENT_SLUG,
 } from "xyne-claw-shared";
-import { tools as xyneSpacesTools } from "../mcp/servers/xyne-spaces-tools.js";
+import { markSdlcRun, SDLC_AGENT_TOOL_PROFILE } from "./sdlc-run-tools.js";
+import { getSessionByConv } from "./session-context.js";
 import { mintSessionToken } from "./session-tokens.js";
+import { resolveClawUserIdForSpacesIdentity, spacesUserIdForClawUser } from "./users-jit.js";
 import {
   resolveAgentProviderConfigs,
   resolveSubagentProviderMode,
@@ -50,20 +52,21 @@ import {
   isInternalCallbackOrigin,
   type ExternalResultCallbackConfig,
 } from "../surfaces/external-api/delivery.js";
+import { assertSafeOutboundUrl } from "../mcpgateway/services/http-client.js";
 import type { VerifiedCliToken } from "./cli-tokens.js";
 import { agentScopeAllows } from "./service-tokens.js";
 import { encryptSurfaceSecret } from "./surface-resolver.js";
 import { isClawAdmin } from "../middleware/agent-acl.js";
 import { isScheduledOrAutomationEvent } from "./run-bridge.js";
+import { conversationAccessError } from "./conversation-access.js";
 import { dispatchRun } from "./dispatch-run.js";
+import { toolUsageRankFor, wantsToolUsageRank } from "./tool-usage-rank.js";
 import { createLogger } from "../logger.js";
 import type { SessionContext } from "../routes/webhook.js";
 
-const log = createLogger("run");
+const JUDGE_BACKENDS = new Set(["jev", "ournormaljev", "ourtrainedjev", "llm"]);
 
-const SDLC_AGENT_TOOL_PROFILE = sdlcAgentToolProfile(
-  xyneSpacesTools.map((tool) => tool.name),
-);
+const log = createLogger("run");
 
 export const RECORDING_MAX_BYTES = 1024 * 1024 * 1024;
 const RECORDING_REF_TTL_SECONDS = 6 * 60 * 60;
@@ -210,6 +213,15 @@ function normalizeRecordingRefs(value: unknown): RunRecordingRef[] | null {
 }
 
 /** Loose shape check for the /experiment epoch context forwarded to the runtime. */
+async function isPublicOutboundUrl(url: string): Promise<boolean> {
+  try {
+    await assertSafeOutboundUrl(url);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 function isExperimentContext(value: unknown): boolean {
   if (!value || typeof value !== "object") return false;
   const obj = value as Record<string, unknown>;
@@ -217,10 +229,11 @@ function isExperimentContext(value: unknown): boolean {
     typeof obj["deadlineAt"] === "string" && obj["deadlineAt"].trim() !== "";
 }
 
-export type AgentRunTriggerSource = "spaces" | "scheduled" | "chat" | "api" | "automation" | "slack" | "heartbeat" | "reflex";
+export type AgentRunTriggerSource = "spaces" | "scheduled" | "chat" | "api" | "automation" | "slack" | "heartbeat" | "reflex" | MessagingChannelKey;
 
 function triggerSourceForEventType(eventType: unknown, requested: unknown): AgentRunTriggerSource {
   if (requested === "slack") return "slack";
+  if (isMessagingChannelKey(requested)) return requested;
   if (eventType === "automation") return "automation";
   if (eventType === "scheduled_job") return "scheduled";
   return "spaces";
@@ -240,12 +253,23 @@ async function resolveUserId(
 
   // Direct call with userId (e.g., from Xyne Spaces)
   if (userId && typeof userId === "string" && userId.trim().length > 0) {
+    // The body id arrives in either representation: legacy callers (queued
+    // messages, pre-migration cards) send the raw Spaces id, current callers
+    // the canonical Claw id. Resolve through the identity ladder so the run
+    // and every downstream row is keyed canonically.
+    // Deliberate MIXED failure policy: an identity-resolution failure here is
+    // FAIL-OPEN (fall back to the raw id — the request was authenticated
+    // upstream and a lookup hiccup must not block runs), while the
+    // body-vs-header userId pin check above is FAIL-CLOSED (403) because a
+    // mismatch there is a conflicting identity claim, not an infra error.
+    const clawUserId =
+      (await resolveClawUserIdForSpacesIdentity(userId.trim()).catch(() => undefined)) ?? userId.trim();
     const user = await prisma.user.findUnique({
-      where: { id: userId.trim() },
+      where: { id: clawUserId },
       select: { name: true, email: true, orgId: true },
     });
     return {
-      userId: userId.trim(),
+      userId: clawUserId,
       userName: userName?.trim() ?? user?.name ?? "",
       userEmail: user?.email ?? "",
       ...(user?.orgId ? { orgId: user.orgId } : {}),
@@ -528,7 +552,7 @@ export async function prepareRun(
   const serviceToken = caller.serviceToken;
   const isServiceTokenCaller = serviceToken?.client === "service";
   {
-    const { task, context, conversationId, piSessionConversationId, agentSlug, callbackUrl, callbackSecret, channelId, deliverTo, projectId, projectName, cwd, eventType, triggerSource, slackDelivery, traceId, provider, providerOrder, providerOverride, subagentProviders, subagentProviderMode, providerConfigs, progressUrl, attachments, recordingRefs, contextFiles, skills: bodySkills, attachedContext, ticketIds, canvasIds, callIds, idempotencyKey: requestedIdempotencyKey, isRegenerate, detached, fastMode, resumedFromHandoff, generateFollowUpSuggestions } = body as {
+    const { task, context, conversationId, piSessionConversationId, agentSlug, callbackUrl, callbackSecret, channelId, deliverTo, projectId, projectName, cwd, eventType, triggerSource, slackDelivery, channelDelivery, traceId, provider, providerOrder, providerOverride, subagentProviders, subagentProviderMode, providerConfigs, progressUrl, attachments, recordingRefs, contextFiles, skills: bodySkills, attachedContext, ticketIds, canvasIds, callIds, idempotencyKey: requestedIdempotencyKey, isRegenerate, detached, fastMode, resumedFromHandoff, judgeBackend, optimizations, generateFollowUpSuggestions } = body as {
       task?: string;
       context?: string;
       conversationId?: string;
@@ -548,6 +572,7 @@ export async function prepareRun(
       eventType?: string;
       triggerSource?: string;
       slackDelivery?: SessionContext["slackDelivery"];
+      channelDelivery?: SessionContext["channelDelivery"];
       traceId?: string;
       provider?: string;
       providerOrder?: string[];
@@ -582,6 +607,8 @@ export async function prepareRun(
       detached?: boolean;
       fastMode?: boolean;
       resumedFromHandoff?: boolean;
+      judgeBackend?: string;
+      optimizations?: unknown;
       generateFollowUpSuggestions?: boolean;
       /** Branching: when true, claw branches the PI session at the last user
        *  entry so the new assistant turn is a sibling of the previous one. */
@@ -635,11 +662,24 @@ export async function prepareRun(
     if ((triggerSource === "slack" || slackDelivery !== undefined) && !isInternalS2SCaller) {
       return { ok: false, status: 400, error: "slackDelivery requires internal service authentication" };
     }
-    if (callbackUrl && !isInternalCallbackOrigin(callbackUrl) && !isAllowedExternalCallbackUrl(callbackUrl)) {
-      return { ok: false, status: 400, error: "callbackUrl is not an allowed target" };
+    if ((isMessagingChannelKey(triggerSource) || channelDelivery !== undefined) && !isInternalS2SCaller) {
+      return { ok: false, status: 400, error: "channelDelivery requires internal service authentication" };
+    }
+    if (callbackUrl) {
+      const allowed = isInternalS2SCaller
+        ? isInternalCallbackOrigin(callbackUrl) || isAllowedExternalCallbackUrl(callbackUrl)
+        : !isInternalCallbackOrigin(callbackUrl) &&
+          isAllowedExternalCallbackUrl(callbackUrl) &&
+          (await isPublicOutboundUrl(callbackUrl));
+      if (!allowed) {
+        return { ok: false, status: 400, error: "callbackUrl is not an allowed target" };
+      }
     }
     if (progressUrl !== undefined && typeof progressUrl !== "string") {
       return { ok: false, status: 400, error: "progressUrl must be a string" };
+    }
+    if (progressUrl && !isInternalS2SCaller) {
+      return { ok: false, status: 400, error: "progressUrl requires internal service authentication" };
     }
     if (progressUrl && !isInternalCallbackOrigin(progressUrl) && !isAllowedExternalCallbackUrl(progressUrl)) {
       return { ok: false, status: 400, error: "progressUrl is not an allowed target" };
@@ -655,8 +695,16 @@ export async function prepareRun(
     const bodyUserId =
       typeof bodyUserIdRaw === "string" && bodyUserIdRaw.trim() ? bodyUserIdRaw.trim() : undefined;
     if (bodyUserId && authenticatedUserId && bodyUserId !== authenticatedUserId) {
-      log.warn(`[run] userId pin mismatch: session=${authenticatedUserId} body=${bodyUserId}`);
-      return { ok: false, status: 403, error: "Body userId does not match authenticated session" };
+      // The pinned header is canonical while legacy clients still send the
+      // raw Spaces alias in the body — resolve before comparing, or the
+      // authenticated user's own runs get falsely rejected. FAIL-CLOSED: an
+      // unresolvable or mismatching body id is a 403 (see resolveUserId for
+      // the complementary fail-open path).
+      const resolvedBodyUserId = await resolveClawUserIdForSpacesIdentity(bodyUserId).catch(() => undefined);
+      if (!resolvedBodyUserId || resolvedBodyUserId !== authenticatedUserId) {
+        log.warn(`[run] userId pin mismatch: session=${authenticatedUserId} body=${bodyUserId}`);
+        return { ok: false, status: 403, error: "Body userId does not match authenticated session" };
+      }
     }
 
     const identityBody = {
@@ -666,6 +714,41 @@ export async function prepareRun(
     const resolved = await resolveUserId(identityBody);
     if ("error" in resolved) {
       return { ok: false, status: 400, error: resolved.error };
+    }
+
+    // Conversation-ownership backstop. Claw sessions are keyed by conversationId
+    // (not userId), so a caller who supplies another user's conversationId would
+    // attach to that thread's shared session. userId is already pinned above;
+    // this stops the cross-user hijack. Only enforced on the interactive-user
+    // path — S2S/automation/scheduled/service-token runs legitimately act on
+    // conversations the authenticated caller doesn't "own". Non-existent/new
+    // conversations pass (verdict "unknown").
+    if (
+      authenticatedUserId &&
+      !isServiceTokenCaller &&
+      !isInternalS2SCaller &&
+      !isScheduledOrAutomationEvent(eventType) &&
+      (conversationId || piSessionConversationId)
+    ) {
+      // The Spaces conversation-access check matches channel_participants by the
+      // workspace-scoped Spaces id, so translate the canonical resolved.userId
+      // back to the Spaces id first. No workspace hint is available this early,
+      // so a multi-workspace user resolves to their most-recent membership —
+      // acceptable for a fail-open defense-in-depth backstop (the interactive
+      // run-stream guard enforces with the request's exact x-spaces-user-id).
+      // TODO(identity): thread the request workspace hint into StartRunInput so
+      // this resolves the exact membership for multi-workspace /run callers.
+      const spacesCheckId = await spacesUserIdForClawUser(resolved.userId).catch(() => resolved.userId);
+      const accessError = await conversationAccessError(spacesCheckId, [
+        conversationId,
+        piSessionConversationId,
+      ]);
+      if (accessError) {
+        log.warn(
+          `[run] conversation access denied userId=${spacesCheckId} conversationId=${conversationId ?? "none"} pi=${piSessionConversationId ?? "none"}`,
+        );
+        return { ok: false, status: 403, error: accessError };
+      }
     }
 
     const headerOrgId = input.headerOrgId;
@@ -712,11 +795,26 @@ export async function prepareRun(
         .findByUserAndProvider(resolved.userId, runOverride.provider)
         .catch(() => null);
       if (!cred?.encryptedKey) {
-        return {
-          ok: false,
-          status: 400,
-          error: `No ${runOverride.provider} credentials for this user — connect it in Settings first`,
-        };
+        // Fall back to the AGENT's own credential for that provider. Requiring a
+        // personal key here was over-broad: every normal mention already runs on
+        // the agent's credentials, so pinning one of the providers the agent is
+        // ALREADY configured with spends the same quota by a different route. It
+        // is not a way to reach a provider nobody has connected — a provider
+        // absent from the agent's own config is still refused below.
+        const agentProviders = await resolveAgentProviderConfigs({ id: agent.id, config: agent.config })
+          .catch(() => null);
+        if (!agentProviders?.providerConfigs?.[runOverride.provider]) {
+          return {
+            ok: false,
+            status: 400,
+            error:
+              `No ${runOverride.provider} credentials for this user, and "${agentSlug}" has none configured either ` +
+              `— connect it in Settings, or add it to the agent's providers`,
+          };
+        }
+        log.info(
+          `[run] provider override ${runOverride.provider} using agent credentials agentSlug=${agentSlug} userId=${resolved.userId}`,
+        );
       }
     }
 
@@ -888,14 +986,6 @@ export async function prepareRun(
         ? `${resolvedAttachedContext.promptPrefix}\n\n${mergedContext}`
         : resolvedAttachedContext.promptPrefix;
     }
-    if (effectiveChannelId) {
-      try {
-        const hubKnowledge = await loadSdlcHubKnowledge(effectiveChannelId, resolved.userId);
-        if (hubKnowledge) mergedContext = mergedContext ? `${hubKnowledge}\n\n${mergedContext}` : hubKnowledge;
-      } catch (err) {
-        log.warn("[run] failed to load SDLC Hub Knowledge:", errMsg(err));
-      }
-    }
 
     // Inject live agent catalog for the Claw concierge agent so the LLM
     // always sees the current agents without any hardcoded list in the prompt.
@@ -930,24 +1020,6 @@ export async function prepareRun(
       ...storedAgentConfig,
       ...((body as { agentConfig?: Record<string, unknown> }).agentConfig ?? {}),
     });
-    if (agentSlug === SDLC_AGENT_SLUG) {
-      const configuredTools = (mergedAgentConfig["tools"] as Record<string, unknown> | undefined) ?? {};
-      const configuredPermissions =
-        (mergedAgentConfig["toolPermissions"] as Record<string, unknown> | undefined) ?? {};
-      mergedAgentConfig = {
-        ...mergedAgentConfig,
-        tools: {
-          ...configuredTools,
-          direct: SDLC_AGENT_TOOL_PROFILE.tools.direct,
-          custom: SDLC_AGENT_TOOL_PROFILE.tools.custom,
-          subagents: SDLC_AGENT_TOOL_PROFILE.tools.subagents,
-        },
-        toolPermissions: {
-          ...configuredPermissions,
-          ...SDLC_AGENT_TOOL_PROFILE.toolPermissions,
-        },
-      };
-    }
     if (!isInternalRun) {
       const {
         sdlcContext: _untrustedSdlcContext,
@@ -959,10 +1031,45 @@ export async function prepareRun(
     }
     let sdlcAgentRunContext = parseSdlcAgentRunContext(mergedAgentConfig["sdlcContext"]);
     if (!sdlcAgentRunContext) {
+      // Claw chat sends no channel; a hub thread reopened there takes its hub from the thread's last run.
+      const hubChannelId =
+        effectiveChannelId ||
+        (conversationId && agentSlug
+          ? ((await getSessionByConv(conversationId, agentSlug).catch(() => null))?.channelId ?? "")
+          : "");
+      // Automation/queued dispatch bodies may carry the hub's workspace;
+      // without it a two-workspace user's identity resolution is ambiguous.
+      const bodyWorkspaceId = (body as { workspaceId?: unknown }).workspaceId;
+      const hubWorkspaceHint =
+        typeof bodyWorkspaceId === "string" && bodyWorkspaceId.trim() ? bodyWorkspaceId.trim() : undefined;
       sdlcAgentRunContext = parseSdlcAgentRunContext(
-        await resolveSdlcHubContextForUser(resolved.userId, effectiveChannelId, conversationId),
+        await resolveSdlcHubContextForUser(resolved.userId, hubChannelId, conversationId, hubWorkspaceHint),
       );
       if (sdlcAgentRunContext) mergedAgentConfig = { ...mergedAgentConfig, sdlcContext: sdlcAgentRunContext };
+    }
+    // Any agent running in an SDLC hub gets the SDLC tools on top of its own.
+    if (sdlcAgentRunContext) {
+      mergedAgentConfig = mergeSdlcToolProfile(mergedAgentConfig, SDLC_AGENT_TOOL_PROFILE, {
+        interactive: !isScheduledOrAutomationEvent(eventType),
+      });
+    }
+    if (effectiveChannelId) {
+      try {
+        // Hub Knowledge membership (channelParticipant.userId) is keyed by the
+        // workspace-scoped Spaces id, while resolved.userId is the canonical
+        // Claw id — convert before the lookup or the filter matches nothing
+        // and hub knowledge silently drops out of the run context. The hub
+        // context carries the run's workspace, which disambiguates users
+        // holding memberships in two Spaces workspaces.
+        const hubWorkspaceRaw = sdlcAgentRunContext?.["workspaceId"];
+        const hubWorkspaceId =
+          typeof hubWorkspaceRaw === "string" && hubWorkspaceRaw.trim() ? hubWorkspaceRaw.trim() : undefined;
+        const hubKnowledgeUserId = await spacesUserIdForClawUser(resolved.userId, hubWorkspaceId);
+        const hubKnowledge = await loadSdlcHubKnowledge(effectiveChannelId, hubKnowledgeUserId);
+        if (hubKnowledge) mergedContext = mergedContext ? `${hubKnowledge}\n\n${mergedContext}` : hubKnowledge;
+      } catch (err) {
+        log.warn("[run] failed to load SDLC Hub Knowledge:", errMsg(err));
+      }
     }
     const effectiveFastMode =
       explicitFastMode ??
@@ -1027,6 +1134,13 @@ export async function prepareRun(
       } catch (error) {
         log.error(`[run] Failed to bind recording references to session ${sessionId}:`, error);
         return { ok: false, status: 503, error: "Could not initialize recording transfer" };
+      }
+    }
+    if (sdlcAgentRunContext) {
+      try {
+        await markSdlcRun(sessionId, String(sdlcAgentRunContext["channelId"]));
+      } catch (error) {
+        log.error(`[run] Failed to mark SDLC run ${sessionId}; the MCP gate will refuse its SDLC tools:`, error);
       }
     }
     const standardCallableAgents = callableAgents as Array<{ slug: string; spacesAppId?: string | null }>;
@@ -1095,7 +1209,26 @@ export async function prepareRun(
         // cred, ignore the override and fall through to normal resolution
         // rather than forcing a provider claw can't serve (which would silently
         // drop to the platform default).
-        const cfg = effectiveProviderConfigs?.[runOverride.provider];
+        // Resolve the agent's own configs when the request did not carry one for
+        // this provider. Without this the pin is silently dropped and the run
+        // lands on the platform default — /eval saw all four arms report
+        // "spaces" while each claimed a different pin.
+        let cfg = effectiveProviderConfigs?.[runOverride.provider];
+        if (!cfg) {
+          const fromAgent = await resolveAgentProviderConfigs({ id: agent.id, config: agent.config })
+            .catch(() => null);
+          const agentCfg = fromAgent?.providerConfigs?.[runOverride.provider];
+          if (agentCfg) {
+            effectiveProviderConfigs = { ...(effectiveProviderConfigs ?? {}), [runOverride.provider]: agentCfg };
+            cfg = agentCfg;
+          }
+        }
+        if (!cfg) {
+          log.warn(
+            `[run] provider override ${runOverride.provider} DROPPED — no credential resolved; ` +
+            `run will use ${effectiveProvider ?? "the platform default"} agentSlug=${agentSlug}`,
+          );
+        }
         if (cfg) {
           effectiveProvider = runOverride.provider;
           if (runOverride.model?.trim()) {
@@ -1127,7 +1260,9 @@ export async function prepareRun(
     }
 
     const acceptHeader = input.wantsSse ? "text/event-stream" : "";
-    const hasExternalCallback = Boolean(callbackUrl && !isInternalCallbackOrigin(callbackUrl));
+    const hasExternalCallback = Boolean(
+      callbackUrl && !(input.isInternalS2SCaller && isInternalCallbackOrigin(callbackUrl)),
+    );
     const externalResultCallback: ExternalResultCallbackConfig | undefined =
       hasExternalCallback && callbackUrl
         ? {
@@ -1227,7 +1362,8 @@ export async function prepareRun(
         const sessionContext: SessionContext = {
           mentionedUserId: agent.spacesAppUserId ?? "",
           senderId: resolved.userId,
-          senderName: resolved.userName || resolved.userId,
+          // Never render the canonical id as a display name.
+          senderName: resolved.userName || resolved.userEmail || resolved.userId,
           channelId: effectiveChannelId ?? "",
           channelName: effectiveChannelId ?? "",
           conversationId: conversationId ?? "",
@@ -1243,6 +1379,7 @@ export async function prepareRun(
           ...(traceId ? { traceId } : {}),
           ...(externalResultCallback ? { externalResultCallback } : {}),
           ...(defaultTriggerSource === "slack" && slackDelivery ? { slackDelivery } : {}),
+          ...(isMessagingChannelKey(defaultTriggerSource) && channelDelivery ? { channelDelivery } : {}),
         };
         const { setSession } = await import("../routes/webhook.js");
         await setSession(
@@ -1352,6 +1489,13 @@ export async function prepareRun(
       })).filter((sk) => !takenSlugs.has(sk.slug)),
     ];
 
+    const toolUsageRank =
+      agentSlug && wantsToolUsageRank(mergedAgentConfig["optimizations"], optimizations, agent.delegationTier)
+        ? await toolUsageRankFor(agentSlug, agent.orgId)
+        : [];
+    const { toolUsageRank: _suppliedToolUsageRank, ...agentConfigWithoutRank } = mergedAgentConfig;
+    mergedAgentConfig = toolUsageRank.length > 0 ? { ...agentConfigWithoutRank, toolUsageRank } : agentConfigWithoutRank;
+
     const forwardBody = {
       sessionId,
       idempotencyKey,
@@ -1402,6 +1546,8 @@ export async function prepareRun(
       ...(detached === true ? { detached: true } : {}),
       fastMode: effectiveFastMode,
       ...(resumedFromHandoff === true ? { resumedFromHandoff: true } : {}),
+      ...(typeof judgeBackend === "string" && JUDGE_BACKENDS.has(judgeBackend) ? { judgeBackend } : {}),
+      ...(typeof optimizations === "string" && /^[a-z0-9_,+\-]{1,400}$/i.test(optimizations) ? { optimizations } : {}),
       // Plan/auto mode gate. This forwardBody is an explicit allowlist, so these
       // MUST be threaded here or claw never sees them and plan mode is inert.
       // 'plan' is set by the webhook mention dispatch (planMode agents, non-twin);

@@ -27,6 +27,7 @@ import {
   truncateTemplateName,
 } from '../../components/SummaryTemplateMenu/SummaryTemplateMenu.utils';
 import {
+  SUMMARY_TEMPLATES_DIALOG_CLASS,
   SummaryTemplatesModal,
   getTemplateIcon,
 } from '../RecordingDetailV2Screen/components/SummaryTemplatesModal';
@@ -41,6 +42,13 @@ const DEFAULT_TEMPLATE_OPTION: SummaryTemplateOption = {
   id: 'default',
   name: DEFAULT_SUMMARY_TEMPLATE_NAME,
   icon: '✨',
+};
+
+/** A template the viewer cannot read; the empty id disables regenerating with it. */
+const PRIVATE_TEMPLATE_OPTION: SummaryTemplateOption = {
+  id: '',
+  name: 'Private template',
+  icon: '🔒',
 };
 
 interface CallSummaryTemplatePickerProps {
@@ -77,12 +85,15 @@ export function CallSummaryTemplatePicker({
     shouldLoadTemplates || templatesModalMode !== null,
   );
   const storedTemplateId = selectedTemplateId ?? '';
-  const [storedTemplate] = useCachedQuery(
+  const shouldQueryStoredTemplate =
+    storedTemplateId.length > 0 && storedTemplateId !== DEFAULT_TEMPLATE_OPTION.id;
+  const [storedTemplate, storedTemplateDetails] = useCachedQuery(
     queries.summaryTemplateById({ templateId: storedTemplateId }),
-    {
-      enabled: storedTemplateId.length > 0 && storedTemplateId !== DEFAULT_TEMPLATE_OPTION.id,
-    },
+    { enabled: shouldQueryStoredTemplate },
   );
+  // Held apart from "still loading", which also yields no row.
+  const storedTemplateDenied =
+    shouldQueryStoredTemplate && storedTemplateDetails.type === 'complete' && !storedTemplate;
 
   const templateOptions: SummaryTemplateOption[] = [
     DEFAULT_TEMPLATE_OPTION,
@@ -107,7 +118,7 @@ export function CallSummaryTemplatePicker({
   const selectedTemplate: SummaryTemplateOption =
     templateOptions.find(template => template.id === selectedTemplateId) ??
     storedTemplateOption ??
-    DEFAULT_TEMPLATE_OPTION;
+    (storedTemplateDenied ? PRIVATE_TEMPLATE_OPTION : DEFAULT_TEMPLATE_OPTION);
 
   const fullLabel = getSummaryTemplateLabel(selectedTemplate);
   const label = truncateTemplateName(fullLabel);
@@ -184,7 +195,7 @@ export function CallSummaryTemplatePicker({
           isLoading={templatesLoading}
           isRegenerating={isRegenerating}
           regeneratingTemplateId={regeneratingTemplateId}
-          canRegenerate={Boolean(onRegenerate)}
+          canRegenerate={Boolean(onRegenerate) && Boolean(selectedTemplate.id)}
           onSelectTemplate={regenerate}
           onRegenerate={() => regenerate(selectedTemplate.id)}
           onOpenTemplates={() => setTemplatesModalMode('browse')}
@@ -200,7 +211,7 @@ export function CallSummaryTemplatePicker({
           onOpenChange={open => !open && setTemplatesModalMode(null)}
           title='Summary Templates'
           description='Choose, create, edit, and share a call summary template.'
-          className='h-full max-h-[824px] w-full max-w-screen-lg overflow-hidden rounded-2xl p-0'
+          className={SUMMARY_TEMPLATES_DIALOG_CLASS}
           testId='summary-templates-dialog'
         >
           <SummaryTemplatesModal

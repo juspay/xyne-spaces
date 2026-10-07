@@ -9,10 +9,10 @@ import {
 } from 'react';
 import { createPortal } from 'react-dom';
 import { useQuery } from '@tanstack/react-query';
-import { Phone } from 'lucide-react';
 import { toast } from 'sonner';
 import { getOzonetelToolbar, linkOzonetelCall } from '../../../services/clients/telephonyApi';
 import Tooltip from '../../ui/Tooltip';
+import { PhoneDefault } from '@xyne/icons';
 
 /**
  * Embeds Ozonetel's hosted CloudAgent toolbar as a header-triggered iframe.
@@ -75,11 +75,13 @@ function setFloatingDockState(next: FloatingDockState): void {
 }
 
 // The toolbar's own dial sends no ticket id, so a reported call is linked to the ticket open on screen.
-let openTicket: { ticketId: string; number: string } | null = null;
+let openTicket: { ticketId: string; numbers: string[] } | null = null;
 // busyAgent can fire more than once per call, and newCall too; act on each call once.
 const handledCallIds = new Set<string>();
 
-export function setCloudAgentOpenTicket(ticket: { ticketId: string; number: string } | null): void {
+export function setCloudAgentOpenTicket(
+  ticket: { ticketId: string; numbers: string[] } | null,
+): void {
   openTicket = ticket;
 }
 
@@ -98,9 +100,9 @@ function linkCallToOpenTicket(token: unknown): void {
   handledCallIds.add(monitorUcid);
 
   const dialled = lastDigits(call.callerId);
-  if (!dialled || dialled !== lastDigits(openTicket.number)) {
+  if (!dialled || !openTicket.numbers.some(number => lastDigits(number) === dialled)) {
     toast.warning('This call is not logged to the open ticket', {
-      description: "It went to a different number than the ticket's.",
+      description: "It went to a number that isn't on the ticket.",
     });
     return;
   }
@@ -178,7 +180,7 @@ function ToolbarButton({ onClick }: { onClick: () => void }): ReactElement {
         data-track-name='OpenOzonetelToolbar'
         onClick={onClick}
       >
-        <Phone size={16} className='shrink-0' />
+        <PhoneDefault size={16} className='shrink-0' />
       </button>
     </Tooltip>
   );
@@ -348,7 +350,7 @@ export const CloudAgentDock = ({
             <span className='absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400/70 opacity-75' />
             <span className='relative inline-flex h-2.5 w-2.5 rounded-full bg-emerald-500' />
           </div>
-          <Phone size={15} className='text-emerald-600' />
+          <PhoneDefault size={15} className='text-emerald-600' />
           <span className='text-sm font-semibold text-foreground'>Ozonetel</span>
         </div>
         <iframe

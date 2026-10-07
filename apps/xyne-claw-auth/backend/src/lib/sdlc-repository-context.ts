@@ -24,12 +24,13 @@ export async function resolveSdlcRepositoryForUser(
   userId: string,
   researchContext: ResearchRepositoryContext | null | undefined,
   conversationId: string,
+  workspaceId?: string,
 ): Promise<SdlcRepositoryResolution> {
   if (researchContext?.type !== "repository" || typeof researchContext.id !== "string" || !researchContext.id.trim()) {
     return { ok: true };
   }
 
-  const auth = await getSpacesAuthForUser(userId, "agent-chat");
+  const auth = await getSpacesAuthForUser(userId, "agent-chat", workspaceId);
   if (!auth) {
     return { ok: false, status: 401, error: "Spaces credentials are required to resolve the SDLC repository" };
   }
@@ -89,9 +90,10 @@ export async function resolveSdlcHubContextForUser(
   userId: string,
   channelId: string | undefined,
   conversationId: string | undefined,
+  workspaceId?: string,
 ): Promise<Record<string, unknown> | undefined> {
   if (!channelId || !conversationId) return undefined;
-  const auth = await getSpacesAuthForUser(userId, "agent-chat");
+  const auth = await getSpacesAuthForUser(userId, "agent-chat", workspaceId);
   if (!auth) return undefined;
   try {
     const response = (await spacesFetch(

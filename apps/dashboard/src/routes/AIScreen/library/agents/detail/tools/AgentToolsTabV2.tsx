@@ -72,9 +72,6 @@ export function AgentToolsTabV2({
   const builtin = useBuiltinCatalog();
 
   const { saved } = tools;
-  // Deliberately NOT routed through tools.openManage/closeManage: that flow
-  // captures a draft on open and re-persists it on close, which would undo an
-  // add made while the dialog was open (the grant call writes config itself).
   const [agentsPickerOpen, setAgentsPickerOpen] = useState(false);
   const callable = useCallableAgents({
     agentSlug: agent.slug,
@@ -88,7 +85,7 @@ export function AgentToolsTabV2({
   // agents so a subagent/MCP/built-in edit never writes them out of the config.
   const withCallableAgents = (next: Required<ToolboxSelection>): ToolSelection => ({
     ...next,
-    callableAgents: tools.draft.callableAgents,
+    callableAgents: saved.callableAgents,
   });
 
   const subagentItems = useMemo<DetailListItem[]>(
@@ -157,6 +154,19 @@ export function AgentToolsTabV2({
 
   const note = canEdit ? null : <DetailLockedNote>{LOCK_NOTE}</DetailLockedNote>;
 
+  // No saved selection means different things per tier (resolveAgentToolsConfig
+  // in xyne-claw-shared): a standard agent runs with only the built-in file
+  // tools, an orchestrator with every tool the user has connected. The empty
+  // lists below would otherwise read as "no tools" for both.
+  const palette = (agent.config?.['tools'] as { openPalette?: unknown } | undefined)?.openPalette;
+  const nothingSelected =
+    [saved.subagents, saved.direct, saved.custom, saved.gateway, saved.callableAgents].every(
+      list => list.length === 0,
+    ) &&
+    palette !== 'read' &&
+    palette !== 'all';
+  const isOrchestrator = agent.delegationTier === 'orchestrator';
+
   /** Manage opens the same browse dialog the create flow uses; read-only says why. */
   const trailingFor = (label: string, section: ManageSectionId): ReactElement =>
     canEdit ? (
@@ -167,6 +177,27 @@ export function AgentToolsTabV2({
 
   return (
     <div className='flex w-full flex-col gap-8'>
+      {nothingSelected && (
+        <p className='rounded-lg border border-border bg-muted/40 px-4 py-2.5 text-xs leading-5 text-muted-foreground'>
+          {isOrchestrator ? (
+            <>
+              <span className='font-medium text-foreground'>Nothing selected — all tools.</span> As
+              an orchestrator this agent gets every tool the signed-in user has connected; its
+              most-used tools stay active and the rest load on demand. Add tools here to restrict it
+              to them.
+            </>
+          ) : (
+            <>
+              <span className='font-medium text-foreground'>
+                Nothing selected — file tools only.
+              </span>{' '}
+              This agent runs with just the built-in file tools (read, write, grep, find, ls) and
+              per-run defaults such as Spaces tools in a Spaces thread. Add tools here to give it
+              more.
+            </>
+          )}
+        </p>
+      )}
       <DetailSection
         label='Subagents'
         info='Specialists this agent can delegate a whole task to'
@@ -275,8 +306,8 @@ export function AgentToolsTabV2({
         loading={subagents.loading}
         isError={subagents.isError}
         onRetry={subagents.refetch}
-        selection={tools.draft}
-        onSelectionChange={next => tools.setDraft(withCallableAgents(next))}
+        selection={saved}
+        onSelectionChange={next => tools.commit(withCallableAgents(next), 'Tools updated')}
         suggested={[]}
       />
 
@@ -303,8 +334,8 @@ export function AgentToolsTabV2({
         loading={mcp.loading}
         isError={mcp.isError}
         onRetry={mcp.refetch}
-        selection={tools.draft}
-        onSelectionChange={next => tools.setDraft(withCallableAgents(next))}
+        selection={saved}
+        onSelectionChange={next => tools.commit(withCallableAgents(next), 'Tools updated')}
         suggested={[]}
       />
 
@@ -317,8 +348,8 @@ export function AgentToolsTabV2({
         loading={builtin.loading}
         isError={builtin.isError}
         onRetry={builtin.refetch}
-        selection={tools.draft}
-        onSelectionChange={next => tools.setDraft(withCallableAgents(next))}
+        selection={saved}
+        onSelectionChange={next => tools.commit(withCallableAgents(next), 'Tools updated')}
         suggested={[]}
       />
     </div>

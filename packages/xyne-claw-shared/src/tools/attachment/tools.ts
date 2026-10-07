@@ -8,9 +8,12 @@ export const sendAttachmentTool: ToolDefinition = {
   slug: "send-attachment",
   name: "Send File Attachment",
   description:
-    "Prepare a file to be sent as an attachment to the channel. " +
-    "The file will be uploaded when the agent's response is processed. " +
-    "Supported files: images (PNG, JPG, GIF), documents (PDF, DOCX), and any other file type.",
+    "Post a file you ALREADY HOLD AS BYTES in this turn to the channel as an attachment — you pass the " +
+    "content inline; it is uploaded when the response is processed. Any file type.\n\n" +
+    "Do NOT use it to ship something that lives on disk somewhere else — there is a tool for each place:\n" +
+    "- file inside the server sandbox → `sandbox-deliver-files` (pass its path; never read-then-resend it).\n" +
+    "- file in the local harness workspace → `deliver-files`.\n" +
+    "- bytes you generated or fetched in this turn → this tool.",
   source: "custom:attachment",
   inputSchema: {
     type: "object",

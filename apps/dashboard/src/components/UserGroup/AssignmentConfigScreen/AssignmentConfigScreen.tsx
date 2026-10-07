@@ -18,7 +18,7 @@ import { queries } from '../../../zero/queries';
 import { mutators } from '../../../zero/mutators';
 import { useActiveUsers } from '../../../hooks/useUsers';
 import type { Board, UserAssignmentState } from '@xyne/shared';
-import { RotationInterval } from '@xyne/shared';
+import { AuditEntityType, RotationInterval } from '@xyne/shared';
 import type { User } from '../../../machines/stateMachine';
 import { useCachedQuery } from '../../../hooks/useCachedQuery';
 import { v4 as uuidv4 } from 'uuid';
@@ -26,6 +26,7 @@ import { formatExpiryTime } from '../../../utils/statusUtils';
 import { OnCallRotationModal } from '../OnCallRotationModal/OnCallRotationModal';
 import { getUserDisplayName } from '../../../utils/userDisplayName';
 import { VisibilityTab } from './VisibilityTab';
+import { AuditLogSection } from './AuditLogSection';
 
 interface AssignmentConfigScreenProps {
   userGroupId: string;
@@ -1048,7 +1049,7 @@ export const AssignmentConfigScreen = ({
   };
 
   return (
-    <div className='flex h-full w-full flex-col overflow-hidden bg-background shadow-md md:rounded-2xl'>
+    <div className='flex h-full w-full flex-col overflow-hidden bg-background'>
       {/* Header */}
       <div className='shrink-0'>
         <div className='flex w-full items-center gap-5 px-6 pt-5'>
@@ -1056,7 +1057,7 @@ export const AssignmentConfigScreen = ({
             variant='ghost'
             size='iconSm'
             className='shrink-0 text-muted-foreground hover:text-foreground'
-            onClick={() => void navigate('/user-groups')}
+            onClick={() => void navigate('/organisations/user-groups')}
             aria-label='Back to user groups'
             data-track-category='UserGroups'
             data-track-name='BackToUserGroups'
@@ -1530,6 +1531,13 @@ export const AssignmentConfigScreen = ({
                   </li>
                 </ul>
               </div>
+
+              {/* Audit trail for this group's assignment config */}
+              <AuditLogSection
+                entityType={AuditEntityType.USER_GROUP_ASSIGNMENT_CONFIG}
+                entityId={userGroupId}
+                entityName={userGroup?.name ?? undefined}
+              />
             </>
           )}
 

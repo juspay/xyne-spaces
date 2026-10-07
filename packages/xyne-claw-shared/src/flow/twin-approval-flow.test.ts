@@ -1,6 +1,5 @@
 import { describe, it, expect } from "vitest";
 import { buildTwinApprovalFlow, type TwinApprovalFlowParams } from "./builder.js";
-import { isTwinDelivery } from "../types/twin-delivery.js";
 import type { FlowComponent, FlowDefinition } from "./builder.js";
 
 function base(overrides: Partial<TwinApprovalFlowParams> = {}): TwinApprovalFlowParams {
@@ -32,26 +31,6 @@ function walk(components: FlowComponent[]): FlowComponent[] {
 }
 const hasTextarea = (flow: FlowDefinition) => walk(flow.components).some((c) => c.type === "textarea");
 const data = (flow: FlowDefinition) => (flow.data ?? {}) as Record<string, unknown>;
-
-describe("isTwinDelivery", () => {
-  it("accepts well-formed deliveries", () => {
-    expect(isTwinDelivery({ action: "react", emoji: "👍" })).toBe(true);
-    expect(isTwinDelivery({ action: "reply", message: "hi" })).toBe(true);
-    expect(isTwinDelivery({ action: "react_and_reply", emoji: "✅", message: "done" })).toBe(true);
-  });
-  it("accepts ignore with no emoji/message (a valid confident-silence delivery)", () => {
-    expect(isTwinDelivery({ action: "ignore" })).toBe(true);
-    // A stray emoji field must not invalidate an ignore.
-    expect(isTwinDelivery({ action: "ignore", emoji: "x" })).toBe(true);
-  });
-  it("rejects malformed / incomplete deliveries", () => {
-    expect(isTwinDelivery(null)).toBe(false);
-    expect(isTwinDelivery({ action: "reply" })).toBe(false); // no message
-    expect(isTwinDelivery({ action: "react" })).toBe(false); // no emoji
-    expect(isTwinDelivery({ action: "react_and_reply", emoji: "👍" })).toBe(false); // no message
-    expect(isTwinDelivery({ action: "shout", message: "hi" })).toBe(false);
-  });
-});
 
 describe("buildTwinApprovalFlow", () => {
   it("reply: shows an editable body, prefills it, and carries the structured delivery in data", () => {

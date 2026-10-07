@@ -15,6 +15,7 @@ import { useAffinityCallback } from '../../../hooks/useAffinityCallback';
 import { useAuth } from '../../../hooks/useAuth';
 import {
   useChannelSearch,
+  useChannelMentionSearch,
   useAllChannels,
   useAllVisibleChannels,
 } from '../../../hooks/useChannels';
@@ -26,7 +27,7 @@ import {
   formatRelativeTime,
   formatRelativeTimestamp,
 } from '../../../utils/dateUtils';
-import HuddleIcon from '../../icons/HuddleIcon';
+import { PhoneDefault } from '@xyne/icons';
 import AIAgentIcon from '../../icons/AIAgentIcon';
 import { getEmojiFontSizeClass } from '../../../utils/emojiUtils';
 import { getUserDisplayName } from '../../../utils/userDisplayName';
@@ -235,16 +236,40 @@ export const ForwardMessageForm: React.FC<ForwardMessageFormProps> = ({
             }),
           );
 
-          // Show success message
-          logger.info(Event.MESSAGE_FORWARDED, {
-            originalMessageId: message.messageId,
-            targetType: 'channel',
-            targetChannelId: firstTarget.id,
-          });
-          toast.success('Message forwarded', {
-            description: `Message sent to #${firstTarget.name}`,
-            duration: 3000,
-          });
+          // One toast for the whole forward: "Forwarding…" until the server answers, then
+          // replaced in place by success or failure, so a rejected forward never shows
+          // "Message forwarded" first.
+          const toastId = toast.loading(`Forwarding to #${firstTarget.name}…`);
+          let settled = false;
+          let timedOut = false;
+          const slowTimer = setTimeout(() => {
+            if (settled) return;
+            timedOut = true;
+            toast.message('Still forwarding…', {
+              id: toastId,
+              description: 'It will be delivered once the connection recovers.',
+              duration: 5000,
+            });
+          }, 10_000);
+
+          void mutation.server
+            .then(result => {
+              if (result.type === 'error' || settled) return;
+              settled = true;
+              clearTimeout(slowTimer);
+              logger.info(Event.MESSAGE_FORWARDED, {
+                originalMessageId: message.messageId,
+                targetType: 'channel',
+                targetChannelId: firstTarget.id,
+              });
+              if (timedOut) return; // already told the user it's on its way
+              toast.success('Message forwarded', {
+                id: toastId,
+                description: `Message sent to #${firstTarget.name}`,
+                duration: 3000,
+              });
+            })
+            .catch(() => undefined); // rejections are handled by subscribeSendLifecycle below
 
           // Reset form and close modal
           form.reset();
@@ -258,12 +283,16 @@ export const ForwardMessageForm: React.FC<ForwardMessageFormProps> = ({
           // Surface a real mutator rejection; transient zero errors are ignored
           // since Zero still persists those on reconnect.
           subscribeSendLifecycle(mutation, () => {
+            if (settled) return;
+            settled = true;
+            clearTimeout(slowTimer);
             logger.error(Event.MESSAGE_FORWARD_FAILED, {
               originalMessageId: message.messageId,
               targetType: 'channel',
               targetChannelId: firstTarget.id,
             });
             toast.error('Failed to forward message', {
+              id: toastId,
               description: `Please try again.`,
               duration: 3000,
             });
@@ -362,21 +391,18 @@ export const ForwardMessageForm: React.FC<ForwardMessageFormProps> = ({
 
   // Channel mention search for # mentions in optional message
   const [channelMentionQuery, setChannelMentionQuery] = useState('');
-  const channelMentionResults = useChannelSearch(channelMentionQuery, 10);
+  const channelMentionResults = useChannelMentionSearch(channelMentionQuery, 10);
 
   const channelMentionItems = useMemo(() => {
     if (!channelMentionResults || channelMentionResults.length === 0) return [];
 
-    // Filter channels to only show DEFAULT scope (exclude DM, GROUP_DM, TICKET, DOCUMENT)
-    return channelMentionResults
-      .filter(channel => channel.scopeType === ChannelScopeType.DEFAULT)
-      .map(channel => ({
-        id: channel.id,
-        name: channel.name,
-        isPrivate: channel.visibility === ChannelVisibility.PRIVATE,
-        ...(channel.description && { description: channel.description }),
-        hasAccess: true,
-      }));
+    return channelMentionResults.map(channel => ({
+      id: channel.id,
+      name: channel.name,
+      isPrivate: channel.visibility === ChannelVisibility.PRIVATE,
+      ...(channel.description && { description: channel.description }),
+      hasAccess: true,
+    }));
   }, [channelMentionResults]);
 
   const handleChannelMentionSearch = (query: string): void => {
@@ -1184,7 +1210,7 @@ export const ForwardMessageForm: React.FC<ForwardMessageFormProps> = ({
                   <div className='flex-shrink-0'>
                     {isCallMessage ? (
                       <div className='w-10 h-10 rounded-md flex items-center justify-center bg-accent'>
-                        <HuddleIcon color='hsl(var(--muted-foreground))' size={20} />
+                        <PhoneDefault color='hsl(var(--muted-foreground))' size={20} />
                       </div>
                     ) : (
                       <Avatar userId={message.senderId} size='md' />

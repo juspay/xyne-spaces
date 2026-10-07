@@ -11,6 +11,8 @@ export interface DrawerProps {
   title?: ReactNode;
   description?: ReactNode;
   focusRef?: RefObject<HTMLElement | null>;
+  /** Merged onto the scroll wrapper around `children`. */
+  bodyClassName?: string;
 }
 
 /**
@@ -38,6 +40,7 @@ export const Drawer = ({
   title,
   description,
   focusRef,
+  bodyClassName,
 }: DrawerProps): React.ReactElement => {
   useNativeDrawerBridge({ open, onOpenChange });
 
@@ -75,7 +78,7 @@ export const Drawer = ({
           {/* Drag handle */}
           <div className='mx-auto mt-4 h-2 w-[100px] rounded-full bg-muted-foreground/30' />
 
-          <div className='overflow-auto flex-1'>
+          <div className={cn('overflow-auto flex-1', bodyClassName)}>
             {/* Hidden title and description for accessibility */}
             {title && <DrawerPrimitive.Title className='hidden'>{title}</DrawerPrimitive.Title>}
             {description && (

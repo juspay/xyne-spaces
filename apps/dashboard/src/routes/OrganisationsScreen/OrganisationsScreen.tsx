@@ -1,5 +1,5 @@
 import { logger, Event as LogEvent } from '../../utils/logger';
-import { ReactElement, useEffect, useRef, useState } from 'react';
+import { ReactElement, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Building2,
   Plus,
@@ -17,10 +17,13 @@ import {
   Globe2,
   LockKeyhole,
   UserCheck,
+  Search,
+  ChevronLeft,
 } from 'lucide-react';
 import { Button } from '../../components/ui/Button/Button';
 import Input from '../../components/ui/Input/Input';
-import { useSelf } from '../../hooks/useUsers';
+import { useSelf, useUsers } from '../../hooks/useUsers';
+import { useDebouncedValue } from '../../hooks/useDebouncedValue';
 import { useZero } from '../../hooks/useZero';
 import { useCachedQuery } from '../../hooks/useCachedQuery';
 import { queries } from '../../zero/queries';
@@ -43,6 +46,7 @@ import { usePlatform } from '../../hooks/usePlatform';
 import { setLastActiveWorkspaceId, setLastActiveWorkspaceName } from '../../machines/authMachine';
 import { apiInstance } from '../../services/clients/apiClient';
 import { JoinRequestsSection } from './JoinRequestsSection';
+import { PendingInvitationsSection } from './PendingInvitationsSection';
 
 // ─── types ───────────────────────────────────────────────────────────────────
 
@@ -133,6 +137,9 @@ const RoleBadge = ({ role }: { role: OrgRole }): ReactElement => {
 // ─── OrgMembersSection ────────────────────────────────────────────────────────
 // Per-org sub-component so each expansion has its own reactive query + local state.
 
+// Same page size as the workspace Members table (UserListView).
+const ORG_MEMBERS_PAGE_SIZE = 10;
+
 interface OrgMembersSectionProps {
   orgId: string;
   orgCreatedBy: string;
@@ -167,6 +174,37 @@ const OrgMembersSection = ({
   const [updatingRoleId, setUpdatingRoleId] = useState<string | null>(null);
   const emailInputRef = useRef<HTMLInputElement>(null);
   const { isMobile } = usePlatform();
+
+  // Org members carry only an email; names come from this workspace's users,
+  // so members outside the workspace (bots, other workspaces) show email only.
+  const workspaceUsers = useUsers();
+  const nameByEmail = useMemo(
+    () => new Map(workspaceUsers.map(u => [u.email.toLowerCase(), u.name])),
+    [workspaceUsers],
+  );
+  const [memberSearch, setMemberSearch] = useState('');
+  const debouncedMemberSearch = useDebouncedValue(memberSearch, 300);
+  const [memberPage, setMemberPage] = useState(1);
+
+  const allMembers = useMemo(() => (members as OrgMemberRow[] | undefined) ?? [], [members]);
+  const filteredMembers = useMemo(() => {
+    const q = debouncedMemberSearch.trim().toLowerCase();
+    if (!q) return allMembers;
+    return allMembers.filter(
+      m =>
+        m.email.toLowerCase().includes(q) ||
+        (nameByEmail.get(m.email.toLowerCase()) ?? '').toLowerCase().includes(q),
+    );
+  }, [allMembers, debouncedMemberSearch, nameByEmail]);
+  const memberPageCount = Math.max(1, Math.ceil(filteredMembers.length / ORG_MEMBERS_PAGE_SIZE));
+  const safeMemberPage = Math.min(memberPage, memberPageCount);
+  const pagedMembers = filteredMembers.slice(
+    (safeMemberPage - 1) * ORG_MEMBERS_PAGE_SIZE,
+    safeMemberPage * ORG_MEMBERS_PAGE_SIZE,
+  );
+  useEffect(() => {
+    setMemberPage(1);
+  }, [debouncedMemberSearch]);
 
   // Determine if the current user can manage this org (matched by email).
   // Fallback: the org creator can always manage (mirrors canInsert ACL bootstrap path).
@@ -341,15 +379,36 @@ const OrgMembersSection = ({
         </div>
       )}
 
+      {/* Members search */}
+      {allMembers.length > 0 && (
+        <div className='px-4 py-3 border-b border-border'>
+          <div className='relative max-w-md'>
+            <Search className='absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground pointer-events-none' />
+            <Input
+              type='text'
+              placeholder='Search members by name or email...'
+              value={memberSearch}
+              onChange={e => setMemberSearch(e.target.value)}
+              className='pl-10 w-full'
+            />
+          </div>
+        </div>
+      )}
+
       {/* Members list */}
-      {!members || (members as OrgMemberRow[]).length === 0 ? (
+      {allMembers.length === 0 ? (
         <div className='p-6 text-center text-muted-foreground'>
           <Users className='w-8 h-8 mx-auto mb-2 opacity-50' />
           <p className='text-sm'>No members in this organisation</p>
         </div>
+      ) : filteredMembers.length === 0 ? (
+        <div className='p-6 text-center text-muted-foreground'>
+          <p className='text-sm font-medium text-foreground'>No members match</p>
+          <p className='text-xs'>Try a different name or email</p>
+        </div>
       ) : (
         <div className='divide-y divide-border'>
-          {(members as OrgMemberRow[]).map(member => (
+          {pagedMembers.map(member => (
             <div
               key={member.memberId}
               className='flex items-center justify-between px-4 py-3 hover:bg-muted/30 transition-colors'
@@ -361,8 +420,17 @@ const OrgMembersSection = ({
                     {member.email[0]?.toUpperCase()}
                   </span>
                 </div>
-                <div>
-                  <p className='text-sm font-medium text-foreground'>{member.email}</p>
+                <div className='min-w-0'>
+                  {nameByEmail.get(member.email.toLowerCase()) ? (
+                    <>
+                      <p className='text-sm font-medium text-foreground truncate'>
+                        {nameByEmail.get(member.email.toLowerCase())}
+                      </p>
+                      <p className='text-xs text-muted-foreground truncate'>{member.email}</p>
+                    </>
+                  ) : (
+                    <p className='text-sm font-medium text-foreground truncate'>{member.email}</p>
+                  )}
                 </div>
                 <RoleBadge role={member.role} />
               </div>
@@ -437,6 +505,45 @@ const OrgMembersSection = ({
               )}
             </div>
           ))}
+        </div>
+      )}
+
+      {filteredMembers.length > ORG_MEMBERS_PAGE_SIZE && (
+        <div className='flex items-center justify-between px-4 py-3 bg-muted border-t border-border'>
+          <span className='text-sm text-muted-foreground'>
+            Showing {(safeMemberPage - 1) * ORG_MEMBERS_PAGE_SIZE + 1} -{' '}
+            {Math.min(safeMemberPage * ORG_MEMBERS_PAGE_SIZE, filteredMembers.length)} of{' '}
+            {filteredMembers.length} members
+          </span>
+          <div className='flex items-center gap-2'>
+            <Button
+              variant='ghost'
+              size='sm'
+              onClick={() => setMemberPage(Math.max(1, safeMemberPage - 1))}
+              disabled={safeMemberPage === 1}
+              aria-label='Previous page'
+              className='h-8 w-8 p-0'
+              data-track-category='Organisations'
+              data-track-name='OrgMembersPrevPage'
+            >
+              <ChevronLeft className='w-4 h-4' />
+            </Button>
+            <span className='text-sm text-foreground'>
+              Page {safeMemberPage} of {memberPageCount}
+            </span>
+            <Button
+              variant='ghost'
+              size='sm'
+              onClick={() => setMemberPage(Math.min(memberPageCount, safeMemberPage + 1))}
+              disabled={safeMemberPage === memberPageCount}
+              aria-label='Next page'
+              className='h-8 w-8 p-0'
+              data-track-category='Organisations'
+              data-track-name='OrgMembersNextPage'
+            >
+              <ChevronRight className='w-4 h-4' />
+            </Button>
+          </div>
         </div>
       )}
     </div>
@@ -603,7 +710,7 @@ export const OrganisationsScreen = (): ReactElement => {
   return (
     <div
       data-testid='organisations-page'
-      className='h-full bg-muted flex flex-col md:rounded-2xl overflow-hidden shadow-[0_0_8px_0_rgba(0,0,0,0.15)] border-root-border border'
+      className='h-full bg-background flex flex-col overflow-hidden'
     >
       {/* ── Org mismatch guard ── */}
       {orgMismatch ? (
@@ -767,6 +874,10 @@ export const OrganisationsScreen = (): ReactElement => {
               ) : null}
 
               {canCreateCommunityWorkspace ? <JoinRequestsSection orgId={workspaceOrgId} /> : null}
+
+              {canCreateCommunityWorkspace ? (
+                <PendingInvitationsSection orgId={workspaceOrgId} />
+              ) : null}
 
               {/* ── Linked orgs accordion list ── */}
               <Card>

@@ -10,6 +10,7 @@ process.env["CLI_TOKENS_ENABLED"] = "true";
 const state = vi.hoisted(() => ({
   rawToken: "",
   verifyCalls: 0,
+  clawUserId: undefined as string | undefined,
   config: {
     cliTokensEnabled: true,
     xyneClawS2sKey: "s2s-secret",
@@ -35,6 +36,7 @@ vi.mock("../lib/cli-tokens.js", () => ({
 
 vi.mock("../lib/users-jit.js", () => ({
   ensureUserExists: vi.fn(async () => undefined),
+  resolveClawUserIdForSpacesIdentity: vi.fn(async () => state.clawUserId),
 }));
 
 vi.mock("../db.js", () => ({
@@ -176,6 +178,9 @@ function findRequireAuthMountsMissingBarrier(mounts: string[]): string[] {
     // Scope-aware read barrier counts too: it rejects token WRITES outright
     // and token READS without the named scope (see allowReadAccessToken).
     && !mount.includes("allowReadAccessToken(")
+    // Scope-aware read+write barrier: token writes are limited to POST on the
+    // allowlisted paths AND the named scope (see allowScopedAccessToken).
+    && !mount.includes("allowScopedAccessToken(")
     && !mount.includes("runRouter")
   );
 }
@@ -249,6 +254,81 @@ describe("requireAuth CLI bearer branch", () => {
 
     expect(next).not.toHaveBeenCalled();
     expect(res.status).toHaveBeenCalledWith(401);
+  });
+});
+
+describe("x-spaces-* header trust boundary", () => {
+  beforeEach(() => {
+    state.rawToken = "";
+    state.verifyCalls = 0;
+    state.clawUserId = undefined;
+    state.config.cliTokensEnabled = true;
+  });
+
+  it("strips forged x-spaces-* headers so a token caller cannot impersonate a Spaces identity", async () => {
+    const { requireAuth } = await import("./require-auth.js");
+    const req = {
+      headers: {
+        authorization: "Bearer xyne_cli_real",
+        "x-spaces-user-id": "victim-spaces-id",
+        "x-spaces-workspace-id": "victim-workspace",
+        "x-spaces-org-member-id": "victim-member",
+      },
+    } as unknown as Request;
+    const res = {
+      status: vi.fn().mockReturnThis(),
+      json: vi.fn(),
+    } as unknown as Response;
+    const next: NextFunction = vi.fn();
+
+    await requireAuth(req, res, next);
+
+    expect(next).toHaveBeenCalledOnce();
+    expect(req.headers["x-user-id"]).toBe("token-owner");
+    expect(req.headers["x-org-id"]).toBe("org-token");
+    // The forged trust-bearing headers must NOT survive entry; only verified
+    // branches (cookie /me success, or a validated S2S key) may stamp them.
+    expect(req.headers["x-spaces-user-id"]).toBeUndefined();
+    expect(req.headers["x-spaces-workspace-id"]).toBeUndefined();
+    expect(req.headers["x-spaces-org-member-id"]).toBeUndefined();
+
+    // Concretely: the pin/alias helpers must not treat the forged id as verified.
+    const { matchesAuthenticatedUserId, getRequesterAliases } = await import("./pin-user-id-param.js");
+    expect(matchesAuthenticatedUserId(req, "victim-spaces-id")).toBe(false);
+    expect(matchesAuthenticatedUserId(req, "token-owner")).toBe(true);
+    expect(getRequesterAliases(req)).toEqual(["token-owner"]);
+  });
+
+  it("keeps the verified S2S contract: a valid key may pin x-spaces-* identity", async () => {
+    state.clawUserId = "claw-canonical-1";
+    const { requireAuth } = await import("./require-auth.js");
+    const req = {
+      headers: {
+        "x-s2s-key": "s2s-secret",
+        "x-user-id": "ws-member-1",
+        "x-spaces-user-id": "ws-member-1",
+        "x-spaces-workspace-id": "ws-1",
+      },
+    } as unknown as Request;
+    const res = {
+      status: vi.fn().mockReturnThis(),
+      json: vi.fn(),
+    } as unknown as Response;
+    const next: NextFunction = vi.fn();
+
+    await requireAuth(req, res, next);
+
+    expect(next).toHaveBeenCalledOnce();
+    expect(res.status).not.toHaveBeenCalled();
+    // Canonical Claw id is stamped in x-user-id; the raw workspace identity is
+    // retained on the side headers as the verified alias pair.
+    expect(req.headers["x-user-id"]).toBe("claw-canonical-1");
+    expect(req.headers["x-spaces-user-id"]).toBe("ws-member-1");
+    expect(req.headers["x-spaces-workspace-id"]).toBe("ws-1");
+
+    const { matchesAuthenticatedUserId } = await import("./pin-user-id-param.js");
+    expect(matchesAuthenticatedUserId(req, "claw-canonical-1")).toBe(true);
+    expect(matchesAuthenticatedUserId(req, "ws-member-1")).toBe(true);
   });
 });
 
@@ -430,5 +510,118 @@ describe("main.ts requireAuth mount policy", () => {
       violations,
       `Every app.use(...) mount with requireAuth must also include requireNoAccessToken, except runRouter.\n\nOffending mounts:\n${violations.join("\n")}`,
     ).toEqual([]);
+  });
+});
+
+/**
+ * A cookie-authed `/claw/*` request that could not be VERIFIED must never come
+ * back as 401.
+ *
+ * The dashboard's axios interceptor (apps/dashboard/src/services/clients/
+ * apiClient.ts) treats any 401 from its own origin as session expiry: it calls
+ * clearAuthTokens() and redirects to /auth. Because `/claw/*` is served from the
+ * same host as Spaces, a claw-auth 401 caused by nothing worse than a slow
+ * /api/auth/me logged real users out. Prod showed 417 such 401s in 6h clustered
+ * at p50 5007ms — exactly the identity-lookup timeout.
+ *
+ * So: upstream timeout / unreachable / 5xx => 503. Only Spaces actually saying
+ * "not you" (or no cookie at all) is a 401.
+ */
+describe("requireAuth: unverifiable identity is 503, not 401", () => {
+  const COOKIE = { headers: { cookie: "xyne-session=abc" } } as unknown as Request;
+
+  function mockRes(): Response & { _status?: number; _body?: unknown } {
+    const res = {
+      _status: undefined as number | undefined,
+      _body: undefined as unknown,
+      setHeader: vi.fn(),
+      status: vi.fn(function (this: { _status?: number }, code: number) {
+        this._status = code;
+        return this as unknown as Response;
+      }),
+      json: vi.fn(function (this: { _body?: unknown }, body: unknown) {
+        this._body = body;
+        return this as unknown as Response;
+      }),
+    };
+    return res as unknown as Response & { _status?: number; _body?: unknown };
+  }
+
+  beforeEach(() => {
+    state.config.cliTokensEnabled = false;
+  });
+
+  it("returns 503 when /api/auth/me times out", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => {
+      const err = new Error("The operation was aborted due to timeout");
+      err.name = "TimeoutError";
+      throw err;
+    }));
+    const { requireAuth } = await import("./require-auth.js");
+    const res = mockRes();
+    const next: NextFunction = vi.fn();
+
+    await requireAuth({ ...COOKIE, headers: { ...COOKIE.headers } } as Request, res, next);
+
+    expect(next).not.toHaveBeenCalled();
+    expect(res._status).toBe(503);
+    expect((res._body as { code?: string }).code).toBe("AUTH_UPSTREAM_UNAVAILABLE");
+    expect(res.setHeader).toHaveBeenCalledWith("Retry-After", "1");
+    vi.unstubAllGlobals();
+  });
+
+  it("returns 503 when /api/auth/me answers 5xx", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => ({ ok: false, status: 503 })));
+    const { requireAuth } = await import("./require-auth.js");
+    const res = mockRes();
+    const next: NextFunction = vi.fn();
+
+    await requireAuth({ ...COOKIE, headers: { ...COOKIE.headers } } as Request, res, next);
+
+    expect(res._status).toBe(503);
+    vi.unstubAllGlobals();
+  });
+
+  it("still returns 401 when Spaces actively rejects the session", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => ({ ok: false, status: 401 })));
+    const { requireAuth } = await import("./require-auth.js");
+    const res = mockRes();
+    const next: NextFunction = vi.fn();
+
+    await requireAuth({ ...COOKIE, headers: { ...COOKIE.headers } } as Request, res, next);
+
+    expect(res._status).toBe(401);
+    vi.unstubAllGlobals();
+  });
+
+  it("still returns 401 when there is no cookie at all", async () => {
+    const { requireAuth } = await import("./require-auth.js");
+    const res = mockRes();
+    const next: NextFunction = vi.fn();
+
+    await requireAuth({ headers: {} } as unknown as Request, res, next);
+
+    expect(res._status).toBe(401);
+  });
+
+  it("lets a valid s2s key through even while /api/auth/me is timing out", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => {
+      const err = new Error("timeout");
+      err.name = "TimeoutError";
+      throw err;
+    }));
+    const { requireAuth } = await import("./require-auth.js");
+    const res = mockRes();
+    const next: NextFunction = vi.fn();
+
+    await requireAuth(
+      { headers: { cookie: "xyne-session=abc", "x-s2s-key": "s2s-secret" } } as unknown as Request,
+      res,
+      next,
+    );
+
+    expect(next).toHaveBeenCalledOnce();
+    expect(res._status).toBeUndefined();
+    vi.unstubAllGlobals();
   });
 });

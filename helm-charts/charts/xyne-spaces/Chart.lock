@@ -56,5 +56,14 @@ dependencies:
 - name: xyne-tei-batch-proxy
   repository: file://../xyne-tei-batch-proxy
   version: 0.1.0
-digest: sha256:0162f0002fa69630c3a318c7927913dbf79d0370698b79ccc73dae51e3c683db
-generated: "2026-09-21T19:11:55.592652+05:30"
+- name: xyne-redis
+  repository: file://../xyne-redis
+  version: 0.1.0
+- name: xyne-sandbox-router
+  repository: file://../xyne-sandbox-router
+  version: 0.1.0
+- name: xyne-egress-proxy
+  repository: file://../xyne-egress-proxy
+  version: 0.1.0
+digest: sha256:7121b1fe3cbeeefd4590ee42ef47c332c37e3d9ce978e803fd46febab32ec86c
+generated: "2026-09-22T13:09:29.276131+05:30"

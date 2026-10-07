@@ -1,0 +1,20 @@
+{{- $m := .Values.addons.monitoring }}
+{{- if $m.enabled }}
+{{- $pool := include "xyne-root.pool" (dict "root" $ "pool" "general") | fromYaml }}
+{{- $vmBase := dict "fullnameOverride" "vm" }}
+{{- $vmValues := include "xyne-root.merge" (dict "base" $vmBase "layers" (list $m.values.victoriaMetrics)) | fromYaml }}
+{{- include "xyne-root.application" (dict "root" $ "name" "victoria-metrics" "namespace" $m.namespace "wave" 1 "source" (include "xyne-root.helmSource" (dict "root" $ "repoURL" "https://victoriametrics.github.io/helm-charts/" "chart" "victoria-metrics-k8s-stack" "targetRevision" $m.victoriaMetrics.version "releaseName" "vm" "values" $vmValues) | fromYaml) "syncOptions" (list "ServerSideApply=true")) }}
+{{- $otelBase := dict
+  "mode" "deployment"
+  "fullnameOverride" "otel-collector"
+  "image" (dict "repository" "ghcr.io/open-telemetry/opentelemetry-collector-releases/opentelemetry-collector-k8s")
+  "config" (dict
+    "receivers" (dict "otlp" (dict "protocols" (dict "http" (dict "endpoint" "0.0.0.0:4318") "grpc" (dict "endpoint" "0.0.0.0:4317"))))
+    "exporters" (dict "otlphttp/metrics" (dict "endpoint" $m.metricsEndpoint "tls" (dict "insecure" true)))
+    "service" (dict "pipelines" (dict "metrics" (dict "receivers" (list "otlp") "processors" (list "batch") "exporters" (list "otlphttp/metrics"))))
+  )
+  "ports" (dict "otlp" (dict "enabled" true) "otlp-http" (dict "enabled" true))
+}}
+{{- $otelValues := include "xyne-root.merge" (dict "base" $otelBase "layers" (list $pool $m.values.otelCollector)) | fromYaml }}
+{{- include "xyne-root.application" (dict "root" $ "name" "otel-collector" "namespace" $m.namespace "wave" 1 "source" (include "xyne-root.helmSource" (dict "root" $ "repoURL" "https://open-telemetry.github.io/opentelemetry-helm-charts" "chart" "opentelemetry-collector" "targetRevision" $m.otelCollector.version "releaseName" "otel-collector" "values" $otelValues) | fromYaml) "ignoreDifferences" (include "xyne-root.deploymentIgnore" . | fromYamlArray)) }}
+{{- end }}

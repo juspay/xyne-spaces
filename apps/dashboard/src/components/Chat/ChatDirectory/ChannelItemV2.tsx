@@ -1,25 +1,25 @@
 import { memo, ReactElement, useState } from 'react';
 import { withProfiler } from '../../../utils/withProfiler';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link } from 'react-router-dom';
+import { useStableNavigate } from '../../../hooks/useStableRouter';
 import {
   Hashtag,
   PencilEdit,
-  Headphones,
   MultipleCrossCancelDefault,
   ThreeDotsMenuVertical,
   CheckTickSingle,
   FolderArrowRight,
   FolderRemove,
+  PhoneDefault,
 } from '@xyne/icons';
-import {
-  ChannelVisibility,
-  ChannelScopeType,
-  ChannelType,
-  NotificationLevel,
-  ChannelSection,
-} from '@xyne/shared';
+import { ChannelVisibility, ChannelScopeType, ChannelType, ChannelSection } from '@xyne/shared';
 import { VisibleChannel } from '../../../machines/stateMachine';
-import { isDMChannel, isGroupDMChannel, parseDMParticipantIds } from './ChatDirectory.utils';
+import {
+  isChannelBold,
+  isDMChannel,
+  isGroupDMChannel,
+  parseDMParticipantIds,
+} from './ChatDirectory.utils';
 import { useDraft, useDraftFromDB } from '../../../hooks/useDraft';
 import { useChannelDisplayName } from '../../../hooks/useChannelDisplayName';
 import ChatLock from '../../icons/ChatLock';
@@ -75,7 +75,7 @@ const ChannelItemV2 = memo(
     const [sectionMenuOpen, setSectionMenuOpen] = useState(false);
     const zero = useZero();
     const context = useAuthContextValues();
-    const navigate = useNavigate();
+    const navigate = useStableNavigate();
 
     const currentUserID = context.userID;
 
@@ -96,15 +96,7 @@ const ChannelItemV2 = memo(
     const { displayName, avatarUserId } = useChannelDisplayName(channel, currentUserID);
 
     const status = useGetChannelUserStatus(channel.id);
-    const hasUnreadCount = unreadCount > 0;
-    const isMuted = status?.desktopNotificationLevel === NotificationLevel.NONE;
-    const shouldShowBold = isDM
-      ? hasUnreadCount
-      : !isMuted &&
-        (hasUnreadCount ||
-          (!!status?.lastViewedAt &&
-            !!channel.channelStats?.lastActivityAt &&
-            channel.channelStats.lastActivityAt > status.lastViewedAt));
+    const shouldShowBold = isChannelBold(channel, unreadCount, status);
 
     const shouldShowCloseButton = isDM && !isActive && unreadCount === 0 && !isMobile;
 
@@ -228,7 +220,7 @@ const ChannelItemV2 = memo(
           </span>
           {hasActiveCall && !isDM && (
             <span className='shrink-0 rounded-full bg-status-success px-2 py-1 text-background'>
-              <Headphones size={14} />
+              <PhoneDefault size={14} />
             </span>
           )}
           {shouldShowDraft && !hideDraftIndicator && (

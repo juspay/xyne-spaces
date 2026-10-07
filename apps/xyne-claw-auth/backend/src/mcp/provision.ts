@@ -8,11 +8,13 @@ import {
   writeFileSync,
   mkdirSync,
 } from "node:fs";
-import { execFileSync } from "node:child_process";
+import { execFile } from "node:child_process";
 import path from "node:path";
+import { promisify } from "node:util";
 
 import { createLogger } from "../logger.js";
 const log = createLogger("provision");
+const execFileAsync = promisify(execFile);
 
 /**
  * Hardened provisioner for `npx`-launched MCP servers.
@@ -179,7 +181,9 @@ async function install(name: string, version: string | undefined, dir: string): 
       path.join(tmp, "package.json"),
       JSON.stringify({ name: "mcp-host", version: "0.0.0", private: true }),
     );
-    execFileSync(
+    // Not execFileSync: an install takes up to INSTALL_TIMEOUT_MS, and blocking
+    // the event loop that long stalls every lease and lock renewal on the pod.
+    await execFileAsync(
       "npm",
       [
         "install",
@@ -193,7 +197,6 @@ async function install(name: string, version: string | undefined, dir: string): 
         "--loglevel=error",
       ],
       {
-        stdio: ["ignore", "pipe", "pipe"],
         timeout: INSTALL_TIMEOUT_MS,
         env: { ...process.env, npm_config_update_notifier: "false" },
       },

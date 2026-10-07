@@ -1,5 +1,5 @@
 import type { Logger } from "../../logger.js";
-import type { ResolvedAgent } from "../digital-twin-agent.js";
+import type { ResolvedAgent } from "../resolved-agent.js";
 import type { ProviderOverride } from "../parseSlashCommand.js";
 
 export interface StopReconcileResult {
@@ -23,6 +23,7 @@ export interface WebhookCommandCtx {
   taskCommandText: string;
   immediateTaskCommand: boolean;
   autoGoalEnabled: boolean;
+  isTwin: boolean;
   reply: (markdownText: string, failureLabel: string) => Promise<void>;
   reconcileStoppedRuns: (
     conversationId: string,

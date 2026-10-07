@@ -8,13 +8,10 @@ export {
   useCanManageUserActivity,
 } from '@xyne/shared/hooks';
 
-import { useHasResourceAccess, usePermissions } from '@xyne/shared/hooks';
+import { usePermissions } from '@xyne/shared/hooks';
 import { AccessType } from '@xyne/shared';
 import { useAuth } from './useAuth';
 
-export const useIsMemoryAdmin = (): boolean => {
-  return useHasResourceAccess('MEMORY');
-};
 export const useCanCreateWorkspace = (): boolean => {
   const permissions = usePermissions();
   return permissions.some(

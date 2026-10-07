@@ -1,33 +1,40 @@
-import { type Express, type Request, type Response } from "express";
+import { type Express, type NextFunction, type Request, type Response } from "express";
 import { requestLogger } from "../middleware/requestLogger.js";
 import { errorMiddleware } from "../lib/http.js";
 import { serversRouter } from "../routes/servers.js";
 import { connectionsRouter } from "../routes/connections.js";
 import { mcpRouter } from "../routes/mcp.js";
+import { sdlcRuntimeCredentialsRouter } from "../routes/sdlc-runtime-credentials.js";
 import { awakeningRouter } from "../routes/awakening.js";
 import { runRouter } from "../routes/run.js";
 import { runStreamRouter, runStreamInternalRouter } from "../routes/run-stream.js";
 import { usersRouter } from "../routes/users.js";
+import { spacesSyncRouter } from "../routes/spaces-sync.js";
 import { gatewaysRouter } from "../routes/gateways.js";
 import { webhookRouter } from "../routes/webhook.js";
 import { flowActionRouter } from "../routes/flow-action.js";
-import { twinDraftInternalRouter } from "../routes/twin-draft.js";
+import { twinDraftInternalRouter } from "../routes/twin-draft-internal.js";
 import { attachmentsInternalRouter } from "../routes/attachments.js";
+import { appConnectorsInternalRouter } from "../routes/app-connectors-internal.js";
+import { agentsInternalRouter } from "../routes/agents-internal.js";
 import { agentsRouter } from "../routes/agents.js";
 import { chainWorkflowsRouter } from "../routes/chain-workflows.js";
 import { spacesRouter } from "../routes/spaces.js";
 import { toolsRouter } from "../routes/tools.js";
 import { researchAgentRouter } from "../routes/research-agent.js";
 import { skillsRouter } from "../routes/skills.js";
+import { gatewayRegistryUiRouter } from "../routes/gateway-registry-ui.js";
 import { knowledgeBaseRouter } from "../routes/knowledge-base.js";
 import subagentsRouter from "../routes/subagents.js";
 import sandboxRouter from "../routes/sandbox.js";
+import sandboxAccessRouter from "../routes/sandbox-access.js";
 import { adminRouter } from "../routes/admin.js";
 import { adminDigitalTwinRouter } from "../routes/admin-digital-twin.js";
 import { organizationsRouter } from "../routes/organizations.js";
 // TEMPORARY — delete after backfill of agents.signingSecret is complete.
 import { adminBackfillSigningSecretsRouter } from "../routes/admin-backfill-signing-secrets.js";
 import { dashboardRouter } from "../routes/dashboard.js";
+import { messagingRouter } from "../surfaces/messaging/routes/index.js";
 import { agentChatRouter, agentChatInternalRouter } from "../routes/agent-chat.js";
 import { artifactAppsRouter } from "../routes/artifact-apps.js";
 import { artifactAppAgentsRouter } from "../routes/artifact-app-agents.js";
@@ -36,10 +43,12 @@ import { designSharesRouter, publicDesignSharesRouter } from "../routes/design-s
 import { conversationArtifactsRouter } from "../routes/conversation-artifacts.js";
 import { sessionsArchiveRouter } from "../routes/sessions-archive.js";
 import { surfaceInternalRouter } from "../routes/surface-internal.js";
+import { pagePanelRouter } from "../routes/page-panel.js";
 import { experimentsInternalRouter } from "../routes/experiments-internal.js";
 import { artifactAppsInternalRouter } from "../routes/artifact-apps-internal.js";
 import { errorPipelineIngestRouter, errorPipelineInternalRouter } from "../routes/error-pipeline.js";
 import { connectorsInternalRouter } from "../routes/connectors-internal.js";
+import { providersInternalRouter } from "../routes/providers-internal.js";
 import { googleOAuthRouter, googleCallbackRouter } from "../routes/google-oauth.js";
 import { microsoftOAuthRouter, microsoftCallbackRouter } from "../routes/microsoft-oauth.js";
 import { calendlyOAuthRouter, calendlyCallbackRouter } from "../routes/calendly-oauth.js";
@@ -48,11 +57,13 @@ import { docusignOAuthRouter, docusignCallbackRouter } from "../routes/docusign-
 import { egnyteOAuthRouter, egnyteCallbackRouter } from "../routes/egnyte-oauth.js";
 import { miroOAuthRouter, miroCallbackRouter } from "../routes/miro-oauth.js";
 import { webflowOAuthRouter, webflowCallbackRouter } from "../routes/webflow-oauth.js";
+import { clickupOAuthRouter, clickupCallbackRouter } from "../routes/clickup-oauth.js";
 import { wixOAuthRouter, wixCallbackRouter } from "../routes/wix-oauth.js";
 import { attioOAuthRouter, attioCallbackRouter } from "../routes/attio-oauth.js";
 import { mailerliteOAuthRouter, mailerliteCallbackRouter } from "../routes/mailerlite-oauth.js";
 import { honeycombOAuthRouter, honeycombCallbackRouter } from "../routes/honeycomb-oauth.js";
 import { customerioOAuthRouter, customerioCallbackRouter } from "../routes/customerio-oauth.js";
+import { notionRemoteOAuthRouter, notionRemoteCallbackRouter } from "../routes/notion-remote-oauth.js";
 import { oauthTokenRouter } from "../routes/oauth-token.js";
 import { rapidApiLinkedInRouter } from "../routes/rapidapi-linkedin.js";
 import { scheduledJobsRouter } from "../routes/scheduled-jobs.js";
@@ -74,9 +85,11 @@ import { entityExtractionRouter } from "../routes/entity-extraction.js";
 import { cliAuthRouter } from "../routes/cli-auth.js";
 import { slackRouter } from "../surfaces/slack/routes/index.js";
 import { mcpGatewayRouter } from "../mcpgateway/index.js";
-import { requireAuth, requireNoAccessToken, allowReadAccessToken, requireStrictS2S, requireInternalS2S, requireUserAuth, optionalAuth, s2sKeyMatches } from "../middleware/require-auth.js";
+import { requireAuth, requireNoAccessToken, allowReadAccessToken, allowScopedAccessToken, requireStrictS2S, requireInternalS2S, requireUserAuth, optionalAuth, s2sKeyMatches } from "../middleware/require-auth.js";
 import { requireClawAdmin, requireSearchEvalAccess } from "../middleware/agent-acl.js";
-import { apiLimiter } from "../middleware/rate-limiters.js";
+import { apiLimiter, sampleClientIp } from "../middleware/rate-limiters.js";
+
+const SIGNED_INGRESS_PREFIXES = ["/webhook"] as const;
 
 const BASE = "/claw/api/v1";
 
@@ -112,7 +125,14 @@ function mountRequestContext(app: Express): void {
     res.json({ status: "ok", service: "xyne-claw-auth", uptime: process.uptime() });
   });
 
-  app.use(BASE, apiLimiter);
+  app.use(BASE, (req: Request, res: Response, next: NextFunction) => {
+    if (SIGNED_INGRESS_PREFIXES.some((prefix) => req.path === prefix || req.path.startsWith(`${prefix}/`))) {
+      next();
+      return;
+    }
+    sampleClientIp(req);
+    apiLimiter(req, res, next);
+  });
 }
 
 function mountCoreApi(app: Express): void {
@@ -129,6 +149,7 @@ function mountCoreApi(app: Express): void {
   // can't be forged. Was previously fully unauthenticated: anyone could POST a
   // stdio connector whose launch command the gateway then spawned (RCE).
   app.use(`${BASE}/servers`, requireUserAuth, serversRouter);
+  app.use(`${BASE}/surface`, requireUserAuth, pagePanelRouter);
   app.use(`${BASE}/users`, requireAuth, requireNoAccessToken, usersRouter);
   app.use(`${BASE}/users`, requireAuth, requireNoAccessToken, connectionsRouter);
   // NOT behind requireAuth (so requireNoAccessToken never runs here): every
@@ -137,11 +158,12 @@ function mountCoreApi(app: Express): void {
   // credential, not a user identity. Do NOT add requireAuth here expecting the
   // access-token barrier to apply; add the guard inside the router instead.
   app.use(`${BASE}/sessions`, mcpRouter);
+  app.use(`${BASE}/sessions`, sdlcRuntimeCredentialsRouter);
   app.use(`${BASE}/gateways`, requireAuth, requireNoAccessToken, requireClawAdmin, gatewaysRouter);
   // allowReadAccessToken (NOT the hard barrier): device-flow CLI tokens are
   // minted with agents:read (routes/cli-auth.ts) so the CLI can list agents.
   // Reads (GET/HEAD) pass with that scope; token writes are still rejected.
-  app.use(`${BASE}/agents`, requireAuth, allowReadAccessToken("agents:read"), agentsRouter);
+  app.use(`${BASE}/agents`, requireAuth, allowScopedAccessToken({ read: "agents:read", write: "agents:write" }), agentsRouter);
   // NOT behind requireAuth (so requireNoAccessToken never runs here): the device
   // -flow endpoints must be reachable pre-authentication, and each route carries
   // its own guard (requireCliTokensEnabled / requireApproveAuth — routes/cli-auth.ts).
@@ -149,12 +171,20 @@ function mountCoreApi(app: Express): void {
   app.use(`${BASE}/cli`, cliAuthRouter);
   // Public Slack ingress; authenticates itself with the per-install HMAC secret.
   app.use(`${BASE}/surfaces/slack`, slackRouter);
+  // Messaging channels (WhatsApp, Telegram, …): admin API is user-authed inside
+  // the router; the per-account webhook ingress self-authenticates per plugin.
+  app.use(`${BASE}/surfaces/:channel`, messagingRouter);
   app.use(`${BASE}/chain-workflows`, requireAuth, requireNoAccessToken, chainWorkflowsRouter);
   app.use(`${BASE}/spaces`, requireAuth, requireNoAccessToken, spacesRouter);
   app.use(`${BASE}/tools`, requireAuth, requireNoAccessToken, toolsRouter);
-  app.use(`${BASE}/skills`, requireAuth, requireNoAccessToken, skillsRouter);
+  app.use(`${BASE}/skills`, requireAuth, allowScopedAccessToken({ write: "skills:write" }), skillsRouter);
+  // Session-authed UI surface over the MCP Gateway registry (secret x-s2s-key
+  // stays server-side; see routes/gateway-registry-ui.ts). Distinct from the
+  // s2s `${BASE}/gateway` router below, which external services still call.
+  app.use(`${BASE}/gateway-registry`, requireAuth, requireNoAccessToken, gatewayRegistryUiRouter);
   app.use(`${BASE}/knowledge-base`, requireAuth, requireNoAccessToken, knowledgeBaseRouter);
-  app.use(`${BASE}/subagents`, requireAuth, requireNoAccessToken, subagentsRouter);
+  app.use(`${BASE}/subagents`, requireAuth, allowScopedAccessToken({ write: "subagents:write" }), subagentsRouter);
+  app.use(`${BASE}/sandbox-access`, requireUserAuth, sandboxAccessRouter); // sandbox-router → may this Spaces session open /claw-preview|code|term/<sandboxId>?
   app.use(`${BASE}/sandbox`, requireAuth, requireNoAccessToken, sandboxRouter);
   app.use(`${BASE}/organizations`, requireAuth, requireNoAccessToken, organizationsRouter);
   app.use(`${BASE}/admin/digital-twin`, requireAuth, requireNoAccessToken, requireClawAdmin, adminDigitalTwinRouter);
@@ -175,14 +205,21 @@ function mountCoreApi(app: Express): void {
   app.use(`${BASE}/internal/agent-chat`, requireStrictS2S, agentChatInternalRouter); // progress/callback from xyne-claw
   app.use(`${BASE}/internal/twin-draft`, requireInternalS2S, twinDraftInternalRouter);  // Spaces → approve/decline an in-thread Twin reply draft (INTERNAL_S2S_KEY)
   app.use(`${BASE}/internal/attachments`, requireInternalS2S, attachmentsInternalRouter); // Spaces → extract document text via claw's converters (INTERNAL_S2S_KEY)
+  app.use(`${BASE}/internal/agents`, requireInternalS2S, agentsInternalRouter); // Spaces → is this app a Claw agent? decides AGENT vs APP at install (INTERNAL_S2S_KEY)
+  app.use(`${BASE}/internal/app-connectors`, requireInternalS2S, appConnectorsInternalRouter); // Spaces → sdk.connectors: run the viewer's own MCP connection for an artifact app (INTERNAL_S2S_KEY)
   app.use(`${BASE}/internal/surface`, requireStrictS2S, surfaceInternalRouter);       // app-control calls from xyne-claw → the user's desktop window
   app.use(`${BASE}/internal/sessions`, requireStrictS2S, sessionsArchiveRouter);     // archive/restore session JSONLs to GCS — S2S only (transcripts)
+  // Spaces → org/workspace/user provisioning. The Spaces provisioning worker
+  // authenticates with the shared XYNE_CLAW_S2S_KEY (x-s2s-key) and drives the
+  // org/workspace/user upserts — see services/clawSpacesSyncClient.ts in Spaces.
+  app.use(`${BASE}/internal/spaces-sync`, requireStrictS2S, spacesSyncRouter);
   app.use(`${BASE}/internal/experiments`, requireStrictS2S, experimentsInternalRouter);
   app.use(`${BASE}/internal/artifact-apps`, requireStrictS2S, artifactAppsInternalRouter); // create-app reads the conversation's head build before an incremental update
   app.use(`${BASE}/error-pipeline`, errorPipelineIngestRouter); // Grafana webhook ingest (JWT-authed inside)
   app.use(`${BASE}/internal/error-pipeline`, requireStrictS2S, errorPipelineInternalRouter); // run-result callback from xyne-claw (S2S only)
   app.use(`${BASE}/internal/tts`, requireStrictS2S, ttsRouter);
   app.use(`${BASE}/internal/connectors`, requireStrictS2S, connectorsInternalRouter); // connector availability lookup for xyne-claw (S2S only)
+  app.use(`${BASE}/internal/providers`, requireStrictS2S, providersInternalRouter); // AI provider availability lookup for xyne-claw (S2S only)
 }
 
 function mountOAuthProviders(app: Express): void {
@@ -215,6 +252,8 @@ function mountOAuthProviders(app: Express): void {
   app.use(BASE, miroCallbackRouter);
   app.use(`${BASE}/users`, requireAuth, requireNoAccessToken, webflowOAuthRouter);
   app.use(BASE, webflowCallbackRouter);
+  app.use(`${BASE}/users`, requireAuth, requireNoAccessToken, clickupOAuthRouter);
+  app.use(BASE, clickupCallbackRouter);
   app.use(`${BASE}/users`, requireAuth, requireNoAccessToken, wixOAuthRouter);
   app.use(BASE, wixCallbackRouter);
   app.use(`${BASE}/users`, requireAuth, requireNoAccessToken, attioOAuthRouter);
@@ -225,6 +264,8 @@ function mountOAuthProviders(app: Express): void {
   app.use(BASE, honeycombCallbackRouter);
   app.use(`${BASE}/users`, requireAuth, requireNoAccessToken, customerioOAuthRouter);
   app.use(BASE, customerioCallbackRouter);
+  app.use(`${BASE}/users`, requireAuth, requireNoAccessToken, notionRemoteOAuthRouter);
+  app.use(BASE, notionRemoteCallbackRouter);
   app.use(`${BASE}/users`, requireAuth, requireNoAccessToken, rapidApiLinkedInRouter);
 }
 

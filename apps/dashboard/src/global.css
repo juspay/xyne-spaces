@@ -479,10 +479,6 @@
 }
 
 @layer base {
-  * {
-    @apply border-border;
-  }
-
   /* Custom scrollbars: transparent rails + subtle thumb, scoped to the actual
      scroll containers (document root + Tailwind overflow utilities) instead of a
      universal `*` rule. The old `* { scrollbar-color: hsl(var(--border)) ... }`
@@ -583,6 +579,7 @@
   }
 }
 
+/* stylelint-disable-next-line selector-max-universal -- moving to html changes inheritance under font-mono and third-party roots; needs visual QA */
 * {
   font-family: "Inter", sans-serif;
 }
@@ -1926,6 +1923,7 @@ mark.chat-text-highlight,
 
 /* DM List Item Message Preview - scoped override for codeblocks */
 [data-message-preview="true"] .message-html-root,
+/* stylelint-disable-next-line selector-max-universal -- pre-existing */
 [data-message-preview="true"] .message-html-root * {
   display: inline !important;
   white-space: nowrap !important;
@@ -2190,6 +2188,35 @@ mark.chat-text-highlight,
   mask: none;
 }
 
+/* Call link preview card: a slightly softer squircle than the 4px default above. */
+.call-link-preview [data-slot="avatar-group"][data-shape="square"] [data-slot="avatar-stack-item"],
+.call-link-preview
+  [data-slot="avatar-group"][data-shape="square"]
+  [data-slot="avatar-stack-item"]
+  img,
+.call-link-preview
+  [data-slot="avatar-group"][data-shape="square"]
+  [data-slot="avatar-stack-item"]
+  [data-slot="avatar"],
+.call-link-preview
+  [data-slot="avatar-group"][data-shape="square"]
+  [data-slot="avatar-stack-item"]
+  [data-slot="avatar-fallback"] {
+  border-radius: 6px;
+}
+
+/* Deeper overlap than the default -4px, with the separator ring in the card's own colour so
+   each tile reads as cut out of the one before it. */
+.call-link-preview
+  [data-slot="avatar-group"][data-shape="square"]
+  [data-slot="avatar-stack-item"]:not(:first-of-type) {
+  margin-left: -7px;
+}
+
+.call-link-preview [data-slot="avatar-group"][data-shape="square"] .border-background {
+  border-color: hsl(var(--card));
+}
+
 /* ============================================================================
  * WORKFLOW STEP DETAILS - Prevent horizontal overflow
  * ============================================================================ */
@@ -2198,6 +2225,7 @@ mark.chat-text-highlight,
   overflow-x: hidden;
 }
 
+/* stylelint-disable-next-line selector-max-universal -- pre-existing */
 [data-id="step-details"] * {
   max-width: 100%;
 }
@@ -2212,6 +2240,7 @@ mark.chat-text-highlight,
 
 /* Ensure MarkdownPreview content doesn't overflow */
 [data-id="step-details"] .wmde-markdown,
+/* stylelint-disable-next-line selector-max-universal -- pre-existing */
 [data-id="step-details"] .wmde-markdown * {
   max-width: 100% !important;
   overflow-wrap: break-word !important;
@@ -2233,6 +2262,55 @@ mark.chat-text-highlight,
 [data-id="step-details"] [data-state="open"] {
   max-width: 100%;
   overflow: hidden;
+}
+
+.sidebar-title-clip {
+  container-type: inline-size;
+  overflow: hidden;
+}
+
+.sidebar-title-text {
+  display: block;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.group:hover .sidebar-title-text {
+  width: max-content;
+  overflow: visible;
+  animation: sidebar-title-marquee var(--marquee-duration, 4s) linear 450ms infinite;
+}
+
+.group.sidebar-title-static:hover .sidebar-title-text {
+  width: auto;
+  overflow: hidden;
+  animation: none;
+  transform: none;
+}
+
+@keyframes sidebar-title-marquee {
+  0% {
+    transform: translateX(0);
+  }
+
+  80%,
+  100% {
+    transform: translateX(min(0px, calc(100cqw - 100%)));
+  }
+}
+
+/* Reduced motion gets the resting, ellipsised state — cancelling only the
+   animation would leave width:max-content in place, so the title would sit
+   expanded and silently clipped by the container with no ellipsis at all.
+   The full name stays reachable through the element's title attribute. */
+@media (prefers-reduced-motion: reduce) {
+  .group:hover .sidebar-title-text {
+    width: auto;
+    overflow: hidden;
+    animation: none;
+    transform: none;
+  }
 }
 
 @keyframes dots {
@@ -2266,6 +2344,28 @@ mark.chat-text-highlight,
   animation: claw-step-enter 0.45s cubic-bezier(0.16, 1, 0.3, 1) both;
 }
 
+/* Cmd+K search: ease a recent/restored query into the input instead of an abrupt pop. */
+@keyframes search-seed-fill-in {
+  from {
+    opacity: 0;
+    transform: translateY(3px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.search-seed-fill-in {
+  animation: search-seed-fill-in 200ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .search-seed-fill-in {
+    animation: none;
+  }
+}
+
 .dot-animate span {
   animation: dots 1.4s infinite;
   font-weight: bold;
@@ -2280,6 +2380,7 @@ mark.chat-text-highlight,
 }
 
 @media (hover: none) and (pointer: coarse) {
+  /* stylelint-disable-next-line selector-max-universal -- pre-existing */
   * {
     user-select: none;
     -webkit-user-select: none;
@@ -3310,10 +3411,13 @@ html .bn-code-block-source-popup-ok-button:hover {
    layer was actually monospace throughout. Pin the metrics on both; only
    colour may vary between them. */
 .canvas-surface .bn-editor .canvas-highlighted-code,
+/* stylelint-disable-next-line selector-max-universal -- pre-existing */
 .canvas-surface .bn-editor .canvas-highlighted-code *,
 .canvas-surface .bn-editor .canvas-mermaid-source .canvas-code-editor,
+/* stylelint-disable-next-line selector-max-universal -- pre-existing */
 .canvas-surface .bn-editor .canvas-mermaid-source .canvas-code-editor *,
 .canvas-surface .bn-editor .canvas-math-source .canvas-code-editor,
+/* stylelint-disable-next-line selector-max-universal -- pre-existing */
 .canvas-surface .bn-editor .canvas-math-source .canvas-code-editor * {
   font-family:
     ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
@@ -3720,6 +3824,7 @@ img.inline-emoji,
 }
 
 /* ── XyneAI sidebar overrides — black text, blue links ── */
+/* stylelint-disable-next-line selector-max-universal -- pre-existing */
 .xyne-ai-markdown *:not(a):not(code):not(.mention-text):not(.mention-text *) {
   color: hsl(var(--foreground)) !important;
 }
@@ -4196,10 +4301,12 @@ img.inline-emoji,
  * week is a <tr> of day <td>s, so without the guard hovering any day paints the
  * whole week row. :where() keeps the exclusion specificity-free.
  */
+/* stylelint-disable-next-line selector-max-universal -- pre-existing */
 [data-theme="midnight"] tr:hover:not(:where(.rdp-root *)) > td {
   background-color: #222530 !important;
 }
 
+/* stylelint-disable-next-line selector-max-universal -- pre-existing */
 [data-theme="midnight"] tr:hover:not(:where(.rdp-root *)) {
   background-color: #222530 !important;
 }
@@ -4210,6 +4317,7 @@ img.inline-emoji,
   border: 1px solid rgba(59, 130, 246, 0.45) !important;
 }
 
+/* stylelint-disable-next-line selector-max-universal -- pre-existing */
 [data-theme="midnight"] .active-call-highlight * {
   color: #e5e7eb !important;
 }
@@ -4538,15 +4646,18 @@ img.inline-emoji,
    the two paths get different header colours in midnight. `.rdp-root` is
    excluded for the same reason — react-day-picker's weekday row is a real
    <thead><th>, which otherwise picks up the data-grid header surface. */
+/* stylelint-disable-next-line selector-max-universal -- pre-existing */
 [data-theme="midnight"]
   th:not(
     :where(.jp-message-html, .bot-markdown-content, .bot-markdown-content-call-summary, .rdp-root) *
   ),
+/* stylelint-disable-next-line selector-max-universal -- pre-existing */
 [data-theme="midnight"]
   th
   *:not(
     :where(.jp-message-html, .bot-markdown-content, .bot-markdown-content-call-summary, .rdp-root) *
   ),
+/* stylelint-disable-next-line selector-max-universal -- pre-existing */
 [data-theme="midnight"]
   th
   span:not(
@@ -4556,6 +4667,7 @@ img.inline-emoji,
 }
 
 /* Specific targeting for table header text with lower contrast */
+/* stylelint-disable-next-line selector-max-universal -- pre-existing */
 [data-theme="midnight"]
   thead
   th:not(
@@ -4566,6 +4678,7 @@ img.inline-emoji,
 }
 
 /* Table header text spans (Type, User Query, Summary, etc.) */
+/* stylelint-disable-next-line selector-max-universal -- pre-existing */
 [data-theme="midnight"]
   th
   :is(p, div, span):not(
@@ -4575,6 +4688,7 @@ img.inline-emoji,
 }
 
 /* Ensure high contrast for all header content */
+/* stylelint-disable-next-line selector-max-universal -- pre-existing */
 [data-theme="midnight"]
   thead
   *:not(
@@ -4628,6 +4742,7 @@ img.inline-emoji,
 }
 
 [data-theme="midnight"] [data-dropdown="dropdown"] [data-dropdown-value],
+/* stylelint-disable-next-line selector-max-universal -- pre-existing */
 [data-theme="midnight"] [data-dropdown="dropdown"] [data-dropdown-value] * {
   color: #d1d5db !important;
 }
@@ -4721,14 +4836,8 @@ img.inline-emoji,
     0 12px 30px -12px rgba(0, 0, 0, 0.4);
 }
 
-[data-theme="midnight"] .ai-send-btn {
-  background-color: #333;
-}
-
-[data-theme="midnight"] .ai-send-btn:hover:not(:disabled) {
-  background-color: #444;
-}
-
+/* Only ever on the send button's DISABLED state — once there is something to
+   send the button switches to the brand fill and drops this class. */
 [data-theme="midnight"] .ai-send-btn:disabled {
   background-color: rgba(51, 51, 51, 0.5);
   color: hsl(var(--muted-foreground));
@@ -4843,6 +4952,69 @@ img.inline-emoji,
   box-shadow:
     0 0 8px 0 rgba(255, 100, 0, 0.08),
     0 0 16px 2px rgba(255, 137, 4, 0.05);
+}
+
+/* Composer "looking for related conversations" — two soft strokes of colour that
+   trace the composer's border while a lookup is in flight. Drawn as a 1px masked
+   ring over the existing border, so turning it on or off never shifts layout; it is
+   hidden, not just transparent, when idle so it costs no paint. */
+.xyne-related-scan {
+  position: relative;
+}
+
+.xyne-related-scan::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  padding: 1px;
+  border-radius: 1rem;
+  pointer-events: none;
+  background: conic-gradient(
+    from var(--xyne-angle),
+    transparent 0deg,
+    rgba(139, 92, 246, 0) 15deg,
+    rgba(139, 92, 246, 0.85) 55deg,
+    rgba(59, 130, 246, 0.85) 80deg,
+    rgba(20, 184, 166, 0.8) 100deg,
+    transparent 125deg,
+    transparent 180deg,
+    rgba(236, 72, 153, 0) 195deg,
+    rgba(236, 72, 153, 0.7) 235deg,
+    rgba(249, 115, 22, 0.7) 260deg,
+    rgba(234, 179, 8, 0.65) 280deg,
+    transparent 305deg
+  );
+  -webkit-mask:
+    linear-gradient(#000 0 0) content-box,
+    linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask:
+    linear-gradient(#000 0 0) content-box exclude,
+    linear-gradient(#000 0 0);
+  animation: xyne-border-spin 2.4s linear infinite;
+  /* Paused while idle: a hidden ring still costs a style recalc every frame. */
+  animation-play-state: paused;
+  opacity: 0;
+  visibility: hidden;
+  transition:
+    opacity 420ms cubic-bezier(0.22, 1, 0.36, 1),
+    visibility 0s linear 420ms;
+}
+
+.xyne-related-scan[data-active="true"]::after {
+  animation-play-state: running;
+  opacity: 1;
+  visibility: visible;
+  transition:
+    opacity 420ms cubic-bezier(0.22, 1, 0.36, 1),
+    visibility 0s;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .xyne-related-scan::after {
+    animation: none;
+  }
 }
 
 /* ================================================================
@@ -4965,6 +5137,7 @@ img.inline-emoji,
    shifted (~9px, and it grows with zoom). Restoring `content-box` inside the
    viewer subtree realigns them. This is the exact fix xyne-search uses. */
 .pdfViewer,
+/* stylelint-disable-next-line selector-max-universal -- pre-existing */
 .pdfViewer * {
   box-sizing: content-box;
 }
@@ -4974,6 +5147,7 @@ img.inline-emoji,
    off the parent text-span's PDF font. Reinherit only `font-family` (not the
    `font` shorthand — pdf.js re-scales font-size/line-height on zoom). */
 .pdfViewer .textLayer .highlight,
+/* stylelint-disable-next-line selector-max-universal -- pre-existing */
 .pdfViewer .textLayer .highlight * {
   font-family: inherit !important;
 }
@@ -5166,6 +5340,7 @@ img.inline-emoji,
 
 /* Override React Flow's pointer cursor while drawing a group-selection box. */
 .flow-plan-editor--group-selection,
+/* stylelint-disable-next-line selector-max-universal -- pre-existing */
 .flow-plan-editor--group-selection * {
   -webkit-user-select: none !important;
   user-select: none !important;
@@ -5362,8 +5537,10 @@ img.inline-emoji,
    28px pills for this row only, so scope the override instead of restyling the trigger. */
 [data-ticket-chip-row] button,
 [data-ticket-chip-row] [role="button"],
+[data-ticket-chip-row] [role="combobox"],
 [data-ticket-chip-row] button > div,
-[data-ticket-chip-row] > div > div {
+[data-ticket-chip-row] > div > div,
+[data-ticket-chip-row] > span {
   border-radius: 9999px;
 }
 

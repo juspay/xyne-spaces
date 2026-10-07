@@ -7,6 +7,7 @@ import { searchChannels as _searchChannels, searchChannelsWithScores as _searchC
 import type { Channel, ChannelUserStatus } from '../zero/schema.js';
 import { ChannelScopeType, ChannelVisibility } from '../zero/schema.js';
 import { isDeskChannelType } from '../utils/channel.js';
+import { searchMentionableChannels } from '../utils/channelMentionSearch.js';
 import { queries } from '../zero/queries.js';
 import { useQuery } from './useQuery.js';
 import { useCachedQuery } from './useCachedQuery';
@@ -24,9 +25,29 @@ export function searchChannels(channels: Channel[], query: string, limit = 10): 
   return _searchChannels(channels, query, limit);
 }
 
-export function searchChannelsWithScores(channels: Channel[], query: string, limit = 10): { item: Channel; score: number }[] {
-  return _searchChannelsWithScores(channels, query, limit);
+export function searchChannelsWithScores(
+  channels: Channel[],
+  query: string,
+  limit = 10,
+  fuseMatches?: ReadonlyArray<{ item: Channel; score?: number | undefined }>,
+): { item: Channel; score: number }[] {
+  return _searchChannelsWithScores(channels, query, limit, fuseMatches);
 }
+
+/** All channels, plus the visible ones not among them. */
+const combineChannels = (channels: Channel[], visibleChannels: VisibleChannel[]): Channel[] => {
+  const combined = [...channels];
+  // Set-based dedup: O(n + m) instead of the previous O(n * m) `combined.some`
+  // scan, which cost ~1.7s/recompute over ~749 all + ~431 visible channels.
+  const seenIds = new Set(channels.map(c => c.id));
+  for (const visibleChannel of visibleChannels) {
+    if (!seenIds.has(visibleChannel.id)) {
+      seenIds.add(visibleChannel.id);
+      combined.push(visibleChannel);
+    }
+  }
+  return combined;
+};
 
 export const useAllChannels = (): Channel[] => {
   const channels = useSelector(
@@ -37,19 +58,16 @@ export const useAllChannels = (): Channel[] => {
     stateMachineActor,
     state => state.context.visibleChannels,
   );
-  return useMemo(() => {
-    const combined = [...channels];
-    // Set-based dedup: O(n + m) instead of the previous O(n * m) `combined.some`
-    // scan, which cost ~1.7s/recompute over ~749 all + ~431 visible channels.
-    const seenIds = new Set(channels.map(c => c.id));
-    for (const visibleChannel of visibleChannels) {
-      if (!seenIds.has(visibleChannel.id)) {
-        seenIds.add(visibleChannel.id);
-        combined.push(visibleChannel);
-      }
-    }
-    return combined;
-  }, [channels, visibleChannels]);
+  return useMemo(() => combineChannels(channels, visibleChannels), [channels, visibleChannels]);
+};
+
+/**
+ * `useAllChannels`, read once without subscribing — for code that needs the list only
+ * when something happens, like a click, and shouldn't re-render as channels change.
+ */
+export const getAllChannels = (): Channel[] => {
+  const { allChannels, visibleChannels } = stateMachineActor.getSnapshot().context;
+  return combineChannels(allChannels, visibleChannels);
 };
 
 export const useAllVisibleChannels = (): VisibleChannel[] => {
@@ -156,9 +174,19 @@ export const useChannelByName = (channelName: string): Channel | undefined => {
   return channel || visibleChannel;
 };
 
+export { searchMentionableChannels };
+
 export const useChannelSearch = (query: string, limit: number): Channel[] => {
   const channels = useAllChannels();
   return useMemo(() => searchChannels(channels, query, limit), [channels, query, limit]);
+};
+
+export const useChannelMentionSearch = (query: string, limit: number): Channel[] => {
+  const channels = useAllChannels();
+  return useMemo(
+    () => searchMentionableChannels(channels, query, limit),
+    [channels, query, limit],
+  );
 };
 
 export const useBrowsableChannels = (): Channel[] => {

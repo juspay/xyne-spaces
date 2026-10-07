@@ -51,6 +51,10 @@ export type TicketFiltersEvent =
       viewId?: string | undefined;
       enabled?: boolean | undefined;
       selectedBoardIdFromDb?: string | null | undefined;
+      /**
+       * Board to fall back to when nothing else picks one.
+       */
+      defaultBoardId?: string | null | undefined;
       searchParams: URLSearchParams;
       setSearchParams: (
         params: URLSearchParams | ((prev: URLSearchParams) => URLSearchParams),
@@ -492,7 +496,10 @@ export const ticketFiltersMachine = setup({
         // the boardId is in the route params (not query params), so we use it as a fallback.
         const boardFromPath =
           event.viewMode === 'board' && event.boardId ? [event.boardId] : undefined;
-        const boardFilter = boardFromUrl ?? boardFromDb ?? boardFromPath;
+        // Last resort only: the URL, the user's persisted board, and the route
+        // path all outrank it, so seeding never overrides an explicit choice.
+        const boardFromDefault = event.defaultBoardId ? [event.defaultBoardId] : undefined;
+        const boardFilter = boardFromUrl ?? boardFromDb ?? boardFromPath ?? boardFromDefault;
 
         if (Object.keys(urlFilters).length > 0) {
           filters = { ...urlFilters };

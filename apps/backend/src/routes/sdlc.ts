@@ -9,6 +9,7 @@ import {
   createSdlcLinkSchema,
   createSdlcVcsCredentialSchema,
   resolveSdlcRepositoryLinkSchema,
+  setSdlcArtifactArchivedSchema,
   sdlcVcsProviderSchema,
   updateSdlcVcsCredentialSchema,
 } from '@xyne/shared';
@@ -152,6 +153,20 @@ router.delete(
       actorFromRequest(req),
       req.params.channelId,
       req.params.repoId
+    );
+    res.status(204).send();
+  })
+);
+
+router.post(
+  '/channels/:channelId/artifacts/:canvasId/archive',
+  route(async (req, res) => {
+    const input = setSdlcArtifactArchivedSchema.parse(req.body);
+    await sdlcHub.setArtifactArchived(
+      actorFromRequest(req),
+      req.params.channelId,
+      req.params.canvasId,
+      input.archived
     );
     res.status(204).send();
   })
@@ -325,6 +340,20 @@ router.get(
       }
       throw error;
     }
+  })
+);
+
+router.get(
+  '/channels/:channelId/nav-target',
+  route(async (req, res) => {
+    const ids = z
+      .object({
+        conversationId: z.string().min(1),
+        messageId: z.string().min(1).optional(),
+      })
+      .parse(req.query);
+    const target = await sdlcHub.navTarget(actorFromRequest(req), req.params.channelId, ids);
+    res.status(200).json({ success: true, target });
   })
 );
 

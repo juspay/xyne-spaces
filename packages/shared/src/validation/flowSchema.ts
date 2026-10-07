@@ -158,6 +158,10 @@ export const dropdownComponentSchema = baseComponentSchema.extend({
     placeholder: z.string().optional(),
     options: selectOptionsField,
     required: z.boolean().optional(),
+    // Opt-in multi-select. Omitted or false keeps the single-select dropdown,
+    // whose field value is a string; true makes the field value a string[] and
+    // renders a searchable dropdown with removable pills.
+    multiple: z.boolean().optional(),
     action: flowActionSchema.optional(),
   }).strict(),
 });

@@ -1,18 +1,11 @@
 import express, { type Request, type Response } from 'express';
 import {
-  ChannelRole,
-  ChannelScopeType,
-  ChannelType,
-  ChannelVisibility,
-  DeskType,
-  EmailMergeMode,
   APP_STORE_KEY_ID_PATTERN,
   IOS_BUNDLE_ID_PATTERN,
 } from '@xyne/shared';
 import { z } from 'zod';
 import { authV2Middleware } from '@/middleware/authV2Middleware';
 import { db } from '@/database/client';
-import { config as appConfig } from '@/config/env';
 import { encrypt } from '@/services/encryptionService';
 import { logger } from '@/utils/logger';
 import { ExternalSourcePlatform } from '../../core/types';
@@ -23,6 +16,8 @@ import {
 } from '../../adapters/social-media/app-store/client';
 import { buildAppStoreSourceRecords } from '../../adapters/social-media/app-store/sourceRecords';
 import { authorizeSocialMediaManager } from './access';
+import { postAppStoreConnectTx } from '@/bypassAcl/transactions/appStore';
+import { postAppStoreAppsTx } from '@/bypassAcl/transactions/appStore';
 
 const TAG = '[AppStoreRoutes]';
 const router = express.Router();
@@ -61,20 +56,6 @@ class AppStoreConnectError extends Error {
     message: string,
   ) {
     super(message);
-  }
-}
-
-/**
- * Nothing ever syncs without the polling worker, and this connect flow is synchronous — so without
- * this check a desk would look fully connected and silently ingest nothing forever.
- */
-function assertSyncWorkerEnabled(): void {
-  if (!appConfig.enableSocialMediaSyncWorker) {
-    throw new AppStoreConnectError(
-      503,
-      'Review syncing is disabled on this deployment (ENABLE_SOCIAL_MEDIA_SYNC_WORKER). ' +
-        'Enable it before connecting an App Store desk, or reviews will never arrive.',
-    );
   }
 }
 
@@ -137,7 +118,7 @@ async function assertAppsVisible(credentials: AppStoreCredentials, appIds: strin
  * isActive — so a plain create() would hit P2002 for any app that was ever connected before.
  * Reactivating in place is what lets a disconnected app be re-added, possibly to a different desk.
  */
-async function reactivateOrCreateSources(
+export async function reactivateOrCreateSources(
   tx: Pick<typeof db, 'externalSource'>,
   params: {
     workspaceId: string;
@@ -206,7 +187,6 @@ router.post(
   authV2Middleware.authenticate,
   async (req: Request, res: Response): Promise<void> => {
     try {
-      assertSyncWorkerEnabled();
       const workspaceId = req.user!.workspaceId!;
       const userId = req.user!.id;
       const input = connectSchema.parse(req.body);
@@ -247,76 +227,7 @@ router.post(
       const encryptedCredentials = encrypt(JSON.stringify(credentials));
       const now = new Date();
 
-      const channelId = await db.$transaction(async (tx) => {
-        const channel = await tx.channel.create({
-          data: {
-            name: input.channelName,
-            description: `App Store reviews for ${applications.length} application${
-              applications.length === 1 ? '' : 's'
-            }`,
-            type: ChannelType.SOCIAL_MEDIA,
-            scopeType: ChannelScopeType.DEFAULT,
-            visibility: input.visibility.toUpperCase() as ChannelVisibility,
-            createdBy: userId,
-            projectId: input.projectId,
-            workspaceId,
-            participantCount: 1,
-            lastActivityAt: now,
-          },
-        });
-        await tx.channelParticipant.create({
-          data: { workspaceId, channelId: channel.id, userId, role: ChannelRole.ADMIN },
-        });
-        await tx.channelUserStatus.create({
-          data: { workspaceId, channelId: channel.id, userId, updatedAt: now },
-        });
-        await tx.channelStats.create({
-          data: { workspaceId, channelId: channel.id, participantCount: 1, lastActivityAt: now },
-        });
-        await tx.emailChannelPreference.create({
-          data: {
-            channelId: channel.id,
-            workspaceId,
-            ownerUserId: userId,
-            assigneeUserGroupId: input.assigneeUserGroupId,
-            boardId: input.boardId,
-            deskType: DeskType.SOCIAL_MEDIA,
-            emailMergeMode: EmailMergeMode.DISABLED,
-          },
-        });
-
-        const mappingBoards = await tx.board.findMany({
-          where: { projectId: input.projectId },
-          orderBy: { createdAt: 'asc' },
-          select: { id: true },
-        });
-        if (mappingBoards.length > 0) {
-          await tx.channelBoardMapping.createMany({
-            data: mappingBoards.map((b, index) => ({
-              channelId: channel.id,
-              boardId: b.id,
-              workspaceId,
-              isDefault: input.boardId ? b.id === input.boardId : index === 0,
-              createdBy: userId,
-              createdAt: now,
-              updatedAt: now,
-            })),
-            skipDuplicates: true,
-          });
-        }
-        // Inside the transaction on purpose: a source that is already connected elsewhere throws
-        // 409 here, and outside it that would leave an orphan channel holding the requested name,
-        // so the user's retry would fail with "a channel with that name exists".
-        await reactivateOrCreateSources(tx, {
-          workspaceId,
-          channelId: channel.id,
-          boardId: input.boardId,
-          ownerUserId: userId,
-          encryptedCredentials,
-          applications,
-        });
-        return channel.id;
-      });
+      const channelId = await postAppStoreConnectTx(input, applications, userId, workspaceId, now, encryptedCredentials);
 
       res.status(201).json({ channelId });
     } catch (error) {
@@ -359,16 +270,7 @@ router.post(
       const credentials = appStoreClient.decryptCredentials(existing.credentials);
       const applications = await resolveApplications(credentials, input.applications);
       // Atomic like connect: a 409 on the Nth app must not leave the first N-1 committed.
-      const result = await db.$transaction((tx) =>
-        reactivateOrCreateSources(tx, {
-          workspaceId,
-          channelId: req.params.channelId,
-          boardId: existing.boardId ?? '',
-          ownerUserId: existing.ownerUserId ?? req.user!.id,
-          encryptedCredentials: existing.credentials,
-          applications,
-        }),
-      );
+      const result = await postAppStoreAppsTx(workspaceId, req, existing, applications);
 
       res.json({ added: result.created + result.reactivated, ...result });
     } catch (error) {

@@ -28,6 +28,7 @@ import { docusignAdapter } from "./adapters/docusign.js";
 import { egnyteAdapter } from "./adapters/egnyte.js";
 import { miroAdapter } from "./adapters/miro.js";
 import { webflowAdapter } from "./adapters/webflow.js";
+import { clickupAdapter } from "./adapters/clickup.js";
 import { wixAdapter } from "./adapters/wix.js";
 import { mailerliteAdapter } from "./adapters/mailerlite.js";
 import { attioAdapter } from "./adapters/attio.js";
@@ -42,6 +43,7 @@ import { excalidrawAdapter } from "./adapters/excalidraw.js";
 import { mongodbAdapter } from "./adapters/mongodb.js";
 import { sentryAdapter } from "./adapters/sentry.js";
 import { notionAdapter } from "./adapters/notion.js";
+import { notionRemoteAdapter } from "./adapters/notion-remote.js";
 import { googleAdapter } from "./adapters/google.js";
 import { microsoftAdapter } from "./adapters/microsoft.js";
 import { twitterAdapter } from "./adapters/twitter.js";
@@ -50,10 +52,16 @@ import { xNewsAdapter } from "./adapters/x-news.js";
 import { jusbizMcpAdapter } from "./adapters/jusbiz-mcp.js";
 import { heisenbergAdapter } from "./adapters/heisenberg.js";
 import { jenkinsAdapter } from "./adapters/jenkins.js";
+import { klaviyoAdapter } from "./adapters/klaviyo.js";
+import { mondayAdapter } from "./adapters/monday.js";
+import { neo4jAuraAdapter } from "./adapters/neo4j-aura.js";
 
 export const STATIC_ADAPTERS: Record<string, McpAdapter> = {
   grafana: grafanaAdapter,
   jenkins: jenkinsAdapter,
+  klaviyo: klaviyoAdapter,
+  monday: mondayAdapter,
+  "neo4j-aura": neo4jAuraAdapter,
   bitbucket: bitbucketAdapter,
   kibana: kibanaAdapter,
   "xyne-spaces": xyneSpacesAdapter,
@@ -95,6 +103,7 @@ export const STATIC_ADAPTERS: Record<string, McpAdapter> = {
   egnyte: egnyteAdapter,
   miro: miroAdapter,
   webflow: webflowAdapter,
+  clickup: clickupAdapter,
   wix: wixAdapter,
   mailerlite: mailerliteAdapter,
   attio: attioAdapter,
@@ -112,6 +121,7 @@ export const STATIC_ADAPTERS: Record<string, McpAdapter> = {
   excalidraw: excalidrawAdapter,
   mongodb: mongodbAdapter,
   notion: notionAdapter,
+  "notion-remote": notionRemoteAdapter,
   sentry: sentryAdapter,
   "sentry-mcp": sentryAdapter,
   twitter: twitterAdapter,

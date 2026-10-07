@@ -60,6 +60,8 @@ interface McpToolInfo {
   readonly serviceName?: string;
   readonly backendId?: string;
   readonly selectionKey?: string;
+  /** claw-auth says this tool cannot mutate — see the propagation below. */
+  readonly readOnly?: boolean;
 }
 
 interface McpServerTools {
@@ -100,7 +102,7 @@ export function applyTrustedMcpBindings(
   return bindings ? { ...params, ...bindings } : params;
 }
 
-import type { DeploymentToolMatch } from "./tool-catalog.js";
+import type { DeploymentConnectorMatch, DeploymentSearchResult, DeploymentToolMatch, UnresolvedConfiguredServer } from "./tool-catalog.js";
 
 export class McpAuthServiceError extends Error {
   readonly status: number;
@@ -125,6 +127,17 @@ async function authFetch<T>(
   init?: RequestInit,
   dispatcher?: Agent,
 ): Promise<T> {
+  return (await authFetchEnvelope<T>(path, sessionToken, init, dispatcher)).data;
+}
+
+/** Like authFetch, but keeps the envelope's sibling fields (e.g. the
+ *  `unresolvedConfigured` list /mcp/tools returns beside `data`). */
+async function authFetchEnvelope<T, Extra extends object = Record<string, unknown>>(
+  path: string,
+  sessionToken: string,
+  init?: RequestInit,
+  dispatcher?: Agent,
+): Promise<{ data: T } & Partial<Extra>> {
   const url = `${SERVER.authServiceUrl}${path}`;
   const res = await fetch(url, {
     ...init,
@@ -136,11 +149,11 @@ async function authFetch<T>(
       ...init?.headers,
     },
   } as unknown as RequestInit);
-  const body = (await res.json()) as AuthResponse<T>;
+  const body = (await res.json()) as AuthResponse<T> & Partial<Extra>;
   if (!body.success || body.data === undefined) {
     throw new McpAuthServiceError(body.error ?? `Auth service error: ${res.status}`, res.status);
   }
-  return body.data;
+  return body as { data: T } & Partial<Extra>;
 }
 
 function injectToolCallIdIntoClawCitations(content: string, toolCallId: string): string {
@@ -296,18 +309,22 @@ export async function searchDeploymentTools(
   sessionId: string,
   sessionToken: string,
   params: { query: string; integration?: string; maxRisk?: string; limit: number },
-): Promise<DeploymentToolMatch[]> {
+): Promise<DeploymentSearchResult> {
   const qs = new URLSearchParams();
   if (params.query) qs.set("q", params.query);
   if (params.integration) qs.set("integrations", params.integration);
   if (params.maxRisk) qs.set("maxRisk", params.maxRisk);
   qs.set("limit", String(params.limit));
 
-  const { matches } = await authFetch<{ mode: string; matches: DeploymentToolMatch[] }>(
+  const { matches, connectors } = await authFetch<{
+    mode: string;
+    matches: DeploymentToolMatch[];
+    connectors?: DeploymentConnectorMatch[];
+  }>(
     `/claw/api/v1/sessions/${encodeURIComponent(sessionId)}/mcp/tools/search?${qs.toString()}`,
     sessionToken,
   );
-  return matches ?? [];
+  return { matches: matches ?? [], connectors: connectors ?? [] };
 }
 
 export async function loadMcpToolsForUser(
@@ -333,18 +350,22 @@ export async function loadMcpToolsForUser(
   subagentId?: string,
 ): Promise<{
   groups: McpToolGroup[];
+  /** Servers the agent's selection grants that did not resolve this run. */
+  unresolvedConfigured: UnresolvedConfiguredServer[];
   cleanup: () => Promise<void>;
   getPendingActions: () => Array<Record<string, unknown>>;
   getAttachments: () => Attachment[];
 }> {
   const permissions = toolPermissions ?? {};
-  const servers = await authFetch<McpServerTools[]>(
+  const envelope = await authFetchEnvelope<McpServerTools[], { unresolvedConfigured: UnresolvedConfiguredServer[] }>(
     `/claw/api/v1/sessions/${encodeURIComponent(sessionId)}/mcp/tools`,
     sessionToken,
   );
+  const servers = envelope.data;
+  const unresolvedConfigured = Array.isArray(envelope.unresolvedConfigured) ? envelope.unresolvedConfigured : [];
 
   if (servers.length === 0) {
-    return { groups: [], cleanup: async () => {}, getPendingActions: () => [], getAttachments: () => [] };
+    return { groups: [], unresolvedConfigured, cleanup: async () => {}, getPendingActions: () => [], getAttachments: () => [] };
   }
 
   const pendingActions: Array<Record<string, unknown>> = [];
@@ -367,9 +388,18 @@ export async function loadMcpToolsForUser(
       const acceptsFiles = isFileInputForwardingServer(server.serverType);
       const trustedBindings = trustedToolBindings?.[mcpTool.name];
       const baseDescription = mcpTool.description || `Tool ${mcpTool.name} from ${displayName}`;
-      const definition: ToolDefinition & { serviceName?: string; backendId?: string; selectionKey?: string; mcpToolName?: string } = {
+      const definition: ToolDefinition & { serviceName?: string; backendId?: string; selectionKey?: string; mcpToolName?: string; serverToolKey?: string; isWriteTool?: boolean } = {
         name: safeName,
         mcpToolName: mcpTool.name,
+        serverToolKey: toolKey,
+        // A declared read-only tool carries `isWriteTool: false` so the open
+        // palette (routes/run.ts::admittedByOpenPalette) believes the
+        // declaration instead of guessing risk from the name. The guess leans
+        // write and reads "star" as a mutation, which silently kept
+        // github-list-stargazers / -star-history / -stargazer-profiles out of
+        // every read-palette run. Only `true` means write anywhere downstream,
+        // so `false` narrows nothing that was previously wide.
+        ...(mcpTool.readOnly === true ? { isWriteTool: false } : {}),
         label: `${displayName}/${mcpTool.name}`,
         ...(typeof mcpTool.serviceName === "string" && mcpTool.serviceName.length > 0
           ? { serviceName: mcpTool.serviceName }
@@ -516,5 +546,5 @@ export async function loadMcpToolsForUser(
   const totalTools = groups.reduce((sum, g) => sum + g.tools.length, 0);
   log.info(`[mcp] Loaded ${totalTools} tools in ${groups.length} groups for session ${sessionId}`);
 
-  return { groups, cleanup: async () => {}, getPendingActions: () => pendingActions, getAttachments: () => mcpAttachments };
+  return { groups, unresolvedConfigured, cleanup: async () => {}, getPendingActions: () => pendingActions, getAttachments: () => mcpAttachments };
 }

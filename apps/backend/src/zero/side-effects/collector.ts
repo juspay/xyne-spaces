@@ -55,6 +55,7 @@ export async function collectSideEffectJobs(
         isDeleted: message.isDeleted,
         channelId: conversation?.channelId ?? undefined,
         isThreadReply: !!conversation && conversation.initialMessageId !== message.messageId,
+        metadata: message.metadata,
       };
     }
   }
@@ -114,6 +115,20 @@ export async function collectSideEffectJobs(
         userGroupId: participant.userGroupId,
         channelId: participant.channelId,
         role: participant.role,
+      };
+    }
+  }
+
+  // Capture the share row before it is deleted so the handler can notify the
+  // (now removed) recipient user/channel that their view access was revoked.
+  if (operation === 'delete' && table === 'view_access') {
+    const grant = await tx.run(zql.view_access.where('id', entityId).one());
+    if (grant) {
+      previousValue = {
+        viewId: grant.viewId,
+        entityType: grant.entityType,
+        entityId: grant.entityId,
+        sharedBy: grant.sharedBy,
       };
     }
   }
@@ -364,6 +379,7 @@ function extractEntityId(table: TableName, args: any): string | null {
     case 'links':
     case 'link_access':
     case 'rcas':
+    case 'view_access':
     case 'ticket_stage_requests': {
       const typedArgs = args as { id: string };
       return typedArgs.id;

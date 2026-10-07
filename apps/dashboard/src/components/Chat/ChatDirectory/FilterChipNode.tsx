@@ -35,7 +35,7 @@ import {
   type SerializedTextNode,
   type Spread,
 } from 'lexical';
-import { Building2, CalendarDays, LayoutGrid, SignalHigh } from 'lucide-react';
+import { Building2, CalendarDays, LayoutGrid, SignalHigh, Users } from 'lucide-react';
 import { Hashtag, UserTwo, Lock02Close } from '@xyne/icons';
 import { type Channel, ChannelScopeType, ChannelVisibility, TicketPriority } from '@xyne/shared';
 import { useChannel } from '../../../hooks/useChannels';
@@ -109,8 +109,12 @@ export function chipLabelText(mentionData: ChipData): string {
   }
   // A mention filter reads the way a mention is written — `mentions: @alice` — because the
   // `@` is the thing being searched for, not a type marker. The avatar beside it doesn't
-  // duplicate it the way the hash glyph would duplicate a `#`.
-  if (mentionData.prefix === 'mentions:' && mentionData.type === ChipType.USER) {
+  // duplicate it the way the hash glyph would duplicate a `#`. A user-group is `@`-mentioned
+  // the same way, so it reads `@Frontend Team`.
+  if (
+    mentionData.prefix === 'mentions:' &&
+    (mentionData.type === ChipType.USER || mentionData.type === ChipType.USER_GROUP)
+  ) {
     return `@${mentionData.name}`;
   }
   if (mentionData.prefix) {
@@ -296,6 +300,11 @@ export function ChipIcon({ mentionData }: { mentionData: ChipData }): React.JSX.
   // lean. No presence dot — it reads as noise inside a 16px chip.
   if (mentionData.type === ChipType.USER) {
     return <Avatar userId={mentionData.id} size='xs' showActiveStatus={false} />;
+  }
+  // User-group — a people glyph, checked before the channel branch so a group id never
+  // reaches `useChannel`.
+  if (mentionData.type === ChipType.USER_GROUP) {
+    return <Users className={ICON_CLASS} />;
   }
   // The channel lookup lives in its own component so `useChannel` is never called
   // conditionally (rules of hooks).

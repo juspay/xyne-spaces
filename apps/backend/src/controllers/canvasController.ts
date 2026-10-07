@@ -4,7 +4,6 @@ import {
   AttachmentEntityType,
   ActivityClassification,
   CanvasRole,
-  SDLC_CONTAINMENT_RELATION,
   SDLC_TRACK_FLAT_RELATION,
   TagMethod,
 } from '@xyne/shared';
@@ -18,6 +17,7 @@ import { notificationService } from '../services/notificationService.js';
 import { slackService } from '../services/slackService.js';
 import { activityService } from '../services/activity/activityService.js';
 import { DatabaseClient } from '@/database/client';
+import { fileTrackItemsTx } from '@/bypassAcl/transactions/sdlcTrackItemFiling';
 import { tagRepository } from '@/database/repositories/tagRepository';
 import { getGroupMembersForNotification } from '../utils/mentionUtils.js';
 import { getSlackRecipientEmails } from '../utils/notificationHelper.js';
@@ -682,31 +682,16 @@ export class CanvasController {
           select: { sourceId: true },
         });
         if (parentTrack) {
-          await prisma.sdlcEntityLink.createMany({
-            data: [
-              {
-                workspaceId: req.user!.workspaceId!,
-                channelId,
-                sourceType: 'FOLDER',
-                sourceId: sdlcFolderId,
-                targetType: 'CANVAS',
-                targetId: canvasId,
-                relationType: SDLC_CONTAINMENT_RELATION,
-                createdBy: creatorId,
-              },
-              {
-                workspaceId: req.user!.workspaceId!,
-                channelId,
-                sourceType: 'TRACK',
-                sourceId: parentTrack.sourceId,
-                targetType: 'CANVAS',
-                targetId: canvasId,
-                relationType: SDLC_TRACK_FLAT_RELATION,
-                createdBy: creatorId,
-              },
-            ],
-            skipDuplicates: true,
-          });
+          await fileTrackItemsTx(
+            prisma,
+            {
+              channelId,
+              trackId: parentTrack.sourceId,
+              parent: { type: 'FOLDER', id: sdlcFolderId },
+              items: [{ type: 'CANVAS', id: canvasId }],
+            },
+            { workspaceId: req.user!.workspaceId!, userId: creatorId },
+          );
         } else {
           const safeSdlcFolderId = sanitizeForLog(sdlcFolderId);
           const safeChannelId = sanitizeForLog(channelId);
@@ -811,6 +796,7 @@ export class CanvasController {
         entityId: canvasId,
         entityType: AttachmentEntityType.CANVAS,
         conversationId: `canvas_${canvasId}`,
+        channelId: null,
         originalFilename: uploadedFile.originalName,
         size: uploadedFile.fileSize,
         mimetype: uploadedFile.mimeType,

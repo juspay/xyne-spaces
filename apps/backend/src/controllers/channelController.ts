@@ -18,7 +18,7 @@ import { MessageAttachmentRepository } from '../database/repositories/messageAtt
 import { UserRepository } from '../database/repositories/users';
 import { UserGroupRepository } from '../database/repositories/userGroups';
 import { ProjectRepository } from '../database/repositories/projectRepository';
-import { Prisma, type User } from '@prisma/client';
+import { type User } from '@prisma/client';
 import { v4 as uuidv4 } from 'uuid';
 import { dlAddressesFor } from '@/services/dlResolver';
 import {
@@ -27,7 +27,6 @@ import {
   ChannelScopeType,
   ChannelVisibility,
   MessageType,
-  AttachmentEntityType,
   DeskType,
   EmailMergeMode,
   AppPermissionStatus,
@@ -57,10 +56,12 @@ import { userActivityTrackingService } from '@/services/userActivityTrackingServ
 import { vespaQueue } from '@/queues/vespaQueue';
 import { channelSchema } from '@/vespa/src/types';
 import { db } from '@/database/client';
+import { hasProjectAdminAccess } from '@/database/acl/admin-access';
 import { NAMESPACE } from '@/vespa/vespaConfig';
 import {logger} from '@/utils/logger';
 import { messageMetadataService } from '@/services/messageMetadataService';
-import { extractSpecialMentions, getChannelParticipantsForMention, getOnlineChannelParticipants } from '@/utils/mentionUtils';
+import { extractAllUsersForNotification, extractSpecialMentions, getChannelParticipantsForMention, getOnlineChannelParticipants } from '@/utils/mentionUtils';
+import { mentionRecipients } from '@/zero/side-effects/tables/mention-delivery';
 import { activityService } from '@/services/activity/activityService';
 import { encrypt, decrypt } from '@/services/encryptionService';
 import { vespaService } from '@/services/vespaSearch';
@@ -68,9 +69,10 @@ import { ChannelEmailAliasService } from '@/services/channelEmailAliasService';
 import { ensureDmConversationAuthorParticipant } from '@/utils/dmConversationParticipants';
 import { groupDmParticipantService } from '@/services/groupDmParticipantService';
 import { AppError } from '@/middleware/errorHandler';
+import { sendForwardedMessageTx } from '@/bypassAcl/transactions/channelController';
 
 export class ChannelController {
-  private channelRepository: ChannelRepository;
+  channelRepository: ChannelRepository;
   private channelParticipantRepository: ChannelParticipantRepository;
   private conversationRepository: ConversationRepository;
   private messageRepository: MessageRepository;
@@ -334,23 +336,37 @@ export class ChannelController {
 
         if (isGroupDm && mentionType) {
           const channel = await this.channelRepository.findById(channelId);
-          await notificationService.createMentionNotifications(
-            recipientIds,
-            createdMessage.messageId,
-            conversation.conversationId,
-            channelId,
-            channel?.name ?? channelId,
-            senderId,
-            senderInfo.name,
-            cleanContent,
-            workspaceId,
-            mentionType,
-            false, // isDMChannel
-            false, // isThreadMessage
-            senderInfo.picture ?? '',
-            undefined, // prefetchedData
-            true, // isGroupDM
-          );
+          // Personally mentioned members are sent without mentionType so the
+          // @channel/@here toggle can't suppress their mention.
+          const personalIds = mentionRecipients(
+            await extractAllUsersForNotification(messageContent, workspaceId),
+            { participantIds: new Set(recipientIds), senderId },
+          ).map(u => u.userId);
+          const personalSet = new Set(personalIds);
+          const sendMentions = (userIds: string[], groupMentionType: '@channel' | '@here' | undefined) =>
+            userIds.length === 0
+              ? Promise.resolve()
+              : notificationService.createMentionNotifications(
+                  userIds,
+                  createdMessage.messageId,
+                  conversation.conversationId,
+                  channelId,
+                  channel?.name ?? channelId,
+                  senderId,
+                  senderInfo.name,
+                  cleanContent,
+                  workspaceId,
+                  groupMentionType,
+                  false, // isDMChannel
+                  false, // isThreadMessage
+                  senderInfo.picture ?? '',
+                  undefined, // prefetchedData
+                  true, // isGroupDM
+                );
+          await Promise.all([
+            sendMentions(personalIds, undefined),
+            sendMentions(recipientIds.filter(id => !personalSet.has(id)), mentionType),
+          ]);
 
           // Mirror MessagesSideEffectHandler.handleSpecialMentionActivities: create
           // the activity-feed records for the @channel/@here audience so the mention
@@ -550,199 +566,7 @@ export class ChannelController {
       // Use transaction for all write operations to maintain atomicity
       const channelWorkspaceId = await this.channelRepository.getWorkspaceId(channelId);
       const targetChannel = await this.channelRepository.findById(channelId);
-      const result = await db.$transaction(async (tx) => {
-        // Create conversation
-      const conversation = await tx.conversation.create({
-        data: {
-          channelId: channelId,
-          createdBy: senderId,
-          initialMessageId: 'temp',
-          workspaceId: channelWorkspaceId,
-          lastActivityAt: new Date(),
-          replyCount: 0,
-          pinned: false,
-        },
-      });
-
-        const forwardedMessageMetadata = {} as Record<string, unknown>;
-        if (isCall) {
-          forwardedMessageMetadata['isCallMessage'] = true;
-          if (meta?.callId) {
-            forwardedMessageMetadata['callId'] = meta.callId;
-          }
-        }
-
-        // Create the forwarded message with XML content
-        const createdMessage = await tx.message.create({
-          data: {
-            conversationId: conversation.conversationId,
-            senderId: senderId,
-            workspaceId: channelWorkspaceId,
-            content: xmlContent,
-            msgType: MessageType.FORWARDED,
-            hasAttachment: originalAttachments.length > 0,
-            metadata: forwardedMessageMetadata as Prisma.InputJsonValue,
-          },
-        });
-        if (targetChannel) {
-          await ensureDmConversationAuthorParticipant({
-            channelId,
-            conversationId: conversation.conversationId,
-            senderId,
-            scopeType: targetChannel.scopeType as ChannelScopeType,
-            tx,
-          });
-        }
-
-         // Copy attachments to the new message
-         const copiedAttachments: any[] = [];
-        if (originalAttachments.length > 0) {
-           // Preserve the sender's display order: sort by explicit position
-           // (falling back to createdAt/id for legacy rows), then stamp a fresh
-           // strictly-increasing position + createdAt on each copy so the
-           // forwarded message renders in the same order as the source.
-           const orderedOriginalAttachments = [...originalAttachments].sort(
-             (a, b) =>
-               (a.position ?? Number.MAX_SAFE_INTEGER) -
-                 (b.position ?? Number.MAX_SAFE_INTEGER) ||
-               a.createdAt.getTime() - b.createdAt.getTime() ||
-               a.id.localeCompare(b.id)
-           );
-           const forwardCloneBaseTs = Date.now();
-           for (const [attIndex, attachment] of orderedOriginalAttachments.entries()) {
-             const copiedAttachment = await tx.messageAttachment.create({
-               data: {
-                 entityId: createdMessage.messageId,
-                 entityType: AttachmentEntityType.CHAT,
-                 originalFilename: attachment.originalFilename,
-                 size: attachment.size,
-                 mimetype: attachment.mimetype,
-                 url: attachment.url,
-                 thumbnailUrl: attachment.thumbnailUrl || undefined,
-                 uploadedByUserId: senderId,
-                 createdBy: senderId,
-                 storageProvider: attachment.storageProvider,
-                 conversationId: conversation.conversationId,
-                 workspaceId: channelWorkspaceId,
-                metadata: (attachment.metadata as Record<string, any>) || {},
-                 width: attachment.width ?? undefined,
-                 height: attachment.height ?? undefined,
-                 createdAt: new Date(forwardCloneBaseTs + attIndex),
-                 position: attIndex,
-               },
-             });
-             copiedAttachments.push(copiedAttachment);
-           }
-         }
-
-        let totalReplyCount = 0;
-
-        // If it is a call message, we want to clone all non-user bot messages (like transcipts/summaries)
-        if (isCall) {
-          // Get all bot thread messages from the original conversation
-          const botMessages = await tx.message.findMany({
-            where: {
-              conversationId: originalMessage.conversationId,
-              msgType: MessageType.BOT
-            }
-          });
-
-          totalReplyCount = botMessages.length;
-
-          // Insert the cloned bot messages into the new conversation
-          for (let i = 0; i < botMessages.length; i++) {
-            const botMsg = botMessages[i]!;
-            const clonedMessage = await tx.message.create({
-              data: {
-                conversationId: conversation.conversationId,
-                senderId: botMsg.senderId,
-                workspaceId: channelWorkspaceId,
-                content: botMsg.content,
-                msgType: botMsg.msgType,
-                hasAttachment: botMsg.hasAttachment,
-                edited: botMsg.edited,
-                isDeleted: botMsg.isDeleted,
-                isSent: botMsg.isSent,
-                showInChannel: botMsg.showInChannel,
-                childConversationId: botMsg.childConversationId,
-                metadata: (botMsg.metadata as Prisma.InputJsonValue) || {},
-                visibleTo: botMsg.visibleTo,
-              }
-            });
-
-            // If the bot message had attachments, clone them too
-            if (botMsg.hasAttachment) {
-              const botOriginalAttachments = await tx.messageAttachment.findMany({
-                where: {
-                  entityId: botMsg.messageId,
-                  entityType: AttachmentEntityType.CHAT
-                }
-              });
-
-              const botChannelWorkspaceId = await this.channelRepository.getWorkspaceId(conversation.channelId);
-              const orderedBotAttachments = [...botOriginalAttachments].sort(
-                (a, b) =>
-                  (a.position ?? Number.MAX_SAFE_INTEGER) -
-                    (b.position ?? Number.MAX_SAFE_INTEGER) ||
-                  a.createdAt.getTime() - b.createdAt.getTime() ||
-                  a.id.localeCompare(b.id)
-              );
-              const botCloneBaseTs = Date.now();
-              for (const [botAttIndex, originalAtt] of orderedBotAttachments.entries()) {
-                await tx.messageAttachment.create({
-                  data: {
-                    entityId: clonedMessage.messageId,
-                    entityType: AttachmentEntityType.CHAT,
-                    originalFilename: originalAtt.originalFilename,
-                    size: originalAtt.size,
-                    mimetype: originalAtt.mimetype,
-                    url: originalAtt.url,
-                    thumbnailUrl: originalAtt.thumbnailUrl || undefined,
-                    uploadedByUserId: senderId,
-                    createdBy: senderId,
-                    storageProvider: originalAtt.storageProvider,
-                    conversationId: conversation.conversationId,
-                    workspaceId: botChannelWorkspaceId,
-                    metadata: (originalAtt.metadata as Prisma.InputJsonValue) || {},
-                    width: originalAtt.width ?? undefined,
-                    height: originalAtt.height ?? undefined,
-                    createdAt: new Date(botCloneBaseTs + botAttIndex),
-                    position: botAttIndex,
-                  }
-                });
-              }
-            }
-          }
-        }
-
-        // Update conversation with real initial message ID and replyCount
-        await tx.conversation.update({
-          where: { conversationId: conversation.conversationId },
-          data: { 
-            initialMessageId: createdMessage.messageId,
-            replyCount: totalReplyCount,
-          },
-        });
-
-        // Update channel last activity in channel_stats
-        await tx.channelStats.upsert({
-          where: { channelId },
-          update: { lastActivityAt: new Date() },
-          create: { channelId, lastActivityAt: new Date(), workspaceId: channelWorkspaceId },
-        });
-
-        // Reopen DM for all participants so they can see the message
-        await tx.channelUserStatus.updateMany({
-          where: { channelId: channelId, isClosed: true },
-          data: { isClosed: false, updatedAt: new Date() },
-        });
-
-        return {
-          conversation,
-          createdMessage,
-          copiedAttachments,
-        };
-      });
+      const result = await sendForwardedMessageTx(channelId, senderId, channelWorkspaceId, isCall, meta, xmlContent, originalAttachments, targetChannel, originalMessage, this);
       await messageMetadataService.syncInitialMessageMd(result.conversation.conversationId);
 
       // Get channel participants for notifications and unread count
@@ -1544,8 +1368,20 @@ export class ChannelController {
 
       res.setHeader('Cache-Control', 'private, no-cache');
 
+      // Slack channels and apps can be bound onto any desk type; they must not shadow the desk's own source.
       const source = await db.externalSource.findFirst({
-        where: { channelId, workspaceId },
+        where: {
+          channelId,
+          workspaceId,
+          NOT: {
+            sourceType: {
+              in: [
+                ...(channel.type === ChannelType.SLACK ? [] : [ExternalSourcePlatform.SLACK_DESK]),
+                ...(channel.type === ChannelType.APP ? [] : [ExternalSourcePlatform.APP_DESK]),
+              ],
+            },
+          },
+        },
         select: { name: true, displayName: true, sourceType: true, isActive: true, externalIdentifier: true },
         orderBy: { createdAt: 'desc' },
       });
@@ -1574,7 +1410,7 @@ export class ChannelController {
         );
       } else if (source?.sourceType === ExternalSourcePlatform.SLACK_DESK) {
         connectedLabel = extractSlackChannelId(source.name);
-      } else if (sourceType && isSocialMediaPlatform(sourceType)) {
+      } else if (sourceType && isSocialMediaPlatform(sourceType) && sourceType !== ExternalSourcePlatform.INSTAGRAM) {
         const reviewSources = await db.externalSource.findMany({
           where: { channelId, workspaceId, sourceType: { in: [...SOCIAL_MEDIA_PLATFORMS] } },
           select: {
@@ -1597,6 +1433,27 @@ export class ChannelController {
         connectedLabel = activeReviewSources
           .map(reviewSource => reviewSource.displayName)
           .join(', ') || 'No active apps';
+      } else if (source?.sourceType === ExternalSourcePlatform.INSTAGRAM) {
+        const igSources = await db.externalSource.findMany({
+          where: { channelId, workspaceId, sourceType: ExternalSourcePlatform.INSTAGRAM },
+          select: {
+            id: true,
+            displayName: true,
+            externalIdentifier: true,
+            isActive: true,
+          },
+          orderBy: { createdAt: 'asc' },
+        });
+        const activeIgSources = igSources.filter(s => s.isActive);
+        isConnected = activeIgSources.length > 0;
+        deskApps = igSources.map(s => ({
+          id: s.id,
+          displayName: s.displayName ?? s.externalIdentifier ?? '',
+          externalIdentifier: s.externalIdentifier,
+          packageName: s.externalIdentifier,
+          isActive: s.isActive,
+        }));
+        connectedLabel = activeIgSources.map(s => s.displayName ? `@${s.displayName}` : s.externalIdentifier).join(', ') || null;
       }
 
       const fromDisplay = (source?.displayName ?? '').match(/[\w.+-]+@[\w.-]+\.[\w.-]+/)?.[0];
@@ -1752,6 +1609,29 @@ export class ChannelController {
       res.status(200).json({ success: true, data: { members } });
     } catch (error) {
       logger.error('Error in getChannelMembers:', error);
+      res.status(500).json({ success: false, error: 'Internal server error' });
+    }
+  };
+  
+  canLinkChannelBoards = async (req: Request, res: Response): Promise<void> => {
+    try {
+      const userId = req.user!.id;
+      const { channelId } = req.params;
+      if (!channelId) {
+        res.status(400).json({ success: false, error: 'channelId is required' });
+        return;
+      }
+
+      const role = await this.channelParticipantRepository.getParticipantRole(channelId, userId);
+      if (role === ChannelRole.ADMIN) {
+        res.status(200).json({ success: true, data: { canLinkBoards: true } });
+        return;
+      }
+
+      const isProjectAdmin = await hasProjectAdminAccess(db, userId);
+      res.status(200).json({ success: true, data: { canLinkBoards: isProjectAdmin } });
+    } catch (error) {
+      logger.error('Error in canLinkChannelBoards:', error);
       res.status(500).json({ success: false, error: 'Internal server error' });
     }
   };
@@ -2612,13 +2492,14 @@ export class ChannelController {
           orgRole: req.user!.orgRole,
           memberId: req.user!.memberId,
         });
-        for (const participant of result.addedParticipants) {
+        // Awaited so "added" lands before the mention the client's prompt delete delivers next.
+        await Promise.all(result.addedParticipants.map(participant =>
           handler.onInsert({
             entityId: participant.participantId,
             entityType: 'channel_participants',
             operation: 'insert'
-          }).catch(err => logger.error('Side-effect handler error: channel_participants onInsert', err));
-        }
+          }).catch(err => logger.error('Side-effect handler error: channel_participants onInsert', err))
+        ));
       }
 
       const response: AddGroupDmParticipantsResponse = {
@@ -2640,3 +2521,4 @@ export class ChannelController {
     }
   };
 }
+

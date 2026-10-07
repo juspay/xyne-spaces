@@ -1,5 +1,6 @@
 import type { Prisma } from "@prisma/client";
 import { prisma } from "../db.js";
+import { userIdFilter } from "./userIdFilter.js";
 
 export const chatMessageRepository = {
   create: (data: {
@@ -69,6 +70,39 @@ export const chatMessageRepository = {
     );
     await prisma.chatMessage.update({ where: { id: row.id }, data: { pendingActions: next as Prisma.InputJsonValue } });
     return true;
+  },
+
+  /** Append a FlowUI artifact card, deduped by screenId. */
+  appendUiFlow: async (id: string, flow: { screenId: string }): Promise<void> => {
+    await prisma.$transaction(async (tx) => {
+      const row = await tx.chatMessage.findUnique({ where: { id }, select: { uiFlows: true } });
+      if (!row) return;
+      const existing = Array.isArray(row.uiFlows)
+        ? (row.uiFlows as Array<Record<string, unknown>>)
+        : [];
+      if (existing.some((entry) => entry?.["screenId"] === flow.screenId)) return;
+      await tx.chatMessage.update({
+        where: { id },
+        data: { uiFlows: [...existing, flow] as unknown as Prisma.InputJsonValue },
+      });
+    });
+  },
+
+  /** Swap a stored card for a new version of itself (pending → answered /
+   *  declined). Returns false when the message or screenId is gone. */
+  replaceUiFlow: async (id: string, screenId: string, flow: unknown): Promise<boolean> => {
+    return prisma.$transaction(async (tx) => {
+      const row = await tx.chatMessage.findUnique({ where: { id }, select: { uiFlows: true } });
+      if (!row || !Array.isArray(row.uiFlows)) return false;
+      const existing = row.uiFlows as Array<Record<string, unknown>>;
+      if (!existing.some((entry) => entry?.["screenId"] === screenId)) return false;
+      const next = existing.map((entry) => (entry?.["screenId"] === screenId ? flow : entry));
+      await tx.chatMessage.update({
+        where: { id },
+        data: { uiFlows: next as unknown as Prisma.InputJsonValue },
+      });
+      return true;
+    });
   },
 
   /** Persist mid-run PARTIAL content, but ONLY while the row is still "running".
@@ -156,16 +190,28 @@ export const chatMessageRepository = {
       include: { attachments: true },
     }),
 
-  findByUserAndAgent: (userId: string, agentSlug: string) =>
-    prisma.chatMessage.findMany({ where: { userId, agentSlug }, orderBy: { createdAt: "asc" } }),
+  /** Rows may be keyed by EITHER of the caller's verified ids — the canonical
+   *  Claw id OR the workspace-scoped raw Spaces id (see getRequesterAliases).
+   *  Accept both so historical rows don't disappear from "my" reads. */
+  findByUserAndAgent: (userIds: string | string[], agentSlug: string) =>
+    prisma.chatMessage.findMany({
+      where: { ...userIdFilter(userIds), agentSlug },
+      orderBy: { createdAt: "asc" },
+    }),
 
   /** Delete every message in a conversation belonging to this user+agent.
    *  Scoped by all three to prevent one user from deleting another's chat
-   *  even if they guess a conversationId. Returns the delete count. */
-  deleteConversation: async (userId: string, agentSlug: string, conversationId: string) => {
+   *  even if they guess a conversationId. Returns the delete count. Alias
+   *  array = both verified representations of the SAME caller. */
+  deleteConversation: async (userIds: string | string[], agentSlug: string, conversationId: string) => {
     const result = await prisma.chatMessage.deleteMany({
-      where: { userId, agentSlug, conversationId },
+      where: { ...userIdFilter(userIds), agentSlug, conversationId },
     });
+    if (result.count > 0) {
+      await prisma.chatConversationMeta.deleteMany({
+        where: { conversationId, agentSlug, ...userIdFilter(userIds) },
+      });
+    }
     return result.count;
   },
 };

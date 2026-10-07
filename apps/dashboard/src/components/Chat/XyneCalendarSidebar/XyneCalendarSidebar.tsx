@@ -33,6 +33,7 @@ import {
   startOfMonth,
   startOfWeek,
 } from 'date-fns';
+import { MeetingStatus } from '@xyne/shared';
 import {
   xyneCalendarActor,
   globalXyneCalendarPanelRef,
@@ -57,18 +58,22 @@ import {
 } from '../../ui/dropdown-menu';
 import { useAuth } from '../../../hooks/useAuth';
 import { useAllVisibleChannels } from '../../../hooks/useChannels';
+import { useOtherUserCalls, type OtherUserCalls } from '../../../hooks/useOtherUserCalls';
 import { useCallHistory } from '../../../routes/CallHistoryScreen/useCallHistory';
 import { type Call } from '../../../routes/CallHistoryScreen/callHistoryItem.utils';
 import {
   ALWAYS_VISIBLE_JOIN_MIN_WIDTH_PERCENTAGE,
+  buildDayEventPool,
   COMPACT_METADATA_MIN_WIDTH_PERCENTAGE,
   computeEventPositions,
   createSlotClickHandler,
   dayKey,
   formatHourLabel,
   getCalendarCreateSlot,
+  getCalendarWindowRange,
   getCallPillVariant,
   getCallsOverlappingDay,
+  getCurrentUserMeetingStatus,
   hasCallEnded,
   isCallDraggable,
   isCallJoinableNow,
@@ -83,8 +88,10 @@ import { useDragReschedule } from '../../../routes/CallHistoryScreen/useDragResc
 import { useResizeEndTime } from '../../../routes/CallHistoryScreen/useResizeEndTime';
 import RecurringRescheduleDialog from '../../../routes/CallHistoryScreen/RecurringRescheduleDialog';
 import { CalendarEventGhost } from '../../../routes/CallHistoryScreen/CalendarEventGhost';
+import { OtherUserEventBlock } from '../../../routes/CallHistoryScreen/OtherUserEventBlock';
 import { XyneCalendarCallPill, type XyneCalendarCallPillVariant } from './XyneCalendarCallPill';
 import CallDetailSidebarView from './CallDetailSidebarView';
+import { XyneCalendarMeetWith } from './XyneCalendarMeetWith';
 import CalendarWeekView from '../../../routes/CallHistoryScreen/CalendarWeekView';
 import CalendarMonthView from '../../../routes/CallHistoryScreen/CalenderMonthView';
 import { GoogleCalendarIcon, MicrosoftIcon } from '../../../routes/CallHistoryScreen/CalendarIcons';
@@ -513,6 +520,7 @@ interface XyneCalendarDraggableDayPillProps {
   joinDisabled: boolean;
   showJoinByDefault: boolean;
   past: boolean;
+  maybe: boolean;
   compact: boolean;
   showCompactMetadata: boolean;
   continuesFromPreviousDay: boolean;
@@ -536,6 +544,7 @@ function XyneCalendarDraggableDayPill({
   joinDisabled,
   showJoinByDefault,
   past,
+  maybe,
   compact,
   showCompactMetadata,
   continuesFromPreviousDay,
@@ -577,6 +586,7 @@ function XyneCalendarDraggableDayPill({
         joinDisabled={joinDisabled}
         showJoinByDefault={showJoinByDefault}
         past={past}
+        maybe={maybe}
         compact={compact}
         showCompactMetadata={showCompactMetadata}
         continuesFromPreviousDay={continuesFromPreviousDay}
@@ -662,6 +672,7 @@ interface XyneCalendarDayViewProps {
   onCallClick: (call: Call) => void;
   onCreateCallAtSlot: (startsAt: Date, endsAt: Date) => void;
   channelPresentationsById: Map<string, ReturnType<typeof getXyneCalendarChannelPresentation>>;
+  otherUsersCalls: OtherUserCalls[];
 }
 
 const XyneCalendarDayView = memo(
@@ -677,6 +688,7 @@ const XyneCalendarDayView = memo(
     onCallClick,
     onCreateCallAtSlot,
     channelPresentationsById,
+    otherUsersCalls,
   }: XyneCalendarDayViewProps): ReactElement => {
     const currentRoomExternalId = useSelector(roomActor, state => state.context.externalId);
     const isRoomSessionActive = useSelector(
@@ -823,10 +835,24 @@ const XyneCalendarDayView = memo(
       [dailyCalls, onCallClick],
     );
 
-    const callPositions = useMemo(
-      () => computeEventPositions(dailyCalls, currentDay),
-      [dailyCalls, currentDay],
-    );
+    // Own calls + "Meet with" users' slots share one pool so overlapping ones sit side by side.
+    const { callPositions, otherSlotMap } = useMemo(() => {
+      const pool = buildDayEventPool(
+        dailyCalls,
+        otherUsersCalls,
+        slot => !!slot.startsAt && isSameDay(new Date(slot.startsAt), currentDay),
+      );
+      return {
+        // The default column cap stacks any further overlapping events on top of each
+        // other, which would hide people's slots — with "Meet with" on, give each its own.
+        callPositions: computeEventPositions(
+          pool.allEvents,
+          currentDay,
+          otherUsersCalls.length > 0 ? Number.POSITIVE_INFINITY : undefined,
+        ),
+        otherSlotMap: pool.otherSlotMap,
+      };
+    }, [dailyCalls, otherUsersCalls, currentDay]);
 
     // Scroll the timeline to show the current time (or the best window of calls) when the day changes, but only if the user hasn't already scrolled to a different time.
     useEffect(() => {
@@ -873,7 +899,7 @@ const XyneCalendarDayView = memo(
         onDragEnd={onDragEnd}
         onDragCancel={onDragCancel}
       >
-        <div ref={scrollContainerRef} className='min-h-0 flex-1 overflow-y-auto px-3 pb-7'>
+        <div ref={scrollContainerRef} className='min-h-0 flex-1 overflow-y-auto px-3 py-4'>
           <div
             className='relative min-w-0'
             style={{ height: TIMELINE_HOUR_HEIGHT * 24 }}
@@ -990,13 +1016,36 @@ const XyneCalendarDayView = memo(
                 </div>
               )}
 
+              {Array.from(otherSlotMap, ([slotId, slot]) => {
+                const position = callPositions.get(slotId);
+                if (!position) return null;
+
+                return (
+                  <OtherUserEventBlock
+                    key={slotId}
+                    top={getTimelineOffset(position.startMins) + CALL_PILL_VERTICAL_INSET}
+                    height={Math.max(
+                      MINIMUM_CALL_PILL_HEIGHT,
+                      getTimelineOffset(position.endMins - position.startMins) -
+                        CALL_PILL_VERTICAL_INSET * 2,
+                    )}
+                    leftPct={position.leftPct}
+                    widthPct={position.widthPct}
+                    color={slot.color}
+                    title={slot.title}
+                    startsAt={slot.startsAt}
+                    endsAt={slot.endsAt}
+                  />
+                );
+              })}
+
               {dailyCalls.map(call => {
                 const position = callPositions.get(call.id);
                 if (!position || !call.startsAt) return null;
 
                 const callHasEnded = hasCallEnded(call, now);
                 const variant = getCallPillVariant(call, currentUserId, now);
-                const joinable = isCallJoinableNow(call, variant, now);
+                const joinable = isCallJoinableNow(call, now);
                 const continuesFromPreviousDay = !isSameDay(new Date(call.startsAt), currentDay);
                 const continuesToNextDay =
                   !!call.endsAt && !isSameDay(new Date(call.endsAt), currentDay);
@@ -1032,6 +1081,7 @@ const XyneCalendarDayView = memo(
                       position.widthPct >= ALWAYS_VISIBLE_JOIN_MIN_WIDTH_PERCENTAGE
                     }
                     past={callHasEnded}
+                    maybe={getCurrentUserMeetingStatus(call, currentUserId) === MeetingStatus.MAYBE}
                     compact={height < 40}
                     showCompactMetadata={position.widthPct >= COMPACT_METADATA_MIN_WIDTH_PERCENTAGE}
                     continuesFromPreviousDay={continuesFromPreviousDay}
@@ -1081,9 +1131,17 @@ const XyneCalendarSidebarTimeline = memo(
     onToday,
   }: XyneCalendarSidebarTimelineProps): ReactElement => {
     const { user } = useAuth();
+
+    // The dates this sidebar is showing — the query fetches exactly that span, with no
+    // list-shaped pool to filter down.
+    const calendarWindow = useMemo(
+      () => getCalendarWindowRange(viewMode, selectedDate),
+      [viewMode, selectedDate],
+    );
+
     const {
       calls,
-      calendarScheduledCalls,
+      calendarRangeCalls,
       isLoading,
       isScheduledCallsLoading,
       handleCallRowClick,
@@ -1099,8 +1157,39 @@ const XyneCalendarSidebarTimeline = memo(
       deleteModalCall,
       handleDeleteConfirm,
       closeDeleteModal,
-    } = useCallHistory(user?.id, { isCalendarView: true });
+    } = useCallHistory(user?.id, { calendarWindow });
     const visibleChannels = useAllVisibleChannels();
+    const { from: meetWithFrom, to: meetWithTo } = useMemo(
+      () => ({ from: new Date(calendarWindow.from), to: new Date(calendarWindow.to) }),
+      [calendarWindow],
+    );
+    const {
+      selectedUsers: meetWithUsers,
+      otherUsersCalls,
+      addUser: addMeetWithUser,
+      removeUser: removeMeetWithUser,
+      refresh: refreshMeetWithCalls,
+    } = useOtherUserCalls(meetWithFrom, meetWithTo);
+
+    // My own calls are live, theirs are fetched once — so when mine change (a call
+    // scheduled, moved or cancelled, likely with them on it), pull theirs again.
+    const ownCallsSignature = useMemo(
+      () =>
+        (calendarRangeCalls ?? [])
+          .map(call => `${call.id}:${call.startsAt}:${call.endsAt}:${call.status}`)
+          .join('|'),
+      [calendarRangeCalls],
+    );
+    const refreshMeetWithCallsRef = useRef(refreshMeetWithCalls);
+    refreshMeetWithCallsRef.current = refreshMeetWithCalls;
+    useEffect(() => {
+      const timer = window.setTimeout(() => refreshMeetWithCallsRef.current(), 500);
+      return (): void => window.clearTimeout(timer);
+    }, [ownCallsSignature]);
+    const otherUsersCallsArray = useMemo(
+      () => Array.from(otherUsersCalls.values()),
+      [otherUsersCalls],
+    );
     const currentRoomExternalId = useSelector(roomActor, state => state.context.externalId);
     const isRoomSessionActive = useSelector(
       roomActor,
@@ -1108,7 +1197,6 @@ const XyneCalendarSidebarTimeline = memo(
         state.matches('joining') || state.matches('connecting') || state.matches('connected'),
     );
     const selectedCallSnapshotRef = useRef<Call | null>(null);
-    const [now, setNow] = useState(() => new Date());
     const [scheduleInitialTime, setScheduleInitialTime] = useState<{
       startsAt: Date;
       endsAt: Date;
@@ -1119,18 +1207,16 @@ const XyneCalendarSidebarTimeline = memo(
       return displayName !== 'Unknown' ? `${displayName.split(' ')[0]}'s Call` : '';
     }, [user]);
 
-    const upcomingCallDates = useMemo(() => {
+    const callDates = useMemo(() => {
       const dates = new Set<number>();
-      const nowTime = now.getTime();
 
-      for (const call of calendarScheduledCalls ?? []) {
+      for (const call of calendarRangeCalls ?? []) {
         if (!call.startsAt) continue;
-        const startsAt = new Date(call.startsAt).getTime();
-        if (startsAt > nowTime) dates.add(startOfDay(new Date(startsAt)).getTime());
+        dates.add(startOfDay(new Date(call.startsAt)).getTime());
       }
 
       return Array.from(dates, date => new Date(date));
-    }, [calendarScheduledCalls, now]);
+    }, [calendarRangeCalls]);
 
     const handleCreateCallAtSlot = useCallback((startsAt: Date, endsAt: Date): void => {
       setScheduleInitialTime({ startsAt, endsAt });
@@ -1146,30 +1232,17 @@ const XyneCalendarSidebarTimeline = memo(
       [handleCreateCallAtSlot],
     );
 
-    // Week/month aren't day-scoped, so they need the full pool `dailyCalls` filters down from.
-    const allCalls = useMemo(
-      () => mergeCallsById([...(calls ?? []), ...(calendarScheduledCalls ?? [])]),
-      [calls, calendarScheduledCalls],
-    );
-
-    useEffect(() => {
-      const intervalId = window.setInterval(() => setNow(new Date()), 12_000);
-      return (): void => window.clearInterval(intervalId);
-    }, []);
+    // Week/month aren't day-scoped, so they need the full window `dailyCalls` narrows down from.
+    const allCalls = useMemo(() => mergeCallsById(calendarRangeCalls ?? []), [calendarRangeCalls]);
 
     const dailyCalls = useMemo(
       () =>
-        mergeCallsById(
-          getCallsOverlappingDay(
-            [...(calls ?? []), ...(calendarScheduledCalls ?? [])],
-            selectedDate,
-          ),
-        ).sort(
+        mergeCallsById(getCallsOverlappingDay(calendarRangeCalls ?? [], selectedDate)).sort(
           (firstCall, secondCall) =>
             new Date(firstCall.startsAt ?? 0).getTime() -
             new Date(secondCall.startsAt ?? 0).getTime(),
         ),
-      [calendarScheduledCalls, calls, selectedDate],
+      [calendarRangeCalls, selectedDate],
     );
 
     // Header count badge — Day reuses dailyCalls; Week/Month filter the full pool
@@ -1201,16 +1274,16 @@ const XyneCalendarSidebarTimeline = memo(
       [visibleChannels],
     );
 
-    // Not `dailyCalls`: that list requires `startsAt` (getCallsOverlappingDay) and only
-    // covers SCHEDULED/ended-history statuses.
+    // Not `dailyCalls`: that list is day-scoped and requires `startsAt`
+    // (getCallsOverlappingDay), so a selected call outside the day would vanish.
     const queriedSelectedCall = useMemo(() => {
       if (!selectedCallId) return null;
       return (
         calls?.find(call => call.id === selectedCallId) ??
-        calendarScheduledCalls?.find(call => call.id === selectedCallId) ??
+        calendarRangeCalls?.find(call => call.id === selectedCallId) ??
         null
       );
-    }, [calls, calendarScheduledCalls, selectedCallId]);
+    }, [calls, calendarRangeCalls, selectedCallId]);
 
     useEffect(() => {
       if (queriedSelectedCall) selectedCallSnapshotRef.current = queriedSelectedCall;
@@ -1233,21 +1306,30 @@ const XyneCalendarSidebarTimeline = memo(
     }, [isLoading, isScheduledCallsLoading, onClearSelectedCall, selectedCall, selectedCallId]);
 
     const sharedHeader = (
-      <XyneCalendarSidebarHeader
-        selectedDate={selectedDate}
-        viewMode={viewMode}
-        onViewModeChange={onViewModeChange}
-        onDateChange={onDateChange}
-        onPreviousDay={onPreviousDay}
-        onNextDay={onNextDay}
-        onToday={onToday}
-        markedDates={upcomingCallDates}
-        callCount={viewPeriodCalls.length}
-        liveCount={liveCount}
-        scheduledCount={scheduledCount}
-        endedCount={endedCount}
-        isLoading={isLoading || isScheduledCallsLoading}
-      />
+      <>
+        <XyneCalendarSidebarHeader
+          selectedDate={selectedDate}
+          viewMode={viewMode}
+          onViewModeChange={onViewModeChange}
+          onDateChange={onDateChange}
+          onPreviousDay={onPreviousDay}
+          onNextDay={onNextDay}
+          onToday={onToday}
+          markedDates={callDates}
+          callCount={viewPeriodCalls.length}
+          liveCount={liveCount}
+          scheduledCount={scheduledCount}
+          endedCount={endedCount}
+          isLoading={isLoading || isScheduledCallsLoading}
+        />
+        <XyneCalendarMeetWith
+          currentUserId={user?.id}
+          selectedUsers={meetWithUsers}
+          otherUsersCalls={otherUsersCalls}
+          onAddUser={addMeetWithUser}
+          onRemoveUser={removeMeetWithUser}
+        />
+      </>
     );
 
     let mainContent: ReactElement;
@@ -1290,6 +1372,7 @@ const XyneCalendarSidebarTimeline = memo(
               onDeleteClick={handleDeleteClick}
               onCreateCallAtSlot={handleCreateCallAtSlot}
               channelPresentationsById={channelPresentationsById}
+              otherUsersCalls={otherUsersCallsArray}
             />
           </div>
         </>
@@ -1309,6 +1392,7 @@ const XyneCalendarSidebarTimeline = memo(
               onEditClick={handleEditClick}
               onDeleteClick={handleDeleteClick}
               onCreateCall={handleCreateCallOnDay}
+              otherUsersCalls={otherUsersCallsArray}
             />
           </div>
         </>
@@ -1329,6 +1413,7 @@ const XyneCalendarSidebarTimeline = memo(
             onCallClick={handleCallRowClick}
             onCreateCallAtSlot={handleCreateCallAtSlot}
             channelPresentationsById={channelPresentationsById}
+            otherUsersCalls={otherUsersCallsArray}
           />
         </>
       );
@@ -1373,6 +1458,7 @@ const XyneCalendarSidebarTimeline = memo(
           onClose={() => setScheduleInitialTime(null)}
           initialStartsAt={scheduleInitialTime?.startsAt ?? null}
           initialEndsAt={scheduleInitialTime?.endsAt ?? null}
+          initialParticipants={meetWithUsers.length > 0 ? meetWithUsers.map(u => u.id) : null}
         />
       </>
     );

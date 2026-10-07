@@ -105,7 +105,14 @@ RAW_RE='\$(query|execute)Raw(Unsafe)?'
 
 # Paths that are never authored by hand. The generated Prisma clients DEFINE
 # these methods, so scanning them would fire on every `prisma generate`.
-EXCLUDED_RE='(^|/)(node_modules|dist|build|generated)/'
+#
+# apps/backend/src/bypassAcl/ is also excluded: it's the one sanctioned location
+# for raw calls (behind the rawQuery() wrapper in bypassAcl/base.ts, each site
+# requiring tables/reason for auditability), enforced instead by
+# scripts/validate-no-acl-bypass.sh (which blocks raw primitives OUTSIDE this
+# folder) and by a CODEOWNERS requirement on the folder. Counting raw calls
+# inside it would fight the framework the guard exists to push code toward.
+EXCLUDED_RE='(^|/)(node_modules|dist|build|generated)/|(^|/)apps/backend/src/bypassAcl/'
 
 # This script is the one file that must spell the guarded names out in full —
 # it cannot be subject to its own rule. Nothing else is exempt.
@@ -164,6 +171,10 @@ while IFS=$'\t' read -r status p1 p2; do
 
     [ "$new_path" = "$SELF_PATH" ] && continue
     printf '%s' "$new_path" | grep -qE "$EXCLUDED_RE" && continue
+
+    # Binary files (a tarball, an image) cannot hold a call site, and awk aborts
+    # on bytes that are not valid text. `grep -I` treats binary as no match.
+    show_at "$NEW_SPEC" "$new_path" | grep -qI . || continue
 
     new_count=$(count_raw "$NEW_SPEC" "$new_path")
     [ "$new_count" = "0" ] && continue

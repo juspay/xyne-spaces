@@ -1,14 +1,13 @@
 import { useMemo } from 'react';
+import { AccessType } from '@xyne/shared';
 import { usePermissions } from './usePermissions';
 import { useAuth } from './useAuth';
-import { WorkspaceRole } from '@xyne/shared';
 import { useUserGroups } from './useUserGroup';
 import {
   NAVIGATION_ITEMS,
   filterNavItemsByPermission,
   type NavigationItem,
 } from '../components/AppSidebar/navigationConfig';
-import { useClawDashboardVisibility } from './useClawDashboardVisibility';
 import { useDisabledToolbarPaths } from './useDisabledToolbarPaths';
 import { useStreamsVisibility } from './useStreamsVisibility';
 import { usePlatform } from './usePlatform';
@@ -21,8 +20,6 @@ export const useVisibleNavigationItems = (): NavigationItem[] => {
   const canManageOwnUserGroups = userGroups.some(
     group => group.createdBy === user?.id && group.workspaceId === user?.workspaceId,
   );
-  const { showClawDashboard } = useClawDashboardVisibility();
-  const isGuest = user?.role === WorkspaceRole.GUEST;
   const disabledToolbarPaths = useDisabledToolbarPaths();
   const { showStreams } = useStreamsVisibility();
   // Streams is a horizontal strip of fixed-width columns — 280px at its
@@ -32,19 +29,11 @@ export const useVisibleNavigationItems = (): NavigationItem[] => {
   const { isMobile } = usePlatform();
 
   return useMemo(() => {
-    const permittedItems = filterNavItemsByPermission(
+    const visibleItems = filterNavItemsByPermission(
       NAVIGATION_ITEMS,
       permissions,
       canManageOwnUserGroups,
     );
-    // Guests are scoped to specific channels / canvases; the Claw Agents
-    // section is a workspace-wide surface they must not see.
-    const withoutGuestBlocked = isGuest
-      ? permittedItems.filter(item => item.path !== '/claw-agents')
-      : permittedItems;
-    const visibleItems = showClawDashboard
-      ? withoutGuestBlocked
-      : withoutGuestBlocked.filter(item => item.path !== '/claw-agents');
     // Streams' single flag. This hook feeds both the sidebar and the list in
     // Preferences > Toolbar, so dropping it here means off is genuinely absent —
     // not merely hidden from the rail while still offered in settings.
@@ -52,14 +41,16 @@ export const useVisibleNavigationItems = (): NavigationItem[] => {
       showStreams && !isMobile
         ? visibleItems
         : visibleItems.filter(item => item.path !== '/streams');
-    return withStreams.filter(item => !disabledToolbarPaths.has(item.path));
-  }, [
-    permissions,
-    canManageOwnUserGroups,
-    showClawDashboard,
-    showStreams,
-    isMobile,
-    isGuest,
-    disabledToolbarPaths,
-  ]);
+    // Migrations with nothing to show: no ticket-migration access and the one
+    // ungated tab (Slack) disabled for this workspace.
+    const migrationsEmpty =
+      disabledToolbarPaths.has('/migrations/slack') &&
+      !permissions.some(
+        p => p.resourceName === 'TICKET-MIGRATION' && p.accessType === AccessType.ADMIN,
+      );
+    return withStreams.filter(
+      item =>
+        !disabledToolbarPaths.has(item.path) && !(item.path === '/migrations' && migrationsEmpty),
+    );
+  }, [permissions, canManageOwnUserGroups, showStreams, isMobile, disabledToolbarPaths]);
 };

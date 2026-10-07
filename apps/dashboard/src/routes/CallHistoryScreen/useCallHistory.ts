@@ -33,7 +33,7 @@ import { EditCallData } from '../../components/Call/ScheduleCallModal/ScheduleCa
 import { useQuery } from '@xyne/shared/hooks';
 
 type ScheduledCall = Omit<
-  QueryResultType<typeof queries.userScheduledCallsV2>[number],
+  QueryResultType<typeof queries.userUpcomingScheduledCalls>[number],
   'participants'
 > & {
   participants?: CallParticipants;
@@ -42,7 +42,7 @@ type ScheduledCall = Omit<
 interface UseCallHistoryReturn {
   calls: Call[] | undefined;
   scheduledCalls: ScheduledCall[] | undefined;
-  calendarScheduledCalls: ScheduledCall[] | undefined;
+  calendarRangeCalls: Call[] | undefined;
   missedCalls: Call[];
   isLoading: boolean;
   isScheduledCallsLoading: boolean;
@@ -89,15 +89,14 @@ interface UseCallHistoryReturn {
 }
 
 interface UseCallHistoryOptions {
-  /** When true, loads all scheduled calls for calendar view */
-  isCalendarView?: boolean;
+  calendarWindow?: { from: number; to: number } | undefined;
 }
 
 export function useCallHistory(
   userId: string | undefined,
   options: UseCallHistoryOptions = {},
 ): UseCallHistoryReturn {
-  const { isCalendarView = false } = options;
+  const { calendarWindow } = options;
   const zero = useZero();
 
   // Toggle for showing channel calls (calls in channels the user is a member of but wasn't invited to)
@@ -130,16 +129,17 @@ export function useCallHistory(
     queries.userUpcomingScheduledCalls({ startsBefore: upcomingWindowEnd.current }),
   );
 
-  // All scheduled calls for calendar view (only loaded when calendar is active)
-  const [allScheduledCalls] = useCachedQuery(queries.userScheduledCallsV2(), {
-    enabled: isCalendarView,
-  });
+  const [calendarRangeRows] = useCachedQuery(
+    queries.userCallsInRange({
+      from: calendarWindow?.from ?? 0,
+      to: calendarWindow?.to ?? 0,
+    }),
+    { enabled: Boolean(calendarWindow) },
+  );
 
   const calls = accumulatedCalls as Call[] | undefined;
   // For normal view: use optimized 2-day window query
   const upcomingScheduledCallRows = upcomingScheduledCalls as ScheduledCall[] | undefined;
-  // For calendar view: use full scheduled calls query
-  const scheduledCallRows = allScheduledCalls as ScheduledCall[] | undefined;
   const [selectedCall, setSelectedCall] = useState<Call | null>(null);
   const [isParticipantsModalOpen, setIsParticipantsModalOpen] = useState(false);
   const [selectedUsers, setSelectedUsers] = useState<User[]>([]);
@@ -237,39 +237,29 @@ export function useCallHistory(
     return filtered;
   }, [upcomingScheduledCallRows, activeCalls, userId]);
 
-  const calendarScheduledCalls = useMemo(() => {
-    if (!scheduledCallRows) return undefined;
+  // Visibility pass over the windowed rows. The query already settled reachability and
+  // ordering, so this only applies the two viewer-level rules the grid shares with the
+  // lists: calls the viewer hid, and channel-reachable calls they were never invited to
+  // (opt-in behind the same showChannelCalls toggle the list uses).
+  const calendarRangeCalls = useMemo(() => {
+    if (!calendarRangeRows) return undefined;
 
-    const activeCallIds = new Set(activeCalls?.map(call => call.id) ?? []);
-    const activeExternalIds = new Set(activeCalls?.map(call => call.externalId) ?? []);
-
-    const filtered = scheduledCallRows.filter(call => {
-      if (call.status === CallStatus.ACTIVE) {
-        return false;
-      }
-      if (activeCallIds.has(call.id) || activeExternalIds.has(call.externalId)) {
-        return false;
-      }
+    return (calendarRangeRows as Call[]).filter(call => {
       const currentUserParticipant = getCurrentUserParticipant(call);
+
       if (userId && currentUserParticipant?.meetingStatus === MeetingStatus.HIDDEN) {
         return false;
       }
 
+      // External calendar events carry no CallParticipant rows — attendees live in
+      // metadata, so the owning user id is what identifies them.
       if (isExternalCalendarEvent(call)) {
         return isExternalCalendarEventForUser(call, userId);
       }
 
-      return Boolean(currentUserParticipant);
+      return showChannelCalls || Boolean(currentUserParticipant);
     });
-
-    filtered.sort((a, b) => {
-      const aTime = a.startsAt ? new Date(a.startsAt).getTime() : Infinity;
-      const bTime = b.startsAt ? new Date(b.startsAt).getTime() : Infinity;
-      return aTime - bTime;
-    });
-
-    return filtered;
-  }, [scheduledCallRows, activeCalls, userId]);
+  }, [calendarRangeRows, showChannelCalls, userId]);
 
   const recentCalls = useMemo(() => {
     const baseCalls = calls;
@@ -279,11 +269,10 @@ export function useCallHistory(
 
     // Build lookup sets for stale-ACTIVE detection.
     // activeCalls (userActiveCalls) is the live source of truth: if a call is no longer
-    // in this set it has ended. allScheduledCalls covers the ACTIVE→SCHEDULED reversion
+    // in this set it has ended. The upcoming rows cover the ACTIVE→SCHEDULED reversion
     // (call ended before endsAt) where the call leaves userCallHistory but the
     // cumulative accumulator still holds an ACTIVE entry.
-    // When calendar view is inactive, fall back to upcomingScheduledCallRows for stale detection.
-    const scheduledSource = scheduledCallRows ?? upcomingScheduledCallRows;
+    const scheduledSource = upcomingScheduledCallRows;
     const activeCallExternalIds = new Set(activeCalls?.map(c => c.externalId) ?? []);
     const scheduledCallIds = new Set(scheduledSource?.map(c => c.id) ?? []);
 
@@ -332,7 +321,7 @@ export function useCallHistory(
       const bTime = b.startsAt || b.startedAt || b.createdAt;
       return new Date(bTime).getTime() - new Date(aTime).getTime();
     });
-  }, [calls, scheduledCallRows, upcomingScheduledCallRows, activeCalls, showChannelCalls, userId]);
+  }, [calls, upcomingScheduledCallRows, activeCalls, showChannelCalls, userId]);
 
   const missedCalls = useMemo(() => {
     if (!recentCalls || !userId) return [];
@@ -790,7 +779,7 @@ export function useCallHistory(
   return {
     calls: recentCalls,
     scheduledCalls,
-    calendarScheduledCalls,
+    calendarRangeCalls,
     missedCalls,
     isLoading,
     isScheduledCallsLoading: upcomingScheduledQueryDetails.type === 'unknown',

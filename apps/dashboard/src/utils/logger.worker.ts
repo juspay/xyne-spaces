@@ -133,10 +133,6 @@ class LoggerWorker {
 
   private handleLog(payload?: WorkerMessage['payload']): void {
     if (payload?.level !== undefined && payload?.event) {
-      if (payload.consoleLog) {
-        // eslint-disable-next-line no-console
-        console.log('[%s] %s', payload.level, String(payload.event), payload.extraFields ?? {});
-      }
       const logEntry: LogEntry = {
         clientSessionId: this.clientSessionId,
         platformName: this.platformName,

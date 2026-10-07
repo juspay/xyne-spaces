@@ -450,6 +450,8 @@ export class EmailAuthController {
             timestamp: new Date().toISOString(),
           }),
           ipAddress: req.ip || req.connection.remoteAddress || undefined,
+          // The user row may still say GOOGLE/MICROSOFT for an SSO account that set a password.
+          loginMethod: AuthProvider.EMAIL,
         });
 
         const jwtToken = jwtService.generateToken({
@@ -573,7 +575,7 @@ export class EmailAuthController {
       });
 
       // Revoke all active sessions for this user — forces re-auth everywhere
-      await this.userSessionService.revokeAllUserSessions(userId);
+      await this.userSessionService.revokeAllUserSessions(userId, 'PASSWORD_CHANGED');
 
       res.status(200).json({ success: true, message: 'Password changed successfully. Please log in again.' });
     } catch (error) {
@@ -756,7 +758,7 @@ export class EmailAuthController {
         select: { id: true },
       });
       for (const u of affectedUsers) {
-        await this.userSessionService.revokeAllUserSessions(u.id);
+        await this.userSessionService.revokeAllUserSessions(u.id, 'PASSWORD_RESET');
       }
 
       // Delete the code from Redis (it's been consumed)
@@ -893,6 +895,25 @@ export class EmailAuthController {
           email: normalizedEmail,
         });
         return;
+      }
+
+      // No workspaceId/invitationId means this registration is on the
+      // create-org (enterprise) path — public email domains cannot create
+      // enterprise workspaces, so fail fast before sending a verification code.
+      // Community joins (workspaceId) and invitations keep allowing any email.
+      if (!workspaceId && !invitationId) {
+        try {
+          await organizationDomainService.assertNotPublicEmailDomain(normalizedEmail);
+        } catch (error) {
+          if (error instanceof PublicEmailDomainError) {
+            logger.warn(`[AUTH] Email registration blocked for ${normalizedEmail} (reason=public_email_domain)`);
+            res.status(403).json({
+              error: error.code,
+              message: error.message,
+            });
+            return;
+          }
+        }
       }
 
       // Dashboard already sends the register password as a SHA-256 hash.

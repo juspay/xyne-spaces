@@ -11,7 +11,6 @@ import { CommunityJoinResultStatus,
   WorkspaceType,
   AuthProvider,
   Status,
-  UserStatus,
   WorkspaceRole } from '@xyne/shared';
 import { DatabaseClient } from '@/database/client';
 import { config } from '@/config/env';
@@ -25,8 +24,9 @@ import { repositories } from '@/database/repositories';
 import { ensureUserInGeneralChannel as joinUserToGeneralChannel } from '@/utils/workspaceGeneralChannel';
 import { withWorkspaceScope } from '@/database/tenant/context';
 import { UserService } from '@/services/userService';
+import { joinOpenCommunityWorkspaceTx } from '@/bypassAcl/transactions/communityWorkspaceService';
 
-const COMMUNITY_MEMBER_WORKSPACE_ROLE = 'COMMUNITY_MEMBER' as WorkspaceRole;
+export const COMMUNITY_MEMBER_WORKSPACE_ROLE = 'COMMUNITY_MEMBER' as WorkspaceRole;
 const TEMPLATE_TOKEN_PATTERN = /{{\s*(workspaceName|workspaceId|joinLink|email)\s*}}/g;
 
 export interface CommunityJoinUserData {
@@ -77,7 +77,7 @@ export interface CommunityJoinRequestListItem {
   workspaceType?: string | null;
 }
 
-type CommunityWorkspace = {
+export type CommunityWorkspace = {
   id: string;
   name: string;
   orgId: string;
@@ -88,8 +88,8 @@ type CommunityWorkspace = {
 };
 
 export class CommunityWorkspaceService {
-  private prisma = DatabaseClient.getInstance();
-  private userService = new UserService();
+  prisma = DatabaseClient.getInstance();
+  userService = new UserService();
 
   async listCommunityWorkspaces(): Promise<CommunityWorkspaceOrganization[]> {
     const organizations = await this.prisma.organization.findMany({
@@ -314,64 +314,7 @@ export class CommunityWorkspaceService {
 
     const landingChannelId = requestedChannel?.id ?? params.workspace.landingChannelId ?? null;
 
-    const result = await this.prisma.$transaction(async (tx) => {
-      let orgMember = await tx.orgMember.findUnique({
-        where: { email },
-        select: { memberId: true },
-      });
-
-      if (!orgMember) {
-        orgMember = await tx.orgMember.create({
-          data: {
-            orgId: params.workspace.orgId,
-            email,
-            role: OrgRole.COMMUNITY_MEMBER as any,
-          },
-          select: { memberId: true },
-        });
-      }
-
-      const hasCompletedOnboarding = await this.userService.hasCompletedOnboarding(email);
-
-      let workspaceUser = await tx.user.findUnique({
-        where: {
-          email_workspaceId: {
-            email,
-            workspaceId: params.workspace.id,
-          },
-        },
-      });
-
-      const isNewUser = !hasCompletedOnboarding;
-      if (workspaceUser) {
-        workspaceUser = await tx.user.update({
-          where: { id: workspaceUser.id },
-          data: {
-            providerUserId: params.userData.providerUserId,
-            name: params.userData.name || workspaceUser.name,
-            picture: params.userData.picture ?? workspaceUser.picture,
-            authProvider: normalizedAuthProvider,
-            status: UserStatus.ACTIVE,
-            leftAt: null,
-          },
-        });
-      } else {
-        workspaceUser = await tx.user.create({
-          data: {
-            providerUserId: params.userData.providerUserId,
-            email,
-            name: params.userData.name,
-            picture: params.userData.picture,
-            authProvider: normalizedAuthProvider,
-            workspace: { connect: { id: params.workspace.id } },
-            role: COMMUNITY_MEMBER_WORKSPACE_ROLE,
-            orgMember: { connect: { memberId: orgMember.memberId } },
-          },
-        });
-      }
-
-      return { workspaceUser, isNewUser };
-    });
+    const result = await joinOpenCommunityWorkspaceTx(this, email, params, normalizedAuthProvider);
 
     if (landingChannelId) {
       try {
@@ -819,3 +762,4 @@ export class CommunityWorkspaceService {
 }
 
 export const communityWorkspaceService = new CommunityWorkspaceService();
+

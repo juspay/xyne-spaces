@@ -1,9 +1,9 @@
 import { logger, Event as LogEvent } from '../utils/logger';
-import { useState, useCallback, useRef, useEffect, useMemo, useDeferredValue } from 'react';
+import { useState, useCallback, useRef, useEffect, useMemo } from 'react';
 import { searchMetricsService } from '../services/searchMetricsService';
 import { useAuthContextValues } from './useAuth';
 import { searchService, clearVespaSearchCache } from '../services/searchService';
-import { DisplaySearchResult, VespaSearchFilters } from '../types/search';
+import { DisplaySearchResult, QueryIntent, VespaSearchFilters } from '../types/search';
 import {
   TabType,
   ChipType,
@@ -14,12 +14,14 @@ import {
   getRelevantAppsParam,
   filterChipToKind,
   type FilterKind,
+  type SelectedMention,
 } from '../components/Chat/ChatDirectory/ChannelCommandMenu.types';
 import { User } from '../machines/stateMachine';
 import { Channel } from '@xyne/shared';
-import { useUserSearch } from './useUsers';
+import { useWorkerUserSearch } from './useWorkerUserSearch';
+import { useWorkerChannelSearch } from './useWorkerChannelSearch';
+import type { MentionHighlightsBuilder } from '../search/mentionHighlights';
 import { ChannelCategory } from '../components/Chat/ChatDirectory/ChatDirectory.types';
-import { filterChannelsBySearchableNames } from '../utils/rankingUtils';
 import {
   parseSearchFilters,
   parseTypeFilter,
@@ -34,12 +36,17 @@ import { useCmdkDefaultRankProfiles, useCmdkFlatAllRankProfiles } from './useCmd
 import type { StructuredSearchFilters } from './useSearchResultsScreen';
 import { resolveDateKeyword } from '../search/filterModel';
 import { unwrapExactSearchQuery } from '../utils/exactSearch';
+import {
+  addViewFiltersToRequest,
+  type TicketSearchView,
+  type TicketZeroQueryArgs,
+} from '../search/ticketSearchScope';
+import { useZero } from './useZero';
+import { queries } from '../zero/queries';
 
 type SearchTrigger = 'keyboard_shortcut' | 'click' | 'auto_focus';
 type SearchLocation = 'global' | 'channel' | 'dm';
-type QuerySource = 'KEYBOARD' | 'CLIPBOARD_PASTE';
-
-type SelectedMention = { id: string; type: ChipType; prefix?: string; name?: string };
+type QuerySource = 'KEYBOARD' | 'CLIPBOARD_PASTE' | 'RECENT';
 
 type MentionBuckets = {
   from: SelectedMention[];
@@ -49,6 +56,7 @@ type MentionBuckets = {
   mentions: SelectedMention[];
   in: SelectedMention[];
   channelMentions: SelectedMention[];
+  userGroupMentions: SelectedMention[];
 };
 
 /**
@@ -63,6 +71,7 @@ const FILTER_KIND_TO_BUCKET: Partial<Record<FilterKind, keyof MentionBuckets>> =
   in: 'in',
   mention: 'mentions',
   channelMention: 'channelMentions',
+  userGroupMention: 'userGroupMentions',
 };
 
 /**
@@ -78,6 +87,7 @@ function deriveMentionBuckets(selectedMentions: SelectedMention[]): MentionBucke
     mentions: [],
     in: [],
     channelMentions: [],
+    userGroupMentions: [],
   };
   for (const mention of selectedMentions) {
     const kind = filterChipToKind(mention);
@@ -96,6 +106,10 @@ interface UseSearchMetricsOptions {
   // Initial value for the "Include my channels" toggle. Defaults to false so the
   // full-page search is unaffected; the Cmd-K modal opts in with `true`.
   defaultOnlyMyChannels?: boolean;
+  // When true, the backend drops results resolving to an archived ticket. cmd+k passes
+  // `true` (always hide archived); the full-page Desk tab supplies it from its
+  // "Show archived" toggle. Other consumers default OFF, so their behavior is unchanged.
+  defaultExcludeArchived?: boolean;
   // Initial value for the "Include automations" toggle. Set when reopening the palette
   // from a search whose scope had it on, so the restored search matches what was run.
   defaultIncludeBotMessages?: boolean;
@@ -104,12 +118,78 @@ interface UseSearchMetricsOptions {
   // flat ranked list — lets the ALL tab show a few of each type at once.
   // Ignored when the `unified` rank profile is selected, which needs a flat list.
   groupByDocType?: boolean;
+  // Cmd-K palette only: also ask the backend whether the query needs AI, which drives the
+  // inline AI answer. Other search surfaces leave this off.
+  classifyIntent?: boolean;
+  // Builds the highlight-only `mentionHighlights` phrases from the active mention chips (see
+  // search/mentionHighlights). Injected by the surfaces that highlight results (full-screen +
+  // cmd+K) so this hook stays decoupled from user/group data; when absent, the chip's name is used.
+  buildMentionHighlights?: MentionHighlightsBuilder;
+  // Cmd-K only: skip the people/channel search on tabs that don't show those results.
+  searchLocalOnlyOnShownTabs?: boolean;
+  // The ticket screen view the palette was opened on (search button / Cmd+F): its filters
+  // apply to Tickets-tab requests. Null in plain Cmd+K, whose Tickets tab searches every ticket.
+  ticketView?: TicketSearchView | null;
 }
 
+const NO_CHANNELS: NonNullable<UseSearchMetricsOptions['allChannels']> = [];
+
 const BACKEND_RESULTS_LIMIT = 25;
+const INTENT_DEBOUNCE_MS = 300;
 // Load-more uses a fixed-size window (constant `limit`, advancing `offset`). Vespa caps the
 // query offset at maxOffset (1000), so stop paginating before `offset` would cross it.
 const MAX_BACKEND_OFFSET = 1000;
+
+// A ticket-screen search scans Vespa in batches this size, keeping the hits Zero's filters
+// pass, until a page is full.
+const SCOPED_TICKET_BATCH = 100;
+
+/**
+ * A page of ticket-screen search results. Vespa matches the text with the filters it can
+ * express; Zero then applies the screen's whole filter set to those ids, and the survivors
+ * keep Vespa's order. Batches continue from `startOffset` until a page is full or Vespa runs
+ * out, so a narrow Zero filter still fills the page.
+ */
+async function searchScopedTickets(
+  zero: ReturnType<typeof useZero>,
+  filters: VespaSearchFilters,
+  zeroQueryArgs: TicketZeroQueryArgs,
+  startOffset: number,
+  signal?: AbortSignal,
+): Promise<{ results: DisplaySearchResult[]; nextOffset: number; hasMore: boolean }> {
+  const kept: DisplaySearchResult[] = [];
+  let offset = startOffset;
+  let total = Number.POSITIVE_INFINITY;
+  while (kept.length < BACKEND_RESULTS_LIMIT && offset < total && offset < MAX_BACKEND_OFFSET) {
+    const batch = await searchService.vespaSearch(
+      { ...filters, offset, limit: SCOPED_TICKET_BATCH },
+      signal,
+      { cache: true },
+    );
+    total = batch.totalCount;
+    // Advance by the window asked for, not the rows that came back: the backend drops archived
+    // tickets after Vespa answers, so a window can return fewer rows (or none) than it covered.
+    offset += SCOPED_TICKET_BATCH;
+    if (batch.results.length === 0) continue;
+    const ids = batch.results.map(result => result.id);
+    const rows = await zero.run(
+      queries.tableTicketsPage({
+        ...zeroQueryArgs,
+        vespaTicketIds: ids,
+        limit: ids.length,
+        start: null,
+      }),
+      { type: 'complete' },
+    );
+    const matching = new Set((rows as ReadonlyArray<{ id: string }>).map(row => row.id));
+    kept.push(...batch.results.filter(result => matching.has(result.id)));
+  }
+  return {
+    results: kept,
+    nextOffset: offset,
+    hasMore: offset < total && offset < MAX_BACKEND_OFFSET,
+  };
+}
 
 /**
  * Cap on user rows fetched for any Cmd+K user surface (plain-search USERS
@@ -231,6 +311,13 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
 
   // New State moved from ChannelCommandMenu
   const [activeTab, setActiveTab] = useState<TabType>(TabType.ALL);
+  // Latest intent verdict, tied to the query it was computed for.
+  const [queryIntent, setQueryIntent] = useState<{
+    query: string;
+    intent: QueryIntent | null;
+  } | null>(null);
+  const intentAbortRef = useRef<AbortController | null>(null);
+  const lastClassifiedQueryRef = useRef('');
   // Per-tab CAC default; an explicit user pick (rankProfile) wins.
   const allDefaultRankProfile = defaultRankProfileFor(activeTab);
   const [selectedMentions, setSelectedMentions] = useState<
@@ -243,6 +330,9 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
   // Cmd-K "Include my channels" toggle. Modal opts in via `defaultOnlyMyChannels`;
   // other consumers (full-page search) default OFF so their behavior is unchanged.
   const [onlyMyChannels, setOnlyMyChannels] = useState(options.defaultOnlyMyChannels ?? false);
+  // When on, the backend hides results tied to an archived ticket. cmd+k sets this true;
+  // the full-page Desk tab drives it from its "Show archived" toggle. Off elsewhere.
+  const [excludeArchived, setExcludeArchived] = useState(options.defaultExcludeArchived ?? false);
   // Exact-match mode. Not derived from the query text: the quotes are added when the
   // request is built, so the box stays clean.
   const [exactMatch, setExactMatch] = useState(false);
@@ -252,31 +342,30 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
   // into the query. Merged over whatever `parseSearchFilters` finds in the text, so typed
   // syntax keeps working and an explicit pick wins.
   const [structuredFilters, setStructuredFilters] = useState<StructuredSearchFilters>({});
+  // Read through a ref so the search callbacks see the view of the current open.
+  const ticketViewRef = useRef(options.ticketView);
+  ticketViewRef.current = options.ticketView;
+  const zero = useZero();
   const structuredFiltersKey = JSON.stringify(structuredFilters);
+  // Removing the view (the ticket screen's scope) has to re-run the search it narrowed.
+  const ticketViewKey = JSON.stringify(options.ticketView?.vespaFilters ?? null);
   // Compare mode: request per-result matchfeatures/rankfeatures for ranking debug.
   const [includeDebugInfo, setIncludeDebugInfo] = useState(false);
   // Load More Ref
   const loadMoreRef = useRef<HTMLDivElement>(null);
 
-  // Filter local users using the search hook - use cleaned searchText
-  const filteredLocalUsers = useUserSearch(cleanedSearchText, CMDK_USER_LIMIT);
+  const shownOnTab = (tabs: TabType[]): boolean =>
+    !options.searchLocalOnlyOnShownTabs || tabs.includes(activeTab);
+  const peopleQuery = shownOnTab([TabType.ALL, TabType.USERS]) ? cleanedSearchText : '';
+  const channelQuery = shownOnTab([TabType.ALL, TabType.CHANNELS]) ? cleanedSearchText : '';
 
-  // Decouple the (potentially expensive) local channel filter from the keystroke
-  // that triggered it. The input value is bound to `text`, so it always echoes
-  // instantly; deferring the value fed to the filter lets React keep the input
-  // responsive and render the previous channel results until the new filter pass
-  // is ready, instead of blocking each keystroke on the full DM Fuse pass.
-  const deferredCleanedSearchText = useDeferredValue(cleanedSearchText);
-
-  // Filter local channels - use the deferred cleaned searchText
+  // Fuzzy matching runs in web workers so typing stays responsive in large workspaces.
+  const filteredLocalUsers = useWorkerUserSearch(peopleQuery, CMDK_USER_LIMIT);
   const filteredLocalChannels: Array<{
     channel: Channel;
     category: ChannelCategory;
     searchableNames?: string[];
-  }> = useMemo(
-    () => filterChannelsBySearchableNames(options.allChannels ?? [], deferredCleanedSearchText),
-    [options.allChannels, deferredCleanedSearchText],
-  );
+  }> = useWorkerChannelSearch(options.allChannels ?? NO_CHANNELS, channelQuery);
 
   const [currentSearchContext, setCurrentSearchContext] = useState<{
     query: string;
@@ -408,6 +497,14 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
     if (querySourceRef.current === 'CLIPBOARD_PASTE') {
       isModifiedRef.current = true;
     }
+  }, []);
+
+  /**
+   * Handle replay of a saved recent search
+   * Tags query_source as RECENT so this session's impression + session-end carry the origin.
+   */
+  const markRecentReplay = useCallback(() => {
+    querySourceRef.current = 'RECENT';
   }, []);
 
   /**
@@ -795,9 +892,13 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
       [TabType.RECORDING]: { page: 1, hasMore: false, total: 0, offset: 0, cumulativeCount: 0 },
       [TabType.DESK]: { page: 1, hasMore: false, total: 0, offset: 0, cumulativeCount: 0 },
     });
+    setQueryIntent(null);
+    intentAbortRef.current?.abort();
+    lastClassifiedQueryRef.current = '';
     // Clear the dedup guard's text so reopening the palette and re-entering the same query
     // (notably a paste of the last search) isn't skipped as a duplicate and re-runs the search.
     lastSearchedParamsRef.current.text = '';
+    lastSearchedParamsRef.current.mentionsKey = '';
     // Re-arm the loader latch: after a clear/close, re-entering a query must show the
     // spinner again rather than a stale "No results".
     setIsSearchPending(false);
@@ -874,7 +975,9 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
         stageFilter ||
         statusFilter ||
         typeFilter ||
-        selectedMentions.length > 0;
+        selectedMentions.length > 0 ||
+        // A ticket view is a filter too: with nothing typed, the palette lists its tickets.
+        (activeTab === TabType.TICKETS && !!ticketViewRef.current);
 
       // Handle type filter - users/channels use filtered local results (shown as grouped in UI)
       const types = parseTypeFilter(typeFilter);
@@ -967,6 +1070,10 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
               filterOnly: !searchText && !!hasFilters,
               includeBotMessages,
               onlyMyChannels,
+              // The Desk and Tickets tabs hide archived tickets; every other tab (All,
+              // Messages, …) shows them, in both cmd+k and full-page search.
+              excludeArchived:
+                excludeArchived && (activeTab === TabType.DESK || activeTab === TabType.TICKETS),
               exactMatch,
               ...(effectiveRankProfile && { rankProfile: effectiveRankProfile }),
               ...(includeDebugInfo && { includeDebugInfo: true }),
@@ -989,12 +1096,14 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
             const mentionUserMentions = buckets.mentions;
             const inChannels = buckets.in;
             const mentionChannels = buckets.channelMentions;
-            // Bare @user/#channel filters only exist on chat messages. `with:` also
-            // filters call participants on the Call History search page.
+            const mentionUserGroups = buckets.userGroupMentions;
+            // Bare @user/#channel and @user-group filters only exist on chat messages. `with:`
+            // also filters call participants on the Call History search page.
             const hasMessageOnlyMention =
               (!options.isCallSearchPage && withMentions.length > 0) ||
               mentionUserMentions.length > 0 ||
-              mentionChannels.length > 0;
+              mentionChannels.length > 0 ||
+              mentionUserGroups.length > 0;
 
             // Assignee filter doesn't apply to Messages/Attachments - return empty results
             if (
@@ -1117,12 +1226,33 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
               searchFilters.type = VespaDocTypes.MESSAGES;
               searchFilters.channelMentions = mentionChannels.map(m => m.id).join(',');
             }
+            // @user-group → messages that mention the group (message-only filter).
+            if (mentionUserGroups.length > 0) {
+              searchFilters.type = VespaDocTypes.MESSAGES;
+              searchFilters.groupMentions = mentionUserGroups.map(g => g.id).join(',');
+            }
 
-            // Mention names are highlight-only — sent separately from `q` (the id filters handle
-            // recall) so the backend can bold them without polluting the free-text query.
-            const mentionHighlights = [...mentionUserMentions, ...mentionChannels]
-              .map(m => m.name)
-              .filter((n): n is string => !!n);
+            // Opened from a ticket screen: tickets only, within that screen's filters.
+            if (activeTab === TabType.TICKETS && ticketViewRef.current) {
+              searchFilters.apps = VespaApps.TICKET;
+              searchFilters.type = VespaDocTypes.TICKETS;
+              // Bot and my-channels scoping only shape chat results; a tickets-only search has none.
+              delete searchFilters.includeBotMessages;
+              delete searchFilters.onlyMyChannels;
+              addViewFiltersToRequest(searchFilters, ticketViewRef.current.vespaFilters);
+            }
+
+            // Highlight-only phrases: the injected builder resolves every display form a mention
+            // could render as; absent (ContextPicker/CallHistory), fall back to the chip's name.
+            const mentionHighlights = options.buildMentionHighlights
+              ? options.buildMentionHighlights(
+                  mentionUserMentions,
+                  mentionChannels,
+                  mentionUserGroups,
+                )
+              : [...mentionUserMentions, ...mentionChannels, ...mentionUserGroups]
+                  .map(m => m.name)
+                  .filter((n): n is string => !!n);
             if (mentionHighlights.length > 0) {
               searchFilters.mentionHighlights = mentionHighlights;
             }
@@ -1202,6 +1332,26 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
                 vespaResponse.results.length >= BACKEND_RESULTS_LIMIT &&
                 currentOffset < vespaResponse.totalCount &&
                 currentOffset + BACKEND_RESULTS_LIMIT <= MAX_BACKEND_OFFSET;
+            } else if (activeTab === TabType.TICKETS && ticketViewRef.current?.zeroQueryArgs) {
+              const page = await searchScopedTickets(
+                zero,
+                {
+                  ...searchFilters,
+                  searchId: searchSessionId || '',
+                  presentationSummary: 'lean',
+                },
+                ticketViewRef.current.zeroQueryArgs,
+                0,
+                abortController.signal,
+              );
+
+              // A newer search superseded this one — drop this out-of-order response.
+              if (isStale()) return;
+
+              mergedResults = page.results;
+              totalCount = page.results.length;
+              currentOffset = page.nextOffset;
+              hasMore = page.hasMore;
             } else {
               const currentSessionId = searchSessionId || '';
               const results = await searchService.vespaSearch(
@@ -1281,12 +1431,14 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
       options.isCallSearchPage,
       includeBotMessages,
       onlyMyChannels,
+      excludeArchived,
       exactMatch,
       rankProfile,
       allDefaultRankProfile,
       flatAllRankProfiles,
       includeDebugInfo,
       structuredFilters,
+      options.buildMentionHighlights,
     ],
   );
 
@@ -1297,24 +1449,28 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
     mentionsKey: string;
     includeBotMessages: boolean;
     onlyMyChannels: boolean;
+    excludeArchived: boolean;
     exactMatch: boolean;
     rankProfile: string;
     allDefaultRankProfile: string;
     flatAllRankProfilesKey: string;
     includeDebugInfo: boolean;
     structuredFiltersKey: string;
+    ticketViewKey: string;
   }>({
     text: '',
     activeTab: TabType.ALL,
     mentionsKey: '',
     includeBotMessages: false,
     onlyMyChannels: options.defaultOnlyMyChannels ?? false,
+    excludeArchived: options.defaultExcludeArchived ?? false,
     exactMatch: false,
     rankProfile: '',
     allDefaultRankProfile,
     flatAllRankProfilesKey: '',
     includeDebugInfo: false,
     structuredFiltersKey: '{}',
+    ticketViewKey: 'null',
   });
 
   // Debounced backend search with pagination reset
@@ -1345,13 +1501,14 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
       activeTab === lastSearchedParamsRef.current.activeTab &&
       includeBotMessages === lastSearchedParamsRef.current.includeBotMessages &&
       onlyMyChannels === lastSearchedParamsRef.current.onlyMyChannels &&
+      excludeArchived === lastSearchedParamsRef.current.excludeArchived &&
       currentMentionsKey === lastSearchedParamsRef.current.mentionsKey &&
       rankProfile === lastSearchedParamsRef.current.rankProfile &&
       allDefaultRankProfile === lastSearchedParamsRef.current.allDefaultRankProfile &&
       flatAllRankProfilesKey === lastSearchedParamsRef.current.flatAllRankProfilesKey &&
       includeDebugInfo === lastSearchedParamsRef.current.includeDebugInfo &&
       structuredFiltersKey === lastSearchedParamsRef.current.structuredFiltersKey &&
-      normalizedText !== ''
+      ticketViewKey === lastSearchedParamsRef.current.ticketViewKey
     ) {
       // Terminal exit with no dispatch — no performSearch().finally runs to disarm the loader.
       // Reconcile to the real in-flight state so a cancelled arm can't strand the spinner true.
@@ -1368,12 +1525,14 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
         activeTab,
         includeBotMessages,
         onlyMyChannels,
+        excludeArchived,
         exactMatch,
         rankProfile,
         allDefaultRankProfile,
         flatAllRankProfilesKey,
         includeDebugInfo,
         structuredFiltersKey,
+        ticketViewKey,
         mentionsKey: currentMentionsKey,
       };
       // Mint this dispatch's run identity here (not in the effect body) so the abort fires at
@@ -1413,13 +1572,45 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
     performSearch,
     includeBotMessages,
     onlyMyChannels,
+    excludeArchived,
     exactMatch,
     rankProfile,
     allDefaultRankProfile,
     flatAllRankProfilesKey,
     includeDebugInfo,
     structuredFiltersKey,
+    ticketViewKey,
   ]);
+
+  // Intent classification for the inline AI answer: its own request and abort handle, so a
+  // slow classifier never holds up search and switching tabs never cancels it. Keyed on text only.
+  useEffect(() => {
+    if (!options.classifyIntent || options.mentionSearchType) return;
+
+    const query = text.trim();
+    if (query === lastClassifiedQueryRef.current) return;
+
+    const timer = setTimeout(() => {
+      lastClassifiedQueryRef.current = query;
+      intentAbortRef.current?.abort();
+      if (!query) {
+        setQueryIntent(null);
+        return;
+      }
+      const controller = new AbortController();
+      intentAbortRef.current = controller;
+      searchService
+        .getQueryIntent(query, controller.signal)
+        .then(intent => {
+          if (!controller.signal.aborted) setQueryIntent({ query, intent });
+        })
+        // Aborted or failed: no verdict, so the palette stays lexical.
+        .catch(() => undefined);
+    }, INTENT_DEBOUNCE_MS);
+    return () => clearTimeout(timer);
+  }, [text, options.classifyIntent, options.mentionSearchType]);
+
+  useEffect(() => () => intentAbortRef.current?.abort(), []);
 
   /**
    * Load More Results
@@ -1459,7 +1650,9 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
       stageFilter ||
       statusFilter ||
       typeFilter ||
-      selectedMentions.length > 0;
+      selectedMentions.length > 0 ||
+      // A ticket view is a filter too: with nothing typed, the palette lists its tickets.
+      (activeTab === TabType.TICKETS && !!ticketViewRef.current);
 
     // Check for local/incomplete types - don't call backend for users/channels or partial typing
     const loadMoreTypes = parseTypeFilter(typeFilter);
@@ -1495,6 +1688,9 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
           filterOnly: !searchText && !!hasFilters,
           includeBotMessages,
           onlyMyChannels,
+          // The Desk and Tickets tabs hide archived tickets; every other tab shows them.
+          excludeArchived:
+            excludeArchived && (activeTab === TabType.DESK || activeTab === TabType.TICKETS),
           exactMatch,
           ...(effectiveRankProfile && { rankProfile: effectiveRankProfile }),
           ...(includeDebugInfo && { includeDebugInfo: true }),
@@ -1517,12 +1713,14 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
         const mentionUserMentions = buckets.mentions;
         const inChannels = buckets.in;
         const mentionChannels = buckets.channelMentions;
-        // Bare @user/#channel filters only exist on chat messages. `with:` also
-        // filters call participants on the Call History search page.
+        const mentionUserGroups = buckets.userGroupMentions;
+        // Bare @user/#channel and @user-group filters only exist on chat messages. `with:`
+        // also filters call participants on the Call History search page.
         const hasMessageOnlyMention =
           (!options.isCallSearchPage && withMentions.length > 0) ||
           mentionUserMentions.length > 0 ||
-          mentionChannels.length > 0;
+          mentionChannels.length > 0 ||
+          mentionUserGroups.length > 0;
 
         // Assignee filter doesn't apply to Messages/Attachments - return empty
         if (
@@ -1598,16 +1796,52 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
           searchFilters.type = VespaDocTypes.MESSAGES;
           searchFilters.channelMentions = mentionChannels.map(m => m.id).join(',');
         }
+        if (mentionUserGroups.length > 0) {
+          searchFilters.type = VespaDocTypes.MESSAGES;
+          searchFilters.groupMentions = mentionUserGroups.map(g => g.id).join(',');
+        }
 
-        // Highlight-only mention names — mirrors the initial search (see note there).
-        const mentionHighlights = [...mentionUserMentions, ...mentionChannels]
-          .map(m => m.name)
-          .filter((n): n is string => !!n);
+        // Opened from a ticket screen: tickets only, within that screen's filters.
+        if (activeTab === TabType.TICKETS && ticketViewRef.current) {
+          searchFilters.apps = VespaApps.TICKET;
+          searchFilters.type = VespaDocTypes.TICKETS;
+          // Bot and my-channels scoping only shape chat results; a tickets-only search has none.
+          delete searchFilters.includeBotMessages;
+          delete searchFilters.onlyMyChannels;
+          addViewFiltersToRequest(searchFilters, ticketViewRef.current.vespaFilters);
+        }
+
+        // Highlight-only phrases — mirrors the initial search (injected builder, else chip name).
+        const mentionHighlights = options.buildMentionHighlights
+          ? options.buildMentionHighlights(mentionUserMentions, mentionChannels, mentionUserGroups)
+          : [...mentionUserMentions, ...mentionChannels, ...mentionUserGroups]
+              .map(m => m.name)
+              .filter((n): n is string => !!n);
         if (mentionHighlights.length > 0) {
           searchFilters.mentionHighlights = mentionHighlights;
         }
 
         const currentSessionId = searchSessionId || '';
+        if (activeTab === TabType.TICKETS && ticketViewRef.current?.zeroQueryArgs) {
+          const page = await searchScopedTickets(
+            zero,
+            { ...searchFilters, searchId: currentSessionId, presentationSummary: 'lean' },
+            ticketViewRef.current.zeroQueryArgs,
+            currentOffset,
+          );
+          setSearchResults(prev => [...prev, ...page.results]);
+          setPaginationState(prev => ({
+            ...prev,
+            [activeTab]: {
+              ...prev[activeTab],
+              hasMore: page.hasMore,
+              total: prev[activeTab].cumulativeCount + page.results.length,
+              offset: page.nextOffset,
+              cumulativeCount: prev[activeTab].cumulativeCount + page.results.length,
+            },
+          }));
+          return;
+        }
         const results = await searchService.vespaSearch({
           ...searchFilters,
           searchId: currentSessionId,
@@ -1644,6 +1878,7 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
       setIsLoadingMore(false);
     }
   }, [
+    options.buildMentionHighlights,
     isLoadingMore,
     paginationState,
     searchSessionId,
@@ -1652,6 +1887,7 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
     selectedMentions,
     includeBotMessages,
     onlyMyChannels,
+    excludeArchived,
     exactMatch,
     rankProfile,
     allDefaultRankProfile,
@@ -1727,9 +1963,19 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
     };
   }, []); // Empty dependency array = only runs on mount/unmount
 
+  // Whether what is typed reads as a question, so the palette may show an AI overview for
+  // it. Stays true while the user keeps extending the classified query (no flicker per
+  // keystroke); the next settled classification re-decides.
+  const trimmedText = text.trim();
+  const isAiQuery =
+    queryIntent?.intent?.mode === 'ai' &&
+    trimmedText !== '' &&
+    trimmedText.startsWith(queryIntent.query);
+
   return {
     // Session state
     searchSessionId,
+    isAiQuery,
 
     // Actions
     onOpen,
@@ -1747,6 +1993,8 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
     setIncludeBotMessages,
     onlyMyChannels,
     setOnlyMyChannels,
+    excludeArchived,
+    setExcludeArchived,
     exactMatch,
     setExactMatch,
     rankProfile,
@@ -1769,6 +2017,7 @@ export function useSearchMetrics(options: UseSearchMetricsOptions = {}) {
     // Clipboard tracking callbacks
     onPasteDetected: handlePasteDetected,
     onManualKeystroke: handleManualKeystroke,
+    markRecentReplay,
 
     searchResults,
     isGrouped,

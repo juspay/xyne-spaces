@@ -36,6 +36,7 @@ import Placeholder from '@tiptap/extension-placeholder';
 import LinkExtension from '@tiptap/extension-link';
 import { LinkSyncPlugin } from '../../../ui/TipTapExtensions/LinkSyncPlugin';
 import { toast } from 'sonner';
+import { AudioLines } from 'lucide-react';
 import { VoiceInput } from '../../../ui/InputBox/VoiceInput';
 import type { VoiceInputHandle } from '../../../ui/InputBox/VoiceInput';
 import { StopIcon } from './StopIcon';
@@ -84,6 +85,7 @@ import type {
 } from './ContextPickerPanel';
 import type { Channel } from '@xyne/shared';
 import { ChannelVisibility } from '@xyne/shared';
+import { searchMentionableChannels } from '../../../../hooks/useChannels';
 import type { DisplaySearchResult } from '../../../../types/search';
 import { TabType } from '../../ChatDirectory/ChannelCommandMenu.types';
 
@@ -127,6 +129,7 @@ export interface XyneAIInputBoxProps {
   onInputChange: (value: string) => void;
   /** `trigger` says which affordance sent it; the button has its own click row. */
   onSubmit: (trigger?: 'button' | 'enter') => void;
+  onEnterVoiceMode?: () => void;
   onSelectedCollectionsChange?: (collectionIds: string[]) => void;
   onThreadInfoChange?: (threadInfo: ThreadInfo | null) => void;
   onSelectionInfosChange?: (selectionInfos: SelectionInfo[]) => void;
@@ -171,6 +174,8 @@ export interface XyneAIInputBoxProps {
   selectedAgentSlug?: string | null;
   agents?: AgentOption[];
   onSelectAgent?: (slug: string | null) => void;
+  isAuto?: boolean;
+  onSelectAuto?: () => void;
   /** Models the selected agent's LiteLLM key can serve. Empty ⇒ picker hides. */
   models?: ClawAgentModel[];
   /** The agent's configured model, shown against the default row. */
@@ -246,6 +251,7 @@ export const XyneAIInputBox = forwardRef<XyneAIInputBoxHandle, XyneAIInputBoxPro
       inputValue,
       onInputChange,
       onSubmit,
+      onEnterVoiceMode,
       onSelectedCollectionsChange,
       onThreadInfoChange,
       onSelectionInfosChange,
@@ -290,6 +296,8 @@ export const XyneAIInputBox = forwardRef<XyneAIInputBoxHandle, XyneAIInputBoxPro
       selectedAgentSlug = null,
       agents = [],
       onSelectAgent,
+      isAuto = false,
+      onSelectAuto,
       models = [],
       defaultModel = null,
       selectedModel = null,
@@ -1184,18 +1192,15 @@ export const XyneAIInputBox = forwardRef<XyneAIInputBoxHandle, XyneAIInputBoxPro
       }
     }, [inputValue, editor]);
 
-    // Convert channels to MentionResult format for MentionSelector (exclude DMs), filtered by search query
+    // Convert ranked, mentionable channels to MentionResult format for MentionSelector
     const channelMentionItems: MentionResult[] = useMemo(() => {
-      const query = channelSearchQuery.toLowerCase();
-      return nonDMChannels
-        .filter(channel => !query || channel.name.toLowerCase().includes(query))
-        .map(channel => ({
-          id: channel.id,
-          name: channel.name,
-          type: 'channel' as const,
-          isPrivate: String(channel.visibility) === 'PRIVATE',
-          ...(channel.description && { description: channel.description }),
-        }));
+      return searchMentionableChannels(nonDMChannels, channelSearchQuery, 10).map(channel => ({
+        id: channel.id,
+        name: channel.name,
+        type: 'channel' as const,
+        isPrivate: String(channel.visibility) === 'PRIVATE',
+        ...(channel.description && { description: channel.description }),
+      }));
     }, [nonDMChannels, channelSearchQuery]);
 
     // Handle channel search from # mention trigger
@@ -1863,7 +1868,7 @@ export const XyneAIInputBox = forwardRef<XyneAIInputBoxHandle, XyneAIInputBoxPro
               — same visual, one less render per focus change. */}
           <div
             className={`
-            overflow-hidden transition-all flex flex-col relative bg-clip-padding
+            overflow-hidden transition flex flex-col relative bg-clip-padding
             ${isMobile ? 'bg-background rounded-[26px] text-foreground shadow-sm' : 'bg-background rounded-2xl border border-chat-composer-border focus-within:border-chat-composer-border-active text-foreground shadow-none'}
           `}
           >
@@ -1944,7 +1949,7 @@ export const XyneAIInputBox = forwardRef<XyneAIInputBoxHandle, XyneAIInputBoxPro
                   >
                     <button
                       type='button'
-                      className={`flex items-center justify-center rounded hover:bg-accent transition-all duration-200 ease-in-out shrink-0 p-1.5`}
+                      className={`flex items-center justify-center rounded hover:bg-accent transition duration-200 ease-in-out shrink-0 p-1.5`}
                       aria-label='Add to conversation'
                       title='Add to conversation'
                       data-track-category='XyneAI'
@@ -1959,7 +1964,7 @@ export const XyneAIInputBox = forwardRef<XyneAIInputBoxHandle, XyneAIInputBoxPro
                   <button
                     type='button'
                     onClick={() => setShowContextPicker(prev => !prev)}
-                    className={`flex items-center justify-center rounded hover:bg-accent transition-all duration-200 ease-in-out shrink-0 p-1.5`}
+                    className={`flex items-center justify-center rounded hover:bg-accent transition duration-200 ease-in-out shrink-0 p-1.5`}
                     aria-label='Add context'
                     title={`Add context (${isMac ? '⌘⇧⌥' : 'Ctrl+Shift+Alt+'}/)`}
                     // Spared by the picker's outside-click handler, so this
@@ -1980,6 +1985,8 @@ export const XyneAIInputBox = forwardRef<XyneAIInputBoxHandle, XyneAIInputBoxPro
                         selectedAgentSlug={selectedAgentSlug}
                         agents={agents}
                         onSelect={onSelectAgent}
+                        auto={isAuto}
+                        {...(onSelectAuto ? { onSelectAuto } : {})}
                         compact={true}
                       />
                     </div>
@@ -1996,6 +2003,7 @@ export const XyneAIInputBox = forwardRef<XyneAIInputBoxHandle, XyneAIInputBoxPro
                         thinkingLevel={thinkingLevel}
                         onSelectThinking={onSelectThinking ?? (() => {})}
                         disabled={false}
+                        align='start'
                       />
                     </div>
                   )}
@@ -2009,6 +2017,20 @@ export const XyneAIInputBox = forwardRef<XyneAIInputBoxHandle, XyneAIInputBoxPro
                     disabled={isStreaming}
                     onStateChange={({ isRecording }) => setIsVoiceRecording(isRecording)}
                   />
+                  {onEnterVoiceMode && (
+                    <button
+                      type='button'
+                      onClick={onEnterVoiceMode}
+                      className='p-1.5 rounded transition-colors duration-200 ease-in-out hover:bg-accent text-muted-foreground'
+                      aria-label='Voice mode'
+                      title='Voice mode'
+                      disabled={isStreaming}
+                      data-track-category='CHAT_INPUT'
+                      data-track-name='ENTER_VOICE_MODE'
+                    >
+                      <AudioLines className='h-4 w-4' aria-hidden />
+                    </button>
+                  )}
                   <button
                     onClick={isStreaming ? onAbort : () => onSubmit('button')}
                     data-ph-capture-attribute-track-id={

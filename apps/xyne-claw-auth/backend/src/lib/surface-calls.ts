@@ -1,5 +1,13 @@
 import { prisma } from "../db.js";
 import { createLogger } from "../logger.js";
+import {
+  browserAccessForRun,
+  callPagePanelTool,
+  isPagePanelTool,
+  pagePanelDeadlineMs,
+  recordOpenUrlPage,
+} from "./page-panel-calls.js";
+import { deviceCapabilities, wakeDevice } from "./device-push.js";
 
 const log = createLogger("surface-calls");
 
@@ -23,10 +31,11 @@ export interface SurfaceCallResult {
   ok: boolean;
   content: string;
   image?: { data: string; mimeType: string };
+  unavailable?: boolean;
 }
 
 export function isSurfaceTool(toolName: string): boolean {
-  return SURFACE_TOOLS.has(toolName);
+  return SURFACE_TOOLS.has(toolName) || isPagePanelTool(toolName);
 }
 
 function deadlineFor(toolName: string): number {
@@ -82,6 +91,15 @@ export async function callSurfaceTool(input: {
   if (tooBig(args)) {
     return { ok: false, content: "Arguments are too large for an app tool." };
   }
+  const browserTool = isPagePanelTool(toolName);
+  const access = browserTool ? await browserAccessForRun(userId, input.sessionId) : null;
+  if (browserTool && !access) {
+    return {
+      ok: false,
+      unavailable: true,
+      content: "Browser tools only reach the user's desktop app for their own Xyne AI screen or SDLC hub runs.",
+    };
+  }
 
   const devices = await prisma.localHarnessDevice.findMany({
     where: { userId, revokedAt: null },
@@ -89,6 +107,20 @@ export async function callSurfaceTool(input: {
   });
 
   const picked = pickDevice(devices);
+  const pushable =
+    access && picked.device
+      ? (await deviceCapabilities(picked.device.id)).has(toolName === "open-url" ? "open-url" : "page-tools")
+      : false;
+  if (access && !pushable) {
+    if (access.surface === "xyne-ai") {
+      return callPagePanelTool({ userId, sessionId: input.sessionId, toolName, args });
+    }
+    return {
+      ok: false,
+      unavailable: true,
+      content: "The user's Xyne desktop app is not connected with browser support, so the SDLC browser can't be reached.",
+    };
+  }
   if (!picked.device) {
     if (picked.reason === "ambiguous") {
       const names = picked.online.map((d) => d.deviceName).join(", ");
@@ -105,7 +137,13 @@ export async function callSurfaceTool(input: {
     };
   }
 
-  const deadlineMs = deadlineFor(toolName);
+  if (access && toolName === "open-url" && access.surface === "xyne-ai") {
+    const failure = await recordOpenUrlPage(access, args);
+    if (failure) return { ok: false, content: failure };
+  }
+
+  const deadlineMs = access ? pagePanelDeadlineMs(toolName) : deadlineFor(toolName);
+  const callArgs = access ? { ...args, xyneSurface: access.surface, xyneRunId: access.runId } : args;
   const call = await prisma.surfaceCall.create({
     data: {
       userId,
@@ -113,11 +151,13 @@ export async function callSurfaceTool(input: {
       deviceId: picked.device.id,
       sessionId: input.sessionId ?? null,
       toolName,
-      args: args as object,
+      args: callArgs as object,
       expiresAt: new Date(Date.now() + deadlineMs),
     },
     select: { id: true },
   });
+  void wakeDevice(picked.device.id);
+  if (access) log.info(`[surface-calls] ${toolName} surface=${access.surface} device=${picked.device.id} run=${access.runId}`);
 
   const until = Date.now() + deadlineMs;
   while (Date.now() < until) {

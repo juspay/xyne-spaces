@@ -1,7 +1,9 @@
 import { Prisma } from "@prisma/client";
+import type { MessagingChannelKey } from "../surfaces/messaging/plugin.js";
 import { prisma, type AppTransactionClient } from "../db.js";
 import { formatDayIST } from "../lib/ist-time.js";
 import { createLogger } from "../logger.js";
+import { userIdFilter } from "./userIdFilter.js";
 
 const log = createLogger("agent-run");
 
@@ -84,6 +86,112 @@ async function withSessionWriteLock<T>(
   );
 }
 
+const TOOL_INVOCATION_FLUSH_MS = Number(process.env["TOOL_INVOCATION_FLUSH_MS"] ?? 2000);
+
+interface PendingToolInvocations {
+  entries: Map<string, Record<string, unknown>>;
+  waiters: Array<{ resolve: () => void; reject: (err: unknown) => void }>;
+  timer: NodeJS.Timeout | null;
+}
+
+const pendingToolInvocations = new Map<string, PendingToolInvocations>();
+const inflightToolInvocationFlushes = new Map<string, Promise<void>>();
+let anonymousInvocationSeq = 0;
+
+function invocationKey(inv: Record<string, unknown>): string {
+  const id = inv["toolCallId"];
+  if (id) return `id:${String(id)}`;
+  anonymousInvocationSeq += 1;
+  return `anon:${anonymousInvocationSeq}`;
+}
+
+function supersedes(incoming: Record<string, unknown>, current: Record<string, unknown>): boolean {
+  return !(incoming["status"] === "running" && current["status"] !== undefined && current["status"] !== "running");
+}
+
+export function mergeToolInvocations(
+  existing: Array<Record<string, unknown>>,
+  batch: Array<Record<string, unknown>>,
+  max: number = MAX_TOOL_INVOCATIONS,
+): Array<Record<string, unknown>> {
+  const next = [...existing];
+  const indexById = new Map<unknown, number>();
+  next.forEach((inv, i) => {
+    if (inv["toolCallId"]) indexById.set(inv["toolCallId"], i);
+  });
+  for (const inv of batch) {
+    const id = inv["toolCallId"];
+    const at = id ? indexById.get(id) : undefined;
+    if (at !== undefined) {
+      if (supersedes(inv, next[at] as Record<string, unknown>)) next[at] = inv;
+    } else {
+      next.push(inv);
+      if (id) indexById.set(id, next.length - 1);
+    }
+  }
+  return next.length > max ? next.slice(next.length - max) : next;
+}
+
+async function writePendingToolInvocations(sessionId: string): Promise<void> {
+  const pending = pendingToolInvocations.get(sessionId);
+  if (!pending || pending.entries.size === 0) return;
+  pendingToolInvocations.delete(sessionId);
+  if (pending.timer) clearTimeout(pending.timer);
+  const batch = [...pending.entries.values()];
+  try {
+    await withSessionWriteLock(sessionId, async (tx) => {
+      const run = await tx.agentRun.findUnique({ where: { sessionId }, select: { toolInvocations: true } });
+      const existing = Array.isArray(run?.toolInvocations)
+        ? (run!.toolInvocations as Array<Record<string, unknown>>)
+        : [];
+      await tx.agentRun.update({
+        where: { sessionId },
+        data: { toolInvocations: mergeToolInvocations(existing, batch) as Prisma.InputJsonValue },
+      });
+    });
+    for (const waiter of pending.waiters) waiter.resolve();
+  } catch (err) {
+    log.warn(
+      `[agent-run] tool invocation flush failed session=${sessionId} batch=${batch.length}: ${err instanceof Error ? err.message : String(err)}`,
+    );
+    for (const waiter of pending.waiters) waiter.reject(err);
+  }
+}
+
+function flushToolInvocations(sessionId: string): Promise<void> {
+  const prior = inflightToolInvocationFlushes.get(sessionId) ?? Promise.resolve();
+  const run = prior.then(() => writePendingToolInvocations(sessionId));
+  inflightToolInvocationFlushes.set(sessionId, run);
+  return run.finally(() => {
+    if (inflightToolInvocationFlushes.get(sessionId) === run) inflightToolInvocationFlushes.delete(sessionId);
+  });
+}
+
+async function flushAllToolInvocations(): Promise<void> {
+  await Promise.all([...pendingToolInvocations.keys()].map((sessionId) => flushToolInvocations(sessionId)));
+}
+
+function enqueueToolInvocation(sessionId: string, invocation: unknown): Promise<void> {
+  const inv = stripNulDeep(invocation) as Record<string, unknown>;
+  let pending = pendingToolInvocations.get(sessionId);
+  if (!pending) {
+    pending = { entries: new Map(), waiters: [], timer: null };
+    pendingToolInvocations.set(sessionId, pending);
+  }
+  const key = invocationKey(inv);
+  const buffered = pending.entries.get(key);
+  if (!buffered || supersedes(inv, buffered)) pending.entries.set(key, inv);
+  const target = pending;
+  const done = new Promise<void>((resolve, reject) => target.waiters.push({ resolve, reject }));
+  if (!target.timer) {
+    target.timer = setTimeout(() => {
+      void flushToolInvocations(sessionId);
+    }, TOOL_INVOCATION_FLUSH_MS);
+    target.timer.unref?.();
+  }
+  return done;
+}
+
 /** Inclusive window for time-series padding. `null` = all time (unbounded left). */
 export type TimeWindow = { start: Date; end: Date } | null;
 
@@ -92,7 +200,7 @@ export interface StartRunInput {
   userId: string;
   agentSlug: string;
   orgId: string;
-  triggerSource: "spaces" | "scheduled" | "chat" | "api" | "automation" | "slack" | "heartbeat" | "reflex" | "app";
+  triggerSource: "spaces" | "scheduled" | "chat" | "api" | "automation" | "slack" | "heartbeat" | "reflex" | "app" | "delegation" | MessagingChannelKey;
   task: string;
   conversationId?: string | null;
   scheduledJobId?: string | null;
@@ -101,6 +209,10 @@ export interface StartRunInput {
   projectName?: string | null;
   fastMode?: boolean | null;
   metadata?: unknown;
+  /** Delegated runs only: the caller's session, agent and tool call. */
+  parentSessionId?: string | null;
+  parentAgentSlug?: string | null;
+  parentToolCallId?: string | null;
 }
 
 export interface FinalizeRunInput {
@@ -145,11 +257,15 @@ export interface FinalizeRunInput {
  * requester's own id is the only scope there is.
  */
 export interface RunListFilter {
-  requesterId: string;
+  /** The caller's verified id forms (canonical + raw Spaces alias) — rows may
+   *  be keyed by either. */
+  requesterIds: string[];
   scope: "own" | "all";
   orgId?: string;
   agentSlug?: string;
-  userId?: string;
+  /** Admin's explicit target-user filter (scope=all only) — again every id
+   *  form the target's rows may be keyed by. */
+  userIds?: string[];
   status?: string;
   from: Date;
   to: Date;
@@ -194,7 +310,7 @@ function buildRunListWhere(f: RunListFilter): Prisma.AgentRunWhereInput {
     // would diverge from listByUser / listByUserLight / searchByUser for no
     // gain while pushing the query off the (userId, startedAt) index.
     return {
-      userId: f.requesterId,
+      ...userIdFilter(f.requesterIds),
       ...window,
       ...(f.status ? { status: f.status } : {}),
       ...(f.agentSlug ? { agentSlug: f.agentSlug } : {}),
@@ -215,8 +331,8 @@ function buildRunListWhere(f: RunListFilter): Prisma.AgentRunWhereInput {
       // The user filter is an ADDITIONAL term, never a replacement for the
       // token guard below: "show me Asha's runs" must not hand over the ones
       // Asha ran under her own OAuth token (mail/calendar/drive content).
-      ...(f.userId ? [{ userId: f.userId }] : []),
-      { OR: [{ userId: f.requesterId }, { usedUserToken: false }] },
+      ...(f.userIds && f.userIds.length > 0 ? [userIdFilter(f.userIds)] : []),
+      { OR: [userIdFilter(f.requesterIds), { usedUserToken: false }] },
     ],
   };
 }
@@ -247,6 +363,9 @@ const RUN_LIST_SELECT = {
   tokensIn: true,
   tokensOut: true,
   rating: true,
+  // Who delegated this run, so the panel can mark it as a child and link back.
+  parentSessionId: true,
+  parentAgentSlug: true,
 } satisfies Prisma.AgentRunSelect;
 
 /** Upper bound on task text shipped per list row. Not `listByAgentSlug`'s 240:
@@ -281,6 +400,9 @@ export const agentRunRepository = {
           ...(input.projectId ? { projectId: input.projectId } : {}),
           ...(input.projectName ? { projectName: input.projectName } : {}),
           ...(input.metadata !== undefined ? { metadata: input.metadata as Prisma.InputJsonValue } : {}),
+          ...(input.parentSessionId ? { parentSessionId: input.parentSessionId } : {}),
+          ...(input.parentAgentSlug ? { parentAgentSlug: input.parentAgentSlug } : {}),
+          ...(input.parentToolCallId ? { parentToolCallId: input.parentToolCallId } : {}),
         },
       });
       log.info(
@@ -322,9 +444,35 @@ export const agentRunRepository = {
     }
   },
 
+  /** Close a run that never reached a terminal callback. Guarded on status
+   *  "running" so a late failure path can't flip a run the result callback has
+   *  already finalized — same discipline as services/orphan-run-finalizer.ts.
+   *  Returns the number of rows actually updated (0 = already terminal). */
+  failIfRunning: async (sessionId: string, error: string) => {
+    const res = await prisma.agentRun.updateMany({
+      where: { sessionId, status: "running" },
+      data: { status: "failed", error, completedAt: new Date(), currentToolLabel: null },
+    });
+    return res.count;
+  },
+
+  /** Hard-delete one run row. Used only when a chat turn pre-created its run and
+   *  the dispatch was then DEFERRED — another worker already owned the
+   *  conversation and its run carries the answer. `deleteMany` (not `delete`) so
+   *  a missing row is a no-op rather than a throw. */
+  deleteBySessionId: (sessionId: string) => prisma.agentRun.deleteMany({ where: { sessionId } }),
+
+  /** Record the tool label a run is currently on.
+   *
+   *  Guarded on status "running" — same discipline as failIfRunning above.
+   *  Progress ticks can land AFTER the result callback finalized the run: a
+   *  subagent's sticky-label timer outlives its parent by seconds, and the
+   *  push is an unawaited fetch that cannot be cancelled. Ungated, such a
+   *  straggler rewrote currentToolLabel on a finished run, so the Agent
+   *  Control Center showed a completed run still "using" a tool. */
   updateProgress: (sessionId: string, currentToolLabel: string) =>
     prisma.agentRun.updateMany({
-      where: { sessionId },
+      where: { sessionId, status: "running" },
       data: { currentToolLabel },
     }),
 
@@ -341,6 +489,7 @@ export const agentRunRepository = {
     // the lock waits for in-flight appends on this sessionId (from any pod)
     // to commit before reading `existing`, guaranteeing finalize sees every
     // persisted invocation. All DB ops use `tx`.
+    await flushToolInvocations(sessionId);
     return withSessionWriteLock(sessionId, async (tx) => {
     let finalInvocations: unknown[] | undefined;
     // Always merge once the run is finalizing, even if the callback didn't
@@ -453,9 +602,9 @@ export const agentRunRepository = {
     });
   },
 
-  rate: (sessionId: string, userId: string, rating: "up" | "down", comment?: string | null) =>
+  rate: (sessionId: string, userIds: string | string[], rating: "up" | "down", comment?: string | null) =>
     prisma.agentRun.updateMany({
-      where: { sessionId, userId },
+      where: { sessionId, ...userIdFilter(userIds) },
       data: { rating, ratingComment: comment ?? null, ratedAt: new Date() },
     }),
 
@@ -466,55 +615,28 @@ export const agentRunRepository = {
   // caller can only rate their own run.
   rateByChatMessageId: (
     chatMessageId: string,
-    userId: string,
+    userIds: string | string[],
     rating: "up" | "down",
     comment?: string | null,
   ) =>
     prisma.agentRun.updateMany({
-      where: { chatMessageId, userId },
+      where: { chatMessageId, ...userIdFilter(userIds) },
       data: { rating, ratingComment: comment ?? null, ratedAt: new Date() },
     }),
 
-  appendToolInvocation: async (sessionId: string, invocation: unknown) => {
-    // Read-modify-write with merge-by-toolCallId semantics:
-    //   - A "running" placeholder is pushed on tool_execution_start
-    //   - A "completed" row is pushed on tool_execution_end with the SAME toolCallId
-    // We replace the placeholder in place so the JSON column mirrors the live
-    // frontend state (single row per tool call, not duplicated).
-    //
-    // Serialized via `withSessionWriteLock` (Postgres advisory lock) so
-    // concurrent appends on the same sessionId — within one pod OR across
-    // multiple pods — don't race and clobber each other. All DB ops below
-    // run through `tx` so they're covered by the lock.
-    await withSessionWriteLock(sessionId, async (tx) => {
-      const run = await tx.agentRun.findUnique({ where: { sessionId }, select: { toolInvocations: true } });
-      const existing = Array.isArray(run?.toolInvocations) ? (run!.toolInvocations as Array<Record<string, unknown>>) : [];
-      // Strip NULs so the jsonb write doesn't throw (this is the root cause of the
-      // "appendToolInvocation failed" storm on sandbox-heavy runs).
-      const inv = stripNulDeep(invocation) as Record<string, unknown>;
-      const incomingId = inv["toolCallId"];
-      let next: Array<Record<string, unknown>>;
-      if (incomingId && existing.some((p) => p["toolCallId"] === incomingId)) {
-        next = existing.map((p) => p["toolCallId"] === incomingId ? inv : p);
-      } else {
-        next = [...existing, inv];
-      }
-      // Bound the column — keep the most recent rows so a heavy investigation
-      // can't grow it without limit (it's rewritten in full on every event).
-      if (next.length > MAX_TOOL_INVOCATIONS) {
-        next = next.slice(next.length - MAX_TOOL_INVOCATIONS);
-      }
-      await tx.agentRun.update({
-        where: { sessionId },
-        data: { toolInvocations: next as Prisma.InputJsonValue },
-      });
-    });
-  },
+  appendToolInvocation: (sessionId: string, invocation: unknown): Promise<void> =>
+    enqueueToolInvocation(sessionId, invocation),
 
-  listByUser: (userId: string, opts?: { status?: string; limit?: number; conversationId?: string; agentSlug?: string }) =>
+  flushToolInvocations: (sessionId: string): Promise<void> => flushToolInvocations(sessionId),
+
+  flushAllToolInvocations: (): Promise<void> => flushAllToolInvocations(),
+
+  /** Accepts one id or the caller's alias pair (canonical + raw Spaces id);
+   *  runs may be keyed by either (see getRequesterAliases). */
+  listByUser: (userIds: string | string[], opts?: { status?: string; limit?: number; conversationId?: string; agentSlug?: string }) =>
     prisma.agentRun.findMany({
       where: {
-        userId,
+        ...userIdFilter(userIds),
         ...(opts?.status ? { status: opts.status } : {}),
         ...(opts?.conversationId ? { conversationId: opts.conversationId } : {}),
         ...(opts?.agentSlug ? { agentSlug: opts.agentSlug } : {}),
@@ -558,6 +680,8 @@ export const agentRunRepository = {
         startedAt: true,
         completedAt: true,
         chatMessageId: true,
+        parentSessionId: true,
+        parentAgentSlug: true,
         // Included because routes/agent-chat.ts and routes/runs.ts pair
         // assistant messages with their tool invocations from a listByUser
         // call. If a future caller needs the cheaper variant (no JSON blob),
@@ -577,7 +701,7 @@ export const agentRunRepository = {
   listAllForAgent: async (
     agentSlug: string,
     orgId: string,
-    requesterId: string,
+    requesterIds: string | string[],
     opts?: { status?: string; limit?: number; conversationId?: string },
   ) => {
     const rows = await prisma.agentRun.findMany({
@@ -587,7 +711,7 @@ export const agentRunRepository = {
         ...(opts?.status ? { status: opts.status } : {}),
         ...(opts?.conversationId ? { conversationId: opts.conversationId } : {}),
         OR: [
-          { userId: requesterId }, // your own runs, always
+          userIdFilter(requesterIds), // your own runs, always (either id form)
           { usedUserToken: false }, // other users' runs only if no user-token usage
         ],
       },
@@ -603,6 +727,8 @@ export const agentRunRepository = {
         currentToolLabel: true,
         task: true,
         conversationId: true,
+        parentSessionId: true,
+        parentAgentSlug: true,
         scheduledJobId: true,
         channelId: true,
         projectId: true,
@@ -699,11 +825,11 @@ export const agentRunRepository = {
    * user-token tool calls the All Runs ACL hides from the list. Your own runs
    * always; everyone else's only when no user token was used.
    */
-  listByConversation: (conversationId: string, requesterId: string, opts?: { limit?: number }) =>
+  listByConversation: (conversationId: string, requesterIds: string | string[], opts?: { limit?: number }) =>
     prisma.agentRun.findMany({
       where: {
         conversationId,
-        OR: [{ userId: requesterId }, { usedUserToken: false }],
+        OR: [userIdFilter(requesterIds), { usedUserToken: false }],
       },
       orderBy: { startedAt: "desc" },
       take: opts?.limit ?? 50,
@@ -752,14 +878,29 @@ export const agentRunRepository = {
     prisma.agentRun.findUnique({ where: { sessionId } }),
 
   /**
-   * The most-recent RUNNING run for a conversation. Used by the Spaces `/stop`
-   * command to find the in-flight run's sessionId (so it can be cancelled) when
-   * the caller only knows the conversationId. Returns null when nothing is
-   * running. Newest-first so a stale row can't shadow the live run.
+   * The most-recent RUNNING run for a conversation, excluding one session id.
+   * Returns null when nothing else is running. Newest-first so a stale row
+   * can't shadow the live run.
+   *
+   * `excludeSessionId` is required — pass `undefined` only if you genuinely
+   * have no session of your own, and mean it. Both chat surfaces write their
+   * own AgentRun row at status "running" BEFORE dispatch (see
+   * lib/chat-run-record.ts for why), and that row is by definition the newest
+   * `startedAt` on the conversation. Without the exclusion this findFirst
+   * returns the caller's OWN row, so awaitTurnHandoff interrupted a session
+   * xyne-claw had never started and then polled it until the handoff timeout:
+   * prod 2026-09-28 09:00-12:30Z saw 55/55 handoffs end `remote_timeout` and
+   * zero wrap up, a flat ~30s added to every chat turn. Regression-tested in
+   * agentRunRepository.findRunningByConversation.test.ts and
+   * lib/run-turn-handoff.test.ts.
    */
-  findRunningByConversation: (conversationId: string) =>
+  findRunningByConversation: (conversationId: string, excludeSessionId: string | undefined) =>
     prisma.agentRun.findFirst({
-      where: { conversationId, status: "running" },
+      where: {
+        conversationId,
+        status: "running",
+        ...(excludeSessionId ? { sessionId: { not: excludeSessionId } } : {}),
+      },
       orderBy: { startedAt: "desc" },
       select: { sessionId: true, userId: true, agentSlug: true, conversationId: true, status: true },
     }),
@@ -840,6 +981,8 @@ export const agentRunRepository = {
         triggerSource: true,
         task: true,
         conversationId: true,
+        parentSessionId: true,
+        parentAgentSlug: true,
         channelId: true,
         toolsUsed: true,
         tokensIn: true,
@@ -896,7 +1039,7 @@ export const agentRunRepository = {
    * still allow `limit` as a defensive ceiling for very long histories.
    */
   listByUserLight: (
-    userId: string,
+    userIds: string | string[],
     // agentSlug/conversationId: the /runs/light route always accepted and
     // forwarded agentSlug, but this signature silently dropped it (spread into
     // an opts shape that never read it) — fixed 2026-07-17 alongside adding
@@ -905,7 +1048,9 @@ export const agentRunRepository = {
   ) =>
     prisma.agentRun.findMany({
       where: {
-        userId,
+        // Accept the caller's alias pair (canonical + raw Spaces id) — runs
+        // may be keyed by either (see getRequesterAliases).
+        ...userIdFilter(userIds),
         ...(opts?.status ? { status: opts.status } : {}),
         ...(opts?.since ? { startedAt: { gte: opts.since } } : {}),
         ...(opts?.agentSlug ? { agentSlug: opts.agentSlug } : {}),
@@ -922,6 +1067,8 @@ export const agentRunRepository = {
         // build chat-deep-links from them. Adding 2 short text columns
         // doesn't meaningfully change the payload size.
         conversationId: true,
+        parentSessionId: true,
+        parentAgentSlug: true,
         channelId: true,
       },
       orderBy: { startedAt: "desc" },
@@ -938,13 +1085,13 @@ export const agentRunRepository = {
    * a match snippet.
    */
   searchByUser: (
-    userId: string,
+    userIds: string | string[],
     query: string,
     opts?: { agentSlug?: string; limit?: number },
   ) =>
     prisma.agentRun.findMany({
       where: {
-        userId,
+        ...userIdFilter(userIds),
         ...(opts?.agentSlug ? { agentSlug: opts.agentSlug } : {}),
         task: { contains: query, mode: "insensitive" },
       },
@@ -956,6 +1103,8 @@ export const agentRunRepository = {
         startedAt: true,
         completedAt: true,
         conversationId: true,
+        parentSessionId: true,
+        parentAgentSlug: true,
         channelId: true,
         task: true,
       },
@@ -1047,7 +1196,7 @@ export const agentRunRepository = {
     const dropAgentSlug = f.admin === true || f.scope === "own";
     // Destructured rather than spread-with-undefined: exactOptionalPropertyTypes
     // rejects `{ ...f, agentSlug: undefined }` against `agentSlug?: string`.
-    const { agentSlug: droppedAgentSlug, userId: _droppedUserId, ...rest } = f;
+    const { agentSlug: droppedAgentSlug, userIds: _droppedUserIds, ...rest } = f;
     const unfaceted: RunListFilter = dropAgentSlug
       ? rest
       : { ...rest, ...(droppedAgentSlug ? { agentSlug: droppedAgentSlug } : {}) };
@@ -1181,6 +1330,27 @@ export const agentRunRepository = {
         tokensCacheWrite: r._sum.tokensCacheWrite ?? 0,
       }))
       .sort((a, b) => (b.tokensIn + b.tokensOut) - (a.tokensIn + a.tokensOut));
+  },
+
+  toolsUsedSince: async (agentSlug: string, orgId: string, since: Date, maxRuns: number): Promise<string[][]> => {
+    const rows = await prisma.agentRun.findMany({
+      where: { agentSlug, orgId, startedAt: { gte: since } },
+      select: { toolsUsed: true },
+      orderBy: { startedAt: "desc" },
+      take: maxRuns,
+    });
+    return rows.map((r) => r.toolsUsed);
+  },
+
+  /** Same as toolsUsedSince across every agent in the org. */
+  toolsUsedSinceInOrg: async (orgId: string, since: Date, maxRuns: number): Promise<string[][]> => {
+    const rows = await prisma.agentRun.findMany({
+      where: { orgId, startedAt: { gte: since } },
+      select: { toolsUsed: true },
+      orderBy: { startedAt: "desc" },
+      take: maxRuns,
+    });
+    return rows.map((r) => r.toolsUsed);
   },
 
   /** High-level global overview suitable for dashboard header cards. */

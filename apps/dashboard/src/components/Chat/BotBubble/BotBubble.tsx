@@ -11,6 +11,7 @@ import { useRouteContext } from '../../../hooks/useRouteContext';
 import { standaloneNavigate } from '../../../utils/electronApp';
 import { useLocation } from 'react-router-dom';
 import { SearchResultsContext } from '../SearchResults/SearchResultsContext';
+import { ThreadNavigationContext } from '../ThreadNavigationContext';
 import { useNavigate } from '../../../hooks/useWorkspaceNavigate';
 
 interface BotBubbleProps {
@@ -56,6 +57,7 @@ const useOpenTicketCard = (
   const { isMobile } = usePlatform();
   const location = useLocation();
   const { onSelectThread: onSelectSearchThread } = useContext(SearchResultsContext);
+  const { openTicket } = useContext(ThreadNavigationContext);
 
   // In the Desk/email ticket-detail view the user is already looking at the
   // ticket whose card is being rendered in the right-panel thread — instead
@@ -82,6 +84,11 @@ const useOpenTicketCard = (
       const ws = window.location.pathname.split('/').find(s => s.length > 0) ?? '';
       const ticketUrl = `${ws ? `/${ws}` : ''}/chat/dir/${resolvedChannelId}?tab=tickets&ticketId=${ticket.id}&conversationId=${resolvedConversationId}`;
       window.open(ticketUrl, '_blank');
+      return;
+    }
+
+    if (openTicket) {
+      openTicket(ticket.id);
       return;
     }
 

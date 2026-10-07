@@ -113,6 +113,7 @@ export interface VespaSearchFilters {
   in?: string; // Channel IDs (scope: within channel/DM)
   mentions?: string; // User IDs the message mentions (scoped mention search; bare @user chip)
   channelMentions?: string; // Channel IDs the message references (scoped mention search; bare #channel chip)
+  groupMentions?: string; // User-group IDs the message mentions (scoped mention search; @user-group chip)
   mentionHighlights?: string[]; // Display name(s) of bare mention chips — highlighted in results, not in YQL
   offset?: number;
   limit?: number;
@@ -160,6 +161,11 @@ export interface VespaSearchFilters {
   // Cmd-K "Include my channels" toggle. Default on → backend scopes to member channels.
   onlyMyChannels?: boolean;
 
+  // When true, the backend drops results that resolve to an archived ticket. Default off
+  // (undefined) preserves current behavior. Set true by cmd+k always, and by the full-page
+  // Desk tab unless its "Show archived" toggle is on.
+  excludeArchived?: boolean;
+
   // Override Vespa grouping. Empty string => flat ranked list (no grouping).
   groupBy?: string;
 }
@@ -169,6 +175,36 @@ export interface VespaSearchGroup {
   groupValue: string;
   count: number;
   results: DisplaySearchResult[];
+}
+
+/** Backend verdict on how the cmd+K palette should treat a query. */
+export interface QueryIntent {
+  mode: 'lexical' | 'ai';
+  /** Probability that the query needs AI (from Jev). */
+  pAI: number;
+}
+
+/** How an existing item relates to a draft in the composer. */
+export type RelatedLabel = 'answers_it' | 'same_question' | 'related_discussion';
+
+export type RelatedKind = 'thread' | 'ticket' | 'canvas' | 'call';
+
+export interface RelatedItem {
+  id: string;
+  kind: RelatedKind;
+  label: RelatedLabel;
+  /** The classifier's confidence in the label. */
+  confidence: number;
+  /** Opens the same way a cmd+K result does. */
+  result: DisplaySearchResult;
+}
+
+export interface RelatedContext {
+  items: RelatedItem[];
+  /** False when the draft was not searched — not ready (half-typed, or nothing to look up). */
+  ready?: boolean;
+  /** The lookup failed; nothing to show, but worth asking again at the next pause. */
+  failed?: boolean;
 }
 
 export interface VespaSearchResponse {

@@ -4,6 +4,7 @@ import { AuthProvider } from './providers/AuthProvider';
 import { AnalyticsProvider } from './providers/AnalyticsProvider';
 import { RouterProvider } from 'react-router-dom';
 import { router } from './routes/AppRoot';
+import { createStableRouter, StableRouterContext } from './hooks/useStableRouter';
 import { ThemeProvider } from '@juspay/blend-design-system';
 import { Toaster } from 'sonner';
 import './styles/sonner-overrides.css';
@@ -26,7 +27,13 @@ import { SwitchLoadingOverlay } from './components/SwitchLoadingOverlay/SwitchLo
 import { InterruptGuard } from './components/InterruptGuard/InterruptGuard';
 import { WorkspaceSwitchToastListener } from './components/WorkspaceSwitchToastListener';
 import { TRUSTED_ORIGINS } from '@xyne/shared';
-import { parseCallInviteLink } from './components/Chat/RenderMessageWithHTML/internalLinkUtils';
+import {
+  isSandboxViewLink,
+  parseCallInviteLink,
+  parseInternalXyneLink,
+} from './components/Chat/RenderMessageWithHTML/internalLinkUtils';
+import { openLink } from './utils/openLink';
+import { crossWorkspaceNavigate } from './hooks/useCrossWorkspaceNavigate';
 import { joinCallSwitchingIfNeeded } from './machines/roomMachine';
 import { detectPlatform } from './hooks/usePlatform';
 import { DEFAULT_WORKSPACE_ID } from './config';
@@ -37,6 +44,8 @@ import {
   InformationCircle,
   MultipleCrossCancelDefault,
 } from '@xyne/icons';
+
+const stableRouter = createStableRouter(router);
 
 const App = (): ReactElement => {
   // Initialize theme on app load
@@ -99,6 +108,12 @@ const App = (): ReactElement => {
         return;
       }
 
+      if (isSandboxViewLink(anchor.href)) {
+        event.preventDefault();
+        openLink(anchor.href, event, { force: 'in-app' });
+        return;
+      }
+
       // Check origin directly from anchor element
       if (anchor.origin === window.location.origin || TRUSTED_ORIGINS.includes(anchor.origin)) {
         event.preventDefault();
@@ -106,8 +121,37 @@ const App = (): ReactElement => {
         const pathname = anchor.pathname;
         const pathSegments = pathname.split('/').filter(Boolean);
 
-        // Check if first segment looks like a workspaceId (cuid format: 20+ alphanumeric chars)
+        // A workspace-scoped link must switch the authenticated session before
+        // navigation; otherwise the URL and Zero/auth workspace diverge — the
+        // address bar shows the target workspace while the sidebar, Zero data
+        // and channel resolution all stay on the old one ("Unknown Channel").
         const hasWorkspaceId = pathSegments[0]?.match(/^[a-z0-9-]{20,}$/i);
+
+        // The ACTIVE workspace must come from where we currently are, never from
+        // the link being clicked. Reading it from `anchor.pathname` compares the
+        // target against itself, so the guard below was false by construction
+        // and the switch never ran.
+        const activeWorkspaceId =
+          router.state.location.pathname
+            .split('/')
+            .filter(Boolean)[0]
+            ?.match(/^[a-z0-9-]{20,}$/i)?.[0] ||
+          DEFAULT_WORKSPACE_ID ||
+          undefined;
+
+        const parsedInternalLink = parseInternalXyneLink(anchor.href);
+        if (
+          parsedInternalLink?.workspaceId &&
+          parsedInternalLink.workspaceId !== activeWorkspaceId
+        ) {
+          void crossWorkspaceNavigate({
+            href: anchor.href,
+            currentWorkspaceId: activeWorkspaceId,
+            // Bound: passing the bare method trips @typescript-eslint/unbound-method.
+            navigate: router.navigate.bind(router),
+          }).catch(() => undefined);
+          return;
+        }
 
         // If no workspaceId and we have a default, prepend it
         if (!hasWorkspaceId && DEFAULT_WORKSPACE_ID) {
@@ -154,7 +198,9 @@ const App = (): ReactElement => {
                   <TooltipProvider delayDuration={0}>
                     <main className='h-screen' style={{ background: 'var(--root-bg)' }}>
                       <Wallpaper />
-                      <RouterProvider router={router}></RouterProvider>
+                      <StableRouterContext.Provider value={stableRouter}>
+                        <RouterProvider router={router}></RouterProvider>
+                      </StableRouterContext.Provider>
                     </main>
                     <SwitchLoadingOverlay />
                     <InterruptGuard />

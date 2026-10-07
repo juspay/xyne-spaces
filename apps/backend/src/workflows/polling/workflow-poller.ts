@@ -2,9 +2,7 @@
 
 import os from 'os'
 import { repositories, WorkflowExecutionWithState } from '@/database/repositories'
-import { workflowRegistry } from '@/workflows/registry/workflowRegistry'
-import { createWorkflowEngineWithDB } from '../factory'
-import { WorkflowExecutionStatus, WorkflowType } from '../types/workflow-enums'
+import { WorkflowExecutionStatus } from '../types/workflow-enums'
 import { PollingConfig, WORKFLOW_POLLER_CONFIG } from './config'
 import { LockService } from '@/services/lockService'
 import { logger } from '@/utils/logger'
@@ -16,11 +14,10 @@ import {
   WorkflowExternalWaitException,
 } from '../exceptions/workflow-exceptions'
 import { workflowStatusSyncService } from '../services/workflowStatusSyncService'
-import { notificationHooks } from '@/hooks/notificationHooks'
 import { cleanupRepository } from '@framework'
 import { generateConsolidatedKnowledgeLearnings } from '../utils/knowledge-generator'
 import type { WorkflowStorage } from '../workflow-storage'
-import { runAsServiceActor } from '@/database/tenant/context'
+import { executeWorkflowUnderServiceActor } from '@/bypassAcl/workflowPollerServices'
 
 
 interface PollingLoop {
@@ -227,68 +224,20 @@ export class WorkflowPoller {
     // Open a per-execution tenant scope so the workspaceId stamper fills workspaceId
     // on every downstream Prisma write (this job runs in the background with no request
     // context). userId is inert — only workspaceId is read by the stamp.
-    await runAsServiceActor('workflow-poller', workflow.workspaceId, async () => {
-      // For child executions, workflowType is in execution; for parent, in workflow
-      const workflowType = (execution.workflowType || workflow.workflowType) as WorkflowType
-
-      if (!workflowType || !workflowRegistry.has(workflowType)) {
-        throw new Error(`Workflow type ${workflowType} not registered`)
-      }
-
-      // Load initial context from execution (child) or workflow (parent)
-      const initialContext = execution.context
-        ? JSON.parse(execution.context)
-        : (workflow.context ? JSON.parse(workflow.context) : {})
-
-      const { engine, storage } = createWorkflowEngineWithDB({
-        workflowId: execution.workflowId,
-        workflowExecutionId: execution.id,
-        context: initialContext
-      })
-
-      // Execute workflow and get output
-      const output = await workflowRegistry.execute(workflowType, engine)
-
-      // Save output to workflow execution
-      await workflowStatusSyncService.updateWorkflowExecution(execution.id, {
-        status: WorkflowExecutionStatus.SUCCESS,
-        output: output ? JSON.stringify(output) : null
-      })
-
-      logger.info(`✅ Completed workflow execution: ${execution.id}`)
-
-      // Generate consolidated knowledge from all agentic checkpoints (async, non-blocking)
-      this.generateConsolidatedKnowledge(execution.id, storage).catch((err: Error) => {
-        logger.error(`Failed to generate consolidated knowledge for ${execution.id}:`, err)
-      })
-
-      const workspacePath = `/tmp/${execution.id}`
-      logger.info(`🧹 Cleaning up workspace for completed parent workflow: ${workspacePath}`)
-      await cleanupRepository(workspacePath).catch((err: Error) => {
-        logger.warn(`Failed to cleanup workspace ${workspacePath}:`, err)
-      })
-
-      // Send workflow completion notification
-      await notificationHooks.onWorkflowCompletion(execution.workflowId, 'SUCCESS', execution.id)
-
-      // If this is a child execution, trigger parent resume
-      if (execution.parentWorkflowExecutionId) {
-        await this.triggerParentResume(execution.parentWorkflowExecutionId, execution.id)
-      }
-    })
+    await executeWorkflowUnderServiceActor(execution, workflow)
   }
 
   private async triggerParentResumeIfChild(parentExecutionId: string | null, childExecutionId: string): Promise<void> {
     try {
       if (parentExecutionId) {
-        await this.triggerParentResume(parentExecutionId, childExecutionId)
+        await WorkflowPoller.triggerParentResume(parentExecutionId, childExecutionId)
       }
     } catch (error) {
       logger.error(`Failed to trigger parent resume for ${childExecutionId}:`, error)
     }
   }
 
-  private async triggerParentResume(parentExecutionId: string, completedChildId: string): Promise<void> {
+  static async triggerParentResume(parentExecutionId: string, completedChildId: string): Promise<void> {
     try {
       const childExecution = await repositories.workflowExecutions.findById(completedChildId)
 
@@ -315,7 +264,7 @@ export class WorkflowPoller {
    * Generate consolidated knowledge learnings from all agentic checkpoints after workflow success
    * Creates a single canvas with unified learnings across all phases
    */
-  private async generateConsolidatedKnowledge(
+  static async generateConsolidatedKnowledge(
     workflowExecutionId: string,
     storage: WorkflowStorage
   ): Promise<void> {

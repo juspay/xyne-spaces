@@ -18,8 +18,7 @@ export const KNOWN_SHORTCUT_SCOPES = [
   'viewer',
   'canvas',
   'sdlc-sidebar',
-  'sdlc-finder',
-  'sdlc-tickets',
+  'sdlc-files',
   'sdlc-explorer',
 ] as const;
 

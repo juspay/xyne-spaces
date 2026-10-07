@@ -14,6 +14,9 @@ export interface EvalImportJobData {
   from?: string;
   to?: string;
   model?: string;
+  /** Verified workspace at enqueue time — disambiguates two-membership users
+   *  during the request-less worker pass. */
+  workspaceId?: string | undefined;
 }
 
 export interface EvalImportProgress {

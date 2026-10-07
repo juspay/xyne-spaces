@@ -1,6 +1,5 @@
 import { useSelector } from '@xstate/react';
 import { useMemo } from 'react';
-import { Headphones } from 'lucide-react';
 import { CallStatus } from '@xyne/shared';
 import { usePlatform } from '../../../hooks/usePlatform';
 import { roomActor } from '../../../machines/roomMachine';
@@ -16,6 +15,7 @@ import {
 import { useAutoJoinOnAccept, useCallJoinState } from '../../../hooks/useCallJoinState';
 import { CallJoinButton } from '../../Call/CallJoinButton/CallJoinButton';
 import AvatarGroup from '../../ui/Avatar/AvatarGroup';
+import { PhoneDefault } from '@xyne/icons';
 
 interface CallLayoutProps {
   callId: string;
@@ -86,7 +86,7 @@ export const CallLayout: React.FC<CallLayoutProps> = ({ callId }) => {
           tabular-numeral duration slot keep the pill from resizing as data updates. */}
       <div className='rounded-lg inline-flex items-center h-10 gap-0.5 text-white'>
         <div className='flex items-center h-full gap-2 rounded-lg px-2 bg-green-700'>
-          <Headphones className='w-5 h-5 text-white' />
+          <PhoneDefault className='w-5 h-5 text-white' />
         </div>
 
         <div className='flex items-center justify-between h-full gap-2 pl-2 pr-3 rounded-lg bg-green-700'>

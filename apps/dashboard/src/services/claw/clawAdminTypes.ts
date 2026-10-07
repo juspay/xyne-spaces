@@ -6,7 +6,12 @@ export interface AdminAccessFlags {
 }
 
 export type RequestTargetType = 'agent' | 'skill';
-export type RequestKind = 'push_to_global' | 'push_to_spaces';
+export type RequestKind =
+  | 'agent_create'
+  | 'clone'
+  | 'push_to_global'
+  | 'push_to_spaces'
+  | 'skill_update';
 
 export interface AgentRequestItem {
   id: string;
@@ -27,6 +32,7 @@ export interface AgentRequestItem {
   orgName?: string | null;
   status: string;
   note?: string | null;
+  proposedContent?: string | null;
   createdAt: string;
 }
 

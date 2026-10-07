@@ -11,9 +11,10 @@ import {
   FOLDER_ACTIONS,
   WORKFLOW_ACTIONS,
 } from '@xyne/workflow-sdk';
-import { db } from '@/database/client';
-import { runAsSystem } from '@/database/tenant/context';
-import { WORKFLOWS_SCOPE } from './constants';
+import { AccessType } from '@xyne/shared';
+import { executionWorkspacesQuery } from '@/bypassAcl/workflowServices';
+import { repositories } from '@/database/repositories';
+import { logger } from '@/utils/logger';
 import { attrsOf } from './utils';
 import type { XyneCtx, XyneFilter } from './types';
 
@@ -22,6 +23,12 @@ const FOLDER_FULL: readonly Action[] = [...FOLDER_ACTIONS, ...CONTAINER_ACTIONS]
 const ROOT_FULL: readonly Action[] = [...CONTAINER_ACTIONS, ...CREDENTIAL_ACTIONS];
 
 const DENIED: readonly Action[] = [];
+
+const APPROVE: Action = 'workflow:approve';
+
+const WORKFLOW_MAKER: readonly Action[] = WORKFLOW_ACTIONS.filter((a) => a !== APPROVE);
+
+const AUTOMATIONS_RESOURCE_NAME = 'AUTOMATIONS';
 
 export class XyneWorkflowAuthorizer implements WorkflowAuthorizer<XyneCtx, XyneFilter> {
   async permissions(ctx: XyneCtx, ref: ResourceRef): Promise<readonly Action[]> {
@@ -34,22 +41,50 @@ export class XyneWorkflowAuthorizer implements WorkflowAuthorizer<XyneCtx, XyneF
     refs: readonly ResourceRef[],
   ): Promise<ReadonlyArray<readonly Action[]>> {
     const executionIds = refs.flatMap((ref) => (ref.type === 'execution' ? [ref.id] : []));
-    const workspaceOf = await this.executionWorkspaces(executionIds);
-    return refs.map((ref) => this.decide(ctx, ref, workspaceOf));
+    const [workspaceOf, mayApprove] = await Promise.all([
+      this.executionWorkspaces(executionIds),
+      this.mayApprove(ctx),
+    ]);
+    return refs.map((ref) => this.decide(ctx, ref, workspaceOf, mayApprove));
   }
 
   visibleFilter(ctx: XyneCtx, _type: ResourceType): Promise<XyneFilter> {
     return Promise.resolve({ workspaceId: ctx.workspaceId });
   }
 
-  private decide(ctx: XyneCtx, ref: ResourceRef, workspaceOf: ReadonlyMap<string, string>): readonly Action[] {
+  private async mayApprove(ctx: XyneCtx): Promise<boolean> {
+    try {
+      const resource = await repositories.resources.findByName(AUTOMATIONS_RESOURCE_NAME);
+      if (!resource) {
+        logger.warn(
+          '[workflows] AUTOMATIONS resource is not configured — nobody can approve a gated workflow. Run scripts/seed-acl.ts.',
+        );
+        return false;
+      }
+      return await repositories.resourceAccess.hasAccess(
+        ctx.userId,
+        resource.id,
+        AccessType.ADMIN,
+      );
+    } catch (err) {
+      logger.error('[workflows] could not decide approval rights:', err);
+      return false;
+    }
+  }
+
+  private decide(
+    ctx: XyneCtx,
+    ref: ResourceRef,
+    workspaceOf: ReadonlyMap<string, string>,
+    mayApprove: boolean,
+  ): readonly Action[] {
     switch (ref.type) {
       case 'root':
-        // Every workspace member may create at the top level and manage credentials.
-        return ROOT_FULL;
+        return mayApprove ? [...ROOT_FULL, APPROVE] : ROOT_FULL;
 
       case 'workflow':
-        return this.sameWorkspace(ctx, ref.record.attributes) ? WORKFLOW_ACTIONS : DENIED;
+        if (!this.sameWorkspace(ctx, ref.record.attributes)) return DENIED;
+        return mayApprove ? WORKFLOW_ACTIONS : WORKFLOW_MAKER;
 
       case 'folder':
         return this.sameWorkspace(ctx, ref.record.attributes) ? FOLDER_FULL : DENIED;
@@ -74,12 +109,7 @@ export class XyneWorkflowAuthorizer implements WorkflowAuthorizer<XyneCtx, XyneF
    */
   private async executionWorkspaces(ids: readonly string[]): Promise<ReadonlyMap<string, string>> {
     if (ids.length === 0) return new Map();
-    const rows = await runAsSystem(() =>
-      db.workflowExecution.findMany({
-        where: { id: { in: [...new Set(ids)] }, ...WORKFLOWS_SCOPE },
-        select: { id: true, workspaceId: true },
-      }),
-    );
+    const rows = await executionWorkspacesQuery(ids);
     return new Map(rows.map((row) => [row.id, row.workspaceId]));
   }
 

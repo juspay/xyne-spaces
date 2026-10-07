@@ -6,24 +6,21 @@ import { DatabaseClient } from '@/database/client';
 import { resolveWorkspaceIdFromModel } from '@/database/tenant/workspace-utils';
 import type { Prisma } from '@prisma/client';
 import {
-  serializeTicketMd,
-  FormEntityType,
   MessageType,
   TicketPriority,
   VespaInsertionStatus,
   VespaOperationType,
 } from '@xyne/shared';
-import type { TicketCardSummary } from '@xyne/shared';
 import { TicketActionResponse, TicketEventType } from '../types';
 import { resolveSlackMentions } from '@/integrations/adapters/slack-webhook-tickets/utils/slackUserResolver';
 import { SlackBlockKitParser } from '@/integrations/adapters/slack-webhook-tickets/utils/slackBlockKitParser';
 import { config } from '@/config/env';
-import { TicketIdService } from '@/services/ticketIdService';
 import { buildCreationFormFieldChanges } from '@/services/ticketCustomFieldService';
 import { vespaQueue } from '@/queues/vespaQueue';
 import { ticketSchema } from '@/vespa/src/types';
 import { NAMESPACE } from '@/vespa/src/config';
 import { currentWorkspaceId } from '@/database/tenant/context';
+import { createTicketWithConversationTx } from '@/bypassAcl/transactions/ticketutils';
 
 // Initialize Block Kit parser instance
 const blockKitParser = new SlackBlockKitParser();
@@ -59,7 +56,7 @@ const CreateTicketParamsSchema = z.object({
 });
 
 
-async function pushVespaJobForTicket(
+export async function pushVespaJobForTicket(
   ticketId: string,
   userId: string,
   workspaceId?: string
@@ -190,75 +187,7 @@ export async function createTicketWithConversation(
         : undefined;
 
     // Generate xyneId and create ticket in a transaction
-    const ticket = await prisma.$transaction(async (tx) => {
-      // Generate xyneId using project-scoped format
-      const xyneId = await TicketIdService.generateTicketId(tx, projectId);
-      // Create ticket using repository
-      const createdTicket = await ticketRepository.createTicket({
-        title,
-        description,
-        createdBy: userId,
-        updatedBy: userId,
-        assignedTo,
-        userGroupId,
-        conversationId: finalConversationId,
-        channelId,
-        projectId,
-        workspaceId,
-        boardId,
-        priority: priority || TicketPriority.LOW,
-        xyneId,
-        stageName,
-        eta,
-        ticketType,
-        merchantId,
-        formFieldChanges,
-      }, tx);
-
-      pushVespaJobForTicket(createdTicket.id, userId, workspaceId || undefined).catch(error => {
-        logger.error(`[CREATE-TICKET] Error pushing Vespa job for ticket ${createdTicket.id}:`, error);
-      });
-
-       const ticketMd = serializeTicketMd({
-         id: createdTicket.id,
-         title: createdTicket.title,
-         description: createdTicket.description,
-         statusV2: createdTicket.statusV2 as TicketCardSummary['statusV2'],
-         priority: createdTicket.priority as TicketCardSummary['priority'],
-         assignedTo: createdTicket.assignedTo ?? null,
-         createdBy: createdTicket.createdBy,
-         createdAt: createdTicket.createdAt.getTime(),
-         eta: createdTicket.eta ? createdTicket.eta.getTime() : null,
-         xyneId: createdTicket.xyneId,
-         stageName: createdTicket.stageName,
-         ticketType: createdTicket.ticketType ?? null,
-         channelId: createdTicket.channelId,
-         conversationId: createdTicket.conversationId,
-       });
-
-       // Update conversation with ticketId and ticket_md
-       await tx.conversation.update({
-         where: { conversationId: finalConversationId },
-         data: { ticketId: createdTicket.id, ticket_md: ticketMd },
-       });
-
-      if (customFieldValues && customFieldValues.fieldValues.length > 0) {
-        await tx.formEntityValues.createMany({
-          data: customFieldValues.fieldValues.map(fieldValue => ({
-            formId: customFieldValues.formId,
-            entityId: createdTicket.id,
-            entityType: FormEntityType.TICKET,
-            fieldId: fieldValue.fieldId,
-            contextId: customFieldValues.contextId,
-            fieldValue: fieldValue.fieldValue,
-            actualFieldValue: fieldValue.actualFieldValue,
-            workspaceId,
-          })),
-        });
-      }
-
-      return createdTicket;
-    });
+    const ticket = await createTicketWithConversationTx(prisma, projectId, ticketRepository, title, description, userId, assignedTo, userGroupId, finalConversationId, channelId, workspaceId, boardId, priority, stageName, eta, ticketType, merchantId, formFieldChanges, customFieldValues);
 
     // Automations re-read the ticket on their own connection, so the event must
     // not be published before the transaction above commits.
@@ -278,3 +207,4 @@ export async function createTicketWithConversation(
     throw error;
   }
 }
+

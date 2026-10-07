@@ -1,3 +1,8 @@
+import { jevEnabled, jevScoreItems, jevThreshold } from "./jev.js";
+import { recordJudgeOutcome } from "./judge-backend.js";
+import { optEnabled } from "./optimizations.js";
+import { metric } from "./metrics.js";
+import { runWithSubagentMcpId } from "./subagent-mcp-context.js";
 import { Type } from "@sinclair/typebox";
 import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
 import {
@@ -9,6 +14,7 @@ import {
   PRESENTATION_CATALOG_SOURCE,
 } from "xyne-claw-shared";
 import type { McpToolGroup } from "./mcp.js";
+import { matchesDirectPick } from "./tool-resolution.js";
 import type { CustomSubagentSpec } from "./subagent-tools.js";
 
 export interface ToolCatalogEntry {
@@ -50,6 +56,14 @@ export interface ToolCatalogItem {
   tool: ToolDefinition;
 }
 
+/**
+ * Whether the SIGNED-IN user/agent can reach a tool's connector, as claw-auth
+ * reports it: `connected` (a credential path exists), `not_connected` (the user
+ * would have to connect it first), `builtin` (not a connector — no connection
+ * needed). Says nothing about whether THIS agent was granted the tool.
+ */
+export type ConnectorConnection = "connected" | "not_connected" | "builtin";
+
 /** One tool from the deployment-wide catalog, as claw-auth returns it. */
 export interface DeploymentToolMatch {
   slug: string;
@@ -59,6 +73,43 @@ export interface DeploymentToolMatch {
   risk: "read" | "write" | "destructive";
   params: Array<{ name: string; type: string; required: boolean; description: string }>;
   grantedToAgents?: number;
+  /** Absent from older claw-auth builds; then the connection is unknown. */
+  connection?: ConnectorConnection;
+  connector?: { type: string; name: string };
+}
+
+/**
+ * A connector with no tools in the deployment index yet (nobody has connected
+ * it, so its tools were never listed). Returned when its name/description
+ * matches the search, so "is there a Grafana integration?" is answerable.
+ */
+export interface DeploymentConnectorMatch {
+  type: string;
+  name: string;
+  description: string;
+  connection: "connected" | "not_connected";
+}
+
+export interface DeploymentSearchResult {
+  matches: DeploymentToolMatch[];
+  connectors: DeploymentConnectorMatch[];
+}
+
+/**
+ * An MCP server the agent's tools selection grants, but that did not resolve
+ * for this run — so none of its tools are in the tool list. claw-auth computes
+ * it (lib/connector-access.ts); without it the run dropped them silently and
+ * the agent never knew its config promised those tools.
+ */
+export interface UnresolvedConfiguredServer {
+  serverType: string;
+  serverName: string;
+  /** `not_connected`: the user must connect it. `unavailable`: it has
+   *  credentials but failed to load this run. */
+  reason: "not_connected" | "unavailable";
+  wholeServer: boolean;
+  tools: string[];
+  moreTools: number;
 }
 
 /**
@@ -73,7 +124,7 @@ export type DeploymentToolSearch = (params: {
   integration?: string;
   maxRisk?: string;
   limit: number;
-}) => Promise<DeploymentToolMatch[]>;
+}) => Promise<DeploymentSearchResult>;
 
 export interface FastToolRuntimeController {
   getActiveToolSet?: () => string[];
@@ -110,7 +161,7 @@ function extractRuntimeToolName(name: string): string {
   return idx >= 0 ? name.slice(idx + 2) : name;
 }
 
-function oneLineDescription(tool: ToolDefinition): string {
+export function oneLineDescription(tool: ToolDefinition): string {
   const raw = (tool.description || tool.promptSnippet || tool.label || tool.name)
     .replace(/\s+/g, " ")
     .trim();
@@ -162,30 +213,53 @@ function addUnique(
   });
 }
 
+export function subagentScopedToolName(subagentName: string, toolName: string): string {
+  return `${subagentName}__${extractRuntimeToolName(toolName)}`.replace(/[^a-zA-Z0-9_-]/g, "_");
+}
+
+function scopeToSubagent(tool: ToolDefinition, subagentName: string, subagentId: string): ToolDefinition {
+  const execute = tool.execute.bind(tool) as (...args: unknown[]) => unknown;
+  return {
+    ...tool,
+    name: subagentScopedToolName(subagentName, tool.name),
+    description: `[${subagentName}] ${tool.description ?? ""}`.trim(),
+    execute: ((...args: unknown[]) => runWithSubagentMcpId(subagentId, () => execute(...args))) as ToolDefinition["execute"],
+  } as ToolDefinition;
+}
+
 function resolveCustomSubagentTools(
   toolsConfig: { direct?: string[]; custom?: string[] },
   groups: McpToolGroup[],
   customTools: ToolDefinition[] | undefined,
 ): ToolDefinition[] {
-  const directNames = new Set(toolsConfig.direct ?? []);
+  const directPicks = toolsConfig.direct ?? [];
   const customSlugs = new Set(toolsConfig.custom ?? []);
   const out: ToolDefinition[] = [];
 
-  if (directNames.size > 0) {
+  if (directPicks.length > 0) {
     for (const group of groups) {
       const writeSet = new Set(group.writeTools.map(String));
       for (const tool of group.tools) {
         const runtimeName = extractRuntimeToolName(tool.name);
-        if (directNames.has(runtimeName) && !writeSet.has(runtimeName)) out.push(tool);
+        if (matchesDirectPick(tool, directPicks) && !(excludeWritesFromCatalog() && writeSet.has(runtimeName))) out.push(tool);
       }
     }
   }
   if (customSlugs.size > 0 && customTools) {
     for (const tool of customTools) {
-      if (customSlugs.has(customToolSelectionKey(tool)) && !isCustomWriteTool(tool)) out.push(tool);
+      if (customSlugs.has(customToolSelectionKey(tool)) && !(excludeWritesFromCatalog() && isCustomWriteTool(tool))) out.push(tool);
     }
   }
   return out;
+}
+
+// Writes were skipped here so they could never be lazily loaded. With the
+// parent-level force unwrap gone they would otherwise be unreachable, and
+// prompt-residency was never the safety mechanism: every write queues a signed
+// pendingAction that a human approves in claw-auth before it executes. Set
+// XYNE_CATALOG_EXCLUDE_WRITES=1 to restore the old exclusion.
+function excludeWritesFromCatalog(): boolean {
+  return process.env["XYNE_CATALOG_EXCLUDE_WRITES"] === "1";
 }
 
 export function buildToolCatalog(params: {
@@ -195,11 +269,10 @@ export function buildToolCatalog(params: {
   /**
    * Whether to catalogue subagent-wrapped read tools.
    *
-   * Only meaningful when subagent delegation is OFF (fast mode) — there the
-   * catalog stands in for the wrappers, so the individual read tools belong in
-   * it. With delegation ON, the wrapper tool is already in the palette and
-   * cataloguing its members too would show the model both `spaces` and
-   * `Spaces__spaces-search`, which is duplication, not disclosure.
+   * With delegation OFF (fast mode) the catalog stands in for the wrappers.
+   * With delegation ON it is set by the open palette or `subagent_read_tools`,
+   * so the model can load a subagent's tools and call them itself instead of
+   * paying for a nested run.
    *
    * Presentation tools are catalogued either way: they're wrapped by nothing.
    */
@@ -213,6 +286,7 @@ export function buildToolCatalog(params: {
    * always-active names back out of the catalog.
    */
   catalogUnwrapped?: boolean;
+  catalogUnwrappedWrites?: boolean;
 }): ToolCatalogItem[] {
   const items: ToolCatalogItem[] = [];
   const seen = new Set<string>();
@@ -224,7 +298,7 @@ export function buildToolCatalog(params: {
       if (!def) continue;
       const writeSet = new Set(group.writeTools.map(String));
       for (const tool of group.tools) {
-        if (writeSet.has(extractRuntimeToolName(tool.name))) continue;
+        if (excludeWritesFromCatalog() && writeSet.has(extractRuntimeToolName(tool.name))) continue;
         addUnique(items, seen, tool, `subagent:${def.name}`, group.serverType);
       }
     }
@@ -233,16 +307,25 @@ export function buildToolCatalog(params: {
       for (const def of SUBAGENT_DEFINITIONS) {
         const matched = params.customTools.filter((tool) => customToolSource(tool) === def.serverType);
         for (const tool of matched) {
-          if (isCustomWriteTool(tool)) continue;
+          if (excludeWritesFromCatalog() && isCustomWriteTool(tool)) continue;
           addUnique(items, seen, tool, `subagent:${def.name}`, def.serverType);
         }
       }
     }
 
+    const serverOf = new Map<ToolDefinition, string>();
+    for (const group of params.groups) {
+      for (const tool of group.tools) serverOf.set(tool, group.serverType);
+    }
     for (const spec of params.customSubagents ?? []) {
       const palette = resolveCustomSubagentTools(spec.tools, params.groups, params.customTools);
       for (const tool of palette) {
-        addUnique(items, seen, tool, `custom-subagent:${spec.name}`);
+        const server = serverOf.get(tool);
+        if (server && spec.id) {
+          addUnique(items, seen, scopeToSubagent(tool, spec.name, spec.id), `custom-subagent:${spec.name}`, server);
+        } else {
+          addUnique(items, seen, tool, `custom-subagent:${spec.name}`, server);
+        }
       }
     }
   }
@@ -268,7 +351,7 @@ export function buildToolCatalog(params: {
       if (findSubagentDefinitionForServer(group.serverType)) continue;
       const writeSet = new Set(group.writeTools.map(String));
       for (const tool of group.tools) {
-        if (writeSet.has(extractRuntimeToolName(tool.name))) continue;
+        if (!params.catalogUnwrappedWrites && writeSet.has(extractRuntimeToolName(tool.name))) continue;
         addUnique(items, seen, tool, `server:${group.serverType}`, group.serverType);
       }
     }
@@ -279,7 +362,7 @@ export function buildToolCatalog(params: {
     for (const tool of params.customTools ?? []) {
       const source = customToolSource(tool);
       if (!source || isPresentationToolSource(source)) continue;
-      if (isCustomWriteTool(tool)) continue;
+      if (!params.catalogUnwrappedWrites && isCustomWriteTool(tool)) continue;
       addUnique(items, seen, tool, source);
     }
   }
@@ -386,6 +469,50 @@ function matchScoped(entries: ToolCatalogEntry[], query: string): ToolCatalogEnt
 }
 
 /**
+ * Keyword hits first, then anything Jev scores as relevant that the keywords
+ * missed. The union is deliberate: substring matching finds nothing for
+ * "average first response time" against `spaces-desk-metrics`, but dropping
+ * what it does catch would be a regression for the phrasings it handles.
+ */
+async function matchScopedSifted(
+  entries: ToolCatalogEntry[],
+  query: string,
+): Promise<ToolCatalogEntry[]> {
+  const keyword = matchScoped(entries, query);
+  if (!optEnabled("jev_tool_sift") || !jevEnabled()) return keyword;
+
+  const already = new Set(keyword.map((e) => e.name));
+  const scores = await jevScoreItems(query, entries, {
+    purpose: "tool-search",
+    key: (e) => e.name,
+    instructions: (e) =>
+      `Would calling this tool help with the request? \`${e.name}\`: ` +
+      `${e.oneLineDescription.slice(0, 300)}`,
+  });
+  if (!scores) return keyword;
+
+  const threshold = jevThreshold("JEV_TOOL_THRESHOLD", 0.4);
+  const added = entries
+    .filter((e) => !already.has(e.name) && (scores.get(e.name) ?? 0) >= threshold)
+    .sort((a, b) => (scores.get(b.name) ?? 0) - (scores.get(a.name) ?? 0));
+
+  if (added.length > 0) {
+    metric.count("tool_search_sift_added", { added: added.length, keyword: keyword.length });
+  }
+  recordJudgeOutcome(
+    "tool-search",
+    `scored ${scores.size} of ${entries.length} tools · keyword hits ${keyword.length} · added ${added.length} at ≥${threshold}`,
+    {
+      query,
+      threshold,
+      added: added.slice(0, 25).map((e) => ({ name: e.name, score: Number((scores.get(e.name) ?? 0).toFixed(3)) })),
+      keywordHits: keyword.slice(0, 25).map((e) => ({ name: e.name, score: Number((scores.get(e.name) ?? 0).toFixed(3)) })),
+    },
+  );
+  return [...keyword, ...added];
+}
+
+/**
  * Resolves a name the model typed to the name the catalog actually holds.
  *
  * Agent-scope search quotes server-decorated runtime names (e.g.
@@ -395,6 +522,10 @@ function matchScoped(entries: ToolCatalogEntry[], query: string): ToolCatalogEnt
  * two servers can share a bare tool name, and loading the wrong one silently
  * is worse than asking for the qualified name.
  */
+export function normalizeToolName(value: string): string {
+  return value.trim().toLowerCase().replace(/[\s_]+/g, "-");
+}
+
 function resolveCatalogName(
   requested: string,
   byName: Map<string, ToolCatalogEntry>,
@@ -402,8 +533,8 @@ function resolveCatalogName(
 ): { name: string } | { ambiguous: string[] } | null {
   if (byName.has(requested)) return { name: requested };
 
-  const norm = (v: string): string => v.toLowerCase().replace(/_/g, "-");
-  const wanted = norm(requested);
+  const wanted = normalizeToolName(requested);
+  const norm = normalizeToolName;
 
   const matches = catalog.filter((entry) => {
     const name = entry.name;
@@ -456,17 +587,184 @@ function renderGrouped(entries: ToolCatalogEntry[], header: string): string {
   return [header, ...sections].join("\n\n");
 }
 
-function renderDeployment(matches: DeploymentToolMatch[], note: string): string {
-  if (matches.length === 0) {
+function renderDeploymentLine(m: DeploymentToolMatch, tag = ""): string {
+  const required = m.params.filter((p) => p.required).map((p) => p.name);
+  const params = required.length ? ` — needs ${required.join(", ")}` : "";
+  const granted = typeof m.grantedToAgents === "number" ? `, granted to ${m.grantedToAgents} agent(s)` : "";
+  return `  - ${m.name} [${m.integration}, ${m.risk}${granted}]${tag}${params}\n      ${m.description.replace(/\s+/g, " ").slice(0, 200)}`;
+}
+
+/** How to tell the user to connect something, given what this run can do about it. */
+function connectAdvice(types: string[], suggestConnectorsAvailable: boolean): string {
+  const list = types.map((t) => JSON.stringify(t)).join(", ");
+  return suggestConnectorsAvailable
+    ? `If the task needs one of these, call suggest-connectors({ serverTypes: [${list}] }) — the user gets a Connect card; do not describe the connection steps in prose.`
+    : `If the task needs one of these, tell the user to connect ${types.join(", ")} (Connectors page) and ask again.`;
+}
+
+/** Lowercase alphanumeric tokens of any length. */
+function tokens(value: string): string[] {
+  return value.toLowerCase().split(/[^a-z0-9]+/).filter(Boolean);
+}
+
+/**
+ * True when the query names this connector: all of its type's tokens
+ * (`xyne-spaces` → xyne + spaces) or all of its display name's tokens appear.
+ * Deliberately strict — a generic word shared with a description must not
+ * advertise an unrelated integration.
+ */
+function queryNamesConnector(queryTokens: ReadonlySet<string>, type: string, name: string): boolean {
+  const byType = tokens(type);
+  const byName = tokens(name);
+  return (
+    (byType.length > 0 && byType.every((t) => queryTokens.has(t))) ||
+    (byName.length > 0 && byName.every((t) => queryTokens.has(t)))
+  );
+}
+
+/**
+ * For an agent-scope search: integrations the QUERY NAMES that this run does
+ * not have because the user never connected them. Agent scope otherwise only
+ * lists loadable tools, so "github … stars" in a run without GitHub came back as
+ * a page of unrelated keyword hits and no hint that GitHub exists here.
+ */
+async function namedNotConnectedSection(
+  query: string,
+  search: DeploymentToolSearch | undefined,
+  runServerTypes: ReadonlySet<string>,
+  suggestConnectorsAvailable: boolean,
+): Promise<string> {
+  if (!query || !search) return "";
+  const queryTokens = new Set(tokens(query));
+  let result: DeploymentSearchResult;
+  try {
+    result = await Promise.race([
+      search({ query, limit: 20 }),
+      new Promise<never>((_, reject) => setTimeout(() => reject(new Error("timeout")), NAMED_LOOKUP_TIMEOUT_MS)),
+    ]);
+  } catch {
+    return "";
+  }
+  const named = (type: string, name: string): boolean =>
+    !runServerTypes.has(type) && queryNamesConnector(queryTokens, type, name);
+  const tools = result.matches.filter(
+    (m) => m.connection === "not_connected" && m.connector && named(m.connector.type, m.connector.name),
+  );
+  const connectors = result.connectors.filter((c) => c.connection === "not_connected" && named(c.type, c.name));
+  if (tools.length === 0 && connectors.length === 0) return "";
+
+  const byConnector = new Map<string, { name: string; tools: DeploymentToolMatch[] }>();
+  for (const m of tools) {
+    const slot = byConnector.get(m.connector!.type) ?? { name: m.connector!.name, tools: [] };
+    slot.tools.push(m);
+    byConnector.set(m.connector!.type, slot);
+  }
+  for (const c of connectors) if (!byConnector.has(c.type)) byConnector.set(c.type, { name: c.name, tools: [] });
+  const lines: string[] = [
+    `## Named in your query but NOT connected for this user (${byConnector.size})`,
+  ];
+  for (const [type, slot] of byConnector) {
+    lines.push(`  ${slot.name} [${type}]${slot.tools.length ? "" : " — connector (its tools appear once someone connects it)"}`);
+    lines.push(...slot.tools.slice(0, 8).map((m) => renderDeploymentLine(m).replace(/^  /, "    ")));
+  }
+  lines.push(
+    `These are not in this run and cannot be loaded until the user connects them. ${connectAdvice([...byConnector.keys()], suggestConnectorsAvailable)}`,
+  );
+  return lines.join("\n");
+}
+
+const NAMED_LOOKUP_TIMEOUT_MS = 4000;
+
+/**
+ * Deployment-wide search, grouped by what the user can reach right now:
+ * connected (usable with the user's current connections) vs. available but not
+ * connected (the user must connect the integration first). "Connected" is about
+ * the user's credentials, not this agent's grant — whether it is loadable in
+ * THIS run is tagged per tool.
+ */
+function renderDeploymentSearch(
+  result: DeploymentSearchResult,
+  ctx: {
+    runServerTypes: ReadonlySet<string>;
+    /** Every tool name registered in this run (active or catalogued). */
+    runToolNames: ReadonlySet<string>;
+    openPalette: boolean;
+    suggestConnectorsAvailable: boolean;
+  },
+): string {
+  const { matches, connectors } = result;
+  if (matches.length === 0 && connectors.length === 0) {
     return "No tools in this deployment match that. Try fewer constraints, or describe the task differently.";
   }
-  const lines = matches.map((m) => {
-    const required = m.params.filter((p) => p.required).map((p) => p.name);
-    const params = required.length ? ` — needs ${required.join(", ")}` : "";
-    const granted = typeof m.grantedToAgents === "number" ? `, granted to ${m.grantedToAgents} agent(s)` : "";
-    return `  - ${m.name} [${m.integration}, ${m.risk}${granted}]${params}\n      ${m.description.replace(/\s+/g, " ").slice(0, 200)}`;
+  const unknown = matches.filter((m) => m.connection === undefined);
+  const connected = matches.filter((m) => m.connection === "connected" || m.connection === "builtin");
+  const notConnected = matches.filter((m) => m.connection === "not_connected");
+  const connectorsConnected = connectors.filter((c) => c.connection === "connected");
+  const connectorsNotConnected = connectors.filter((c) => c.connection === "not_connected");
+
+  const total = matches.length + connectors.length;
+  const out: string[] = [`Deployment catalog — ${total} match${total === 1 ? "" : "es"}.`];
+
+  if (unknown.length > 0) {
+    // Older claw-auth: no connection data, so no grouping.
+    out.push("", ...unknown.map((m) => renderDeploymentLine(m)));
+  }
+
+  if (connected.length > 0 || connectorsConnected.length > 0) {
+    // An MCP tool is here when its server resolved this run; a built-in one
+    // when its slug (= its runtime name) is registered.
+    const inRun = (m: DeploymentToolMatch): boolean =>
+      m.connection === "builtin"
+        ? ctx.runToolNames.has(m.slug)
+        : m.connection === "connected" && !!m.connector && ctx.runServerTypes.has(m.connector.type);
+    out.push("", `## Connected — the user's connections reach these (${connected.length + connectorsConnected.length})`);
+    out.push(...connected.map((m) => renderDeploymentLine(m, inRun(m) ? " (in this run)" : m.connection === "builtin" ? " (built-in)" : "")));
+    out.push(...connectorsConnected.map((c) => `  - ${c.name} [${c.type}] — connector, tools not indexed yet\n      ${c.description.replace(/\s+/g, " ").slice(0, 200)}`));
+    out.push(
+      ctx.openPalette
+        ? "Tagged \"(in this run)\" are already here: call them, or find them with search-tools scope=\"agent\" and load them. Others: try load-tools with the exact name; one that comes back \"unknown\" is not loadable in this run."
+        : "Tagged \"(in this run)\" are already here: call them, or find them with search-tools scope=\"agent\" and load them. Untagged ones are reachable with the user's connections but not loaded in this run — delegate to an agent that has them, or ask an admin to grant them.",
+    );
+  }
+
+  if (notConnected.length > 0 || connectorsNotConnected.length > 0) {
+    const byConnector = new Map<string, { name: string; tools: DeploymentToolMatch[] }>();
+    for (const m of notConnected) {
+      const type = m.connector?.type ?? m.integration;
+      const slot = byConnector.get(type) ?? { name: m.connector?.name ?? type, tools: [] };
+      slot.tools.push(m);
+      byConnector.set(type, slot);
+    }
+    out.push("", `## Available but NOT connected — the user must connect the integration first (${notConnected.length + connectorsNotConnected.length})`);
+    for (const [type, slot] of byConnector) {
+      out.push(`  ${slot.name} [${type}]`);
+      out.push(...slot.tools.map((m) => renderDeploymentLine(m).replace(/^  /, "    ")));
+    }
+    out.push(...connectorsNotConnected.map((c) => `  ${c.name} [${c.type}] — connector (its tools appear once someone connects it)\n      ${c.description.replace(/\s+/g, " ").slice(0, 200)}`));
+    const types = [...new Set([...byConnector.keys(), ...connectorsNotConnected.map((c) => c.type)])];
+    out.push(`None of these can be called until the user connects the integration. ${connectAdvice(types, ctx.suggestConnectorsAvailable)}`);
+  }
+  return out.join("\n");
+}
+
+/** Configured-but-unresolved servers, as one section the model can act on.
+ *  Shared by search-tools answers and the run-context primer (routes/run.ts). */
+export function renderUnresolvedConfigured(list: UnresolvedConfiguredServer[], suggestConnectorsAvailable: boolean): string {
+  if (list.length === 0) return "";
+  const lines = list.map((u) => {
+    const tools = u.tools.length
+      ? `: ${u.tools.join(", ")}${u.moreTools ? ` (+${u.moreTools} more)` : ""}`
+      : u.wholeServer ? " (whole server)" : "";
+    const why = u.reason === "not_connected" ? "not connected for this user" : "has credentials but failed to load this run";
+    return `  - ${u.serverType} (${u.serverName}) — ${why}${tools}`;
   });
-  return [`Deployment catalog — ${matches.length} match${matches.length === 1 ? "" : "es"}.`, ...lines, "", note].join("\n");
+  const notConnected = list.filter((u) => u.reason === "not_connected").map((u) => u.serverType);
+  return [
+    `## Selected in this agent's config but NOT in this run (${list.length})`,
+    ...lines,
+    "Their tools are not in your tool list and cannot be loaded.",
+    ...(notConnected.length ? [connectAdvice(notConnected, suggestConnectorsAvailable)] : []),
+  ].join("\n");
 }
 
 /** One MCP server this run is connected to, as search-tools reports it. */
@@ -525,6 +823,13 @@ export function buildFastModeMetaTools(options: {
   openPalette?: boolean;
   /** Connected MCP servers, for `scope:"mcp"`. Empty when none are wired. */
   mcpServers?: McpServerSummary[];
+  /** Servers the agent's selection grants that did not resolve this run. */
+  unresolvedConfigured?: UnresolvedConfiguredServer[];
+  /** Whether suggest-connectors is registered, so answers only point at it when it exists. */
+  suggestConnectorsAvailable?: boolean;
+  /** Every tool name registered in this run, for tagging deployment matches. */
+  runToolNames?: string[];
+  activeTools?: ToolCatalogEntry[];
 }): ToolDefinition[] {
   const catalog = [...options.catalog].sort((a, b) => a.name.localeCompare(b.name));
   const emptyCatalogMessage = [
@@ -537,6 +842,16 @@ export function buildFastModeMetaTools(options: {
 
   const catalogNames = [...new Set(catalog.map((entry) => entry.catalog))].sort();
   const mcpServers = options.mcpServers ?? [];
+  const unresolvedConfigured = options.unresolvedConfigured ?? [];
+  const suggestConnectorsAvailable = options.suggestConnectorsAvailable === true;
+  const unresolvedSection = renderUnresolvedConfigured(unresolvedConfigured, suggestConnectorsAvailable);
+  const unresolvedFor = (serverType: string): UnresolvedConfiguredServer | undefined =>
+    unresolvedConfigured.find((u) => u.serverType === serverType);
+  const unresolvedAnswer = (serverType: string): string | undefined => {
+    const u = unresolvedFor(serverType);
+    if (!u) return undefined;
+    return renderUnresolvedConfigured([u], suggestConnectorsAvailable);
+  };
   // Every server the run is connected to, plus any the catalog names on its own,
   // so the enum still guides the model when `mcpServers` was not supplied.
   const mcpServerTypes = [
@@ -564,11 +879,13 @@ export function buildFastModeMetaTools(options: {
       description:
         "Find a tool. Covers two different questions, and `scope` picks which one.\n" +
         `scope="agent" (the default) looks at the tools THIS run can use. Everything it returns is loadable right now — pass the exact names to load-tools and they are callable on your next turn. Catalogs: ${catalogNames.join(", ") || "(none)"}.\n` +
-        'scope="claw" looks at every tool the deployment has, including ones this agent was never given. Use it to find out what exists at all — planning work, configuring another agent, or checking whether a capability is even available here. Results are not necessarily loadable; the answer says which.\n' +
+        'scope="claw" looks at every tool the deployment has, including ones this agent was never given and integrations the user has not connected. Use it to find out what exists at all — planning work, configuring another agent, or checking whether a capability is even available here. Results are grouped into connected (the user\'s connections reach them; tagged when already in this run) and available-but-not-connected (the user must connect the integration first — offer that connection rather than working around it).\n' +
         'scope="mcp" answers "which MCP servers am I connected to". On its own it lists them with their tool counts; add `mcp` to list one server\'s tools. Use it when the ask names a system ("anything from Heisenberg?") rather than a task.\n' +
         "Omit `query` to browse the whole scope. Pass `query` to narrow it, and describe what you are trying to DO rather than guessing a tool name — \"post a message to a channel\", \"fill in a pdf form\". Agent scope matches on words, so keywords work; claw scope is a semantic search, so a full phrase works better than a single noun.\n" +
         "`catalog` narrows the agent scope to one catalog; `integration` narrows the claw scope to one product (google, sandbox, github). `maxRisk` is a ceiling, not an exact match: \"read\" excludes everything that writes, \"write\" still excludes destructive. Use it when you only need to look something up.\n" +
-        "Call it before guessing a tool name. A wrong name costs a failed call; a search costs one cheap round trip.",
+        (options.activeTools
+          ? "Only for tools you do not already have: if a tool already in your tool list fits, call it directly — no search or load needed. When you do search, matching tools that are already active are listed first."
+          : "Call it before guessing a tool name. A wrong name costs a failed call; a search costs one cheap round trip."),
       parameters: Type.Unsafe({
         type: "object",
         additionalProperties: false,
@@ -621,8 +938,11 @@ export function buildFastModeMetaTools(options: {
             const known = mcpServers.find((server) => server.serverType === mcp);
             const entries = entriesForMcp(mcp);
             if (!known && entries.length === 0) {
+              const configured = unresolvedAnswer(mcp);
+              if (configured) return text(configured);
               return text(
-                `No MCP server "${mcp}" in this run. Connected: ${mcpServerTypes.join(", ") || "(none)"}.`,
+                `No MCP server "${mcp}" in this run. Connected: ${mcpServerTypes.join(", ") || "(none)"}. ` +
+                'search-tools scope="claw" shows whether the deployment has it and whether the user has connected it.',
               );
             }
             if (entries.length === 0) {
@@ -641,7 +961,7 @@ export function buildFastModeMetaTools(options: {
             );
           }
           if (mcpServers.length === 0) {
-            return text("No MCP servers are connected in this run.");
+            return text(["No MCP servers are connected in this run.", unresolvedSection].filter(Boolean).join("\n\n"));
           }
           const lines = mcpServers.map((server) => {
             const loadable = entriesForMcp(server.serverType).length;
@@ -650,7 +970,8 @@ export function buildFastModeMetaTools(options: {
           });
           return text(
             `${mcpServers.length} connected MCP server(s):\n${lines.join("\n")}\n\n` +
-            'Add `mcp` to list one server\'s tools, or call load-tools({ mcp: "<server>" }) to take them all.',
+            'Add `mcp` to list one server\'s tools, or call load-tools({ mcp: "<server>" }) to take them all.' +
+            (unresolvedSection ? `\n\n${unresolvedSection}` : ""),
           );
         }
 
@@ -661,7 +982,7 @@ export function buildFastModeMetaTools(options: {
               'Use scope="agent" to search the tools already available here.',
             );
           }
-          const matches = await options.searchDeployment({
+          const result = await options.searchDeployment({
             query,
             limit,
             ...(typeof input.integration === "string" && input.integration.trim()
@@ -669,45 +990,71 @@ export function buildFastModeMetaTools(options: {
               : {}),
             ...(maxRisk ? { maxRisk } : {}),
           }).catch((err: unknown) => (err instanceof Error ? err.message : String(err)));
-          if (typeof matches === "string") {
+          if (typeof result === "string") {
             // Surface the real error (404 vs 403 vs timeout) rather than a
             // generic "could not reach" message.
             return text(
-              `Could not reach the deployment catalog: ${matches.slice(0, 200)}. ` +
+              `Could not reach the deployment catalog: ${result.slice(0, 200)}. ` +
               'scope="agent" still works and covers everything this run can load.',
             );
           }
-          // Telling a restricted agent to load-tools one of these yields
-          // "unknown", which reads as a broken tool, not a permission
-          // boundary — hence the distinct wording below. openPalette only
-          // waives the grant requirement; it can't conjure credentials, so a
-          // tool whose integration was never connected still isn't loadable.
-          return text(renderDeployment(matches, options.openPalette
-            ? "This agent has an open palette, so try load-tools with the exact name. "
-              + 'A name that comes back "unknown" is not in this run at all — its integration has no '
-              + "credentials here, and no palette setting changes that."
-            : "These are NOT loadable in this run: this agent only loads what it was granted. "
-              + 'Re-run with scope="agent" to see what is, or ask an admin to grant one of the above.'));
+          // Grouped by what the USER can reach (connected vs. needs connecting),
+          // with per-tool "(in this run)" tags — so the agent either uses a
+          // connected tool or offers the connection, instead of guessing.
+          const rendered = renderDeploymentSearch(result, {
+            runServerTypes: new Set(mcpServerTypes),
+            runToolNames: new Set(options.runToolNames ?? []),
+            openPalette: options.openPalette === true,
+            suggestConnectorsAvailable,
+          });
+          return text(unresolvedSection ? `${rendered}\n\n${unresolvedSection}` : rendered);
         }
 
+        // Agent scope lists what this run can load. When the query names an
+        // integration the run lacks, say it exists but is not connected.
+        const namedTail = await namedNotConnectedSection(
+          query,
+          options.searchDeployment,
+          new Set(mcpServerTypes),
+          suggestConnectorsAvailable,
+        );
+        const agentText = (body: string) => text(namedTail ? `${body}\n\n${namedTail}` : body);
         const scoped = scopeTo(input.catalog);
-        if ("error" in scoped) return text(scoped.error);
+        if ("error" in scoped) return agentText(scoped.error);
+        const activeAllowed = maxRisk ? new Set(riskAtOrBelow(maxRisk as "read" | "write" | "destructive")) : null;
+        const activeHits =
+          query && options.activeTools && !input.catalog && !mcp
+            ? matchScoped(options.activeTools, query).filter((e) => !activeAllowed || activeAllowed.has(entryRisk(e)))
+            : [];
+        const activeSection = activeHits.length
+          ? [
+              `## already active — call directly, no search or load needed (${activeHits.length})`,
+              ...activeHits.slice(0, limit).map((e) => `  - ${e.name}: ${e.oneLineDescription}`),
+            ].join("\n")
+          : "";
         if (scoped.entries.length === 0) {
-          return text(`The tool catalog is empty. ${emptyCatalogMessage}`);
+          if (activeSection) return agentText(`${activeHits.length} tool(s) you already have match ${JSON.stringify(query)} — call them directly.\n\n${activeSection}`);
+          return agentText([`The tool catalog is empty. ${emptyCatalogMessage}`, unresolvedSection].filter(Boolean).join("\n\n"));
         }
         if (mcp && !mcpServerTypes.includes(mcp)) {
-          return text(`No MCP server "${mcp}" in this run. Connected: ${mcpServerTypes.join(", ") || "(none)"}.`);
+          const configured = unresolvedAnswer(mcp);
+          if (configured) return agentText(configured);
+          return agentText(`No MCP server "${mcp}" in this run. Connected: ${mcpServerTypes.join(", ") || "(none)"}.`);
         }
         const byServer = mcp ? scoped.entries.filter((e) => e.mcpServer === mcp) : scoped.entries;
 
         const allowed = maxRisk ? new Set(riskAtOrBelow(maxRisk as "read" | "write" | "destructive")) : null;
         const risked = allowed ? byServer.filter((e) => allowed.has(entryRisk(e))) : byServer;
-        const matched = query ? matchScoped(risked, query) : risked;
+        const matched = query ? await matchScopedSifted(risked, query) : risked;
+        if (matched.length === 0 && activeSection) {
+          return agentText(`Nothing to load matches ${JSON.stringify(query)}, but ${activeHits.length} tool(s) you already have do — call them directly.\n\n${activeSection}`);
+        }
         if (matched.length === 0) {
-          return text(
+          return agentText(
             `No tool in this agent's catalog matches ${JSON.stringify(query)}. ` +
             `${risked.length} tool(s) are available here — call search-tools with no query to browse them, ` +
-            'or scope="claw" to check whether the deployment has one this agent was not given.',
+            'or scope="claw" to check whether the deployment has one this agent was not given.' +
+            (unresolvedSection ? `\n\n${unresolvedSection}` : ""),
           );
         }
 
@@ -715,7 +1062,8 @@ export function buildFastModeMetaTools(options: {
         const header =
           `${shown.length} of ${matched.length} matching tool(s)${query ? ` for ${JSON.stringify(query)}` : ""}. ` +
           'Pick the names you need and call load-tools({ names: [...] }), or load-tools({ catalog: "<name>" }) for a whole catalog.';
-        return text(renderGrouped(shown, header));
+        const grouped = renderGrouped(shown, header);
+        return agentText(activeSection ? `${activeSection}\n\n${grouped}` : grouped);
       },
     },
     {
@@ -797,9 +1145,21 @@ export function buildFastModeMetaTools(options: {
         const resolved: string[] = [];
         const unknown: string[] = [];
         const ambiguous: string[] = [];
+        const alreadyActive: string[] = [];
+        const activeByName = new Map((options.activeTools ?? []).map((e) => [e.name, e]));
+        const activeMatch = (requested: string): string | null => {
+          if (activeByName.has(requested)) return requested;
+          const wanted = normalizeToolName(requested.split("__").pop() ?? requested);
+          const hits = [...activeByName.keys()].filter(
+            (n) => normalizeToolName(n) === normalizeToolName(requested) || normalizeToolName(n.split("__").pop() ?? n) === wanted,
+          );
+          return hits.length === 1 ? hits[0]! : null;
+        };
         for (const requested of names) {
           const hit = resolveCatalogName(requested, byName, catalog);
-          if (hit === null) unknown.push(requested);
+          const active = hit === null ? activeMatch(requested) : null;
+          if (active) alreadyActive.push(active);
+          else if (hit === null) unknown.push(requested);
           else if ("ambiguous" in hit) ambiguous.push(`${requested} (could be ${hit.ambiguous.join(" or ")})`);
           else resolved.push(hit.name);
         }
@@ -812,9 +1172,12 @@ export function buildFastModeMetaTools(options: {
         const parts = [
           result.loaded.length > 0 ? `Loaded: ${result.loaded.join(", ")}` : "",
           result.alreadyLoaded.length > 0 ? `Already loaded: ${result.alreadyLoaded.join(", ")}` : "",
+          alreadyActive.length > 0 ? `Already active — nothing to load, call directly: ${alreadyActive.join(", ")}` : "",
           ambiguous.length > 0 ? `Ambiguous, name the server too: ${ambiguous.join("; ")}` : "",
           allUnknown.length > 0 ? unknownExplanation(allUnknown, catalog) : "",
-          `Active tools: ${result.activeToolSet.length}/${result.maxActiveTools}`,
+          options.activeTools
+            ? `Loaded on demand: ${result.activeToolSet.length}/${result.maxActiveTools} (the ${options.activeTools.length} tools you started with are separate and always callable)`
+            : `Active tools: ${result.activeToolSet.length}/${result.maxActiveTools}`,
           "Loaded tools are available starting with the next assistant turn.",
         ].filter(Boolean);
         return { content: [{ type: "text" as const, text: parts.join("\n") }], details: {} };
@@ -844,9 +1207,61 @@ const INLINE_LISTING_MAX = 15;
  * replaces delegation and the model must call these tools itself, whereas with
  * delegation on the catalog is purely additive and the claim would be false.
  */
+const INDEX_CHAR_BUDGET_DEFAULT = 24_000;
+const INDEX_ONE_LINER_FULL = 300;
+const INDEX_ONE_LINER_SHORT = 110;
+
+type IndexTier = "full" | "short" | "names" | "header";
+
+function indexCharBudget(): number {
+  const raw = Number(process.env["XYNE_CATALOG_INDEX_BUDGET"]);
+  return Number.isFinite(raw) && raw >= 2_000 ? raw : INDEX_CHAR_BUDGET_DEFAULT;
+}
+
+function clip(text: string, max: number): string {
+  const flat = text.replace(/\s+/g, " ").trim();
+  return flat.length <= max ? flat : `${flat.slice(0, max - 1).trimEnd()}…`;
+}
+
+function renderCatalogSection(name: string, entries: ToolCatalogEntry[], tier: IndexTier): string[] {
+  const header = `- **${name}** (${entries.length} tool${entries.length === 1 ? "" : "s"})`;
+  if (tier === "header") return [`${header} — call search-tools with this catalog to see its tools.`];
+  if (tier === "names") return [`${header}: ${entries.map((e) => e.name).join(", ")}`];
+  const max = tier === "full" ? INDEX_ONE_LINER_FULL : INDEX_ONE_LINER_SHORT;
+  return [header, ...entries.map((e) => `    - ${e.name}: ${clip(e.oneLineDescription, max)}`)];
+}
+
+const TIER_ORDER: IndexTier[] = ["full", "short", "names", "header"];
+
+function fitIndexTiers(byCatalog: Array<[string, ToolCatalogEntry[]]>, budget: number): Map<string, IndexTier> {
+  const tiers = new Map<string, IndexTier>(byCatalog.map(([name]) => [name, "full"]));
+  const sizeAt = (name: string, entries: ToolCatalogEntry[], tier: IndexTier): number =>
+    renderCatalogSection(name, entries, tier).join("\n").length + 1;
+  const sizes = new Map<string, number>(byCatalog.map(([name, entries]) => [name, sizeAt(name, entries, "full")]));
+  let total = [...sizes.values()].reduce((sum, n) => sum + n, 0);
+  const entriesOf = new Map(byCatalog);
+  while (total > budget) {
+    let target: string | undefined;
+    let largest = -1;
+    for (const [name, size] of sizes) {
+      if (tiers.get(name) !== "header" && size > largest) {
+        largest = size;
+        target = name;
+      }
+    }
+    if (!target) break;
+    const next = TIER_ORDER[TIER_ORDER.indexOf(tiers.get(target)!) + 1]!;
+    tiers.set(target, next);
+    const resized = sizeAt(target, entriesOf.get(target)!, next);
+    total += resized - sizes.get(target)!;
+    sizes.set(target, resized);
+  }
+  return tiers;
+}
+
 export function renderToolCatalogForPrompt(
   catalog: ToolCatalogEntry[],
-  opts?: { subagentDelegationDisabled?: boolean },
+  opts?: { subagentDelegationDisabled?: boolean; fullIndex?: boolean; preferDirect?: boolean },
 ): string {
   if (catalog.length === 0) return "";
 
@@ -856,23 +1271,43 @@ export function renderToolCatalogForPrompt(
     list.push(entry);
     byCatalog.set(entry.catalog, list);
   }
-
-  const sections = [...byCatalog.entries()]
+  const ordered = [...byCatalog.entries()]
     .sort(([a], [b]) => a.localeCompare(b))
-    .flatMap(([name, entries]) => {
-      const sorted = entries.slice().sort((a, b) => a.name.localeCompare(b.name));
-      const header = `- **${name}** (${sorted.length} tool${sorted.length === 1 ? "" : "s"})`;
-      if (sorted.length > INLINE_LISTING_MAX) {
-        return [`${header} — call search-tools with this catalog to see its tools.`];
-      }
-      return [header, ...sorted.map((entry) => `    - ${entry.name}: ${entry.oneLineDescription}`)];
-    });
+    .map(([name, entries]): [string, ToolCatalogEntry[]] => [name, entries.slice().sort((a, b) => a.name.localeCompare(b.name))]);
+
+  const subagentCatalogs = [...new Set(catalog.filter((e) => e.source.startsWith("subagent:") || e.source.startsWith("custom-subagent:")).map((e) => e.catalog))].sort();
+  const directFirst =
+    opts?.preferDirect && !opts.subagentDelegationDisabled && subagentCatalogs.length
+      ? [`The ${subagentCatalogs.join(", ")} catalog${subagentCatalogs.length === 1 ? " holds" : "s hold"} the same tools your subagent${subagentCatalogs.length === 1 ? "" : "s"} of that name use${subagentCatalogs.length === 1 ? "s" : ""}, writes included. Call them yourself first: a subagent is a slow nested model run, so delegate only for open-ended research that needs many queries.`]
+      : [];
+  const intro = opts?.subagentDelegationDisabled
+    ? "Subagent delegation is disabled. The tools below are NOT loaded yet — use `load-tools` to pull in the ones you need, then call them yourself."
+    : "The tools below are NOT loaded yet — their full schemas arrive only when you ask for them.";
+
+  if (opts?.fullIndex) {
+    const tiers = fitIndexTiers(ordered, indexCharBudget());
+    return [
+      "## Tool Catalogs",
+      intro,
+      "Tools already in your tool list are ready to call — they are not listed here and never need searching or loading.",
+      ...directFirst,
+      "Every tool you can load is named below. Pick only the specific tools this task will call and pass their exact names to `load-tools` — no search needed. Do not load a whole catalog: each loaded tool adds its full schema to your context. Use `search-tools` only when nothing listed fits, or with `scope=\"claw\"` to look beyond this agent. Loaded tools are callable from your next turn, so request them in one call.",
+      ...ordered.flatMap(([name, entries]) => renderCatalogSection(name, entries, tiers.get(name)!)),
+    ].join("\n");
+  }
+
+  const sections = ordered.flatMap(([name, sorted]) => {
+    const header = `- **${name}** (${sorted.length} tool${sorted.length === 1 ? "" : "s"})`;
+    if (sorted.length > INLINE_LISTING_MAX) {
+      return [`${header} — call search-tools with this catalog to see its tools.`];
+    }
+    return [header, ...sorted.map((entry) => `    - ${entry.name}: ${entry.oneLineDescription}`)];
+  });
 
   return [
     "## Tool Catalogs",
-    opts?.subagentDelegationDisabled
-      ? "Subagent delegation is disabled. The tools below are NOT loaded yet — use `load-tools` to pull in the ones you need, then call them yourself."
-      : "The tools below are NOT loaded yet — their full schemas arrive only when you ask for them.",
+    intro,
+    ...directFirst,
     "Call `search-tools` to find one — no arguments lists everything here, a `query` narrows it, and `scope=\"claw\"` looks beyond this agent at every tool the deployment has. Then `load-tools` activates the ones you need. Loaded tools are callable from your next turn, so batch everything into one call.",
     ...sections,
   ].join("\n");

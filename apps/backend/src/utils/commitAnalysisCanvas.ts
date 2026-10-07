@@ -85,7 +85,11 @@ export interface CommitAnalysisRepoSlice {
   deployedCommitId: string;
   newCommitId: string;
   results: CommitAnalysisResult[];
+  affectedApplications?: AffectedApplicationInfo[];
 }
+
+type CanvasEnvChange = { filePath: string; fileName: string; newValue: string; commitId?: string; applicationId?: string };
+type CanvasMigrationLink = { filePath: string; diffUrl: string; applicationId?: string };
 
 // A "result" shape narrowed to what the PR/env/migration renderers read. Both
 // the main analysis and the hotfix delta feed the same renderers.
@@ -134,7 +138,7 @@ function makeUserLookup(): UserLookup {
 // .env.prod) don't collapse to one entry. A path-only key is also stored as a
 // fallback for changes that lack a commitId (the run-accumulated summary).
 function indexEnvChangesByPath(
-  envChanges: Array<{ filePath: string; fileName: string; newValue: string; commitId?: string }> | undefined
+  envChanges: CanvasEnvChange[] | undefined
 ): Map<string, { fileName: string; newValue: string }> {
   const map = new Map<string, { fileName: string; newValue: string }>();
   if (envChanges) {
@@ -153,7 +157,7 @@ function indexEnvChangesByPath(
 // Group migration links by commit so a file like schema.prisma touched by
 // multiple PRs resolves to the right per-commit diff.
 function indexMigrationLinksByCommit(
-  migrationLinks: Array<{ filePath: string; diffUrl: string }> | undefined
+  migrationLinks: CanvasMigrationLink[] | undefined
 ): Map<string, Map<string, string>> {
   const map = new Map<string, Map<string, string>>();
   if (migrationLinks) {
@@ -168,6 +172,48 @@ function indexMigrationLinksByCommit(
   }
   return map;
 }
+
+function resultsForApplication(results: PrResult[], matchedFiles: string[]): PrResult[] {
+  if (matchedFiles.length === 0) return [];
+  const matched = new Set(matchedFiles);
+  return results
+    .map(result => ({ ...result, filePaths: result.filePaths.filter(fp => matched.has(fp)) }))
+    .filter(result => result.filePaths.length > 0);
+}
+
+function uniqueMigrationsByPath(links: CanvasMigrationLink[]): CanvasMigrationLink[] {
+  const seen = new Map<string, CanvasMigrationLink>();
+  for (const link of links) {
+    if (!seen.has(link.filePath)) seen.set(link.filePath, link);
+  }
+  return [...seen.values()];
+}
+
+type AppScope = { results: PrResult[]; label?: string };
+function appScopes(
+  affectedApplications: AffectedApplicationInfo[],
+  repoSlices: CommitAnalysisRepoSlice[] | undefined,
+  allResults: PrResult[],
+): Map<string, AppScope> {
+  const scopes = new Map<string, AppScope>();
+  const multiRepo = (repoSlices?.length ?? 0) > 1;
+  for (const slice of repoSlices ?? []) {
+    const scope: AppScope = {
+      results: slice.results,
+      ...(multiRepo ? { label: `${slice.workspace}/${slice.repoSlug}` } : {}),
+    };
+    for (const app of slice.affectedApplications ?? []) scopes.set(app.id, scope);
+  }
+  for (const app of affectedApplications) {
+    if (!scopes.has(app.id)) scopes.set(app.id, { results: allResults });
+  }
+  return scopes;
+}
+
+const countLabel = (n: number, word: string): string => `${n} ${word}${n === 1 ? '' : 's'}`;
+
+// PR-less commits are keyed by commit so they can't poison the claimed set.
+const resultKey = (result: PrResult): number | string => result.pullRequest?.id ?? result.commitId;
 
 function uniquePrResults(results: PrResult[]): PrResult[] {
   const seen = new Map<number, PrResult>();
@@ -307,8 +353,8 @@ async function appendPullRequestBlocks(
 async function buildMainAnalysisBlocks(
   results: PrResult[],
   affectedApplications: AffectedApplicationInfo[],
-  envChanges: Array<{ filePath: string; fileName: string; newValue: string; commitId?: string }> | undefined,
-  migrationLinks: Array<{ filePath: string; diffUrl: string }> | undefined,
+  envChanges: CanvasEnvChange[] | undefined,
+  migrationLinks: CanvasMigrationLink[] | undefined,
   metadata: CommitAnalysisCanvasMetadata,
   title: string,
   repoSlices?: CommitAnalysisRepoSlice[],
@@ -387,27 +433,6 @@ async function buildMainAnalysisBlocks(
     content: [{ type: 'text', text: `${totalCommits} commits analyzed • ${commitsWithPR} with PRs • ${commitsWithTicket} with tickets`, styles: {} }],
   });
 
-  if (affectedApplications.length > 0) {
-    blocks.push({
-      id: uuidv4(),
-      type: 'heading',
-      props: { level: 2 },
-      content: [{ type: 'text', text: '🚀 Services to be Deployed', styles: {} }],
-    });
-
-    for (const app of affectedApplications) {
-      const content: BlockNoteInlineContent[] = [
-        { type: 'text', text: app.name, styles: { bold: true } },
-      ];
-      if (app.mappedTicketId && metadata.channelId) {
-        const ticketUrl = `${config.slackFrontendUrl}/chat/${metadata.channelId}?tab=tickets&ticketId=${app.mappedTicketId}&conversationId=${metadata.conversationId || ''}`;
-        content.push({ type: 'text', text: ' - ', styles: {} });
-        content.push({ type: 'link', href: ticketUrl, content: [{ type: 'text', text: 'Ticket', styles: {} }] });
-      }
-      blocks.push({ id: uuidv4(), type: 'bulletListItem', content });
-    }
-  }
-
   blocks.push({
     id: uuidv4(),
     type: 'heading',
@@ -433,56 +458,159 @@ async function buildMainAnalysisBlocks(
     ],
   });
 
-  if (envVarList.length > 0) {
-    blocks.push({
-      id: uuidv4(),
-      type: 'heading',
-      props: { level: 3 },
-      content: [{ type: 'text', text: '🔧 Environment Variables', styles: {} }],
-    });
-    for (const item of envVarList) {
-      blocks.push({
-        id: uuidv4(),
-        type: 'bulletListItem',
-        content: [
-          { type: 'text', text: item.name, styles: { code: true } },
-          { type: 'text', text: ` [${item.status}]`, styles: { bold: true } },
-        ],
-      });
-    }
-  }
-
-  blocks.push({
-    id: uuidv4(),
-    type: 'heading',
-    props: { level: 2 },
-    content: [{ type: 'text', text: '🔀 Pull Requests & Tickets', styles: {} }],
-  });
-
   const envChangesByPath = indexEnvChangesByPath(envChanges);
   const migrationLinksByCommit = indexMigrationLinksByCommit(migrationLinks);
 
-  if (multiRepo && repoSlices) {
-    for (const slice of repoSlices) {
-      const prResults = uniquePrResults(slice.results);
-      if (prResults.length === 0) continue;
+  if (affectedApplications.length > 0) {
+    type ServiceSection = {
+      heading: string;
+      mappedTicketId?: string;
+      envVars: ReturnType<typeof parseEnvChanges>;
+      migrations: CanvasMigrationLink[];
+      prResults: PrResult[];
+    };
+
+    const scopes = appScopes(affectedApplications, repoSlices, results);
+    const allEnvChanges = envChanges ?? [];
+    const allMigrationLinks = migrationLinks ?? [];
+
+    const sections: ServiceSection[] = affectedApplications.map(app => {
+      const scope = scopes.get(app.id)!;
+      return {
+        heading: scope.label ? `🚀 ${app.name} — ${scope.label}` : `🚀 ${app.name}`,
+        mappedTicketId: app.mappedTicketId,
+        envVars: parseEnvChanges(allEnvChanges.filter(change => change.applicationId === app.id)),
+        migrations: uniqueMigrationsByPath(
+          allMigrationLinks.filter(link => link.applicationId === app.id),
+        ),
+        prResults: uniquePrResults(resultsForApplication(scope.results, app.matchedFiles)),
+      };
+    });
+
+    // PR ids are repo-local, so "unclaimed" is resolved per repo.
+    const unclaimedResults = (repoSlices?.length ? repoSlices : [{ results, affectedApplications }]).flatMap(slice => {
+      const apps = slice.affectedApplications ?? affectedApplications;
+      const claimed = new Set(
+        apps.flatMap(app => resultsForApplication(slice.results, app.matchedFiles).map(resultKey)),
+      );
+      return uniquePrResults(slice.results.filter(result => !claimed.has(resultKey(result))));
+    });
+    const unclaimed: ServiceSection = {
+      heading: '📦 Other changes',
+      envVars: parseEnvChanges(allEnvChanges.filter(change => !change.applicationId)),
+      migrations: uniqueMigrationsByPath(allMigrationLinks.filter(link => !link.applicationId)),
+      prResults: unclaimedResults,
+    };
+    if (
+      unclaimed.envVars.length > 0 ||
+      unclaimed.migrations.length > 0 ||
+      unclaimed.prResults.length > 0
+    ) {
+      sections.push(unclaimed);
+    }
+
+    for (const section of sections) {
       blocks.push({
         id: uuidv4(),
         type: 'heading',
-        props: { level: 3 },
-        content: [{ type: 'text', text: `📦 ${slice.workspace}/${slice.repoSlug}`, styles: {} }],
+        props: { level: 2 },
+        content: [{ type: 'text', text: section.heading, styles: {} }],
       });
-      for (const result of prResults) {
+
+      const summary: BlockNoteInlineContent[] = [
+        {
+          type: 'text',
+          text: `${countLabel(section.prResults.length, 'PR')} • ${countLabel(section.migrations.length, 'migration')} • ${countLabel(section.envVars.length, 'env var')}`,
+          styles: {},
+        },
+      ];
+      if (section.mappedTicketId && metadata.channelId) {
+        const ticketUrl = `${config.slackFrontendUrl}/chat/${metadata.channelId}?tab=tickets&ticketId=${section.mappedTicketId}&conversationId=${metadata.conversationId || ''}`;
+        summary.push({ type: 'text', text: ' • ', styles: {} });
+        summary.push({ type: 'link', href: ticketUrl, content: [{ type: 'text', text: 'Ticket', styles: {} }] });
+      }
+      blocks.push({ id: uuidv4(), type: 'paragraph', content: summary });
+
+      for (const item of section.envVars) {
+        blocks.push({
+          id: uuidv4(),
+          type: 'bulletListItem',
+          content: [
+            { type: 'text', text: '🔧 ', styles: {} },
+            { type: 'text', text: item.name, styles: { code: true } },
+            { type: 'text', text: ` [${item.status}]`, styles: { bold: true } },
+          ],
+        });
+      }
+
+      for (const link of section.migrations) {
+        blocks.push({
+          id: uuidv4(),
+          type: 'bulletListItem',
+          // BlockNote rejects code+link on one text node; keep the path outside the link.
+          content: [
+            { type: 'text', text: '🗃️ ', styles: {} },
+            { type: 'link', href: link.diffUrl, content: [{ type: 'text', text: 'View Diff → ', styles: {} }] },
+            { type: 'text', text: link.filePath, styles: { code: true } },
+          ],
+        });
+      }
+
+      for (const result of section.prResults) {
         await appendPullRequestBlocks(
           blocks, result, metadata, mentionedUserIds, lookupUserByEmail, envChangesByPath, migrationLinksByCommit,
         );
       }
     }
   } else {
-    for (const result of uniquePrResults(results)) {
-      await appendPullRequestBlocks(
-        blocks, result, metadata, mentionedUserIds, lookupUserByEmail, envChangesByPath, migrationLinksByCommit,
-      );
+    if (envVarList.length > 0) {
+      blocks.push({
+        id: uuidv4(),
+        type: 'heading',
+        props: { level: 3 },
+        content: [{ type: 'text', text: '🔧 Environment Variables', styles: {} }],
+      });
+      for (const item of envVarList) {
+        blocks.push({
+          id: uuidv4(),
+          type: 'bulletListItem',
+          content: [
+            { type: 'text', text: item.name, styles: { code: true } },
+            { type: 'text', text: ` [${item.status}]`, styles: { bold: true } },
+          ],
+        });
+      }
+    }
+
+    blocks.push({
+      id: uuidv4(),
+      type: 'heading',
+      props: { level: 2 },
+      content: [{ type: 'text', text: '🔀 Pull Requests & Tickets', styles: {} }],
+    });
+
+    if (multiRepo && repoSlices) {
+      for (const slice of repoSlices) {
+        const prResults = uniquePrResults(slice.results);
+        if (prResults.length === 0) continue;
+        blocks.push({
+          id: uuidv4(),
+          type: 'heading',
+          props: { level: 3 },
+          content: [{ type: 'text', text: `📦 ${slice.workspace}/${slice.repoSlug}`, styles: {} }],
+        });
+        for (const result of prResults) {
+          await appendPullRequestBlocks(
+            blocks, result, metadata, mentionedUserIds, lookupUserByEmail, envChangesByPath, migrationLinksByCommit,
+          );
+        }
+      }
+    } else {
+      for (const result of uniquePrResults(results)) {
+        await appendPullRequestBlocks(
+          blocks, result, metadata, mentionedUserIds, lookupUserByEmail, envChangesByPath, migrationLinksByCommit,
+        );
+      }
     }
   }
 
@@ -493,8 +621,8 @@ async function buildMainAnalysisBlocks(
 // no hotfix PRs so callers can drop the section entirely.
 async function buildHotfixSectionBlocks(
   results: PrResult[],
-  envChanges: Array<{ filePath: string; fileName: string; newValue: string; commitId?: string }> | undefined,
-  migrationLinks: Array<{ filePath: string; diffUrl: string }> | undefined,
+  envChanges: CanvasEnvChange[] | undefined,
+  migrationLinks: CanvasMigrationLink[] | undefined,
   metadata: CommitAnalysisCanvasMetadata,
 ): Promise<{ blocks: BlockNoteBlock[]; mentionedUserIds: string[] }> {
   const prResults = uniquePrResults(results);
@@ -644,8 +772,8 @@ export interface UpsertCommitAnalysisCanvasArgs {
   section: CanvasSection;
   results: CommitAnalysisResult[];
   affectedApplications: AffectedApplicationInfo[];
-  envChanges: Array<{ filePath: string; fileName: string; newValue: string; commitId?: string }> | undefined;
-  migrationLinks: Array<{ filePath: string; diffUrl: string }> | undefined;
+  envChanges: CanvasEnvChange[] | undefined;
+  migrationLinks: CanvasMigrationLink[] | undefined;
   createdByUserId: string;
   metadata: CommitAnalysisCanvasMetadata;
   repoSlices?: CommitAnalysisRepoSlice[];
@@ -874,8 +1002,8 @@ async function persistNewAnalysisCanvas(args: {
 export async function createCommitAnalysisCanvas(
   results: CommitAnalysisResult[],
   affectedApplications: AffectedApplicationInfo[],
-  envChanges: Array<{ filePath: string; fileName: string; newValue: string; commitId?: string }> | undefined,
-  migrationLinks: Array<{ filePath: string; diffUrl: string }> | undefined,
+  envChanges: CanvasEnvChange[] | undefined,
+  migrationLinks: CanvasMigrationLink[] | undefined,
   createdByUserId: string,
   metadata: CommitAnalysisCanvasMetadata,
   repoSlices?: CommitAnalysisRepoSlice[]

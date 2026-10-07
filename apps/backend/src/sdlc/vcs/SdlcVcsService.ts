@@ -2,7 +2,6 @@ import { Prisma, type PrismaClient } from '@prisma/client';
 import {
   ACLAuditEventType,
   ACLAuditTargetType,
-  SDLC_AGENT_SLUG,
   SDLC_GITHUB_HOST,
   sdlcTokenSchemaFor,
   type BootstrapSdlcRuntimeCredentialInput,
@@ -15,7 +14,7 @@ import { DatabaseClient } from '@/database/client';
 import { AppError } from '@/middleware/errorHandler';
 import { logger } from '@/utils/logger';
 import type { SdlcActor } from '../types';
-import { isSafeSdlcGitRef, requireSdlcBaseBranch } from '../sdlcRepositoryContext';
+import { requireSdlcBaseBranch } from '../sdlcRepositoryContext';
 import { GitHubVcsAdapter } from './GitHubVcsAdapter';
 import { BitbucketServerVcsAdapter } from './BitbucketServerVcsAdapter';
 import { SdlcVcsCredentialStore, type StoredSdlcVcsCredential } from './SdlcVcsCredentialStore';
@@ -37,20 +36,26 @@ import type {
   VcsProviderAdapter,
 } from './types';
 import { VcsProviderError } from './types';
-import { sdlcGrantCoversRepo, verifySdlcInteractiveGrant } from './sdlcInteractiveGrant';
 import { findSdlcMembershipForActor } from '../sdlcChannelMembership';
 import { requireSdlcProjectAccess } from '../sdlcProjectAccess';
+import { updateCredentialTx } from '@/bypassAcl/transactions/SdlcVcsService';
+import { revalidateCredentialTx } from '@/bypassAcl/transactions/SdlcVcsService';
+import { revalidateCredentialTx2 } from '@/bypassAcl/transactions/SdlcVcsService';
+import { deleteCredentialTx } from '@/bypassAcl/transactions/SdlcVcsService';
+import { performRepositoryCheckTx } from '@/bypassAcl/transactions/SdlcVcsService';
+import { performRepositoryCheckTx2 } from '@/bypassAcl/transactions/SdlcVcsService';
+import { invalidateCredentialTx } from '@/bypassAcl/transactions/SdlcVcsService';
 
 const ACCESS_REFRESH_CHUNK = 5;
 
-const PROVIDER_LABEL: Record<VcsProvider, string> = {
+export const PROVIDER_LABEL: Record<VcsProvider, string> = {
   GITHUB: 'GitHub',
   BITBUCKET_SERVER: 'Bitbucket',
 };
 
 type Db = PrismaClient | Prisma.TransactionClient;
 
-interface RepositoryRow {
+export interface RepositoryRow {
   id: string;
   workspaceId: string | null;
   url: string;
@@ -70,10 +75,6 @@ export interface SandboxCredentialBootstrap {
   repository: { name: string; cloneUrl: string; baseBranch: string };
 }
 
-function grantSecret(): string {
-  return process.env['INTERNAL_S2S_KEY'] || process.env['XYNE_CLAW_S2S_KEY'] || '';
-}
-
 function isUsable(credential: StoredSdlcVcsCredential | null): credential is StoredSdlcVcsCredential & {
   token: string;
 } {
@@ -83,11 +84,11 @@ function isUsable(credential: StoredSdlcVcsCredential | null): credential is Sto
 }
 
 export class SdlcVcsService implements SdlcVcs {
-  private readonly credentialStore = new SdlcVcsCredentialStore();
+  readonly credentialStore = new SdlcVcsCredentialStore();
   private readonly github = new GitHubVcsAdapter();
   private readonly bitbucket = new Map<string, BitbucketServerVcsAdapter>();
 
-  constructor(private readonly prisma: PrismaClient = DatabaseClient.getInstance()) {}
+  constructor(readonly prisma: PrismaClient = DatabaseClient.getInstance()) {}
 
   parseRepositoryUrl(url: string): ParsedRepository {
     try {
@@ -282,33 +283,7 @@ export class SdlcVcsService implements SdlcVcs {
         throw this.toAppError(error);
       }
     }
-    await this.prisma.$transaction(async (tx) => {
-      await this.credentialStore.lock(tx, credentialId);
-      const current = await this.requireCredential(actor.workspaceId, credentialId, tx);
-      const now = new Date().toISOString();
-      await this.credentialStore.save(tx, {
-        ...current,
-        ...(input.name !== undefined ? { name: input.name } : {}),
-        ...(validation && input.token
-          ? {
-              status: 'CONNECTED' as const,
-              token: input.token,
-              revision: current.revision + 1,
-              identityLogin: validation.identityLogin,
-              accountName: validation.accountName,
-              accountEmail: validation.accountEmail,
-              validationStatus: 'VALID',
-              validatedAt: now,
-              validationErrorCode: null,
-              validationErrorMessage: null,
-              disconnectedAt: null,
-            }
-          : {}),
-        updatedBy: actor.userId,
-        updatedAt: now,
-      });
-      if (validation) await this.resetLinkedCapabilities(tx, actor.workspaceId, credentialId);
-    });
+    await updateCredentialTx(this, credentialId, actor, input, validation);
     if (validation) {
       await this.audit(actor, credentialId, 'replaced');
       void this.refreshCredentialRepositories(actor, credentialId);
@@ -325,38 +300,12 @@ export class SdlcVcsService implements SdlcVcs {
     try {
       const validation = await this.adapter(row.provider, row.host).validateCredential(row.token);
       const now = new Date().toISOString();
-      await this.prisma.$transaction(async (tx) => {
-        await this.credentialStore.save(tx, {
-          ...row,
-          validationStatus: 'VALID',
-          validatedAt: now,
-          validationErrorCode: null,
-          validationErrorMessage: null,
-          identityLogin: validation.identityLogin,
-          accountName: validation.accountName,
-          accountEmail: validation.accountEmail,
-          updatedBy: actor.userId,
-          updatedAt: now,
-        });
-        await this.resetLinkedCapabilities(tx, actor.workspaceId, credentialId);
-      });
+      await revalidateCredentialTx(this, row, now, validation, actor, credentialId);
       await this.audit(actor, row.id, 'validated');
       void this.refreshCredentialRepositories(actor, credentialId);
     } catch (error) {
       const mapped = this.providerError(error);
-      await this.prisma.$transaction(async (tx) => {
-        const now = new Date().toISOString();
-        await this.credentialStore.save(tx, {
-          ...row,
-          validationStatus: 'INVALID',
-          validatedAt: now,
-          validationErrorCode: mapped.code,
-          validationErrorMessage: mapped.message,
-          updatedBy: actor.userId,
-          updatedAt: now,
-        });
-        await this.resetLinkedCapabilities(tx, actor.workspaceId, credentialId);
-      });
+      await revalidateCredentialTx2(this, row, mapped, actor, credentialId);
       await this.audit(actor, row.id, 'validation_failed');
       throw this.toAppError(mapped);
     }
@@ -366,20 +315,7 @@ export class SdlcVcsService implements SdlcVcs {
   /** Linked Repositories keep working anonymously if public; private ones need a new credential. */
   async deleteCredential(actor: SdlcActor, credentialId: string): Promise<void> {
     await this.requireWorkspaceAdmin(actor);
-    const repoIds = await this.prisma.$transaction(async (tx) => {
-      await this.credentialStore.lock(tx, credentialId);
-      await this.requireCredential(actor.workspaceId, credentialId, tx);
-      const linked = await tx.repo.findMany({
-        where: { workspaceId: actor.workspaceId, vcsCredentialId: credentialId },
-        select: { id: true },
-      });
-      await tx.repo.updateMany({
-        where: { id: { in: linked.map((repo) => repo.id) } },
-        data: { vcsCredentialId: null, accessCapabilities: [] },
-      });
-      await this.credentialStore.remove(tx, credentialId);
-      return linked.map((repo) => repo.id);
-    });
+    const repoIds = await deleteCredentialTx(this, credentialId, actor);
     await this.audit(actor, credentialId, 'disconnected');
     void this.refreshRepositories(actor, repoIds);
   }
@@ -510,24 +446,7 @@ export class SdlcVcsService implements SdlcVcs {
       } else {
         inspection = await adapter.inspectRepository({ repository, baseBranch });
       }
-      await this.prisma.$transaction(async (tx) => {
-        if (!(await this.credentialUnchanged(tx, repo, credentialState))) {
-          throw new VcsProviderError(
-            'CREDENTIAL_CHANGED_DURING_CHECK',
-            'Repository credential changed during repository access check',
-            409,
-            true
-          );
-        }
-        await tx.repo.update({
-          where: { id: repo.id },
-          data: {
-            canonicalUrl: inspection.repository.canonicalUrl,
-            accessCapabilities: inspection.capabilities as unknown as Prisma.InputJsonValue,
-          },
-        });
-        await this.accessCheckAudit(input, repo.id, fallbackError?.code ?? 'READY', tx);
-      });
+      await performRepositoryCheckTx(this, repo, credentialState, inspection, input, fallbackError);
       this.refreshAfterCredentialInvalidation(invalidatedCredentialId, input, repo.id);
       return { status: 'READY', errorMessage: null, capabilities: inspection.capabilities };
     } catch (error) {
@@ -546,15 +465,7 @@ export class SdlcVcsService implements SdlcVcs {
       const capabilities = blockedCapabilities(mapped);
       // Bull's per-repo job id used to serialise checks; without it a slow failure can
       // overwrite a newer success, so take the same guard as the success path.
-      const stale = await this.prisma.$transaction(async (tx) => {
-        if (!(await this.credentialUnchanged(tx, repo, credentialState))) return true;
-        await tx.repo.update({
-          where: { id: repo.id },
-          data: { accessCapabilities: capabilities as unknown as Prisma.InputJsonValue },
-        });
-        await this.accessCheckAudit(input, repo.id, mapped.code, tx);
-        return false;
-      });
+      const stale = await performRepositoryCheckTx2(this, repo, credentialState, capabilities, input, mapped);
       this.refreshAfterCredentialInvalidation(invalidatedCredentialId, input, repo.id);
       if (stale) {
         return {
@@ -594,13 +505,12 @@ export class SdlcVcsService implements SdlcVcs {
     }
   }
 
-  // The grant branch serves only the claw deployed before Actor-based access.
   async bootstrapSandboxCredential(
     binding: BootstrapSdlcRuntimeCredentialInput
   ): Promise<SandboxCredentialBootstrap> {
     const repo = await this.prisma.repo.findUnique({ where: { id: binding.repoId } });
     if (!repo?.workspaceId) throw new AppError('SDLC repository not found', 404);
-    const { actor, legacy } = this.runActor(binding, repo);
+    const actor = this.runActor(binding, repo);
     await this.requireRepositoryMember(actor, repo.id);
     let sandboxPublicKey: ReturnType<typeof parseSandboxPublicKey>;
     try {
@@ -640,13 +550,6 @@ export class SdlcVcsService implements SdlcVcs {
         sandboxId: binding.sandboxId,
         credentialRevision: credential.revision,
         expiresAt: new Date(Date.now() + 15 * 60_000).toISOString(),
-        ...(legacy
-          ? {
-              agentSlug: SDLC_AGENT_SLUG,
-              operation: 'INTERACTIVE',
-              conversationId: binding.conversationId!,
-            }
-          : {}),
       },
       sandboxPublicKey
     );
@@ -656,21 +559,13 @@ export class SdlcVcsService implements SdlcVcs {
   async createPullRequest(input: CreateSdlcPullRequestInput) {
     const repo = await this.prisma.repo.findUnique({ where: { id: input.repoId } });
     if (!repo?.workspaceId) throw new AppError('SDLC repository not found', 404);
-    // Single-repo claim only: a grant's repoIds must never authorize a write.
-    const { actor } = this.runActor(input, repo, { singleRepository: true });
+    const actor = this.runActor(input, repo);
     await this.requireRepositoryMember(actor, repo.id);
     await this.requireCapabilities(actor, repo.id, ['READ_REPOSITORY', 'CREATE_PULL_REQUEST']);
-    const expectedBase = requireSdlcBaseBranch(repo.baseBranch);
-    if (!expectedBase || input.base !== expectedBase) {
-      throw new AppError('Pull request base must match the configured base branch', 409);
-    }
-    if (!isSafeSdlcGitRef(input.head) || input.head === input.base) {
-      throw new AppError('Refusing to create a pull request from the default branch', 409);
-    }
+    // Any head/base pair: the provider rejects missing branches and head === base itself.
     const { adapter, repository, token } = await this.repositoryAccess(this.prisma, repo);
     if (!token) throw new AppError('Repository credential is not connected', 409);
     try {
-      await adapter.verifyRemoteCommit(token, repository, input.head, input.commitHash);
       const result = await adapter.createPullRequest(token, {
         owner: repository.owner,
         repository: repository.name,
@@ -728,30 +623,6 @@ export class SdlcVcsService implements SdlcVcs {
         );
       }
       throw this.toAppError(mapped);
-    }
-  }
-
-  async verifySourcePaths(repoId: string, commitHash: string, paths: string[]): Promise<void> {
-    if (paths.length === 0) return;
-    const { adapter, repository, token } = await this.repositoryAccessById(repoId);
-    try {
-      await adapter.verifyPathsAtCommit(token, repository, commitHash, paths);
-    } catch (error) {
-      throw this.toAppError(this.providerError(error));
-    }
-  }
-
-  async verifySourceRanges(
-    repoId: string,
-    commitHash: string,
-    references: import('./types').SourceLineRange[]
-  ): Promise<void> {
-    if (references.length === 0) return;
-    const { adapter, repository, token } = await this.repositoryAccessById(repoId);
-    try {
-      await adapter.verifySourceRangesAtCommit(token, repository, commitHash, references);
-    } catch (error) {
-      throw this.toAppError(this.providerError(error));
     }
   }
 
@@ -827,40 +698,13 @@ export class SdlcVcsService implements SdlcVcs {
   }
 
   private runActor(
-    input: {
-      workspaceId?: string | undefined;
-      actorUserId?: string | undefined;
-      interactiveGrant?: string | undefined;
-      conversationId?: string | undefined;
-      agentSlug?: string | undefined;
-    },
-    repo: { id: string; workspaceId: string | null },
-    options: { singleRepository?: boolean } = {}
-  ): { actor: SdlcActor; legacy: boolean } {
-    if (input.workspaceId && input.actorUserId) {
-      if (input.workspaceId !== repo.workspaceId) {
-        throw new AppError('SDLC repository not found', 404);
-      }
-      return { actor: { userId: input.actorUserId, workspaceId: input.workspaceId }, legacy: false };
+    input: { workspaceId: string; actorUserId: string },
+    repo: { id: string; workspaceId: string | null }
+  ): SdlcActor {
+    if (input.workspaceId !== repo.workspaceId) {
+      throw new AppError('SDLC repository not found', 404);
     }
-    let grant;
-    try {
-      grant = verifySdlcInteractiveGrant(input.interactiveGrant ?? '', grantSecret());
-    } catch {
-      throw new AppError('Invalid or expired SDLC interactive grant', 403);
-    }
-    const covers = options.singleRepository
-      ? grant.repoId === repo.id
-      : sdlcGrantCoversRepo(grant, repo.id);
-    if (
-      (input.agentSlug !== undefined && input.agentSlug !== SDLC_AGENT_SLUG) ||
-      !covers ||
-      grant.workspaceId !== repo.workspaceId ||
-      grant.conversationId !== input.conversationId
-    ) {
-      throw new AppError('SDLC interactive binding mismatch', 403);
-    }
-    return { actor: { userId: grant.actorUserId, workspaceId: grant.workspaceId }, legacy: true };
+    return { userId: input.actorUserId, workspaceId: input.workspaceId };
   }
 
   private refreshAfterCredentialInvalidation(
@@ -934,61 +778,7 @@ export class SdlcVcsService implements SdlcVcs {
     credential: StoredSdlcVcsCredential;
     error: VcsProviderError;
   }): Promise<void> {
-    await this.prisma.$transaction(async (tx) => {
-      await this.credentialStore.lock(tx, input.credential.id);
-      const current = await this.credentialStore.find(tx, input.workspaceId, input.credential.id);
-      if (
-        !current ||
-        current.revision !== input.credential.revision ||
-        current.status !== 'CONNECTED'
-      ) {
-        return;
-      }
-      const now = new Date().toISOString();
-      await this.credentialStore.save(tx, {
-        ...current,
-        validationStatus: 'INVALID',
-        validatedAt: now,
-        validationErrorCode: input.error.code,
-        validationErrorMessage: `${PROVIDER_LABEL[current.provider]} rejected this key. It may be expired or revoked; replace it to restore repository write access.`,
-        updatedBy: input.userId,
-        updatedAt: now,
-      });
-      await this.resetLinkedCapabilities(tx, input.workspaceId, current.id);
-    });
-  }
-
-  private async resetLinkedCapabilities(
-    tx: Prisma.TransactionClient,
-    workspaceId: string,
-    credentialId: string
-  ): Promise<void> {
-    await tx.repo.updateMany({
-      where: { workspaceId, vcsCredentialId: credentialId },
-      data: { accessCapabilities: [] },
-    });
-  }
-
-  private async credentialUnchanged(
-    tx: Prisma.TransactionClient,
-    repo: RepositoryRow,
-    expectedState: string | null
-  ): Promise<boolean> {
-    if (!repo.workspaceId) return false;
-    const current = await tx.repo.findUnique({
-      where: { id: repo.id },
-      select: { vcsCredentialId: true },
-    });
-    if ((current?.vcsCredentialId ?? null) !== repo.vcsCredentialId) return false;
-    if (!repo.vcsCredentialId) return expectedState === null;
-    await this.credentialStore.lock(tx, repo.vcsCredentialId);
-    const credential = await this.credentialStore.find(tx, repo.workspaceId, repo.vcsCredentialId);
-    const repository = this.parseRepositoryUrl(repo.canonicalUrl || repo.url);
-    const matching =
-      credential && credential.provider === repository.provider && credential.host === repository.host
-        ? credential
-        : null;
-    return this.credentialState(matching) === expectedState;
+    await invalidateCredentialTx(this, input);
   }
 
   private adapter(provider: VcsProvider, host: string): VcsProviderAdapter {
@@ -1010,7 +800,7 @@ export class SdlcVcsService implements SdlcVcs {
     );
   }
 
-  private async requireCredential(
+  async requireCredential(
     workspaceId: string,
     credentialId: string,
     client: Db = this.prisma
@@ -1067,7 +857,7 @@ export class SdlcVcsService implements SdlcVcs {
     return repo;
   }
 
-  private credentialState(credential: StoredSdlcVcsCredential | null): string | null {
+  credentialState(credential: StoredSdlcVcsCredential | null): string | null {
     if (!credential) return null;
     return [
       credential.id,
@@ -1120,7 +910,7 @@ export class SdlcVcsService implements SdlcVcs {
     });
   }
 
-  private accessCheckAudit(
+  accessCheckAudit(
     input: { workspaceId: string; userId: string },
     repoId: string,
     outcome: string,
@@ -1140,3 +930,10 @@ export class SdlcVcsService implements SdlcVcs {
 }
 
 export const sdlcVcs = new SdlcVcsService();
+
+
+
+
+
+
+

@@ -40,6 +40,7 @@ const saveConfigSchema = z.object({
     createTicketOnProgressive: z.boolean().optional(),
     createTicketOnPredictive: z.boolean().optional(),
     ticketSubjectTemplate: z.string().optional(),
+    phoneFieldNames: z.array(z.string()).optional(),
     customerPhoneFieldName: z.string().optional(),
   }).optional(),
 });
@@ -179,10 +180,13 @@ router.get('/toolbar', supportReadAuth, async (req: Request, res: Response): Pro
   if (!workspaceId) return;
 
   const cfg = await ozonetelConfigService.getConfig(workspaceId);
+  const phoneFieldNames = cfg?.ticketRules?.phoneFieldNames ?? [];
   res.json({
     configured: !!cfg,
     toolbarUrl: cfg?.toolbarUrl ?? null,
-    customerPhoneFieldName: cfg?.ticketRules?.customerPhoneFieldName ?? null,
+    phoneFieldNames,
+    // Legacy single field, still read by dashboards built before phoneFieldNames.
+    customerPhoneFieldName: phoneFieldNames[0] ?? null,
   });
 });
 
@@ -220,7 +224,12 @@ router.get('/config', supportAdminAuth, async (req: Request, res: Response): Pro
     toolbarUrl: cfg.toolbarUrl ?? null,
     postCallWebhookURL,
     agentMapping: cfg.agentMapping,
-    ticketRules: cfg.ticketRules ?? {},
+    ticketRules: {
+      ...(cfg.ticketRules ?? {}),
+      ...(cfg.ticketRules?.phoneFieldNames?.[0]
+        ? { customerPhoneFieldName: cfg.ticketRules.phoneFieldNames[0] }
+        : {}),
+    },
     ...(channelId
       ? {
           channelRouting: {

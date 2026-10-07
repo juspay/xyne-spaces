@@ -10,6 +10,7 @@ import { db } from '@/database/client';
 import type { Response } from 'express';
 import { randomUUID } from 'crypto';
 import { sendWebhookNotification, signWebhookPayload } from '@/apps/core/eventSubscriptionUtils';
+import { attachXyneAiFlowToken } from '@/apps/core/flowToken';
 import { BaseAppEvent, AppEventType } from '@/apps/types';
 import { decrypt } from '@/services/encryptionService';
 import { orgLLMCredentialService } from '@/services/orgLLMCredentialService';
@@ -21,6 +22,9 @@ import { Agent } from 'undici';
 // real clock. Mirrors streamDispatcher in claw-auth's consume-claw-stream.ts.
 const briefStreamDispatcher = new Agent({ headersTimeout: 0, bodyTimeout: 0, connectTimeout: 10_000 });
 
+
+/** Claw agent that answers the cmd+K AI overview in one turn (claw-auth provisions it). */
+export const CMDK_ANSWER_AGENT_SLUG = 'cmdk-answer';
 
 export interface ClawRunRequest {
   userId: string;
@@ -84,6 +88,8 @@ export interface ClawRunRequest {
   /** Single search + single answer pass instead of the full agentic tool
    *  loop — see xyne-claw-auth's run-stream.ts POST / instant branch. */
   instant?: boolean;
+  /** cmd+K AI overview: the palette tab claw searches before answering (its `agentConfig.answerScope`). */
+  answerScope?: string;
   researchContext?: { type: string; id?: string; name: string } | null;
   createCanvasEnabled: boolean;
   sessionId?: string;
@@ -98,6 +104,10 @@ export interface ClawRunRequest {
   /** Generate contextual next-question chips for this response. Ask AI v2
    *  enables this explicitly for every agent slug. */
   generateFollowUpSuggestions?: boolean;
+  /** Name the conversation from its opening exchange. False for asks that
+   *  never reach the chat list — cmd+K answers and the compose subject
+   *  helper — where the title is a completion nobody can ever see. */
+  generateTitle?: boolean;
   // Per-run schema/draft context for dashboard-ai — goes out via
   // additionalInstructions so it is fresh each run instead of accumulating
   // in the conversation history.
@@ -580,6 +590,7 @@ export async function runClawAgentStream(
     agentConfig: {
       webSearchEnabled: String(request.webSearchEnabled),
       deepResearchEnabled: String(request.deepResearchEnabled),
+      ...(request.answerScope && { answerScope: request.answerScope }),
       ...(config.xyneAiExtended.url && { XYNE_AI_EXTENDED_URL: config.xyneAiExtended.url }),
       ...(request.conversationId && { SPACES_CONVERSATION_ID: request.conversationId }),
       ...(request.canvasId && { SPACES_CANVAS_ID: request.canvasId }),
@@ -600,6 +611,7 @@ export async function runClawAgentStream(
     },
     ...(additionalInstructions && { additionalInstructions }),
     ...(request.generateFollowUpSuggestions === true && { generateFollowUpSuggestions: true }),
+    ...(request.generateTitle === false && { generateTitle: false }),
     ...(request.isRegenerate && { isRegenerate: true }),
     ...(request.isEditUserMessage && { isEditUserMessage: true }),
     ...(parentUserMessageId && { parentUserMessageId }),
@@ -738,6 +750,14 @@ export async function runClawAgentStream(
                 })}\n\n`
               );
               if (typeof (res as any).flush === 'function') (res as any).flush();
+            } else if (eventType === 'ui-flow') {
+              res.write(
+                `data: ${JSON.stringify({
+                  type: 'ui_flow',
+                  flow: attachXyneAiFlowToken(parsed.flow, request.userId),
+                })}\n\n`
+              );
+              if (typeof (res as any).flush === 'function') (res as any).flush();
             } else if (eventType === 'debug') {
               if (parsed.debugEvent?.kind !== 'session_start') {
                 res.write(
@@ -783,6 +803,17 @@ export async function runClawAgentStream(
                     followUpSuggestions: parsed.followUpSuggestions,
                   }),
                   ...(parsed.followUpsPending === true && { followUpsPending: true }),
+                })}\n\n`
+              );
+              if (typeof (res as any).flush === 'function') (res as any).flush();
+            } else if (eventType === 'follow-ups') {
+              // Generated after the answer; claw-auth holds the stream open
+              // past `done` and delivers them here.
+              res.write(
+                `data: ${JSON.stringify({
+                  type: 'follow_ups',
+                  followUpSuggestions: parsed.suggestions,
+                  ...(parsed.id && { messageId: parsed.id }),
                 })}\n\n`
               );
               if (typeof (res as any).flush === 'function') (res as any).flush();
@@ -1389,6 +1420,38 @@ export async function deleteClawConversation(
   }
 
   return (await response.json()) as { success: boolean; data: { deleted: number } };
+}
+
+export async function patchClawConversation(
+  req: { headers?: { cookie?: string }; userId: string },
+  convId: string,
+  patch: { title?: string; pinned?: boolean },
+  agentSlug?: string
+): Promise<{ success: boolean; data: { title: string | null; pinned: boolean } }> {
+  const slug = agentSlug || 'ask-ai';
+  const url = `${getClawBaseUrl()}/claw/api/v1/agent-chat/${encodeURIComponent(slug)}/chat/${encodeURIComponent(convId)}`;
+  const response = await fetch(url, {
+    method: 'PATCH',
+    headers: {
+      'Content-Type': 'application/json',
+      ...extractUserIdHeader(req.userId),
+      ...extractCookieHeader(req),
+    },
+    body: JSON.stringify(patch),
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    logger.error(`[ClawAgentService] patchConversation failed: ${response.status} ${errorText}`);
+    throw new Error(
+      response.status === 404 ? 'Conversation not found' : 'Failed to update conversation'
+    );
+  }
+
+  return (await response.json()) as {
+    success: boolean;
+    data: { title: string | null; pinned: boolean };
+  };
 }
 
 /**

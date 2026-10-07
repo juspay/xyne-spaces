@@ -1,10 +1,19 @@
 import type { Request, Response } from 'express';
 import type { Prisma } from '@prisma/client';
 import z from 'zod';
-import { summaryTemplateService, SummaryTemplateError } from '@/services/summaryTemplateService';
+import {
+  summaryTemplateService,
+  SummaryTemplateError,
+  SummaryTemplateNamesTakenError,
+} from '@/services/summaryTemplateService';
 import { summaryTemplateAiService } from '@/services/summaryTemplateAiService';
-import { DefaultOutlet } from '@xyne/shared';
+import {
+  DefaultOutlet,
+  SUMMARY_MAX_INPUT_CHARS,
+  SUMMARY_TEMPLATE_SELECTION_MAX_TRANSCRIPT_CHARS,
+} from '@xyne/shared';
 import { logger } from '@/utils/logger';
+import { callDocumentService, DRAFT_SUMMARY_TEMPLATE_ID } from '@/services/callDocumentService';
 import {
   summaryTemplateSharingService,
   SummaryTemplateSharingError,
@@ -15,21 +24,45 @@ import {
   SummaryTemplatePublicationError,
 } from '@/services/summaryTemplatePublicationService';
 
+// Single source for field limits, so the save, AI-assist and selection-test schemas agree.
+const LIMITS = {
+  name: 120,
+  meetingContext: 500,
+  id: 200,
+  sectionTitle: 100,
+  sectionDescription: 500,
+  sections: 20,
+  systemPrompt: 12_000,
+} as const;
+
 const SummaryTemplateSectionSchema = z.object({
-  id: z.string().trim().min(1).max(200),
-  title: z.string().trim().min(1).max(100),
-  description: z.string().trim().min(1).max(500),
+  id: z.string().trim().min(1).max(LIMITS.id),
+  title: z.string().trim().min(1).max(LIMITS.sectionTitle),
+  description: z.string().trim().min(1).max(LIMITS.sectionDescription),
   // Only honoured on the reserved Decisions / Action Items sections; see summaryTemplateService.
   disabled: z.boolean().optional(),
 });
 
 const SummaryTemplateCreateSchema = z.object({
-  name: z.string().trim().min(1).max(120),
-  autoTriggerPrompt: z.string().trim().max(500).nullable().optional(),
-  sections: z.array(SummaryTemplateSectionSchema).min(1).max(20),
-  systemPrompt: z.string().trim().max(12_000).optional(),
+  name: z.string().trim().min(1).max(LIMITS.name),
+  autoTriggerPrompt: z.string().trim().max(LIMITS.meetingContext).nullable().optional(),
+  sections: z.array(SummaryTemplateSectionSchema).min(1).max(LIMITS.sections),
+  systemPrompt: z.string().trim().max(LIMITS.systemPrompt).optional(),
   version: z.number().int().positive().default(1),
   defaultOutlet: z.enum([DefaultOutlet.EMAIL, DefaultOutlet.MESSAGE]).default(DefaultOutlet.EMAIL),
+});
+
+const SUMMARY_TEMPLATE_BULK_LIMIT = 50;
+
+const SummaryTemplateBulkCreateSchema = z.object({
+  templates: z
+    .array(
+      SummaryTemplateCreateSchema.extend({
+        autoTriggerPrompt: z.string().trim().min(1).max(LIMITS.meetingContext),
+      })
+    )
+    .min(1)
+    .max(SUMMARY_TEMPLATE_BULK_LIMIT),
 });
 
 const SummaryTemplateUpdateSchema = SummaryTemplateCreateSchema.partial().refine(
@@ -58,17 +91,61 @@ const SummaryTemplateSharingCommandSchema = z.discriminatedUnion('action', [
 ]);
 
 const SummaryTemplateAiInputSchema = z.object({
-  name: z.string().trim().min(1).max(120),
-  meetingContext: z.string().trim().max(500).nullable().optional(),
+  name: z.string().trim().min(1).max(LIMITS.name),
+  meetingContext: z.string().trim().max(LIMITS.meetingContext).nullable().optional(),
   sections: z
     .array(
       z.object({
-        title: z.string().trim().max(100),
-        description: z.string().trim().max(500),
+        title: z.string().trim().max(LIMITS.sectionTitle),
+        description: z.string().trim().max(LIMITS.sectionDescription),
       })
     )
-    .max(20)
+    .max(LIMITS.sections)
     .optional(),
+});
+
+// Drafts may be half-filled (blank name or section cards), so only lengths are enforced.
+const SummaryTemplateDraftSchema = z.object({
+  id: z.string().trim().max(LIMITS.id).nullable().optional(),
+  name: z.string().trim().max(LIMITS.name),
+  autoTriggerPrompt: z.string().trim().max(LIMITS.meetingContext).nullable().optional(),
+  sections: z
+    .array(
+      z.object({
+        id: z.string().trim().max(LIMITS.id).optional(),
+        title: z.string().trim().max(LIMITS.sectionTitle),
+        description: z.string().trim().max(LIMITS.sectionDescription),
+        disabled: z.boolean().optional(),
+      })
+    )
+    .max(LIMITS.sections),
+  systemPrompt: z.string().trim().max(LIMITS.systemPrompt).optional(),
+});
+
+// Selection is decided by Meeting Context, so that test refuses drafts without one.
+const SummaryTemplateSelectionDraftSchema = SummaryTemplateDraftSchema.extend({
+  autoTriggerPrompt: z
+    .string({
+      required_error: 'Add a Meeting Context to test template selection',
+      invalid_type_error: 'Add a Meeting Context to test template selection',
+    })
+    .trim()
+    .min(1, 'Add a Meeting Context to test template selection')
+    .max(LIMITS.meetingContext),
+});
+
+const SummaryTemplateSelectionTestSchema = z.object({
+  transcript: z
+    .string()
+    .trim()
+    .min(1, 'Provide a transcript')
+    .max(SUMMARY_TEMPLATE_SELECTION_MAX_TRANSCRIPT_CHARS),
+  draft: SummaryTemplateSelectionDraftSchema,
+});
+
+const SummaryTemplateOutputTestSchema = z.object({
+  transcript: z.string().trim().min(1, 'Provide a transcript').max(SUMMARY_MAX_INPUT_CHARS),
+  draft: SummaryTemplateDraftSchema,
 });
 
 function sendError(res: Response, error: unknown): void {
@@ -111,6 +188,37 @@ export class SummaryTemplateController {
       });
       res.status(201).json({ success: true, template });
     } catch (error) {
+      sendError(res, error);
+    }
+  };
+
+  bulkCreate = async (req: Request, res: Response): Promise<void> => {
+    try {
+      const parsed = SummaryTemplateBulkCreateSchema.safeParse(req.body);
+      if (!parsed.success) {
+        const issue = parsed.error.errors[0];
+        const index = issue?.path[0] === 'templates' ? issue.path[1] : undefined;
+        const prefix = typeof index === 'number' ? `Template ${index + 1}: ` : '';
+        res.status(400).json({ success: false, error: `${prefix}${issue?.message ?? 'Invalid'}` });
+        return;
+      }
+
+      const templates = await summaryTemplateService.bulkCreate(
+        req.user!.workspaceId,
+        req.user!.id,
+        parsed.data.templates.map((template) => ({
+          ...template,
+          sections: template.sections as Prisma.InputJsonValue,
+        }))
+      );
+      res.status(201).json({ success: true, templates });
+    } catch (error) {
+      if (error instanceof SummaryTemplateNamesTakenError) {
+        res
+          .status(error.statusCode)
+          .json({ success: false, error: error.message, takenNames: error.names });
+        return;
+      }
       sendError(res, error);
     }
   };
@@ -228,6 +336,76 @@ export class SummaryTemplateController {
         return;
       }
       res.json({ success: true, sections });
+    } catch (error) {
+      sendError(res, error);
+    }
+  };
+
+  testSelection = async (req: Request, res: Response): Promise<void> => {
+    try {
+      const input = SummaryTemplateSelectionTestSchema.parse(req.body);
+      const { id: userId, workspaceId } = req.user!;
+
+      const { draft } = input;
+      const selection = await callDocumentService.previewRecordingSummaryTemplateSelection(
+        input.transcript,
+        workspaceId,
+        userId,
+        `summary-template-test:${workspaceId}:${userId}`,
+        {
+          id: draft.id || DRAFT_SUMMARY_TEMPLATE_ID,
+          name: draft.name || 'Untitled template',
+          version: 1,
+          autoTriggerPrompt: draft.autoTriggerPrompt,
+          sections: draft.sections as Prisma.JsonArray,
+          systemPrompt: draft.systemPrompt ?? '',
+        }
+      );
+      const selectedId = selection.template?.id;
+      res.json({
+        success: true,
+        selectedDraft:
+          !selection.fellBack &&
+          (selectedId === DRAFT_SUMMARY_TEMPLATE_ID || (!!draft.id && selectedId === draft.id)),
+        selectedTemplateId: selectedId ?? null,
+        selectedTemplateName: selection.template?.name ?? null,
+        fellBack: selection.fellBack,
+        reason: selection.reason,
+      });
+    } catch (error) {
+      sendError(res, error);
+    }
+  };
+
+  testOutput = async (req: Request, res: Response): Promise<void> => {
+    try {
+      const { transcript, draft } = SummaryTemplateOutputTestSchema.parse(req.body);
+      const { id: userId, workspaceId } = req.user!;
+      const preview = await callDocumentService.previewRecordingSummary(
+        transcript,
+        workspaceId,
+        userId,
+        {
+          name: draft.name || 'Untitled template',
+          autoTriggerPrompt: draft.autoTriggerPrompt ?? null,
+          sections: draft.sections as Prisma.JsonArray,
+          systemPrompt: draft.systemPrompt ?? '',
+        }
+      );
+      if (!preview) {
+        res.status(502).json({ success: false, error: 'Unable to generate a summary' });
+        return;
+      }
+      res.json({
+        success: true,
+        summary: preview.summary,
+        citationSegments: preview.segments.map(({ n, timestamp, speaker, text }) => ({
+          n,
+          timestamp,
+          speaker,
+          snippet: text,
+        })),
+      });
     } catch (error) {
       sendError(res, error);
     }

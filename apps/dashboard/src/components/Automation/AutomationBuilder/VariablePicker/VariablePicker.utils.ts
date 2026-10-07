@@ -60,10 +60,14 @@ export function findSoleMatchingVariable(
     const pool = exact.length > 0 ? exact : matches;
     if (pool.length === 1) return pool[0]!;
 
-    const preferred = PREFERRED_PATHS_BY_KIND[targetEntityKind] ?? [];
-    for (const path of preferred) {
-      const hit = pool.find(m => m.path === path);
-      if (hit) return hit;
+    // A preferred path is a default, not a unique answer — once a previous step
+    // offers one too, the choice is ambiguous and belongs to the user.
+    if (pool.every(m => m.role === 'trigger')) {
+      const preferred = PREFERRED_PATHS_BY_KIND[targetEntityKind] ?? [];
+      for (const path of preferred) {
+        const hit = pool.find(m => m.path === path);
+        if (hit) return hit;
+      }
     }
     const sourceKeys = new Set(pool.map(m => `${m.sourceKey}:${m.role}`));
     if (sourceKeys.size === 1) return pool[0]!;

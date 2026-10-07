@@ -457,7 +457,7 @@ export function setupIpcHandlers(): void {
 
   ipcMain.on('clear-all-cookies', (event) => {
     if (!isMainWindowSender(event)) return;
-    void clearAllCookies();
+    void clearAllCookies('renderer_ipc_request');
   });
 
   ipcMain.on('set-badge-count', (_event, count: number) => {
@@ -820,6 +820,16 @@ export function setupIpcHandlers(): void {
   ipcMain.handle('local-harness:disconnect', async (event) => {
     requireLocalHarness(event);
     return localHarnessBridge.disconnect(await xyneCookieHeader());
+  });
+
+  ipcMain.handle('local-harness:connect-computer', async (event) => {
+    requireLocalHarness(event);
+    return localHarnessBridge.connectComputer(await xyneCookieHeader());
+  });
+
+  ipcMain.handle('local-harness:disconnect-computer', async (event) => {
+    requireLocalHarness(event);
+    return localHarnessBridge.disconnectComputer(await xyneCookieHeader());
   });
 
   ipcMain.handle('local-harness:pick-folder', async (event) => {

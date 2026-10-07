@@ -21,16 +21,7 @@ import { useLocation, useNavigate, useOutlet } from 'react-router-dom';
 import { Virtuoso } from 'react-virtuoso';
 import { useAuth } from '../../hooks/useAuth';
 import { useCallHistory } from './useCallHistory';
-import {
-  CallOrigin,
-  CallStatus,
-  CallType,
-  CallVisibility,
-  ChannelScopeType,
-  InvitationResponse,
-  MeetingStatus,
-  TagMethod,
-} from '@xyne/shared';
+import { CallStatus, TagMethod } from '@xyne/shared';
 import { logger, Event } from '../../utils/logger';
 import { dataLoadDuration, safeRecordMetric } from '../../services/otel';
 import AppNavigator from '../../components/AppNavigator/AppNavigator';
@@ -52,9 +43,12 @@ import { isSameDay } from '../../utils/dateUtils';
 import { mutators } from '../../zero/mutators';
 import { CallCard } from './CallCard';
 import {
-  Call,
+  hasExternalChatAccess,
+  isDmScope,
   isMissedCallForUser,
   isExternalCalendarEvent,
+  isVisibleInCallList,
+  mapVespaCallResultToCall,
   isScheduledCallJoinable,
   RecentCallFilter,
   FILTER_LABELS,
@@ -65,6 +59,7 @@ import { useResolvedRecordingLabels } from '../../hooks/useResolvedRecordingLabe
 import { normalizeRecordingTags } from '../../utils/recordingUtils';
 import { CallExternalChatDialog } from '../../components/Call/CallExternalChatDialog/CallExternalChatDialog';
 import { ParticipantsModal } from './ParticipantsModal';
+import { getCalendarWindow } from './CalenderViewUtils';
 import CalendarWeekView from './CalendarWeekView';
 import CalendarDayView from './CalendarDayView';
 import CalendarMonthView from './CalenderMonthView';
@@ -72,8 +67,8 @@ import { usePlatform } from '../../hooks/usePlatform';
 import MeetWithPanel from './MeetWithPanel';
 import { useOtherUserCalls } from '../../hooks/useOtherUserCalls';
 import { UpcomingCallsList } from '../../components/Call/UpcomingCallsList';
+import { CallListSkeleton } from './CallListSkeleton';
 import { useSearchMetrics } from '../../hooks/useSearchMetrics';
-import type { DisplaySearchResult } from '../../types/search';
 import { getUserDisplayName } from '../../utils/userDisplayName';
 import { ChipType, TabType } from '../../components/Chat/ChatDirectory/ChannelCommandMenu.types';
 import { type InitialQueryData } from '../../components/Chat/ChatDirectory/LexicalSearchInput';
@@ -91,138 +86,6 @@ interface EmptyStateProps {
 
 function isSameMonth(a: Date, b: Date): boolean {
   return a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth();
-}
-
-function hasExternalChatAccess(call: Call): boolean {
-  return (
-    call.participants?.some(p => p.isExternal && p.response !== InvitationResponse.INVITED) ?? false
-  );
-}
-
-function isDmScope(scopeType: ChannelScopeType | string | null | undefined): boolean {
-  return scopeType === ChannelScopeType.DM || scopeType === ChannelScopeType.GROUP_DM;
-}
-
-function isVisibleInCallList(
-  call: Call,
-  currentUserId: string | undefined,
-  showChannelCalls: boolean,
-): boolean {
-  if (isExternalCalendarEvent(call)) return true;
-  if (showChannelCalls) return true;
-  return call.participants?.some(p => p.userId === currentUserId) ?? false;
-}
-
-function stripSearchHighlight(value: string | undefined): string {
-  return (value || '').replace(/<\/?hi>/g, '');
-}
-
-function timestampOrUndefined(value: number | undefined): number | undefined {
-  return value && value > 0 ? value : undefined;
-}
-
-function isJoinedInvitationResponse(response: string): boolean {
-  return (
-    response === String(InvitationResponse.ACCEPTED) || response === String(InvitationResponse.LEFT)
-  );
-}
-
-function mapVespaCallResultToCall(result: DisplaySearchResult, workspaceId: string): Call {
-  const context = result.searchContext;
-  const callId = context?.callId || result.id;
-  const startedAt =
-    timestampOrUndefined(context?.startedAt) ||
-    timestampOrUndefined(context?.startsAt) ||
-    Date.now();
-  const now = Date.now();
-  const participantResponses = context?.participantResponses || [];
-  const participantUserIds = context?.userIds || [];
-  const participantNames = context?.participantNames || [];
-  const participantEmails = context?.participantEmails || [];
-  const participantCount = Math.max(
-    participantUserIds.length,
-    participantResponses.length,
-    participantNames.length,
-    participantEmails.length,
-  );
-
-  return {
-    workspaceId,
-    id: callId,
-    externalId: context?.externalId || callId,
-    title: stripSearchHighlight(context?.title || result.title) || null,
-    createdByUserId: context?.createdByUserId || '',
-    organizerId: null,
-    channelId: context?.channelId || null,
-    orgName: null,
-    description: null,
-    callType: CallType.VIDEO,
-    callOrigin: (context?.callOrigin as CallOrigin | undefined) ?? CallOrigin.CHANNEL,
-    status: (context?.status as CallStatus | undefined) ?? CallStatus.ENDED,
-    roomLink: context?.roomLink || null,
-    startsAt: timestampOrUndefined(context?.startsAt) ?? null,
-    endsAt: timestampOrUndefined(context?.endsAt) ?? null,
-    timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
-    isRecurring: Boolean(context?.recurringSeriesId),
-    recurringSeriesId: context?.recurringSeriesId || null,
-    recurrenceRule: null,
-    instanceDate: null,
-    recordingEnabled: false,
-    recordingUrl: null,
-    recordingParticipants: '[]',
-    transcript: context?.hasTranscript ? 'available' : undefined,
-    aiSummary: null,
-    startedAt,
-    endedAt: timestampOrUndefined(context?.endedAt) ?? null,
-    lastActivityAt: timestampOrUndefined(context?.endedAt) || startedAt,
-    createdAt: startedAt,
-    updatedAt: now,
-    metadata: null,
-    callUpdatesChannel: null,
-    participantCount,
-    participantPreviewUserIds: JSON.stringify(
-      participantUserIds
-        .map((userId, index) =>
-          userId
-            ? {
-                userId,
-                hasJoined: isJoinedInvitationResponse(participantResponses[index] || ''),
-              }
-            : null,
-        )
-        .filter((entry): entry is { userId: string; hasJoined: boolean } => entry !== null),
-    ),
-    summaryTemplateId: null,
-    labels: [],
-    markedItems: [],
-    xyneManaged: false,
-    visibility: CallVisibility.PRIVATE,
-    participants: Array.from({ length: participantCount }, (_, index) => {
-      const userId = participantUserIds[index] || '';
-      const displayName = stripSearchHighlight(participantNames[index]);
-      const email = stripSearchHighlight(participantEmails[index]);
-      const isExternal = !userId;
-
-      return {
-        workspaceId,
-        id: `${callId}:${userId || `external-${index}`}`,
-        callId,
-        userId,
-        invitedBy: context?.createdByUserId || '',
-        invitedAt: startedAt,
-        response: (participantResponses[index] as InvitationResponse | undefined) || null,
-        meetingStatus: MeetingStatus.PENDING,
-        respondedAt: null,
-        joinedAt: null,
-        leftAt: null,
-        metadata: null,
-        displayName: displayName || null,
-        email: email || null,
-        isExternal,
-        ringStatus: null,
-      };
-    }),
-  } as Call;
 }
 
 const CallHistoryScreen = (): ReactElement => {
@@ -271,10 +134,30 @@ const CallHistoryScreen = (): ReactElement => {
     return d;
   });
 
+  // Date range for the currently displayed calendar view. Declared up here because it
+  // is what useCallHistory fetches the calendar's calls for — the grid asks for the
+  // window it is about to draw rather than filtering down a list-shaped pool.
+  // Each sub-view tracks its own anchor date, so pick the anchor and let
+  // getCalendarWindow decide the span.
+  const { from: calendarFrom, to: calendarTo } = useMemo(() => {
+    const anchor =
+      calendarSubView === 'week'
+        ? currentWeekStart
+        : calendarSubView === 'day'
+          ? currentDayStart
+          : currentMonthStart;
+    return getCalendarWindow(calendarSubView, anchor);
+  }, [calendarSubView, currentWeekStart, currentDayStart, currentMonthStart]);
+
+  const calendarWindow = useMemo(
+    () => ({ from: calendarFrom.getTime(), to: calendarTo.getTime() }),
+    [calendarFrom, calendarTo],
+  );
+
   const {
     calls,
     scheduledCalls,
-    calendarScheduledCalls,
+    calendarRangeCalls,
     missedCalls,
     isLoading,
     isScheduledCallsLoading,
@@ -307,7 +190,9 @@ const CallHistoryScreen = (): ReactElement => {
     closeEditModal,
     showChannelCalls,
     setShowChannelCalls,
-  } = useCallHistory(user?.id, { isCalendarView: viewMode === 'calendar' });
+  } = useCallHistory(user?.id, {
+    ...(viewMode === 'calendar' ? { calendarWindow } : {}),
+  });
 
   const allUsers = useUsers();
   const activeUsers = useActiveUsers();
@@ -511,20 +396,6 @@ const CallHistoryScreen = (): ReactElement => {
     },
     [],
   );
-  // Compute date range for the currently displayed calendar view
-  const calendarFrom = useMemo(() => {
-    if (calendarSubView === 'week') return currentWeekStart;
-    if (calendarSubView === 'day') return currentDayStart;
-    return currentMonthStart;
-  }, [calendarSubView, currentWeekStart, currentDayStart, currentMonthStart]);
-
-  const calendarTo = useMemo(() => {
-    const d = new Date(calendarFrom);
-    if (calendarSubView === 'week') d.setDate(d.getDate() + 7);
-    else if (calendarSubView === 'day') d.setDate(d.getDate() + 1);
-    else d.setMonth(d.getMonth() + 1);
-    return d;
-  }, [calendarFrom, calendarSubView]);
 
   useEffect(() => {
     setCallSearchActiveTab(TabType.CALL);
@@ -823,10 +694,6 @@ const CallHistoryScreen = (): ReactElement => {
     );
   }, [hasCallSearch, scheduledCalls, showChannelCalls, user?.id, vespaScheduledCallRows]);
 
-  const filteredCalendarScheduledCalls = hasCallSearch
-    ? visibleScheduledCalls
-    : calendarScheduledCalls;
-
   const limitedScheduledCalls = useMemo(() => {
     if (!visibleScheduledCalls) return visibleScheduledCalls;
     return visibleScheduledCalls.filter(call => !isExternalCalendarEvent(call));
@@ -881,14 +748,16 @@ const CallHistoryScreen = (): ReactElement => {
   )?.filter(call => !isExternalCalendarEvent(call));
 
   const calendarCalls = useMemo(() => {
-    const combined = [...(filteredRecentCalls || []), ...(filteredCalendarScheduledCalls || [])];
+    if (!hasCallSearch) return calendarRangeCalls ?? [];
+
+    const combined = [...(filteredRecentCalls || []), ...(visibleScheduledCalls || [])];
     const seenCallIds = new Set<string>();
     return combined.filter(call => {
       if (seenCallIds.has(call.id)) return false;
       seenCallIds.add(call.id);
       return true;
     });
-  }, [filteredRecentCalls, filteredCalendarScheduledCalls]);
+  }, [hasCallSearch, calendarRangeCalls, filteredRecentCalls, visibleScheduledCalls]);
 
   const displayRecentCalls = useMemo(() => {
     const base = filteredRecentCallsNoGcal || [];
@@ -1229,8 +1098,8 @@ const CallHistoryScreen = (): ReactElement => {
             {viewMode === 'list' ? (
               (!hasCallSearch && isScheduledCallsLoading) ||
               (hasCallSearch && isVespaCallSearching) ? (
-                <div className='py-10 flex items-center justify-center'>
-                  <Loader2 className='w-6 h-6 animate-spin text-muted-foreground' />
+                <div className='border border-border rounded-xl px-5 py-4'>
+                  <CallListSkeleton count={2} />
                 </div>
               ) : (
                 <UpcomingCallsList
@@ -1347,8 +1216,8 @@ const CallHistoryScreen = (): ReactElement => {
               {displayRecentCalls.length === 0 ? (
                 (!hasCallSearch && showRecentCallsLoader) ||
                 (hasCallSearch && isVespaCallSearching) ? (
-                  <div className='py-10 flex items-center justify-center'>
-                    <Loader2 className='w-6 h-6 animate-spin text-muted-foreground' />
+                  <div className='-mx-3'>
+                    <CallListSkeleton />
                   </div>
                 ) : hasCallSearch ? (
                   <NoFiltredCalls
@@ -1376,12 +1245,11 @@ const CallHistoryScreen = (): ReactElement => {
                       }
                     }}
                     computeItemKey={(_, call) => call.id}
-                    itemContent={(i, call) => (
+                    itemContent={(_, call) => (
                       <div className='pb-3'>
                         <CallCard
                           call={call}
                           currentUserId={user?.id}
-                          isLastItem={i === displayRecentCalls.length - 1}
                           onCallClick={() => handleCallRowClick(call)}
                           onParticipantsClick={() => handleParticipantsClick(call)}
                           handleGotoTranscript={getGotoTranscriptHandler(call)}
@@ -1397,7 +1265,7 @@ const CallHistoryScreen = (): ReactElement => {
                           onDetailClick={() => {
                             // The labels on screen right now double as the detail picker's
                             // suggestions — same rows this screen's label filter is built from.
-                            void navigate(`${call.id}/detail`, {
+                            void navigate(`${call.externalId}/detail`, {
                               state: { call, labelSuggestions: availableCallLabels },
                             });
                           }}

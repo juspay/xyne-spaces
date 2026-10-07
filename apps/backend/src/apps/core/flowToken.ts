@@ -39,6 +39,24 @@ export function mintFlowToken(claims: FlowTokenClaims): string {
   return `${encoded}.${sign(encoded)}`;
 }
 
+/** Mints a per-fetch flow-action token for a Xyne AI artifact card. Cards
+ *  without `spacesAppId` + `chatMessageId` are returned untouched. */
+export function attachXyneAiFlowToken<T>(flow: T, userId: string): T {
+  if (!flow || typeof flow !== 'object') return flow;
+  const data = (flow as { data?: unknown }).data;
+  if (!data || typeof data !== 'object') return flow;
+  const record = data as Record<string, unknown>;
+  const appId = record['spacesAppId'];
+  const messageId = record['chatMessageId'];
+  if (typeof appId !== 'string' || !appId) return flow;
+  if (typeof messageId !== 'string' || !messageId) return flow;
+  if (!userId) return flow;
+  return {
+    ...flow,
+    data: { ...record, __xyneFlowToken: mintFlowToken({ appId, userId, messageId }) },
+  };
+}
+
 /**
  * Returns the appId the token was minted for, or null if it fails any check.
  * One return value on purpose — there is no partially-trusted token.

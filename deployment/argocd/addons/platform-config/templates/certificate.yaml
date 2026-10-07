@@ -1,0 +1,50 @@
+{{- if .Values.certManager.enabled }}
+{{- $mode := .Values.certManager.mode | default "acme" }}
+{{- if not (has $mode (list "acme" "internal")) }}
+{{- fail (printf "certManager.mode must be acme or internal, got %q" $mode) }}
+{{- end }}
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: {{ .Values.certManager.issuer }}
+  labels:
+    {{- include "platform-config.labels" . | nindent 4 }}
+spec:
+{{- if eq $mode "internal" }}
+  selfSigned: {}
+{{- else }}
+  acme:
+    server: {{ .Values.certManager.server }}
+    {{- with .Values.certManager.email }}
+    email: {{ . }}
+    {{- end }}
+    privateKeySecretRef:
+      name: {{ .Values.certManager.issuer }}-account-key
+    solvers:
+      - http01:
+          ingress:
+            ingressClassName: {{ .Values.certManager.ingressClassName }}
+{{- end }}
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: {{ .Values.gateway.tlsSecret }}
+  namespace: {{ .Values.gateway.namespace }}
+  labels:
+    {{- include "platform-config.labels" . | nindent 4 }}
+spec:
+  secretName: {{ .Values.gateway.tlsSecret }}
+  issuerRef:
+    kind: ClusterIssuer
+    name: {{ .Values.certManager.issuer }}
+{{- if eq $mode "internal" }}
+  duration: {{ .Values.certManager.duration }}
+  renewBefore: {{ .Values.certManager.renewBefore }}
+  privateKey:
+    algorithm: ECDSA
+    size: 256
+{{- end }}
+  dnsNames:
+    {{- include "platform-config.hosts" . | nindent 4 }}
+{{- end }}

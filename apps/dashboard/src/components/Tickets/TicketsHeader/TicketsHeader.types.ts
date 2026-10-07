@@ -37,6 +37,12 @@ export interface FilterPickerContext {
   availableBoards?: string[] | undefined;
   availableBoardDetails?: BoardOption[] | undefined;
   sourceChannelProjectIds?: string[] | undefined;
+  /**
+   * Offer "All Boards" even when there is only one board to pick. A track view sets
+   * it: its tickets can sit on boards the hub doesn't list, so all boards is a real
+   * choice there, and the way back once one board is picked.
+   */
+  alwaysOfferAllBoards?: boolean;
   availableTags?: string[] | undefined;
   onLoadMoreTags?: () => void;
   hasMoreTags?: boolean;
@@ -72,17 +78,20 @@ export interface HeaderViewSave {
 
 export interface TicketsHeaderProps {
   startSlot?: ReactElement | null | undefined;
+  /** Beside New ticket, before it: a host's own action for the board it shows. */
+  endSlot?: ReactNode;
   title: string;
   ticketCount: number | null;
   isFiltered: boolean;
   star?: { isStarred: boolean; onToggle: () => void } | null;
-  searchValue: string;
-  onSearchChange: (value: string) => void;
-  isExactSearch: boolean;
-  onExactSearchChange: (exact: boolean) => void;
+  /** Opens the palette as a ticket search scoped to this screen's filters. */
+  onOpenSearch: () => void;
   share?: { viewId: string; viewName: string } | null;
   onCreateTicket?: (() => void) | null;
   createTicketMetadata?: string;
+  /** Channel surfaces only: opens the dialog that links boards to the channel. */
+  onLinkBoards?: (() => void) | null;
+  linkBoardsMetadata?: string;
 
   layoutView: HeaderLayoutView;
   onLayoutChange: (layout: HeaderLayoutView) => void;

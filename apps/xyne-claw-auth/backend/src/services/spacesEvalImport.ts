@@ -76,7 +76,7 @@ function chatRole(msg: Record<string, unknown>): TurnRole {
   const sender = (msg["sender"] && typeof msg["sender"] === "object" ? msg["sender"] : {}) as Record<string, unknown>;
   const userType = str(sender, "userType");
   const role = str(sender, "role");
-  if (msgType === "BOT" || userType === "BOT" || userType === "APP") return "bot";
+  if (msgType === "BOT" || userType === "BOT" || userType === "APP" || userType === "AGENT") return "bot";
   if (role === "ADMIN" || role === "OWNER") return "human-agent";
   return "customer";
 }

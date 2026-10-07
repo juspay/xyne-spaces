@@ -18,6 +18,7 @@ import {
   FormEntityType,
   FormFieldType,
   LookupType,
+  ReleaseTrackingMode,
   TicketPriority,
   TicketStatusV2,
   isFieldActive,
@@ -50,6 +51,7 @@ import { EntityLinkContext, type EntityLinkScope } from '../../../contexts/Entit
 import { useAllVisibleChannels } from '../../../hooks/useChannels';
 import { useTitleGenerator } from '../../../hooks/useTitleGenerator';
 import { useChannelAssignGate } from '../../../hooks/useChannelAssignGate';
+import { useChannelBoards } from '../../../hooks/useChannelBoards';
 import { useActiveUsers, useUsers, useSelf } from '../../../hooks/useUsers';
 import { channelMembersFirst, currentUserFirst } from '../../../utils/channelMembersFirst';
 import { useUserGroups } from '../../../hooks/useUserGroup';
@@ -64,7 +66,12 @@ import { Button } from '../../ui/Button';
 import { Dialog } from '../../ui/Dialog';
 import { EntitySelector } from '../../ui/EntitySelector/EntitySelector';
 import { EntityMultiSelector } from '../../ui/EntitySelector/EntityMultiSelector';
-import { RepoDot, repoColor } from '../../Release/repoVisual';
+import { repoShortName } from '../../Release/repoVisual';
+import {
+  ReleaseRepositoriesSection,
+  type ReleaseRangeKey,
+  type ReleaseRepoRow,
+} from './ReleaseRepositoriesSection';
 import { AttachmentPreview } from '../../ui/files/AttachmentPreview';
 import type { UploadedFile } from '../../ui/files/Files.types';
 import Input from '../../ui/Input';
@@ -89,6 +96,7 @@ import {
 import { DatePicker } from '../../ui/DatePicker/DatePicker';
 import { TextShimmer } from '../../ui/ShimmerText';
 import { useCachedQuery } from '../../../hooks/useCachedQuery';
+import { useDebouncedValue } from '../../../hooks/useDebouncedValue';
 import type { BoardMetadata } from '../../Board/BoardTicketFormConfig';
 import { isReleaseBoard, isMainReleaseBoard } from '../../../utils/boardUtils';
 import { useDraftAttachments } from '../../../hooks/useDraft';
@@ -112,6 +120,7 @@ interface CreateTicketModalProps {
   };
   enableUrlSync?: boolean;
   channelId: string;
+  initialChannelId?: string | undefined;
   projectId?: string;
   defaultStageId?: string | undefined;
   selectedBoardId?: string | null;
@@ -125,6 +134,8 @@ interface CreateTicketModalProps {
   initialStatus?: TicketStatusV2 | null;
   initialStageName?: string | null;
   initialTags?: string[];
+  initialMerchantId?: string | undefined;
+  initialDynamicFields?: Record<string, string | string[]> | undefined;
   initialTicketKind?: 'task' | 'release';
   releaseOnly?: boolean;
   releaseChannelIds?: string[];
@@ -179,8 +190,19 @@ type SubTicketDraft = {
 };
 
 const EMPTY_TAGS: string[] = [];
+const RECENT_LABELS_STORAGE_KEY = 'xyne_recent_labels';
+const RECENT_LABELS_LIMIT = 20;
 
 const PRIMARY_RANGE_FIELD_NAMES = ['branch', 'deployedCommitId', 'newCommitId'];
+// Rendered inline in the release repository rows instead of the fields panel.
+const RELEASE_INLINE_FIELD_NAMES = [...PRIMARY_RANGE_FIELD_NAMES, 'releaseVersion'];
+
+const withoutRangeFields = (
+  fields: Record<string, string | string[]>,
+): Record<string, string | string[]> =>
+  Object.fromEntries(
+    Object.entries(fields).filter(([key]) => !PRIMARY_RANGE_FIELD_NAMES.includes(key)),
+  );
 
 const PRIMARY_DF_KEY = {
   branch: 'branch',
@@ -212,6 +234,7 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
   isOpen,
   onClose,
   channelId,
+  initialChannelId,
   projectId,
   selectedBoardId,
   initialTitle = '',
@@ -223,6 +246,8 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
   initialStatus = null,
   initialStageName = null,
   initialTags = EMPTY_TAGS,
+  initialMerchantId,
+  initialDynamicFields,
   initialTicketKind = 'task',
   releaseOnly = false,
   releaseChannelIds,
@@ -428,10 +453,14 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
     }
   }, [usesLocalAttachments, providerClearDroppedFiles, channelId, sourceConversation]);
 
+  // Not filtered by whether the channel has boards: that lives in
+  // channel_board_mappings and cannot be evaluated cheaply for every channel.
+  // Picking a channel with no linked boards falls through to the "no boards are
+  // configured" empty state on the board field instead.
   const channels = useAllVisibleChannels().filter(
     channel =>
       channel.scopeType === ChannelScopeType.DEFAULT &&
-      (!allowChannelSelection || (!channel.isArchived && Boolean(channel.projectId))),
+      (!allowChannelSelection || !channel.isArchived),
   );
 
   // Track if title has been auto-generated for this modal session
@@ -481,11 +510,11 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
       assignee: initialAssignee,
       userGroupId: null,
       boardId: selectedBoardId || '',
-      channelId: channelId,
+      channelId: initialChannelId || channelId,
       workflowType: standaloneSeed?.workflowType ?? '',
       files: [],
-      dynamicFields: {},
-      merchantId: '',
+      dynamicFields: initialDynamicFields ?? {},
+      merchantId: initialMerchantId ?? '',
       ticketType: BaseTicketType.Fix,
     } as CreateTicketFormData,
     onSubmit: async ({ value }) => {
@@ -504,46 +533,15 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
     gatedAssign: gatedAssignUser,
   } = useChannelAssignGate(selectedChannelId);
 
-  // Find selected channel to get its projectId
-  const selectedChannel = useMemo(
-    () => channels?.find(c => c.id === selectedChannelId),
-    [channels, selectedChannelId],
-  );
-
-  // Fetch boards for the selected channel's project (or default projectId)
-  const selectedChannelProjectId =
-    canSelectChannel && selectedChannel?.projectId ? selectedChannel.projectId : projectId;
   const effectiveChannelId = canSelectChannel ? (selectedChannelId ?? channelId) : channelId;
-  // Boards for ticket creation come from the selected channel's PROJECT (all of the
-  // project's boards). A projectless channel resolves to no project → no boards, and
-  // the UI shows the "no boards are configured" empty state.
-  const [projectBoards] = useCachedQuery(
-    queries.boardsListByProject({ projectId: selectedChannelProjectId ?? '' }),
-    { enabled: !!selectedChannelProjectId },
-  );
-  const boards = useMemo(() => projectBoards ?? [], [projectBoards]);
+  // Boards for ticket creation are the boards LINKED to the selected channel
+  // (channel_board_mappings), which may span projects. A channel with no linked
+  // boards yields none, and the board field renders an empty state instead.
+  const { boards } = useChannelBoards(effectiveChannelId);
 
   // Read by the open-reset effect without adding `boards` to its deps.
   const boardsRef = useRef(boards);
   boardsRef.current = boards;
-
-  // Services grouped by main release board → read-only chips under each repo.
-  const [releaseApplications] = useCachedQuery(
-    queries.applicationsByProjectId({ projectId: selectedChannelProjectId ?? '' }),
-    { enabled: !!selectedChannelProjectId },
-  );
-  const servicesByMainBoard = useMemo(() => {
-    const map = new Map<string, string[]>();
-    const list =
-      !releaseApplications || releaseApplications instanceof Error ? [] : releaseApplications;
-    for (const app of list) {
-      if (!app.mainReleaseBoardId) continue;
-      const names = map.get(app.mainReleaseBoardId) ?? [];
-      names.push(app.name);
-      map.set(app.mainReleaseBoardId, names);
-    }
-    return map;
-  }, [releaseApplications]);
 
   // Get selected board's metadata for ticket form configuration
   const selectedBoard = useMemo(
@@ -554,14 +552,52 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
   const isReleaseLine = ticketKind === 'release';
   // Only main release boards are selectable (repos); services show as chips below.
   // Keep the currently-primary board even if it lacks a provider.
-  const releaseBoardOptions = useMemo(
+  const releaseBoards = useMemo(
     () =>
       (boards ?? [])
         .filter(b => isMainReleaseBoard(b) || b.id === formValues.boardId)
-        .filter(b => isReleaseBoard(b.boardType))
-        .map(b => ({ label: b.name, value: b.id, icon: <RepoDot color={repoColor(b.id)} /> })),
+        .filter(b => isReleaseBoard(b.boardType)),
     [boards, formValues.boardId],
   );
+
+  // Services are looked up per repo, so only the RELEASE boards' projects matter —
+  // not every project the channel's linked boards happen to span. A channel's boards
+  // can cross projects now, so this is a set rather than the channel's own
+  // (deprecated) projectId, but it stays as narrow as the repos on screen.
+  const releaseProjectIds = useMemo(() => {
+    const ids = new Set<string>();
+    for (const board of releaseBoards) {
+      if (board.projectId) ids.add(board.projectId);
+    }
+    return Array.from(ids).sort();
+  }, [releaseBoards]);
+
+  // Services grouped by main release board → read-only chips under each repo.
+  const [releaseApplications] = useCachedQuery(
+    queries.applicationsByProjectIds({ projectIds: releaseProjectIds }),
+    { enabled: isReleaseLine && releaseProjectIds.length > 0 },
+  );
+  const { servicesByMainBoard, repoUrlByMainBoard } = useMemo(() => {
+    const services = new Map<string, string[]>();
+    const repoUrls = new Map<string, string>();
+    const list =
+      !releaseApplications || releaseApplications instanceof Error ? [] : releaseApplications;
+    for (const app of list) {
+      if (!app.mainReleaseBoardId) continue;
+      const names = services.get(app.mainReleaseBoardId) ?? [];
+      names.push(app.name);
+      services.set(app.mainReleaseBoardId, names);
+      if (app.repoUrl) repoUrls.set(app.mainReleaseBoardId, app.repoUrl);
+    }
+    return { servicesByMainBoard: services, repoUrlByMainBoard: repoUrls };
+  }, [releaseApplications]);
+
+  const isVersionBoard = (board: { releaseTrackingMode?: string | null } | undefined): boolean =>
+    board?.releaseTrackingMode === ReleaseTrackingMode.VERSION;
+  const primaryReleaseBoard = releaseBoards.find(b => b.id === formValues.boardId);
+  // The backend runs a release by its primary board's mode, and a version release
+  // records only that board, so every selected repo shares the primary's mode.
+  const isVersionRelease = isReleaseLine && isVersionBoard(primaryReleaseBoard);
 
   const boardMetadata = selectedBoard?.metadata as BoardMetadata | null;
 
@@ -607,13 +643,21 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
   useEffect(() => {
     if (ticketKind === 'release') return;
     if (formValues.boardId) {
-      form.setFieldValue('dynamicFields', {});
-      markAutoApplied({ dynamicFields: serializeDynamicFields({}) });
+      const seeded = formValues.boardId === selectedBoardId ? (initialDynamicFields ?? {}) : {};
+      form.setFieldValue('dynamicFields', seeded);
+      markAutoApplied({ dynamicFields: serializeDynamicFields(seeded) });
     }
     setSelectedRepoBoardIds([]);
     setRepoRanges({});
     hasPopulatedRepoDeployed.current = new Set();
-  }, [formValues.boardId, form, markAutoApplied, ticketKind]);
+  }, [
+    formValues.boardId,
+    form,
+    markAutoApplied,
+    ticketKind,
+    selectedBoardId,
+    initialDynamicFields,
+  ]);
 
   useEffect(() => {
     if (!isOpen) {
@@ -724,8 +768,13 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
 
   // Project-level tags — lazy-loaded when the label dropdown is first opened
   const [tagsQueried, setTagsQueried] = useState(false);
+  const [tagSearch, setTagSearch] = useState('');
+  const debouncedTagSearch = useDebouncedValue(tagSearch.trim(), 200);
   const [projectTags] = useCachedQuery(
-    queries.projectTagsByProjectId({ projectId: selectedBoard?.projectId ?? '' }),
+    queries.projectTagsByProjectId({
+      projectId: selectedBoard?.projectId ?? '',
+      search: debouncedTagSearch,
+    }),
     { enabled: tagsQueried && !!selectedBoard?.projectId },
   );
 
@@ -1174,14 +1223,18 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
     ],
   );
 
-  const releaseGateMessage = useMemo(() => {
-    if (ticketKind !== 'release') return null;
-    if (!formValues?.boardId) return 'Select at least one repository';
+  const releaseVersionValue = formValues?.dynamicFields?.['releaseVersion'];
+  const releaseVersion = (
+    Array.isArray(releaseVersionValue)
+      ? (releaseVersionValue[0] ?? '')
+      : (releaseVersionValue ?? '')
+  ).trim();
+
+  const releaseRanges = useMemo(() => {
     const df = formValues?.dynamicFields ?? {};
     const one = (v: string | string[] | undefined): string =>
       (Array.isArray(v) ? (v[0] ?? '') : (v ?? '')).trim();
-    const isSha = (v: string): boolean => /^[0-9a-f]{7,40}$/i.test(v);
-    const ranges = [
+    return [
       {
         branch: one(df['branch']),
         deployed: one(df['deployedCommitId']),
@@ -1193,23 +1246,50 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
         next: (repoRanges[id]?.newCommit ?? '').trim(),
       })),
     ];
-    if (ranges.some(r => !r.branch || !r.deployed || !r.next)) {
+  }, [formValues?.dynamicFields, selectedRepoBoardIds, repoRanges]);
+  const releaseNeedsRepo = !formValues?.boardId;
+  const releaseNeedsVersion = !releaseNeedsRepo && isVersionRelease && !releaseVersion;
+  const releaseNeedsRange =
+    !releaseNeedsRepo &&
+    !isVersionRelease &&
+    releaseRanges.some(r => !r.branch || !r.deployed || !r.next);
+
+  const releaseGateMessage = useMemo(() => {
+    if (ticketKind !== 'release') return null;
+    if (releaseNeedsRepo) return 'Select at least one repository';
+    if (releaseNeedsVersion) return 'Enter the release version';
+    if (isVersionRelease) return null;
+    const isSha = (v: string): boolean => /^[0-9a-f]{7,40}$/i.test(v);
+    if (releaseNeedsRange) {
       return 'Enter the branch and deployed → new commit range for every selected repository';
     }
-    if (ranges.some(r => !isSha(r.deployed) || !isSha(r.next))) {
+    if (releaseRanges.some(r => !isSha(r.deployed) || !isSha(r.next))) {
       return 'Commit values must be valid hashes (7–40 hex characters)';
     }
-    if (ranges.some(r => r.deployed === r.next)) {
+    if (releaseRanges.some(r => r.deployed === r.next)) {
       return 'Deployed and new commit must be different';
     }
     return null;
   }, [
     ticketKind,
-    formValues?.boardId,
-    formValues?.dynamicFields,
-    selectedRepoBoardIds,
-    repoRanges,
+    releaseNeedsRepo,
+    releaseNeedsVersion,
+    releaseNeedsRange,
+    isVersionRelease,
+    releaseRanges,
   ]);
+
+  const releaseHint = ((): string | null => {
+    if (ticketKind !== 'release') return null;
+    const missing = [
+      !formValues?.title?.trim() && 'a title',
+      (formValues?.description ?? '').trim().length < 5 && 'a description',
+      releaseNeedsRepo && 'a repository',
+      releaseNeedsVersion && 'a version',
+      releaseNeedsRange && 'branch & commits',
+    ].filter(Boolean);
+    return missing.length > 0 ? `Add ${missing.join(', ')}` : null;
+  })();
 
   // CREATE_TICKET_SUCCEEDED: the "it exists now" row. SUBMIT_CREATE_TICKET_MODAL is
   // the click; this fires only after POST /tickets returned an id, with the shape
@@ -1356,9 +1436,13 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
           ? filterActiveDynamicFieldValues(resolvedFormFields, formData.dynamicFields)
           : formData.dynamicFields;
 
-      const submitDynamicFields: Record<string, string | string[]> =
+      const submitDynamicFields: Record<string, string | string[]> = !(
         isReleaseLine && !!formData.boardId
-          ? {
+      )
+        ? filteredDynamicFields
+        : isVersionRelease
+          ? withoutRangeFields(filteredDynamicFields)
+          : {
               ...filteredDynamicFields,
               releaseRepos: JSON.stringify([
                 {
@@ -1376,8 +1460,7 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
                   newCommit: repoRanges[id]?.newCommit ?? '',
                 })),
               ]),
-            }
-          : filteredDynamicFields;
+            };
 
       // Split assignee into assignedTo and userGroupId
       const assignedTo = formData.assignee?.type === 'assigneeTo' ? formData.assignee.value : null;
@@ -1550,6 +1633,20 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
         createdTicketResponse = response.data;
         processTicketCreationResponse(response, formData.workflowType, effectiveChannelId);
         trackCreateSucceeded(formData, response.data, effectiveChannelId);
+      }
+      if (formData.tags && formData.tags.length > 0) {
+        const recentLabelsKey = `${RECENT_LABELS_STORAGE_KEY}:${user.id}:${formData.boardId}`;
+        try {
+          const stored = JSON.parse(localStorage.getItem(recentLabelsKey) ?? '[]') as string[];
+          const recent = [...new Set([...formData.tags, ...stored])].slice(0, RECENT_LABELS_LIMIT);
+          localStorage.setItem(recentLabelsKey, JSON.stringify(recent));
+        } catch (error) {
+          logger.warn(LogEvent.FRONTEND_ERROR, {
+            type: 'recent_labels_save_failed',
+            message: 'Failed to save recent labels',
+            error: error,
+          });
+        }
       }
       const subticketsToCreate = normalizeSubTicketDrafts(subTickets);
       if (createdTicketResponse?.id && subticketsToCreate.length > 0) {
@@ -1823,7 +1920,8 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
     if (!formValues?.boardId) {
       form.setFieldValue('boardId', id);
       const df = formValues?.dynamicFields ?? {};
-      if (!getSingleStringValue(df['branch'] ?? '').trim()) {
+      const board = releaseBoards.find(b => b.id === id);
+      if (!isVersionBoard(board) && !getSingleStringValue(df['branch'] ?? '').trim()) {
         form.setFieldValue('dynamicFields', { ...df, branch: 'main' });
       }
     } else {
@@ -1834,6 +1932,62 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
       }));
     }
   };
+
+  const makePrimaryRepo = (id: string): void => {
+    const previousPrimary = formValues?.boardId;
+    if (!previousPrimary || !selectedRepoBoardIds.includes(id)) return;
+    const previousRange = getRepoRange(previousPrimary);
+    const nextRange = repoRanges[id] ?? { branch: 'main', deployedCommit: '', newCommit: '' };
+    form.setFieldValue('boardId', id);
+    form.setFieldValue('dynamicFields', {
+      ...formValues?.dynamicFields,
+      branch: nextRange.branch,
+      deployedCommitId: nextRange.deployedCommit,
+      newCommitId: nextRange.newCommit,
+    });
+    setSelectedRepoBoardIds(prev => [previousPrimary, ...prev.filter(x => x !== id)]);
+    setRepoRanges(prev => ({ ...prev, [previousPrimary]: previousRange }));
+  };
+
+  const releaseRepoDisabledReason = (board: (typeof releaseBoards)[number]): string | null => {
+    if (!primaryReleaseBoard || board.id === primaryReleaseBoard.id) return null;
+    if (isVersionRelease) return 'A version release covers one repository';
+    return isVersionBoard(board) ? 'Uses version tracking — release it separately' : null;
+  };
+
+  const clearRepos = useCallback((): void => {
+    form.setFieldValue('boardId', '');
+    form.setFieldValue(
+      'dynamicFields',
+      withoutRangeFields(form.getFieldValue('dynamicFields') ?? {}),
+    );
+    setSelectedRepoBoardIds([]);
+    setRepoRanges({});
+    hasPopulatedRepoDeployed.current = new Set();
+    hasPopulatedDeployedCommitId.current = false;
+  }, [form]);
+
+  const releaseRepoRows: ReleaseRepoRow[] = releaseBoards.map(board => {
+    const repoUrl = repoUrlByMainBoard.get(board.id);
+    return {
+      id: board.id,
+      name: repoUrl ? repoShortName(repoUrl) : board.name,
+      isVersion: isVersionBoard(board),
+      services: servicesByMainBoard.get(board.id) ?? [],
+      selected: board.id === formValues?.boardId || selectedRepoBoardIds.includes(board.id),
+      primary: board.id === formValues?.boardId,
+      disabledReason: releaseRepoDisabledReason(board),
+      range: getRepoRange(board.id),
+    };
+  });
+
+  // A different release channel lists different repositories, so start the pick over.
+  const releaseChannelRef = useRef(effectiveChannelId);
+  useEffect(() => {
+    if (!isReleaseLine || releaseChannelRef.current === effectiveChannelId) return;
+    releaseChannelRef.current = effectiveChannelId;
+    clearRepos();
+  }, [isReleaseLine, effectiveChannelId, clearRepos]);
 
   const boardOptions = useMemo(
     () =>
@@ -1968,10 +2122,24 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
     selfId,
   ]);
 
+  const recentTags = useMemo(() => {
+    if (!isOpen || !user?.id || !formValues.boardId) return EMPTY_TAGS;
+    const recentLabelsKey = `${RECENT_LABELS_STORAGE_KEY}:${user.id}:${formValues.boardId}`;
+    try {
+      return JSON.parse(localStorage.getItem(recentLabelsKey) ?? '[]') as string[];
+    } catch {
+      return EMPTY_TAGS;
+    }
+  }, [isOpen, user?.id, formValues.boardId]);
+
   // Get tag options
   const tagOptions = useMemo(() => {
     const selectedTags = formValues.tags ?? [];
-    const allTags = [...new Set([...availableTags, ...newTags, ...initialTags, ...selectedTags])];
+    const allTags = [
+      ...new Set([...availableTags, ...newTags, ...initialTags, ...selectedTags, ...recentTags]),
+    ];
+    const recentRank = new Map(recentTags.map((tag, index) => [tag, index]));
+    const rankOf = (tag: string): number => recentRank.get(tag) ?? recentTags.length;
 
     return allTags
       .filter(tag => typeof tag === 'string' && tag.trim().length > 0)
@@ -1979,8 +2147,9 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
         label: tag,
         value: tag,
         icon: <span className={cn('size-2 rounded-full', TAG_COLORS[index % TAG_COLORS.length])} />,
-      }));
-  }, [availableTags, newTags, initialTags, formValues.tags]);
+      }))
+      .sort((a, b) => rankOf(a.value) - rankOf(b.value));
+  }, [availableTags, newTags, initialTags, formValues.tags, recentTags]);
 
   const requiredDynamicFields = useMemo(() => {
     const visibilityMap = boardMetadata?.customFieldVisibility;
@@ -2011,7 +2180,7 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
   const visibleDynamicFields = useMemo(
     () =>
       isReleaseLine
-        ? activeDynamicFields.filter(f => !PRIMARY_RANGE_FIELD_NAMES.includes(f.fieldName))
+        ? activeDynamicFields.filter(f => !RELEASE_INLINE_FIELD_NAMES.includes(f.fieldName))
         : activeDynamicFields,
     [activeDynamicFields, isReleaseLine],
   );
@@ -2479,16 +2648,27 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
               >
                 {field => {
                   if (ticketKind === 'release') return null;
+                  // A channel with no linked boards would otherwise render an empty
+                  // picker and only explain itself via "Board is required" on submit.
+                  // Guarded on a channel actually being chosen — in the pick-a-channel
+                  // variant there is none yet, and the boards are empty for that reason.
+                  if (effectiveChannelId && boardOptions.length === 0) {
+                    return (
+                      <p className='text-xs text-muted-foreground'>
+                        No boards are configured for this channel. Link a board to it before
+                        creating tickets.
+                      </p>
+                    );
+                  }
                   return (
                     <EntitySelector
-                      showSearch={false}
                       options={boardOptions}
                       selectedValue={field.state.value || ''}
                       onSelect={(value: string | null) => {
                         field.handleChange(value as CreateTicketFormData['boardId']);
                         setBoardSelectorOpen(false);
                       }}
-                      searchPlaceholder='board'
+                      searchPlaceholder='Search boards'
                       placeholder='Select a board'
                       inputIcon={<SquareKanban className='size-3.5' strokeWidth={2.33} />}
                       inputClassName='!h-8 rounded-lg'
@@ -2503,139 +2683,18 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
             </div>
 
             {isReleaseLine && (
-              <div className='space-y-2'>
-                <div className='flex items-baseline justify-between'>
-                  <span className='font-mono text-[10px] uppercase tracking-wide text-muted-foreground'>
-                    Repositories
-                  </span>
-                  <span className='font-mono text-[11px] text-muted-foreground'>
-                    {(formValues?.boardId ? 1 : 0) + selectedRepoBoardIds.length} selected
-                  </span>
-                </div>
-
-                {releaseBoardOptions.map(o => {
-                  const id = o.value;
-                  const isPrimary = id === formValues?.boardId;
-                  const selected = isPrimary || selectedRepoBoardIds.includes(id);
-                  const range = getRepoRange(id);
-                  const setField = (
-                    key: 'branch' | 'deployedCommit' | 'newCommit',
-                    value: string,
-                  ) => setRepoRangeField(id, key, value);
-                  const toggle = () => toggleRepoBoard(id);
-                  return (
-                    <div
-                      key={id}
-                      className={cn(
-                        'rounded-xl border px-3 py-2.5 transition-colors',
-                        selected ? 'border-primary/40 bg-primary/5' : 'border-border bg-muted/20',
-                      )}
-                    >
-                      <div className='flex items-center gap-3'>
-                        <button
-                          type='button'
-                          onClick={toggle}
-                          aria-pressed={selected}
-                          aria-label={selected ? `Remove ${o.label}` : `Add ${o.label}`}
-                          data-track-category='CreateTicket'
-                          data-track-name='ToggleReleaseRepo'
-                          className={cn(
-                            'grid size-[18px] shrink-0 place-items-center rounded-[5px] border text-[11px] font-semibold transition-colors',
-                            selected
-                              ? 'border-primary bg-primary text-primary-foreground'
-                              : 'border-border text-transparent hover:border-primary/60',
-                          )}
-                        >
-                          ✓
-                        </button>
-                        <RepoDot color={repoColor(id)} className={selected ? '' : 'opacity-50'} />
-                        <button
-                          type='button'
-                          onClick={toggle}
-                          data-track-category='CreateTicket'
-                          data-track-name='ToggleReleaseRepoLabel'
-                          className={cn(
-                            'min-w-0 flex-1 truncate text-left text-sm font-semibold',
-                            selected ? 'text-foreground' : 'text-muted-foreground',
-                          )}
-                        >
-                          {o.label}
-                        </button>
-                        {isPrimary && (
-                          <span className='shrink-0 rounded-md bg-primary/15 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-primary'>
-                            Primary
-                          </span>
-                        )}
-                        {selected ? (
-                          <div className='flex shrink-0 items-center gap-1.5'>
-                            <input
-                              value={range.deployedCommit}
-                              onChange={e => setField('deployedCommit', e.target.value)}
-                              placeholder='deployed'
-                              className='w-[92px] rounded-md border border-border bg-background px-2 py-1 font-mono text-[11px] text-foreground placeholder:text-muted-foreground focus:border-primary focus:outline-none'
-                              data-track-category='CreateTicket'
-                              data-track-name='RepoDeployedCommit'
-                            />
-                            <span className='text-muted-foreground'>→</span>
-                            <input
-                              value={range.newCommit}
-                              onChange={e => setField('newCommit', e.target.value)}
-                              placeholder='new'
-                              className='w-[92px] rounded-md border border-border bg-background px-2 py-1 font-mono text-[11px] text-foreground placeholder:text-muted-foreground focus:border-primary focus:outline-none'
-                              data-track-category='CreateTicket'
-                              data-track-name='RepoNewCommit'
-                            />
-                          </div>
-                        ) : (
-                          <div className='flex shrink-0 items-center gap-1.5 opacity-40'>
-                            <span className='w-[92px] rounded-md border border-border px-2 py-1 text-center font-mono text-[11px] text-muted-foreground'>
-                              —
-                            </span>
-                            <span className='text-muted-foreground'>→</span>
-                            <span className='w-[92px] rounded-md border border-border px-2 py-1 text-center font-mono text-[11px] text-muted-foreground'>
-                              —
-                            </span>
-                          </div>
-                        )}
-                      </div>
-                      {selected && (
-                        <div className='mt-2 flex items-center gap-2 pl-[30px]'>
-                          <label
-                            htmlFor={`repo-branch-${id}`}
-                            className='font-mono text-[10px] uppercase tracking-wide text-muted-foreground'
-                          >
-                            Branch
-                          </label>
-                          <input
-                            id={`repo-branch-${id}`}
-                            value={range.branch}
-                            onChange={e => setField('branch', e.target.value)}
-                            placeholder='main'
-                            className='w-40 rounded-md border border-border bg-background px-2 py-1 text-[12px] text-foreground placeholder:text-muted-foreground focus:border-primary focus:outline-none'
-                            data-track-category='CreateTicket'
-                            data-track-name='RepoBranch'
-                          />
-                        </div>
-                      )}
-                      {(servicesByMainBoard.get(id)?.length ?? 0) > 0 && (
-                        <div className='mt-2 flex flex-wrap items-center gap-1.5 pl-[30px]'>
-                          <span className='font-mono text-[10px] uppercase tracking-wide text-muted-foreground'>
-                            Services
-                          </span>
-                          {servicesByMainBoard.get(id)!.map(name => (
-                            <span
-                              key={name}
-                              className='rounded-md bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground'
-                            >
-                              {name}
-                            </span>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
+              <ReleaseRepositoriesSection
+                repos={releaseRepoRows}
+                version={getSingleStringValue(formValues?.dynamicFields?.['releaseVersion'] ?? '')}
+                versionError={dynamicFieldErrors['releaseVersion']}
+                onToggle={toggleRepoBoard}
+                onMakePrimary={makePrimaryRepo}
+                onClear={clearRepos}
+                onRangeChange={(id: string, key: ReleaseRangeKey, value: string) =>
+                  setRepoRangeField(id, key, value)
+                }
+                onVersionChange={value => handleDynamicFieldChange('releaseVersion', value)}
+              />
             )}
           </div>
 
@@ -2890,8 +2949,10 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
                       setNewTags(prev => [...prev, value]);
                       field.handleChange([...field.state.value, value]);
                     }}
+                    onSearchChange={setTagSearch}
                     onOpenChange={open => {
                       if (open && !tagsQueried) setTagsQueried(true);
+                      if (!open) setTagSearch('');
                     }}
                     placeholder={`Label${mandatoryLabels ? ' *' : ''}`}
                     searchPlaceholder='Search labels'
@@ -2960,6 +3021,9 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
           </div>
 
           <div className='flex items-center gap-3'>
+            {releaseHint && (
+              <span className='text-[12.5px] text-muted-foreground'>{releaseHint}</span>
+            )}
             <Button
               type='submit'
               loading={form.state.isSubmitting}

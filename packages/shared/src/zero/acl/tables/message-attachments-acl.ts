@@ -1,7 +1,7 @@
 import type { Query } from '@rocicorp/zero';
 import type { Schema, Context } from '../../schema';
 import { ChannelVisibility } from '../../schema';
-import { AttachmentEntityType } from '../../types';
+import { AttachmentEntityType, UNSENT_ATTACHMENT_ENTITY_TYPES } from '../../types';
 import { BaseQueryACL } from '../core/base-acl';
 import type { SelectArgs } from '../core/types';
 import {
@@ -27,11 +27,14 @@ export class MessageAttachmentsACL extends BaseQueryACL<'message_attachments'> {
         .where(({ or, and, cmp, exists }) =>
           or(
             cmp('createdBy', '=', this.ctx.userID),
-            exists('conversation', c =>
-              c.whereExists('channel', ch =>
-                ch
-                  .where('workspaceId', '=', this.ctx.workspaceId)
-                  .where(guestChannelAccessWhere(this.ctx)),
+            and(
+              cmp('entityType', 'NOT IN', UNSENT_ATTACHMENT_ENTITY_TYPES),
+              exists('conversation', c =>
+                c.whereExists('channel', ch =>
+                  ch
+                    .where('workspaceId', '=', this.ctx.workspaceId)
+                    .where(guestChannelAccessWhere(this.ctx)),
+                ),
               ),
             ),
             and(
@@ -53,10 +56,13 @@ export class MessageAttachmentsACL extends BaseQueryACL<'message_attachments'> {
         .where(({ or, and, cmp, exists }) =>
           or(
             cmp('createdBy', '=', this.ctx.userID),
-            exists('conversation', c =>
-              c
-                .where('channelId', channelId)
-                .whereExists('channel', scalarChannelBody(this.ctx, channelId, isMember), SCALAR),
+            and(
+              cmp('entityType', 'NOT IN', UNSENT_ATTACHMENT_ENTITY_TYPES),
+              exists('conversation', c =>
+                c
+                  .where('channelId', channelId)
+                  .whereExists('channel', scalarChannelBody(this.ctx, channelId, isMember), SCALAR),
+              ),
             ),
             and(
               cmp('entityType', '=', AttachmentEntityType.SDLC_HUB),
@@ -76,20 +82,23 @@ export class MessageAttachmentsACL extends BaseQueryACL<'message_attachments'> {
       .where(({ or, and, cmp, exists }) =>
         or(
           cmp('createdBy', '=', this.ctx.userID),
-          exists('conversation', (c) =>
-            // Pin the join direction — see tickets-acl.ts for the full rationale.
-            // Prod: this arm flipped is the getConversationAttachementsV2
-            // 60k-channel scan (73s worst-case materializations, 2026-09-15).
-            c.whereExists('channel', (ch) =>
-              ch
-                .where('workspaceId', '=', this.ctx.workspaceId)
-                .where(({ or: or2, cmp: cmp2, exists: exists2 }) =>
-                  or2(
-                    cmp2('visibility', '=', ChannelVisibility.PUBLIC),
-                    exists2('participants', (p) => p.where('userId', this.ctx.userID)),
+          and(
+            cmp('entityType', 'NOT IN', UNSENT_ATTACHMENT_ENTITY_TYPES),
+            exists('conversation', (c) =>
+              // Pin the join direction — see tickets-acl.ts for the full rationale.
+              // Prod: this arm flipped is the getConversationAttachementsV2
+              // 60k-channel scan (73s worst-case materializations, 2026-09-15).
+              c.whereExists('channel', (ch) =>
+                ch
+                  .where('workspaceId', '=', this.ctx.workspaceId)
+                  .where(({ or: or2, cmp: cmp2, exists: exists2 }) =>
+                    or2(
+                      cmp2('visibility', '=', ChannelVisibility.PUBLIC),
+                      exists2('participants', (p) => p.where('userId', this.ctx.userID)),
+                    ),
                   ),
-                ),
-              { flip: false },
+                { flip: false },
+              ),
             ),
           ),
           and(

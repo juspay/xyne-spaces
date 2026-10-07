@@ -22,7 +22,9 @@
  *
  * Redelivery therefore asks ownerStatus(): free → claim; mine → claim; held by a
  * pod whose alive key EXISTS → FROZEN, defer and never steal; held by a pod with
- * no alive key → DEAD, take over immediately. Owner tokens are `<pod>:<uuid>` so
+ * no alive key → DEAD, take over immediately. The claim itself is a compare-and-set
+ * that only replaces the exact dead holder that was inspected, so two workers
+ * racing for the same session cannot both win. Owner tokens are `<pod>:<uuid>` so
  * the holder's pod name is recoverable from the token alone.
  *
  * Fail-open on every Redis error: a registry outage must never block execution.
@@ -30,7 +32,7 @@
 
 import { Redis } from "ioredis";
 import { randomUUID } from "node:crypto";
-import { hostname } from "node:os";
+import { hostname, networkInterfaces } from "node:os";
 import { createLogger } from "./logger.js";
 
 const clog = createLogger("run-ownership");
@@ -41,6 +43,7 @@ export const POD_ALIVE_TTL_SECONDS = 120;
 export const POD_ALIVE_REFRESH_INTERVAL_MS = 30_000;
 export const OWNER_KEY_PREFIX = "claw:run-owner:";
 export const POD_ALIVE_KEY_PREFIX = "claw:pod-alive:";
+export const POD_ADDR_KEY_PREFIX = "claw:pod-addr:";
 
 let client: Redis | null = null;
 let disabled = false;
@@ -56,6 +59,57 @@ export function podAliveKey(pod: string): string {
 
 export function podName(): string {
   return process.env["POD_ID"] ?? hostname();
+}
+
+export function podAddrKey(pod: string): string {
+  return `${POD_ADDR_KEY_PREFIX}${pod}`;
+}
+
+function ownIpv4(): string | null {
+  const fromEnv = process.env["POD_IP"]?.trim();
+  if (fromEnv) return fromEnv;
+  for (const addrs of Object.values(networkInterfaces())) {
+    for (const addr of addrs ?? []) {
+      if (addr.family === "IPv4" && !addr.internal) return addr.address;
+    }
+  }
+  return null;
+}
+
+let podAddrTimer: ReturnType<typeof setInterval> | null = null;
+
+export function startPodAddressPublisher(port: number): void {
+  if (podAddrTimer) return;
+  const ip = ownIpv4();
+  if (!ip) {
+    clog.warn("[run-ownership] no non-internal IPv4 found — pod address not published; /debug cannot be routed to this pod");
+    return;
+  }
+  const url = `http://${ip}:${port}`;
+  const publish = async (): Promise<void> => {
+    const c = getClient();
+    if (!c) return;
+    try {
+      await c.set(podAddrKey(podName()), url, "EX", POD_ALIVE_TTL_SECONDS);
+    } catch (err) {
+      warnFailOpen("pod-addr", err);
+    }
+  };
+  void publish();
+  podAddrTimer = setInterval(() => { void publish(); }, POD_ALIVE_REFRESH_INTERVAL_MS);
+  podAddrTimer.unref();
+}
+
+export async function podAddress(pod: string): Promise<string | null> {
+  const c = getClient();
+  if (!c) return null;
+  try {
+    const value = await c.get(podAddrKey(pod));
+    return typeof value === "string" && value.length > 0 ? value : null;
+  } catch (err) {
+    warnFailOpen("pod-addr-read", err);
+    return null;
+  }
 }
 
 export function ownerPodFromToken(token: string): string | null {
@@ -115,12 +169,27 @@ export function createOwnerToken(): string {
   return `${podName()}:${randomUUID()}`;
 }
 
-export async function claimOwnership(sessionId: string, ownerToken: string): Promise<boolean> {
+export const OWNERSHIP_CLAIM_SCRIPT = `
+local current = redis.call('GET', KEYS[1])
+if current == false or current == ARGV[1] or (ARGV[3] ~= '' and current == ARGV[3]) then
+  redis.call('SET', KEYS[1], ARGV[1], 'EX', ARGV[2])
+  return 1
+end
+return 0`;
+
+export async function claimOwnership(sessionId: string, ownerToken: string, takeoverFrom?: string | null): Promise<boolean> {
   const c = getClient();
   if (!c) return true;
   try {
-    await c.set(keyFor(sessionId), ownerToken, "EX", OWNERSHIP_TTL_SECONDS);
-    return true;
+    const res = await c.eval(
+      OWNERSHIP_CLAIM_SCRIPT,
+      1,
+      keyFor(sessionId),
+      ownerToken,
+      String(OWNERSHIP_TTL_SECONDS),
+      takeoverFrom ?? "",
+    );
+    return Number(res) === 1;
   } catch (err) {
     warnFailOpen("claim", err);
     return true;
@@ -161,21 +230,30 @@ export async function isOwnedByOther(sessionId: string, ownerToken: string): Pro
 
 export type OwnerStatus = "free" | "mine" | "alive-other" | "dead-other";
 
-export async function ownerStatus(sessionId: string, myToken: string): Promise<OwnerStatus> {
+export interface OwnerSnapshot {
+  status: OwnerStatus;
+  holder: string | null;
+}
+
+export async function inspectOwner(sessionId: string, myToken: string): Promise<OwnerSnapshot> {
   const c = getClient();
-  if (!c) return "free";
+  if (!c) return { status: "free", holder: null };
   try {
     const current = await c.get(keyFor(sessionId));
-    if (typeof current !== "string" || current.length === 0) return "free";
-    if (current === myToken) return "mine";
+    if (typeof current !== "string" || current.length === 0) return { status: "free", holder: null };
+    if (current === myToken) return { status: "mine", holder: current };
     const pod = ownerPodFromToken(current);
-    if (!pod) return "dead-other";
+    if (!pod) return { status: "dead-other", holder: current };
     const alive = await c.exists(podAliveKey(pod));
-    return Number(alive) > 0 ? "alive-other" : "dead-other";
+    return { status: Number(alive) > 0 ? "alive-other" : "dead-other", holder: current };
   } catch (err) {
     warnFailOpen("owner-status", err);
-    return "free";
+    return { status: "free", holder: null };
   }
+}
+
+export async function ownerStatus(sessionId: string, myToken: string): Promise<OwnerStatus> {
+  return (await inspectOwner(sessionId, myToken)).status;
 }
 
 export async function currentOwnerPod(sessionId: string): Promise<string | null> {

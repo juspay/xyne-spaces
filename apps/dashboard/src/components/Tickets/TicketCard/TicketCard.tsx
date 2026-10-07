@@ -614,7 +614,7 @@ export const TicketCard: React.FC<TicketCardProps> = ({
           onClick={e => onClick?.(e)}
           data-testid={`ticket-card-${ticket.id}`}
           className={cn(
-            `flex items-center gap-3 text-left ${releaseBoardBgColor} rounded-md border w-full px-3 py-1.5 hover:shadow-sm transition-all cursor-pointer group shadow-sm`,
+            `flex items-center gap-3 text-left ${releaseBoardBgColor} rounded-md border w-full px-3 py-1.5 hover:shadow-sm transition cursor-pointer group shadow-sm`,
           )}
           data-track-category='Tickets'
           data-track-name='OpenTicketCard'
@@ -654,13 +654,22 @@ export const TicketCard: React.FC<TicketCardProps> = ({
   }
 
   return (
-    <button
-      type='button'
+    // Not a <button>: the card holds buttons of its own (assignee, priority, stage),
+    // and a button can't contain another. It still behaves as one.
+    <div
+      role='button'
+      tabIndex={0}
       onClick={e => onClick?.(e)}
+      onKeyDown={e => {
+        // The card's own keys only; the controls inside it handle theirs.
+        if (e.target !== e.currentTarget || (e.key !== 'Enter' && e.key !== ' ')) return;
+        e.preventDefault();
+        onClick?.(e.nativeEvent);
+      }}
       data-testid={`ticket-card-${ticket.id}`}
       className={cn(
         width,
-        `text-left ${releaseBoardBgColor} rounded-xl border w-full max-w-lg hover:shadow-sm transition-all cursor-pointer group shadow-sm relative container-type-inline overflow-hidden`,
+        `text-left ${releaseBoardBgColor} rounded-xl border w-full max-w-lg hover:shadow-sm transition cursor-pointer group shadow-sm relative container-type-inline overflow-hidden`,
         isCompact ? 'p-3' : 'p-0',
         isCompact && isEmailRead && 'email-read-card shadow-none',
       )}
@@ -1075,6 +1084,6 @@ export const TicketCard: React.FC<TicketCardProps> = ({
           </div>
         </div>
       </div>
-    </button>
+    </div>
   );
 };

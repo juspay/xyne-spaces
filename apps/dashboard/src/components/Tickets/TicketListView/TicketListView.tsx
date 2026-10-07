@@ -8,13 +8,13 @@ import { Popover } from '../../ui/Popover/Popover';
 import { TicketListRow } from './TicketListRow';
 import { queries } from '../../../zero/queries';
 import { useShortcut } from '../../../shortcuts';
-import { useRacedQuery } from '../../../hooks/useRacedQuery';
+import { useCachedQuery } from '../../../hooks/useCachedQuery';
 import { useAuthContextValues } from '../../../hooks/useAuth';
 import { dataLoadDuration, safeRecordMetric } from '../../../services/otel';
 import { logger, Event } from '../../../utils/logger';
 import type { QueryResultType } from '@rocicorp/zero';
 import type { TicketListItem } from './TicketListView.types';
-import { TicketPriority } from '@xyne/shared';
+import { DeskType, TicketPriority, MailboxState } from '@xyne/shared';
 import type { MailboxFolder } from '../../xyne-desk/DeskFolders/DeskMailboxSidebar';
 import {
   ticketMatchesDynamicFieldEntries,
@@ -22,25 +22,29 @@ import {
   type DynamicFieldQueryFilter,
   type FormEntityValueLike,
 } from '../../../utils/board/dynamicFieldFilters';
+import type { ResolvedDisplayFormField } from '../../../utils/board/resolveDisplayFormFields';
+import { dynamicColumnKey } from '../TicketTable/TicketTableTypes';
 import {
   DEFAULT_TICKET_LIST_COLUMN_WIDTHS,
+  dynamicFieldListColumn,
   getTicketListColumnAlignClass,
   getTicketListGridTemplate,
+  orderTicketListColumns,
   TICKET_LIST_COLUMN_GAP,
   TICKET_LIST_COLUMN_PADDING_X,
   TICKET_LIST_COLUMNS,
   TICKET_LIST_HORIZONTAL_PADDING,
   TICKET_LIST_SELECTION_COLUMN_WIDTH,
-  type TicketListColumnKey,
   type TicketListColumnWidths,
 } from './ticketListColumns';
+import type { TicketListColumnDefinition } from './ticketListColumns';
 
 const PAGE_SIZE = 50;
 const COLUMN_WIDTHS_STORAGE_KEY = 'xyne:desk-ticket-list-column-widths:v2';
 
 interface ColumnResizeDrag {
-  column: TicketListColumnKey;
-  adjacentColumn: TicketListColumnKey;
+  column: string;
+  adjacentColumn: string;
   pointerId: number;
   startX: number;
   startWidth: number;
@@ -56,8 +60,9 @@ interface ColumnResizeDrag {
 const computeAvailableColumnsWidth = (
   containerWidth: number,
   showSelectionColumn: boolean,
+  visibleColumnCount: number = TICKET_LIST_COLUMNS.length,
 ): number => {
-  const columnCount = TICKET_LIST_COLUMNS.length + (showSelectionColumn ? 1 : 0);
+  const columnCount = visibleColumnCount + (showSelectionColumn ? 1 : 0);
   return Math.max(
     1,
     containerWidth -
@@ -75,10 +80,9 @@ const loadColumnWidths = (): TicketListColumnWidths => {
     const stored = localStorage.getItem(COLUMN_WIDTHS_STORAGE_KEY);
     if (!stored) return widths;
     const parsed = JSON.parse(stored) as Record<string, unknown>;
-    for (const column of TICKET_LIST_COLUMNS) {
-      const storedWidth = parsed[column.key];
+    for (const [key, storedWidth] of Object.entries(parsed)) {
       if (typeof storedWidth === 'number' && Number.isFinite(storedWidth) && storedWidth > 0) {
-        widths[column.key] = storedWidth;
+        widths[key] = storedWidth;
       }
     }
   } catch {
@@ -91,7 +95,7 @@ export type SupportTicketRow = NonNullable<
   QueryResultType<typeof queries.supportTicketsPageV4>[number]
 >;
 
-type PageCursor = { id: string; lastEmailAt: number };
+export type PageCursor = { id: string; lastEmailAt: number };
 
 interface TicketListViewProps {
   filter: {
@@ -115,6 +119,11 @@ interface TicketListViewProps {
   dynamicFieldEntries?: DynamicFieldFilterEntry[] | undefined;
   onTicketClick: (ticket: SupportTicketRow) => void;
   isMember: boolean;
+  /**
+   * When set, the current page is filtered into a per-user mailbox folder (Inbox / All Mail /
+   * Starred / Spam) using each ticket's `userMailbox` overlay. Filtering is client-side
+   * (a ticket with no overlay row defaults to Inbox, which can't be expressed server-side).
+   */
   mailboxFolder?: MailboxFolder | undefined;
   activeTicketId?: string | null | undefined;
   showExtraFields?: boolean;
@@ -127,6 +136,18 @@ interface TicketListViewProps {
   onPageChange?: (pageIndex: number) => void;
   onToggleSelectAll?: (rows: SelectableRow[], select: boolean) => void;
   onTicketsLoaded?: (tickets: SupportTicketRow[]) => void;
+  deskType?: string;
+  visibleColumnKeys?: ReadonlySet<string> | undefined;
+  dynamicFieldColumns?: ResolvedDisplayFormField[] | undefined;
+  columnOrder?: string[] | undefined;
+  initialPageIndex?: number | undefined;
+  initialPageCursors?: ReadonlyArray<PageCursor | null> | undefined;
+  initialFetchLimit?: number | undefined;
+  onPaginationChange?: (
+    pageIndex: number,
+    pageCursors: ReadonlyArray<PageCursor | null>,
+    fetchLimit: number,
+  ) => void;
 }
 
 export interface SelectableRow {
@@ -165,7 +186,16 @@ export const TicketListView = function TicketListView({
   onPageChange,
   onToggleSelectAll,
   onTicketsLoaded,
+  deskType,
+  visibleColumnKeys,
+  dynamicFieldColumns,
+  columnOrder,
+  initialPageIndex,
+  initialPageCursors,
+  initialFetchLimit,
+  onPaginationChange,
 }: TicketListViewProps): React.ReactElement {
+  const isSocialMedia = deskType === DeskType.SOCIAL_MEDIA;
   const virtuosoRef = useRef<VirtuosoHandle>(null);
   const { userID } = useAuthContextValues();
 
@@ -188,11 +218,18 @@ export const TicketListView = function TicketListView({
     conversationLabelId,
   } = filter;
 
-  const [pageCursors, setPageCursors] = useState<Array<PageCursor | null>>([null]);
-  const [pageIndex, setPageIndex] = useState(0);
+  const [pageCursors, setPageCursors] = useState<Array<PageCursor | null>>(() =>
+    initialPageCursors ? [...initialPageCursors] : [null],
+  );
+  const [pageIndex, setPageIndex] = useState(initialPageIndex ?? 0);
+  // Two independent refs so Effect A and Effect B each guard their own first run
+  // independently — sharing one ref would let Effect A consume it before Effect B checks.
+  const restoringPage = initialPageIndex !== undefined && initialPageIndex > 0;
+  const skipFirstPageResetRef = useRef(restoringPage);
+  const skipFirstLimitResetRef = useRef(restoringPage);
   const [selectAllMenuOpen, setSelectAllMenuOpen] = useState(false);
   const [columnWidths, setColumnWidths] = useState<TicketListColumnWidths>(loadColumnWidths);
-  const [resizingColumn, setResizingColumn] = useState<TicketListColumnKey | null>(null);
+  const [resizingColumn, setResizingColumn] = useState<string | null>(null);
   const resizeDragRef = useRef<ColumnResizeDrag | null>(null);
   const columnHeadersRef = useRef<HTMLDivElement>(null);
   // Virtuoso's scroller: rows render inside it (net of its scrollbar) while the header and
@@ -230,11 +267,45 @@ export const TicketListView = function TicketListView({
   }, []);
   // Adaptive server fetch window. Starts at one page (+1 sentinel); grows only for the
   // client-filtered folders when a page needs more rows to fill after filtering.
-
+  const [fetchLimit, setFetchLimit] = useState(initialFetchLimit ?? PAGE_SIZE + 1);
   const showSelectionColumn = !!onToggleSelect;
+
+  // subject is always visible; other columns respect visibleColumnKeys when provided.
+  const dynamicFieldByKey = useMemo(
+    () => new Map((dynamicFieldColumns ?? []).map(field => [dynamicColumnKey(field.id), field])),
+    [dynamicFieldColumns],
+  );
+  const visibleColumns = useMemo(
+    (): readonly TicketListColumnDefinition[] =>
+      orderTicketListColumns(
+        [
+          ...(visibleColumnKeys
+            ? TICKET_LIST_COLUMNS.filter(c => c.key === 'subject' || visibleColumnKeys.has(c.key))
+            : TICKET_LIST_COLUMNS),
+          ...Array.from(dynamicFieldByKey, ([key, field]) =>
+            dynamicFieldListColumn(key, field.fieldName),
+          ),
+        ],
+        columnOrder,
+      ),
+    [visibleColumnKeys, dynamicFieldByKey, columnOrder],
+  );
+  const widthOf = useCallback(
+    (key: string): number =>
+      columnWidths[key] ?? visibleColumns.find(c => c.key === key)?.defaultWidth ?? 0,
+    [columnWidths, visibleColumns],
+  );
+  const formEntityValueFieldIds = useMemo(
+    () =>
+      dynamicFieldColumns && dynamicFieldColumns.length > 0
+        ? dynamicFieldColumns.map(field => field.id)
+        : undefined,
+    [dynamicFieldColumns],
+  );
+
   const ticketListGridTemplate = useMemo(
-    () => getTicketListGridTemplate(columnWidths, showSelectionColumn),
-    [columnWidths, showSelectionColumn],
+    () => getTicketListGridTemplate(visibleColumns, columnWidths, showSelectionColumn),
+    [columnWidths, showSelectionColumn, visibleColumns],
   );
 
   // Persist on drag settle only — `columnWidths` changes every pointermove and setItem is sync.
@@ -246,6 +317,13 @@ export const TicketListView = function TicketListView({
       // Column resizing remains available when storage is blocked.
     }
   }, [columnWidths, resizingColumn]);
+
+  // Report pagination state to parent so it can be restored after remount.
+  const onPaginationChangeRef = useRef(onPaginationChange);
+  onPaginationChangeRef.current = onPaginationChange;
+  useEffect(() => {
+    onPaginationChangeRef.current?.(pageIndex, pageCursors, fetchLimit);
+  }, [pageIndex, pageCursors, fetchLimit]);
 
   useEffect((): (() => void) => {
     return (): void => {
@@ -260,36 +338,38 @@ export const TicketListView = function TicketListView({
     // Header ref is only a fallback for the first render, before the callback ref runs.
     const containerWidth =
       scrollerElRef.current?.clientWidth ?? columnHeadersRef.current?.clientWidth ?? 1;
-    return computeAvailableColumnsWidth(containerWidth, showSelectionColumn);
-  }, [showSelectionColumn]);
+    return computeAvailableColumnsWidth(containerWidth, showSelectionColumn, visibleColumns.length);
+  }, [showSelectionColumn, visibleColumns.length]);
 
   // Denominator for unit → pixel conversion. A drag only shifts width between two adjacent
   // columns, so the total stays constant.
   const totalColumnUnits = useMemo(
-    () => TICKET_LIST_COLUMNS.reduce((total, item) => total + columnWidths[item.key], 0),
-    [columnWidths],
+    () => visibleColumns.reduce((total, item) => total + widthOf(item.key), 0),
+    [widthOf, visibleColumns],
   );
-  const columnsPixelWidth = computeAvailableColumnsWidth(scrollerClientWidth, showSelectionColumn);
+  const columnsPixelWidth = computeAvailableColumnsWidth(
+    scrollerClientWidth,
+    showSelectionColumn,
+    visibleColumns.length,
+  );
   const columnPixelWidth = useCallback(
-    (key: TicketListColumnKey): number =>
-      totalColumnUnits > 0
-        ? Math.round((columnWidths[key] / totalColumnUnits) * columnsPixelWidth)
-        : 0,
-    [columnWidths, totalColumnUnits, columnsPixelWidth],
+    (key: string): number =>
+      totalColumnUnits > 0 ? Math.round((widthOf(key) / totalColumnUnits) * columnsPixelWidth) : 0,
+    [widthOf, totalColumnUnits, columnsPixelWidth],
   );
 
   const resizeColumnPair = useCallback(
     (
-      column: TicketListColumnKey,
-      adjacentColumn: TicketListColumnKey,
+      column: string,
+      adjacentColumn: string,
       startWidth: number,
       startAdjacentWidth: number,
       deltaPixels: number,
       availableWidth: number,
       totalWidthUnits: number,
     ): void => {
-      const columnDefinition = TICKET_LIST_COLUMNS.find(item => item.key === column);
-      const adjacentDefinition = TICKET_LIST_COLUMNS.find(item => item.key === adjacentColumn);
+      const columnDefinition = visibleColumns.find(item => item.key === column);
+      const adjacentDefinition = visibleColumns.find(item => item.key === adjacentColumn);
       if (!columnDefinition || !adjacentDefinition) return;
 
       const pixelsToUnits = totalWidthUnits / availableWidth;
@@ -317,14 +397,14 @@ export const TicketListView = function TicketListView({
         [adjacentColumn]: Number((pairWidth - nextWidth).toFixed(3)),
       }));
     },
-    [],
+    [visibleColumns],
   );
 
   const handleColumnResizePointerDown = useCallback(
-    (column: TicketListColumnKey, event: React.PointerEvent<HTMLButtonElement>): void => {
+    (column: string, event: React.PointerEvent<HTMLButtonElement>): void => {
       if (event.button !== 0) return;
-      const columnIndex = TICKET_LIST_COLUMNS.findIndex(item => item.key === column);
-      const adjacentColumn = TICKET_LIST_COLUMNS[columnIndex + 1];
+      const columnIndex = visibleColumns.findIndex(item => item.key === column);
+      const adjacentColumn = visibleColumns[columnIndex + 1];
       if (!adjacentColumn) return;
       event.preventDefault();
       event.stopPropagation();
@@ -334,8 +414,8 @@ export const TicketListView = function TicketListView({
         adjacentColumn: adjacentColumn.key,
         pointerId: event.pointerId,
         startX: event.clientX,
-        startWidth: columnWidths[column],
-        startAdjacentWidth: columnWidths[adjacentColumn.key],
+        startWidth: widthOf(column),
+        startAdjacentWidth: widthOf(adjacentColumn.key),
         availableWidth: getAvailableColumnsWidth(),
         totalWidthUnits: totalColumnUnits,
         handle: event.currentTarget,
@@ -346,7 +426,7 @@ export const TicketListView = function TicketListView({
       document.body.style.userSelect = 'none';
       setResizingColumn(column);
     },
-    [columnWidths, getAvailableColumnsWidth, totalColumnUnits],
+    [widthOf, getAvailableColumnsWidth, totalColumnUnits, visibleColumns],
   );
 
   const handleColumnResizePointerMove = useCallback(
@@ -382,27 +462,27 @@ export const TicketListView = function TicketListView({
   );
 
   const handleColumnResizeKeyDown = useCallback(
-    (column: TicketListColumnKey, event: React.KeyboardEvent<HTMLButtonElement>): void => {
+    (column: string, event: React.KeyboardEvent<HTMLButtonElement>): void => {
       if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return;
-      const columnIndex = TICKET_LIST_COLUMNS.findIndex(item => item.key === column);
-      const adjacentColumn = TICKET_LIST_COLUMNS[columnIndex + 1];
+      const columnIndex = visibleColumns.findIndex(item => item.key === column);
+      const adjacentColumn = visibleColumns[columnIndex + 1];
       if (!adjacentColumn) return;
       event.preventDefault();
       resizeColumnPair(
         column,
         adjacentColumn.key,
-        columnWidths[column],
-        columnWidths[adjacentColumn.key],
+        widthOf(column),
+        widthOf(adjacentColumn.key),
         event.key === 'ArrowRight' ? 8 : -8,
         getAvailableColumnsWidth(),
         totalColumnUnits,
       );
     },
-    [columnWidths, getAvailableColumnsWidth, resizeColumnPair, totalColumnUnits],
+    [widthOf, getAvailableColumnsWidth, resizeColumnPair, totalColumnUnits, visibleColumns],
   );
 
   const pageStart = pageCursors[pageIndex] ?? null;
-  const [firstPage, firstPageDetails] = useRacedQuery(
+  const [firstPage, firstPageDetails] = useCachedQuery(
     queries.supportTicketsPageV4({
       channelId,
       isMember,
@@ -425,7 +505,8 @@ export const TicketListView = function TicketListView({
       // adaptive fetch window so their pages fill correctly after filtering.
       ...(mailboxFolder ? { mailboxFolder } : {}),
       dynamicFieldFilters,
-      limit: PAGE_SIZE + 1,
+      formEntityValueFieldIds,
+      limit: fetchLimit,
       userGroups,
       ...(conversationLabelId ? { conversationLabelId } : {}),
       start: pageStart,
@@ -479,10 +560,23 @@ export const TicketListView = function TicketListView({
   );
 
   useEffect(() => {
+    if (skipFirstPageResetRef.current) {
+      skipFirstPageResetRef.current = false;
+      return;
+    }
     setPageCursors([null]);
     setPageIndex(0);
     loadStartTimeRef.current = Date.now();
   }, [filterKey]);
+
+  // Each page (and each filter) begins a fresh adaptive fetch from its own cursor.
+  useEffect(() => {
+    if (skipFirstLimitResetRef.current) {
+      skipFirstLimitResetRef.current = false;
+      return;
+    }
+    setFetchLimit(PAGE_SIZE + 1);
+  }, [pageStart, filterKey]);
 
   // Record first-page load duration once it becomes complete.
   useEffect(() => {
@@ -524,15 +618,50 @@ export const TicketListView = function TicketListView({
     return unique;
   }, [firstPage]);
 
+  // Filter the WHOLE fetched buffer into the active mailbox folder BEFORE paginating, so
+  // Inbox / All Mail paginate over the filtered result set (not a pre-sliced page). Inbox /
+  // All Mail must be filtered client-side: they include tickets with no overlay row
+  // (default = Inbox), which would need a NOT EXISTS predicate to filter server-side —
+  // unsupported on the Zero client (bug 3438). Spam / Starred are already filtered
+  // server-side, so this is a no-op for them.
   const filteredAll = useMemo<SupportTicketRow[]>(() => {
-    if (!dynamicFieldEntries?.length) return allRows;
-    return allRows.filter(t =>
-      ticketMatchesDynamicFieldEntries(
-        t.formEntityValues as FormEntityValueLike[] | undefined,
-        dynamicFieldEntries,
-      ),
-    );
-  }, [allRows, dynamicFieldEntries]);
+    let rows = allRows;
+    if (mailboxFolder) {
+      rows = rows.filter(t => {
+        const overlay = (t.userMailbox ?? [])[0];
+        const state = overlay?.state ?? MailboxState.INBOX;
+        switch (mailboxFolder) {
+          case 'all':
+            return state === MailboxState.INBOX || state === MailboxState.ARCHIVED;
+          case 'starred':
+            return (
+              !!overlay?.starred &&
+              (state === MailboxState.INBOX || state === MailboxState.ARCHIVED)
+            );
+          case 'spam':
+            return state === MailboxState.SPAM;
+          case 'sent':
+          case 'drafts':
+            // Filtered server-side by a positive exists() (sent email / reply draft by me);
+            // the exists() also runs on the client, so every fetched row already qualifies —
+            // no overlay check here.
+            return true;
+          case 'inbox':
+          default:
+            return state === MailboxState.INBOX;
+        }
+      });
+    }
+    if (dynamicFieldEntries?.length) {
+      rows = rows.filter(t =>
+        ticketMatchesDynamicFieldEntries(
+          t.formEntityValues as FormEntityValueLike[] | undefined,
+          dynamicFieldEntries,
+        ),
+      );
+    }
+    return rows;
+  }, [allRows, mailboxFolder, dynamicFieldEntries]);
 
   // Paginate over the FILTERED rows: render one PAGE_SIZE window; a (PAGE_SIZE+1)th filtered
   // row is the "next page exists" sentinel (mirrors the server keyset paging, on filtered rows).
@@ -544,8 +673,19 @@ export const TicketListView = function TicketListView({
   }, [filteredTickets, onTicketsLoaded]);
 
   const complete = firstPageDetails.type === 'complete';
-  const rowsEmpty = complete && filteredTickets.length === 0;
-  const showInitialSkeletons = !complete && allRows.length === 0;
+  // Server returned fewer rows than requested → the channel/folder is genuinely exhausted;
+  // no amount of extra fetching can surface additional rows.
+  const serverExhausted = allRows.length < fetchLimit;
+  // A client-filtered folder (Inbox / All Mail) can filter a full server page down below a
+  // page's worth. Keep growing the fetch window (effect below) until we have a full page
+  // (+1 sentinel) of MATCHING rows OR the source is genuinely exhausted — there is no fixed
+  // cap, so matching tickets sitting behind a long run of archived/spam are never missed.
+  // `converged` = the page is definitive (safe to show its empty state).
+  const needMoreRows = complete && !serverExhausted && filteredAll.length < PAGE_SIZE + 1;
+  const converged = complete && !needMoreRows;
+
+  const rowsEmpty = converged && filteredTickets.length === 0;
+  const showInitialSkeletons = (!complete && allRows.length === 0) || needMoreRows;
 
   const isLastPage = !hasNextPage;
 
@@ -576,13 +716,25 @@ export const TicketListView = function TicketListView({
     virtuosoRef.current?.scrollToIndex({ index: 0 });
   }, [pageIndex]);
 
+  // Grow the fetch window until the client-filtered page holds a full PAGE_SIZE (+1 sentinel)
+  // of matching rows, or the source is genuinely exhausted — so Inbox / All Mail never miss
+  // matching tickets that sit behind a long run of archived/spam rows. Doubling keeps this to
+  // O(log n) fetches even when a folder is sparse in a large channel; termination is
+  // guaranteed because `serverExhausted` flips true once the window exceeds the row count.
+  useEffect(() => {
+    if (!needMoreRows) return;
+    setFetchLimit(prev => prev * 2);
+    // fetchLimit is a dep so the effect re-evaluates after each grow, even if a cached
+    // refetch never lets `needMoreRows` flip to false in between.
+  }, [needMoreRows, fetchLimit]);
+
   // If a page past the first ends up empty (e.g. its rows were archived/deleted after we
   // navigated to it), fall back toward populated pages.
   useEffect(() => {
-    if (complete && filteredTickets.length === 0 && pageIndex > 0) {
+    if (converged && filteredTickets.length === 0 && pageIndex > 0) {
       goToPrevPage();
     }
-  }, [complete, filteredTickets.length, pageIndex, goToPrevPage]);
+  }, [converged, filteredTickets.length, pageIndex, goToPrevPage]);
 
   const firstRowBoardId = (filteredTickets[0] ?? allRows[0])?.boardId;
   useEffect(() => {
@@ -703,6 +855,9 @@ export const TicketListView = function TicketListView({
             isActive={isActive}
             showExtraFields={showExtraFields}
             gridTemplate={ticketListGridTemplate}
+            columns={visibleColumns}
+            dynamicFieldByKey={dynamicFieldByKey}
+            {...(deskType !== undefined && { deskType })}
             {...(onToggleSelect
               ? {
                   isSelected: selectedIds?.has(row.id) ?? false,
@@ -896,7 +1051,7 @@ export const TicketListView = function TicketListView({
             }}
           >
             {showSelectionColumn && <div aria-hidden='true' />}
-            {TICKET_LIST_COLUMNS.map(column => (
+            {visibleColumns.map(column => (
               <div
                 key={column.key}
                 role='columnheader'
@@ -905,7 +1060,13 @@ export const TicketListView = function TicketListView({
                   getTicketListColumnAlignClass(column.key),
                 )}
               >
-                <span className='min-w-0 truncate'>{column.label}</span>
+                <span className='min-w-0 truncate'>
+                  {isSocialMedia && column.key === 'emails'
+                    ? 'Messages'
+                    : isSocialMedia && column.key === 'latestEmail'
+                      ? 'Latest message'
+                      : column.label}
+                </span>
               </div>
             ))}
           </div>
@@ -923,9 +1084,9 @@ export const TicketListView = function TicketListView({
           }}
         >
           {showSelectionColumn && <span aria-hidden='true' />}
-          {TICKET_LIST_COLUMNS.map((column, columnIndex) => (
+          {visibleColumns.map((column, columnIndex) => (
             <span key={column.key} className='relative'>
-              {columnIndex < TICKET_LIST_COLUMNS.length - 1 && (
+              {columnIndex < visibleColumns.length - 1 && (
                 <button
                   type='button'
                   role='slider'

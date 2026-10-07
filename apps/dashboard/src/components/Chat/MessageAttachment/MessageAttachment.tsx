@@ -50,10 +50,11 @@ import { useZero } from '../../../hooks/useZero';
 import { mutators } from '../../../zero/mutators';
 import { DownloadButton } from './DownloadButton';
 import { DeleteButton } from './DeleteButton';
+import { InlineCsvFile } from './InlineCsvFile';
+import { isCsvFile } from './csvPreview';
 
 import { CopyCopied, CopyDefault } from '@xyne/icons';
 import { useClipboard } from '../../../hooks/useClipboard';
-import axios from 'axios';
 import { cn } from '../../../utils/classNames';
 import { useSelector } from '@xstate/react';
 import {
@@ -121,7 +122,7 @@ const Preview: React.FC<{
   fullSize?: boolean | undefined;
   isInMultiImageGroup?: boolean;
   onLoadingChange?: (isLoading: boolean) => void;
-  onImageBlobUrlChange?: (blobUrl: string | null) => void;
+  onImageBlobChange?: (blob: Blob | null) => void;
 }> = ({
   attachmentId,
   mimeType,
@@ -134,7 +135,7 @@ const Preview: React.FC<{
   isInGrid,
   fullSize,
   isInMultiImageGroup,
-  onImageBlobUrlChange,
+  onImageBlobChange,
 }) => {
   const isVideo = isVideoFile(mimeType);
   const isDocumentWithThumbnail = isPreviewableDocument(mimeType) && !!thumbnailUrl;
@@ -142,11 +143,12 @@ const Preview: React.FC<{
   const isImage = isImageFile(mimeType) || isHeic;
 
   const [imageBlobUrl, setImageBlobUrl] = useState<string | null>(null);
+  const [imageBlob, setImageBlob] = useState<Blob | null>(null);
 
-  // Notify parent when imageBlobUrl changes
+  // Notify parent when the preview blob changes
   useEffect(() => {
-    onImageBlobUrlChange?.(imageBlobUrl);
-  }, [imageBlobUrl, onImageBlobUrlChange]);
+    onImageBlobChange?.(imageBlob);
+  }, [imageBlob, onImageBlobChange]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<boolean>(false);
 
@@ -192,6 +194,7 @@ const Preview: React.FC<{
       if (cachedBlob) {
         const localBlobUrl = URL.createObjectURL(cachedBlob);
         setImageBlobUrl(localBlobUrl);
+        setImageBlob(cachedBlob);
         setIsLoading(false);
         return (): void => {
           URL.revokeObjectURL(localBlobUrl);
@@ -218,6 +221,7 @@ const Preview: React.FC<{
         // Only recalculate if we don't have stored dimensions
         // Use stored dimensions - no need to wait for image load
         setImageBlobUrl(blobUrl);
+        setImageBlob(blob);
         setIsLoading(false);
       } catch {
         setError(true);
@@ -457,20 +461,19 @@ const ActionTray: React.FC<{
   fileName: string;
   canDelete: boolean;
   onDelete: () => void | Promise<void>;
-  imageBlobUrl?: string | null;
-}> = ({ attachmentId, fileName, canDelete, onDelete, imageBlobUrl }) => {
+  imageBlob?: Blob | null;
+}> = ({ attachmentId, fileName, canDelete, onDelete, imageBlob }) => {
   const { isMobile } = usePlatform();
   const { copyImage } = useClipboard();
   const [copied, setCopied] = useState(false);
 
   const handleCopyImage = async (): Promise<void> => {
-    if (!imageBlobUrl) return;
-    // The fetch is deferred into copyImage so the clipboard write is issued inside
-    // this click's task; copyImage owns the success/failure toast.
-    const copied = await copyImage(async () => {
-      const response = await axios.get<Blob>(imageBlobUrl, { responseType: 'blob' });
-      return response.data;
-    });
+    if (!imageBlob) return;
+    // Copy the bytes we already hold rather than re-reading the object URL:
+    // connect-src has no `blob:`, so XHR-ing it back is blocked by CSP (and the
+    // URL may already be revoked while the <img> keeps showing its decoded frame).
+    // copyImage owns the success/failure toast.
+    const copied = await copyImage(imageBlob);
     if (!copied) return;
     setCopied(true);
     window.setTimeout(() => setCopied(false), 1200);
@@ -480,7 +483,7 @@ const ActionTray: React.FC<{
     <div className='absolute top-2 right-2 z-10 opacity-0 group-hover/attachment:opacity-100 transition-opacity duration-200'>
       {!isMobile && (
         <div className='flex items-center justify-between bg-background/90 backdrop-blur-sm rounded-lg p-1 shadow-lg border border-border'>
-          {imageBlobUrl && (
+          {imageBlob && (
             <button
               onClick={e => {
                 e.stopPropagation();
@@ -1259,8 +1262,8 @@ export const MessageAttachment: React.FC<MessageAttachmentProps> = ({
     attachment.uploadedByUserId,
   );
 
-  // Track image blob URL for copy functionality
-  const [imageBlobUrl, setImageBlobUrl] = useState<string | null>(null);
+  // Track the decoded preview blob for copy functionality
+  const [imageBlob, setImageBlob] = useState<Blob | null>(null);
 
   // Tombstone: render a "this file was deleted" card when the attachment is soft-deleted
   if ((attachment as { isDeleted?: boolean }).isDeleted) {
@@ -1272,8 +1275,10 @@ export const MessageAttachment: React.FC<MessageAttachmentProps> = ({
     );
   }
 
+  const isCsv = isCsvFile(attachment.mimetype, attachment.originalFilename);
   const isTextFile =
-    attachment.mimetype === 'text/plain' || attachment.originalFilename.endsWith('.txt');
+    !isCsv &&
+    (attachment.mimetype === 'text/plain' || attachment.originalFilename.endsWith('.txt'));
   const isCodeFile = isCodeFileByName(attachment.originalFilename);
   const isVideo = isVideoFile(attachment.mimetype);
   const isImage =
@@ -1315,6 +1320,18 @@ export const MessageAttachment: React.FC<MessageAttachmentProps> = ({
       handleCardClick();
     }
   };
+
+  if (isCsv && !compact && !isMobile) {
+    return (
+      <InlineCsvFile
+        attachmentId={attachment.id}
+        fileName={attachment.originalFilename}
+        fileSize={attachment.size}
+        onOpen={handleCardClick}
+        {...(extraActions && { extraActions })}
+      />
+    );
+  }
 
   // Render inline text viewer for .txt files on PC only (mobile shows as regular attachment)
   if (isTextFile && !compact && !isMobile) {
@@ -1382,7 +1399,7 @@ export const MessageAttachment: React.FC<MessageAttachmentProps> = ({
     <>
       <div
         className={cn(
-          'message-attachment group/attachment relative flex flex-col bg-card border border-border rounded-lg overflow-hidden hover:shadow-md transition-all duration-200 cursor-pointer focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2',
+          'message-attachment group/attachment relative flex flex-col bg-card border border-border rounded-lg overflow-hidden hover:shadow-md transition duration-200 cursor-pointer focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2',
           compact
             ? 'w-16 h-16 '
             : isInGrid
@@ -1427,7 +1444,7 @@ export const MessageAttachment: React.FC<MessageAttachmentProps> = ({
             isInGrid={isInGrid}
             fullSize={fullSize}
             {...(isInMultiImageGroup && { isInMultiImageGroup: true })}
-            onImageBlobUrlChange={setImageBlobUrl}
+            onImageBlobChange={setImageBlob}
           />
 
           {/* Slack-style hover action tray */}
@@ -1437,13 +1454,13 @@ export const MessageAttachment: React.FC<MessageAttachmentProps> = ({
               fileName={attachment.originalFilename}
               canDelete={canDelete}
               onDelete={handleDelete}
-              imageBlobUrl={isImage ? imageBlobUrl : null}
+              imageBlob={isImage ? imageBlob : null}
             />
           )}
         </div>
 
         {/* Hover overlay for better UX feedback */}
-        <div className='absolute inset-0 bg-black bg-opacity-0 group-hover/attachment:bg-opacity-5 transition-all duration-200 pointer-events-none' />
+        <div className='absolute inset-0 bg-black bg-opacity-0 group-hover/attachment:bg-opacity-5 transition duration-200 pointer-events-none' />
       </div>
     </>
   );
