@@ -627,6 +627,9 @@ const AIScreen = (): ReactElement => {
   const workspacePane = useMemo(
     () => (
       <WorkspacePane
+        // Per-thread state (selection, tabs, restore bookkeeping) must not
+        // leak across an in-place thread switch.
+        key={activeSessionId || 'none'}
         conversationId={activeSessionId || null}
         appPane={appPane}
         openRequest={workspaceRequest}

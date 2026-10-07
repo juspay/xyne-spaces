@@ -361,6 +361,9 @@ function WorkspacePaneInner({
 
   useEffect(() => {
     if (!conversationId) return;
+    // Don't persist until this thread's remembered tab has been restored:
+    // writing the pre-restore null (artifacts still loading) would erase it.
+    if (restored.current !== conversationId) return;
     if (selectedId === TRANSIENT_APP_ARTIFACT_ID || selectedId === TRANSIENT_DESIGN_ARTIFACT_ID) {
       return;
     }
