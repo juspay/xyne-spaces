@@ -1,9 +1,12 @@
 import { ReactElement, useMemo, useState } from 'react';
-import { ChevronRight, SearchDefault as Search } from '@xyne/icons';
 import { queries } from '../../../zero/queries';
 import { useCachedQuery } from '../../../hooks/useCachedQuery';
-import { cn } from '../../../utils/classNames';
 import { Checkbox } from '../../ui/Checkbox/Checkbox';
+import {
+  GroupedSelectList,
+  GroupedSelectGroup,
+  GroupedSelectRow,
+} from '../../ui/GroupedSelectList/GroupedSelectList';
 import type { PickerProjectRowProps, ViewBoardPickerProps } from './ViewBoardPicker.types';
 
 interface BoardLite {
@@ -41,58 +44,48 @@ function PickerProjectRow({
   };
 
   return (
-    <div data-slot='view-board-picker-project'>
-      <button
-        type='button'
-        onClick={onToggleExpand}
-        className='w-full flex items-center gap-2 px-2 py-1.5 rounded-md transition-colors hover:bg-muted group'
-        data-track-category='Projects'
-        data-track-name='TogglePickerProject'
-      >
-        <ChevronRight
-          className={cn(
-            'size-4 text-muted-foreground transition-transform',
-            expanded ? 'rotate-90' : 'rotate-0',
-          )}
-        />
-        <span className='flex-1 text-left text-[13px] text-foreground truncate group-hover:text-foreground'>
+    <GroupedSelectGroup
+      expanded={expanded}
+      onToggleExpand={onToggleExpand}
+      count={selectedInProject}
+      trackCategory='Projects'
+      trackName='TogglePickerProject'
+      header={
+        <button
+          type='button'
+          onClick={onToggleExpand}
+          className='min-w-0 flex-1 truncate text-left text-[13px] text-foreground'
+          data-track-category='Projects'
+          data-track-name='TogglePickerProject'
+        >
           {project.name}
-        </span>
-        {selectedInProject > 0 && (
-          <span className='text-[11px] tabular-nums text-primary-foreground bg-primary px-1.5 py-0.5 rounded-full'>
-            {selectedInProject}
-          </span>
-        )}
-      </button>
-
-      {expanded && (
-        <div className='ml-6 mt-0.5 mb-1 flex flex-col gap-1'>
-          {boardList.length === 0 ? (
-            <div className='px-2 py-1.5 text-[12px] text-muted-foreground'>No boards</div>
-          ) : (
-            <>
-              <div className='px-2 py-1'>
-                <Checkbox
-                  checked={allSelected}
-                  indeterminate={someSelected}
-                  onChange={handleToggleAll}
-                  label='All boards'
-                />
-              </div>
-              {boardList.map(board => (
-                <div key={board.id} className='px-2 py-1'>
-                  <Checkbox
-                    checked={selected.has(board.id)}
-                    onChange={checked => onToggleBoards([board.id], checked)}
-                    label={board.name}
-                  />
-                </div>
-              ))}
-            </>
-          )}
-        </div>
+        </button>
+      }
+    >
+      {boardList.length === 0 ? (
+        <div className='px-2 py-1.5 text-[12px] text-muted-foreground'>No boards</div>
+      ) : (
+        <>
+          <GroupedSelectRow>
+            <Checkbox
+              checked={allSelected}
+              indeterminate={someSelected}
+              onChange={handleToggleAll}
+              label='All boards'
+            />
+          </GroupedSelectRow>
+          {boardList.map(board => (
+            <GroupedSelectRow key={board.id}>
+              <Checkbox
+                checked={selected.has(board.id)}
+                onChange={checked => onToggleBoards([board.id], checked)}
+                label={board.name}
+              />
+            </GroupedSelectRow>
+          ))}
+        </>
       )}
-    </div>
+    </GroupedSelectGroup>
   );
 }
 
@@ -156,36 +149,25 @@ export function ViewBoardPickerContent({
   };
 
   return (
-    <div className='flex flex-col' data-slot='view-board-picker'>
-      <div className='flex items-center gap-2 px-3 py-2 border-b border-border'>
-        <Search className='size-3.5 text-muted-foreground shrink-0' />
-        <input
-          value={search}
-          onChange={e => setSearch(e.target.value)}
-          placeholder='Search projects...'
-          className='flex-1 bg-transparent text-[13px] text-foreground outline-none placeholder:text-muted-foreground'
-          data-track-category='Projects'
-          data-track-name='SearchBoardPicker'
+    <GroupedSelectList
+      search={search}
+      onSearchChange={setSearch}
+      searchPlaceholder='Search projects...'
+      isEmpty={filteredProjects.length === 0}
+      emptyLabel={search ? 'No matching projects' : 'No projects found'}
+      trackCategory='Projects'
+      trackName='SearchBoardPicker'
+    >
+      {filteredProjects.map(project => (
+        <PickerProjectRow
+          key={project.id}
+          project={project}
+          selected={selected}
+          expanded={expandedProjects.has(project.id)}
+          onToggleExpand={() => handleToggleExpand(project.id)}
+          onToggleBoards={handleToggleBoards}
         />
-      </div>
-      <div className='max-h-80 overflow-y-auto p-1'>
-        {filteredProjects.length === 0 ? (
-          <div className='px-2 py-6 text-center text-[12px] text-muted-foreground'>
-            {search ? 'No matching projects' : 'No projects found'}
-          </div>
-        ) : (
-          filteredProjects.map(project => (
-            <PickerProjectRow
-              key={project.id}
-              project={project}
-              selected={selected}
-              expanded={expandedProjects.has(project.id)}
-              onToggleExpand={() => handleToggleExpand(project.id)}
-              onToggleBoards={handleToggleBoards}
-            />
-          ))
-        )}
-      </div>
-    </div>
+      ))}
+    </GroupedSelectList>
   );
 }
