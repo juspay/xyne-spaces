@@ -1,5 +1,6 @@
 import { transaction } from '../base';
 import { db } from '@/database/client';
+import { newConnectId, createConnectGroupForEntity, ConnectEntityType } from '@/database/connectGroup';
 import { buildGooglePlaySourceRecords } from '@/integrations/adapters/social-media/google-play/sourceRecords';
 import { logger } from '@/utils/logger';
 import { ChannelType, ChannelScopeType, ChannelVisibility, ChannelRole, DeskType, EmailMergeMode } from '@xyne/shared';
@@ -18,7 +19,9 @@ interface GooglePlayConnectInput {
 }
 
 export function postGooglePlayConnectTx(state: GooglePlayConnectInput & { userId: string; workspaceId: string }, encryptedCredentials: string, now: Date) {
-  return transaction(['Board', 'Channel', 'ChannelBoardMapping', 'ChannelParticipant', 'ChannelStats', 'ChannelUserStatus', 'EmailChannelPreference', 'ExternalSource'], 'postGooglePlayConnect: channel, participant, status, preference, board-mapping and external-source rows must commit atomically; tx is not ACL-wrapped', db, async (tx) => {
+  return transaction(['Board', 'Channel', 'ChannelBoardMapping', 'ChannelParticipant', 'ChannelStats', 'ChannelUserStatus', 'EmailChannelPreference', 'ExternalSource', 'ConnectGroup'], 'postGooglePlayConnect: channel, participant, status, preference, board-mapping and external-source rows must commit atomically; tx is not ACL-wrapped', db, async (tx) => {
+    // Slack Connect: the channel is a shareable entity → its own connectId + a private connect_group row.
+    const connectId = newConnectId();
     const channel = await tx.channel.create({
       data: {
         name: state.channelName,
@@ -33,7 +36,14 @@ export function postGooglePlayConnectTx(state: GooglePlayConnectInput & { userId
         workspaceId: state.workspaceId,
         participantCount: 1,
         lastActivityAt: now,
+        connectId,
       },
+    });
+    await createConnectGroupForEntity(tx, {
+      entityType: ConnectEntityType.CHANNEL,
+      entityId: channel.id,
+      hostWorkspaceId: state.workspaceId,
+      connectId,
     });
     await tx.channelParticipant.create({
       data: {

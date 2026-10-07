@@ -14,6 +14,7 @@ import {
   CanvasRole,
   OrgRole, UserStatus } from '@xyne/shared';
 import { DatabaseClient } from '@/database/client';
+import { resolveCanvasConnectId } from '@/database/connectGroup';
 import { withWorkspaceScope } from '@/database/tenant/context';
 import { logger } from '@/utils/logger';
 import { emailService } from './email/factory';
@@ -608,6 +609,7 @@ export class InvitationService {
 
     if (entityType === GuestEntity.CANVAS) {
       await this.assertCanvasInWorkspace(entityId, workspaceId, tx);
+      const canvasConnectId = await resolveCanvasConnectId(tx, entityId);
       await tx.canvasParticipant.upsert({
         where: {
           canvasId_userId: {
@@ -621,6 +623,7 @@ export class InvitationService {
           userId,
           workspaceId,
           role: CanvasRole.VIEWER,
+          ...(canvasConnectId ? { canvasConnectId } : {}),
         },
       });
       return `/${workspaceId}/chat/canvas/${entityId}`;
