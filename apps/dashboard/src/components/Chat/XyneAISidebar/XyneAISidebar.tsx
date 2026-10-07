@@ -72,6 +72,11 @@ import {
   type EditedMessageContext,
 } from './components/MessageItem';
 import { ConversationHistory } from './components/ConversationHistory';
+import {
+  clearKbDocAskAISession,
+  getKbDocAskAISession,
+  setKbDocAskAISession,
+} from '../../../utils/kbDocAskAISession';
 import { XyneAIHeader } from './components/XyneAIHeader';
 import { XyneAIOnboardingHeader } from './components/XyneAIOnboardingHeader';
 import { useAIOnboarding, ALL_ONBOARDING_SUGGESTIONS } from '../../../contexts/AIOnboardingContext';
@@ -231,6 +236,11 @@ const XyneAISidebar = ({
   const [inputValue, setInputValue] = useState('');
   const [messages, setMessages] = useState<Message[]>([]);
   const [conversationId, setConversationId] = useState<string>('');
+  const conversationIdRef = useRef(conversationId);
+  conversationIdRef.current = conversationId;
+  // KB file whose Ask AI chat is being started fresh in this panel; the first
+  // session id it gets is remembered as that file's chat (kbDocAskAISession).
+  const pendingKbDocIdRef = useRef<string | null>(null);
   const [streamThreadKey, setStreamThreadKey] = useState<string>(
     () => initialConversationId ?? newStreamSlotKey(),
   );
@@ -1055,6 +1065,17 @@ const XyneAISidebar = ({
             startFreshChat: false,
           });
         }
+      } else if (
+        !isAgentForced &&
+        !isFullscreen &&
+        xyneAIActor.getSnapshot().context.startFreshChat
+      ) {
+        // Channel-less opens (KB file/folder, recordings, calls) used to leave
+        // the machine's startFreshChat stuck at true, so every later remount of
+        // the panel re-ran this reset and wiped the conversation the user had
+        // since started. Clear only the flag — re-sending OPEN here would drop
+        // the KB scope and other context that a channel-less open carries.
+        xyneAIActor.send({ type: 'CONSUME_FRESH_CHAT' });
       }
     }
   }, [
@@ -1277,6 +1298,8 @@ const XyneAISidebar = ({
   };
 
   const handleLoadConversation = async (conversation: ConversationHistoryType): Promise<void> => {
+    // Opening an existing chat must not get linked to the file in scope.
+    pendingKbDocIdRef.current = null;
     resetAssistant();
     setLoadingHistorySessionId(conversation.sessionId);
     setStreamThreadKey(conversation.sessionId);
@@ -1429,6 +1452,7 @@ const XyneAISidebar = ({
     // Clear machine focus first — otherwise the focus subscription sees stale focusSessionId
     // while conversationId is '' and re-loads the previous session (flicker).
     xyneAIActor.send({ type: 'SET_FOCUS_SESSION', sessionId: null });
+    pendingKbDocIdRef.current = kbDocIdProp || null;
 
     setStreamThreadKey(newStreamSlotKey());
     usesDraftStreamKeyRef.current = true;
@@ -1451,7 +1475,7 @@ const XyneAISidebar = ({
     setShowUserActivityPanel(false);
 
     processedSelectionKeysRef.current.clear();
-  }, [resetAssistant]);
+  }, [resetAssistant, kbDocIdProp]);
 
   // When user selects a different agent from the global selector,
   // reset to a fresh conversation scoped to that agent.
@@ -1494,6 +1518,74 @@ const XyneAISidebar = ({
   );
 
   const handleLoadConversationRef = useRef(handleLoadConversation);
+
+  // "Ask AI about this file": reopen the chat the user already had about this
+  // file instead of a blank one. Runs once per KB-scoped OPEN (kbOpenNonce)
+  // and on mount, after the startFreshChat reset above has cleared the panel.
+  const kbDocUserId = currentUser?.id ?? null;
+  const v2SessionsDataRef = useRef(v2SessionsData);
+  v2SessionsDataRef.current = v2SessionsData;
+  const lastKbResumeNonceRef = useRef<number | null>(null);
+  useEffect(() => {
+    if (!kbDocIdProp || isAgentForced || isFullscreen || !kbDocUserId) return;
+    const nonce = kbOpenNonce ?? 0;
+    if (lastKbResumeNonceRef.current === nonce) return;
+    lastKbResumeNonceRef.current = nonce;
+
+    const key = { userId: kbDocUserId, agentSlug: effectiveAgentSlug, docId: kbDocIdProp };
+    const storedSessionId = getKbDocAskAISession(key);
+    if (!storedSessionId) {
+      if (!conversationIdRef.current) pendingKbDocIdRef.current = kbDocIdProp;
+      return;
+    }
+    if (conversationIdRef.current === storedSessionId) return;
+
+    let cancelled = false;
+    void (async (): Promise<void> => {
+      try {
+        const sessions = v2SessionsDataRef.current ?? (await refetchV2Sessions()).data;
+        if (cancelled) return;
+        const match = sessions?.find(c => c.sessionId === storedSessionId);
+        if (!match) {
+          // Deleted, or no longer visible to this agent: fall back to fresh.
+          clearKbDocAskAISession(key);
+          if (!conversationIdRef.current) pendingKbDocIdRef.current = kbDocIdProp;
+          return;
+        }
+        // The user already started typing a new chat in the meantime.
+        if (conversationIdRef.current) return;
+        await handleLoadConversationRef.current(match);
+      } catch (error) {
+        logger.error(LogEvent.FRONTEND_ERROR, {
+          type: 'migrated_console_error',
+          message: String('[XyneAISidebar] Failed to resume KB file chat:'),
+          error: error,
+        });
+      }
+    })();
+    return (): void => {
+      cancelled = true;
+    };
+  }, [
+    kbDocIdProp,
+    kbOpenNonce,
+    kbDocUserId,
+    effectiveAgentSlug,
+    isAgentForced,
+    isFullscreen,
+    refetchV2Sessions,
+  ]);
+
+  // Remember the session a fresh file-scoped chat was given.
+  useEffect(() => {
+    const docId = pendingKbDocIdRef.current;
+    if (!conversationId || !docId || !kbDocUserId) return;
+    setKbDocAskAISession(
+      { userId: kbDocUserId, agentSlug: effectiveAgentSlug, docId },
+      conversationId,
+    );
+    pendingKbDocIdRef.current = null;
+  }, [conversationId, kbDocUserId, effectiveAgentSlug]);
   handleLoadConversationRef.current = handleLoadConversation;
 
   // Fullscreen / parent-driven session id (no remount required)
