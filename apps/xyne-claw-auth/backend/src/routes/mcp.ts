@@ -1820,10 +1820,23 @@ router.post("/:sessionId/mcp/call", async (req: Request<{ sessionId: string }>, 
         return;
       }
 
-      const user = await prisma.user.findUnique({
-        where: { id: userId },
-        select: { email: true },
-      });
+      // Gateway-tool identity: prefer the run's on-behalf-of end-user (set by
+      // external-API /run, SessionContext.onBehalfOfEmail) over the run owner.
+      // Fail-CLOSED when the stored email no longer resolves (user removed or
+      // context tampered): silently falling back to the token owner would hand
+      // the run a credential for the wrong identity, which defeats the whole
+      // point of the per-user backend ACL.
+      const { getSession } = await import("./webhook.js");
+      const sessionCtx = await getSession(req.params.sessionId).catch(() => null);
+      const user = sessionCtx?.onBehalfOfEmail
+        ? await prisma.user.findFirst({
+            where: { email: sessionCtx.onBehalfOfEmail },
+            select: { email: true },
+          })
+        : await prisma.user.findUnique({
+            where: { id: userId },
+            select: { email: true },
+          });
       if (!user) {
         res.status(404).json({ success: false, error: "User not found" });
         return;
