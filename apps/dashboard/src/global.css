@@ -5640,3 +5640,137 @@ img.inline-emoji,
 [data-ticket-context-row] [role="combobox"] {
   height: 34px !important;
 }
+
+/* Voice mode orb: coral primary with pink/peach/violet light flowing through it. Motion stays on
+   transforms, speeds up with the voice phase, and `--voice-level` (0-1, mic loudness) swells it. */
+.voice-orb {
+  --orb-pink: #ff6b9d;
+  --orb-peach: #ffa06b;
+  --orb-coral: hsl(var(--primary));
+  --orb-deep: color-mix(in srgb, #ff6b9d 62%, var(--claw-ai-fg, #7c3aed));
+  position: relative;
+  display: inline-block;
+  flex: none;
+  overflow: hidden;
+  isolation: isolate;
+  border-radius: 9999px;
+  background:
+    radial-gradient(
+      circle at 30% 28%,
+      color-mix(in srgb, var(--orb-peach) 70%, white) 0 6%,
+      transparent 42%
+    ),
+    radial-gradient(circle at 74% 76%, var(--orb-deep) 0 18%, transparent 62%),
+    radial-gradient(
+      circle at 50% 50%,
+      var(--orb-pink) 0%,
+      var(--orb-coral) 62%,
+      var(--orb-peach) 100%
+    );
+  box-shadow:
+    inset 0 0 0 1px rgb(255 255 255 / 0.22),
+    0 0 18px
+      color-mix(in srgb, var(--orb-pink) calc(35% + var(--voice-level, 0) * 30%), transparent);
+  scale: calc(1 + var(--voice-level, 0) * 0.14);
+  transition: scale 90ms linear;
+  animation: voice-orb-breathe 7s ease-in-out infinite;
+  will-change: transform;
+}
+
+.voice-orb::before {
+  position: absolute;
+  inset: -35%;
+  border-radius: inherit;
+  background: conic-gradient(
+    from 20deg,
+    transparent 0deg,
+    color-mix(in srgb, var(--orb-peach) 85%, transparent) 70deg,
+    color-mix(in srgb, var(--orb-pink) 80%, transparent) 150deg,
+    color-mix(in srgb, var(--orb-deep) 70%, transparent) 235deg,
+    transparent 330deg
+  );
+  content: "";
+  filter: blur(8px);
+  opacity: 0.9;
+  animation: voice-orb-flow 7.5s linear infinite;
+  will-change: transform;
+}
+
+.voice-orb::after {
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background:
+    radial-gradient(circle at 32% 24%, rgb(255 255 255 / 0.62), transparent 34%),
+    radial-gradient(circle at 50% 110%, rgb(0 0 0 / 0.14), transparent 55%);
+  content: "";
+}
+
+.voice-orb[data-phase="transcribing"] {
+  animation-duration: 2.8s;
+}
+.voice-orb[data-phase="transcribing"]::before {
+  animation-duration: 3.2s;
+}
+
+.voice-orb[data-phase="listening"] {
+  animation-duration: 1.8s;
+}
+.voice-orb[data-phase="listening"]::before {
+  animation-duration: 2.3s;
+}
+
+.voice-orb[data-phase="understanding"],
+.voice-orb[data-phase="asking"] {
+  animation-duration: 2.6s;
+}
+.voice-orb[data-phase="understanding"]::before,
+.voice-orb[data-phase="asking"]::before {
+  animation-duration: 1.6s;
+}
+
+.voice-orb[data-phase="speaking"] {
+  animation-duration: 1.55s;
+}
+.voice-orb[data-phase="speaking"]::before {
+  animation-duration: 1.9s;
+}
+
+/* The stage orb is large enough for a wider glow. */
+.voice-orb--stage {
+  box-shadow:
+    inset 0 0 0 1px rgb(255 255 255 / 0.22),
+    0 0 44px
+      color-mix(in srgb, var(--orb-pink) calc(35% + var(--voice-level, 0) * 30%), transparent);
+}
+
+@keyframes voice-orb-breathe {
+  0%,
+  100% {
+    transform: scale(0.96);
+  }
+  50% {
+    transform: scale(1.04);
+  }
+}
+
+@keyframes voice-orb-flow {
+  0% {
+    transform: rotate(0deg) scale(0.92);
+  }
+  50% {
+    transform: rotate(180deg) scale(1.08);
+  }
+  100% {
+    transform: rotate(360deg) scale(0.92);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .voice-orb,
+  .voice-orb::before {
+    animation: none;
+    transition: none;
+    will-change: auto;
+  }
+}
