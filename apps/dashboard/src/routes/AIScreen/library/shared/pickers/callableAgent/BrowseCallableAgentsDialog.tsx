@@ -206,7 +206,11 @@ export function BrowseCallableAgentsDialog({
             key={entry.slug}
             entry={entry}
             onOpen={() => setOpenSlug(entry.slug)}
-            onToggle={() => (entry.status !== null ? onRemove(entry.slug) : onAdd(entry.slug, ''))}
+            onToggle={() => {
+              if (entry.status !== null) onRemove(entry.slug);
+              else if (entry.needsApproval) setOpenSlug(entry.slug);
+              else onAdd(entry.slug, '');
+            }}
           />
         ))}
       </div>

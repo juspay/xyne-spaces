@@ -7,6 +7,7 @@ import {
 } from '../components/AppSidebar/navigationConfig';
 import { AppIcon } from '../components/AppIcon/AppIcon';
 import { inboxItemsStore, useAppSnapshots, appIdOf, appItemId } from './barItems';
+import { useDisabledToolbarPaths } from './useDisabledToolbarPaths';
 
 /** Where an Inbox app entry opens: the chat panel, directory still alongside. */
 export const inboxAppPath = (appId: string): string => `/chat/dir/app/${appId}`;
@@ -29,6 +30,7 @@ const appNavIcon = (icon: string | null): PikaIcon => {
 export const useInboxNavItems = (radarEnabled: boolean): ChatNavItem[] => {
   const ids = inboxItemsStore.useItems();
   const snapshots = useAppSnapshots();
+  const disabledToolbarPaths = useDisabledToolbarPaths();
 
   return useMemo(() => {
     const byKey = new Map<string, ChatNavItem>(CHAT_NAV_ITEMS.map(item => [item.key, item]));
@@ -50,8 +52,9 @@ export const useInboxNavItems = (radarEnabled: boolean): ChatNavItem[] => {
       const item = byKey.get(id);
       if (!item) continue;
       if (item.requiresRadar && !radarEnabled) continue;
+      if (item.toolbarPath && disabledToolbarPaths.has(item.toolbarPath)) continue;
       items.push(item);
     }
     return items;
-  }, [ids, snapshots, radarEnabled]);
+  }, [ids, snapshots, radarEnabled, disabledToolbarPaths]);
 };

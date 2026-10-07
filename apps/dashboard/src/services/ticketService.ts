@@ -116,6 +116,25 @@ export const getKanbanCounts = async (
   return response.data;
 };
 
+/** The same counts over one SDLC track's tickets, across every board they are on. */
+export interface TrackKanbanCountsRequest extends Omit<
+  KanbanCountsRequest,
+  'viewMode' | 'projectId' | 'boardId'
+> {
+  channelId: string;
+  trackId: string;
+}
+
+export const getTrackKanbanCounts = async (
+  payload: TrackKanbanCountsRequest,
+): Promise<KanbanCountsResponse> => {
+  const response = await apiInstance.post<KanbanCountsResponse>(
+    '/tickets/kanban/track-counts',
+    payload,
+  );
+  return response.data;
+};
+
 export interface Merchant {
   mid: string;
 }

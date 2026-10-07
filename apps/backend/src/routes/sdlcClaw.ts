@@ -44,7 +44,7 @@ async function actorFromRequest(req: Request): Promise<SdlcActor> {
     where: { id: userId },
     select: { userType: true, workspaceId: true },
   });
-  if (user?.userType !== UserType.APP) return { userId, workspaceId };
+  if (user?.userType !== UserType.APP && user?.userType !== UserType.AGENT) return { userId, workspaceId };
 
   const actingUserHeader = req.headers['x-xyne-acting-user-id'];
   const actingUserId = typeof actingUserHeader === 'string' ? actingUserHeader.trim() : '';
@@ -55,7 +55,7 @@ async function actorFromRequest(req: Request): Promise<SdlcActor> {
     where: {
       id: actingUserId,
       workspaceId,
-      userType: { not: UserType.APP },
+      userType: { notIn: [UserType.APP, UserType.AGENT] },
     },
     select: { id: true },
   });

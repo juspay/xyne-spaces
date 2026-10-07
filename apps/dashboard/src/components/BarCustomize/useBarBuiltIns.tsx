@@ -3,6 +3,7 @@ import type { ChannelScopeType } from '@xyne/shared';
 import { useVisibleNavigationItems } from '../../hooks/useVisibleNavigationItems';
 import { useRadarEnabled } from '../../hooks/radarCacConfig';
 import { useAuth } from '../../hooks/useAuth';
+import { useDisabledToolbarPaths } from '../../hooks/useDisabledToolbarPaths';
 import { chatNavItems } from '../AppSidebar/navigationConfig';
 import { useAvailableBuiltInTabs } from '../Chat/ConversationPannel/ConversationPannel.utils';
 
@@ -31,13 +32,16 @@ export const useToolbarBuiltIns = (): BarBuiltIn[] => {
 export const useInboxBuiltIns = (): BarBuiltIn[] => {
   const { user } = useAuth();
   const radarEnabled = useRadarEnabled(user?.email);
+  const disabledToolbarPaths = useDisabledToolbarPaths();
   return useMemo(
     () =>
-      chatNavItems(radarEnabled).map(item => {
-        const Icon = item.icon;
-        return { id: item.key, label: item.label, icon: <Icon size={16} /> };
-      }),
-    [radarEnabled],
+      chatNavItems(radarEnabled)
+        .filter(item => !item.toolbarPath || !disabledToolbarPaths.has(item.toolbarPath))
+        .map(item => {
+          const Icon = item.icon;
+          return { id: item.key, label: item.label, icon: <Icon size={16} /> };
+        }),
+    [radarEnabled, disabledToolbarPaths],
   );
 };
 

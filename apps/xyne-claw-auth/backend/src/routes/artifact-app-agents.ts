@@ -37,7 +37,7 @@ import { prisma } from "../db.js";
 import { CONFIG } from "../config.js";
 import { redisService } from "../redis.js";
 import { getRequesterId, getOrgId, isClawAdmin } from "../middleware/agent-acl.js";
-import { getWorkspaceIdForUser } from "../lib/spaces-db.js";
+import { getWorkspaceIdForUser, requestWorkspaceHint } from "../lib/spaces-db.js";
 import { visibleAgentWhereForRunningUser } from "../lib/callable-agent-resolver.js";
 import { resolveAgentProviderConfigs } from "../lib/agent-provider-config.js";
 import { resolveFastMode } from "../lib/fast-mode.js";
@@ -149,6 +149,7 @@ function declaredAgentsFrom(manifest: unknown): string[] {
 async function resolveAppContext(
   input: { appId?: string | undefined; attachmentId?: string | undefined },
   requesterId: string,
+  workspaceHint?: string,
 ): Promise<{ ok: true; ctx: AppContext } | { ok: false; status: number; error: string }> {
   if (input.appId) {
     const app = await prisma.artifactApp.findUnique({ where: { id: input.appId } });
@@ -156,7 +157,7 @@ async function resolveAppContext(
 
     const isOwner = app.ownerUserId === requesterId;
     if (!isOwner) {
-      const workspaceId = await getWorkspaceIdForUser(requesterId, "artifact-app-agents");
+      const workspaceId = await getWorkspaceIdForUser(requesterId, "artifact-app-agents", workspaceHint);
       const sameWorkspace = workspaceId !== null && workspaceId === app.workspaceId;
       if (!sameWorkspace || app.visibility !== VISIBILITY_WORKSPACE) {
         return { ok: false, status: 403, error: "Forbidden" };
@@ -193,7 +194,7 @@ async function resolveAppContext(
     if (!att) return { ok: false, status: 404, error: "Artifact not found" };
     if (att.uploaderUserId !== requesterId) return { ok: false, status: 403, error: "Forbidden" };
 
-    const workspaceId = await getWorkspaceIdForUser(requesterId, "artifact-app-agents");
+    const workspaceId = await getWorkspaceIdForUser(requesterId, "artifact-app-agents", workspaceHint);
     if (!workspaceId) return { ok: false, status: 409, error: "No Spaces workspace for this user" };
 
     const manifest = (att.metadata as { reactArtifact?: unknown } | null)?.reactArtifact ?? null;
@@ -258,6 +259,7 @@ artifactAppAgentsRouter.get("/agents", async (req: Request, res: Response): Prom
       attachmentId: typeof req.query["attachmentId"] === "string" ? req.query["attachmentId"] : undefined,
     },
     requesterId,
+    requestWorkspaceHint(req),
   );
   if (!resolved.ok) {
     res.status(resolved.status).json({ success: false, error: resolved.error });
@@ -282,7 +284,7 @@ artifactAppAgentsRouter.post("/runs", async (req: Request, res: Response): Promi
   const { prompt, agentSlug: requestedSlug } = parsed.data;
   const runKey = parsed.data.key ?? "default";
 
-  const resolved = await resolveAppContext(parsed.data, requesterId);
+  const resolved = await resolveAppContext(parsed.data, requesterId, requestWorkspaceHint(req));
   if (!resolved.ok) {
     res.status(resolved.status).json({ success: false, error: resolved.error });
     return;

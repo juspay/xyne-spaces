@@ -16,6 +16,7 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { Sparkles, ChevronRight, Loader2, Check, X, Info, AlertTriangle } from "lucide-react";
 import type { AgentLight } from "../../lib/types";
+import { isCurrentUser } from "../../lib/identity";
 import {
   suggestTools,
   type AvailableTools,
@@ -570,7 +571,9 @@ export function ToolboxPicker({
     }
   };
   const agentNeedsReason = (agentOption: AgentLight) =>
-    !!delegatedAgents && agentOption.ownerUserId !== delegatedAgents.currentUserId;
+    // The caller-supplied id and Claw rows may each use either id form
+    // (canonical Claw id or raw Spaces id) — accept either as "mine".
+    !!delegatedAgents && !isCurrentUser(agentOption.ownerUserId) && agentOption.ownerUserId !== delegatedAgents.currentUserId;
 
   const requestDelegationReason = (agentsToAdd: AgentLight[]) => {
     const firstAgent = agentsToAdd[0];

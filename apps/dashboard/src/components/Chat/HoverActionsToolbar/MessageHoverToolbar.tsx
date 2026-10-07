@@ -1,4 +1,12 @@
-import React, { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
+import React, {
+  useCallback,
+  useContext,
+  useEffect,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from 'react';
+import { DiscussionListContext } from '../ConversationPannel/DiscussionListContext';
 import { HoverActionsToolbar } from './HoverActionsToolbar';
 import { hoveredMessage, messageInteractionModality } from '../ChatBubble/hoveredMessageRef';
 import {
@@ -43,6 +51,9 @@ export const MessageHoverToolbar: React.FC<MessageHoverToolbarProps> = ({
   // Keyboard shortcuts for whichever message is hovered — registered once per
   // list here instead of once per mounted ChatBubble (~6 × ~40 effects saved).
   useMessageHoverShortcuts(containerRef, keyboardSelectedMessageId);
+  // Discussion cards carry their actions in their own footer, so the floating bar
+  // stays hidden there; the shortcuts above still act on the hovered message.
+  const inDiscussionList = useContext(DiscussionListContext) !== null;
 
   const [activeRow, setActiveRow] = useState<ActiveRow | null>(null);
   const [isEmojiPickerOpen, setIsEmojiPickerOpen] = useState(false);
@@ -306,7 +317,7 @@ export const MessageHoverToolbar: React.FC<MessageHoverToolbarProps> = ({
     [setHighlightedRow, setKeyboardHighlightedRow],
   );
 
-  if (!activeRow || !actions) return null;
+  if (!activeRow || !actions || inDiscussionList) return null;
 
   // After the pinned popover/dropdown closes, hide unless the pointer is
   // still over the list (in which case pointerover keeps driving the overlay).

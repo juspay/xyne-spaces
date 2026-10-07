@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { useAuth } from "../../hooks/useAuth";
 import { useAdminStatus } from "./useAdminStatus";
+import { isCurrentUser } from "../../lib/identity";
 import type {
   AgentLight,
   McpServer,
@@ -106,13 +107,13 @@ export interface HomeData {
   pausedScheduledJobs: number;
   /** Soonest upcoming scheduled job in the user's queue, or null. */
   nextScheduledJob: ScheduledJob | null;
-  /** Agents created by the current user (ownerUserId === userId). */
+  /** Agents created by the current user (isCurrentUser(ownerUserId)). */
   personalAgents: number;
   /** Agents owned by others or shipped with the workspace. */
   sharedAgents: number;
-  /** Skills created by the current user (ownerUserId === userId). */
+  /** Skills created by the current user (isCurrentUser(ownerUserId)). */
   personalSkills: number;
-  /** Skills shipped with the product (ownerUserId !== userId). */
+  /** Skills shipped with the product (!isCurrentUser(ownerUserId)). */
   inBuiltSkills: number;
   /** Top-run agent for the user today (from dashboard1d.agentTable). */
   topAgentToday: UserDashboardAgentRow | null;
@@ -347,11 +348,11 @@ export function useHomeData(): HomeData {
   const unusedSkills = skills.filter((s) => !attachedSkillIds.has(s.id)).length;
 
   const personalAgents = userId
-    ? agents.filter((a) => a.ownerUserId === userId).length
+    ? agents.filter((a) => isCurrentUser(a.ownerUserId)).length
     : 0;
   const sharedAgents = agents.length - personalAgents;
   const personalSkills = userId
-    ? skills.filter((s) => s.ownerUserId === userId).length
+    ? skills.filter((s) => isCurrentUser(s.ownerUserId)).length
     : 0;
   const inBuiltSkills = skills.length - personalSkills;
 

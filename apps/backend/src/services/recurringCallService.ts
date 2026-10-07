@@ -36,6 +36,7 @@ export interface RecurringSeriesShape {
   startsOn: Date;
   endsOn: Date | null;
   callUpdatesChannel: string | null;
+  summaryTemplateId?: string | null;
 }
 
 // ── Service ───────────────────────────────────────────────────────────────────
@@ -121,6 +122,7 @@ export class RecurringCallService {
         participantInviters,
         ...(externalInvitees.length > 0 && { externalInvitees }),
         callUpdatesChannel: callUpdatesChannel ?? null,
+        ...(recurringSeries.summaryTemplateId && { summaryTemplateId: recurringSeries.summaryTemplateId }),
       }, tx);
 
       queueCallVespaFeed(callId, { source: CallVespaFeedSource.RecurringCallServiceCreateInstance });

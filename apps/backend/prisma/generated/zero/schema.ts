@@ -999,6 +999,8 @@ export const invitationTable = table("invitations")
     entityId: string().optional(),
     entityType: string().optional(),
     channelId: string().optional(),
+    isOrgApproved: boolean().optional(),
+    inviteEmailSentAt: number().optional(),
     createdAt: number(),
     updatedAt: number(),
   })
@@ -1839,6 +1841,7 @@ export const recurringCallSeriesTable = table("recurring_call_series")
     endsOn: number().optional(),
     metadata: json().optional(),
     callUpdatesChannel: string().optional(),
+    summaryTemplateId: string().optional(),
     createdAt: number(),
     updatedAt: number(),
   })

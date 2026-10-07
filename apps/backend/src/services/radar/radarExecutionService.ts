@@ -11,6 +11,7 @@ import {
 } from '@/services/radar/radarParser';
 import { noOpReassignFeedback, validateTransitions } from '@/services/radar/radarValidator';
 import { radarApplier } from '@/services/radar/radarApplier';
+import { recordPrLinks } from '@/services/radar/radarPrLinks';
 import {
   duplicateCreateFeedback,
   isDuplicate,
@@ -210,6 +211,9 @@ class RadarExecutionService {
       if (window.length === 0) {
         return; // drained — the job may complete
       }
+      // Before the gate, so a PR link is remembered even in a pass the parser
+      // skips; a merge later finds this thread by that link. Never throws.
+      await recordPrLinks(scope, window);
 
       // Gate: four deterministic branches — a tracked scope (any reply may move
       // a ball), an untracked one with a resolved @mention of a person or of a
@@ -823,7 +827,7 @@ class RadarExecutionService {
   }
 }
 
-const stripHtml = (html: string): string =>
+export const stripHtml = (html: string): string =>
   html
     .replace(/<[^>]*>/g, ' ')
     .replace(/&nbsp;/g, ' ')

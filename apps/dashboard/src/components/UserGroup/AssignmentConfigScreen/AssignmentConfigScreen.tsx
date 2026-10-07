@@ -41,6 +41,49 @@ const ROTATION_INTERVAL_OPTIONS: { value: RotationInterval; label: string }[] = 
 /** Radix Select rejects an empty-string item value, so "no board filter" needs a sentinel. */
 const ALL_BOARDS_VALUE = '__all_boards__';
 
+// Mirrors the mutator's accepted range for percentageWindowDays
+const MAX_SHARE_WINDOW_DAYS = 90;
+
+/** Which tickets received in the share window count toward a member's % share. */
+type ShareBasis = 'ALL' | 'OPEN';
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+/** Preset window lengths; any other 1–90 day value is entered as Custom. Stored as days. */
+const SHARE_WINDOW_PRESETS: { days: number; label: string }[] = [
+  { days: 1, label: '1 day' },
+  { days: 7, label: '1 week (7 days)' },
+  { days: 14, label: '2 weeks (14 days)' },
+  { days: 30, label: '1 month (30 days)' },
+  { days: 90, label: '3 months (90 days)' },
+];
+const CUSTOM_SHARE_WINDOW = 'CUSTOM';
+
+/** Select value for a stored window length: its preset, Custom for any other value, or none. */
+const shareWindowChoiceFor = (days: number | null): string | null => {
+  if (days === null) return null;
+  return SHARE_WINDOW_PRESETS.some(p => p.days === days) ? String(days) : CUSTOM_SHARE_WINDOW;
+};
+
+/** Local midnight today — share windows start at the beginning of the day they are (re)started. */
+const startOfToday = (): number => {
+  const d = new Date();
+  d.setHours(0, 0, 0, 0);
+  return d.getTime();
+};
+
+/** Start of the fixed share window containing now; mirrors currentShareWindowStart on the backend. */
+const currentShareWindowStart = (startAt: number, windowDays: number): number => {
+  const now = Date.now();
+  if (now <= startAt) return startAt;
+  const length = windowDays * DAY_MS;
+  return startAt + Math.floor((now - startAt) / length) * length;
+};
+
+const SHARE_BASIS_OPTIONS: { value: ShareBasis; label: string }[] = [
+  { value: 'ALL', label: 'All tickets' },
+  { value: 'OPEN', label: 'Open tickets only' },
+];
+
 const TABLE_HEAD_CELL =
   'px-6 py-3 text-xs font-medium uppercase tracking-wider text-muted-foreground';
 
@@ -64,6 +107,8 @@ export const AssignmentConfigScreen = ({
   const [maxWorkloadError, setMaxWorkloadError] = useState<string | null>(null);
   const [isRotationModalOpen, setIsRotationModalOpen] = useState(false);
   const [showDisableRotationWarning, setShowDisableRotationWarning] = useState(false);
+  // Asked when the share window length changes on a board whose window is already running
+  const [showShareWindowChangeDialog, setShowShareWindowChangeDialog] = useState(false);
   const [activeTab, setActiveTab] = useState<'availability' | 'visibility'>('availability');
   // Members switched off in this session who were opted in to a ticket handoff on save
   const [pendingReassignUserIds, setPendingReassignUserIds] = useState<Set<string>>(new Set());
@@ -90,6 +135,12 @@ export const AssignmentConfigScreen = ({
   const [localMaxTickets, setLocalMaxTickets] = useState<Map<string, number>>(new Map());
   const [localBoardWeight, setLocalBoardWeight] = useState<number>(1);
   const [localUsePercentage, setLocalUsePercentage] = useState<boolean>(false);
+  // Share window length (days) and which tickets count; no defaults — required when % share is on
+  const [shareWindowDaysInput, setShareWindowDaysInput] = useState<string>('');
+  const [localShareWindowDays, setLocalShareWindowDays] = useState<number | null>(null);
+  const [localShareBasis, setLocalShareBasis] = useState<ShareBasis | null>(null);
+  // Preset ('1', '7', …) or 'CUSTOM' selected for the window length
+  const [shareWindowChoice, setShareWindowChoice] = useState<string | null>(null);
 
   // Group-level rotation state
   const [localAutoRotationEnabled, setLocalAutoRotationEnabled] = useState<boolean>(false);
@@ -301,10 +352,20 @@ export const AssignmentConfigScreen = ({
       setBoardWeight(String(weight));
       setLocalBoardWeight(weight);
       setLocalUsePercentage(score?.usePercentage ?? false);
+      const windowDays = score?.percentageWindowDays ?? null;
+      setShareWindowDaysInput(windowDays === null ? '' : String(windowDays));
+      setLocalShareWindowDays(windowDays);
+      setShareWindowChoice(shareWindowChoiceFor(windowDays));
+      const basis = score?.percentageShareBasis;
+      setLocalShareBasis(basis === 'ALL' || basis === 'OPEN' ? basis : null);
     } else {
       setBoardWeight('1');
       setLocalBoardWeight(1);
       setLocalUsePercentage(false);
+      setShareWindowDaysInput('');
+      setLocalShareWindowDays(null);
+      setShareWindowChoice(null);
+      setLocalShareBasis(null);
     }
     setHasChanges(false);
   }, [selectedBoardId, boardComplexityScores]);
@@ -541,6 +602,7 @@ export const AssignmentConfigScreen = ({
   };
 
   // Check if percentage is valid (sum = 100 per set) when usePercentage is enabled and rotation is enabled
+
   const isPercentageValid = useMemo(() => {
     if (!localUsePercentage) return true;
 
@@ -616,6 +678,69 @@ export const AssignmentConfigScreen = ({
     }
   };
 
+  const handleShareWindowChoiceChange = (choice: string): void => {
+    setShareWindowChoice(choice);
+    setHasChanges(true);
+    // Custom keeps the current length so the admin can edit it in the input below
+    if (choice === CUSTOM_SHARE_WINDOW) return;
+    const days = parseInt(choice, 10);
+    setLocalShareWindowDays(days);
+    setShareWindowDaysInput(String(days));
+  };
+
+  const handleShareWindowDaysChange = (value: string): void => {
+    const withoutLeadingZeros = value.replace(/[^0-9]/g, '').replace(/^0+/, '');
+    if (withoutLeadingZeros === '') {
+      setShareWindowDaysInput('');
+      return;
+    }
+    const days = Math.min(parseInt(withoutLeadingZeros, 10), MAX_SHARE_WINDOW_DAYS);
+    setShareWindowDaysInput(String(days));
+    setLocalShareWindowDays(days);
+    setHasChanges(true);
+  };
+
+  const savedBoardScore = selectedBoardId
+    ? boardComplexityScores?.find(s => s.boardId === selectedBoardId)
+    : undefined;
+  const savedShareWindowStartAt =
+    savedBoardScore?.usePercentage === true
+      ? (savedBoardScore.percentageWindowStartAt ?? null)
+      : null;
+  const savedShareWindowDays = savedBoardScore?.percentageWindowDays ?? null;
+  const savedShareBasis =
+    savedBoardScore?.percentageShareBasis === 'ALL' ||
+    savedBoardScore?.percentageShareBasis === 'OPEN'
+      ? savedBoardScore.percentageShareBasis
+      : null;
+
+  const isShareSectionChanged =
+    localUsePercentage &&
+    (savedBoardScore?.usePercentage !== true ||
+      localShareWindowDays !== savedShareWindowDays ||
+      localShareBasis !== savedShareBasis);
+
+  // % share needs both a window length and a ticket basis (neither has a default), but only
+  // enforce it when the admin edits that section, so unrelated edits on such boards can save.
+  const isShareSettingsValid =
+    !isShareSectionChanged || (localShareWindowDays !== null && localShareBasis !== null);
+
+  // Changing the window length mid-window: the admin chooses whether to restart counting today
+  // or keep the current start date and apply the new length from it.
+  const needsShareWindowChoice = (): boolean =>
+    localUsePercentage &&
+    savedShareWindowStartAt !== null &&
+    savedShareWindowDays !== null &&
+    localShareWindowDays !== savedShareWindowDays;
+
+  const continueSave = (): void => {
+    if (needsShareWindowChoice()) {
+      setShowShareWindowChangeDialog(true);
+      return;
+    }
+    void performSave();
+  };
+
   const handleSave = (): void => {
     // Check if user is disabling auto-rotation - show warning if so
     const isDisablingRotation =
@@ -626,10 +751,23 @@ export const AssignmentConfigScreen = ({
       return;
     }
 
-    void performSave();
+    continueSave();
   };
 
-  const performSave = async (): Promise<void> => {
+  /** What to send for percentageWindowStartAt; undefined keeps the stored start. */
+  const resolveShareWindowStartAt = (resetShareWindow: boolean): number | undefined => {
+    if (!localUsePercentage) return undefined;
+    // First time % share is configured (or it never had a start): the first window begins today.
+    // Unrelated saves on a board without share settings leave the start unset.
+    if (savedShareWindowStartAt === null) return isShareSectionChanged ? startOfToday() : undefined;
+    return resetShareWindow ? startOfToday() : undefined;
+  };
+
+  const performSave = async (resetShareWindow = false): Promise<void> => {
+    if (!isShareSettingsValid) {
+      setPercentageError('Set the share window and which tickets count before saving.');
+      return;
+    }
     // Validate percentage sum equals 100 when usePercentage is enabled
     if (localUsePercentage) {
       if (localAutoRotationEnabled) {
@@ -674,6 +812,9 @@ export const AssignmentConfigScreen = ({
             boardId: selectedBoardId,
             weight: localBoardWeight,
             usePercentage: localUsePercentage,
+            percentageWindowDays: localShareWindowDays ?? undefined,
+            percentageShareBasis: localShareBasis ?? undefined,
+            percentageWindowStartAt: resolveShareWindowStartAt(resetShareWindow),
           }
         : undefined;
 
@@ -1049,7 +1190,7 @@ export const AssignmentConfigScreen = ({
   };
 
   return (
-    <div className='flex h-full w-full flex-col overflow-hidden bg-background shadow-md md:rounded-2xl'>
+    <div className='flex h-full w-full flex-col overflow-hidden bg-background'>
       {/* Header */}
       <div className='shrink-0'>
         <div className='flex w-full items-center gap-5 px-6 pt-5'>
@@ -1057,7 +1198,7 @@ export const AssignmentConfigScreen = ({
             variant='ghost'
             size='iconSm'
             className='shrink-0 text-muted-foreground hover:text-foreground'
-            onClick={() => void navigate('/user-groups')}
+            onClick={() => void navigate('/organisations/user-groups')}
             aria-label='Back to user groups'
             data-track-category='UserGroups'
             data-track-name='BackToUserGroups'
@@ -1076,7 +1217,7 @@ export const AssignmentConfigScreen = ({
           <Button
             className='h-auto shrink-0 rounded-lg p-2 text-sm'
             onClick={() => void handleSave()}
-            disabled={!hasChanges || isSaving || !isPercentageValid}
+            disabled={!hasChanges || isSaving || !isPercentageValid || !isShareSettingsValid}
             data-track-category='UserGroups'
             data-track-name='SaveAssignmentConfig'
           >
@@ -1376,6 +1517,116 @@ export const AssignmentConfigScreen = ({
                       }}
                     />
                   </div>
+
+                  {localUsePercentage && (
+                    <div className='mt-4 flex flex-col gap-2 border-t border-border pt-4'>
+                      <span className='text-[13px] font-medium text-foreground'>Share window</span>
+                      <p className='text-xs leading-[1.4] text-muted-foreground'>
+                        New tickets go to whoever is furthest below their % share of the tickets
+                        assigned on this board in the current window. Counts reset to zero at the
+                        end of each window, starting from the day % share was turned on. Pick a
+                        preset or a custom length of 1 to {MAX_SHARE_WINDOW_DAYS} days.
+                      </p>
+                      {savedShareWindowStartAt !== null && savedShareWindowDays !== null && (
+                        <p className='text-xs leading-[1.4] text-muted-foreground'>
+                          Current window started{' '}
+                          <span className='font-medium text-foreground'>
+                            {new Date(
+                              currentShareWindowStart(
+                                savedShareWindowStartAt,
+                                savedShareWindowDays,
+                              ),
+                            ).toLocaleDateString()}
+                          </span>
+                          .
+                        </p>
+                      )}
+                      <Select
+                        value={shareWindowChoice ?? ''}
+                        onValueChange={handleShareWindowChoiceChange}
+                      >
+                        <SelectTrigger
+                          className='mt-1 w-full max-w-[240px]'
+                          aria-label='Share window'
+                          data-track-category='UserGroups'
+                          data-track-name='SelectShareWindow'
+                        >
+                          <SelectValue placeholder='Select…' />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {SHARE_WINDOW_PRESETS.map(preset => (
+                            <SelectItem key={preset.days} value={String(preset.days)}>
+                              {preset.label}
+                            </SelectItem>
+                          ))}
+                          <SelectItem value={CUSTOM_SHARE_WINDOW}>Custom…</SelectItem>
+                        </SelectContent>
+                      </Select>
+                      {shareWindowChoice === CUSTOM_SHARE_WINDOW && (
+                        <Input
+                          type='text'
+                          inputMode='numeric'
+                          id='share-window-days'
+                          aria-label='Custom share window in days'
+                          value={shareWindowDaysInput}
+                          onChange={e => handleShareWindowDaysChange(e.target.value)}
+                          onBlur={() => {
+                            // Restore the last valid value if left empty
+                            if (shareWindowDaysInput === '') {
+                              setShareWindowDaysInput(
+                                localShareWindowDays === null ? '' : String(localShareWindowDays),
+                              );
+                            }
+                          }}
+                          placeholder='e.g. 7'
+                          className='mt-1 w-24 text-sm'
+                          data-track-event='change'
+                          data-track-category='UserGroups'
+                          data-track-name='SetShareWindowDays'
+                        />
+                      )}
+                    </div>
+                  )}
+
+                  {localUsePercentage && (
+                    <div className='mt-4 flex flex-col gap-2 border-t border-border pt-4'>
+                      <span className='text-[13px] font-medium text-foreground'>
+                        Tickets counted
+                      </span>
+                      <p className='text-xs leading-[1.4] text-muted-foreground'>
+                        Which tickets received in the share window count toward each person&apos;s
+                        share. With open only, a ticket stops counting once it is closed.
+                      </p>
+                      <Select
+                        value={localShareBasis ?? ''}
+                        onValueChange={value => {
+                          setLocalShareBasis(value as ShareBasis);
+                          setHasChanges(true);
+                        }}
+                      >
+                        <SelectTrigger
+                          className='mt-1 w-full max-w-[240px]'
+                          aria-label='Tickets counted'
+                          data-track-category='UserGroups'
+                          data-track-name='SelectShareBasis'
+                        >
+                          <SelectValue placeholder='Select…' />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {SHARE_BASIS_OPTIONS.map(option => (
+                            <SelectItem key={option.value} value={option.value}>
+                              {option.label}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                      {!isShareSettingsValid && (
+                        <p className='text-[13px] text-destructive'>
+                          Set the share window and which tickets count to save % share.
+                        </p>
+                      )}
+                    </div>
+                  )}
                 </div>
               )}
 
@@ -1503,19 +1754,20 @@ export const AssignmentConfigScreen = ({
                     experts go first.
                   </li>
                   <li>
-                    <strong className='font-medium text-foreground'>Score</strong>: the lowest score
-                    gets the ticket —{' '}
-                    <code className='font-mono text-xs'>
-                      weightedActiveTasks − expertiseBonus − percentDiff
-                    </code>
+                    <strong className='font-medium text-foreground'>Score</strong>: without % share,
+                    the lowest score gets the ticket —{' '}
+                    <code className='font-mono text-xs'>weightedActiveTasks − expertiseBonus</code>
                   </li>
                   <li>
                     <strong className='font-medium text-foreground'>Expertise bonus</strong>:
                     experts get −10 points, which moves them up the queue.
                   </li>
                   <li>
-                    <strong className='font-medium text-foreground'>% Share</strong>: anyone below
-                    their target share gets priority, which evens out distribution.
+                    <strong className='font-medium text-foreground'>% Share</strong>: when on for a
+                    board, each ticket goes to whoever is furthest below their share of the tickets
+                    assigned on that board in the share window (all of them, or only those still
+                    open). Open tickets only break ties, and people at 0% get tickets only when
+                    everyone else is at their limit.
                   </li>
                   <li>
                     <strong className='font-medium text-foreground'>Max tickets</strong>: people at
@@ -1622,6 +1874,48 @@ export const AssignmentConfigScreen = ({
         </div>
       </Dialog>
 
+      {/* Share window length changed mid-window */}
+      <Dialog
+        open={showShareWindowChangeDialog}
+        onOpenChange={setShowShareWindowChangeDialog}
+        title='Restart the share window?'
+      >
+        <div className='p-6'>
+          <p className='mb-6 text-[13px] leading-[1.5] text-muted-foreground'>
+            You changed the share window from {savedShareWindowDays} to {localShareWindowDays} days.
+            Restart counting from today, or keep the current start date
+            {savedShareWindowStartAt !== null &&
+              ` (${new Date(savedShareWindowStartAt).toLocaleDateString()})`}{' '}
+            and apply the new length from there?
+          </p>
+
+          <div className='flex justify-end gap-3'>
+            <Button
+              variant='secondary'
+              onClick={() => {
+                setShowShareWindowChangeDialog(false);
+                void performSave(false);
+              }}
+              data-track-category='UserGroups'
+              data-track-name='ContinueShareWindow'
+            >
+              Keep current start
+            </Button>
+            <Button
+              onClick={() => {
+                setShowShareWindowChangeDialog(false);
+                void performSave(true);
+              }}
+              data-track-category='UserGroups'
+              data-track-name='ResetShareWindow'
+              data-track-metadata={JSON.stringify({ userGroupId })}
+            >
+              Restart from today
+            </Button>
+          </div>
+        </div>
+      </Dialog>
+
       {/* Disable Auto-Rotation Warning Dialog */}
       <Dialog
         open={showDisableRotationWarning}
@@ -1647,7 +1941,7 @@ export const AssignmentConfigScreen = ({
               variant='destructive'
               onClick={() => {
                 setShowDisableRotationWarning(false);
-                void performSave();
+                continueSave();
               }}
               data-track-category='UserGroups'
               data-track-name='ConfirmDisableRotation'

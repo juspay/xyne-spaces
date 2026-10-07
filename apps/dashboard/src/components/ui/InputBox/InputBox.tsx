@@ -128,6 +128,8 @@ type SendTrigger =
   | 'mobile_editor'
   | 'unknown';
 import { useChannel } from '../../../hooks/useChannels';
+import { extractCallLinkFromInviteText } from '../../../utils/callControls';
+import { parseCallInviteLink } from '../../Chat/RenderMessageWithHTML/internalLinkUtils';
 
 const lowlight = createLowlight(all);
 
@@ -761,11 +763,6 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
       ],
       content: value || '',
       editable: !isSending,
-      onCreate: ({ editor }) => {
-        const initialText = editor.getText().trim();
-        setContent(initialText.length > 0 ? 'has-content' : '');
-        updateEmojiSizeClass(editor);
-      },
       autofocus: autoFocus ? autoFocus : null,
       onFocus: () => {
         setIsFocused(true);
@@ -1052,6 +1049,21 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
             }
           }
 
+          // A copied call invite ("Copy link" / "Copy joining info") is written for email and
+          // calendars. In chat, keep only its link: the message then renders as the call card.
+          const inviteCallLink = extractCallLinkFromInviteText(
+            clipboard?.getData('text/plain') ?? '',
+          );
+          if (inviteCallLink && parseCallInviteLink(inviteCallLink)) {
+            event.preventDefault();
+            editor?.commands.insertContent({
+              type: 'text',
+              text: inviteCallLink,
+              marks: [{ type: 'link', attrs: { href: inviteCallLink } }],
+            });
+            return true;
+          }
+
           /** Handle File Pasting */
           const files = clipboard?.files ?? [];
           if (features.fileAttachments && files.length > 0) {
@@ -1217,6 +1229,14 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
         },
       },
     });
+
+    // What the editor starts with, read once it exists. It is made during the first
+    // render, so onCreate would set this state before the component had mounted.
+    useEffect(() => {
+      if (!editor) return;
+      setContent(editor.getText().trim().length > 0 ? 'has-content' : '');
+      updateEmojiSizeClass(editor);
+    }, [editor, updateEmojiSizeClass]);
 
     useEffect(() => {
       editor?.setEditable(!disabled && !isSending, false);

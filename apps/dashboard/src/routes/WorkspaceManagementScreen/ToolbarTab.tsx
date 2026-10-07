@@ -10,7 +10,9 @@ import { cn } from '../../utils/classNames';
 import { WorkspaceRole } from '@xyne/shared';
 import {
   NAVIGATION_ITEMS,
+  NON_RAIL_TOOLBAR_ITEMS,
   TOOLBAR_ITEM_DESCRIPTIONS,
+  TOOLBAR_UNMANAGED_PATHS,
 } from '../../components/AppSidebar/navigationConfig';
 import { PATH_TO_RESOURCE } from '../../components/AppSidebar/utils/resourceMapping';
 
@@ -48,9 +50,15 @@ export const ToolbarTab = ({ isActive: _isActive = false }: ToolbarTabProps): Re
   // NAVIGATION_ITEMS directly rather than useVisibleNavigationItems, so it needs
   // the filter applied here too.
   const { showStreams } = useStreamsVisibility();
-  const manageableItems = NAVIGATION_ITEMS.filter(
-    item => !(item.path in PATH_TO_RESOURCE) && (showStreams || item.path !== '/streams'),
-  );
+  const manageableItems = [
+    ...NAVIGATION_ITEMS.filter(
+      item =>
+        !(item.path in PATH_TO_RESOURCE) &&
+        !TOOLBAR_UNMANAGED_PATHS.has(item.path) &&
+        (showStreams || item.path !== '/streams'),
+    ),
+    ...NON_RAIL_TOOLBAR_ITEMS,
+  ];
 
   const [searchQuery, setSearchQuery] = useState('');
   const visibleItems = manageableItems.filter(item =>

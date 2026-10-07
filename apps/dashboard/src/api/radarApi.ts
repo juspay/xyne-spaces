@@ -153,7 +153,7 @@ export interface RadarItemMutation {
   id: string;
   itemId: string;
   op: string;
-  actorType: 'llm' | 'manual';
+  actorType: 'llm' | 'manual' | 'reaction' | 'pr_merge';
   actorId: string | null;
   sourceMessageId: string | null;
   payload: Record<string, unknown> | null;

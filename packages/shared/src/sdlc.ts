@@ -52,6 +52,15 @@ export function sdlcHubKnowledgeFolderId(channelId: string): string {
   return `sdlc-knowledge-${channelId}`;
 }
 
+/**
+ * A folder's or a track's chosen icon: an @xyne/icons name, which is lowercase
+ * words joined by hyphens.
+ */
+export const sdlcIconNameSchema = z
+  .string()
+  .max(64)
+  .regex(/^[a-z0-9]+(-[a-z0-9]+)*$/);
+
 export const SDLC_WORKFLOW_RELATION = "WORKFLOW";
 export const SDLC_WIKI_WORKFLOW_RELATION = "WIKI_WORKFLOW";
 
@@ -118,6 +127,15 @@ export const SDLC_TREE_TARGET_TYPES = [
 export const SDLC_TRACK_FLAT_RELATION = "TRACK_ITEM_SECONDARY";
 
 /**
+ * A FOLDER -> item edge from every folder an item sits under, however deep, so
+ * "everything under this folder" and "the folders above this item" are each one
+ * indexed lookup. The folder-level twin of the flat track edge. Derived: kept in
+ * step with the containment edges in the same transaction as every write that
+ * files, moves or unfiles an item, never on its own.
+ */
+export const SDLC_FOLDER_FLAT_RELATION = "FOLDER_ITEM_SECONDARY";
+
+/**
  * Edges no user may write or delete through the generic link API. Derived or
  * structural: the app maintains them with the thing they describe.
  */
@@ -125,6 +143,7 @@ export const SDLC_STRUCTURAL_RELATIONS = [
   SDLC_MEMBERSHIP_RELATION,
   SDLC_TRACK_MEMBERSHIP_RELATION,
   SDLC_TRACK_FLAT_RELATION,
+  SDLC_FOLDER_FLAT_RELATION,
   SDLC_WORKFLOW_RELATION,
   SDLC_WIKI_WORKFLOW_RELATION,
   SDLC_HUB_ITEM_RELATION,
@@ -788,7 +807,52 @@ export const SDLC_UPLOAD_EXTENSIONS = [
   "m4v",
   "avi",
   "mkv",
+  // code and data — text, previewed with its language's colours. Only what the
+  // upload filter (ALLOWED_UPLOAD_EXTENSIONS) also takes, or it would be dropped.
+  "json",
+  "jsonl",
+  "xml",
+  "yaml",
+  "yml",
+  "toml",
+  "ini",
+  "conf",
+  "sql",
+  "log",
+  "py",
+  "js",
+  "mjs",
+  "cjs",
+  "ts",
+  "tsx",
+  "jsx",
+  "sh",
+  "bash",
+  "java",
+  "go",
+  "rs",
+  "rb",
+  "c",
+  "h",
+  "cpp",
+  "hpp",
+  "diff",
+  "patch",
+  "gradle",
 ] as const;
+
+/**
+ * A file's new name, keeping its extension: report.pdf renamed "Q4 report" is
+ * "Q4 report.pdf", so it still opens and previews as what it is. A name already
+ * ending in the extension is taken as it is.
+ */
+export function withKeptExtension(current: string, next: string): string {
+  const name = next.trim();
+  const dot = current.lastIndexOf(".");
+  if (dot <= 0 || dot === current.length - 1) return name;
+  const extension = current.slice(dot);
+  return name.toLowerCase().endsWith(extension.toLowerCase()) ? name : `${name}${extension}`;
+}
 
 /** `accept` for a file input, so the picker offers only what will be taken. */
 export const SDLC_UPLOAD_ACCEPT = SDLC_UPLOAD_EXTENSIONS.map(
