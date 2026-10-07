@@ -1,6 +1,10 @@
 # Xyne Desk auto-merge and manual controls
 
 ## Auto Merge ON combines matching emails
+tags: quarantine
+
+Quarantined: auto-merge duplicate detection queries Vespa (vespaDuplicateDetector), which the Docker test stack does not run.
+
 * using browser
 * Ensuring user "admin-1" is logged in
 * Creating personal Desk channel "channel-desk-auto-merge-on" for user "admin-1" in project "project-1"
