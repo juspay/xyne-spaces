@@ -27,17 +27,20 @@ const isWorkspaceAdmin = (role: WorkspaceRole | null | undefined): boolean =>
 
 const WorkspaceRoleBadge = ({ role }: { role: WorkspaceRole | null }): ReactElement => {
   const isAdmin = isWorkspaceAdmin(role);
+  const isGuest = role === WorkspaceRole.GUEST;
   return (
     <span
       className={cn(
         'inline-flex shrink-0 items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium',
         isAdmin
           ? 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400'
-          : 'bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-400',
+          : isGuest
+            ? 'bg-purple-500/10 text-purple-600 dark:text-purple-400'
+            : 'bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-400',
       )}
     >
       {isAdmin ? <Shield className='w-3 h-3' /> : <User className='w-3 h-3' />}
-      {role === WorkspaceRole.OWNER ? 'Owner' : isAdmin ? 'Admin' : 'Member'}
+      {role === WorkspaceRole.OWNER ? 'Owner' : isAdmin ? 'Admin' : isGuest ? 'Guest' : 'Member'}
     </span>
   );
 };
@@ -116,73 +119,82 @@ export const MembersTab = (): ReactElement => {
     </>
   );
 
-  const renderActions = (user: UserType): ReactElement => (
-    <>
-      {canEditAccess && (
-        <Button
-          variant='secondary'
-          size='sm'
-          onClick={() => setEditingUser(user)}
-          data-track-category='workspace-management'
-          data-track-name='EDIT_USER_ACCESS'
-        >
-          Edit access
-        </Button>
-      )}
-      {canManageMembers && user.role !== WorkspaceRole.OWNER && (
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <Button
-              variant='ghost'
-              size='sm'
-              aria-label={`More actions for ${user.name}`}
-              className='h-8 w-8 p-0'
-              data-track-category='workspace-management'
-              data-track-name='OPEN_MEMBER_ACTIONS'
-            >
-              <MoreHorizontal className='w-4 h-4' />
-            </Button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align='end'>
-            {user.role === WorkspaceRole.ADMIN ? (
+  // Guests have scoped access managed from the Guests tab, so the only action
+  // offered for them here is removal.
+  const renderActions = (user: UserType): ReactElement => {
+    const isGuest = user.role === WorkspaceRole.GUEST;
+    return (
+      <>
+        {canEditAccess && !isGuest && (
+          <Button
+            variant='secondary'
+            size='sm'
+            onClick={() => setEditingUser(user)}
+            data-track-category='workspace-management'
+            data-track-name='EDIT_USER_ACCESS'
+          >
+            Edit access
+          </Button>
+        )}
+        {canManageMembers && user.role !== WorkspaceRole.OWNER && (
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button
+                variant='ghost'
+                size='sm'
+                aria-label={`More actions for ${user.name}`}
+                className='h-8 w-8 p-0'
+                data-track-category='workspace-management'
+                data-track-name='OPEN_MEMBER_ACTIONS'
+              >
+                <MoreHorizontal className='w-4 h-4' />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align='end'>
+              {isGuest ? null : user.role === WorkspaceRole.ADMIN ? (
+                <DropdownMenuItem
+                  onClick={() => handleUpdateRole(user, WorkspaceRole.MEMBER)}
+                  disabled={isLastAdmin(user)}
+                  data-track-category='workspace-management'
+                  data-track-name='SET_MEMBER_ROLE_MEMBER'
+                >
+                  <User className='w-4 h-4 mr-2' />
+                  Make member
+                  {isLastAdmin(user) && (
+                    <span className='ml-2 text-xs text-muted-foreground'>(Last admin)</span>
+                  )}
+                </DropdownMenuItem>
+              ) : (
+                <DropdownMenuItem
+                  onClick={() => handleUpdateRole(user, WorkspaceRole.ADMIN)}
+                  data-track-category='workspace-management'
+                  data-track-name='SET_MEMBER_ROLE_ADMIN'
+                >
+                  <Shield className='w-4 h-4 mr-2' />
+                  Make admin
+                </DropdownMenuItem>
+              )}
+              {!isGuest && <DropdownMenuSeparator />}
               <DropdownMenuItem
-                onClick={() => handleUpdateRole(user, WorkspaceRole.MEMBER)}
+                onClick={() => setUserToRemove(user)}
                 disabled={isLastAdmin(user)}
+                className='text-destructive focus:text-destructive'
                 data-track-category='workspace-management'
-                data-track-name='SET_MEMBER_ROLE_MEMBER'
+                data-track-name='OPEN_REMOVE_MEMBER_CONFIRM'
               >
-                <User className='w-4 h-4 mr-2' />
-                Make member
-                {isLastAdmin(user) && (
-                  <span className='ml-2 text-xs text-muted-foreground'>(Last admin)</span>
-                )}
+                <UserMinus className='w-4 h-4 mr-2' />
+                Remove from workspace
               </DropdownMenuItem>
-            ) : (
-              <DropdownMenuItem
-                onClick={() => handleUpdateRole(user, WorkspaceRole.ADMIN)}
-                data-track-category='workspace-management'
-                data-track-name='SET_MEMBER_ROLE_ADMIN'
-              >
-                <Shield className='w-4 h-4 mr-2' />
-                Make admin
-              </DropdownMenuItem>
-            )}
-            <DropdownMenuSeparator />
-            <DropdownMenuItem
-              onClick={() => setUserToRemove(user)}
-              disabled={isLastAdmin(user)}
-              className='text-destructive focus:text-destructive'
-              data-track-category='workspace-management'
-              data-track-name='OPEN_REMOVE_MEMBER_CONFIRM'
-            >
-              <UserMinus className='w-4 h-4 mr-2' />
-              Remove from workspace
-            </DropdownMenuItem>
-          </DropdownMenuContent>
-        </DropdownMenu>
-      )}
-    </>
-  );
+            </DropdownMenuContent>
+          </DropdownMenu>
+        )}
+        {/* Keeps the owner's Edit access aligned with rows that have the menu. */}
+        {canManageMembers && user.role === WorkspaceRole.OWNER && (
+          <span aria-hidden='true' className='h-8 w-8 shrink-0' />
+        )}
+      </>
+    );
+  };
 
   const loading = users === undefined;
 
