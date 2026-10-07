@@ -15,6 +15,9 @@ function fakeSession(exitCodes: Record<string, number | null> = {}) {
           done: true,
           exitCode: Object.keys(exitCodes).find((k) => jobId.includes(k)) ? exitCodes[Object.keys(exitCodes).find((k) => jobId.includes(k))!]! : 0,
           stderr: "boom",
+          stdout: jobId.includes("dep-sync")
+            ? "dependency-sync: FAILED — build will not work until these are fixed:\n  chitragupt: yarn install --immutable FAILED after 4s -> cd /workspace/chitragupt && yarn install --immutable (log: /tmp/depsync-chitragupt.log)"
+            : "",
         })),
       },
     },
@@ -36,7 +39,7 @@ describe("runReuseSteps", () => {
     const log: string[] = [];
     await runReuseSteps(session, steps, "/workspace/upi-fe", log, 1);
     expect(ran).toEqual(["cd /workspace/upi-fe && dep-sync"]);
-    expect(log).toEqual(["Running on reuse: sync node_modules...", "sync node_modules done."]);
+    expect(log.slice(0, 2)).toEqual(["Running on reuse: sync node_modules...", "sync node_modules done."]);
   });
 
   it("honours a step cwd", async () => {
@@ -51,6 +54,14 @@ describe("runReuseSteps", () => {
     await runReuseSteps(session, steps.filter((s) => !(s.type === "run" && s.runOnReuse)), "/w", log, 1);
     expect(ran).toEqual([]);
     expect(log).toEqual([]);
+  });
+
+  it("surfaces the step's output, so an in-band FAILED line naming the repo and command reaches the log", async () => {
+    const { session } = fakeSession();
+    const log: string[] = [];
+    await runReuseSteps(session, steps, "/w", log, 1);
+    expect(log[2]).toContain("chitragupt: yarn install --immutable FAILED");
+    expect(log[2]).toContain("cd /workspace/chitragupt && yarn install --immutable");
   });
 
   it("logs a failure as a warning instead of throwing, so reuse still returns", async () => {

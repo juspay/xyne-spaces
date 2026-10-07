@@ -523,9 +523,11 @@ export type SetupStep =
 type ReuseStepSession = {
   commands: {
     runDetached(cmd: string): Promise<string>;
-    pollJob(jobId: string): Promise<{ done: boolean; exitCode: number | null; stderr?: string | null }>;
+    pollJob(jobId: string): Promise<{ done: boolean; exitCode: number | null; stdout?: string | null; stderr?: string | null }>;
   };
 };
+
+const REUSE_STEP_OUTPUT_LINES = 20;
 
 export async function runReuseSteps(
   session: ReuseStepSession,
@@ -552,6 +554,8 @@ export async function runReuseSteps(
         } else {
           log.push(`${step.label} done.`);
         }
+        const output = redactSecrets(status.stdout ?? "").trim();
+        if (output) log.push(output.split("\n").slice(-REUSE_STEP_OUTPUT_LINES).join("\n"));
         break;
       }
       if (!finished) log.push(`${step.label}: WARN still running after ${timeoutMs / 1000}s on reuse; continuing.`);
