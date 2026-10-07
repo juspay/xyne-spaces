@@ -134,6 +134,7 @@ import deskMetricsAggregateRoutes from '@/routes/deskMetricsAggregateRoutes';
 import deskMetricsClawRoutes from '@/routes/deskMetricsClawRoutes';
 import deskReportPanelRoutes from '@/routes/deskReportPanelRoutes';
 import aiRetriggerRoutes from '@/routes/aiRetriggerRoutes';
+import deskAutoAssignRoutes from '@/routes/deskAutoAssignRoutes';
 import testAuthRoutes from '@/routes/testAuth';
 import customInstructionRoutes from '@/routes/customInstruction';
 import dailyBriefRoutes from '@/routes/dailyBrief';
@@ -180,7 +181,7 @@ import { boardConfigCopyWorker } from '@/workers/boardConfigCopyWorker';
 import { assignmentReactivationQueue } from '@/queues/assignmentReactivationQueue';
 import { ticketReassignmentQueue } from '@/queues/ticketReassignmentQueue';
 import { onCallRotationQueue } from '@/queues/onCallRotationQueue';
-import { assignmentBackfillQueue } from '@/queues/assignmentBackfillQueue';
+import { autoAssignSweepQueue } from '@/queues/autoAssignSweepQueue';
 import { scheduledMessageQueue } from '@/queues/scheduledMessageQueue';
 import { conversationIngestQueue } from '@/queues/conversationIngestQueue';
 import { documentIngestQueue } from '@/queues/documentIngestQueue';
@@ -404,6 +405,7 @@ export class App {
     this.app.use('/api/desk-metrics', authMiddleware.authenticate, deskMetricsAggregateRoutes);
     this.app.use('/api/desk-report', authMiddleware.authenticate, deskReportPanelRoutes);
     this.app.use('/api/channels/:channelId/ai-retrigger', authMiddleware.authenticate, aiRetriggerRoutes);
+    this.app.use('/api/channels/:channelId/desk', authMiddleware.authenticate, deskAutoAssignRoutes);
 
     // Meet callback route (API key auth - called by SAM service)
     this.app.use('/api/meet', meetCallbackRoutes);
@@ -896,8 +898,8 @@ export class App {
           await onCallRotationQueue.initialize();
         })(),
         (async () => {
-          logger.info('Initializing assignment backfill queue...');
-          await assignmentBackfillQueue.initialize();
+          logger.info('Initializing auto-assign sweep queue...');
+          await autoAssignSweepQueue.initialize();
         })(),
         (async () => {
           logger.info('Initializing scheduled message queue...');
@@ -952,8 +954,8 @@ export class App {
       logger.info('Initializing on-call rotation queue...');
       await onCallRotationQueue.initialize();
 
-      logger.info('Initializing assignment backfill queue...');
-      await assignmentBackfillQueue.initialize();
+      logger.info('Initializing auto-assign sweep queue...');
+      await autoAssignSweepQueue.initialize();
 
       logger.info('Initializing scheduled message queue...');
       await scheduledMessageQueue.initialize();
@@ -1198,8 +1200,8 @@ export class App {
       // Close on-call rotation queue
       await onCallRotationQueue.close();
 
-      // Close assignment backfill queue
-      await assignmentBackfillQueue.close();
+      // Close auto-assign sweep queue
+      await autoAssignSweepQueue.close();
 
       // Close scheduled message queue
       await scheduledMessageQueue.close();

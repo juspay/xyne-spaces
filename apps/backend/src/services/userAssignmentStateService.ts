@@ -2,6 +2,7 @@ import { DatabaseClient } from '@/database/client';
 import { logger } from '@/utils/logger';
 import { assignmentReactivationQueue } from '@/queues/assignmentReactivationQueue';
 import { ticketReassignmentQueue } from '@/queues/ticketReassignmentQueue';
+import { autoAssignSweepQueue } from '@/queues/autoAssignSweepQueue';
 import { redisService } from './redisService';
 import { activityService } from '@/services/activity/activityService';
 import { notificationService } from '@/services/notificationService';
@@ -343,6 +344,38 @@ export class UserAssignmentStateService {
 
       // Notify subscribers (user_group_mappings.isNotified) that user is available again
       await this.notifySubscribersOfResume(userId, userGroupIds);
+
+      // A member becoming available is the only event that can make a previously
+      // unassignable ticket assignable, so this is where the retry belongs — one sweep per
+      // group, deduped by the queue if several members come back at once. Queueing must
+      // not fail the availability change itself: the user is available either way, and a
+      // desk manager can still sweep by hand.
+      // Only the groups the member is actually assignable in again. A group they were
+      // inactive in has nothing to retry, and a sweep there would enqueue the group's whole
+      // unassigned backlog for nothing.
+      const activeGroupIds = userGroupIds.filter((userGroupId, index) => {
+        const current = currentStateMap.get(userGroupId);
+        return Boolean(restoreResults[index]) || Boolean(current?.onCall || current?.isActiveForAssignment);
+      });
+
+      await Promise.all(
+        activeGroupIds.map(async (userGroupId) => {
+          const groupWorkspaceId = groupWorkspaceMap.get(userGroupId);
+          if (!groupWorkspaceId) return;
+          try {
+            await autoAssignSweepQueue.enqueue({
+              workspaceId: groupWorkspaceId,
+              scope: { userGroupId },
+              requestedBy: userId,
+            });
+          } catch (error) {
+            logger.error(
+              `❌ [ASSIGNMENT-STATE] Failed to queue auto-assign sweep for group ${userGroupId}:`,
+              error
+            );
+          }
+        })
+      );
 
       logger.info(
         `▶️ [ASSIGNMENT-STATE] User ${userId} set available for assignment in ${userGroupIds.length} group(s)`

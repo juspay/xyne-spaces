@@ -26,14 +26,22 @@ function shouldAssignTicketPerson(
   groupChanged: boolean,
   ticketIsUnassigned: boolean,
   effectiveGroupId: string | null,
+  assignmentOnly: boolean,
 ): boolean {
+  if (boardId === null) return false;
+
+  // An assignment-only run is a retry for a ticket nobody picked up — the desk sweep, or a
+  // member becoming available again. Supplying the desk's default group makes groupChanged
+  // true for any ticket that never got a group, so honouring rule 1 here would let a retry
+  // overwrite whoever assigned the ticket by hand in the meantime.
+  if (assignmentOnly) {
+    return ticketIsUnassigned && effectiveGroupId !== null;
+  }
+
   // ASSIGN RULE:
   // 1. Group changed → assign to someone in the new group
   // 2. Ticket is unassigned + classification yielded a group → assign
-  return boardId !== null && (
-    groupChanged ||
-    (ticketIsUnassigned && effectiveGroupId !== null)
-  );
+  return groupChanged || (ticketIsUnassigned && effectiveGroupId !== null);
 }
 
 export class EmailClassificationWorker {
@@ -189,6 +197,7 @@ export class EmailClassificationWorker {
       groupChanged,
       ticketIsUnassigned,
       effectiveGroupId,
+      runAssignment && !runClassification,
     );
 
     const updatePayload: Record<string, unknown> = {
@@ -325,7 +334,9 @@ export class EmailClassificationWorker {
     if (newAssignedTo && assignmentSucceeded) {
       const assignReason = resolvedGroupId
         ? 'AI classification'
-        : 'Default channel group';
+        : groupChanged
+          ? 'Default channel group'
+          : 'Existing ticket group';
 
       try {
         // 1. Ticket activity row (appears in the ticket's activity log)
