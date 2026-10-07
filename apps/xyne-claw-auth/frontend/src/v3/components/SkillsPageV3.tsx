@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import { useSearchParams } from "react-router-dom";
+import { isCurrentUser } from "../../lib/identity";
 import {
   PlusIcon,
   MagnifyingGlassIcon,
@@ -226,27 +227,27 @@ export function SkillsPageV3({ isAdmin = false }: SkillsPageV3Props = {}) {
    * V1 only applied to the Global Skills section.
    */
   const canManage = (skill: Skill): boolean =>
-    skill.ownerUserId === userId || (isAdmin && skill.scope === "global");
+    isCurrentUser(skill.ownerUserId) || (isAdmin && skill.scope === "global");
 
   const mySkills = skills
     .filter(
-      (s) => s.ownerUserId === userId && matchesSearch(s),
+      (s) => isCurrentUser(s.ownerUserId) && matchesSearch(s),
     )
     .sort(sortByUsage);
 
   const globalSkills = skills
     .filter(
-      (s) => s.ownerUserId !== userId && matchesSearch(s),
+      (s) => !isCurrentUser(s.ownerUserId) && matchesSearch(s),
     )
     .sort(sortByUsage);
 
   /* Stats */
   const totalSkills = skills.length;
   const myCount = skills.filter(
-    (s) => s.ownerUserId === userId,
+    (s) => isCurrentUser(s.ownerUserId),
   ).length;
   const globalCount = skills.filter(
-    (s) => s.ownerUserId !== userId,
+    (s) => !isCurrentUser(s.ownerUserId),
   ).length;
   const unusedCount = skills.filter(
     (s) => (agentsBySkill[s.id]?.length ?? 0) === 0,

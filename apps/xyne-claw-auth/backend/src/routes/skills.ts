@@ -6,6 +6,7 @@ import { getRequesterId, getOrgId, isClawAdmin, requireClawAdmin, getAgentEditAc
 import { s2sKeyMatches } from "../middleware/require-auth.js";
 import { writeAuditLog } from "../lib/audit.js";
 import { getWorkspaceIdForUser } from "../lib/spaces-db.js";
+import { spacesUserIdForClawUser } from "../lib/users-jit.js";
 import { decrypt } from "../crypto.js";
 import { CONFIG } from "../config.js";
 import { spacesAppFetch } from "../lib/spaces-api.js";
@@ -455,8 +456,11 @@ async function notifyApproverOfSkillUpdateInSpaces(args: {
       log.warn(`[skills/propose-update] owner DM skipped for ${args.skillSlug}: no workspaceId for approver ${args.approverUserId}`);
       return;
     }
+    // openDm is keyed by Spaces' workspace-scoped user id; approverUserId is
+    // the canonical Claw id — translate or the DM silently never opens.
+    const spacesApproverUserId = await spacesUserIdForClawUser(args.approverUserId, workspaceId).catch(() => args.approverUserId);
     const dm = (await spacesAppFetch("/channel/openDm", {
-      targetUserId: args.approverUserId,
+      targetUserId: spacesApproverUserId,
       workspaceId,
     }, token)) as { channelId: string };
 

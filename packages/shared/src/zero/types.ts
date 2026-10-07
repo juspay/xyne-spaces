@@ -537,6 +537,7 @@ export enum AppIncomingWebhookType {
   AMAZON_SNS = 'AMAZON_SNS',
   PINGDOM = 'PINGDOM',
   GCP = 'GCP',
+  HUBSPOT = 'HUBSPOT',
 }
 
 // @ts-ignore TS1294

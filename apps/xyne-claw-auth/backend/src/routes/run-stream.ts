@@ -3,7 +3,11 @@ import { errMsg } from "../lib/errors.js";
 import { randomUUID } from "node:crypto";
 import { CONFIG } from "../config.js";
 import type { FlowDefinition } from "xyne-claw-shared";
-import { requireAuth, requireNoAccessToken, requireResultToken } from "../middleware/require-auth.js";
+import { requireAuth, requireNoAccessToken, requireResultToken, s2sKeyMatches } from "../middleware/require-auth.js";
+import { matchesAuthenticatedUserId } from "../middleware/pin-user-id-param.js";
+import { resolveCanonicalUserIdOrSelf } from "../lib/users-jit.js";
+import { requestWorkspaceHint } from "../lib/spaces-db.js";
+import { conversationAccessError } from "../lib/conversation-access.js";
 import { getRequesterId, getAgentEditAccess, isClawAdmin } from "../middleware/agent-acl.js";
 import { prisma } from "../db.js";
 import { chatMessageRepository, agentRunRepository, chatAttachmentRepository, userAgentConfigRepository } from "../repositories/index.js";
@@ -518,7 +522,6 @@ publicRouter.post("/", requireAuth, requireNoAccessToken, async (req: Request, r
 
   try {
     const {
-      userId,
       userName,
       userEmail,
       task,
@@ -577,10 +580,14 @@ publicRouter.post("/", requireAuth, requireNoAccessToken, async (req: Request, r
       return;
     }
 
-    if (!userId || typeof userId !== "string") {
+    // Declared separately (typed `string`) so the canonicalization below can
+    // reassign it: a destructured `unknown` binding would lose its narrowing.
+    const rawUserId = (req.body as Record<string, unknown>)["userId"];
+    if (!rawUserId || typeof rawUserId !== "string") {
       res.status(400).json({ success: false, error: "userId is required" });
       return;
     }
+    let userId: string = rawUserId;
 
     if (studioMode !== undefined && studioMode !== "design") {
       res.status(400).json({ success: false, error: "Unknown studioMode" });
@@ -717,13 +724,50 @@ publicRouter.post("/", requireAuth, requireNoAccessToken, async (req: Request, r
       : applyAiScreenCommand(task).task;
 
     const sessionUserId = req.headers["x-user-id"];
-    if (typeof sessionUserId === "string" && sessionUserId && sessionUserId !== userId) {
+    // Spaces sends its workspace membership ID in the body while requireAuth
+    // resolves the verified session to Claw's canonical user ID. They are two
+    // representations of the same caller, not an attempted cross-user run.
+    if (typeof sessionUserId === "string" && sessionUserId && !matchesAuthenticatedUserId(req, userId)) {
       res.status(403).json({ success: false, error: "Body userId does not match authenticated session" });
       return;
     }
+    // Canonicalize once: everything downstream — ACL checks (isClawAdmin,
+    // getAgentEditAccess), user-agent config, local-harness device lookup and
+    // session-token minting, and every persisted chat/run/attachment row —
+    // keys on Claw's canonical user id. The verified session header already
+    // carries it; an S2S caller that pinned only the raw alias is resolved
+    // through the identity ladder (fail-open to the supplied id).
+    userId = typeof sessionUserId === "string" && sessionUserId
+      ? sessionUserId
+      : await resolveCanonicalUserIdOrSelf(userId, requestWorkspaceHint(req));
 
     const slug = typeof agentSlug === "string" && agentSlug ? agentSlug : "assistant";
     const convId = typeof conversationId === "string" && conversationId ? conversationId : `chat-${randomUUID()}`;
+
+    // Conversation-ownership guard, BEFORE any convId-keyed side effect (message
+    // persist, branch clone). Claw sessions are shared per thread (keyed by
+    // conversationId, not userId), so a caller supplying another user's
+    // conversationId could attach to and poison their session. Skip for genuine
+    // S2S callers; new conversations (no supplied conversationId) pass.
+    // The Spaces conversation-access check matches channel_participants by the
+    // workspace-scoped Spaces id, so pass the raw `x-spaces-user-id` (set by
+    // stampVerifiedIdentity) — NOT the canonical `x-user-id`, which Spaces can't resolve.
+    const spacesRequesterId = req.headers["x-spaces-user-id"];
+    const accessCheckUserId =
+      typeof spacesRequesterId === "string" && spacesRequesterId
+        ? spacesRequesterId
+        : (typeof sessionUserId === "string" && sessionUserId ? sessionUserId : userId);
+    if (
+      typeof conversationId === "string" && conversationId &&
+      accessCheckUserId && !s2sKeyMatches(req.headers["x-s2s-key"] as string | undefined)
+    ) {
+      const accessError = await conversationAccessError(accessCheckUserId, [conversationId]);
+      if (accessError) {
+        log.warn(`[run-stream] conversation access denied userId=${accessCheckUserId} conversationId=${conversationId}`);
+        res.status(403).json({ success: false, error: accessError });
+        return;
+      }
+    }
     const requestOrgId = typeof req.headers["x-org-id"] === "string" && req.headers["x-org-id"].trim()
       ? req.headers["x-org-id"].trim()
       : undefined;
@@ -765,6 +809,7 @@ publicRouter.post("/", requireAuth, requireNoAccessToken, async (req: Request, r
         ? researchContext as { type?: unknown; id?: unknown }
         : undefined,
       convId,
+      requestWorkspaceHint(req),
     );
     if (!sdlcResolution.ok) {
       res.status(sdlcResolution.status).json({ success: false, error: sdlcResolution.error });
@@ -773,7 +818,7 @@ publicRouter.post("/", requireAuth, requireNoAccessToken, async (req: Request, r
     const sdlcContext =
       sdlcResolution.repository?.agentContext ??
       (typeof channelId === "string"
-        ? await resolveSdlcHubContextForUser(userId, channelId, convId)
+        ? await resolveSdlcHubContextForUser(userId, channelId, convId, requestWorkspaceHint(req))
         : undefined);
 
     // Resolve the agent's provider credentials so this SSE run uses the agent's
@@ -1554,7 +1599,7 @@ publicRouter.post("/", requireAuth, requireNoAccessToken, async (req: Request, r
           "../services/agentChatContextService.js"
         );
         const { getSpacesAuthForUser } = await import("../lib/spaces-db.js");
-        const auth = await getSpacesAuthForUser(userId);
+        const auth = await getSpacesAuthForUser(userId, "agent-chat", requestWorkspaceHint(req));
         const normalized = normalizeAttachedContext(forwardedAttachedContext);
         if (auth && normalized.items.length > 0) {
           const payload = await buildAttachedContextPayload(normalized.items, auth);
@@ -1921,7 +1966,10 @@ publicRouter.post("/cancel", requireAuth, requireNoAccessToken, async (req: Requ
     }
 
     const run = await agentRunRepository.findBySessionId(sessionId);
-    if (!run || run.userId !== userId) {
+    // run.userId may be keyed by EITHER verified representation of the caller
+    // (canonical Claw id or the raw Spaces id the session was started under),
+    // so a strict equality check would 404 the legitimate owner.
+    if (!run || (run.userId !== userId && !matchesAuthenticatedUserId(req, run.userId))) {
       res.status(404).json({ success: false, error: "Run not found" });
       return;
     }
@@ -1934,12 +1982,14 @@ publicRouter.post("/cancel", requireAuth, requireNoAccessToken, async (req: Requ
       return;
     }
 
+    // Forward the run's stored owner id (not the requester): the pod compares
+    // x-user-id against the id the run was dispatched with.
     const cancelRes = await fetch(`${CONFIG.internalUrl}/claw/api/v1/internal/run/${encodeURIComponent(sessionId)}/cancel`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
         ...(CONFIG.xyneClawS2sKey ? { "x-s2s-key": CONFIG.xyneClawS2sKey } : {}),
-        "x-user-id": userId,
+        "x-user-id": run.userId,
       },
     });
 
@@ -2348,13 +2398,18 @@ internalRouter.post("/:streamId/callback", async (req: Request<{ streamId: strin
               }),
             );
           }
-          delivered.push(
-            await renderProviderSuggestCard({
-              taskText,
-              id: suggestIdentity,
-              target: suggestTarget,
-            }),
-          );
+          const providerSuggestions = body["pendingProviderSuggestions"] as
+            | { providers: string[]; listAll?: boolean; title?: string }
+            | undefined;
+          if (providerSuggestions) {
+            delivered.push(
+              await renderProviderSuggestCard({
+                suggestions: providerSuggestions,
+                id: suggestIdentity,
+                target: suggestTarget,
+              }),
+            );
+          }
           // Same reason as the agent cards: the terminal payload has no uiFlows
           // slot, so a card must go on the wire to paint without a refetch.
           for (const flow of delivered) {

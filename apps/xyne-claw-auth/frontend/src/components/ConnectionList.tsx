@@ -1,5 +1,6 @@
 import { useState, useCallback, useEffect, useMemo } from "react";
 import type { UserConnection, HealthResult } from "../lib/types";
+import { isCurrentUser } from "../lib/identity";
 import {
   checkConnectionHealth,
   autoConnectSpaces,
@@ -672,7 +673,7 @@ export function ConnectionList({ connections, loading, userId, onDelete, onEdit,
                           publishReviewNote?: string;
                         };
                         const isPersonal = meta.scope === 'personal';
-                        const isOwner = meta.ownerUserId === userId;
+                        const isOwner = isCurrentUser(meta.ownerUserId);
                         if (!isPersonal || !isOwner) return null;
                         const status = meta.publishStatus ?? 'draft';
                         if (status === 'approved') return null;
