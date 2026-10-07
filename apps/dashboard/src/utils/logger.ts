@@ -150,8 +150,6 @@ export const Event = {
   VESPA_SEARCH_SESSION_END: 'vespa_search_session_end',
   VESPA_SEARCH_TAB_CLICK: 'vespa_search_tab_click',
   VESPA_SEARCH_SHOW_RESULTS: 'vespa_search_show_results',
-  CMDK_STARRED_SNAPSHOT: 'cmdk_starred_snapshot',
-  CMDK_STARRED_CLICK: 'cmdk_starred_click',
   APP_LOADER_HIDDEN: 'app_loader_hidden',
   INITIAL_STATE_HYDRATION_COMPLETE: 'initial_state_hydration_complete',
   INITIAL_STATE_HYDRATION_FAILED: 'initial_state_hydration_failed',

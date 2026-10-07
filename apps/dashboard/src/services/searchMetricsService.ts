@@ -12,6 +12,7 @@ import type {
   SearchSessionEndEvent,
   SearchTabClickEvent,
   SearchShowResultsEvent,
+  SearchSurface,
 } from '../types/searchEvents';
 import * as otelMetrics from './otel/searchMetrics';
 import { SEARCH_VERSION } from '../config';
@@ -35,12 +36,20 @@ class SearchMetricsService {
   /**
    * Track when a new search session starts
    */
-  trackSessionStart(searchSessionId: string, userId: string, tab: TabType): void {
+  trackSessionStart(params: {
+    searchSessionId: string;
+    userId: string;
+    tab: TabType;
+    starredCount?: number;
+    surface?: SearchSurface;
+  }): void {
     // Log structured event
     const event: SearchSessionStartEvent = {
-      search_session_id: searchSessionId,
-      user_id: userId,
-      tab,
+      search_session_id: params.searchSessionId,
+      user_id: params.userId,
+      tab: params.tab,
+      ...(params.starredCount !== undefined && { starred_count: params.starredCount }),
+      ...(params.surface && { surface: params.surface }),
     };
     logger.info(Event.VESPA_SEARCH_SESSION_START, event as unknown as Record<string, unknown>);
 
@@ -49,9 +58,9 @@ class SearchMetricsService {
     otelMetrics.safeRecordMetric(() => {
       otelMetrics.searchSessionsStarted.add(1, {
         version: SEARCH_VERSION,
-        user_id: userId,
+        user_id: params.userId,
         platform: platform,
-        tab: tab,
+        tab: params.tab,
       });
     });
   }
@@ -126,6 +135,8 @@ class SearchMetricsService {
     resultUrl?: string;
     tab: TabType;
     relevanceScore?: number;
+    isStarred?: boolean;
+    surface?: SearchSurface;
   }): void {
     const words = countWords(params.queryText);
     // Log structured event
@@ -142,6 +153,8 @@ class SearchMetricsService {
       ...(params.scrollDepth !== undefined && { scroll_depth: params.scrollDepth }),
       ...(params.resultUrl && { result_url: params.resultUrl }),
       ...(params.relevanceScore !== undefined && { relevance_score: params.relevanceScore }),
+      ...(params.isStarred !== undefined && { is_starred: params.isStarred }),
+      ...(params.surface && { surface: params.surface }),
     };
     logger.info(Event.VESPA_SEARCH_CLICK, event as unknown as Record<string, unknown>);
     // Record metrics - increment click counter
@@ -288,44 +301,6 @@ class SearchMetricsService {
       filters_used: params.filtersUsed,
     };
     logger.info(Event.VESPA_SEARCH_SHOW_RESULTS, event as unknown as Record<string, unknown>);
-  }
-
-  /**
-   * Record the user's starred count when the palette opens, so the latest sample per user is
-   * their starred-item count. Sampled on open rather than on each star toggle: stars change
-   * from several surfaces (sidebar drag, header, info panel, support), and the count at open
-   * time is what the user actually sees in the palette.
-   */
-  trackStarredSnapshot(params: { userId: string; starredCount: number }): void {
-    const platform = detectPlatform();
-    logger.info(Event.CMDK_STARRED_SNAPSHOT, {
-      user_id: params.userId,
-      starred_count: params.starredCount,
-      platform,
-    });
-  }
-
-  /**
-   * Track a click on a starred channel from the palette.
-   */
-  trackStarredClick(params: {
-    userId: string;
-    channelId: string;
-    rankPosition: number;
-    starredCount: number;
-    hasQuery: boolean;
-    tab: TabType;
-  }): void {
-    const platform = detectPlatform();
-    logger.info(Event.CMDK_STARRED_CLICK, {
-      user_id: params.userId,
-      channel_id: params.channelId,
-      rank_position: params.rankPosition,
-      starred_count: params.starredCount,
-      has_query: params.hasQuery,
-      tab: params.tab,
-      platform,
-    });
   }
 }
 

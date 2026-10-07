@@ -114,7 +114,6 @@ import {
 import { mergeRankedCandidates, type RankedCandidate } from '@xyne/shared/utils';
 import type { User } from '../../../machines/stateMachine';
 import { searchMetricsService } from '../../../services/searchMetricsService';
-import { sudoQueryService } from '../../../services/hyperAnalytics/sudoQueryService';
 import { useHistoryBackedOverlay } from '../../../hooks/useHistoryBackedOverlay';
 import {
   clearLastSearchState,
@@ -648,20 +647,6 @@ const ChannelCommandMenuContent = ({
     }
   }, [open]);
 
-  // Metrics: one starred-count sample per open. Pickers built on this menu
-  // (context selection) are not cmd+K, so they don't sample.
-  const starredIds = useMemo(() => new Set(starred.map(c => c.id)), [starred]);
-  useEffect(() => {
-    if (!open || contextSelectionMode) return;
-    searchMetricsService.trackStarredSnapshot({
-      userId: currentUserID,
-      starredCount: starred.length,
-    });
-    sudoQueryService.track('cmdk_starred_snapshot', { starredCount: starred.length });
-    // Runs once per open: the count is read at open time, not re-sampled on every star change.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open]);
-
   useScope('command', open);
 
   const { searchMode } = useSearchMode();
@@ -861,6 +846,8 @@ const ChannelCommandMenuContent = ({
     onManualKeystroke,
     markRecentReplay,
   } = useSearchMetrics({
+    // Context-selection pickers reuse this menu but aren't Cmd+K, so they send no surface.
+    ...(!contextSelectionMode && { surface: 'cmdk' as const }),
     allChannels,
     mentionSearchType,
     // Default "my channels" ON everywhere (restrict to the user's channels by default),
@@ -2549,18 +2536,6 @@ const ChannelCommandMenuContent = ({
       channel.id,
       route,
     );
-
-    if (starredIds.has(channel.id)) {
-      const starredClick = {
-        channelId: channel.id,
-        rankPosition: rankPosition ?? 1,
-        starredCount: starredIds.size,
-        hasQuery: searchText.trim().length > 0,
-        tab: activeTab,
-      };
-      searchMetricsService.trackStarredClick({ userId: currentUserID, ...starredClick });
-      sudoQueryService.track('cmdk_starred_click', starredClick);
-    }
 
     if (consumeModifier()) {
       const channelResult = { id: channel.id, type: 'channel' } as DisplaySearchResult;
