@@ -1,5 +1,4 @@
-import { ChannelType, DeskType } from '../zero/schema.js';
-import { MAX_DESK_APPS } from '../zero/types.js';
+import { ChannelType, DeskType, MAX_DESK_APPS } from '../zero/types.js';
 
 /** Desk channel types — EMAIL, SLACK, APP, CALL and SOCIAL_MEDIA channels all feed into Xyne Desk. */
 export const DESK_CHANNEL_TYPES: ReadonlySet<ChannelType> = new Set([

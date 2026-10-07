@@ -31,7 +31,16 @@ import { createDirectRouter } from '../direct';
 import { SdkApiError } from '../errors';
 import { resolveV1Operation } from './mapper';
 import { parseV1Args } from './parser';
-import type { V1Kind } from './types';
+import type { V1Kind, V1Target } from './types';
+
+/**
+ * The direct routes, also reachable by operation id.
+ *
+ * Built once and shared with the path-addressed mount below, so an id that
+ * resolves to a route runs exactly what a request to that route would —
+ * including any route-local middleware.
+ */
+const directRouter = createDirectRouter();
 
 /**
  * Body of a v1 call.
@@ -101,6 +110,16 @@ function v1Handler(endpoint: Extract<V1Kind, 'query' | 'mutator'>) {
     if (!target) {
       throw new SdkApiError('not_found', `Unknown operation "${op}" in API v1.`);
     }
+    if (target.kind === 'retired') {
+      throw new SdkApiError('not_found', `Operation "${op}" was retired: ${target.reason}`);
+    }
+    if (target.kind === 'direct') {
+      // Accepted on either endpoint: an id that moved onto a route was shipped
+      // as a query or a mutator, and the client still posts it there.
+      const parsed = parseV1Args(op, args);
+      await runDirect(target, parsed.args as Record<string, unknown>, req, res);
+      return;
+    }
     if (target.kind !== endpoint) {
       // Naming the right endpoint rather than just refusing: this is a client
       // bug, and the fix is mechanical.
@@ -116,7 +135,8 @@ function v1Handler(endpoint: Extract<V1Kind, 'query' | 'mutator'>) {
 
     if (endpoint === 'query') {
       // COOKIE-BASED AUTH (ACTIVE)
-      res.status(200).json({ data: await callQuery(target.name, parsed.args, ctx) });
+      const data = await callQuery(target.name, parsed.args, ctx);
+      res.status(200).json({ data: parsed.mapResult ? parsed.mapResult(data) : data });
       // API KEY AUTH (COMMENTED OUT)
       // res.status(200).json({ data: await callQuery(target.name, parsed.args, auth.ctx) });
       return;
@@ -129,6 +149,41 @@ function v1Handler(endpoint: Extract<V1Kind, 'query' | 'mutator'>) {
     // `generated` carries any id this layer minted, so a caller that just created
     // a row learns its id without having had to supply one.
     res.status(200).json({ success: true, ...(parsed.generated ? { generated: parsed.generated } : {}) });
+  });
+}
+
+/**
+ * Run an operation id that resolves to a direct route.
+ *
+ * The request is re-entered into the direct router under the route's method and
+ * path, with the parsed arguments as its body, so the route's own middleware and
+ * response shaping apply unchanged. It is the request itself that is rewritten,
+ * not a copy: the tenant scope holds this object, and route middleware such as
+ * `workspaceScopedRoute` marks it. Settles when the route has answered, or
+ * rejects with whatever it failed with.
+ */
+function runDirect(
+  target: Extract<V1Target, { kind: 'direct' }>,
+  args: Record<string, unknown>,
+  req: Request,
+  res: Response,
+): Promise<void> {
+  const path = target.path(args);
+  const original = { method: req.method, url: req.url, body: req.body as unknown };
+  req.method = target.method;
+  req.url = path;
+  req.body = args;
+
+  return new Promise<void>((resolve, reject) => {
+    res.once('finish', () => resolve());
+    res.once('close', () => resolve());
+    directRouter(req, res, (err?: unknown) => {
+      // Back to what the error handler should log: the request as it arrived.
+      Object.assign(req, original);
+      // Reaching `next` at all means the route did not answer: either it failed,
+      // or nothing matched, which is a mapper bug rather than a caller's.
+      reject(err ?? new SdkApiError('internal', `No direct route serves ${target.method} ${path}.`));
+    });
   });
 }
 
@@ -146,7 +201,7 @@ export function createSdkV1Router(): Router {
   // carry their own path in the client, which is the remaining half of the
   // migration — catalog operations move first because they are the ones whose
   // names were leaking.
-  router.use(createDirectRouter());
+  router.use(directRouter);
 
   return router;
 }

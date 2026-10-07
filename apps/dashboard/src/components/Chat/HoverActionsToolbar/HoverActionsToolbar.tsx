@@ -103,12 +103,6 @@ export interface HoverActionsToolbarProps {
   /** Called when user clicks “Show all shortcuts” */
   onShowAllShortcuts?: () => void;
   /**
-   * Vertical placement relative to the hovered row. Defaults to 'above', which
-   * lifts the bar clear of the row. Set from ChatBubble's registered actions;
-   * only the thread parent passes 'below'.
-   */
-  placement?: 'above' | 'below';
-  /**
    * 'bar', the default: the floating bar over a hovered row. 'footer': a card's own
    * footer — React and More in line, everything else inside More — for a discussion
    * card, where a bar over the text would crowd it.
@@ -162,7 +156,6 @@ export const HoverActionsToolbar: React.FC<HoverActionsToolbarProps> = ({
   messageShortcuts,
   onRunShortcut,
   onShowAllShortcuts,
-  placement = 'above',
   layout = 'bar',
 }) => {
   // Shared identity for every action in this toolbar. `conversationId` is the
@@ -245,7 +238,7 @@ export const HoverActionsToolbar: React.FC<HoverActionsToolbarProps> = ({
       className={
         compact
           ? 'flex items-center gap-0.5'
-          : `absolute ${placement === 'below' ? 'top-1' : '-top-7'} right-4 z-50 p-1 flex max-w-[calc(100%-2rem)] flex-wrap items-center justify-end gap-1 rounded-lg border border-border bg-popover shadow-md`
+          : 'absolute -top-7 right-4 z-50 p-1 flex max-w-[calc(100%-2rem)] flex-wrap items-center justify-end gap-1 rounded-lg border border-border bg-popover shadow-md'
       }
     >
       {/* Frequently used emojis, one click each — then the full picker */}

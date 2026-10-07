@@ -502,7 +502,7 @@ export class CallController {
         }
 
         stage = 'transcription_agent_resolution';
-        const headlessAgentName = await livekitService.resolveAgentNameForUser(userId);
+        const headlessAgentName = await livekitService.resolveAgentNameForUser(userId, { roomName: callExternalId });
 
         const roomLink = buildCallInviteUrl(callExternalId);
         const roomMetadata = JSON.stringify({
@@ -766,7 +766,7 @@ export class CallController {
       }
 
       stage = 'transcription_agent_resolution';
-      const agentName = await livekitService.resolveAgentNameForUser(userId);
+      const agentName = await livekitService.resolveAgentNameForUser(userId, { roomName: callExternalId });
 
       // Create LiveKit room with metadata
       // The webhook will create all DB records when first participant joins
@@ -995,7 +995,7 @@ export class CallController {
           logger.info(`Deleted existing room ${callId}`);
         }
 
-        const joinAgentName = await livekitService.resolveAgentNameForUser(activeCall.createdByUserId);
+        const joinAgentName = await livekitService.resolveAgentNameForUser(activeCall.createdByUserId, { roomName: callId });
 
         // Prepare room metadata
         const roomMetadata = JSON.stringify({

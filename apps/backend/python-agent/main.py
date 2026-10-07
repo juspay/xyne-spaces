@@ -34,13 +34,13 @@ import tempfile
 setup_logging()
 logger = get_logger(__name__)
 
-# Suppress livekit-agents internal logging - only show CRITICAL errors
+# Show livekit-agents worker connection logs (registration, retries) at INFO
 # This must be done at module level (before cli.run_app) to catch all logs
 import logging as _logging
-_logging.getLogger("livekit").setLevel(_logging.CRITICAL)
-_logging.getLogger("livekit.agents").setLevel(_logging.CRITICAL)
-_logging.getLogger("livekit.plugins").setLevel(_logging.CRITICAL)
-_logging.getLogger("livekit.agents.ipc").setLevel(_logging.CRITICAL)
+_logging.getLogger("livekit").setLevel(_logging.INFO)
+_logging.getLogger("livekit.agents").setLevel(_logging.INFO)
+_logging.getLogger("livekit.plugins").setLevel(_logging.INFO)
+_logging.getLogger("livekit.agents.ipc").setLevel(_logging.INFO)
 
 # Load configuration
 config = Config.load()

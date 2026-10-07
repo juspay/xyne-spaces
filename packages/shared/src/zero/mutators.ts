@@ -7363,9 +7363,10 @@ export const mutators = defineMutators({
         name: z.string(),
         emoji: z.string().nullable().optional(),
         position: z.string(),
+        filterMode: z.nativeEnum(ChannelFilterMode).nullable().optional(),
         timestamp: z.number(),
       }),
-      async ({ tx, ctx, args: { id, name, emoji, position, timestamp } }) => {
+      async ({ tx, ctx, args: { id, name, emoji, position, filterMode, timestamp } }) => {
         // Reject a name this user already uses in this workspace (case-insensitive).
         const siblings = await tx.run(
           zql.channel_sections
@@ -7386,6 +7387,7 @@ export const mutators = defineMutators({
           position,
           isCollapsed: false,
           isDeleted: false,
+          ...(filterMode !== undefined && { filterMode: filterMode ?? null }),
           createdAt: timestamp,
           updatedAt: timestamp,
         });
@@ -7965,6 +7967,10 @@ export const mutators = defineMutators({
             boardId: z.string(),
             weight: z.number(),
             usePercentage: z.boolean(),
+            percentageWindowDays: z.number().int().min(1).max(90).optional(),
+            percentageShareBasis: z.enum(['ALL', 'OPEN']).optional(),
+            // Start of the first share window (ms); null clears it. Omit to keep the current start.
+            percentageWindowStartAt: z.number().nullable().optional(),
           })
           .optional(),
         expertiseMappings: z
@@ -8080,6 +8086,15 @@ export const mutators = defineMutators({
               id: existingScore.id,
               weight: boardWeight.weight,
               usePercentage: boardWeight.usePercentage,
+              ...(boardWeight.percentageWindowDays !== undefined && {
+                percentageWindowDays: boardWeight.percentageWindowDays,
+              }),
+              ...(boardWeight.percentageShareBasis !== undefined && {
+                percentageShareBasis: boardWeight.percentageShareBasis,
+              }),
+              ...(boardWeight.percentageWindowStartAt !== undefined && {
+                percentageWindowStartAt: boardWeight.percentageWindowStartAt,
+              }),
               updatedAt: now,
             });
           } else {
@@ -8096,6 +8111,9 @@ export const mutators = defineMutators({
               boardId: boardWeight.boardId,
               weight: boardWeight.weight,
               usePercentage: boardWeight.usePercentage,
+              percentageWindowDays: boardWeight.percentageWindowDays ?? null,
+              percentageShareBasis: boardWeight.percentageShareBasis ?? null,
+              percentageWindowStartAt: boardWeight.percentageWindowStartAt ?? null,
               createdBy: ctx.userID,
               createdAt: now,
               updatedAt: now,

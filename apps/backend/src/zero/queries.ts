@@ -3371,6 +3371,12 @@ export const queries: AnyQueryRegistry = defineQueries({
     return query
   }),
 
+  // Point lookup used by `useUser` when an id is missing from the hydrated
+  // workspace users set (e.g. user added after the initial load). Scoped by
+  // UsersACL like every other `users` read, so it never widens visibility.
+  getUserById: defineQuery(z.object({ userId: z.string() }), ({ args: { userId } }) => {
+    return zql.users.where('id', userId).one();
+  }),
   getUserProfilesByIds: defineQuery(
     z.object({ userIds: z.array(z.string()) }),
     ({ args: { userIds } }) => {
@@ -5252,8 +5258,9 @@ dmChannelsLatestMessagesPaginated: defineQuery(
       limit: z.number().optional(),
       start: z.object({ name: z.string(), id: z.string() }).nullish(),
       direction: z.enum(['forward', 'backward']).optional(),
+      search: z.string().optional(),
     }),
-    ({ args: { projectIds, limit = 100, start, direction = 'forward' } }) => {
+    ({ args: { projectIds, limit = 100, start, direction = 'forward', search } }) => {
       if (projectIds.length === 0) {
         return zql.project_tags.where('id', 'nonexistent').limit(0);
       }
@@ -5262,6 +5269,9 @@ dmChannelsLatestMessagesPaginated: defineQuery(
         .where('projectId', 'IN', projectIds)
         .orderBy('name', isBackward ? 'desc' : 'asc')
         .orderBy('id', isBackward ? 'desc' : 'asc');
+      if (search) {
+        q = q.where('name', 'ILIKE', `%${search}%`);
+      }
       if (start) {
         q = q.start({ name: start.name, id: start.id }, { inclusive: false });
       }
