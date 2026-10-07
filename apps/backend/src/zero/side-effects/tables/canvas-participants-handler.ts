@@ -101,7 +101,8 @@ export class CanvasParticipantsSideEffectHandler extends BaseSideEffectHandler {
         actionSourceId,
         canvasId,
         actorId: this.ctx.userID,
-        classification: ActivityClassification.ACTIONABLE,
+        // Share / role change / revoke is informational: All only, not Actionable or FYI.
+        classification: ActivityClassification.NONE,
         ...(effectiveChannelId ? { channelId: effectiveChannelId } : {}),
       })),
     );
