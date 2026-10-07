@@ -563,8 +563,12 @@ async function createProject(adminUser: StoredUser): Promise<BaselineProject> {
   let projectId: string | undefined;
   try {
     const response = await submitPromise;
-    const body = (await response.json().catch(() => null)) as { id?: string } | null;
-    projectId = body?.id;
+    // POST /api/projects responds with { project: { id } }.
+    const body = (await response.json().catch(() => null)) as {
+      id?: string;
+      project?: { id?: string };
+    } | null;
+    projectId = body?.project?.id ?? body?.id;
   } catch {
     baselineLogger.warn('Could not capture project creation response, will rely on URL parsing');
   }

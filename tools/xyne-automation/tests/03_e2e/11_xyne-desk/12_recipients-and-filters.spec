@@ -2,7 +2,7 @@
 
 ## Reply recipients and Desk filters remain correct
 * using browser
-* logging in as user "admin-1"
+* Ensuring user "admin-1" is logged in
 * Creating personal Desk channel "channel-desk-recipients-filters" for user "admin-1" in project "project-1"
 * generating mock incoming Desk email "recipient-filter-mail-1" with reply-all recipients and attachment
 * injecting mock incoming Desk email "recipient-filter-mail-1" into channel "channel-desk-recipients-filters" for user "admin-1"

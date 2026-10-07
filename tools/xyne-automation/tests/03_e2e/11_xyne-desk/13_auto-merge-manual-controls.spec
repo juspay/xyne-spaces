@@ -2,7 +2,7 @@
 
 ## Auto Merge ON combines matching emails
 * using browser
-* logging in as user "admin-1"
+* Ensuring user "admin-1" is logged in
 * Creating personal Desk channel "channel-desk-auto-merge-on" for user "admin-1" in project "project-1"
 * setting Desk auto-merge "on" for channel "channel-desk-auto-merge-on" user "admin-1"
 * generating mock Desk email pair "auto-merge-on-mail-1" and "auto-merge-on-mail-2" with the same subject and domain
@@ -13,7 +13,7 @@
 
 ## Auto Merge OFF keeps emails separate and manual merge/demerge remains available
 * using browser
-* logging in as user "admin-1"
+* Ensuring user "admin-1" is logged in
 * Creating personal Desk channel "channel-desk-auto-merge-off" for user "admin-1" in project "project-1"
 * setting Desk auto-merge "off" for channel "channel-desk-auto-merge-off" user "admin-1"
 * generating mock Desk email pair "auto-merge-off-mail-1" and "auto-merge-off-mail-2" with the same subject and domain

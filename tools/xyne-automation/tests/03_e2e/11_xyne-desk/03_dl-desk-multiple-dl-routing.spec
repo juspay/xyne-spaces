@@ -2,7 +2,7 @@
 
 ## Multiple DL desk channels receive their own incoming mails
 * using browser
-* logging in as user "admin-1"
+* Ensuring user "admin-1" is logged in
 * Creating DL Desk channel "channel-desk-dl-routing-a" for user "admin-1" in project "project-1"
 * Creating DL Desk channel "channel-desk-dl-routing-b" for user "admin-1" in project "project-1"
 * Creating DL Desk channel "channel-desk-dl-routing-c" for user "admin-1" in project "project-1"

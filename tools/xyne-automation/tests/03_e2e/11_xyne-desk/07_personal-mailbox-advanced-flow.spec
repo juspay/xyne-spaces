@@ -2,7 +2,7 @@
 
 ## Personal mailbox ticket UI, update, reply-all, and attachment happy flow
 * using browser
-* logging in as user "admin-1"
+* Ensuring user "admin-1" is logged in
 * Creating personal Desk channel "channel-desk-personal-advanced-flow" for user "admin-1" in project "project-1"
 * clearing mock Desk sent mails for channel "channel-desk-personal-advanced-flow" user "admin-1"
 * generating mock incoming Desk email "personal-advanced-mail-1" with reply-all recipients and attachment
