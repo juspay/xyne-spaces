@@ -1,12 +1,5 @@
 import type { AccessibleClawAgent } from '../../services/clawAgentListService';
 
-export const ASK_AI_LABEL = 'Ask AI';
-export const AUTO_LABEL = 'Auto';
-
-export function matchesText(text: string, query: string): boolean {
-  return text.toLowerCase().includes(query.toLowerCase());
-}
-
 /**
  * Filter + rank agents for the picker search.
  * Name matches (prefix, then word-start, then substring) come first, then slug

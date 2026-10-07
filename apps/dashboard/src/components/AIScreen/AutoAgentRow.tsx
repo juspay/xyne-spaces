@@ -2,7 +2,6 @@ import type { ReactElement, ReactNode } from 'react';
 import { Check } from 'lucide-react';
 import { cn } from '../../utils/classNames';
 import { SELECTOR_ROW_CLASS, SELECTOR_ROW_SELECTED_CLASS } from './selectorStyles';
-import { AUTO_LABEL } from './agentSearch';
 
 interface AutoAgentRowProps {
   selected: boolean;
@@ -26,7 +25,7 @@ export const AutoAgentRow = ({
   >
     <span className='flex min-w-0 items-center gap-2.5'>
       {glyph}
-      <span className={labelClassName}>{AUTO_LABEL}</span>
+      <span className={labelClassName}>Auto</span>
     </span>
     {selected && <Check className='h-3.5 w-3.5 shrink-0' aria-hidden />}
   </button>
