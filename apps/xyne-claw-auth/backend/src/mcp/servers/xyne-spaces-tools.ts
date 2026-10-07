@@ -10326,8 +10326,8 @@ const spacesWorkflowCatalog: ToolDef = {
   inputSchema: {
     type: "object",
     properties: {
-      stepTypes: { type: "array", items: { type: "string" }, description: 'Step types to expand, e.g. ["HTTP_REQUEST", "CONDITIONAL"].' },
-      triggerTypes: { type: "array", items: { type: "string" }, description: 'Trigger types to expand, e.g. ["CRON"].' },
+      stepTypes: { type: "array", items: { type: "string" }, maxItems: 12, description: 'Step types to expand, e.g. ["HTTP_REQUEST", "CONDITIONAL"].' },
+      triggerTypes: { type: "array", items: { type: "string" }, maxItems: 8, description: 'Trigger types to expand, e.g. ["CRON"].' },
     },
   },
   handler: withToolErrors("Workflow catalog error", async (args) => {
@@ -10350,7 +10350,8 @@ const spacesWorkflowNodeContext: ToolDef = {
     "What a given step of an SDK workflow can REFERENCE: `trigger`, `vars` and `steps.<stepId>.output` of every step " +
     "that runs before it, as JSON Schemas — scope-aware, so a step inside a LOOP / MAP sees a different set. Call it " +
     "before writing any {{...}} reference such as {{trigger.field}} or {{steps.<stepId>.output.field}}; an invented " +
-    "path resolves to nothing at run time. Pass a draft `config`, or `workflowId` to use the saved one.",
+    "path fails validation. Inside a LOOP / MAP body the current item is {{steps.__loop.output.currentItem}} / " +
+    "{{steps.__map.output.currentItem}}. Pass a draft `config`, or `workflowId` to use the saved one.",
   inputSchema: {
     type: "object",
     properties: {
@@ -10363,7 +10364,9 @@ const spacesWorkflowNodeContext: ToolDef = {
   handler: withToolErrors("Workflow node context error", async (args) => {
     if (!args["config"] && !args["workflowId"]) return err("Provide either config or workflowId.");
     const config = args["config"] ?? (await savedWorkflow(args["workflowId"]))["config"];
-    return wfJson(await wfSend("/schema/available-context", { config, atStepId: args["atStepId"] }));
+    const res = (await wfSend("/schema/available-context", { config, atStepId: args["atStepId"] })) as { context?: unknown };
+    if (res.context == null) return err(`No step "${String(args["atStepId"])}" in this config.`);
+    return wfJson(res);
   }),
 };
 
@@ -10371,7 +10374,7 @@ const spacesWorkflowList: ToolDef = {
   name: "spaces-workflow-list",
   description:
     "List SDK workflows — the ones built on the Workflows screen — and the folders they live in. Use it to resolve a " +
-    "workflow NAME to an id (the name is inside each row's `metadata`), or to pick a folder id for " +
+    "workflow NAME to an id (each row has `name`), or to pick a folder id for " +
     "spaces-workflow-create. NOT automations (spaces-automations-list) and not legacy workflows (spaces-workflow-stats).",
   inputSchema: {
     type: "object",
@@ -10386,15 +10389,21 @@ const spacesWorkflowList: ToolDef = {
     if (args["folderId"]) params.set("folderId", String(args["folderId"]));
     if (args["cursor"]) params.set("cursor", String(args["cursor"]));
     const [workflows, folders] = await Promise.all([spacesFetch(`${WF}/workflows?${params.toString()}`), spacesFetch(`${WF}/folders?limit=100`)]);
-    return wfJson({ ...(workflows as object), folders: (folders as { folders?: unknown }).folders });
+    const page = workflows as { workflows?: Record<string, unknown>[]; nextCursor?: string };
+    // A row carries its whole config; that is spaces-workflow-get's job, not a listing's.
+    const rows = (page.workflows ?? []).map((w) => {
+      const metadata = (typeof w["metadata"] === "string" ? JSON.parse(w["metadata"]) : w["metadata"]) as { name?: string } | null;
+      return Object.fromEntries([["name", metadata?.name], ...["id", "status", "summary", "folderId", "eventType", "updatedAt"].map((k) => [k, w[k]])]);
+    });
+    return wfJson({ workflows: rows, nextCursor: page.nextCursor, folders: (folders as { folders?: unknown }).folders });
   }),
 };
 
 const spacesWorkflowGet: ToolDef = {
   name: "spaces-workflow-get",
   description:
-    "Read one SDK workflow: name, summary, status (ACTIVE = its trigger is live) and the full config (trigger + step " +
-    "tree). Use it to explain a workflow, to decode step ids seen in a run, and before editing — " +
+    "Read one SDK workflow: summary, status (ACTIVE = trigger on; DISABLED = off; DRAFT / PENDING_APPROVAL / REJECTED = " +
+    "not yet live), `metadata` (a JSON string holding the name) and the full config (trigger + step tree). Use it to explain a workflow, to decode step ids seen in a run, and before editing — " +
     "spaces-workflow-update needs the COMPLETE config.",
   inputSchema: {
     type: "object",
@@ -10402,22 +10411,6 @@ const spacesWorkflowGet: ToolDef = {
     required: ["workflowId"],
   },
   handler: withToolErrors("Workflow get error", async (args) => wfJson(await savedWorkflow(args["workflowId"]))),
-};
-
-const spacesWorkflowValidate: ToolDef = {
-  name: "spaces-workflow-validate",
-  description:
-    "Check an SDK workflow config WITHOUT saving it. Returns each issue with its path, a code and a message. Run it on " +
-    "every config you draft; create and update refuse an invalid config anyway.",
-  inputSchema: {
-    type: "object",
-    properties: { config: { type: "object", description: "The full workflow config: { trigger: { type, config }, steps: [...] }." } },
-    required: ["config"],
-  },
-  handler: withToolErrors("Workflow validate error", async (args) => {
-    const issues = await workflowIssues(args["config"]);
-    return ok(issues === null ? "Config is VALID." : `Config is INVALID.\n${issues}`);
-  }),
 };
 
 const spacesWorkflowCreate: ToolDef = {
@@ -10443,7 +10436,8 @@ const spacesWorkflowCreate: ToolDef = {
     const issues = await workflowIssues(args["config"]);
     if (issues !== null) return err(`Config is INVALID — nothing was saved. Fix these and retry:\n${issues}`);
     const { name, config, folderId, summary } = args;
-    const created = (await wfSend("/workflows", { name, config, folderId, ...(summary ? { summary } : {}) })) as { id: string };
+    const created = (await wfSend("/workflows", { name, config, folderId, ...(summary ? { summary } : {}) })) as { id?: string };
+    if (!created?.id) return err("Workflow create returned no id — check spaces-workflow-list before retrying.");
 
     // The backend creates every workflow ACTIVE. Nothing an agent authored should start
     // firing before a person has read it, so take the trigger out of service straight away.
@@ -10462,7 +10456,8 @@ const spacesWorkflowUpdate: ToolDef = {
     "Change an existing SDK workflow's name, summary or config. The save applies in place — there are no drafts — so on " +
     "an ACTIVE workflow the next run uses the new config; confirm with the user before editing a live one. Read it with " +
     "spaces-workflow-get FIRST and send the COMPLETE config: it replaces wholesale. Keep existing step ids. An invalid " +
-    "config is refused. Editing does not switch a workflow on or off.",
+    "config is refused. Editing does not switch a workflow on or off, but it withdraws a pending approval, and a " +
+    "changed TRIGGER on an ACTIVE workflow takes effect only after a person turns it off and on.",
   inputSchema: {
     type: "object",
     properties: {
@@ -10474,7 +10469,9 @@ const spacesWorkflowUpdate: ToolDef = {
     required: ["workflowId"],
   },
   handler: withToolErrors("Workflow update error", async (args) => {
-    const { workflowId, ...body } = args;
+    const { workflowId } = args;
+    // Not a spread of args: the route also honours folderId and metadata, which would move or rename it.
+    const body = Object.fromEntries(["name", "summary", "config"].filter((k) => args[k] !== undefined).map((k) => [k, args[k]]));
     if (Object.keys(body).length === 0) return err("Nothing to update — provide at least one of name, summary or config.");
     if (body["config"]) {
       const issues = await workflowIssues(body["config"]);
@@ -10497,7 +10494,9 @@ const spacesWorkflowFolderCreate: ToolDef = {
     },
     required: ["name"],
   },
-  handler: withToolErrors("Workflow folder create error", async (args) => wfJson(await wfSend("/folders", args))),
+  handler: withToolErrors("Workflow folder create error", async (args) =>
+    wfJson(await wfSend("/folders", { name: args["name"], ...(args["parentId"] ? { parentId: args["parentId"] } : {}) })),
+  ),
 };
 
 const spacesWorkflowRun: ToolDef = {
@@ -10505,7 +10504,8 @@ const spacesWorkflowRun: ToolDef = {
   description:
     "Run an SDK workflow NOW and return its executionId. Works even on a workflow that is switched off, so this is how " +
     "you test one you just built. It really executes the steps — messages get sent, tickets get updated — so confirm " +
-    "with the user first. The run is asynchronous: read the outcome with spaces-workflow-run-get, never assume success.",
+    "with the user first. Refused while the workflow is awaiting approval. The run is asynchronous: read the outcome " +
+    "with spaces-workflow-run-get, never assume success.",
   inputSchema: {
     type: "object",
     properties: {
@@ -10524,7 +10524,8 @@ const spacesWorkflowRunList: ToolDef = {
   description:
     "Recent executions of SDK workflows, newest first — 'did it run last night', 'how often does this fail', 'what is " +
     "stuck right now'. Filter by workflow and/or status. EXTERNAL_WAIT means parked on an approval, agent or callback, " +
-    "not a hang; SKIPPED means the trigger filter rejected it. Pass an id to spaces-workflow-run-get for step detail.",
+    "not a hang — status=EXTERNAL_WAIT is how you list runs awaiting approval. SCHEDULED means waiting for its fire " +
+    "time; SKIPPED means the trigger scope or filter rejected it. Pass an id to spaces-workflow-run-get for step detail.",
   inputSchema: {
     type: "object",
     properties: {
@@ -10545,8 +10546,9 @@ const spacesWorkflowRunGet: ToolDef = {
   name: "spaces-workflow-run-get",
   description:
     "Read one execution of an SDK workflow: overall status, the trigger payload, and every step that ran with its " +
-    "status and `data` (input, output, error). This answers 'why did this run fail' — read the step whose status is " +
-    "FAILED, or the one sitting in EXTERNAL_WAIT. A nested step is named '<controlStepId>:<branch>#<iteration>/<stepId>'.",
+    "status and `data` — a JSON STRING to parse: { input, output, error }. This answers 'why did this run fail' — read " +
+    "the step whose status is FAILED, or the one sitting in EXTERNAL_WAIT. A nested step is named " +
+    "'<controlStepId>:<branch>#<iteration>/<stepId>'. Also returns the workflow's CURRENT config; large for looped runs.",
   inputSchema: {
     type: "object",
     properties: { executionId: { type: "string", description: "Execution id (from spaces-workflow-run-list or spaces-workflow-run)." } },
@@ -10558,49 +10560,35 @@ const spacesWorkflowRunGet: ToolDef = {
 const spacesWorkflowRerun: ToolDef = {
   name: "spaces-workflow-rerun",
   description:
-    "Re-run a FINISHED execution from one of its TOP-LEVEL steps, as a new execution: earlier steps are copied as " +
-    "completed, the original trigger payload is reused, and it resumes at that step with the workflow's CURRENT config. " +
+    "Re-run a FINISHED execution from one of its TOP-LEVEL steps, as a new execution: earlier steps that ran are copied " +
+    "as completed (one that never ran, or was added since, executes), the original trigger payload is reused, and it resumes at that step with the workflow's CURRENT config. " +
     "Returns the new executionId. It really executes the steps again, so confirm with the user first.",
   inputSchema: {
     type: "object",
     properties: {
       executionId: { type: "string", description: "The finished execution to rerun (COMPLETED, FAILED or CANCELLED)." },
       fromStepId: { type: "string", description: "Top-level step id to restart from; the first step's id reruns everything." },
-      configOverrides: { type: "object", description: "Optional one-off fields merged into that step's config for this run only." },
     },
     required: ["executionId", "fromStepId"],
   },
   handler: withToolErrors("Workflow rerun error", async (args) => {
-    const { executionId, ...body } = args;
-    return wfJson(await wfSend(`/executions/${wfId(executionId)}/rerun`, body));
+    // fromStepId only: the route also takes configOverrides, which would run step config nobody saved or reviewed.
+    return wfJson(await wfSend(`/executions/${wfId(args["executionId"])}/rerun`, { fromStepId: args["fromStepId"] }));
   }),
 };
 
 const spacesWorkflowCancel: ToolDef = {
   name: "spaces-workflow-cancel",
   description:
-    "Cancel an execution that has not finished (PENDING, SCHEDULED, RUNNING or EXTERNAL_WAIT), marking it CANCELLED so " +
-    "no further steps start. Confirm with the user first.",
+    "Cancel a queued or parked execution (PENDING, SCHEDULED, EXTERNAL_WAIT) so it never continues. A RUNNING execution " +
+    "is NOT interrupted — its current walk finishes and may overwrite the status; re-check with " +
+    "spaces-workflow-run-get. Confirm with the user first.",
   inputSchema: {
     type: "object",
     properties: { executionId: { type: "string", description: "Execution id to cancel (from spaces-workflow-run-list)." } },
     required: ["executionId"],
   },
   handler: withToolErrors("Workflow cancel error", async (args) => wfJson(await wfSend(`/executions/${wfId(args["executionId"])}/cancel`))),
-};
-
-const spacesWorkflowPendingApprovals: ToolDef = {
-  name: "spaces-workflow-pending-approvals",
-  description:
-    "List executions of SDK workflows parked waiting for a person's approval, with the workflow and the step each is " +
-    "parked at. Approving is done by a person on the Workflows screen.",
-  inputSchema: {
-    type: "object",
-    properties: { workflowId: { type: "string", description: "Optional workflow id to restrict to." } },
-  },
-  handler: withToolErrors("Workflow pending approvals error", async (args) =>
-    wfJson(await spacesFetch(`${WF}/executions/pending-approvals${args["workflowId"] ? `?workflowIds=${wfId(args["workflowId"])}` : ""}`)),
-  ),
 };
 
 export const tools: ToolDef[] = [
@@ -10683,7 +10671,6 @@ export const tools: ToolDef[] = [
   spacesWorkflowNodeContext,
   spacesWorkflowList,
   spacesWorkflowGet,
-  spacesWorkflowValidate,
   spacesWorkflowCreate,
   spacesWorkflowUpdate,
   spacesWorkflowFolderCreate,
@@ -10692,5 +10679,4 @@ export const tools: ToolDef[] = [
   spacesWorkflowRunGet,
   spacesWorkflowRerun,
   spacesWorkflowCancel,
-  spacesWorkflowPendingApprovals,
 ];
