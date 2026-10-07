@@ -18,6 +18,7 @@ export {
 } from './schemas.js';
 export {
   validateWriteFilePath,
+  resolveFilePath,
   ensureDirectoryExists,
   getExistingFileInfo,
   validateFileContent,

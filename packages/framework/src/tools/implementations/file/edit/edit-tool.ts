@@ -12,10 +12,10 @@ import {
   type EditToolLLMOutput
 } from './schemas.js';
 import { 
-  validateEditFilePath,
-  getFileContent,
-  validateEditContent
-} from './validation.js';
+  resolveFilePath,
+  getExistingFileInfo,
+  validateFileContent
+} from '../write/security.js';
 import { generateGitStyleDiff } from '../../../../utils/diff-generator.js';
 
 /**
@@ -89,7 +89,7 @@ export class EditTool extends BaseTool<EditToolInput, EditToolOutput, EditToolLL
 
     try {
       // Validate and resolve file path (supports both relative and absolute)
-      const resolvedPath = validateEditFilePath(input.file_path, this.getEffectiveCwd(context));
+      const resolvedPath = resolveFilePath(input.file_path, this.getEffectiveCwd(context));
       
       // Validate that old_string and new_string are different
       if (input.old_string === input.new_string) {
@@ -99,7 +99,7 @@ export class EditTool extends BaseTool<EditToolInput, EditToolOutput, EditToolLL
       // Note: Empty old_string is allowed for new file creation (replacing empty content)
       
       // Get existing file information
-      const fileInfo = await getFileContent(resolvedPath);
+      const fileInfo = await getExistingFileInfo(resolvedPath);
       
       // Handle file existence
       const fileExists = fileInfo.exists;
@@ -112,7 +112,7 @@ export class EditTool extends BaseTool<EditToolInput, EditToolOutput, EditToolLL
       
       // Validate original content for security issues
       if (originalContent.length > 0) {
-        validateEditContent(originalContent);
+        validateFileContent(originalContent);
       }
       
       // Perform find/replace operation
@@ -157,7 +157,7 @@ export class EditTool extends BaseTool<EditToolInput, EditToolOutput, EditToolLL
       const contentChanged = originalContent !== newContent;
       
       // Validate final content for security issues
-      validateEditContent(newContent);
+      validateFileContent(newContent);
       
       // Generate git-style diff with line numbers
       const diff = generateGitStyleDiff(originalContent, newContent, input.file_path);
