@@ -21,3 +21,4 @@ CREATE TABLE "public"."connect_group" (
 CREATE UNIQUE INDEX "connect_group_connectId_invitedWorkspaceId_key" ON "public"."connect_group"("connectId", "invitedWorkspaceId");
 CREATE INDEX CONCURRENTLY IF NOT EXISTS "connect_group_hostWorkspaceId_idx" ON "public"."connect_group"("hostWorkspaceId");
 CREATE INDEX CONCURRENTLY IF NOT EXISTS "connect_group_invitedWorkspaceId_idx" ON "public"."connect_group"("invitedWorkspaceId");
+CREATE INDEX CONCURRENTLY IF NOT EXISTS "connect_group_entityId_idx" ON "public"."connect_group"("entityId");

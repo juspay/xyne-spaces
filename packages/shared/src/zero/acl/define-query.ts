@@ -103,6 +103,12 @@ function applyQueryACL<TQuery>(
   const acl = QueryACLFactory.getACL(tableName, ctx);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const scoped = acl.canSelect(query as any, args) as TQuery;
+  // Slack Connect — connect-scoped tables resolve tenancy via connect_group (host/invited workspace),
+  // NOT a workspaceId column. This backstop is the SINGLE place `connectReach` is applied
+  if (ctx.workspaceId && CONNECT_SCOPED_TABLES.has(tableName)) {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    return (scoped as any).where(connectReach(ctx, undefined, connectColumnForTable(tableName))) as TQuery;
+  }
   // Tenant backstop: scope root rows to the caller's workspace. Structural + idempotent with
   // per-table ACLs that already filter workspaceId. Skips tables with no workspaceId column / opt-outs.
   if (
@@ -110,12 +116,6 @@ function applyQueryACL<TQuery>(
     WORKSPACE_SCOPED_TABLES.has(tableName) &&
     !WORKSPACE_SCOPE_OPT_OUT.has(tableName)
   ) {
-    // Slack Connect: tables with a connectId resolve tenancy via connect_group (host/invited
-    // workspace), falling back to workspaceId for rows that have no connectId yet.
-    if (CONNECT_SCOPED_TABLES.has(tableName)) {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      return (scoped as any).where(connectReach(ctx, undefined, connectColumnForTable(tableName))) as TQuery;
-    }
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     return (scoped as any).where('workspaceId', '=', ctx.workspaceId) as TQuery;
   }

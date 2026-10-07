@@ -3556,12 +3556,12 @@ export const queries = defineQueries({
   ),
 
   canvasThreadComments: defineQuery(
-    // threadId is already connect-group-agnostic (a thread belongs to one connect group),
-    // so this query is unchanged; connectId is accepted for signature symmetry only.
+    // A thread belongs to one connect group, so threadId alone scopes the comments. No `workspaceId`
+    // filter: tenancy comes from the defineQuery backstop (connect_group reach), which keeps comments
+    // on a canvas shared from another workspace visible. connectId is accepted for signature symmetry.
     z.object({ threadId: z.string(), connectId: z.string().optional() }),
-    ({ ctx, args: { threadId } }) => {
+    ({ args: { threadId } }) => {
       return zql.canvas_comments
-        .where('workspaceId', ctx.workspaceId)
         .where('threadId', threadId)
         .orderBy('createdAt', 'asc');
     },
@@ -3890,26 +3890,14 @@ export const queries = defineQueries({
     }),
     ({ ctx, args }) => {
       const isBackward = args.direction === 'backward';
-      let query = zql.canvases
-        .where('docType', DocType.Quarto)
-        .where(helpers => {
-          return helpers.or(
-            helpers.cmp('createdBy', ctx.userID),
-            helpers.exists('participants', p =>
-              p.where(({ or, cmp, exists: ex }) =>
-                or(
-                  cmp('userId', ctx.userID),
-                  ex('userGroup', ug =>
-                    ug.whereExists('userGroupMappings', m => m.where('userId', ctx.userID)),
-                  ),
-                  ex('channel', ch =>
-                    ch.whereExists('participants', cp => cp.where('userId', ctx.userID)),
-                  ),
-                ),
-              ),
-            ),
-          );
-        })
+      // Use the flipped (no-PUBLIC) visibility helper — same as userCanvasesPaginated. The viewer's
+      // own rows drive the scan instead of a hand-written OR-of-exists that Zero can't push into
+      // SQLite, which (combined with the connect_group reach) made it walk every workspace's docs.
+      let query = applyCanvasVisibilityQueryFilter(
+        zql.canvases.where('docType', DocType.Quarto),
+        ctx.userID,
+        false,
+      )
         .orderBy('updatedAt', isBackward ? 'asc' : 'desc')
         .orderBy('id', isBackward ? 'asc' : 'desc');
 

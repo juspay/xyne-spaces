@@ -1970,14 +1970,21 @@ model ConnectGroup {
   createdAt          DateTime // set in code
   updatedAt          DateTime // set in code
 
+  // Slack Connect — filter-only relation back to the canvas (entityId == canvas.id). Used by the
+  // Prisma ACL's correlated-EXISTS reach; typed non-optional because entityId is required (for a
+  // channel group it simply points at no canvas — relationMode="prisma", so nothing enforces it and
+  // we never `include` it). Cascade: deleting a canvas drops its connect_group rows.
+  canvasEntity       Canvas   @relation("CanvasConnectGroups", fields: [entityId], references: [id], onDelete: Cascade)
+
   // (connectId, invitedWorkspaceId) unique also serves every `connectId = ?` probe via its
-  // leftmost prefix, so no standalone @@index([connectId]) is needed. hostWorkspaceId and
-  // invitedWorkspaceId are each indexed — resolveReachableEntity() filters on
-  // (hostWorkspaceId = me OR invitedWorkspaceId = me) on every canvas ACL read/write (bitmap-OR).
-  // entityId has no index: lookups go entity→connectId, never entityId→group.
+  // leftmost prefix. hostWorkspaceId and invitedWorkspaceId are each indexed for the
+  // (hostWorkspaceId = me OR invitedWorkspaceId = me) filter (bitmap-OR).
+  // entityId is indexed because the canvas ACL's correlated-EXISTS reach joins
+  // connect_group.entityId == canvas.id per row (one indexed probe instead of a materialised id-set).
   @@unique([connectId, invitedWorkspaceId])
   @@index([hostWorkspaceId])
   @@index([invitedWorkspaceId])
+  @@index([entityId])
   @@map("connect_group")
   @@schema("public")
 }
@@ -3230,6 +3237,10 @@ model Canvas {
   quartoDocumentType String?    // "docs" | "book" | "slides" | "website" (type of Quarto document)
   gcsPath      String?          // Path in GCS where the bundle is stored
   connectId    String?          // Slack Connect: this canvas's connect_group handle (null until backfilled)
+  // Slack Connect: filter-only relation to this canvas's connect_group rows (connect_group.entityId ==
+  // canvas.id). Lets the Prisma ACL authorize reach with a correlated EXISTS — "is my workspace a host
+  // or invited member of this canvas's group?" — instead of materialising every reachable canvas id.
+  connectGroups ConnectGroup[] @relation("CanvasConnectGroups")
 
   @@unique([userRepo]) // One doc per repo/branch combination (backward compatibility)
   @@unique([repoId, branchName]) // One doc per repo/branch combination (when repoId is set)

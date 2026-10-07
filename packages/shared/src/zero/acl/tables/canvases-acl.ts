@@ -1,7 +1,6 @@
 import type { Query } from '@rocicorp/zero';
 import type { Schema, Context } from '../../schema';
 import { BaseQueryACL } from '../core/base-acl';
-import { connectReach } from '../core/connect-reach';
 import { guestCanvasAccessWhere, isGuestContext } from '../core/guest-acl-utils';
 
 export class CanvasesACL extends BaseQueryACL<'canvases'> {
@@ -17,14 +16,6 @@ export class CanvasesACL extends BaseQueryACL<'canvases'> {
         )
         .where(guestCanvasAccessWhere(this.ctx));
     }
-
-    // Slack Connect: connectId → connect_group workspace truth; else the creator's workspace.
-    return query.where(
-      connectReach(this.ctx, ({ exists }) =>
-        exists('createdByUser', (u: { where: (...a: unknown[]) => unknown }) =>
-          u.where('workspaceId', '=', this.ctx.workspaceId),
-        ),
-      ),
-    );
+    return query;
   }
 }

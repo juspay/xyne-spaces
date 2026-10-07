@@ -49,13 +49,17 @@ export function connectReach(ctx: Context, legacy?: (helpers: any) => any, conne
     const fallback = legacy ? legacy(helpers) : cmp('workspaceId', ctx.workspaceId);
     return or(
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      exists('connectGroup', (g: any) =>
-        g
-          .where('status', 'ACTIVE')
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          .where(({ or: o, cmp: c }: any) =>
-            o(c('hostWorkspaceId', ctx.workspaceId), c('invitedWorkspaceId', ctx.workspaceId)),
-          ),
+      exists(
+        'connectGroup',
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        (g: any) =>
+          g
+            .where('status', 'ACTIVE')
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            .where(({ or: o, cmp: c }: any) =>
+              o(c('hostWorkspaceId', ctx.workspaceId), c('invitedWorkspaceId', ctx.workspaceId)),
+            ),
+        { flip: false },
       ),
       and(cmp(connectColumn, 'IS', null), fallback),
     );

@@ -168,33 +168,6 @@ const CANVAS_CHILD_TABLES = new Set<string>([
   'canvas_user_status',
 ]);
 
-/**
- * Resolve the reachable PARENT entity ids for `workspaceId` from connect_group: the `entityId`s of
- * ACTIVE groups this workspace HOSTS or is INVITED to, for the given `entityType` — used to scope the
- * entity LIST (e.g. "all canvases I can reach"). Records the connect_acl_mode metric. `ok = false`
- * means the lookup threw → the caller MUST degrade to its plain workspace predicate (the exact
- * pre-Connect behaviour), and the metric records outcome=error_fallback so a real regression is visible.
- * Child reads do NOT use this — they gate on their single connectId (see canWorkspaceReachConnect).
- */
-export async function resolveReachableEntity(
-  client: Prisma.TransactionClient,
-  workspaceId: string,
-  entityType: ConnectEntityType,
-): Promise<{ entityIds: string[]; ok: boolean }> {
-  try {
-    const groups = await client.connectGroup.findMany({
-      where: {
-        status: 'ACTIVE',
-        entityType,
-        OR: [{ hostWorkspaceId: workspaceId }, { invitedWorkspaceId: workspaceId }],
-      },
-      select: { entityId: true },
-    });
-    return { entityIds: groups.map((g) => g.entityId), ok: true };
-  } catch {
-    return { entityIds: [], ok: false };
-  }
-}
 
 /** connectId IS NULL (un-backfilled) → legacy workspace scope; matches Zero's `legacy` branch. (Parent only.) */
 type ConnectNullFallback = { AND: [{ connectId: null }, { workspaceId: string }] };
@@ -285,15 +258,27 @@ export async function connectReachWhere(
     recordConnectAcl(table, op, 'workspace', 'flag_off');
     return { workspaceId };
   }
-  const { entityIds, ok } = await resolveReachableEntity(client, workspaceId, ConnectEntityType.CANVAS);
-  if (!ok) {
-    recordConnectAcl(table, op, 'workspace', 'error_fallback');
-    return { workspaceId };
-  }
   recordConnectAcl(table, op, 'connect_group', 'connect_group');
   const nullFallback: ConnectNullFallback = { AND: [{ connectId: null }, { workspaceId }] };
-  // Parent (canvases) id-set + its own `connectId IS NULL` fallback — cast past the child-safe type.
-  return { OR: [{ id: { in: entityIds } }, nullFallback] } as unknown as ConnectReachWhere;
+  // Correlated EXISTS, NOT a materialised id-set. A canvas is reachable when its OWN connect_group
+  // (connect_group.entityId == canvas.id) has an ACTIVE row with this workspace as host or invited —
+  // Postgres evaluates it per candidate row through the `connectGroups` relation, so there is no
+  // `id IN (…)` list and no 32,767 bind-variable ceiling on large workspaces. A not-yet-backfilled
+  // canvas (connectId NULL, no group row) still shows via the `connectId IS NULL → workspaceId`
+  // fallback until the backfill runs. Cast past the child-safe type (parent-only shape).
+  return {
+    OR: [
+      {
+        connectGroups: {
+          some: {
+            status: 'ACTIVE',
+            OR: [{ hostWorkspaceId: workspaceId }, { invitedWorkspaceId: workspaceId }],
+          },
+        },
+      },
+      nullFallback,
+    ],
+  } as unknown as ConnectReachWhere;
 }
 
 /** Resolve the connectId of an existing channel (for channel-scoped folders). */
