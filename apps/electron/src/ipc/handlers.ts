@@ -571,7 +571,7 @@ export function setupIpcHandlers(): void {
 
   // App update handler - triggers hard reload when user clicks update button
   ipcMain.on('apply-app-update', () => {
-    void performHardReload();
+    performHardReload();
   });
   ipcMain.handle('request-all-media-permissions', async () => {
     return requestAllMediaPermissions();
