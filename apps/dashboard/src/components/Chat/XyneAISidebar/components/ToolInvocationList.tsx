@@ -1,83 +1,63 @@
 import { useMemo, useState } from 'react';
 import type { ReactElement } from 'react';
-import { Loader2, ChevronRight, Check, AlertCircle, Link2, CircleSlash, Clock } from 'lucide-react';
+import { AlertCircle, Bot, ChevronRight, Link2 } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import type { ToolInvocation, ClawCitation } from '../utils/XyneAITypes';
 import { buildClawCitationUrl, getClawCitationLabel } from '../utils/clawCitationUrl';
-import { activityAccent } from './activityShared';
+import { cn } from '../../../../utils/classNames';
+import {
+  agentLabel,
+  childToolLabel,
+  formatDuration,
+  humanizeToolName,
+  isSubagentCall,
+  Reveal,
+} from './activityShared';
 
-interface ToolInvocationListProps {
-  invocations: ToolInvocation[];
-  /** When the parent message was cancelled mid-stream, any invocation still in
-   *  status='running' should render as cancelled (not as a perpetual spinner).
-   *  Backend marks the message status='cancelled', but in-flight tool rows it
-   *  emitted via pushInvocation never got their tool_execution_end frame —
-   *  they stay 'running' in the array. Normalize at the render boundary. */
-  messageAborted?: boolean | undefined;
+export interface InvocationTree {
+  roots: ToolInvocation[];
+  /** Top-level calls by toolCallId. */
+  byId: Map<string, ToolInvocation>;
+  /** A subagent's calls, under the call that spawned it. */
+  childrenByParent: Map<string, ToolInvocation[]>;
 }
 
 /**
- * Turn a raw tool id like `Xyne_Spaces__spaces-create-ticket` or
- * `merge_pull_request` into a user-facing label like "Create Ticket" /
- * "Merge Pull Request". Strips the MCP server prefix if present, then
- * title-cases words separated by `-` or `_`.
+ * A message's tool calls as a tree. When the message was stopped mid-run, a
+ * call still marked running never got its end frame — it is shown as
+ * cancelled rather than as a perpetual spinner (children inherit this).
  */
-function humanizeToolName(raw: string): string {
-  if (!raw) return raw;
-  const stripped = raw.includes('__') ? raw.split('__').slice(1).join('__') : raw;
-  const trimmed = stripped.includes(':') ? stripped.split(':').slice(-1)[0]! : stripped;
-  return trimmed
-    .split(/[-_]/)
-    .filter(Boolean)
-    .map(w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase())
-    .join(' ');
-}
-
-export function ToolInvocationList({
-  invocations,
+export function groupInvocations(
+  invocations: ToolInvocation[],
   messageAborted = false,
-}: ToolInvocationListProps): ReactElement {
-  // Normalize once per render — child invocations inside subagents inherit the
-  // cancelled state from their parent message via this single sweep, so the
-  // tree walker below doesn't need a second pass.
-  const normalized = useMemo<ToolInvocation[]>(() => {
-    if (!messageAborted) return invocations;
-    return invocations.map(inv =>
-      inv.status === 'running' || (inv.background && inv.backgroundState === 'running')
-        ? { ...inv, status: 'cancelled' as const }
-        : inv,
-    );
-  }, [invocations, messageAborted]);
-
+): InvocationTree {
   const roots: ToolInvocation[] = [];
+  const byId = new Map<string, ToolInvocation>();
   const childrenByParent = new Map<string, ToolInvocation[]>();
-
-  for (const inv of normalized) {
+  for (const raw of invocations) {
+    const inv =
+      messageAborted &&
+      (raw.status === 'running' || (raw.background && raw.backgroundState === 'running'))
+        ? { ...raw, status: 'cancelled' as const }
+        : raw;
     if (inv.parentToolCallId) {
       const list = childrenByParent.get(inv.parentToolCallId) ?? [];
       list.push(inv);
       childrenByParent.set(inv.parentToolCallId, list);
     } else {
       roots.push(inv);
+      if (inv.toolCallId) byId.set(inv.toolCallId, inv);
     }
   }
-
-  const toRender = roots.length > 0 ? roots : Array.from(childrenByParent.values()).flat();
-
-  return (
-    <div className='space-y-1'>
-      {toRender.map((inv, i) => (
-        <InvocationItem key={inv.toolCallId ?? `${inv.toolName}-${i}`} invocation={inv}>
-          {inv.toolCallId ? childrenByParent.get(inv.toolCallId) : undefined}
-        </InvocationItem>
-      ))}
-    </div>
-  );
+  return { roots, byId, childrenByParent };
 }
 
 interface InvocationItemProps {
   invocation: ToolInvocation;
+  /** A subagent's own calls, listed under it when it is opened. */
   children?: ToolInvocation[] | undefined;
+  /** One of a subagent's calls: a tighter row under its parent. */
+  nested?: boolean;
 }
 
 interface CitationListProps {
@@ -93,30 +73,29 @@ function CitationList({ citations }: CitationListProps): ReactElement {
     <div>
       <button
         onClick={() => hasOverflow && setExpanded(!expanded)}
-        className={`flex w-full items-center justify-between ${hasOverflow ? 'cursor-pointer hover:text-foreground' : ''} text-muted-foreground/70 mb-1 text-[10px] uppercase tracking-wide`}
+        className={cn(
+          'mb-0.5 flex w-full items-center justify-between text-[11px] text-muted-foreground/70',
+          hasOverflow && 'cursor-pointer hover:text-foreground',
+        )}
         type='button'
         data-track-category='XyneAI'
         data-track-name='toggle-citations-expand'
       >
-        <span>Citations ({citations.length})</span>
-        {hasOverflow && (
-          <span className='text-[10px]'>
-            {expanded ? 'Show less' : `Show all ${citations.length}`}
-          </span>
-        )}
+        <span>Sources ({citations.length})</span>
+        {hasOverflow && <span>{expanded ? 'Show less' : `Show all ${citations.length}`}</span>}
       </button>
-      <ul className={`space-y-1 ${expanded ? 'max-h-48 overflow-y-auto pr-1' : ''}`}>
+      <ul className={cn('space-y-0.5', expanded && 'max-h-48 overflow-y-auto pr-1')}>
         {(expanded ? citations : citations.slice(0, MAX_VISIBLE)).map((citation, idx) => {
           const url = buildClawCitationUrl(citation);
           const label = getClawCitationLabel(citation);
 
           return (
-            <li key={idx} className='flex items-start gap-1.5'>
-              <Link2 size={10} className='mt-0.5 shrink-0 text-muted-foreground/50' />
+            <li key={idx} className='flex items-start gap-1.5 text-[11px] leading-[18px]'>
+              <Link2 aria-hidden className='mt-[3px] size-3 shrink-0 text-muted-foreground/50' />
               {url ? (
                 <Link
                   to={url}
-                  className='break-all text-[10px] text-blue-500 hover:text-blue-600 hover:underline'
+                  className='break-all text-blue-500 hover:text-blue-600 hover:underline'
                   onClick={e => e.stopPropagation()}
                   data-track-category='XyneAI'
                   data-track-name='open-citation-link'
@@ -124,13 +103,13 @@ function CitationList({ citations }: CitationListProps): ReactElement {
                   {label}
                 </Link>
               ) : (
-                <span className='break-all text-[10px] text-muted-foreground'>{label}</span>
+                <span className='break-all text-muted-foreground'>{label}</span>
               )}
             </li>
           );
         })}
         {!expanded && hasOverflow && (
-          <li className='text-[10px] text-muted-foreground/50 pl-4'>
+          <li className='pl-[18px] text-[11px] text-muted-foreground/50'>
             +{citations.length - MAX_VISIBLE} more
           </li>
         )}
@@ -139,195 +118,249 @@ function CitationList({ citations }: CitationListProps): ReactElement {
   );
 }
 
-function InvocationItem({ invocation, children }: InvocationItemProps): ReactElement {
-  const [expanded, setExpanded] = useState(false);
+/** Arguments that say what a call is about, most telling first; the first one
+ *  present is shown beside the tool's name. */
+const PREVIEW_KEYS = [
+  'description',
+  'question',
+  'query',
+  'title',
+  'path',
+  'file_path',
+  'url',
+  'command',
+  'pattern',
+  'prompt',
+];
 
-  const isSubagent = children && children.length > 0;
+function previewOf(args: Record<string, unknown>): { key: string; text: string } | null {
+  for (const key of PREVIEW_KEYS) {
+    const value = args[key];
+    if (typeof value === 'string' && value.trim()) return { key, text: value.trim() };
+  }
+  return null;
+}
+
+/** A result as text a person reads: MCP tools wrap theirs in a
+ *  `{"content":[{"type":"text","text":…}]}` envelope, which is unwrapped. */
+function readableResult(result: string): string {
+  if (!result.trimStart().startsWith('{"content"')) return result;
+  try {
+    const parsed = JSON.parse(result) as { content?: Array<{ type?: string; text?: unknown }> };
+    const texts = (parsed.content ?? [])
+      .filter(block => block.type === 'text' && typeof block.text === 'string')
+      .map(block => block.text as string);
+    return texts.length > 0 ? texts.join('\n\n') : result;
+  } catch {
+    return result;
+  }
+}
+
+/** Only rendered once its row is opened, so results are parsed on demand. */
+function ToolResult({
+  result,
+  prose,
+  failed,
+}: {
+  result: string | undefined;
+  /** A subagent's answer reads as prose, not as output. */
+  prose: boolean;
+  failed: boolean;
+}): ReactElement {
+  const text = useMemo(() => (result ? readableResult(result) : ''), [result]);
+  return (
+    <pre
+      className={cn(
+        'max-h-64 overflow-auto whitespace-pre-wrap break-words',
+        prose ? 'font-sans text-xs leading-5' : 'font-mono text-[11px] leading-[18px]',
+        failed ? 'text-red-500/90' : 'text-muted-foreground/80',
+      )}
+    >
+      {text || 'No output'}
+    </pre>
+  );
+}
+
+/** A subagent's calls shown at once; earlier ones fold behind "Show N earlier". */
+const VISIBLE_SUBAGENT_CALLS = 8;
+
+/**
+ * One tool call as a quiet row: its name, what it was about, and — right after
+ * them — an alert when it failed and the chevron. Success needs no mark; a
+ * running call's name shimmers. Opening it shows the arguments it was not
+ * already summarised by, its result and its sources.
+ *
+ * A subagent reads as an agent, not a tool: "Spaces agent", its question and
+ * how many calls it has made, with what it is doing right now while it runs.
+ * Opened, it lists its calls under a thin guide line, then its answer.
+ */
+export function InvocationItem({
+  invocation,
+  children,
+  nested = false,
+}: InvocationItemProps): ReactElement {
+  const [expanded, setExpanded] = useState(false);
+  const [showAllCalls, setShowAllCalls] = useState(false);
+
+  const subCalls = children ?? [];
+  const isSubagent = isSubagentCall(invocation, children);
   const isRunning = invocation.status === 'running';
   const isCancelled = invocation.status === 'cancelled';
   // A subagent spawned with run_in_background: the wrapper tool call returned
   // immediately (status='completed'), so its live state lives in backgroundState.
   const isBackground = invocation.background === true;
-  const bgState = invocation.backgroundState;
-  const isBackgroundRunning = isBackground && bgState === 'running' && !isCancelled;
-  const runningChildren = children?.filter(c => c.status === 'running').length ?? 0;
-  const completedChildren = (children?.length ?? 0) - runningChildren;
-  // The subagent's currently-running inner tool — surfaced live on the card so a
-  // busy subagent reads as busy without the user expanding it.
-  const runningChild = children?.find(c => c.status === 'running');
-
-  // Get a simple preview of what the tool is doing
-  const getActionPreview = () => {
-    const args = invocation.args ?? {};
-    if (args['question']) return args['question'] as string;
-    if (args['query']) return args['query'] as string;
-    if (args['title']) return args['title'] as string;
-    return null;
-  };
-
-  const preview = getActionPreview();
+  const isBackgroundRunning =
+    isBackground && invocation.backgroundState === 'running' && !isCancelled;
+  const working = isRunning || isBackgroundRunning;
+  const failed =
+    !!invocation.isError ||
+    invocation.status === 'error' ||
+    invocation.backgroundState === 'error';
+  const args = invocation.args ?? {};
+  const preview = previewOf(args);
+  // What a busy subagent is doing right now, so it reads as busy while closed.
+  const runningChild = working
+    ? subCalls.filter(child => child.status === 'running').at(-1)
+    : undefined;
+  const detail =
+    runningChild && !expanded
+      ? `${childToolLabel(runningChild, invocation.toolName)}…`
+      : (preview?.text ?? null);
+  const note = isCancelled
+    ? 'stopped'
+    : isBackgroundRunning
+      ? 'running in background'
+      : isBackground
+        ? 'background'
+        : null;
+  const showArgs = Object.keys(args).some(key => key !== preview?.key);
+  const showDuration = !working && !isCancelled;
+  const hiddenCalls = showAllCalls ? 0 : Math.max(0, subCalls.length - VISIBLE_SUBAGENT_CALLS);
+  const iconClass = nested ? 'mt-1 size-3' : 'mt-[3px] size-3.5';
 
   return (
-    // Subagents get a distinct bordered card so a nested LLM run reads as more
-    // than a plain tool row; ordinary tools stay borderless.
-    <div className={isSubagent ? `group border px-1.5 ${activityAccent.card}` : 'group'}>
+    <div className='min-w-0'>
       <button
-        onClick={() => setExpanded(!expanded)}
-        className='flex w-full items-center gap-2 py-1 text-left transition-colors hover:text-foreground'
         type='button'
+        onClick={() => setExpanded(value => !value)}
+        aria-expanded={expanded}
+        className={cn(
+          'group/row flex w-full items-start gap-2 text-left leading-5 transition-colors hover:bg-muted/40 focus-visible:bg-muted/40 focus-visible:outline-none',
+          nested ? 'rounded-md px-2 py-0.5 text-xs' : 'px-3 py-1 text-[13px]',
+        )}
         data-track-category='XyneAI'
         data-track-name='toggle-tool-invocation'
       >
-        <ChevronRight
-          size={14}
-          className={`shrink-0 text-muted-foreground transition-transform duration-200 ${expanded ? 'rotate-90' : ''}`}
-        />
-
-        <div className='flex min-w-0 flex-1 items-center gap-2'>
-          {/* Status indicator */}
-          {isCancelled ? (
-            // Subtle Stopped marker — same visual weight as the success Check
-            // but always visible, so a user scanning a cancelled message sees
-            // which tools were mid-flight when they hit Stop.
-            <CircleSlash size={12} className='shrink-0 text-muted-foreground' />
-          ) : isBackgroundRunning ? (
-            // Detached background subagent still running — a slow gray clock,
-            // deliberately distinct from the accent spinner of a BLOCKING tool
-            // so it reads as "fired and kept going", not "waiting on this".
-            <Clock size={12} className='animate-pulse shrink-0 text-muted-foreground' />
-          ) : isRunning ? (
-            <Loader2 size={12} className={`animate-spin shrink-0 ${activityAccent.text}`} />
-          ) : invocation.isError || bgState === 'error' ? (
-            // Errors are the only red — kept faint (red-400), not full destructive.
-            <AlertCircle size={12} className='shrink-0 text-red-400' />
-          ) : isBackground ? (
-            // Completed background subagent — keep the check always visible so a
-            // finished detached task reads as resolved, not hover-revealed.
-            <Check size={12} className='shrink-0 text-emerald-500' />
-          ) : (
-            <Check
-              size={12}
-              className='shrink-0 text-emerald-500 opacity-0 group-hover:opacity-100 transition-opacity'
+        <span className='flex min-w-0 items-start gap-1.5'>
+          {isSubagent && (
+            <Bot aria-hidden className={cn('shrink-0 text-muted-foreground/70', iconClass)} />
+          )}
+          <span
+            className={cn(
+              'shrink-0',
+              isSubagent ? 'text-muted-foreground' : 'text-muted-foreground/70',
+              working && 'typing-shimmer',
+            )}
+          >
+            {isSubagent
+              ? agentLabel(invocation.toolName)
+              : nested
+                ? childToolLabel(invocation, invocation.subagentName ?? '')
+                : humanizeToolName(invocation.toolName) || 'Tool'}
+          </span>
+          {detail && (
+            <span
+              className={cn(
+                'min-w-0 break-words',
+                runningChild && !expanded ? 'text-muted-foreground/60' : 'text-muted-foreground',
+                preview?.key === 'command' && 'font-mono text-[0.92em]',
+                !expanded && 'truncate',
+              )}
+            >
+              {detail}
+            </span>
+          )}
+          {isSubagent && subCalls.length > 0 && (
+            <span className='shrink-0 tabular-nums text-muted-foreground/50'>
+              {subCalls.length} {subCalls.length === 1 ? 'call' : 'calls'}
+            </span>
+          )}
+          {note && <span className='shrink-0 text-muted-foreground/50'>{note}</span>}
+          {failed && (
+            <AlertCircle
+              role='img'
+              aria-label='Failed'
+              className={cn('shrink-0 text-red-500/90', iconClass)}
             />
           )}
-
-          {/* Tool name — subagents read as a group via the hairline box + the
-              medium-weight name + child count, not a colored badge. */}
+          <ChevronRight
+            aria-hidden
+            className={cn(
+              'shrink-0 text-muted-foreground/50 transition-transform duration-200 motion-reduce:transition-none',
+              iconClass,
+              expanded && 'rotate-90',
+            )}
+          />
+        </span>
+        {showDuration && (
           <span
-            className={`text-xs ${isSubagent ? 'font-medium text-foreground/80' : 'text-muted-foreground'}`}
+            className={cn(
+              'ml-auto shrink-0 pl-2 text-[11px] tabular-nums text-muted-foreground/50 transition-opacity group-hover/row:opacity-100',
+              !expanded && 'opacity-0',
+            )}
           >
-            {humanizeToolName(invocation.toolName)}
+            {formatDuration(invocation.durationMs)}
           </span>
-
-          {/* Background (run_in_background) tag */}
-          {isBackground && (
-            <span
-              className={`shrink-0 rounded px-1 text-[9px] uppercase tracking-wide ${activityAccent.bgChip}`}
-            >
-              {bgState === 'error'
-                ? 'background · failed'
-                : bgState === 'completed'
-                  ? 'background · done'
-                  : 'background'}
-            </span>
-          )}
-
-          {/* Subagent indicator */}
-          {isSubagent && (
-            <span className='shrink-0 text-[10px] text-muted-foreground/70'>
-              ({runningChildren > 0 ? `${completedChildren}/${children?.length}` : children?.length}
-              )
-            </span>
-          )}
-
-          {/* Live running child — what the subagent is doing right now */}
-          {isSubagent && runningChild && !expanded && (
-            <span className={`truncate text-[10px] ${activityAccent.soft}`}>
-              ↳ {humanizeToolName(runningChild.toolName)}…
-            </span>
-          )}
-
-          {/* Preview text */}
-          {preview && !expanded && (
-            <span className='truncate text-[11px] text-muted-foreground/70'>{preview}</span>
-          )}
-
-          {/* Duration */}
-          <span className='ml-auto shrink-0 text-[10px] text-muted-foreground/60 tabular-nums'>
-            {isBackgroundRunning
-              ? 'running…'
-              : isRunning
-                ? '…'
-                : isCancelled
-                  ? 'stopped'
-                  : `${invocation.durationMs}ms`}
-          </span>
-        </div>
+        )}
       </button>
 
-      {/* Expanded details */}
-      {expanded && (
-        <div className='ml-3 border-l border-border pl-3 mt-1 space-y-2 text-[11px]'>
-          {/* Arguments */}
-          {Object.keys(invocation.args ?? {}).length > 0 && (
-            <div>
-              <div className='text-muted-foreground/70 mb-0.5 text-[10px] uppercase tracking-wide'>
-                Arguments
-              </div>
-              <pre className='overflow-x-auto whitespace-pre-wrap break-all rounded bg-muted px-2 py-1.5 font-mono text-muted-foreground text-[10px]'>
-                {JSON.stringify(invocation.args, null, 2)}
-              </pre>
+      <Reveal open={expanded}>
+        <div className={cn('space-y-1.5 pb-2 pt-0.5', nested ? 'px-2' : 'px-3')}>
+          {showArgs && (
+            <pre className='max-h-48 overflow-auto whitespace-pre-wrap break-words rounded-md border border-border/50 px-2.5 py-1.5 font-mono text-[11px] leading-[18px] text-muted-foreground/80'>
+              {JSON.stringify(args, null, 2)}
+            </pre>
+          )}
+
+          {subCalls.length > 0 && (
+            <div className='ml-0.5 border-l border-border/60 pl-1.5'>
+              {hiddenCalls > 0 && (
+                <button
+                  type='button'
+                  onClick={() => setShowAllCalls(true)}
+                  className='rounded-md px-2 py-0.5 text-xs leading-5 text-muted-foreground/60 transition-colors hover:text-foreground'
+                  data-track-category='XyneAI'
+                  data-track-name='show-all-subagent-calls'
+                >
+                  Show {hiddenCalls} earlier {hiddenCalls === 1 ? 'call' : 'calls'}
+                </button>
+              )}
+              <ul>
+                {subCalls.slice(hiddenCalls).map((child, i) => (
+                  <li
+                    key={child.toolCallId ?? `${child.toolName}-${i}`}
+                    className='duration-200 animate-in fade-in-0 motion-reduce:animate-none'
+                  >
+                    <InvocationItem invocation={child} nested />
+                  </li>
+                ))}
+              </ul>
             </div>
           )}
 
-          {/* Result. Cancelled rows have no result body — show a one-line
-              "Stopped before completion" instead of an empty pre block. */}
-          {!isRunning && !isCancelled && (
-            <div>
-              <div className='text-muted-foreground/70 mb-0.5 text-[10px] uppercase tracking-wide'>
-                Result
-              </div>
-              <pre
-                className={`overflow-x-auto whitespace-pre-wrap break-all rounded px-2 py-1.5 font-mono text-[10px] ${
-                  invocation.isError
-                    ? 'bg-red-400/10 text-red-400'
-                    : 'bg-muted text-muted-foreground'
-                }`}
-              >
-                {invocation.result || '(no result)'}
-              </pre>
-            </div>
-          )}
-          {isCancelled && (
-            <div className='text-[10px] italic text-muted-foreground/70'>
-              Stopped before completion
-            </div>
+          {isCancelled ? (
+            <p className='text-xs italic text-muted-foreground/60'>Stopped before it finished</p>
+          ) : (
+            !working && (
+              <ToolResult result={invocation.result} prose={isSubagent} failed={failed} />
+            )
           )}
 
-          {/* Nested tool calls */}
-          {/* Citations */}
           {invocation.citations && invocation.citations.length > 0 && (
             <CitationList citations={invocation.citations} />
           )}
-
-          {/* Nested tool calls */}
-          {children && children.length > 0 && (
-            <div className='pt-1'>
-              <div className='text-muted-foreground/70 mb-1 text-[10px] uppercase tracking-wide'>
-                Nested calls
-              </div>
-              <div className='space-y-0.5'>
-                {children.map((child, i) => (
-                  <InvocationItem
-                    key={child.toolCallId ?? `${child.toolName}-${i}`}
-                    invocation={child}
-                  />
-                ))}
-              </div>
-            </div>
-          )}
         </div>
-      )}
+      </Reveal>
     </div>
   );
 }

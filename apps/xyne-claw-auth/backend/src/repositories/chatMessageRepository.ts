@@ -1,4 +1,5 @@
-import type { Prisma } from "@prisma/client";
+import { Prisma } from "@prisma/client";
+import type { AssistantPart } from "../lib/chat-run-record.js";
 import { prisma } from "../db.js";
 
 export const chatMessageRepository = {
@@ -19,11 +20,14 @@ export const chatMessageRepository = {
      *  unknown so callers can pass the domain array without a Prisma import; the
      *  JSON cast is localized here. */
     attachedContext?: unknown;
+    /** The assistant turn as ordered parts (see the `parts` column). */
+    parts?: AssistantPart[] | null;
   }) => {
-    const { attachedContext, pendingActions, ...rest } = data;
+    const { attachedContext, pendingActions, parts, ...rest } = data;
     return prisma.chatMessage.create({
       data: {
         ...rest,
+        ...(parts ? { parts: parts as unknown as Prisma.InputJsonValue } : {}),
         ...(attachedContext !== undefined
           ? { attachedContext: attachedContext as Prisma.InputJsonValue }
           : {}),
@@ -39,15 +43,18 @@ export const chatMessageRepository = {
    *  run completes (branching needs the assistant id reserved up-front). */
   update: (
     id: string,
-    data: { content?: string; status?: string; reasoning?: string | null; parentId?: string | null; pendingActions?: unknown; runProvider?: string | null },
+    data: { content?: string; status?: string; reasoning?: string | null; parentId?: string | null; pendingActions?: unknown; runProvider?: string | null; parts?: AssistantPart[] | null },
   ) => {
-    const { pendingActions, ...rest } = data;
+    const { pendingActions, parts, ...rest } = data;
     return prisma.chatMessage.update({
       where: { id },
       data: {
         ...rest,
         ...(pendingActions !== undefined
           ? { pendingActions: pendingActions as Prisma.InputJsonValue }
+          : {}),
+        ...(parts !== undefined
+          ? { parts: parts === null ? Prisma.DbNull : (parts as unknown as Prisma.InputJsonValue) }
           : {}),
       },
     });
@@ -108,8 +115,11 @@ export const chatMessageRepository = {
    *  Conditional (updateMany + status guard) so a late/cross-pod debounced write
    *  can never clobber the final content the completion callback wrote (which
    *  flips status off "running"). Returns count of rows updated (0 = ignored). */
-  updatePartialContent: (id: string, data: { content?: string; reasoning?: string | null }) =>
-    prisma.chatMessage.updateMany({ where: { id, status: "running" }, data }),
+  updatePartialContent: (id: string, data: { content?: string; reasoning?: string | null; parts?: AssistantPart[] }) =>
+    prisma.chatMessage.updateMany({
+      where: { id, status: "running" },
+      data: { ...data, ...(data.parts ? { parts: data.parts as unknown as Prisma.InputJsonValue } : {}) },
+    }),
 
   /** Hard-delete a single message by id. Used to drop a duplicate run's
    *  pre-created assistant placeholder when that run is skipped because another
@@ -233,6 +243,10 @@ export const chatMessageRepository = {
       .sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime())
       .map(({ conversationId, agentSlug, content }) => ({ conversationId, agentSlug, content }));
   },
+
+  /** The ordered parts a still-running placeholder accumulated (partial writes). */
+  partialParts: async (id: string): Promise<unknown> =>
+    (await prisma.chatMessage.findUnique({ where: { id }, select: { parts: true } }))?.parts ?? null,
 
   /** Delete every message in a conversation belonging to this user+agent.
    *  Scoped by all three to prevent one user from deleting another's chat

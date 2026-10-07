@@ -734,6 +734,7 @@ export async function runClawAgentStream(
                 `data: ${JSON.stringify({
                   type: 'delta',
                   content: parsed.content || parsed.delta,
+                  ...(typeof parsed.partId === 'string' && { partId: parsed.partId }),
                 })}\n\n`
               );
               if (typeof (res as any).flush === 'function') (res as any).flush();
@@ -742,6 +743,9 @@ export async function runClawAgentStream(
                 `data: ${JSON.stringify({
                   type: 'reasoning_delta',
                   reasoningDelta: parsed.delta || parsed.reasoningDelta,
+                  // The thinking block it belongs to — the client builds the
+                  // turn's ordered step timeline from these.
+                  ...(typeof parsed.partId === 'string' && { partId: parsed.partId }),
                 })}\n\n`
               );
               if (typeof (res as any).flush === 'function') (res as any).flush();
@@ -823,6 +827,8 @@ export async function runClawAgentStream(
                     followUpSuggestions: parsed.followUpSuggestions,
                   }),
                   ...(parsed.followUpsPending === true && { followUpsPending: true }),
+                  // The turn as ordered thinking / text / tool parts.
+                  ...(Array.isArray(parsed.parts) && { parts: parsed.parts }),
                 })}\n\n`
               );
               if (typeof (res as any).flush === 'function') (res as any).flush();

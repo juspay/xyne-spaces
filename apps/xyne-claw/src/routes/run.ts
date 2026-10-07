@@ -50,6 +50,7 @@ import { describeFetchError } from "../run-deadline.js";
 import { SandboxUnavailableError } from "../sandbox-unavailable.js";
 import { isSafeId } from "../safe-id.js";
 import { sanitizeCitations } from "../citation-sanitizer.js";
+import { TurnParts } from "../turn-parts.js";
 import { validateS2SKey } from "../middleware/auth.js";
 import { transientProviderCallback } from "../transient-provider-callback.js";
 import { loadMcpToolsForUser,
@@ -1148,11 +1149,12 @@ function makeSseProgressEmitter(initialRes: Response, sessionId: string): SsePro
     pr: (sid, pr: Record<string, unknown>) => write({ event: "pr", seq: next(), sessionId: sid, pr }),
     uiWidget: (sid, widget: UiWidget) => write({ event: "ui-widget", seq: next(), sessionId: sid, widget }),
     streamChunk: (sid, payload) => {
+      const partId = payload.partId ? { partId: payload.partId } : {};
       if (payload.reasoningDelta !== undefined) {
-        write({ event: "reasoning", seq: next(), sessionId: sid, reasoningDelta: payload.reasoningDelta });
+        write({ event: "reasoning", seq: next(), sessionId: sid, reasoningDelta: payload.reasoningDelta, ...partId });
       }
       if (payload.textDelta !== undefined) {
-        write({ event: "delta", seq: next(), sessionId: sid, textDelta: payload.textDelta });
+        write({ event: "delta", seq: next(), sessionId: sid, textDelta: payload.textDelta, ...partId });
       }
     },
     debugProgress: (sid, event) => write({ event: "debug", seq: next(), sessionId: sid, debugEvent: event }),
@@ -4746,6 +4748,15 @@ export async function processTask(
       tokenUsage: result.tokenUsage,
       ...(result.reasoning && result.reasoning.trim()
         ? { reasoning: result.reasoning }
+        : {}),
+      // The turn as ordered thinking / text / tool parts, ending in exactly the
+      // answer delivered as `result` (same citation sanitizing).
+      ...(result.parts?.length && structuredOutputPayload === undefined
+        ? {
+            parts: TurnParts.alignFinalAnswer(result.parts, callbackResultText, (text) =>
+              sanitizeCitations(text, result.toolInvocations, result.sessionClfTokens),
+            ),
+          }
         : {}),
       ...(result.latency ? { latency: result.latency } : {}),
       ...(result.toolInvocations.length > 0

@@ -8,7 +8,16 @@ import { errMsg } from "../lib/errors.js";
 import { SDLC_AGENT_SLUG, isAgentInvocableBy, IMMEDIATE_TASK_COMMAND_RE, parseLocalSandboxCommand } from "xyne-claw-shared";
 import { recordDeliveredArtifacts } from "../lib/delivered-artifacts.js";
 import { recordUploadedArtifacts } from "../lib/conversation-artifact-signals.js";
-import { mintChatSessionId, beginChatRun, failChatRun, discardChatRun } from "../lib/chat-run-record.js";
+import {
+  mintChatSessionId,
+  beginChatRun,
+  failChatRun,
+  discardChatRun,
+  finalTurnFields,
+  normalizeAssistantParts,
+  reasoningText,
+  type AssistantPart,
+} from "../lib/chat-run-record.js";
 import { isDirectChatConversation } from "../lib/conversation-kind.js";
 import {
   agentFacets,
@@ -72,7 +81,7 @@ import { consumeClawStream } from "../lib/consume-claw-stream.js";
 import { cancelRunSession } from "../lib/experiment.js";
 import { redisService } from "../redis.js";
 import { subscribeLive, publishLiveEvent, type LiveEvent } from "../lib/live-conversation-bus.js";
-import { pushDelta, endDeltaCoalescer, liveUserIdForSession } from "../lib/live-delta-coalescer.js";
+import { pushDelta, pushToolPart, endDeltaCoalescer, liveUserIdForSession } from "../lib/live-delta-coalescer.js";
 import { resolveSdlcRepositoryForUser } from "../lib/sdlc-repository-context.js";
 
 import { attachArtifactToSessionApp } from "../lib/artifact-app-session.js";
@@ -312,6 +321,8 @@ interface PendingStream {
     /** Canonical attachment rows persisted by the callback handler, for the
      *  SSE `done` event. */
     persistedAttachments?: PersistedAttachment[];
+    /** The turn as ordered thinking / text / tool parts (null: render from content). */
+    parts?: AssistantPart[] | null;
   }) => void;
   setClosed: () => void;
   /** Pre-created assistant ChatMessage row for this turn. Branching requires
@@ -415,6 +426,7 @@ type ChatBusEvent =
       pendingActions?: Array<Record<string, unknown>>;
       persisted: boolean;
       persistedAttachments?: PersistedAttachment[];
+      parts?: AssistantPart[] | null;
     };
 
 let _chatSubscriberReady = false;
@@ -452,6 +464,7 @@ function ensureChatEventsSubscriber(): void {
       ...(msg.pendingActions?.length ? { pendingActions: msg.pendingActions } : {}),
       persisted: msg.persisted,
       ...(msg.persistedAttachments?.length ? { persistedAttachments: msg.persistedAttachments } : {}),
+      ...(msg.parts ? { parts: msg.parts } : {}),
     });
   });
 }
@@ -474,6 +487,25 @@ function publishChatEvent(event: ChatBusEvent): void {
  * Returns null when another pod/attempt already persisted this session's
  * message (guard lost), or the persisted rows when this call won.
  */
+/**
+ * The `reasoning` a reader expects, for a row that stores its thinking only in
+ * ordered `parts` (newer turns): joined from the parts when the column is
+ * empty, so clients that only know `reasoning` see what they always did.
+ */
+/** How long a finished run took, start to finish; null while it runs. */
+function runDurationMs(run: { startedAt: Date; completedAt: Date | null }): number | null {
+  if (!run.completedAt) return null;
+  const ms = run.completedAt.getTime() - run.startedAt.getTime();
+  return ms >= 0 ? ms : null;
+}
+
+function withPartsReasoning(row: { reasoning?: string | null; parts?: unknown }): { reasoning?: string | null } {
+  if (row.reasoning) return { reasoning: row.reasoning };
+  const parts = normalizeAssistantParts(row.parts);
+  const text = parts ? reasoningText(parts) : "";
+  return text ? { reasoning: text } : {};
+}
+
 async function persistAssistantResult(args: {
   conversationId: string;
   agentSlug: string;
@@ -489,8 +521,13 @@ async function persistAssistantResult(args: {
    *  time so its id can drive PI session branching and AgentRun linkage. */
   assistantMessageId?: string;
   runProvider?: string;
+  /** The turn's ordered parts and/or whole reasoning (lib/chat-run-record finalTurnFields). */
+  turn?: { parts: AssistantPart[] | null; reasoning?: string };
 }): Promise<{ messageId: string; persistedAttachments: PersistedAttachment[] } | null> {
-  const runProviderField = args.runProvider ? { runProvider: args.runProvider } : {};
+  const runProviderField = {
+    ...(args.runProvider ? { runProvider: args.runProvider } : {}),
+    ...(args.turn ? { parts: args.turn.parts, ...(args.turn.reasoning ? { reasoning: args.turn.reasoning } : {}) } : {}),
+  };
   if (args.sessionId) {
     const guard = await redisService.getConnection()
       .set(`agent-chat:msg-persisted:${args.sessionId}`, "1", "EX", 86_400, "NX")
@@ -1691,6 +1728,7 @@ router.post("/:slug/chat", async (req: Request<{ slug: string }>, res: Response)
       pendingActions?: Array<Record<string, unknown>>;
       persisted?: boolean;
       persistedAttachments?: PersistedAttachment[];
+      parts?: AssistantPart[] | null;
     }>((resolve) => {
       let closed = false;
       // This pod now holds a live SSE stream — make sure it's listening on the
@@ -2228,6 +2266,7 @@ router.post("/:slug/chat", async (req: Request<{ slug: string }>, res: Response)
         parentId: assistantParentId,
         ...(pendingActionsForClient.length ? { pendingActions: pendingActionsForClient } : {}),
         ...(persistedAttachments.length ? { attachments: persistedAttachments } : {}),
+        ...(result.parts ? { parts: result.parts } : {}),
       })}\n\n`);
       res.end();
     }
@@ -2366,12 +2405,14 @@ internalRouter.post("/:slug/chat/:convId/progress", async (req: Request<{ slug: 
   res.json({ success: true });
 
   const callbackId = req.query["callbackId"] as string | undefined;
-  const { toolLabel, sessionId, toolInvocation, reasoningDelta, textDelta, attachment, debugEvent } = req.body as {
+  const { toolLabel, sessionId, toolInvocation, reasoningDelta, textDelta, partId, attachment, debugEvent } = req.body as {
     toolLabel?: string;
     sessionId?: string;
     toolInvocation?: unknown;
     reasoningDelta?: string;
     textDelta?: string;
+    /** The thinking/text block the delta belongs to (absent from older pods). */
+    partId?: string;
     attachment?: { fileName: string; mimeType: string; data: string; metadata?: Record<string, unknown> };
     debugEvent?: Record<string, unknown>;
   };
@@ -2390,8 +2431,9 @@ internalRouter.post("/:slug/chat/:convId/progress", async (req: Request<{ slug: 
   // toolInvocation may carry parentToolCallId + subagentName for nested child rows.
   if (toolInvocation) events.push({ event: "tool", data: { toolInvocation } });
   // Tier 3: reasoning / text deltas char-by-char as they arrive from the model.
-  if (typeof reasoningDelta === "string" && reasoningDelta.length > 0) events.push({ event: "reasoning", data: { delta: reasoningDelta } });
-  if (typeof textDelta === "string" && textDelta.length > 0) events.push({ event: "text", data: { delta: textDelta } });
+  const deltaPart = typeof partId === "string" && partId ? { partId } : {};
+  if (typeof reasoningDelta === "string" && reasoningDelta.length > 0) events.push({ event: "reasoning", data: { delta: reasoningDelta, ...deltaPart } });
+  if (typeof textDelta === "string" && textDelta.length > 0) events.push({ event: "text", data: { delta: textDelta, ...deltaPart } });
   // Stream a just-captured attachment (e.g. create-ppt PPTX) so the UI
   // renders it mid-session instead of waiting for finalize.
   if (attachment) events.push({ event: "attachment", data: { attachment } });
@@ -2465,6 +2507,8 @@ internalRouter.post("/:slug/chat/:convId/progress", async (req: Request<{ slug: 
   if (sessionId && toolInvocation) {
     agentRunRepository.appendToolInvocation(sessionId, toolInvocation).catch(() => {});
     if (CONFIG.liveToolCallsEnabled) {
+      const assistantMessageId = typeof req.query["assistantMessageId"] === "string" ? req.query["assistantMessageId"] : undefined;
+      pushToolPart(sessionId, req.params.convId, req.params.slug, assistantMessageId, toolInvocation as Record<string, unknown>);
       liveUserIdForSession(sessionId)
         .then((uid) => {
           if (uid)
@@ -2491,7 +2535,7 @@ internalRouter.post("/:slug/chat/:convId/progress", async (req: Request<{ slug: 
   // above); applyLiveEvent's driving-tab guard prevents double-render.
   if (sessionId && CONFIG.liveToolCallsEnabled && ((typeof textDelta === "string" && textDelta) || (typeof reasoningDelta === "string" && reasoningDelta))) {
     const assistantMessageId = typeof req.query["assistantMessageId"] === "string" ? req.query["assistantMessageId"] : undefined;
-    pushDelta(sessionId, req.params.convId, req.params.slug, assistantMessageId, textDelta, reasoningDelta);
+    pushDelta(sessionId, req.params.convId, req.params.slug, assistantMessageId, textDelta, reasoningDelta, undefined, typeof partId === "string" ? partId : undefined);
   }
 
   if (sessionId && toolLabel) {
@@ -2634,6 +2678,16 @@ internalRouter.post("/:slug/chat/:convId/callback", async (req: Request<{ slug: 
   const finalContent = enrichedResult ?? widgetErrorContent(error, error ?? "No response");
   const finalStatus = normalizeRunStatus(status);
   const errorCode = typeof error === "string" ? error : undefined;
+  // The turn's ordered parts (or, without them, its whole reasoning) — the
+  // same value is stored and sent on `done`.
+  const turn = await finalTurnFields({
+    status: finalStatus,
+    modelAnswer: result ?? "",
+    storedAnswer: finalContent,
+    callbackParts: (req.body as { parts?: unknown }).parts,
+    callbackReasoning: (req.body as { reasoning?: unknown }).reasoning,
+    assistantMessageId: chatMessageId,
+  });
   // persistedFlag semantics: true ⇔ a chat_messages row for this result
   // durably exists (written now, or by an earlier retry that won the SETNX
   // guard). Only then may the SSE pod skip its own fallback write. A thrown
@@ -2660,6 +2714,7 @@ internalRouter.post("/:slug/chat/:convId/callback", async (req: Request<{ slug: 
         ...(sessionId ? { sessionId } : {}),
         ...(chatMessageId ? { assistantMessageId: chatMessageId } : {}),
         ...(provider ? { runProvider: provider } : {}),
+        turn,
       });
       persistedFlag = true; // non-null = written now; null = guard loss = a retry already wrote it
       if (persisted?.persistedAttachments.length) {
@@ -2741,6 +2796,7 @@ internalRouter.post("/:slug/chat/:convId/callback", async (req: Request<{ slug: 
     ...(pendingActions?.length ? { pendingActions } : {}),
     persisted: persistedFlag,
     ...(persistedAttachments.length ? { persistedAttachments } : {}),
+    parts: turn.parts,
   };
 
   if (callbackId && pendingStreams.has(callbackId)) {
@@ -2768,6 +2824,7 @@ internalRouter.post("/:slug/chat/:convId/callback", async (req: Request<{ slug: 
       ...(pendingActions?.length ? { pendingActions } : {}),
       persisted: persistedFlag,
       ...(persistedAttachments.length ? { persistedAttachments } : {}),
+      ...(turn.parts ? { parts: turn.parts } : {}),
     });
   }
 });
@@ -2840,6 +2897,7 @@ router.post("/:slug/chat/:convId/fork", async (req: Request<{ slug: string; conv
         role: msg.role,
         content: msg.content ?? "",
         ...(msg.reasoning ? { reasoning: msg.reasoning } : {}),
+        ...(normalizeAssistantParts(msg.parts) ? { parts: normalizeAssistantParts(msg.parts) } : {}),
         parentId,
         orgId: (msg as { orgId: string }).orgId,
       });
@@ -2928,7 +2986,7 @@ router.get("/:slug/chat/:convId/messages", async (req: Request<{ slug: string; c
           ...(reactArtifact ? { metadata: { reactArtifact } } : {}),
         };
       });
-      return { ...m, attachments };
+      return { ...m, ...withPartsReasoning(m), attachments };
     });
 
     // Pair tool invocations with the assistant message they produced.
@@ -2955,11 +3013,15 @@ router.get("/:slug/chat/:convId/messages", async (req: Request<{ slug: string; c
     // to agent_runs via POST /runs/:sessionId/rate). Built off the same
     // chatMessageId linkage as runByMsgId, with the same legacy fallback.
     const ratingByMsgId: Record<string, { rating: "up" | "down" | null; comment: string | null }> = {};
+    // assistantMsgId → how long its run took, start to finish ("Worked for 2m 31s").
+    const durationByMsgId: Record<string, number> = {};
     const linkedAssistantIds = new Set<string>();
     for (const run of agentRuns) {
       const linkedId = (run as { chatMessageId?: string | null }).chatMessageId;
       if (!linkedId) continue;
       if (run.sessionId) runByMsgId[linkedId] = run.sessionId;
+      const linkedDuration = runDurationMs(run);
+      if (linkedDuration !== null) durationByMsgId[linkedId] = linkedDuration;
       if (run.rating) ratingByMsgId[linkedId] = { rating: run.rating as "up" | "down", comment: run.ratingComment ?? null };
       const invocations = run.toolInvocations;
       if (Array.isArray(invocations) && (invocations as unknown[]).length > 0) {
@@ -2994,6 +3056,8 @@ router.get("/:slug/chat/:convId/messages", async (req: Request<{ slug: string; c
       const run = unlinkedCompletedRuns[i]!;
       if (run.sessionId) runByMsgId[msg.id] = run.sessionId;
       if (run.rating) ratingByMsgId[msg.id] = { rating: run.rating as "up" | "down", comment: run.ratingComment ?? null };
+      const pairedDuration = runDurationMs(run);
+      if (pairedDuration !== null) durationByMsgId[msg.id] = pairedDuration;
       const invocations = run.toolInvocations;
       if (Array.isArray(invocations) && (invocations as unknown[]).length > 0) {
         const followUps = extractFollowUpSuggestionsFromInvocations(invocations);
@@ -3026,6 +3090,7 @@ router.get("/:slug/chat/:convId/messages", async (req: Request<{ slug: string; c
         ...(followUpsByMsgId[message.id]?.length
           ? { followUpSuggestions: followUpsByMsgId[message.id] }
           : {}),
+        ...(durationByMsgId[message.id] !== undefined ? { durationMs: durationByMsgId[message.id] } : {}),
       })),
       ...(Object.keys(invocationsByMsgId).length > 0 && { invocationsByMsgId }),
       ...(Object.keys(icons).length > 0 && { icons }),
@@ -3224,7 +3289,19 @@ router.get("/:slug/chat/:convId/live", async (req: Request<{ slug: string; convI
         invocationsByMsgId,
         inProgress,
         ...(Object.keys(uiFlowsByMsgId).length > 0 ? { uiFlowsByMsgId } : {}),
-        ...(runningMsg ? { partial: { msgId: runningMsg.id, content: runningMsg.content ?? "", reasoning: runningMsg.reasoning ?? "" } } : {}),
+        ...(runningMsg
+          ? {
+              partial: {
+                msgId: runningMsg.id,
+                // When the turn started — a tab attaching mid-run times it from here.
+                createdAt: runningMsg.createdAt,
+                content: runningMsg.content ?? "",
+                reasoning: withPartsReasoning(runningMsg).reasoning ?? "",
+                // The run so far in order, for the viewer's step timeline.
+                ...(normalizeAssistantParts(runningMsg.parts) ? { parts: normalizeAssistantParts(runningMsg.parts) } : {}),
+              },
+            }
+          : {}),
       })}\n\n`,
     );
   } catch (err) {
@@ -4058,6 +4135,7 @@ async function runAgentChatViaSse(
               agentRunRepository.appendToolInvocation(sessionId, toolInvocation as Record<string, unknown>).catch(() => {});
               // Live tap: fan out to /live viewers (other tabs / shared link).
               if (CONFIG.liveToolCallsEnabled && liveUserId) {
+                pushToolPart(sessionId, conversationId, slug, assistantMessageId, toolInvocation as Record<string, unknown>, liveUserId);
                 publishLiveEvent(conversationId, { type: "invocation", conversationId, agentSlug: slug, userId: liveUserId, toolInvocation, ts: Date.now() });
               }
             },
@@ -4075,18 +4153,18 @@ async function runAgentChatViaSse(
                 }
               }
             },
-            onReasoning: (sid, delta) => {
+            onReasoning: (sid, delta, partId) => {
               if (!delta) return;
-              pendingStreams.get(callbackId)?.sendEvent("reasoning", { delta });
+              pendingStreams.get(callbackId)?.sendEvent("reasoning", { delta, ...(partId ? { partId } : {}) });
               // Live tap for VIEWERS (reloaded tabs / Spaces): coalesce + publish
               // reasoning to the bus + debounce-persist partial content, so a
               // viewer streams the answer instead of seeing it appear on `done`.
-              if (CONFIG.liveToolCallsEnabled && sid && liveUserId) pushDelta(sid, conversationId, slug, assistantMessageId, undefined, delta, liveUserId);
+              if (CONFIG.liveToolCallsEnabled && sid && liveUserId) pushDelta(sid, conversationId, slug, assistantMessageId, undefined, delta, liveUserId, partId);
             },
-            onTextDelta: (sid, delta) => {
+            onTextDelta: (sid, delta, partId) => {
               if (!delta) return;
-              pendingStreams.get(callbackId)?.sendEvent("text", { delta });
-              if (CONFIG.liveToolCallsEnabled && sid && liveUserId) pushDelta(sid, conversationId, slug, assistantMessageId, delta, undefined, liveUserId);
+              pendingStreams.get(callbackId)?.sendEvent("text", { delta, ...(partId ? { partId } : {}) });
+              if (CONFIG.liveToolCallsEnabled && sid && liveUserId) pushDelta(sid, conversationId, slug, assistantMessageId, delta, undefined, liveUserId, partId);
             },
             onAttachment: (_sid, attachment) => {
               pendingStreams.get(callbackId)?.sendEvent("attachment", { attachment });

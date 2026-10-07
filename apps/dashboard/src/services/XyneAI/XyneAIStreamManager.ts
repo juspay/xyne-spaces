@@ -8,7 +8,14 @@ import { logger, Event as LogEvent } from '../../utils/logger';
  * Allows streams to persist across sidebar open/close cycles
  * Uses Web Worker for streaming to run on a separate thread
  */
-import type { FlowDefinition } from '@xyne/shared';
+import {
+  applyPartDelta,
+  applyToolPart,
+  closeAssistantParts,
+  normalizeAssistantParts,
+  type AssistantPartDelta,
+  type FlowDefinition,
+} from '@xyne/shared';
 import { apiInstance, BASE_URL } from '../clients/apiClient';
 import { consumeConversationLiveStream } from './liveConversationStream';
 import { trackCitationsGenerated } from '../otel/xyneAIMetrics';
@@ -230,6 +237,25 @@ function truncateForToast(text: string, max: number): string {
 const HANDOFF_KEY_PREFIX = 'handoff:';
 const HANDOFF_STATUS_MESSAGE = 'Wrapping up before your new message';
 
+/** A reconnect snapshot's parts, when they cover at least what already streamed
+ *  (the persisted partial only ever grows). */
+function healedParts(
+  snapshot: unknown,
+  current: Message['parts'],
+): { parts: NonNullable<Message['parts']> } | Record<string, never> {
+  const healed = normalizeAssistantParts(snapshot);
+  return healed && healed.length >= (current?.length ?? 0) ? { parts: healed } : {};
+}
+
+/** A bot turn that just ended, with how long it took from its message's start
+ *  ("Worked for 2m 31s"). Stamped once; the server's figure replaces it when
+ *  the transcript is refreshed. */
+function withTurnDuration(msg: Message): Message {
+  if (msg.type !== 'bot' || msg.durationMs !== undefined) return msg;
+  const ms = Date.now() - new Date(msg.timestamp).getTime();
+  return Number.isFinite(ms) && ms >= 0 ? { ...msg, durationMs: ms } : msg;
+}
+
 class XyneAIStreamManager {
   private static instance: XyneAIStreamManager;
 
@@ -283,6 +309,8 @@ class XyneAIStreamManager {
 
   // rAF-based batching: accumulate delta content per stream and flush once per frame
   private pendingDeltaMap: Map<string, string> = new Map();
+  /** The same pending text, per text part (claw's partId), for the timeline. */
+  private pendingTextPartsMap: Map<string, AssistantPartDelta[]> = new Map();
   private rafIdMap: Map<string, number> = new Map();
 
   // streamIds of live viewers whose SSE connection is CURRENTLY open. Lets the
@@ -477,6 +505,8 @@ class XyneAIStreamManager {
     const pendingDelta = this.pendingDeltaMap.get(streamId);
     if (!pendingDelta) return;
     this.pendingDeltaMap.delete(streamId);
+    const pendingTextParts = this.pendingTextPartsMap.get(streamId) ?? [];
+    this.pendingTextPartsMap.delete(streamId);
 
     // Find thread and state
     let threadId: string | undefined;
@@ -512,8 +542,11 @@ class XyneAIStreamManager {
     };
 
     updateMessages(prev =>
-      prev.map(msg => {
-        if (msg.id !== botMessageId) return msg;
+      prev.map(rawMsg => {
+        if (rawMsg.id !== botMessageId) return rawMsg;
+        const msg = pendingTextParts.length
+          ? { ...rawMsg, parts: pendingTextParts.reduce(applyPartDelta, rawMsg.parts ?? []) }
+          : rawMsg;
 
         // Read rawContent here to ensure we have the latest accumulated value
         const rawContent = currentStreamData.rawContent;
@@ -644,6 +677,18 @@ class XyneAIStreamManager {
       if (!streamState.firstTokenAt) streamState.firstTokenAt = Date.now();
       const pending = this.pendingDeltaMap.get(streamId) ?? '';
       this.pendingDeltaMap.set(streamId, pending + data['content']);
+      // v2 (claw) text is the answer itself; v1's is a structured payload
+      // parsed elsewhere, so only v2 builds the step timeline.
+      if (streamState.version === 'v2') {
+        const textParts = this.pendingTextPartsMap.get(streamId) ?? [];
+        textParts.push({
+          type: 'text',
+          partId: typeof data['partId'] === 'string' ? data['partId'] : undefined,
+          delta: data['content'],
+          at: new Date().toISOString(),
+        });
+        this.pendingTextPartsMap.set(streamId, textParts);
+      }
       this.scheduleDeltaFlush(streamId);
       return;
     }
@@ -742,6 +787,7 @@ class XyneAIStreamManager {
     // Cleanup stream data
     this.streamDataMap.delete(streamId);
     this.pendingDeltaMap.delete(streamId);
+    this.pendingTextPartsMap.delete(streamId);
     const completionRafId = this.rafIdMap.get(streamId);
     if (completionRafId !== undefined) {
       cancelAnimationFrame(completionRafId);
@@ -788,6 +834,7 @@ class XyneAIStreamManager {
     // Cleanup stream data
     this.streamDataMap.delete(streamId);
     this.pendingDeltaMap.delete(streamId);
+    this.pendingTextPartsMap.delete(streamId);
     const errorRafId = this.rafIdMap.get(streamId);
     if (errorRafId !== undefined) {
       cancelAnimationFrame(errorRafId);
@@ -1403,10 +1450,21 @@ class XyneAIStreamManager {
       case 'reasoning_delta': {
         const reasoningDelta = data['reasoningDelta'] as string | undefined;
         if (reasoningDelta) {
+          const partId = typeof data['partId'] === 'string' ? data['partId'] : undefined;
+          const at = new Date().toISOString();
           updateMessages(prev =>
             prev.map(msg =>
               msg.id === botMessageId
-                ? { ...msg, reasoning: (msg.reasoning ?? '') + reasoningDelta }
+                ? {
+                    ...msg,
+                    reasoning: (msg.reasoning ?? '') + reasoningDelta,
+                    parts: applyPartDelta(msg.parts ?? [], {
+                      type: 'reasoning',
+                      partId,
+                      delta: reasoningDelta,
+                      at,
+                    }),
+                  }
                 : msg,
             ),
           );
@@ -1499,7 +1557,11 @@ class XyneAIStreamManager {
                 newInvocations = [...existingInvocations, toolInvocation];
               }
 
-              return { ...msg, toolInvocations: newInvocations };
+              return {
+                ...msg,
+                toolInvocations: newInvocations,
+                parts: applyToolPart(msg.parts ?? [], toolInvocation, new Date().toISOString()),
+              };
             }),
           );
         }
@@ -1920,8 +1982,14 @@ class XyneAIStreamManager {
             messageAttachments.length > 0 && { attachments: messageAttachments }),
           ...(sources && sources.length > 0 && { sources }),
         };
+        // The server's ordered parts are authoritative (sanitized, ending in
+        // the stored answer); without them, close what streamed.
+        const finalParts = normalizeAssistantParts(data['parts']);
+        if (finalParts) updatedMsg.parts = finalParts;
+        else if (msg.parts?.length)
+          updatedMsg.parts = closeAssistantParts(msg.parts, new Date().toISOString());
         if (traceId) updatedMsg.traceId = traceId;
-        return updatedMsg;
+        return withTurnDuration(updatedMsg);
       }),
     );
   }
@@ -2006,7 +2074,7 @@ class XyneAIStreamManager {
           : typeof m.streamingContent === 'string' && m.streamingContent.length > 0
             ? m.streamingContent
             : m.content;
-      return { ...m, isStreaming: false, content: finalContent };
+      return withTurnDuration({ ...m, isStreaming: false, content: finalContent });
     });
     this.notifySubscribers({ ...currentState });
     this.reportRunOutcome(currentState, 'RESPONSE_COMPLETED', {
@@ -2138,7 +2206,7 @@ class XyneAIStreamManager {
     };
 
     const ensureViewerStream = (
-      partial?: { content?: string; reasoning?: string },
+      partial?: { content?: string; reasoning?: string; parts?: unknown; createdAt?: string },
       inProgress?: ToolInvocation[],
     ): void => {
       if (started) return;
@@ -2162,14 +2230,20 @@ class XyneAIStreamManager {
         id: botMessageId,
         type: 'bot',
         content: '',
-        timestamp: new Date(),
+        // When the turn started, not when this tab attached to it.
+        timestamp: partial?.createdAt ? new Date(partial.createdAt) : new Date(),
         isStreaming: true,
+        // Who is answering, so the response opens with its agent from the start.
+        ...(agentSlug ? { agentSlug } : {}),
         streamingContent: partial?.content ?? '',
         sessionId: convId,
         ...(parentTip ? { parentId: parentTip.id } : {}),
         ...(partial?.reasoning ? { reasoning: partial.reasoning } : {}),
         ...(inProgress && inProgress.length ? { toolInvocations: inProgress } : {}),
       };
+      // The run so far in order, so the viewer's timeline starts complete.
+      const partialParts = normalizeAssistantParts(partial?.parts);
+      if (partialParts) botMsg.parts = partialParts;
       const streamState: StreamState = {
         streamId,
         threadId,
@@ -2198,7 +2272,7 @@ class XyneAIStreamManager {
       switch (type) {
         case 'snapshot': {
           const partial = data['partial'] as
-            | { msgId?: string; content?: string; reasoning?: string }
+            | { msgId?: string; content?: string; reasoning?: string; parts?: unknown; createdAt?: string }
             | undefined;
           const inProgress = (data['inProgress'] as ToolInvocation[] | undefined) ?? [];
           if (!started) {
@@ -2236,6 +2310,7 @@ class XyneAIStreamManager {
                     (!m.reasoning || partial.reasoning.length > m.reasoning.length)
                       ? { reasoning: partial.reasoning }
                       : {}),
+                    ...healedParts(partial.parts, m.parts),
                   }
                 : m,
             );
@@ -2271,6 +2346,42 @@ class XyneAIStreamManager {
         }
         case 'delta': {
           if (!started) ensureViewerStream();
+          // Newer pods send the batch split per thinking/text part, in order.
+          const chunks = Array.isArray(data['chunks'])
+            ? (data['chunks'] as Array<{ type?: string; partId?: string; delta?: string }>)
+            : null;
+          if (chunks) {
+            for (const chunk of chunks) {
+              if (!chunk.delta) continue;
+              if (chunk.type === 'text') {
+                this.pendingDeltaMap.set(
+                  streamId,
+                  (this.pendingDeltaMap.get(streamId) ?? '') + chunk.delta,
+                );
+                const textParts = this.pendingTextPartsMap.get(streamId) ?? [];
+                textParts.push({
+                  type: 'text',
+                  partId: chunk.partId,
+                  delta: chunk.delta,
+                  at: new Date().toISOString(),
+                });
+                this.pendingTextPartsMap.set(streamId, textParts);
+              } else if (chunk.type === 'reasoning') {
+                // Text batched before this thinking comes first on the timeline.
+                if (this.pendingDeltaMap.has(streamId)) this.flushDeltaContentSync(streamId);
+                this.processStreamEvent(
+                  { type: 'reasoning_delta', reasoningDelta: chunk.delta, partId: chunk.partId },
+                  botMessageId,
+                  '',
+                  [],
+                  streamId,
+                  threadId,
+                );
+              }
+            }
+            if (this.pendingDeltaMap.has(streamId)) this.scheduleDeltaFlush(streamId);
+            break;
+          }
           const textDelta = data['textDelta'] as string | undefined;
           const reasoningDelta = data['reasoningDelta'] as string | undefined;
           if (textDelta) {
@@ -2308,6 +2419,9 @@ class XyneAIStreamManager {
         case 'invocation': {
           if (!started) ensureViewerStream();
           const toolInvocation = data['toolInvocation'];
+          // Text streamed before this call comes first on the timeline.
+          if (toolInvocation && this.pendingDeltaMap.has(streamId))
+            this.flushDeltaContentSync(streamId);
           if (toolInvocation)
             this.processStreamEvent(
               { type: 'tool_invocation', toolInvocation },
@@ -2375,7 +2489,7 @@ class XyneAIStreamManager {
                 if (m.id !== botMessageId) return m;
                 const finalContent =
                   m.content && m.content.length > 0 ? m.content : (m.streamingContent ?? '');
-                return { ...m, isStreaming: false, content: finalContent };
+                return withTurnDuration({ ...m, isStreaming: false, content: finalContent });
               });
               this.notifySubscribers({ ...st });
             }
@@ -2422,7 +2536,7 @@ class XyneAIStreamManager {
               if (m.id !== botMessageId) return m;
               const finalContent =
                 m.content && m.content.length > 0 ? m.content : (m.streamingContent ?? '');
-              return { ...m, isStreaming: false, content: finalContent };
+              return withTurnDuration({ ...m, isStreaming: false, content: finalContent });
             });
             this.notifySubscribers({ ...st });
           }
@@ -2576,6 +2690,16 @@ class XyneAIStreamManager {
             // Preserve locally accumulated reasoning if backend didn't return it
             ...(mergedReasoning !== undefined && { reasoning: mergedReasoning }),
             ...(localMsg.pendingActions?.length && { pendingActions: localMsg.pendingActions }),
+            // The streamed timeline and plan aren't always in the history
+            // read (plans never are); keep what the stream built.
+            ...(!finalRefreshed.parts?.length &&
+              localMsg.parts?.length && { parts: localMsg.parts }),
+            ...(!finalRefreshed.planTodos?.length &&
+              localMsg.planTodos?.length && { planTodos: localMsg.planTodos }),
+            ...(!finalRefreshed.planTitle &&
+              localMsg.planTitle && { planTitle: localMsg.planTitle }),
+            ...(finalRefreshed.durationMs === undefined &&
+              localMsg.durationMs !== undefined && { durationMs: localMsg.durationMs }),
             // Keep the local ID to avoid breaking React keys and parent references
             id: localMsg.id,
             // Tree topology is owned LOCALLY during a stream's lifetime.
@@ -2764,7 +2888,7 @@ class XyneAIStreamManager {
         // status="cancelled", so reload-from-server matches.
         state.messages = state.messages.map(msg =>
           msg.isStreaming
-            ? {
+            ? withTurnDuration({
                 ...msg,
                 // Keep streamed content; fall back to streamingContent if
                 // content hasn't been finalized yet.
@@ -2772,7 +2896,7 @@ class XyneAIStreamManager {
                 isStreaming: false,
                 isAborted: true,
                 streamingContent: '',
-              }
+              })
             : msg,
         );
 

@@ -17,7 +17,7 @@ import { AgentGlyph } from './AIAgentSelector';
 
 /**
  * Agents in the chat UI: who a conversation was with (history rows and their
- * filter) and who each of the user's messages went to. One agent per message
+ * filter), who each of the user's messages went to, and who answered. One agent per message
  * is the source of truth (`Message.agentSlug`); the directory resolves it to a
  * name and the avatar Spaces shows for that agent.
  */
@@ -47,12 +47,20 @@ export function useAgentDirectory(): Map<string, AgentIdentity> {
 function IdentityGlyph({
   identity,
   size,
+  rounded,
 }: {
   identity: AgentIdentity;
   size: number;
+  rounded?: boolean;
 }): ReactElement {
   return (
-    <AgentGlyph name={identity.name} color={identity.color} userId={identity.userId} size={size} />
+    <AgentGlyph
+      name={identity.name}
+      color={identity.color}
+      userId={identity.userId}
+      size={size}
+      {...(rounded ? { rounded } : {})}
+    />
   );
 }
 
@@ -159,6 +167,21 @@ export function AgentRecipient({ slug, className }: AgentRecipientProps): ReactE
       <span>To</span>
       <IdentityGlyph identity={identity} size={14} />
       <span className='font-medium text-foreground/80'>{identity.name}</span>
+    </div>
+  );
+}
+
+/** The agent answering, above the start of its response: avatar, then name. */
+export function AgentByline({ slug, className }: AgentRecipientProps): ReactElement {
+  const directory = useAgentDirectory();
+  const identity = agentIdentity(directory, slug);
+  return (
+    <div
+      data-testid='message-agent'
+      className={cn('flex items-center gap-2 text-sm leading-5', className)}
+    >
+      <IdentityGlyph identity={identity} size={20} rounded />
+      <span className='truncate font-medium text-foreground'>{identity.name}</span>
     </div>
   );
 }

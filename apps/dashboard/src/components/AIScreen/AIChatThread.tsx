@@ -11,7 +11,6 @@ import {
   forwardRef,
   useImperativeHandle,
   type ReactElement,
-  type CSSProperties,
 } from 'react';
 import {
   Menu,
@@ -58,7 +57,7 @@ import type { AssistantActions } from '../Assistant/useAssistantActions';
 import { AIComposer, type AIComposerAttachment, type AIComposerHandle } from './AIComposer';
 import { ReadonlyContextPills } from './ReadonlyContextPills';
 import { type ComposerContext, toStreamOverrides } from './composerContext';
-import { AgentRecipient } from './ConversationAgents';
+import { AgentByline, AgentRecipient } from './ConversationAgents';
 import { FollowUpSuggestions } from './FollowUpSuggestions';
 import {
   anchorFromArgs,
@@ -77,7 +76,6 @@ import { fetchV2ConversationMessages } from '../../services/XyneAI/XyneAISession
 import { useV2SessionsList, useV2SessionInvalidator } from '../../hooks/useAskAISessionsV2';
 import { xyneAIStreamManager } from '../../services/XyneAI/XyneAIStreamManager';
 import { BASE_URL } from '../../services/clients/apiClient';
-import { BrailleLoader, AnimatedLabel, useStableLabel } from './ReasoningLoader';
 import { createMarkdownComponents } from '../../utils/markdownComponents';
 import { StreamingMarkdownBlocks, rehypeStreamWordFade } from '../utils/StreamingMarkdownBlocks';
 import {
@@ -113,7 +111,7 @@ import { PromptMarkerRail, type PromptMarker } from './PromptMarkerRail';
 import type { ArtifactAppRestoreEvent } from '../../services/claw/artifactAppsService';
 import { useAppCreationModeSignal } from './ReactArtifact/appCreationModeContext';
 import { SidebarLeftOpen } from '@xyne/icons';
-import { formatChatTurnSeparator } from '../../utils/dateUtils';
+import { formatChatTurnSeparator, formatFullTimestamp, formatTimeAmPm } from '../../utils/dateUtils';
 import { Tooltip } from '../ui/Tooltip';
 import {
   ConversationToolInvocationsContext,
@@ -122,17 +120,13 @@ import {
   processNodeForUserTags,
   processTextForCopy,
 } from '../Chat/XyneAISidebar/components/MessageItem';
-import { ToolInvocationList } from '../Chat/XyneAISidebar/components/ToolInvocationList';
+import { TurnTimeline } from '../Chat/XyneAISidebar/components/TurnTimeline';
+import {
+  turnDurationLabel,
+  turnFinishedAt,
+} from '../Chat/XyneAISidebar/components/activityShared';
 import { PendingActionBlock } from '../Chat/XyneAISidebar/components/PendingActionBlock';
 import { respondToPendingAction } from '../../services/XyneAI/XyneAIPendingActionService';
-import {
-  ActivityStatusChip,
-  LiveReasoning,
-  formatDuration,
-  formatCount,
-  useElapsedMs,
-  useSmoothCount,
-} from '../Chat/XyneAISidebar/components/activityShared';
 import { AskAIDebugPanel } from '../Chat/XyneAISidebar/components/AskAIDebugPanel';
 import {
   resolveActivePath,
@@ -308,201 +302,6 @@ function ChatTopbar({
         </button>
       )}
     </header>
-  );
-}
-
-// ═══════════════════════════════════════════════════════════════════════════════
-// Reasoning Section (expandable, matching xyne-search reference)
-// ═══════════════════════════════════════════════════════════════════════════════
-
-// Rotating phase labels shown while reasoning is streaming. We don't have
-// pi-mono-style tool events here (just a single accumulating string), so we
-// cycle through a small list of human-sounding phases driven by how much
-// reasoning has arrived. Matches the "Thinking → Weighing it up → Reasoning"
-// feel of the xyne-search /ai chip without faking tool-specific labels.
-const STREAMING_PHASES = ['Thinking', 'Weighing it up', 'Reasoning'] as const;
-
-function phaseLabelFor(reasoningLength: number): string {
-  if (reasoningLength === 0) return STREAMING_PHASES[0];
-  if (reasoningLength < 240) return STREAMING_PHASES[1];
-  return STREAMING_PHASES[2];
-}
-
-// Top + bottom fade mask for the expanded panel — mirrors the sidebar's
-// ActivityBlock so the section bleeds into the surrounding message column
-// instead of ending in a hard edge.
-const REASONING_FADE_MASK_STYLE: CSSProperties = {
-  WebkitMaskImage:
-    'linear-gradient(to bottom, transparent 0, black 14px, black calc(100% - 14px), transparent 100%)',
-  maskImage:
-    'linear-gradient(to bottom, transparent 0, black 14px, black calc(100% - 14px), transparent 100%)',
-};
-
-function ReasoningSection({
-  reasoning,
-  isStreaming,
-  toolInvocations,
-  messageAborted,
-}: {
-  reasoning: string;
-  isStreaming?: boolean | undefined;
-  toolInvocations?: ToolInvocationType[] | undefined;
-  messageAborted?: boolean | undefined;
-}): ReactElement {
-  const [expanded, setExpanded] = useState(false);
-  const hasReasoning = reasoning.trim().length > 0;
-  const hasTools = !!toolInvocations && toolInvocations.length > 0;
-  const canExpand = hasReasoning || hasTools;
-  // Anything to show? When this flips false on completion (pure text answer) the
-  // grid-rows collapse eases the section out. No remount now (stable key), so the
-  // transition actually animates.
-  const shouldShow = !!isStreaming || hasReasoning || hasTools;
-
-  // Throttled so the chip doesn't strobe through phases.
-  const stablePhase = useStableLabel(phaseLabelFor(reasoning.length));
-  const elapsedMs = useElapsedMs(!!isStreaming);
-  const completedToolCount = (toolInvocations ?? []).filter(t => !t.parentToolCallId).length;
-  const toolDurationSumMs = (toolInvocations ?? []).reduce((a, t) => a + (t.durationMs || 0), 0);
-  const displayedDurationMs = elapsedMs ?? toolDurationSumMs;
-  // Tool count tweens on the rare +1; the char count updates per delta (no
-  // per-frame tween) — keeps streaming cheap.
-  const smoothTools = useSmoothCount(completedToolCount);
-  // Done label mirrors the sidebar: "Thought for Ns · N tools".
-  const doneLabel =
-    displayedDurationMs > 0
-      ? `Thought for ${formatDuration(displayedDurationMs)}${hasTools ? ` · ${smoothTools} tool${smoothTools === 1 ? '' : 's'}` : ''}`
-      : hasReasoning
-        ? 'Thought process'
-        : 'Reasoning';
-  const liveText = isStreaming ? `${stablePhase}…` : doneLabel;
-  // Streaming right-side metadata: live char counter + elapsed (tweened digits).
-  const streamingBits = isStreaming
-    ? [
-        reasoning.length > 0 ? `${formatCount(reasoning.length)} chars` : null,
-        displayedDurationMs > 0 ? formatDuration(displayedDurationMs) : null,
-      ].filter(Boolean)
-    : [];
-
-  return (
-    // Whole-section collapse: grid-rows(1fr↔0fr)+opacity eases the section out on
-    // completion when nothing's left to show. Kept mounted (collapsed) so the exit
-    // transitions; CSS only animates on change, so a message that starts hidden
-    // (history) renders collapsed with no motion. Margin is on the inner div so it
-    // collapses with the height.
-    <div
-      className={cn(
-        'grid',
-        shouldShow ? 'grid-rows-[1fr] opacity-100' : 'grid-rows-[0fr] opacity-0',
-      )}
-      style={{ transition: 'grid-template-rows 220ms ease-out, opacity 180ms ease-out' }}
-    >
-      <div className='overflow-hidden'>
-        <div className='my-1 text-xs'>
-          <button
-            type='button'
-            onClick={() => {
-              if (canExpand) setExpanded(!expanded);
-            }}
-            disabled={!canExpand}
-            aria-expanded={expanded}
-            aria-label={isStreaming ? liveText : 'Show reasoning'}
-            className={cn(
-              '-ml-1 inline-flex items-center gap-1.5 rounded-md px-1.5 py-1 text-muted-foreground transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background',
-              canExpand ? 'hover:bg-secondary/70 hover:text-foreground' : 'cursor-default',
-            )}
-            data-track-category='XyneAI'
-            data-track-name='TOGGLE_REASONING'
-          >
-            <ChevronRight
-              className={cn(
-                'h-3 w-3 flex-shrink-0 transition-transform duration-200',
-                expanded && 'rotate-90',
-                !canExpand && 'opacity-50',
-              )}
-              aria-hidden
-              strokeWidth={2}
-            />
-            {isStreaming && <BrailleLoader />}
-            <span className='select-none'>
-              <AnimatedLabel text={liveText} />
-            </span>
-            {streamingBits.length > 0 && (
-              <span className='text-[10px] tabular-nums text-muted-foreground/60'>
-                · {streamingBits.join(' · ')}
-              </span>
-            )}
-            {/* ONE consolidated status chip ("⟳ 2 running · ⧗ 5 bg") — fixed
-            footprint, tweened counts, so the header never grows or jumps as
-            parallel calls come and go. Renders after completion too while
-            detached background work is still running. */}
-            <ActivityStatusChip toolInvocations={toolInvocations} />
-          </button>
-
-          {/* Live streaming surface: streams the model's reasoning live in a bounded
-          auto-scroll window. Collapses out (grid-rows + opacity) when streaming
-          ends instead of unmounting abruptly; kept mounted while collapsed so the
-          exit transitions. */}
-          <div
-            className={cn(
-              'grid',
-              isStreaming && hasReasoning
-                ? 'grid-rows-[1fr] opacity-100'
-                : 'grid-rows-[0fr] opacity-0',
-            )}
-            style={{ transition: 'grid-template-rows 220ms ease-out, opacity 180ms ease-out' }}
-          >
-            <div className='overflow-hidden'>
-              <div className='mt-1 pl-5'>
-                <LiveReasoning reasoning={reasoning} streaming={!!isStreaming} lines={5} />
-              </div>
-            </div>
-          </div>
-
-          {/* Smooth expand/collapse via the grid-rows 0fr→1fr trick — quick, never
-          snaps. Content stays mounted. */}
-          {canExpand && (
-            <div
-              className={cn(
-                'grid transition-[grid-template-rows] duration-200 ease-out',
-                expanded ? 'grid-rows-[1fr]' : 'grid-rows-[0fr]',
-              )}
-            >
-              <div className='overflow-hidden'>
-                <div
-                  className='mt-1.5 max-h-[28rem] overflow-y-auto pl-5 pr-0.5 py-2 space-y-3'
-                  style={REASONING_FADE_MASK_STYLE}
-                >
-                  {hasReasoning && (
-                    <div>
-                      <div className='mb-1 text-[10px] uppercase tracking-wide text-muted-foreground/70'>
-                        Reasoning
-                      </div>
-                      <pre className='whitespace-pre-wrap break-words font-mono text-[11px] leading-relaxed text-muted-foreground'>
-                        {reasoning}
-                      </pre>
-                    </div>
-                  )}
-
-                  {hasTools && (
-                    <div>
-                      {hasReasoning && (
-                        <div className='mb-1 text-[10px] uppercase tracking-wide text-muted-foreground/70'>
-                          Tool calls
-                        </div>
-                      )}
-                      <ToolInvocationList
-                        invocations={toolInvocations}
-                        messageAborted={messageAborted}
-                      />
-                    </div>
-                  )}
-                </div>
-              </div>
-            </div>
-          )}
-        </div>
-      </div>
-    </div>
   );
 }
 
@@ -982,6 +781,22 @@ function ChatMessageBubble({
     return filtered;
   }, [message.content, message.streamingContent, knownToolCallIds]);
 
+  // One answer text, ready for markdown: citation tokens linked (numbered
+  // across the whole turn, so a text part never renumbers), unknown marks
+  // stripped, design HTML wrapped. Used for the whole answer and per text part.
+  const prepareAnswerText = useCallback(
+    (raw: string, streaming: boolean): string => {
+      const linkified = linkifyAndGroupClawCitations(raw, clawCitationToolNumbers);
+      const stripped = stripCitationMarks(linkified);
+      const nonClfStripped = stripNonClfCitationTokens(stripped);
+      const cleaned = stripUnknownCiteLinks(nonClfStripped, validCitationKeys);
+      const designed =
+        message.type === 'bot' && hasDesignHtml(cleaned) ? designChatContent(cleaned) : cleaned;
+      return streaming ? designed + '\n' : designed;
+    },
+    [message.type, clawCitationToolNumbers, validCitationKeys],
+  );
+
   const displayContent = useMemo(() => {
     // While streaming, the manager batches deltas into `streamingContent` and
     // only writes `content` on completion. Reading content-only here is what
@@ -991,20 +806,13 @@ function ChatMessageBubble({
       message.type === 'bot' && message.isStreaming && message.streamingContent
         ? message.streamingContent
         : message.content || message.streamingContent || '';
-    const linkified = linkifyAndGroupClawCitations(raw, clawCitationToolNumbers);
-    const stripped = stripCitationMarks(linkified);
-    const nonClfStripped = stripNonClfCitationTokens(stripped);
-    const cleaned = stripUnknownCiteLinks(nonClfStripped, validCitationKeys);
-    const designed =
-      message.type === 'bot' && hasDesignHtml(cleaned) ? designChatContent(cleaned) : cleaned;
-    return message.isStreaming ? designed + '\n' : designed;
+    return prepareAnswerText(raw, !!message.isStreaming);
   }, [
     message.type,
     message.content,
     message.streamingContent,
     message.isStreaming,
-    clawCitationToolNumbers,
-    validCitationKeys,
+    prepareAnswerText,
   ]);
 
   const inlineCitations = useMemo(
@@ -1173,6 +981,25 @@ function ChatMessageBubble({
     [answerComponents, wordFade],
   );
 
+  /** One block of answer markdown. Keyed off everStreamed (not isStreaming) so
+   *  content that lands AT completion — the final tail words, finalized
+   *  citation chips — still fades in instead of popping the instant
+   *  isStreaming flips false; settled DOM never re-animates. */
+  const renderAnswerMarkdown = (content: string): ReactElement | null =>
+    content.trim().length > 0 ? (
+      <div
+        className={`bot-markdown-content xyne-ai-markdown text-sm font-normal leading-7 text-foreground${
+          everStreamedRef.current ? ' streaming-answer-fade' : ''
+        }`}
+      >
+        {everStreamedRef.current ? (
+          <StreamingMarkdownBlocks content={content} render={renderAnswerBlock} />
+        ) : (
+          renderAnswerBlock(content)
+        )}
+      </div>
+    ) : null;
+
   const hasUserContent = isUser && message.content.trim().length > 0;
   const hasUserAttachments = isUser && !!message.attachments && message.attachments.length > 0;
   // Everything an assistant message attached EXCEPT its React artifacts, which
@@ -1330,85 +1157,75 @@ function ChatMessageBubble({
             />
           )}
           {!isEditing && (
-            <div className='mt-0.5 flex items-center gap-0.5 opacity-0 transition-opacity duration-150 group-hover:opacity-100'>
-              {hasUserContent && (
-                <button
-                  type='button'
-                  onClick={(): void => {
-                    void navigator.clipboard
-                      .writeText(processTextForCopy(userStrippedContent, resolveMention))
-                      .then(markCopied);
-                  }}
-                  className='inline-flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground'
-                  title={copied ? 'Copied!' : 'Copy'}
-                  data-track-category='XyneAI'
-                  data-track-name='COPY_USER_MESSAGE'
-                  data-track-metadata={JSON.stringify({ ...trackContext, messageId: message.id })}
-                >
-                  {copied ? (
-                    <Check className='h-3.5 w-3.5' aria-hidden strokeWidth={1.75} />
-                  ) : (
-                    <Copy className='h-3.5 w-3.5' aria-hidden strokeWidth={1.75} />
-                  )}
-                </button>
-              )}
-              {onEditSubmit && (
-                <button
-                  type='button'
-                  onClick={() => {
-                    setEditText(message.content);
-                    setIsEditing(true);
-                    setTimeout(() => editTextareaRef.current?.focus(), 0);
-                  }}
-                  className='inline-flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground'
-                  title='Edit message'
-                  data-track-category='XyneAI'
-                  data-track-name='EDIT_MESSAGE'
-                >
-                  <Pencil className='h-3.5 w-3.5' aria-hidden strokeWidth={1.75} />
-                </button>
-              )}
+            <div className='mt-0.5 flex items-center gap-1'>
+              <div className='flex items-center gap-0.5 opacity-0 transition-opacity duration-150 group-hover:opacity-100'>
+                {hasUserContent && (
+                  <button
+                    type='button'
+                    onClick={(): void => {
+                      void navigator.clipboard
+                        .writeText(processTextForCopy(userStrippedContent, resolveMention))
+                        .then(markCopied);
+                    }}
+                    className='inline-flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground'
+                    title={copied ? 'Copied!' : 'Copy'}
+                    data-track-category='XyneAI'
+                    data-track-name='COPY_USER_MESSAGE'
+                    data-track-metadata={JSON.stringify({ ...trackContext, messageId: message.id })}
+                  >
+                    {copied ? (
+                      <Check className='h-3.5 w-3.5' aria-hidden strokeWidth={1.75} />
+                    ) : (
+                      <Copy className='h-3.5 w-3.5' aria-hidden strokeWidth={1.75} />
+                    )}
+                  </button>
+                )}
+                {onEditSubmit && (
+                  <button
+                    type='button'
+                    onClick={() => {
+                      setEditText(message.content);
+                      setIsEditing(true);
+                      setTimeout(() => editTextareaRef.current?.focus(), 0);
+                    }}
+                    className='inline-flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground'
+                    title='Edit message'
+                    data-track-category='XyneAI'
+                    data-track-name='EDIT_MESSAGE'
+                  >
+                    <Pencil className='h-3.5 w-3.5' aria-hidden strokeWidth={1.75} />
+                  </button>
+                )}
+              </div>
+              <time
+                dateTime={new Date(message.timestamp).toISOString()}
+                title={formatFullTimestamp(message.timestamp)}
+                className='px-1 text-[11px] tabular-nums text-muted-foreground/60'
+              >
+                {formatTimeAmPm(message.timestamp)}
+              </time>
             </div>
           )}
         </div>
       ) : (
         <div className='flex min-w-0 flex-col gap-2'>
-          {/* Reasoning section — also acts as the initial loading placeholder
-              so the user sees "Reasoning" with bouncing dots from the moment
-              streaming starts. When expanded, also reveals the tool-call tree
-              inside (matching the sidebar's ActivityBlock layout). Always
-              mounted so its grid-rows collapse can animate the exit on
-              completion; it self-hides (collapsed) when there's nothing to show. */}
-          <ReasoningSection
-            reasoning={message.reasoning ?? ''}
-            isStreaming={message.isStreaming}
-            toolInvocations={message.toolInvocations}
-            messageAborted={!!message.isAborted}
+          {isV2 && agentSlug && <AgentByline slug={agentSlug} />}
+          {/* The turn in order — thinking, text, tool calls, … answer — with
+              each run of steps folded into one expandable group. Shared with
+              the sidebar and the overlay. */}
+          <TurnTimeline
+            message={message}
+            previewLines={4}
+            renderText={(text, { streaming }) =>
+              renderAnswerMarkdown(prepareAnswerText(text, streaming))
+            }
+            legacyAnswer={displayContent ? renderAnswerMarkdown(displayContent) : null}
+            plan={
+              message.planTodos?.length ? (
+                <PlanCard todos={message.planTodos} title={message.planTitle} />
+              ) : undefined
+            }
           />
-
-          {displayContent && displayContent.length > 0 && (
-            <div
-              className={`bot-markdown-content xyne-ai-markdown text-sm font-normal leading-7 text-foreground${
-                // Keyed off everStreamed (not isStreaming) so content that
-                // lands AT completion — the final tail words, finalized
-                // citation chips — still fades in instead of popping the
-                // instant isStreaming flips false. Mount-only animations +
-                // the no-remount architecture make the class harmless to
-                // keep: settled DOM never re-animates.
-                everStreamedRef.current ? ' streaming-answer-fade' : ''
-              }`}
-            >
-              {everStreamedRef.current ? (
-                <StreamingMarkdownBlocks content={displayContent} render={renderAnswerBlock} />
-              ) : (
-                renderAnswerBlock(displayContent)
-              )}
-            </div>
-          )}
-
-          {!isUser && message.planTodos && message.planTodos.length > 0 && (
-            <PlanCard todos={message.planTodos} title={message.planTitle} />
-          )}
 
           {!isUser &&
             message.uiFlows?.map(flow => (
@@ -1484,17 +1301,33 @@ function ChatMessageBubble({
             />
           ) : null}
 
-          {!isUser && onDebug && (
-            <button
-              type='button'
-              onClick={onDebug}
-              className='mt-1.5 inline-flex w-fit items-center gap-1 rounded-md px-1.5 py-1 text-[11px] text-muted-foreground transition-colors hover:bg-muted hover:text-foreground'
-              title='Debug this response'
-              data-track-category='XyneAI'
-              data-track-name='DEBUG_RESPONSE'
-            >
-              <Bug size={12} /> Debug this response
-            </button>
+          {/* The turn's closing line: how long it took and when it finished. */}
+          {!isUser && ((!message.isStreaming && !message.errorInfo) || onDebug) && (
+            <div className='mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-muted-foreground'>
+              {!message.isStreaming && !message.errorInfo && (
+                <time
+                  dateTime={turnFinishedAt(message).toISOString()}
+                  title={formatFullTimestamp(turnFinishedAt(message))}
+                  className='tabular-nums text-muted-foreground/70'
+                >
+                  {[turnDurationLabel(message), formatTimeAmPm(turnFinishedAt(message))]
+                    .filter(Boolean)
+                    .join(' · ')}
+                </time>
+              )}
+              {onDebug && (
+                <button
+                  type='button'
+                  onClick={onDebug}
+                  className='-ml-1.5 inline-flex w-fit items-center gap-1 rounded-md px-1.5 py-1 transition-colors hover:bg-muted hover:text-foreground'
+                  title='Debug this response'
+                  data-track-category='XyneAI'
+                  data-track-name='DEBUG_RESPONSE'
+                >
+                  <Bug size={12} /> Debug this response
+                </button>
+              )}
+            </div>
           )}
 
           {/* Hover actions — on all bot messages */}

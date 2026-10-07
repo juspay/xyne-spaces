@@ -35,10 +35,13 @@ export function AgentGlyph({
   name,
   size = 20,
   userId,
+  rounded = false,
 }: {
   color?: string | undefined;
   name: string;
   size?: number;
+  /** A circle instead of the default rounded square. */
+  rounded?: boolean;
   /** The agent's Spaces bot user: when it is known here, draw the avatar a
    *  channel shows for the agent (its picture, or Spaces' letter fallback). */
   userId?: string | undefined;
@@ -51,6 +54,7 @@ export function AgentGlyph({
           userId={userId}
           size={size < 18 ? 'xs' : size < 24 ? 'sm' : 'rg'}
           showActiveStatus={false}
+          rounded={rounded}
           className='size-full'
         />
       </span>
@@ -60,7 +64,8 @@ export function AgentGlyph({
     <span
       aria-hidden
       className={cn(
-        'inline-flex shrink-0 items-center justify-center rounded-sm font-medium uppercase text-white',
+        'inline-flex shrink-0 items-center justify-center font-medium uppercase text-white',
+        rounded ? 'rounded-full' : 'rounded-sm',
         !color && 'bg-muted-foreground',
       )}
       style={{

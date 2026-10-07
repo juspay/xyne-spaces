@@ -3,7 +3,7 @@
  * Proxies through the Spaces backend to xyne-claw-auth conversation APIs.
  */
 
-import type { FlowDefinition } from '@xyne/shared';
+import { normalizeAssistantParts, type FlowDefinition } from '@xyne/shared';
 import { apiInstance } from '../clients/apiClient';
 import type {
   ConversationHistory as ConversationHistoryType,
@@ -83,8 +83,12 @@ interface ClawChatMessage {
    *  chronological order in that case. */
   parentId?: string | null;
   reasoning?: string;
+  /** The assistant turn in order — thinking, text and tool calls (newer turns). */
+  parts?: unknown;
   pendingActions?: PendingAction[];
   followUpSuggestions?: string[];
+  /** Assistant rows: how long the run took, start to finish. */
+  durationMs?: number;
   attachments?: Array<{
     id: string;
     mimeType: string;
@@ -261,6 +265,7 @@ export async function fetchV2ConversationMessages(
           ...(inv.citations !== undefined && { citations: inv.citations }),
           ...(inv.parentToolCallId !== undefined && { parentToolCallId: inv.parentToolCallId }),
           ...(inv.subagentName !== undefined && { subagentName: inv.subagentName }),
+          ...(inv.startedAt !== undefined && { startedAt: inv.startedAt }),
         }));
       } else if (allToolInvocations.length > 0) {
         const msgCreatedAt = new Date(msg.createdAt).getTime();
@@ -324,6 +329,7 @@ export async function fetchV2ConversationMessages(
         ? { followUpSuggestions: msg.followUpSuggestions }
         : {}),
       ...(!isUser && runByMsgId?.[msg.id] ? { debugSessionId: runByMsgId[msg.id] } : {}),
+      ...(!isUser && typeof msg.durationMs === 'number' ? { durationMs: msg.durationMs } : {}),
       // Seed 👍/👎 thumb state from the run's persisted rating (up→1, down→2).
       ...(!isUser && ratingByMsgId?.[msg.id]?.rating
         ? {
@@ -356,6 +362,9 @@ export async function fetchV2ConversationMessages(
     if (msg.reasoning && msg.reasoning.length > 0) {
       mappedMessage.reasoning = msg.reasoning;
     }
+    // The turn in order, for the step timeline (absent on older turns).
+    const parts = isUser ? null : normalizeAssistantParts(msg.parts);
+    if (parts) mappedMessage.parts = parts;
 
     return mappedMessage;
   });
