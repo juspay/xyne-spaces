@@ -382,12 +382,134 @@ export function serializeCallPreviewMd(data: CallPreviewData | null | undefined)
 }
 
 // ==========================================================================
+// X POST PREVIEW (x.com / twitter.com status links)
+// ==========================================================================
+
+/**
+ * Lifecycle of the AI summary on an X post card.
+ *
+ * - pending: the post is long enough to summarise and a job is queued.
+ * - ready:   `tldr` holds the summary.
+ * - failed:  summarisation gave up; the card still shows the post text.
+ * - skipped: the post is short enough to read as-is (or the feature is off).
+ */
+export type XPostTldrStatus = 'pending' | 'ready' | 'failed' | 'skipped';
+
+export interface XPostPreviewData {
+  url: string;
+  /** Numeric status id from the URL. Stable cache key for the TLDR. */
+  postId: string;
+  authorName: string;
+  /** Handle without the leading @. */
+  authorHandle: string;
+  /** Post text as published by X. Untrusted — render as plain text only. */
+  text: string;
+  /** ISO-8601 creation time, when known. */
+  createdAt?: string;
+  /** AI summary. Untrusted model output — render as plain text only. */
+  tldr?: string;
+  tldrStatus: XPostTldrStatus;
+}
+
+const X_POST_PREVIEW_BLOCK_START = ':::x_post_preview';
+const X_POST_PREVIEW_BLOCK_END = ':::';
+const X_POST_TLDR_STATUSES: readonly XPostTldrStatus[] = ['pending', 'ready', 'failed', 'skipped'];
+
+/**
+ * Parse link_preview_md Markdown string for X post previews.
+ *
+ * Format:
+ * :::x_post_preview
+ * url: https://x.com/user/status/123
+ * postId: 123
+ * authorName: Jane
+ * authorHandle: jane
+ * text: line one\nline two
+ * createdAt: 2026-01-01T00:00:00.000Z
+ * tldrStatus: ready
+ * tldr: Short summary
+ * :::
+ */
+export function parseXPostPreviewMd(md: string | null | undefined): XPostPreviewData | null {
+  if (!md) return null;
+
+  const lines = md.split('\n');
+  let inBlock = false;
+  const data: Record<string, string> = {};
+
+  for (const line of lines) {
+    const trimmed = line.trim();
+
+    if (trimmed === X_POST_PREVIEW_BLOCK_START) {
+      inBlock = true;
+      continue;
+    }
+
+    if (inBlock && trimmed === X_POST_PREVIEW_BLOCK_END) {
+      inBlock = false;
+      continue;
+    }
+
+    if (!inBlock || !trimmed.includes(':')) continue;
+
+    const colonIndex = trimmed.indexOf(':');
+    const key = trimmed.slice(0, colonIndex).trim();
+    data[key] = trimmed.slice(colonIndex + 1).trim();
+  }
+
+  if (!data['url'] || !data['postId']) return null;
+
+  const rawStatus = data['tldrStatus'] as XPostTldrStatus | undefined;
+  const tldrStatus: XPostTldrStatus =
+    rawStatus && X_POST_TLDR_STATUSES.includes(rawStatus) ? rawStatus : 'skipped';
+
+  const result: XPostPreviewData = {
+    url: unescapePreviewValue(data['url']),
+    postId: unescapePreviewValue(data['postId']),
+    authorName: unescapePreviewValue(data['authorName'] || ''),
+    authorHandle: unescapePreviewValue(data['authorHandle'] || ''),
+    text: unescapePreviewValue(data['text'] || ''),
+    tldrStatus,
+  };
+
+  if (data['createdAt']) result.createdAt = unescapePreviewValue(data['createdAt']);
+  if (data['tldr']) result.tldr = unescapePreviewValue(data['tldr']);
+
+  return result;
+}
+
+/** Serialize X post preview data into Markdown. */
+export function serializeXPostPreviewMd(data: XPostPreviewData | null | undefined): string | null {
+  if (!data || !data.url || !data.postId) return null;
+
+  const entries: Array<[string, string | undefined]> = [
+    ['url', data.url],
+    ['postId', data.postId],
+    ['authorName', data.authorName],
+    ['authorHandle', data.authorHandle],
+    ['text', data.text],
+    ['createdAt', data.createdAt],
+    ['tldrStatus', data.tldrStatus],
+    ['tldr', data.tldr],
+  ];
+
+  const lines = [X_POST_PREVIEW_BLOCK_START];
+  for (const [key, value] of entries) {
+    if (value === undefined || value === null || value === '') continue;
+    lines.push(`${key}: ${escapePreviewValue(String(value))}`);
+  }
+  lines.push(X_POST_PREVIEW_BLOCK_END);
+  return lines.join('\n');
+}
+
+// ==========================================================================
 // UNIFIED PREVIEW PARSER (reads link_preview_md column)
 // ==========================================================================
 
 export type PreviewMdResult =
   | { type: 'message_preview'; data: MessagePreviewData }
   | { type: 'call_preview'; data: CallPreviewData }
+  | { type: 'x_post_preview'; data: XPostPreviewData }
   | { type: 'link_preview'; data: LinkPreviewData };
 
 /**
@@ -405,6 +527,11 @@ export function parsePreviewMd(md: string | null | undefined): PreviewMdResult |
   if (md.includes(CALL_PREVIEW_BLOCK_START)) {
     const data = parseCallPreviewMd(md);
     return data ? { type: 'call_preview', data } : null;
+  }
+
+  if (md.includes(X_POST_PREVIEW_BLOCK_START)) {
+    const data = parseXPostPreviewMd(md);
+    return data ? { type: 'x_post_preview', data } : null;
   }
 
   if (md.includes(LINK_PREVIEW_BLOCK_START)) {

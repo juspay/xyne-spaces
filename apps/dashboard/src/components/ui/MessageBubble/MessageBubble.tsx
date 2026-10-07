@@ -50,6 +50,7 @@ import { BotBubble } from '../../Chat/BotBubble';
 import { LinkPreview } from '../../Chat/LinkPreview/LinkPreview';
 import { InternalMessagePreview } from '../../Chat/LinkPreview/InternalMessagePreview';
 import { CallLinkPreview } from '../../Chat/LinkPreview/CallLinkPreview';
+import { XPostPreview } from '../../Chat/LinkPreview/XPostPreview';
 import { CallLinkCaption, isCallLinkOnlyMessage } from '../../Chat/LinkPreview/CallLinkCaption';
 import { getEmojiFontSizeClass } from '../../../utils/emojiUtils';
 import { RenderMessageWithHTML } from '../../Chat/RenderMessageWithHTML/RenderMessageWithHTML';
@@ -1719,6 +1720,11 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                     />
                   ) : previewResult.type === 'call_preview' ? (
                     <CallLinkPreview
+                      metadata={previewResult.data}
+                      onClose={() => setShowLinkPreview(false)}
+                    />
+                  ) : previewResult.type === 'x_post_preview' ? (
+                    <XPostPreview
                       metadata={previewResult.data}
                       onClose={() => setShowLinkPreview(false)}
                     />

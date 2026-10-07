@@ -7,6 +7,7 @@ import { BotBubble } from '../BotBubble';
 import { LinkPreview } from '../LinkPreview/LinkPreview';
 import { InternalMessagePreview } from '../LinkPreview/InternalMessagePreview';
 import { CallLinkPreview } from '../LinkPreview/CallLinkPreview';
+import { XPostPreview } from '../LinkPreview/XPostPreview';
 import { CanvasPreview } from '../../Canvas/CanvasPreview';
 import { TicketActivityMessage } from '../TicketActivityMessage/TicketActivityMessage';
 import { ConversationTabContext } from '../ConversationTabContext';
@@ -1532,6 +1533,11 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
             />
           ) : previewResult.type === 'call_preview' ? (
             <CallLinkPreview
+              metadata={previewResult.data}
+              onClose={() => setShowLinkPreview(false)}
+            />
+          ) : previewResult.type === 'x_post_preview' ? (
+            <XPostPreview
               metadata={previewResult.data}
               onClose={() => setShowLinkPreview(false)}
             />

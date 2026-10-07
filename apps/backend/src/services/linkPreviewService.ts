@@ -58,6 +58,27 @@ export interface InternalMessageLinkMetadata {
 export type LinkMetadata = ExternalLinkMetadata | InternalMessageLinkMetadata;
 
 /**
+ * Parsed forward-proxy for link-preview fetches (LINK_PREVIEW_EGRESS_PROXY_URL), or
+ * undefined when unset (direct connection). Shared with the X post fetcher.
+ */
+export function getLinkPreviewEgressProxy(): { host: string; port: number; protocol: string } | undefined {
+  const raw = config.linkPreview.egressProxyUrl;
+  if (!raw) return undefined;
+  try {
+    const u = new URL(raw);
+    const protocol = u.protocol.replace(/:$/, '');
+    return {
+      host: u.hostname,
+      port: Number(u.port) || (protocol === 'https' ? 443 : 80),
+      protocol,
+    };
+  } catch {
+    logger.warn(`Invalid LINK_PREVIEW_EGRESS_PROXY_URL; ignoring and connecting directly: ${raw}`);
+    return undefined;
+  }
+}
+
+/**
  * LinkPreviewService
  *
  * Fetches and extracts metadata from URLs for link previews
@@ -167,20 +188,7 @@ export class LinkPreviewService {
    * undefined when unset (direct connection).
    */
   private egressProxy(): { host: string; port: number; protocol: string } | undefined {
-    const raw = config.linkPreview.egressProxyUrl;
-    if (!raw) return undefined;
-    try {
-      const u = new URL(raw);
-      const protocol = u.protocol.replace(/:$/, '');
-      return {
-        host: u.hostname,
-        port: Number(u.port) || (protocol === 'https' ? 443 : 80),
-        protocol,
-      };
-    } catch {
-      logger.warn(`Invalid LINK_PREVIEW_EGRESS_PROXY_URL; ignoring and connecting directly: ${raw}`);
-      return undefined;
-    }
+    return getLinkPreviewEgressProxy();
   }
 
   /**

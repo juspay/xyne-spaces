@@ -15,6 +15,7 @@ import {
   closeDriveImportQueue,
 } from '@/services/driveImport/driveImportWorker'
 import { messageClassificationQueue } from '@/queues/messageClassificationQueue'
+import { xPostTldrQueue } from '@/queues/xPostTldrQueue'
 import { proactiveNudgeWorker } from './workers/proactiveNudgeWorker'
 import { activityClassificationWorkerService } from '@/services/activity/activityClassificationWorkerService'
 import { ticketCleanupWorkerService } from '@/services/tickets/descriptionCleaner/ticketCleanupWorkerService'
@@ -206,6 +207,12 @@ class WorkerService {
         logger.info('Starting message classification worker service...')
         await messageClassificationQueue.initialize()
         messageClassificationQueue.startProcessing()
+      }
+      // AI TLDRs for X post link cards. Same producer/consumer split as classification.
+      if (appConfig.xPostTldr.enabled) {
+        logger.info('Starting X post TLDR worker service...')
+        await xPostTldrQueue.initialize()
+        xPostTldrQueue.startProcessing()
       }
 
       if (appConfig.enableWorkflowStepGcsSync) {
@@ -500,6 +507,7 @@ class WorkerService {
       if (messageClassificationEnabled) {
         await messageClassificationQueue.shutdown()
       }
+      await xPostTldrQueue.shutdown()
 
       if (workflowsEnabled) {
         await workflowsWorker.stop()

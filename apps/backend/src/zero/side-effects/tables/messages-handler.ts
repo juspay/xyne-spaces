@@ -25,6 +25,9 @@ import { activityTrackingService } from '@/services/activityTrackingService';
 import { Platform,
   serializeMessagePreviewMd,
   serializeLinkPreviewMd,
+  serializeXPostPreviewMd,
+  parseXPostPreviewMd,
+  type XPostTldrStatus,
   parseLinkPreviewMd,
   serializeCallPreviewMd,
   parseForwardedMessageXml,
@@ -47,6 +50,9 @@ import { ChannelRepository } from '@/database/repositories/channelRepository';
 import { InstalledAppsRepository } from '@/database/repositories/installedAppsRepository';
 import { extractInternalUrl, parseInternalUrl, extractFirstUrl, extractCallLink } from '@/utils/urlUtils';
 import { linkPreviewService, type ExternalLinkMetadata } from '@/services/linkPreviewService';
+import { parseXPostUrl } from '@/services/xPost/xPostUrl';
+import { fetchXPost, shouldSummarizeXPost, getCachedXPostTldr } from '@/services/xPost/xPostService';
+import { xPostTldrQueue } from '@/queues/xPostTldrQueue';
 import { botCatalog } from '@/bots/unified/catalog/bot-catalog';
 import { extractBotMentions, executeBotForMention, CHAT_ENABLED_BOT_IDS } from '@/services/bots';
 import { getSlackRecipientEmails } from '@/utils/notificationHelper';
@@ -1124,6 +1130,77 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
     return true;
   }
 
+  /**
+   * X (Twitter) status links. X serves bots a login wall rather than OG tags, so the generic
+   * scraper produces an empty card; this reads the post from X's public embed endpoint instead.
+   *
+   * Writes the card straight away. For long posts (ENABLE_X_POST_TLDR, X_POST_TLDR_MIN_CHARS)
+   * the card is written as "pending" and a queued job fills in the TLDR — model latency never
+   * holds up the preview. Returns false (fall through to the OG preview) if the post can't be read.
+   */
+  private async resolveXPostLinkPreview(
+    messageId: string,
+    conversationId: string,
+    url: string,
+  ): Promise<boolean> {
+    const parsed = parseXPostUrl(url);
+    if (!parsed) return false;
+
+    const post = await fetchXPost(parsed.postId);
+    if (!post) return false;
+
+    let tldrStatus: XPostTldrStatus = 'skipped';
+    let tldr: string | undefined;
+    if (shouldSummarizeXPost(post.text)) {
+      const cached = await getCachedXPostTldr(post.postId);
+      if (cached) {
+        tldrStatus = 'ready';
+        tldr = cached;
+      } else if (xPostTldrQueue.isReady()) {
+        tldrStatus = 'pending';
+      }
+    }
+
+    const md = serializeXPostPreviewMd({
+      url: `https://x.com/${post.authorHandle}/status/${post.postId}`,
+      postId: post.postId,
+      authorName: post.authorName,
+      authorHandle: post.authorHandle,
+      text: post.text,
+      ...(post.createdAt ? { createdAt: post.createdAt } : {}),
+      tldrStatus,
+      ...(tldr ? { tldr } : {}),
+    });
+    if (!md) return false;
+
+    await withWorkspaceScope(() => db.message.update({
+      where: { messageId },
+      data: { link_preview_md: md },
+    }));
+    await this.syncConversationMessageMetadata(conversationId);
+
+    if (tldrStatus === 'pending') {
+      const queued = await xPostTldrQueue.enqueue({ messageId, conversationId, postId: post.postId });
+      if (!queued) {
+        // Don't leave a spinner that nothing will resolve.
+        const fallback = serializeXPostPreviewMd({ ...parseXPostPreviewMd(md)!, tldrStatus: 'skipped' });
+        await withWorkspaceScope(() => db.message.update({
+          where: { messageId },
+          data: { link_preview_md: fallback },
+        }));
+        await this.syncConversationMessageMetadata(conversationId);
+      }
+    }
+
+    logger.info('[MessagesSideEffect] Wrote X post preview', {
+      messageId,
+      postId: post.postId,
+      textChars: post.text.length,
+      tldrStatus,
+    });
+    return true;
+  }
+
   private async resolveLinkPreview(
     messageId: string,
     conversationId: string,
@@ -1153,6 +1230,10 @@ export class MessagesSideEffectHandler extends BaseSideEffectHandler {
     // 3) Try Bitbucket PR link preview (API-first with URL-derived fallback)
     const url = extractFirstUrl(contentWithoutMentions);
     if (url) {
+      // 3a) X (Twitter) post: post card with the text inline, plus an async AI TLDR for long posts.
+      const resolvedXPost = await this.resolveXPostLinkPreview(messageId, conversationId, url);
+      if (resolvedXPost) return;
+
       const resolvedBitbucket = await this.resolveBitbucketLinkPreview(
         messageId,
         conversationId,

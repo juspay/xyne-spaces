@@ -1176,6 +1176,10 @@ export class App {
     const { messageClassificationQueue } = await import('@/queues/messageClassificationQueue');
     await messageClassificationQueue.initialize();
 
+    logger.info('Initializing X post TLDR queue (producer)...');
+    const { xPostTldrQueue } = await import('@/queues/xPostTldrQueue');
+    await xPostTldrQueue.initialize();
+
     logger.info('Initializing HEIC rendition queue (producer)...');
     const { heicRenditionQueue } = await import('@/queues/heicRenditionQueue');
     await heicRenditionQueue.initialize();

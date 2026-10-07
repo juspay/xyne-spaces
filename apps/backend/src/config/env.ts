@@ -503,6 +503,13 @@ const envSchema = Joi.object({
   // Optional forward-proxy for the link-preview outbound fetch. When set, the preview
   // fetch is routed through it instead of connecting directly. Empty = direct (default).
   LINK_PREVIEW_EGRESS_PROXY_URL: Joi.string().allow('').default(''),
+  // X (Twitter) post links: render a post card and, for long posts, an AI TLDR.
+  // Off by default; must be set on BOTH the API and the worker (queue producer + consumer).
+  ENABLE_X_POST_TLDR: Joi.boolean().default(false),
+  // Posts shorter than this are shown in full with no TLDR — they are already quick to read.
+  X_POST_TLDR_MIN_CHARS: Joi.number().integer().min(0).default(400),
+  // Model for the TLDR; empty falls back to DEFAULT_MODEL_NAME.
+  X_POST_TLDR_MODEL: Joi.string().allow('').default(''),
   ENC_S2S_KEY: Joi.string().allow(''),
   ENCRYPTION_SERVICE_URL: Joi.string().uri().default('http://localhost:3012'),
   ENCRYPTION_REQUEST_TIMEOUT_MS: Joi.number().integer().min(1).default(5000),
@@ -1255,6 +1262,11 @@ export const config = {
   linkPreview: {
     // Optional forward-proxy for the link-preview fetch.
     egressProxyUrl: (envVars.LINK_PREVIEW_EGRESS_PROXY_URL as string).trim(),
+  },
+  xPostTldr: {
+    enabled: envVars.ENABLE_X_POST_TLDR as boolean,
+    minChars: envVars.X_POST_TLDR_MIN_CHARS as number,
+    model: (envVars.X_POST_TLDR_MODEL as string).trim(),
   },
   askAI: {
     version: envVars.ASK_AI_VERSION as 'v1' | 'v2',
