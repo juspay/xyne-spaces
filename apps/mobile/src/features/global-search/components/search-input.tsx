@@ -15,14 +15,16 @@ import {
   Pressable,
   ScrollView,
   StyleSheet,
+  Text,
   TextInput,
   View,
   type NativeSyntheticEvent,
   type TextInputKeyPressEventData,
 } from 'react-native';
-import { Search, X } from 'lucide-react-native';
+import { ListFilter, Search, X } from 'lucide-react-native';
 import { useCSSVariable, useUniwind } from 'uniwind';
 
+import { useBubbleAccent } from '@/src/theme/useBubbleAccent';
 import { haptics } from '@/src/utils/haptics';
 import { withAlpha } from '@/src/utils/color';
 import { SearchFilterChipView } from './search-filter-chip';
@@ -50,6 +52,8 @@ import {
 import { filterChipTitle, placeholderForTab, type GlobalSearchTab } from '../utils/search-tabs';
 import type { SearchFilterChip, SearchScope } from '../types';
 
+const FILTER_BUTTON_GAP = 8;
+
 /**
  * Android sends no backspace key event to an empty TextInput, so with only chips left
  * there is nothing to hang "backspace removes the last chip" off. One zero-width space
@@ -66,7 +70,38 @@ const EMPTY_CARET = '​';
 const ANDROID_AUTOFOCUS_DELAY_MS = 300;
 
 const styles = StyleSheet.create({
-  wrapper: { paddingHorizontal: SEARCH_SIDE_MARGIN },
+  wrapper: {
+    paddingHorizontal: SEARCH_SIDE_MARGIN,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: FILTER_BUTTON_GAP,
+  },
+  pill: { flex: 1 },
+  filterButton: {
+    width: SEARCH_BAR_HEIGHT,
+    height: SEARCH_BAR_HEIGHT,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: SEARCH_BAR_HEIGHT / 2,
+    borderWidth: StyleSheet.hairlineWidth,
+  },
+  filterBadge: {
+    position: 'absolute',
+    top: 4,
+    right: 4,
+    minWidth: 16,
+    height: 16,
+    borderRadius: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 4,
+  },
+  filterBadgeText: {
+    color: '#ffffff',
+    fontSize: 10,
+    fontWeight: '700',
+    lineHeight: 12,
+  },
   scroll: { flex: 1 },
   scrollContent: { alignItems: 'center', flexGrow: 1 },
 });
@@ -85,6 +120,13 @@ export type SearchInputProps = {
   scope: SearchScope | null;
   dispatch: SearchDispatch;
   onRequestClose: () => void;
+  /**
+   * Filter control to the right of the search pill. Hidden when search is locked
+   * to a conversation (`scope`), matching the filter row below.
+   */
+  onFilterPress?: (() => void) | undefined;
+  /** Active modal filters for the badge (excludes From/In and mode pills). */
+  filterBadgeCount?: number;
 };
 
 /**
@@ -104,6 +146,8 @@ export const SearchInput = memo(function SearchInput({
   scope,
   dispatch,
   onRequestClose,
+  onFilterPress,
+  filterBadgeCount = 0,
 }: SearchInputProps): ReactElement {
   const inputRef = useRef<TextInput>(null);
 
@@ -117,6 +161,7 @@ export const SearchInput = memo(function SearchInput({
   const foregroundColor = useCSSVariable('--color-foreground') as string;
   const mutedColor = useCSSVariable('--color-secondary-text') as string;
   const { theme } = useUniwind();
+  const { accentText } = useBubbleAccent();
 
   // Driven from the change handler, never from an effect, and `maxWaitMs` commits even
   // while the user keeps typing. Together they stop continuous typing from never
@@ -239,15 +284,30 @@ export const SearchInput = memo(function SearchInput({
     return scope ? scopedPlaceholder(scope) : placeholderForTab(tab);
   }, [hasChips, scope, tab]);
 
+  const borderColor = withAlpha(foregroundColor, theme === 'dark' ? 0.08 : 0.06);
+
   const pillStyle = useMemo(
     () => ({
       height: SEARCH_BAR_HEIGHT,
       backgroundColor: inputColor,
-      borderColor: withAlpha(foregroundColor, theme === 'dark' ? 0.08 : 0.06),
+      borderColor,
       borderWidth: StyleSheet.hairlineWidth,
     }),
-    [foregroundColor, inputColor, theme],
+    [borderColor, inputColor],
   );
+
+  const filterButtonStyle = useMemo(
+    () => ({
+      backgroundColor: inputColor,
+      borderColor,
+    }),
+    [borderColor, inputColor],
+  );
+
+  const onFilterButtonPress = useCallback(() => {
+    void haptics.buttonTap();
+    onFilterPress?.();
+  }, [onFilterPress]);
 
   const textStyle = useMemo(
     () => [
@@ -273,7 +333,7 @@ export const SearchInput = memo(function SearchInput({
     <View style={styles.wrapper}>
       <View
         className='flex-row items-center gap-2 overflow-hidden rounded-full px-3'
-        style={pillStyle}
+        style={[styles.pill, pillStyle]}
       >
         <Search size={SEARCH_BAR_ICON_SIZE} color={mutedColor} />
 
@@ -327,6 +387,30 @@ export const SearchInput = memo(function SearchInput({
           <X size={20} color={mutedColor} />
         </Pressable>
       </View>
+
+      {scope || !onFilterPress ? null : (
+        <Pressable
+          accessibilityRole='button'
+          accessibilityLabel={
+            filterBadgeCount > 0 ? `Filters, ${filterBadgeCount} active` : 'Filters'
+          }
+          hitSlop={8}
+          onPress={onFilterButtonPress}
+          style={[styles.filterButton, filterButtonStyle]}
+        >
+          <ListFilter
+            size={SEARCH_BAR_ICON_SIZE}
+            color={filterBadgeCount > 0 ? accentText : mutedColor}
+          />
+          {filterBadgeCount > 0 ? (
+            <View style={[styles.filterBadge, { backgroundColor: accentText }]}>
+              <Text style={styles.filterBadgeText}>
+                {filterBadgeCount > 9 ? '9+' : String(filterBadgeCount)}
+              </Text>
+            </View>
+          ) : null}
+        </Pressable>
+      )}
     </View>
   );
 });

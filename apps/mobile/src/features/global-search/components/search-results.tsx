@@ -1,6 +1,7 @@
 import { useEffect, useMemo, type ReactElement } from 'react';
 
 import type { SearchState } from '../hooks/use-search-state';
+import { hasStructuredFilterInput } from '../utils/filter-model';
 import { buildSearchRequest, categoryForTab } from '../utils/search-request';
 import type { SearchFilterChip, SearchScope } from '../types';
 import { ChannelResults, ChatResults } from './results/local-results';
@@ -28,7 +29,8 @@ export function SearchResults({
   onLeave,
   ...chrome
 }: SearchResultsProps): ReactElement {
-  const { tab, query, chips, onlyMyChannels, includeBotMessages, exactMatch, trigger } = state;
+  const { tab, query, chips, structured, onlyMyChannels, includeBotMessages, exactMatch, trigger } =
+    state;
   const { scrollOffset } = chrome;
   const showsSuggestions = trigger !== null;
 
@@ -44,12 +46,13 @@ export function SearchResults({
         tab,
         query,
         chips,
+        structured,
         onlyMyChannels,
         includeBotMessages,
         exactMatch,
         scope,
       }),
-    [chips, exactMatch, includeBotMessages, onlyMyChannels, query, scope, tab],
+    [chips, exactMatch, includeBotMessages, onlyMyChannels, query, scope, structured, tab],
   );
 
   if (trigger) {
@@ -62,7 +65,8 @@ export function SearchResults({
 
   const category = scope ? 'messages' : categoryForTab(tab);
   // A locked scope narrows the request but is not something the user asked for.
-  const hasQuery = query.length > 0 || chips.length > 0;
+  const hasQuery =
+    query.length > 0 || chips.length > 0 || hasStructuredFilterInput(structured);
 
   if (category === 'calls') {
     return <CallResults request={request} query={query} hasQuery={hasQuery} {...chrome} />;

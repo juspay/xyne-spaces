@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
 import type { SearchFilterChip, SearchScope } from '@/src/features/global-search/types';
+import { DEFAULT_STRUCTURED_FILTERS } from '@/src/features/global-search/utils/filter-model';
 import {
   buildSearchRequest,
   toSearchParams,
@@ -25,6 +26,7 @@ function input(overrides: Partial<SearchRequestInput> = {}): SearchRequestInput 
     tab: 'messages',
     query: '',
     chips: [],
+    structured: { ...DEFAULT_STRUCTURED_FILTERS },
     onlyMyChannels: false,
     includeBotMessages: false,
     exactMatch: false,
@@ -55,6 +57,18 @@ describe('global search request', () => {
 
     it('does not let the toggle alone start a scoped search', () => {
       assert.equal(buildSearchRequest(input({ scope, onlyMyChannels: true })), null);
+    });
+
+    it('does not let structured filters alone start a scoped search', () => {
+      assert.equal(
+        buildSearchRequest(
+          input({
+            scope,
+            structured: { ...DEFAULT_STRUCTURED_FILTERS, priority: 'HIGH' },
+          }),
+        ),
+        null,
+      );
     });
 
     it('searches the locked conversation once there is text', () => {
@@ -130,6 +144,32 @@ describe('global search request', () => {
 
     it('sends nothing with no text and no chips', () => {
       assert.equal(buildSearchRequest(input()), null);
+    });
+
+    it('searches when only a modal filter is set', () => {
+      const sent = params({
+        structured: {
+          ...DEFAULT_STRUCTURED_FILTERS,
+          assignees: [{ id: 'u9', label: 'Ada' }],
+        },
+      });
+
+      assert.equal(sent['assignee'], 'u9');
+      assert.equal(sent['filterOnly'], 'true');
+    });
+
+    it('maps date presets and showArchived on tickets', () => {
+      const sent = params({
+        tab: 'tickets',
+        structured: {
+          ...DEFAULT_STRUCTURED_FILTERS,
+          dateRange: 'last 7 days',
+          showArchived: true,
+        },
+      });
+
+      assert.equal(sent['range'], 'last 7 days');
+      assert.equal(sent['excludeArchived'], 'false');
     });
 
     it('does not treat the toggle alone as a query', () => {

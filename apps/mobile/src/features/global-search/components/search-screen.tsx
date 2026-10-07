@@ -1,14 +1,6 @@
 import { useLocalSearchParams, useRouter, type Href } from 'expo-router';
-import {
-  useEffect,
-  memo,
-  useCallback,
-  useMemo,
-  useRef,
-  type ReactElement,
-  type RefObject,
-} from 'react';
-import { StyleSheet, View } from 'react-native';
+import {useEffect, memo, useCallback, useMemo, useRef, useState, type ReactElement, type RefObject } from 'react';
+import { Keyboard, StyleSheet, View } from 'react-native';
 import Animated, {
   Extrapolation,
   interpolate,
@@ -19,9 +11,12 @@ import Animated, {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useCSSVariable } from 'uniwind';
 
+import { FiltersSheet } from '../components/filters/filters-sheet';
 import { GlobalSearchFilterBar } from '../components/filters/global-search-filter-bar';
 import { SearchCategoryTags } from './search-category-tags';
 import { useSearchState, type SearchDispatch } from '../hooks/use-search-state';
+import { countActiveFilters, toSearchResultsFilters } from '../utils/filter-registry';
+import type { StructuredSearchFilters } from '../utils/filter-model';
 import {
   initialTabForSurface,
   SEARCH_TABS,
@@ -173,6 +168,7 @@ export function GlobalSearchScreen({
       <SearchToolbar
         tab={state.tab}
         chips={state.chips}
+        structured={state.structured}
         onlyMyChannels={state.onlyMyChannels}
         includeBotMessages={state.includeBotMessages}
         exactMatch={state.exactMatch}
@@ -196,6 +192,7 @@ export function GlobalSearchScreen({
 const SearchToolbar = memo(function SearchToolbar({
   tab,
   chips,
+  structured,
   onlyMyChannels,
   includeBotMessages,
   exactMatch,
@@ -210,6 +207,7 @@ const SearchToolbar = memo(function SearchToolbar({
 }: {
   tab: GlobalSearchTab;
   chips: readonly SearchFilterChip[];
+  structured: StructuredSearchFilters;
   onlyMyChannels: boolean;
   fieldHostedElsewhere: boolean;
   includeBotMessages: boolean;
@@ -224,6 +222,7 @@ const SearchToolbar = memo(function SearchToolbar({
   scope: SearchScope | null;
 }): ReactElement {
   const router = useRouter();
+  const [filtersOpen, setFiltersOpen] = useState(false);
 
   // The screen's own background, so results scrolling under the toolbar are hidden
   // rather than showing through, and the band has no visible edge against the page.
@@ -243,6 +242,37 @@ const SearchToolbar = memo(function SearchToolbar({
 
   const onTabChange = useCallback(
     (next: GlobalSearchTab) => dispatch({ type: 'tabChanged', tab: next }),
+    [dispatch],
+  );
+
+  const appliedFilters = useMemo(
+    () =>
+      toSearchResultsFilters({
+        tab,
+        chips,
+        structured,
+        onlyMyChannels,
+        includeBotMessages,
+        exactMatch,
+      }),
+    [chips, exactMatch, includeBotMessages, onlyMyChannels, structured, tab],
+  );
+
+  const filterBadgeCount = countActiveFilters(appliedFilters);
+
+  const openFilters = useCallback(() => {
+    Keyboard.dismiss();
+    setFiltersOpen(true);
+  }, []);
+
+  const applyFilters = useCallback(
+    (next: { structured: StructuredSearchFilters; chips: readonly SearchFilterChip[] }) => {
+      dispatch({
+        type: 'structuredApplied',
+        structured: next.structured,
+        chips: next.chips,
+      });
+    },
     [dispatch],
   );
 
@@ -298,6 +328,7 @@ const SearchToolbar = memo(function SearchToolbar({
   );
 
   return (
+    <>
     <Animated.View pointerEvents='box-none' style={[containerStyle, toolbarStyle]}>
       <View pointerEvents='box-none' style={innerStyle}>
         {fieldHostedElsewhere ? null : (
@@ -327,5 +358,14 @@ const SearchToolbar = memo(function SearchToolbar({
         )}
       </View>
     </Animated.View>
+    {scope ? null : (
+        <FiltersSheet
+          isOpen={filtersOpen}
+          onClose={() => setFiltersOpen(false)}
+          applied={appliedFilters}
+          onApply={applyFilters}
+        />
+      )}
+    </>
   );
 });

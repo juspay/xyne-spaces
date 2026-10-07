@@ -2,6 +2,11 @@ import { useReducer, type Dispatch } from 'react';
 
 import type { SearchFilterChip, SearchFilterPrefix } from '../types';
 import { isExactSearchQuery } from '../utils/exact-search';
+import {
+  DEFAULT_STRUCTURED_FILTERS,
+  structuredFiltersEqual,
+  type StructuredSearchFilters,
+} from '../utils/filter-model';
 import { triggersEqual, type FilterTrigger } from '../utils/filter-trigger';
 import type { GlobalSearchTab } from '../utils/search-tabs';
 
@@ -11,6 +16,8 @@ export type SearchState = {
   query: string;
   /** Filters the user picked. A locked conversation scope is never in here. */
   chips: readonly SearchFilterChip[];
+  /** Modal-only / structured filters (From/In stay in `chips`). */
+  structured: StructuredSearchFilters;
   onlyMyChannels: boolean;
   /** Include BOT messageType hits. Messages tab only; default off. */
   includeBotMessages: boolean;
@@ -31,6 +38,7 @@ export type SearchAction =
   | { type: 'chipRemoved'; chip: Pick<SearchFilterChip, 'id' | 'prefix'> }
   | { type: 'lastChipRemoved' }
   | { type: 'chipsReplaced'; prefix: SearchFilterPrefix; chips: readonly SearchFilterChip[] }
+  | { type: 'structuredApplied'; structured: StructuredSearchFilters; chips: readonly SearchFilterChip[] }
   | { type: 'onlyMyChannelsToggled' }
   | { type: 'includeBotMessagesToggled' }
   | { type: 'exactMatchToggled' }
@@ -43,6 +51,7 @@ export function createSearchState(tab: GlobalSearchTab): SearchState {
     tab,
     query: '',
     chips: [],
+    structured: { ...DEFAULT_STRUCTURED_FILTERS },
     onlyMyChannels: false,
     includeBotMessages: false,
     exactMatch: false,
@@ -74,6 +83,8 @@ function chipsEqual(a: readonly SearchFilterChip[], b: readonly SearchFilterChip
 export function searchReducer(state: SearchState, action: SearchAction): SearchState {
   switch (action.type) {
     case 'tabChanged':
+      // Keep filters across tabs — the Filters drawer always shows the full
+      // dashboard `all` set, and Vespa only consumes fields each category accepts.
       return state.tab === action.tab ? state : { ...state, tab: action.tab };
 
     case 'queryCommitted': {
@@ -114,6 +125,17 @@ export function searchReducer(state: SearchState, action: SearchAction): SearchS
       return chipsEqual(state.chips, chips) ? state : { ...state, chips };
     }
 
+    case 'structuredApplied': {
+      const chipsSame = chipsEqual(state.chips, action.chips);
+      const structuredSame = structuredFiltersEqual(state.structured, action.structured);
+      if (chipsSame && structuredSame) return state;
+      return {
+        ...state,
+        chips: chipsSame ? state.chips : action.chips,
+        structured: structuredSame ? state.structured : action.structured,
+      };
+    }
+
     case 'onlyMyChannelsToggled':
       return { ...state, onlyMyChannels: !state.onlyMyChannels };
 
@@ -124,9 +146,18 @@ export function searchReducer(state: SearchState, action: SearchAction): SearchS
       return { ...state, exactMatch: !state.exactMatch };
 
     case 'cleared':
-      return state.query === '' && state.chips.length === 0 && state.trigger === null
+      return state.query === '' &&
+        state.chips.length === 0 &&
+        state.trigger === null &&
+        structuredFiltersEqual(state.structured, DEFAULT_STRUCTURED_FILTERS)
         ? state
-        : { ...state, query: '', chips: [], trigger: null };
+        : {
+            ...state,
+            query: '',
+            chips: [],
+            trigger: null,
+            structured: { ...DEFAULT_STRUCTURED_FILTERS },
+          };
   }
 }
 

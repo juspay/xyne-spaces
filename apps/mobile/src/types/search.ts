@@ -192,6 +192,16 @@ export interface VespaSearchFilters {
    * excludes bot messages. Meaningful for message search.
    */
   includeBotMessages?: boolean;
+  mentions?: string;
+  channelMentions?: string;
+  groupMentions?: string;
+  fromEmail?: string;
+  toEmail?: string;
+  entity?: string;
+  /**
+   * Desk/Tickets: omit or true = exclude archived. `showArchived` ON → false.
+   */
+  excludeArchived?: boolean;
 }
 
 export interface VespaSearchGroup {

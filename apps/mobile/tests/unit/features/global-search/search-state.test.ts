@@ -8,6 +8,7 @@ import {
   type SearchState,
 } from '@/src/features/global-search/hooks/use-search-state';
 import type { SearchFilterChip } from '@/src/features/global-search/types';
+import { DEFAULT_STRUCTURED_FILTERS } from '@/src/features/global-search/utils/filter-model';
 import type { FilterTrigger } from '@/src/features/global-search/utils/filter-trigger';
 
 function chip(id: string, prefix: SearchFilterChip['prefix'] = 'from:'): SearchFilterChip {
@@ -34,6 +35,7 @@ describe('global search state', () => {
       tab: 'channels',
       query: '',
       chips: [],
+      structured: DEFAULT_STRUCTURED_FILTERS,
       onlyMyChannels: false,
       includeBotMessages: false,
       exactMatch: false,
