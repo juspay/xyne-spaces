@@ -1,5 +1,6 @@
 import { ReactElement, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import XyneHomeLogo from '../../XyneHomeLogo/XyneHomeLogo';
 import {
   ChevronRight,
   PlusDefault,
@@ -116,7 +117,7 @@ const MobileChatDirectory = ({
         {/* Top Row: Logo + Name Badge | Avatar */}
         <div className='flex items-center justify-between mb-4'>
           <div className='flex items-center gap-1'>
-            <img src='/svgs/xyne.svg' alt='Xyne Logo' className='h-5 w-auto' />
+            <XyneHomeLogo source='mobile_chat_directory' imgClassName='h-5 w-auto' />
           </div>
           <MobileProfileMenu userId={context.userID} />
         </div>
