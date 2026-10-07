@@ -154,12 +154,10 @@ import {
   ATTACHMENT_STILL_UPLOADING,
   isAttachmentUploaded,
   isAttachmentUploadInFlight,
-} from '@xyne/shared/zero/mutators';
-import {
   validateFieldBranches,
   validateUniqueFieldNames,
   assertFieldIsCurrentlyActive,
-} from './formsMutatorHelpers';
+} from '@xyne/shared/zero/mutators';
 import { v4 as uuidv4 } from 'uuid';
 import { extractAllMentions } from '@/utils/mentionParser';
 import { detectVcsProvider } from '@/utils/repoUrlParser';
