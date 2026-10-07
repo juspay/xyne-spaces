@@ -2269,7 +2269,7 @@ router.post("/:sessionId/mcp/call", async (req: Request<{ sessionId: string }>, 
     const upstreamResult =
       serverType === "bitbucket"
         ? await callBitbucketThrottled(userId, credentials, tool, effectiveParams, agentSlug)
-        : await callTool(userId, serverType, credentials, tool, effectiveParams, agentSlug);
+        : await callTool(userId, serverType, credentials, tool, effectiveParams, agentSlug, undefined, effective.instance);
     let result = upstreamResult;
 
     // Upstream mcp-grafana query tools (query_elasticsearch, …) run through

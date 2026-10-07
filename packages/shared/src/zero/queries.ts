@@ -4488,6 +4488,16 @@ export const queries = defineQueries({
       return zql.user_groups.where('id', userGroupId).one();
     },
   ),
+  // Several groups in one read, for callers that already hold the ids.
+  getUserGroupsByIds: defineQuery(
+    z.object({ userGroupIds: z.array(z.string()).max(500) }),
+    ({ args: { userGroupIds } }) => {
+      if (userGroupIds.length === 0) {
+        return zql.user_groups.where('id', 'nonexistent').limit(0);
+      }
+      return zql.user_groups.where('id', 'IN', userGroupIds).orderBy('createdAt', 'desc');
+    },
+  ),
   // Query for board by ID with related project
   getBoardById: defineQuery(z.object({ boardId: z.string() }), ({ args: { boardId } }) => {
     return zql.boards.where('id', boardId).related('project').one();
@@ -4556,8 +4566,9 @@ export const queries = defineQueries({
       limit: z.number().optional(),
       start: z.object({ name: z.string(), id: z.string() }).nullish(),
       direction: z.enum(['forward', 'backward']).optional(),
+      search: z.string().optional(),
     }),
-    ({ args: { projectIds, limit = 100, start, direction = 'forward' } }) => {
+    ({ args: { projectIds, limit = 100, start, direction = 'forward', search } }) => {
       if (projectIds.length === 0) {
         return zql.project_tags.where('id', 'nonexistent').limit(0);
       }
@@ -4566,6 +4577,9 @@ export const queries = defineQueries({
         .where('projectId', 'IN', projectIds)
         .orderBy('name', isBackward ? 'desc' : 'asc')
         .orderBy('id', isBackward ? 'desc' : 'asc');
+      if (search) {
+        q = q.where('name', 'ILIKE', `%${search}%`);
+      }
       if (start) {
         q = q.start({ name: start.name, id: start.id }, { inclusive: false });
       }
