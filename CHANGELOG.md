@@ -1,3 +1,19 @@
+## [1.472.0](https://github.com/juspay/xyne-spaces/compare/v1.471.0...v1.472.0) (2026-10-07)
+
+
+### Features
+
+* show recently used labels first in ticket details and the kanban label filter ([#2756](https://github.com/juspay/xyne-spaces/issues/2756)) ([5cb5091](https://github.com/juspay/xyne-spaces/commit/5cb50911f45def973e801ec58c060b19ac260a76)), closes [#2274](https://github.com/juspay/xyne-spaces/issues/2274)
+* Update community onboarding flow ([#2765](https://github.com/juspay/xyne-spaces/issues/2765)) ([37f21ce](https://github.com/juspay/xyne-spaces/commit/37f21ce7319e952b2ddcac9582a01d31e611c92e))
+
+
+### Bug Fixes
+
+* add public schema to invitations org approval migration ([#2735](https://github.com/juspay/xyne-spaces/issues/2735)) ([12b7240](https://github.com/juspay/xyne-spaces/commit/12b7240a50035a298234307996f3bfdde41b680c))
+* added optimizations toggle in UI ([#2719](https://github.com/juspay/xyne-spaces/issues/2719)) ([b9cbe58](https://github.com/juspay/xyne-spaces/commit/b9cbe58e9719375748515d634e6c3b4529026fd8))
+* hover toolbar no longer covers the thread parent message ([#2459](https://github.com/juspay/xyne-spaces/issues/2459)) ([2ed325a](https://github.com/juspay/xyne-spaces/commit/2ed325abe5841ec6d681dc18a1f4f530be77d5bc)), closes [#2089](https://github.com/juspay/xyne-spaces/issues/2089)
+* increase gap between back/forward buttons and window controls (traffic lights) ([#2655](https://github.com/juspay/xyne-spaces/issues/2655)) ([f4c585f](https://github.com/juspay/xyne-spaces/commit/f4c585f2ccd7d43ed8e79f7839f7a678b212a6d1))
+
 ## [1.471.0](https://github.com/juspay/xyne-spaces/compare/v1.470.0...v1.471.0) (2026-10-07)
 
 
