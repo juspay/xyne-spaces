@@ -20,14 +20,21 @@ const UpdateTicketConfigSchema = z.object({
   status: z.nativeEnum(TicketStatusV2).optional(),
   stageName: withOptions(variableRef(z.string())).optional(),
   assignedTo: withOptions(variableRef(z.string())).optional(),
+  labels: variableRef(z.array(z.string().min(1)))
+    .optional()
+    .describe("Labels to add. A label already on the ticket is kept as is, matched ignoring case; one the project already has keeps the project's spelling"),
 });
 
 const UpdateTicketOutputSchema = z.object({
   ticketId: z.string(),
+  addedLabels: z.array(z.string()),
+  alreadyPresentLabels: z.array(z.string()).describe('Labels the ticket already had'),
 });
 
 interface UpdateTicketOutput extends Record<string, unknown> {
   ticketId: string;
+  addedLabels: string[];
+  alreadyPresentLabels: string[];
 }
 
 export class UpdateTicketStep extends BaseActionStep<
@@ -39,7 +46,7 @@ export class UpdateTicketStep extends BaseActionStep<
   readonly outputSchema = UpdateTicketOutputSchema;
   readonly name = 'Update a ticket';
   readonly description =
-    'Updates fields on an existing ticket — title, description, priority, status, stage, or assignee.';
+    'Updates fields on an existing ticket — title, description, priority, status, stage, assignee, or labels.';
   readonly category = 'ticket';
   readonly icon = 'Pencil';
 
@@ -152,6 +159,52 @@ export class UpdateTicketStep extends BaseActionStep<
       await repositories.tickets.updateTicketFields(ticketId, fields, updatedBy);
     }
 
-    return { ticketId };
+    const addedLabels: string[] = [];
+    const alreadyPresentLabels: string[] = [];
+    if (config.labels !== undefined) {
+      const prisma = DatabaseClient.getInstance();
+      const raw = Array.isArray(config.labels) ? config.labels : String(config.labels).split(',');
+      const ticket = await prisma.ticket.findUniqueOrThrow({
+        where: { id: ticketId },
+        select: { projectId: true, workspaceId: true },
+      });
+      const [ticketTags, mappedTags, projectTags] = await Promise.all([
+        prisma.ticketTag.findMany({ where: { ticketId }, select: { name: true } }),
+        prisma.ticketTagMapping.findMany({ where: { ticketId }, select: { tagName: true } }),
+        prisma.projectTag.findMany({ where: { projectId: ticket.projectId }, select: { name: true } }),
+      ]);
+      const onTicket = new Map(
+        [...ticketTags.map((tag) => tag.name), ...mappedTags.map((tag) => tag.tagName)].map((name) => [name.toLowerCase(), name]),
+      );
+      const inProject = new Map(projectTags.map((tag) => [tag.name.toLowerCase(), tag.name]));
+
+      const toAdd = new Map<string, string>();
+      for (const label of raw.map((value) => value.trim()).filter(Boolean)) {
+        const key = label.toLowerCase();
+        const present = onTicket.get(key);
+        if (present) {
+          if (!alreadyPresentLabels.includes(present)) alreadyPresentLabels.push(present);
+        } else if (!toAdd.has(key)) {
+          toAdd.set(key, inProject.get(key) ?? label);
+        }
+      }
+
+      const { added, alreadyPresent } = await repositories.tickets.addTagsByName(ticketId, [...toAdd.values()]);
+      addedLabels.push(...added);
+      alreadyPresentLabels.push(...alreadyPresent);
+      if (added.length > 0) {
+        await prisma.ticketActivity.createMany({
+          data: added.map((label) => ({
+            ticketId,
+            updatedBy,
+            workspaceId: ticket.workspaceId,
+            activityType: ActivityType.TAGS,
+            value: { action: 'added', newValue: label, isAutomation: true },
+          })),
+        });
+      }
+    }
+
+    return { ticketId, addedLabels, alreadyPresentLabels };
   }
 }

@@ -15,6 +15,7 @@
 import { BaseTicketType, FormEntityType, ReleaseTrackingMode, VCSProviderType } from '@xyne/shared';
 import { db } from '@/database/client';
 import { logger } from '@/utils/logger';
+import { config } from '@/config/env';
 import { FormsRepository } from '@/database/repositories/formsRepository';
 import { CommitAnalysisController } from '@/controllers/commitAnalysisController';
 import { unifiedBotUserService } from '@/bots/unified/index.js';
@@ -67,6 +68,10 @@ export async function syncReleaseOnPRMerge(params: ReleaseMergeSyncParams): Prom
   // workspaces, so the workspace filter prevents cross-workspace syncs).
   const { workspaceId, provider, projectKey, repoSlug, baseBranch, mergeCommitSha, source } = params;
   const repoLabel = `${projectKey}/${repoSlug}`;
+  if (!config.release.autoAnalysisEnabled) {
+    logger.info(`[${source}] Release sync skipped for ${repoLabel}: RELEASE_AUTO_ANALYSIS_ENABLED=false`);
+    return;
+  }
 
   try {
     // 1. COMMIT_RANGE boards on this provider whose configured app repo matches

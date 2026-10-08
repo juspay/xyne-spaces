@@ -1090,15 +1090,17 @@ export class TicketController {
 
         // Make silent-skip visible — log which condition(s) failed so this can be
         // debugged without staring at code. WARN level so it shows up by default.
-        if (!this.commitAnalysisController || !releaseTicket || (!hasRepoRows && !hasScalarRange)) {
+        const autoAnalysisEnabled = config.release.autoAnalysisEnabled;
+        if (!autoAnalysisEnabled || !this.commitAnalysisController || !releaseTicket || (!hasRepoRows && !hasScalarRange)) {
           const missing: string[] = [];
+          if (!autoAnalysisEnabled) missing.push('RELEASE_AUTO_ANALYSIS_ENABLED=false');
           if (!this.commitAnalysisController) missing.push('commitAnalysisController(not initialized — check Bitbucket env vars)');
           if (!releaseTicket) missing.push(`ticketType(=${ticket.ticketType}, want Release/Hotfix)`);
           if (!hasRepoRows && !hasScalarRange) missing.push('no complete ReleaseRepository rows and no scalar deployedCommitId/newCommitId/branch');
           logger.warn(`[ReleaseTrigger] skipped for ticket ${ticket.xyneId}: missing=${missing.join(', ')}`);
         }
 
-        if (this.commitAnalysisController && releaseTicket && (hasRepoRows || hasScalarRange)) {
+        if (autoAnalysisEnabled && this.commitAnalysisController && releaseTicket && (hasRepoRows || hasScalarRange)) {
           // workspace + repoSlug are now derived inside commitAnalysisController
           // from Application.repoUrl on the resolved project. We pass empty
           // placeholders to satisfy the existing param shape; the controller
