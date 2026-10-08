@@ -462,17 +462,20 @@ export function requireInternalS2S(
   res: Response,
   next: NextFunction,
 ): void {
-  const provided = req.headers["x-s2s-key"];
-  const expected = process.env["INTERNAL_S2S_KEY"] ?? "";
-  if (expected && typeof provided === "string") {
-    const a = Buffer.from(provided);
-    const b = Buffer.from(expected);
-    if (a.length === b.length && timingSafeEqual(a, b)) {
-      next();
-      return;
-    }
+  if (internalS2sKeyMatches(req.headers["x-s2s-key"])) {
+    next();
+    return;
   }
   res.status(401).json({ success: false, error: "s2s key required" });
+}
+
+/** Constant-time check against `INTERNAL_S2S_KEY`; fails closed when unset. */
+export function internalS2sKeyMatches(provided: string | string[] | undefined): boolean {
+  const expected = process.env["INTERNAL_S2S_KEY"] ?? "";
+  if (!expected || typeof provided !== "string") return false;
+  const a = Buffer.from(provided);
+  const b = Buffer.from(expected);
+  return a.length === b.length && timingSafeEqual(a, b);
 }
 
 /**

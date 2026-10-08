@@ -1659,6 +1659,46 @@ export async function listS2SClawAgents(): Promise<S2SClawAgent[]> {
 }
 
 /**
+ * The AGENT-vs-APP lookup could not give a definite answer. installApp must fail
+ * rather than guess: a user's type is set once, so a wrong guess is permanent.
+ * (Message deliberately avoids "not found" — the install controller maps that to 404.)
+ */
+export class ClawAgentLookupError extends Error {
+  constructor(reason: string) {
+    super(`Could not determine whether this app is a Claw agent: ${reason}`);
+    this.name = 'ClawAgentLookupError';
+  }
+}
+
+/**
+ * Whether a Claw agent is published as this Spaces app. Asks claw-auth, which
+ * owns the agent↔app link, via its internal by-spaces-app lookup — unfiltered by
+ * visibility/org/enabled, unlike listS2SClawAgents (which would miss personal and
+ * disabled agents). Authenticated with INTERNAL_S2S_KEY, the key the backend
+ * shares with claw-auth (the backend is not given XYNE_CLAW_S2S_KEY).
+ * Returns true/false only on a well-formed answer; every other outcome throws
+ * ClawAgentLookupError.
+ */
+export async function isSpacesAppClawAgent(spacesAppId: string): Promise<boolean> {
+  const key = config.internalS2sKey;
+  if (!key) throw new ClawAgentLookupError('INTERNAL_S2S_KEY is not configured');
+  const url = `${getClawBaseUrl()}/claw/api/v1/internal/agents/by-spaces-app/${encodeURIComponent(spacesAppId)}`;
+  let res: globalThis.Response;
+  try {
+    // Above claw-auth's own DB retry budget, so a slow-but-healthy answer isn't cut off.
+    res = await fetch(url, { method: 'GET', headers: { 'x-s2s-key': key }, signal: AbortSignal.timeout(15_000) });
+  } catch (err) {
+    throw new ClawAgentLookupError(`claw-auth unreachable (${err instanceof Error ? err.message : String(err)})`);
+  }
+  if (!res.ok) throw new ClawAgentLookupError(`claw-auth answered HTTP ${res.status}`);
+  const json = (await res.json().catch(() => null)) as { success?: unknown; data?: { isAgent?: unknown } } | null;
+  if (!json || json.success !== true || typeof json.data?.isAgent !== 'boolean') {
+    throw new ClawAgentLookupError('claw-auth returned an unexpected response');
+  }
+  return json.data.isAgent;
+}
+
+/**
  * A slug that names no agent this caller can reach.
  *
  * Distinct from the generic failures around it because the caller's fix is
