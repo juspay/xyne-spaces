@@ -155,6 +155,20 @@ export async function emitTicketCreated(
   }
 }
 
+/**
+ * Release completed → move its bundled dev tickets to a Completed-group stage.
+ * Fire-and-forget: never blocks or fails the release transition. Dynamic import
+ * avoids an import cycle (the completion service itself uses TicketRepository).
+ * Flag + per-board opt-out are checked inside the service.
+ */
+function triggerReleaseDevTicketCompletion(releaseTicketId: string, completedBy: string, completedAt: Date): void {
+  void import('@/services/release/releaseDevTicketCompletionService')
+    .then(({ releaseDevTicketCompletionService }) =>
+      releaseDevTicketCompletionService.onReleaseCompleted({ releaseTicketId, completedBy, completedAt }),
+    )
+    .catch(error => logger.error(`[ReleaseDevComplete] failed for release ${releaseTicketId}:`, error));
+}
+
 export class TicketRepository {
 
   /**
@@ -472,6 +486,7 @@ export class TicketRepository {
           error,
         );
       }
+      triggerReleaseDevTicketCompletion(ticketId, updatedBy, updatedTicket.updatedAt);
     }
 
     if (stageChanged || statusChanged) {
@@ -963,6 +978,7 @@ export class TicketRepository {
           error,
         );
       }
+      triggerReleaseDevTicketCompletion(ticketId, updatedBy, updatedTicket.updatedAt);
     }
 
     // Consolidate all field changes into a single TICKET_UPDATED emit.

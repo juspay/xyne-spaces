@@ -222,7 +222,7 @@ async function resolveLinearEntryTarget(ticket: {
  * exclusive columns on the same table. ROLE approvers are fanned out to their
  * member users.
  */
-async function notifyEntryApprovers(
+export async function notifyEntryApprovers(
   approversWhere: { transitionId: string } | { stageId: string },
   ticket: { id: string; channelId: string | null },
   stageName: string | null,
