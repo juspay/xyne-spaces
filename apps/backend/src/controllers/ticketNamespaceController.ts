@@ -1,6 +1,6 @@
 import { Request, Response } from 'express';
 import { Prisma } from '@prisma/client';
-import { sanitizeProjectCode, isValidProjectCode } from '@xyne/shared';
+import { sanitizeProjectCode, isValidProjectCode, WorkspaceRole } from '@xyne/shared';
 import { TicketNamespaceRepository } from '@/database/repositories/ticketNamespaceRepository';
 import { ProjectRepository } from '@/database/repositories/projectRepository';
 import { DatabaseClient } from '@/database/client';
@@ -24,6 +24,10 @@ export class TicketNamespaceController {
       const workspaceId = req.user?.workspaceId;
       if (!userId || !workspaceId) {
         res.status(401).json({ error: 'Unauthorized' });
+        return;
+      }
+      if (req.user?.role === WorkspaceRole.GUEST) {
+        res.status(403).json({ error: 'Guests cannot create ticket codes' });
         return;
       }
 
