@@ -44,6 +44,9 @@ function subscribe(listener: () => void): () => void {
 
 const getState = (): PoolState => poolState;
 
+// A hot swap would split slots and host across two copies of this store; reload instead.
+if (import.meta.hot) import.meta.hot.accept(() => window.location.reload());
+
 export const artifactAppPool = {
   mount(slotId: string, appId: string, props: SlotProps, backRef: BackRef): () => void {
     backRefs.set(slotId, backRef);
