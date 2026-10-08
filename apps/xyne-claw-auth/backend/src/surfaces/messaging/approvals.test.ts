@@ -17,7 +17,19 @@ vi.mock("../../lib/spaces-post-target.js", async (importOriginal) => ({
 }));
 vi.mock("../../lib/spaces-db.js", () => ({ getSpacesAuthForUser }));
 
-const { redeemApproval, enqueueApprovalCards, describeWriteAction } = await import("./approvals.js");
+const { redeemApproval, enqueueApprovalCards, describeWriteAction, summarizeApprovedWrite } = await import(
+  "./approvals.js"
+);
+
+/** What spaces-create-ticket actually answers with, citation token and all. */
+const CREATE_TICKET_RESULT = [
+  "[clf-__TOOL_CALL_ID__#1] Ticket created:",
+  "xyneId: PROG-412",
+  "ID: cmu55sxju08ue13dwgyv32bsm",
+  "Status: TODO",
+  "Priority: MEDIUM",
+  "ConversationID: cmu9z1k4t000108l3f2abcdef",
+].join("\n");
 
 const account = { id: "acc", orgId: "org1", surfaceId: "whatsapp", accountKey: "acct_1" } as never;
 const base = {
@@ -176,5 +188,127 @@ describe("generic write card", () => {
         options: { dryRun: false },
       }),
     ).toBe("Run *google-gmail-modify-labels*\n\nmessageIds: 18f2a, 18f2b\naddLabelIds: STARRED");
+  });
+});
+
+describe("the reply after an approved write", () => {
+  beforeEach(() => {
+    created.mockReset();
+    executeApprovedWrite.mockReset();
+    enqueueOutbound.mockReset();
+  });
+
+  it("names the ticket it just created instead of the tool that ran", async () => {
+    executeApprovedWrite.mockResolvedValue({
+      ok: true,
+      message: "Done — spaces-create-ticket ran.",
+      resultText: CREATE_TICKET_RESULT,
+    });
+    await redeemApproval({
+      account,
+      option: {
+        ...base,
+        action: { kind: "approve-write", label: "spaces-create-ticket" },
+        write: {
+          serverType: "xyne-spaces",
+          tool: "spaces-create-ticket",
+          params: { title: "Settlement mismatch", dynamicFields: { MID: "merchant_1234" } },
+          userId: "u1",
+          signature: "sig",
+        } as never,
+      },
+      senderId: base.senderId,
+      chatId: base.chatId,
+    });
+    const sent = enqueueOutbound.mock.calls[0]?.[1] as { text: string };
+    expect(sent.text).toContain("PROG-412");
+    expect(sent.text).toContain("Settlement mismatch");
+    expect(sent.text).toContain("MID: merchant_1234");
+    expect(sent.text).not.toContain("clf-");
+  });
+
+  it("leaves the agent the ids, so a follow-up can act on the new ticket", async () => {
+    executeApprovedWrite.mockResolvedValue({
+      ok: true,
+      message: "Done — spaces-create-ticket ran.",
+      resultText: CREATE_TICKET_RESULT,
+    });
+    await redeemApproval({
+      account,
+      option: {
+        ...base,
+        action: { kind: "approve-write", label: "spaces-create-ticket" },
+        write: { tool: "spaces-create-ticket", params: { title: "T" } } as never,
+      },
+      senderId: base.senderId,
+      chatId: base.chatId,
+    });
+    const recorded = created.mock.calls[1]?.[0] as { content: string };
+    expect(recorded.content).toContain("cmu9z1k4t000108l3f2abcdef");
+    expect(recorded.content).toContain("cmu55sxju08ue13dwgyv32bsm");
+  });
+
+  it("offers the email step when the ticket is on an email desk", () => {
+    const summary = summarizeApprovedWrite(
+      "spaces-create-ticket",
+      { title: "Settlement mismatch" },
+      `${CREATE_TICKET_RESULT}\nEmail desk: yes — ask whether the customer should be emailed about this ticket.`,
+    );
+    expect(summary).toContain("PROG-412");
+    expect(summary).toContain("email address");
+  });
+
+  it("does not offer an email on a board ticket, which has no mailbox", () => {
+    const summary = summarizeApprovedWrite("spaces-create-ticket", { title: "T" }, CREATE_TICKET_RESULT);
+    expect(summary).toContain("PROG-412");
+    expect(summary).not.toContain("email address");
+  });
+
+  it("falls back to the generic line for a tool with nothing to quote", () => {
+    expect(summarizeApprovedWrite("spaces-schedule-call", {}, "Call scheduled.")).toBeNull();
+    expect(summarizeApprovedWrite("spaces-create-ticket", {}, "")).toBeNull();
+  });
+});
+
+describe("create-ticket card", () => {
+  it("shows the custom fields being written, not just the title", () => {
+    expect(
+      describeWriteAction("spaces-create-ticket", {
+        title: "Settlement mismatch",
+        description: "Merchant reports a gap",
+        dynamicFields: { MID: "merchant_1234", Severity: "P2" },
+      }),
+    ).toBe(
+      "Create the ticket *Settlement mismatch*\n\nMerchant reports a gap\n\nMID: merchant_1234\nSeverity: P2",
+    );
+  });
+
+  it("is unchanged when the board has no custom fields", () => {
+    expect(
+      describeWriteAction("spaces-create-ticket", { title: "T", description: "D" }),
+    ).toBe("Create the ticket *T*\n\nD");
+  });
+});
+
+describe("send-email card", () => {
+  // Every recipient has to be visible: approving a send means approving who
+  // receives it, and bcc was previously forwarded but never rendered.
+  it("shows to, cc AND bcc", () => {
+    const body = describeWriteAction("spaces-send-ticket-email", {
+      to: ["ops@merchant.com"],
+      cc: ["finance@merchant.com"],
+      bcc: ["audit@internal.com"],
+      subject: "Settlement gap",
+      body: "Hi there,\n\nWe are looking into it.",
+    });
+    expect(body).toContain("ops@merchant.com");
+    expect(body).toContain("cc finance@merchant.com");
+    expect(body).toContain("bcc audit@internal.com");
+    expect(body).toContain("Subject: Settlement gap");
+    expect(body).toContain("We are looking into it.");
+  });
+
+  it("says plainly when there is no recipient rather than looking empty", () => {
+    expect(describeWriteAction("spaces-send-ticket-email", { body: "x" })).toContain("(nobody)");
   });
 });

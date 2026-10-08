@@ -45,6 +45,32 @@ export interface WriteCardAction {
  *  since the executed payload comes from the HMAC-signed action, not the card. */
 const BULK_TICKETS_CARD_LIMIT = 25;
 
+/** "MID: merchant_1234" pairs out of a custom-field map, or nothing. */
+function fieldMapEntries(value: unknown): Array<[string, string]> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return [];
+  return Object.entries(value as Record<string, unknown>)
+    .map(([key, raw]): [string, string] => [
+      key,
+      Array.isArray(raw) ? raw.map((v) => String(v)).join(", ") : String(raw ?? ""),
+    ])
+    .filter(([, text]) => text.trim() !== "");
+}
+
+/** The same 12-field cap as the WhatsApp card, with the same honest marker:
+ *  a silently shortened list reads as the whole list. */
+function fieldMapLines(value: unknown): string[] {
+  const entries = fieldMapEntries(value);
+  const shown = entries.slice(0, 12).map(([key, text]) => `**${key}:** ${text}`);
+  if (entries.length > 12) shown.push(`_…and ${entries.length - 12} more (all are written)_`);
+  return shown;
+}
+
+/** A recipient list the approver can read, from an array or a bare string. */
+function fieldList(value: unknown): string {
+  if (Array.isArray(value)) return value.map((v) => String(v)).filter(Boolean).join(", ");
+  return typeof value === "string" ? value.trim() : "";
+}
+
 export function formatActionDescription(tool: string, params: Record<string, unknown>, options?: { channelName?: string }): string {
   if (tool === "user-send-message") {
     const fullContent = mentionShorthandToText(params["content"] as string ?? "");
@@ -73,6 +99,29 @@ export function formatActionDescription(tool: string, params: Record<string, unk
     const desc = (params["description"] as string ?? "").slice(0, 300);
     const lines = [`**Create Ticket**`, ``, `**Title:** ${title}`];
     if (desc) lines.push(`**Description:** ${desc}${(params["description"] as string ?? "").length > 300 ? "..." : ""}`);
+    // Custom fields are the point of some desks (a MID, a merchant name) and
+    // are invisible in the title, so a card that omits them asks for approval
+    // of a value the approver cannot see.
+    lines.push(...fieldMapLines(params["dynamicFields"]));
+    return lines.join("\n");
+  }
+
+  if (tool === "spaces-send-ticket-email") {
+    const to = fieldList(params["to"]);
+    const cc = fieldList(params["cc"]);
+    const bcc = fieldList(params["bcc"]);
+    const subject = (params["subject"] as string) ?? "";
+    const fullBody = (params["body"] as string) ?? "";
+    const body = fullBody.slice(0, 1500);
+    const lines = [`**Send Email from Ticket**`, ``, `**To:** ${to || "(nobody)"}`];
+    if (cc) lines.push(`**Cc:** ${cc}`);
+    if (bcc) lines.push(`**Bcc:** ${bcc}`);
+    if (subject) lines.push(`**Subject:** ${subject}`);
+    lines.push(
+      ``,
+      `**Message:**`,
+      `${body}${fullBody.length > 1500 ? "\n…(truncated — the full message is sent)" : ""}`,
+    );
     return lines.join("\n");
   }
 
@@ -95,7 +144,10 @@ export function formatActionDescription(tool: string, params: Record<string, unk
       const tags = Array.isArray(ticket["tags"]) ? (ticket["tags"] as unknown[]).join(", ") : "";
       const rawDesc = String(ticket["description"] ?? "");
       const desc = rawDesc.slice(0, 200);
-      const meta = [priority, assignee && `→ ${assignee}`, tags && `[${tags}]`].filter(Boolean).join(" · ");
+      const fields = fieldMapEntries(ticket["dynamicFields"] ?? params["defaultDynamicFields"])
+        .map(([key, value]) => `${key}: ${value}`)
+        .join(" · ");
+      const meta = [priority, assignee && `→ ${assignee}`, tags && `[${tags}]`, fields].filter(Boolean).join(" · ");
       lines.push(`**${index + 1}. ${title}**${meta ? ` — ${meta}` : ""}`);
       if (desc) lines.push(`${desc}${rawDesc.length > 200 ? "…" : ""}`);
       lines.push(``);

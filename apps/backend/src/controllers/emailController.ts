@@ -164,14 +164,23 @@ export class EmailController {
 
       // 2. Fetch initial email (first email in conversation by createdAt)
       const emails = await this.emailRepo.findByConversationId(conversationId);
-      if (emails.length === 0) {
-        return res.status(404).json({ error: 'No emails found in conversation' });
-      }
 
-      // Get initial email (last in array since findByConversationId orders by createdAt DESC)
+      // A desk ticket can exist before any email does — one raised from
+      // WhatsApp, from a chat message or from the ticket form, where nobody
+      // has written to the customer yet. The first outbound mail on such a
+      // thread is not a reply to anything: it OPENS the provider thread
+      // (sendMailNew, as compose does) and the request must carry the subject,
+      // because there is no earlier email to take one from.
+      const isFirstEmail = emails.length === 0;
+      // Last in the array: findByConversationId orders by createdAt DESC.
       const initialEmail = emails[emails.length - 1];
       // Most recent email (first in DESC-ordered array) — used as isReplyTo for Zoho threading
       const latestEmail = emails[0];
+      if (isFirstEmail && !requestSubject?.trim()) {
+        return res.status(400).json({
+          error: 'subject is required for the first email on this ticket — there is no earlier email to reply to',
+        });
+      }
 
       // 4. Get external source for credentials
       const channel = await this.channelRepo.findById(conversation.channelId);
@@ -181,19 +190,23 @@ export class EmailController {
 
       const externalSource = await this.channelExternalSourceResolver.resolveForChannel(channel.id);
       if (!externalSource) {
-        return res.status(404).json({ error: 'External source not found' });
+        return res.status(400).json({
+          error: 'no_mailbox',
+          message: `#${channel.name} has no mailbox connected, so email cannot be sent from it. Email replies need an EMAIL desk with a connected Google, Microsoft or Zoho mailbox; this channel is ${channel.type}.`,
+        });
       }
 
       const quoteSource =
         (replyToEmailId && emails.find(e => e.id === replyToEmailId)) || latestEmail;
       const isGmail = externalSource.sourceType === ExternalSourcePlatform.GOOGLE;
-      const bodyWithQuote = isGmail
-        ? appendReplyQuote(safeBody, {
-            from: quoteSource.from,
-            body: quoteSource.body,
-            createdAt: quoteSource.createdAt,
-          })
-        : safeBody;
+      const bodyWithQuote =
+        isGmail && quoteSource
+          ? appendReplyQuote(safeBody, {
+              from: quoteSource.from,
+              body: quoteSource.body,
+              createdAt: quoteSource.createdAt,
+            })
+          : safeBody;
 
       const preference = await this.emailChannelPreferenceRepo.findByChannelId(channel.id);
       if (!preference?.ownerUserId) {
@@ -296,12 +309,32 @@ export class EmailController {
       // to threadId for providers (Zoho/Microsoft) that don't expose one.
       const baseSubject = requestSubject?.trim()
         ? requestSubject.trim().replace(/^(re:\s*)+/i, '').trim()
-        : initialEmail.subject.replace(/^(re:\s*)+/i, '').trim();
-      const replySubject = `Re: ${baseSubject}`;
+        : (initialEmail?.subject ?? '').replace(/^(re:\s*)+/i, '').trim();
+      // "Re:" would be a lie on a thread nobody has written to yet.
+      const replySubject = isFirstEmail ? baseSubject : `Re: ${baseSubject}`;
 
       let result: { threadId: string; messageId?: string };
 
-      if (externalSource.sourceType === ExternalSourcePlatform.MICROSOFT) {
+      if (isFirstEmail) {
+        // No provider thread exists yet, so every provider takes the same
+        // path: send a new mail and let its thread id become this ticket's.
+        if (!adapter.sendMailNew) {
+          return res.status(400).json({
+            error: `Provider ${externalSource.sourceType} cannot start a new email thread on an existing ticket`,
+          });
+        }
+        result = await adapter.sendMailNew({
+          encryptedCredentials: externalSource.credentials,
+          sourceId: externalSource.id,
+          subject: replySubject,
+          body: outboundBody,
+          to: toRecipients,
+          cc: ccRecipients,
+          bcc: bccRecipients,
+          ...(fromEmailAddress && { fromEmailAddress }),
+          ...(fileAttachments.length > 0 && { fileAttachments }),
+        });
+      } else if (externalSource.sourceType === ExternalSourcePlatform.MICROSOFT) {
         const sender = MicrosoftDeskService.createEmailSender(
           externalSource.credentials,
           externalSource.id
@@ -375,7 +408,14 @@ export class EmailController {
 
       // 6. Save reply in database
       const externalMessageId = result.messageId || result.threadId;
-      const emailType = type === 'REPLY' ? EmailType.REPLY : EmailType.REPLY_ALL;
+      // COMPOSE is what an outbound mail that starts a thread is recorded as
+      // everywhere else (see composeEmail), so the desk thread and the metrics
+      // read the same whether the thread was opened here or from Compose.
+      const emailType = isFirstEmail
+        ? EmailType.COMPOSE
+        : type === 'REPLY'
+          ? EmailType.REPLY
+          : EmailType.REPLY_ALL;
       const newEmail = await this.emailRepo.create({
         type: emailType,
         subject: replySubject,
@@ -394,6 +434,39 @@ export class EmailController {
       await advanceLastEmailAt(db, { conversationId }, newEmail.createdAt);
       websocketService.broadcastLabelUnreadCountsUpdate(conversation.channelId);
 
+      // Claim the brand-new provider thread NOW, before the awaited side
+      // effects below. Until this row exists the inbound sync has no mapping
+      // from the thread to this conversation, so a fast webhook (our own sent
+      // message, or an instant reply) would open a SECOND ticket for it.
+      // Best-effort: the mail is already sent.
+      // `threadClaimed` then skips the general claim in step 7.
+      let threadClaimed = false;
+      if (isFirstEmail) {
+        try {
+          await this.externalMessageRepo.create({
+            externalSourceId: externalSource.id,
+            externalId: externalMessageId,
+            externalThreadId: result.threadId,
+            entityId: newEmail.id,
+            direction: MessageDirection.OUTGOING,
+            entityType: ExternalEntityType.EMAIL,
+          });
+          threadClaimed = true;
+        } catch (error) {
+          // Already claimed (a retry, or the webhook beat us to it) is a
+          // success for our purposes: the mapping exists either way.
+          threadClaimed =
+            error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002';
+          if (!threadClaimed) {
+            logger.warn('[EmailController] Failed to claim the new email thread', {
+              conversationId,
+              threadId: result.threadId,
+              error: error instanceof Error ? error.message : String(error),
+            });
+          }
+        }
+      }
+
       // 6a. Record the reply as a ticket event, mirroring how stage changes surface: a
       // ticket_activities row for the Details → Activity timeline, plus a SYSTEM message for the
       // Messages thread. Non-blocking — the email is already sent, so a failure here must never
@@ -402,6 +475,7 @@ export class EmailController {
       try {
         const replyingUser = await this.userRepo.findById(userId);
         const replierName = replyingUser?.name || req.user?.name || 'Someone';
+        const verb = isFirstEmail ? 'sent an email' : 'replied to the email';
 
         const ticketForActivity = await db.ticket.findFirst({
           where: { conversationId },
@@ -425,7 +499,7 @@ export class EmailController {
           message: {
             conversationId,
             senderId: userId,
-            content: `${replierName} replied to the email`,
+            content: `${replierName} ${verb}`,
             activityType: 'EMAIL_REPLY',
             workspaceId: channel.workspaceId,
           },
@@ -439,7 +513,14 @@ export class EmailController {
 
       // Record the first response time for SLA tracking.
       // Uses newEmail.createdAt so the timestamp matches the persisted email record.
-      await emailService.recordFirstResponse(conversationId, newEmail.createdAt);
+      //
+      // Skipped when this mail OPENS the thread: first-response time measures
+      // how long a customer waited for an answer, and there was no inbound
+      // message to answer. Counting it would quietly improve the desk's SLA
+      // numbers every time an agent reaches out first.
+      if (!isFirstEmail) {
+        await emailService.recordFirstResponse(conversationId, newEmail.createdAt);
+      }
 
       // Audit trail + desk metrics: manual agent reply.
       await emailService.recordEmailSentActivity(
@@ -477,22 +558,25 @@ export class EmailController {
 
       // 7. Create ExternalMessage tracking record for deduplication.
       // Prevents the provider sync from re-creating an Email row for the
-      // outbound message we just sent.
-      try {
-        await this.externalMessageRepo.create({
-          externalSourceId: externalSource.id,
-          externalId: externalMessageId,
-          externalThreadId: initialEmail.externalThreadId,
-          entityId: newEmail.id,
-          direction: MessageDirection.OUTGOING,
-          entityType: ExternalEntityType.EMAIL,
-        });
-        logger.info(`[EmailController] ExternalMessage tracking record created for email: ${newEmail.id}`);
-      } catch (error) {
-        if (
-          !(error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002')
-        ) {
-          logger.warn(`[EmailController] Failed to create ExternalMessage tracking record:`, error);
+      // outbound message we just sent. Skipped when the first-email branch
+      // above already claimed this exact row.
+      if (!threadClaimed) {
+        try {
+          await this.externalMessageRepo.create({
+            externalSourceId: externalSource.id,
+            externalId: externalMessageId,
+            externalThreadId: isFirstEmail ? result.threadId : initialEmail!.externalThreadId,
+            entityId: newEmail.id,
+            direction: MessageDirection.OUTGOING,
+            entityType: ExternalEntityType.EMAIL,
+          });
+          logger.info(`[EmailController] ExternalMessage tracking record created for email: ${newEmail.id}`);
+        } catch (error) {
+          if (
+            !(error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002')
+          ) {
+            logger.warn(`[EmailController] Failed to create ExternalMessage tracking record:`, error);
+          }
         }
       }
 
@@ -534,6 +618,14 @@ export class EmailController {
         } catch (error) {
           logger.warn(`[EmailController] Failed to delete draft ${draftId}:`, error);
         }
+      }
+
+      // The opening mail that was auto-drafted for this ticket has now gone
+      // out, so the draft is spent — whether it was sent from the composer or
+      // from WhatsApp. `draftId` above only covers a draft the sender owned;
+      // this one is the ownerless auto-draft seed.
+      if (isFirstEmail) {
+        await emailService.discardOpeningAutoDraft(conversationId);
       }
 
       // 8. Store Zoho attachment references in MessageAttachment table for UI display.

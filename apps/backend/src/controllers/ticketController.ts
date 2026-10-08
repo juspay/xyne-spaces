@@ -38,6 +38,7 @@ import {
 } from '../services/ticketCustomFieldService';
 import { buildCreationFormFieldChanges } from '../services/ticketCustomFieldService';
 import {
+  resolveBoardTicketFormId,
   resolveFormFieldDefinitionsForForm,
   type ResolvedFormFieldDefinition,
 } from '@/utils/fieldDefinition';
@@ -67,6 +68,8 @@ import { versionReleaseMappingService } from '@/services/release/versionReleaseM
 import { BaseTicketType,
   FormContextType,
   FormEntityType,
+  parseFieldOptionValues,
+  resolveParentOption,
   ReleaseTrackingMode,
   TicketStatusV2,
   TicketPriority,
@@ -94,6 +97,7 @@ import { unifiedBotUserService } from '@/bots/unified';
 import { workflowManager } from '@/workflows/services/workflowManager';
 import { WorkflowType } from '@/workflows/types/workflow-enums';
 import { ticketService } from '@/services/ticketService';
+import { emailService } from '@/services/emailService';
 import { dualWriteTicketTags } from '@/services/ticketTagDualWriteService';
 import { createTicketWithConversationTx } from '@/bypassAcl/transactions/controllersTicketController';
 import { createTicketTx } from '@/bypassAcl/transactions/controllersTicketController';
@@ -383,6 +387,61 @@ export class TicketController {
     } catch (error) {
       logger.error('[TicketController] Failed to fetch my ticket board ids', error);
       res.status(500).json({ error: 'Failed to fetch board ids' });
+    }
+  };
+
+  getBoardTicketFields = async (req: Request, res: Response): Promise<void> => {
+    try {
+      const boardId = String(req.query.boardId ?? '').trim();
+      if (!boardId) {
+        res.status(400).json({ error: 'boardId is required' });
+        return;
+      }
+      if (!req.user?.id) {
+        res.status(401).json({ error: 'User not authenticated' });
+        return;
+      }
+
+      // Workspace-scoped by the tenant ACL extension, so a board in another
+      // workspace reads as missing rather than leaking its form.
+      const board = await db.board.findUnique({
+        where: { id: boardId },
+        select: { id: true, name: true },
+      });
+      if (!board) {
+        res.status(404).json({ error: 'Board not found' });
+        return;
+      }
+
+      const formId = await resolveBoardTicketFormId(db, boardId);
+      if (!formId) {
+        res.status(200).json({ boardId, boardName: board.name, formId: null, fields: [] });
+        return;
+      }
+
+      const definitions = await resolveFormFieldDefinitionsForForm(db, formId);
+      const fields = definitions.map(field => {
+        const parent = field.parentOptionId
+          ? resolveParentOption(definitions, field.parentOptionId)
+          : undefined;
+        return {
+          fieldName: field.fieldName,
+          fieldType: field.fieldType,
+          required: !field.isOptional,
+          options: parseFieldOptionValues(field.fieldEnum),
+          ...(parent
+            ? { shownWhen: { fieldName: parent.parentField.fieldName, equals: parent.option.value } }
+            : {}),
+        };
+      });
+
+      res.status(200).json({ boardId, boardName: board.name, formId, fields });
+    } catch (error) {
+      logger.error('[TicketController] Failed to fetch board ticket fields', {
+        boardId: req.query.boardId,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      res.status(500).json({ error: 'Failed to fetch board ticket fields' });
     }
   };
 
@@ -839,6 +898,28 @@ export class TicketController {
             `[createTicket] Skipped last-activity update for channel ${String(ticketChannelId).replace(/[\r\n]/g, '')}: ${(err instanceof Error ? err.message : String(err)).replace(/[\r\n]/g, '')}`,
           );
         }
+
+        // A ticket raised on an email desk from somewhere other than the
+        // mailbox — WhatsApp, a chat message, the ticket form — has nobody
+        // written to yet, so the agent who opens it finds an empty composer.
+        // Draft that first email now, exactly as an inbound email would have.
+        // No-ops unless the channel has auto-draft switched on; fire-and-forget,
+        // because a draft is a convenience and must never fail or delay the
+        // ticket.
+        void emailService
+          .triggerOpeningAutoDraft({
+            ticketId: ticket.id,
+            conversationId: ticket.conversationId,
+            channelId: ticketChannelId,
+            title: ticket.title,
+            description: description ?? '',
+          })
+          .catch(err =>
+            logger.warn('[createTicket] opening auto-draft failed', {
+              ticketId: ticket.id,
+              error: err instanceof Error ? err.message : String(err),
+            }),
+          );
       }
 
       // Create TicketTag records for each tag

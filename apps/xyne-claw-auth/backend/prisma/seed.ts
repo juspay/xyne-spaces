@@ -723,6 +723,7 @@ Some tools (like creating tickets or scheduling calls) require user approval bef
       config: {
         toolPermissions: {
           "xyne-spaces__spaces-create-ticket": "ask",
+          "xyne-spaces__spaces-send-ticket-email": "ask",
           "xyne-spaces__spaces-schedule-call": "ask",
         },
       },
@@ -735,6 +736,7 @@ Some tools (like creating tickets or scheduling calls) require user approval bef
       config: {
         toolPermissions: {
           "xyne-spaces__spaces-create-ticket": "ask",
+          "xyne-spaces__spaces-send-ticket-email": "ask",
           "xyne-spaces__spaces-schedule-call": "ask",
         },
       },
@@ -780,6 +782,7 @@ You ARE the user. Not "the user's assistant" or "an AI representing the user". T
     memoryEnabled: true,
     toolPermissions: {
       "xyne-spaces__spaces-create-ticket": "ask",
+      "xyne-spaces__spaces-send-ticket-email": "ask",
       "xyne-spaces__spaces-schedule-call": "ask",
       "xyne-spaces__spaces-send-message": "ask",
     },
@@ -964,6 +967,7 @@ You:
             "spaces-projects",
             "spaces-project-team-members",
             "spaces-boards",
+            "spaces-board-fields",
             "spaces-calls",
             "spaces-canvases",
             "spaces-read-canvas",
@@ -976,6 +980,7 @@ You:
             // Write-side — require approval (see toolPermissions below).
             "spaces-create-ticket",
             "spaces-update-ticket",
+            "spaces-send-ticket-email",
             "spaces-schedule-call",
             "user-send-message",
             "spaces-create-canvas",
@@ -1050,6 +1055,7 @@ You:
             "spaces-projects",
             "spaces-project-team-members",
             "spaces-boards",
+            "spaces-board-fields",
             "spaces-calls",
             "spaces-canvases",
             "spaces-read-canvas",
@@ -1062,6 +1068,7 @@ You:
             // Write-side — require approval (see toolPermissions below).
             "spaces-create-ticket",
             "spaces-update-ticket",
+            "spaces-send-ticket-email",
             "spaces-schedule-call",
             "user-send-message",
             "spaces-create-canvas",

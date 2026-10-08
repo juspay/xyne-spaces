@@ -96,3 +96,28 @@ describe("isReadOnlyRun", () => {
     expect(isReadOnlyRun(cfg("act"))).toBe(false);
   });
 });
+
+// Mail to a customer leaves the workspace entirely. An unattended run has
+// nobody to click an approval, so "ask" would hang rather than refuse —
+// below "act" this has to be a hard deny.
+describe("outbound customer email", () => {
+  for (const policy of ["observe", "reply"] as const) {
+    it(`is denied under ${policy}`, () => {
+      const permissions = buildWritePermissions(
+        { writePolicy: policy, shadow: false } as never,
+        {},
+      );
+      expect(permissions["xyne-spaces__spaces-send-ticket-email"]).toBe("deny");
+    });
+  }
+
+  it("is allowed under act, like every other write", () => {
+    const permissions = buildWritePermissions({ writePolicy: "act", shadow: false } as never, {});
+    expect(permissions["xyne-spaces__spaces-send-ticket-email"]).toBeUndefined();
+  });
+
+  it("is denied in shadow even when the policy says act", () => {
+    const permissions = buildWritePermissions({ writePolicy: "act", shadow: true } as never, {});
+    expect(permissions["xyne-spaces__spaces-send-ticket-email"]).toBe("deny");
+  });
+});

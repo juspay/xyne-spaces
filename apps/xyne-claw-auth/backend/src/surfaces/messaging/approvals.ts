@@ -49,6 +49,23 @@ function paramText(value: unknown): string {
 
 const THREAD_PREVIEW_CHARS = 160;
 
+/** "MID: merchant_1234" per line, for a card that would otherwise hide the
+ *  custom-field values being written. Capped so a wide form cannot push the
+ *  rest of the card past WhatsApp's 1024-character body. */
+function describeFieldMap(value: unknown): string {
+  const map = value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : null;
+  if (!map) return "";
+  const entries = Object.entries(map)
+    .map(([key, raw]) => [key, paramText(raw)] as const)
+    .filter(([, text]) => text !== "");
+  if (entries.length === 0) return "";
+  // Capped at 12 like the Spaces card (lib/write-card-render.ts) so the same
+  // write does not show a different number of fields on the two surfaces.
+  const shown = entries.slice(0, 12).map(([key, text]) => `${key}: ${clamp(text, 120)}`);
+  if (entries.length > 12) shown.push(`…and ${entries.length - 12} more`);
+  return shown.join("\n");
+}
+
 export function htmlToCardText(html: string): string {
   let current = html;
   let previous: string;
@@ -112,19 +129,47 @@ export function describeWriteAction(tool: string, params: Record<string, unknown
     case "spaces-create-ticket": {
       const title = str(params["title"]) || "(untitled)";
       const desc = clamp(str(params["description"]), 300);
-      return `Create the ticket *${title}*${desc ? `\n\n${desc}` : ""}`;
+      // Custom fields are the whole point of some desks (a MID, a merchant
+      // name), and they are invisible in the title — so a card that hides
+      // them asks the person to approve a value they cannot see.
+      const fields = describeFieldMap(params["dynamicFields"]);
+      return `Create the ticket *${title}*${desc ? `\n\n${desc}` : ""}${fields ? `\n\n${fields}` : ""}`;
     }
     case "spaces-create-bulk-tickets": {
       const tickets = Array.isArray(params["tickets"]) ? params["tickets"] : [];
+      const shared = describeFieldMap(params["defaultDynamicFields"]);
       const names = tickets
         .slice(0, 5)
-        .map((t, i) => `${i + 1}. ${str((t as Record<string, unknown>)["title"]) || "(untitled)"}`)
+        .map((t, i) => {
+          const ticket = t as Record<string, unknown>;
+          // Per-ticket fields replace the shared ones, so show whichever
+          // actually applies rather than implying both are written.
+          const own = ticket["dynamicFields"];
+          const fields = own === undefined || own === null ? shared : describeFieldMap(own);
+          return `${i + 1}. ${str(ticket["title"]) || "(untitled)"}${fields ? ` — ${fields.replace(/\n/g, ", ")}` : ""}`;
+        })
         .join("\n");
       const more = tickets.length > 5 ? `\n…and ${tickets.length - 5} more` : "";
       return `Create ${tickets.length} ticket(s):\n${names}${more}`;
     }
-    case "spaces-update-ticket":
-      return `Update ticket ${str(params["ticketId"]) || "(unknown)"}`;
+    case "spaces-send-ticket-email": {
+      // An email leaves the building. Recipients and the actual words are the
+      // whole decision, so both go on the card even when that crowds it.
+      const to = paramText(params["to"]) || "(nobody)";
+      const cc = paramText(params["cc"]);
+      const bcc = paramText(params["bcc"]);
+      const subject = str(params["subject"]);
+      const fullBody = cardText(str(params["body"]));
+      const content = clamp(fullBody, MAX_DETAIL_CHARS);
+      const lines = [`Email *${to}*${cc ? `, cc ${cc}` : ""}${bcc ? `, bcc ${bcc}` : ""} from this ticket`];
+      if (subject) lines.push(`Subject: ${subject}`);
+      const cut = fullBody.length > MAX_DETAIL_CHARS ? "\n(shortened for this card — the full message is sent)" : "";
+      return `${lines.join("\n")}\n\n"${content}"${cut}`;
+    }
+    case "spaces-update-ticket": {
+      const fields = describeFieldMap(params["customFields"]);
+      return `Update ticket ${str(params["ticketId"]) || "(unknown)"}${fields ? `\n\n${fields}` : ""}`;
+    }
     case "spaces-schedule-call":
       return `Schedule a call: ${clamp(str(params["title"]) || "(untitled)", 200)}`;
     default: {
@@ -224,6 +269,71 @@ export async function enqueueApprovalCards(input: {
   }
 }
 
+/** Tool results carry inline citation tokens for the Spaces UI; on a phone
+ *  they are noise. */
+function stripCitationTokens(text: string): string {
+  return text
+    .replace(/\[clf-[^\]]*\]/g, "")
+    .replace(/[ \t]+/g, " ")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
+function fieldFromResult(text: string, label: string): string {
+  const match = new RegExp(`^\\s*${label}:\\s*(.+)$`, "im").exec(text);
+  return match?.[1]?.trim() ?? "";
+}
+
+/**
+ * What the person is told once the write has actually run.
+ *
+ * `executeApprovedWrite` answers with "Done — <tool> ran.", which is true and
+ * useless: the one thing somebody creating a ticket from WhatsApp needs back
+ * is its id. The tool's own result text has it, so this turns that into a
+ * sentence and falls back to the generic line for tools with nothing worth
+ * quoting.
+ */
+export function summarizeApprovedWrite(
+  tool: string,
+  params: Record<string, unknown>,
+  resultText: string | undefined,
+): string | null {
+  const text = stripCitationTokens(resultText || "");
+  if (!text) return null;
+  switch (tool) {
+    case "spaces-create-ticket": {
+      const xyneId = fieldFromResult(text, "xyneId");
+      if (!xyneId) return null;
+      const title = str(params["title"]);
+      const lines = [`Ticket *${xyneId}* created${title ? `: ${title}` : ""}.`];
+      const fields = describeFieldMap(params["dynamicFields"]);
+      if (fields) lines.push("", fields);
+      const attachments = fieldFromResult(text, "Attachments");
+      if (attachments) lines.push("", `Attachments: ${attachments}`);
+      // On an email desk the ticket is only half of it — offer the step the
+      // person would otherwise have to know to ask for. The tool result says
+      // whether this channel can mail a customer at all.
+      if (/^\s*Email desk:\s*yes/im.test(text)) {
+        lines.push("", "Want me to email the customer the ticket details? Send me their email address(es).");
+      }
+      return lines.join("\n");
+    }
+    case "spaces-send-ticket-email": {
+      const sentTo = paramText(params["to"]);
+      return sentTo
+        ? `Email sent to ${sentTo}. It is on the ticket's email thread, and replies will land there.`
+        : null;
+    }
+    case "spaces-update-ticket": {
+      // The update tool answers "Ticket <id> updated: a, b" already — quote it
+      // rather than inventing a second phrasing.
+      return /updated/i.test(text) ? text : null;
+    }
+    default:
+      return null;
+  }
+}
+
 /**
  * Write the tap and its outcome into the conversation the run used.
  *
@@ -303,8 +413,22 @@ export async function redeemApproval(input: {
       approverUserId: effectiveUserId,
       ...(option.conversationId ? { conversationId: option.conversationId } : {}),
     });
-    await reply(outcome.ok ? `${outcome.message}` : `${outcome.message}`);
-    await recordOutcome(option, account.orgId, `Approved: ${option.action.label}`, outcome.message);
+    const spoken = outcome.ok
+      ? (summarizeApprovedWrite(option.write.tool, option.write.params, outcome.resultText) ?? outcome.message)
+      : outcome.message;
+    await reply(spoken);
+    // The transcript gets the tool's RAW result as well, not just the sentence
+    // the person saw. The write ran outside any run, so this note is the only
+    // place the next turn can learn the new ticket's ids — without them the
+    // agent cannot act on "now email it to the merchant".
+    await recordOutcome(
+      option,
+      account.orgId,
+      `Approved: ${option.action.label}`,
+      outcome.ok && outcome.resultText?.trim()
+        ? `${spoken}\n\n[tool result]\n${stripCitationTokens(outcome.resultText)}`
+        : spoken,
+    );
   } catch (err) {
     log.error(`[approvals] execution threw for ${option.action.label}: ${errMsg(err)}`);
     await reply("Something went wrong running that. Please try again from Xyne Spaces.");

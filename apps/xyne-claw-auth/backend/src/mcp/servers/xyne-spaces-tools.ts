@@ -4223,6 +4223,85 @@ interface BoardRow {
   updatedAt?: string;
 }
 
+/** A plain object argument, or undefined for anything else (the model sends a
+ *  bare string often enough that a cast would write junk). */
+function asFieldMap(value: unknown): Record<string, unknown> | undefined {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : undefined;
+}
+
+// ── spaces-board-fields ─────────────────────────────────────────────
+
+/**
+ * A board's ticket custom fields. Without this the agent cannot know that a
+ * desk expects, say, a "MID": `dynamicFields` is keyed by field NAME, and a
+ * name that is not on the board's form is rejected rather than guessed at.
+ */
+const spacesBoardFields: ToolDef = {
+  name: "spaces-board-fields",
+  description:
+    "List the custom (form) fields a board's tickets carry — field name, type, whether it is required, " +
+    "and the allowed values for a dropdown. Call this BEFORE spaces-create-ticket or spaces-update-ticket " +
+    "whenever the ticket needs more than title/description/priority/assignee — e.g. a desk with a 'MID' " +
+    "field. The names returned here are exactly the keys to pass in `dynamicFields` (create) or " +
+    "`customFields` (update); any other name is refused. A field with `shownWhen` only applies when its " +
+    "parent field holds that value. Returns no fields when the board has no ticket form.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      boardId: { type: "string", description: "Board ID (use spaces-boards to find)" },
+    },
+    required: ["boardId"],
+  },
+  handler: withToolErrors("Board fields error", async (args) => {
+      const boardId = String(args["boardId"] ?? "").trim();
+      if (!boardId) return err("boardId is required.");
+
+      const data = (await spacesFetch(
+        `/api/tickets/claw/board-fields?boardId=${encodeURIComponent(boardId)}`,
+      )) as BoardFieldsResponse;
+
+      const fields = Array.isArray(data?.fields) ? data.fields : [];
+      const where = data?.boardName ? `board ${data.boardName}` : `board ${boardId}`;
+      if (fields.length === 0) {
+        return ok(`No custom fields on ${where} — create tickets with the standard fields only.`);
+      }
+
+      const lines = fields.map((field) => {
+        const parts = [`${field.fieldName} (${field.fieldType}${field.required ? ", required" : ", optional"})`];
+        if (field.options && field.options.length > 0) {
+          parts.push(`  Allowed values: ${field.options.join(" | ")}`);
+        }
+        if (field.shownWhen) {
+          parts.push(`  Only applies when ${field.shownWhen.fieldName} = ${field.shownWhen.equals}`);
+        }
+        return parts.join("\n");
+      });
+
+      return ok(
+        `${fields.length} custom field(s) on ${where}:\n\n${lines.join("\n\n")}\n\n` +
+          "Pass these by NAME in dynamicFields (spaces-create-ticket) or customFields (spaces-update-ticket). " +
+          "Value by type — STRING / SINGLE_SELECT: a string; NUMBER: a number; BOOLEAN: true or false; " +
+          "DATE: a date like 2026-01-31; MULTI_SELECT / USER: an array (of allowed values / user IDs); " +
+          "TICKET: a ticket ID, on create only; DOC: a file, which cannot be set here.",
+      );
+    }),
+};
+
+interface BoardFieldsResponse {
+  boardId?: string;
+  boardName?: string;
+  formId?: string | null;
+  fields?: Array<{
+    fieldName: string;
+    fieldType: string;
+    required?: boolean;
+    options?: string[];
+    shownWhen?: { fieldName: string; equals: string };
+  }>;
+}
+
 // ── spaces-create-ticket ────────────────────────────────────────────
 
 const spacesCreateTicket: ToolDef = {
@@ -4234,7 +4313,12 @@ const spacesCreateTicket: ToolDef = {
     "If the user's triggering message had file attachments, ALSO pass attachConversationId " +
     "= the conversationId from your session (the thread that triggered this run). " +
     "Attachments will be copied from that conversation onto the ticket in the same operation. " +
-    "attachConversationId is attachments-only — it does NOT change where the ticket lives.",
+    "attachConversationId is attachments-only — it does NOT change where the ticket lives. " +
+    "Boards can carry custom fields (a desk's 'MID', for example): call spaces-board-fields FIRST when the " +
+    "ticket needs any, then pass them in `dynamicFields`. " +
+    "When the result says 'Email desk: yes', the ticket can mail the customer — offer that as the next step and " +
+    "use spaces-send-ticket-email once they give you the address(es); until then the desk shows an auto-drafted " +
+    "email on the ticket for whoever opens it.",
   inputSchema: {
     type: "object",
     properties: {
@@ -4264,6 +4348,15 @@ const spacesCreateTicket: ToolDef = {
       assignedTo: { type: "string", description: "User ID to assign (use spaces-users to find)" },
       eta: { type: "string", description: "Due date as ISO 8601 string" },
       tags: { type: "array", items: { type: "string" }, description: "Tags to apply" },
+      dynamicFields: {
+        type: "object",
+        description:
+          "The board's custom (form) field values, keyed by field NAME exactly as spaces-board-fields " +
+          "reports it — e.g. { \"MID\": \"merchant_1234\" }. A multi-select field takes an array of " +
+          "strings. A name that is not on the board's form, or a required field left out, is refused — " +
+          "resolve the real names with spaces-board-fields rather than guessing.",
+        additionalProperties: true,
+      },
     },
     required: ["title", "description", "projectId", "boardId", "channelId"],
   },
@@ -4287,6 +4380,12 @@ const spacesCreateTicket: ToolDef = {
       if (args["assignedTo"]) body["assignedTo"] = args["assignedTo"];
       if (args["eta"]) body["eta"] = args["eta"];
       if (args["tags"]) body["tags"] = args["tags"];
+      // Custom (form) field values, keyed by field name. The Spaces create
+      // endpoint resolves them against the BOARD's ticket form and is the
+      // authority on what is valid; the queue-time validator rejects unknown
+      // names earlier so the person never approves a doomed write.
+      const dynamicFields = asFieldMap(args["dynamicFields"]);
+      if (dynamicFields && Object.keys(dynamicFields).length > 0) body["dynamicFields"] = dynamicFields;
 
       // WORKAROUND for xyne-backend bug (ticketController.ts:500): when the
       // body omits createdBy, the conversationParticipant.upsert in the
@@ -4372,6 +4471,12 @@ const spacesCreateTicket: ToolDef = {
       );
       applyChannelInfo(citations, channelInfo);
 
+      // Whether the customer can be emailed from this ticket. The channel type
+      // is already in hand from the citation lookup, and saying so here is what
+      // lets the next step be offered — on an email desk the ticket is only
+      // half the job, the merchant still has to be told.
+      const isEmailDesk = channelInfo.get(channelId)?.type === "EMAIL";
+
       const bodyLines = [
         `xyneId: ${data.xyneId}`,
         `ID: ${data.id}`,
@@ -4379,6 +4484,7 @@ const spacesCreateTicket: ToolDef = {
         `Priority: ${data.priority}`,
         `ConversationID: ${data.conversationId}`,
         ...(attachLine ? [attachLine.trimStart()] : []),
+        ...(isEmailDesk ? ["Email desk: yes — the customer can be emailed from this ticket."] : []),
       ];
       return okCited(prefixChunk(1, "Ticket created:", bodyLines), citations);
     }),
@@ -4398,6 +4504,7 @@ interface BulkTicketInput {
   assignedTo?: unknown;
   eta?: unknown;
   tags?: unknown;
+  dynamicFields?: unknown;
 }
 
 interface BulkTicketCreateResult {
@@ -4426,8 +4533,9 @@ const spacesCreateBulkTickets: ToolDef = {
   description:
     "Create MANY tickets in Spaces behind ONE approval. Prefer this tool over calling spaces-create-ticket repeatedly " +
     "when turning multiple findings into multiple tickets. Set shared projectId, boardId, channelId, defaultPriority, " +
-    "defaultTags, and defaultAssignedTo once at the top level; each ticket may override projectId, boardId, channelId, " +
-    "priority, assignedTo, eta, and tags. Tickets are created sequentially and partial failures are reported.",
+    "defaultTags, defaultAssignedTo and defaultDynamicFields once at the top level; each ticket may override projectId, " +
+    "boardId, channelId, priority, assignedTo, eta, tags and dynamicFields. Tickets are created sequentially and partial " +
+    "failures are reported.",
   inputSchema: {
     type: "object",
     properties: {
@@ -4437,6 +4545,13 @@ const spacesCreateBulkTickets: ToolDef = {
       defaultPriority: { type: "string", enum: ["LOW", "MEDIUM", "HIGH", "CRITICAL"], description: "Priority applied to tickets that do not specify priority." },
       defaultTags: { type: "array", items: { type: "string" }, description: "Tags applied to tickets that do not specify tags." },
       defaultAssignedTo: { type: "string", description: "Assignee applied to tickets that do not specify assignedTo." },
+      defaultDynamicFields: {
+        type: "object",
+        description:
+          "Board custom (form) field values applied to tickets that do not specify dynamicFields, keyed by field " +
+          "NAME as spaces-board-fields reports it. Per-ticket dynamicFields REPLACES this, it does not merge.",
+        additionalProperties: true,
+      },
       tickets: {
         type: "array",
         minItems: 1,
@@ -4452,6 +4567,11 @@ const spacesCreateBulkTickets: ToolDef = {
             assignedTo: { type: "string", description: "User ID to assign" },
             eta: { type: "string", description: "Due date as ISO 8601 string" },
             tags: { type: "array", items: { type: "string" }, description: "Tags to apply" },
+            dynamicFields: {
+              type: "object",
+              description: "Board custom field values for this ticket, keyed by field name. Replaces defaultDynamicFields.",
+              additionalProperties: true,
+            },
           },
           required: ["title", "description"],
         },
@@ -4478,6 +4598,7 @@ const spacesCreateBulkTickets: ToolDef = {
     const defaultPriority = optionalString(args["defaultPriority"]) as TicketPriority | undefined;
     const defaultAssignedTo = optionalString(args["defaultAssignedTo"]);
     const defaultTags = normalizeTags(args["defaultTags"]);
+    const defaultDynamicFields = asFieldMap(args["defaultDynamicFields"]);
     const created: Array<{ index: number; title: string; id: string; xyneId: string; url?: string }> = [];
     const failures: Array<{ index: number; title: string; reason: string }> = [];
 
@@ -4492,6 +4613,7 @@ const spacesCreateBulkTickets: ToolDef = {
       const assignedTo = optionalString(ticket.assignedTo) ?? defaultAssignedTo;
       const eta = optionalString(ticket.eta);
       const tags = normalizeTags(ticket.tags) ?? defaultTags;
+      const dynamicFields = asFieldMap(ticket.dynamicFields) ?? defaultDynamicFields;
       const label = title ?? `ticket ${i + 1}`;
 
       if (!title || !description) {
@@ -4505,6 +4627,7 @@ const spacesCreateBulkTickets: ToolDef = {
         if (assignedTo) body["assignedTo"] = assignedTo;
         if (eta) body["eta"] = eta;
         if (tags) body["tags"] = tags;
+        if (dynamicFields && Object.keys(dynamicFields).length > 0) body["dynamicFields"] = dynamicFields;
         if (ctx.userId) body["createdBy"] = ctx.userId;
 
         const data = (await spacesFetch("/api/tickets/claw", {
@@ -4558,7 +4681,8 @@ const spacesUpdateTicket: ToolDef = {
   description:
     "Update an existing ticket in Spaces. At least one update field must be provided. " +
     "Use spaces-tickets to find the ticket ID (use the Internal ID, not the Xyne ID), spaces-users for user IDs, and spaces-boards for valid stage names. " +
-    "Stage changes also update the ticket status to the stage's default status unless you explicitly provide a status override.",
+    "Stage changes also update the ticket status to the stage's default status unless you explicitly provide a status override. " +
+    "To set a board custom field (a desk's 'MID', for example), resolve its name with spaces-board-fields and pass `customFields`.",
   inputSchema: {
     type: "object",
     properties: {
@@ -4592,6 +4716,14 @@ const spacesUpdateTicket: ToolDef = {
         description:
           "Replace the ticket's tags with this list of tag names. Pass an empty array to remove all tags.",
       },
+      customFields: {
+        type: "object",
+        description:
+          "Board custom (form) field values to set, keyed by field NAME as spaces-board-fields reports it " +
+          "— e.g. { \"MID\": \"merchant_1234\" }. Only the fields you pass are changed; the rest keep " +
+          "their values. A multi-select field takes an array of strings. Unknown names are refused.",
+        additionalProperties: true,
+      },
     },
     required: ["ticketId"],
   },
@@ -4611,6 +4743,8 @@ const spacesUpdateTicket: ToolDef = {
         return err("tags must be an array of strings.");
       }
       const tags = tagsProvided ? (rawTags as unknown[]).map((t) => String(t)) : undefined;
+      const customFields = asFieldMap(args["customFields"]);
+      const customFieldsProvided = !!customFields && Object.keys(customFields).length > 0;
 
       if (!ticketId) return err("ticketId is required.");
       if (
@@ -4622,10 +4756,11 @@ const spacesUpdateTicket: ToolDef = {
         !priority &&
         !status &&
         !eta &&
-        !tagsProvided
+        !tagsProvided &&
+        !customFieldsProvided
       ) {
         return err(
-          "At least one update field is required (assigneeId, stage, groupId, title, description, priority, status, eta, or tags).",
+          "At least one update field is required (assigneeId, stage, groupId, title, description, priority, status, eta, tags, or customFields).",
         );
       }
 
@@ -4639,6 +4774,9 @@ const spacesUpdateTicket: ToolDef = {
       if (status) body["status"] = status;
       if (eta) body["eta"] = eta;
       if (tagsProvided) body["tags"] = tags;
+      // The PATCH route calls these `formFields`; the tool says `customFields`
+      // so one word covers both create and update for the model.
+      if (customFieldsProvided) body["formFields"] = customFields;
 
       const result = (await spacesFetch(`/api/tickets/${encodeURIComponent(ticketId)}`, {
         method: "PATCH",
@@ -5910,6 +6048,197 @@ interface EmailRow {
   conversationId: string;
   channelId: string;
   createdAt: string;
+}
+
+// ── spaces-send-ticket-email ────────────────────────────────────────
+
+/** Minimal markdown → email HTML. The desk stores every email body as HTML
+ *  (the composer and the auto-draft both do), so plain text sent as-is would
+ *  arrive as one unbroken blob. */
+function emailBodyHtml(body: string): string {
+  const escape = (text: string): string =>
+    text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  return body
+    .replace(/\r\n/g, "\n")
+    .split(/\n{2,}/)
+    .map((para) => para.trim())
+    .filter(Boolean)
+    .map(
+      (para) =>
+        // Per paragraph, so an unclosed ** cannot swallow the rest of the mail.
+        `<p>${escape(para).replace(/\n/g, "<br>").replace(/\*\*([^*\n]+)\*\*/g, "<strong>$1</strong>")}</p>`,
+    )
+    .join("");
+}
+
+interface TicketEmailTarget {
+  id: string;
+  xyneId?: string;
+  title?: string;
+  conversationId?: string;
+  channelId?: string;
+}
+
+/**
+ * The ticket a send is aimed at, by internal id, by its conversation, or by
+ * the Xyne id. The last one is a concession to reality: the human-readable id
+ * is what everybody quotes, so the model reaches for it — and because a write
+ * tool's handler only runs AFTER a human has approved the card, refusing it
+ * here would spend somebody's approval on an error message.
+ */
+async function resolveTicketForEmail(
+  args: { ticketId?: string; conversationId?: string },
+  auth?: SpacesAuthContext,
+): Promise<TicketEmailTarget | null> {
+  const lookup = async (where: Record<string, unknown>): Promise<TicketEmailTarget | null> => {
+    try {
+      const rows = (await interact(
+        { model: "ticket", operation: "findMany", where, take: 1 },
+        auth,
+      )) as TicketEmailTarget[];
+      return rows?.[0] ?? null;
+    } catch {
+      return null;
+    }
+  };
+  if (args.conversationId) return lookup({ conversationId: { equals: args.conversationId } });
+  const ticketId = args.ticketId;
+  if (!ticketId) return null;
+  const looksLikeXyneId = /^[A-Za-z][A-Za-z0-9]*-\d+$/.test(ticketId);
+  const byId = (): Promise<TicketEmailTarget | null> => lookup({ id: { equals: ticketId } });
+  const byXyneId = (): Promise<TicketEmailTarget | null> => lookup({ xyneId: { equals: ticketId } });
+  return looksLikeXyneId ? ((await byXyneId()) ?? (await byId())) : ((await byId()) ?? (await byXyneId()));
+}
+
+const spacesSendTicketEmail: ToolDef = {
+  // POST /api/email/:conversationId/reply is user-session-only, like
+  // spaces-update-ticket: it sends AS the desk, on behalf of a real person.
+  userOnly: true,
+  name: "spaces-send-ticket-email",
+  description:
+    "Send an email to a customer or merchant FROM an Xyne Desk ticket, so the mail and every answer to it " +
+    "live on that ticket's email thread. Use this after creating a ticket on an email desk when the person " +
+    "asks you to let the merchant know, and to reply to an ongoing email thread. " +
+    "Works on a ticket with no email yet — that first mail opens the thread — and on one that already has " +
+    "a thread, where it is sent as a reply so the answer threads back onto the same ticket. " +
+    "RECIPIENTS ARE NEVER GUESSED: ask the person for the merchant's email addresses and pass exactly what " +
+    "they give you. The mail is sent from the desk's own mailbox, not from your account. " +
+    "Read the thread first with spaces-emails when replying.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      ticketId: {
+        type: "string",
+        description:
+          "The ticket's Internal ID (the 'Internal ID' / 'ID' field from spaces-tickets). A Xyne ID like " +
+          "PROG-412 is also accepted. Use this or conversationId.",
+      },
+      conversationId: {
+        type: "string",
+        description: "The ticket's conversationId, if you have that instead of the ticket ID.",
+      },
+      to: {
+        type: "array",
+        items: { type: "string" },
+        minItems: 1,
+        description: "Recipient email addresses, exactly as the person gave them.",
+      },
+      cc: { type: "array", items: { type: "string" }, description: "Cc addresses." },
+      bcc: { type: "array", items: { type: "string" }, description: "Bcc addresses." },
+      subject: {
+        type: "string",
+        description:
+          "Subject line. Required for the first email on a ticket; omit on an existing thread to keep its subject.",
+      },
+      body: {
+        type: "string",
+        description:
+          "The email body. Plain text with blank lines between paragraphs; **bold** works. Write the whole " +
+          "message — it is sent as written, so no placeholders and no 'insert X here'.",
+      },
+    },
+    required: ["body", "to"],
+  },
+  handler: withToolErrors("Send ticket email error", async (args) => {
+      const ticketId = String(args["ticketId"] ?? "").trim();
+      const conversationIdArg = String(args["conversationId"] ?? "").trim();
+      const body = String(args["body"] ?? "").trim();
+      const subject = String(args["subject"] ?? "").trim();
+      const to = normalizeEmailList(args["to"]);
+      const cc = normalizeEmailList(args["cc"]);
+      const bcc = normalizeEmailList(args["bcc"]);
+
+      if (!ticketId && !conversationIdArg) return err("Pass ticketId or conversationId.");
+      if (!body) return err("body is required — write the whole email.");
+      if (to.length === 0) {
+        return err(
+          "At least one recipient is required. Ask the person for the merchant's email address; do not invent one.",
+        );
+      }
+
+      const ticket = await resolveTicketForEmail({
+        ...(ticketId ? { ticketId } : {}),
+        ...(conversationIdArg ? { conversationId: conversationIdArg } : {}),
+      });
+
+      const conversationId = ticket?.conversationId || conversationIdArg;
+      if (!conversationId) {
+        return err(
+          ticketId
+            ? `No ticket found for ${ticketId} — resolve it with spaces-tickets and pass its Internal ID.`
+            : `No conversation ${conversationIdArg}.`,
+        );
+      }
+
+      // No fallback to the ticket title on purpose. On an existing thread the
+      // Spaces reply route keeps the thread's own subject, and inventing one
+      // would send "Re: <internal ticket title>" and split the thread in the
+      // customer's client. On a thread being opened the subject is required
+      // up front (see the validator), so by here it is always present when it
+      // is needed — and whatever goes out is what the approver saw.
+
+      const response = (await spacesFetch(`/api/email/${encodeURIComponent(conversationId)}/reply`, {
+        method: "POST",
+        body: JSON.stringify({
+          body: emailBodyHtml(body),
+          type: "REPLY_ALL",
+          to,
+          cc,
+          bcc,
+          ...(subject ? { subject } : {}),
+        }),
+      })) as { emailId?: string; threadId?: string };
+
+      const citations: Citation[] = [];
+      if (ticket?.channelId) {
+        pushThreadCitation(citations, ticket.channelId, conversationId, 1, "Desk email thread", {
+          ...(ticket.xyneId ? { xyneId: ticket.xyneId } : {}),
+          ...(response?.emailId ? { mailId: response.emailId } : {}),
+        });
+        const channelInfo = await resolveChannelInfo([ticket.channelId]);
+        applyChannelInfo(citations, channelInfo);
+      }
+
+      const lines = [
+        `Sent to ${to.join(", ")}${cc.length ? ` (cc ${cc.join(", ")})` : ""}${bcc.length ? ` (bcc ${bcc.join(", ")})` : ""}.`,
+        ...(subject ? [`Subject: ${subject}`] : []),
+        ...(ticket?.xyneId ? [`Ticket: ${ticket.xyneId}`] : []),
+        "It is on the ticket's email thread now, and replies will land there.",
+      ];
+      return okCited(prefixChunk(1, "Email sent:", lines), citations);
+    }),
+};
+
+/** Addresses as the model passed them, de-duped. Validation is the mail
+ *  provider's job; this only keeps the obvious junk out of a send. */
+function normalizeEmailList(value: unknown): string[] {
+  const raw = Array.isArray(value) ? value : typeof value === "string" ? value.split(/[,;\s]+/) : [];
+  const seen = new Set<string>();
+  for (const entry of raw) {
+    const text = typeof entry === "string" ? entry.trim() : "";
+    if (text && text.includes("@")) seen.add(text);
+  }
+  return [...seen];
 }
 
 // ── spaces-thread-attachments / spaces-fetch-attachment ──────────────
@@ -10322,7 +10651,9 @@ export const tools: ToolDef[] = [
   spacesCanvases,
   spacesCalls,
   spacesBoards,
+  spacesBoardFields,
   spacesEmails,
+  spacesSendTicketEmail,
   spacesThreadAttachments,
   spacesFetchAttachment,
   spacesUploadToKb,

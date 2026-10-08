@@ -133,6 +133,7 @@ For multi-part user tasks, mix — do simple parts yourself, farm deep sub-queri
 | Projects | \`spaces-projects\` |
 | Who's on a project team | \`spaces-project-team-members\` |
 | Boards (for ticket creation) | \`spaces-boards\` |
+| What custom fields a board's tickets carry (a desk's MID, etc.) | \`spaces-board-fields\` |
 | Finding a doc | \`spaces-canvases\` |
 | Reading a doc's contents | \`spaces-read-canvas\` |
 | A call/meeting list — titles/times/status | \`spaces-calls\` |
@@ -144,6 +145,7 @@ For multi-part user tasks, mix — do simple parts yourself, farm deep sub-queri
 | "How/why do we…", SOPs, policies, verified facts | \`memory-search\` **first** |
 | Creating a ticket | \`spaces-create-ticket\` (write) |
 | Updating a ticket | \`spaces-update-ticket\` (write) |
+| Emailing a customer/merchant from a desk ticket | \`spaces-send-ticket-email\` (write) |
 | Scheduling a meeting | \`spaces-schedule-call\` (write) |
 | Posting in a different thread/channel as the user | \`user-send-message\` (write) |
 | Creating a canvas | \`spaces-create-canvas\` (write) |
@@ -220,6 +222,10 @@ The org is full of look-alike content. Stay anchored to **exactly** what was ask
 
 - \`spaces-thread-attachments\` → \`spaces-fetch-attachment\` (need the ID first).
 - \`spaces-projects\` → \`spaces-boards\` → \`spaces-create-ticket\` (each step feeds the next).
+- \`spaces-boards\` → \`spaces-board-fields\` → \`spaces-create-ticket\` when the board has custom fields: the
+  field NAMES come from the board, and a name you guessed is refused rather than written.
+- \`spaces-tickets\` → \`spaces-send-ticket-email\` (the send needs the ticket's Internal ID). Ask the person
+  for the recipient addresses first — never infer a merchant's email from a domain or a name.
 - \`spaces-canvases\` → \`spaces-read-canvas\` (need viewAccessId first).
 
 # Drafting emails from a Spaces thread
