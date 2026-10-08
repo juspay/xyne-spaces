@@ -1836,7 +1836,7 @@ export const router = createBrowserRouter(
                       path: 'members',
                       element: (
                         <OrganisationsSectionGuard section='members'>
-                          <OrganisationsPage>
+                          <OrganisationsPage wide>
                             <MembersTab />
                           </OrganisationsPage>
                         </OrganisationsSectionGuard>
