@@ -51,6 +51,7 @@ import { validateKbGrants } from "../lib/spaces-kb.js";
 import { ORG_SCOPED_SLUGS } from "../lib/org-scoped-slugs.js";
 import { getAdminOrgScope, getOrgNameMap, withOrgLabel } from "../lib/admin-org-scope.js";
 import { asyncHandler, ok, badRequest, unauthorized, forbidden, notFound, conflict, HttpError } from "../lib/http.js";
+import { agentRunDetail, agentRunHealth } from "../lib/agent-run-health.js";
 
 import { createLogger } from "../logger.js";
 const log = createLogger("agents");
@@ -1366,6 +1367,27 @@ router.post(
       res.status(500).json({ success: false, error: "Internal server error" });
     }
   },
+);
+
+router.get(
+  "/:slug/monitor",
+  requireAgentOwnerOrAdmin,
+  asyncHandler(async (req: Request<{ slug: string }>, res: Response) => {
+    const agent = req.agentContext!.agent;
+    const days = Math.min(Math.max(Math.trunc(Number(req.query["days"]) || 7), 1), 90);
+    ok(res, await agentRunHealth(agent.slug, agent.orgId, days));
+  }),
+);
+
+router.get(
+  "/:slug/monitor/runs/:sessionId",
+  requireAgentOwnerOrAdmin,
+  asyncHandler(async (req: Request<{ slug: string; sessionId: string }>, res: Response) => {
+    const agent = req.agentContext!.agent;
+    const detail = await agentRunDetail(agent.slug, agent.orgId, req.params.sessionId);
+    if (!detail) throw notFound("Run not found for this agent");
+    ok(res, detail);
+  }),
 );
 
 router.get(
