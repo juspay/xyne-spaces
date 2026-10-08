@@ -21,13 +21,13 @@ import { prisma } from "../db.js";
 import { decrypt } from "../crypto.js";
 import { isOAuthProvider, prepareOAuthCustomTool } from "../lib/oauth-custom-tool.js";
 import { executeTwinApprovalDelivery, twinDeliveryContextFromFlowData } from "../lib/twin-approval-delivery.js";
-import { fetchTicketForCard, parseXyneIdFromToolResult } from "../lib/ticket-card.js";
+import { fetchTicketForCard, parseSentEmailFromToolResult, parseXyneIdFromToolResult } from "../lib/ticket-card.js";
 import { verifySpacesSignature } from "../middleware/verify-spaces-signature.js";
 import { agentRunRepository, chatMessageRepository } from "../repositories/index.js";
 import { recordTwinApprovalOutcome } from "../services/twinResponseFeedback.js";
 import type { FlowDefinition } from "xyne-claw-shared";
 import { FORK_TO_CONVERSATION_TOOL } from "xyne-claw-shared";
-import { mdToMrkdwn, FlowBuilder, buildWriteResultFlow, buildPlanFlow, buildUserQuestionFlow, buildTicketFlow, buildAgentCardFlow, userQuestionOptionLabel, PLAN_COMPONENT_ID, AGENT_COMPONENT_ID, AGENT_EDITS_STATE_KEY } from "xyne-claw-shared";
+import { mdToMrkdwn, FlowBuilder, buildWriteResultFlow, buildPlanFlow, buildUserQuestionFlow, buildTicketFlow, buildEmailSentFlow, buildAgentCardFlow, userQuestionOptionLabel, PLAN_COMPONENT_ID, AGENT_COMPONENT_ID, AGENT_EDITS_STATE_KEY } from "xyne-claw-shared";
 import {
   clearActivePlanCard,
   getActivePlanCard,
@@ -662,7 +662,7 @@ async function finishWriteSuccess(opts: {
   afterCard?: (() => void) | undefined;
 }): Promise<void> {
   let flow: FlowDefinition | null = null;
-  let usedTicketFlow = false;
+  let usedRichFlow = false;
   if (opts.tool === "spaces-create-ticket") {
     const xyneId = parseXyneIdFromToolResult(opts.resultText);
     const agent = xyneId ? await getAgentTokenAndUserId(opts.agentSlug, opts.spacesAppId) : null;
@@ -670,8 +670,32 @@ async function finishWriteSuccess(opts: {
       const ticket = await fetchTicketForCard(xyneId, agent.token);
       if (ticket) {
         flow = buildTicketFlow(ticket);
-        usedTicketFlow = true;
+        usedRichFlow = true;
       }
+    }
+  }
+  if (opts.tool === "spaces-send-ticket-email") {
+    // Recipients, subject and the ticket are the whole story of a send; the
+    // generic card would dump the tool's raw text as one "Result:" blob.
+    const sent = parseSentEmailFromToolResult(opts.resultText);
+    if (sent) {
+      // The ticket chip is a bonus, not a requirement: without it the card
+      // still says who was written to and about what.
+      const agent = sent.ticketXyneId
+        ? await getAgentTokenAndUserId(opts.agentSlug, opts.spacesAppId)
+        : null;
+      const ticket =
+        sent.ticketXyneId && agent ? await fetchTicketForCard(sent.ticketXyneId, agent.token) : null;
+      flow = buildEmailSentFlow({
+        to: sent.to,
+        ...(sent.cc.length ? { cc: sent.cc } : {}),
+        ...(sent.bcc.length ? { bcc: sent.bcc } : {}),
+        ...(sent.subject ? { subject: sent.subject } : {}),
+        ...(ticket ? { ticket } : {}),
+      });
+      // Arms the generic-card retry below: if Spaces rejects this flow, the
+      // card must still flip out of its Approve/Decline state.
+      usedRichFlow = true;
     }
   }
   if (!flow) {
@@ -688,11 +712,14 @@ async function finishWriteSuccess(opts: {
     spacesAppId: opts.spacesAppId,
     xyneAi: opts.xyneAi,
   });
-  if (status === "flow-schema-400" && usedTicketFlow) {
+  if (status === "flow-schema-400" && usedRichFlow) {
     // The rich `ticket` component isn't supported by this Spaces backend, so the
     // update was rejected and the approval card would stay stuck on Approve/
     // Decline. Fall back to the generic result card (supported components) so the
     // card still flips to a completed state; the write itself already succeeded.
+    log.warn(
+      `[flow-action] rich result card rejected by the Spaces flow schema; falling back to the generic card tool=${opts.tool} conversationId=${opts.conversationId ?? ""}`,
+    );
     const { heading, details } = summarizeToolResult(opts.tool, opts.resultText);
     const fallback = buildWriteResultFlow({ tool: opts.tool, ok: true, heading, details });
     await replaceFlowCardWithFlow(opts.messageId, opts.agentSlug, fallback, opts.conversationId, opts.channelId, opts.spacesAppId);
