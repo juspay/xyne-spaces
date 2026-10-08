@@ -2,6 +2,7 @@ import React from 'react';
 import { useNavigate } from 'react-router-dom';
 import { ChevronRight, PauseBig, PlayBig, StopBig } from '@xyne/icons';
 import { Button } from '../Button/Button';
+import { Tooltip } from '../Tooltip';
 import { useAuth } from '../../../hooks/useAuth';
 import { useCallDuration } from '../../../hooks/useCalls';
 import { sendRecordingEvent, useRecordingStore } from '../../../hooks/useRecordingStore';
@@ -108,38 +109,40 @@ export const RecordingBubble: React.FC<RecordingBubbleProps> = ({ message, callI
       </span>
       {canControl && (
         <div className='flex shrink-0 items-center gap-1'>
-          <Button
-            type='button'
-            variant='ghost'
-            size='icon'
-            className='size-6 rounded-full text-muted-foreground hover:text-foreground'
-            onClick={() =>
-              sendRecordingEvent({ type: isPaused ? 'resumeRecording' : 'pauseRecording' })
-            }
-            aria-label={isPaused ? 'Resume recording' : 'Pause recording'}
-            title={isPaused ? 'Resume recording' : 'Pause recording'}
-            data-track-category='RECORDING'
-            data-track-name={isPaused ? 'RESUME_FROM_THREAD' : 'PAUSE_FROM_THREAD'}
-          >
-            {isPaused ? (
-              <PlayBig size={14} variant='Solid' />
-            ) : (
-              <PauseBig size={14} strokeWidth={4} variant='Solid' />
-            )}
-          </Button>
-          <Button
-            type='button'
-            variant='destructive'
-            size='icon'
-            className='size-6 rounded-full'
-            onClick={stopRecording}
-            aria-label='End recording'
-            title='End recording'
-            data-track-category='RECORDING'
-            data-track-name='END_FROM_THREAD'
-          >
-            <StopBig size={14} variant='Solid' />
-          </Button>
+          <Tooltip content={isPaused ? 'Resume recording' : 'Pause recording'} side='top'>
+            <Button
+              type='button'
+              variant='ghost'
+              size='icon'
+              className='size-6 rounded-full text-muted-foreground hover:text-foreground'
+              onClick={() =>
+                sendRecordingEvent({ type: isPaused ? 'resumeRecording' : 'pauseRecording' })
+              }
+              aria-label={isPaused ? 'Resume recording' : 'Pause recording'}
+              data-track-category='RECORDING'
+              data-track-name={isPaused ? 'RESUME_FROM_THREAD' : 'PAUSE_FROM_THREAD'}
+            >
+              {isPaused ? (
+                <PlayBig size={14} variant='Solid' />
+              ) : (
+                <PauseBig size={14} strokeWidth={4} variant='Solid' />
+              )}
+            </Button>
+          </Tooltip>
+          <Tooltip content='End recording' side='top'>
+            <Button
+              type='button'
+              variant='destructive'
+              size='icon'
+              className='size-6 rounded-full'
+              onClick={stopRecording}
+              aria-label='End recording'
+              data-track-category='RECORDING'
+              data-track-name='END_FROM_THREAD'
+            >
+              <StopBig size={14} variant='Solid' />
+            </Button>
+          </Tooltip>
         </div>
       )}
       {canView && (

@@ -228,51 +228,60 @@ export const LiveRecordingControlBar = ({
       {ownsSession && (
         <div className='flex items-center gap-1.5'>
           <span className='h-6 w-px shrink-0 bg-border' aria-hidden='true' />
-          <Button
-            type='button'
-            variant='ghost'
-            size='icon'
-            onClick={onToggleCamera}
-            disabled={isPaused || isStopping}
-            className={cn(
-              'size-9 shrink-0 rounded-xl border',
-              isCameraEnabled
-                ? 'border-border bg-foreground text-background hover:bg-foreground/85 hover:text-background'
-                : 'border-transparent text-muted-foreground hover:text-foreground',
-            )}
-            aria-label={isCameraEnabled ? 'Turn off camera' : 'Turn on camera'}
-            aria-pressed={isCameraEnabled}
-            title={isCameraEnabled ? 'Turn off camera' : 'Turn on camera'}
-            data-track-category='RecordingDetailV2'
-            data-track-name={`camera_${isCameraEnabled ? 'off' : 'on'}`}
-          >
-            {isCameraEnabled ? (
-              <VideoCallDefault size={18} strokeWidth={2.2} />
-            ) : (
-              <VideoCallOff size={18} strokeWidth={2} />
-            )}
-          </Button>
+          <Tooltip content={isCameraEnabled ? 'Turn off camera' : 'Turn on camera'} side='bottom'>
+            <span className='inline-flex shrink-0'>
+              <Button
+                type='button'
+                variant='ghost'
+                size='icon'
+                onClick={onToggleCamera}
+                disabled={isPaused || isStopping}
+                className={cn(
+                  'size-9 shrink-0 rounded-xl border',
+                  isCameraEnabled
+                    ? 'border-border bg-foreground text-background hover:bg-foreground/85 hover:text-background'
+                    : 'border-transparent text-muted-foreground hover:text-foreground',
+                )}
+                aria-label={isCameraEnabled ? 'Turn off camera' : 'Turn on camera'}
+                aria-pressed={isCameraEnabled}
+                data-track-category='RecordingDetailV2'
+                data-track-name={`camera_${isCameraEnabled ? 'off' : 'on'}`}
+              >
+                {isCameraEnabled ? (
+                  <VideoCallDefault size={18} strokeWidth={2.2} />
+                ) : (
+                  <VideoCallOff size={18} strokeWidth={2} />
+                )}
+              </Button>
+            </span>
+          </Tooltip>
           {canShareScreen() && (
-            <Button
-              type='button'
-              variant='ghost'
-              size='icon'
-              onClick={onToggleScreenShare}
-              disabled={isPaused || isStopping}
-              className={cn(
-                'size-9 shrink-0 rounded-xl border',
-                isScreenShareEnabled
-                  ? 'border-border bg-foreground text-background hover:bg-foreground/85 hover:text-background'
-                  : 'border-transparent text-muted-foreground hover:text-foreground',
-              )}
-              aria-label={isScreenShareEnabled ? 'Stop sharing screen' : 'Share screen'}
-              aria-pressed={isScreenShareEnabled}
-              title={isScreenShareEnabled ? 'Stop sharing screen' : 'Share screen'}
-              data-track-category='RecordingDetailV2'
-              data-track-name={`screen_share_${isScreenShareEnabled ? 'off' : 'on'}`}
+            <Tooltip
+              content={isScreenShareEnabled ? 'Stop recording screen' : 'Record screen'}
+              side='bottom'
             >
-              <Monitor01 size={18} />
-            </Button>
+              <span className='inline-flex shrink-0'>
+                <Button
+                  type='button'
+                  variant='ghost'
+                  size='icon'
+                  onClick={onToggleScreenShare}
+                  disabled={isPaused || isStopping}
+                  className={cn(
+                    'size-9 shrink-0 rounded-xl border',
+                    isScreenShareEnabled
+                      ? 'border-border bg-foreground text-background hover:bg-foreground/85 hover:text-background'
+                      : 'border-transparent text-muted-foreground hover:text-foreground',
+                  )}
+                  aria-label={isScreenShareEnabled ? 'Stop sharing screen' : 'Share screen'}
+                  aria-pressed={isScreenShareEnabled}
+                  data-track-category='RecordingDetailV2'
+                  data-track-name={`screen_share_${isScreenShareEnabled ? 'off' : 'on'}`}
+                >
+                  <Monitor01 size={18} />
+                </Button>
+              </span>
+            </Tooltip>
           )}
         </div>
       )}
