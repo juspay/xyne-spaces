@@ -88,6 +88,7 @@ export const AutoDraftAgentChatPanel: React.FC<AutoDraftAgentChatPanelProps> = (
             key={autoSendNonce}
             channelId={channelId}
             startFreshChat
+            trackSource='desk_auto_draft'
             forcedAgentSlug={autoDraftAgentSlug}
             initialQuery={pendingQuery}
             autoSendNonce={autoSendNonce}

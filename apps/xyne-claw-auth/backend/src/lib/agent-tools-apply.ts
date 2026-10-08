@@ -42,6 +42,7 @@ const log = createLogger("agent-tools-apply");
 /** Tool slugs this module owns. flow-action routes on this set. */
 export const AGENT_TOOL_SLUGS = new Set([
   "create-agent",
+  "clone-agent",
   "update-agent",
   "create-subagent",
   "update-subagent",
@@ -135,6 +136,54 @@ async function createAgent(params: Record<string, unknown>, userId: string): Pro
 
   const note = unknownToolsNote(resolved.unknown);
   return { ok: true, message: `Agent "${name}" created (\`${slug}\`).`, ...(note ? { note } : {}) };
+}
+
+async function cloneAgent(params: Record<string, unknown>, userId: string): Promise<ApplyResult> {
+  const sourceSlug = kebab(str(params["sourceSlug"]));
+  const name = str(params["name"]);
+  const slug = kebab(str(params["slug"]) || name);
+
+  if (!sourceSlug || !name) {
+    return { ok: false, error: "Source agent identifier and clone name are required." };
+  }
+  if (!slug || !isValidKebab(slug)) {
+    return { ok: false, error: `Invalid clone identifier "${slug}" — use lowercase letters, digits and single hyphens.` };
+  }
+
+  const orgId = await orgOf(userId);
+  if (!orgId) return { ok: false, error: "Could not resolve your organization to clone the agent." };
+
+  // Visibility is authorization here: knowing a private agent's slug must not
+  // let an approval card copy its prompt, capabilities or KB grants.
+  const source = await agentRepository.findBySlugVisibleTo(sourceSlug, orgId, userId);
+  if (!source) return { ok: false, error: `No visible agent "${sourceSlug}" in your workspace.` };
+
+  // A deterministic destination slug makes approval replays safe: the first
+  // approval creates the row and any duplicate click stops at this guard.
+  if (await agentRepository.findBySlug(slug, orgId)) {
+    return { ok: false, error: `An agent with the identifier "${slug}" already exists — nothing was cloned.` };
+  }
+
+  const clone = await agentRepository.cloneAgentForUser(source.id, userId, { name, slug });
+  if (!clone) return { ok: false, error: `The source agent "${sourceSlug}" no longer exists.` };
+
+  await writeAuditLog({
+    actorUserId: userId,
+    eventType: "AGENT_CREATED",
+    targetId: clone.id,
+    description: `agent-authored clone of "${source.name}" (${source.slug}) → "${clone.name}" (${clone.slug})`,
+    metadata: { sourceAgentId: source.id, sourceSlug: source.slug },
+  }).catch(() => {});
+  log.info(`[clone-agent] cloned ${source.slug} → ${clone.slug} (id=${clone.id}) owner=${userId} org=${orgId}`);
+
+  const credentialNote = source.ownerUserId === userId
+    ? undefined
+    : "Saved integration credentials were not copied; connect your own credentials before using those integrations.";
+  return {
+    ok: true,
+    message: `Agent "${source.name}" cloned as "${clone.name}" (\`${clone.slug}\`).`,
+    ...(credentialNote ? { note: credentialNote } : {}),
+  };
 }
 
 async function updateAgent(params: Record<string, unknown>, userId: string): Promise<ApplyResult> {
@@ -410,6 +459,8 @@ export async function applyAgentToolAction(
     switch (tool) {
       case "create-agent":
         return await createAgent(params, userId);
+      case "clone-agent":
+        return await cloneAgent(params, userId);
       case "update-agent":
         return await updateAgent(params, userId);
       case "create-subagent":

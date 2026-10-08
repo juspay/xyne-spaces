@@ -1,4 +1,4 @@
-import type { ReactElement } from 'react';
+import { useRef, type KeyboardEvent, type ReactElement } from 'react';
 import { cn } from '@/utils/classNames';
 
 export interface TabItem {
@@ -13,6 +13,7 @@ interface TabsProps {
   trackCategory?: string;
   trackPrefix?: string;
   className?: string;
+  idPrefix?: string;
 }
 
 export function Tabs({
@@ -22,9 +23,27 @@ export function Tabs({
   trackCategory,
   trackPrefix,
   className,
+  idPrefix,
 }: TabsProps): ReactElement {
+  const listRef = useRef<HTMLDivElement | null>(null);
+
+  const onKeyDown = (event: KeyboardEvent<HTMLButtonElement>): void => {
+    const delta = event.key === 'ArrowRight' ? 1 : event.key === 'ArrowLeft' ? -1 : 0;
+    const jump = event.key === 'Home' ? 0 : event.key === 'End' ? items.length - 1 : -1;
+    if (delta === 0 && jump < 0) return;
+    event.preventDefault();
+    const current = items.findIndex(item => item.id === activeId);
+    const next = jump >= 0 ? jump : (current + delta + items.length) % items.length;
+    const target = items[next];
+    if (!target) return;
+    onSelect(target.id);
+    const buttons = listRef.current?.querySelectorAll<HTMLButtonElement>('[role="tab"]');
+    buttons?.[next]?.focus();
+  };
+
   return (
     <div
+      ref={listRef}
       className={cn('no-scrollbar flex items-start gap-1 overflow-x-auto', className)}
       role='tablist'
     >
@@ -35,8 +54,12 @@ export function Tabs({
             key={tab.id}
             type='button'
             role='tab'
+            id={idPrefix ? `${idPrefix}-tab-${tab.id}` : undefined}
             aria-selected={isActive}
             aria-current={isActive ? 'page' : undefined}
+            aria-controls={idPrefix ? `${idPrefix}-panel-${tab.id}` : undefined}
+            tabIndex={isActive ? 0 : -1}
+            onKeyDown={onKeyDown}
             onClick={() => onSelect(tab.id)}
             {...(trackCategory ? { 'data-track-category': trackCategory } : {})}
             {...(trackPrefix ? { 'data-track-name': `${trackPrefix}: ${tab.label}` } : {})}

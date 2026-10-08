@@ -1,5 +1,6 @@
 import { DatabaseClient } from '@/database/client';
 import { createDefaultTicketNamespace } from '@/utils/ticketNamespaceUtils';
+import { newConnectId, createConnectGroupForEntity, ConnectEntityType } from '@/database/connectGroup';
 import {
   ActivityClassification,
   AuthProvider,
@@ -359,6 +360,7 @@ export class TestAuthSeeder {
         where: { name: dmName, scopeType: ChannelScopeType.DM, projectId: dmProject.id },
       });
       if (!channel) {
+        const connectId = newConnectId();
         channel = await db.channel.create({
           data: {
             name: dmName,
@@ -369,7 +371,14 @@ export class TestAuthSeeder {
             createdBy: userId,
             projectId: dmProject.id,
             workspaceId,
+            connectId,
           },
+        });
+        await createConnectGroupForEntity(db, {
+          entityType: ConnectEntityType.CHANNEL,
+          entityId: channel.id,
+          hostWorkspaceId: workspaceId,
+          connectId,
         });
       }
 
@@ -636,6 +645,7 @@ export class TestAuthSeeder {
       });
 
       if (!channel) {
+        const connectId = newConnectId();
         channel = await db.channel.create({
           data: {
             name: channelName,
@@ -646,7 +656,14 @@ export class TestAuthSeeder {
             createdBy: userId,
             projectId: project.id,
             workspaceId,
+            connectId,
           },
+        });
+        await createConnectGroupForEntity(db, {
+          entityType: ConnectEntityType.CHANNEL,
+          entityId: channel.id,
+          hostWorkspaceId: workspaceId,
+          connectId,
         });
       }
 

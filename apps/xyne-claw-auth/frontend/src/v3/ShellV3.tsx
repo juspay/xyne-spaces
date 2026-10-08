@@ -40,6 +40,7 @@ import {
   CaretRightIcon,
   DotsThreeVerticalIcon,
   ArrowUUpLeftIcon,
+  ClockCounterClockwiseIcon,
 } from "@phosphor-icons/react";
 import { useAuth } from "../hooks/useAuth";
 import { useTheme } from "./hooks/useTheme";
@@ -113,6 +114,7 @@ const SIDEBAR_GROUPS: SidebarGroupConfig[] = [
     items: [
       { label: "Agents",    path: "/v3/agents",    icon: RobotIcon },
       { label: "MCPs",          path: "/v3/mcp",       icon: PlugsConnectedIcon },
+      { label: "MCP Registry",  path: "/v3/gateway-registry", icon: PlugsConnectedIcon },
       { label: "Skills",       path: "/v3/skills",    icon: WrenchIcon },
       { label: "Subagents",  path: "/v3/subagents", icon: TreeStructureIcon },
       { label: "Channels",     path: "/v3/gateways",  icon: ShareNetworkIcon },
@@ -122,6 +124,9 @@ const SIDEBAR_GROUPS: SidebarGroupConfig[] = [
   {
     label: "Observe",
     items: [
+      // Runs leads the group on purpose: it is the only Observe item every user
+      // can act on (their own sessions), so it reads before the aggregate views.
+      { label: "Runs", path: "/v3/runs", icon: ClockCounterClockwiseIcon },
       { label: "Metrics", path: "/v3/metrics", icon: ChartBarIcon },
       { label: "Evals", path: "/v3/evals", icon: FlaskIcon },
       { label: "Search Evals", path: "/v3/search-evals", icon: MagnifyingGlassIcon },

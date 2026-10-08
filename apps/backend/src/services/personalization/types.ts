@@ -136,6 +136,25 @@ export const SIGNAL_CONFIGS: Record<SignalType, SignalConfig> = {
   },
 };
 
+// Weight halves every 21 days — three working-week cadence to handle monthly-cycle usage patterns.
+export const SIGNAL_HALF_LIFE_MS = 21 * 24 * 60 * 60 * 1000;
+
+/** Decay factor after `elapsedMs`; shared by the sync worker and signal capture. */
+export function signalDecayFactor(elapsedMs: number): number {
+  return Math.pow(0.5, elapsedMs / SIGNAL_HALF_LIFE_MS);
+}
+
+/**
+ * Decay factor for a signal whose action happened at `occurredAt` (ms epoch). Decay is
+ * exponential, so pre-decaying a delta by its age equals recording it at `occurredAt`:
+ * imported history (Slack, WhatsApp) fades by its real age instead of counting as fresh.
+ * Missing, invalid or future times decay nothing.
+ */
+export function signalAgeFactor(occurredAt: number | undefined, now = Date.now()): number {
+  if (!occurredAt || !Number.isFinite(occurredAt)) return 1;
+  return signalDecayFactor(Math.max(0, now - occurredAt));
+}
+
 /**
  * Signal payload interfaces
  */
@@ -144,6 +163,7 @@ export interface ChannelSignalPayload {
   channelId: string;
   signalType: SignalType;
   weight?: number; // Optional override of default weight
+  occurredAt?: number; // ms epoch of the action; the weight is decayed by its age
   metadata?: Record<string, any>; // Optional metadata for debugging
 }
 
@@ -152,6 +172,7 @@ export interface UserSignalPayload {
   toUserId: string;
   signalType: SignalType;
   weight?: number;
+  occurredAt?: number; // ms epoch of the action; the weight is decayed by its age
   metadata?: Record<string, any>;
 }
 

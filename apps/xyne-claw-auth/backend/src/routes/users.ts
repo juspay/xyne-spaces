@@ -1,17 +1,56 @@
 import { Router, type Request, type Response } from "express";
+import { randomUUID } from "node:crypto";
 import { asyncHandler, ok, badRequest, forbidden, notFound, HttpError } from "../lib/http.js";
 import { prisma } from "../db.js";
-import { encrypt } from "../crypto.js";
+import { decrypt, encrypt } from "../crypto.js";
 import { CONFIG } from "../config.js";
 import { hasConnectorDefinition } from "../mcp/connector-definitions.js";
 import { syncToolsForServer } from "../tool-sync.js";
-import { getDefaultOrgId, ensureOrgMembership, ensureUserExists } from "../lib/users-jit.js";
+import { evictSession } from "../mcp/runner.js";
+import {
+  getDefaultOrgId,
+  ensureOrgMembership,
+  ensureUserExists,
+  findUserByAnyId,
+  resolveClawUserIdForSpacesIdentity,
+} from "../lib/users-jit.js";
 import { getOrgId, getRequesterId } from "../middleware/agent-acl.js";
-import { getWorkspaceIdForUser } from "../lib/spaces-db.js";
+import { getWorkspaceIdForUser, requestWorkspaceHint } from "../lib/spaces-db.js";
+import { getCanonicalRequesterId, matchesAuthenticatedUserId } from "../middleware/pin-user-id-param.js";
 
 import { createLogger } from "../logger.js";
 const log = createLogger("users");
 const router = Router();
+
+/**
+ * GET /users/me
+ *
+ * The Spaces cookie identifies a workspace-scoped Spaces user, whereas Claw
+ * owns the canonical person id. `requireAuth` resolves that identity before
+ * this handler runs and stamps both values onto the request. The SPA must use
+ * `userId` for every Claw URL; retaining the raw Spaces id here is useful only
+ * to callers that also need to call Spaces directly.
+ */
+router.get("/me", (req: Request, res: Response) => {
+  const userId = req.headers["x-user-id"];
+  if (typeof userId !== "string" || !userId) {
+    res.status(401).json({ success: false, error: "authenticated user required" });
+    return;
+  }
+
+  const spacesUserId = req.headers["x-spaces-user-id"];
+  const spacesWorkspaceId = req.headers["x-spaces-workspace-id"];
+  const spacesOrgMemberId = req.headers["x-spaces-org-member-id"];
+  res.json({
+    success: true,
+    data: {
+      userId,
+      ...(typeof spacesUserId === "string" && spacesUserId ? { spacesUserId } : {}),
+      ...(typeof spacesWorkspaceId === "string" && spacesWorkspaceId ? { spacesWorkspaceId } : {}),
+      ...(typeof spacesOrgMemberId === "string" && spacesOrgMemberId ? { spacesOrgMemberId } : {}),
+    },
+  });
+});
 
 /**
  * GET /users[?q=<substr>]
@@ -79,8 +118,7 @@ router.post("/", asyncHandler(async (req: Request, res: Response) => {
     throw badRequest("name is required");
   }
 
-  const sessionUserId = req.headers["x-user-id"];
-  if (typeof sessionUserId === "string" && sessionUserId && sessionUserId !== id.trim()) {
+  if (getCanonicalRequesterId(req) && !matchesAuthenticatedUserId(req, id.trim())) {
     throw forbidden("Body id does not match authenticated session");
   }
 
@@ -93,8 +131,15 @@ router.post("/", asyncHandler(async (req: Request, res: Response) => {
   let user;
   const jitOk = await ensureUserExists(id.trim(), "require-auth");
   if (jitOk) {
+    // Disambiguate users with memberships in two Spaces workspaces: requireAuth
+    // already verified and stamped the requesting workspace on this request.
+    const clawUserId = await resolveClawUserIdForSpacesIdentity(id.trim(), requestWorkspaceHint(req));
+    if (!clawUserId) {
+      log.error(`[users] JIT resolved Spaces user ${id.trim()} but no Claw identity exists`);
+      throw new HttpError(503, "User identity is still being synchronized");
+    }
     user = await prisma.user.update({
-      where: { id: id.trim() },
+      where: { id: clawUserId },
       data: { email: email.trim(), name: name.trim() },
     });
     // Gap 8: re-assert OrgMembership for a pre-existing user (ensureUserExists
@@ -107,25 +152,101 @@ router.post("/", asyncHandler(async (req: Request, res: Response) => {
       log.error(`[users] default org not provisioned — cannot create user ${id.trim()}. Run backfill-default-org.ts.`);
       throw new HttpError(503, "Default organization not provisioned");
     }
-    user = await prisma.user.upsert({
-      where: { id: id.trim() },
-      create: { id: id.trim(), email: email.trim(), name: name.trim(), orgId },
-      update: { email: email.trim(), name: name.trim() },
-    });
-    await ensureOrgMembership(user.id, orgId);
+    // The user may already exist locally under a canonical id (provisioned
+    // via spaces-sync or an earlier flow) even when the Spaces profile is
+    // unreachable. Resolve before creating or we'd mint a duplicate person.
+    const existingUser = await findUserByAnyId(id.trim());
+    if (existingUser) {
+      user = await prisma.user.update({
+        where: { id: existingUser.id },
+        data: { email: email.trim(), name: name.trim() },
+      });
+    } else {
+      user = await prisma.user.create({
+        data: {
+          id: `claw-user-${randomUUID()}`,
+          email: email.trim(),
+          name: name.trim(),
+          orgId,
+        },
+      });
+    }
+    // Re-assert membership in the org the row belongs to (the resolved
+    // existing row's org may differ from the default used for new rows).
+    await ensureOrgMembership(user.id, user.orgId);
   }
 
-  // Auto-configure xyne-spaces MCP connection if token provided
-  if (spacesToken && typeof spacesToken === "string") {
-    autoConfigureSpaces(user.id, spacesToken).catch((err) => {
+  // Spaces is not an optional integration: every claw surface reads through it,
+  // so login is where the connection gets established rather than the
+  // Connections page, which a user may never open.
+  //
+  // The body token is a best effort from the SPA and is usually absent, because
+  // the workspace cookie is httpOnly and `getGoogleToken()` reads cookies from
+  // JavaScript. The server has the same cookie on this very request, so read it
+  // here instead of depending on the client to forward it.
+  const spacesSession = spacesSessionFromRequest(req);
+  const token = (typeof spacesToken === "string" && spacesToken) || spacesSession.token;
+  if (token) {
+    // `id.trim()` is the raw, workspace-scoped Spaces id from the request body
+    // (the user's own id — matchesAuthenticatedUserId enforced above): the
+    // workspace lookup needs the Spaces-side key, never the canonical Claw id.
+    autoConfigureSpaces(user.id, id.trim(), token, spacesSession.sessionId).catch((err) => {
       log.error("[users] auto-configure xyne-spaces failed:", err);
     });
+  } else {
+    log.warn(`[users] no Spaces token on login for ${user.id}; xyne-spaces left as-is`);
   }
 
   ok(res, user);
 }));
 
-async function autoConfigureSpaces(userId: string, token: string): Promise<void> {
+/**
+ * The Spaces credentials carried by this request's own cookies.
+ *
+ * `sessionId` matters as much as the token: Spaces' auth middleware only
+ * refreshes an expired JWT when the session id is present, so a connection
+ * stored without it starts 401ing the moment the 24h token lapses.
+ */
+function spacesSessionFromRequest(req: Request): { token?: string; sessionId?: string } {
+  const header = req.headers.cookie;
+  if (!header) return {};
+  const read = (name: string): string | undefined => {
+    const prefix = `${name}=`;
+    for (const part of header.split(";")) {
+      const cookie = part.trim();
+      if (cookie.startsWith(prefix)) {
+        return cookie.slice(prefix.length).trim() || undefined;
+      }
+    }
+    return undefined;
+  };
+  const workspace = read("xyne_last_workspace");
+  const workspaceToken = workspace ? read(`xyne_ws_${workspace}_token`) : undefined;
+  const legacy = read("google_access_token");
+  return {
+    ...((workspaceToken ?? (legacy && legacy.split(".").length === 3 ? legacy : undefined))
+      ? { token: workspaceToken ?? legacy! }
+      : {}),
+    ...(read("user_session_id") ? { sessionId: read("user_session_id")! } : {}),
+  };
+}
+
+/** True when the stored blob already holds exactly these credentials. */
+function sameCredentials(
+  row: { encryptedCreds: string; iv: string; authTag: string },
+  next: Record<string, string>,
+): boolean {
+  try {
+    const current = JSON.parse(decrypt(row.encryptedCreds, row.iv, row.authTag, CONFIG.encryptionKey)) as Record<string, string>;
+    const keys = new Set([...Object.keys(current), ...Object.keys(next)]);
+    return [...keys].every((k) => current[k] === next[k]);
+  } catch {
+    // Undecryptable means a key rotation or a corrupt row; rewriting is the fix.
+    return false;
+  }
+}
+
+async function autoConfigureSpaces(clawUserId: string, spacesUserId: string, token: string, sessionId?: string): Promise<void> {
   const serverType = "xyne-spaces";
 
   // Find or create the xyne-spaces MCP server
@@ -142,21 +263,33 @@ async function autoConfigureSpaces(userId: string, token: string): Promise<void>
   }
 
   const spacesUrl = CONFIG.spacesInternalUrl;
-  const workspaceId = await getWorkspaceIdForUser(userId, "require-auth").catch(() => null);
+  const workspaceId = await getWorkspaceIdForUser(spacesUserId, "require-auth").catch(() => null);
   const credentials = {
     url: spacesUrl,
     token,
+    ...(sessionId ? { sessionId } : {}),
     ...(workspaceId ? { workspaceId } : {}),
   };
   if (workspaceId) {
-    log.info(`[users] Auto-configured xyne-spaces workspaceId=${workspaceId} for user ${userId}`);
+    log.info(`[users] Auto-configured xyne-spaces workspaceId=${workspaceId} for user ${clawUserId}`);
   }
+  // Login happens often and these credentials rarely change, so stop here when
+  // nothing moved. Rewriting them would evict the running MCP child and kick off
+  // a full tool re-sync on every page load.
+  const existing = await prisma.userMcpConnection.findUnique({
+    where: { userId_mcpServerId: { userId: clawUserId, mcpServerId: server.id } },
+    select: { encryptedCreds: true, iv: true, authTag: true },
+  });
+  if (existing && sameCredentials(existing, credentials)) {
+    return;
+  }
+
   const encrypted = encrypt(JSON.stringify(credentials), CONFIG.encryptionKey);
 
   await prisma.userMcpConnection.upsert({
-    where: { userId_mcpServerId: { userId, mcpServerId: server.id } },
+    where: { userId_mcpServerId: { userId: clawUserId, mcpServerId: server.id } },
     create: {
-      userId,
+      userId: clawUserId,
       mcpServerId: server.id,
       encryptedCreds: encrypted.ciphertext,
       iv: encrypted.iv,
@@ -169,14 +302,20 @@ async function autoConfigureSpaces(userId: string, token: string): Promise<void>
     },
   });
 
+  // The cached MCP child bakes these credentials into its env at spawn time, so
+  // a refreshed token only takes effect once the child is dropped.
+  await evictSession(clawUserId, serverType).catch((err) => {
+    log.error(`[users] evictSession failed for ${serverType}:`, err);
+  });
+
   // Sync tools
   if (await hasConnectorDefinition(serverType)) {
-    syncToolsForServer(userId, serverType, server.name, credentials).catch((err) => {
+    syncToolsForServer(clawUserId, serverType, server.name, credentials).catch((err) => {
       log.error(`[users] tool sync failed for ${serverType}:`, err);
     });
   }
 
-  log.info(`[users] Auto-configured xyne-spaces for user ${userId}`);
+  log.info(`[users] Auto-configured xyne-spaces for user ${clawUserId}`);
 
   // Also auto-connect xyne-spaces-app-tools for this user.
   // Stores the default agent's spacesAppToken so the MCP server can post autonomously
@@ -194,9 +333,9 @@ async function autoConfigureSpaces(userId: string, token: string): Promise<void>
       });
     }
 
-    const user = await prisma.user.findUnique({ where: { id: userId }, select: { orgId: true } });
+    const user = await prisma.user.findUnique({ where: { id: clawUserId }, select: { orgId: true } });
     if (!user?.orgId) {
-      log.error(`[users] orgId is required; refusing global default-agent lookup for xyne-spaces-app-tools userId=${userId}`);
+      log.error(`[users] orgId is required; refusing global default-agent lookup for xyne-spaces-app-tools userId=${clawUserId}`);
       return;
     }
 
@@ -219,9 +358,9 @@ async function autoConfigureSpaces(userId: string, token: string): Promise<void>
     const appToolsCredentials = { url: spacesUrl, app_token: decryptedAppToken };
     const encryptedAppTools = encrypt(JSON.stringify(appToolsCredentials), CONFIG.encryptionKey);
     await prisma.userMcpConnection.upsert({
-      where: { userId_mcpServerId: { userId, mcpServerId: appToolsServer.id } },
+      where: { userId_mcpServerId: { userId: clawUserId, mcpServerId: appToolsServer.id } },
       create: {
-        userId,
+        userId: clawUserId,
         mcpServerId: appToolsServer.id,
         encryptedCreds: encryptedAppTools.ciphertext,
         iv: encryptedAppTools.iv,
@@ -236,14 +375,14 @@ async function autoConfigureSpaces(userId: string, token: string): Promise<void>
 
     const appToolsType = "xyne-spaces-app-tools";
     if (await hasConnectorDefinition(appToolsType)) {
-      syncToolsForServer(userId, appToolsType, appToolsServer.name, appToolsCredentials).catch((err) => {
+      syncToolsForServer(clawUserId, appToolsType, appToolsServer.name, appToolsCredentials).catch((err) => {
         log.error(`[users] tool sync failed for ${appToolsType}:`, err);
       });
     }
 
-    log.info(`[users] Auto-configured xyne-spaces-app-tools for user ${userId}`);
+    log.info(`[users] Auto-configured xyne-spaces-app-tools for user ${clawUserId}`);
   } catch (err) {
-    log.error(`[users] auto-configure xyne-spaces-app-tools failed for user ${userId}:`, err);
+    log.error(`[users] auto-configure xyne-spaces-app-tools failed for user ${clawUserId}:`, err);
     // Non-fatal — don't block the spaces configuration
   }
 }
@@ -260,16 +399,14 @@ router.get("/:id", asyncHandler(async (req: Request<{ id: string }>, res: Respon
     throw badRequest("orgId is required");
   }
 
-  const user = await prisma.user.findFirst({
-    where: { id: req.params.id, orgId },
-    select: { id: true, email: true, name: true },
-  });
-
-  if (!user) {
+  // `:id` may be a canonical Claw id or a Spaces workspace-scoped alias —
+  // resolve through the identity/exact-id ladder before scoping by org.
+  const resolved = await findUserByAnyId(req.params.id);
+  if (!resolved || resolved.orgId !== orgId) {
     throw notFound("User not found");
   }
 
-  ok(res, user);
+  ok(res, { id: resolved.id, email: resolved.email, name: resolved.name });
 }));
 
 export { router as usersRouter };

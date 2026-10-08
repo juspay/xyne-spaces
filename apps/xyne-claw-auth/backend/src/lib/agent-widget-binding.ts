@@ -4,8 +4,8 @@
  * The live card render path (doRenderPrCard / doRenderPlanCard) keeps its state
  * on the Redis SessionContext (fast, 24h TTL, deleted on run completion). This
  * table COMPLEMENTS that: it is the durable index an INBOUND event that fires
- * long after the run ended (e.g. a Bitbucket pr:merged webhook) uses to recover
- * the thread + agent identity and post a fresh status card.
+ * long after the run ended (e.g. a GitHub/Bitbucket PR-merged webhook) uses to
+ * recover the card, thread and agent identity and update the card in place.
  *
  * Generic across widget `kind`:
  *   - 'pr'   → externalKey = normalized PR URL; data = {provider,title,ticketId,url,desc,repo,number}
@@ -32,12 +32,12 @@ export type WidgetKind = "pr" | "plan";
  * "PROJECT/repo" while the webhook exposes project.key + repo.slug separately).
  */
 export function normalizePrUrl(url: string): string {
-  return url
-    .trim()
-    .toLowerCase()
-    .replace(/^https?:\/\//, "")
-    .replace(/[?#].*$/, "")
-    .replace(/\/+$/, "");
+  const withoutScheme = url.trim().toLowerCase().replace(/^https?:\/\//, "");
+  const cut = withoutScheme.search(/[?#]/);
+  const path = cut === -1 ? withoutScheme : withoutScheme.slice(0, cut);
+  let end = path.length;
+  while (end > 0 && path.charCodeAt(end - 1) === 47) end -= 1;
+  return path.slice(0, end);
 }
 
 export interface WidgetBindingInput {
@@ -106,15 +106,20 @@ export async function findPrBindingByUrl(prUrl: string): Promise<AgentWidgetBind
 }
 
 /** Record the last rendered status (dedup for provider re-delivery) and,
- *  optionally, the latest posted messageId. */
+ *  optionally, the card's messageId and its updated card-rebuild `data`. */
 export async function setWidgetBindingStatus(
   id: string,
   status: string,
   messageId?: string,
+  data?: Record<string, unknown>,
 ): Promise<void> {
   await prisma.agentWidgetBinding.update({
     where: { id },
-    data: { status, ...(messageId ? { messageId } : {}) },
+    data: {
+      status,
+      ...(messageId ? { messageId } : {}),
+      ...(data ? { data: data as Prisma.InputJsonValue } : {}),
+    },
   });
 }
 

@@ -4,7 +4,6 @@
       "id": "sdlc",
       "match": { "path_prefix": "/sdlc-app/" },
       "bundle": "main-sdlc",
-      "version": 1,
       "strip_prefix": "/sdlc-app"
     },
     {
@@ -35,8 +34,7 @@
     {
       "id": "default",
       "match": { "path_prefix": "/" },
-      "bundle": "main",
-      "version": 1
+      "bundle": "main"
     }
   ]
 }

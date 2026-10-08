@@ -10,7 +10,9 @@ import { decryptStoredField, spacesAppFetch } from "../surfaces/spaces/client.js
 
 const log = createLogger("experiment");
 
-const MAX_DURATION_MS = 8 * 60 * 60 * 1000;
+const MAX_DURATION_MS = Number(
+  process.env["EXPERIMENT_MAX_DURATION_MS"] ?? String(30 * 24 * 60 * 60 * 1000),
+);
 const DEFAULT_DURATION_MS = 60 * 60 * 1000;
 
 export type ExperimentCommand =
@@ -65,11 +67,13 @@ export function parseExperimentCommand(text: string | undefined | null): Experim
 
   let durationMs = DEFAULT_DURATION_MS;
   let focusParts = rest.split(/\s+/);
-  const durationMatch = /^(\d+)(m|h)$/i.exec(firstLower);
+  const durationMatch = /^(\d+)(m|h|d)$/i.exec(firstLower);
   if (durationMatch) {
     const amount = Number(durationMatch[1]);
-    durationMs = durationMatch[2]!.toLowerCase() === "h"
-      ? amount * 60 * 60 * 1000
+    const unit = durationMatch[2]!.toLowerCase();
+    durationMs =
+      unit === "d" ? amount * 24 * 60 * 60 * 1000
+      : unit === "h" ? amount * 60 * 60 * 1000
       : amount * 60 * 1000;
     focusParts = tail;
   } else if (focusParts.length === 1 && !/^(?:focus|provider|model)=/i.test(firstLower)) {
@@ -162,7 +166,10 @@ export function formatDuration(ms: number): string {
   if (minutes < 60) return `${minutes}m`;
   const hours = Math.floor(minutes / 60);
   const rem = minutes % 60;
-  return rem ? `${hours}h ${rem}m` : `${hours}h`;
+  if (hours < 48) return rem ? `${hours}h ${rem}m` : `${hours}h`;
+  const days = Math.floor(hours / 24);
+  const remHours = hours % 24;
+  return remHours ? `${days}d ${remHours}h` : `${days}d`;
 }
 
 export function buildLedgerMarkdown(

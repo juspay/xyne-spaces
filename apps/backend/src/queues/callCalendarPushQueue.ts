@@ -19,8 +19,7 @@
 import Bull from 'bull';
 import { redisService } from '@/services/redisService';
 import { logger } from '@/utils/logger';
-import { repositories } from '@/database/repositories';
-import { runAsSystem } from '@/database/tenant/context';
+import { findCallCalendarPushRevision } from '@/bypassAcl/callServices';
 import { syncCallToGoogleCalendar } from '@/services/callCalendarPushService';
 
 const TAG = '[CALENDAR_PUSH][QUEUE]';
@@ -30,6 +29,7 @@ const PUSH_COALESCE_DELAY_MS = 1_500;
 
 type CallCalendarPushJobData = {
   callId: string;
+  callExternalId: string;
   /** Set on the follow-up job scheduled when a call was edited mid-run. */
   isFollowUp?: boolean;
 };
@@ -97,25 +97,23 @@ class CallCalendarPushQueue {
     // Concurrency 1: deterministic job ids already serialise per call, and a
     // single Google account is the bottleneck for every call it organizes.
     queue.process('sync-call', async (job) => {
-      const { callId, isFollowUp } = job.data as CallCalendarPushJobData;
-      const reconciledAt = await syncCallToGoogleCalendar(callId);
+      const { callId, callExternalId, isFollowUp } = job.data as CallCalendarPushJobData;
+      const reconciledAt = await syncCallToGoogleCalendar(callId, callExternalId);
       if (!reconciledAt) return;
 
       // A follow-up already covers one missed edit; chaining further would
       // let a steadily-edited call re-enqueue itself indefinitely.
       if (isFollowUp) return;
 
-      const current = await runAsSystem(() =>
-        repositories.calls.findCalendarPushRevision(callId),
-      );
+      const current = await findCallCalendarPushRevision(callId);
       if (!current || current.getTime() === reconciledAt.getTime()) return;
 
-      logger.info(`${TAG} Call changed while pushing; scheduling follow-up`, { callId });
+      logger.info(`${TAG} Call changed while pushing; scheduling follow-up`, { callId: callExternalId });
       const followUpId = pushJobId(callId, 'followup');
       await clearDeadJobForReenqueue(queue, followUpId);
       await queue.add(
         'sync-call',
-        { callId, isFollowUp: true },
+        { callId, callExternalId, isFollowUp: true },
         { jobId: followUpId, delay: PUSH_COALESCE_DELAY_MS },
       );
     });
@@ -123,7 +121,7 @@ class CallCalendarPushQueue {
     queue.on('failed', (job, err) => {
       logger.error(`${TAG} Push job failed`, {
         jobId: job.id,
-        callId: job.data?.callId,
+        callId: job.data?.callExternalId,
         error: err.message,
       });
     });
@@ -132,11 +130,11 @@ class CallCalendarPushQueue {
     logger.info(`${TAG} Push queue processor registered`);
   }
 
-  async enqueueSync(callId: string): Promise<void> {
+  async enqueueSync(callId: string, callExternalId: string): Promise<void> {
     const queue = await this.ensureQueue();
     const jobId = pushJobId(callId);
     await clearDeadJobForReenqueue(queue, jobId);
-    await queue.add('sync-call', { callId }, { jobId, delay: PUSH_COALESCE_DELAY_MS });
+    await queue.add('sync-call', { callId, callExternalId }, { jobId, delay: PUSH_COALESCE_DELAY_MS });
   }
 
   async close(): Promise<void> {
@@ -156,10 +154,10 @@ export const callCalendarPushQueue = new CallCalendarPushQueue();
  * Fire-and-forget by design: the calendar copy is a projection of the call,
  * so a Redis hiccup must never fail the scheduling request that produced it.
  */
-export function queueCallCalendarPush(callId: string, context: string): void {
-  void callCalendarPushQueue.enqueueSync(callId).catch((err) => {
+export function queueCallCalendarPush(callId: string, callExternalId: string, context: string): void {
+  void callCalendarPushQueue.enqueueSync(callId, callExternalId).catch((err) => {
     logger.error(`${TAG} Failed to enqueue push`, {
-      callId,
+      callId: callExternalId,
       context,
       error: err instanceof Error ? err.message : String(err),
     });
@@ -167,6 +165,6 @@ export function queueCallCalendarPush(callId: string, context: string): void {
 }
 
 /** Enqueue a push for several calls — a recurring series' materialized instances. */
-export function queueCallCalendarPushMany(callIds: string[], context: string): void {
-  for (const callId of callIds) queueCallCalendarPush(callId, context);
+export function queueCallCalendarPushMany(calls: Array<{ id: string; externalId: string }>, context: string): void {
+  for (const call of calls) queueCallCalendarPush(call.id, call.externalId, context);
 }

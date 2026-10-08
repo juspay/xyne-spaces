@@ -89,6 +89,7 @@ export interface DoclingStagedPart {
 export interface DoclingStagedParts {
   stageDir: string
   partsDir: string
+  resultsDir: string
   manifestPath: string
   totalPages: number
   partsTotal: number

@@ -1,5 +1,5 @@
 import React from 'react';
-import { BASE_URL } from '../../../services/clients/apiClient';
+import { getAttachmentStreamUrl } from '../../../services/clients/apiClient';
 import { recordingService } from '../../../services/Recording/recordingService';
 
 interface InlineVideoPreviewProps {
@@ -29,8 +29,7 @@ export function InlineVideoPreview({
   // endpoint can serve the file: playback starts on the first chunk and seeking
   // works, instead of waiting for the whole recording to download. If that
   // request fails the effect below falls back to the blob download.
-  const streamUrl =
-    attachmentId && !streamFailed ? `${BASE_URL}/attachments/${attachmentId}/stream` : null;
+  const streamUrl = attachmentId && !streamFailed ? getAttachmentStreamUrl(attachmentId) : null;
 
   React.useEffect(() => {
     // Streaming path needs no blob — skip the download entirely.

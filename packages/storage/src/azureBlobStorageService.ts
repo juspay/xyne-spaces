@@ -301,6 +301,16 @@ export class AzureBlobStorageService implements StorageService {
     return resp.readableStreamBody;
   }
 
+  async listPrefixes(prefix: string): Promise<string[]> {
+    const out: string[] = [];
+    for await (const item of this.container.listBlobsByHierarchy('/', { prefix })) {
+      if (item.kind === 'prefix') {
+        out.push(item.name.slice(prefix.length).replace(/\/$/, ''));
+      }
+    }
+    return out;
+  }
+
   async listFiles(prefix: string): Promise<ListedFile[]> {
     const results: ListedFile[] = [];
     for await (const item of this.container.listBlobsFlat({ prefix })) {

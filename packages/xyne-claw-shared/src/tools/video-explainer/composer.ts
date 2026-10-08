@@ -5,6 +5,7 @@ import type { Session } from "@xyne/kata-sdk";
 import type { ToolExecutionContext } from "../types.js";
 import {
   buildSandboxStoreKey,
+  sandboxConversationIdFromMeta,
   getSandboxSession,
   REPO_CONFIGS,
 } from "../sandbox/index.js";
@@ -73,7 +74,7 @@ function s2sKey(context: ToolExecutionContext): string {
 export function currentSandbox(context: ToolExecutionContext): Session | undefined {
   const storeKey = buildSandboxStoreKey(
     context.meta?.["userId"],
-    context.meta?.["conversationId"],
+    sandboxConversationIdFromMeta(context.meta),
     context.meta?.["agentSlug"],
   );
   return storeKey ? getSandboxSession(storeKey) : undefined;

@@ -169,7 +169,7 @@ export class MakeCallStep extends BaseActionStep<typeof MakeCallConfigSchema, Ma
       });
     }
 
-    // Drop bot/app users and anyone outside the automation workspace in a single
+    // Drop bot/app/agent users and anyone outside the automation workspace in a single
     // batch lookup. This prevents stale/crafted configs from ringing machines or
     // leaking across workspace boundaries.
     if (allInvitedUserIds.length > 0) {
@@ -179,7 +179,7 @@ export class MakeCallStep extends BaseActionStep<typeof MakeCallConfigSchema, Ma
       });
       const allowedUserIds = new Set(
         resolvedUsers
-          .filter((u) => u.userType !== UserType.BOT && u.userType !== UserType.APP)
+          .filter((u) => u.userType !== UserType.BOT && u.userType !== UserType.APP && u.userType !== UserType.AGENT)
           .map((u) => u.id)
       );
       const droppedCount = allInvitedUserIds.length - allowedUserIds.size;
@@ -301,8 +301,7 @@ export class MakeCallStep extends BaseActionStep<typeof MakeCallConfigSchema, Ma
       ringFailures += 1;
       logger.error('[MakeCallStep] participant_ring_failed', {
         participantId: result.invitedParticipantIds[index],
-        callId,
-        externalId,
+        callId: externalId,
         channelId,
         error:
           ringResult.reason instanceof Error
@@ -313,8 +312,7 @@ export class MakeCallStep extends BaseActionStep<typeof MakeCallConfigSchema, Ma
 
     if (result.invitedParticipantIds.length > 0 && ringSuccesses === 0) {
       logger.error('[MakeCallStep] all_participant_rings_failed', {
-        callId,
-        externalId,
+        callId: externalId,
         channelId,
         participantCount: result.invitedParticipantIds.length,
       });
@@ -363,8 +361,7 @@ export class MakeCallStep extends BaseActionStep<typeof MakeCallConfigSchema, Ma
         if (cleanupResult.status === 'fulfilled') return;
         logger.error('[MakeCallStep] all_rings_failed_cleanup_failed', {
           cleanup: index === 0 ? 'db_tombstone' : 'livekit_room',
-          callId,
-          externalId,
+          callId: externalId,
           error:
             cleanupResult.reason instanceof Error
               ? cleanupResult.reason.message
@@ -377,8 +374,7 @@ export class MakeCallStep extends BaseActionStep<typeof MakeCallConfigSchema, Ma
     }
 
     logger.info('[MakeCallStep] call_created', {
-      callId,
-      externalId,
+      callId: externalId,
       channelId,
       participantCount: allInvitedUserIds.length,
       ringSuccesses,

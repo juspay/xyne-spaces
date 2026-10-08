@@ -132,6 +132,10 @@ export function makeResolveHandler(
 
     metrics.resolves.inc({ rule: resolution.rule.id });
     headers['X-Edge-Rule'] = resolution.rule.id;
+    headers['X-Edge-Lane'] = resolution.lane;
+    if (resolution.version !== undefined) {
+      headers['X-Edge-Build'] = resolution.version;
+    }
     headers['X-Edge-Bundle'] = resolution.bundle;
     headers['X-Edge-Version'] = keyVersion(resolution);
     headers['X-Edge-Object'] = encodeObject(resolution.object);

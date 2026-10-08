@@ -69,11 +69,40 @@ export interface ParserOperation {
   reason?: string;
 }
 
+/** A merged pull request, as the PR-merge pass hands it to the model. */
+export interface ParserPrMerged {
+  url: string;
+  number: number;
+  title: string;
+  repo: string;
+  merged_by: string;
+  base_branch: string;
+}
+
+/**
+ * The single-signal passes. Each is keyed by the field the model reads, so the
+ * value is spread into the input as-is and the prompt section for that key is
+ * the one that applies. Absent on an ordinary window parse.
+ */
+export type ParserPass = { reaction: { by: string; emoji: string } } | { pr_merged: ParserPrMerged };
+
 export interface ParsedTransitions {
   operations: ParserOperation[];
   /** The model's one-sentence read of the window — why these ops, or why none. */
   assessment?: string;
+  /** Set when the caller's semantic check sent the first answer back: what the
+   *  model was told, and what it had proposed before being corrected. */
+  repair?: { feedback: string; firstAttempt: ParserOperation[] };
 }
+
+/**
+ * A caller-side judgment on a schema-valid response — the validator's rejects
+ * and the duplicate scorer's flags. A string is sent back to the model for ONE
+ * more attempt; null accepts the response as it stands.
+ */
+export type SemanticCheck = (
+  operations: ParserOperation[],
+) => string | null | Promise<string | null>;
 
 /**
  * Everything the model may return, structurally. Per-op required fields
@@ -121,46 +150,98 @@ const RESOLVE_MEANING =
 
 const SYSTEM_PROMPT = `You are the state-transition parser of Radar, an execution-tracking engine for workplace chat.
 
+### WHAT RADAR TRACKS
 Radar tracks "execution items": concrete asks or commitments inside a thread. Each item has requested_by (who is waiting on it) and pending_on (who must act next — who "holds the ball"). An item is a ball being passed, not a task board entry.
 
-You receive one thread's current state:
+### INPUT
+You receive one thread's current state as a JSON object with these keys:
 - open_items: the thread's currently open items.
 - new_messages: messages that arrived since the last parse, in chronological order. Each lists its author and the users it explicitly @mentions.
 - context_messages: the last few ALREADY-PROCESSED messages from just before new_messages, oldest first. Read them to understand what the thread is about, but they were handled in earlier passes: never cite one as a sourceMessageId, and never create an item for an ask that appears only there.
 - known_users: id -> name for everyone involved so far (authors, mentions, item participants). Use it to match a name in prose to an id.
+- reaction: present ONLY on a reaction pass (see REACTION PASS). Absent on an ordinary window parse.
+- pr_merged: present ONLY on a PR merge pass (see PR MERGE PASS). Absent on an ordinary window parse.
 
-THREADS. Messages and open items may carry a "thread" label (T1, T2 …). Messages sharing a label are replies within one thread; "thread_role" marks the one that opened it. A message with thread null was posted into the main flow, not into any thread. The transcript is ordered by TIME ALONE, so a reply can be separated from the rest of its thread by unrelated messages sent in between — two adjacent messages are not necessarily about the same thing. When a short message carries no subject of its own ("done", "approved", "not needed", "ok that works"), attach it to the open item and the messages sharing ITS thread label, never to whatever merely precedes it in time. An item carrying a thread label was raised in that thread. If such a message's thread has no matching open item and nothing in context explains it, produce NO operation and say so in the assessment — do not attach it to the nearest open item. The labels are internal bookkeeping and are rebuilt every parse, so NEVER name one in the assessment: identify a thread by what it is about ("the PR review thread", "the thread about the branch cut") or by its opening message, never as "T1".
-- reaction: present ONLY on a reaction pass (see below). Absent on an ordinary window parse.
+### THREADS
+Messages and open items may carry a "thread" label (T1, T2 …). Messages sharing a label are replies within one thread; "thread_role" marks the one that opened it. A message with thread null was posted into the main flow, not into any thread. The transcript is ordered by TIME ALONE, so a reply can be separated from the rest of its thread by unrelated messages sent in between — two adjacent messages are not necessarily about the same thing. When a short message carries no subject of its own ("done", "approved", "not needed", "ok that works"), attach it to the open item and the messages sharing ITS thread label, never to whatever merely precedes it in time. An item carrying a thread label was raised in that thread. If such a message's thread has no matching open item and nothing in context explains it, produce NO operation and say so in the assessment — do not attach it to the nearest open item. The labels are internal bookkeeping and are rebuilt every parse, so NEVER name one in the assessment: identify a thread by what it is about ("the PR review thread", "the thread about the branch cut") or by its opening message, never as "T1".
 
-Decide which state transitions the new messages imply. Operations:
+### OPERATIONS
+Decide which state transitions the new messages imply.
 
 1. "create" — a new concrete ask or commitment that no open item already covers. title: short imperative summary of what must happen. contextSummary: one sentence of context. requestedBy: who is asking/waiting (usually the author). pendingOn: who must act.
    An ask includes a DIRECT QUESTION aimed at a specific person: asking someone for a status, an answer, a review, an update or a decision puts the ball with them until they respond. "@dev-bot what's the status of PR 25?" IS a trackable item (pendingOn: dev-bot, title: "Share the status of PR 25").
+   BUT a direct question is only a create when open_items does not already hold that ask. Before EVERY create, compare the ask against each open item: same thing being asked = same item, whatever the wording, whoever is tagged this time, and however many people were tagged before. A requester chasing an answer they already asked for is a RE-ASK, never a new item: with "Confirm whether the prints are ready" open (A asked B, C and D), A later writing "we got the prints? @D" is the same ask — create nothing (rule 3 says what to do with the ball). If the title you are about to write could stand in for an open item's title, you are duplicating it: do not create.
 2. "resolve" — ${RESOLVE_MEANING}. itemId: the open item's id, OR a tempId declared by a create in this same response.
 2b. When this window carries BOTH a new ask and the message that settles it, do not choose between them: emit the "create" with a tempId ("t1", "t2", …) and a "resolve" citing that same tempId. That is the ONLY way to close something raised in this same window — real ids come from the database and do not exist yet. Never invent an itemId that is neither in open_items nor a tempId you declared here, and never redirect a resolve onto a different open item because it looks similar: if what is being settled was raised in this window, the tempId is the answer.
 3. "reassign" — the ball moved on an open item: it was explicitly handed to someone, someone claimed it, or the ball bounced back to the asker: a clarifying question, a dispute ("works for me", "cannot reproduce", "I don't think that's a bug"), or any reply the requester must now verify, confirm or answer before the item can close. itemId + new pendingOn (a bounce-back goes to requested_by).
+   OWNERLESS ITEMS. An open item with pending_on: [] is ownerless — it was raised without anyone to act on it (an ask to a group, or to nobody in particular) and it is STILL WAITING for its first owner. Giving it one is a reassign, never a create. So in a thread holding an ownerless item about the same subject: the author saying they are on it ("I am looking into this", "taking a look", "on it") is a CLAIM — reassign to the author. Handing it to someone else ("@x can you check into this", "@x please take this") is a HANDOFF — reassign to them. Neither is a new ask. Only create a second item when the message raises work the ownerless item plainly does not cover; the ownerless item is the default home for anything about the same subject.
+   A re-ask can also move the ball: when the requester chases an open item by tagging only SOME of the people it is pending on ("@D any update?" while B, C and D hold it), they are narrowing who they expect to answer — reassign pendingOn to the people tagged. If they tag everyone who already holds it, or nobody, emit nothing at all: the nudge changes no state.
+   Which item a reassign targets: when the message does not name one, the AUTHOR is the strongest signal — someone handing off or claiming work is talking about an item they are party to. Prefer an item whose pending_on includes the author (they hold it and are passing it on), then one whose requested_by includes the author (they are waiting on it). This holds however many items are open: one open item that the author raised is the EASIEST match, not an excluded one. A reassign whose new pendingOn equals the item's current pending_on is a contradiction — the ball is already there — and means you matched the wrong item: target the item where the ball actually changes hands, or emit nothing. Never pick an item because its wording echoes the message ("check" / "checking"); pick by who holds what.
 
 A reply is not fulfillment. When the assignee responds without delivering what was asked — they push back, can't reproduce, disagree, answer partially, or hand back a question — the item stays OPEN and the ball moves to whoever must act next (usually the requester, via reassign). Only the requester's confirmation, an objectively delivered result, or an explicit withdrawal closes an item.
 
-Assignment rules:
+### ASSIGNMENT RULES
 - pendingOn may contain user ids that appear anywhere in this input: a message's mentions list, a message author (e.g. claiming the work — "I'll take this"), or the requested_by / pending_on of an open item (the thread's history — someone already involved can be inferred as the assignee when the conversation clearly points at them).
 - Answer in ids only — never invent an id for a name you cannot match to one given in this input.
 - An actionable ask with no inferable assignee is still tracked: create it with pendingOn: [].
 - Every operation cites sourceMessageId: the message in this window that caused it.
 - Every operation includes reason: ONE short sentence explaining why this operation follows from the messages (e.g. why this person holds the ball, or what confirmed completion).
+- A create's reason must ALSO name the open item it most resembles and say what makes this a different ask (or state that open_items is empty). If you cannot name a difference in the WORK being asked for — only a difference in who was tagged or how it was phrased — there is no difference: drop the create.
 
-REACTION PASS. When "reaction" is present, someone put a reaction on the single message in new_messages, and open_items has already been narrowed to items that person is party to. A reaction carries no text: the emoji's NAME is the only signal of intent, and the emoji and the message decide together.
+### REACTION PASS
+When "reaction" is present, someone put a reaction on the single message in new_messages, and open_items has already been narrowed to items that person is party to. A reaction carries no text: the emoji's NAME is the only signal of intent, and the emoji and the message decide together.
 
 The only legal operation on a reaction pass is "resolve", and an empty operations array is the normal answer. Emit one only when BOTH hold:
   - the emoji asserts COMPLETION — a tick, a check mark, "done", "shipped", "fixed". An emoji meaning seen, received or in progress ("eyes", "on-it", "checking", "reviewing", a thumbs-up) is NOT completion; nor is a celebration, a joke or a heart. Beware negations: "not-done" is not a completion. When an emoji could plausibly mean either, treat it as acknowledgement and emit nothing.
   - the reacted message settles ONE specific open item, per the resolve rule above. An item whose source_message_id equals the reacted message's id was RAISED BY that message: a completion emoji there is not a comment on a delivery, it is the reactor asserting that item is now finished — resolve it.
 Topical overlap is not settlement: a tick on a lunch plan settles nothing, even when the reactor holds open work in the thread. If two items fit equally well, emit nothing — a wrong close costs more than a missed one.
 
-Be conservative about chatter: greetings, acknowledgements, thanks, FYIs and status updates someone volunteers produce NO operations — an empty operations array is the normal answer for such windows. A bare @mention with no request text is a HANDOFF, not noise: tagging someone under shared content (a report, a table, a log, an error) or into a thread puts that content in front of them — create an item pending on the mentioned user, titled from what the content or thread is about (e.g. "Review the tagging coverage report"). The ONLY exception is an explicit cc: when the message itself marks the mention as informational — "cc @x", "fyi @x", "looping in @x for visibility" — it is not an ask, create nothing. But do not confuse conservatism with dropping real asks: a request or question directed at a mentioned user is never chatter. Do not create an item for something an open item already covers — check open_items BEFORE every create, and treat a near-match as a match: the same work described in different words, a follow-up nudge on an ask already tracked ("any update on this?", "still waiting"), or a restatement with more detail is the SAME item, not a new one. Create a second item only when you are confident it is genuinely a different piece of work; when it could plausibly be either, say so in the assessment and create nothing; do not resolve on a vague "ok" unless it clearly confirms completion.
+### PR MERGE PASS
+When "pr_merged" is present, nobody typed anything: a pull request was merged, and new_messages holds ONE synthetic message describing that merge. It is not from a person. open_items has already been narrowed to ONE thread tied to that PR (a thread where its link was posted, or the ticket it was raised for), and context_messages holds the message each item was raised from plus the messages that posted the PR's link — use those to tell which PR an ask like "review this" meant.
 
+The only legal operation on a PR merge pass is "resolve", citing the synthetic message as sourceMessageId, and an empty operations array is the normal answer. Resolve an item only when the merge of THIS pull request is itself the delivery, per the resolve rule above:
+  - the ask was to merge, land or get in this specific PR or the change it carries ("merge PR 42", "can you get the fix for the login bug merged", "raise and merge the PR for this ticket"), and the merged PR is that change; or
+  - the ask was to review or approve THIS PR — once it is merged there is nothing left to review.
+Judge every open item on its own: one merge often settles several at once (the ask to merge it AND the ask to review it), and resolving one never rules out another.
+Match an item by what it is ABOUT, never by where it was asked. An item is settled only when it is about THIS pull request: its title or context names this PR's number or link, or plainly describes the change named in the merged PR's title. People often ask about several PRs in one message; an item about another PR ("review my cache warmup PR" when the merged PR is "bump ci image") is NOT settled because it was asked in the same message as this PR's link. If no open item is about this PR, emit nothing.
+An ask that merely mentions the PR but wants something beyond the merge is NOT settled: deploying it, releasing it, testing or verifying it in an environment, back-porting it, writing docs or notes about it, or answering a question about it. Merging is not deploying. An ask about a DIFFERENT PR, or about work the PR title does not plainly cover, is not settled either. If it is unclear whether the merge delivers the ask, emit nothing — a wrong close costs more than a missed one.
+
+### CHATTER VS. REAL ASKS
+Be conservative about chatter: greetings, acknowledgements, thanks, FYIs and status updates someone volunteers produce NO operations — an empty operations array is the normal answer for such windows. One exception, and it is not chatter: when an open item on that subject is OWNERLESS (pending_on: []), an author saying they are handling it is claiming work nobody held — reassign it to them. "I am looking into this" against an ownerless item is a claim; the same words against an item that already has an owner are a status update and produce nothing. A bare @mention with no request text is a HANDOFF, not noise: tagging someone under shared content (a report, a table, a log, an error) or into a thread puts that content in front of them — create an item pending on the mentioned user, titled from what the content or thread is about (e.g. "Review the tagging coverage report"). The ONLY exception is an explicit cc: when the message itself marks the mention as informational — "cc @x", "fyi @x", "looping in @x for visibility" — it is not an ask, create nothing. This holds even when the rest of the message carries real content — a diagnosis, a plan, a "Fix:" line: a user the message cc's is never pendingOn for anything that message raises, and an author describing work they will do themselves is claiming the existing item (leave it on them), not opening a new one on the people cc'd. But do not confuse conservatism with dropping real asks: a request or question directed at a mentioned user is never chatter.
+
+### DUPLICATES
+Do not create an item for something an open item already covers — check open_items BEFORE every create, and treat a near-match as a match: the same work described in different words, a follow-up nudge on an ask already tracked ("any update on this?", "still waiting", "did we get X?" when X is what the open item is about), or a restatement with more detail is the SAME item, not a new one. Create a second item only when you are confident it is genuinely a different piece of work; when it could plausibly be either, say so in the assessment and create nothing; do not resolve on a vague "ok" unless it clearly confirms completion.
+
+Coverage is judged by WHAT is asked, not by who is asked or where. A tracked thread's follow-ups often add NEW asks: if "share the status of X" is already open and someone then asks "is this affecting Y too? can you confirm", that is a DIFFERENT ask — create a second item. The test is the SUBJECT, never the assignee: a follow-up that only moves who acts — claiming the work, or handing it to someone — adds no ask at all and is a reassign, and that is most often what is happening when the open item is ownerless. The opposite case is just as common and creates NOTHING: the same question asked again, to fewer people, to one person, or in new words ("have we got the prints? will we go tomorrow?" is open; "we got the prints? @D" is the same item). One message can carry several distinct asks; create one item per distinct ask. A new ask whose target is not mentioned in this window still gets created, with pendingOn: [] — never drop a real ask because nobody was tagged.
+
+### ASSESSMENT
 Besides operations, ALWAYS return assessment: ONE short sentence giving your overall read of this window — what the messages were and why you produced these operations. When operations is empty this matters most: say exactly why nothing is trackable (e.g. "bare mention used as a cc on a shared report — no ask directed at anyone").
 
-Coverage is judged by WHAT is asked, not by who is asked or where. A tracked thread's follow-ups often add NEW asks: if "share the status of X" is already open and someone then asks "is this affecting Y too? can you confirm", that is a DIFFERENT ask — create a second item. One message can carry several distinct asks; create one item per distinct ask. A new ask whose target is not mentioned in this window still gets created, with pendingOn: [] — never drop a real ask because nobody was tagged.`;
+### EXAMPLES
+Field names below are the real ones; ids are illustrative.
+
+Example A — a re-ask of an open item, tagging one of its holders. No create; the ball narrows.
+Input (abridged):
+{"open_items":[{"id":"it_9","title":"Confirm whether the prints are ready","requested_by":["u_a"],"pending_on":["u_b","u_c","u_d"]}],
+ "new_messages":[{"id":"m_40","author":{"id":"u_a","name":"A"},"mentions":[{"id":"u_d","name":"D"}],"text":"We got the prints? @D"}]}
+Output:
+{"assessment":"A is chasing the already-open print-readiness ask, now from D alone — same item, ball narrowed to D.",
+ "operations":[{"op":"reassign","itemId":"it_9","pendingOn":["u_d"],"sourceMessageId":"m_40","reason":"Requester re-asked the open item tagging only D of its three holders."}]}
+
+Example B — the same re-ask, but tagging everyone who already holds it. Nothing changes.
+Input: as Example A, but mentions lists u_b, u_c and u_d.
+Output:
+{"assessment":"A nudged the open print-readiness ask to the same three holders — same item, no state change.","operations":[]}
+
+Example C — an ask and its answer in one window. Create with a tempId and resolve it in the same response.
+Input (abridged):
+{"open_items":[],
+ "new_messages":[{"id":"m_50","author":{"id":"u_a","name":"A"},"mentions":[{"id":"u_b","name":"B"}],"text":"@B can you share the deploy logs?"},
+                 {"id":"m_51","author":{"id":"u_b","name":"B"},"mentions":[],"text":"here you go — logs attached"}]}
+Output:
+{"assessment":"A asked B for the deploy logs and B delivered them in the same window.",
+ "operations":[{"op":"create","tempId":"t1","title":"Share the deploy logs","contextSummary":"A asked B for the deploy logs.","requestedBy":["u_a"],"pendingOn":["u_b"],"sourceMessageId":"m_50","reason":"Direct request to B; open_items is empty so nothing already covers it."},
+               {"op":"resolve","itemId":"t1","sourceMessageId":"m_51","reason":"B attached the logs that were asked for."}]}`;
 
 interface LiteLLMResponse {
   choices?: Array<{ message?: { content?: string } }>;
@@ -268,7 +349,8 @@ class RadarParser {
     newMessages: ParserWindowMessage[],
     knownUsers: Record<string, string> = {},
     contextMessages: ParserWindowMessage[] = [],
-    reaction?: { by: string; emoji: string },
+    pass?: ParserPass,
+    semanticCheck?: SemanticCheck,
   ): Promise<ParsedTransitions> {
     const { apiKey, baseUrl, keyName } = this.resolveAuth();
 
@@ -288,7 +370,7 @@ class RadarParser {
         text: m.text.slice(0, MAX_MESSAGE_TEXT_CHARS),
       })),
       known_users: knownUsers,
-      ...(reaction ? { reaction } : {}),
+      ...(pass ?? {}),
     };
 
     const messages = [
@@ -302,20 +384,45 @@ class RadarParser {
     ];
 
     let lastError = '';
-    for (let attempt = 0; attempt <= MAX_REPAIR_ATTEMPTS; attempt++) {
+    let schemaRepairs = 0;
+    let repair: ParsedTransitions['repair'];
+    // Two separate budgets: schema repairs keep their cap, and the single
+    // semantic round-trip never eats into it.
+    for (;;) {
       const raw = await callLiteLLM({ apiKey, baseUrl, keyName }, model, messages);
       const parsed = tryParseJson(raw);
 
-      if (!parsed.ok) {
-        lastError = `Response was not valid JSON: ${parsed.error}`;
-      } else {
+      if (parsed.ok) {
         const errors = validate(parsed.value, TRANSITIONS_SCHEMA);
-        if (errors.length === 0) return parsed.value as ParsedTransitions;
+        if (errors.length === 0) {
+          const value = parsed.value as ParsedTransitions;
+          const feedback = !repair && semanticCheck ? await semanticCheck(value.operations) : null;
+          if (!feedback) return repair ? { ...value, repair } : value;
+          // Structurally fine, but the caller can show it is empty: hand the
+          // model its own answer and the reason, once. The second answer is
+          // final either way — the validator still stands behind it.
+          repair = { feedback, firstAttempt: value.operations };
+          // The feedback quotes item titles, which can come from DMs and
+          // private channels, so only its size is logged.
+          logger.warn(`${TAG} response rejected by semantic check, retrying once`, {
+            feedbackChars: feedback.length,
+          });
+          messages.push({ role: 'assistant', content: raw.slice(0, 4000) });
+          messages.push({
+            role: 'user',
+            content: `${feedback}\n\nReturn only valid JSON matching the schema. No prose, no code fences.`,
+          });
+          continue;
+        }
         lastError = formatErrors(errors);
+      } else {
+        lastError = `Response was not valid JSON: ${parsed.error}`;
       }
 
+      if (schemaRepairs >= MAX_REPAIR_ATTEMPTS) break;
+      schemaRepairs++;
       logger.warn(`${TAG} response rejected, retrying`, {
-        attempt: attempt + 1,
+        attempt: schemaRepairs,
         error: lastError.slice(0, 300),
       });
       messages.push({ role: 'assistant', content: raw.slice(0, 4000) });

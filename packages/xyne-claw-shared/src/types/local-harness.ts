@@ -71,6 +71,23 @@ export interface LocalHarnessRunEnvelope {
   task: string;
   context: string | null;
   timeoutMs: number;
+  resumeSessionId?: string | null;
+  attachments?: Array<{
+    id: string;
+    fileName: string;
+    mimeType: string;
+  }>;
+  workspace?: {
+    path: string;
+    name: string;
+    branch?: string;
+  };
+  localSandbox?: {
+    command: string;
+    instruction: string;
+    skills: Array<{ name: string; content: string }>;
+    container?: boolean;
+  };
 }
 
 export type LocalHarnessPollResult =
@@ -84,6 +101,7 @@ export interface LocalHarnessToolSpec {
   description: string;
   inputSchema: Record<string, unknown>;
   write: boolean;
+  local?: boolean;
 }
 
 export interface LocalHarnessToolList {
@@ -104,7 +122,16 @@ export interface LocalHarnessToolCallResponse {
 
 export type LocalHarnessProgressEvent =
   | { kind: "text"; delta: string }
-  | { kind: "tool"; toolName: string }
+  | { kind: "reasoning"; delta: string }
+  | {
+      kind: "tool";
+      toolName: string;
+      toolCallId?: string;
+      args?: Record<string, unknown>;
+      result?: string;
+      status?: "running" | "completed" | "error";
+      durationMs?: number;
+    }
   | { kind: "status"; label: string };
 
 export type LocalHarnessRunStatus = "done" | "failed" | "cancelled";
@@ -116,6 +143,40 @@ export interface LocalHarnessRunResult {
   tokenUsage?: { input?: number; output?: number };
   effectiveModel?: string;
   error?: string;
+  harnessSessionId?: string;
+  workspaceDiff?: LocalHarnessWorkspaceDiff;
+  interrupted?: true;
+}
+
+export interface LocalHarnessWorkspaceDiff {
+  branch: string;
+  changedFiles: number;
+  stat: string;
+  patch: string;
+}
+
+export const LOCAL_HARNESS_DIFF_PATCH_MAX = 2 * 1024 * 1024;
+export const LOCAL_HARNESS_DIFF_STAT_MAX = 20 * 1024;
+
+export function isLocalHarnessWorkspaceDiff(v: unknown): v is LocalHarnessWorkspaceDiff {
+  if (!v || typeof v !== "object" || Array.isArray(v)) return false;
+  const d = v as Record<string, unknown>;
+  return (
+    typeof d["branch"] === "string" &&
+    typeof d["changedFiles"] === "number" &&
+    Number.isFinite(d["changedFiles"]) &&
+    typeof d["stat"] === "string" &&
+    typeof d["patch"] === "string"
+  );
+}
+
+export function clampLocalHarnessWorkspaceDiff(diff: LocalHarnessWorkspaceDiff): LocalHarnessWorkspaceDiff {
+  return {
+    branch: diff.branch.slice(0, 300),
+    changedFiles: Math.max(0, Math.floor(diff.changedFiles)),
+    stat: diff.stat.slice(0, LOCAL_HARNESS_DIFF_STAT_MAX),
+    patch: diff.patch.slice(0, LOCAL_HARNESS_DIFF_PATCH_MAX),
+  };
 }
 
 export function isLocalHarnessToolCallRequest(v: unknown): v is LocalHarnessToolCallRequest {
@@ -132,6 +193,12 @@ export function isLocalHarnessRunResult(v: unknown): v is LocalHarnessRunResult 
   const r = v as Record<string, unknown>;
   const status = r["status"];
   if (status !== "done" && status !== "failed" && status !== "cancelled") return false;
+  const harnessSessionId = r["harnessSessionId"];
+  if (harnessSessionId !== undefined && typeof harnessSessionId !== "string") return false;
+  const workspaceDiff = r["workspaceDiff"];
+  if (workspaceDiff !== undefined && !isLocalHarnessWorkspaceDiff(workspaceDiff)) return false;
+  const interrupted = r["interrupted"];
+  if (interrupted !== undefined && interrupted !== true) return false;
   return typeof r["text"] === "string";
 }
 
@@ -140,6 +207,8 @@ export function isLocalHarnessProgressEvent(v: unknown): v is LocalHarnessProgre
   const e = v as Record<string, unknown>;
   switch (e["kind"]) {
     case "text":
+      return typeof e["delta"] === "string";
+    case "reasoning":
       return typeof e["delta"] === "string";
     case "tool":
       return isSafeLocalHarnessName(e["toolName"]);

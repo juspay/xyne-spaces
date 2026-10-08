@@ -87,11 +87,25 @@ export interface RecallOpts {
   queryTimestamp?: string;
 }
 
+/** Per-arm retrieval scores. Hindsight fuses `semantic` (embedding closeness) and
+ *  `reranker` (cross-encoder) into `final`. Rank on `semantic` when the stored text
+ *  is descriptive rather than an answer to the query — the cross-encoder scores such
+ *  content near zero and drags `final` down with it. */
+export interface RecallScores {
+  final?: number;
+  semantic?: number;
+  reranker?: number;
+}
+
 export interface RecalledMemory {
   id: string;
   text: string;
   factType?: string;
   tags?: string[];
+  metadata?: Record<string, string>;
+  /** Provider chunk identity, when the provider stores chunks rather than facts. */
+  chunkId?: string;
+  scores?: RecallScores;
   score?: number;
 }
 
@@ -113,6 +127,9 @@ export interface Memory {
   content: string;
   tags?: string[];
   metadata?: Record<string, string>;
+  /** Provider chunk identity, `<document>_<ordinal>` — lets callers reassemble a
+   *  document that the provider split on write. */
+  chunkId?: string;
   factType?: string;
   createdAt?: string;
   /** Canonical entity names Hindsight extracted for this memory. Drives the
@@ -229,6 +246,27 @@ export interface EnsureBankOpts {
    *  overrides may set any bank-configurable field (e.g.
    *  `retain_extraction_mode: "chunks"` to store content as-is with no LLM). */
   retainStrategies?: Record<string, Record<string, unknown>>;
+  /** Retain-time extraction mode for the whole bank. `chunks` stores content
+   *  verbatim with no LLM on the write path, turning the bank into a plain vector
+   *  store — use it for banks holding documents rather than facts. Defaults to the
+   *  provider's fact-extraction mode so existing banks are unaffected. */
+  retainExtractionMode?: RetainExtractionMode;
+  /** Max characters per stored chunk. Raise it to keep a document whole. */
+  retainChunkSize?: number;
+}
+
+export type RetainExtractionMode = "concise" | "verbose" | "custom" | "verbatim" | "chunks";
+
+export interface RetainOpts {
+  /**
+   * Wait for the write to be queryable before resolving. Defaults to false,
+   * because fact extraction is slow enough that blocking on it would stall a
+   * request. Banks that store content verbatim have no extraction step, so a
+   * synchronous write costs little and makes read-after-write safe — without it
+   * a caller that reads back to decide what to replace sees nothing and writes
+   * a duplicate.
+   */
+  waitForIndex?: boolean;
 }
 
 /**
@@ -247,7 +285,7 @@ export interface MemoryProvider {
   ensureBank(bankId: string, opts?: EnsureBankOpts): Promise<void>;
 
   /** Store new memories. Provider may extract / chunk / re-embed internally. */
-  retain(bankId: string, items: RetainItem[]): Promise<RetainedMemory[]>;
+  retain(bankId: string, items: RetainItem[], opts?: RetainOpts): Promise<RetainedMemory[]>;
 
   /** Similarity-style retrieval. Returns ranked memories. */
   recall(bankId: string, query: string, opts?: RecallOpts): Promise<RecalledMemory[]>;
@@ -269,6 +307,10 @@ export interface MemoryProvider {
    * tag reaches every memory regardless. Optional — callers feature-detect.
    */
   deleteByTag?(bankId: string, tag: string): Promise<number>;
+
+  /** Resolved bank settings plus the per-bank overrides actually stored.
+   *  Callers use it to confirm a bank is configured as requested. */
+  getBankConfig?(bankId: string): Promise<{ config: Record<string, unknown>; overrides: Record<string, unknown> }>;
 
   /**
    * Hard-delete EVERY memory in the bank. The bank row and config overrides
@@ -318,6 +360,22 @@ export function bankIdForAgent(agentSlug: string): string {
     .replace(/^-+|-+$/g, "")
     .slice(0, 44);
   return `xyne-${sanitized}`;
+}
+
+export const DIGITAL_TWIN_SLUG = "digital-twin";
+export const DIGITAL_TWIN_BANK_ID = bankIdForAgent(DIGITAL_TWIN_SLUG);
+
+/**
+ * Twin gate — MUST be keyed on the bank id, not the raw slug. bankIdForAgent
+ * sanitizes (lowercase, collapse non-alphanumerics, truncate 44), so slugs like
+ * "digital_twin" / "Digital-Twin" / "digital--twin" all resolve to the twin's
+ * bank `xyne-digital-twin`. A raw `=== "digital-twin"` check would let such an
+ * agent reach the shared twin bank WITHOUT the per-user `user:<id>` gating and
+ * leak every opted-in user's personal memories. Anything that lands in the twin
+ * bank gets twin treatment.
+ */
+export function isDigitalTwinAgent(agentSlug: string | null | undefined): boolean {
+  return !!agentSlug && bankIdForAgent(agentSlug) === DIGITAL_TWIN_BANK_ID;
 }
 
 /** Org-scoped bank id: `xyne-<org8>-<slug>`. org8 = first 8 lowercased alphanumeric chars of orgId. Multi-org fix (2026-07-17): slug-only bank ids made same-slug agents in different orgs share one memory bank. */

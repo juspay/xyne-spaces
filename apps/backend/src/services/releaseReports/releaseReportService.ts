@@ -9,15 +9,16 @@ import {
   UserType,
 } from '@xyne/shared';
 import { db } from '@/database/client';
-import { config } from '@/config/env';
 import { TicketRepository } from '@/database/repositories/ticketRepository';
 import { MessageRepository } from '@/database/repositories/messageRepository';
 import { ReleaseRepository } from '@/database/repositories/releaseRepository';
 import { conversationService } from '@/services/conversationService';
+import { buildWorkspaceCanvasUrl } from '@/services/canvasService';
 import { unifiedBotUserService } from '@/bots/unified';
 import { userActivityTrackingService } from '@/services/userActivityTrackingService';
 import { logger } from '@/utils/logger';
 import { ReleaseReportCanvasService } from './releaseReportCanvas';
+import { publishTx } from '@/bypassAcl/transactions/releaseReportService';
 
 interface ReleaseReportTicketMetadata {
   releaseReportCanvasId?: string;
@@ -32,11 +33,6 @@ interface PublishReleaseReportInput {
 }
 
 const ENV_VAR_REGEX = /^\s*([A-Za-z][A-Za-z0-9_]*)\s*[=:]/gm;
-
-function buildReleaseReportCanvasUrl(workspaceId: string, canvasId: string): string {
-  const frontendUrl = config.slackFrontendUrl.replace(/\/$/, '');
-  return `${frontendUrl}/${workspaceId}/chat/canvas/${canvasId}`;
-}
 
 function extractEnvironmentVariableNames(...values: string[]): Set<string> {
   const names = new Set<string>();
@@ -286,16 +282,10 @@ export class ReleaseReportService {
   }: PublishReleaseReportInput): Promise<PublishReleaseReportResponse> {
     const report = await this.gatherReleaseReport(ticketId);
 
-    return db.$transaction(
-      async (tx) => {
-        await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${'release-report:' + ticketId}))`;
-        return this.publishLocked(ticketId, publisher, report);
-      },
-      { maxWait: 10_000, timeout: 60_000 }
-    );
+    return publishTx(ticketId, this, publisher, report);
   }
 
-  private async publishLocked(
+  async publishLocked(
     ticketId: string,
     publisher: User,
     report: ReleaseReport
@@ -316,7 +306,7 @@ export class ReleaseReportService {
       version,
       existingMetadata.releaseReportCanvasId
     );
-    const canvasUrl = buildReleaseReportCanvasUrl(report.release.workspaceId, canvas.canvasId);
+    const canvasUrl = buildWorkspaceCanvasUrl(report.release.workspaceId, canvas.canvasId);
 
     // Timeline event — best-effort, never blocks the publish path.
     void this.releaseRepository
@@ -456,3 +446,4 @@ A full release report for **${report.release.xyneId} - ${report.release.title}**
     };
   }
 }
+

@@ -27,11 +27,18 @@
  *     downstream invocation persistence. Stripped before anything stores them.
  */
 
+import { basename } from "node:path";
+import { gcsUploadSessionFile } from "./storage.js";
 import { mkdir, writeFile } from "node:fs/promises";
 import { join as joinPath, resolve as resolvePath } from "node:path";
+import { randomUUID } from "node:crypto";
 import { metric } from "./metrics.js";
 
 import { createLogger } from "./logger.js";
+import { optEnabled } from "./optimizations.js";
+import { siftToolResult } from "./result-sift.js";
+import { currentRunMessages, currentRunTask } from "./run-context.js";
+import { currentToolCall } from "./tool-call-context.js";
 const log = createLogger("tool-output");
 
 // MCP/custom tool results are often structure-heavy JSON, so we use a tighter
@@ -64,6 +71,15 @@ export const SPILL_MAX_LINE_CHARS = Number(process.env["XYNE_CLAW_SPILL_MAX_LINE
 // mcpTool.name / custom-tool slug) that should get the larger retrieval cap.
 const RETRIEVAL_TOOL_NAMES: ReadonlySet<string> = new Set([
   "kb-search",
+  // spaces-vespa-search replaced spaces-search as the general search tool
+  // (2026-09-26); corpus-scan and evidence-pack return the same kind of
+  // reason-over-it evidence. Missing from this set they'd take the small
+  // bulk-tool cap and spill behind a 2KB preview — the grounding leak above.
+  "spaces-vespa-search",
+  "spaces-corpus-scan",
+  "spaces-evidence-pack",
+  // Kept so historical results and any not-yet-migrated caller still get the
+  // retrieval cap rather than silently degrading.
   "spaces-search",
   "spaces-research",
   "memory-search",
@@ -189,6 +205,58 @@ export function lineifyForSpill(content: string, maxLineChars: number = SPILL_MA
  * read/grep tools. On a disk-write failure, falls back to an inline head with a
  * clear truncation note rather than dropping silently.
  */
+
+async function siftIntoContext(
+  outputBaseDir: string,
+  category: string,
+  toolName: string,
+  clean: string,
+  cap: number,
+): Promise<string | null> {
+  const call = currentToolCall();
+  const outcome = await siftToolResult({
+    toolName,
+    content: clean,
+    task: currentRunTask(),
+    // R1: the classifier sees the conversation so far and this call's args,
+    // not just the latest message.
+    messages: currentRunMessages(),
+    ...(call ? { args: call.args } : {}),
+    charBudget: cap,
+  }).catch(() => null);
+  if (!outcome) return null;
+
+  const safeCategory = category.replace(/[^a-zA-Z0-9_-]/g, "_");
+  const safeTool = toolName.replace(/[^a-zA-Z0-9_-]/g, "_");
+  const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+  const dir = resolvePath(outputBaseDir, ".context", "tool-results");
+  const fileName = `${safeCategory}-${safeTool}-${stamp}-${randomUUID().slice(0, 8)}.json`;
+  const absPath = joinPath(dir, fileName);
+  const lined = lineifyForSpill(clean);
+  try {
+    await mkdir(dir, { recursive: true });
+    await writeFile(absPath, lined, { encoding: "utf8" });
+    void gcsUploadSessionFile(basename(outputBaseDir), joinPath(".context", "tool-results", fileName), lined);
+  } catch (err) {
+    log.warn(`[tool-output] ${safeCategory}/${safeTool} sift skipped — full result could not be saved: ${err instanceof Error ? err.message : String(err)}`);
+    return null;
+  }
+
+  metric.count("tool_output_sifted", { category: safeCategory, tool: safeTool });
+  log.info(
+    `[tool-output] ${safeCategory}/${safeTool} sifted ${outcome.total} → ${outcome.kept} items, ` +
+    `${outcome.charsBefore}b → ${outcome.charsAfter}b (full at ${absPath})`,
+  );
+  return [
+    `[Relevance filter: showing ${outcome.kept} of ${outcome.total} items from this result — the ones relevant to the user's request. ` +
+      `The other ${outcome.total - outcome.kept} were left out to save context, NOT because they don't exist: ` +
+      `counts and totals must use ${outcome.total}, not ${outcome.kept}.`,
+    `The complete, unfiltered result is saved at ${absPath} — read or grep that file if you need an item that isn't shown.]`,
+    ``,
+    outcome.text,
+  ].join("\n");
+}
+
 export async function promoteIfOversized(
   outputBaseDir: string,
   category: string,
@@ -198,11 +266,45 @@ export async function promoteIfOversized(
   // retrieval tools keep their full result inline while bulk/file tools spill at
   // the small cap. Callers may pass an explicit value to override.
   inlineCapBytes?: number,
+  // When true, persist the raw result to a file even when it fits inline, and
+  // hand the model the path — so it can forward the whole file into a sandbox
+  // byte-for-byte (sandbox-copy-in contextPath) instead of retyping it.
+  forceFile = false,
 ): Promise<string> {
   const cap = inlineCapBytes ?? inlineCapForTool(toolName);
   const clean = stripControlChars(rawContent);
+  // Per-call choice (the `sift` tool param) wins over the agent default, which
+  // covers retrieval tools. Only one pass sifts: an MCP result goes through
+  // this function twice (mcp.ts, then the custom-tool wrapper).
+  const call = currentToolCall();
+  const siftWanted = call?.sift ?? (optEnabled("jev_result_sift") && isRetrievalTool(toolName));
+  if (siftWanted && !call?.sifted) {
+    const sifted = await siftIntoContext(outputBaseDir, category, toolName, clean, cap);
+    if (sifted) {
+      if (call) call.sifted = true;
+      return sifted;
+    }
+  }
   if (clean.length <= cap) {
-    return clean;
+    if (!forceFile) return clean;
+    // Persist the RAW bytes (not the control-stripped inline copy) so a sandbox-copy-in
+    // forward is byte-identical; the random suffix avoids same-millisecond collisions.
+    const safeCat = category.replace(/[^a-zA-Z0-9_-]/g, "_");
+    const safeName = toolName.replace(/[^a-zA-Z0-9_-]/g, "_");
+    const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+    const fileName = `${safeCat}-${safeName}-${stamp}-${randomUUID().slice(0, 8)}.json`;
+    const dir = resolvePath(outputBaseDir, ".context", "tool-results");
+    const absPath = joinPath(dir, fileName);
+    const relPath = joinPath("tool-results", fileName);
+    try {
+      await mkdir(dir, { recursive: true });
+      await writeFile(absPath, rawContent, { encoding: "utf8" });
+    } catch (err) {
+      log.warn(`[tool-output] ${safeCat}/${safeName} force-file write failed: ${err instanceof Error ? err.message : String(err)}`);
+      return clean;
+    }
+    metric.count("tool_output_spill", { category: safeCat, tool: safeName });
+    return `${clean}\n\n[Full raw result also saved — forward it into a sandbox with sandbox-copy-in contextPath: "${relPath}" instead of pasting its content.]`;
   }
   // Reflow to line-structured form so the spilled file is readable/greppable by
   // the line-oriented read/grep tools (a minified single-line JSON payload is
@@ -225,10 +327,16 @@ export async function promoteIfOversized(
   // An absolute path is checked as-is by the read gate and matches the (already
   // absolute-resolved) .context read roots.
   const dir = resolvePath(outputBaseDir, ".context", "tool-results");
-  const absPath = joinPath(dir, `${safeCategory}-${safeTool}-${stamp}.json`);
+  const baseName = `${safeCategory}-${safeTool}-${stamp}-${randomUUID().slice(0, 8)}`;
+  const absPath = joinPath(dir, `${baseName}.json`);
   try {
     await mkdir(dir, { recursive: true });
     await writeFile(absPath, lined, { encoding: "utf8" });
+    void gcsUploadSessionFile(
+      basename(outputBaseDir),
+      joinPath(".context", "tool-results", `${baseName}.json`),
+      lined,
+    );
   } catch (err) {
     const truncated = lined.slice(0, cap);
     return [
@@ -239,6 +347,30 @@ export async function promoteIfOversized(
       truncated,
     ].join("\n");
   }
+  // MCP callers (forceFile) additionally get the UNMODIFIED bytes as a sibling
+  // file: the lined copy above is reflowed for read/grep, so forwarding it into
+  // a sandbox would not be byte-identical to the tool's actual result. Costs a
+  // second write for oversized blobs; best-effort — the lined spill above is
+  // the load-bearing one.
+  let rawRelPath: string | undefined;
+  if (forceFile) {
+    const rawFileName = `${baseName}-raw.json`;
+    try {
+      await writeFile(joinPath(dir, rawFileName), rawContent, { encoding: "utf8" });
+      // Awaited, unlike the lined copy above: this is the path the model is
+      // told to forward with sandbox-copy-in, and that call lands on whichever
+      // pod claims the NEXT turn. If it is not in the archive by then, that pod
+      // restores a session without it.
+      await gcsUploadSessionFile(
+        basename(outputBaseDir),
+        joinPath(".context", "tool-results", rawFileName),
+        rawContent,
+      );
+      rawRelPath = joinPath("tool-results", rawFileName);
+    } catch (err) {
+      log.warn(`[tool-output] ${safeCategory}/${safeTool} raw sibling write failed: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
   const preview = lined.slice(0, previewBytes);
   metric.count("tool_output_spill", { category: safeCategory, tool: safeTool });
   metric.observe("tool_output_spill_bytes", clean.length, { category: safeCategory, tool: safeTool });
@@ -246,6 +378,9 @@ export async function promoteIfOversized(
   return [
     `[Tool returned ${clean.length} chars — full result saved to ${absPath}.`,
     `Use the read tool on that absolute path (with offset/limit) or grep on it to inspect.`,
+    ...(rawRelPath
+      ? [`To use the whole result inside a sandbox, forward the byte-identical raw copy with sandbox-copy-in contextPath: "${rawRelPath}" instead of retyping it.`]
+      : []),
     `If you're looking for specific entries, consider re-calling the tool with narrower filters.]`,
     ``,
     `## Preview (first ${previewBytes} chars)`,

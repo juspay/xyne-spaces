@@ -2,6 +2,9 @@ import { ReactElement, useEffect, useRef, useState } from 'react';
 import { useLocation, useParams } from 'react-router-dom';
 import { SDLC_APP_BASE_PATH } from '../../config';
 import { useCallJoinOrInitiate } from '../../hooks/useCallJoinOrInitiate';
+import { openLink } from '../../utils/openLink';
+import { routePopupToEmbeddedWebview } from '../../utils/embeddedWebviewRegistry';
+import { SdlcEmbeddedWebview } from './SdlcEmbeddedWebview';
 import { parseSdlcFrameMessage, SDLC_FRAME_MESSAGE } from './sdlcFrameMessages';
 import { SDLC_WINDOW_FRAME_NAME } from './useSdlcFrameBridge';
 
@@ -48,6 +51,13 @@ const SdlcWindow = (): ReactElement => {
         return;
       }
 
+      if (message.type === SDLC_FRAME_MESSAGE.openLink) {
+        // Forced in-app: the lane asked for this because it wants the link in
+        // the app, not handed to the operating system.
+        openLink(message.url, null, { force: 'in-app' });
+        return;
+      }
+
       if (message.type === SDLC_FRAME_MESSAGE.reset) {
         setSrc(`${SDLC_APP_BASE_PATH}/${workspaceId}/sdlc?_reset=${Date.now()}`);
         setResetCount(count => count + 1);
@@ -58,16 +68,44 @@ const SdlcWindow = (): ReactElement => {
     return (): void => window.removeEventListener('message', onMessage);
   }, [workspaceId]);
 
+  /**
+   * Popups from a page embedded in this window.
+   *
+   * Main denies every popup a webview asks for and forwards the url to the
+   * window that embedded it. In the app's main window BrowserPanelHandler picks
+   * that up and offers it to the embedded webview before falling back to the
+   * browser panel — but this route renders SdlcWindow alone, without AppRoot, so
+   * here there is nobody to offer it to and the click was being dropped.
+   */
+  useEffect(() => {
+    const api = window.electronAPI;
+    if (!api?.onOpenInBrowserPanel) return;
+    return api.onOpenInBrowserPanel((url: string, sourceWebContentsId?: number) => {
+      if (routePopupToEmbeddedWebview(url, sourceWebContentsId)) return;
+      // Nothing embedded here claimed it and this window has no browser panel,
+      // so the system browser is the only place left for it to go.
+      openLink(url, null, { force: 'external' });
+    });
+  }, []);
+
   return (
-    <iframe
-      key={resetCount}
-      ref={iframeRef}
-      src={src}
-      title='SDLC'
-      name={SDLC_WINDOW_FRAME_NAME}
-      className='h-full w-full border-0'
-      allow='clipboard-read; clipboard-write'
-    />
+    <div className='relative h-full w-full'>
+      <iframe
+        key={resetCount}
+        ref={iframeRef}
+        src={src}
+        title='SDLC'
+        name={SDLC_WINDOW_FRAME_NAME}
+        className='h-full w-full border-0'
+        allow='clipboard-read; clipboard-write'
+      />
+      {/* The window fills its wrapper, so the frame's own coordinates are the
+          wrapper's; no offset to add. */}
+      <SdlcEmbeddedWebview
+        offset={{ top: 0, left: 0 }}
+        getFrameWindow={() => iframeRef.current?.contentWindow ?? null}
+      />
+    </div>
   );
 };
 

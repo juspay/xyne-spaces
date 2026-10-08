@@ -130,7 +130,9 @@ export const UserGroupListItem = ({
             <Button
               variant='outline'
               className='h-[26px] rounded-[10px] px-3 text-xs'
-              onClick={() => void navigate(`/user-groups/${userGroup.id}/assignment-config`)}
+              onClick={() =>
+                void navigate(`/organisations/user-groups/${userGroup.id}/assignment-config`)
+              }
               data-track-category='UserGroups'
               data-track-name='OpenAssignmentConfig'
               data-track-metadata={JSON.stringify({

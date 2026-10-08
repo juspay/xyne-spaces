@@ -3,8 +3,10 @@ import { errMsg } from "../lib/errors.js";
 import { Prisma } from "@prisma/client";
 import { skillRepository, agentRequestRepository, userRepository } from "../repositories/index.js";
 import { getRequesterId, getOrgId, isClawAdmin, requireClawAdmin, getAgentEditAccess , requireRequester} from "../middleware/agent-acl.js";
+import { s2sKeyMatches } from "../middleware/require-auth.js";
 import { writeAuditLog } from "../lib/audit.js";
 import { getWorkspaceIdForUser } from "../lib/spaces-db.js";
+import { spacesUserIdForClawUser } from "../lib/users-jit.js";
 import { decrypt } from "../crypto.js";
 import { CONFIG } from "../config.js";
 import { spacesAppFetch } from "../lib/spaces-api.js";
@@ -24,6 +26,26 @@ import { createLogger } from "../logger.js";
 const log = createLogger("skills");
 
 const router = Router();
+
+/**
+ * A skill slug/id is caller-supplied, so org scope is tenant isolation, not
+ * authorization: a same-org user must not read another user's PRIVATE (non-global)
+ * skill's content or files by guessing its slug/id. Readable = global, owned, or
+ * admin; internal S2S callers (the runner) are trusted. A not-readable skill
+ * resolves to 404 — never 403 — so the slug is not confirmed to someone probing.
+ */
+async function assertSkillReadable(
+  skill: { slug: string; scope: string; ownerUserId: string | null },
+  req: Request,
+): Promise<void> {
+  if (s2sKeyMatches(req.headers["x-s2s-key"])) return;
+  if (skill.scope === "global") return;
+  const requesterId = getRequesterId(req);
+  if (requesterId && skill.ownerUserId === requesterId) return;
+  if (requesterId && (await isClawAdmin(requesterId))) return;
+  log.warn(`[skills] private-skill read blocked slug=${skill.slug} owner=${skill.ownerUserId ?? "none"} viewer=${requesterId ?? "none"}`);
+  throw notFound("Skill not found");
+}
 
 /**
  * R1: may the proposer's chosen agent post the approval DM under that agent's
@@ -65,6 +87,7 @@ router.get("/:slug", asyncHandler(async (req: Request<{ slug: string }>, res: Re
     log.warn(`[skills/get] skill org-scoped miss slug=${req.params.slug} orgId=${getOrgId(req) ?? "none"} userId=${getRequesterId(req) ?? "none"}`);
     throw notFound("Skill not found");
   }
+  await assertSkillReadable(skill, req);
   ok(res, skill);
 }));
 
@@ -301,6 +324,7 @@ router.get("/:slug/files", asyncHandler(async (req: Request<{ slug: string }>, r
     log.warn(`[skills/files] skill org-scoped miss slug=${req.params.slug} orgId=${getOrgId(req) ?? "none"} userId=${getRequesterId(req) ?? "none"}`);
     throw notFound("Skill not found");
   }
+  await assertSkillReadable(skill, req);
   const files = await skillRepository.listFiles(skill.id);
   ok(res, files.map((f) => ({
     id: f.id,
@@ -317,6 +341,7 @@ router.get("/:slug/files/:fileId", asyncHandler(async (req: Request<{ slug: stri
     log.warn(`[skills/file] skill org-scoped miss slug=${req.params.slug} orgId=${getOrgId(req) ?? "none"} fileId=${req.params.fileId} userId=${getRequesterId(req) ?? "none"}`);
     throw notFound("Skill not found");
   }
+  await assertSkillReadable(skill, req);
   const files = await skillRepository.listFiles(skill.id);
   const file = files.find((f) => f.id === req.params.fileId);
   if (!file) throw notFound("File not found");
@@ -431,8 +456,11 @@ async function notifyApproverOfSkillUpdateInSpaces(args: {
       log.warn(`[skills/propose-update] owner DM skipped for ${args.skillSlug}: no workspaceId for approver ${args.approverUserId}`);
       return;
     }
+    // openDm is keyed by Spaces' workspace-scoped user id; approverUserId is
+    // the canonical Claw id — translate or the DM silently never opens.
+    const spacesApproverUserId = await spacesUserIdForClawUser(args.approverUserId, workspaceId).catch(() => args.approverUserId);
     const dm = (await spacesAppFetch("/channel/openDm", {
-      targetUserId: args.approverUserId,
+      targetUserId: spacesApproverUserId,
       workspaceId,
     }, token)) as { channelId: string };
 

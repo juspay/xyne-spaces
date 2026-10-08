@@ -5,6 +5,9 @@
  * detail bar, which mirrors the live control bar's layout — can drive the same audio
  * without duplicating the load/release logic.
  *
+ * With `src` (a range-capable stream URL) playback starts without downloading the file;
+ * if the stream can't play, it falls back to downloading it once through `onLoad`.
+ *
  *   idle → (toggle) → loading → playing ↔ paused
  *                            → idle (on error / ended)
  */
@@ -16,6 +19,7 @@ export type AudioPlayState = 'idle' | 'loading' | 'playing' | 'paused';
 
 export interface UseAudioPlaybackOptions {
   onLoad: (signal: AbortSignal) => Promise<Blob>;
+  src?: string | undefined;
   initialDurationSec?: number | undefined;
   showToastOnError?: boolean;
 }
@@ -31,8 +35,11 @@ export interface UseAudioPlaybackReturn {
   setPlaybackRate: (rate: number) => void;
 }
 
+const isAbortError = (err: unknown): boolean => err instanceof Error && err.name === 'AbortError';
+
 export function useAudioPlayback({
   onLoad,
+  src,
   initialDurationSec = 0,
   showToastOnError = false,
 }: UseAudioPlaybackOptions): UseAudioPlaybackReturn {
@@ -43,6 +50,7 @@ export function useAudioPlayback({
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const blobUrlRef = useRef<string | null>(null);
   const abortRef = useRef<AbortController | null>(null);
+  const streamFailedRef = useRef(false);
 
   // Releases the current Audio element: stops playback, detaches the media
   // resource (removeAttribute('src')+load() frees the decoder and makes the
@@ -70,6 +78,56 @@ export function useAudioPlayback({
     return (): void => releaseRef.current();
   }, []);
 
+  const startAudio = async (url: string, isStream: boolean): Promise<void> => {
+    const audio = new Audio();
+    // Must be set before src so the credentialed range requests pass CORS.
+    if (isStream) audio.crossOrigin = 'use-credentials';
+    audio.src = url;
+    audio.playbackRate = playbackRate;
+    audioRef.current = audio;
+
+    let hasStarted = false;
+    audio.addEventListener('loadedmetadata', () => {
+      if (isFinite(audio.duration)) setDuration(audio.duration);
+    });
+    audio.addEventListener('timeupdate', () => setCurrentTime(audio.currentTime));
+    audio.addEventListener('playing', () => {
+      hasStarted = true;
+      setState('playing');
+    });
+    audio.addEventListener('pause', () => {
+      if (!audio.ended) setState('paused');
+    });
+    audio.addEventListener('ended', () => {
+      setState('idle');
+      setCurrentTime(0);
+    });
+    audio.addEventListener('error', () => {
+      if (hasStarted) setState('idle');
+    });
+
+    await audio.play();
+  };
+
+  const loadAndPlay = async (): Promise<void> => {
+    if (src && !streamFailedRef.current) {
+      try {
+        await startAudio(src, true);
+        return;
+      } catch (err: unknown) {
+        if (isAbortError(err)) throw err;
+        streamFailedRef.current = true;
+        releaseAudio();
+      }
+    }
+
+    abortRef.current = new AbortController();
+    const blob = await onLoad(abortRef.current.signal);
+    const url = URL.createObjectURL(blob);
+    blobUrlRef.current = url;
+    await startAudio(url, false);
+  };
+
   const toggle = async (): Promise<void> => {
     if (state === 'playing') {
       audioRef.current?.pause();
@@ -86,31 +144,9 @@ export function useAudioPlayback({
     setState('loading');
     releaseAudio(); // free the previous element + blob before creating new ones
     try {
-      abortRef.current = new AbortController();
-      const blob = await onLoad(abortRef.current.signal);
-      const url = URL.createObjectURL(blob);
-      blobUrlRef.current = url;
-
-      const audio = new Audio(url);
-      audio.playbackRate = playbackRate;
-      audioRef.current = audio;
-
-      audio.addEventListener('loadedmetadata', () => {
-        if (isFinite(audio.duration)) setDuration(audio.duration);
-      });
-      audio.addEventListener('timeupdate', () => setCurrentTime(audio.currentTime));
-      audio.addEventListener('playing', () => setState('playing'));
-      audio.addEventListener('pause', () => {
-        if (!audio.ended) setState('paused');
-      });
-      audio.addEventListener('ended', () => {
-        setState('idle');
-        setCurrentTime(0);
-      });
-
-      await audio.play();
+      await loadAndPlay();
     } catch (err: unknown) {
-      if (err instanceof Error && err.name === 'AbortError') return;
+      if (isAbortError(err)) return;
       setState('idle');
       if (showToastOnError) toast.error('Failed to load recording');
     }

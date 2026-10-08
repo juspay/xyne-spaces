@@ -31,8 +31,10 @@ export class CollectionPermissionsACL extends BaseQueryACL<'collection_permissio
               ),
               // Channel grants — same reasoning as the group check above.
               innerExists('permissions', (p) =>
+                // Pin the join direction — see tickets-acl.ts for the full rationale.
                 p.whereExists('channel', (ch) =>
                   ch.whereExists('participants', (cp) => cp.where('userId', this.ctx.userID)),
+                  { flip: false },
                 ),
               ),
             )

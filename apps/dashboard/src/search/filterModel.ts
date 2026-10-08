@@ -22,6 +22,7 @@ export const CHIP_PREFIXES = [
   'assignee:',
   'priority:',
   'board:',
+  'entity:',
   // Date chips are value filters like priority — a window, not an entity.
   'on:',
   'after:',
@@ -46,6 +47,8 @@ export interface SearchResultsFilters {
   // Bare @user / #channel mention filters (no prefix) — searched as message mentions.
   mentionUserIds: string[];
   mentionChannelIds: string[];
+  // Picked @user-group mention filter — searched as message group-mentions (Vespa `groupMentions`).
+  mentionUserGroupIds: string[];
   // Ticket power-filters. Typed syntax (`status:`, `board:`, …) still works and feeds the
   // same backend fields; these carry the values picked in the Filters popover.
   priority: string;
@@ -53,6 +56,8 @@ export interface SearchResultsFilters {
   statuses: string[];
   boardIds: string[];
   tags: string[];
+  /** Entity names annotated on messages/tickets. AND-ed by the backend, not OR-ed. */
+  entities: string[];
   // Date range: either a keyword (`range:last 7 days`) or explicit bounds (YYYY-MM-DD).
   dateRange: string;
   after: string;
@@ -62,6 +67,8 @@ export interface SearchResultsFilters {
   /** Phrase search. The query is quoted when the request is built, never in the box. */
   exactMatch: boolean;
   onlyMyChannels: boolean;
+  /** Desk-only toggle. When on, archived tickets are included in Desk results. */
+  showArchived: boolean;
   rankProfile: string;
 }
 
@@ -75,10 +82,12 @@ export const DEFAULT_SEARCH_FILTERS: SearchResultsFilters = {
   withUserIds: [],
   mentionUserIds: [],
   mentionChannelIds: [],
+  mentionUserGroupIds: [],
   priority: '',
   statuses: [],
   boardIds: [],
   tags: [],
+  entities: [],
   dateRange: '',
   after: '',
   before: '',
@@ -86,6 +95,7 @@ export const DEFAULT_SEARCH_FILTERS: SearchResultsFilters = {
   includeBotMessages: false,
   exactMatch: false,
   onlyMyChannels: true,
+  showArchived: false,
   rankProfile: '',
 };
 
@@ -202,6 +212,7 @@ export interface StructuredSearchFilters {
   status?: string;
   board?: string;
   tags?: string;
+  entity?: string;
   before?: string;
   after?: string;
   range?: string;

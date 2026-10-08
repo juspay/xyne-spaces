@@ -31,6 +31,9 @@ describe("buildCodeFlow", () => {
 });
 
 describe("buildDiffFlow", () => {
+  // Note the declared counts (2 and 3) do not match the body — models get these
+  // wrong constantly, so normalizeUnifiedPatch recomputes them. Header-repair
+  // itself is covered in depth by unified-patch.test.ts.
   const hunk = "@@ -41,2 +41,3 @@\n-messaging.onTokenRefresh(noop);\n+messaging.onTokenRefresh((t) => registerDevice(t));\n";
 
   it("adds file headers to a bare hunk list so the patch parses", () => {
@@ -40,9 +43,19 @@ describe("buildDiffFlow", () => {
     expect(flow.components[0]).toMatchObject({ id: "diff", type: "diff" });
     const props = flow.components[0]?.props as { path: string; patch: string };
     expect(props.path).toBe("src/push/token.ts");
-    expect(props.patch).toBe(`--- a/src/push/token.ts\n+++ b/src/push/token.ts\n${hunk}`);
+    expect(props.patch).toBe(
+      "--- a/src/push/token.ts\n+++ b/src/push/token.ts\n@@ -41,1 +41,1 @@\n" +
+        "-messaging.onTokenRefresh(noop);\n+messaging.onTokenRefresh((t) => registerDevice(t));\n",
+    );
     // Preview line only — no action surface on a display-only card.
     expect(flow.data).toEqual({ kind: "diff", fallbackText: "src/push/token.ts · +1/−1" });
+  });
+
+  it("renders a bare @@ header, which the diff parser silently drops otherwise", () => {
+    const flow = buildDiffFlow("src/a.ts", "@@\n-const a = 1;\n+const a = 2;\n");
+    const { patch } = flow.components[0]?.props as { patch: string };
+    expect(patch).toContain("@@ -1,1 +1,1 @@");
+    expect(flow.data).toMatchObject({ fallbackText: "src/a.ts · +1/−1" });
   });
 
   it("still adds headers when a hunk body line looks like a file header", () => {
@@ -52,10 +65,17 @@ describe("buildDiffFlow", () => {
     expect(patch.startsWith("--- a/db/migrations/002.sql\n+++ b/db/migrations/002.sql\n")).toBe(true);
   });
 
-  it("leaves an already-headed patch untouched", () => {
+  it("keeps the git header block of an already-headed patch", () => {
     const full = `diff --git a/x.ts b/x.ts\n--- a/x.ts\n+++ b/x.ts\n${hunk}`;
-    const flow = buildDiffFlow("x.ts", full);
-    expect((flow.components[0]?.props as { patch: string }).patch).toBe(full);
+    const { patch } = buildDiffFlow("x.ts", full).components[0]?.props as { patch: string };
+    expect(patch.startsWith("diff --git a/x.ts b/x.ts\n--- a/x.ts\n+++ b/x.ts\n")).toBe(true);
+  });
+
+  it("falls back to the raw patch when there is nothing to normalize", () => {
+    // Nothing renderable, but the card is still posted rather than swallowed —
+    // post-diff is what refuses this input, upstream of the builder.
+    const { patch } = buildDiffFlow("x.ts", "no diff here").components[0]?.props as { patch: string };
+    expect(patch).toBe("no diff here");
   });
 
   it("truncates a runaway patch with a visible marker", () => {

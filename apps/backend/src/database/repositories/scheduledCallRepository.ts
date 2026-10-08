@@ -2,6 +2,8 @@ import { DatabaseClient } from '../client';
 import { type Prisma } from '@prisma/client';
 import { CallStatus, RecurringCallSeriesStatus } from '@xyne/shared';
 import { logger } from '@/utils/logger';
+import { queueScheduledCallPillSync } from '@/services/scheduledCallPillSync';
+import { CallVespaFeedSource, queueCallVespaFeed } from '@/services/callVespaQueue';
 
 export class ScheduledCallRepository {
   private client(tx?: Prisma.TransactionClient) {
@@ -12,10 +14,12 @@ export class ScheduledCallRepository {
    * Cancel a single SCHEDULED call instance by marking it as CANCELLED.
    */
   async cancelCall(callId: string): Promise<void> {
-    await this.client().call.update({
+    const call = await this.client().call.update({
       where: { id: callId },
       data: { status: CallStatus.CANCELLED },
     });
+    queueScheduledCallPillSync(callId, call.externalId, 'scheduledCallRepository.cancelCall');
+    queueCallVespaFeed(callId, { source: CallVespaFeedSource.ScheduledCallRepositoryCancelCall });
   }
 
   async findFirstUpcomingSeriesInstance(params: {
@@ -122,38 +126,36 @@ export class ScheduledCallRepository {
   }
 
   /**
-   * Find all call instance IDs for a series.
+   * Find all call instances (id + externalId) for a series.
    */
-  async findCallIdsBySeriesId(params: {
+  async findCallsBySeriesId(params: {
     seriesId: string;
     tx: Prisma.TransactionClient;
-  }): Promise<string[]> {
+  }): Promise<Array<{ id: string; externalId: string }>> {
     const { seriesId, tx } = params;
-    const instances = await tx.call.findMany({
+    return tx.call.findMany({
       where: { recurringSeriesId: seriesId },
-      select: { id: true },
+      select: { id: true, externalId: true },
     });
-    return instances.map((i) => i.id);
   }
 
   /**
-   * Find future SCHEDULED call instance IDs for a series.
+   * Find future SCHEDULED call instances (id + externalId) for a series.
    */
-  async findFutureScheduledCallIds(params: {
+  async findFutureScheduledCalls(params: {
     seriesId: string;
     now: Date;
     tx: Prisma.TransactionClient;
-  }): Promise<string[]> {
+  }): Promise<Array<{ id: string; externalId: string }>> {
     const { seriesId, now, tx } = params;
-    const instances = await tx.call.findMany({
+    return tx.call.findMany({
       where: {
         recurringSeriesId: seriesId,
         status: CallStatus.SCHEDULED,
         startsAt: { gt: now },
       },
-      select: { id: true },
+      select: { id: true, externalId: true },
     });
-    return instances.map((i) => i.id);
   }
 
   /**
@@ -192,15 +194,17 @@ export class ScheduledCallRepository {
     title?: string | null;
     channelId?: string | null;
     callUpdatesChannel?: string | null;
+    summaryTemplateId?: string | null;
     tx?: Prisma.TransactionClient;
   }): Promise<number> {
-    const { callIds, title, channelId, callUpdatesChannel, tx } = params;
+    const { callIds, title, channelId, callUpdatesChannel, summaryTemplateId, tx } = params;
     if (callIds.length === 0) return 0;
 
     const data: Prisma.CallUncheckedUpdateManyInput = {};
     if (title !== undefined) data.title = title;
     if (channelId !== undefined) data.channelId = channelId;
     if (callUpdatesChannel !== undefined) data.callUpdatesChannel = callUpdatesChannel;
+    if (summaryTemplateId !== undefined) data.summaryTemplateId = summaryTemplateId;
 
     if (Object.keys(data).length === 0) return 0;
 
@@ -210,96 +214,5 @@ export class ScheduledCallRepository {
     });
 
     return result.count;
-  }
-
-  /**
-   * Count future SCHEDULED instances from a given date.
-   */
-  async countFutureScheduledInstances(params: {
-    seriesId: string;
-    fromDate: Date;
-    tx: Prisma.TransactionClient;
-  }): Promise<number> {
-    const { seriesId, fromDate, tx } = params;
-    return tx.call.count({
-      where: {
-        recurringSeriesId: seriesId,
-        status: CallStatus.SCHEDULED,
-        startsAt: { gte: fromDate },
-      },
-    });
-  }
-
-  /**
-   * Check if a SCHEDULED instance already exists at a specific time.
-   */
-  async findExistingInstanceAt(params: {
-    seriesId: string;
-    startsAt: Date;
-    tx: Prisma.TransactionClient;
-  }): Promise<{ id: string } | null> {
-    const { seriesId, startsAt, tx } = params;
-    return tx.call.findFirst({
-      where: {
-        recurringSeriesId: seriesId,
-        status: CallStatus.SCHEDULED,
-        startsAt,
-      },
-      select: { id: true },
-    });
-  }
-
-  /**
-   * Find the last SCHEDULED instance to determine where to start creating new ones.
-   */
-  async findLastScheduledInstance(params: {
-    seriesId: string;
-    tx: Prisma.TransactionClient;
-  }): Promise<{ id: string; startsAt: Date | null } | null> {
-    const { seriesId, tx } = params;
-    return tx.call.findFirst({
-      where: {
-        recurringSeriesId: seriesId,
-        status: CallStatus.SCHEDULED,
-      },
-      orderBy: { startsAt: 'desc' },
-      select: { id: true, startsAt: true },
-    });
-  }
-
-  /**
-   * Find the next SCHEDULED instance after a given date.
-   * Used to create Bull jobs for the next instance when the current one ends.
-   */
-  async findNextScheduledInstance(params: {
-    seriesId: string;
-    afterDate: Date;
-    tx: Prisma.TransactionClient;
-  }): Promise<{ id: string; externalId: string; title: string | null; startsAt: Date | null; endsAt: Date | null } | null> {
-    const { seriesId, afterDate, tx } = params;
-    return tx.call.findFirst({
-      where: {
-        recurringSeriesId: seriesId,
-        status: CallStatus.SCHEDULED,
-        startsAt: { gt: afterDate },
-      },
-      orderBy: { startsAt: 'asc' },
-      select: { id: true, externalId: true, title: true, startsAt: true, endsAt: true },
-    });
-  }
-
-  /**
-   * Find participant user IDs for a call instance.
-   */
-  async findCallParticipantUserIds(params: {
-    callId: string;
-    tx: Prisma.TransactionClient;
-  }): Promise<string[]> {
-    const { callId, tx } = params;
-    const participants = await tx.callParticipant.findMany({
-      where: { callId, isExternal: false },
-      select: { userId: true },
-    });
-    return participants.map((p) => p.userId);
   }
 }

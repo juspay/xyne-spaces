@@ -8,14 +8,14 @@ import { jwtService } from '../services/jwtService';
 import { oauthStateServiceV2 } from '../services/oauthStateServiceV2';
 import { pkceServiceV2 } from '../services/pkceServiceV2';
 import { MicrosoftAuthController } from './microsoftAuthController';
-import { channelService } from '../services/channelService';
 import { WorkspaceJoinPolicy, WorkspaceType, AuthProvider, UserStatus, OrgRole } from '@xyne/shared';
 import type { WorkspaceJoinPolicy as WorkspaceJoinPolicyValue, WorkspaceType as WorkspaceTypeValue } from '@xyne/shared';
 
 import '../types/express';
 import { config } from '@/config/env';
+import { isRefreshAllowed } from '@/services/sessionRefreshValidator';
 import { DatabaseClient } from '@/database/client';
-import { runAsSystem } from '@/database/tenant/context';
+import { switchWorkspaceData, ensureSelfDmForUserData, getWorkspaceLandingChannelData } from '@/bypassAcl/authServices';
 import { getEncryptionProvider } from '@/services/encryption';
 import { getFrontendUrl, resolveConfiguredOAuthRedirectUrl } from '@/utils/publicUrls';
 import {
@@ -117,14 +117,7 @@ export class AuthV2Controller {
     userId: string,
     workspaceId: string
   ): Promise<string | null> {
-    try {
-      const selfDmChannelId = await channelService.ensureSelfDmExists(userId, workspaceId);
-      logger.info(`[ensureSelfDmForUser] Self-DM ensured for user ${userId}: ${selfDmChannelId}`);
-      return selfDmChannelId;
-    } catch (error) {
-      logger.error(`[ensureSelfDmForUser] Failed to ensure self-DM for user ${userId}:`, error);
-      return null;
-    }
+    return ensureSelfDmForUserData(userId, workspaceId);
   }
 
   /**
@@ -159,7 +152,7 @@ export class AuthV2Controller {
     if (refreshToken) {
       try {
         const refreshTokenExpiry = new Date();
-        refreshTokenExpiry.setDate(refreshTokenExpiry.getDate() + 30);
+        refreshTokenExpiry.setDate(refreshTokenExpiry.getDate() + config.session.expiryDays);
 
         const deviceInfo = JSON.stringify({
           userAgent: req.headers['user-agent'],
@@ -319,7 +312,7 @@ export class AuthV2Controller {
 
       const authUrl = this.getGoogleClient(isNy).generateAuthUrl({
         access_type: 'offline',
-        scope: ['openid', 'email', 'profile'],
+        scope: ['openid', 'email', 'profile', 'https://www.googleapis.com/auth/contacts.readonly', 'https://www.googleapis.com/auth/contacts.other.readonly'],
         prompt: 'consent',
         redirect_uri: redirectUri,
         state,
@@ -543,13 +536,24 @@ export class AuthV2Controller {
       let publicEmailError = null;
 
       if (workspaces.length === 0 && !userExistsButRemoved) {
-        if (stateData.enterpriseLogin) {
+        // Public email domains can never create enterprise workspaces — the only
+        // path forward for a workspace-less user without a pending community join
+        // or invitation — so fail fast on them regardless of the entry flow. The
+        // remaining domain-conflict assert stays gated on the explicit
+        // enterprise intent.
+        try {
+          await organizationDomainService.assertNotPublicEmailDomain(googleUserData.email);
+        } catch (error) {
+          if (error instanceof PublicEmailDomainError) {
+            publicEmailError = error;
+          }
+        }
+
+        if (stateData.enterpriseLogin && !publicEmailError) {
           try {
             await organizationDomainService.assertCanCreateOrgForEmail(googleUserData.email);
           } catch (error) {
-            if (error instanceof PublicEmailDomainError) {
-              publicEmailError = error;
-            } else if (error instanceof OrganizationDomainConflictError) {
+            if (error instanceof OrganizationDomainConflictError) {
               domainConflictError = error;
             }
           }
@@ -634,7 +638,7 @@ export class AuthV2Controller {
 
         res.cookie('xyne_last_workspace', workspaceId, {
           ...cookieBase,
-          maxAge: 30 * 24 * 60 * 60 * 1000,
+          maxAge: config.session.expiryDays * 24 * 60 * 60 * 1000,
         });
 
         res.cookie(`xyne_ws_${workspaceId}_token`, jwtToken, {
@@ -736,8 +740,24 @@ export class AuthV2Controller {
 
       logger.info(`[${requestId}] Session found for user: ${session.user.email}`);
 
-      if (session.status !== 'ACTIVE' || new Date() > session.refreshTokenExpiry) {
-        logger.warn(`[${requestId}] Session expired or inactive`);
+      // ENABLE_PROVIDER_REVOCATION_CHECK gates the refresh-validity decision.
+      // Disabled → the original inline check (session status + expiry only) runs
+      // verbatim, calling nothing new. Enabled → the shared isRefreshAllowed
+      // decision (status/expiry/leftAt + Google/Microsoft revocation +
+      // deactivation cleanup), same as the v1/v2 auth middlewares — so this
+      // JWT-minting endpoint (used by Zero clients after a 401) can't re-issue a
+      // token for a revoked user.
+      if (!config.enableProviderRevocationCheck) {
+        if (session.status !== 'ACTIVE' || new Date() > session.refreshTokenExpiry) {
+          logger.warn(`[${requestId}] Session expired or inactive`);
+          res.status(401).json({
+            error: 'Session expired',
+            message: 'Please re-authenticate',
+          });
+          return;
+        }
+      } else if (!(await isRefreshAllowed(session))) {
+        logger.warn(`[${requestId}] Session refresh not allowed (invalid or revoked)`);
         res.status(401).json({
           error: 'Session expired',
           message: 'Please re-authenticate',
@@ -940,13 +960,23 @@ export class AuthV2Controller {
       let publicEmailError = null;
 
       if (workspaces.length === 0 && !userExistsButRemoved) {
-        if (stateData.enterpriseLogin) {
+        // Public email domains can never create enterprise workspaces, so fail fast
+        // on them regardless of the entry flow (mirrors handleCallback). The
+        // remaining domain-conflict assert stays gated on the explicit
+        // enterprise intent.
+        try {
+          await organizationDomainService.assertNotPublicEmailDomain(googleUserData.email);
+        } catch (error) {
+          if (error instanceof PublicEmailDomainError) {
+            publicEmailError = error;
+          }
+        }
+
+        if (stateData.enterpriseLogin && !publicEmailError) {
           try {
             await organizationDomainService.assertCanCreateOrgForEmail(googleUserData.email);
           } catch (error) {
-            if (error instanceof PublicEmailDomainError) {
-              publicEmailError = error;
-            } else if (error instanceof OrganizationDomainConflictError) {
+            if (error instanceof OrganizationDomainConflictError) {
               domainConflictError = error;
             }
           }
@@ -1026,7 +1056,7 @@ export class AuthV2Controller {
 
         res.cookie('xyne_last_workspace', workspaceId, {
           ...cookieBase,
-          maxAge: 30 * 24 * 60 * 60 * 1000,
+          maxAge: config.session.expiryDays * 24 * 60 * 60 * 1000,
         });
 
         res.cookie(`xyne_ws_${workspaceId}_token`, jwtToken, {
@@ -1363,7 +1393,7 @@ export class AuthV2Controller {
 
         res.cookie('xyne_last_workspace', workspaceId, {
           ...cookieBase,
-          maxAge: 30 * 24 * 60 * 60 * 1000,
+          maxAge: config.session.expiryDays * 24 * 60 * 60 * 1000,
         });
 
         res.cookie(`xyne_ws_${workspaceId}_token`, jwtToken, {
@@ -1466,7 +1496,7 @@ export class AuthV2Controller {
       
       if (sessionId) {
         logger.info(`[${requestId}] Revoking session for user ${req.user?.email}`);
-        await this.userSessionService.revokeSession(sessionId);
+        await this.userSessionService.revokeSession(sessionId, 'USER_LOGOUT');
       }
 
       if (req.user && sessionId) {
@@ -1606,6 +1636,11 @@ export class AuthV2Controller {
         return;
       }
 
+      // Reaching here without a pending-auth cookie means the existingSessionId
+      // branch above ran (the only other non-early-return path) — the user was
+      // already signed in and this is a workspace pick, not a fresh sign-in.
+      const isAutoLogin = !pendingAuthCookie;
+
       if (!oauthUserData?.email) {
         logger.warn(`[LOGIN-WORKSPACE] Workspace login rejected (platform=${platform}, reason=missing_user_data)`);
         res.status(401).json({
@@ -1641,16 +1676,13 @@ export class AuthV2Controller {
       await this.userService.ensureUserPresence(workspaceUser.id, workspaceId);
       const selfDmChannelId = await this.ensureSelfDmForUser(workspaceUser.id, workspaceId);
 
-      const workspace = await this.prisma.workspace.findUnique({
-        where: { id: workspaceId },
-        select: { landingChannelId: true },
-      });
+      const workspace = await getWorkspaceLandingChannelData(workspaceId);
 
       let sessionId = null;
       if (pendingRefreshToken || provider==AuthProvider.EMAIL) {
         try {
           const refreshTokenExpiry = new Date();
-          refreshTokenExpiry.setDate(refreshTokenExpiry.getDate() + 30);
+          refreshTokenExpiry.setDate(refreshTokenExpiry.getDate() + config.session.expiryDays);
 
           const deviceInfo = JSON.stringify({
             userAgent: req.headers['user-agent'],
@@ -1667,6 +1699,7 @@ export class AuthV2Controller {
             accessTokenExpiry: pendingAccessTokenExpiry,
             deviceInfo,
             ipAddress: req.ip || req.connection.remoteAddress || undefined,
+            loginMethod: isAutoLogin ? 'AUTO_LOGIN' : undefined,
           });
 
           sessionId = session.id;
@@ -1702,7 +1735,7 @@ export class AuthV2Controller {
       // Set last workspace pointer
       res.cookie('xyne_last_workspace', workspaceId, {
         ...cookieOptions,
-        maxAge: 30 * 24 * 60 * 60 * 1000, // 30 days
+        maxAge: config.session.expiryDays * 24 * 60 * 60 * 1000,
       });
 
       if (sessionId) {
@@ -1824,17 +1857,14 @@ export class AuthV2Controller {
       await this.userService.ensureUserPresence(workspaceUser.id, workspace.id);
       const selfDmChannelId = await this.ensureSelfDmForUser(workspaceUser.id, workspace.id);
 
-      const workspaceRecord = await this.prisma.workspace.findUnique({
-        where: { id: workspace.id },
-        select: { landingChannelId: true },
-      });
+      const workspaceRecord = await getWorkspaceLandingChannelData(workspace.id);
 
       let sessionId = null;
 
       if (pendingRefreshToken) {
         try {
           const refreshTokenExpiry = new Date();
-          refreshTokenExpiry.setDate(refreshTokenExpiry.getDate() + 30);
+          refreshTokenExpiry.setDate(refreshTokenExpiry.getDate() + config.session.expiryDays);
 
           const deviceInfo = JSON.stringify({
             userAgent: req.headers['user-agent'],
@@ -1886,14 +1916,14 @@ export class AuthV2Controller {
       if (sessionId) {
         res.cookie('user_session_id', sessionId, {
           ...cookieOptions,
-          maxAge: config.session.expiryDays * 24 * 60 * 60 * 1000, // 30 days
+          maxAge: config.session.expiryDays * 24 * 60 * 60 * 1000,
         });
       }
       
       // Set last workspace pointer
       res.cookie('xyne_last_workspace', targetWorkspaceId, {
         ...cookieOptions,
-        maxAge: 30 * 24 * 60 * 60 * 1000, // 30 days
+        maxAge: config.session.expiryDays * 24 * 60 * 60 * 1000,
       });
 
       setOnboardingCookie(res, isNewUser, {
@@ -1996,85 +2026,86 @@ export class AuthV2Controller {
 
       const currentUser = req.user!;
 
+      // Get existing session from global session cookie
+      // We reuse the same session across workspaces (session belongs to user, not workspace)
+      const sessionId = req.cookies?.user_session_id;
+
       // Switching workspaces is inherently cross-tenant: everything below acts on the
       // TARGET workspace while the ambient session context is still the caller's current
       // (old) one — the per-model ACLs' "must match your current workspace" rule can never
       // be satisfied by definition. Safe to bypass because every lookup here is keyed off
       // `currentUser.email` (the caller's own verified session), never attacker-supplied —
-      // this can only ever act on the caller's own identity in the target workspace.
-      await runAsSystem(async () => {
-        // Find the User record scoped to the target workspace
-        const targetUser = await this.userService.findUserByEmail(currentUser.email, workspaceId);
-        if (!targetUser) {
-          res.status(403).json({
-            error: 'Forbidden',
-            message: 'You do not have access to this workspace',
-          });
-          return;
-        }
-
-        await this.userService.ensureUserPresence(targetUser.id, workspaceId);
-        const selfDmChannelId = await this.ensureSelfDmForUser(targetUser.id, workspaceId);
-
-        const workspace = await this.prisma.workspace.findUnique({
-          where: { id: workspaceId },
-          select: { landingChannelId: true },
+      // this can only ever act on the caller's own identity in the target workspace. The
+      // session lookup is included here too (not read separately below) since the reused
+      // session's workspaceId is stale relative to the ambient (old) workspace by the second
+      // switch, which would wrongly ACL-block an out-of-band lookup.
+      const data = await switchWorkspaceData(currentUser.email, workspaceId, sessionId);
+      if (!data) {
+        res.status(403).json({
+          error: 'Forbidden',
+          message: 'You do not have access to this workspace',
         });
+        return;
+      }
+      const { targetUser, selfDmChannelId, workspace, currentSession } = data;
 
-        // Get existing session from global session cookie
-        // We reuse the same session across workspaces (session belongs to user, not workspace)
-        const sessionId = req.cookies?.user_session_id;
+      // Verify session exists and is valid
+      let validSessionId: string | null = null;
+      let sessionRefreshExpiry: Date | null = null;
+      if (currentSession && currentSession.status === 'ACTIVE') {
+        validSessionId = currentSession.id;
+        // Reusing the session (fixed window): the DB refreshTokenExpiry is NOT
+        // extended on switch, so the cookies must reflect its remaining life,
+        // never a fresh now+expiryDays (which would outlive the DB record).
+        sessionRefreshExpiry = currentSession.refreshTokenExpiry;
+        logger.info(`[SWITCH-WORKSPACE] Reusing existing session: ${validSessionId}`);
+      }
 
-        // Verify session exists and is valid
-        let validSessionId: string | null = null;
-        if (sessionId) {
-          const currentSession = await this.userSessionService.getSessionById(sessionId);
-          if (currentSession && currentSession.status === 'ACTIVE') {
-            validSessionId = currentSession.id;
-            logger.info(`[SWITCH-WORKSPACE] Reusing existing session: ${validSessionId}`);
-          }
-        }
+      if (!validSessionId) {
+        logger.warn(`[SWITCH-WORKSPACE] No valid session found for workspace switch`);
+      }
 
-        if (!validSessionId) {
-          logger.warn(`[SWITCH-WORKSPACE] No valid session found for workspace switch`);
-        }
+      // Session-scoped cookie lifetime: exact remaining validity of the reused
+      // session so user_session_id (and the pointer) match the DB row.
+      const sessionCookieMaxAge = sessionRefreshExpiry
+        ? sessionRefreshExpiry.getTime() - Date.now()
+        : config.session.expiryDays * 24 * 60 * 60 * 1000;
 
-        const token = jwtService.generateToken({
-          sub: targetUser.id,
+      const token = jwtService.generateToken({
+        sub: targetUser.id,
+        email: targetUser.email,
+        name: targetUser.name,
+        picture: targetUser.picture || undefined,
+        workspaceId: targetUser.workspaceId ?? undefined,
+        memberId: targetUser.orgMemberId,
+      });
+
+      const isProduction = process.env.NODE_ENV === 'production';
+      const cookieBase = { httpOnly: true, secure: isProduction, sameSite: 'strict' as const, path: '/' };
+
+      // Set workspace-specific cookies
+      res.cookie(`xyne_ws_${workspaceId}_token`, token, { ...cookieBase, maxAge: config.jwt.expirationSeconds * 1000 });
+      res.cookie('xyne_last_workspace', workspaceId, { ...cookieBase, maxAge: sessionCookieMaxAge });
+
+      // Set global session cookie (reusing existing session)
+      if (validSessionId) {
+        res.cookie('user_session_id', validSessionId, { ...cookieBase, maxAge: sessionCookieMaxAge });
+      }
+
+      logger.info(`[SWITCH-WORKSPACE] User ${currentUser.email} switched to workspace ${workspaceId}`);
+
+      res.status(200).json({
+        user: {
+          id: targetUser.id,
           email: targetUser.email,
           name: targetUser.name,
-          picture: targetUser.picture || undefined,
-          workspaceId: targetUser.workspaceId ?? undefined,
+          picture: targetUser.picture,
+          workspaceId: targetUser.workspaceId,
+          role: targetUser.role,
           memberId: targetUser.orgMemberId,
-        });
-
-        const isProduction = process.env.NODE_ENV === 'production';
-        const cookieBase = { httpOnly: true, secure: isProduction, sameSite: 'strict' as const, path: '/' };
-
-        // Set workspace-specific cookies
-        res.cookie(`xyne_ws_${workspaceId}_token`, token, { ...cookieBase, maxAge: config.jwt.expirationSeconds * 1000 });
-        res.cookie('xyne_last_workspace', workspaceId, { ...cookieBase, maxAge: 30 * 24 * 60 * 60 * 1000 });
-
-        // Set global session cookie (reusing existing session)
-        if (validSessionId) {
-          res.cookie('user_session_id', validSessionId, { ...cookieBase, maxAge: 30 * 24 * 60 * 60 * 1000 });
-        }
-
-        logger.info(`[SWITCH-WORKSPACE] User ${currentUser.email} switched to workspace ${workspaceId}`);
-
-        res.status(200).json({
-          user: {
-            id: targetUser.id,
-            email: targetUser.email,
-            name: targetUser.name,
-            picture: targetUser.picture,
-            workspaceId: targetUser.workspaceId,
-            role: targetUser.role,
-            memberId: targetUser.orgMemberId,
-          },
-          selfDmChannelId,
-          landingChannelId: workspace?.landingChannelId ?? null,
-        });
+        },
+        selfDmChannelId,
+        landingChannelId: workspace?.landingChannelId ?? null,
       });
     } catch (error) {
       logger.error('Error switching workspace:', error);
@@ -2142,6 +2173,16 @@ export class AuthV2Controller {
 
         logger.info(`[CREATE-WORKSPACE-PENDING] User ${oauthUserData.email} creating workspace "${workspaceName}" via ${provider}`);
 
+        // The pending-auth cookie is a plain string — normalize it into the enum
+        // we persist on the User row so a Microsoft login is not saved as GOOGLE.
+        const normalizedProvider = provider?.toUpperCase();
+        const signUpProvider =
+          normalizedProvider === 'MICROSOFT'
+            ? AuthProvider.MICROSOFT
+            : normalizedProvider === 'EMAIL'
+              ? AuthProvider.EMAIL
+              : AuthProvider.GOOGLE;
+
         const userData = {
           providerUserId: (oauthUserData.providerUserId || oauthUserData.googleId)!,
           email: oauthUserData.email.toLowerCase(),
@@ -2185,7 +2226,7 @@ export class AuthV2Controller {
         });
 
         const { organization, workspace, workspaceUser } = await this.userService.createWorkspaceInOrg(
-          { userId: '', providerUserId: userData.providerUserId, email: userData.email, name: userData.name, picture: userData.picture },
+          { userId: '', providerUserId: userData.providerUserId, email: userData.email, name: userData.name, picture: userData.picture, authProvider: signUpProvider },
           workspaceName,
           {
             workspaceType: (workspaceType ?? WorkspaceType.ENTERPRISE) as WorkspaceTypeValue,
@@ -2196,16 +2237,13 @@ export class AuthV2Controller {
         await this.userService.ensureUserPresence(workspaceUser.id, workspace.id);
         const selfDmChannelId = await this.ensureSelfDmForUser(workspaceUser.id, workspace.id);
 
-        const workspaceRecord = await this.prisma.workspace.findUnique({
-          where: { id: workspace.id },
-          select: { landingChannelId: true },
-        });
+        const workspaceRecord = await getWorkspaceLandingChannelData(workspace.id);
 
         let sessionId = null;
         if (pendingRefreshToken) {
           try {
             const refreshTokenExpiry = new Date();
-            refreshTokenExpiry.setDate(refreshTokenExpiry.getDate() + 30);
+            refreshTokenExpiry.setDate(refreshTokenExpiry.getDate() + config.session.expiryDays);
             const deviceInfo = JSON.stringify({
               userAgent: req.headers['user-agent'],
               acceptLanguage: req.headers['accept-language'],
@@ -2257,7 +2295,7 @@ export class AuthV2Controller {
 
         res.cookie('xyne_last_workspace', targetWorkspaceId, {
           ...cookieOptions,
-          maxAge: 30 * 24 * 60 * 60 * 1000,
+          maxAge: config.session.expiryDays * 24 * 60 * 60 * 1000,
         });
 
         const isNewUser = !(await this.userService.hasCompletedOnboarding(userData.email));
@@ -2344,7 +2382,7 @@ export class AuthV2Controller {
       }
 
       const { organization, workspace, workspaceUser } = await this.userService.createWorkspaceInOrg(
-        { userId: fullUser.id, providerUserId: fullUser.providerUserId, email: fullUser.email, name: fullUser.name, picture: fullUser.picture },
+        { userId: fullUser.id, providerUserId: fullUser.providerUserId, email: fullUser.email, name: fullUser.name, picture: fullUser.picture, authProvider: fullUser.authProvider as AuthProvider },
         workspaceName,
         {
           workspaceType: (workspaceType ?? WorkspaceType.ENTERPRISE) as WorkspaceTypeValue,
@@ -2355,10 +2393,7 @@ export class AuthV2Controller {
       await this.userService.ensureUserPresence(workspaceUser.id, workspace.id);
       const selfDmChannelId = await this.ensureSelfDmForUser(workspaceUser.id, workspace.id);
 
-      const workspaceRecord = await this.prisma.workspace.findUnique({
-        where: { id: workspace.id },
-        select: { landingChannelId: true },
-      });
+      const workspaceRecord = await getWorkspaceLandingChannelData(workspace.id);
 
       // Reuse refresh token from current session
       // Get global session cookie
@@ -2370,7 +2405,7 @@ export class AuthV2Controller {
       if (currentSession?.refreshToken) {
         try {
           const refreshTokenExpiry = new Date();
-          refreshTokenExpiry.setDate(refreshTokenExpiry.getDate() + 30);
+          refreshTokenExpiry.setDate(refreshTokenExpiry.getDate() + config.session.expiryDays);
           const newSession = await this.userSessionService.createSession({
             userId: workspaceUser.id,
             refreshToken: currentSession.refreshToken,
@@ -2378,6 +2413,8 @@ export class AuthV2Controller {
             accessToken: currentSession.accessToken ?? undefined,
             deviceInfo: JSON.stringify({ userAgent: req.headers['user-agent'], timestamp: new Date().toISOString(), appVersion: req.headers['x-app-version'] }),
             ipAddress: req.ip || req.connection.remoteAddress || undefined,
+            // Already signed in — a session for the workspace they just created.
+            loginMethod: 'WORKSPACE_CREATED',
           });
           newSessionId = newSession.id;
         } catch (sessionError) {
@@ -2404,7 +2441,7 @@ export class AuthV2Controller {
       if (newSessionId) {
         res.cookie('user_session_id', newSessionId, { ...cookieBase, maxAge: config.session.expiryDays * 24 * 60 * 60 * 1000 });
       }
-      res.cookie('xyne_last_workspace', targetWorkspaceId, { ...cookieBase, maxAge: 30 * 24 * 60 * 60 * 1000 });
+      res.cookie('xyne_last_workspace', targetWorkspaceId, { ...cookieBase, maxAge: config.session.expiryDays * 24 * 60 * 60 * 1000 });
       const isNewUser = !(await this.userService.hasCompletedOnboarding(fullUser.email));
       setOnboardingCookie(res, isNewUser, {
         secure: isProduction,

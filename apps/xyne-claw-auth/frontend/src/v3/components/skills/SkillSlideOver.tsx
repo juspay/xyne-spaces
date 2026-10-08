@@ -1,4 +1,5 @@
 import { useRef, useState, useEffect, useCallback } from "react";
+import { isCurrentUser } from "../../../lib/identity";
 import {
   SparkleIcon,
   PencilSimpleIcon,
@@ -117,7 +118,7 @@ export function SkillSlideOver({
   if (!skill) return null;
 
   const canEdit =
-    (skill.ownerUserId === userId || (isAdmin && skill.scope === "global")) &&
+    (isCurrentUser(skill.ownerUserId) || (isAdmin && skill.scope === "global")) &&
     skill.source !== "seeded";
   const isSeeded = skill.source === "seeded";
 
@@ -405,6 +406,10 @@ export function SkillSlideOver({
             <div className="flex items-center justify-between py-[8px]">
               <span className="text-xyne-fg-tertiary">Created</span>
               <span className="text-xyne-fg-primary">{formatDate(skill.createdAt)}</span>
+            </div>
+            <div className="flex items-center justify-between py-[8px]">
+              <span className="text-xyne-fg-tertiary">Last updated</span>
+              <span className="text-xyne-fg-primary">{formatDate(skill.updatedAt)}</span>
             </div>
             <div className="flex items-center justify-between py-[8px]">
               <span className="text-xyne-fg-tertiary">Size</span>

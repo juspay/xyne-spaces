@@ -5,11 +5,15 @@ import {
 	resolveSlackText,
 } from "@/integrations/adapters/slack-webhook-tickets/utils/slackUtils";
 import { config } from "@/config/env";
+import { resolveSlackHandleMentions } from "./handleMentions";
 import type { TransformContext } from "../../types";
 import type {
+	SlackChatDeleteRequest,
+	SlackChatPostEphemeralRequest,
 	SlackChatPostMessageRequest,
 	SlackChatUpdateRequest,
 } from "../types";
+import type { FlowDefinition } from "@xyne/shared";
 
 export interface PostMessageArgs {
 	channelId: string;
@@ -20,9 +24,25 @@ export interface PostMessageArgs {
 	metadata?: Record<string, unknown>;
 }
 
+export interface PostEphemeralArgs {
+	channelId: string;
+	userId: string;
+	recipientId: string;
+	flow?: FlowDefinition;
+	content?: string;
+	isMarkdown: boolean;
+	conversationId?: string;
+	metadata?: Record<string, unknown>;
+}
+
 export interface UpdateMessageArgs {
 	messageId: string;
 	content: string;
+}
+
+export interface DeleteMessageArgs {
+	messageId: string;
+	channelId: string;
 }
 
 const blockKitParser = new SlackBlockKitParser();
@@ -89,11 +109,71 @@ export async function transformPostMessage(
 	slackReq: SlackChatPostMessageRequest,
 	context: TransformContext,
 ): Promise<PostMessageArgs> {
-	const { content, isMarkdown } = await processContent(slackReq, config.slackBotToken, context.workspaceId ?? config.defaultWorkspaceId);
+	const workspaceId = context.workspaceId ?? config.defaultWorkspaceId;
+	const resolvedReq = await resolveSlackHandleMentions(slackReq, workspaceId);
+
+	const { content, isMarkdown } = await processContent(resolvedReq, config.slackBotToken, workspaceId);
 
 	return {
 		channelId: slackReq.channel,
 		userId: context.userId,
+		content,
+		isMarkdown,
+		conversationId: slackReq.thread_ts,
+		metadata: slackReq.metadata,
+	};
+}
+
+async function processEphemeralContent(
+	req: Pick<
+		SlackChatPostEphemeralRequest,
+		"text" | "blocks" | "attachments" | "mrkdwn"
+	>,
+	botToken?: string,
+	workspaceId?: string,
+): Promise<{ flow?: FlowDefinition; content?: string; isMarkdown: boolean }> {
+	if (req.blocks?.length || req.attachments?.length) {
+		const flowJSON = await convertBlockKitToFlowJSON({
+			text: req.text,
+			blocks: req.blocks,
+			attachments: req.attachments,
+		}, botToken, workspaceId);
+
+		if (flowJSON) {
+			return { flow: flowJSON, isMarkdown: false };
+		}
+
+		// Fallback: convert to HTML. Inlined rather than delegated so the
+		// converter above is not run a second time on this path.
+		const resolvedReq = await resolveSlackMessageParts(req, botToken, workspaceId);
+		return {
+			content: blockKitParser.parse({
+				text: resolvedReq.text,
+				blocks: resolvedReq.blocks,
+				attachments: resolvedReq.attachments,
+			}),
+			isMarkdown: false,
+		};
+	}
+
+	return processContent(req, botToken, workspaceId);
+}
+
+export async function transformPostEphemeral(
+	slackReq: SlackChatPostEphemeralRequest & { recipientId: string },
+	context: TransformContext,
+): Promise<PostEphemeralArgs> {
+	const { flow, content, isMarkdown } = await processEphemeralContent(
+		slackReq,
+		config.slackBotToken,
+		context.workspaceId ?? config.defaultWorkspaceId,
+	);
+
+	return {
+		channelId: slackReq.channel,
+		userId: context.userId,
+		recipientId: slackReq.recipientId,
+		flow,
 		content,
 		isMarkdown,
 		conversationId: slackReq.thread_ts,
@@ -111,4 +191,10 @@ export async function transformUpdate(
 		messageId: slackReq.ts,
 		content,
 	};
+}
+
+export function transformDelete(
+	slackReq: SlackChatDeleteRequest,
+): DeleteMessageArgs {
+	return { messageId: slackReq.ts, channelId: slackReq.channel };
 }

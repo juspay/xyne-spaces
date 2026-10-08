@@ -1,0 +1,114 @@
+{{- $s := .Values.services }}
+apiVersion: networking.istio.io/v1
+kind: VirtualService
+metadata:
+  name: xyne
+  namespace: {{ .Values.namespace }}
+  labels:
+    {{- include "platform-config.labels" . | nindent 4 }}
+spec:
+  hosts:
+    - {{ .Values.domain }}
+  gateways:
+    - {{ .Values.gateway.namespace }}/{{ .Values.gateway.name }}
+  http:
+    {{- if .Values.routes.health }}
+    - name: health
+      match:
+        - uri:
+            exact: {{ .Values.routes.healthPath }}
+      directResponse:
+        status: 200
+        body:
+          string: "ok"
+    {{- end }}
+    {{- range .Values.routes.extra }}
+    - {{- toYaml . | nindent 6 }}
+    {{- end }}
+    - name: api
+      match:
+        - uri:
+            prefix: /api/
+      route:
+        - destination:
+            host: {{ $s.backend.host }}
+            port:
+              number: {{ $s.backend.port }}
+      timeout: {{ .Values.routes.apiTimeout }}
+    - name: zero
+      match:
+        - uri:
+            prefix: /zero/
+      rewrite:
+        uri: /
+      route:
+        - destination:
+            host: {{ $s.zero.host }}
+            port:
+              number: {{ $s.zero.port }}
+    - name: ysweet
+      match:
+        - uri:
+            prefix: /ysweet/
+      route:
+        - destination:
+            host: {{ $s.ysweet.host }}
+            port:
+              number: {{ $s.ysweet.port }}
+    {{- if .Values.routes.externalDashboard }}
+    - name: external
+      match:
+        - uri:
+            prefix: /external/
+      route:
+        - destination:
+            host: {{ $s.externalDashboard.host }}
+            port:
+              number: {{ $s.externalDashboard.port }}
+    {{- end }}
+    {{- if .Values.routes.clawAuth }}
+    - name: claw-api
+      match:
+        - uri:
+            prefix: /claw/api/
+        - uri:
+            exact: /claw/health
+      route:
+        - destination:
+            host: {{ $s.clawAuth.host }}
+            port:
+              number: {{ $s.clawAuth.port }}
+    {{- end }}
+    {{- if .Values.routes.clawAuthFrontend }}
+    - name: claw
+      match:
+        - uri:
+            prefix: /claw/
+        - uri:
+            exact: /claw
+      route:
+        - destination:
+            host: {{ $s.clawAuthFrontend.host }}
+            port:
+              number: {{ $s.clawAuthFrontend.port }}
+    {{- end }}
+    {{- if .Values.routes.clawPreview }}
+    - name: claw-preview
+      match:
+        - uri:
+            prefix: /claw-preview/
+      route:
+        - destination:
+            host: {{ $s.sandboxRouter.host }}
+            port:
+              number: {{ $s.sandboxRouter.port }}
+    {{- end }}
+    - name: dashboard
+      match:
+        - uri:
+            prefix: /
+      route:
+        - destination:
+            host: {{ $s.dashboard.host }}
+            port:
+              number: {{ $s.dashboard.port }}

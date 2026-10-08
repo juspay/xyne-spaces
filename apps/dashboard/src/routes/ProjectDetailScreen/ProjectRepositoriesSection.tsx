@@ -27,7 +27,6 @@ interface ProjectRepository {
   accessJobStatus: string;
   accessCapabilities: unknown;
   accessJobErrorMessage: string | null;
-  setupExecution: { status: string } | null;
 }
 
 export function ProjectRepositoriesSection(props: {
@@ -130,8 +129,8 @@ export function ProjectRepositoriesSection(props: {
           onSettings={() =>
             void navigate(
               workspaceId
-                ? `/${workspaceId}/workspace-management?tab=repository-credentials`
-                : '/workspace-management?tab=repository-credentials',
+                ? `/${workspaceId}/organisations/repository-credentials`
+                : '/organisations/repository-credentials',
             )
           }
         />

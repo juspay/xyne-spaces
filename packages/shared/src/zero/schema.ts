@@ -75,6 +75,7 @@ import {
   RCAStatus,
   RecapEntityType,
   RecurringCallSeriesStatus,
+  RingStatus,
   ReenterMode,
   ReleaseEventType,
   ReleaseTrackingMode,
@@ -83,6 +84,7 @@ import {
   SavedConfigContextType,
   SavedConfigEntityName,
   SavedConfigVisibility,
+  SlackDeskTriggerMode,
   Status,
   SurfaceAreaType,
   SurfaceLinkKind,
@@ -91,6 +93,7 @@ import {
   TicketStageRequestStatus,
   TicketStatus,
   TicketStatusV2,
+  UserActivityStatus,
   UserPresenceStatus,
   UserResponsibility,
   UserStatus,
@@ -200,6 +203,17 @@ export const ticketTable = table('tickets')
     emailReplyEnabled: boolean(),
   })
   .primaryKey('id');
+
+export const ticketDescriptionTable = table('ticket_descriptions')
+  .columns({
+    ticketId: string(),
+    workspaceId: string(),
+    channelId: string(),
+    description: string(),
+    createdAt: number(),
+    updatedAt: number(),
+  })
+  .primaryKey('ticketId');
 
 export const subTicketTable = table('sub_tickets')
   .columns({
@@ -445,6 +459,7 @@ export const userAssignmentStateTable = table('user_assignment_states')
   })
   .primaryKey('id');
 
+
 export const boardComplexityScoreTable = table('board_complexity_scores')
   .columns({
     workspaceId: string(), // denormalized tenant key (stamped on insert)
@@ -453,6 +468,9 @@ export const boardComplexityScoreTable = table('board_complexity_scores')
     boardId: string(),
     weight: number(),
     usePercentage: boolean(),
+    percentageWindowDays: number().optional(),
+    percentageShareBasis: string().optional(),
+    percentageWindowStartAt: number().optional(),
     createdAt: number(),
     updatedAt: number(),
     createdBy: string(),
@@ -518,24 +536,6 @@ export const workflowTable = table('workflows')
   })
   .primaryKey('id');
 
-export const workflowExecutionTable = table('workflow_executions')
-  .columns({
-    workspaceId: string(), // denormalized tenant key (stamped on insert)
-    id: string(),
-    workflowId: string(),
-    workflowType: string().optional(),
-    status: string(),
-    parentWorkflowExecutionId: string().optional(),
-    sourceStepsId: string().optional(),
-    stepInputOverrideData: string().optional(),
-    tag: string(),
-    createdAt: number(),
-    updatedAt: number(),
-    ignoreDuration: number(),
-    createdBy: string().optional(),
-  })
-  .primaryKey('id');
-
 export const userGroupTable = table('user_groups')
   .columns({
     id: string(),
@@ -584,6 +584,7 @@ export const userTable = table('users')
     /** Assignment availability promoted from user_presence for query performance (dual-written) */
     assignmentUnavailableUntil: number().optional(),
     calendarVisibility: enumeration<CalendarVisibility>(),
+    activityStatus: enumeration<UserActivityStatus>().optional(),
   })
   .primaryKey('id');
 
@@ -769,6 +770,8 @@ export const invitationTable = table('invitations')
     entityId: string().optional(),
     entityType: string().optional(),
     channelId: string().optional(),
+    isOrgApproved: boolean().optional(),
+    inviteEmailSentAt: number().optional(),
     createdAt: number(),
     updatedAt: number(),
   })
@@ -807,6 +810,7 @@ export const channelTable = table('channels')
     isArchived: boolean(),
     showTicketsTabTicketsInChat: boolean().optional(),
     callSummaryPrompt: string().optional(), // Per-channel detailed call summary sections override
+    connectId: string().optional(), // Slack Connect: connect_group handle (null until backfilled)
   })
   .primaryKey('id');
 
@@ -1005,6 +1009,7 @@ export const messageAttachmentTable = table('message_attachments')
     createdBy: string(),
     metadata: json().optional(),
     conversationId: string().optional(),
+    channelId: string().optional(), // denormalized conversation.channelId; NULL = not conversation-anchored
     thumbnailUrl: string().optional(),
     isDeleted: boolean(),
     uploadStatus: enumeration<AttachmentUploadStatus>().optional(),
@@ -1101,6 +1106,7 @@ export const activityTable = table('activities')
     conversationId: string().optional(),
     channelId: string().optional(),
     canvasId: string().optional(),
+    savedViewId: string().optional(),
     trackId: string().optional(),
     blockId: string().optional(),
     conversationSeenCutoffAt: number().optional(),
@@ -1276,6 +1282,7 @@ export const callParticipantTable = table('call_participants')
     displayName: string().optional(),
     email: string().optional(),
     isExternal: boolean(),
+    ringStatus: enumeration<RingStatus>().optional(),
   })
   .primaryKey('id');
 
@@ -1297,6 +1304,7 @@ export const recurringCallSeriesTable = table('recurring_call_series')
     createdAt: number(),
     updatedAt: number(),
     callUpdatesChannel: string().optional(),
+    summaryTemplateId: string().optional(),
   })
   .primaryKey('id');
 
@@ -1359,6 +1367,7 @@ export const canvasTable = table('canvases')
     entryFile: string().optional(),
     quartoDocumentType: string().optional(),
     gcsPath: string().optional(),
+    connectId: string().optional(), // Slack Connect: connect_group handle (null until backfilled)
   })
   .primaryKey('id');
 
@@ -1373,13 +1382,14 @@ export const canvasVersionTable = table('canvas_versions')
     createdBy: string().optional(),
     createdAt: number(),
     updatedAt: number(),
+    canvasConnectId: string().optional(), // Slack Connect: the parent canvas's connectId (null until backfilled)
   })
   .primaryKey('id');
 
 export const canvasCommentThreadTable = table('canvas_comment_threads' /* CanvasCommentThread */)
   .columns({
     id: string(),
-    workspaceId: string().optional(), // denormalized tenant key (stamped on insert; nullable during backfill release)
+    workspaceId: string(), // denormalized tenant key (stamped on insert)
     canvasId: string(),
     blockId: string(),
     anchorText: string().optional(),
@@ -1390,13 +1400,14 @@ export const canvasCommentThreadTable = table('canvas_comment_threads' /* Canvas
     statusUpdatedAt: number().optional(),
     createdBy: string(),
     createdAt: number(),
+    canvasConnectId: string().optional(), // Slack Connect: the parent canvas's connectId (null until backfilled)
   })
   .primaryKey('id');
 
 export const canvasCommentTable = table('canvas_comments' /* CanvasComment */)
   .columns({
     id: string(),
-    workspaceId: string().optional(), // denormalized tenant key (stamped on insert; nullable during backfill release)
+    workspaceId: string(), // denormalized tenant key (stamped on insert)
     threadId: string(),
     canvasId: string(),
     body: string(),
@@ -1406,6 +1417,7 @@ export const canvasCommentTable = table('canvas_comments' /* CanvasComment */)
     editedAt: number().optional(),
     deletedAt: number().optional(),
     createdAt: number(),
+    canvasConnectId: string().optional(), // Slack Connect: the parent canvas's connectId (null until backfilled)
   })
   .primaryKey('id');
 
@@ -1420,6 +1432,7 @@ export const canvasParticipantTable = table('canvas_participants')
     role: enumeration<CanvasRole>(),
     joinedAt: number(),
     updatedAt: number(),
+    canvasConnectId: string().optional(), // Slack Connect: the parent canvas's connectId (null until backfilled)
   })
   .primaryKey('id');
 
@@ -1432,6 +1445,24 @@ export const canvasUserStatusTable = table('canvas_user_status' /* CanvasUserSta
     isStarred: boolean(),
     createdAt: number(),
     updatedAt: number().optional(),
+    canvasConnectId: string().optional(), // Slack Connect: the parent canvas's connectId (null until backfilled)
+  })
+  .primaryKey('id');
+
+// Slack Connect — one row per channel/canvas "connection" (see connect_group in Prisma).
+// Phase 1: always PRIVATE — invitedEntityId / invitedWorkspaceId NULL, status 'ACTIVE'.
+export const connectGroupTable = table('connect_group')
+  .columns({
+    id: string(),
+    entityType: string(), // 'channel' | 'canvas'
+    entityId: string(),
+    hostWorkspaceId: string(),
+    invitedEntityId: string().optional(),
+    invitedWorkspaceId: string().optional(),
+    connectId: string(),
+    status: string(),
+    createdAt: number(),
+    updatedAt: number(),
   })
   .primaryKey('id');
 
@@ -1531,6 +1562,37 @@ export const sdlcArtifactTable = table('sdlc_artifacts')
   .primaryKey('artifactId');
 
 // Tracks carry no scope column: the CHANNEL -> TRACK edge in sdlc_entity_links places them.
+export const sdlcFolderTable = table('sdlc_folders')
+  .columns({
+    workspaceId: string(),
+    id: string(),
+    name: string(),
+    /** An @xyne/icons name shown in place of the folder mark; null shows the mark. */
+    icon: string().optional(),
+    createdBy: string(),
+    createdAt: number(),
+    updatedAt: number(),
+  })
+  .primaryKey('id');
+
+export const sdlcItemCommentTable = table('sdlc_item_comments')
+  .columns({
+    id: string(),
+    workspaceId: string(),
+    entityType: string(),
+    entityId: string(),
+    body: string(),
+    anchorQuote: string().optional(),
+    anchorSelector: string().optional(),
+    resolved: boolean(),
+    resolvedBy: string().optional(),
+    resolvedAt: number().optional(),
+    createdBy: string(),
+    createdAt: number(),
+    updatedAt: number(),
+  })
+  .primaryKey('id');
+
 export const sdlcTrackTable = table('sdlc_tracks')
   .columns({
     workspaceId: string(),
@@ -1539,6 +1601,8 @@ export const sdlcTrackTable = table('sdlc_tracks')
     repoId: string().optional(),
     name: string(),
     description: string().optional(),
+    /** An @xyne/icons name shown in place of the track mark; null shows the mark. */
+    icon: string().optional(),
     status: string(),
     createdBy: string(),
     createdAt: number(),
@@ -1656,6 +1720,9 @@ export const emailReadTable = table('email_reads') // Prisma model: EmailRead
     userId: string(),
     lastReadEmailId: string(),
     lastReadEmailAt: number(),
+    // True once tickets.lastEmailAt moves past lastReadEmailAt (see Prisma EmailRead.hasNewEmail).
+    // Nullable with no DB default; mutators always write it explicitly.
+    hasNewEmail: boolean().optional(),
     createdAt: number(),
     updatedAt: number(),
   })
@@ -1681,14 +1748,19 @@ export const emailChannelPreferenceTable = table('email_channel_preferences')
     autoDraftMode: enumeration<AutoDraftMode>().optional(),
     deskType: enumeration<DeskType>(),
     dlEmail: string().optional(),
+    dlAliases: string().optional(),
     workspaceId: string(),
     autoDraftAgentSlug: string().optional(),
     metricsEnabled: boolean().optional(),
     frtStageNames: string().optional(),
+    metricsGuestVisibility: string().optional(),
     appWebhookDeliveryEnabled: boolean().optional(),
     deskReportEnabled: boolean().optional(),
     deskReportAgentSlug: string().optional(),
     deskReportRangeDays: number().optional(),
+    duplicateScopeConfig: string().optional(),
+    slackDeskTriggerMode: enumeration<SlackDeskTriggerMode>().optional(),
+    deskAppIds: string().optional(),
   })
   .primaryKey('channelId');
 
@@ -2516,6 +2588,31 @@ export const ticketTableRelationships = relationships(ticketTable, ({ one, many 
     destField: ['ticketId'],
     destSchema: ticketTagMappingTable,
   }),
+  ticketDescription: one({
+    sourceField: ['id'],
+    destField: ['ticketId'],
+    destSchema: ticketDescriptionTable,
+  }),
+  // SDLC edges pointing at this ticket — how a track holds it. targetId is
+  // polymorphic, so readers filter by targetType and relationType.
+  sdlcEntityLinks: many({
+    sourceField: ['id'],
+    destField: ['targetId'],
+    destSchema: sdlcEntityLinkTable,
+  }),
+}));
+
+export const ticketDescriptionTableRelationships = relationships(ticketDescriptionTable, ({ one }) => ({
+  ticket: one({
+    sourceField: ['ticketId'],
+    destField: ['id'],
+    destSchema: ticketTable,
+  }),
+  channel: one({
+    sourceField: ['channelId'],
+    destField: ['id'],
+    destSchema: channelTable,
+  }),
 }));
 
 export const subTicketTableRelationships = relationships(subTicketTable, ({ one, many }) => ({
@@ -2989,43 +3086,7 @@ export const workflowTableRelationships = relationships(workflowTable, ({ one, m
     destField: ['id'],
     destSchema: ticketTable,
   }),
-  workflowExecutions: many({
-    sourceField: ['id'],
-    destField: ['workflowId'],
-    destSchema: workflowExecutionTable,
-  }),
 }));
-
-export const workflowExecutionTableRelationships = relationships(
-  workflowExecutionTable,
-  ({ one, many }) => ({
-    workflow: one({
-      sourceField: ['workflowId'],
-      destField: ['id'],
-      destSchema: workflowTable,
-    }),
-    parentWorkflowExecution: one({
-      sourceField: ['parentWorkflowExecutionId'],
-      destField: ['id'],
-      destSchema: workflowExecutionTable,
-    }),
-    childWorkflowExecutions: many({
-      sourceField: ['id'],
-      destField: ['parentWorkflowExecutionId'],
-      destSchema: workflowExecutionTable,
-    }),
-    pullRequests: many({
-      sourceField: ['id'],
-      destField: ['workflowExecutionId'],
-      destSchema: pullRequestsTable,
-    }),
-    createdByUser: one({
-      sourceField: ['createdBy'],
-      destField: ['id'],
-      destSchema: userTable,
-    }),
-  }),
-);
 
 
 export const userGroupTableRelationships = relationships(userGroupTable, ({ one, many }) => ({
@@ -3270,6 +3331,13 @@ export const conversationTableRelationships = relationships(conversationTable, (
     destField: ['id'],
     destSchema: channelTable,
   }),
+  // SDLC links pointing at this conversation: the item it discusses, and the track it
+  // rolls up to. What lets a conversation list be scoped to a track or an item.
+  sdlcEntityLinks: many({
+    sourceField: ['conversationId'],
+    destField: ['targetId'],
+    destSchema: sdlcEntityLinkTable,
+  }),
   initialMessage: one({
     sourceField: ['initialMessageId'],
     destField: ['messageId'],
@@ -3414,6 +3482,11 @@ export const channelTableRelationships = relationships(channelTable, ({ one, man
     destField: ['channelId'],
     destSchema: channelBoardMappingTable,
   }),
+  ticketDescriptions: many({
+    sourceField: ['id'],
+    destField: ['channelId'],
+    destSchema: ticketDescriptionTable,
+  }),
 }));
 
 export const channelBoardMappingTableRelationships = relationships(
@@ -3438,11 +3511,6 @@ export const repoTableRelationships = relationships(repoTable, ({ one, many }) =
     destField: ['id'],
     destSchema: projectTable,
   }),
-  setupExecution: one({
-    sourceField: ['sdlcSetupExecutionId'],
-    destField: ['id'],
-    destSchema: workflowExecutionTable,
-  }),
   // Membership edges pointing here. targetId is polymorphic, so readers filter
   // by relationType.
   sdlcEntityLinks: many({
@@ -3452,7 +3520,7 @@ export const repoTableRelationships = relationships(repoTable, ({ one, many }) =
   }),
 }));
 
-export const sdlcEntityLinkTableRelationships = relationships(sdlcEntityLinkTable, ({ one }) => ({
+export const sdlcEntityLinkTableRelationships = relationships(sdlcEntityLinkTable, ({ one, many }) => ({
   // Only meaningful on membership edges, where targetId is the repository.
   repo: one({
     sourceField: ['targetId'],
@@ -3464,7 +3532,82 @@ export const sdlcEntityLinkTableRelationships = relationships(sdlcEntityLinkTabl
     destField: ['id'],
     destSchema: channelTable,
   }),
+  workflow: one({
+    sourceField: ['targetId'],
+    destField: ['id'],
+    destSchema: workflowTable,
+  }),
+  // Links into this link's source item — an artifact's track edge, from its discussion.
+  sourceItemLinks: many({
+    sourceField: ['sourceType', 'sourceId'],
+    destField: ['targetType', 'targetId'],
+    destSchema: sdlcEntityLinkTable,
+  }),
+  // Links into the same item as this one — a contained item's track edge, from its
+  // containment edge.
+  sameTargetLinks: many({
+    sourceField: ['targetType', 'targetId'],
+    destField: ['targetType', 'targetId'],
+    destSchema: sdlcEntityLinkTable,
+  }),
+  // The item at either end, so a list of links arrives with what they point at. Ids
+  // are polymorphic: each is only meaningful where that end's type matches, and ids
+  // never collide across these tables.
+  targetFolder: one({
+    sourceField: ['targetId'],
+    destField: ['id'],
+    destSchema: sdlcFolderTable,
+  }),
+  targetLink: one({
+    sourceField: ['targetId'],
+    destField: ['id'],
+    destSchema: linkTable,
+  }),
+  targetFile: one({
+    sourceField: ['targetId'],
+    destField: ['id'],
+    destSchema: messageAttachmentTable,
+  }),
+  targetCanvas: one({
+    sourceField: ['targetId'],
+    destField: ['id'],
+    destSchema: canvasTable,
+  }),
+  sourceFolder: one({
+    sourceField: ['sourceId'],
+    destField: ['id'],
+    destSchema: sdlcFolderTable,
+  }),
+  sourceLink: one({
+    sourceField: ['sourceId'],
+    destField: ['id'],
+    destSchema: linkTable,
+  }),
+  sourceFile: one({
+    sourceField: ['sourceId'],
+    destField: ['id'],
+    destSchema: messageAttachmentTable,
+  }),
+  sourceCanvas: one({
+    sourceField: ['sourceId'],
+    destField: ['id'],
+    destSchema: canvasTable,
+  }),
 }));
+
+export const sdlcItemCommentTableRelationships = relationships(
+  sdlcItemCommentTable,
+  ({ many }) => ({
+    // The commented entity is placed in a hub by an edge, so the hub is reached
+    // the way a folder reaches it: through the edges pointing at the same id.
+    // targetId is polymorphic, so readers filter by relationType.
+    sdlcEntityLinks: many({
+      sourceField: ['entityId'],
+      destField: ['targetId'],
+      destSchema: sdlcEntityLinkTable,
+    }),
+  }),
+);
 
 export const sdlcArtifactTableRelationships = relationships(sdlcArtifactTable, ({ one }) => ({
   repo: one({
@@ -3479,6 +3622,15 @@ export const sdlcArtifactTableRelationships = relationships(sdlcArtifactTable, (
   }),
 }));
 
+export const sdlcFolderTableRelationships = relationships(sdlcFolderTable, ({ many }) => ({
+  // Edges pointing here. targetId is polymorphic, so readers filter by relationType.
+  sdlcEntityLinks: many({
+    sourceField: ['id'],
+    destField: ['targetId'],
+    destSchema: sdlcEntityLinkTable,
+  }),
+}));
+
 export const sdlcTrackTableRelationships = relationships(sdlcTrackTable, ({ many }) => ({
   // Edges pointing here. targetId is polymorphic, so readers filter by relationType.
   sdlcEntityLinks: many({
@@ -3488,11 +3640,16 @@ export const sdlcTrackTableRelationships = relationships(sdlcTrackTable, ({ many
   }),
 }));
 
-export const channelStatsTableRelationships = relationships(channelStatsTable, ({ one }) => ({
+export const channelStatsTableRelationships = relationships(channelStatsTable, ({ one, many }) => ({
   channel: one({
     sourceField: ['channelId'],
     destField: ['id'],
     destSchema: channelTable,
+  }),
+  participants: many({
+    sourceField: ['channelId'],
+    destField: ['channelId'],
+    destSchema: channelParticipantTable,
   }),
 }));
 
@@ -3502,6 +3659,14 @@ export const attachementTableRelationShips = relationships(messageAttachmentTabl
     sourceField: ["conversationId"],
     destField: ["conversationId"],
     destSchema: conversationTable
+  }),
+  // entityId is polymorphic, so this resolves only for the rows whose owning
+  // feature puts a channel there — SDLC hub files, which have no conversation to
+  // be authorised through. Same shape as sdlcEntityLinks.repo.
+  hubChannel: one({
+    sourceField: ["entityId"],
+    destField: ["id"],
+    destSchema: channelTable
   })
 }))
 
@@ -3696,6 +3861,11 @@ export const activityTableRelationships = relationships(activityTable, ({ one })
     destField: ['id'],
     destSchema: canvasTable,
   }),
+  savedView: one({
+    sourceField: ['savedViewId'],
+    destField: ['id'],
+    destSchema: savedUserConfigurationTable,
+  }),
   actor: one({
     sourceField: ['actorId'],
     destField: ['id'],
@@ -3804,6 +3974,13 @@ export const callTableRelationships = relationships(callTable, ({ one, many }) =
     sourceField: ['summaryTemplateId'],
     destField: ['id'],
     destSchema: summaryTemplateTable,
+  }),
+  // The SDLC links filing the call: owner -> CALL, the owner a track, item or artifact.
+  // targetId is polymorphic, so readers filter on targetType and relationType.
+  sdlcEntityLinks: many({
+    sourceField: ['id'],
+    destField: ['targetId'],
+    destSchema: sdlcEntityLinkTable,
   }),
 }));
 
@@ -3965,6 +4142,12 @@ export const canvasTableRelationships = relationships(canvasTable, ({ one, many 
     destField: ['artifactId'],
     destSchema: sdlcArtifactTable,
   }),
+  // SDLC links pointing at this artifact: the track it belongs to, the folder holding it.
+  sdlcEntityLinks: many({
+    sourceField: ['id'],
+    destField: ['targetId'],
+    destSchema: sdlcEntityLinkTable,
+  }),
   participants: many({
     sourceField: ['id'],
     destField: ['canvasId'],
@@ -4015,13 +4198,23 @@ export const canvasTableRelationships = relationships(canvasTable, ({ one, many 
     destField: ['accessibleEntityId'],
     destSchema: guestAccessTable,
   }),
+  connectGroup: many({
+    sourceField: ['connectId'],
+    destField: ['connectId'],
+    destSchema: connectGroupTable,
+  }),
 }));
 
-export const canvasVersionTableRelationships = relationships(canvasVersionTable, ({ one }) => ({
+export const canvasVersionTableRelationships = relationships(canvasVersionTable, ({ one, many }) => ({
   canvas: one({
     sourceField: ['canvasId'],
     destField: ['id'],
     destSchema: canvasTable,
+  }),
+  connectGroup: many({
+    sourceField: ['canvasConnectId'],
+    destField: ['connectId'],
+    destSchema: connectGroupTable,
   }),
 }));
 
@@ -4053,12 +4246,17 @@ export const canvasCommentThreadTableRelationships = relationships(
       destField: ['id'],
       destSchema: userTable,
     }),
+    connectGroup: many({
+      sourceField: ['canvasConnectId'],
+      destField: ['connectId'],
+      destSchema: connectGroupTable,
+    }),
   }),
 );
 
 export const canvasCommentTableRelationships = relationships(
   canvasCommentTable,
-  ({ one }) => ({
+  ({ one, many }) => ({
     thread: one({
       sourceField: ['threadId'],
       destField: ['id'],
@@ -4069,10 +4267,15 @@ export const canvasCommentTableRelationships = relationships(
       destField: ['id'],
       destSchema: userTable,
     }),
+    connectGroup: many({
+      sourceField: ['canvasConnectId'],
+      destField: ['connectId'],
+      destSchema: connectGroupTable,
+    }),
   }),
 );
 
-export const canvasParticipantTableRelationships = relationships(canvasParticipantTable, ({ one }) => ({
+export const canvasParticipantTableRelationships = relationships(canvasParticipantTable, ({ one, many }) => ({
   canvas: one({
     sourceField: ['canvasId'],
     destField: ['id'],
@@ -4093,11 +4296,16 @@ export const canvasParticipantTableRelationships = relationships(canvasParticipa
     destField: ['id'],
     destSchema: channelTable,
   }),
+  connectGroup: many({
+    sourceField: ['canvasConnectId'],
+    destField: ['connectId'],
+    destSchema: connectGroupTable,
+  }),
 }));
 
 export const canvasUserStatusTableRelationships = relationships(
   canvasUserStatusTable,
-  ({ one }) => ({
+  ({ one, many }) => ({
     canvas: one({
       sourceField: ['canvasId'],
       destField: ['id'],
@@ -4108,15 +4316,15 @@ export const canvasUserStatusTableRelationships = relationships(
       destField: ['id'],
       destSchema: userTable,
     }),
+    connectGroup: many({
+      sourceField: ['canvasConnectId'],
+      destField: ['connectId'],
+      destSchema: connectGroupTable,
+    }),
   }),
 );
 
 export const pullRequestsTableRelationships = relationships(pullRequestsTable, ({ one }) => ({
-  workflowExecution: one({
-    sourceField: ['workflowExecutionId'],
-    destField: ['id'],
-    destSchema: workflowExecutionTable,
-  }),
   ticket: one({
     sourceField: ['ticketId'],
     destField: ['id'],
@@ -4680,6 +4888,12 @@ export const savedUserConfigurationTableRelationships = relationships(
       destField: ['viewId'],
       destSchema: viewAccessTable,
     }),
+    // Used only for DESK_TICKET configs where contextId holds a channelId.
+    contextChannel: one({
+      sourceField: ['contextId'],
+      destField: ['id'],
+      destSchema: channelTable,
+    }),
   }),
 );
 
@@ -4690,6 +4904,14 @@ export const viewAccessTableRelationships = relationships(
       sourceField: ['viewId'],
       destField: ['id'],
       destSchema: savedUserConfigurationTable,
+    }),
+    // CHANNEL grants store the channelId in entityId; USER grants store a userId here
+    // (which never matches a channel id, so this relation is simply empty for them).
+    // Lets ACLs/queries resolve channel membership for channel-scoped shares.
+    channel: one({
+      sourceField: ['entityId'],
+      destField: ['id'],
+      destSchema: channelTable,
     }),
   }),
 );
@@ -4805,6 +5027,7 @@ export const schema = createSchema({
     toolTable,
     agentToolsMappingTable,
     ticketTable,
+    ticketDescriptionTable,
     subTicketTable,
     ticketSubTicketMappingTable,
     ticketAssignmentTable,
@@ -4829,7 +5052,6 @@ export const schema = createSchema({
     userWorkloadMappingTable,
     userExpertiseMappingTable,
     workflowTable,
-    workflowExecutionTable,
     userGroupTable,
     userTable,
     userPresenceTable,
@@ -4878,12 +5100,15 @@ export const schema = createSchema({
     canvasCommentTable,
     canvasParticipantTable,
     canvasUserStatusTable,
+    connectGroupTable,
     bookmarkTable,
     linkTable,
     linkAccessTable,
     repoTable,
     sdlcEntityLinkTable,
     sdlcArtifactTable,
+    sdlcFolderTable,
+    sdlcItemCommentTable,
     sdlcTrackTable,
     emailTable,
     emailDraftTable,
@@ -4944,6 +5169,7 @@ export const schema = createSchema({
     toolTableRelationships,
     agentToolsMappingTableRelationships,
     ticketTableRelationships,
+    ticketDescriptionTableRelationships,
     subTicketTableRelationships,
     ticketSubTicketMappingTableRelationships,
     ticketAssignmentTableRelationships,
@@ -4969,7 +5195,6 @@ export const schema = createSchema({
     userWorkloadMappingTableRelationships,
     userExpertiseMappingTableRelationships,
     workflowTableRelationships,
-    workflowExecutionTableRelationships,
     userGroupTableRelationships,
     userTableRelationships,
     userPresenceTableRelationships,
@@ -4985,6 +5210,8 @@ export const schema = createSchema({
     repoTableRelationships,
     sdlcEntityLinkTableRelationships,
     sdlcArtifactTableRelationships,
+    sdlcFolderTableRelationships,
+    sdlcItemCommentTableRelationships,
     sdlcTrackTableRelationships,
     messageTableRelationships,
     messageArtifactTableRelationships,
@@ -5083,6 +5310,7 @@ export type Model = Row<typeof schema.tables.models>;
 export type Tool = Row<typeof schema.tables.tools>;
 export type AgentToolsMapping = Row<typeof schema.tables.agent_tools_mappings>;
 export type Ticket = Row<typeof schema.tables.tickets>;
+export type TicketDescription = Row<typeof schema.tables.ticket_descriptions>;
 export type SubTicket = Row<typeof schema.tables.sub_tickets>;
 export type TicketSubTicketMapping = Row<typeof schema.tables.ticket_sub_ticket_mappings>;
 export type TicketActivity = Row<typeof schema.tables.ticket_activities>;
@@ -5099,7 +5327,6 @@ export type Board = Row<typeof schema.tables.boards>;
 export type Stage = Row<typeof schema.tables.stages>;
 export type StagePRStatusMapping = Row<typeof schema.tables.stage_pr_status_mappings>;
 export type Workflow = Row<typeof schema.tables.workflows>;
-export type WorkflowExecution = Row<typeof schema.tables.workflow_executions>;
 export type UserGroup = Row<typeof schema.tables.user_groups>;
 export type User = Row<typeof schema.tables.users>;
 export type UserGroupMapping = Row<typeof schema.tables.user_group_mappings>;
@@ -5157,6 +5384,8 @@ export type Email = Row<typeof schema.tables.emails>;
 export type Repo = Row<typeof schema.tables.repos>;
 export type SdlcEntityLink = Row<typeof schema.tables.sdlc_entity_links>;
 export type SdlcArtifact = Row<typeof schema.tables.sdlc_artifacts>;
+export type SdlcFolder = Row<typeof schema.tables.sdlc_folders>;
+export type SdlcItemComment = Row<typeof schema.tables.sdlc_item_comments>;
 export type SdlcTrack = Row<typeof schema.tables.sdlc_tracks>;
 export type EmailDraft = Row<typeof schema.tables.email_drafts>;
 export type ConversationLabel = Row<typeof schema.tables.conversation_labels>;

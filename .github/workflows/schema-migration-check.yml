@@ -48,6 +48,25 @@ jobs:
       - name: Validate tenant keys on new models
         run: bash scripts/validate-workspace-id.sh
 
+  # Raw SQL is frozen: block a NEW raw-query call in any file. Those APIs are
+  # the only way to reach the DB without the Prisma query builder, and therefore
+  # without the tenant ACL filter + workspaceId stamper. Same self-resolving
+  # base as the enum guard: $CHANGE_TARGET, own fetch, BASE...HEAD. Compares
+  # per-file call COUNTS, so existing raw SQL is never retroactively flagged and
+  # reformatting it does not false-fire.
+  raw-sql-guard:
+    name: Raw SQL guard
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Raw SQL guard
+        env:
+          CHANGE_TARGET: ${{ github.base_ref }}
+        run: bash scripts/validate-no-raw-sql.sh --ci
+
   # Postgres enums are frozen: block new enum blocks/values and CREATE/ALTER
   # TYPE in migrations. The script resolves the base via $CHANGE_TARGET (falls
   # back to main), does its own fetch, and diffs BASE...HEAD.

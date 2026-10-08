@@ -3,14 +3,20 @@ import { ChevronDown } from '@xyne/icons';
 import { toast } from 'sonner';
 import { v4 as uuidv4 } from 'uuid';
 import { Popover } from '../../ui/Popover/Popover';
+import { Tooltip } from '../../ui/Tooltip';
 import { useZero } from '../../../hooks/useZero';
 import { mutators } from '../../../zero/mutators';
 import { queries } from '../../../zero/queries';
 import { useCachedQuery } from '../../../hooks/useCachedQuery';
 import { getStageColor } from '../../../routes/KanbanBoardScreen/KanbanBoardScreen.utils';
-import { StageIndicator } from '../../../utils/board/stageStatusIcon';
+import {
+  StageIndicator,
+  StageStatusIcon,
+  resolveStageStatus,
+} from '../../../utils/board/stageStatusIcon';
 import { cn } from '../../../utils/classNames';
 import { surfaceMutationError } from '../../../utils/zeroMutationToast';
+import { trackTicketOutcome } from '../../../services/Analytics/ticketTracking';
 import { useAuth } from '../../../hooks/useAuth';
 import { useCurrentUserRoleIds } from '../../../hooks/useRoles';
 import { TicketStageRequestStatus, BoardType, ApproverType, FormContextType } from '@xyne/shared';
@@ -19,6 +25,7 @@ import { getReachableStageIds, findMatchingTransition } from '../../../utils/sta
 import { StageFormModal } from '../StageFormModal/StageFormModal';
 import type { StageVisitEta } from '../StageFormFields/useStageForm';
 import type { Stage } from '../../../routes/KanbanBoardScreen/KanbanBoardScreen.types';
+import { useExclusivePicker } from '../TicketTable/ExclusivePickerScope';
 
 interface StagePickerProps {
   ticketId: string;
@@ -41,6 +48,9 @@ interface StagePickerProps {
     | undefined;
   /** Fired after a stage change is successfully initiated (not when a form gate opens). */
   onAfterStageChange?: ((stageName: string) => void) | undefined;
+  triggerClassName?: string | undefined;
+  /** Dense rows: plain status icons (trigger and options) instead of stage progress; stage name in a tooltip. */
+  iconOnly?: boolean;
 }
 
 const SUPPORT_STAGES: ReadonlyArray<string> = ['Backlog', 'To Do', 'In Progress', 'Review', 'Done'];
@@ -173,8 +183,11 @@ export function StagePicker({
   boardId,
   onStageChange,
   onAfterStageChange,
+  triggerClassName,
+  iconOnly = false,
 }: StagePickerProps): ReactElement {
   const [open, setOpen] = useState(false);
+  useExclusivePicker(open, setOpen);
   const zero = useZero();
   const { user: currentUser } = useAuth();
   const currentUserRoleIds = useCurrentUserRoleIds();
@@ -348,10 +361,25 @@ export function StagePicker({
       if (onStageChange) {
         onStageChange(ticketId, next, stageName);
       } else {
-        void zero.mutate(
-          mutators.ticket.update({ id: ticketId, stageName: next, updatedAt: Date.now() }),
-        );
-        onAfterStageChange?.(next);
+        // Outcome only once the server confirmed, like the two branches below.
+        void surfaceMutationError(
+          zero.mutate(
+            mutators.ticket.update({ id: ticketId, stageName: next, updatedAt: Date.now() }),
+          ),
+          'Failed to update stage',
+        ).then(ok => {
+          if (!ok) return;
+          trackTicketOutcome(
+            'TICKET_STAGE_CHANGED',
+            { id: ticketId, boardId },
+            {
+              surface: 'list_inline',
+              to: next,
+              previous: stageName ?? null,
+            },
+          );
+          onAfterStageChange?.(next);
+        });
       }
       setOpen(false);
       return;
@@ -606,6 +634,16 @@ export function StagePicker({
         }
 
         if (serverResult?.type !== 'error') {
+          trackTicketOutcome(
+            'TICKET_STAGE_CHANGED',
+            { id: ticketId, boardId },
+            {
+              surface: 'list_inline',
+              to: next,
+              previous: stageName ?? null,
+              nonLinear: true,
+            },
+          );
           onAfterStageChange?.(next);
         }
       });
@@ -622,7 +660,23 @@ export function StagePicker({
           }),
         ),
         'Failed to update stage',
-      );
+      ).then(ok => {
+        if (ok) {
+          trackTicketOutcome(
+            'TICKET_STAGE_CHANGED',
+            { id: ticketId, boardId },
+            {
+              surface: 'list_inline',
+              to: next,
+              previous: stageName ?? null,
+              ...(typeof targetStageObj?.sequenceNumber === 'number' &&
+                typeof currentStageObj?.sequenceNumber === 'number' && {
+                  isBackward: targetStageObj.sequenceNumber < currentStageObj.sequenceNumber,
+                }),
+            },
+          );
+        }
+      });
       onAfterStageChange?.(next);
     }
     setOpen(false);
@@ -636,20 +690,35 @@ export function StagePicker({
         setOpen(prev => !prev);
       }}
       onKeyDown={e => e.stopPropagation()}
-      className='inline-flex items-center gap-1 rounded-sm px-1.5 py-0.5 text-xs text-muted-foreground hover:bg-muted transition-colors whitespace-nowrap'
+      className={cn(
+        iconOnly
+          ? 'inline-flex h-5 w-5 items-center justify-center rounded-md hover:bg-muted'
+          : 'inline-flex items-center gap-1 rounded-sm px-1.5 py-0.5 text-xs text-muted-foreground hover:bg-muted transition-colors whitespace-nowrap',
+        triggerClassName,
+      )}
       aria-label='Change stage'
       data-track-category='Tickets'
       data-track-name='ToggleRowStage'
     >
-      <StageIndicator
-        stages={stages}
-        stageName={currentStage}
-        fallbackStatus={statusV2}
-        isNonLinearBoard={isNonLinear}
-        size={12}
-      />
-      <span>{stageLabel}</span>
-      <ChevronDown className='w-3 h-3 opacity-60' />
+      {iconOnly ? (
+        <Tooltip content={`Stage: ${stageLabel}`}>
+          <span className='inline-flex items-center justify-center'>
+            <StageStatusIcon status={statusV2} />
+          </span>
+        </Tooltip>
+      ) : (
+        <>
+          <StageIndicator
+            stages={stages}
+            stageName={currentStage}
+            fallbackStatus={statusV2}
+            isNonLinearBoard={isNonLinear}
+            size={12}
+          />
+          <span>{stageLabel}</span>
+          <ChevronDown className='w-3 h-3 opacity-60' />
+        </>
+      )}
     </button>
   );
 
@@ -681,12 +750,16 @@ export function StagePicker({
               data-track-category='Tickets'
               data-track-name='SelectRowStage'
             >
-              <StageIndicator
-                stages={stages}
-                stageName={stage}
-                isNonLinearBoard={isNonLinear}
-                size={12}
-              />
+              {iconOnly ? (
+                <StageStatusIcon status={resolveStageStatus(stages, stage)} />
+              ) : (
+                <StageIndicator
+                  stages={stages}
+                  stageName={stage}
+                  isNonLinearBoard={isNonLinear}
+                  size={12}
+                />
+              )}
               <span className='text-foreground'>{stage}</span>
             </button>
           ))}

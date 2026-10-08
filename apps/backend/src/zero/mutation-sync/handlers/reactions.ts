@@ -6,9 +6,8 @@ import {
   parseReactionsMd,
   removeReactionFromData,
   serializeReactionsMd,
-  serializeInitialMessageMd,
+  buildInitialMessageMd,
 } from '@xyne/shared';
-import type { InitialMessageSummary } from '@xyne/shared';
 import type { ReactionPreviousValue } from '../types';
 import { BaseMutationSyncHandler } from '../base-handler';
 
@@ -40,27 +39,7 @@ async function syncInitialMessageMdAfterReaction(
 
   if (conversations.length === 0) return;
 
-  const summary: InitialMessageSummary = {
-    messageId: message.messageId,
-    conversationId: message.conversationId,
-    senderId: message.senderId,
-    content: message.content,
-    msgType: message.msgType,
-    hasAttachment: message.hasAttachment,
-    edited: message.edited,
-    isDeleted: message.isDeleted,
-    showInChannel: message.showInChannel,
-    visibleTo: message.visibleTo,
-    createdAt: message.createdAt,
-    metadata: message.metadata ? JSON.stringify(message.metadata) : null,
-    nudgeCount: message.nudgeCount,
-    isSent: message.isSent,
-    reactions_md: updatedReactionsMd,
-    link_preview_md: message.link_preview_md,
-    childConversationId: message.childConversationId,
-  };
-
-  const md = serializeInitialMessageMd(summary);
+  const md = buildInitialMessageMd({ ...message, reactions_md: updatedReactionsMd });
 
   for (const conversation of conversations) {
     if (conversation.initial_message_md === md) continue;

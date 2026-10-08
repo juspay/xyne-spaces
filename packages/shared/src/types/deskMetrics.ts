@@ -6,6 +6,9 @@
  * they cover activity recorded since the desk-metrics feature was deployed.
  */
 
+/** Which tickets the range picks: created in it (default), or also older ones active in it. */
+export type DeskMetricsDateBasis = 'created' | 'active';
+
 /** Per-ticket drill-down row (newest cohort tickets). */
 export interface DeskMetricsTicketRow {
   ticketId: string;
@@ -20,6 +23,7 @@ export interface DeskMetricsTicketRow {
   assigneeName: string | null;
   frtSeconds: number | null;
   rtSeconds: number | null;
+  resolvedAt: number | null; // epoch ms; latest resolution, where rtSeconds ends
   csatScore: number | null; // 1..5
   csatRating: string | null; // GOOD | BAD
   customFields: Record<string, string> | null; // form field name → value; only fields with non-empty values included
@@ -74,7 +78,22 @@ export interface DeskMetricsResponse {
   tagBreakdown: Array<{ tag: string; tagCategory: string; count: number }>;
   tickets: DeskMetricsTicketRow[];
   agents: DeskMetricsAgentRow[];
+  /**
+   * Only sent to guests: what the desk owner lets them see, stored as JSON in
+   * email_channel_preferences.metricsGuestVisibility. Keys: `kpi:*`, `chart:*` (tag charts use
+   * `chart:tags`), `column:*`, stageCounts, ticketTable, csvDownload, moreFilters, agentsTab.
+   * A key without an entry is shown. It only hides UI.
+   */
+  guestVisibility?: Record<string, boolean>;
 }
+
+export const parseDeskMetricsGuestVisibility = (raw?: string | null): Record<string, boolean> => {
+  try {
+    return (JSON.parse(raw || '{}') as Record<string, boolean> | null) ?? {};
+  } catch {
+    return {};
+  }
+};
 
 export interface DeskMetricsPerDeskRow {
   channelId: string;

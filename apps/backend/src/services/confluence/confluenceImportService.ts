@@ -2,6 +2,7 @@ import crypto from 'crypto';
 import { v4 as uuidv4 } from 'uuid';
 import type { Prisma } from '@prisma/client';
 import { DatabaseClient } from '@/database/client';
+import { newConnectId, resolveCanvasConnectId, ConnectEntityType } from '@/database/connectGroup';
 import { logger } from '@/utils/logger';
 import { convertMarkdownToBlockNote } from '@/services/canvasService';
 import type { BlockNoteBlock } from '@/types/blockNoteTypes';
@@ -409,17 +410,6 @@ export class ConfluenceImportService {
       throw new Error(`Target project ${input.projectId} not found`);
     }
 
-    const actorMembership = await db.channelParticipant.findFirst({
-      where: {
-        userId: input.actorUserId,
-        channel: { projectId: input.projectId },
-      },
-      select: { id: true },
-    });
-    if (!actorMembership) {
-      throw new Error(`Actor user ${input.actorUserId} must belong to at least one channel in project ${input.projectId}`);
-    }
-
     const mappedChannelIds = Object.values(input.sectionMappings || {})
       .filter((mapping): mapping is { type: 'channel' | 'channelFolder'; channelId: string } =>
         (mapping.type === 'channel' || mapping.type === 'channelFolder') && typeof mapping.channelId === 'string',
@@ -429,16 +419,13 @@ export class ConfluenceImportService {
     if (mappedChannelIds.length > 0) {
       const channels = await db.channel.findMany({
         where: { id: { in: mappedChannelIds } },
-        select: { id: true, projectId: true, isArchived: true },
+        select: { id: true, isArchived: true },
       });
       const channelById = new Map(channels.map(channel => [channel.id, channel]));
 
       for (const channelId of mappedChannelIds) {
         const channel = channelById.get(channelId);
         if (!channel) throw new Error(`Mapped channel ${channelId} not found`);
-        if (channel.projectId !== input.projectId) {
-          throw new Error(`Mapped channel ${channelId} does not belong to project ${input.projectId}`);
-        }
         if (channel.isArchived) {
           throw new Error(`Mapped channel ${channelId} is archived`);
         }
@@ -486,7 +473,7 @@ export class ConfluenceImportService {
         workspaceId,
       });
 
-      projectId = targetChannel.projectId;
+      projectId = targetChannel.projectId ?? undefined;
       defaultChannelId = targetChannel.id;
       reusedProject = true;
       reusedChannels += 1;
@@ -552,7 +539,7 @@ export class ConfluenceImportService {
     channelId?: string;
     channelName?: string;
     workspaceId: string;
-  }): Promise<{ id: string; name: string; projectId: string }> {
+  }): Promise<{ id: string; name: string; projectId: string | null }> {
     if (input.channelId) {
       const channel = await db.channel.findFirst({
         where: {
@@ -1258,6 +1245,8 @@ export class ConfluenceImportService {
       throw new Error('workspaceId required: Confluence import config missing workspaceId');
     }
     const ownerUserIds = uniqueIds([creatorUserId, lastEditorUserId, actorUserId]);
+    const connectId = newConnectId();
+    const connectNow = new Date();
     await db.$transaction([
       db.canvas.create({
         data: {
@@ -1272,6 +1261,7 @@ export class ConfluenceImportService {
           isCollaborative: true,
           docType: DocType.Canvas,
           workspaceId,
+          connectId,
           projectId: prepared.destination.projectId,
           ...(prepared.destination.type === 'channel' || prepared.destination.type === 'channelFolder'
             ? { channelId: prepared.destination.channelId }
@@ -1280,6 +1270,19 @@ export class ConfluenceImportService {
             ? { folderId: prepared.destination.folderId }
             : {}),
           metadata: this.buildCanvasMetadata(prepared, input, checksum, sourceUrl, undefined, visibilityDecision) as Prisma.InputJsonValue,
+        },
+      }),
+      db.connectGroup.create({
+        data: {
+          entityType: ConnectEntityType.CANVAS,
+          entityId: canvasId,
+          hostWorkspaceId: workspaceId,
+          invitedEntityId: null,
+          invitedWorkspaceId: null,
+          connectId,
+          status: 'ACTIVE',
+          createdAt: connectNow,
+          updatedAt: connectNow,
         },
       }),
       db.canvasParticipant.createMany({
@@ -1291,6 +1294,7 @@ export class ConfluenceImportService {
           joinedAt: new Date(),
           updatedAt: new Date(),
           workspaceId,
+          canvasConnectId: connectId,
         })),
         skipDuplicates: true,
       }),
@@ -1346,6 +1350,7 @@ export class ConfluenceImportService {
     const ownerUserIds = uniqueIds(userIds);
     if (ownerUserIds.length === 0) return;
 
+    const connectId = await resolveCanvasConnectId(db, canvasId);
     await db.canvasParticipant.createMany({
       data: ownerUserIds.map(userId => ({
         id: uuidv4(),
@@ -1355,6 +1360,7 @@ export class ConfluenceImportService {
         joinedAt: new Date(),
         updatedAt: new Date(),
         workspaceId,
+        ...(connectId ? { canvasConnectId: connectId } : {}),
       })),
       skipDuplicates: true,
     });

@@ -5,6 +5,15 @@ import { SDLC_APP_BASE_PATH } from '../../config';
 import { useCallJoinOrInitiate } from '../../hooks/useCallJoinOrInitiate';
 import { useSdlcFrame } from './SdlcFrameContext';
 import { isSdlcPath, parseSdlcFrameMessage, SDLC_FRAME_MESSAGE } from './sdlcFrameMessages';
+import {
+  getLastSdlcLocation,
+  setLastSdlcLocation,
+  sdlcHubIdOf,
+  withoutResetParam,
+} from './lastSdlcLocation';
+import { openLink } from '../../utils/openLink';
+import { SdlcEmbeddedWebview } from './SdlcEmbeddedWebview';
+import { registerSdlcFramePoster } from '../../components/AIScreen/Workspace/sdlcBrowserTarget';
 
 /**
  * Owns the SDLC lane's iframe for the lifetime of the workspace.
@@ -33,9 +42,8 @@ const SdlcFrameHost = (): ReactElement | null => {
   const initiateCallRef = useRef(initiateCall);
   initiateCallRef.current = initiateCall;
 
-  // Last path each side told the other, so echoes do not loop.
-  const lastFromFrameRef = useRef<string | null>(null);
-  const lastToFrameRef = useRef<string | null>(null);
+  // Where the frame is now, from its last report or our last send; sending it again only echoes.
+  const frameLocationRef = useRef<string | null>(null);
 
   const container = useMemo(() => {
     if (typeof document === 'undefined') return null;
@@ -59,9 +67,23 @@ const SdlcFrameHost = (): ReactElement | null => {
   // :workspaceId, so at mount the location is usually a different screen.
   useEffect(() => {
     if (!viewport || initialSrcRef.current || !workspaceId) return;
-    initialSrcRef.current = `${SDLC_APP_BASE_PATH}${location.pathname}${location.search}${location.hash}`;
+    // Bare /sdlc after a reload: resume the durable last-visited page.
+    const root = `/${workspaceId}/sdlc`;
+    const stored =
+      location.pathname === root || location.pathname === `${root}/`
+        ? getLastSdlcLocation(workspaceId)
+        : null;
+    initialSrcRef.current = `${SDLC_APP_BASE_PATH}${stored ?? `${location.pathname}${location.search}${location.hash}`}`;
     setHasActivated(true);
   }, [viewport, workspaceId, location.pathname, location.search, location.hash]);
+
+  useEffect(
+    () =>
+      registerSdlcFramePoster(message => {
+        iframeRef.current?.contentWindow?.postMessage(message, window.location.origin);
+      }),
+    [],
+  );
 
   // frame → parent
   useEffect(() => {
@@ -88,13 +110,22 @@ const SdlcFrameHost = (): ReactElement | null => {
         return;
       }
 
+      if (message.type === SDLC_FRAME_MESSAGE.openLink) {
+        // Forced in-app: the lane asked because it wants this in the app, not
+        // handed to the operating system.
+        openLink(message.url, null, { force: 'in-app' });
+        return;
+      }
+
       if (message.type === SDLC_FRAME_MESSAGE.reset) {
-        // Timestamp forces a fresh document rather than a cached one. JS cannot
-        // request a true cache-bypassing reload.
-        const root = `/${workspaceId}/sdlc`;
-        initialSrcRef.current = `${SDLC_APP_BASE_PATH}${root}?_reset=${Date.now()}`;
-        lastFromFrameRef.current = null;
-        lastToFrameRef.current = null;
+        // Timestamp forces a fresh document rather than a cached one. Stay on the
+        // frame's current page instead of dropping to the hub root.
+        const frameLocation = frameLocationRef.current;
+        const root =
+          frameLocation && sdlcHubIdOf(frameLocation) ? frameLocation : `/${workspaceId}/sdlc`;
+        const separator = root.includes('?') ? '&' : '?';
+        initialSrcRef.current = `${SDLC_APP_BASE_PATH}${root}${separator}_reset=${Date.now()}`;
+        frameLocationRef.current = null;
         setIsReady(false);
         setResetCount(count => count + 1);
         if (location.pathname !== root) void navigate(root, { replace: true });
@@ -103,11 +134,13 @@ const SdlcFrameHost = (): ReactElement | null => {
 
       if (message.type !== SDLC_FRAME_MESSAGE.route) return;
 
-      lastFromFrameRef.current = message.path;
+      const reported = withoutResetParam(message.path);
+      frameLocationRef.current = reported;
+      if (workspaceId) setLastSdlcLocation(workspaceId, reported);
       // Only while on screen — a hidden frame must not move the address bar.
       const current = `${location.pathname}${location.search}${location.hash}`;
-      if (viewport && isSdlcPath(message.path) && message.path !== current) {
-        void navigate(message.path, { replace: true });
+      if (viewport && isSdlcPath(reported) && reported !== current) {
+        void navigate(reported, { replace: true });
       }
     };
 
@@ -124,33 +157,51 @@ const SdlcFrameHost = (): ReactElement | null => {
     // The hash carries #origin/#messageId scroll targets, so it must ride along.
     const path = `${location.pathname}${location.search}${location.hash}`;
     if (!isSdlcPath(location.pathname)) return;
-    if (path === lastFromFrameRef.current || path === lastToFrameRef.current) return;
+    if (path === frameLocationRef.current) return;
 
-    lastToFrameRef.current = path;
+    // The bare hub link means "back to SDLC", so it returns to wherever the frame
+    // already is — when that is an SDLC page, not the Workflows screen it also shows.
+    const frameLocation = frameLocationRef.current;
+    if (
+      frameLocation &&
+      /^\/[^/]+\/sdlc(\/|$)/.test(frameLocation) &&
+      /^\/[^/]+\/sdlc\/?$/.test(location.pathname)
+    ) {
+      void navigate(frameLocation, { replace: true });
+      return;
+    }
+
+    frameLocationRef.current = path;
     target.postMessage({ type: SDLC_FRAME_MESSAGE.navigate, path }, window.location.origin);
-  }, [isReady, viewport, location.pathname, location.search, location.hash]);
+  }, [isReady, viewport, location.pathname, location.search, location.hash, navigate]);
 
   if (!container || !hasActivated || !initialSrcRef.current) return null;
 
   return createPortal(
-    <iframe
-      key={resetCount}
-      ref={iframeRef}
-      src={initialSrcRef.current}
-      title='SDLC'
-      style={{
-        position: 'fixed',
-        top: viewport?.top ?? 0,
-        left: viewport?.left ?? 0,
-        width: viewport?.width ?? 0,
-        height: viewport?.height ?? 0,
-        border: 0,
-        visibility: viewport ? 'visible' : 'hidden',
-        pointerEvents: viewport ? 'auto' : 'none',
-        zIndex: 1,
-      }}
-      allow='clipboard-read; clipboard-write'
-    />,
+    <>
+      <iframe
+        key={resetCount}
+        ref={iframeRef}
+        src={initialSrcRef.current}
+        title='SDLC'
+        style={{
+          position: 'fixed',
+          top: viewport?.top ?? 0,
+          left: viewport?.left ?? 0,
+          width: viewport?.width ?? 0,
+          height: viewport?.height ?? 0,
+          border: 0,
+          visibility: viewport ? 'visible' : 'hidden',
+          pointerEvents: viewport ? 'auto' : 'none',
+          zIndex: 1,
+        }}
+        allow='clipboard-read; clipboard-write'
+      />
+      <SdlcEmbeddedWebview
+        offset={viewport ? { top: viewport.top, left: viewport.left } : null}
+        getFrameWindow={() => iframeRef.current?.contentWindow ?? null}
+      />
+    </>,
     container,
   );
 };

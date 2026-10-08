@@ -134,7 +134,11 @@ const ActiveCallEntry = ({ call, isCurrent }: ActiveCallEntryProps): ReactElemen
         )}
         data-track-category='App_Sidebar'
         data-track-name={isCurrent ? 'Rail_Return_To_Call' : 'Rail_Join_Call'}
-        data-track-metadata={JSON.stringify({ callId: call.externalId })}
+        data-track-metadata={JSON.stringify({
+          callId: call.externalId,
+          source: 'calls_rail',
+          isReturn: isCurrent,
+        })}
       >
         {isCurrent ? (
           <>

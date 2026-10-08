@@ -1,4 +1,5 @@
 import Joi from 'joi';
+import { RELATED_CONTEXT_MAX_DRAFT_CHARS } from '@xyne/shared';
 
 /**
  * Validation schema for Vespa search queries
@@ -31,11 +32,11 @@ export const vespaSearchQuerySchema = Joi.object({
     'number.max': 'Offset cannot exceed 1000',
   }),
 
-  limit: Joi.number().integer().min(1).max(200).default(20).messages({
+  limit: Joi.number().integer().min(1).max(400).default(20).messages({
     'number.base': 'Limit must be a number',
     'number.integer': 'Limit must be an integer',
     'number.min': 'Limit must be at least 1',
-    'number.max': 'Limit cannot exceed 200'
+    'number.max': 'Limit cannot exceed 400'
   }),
 
   // Rank profile
@@ -45,11 +46,12 @@ export const vespaSearchQuerySchema = Joi.object({
 
   // Frontend-compatible filters (includes subApp types: canvas, transcript, rca)
   // Supports comma-separated values: messages,files or canvas,transcript
+  // Special type 'ticket_tags' is used for tag search aggregation
   type: Joi.string()
-    .pattern(/^(messages|attachments|calls|channels|tickets|users|files|canvas|transcript|rca|people|emails)(,(messages|attachments|calls|channels|tickets|users|files|canvas|transcript|rca|people|emails))*$/)
+    .pattern(/^(messages|attachments|calls|channels|tickets|users|files|canvas|transcript|rca|people|emails|ticket_tags)(,(messages|attachments|calls|channels|tickets|users|files|canvas|transcript|rca|people|emails|ticket_tags))*$/)
     .optional()
     .messages({
-      'string.pattern.base': 'Type must be comma-separated values of: messages, attachments, calls, channels, tickets, users, files, canvas, transcript, rca, people, emails, calls'
+      'string.pattern.base': 'Type must be comma-separated values of: messages, attachments, calls, channels, tickets, users, files, canvas, transcript, rca, people, emails, ticket_tags'
     }),
 
   from: Joi.alternatives()
@@ -138,6 +140,19 @@ export const vespaSearchQuerySchema = Joi.object({
       'alternatives.types': 'channelMentions must be a string or array of channel IDs'
     }),
 
+  // Group-mention filter (scoped search): messages that mention these user-group IDs (Vespa `groupMentions` field)
+  groupMentions: Joi.alternatives()
+    .try(
+      Joi.array().items(Joi.string()),
+      Joi.string().custom((value) => {
+        return value.split(',').map((id: string) => id.trim()).filter(Boolean);
+      })
+    )
+    .optional()
+    .messages({
+      'alternatives.types': 'groupMentions must be a string or array of user-group IDs'
+    }),
+
   // Highlight-only mention display name(s); JSON-encoded array since names can contain commas.
   mentionHighlights: Joi.alternatives()
     .try(
@@ -219,6 +234,24 @@ export const vespaSearchQuerySchema = Joi.object({
     'string.base': 'messageActs must be a comma-separated string'
   }),
 
+  // Entity filter: entity name(s) annotated on chat messages / tickets (`entityNames`).
+  entity: Joi.alternatives()
+    .try(
+      Joi.array().items(Joi.string()),
+      Joi.string().custom((value) => {
+        return value.split(',').map((name: string) => name.trim()).filter(Boolean);
+      })
+    )
+    .optional()
+    .messages({
+      'alternatives.types': 'entity must be a string or array of entity names'
+    }),
+
+  // Link filter: "true" → only chat messages with a link, "false" → only those without (`hasLinks`).
+  hasLink: Joi.string().valid('true', 'false').optional().messages({
+    'any.only': 'hasLink must be "true" or "false"'
+  }),
+
   dynamicFieldValues: Joi.alternatives()
     .try(
       Joi.array().items(Joi.string()),
@@ -273,6 +306,10 @@ export const vespaSearchQuerySchema = Joi.object({
 
   assignee: Joi.string().optional().messages({
     'string.base': 'Assignee must be a string'
+  }),
+
+  userGroup: Joi.string().optional().messages({
+    'string.base': 'UserGroup must be a string'
   }),
 
   subApp: Joi.string().valid('canvas', 'transcript', 'recording', 'rca', 'collections').optional().messages({
@@ -331,6 +368,12 @@ export const vespaSearchQuerySchema = Joi.object({
   // Cmd-K "Include my channels" toggle. When true, scope chat results to channels the user is a member of.
   onlyMyChannels: Joi.string().valid('true', 'false').optional().messages({
     'any.only': 'onlyMyChannels must be "true" or "false"'
+  }),
+
+  // When true, drop results resolving to an archived ticket. cmd+k always sends true; the
+  // full-page Desk tab sends it unless its "Show archived" toggle is on.
+  excludeArchived: Joi.string().valid('true', 'false').optional().messages({
+    'any.only': 'excludeArchived must be "true" or "false"'
   }),
 
   // Debug flag
@@ -392,4 +435,29 @@ export const vespaSchemaQuerySchema = Joi.object({
     }),
 }).messages({
   'object.unknown': 'Unknown query parameter: {{#label}}',
+});
+
+/**
+ * Validation schema for cmd+K query intent classification (lexical vs AI)
+ */
+export const queryIntentQuerySchema = Joi.object({
+  q: Joi.string().trim().min(1).max(500).required().messages({
+    'string.empty': 'Query parameter "q" cannot be empty',
+    'string.max': 'Query cannot exceed 500 characters',
+    'any.required': 'Query parameter "q" is required'
+  }),
+});
+
+/**
+ * Body for the composer's related-context lookup: the draft being typed, and the
+ * thread it is being typed in, if any.
+ */
+export const relatedContextBodySchema = Joi.object({
+  // The composer never sends more than it uses.
+  text: Joi.string().trim().min(1).max(RELATED_CONTEXT_MAX_DRAFT_CHARS).required().messages({
+    'string.empty': '"text" cannot be empty',
+    'string.max': `Text cannot exceed ${RELATED_CONTEXT_MAX_DRAFT_CHARS} characters`,
+    'any.required': '"text" is required'
+  }),
+  conversationId: Joi.string().max(64).optional(),
 });

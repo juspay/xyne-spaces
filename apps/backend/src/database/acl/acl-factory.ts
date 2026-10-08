@@ -3,6 +3,8 @@ import { BaseQueryACL, ACLContext } from './base-acl'
 import {
   ActivitiesACL,
   AppsACL,
+  AppCommandACL,
+  AppPermissionACL,
   InstalledAppsACL,
   AgentsACL,
   AgentStepsACL,
@@ -47,6 +49,7 @@ import {
   InvitationsACL,
   OrganizationDomainsACL,
   OrgLLMServiceAccountCredentialsACL,
+  OrgMemberCredentialsACL,
   LinkAccessACL,
   LinksACL,
   LookupValuesACL,
@@ -87,6 +90,7 @@ import {
   TicketEntityMappingsACL,
   TicketReferenceMappingsACL,
   TicketsACL,
+  TicketDescriptionsACL,
   TicketStageEtaACL,
   TicketSubTicketMappingsACL,
   TicketTagsACL,
@@ -144,6 +148,8 @@ export class ACLFactory {
       return new ActivitiesACL(ctx, prisma)
     case 'agent':
       return new AgentsACL(ctx, prisma)
+    case 'agentConversationShare':
+      return new BaseQueryACL(ctx, prisma)
     case 'agentStep':
       return new AgentStepsACL(ctx, prisma)
     case 'agentToolsMapping':
@@ -187,7 +193,11 @@ export class ACLFactory {
       return new BaseQueryACL(ctx, prisma)
     case 'executionRunLog':
       return new BaseQueryACL(ctx, prisma)
-    case 'radarTeam':
+    case 'radarPrLink':
+      return new BaseQueryACL(ctx, prisma)
+    // Rules are per user, and every read is already scoped to (workspaceId,
+    // userId) by radarRuleStore — there is no route that reads anyone else's.
+    case 'radarRule':
       return new BaseQueryACL(ctx, prisma)
     case 'channel':
       return new ChannelsACL(ctx, prisma)
@@ -297,6 +307,10 @@ export class ACLFactory {
       return new BaseQueryACL(ctx, prisma)
     case 'sdlcTrack':
       return new BaseQueryACL(ctx, prisma)
+    case 'sdlcFolder':
+      return new BaseQueryACL(ctx, prisma)
+    case 'sdlcItemComment':
+      return new BaseQueryACL(ctx, prisma)
     case 'role':
       return new RolesACL(ctx, prisma)
     case 'savedUserConfiguration':
@@ -321,6 +335,8 @@ export class ACLFactory {
       return new TicketsACL(ctx, prisma)
     case 'ticketNamespace':
       return new TicketNamespacesACL(ctx, prisma)
+    case 'ticketDescription':
+      return new TicketDescriptionsACL(ctx, prisma)
     case 'ticketActivity':
       return new TicketActivitiesACL(ctx, prisma)
     case 'ticketAssignment':
@@ -371,16 +387,20 @@ export class ACLFactory {
       return new WorkspaceOrganizationsACL(ctx, prisma)
     case 'aCLAuditLog':
       return new BaseQueryACL(ctx, prisma)
+    case 'auditLog':
+      return new BaseQueryACL(ctx, prisma)
+    case 'auditLogChange':
+      return new BaseQueryACL(ctx, prisma)
     case 'activityAlias':
       return new UnscopedACL(ctx, prisma)
     case 'apiKey':
       return new BaseQueryACL(ctx, prisma)
     case 'appCommand':
-      return new BaseQueryACL(ctx, prisma)
+      return new AppCommandACL(ctx, prisma)
     case 'appIncomingWebhook':
       return new BaseQueryACL(ctx, prisma)
     case 'appPermission':
-      return new BaseQueryACL(ctx, prisma)
+      return new AppPermissionACL(ctx, prisma)
     case 'apps':
       return new AppsACL(ctx, prisma)
     case 'availableAppPermission':
@@ -527,6 +547,8 @@ export class ACLFactory {
       return new UnscopedACL(ctx, prisma)
     case 'orgLLMServiceAccountCredential':
       return new OrgLLMServiceAccountCredentialsACL(ctx, prisma)
+    case 'orgMemberCredential':
+      return new OrgMemberCredentialsACL(ctx, prisma)
     case 'guestAccess':
       return new BaseQueryACL(ctx, prisma)
     case 'entity':
@@ -536,6 +558,9 @@ export class ACLFactory {
     case 'entityAlias':
       return new BaseQueryACL(ctx, prisma)
     case 'deskAutoLabelRuleReference':
+      return new BaseQueryACL(ctx, prisma)
+    case 'connectGroup':
+      // Slack Connect reach table — default ACL in Phase 1 (no per-row restriction yet).
       return new BaseQueryACL(ctx, prisma)
     }
   }

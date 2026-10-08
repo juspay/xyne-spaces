@@ -1,9 +1,14 @@
 import { z } from 'zod';
-import { MeetingStatus } from '@xyne/shared';
+import { MeetingStatus, RingStatus } from '@xyne/shared';
 
 export const UpdateRsvpSchema = z.object({
   status: z.nativeEnum(MeetingStatus),
   isSeries: z.boolean().optional(),
+});
+
+// CALLING is written by the invite, never reported by a device.
+export const UpdateRingStatusSchema = z.object({
+  ringStatus: z.enum([RingStatus.RINGING, RingStatus.BUSY]),
 });
 
 export const HideCallSchema = z.object({
@@ -104,6 +109,8 @@ export const ScheduleCallSchema = z.object({
   externalInvitees: z.array(z.string().email()).optional(),
   externalInviteDelivery: z.enum(['standalone', 'conversation_reply']).optional(),
   invitation: CallInvitationSchema.optional(),
+  // Pins the detailed-summary template so no LLM template selection runs for this call.
+  summaryTemplateId: z.string().trim().min(1).optional(),
 }).refine(
   (data) => data.channelId || (data.targetUserIds && data.targetUserIds.length > 0),
   'Either channelId or targetUserIds is required'
@@ -157,6 +164,8 @@ export const RecurringScheduleCallSchema = z
     endsOn: z.number().optional(),
     externalInvitees: z.array(z.string().email()).optional(),
     invitation: CallInvitationSchema.optional(),
+    // Pinned onto every instance of the series; see ScheduleCallSchema.summaryTemplateId.
+    summaryTemplateId: z.string().trim().min(1).optional(),
   })
   .refine(
     (data) => data.channelId || (data.targetUserIds && data.targetUserIds.length > 0),
@@ -193,6 +202,8 @@ export const UpdateScheduleCallSchema = z
     channelId: z.string().optional(),
     callUpdatesChannel: z.string().optional(),
     externalInvitees: z.array(z.string().email()).optional(),
+    // null clears the pinned template (back to LLM selection).
+    summaryTemplateId: z.string().trim().min(1).nullable().optional(),
   })
   .refine(
     (data) => !data.startsAt || !data.endsAt || data.startsAt < data.endsAt,
@@ -224,6 +235,8 @@ export const UpdateRecurringSeriesSchema = z
     channelId: z.string().optional(),
     callUpdatesChannel: z.string().optional(),
     externalInvitees: z.array(z.string().email()).optional(),
+    // null clears the pinned template (back to LLM selection).
+    summaryTemplateId: z.string().trim().min(1).nullable().optional(),
   })
   .refine(
     (data) => !data.startTime || !data.endTime || data.startTime !== data.endTime,

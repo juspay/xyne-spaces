@@ -238,6 +238,9 @@ export const InstantCallModal: React.FC<InstantCallModalProps> = ({
                 onClick={handleClose}
                 data-track-category='CALLS'
                 data-track-name='CANCEL_INSTANT_CALL'
+                data-track-metadata={JSON.stringify({
+                  participantCount: selectedParticipants.length,
+                })}
                 data-testid='instant-call-cancel-button'
               >
                 Cancel
@@ -248,6 +251,11 @@ export const InstantCallModal: React.FC<InstantCallModalProps> = ({
                 onClick={handleSubmit}
                 data-track-category='CALLS'
                 data-track-name='START_INSTANT_CALL'
+                data-track-metadata={JSON.stringify({
+                  source: 'instant_call_modal',
+                  participantCount: selectedParticipants.length,
+                  hasChannelSelection: selectedParticipants.some(v => v.startsWith('channel:')),
+                })}
                 disabled={selectedParticipants.length === 0}
                 className='rounded-lg text-[13px] bg-primary hover:bg-primary hover:opacity-80 disabled:opacity-20 disabled:cursor-not-allowed'
                 data-testid='instant-call-start-button'

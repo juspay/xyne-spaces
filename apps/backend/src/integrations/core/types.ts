@@ -22,11 +22,16 @@ export enum ExternalSourcePlatform {
   APP_DESK = 'app-desk',
   OZONETEL = 'ozonetel',
   GOOGLE_PLAY = 'google-play-reviews',
+  APP_STORE = 'app-store-reviews',
+  INSTAGRAM = 'instagram',
+  FACEBOOK = 'facebook',
 }
 
 export interface IngestionOptions {
   /** Bypass the source's persisted cursor for an explicit full/manual fetch. */
   ignoreSyncCursor?: boolean;
+  /** User-chosen backfill window. The only thing allowed to reach past the normal floor. */
+  backfill?: { startDate: Date; endDate: Date };
 }
 
 /**
@@ -93,6 +98,7 @@ export interface NormalizedData {
     replyTo?: string[];
     type?: EmailType;
     sentByUserId?: string;
+    skipBlockingCheck?: boolean;
     rating?: number;
     clientVersionName?: string;
     clientVersionCode?: string;
@@ -125,6 +131,7 @@ export interface NormalizedData {
     hasAttachments?: boolean;
     attachmentCount?: number;
     isReply?: boolean; // true for Ticket_Thread_Add events
+    targetConversationId?: string; // append here instead of thread matching
     
     [key: string]: string | number | boolean | Date | string[] | undefined; // Platform-specific metadata
   };
@@ -204,11 +211,19 @@ export interface ExternalSourceAdapter {
   ): Promise<AuthResult>;
 
   /** Optional: Preprocess payload (fetch additional data via API) */
-  preprocess?(
-    rawPayload: unknown,
-    source?: ExternalSource,
-    options?: IngestionOptions,
-  ): Promise<unknown>;
+  preprocess?(rawPayload: unknown, source?: ExternalSource, options?: IngestionOptions): Promise<unknown>;
+
+  /**
+   * Optional: resume cursor to persist after a successful ingest. Return null to leave the stored
+   * cursor untouched — required when a run could not prove it covered its whole window.
+   */
+  resolveNextCursor?(source: ExternalSource, syncStartedAt: Date): string | null;
+
+  /**
+   * Optional: called with the externalIds that failed to sync, before ingest throws. Lets an
+   * adapter bound retries on a permanently-bad item instead of re-fetching it forever.
+   */
+  onIngestFailures?(source: ExternalSource, failedExternalIds: string[]): Promise<void>;
 
   /** Optional: Dynamically determine source name for database lookup based on payload */
   getSourceNameFromDB?(payload: unknown): string | undefined;
@@ -249,7 +264,7 @@ export interface ExternalSourceAdapter {
    */
   sendMailNew?(ctx: NewMailContext): Promise<MailReplyResult>;
 
-  /** Optional: provider reply sender for non-email Desk interactions. */
+  /** Optional: provider reply sender for non-email Desk interactions (e.g. Instagram DMs). */
   sendInteractionReply?(ctx: InteractionReplyContext): Promise<NormalizedData>;
 }
 

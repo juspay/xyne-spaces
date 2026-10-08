@@ -3,10 +3,10 @@ import { MessageType, Schema } from '@xyne/shared';
 import { zql } from '../../queries';
 import {
   serializeRepliesMd,
-  serializeInitialMessageMd,
+  buildInitialMessageMd,
   serializeParentMessageMd,
 } from '@xyne/shared';
-import type { InitialMessageSummary, ParentMessageSummary } from '@xyne/shared';
+import type { ParentMessageSummary } from '@xyne/shared';
 import type { MessagePreviousValue } from '../types';
 import { BaseMutationSyncHandler } from '../base-handler';
 
@@ -28,47 +28,25 @@ export class MessagesMutationSyncHandler extends BaseMutationSyncHandler {
   }
 }
 
-function buildInitialMessageSummary(
-  message: {
-    messageId: string;
-    conversationId: string;
-    senderId: string;
-    content: string;
-    msgType: MessageType;
-    hasAttachment: boolean;
-    edited: boolean;
-    isDeleted: boolean;
-    showInChannel: boolean;
-    visibleTo: string | null;
-    createdAt: number;
-    metadata: unknown;
-    nudgeCount: number | null;
-    isSent: boolean;
-    reactions_md: string | null;
-    link_preview_md: string | null;
-    childConversationId: string | null;
-  },
-): InitialMessageSummary {
-  return {
-    messageId: message.messageId,
-    conversationId: message.conversationId,
-    senderId: message.senderId,
-    content: message.content,
-    msgType: message.msgType,
-    hasAttachment: message.hasAttachment,
-    edited: message.edited,
-    isDeleted: message.isDeleted,
-    showInChannel: message.showInChannel,
-    visibleTo: message.visibleTo,
-    createdAt: message.createdAt,
-    metadata: message.metadata ? JSON.stringify(message.metadata) : null,
-    nudgeCount: message.nudgeCount,
-    isSent: message.isSent,
-    reactions_md: message.reactions_md,
-    link_preview_md: message.link_preview_md,
-    childConversationId: message.childConversationId,
-  };
-}
+type InitialMessageRow = {
+  messageId: string;
+  conversationId: string;
+  senderId: string;
+  content: string;
+  msgType: MessageType;
+  hasAttachment: boolean;
+  edited: boolean;
+  isDeleted: boolean;
+  showInChannel: boolean;
+  visibleTo: string | null;
+  createdAt: number;
+  metadata: unknown;
+  nudgeCount: number | null;
+  isSent: boolean;
+  reactions_md: string | null;
+  link_preview_md: string | null;
+  childConversationId: string | null;
+};
 
 function buildParentMessageSummary(
   message: {
@@ -91,12 +69,11 @@ function buildParentMessageSummary(
 }
 
 async function syncInitialMessageMd(
-  message: Parameters<typeof buildInitialMessageSummary>[0],
+  message: InitialMessageRow,
   conversation: { conversationId: string; initial_message_md: string | null },
   tx: Transaction<Schema>,
 ): Promise<void> {
-  const summary = buildInitialMessageSummary(message);
-  const md = serializeInitialMessageMd(summary);
+  const md = buildInitialMessageMd(message);
 
   if (conversation.initial_message_md === md) return;
 

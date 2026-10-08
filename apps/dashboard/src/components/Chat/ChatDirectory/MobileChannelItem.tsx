@@ -1,6 +1,6 @@
 import { ReactElement } from 'react';
 import { Link, useParams } from 'react-router-dom';
-import { Hashtag, PencilEdit, Headphones } from '@xyne/icons';
+import { Hashtag, PencilEdit, PhoneDefault } from '@xyne/icons';
 import { ChannelVisibility, NotificationLevel } from '@xyne/shared';
 import { isDMChannel, isGroupDMChannel, parseDMParticipantIds } from './ChatDirectory.utils';
 import { useDraft } from '../../../hooks/useDraft';
@@ -126,14 +126,15 @@ const MobileChannelItem = ({ channel, unreadCount = 0 }: MobileChannelItemProps)
                 statusEmoji={dmUser?.statusEmoji}
                 statusContent={dmUser?.statusContent}
                 statusExpiryAt={dmUser?.statusExpiryAt}
+                activityStatus={dmUser?.activityStatus}
                 size='sm'
                 showOnHover={true}
               />
             )}
           </span>
-          {hasActiveCall && (
+          {hasActiveCall && !isDM && (
             <span className='shrink-0 rounded-full bg-status-success px-2 py-1 text-background'>
-              <Headphones size={14} />
+              <PhoneDefault size={14} />
             </span>
           )}
           {draftMessage && !isActive && (

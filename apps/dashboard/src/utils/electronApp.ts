@@ -1,3 +1,4 @@
+import type { EntityLinkSourceType } from '@/contexts/EntityLinkContext';
 import { logger, Event as LogEvent } from './logger';
 import type { CSSProperties } from 'react';
 import type { ElectronAPI } from '../types/electron';
@@ -217,11 +218,13 @@ export interface CreateTicketPopoutDraft {
   tab?: string | null | undefined;
   sourceConversationId?: string | null | undefined;
   sourceMessageId?: string | null | undefined;
-  entityLinkContext?: { sourceType: 'CANVAS' | 'TRACK'; sourceId: string } | null | undefined;
+  entityLinkContext?: { sourceType: EntityLinkSourceType; sourceId: string } | null | undefined;
   initialMessageId?: string | null | undefined;
   parentTicketId?: string | null | undefined;
   isFromSubTicket?: boolean | undefined;
   isFromAI?: boolean | undefined;
+  /** Opening surface, forwarded so the popout's create outcome keeps its source. */
+  trackSource?: string | undefined;
   subTickets?: Array<{ title: string; description?: string }> | undefined;
   excludedChatAttachmentIds?: string[] | undefined;
   // Full in-progress form snapshot so nothing the user entered is dropped.

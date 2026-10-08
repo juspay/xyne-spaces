@@ -73,6 +73,7 @@ import { useUserGroups } from '../../../hooks/useUserGroup';
 import { useTheme } from '../../../hooks/useTheme';
 import { useZero } from '../../../hooks/useZero';
 import { useCachedQuery } from '@xyne/shared/hooks';
+import { useCanvasConnectId } from '../../../hooks/useCanvasConnectId';
 import { queries } from '@xyne/shared/zero/queries';
 import { getUserDisplayName } from '../../../utils/userDisplayName';
 import { logger, Event } from '../../../utils/logger';
@@ -88,6 +89,7 @@ import { CanvasWidthHandles } from '../CanvasWidthHandles';
 import { useCanvasCommentEditorBridge } from '../useCanvasCommentEditorBridge';
 import { useCanvasTicketEditorBridge } from '../useCanvasTicketEditorBridge';
 import { CanvasTicketCreationFlow } from '../CanvasTicketCreationFlow/CanvasTicketCreationFlow';
+import { CanvasTicketLinkFlow } from '../CanvasTicketLinkFlow/CanvasTicketLinkFlow';
 
 const canvasDictionary = {
   ...en,
@@ -144,6 +146,7 @@ export const CanvasEditor = forwardRef<CanvasEditorRef, CanvasEditorProps>(
       canvasParticipants: preloadedParticipants,
       canvasCreatedBy,
       currentUserRole,
+      header,
     },
     ref,
   ) => {
@@ -155,8 +158,9 @@ export const CanvasEditor = forwardRef<CanvasEditorRef, CanvasEditorProps>(
     const { theme } = useTheme();
     const isXyneAIOpen = useSelector(xyneAIActor, state => state.matches('open'));
     const z = useZero();
+    const connectId = useCanvasConnectId(canvasId);
     const [queriedParticipants = []] = useCachedQuery(
-      queries.canvasParticipants({ canvasId: canvasId || '' }),
+      queries.canvasParticipants({ canvasId: canvasId || '', connectId }),
       {
         enabled: Boolean(canvasId) && !preloadedParticipants,
       },
@@ -422,8 +426,10 @@ export const CanvasEditor = forwardRef<CanvasEditorRef, CanvasEditorProps>(
     });
     const {
       activeTicketAnchor,
+      activeTicketAction,
       isTicketChannelArchived,
       openTicketForCurrentSelection,
+      openTicketLinkForCurrentSelection,
       closeTicketModal,
       handleTicketCreated,
     } = useCanvasTicketEditorBridge({
@@ -564,6 +570,7 @@ export const CanvasEditor = forwardRef<CanvasEditorRef, CanvasEditorProps>(
           canComment: editable,
           canCreateTicket: editable && !isTicketChannelArchived,
           onCreateTicket: openTicketForCurrentSelection,
+          onLinkTicket: openTicketLinkForCurrentSelection,
         }),
       [
         _canvasTitle,
@@ -571,6 +578,7 @@ export const CanvasEditor = forwardRef<CanvasEditorRef, CanvasEditorProps>(
         editable,
         isTicketChannelArchived,
         openCommentsForCurrentBlock,
+        openTicketLinkForCurrentSelection,
         openTicketForCurrentSelection,
       ],
     );
@@ -611,6 +619,7 @@ export const CanvasEditor = forwardRef<CanvasEditorRef, CanvasEditorProps>(
         <div className='relative flex min-h-0 flex-1 overflow-hidden'>
           <div className='thin-scrollbar relative min-h-0 flex-1 overflow-auto pt-8'>
             <CanvasWidthHandles surfaceRef={containerRef} />
+            {header}
             <CanvasMentionContext.Provider value={mentionContextValue}>
               <BlockNoteView
                 editor={asBlockNoteEditorForView(editor)}
@@ -674,10 +683,15 @@ export const CanvasEditor = forwardRef<CanvasEditorRef, CanvasEditorProps>(
         </div>
 
         <CanvasTicketCreationFlow
-          anchor={activeTicketAnchor}
+          anchor={activeTicketAction === 'create' ? activeTicketAnchor : null}
           channelId={channelId}
           onClose={closeTicketModal}
           onTicketCreated={handleTicketCreated}
+        />
+        <CanvasTicketLinkFlow
+          anchor={activeTicketAction === 'link' ? activeTicketAnchor : null}
+          onClose={closeTicketModal}
+          onTicketSelected={handleTicketCreated}
         />
 
         {/* Presentation Modal */}

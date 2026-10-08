@@ -110,3 +110,5 @@ CREATE UNIQUE INDEX "repos_workspaceId_canonicalUrl_key" ON "public"."repos"("wo
 --
 -- ALTER TABLE "public"."projects" ADD COLUMN     "sdlcBoardId" TEXT;
 -- CREATE UNIQUE INDEX "projects_sdlcBoardId_key" ON "public"."projects"("sdlcBoardId");
+
+-- repos.sdlcSetupExecutionId is deprecated: only the removed SDLC worker wrote it. Kept, not dropped.

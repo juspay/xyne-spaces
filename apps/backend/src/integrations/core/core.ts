@@ -5,11 +5,14 @@
 
 import {
   ExternalSourceAdapter,
+  ExternalSourcePlatform,
   NormalizedData,
   IngestionResult,
   type IngestionOptions,
 } from './types';
 import { SourceNotFoundError } from './errors';
+import { isMetaMessagingPlatform } from '../social-media/constants';
+import { appendFailedAttachmentLinks } from '../adapters/social-media/shared/metaDmAttachments';
 import { ExternalSourceRepository } from '../../database/repositories/externalSourceRepository';
 import { ExternalMessageRepository } from '../../database/repositories/externalMessageRepository';
 import { ConversationRepository } from '../../database/repositories/conversationRepository';
@@ -17,7 +20,7 @@ import { MessageRepository } from '../../database/repositories/messageRepository
 import { ChannelRepository } from '../../database/repositories/channelRepository';
 import { EmailChannelPreferenceRepository } from '../../database/repositories/emailChannelPreferenceRepository';
 import { ExternalSource, ExternalMessage } from '@prisma/client';
-import { isDeskChannelType, ExternalEntityType, EmailType, EmailMergeMode, ChannelType, MessageDirection, MessageType } from '@xyne/shared';
+import { isDeskChannelType, ExternalEntityType, EmailType, EmailMergeMode, ChannelType, MessageDirection, MessageType, DeskType } from '@xyne/shared';
 import { logger } from '../../utils/logger';
 import { conversationService } from '../../services/conversationService';
 import { emailService } from '../../services/emailService';
@@ -28,7 +31,7 @@ import {
 } from '@/services/externalAttachmentService';
 import { EmailRepository } from '@/database/repositories';
 import { findDuplicateEmailConversation } from '../../utils/vespaDuplicateDetector';
-import { collectDlCandidates } from '@/services/dlResolver';
+import { collectDlCandidates, dlAddressesFor } from '@/services/dlResolver';
 import { db } from '@/database/client';
 import { ChannelEmailAliasService } from '@/services/channelEmailAliasService';
 import { unifiedBotUserService } from '@/bots/unified/services/unified-bot-user-service.js';
@@ -101,6 +104,7 @@ export class ExternalSourceCore {
 
     const allResults: IngestionResult[] = [];
     const failedExternalIds: string[] = [];
+    let firstFailureMessage: string | undefined;
     for (const payload of payloads) {
       if (payload && typeof payload === 'object' && (payload as any).__skipIngestion) {
         const reason = (payload as any).__skipReason || 'unspecified';
@@ -127,6 +131,7 @@ export class ExternalSourceCore {
           allResults.push(...results);
         } catch (error) {
           failedExternalIds.push(normalizedData.externalId);
+          firstFailureMessage ??= error instanceof Error ? error.message : String(error);
           logger.error(`Failed to sync interaction from ${sourceName}`, {
             externalId: normalizedData.externalId,
             eventType: normalizedData.metadata.eventType,
@@ -137,13 +142,23 @@ export class ExternalSourceCore {
       }
     }
 
+    if (source && adapter.onIngestFailures) {
+      // Before the throw below, so an adapter can count attempts per item. Never let bookkeeping
+      // mask the real ingestion error.
+      try {
+        await adapter.onIngestFailures(source, failedExternalIds);
+      } catch (error) {
+        logger.error('Failed to record ingest failures', { sourceName, error });
+      }
+    }
+
     if (failedExternalIds.length > 0) {
       logger.error(
         `[INGEST_INCOMPLETE] ${failedExternalIds.length} message(s) not ingested from ${sourceName}`,
         { sourceName, externalIds: failedExternalIds },
       );
       throw new Error(
-        `Failed to sync ${failedExternalIds.length} interaction${failedExternalIds.length === 1 ? '' : 's'} from ${sourceName}`,
+        `Failed to sync ${failedExternalIds.length} interaction${failedExternalIds.length === 1 ? '' : 's'} from ${sourceName}: ${firstFailureMessage}`,
       );
     }
 
@@ -270,6 +285,14 @@ export class ExternalSourceCore {
       }
     }
 
+    if (isMetaMessagingPlatform(source.sourceType) && normalizedData.attachments?.length) {
+      normalizedData.content = appendFailedAttachmentLinks(
+        normalizedData.content,
+        normalizedData.attachments,
+        downloadedAttachments.map((attachment) => attachment.metadata?.externalUrl),
+      );
+    }
+
     // 3. Check for duplicate (deduplication)
     const existingExtMsg = await this.externalMessageRepo.findByExternalId(
       source.id,
@@ -369,8 +392,15 @@ export class ExternalSourceCore {
         externalId: normalizedData.externalId,
         externalThreadId: normalizedData.externalThreadId,
         entityId: resolvedEntityId,
-        direction: MessageDirection.INCOMING,
+        // For Zoho, TICKET_THREAD_ADD sets isReply=true but represents a customer message (INCOMING).
+        // For all other adapters, isReply=true means an agent sent the message (OUTGOING).
+        direction: (normalizedData.metadata.isReply && source.sourceType !== ExternalSourcePlatform.ZOHO)
+          ? MessageDirection.OUTGOING
+          : MessageDirection.INCOMING,
         entityType: isDeskChannel ? ExternalEntityType.EMAIL : ExternalEntityType.MESSAGE,
+        // Override createdAt with the real event time for Instagram/Facebook only (24h window check).
+        // Other adapters keep @default(now()) to avoid reordering historical imports.
+        ...(isMetaMessagingPlatform(source.sourceType) && { createdAt: normalizedData.metadata.timestamp }),
       });
     }
 
@@ -412,7 +442,8 @@ export class ExternalSourceCore {
       if (!channelId) return [];
 
       const channel = await this.channelRepo.findById(channelId);
-      return channel?.workspaceId === workspaceId && channel.type === ChannelType.CALL
+      // Not just CALL: a call linked to a ticket is appended to that ticket's app desk.
+      return channel?.workspaceId === workspaceId && isDeskChannelType(channel.type)
         ? [channelId]
         : [];
     }
@@ -461,10 +492,19 @@ export class ExternalSourceCore {
       return [];
     }
 
-    const matches = await db.emailChannelPreference.findMany({
-      where: { workspaceId, dlEmail: { in: addrs, mode: 'insensitive' } },
-      select: { channelId: true, dlEmail: true },
+    const candidates = await db.emailChannelPreference.findMany({
+      where: {
+        workspaceId,
+        deskType: DeskType.DL,
+        OR: [{ dlEmail: { in: addrs, mode: 'insensitive' } }, { NOT: { dlAliases: null } }],
+      },
+      select: { channelId: true, dlEmail: true, dlAliases: true },
     });
+    // addrs is already lowercased by collectDlCandidates, as is dlAddressesFor.
+    const addrSet = new Set(addrs);
+    const matches = candidates.filter(pref =>
+      dlAddressesFor(pref).some(address => addrSet.has(address)),
+    );
     if (matches.length === 0) {
       logger.info(`[DL_ROUTE] Dropping inbound: no desk for from/to/cc`, {
         sourceName: source.name,
@@ -514,6 +554,55 @@ export class ExternalSourceCore {
           return { conversation, message: undefined, email: existingEmail, isNew: false };
         }
       }
+    }
+
+    // The target conversation may have no email to thread-match against, so it is named outright.
+    const targetConversationId =
+      typeof normalizedData.metadata.targetConversationId === 'string'
+        ? normalizedData.metadata.targetConversationId.trim()
+        : '';
+    if (targetConversationId && isDeskChannel && normalizedData.emailData) {
+      const conversation = await this.conversationRepo.findById(targetConversationId);
+      if (conversation) {
+        const rootEmail = await this.emailRepo.findFirstByConversationId(conversation.conversationId);
+        const uploadedFilesForTarget =
+          AttachmentConversionService.convertDownloadedToUploaded(downloadedAttachments);
+        const { email } = await emailService.addEmailToConversation({
+          conversationId: conversation.conversationId,
+          emailSubject: normalizedData.emailData.subject || '',
+          emailBody: normalizedData.content,
+          emailTo: normalizedData.emailData.to || [],
+          emailFrom: normalizedData.emailData.from || '',
+          emailCc: normalizedData.emailData.cc || [],
+          emailBcc: normalizedData.emailData.bcc || [],
+          emailReplyTo: normalizedData.emailData.replyTo || [],
+          externalThreadId: rootEmail?.externalThreadId || normalizedData.externalThreadId,
+          externalMessageId: normalizedData.externalId,
+          rfcMessageId: normalizedData.rfcMessageId,
+          uploadedFiles: uploadedFilesForTarget,
+          receivedAt: normalizedData.metadata.timestamp,
+          ...this.getEmailIntegrationFields(normalizedData),
+        });
+        logger.info('[TARGET_CONVERSATION] Appended to linked conversation', {
+          conversationId: conversation.conversationId,
+          externalId: normalizedData.externalId,
+          channelId: source.channelId,
+        });
+        return { conversation, message: undefined, email, isNew: false };
+      }
+      // Falling through would thread-match and could open a new ticket instead.
+      logger.warn('[TARGET_CONVERSATION] Linked conversation not found', {
+        targetConversationId,
+        externalId: normalizedData.externalId,
+      });
+      return {
+        conversation: undefined,
+        message: undefined,
+        email: undefined,
+        isNew: false,
+        blocked: true,
+        blockedReason: 'target_conversation_missing',
+      };
     }
 
     // Keep merge scoped to the configured external source. All providers share

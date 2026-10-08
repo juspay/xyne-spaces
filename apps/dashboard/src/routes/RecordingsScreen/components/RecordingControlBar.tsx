@@ -4,10 +4,22 @@
  */
 
 import { ReactElement, useEffect, useState, useRef } from 'react';
-import { Loader2, Pause, Play } from 'lucide-react';
+import {
+  Loader2,
+  Monitor,
+  MonitorOff,
+  Pause,
+  Play,
+  Video,
+  VideoOff,
+  type LucideIcon,
+} from 'lucide-react';
 import { calculateRecordingElapsedMs, formatElapsedTime } from '../../../utils/recordingUtils';
+import { canShareScreen } from '../../../utils/recordingMedia';
+import { cn } from '../../../utils/classNames';
 import { Waveform } from '../../../utils/recordingWaveform';
 import { ShortcutTooltip } from '../../../components/ui/ShortcutTooltip';
+import type { RecordingVideoControls } from '../../../hooks/useRecordingStore';
 
 /**
  * Returns true when the dashboard is running inside a mobile browser or
@@ -31,7 +43,50 @@ function useMobileWebPadding(): boolean {
   return isMobileWeb;
 }
 
-interface RecordingControlBarProps {
+interface MediaToggleButtonProps {
+  isOn: boolean;
+  disabled: boolean;
+  onClick: () => void;
+  onLabel: string;
+  offLabel: string;
+  onIcon: LucideIcon;
+  offIcon: LucideIcon;
+  trackName: string;
+}
+
+function MediaToggleButton({
+  isOn,
+  disabled,
+  onClick,
+  onLabel,
+  offLabel,
+  onIcon,
+  offIcon,
+  trackName,
+}: MediaToggleButtonProps): ReactElement {
+  const Icon = isOn ? onIcon : offIcon;
+
+  return (
+    <button
+      onClick={onClick}
+      disabled={disabled}
+      className={cn(
+        'flex items-center justify-center w-10 h-10 rounded-full border border-border transition-colors disabled:opacity-50 disabled:cursor-not-allowed',
+        isOn
+          ? 'bg-foreground text-background hover:bg-foreground/85'
+          : 'bg-foreground/15 text-foreground hover:bg-foreground/25',
+      )}
+      title={isOn ? onLabel : offLabel}
+      aria-pressed={isOn}
+      data-track-category='RecordingControlBar'
+      data-track-name={`${trackName}_${isOn ? 'off' : 'on'}`}
+    >
+      <Icon className='w-5 h-5' />
+    </button>
+  );
+}
+
+interface RecordingControlBarProps extends RecordingVideoControls {
   isRecording: boolean;
   isPaused: boolean;
   isStarting: boolean;
@@ -51,10 +106,14 @@ export function RecordingControlBar({
   startTime,
   pauseStartedAt,
   accumulatedPausedMs,
+  isCameraEnabled,
+  isScreenShareEnabled,
   onStart,
   onStop,
   onPause,
   onResume,
+  onToggleCamera,
+  onToggleScreenShare,
 }: RecordingControlBarProps): ReactElement {
   const [elapsed, setElapsed] = useState(0);
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -97,7 +156,7 @@ export function RecordingControlBar({
           </span>
         )}
 
-        {/* Pause/Resume and Stop buttons (visible when recording) */}
+        {/* Pause/Resume, camera, screen share and Stop buttons (visible when recording) */}
         {isRecording ? (
           <>
             <button
@@ -107,6 +166,10 @@ export function RecordingControlBar({
               title={isPaused ? 'Resume recording' : 'Pause recording'}
               data-track-category='RecordingControlBar'
               data-track-name={isPaused ? 'resume_recording' : 'pause_recording'}
+              data-track-metadata={JSON.stringify({
+                source: 'recording_control_bar',
+                elapsedMs: startTime ? Date.now() - startTime - accumulatedPausedMs : null,
+              })}
             >
               {isPaused ? (
                 <Play className='w-5 h-5 text-foreground' />
@@ -115,12 +178,41 @@ export function RecordingControlBar({
               )}
             </button>
 
+            <MediaToggleButton
+              isOn={isCameraEnabled}
+              disabled={isPaused}
+              onClick={onToggleCamera}
+              onLabel='Turn off camera'
+              offLabel='Turn on camera'
+              onIcon={Video}
+              offIcon={VideoOff}
+              trackName='camera'
+            />
+
+            {canShareScreen() && (
+              <MediaToggleButton
+                isOn={isScreenShareEnabled}
+                disabled={isPaused}
+                onClick={onToggleScreenShare}
+                onLabel='Stop sharing screen'
+                offLabel='Share screen'
+                onIcon={Monitor}
+                offIcon={MonitorOff}
+                trackName='screen_share'
+              />
+            )}
+
             <button
               onClick={onStop}
               className='flex items-center justify-center w-12 h-12 rounded-xl bg-foreground/15 hover:bg-foreground/25 transition-colors'
               title='Stop recording'
               data-track-category='RecordingControlBar'
               data-track-name='stop_recording'
+              data-track-metadata={JSON.stringify({
+                source: 'recording_control_bar',
+                durationMs: startTime ? Date.now() - startTime - accumulatedPausedMs : null,
+                wasPaused: accumulatedPausedMs > 0,
+              })}
             >
               {/* Square stop icon */}
               <div className='w-5 h-5 rounded-sm bg-destructive' />

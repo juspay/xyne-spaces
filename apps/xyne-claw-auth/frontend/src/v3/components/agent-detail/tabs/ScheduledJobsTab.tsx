@@ -22,6 +22,7 @@ import {
   listSpacesChannels,
 } from "../../../../lib/api";
 import { useSnackbar } from "../../ui/Snackbar";
+import { humanizeCron } from "../../../../lib/humanizeCron";
 
 interface Props {
   jobs: ScheduledJob[];
@@ -347,7 +348,9 @@ function JobCard({
   };
 
   const runMeta = [
-    job.type === "cron" && job.cronExpression ? job.cronExpression : null,
+    job.type === "cron" && job.cronExpression
+      ? humanizeCron(job.cronExpression) ?? job.cronExpression
+      : null,
     job.type === "once" && job.nextRunAt ? new Date(job.nextRunAt).toLocaleString() : null,
     job.maxRuns != null
       ? `runs: ${job.runCount}/${job.maxRuns}`
@@ -536,42 +539,52 @@ function JobCard({
         <div className="flex flex-wrap items-center gap-2 pl-11">
           <span className="text-[12px] text-xyne-fg-tertiary">schedule:</span>
           {editingCron ? (
-            <div className="flex items-center gap-1.5">
-              <input
-                autoFocus
-                type="text"
-                value={cronDraft}
-                onChange={(e) => setCronDraft(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter") void handleSaveCron();
-                  if (e.key === "Escape") setEditingCron(false);
-                }}
-                placeholder="* * * * *"
-                className="w-36 rounded-lg border border-xyne-border-focus bg-xyne-surface px-2 py-1 font-mono text-[12px] text-xyne-fg-primary outline-none"
-              />
-              <button
-                type="button"
-                onClick={() => void handleSaveCron()}
-                disabled={savingCron}
-                title="Save schedule"
-                className="rounded-md p-1 text-xyne-success-fg hover:bg-xyne-success-bg disabled:opacity-40"
-              >
-                <CheckIcon size={14} />
-              </button>
-              <button
-                type="button"
-                onClick={() => setEditingCron(false)}
-                disabled={savingCron}
-                title="Cancel"
-                className="rounded-md p-1 text-xyne-fg-muted hover:bg-xyne-surface-subtle disabled:opacity-40"
-              >
-                <XIcon size={14} />
-              </button>
-            </div>
+            <>
+              <div className="flex items-center gap-1.5">
+                <input
+                  autoFocus
+                  type="text"
+                  value={cronDraft}
+                  onChange={(e) => setCronDraft(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") void handleSaveCron();
+                    if (e.key === "Escape") setEditingCron(false);
+                  }}
+                  placeholder="* * * * *"
+                  className="w-36 rounded-lg border border-xyne-border-focus bg-xyne-surface px-2 py-1 font-mono text-[12px] text-xyne-fg-primary outline-none"
+                />
+                <button
+                  type="button"
+                  onClick={() => void handleSaveCron()}
+                  disabled={savingCron}
+                  title="Save schedule"
+                  className="rounded-md p-1 text-xyne-success-fg hover:bg-xyne-success-bg disabled:opacity-40"
+                >
+                  <CheckIcon size={14} />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setEditingCron(false)}
+                  disabled={savingCron}
+                  title="Cancel"
+                  className="rounded-md p-1 text-xyne-fg-muted hover:bg-xyne-surface-subtle disabled:opacity-40"
+                >
+                  <XIcon size={14} />
+                </button>
+              </div>
+              {humanizeCron(cronDraft) && (
+                <span className="text-[11px] text-xyne-fg-tertiary">
+                  {humanizeCron(cronDraft)}
+                </span>
+              )}
+            </>
           ) : (
             <div className="flex items-center gap-1.5">
-              <span className="font-mono text-[12px] text-xyne-fg-secondary">
-                {job.cronExpression || "—"}
+              <span
+                className="text-[12px] text-xyne-fg-secondary"
+                title={job.cronExpression || undefined}
+              >
+                {humanizeCron(job.cronExpression) ?? job.cronExpression ?? "—"}
               </span>
               {isActive && (
                 <button

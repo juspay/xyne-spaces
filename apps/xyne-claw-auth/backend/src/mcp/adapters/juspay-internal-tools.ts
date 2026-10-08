@@ -14,8 +14,14 @@ const BASE_URL =
  * (JUSPAY_INTERNAL_TOOLS_VALIDATE_TOKEN), which must match SERVER_API_KEY
  * configured on juspay-internal-tools.
  *
- * Tool filtering: x-tools-needed header requests only the "curie" category,
- * so juspay returns only Curie CRM tools (7 tools for lead/org/ticket queries).
+ * Tool filtering: the x-tools-needed header selects which categories juspay
+ * returns -- "curie" (Curie CRM: 7 read tools plus 2 write tools for
+ * lead/org/ticket queries and ticket edits), "default" and "admin_config".
+ *
+ * writeTools gates the two Curie write tools behind the human approval flow:
+ * routes/mcp.ts forces permission to "ask" for any tool named here (it cannot
+ * be overridden by agent config) and refuses to sign an action for a tool that
+ * is not. Names must be the RAW MCP tool names, not the prefixed runtime ones.
  */
 export const juspayInternalToolsAdapter: HttpMcpAdapter = {
   transport: "http",
@@ -23,7 +29,7 @@ export const juspayInternalToolsAdapter: HttpMcpAdapter = {
   // __list_tools__ performs a real listTools() call against the Python server,
   // verifying connectivity and returning the live tool count.
   healthCheck: { name: "__list_tools__", params: {} },
-  writeTools: [],
+  writeTools: ["curie_ticket_patch", "curie_ticket_comment_create"],
   credentialFields: [],
   buildHttpUrl(_credentials) {
     return {

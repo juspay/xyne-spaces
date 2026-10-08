@@ -12,6 +12,7 @@ import type {
   SearchSessionEndEvent,
   SearchTabClickEvent,
   SearchShowResultsEvent,
+  SearchSurface,
 } from '../types/searchEvents';
 import * as otelMetrics from './otel/searchMetrics';
 import { SEARCH_VERSION } from '../config';
@@ -35,12 +36,20 @@ class SearchMetricsService {
   /**
    * Track when a new search session starts
    */
-  trackSessionStart(searchSessionId: string, userId: string, tab: TabType): void {
+  trackSessionStart(params: {
+    searchSessionId: string;
+    userId: string;
+    tab: TabType;
+    starredCount?: number;
+    surface?: SearchSurface;
+  }): void {
     // Log structured event
     const event: SearchSessionStartEvent = {
-      search_session_id: searchSessionId,
-      user_id: userId,
-      tab,
+      search_session_id: params.searchSessionId,
+      user_id: params.userId,
+      tab: params.tab,
+      ...(params.starredCount !== undefined && { starred_count: params.starredCount }),
+      ...(params.surface && { surface: params.surface }),
     };
     logger.info(Event.VESPA_SEARCH_SESSION_START, event as unknown as Record<string, unknown>);
 
@@ -49,9 +58,9 @@ class SearchMetricsService {
     otelMetrics.safeRecordMetric(() => {
       otelMetrics.searchSessionsStarted.add(1, {
         version: SEARCH_VERSION,
-        user_id: userId,
+        user_id: params.userId,
         platform: platform,
-        tab: tab,
+        tab: params.tab,
       });
     });
   }
@@ -68,7 +77,7 @@ class SearchMetricsService {
     facetCounts: Record<string, number>;
     searchTrigger: 'keyboard_shortcut' | 'click' | 'auto_focus';
     searchLocation?: 'global' | 'channel' | 'dm';
-    querySource: 'KEYBOARD' | 'CLIPBOARD_PASTE';
+    querySource: 'KEYBOARD' | 'CLIPBOARD_PASTE' | 'RECENT';
     isModified: boolean;
     tab: TabType;
   }): void {
@@ -126,6 +135,8 @@ class SearchMetricsService {
     resultUrl?: string;
     tab: TabType;
     relevanceScore?: number;
+    isStarred?: boolean;
+    surface?: SearchSurface;
   }): void {
     const words = countWords(params.queryText);
     // Log structured event
@@ -142,6 +153,8 @@ class SearchMetricsService {
       ...(params.scrollDepth !== undefined && { scroll_depth: params.scrollDepth }),
       ...(params.resultUrl && { result_url: params.resultUrl }),
       ...(params.relevanceScore !== undefined && { relevance_score: params.relevanceScore }),
+      ...(params.isStarred !== undefined && { is_starred: params.isStarred }),
+      ...(params.surface && { surface: params.surface }),
     };
     logger.info(Event.VESPA_SEARCH_CLICK, event as unknown as Record<string, unknown>);
     // Record metrics - increment click counter
@@ -183,7 +196,7 @@ class SearchMetricsService {
     dwellTimeMs: number;
     endReason: 'click' | 'abandon' | 'clear' | 'blur';
     totalSessionDurationMs: number;
-    querySource: 'KEYBOARD' | 'CLIPBOARD_PASTE';
+    querySource: 'KEYBOARD' | 'CLIPBOARD_PASTE' | 'RECENT';
     isModified: boolean;
     tab: TabType;
   }): void {

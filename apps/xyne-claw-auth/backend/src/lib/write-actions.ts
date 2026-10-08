@@ -21,6 +21,7 @@ import { errMsg } from "./errors.js";
 import { decrypt, encrypt } from "../crypto.js";
 import { CONFIG } from "../config.js";
 import { GATEWAY_KEY_PREFIX, parseGatewayCatalogSource } from "../mcpgateway/key-format.js";
+import { AMBIENT_USER_CREDENTIAL_SERVER_TYPES } from "./credentials-loader.js";
 
 const DEFAULT_GATEWAY_TENANT = process.env.ALLOWED_TENANTS
   ?.split(",")
@@ -134,6 +135,28 @@ export async function executeWriteAction(action: SignedWriteAction): Promise<Wri
       return { ok: true, content: String(result) };
     }
 
+    // 2b-i. Agent-authoring writes (agents, subagents, MCP servers) — no MCP
+    // connector; applied directly, mirroring routes/flow-action.ts.
+    {
+      const { AGENT_TOOL_SLUGS, applyAgentToolAction } = await import("./agent-tools-apply.js");
+      if (serverType === "agent-tools" && AGENT_TOOL_SLUGS.has(tool)) {
+        const outcome = await applyAgentToolAction(tool, params, userId);
+        if (!outcome.ok) return { ok: false, content: "", error: outcome.error };
+        return { ok: true, content: outcome.note ? `${outcome.message}\n\n${outcome.note}` : outcome.message };
+      }
+    }
+
+    // 2b-ii. create-skill — also no MCP connector. Without this it fell through
+    // to 2c and failed with "No adapter for server type: agent-tools".
+    {
+      const { applyCreateSkill, isCreateSkillAction } = await import("./skill-apply.js");
+      if (isCreateSkillAction(serverType, tool)) {
+        const outcome = await applyCreateSkill(params, userId);
+        if (outcome.status !== "created") return { ok: false, content: "", error: outcome.error };
+        return { ok: true, content: outcome.message };
+      }
+    }
+
     // 2c. MCP-based adapters (xyne-spaces, bitbucket, ardra-finops, github, ...)
     // Also covers dynamic DB-stored connectors (e.g. cloudinary, airtable)
     const { callTool } = await import("../mcp/runner.js");
@@ -142,25 +165,23 @@ export async function executeWriteAction(action: SignedWriteAction): Promise<Wri
       return { ok: false, content: "", error: `No adapter for server type: ${serverType}` };
     }
 
-    // For xyne-spaces: resolve credentials from the Spaces DB directly, same as
-    // the MCP runner does in getOrCreateSession(). The userMcpConnection table
-    // may not have a row (user hasn't gone through dashboard connection flow),
-    // but their Spaces session still exists in workflow.user_sessions. Without
-    // this, all write-action approvals fail with "No xyne-spaces connection".
     let credentials: Record<string, unknown>;
-    if (serverType === "xyne-spaces") {
+    if (AMBIENT_USER_CREDENTIAL_SERVER_TYPES.has(serverType)) {
       const { getSpacesAuthForUser } = await import("../lib/spaces-db.js");
       const live = await getSpacesAuthForUser(userId, "write-action");
       if (live) {
         credentials = {
-          url: CONFIG.spacesAppUrl,
+          // Server-to-server call from the claw-auth pod: use the in-cluster
+          // Spaces URL, same as credentials-loader (flow-action path). The
+          // public spacesAppUrl is not reachable from here ("fetch failed").
+          url: CONFIG.spacesInternalUrl,
           token: live.token,
           sessionId: live.sessionId,
           workspaceId: live.workspaceId,
           userId,
         };
       } else {
-        return { ok: false, content: "", error: `No xyne-spaces connection for this user.` };
+        return { ok: false, content: "", error: `No ${serverType} connection for this user.` };
       }
     } else {
       const connection = await prisma.userMcpConnection.findFirst({

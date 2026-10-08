@@ -51,6 +51,10 @@ export interface PrCardInput {
   desc?: string;
   /** Ticket/issue link (distinct from the PR `url`). */
   detailsUrl?: string;
+  /** Branch the PR merges INTO (github `base.ref`, bitbucket `destination.branch.name`). */
+  targetBranch?: string | undefined;
+  /** Branch the PR merges FROM (github `head.ref`, bitbucket `source.branch.name`). */
+  sourceBranch?: string | undefined;
 }
 
 /** The bits of PR identity used to key the (stable) screenId + the emitter's

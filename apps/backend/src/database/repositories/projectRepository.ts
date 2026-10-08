@@ -2,8 +2,8 @@ import { SDLC_MEMBERSHIP_RELATION } from '@xyne/shared';
 import { BaseRepository } from './base';
 import { Project } from '@prisma/client';
 import { QueryOptions, PaginationOptions, PaginatedResult } from '@/types/database';
-import { sanitizeProjectCode, ProjectType, TicketStatusV2 } from '@xyne/shared';
-import { createDefaultTicketNamespace } from '@/utils/ticketNamespaceUtils';
+import { sanitizeProjectCode, ProjectType } from '@xyne/shared';
+import { createTx } from '@/bypassAcl/transactions/projectRepository';
 //import { queueProjectIngestion } from '@/queues/vespaQueue';
 
 export interface CreateProjectInput {
@@ -46,77 +46,8 @@ export class ProjectRepository extends BaseRepository<Project, CreateProjectInpu
     // Validate project code
     await this.validateProjectCode(data.code, undefined, data.workspaceId);
 
-    // Use transaction to create project, its default namespace and default board together
-    const result =  await this.db.$transaction(async (tx) => {
-      const project = await tx.project.create({
-        data: {
-          name: data.name,
-          description: data.description,
-          createdBy: data.createdBy,
-          code: data.code,
-          type: ProjectType.DEFAULT,
-          workspace: { connect: { id: data.workspaceId } },
-        }
-      });
-
-      // Automatically create a default board for the project
-      const board = await tx.board.create({
-        data: {
-          name: data.name,
-          projectId: project.id,
-          workspaceId: data.workspaceId,
-          createdBy: data.createdBy,
-        }
-      });
-
-      // Create default stages for the board with proper status mappings
-      await tx.stage.createMany({
-        data: [
-          {
-            name: 'To Do',
-            sequenceNumber: 1,
-            boardId: board.id,
-            workspaceId: board.workspaceId,
-            createdBy: data.createdBy,
-            defaultTicketStatusV2: TicketStatusV2.TODO,
-          },
-          {
-            name: 'In Progress',
-            sequenceNumber: 2,
-            boardId: board.id,
-            workspaceId: board.workspaceId,
-            createdBy: data.createdBy,
-            defaultTicketStatusV2: TicketStatusV2.STARTED,
-          },
-          {
-            name: 'Review',
-            sequenceNumber: 3,
-            boardId: board.id,
-            workspaceId: board.workspaceId,
-            createdBy: data.createdBy,
-            defaultTicketStatusV2: TicketStatusV2.STARTED,
-          },
-          {
-            name: 'Completed',
-            sequenceNumber: 4,
-            boardId: board.id,
-            workspaceId: board.workspaceId,
-            createdBy: data.createdBy,
-            defaultTicketStatusV2: TicketStatusV2.COMPLETED,
-          },
-        ]
-      });
-
-      // Seed the project's default namespace and link its board(s)
-      const namespace = await createDefaultTicketNamespace(tx, {
-        workspaceId: data.workspaceId,
-        projectId: project.id,
-        code: data.code,
-        createdBy: data.createdBy,
-      });
-
-      return { ...project, defaultTicketNamespaceId: namespace?.id ?? null };
-    });
+    // Use transaction to create project and default board together
+    const result =  await createTx(this, data);
 
 
     return result;
@@ -316,3 +247,4 @@ export class ProjectRepository extends BaseRepository<Project, CreateProjectInpu
     return project?.id ?? null;
   }
 }
+

@@ -14,6 +14,7 @@ import { UserRepository } from '@/database/repositories/users';
 import type { User } from '@prisma/client';
 import { ProjectRepository } from '@/database/repositories/projectRepository';
 import { AppError } from '@/middleware/errorHandler';
+import { websocketService } from '@/services/websocketService';
 import { logger } from '@/utils/logger';
 
 export interface AddGroupDmParticipantsParams {
@@ -108,7 +109,19 @@ export class GroupDmParticipantService {
     }
 
     const newUsers = await this.loadActiveUsers(newUserIds, workspaceId);
-    const allParticipantIds = [...new Set([...currentUserIds, ...newUserIds])].sort();
+
+    // Existing members are carried into the destination group, so they must be
+    // ACTIVE too. Deactivation does not remove channel participant rows, so the
+    // source DM can still list a deactivated user.
+    const activeExistingIds = await this.filterActiveUserIds(currentUserIds, workspaceId);
+    const allParticipantIds = [...new Set([...activeExistingIds, ...newUserIds])].sort();
+
+    if (allParticipantIds.length < 3) {
+      throw new AppError(
+        'Cannot create a group with a deactivated member. Start a new conversation instead.',
+        400,
+      );
+    }
 
     if (allParticipantIds.length > MAX_DM_PARTICIPANTS) {
       throw new AppError(
@@ -237,6 +250,15 @@ export class GroupDmParticipantService {
     }
   }
 
+  private async filterActiveUserIds(userIds: string[], workspaceId: string): Promise<string[]> {
+    const active: string[] = [];
+    for (const userId of userIds) {
+      const user = await this.userRepository.findByIdInWorkspace(userId, workspaceId);
+      if (user && user.status === 'ACTIVE') active.push(userId);
+    }
+    return active;
+  }
+
   private async loadActiveUsers(
     userIds: string[],
     workspaceId: string,
@@ -301,6 +323,13 @@ export class GroupDmParticipantService {
       targetChannelId,
       cutoff,
     );
+
+    // Refresh label unread counts for both channels once the move is done (moved out of the repository so the
+    // data layer doesn't depend on websocketService).
+    if (result.moved > 0) {
+      websocketService.broadcastLabelUnreadCountsUpdate(sourceChannelId);
+      websocketService.broadcastLabelUnreadCountsUpdate(targetChannelId);
+    }
 
     logger.info('group_dm_history_moved', {
       sourceChannelId,

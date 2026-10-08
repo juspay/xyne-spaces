@@ -25,6 +25,7 @@ interface CompactActionsMenuProps {
   contentAlign?: 'start' | 'center' | 'end';
   /** Force the dark theme's tokens on the (portaled) menu content, e.g. for in-call surfaces. */
   forceDarkTheme?: boolean;
+  onCloseAutoFocus?: (event: Event) => void;
 }
 
 const CompactActionsMenu = ({
@@ -32,6 +33,7 @@ const CompactActionsMenu = ({
   triggerClassName = 'p-2 border border-[#E4E6E7] rounded-lg h-8 w-8',
   contentAlign = 'end',
   forceDarkTheme = false,
+  onCloseAutoFocus,
 }: CompactActionsMenuProps): ReactElement => {
   const visibleItems = items.filter(item => item.visible !== false);
 
@@ -45,6 +47,7 @@ const CompactActionsMenu = ({
       <DropdownMenuContent
         align={contentAlign}
         className='min-w-[14rem]'
+        {...(onCloseAutoFocus ? { onCloseAutoFocus } : {})}
         {...(forceDarkTheme ? { 'data-theme': 'midnight' } : {})}
       >
         {visibleItems.map((item, index) => {

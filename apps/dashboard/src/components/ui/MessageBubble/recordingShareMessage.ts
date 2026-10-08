@@ -1,5 +1,5 @@
 import { useCallback, useMemo } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useStableNavigate } from '../../../hooks/useStableRouter';
 import { queries } from '../../../zero/queries';
 import { useQuery } from '../../../hooks/useQuery';
 
@@ -71,7 +71,7 @@ export interface ResolvedRecordingShareMessage extends ParsedRecordingShareMessa
 export const useRecordingShareMessage = (
   content: string | null | undefined,
 ): ResolvedRecordingShareMessage | null => {
-  const navigate = useNavigate();
+  const navigate = useStableNavigate();
   const parsed = useMemo(() => (content ? parseRecordingShareMessage(content) : null), [content]);
   const [recording] = useQuery(
     queries.oatsRecordingByExternalId({ callId: parsed?.recordingId ?? '' }),

@@ -1,11 +1,18 @@
 import { ReactElement, useMemo, useState } from 'react';
-import { Edit2, Copy, Check, Rocket, CornerDownRight } from 'lucide-react';
+import { Edit2, Copy, Check, History, Rocket, CornerDownRight } from 'lucide-react';
 import { BoardType } from '@xyne/shared';
 import { EmptyState } from '../EmptyState';
 import { DelayedSpinner } from '../../ui/DelayedSpinner';
 import { Button } from '../../ui/Button';
 import { Badge } from '../../ui/Badge';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '../../ui/dropdown-menu';
 import { copyTextToClipboard } from '../../../utils/clipboardUtils';
+import { formatDateNumeric } from '../../../utils/dateUtils';
 import { toast } from 'sonner';
 import { getBoardEditLabel } from '../BoardCard';
 import type { BoardWithStages } from '../BoardCard';
@@ -31,6 +38,7 @@ interface BoardsTableProps {
   onEdit: (board: BoardWithStages) => void;
   onClone?: (board: BoardWithStages) => void;
   onCopyConfig?: (board: BoardWithStages) => void;
+  onHistory?: (board: BoardWithStages) => void;
   applicationBoardIds?: Set<string>;
   // Map app-board-id → Application row; used to detect app boards, show the app
   // name, and group them under mainReleaseBoardId. Omitted = flat table (old behaviour).
@@ -46,7 +54,88 @@ interface BoardsTableProps {
   // True while the boards query is still resolving. Distinguishes
   // "still loading" from "genuinely no boards" so we don't flash the empty state.
   loading?: boolean;
+  showTypeColumn?: boolean;
 }
+
+interface BoardActionsDropdownProps {
+  board: BoardWithStages;
+  editLabel: string;
+  onEdit: (board: BoardWithStages) => void;
+  onClone?: ((board: BoardWithStages) => void) | undefined;
+  onCopyConfig?: ((board: BoardWithStages) => void) | undefined;
+  onHistory?: ((board: BoardWithStages) => void) | undefined;
+}
+
+/** Single edit-style icon trigger opening the board's action menu (Edit / Clone / Copy config / History). */
+const BoardActionsDropdown = ({
+  board,
+  editLabel,
+  onEdit,
+  onClone,
+  onCopyConfig,
+  onHistory,
+}: BoardActionsDropdownProps): ReactElement => (
+  <DropdownMenu>
+    <DropdownMenuTrigger asChild>
+      <Button
+        variant='secondary'
+        size='iconSm'
+        title='Board actions'
+        data-testid='board-actions-button'
+        data-track-category='Board'
+        data-track-name='Board_Actions_Dropdown_Trigger'
+        data-track-metadata={JSON.stringify({ boardId: board.id, boardName: board.name })}
+      >
+        <Edit2 size={14} />
+      </Button>
+    </DropdownMenuTrigger>
+    <DropdownMenuContent align='end' className='w-44'>
+      <DropdownMenuItem
+        onClick={() => onEdit(board)}
+        data-track-category='Board'
+        data-track-name='Edit_Board_Table'
+        data-track-metadata={JSON.stringify({ boardId: board.id, boardName: board.name })}
+      >
+        <Edit2 size={14} />
+        {editLabel}
+      </DropdownMenuItem>
+      {board.boardType === BoardType.FLOW && onClone && (
+        <DropdownMenuItem
+          onClick={() => onClone(board)}
+          data-track-category='Board'
+          data-track-name='Clone_Flow_Board_Table'
+          data-track-metadata={JSON.stringify({ boardId: board.id, boardName: board.name })}
+        >
+          <Copy size={14} />
+          Clone
+        </DropdownMenuItem>
+      )}
+      {onCopyConfig && (
+        <DropdownMenuItem
+          onClick={() => onCopyConfig(board)}
+          data-track-category='Board'
+          data-track-name='Copy_Board_Config_Table'
+          data-track-metadata={JSON.stringify({ boardId: board.id, boardName: board.name })}
+        >
+          <Copy size={14} />
+          Copy config
+        </DropdownMenuItem>
+      )}
+      {onHistory && (
+        <DropdownMenuItem
+          onClick={() => onHistory(board)}
+          data-testid='board-history-button'
+          data-track-category='Board'
+          data-track-name='Board_History_Table'
+          data-track-metadata={JSON.stringify({ boardId: board.id, boardName: board.name })}
+        >
+          <History size={14} />
+          History
+        </DropdownMenuItem>
+      )}
+    </DropdownMenuContent>
+  </DropdownMenu>
+);
 
 type RowKind =
   | { type: 'standalone'; board: BoardWithStages }
@@ -59,12 +148,14 @@ export const BoardsTable = ({
   onEdit,
   onClone,
   onCopyConfig,
+  onHistory,
   applicationBoardIds,
   applicationByBoardId,
   namespaceCodeByBoardId,
   onBoardClick,
   onWorkflowFields,
   loading = false,
+  showTypeColumn = true,
 }: BoardsTableProps): ReactElement => {
   const [copiedBoardId, setCopiedBoardId] = useState<string | null>(null);
 
@@ -184,9 +275,11 @@ export const BoardsTable = ({
             <th className='px-6 py-3 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider'>
               Board Name
             </th>
-            <th className='px-6 py-3 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider'>
-              Type
-            </th>
+            {showTypeColumn && (
+              <th className='px-6 py-3 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider'>
+                Type
+              </th>
+            )}
             <th className='px-6 py-3 text-left text-xs font-medium text-muted-foreground uppercase tracking-wider'>
               Board ID
             </th>
@@ -221,17 +314,19 @@ export const BoardsTable = ({
                       </span>
                     </div>
                   </td>
-                  <td className='px-6 py-3 whitespace-nowrap'>
-                    <span
-                      className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-[11px] font-medium ${
-                        mainBoard.boardType === BoardType.FLOW
-                          ? 'bg-[#6276be]/10 text-[#6276be]'
-                          : 'bg-muted text-muted-foreground'
-                      }`}
-                    >
-                      {BOARD_TYPE_LABELS[mainBoard.boardType] ?? mainBoard.boardType}
-                    </span>
-                  </td>
+                  {showTypeColumn && (
+                    <td className='px-6 py-3 whitespace-nowrap'>
+                      <span
+                        className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-[11px] font-medium ${
+                          mainBoard.boardType === BoardType.FLOW
+                            ? 'bg-[#6276be]/10 text-[#6276be]'
+                            : 'bg-muted text-muted-foreground'
+                        }`}
+                      >
+                        {BOARD_TYPE_LABELS[mainBoard.boardType] ?? mainBoard.boardType}
+                      </span>
+                    </td>
+                  )}
                   <td className='px-6 py-3 whitespace-nowrap'>
                     <div className='flex items-center gap-1'>
                       <code className='text-xs bg-muted px-1.5 py-0.5 rounded font-mono truncate max-w-[140px] inline-block'>
@@ -252,7 +347,7 @@ export const BoardsTable = ({
                   </td>
                   <td className='px-6 py-3 whitespace-nowrap'>
                     <div className='text-sm text-muted-foreground'>
-                      {new Date(mainBoard.createdAt).toLocaleDateString()}
+                      {formatDateNumeric(mainBoard.createdAt)}
                     </div>
                   </td>
                   <td
@@ -263,20 +358,12 @@ export const BoardsTable = ({
                     data-track-metadata={JSON.stringify({ boardId: mainBoard.id })}
                   >
                     <div className='flex items-center justify-end gap-2'>
-                      <Button
-                        variant='secondary'
-                        onClick={() => handleBoardEdit(mainBoard)}
-                        data-testid='edit-board-button'
-                        data-track-category='Board'
-                        data-track-name='Edit_Board_Table'
-                        data-track-metadata={JSON.stringify({
-                          boardId: mainBoard.id,
-                          boardName: mainBoard.name,
-                        })}
-                      >
-                        <Edit2 size={14} />
-                        {editBoardLabel(mainBoard)}
-                      </Button>
+                      <BoardActionsDropdown
+                        board={mainBoard}
+                        editLabel={editBoardLabel(mainBoard)}
+                        onEdit={handleBoardEdit}
+                        onHistory={onHistory}
+                      />
                     </div>
                   </td>
                 </tr>
@@ -286,7 +373,7 @@ export const BoardsTable = ({
             if (row.type === 'orphanReleaseGroupHeader') {
               return (
                 <tr key={`orphan-${row.mainBoardId}`} className='bg-muted/40'>
-                  <td className='px-6 py-3 whitespace-nowrap' colSpan={5}>
+                  <td className='px-6 py-3 whitespace-nowrap' colSpan={showTypeColumn ? 5 : 4}>
                     <div className='flex items-center gap-2'>
                       <Rocket size={14} className='text-muted-foreground' />
                       <span className='text-sm font-medium text-muted-foreground italic'>
@@ -319,17 +406,19 @@ export const BoardsTable = ({
                       </span>
                     </div>
                   </td>
-                  <td className='px-6 py-4 whitespace-nowrap'>
-                    <span
-                      className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-[11px] font-medium ${
-                        board.boardType === BoardType.FLOW
-                          ? 'bg-[#6276be]/10 text-[#6276be]'
-                          : 'bg-muted text-muted-foreground'
-                      }`}
-                    >
-                      {BOARD_TYPE_LABELS[board.boardType] ?? board.boardType}
-                    </span>
-                  </td>
+                  {showTypeColumn && (
+                    <td className='px-6 py-4 whitespace-nowrap'>
+                      <span
+                        className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-[11px] font-medium ${
+                          board.boardType === BoardType.FLOW
+                            ? 'bg-[#6276be]/10 text-[#6276be]'
+                            : 'bg-muted text-muted-foreground'
+                        }`}
+                      >
+                        {BOARD_TYPE_LABELS[board.boardType] ?? board.boardType}
+                      </span>
+                    </td>
+                  )}
                   <td className='px-6 py-4 whitespace-nowrap'>
                     <div className='flex items-center gap-1'>
                       <code className='text-xs bg-muted px-1.5 py-0.5 rounded font-mono truncate max-w-[140px] inline-block'>
@@ -350,7 +439,7 @@ export const BoardsTable = ({
                   </td>
                   <td className='px-6 py-4 whitespace-nowrap'>
                     <div className='text-sm text-muted-foreground'>
-                      {new Date(board.createdAt).toLocaleDateString()}
+                      {formatDateNumeric(board.createdAt)}
                     </div>
                   </td>
                   <td
@@ -361,20 +450,12 @@ export const BoardsTable = ({
                     data-track-metadata={JSON.stringify({ boardId: board.id })}
                   >
                     <div className='flex items-center justify-end gap-2'>
-                      <Button
-                        variant='secondary'
-                        onClick={() => handleBoardEdit(board)}
-                        data-testid='edit-board-button'
-                        data-track-category='Board'
-                        data-track-name='Edit_Board_Table'
-                        data-track-metadata={JSON.stringify({
-                          boardId: board.id,
-                          boardName: board.name,
-                        })}
-                      >
-                        <Edit2 size={14} />
-                        {editBoardLabel(board)}
-                      </Button>
+                      <BoardActionsDropdown
+                        board={board}
+                        editLabel={editBoardLabel(board)}
+                        onEdit={handleBoardEdit}
+                        onHistory={onHistory}
+                      />
                     </div>
                   </td>
                 </tr>
@@ -401,17 +482,19 @@ export const BoardsTable = ({
                     )}
                   </div>
                 </td>
-                <td className='px-6 py-4 whitespace-nowrap'>
-                  <span
-                    className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-[11px] font-medium ${
-                      board.boardType === BoardType.FLOW
-                        ? 'bg-[#6276be]/10 text-[#6276be]'
-                        : 'bg-muted text-muted-foreground'
-                    }`}
-                  >
-                    {BOARD_TYPE_LABELS[board.boardType] ?? board.boardType}
-                  </span>
-                </td>
+                {showTypeColumn && (
+                  <td className='px-6 py-4 whitespace-nowrap'>
+                    <span
+                      className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-[11px] font-medium ${
+                        board.boardType === BoardType.FLOW
+                          ? 'bg-[#6276be]/10 text-[#6276be]'
+                          : 'bg-muted text-muted-foreground'
+                      }`}
+                    >
+                      {BOARD_TYPE_LABELS[board.boardType] ?? board.boardType}
+                    </span>
+                  </td>
+                )}
                 <td className='px-6 py-4 whitespace-nowrap'>
                   <div className='flex items-center gap-1'>
                     <code className='text-xs bg-muted px-1.5 py-0.5 rounded font-mono truncate max-w-[140px] inline-block'>
@@ -432,7 +515,7 @@ export const BoardsTable = ({
                 </td>
                 <td className='px-6 py-4 whitespace-nowrap'>
                   <div className='text-sm text-muted-foreground'>
-                    {new Date(board.createdAt).toLocaleDateString()}
+                    {formatDateNumeric(board.createdAt)}
                   </div>
                 </td>
                 <td className='px-6 py-4 whitespace-nowrap text-right text-sm font-medium'>
@@ -450,51 +533,14 @@ export const BoardsTable = ({
                     data-track-name='Board_Actions_Container'
                     data-track-metadata={JSON.stringify({ boardId: board.id })}
                   >
-                    {board.boardType === BoardType.FLOW && onClone && (
-                      <Button
-                        variant='secondary'
-                        onClick={() => onClone(board)}
-                        data-track-category='Board'
-                        data-track-name='Clone_Flow_Board_Table'
-                        data-track-metadata={JSON.stringify({
-                          boardId: board.id,
-                          boardName: board.name,
-                        })}
-                      >
-                        <Copy size={14} />
-                        Clone
-                      </Button>
-                    )}
-                    <Button
-                      variant='secondary'
-                      onClick={() => handleBoardEdit(board)}
-                      data-testid='edit-board-button'
-                      data-track-category='Board'
-                      data-track-name='Edit_Board_Table'
-                      data-track-metadata={JSON.stringify({
-                        boardId: board.id,
-                        boardName: board.name,
-                      })}
-                    >
-                      <Edit2 size={14} />
-                      {editBoardLabel(board)}
-                    </Button>
-                    {onCopyConfig && (
-                      <Button
-                        variant='secondary'
-                        onClick={() => onCopyConfig(board)}
-                        data-testid='copy-board-config-button'
-                        data-track-category='Board'
-                        data-track-name='Copy_Board_Config_Table'
-                        data-track-metadata={JSON.stringify({
-                          boardId: board.id,
-                          boardName: board.name,
-                        })}
-                      >
-                        <Copy size={14} />
-                        Copy config
-                      </Button>
-                    )}
+                    <BoardActionsDropdown
+                      board={board}
+                      editLabel={editBoardLabel(board)}
+                      onEdit={handleBoardEdit}
+                      onClone={onClone}
+                      onCopyConfig={onCopyConfig}
+                      onHistory={onHistory}
+                    />
                   </div>
                 </td>
               </tr>

@@ -21,6 +21,7 @@ import { useAuth } from '../../../hooks/useAuth';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useChannelByName } from '../../../hooks/useChannels';
 import Avatar from '../../ui/Avatar/Avatar';
+import { RemoveProfilePictureButton } from '../../ui/UserProfile/RemoveProfilePictureButton';
 import { StatusIndicator } from '../../ui/StatusIndicator';
 import { Button } from '../../ui/Button/Button';
 import { cn } from '../../../utils/classNames';
@@ -29,6 +30,7 @@ import { useSelf } from '../../../hooks/useUsers';
 import { mutators } from '../../../zero/mutators';
 import { v4 as uuidv4 } from 'uuid';
 import { useUserPresence } from '../../../hooks/usePresence';
+import { notificationsArePaused } from '../../../utils/notificationsPause';
 import { SelectedStatusData } from './SetStatusView';
 
 type ViewType = 'default' | 'status-suggestions' | 'status-edit';
@@ -105,9 +107,10 @@ const ProfileView = ({
   }, [isPresenceDropdownOpen]);
 
   const notificationsPausedUntil = user?.notificationsPausedUntil;
-  const isNotificationsPaused = useMemo(() => {
-    return notificationsPausedUntil ? notificationsPausedUntil > Date.now() : false;
-  }, [notificationsPausedUntil]);
+  const isNotificationsPaused = useMemo(
+    () => notificationsArePaused(notificationsPausedUntil),
+    [notificationsPausedUntil],
+  );
 
   const pauseOptions = useMemo(
     () => [
@@ -231,6 +234,10 @@ const ProfileView = ({
               }}
               className='hidden'
               disabled={isUploadingPicture}
+            />
+            <RemoveProfilePictureButton
+              disabled={isUploadingPicture}
+              className='top-0 right-0 size-4 [&_svg]:size-2.5'
             />
           </div>
         </div>

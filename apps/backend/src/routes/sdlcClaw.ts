@@ -1,16 +1,22 @@
 import { Router, type NextFunction, type Request, type Response } from 'express';
 import {
   UserType,
-  createSdlcLinkSchema,
-  createSdlcClawArtifactSchema,
+  createSdlcClawLinkSchema,
+  listSdlcEntityLinksSchema,
+  sdlcRepoIds,
+  createSdlcClawDocumentSchema,
   createSdlcTrackSchema,
   createSdlcArtifactTypeSchema,
   renameSdlcArtifactTypeSchema,
-  updateSdlcBaselineDraftSchema,
   updateSdlcClawArtifactSchema,
+  editSdlcClawArtifactSectionSchema,
+  moveSdlcClawArtifactSchema,
+  archiveSdlcClawArtifactSchema,
+  createSdlcClawTrackFolderSchema,
 } from '@xyne/shared';
+import { ZodError } from 'zod';
 import { DatabaseClient } from '@/database/client';
-import { AppError } from '@/middleware/errorHandler';
+import { AppError, zodErrorToAppError } from '@/middleware/errorHandler';
 import { SdlcHubService, type SdlcActor } from '@/sdlc';
 
 const router = Router();
@@ -20,7 +26,9 @@ const sdlcHub = new SdlcHubService();
 function route(
   handler: (req: Request, res: Response) => Promise<void>,
 ): (req: Request, res: Response, next: NextFunction) => void {
-  return (req, res, next) => void handler(req, res).catch(next);
+  // A bad agent input is the caller's mistake: a 400 the model can read, not a 500.
+  return (req, res, next) =>
+    void handler(req, res).catch(error => next(error instanceof ZodError ? zodErrorToAppError(error) : error));
 }
 
 function channelIdFromBody(req: Request): string | undefined {
@@ -36,7 +44,7 @@ async function actorFromRequest(req: Request): Promise<SdlcActor> {
     where: { id: userId },
     select: { userType: true, workspaceId: true },
   });
-  if (user?.userType !== UserType.APP) return { userId, workspaceId };
+  if (user?.userType !== UserType.APP && user?.userType !== UserType.AGENT) return { userId, workspaceId };
 
   const actingUserHeader = req.headers['x-xyne-acting-user-id'];
   const actingUserId = typeof actingUserHeader === 'string' ? actingUserHeader.trim() : '';
@@ -47,7 +55,7 @@ async function actorFromRequest(req: Request): Promise<SdlcActor> {
     where: {
       id: actingUserId,
       workspaceId,
-      userType: { not: UserType.APP },
+      userType: { notIn: [UserType.APP, UserType.AGENT] },
     },
     select: { id: true },
   });
@@ -60,30 +68,51 @@ async function actorFromRequest(req: Request): Promise<SdlcActor> {
 router.post(
   '/links',
   route(async (req, res) => {
-    const input = createSdlcLinkSchema.extend({ repoId: createSdlcLinkSchema.shape.sourceId }).parse(
-      req.body,
-    );
-    const { repoId, ...linkInput } = input;
+    const { repoId, repoIds, channelId, ...linkInput } = createSdlcClawLinkSchema.parse(req.body);
+    const namedRepoId = sdlcRepoIds({ repoId, repoIds })[0] ?? null;
+    if (!channelId && !namedRepoId) {
+      throw new AppError('channelId is required', 400);
+    }
     const link = await sdlcHub.linkContext(
       await actorFromRequest(req),
-      repoId,
+      channelId ? null : namedRepoId,
       linkInput,
-      channelIdFromBody(req)
+      channelId
     );
     res.status(201).json({ success: true, link });
   }),
 );
 
 router.post(
-  '/tracks/list',
+  '/entity-links/list',
   route(async (req, res) => {
-    const repoId = typeof req.body?.repoId === 'string' ? req.body.repoId : '';
-    if (!repoId) throw new AppError('repoId is required', 400);
-    const tracks = await sdlcHub.listTracks(
+    const input = listSdlcEntityLinksSchema.parse(req.body);
+    const links = await sdlcHub.listEntityLinks(await actorFromRequest(req), input);
+    res.status(200).json({ success: true, links });
+  }),
+);
+
+router.post(
+  '/repositories/list',
+  route(async (req, res) => {
+    const query = typeof req.body?.query === 'string' ? req.body.query : '';
+    const requestedLimit = Number(req.body?.limit);
+    const repositories = await sdlcHub.listRepositoryRunContexts(
       await actorFromRequest(req),
-      repoId,
+      query,
+      Number.isFinite(requestedLimit) ? requestedLimit : 20,
       channelIdFromBody(req)
     );
+    res.status(200).json({ success: true, repositories });
+  }),
+);
+
+router.post(
+  '/tracks/list',
+  route(async (req, res) => {
+    const channelId = channelIdFromBody(req);
+    if (!channelId) throw new AppError('channelId is required', 400);
+    const tracks = await sdlcHub.listTracks(await actorFromRequest(req), channelId);
     res.status(200).json({ success: true, tracks });
   }),
 );
@@ -98,15 +127,20 @@ router.post(
 );
 
 router.post(
+  '/track-folders',
+  route(async (req, res) => {
+    const input = createSdlcClawTrackFolderSchema.parse(req.body);
+    const folder = await sdlcHub.createTrackFolderFromClaw(await actorFromRequest(req), input);
+    res.status(201).json({ success: true, folder });
+  }),
+);
+
+router.post(
   '/artifact-types/list',
   route(async (req, res) => {
-    const repoId = typeof req.body?.repoId === 'string' ? req.body.repoId : '';
-    if (!repoId) throw new AppError('repoId is required', 400);
-    const artifactTypes = await sdlcHub.listArtifactTypes(
-      await actorFromRequest(req),
-      repoId,
-      channelIdFromBody(req)
-    );
+    const channelId = channelIdFromBody(req);
+    if (!channelId) throw new AppError('channelId is required', 400);
+    const artifactTypes = await sdlcHub.listArtifactTypes(await actorFromRequest(req), channelId);
     res.status(200).json({ success: true, artifactTypes });
   }),
 );
@@ -117,9 +151,8 @@ router.post(
     const input = createSdlcArtifactTypeSchema.parse(req.body);
     const artifactType = await sdlcHub.createArtifactType(
       await actorFromRequest(req),
-      input.repoId,
-      input.name,
-      input.channelId
+      input.channelId,
+      input.name
     );
     res.status(201).json({ success: true, artifactType });
   }),
@@ -134,7 +167,7 @@ router.patch(
     });
     const artifactType = await sdlcHub.renameArtifactType(
       await actorFromRequest(req),
-      input.repoId,
+      input.channelId,
       input.folderId,
       input.name
     );
@@ -145,8 +178,12 @@ router.patch(
 router.post(
   '/artifacts',
   route(async (req, res) => {
-    const input = createSdlcClawArtifactSchema.parse(req.body);
-    const artifact = await sdlcHub.createArtifactFromClaw(await actorFromRequest(req), input);
+    const input = createSdlcClawDocumentSchema.parse(req.body);
+    const actor = await actorFromRequest(req);
+    const artifact =
+      'artifactType' in input
+        ? await sdlcHub.createWikiPage(actor, input)
+        : await sdlcHub.createArtifactFromClaw(actor, input);
     res.status(201).json({ success: true, artifact });
   }),
 );
@@ -161,13 +198,28 @@ router.post(
 );
 
 router.post(
-  '/baseline-drafts',
+  '/artifacts/section',
   route(async (req, res) => {
-    const input = updateSdlcBaselineDraftSchema.parse(req.body);
-    const artifact = await sdlcHub.updateBaselineDraftFromClaw(
-      await actorFromRequest(req),
-      input
-    );
+    const input = editSdlcClawArtifactSectionSchema.parse(req.body);
+    const artifact = await sdlcHub.editArtifactSectionFromClaw(await actorFromRequest(req), input);
+    res.status(200).json({ success: true, artifact });
+  }),
+);
+
+router.post(
+  '/artifacts/move',
+  route(async (req, res) => {
+    const input = moveSdlcClawArtifactSchema.parse(req.body);
+    const artifact = await sdlcHub.moveArtifactFromClaw(await actorFromRequest(req), input);
+    res.status(200).json({ success: true, artifact });
+  }),
+);
+
+router.post(
+  '/artifacts/archive',
+  route(async (req, res) => {
+    const input = archiveSdlcClawArtifactSchema.parse(req.body);
+    const artifact = await sdlcHub.archiveArtifactFromClaw(await actorFromRequest(req), input);
     res.status(200).json({ success: true, artifact });
   }),
 );

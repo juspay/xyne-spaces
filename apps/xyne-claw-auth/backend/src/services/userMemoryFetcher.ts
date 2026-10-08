@@ -28,6 +28,7 @@
 
 import type { UserMemoryRecord } from "xyne-claw-shared";
 import { errMsg } from "../lib/errors.js";
+import { spacesUserIdForClawUser } from "../lib/users-jit.js";
 import {
   interact,
   search,
@@ -191,6 +192,18 @@ async function vespaQuery(
   }
 }
 
+/**
+ * Vespa sender/participant and canvas createdBy/participants filters are keyed
+ * by the RAW workspace-scoped Spaces user id, while this pipeline's callers
+ * (digitalTwinDaily, backfill worker, preview routes) pass the canonical Claw
+ * id. Translate once per fetcher entry, or every filter silently matches
+ * nothing and the twin ends up with an empty memory corpus. Fail-open: on a
+ * lookup hiccup keep the input id.
+ */
+async function toSpacesUserId(userId: string, workspaceId?: string | null): Promise<string> {
+  return spacesUserIdForClawUser(userId, workspaceId).catch(() => userId);
+}
+
 // ─── Messages ───────────────────────────────────────────────────────────
 
 export async function fetchUserMessages(
@@ -198,6 +211,7 @@ export async function fetchUserMessages(
   window: { from: Date; to: Date },
   limit = MAX_RECORDS_PER_FETCH,
 ): Promise<UserMemoryRecord[]> {
+  const spacesUserId = await toSpacesUserId(userId);
   // `after`/`before` name a whole DAY and exclude it: after → that day's
   // 23:59:59.999, before → its 00:00:00.000. A single-day window therefore asks
   // for `> 23:59 AND < 00:00`, which nothing satisfies. Widen by a day each side
@@ -205,19 +219,19 @@ export async function fetchUserMessages(
   const DAY = 24 * 3600 * 1000;
   const hits = await vespaQuery(userId, {
     type: "messages",
-    from: userId,                      // senderId filter (vespaSearch maps this for messages)
+    from: spacesUserId,                // senderId filter (vespaSearch maps this for messages)
     after: toIsoDate(new Date(window.from.getTime() - DAY)),
     before: toIsoDate(new Date(window.to.getTime() + DAY)),
     limit: String(limit),
   });
 
   return hits
-    // Defense-in-depth: even though `from=userId` filters server-side and
+    // Defense-in-depth: even though `from` filters server-side and
     // Vespa's permissions[] gate-keeps access, double-check the senderId
     // matches in JS. Catches any future drift in the senderId mapping.
     .filter((h) => {
       const sender = h.searchContext?.senderId;
-      return typeof sender !== "string" || sender === userId;
+      return typeof sender !== "string" || sender === spacesUserId;
     })
     // Exact window. `metadata.timestamp` is a display string, so use the epoch.
     // A hit without one is kept — the day filter already bounded it.
@@ -452,10 +466,11 @@ export async function fetchUserCalls(
 ): Promise<UserMemoryRecord[]> {
   const auth = await resolveAuthForUser(userId);
   if (!auth) return [];
+  const spacesUserId = await toSpacesUserId(userId, auth.workspaceId);
 
   const hits = await vespaQuery(userId, {
     type: "calls",
-    withUser: userId,
+    withUser: spacesUserId,
     callStartsAt: String(window.from.getTime()),
     callEndsAt: String(window.to.getTime()),
     // Must be explicit: with no callType the query appends
@@ -529,8 +544,9 @@ export async function fetchUserCanvases(
 ): Promise<UserMemoryRecord[]> {
   const auth = await resolveAuthForUser(userId);
   if (!auth) return [];
+  const spacesUserId = await toSpacesUserId(userId, auth.workspaceId);
 
-  const rows = await queryUserCanvases(userId, window, limit, auth);
+  const rows = await queryUserCanvases(spacesUserId, window, limit, auth);
 
   // Drop machine-authored canvases. A call summary grants its attendees
   // OWNER/EDITOR, so the participant filter above matches it for everyone on the
@@ -546,7 +562,7 @@ export async function fetchUserCanvases(
 
   return rows
     .filter((cv) => !isGeneratedCanvas(cv))
-    .filter((cv) => cv.createdBy === userId || cv.content)  // safety
+    .filter((cv) => cv.createdBy === spacesUserId || cv.content)  // safety
     .map((cv): UserMemoryRecord => ({
       id: cv.id,
       type: "canvas",
@@ -572,6 +588,7 @@ export async function countUserRecords(
 ): Promise<{ messages: number; calls: number; canvases: number }> {
   const auth = await resolveAuthForUser(userId);
   if (!auth) return { messages: 0, calls: 0, canvases: 0 };
+  const spacesUserId = await toSpacesUserId(userId, auth.workspaceId);
 
   async function safeMessagesCount(): Promise<number> {
     try {
@@ -580,7 +597,7 @@ export async function countUserRecords(
           q: "",
           filterOnly: "true",
           type: "messages",
-          from: userId,
+          from: spacesUserId,
           after: toIsoDate(window.from),
           before: toIsoDate(window.to),
           limit: "1",
@@ -605,7 +622,7 @@ export async function countUserRecords(
         q: "",
         filterOnly: "true",
         type: "calls",
-        withUser: userId,
+        withUser: spacesUserId,
         callStartsAt: String(window.from.getTime()),
         callEndsAt: String(window.to.getTime()),
         callType: "VIDEO,AUDIO,HEADLESS",   // see fetchUserCalls — HEADLESS is excluded by default
@@ -640,7 +657,7 @@ export async function countUserRecords(
         {
           model: "canvas",
           operation: "count",
-          where: { ...winFilter, createdBy: { equals: userId } },
+          where: { ...winFilter, createdBy: { equals: spacesUserId } },
         },
         auth!,
       ).catch(() => ({ count: 0 })),
@@ -650,7 +667,7 @@ export async function countUserRecords(
           operation: "count",
           where: {
             ...winFilter,
-            participants: { some: { userId: { equals: userId }, role: { in: ["OWNER", "EDITOR"] } } },
+            participants: { some: { userId: { equals: spacesUserId }, role: { in: ["OWNER", "EDITOR"] } } },
           },
         },
         auth!,

@@ -4,6 +4,7 @@ import {
   FormEntityType,
   FormFieldType,
   ChannelType,
+  DESK_CHANNEL_TYPES,
   ExternalEntityType,
 } from '@xyne/shared';
 import { db } from '@/database/client';
@@ -12,10 +13,17 @@ import { EmailRepository } from '@/database/repositories/emailRepository';
 import { ExternalMessageRepository } from '@/database/repositories/externalMessageRepository';
 import { UserRepository } from '@/database/repositories/users';
 import { logger } from '@/utils/logger';
+import { callTranscriptionQueue } from '@/queues/callTranscriptionQueue';
 import { ozonetelConfigService, type OzonetelTicketRules } from './ozonetelConfigService';
 import { unifiedBotUserService } from '@/bots/unified/services/unified-bot-user-service';
 import { syncConversationTicketMdFromPrismaTicket } from '@/utils/ticketMd';
 import { resolveTelephonyAgentUserId } from './telephonyAgentUserService';
+import { resolveLinkedTicketTarget } from './telephonyTicketLink';
+import {
+  sanitizeTranscriptionState,
+  withTranscriptionState,
+  type TelephonyTranscriptionState,
+} from './callTranscript';
 import type {
   TelephonyDirection,
   TelephonyEvent,
@@ -53,9 +61,11 @@ interface TelephonyStoredMetadata {
   endedAt?: string;
   talkTimeSec?: number;
   metadata?: Record<string, unknown>;
+  /** Call-recording transcription state (manual "Transcribe" action). Survives event rebuilds. */
+  transcription?: TelephonyTranscriptionState;
 }
 
-interface TelephonyEmailBodyPayload {
+export interface TelephonyEmailBodyPayload {
   provider: 'ozonetel';
   from?: string;
   agent?: string;
@@ -73,6 +83,25 @@ interface TelephonyEmailBodyPayload {
   recording?: string;
   disposition?: string;
   comments?: string;
+  transcription?: TelephonyTranscriptionState;
+}
+
+/**
+ * Parse the raw JSON payload stored in a telephony call email body.
+ * Returns null when the body is not an Ozonetel call payload.
+ */
+export function parseTelephonyEmailBodyPayload(body: string | null | undefined): TelephonyEmailBodyPayload | null {
+  if (!body) return null;
+  try {
+    const payload = JSON.parse(body) as Partial<TelephonyEmailBodyPayload> | null;
+    if (!payload || typeof payload !== 'object' || payload.provider !== 'ozonetel') return null;
+    return {
+      ...(payload as TelephonyEmailBodyPayload),
+      transcription: sanitizeTranscriptionState(payload.transcription),
+    };
+  } catch {
+    return null;
+  }
 }
 
 function parseStoredTelephonyEmailBody(body: string): Partial<TelephonyStoredMetadata> | null {
@@ -93,6 +122,7 @@ function parseStoredTelephonyEmailBody(body: string): Partial<TelephonyStoredMet
       endedAt: asIso(endedAt),
       talkTimeSec,
       recordingUrl: payload.recording?.trim() || undefined,
+      transcription: sanitizeTranscriptionState(payload.transcription),
       metadata: {
         ...(payload.monitorUcid?.trim() && { monitorUcid: payload.monitorUcid.trim() }),
         ...(payload.ucid?.trim() && { ucid: payload.ucid.trim() }),
@@ -309,6 +339,7 @@ function buildEmailBody(meta: TelephonyStoredMetadata): string {
       typeof metadata.disposition === 'string' ? metadata.disposition.trim() || undefined : undefined,
     comments:
       typeof metadata.comments === 'string' ? metadata.comments.trim() || undefined : undefined,
+    transcription: meta.transcription,
   };
   return JSON.stringify(payload);
 }
@@ -414,7 +445,8 @@ export class TelephonyEmailService {
         id: emailId,
         channel: {
           workspaceId,
-          type: ChannelType.CALL,
+          // Not just CALL: a linked call's email lives on the ticket's app desk.
+          type: { in: Array.from(DESK_CHANNEL_TYPES) },
         },
       },
       select: {
@@ -422,6 +454,7 @@ export class TelephonyEmailService {
         channelId: true,
         conversationId: true,
         body: true,
+        channel: { select: { type: true } },
       },
     });
   }
@@ -495,7 +528,7 @@ export class TelephonyEmailService {
   async prepareCoreIngestion(
     event: TelephonyEvent,
     sourceId: string,
-  ): Promise<{ channelId: string; creatorUserId?: string } | null> {
+  ): Promise<{ channelId: string; creatorUserId?: string; targetConversationId?: string } | null> {
     const trackedCall = await this.findTrackedCallEmail(
       sourceId,
       event.externalId,
@@ -512,6 +545,21 @@ export class TelephonyEmailService {
         status: event.status,
       });
       return null;
+    }
+
+    // Linked calls attach to an existing ticket, so the createTicketOn* gates do not apply.
+    const linkedTicket = await resolveLinkedTicketTarget(event);
+    if (linkedTicket) {
+      logger.info(`${TAG} event linked to ticket`, {
+        externalId: event.externalId,
+        workspaceId: event.workspaceId,
+        ticketId: linkedTicket.ticketId,
+        status: event.status,
+      });
+      return {
+        channelId: linkedTicket.channelId,
+        targetConversationId: linkedTicket.conversationId,
+      };
     }
 
     const context = await this.resolveCreateContext(event);
@@ -630,6 +678,8 @@ export class TelephonyEmailService {
       endedAt: nextMeta.endedAt ?? previousMeta?.endedAt,
       talkTimeSec: nextMeta.talkTimeSec ?? previousMeta?.talkTimeSec,
       recordingUrl: nextMeta.recordingUrl ?? previousMeta?.recordingUrl,
+      // Inbound events never carry transcription state; keep whatever the job wrote.
+      transcription: previousMeta?.transcription,
       metadata: {
         ...(previousMeta?.metadata ?? {}),
         ...(nextMeta.metadata ?? {}),
@@ -659,6 +709,17 @@ export class TelephonyEmailService {
         title: true,
       },
     });
+
+    // First event carrying the recording: transcribe (and then summarise) without waiting for a click.
+    if (mergedMeta.recordingUrl && !previousMeta?.transcription) {
+      await this.autoTranscribe(existingEmail.id, event.workspaceId, nextMeta.agentUserId ?? ticket?.createdBy);
+    }
+
+    // Only linked calls land on a non-call desk; leave that customer ticket's title, assignee and fields alone.
+    if (ticket && existingEmail.channel.type !== ChannelType.CALL) {
+      return { emailId: existingEmail.id, externalId: event.externalId, ticketId: ticket.id };
+    }
+
     if (ticket) {
       const shouldUpdateAssignee =
         !!nextMeta.agentUserId && ticket.assignedTo !== nextMeta.agentUserId;
@@ -686,6 +747,79 @@ export class TelephonyEmailService {
     }
 
     return { emailId: existingEmail.id, externalId: event.externalId, ticketId: ticket?.id ?? null };
+  }
+
+  /**
+   * Same job the "Transcribe" button enqueues; `queued` is written first so later events
+   * (disposition, comments) see the state and don't enqueue again. Never fails the webhook.
+   */
+  private async autoTranscribe(emailId: string, workspaceId: string, userId: string | undefined): Promise<void> {
+    if (!userId) {
+      logger.warn(`${TAG} auto-transcription skipped: no agent or ticket creator to attribute it to`, { emailId, workspaceId });
+      return;
+    }
+    try {
+      await this.setTranscriptionState(emailId, workspaceId, { status: 'queued' });
+      const enqueued = await callTranscriptionQueue.enqueue({ emailId, workspaceId, userId });
+      logger.info(`${TAG} auto-transcription ${enqueued ? 'queued' : 'already in progress'}`, { emailId, workspaceId });
+    } catch (error) {
+      logger.error(`${TAG} auto-transcription failed to enqueue`, { emailId, workspaceId, error });
+      await this.setTranscriptionState(emailId, workspaceId, {
+        status: 'failed',
+        error: 'Could not start transcription. Please try again.',
+      }).catch(() => undefined);
+    }
+  }
+
+  /**
+   * Load a call email (desk channel in the given workspace) together with its parsed
+   * Ozonetel payload. Returns null when the email doesn't exist, isn't on a desk
+   * channel of this workspace, or its body isn't an Ozonetel payload.
+   */
+  async getCallEmailWithPayload(
+    emailId: string,
+    workspaceId: string,
+  ): Promise<{
+    id: string;
+    channelId: string;
+    conversationId: string;
+    body: string;
+    payload: TelephonyEmailBodyPayload;
+  } | null> {
+    const email = await this.findCallEmailById(emailId, workspaceId);
+    if (!email) return null;
+    const payload = parseTelephonyEmailBodyPayload(email.body);
+    if (!payload) return null;
+    return {
+      id: email.id,
+      channelId: email.channelId,
+      conversationId: email.conversationId,
+      body: email.body,
+      payload,
+    };
+  }
+
+  /**
+   * Persist the call-recording transcription state on the call email body.
+   * Read-modify-write on the `transcription` key only; all other keys are untouched.
+   * Zero syncs the body change to the thread UI. Returns false (no-op) if the email
+   * isn't a call email in this workspace.
+   */
+  async setTranscriptionState(
+    emailId: string,
+    workspaceId: string,
+    state: Omit<TelephonyTranscriptionState, 'updatedAt'> & { updatedAt?: string },
+  ): Promise<boolean> {
+    const email = await this.findCallEmailById(emailId, workspaceId);
+    if (!email) return false;
+    const nextBody = withTranscriptionState(email.body, {
+      ...state,
+      updatedAt: state.updatedAt ?? new Date().toISOString(),
+    });
+    if (nextBody === null) return false;
+    await this.emailRepository.update(email.id, { body: nextBody });
+    logger.info(`${TAG} transcription state updated`, { emailId, workspaceId, status: state.status });
+    return true;
   }
 }
 

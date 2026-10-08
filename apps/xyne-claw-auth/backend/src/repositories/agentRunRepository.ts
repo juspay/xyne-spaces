@@ -1,7 +1,9 @@
 import { Prisma } from "@prisma/client";
+import type { MessagingChannelKey } from "../surfaces/messaging/plugin.js";
 import { prisma, type AppTransactionClient } from "../db.js";
 import { formatDayIST } from "../lib/ist-time.js";
 import { createLogger } from "../logger.js";
+import { userIdFilter } from "./userIdFilter.js";
 
 const log = createLogger("agent-run");
 
@@ -13,9 +15,9 @@ function stripNulDeep(value: unknown): unknown {
   if (typeof value === "string") return value.replace(/\u0000/g, "");
   if (Array.isArray(value)) return value.map(stripNulDeep);
   if (value && typeof value === "object") {
-    const out: Record<string, unknown> = {};
-    for (const [k, v] of Object.entries(value)) out[k] = stripNulDeep(v);
-    return out;
+    const out = new Map<string, unknown>();
+    for (const [k, v] of Object.entries(value)) out.set(k, stripNulDeep(v));
+    return Object.fromEntries(out);
   }
   return value;
 }
@@ -84,6 +86,112 @@ async function withSessionWriteLock<T>(
   );
 }
 
+const TOOL_INVOCATION_FLUSH_MS = Number(process.env["TOOL_INVOCATION_FLUSH_MS"] ?? 2000);
+
+interface PendingToolInvocations {
+  entries: Map<string, Record<string, unknown>>;
+  waiters: Array<{ resolve: () => void; reject: (err: unknown) => void }>;
+  timer: NodeJS.Timeout | null;
+}
+
+const pendingToolInvocations = new Map<string, PendingToolInvocations>();
+const inflightToolInvocationFlushes = new Map<string, Promise<void>>();
+let anonymousInvocationSeq = 0;
+
+function invocationKey(inv: Record<string, unknown>): string {
+  const id = inv["toolCallId"];
+  if (id) return `id:${String(id)}`;
+  anonymousInvocationSeq += 1;
+  return `anon:${anonymousInvocationSeq}`;
+}
+
+function supersedes(incoming: Record<string, unknown>, current: Record<string, unknown>): boolean {
+  return !(incoming["status"] === "running" && current["status"] !== undefined && current["status"] !== "running");
+}
+
+export function mergeToolInvocations(
+  existing: Array<Record<string, unknown>>,
+  batch: Array<Record<string, unknown>>,
+  max: number = MAX_TOOL_INVOCATIONS,
+): Array<Record<string, unknown>> {
+  const next = [...existing];
+  const indexById = new Map<unknown, number>();
+  next.forEach((inv, i) => {
+    if (inv["toolCallId"]) indexById.set(inv["toolCallId"], i);
+  });
+  for (const inv of batch) {
+    const id = inv["toolCallId"];
+    const at = id ? indexById.get(id) : undefined;
+    if (at !== undefined) {
+      if (supersedes(inv, next[at] as Record<string, unknown>)) next[at] = inv;
+    } else {
+      next.push(inv);
+      if (id) indexById.set(id, next.length - 1);
+    }
+  }
+  return next.length > max ? next.slice(next.length - max) : next;
+}
+
+async function writePendingToolInvocations(sessionId: string): Promise<void> {
+  const pending = pendingToolInvocations.get(sessionId);
+  if (!pending || pending.entries.size === 0) return;
+  pendingToolInvocations.delete(sessionId);
+  if (pending.timer) clearTimeout(pending.timer);
+  const batch = [...pending.entries.values()];
+  try {
+    await withSessionWriteLock(sessionId, async (tx) => {
+      const run = await tx.agentRun.findUnique({ where: { sessionId }, select: { toolInvocations: true } });
+      const existing = Array.isArray(run?.toolInvocations)
+        ? (run!.toolInvocations as Array<Record<string, unknown>>)
+        : [];
+      await tx.agentRun.update({
+        where: { sessionId },
+        data: { toolInvocations: mergeToolInvocations(existing, batch) as Prisma.InputJsonValue },
+      });
+    });
+    for (const waiter of pending.waiters) waiter.resolve();
+  } catch (err) {
+    log.warn(
+      `[agent-run] tool invocation flush failed session=${sessionId} batch=${batch.length}: ${err instanceof Error ? err.message : String(err)}`,
+    );
+    for (const waiter of pending.waiters) waiter.reject(err);
+  }
+}
+
+function flushToolInvocations(sessionId: string): Promise<void> {
+  const prior = inflightToolInvocationFlushes.get(sessionId) ?? Promise.resolve();
+  const run = prior.then(() => writePendingToolInvocations(sessionId));
+  inflightToolInvocationFlushes.set(sessionId, run);
+  return run.finally(() => {
+    if (inflightToolInvocationFlushes.get(sessionId) === run) inflightToolInvocationFlushes.delete(sessionId);
+  });
+}
+
+async function flushAllToolInvocations(): Promise<void> {
+  await Promise.all([...pendingToolInvocations.keys()].map((sessionId) => flushToolInvocations(sessionId)));
+}
+
+function enqueueToolInvocation(sessionId: string, invocation: unknown): Promise<void> {
+  const inv = stripNulDeep(invocation) as Record<string, unknown>;
+  let pending = pendingToolInvocations.get(sessionId);
+  if (!pending) {
+    pending = { entries: new Map(), waiters: [], timer: null };
+    pendingToolInvocations.set(sessionId, pending);
+  }
+  const key = invocationKey(inv);
+  const buffered = pending.entries.get(key);
+  if (!buffered || supersedes(inv, buffered)) pending.entries.set(key, inv);
+  const target = pending;
+  const done = new Promise<void>((resolve, reject) => target.waiters.push({ resolve, reject }));
+  if (!target.timer) {
+    target.timer = setTimeout(() => {
+      void flushToolInvocations(sessionId);
+    }, TOOL_INVOCATION_FLUSH_MS);
+    target.timer.unref?.();
+  }
+  return done;
+}
+
 /** Inclusive window for time-series padding. `null` = all time (unbounded left). */
 export type TimeWindow = { start: Date; end: Date } | null;
 
@@ -92,7 +200,7 @@ export interface StartRunInput {
   userId: string;
   agentSlug: string;
   orgId: string;
-  triggerSource: "spaces" | "scheduled" | "chat" | "api" | "automation" | "slack" | "heartbeat" | "reflex" | "app";
+  triggerSource: "spaces" | "scheduled" | "chat" | "api" | "automation" | "slack" | "heartbeat" | "reflex" | "app" | "delegation" | MessagingChannelKey;
   task: string;
   conversationId?: string | null;
   scheduledJobId?: string | null;
@@ -101,6 +209,10 @@ export interface StartRunInput {
   projectName?: string | null;
   fastMode?: boolean | null;
   metadata?: unknown;
+  /** Delegated runs only: the caller's session, agent and tool call. */
+  parentSessionId?: string | null;
+  parentAgentSlug?: string | null;
+  parentToolCallId?: string | null;
 }
 
 export interface FinalizeRunInput {
@@ -133,6 +245,134 @@ export interface FinalizeRunInput {
   fastMode?: boolean | null;
 }
 
+/**
+ * Filter shape shared by the two paged run listings (GET /runs/paged) that back
+ * the agent Activity tab and the admin cross-agent Runs page.
+ *
+ * `orgId` is REQUIRED whenever `scope === "all"`. The route asserts it and
+ * fails the request closed; `buildRunListWhere` asserts it again, because an
+ * undefined org silently WIDENS a scope=all query to every tenant instead of
+ * narrowing it — the one failure mode here that leaks across organisations.
+ * `userId` is a scope=all-only ADDITIONAL filter: under scope=own the
+ * requester's own id is the only scope there is.
+ */
+export interface RunListFilter {
+  /** The caller's verified id forms (canonical + raw Spaces alias) — rows may
+   *  be keyed by either. */
+  requesterIds: string[];
+  scope: "own" | "all";
+  orgId?: string;
+  agentSlug?: string;
+  /** Admin's explicit target-user filter (scope=all only) — again every id
+   *  form the target's rows may be keyed by. */
+  userIds?: string[];
+  status?: string;
+  from: Date;
+  to: Date;
+  /** Case-insensitive sessionId PREFIX. When set the date window is dropped —
+   *  see buildRunListWhere. */
+  sessionIdPrefix?: string;
+  /** True only when the route proved the caller is a CLAW_ADMIN, i.e. entitled
+   *  to the CROSS-AGENT listing. Never used to widen the row query — only
+   *  `listPagedFacets` reads it, to decide whether dropping `agentSlug` is a
+   *  dropdown fix or a privilege escalation. See the comment there. */
+  admin?: boolean;
+}
+
+/**
+ * Single source of truth for the paged-listing WHERE clause. `listPaged` and
+ * `listPagedFacets` MUST both go through it.
+ *
+ * The `usedUserToken` OR-guard is already triplicated across `listAllForAgent`,
+ * `listByConversation` and `listSessionAclForConversation`; a fourth hand-rolled
+ * copy that drifts is exactly how a run which fetched another user's private
+ * OAuth token becomes readable by a different admin. One builder, two callers,
+ * nothing to drift.
+ */
+function buildRunListWhere(f: RunListFilter): Prisma.AgentRunWhereInput {
+  // Half-open window: `lt` on the upper bound so a caller passing an exact
+  // day boundary as both `to` of one page and `from` of the next can't
+  // double-count the run that started on the tick.
+  //
+  // A sessionId lookup DROPS the window entirely. A session id names one run
+  // that already exists; intersecting it with "the last 30 days" makes the
+  // search silently fail for the older run the user is holding an id for,
+  // which reads as "search is broken" rather than "your date filter excluded
+  // it". Scope/org/usedUserToken still apply below, so this widens what you
+  // can FIND, never what you are allowed to see.
+  const idLookup = !!f.sessionIdPrefix;
+  const window = idLookup
+    ? { sessionId: { startsWith: f.sessionIdPrefix as string, mode: "insensitive" as const } }
+    : { startedAt: { gte: f.from, lt: f.to } };
+
+  if (f.scope === "own") {
+    // No orgId predicate — userId already implies the org, and adding one
+    // would diverge from listByUser / listByUserLight / searchByUser for no
+    // gain while pushing the query off the (userId, startedAt) index.
+    return {
+      ...userIdFilter(f.requesterIds),
+      ...window,
+      ...(f.status ? { status: f.status } : {}),
+      ...(f.agentSlug ? { agentSlug: f.agentSlug } : {}),
+    };
+  }
+
+  if (!f.orgId) {
+    // Never degrade to "no org predicate": that returns every organisation's
+    // runs — task text and conversationIds included — to one org's admin.
+    throw new Error("buildRunListWhere: orgId is required for scope=all");
+  }
+  return {
+    ...(f.agentSlug ? { agentSlug: f.agentSlug } : {}),
+    orgId: f.orgId,
+    ...window,
+    ...(f.status ? { status: f.status } : {}),
+    AND: [
+      // The user filter is an ADDITIONAL term, never a replacement for the
+      // token guard below: "show me Asha's runs" must not hand over the ones
+      // Asha ran under her own OAuth token (mail/calendar/drive content).
+      ...(f.userIds && f.userIds.length > 0 ? [userIdFilter(f.userIds)] : []),
+      { OR: [userIdFilter(f.requesterIds), { usedUserToken: false }] },
+    ],
+  };
+}
+
+/**
+ * Deliberately light projection for the paged listings — same discipline as
+ * `listByUserLight`, for the same reason.
+ *
+ * `toolInvocations` is EXCLUDED and must stay excluded: it is JSON, routinely
+ * hundreds of KB per row, and 50 rows of it is precisely the payload disaster
+ * `listByUserLight` was created to prevent. `result`, `error`, `toolsUsed` and
+ * the whole latency block are excluded too — no list row renders them, and a
+ * caller that genuinely needs them already has `getRun`. `usedUserToken` is an
+ * ACL input, not a client field, so it is never selected.
+ */
+const RUN_LIST_SELECT = {
+  id: true,
+  sessionId: true,
+  userId: true,
+  agentSlug: true,
+  triggerSource: true,
+  status: true,
+  task: true,
+  conversationId: true,
+  channelId: true,
+  startedAt: true,
+  completedAt: true,
+  tokensIn: true,
+  tokensOut: true,
+  rating: true,
+  // Who delegated this run, so the panel can mark it as a child and link back.
+  parentSessionId: true,
+  parentAgentSlug: true,
+} satisfies Prisma.AgentRunSelect;
+
+/** Upper bound on task text shipped per list row. Not `listByAgentSlug`'s 240:
+ *  the UI-only search matches on task text, and a 240-char cap would make that
+ *  search a lie for long prompts. 2000 x 100 rows is ~200 KB worst case. */
+const RUN_LIST_TASK_CAP = 2000;
+
 export const agentRunRepository = {
   start: async (input: StartRunInput) => {
     // Stamp the agent's active prompt version so quality/latency can later be
@@ -160,6 +400,9 @@ export const agentRunRepository = {
           ...(input.projectId ? { projectId: input.projectId } : {}),
           ...(input.projectName ? { projectName: input.projectName } : {}),
           ...(input.metadata !== undefined ? { metadata: input.metadata as Prisma.InputJsonValue } : {}),
+          ...(input.parentSessionId ? { parentSessionId: input.parentSessionId } : {}),
+          ...(input.parentAgentSlug ? { parentAgentSlug: input.parentAgentSlug } : {}),
+          ...(input.parentToolCallId ? { parentToolCallId: input.parentToolCallId } : {}),
         },
       });
       log.info(
@@ -201,9 +444,35 @@ export const agentRunRepository = {
     }
   },
 
+  /** Close a run that never reached a terminal callback. Guarded on status
+   *  "running" so a late failure path can't flip a run the result callback has
+   *  already finalized — same discipline as services/orphan-run-finalizer.ts.
+   *  Returns the number of rows actually updated (0 = already terminal). */
+  failIfRunning: async (sessionId: string, error: string) => {
+    const res = await prisma.agentRun.updateMany({
+      where: { sessionId, status: "running" },
+      data: { status: "failed", error, completedAt: new Date(), currentToolLabel: null },
+    });
+    return res.count;
+  },
+
+  /** Hard-delete one run row. Used only when a chat turn pre-created its run and
+   *  the dispatch was then DEFERRED — another worker already owned the
+   *  conversation and its run carries the answer. `deleteMany` (not `delete`) so
+   *  a missing row is a no-op rather than a throw. */
+  deleteBySessionId: (sessionId: string) => prisma.agentRun.deleteMany({ where: { sessionId } }),
+
+  /** Record the tool label a run is currently on.
+   *
+   *  Guarded on status "running" — same discipline as failIfRunning above.
+   *  Progress ticks can land AFTER the result callback finalized the run: a
+   *  subagent's sticky-label timer outlives its parent by seconds, and the
+   *  push is an unawaited fetch that cannot be cancelled. Ungated, such a
+   *  straggler rewrote currentToolLabel on a finished run, so the Agent
+   *  Control Center showed a completed run still "using" a tool. */
   updateProgress: (sessionId: string, currentToolLabel: string) =>
     prisma.agentRun.updateMany({
-      where: { sessionId },
+      where: { sessionId, status: "running" },
       data: { currentToolLabel },
     }),
 
@@ -220,6 +489,7 @@ export const agentRunRepository = {
     // the lock waits for in-flight appends on this sessionId (from any pod)
     // to commit before reading `existing`, guaranteeing finalize sees every
     // persisted invocation. All DB ops use `tx`.
+    await flushToolInvocations(sessionId);
     return withSessionWriteLock(sessionId, async (tx) => {
     let finalInvocations: unknown[] | undefined;
     // Always merge once the run is finalizing, even if the callback didn't
@@ -332,9 +602,9 @@ export const agentRunRepository = {
     });
   },
 
-  rate: (sessionId: string, userId: string, rating: "up" | "down", comment?: string | null) =>
+  rate: (sessionId: string, userIds: string | string[], rating: "up" | "down", comment?: string | null) =>
     prisma.agentRun.updateMany({
-      where: { sessionId, userId },
+      where: { sessionId, ...userIdFilter(userIds) },
       data: { rating, ratingComment: comment ?? null, ratedAt: new Date() },
     }),
 
@@ -345,55 +615,28 @@ export const agentRunRepository = {
   // caller can only rate their own run.
   rateByChatMessageId: (
     chatMessageId: string,
-    userId: string,
+    userIds: string | string[],
     rating: "up" | "down",
     comment?: string | null,
   ) =>
     prisma.agentRun.updateMany({
-      where: { chatMessageId, userId },
+      where: { chatMessageId, ...userIdFilter(userIds) },
       data: { rating, ratingComment: comment ?? null, ratedAt: new Date() },
     }),
 
-  appendToolInvocation: async (sessionId: string, invocation: unknown) => {
-    // Read-modify-write with merge-by-toolCallId semantics:
-    //   - A "running" placeholder is pushed on tool_execution_start
-    //   - A "completed" row is pushed on tool_execution_end with the SAME toolCallId
-    // We replace the placeholder in place so the JSON column mirrors the live
-    // frontend state (single row per tool call, not duplicated).
-    //
-    // Serialized via `withSessionWriteLock` (Postgres advisory lock) so
-    // concurrent appends on the same sessionId — within one pod OR across
-    // multiple pods — don't race and clobber each other. All DB ops below
-    // run through `tx` so they're covered by the lock.
-    await withSessionWriteLock(sessionId, async (tx) => {
-      const run = await tx.agentRun.findUnique({ where: { sessionId }, select: { toolInvocations: true } });
-      const existing = Array.isArray(run?.toolInvocations) ? (run!.toolInvocations as Array<Record<string, unknown>>) : [];
-      // Strip NULs so the jsonb write doesn't throw (this is the root cause of the
-      // "appendToolInvocation failed" storm on sandbox-heavy runs).
-      const inv = stripNulDeep(invocation) as Record<string, unknown>;
-      const incomingId = inv["toolCallId"];
-      let next: Array<Record<string, unknown>>;
-      if (incomingId && existing.some((p) => p["toolCallId"] === incomingId)) {
-        next = existing.map((p) => p["toolCallId"] === incomingId ? inv : p);
-      } else {
-        next = [...existing, inv];
-      }
-      // Bound the column — keep the most recent rows so a heavy investigation
-      // can't grow it without limit (it's rewritten in full on every event).
-      if (next.length > MAX_TOOL_INVOCATIONS) {
-        next = next.slice(next.length - MAX_TOOL_INVOCATIONS);
-      }
-      await tx.agentRun.update({
-        where: { sessionId },
-        data: { toolInvocations: next as Prisma.InputJsonValue },
-      });
-    });
-  },
+  appendToolInvocation: (sessionId: string, invocation: unknown): Promise<void> =>
+    enqueueToolInvocation(sessionId, invocation),
 
-  listByUser: (userId: string, opts?: { status?: string; limit?: number; conversationId?: string; agentSlug?: string }) =>
+  flushToolInvocations: (sessionId: string): Promise<void> => flushToolInvocations(sessionId),
+
+  flushAllToolInvocations: (): Promise<void> => flushAllToolInvocations(),
+
+  /** Accepts one id or the caller's alias pair (canonical + raw Spaces id);
+   *  runs may be keyed by either (see getRequesterAliases). */
+  listByUser: (userIds: string | string[], opts?: { status?: string; limit?: number; conversationId?: string; agentSlug?: string }) =>
     prisma.agentRun.findMany({
       where: {
-        userId,
+        ...userIdFilter(userIds),
         ...(opts?.status ? { status: opts.status } : {}),
         ...(opts?.conversationId ? { conversationId: opts.conversationId } : {}),
         ...(opts?.agentSlug ? { agentSlug: opts.agentSlug } : {}),
@@ -437,6 +680,8 @@ export const agentRunRepository = {
         startedAt: true,
         completedAt: true,
         chatMessageId: true,
+        parentSessionId: true,
+        parentAgentSlug: true,
         // Included because routes/agent-chat.ts and routes/runs.ts pair
         // assistant messages with their tool invocations from a listByUser
         // call. If a future caller needs the cheaper variant (no JSON blob),
@@ -456,7 +701,7 @@ export const agentRunRepository = {
   listAllForAgent: async (
     agentSlug: string,
     orgId: string,
-    requesterId: string,
+    requesterIds: string | string[],
     opts?: { status?: string; limit?: number; conversationId?: string },
   ) => {
     const rows = await prisma.agentRun.findMany({
@@ -466,7 +711,7 @@ export const agentRunRepository = {
         ...(opts?.status ? { status: opts.status } : {}),
         ...(opts?.conversationId ? { conversationId: opts.conversationId } : {}),
         OR: [
-          { userId: requesterId }, // your own runs, always
+          userIdFilter(requesterIds), // your own runs, always (either id form)
           { usedUserToken: false }, // other users' runs only if no user-token usage
         ],
       },
@@ -482,6 +727,8 @@ export const agentRunRepository = {
         currentToolLabel: true,
         task: true,
         conversationId: true,
+        parentSessionId: true,
+        parentAgentSlug: true,
         scheduledJobId: true,
         channelId: true,
         projectId: true,
@@ -578,11 +825,11 @@ export const agentRunRepository = {
    * user-token tool calls the All Runs ACL hides from the list. Your own runs
    * always; everyone else's only when no user token was used.
    */
-  listByConversation: (conversationId: string, requesterId: string, opts?: { limit?: number }) =>
+  listByConversation: (conversationId: string, requesterIds: string | string[], opts?: { limit?: number }) =>
     prisma.agentRun.findMany({
       where: {
         conversationId,
-        OR: [{ userId: requesterId }, { usedUserToken: false }],
+        OR: [userIdFilter(requesterIds), { usedUserToken: false }],
       },
       orderBy: { startedAt: "desc" },
       take: opts?.limit ?? 50,
@@ -631,16 +878,50 @@ export const agentRunRepository = {
     prisma.agentRun.findUnique({ where: { sessionId } }),
 
   /**
-   * The most-recent RUNNING run for a conversation. Used by the Spaces `/stop`
-   * command to find the in-flight run's sessionId (so it can be cancelled) when
-   * the caller only knows the conversationId. Returns null when nothing is
-   * running. Newest-first so a stale row can't shadow the live run.
+   * The most-recent RUNNING run for a conversation, excluding one session id.
+   * Returns null when nothing else is running. Newest-first so a stale row
+   * can't shadow the live run.
+   *
+   * `excludeSessionId` is required — pass `undefined` only if you genuinely
+   * have no session of your own, and mean it. Both chat surfaces write their
+   * own AgentRun row at status "running" BEFORE dispatch (see
+   * lib/chat-run-record.ts for why), and that row is by definition the newest
+   * `startedAt` on the conversation. Without the exclusion this findFirst
+   * returns the caller's OWN row, so awaitTurnHandoff interrupted a session
+   * xyne-claw had never started and then polled it until the handoff timeout:
+   * prod 2026-09-28 09:00-12:30Z saw 55/55 handoffs end `remote_timeout` and
+   * zero wrap up, a flat ~30s added to every chat turn. Regression-tested in
+   * agentRunRepository.findRunningByConversation.test.ts and
+   * lib/run-turn-handoff.test.ts.
    */
-  findRunningByConversation: (conversationId: string) =>
+  findRunningByConversation: (conversationId: string, excludeSessionId: string | undefined) =>
     prisma.agentRun.findFirst({
-      where: { conversationId, status: "running" },
+      where: {
+        conversationId,
+        status: "running",
+        ...(excludeSessionId ? { sessionId: { not: excludeSessionId } } : {}),
+      },
       orderBy: { startedAt: "desc" },
       select: { sessionId: true, userId: true, agentSlug: true, conversationId: true, status: true },
+    }),
+
+  findLatestByConversation: (conversationId: string, agentSlug?: string) =>
+    prisma.agentRun.findFirst({
+      where: { conversationId, ...(agentSlug ? { agentSlug } : {}) },
+      orderBy: { startedAt: "desc" },
+      select: {
+        sessionId: true,
+        userId: true,
+        agentSlug: true,
+        status: true,
+        provider: true,
+        model: true,
+        currentToolLabel: true,
+        error: true,
+        toolInvocations: true,
+        startedAt: true,
+        completedAt: true,
+      },
     }),
 
   /**
@@ -700,6 +981,8 @@ export const agentRunRepository = {
         triggerSource: true,
         task: true,
         conversationId: true,
+        parentSessionId: true,
+        parentAgentSlug: true,
         channelId: true,
         toolsUsed: true,
         tokensIn: true,
@@ -756,7 +1039,7 @@ export const agentRunRepository = {
    * still allow `limit` as a defensive ceiling for very long histories.
    */
   listByUserLight: (
-    userId: string,
+    userIds: string | string[],
     // agentSlug/conversationId: the /runs/light route always accepted and
     // forwarded agentSlug, but this signature silently dropped it (spread into
     // an opts shape that never read it) — fixed 2026-07-17 alongside adding
@@ -765,7 +1048,9 @@ export const agentRunRepository = {
   ) =>
     prisma.agentRun.findMany({
       where: {
-        userId,
+        // Accept the caller's alias pair (canonical + raw Spaces id) — runs
+        // may be keyed by either (see getRequesterAliases).
+        ...userIdFilter(userIds),
         ...(opts?.status ? { status: opts.status } : {}),
         ...(opts?.since ? { startedAt: { gte: opts.since } } : {}),
         ...(opts?.agentSlug ? { agentSlug: opts.agentSlug } : {}),
@@ -782,6 +1067,8 @@ export const agentRunRepository = {
         // build chat-deep-links from them. Adding 2 short text columns
         // doesn't meaningfully change the payload size.
         conversationId: true,
+        parentSessionId: true,
+        parentAgentSlug: true,
         channelId: true,
       },
       orderBy: { startedAt: "desc" },
@@ -798,13 +1085,13 @@ export const agentRunRepository = {
    * a match snippet.
    */
   searchByUser: (
-    userId: string,
+    userIds: string | string[],
     query: string,
     opts?: { agentSlug?: string; limit?: number },
   ) =>
     prisma.agentRun.findMany({
       where: {
-        userId,
+        ...userIdFilter(userIds),
         ...(opts?.agentSlug ? { agentSlug: opts.agentSlug } : {}),
         task: { contains: query, mode: "insensitive" },
       },
@@ -816,12 +1103,137 @@ export const agentRunRepository = {
         startedAt: true,
         completedAt: true,
         conversationId: true,
+        parentSessionId: true,
+        parentAgentSlug: true,
         channelId: true,
         task: true,
       },
       orderBy: { startedAt: "desc" },
       take: opts?.limit ?? 20,
     }),
+
+  /**
+   * Paged + counted run listing behind GET /runs/paged. Serves BOTH the agent
+   * Activity tab (scope=all + agentSlug) and the admin cross-agent Runs page
+   * (scope=all, no agentSlug), plus every user's own history (scope=own).
+   *
+   * OFFSET rather than a keyset cursor on purpose: the product requirement is a
+   * denominator ("1-50 of 1,284") and Prev as well as Next, neither of which a
+   * forward-only cursor gives. With the (userId|orgId, startedAt) composites and
+   * the route's mandatory bounded date window, LIMIT/OFFSET is an index-ordered
+   * scan skipping k index tuples, not a sort — and the route caps offset at
+   * 10000 so the deep-page cost stays bounded.
+   *
+   * `total` is a COUNT over the IDENTICAL where clause, issued in the same
+   * Promise.all so it rides the same index range.
+   */
+  listPaged: async (f: RunListFilter, page: { limit: number; offset: number }) => {
+    const where = buildRunListWhere(f);
+    const [rows, total] = await Promise.all([
+      prisma.agentRun.findMany({
+        where,
+        select: RUN_LIST_SELECT,
+        // The `id` tiebreaker is mandatory, not cosmetic: startedAt has ms
+        // resolution and batch-created runs genuinely tie, and OFFSET paging
+        // over a non-deterministic order both skips and duplicates rows across
+        // page boundaries.
+        orderBy: [{ startedAt: "desc" }, { id: "desc" }],
+        take: page.limit,
+        skip: page.offset,
+      }),
+      prisma.agentRun.count({ where }),
+    ]);
+    const capped = rows.map((r) => ({
+      ...r,
+      task: r.task.length <= RUN_LIST_TASK_CAP ? r.task : r.task.slice(0, RUN_LIST_TASK_CAP),
+      userName: null as string | null,
+      userEmail: null as string | null,
+    }));
+    // Only the elevated listing shows other people's runs, so only it needs
+    // names. Under scope=own every row is the requester's own and the extra
+    // round-trip would buy nothing.
+    if (f.scope !== "all") return { rows: capped, total };
+    const userIds = [...new Set(capped.map((r) => r.userId))];
+    const users =
+      userIds.length === 0
+        ? []
+        : await prisma.user.findMany({
+            where: { id: { in: userIds } },
+            select: { id: true, email: true, name: true },
+          });
+    const userMap = new Map(users.map((u) => [u.id, u]));
+    return {
+      rows: capped.map((r) => {
+        const u = userMap.get(r.userId);
+        return { ...r, userName: u?.name ?? null, userEmail: u?.email ?? null };
+      }),
+      total,
+    };
+  },
+
+  /**
+   * Facet counts for the filter dropdowns of the same listing, in ONE groupBy.
+   *
+   * The userId predicate is ALWAYS dropped, and agentSlug is dropped only for
+   * callers whose grant already covers every agent: a facet list built from the
+   * already-filtered set collapses to the single option the user just picked,
+   * so the dropdown can never be changed again (same reasoning as the facet
+   * comment in AdminPageV3). Everything else — the org predicate, the date
+   * window, the status filter and the `usedUserToken` OR — is RETAINED, because
+   * the facets carry exactly the same ACL as the rows: without the OR the user
+   * dropdown becomes an org directory leak, listing names and emails of people
+   * whose every run is token-hidden.
+   */
+  listPagedFacets: async (f: RunListFilter) => {
+    // agentSlug may only be dropped when the caller could have asked for the
+    // cross-agent listing anyway — a CLAW_ADMIN, or scope=own where the where
+    // clause is pinned to the requester's own rows. An agent OWNER/CONTRIBUTOR
+    // reaches scope=all through the R2 gate with a grant that covers exactly
+    // ONE agent; dropping their agentSlug turns the facets into an org-wide
+    // user roster (name + email + run count of everyone in the org) plus the
+    // org's full agent inventory. It also makes the dropdown lie, offering
+    // users whose runs of THIS agent number zero.
+    const dropAgentSlug = f.admin === true || f.scope === "own";
+    // Destructured rather than spread-with-undefined: exactOptionalPropertyTypes
+    // rejects `{ ...f, agentSlug: undefined }` against `agentSlug?: string`.
+    const { agentSlug: droppedAgentSlug, userIds: _droppedUserIds, ...rest } = f;
+    const unfaceted: RunListFilter = dropAgentSlug
+      ? rest
+      : { ...rest, ...(droppedAgentSlug ? { agentSlug: droppedAgentSlug } : {}) };
+    const grouped = await prisma.agentRun.groupBy({
+      by: ["agentSlug", "userId"],
+      where: buildRunListWhere(unfaceted),
+      _count: { _all: true },
+    });
+    const agentCounts = new Map<string, number>();
+    const userCounts = new Map<string, number>();
+    for (const g of grouped) {
+      agentCounts.set(g.agentSlug, (agentCounts.get(g.agentSlug) ?? 0) + g._count._all);
+      userCounts.set(g.userId, (userCounts.get(g.userId) ?? 0) + g._count._all);
+    }
+    const agents = [...agentCounts.entries()]
+      .map(([agentSlug, count]) => ({ agentSlug, count }))
+      .sort((a, b) => b.count - a.count || a.agentSlug.localeCompare(b.agentSlug));
+    const users: Array<{ userId: string; name: string | null; email: string | null; count: number }> = [];
+    // scope=own has exactly one possible user (the requester); shipping a roster
+    // to a caller who passed no elevation check is the leak R5 exists to stop.
+    if (f.scope !== "all") return { agents, users };
+    const userIds = [...userCounts.keys()];
+    const hydrated =
+      userIds.length === 0
+        ? []
+        : await prisma.user.findMany({
+            where: { id: { in: userIds } },
+            select: { id: true, email: true, name: true },
+          });
+    const userMap = new Map(hydrated.map((u) => [u.id, u]));
+    for (const [userId, count] of userCounts) {
+      const u = userMap.get(userId);
+      users.push({ userId, name: u?.name ?? null, email: u?.email ?? null, count });
+    }
+    users.sort((a, b) => b.count - a.count || (a.name ?? a.userId).localeCompare(b.name ?? b.userId));
+    return { agents, users };
+  },
 
   /**
    * Aggregate rating stats per agent within a window. Null cutoff = all time.
@@ -918,6 +1330,27 @@ export const agentRunRepository = {
         tokensCacheWrite: r._sum.tokensCacheWrite ?? 0,
       }))
       .sort((a, b) => (b.tokensIn + b.tokensOut) - (a.tokensIn + a.tokensOut));
+  },
+
+  toolsUsedSince: async (agentSlug: string, orgId: string, since: Date, maxRuns: number): Promise<string[][]> => {
+    const rows = await prisma.agentRun.findMany({
+      where: { agentSlug, orgId, startedAt: { gte: since } },
+      select: { toolsUsed: true },
+      orderBy: { startedAt: "desc" },
+      take: maxRuns,
+    });
+    return rows.map((r) => r.toolsUsed);
+  },
+
+  /** Same as toolsUsedSince across every agent in the org. */
+  toolsUsedSinceInOrg: async (orgId: string, since: Date, maxRuns: number): Promise<string[][]> => {
+    const rows = await prisma.agentRun.findMany({
+      where: { orgId, startedAt: { gte: since } },
+      select: { toolsUsed: true },
+      orderBy: { startedAt: "desc" },
+      take: maxRuns,
+    });
+    return rows.map((r) => r.toolsUsed);
   },
 
   /** High-level global overview suitable for dashboard header cards. */
@@ -1643,3 +2076,8 @@ export const agentRunRepository = {
     }));
   },
 };
+
+/** One row of the paged listing — the light projection plus the userName /
+ *  userEmail hydrated only under scope=all. Derived from the method so the
+ *  select clause stays the single definition of the shape. */
+export type AgentRunListRow = Awaited<ReturnType<typeof agentRunRepository.listPaged>>["rows"][number];

@@ -20,7 +20,7 @@ export interface SessionEvent {
 }
 
 export interface UserEvent {
-  type: 'channel_added' | 'channel_removed' | 'participant_added' | 'participant_removed' | 'user_mentioned' | 'incoming_call' | 'call_ended' | 'call_cancelled' | 'recap_unread_count_updated' | 'recap_generated' | 'recap_cleanup_completed' | 'data_source_ingestion_updated' | 'data_source_ingestion_progress' | 'client_command';
+  type: 'channel_added' | 'channel_removed' | 'participant_added' | 'participant_removed' | 'user_mentioned' | 'incoming_call' | 'call_ended' | 'call_cancelled' | 'recap_unread_count_updated' | 'recap_generated' | 'recap_cleanup_completed' | 'data_source_ingestion_updated' | 'data_source_ingestion_progress' | 'client_command' | 'ephemeral_message' | 'open_screen_message';
   userId: string;
   data: any;
   timestamp: Date;
@@ -49,6 +49,43 @@ export interface WorkflowEvent {
 export interface PresenceEvent {
   userId: string;
   status: 'ONLINE' | 'AWAY' | 'OFFLINE';
+}
+
+/** The denormalized ticket fields the kanban count rooms are derived from. */
+export interface TicketCountsSnapshot {
+  id: string;
+  workspaceId: string;
+  boardId: string | null;
+
+  channelId: string | null;
+  projectId: string | null;
+  stageName: string | null;
+  statusV2: string | null;
+  priority: string | null;
+  assignedTo: string | null;
+  createdBy: string | null;
+  userGroupId: string | null;
+  ticketType: string | null;
+  isStageOverdue?: boolean;
+  eta: number | null;
+  createdAt: number;
+  tags?: string[];
+  prReviewers?: string[];
+  qaAssigned?: string[];
+  roleAssignments?: Array<{ roleId: string; userIds: string[] }>;
+  formFieldValues?: Record<string, unknown>;
+}
+
+export interface TicketCountsEvent {
+  operation: 'insert' | 'update';
+  ticket: TicketCountsSnapshot;
+  previousTicket?: TicketCountsSnapshot | null;
+  timestamp: string;
+}
+
+export interface LabelUnreadCountsEvent {
+  channelId: string;
+  timestamp: string;
 }
 
 class RedisService {
@@ -229,6 +266,17 @@ class RedisService {
   ): Promise<void> {
     if (!this.redis) throw new Error('Redis not initialized');
     await this.redis.set(`user:wsctx:${userId}`, JSON.stringify(ctx), 'EX', 3600);
+  }
+
+  // 24h so the post-call webhook still finds it after long calls.
+  async setOzonetelCallTicket(workspaceId: string, callId: string, ticketId: string): Promise<void> {
+    if (!this.redis) throw new Error('Redis not initialized');
+    await this.redis.set(`ozonetel:call-ticket:${workspaceId}:${callId}`, ticketId, 'EX', 86400);
+  }
+
+  async getOzonetelCallTicket(workspaceId: string, callId: string): Promise<string | null> {
+    if (!this.redis) throw new Error('Redis not initialized');
+    return this.redis.get(`ozonetel:call-ticket:${workspaceId}:${callId}`);
   }
 
   // Session subscription management
@@ -533,6 +581,128 @@ class RedisService {
   
   // Global presence channel - all connected clients subscribe to this
   private readonly PRESENCE_CHANNEL = 'global:presence';
+
+  private readonly TICKET_COUNTS_CHANNEL = 'global:ticket-counts';
+
+  private readonly LABEL_UNREAD_COUNTS_CHANNEL = 'global:label-unread-counts';
+
+  /**
+   * Publish a live kanban-count change to every pod.
+   *
+   * Room membership for `ticket-counts:*` lives in each pod's in-memory Socket.IO
+   * adapter, so `io.to(room).emit(...)` reaches only that pod's sockets. Fanning the
+   * event out here — exactly as presence does — is what makes it cross pods.
+   */
+  async broadcastTicketCountsEvent(event: TicketCountsEvent): Promise<void> {
+    if (!this.publisher) {
+      logger.warn('[REDIS-TICKET-COUNTS] Redis publisher not initialized for ticket counts event');
+      return;
+    }
+
+    try {
+      const subscriberCount = await this.publisher.publish(
+        this.TICKET_COUNTS_CHANNEL,
+        JSON.stringify(event),
+      );
+
+      // Zero subscribers means no pod anywhere has setupTicketCountsSubscription running,
+      // so this event — and every other one — reaches nobody. That is a deployment-level
+      // failure, not a quiet no-op, so it is a warn rather than a debug.
+      if (subscriberCount === 0) {
+        logger.warn(
+          `[REDIS-TICKET-COUNTS] Published ${event.operation} for ticket ${event.ticket.id} but NO pod is subscribed to ${this.TICKET_COUNTS_CHANNEL} — live counts are dead cluster-wide`,
+        );
+        return;
+      }
+
+      logger.debug(
+        `[REDIS-TICKET-COUNTS] Published ${event.operation} for ticket ${event.ticket.id} (received by ${subscriberCount} subscribers)`,
+      );
+    } catch (error) {
+      logger.error(
+        `[REDIS-TICKET-COUNTS] Failed to publish ${event.operation} for ticket ${event.ticket.id}:`,
+        error,
+      );
+    }
+  }
+
+  async subscribeToTicketCountsEvents(
+    callback: (event: TicketCountsEvent) => void
+  ): Promise<void> {
+    if (!this.subscriber) throw new Error('Redis subscriber not initialized');
+
+    const channel = this.TICKET_COUNTS_CHANNEL;
+
+    if (!this.subscriptionCallbacks.has(channel)) {
+      this.subscriptionCallbacks.set(channel, []);
+    }
+    this.subscriptionCallbacks.get(channel)!.push(callback);
+
+    this.setupGlobalMessageHandler();
+
+    if (!this.activeSubscriptions.has(channel)) {
+      logger.info(`[REDIS-TICKET-COUNTS] Subscribing to global ticket counts channel: ${channel}`);
+      await this.subscriber.subscribe(channel);
+      this.activeSubscriptions.add(channel);
+    }
+  }
+
+  /**
+   * Label-unread fan-out mirrors the ticket-counts bridge: room membership for
+   * `label-unread-counts:channel:*` lives in each pod's in-memory Socket.IO
+   * adapter, so publishing here is what makes worker-originated events (desk
+   * auto-label automations, backfills) and other pods' writes reach every socket.
+   */
+  async broadcastLabelUnreadCountsEvent(event: LabelUnreadCountsEvent): Promise<void> {
+    if (!this.publisher) {
+      logger.warn('[REDIS-LABEL-UNREAD] Redis publisher not initialized for label unread counts event');
+      return;
+    }
+
+    try {
+      const subscriberCount = await this.publisher.publish(
+        this.LABEL_UNREAD_COUNTS_CHANNEL,
+        JSON.stringify(event),
+      );
+
+      if (subscriberCount === 0) {
+        logger.warn(
+          `[REDIS-LABEL-UNREAD] Published label unread update for channel ${event.channelId} but NO pod is subscribed to ${this.LABEL_UNREAD_COUNTS_CHANNEL} — live label counts are dead cluster-wide`,
+        );
+        return;
+      }
+
+      logger.debug(
+        `[REDIS-LABEL-UNREAD] Published label unread update for channel ${event.channelId} (received by ${subscriberCount} subscribers)`,
+      );
+    } catch (error) {
+      logger.error(
+        `[REDIS-LABEL-UNREAD] Failed to publish label unread update for channel ${event.channelId}:`,
+        error,
+      );
+    }
+  }
+
+  async subscribeToLabelUnreadCountsEvents(
+    callback: (event: LabelUnreadCountsEvent) => void
+  ): Promise<void> {
+    if (!this.subscriber) throw new Error('Redis subscriber not initialized');
+
+    const channel = this.LABEL_UNREAD_COUNTS_CHANNEL;
+
+    if (!this.subscriptionCallbacks.has(channel)) {
+      this.subscriptionCallbacks.set(channel, []);
+    }
+    this.subscriptionCallbacks.get(channel)!.push(callback);
+
+    this.setupGlobalMessageHandler();
+
+    if (!this.activeSubscriptions.has(channel)) {
+      logger.info(`[REDIS-LABEL-UNREAD] Subscribing to global label unread counts channel: ${channel}`);
+      await this.subscriber.subscribe(channel);
+      this.activeSubscriptions.add(channel);
+    }
+  }
 
   /**
    * Broadcast a presence event to all subscribers

@@ -1,18 +1,23 @@
 import { type ReactElement, useEffect, useState } from 'react';
 import { Button } from '@/components/ui/Button/Button';
-import { createMcpConnection, mcpCredentialFields } from '@/services/claw/clawMcpService';
+import { createMcpConnection } from '@/services/claw/clawMcpService';
 import type { McpServer } from '@/services/claw/clawMcpTypes';
 import { V2Dialog } from '../../shared/primitives/V2Dialog';
 import { McpLogo } from '../../shared/pickers/mcp/McpLogo';
+import { useMcpCredentialFields } from '../../shared/pickers/mcp/useMcpCredentialFields';
 
 /**
  * Collects a connector's own credentials (url, token, api key, …) and creates
  * the connection.
  *
- * Which inputs to show comes from the connector itself — its saved
- * `credentialForm`, else derived from its JSON `credentialSchema` — so a new
- * connector needs no change here to be connectable. Values are posted straight
- * to claw-auth and never stored client-side.
+ * Which inputs to show comes from the /servers/credential-fields registry
+ * first, falling back to the connector's own `credentialForm` /
+ * `credentialSchema` columns. Reading the columns alone is what broke prod:
+ * they are nullable and unset for connectors whose fields live only in code
+ * (amplitude, asana, bigquery, bitbucket…), so the dialog said "no details
+ * needed" and Connect posted an empty bag the backend then rejected.
+ *
+ * Values are posted straight to claw-auth and never stored client-side.
  */
 interface McpConnectDialogProps {
   server: McpServer;
@@ -35,7 +40,8 @@ export const McpConnectDialog = ({
   onOpenChange,
   onConnected,
 }: McpConnectDialogProps): ReactElement => {
-  const fields = mcpCredentialFields(server);
+  const { fieldsFor, loading: fieldsLoading } = useMcpCredentialFields();
+  const fields = fieldsFor(server);
   const [values, setValues] = useState<Record<string, string>>({});
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -54,7 +60,7 @@ export const McpConnectDialog = ({
   );
 
   const handleSubmit = async (): Promise<void> => {
-    if (submitting || missingRequired) return;
+    if (submitting || fieldsLoading || missingRequired) return;
     setError(null);
     setSubmitting(true);
     try {
@@ -87,11 +93,11 @@ export const McpConnectDialog = ({
           </Button>
           <Button
             onClick={(): void => void handleSubmit()}
-            disabled={submitting || missingRequired}
+            disabled={submitting || fieldsLoading || missingRequired}
             data-track-category='Claw MCP'
             data-track-name='SubmitConnectMcp'
           >
-            {submitting ? 'Connecting…' : 'Connect'}
+            {submitting ? 'Verifying…' : 'Connect'}
           </Button>
         </>
       }
@@ -108,9 +114,18 @@ export const McpConnectDialog = ({
         </div>
       </div>
 
+      {submitting && (
+        <p className='text-xs leading-4 text-muted-foreground'>
+          Checking these details with {label}. A connector being started for the first time can take
+          a few moments.
+        </p>
+      )}
+
       {fields.length === 0 ? (
         <p className='text-sm text-muted-foreground'>
-          This connector needs no details — confirm to connect.
+          {fieldsLoading
+            ? 'Checking what this connector needs…'
+            : 'This connector needs no details — confirm to connect.'}
         </p>
       ) : (
         fields.map(field => (

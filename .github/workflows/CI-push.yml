@@ -21,6 +21,7 @@ concurrency:
 jobs:
   ci:
     uses: ./.github/workflows/ci.yml
+    secrets: inherit
 
   semantic-release:
     name: "Prod: Semantic Release"

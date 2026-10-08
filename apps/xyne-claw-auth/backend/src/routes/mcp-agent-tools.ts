@@ -1,6 +1,10 @@
 import type { AgentToolsConfig } from "xyne-claw-shared";
-import { getSubagentDefinition } from "xyne-claw-shared";
+import { getSubagentDefinition,
+  openPaletteAdmits,
+  openPaletteModeFromTools,
+} from "xyne-claw-shared";
 import type { McpServerTools, McpToolInfo } from "../mcp/types.js";
+import type { KnownMcpTool } from "../lib/mcp-tool-name-index.js";
 import {
   gatewayCatalogSource,
   gatewayToolSelectionKey,
@@ -205,10 +209,17 @@ export function isMcpToolAllowedByAgentConfig(
   serverName: string,
   toolNameOrInfo: string | Pick<McpToolInfo, "name" | "selectionKey">,
   parseGatewayServerType: (serverType: string) => GatewayServerTarget | null,
+  /** Whether the connector marks this tool a write — only used by the open-palette fallback below. */
+  isWriteTool?: boolean,
 ): boolean {
   if (!config) return true;
   const tool = typeof toolNameOrInfo === "string" ? { name: toolNameOrInfo } : toolNameOrInfo;
-  return isMcpToolAllowedByAgentAllowSet(buildAgentToolAllowSet(config), serverType, serverName, tool, parseGatewayServerType);
+  if (isMcpToolAllowedByAgentAllowSet(buildAgentToolAllowSet(config), serverType, serverName, tool, parseGatewayServerType)) {
+    return true;
+  }
+  // Open palette is checked last so it never overrides an explicit grant —
+  // must stay in sync with the listing filter below, or a listed tool 403s on call.
+  return openPaletteAdmits(openPaletteModeFromTools(config), tool.name, isWriteTool);
 }
 
 export function shouldBypassMcpToolAgentFilter(serverType: string): boolean {
@@ -302,6 +313,8 @@ export function filterMcpServerToolsForAgentConfig(
   if (isMcpServerAllowedByAgentAllowSet(allow, serverTools.serverType, serverTools.serverName, parseGatewayServerType)) {
     return serverTools;
   }
+  const palette = openPaletteModeFromTools(config);
+  const writes = new Set(serverTools.writeTools ?? []);
   const tools = serverTools.tools.filter((tool) => {
     if (isMcpToolAllowedByAgentAllowSet(allow, serverTools.serverType, serverTools.serverName, tool, parseGatewayServerType)) {
       return true;
@@ -311,9 +324,44 @@ export function filterMcpServerToolsForAgentConfig(
       retainedForSubagents?.add(subagent);
       return true;
     }
-    return false;
+    // Open palette: ceiling is the tool's risk, not the agent's config —
+    // openPaletteAdmits never admits a destructive tool.
+    return openPaletteAdmits(palette, tool.name, writes.has(tool.name));
   });
   if (tools.length === 0) return null;
   const keptToolNames = new Set(tools.map((tool) => tool.name));
   return { ...serverTools, tools, writeTools: serverTools.writeTools.filter((toolName) => keptToolNames.has(toolName)) };
+}
+
+function scopedPicksNameServer(allow: AgentToolAllowSet, serverType: string, serverName: string): boolean {
+  const servers = new Set([normToolKey(serverType), normToolKey(serverName)]);
+  for (const key of allow.scopedToolNorm) {
+    const server = key.slice(0, key.indexOf("\u0000"));
+    if (servers.has(server)) return true;
+  }
+  return false;
+}
+
+export function mcpServerMayServeAgentConfig(input: {
+  config: AgentToolsConfig | undefined;
+  serverType: string;
+  serverName: string;
+  knownTools: ReadonlyArray<KnownMcpTool> | null;
+  parseGatewayServerType: (serverType: string) => GatewayServerTarget | null;
+  subagentRefs?: SubagentToolRefs[];
+}): boolean {
+  const { config, serverType, serverName, knownTools, parseGatewayServerType } = input;
+  if (!config) return true;
+  if (shouldBypassMcpToolAgentFilter(serverType)) return true;
+  if (openPaletteModeFromTools(config) !== "off") return true;
+  const allow = buildAgentToolAllowSet(config);
+  if (isMcpServerAllowedByAgentAllowSet(allow, serverType, serverName, parseGatewayServerType)) return true;
+  if (scopedPicksNameServer(allow, serverType, serverName)) return true;
+  if (!knownTools) return true;
+  const refs = input.subagentRefs ?? [];
+  return knownTools.some(
+    (tool) =>
+      isMcpToolAllowedByAgentAllowSet(allow, serverType, serverName, tool, parseGatewayServerType) ||
+      subagentReferencingTool(refs, tool) !== null,
+  );
 }

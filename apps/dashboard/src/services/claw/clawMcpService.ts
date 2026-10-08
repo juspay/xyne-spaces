@@ -17,6 +17,22 @@ export function listMcpConnections(userId: string): Promise<UserConnection[]> {
   return clawApiRequest<UserConnection[]>(`/users/${encodeURIComponent(userId)}/connections`);
 }
 
+export interface McpAvailability {
+  readonly mcpServerId: string;
+  readonly type: string;
+  /** This user has their own connection. */
+  readonly personal: boolean;
+  /** An org or deployment-wide credential the runtime falls back to. */
+  readonly org: boolean;
+}
+
+/** Which connectors will actually work for this user, own key or not. */
+export function listMcpAvailability(userId: string): Promise<McpAvailability[]> {
+  return clawApiRequest<McpAvailability[]>(
+    `/users/${encodeURIComponent(userId)}/connections/availability`,
+  );
+}
+
 export function listAgentMcpConnections(
   slug: string,
   requesterId: string,

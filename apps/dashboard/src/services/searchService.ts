@@ -1,5 +1,11 @@
 import { apiInstance } from './clients/apiClient';
-import { DisplaySearchResult, VespaSearchResponse, VespaSearchFilters } from '../types/search';
+import {
+  DisplaySearchResult,
+  QueryIntent,
+  RelatedContext,
+  VespaSearchResponse,
+  VespaSearchFilters,
+} from '../types/search';
 import { buildVespaSearchCacheKey } from './vespaSearchCacheKey';
 import { toSearchQuery } from '../utils/exactSearch';
 /**
@@ -16,6 +22,22 @@ export function sanitizeSearchQuery(query: string): string {
       .replace(/[\u0000-\u001F\u007F]/g, '') // Remove control characters
       .substring(0, 500)
   ); // Enforce max length
+}
+
+export interface VespaTagSearchResponse {
+  success: boolean;
+  data?: {
+    tags: string[];
+    total: number;
+  };
+  error?: string;
+}
+
+export interface VespaTagSearchFilters {
+  query?: string | undefined;
+  projectId?: string | undefined;
+  boardIds?: string[] | undefined;
+  limit?: number | undefined;
 }
 
 export class SearchService {
@@ -116,6 +138,37 @@ export class SearchService {
   }
 
   /**
+   * Classify a cmd+K query as a keyword lookup or a question that needs AI.
+   * Separate from vespaSearch so a slow classifier never delays results.
+   * Null means "no verdict" (feature off, clearly lexical, or classifier down).
+   */
+  async getQueryIntent(query: string, signal?: AbortSignal): Promise<QueryIntent | null> {
+    const response = await apiInstance.get<{ success: boolean; data: QueryIntent | null }>(
+      `${this.vespaBaseUrl}/intent`,
+      { params: { q: query }, ...(signal ? { signal } : {}) },
+    );
+    return response.data.success ? response.data.data : null;
+  }
+
+  /**
+   * What a composer draft relates to: threads, tickets, canvases and calls where it
+   * is answered, was asked before, or was discussed. POST so the unsent draft never
+   * lands in a URL. Null means "no verdict" (feature off or classifier down).
+   */
+  async getRelatedContext(
+    text: string,
+    conversationId: string | undefined,
+    signal?: AbortSignal,
+  ): Promise<RelatedContext | null> {
+    const response = await apiInstance.post<{ success: boolean; data: RelatedContext | null }>(
+      `${this.vespaBaseUrl}/related`,
+      { text, ...(conversationId ? { conversationId } : {}) },
+      signal ? { signal } : {},
+    );
+    return response.data.success ? response.data.data : null;
+  }
+
+  /**
    * Build query parameters for Vespa search request
    */
   private buildVespaSearchParams(filters: VespaSearchFilters): Record<string, string> {
@@ -161,6 +214,10 @@ export class SearchService {
 
     if (filters.channelMentions) {
       params['channelMentions'] = filters.channelMentions;
+    }
+
+    if (filters.groupMentions) {
+      params['groupMentions'] = filters.groupMentions;
     }
 
     // Highlight-only display names; JSON-encoded since names can contain commas.
@@ -216,6 +273,10 @@ export class SearchService {
       params['tags'] = filters.tags;
     }
 
+    if (filters.entity) {
+      params['entity'] = filters.entity;
+    }
+
     if (filters.before) {
       params['before'] = filters.before;
     }
@@ -238,6 +299,10 @@ export class SearchService {
 
     if (filters.assignee) {
       params['assignee'] = filters.assignee;
+    }
+
+    if (filters.userGroup) {
+      params['userGroup'] = filters.userGroup;
     }
 
     if (filters.dynamicFieldValues) {
@@ -286,11 +351,64 @@ export class SearchService {
       params['onlyMyChannels'] = filters.onlyMyChannels.toString();
     }
 
+    if (filters.excludeArchived !== undefined) {
+      params['excludeArchived'] = filters.excludeArchived.toString();
+    }
+
     if (filters.groupBy !== undefined) {
       params['groupBy'] = filters.groupBy;
     }
 
     return params;
+  }
+
+  /**
+   * Search for ticket tags via Vespa grouping
+   */
+  async searchTags(
+    filters: VespaTagSearchFilters,
+    signal?: AbortSignal,
+  ): Promise<{ tags: string[]; total: number }> {
+    try {
+      const params: Record<string, string> = {
+        type: 'ticket_tags',
+      };
+
+      if (filters.query) {
+        params['q'] = sanitizeSearchQuery(filters.query);
+      }
+
+      if (filters.projectId) {
+        params['projectId'] = filters.projectId;
+      }
+
+      if (filters.boardIds && filters.boardIds.length > 0) {
+        params['board'] = filters.boardIds.join(',');
+      }
+
+      if (filters.limit !== undefined) {
+        params['limit'] = filters.limit.toString();
+      }
+
+      const response = await apiInstance.get<VespaTagSearchResponse>(this.vespaBaseUrl, {
+        params,
+        ...(signal ? { signal } : {}),
+      });
+
+      if (!response.data.success || !response.data.data) {
+        throw new Error(response.data.error || 'Vespa tag search request failed');
+      }
+
+      return {
+        tags: response.data.data.tags,
+        total: response.data.data.total,
+      };
+    } catch (error) {
+      if (error instanceof Error) {
+        throw error;
+      }
+      throw new Error('Vespa tag search request failed');
+    }
   }
 }
 

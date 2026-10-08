@@ -1,17 +1,24 @@
 import { useSelector } from '@xstate/react';
-import { useEffect, useRef, useMemo, useCallback } from 'react';
+import { useEffect, useRef, useMemo, useCallback, useState } from 'react';
 import { useZero } from '../../../hooks/useZero';
 import { QueryResultType } from '@rocicorp/zero';
 import { useAuth } from '../../../hooks/useAuth';
 import { callActor } from '../../../machines/callMachine';
 import { roomActor } from '../../../machines/roomMachine';
-import { CallParticipant, Channel } from '@xyne/shared';
+import { CallParticipant, Channel, RingStatus } from '@xyne/shared';
 import { mutators } from '../../../zero/mutators';
 import { queries } from '../../../zero/queries';
 import { useAllChannels } from '../../../hooks/useChannels';
 import { getUserDisplayName } from '../../../utils/userDisplayName';
-import { useUsers } from '../../../hooks/useUsers';
+import { useSelf, useUsers } from '../../../hooks/useUsers';
+import { notificationsArePaused } from '../../../utils/notificationsPause';
 import { IncomingCallCard } from '../IncomingCall/IncomingCallCard';
+import {
+  FloatingIncomingCallWindow,
+  canFloatIncomingCall,
+  useFloatingHost,
+  useIsAppFocused,
+} from '../IncomingCall/FloatingIncomingCallWindow';
 import { globalClickTracker } from '../../../services/Analytics/globalClickTracker';
 import { buildCallNotificationBody } from '../IncomingCall/callNotificationBody';
 import {
@@ -32,6 +39,8 @@ export function IncomingCallModal(): React.ReactElement | null {
   const { user } = useAuth();
   const zero = useZero();
   const allUsers = useUsers();
+  // "Pause notifications" in Settings covers calls too.
+  const notificationsPaused = notificationsArePaused(useSelf()?.notificationsPausedUntil);
 
   // Use selectors to get state from the call actor
   const callState = useSelector(callActor, snapshot => snapshot.value);
@@ -40,6 +49,9 @@ export function IncomingCallModal(): React.ReactElement | null {
   const processingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const lastViewModelRef = useRef<IncomingCallViewModel | null>(null);
   const silenceRef = useRef<{ callId: string; reason: RingSilenceReason | null } | null>(null);
+  // callId -> ring status this device already reported, so each Zero sync doesn't re-send it
+  const reportedRingStatusRef = useRef<Map<string, RingStatus>>(new Map());
+  const liveSilenceReasonRef = useRef<RingSilenceReason | null>(null);
 
   // Get active calls from roomActor context and filter for incoming calls (where user is invited)
   const allActiveCalls = useSelector(roomActor, state => state.context.activeCalls);
@@ -95,6 +107,20 @@ export function IncomingCallModal(): React.ReactElement | null {
     });
   });
 
+  // Tell the caller this device has the call: RINGING, or BUSY when it arrives silenced
+  // because the user is already on a call / recording / has the mic in use. The mutator
+  // only ever raises the status, so a second device reporting RINGING can't undo BUSY.
+  const reportRingStatus = useCallback(
+    (callId: string): void => {
+      if (!zero) return;
+      const ringStatus = liveSilenceReasonRef.current ? RingStatus.BUSY : RingStatus.RINGING;
+      if (reportedRingStatusRef.current.get(callId) === ringStatus) return;
+      reportedRingStatusRef.current.set(callId, ringStatus);
+      void zero.mutate(mutators.calls.updateRingStatus({ callId, ringStatus }));
+    },
+    [zero],
+  );
+
   useEffect(() => {
     // Clear any existing timeout
     if (processingTimeoutRef.current) {
@@ -136,6 +162,8 @@ export function IncomingCallModal(): React.ReactElement | null {
           type: 'INCOMING_CALL',
           callData,
         });
+
+        reportRingStatus(callId);
       });
     }, 500); // 500ms delay to allow state transitions to complete
 
@@ -144,7 +172,7 @@ export function IncomingCallModal(): React.ReactElement | null {
         clearTimeout(processingTimeoutRef.current);
       }
     };
-  }, [incomingCalls, incomingCallQueue, canShowIncomingCalls, user?.id]);
+  }, [incomingCalls, incomingCallQueue, canShowIncomingCalls, user?.id, reportRingStatus]);
 
   // The caller hanging up removes the call from activeCalls. Tear the modal
   // down on that change rather than inside the debounce below — half a second
@@ -191,10 +219,13 @@ export function IncomingCallModal(): React.ReactElement | null {
   // mic half is Electron/macOS only; on web it is always false and the other two
   // carry the feature on their own.
   const liveSilenceReason = getRingSilenceReason({
+    notificationsPaused,
     isInActiveCall,
     recordingStatus,
     micBusy,
   });
+
+  liveSilenceReasonRef.current = liveSilenceReason;
 
   // Decided once per call and then held. Recomputing live would mean hanging up
   // on your first call sends the second one into a full-volume ringtone
@@ -221,6 +252,27 @@ export function IncomingCallModal(): React.ReactElement | null {
     }
   }
   const silenceReason = incomingCallData ? (silenceRef.current?.reason ?? null) : null;
+
+  // On desktop builds that support it, a call rings in a floating window over
+  // other apps whenever Xyne is not focused — including when the user switches
+  // away mid-ring — and the in-app card covers the rest, so the OS banner is
+  // not needed. A paused call reaches nothing outside the app.
+  const isPaused = silenceReason === 'paused';
+  const [canFloat] = useState(canFloatIncomingCall);
+  // A float that could not open, or was closed from outside mid-ring, costs only
+  // that call its float; it falls back to the banner.
+  const [floatLostForCallId, setFloatLostForCallId] = useState<string | null>(null);
+  const floatPossible = canFloat && floatLostForCallId !== incomingCallData?.callId;
+  // Every app window runs this component; only the main one floats the card.
+  const floatHost = useFloatingHost(floatPossible && isRinging);
+  const floatsHere = floatPossible && !isPaused && floatHost?.isMain === true;
+  const isAppFocused = useIsAppFocused(floatsHere && isRinging);
+  const showFloatingCard = floatsHere && isRinging && !!incomingCallData && isAppFocused === false;
+  // The banner is for when nothing else can show the call outside the app: no
+  // float support, the float was lost, or no main window left to float it.
+  // Undecided (host not answered yet) counts as covered, to avoid a stray banner.
+  const showBanner =
+    !isPaused && !(floatPossible && (floatHost === undefined || floatHost.mainExists));
 
   // Play notification sound when incoming call appears
   useEffect(() => {
@@ -334,6 +386,7 @@ export function IncomingCallModal(): React.ReactElement | null {
   useEffect(() => {
     if (
       !window.electronAPI ||
+      !showBanner ||
       !isRinging ||
       !incomingCallData ||
       notificationBody === null ||
@@ -359,7 +412,7 @@ export function IncomingCallModal(): React.ReactElement | null {
         window.electronAPI.closeCallNotification(incomingCallData.callId);
       }
     };
-  }, [isRinging, incomingCallData, notificationBody, silenceReason]);
+  }, [showBanner, isRinging, incomingCallData, notificationBody, silenceReason]);
 
   // Handle Electron notification action callbacks (accept/reject from notification)
   useEffect(() => {
@@ -438,11 +491,38 @@ export function IncomingCallModal(): React.ReactElement | null {
     lastViewModelRef.current = vm;
 
     return (
-      <IncomingCallCard
-        vm={vm}
-        onAccept={() => handleAcceptCall(incomingCallData.callId)}
-        onReject={() => handleRejectCall(incomingCallData.callId)}
-      />
+      <>
+        <IncomingCallCard
+          vm={vm}
+          onAccept={() => handleAcceptCall(incomingCallData.callId)}
+          onReject={() => handleRejectCall(incomingCallData.callId)}
+        />
+        {showFloatingCard && (
+          <FloatingIncomingCallWindow
+            key={incomingCallData.callId}
+            onUnavailable={() => setFloatLostForCallId(incomingCallData.callId)}
+          >
+            {container => (
+              <IncomingCallCard
+                container={container}
+                vm={vm}
+                // Tracked by hand: the global click tracker only sees clicks in
+                // this page, and the floating card lives in its own window.
+                onAccept={() => {
+                  globalClickTracker.trackManualEvent('CALLS', 'ACCEPT_INCOMING_CALL_FLOATING');
+                  // Joining puts the user in the call, so Xyne comes to the front.
+                  window.electronAPI?.incomingCallWindow?.bringAppToFront();
+                  handleAcceptCall(incomingCallData.callId);
+                }}
+                onReject={() => {
+                  globalClickTracker.trackManualEvent('CALLS', 'REJECT_INCOMING_CALL_FLOATING');
+                  handleRejectCall(incomingCallData.callId);
+                }}
+              />
+            )}
+          </FloatingIncomingCallWindow>
+        )}
+      </>
     );
   }
 

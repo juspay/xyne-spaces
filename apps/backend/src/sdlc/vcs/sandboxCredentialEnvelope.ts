@@ -1,3 +1,4 @@
+import type { SdlcSandboxGitCredential } from '@xyne/shared';
 import {
   createCipheriv,
   createPublicKey,
@@ -9,13 +10,9 @@ import {
 } from 'crypto';
 
 export interface SandboxCredentialBinding {
-  agentSlug: 'sdlc-agent';
   workspaceId: string;
   repoId: string;
-  operation: string;
-  executionId?: string;
-  sessionId?: string;
-  conversationId?: string;
+  actorUserId: string;
   sandboxId: string;
   credentialRevision: number;
   expiresAt: string;
@@ -44,7 +41,7 @@ export function parseSandboxPublicKey(encoded: string): KeyObject {
 }
 
 export function encryptSandboxCredentialEnvelope(
-  authentication: { username: string; password: string },
+  authentication: SdlcSandboxGitCredential,
   binding: SandboxCredentialBinding,
   sandboxPublicKey: KeyObject,
 ): SandboxCredentialEnvelope {

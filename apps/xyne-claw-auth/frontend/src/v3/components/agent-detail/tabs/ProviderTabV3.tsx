@@ -223,10 +223,10 @@ export function ProviderTabV3({ agent, userId }: Props) {
    *   `true`  (Always On) — agent's provider is the default for every run.
    *                         Old behavior; backfill default so existing agents
    *                         keep working without any opt-in.
-   *   `false` (On /upgrade) — runs default to the platform model (Kimi/Spaces);
-   *                          the agent's premium provider is used only when the
-   *                          user explicitly opts in via `/upgrade` or accepts
-   *                          the prompt after a failure / soft refusal.
+   *   `false` (Platform default) — runs use the user's personal provider
+   *                                (if configured), otherwise the platform model.
+   *                                The agent's premium provider is never selected
+   *                                automatically.
    *
    * Stored at agent.config.providerAlwaysOn. Undefined = treated as true on
    * the backend (see webhook.ts), so existing agents keep their behavior
@@ -748,7 +748,7 @@ export function ProviderTabV3({ agent, userId }: Props) {
 
         {providerView === "standard" ? (
           <>
-            {/* Always On vs. On /upgrade — policy switch for when the agent's
+            {/* Always On vs. Platform default — policy switch for when the agent's
                 premium provider is actually consumed. Defaults to Always On for
                 backfill (matches every existing agent's pre-feature behavior). */}
             <div className="mb-4 rounded-lg border border-xyne-border bg-xyne-surface-subtle p-3">
@@ -758,7 +758,7 @@ export function ProviderTabV3({ agent, userId }: Props) {
                   <p className="mt-1 text-[12px] text-xyne-fg-secondary leading-relaxed">
                     {alwaysOn
                       ? "Always on — every run uses the first provider above."
-                      : "On /upgrade only — runs default to the Spaces model (Kimi). Users opt in by typing /upgrade or accepting the prompt after a failure."}
+                      : "Platform default — runs use the user's personal provider if configured, otherwise the Spaces model (Kimi). The agent's own providers are used only in Always On mode."}
                   </p>
                 </div>
                 <div
@@ -790,7 +790,7 @@ export function ProviderTabV3({ agent, userId }: Props) {
                         : "text-xyne-fg-secondary hover:text-xyne-fg-primary"
                     }`}
                   >
-                    On /upgrade
+                    Platform default
                   </button>
                 </div>
               </div>
@@ -823,7 +823,7 @@ export function ProviderTabV3({ agent, userId }: Props) {
                   <div className="text-[13px] font-medium text-xyne-fg-primary">Subagents</div>
                   <p className="mt-1 text-[12px] text-xyne-fg-secondary leading-relaxed">
                     {subagentMode === "spaces"
-                      ? "Spaces default — subagents run on the Spaces platform model (cheaper/faster), even when this agent is on a premium provider."
+                      ? "Spaces default — subagents run on the Spaces fast model (falling back to the standard Spaces model if it fails), even when this agent is on a premium provider."
                       : "Follow parent — subagents run on the same provider as this agent."}
                     {" "}A per-subagent override, when set, always wins.
                   </p>

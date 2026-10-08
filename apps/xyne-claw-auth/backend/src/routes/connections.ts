@@ -1,15 +1,17 @@
 import { Router, type Request, type Response } from "express";
-import { asyncHandler, ok, badRequest, notFound } from "../lib/http.js";
+import { asyncHandler, ok, badRequest, notFound, HttpError, unauthorized } from "../lib/http.js";
 import { prisma } from "../db.js";
 import { encrypt, decrypt } from "../crypto.js";
 import { CONFIG } from "../config.js";
 import { validateCredentials } from "../validation.js";
 import { checkHealth } from "../health.js";
+import { verifyMcpCredentials } from "../lib/mcp-credential-verify.js";
+import { availabilityForServerIds } from "../lib/connector-availability.js";
 import { hasConnectorDefinition } from "../mcp/connector-definitions.js";
 import { evictSession } from "../mcp/runner.js";
 import { syncToolsForServer } from "../tool-sync.js";
-import { pinUserIdParam } from "../middleware/pin-user-id-param.js";
-import { getWorkspaceIdForUser } from "../lib/spaces-db.js";
+import { getCanonicalRequesterId, pinUserIdParam } from "../middleware/pin-user-id-param.js";
+import { getWorkspaceIdForUser, requestWorkspaceHint } from "../lib/spaces-db.js";
 
 import { createLogger } from "../logger.js";
 const log = createLogger("connections");
@@ -18,8 +20,17 @@ const router = Router();
 
 router.use("/:userId", pinUserIdParam);
 
+// Route parameters may contain the verified raw Spaces membership ID. Never
+// use that ID for persistence: all Claw connection rows are keyed by the
+// canonical identity that requireAuth placed in x-user-id.
+function canonicalUserId(req: Request): string {
+  const userId = getCanonicalRequesterId(req);
+  if (!userId) throw unauthorized("authenticated user required after pinUserIdParam");
+  return userId;
+}
+
 router.get("/:userId/connections", asyncHandler(async (req: Request<{ userId: string }>, res: Response) => {
-  const userId = req.params.userId;
+  const userId = canonicalUserId(req);
 
   const connections = await prisma.userMcpConnection.findMany({
     where: { userId },
@@ -39,8 +50,25 @@ router.get("/:userId/connections", asyncHandler(async (req: Request<{ userId: st
   ok(res, data);
 }));
 
+// GET /:userId/connections/availability
+router.get("/:userId/connections/availability", asyncHandler(async (req: Request<{ userId: string }>, res: Response) => {
+  const userId = canonicalUserId(req);
+  const servers = await prisma.mcpServer.findMany({ where: { enabled: true }, select: { id: true, type: true } });
+  const availability = await availabilityForServerIds(userId, servers.map((s) => s.id));
+
+  ok(
+    res,
+    servers.map((server) => ({
+      mcpServerId: server.id,
+      type: server.type,
+      personal: availability.personal.has(server.id),
+      org: availability.org.has(server.id),
+    })),
+  );
+}));
+
 router.post("/:userId/connections", asyncHandler(async (req: Request<{ userId: string }>, res: Response) => {
-  const userId = req.params.userId;
+  const userId = canonicalUserId(req);
   const { mcpServerId, credentials } = req.body as {
     mcpServerId?: string;
     credentials?: Record<string, unknown>;
@@ -62,6 +90,17 @@ router.post("/:userId/connections", asyncHandler(async (req: Request<{ userId: s
   const validation = await validateCredentials(serverExists.type, credentials);
   if (!validation.valid) {
     throw badRequest(validation.error);
+  }
+
+  await evictSession(userId, serverExists.type).catch(() => {});
+  const verification = await verifyMcpCredentials({
+    sessionKey: userId,
+    serverType: serverExists.type,
+    serverName: serverExists.name,
+    credentials: credentials as Record<string, unknown>,
+  });
+  if (!verification.ok) {
+    throw new HttpError(verification.kind === "rejected" ? 400 : 502, verification.message);
   }
 
   const encrypted = encrypt(JSON.stringify(credentials), CONFIG.encryptionKey);
@@ -111,7 +150,7 @@ router.post("/:userId/connections", asyncHandler(async (req: Request<{ userId: s
 }));
 
 router.delete("/:userId/connections/:id", asyncHandler(async (req: Request<{ userId: string; id: string }>, res: Response) => {
-  const userId = req.params.userId;
+  const userId = canonicalUserId(req);
   const id = req.params.id;
 
   const connection = await prisma.userMcpConnection.findFirst({
@@ -136,7 +175,7 @@ router.delete("/:userId/connections/:id", asyncHandler(async (req: Request<{ use
 
 router.get("/:userId/connections/:id/health", async (req: Request<{ userId: string; id: string }>, res: Response) => {
   try {
-    const userId = req.params.userId;
+    const userId = canonicalUserId(req);
     const id = req.params.id;
 
     const connection = await prisma.userMcpConnection.findFirst({
@@ -256,7 +295,7 @@ router.get("/:userId/connections/:id/health", async (req: Request<{ userId: stri
 });
 
 router.post("/:userId/connections/auto-connect-spaces", asyncHandler(async (req: Request<{ userId: string }>, res: Response) => {
-  const userId = req.params.userId;
+  const userId = canonicalUserId(req);
   const { spacesToken: bodyToken } = req.body as { spacesToken?: string };
 
   // Accept token from body OR from httpOnly cookie (forwarded by proxy).
@@ -266,7 +305,8 @@ router.post("/:userId/connections/auto-connect-spaces", asyncHandler(async (req:
   // pending-auth window it holds a JSON blob.
   const cookie = req.headers.cookie ?? "";
   const readCookie = (name: string): string | undefined => {
-    const m = cookie.match(new RegExp(`(?:^|;\\s*)${name}=([^;]*)`));
+    const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const m = cookie.match(new RegExp(`(?:^|;[ \t]*)${escaped}=([^;]*)`));
     return m?.[1] ? decodeURIComponent(m[1]) : undefined;
   };
   const lastWorkspace = readCookie("xyne_last_workspace");
@@ -299,7 +339,8 @@ router.post("/:userId/connections/auto-connect-spaces", asyncHandler(async (req:
   // looks at `req.cookies.xyne_session` *after* confirming `workspaceId` is
   // present (header or `xyne_last_workspace` cookie). Without it the
   // session-refresh path is skipped entirely → 401 once the JWT expires.
-  const resolvedWorkspaceId = lastWorkspace ?? await getWorkspaceIdForUser(userId, "require-auth").catch(() => null);
+  const resolvedWorkspaceId = lastWorkspace
+    ?? await getWorkspaceIdForUser(userId, "require-auth", requestWorkspaceHint(req)).catch(() => null);
   if (resolvedWorkspaceId) credentials["workspaceId"] = resolvedWorkspaceId;
   // TEMP [sid-debug] — remove after verifying
   log.info(`[sid-debug] auto-connect-spaces storing credentials keys=[${Object.keys(credentials).join(",")}] (no values)`);

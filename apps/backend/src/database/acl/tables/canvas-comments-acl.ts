@@ -1,15 +1,8 @@
 import { Prisma, PrismaClient } from '@prisma/client'
 import { BaseQueryACL, ACLContext } from '../base-acl'
+import { connectReachWhere } from '../../connectGroup'
 
-/**
- * Canvas comments carry NO workspaceId column — the tenant boundary is reached
- * through thread -> canvas. Filtering has to traverse that relation; a bare {}
- * would read as unrestricted and skip scoping altogether.
- *
- * canvasId is denormalised onto the row as well, but the thread relation is the
- * authoritative path (a comment cannot exist without its thread), so the filter
- * goes through it and creates validate both.
- */
+/** Canvas comments are tenant-scoped directly by their denormalized workspaceId. */
 export class CanvasCommentsACL extends BaseQueryACL<
   Prisma.CanvasCommentWhereInput,
   Prisma.CanvasCommentUncheckedCreateInput
@@ -18,19 +11,30 @@ export class CanvasCommentsACL extends BaseQueryACL<
     super(ctx, prisma)
   }
 
-  async getWhereClause(): Promise<Prisma.CanvasCommentWhereInput> {
-    return { thread: { canvas: { workspaceId: this.ctx.workspaceId } } }
+  async getWhereClause(queryWhere?: Record<string, unknown>): Promise<Prisma.CanvasCommentWhereInput> {
+    // Slack Connect: single-entity gate on the query's connectId/canvasId (comments are usually keyed
+    // by threadId — then neither is present and this degrades to the row's own workspaceId).
+    return connectReachWhere(this.prisma, this.ctx.workspaceId, 'canvas_comments', 'read', {
+      connectId: queryWhere?.canvasConnectId as string | undefined,
+      canvasId: queryWhere?.canvasId as string | undefined,
+    })
   }
 
-  async getMutateWhere(): Promise<Prisma.CanvasCommentWhereInput> {
-    return { thread: { canvas: { workspaceId: this.ctx.workspaceId } } }
+  async getMutateWhere(queryWhere?: Record<string, unknown>): Promise<Prisma.CanvasCommentWhereInput> {
+    // Slack Connect: update/delete scope follows the same single-entity gate as reads.
+    return connectReachWhere(this.prisma, this.ctx.workspaceId, 'canvas_comments', 'write', {
+      connectId: queryWhere?.canvasConnectId as string | undefined,
+      canvasId: queryWhere?.canvasId as string | undefined,
+    })
   }
 
   async canCreate(data: Prisma.CanvasCommentUncheckedCreateInput): Promise<boolean> {
+    if (data.workspaceId !== this.ctx.workspaceId) return false
+
     const thread = await this.prisma.canvasCommentThread.findFirst({
       where: {
         id: data.threadId,
-        canvas: { workspaceId: this.ctx.workspaceId },
+        workspaceId: this.ctx.workspaceId,
       },
       select: { canvasId: true },
     })

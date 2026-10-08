@@ -22,6 +22,9 @@ export interface RunScalars {
   dataSourceId?: string;
   draftId?: string;
   focusedComponentId?: string;
+  workflowId?: string;
+  executionId?: string;
+  focusedStepId?: string;
 }
 
 function key(sessionId: string): string {
@@ -30,7 +33,7 @@ function key(sessionId: string): string {
 
 export async function storeRunScalars(sessionId: string, scalars: RunScalars): Promise<void> {
   if (!sessionId) return;
-  if (!scalars.dataSourceId && !scalars.draftId && !scalars.focusedComponentId) return;
+  if (!Object.values(scalars).some((v) => typeof v === "string" && v)) return;
   try {
     await redisService.getConnection().set(key(sessionId), JSON.stringify(scalars), "EX", TTL_SECONDS);
   } catch (err) {

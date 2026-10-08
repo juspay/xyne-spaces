@@ -1,13 +1,15 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { RenderMessageWithHTML } from '../RenderMessageWithHTML/RenderMessageWithHTML';
+import { ExpandableMessageContext } from './ExpandableMessageContext';
 import { MaximizeTwoArrow } from '@xyne/icons';
-import useMeasure from '../../../hooks/useMeasure';
 
 interface ExpandableMessageProps {
-  message: string;
+  message?: string;
+  children?: React.ReactNode;
   showEdited?: boolean;
   maxHeight?: number; // in pixels, default 500
   className?: string;
+  fadeColor?: string;
   isSystemMessage?: boolean;
   messageId?: string;
   conversationId?: string;
@@ -21,9 +23,11 @@ interface ExpandableMessageProps {
 
 export const ExpandableMessage: React.FC<ExpandableMessageProps> = ({
   message,
+  children,
   showEdited = false,
   maxHeight = 500,
   className = '',
+  fadeColor = 'hsl(var(--background))',
   isSystemMessage = false,
   messageId,
   conversationId,
@@ -33,43 +37,62 @@ export const ExpandableMessage: React.FC<ExpandableMessageProps> = ({
   const [shouldShowButton, setShouldShowButton] = useState(false);
   const contentRef = useRef<HTMLDivElement>(null);
 
-  // Use ResizeObserver via useMeasure hook for reliable size detection
-  const { height: contentHeight } = useMeasure({ ref: contentRef, observeResize: true });
-
+  // Measure only after layout: a sync read here forced a style recalc per mounted message.
+  // Re-subscribing on `message` re-measures, since `observe()` delivers an initial entry.
   useEffect(() => {
-    if (contentRef.current) {
-      const fullHeight = contentRef.current.scrollHeight;
+    const node = contentRef.current;
+    if (!node) return undefined;
+    const observer = new ResizeObserver((): void => {
       // Add a small buffer to account for rounding errors
-      setShouldShowButton(fullHeight > maxHeight + 10);
-    }
-  }, [contentHeight, message, maxHeight]);
+      setShouldShowButton(node.scrollHeight > maxHeight + 10);
+    });
+    observer.observe(node);
+    return (): void => observer.disconnect();
+  }, [message, maxHeight]);
 
   const toggleExpanded = () => {
     setIsExpanded(!isExpanded);
   };
 
-  return (
+  // Blocks inside the message that collapse themselves (long code blocks) report
+  // when the user expands them. That already expands the message, so don't clip
+  // it or show a second toggle while any of them is open.
+  const [expandedChildCount, setExpandedChildCount] = useState(0);
+  const childContext = useMemo(
+    () => ({
+      setChildExpanded: (expanded: boolean) =>
+        setExpandedChildCount(count => Math.max(0, count + (expanded ? 1 : -1))),
+    }),
+    [],
+  );
+  const hasExpandedChild = expandedChildCount > 0;
+
+  const content = (
     <div className={`expandable-message relative ${className}`}>
       <div
         ref={contentRef}
-        className='transition-all duration-300 ease-in-out overflow-hidden'
+        className='overflow-hidden'
         style={{
-          maxHeight: isExpanded ? 'none' : `${maxHeight}px`,
+          maxHeight: isExpanded || hasExpandedChild ? 'none' : `${maxHeight}px`,
         }}
       >
-        <div className='jp-message-html whitespace-pre-wrap break-all-words'>
-          <RenderMessageWithHTML
-            message={message}
-            showEdited={showEdited}
-            isSystemMessage={isSystemMessage}
-            {...(messageId !== undefined && { messageId })}
-            {...(conversationId !== undefined && { conversationId })}
-            {...(slashCommandArtifactContext !== undefined && { slashCommandArtifactContext })}
-          />
-        </div>
+        {children !== undefined ? (
+          children
+        ) : (
+          <div className='jp-message-html whitespace-pre-wrap break-all-words'>
+            <RenderMessageWithHTML
+              message={message ?? ''}
+              showEdited={showEdited}
+              isSystemMessage={isSystemMessage}
+              {...(messageId !== undefined && { messageId })}
+              {...(conversationId !== undefined && { conversationId })}
+              {...(slashCommandArtifactContext !== undefined && { slashCommandArtifactContext })}
+            />
+          </div>
+        )}
       </div>
 
-      {shouldShowButton && (
+      {shouldShowButton && !hasExpandedChild && (
         <div
           className={
             isExpanded
@@ -80,8 +103,7 @@ export const ExpandableMessage: React.FC<ExpandableMessageProps> = ({
             isExpanded
               ? undefined
               : {
-                  backgroundImage:
-                    'linear-gradient(to bottom, transparent, hsl(var(--background)))',
+                  backgroundImage: `linear-gradient(to bottom, transparent, ${fadeColor})`,
                 }
           }
         >
@@ -91,7 +113,7 @@ export const ExpandableMessage: React.FC<ExpandableMessageProps> = ({
             className='expand-toggle-pill pointer-events-auto flex items-center gap-1 rounded-full bg-background px-2.5 py-1.5 text-[13px] leading-none text-foreground transition-colors hover:bg-muted cursor-pointer'
             data-track-category='ChatMessage'
             data-track-name='TOGGLE_EXPAND_MESSAGE'
-            data-track-metadata={JSON.stringify({ isExpanded, message: message.length })}
+            data-track-metadata={JSON.stringify({ isExpanded, message: message?.length ?? 0 })}
           >
             <MaximizeTwoArrow size={16} className={isExpanded ? 'rotate-180' : undefined} />
             <span>{isExpanded ? 'Show less' : 'Show more'}</span>
@@ -99,5 +121,11 @@ export const ExpandableMessage: React.FC<ExpandableMessageProps> = ({
         </div>
       )}
     </div>
+  );
+
+  return (
+    <ExpandableMessageContext.Provider value={childContext}>
+      {content}
+    </ExpandableMessageContext.Provider>
   );
 };

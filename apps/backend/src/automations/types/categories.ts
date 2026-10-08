@@ -16,6 +16,7 @@ export enum StepCategory {
   AI = 'ai',
   USER = 'user',
   CONTROL = 'control',
+  VALIDATOR = 'validator',
 }
 
 export const StepCategorySchema = z.nativeEnum(StepCategory);

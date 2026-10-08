@@ -1,6 +1,6 @@
 import React from 'react';
 import * as Tooltip from '@radix-ui/react-tooltip';
-import { isStatusExpired, formatExpiryTime } from '../../../utils/statusUtils';
+import { formatExpiryTime, resolveUserStatus } from '../../../utils/statusUtils';
 import { cn } from '../../../utils/classNames';
 import { renderEmoji } from '../../../utils/customEmojiUtils';
 
@@ -10,6 +10,7 @@ interface StatusIndicatorProps {
   statusEmoji?: string | null | undefined;
   statusContent?: string | null | undefined;
   statusExpiryAt?: number | null | undefined;
+  activityStatus?: string | null | undefined;
   size?: StatusIndicatorSize;
   showOnHover?: boolean;
   className?: string;
@@ -25,15 +26,20 @@ export const StatusIndicator: React.FC<StatusIndicatorProps> = ({
   statusEmoji,
   statusContent,
   statusExpiryAt,
+  activityStatus,
   size = 'sm',
   showOnHover = true,
   className,
 }) => {
-  // Check if user has a valid (non-expired) status
-  const hasValidStatus = statusEmoji && (!statusExpiryAt || !isStatusExpired(statusExpiryAt));
+  const status = resolveUserStatus({
+    activityStatus,
+    statusEmoji,
+    statusContent,
+    statusExpiryAt,
+  });
 
   // Don't render anything if no valid status
-  if (!hasValidStatus) {
+  if (!status.hasStatus) {
     return null;
   }
 
@@ -47,9 +53,9 @@ export const StatusIndicator: React.FC<StatusIndicatorProps> = ({
         sizeClass,
         className,
       )}
-      title={showOnHover ? undefined : `${statusContent}`}
+      title={showOnHover ? undefined : `${status.content}`}
     >
-      <span className='leading-none'>{renderEmoji(statusEmoji)}</span>
+      <span className='leading-none'>{renderEmoji(status.emoji)}</span>
     </div>
   );
 
@@ -72,11 +78,11 @@ export const StatusIndicator: React.FC<StatusIndicatorProps> = ({
           >
             <div className='text-sm text-center'>
               <div className='font-medium text-popover-foreground break-words flex items-center justify-center gap-1'>
-                {renderEmoji(statusEmoji)} {statusContent}
+                {renderEmoji(status.emoji)} {status.content}
               </div>
-              {statusExpiryAt && (
+              {status.expiryAt && (
                 <div className='text-xs text-muted-foreground mt-1'>
-                  {formatExpiryTime(statusExpiryAt, true)}
+                  {formatExpiryTime(status.expiryAt, true)}
                 </div>
               )}
             </div>

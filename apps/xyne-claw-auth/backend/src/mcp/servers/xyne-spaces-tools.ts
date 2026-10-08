@@ -5,6 +5,7 @@
  * Handlers call the Spaces HTTP client and return MCP-formatted results.
  */
 
+import { randomUUID } from "node:crypto";
 import { errMsg } from "../../lib/errors.js";
 import {
   interact,
@@ -21,14 +22,13 @@ import { esc, queryDirect, type DirectSearchResponse } from "./vespa-direct.js";
 import { buildYqlFromParams, AREA_NAMES, AREA_ALIASES, describeAreasForPrompt } from "./vespa-search-areas.js";
 import { validateCorpusScan, buildCorpusScanYql, parseBucketKey, termToQuery, MAX_SCAN_TERMS, type CorpusScanScope } from "./vespa-corpus-scan.js";
 import { validateEvidencePack, bucketRange, buildPackFetchYql, formatIstDate, toSnippet, MAX_PACK_PER_BUCKET, DEFAULT_PACK_PER_BUCKET, MAX_BUCKET_FETCHES } from "./vespa-evidence-pack.js";
-import { getWorkspaceIdForUser } from "../../lib/spaces-db.js";
+import { getWorkspaceIdForUser, spacesDbAvailable } from "../../lib/spaces-db.js";
 import {
   extractCleanTextFromFlowJson,
   isFlowJsonContent,
   SDLC_TOOL_NAMES,
   type Citation,
 } from "xyne-claw-shared";
-import { SDLC_BASELINE_KINDS } from "@xyne/shared/sdlc";
 import { CONFIG } from "../../config.js";
 import { createLogger } from "../../logger.js";
 
@@ -38,6 +38,18 @@ const RAW_ATTACHMENT_INLINE_LIMIT_BYTES = Number(
   process.env["SPACES_FETCH_ATTACHMENT_INLINE_LIMIT_BYTES"] ?? 5 * 1024 * 1024,
 );
 const isOnyxBenchLane = (): boolean => (process.env["ONYX_BENCH_VESPA"] ?? "").trim() === "true";
+
+// `spaces-search` used to cover the DIRECT_VESPA_SEARCH=off case. It is gone
+// (2026-09-26), so that flag now decides whether this deployment ships a
+// general search tool AT ALL. Silence there would look like "the agent chose
+// not to search" rather than "the agent had nothing to search with".
+if (!CONFIG.directVespaSearch) {
+  log.error(
+    "[xyne-spaces-tools] DIRECT_VESPA_SEARCH is off — NO general search tool is registered " +
+    "(spaces-vespa-search/-corpus-scan/-evidence-pack are all gated on it, and spaces-search was removed). " +
+    "Set DIRECT_VESPA_SEARCH=true plus VESPA_QUERY_ENDPOINT / VESPA_NAMESPACE / VESPA_CLUSTER.",
+  );
+}
 const ATTACHMENT_INGEST_TIMEOUT_MS = Number(
   process.env["SPACES_FETCH_ATTACHMENT_INGEST_TIMEOUT_MS"] ?? 120_000,
 );
@@ -964,7 +976,7 @@ const spacesSearch: ToolDef = {
       // spaces-search ALWAYS goes through the Spaces backend /api/vespaSearch
       // (the canonical YqlBuilder). DIRECT_VESPA_SEARCH deliberately does NOT
       // reroute this tool through the hand-maintained vespa-direct.ts copy — that
-      // flag now only gates the spaces-vespa-query escape-hatch tool (registered
+      // flag now only gates the structured direct-Vespa tools (registered
       // below). The direct copy lagged the backend (no mail, no fuzzy fallback,
       // no personalization/threshold ranking, single-surface grouping dropped,
       // weaker workspace isolation), so routing the primary search tool through
@@ -1342,12 +1354,12 @@ const spacesTickets: ToolDef = {
   description:
     "PRIMARY tool for all ticket queries. ALWAYS use this when the user asks about tickets, ticket status, ticket lists, " +
     "or anything ticket-related. Covers every filter the Spaces tickets UI offers: status, priority, assignee, creator, " +
-    "board, project, tags/labels, stage, channel, user group, ticket type, AI category, PR reviewer, QA assignee, " +
+    "board, project, tags/labels, stage, channel, merchant id (MID), user group, ticket type, AI category, PR reviewer, QA assignee, " +
     "due-date (ETA) range, and creation-date range. Every people filter (assignee, creator, PR reviewer, QA) accepts an " +
     "EMAIL or a userId. Most filters have a multi-select array form (statusIn, priorityIn, boardIdIn, stageNameIn, " +
-    "assignedToIn, createdByIn, userGroupIds, ticketTypes, aiCategory, prReviewers, qaAssigned) that matches ANY of the " +
+    "assignedToIn, createdByIn, userGroupIds, ticketTypes, aiCategory, prReviewers, qaAssigned, merchantIdIn) that matches ANY of the " +
     "given values. Returns structured ticket details including assignee, tags, stage, channel ID, conversation ID, " +
-    "createdAt, and updatedAt, plus (when set) the resolver + close time, last editor, first-response time, ticket type, " +
+    "createdAt, and updatedAt, plus (when set) the merchant id (MID), resolver + close time, last editor, first-response time, ticket type, " +
     "AI triage labels, owning group, due date (ETA), archived status, and related/duplicate tickets — the full lifecycle in one call. " +
     "Archived tickets are EXCLUDED from every filtered query (matching the Spaces UI); only a direct `ticketId`/`xyneId` " +
     "lookup can return one. " +
@@ -1402,6 +1414,16 @@ const spacesTickets: ToolDef = {
         description: "Filter by tag name(s), comma-separated (e.g. 'April-Launch,Q2')",
       },
       channelId: { type: "string", description: "Filter to tickets in this channel only" },
+      merchantId: {
+        type: "string",
+        description:
+          "Filter by merchant id (MID) — the ticket's merchantId column, matched exactly (e.g. 'merchant_1234'). Use when the user asks for tickets of a specific merchant.",
+      },
+      hasMerchantId: {
+        type: "boolean",
+        description:
+          "When true, return ONLY tickets that are linked to a merchant (merchantId is set); when false, only tickets with NO merchant. Ignored if `merchantId`/`merchantIdIn` is given.",
+      },
       // ── Multi-select variants (mirror the Spaces tickets UI, which is multi-select
       //    on every dropdown). Each is an array → Prisma `in`; when both a singular
       //    field above and its plural form are passed, the plural (array) wins. ──
@@ -1419,6 +1441,12 @@ const spacesTickets: ToolDef = {
         type: "array",
         items: { type: "string" },
         description: "Filter by MULTIPLE board ids (matches any). Multi-select form of `boardId`.",
+      },
+      merchantIdIn: {
+        type: "array",
+        items: { type: "string" },
+        description:
+          "Filter by MULTIPLE merchant ids / MIDs (matches any). Multi-select form of `merchantId`.",
       },
       stageNameIn: {
         type: "array",
@@ -1568,6 +1596,7 @@ const spacesTickets: ToolDef = {
       if (args["projectId"]) baseWhere["projectId"] = { equals: args["projectId"] };
       if (args["stageName"]) baseWhere["stageName"] = { equals: args["stageName"] };
       if (args["channelId"]) baseWhere["channelId"] = { equals: args["channelId"] };
+      if (args["merchantId"]) baseWhere["merchantId"] = { equals: args["merchantId"] };
       if (args["tags"]) {
         const tagNames = (args["tags"] as string)
           .split(",")
@@ -1607,6 +1636,13 @@ const spacesTickets: ToolDef = {
       if (boardIdIn.length) baseWhere["boardId"] = { in: boardIdIn };
       const stageNameIn = asStrArr(args["stageNameIn"]);
       if (stageNameIn.length) baseWhere["stageName"] = { in: stageNameIn };
+      const merchantIdIn = asStrArr(args["merchantIdIn"]);
+      if (merchantIdIn.length) baseWhere["merchantId"] = { in: merchantIdIn };
+      // Presence filter — only when no explicit id was given, so a concrete MID
+      // always wins over "any merchant" (mirrors the Spaces tickets API).
+      if (!merchantIdIn.length && !args["merchantId"] && typeof args["hasMerchantId"] === "boolean") {
+        baseWhere["merchantId"] = args["hasMerchantId"] ? { not: null } : { equals: null };
+      }
       const userGroupIds = asStrArr(args["userGroupIds"]);
       if (userGroupIds.length) baseWhere["userGroupId"] = { in: userGroupIds };
       const ticketTypes = asStrArr(args["ticketTypes"]);
@@ -2132,6 +2168,7 @@ async function formatTickets(rows: TicketRow[], opts: FormatOptions = {}): Promi
     }
     if (t.updatedBy && t.updatedBy !== t.createdBy) parts.push(`  Last edited by: ${userLabel(t.updatedBy)}`);
     if (t.ticketType) parts.push(`  Type: ${t.ticketType}`);
+    if (t.merchantId) parts.push(`  Merchant ID: ${t.merchantId}`);
     if (t.aiCategory || t.aiSubCategory) {
       parts.push(`  AI triage: ${[t.aiCategory, t.aiSubCategory].filter(Boolean).join(" / ")}`);
     }
@@ -2374,6 +2411,7 @@ interface TicketRow {
   firstRespondedAt?: string; // SLA: first response
   userGroupId?: string; // owning group (id; name is gateway-blocked)
   ticketType?: string; // categorization (e.g. Bug/Fix)
+  merchantId?: string; // linked merchant (MID), when the ticket has one
   isArchived?: boolean; // live PG archived state
   aiCategory?: string; // AI triage label
   aiSubCategory?: string; // AI triage sub-label
@@ -3225,8 +3263,20 @@ function userDetailLines(u: UserRow): string[] {
   if (u.lastActiveAt) times.push(`Last seen: ${toIST(u.lastActiveAt)} IST`);
   if (times.length > 0) out.push(`  ${times.join(" · ")}`);
   if (u.statusContent) out.push(`  Status: ${u.statusEmoji ? `${u.statusEmoji} ` : ""}${u.statusContent}`);
-  if (u.picture) out.push(`  Avatar: ${u.picture}`);
+  if (u.picture) out.push(`  Avatar: ${buildAvatarUrl(u.id, u.picture)}`);
   return out;
+}
+
+/** Build a READY-MADE, absolute avatar URL the agent can drop into HTML
+ *  verbatim. We emit the full URL (never the bare id + storage path) so the
+ *  desk/report agent never re-types — and truncates — the 25-char user id.
+ *  If `picture` is already an absolute http(s) URL it's passed through
+ *  unchanged; otherwise it's treated as a storage path and encoded into the
+ *  authenticated `/api/users/<id>/picture?v=<path>` endpoint. */
+function buildAvatarUrl(userId: string, picture: string): string {
+  if (/^https?:\/\//i.test(picture)) return picture;
+  const base = CONFIG.spacesAppUrl.replace(/\/+$/, "");
+  return `${base}/api/users/${userId}/picture?v=${encodeURIComponent(picture)}`;
 }
 
 // ── spaces-activity ──────────────────────────────────────────────────
@@ -4201,15 +4251,10 @@ const spacesCreateTicket: ToolDef = {
         description:
           "Optional. ConversationId of the user's triggering message. When set, any file attachments on that message are copied to the new ticket in the same operation. Does NOT affect routing — channelId still determines where the ticket lives.",
       },
-      sdlcRepoId: {
-        type: "string",
-        description:
-          "Required with sourceCanvasId when creating an implementation ticket for an SDLC artifact. The SDLC repository ID from repository mode.",
-      },
       sourceCanvasId: {
         type: "string",
         description:
-          "Required with sdlcRepoId when creating an implementation ticket for an SDLC artifact. The artifact canvas ID to link to the new ticket.",
+          "Set when creating an implementation ticket for an SDLC artifact: the artifact canvas ID to link to the new ticket. The link is scoped to the SDLC Hub given by channelId — no repository is needed.",
       },
       priority: {
         type: "string",
@@ -4227,11 +4272,7 @@ const spacesCreateTicket: ToolDef = {
         return err("channelId is required.");
       }
 
-      const sdlcRepoId = String(args["sdlcRepoId"] ?? "").trim();
       const sourceCanvasId = String(args["sourceCanvasId"] ?? "").trim();
-      if (Boolean(sdlcRepoId) !== Boolean(sourceCanvasId)) {
-        return err("sdlcRepoId and sourceCanvasId must be provided together.");
-      }
 
       const attachConversationId = (args["attachConversationId"] as string | undefined)?.trim() || undefined;
 
@@ -4246,9 +4287,6 @@ const spacesCreateTicket: ToolDef = {
       if (args["assignedTo"]) body["assignedTo"] = args["assignedTo"];
       if (args["eta"]) body["eta"] = args["eta"];
       if (args["tags"]) body["tags"] = args["tags"];
-      if (sdlcRepoId && sourceCanvasId) {
-        body["entityLinkContext"] = { sourceType: "CANVAS", sourceId: sourceCanvasId };
-      }
 
       // WORKAROUND for xyne-backend bug (ticketController.ts:500): when the
       // body omits createdBy, the conversationParticipant.upsert in the
@@ -4275,13 +4313,13 @@ const spacesCreateTicket: ToolDef = {
         status: string;
       };
 
-      if (sdlcRepoId && sourceCanvasId) {
+      if (sourceCanvasId) {
         try {
           await spacesFetch("/api/sdlc/claw/links", {
             method: "POST",
             headers: { "x-xyne-acting-user-id": ctx.userId },
             body: JSON.stringify({
-              repoId: sdlcRepoId,
+              channelId: args["channelId"],
               sourceType: "CANVAS",
               sourceId: sourceCanvasId,
               targetType: "TICKET",
@@ -4856,6 +4894,66 @@ const spacesScheduleCall: ToolDef = {
     }),
 };
 
+// ── spaces-start-call ─────────────────────────────────────────────────
+
+const spacesStartCall: ToolDef = {
+  name: "spaces-start-call",
+  description:
+    "Ring people on Spaces right now and start a live call. Use it when the user asks to call, ring, dial or get " +
+    "someone on a call — not for a future meeting, which is spaces-schedule-call. Resolve names to user IDs with " +
+    "spaces-users first. The people you name are rung on their Spaces clients and can accept or decline; you cannot " +
+    "make anyone answer. Report who was rung and the call link, and never claim a call was answered.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      targetUserIds: {
+        type: "array",
+        items: { type: "string" },
+        description: "User IDs to ring (use spaces-users to resolve names).",
+      },
+      channelId: { type: "string", description: "Ring a channel instead of named users." },
+      callType: { type: "string", enum: ["AUDIO", "VIDEO"], description: "Defaults to AUDIO." },
+      conversationId: {
+        type: "string",
+        description: "The AI conversation this call belongs to, so the call is linked back to this chat.",
+      },
+    },
+    required: [],
+  },
+  handler: withToolErrors("Start call error", async (args) => {
+      const targets = (args["targetUserIds"] as string[] | undefined) ?? [];
+      if (!args["channelId"] && targets.length === 0) {
+        return err("Must provide either channelId or targetUserIds.");
+      }
+
+      const body: Record<string, unknown> = {
+        callType: args["callType"] === "VIDEO" ? "VIDEO" : "AUDIO",
+      };
+      if (targets.length > 0) body["invitedUserIds"] = targets;
+      if (args["channelId"]) body["channelId"] = args["channelId"];
+      if (args["conversationId"]) body["conversationId"] = args["conversationId"];
+
+      const data = (await spacesFetch("/api/calls/claw/initiate", {
+        method: "POST",
+        body: JSON.stringify(body),
+      })) as { success?: boolean; callId?: string; externalId?: string; roomLink?: string };
+
+      if (data.success === false) return err("Failed to start the call.");
+      const who = targets.length > 0 ? `${targets.length} person(s)` : `channel ${String(args["channelId"])}`;
+      return ok(
+        [
+          `Ringing ${who} on Spaces now.`,
+          data.callId ? `  callId: ${data.callId}` : "",
+          data.externalId ? `  externalId: ${data.externalId}` : "",
+          data.roomLink ? `  join: ${data.roomLink}` : "",
+          "They can accept or decline; tell the user it is ringing, not that it was answered.",
+        ]
+          .filter(Boolean)
+          .join("\n"),
+      );
+    }),
+};
+
 // ── spaces-whoami ─────────────────────────────────────────────────────
 
 const spacesWhoami: ToolDef = {
@@ -4903,7 +5001,7 @@ const spacesReadCanvas: ToolDef = {
       const viewAccessId = String(params["viewAccessId"] ?? "").trim();
       if (!viewAccessId) return err("viewAccessId is required");
 
-      const s2sKey = process.env["INTERNAL_S2S_KEY"] ?? "";
+      const s2sKey = process.env["INTERNAL_S2S_KEY"] || process.env["XYNE_CLAW_S2S_KEY"] || "";
       const result = (await spacesFetch(
         `/api/internal/canvas/view/${encodeURIComponent(viewAccessId)}`,
         {
@@ -4954,7 +5052,7 @@ const spacesEditCanvas: ToolDef = {
       if (!viewAccessId) return err("viewAccessId is required");
       if (!content) return err("content is required");
 
-      const s2sKey = process.env["INTERNAL_S2S_KEY"] ?? "";
+      const s2sKey = process.env["INTERNAL_S2S_KEY"] || process.env["XYNE_CLAW_S2S_KEY"] || "";
       const result = (await spacesFetch(
         `/api/internal/canvas/view/${encodeURIComponent(viewAccessId)}`,
         {
@@ -5205,6 +5303,9 @@ const spacesCreateCanvas: ToolDef = {
   name: "spaces-create-canvas",
   description:
     "Create a new canvas in Xyne Spaces from markdown content. " +
+    "Use it for documents the user should keep: notes, specs, summaries and architecture write-ups. " +
+    "A ```mermaid fenced block renders as a live diagram in the canvas, so put flowcharts, sequence diagrams and " +
+    "architecture diagrams in one. " +
     "Returns the canvas URL and viewAccessId. " +
     "The user will be set as an OWNER of the canvas.",
   inputSchema: {
@@ -5223,6 +5324,16 @@ const spacesCreateCanvas: ToolDef = {
         enum: ["PUBLIC", "PRIVATE"],
         description: "Visibility: PUBLIC (team-visible) or PRIVATE (invite-only). Default: PRIVATE",
       },
+      channelId: {
+        type: "string",
+        description:
+          "Hub channel to file the canvas in. Use the channelId from the run's open-surface context when the user is working in a hub, so the canvas lands where they are rather than unfiled.",
+      },
+      sdlcFolderId: {
+        type: "string",
+        description:
+          "Folder inside that hub to file the canvas in. Use the folderId from the run's open-surface context; requires channelId.",
+      },
     },
     required: ["title", "markdown"],
   },
@@ -5230,6 +5341,8 @@ const spacesCreateCanvas: ToolDef = {
       const title = String(args["title"] ?? "").trim();
       const markdown = String(args["markdown"] ?? "");
       const visibility = String(args["visibility"] ?? "PRIVATE");
+      const channelId = String(args["channelId"] ?? "").trim();
+      const sdlcFolderId = String(args["sdlcFolderId"] ?? "").trim();
 
       if (!title) return err("Title is required");
       if (!markdown) return err("Markdown content is required");
@@ -5240,6 +5353,8 @@ const spacesCreateCanvas: ToolDef = {
           title,
           markdown,
           visibility: visibility === "PUBLIC" ? "PUBLIC" : "PRIVATE",
+          ...(channelId ? { channelId } : {}),
+          ...(channelId && sdlcFolderId ? { sdlcFolderId } : {}),
         }),
       })) as {
         id: string;
@@ -5255,6 +5370,7 @@ const spacesCreateCanvas: ToolDef = {
         prefixChunk(1, "Canvas created successfully!", [
           ``,
           `Title: ${data.title}`,
+          ...(channelId && sdlcFolderId ? [`Filed in the hub folder the user is working in.`] : []),
           `URL: ${data.url}`,
           `Visibility: ${data.visibility}`,
           `View Access ID: ${data.viewAccessId}`,
@@ -5264,344 +5380,22 @@ const spacesCreateCanvas: ToolDef = {
     }),
 };
 
-// ── canonical SDLC artifact mutation ──────────────────────────────
-const SDLC_AGENT_COMMIT_REF_PATTERN = "^(?:[0-9a-fA-F]{9,40}|ROOT_BOOTSTRAP)$";
-const SDLC_WIKI_PATH_PATTERN = "^(?!.*(?:^|/)\\.\\.(?:/|$))(?!.*//)[^/\\\\]+(?:/[^/\\\\]+)*\\.[mM][dD]$";
-const sdlcSourcePathsSchema = {
-  type: "array",
-  maxItems: 500,
-  items: { type: "string", minLength: 1, maxLength: 1024 },
-} as const;
-const sdlcSourceReferencesSchema = {
-  type: "array",
-  maxItems: 500,
-  items: {
-    type: "object",
-    additionalProperties: false,
-    properties: {
-      path: { type: "string", minLength: 1, maxLength: 1024, description: "Repository-relative source path" },
-      symbol: { type: "string", minLength: 1, maxLength: 512, description: "Optional source symbol shown in the link label" },
-      startLine: { type: "integer", minimum: 1, description: "Optional trusted one-based start line" },
-      endLine: { type: "integer", minimum: 1, description: "Optional trusted one-based end line" },
-    },
-    required: ["path"],
-  },
+// ── SDLC tools ─────────────────────────────────────────────────────
+// workspaceId and actorUserId arrive bound from the run's SDLC context; every
+// other argument is the LLM's, and the Spaces backend checks the Actor can reach it.
+
+const SDLC_CHANNEL_ID = {
+  type: "string",
+  minLength: 1,
+  description: "Channel id of the SDLC Hub (a hub is a channel). Use this run's hub from the SDLC Run Context, or a channelId from spaces-sdlc-list-repositories.",
 } as const;
 
-function sdlcMutationVariant(
-  artifactType: "WIKI" | "BASELINE",
-  action: string,
-  required: readonly string[],
-  propertyOverrides: Record<string, unknown> = {},
-) {
-  return {
-    type: "object",
-    properties: {
-      artifactType: { const: artifactType },
-      action: { const: action },
-      ...(required.includes("sourcePaths") && action !== "archive" ? { sourcePaths: { minItems: 1 } } : {}),
-      ...propertyOverrides,
-    },
-    required: ["artifactType", "action", ...required],
-  } as const;
-}
-
-const spacesSdlcMutateArtifact: ToolDef = {
-  name: SDLC_TOOL_NAMES.mutateArtifact,
-  description:
-    "Create or mutate one trusted-repository SDLC artifact. Supports artifact create/update, incremental " +
-    "baseline drafts, and Wiki page create/update/section/move/archive/restore actions. Artifact types are canvas " +
-    "folders on the repo's SDLC channel: PRD and Tech Docs are seeded built-in types, and users can add custom " +
-    "types; list them via spaces-sdlc-list-artifact-types. To create an artifact of any type, pass its folderId " +
-    "(from that tool) plus trackId (the SDLC track it belongs to). To update an artifact, pass its canvasId and " +
-    "markdown. Link related artifacts via relatedCanvasIds. Trusted repository and execution identity is " +
-    "injected by the platform.",
-  inputSchema: {
-    type: "object",
-    properties: {
-      repoId: { type: "string", minLength: 1 },
-      workspaceId: { type: "string", minLength: 1 },
-      actorUserId: { type: "string", minLength: 1 },
-      executionId: { type: "string", minLength: 1 },
-      sessionId: { type: "string", minLength: 1 },
-      artifactType: { type: "string", enum: ["WIKI", "BASELINE"] },
-      baselineKind: {
-        type: "string",
-        enum: [...SDLC_BASELINE_KINDS],
-      },
-      setupExecutionId: { type: "string", minLength: 1 },
-      workflowExecutionId: { type: "string", minLength: 1 },
-      title: { type: "string", minLength: 1, maxLength: 255 },
-      action: {
-        type: "string",
-        enum: ["create", "update", "replace_section", "insert_section", "remove_section", "move", "archive", "restore", "begin", "upsert_section", "finalize"],
-      },
-      sectionKey: { type: "string", minLength: 1, maxLength: 80 },
-      sectionTitle: { type: "string", minLength: 1, maxLength: 255 },
-      markdown: { type: "string", minLength: 1, maxLength: 5_000_000 },
-      path: { type: "string", minLength: 1, maxLength: 512, pattern: SDLC_WIKI_PATH_PATTERN },
-      destinationPath: { type: "string", minLength: 1, maxLength: 512, pattern: SDLC_WIKI_PATH_PATTERN },
-      expectedContentHash: { type: "string", minLength: 1, maxLength: 128 },
-      heading: { type: "string", minLength: 1, maxLength: 255, description: "Exact existing page heading used as the section mutation target or insertion anchor" },
-      commitSha: { type: "string", pattern: SDLC_AGENT_COMMIT_REF_PATTERN },
-      sourcePaths: sdlcSourcePathsSchema,
-      sourceReferences: sdlcSourceReferencesSchema,
-      folderId: { type: "string", minLength: 1, description: "The artifact-type folder id to create the artifact under; get it from spaces-sdlc-list-artifact-types. Required for every artifact create." },
-      relatedCanvasIds: { type: "array", items: { type: "string", minLength: 1 }, description: "Optional canvas ids of existing artifacts to link as related context on create." },
-      trackId: { type: "string", minLength: 1, description: "Required when creating an artifact: the SDLC track it belongs to. Get it from spaces-sdlc-list-artifacts or the user's chosen track." },
-      generationCommit: { type: "string", maxLength: 255 },
-      canvasId: { type: "string", minLength: 1, description: "Canonical SDLC Canvas ID from the canvas URL or artifact response" },
-    },
-    required: ["action"],
-    oneOf: [
-      {
-        type: "object",
-        properties: {
-          action: { const: "create" },
-          folderId: { type: "string", minLength: 1 },
-        },
-        required: ["action", "folderId", "title", "markdown", "trackId"],
-        not: { required: ["artifactType"] },
-      },
-      {
-        type: "object",
-        properties: {
-          action: { const: "update" },
-          canvasId: { type: "string", minLength: 1 },
-        },
-        required: ["action", "canvasId", "markdown"],
-        not: { required: ["artifactType"] },
-      },
-      sdlcMutationVariant("WIKI", "create", ["commitSha", "path", "title", "markdown", "sourcePaths"]),
-      sdlcMutationVariant("WIKI", "update", ["commitSha", "path", "expectedContentHash", "title", "markdown", "sourcePaths"]),
-      sdlcMutationVariant("WIKI", "restore", ["commitSha", "path", "expectedContentHash", "title", "markdown", "sourcePaths"]),
-      sdlcMutationVariant("WIKI", "archive", ["commitSha", "path", "expectedContentHash", "sourcePaths"]),
-      sdlcMutationVariant("WIKI", "replace_section", ["commitSha", "path", "expectedContentHash", "heading", "markdown", "sourcePaths"], { markdown: { maxLength: 1_000_000 } }),
-      sdlcMutationVariant("WIKI", "insert_section", ["commitSha", "path", "expectedContentHash", "heading", "markdown", "sourcePaths"], { markdown: { maxLength: 1_000_000 } }),
-      sdlcMutationVariant("WIKI", "remove_section", ["commitSha", "path", "expectedContentHash", "heading", "sourcePaths"]),
-      sdlcMutationVariant("WIKI", "move", ["commitSha", "path", "destinationPath", "expectedContentHash"]),
-      sdlcMutationVariant("BASELINE", "begin", ["baselineKind", "setupExecutionId", "workflowExecutionId", "title"]),
-      sdlcMutationVariant("BASELINE", "upsert_section", ["baselineKind", "setupExecutionId", "workflowExecutionId", "title", "sectionKey", "sectionTitle", "markdown", "sourceReferences"], { markdown: { maxLength: 1_000_000 }, sourceReferences: { minItems: 1 } }),
-      sdlcMutationVariant("BASELINE", "finalize", ["baselineKind", "setupExecutionId", "workflowExecutionId", "title"]),
-    ],
-  },
-  async handler(args, ctx) {
-    return mutateSdlcArtifact(args, ctx);
-  },
-  async appHandler(args, ctx) {
-    return mutateSdlcArtifact(args, ctx);
-  },
-};
-
-async function updateSdlcBaseline(args: Record<string, unknown>, ctx: HandlerContext): Promise<ToolResult> {
-  try {
-    const data = (await spacesFetch("/api/sdlc/claw/baseline-drafts", {
-      method: "POST",
-      headers: { "x-xyne-acting-user-id": ctx.userId },
-      body: JSON.stringify(args),
-    }, sdlcSpacesAuth())) as {
-      artifact: {
-        canvasId: string;
-        viewAccessId?: string;
-        url?: string;
-        kind: string;
-      };
-    };
-    const artifact = data.artifact;
-    const citations: Citation[] = [];
-    pushCanvasCitation(citations, artifact.viewAccessId, 1, String(args["title"] ?? "SDLC baseline"));
-    return okCited(
-      prefixChunk(1, `SDLC baseline ${String(args["action"] ?? "updated")}`, [
-        `Canvas ID: ${artifact.canvasId}`,
-        `URL: ${artifact.url ?? `/chat/canvas/${artifact.canvasId}`}`,
-      ]),
-      citations,
-    );
-  } catch (e) {
-    return err(`Update SDLC baseline error: ${errMsg(e)}`);
-  }
-}
-
-async function createSdlcArtifact(args: Record<string, unknown>, ctx: HandlerContext): Promise<ToolResult> {
-  try {
-    const data = (await spacesFetch("/api/sdlc/claw/artifacts", {
-      method: "POST",
-      headers: { "x-xyne-acting-user-id": ctx.userId },
-      body: JSON.stringify(args),
-    }, sdlcSpacesAuth())) as {
-      artifact: {
-        canvasId: string;
-        viewAccessId?: string;
-        url?: string;
-      };
-    };
-    const artifact = data.artifact;
-    const citations: Citation[] = [];
-    pushCanvasCitation(citations, artifact.viewAccessId, 1, String(args["title"] ?? "SDLC artifact"));
-    return okCited(
-      prefixChunk(1, "SDLC artifact created", [
-        `Canvas ID: ${artifact.canvasId}`,
-        `URL: ${artifact.url ?? `/chat/canvas/${artifact.canvasId}`}`,
-      ]),
-      citations,
-    );
-  } catch (e) {
-    return err(`Create SDLC artifact error: ${errMsg(e)}`);
-  }
-}
-
-async function mutateSdlcArtifact(args: Record<string, unknown>, ctx: HandlerContext): Promise<ToolResult> {
-  const artifactType = String(args["artifactType"] ?? "");
-  const action = String(args["action"] ?? "");
-  if (artifactType === "BASELINE") {
-    if (!["begin", "upsert_section", "finalize"].includes(action)) {
-      return err("Baseline action must be begin, upsert_section, or finalize.");
-    }
-    return updateSdlcBaseline(args, ctx);
-  }
-  const folderId = String(args["folderId"] ?? "").trim();
-  if (action === "create" && folderId) {
-    return createSdlcArtifact(args, ctx);
-  }
-  if (action === "update" && !artifactType && String(args["canvasId"] ?? "").trim()) {
-    try {
-      const data = (await spacesFetch("/api/sdlc/claw/artifacts/update", {
-        method: "POST",
-        headers: { "x-xyne-acting-user-id": ctx.userId },
-        body: JSON.stringify(args),
-      }, sdlcSpacesAuth())) as { artifact: { canvasId: string; viewAccessId?: string; url?: string } };
-      return ok(JSON.stringify(data.artifact));
-    } catch (e) {
-      return err(`Update SDLC artifact error: ${errMsg(e)}`);
-    }
-  }
-  if (artifactType !== "WIKI") return err("Unsupported SDLC artifactType.");
-  if (action === "move") {
-    return callSdlcWiki("/pages/move", {
-      executionId: args["executionId"], sessionId: args["sessionId"], repoId: args["repoId"],
-      commitSha: args["commitSha"], sourcePath: args["path"], destinationPath: args["destinationPath"],
-      expectedContentHash: args["expectedContentHash"], title: args["title"],
-    });
-  }
-  if (!["create", "update", "replace_section", "insert_section", "remove_section", "archive", "restore"].includes(action)) {
-    return err("Unsupported Wiki artifact action.");
-  }
-  const page = {
-    action,
-    path: args["path"],
-    title: args["title"],
-    markdown: args["markdown"],
-    expectedContentHash: args["expectedContentHash"],
-    heading: args["heading"],
-    sourcePaths: args["sourcePaths"] ?? [],
-    sourceReferences: args["sourceReferences"],
-  };
-  return callSdlcWiki("/pages/write", {
-    executionId: args["executionId"], sessionId: args["sessionId"], repoId: args["repoId"],
-    commitSha: args["commitSha"], page,
-  });
-}
-
-async function callSdlcWiki(path: string, args: Record<string, unknown>): Promise<ToolResult> {
-  try {
-    const s2sKey = process.env["INTERNAL_S2S_KEY"] ?? process.env["XYNE_CLAW_S2S_KEY"] ?? "";
-    if (!s2sKey) return err("Internal S2S key is unavailable for the SDLC Wiki tool.");
-    const data = await spacesFetch(
-      `/api/internal/sdlc/wiki${path}`,
-      { method: "POST", body: JSON.stringify(args) },
-      { s2sKey },
-    );
-    return ok(JSON.stringify(data));
-  } catch (e) {
-    return err(`SDLC Wiki tool error: ${errMsg(e)}`);
-  }
-}
-
-async function callSdlcArtifactHistory(
-  path: string,
-  args: Record<string, unknown>,
-  ctx: HandlerContext,
-): Promise<ToolResult> {
-  try {
-    const s2sKey = process.env["INTERNAL_S2S_KEY"] ?? process.env["XYNE_CLAW_S2S_KEY"] ?? "";
-    if (!s2sKey) return err("Internal S2S key is unavailable for SDLC artifact history.");
-    const data = await spacesFetch(
-      `/api/internal/sdlc/artifact-versions${path}`,
-      {
-        method: "POST",
-        headers: { "x-xyne-acting-user-id": ctx.userId },
-        body: JSON.stringify(args),
-      },
-      { s2sKey },
-    );
-    return ok(JSON.stringify(data));
-  } catch (e) {
-    return err(`SDLC artifact history error: ${errMsg(e)}`);
-  }
-}
-
-const sdlcArtifactSelectorSchema = {
-  oneOf: [
-    {
-      type: "object",
-      additionalProperties: false,
-      properties: {
-        type: { const: "WIKI_PAGE" },
-        path: {
-          type: "string",
-          minLength: 1,
-          maxLength: 512,
-          pattern: SDLC_WIKI_PATH_PATTERN,
-          description: "Current normalized relative Markdown Wiki page path",
-        },
-        includeArchived: { type: "boolean" },
-      },
-      required: ["type", "path"],
-    },
-    {
-      type: "object",
-      additionalProperties: false,
-      properties: {
-        type: { const: "SDLC_CANVAS" },
-        canvasId: { type: "string", minLength: 1, maxLength: 256, description: "Repo Knowledge or artifact Canvas ID" },
-      },
-      required: ["type", "canvasId"],
-    },
-  ],
+const SDLC_CANVAS_ID = {
+  type: "string",
+  minLength: 1,
+  maxLength: 256,
+  description: "Canvas id of the artifact, from spaces-sdlc-list-artifacts or an artifact URL.",
 } as const;
-
-const spacesSdlcListArtifactVersions: ToolDef = {
-  name: SDLC_TOOL_NAMES.listArtifactVersions,
-  description: "List a bounded newest-first page of immutable versions for one trusted-repository SDLC Wiki page, Repo Knowledge document, or artifact (any type). Read the current artifact first and paginate only when older context is relevant; this list intentionally omits historical bodies.",
-  inputSchema: {
-    type: "object",
-    properties: {
-      repoId: { type: "string" }, workspaceId: { type: "string" }, actorUserId: { type: "string" },
-      selector: sdlcArtifactSelectorSchema,
-      cursor: { type: "string", minLength: 1 },
-      limit: { type: "integer", minimum: 1, maximum: 25 },
-    },
-    required: ["repoId", "workspaceId", "actorUserId", "selector"],
-  },
-  async handler(args, ctx) { return callSdlcArtifactHistory("/list", args, ctx); },
-  async appHandler(args, ctx) { return callSdlcArtifactHistory("/list", args, ctx); },
-};
-
-const spacesSdlcReadArtifactVersion: ToolDef = {
-  name: SDLC_TOOL_NAMES.readArtifactVersion,
-  description: "Read exactly one immutable version previously listed for a trusted-repository SDLC artifact. Historical text is supporting evidence only; current repository code and current artifacts remain authoritative.",
-  inputSchema: {
-    type: "object",
-    properties: {
-      repoId: { type: "string" }, workspaceId: { type: "string" }, actorUserId: { type: "string" },
-      selector: sdlcArtifactSelectorSchema,
-      versionId: { type: "string", minLength: 1 },
-    },
-    required: ["repoId", "workspaceId", "actorUserId", "selector", "versionId"],
-  },
-  async handler(args, ctx) { return callSdlcArtifactHistory("/read", args, ctx); },
-  async appHandler(args, ctx) { return callSdlcArtifactHistory("/read", args, ctx); },
-};
 
 // SDLC claw routes (/api/sdlc/claw/*) can be pointed at a dedicated SDLC backend
 // via SDLC_BACKEND_URL, mirroring the iframe's VITE_SDLC_BACKEND_URL. Unset -> the
@@ -5621,234 +5415,375 @@ function sdlcSpacesAuth(): SpacesAuthContext | undefined {
   };
 }
 
-async function callSdlcTracks(
-  path: string,
-  args: Record<string, unknown>,
-  ctx: HandlerContext,
-): Promise<ToolResult> {
+function pick(args: Record<string, unknown>, keys: readonly string[]): Record<string, unknown> {
+  return Object.fromEntries(keys.filter((key) => args[key] !== undefined).map((key) => [key, args[key]]));
+}
+
+/** Hub routes that take the Actor from the acting-user header. */
+async function sdlcClawCall(label: string, path: string, body: Record<string, unknown>, ctx: HandlerContext): Promise<ToolResult> {
   try {
-    const data = await spacesFetch(`/api/sdlc/claw/tracks${path}`, {
+    const data = await spacesFetch(`/api/sdlc/claw${path}`, {
       method: "POST",
       headers: { "x-xyne-acting-user-id": ctx.userId },
-      body: JSON.stringify(args),
+      body: JSON.stringify(body),
     }, sdlcSpacesAuth());
     return ok(JSON.stringify(data));
   } catch (e) {
-    return err(`SDLC tracks error: ${errMsg(e)}`);
+    return err(`${label} error: ${errMsg(e)}`);
   }
 }
 
-const spacesSdlcListTracks: ToolDef = {
-  name: SDLC_TOOL_NAMES.listTracks,
-  description:
-    "List the SDLC tracks (workstreams) in a trusted repository. Call this before creating a PRD or Tech Doc so the user can pick an existing track; if none fit, use spaces-sdlc-create-track.",
-  inputSchema: {
-    type: "object",
-    properties: { repoId: { type: "string", minLength: 1 } },
-    required: ["repoId"],
-  },
-  async handler(args, ctx) {
-    return callSdlcTracks("/list", args, ctx);
-  },
-  async appHandler(args, ctx) {
-    return callSdlcTracks("/list", args, ctx);
-  },
-};
+/** Internal routes that take the bound Actor pair in the body. */
+async function sdlcInternalFetch(path: string, body: Record<string, unknown>, ctx: HandlerContext): Promise<unknown> {
+  const s2sKey = process.env["INTERNAL_S2S_KEY"] ?? process.env["XYNE_CLAW_S2S_KEY"] ?? "";
+  if (!s2sKey) throw new Error("Internal S2S key is unavailable for SDLC tools.");
+  return spacesFetch(
+    path,
+    {
+      method: "POST",
+      headers: { "x-xyne-acting-user-id": ctx.userId },
+      body: JSON.stringify(body),
+    },
+    { s2sKey },
+  );
+}
 
-const spacesSdlcCreateTrack: ToolDef = {
-  name: SDLC_TOOL_NAMES.createTrack,
+async function sdlcInternalCall(label: string, path: string, body: Record<string, unknown>, ctx: HandlerContext): Promise<ToolResult> {
+  try {
+    return ok(JSON.stringify(await sdlcInternalFetch(path, body, ctx)));
+  } catch (e) {
+    return err(`${label} error: ${errMsg(e)}`);
+  }
+}
+
+function sdlcActor(args: Record<string, unknown>): Record<string, unknown> {
+  return pick(args, ["workspaceId", "actorUserId"]);
+}
+
+function sdlcTool(def: Omit<ToolDef, "appHandler">): ToolDef {
+  return { ...def, appHandler: def.handler };
+}
+
+const spacesSdlcListRepositories = sdlcTool({
+  name: SDLC_TOOL_NAMES.listRepositories,
   description:
-    "Create a new SDLC track (workstream) in a trusted repository. Use this when the user wants a brand-new track for a PRD/Tech Doc rather than an existing one. Returns the new track id to pass as trackId in spaces-sdlc-mutate-artifact.",
+    "List the repositories of one SDLC Hub: repoId, name, clone url and base branch. Pass the hub's channelId. " +
+    "An empty result means the hub has no repositories yet.",
   inputSchema: {
     type: "object",
     properties: {
-      repoId: { type: "string", minLength: 1 },
+      channelId: SDLC_CHANNEL_ID,
+      query: { type: "string", maxLength: 120, description: "Optional case-insensitive filter on repository name or URL." },
+      limit: { type: "integer", minimum: 1, maximum: 50, default: 20 },
+    },
+    required: ["channelId"],
+  },
+  handler: (args, ctx) =>
+    sdlcClawCall("SDLC repositories", "/repositories/list", pick(args, ["channelId", "query", "limit"]), ctx),
+});
+
+const SDLC_ARTIFACT_TYPE =
+  "Artifact type: what kind of document it is (PRD, Tech Doc, Hub Knowledge or a custom type). " +
+  "Ids come from spaces-sdlc-list-artifact-types. Not a track folder.";
+
+const SDLC_TRACK_FOLDER =
+  "Track folder: a folder a user made inside a track to group its items. Ids come from spaces-sdlc-list-tracks " +
+  "(each track's folders). Not an artifact type.";
+
+const spacesSdlcListTracks = sdlcTool({
+  name: SDLC_TOOL_NAMES.listTracks,
+  description:
+    "List the tracks (workstreams) of one SDLC Hub with each track's folders ({ id, name, parentId }; parentId is the track id for a " +
+    "top-level folder). Call it before creating a PRD or Tech Doc so the user can pick a track.",
+  inputSchema: { type: "object", properties: { channelId: SDLC_CHANNEL_ID }, required: ["channelId"] },
+  handler: (args, ctx) => sdlcClawCall("SDLC tracks", "/tracks/list", pick(args, ["channelId"]), ctx),
+});
+
+const spacesSdlcCreateTrack = sdlcTool({
+  name: SDLC_TOOL_NAMES.createTrack,
+  description: "Create a track (workstream) in one SDLC Hub. Returns the track id to pass as trackId when creating artifacts.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      channelId: SDLC_CHANNEL_ID,
       name: { type: "string", minLength: 1, maxLength: 120 },
       description: { type: "string", maxLength: 2000 },
     },
-    required: ["repoId", "name"],
+    required: ["channelId", "name"],
   },
-  async handler(args, ctx) {
-    return callSdlcTracks("", args, ctx);
-  },
-  async appHandler(args, ctx) {
-    return callSdlcTracks("", args, ctx);
-  },
-};
+  handler: (args, ctx) => sdlcClawCall("SDLC tracks", "/tracks", pick(args, ["channelId", "name", "description"]), ctx),
+});
 
-async function callSdlcArtifactTypes(
-  path: string,
-  args: Record<string, unknown>,
-  ctx: HandlerContext,
-): Promise<ToolResult> {
-  try {
-    const data = await spacesFetch(`/api/sdlc/claw/artifact-types${path}`, {
-      method: "POST",
-      headers: { "x-xyne-acting-user-id": ctx.userId },
-      body: JSON.stringify(args),
-    }, sdlcSpacesAuth());
-    return ok(JSON.stringify(data));
-  } catch (e) {
-    return err(`SDLC artifact types error: ${errMsg(e)}`);
+const spacesSdlcCreateTrackFolder = sdlcTool({
+  name: SDLC_TOOL_NAMES.createTrackFolder,
+  description:
+    "Create a track folder: a folder inside one track to group its artifacts and tickets. Returns its id to pass as trackFolderId. " +
+    "This is not an artifact type; for a new type use the hub's artifact types.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      channelId: SDLC_CHANNEL_ID,
+      trackId: { type: "string", minLength: 1, description: "The track the folder belongs to, from spaces-sdlc-list-tracks." },
+      name: { type: "string", minLength: 1, maxLength: 120 },
+      parentTrackFolderId: { type: "string", minLength: 1, description: `Optional parent in the same track; omit for the track's top level. ${SDLC_TRACK_FOLDER}` },
+    },
+    required: ["channelId", "trackId", "name"],
+  },
+  handler: (args, ctx) =>
+    sdlcClawCall("SDLC track folder", "/track-folders", pick(args, ["channelId", "trackId", "name", "parentTrackFolderId"]), ctx),
+});
+
+const spacesSdlcListArtifactTypes = sdlcTool({
+  name: SDLC_TOOL_NAMES.listArtifactTypes,
+  description:
+    "List the artifact types of one SDLC Hub with their id. PRD and Tech Doc are built in; users add custom types. " +
+    "Pass the id as artifactTypeId to spaces-sdlc-write-artifact create.",
+  inputSchema: { type: "object", properties: { channelId: SDLC_CHANNEL_ID }, required: ["channelId"] },
+  handler: (args, ctx) => sdlcClawCall("SDLC artifact types", "/artifact-types/list", pick(args, ["channelId"]), ctx),
+});
+
+const spacesSdlcListEntityLinks = sdlcTool({
+  name: SDLC_TOOL_NAMES.listEntityLinks,
+  description:
+    "List everything linked to one thing in an SDLC Hub, one hop in both directions: the tickets, artifacts, " +
+    "tracks, folders, conversations, calls, pull requests and repositories related to it. Each link names the other end " +
+    "(type, id, display name) and the relation. Call it again on a result to follow a link further.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      channelId: SDLC_CHANNEL_ID,
+      entityType: {
+        type: "string",
+        enum: ["CANVAS", "TICKET", "CHANNEL", "CONVERSATION", "MESSAGE", "EMAIL", "CALL", "RECORDING", "ATTACHMENT", "PULL_REQUEST", "REPOSITORY", "WORKFLOW_EXECUTION", "WORKFLOW", "TRACK", "FOLDER"],
+      },
+      entityId: { type: "string", minLength: 1 },
+      relationType: { type: "string", description: "Optional: only links of this relation, e.g. TICKET, CONTEXT, DISCUSSION." },
+      otherType: { type: "string", description: "Optional: only links whose other end is this entity type." },
+      limit: { type: "integer", minimum: 1, maximum: 200, default: 100 },
+    },
+    required: ["channelId", "entityType", "entityId"],
+  },
+  handler: (args, ctx) =>
+    sdlcClawCall(
+      "SDLC entity links",
+      "/entity-links/list",
+      pick(args, ["channelId", "entityType", "entityId", "relationType", "otherType", "limit"]),
+      ctx,
+    ),
+});
+
+const spacesSdlcListArtifacts = sdlcTool({
+  name: SDLC_TOOL_NAMES.listArtifacts,
+  description:
+    "List one SDLC Hub's artifacts without their bodies. kind ARTIFACT (default) lists PRDs, Tech Docs, custom types and Hub Knowledge " +
+    "with url, artifactType, track and trackFolder; filter by artifactTypeId, trackId or trackFolderId. kind WIKI lists one Wiki's pages with their folderPath: " +
+    "pass repoId for that repository's Wiki, omit it for the Hub Wiki. Read one with spaces-sdlc-read-artifact.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      channelId: SDLC_CHANNEL_ID,
+      kind: { type: "string", enum: ["ARTIFACT", "WIKI"], default: "ARTIFACT" },
+      artifactTypeId: { type: "string", minLength: 1, description: SDLC_ARTIFACT_TYPE },
+      trackId: { type: "string", minLength: 1, description: "Artifacts of one track, from spaces-sdlc-list-tracks." },
+      trackFolderId: { type: "string", minLength: 1, description: `Artifacts filed directly in one track folder. ${SDLC_TRACK_FOLDER}` },
+      repoId: { type: "string", minLength: 1, description: "WIKI only: the repository whose Wiki to list." },
+      includeArchived: { type: "boolean", description: "Include archived artifacts and pages." },
+    },
+    required: ["channelId"],
+  },
+  handler: (args, ctx) =>
+    args["kind"] === "WIKI"
+      ? sdlcInternalCall("SDLC Wiki", "/api/internal/sdlc/wiki/pages/list", {
+          ...sdlcActor(args),
+          ...pick(args, ["channelId", "repoId", "includeArchived"]),
+        }, ctx)
+      : sdlcInternalCall("SDLC artifacts", "/api/internal/sdlc/artifact-versions/current/list", {
+          ...sdlcActor(args),
+          ...pick(args, ["channelId", "artifactTypeId", "trackId", "trackFolderId", "includeArchived"]),
+        }, ctx),
+});
+
+const spacesSdlcReadArtifact = sdlcTool({
+  name: SDLC_TOOL_NAMES.readArtifact,
+  description:
+    "Read one SDLC artifact or Wiki page as Markdown. Pass versionId (from spaces-sdlc-list-artifact-versions) to read an older version; " +
+    "old text is supporting evidence only, current code and the current artifact win.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      canvasId: SDLC_CANVAS_ID,
+      versionId: { type: "string", minLength: 1 },
+    },
+    required: ["canvasId"],
+  },
+  handler: (args, ctx) =>
+    sdlcInternalCall("SDLC artifact", "/api/internal/sdlc/artifact-versions/current/read", {
+      ...sdlcActor(args),
+      ...pick(args, ["canvasId", "versionId"]),
+    }, ctx),
+});
+
+const spacesSdlcListArtifactVersions = sdlcTool({
+  name: SDLC_TOOL_NAMES.listArtifactVersions,
+  description: "List a newest-first page of one SDLC artifact's versions, without their bodies. Read the current artifact first.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      canvasId: SDLC_CANVAS_ID,
+      cursor: { type: "string", minLength: 1 },
+      limit: { type: "integer", minimum: 1, maximum: 25 },
+    },
+    required: ["canvasId"],
+  },
+  handler: (args, ctx) =>
+    sdlcInternalCall("SDLC artifact history", "/api/internal/sdlc/artifact-versions/list", {
+      ...sdlcActor(args),
+      ...pick(args, ["canvasId", "cursor", "limit"]),
+    }, ctx),
+});
+
+const SDLC_WRITE_ACTIONS = ["create", "update", "replace_section", "insert_section", "remove_section", "move"] as const;
+
+async function writeSdlcArtifact(args: Record<string, unknown>, ctx: HandlerContext): Promise<ToolResult> {
+  const action = String(args["action"] ?? "");
+  if (args["kind"] === "WIKI") {
+    return sdlcInternalCall("SDLC Wiki page", "/api/internal/sdlc/wiki/pages/write", {
+      ...sdlcActor(args),
+      ...pick(args, ["channelId", "repoId", "generationCommit"]),
+      page: pick(args, ["action", "canvasId", "folderPath", "title", "markdown", "heading"]),
+    }, ctx);
+  }
+  switch (action) {
+    case "create":
+      return createSdlcArtifact(args, ctx);
+    case "update":
+      return sdlcClawCall("Update SDLC artifact", "/artifacts/update", pick(args, ["canvasId", "title", "markdown", "relatedCanvasIds"]), ctx);
+    case "replace_section":
+    case "insert_section":
+    case "remove_section":
+      return sdlcClawCall("Edit SDLC artifact section", "/artifacts/section", pick(args, ["canvasId", "action", "heading", "markdown"]), ctx);
+    case "move":
+      return sdlcClawCall("Move SDLC artifact", "/artifacts/move", pick(args, ["canvasId", "parentId"]), ctx);
+    default:
+      return err(`Unsupported SDLC artifact action: ${action}`);
   }
 }
 
-const spacesSdlcListArtifactTypes: ToolDef = {
-  name: SDLC_TOOL_NAMES.listArtifactTypes,
+async function createSdlcArtifact(args: Record<string, unknown>, ctx: HandlerContext): Promise<ToolResult> {
+  try {
+    const data = (await spacesFetch("/api/sdlc/claw/artifacts", {
+      method: "POST",
+      headers: { "x-xyne-acting-user-id": ctx.userId },
+      // Spaces stores the artifact type as a folder and names it folderId; the dashboard posts to the same route.
+      body: JSON.stringify({
+        ...pick(args, ["channelId", "trackId", "trackFolderId", "title", "markdown", "repoIds", "relatedCanvasIds"]),
+        folderId: args["artifactTypeId"],
+      }),
+    }, sdlcSpacesAuth())) as { artifact: { canvasId: string; viewAccessId?: string; url?: string } };
+    const artifact = data.artifact;
+    const citations: Citation[] = [];
+    pushCanvasCitation(citations, artifact.viewAccessId, 1, String(args["title"] ?? "SDLC artifact"));
+    return okCited(
+      prefixChunk(1, "SDLC artifact created", [
+        `Canvas ID: ${artifact.canvasId}`,
+        `URL: ${artifact.url ?? `/chat/canvas/${artifact.canvasId}`}`,
+      ]),
+      citations,
+    );
+  } catch (e) {
+    return err(`Create SDLC artifact error: ${errMsg(e)}`);
+  }
+}
+
+const spacesSdlcWriteArtifact = sdlcTool({
+  name: SDLC_TOOL_NAMES.writeArtifact,
   description:
-    "List the SDLC artifact types (canvas folders) in a trusted repository. Each type is a folder on the repo's SDLC channel; PRD and Tech Doc are seeded built-in types and users can add more custom types. Call this before creating an artifact of a custom type to get its folderId, then pass that folderId to spaces-sdlc-mutate-artifact create.",
-  inputSchema: {
-    type: "object",
-    properties: { repoId: { type: "string", minLength: 1 } },
-    required: ["repoId"],
-  },
-  async handler(args, ctx) {
-    return callSdlcArtifactTypes("/list", args, ctx);
-  },
-  async appHandler(args, ctx) {
-    return callSdlcArtifactTypes("/list", args, ctx);
-  },
-};
-
-const spacesSdlcListArtifacts: ToolDef = {
-  name: SDLC_TOOL_NAMES.listArtifacts,
-  description: "List current trusted-repository Wiki, Baseline, and artifact documents (every artifact type, seeded or custom). Returns bounded identity and current-state metadata without historical bodies.",
+    "Create or change one SDLC artifact (PRD, Tech Doc, custom type, Hub Knowledge) or, with kind WIKI, one Wiki page. " +
+    "create: artifacts take channelId, artifactTypeId (from spaces-sdlc-list-artifact-types), trackId (every type except Hub Knowledge), " +
+    "optional trackFolderId (a folder inside that track, from spaces-sdlc-list-tracks), title, markdown, optional repoIds and relatedCanvasIds; " +
+    "Wiki pages take channelId, optional repoId (omit for the Hub Wiki), folderPath, title, markdown. " +
+    "update: canvasId plus any of markdown, title, relatedCanvasIds (links are added, never removed). " +
+    "replace_section / insert_section: canvasId, heading (an existing heading), markdown starting with a heading; remove_section: canvasId, heading. " +
+    "Prefer section actions for focused edits so unrelated content survives. " +
+    "move: artifacts take canvasId and parentId (a track folder in the same track, or the track id for its root); Wiki pages take canvasId and folderPath. " +
+    "Wiki actions always take channelId and the repoId of that Wiki. Cite code as markdown links pinned to a commit.",
   inputSchema: {
     type: "object",
     properties: {
-      repoId: { type: "string" }, workspaceId: { type: "string" }, actorUserId: { type: "string" },
-      executionId: { type: "string" }, sessionId: { type: "string" },
-      kinds: { type: "array", items: { type: "string", enum: ["WIKI", "BASELINE", "ARTIFACT", "PRD", "TECH_DOC"] }, description: "Filter by kind. ARTIFACT covers every artifact type (seeded or custom); PRD/TECH_DOC are accepted as legacy aliases for ARTIFACT." },
-      includeArchived: { type: "boolean" },
+      action: { type: "string", enum: [...SDLC_WRITE_ACTIONS] },
+      kind: { type: "string", enum: ["ARTIFACT", "WIKI"], default: "ARTIFACT" },
+      channelId: SDLC_CHANNEL_ID,
+      canvasId: SDLC_CANVAS_ID,
+      title: { type: "string", minLength: 1, maxLength: 255 },
+      markdown: { type: "string", minLength: 1, maxLength: 5_000_000 },
+      heading: { type: "string", minLength: 1, maxLength: 255, description: "Exact existing heading the section action targets." },
+      artifactTypeId: { type: "string", minLength: 1, description: `For create. ${SDLC_ARTIFACT_TYPE}` },
+      trackId: { type: "string", minLength: 1, description: "Track id, for create." },
+      trackFolderId: { type: "string", minLength: 1, description: `For create, optional: file the artifact in this folder of trackId instead of the track's top level. ${SDLC_TRACK_FOLDER}` },
+      parentId: { type: "string", minLength: 1, description: "Artifact move target: a track folder id in the same track, or the track id for its top level." },
+      folderPath: { type: "string", maxLength: 512, description: "Wiki folders separated by \"/\", e.g. \"architecture/payments\". Empty is the Wiki's top level." },
+      repoId: { type: "string", minLength: 1, description: "Wiki only: the repository whose Wiki the page belongs to." },
+      repoIds: { type: "array", items: { type: "string", minLength: 1 }, maxItems: 50, description: "Artifact create only: repositories the artifact is about." },
+      relatedCanvasIds: { type: "array", items: { type: "string", minLength: 1 }, description: "Existing artifacts to link as related context." },
     },
-    required: ["repoId", "workspaceId", "actorUserId"],
+    required: ["action"],
   },
-  async handler(args, ctx) {
-    return args["executionId"] && args["sessionId"]
-      ? callSdlcWiki("/pages/list", args)
-      : callSdlcArtifactHistory("/current/list", args, ctx);
-  },
-  async appHandler(args, ctx) {
-    return args["executionId"] && args["sessionId"]
-      ? callSdlcWiki("/pages/list", args)
-      : callSdlcArtifactHistory("/current/list", args, ctx);
-  },
-};
+  handler: writeSdlcArtifact,
+});
 
-const spacesSdlcReadArtifact: ToolDef = {
-  name: SDLC_TOOL_NAMES.readArtifact,
-  description: "Read one current trusted-repository Wiki, Baseline, PRD, or Tech Doc artifact as Markdown with its live content hash.",
+const spacesSdlcArchiveArtifact = sdlcTool({
+  name: SDLC_TOOL_NAMES.archiveArtifact,
+  description: "Archive or restore one SDLC artifact or Wiki page. Archived items are hidden from lists unless includeArchived is set.",
   inputSchema: {
     type: "object",
     properties: {
-      repoId: { type: "string" }, workspaceId: { type: "string" }, actorUserId: { type: "string" },
-      selector: sdlcArtifactSelectorSchema,
+      canvasId: SDLC_CANVAS_ID,
+      action: { type: "string", enum: ["archive", "restore"] },
     },
-    required: ["repoId", "workspaceId", "actorUserId", "selector"],
+    required: ["canvasId", "action"],
   },
-  async handler(args, ctx) { return callSdlcArtifactHistory("/current/read", args, ctx); },
-  async appHandler(args, ctx) { return callSdlcArtifactHistory("/current/read", args, ctx); },
-};
+  handler: (args, ctx) =>
+    sdlcClawCall("Archive SDLC artifact", "/artifacts/archive", {
+      canvasId: args["canvasId"],
+      archived: args["action"] === "archive",
+    }, ctx),
+});
 
-const spacesSdlcWikiVerifySources: ToolDef = {
-  name: SDLC_TOOL_NAMES.verifyWikiSources,
-  description: "Preflight a bounded batch of repository-relative source paths at one assigned abbreviated checkpoint ref. Returns the exact invalid path instead of discovering source failures during a page mutation.",
-  inputSchema: {
-    type: "object",
-    properties: {
-      executionId: { type: "string" }, sessionId: { type: "string" }, repoId: { type: "string" },
-      commitSha: { type: "string", pattern: SDLC_AGENT_COMMIT_REF_PATTERN },
-      paths: { ...sdlcSourcePathsSchema, minItems: 1 },
-    },
-    required: ["executionId", "sessionId", "repoId", "commitSha", "paths"],
-  },
-  async handler(args) { return callSdlcWiki("/sources/verify", args); },
-  async appHandler(args) { return callSdlcWiki("/sources/verify", args); },
-};
-
-const spacesSdlcWikiBeginCheckpoint: ToolDef = {
-  name: SDLC_TOOL_NAMES.beginWikiCheckpoint,
-  description:
-    "Begin one server-authorized checkpoint inside the assigned history window. Choose a meaningful intermediate ref or the mandatory endpoint, then serialize all page writes and finalization for that ref before beginning another checkpoint.",
-  inputSchema: {
-    type: "object",
-    properties: {
-      executionId: { type: "string" }, sessionId: { type: "string" }, repoId: { type: "string" },
-      commitSha: { type: "string", pattern: SDLC_AGENT_COMMIT_REF_PATTERN },
-    },
-    required: ["executionId", "sessionId", "repoId", "commitSha"],
-  },
-  async handler(args) { return callSdlcWiki("/checkpoints/begin", args); },
-  async appHandler(args) { return callSdlcWiki("/checkpoints/begin", args); },
-};
-
-const spacesSdlcWikiFinalizeCommit: ToolDef = {
-  name: SDLC_TOOL_NAMES.finalizeWikiCommit,
-  description:
-    "Durably finalize one assigned Wiki commit after all required one-page writes succeed, or finalize it as no-op when no pages were written. This advances the commit checkpoint.",
-  inputSchema: {
-    type: "object",
-    properties: {
-      executionId: { type: "string" }, sessionId: { type: "string" }, repoId: { type: "string" },
-      commitSha: { type: "string", pattern: SDLC_AGENT_COMMIT_REF_PATTERN }, outcome: { type: "string", enum: ["changes", "noop"] },
-      summary: { type: "string", minLength: 1, maxLength: 4_000 },
-    },
-    required: ["executionId", "sessionId", "repoId", "commitSha", "outcome", "summary"],
-  },
-  async handler(args) { return callSdlcWiki("/commits/finalize", args); },
-  async appHandler(args) { return callSdlcWiki("/commits/finalize", args); },
-};
-
-// ── spaces-sdlc-create-pull-request ───────────────────────────────
-const spacesSdlcCreatePullRequest: ToolDef = {
+const spacesSdlcCreatePullRequest = sdlcTool({
   name: SDLC_TOOL_NAMES.createPullRequest,
   description:
-    "Create a draft pull request after a convention-derived safe feature branch has been pushed. " +
-    "The Spaces backend resolves its trusted execution or interactive authorization and verifies repository, " +
-    "remote commit, exact head/base, and draft state. Never use generic GitHub credentials for SDLC work.",
+    "Open a pull request on GitHub or Bitbucket from a pushed branch, using the repository's own credential. " +
+    "Any head and base branch; the provider rejects a missing branch or head equal to base. draft defaults to true. " +
+    "Never use generic GitHub or Bitbucket credentials for SDLC work.",
   inputSchema: {
     type: "object",
     properties: {
-      executionId: { type: "string" },
-      sessionId: { type: "string" },
-      interactiveGrant: { type: "string" },
-      conversationId: { type: "string" },
-      repoId: { type: "string" },
+      repoId: { type: "string", minLength: 1, description: "SDLC repository id from spaces-sdlc-list-repositories." },
       title: { type: "string", minLength: 1, maxLength: 256 },
       body: { type: "string", maxLength: 65_536 },
-      head: { type: "string", minLength: 1, maxLength: 255 },
-      base: { type: "string", minLength: 1, maxLength: 255 },
-      commitHash: { type: "string", pattern: "^[0-9a-fA-F]{40}$" },
+      head: { type: "string", minLength: 1, maxLength: 255, description: "Branch with the changes." },
+      base: { type: "string", minLength: 1, maxLength: 255, description: "Branch to merge into." },
+      draft: { type: "boolean", default: true },
     },
-    required: ["repoId", "title", "head", "base", "commitHash"],
+    required: ["repoId", "title", "head", "base"],
   },
-  handler: withToolErrors("Create SDLC pull request error", async (args) => {
-      const s2sKey = process.env["INTERNAL_S2S_KEY"] ?? process.env["XYNE_CLAW_S2S_KEY"] ?? "";
-      if (!s2sKey) return err("Internal S2S key is unavailable for SDLC pull request creation.");
-      const data = (await spacesFetch(
-        "/api/internal/sdlc/vcs/pull-requests",
-        { method: "POST", body: JSON.stringify(args) },
-        { s2sKey },
-      )) as {
-        pullRequest?: { url?: string; number?: number; draft?: boolean; head?: string; base?: string };
-      };
-      if (!data.pullRequest?.url || data.pullRequest.draft !== true) {
-        return err("Spaces returned an invalid draft pull request result.");
-      }
-      return ok(
-        [
-          "Draft pull request created and verified.",
-          `URL: ${data.pullRequest.url}`,
-          `Number: ${data.pullRequest.number ?? "unknown"}`,
-          `Head: ${data.pullRequest.head ?? "unknown"}`,
-          `Base: ${data.pullRequest.base ?? "unknown"}`,
-        ].join("\n"),
-      );
-    }),
-  async appHandler(args) {
-    return spacesSdlcCreatePullRequest.handler(args, { userId: "sdlc", authMode: "app" });
-  },
-};
+  handler: withToolErrors("Create SDLC pull request error", async (args, ctx) => {
+    const data = (await sdlcInternalFetch("/api/internal/sdlc/vcs/pull-requests", {
+      ...sdlcActor(args),
+      ...pick(args, ["repoId", "title", "body", "head", "base", "draft"]),
+    }, ctx)) as { pullRequest?: { url?: string; number?: number; draft?: boolean; head?: string; base?: string } };
+    if (!data.pullRequest?.url) return err("Spaces returned an invalid pull request result.");
+    return ok(
+      [
+        `${data.pullRequest.draft ? "Draft pull request" : "Pull request"} created.`,
+        `URL: ${data.pullRequest.url}`,
+        `Number: ${data.pullRequest.number ?? "unknown"}`,
+        `Head: ${data.pullRequest.head ?? "unknown"}`,
+        `Base: ${data.pullRequest.base ?? "unknown"}`,
+      ].join("\n"),
+    );
+  }),
+});
 
 // ── spaces-emails ──────────────────────────────────────────────────
 
@@ -7124,7 +7059,7 @@ const userSendMessage: ToolDef = {
       { required: ["channelId"], not: { required: ["conversationId"] } },
     ],
   },
-  async handler(args) {
+  async handler(args, ctx) {
     try {
       const conversationId = String(args["conversationId"] ?? "").trim();
       const channelId = String(args["channelId"] ?? "").trim();
@@ -7138,8 +7073,16 @@ const userSendMessage: ToolDef = {
 
       // Same mention-expansion the app-tools version uses, so @Name[userId]
       // shorthand works consistently across both tools.
-      const { expandSpacesMentions } = await import("../../lib/mention-transform.js");
-      const content = expandSpacesMentions(rawContent);
+      const { expandSpacesMentions, resolveUnboundMentions } = await import("../../lib/mention-transform.js");
+      const { buildSpacesMentionLookupsDb } = await import("../../lib/mention-lookups.js");
+      const workspaceId =
+        (process.env["XYNE_SPACES_WORKSPACE_ID"] ?? "").trim() ||
+        (ctx?.userId ? await getWorkspaceIdForUser(ctx.userId).catch(() => null) : null) ||
+        undefined;
+      const resolved = spacesDbAvailable()
+        ? await resolveUnboundMentions(rawContent, buildSpacesMentionLookupsDb(workspaceId)).catch(() => rawContent)
+        : rawContent;
+      const content = expandSpacesMentions(resolved);
 
       if (conversationId) {
         const result = (await spacesFetch(
@@ -7183,68 +7126,6 @@ const userSendMessage: ToolDef = {
   },
 };
 
-// ── spaces-vespa-schema ──────────────────────────────────────────────────────
-
-const spacesVespaSchema: ToolDef = {
-  name: "spaces-vespa-schema",
-  description:
-    "Returns the field definitions for Vespa search schemas. " +
-    "Use this BEFORE building a direct YQL query to discover " +
-    "the exact field names, types, and whether each field is filterable (usable in WHERE) or searchable (usable in userInput/contains). " +
-    "Pass a schema name to get that schema's fields.\n\n" +
-    "## Schema name → YQL source name mapping\n" +
-    "The schema name you pass here (the .sd filename) is DIFFERENT from the source name used in `from sources` in YQL:\n" +
-    "- chat_message     → `from sources message`\n" +
-    "- chat_attachment  → `from sources attachment`\n" +
-    "- chat_container   → `from sources channel`\n" +
-    "- ticket           → `from sources ticket`\n" +
-    "- user             → `from sources user`\n" +
-    "- file             → `from sources file`\n" +
-    "- sam_transcript   → `from sources sam_transcript`\n\n" +
-    "Key fields by use case:\n" +
-    "- Filter by sender: chat_message.userId, ticket.createdBy\n" +
-    "- Filter by channel: chat_message.channelId, ticket.channelId\n" +
-    "- Filter by time: chat_message.createdAtTimestamp, ticket.createdAtTimestamp, file.createdAtTimestamp, sam_transcript.dateTime (all in ms)\n" +
-    '- Access control: always include permissions contains "<userId>" for chat/ticket/file unless scoping by channelId\n' +
-    "- Ticket status: ticket.status (TODO|STARTED|PAUSED|CANCELLED|COMPLETED)\n" +
-    "- File sub-type: file.subApp (CANVAS|TRANSCRIPT|CHAT_ATTACHMENT|TICKET_ATTACHMENT|RCA)",
-  inputSchema: {
-    type: "object",
-    properties: {
-      schema: {
-        type: "string",
-        enum: [
-          "chat_message",
-          "chat_attachment",
-          "chat_container",
-          "attachment",
-          "ticket",
-          "user",
-          "file",
-          "sam_transcript",
-          "mail",
-          "mail_attachment",
-          "project",
-          "memory",
-        ],
-        description: "Schema name to fetch field definitions for.",
-      },
-    },
-    required: ["schema"],
-  },
-  handler: withToolErrors("vespa-schema error", async (args) => {
-      const qs = `?schema=${encodeURIComponent(String(args["schema"]))}`;
-
-      // The /claw mount is dual-auth (authenticateUserOrApp) so this works for
-      // both user and app tokens (the bare /api/vespaSearch mount is
-      // user-session-only and 401s app-mode runs).
-      const text = await spacesFetchText(`/api/vespaSearch/claw/schema${qs}`);
-      if (!text || !text.trim())
-        return err("Schema not found or VESPA_SCHEMA_PATH is not configured on the server.");
-      return ok(text);
-    }),
-};
-
 /**
  * Entity ids for the DIRECT-VESPA tools only.
  *
@@ -7272,8 +7153,8 @@ function directEntityIdLines(r: SearchResult): string {
   return lines.length > 0 ? `\n${lines.join("\n")}` : "";
 }
 
-// Shared renderer for the direct-Vespa tools (spaces-vespa-query raw YQL and
-// spaces-vespa-search structured). Builds a routable Citation per result row —
+// Shared renderer for the direct-Vespa tools (spaces-vespa-search and the
+// bench search). Builds a routable Citation per result row —
 // mirrors spaces-search's harvest() so hits render as CLICKABLE chips instead of
 // dead tokens. harvest() returns whether it pushed a citation; the caller gates
 // the inline token on that (formatSearchResult(r, null) → no token), so a
@@ -7593,21 +7474,37 @@ const onyxBenchSearch: ToolDef = {
     const workspaceId = (process.env["XYNE_SPACES_WORKSPACE_ID"] ?? "").trim();
     if (!workspaceId) return err("XYNE_SPACES_WORKSPACE_ID is not set — cannot scope benchmark search.");
 
-    // Build YQL — mirrors the eval retrieval query from enterpriseRagEval.ts:
+    // Build YQL — hybrid retrieval matching spaces-search:
     //   select * from sources chat_message, file, mail, ticket
-    //   where ({grammar:"tokenize"} userInput(@query)) and workspaceId contains "..."
+    //   where (userInput(@query) or nearestNeighbor(text_embeddings, e) or nearestNeighbor(chunk_embeddings, e) or nearestNeighbor(combined_embeddings, e)) and workspaceId contains "..."
+    //
+    // userInput defaults to weakAnd (partial token match — fewer false
+    // negatives than grammar:"tokenize" which required ALL tokens). The
+    // nearestNeighbor ORs add semantic retrieval: queryDirect already sends
+    // input.query(e)=embed(hf-embedder, @query) via defaultNativeInputs, so
+    // the embedding vector is available. Each schema has its own embedding
+    // field name (chat_message→text_embeddings, file/mail→chunk_embeddings,
+    // ticket→combined_embeddings); OR-ing all three ensures the NN clause
+    // fires on whichever schema the relevant doc lives in.
     //
     // sourceType narrowing: each source type gets its own channel container
     // (bench-ch-<workspaceId>-<sourceType>), and channelId is imported from
     // channelRef.docId on all 4 schemas. This is the ONLY reliable way to
     // narrow by source type — docType doesn't distinguish (e.g. gmail→"mail",
     // jira→"ticket", fireflies→"file").
+    const targetHits = Math.max(hits, 20);
+    const nnClauses = [
+      `({targetHits:${targetHits}} nearestNeighbor(text_embeddings, e))`,
+      `({targetHits:${targetHits}} nearestNeighbor(chunk_embeddings, e))`,
+      `({targetHits:${targetHits}} nearestNeighbor(combined_embeddings, e))`,
+    ].join(" or ");
+    const retrieval = `(userInput(@query) or ${nnClauses})`;
     const clauses: string[] = [`workspaceId contains "${esc(workspaceId)}"`];
     if (sourceType) {
       const benchChannelId = `bench-ch-${workspaceId}-${sourceType}`;
       clauses.push(`channelId contains "${esc(benchChannelId)}"`);
     }
-    const yql = `select * from sources ${BENCH_RETRIEVAL_SCHEMAS} where ({grammar:"tokenize"} userInput(@query)) and ${clauses.join(" and ")}`;
+    const yql = `select * from sources ${BENCH_RETRIEVAL_SCHEMAS} where ${retrieval} and ${clauses.join(" and ")}`;
 
     try {
       const data = await queryDirect(
@@ -7646,133 +7543,6 @@ const onyxBenchSearch: ToolDef = {
   }),
 };
 
-// ── spaces-vespa-query ───────────────────────────────────────────────────────
-
-const spacesVespaQuery: ToolDef = {
-  name: "spaces-vespa-query",
-  description:
-    "Execute a raw YQL query directly against Vespa. " +
-    "Use this when spaces-search doesn't support the exact filter combination you need.\n\n" +
-    "## Workflow\n" +
-    "1. Call **spaces-vespa-schema** with the schema name to discover exact field names and types.\n" +
-    "2. Write your YQL using those field names.\n" +
-    "3. Call this tool with the YQL.\n\n" +
-    "## ACL — include the correct guard per schema\n" +
-    "Always include the access control condition for the schema you query. ACL is auto-injected if omitted, but you should write it explicitly.\n" +
-    '- message / attachment / ticket / sam_transcript / mail / mail_attachment / memory: `permissions contains "<userId>"`\n' +
-    '- file: `(ownerId contains "<userId>" or permissions contains "<userId>" or isPrivate contains "false")` for CANVAS; `(ownerId contains "<userId>" or channelPermissions contains "<userId>" or isPrivate contains "false")` for CHAT_ATTACHMENT/TRANSCRIPT; no guard for RCA\n' +
-    "- user / channel: no ACL needed (public)\n" +
-    "Use the `userId` field from **spaces-whoami** if you need your own id.\n\n" +
-    "## YQL examples (use the YQL source name, NOT the schema name from spaces-vespa-schema)\n" +
-    "```\n" +
-    "-- tickets assigned to a user, open only (source: ticket)\n" +
-    'select * from sources ticket where userInput(@query) and status contains "OPEN" and assignedTo contains "<userId>" and permissions contains "<userId>"\n\n' +
-    "-- messages in a channel since a date (source: message) — write dates as dd/mm/yy, NOT epoch ms\n" +
-    'select * from sources message where channelId contains "<channelId>" and createdAtTimestamp > 01/06/26 and permissions contains "<userId>"\n\n' +
-    "-- files of subApp CANVAS owned by user (source: file)\n" +
-    'select * from sources file where subApp contains "CANVAS" and ownerId contains "<userId>"\n\n' +
-    "-- channels by name (source: channel, no ACL needed)\n" +
-    "select * from sources channel where userInput(@query)\n" +
-    "```\n\n" +
-    "## YQL source names\n" +
-    "message, attachment, channel, ticket, user, file, sam_transcript\n" +
-    "(These differ from the schema names passed to spaces-vespa-schema — see that tool's description for the mapping.)\n\n" +
-    "## Ranking (rankProfile / rankInputs)\n" +
-    "Relevance scoring is driven by a Vespa rank profile that must EXIST in every schema your YQL touches.\n" +
-    "- For a filter-only or grouping/count query (no relevance order needed) leave both unset — the tool uses the built-in `unranked` profile.\n" +
-    "- For free-text relevance, read the target schema's .sd `rank-profile <name> { ... }` blocks and pass `rankProfile` (e.g. `default_native` for general relevance, `default_fuzzy` for typo-tolerant, `semantic_ranking` for vector-only). If unset, free-text defaults to `default_native`.\n" +
-    "- When you set a scoring `rankProfile`, also pass `rankInputs` taken from that profile's `inputs { query(...) }` block. If unset, the standard default_native inputs are used.\n\n" +
-    "## Notes\n" +
-    "- Only available when DIRECT_VESPA_SEARCH is enabled.\n" +
-    "- Pass free-text as `query` (bound to `@query` in YQL via `userInput(@query)`), not embedded in the YQL string.\n" +
-    '- Write date filters as dd/mm/yy (e.g. `createdAtTimestamp > 01/06/26`) — do NOT compute epoch ms yourself. The tool converts each literal to milliseconds before running the query. A bare date is treated as IST midnight of that day; to filter on a specific IST time add `HH:MM` (or `HH:MM:SS`), e.g. `createdAtTimestamp > "01/06/26 14:30"`. dd/mm/yyyy is also accepted. Dates are only converted when they follow a comparison operator (> < >= <=), so a date inside a text match stays literal.\n' +
-    "- Result rows come back citation-ready: each routable row (message/thread, ticket, channel, canvas, chat file, desk mail, RCA) is auto-tagged with a clickable source token. You do NOT need to project specific columns for this — the tool normalizes your `select` list to `select *` and returns a curated field set, so just write the `from`/`where`/`order by` you need.",
-  inputSchema: {
-    type: "object",
-    properties: {
-      yql: {
-        type: "string",
-        description: "Raw Vespa YQL query string. Use field names from spaces-vespa-schema.",
-      },
-      query: {
-        type: "string",
-        description:
-          "Free-text query bound to @query in the YQL. Pass this separately — do not embed it in the yql string.",
-      },
-      hits: {
-        type: "number",
-        minimum: 0,
-        maximum: 100,
-        default: 20,
-        description:
-          "Max document hits to return (default 20, max 100). Pass 0 for grouping/count queries that only need the group aggregation, not the documents themselves.",
-      },
-      offset: {
-        type: "number",
-        minimum: 0,
-        default: 0,
-        description: "Pagination offset.",
-      },
-      rankProfile: {
-        type: "string",
-        description:
-          "Optional Vespa rank profile to score with, read from the schema's .sd `rank-profile` blocks. Must exist in EVERY source in your YQL. " +
-          "Common: `default_native` (general relevance), `default_fuzzy` (typo-tolerant), `semantic_ranking` (vector-only), `unranked` (no scoring). " +
-          "If omitted: `unranked` for grouping/count or no-text queries, `default_native` otherwise.",
-      },
-      rankInputs: {
-        type: "object",
-        additionalProperties: true,
-        description:
-          "Optional inputs for the chosen rank profile, read from its `inputs { query(...) }` block in the .sd. " +
-          "Keys may be bare (`alpha`) or wrapped (`query(alpha)`); each is sent as `input.query(<name>)`. " +
-          'For an embedding input use `{ "e": "embed(hf-embedder, @query)" }` (the embedder id is required — the cluster defines more than one). Ignored when the profile is `unranked`; if omitted with a scoring profile, the standard default_native inputs are used.',
-      },
-    },
-    required: ["yql"],
-  },
-  async handler(args, ctx) {
-    if (!CONFIG.directVespaSearch) {
-      return err("spaces-vespa-query requires DIRECT_VESPA_SEARCH=true.");
-    }
-    try {
-      const yql = String(args["yql"] ?? "").trim();
-      if (!yql) return err("yql is required.");
-      const query = String(args["query"] ?? "").trim();
-      const hits = Math.min(Math.max(Number(args["hits"] ?? 20), 0), 100);
-      const offset = Math.max(Number(args["offset"] ?? 0), 0);
-      const rankProfile = args["rankProfile"] != null ? String(args["rankProfile"]) : undefined;
-      const rankInputs =
-        args["rankInputs"] && typeof args["rankInputs"] === "object" && !Array.isArray(args["rankInputs"])
-          ? (args["rankInputs"] as Record<string, unknown>)
-          : undefined;
-
-      const { userId: aclUserId, workspaceId } = await directVespaIdentity(ctx.userId);
-      if (!workspaceId) {
-        log.error(
-          `[xyne-spaces-tools] workspaceId is required; refusing raw Vespa query userId=${ctx.userId}`,
-        );
-        return err("Could not resolve your workspaceId — cannot run a workspace-scoped raw Vespa query.");
-      }
-
-      const data = await queryDirect(
-        yql,
-        query,
-        aclUserId,
-        hits,
-        offset,
-        CONFIG.vespaQueryEndpoint,
-        rankProfile,
-        rankInputs,
-        workspaceId,
-      );
-      return renderDirectResult(data, hits, offset, workspaceId);
-    } catch (e) {
-      return directError("vespa-query error", e);
-    }
-  },
-};
-
 /**
  * Caller identity for the DIRECT-VESPA tools, with a LOCAL-ONLY override.
  *
@@ -7802,7 +7572,8 @@ async function directVespaIdentity(
   // XYNE_SPACES_WORKSPACE_ID when the adapter is bound — bench + session modes.
   // Falls back to the Spaces-DB user row when no env set.
   const envWorkspace = (process.env["XYNE_SPACES_WORKSPACE_ID"] ?? "").trim();
-  const workspaceId = devWorkspace || envWorkspace || (await getWorkspaceIdForUser(userId));
+  const workspaceId =
+    devWorkspace || envWorkspace || (await getWorkspaceIdForUser(userId, "mcp-runner", envWorkspace || undefined));
   if (devUser || devWorkspace) {
     log.warn(
       `[xyne-spaces-tools] DEV vespa identity override: user ${ctxUserId} -> ${userId}, workspace -> ${workspaceId}`,
@@ -9178,12 +8949,1361 @@ const spacesDeskMetrics: ToolDef = {
     }),
 };
 
+// ── Automations ───────────────────────────────────────────────────────
+
+interface AutomationView {
+  id: string;
+  name: string;
+  description: string | null;
+  status: string;
+  config?: { trigger?: { type?: string; config?: Record<string, unknown> }; steps?: unknown[] };
+  createdById: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+interface AutomationRunSummary {
+  id: string;
+  automationId: string;
+  status: string;
+  error: string | null;
+  startedAt: string;
+  completedAt: string | null;
+}
+
+// Run errors often carry Prisma's ANSI color codes; they are noise to the model.
+function stripAnsi(text: string): string {
+  return text.replace(/\u001b\[[0-9;]*m/g, "");
+}
+
+function clipJson(value: unknown, max = 600): string {
+  if (value === null || value === undefined) return "(none)";
+  const text = typeof value === "string" ? value : JSON.stringify(value);
+  return text.length > max ? `${text.slice(0, max)}… [truncated, ${text.length} chars]` : text;
+}
+
+interface WorkflowRow {
+  id: string;
+  workflowName: string | null;
+  status: string;
+  eventType: string | null;
+  context: string | null;
+  metadata: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+const AUTOMATION_WORKFLOW_TYPE = "Automations";
+
+function parseJsonObject(raw: string | null): Record<string, unknown> {
+  if (!raw) return {};
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed)
+      ? (parsed as Record<string, unknown>)
+      : {};
+  } catch {
+    return {};
+  }
+}
+
+// Tool args arrive as a string or an array; accept both.
+function asList(value: unknown): string[] {
+  const raw = Array.isArray(value) ? value : value === undefined || value === null || value === "" ? [] : [value];
+  return raw.map((v) => String(v).trim()).filter(Boolean);
+}
+
+/** ISO-8601 string or epoch milliseconds → ISO string; null when unparseable. */
+function toIso(value: unknown, endOfDay = false): string | null {
+  const raw = String(value).trim();
+  const numeric = Number(raw);
+  // A 10-digit number is epoch seconds; a bare date as an upper bound means the whole day.
+  let ms = Number.isFinite(numeric) ? (numeric < 1e11 ? numeric * 1000 : numeric) : Date.parse(raw);
+  if (endOfDay && /^\d{4}-\d{2}-\d{2}$/.test(raw)) ms += 86_399_999;
+  return Number.isFinite(ms) ? new Date(ms).toISOString() : null;
+}
+
+/** "Name <email> (id)" for each user id, falling back to the bare id. */
+async function userLabels(ids: string[]): Promise<Map<string, string>> {
+  const unique = [...new Set(ids.filter(Boolean))];
+  const labels = new Map<string, string>();
+  if (unique.length === 0) return labels;
+  try {
+    const users = (await interact({
+      model: "user",
+      operation: "findMany",
+      where: { id: { in: unique } },
+      take: unique.length,
+    })) as Array<{ id: string; name?: string | null; email?: string | null }>;
+    for (const u of users ?? []) labels.set(u.id, `${u.name ?? "(no name)"} <${u.email ?? "no email"}> (${u.id})`);
+  } catch {
+    // Names are a convenience; the ids still identify the authors.
+  }
+  return labels;
+}
+
+const AUTOMATION_STATUSES = ["DRAFT", "PENDING_APPROVAL", "ACTIVE", "DISABLED", "REJECTED", "REVOKED", "AUTO_REVOKED", "ARCHIVED"];
+// The Automations screen's default: history rows stay hidden until asked for.
+const DEFAULT_AUTOMATION_STATUSES = ["DRAFT", "PENDING_APPROVAL", "ACTIVE", "DISABLED"];
+const AUTOMATION_SCAN_CAP = 1000;
+
+const spacesAutomationsList: ToolDef = {
+  name: "spaces-automations-list",
+  description:
+    "Find automations — the entry point for almost every automation question, with the same filters as the " +
+    "Automations screen. Resolve a NAME to an id here before calling get / runs / versions; never invent an id. " +
+    "Examples: 'the escalation automation' → query='escal'; 'what runs on #support' → channelIds=[<id>] + " +
+    "statuses=['ACTIVE']; 'what did Asha build' → createdBy=[<id>]. Each row shows status, trigger, channels, step count and the author's name. " +
+    "Like the screen, other people's DRAFT / PENDING_APPROVAL automations are never shown, and by default only " +
+    "DRAFT, PENDING_APPROVAL, ACTIVE and DISABLED rows are listed.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      query: {
+        type: "string",
+        description:
+          "Case-insensitive text matched against the name, description and trigger type — the screen's search " +
+          "box. Partial words work, e.g. 'escal' finds 'Escalate P1 tickets'.",
+      },
+      statuses: {
+        type: "array",
+        items: { type: "string", enum: AUTOMATION_STATUSES },
+        description:
+          "Statuses to include. Default: DRAFT, PENDING_APPROVAL, ACTIVE, DISABLED. Add REJECTED, REVOKED, " +
+          "AUTO_REVOKED or ARCHIVED to see history rows. ['ACTIVE'] = only what can fire right now.",
+      },
+      triggerTypes: {
+        type: "array",
+        items: { type: "string" },
+        description:
+          "Trigger types, e.g. ['TICKET_CREATED', 'MESSAGE_RECEIVED']. Valid values: spaces-automation-schema kind='triggers'.",
+      },
+      channelIds: {
+        type: "array",
+        items: { type: "string" },
+        description:
+          "Channel ids (from spaces-channels). Keeps automations whose TRIGGER is scoped to any of them — what " +
+          "fires for activity in that channel, the same as the screen's channel filter. Ticket automations " +
+          "scoped by board/project are not tied to a channel and do not match; use referencesId for any mention.",
+      },
+      createdBy: {
+        type: "array",
+        items: { type: "string" },
+        description:
+          "Author user ids (from spaces-users; names do not work). Editing an approved automation creates a new " +
+          "version stamped with the editor, so this also answers 'who changed it'.",
+      },
+      referencesId: {
+        type: "string",
+        description:
+          "Any id mentioned ANYWHERE in the config (channel, user, board, project, stage, group, agent). Report " +
+          "the result as 'automations that hardcode this id', never a complete list: it is a text match, so it " +
+          "misses dynamic refs like {{trigger.ticket.assigneeId}} and can over-match an id inside descriptive text.",
+      },
+      dateField: {
+        type: "string",
+        enum: ["createdAt", "updatedAt"],
+        default: "createdAt",
+        description: "Which timestamp `from` / `to` apply to.",
+      },
+      from: { type: "string", description: "ISO-8601 or epoch ms — only automations whose dateField is at/after this." },
+      to: { type: "string", description: "ISO-8601 or epoch ms — only automations whose dateField is at/before this; a bare date (YYYY-MM-DD) includes that whole day." },
+      sortBy: {
+        type: "string",
+        enum: ["updatedAt", "createdAt", "name", "status"],
+        default: "updatedAt",
+        description: "Sort key (the screen's default is updatedAt).",
+      },
+      sortDirection: {
+        type: "string",
+        enum: ["desc", "asc"],
+        default: "desc",
+        description: "desc = newest / Z→A first; asc = oldest / A→Z first.",
+      },
+      limit: { type: "number", minimum: 1, maximum: 100, default: 25, description: "Max automations per page (default 25)." },
+      offset: { type: "number", minimum: 0, default: 0, description: "Pagination offset (default 0)." },
+    },
+  },
+  handler: withToolErrors("Automations list error", async (args, ctx) => {
+    const statuses = asList(args["statuses"]);
+    const where: Record<string, unknown> = {
+      workflowType: { equals: AUTOMATION_WORKFLOW_TYPE },
+      status: { in: statuses.length > 0 ? statuses : DEFAULT_AUTOMATION_STATUSES },
+    };
+    const triggerTypes = asList(args["triggerTypes"]);
+    if (triggerTypes.length > 0) where["eventType"] = { in: triggerTypes };
+    const dateField = args["dateField"] === "updatedAt" ? "updatedAt" : "createdAt";
+    const range: Record<string, string> = {};
+    for (const [key, op] of [["from", "gte"], ["to", "lte"]] as const) {
+      if (args[key] === undefined || args[key] === "") continue;
+      const iso = toIso(args[key], key === "to");
+      if (!iso) return err(`${key} must be ISO-8601 or epoch milliseconds, not "${String(args[key])}".`);
+      range[op] = iso;
+    }
+    if (Object.keys(range).length > 0) where[dateField] = range;
+
+    // The gateway cannot OR conditions or test the JSON config, so — like the
+    // Automations screen — fetch the workspace's automations and filter here.
+    const rows = ((await interact({
+      model: "workflow",
+      operation: "findMany",
+      where,
+      orderBy: [{ updatedAt: "desc" }, { id: "desc" }],
+      take: AUTOMATION_SCAN_CAP,
+    })) as WorkflowRow[] | null) ?? [];
+
+    const query = String(args["query"] ?? "").trim().toLowerCase();
+    const channelIds = asList(args["channelIds"]);
+    const createdBy = asList(args["createdBy"]);
+    const referencesId = String(args["referencesId"] ?? "").trim();
+
+    const items = rows
+      .map((row) => {
+        const config = parseJsonObject(row.context);
+        const metadata = parseJsonObject(row.metadata);
+        const trigger = (config["trigger"] ?? {}) as { type?: string; config?: Record<string, unknown> };
+        const rawChannels = trigger.config?.["channelIds"];
+        return {
+          row,
+          triggerType: trigger.type || row.eventType || "(no trigger)",
+          channels: Array.isArray(rawChannels) ? rawChannels.map(String) : [],
+          steps: Array.isArray(config["steps"]) ? (config["steps"] as unknown[]).length : 0,
+          author: metadata["createdById"] ? String(metadata["createdById"]) : "",
+          description: metadata["description"] ? String(metadata["description"]) : "",
+        };
+      })
+      .filter((a) => {
+        // Same rule as the Automations screen: drafts and proposals are private to their author.
+        if ((a.row.status === "DRAFT" || a.row.status === "PENDING_APPROVAL") && a.author !== ctx.userId) return false;
+        if (query && ![a.row.workflowName ?? "", a.description, a.triggerType].some((t) => t.toLowerCase().includes(query))) {
+          return false;
+        }
+        if (channelIds.length > 0 && !channelIds.some((id) => a.channels.includes(id))) return false;
+        if (createdBy.length > 0 && !createdBy.includes(a.author)) return false;
+        if (referencesId && !(a.row.context ?? "").includes(referencesId)) return false;
+        return true;
+      });
+
+    const capped =
+      rows.length >= AUTOMATION_SCAN_CAP
+        ? `\n\n[Only the ${AUTOMATION_SCAN_CAP} most recently updated automations were scanned — narrow with statuses, triggerTypes or from/to.]`
+        : "";
+
+    const sortBy = ["createdAt", "name", "status"].includes(String(args["sortBy"])) ? String(args["sortBy"]) : "updatedAt";
+    const direction = args["sortDirection"] === "asc" ? 1 : -1;
+    const sortKey = (a: (typeof items)[number]): string =>
+      sortBy === "name"
+        ? (a.row.workflowName ?? "").toLowerCase()
+        : sortBy === "status"
+          ? a.row.status
+          : String(sortBy === "createdAt" ? a.row.createdAt : a.row.updatedAt);
+    items.sort((x, y) => sortKey(x).localeCompare(sortKey(y)) * direction || y.row.id.localeCompare(x.row.id));
+
+    const limit = Math.min(Math.max(Number(args["limit"] ?? 25), 1), 100);
+    const offset = Math.max(Number(args["offset"] ?? 0), 0);
+    const page = items.slice(offset, offset + limit);
+    if (page.length === 0) {
+      return ok(
+        items.length > 0
+          ? `No automations on this page — ${items.length} match in total.`
+          : "No automations matched those filters. By default REJECTED / REVOKED / AUTO_REVOKED / ARCHIVED " +
+              "rows are hidden (pass them in statuses), and other people's drafts are private." + capped,
+      );
+    }
+
+    const labels = await userLabels(page.map((a) => a.author));
+    const lines = page.map((a) => {
+      const channels = a.channels.length > 0 ? ` · channels: ${a.channels.join(", ")}` : "";
+      const author = a.author ? (labels.get(a.author) ?? a.author) : "(unknown)";
+      return (
+        `- ${a.row.workflowName ?? "(unnamed)"} [${a.row.id}]\n` +
+        `    status: ${a.row.status} · trigger: ${a.triggerType}${channels} · steps: ${a.steps}\n` +
+        `    author: ${author} · created: ${a.row.createdAt} · updated: ${a.row.updatedAt}` +
+        (a.description ? `\n    ${a.description}` : "")
+      );
+    });
+
+    return ok(
+      `${items.length} automation(s) match (sorted by ${sortBy} ${direction > 0 ? "asc" : "desc"}):\n${lines.join("\n")}` +
+        paginationFooter({ returned: page.length, limit, offset, total: items.length }) +
+        capped,
+    );
+  }),
+};
+
+/** "MESSAGE_RECEIVED — channelIds: c1, c2; messageTypes: USER" — the trigger and its scope in one line. */
+function describeTrigger(config: AutomationView["config"]): string {
+  const trigger = config?.trigger;
+  if (!trigger?.type) return "(no trigger)";
+  const filters = Object.entries(trigger.config ?? {})
+    .map(([key, value]) => {
+      const plainList = Array.isArray(value) && value.every((v) => typeof v !== "object" || v === null);
+      return `${key}: ${plainList ? (value as unknown[]).join(", ") : JSON.stringify(value)}`;
+    })
+    .join("; ");
+  return clipJson(filters ? `${trigger.type} — ${filters}` : trigger.type, 400);
+}
+
+const spacesAutomationGet: ToolDef = {
+  name: "spaces-automation-get",
+  description:
+    "Fetch ONE automation in full: status, author (name + email), a one-line trigger/scope summary and the " +
+    "complete trigger + step configuration as JSON. Use it to explain what an automation does or to read its " +
+    "config before changing it (spaces-automation-update needs the COMPLETE config). Pass an id from " +
+    "spaces-automations-list. ARCHIVED rows cannot be fetched here — read them with spaces-automation-versions versionId.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      automationId: { type: "string", description: "Automation id (from spaces-automations-list)." },
+    },
+    required: ["automationId"],
+  },
+  handler: withToolErrors("Automation get error", async (args) => {
+    const id = String(args["automationId"] ?? "").trim();
+    if (!id) return err("automationId is required");
+
+    let res: { data?: AutomationView };
+    try {
+      res = (await spacesFetch(`/api/automations/${encodeURIComponent(id)}`)) as { data?: AutomationView };
+    } catch (e) {
+      if ((e as { status?: number }).status === 404) {
+        return err(
+          `Automation ${id} not found in this workspace, or it is ARCHIVED (archived rows cannot be fetched ` +
+            `here). Read it with spaces-automation-versions automationId=${id} versionId=${id}.`,
+        );
+      }
+      throw e;
+    }
+    const a = res.data;
+    if (!a) return err(`Automation ${id} not found.`);
+    const labels = await userLabels(a.createdById ? [a.createdById] : []);
+
+    return ok(
+      [
+        `# ${a.name}`,
+        `ID: ${a.id}`,
+        `Status: ${a.status}`,
+        `Description: ${a.description ?? "(none)"}`,
+        `Trigger: ${describeTrigger(a.config)}`,
+        `Steps: ${Array.isArray(a.config?.steps) ? a.config.steps.length : 0} top-level`,
+        `Created by: ${a.createdById ? (labels.get(a.createdById) ?? a.createdById) : "(unknown)"} · created ${a.createdAt} · updated ${a.updatedAt}`,
+        ``,
+        `## Config`,
+        JSON.stringify(a.config ?? {}, null, 2),
+      ].join("\n"),
+    );
+  }),
+};
+
+const RUN_STATUSES = ["PENDING", "SCHEDULED", "RUNNING", "EXTERNAL_WAIT", "COMPLETED", "FAILED", "CANCELLED", "SKIPPED"];
+
+// The backend fills completedAt for PENDING runs too (from updatedAt), but they have not run yet.
+function finishedAt(run: AutomationRunSummary): string | null {
+  return run.status === "PENDING" ? null : run.completedAt;
+}
+
+/** "850ms", "12.3s", "4m 5s", "1h 2m"; null while unfinished or unparseable. */
+function durationText(start: string | null | undefined, end: string | null | undefined): string | null {
+  const ms = Date.parse(String(end)) - Date.parse(String(start));
+  if (!Number.isFinite(ms) || ms < 0) return null;
+  if (ms < 1000) return `${ms}ms`;
+  if (ms < 59_950) return `${(ms / 1000).toFixed(1)}s`;
+  const seconds = Math.round(ms / 1000);
+  if (seconds < 3600) return `${Math.floor(seconds / 60)}m ${seconds % 60}s`;
+  const minutes = Math.round(seconds / 60);
+  return `${Math.floor(minutes / 60)}h ${minutes % 60}m`;
+}
+
+const spacesAutomationRuns: ToolDef = {
+  name: "spaces-automation-runs",
+  description:
+    "List EXECUTIONS (runs) of one automation, newest first — the first stop for 'did it run?', 'how often " +
+    "does it fail?' or 'what happened yesterday?'. Each row: run id, status, start and finish time, duration and " +
+    "the first line of any error; the header counts runs per status. Filter by one or more statuses and a time " +
+    "range (from / to, or sinceHours). Statuses: PENDING, SCHEDULED, RUNNING, EXTERNAL_WAIT (parked waiting on an " +
+    "agent/callback), COMPLETED, FAILED, CANCELLED, SKIPPED (trigger fired but a filter stopped it). " +
+    "Pass run ids to spaces-automation-run for step-level detail.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      automationId: { type: "string", description: "Automation id (from spaces-automations-list). Required." },
+      statuses: {
+        type: "array",
+        items: { type: "string", enum: RUN_STATUSES },
+        description: "Only runs in these statuses, e.g. ['FAILED'] when debugging or ['RUNNING','EXTERNAL_WAIT'] for in-flight runs. Omit for all.",
+      },
+      from: { type: "string", description: "ISO-8601 or epoch ms — only runs that STARTED at/after this." },
+      to: { type: "string", description: "ISO-8601 or epoch ms — only runs that STARTED at/before this; a bare date (YYYY-MM-DD) includes that whole day." },
+      sinceHours: {
+        type: "number",
+        minimum: 1,
+        description: "Shortcut for from = now − N hours, e.g. 24 for the last day, 168 for the last week. Ignored when `from` is set.",
+      },
+      limit: { type: "number", minimum: 1, maximum: 200, default: 50, description: "Max runs (default 50)." },
+      cursor: {
+        type: "string",
+        description: "nextCursor from a previous call (single-status or unfiltered listings only).",
+      },
+    },
+    required: ["automationId"],
+  },
+  handler: withToolErrors("Automation runs error", async (args) => {
+    const id = String(args["automationId"] ?? "").trim();
+    if (!id) return err("automationId is required");
+    const limit = Math.min(Math.max(Number(args["limit"] ?? 50), 1), 200);
+    const statuses = [...new Set(asList(args["statuses"]))];
+
+    // The backend parseInts from/to, so an ISO string would silently become 1970: always send epoch ms.
+    const range: Record<string, string> = {};
+    for (const key of ["from", "to"] as const) {
+      if (args[key] === undefined || args[key] === null || args[key] === "") continue;
+      const iso = toIso(args[key], key === "to");
+      if (!iso) return err(`${key} must be ISO-8601 or epoch milliseconds, not "${String(args[key])}".`);
+      range[key] = String(Date.parse(iso));
+    }
+    if (!range["from"] && Number(args["sinceHours"]) > 0) {
+      range["from"] = String(Date.now() - Number(args["sinceHours"]) * 3_600_000);
+    }
+
+    // The endpoint filters one status at a time; fetch each and merge.
+    const fetchPage = async (status: string | null) => {
+      const params = new URLSearchParams({ limit: String(limit), ...range });
+      if (status) params.set("status", status);
+      if (args["cursor"] && statuses.length <= 1) params.set("cursor", String(args["cursor"]));
+      return (await spacesFetch(`/api/automations/${encodeURIComponent(id)}/runs?${params.toString()}`)) as {
+        data?: { runs?: AutomationRunSummary[]; nextCursor?: string | null };
+      };
+    };
+    const pages = await Promise.all(statuses.length > 0 ? statuses.map((s) => fetchPage(s)) : [fetchPage(null)]);
+    const runs = pages
+      .flatMap((p) => p.data?.runs ?? [])
+      .sort((a, b) => Date.parse(b.startedAt) - Date.parse(a.startedAt))
+      .slice(0, limit);
+
+    if (runs.length === 0) {
+      return ok(
+        "No runs recorded for this automation with those filters.\n\n" +
+          "CAUTION — do not conclude 'it never triggered'. An empty result means EITHER the event never " +
+          "reached it, OR it was rejected before any run row existed: not ACTIVE at the time, trigger filters " +
+          "did not match, or a different event type. A run filtered out mid-flight would instead show as " +
+          "SKIPPED. Check status and trigger filters with spaces-automation-get before explaining why.",
+      );
+    }
+
+    const counts = new Map<string, number>();
+    for (const r of runs) counts.set(r.status, (counts.get(r.status) ?? 0) + 1);
+    const lines = runs.map((r) => {
+      const completedAt = finishedAt(r);
+      const took = durationText(r.startedAt, completedAt);
+      const finished = completedAt ? ` · finished ${completedAt}${took ? ` · took ${took}` : ""}` : " · not finished";
+      // Multi-line errors (Prisma) put the cause on the LAST line, so keep both ends.
+      const errorLines = r.error ? stripAnsi(r.error).split("\n").map((l) => l.trim()).filter(Boolean) : [];
+      const errorText = errorLines.length > 1 ? `${errorLines[0]} … ${errorLines[errorLines.length - 1]}` : (errorLines[0] ?? "");
+      const error = errorText ? `\n    error: ${clipJson(errorText, 300)}` : "";
+      return `- ${r.id} · ${r.status} · started ${r.startedAt}${finished}${error}`;
+    });
+
+    const cursor = statuses.length <= 1 ? pages[0]?.data?.nextCursor : null;
+    const more = cursor
+      ? `\n\n[More runs available — call again with cursor="${cursor}".]`
+      : pages.some((p) => p.data?.nextCursor) || runs.length === limit
+        ? `\n\n[There may be older runs — call again with to="${runs[runs.length - 1]!.startedAt}" (that run repeats as the first row).]`
+        : "";
+    return ok(
+      `${runs.length} run(s) — ${[...counts].map(([s, n]) => `${s} ${n}`).join(", ")}:\n${lines.join("\n")}${more}`,
+    );
+  }),
+};
+
+type RunDetail = {
+  run?: AutomationRunSummary & { triggerData?: unknown; context?: unknown };
+  state?: unknown;
+  steps?: Array<{ stepName: string; status: string; data: unknown; createdAt: string; updatedAt: string }>;
+};
+
+function renderRun(detail: RunDetail, opts: { full: boolean; onlyFailed: boolean; stepName: string }): string {
+  const run = detail.run!;
+  const allSteps = detail.steps ?? [];
+  const steps = allSteps.filter(
+    (s) => (!opts.stepName || s.stepName === opts.stepName) && (!opts.onlyFailed || s.status === "FAILED"),
+  );
+  const stepLines = steps.length
+    ? steps.map((s, i) => {
+        // The executor stores `error` LAST, so front-clipping would hide it.
+        const data = s.data && typeof s.data === "object" && !Array.isArray(s.data) ? (s.data as Record<string, unknown>) : {};
+        const failure = data["error"];
+        const took = durationText(s.createdAt, s.updatedAt);
+        const lines = [`${i + 1}. ${s.stepName}${data["type"] ? ` (${String(data["type"])})` : ""} — ${s.status}${took ? ` · ${took}` : ""}`];
+        if (failure !== undefined && failure !== null && failure !== "") {
+          lines.push(`   ERROR: ${stripAnsi(typeof failure === "string" ? failure : JSON.stringify(failure))}`);
+        }
+        lines.push(`   data: ${opts.full ? clipJson(s.data, 100_000) : clipJson(s.data)}`);
+        return lines.join("\n");
+      })
+    : [allSteps.length ? "(no step matches the stepName / onlyFailedSteps filter)" : "(no steps recorded)"];
+  const completedAt = finishedAt(run);
+  const took = durationText(run.startedAt, completedAt);
+
+  return [
+    `# Run ${run.id}`,
+    `Automation: ${run.automationId}`,
+    `Status: ${run.status}`,
+    `Started: ${run.startedAt} · Completed: ${completedAt ?? "(not finished)"}${took ? ` · took ${took}` : ""}`,
+    `Error: ${run.error ? stripAnsi(run.error) : "(none)"}`,
+    ``,
+    `## Trigger payload`,
+    clipJson(run.triggerData, opts.full ? 100_000 : 1500),
+    ``,
+    `## Pause / resume state`,
+    clipJson(detail.state, 800),
+    ``,
+    steps.length === allSteps.length
+      ? `## Steps (${steps.length})`
+      : `## Steps (${steps.length} of ${allSteps.length} shown — filtered)`,
+    ...stepLines,
+  ].join("\n");
+}
+
+const spacesAutomationRun: ToolDef = {
+  name: "spaces-automation-run",
+  description:
+    "Get one or more automation runs in detail, by run id: status, start/finish time and duration, the trigger " +
+    "payload that started it, the pause/resume state, and every step with its status, duration, error and output. " +
+    "This is the tool that answers 'why did this run fail' — read the step whose status is FAILED, or the one " +
+    "sitting in EXTERNAL_WAIT. Run ids come from spaces-automation-runs; pass up to 10 at once to compare runs. " +
+    "Step payloads are truncated unless fullStepData=true. stepName is POSITIONAL: step_N is index N of " +
+    "config.steps and <parent>__if_true__step_N is index N of that branch — decode it against spaces-automation-get.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      runIds: {
+        type: "array",
+        items: { type: "string" },
+        minItems: 1,
+        maxItems: 10,
+        description: "Run ids (from spaces-automation-runs), 1–10. Each is fetched and shown separately.",
+      },
+      onlyFailedSteps: {
+        type: "boolean",
+        default: false,
+        description: "Show only steps whose status is FAILED — the fastest way to the root cause of a failed run.",
+      },
+      stepName: {
+        type: "string",
+        description:
+          "Show only this step, e.g. 'step_2' or 'step_0__if_true__step_1'. Combine with fullStepData=true to read one step's complete payload.",
+      },
+      fullStepData: {
+        type: "boolean",
+        default: false,
+        description: "Return untruncated step payloads and trigger data. Off by default — these can be very large.",
+      },
+    },
+    required: ["runIds"],
+  },
+  handler: withToolErrors("Automation run error", async (args) => {
+    const ids = [...new Set(asList(args["runIds"]))];
+    if (ids.length === 0) return err("runIds is required — pass one or more run ids from spaces-automation-runs.");
+    if (ids.length > 10) return err("Pass at most 10 runIds per call.");
+    const opts = {
+      full: args["fullStepData"] === true,
+      onlyFailed: args["onlyFailedSteps"] === true,
+      stepName: String(args["stepName"] ?? "").trim(),
+    };
+
+    const results = await Promise.allSettled(
+      ids.map((id) => spacesFetch(`/api/automations/runs/${encodeURIComponent(id)}`) as Promise<{ data?: RunDetail }>),
+    );
+    const blocks = results.map((r, i) =>
+      r.status === "fulfilled" && r.value.data?.run
+        ? renderRun(r.value.data, opts)
+        : `# Run ${ids[i]}\n${
+            r.status === "rejected" && (r.reason as { status?: number }).status !== 404
+              ? `Could not load: ${errMsg(r.reason)}`
+              : "Not found in this workspace."
+          }`,
+    );
+    return ok(blocks.join("\n\n---\n\n"));
+  }),
+};
+
+const spacesAutomationSchema: ToolDef = {
+  name: "spaces-automation-schema",
+  description:
+    "Discover what automations CAN do: list every available trigger type or step type, or get " +
+    "the full JSON config/output schema for one of them. " +
+    "Call this BEFORE describing or drafting an automation config so you use real trigger/step " +
+    "types and real field names instead of guessing. " +
+    "kind='triggers' or 'steps' lists them; add `type` to get that one's full schema.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      kind: {
+        type: "string",
+        enum: ["triggers", "steps", "operators"],
+        description:
+          "'triggers' = what can start an automation; 'steps' = what it can do; " +
+          "'operators' = comparison operators available in conditions.",
+      },
+      type: {
+        type: "string",
+        description:
+          "Optional. A specific trigger or step type (from the list) to fetch the full " +
+          "config + output JSON schema for. Ignored when kind='operators'.",
+      },
+    },
+    required: ["kind"],
+  },
+  handler: withToolErrors("Automation schema error", async (args) => {
+    const kind = String(args["kind"] ?? "").trim();
+    if (!["triggers", "steps", "operators"].includes(kind)) {
+      return err("kind must be one of: triggers, steps, operators");
+    }
+
+    if (kind === "operators") {
+      const res = (await spacesFetch("/api/automations/schema/operators")) as { data?: unknown };
+      return ok(`## Condition operators\n${JSON.stringify(res.data ?? {}, null, 2)}`);
+    }
+
+    const type = args["type"] ? String(args["type"]).trim() : "";
+    if (type) {
+      const res = (await spacesFetch(
+        `/api/automations/schema/${kind}/${encodeURIComponent(type)}`,
+      )) as { data?: unknown };
+      return ok(`## ${kind.slice(0, -1)} "${type}"\n${JSON.stringify(res.data ?? {}, null, 2)}`);
+    }
+
+    const res = (await spacesFetch(`/api/automations/schema/${kind}`)) as {
+      data?: Array<{ type: string; name: string; description?: string; category?: string }>;
+    };
+    const rows = res.data ?? [];
+    if (rows.length === 0) return ok(`No ${kind} registered.`);
+
+    const lines = rows.map(
+      (r) => `- ${r.type} — ${r.name}${r.category ? ` (${r.category})` : ""}${r.description ? `: ${r.description}` : ""}`,
+    );
+    return ok(
+      `${rows.length} ${kind}:\n${lines.join("\n")}\n\n` +
+        `[Call again with type="<one of the above>" for its full config/output schema.]`,
+    );
+  }),
+};
+
+const spacesAutomationValidate: ToolDef = {
+  name: "spaces-automation-validate",
+  description:
+    "Check whether an automation config is structurally valid WITHOUT saving anything. " +
+    "Purely a dry run — it creates and changes nothing. " +
+    "Use it to verify a config you drafted (after reading spaces-automation-schema) before " +
+    "presenting it to the user. Returns validation errors with the offending field paths.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      config: {
+        type: "object",
+        description:
+          "The automation config object to validate — { trigger: { type, config }, steps: [...] }. " +
+          "Use spaces-automation-schema to get the exact shape for each trigger/step type.",
+      },
+    },
+    required: ["config"],
+  },
+  handler: withToolErrors("Automation validate error", async (args) => {
+    const config = args["config"];
+    if (!config || typeof config !== "object" || Array.isArray(config)) return err("config must be an object");
+
+    const res = (await spacesFetch("/api/automations/validate", {
+      method: "POST",
+      body: JSON.stringify({ config }),
+      // The endpoint returns { valid, issues } — not `errors`.
+    })) as { data?: { valid?: boolean; issues?: unknown } };
+
+    const result = res.data ?? {};
+    const problems = result.issues;
+    const idProblems = stepIdProblems(config);
+    if (result.valid && idProblems.length === 0) return ok("Config is VALID.");
+    return ok(
+      "Config is INVALID." +
+        (result.valid ? "" : `\n${JSON.stringify(problems, null, 2)}`) +
+        (idProblems.length > 0 ? `\n${stepIdError(idProblems, "Rename these before create/update")}` : ""),
+    );
+  }),
+};
+
+/**
+ * Gives every step without an id one in the builder's format (makeStepId in
+ * dashboard Automation.types.ts), in place, including steps inside branches.
+ * Returns a line per assigned id for the tool result.
+ */
+function assignMissingStepIds(config: unknown): string[] {
+  const steps = flattenAutomationSteps((config as AutomationView["config"])?.steps);
+  const assigned: string[] = [];
+  steps.forEach(({ step, branch }, i) => {
+    // Only absent or blank ids; non-string ones are refused by stepIdProblems first.
+    const id = step["id"];
+    const missing = id === undefined || id === null || (typeof id === "string" && !id.trim());
+    if (!missing) return;
+    step["id"] = `stp_${randomUUID().replace(/-/g, "")}`;
+    assigned.push(`step ${i + 1} (${String(step["type"] ?? "?")}${branch ? `, in ${branch}` : ""}) → ${String(step["id"])}`);
+  });
+  return assigned;
+}
+
+// The resolver reads these as roots (trigger/automation), strips `context.` as the
+// legacy prefix, or refuses them (prototype keys) — a step with one is unreferenceable.
+const RESERVED_STEP_IDS = new Set(["trigger", "automation", "context", "__proto__", "constructor", "prototype"]);
+
+/** Non-string, dotted, reserved or duplicate step ids; the backend accepts all of them and they break {{<stepId>.output}}. */
+function stepIdProblems(config: unknown): string[] {
+  const problems: string[] = [];
+  const seen = new Set<string>();
+  for (const { step } of flattenAutomationSteps((config as AutomationView["config"])?.steps)) {
+    const raw = step["id"];
+    if (raw !== undefined && raw !== null && typeof raw !== "string") {
+      problems.push(`${JSON.stringify(raw)} is not a string — step ids must be strings.`);
+      continue;
+    }
+    const id = (raw ?? "").trim();
+    if (!id) continue;
+    if (id.includes(".")) problems.push(`"${id}" contains "." — references split on dots, so it can never be read.`);
+    else if (RESERVED_STEP_IDS.has(id)) problems.push(`"${id}" is reserved — {{${id}...}} never reads a step.`);
+    else if (seen.has(id)) problems.push(`"${id}" is used by more than one step — the later step's output overwrites the earlier one's.`);
+    seen.add(id);
+  }
+  return problems;
+}
+
+const stepIdError = (problems: string[], next = "Nothing was saved — rename these and retry"): string =>
+  `Step ids must be unique strings without "." and not reserved (${[...RESERVED_STEP_IDS].join(", ")}). ${next}:\n` +
+  problems.map((p) => `- ${p}`).join("\n");
+
+const assignedIdsNote = (assigned: string[]): string[] =>
+  assigned.length > 0 ? [``, `Assigned ids to ${assigned.length} step(s) that had none:`, ...assigned.map((a) => `- ${a}`)] : [];
+
+const spacesAutomationCreate: ToolDef = {
+  name: "spaces-automation-create",
+  description:
+    "Create a NEW automation. Always saved as a DRAFT — it does NOT start running; call " +
+    "spaces-automation-submit, then an admin approves it. " +
+    "REQUIRED FIRST: spaces-automation-schema (list, then `type` for each chosen trigger/step) and " +
+    "spaces-automation-validate — skip these and you will invent fields that don't exist. " +
+    "Resolve every id via spaces-channels / -users / -projects / -boards; agent slugs via " +
+    "spaces-automation-agents. " +
+    "HARD RULE: every trigger except the webhook one needs at least one scope filter " +
+    "(channel/board/project, field varies) or the create is rejected with a 400. " +
+    "Pass data between steps with `{{trigger.<field>}}`, `{{automation.id}}` or " +
+    "`{{<stepId>.output.<field>}}` — step id, not name, earlier steps only. A step whose output a " +
+    "later step references needs a unique `id` you choose (an id assigned at save time cannot be " +
+    "referenced in the same config); any step without an id gets one like the builder's (stp_…). " +
+    "Ids must be unique strings across all steps (branches included), without '.', and not trigger, automation or context — " +
+    "such configs are refused.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      name: { type: "string", description: "Human-readable automation name, e.g. 'Escalate P1 tickets to oncall'." },
+      description: { type: "string", description: "Optional longer description of what it does and why." },
+      config: {
+        type: "object",
+        description:
+          "The automation config: { trigger: { type, config }, steps: [ { type, config, ... } ] }. " +
+          "Types and field names MUST come from spaces-automation-schema.",
+      },
+    },
+    required: ["name", "config"],
+  },
+  handler: withToolErrors("Automation create error", async (args) => {
+    const name = String(args["name"] ?? "").trim();
+    const config = args["config"];
+    if (!name) return err("name is required");
+    if (!config || typeof config !== "object" || Array.isArray(config)) return err("config must be an object");
+    const idProblems = stepIdProblems(config);
+    if (idProblems.length > 0) return err(stepIdError(idProblems));
+    const assigned = assignMissingStepIds(config);
+
+    const body: Record<string, unknown> = { name, config };
+    if (args["description"] !== undefined) body["description"] = args["description"];
+
+    const res = (await spacesFetch("/api/automations", {
+      method: "POST",
+      body: JSON.stringify(body),
+    })) as { data?: { automation?: AutomationView } };
+
+    const a = res.data?.automation;
+    if (!a) return err("Automation was not created (no automation returned).");
+    return ok(
+      [
+        `Created automation "${a.name}" as ${a.status}.`,
+        `ID: ${a.id}`,
+        ``,
+        `It is NOT running yet. Call spaces-automation-submit with this id to request approval;`,
+        `an admin must approve it before it goes ACTIVE.`,
+        ...assignedIdsNote(assigned),
+      ].join("\n"),
+    );
+  }),
+};
+
+const spacesAutomationUpdate: ToolDef = {
+  name: "spaces-automation-update",
+  description:
+    "Change an existing automation's name, description, or config. " +
+    "Your own DRAFT is edited in place; anything else (ACTIVE/approved, or someone else's) gets a " +
+    "NEW DRAFT VERSION in the same lineage while the live one keeps running — the result says " +
+    "which, so tell the user. Either way it is not live until submitted and approved. " +
+    "Read the current config with spaces-automation-get FIRST and send the COMPLETE new config: it " +
+    "replaces wholesale, it does not merge. KEEP every existing step's `id` exactly as get returned " +
+    "it: a step sent without its id gets a new stp_… id, and version history then shows it as removed " +
+    "and re-added. Validate first; omit `config` to rename only.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      automationId: { type: "string", description: "Automation id to update (from spaces-automations-list)." },
+      name: { type: "string", description: "New name. Omit to keep the current one." },
+      description: { type: "string", description: "New description. Omit to keep the current one." },
+      config: {
+        type: "object",
+        description:
+          "COMPLETE replacement config { trigger, steps }. Omit to leave the config unchanged. " +
+          "Partial configs will drop the steps you left out.",
+      },
+    },
+    required: ["automationId"],
+  },
+  handler: withToolErrors("Automation update error", async (args) => {
+    const id = String(args["automationId"] ?? "").trim();
+    if (!id) return err("automationId is required");
+
+    const body: Record<string, unknown> = {};
+    for (const key of ["name", "description", "config"]) {
+      if (args[key] !== undefined) body[key] = args[key];
+    }
+    const hasConfig = body["config"] !== undefined;
+    if (hasConfig && (!body["config"] || typeof body["config"] !== "object" || Array.isArray(body["config"]))) {
+      return err("config must be an object");
+    }
+    const idProblems = hasConfig ? stepIdProblems(body["config"]) : [];
+    if (idProblems.length > 0) return err(stepIdError(idProblems));
+    const assigned = hasConfig ? assignMissingStepIds(body["config"]) : [];
+    if (Object.keys(body).length === 0) {
+      return err("Nothing to update — provide at least one of name, description, or config.");
+    }
+
+    const res = (await spacesFetch(`/api/automations/${encodeURIComponent(id)}`, {
+      method: "PUT",
+      body: JSON.stringify(body),
+    })) as { data?: { automation?: AutomationView } };
+
+    const a = res.data?.automation;
+    if (!a) return err("Update did not return an automation.");
+
+    const newVersion = a.id !== id;
+    return ok(
+      [
+        newVersion
+          ? `Created a NEW DRAFT VERSION (${a.id}) in the same lineage. The original (${id}) is unchanged and still live if it was active.`
+          : `Updated DRAFT ${a.id} in place.`,
+        `Name: ${a.name} · Status: ${a.status}`,
+        ``,
+        `Not live yet — call spaces-automation-submit with id ${a.id} to request approval.`,
+        ...assignedIdsNote(assigned),
+      ].join("\n"),
+    );
+  }),
+};
+
+const spacesAutomationSubmit: ToolDef = {
+  name: "spaces-automation-submit",
+  description:
+    "Submit a DRAFT automation for admin approval, moving it DRAFT → PENDING_APPROVAL and DMing " +
+    "the workspace's automation admins. This does NOT make it active — an admin still has to approve. " +
+    "Only the draft's owner can submit it. Confirm with the user before calling.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      automationId: { type: "string", description: "DRAFT automation id to submit for approval." },
+    },
+    required: ["automationId"],
+  },
+  handler: withToolErrors("Automation submit error", async (args) => {
+    const id = String(args["automationId"] ?? "").trim();
+    if (!id) return err("automationId is required");
+
+    const res = (await spacesFetch(`/api/automations/${encodeURIComponent(id)}/submit`, {
+      method: "POST",
+      body: JSON.stringify({}),
+    })) as { data?: { automation?: AutomationView } };
+
+    const a = res.data?.automation;
+    return ok(
+      a
+        ? `Submitted "${a.name}" (${a.id}) for approval — status is now ${a.status}. Admins have been notified; one of them must approve it before it runs.`
+        : `Submitted ${id} for approval.`,
+    );
+  }),
+};
+
+const BRANCH_KEYS = new Set(["if_true", "if_false", "default", "cases"]);
+
+/** A step's own fields as "name", "config.channelId", … — branch children are compared as their own steps. */
+function stepFields(step: Record<string, unknown>): Map<string, unknown> {
+  const fields = new Map<string, unknown>();
+  for (const [key, value] of Object.entries(step)) if (key !== "id" && key !== "config") fields.set(key, value);
+  for (const [key, value] of Object.entries((step["config"] ?? {}) as Record<string, unknown>)) {
+    if (!BRANCH_KEYS.has(key)) fields.set(`config.${key}`, value);
+  }
+  // A Switch case is { condition, label, steps }: only its steps are a branch.
+  const cases = ((step["config"] ?? {}) as Record<string, unknown>)["cases"];
+  if (Array.isArray(cases)) {
+    fields.set(
+      "config.cases",
+      cases.map((c) => Object.fromEntries(Object.entries((c ?? {}) as Record<string, unknown>).filter(([k]) => k !== "steps"))),
+    );
+  }
+  return fields;
+}
+
+/** Human-readable changes from `older` to `newer`: name, description, trigger, and steps matched by id. */
+function diffAutomations(older: AutomationView, newer: AutomationView): string[] {
+  // JSON-quoted so "" vs " " vs a missing value stay distinguishable.
+  const show = (value: unknown): string =>
+    value === undefined || value === null ? "(none)" : clipJson(JSON.stringify(value), 160);
+  const changes: string[] = [];
+  if (older.name !== newer.name) changes.push(`name: ${show(older.name)} → ${show(newer.name)}`);
+  if ((older.description ?? "") !== (newer.description ?? "")) {
+    changes.push(`description: ${show(older.description)} → ${show(newer.description)}`);
+  }
+
+  const before = older.config?.trigger ?? {};
+  const after = newer.config?.trigger ?? {};
+  if (before.type !== after.type) changes.push(`trigger type: ${before.type ?? "(none)"} → ${after.type ?? "(none)"}`);
+  for (const key of new Set([...Object.keys(before.config ?? {}), ...Object.keys(after.config ?? {})])) {
+    const a = before.config?.[key];
+    const b = after.config?.[key];
+    if (JSON.stringify(a) !== JSON.stringify(b)) changes.push(`trigger ${key}: ${show(a)} → ${show(b)}`);
+  }
+  // Other top-level config (e.g. `schedule`) compared whole.
+  const oldConfig = (older.config ?? {}) as Record<string, unknown>;
+  const newConfig = (newer.config ?? {}) as Record<string, unknown>;
+  for (const key of new Set([...Object.keys(oldConfig), ...Object.keys(newConfig)])) {
+    if (key === "trigger" || key === "steps") continue;
+    if (JSON.stringify(oldConfig[key]) !== JSON.stringify(newConfig[key])) {
+      changes.push(`${key}: ${show(oldConfig[key])} → ${show(newConfig[key])}`);
+    }
+  }
+
+  const index = (a: AutomationView) =>
+    new Map(
+      flattenAutomationSteps(a.config?.steps).map(({ step, branch }, i) => [
+        String(step["id"] ?? `#${i + 1}`),
+        { step, branch },
+      ]),
+    );
+  const oldSteps = index(older);
+  const newSteps = index(newer);
+  for (const [id, { step }] of oldSteps) {
+    if (!newSteps.has(id)) changes.push(`step removed: ${id} (${String(step["type"] ?? "?")})`);
+  }
+  for (const [id, { step, branch }] of newSteps) {
+    const previous = oldSteps.get(id);
+    if (!previous) {
+      changes.push(`step added: ${id} (${String(step["type"] ?? "?")})${branch ? ` in ${branch}` : ""}`);
+      continue;
+    }
+    if (previous.branch !== branch) changes.push(`step ${id} moved: ${previous.branch || "top level"} → ${branch || "top level"}`);
+    const a = stepFields(previous.step);
+    const b = stepFields(step);
+    for (const key of new Set([...a.keys(), ...b.keys()])) {
+      if (JSON.stringify(a.get(key)) !== JSON.stringify(b.get(key))) {
+        changes.push(`step ${id} ${key}: ${show(a.get(key))} → ${show(b.get(key))}`);
+      }
+    }
+  }
+  const kept = (steps: Map<string, unknown>, other: Map<string, unknown>) => [...steps.keys()].filter((id) => other.has(id));
+  const oldOrder = kept(oldSteps, newSteps);
+  const newOrder = kept(newSteps, oldSteps);
+  if (oldOrder.join(",") !== newOrder.join(",")) changes.push(`step order: ${oldOrder.join(", ")} → ${newOrder.join(", ")}`);
+  return changes;
+}
+
+const spacesAutomationVersions: ToolDef = {
+  name: "spaces-automation-versions",
+  description:
+    "Version history of an automation — every edit of an approved automation creates a new version instead of " +
+    "changing the live one. Lists each version (newest first) with status, who made it (name + email), when, and " +
+    "a summary of what changed from the version before it. compareFrom / compareTo gives the full change list " +
+    "between any two versions (trigger filters and every step field); versionId prints one version's complete " +
+    "config — the only way to read ARCHIVED versions. Use it for 'what versions did it have', 'what changed', " +
+    "'who changed it' and 'which version is live'. Pass any id in the lineage.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      automationId: { type: "string", description: "Any automation id belonging to the lineage. Required." },
+      compareFrom: {
+        type: "string",
+        description: "Older version id. Defaults to the version just before compareTo when only compareTo is given.",
+      },
+      compareTo: {
+        type: "string",
+        description: "Newer version id. Defaults to the newest version when only compareFrom is given.",
+      },
+      versionId: {
+        type: "string",
+        description: "Print this one version's full config (works for ARCHIVED versions too). Ignores compareFrom/compareTo.",
+      },
+    },
+    required: ["automationId"],
+  },
+  handler: withToolErrors("Automation versions error", async (args) => {
+    const id = String(args["automationId"] ?? "").trim();
+    if (!id) return err("automationId is required");
+
+    const res = (await spacesFetch(`/api/automations/${encodeURIComponent(id)}/versions`)) as { data?: AutomationView[] };
+    const versions = res.data ?? []; // newest first
+    if (versions.length === 0) return ok("No versions found for this automation.");
+    const labels = await userLabels(versions.map((v) => v.createdById ?? ""));
+    const author = (v: AutomationView) => (v.createdById ? (labels.get(v.createdById) ?? v.createdById) : "(unknown)");
+    const find = (key: string): AutomationView | undefined => versions.find((v) => v.id === key);
+    const known = `Versions: ${versions.map((v) => `${v.id} (${v.status})`).join(", ")}.`;
+
+    const versionId = String(args["versionId"] ?? "").trim();
+    if (versionId) {
+      const v = find(versionId);
+      if (!v) return err(`${versionId} is not in this lineage. ${known}`);
+      return ok(
+        [
+          `# ${v.name} — version ${v.id}`,
+          `Status: ${v.status} · by ${author(v)} · created ${v.createdAt} · updated ${v.updatedAt}`,
+          `Trigger: ${describeTrigger(v.config)}`,
+          ``,
+          `## Config`,
+          JSON.stringify(v.config ?? {}, null, 2),
+        ].join("\n"),
+      );
+    }
+
+    const fromArg = String(args["compareFrom"] ?? "").trim();
+    const toArg = String(args["compareTo"] ?? "").trim();
+    if (fromArg || toArg) {
+      const to = toArg ? find(toArg) : versions[0];
+      const toIndex = to ? versions.indexOf(to) : -1;
+      const from = fromArg ? find(fromArg) : versions[toIndex + 1];
+      if (!to || !from) {
+        return err(`${!to ? `compareTo ${toArg}` : fromArg ? `compareFrom ${fromArg}` : "An older version to compare with"} was not found. ${known}`);
+      }
+      if (from.id === to.id) return err("compareFrom and compareTo are the same version.");
+      // Versions are newest first; always diff older → newer so additions never read as removals.
+      const [older, newer] = versions.indexOf(from) > versions.indexOf(to) ? [from, to] : [to, from];
+      const changes = diffAutomations(older, newer);
+      return ok(
+        [
+          `Changes from ${older.id} (${older.status}, by ${author(older)}, ${older.createdAt})`,
+          `to ${newer.id} (${newer.status}, by ${author(newer)}, ${newer.createdAt}):`,
+          ...(changes.length > 0 ? changes.map((c) => `- ${c}`) : ["- No differences in name, description, trigger or steps."]),
+        ].join("\n"),
+      );
+    }
+
+    const lines = versions.map((v, i) => {
+      const older = versions[i + 1];
+      const changes = older ? diffAutomations(older, v) : [];
+      const summary = !older
+        ? "first version"
+        : changes.length === 0
+          ? "no config changes from the previous version"
+          : `${changes.slice(0, 3).join("; ")}${changes.length > 3 ? ` (+${changes.length - 3} more)` : ""}`;
+      return (
+        `- ${v.id} · ${v.status} · ${v.name}${v.id === id ? "  ← the id you asked about" : ""}\n` +
+        `    by ${author(v)} · created ${v.createdAt} · updated ${v.updatedAt}\n` +
+        `    changes: ${summary}`
+      );
+    });
+    return ok(
+      `${versions.length} version(s), newest first:\n${lines.join("\n")}\n\n` +
+        `[Full change list between two versions: compareFrom / compareTo. Full config of one (even ARCHIVED): versionId.]`,
+    );
+  }),
+};
+
+function jsonSchemaProps(schema: unknown): Record<string, { type?: string; description?: string }> {
+  if (!schema || typeof schema !== "object") return {};
+  const s = schema as Record<string, unknown>;
+  const direct = s["properties"];
+  if (direct && typeof direct === "object") {
+    return direct as Record<string, { type?: string; description?: string }>;
+  }
+  const defs = s["definitions"];
+  if (defs && typeof defs === "object") {
+    for (const value of Object.values(defs as Record<string, unknown>)) {
+      const props = (value as Record<string, unknown> | null)?.["properties"];
+      if (props && typeof props === "object") {
+        return props as Record<string, { type?: string; description?: string }>;
+      }
+    }
+  }
+  return {};
+}
+
+// Branch steps live at config.if_true / if_false / cases[].steps / default.
+function flattenAutomationSteps(
+  steps: unknown,
+  branch = "",
+  out: Array<{ step: Record<string, unknown>; branch: string }> = [],
+): Array<{ step: Record<string, unknown>; branch: string }> {
+  if (!Array.isArray(steps)) return out;
+  for (const raw of steps) {
+    if (!raw || typeof raw !== "object" || Array.isArray(raw)) continue;
+    const step = raw as Record<string, unknown>;
+    out.push({ step, branch });
+    const config = (step["config"] ?? {}) as Record<string, unknown>;
+    const label = branch ? `${branch} › ` : "";
+    flattenAutomationSteps(config["if_true"], `${label}if_true`, out);
+    flattenAutomationSteps(config["if_false"], `${label}if_false`, out);
+    flattenAutomationSteps(config["default"], `${label}default`, out);
+    const cases = config["cases"];
+    if (Array.isArray(cases)) {
+      cases.forEach((entry, i) => {
+        if (entry && typeof entry === "object") {
+          flattenAutomationSteps((entry as Record<string, unknown>)["steps"], `${label}case[${i}]`, out);
+        }
+      });
+    }
+  }
+  return out;
+}
+
+const spacesAutomationVariables: ToolDef = {
+  name: "spaces-automation-variables",
+  description:
+    "List the CONCRETE variable refs usable inside one automation, resolved against its real " +
+    "trigger and real step ids — so the paths returned work verbatim. Call before authoring or " +
+    "editing step configs; for a type not added yet use spaces-automation-schema. " +
+    "SYNTAX (wrong = silently empty): `{{trigger.ticket.id}}`. Alone in a field it passes the typed " +
+    "value; inside a sentence it is stringified. Legacy `{{context.trigger.x}}` also parses. " +
+    "THREE ROOTS: `trigger.*` (the firing event), `automation.*` (id, workspaceId, createdById), " +
+    "and `<stepId>.output.*` — keyed by step **id**, not name, and only for steps that already ran.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      automationId: {
+        type: "string",
+        description: "Automation id whose trigger + steps should be enumerated.",
+      },
+    },
+    required: ["automationId"],
+  },
+  handler: withToolErrors("Automation variables error", async (args) => {
+    const id = String(args["automationId"] ?? "").trim();
+    if (!id) return err("automationId is required");
+
+    const res = (await spacesFetch(`/api/automations/${encodeURIComponent(id)}`)) as {
+      data?: AutomationView;
+    };
+    const automation = res.data;
+    if (!automation) return err(`Automation ${id} not found.`);
+
+    const triggerType = automation.config?.trigger?.type ?? "";
+    const steps = flattenAutomationSteps(automation.config?.steps);
+
+    const lines: string[] = [
+      `# Variables available in "${automation.name}" (${automation.id})`,
+      ``,
+      `## automation.*`,
+      `- {{automation.id}}`,
+      `- {{automation.workspaceId}}`,
+      `- {{automation.createdById}}`,
+      ``,
+      `## trigger.* — ${triggerType || "(no trigger configured)"}`,
+    ];
+
+    if (triggerType) {
+      try {
+        const tRes = (await spacesFetch(
+          `/api/automations/schema/triggers/${encodeURIComponent(triggerType)}`,
+        )) as { data?: { outputSchema?: unknown } };
+        const props = jsonSchemaProps(tRes.data?.outputSchema);
+        const names = Object.keys(props);
+        if (names.length === 0) {
+          lines.push(`- (this trigger declares no output fields)`);
+        } else {
+          for (const key of names) {
+            const meta = props[key] ?? {};
+            lines.push(`- {{trigger.${key}}}${meta.type ? ` (${meta.type})` : ""}${meta.description ? ` — ${meta.description}` : ""}`);
+          }
+          const objectField = names.find((key) => props[key]?.type === "object");
+          if (objectField) {
+            lines.push(
+              `- (object fields have nested paths, e.g. {{trigger.${objectField}.<field>}} — use spaces-automation-schema kind='triggers' type='${triggerType}' for the full nested shape)`,
+            );
+          }
+        }
+      } catch {
+        lines.push(`- (could not load the schema for trigger "${triggerType}")`);
+      }
+    }
+
+    lines.push(``, `## Step outputs — reference by step ID`);
+    if (steps.length === 0) {
+      lines.push(`- (this automation has no steps yet)`);
+    } else {
+      const typeProps = new Map<string, string[]>();
+      for (const type of new Set(steps.map(({ step }) => String(step["type"] ?? "")).filter(Boolean))) {
+        try {
+          const sRes = (await spacesFetch(
+            `/api/automations/schema/steps/${encodeURIComponent(type)}`,
+          )) as { data?: { outputSchema?: unknown } };
+          typeProps.set(type, Object.keys(jsonSchemaProps(sRes.data?.outputSchema)));
+        } catch {
+          typeProps.set(type, []);
+        }
+      }
+
+      steps.forEach(({ step, branch }, i) => {
+        const stepId = String(step["id"] ?? "");
+        const type = String(step["type"] ?? "?");
+        const label = step["name"] ? ` "${String(step["name"])}"` : "";
+        const where = branch ? ` [in ${branch}]` : "";
+        lines.push(``, `${i + 1}. ${type}${label}${where} — id: ${stepId || "(missing id!)"}`);
+        if (!stepId) {
+          lines.push(`   (no id on this step — its output cannot be referenced)`);
+          return;
+        }
+        // RUN_AGENT (outputSchema) and TRIGGER_WEBHOOK (responseSchema) declare their real
+        // output in their own config as a flat { key: type } map (backend declared-schema.ts);
+        // the webhook step's declared keys surface under output.responseJson.
+        const stepConfig = (step["config"] ?? {}) as Record<string, unknown>;
+        const isWebhook = type === "TRIGGER_WEBHOOK";
+        const declared = stepConfig[isWebhook ? "responseSchema" : "outputSchema"];
+        const declaredFields =
+          declared && typeof declared === "object" && !Array.isArray(declared)
+            ? Object.keys(declared).map((k) => (isWebhook ? `responseJson.${k}` : k))
+            : [];
+        const generic = typeProps.get(type) ?? [];
+        const fields = declaredFields.length === 0 ? generic : isWebhook ? [...generic, ...declaredFields] : declaredFields;
+
+        if (fields.length === 0) {
+          lines.push(`   - {{${stepId}.output}} (this step declares no named output fields)`);
+        } else {
+          for (const f of fields) lines.push(`   - {{${stepId}.output.${f}}}`);
+          if (declaredFields.length > 0) {
+            lines.push(`   (fields declared by this step's own config, not the generic step schema)`);
+          }
+        }
+      });
+      lines.push(
+        ``,
+        `NOTE: a step can only reference steps ABOVE it — later steps have not run yet and resolve to empty.`,
+      );
+    }
+
+    return ok(lines.join("\n"));
+  }),
+};
+
+const spacesAutomationWebhook: ToolDef = {
+  name: "spaces-automation-webhook",
+  description:
+    "For a WEBHOOK-triggered automation, show its inbound webhook URL and whether a secret has " +
+    "already been issued. The secret itself is shown only once at issue time and is NEVER returned " +
+    "here. If no secret has been issued yet the URL cannot receive calls — use " +
+    "spaces-automation-webhook-issue to mint one.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      automationId: { type: "string", description: "Automation id of a webhook-triggered automation." },
+    },
+    required: ["automationId"],
+  },
+  handler: withToolErrors("Automation webhook error", async (args) => {
+    const id = String(args["automationId"] ?? "").trim();
+    if (!id) return err("automationId is required");
+
+    const res = (await spacesFetch(
+      `/api/automations/${encodeURIComponent(id)}/webhook`,
+    )) as { data?: { url?: string; issued?: boolean } };
+
+    const url = res.data?.url ?? "(unknown)";
+    return ok(
+      res.data?.issued
+        ? `Webhook base URL: ${url}\nA secret HAS been issued. The full URL (with secret) was shown only at issue time and cannot be re-read, reissued or rotated from Spaces.`
+        : `Webhook base URL: ${url}\nNo secret issued yet — this endpoint will reject calls until you issue one (spaces-automation-webhook-issue).`,
+    );
+  }),
+};
+
+const spacesAutomationWebhookIssue: ToolDef = {
+  name: "spaces-automation-webhook-issue",
+  description:
+    "Mint the webhook secret for a WEBHOOK-triggered automation and return the full callable URL. " +
+    "The secret is shown EXACTLY ONCE — relay it to the user immediately and tell them to store it. " +
+    "A secret can be issued only ONCE per automation: if one exists this mints nothing, and there is " +
+    "no way to re-read, reissue or rotate it. Confirm with the user before calling.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      automationId: { type: "string", description: "Automation id of a webhook-triggered automation." },
+    },
+    required: ["automationId"],
+  },
+  handler: withToolErrors("Automation webhook issue error", async (args) => {
+    const id = String(args["automationId"] ?? "").trim();
+    if (!id) return err("automationId is required");
+
+    const res = (await spacesFetch(`/api/automations/${encodeURIComponent(id)}/webhook`, {
+      method: "POST",
+      body: JSON.stringify({}),
+    })) as { data?: { url?: string | null; alreadyIssued?: boolean } };
+
+    if (res.data?.alreadyIssued || !res.data?.url) {
+      return ok(
+        "A webhook secret has already been issued for this automation, so no new URL was minted. " +
+          "The original URL cannot be re-read, reissued or rotated from Spaces.",
+      );
+    }
+    return ok(
+      `Webhook URL (contains the secret — shown ONCE, store it now):\n${res.data.url}\n\n` +
+        `POST JSON to this URL to fire the automation — it only fires while the automation is ACTIVE. ` +
+        `CAVEAT: the inbound route matches only automationSeriesId, which a brand-new automation ` +
+        `(and in-place DRAFT edits) leave null, so a first version 404s even when ACTIVE. The series ` +
+        `id is set when a live automation is edited (that forks a new version); from that approved ` +
+        `version on, this URL works.`,
+    );
+  }),
+};
+
+const spacesAutomationAgents: ToolDef = {
+  name: "spaces-automation-agents",
+  description:
+    "List the Claw agents available to a RUN_AGENT automation step. Call this before authoring any " +
+    "automation that uses RUN_AGENT so you reference a real agent, never a guessed name.",
+  inputSchema: { type: "object", properties: {} },
+  handler: withToolErrors("Automation agents error", async () => {
+    // Not spacesFetch: its /claw fallback turns a 502 here into GET /api/automations/agents,
+    // which hits /:id and reports a misleading "404 Automation not found".
+    const res = JSON.parse(await spacesFetchText("/api/automations/claw/agents")) as {
+      data?: Array<{ slug?: string; name?: string; description?: string | null }>;
+    };
+    const agents = res.data ?? [];
+    if (agents.length === 0) return ok("No claw agents available.");
+    const lines = agents.map((a) => `- ${a.slug} — ${a.name ?? a.slug}${a.description ? `: ${a.description}` : ""}`);
+    return ok(`${agents.length} agent(s) — use the slug as RUN_AGENT agentSlug:\n${lines.join("\n")}`);
+  }),
+};
+
 export const tools: ToolDef[] = [
   spacesWhoami,
-  ...(CONFIG.directVespaSearch ? [spacesVespaSchema, spacesVespaQuery, spacesVespaSearch, spacesCorpusScan, spacesEvidencePack] : []),
-  onyxBenchSearch,
-  spacesSearch,
-  spacesSearchV2,
+  // `spaces-vespa-search` is the general search tool (2026-09-26). The older
+  // `spaces-search` and its `spaces-search-v2` fork are no longer listed: three
+  // overlapping search tools made the model pick badly, and v2 was a partial
+  // fork of v1 that no prompt or skill pointed at.
+  //
+  // NOTE: DIRECT_VESPA_SEARCH is now LOAD-BEARING. With it off there is no
+  // general search tool at all, where previously `spaces-search` covered that
+  // case — see the startup guard in this module.
+  ...(CONFIG.directVespaSearch ? [spacesVespaSearch, spacesCorpusScan, spacesEvidencePack] : []),
+  // Benchmark-only (EnterpriseRAG-Bench). Catalogued ONLY on the bench lane —
+  // its handler already refused elsewhere, but listing it put a fictional-corpus
+  // search tool in every real agent's palette.
+  ...(isOnyxBenchLane() ? [onyxBenchSearch] : []),
   spacesMyItems,
   spacesSavedViews,
   spacesWorkflowStats,
@@ -9211,20 +10331,38 @@ export const tools: ToolDef[] = [
   spacesUpdateTicket,
   spacesUpdateBulkTickets,
   spacesScheduleCall,
+  spacesStartCall,
   spacesReadCanvas,
   spacesEditCanvas,
   spacesTriggerAgent,
   spacesCreateCanvas,
   spacesSdlcListArtifacts,
   spacesSdlcReadArtifact,
+  spacesSdlcListRepositories,
   spacesSdlcListTracks,
   spacesSdlcCreateTrack,
+  spacesSdlcCreateTrackFolder,
   spacesSdlcListArtifactTypes,
-  spacesSdlcMutateArtifact,
+  spacesSdlcWriteArtifact,
+  spacesSdlcArchiveArtifact,
   spacesSdlcCreatePullRequest,
+  spacesSdlcListEntityLinks,
   spacesSdlcListArtifactVersions,
-  spacesSdlcReadArtifactVersion,
-  spacesSdlcWikiVerifySources,
-  spacesSdlcWikiBeginCheckpoint,
-  spacesSdlcWikiFinalizeCommit,
+  spacesAutomationsList,
+  // /api/automations/* needs a user session; hide these in app-mode runs.
+  ...[
+    spacesAutomationGet,
+    spacesAutomationRuns,
+    spacesAutomationRun,
+    spacesAutomationSchema,
+    spacesAutomationValidate,
+    spacesAutomationCreate,
+    spacesAutomationUpdate,
+    spacesAutomationSubmit,
+    spacesAutomationVersions,
+    spacesAutomationVariables,
+    spacesAutomationWebhook,
+    spacesAutomationWebhookIssue,
+    spacesAutomationAgents,
+  ].map((t): ToolDef => ({ ...t, userOnly: true })),
 ];

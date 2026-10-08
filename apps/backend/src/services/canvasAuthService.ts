@@ -1,14 +1,16 @@
 import { Prisma } from '@prisma/client';
 import { db } from '@/database/client';
+import { newConnectId, ConnectEntityType } from '@/database/connectGroup';
 import {
   resolveCanvasHierarchy,
   GuestEntity,
   CanvasRole,
   ChannelRole,
+  ChannelType,
   WorkspaceRole,
   CanvasVisibility,
+  SDLC_HUB_KNOWLEDGE_FOLDER,
 } from '@xyne/shared';
-import { isBaselineCanvasType } from '@xyne/shared';
 import { logger } from '@/utils/logger';
 import { vespaQueue } from '@/queues/vespaQueue';
 import { fileSchema, SubApp } from '@/vespa/src/types';
@@ -24,6 +26,7 @@ export interface CanvasAuthResult {
     createdBy: string;
     visibility: string;
   };
+  crossWorkspace?: boolean;
 }
 
 class CanvasAuthService {
@@ -179,10 +182,21 @@ class CanvasAuthService {
     dbClient: typeof db = db
   ): Promise<CanvasAuthResult> {
     try {
+      const currentUserContext = await this.getCurrentUserContext(userId, dbClient);
+      if (!currentUserContext) {
+        logger.warn(`[CanvasAuth] User ${userId} has no workspace; denying canvas ${canvasId}`);
+        return {
+          hasAccess: false,
+          canEdit: false,
+          canView: false,
+        };
+      }
+
       let canvas = await dbClient.canvas.findUnique({
         where: { id: canvasId },
         select: {
           id: true,
+          workspaceId: true,
           createdBy: true,
           visibility: true,
           channelId: true,
@@ -202,10 +216,12 @@ class CanvasAuthService {
       if (!canvas) {
         canvas = await dbClient.canvas.findFirst({
           where: {
+            workspaceId: currentUserContext.workspaceId,
             OR: [{ viewAccessId: canvasId }, { editAccessId: canvasId }],
           },
           select: {
             id: true,
+            workspaceId: true,
             createdBy: true,
             visibility: true,
             channelId: true,
@@ -226,11 +242,37 @@ class CanvasAuthService {
         };
       }
 
+      if (canvas.workspaceId !== currentUserContext.workspaceId) {
+        logger.warn('[CanvasAuth] Cross-workspace canvas access denied', {
+          userId,
+          canvasId: canvas.id,
+          requestedAs: canvasId,
+          userWorkspaceId: currentUserContext.workspaceId,
+          canvasWorkspaceId: canvas.workspaceId,
+        });
+        return {
+          hasAccess: false,
+          canEdit: false,
+          canView: false,
+          crossWorkspace: true,
+        };
+      }
+
       const isCreator = canvas.createdBy === userId;
-      const currentUserContext = await this.getCurrentUserContext(userId, dbClient);
-      const isSdlcBaseline = isBaselineCanvasType(canvas.sdlcArtifact?.artifactType);
-      const isSdlcBaselineChannelAdmin = Boolean(
-        isSdlcBaseline &&
+      const isHubKnowledge = canvas.folderId
+        ? Boolean(
+            await dbClient.canvasFolder.findFirst({
+              where: {
+                id: canvas.folderId,
+                name: SDLC_HUB_KNOWLEDGE_FOLDER,
+                channel: { type: ChannelType.SDLC },
+              },
+              select: { id: true },
+            })
+          )
+        : false;
+      const isHubKnowledgeChannelAdmin = Boolean(
+        isHubKnowledge &&
         canvas.channelId &&
         (await dbClient.channelParticipant.findFirst({
           where: { channelId: canvas.channelId, userId, role: ChannelRole.ADMIN },
@@ -282,7 +324,7 @@ class CanvasAuthService {
         groupParticipant as Parameters<typeof this.strongerRole>[0],
         channelParticipant
       );
-      const effectiveRole = isSdlcBaselineChannelAdmin
+      const effectiveRole = isHubKnowledgeChannelAdmin
         ? CanvasRole.EDITOR
         : (participant?.role ?? entityRole?.role);
       const hasOwnerRole = effectiveRole === CanvasRole.OWNER;
@@ -295,7 +337,7 @@ class CanvasAuthService {
         dbClient
       );
 
-      const canEdit = isCreator || hasOwnerRole || hasEditorRole || isSdlcBaselineChannelAdmin;
+      const canEdit = isCreator || hasOwnerRole || hasEditorRole || isHubKnowledgeChannelAdmin;
 
       const canView =
         canEdit || hasViewerRole || hasPublicVisibilityAccess || hasGuestContainerAccess;
@@ -384,7 +426,9 @@ class CanvasAuthService {
         loadChannel: (channelId) =>
           db.channel.findUnique({
             where: { id: channelId },
-            select: { projectId: true, isArchived: true },
+            // resolveCanvasHierarchy only needs to confirm the channel exists now
+            // (the project-mismatch check was removed); no channel.projectId read.
+            select: { id: true },
           }),
       });
 
@@ -414,21 +458,7 @@ class CanvasAuthService {
         if (!channelMembership) {
           throw new Error('User does not have permission to create canvas in this channel');
         }
-      } else if (resolvedProjectId) {
-        const projectChannelMembership = await db.channelParticipant.findFirst({
-          where: {
-            userId,
-            channel: {
-              projectId: resolvedProjectId,
-            },
-          },
-        });
-
-        if (!projectChannelMembership) {
-          throw new Error('User does not have permission to create canvas in this project');
-        }
       }
-
       const creator = await db.user.findUnique({
         where: { id: userId },
         select: { workspaceId: true },
@@ -438,6 +468,8 @@ class CanvasAuthService {
       }
       const workspaceId = creator.workspaceId;
 
+      const connectId = newConnectId();
+      const connectNow = new Date();
       await db.$transaction([
         db.canvas.create({
           data: {
@@ -448,10 +480,24 @@ class CanvasAuthService {
             title: options?.title || 'Untitled Canvas',
             content: [],
             isCollaborative: true,
+            connectId,
             ...(resolvedChannelId ? { channelId: resolvedChannelId } : {}),
             ...(resolvedProjectId ? { projectId: resolvedProjectId } : {}),
             ...(folderId ? { folderId } : {}),
             ...(options?.metadata ? { metadata: options.metadata as Prisma.InputJsonValue } : {}),
+          },
+        }),
+        db.connectGroup.create({
+          data: {
+            entityType: ConnectEntityType.CANVAS,
+            entityId: canvasId,
+            hostWorkspaceId: workspaceId,
+            invitedEntityId: null,
+            invitedWorkspaceId: null,
+            connectId,
+            status: 'ACTIVE',
+            createdAt: connectNow,
+            updatedAt: connectNow,
           },
         }),
         db.canvasParticipant.upsert({
@@ -461,6 +507,7 @@ class CanvasAuthService {
             userId,
             workspaceId,
             role: CanvasRole.OWNER,
+            canvasConnectId: connectId,
           },
           update: {
             workspaceId,

@@ -12,7 +12,7 @@ import { randomUUID } from 'node:crypto';
 import { config } from '@/config/env';
 import { logger } from '@/utils/logger';
 import { db } from '@/database/client';
-import { runAsServiceActor } from '@/database/tenant/context';
+import { commitDoclingSplit } from '@/bypassAcl/doclingIngestServices';
 import vespaClient from '@/vespa/client';
 import { fileSchema, type InsertDocument } from '@/vespa/src/types';
 import { runSyncFallbackForFailedFile } from '../../processors/syncFallback';
@@ -55,7 +55,14 @@ import {
   tryAcquireDoclingSchedulerWeightedPermit as tryAcquireWeightedPermit,
   type DoclingSchedulerPermit,
 } from '../runtime/submitPermits';
-import { readBuffer, readJson, cleanupStage, readSourceBuffer } from '../scheduler/storage';
+import {
+  readBuffer,
+  readJson,
+  cleanupStage,
+  readSourceBuffer,
+  partKey,
+  isMissingObjectError,
+} from '../scheduler/storage';
 import { stagePdfParts } from '../scheduler/pdfSplitter';
 import { submitDoclingAsyncJob } from '../runtime/client';
 
@@ -83,12 +90,6 @@ class TerminalDoclingSchedulerError extends Error {
 const isTerminalDoclingSchedulerError = (error: unknown): error is TerminalDoclingSchedulerError =>
   error instanceof TerminalDoclingSchedulerError ||
   (error instanceof Error && error.name === 'TerminalDoclingSchedulerError');
-
-// GCS throws "File does not exist in GCS: <path>" for missing objects.
-const isMissingSourceFileError = (message: string) =>
-  message.includes('does not exist in GCS') ||
-  message.includes('ENOENT') ||
-  message.includes('No such file or directory');
 
 interface SchedulerFileContext {
   vespaDocId: string;
@@ -118,13 +119,13 @@ const getSchedulerFileContext = async (file: {
 };
 
 /**
- * Read a staged part PDF from local disk. The stage lives in the container's
- * ephemeral /tmp, so it can vanish (pod restart / disk eviction, or the splitter
- * ran on a different pod) → ENOENT. When that happens, re-fetch the SOURCE PDF
- * from GCS (its key is on the file row) and re-run the splitter to regenerate the
- * parts at the same local paths, then read again — so the part self-heals instead
- * of failing the whole file. Re-splits with the file's ORIGINAL page-chunk size so
- * the regenerated boundaries match the existing DB part rows exactly.
+ * Read a staged part PDF. It can still be missing — the staged object was
+ * cleaned up, or the row is a legacy one whose pod-local stage lived on another
+ * pod. When that happens, re-fetch the SOURCE PDF (its key is on the file row)
+ * and re-run the splitter to regenerate the parts, then read the fresh staging
+ * key — so the part self-heals instead of failing the whole file. Re-splits
+ * with the file's ORIGINAL page-chunk size so the regenerated boundaries match
+ * the existing DB part rows exactly.
  */
 const readStagedPartBuffer = async (
   file: DoclingFile,
@@ -134,13 +135,13 @@ const readStagedPartBuffer = async (
   try {
     return await readBuffer(part.partPath);
   } catch (error) {
-    if (!isMissingSourceFileError(errMsg(error))) throw error;
-    const gcsKey = file.sourceStorageKey || file.sourcePath;
+    if (!isMissingObjectError(error)) throw error;
+    const sourceKey = file.sourceStorageKey || file.sourcePath;
     logger.warn(
-      '[DOCLING_SCHEDULER][submitter] staged part missing locally; re-staging from GCS source',
-      { fileId: file.fileId, partIndex: part.partIndex, partPath: part.partPath, gcsKey },
+      '[DOCLING_SCHEDULER][submitter] staged part missing; re-staging from the source PDF',
+      { fileId: file.fileId, partIndex: part.partIndex, partPath: part.partPath, sourceKey },
     );
-    const sourceBuffer = await readSourceBuffer(gcsKey);
+    const sourceBuffer = await readSourceBuffer(sourceKey);
     await stagePdfParts({
       fileId: file.fileId,
       sourceBuffer,
@@ -148,7 +149,9 @@ const readStagedPartBuffer = async (
       fileName: ctx.fileName,
       pageChunkSize: file.pageChunkSize || getRuntimeConfig().pageChunkSize,
     });
-    return await readBuffer(part.partPath);
+    // part.partPath may be a legacy pod-local path; after re-staging the part
+    // lives at the current staging key — read that.
+    return await readBuffer(partKey(file.fileId, part.partIndex));
   }
 };
 
@@ -470,16 +473,9 @@ const runSplitterWorker = async (id: string, shouldStop: () => boolean) => {
       // Stamp docling_async_parts with the file's tenant. Background worker has no
       // request-scoped context, so open one from the denormalized file.workspaceId
       // (populated at intake). Fall back to an unscoped run when it's absent.
-      const commitSplit = () => markDoclingFileSplitComplete(
-        file,
-        stagedParts,
-        stagedParts.stageDir + '/results',
-      );
       const committed = file.workspaceId
-        ? await runAsServiceActor('docling-splitter', file.workspaceId,
-            commitSplit,
-          )
-        : await commitSplit();
+        ? await commitDoclingSplit(file.workspaceId, file, stagedParts, stagedParts.resultsDir)
+        : await markDoclingFileSplitComplete(file, stagedParts, stagedParts.resultsDir);
       if (!committed) {
         logger.warn('[DOCLING_SCHEDULER] Ignoring stale split completion (lease changed)', {
           fileId: file.fileId,
@@ -497,7 +493,7 @@ const runSplitterWorker = async (id: string, shouldStop: () => boolean) => {
       const message = errMsg(error);
       logger.error('[DOCLING_SCHEDULER] split failed', { fileId: file.fileId, error: message });
       const nextAttempt = file.splitAttemptCount + 1;
-      if (isTerminalDoclingSchedulerError(error) || isMissingSourceFileError(message) || nextAttempt >= sched().maxSplitAttempts) {
+      if (isTerminalDoclingSchedulerError(error) || isMissingObjectError(error) || nextAttempt >= sched().maxSplitAttempts) {
         await failDoclingFileIfOwned(
           file,
           'splitting',

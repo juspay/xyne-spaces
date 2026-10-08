@@ -8,13 +8,13 @@ import { getServerSchema } from '#zero-internal/schema';
 import { compile, extractZqlResult } from '#zero-internal/compiler';
 import { formatPgInternalConvert } from '#zero-internal/sql';
 import { Pool } from 'pg';
-import { Context, schema } from '@xyne/shared';
+import { Context, schema, setConnectQueryEnabledCanvas, getConnectQueryEnabledCanvas } from '@xyne/shared';
 import { AuthData, createMutators } from './mutators';
 import { queries } from './queries';
 import { scopeQueryToTenant } from './tenant-scope';
 import jwt from 'jsonwebtoken';
 import { logger } from '@/utils/logger';
-import { getZeroMutationLatency, getZeroMutationOperations, getZeroQueryLatency, getZeroQueryOperations } from '@/services/otel';
+import { getConnectAclMode, getConnectQueryMode, getZeroMutationLatency, getZeroMutationOperations, getZeroQueryLatency, getZeroQueryOperations } from '@/services/otel';
 import {
   createVespaJobsAccumulator,
   VespaJobsAccumulator,
@@ -31,9 +31,13 @@ import { runWithContext } from '@/database/tenant/context';
 import { NAMESPACE } from '@/vespa/vespaConfig';
 import { VespaOperationType } from './vespa-injection/core/mapper';
 import { wrapTransactionWithACL } from './acl';
+import { createZeroAuditJobs, flushAuditTrail } from './audit';
+import type { AuditJobsAccumulator } from './audit';
+import { decryptQueryResult } from './encryption-interceptor';
 import { config } from '@/config/env';
 import { checkRateLimit } from '@/services/zeroRateLimiter';
 import { superpositionClient } from '@/services/superpositionClient';
+import { runCompiledZqlSql } from '@/bypassAcl/zeroServices';
 
 const mustGetBackendQuery = (name: string): AnyCustomQuery =>
   mustGetQuery(queries as never, name) as AnyCustomQuery;
@@ -56,6 +60,14 @@ const isQueryDisabled = async (name: string): Promise<boolean> => {
     logger.error('Failed to read disabled queries from superposition', { error });
     return false;
   }
+};
+
+// Slack Connect — canvas query-mode switch, backed by the CONNECT_QUERY_ENABLED_CANVAS env var
+// (see config/env.ts), not CAC. The shared Zero query builder can't read backend env itself, so we
+// push the static value into its cell. Flipping requires a redeploy — acceptable for a once-off
+// post-backfill switch, and more predictable than a per-request CAC read that didn't reflect live.
+const syncConnectQueryFlag = (): void => {
+  setConnectQueryEnabledCanvas(config.connectQueryEnabledCanvas);
 };
 
 // Create database connection pool
@@ -257,6 +269,7 @@ export async function handleMutate(request: Request): Promise<unknown> {
         const mutationAwaitedPostCommitTasks: (() => Promise<void>)[] = [];
         const mutationVespaJobs = createVespaJobsAccumulator();
         const mutationSideEffectJobs = createSideEffectJobsAccumulator();
+        let mutationAuditJobs: AuditJobsAccumulator | undefined = undefined;
 
         return transact(async (tx, mutatorName, args) => {
           capturedMutatorName = mutatorName;
@@ -265,19 +278,38 @@ export async function handleMutate(request: Request): Promise<unknown> {
             mutationAsyncTasks,
             mutationAwaitedPostCommitTasks,
           );
+          mutationAuditJobs = await createZeroAuditJobs(tx, context.userID);
           const wrappedTx = wrapTransactionWithACL(
             tx,
             context,
             mutationVespaJobs,
             mutationSideEffectJobs,
             mutatorName,
+            mutationAuditJobs,
           );
           const mutator = mustGetMutator(mutators, mutatorName);
           return mutator.fn({ tx: wrappedTx, args, ctx: context });
-        }).then((mutatorResult) => {
+        }).then(async mutatorResult => {
           // Zero resolves application failures as mutation results after rolling
           // back the transaction. Do not dispatch work staged by that rollback.
           if (!('error' in mutatorResult.result)) {
+            if (mutationAuditJobs) {
+              // Audit tables live outside the Zero graph (non_zero schema), so
+              // the flush is its own commit — it runs here, after the mutation
+              // result is known successful, rather than on the Zero transaction.
+              try {
+                await flushAuditTrail(
+                  db,
+                  { userId: context.userID, workspaceId: context.workspaceId },
+                  mutationAuditJobs,
+                );
+              } catch (error) {
+                logger.error('[AuditTrail] failed to flush audit for mutation', {
+                  mutator: capturedMutatorName,
+                  error: error instanceof Error ? error.message : error,
+                });
+              }
+            }
             asyncTasks.push(...mutationAsyncTasks);
             awaitedPostCommitTasks.push(...mutationAwaitedPostCommitTasks);
             vespaJobs.push(...mutationVespaJobs);
@@ -384,6 +416,63 @@ export async function handleMutate(request: Request): Promise<unknown> {
   }
 }
 
+// Slack Connect — canvas child queries whose lookup mode (connectId vs canvasId) we count.
+// `canvasThreadComments` is keyed by threadId (always legacy) but tracked for a complete split.
+const CONNECT_CANVAS_QUERY_TABLES: Record<string, string> = {
+  canvasParticipants: 'canvas_participants',
+  canvasCommentThreads: 'canvas_comment_threads',
+  canvasVersions: 'canvas_versions',
+  canvasThreadComments: 'canvas_comments_by_thread',
+};
+
+/** Record the connect vs legacy lookup mode for a canvas child query (no-op for others). */
+function recordConnectQueryMode(queryName: string, args: unknown): void {
+  const table = CONNECT_CANVAS_QUERY_TABLES[queryName];
+  if (!table) return;
+  // The two independent inputs to the decision — exposed as labels so Grafana shows exactly
+  // which one is off when mode stays "legacy":
+  //   flag           = is CONNECT_QUERY_ENABLED_CANVAS (env) true?
+  //   has_connect_id = did the client send a connectId in the query args?
+  // canvasThreadComments is keyed by threadId (never connectId), so it's always legacy.
+  const threadScoped = queryName === 'canvasThreadComments';
+  // Same value the query builder saw — syncConnectQueryFlag() set it from env earlier this request.
+  const flagOn = getConnectQueryEnabledCanvas();
+  const hasConnectId = !!(args as { connectId?: string } | undefined)?.connectId;
+  const usedConnectId = !threadScoped && flagOn && hasConnectId;
+  // `reason` is the single field to group by in Grafana to see WHY a query stayed legacy:
+  //   used_connect_id   → filtered by connectId (the goal)
+  //   flag_off          → CONNECT_QUERY_ENABLED_CANVAS (env) is false
+  //   connect_id_missing→ flag on but the row/args had no connectId (a data/plumbing gap)
+  //   threadid_scoped   → canvasThreadComments, keyed by threadId by design (never connectId)
+  const reason = threadScoped
+    ? 'threadid_scoped'
+    : usedConnectId
+      ? 'used_connect_id'
+      : !flagOn
+        ? 'flag_off'
+        : 'connect_id_missing';
+  getConnectQueryMode().add(1, {
+    entity: 'canvas',
+    table,
+    mode: usedConnectId ? 'connect_id' : 'legacy',
+    flag: flagOn ? 'on' : 'off',
+    has_connect_id: hasConnectId ? 'yes' : 'no',
+    reason,
+  });
+  // ACL workspace-truth source on the Zero read path (reach is always applied to connect-scoped
+  // tables — no env flag). connect_group when the caller scoped by connectId, else workspace.
+  // The Prisma layer emits the same counter with layer=prisma + an outcome (ok|error_fallback).
+  const usesConnectGroup = !threadScoped && hasConnectId;
+  getConnectAclMode().add(1, {
+    entity: 'canvas',
+    table,
+    layer: 'zero',
+    op: 'read',
+    mode: usesConnectGroup ? 'connect_group' : 'workspace',
+    outcome: 'ok',
+  });
+}
+
 export async function handleQueries(request: Request): Promise<any> {
   const startTime = Date.now();
   let capturedQueryName: string | null = null;
@@ -398,6 +487,9 @@ export async function handleQueries(request: Request): Promise<any> {
     throw new Error("Rate limit exceeded");
   }
 
+  // Refresh the canvas query-mode switch from CAC before any query builds this request.
+  syncConnectQueryFlag();
+
   try {
     const result = await handleQueryRequest(
       // zero's QueryRequestHandler type is sync-only but the runtime awaits the
@@ -405,6 +497,7 @@ export async function handleQueries(request: Request): Promise<any> {
       (queryName, args): any =>
         (async () => {
           capturedQueryName = queryName;
+          recordConnectQueryMode(queryName, args);
           if (await isQueryDisabled(queryName)) {
             getZeroQueryOperations().add(1, { query: queryName, stage: 'disabled' });
             logger.warn('zero_query_disabled', { query: queryName });
@@ -523,6 +616,9 @@ function buildQueryInternals(
  * read ACL is folded into the AST before any SQL is generated — there is no
  * second authorization path. `provider` is the caller's to choose: the replica
  * for ordinary reads, the primary when a read must not be stale.
+ *
+ * Rows come straight from pg, so server-encrypted fields are decrypted here; the
+ * Prisma extension and Zero's `run` proxy never see this path.
  */
 export async function runCatalogQuery(
   name: string,
@@ -545,7 +641,7 @@ export async function runCatalogQuery(
       executePostgresQuery(tx.dbTransaction, ast, format, schema, serverSchema),
     );
     conformToZeroShape(data, format as ZeroResultFormat);
-    return data;
+    return await decryptQueryResult(data, { queryName: name });
   } catch (error) {
     throw new CatalogQueryError('execute', `Catalog query "${name}" failed.`, error);
   }
@@ -638,10 +734,7 @@ export async function handleQueriesZqlToSql(request: Request): Promise<any> {
           logger.info(`Executing SQL via Prisma:`, sqlQuery.text);
 
           // Execute via Prisma
-          const pgResult = await prisma.$queryRawUnsafe(
-            sqlQuery.text,
-            ...sqlQuery.values
-          );
+          const pgResult = await runCompiledZqlSql(prisma, sqlQuery.text, sqlQuery.values);
 
           // Handle empty results for singular queries
           const pgArrayResult = Array.isArray(pgResult) ? pgResult : [pgResult];
@@ -652,8 +745,9 @@ export async function handleQueriesZqlToSql(request: Request): Promise<any> {
             };
           }
 
-          // Extract ZQL result from JSON-wrapped response
-          const data = extractZqlResult(pgArrayResult);
+          // Extract ZQL result from JSON-wrapped response. Raw SQL bypasses the
+          // Prisma encryption extension, so decrypt server-encrypted fields explicitly.
+          const data = await decryptQueryResult(extractZqlResult(pgArrayResult), { queryName: req.name });
 
           logger.info(`Converting ZQL to SQL: ${req.name}`);
           logger.info('Full SQL query:', sqlQuery.text);
@@ -719,10 +813,23 @@ export async function runCatalogMutation(
   const mutator = mustGetCatalogMutator(mutators, name);
 
   await dbProvider.transaction(async (tx) => {
-    const wrappedTx = wrapTransactionWithACL(tx, ctx, vespaJobs, sideEffectJobs, name);
+    const auditJobs = await createZeroAuditJobs(tx, ctx.userID);
+    const wrappedTx = wrapTransactionWithACL(tx, ctx, vespaJobs, sideEffectJobs, name, auditJobs);
     // Args are validated by the mutator's own zod schema; the cast only satisfies
     // Zero's ReadonlyJSONValue parameter type.
     await mutator.fn({ tx: wrappedTx, args: args as never, ctx });
+    // Audit tables live outside the Zero graph (non_zero schema); the flush is
+    // its own commit via the shared Prisma client. Catalog mutations can run
+    // under service principals whose id is not a users row; audit failures here
+    // are logged rather than failing background work.
+    try {
+      await flushAuditTrail(db, { userId: ctx.userID, workspaceId: ctx.workspaceId }, auditJobs);
+    } catch (error) {
+      logger.error('[AuditTrail] failed to flush audit for catalog mutation', {
+        mutator: name,
+        error: error instanceof Error ? error.message : error,
+      });
+    }
   });
 
   await Promise.allSettled(awaitedPostCommitTasks.map(task => task()));

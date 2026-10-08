@@ -14,10 +14,11 @@ import { websocketService } from '@/services/websocketService';
 import { versionReleaseMappingService } from '@/services/release/versionReleaseMappingService';
 import { BaseTicketType, isReleaseTicket, PRStatusEvent, BoardType, ActivityType, TicketStatusV2 } from '@xyne/shared';
 import { ticketStageTransitionService } from './stageTransition/ticketStageTransitionService';
-import { dualWriteTicketTags, dualDeleteTicketTag } from '@/services/ticketTagDualWriteService';
+import { updateTicketTagsTx } from '@/bypassAcl/transactions/ticketService';
+import { bulkUpdateTicketTagsTx } from '@/bypassAcl/transactions/ticketService';
 
 
-const prisma = DatabaseClient.getInstance();
+export const prisma = DatabaseClient.getInstance();
 
 const sanitizeFilename = (filename: string): string => {
   return filename
@@ -179,7 +180,7 @@ export class TicketService {
 
   async asignUserGroupToTicket(ticketId: string, userId: string, groupId: string): Promise<void> {
     try {
-      await this.ticketRepository.assignUserGroupToTicket(ticketId, userId, groupId);
+      await this.ticketRepository.assignUserGroupToTicket(ticketId, groupId, userId);
       logger.debug(`[TicketService] Successfully assigned user group ${groupId} to ticket ${ticketId}.`);
     } catch (error) {
       logger.error(`[TicketService] Error assigning user group to ticket:`, error);
@@ -414,6 +415,11 @@ export class TicketService {
         ticket: currentCountsSnapshot,
         previousTicket: previousCountsSnapshot,
       });
+      // Desk label badges depend on the same ticket fields — invalidate the
+      // channel room whenever a channel-backed ticket changes.
+      if (currentCountsSnapshot.channelId) {
+        websocketService.broadcastLabelUnreadCountsUpdate(currentCountsSnapshot.channelId);
+      }
     }
 
     logger.info(`[TicketService] Updated ticket ${ticketId}: ${updates.join(', ')}`);
@@ -452,22 +458,7 @@ export class TicketService {
       return { added: [], removed: [] };
     }
 
-    await prisma.$transaction(async tx => {
-      if (toRemove.length > 0) {
-        await tx.ticketTag.deleteMany({
-          where: { ticketId, name: { in: toRemove } },
-        });
-        for (const name of toRemove) {
-          await dualDeleteTicketTag(ticketId, name, tx);
-        }
-      }
-      if (toAdd.length > 0) {
-        await tx.ticketTag.createMany({
-          data: toAdd.map(name => ({ name, ticketId, workspaceId: ticket.workspaceId })),
-        });
-        await dualWriteTicketTags(ticketId, toAdd, tx);
-      }
-    });
+    await updateTicketTagsTx(toRemove, ticketId, toAdd, ticket);
 
     logger.info(
       `[TicketService] Updated tags for ticket ${ticketId}: +${toAdd.length} -${toRemove.length}`,
@@ -549,22 +540,7 @@ export class TicketService {
       }
 
       try {
-        await prisma.$transaction(async tx => {
-          if (toRemove.length > 0) {
-            await tx.ticketTag.deleteMany({
-              where: { ticketId, name: { in: toRemove } },
-            });
-            for (const name of toRemove) {
-              await dualDeleteTicketTag(ticketId, name, tx);
-            }
-          }
-          if (toAdd.length > 0) {
-            await tx.ticketTag.createMany({
-              data: toAdd.map(name => ({ name, ticketId, workspaceId })),
-            });
-            await dualWriteTicketTags(ticketId, toAdd, tx);
-          }
-        });
+        await bulkUpdateTicketTagsTx(toRemove, ticketId, toAdd, workspaceId);
       } catch (error) {
         logger.error(
           `[TicketService] bulkUpdateTicketTags failed for ticket ${ticketId}:`,
@@ -667,3 +643,5 @@ export class TicketService {
 
 // Export a singleton instance
 export const ticketService = new TicketService();
+
+

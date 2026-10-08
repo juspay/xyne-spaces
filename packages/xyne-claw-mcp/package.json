@@ -8,7 +8,8 @@
     "xyne-claw-mcp": "dist/index.js"
   },
   "scripts": {
-    "build": "tsc"
+    "build": "tsc",
+    "prepare": "tsc"
   },
   "engines": {
     "node": ">=22"

@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { z } from 'zod';
 import { BaseAgentProvider } from '@xyne/workflow-sdk/agents/host';
 import type {
@@ -7,6 +8,7 @@ import type {
   AgentRunResult,
   AsyncAgentCapability,
 } from '@xyne/workflow-sdk/agents/host';
+import { withOptions } from '@xyne/workflow-sdk';
 import type { Attachment, ResumePayload, StepExecutionContext } from '@xyne/workflow-sdk';
 import { config } from '@/config/env';
 import { logger } from '@/utils/logger';
@@ -31,7 +33,8 @@ import type { XyneCtx, XyneResourceAttrs } from '../types';
  */
 
 export const ClawAgentConfigSchema = z.object({
-  agentSlug: z.string().min(1)
+  // A picker in every editor: the step answers it from `listAgents` below.
+  agentSlug: withOptions(z.string().min(1))
     .describe('Slug of the claw agent to run, e.g. "support-triage"'),
 });
 
@@ -52,11 +55,7 @@ export class ClawAgentProvider
   readonly name = 'Xyne Claw';
   readonly configSchema = ClawAgentConfigSchema;
 
-  /**
-   * Backs the agent picker. Not reachable from the builder yet — `agentSlug` is
-   * a free-text field until the SDK grows an agents route and the UI honours
-   * `format: 'agent-ref'`. Implemented now so that work is a route away.
-   */
+  /** Backs the agent picker on `agentSlug` (served through the step's `getOptions`). */
   override async listAgents(_ctx: XyneCtx): Promise<AgentDescriptor[]> {
     const agents = await listDispatchableClawAgents();
     return agents.map((agent) => ({
@@ -74,20 +73,30 @@ export class ClawAgentProvider
     const { workspaceId } = ctx.runtime.attributes as XyneResourceAttrs;
     const identity = await resolveClawRunIdentity(stepConfig.agentSlug, workspaceId);
 
-    // A distinct session per attempt keeps claw's own run history readable —
-    // a repair re-run is visible as its own run rather than overwriting the
-    // attempt it replaces. This is a label, not the correlation key.
+    // One session per turn and attempt. Claw-auth only accepts ids of
+    // [A-Za-z0-9_-] (anything else is silently swapped for a random one), and it
+    // de-duplicates dispatches by session id — so each turn and each repair must
+    // have its own, while a genuinely repeated dispatch of the same one still
+    // collapses. The node path is hashed: it holds `:`, `/` and `#`.
     const attempt = input.repair?.attempt ?? 0;
-    const sessionId = `wf:${ctx.runtime.executionId}:${ctx.runtime.stepName}`
-      + (attempt > 0 ? `:retry-${String(attempt)}` : '');
+    const turn = input.conversation?.turn ?? 0;
+    const sessionId = safeClawId(
+      `wf-${ctx.runtime.executionId}-${shortHash(ctx.runtime.stepName)}-t${String(turn)}-r${String(attempt)}`,
+    );
+    // A step that waits for replies keeps one conversation across its turns;
+    // claw resumes the agent's session by this id, so nothing is kept here.
+    const conversationId = input.conversation
+      ? safeClawId(`wf-${shortHash(`${workspaceId}|${stepConfig.agentSlug}|${input.conversation.id}`)}`)
+      : undefined;
 
     logger.info(
       `[workflows] dispatching claw agent — execution=${ctx.runtime.executionId} `
       + `node=${ctx.runtime.stepName} agent=${stepConfig.agentSlug} session=${sessionId}`,
     );
 
-    const response = await runS2SClawAgent({
+    const response = await dispatchWithBusyRetry(Boolean(conversationId), () => runS2SClawAgent({
       sessionId,
+      ...(conversationId ? { conversationId } : {}),
       agentSlug: stepConfig.agentSlug,
       task: buildTask(input),
       workspaceId,
@@ -97,8 +106,8 @@ export class ClawAgentProvider
       spacesWorkspaceId: identity.spacesWorkspaceId,
       spacesOrgId: identity.spacesOrgId,
       spacesOrgMemberId: identity.spacesOrgMemberId,
-      callbackUrl: buildCallbackUrl(ctx.runtime.executionId, ctx.runtime.stepName, attempt),
-    });
+      callbackUrl: buildCallbackUrl(ctx.runtime.executionId, ctx.runtime.stepName, attempt, input.conversation?.turn),
+    }));
 
     if (!response.success) {
       throw new Error(
@@ -118,40 +127,60 @@ export class ClawAgentProvider
   async collect(
     payload: ResumePayload,
     record: AgentDispatchRecord,
-    _stepConfig: ClawAgentConfig,
+    stepConfig: ClawAgentConfig,
     ctx: StepExecutionContext,
   ): Promise<AgentRunResult> {
-    const envelope = isRecord(payload.data) ? (payload.data as ClawCallbackEnvelope) : null;
-    if (!envelope) {
-      throw new Error(
-        `[workflows] claw callback for session ${record.externalRef} carried no envelope`,
-      );
-    }
-
-    if (envelope.status && envelope.status !== 'completed') {
-      const detail = envelope.error ?? `agent run ${String(envelope.status)}`;
-      throw new Error(
-        `[workflows] claw run ${record.externalRef} status=${String(envelope.status)}: ${String(detail)}`,
-      );
-    }
-
-    // A non-string result is not a failure in itself — hand it over as JSON and
-    // let the step's classifier and repair loop decide.
-    const text = typeof envelope.result === 'string'
-      ? envelope.result
-      : JSON.stringify(envelope.result ?? '');
-
-    return {
-      text,
-      // Claw runs its own tool loop and reports neither tool calls nor token
-      // accounting in the callback envelope, so this reports none rather than
-      // inventing numbers. Both are visible in claw's own run history.
-      toolCalls: [],
-      turnCount: 1,
-      usage: { inputTokens: 0, outputTokens: 0 },
-      attachments: await storeCallbackAttachments(envelope.attachments, ctx),
-    };
+    return collectClawResult(payload, record, stepConfig, ctx);
   }
+}
+
+/** Claw joins the agent's last text messages, so a mid-run note can precede the JSON. */
+function jsonAtEnd(text: string): string | null {
+  for (let start = text.indexOf('{'); start !== -1; start = text.indexOf('{', start + 1)) {
+    try {
+      JSON.parse(text.slice(start));
+      return text.slice(start);
+    } catch {
+      continue;
+    }
+  }
+  return null;
+}
+
+export async function collectClawResult(
+  payload: ResumePayload,
+  record: AgentDispatchRecord,
+  stepConfig: object,
+  ctx: StepExecutionContext,
+): Promise<AgentRunResult> {
+  const envelope = isRecord(payload.data) ? (payload.data as ClawCallbackEnvelope) : null;
+  if (!envelope) {
+    throw new Error(
+      `[workflows] claw callback for session ${record.externalRef} carried no envelope`,
+    );
+  }
+
+  if (envelope.status && envelope.status !== 'completed') {
+    const detail = envelope.error ?? `agent run ${String(envelope.status)}`;
+    throw new Error(
+      `[workflows] claw run ${record.externalRef} status=${String(envelope.status)}: ${String(detail)}`,
+    );
+  }
+
+  const raw = typeof envelope.result === 'string'
+    ? envelope.result
+    : JSON.stringify(envelope.result ?? '');
+  // The SDK passes the whole step config, outputType included.
+  const expectJson = 'outputType' in stepConfig && stepConfig.outputType === 'json';
+  const text = expectJson ? (jsonAtEnd(raw) ?? raw) : raw;
+
+  return {
+    text,
+    toolCalls: [],
+    turnCount: 1,
+    usage: { inputTokens: 0, outputTokens: 0 },
+    attachments: await storeCallbackAttachments(envelope.attachments, ctx),
+  };
 }
 
 // ─── Correlation ───
@@ -174,9 +203,16 @@ export function readAgentDispatch(data: string | null): AgentDispatchRecord | un
   if (!isRecord(parsed)) return undefined;
   const agent = parsed['agent'];
   if (!isRecord(agent)) return undefined;
-  const { provider, attempt, externalRef } = agent;
+  const { provider, attempt, externalRef, conversation } = agent;
   if (typeof provider !== 'string' || typeof externalRef !== 'string') return undefined;
-  return { provider, externalRef, attempt: typeof attempt === 'number' ? attempt : 0 };
+  const turn = isRecord(conversation) && typeof conversation['turn'] === 'number' ? conversation['turn'] : undefined;
+  const id = isRecord(conversation) && typeof conversation['id'] === 'string' ? conversation['id'] : undefined;
+  return {
+    provider,
+    externalRef,
+    attempt: typeof attempt === 'number' ? attempt : 0,
+    ...(id !== undefined && turn !== undefined ? { conversation: { id, turn } } : {}),
+  };
 }
 
 /**
@@ -196,10 +232,43 @@ export function readAgentDispatch(data: string | null): AgentDispatchRecord | un
  * its own path segments. Claw passes the callback URL through verbatim
  * (`fetch(opts.callbackUrl, …)`), so the query string survives.
  */
-function buildCallbackUrl(executionId: string, nodePath: string, attempt: number): string {
+export function buildCallbackUrl(executionId: string, nodePath: string, attempt: number, turn?: number): string {
   const base = config.xyneClaw.callbackUrl.replace(/\/$/, '');
   return `${base}/api/internal/workflows-v2/claw-callback/${encodeURIComponent(executionId)}`
-    + `?nodePath=${encodeURIComponent(nodePath)}&attempt=${String(attempt)}`;
+    + `?nodePath=${encodeURIComponent(nodePath)}&attempt=${String(attempt)}`
+    + (turn !== undefined ? `&turn=${String(turn)}` : '');
+}
+
+function safeClawId(raw: string): string {
+  return raw.replace(/[^A-Za-z0-9_-]/g, '-').slice(0, 96);
+}
+
+function shortHash(value: string): string {
+  return createHash('sha256').update(value).digest('hex').slice(0, 16);
+}
+
+/** How long to keep retrying while claw-auth still holds the conversation's previous turn. */
+const BUSY_RETRY_MS = 35_000;
+const BUSY_RETRY_EVERY_MS = 3_000;
+
+/**
+ * Claw-auth keeps a short per-conversation guard after each dispatch (up to
+ * 30 s) and answers 409 while it holds. A person replying quickly can land in
+ * it; waiting it out is the whole fix, so only a conversation's dispatch
+ * retries, and only on that answer.
+ */
+async function dispatchWithBusyRetry<T>(inConversation: boolean, send: () => Promise<T>): Promise<T> {
+  const deadline = Date.now() + BUSY_RETRY_MS;
+  for (;;) {
+    try {
+      return await send();
+    } catch (err) {
+      const busy = inConversation && err instanceof Error && /HTTP 409/.test(err.message);
+      if (!busy || Date.now() + BUSY_RETRY_EVERY_MS > deadline) throw err;
+      logger.info(`[workflows] claw conversation still busy with its previous turn — retrying in ${String(BUSY_RETRY_EVERY_MS)}ms`);
+      await new Promise((resolve) => setTimeout(resolve, BUSY_RETRY_EVERY_MS));
+    }
+  }
 }
 
 // ─── Payload ───
@@ -209,7 +278,7 @@ function buildCallbackUrl(executionId: string, nodePath: string, attempt: number
  * parameter, so the output contract has to be stated in the task itself. Same
  * approach as automations' `buildRetryPrompt`.
  */
-function buildTask(input: AgentRunInput): string {
+export function buildTask(input: AgentRunInput): string {
   const parts = [input.task];
 
   if (input.expectJson) {

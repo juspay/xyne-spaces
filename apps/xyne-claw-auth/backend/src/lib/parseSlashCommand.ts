@@ -35,6 +35,15 @@ export type SlashCommand =
   | { kind: "queueClear" }
   // `/help` — list the available slash commands.
   | { kind: "help" }
+  | { kind: "status" }
+  // `/eval <question>` — run the question once on every configured provider,
+  // each answering in this thread, then attach a timing comparison.
+  | { kind: "eval"; question: string; providers: string[]; judges: string[]; opts: string[] }
+  // `/debug` — attach one HTML file with the latest run's execution trace.
+  // `/debug all` — every checkpointed session in the thread, newest first,
+  // each expandable, so an issue can be traced across runs.
+  // `/debug chain` — why the agent workflow bound to this channel did (not) hand off.
+  | { kind: "debug"; scope?: "latest" | "all" | "chain" }
   // `/fast` / `/fast off` — thread-scoped fast-mode toggle. Start-anchored only.
   | { kind: "fastMode"; enabled: boolean }
   | { kind: "fastModeUsage" };
@@ -58,8 +67,38 @@ const LEADING_MENTIONS = /^(?:@[\w.\-]+(?:\s+[\w.\-]+)*\s*)+/;
 const TRAILING_COMMAND_TOKEN = /(?:^|\s)(\/(?:stop|help|clear))\s*$/i;
 const GOAL_OVERRIDABLE_PROVIDERS = new Set(["spaces", "litellm", "claude", "codex", "copilot"]);
 
+const ZERO_WIDTH = /[​-‍⁠﻿]/g;
+const TRAILING_MENTIONS = /(?:\s*@[\w.\-]+(?:\s+[\w.\-]+)*)+\s*$/;
+const ARGLESS_KINDS: ReadonlySet<SlashCommand["kind"]> = new Set<SlashCommand["kind"]>([
+  "goalStatus",
+  "goalClear",
+  "clear",
+  "queueShow",
+  "queueClear",
+  "help",
+  "status",
+  "debug",
+  "fastMode",
+]);
+
 export function parseSlashCommand(input: string | undefined | null): SlashCommand | null {
   if (!input) return null;
+  const cleaned = input.replace(ZERO_WIDTH, "");
+  const strict = parseSlashCommandStrict(cleaned);
+  if (strict) return strict;
+
+  const loose = cleaned
+    .trim()
+    .replace(LEADING_MENTIONS, "")
+    .replace(TRAILING_MENTIONS, "")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (loose[0] !== "/") return null;
+  const parsed = parseFromSlash(loose);
+  return parsed && ARGLESS_KINDS.has(parsed.kind) ? parsed : null;
+}
+
+function parseSlashCommandStrict(input: string): SlashCommand | null {
   const trimmed = input.trim().replace(LEADING_MENTIONS, "");
 
   // Primary: message begins with the command (all commands, args allowed).
@@ -88,6 +127,43 @@ function parseFromSlash(trimmed: string): SlashCommand | null {
   if (lower === "/help") {
     return { kind: "help" };
   }
+  if (lower === "/status") {
+    return { kind: "status" };
+  }
+  if (lower === "/eval" || lower.startsWith("/eval ")) {
+    const rest = trimmed.slice("/eval".length).trim();
+    const providers: string[] = [];
+    const judges: string[] = [];
+    const opts: string[] = [];
+    const question = rest
+      .replace(/(?:^|\s)providers?=([\w,\-]+)/gi, (_m, list: string) => {
+        for (const p of list.split(",").map((x) => x.trim().toLowerCase()).filter(Boolean)) providers.push(p);
+        return " ";
+      })
+      .replace(/(?:^|\s)judges?=([\w,\-]+)/gi, (_m, list: string) => {
+        for (const j of list.split(",").map((x) => x.trim().toLowerCase()).filter(Boolean)) {
+          judges.push(j === "all" ? "all" : j);
+        }
+        return " ";
+      })
+      .replace(/(?:^|\s)opts?=([\w,+\-|]+)/gi, (_m, list: string) => {
+        for (const arm of list.split("|").map((x) => x.trim().toLowerCase()).filter(Boolean)) {
+          if (!opts.includes(arm)) opts.push(arm);
+        }
+        return " ";
+      })
+      .trim();
+    return { kind: "eval", question, providers, judges, opts };
+  }
+  if (lower === "/debug") {
+    return { kind: "debug" };
+  }
+  if (lower === "/debug all" || lower === "/debug sessions") {
+    return { kind: "debug", scope: "all" };
+  }
+  if (lower === "/debug chain" || lower === "/debug workflow") {
+    return { kind: "debug", scope: "chain" };
+  }
   if (lower === "/fast" || lower === "/fast on") {
     return { kind: "fastMode", enabled: true };
   }
@@ -97,8 +173,8 @@ function parseFromSlash(trimmed: string): SlashCommand | null {
   if (lower.startsWith("/fast ")) {
     const rest = trimmed.slice("/fast ".length).trim();
     // Obvious on/off typos get the usage hint; anything else is
-    // "/fast <task>" — enable fast mode AND run the task in one message
-    // (mirrors `/upgrade [task]`). Handled by the webhook's FAST_RE block,
+    // "/fast <task>" — enable fast mode AND run the task in one message.
+    // Handled by the webhook's FAST_RE block,
     // so fall through as a normal message here.
     if (/^o(n+|f+)$/i.test(rest)) {
       return { kind: "fastModeUsage" };

@@ -397,8 +397,15 @@ export const applyTicketFilters = (
       }
     }
 
-    // User groups filter
-    if (filters.userGroups && filters.userGroups.length > 0) {
+    // User groups filter.
+    //
+    // '' means the group is UNKNOWN, not absent: search-backed rows are built by toTicket
+    // (useVespaTicketSearch) from Vespa's `lean` document summary, which does not project
+    // userGroupId, so it defaults to ''. Vespa already applied this filter server-side, so
+    // such a row cannot and need not be re-judged here — dropping it emptied the board (and
+    // with it the derived group list) when switching to assignee/priority grouping while a
+    // search was active. A Zero row that genuinely has no group is null and still drops.
+    if (filters.userGroups && filters.userGroups.length > 0 && ticket.userGroupId !== '') {
       if (!ticket.userGroupId || !filters.userGroups.includes(ticket.userGroupId)) {
         return false;
       }
@@ -468,6 +475,13 @@ export const applyTicketFilters = (
       }
     }
 
+    // Merchant ID filter (exact match)
+    if (filters.merchantIds && filters.merchantIds.length > 0) {
+      if (!ticket.merchantId || !filters.merchantIds.includes(ticket.merchantId)) {
+        return false;
+      }
+    }
+
     // Source channel filter
     if (filters.sourceChannels && filters.sourceChannels.length > 0) {
       if (!ticket.channelId || !filters.sourceChannels.includes(ticket.channelId)) {
@@ -524,7 +538,12 @@ export const groupTicketsByFormField = (
   const groups: Record<string, Ticket[]> = {};
 
   tickets.forEach(ticket => {
-    const formValues = formValuesByTicketId.get(ticket.id) || [];
+    const formValues = formValuesByTicketId.get(ticket.id);
+    // No entry means the values were never loaded, which is "unknown", not "has no value".
+    // Grouping it under No Value would invent a membership — and since opening a group is
+    // what loads these rows, the bucket would gain a ticket per group opened. The group list
+    // and counts come from the server, so leaving it ungrouped costs nothing.
+    if (!formValues) return;
     const fieldEntry = formValues.find(v => v.fieldId === fieldId);
 
     // Use actualFieldValue which contains the properly typed value
@@ -571,7 +590,16 @@ export const groupTicketsByFormField = (
           }
           // For objects/arrays, use JSON serialization or ignore
         }
-        const groupKey = val || 'No Value';
+        // A STRING key is folded to lower case to match the group list the server sends
+        // (getFormFieldGroupKeys in kanbanCountsService), which folds it so that "MID 1" and
+        // "mid 1" are one group — the column page is fetched with an uncased Vespa token and
+        // cannot tell them apart. The column header uses the server's displayName, so the
+        // stored spelling is still what the user sees.
+        const groupKey = val
+          ? fieldType === FormFieldType.STRING
+            ? val.toLowerCase()
+            : val
+          : 'No Value';
         if (!groups[groupKey]) groups[groupKey] = [];
         groups[groupKey].push(ticket);
       }
@@ -623,7 +651,11 @@ export const extractBoardFormFields = (
 };
 
 /**
- * Extracts form fields eligible for grouping (SINGLE_SELECT, MULTI_SELECT, USER)
+ * Extracts form fields eligible for grouping (SINGLE_SELECT, MULTI_SELECT, USER, STRING).
+ *
+ * STRING groups through the same scalar path as SINGLE_SELECT — grouping, counts and the
+ * Vespa token treat the two identically. DATE and BOOLEAN stay out: a column per timestamp
+ * is no use, and BOOLEAN reads better as a filter.
  */
 export const extractGroupableFormFields = (
   filters: TicketFilters,
@@ -634,6 +666,19 @@ export const extractGroupableFormFields = (
     field =>
       field.fieldType === FormFieldType.SINGLE_SELECT ||
       field.fieldType === FormFieldType.MULTI_SELECT ||
-      field.fieldType === FormFieldType.USER,
+      field.fieldType === FormFieldType.USER ||
+      field.fieldType === FormFieldType.STRING,
   );
+};
+
+export const DERIVED_COLUMNS = ['stage'];
+
+export const DEFAULT_VISIBLE_COLUMNS = ['assignee', 'dueDate', 'status', 'priority', 'tags'];
+
+export const mergeSavedColumns = (prev: Set<string>, saved: string[]): Set<string> => {
+  const next = new Set(saved);
+  for (const key of DERIVED_COLUMNS) {
+    if (prev.has(key)) next.add(key);
+  }
+  return next;
 };

@@ -1,7 +1,8 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   PointerSensor,
   closestCenter,
+  pointerWithin,
   useSensor,
   useSensors,
   type CollisionDetection,
@@ -18,6 +19,7 @@ import {
   type ChannelUserStatus,
 } from '@xyne/shared';
 import { useZero } from '../../../hooks/useZero';
+import { useUsersById } from '../../../hooks/useUsers';
 import { useCachedQuery } from '../../../hooks/useCachedQuery';
 import { queries } from '../../../zero/queries';
 import { mutators } from '../../../zero/mutators';
@@ -25,8 +27,11 @@ import {
   applyChannelFilter,
   bucketChannelsBySection,
   DEFAULT_FILTER_MODE,
+  isChannelBold,
   isDMChannel,
   keyBetween,
+  pinSelfDMLast,
+  sortChannelsAlphabetically,
   suppressNextClick,
   sumSectionUnread,
   type ChannelFilterContext,
@@ -49,6 +54,7 @@ interface UseChannelSectionDndParams {
   unreadCounts: Record<string, number>;
   mentionCounts: Record<string, number>;
   activeChannelId?: string | undefined;
+  currentUserId: string;
 }
 
 interface ChannelSectionDnd {
@@ -87,8 +93,10 @@ export const useChannelSectionDnd = ({
   unreadCounts,
   mentionCounts,
   activeChannelId,
+  currentUserId,
 }: UseChannelSectionDndParams): ChannelSectionDnd => {
   const zero = useZero();
+  const usersById = useUsersById();
   const [channelSections] = useCachedQuery(queries.userChannelSections({}));
   const allSectionable = useMemo(
     () => [...channels, ...directMessages],
@@ -141,8 +149,8 @@ export const useChannelSectionDnd = ({
     if (!sortOrder) return chs;
     const sorted = [...chs];
     if (sortOrder === ChannelSortOrder.ALPHABETICAL) {
-      return sorted.sort((a, b) =>
-        (a.name ?? '').toLowerCase().localeCompare((b.name ?? '').toLowerCase()),
+      return sortChannelsAlphabetically(chs, currentUserId, usersById, c =>
+        isChannelBold(c, unreadCounts[c.id] ?? 0, statuses.get(c.id)),
       );
     }
     const lastActivity = (c: VisibleChannel) => c.channelStats?.lastActivityAt ?? 0;
@@ -182,11 +190,16 @@ export const useChannelSectionDnd = ({
     ? sectioned.map(bucket => ({ section: bucket.section, channels: fromDrag(bucket.section.id) }))
     : sectioned.map(bucket => ({
         section: bucket.section,
-        channels: applySectionSort(
-          filterFor(bucket.channels, bucket.section.filterMode ?? DEFAULT_FILTER_MODE),
-          bucket.section.sortOrder,
-          statusByChannelId,
-        ),
+        channels: bucket.section.sortOrder
+          ? pinSelfDMLast(
+              applySectionSort(
+                filterFor(bucket.channels, bucket.section.filterMode ?? DEFAULT_FILTER_MODE),
+                bucket.section.sortOrder,
+                statusByChannelId,
+              ),
+              currentUserId,
+            )
+          : filterFor(bucket.channels, bucket.section.filterMode ?? DEFAULT_FILTER_MODE),
       }));
   const defaultDisplayChannels = dragItems
     ? fromDrag(DEFAULT_CONTAINER)
@@ -214,7 +227,7 @@ export const useChannelSectionDnd = ({
       ? ((channelSections ?? []).find(s => s.id === activeDragId) ?? null)
       : null;
 
-  const moveChannelToSection = (channelId: string, sectionId: string | null): void => {
+  const moveChannelToSectionLatest = (channelId: string, sectionId: string | null): void => {
     const timestamp = Date.now();
     let position = keyBetween(null, null);
     if (sectionId) {
@@ -231,6 +244,13 @@ export const useChannelSectionDnd = ({
     }
     void zero.mutate(mutators.channel.moveToSection({ channelId, sectionId, position, timestamp }));
   };
+  const moveChannelToSectionRef = useRef(moveChannelToSectionLatest);
+  moveChannelToSectionRef.current = moveChannelToSectionLatest;
+  const moveChannelToSection = useCallback(
+    (channelId: string, sectionId: string | null): void =>
+      moveChannelToSectionRef.current(channelId, sectionId),
+    [],
+  );
 
   const findContainer = (id: string, items: Record<string, string[]>): string | null => {
     if (id.startsWith('section-drop-')) {
@@ -275,6 +295,12 @@ export const useChannelSectionDnd = ({
       const t = (c.data.current as { type?: string } | undefined)?.type;
       return activeType === 'section' ? t === 'section' : t === 'container';
     });
+    if (activeType === 'channel') {
+      // Group containers are large and nested, so centre distance can pick the wrong
+      // one (e.g. Starred beats a tall Channels list). Prefer what's under the pointer.
+      const hits = pointerWithin({ ...args, droppableContainers });
+      if (hits.length > 0) return hits;
+    }
     return closestCenter({ ...args, droppableContainers });
   };
 

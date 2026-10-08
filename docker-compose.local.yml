@@ -128,8 +128,8 @@ services:
       - ENABLE_TRANSCRIPTION=${ENABLE_TRANSCRIPTION:-0}
       - ENABLE_EGRESS=${ENABLE_EGRESS:-0}
       - LIVEKIT_URL=ws://livekit:7880
-      - LIVEKIT_API_KEY=devkey
-      - LIVEKIT_API_SECRET=devsecret
+      - LIVEKIT_API_KEY=localdevkey
+      - LIVEKIT_API_SECRET=localdevsecret
       - BACKEND_URL=http://host.docker.internal:3001
       - REDIS_URL=redis://redis:6379
       - REDIS_HOST=redis

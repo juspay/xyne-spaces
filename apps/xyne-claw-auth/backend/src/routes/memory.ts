@@ -18,25 +18,47 @@
 import { Router, type Request, type Response } from "express";
 import { errMsg } from "../lib/errors.js";
 import type { Prisma } from "@prisma/client";
-import { bankIdForAgent, buildRetainMission, getMemoryProvider } from "xyne-claw-shared";
+import { bankIdForAgent, buildRetainMission, DIGITAL_TWIN_BANK_ID, DIGITAL_TWIN_SLUG, getMemoryProvider, isDigitalTwinAgent } from "xyne-claw-shared";
 import type { MemoryRecord, EntityGraphEdge } from "xyne-claw-shared";
 import { prisma } from "../db.js";
 import { agentRepository } from "../repositories/index.js";
 import { createLogger, createTraceId } from "../logger.js";
 import { requireAuth, requireUserAuth, s2sKeyMatches } from "../middleware/require-auth.js";
-import { isClawAdmin, requireClawAdmin, getOrgId, getRequesterId } from "../middleware/agent-acl.js";
+import { resolveClawUserIdForSpacesIdentity } from "../lib/users-jit.js";
+import { isClawAdmin, requireClawAdmin, getAgentEditAccess, getOrgId, getRequesterId } from "../middleware/agent-acl.js";
+import { matchesAuthenticatedUserId } from "../middleware/pin-user-id-param.js";
 import { curateApprovedTranscript, persistSubsystemReviews, readSessionTranscript, type SessionTranscript } from "../services/memoryCronService.js";
 import { classifySessionSubsystemForBank, distillSessionFile, parseSessionFile } from "../services/sessionCurator.js";
 import { enqueueAgentBackfill, getAgentBackfillQueue } from "../queue/agent-backfill-queue.js";
 import { runRetentionSweep } from "../services/memoryRetentionService.js";
 import {
   getPromptFiles,
+  getCandidatePromptFiles,
   getFile as getAgentFile,
   listFiles as listAgentFiles,
   upsertFile as upsertAgentFile,
   MAX_FILE_CHARS,
+  MEMORY_FILE_NAME_RE,
 } from "../services/agentMemoryFiles.js";
-import { ensureTwinBank, twinObservationScopes, VERBATIM_IMPORT_STRATEGY } from "../services/userMemoryCuratorClient.js";
+import { ensureTwinBank, twinObservationScopes, VERBATIM_IMPORT_STRATEGY } from "../services/twinMemoryBank.js";
+
+/**
+ * Memory-maintenance ACL: the agent's owner, a share holder with EDITOR or
+ * CONTRIBUTOR, or a CLAW_ADMIN.
+ *
+ * The dashboard renders the Memory tab whenever `canEdit` is true — owner OR
+ * editor OR contributor (frontend/src/v3/lib/agentPermissions.ts) — while these
+ * routes used to compare `ownerUserId` alone. The result was a tab that 403'd
+ * for exactly the people it was rendered for. This helper is the same rule the
+ * UI uses, via the canonical ACL helper.
+ *
+ * DESTRUCTIVE memory routes (clear-all, subsystem delete) deliberately do NOT
+ * use this: wiping a shared bank stays owner/admin-only.
+ */
+async function canMaintainAgentMemory(req: Request, agentSlug: string, userId: string): Promise<boolean> {
+  const access = await getAgentEditAccess(userId, agentSlug, getOrgId(req));
+  return Boolean(access?.canEdit);
+}
 
 const logger = createLogger("memory-review", createTraceId());
 
@@ -44,21 +66,23 @@ const logger = createLogger("memory-review", createTraceId());
 // Default is HindsightProvider, swappable via the MEMORY_PROVIDER env var.
 const memory = getMemoryProvider();
 
-const DIGITAL_TWIN_SLUG = "digital-twin";
-const DIGITAL_TWIN_BANK = bankIdForAgent(DIGITAL_TWIN_SLUG);
-
 /**
- * Twin detection MUST key on the bank id, not the raw slug. bankIdForAgent
- * sanitizes (lowercase, collapse non-alphanumerics, truncate 44), so slugs
- * like "digital_twin" / "Digital-Twin" / "digital--twin" all resolve to the
- * twin's bank `xyne-digital-twin`. A raw `=== "digital-twin"` check would let
- * such an agent reach the shared twin bank WITHOUT the per-user `user:<id>`
- * scoping — exposing every user's personal memories. Anything that lands in
- * the twin bank gets twin treatment.
+ * Twin memories are STORED tagged `user:<canonical Claw id>`, but clients
+ * address them with the only id they know — the raw (workspace-scoped) Spaces
+ * id. Validate that `tag` names the requester AND return it in canonical
+ * storage form, or null when it doesn't name them. Centralizes alias tolerance
+ * so legacy and migrated identities pass the twin gates and hit the same
+ * canonical-keyed stored tags.
  */
-function isDigitalTwinAgent(agentSlug: string | undefined): boolean {
-  return !!agentSlug && bankIdForAgent(agentSlug) === DIGITAL_TWIN_BANK;
+async function canonicalTwinTag(tag: string | undefined, requesterId: string | undefined): Promise<string | null> {
+  const taggedId = /^user:(.+)$/.exec((tag ?? "").trim())?.[1]?.trim();
+  const reqId = requesterId?.trim();
+  if (!taggedId || !reqId) return null;
+  if (taggedId === reqId) return `user:${reqId}`;
+  const canonical = await resolveClawUserIdForSpacesIdentity(taggedId).catch(() => undefined);
+  return canonical === reqId ? `user:${reqId}` : null;
 }
+
 
 async function assertMemoryUserAccess(
   req: Request,
@@ -67,7 +91,9 @@ async function assertMemoryUserAccess(
 ): Promise<boolean> {
   if (s2sKeyMatches(req.headers["x-s2s-key"])) return true;
   const requesterId = getRequesterId(req);
-  if (requesterId && requesterId === targetUserId) return true;
+  // targetUserId arrives as the raw Spaces id from the browser; match it against
+  // the caller's alias set (canonical x-user-id OR raw x-spaces-user-id).
+  if (matchesAuthenticatedUserId(req, targetUserId)) return true;
   if (requesterId && (await isClawAdmin(requesterId))) return true;
   res.status(403).json({ success: false, error: "You can only access your own memory files." });
   return false;
@@ -96,6 +122,24 @@ memoryRouter.get("/agent-prompt-files", requireAuth, async (req, res) => {
       return;
     }
     if (!(await assertMemoryUserAccess(req, res, userId))) return;
+    // candidates=1: every non-empty file with its loadInPrompt flag, so claw can
+    // pick per task (jev_memory_file_pick). Default: today's toggled set.
+    if (req.query["candidates"] === "1") {
+      const files = await getCandidatePromptFiles(agentSlug, userId);
+      res.json({
+        success: true,
+        data: {
+          candidates: true,
+          files: files.map((f) => ({
+            name: f.name,
+            content: f.content,
+            loadInPrompt: f.loadInPrompt,
+            ...(f.description ? { description: f.description } : {}),
+          })),
+        },
+      });
+      return;
+    }
     const files = await getPromptFiles(agentSlug, userId);
     res.json({
       success: true,
@@ -106,8 +150,6 @@ memoryRouter.get("/agent-prompt-files", requireAuth, async (req, res) => {
     res.json({ success: true, data: { files: [] } });
   }
 });
-
-const AGENT_FILE_NAME_RE = /^[a-zA-Z0-9._-]{1,64}$/;
 
 /**
  * GET /memory/agent-file?agentSlug=&userId=&name=
@@ -166,7 +208,7 @@ memoryRouter.post("/agent-file", requireAuth, async (req, res) => {
     const name = typeof body.name === "string" ? body.name.trim() : "";
     const content = typeof body.content === "string" ? body.content : "";
     const mode = body.mode === "replace" ? "replace" : "append";
-    if (!userId || !AGENT_FILE_NAME_RE.test(name) || !content.trim()) {
+    if (!userId || !MEMORY_FILE_NAME_RE.test(name) || !content.trim()) {
       res.status(400).json({ success: false, error: "userId, valid name, and content are required" });
       return;
     }
@@ -176,7 +218,7 @@ memoryRouter.post("/agent-file", requireAuth, async (req, res) => {
       const current = await getAgentFile(agentSlug, userId, name);
       finalContent = current?.content ? `${current.content.trimEnd()}\n\n${content.trim()}` : content.trim();
     }
-    const file = await upsertAgentFile({ agentSlug, userId, name, content: finalContent, updatedBy: "agent" });
+    const file = await upsertAgentFile({ agentSlug, owner: userId, name, content: finalContent, updatedBy: "agent" });
     res.json({
       success: true,
       data: { file: { name: file.name, chars: file.content.length, maxChars: MAX_FILE_CHARS } },
@@ -283,7 +325,7 @@ async function checkTwinAccess(
       res.status(403).json({ success: false, error: "Cannot verify ownership; delete refused" });
       return false;
     }
-    const memo = await getMemoryFn(bankIdForAgent("digital-twin"), opts.hindsightMemoryId).catch(() => null);
+    const memo = await getMemoryFn(DIGITAL_TWIN_BANK_ID, opts.hindsightMemoryId).catch(() => null);
     if (!memo) {
       res.status(404).json({ success: false, error: "Memory not found" });
       return false;
@@ -597,7 +639,8 @@ memoryRouter.post("/banks/:agentSlug/retention-sweep", requireClawAdmin, async (
 memoryRouter.get("/banks/:agentSlug/memories", requireUserAuth, async (req, res) => {
   try {
     const agentSlug = req.params["agentSlug"] as string;
-    const { scope, search, subsystem, userTag, limit = "50", offset = "0" } = req.query as Record<string, string>;
+    const { scope, search, subsystem, limit = "50", offset = "0" } = req.query as Record<string, string>;
+    let userTag = req.query["userTag"] as string | undefined;
     const take = Math.min(Number(limit) || 50, 200);
     const skip = Math.max(Number(offset) || 0, 0);
 
@@ -605,18 +648,21 @@ memoryRouter.get("/banks/:agentSlug/memories", requireUserAuth, async (req, res)
     // opted in. A list call MUST be restricted to the requester's own
     // user-tag — otherwise one user could enumerate everyone else's Twin
     // memories.  We require `?userTag=user:<id>` AND that it matches the
-    // requesting userId. Other agent banks (assistant, doctor, etc.) are
-    // shared/agent-scoped so they don't need this gate.
+    // requesting userId (raw alias or canonical — the tag is canonicalized
+    // here so it also matches the canonical-keyed stored tags). Other agent
+    // banks (assistant, doctor, etc.) are shared/agent-scoped so they don't
+    // need this gate.
     const requesterId = (req.headers["x-user-id"] as string | undefined)?.trim();
     if (isDigitalTwinAgent(agentSlug)) {
-      const expected = requesterId ? `user:${requesterId}` : "";
-      if (!userTag || userTag !== expected) {
+      const canonicalTag = await canonicalTwinTag(userTag, requesterId);
+      if (!canonicalTag) {
         res.status(403).json({
           success: false,
           error: "Digital Twin memories are per-user; userTag must match requester",
         });
         return;
       }
+      userTag = canonicalTag;
     }
 
     const bankId = bankIdForAgent(agentSlug);
@@ -635,16 +681,17 @@ memoryRouter.get("/banks/:agentSlug/memories", requireUserAuth, async (req, res)
       // Wide because the twin bank is SHARED across users and Hindsight can't
       // tag-filter server-side — we over-fetch then filter to `userTag`. Sized
       // to surface a heavy user's full set so pagination can page through it.
+      const twinTag = userTag; // const-capture: closures below keep the narrowing
       const WIDE_FETCH = Number(process.env["TWIN_MEMORIES_WIDE_FETCH"] ?? 2000);
       const widePage = await memory.listMemories(bankId, {
         limit: WIDE_FETCH,
         offset: 0,
         ...(search && search.trim().length > 0 ? { search: search.trim() } : {}),
-        tags: [userTag],
+        tags: [twinTag],
       });
 
       // AUTHORITATIVE user-scope filter — JS, not provider.
-      let scoped = widePage.memories.filter((m) => (m.tags ?? []).includes(userTag));
+      let scoped = widePage.memories.filter((m) => (m.tags ?? []).includes(twinTag));
       // Optional subsystem narrowing inside the user's scope.
       if (subsystem && subsystem.trim().length > 0) {
         const subsystemTag = `subsystem:${subsystem.trim()}`;
@@ -722,12 +769,13 @@ memoryRouter.get("/banks/:agentSlug/memories", requireUserAuth, async (req, res)
     // arbitrary `userTag` (or scope=user). Only an admin may query across
     // users; everyone else is pinned to their own user-tag.
     const isAdmin = requesterId ? await isClawAdmin(requesterId) : false;
-    if (!isAdmin) {
-      const ownTag = requesterId ? `user:${requesterId}` : "";
-      if (userTag && userTag.startsWith("user:") && userTag !== ownTag) {
+    if (!isAdmin && userTag && userTag.startsWith("user:")) {
+      const canonicalTag = await canonicalTwinTag(userTag, requesterId);
+      if (!canonicalTag) {
         res.status(403).json({ success: false, error: "userTag must match the requesting user" });
         return;
       }
+      userTag = canonicalTag;
     }
     const listFilter: { limit: number; offset: number; search?: string; tags?: string[] } = {
       limit: take,
@@ -821,19 +869,22 @@ memoryRouter.get("/banks/:agentSlug/stats", requireUserAuth, async (req, res) =>
   try {
     const agentSlug = req.params["agentSlug"] as string;
     const range = (req.query["range"] as string) || "7d";
-    const userTag = (req.query["userTag"] as string | undefined)?.trim();
+    let userTag = (req.query["userTag"] as string | undefined)?.trim();
     const days = RANGE_DAYS[range] ?? 7;
     const cutoff = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
     const bankId = bankIdForAgent(agentSlug);
 
     // Per-user privacy gate for the digital-twin bank — see /memories route.
+    // Alias-tolerant (raw Spaces id or canonical Claw id), canonicalized so the
+    // tag matchers below hit the canonical-keyed stored tags.
     const requesterId = (req.headers["x-user-id"] as string | undefined)?.trim();
     if (isDigitalTwinAgent(agentSlug)) {
-      const expected = requesterId ? `user:${requesterId}` : "";
-      if (!userTag || userTag !== expected) {
+      const canonicalTag = await canonicalTwinTag(userTag, requesterId);
+      if (!canonicalTag) {
         res.status(403).json({ success: false, error: "Digital Twin stats are per-user; userTag must match requester" });
         return;
       }
+      userTag = canonicalTag;
     }
 
     // ── Digital-twin: per-user stats path ────────────────────────────
@@ -1032,17 +1083,19 @@ memoryRouter.get("/banks/:agentSlug/stats", requireUserAuth, async (req, res) =>
 memoryRouter.get("/banks/:agentSlug/subsystem-graph", requireUserAuth, async (req, res) => {
   try {
     const agentSlug = req.params["agentSlug"] as string;
-    const userTag = (req.query["userTag"] as string | undefined)?.trim();
+    let userTag = (req.query["userTag"] as string | undefined)?.trim();
     const bankId = bankIdForAgent(agentSlug);
 
     // Per-user privacy gate for the digital-twin bank — see /memories route.
+    // Alias-tolerant + canonicalized (see /memories).
     const requesterId = (req.headers["x-user-id"] as string | undefined)?.trim();
     if (isDigitalTwinAgent(agentSlug)) {
-      const expected = requesterId ? `user:${requesterId}` : "";
-      if (!userTag || userTag !== expected) {
+      const canonicalTag = await canonicalTwinTag(userTag, requesterId);
+      if (!canonicalTag) {
         res.status(403).json({ success: false, error: "Digital Twin graph is per-user; userTag must match requester" });
         return;
       }
+      userTag = canonicalTag;
     }
 
     const listFilter: { limit: number; tags?: string[] } = { limit: 500 };
@@ -1146,7 +1199,12 @@ memoryRouter.get("/banks/:agentSlug/subsystem-graph", requireUserAuth, async (re
 memoryRouter.get("/banks/:agentSlug/graph", requireUserAuth, async (req, res) => {
   try {
     const agentSlug = req.params["agentSlug"] as string;
-    const userTag = (req.query["userTag"] as string | undefined)?.trim();
+    const rawUserTag = (req.query["userTag"] as string | undefined)?.trim();
+    // Canonicalize up front: the gate compares against the (canonical)
+    // requester, and the per-user filters below match canonical-keyed tags.
+    const userTag = isDigitalTwinAgent(agentSlug)
+      ? (await canonicalTwinTag(rawUserTag, (req.headers["x-user-id"] as string | undefined)?.trim())) ?? undefined
+      : rawUserTag;
     if (!(await checkTwinAccess(req, res, agentSlug, "read", { ...(userTag && { userTag }) }))) return;
     const bankId = bankIdForAgent(agentSlug);
     const getGraph = memory.getEntityGraph?.bind(memory);
@@ -1504,8 +1562,8 @@ memoryRouter.post("/banks/:agentSlug/consolidate", requireUserAuth, async (req, 
         return;
       }
       const admin = await isClawAdmin(requesterId);
-      if (!admin && agent.ownerUserId !== requesterId) {
-        res.status(403).json({ success: false, error: "Only the agent owner or an admin can trigger consolidation." });
+      if (!admin && !(await canMaintainAgentMemory(req, agentSlug, requesterId))) {
+        res.status(403).json({ success: false, error: "Only the agent owner, an editor, or an admin can trigger consolidation." });
         return;
       }
     }
@@ -1613,8 +1671,8 @@ memoryRouter.post("/banks/:agentSlug/memories/import", requireUserAuth, async (r
         return;
       }
       const admin = await isClawAdmin(requesterId);
-      if (!admin && agent.ownerUserId !== requesterId) {
-        res.status(403).json({ success: false, error: "Only the agent owner or an admin can import memories." });
+      if (!admin && !(await canMaintainAgentMemory(req, agentSlug, requesterId))) {
+        res.status(403).json({ success: false, error: "Only the agent owner, an editor, or an admin can import memories." });
         return;
       }
     }
@@ -1766,8 +1824,8 @@ memoryRouter.post("/banks/:agentSlug/upload-md", requireUserAuth, async (req, re
       return;
     }
     const admin = await isClawAdmin(userId);
-    if (!admin && agent.ownerUserId !== userId) {
-      res.status(403).json({ success: false, error: "Only the agent owner or an admin can upload memory documents." });
+    if (!admin && !(await canMaintainAgentMemory(req, agentSlug, userId))) {
+      res.status(403).json({ success: false, error: "Only the agent owner, an editor, or an admin can upload memory documents." });
       return;
     }
 
@@ -2239,8 +2297,8 @@ memoryRouter.post("/banks/:agentSlug/backfill", requireUserAuth, async (req, res
       res.status(404).json({ success: false, error: "Agent not found" });
       return;
     }
-    if (!(await isClawAdmin(requesterId)) && agent.ownerUserId !== requesterId) {
-      res.status(403).json({ success: false, error: "Only the agent owner or an admin can backfill this agent's memory." });
+    if (!(await canMaintainAgentMemory(req, agentSlug, requesterId))) {
+      res.status(403).json({ success: false, error: "Only the agent owner, an editor, or an admin can backfill this agent's memory." });
       return;
     }
     const body = (req.body ?? {}) as { from?: string; to?: string; days?: number };
@@ -2416,8 +2474,8 @@ memoryRouter.post("/banks/:agentSlug/enable", requireUserAuth, async (req, res) 
       res.status(401).json({ success: false, error: "Unauthenticated" });
       return;
     }
-    if (!(await isClawAdmin(requesterId)) && agent.ownerUserId !== requesterId) {
-      res.status(403).json({ success: false, error: "Only the agent owner or an admin can manage this agent's memory." });
+    if (!(await canMaintainAgentMemory(req, agentSlug, requesterId))) {
+      res.status(403).json({ success: false, error: "Only the agent owner, an editor, or an admin can manage this agent's memory." });
       return;
     }
 
@@ -2466,8 +2524,8 @@ memoryRouter.post("/banks/:agentSlug/disable", requireUserAuth, async (req, res)
       res.status(401).json({ success: false, error: "Unauthenticated" });
       return;
     }
-    if (!(await isClawAdmin(requesterId)) && agent.ownerUserId !== requesterId) {
-      res.status(403).json({ success: false, error: "Only the agent owner or an admin can manage this agent's memory." });
+    if (!(await canMaintainAgentMemory(req, agentSlug, requesterId))) {
+      res.status(403).json({ success: false, error: "Only the agent owner, an editor, or an admin can manage this agent's memory." });
       return;
     }
 
@@ -2509,6 +2567,9 @@ memoryRouter.post("/banks/:agentSlug/clear-all", requireUserAuth, async (req, re
       res.status(404).json({ success: false, error: "Agent not found" });
       return;
     }
+    // Deliberately owner/admin-only (NOT canMaintainAgentMemory): clearing the
+    // bank is irreversible and destroys work belonging to every user of the
+    // agent, so an editor must not be able to do it.
     const admin = await isClawAdmin(userId);
     if (!admin && agent.ownerUserId !== userId) {
       res.status(403).json({ success: false, error: "Only the agent owner or an admin can clear all memories." });
@@ -2571,6 +2632,8 @@ memoryRouter.delete("/banks/:agentSlug/subsystems/:subsystem", requireUserAuth, 
       res.status(404).json({ success: false, error: "Agent not found" });
       return;
     }
+    // Deliberately owner/admin-only (NOT canMaintainAgentMemory) — same
+    // rationale as clear-all: irreversible, and shared across the agent's users.
     const admin = await isClawAdmin(userId);
     if (!admin && agent.ownerUserId !== userId) {
       res.status(403).json({ success: false, error: "Only the agent owner or an admin can delete a subsystem." });
@@ -2634,13 +2697,13 @@ memoryRouter.post("/banks/:agentSlug/upload-session", requireUserAuth, async (re
       return;
     }
     const admin = await isClawAdmin(userId);
-    if (!admin && agent.ownerUserId !== userId) {
-      res.status(403).json({ success: false, error: "Only the agent owner or an admin can upload sessions." });
+    if (!admin && !(await canMaintainAgentMemory(req, agentSlug, userId))) {
+      res.status(403).json({ success: false, error: "Only the agent owner, an editor, or an admin can upload sessions." });
       return;
     }
     // The twin bank holds per-user private memories; a "shared" upload into it
     // is never correct (twin knowledge flows through the user-memory pipeline).
-    if (bankIdForAgent(agentSlug) === bankIdForAgent("digital-twin")) {
+    if (isDigitalTwinAgent(agentSlug)) {
       res.status(400).json({ success: false, error: "Sessions cannot be uploaded to the digital twin — twin memory is per-user and managed from the Digital Twin page." });
       return;
     }

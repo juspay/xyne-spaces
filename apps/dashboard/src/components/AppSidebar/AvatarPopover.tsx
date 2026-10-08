@@ -6,7 +6,7 @@ import { StatusIndicator } from '../ui/StatusIndicator';
 import { Button } from '../ui/Button/Button';
 import { UpdateStatusModal } from './UpdateStatusModal';
 import { useUser } from '../../hooks/useUsers';
-import { isStatusExpired, formatExpiryTime } from '../../utils/statusUtils';
+import { isStatusExpired, formatExpiryTime, resolveUserStatus } from '../../utils/statusUtils';
 import { renderEmoji } from '../../utils/customEmojiUtils';
 
 interface AvatarPopoverProps {
@@ -25,6 +25,8 @@ export const AvatarPopover: React.FC<AvatarPopoverProps> = ({ userId }) => {
   const statusExpiryAt = user?.statusExpiryAt;
 
   const hasStatus = statusEmoji && (!statusExpiryAt || !isStatusExpired(statusExpiryAt));
+
+  const hasDisplayStatus = resolveUserStatus(user).hasStatus;
 
   const handleClearStatus = (e: React.MouseEvent): void => {
     e.stopPropagation();
@@ -52,12 +54,13 @@ export const AvatarPopover: React.FC<AvatarPopoverProps> = ({ userId }) => {
             variant='ghost'
             className='focus:outline-none flex flex-col items-center gap-1 p-0 h-auto'
           >
-            {hasStatus && (
+            {hasDisplayStatus && (
               <div className='h-4 flex items-center justify-center bg-muted rounded-full px-2 min-w-[16px]'>
                 <StatusIndicator
                   statusEmoji={user?.statusEmoji}
                   statusContent={user?.statusContent}
                   statusExpiryAt={user?.statusExpiryAt}
+                  activityStatus={user?.activityStatus}
                   size='sm'
                 />
               </div>

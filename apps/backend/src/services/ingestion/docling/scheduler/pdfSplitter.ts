@@ -28,7 +28,7 @@ export const stagePdfParts = async (input: {
     throw new Error(`PDF ${input.fileId} has no pages`);
   }
 
-  const { stageDir, partsDir, manifestPath } = stagingPaths(input.fileId);
+  const { stageDir, partsDir, resultsDir, manifestPath } = stagingPaths(input.fileId);
   const parts: DoclingStagedPart[] = [];
   let partIndex = 0;
 
@@ -68,6 +68,7 @@ export const stagePdfParts = async (input: {
   const stagedParts: DoclingStagedParts = {
     stageDir,
     partsDir,
+    resultsDir,
     manifestPath,
     totalPages,
     partsTotal: parts.length,

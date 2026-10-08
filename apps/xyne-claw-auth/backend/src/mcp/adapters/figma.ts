@@ -3,7 +3,7 @@ import type { StdioMcpAdapter } from "../types.js";
 export const figmaAdapter: StdioMcpAdapter = {
   transport: "stdio",
   type: "figma",
-  healthCheck: { name: "get_figma_file", params: { fileKey: "test" } },
+  healthCheck: { name: "__list_tools__", params: {} },
   credentialFields: [
     { name: "apiKey", label: "Figma API Key", type: "password", placeholder: "figd_xxxxxxxxxxxxxxxx" },
   ],

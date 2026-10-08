@@ -12,7 +12,6 @@ import {
   Bookmark,
   Forward,
   Copy,
-  Headphones,
   Mic,
   ArrowLeft,
   Clock3,
@@ -30,6 +29,7 @@ import { ConversationWithTicket } from '../../ui/MessageBubble/MessageBubble.typ
 import { AnimatePresence, motion } from 'framer-motion';
 import { useMeasure } from 'react-use';
 import AddReactionActionView from '../AddReactionActionView/AddReactionActionView';
+import { PhoneDefault } from '@xyne/icons';
 
 type DrawerView = 'default' | 'emoji';
 
@@ -123,17 +123,8 @@ export const MessageActionsDrawer: React.FC<MessageActionsDrawerProps> = ({
     handleOpenChange(false); // Close drawer after action
   };
 
-  const handleEmojiSelect = (emoji: {
-    emoji: string;
-    isCustom: boolean;
-    emojiId?: string;
-    imageUrl?: string;
-    names?: string[];
-  }): void => {
-    // For custom emojis, store the emojiId with a prefix
-    const emojiName = emoji.isCustom
-      ? `custom:${emoji.emoji}:${emoji.names?.[0] || 'custom'}`
-      : emoji.emoji;
+  // Receives the stored reaction token, already serialised by the picker surface.
+  const handleEmojiSelect = (emojiName: string): void => {
     const hasReacted = !!user && (reactionsData[emojiName] || []).includes(user.id);
 
     toggleReaction({
@@ -177,11 +168,11 @@ export const MessageActionsDrawer: React.FC<MessageActionsDrawerProps> = ({
       onOpenChange={handleOpenChange}
       title='Message Actions'
       description='Choose an action for this message'
+      bodyClassName='overflow-visible'
     >
       <motion.div
         animate={{ height: drawerHeight }}
         transition={{ duration: 0.3, ease: [0.25, 1, 0.5, 1] }}
-        className='[*:has(>*>&)]:overflow-visible'
       >
         <div ref={drawerContentRef} className='px-2 py-4'>
           <AnimatePresence initial={false} mode='popLayout' custom={view}>
@@ -206,6 +197,7 @@ export const MessageActionsDrawer: React.FC<MessageActionsDrawerProps> = ({
                   </button>
                   <AddReactionActionView
                     handleEmojiSelect={handleEmojiSelect}
+                    messageId={messageId}
                     customEmojis={customEmojis}
                   />
                 </div>
@@ -230,7 +222,7 @@ export const MessageActionsDrawer: React.FC<MessageActionsDrawerProps> = ({
                   {/* Initiate Call */}
                   {onInitiateCall && messageId === initialMessageId && !isChannelArchived && (
                     <ActionButton
-                      icon={<Headphones className='w-5 h-5' />}
+                      icon={<PhoneDefault className='w-5 h-5' />}
                       label={isCallDisabled ? 'Call already in progress' : 'Start Call'}
                       onClick={() => handleActionClick(onInitiateCall)}
                       disabled={isCallDisabled}

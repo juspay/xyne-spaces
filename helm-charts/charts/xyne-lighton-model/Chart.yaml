@@ -1,0 +1,18 @@
+apiVersion: v2
+name: xyne-lighton-model
+description: Xyne Spaces LightOnOCR model server - vLLM serving lightonai/LightOnOCR-2-1B-bbox on one GPU behind an OpenAI-compatible API, used by xyne-lighton-ocr
+type: application
+version: 0.1.0
+appVersion: "v0.29.0"
+keywords:
+  - xyne
+  - ocr
+  - lighton
+  - vllm
+home: https://github.com/juspay/xyne-spaces
+sources:
+  - https://huggingface.co/lightonai/LightOnOCR-2-1B-bbox
+dependencies:
+  - name: xyne-common
+    version: 0.1.0
+    repository: file://../xyne-common

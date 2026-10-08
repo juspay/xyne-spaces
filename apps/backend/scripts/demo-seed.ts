@@ -223,14 +223,20 @@ async function ensureUsers(workspaceId: string, orgId: string, admin: SeededUser
     //
     // Seeding these as GOOGLE produced users who look right in the UI and cannot
     // sign in at all.
-    await prisma.orgMember.create({
-      data: {
-        memberId,
-        orgId,
-        email,
-        role: OrgRole.MEMBER,
-        passwordHash: await hashPassword(DEMO_USER_PASSWORD),
-      },
+    const demoPasswordHash = await hashPassword(DEMO_USER_PASSWORD);
+    await prisma.$transaction(async (tx) => {
+      await tx.orgMember.create({
+        data: {
+          memberId,
+          orgId,
+          email,
+          role: OrgRole.MEMBER,
+          passwordHash: demoPasswordHash,
+        },
+      });
+      await tx.orgMemberCredential.create({
+        data: { memberId, orgId, passwordHash: demoPasswordHash },
+      });
     });
     const user = await prisma.user.create({
       data: {
@@ -414,7 +420,8 @@ async function createConversation(
 async function createChannels(
   users: SeededUser[],
   workspaceId: string,
-  projectId: string
+  projectId: string,
+  boardId: string
 ) {
   const created: Array<{ id: string; slug: string; conversationId: string }> = [];
 
@@ -441,6 +448,23 @@ async function createChannels(
       },
     });
     vespaJobs.push({ schema: 'chat_container', docId: channelId });
+
+    // Mirror the channel→board link into channel_board_mappings (the source of truth
+    // now that projects are decoupled from channels). Without this the channel shows
+    // "No boards are configured" in the Tickets tab. One board here, so it's the default.
+    const now = minsAgo(i);
+    await prisma.channelBoardMapping.create({
+      data: {
+        id: createId(),
+        channelId,
+        boardId,
+        workspaceId,
+        isDefault: true,
+        createdBy: admin.id,
+        createdAt: now,
+        updatedAt: now,
+      },
+    });
 
     // The DM/channel lists read channel_stats, not channels — without a row the
     // channel does not appear in the sidebar.
@@ -772,7 +796,7 @@ async function main() {
   const { projectId, boardId } = await ensureProjectAndBoard(workspace.id, users[0].id);
   console.log(`  📁 ${PROJECT_NAME} project + ${BOARD_NAME} board (${STAGES.length} stages)`);
 
-  const channels = await createChannels(users, workspace.id, projectId);
+  const channels = await createChannels(users, workspace.id, projectId, boardId);
   await createTickets(users, workspace.id, projectId, boardId, channels);
 
   await queueForVespa(workspace.id, orgId, users[0].id);

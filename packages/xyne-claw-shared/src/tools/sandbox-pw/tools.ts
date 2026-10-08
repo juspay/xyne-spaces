@@ -23,7 +23,7 @@ import path from "node:path";
 
 import type { ToolDefinition } from "../types.js";
 import { getOrSpawnSandboxPwClient, evictSandboxPwClient } from "./client.js";
-import { buildSandboxStoreKey } from "../sandbox/tools.js";
+import { buildSandboxStoreKey, sandboxConversationIdFromMeta } from "../sandbox/tools.js";
 
 import { createLogger } from "../../logger.js";
 const log = createLogger("tools");
@@ -281,7 +281,7 @@ function makeSandboxPwTool(spec: PwToolSpec): ToolDefinition {
       if (!conversationId) return "Error: No conversationId in context.";
       const storeKey = buildSandboxStoreKey(
         context.meta?.["userId"],
-        conversationId,
+        sandboxConversationIdFromMeta(context.meta) ?? conversationId,
         context.meta?.["agentSlug"],
       );
       if (!storeKey) return "Error: No userId/conversationId in context.";

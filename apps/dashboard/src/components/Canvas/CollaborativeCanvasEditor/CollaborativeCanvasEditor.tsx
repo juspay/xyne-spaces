@@ -46,6 +46,7 @@ import { logger, Event } from '../../../utils/logger';
 import { useZero } from '../../../hooks/useZero';
 import { queries } from '../../../zero/queries';
 import { useCachedQuery } from '../../../hooks/useCachedQuery';
+import { useCanvasConnectId } from '../../../hooks/useCanvasConnectId';
 import {
   resolveFileUrl,
   extractHeadingsFromBlocks,
@@ -91,6 +92,7 @@ import { CanvasFilePanel } from '../CanvasFilePanel/CanvasFilePanel';
 import { useCanvasCommentEditorBridge } from '../useCanvasCommentEditorBridge';
 import { useCanvasTicketEditorBridge } from '../useCanvasTicketEditorBridge';
 import { CanvasTicketCreationFlow } from '../CanvasTicketCreationFlow/CanvasTicketCreationFlow';
+import { CanvasTicketLinkFlow } from '../CanvasTicketLinkFlow/CanvasTicketLinkFlow';
 
 const DEFAULT_CANVAS_PLACEHOLDER = "Write something, or press '/' for commands";
 const RECORDING_SUMMARY_EDITED_TEXT_COLOR = 'recording-summary-edited';
@@ -143,6 +145,8 @@ interface CollaborativeCanvasEditorProps {
   canvasCreatedBy?: string | undefined;
   /** Effective role of current user on this canvas */
   currentUserRole?: CanvasRole | null;
+  /** Scrolls with the document, above its first block. */
+  header?: React.ReactNode;
 }
 
 export const CollaborativeCanvasEditor = forwardRef<
@@ -170,6 +174,7 @@ export const CollaborativeCanvasEditor = forwardRef<
       canvasParticipants: preloadedParticipants,
       canvasCreatedBy,
       currentUserRole,
+      header,
     },
     ref,
   ) => {
@@ -181,9 +186,13 @@ export const CollaborativeCanvasEditor = forwardRef<
     const isXyneAIOpen = useSelector(xyneAIActor, state => state.matches('open'));
     const z = useZero();
     const currentUserId = (user?.id as string) || '';
-    const [queriedParticipants = []] = useCachedQuery(queries.canvasParticipants({ canvasId }), {
-      enabled: Boolean(canvasId) && !preloadedParticipants,
-    });
+    const connectId = useCanvasConnectId(canvasId);
+    const [queriedParticipants = []] = useCachedQuery(
+      queries.canvasParticipants({ canvasId, connectId }),
+      {
+        enabled: Boolean(canvasId) && !preloadedParticipants,
+      },
+    );
     const canvasParticipants = preloadedParticipants ?? queriedParticipants;
     const currentUserName =
       (user?.name ? String(user.name) : undefined) ||
@@ -582,8 +591,10 @@ export const CollaborativeCanvasEditor = forwardRef<
     });
     const {
       activeTicketAnchor,
+      activeTicketAction,
       isTicketChannelArchived,
       openTicketForCurrentSelection,
+      openTicketLinkForCurrentSelection,
       closeTicketModal,
       handleTicketCreated,
     } = useCanvasTicketEditorBridge({
@@ -706,6 +717,7 @@ export const CollaborativeCanvasEditor = forwardRef<
           canComment: editable && !isReadOnly,
           canCreateTicket: editable && !isReadOnly && !isTicketChannelArchived,
           onCreateTicket: openTicketForCurrentSelection,
+          onLinkTicket: openTicketLinkForCurrentSelection,
         }),
       [
         canvasId,
@@ -713,6 +725,7 @@ export const CollaborativeCanvasEditor = forwardRef<
         isReadOnly,
         isTicketChannelArchived,
         openCommentsForCurrentBlock,
+        openTicketLinkForCurrentSelection,
         openTicketForCurrentSelection,
         title,
       ],
@@ -804,6 +817,7 @@ export const CollaborativeCanvasEditor = forwardRef<
             }}
           >
             <CanvasWidthHandles surfaceRef={containerRef} />
+            {header}
             <div
               className='blocknote-editor-wrapper w-full max-w-full'
               style={{
@@ -889,10 +903,15 @@ export const CollaborativeCanvasEditor = forwardRef<
         </div>
 
         <CanvasTicketCreationFlow
-          anchor={activeTicketAnchor}
+          anchor={activeTicketAction === 'create' ? activeTicketAnchor : null}
           channelId={channelId}
           onClose={closeTicketModal}
           onTicketCreated={handleTicketCreated}
+        />
+        <CanvasTicketLinkFlow
+          anchor={activeTicketAction === 'link' ? activeTicketAnchor : null}
+          onClose={closeTicketModal}
+          onTicketSelected={handleTicketCreated}
         />
 
         {/* Presentation Modal */}

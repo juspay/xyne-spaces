@@ -25,7 +25,7 @@
 
 import { marked } from "marked";
 import type { ToolDefinition } from "../types.js";
-import { buildHtmlDocument, sanitizeHtmlBody } from "./template.js";
+import { buildHtmlDocument, extractThemeStyles, sanitizeHtmlBody, sanitizeThemeCss } from "./template.js";
 
 import { createLogger } from "../../logger.js";
 const log = createLogger("tools");
@@ -149,6 +149,25 @@ function preRenderCharts(md: string): string {
 
 const HTML_MIME = "text/html";
 
+/** A complete HTML document (doctype or <html> root). Must NOT go through
+ *  marked: any 4-space-indented line after a blank line becomes an escaped
+ *  <pre><code> block, which is how whole report sections rendered as raw tags. */
+const FULL_HTML_DOC_RE = /^\s*(?:<!--(?:[^-]|-(?!-))*-->\s*)*(?:<!doctype\s+html|<html[\s>])/i;
+
+export function isFullHtmlDocument(input: string): boolean {
+  return FULL_HTML_DOC_RE.test(input);
+}
+
+/** Inner HTML of <body>, or the document minus doctype/<html>/<head>. */
+export function extractHtmlBody(doc: string): string {
+  const m = /<body\b[^>]*>([\s\S]*?)<\/body\s*>/i.exec(doc);
+  if (m) return m[1] ?? "";
+  return doc
+    .replace(/<!doctype[^>]*>/gi, "")
+    .replace(/<head\b[\s\S]*?<\/head\s*>/gi, "")
+    .replace(/<\/?html\b[^>]*>/gi, "");
+}
+
 /** Cap input markdown to bound server memory + downstream rendering cost.
  *  500K chars ≈ 500KB before HTML wrapping. Above this is almost always a
  *  prompt bug, not a real report. */
@@ -202,9 +221,12 @@ export const createHtmlReportTool: ToolDefinition = {
         type: "string",
         description:
           "Full report content in markdown. Headings, tables, lists, code blocks, " +
-          "and links all render natively. Plain text and inline HTML also work but " +
-          "<script>, <style>, <iframe> and inline event handlers are stripped for " +
-          "safety. Soft limit: 500,000 chars.",
+          "and links all render natively. Plain text and inline HTML also work; a complete " +
+          "HTML document (starting with <!DOCTYPE html> or <html>) is used as-is, not parsed as markdown; " +
+          "<script>, <iframe>, inline style= attributes and event handlers are stripped for " +
+          "safety. To apply a theme (e.g. from a skill), put its <style> block at the top " +
+          "and use its class names on your HTML elements: the stylesheet is kept and applied " +
+          "on top of the default one (no @import or external url()). Soft limit: 500,000 chars.",
       },
     },
     required: ["title", "summary", "detailsMarkdown"],
@@ -233,8 +255,12 @@ export const createHtmlReportTool: ToolDefinition = {
     try {
       // Pre-render chart blocks to inline SVG/HTML before markdown parsing
       // so charts display in JS-disabled viewers (Spaces file viewer, etc.)
-      const processedMarkdown = preRenderCharts(detailsMarkdown);
-      const rawHtml = await Promise.resolve(marked.parse(processedMarkdown));
+      const theme = extractThemeStyles(detailsMarkdown);
+      const themeCss = sanitizeThemeCss(theme.css);
+      const fullDoc = isFullHtmlDocument(theme.markdown);
+      const rawHtml = fullDoc
+        ? extractHtmlBody(theme.markdown)
+        : await Promise.resolve(marked.parse(preRenderCharts(theme.markdown)));
       const safeBodyHtml = sanitizeHtmlBody(
         typeof rawHtml === "string" ? rawHtml : String(rawHtml),
       );
@@ -243,6 +269,8 @@ export const createHtmlReportTool: ToolDefinition = {
         title,
         subtitle: `Length: ${detailsMarkdown.length.toLocaleString()} chars · Generated: ${new Date().toISOString()}`,
         body: safeBodyHtml,
+        ...(themeCss ? { themeCss } : {}),
+        chrome: !fullDoc,
       });
 
       const fileName = safeFileName(title);

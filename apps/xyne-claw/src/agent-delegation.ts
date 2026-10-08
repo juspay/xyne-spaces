@@ -15,15 +15,18 @@
  * Callable AGENTS are the opposite: each is a FULL agent loop with its own
  * system prompt, toolset, MCP servers and provider — a genuinely heavy,
  * expensive nested run. So the governance is inverted:
- *   - CONCURRENCY = 1: at most one agent delegation runs at a time per parent
- *     run. If the model fires two in one turn, they SERIALIZE (a mutex), they
- *     do NOT run in parallel.
+ *   - CONCURRENCY (default 1): at most one agent delegation runs at a time per
+ *     parent run — if the model fires two in one turn they SERIALIZE behind a
+ *     mutex. Orchestrator-tier runs override this to unlimited: fanning a
+ *     multi-part request out to N specialists costs the slowest one, not the
+ *     sum. The per-run BUDGET and DEPTH CAP stay the real limits.
  *   - DEPTH CAP (default 1): a callee cannot itself delegate to another agent.
  *     No A → B → C. (Subagents already forbid nesting; this is the A2A analog.)
  *   - COUNT BUDGET: a hard cap on total delegations per parent run.
  *   - CYCLE GUARD: an agent already on the delegation stack cannot be called
  *     again (no A → A, and at higher caps no A → B → A).
- *   - Flipped tool tag: "delegate to at most ONE at a time, do NOT batch".
+ *   - Tool tag: batch INDEPENDENT calls in one turn (they run in parallel when
+ *     concurrency allows); go sequential only when one task needs another's output.
  *
  * ─────────────────────────────────────────────────────────────────────────
  * WHERE THIS PLUGS IN (production wiring)
@@ -48,6 +51,9 @@
  * pi's `ToolDefinition` (name/label/description/parameters/execute), so the
  * factory output drops straight into the parent tool array.
  */
+
+import { track, type ChildTaskRegistry } from "./child-tasks.js";
+import { isValidFollowUpHandle } from "./subagent-followup.js";
 
 // ── Structural tool shape (compatible with pi ToolDefinition) ──────────────
 
@@ -82,6 +88,8 @@ export interface CallableAgentSpec {
   description: string;
   systemPrompt: string;
   agentConfig?: Record<string, unknown>;
+  /** The callee's tier; absent from older claw-auth builds (read as standard). */
+  delegationTier?: "standard" | "orchestrator";
   /** Tool param the parent fills with the delegated task. Defaults to "task". */
   paramName?: string;
   paramDescription?: string;
@@ -136,16 +144,31 @@ export type NestedAgentRunner = (args: {
   /** Governor to hand the callee so ITS own delegation attempts are governed
    *  (and, at the depth cap, refused). */
   childGovernor: AgentDelegationGovernor;
+  /** The spawning tool call. The runner keys the callee's trace on it so the
+   *  child run nests under this row in the caller's debug tree. */
+  toolCallId: string;
+  /** Resume the callee session this handle names instead of starting cold. */
+  followUpId?: string;
   signal?: AbortSignal;
   onProgress?: (label: string) => void;
-}) => Promise<{ text: string; toolsUsed?: string[] }>;
+}) => Promise<{ text: string; toolsUsed?: string[]; followUpId?: string }>;
+
+/** Runtime wiring handed to the delegation tools. All optional: without a
+ *  registry `run_in_background` is not exposed, and without a signal the only
+ *  cancellation is the per-call one the tool creates for itself. */
+export interface DelegationToolOpts {
+  signal?: AbortSignal;
+  onProgress?: (label: string) => void;
+  /** Present on the top-level run only, where results can be drained back. */
+  registry?: ChildTaskRegistry;
+}
 
 // ── Observability ───────────────────────────────────────────────────────────
 
 export type DelegationEventKind =
   | "requested"     // parent asked to delegate
   | "blocked"       // refused by a guard (depth / budget / cycle)
-  | "queued"        // waiting on the concurrency-1 mutex
+  | "queued"        // waiting on the concurrency mutex (concurrency: 1 only)
   | "started"       // callee loop began
   | "completed"     // callee loop returned
   | "failed";       // callee loop threw
@@ -169,6 +192,10 @@ export interface DelegationGovernorOptions {
   maxDepth?: number;
   /** Hard cap on total delegations across the whole parent run. */
   maxDelegationsPerRun?: number;
+  /** How many delegations may run at once. Defaults to A2A_DEFAULTS.CONCURRENCY
+   *  (1 = serialize). Orchestrator-tier runs pass Infinity so independent
+   *  parallel tool_use blocks actually run in parallel. */
+  concurrency?: number;
   /** Depth of THIS governor (0 at the top-level run). */
   depth?: number;
   /** Slugs already on the delegation stack (for the cycle guard). */
@@ -184,6 +211,7 @@ export interface DelegationGovernorOptions {
 export const A2A_DEFAULTS = {
   MAX_DEPTH: 1,
   MAX_DELEGATIONS_PER_RUN: 3,
+  MAX_DELEGATIONS_PER_RUN_ORCHESTRATOR: 20,
   CONCURRENCY: 1, // fixed: agents are heavy; one loop at a time.
 } as const;
 
@@ -206,7 +234,10 @@ export const MAX_DELEGATIONS_PER_RUN_BOUNDS = {
  * valid delegation budget. Non-integers, out-of-range, and missing values fall
  * back to the default; in-range values are clamped to [MIN, MAX].
  */
-export function clampMaxDelegationsPerRun(value: unknown): number {
+export function clampMaxDelegationsPerRun(
+  value: unknown,
+  fallback: number = MAX_DELEGATIONS_PER_RUN_BOUNDS.DEFAULT,
+): number {
   const n =
     typeof value === "number"
       ? value
@@ -214,7 +245,7 @@ export function clampMaxDelegationsPerRun(value: unknown): number {
         ? Number(value)
         : NaN;
   if (!Number.isFinite(n) || !Number.isInteger(n)) {
-    return MAX_DELEGATIONS_PER_RUN_BOUNDS.DEFAULT;
+    return fallback;
   }
   return Math.min(
     MAX_DELEGATIONS_PER_RUN_BOUNDS.MAX,
@@ -236,14 +267,20 @@ export class AgentDelegationGovernor {
   private readonly onEvent: DelegationEventSink | undefined;
   private readonly sharedCounter: { count: number };
 
-  /** Tail of the mutex chain. Every exclusive section awaits the previous one,
-   *  so concurrency is pinned to 1 regardless of how many tool calls the model
-   *  fires in a single turn. */
+  /** Tail of the mutex chain, used only when `concurrency` is 1. Each exclusive
+   *  section awaits the previous one, so delegations serialize no matter how
+   *  many tool calls the model fires in one turn. When concurrency is
+   *  unlimited this stays untouched and `runExclusive` runs `fn` immediately. */
   private queueTail: Promise<void> = Promise.resolve();
+  /** How many delegations may run at once. 1 = the historical mutex;
+   *  Infinity = the model's parallel tool_use blocks actually run in parallel
+   *  (what orchestrator-tier runs want — see A2A_DEFAULTS.CONCURRENCY). */
+  readonly concurrency: number;
 
   constructor(opts: DelegationGovernorOptions = {}) {
     this.maxDepth = opts.maxDepth ?? A2A_DEFAULTS.MAX_DEPTH;
     this.maxDelegationsPerRun = opts.maxDelegationsPerRun ?? A2A_DEFAULTS.MAX_DELEGATIONS_PER_RUN;
+    this.concurrency = opts.concurrency ?? A2A_DEFAULTS.CONCURRENCY;
     this.depth = opts.depth ?? 0;
     this.ownerSlug = opts.ownerSlug ?? "root";
     this.visited = new Set(opts.visited ?? []);
@@ -301,10 +338,13 @@ export class AgentDelegationGovernor {
     this.sharedCounter.count += 1;
   }
 
-  /** Serialize `fn` behind the concurrency-1 mutex. If another delegation is
-   *  in flight, this awaits it first (queued), then runs. Guarantees exactly
-   *  one heavy agent loop executes at a time within the run. */
+  /** Run `fn` under the configured concurrency. With `concurrency: 1` this is
+   *  the historical mutex — if another delegation is in flight, await it first
+   *  (signalling `queued`), then run. With unlimited concurrency there is
+   *  nothing to wait for, so parallel tool_use blocks genuinely run in
+   *  parallel; the per-run budget and depth cap remain the only limits. */
   async runExclusive<T>(onQueued: () => void, fn: () => Promise<T>): Promise<T> {
+    if (this.concurrency !== 1) return fn();
     const prior = this.queueTail;
     let release!: () => void;
     this.queueTail = new Promise<void>((r) => (release = r));
@@ -327,6 +367,7 @@ export class AgentDelegationGovernor {
     return new AgentDelegationGovernor({
       maxDepth: this.maxDepth,
       maxDelegationsPerRun: this.maxDelegationsPerRun,
+      concurrency: this.concurrency,
       depth: this.depth + 1,
       ownerSlug: calleeSlug,
       visited: [...this.visited, calleeSlug],
@@ -348,7 +389,7 @@ export function callableAgentDescription(spec: CallableAgentSpec): string {
   );
 }
 
-const paramSchema = (spec: CallableAgentSpec): unknown => ({
+const paramSchema = (spec: CallableAgentSpec, withBackground: boolean): unknown => ({
   type: "object",
   additionalProperties: false,
   required: [spec.paramName ?? "task"],
@@ -359,17 +400,47 @@ const paramSchema = (spec: CallableAgentSpec): unknown => ({
         spec.paramDescription ??
         `The complete, self-contained task for ${spec.name}. Include all context it needs — it does not see this conversation.`,
     },
+    session_id: {
+      type: "string",
+      description:
+        `Optional. To ask ${spec.name} a follow-up WITH the full context of a previous call, pass the session_id that call returned. Omit to start a fresh session.`,
+    },
+    ...(withBackground
+      ? {
+          run_in_background: {
+            type: "boolean",
+            description:
+              `Run ${spec.name} in the BACKGROUND (non-blocking). You get an immediate acknowledgement and keep working; its answer is delivered to you automatically before you finish your reply. Do NOT poll for it.`,
+          },
+        }
+      : {}),
   },
 });
+
+/** Reads the two control params shared by both delegation tool shapes. A
+ *  malformed handle starts a fresh session rather than failing the call. */
+function readDelegationControls(
+  raw: Record<string, unknown> | null | undefined,
+  opts: DelegationToolOpts,
+): { followUpId?: string; background?: boolean } {
+  const handle = raw?.["session_id"];
+  return {
+    ...(isValidFollowUpHandle(handle) ? { followUpId: handle } : {}),
+    ...(raw?.["run_in_background"] === true && opts.registry ? { background: true } : {}),
+  };
+}
 
 async function runGovernedDelegation(args: {
   spec: CallableAgentSpec;
   question: string;
   governor: AgentDelegationGovernor;
   runner: NestedAgentRunner;
-  opts?: { signal?: AbortSignal; onProgress?: (label: string) => void };
+  toolCallId: string;
+  followUpId?: string | undefined;
+  background?: boolean;
+  opts?: DelegationToolOpts;
 }): Promise<ToolResultContent> {
-  const { spec, question, governor, runner, opts = {} } = args;
+  const { spec, question, governor, runner, toolCallId, followUpId, background, opts = {} } = args;
   const caller = governor.ownerSlug;
   governor.emit({
     ts: Date.now(),
@@ -396,8 +467,16 @@ async function runGovernedDelegation(args: {
 
   // 2) Reserve budget, then serialize behind the concurrency-1 mutex.
   governor.reserve();
-  try {
-    const result = await governor.runExclusive(
+
+  // Per-call cancellation: the run's signal stops every delegation, this stops
+  // just this callee, so `task-stop` can kill one slow agent and leave the
+  // others fanned out alongside it running.
+  const callAbort = new AbortController();
+  if (opts.signal?.aborted) callAbort.abort();
+  else opts.signal?.addEventListener("abort", () => callAbort.abort(), { once: true });
+
+  const invoke = async (): Promise<{ text: string; toolsUsed?: string[]; followUpId?: string }> =>
+    governor.runExclusive(
       () => {
         governor.emit({
           ts: Date.now(), kind: "queued", caller, callee: spec.slug, depth: governor.depth,
@@ -413,7 +492,9 @@ async function runGovernedDelegation(args: {
           question,
           depth: governor.depth + 1,
           childGovernor,
-          ...(opts.signal ? { signal: opts.signal } : {}),
+          toolCallId,
+          ...(followUpId ? { followUpId } : {}),
+          signal: callAbort.signal,
           ...(opts.onProgress ? { onProgress: opts.onProgress } : {}),
         });
         governor.emit({
@@ -423,7 +504,60 @@ async function runGovernedDelegation(args: {
         return out;
       },
     );
-    return { content: [{ type: "text", text: result.text }], details: {} };
+
+  // 3) Background: hand the parent an immediate ack and let the drain loop in
+  //    runTask deliver the answer. Budget is already reserved, so a detached
+  //    delegation still counts against the run.
+  if (background && opts.registry) {
+    const detached = invoke().then(
+      (out) => ({
+        content: [{ type: "text" as const, text: out.text }],
+        details: out.followUpId ? { session_id: out.followUpId } : {},
+      }),
+      (err: unknown) => {
+        // The blocking path emits this from its catch. A detached one has none,
+        // and a delegation missing from the event stream reads as never run.
+        governor.emit({
+          ts: Date.now(),
+          kind: "failed",
+          caller,
+          callee: spec.slug,
+          depth: governor.depth,
+          reason: err instanceof Error ? err.message : String(err),
+        });
+        throw err;
+      },
+    );
+    track(opts.registry, {
+      taskId: toolCallId,
+      kind: "agent",
+      name: spec.slug,
+      question,
+      startedAt: Date.now(),
+      promise: detached,
+      cancel: () => callAbort.abort(),
+    });
+    return {
+      content: [{
+        type: "text",
+        text:
+          `Started "${spec.name}" in the background (task ${toolCallId}). It is running now — ` +
+          `continue with other work. Its answer will be delivered to you automatically before you ` +
+          `finish your reply; do NOT block on it or poll for it.`,
+      }],
+      details: { taskId: toolCallId, background: true },
+    };
+  }
+
+  try {
+    const result = await invoke();
+    const followUpFooter = result.followUpId
+      ? `\n\n---\n_Follow-up:_ to ask ${spec.name} another question WITH the full context of this run, call \`call-agent\` again with \`session_id: "${result.followUpId}"\`. Omit it to start fresh.`
+      : "";
+    return {
+      content: [{ type: "text", text: `${result.text}${followUpFooter}` }],
+      details: result.followUpId ? { session_id: result.followUpId } : {},
+    };
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     governor.emit({
@@ -441,7 +575,7 @@ export function buildCallableAgentTools(
   specs: CallableAgentSpec[],
   governor: AgentDelegationGovernor,
   runner: NestedAgentRunner,
-  opts: { signal?: AbortSignal; onProgress?: (label: string) => void } = {},
+  opts: DelegationToolOpts = {},
 ): CallableAgentTool[] {
   if (!governor.canExposeDelegationTools()) return [];
   if (!specs || specs.length === 0) return [];
@@ -453,10 +587,19 @@ export function buildCallableAgentTools(
       label: spec.name,
       description: callableAgentDescription(spec),
       progressLabels: spec.progressLabels ?? [`Delegating to ${spec.name}…`],
-      parameters: paramSchema(spec),
+      parameters: paramSchema(spec, opts.registry !== undefined),
       async execute(_toolCallId: string, params: unknown): Promise<ToolResultContent> {
-        const question = String((params as Record<string, unknown>)?.[paramName] ?? "").trim();
-        return runGovernedDelegation({ spec, question, governor, runner, opts });
+        const raw = params as Record<string, unknown> | null | undefined;
+        const question = String(raw?.[paramName] ?? "").trim();
+        return runGovernedDelegation({
+          spec,
+          question,
+          governor,
+          runner,
+          toolCallId: _toolCallId,
+          ...readDelegationControls(raw, opts),
+          opts,
+        });
       },
     };
   });
@@ -467,7 +610,7 @@ export function buildOrchestratorCallableAgentTool(
   governor: AgentDelegationGovernor,
   hydrateSpec: (calleeSlug: string) => Promise<CallableAgentSpec>,
   runner: NestedAgentRunner,
-  opts: { signal?: AbortSignal; onProgress?: (label: string) => void } = {},
+  opts: DelegationToolOpts = {},
 ): CallableAgentTool[] {
   if (!governor.canExposeDelegationTools()) return [];
   if (!specs || specs.length === 0) return [];
@@ -477,7 +620,11 @@ export function buildOrchestratorCallableAgentTool(
   return [{
     name: "call-agent",
     label: "Call Agent",
-    description: "Delegate a self-contained task to another agent — ONE at a time, never batch; prefer using list_agents first to choose.",
+    description:
+      "Delegate a self-contained task to another agent. When a request has several INDEPENDENT parts, " +
+      "emit one call-agent block PER PART IN THE SAME TURN — they run concurrently, so the wait is the " +
+      "slowest agent instead of the sum. Only call sequentially when one task genuinely needs a previous " +
+      "task's output.",
     progressLabels: ["Delegating to agent…"],
     parameters: {
       type: "object",
@@ -492,6 +639,20 @@ export function buildOrchestratorCallableAgentTool(
           type: "string",
           description: "The complete, self-contained task for the selected agent. Include all context it needs — it does not see this conversation.",
         },
+        session_id: {
+          type: "string",
+          description:
+            "Optional. To ask THIS SAME agent a follow-up WITH the full context of a previous call, pass the session_id that call returned. Omit to start a fresh session. Never pass a session_id another agent returned.",
+        },
+        ...(opts.registry
+          ? {
+              run_in_background: {
+                type: "boolean",
+                description:
+                  "Run this agent in the BACKGROUND (non-blocking). You get an immediate acknowledgement and keep working; its answer is delivered to you automatically before you finish your reply. Use for slow, independent work. Leave unset when you need the answer to decide your very next step. Do NOT poll for it.",
+              },
+            }
+          : {}),
       },
     },
     async execute(_toolCallId: string, params: unknown): Promise<ToolResultContent> {
@@ -511,7 +672,15 @@ export function buildOrchestratorCallableAgentTool(
       }
       opts.onProgress?.(light.progressLabels?.[0] ?? `Delegating to ${light.name}…`);
       const fullSpec = await hydrateSpec(agentSlug);
-      return runGovernedDelegation({ spec: fullSpec, question, governor, runner, opts });
+      return runGovernedDelegation({
+        spec: fullSpec,
+        question,
+        governor,
+        runner,
+        toolCallId: _toolCallId,
+        ...readDelegationControls(raw, opts),
+        opts,
+      });
     },
   }];
 }

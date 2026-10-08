@@ -32,10 +32,24 @@ router.post(
 );
 
 router.post(
+	"/chat.postEphemeral",
+	requirePermission("chat:write"),
+	slackChannelValidation("body"),
+	controller.chatPostEphemeral,
+);
+
+router.post(
 	"/chat.update",
 	requirePermission("chat:write"),
 	slackChannelValidation("body"),
 	controller.chatUpdate,
+);
+
+router.post(
+	"/chat.delete",
+	requirePermission("chat:delete"),
+	slackChannelValidation("body"),
+	controller.chatDelete,
 );
 
 router.get(

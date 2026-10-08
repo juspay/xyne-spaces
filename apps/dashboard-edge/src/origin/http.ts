@@ -45,6 +45,9 @@ export function createHttpOrigin(cfg: Config['storage']): Origin {
       endpoint: base,
       auth: cfg.authHeader ? 'static-header' : 'none',
     }),
+    async listPrefixes(): Promise<string[]> {
+      return [];
+    },
     async head(key: string): Promise<ObjectInfo | null> {
       const res = await fetch(urlFor(key), { method: 'HEAD', headers });
       if (res.status === 404) {

@@ -5,7 +5,6 @@ import {
   X,
   Check,
   HelpCircle,
-  Headphones,
   Headset,
   ChevronDown,
   Users,
@@ -21,7 +20,6 @@ import {
   CalendarFold,
   Loader2,
 } from 'lucide-react';
-import { RRule } from 'rrule';
 import { useSelector } from '@xstate/react';
 import { GoogleCalendarIcon, MicrosoftIcon } from './CalendarIcons';
 import { CallStatus, MeetingStatus } from '@xyne/shared';
@@ -47,12 +45,14 @@ import { formatRelativeTime, formatTimeAmPm, formatTimeUntil } from '../../utils
 import {
   didAttend,
   formatCallDuration,
+  formatRecurrenceRule,
   MAX_AVATARS_TO_SHOW,
   RSVP_BADGE_BASE_CLASS,
 } from './CalenderViewUtils';
 import { roomActor } from '../../machines/roomMachine';
 import { useNowWithBoundary } from '../../hooks/useNowWithBoundary';
 import { queries } from '../../zero/queries';
+import { PhoneDefault } from '@xyne/icons';
 
 interface CalendarCallPopupProps {
   call: Call;
@@ -72,24 +72,6 @@ function formatPopupDate(startsAt: number | string): string {
     month: 'long',
     day: 'numeric',
   });
-}
-
-/**
- * Convert an RRULE string to a short human-readable label.
- * e.g. "FREQ=WEEKLY;BYDAY=TU" → "Every week on Tuesday"
- */
-function formatRecurrenceRule(ruleStr: string | null | undefined): string {
-  if (!ruleStr) return 'This call repeats on a schedule';
-  try {
-    // Strip the "RRULE:" prefix if present, then parse
-    const cleaned = ruleStr.replace(/^RRULE:/i, '');
-    const options = RRule.parseString(cleaned);
-    const rule = new RRule(options);
-    const text = rule.toText();
-    return text.charAt(0).toUpperCase() + text.slice(1);
-  } catch {
-    return 'This call repeats on a schedule';
-  }
 }
 
 // Small RSVP badge overlaid on the avatar bottom-right corner
@@ -475,7 +457,7 @@ const CalendarCallPopup = ({
         {/* Call icon */}
         <div className='mb-4'>
           <div className='size-12 rounded-xl bg-blue-100 flex items-center justify-center'>
-            <Headphones className='size-6 text-blue-500' />
+            <PhoneDefault className='size-6 text-blue-500' />
           </div>
         </div>
 
@@ -518,7 +500,7 @@ const CalendarCallPopup = ({
       <div className='p-5'>
         <div className='mb-4'>
           <div className='size-12 rounded-xl bg-blue-100 flex items-center justify-center'>
-            <Headphones className='size-6 text-blue-500' />
+            <PhoneDefault className='size-6 text-blue-500' />
           </div>
         </div>
         <h3 className='font-semibold text-foreground text-base mb-1'>Hide recurring event</h3>
@@ -884,6 +866,11 @@ const CalendarCallPopup = ({
               disabled={isJoinDisabled}
               data-track-category='CALLS'
               data-track-name='popup-join-call'
+              data-track-metadata={JSON.stringify({
+                source: 'call_history_calendar',
+                callId: call.externalId,
+                callStatus: call.status,
+              })}
               className={cn(
                 'w-full mt-3 h-10 flex items-center justify-center gap-1.5 rounded-xl text-sm font-medium transition-opacity',
                 isJoinDisabled

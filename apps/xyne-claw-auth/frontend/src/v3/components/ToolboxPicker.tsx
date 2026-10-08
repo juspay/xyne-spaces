@@ -16,6 +16,7 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { Sparkles, ChevronRight, Loader2, Check, X, Info, AlertTriangle } from "lucide-react";
 import type { AgentLight } from "../../lib/types";
+import { isCurrentUser } from "../../lib/identity";
 import {
   suggestTools,
   type AvailableTools,
@@ -26,6 +27,7 @@ import {
   type DelegationIdentityMode,
 } from "../../lib/api";
 import { parseGatewaySelectionKey, parseGatewaySource } from "../lib/gatewayKeys";
+import { expandLegacyDirect, mcpSelectionKey } from "../lib/toolSelectionKeys";
 import { ConfirmDialog } from "./ui/ConfirmDialog";
 import { Dialog } from "./ui/Dialog";
 import { Button } from "./ui/Button";
@@ -50,14 +52,26 @@ function riskDotCls(riskLevel: "read" | "write" | "destructive" | undefined): st
   return "bg-amber-500";
 }
 
-/** snake_case → Sentence case, stripping an optional server prefix. */
+/**
+ * `spaces-vespa-search` → `Vespa search` when shown under a group already
+ * headed "Xyne Spaces".
+ *
+ * Tools mix `-` and `_` separators and rarely repeat the server slug verbatim
+ * (`xyne-spaces` publishes `spaces-*`), so the prefix is matched token-wise
+ * rather than literally — the old literal check never fired for hyphenated
+ * names and every Spaces chip read "Spaces-…", truncating out the useful half.
+ * Only one leading token is dropped: greedy stripping would reduce
+ * `spaces-tools-list` to just "List".
+ */
 function humanizeToolName(name: string, prefix?: string): string {
-  let n = name;
+  const tokens = name.split(/[-_]+/).filter(Boolean);
   if (prefix) {
-    const p = prefix.toLowerCase().replace(/-/g, "_") + "_";
-    if (n.toLowerCase().startsWith(p)) n = n.slice(p.length);
+    // Whitespace separates too: callers pass either a raw source
+    // (`xyne-spaces`) or a display label (`Xyne Spaces`).
+    const prefixTokens = new Set(prefix.toLowerCase().split(/[-_:\s]+/).filter(Boolean));
+    if (tokens.length > 1 && prefixTokens.has(tokens[0]!.toLowerCase())) tokens.shift();
   }
-  return n.replace(/_/g, " ").replace(/^[a-z]/, (c) => c.toUpperCase());
+  return tokens.join(" ").replace(/^[a-z]/, (c) => c.toUpperCase());
 }
 
 function SectionCaption({ friendly, technical }: { friendly: React.ReactNode; technical?: string }) {
@@ -175,6 +189,9 @@ export function ToolboxPicker({
 }: Props) {
   const [toolTab, setToolTab] = useState("all");
   const [toolSearch, setToolSearch] = useState("");
+  // Compact mode only: the selected-tool chip list starts collapsed to a
+  // per-bucket count. Expanded it is 40+ chips on a real agent.
+  const [compactTrayOpen, setCompactTrayOpen] = useState(false);
   const [pinnedDetail, setPinnedDetail] = useState<IntegrationToolEntry | null>(null);
   const [hoveredDetail, setHoveredDetail] = useState<IntegrationToolEntry | null>(null);
   const [expandedSections, setExpandedSections] = useState<Set<string>>(new Set());
@@ -216,8 +233,27 @@ export function ToolboxPicker({
     const arr = value[key];
     onChange({ ...value, [key]: arr.includes(val) ? arr.filter((x) => x !== val) : [...arr, val] });
   };
-  const toggleAll = (key: RequiredSelectionKey, all: string[]) =>
-    onChange({ ...value, [key]: value[key].length === all.length ? [] : all });
+  /**
+   * Select-all for ONE section.
+   *
+   * Sections share a single array — every MCP server's tools live in `direct` —
+   * so this unions and subtracts rather than assigning. Assigning `all` replaced
+   * the whole array, which silently dropped every other server's picks. Same
+   * shape as `toggleCustomGroup` below, which always did it this way.
+   *
+   * `select` is for callers that already know which way they are going; without
+   * it the section flips on its own current state.
+   */
+  const toggleAll = (key: RequiredSelectionKey, all: string[], select?: boolean) => {
+    const current = value[key];
+    const shouldSelect = select ?? !(all.length > 0 && all.every((v) => current.includes(v)));
+    onChange({
+      ...value,
+      [key]: shouldSelect
+        ? [...new Set([...current, ...all])]
+        : current.filter((x) => !all.includes(x)),
+    });
+  };
   const toggleCustomGroup = (slugs: string[], allSelected: boolean) =>
     onChange({ ...value, custom: allSelected ? value.custom.filter((x) => !slugs.includes(x)) : [...new Set([...value.custom, ...slugs])] });
   const clearAll = () =>
@@ -296,9 +332,8 @@ export function ToolboxPicker({
     }
     const directSet = new Set(value.direct);
     const customSet = new Set(value.custom);
-    for (const t of availableTools.writeTools) if (suggestedNames.has(t.name)) directSet.add(t.name);
-    for (const [source, tools] of Object.entries(availableTools.serverTools))
-      for (const t of tools) if (suggestedNames.has(t.name)) directSet.add(parseGatewaySource(source) ? t.slug : t.name);
+    for (const [source, tools] of mcpEntries)
+      for (const t of tools) if (suggestedNames.has(t.name)) directSet.add(selectionKeyForMcpTool(source, t));
     for (const g of availableTools.customGroups)
       for (const t of g.tools) if (suggestedNames.has(t.name)) customSet.add(t.slug);
     onChange({ subagents: Array.from(subagentSet), direct: Array.from(directSet), custom: Array.from(customSet), gateway: value.gateway ?? [], callableAgents: value.callableAgents ?? [] });
@@ -366,8 +401,18 @@ export function ToolboxPicker({
   const customLabel = (source: string): string =>
     source.replace("custom:", "").replace(/-/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
 
-  const selectionKeyForMcpTool = (source: string, tool: { slug: string; name: string }) =>
-    parseGatewaySource(source) ? tool.slug : tool.name;
+  /**
+   * The key written into `tools.direct` for one MCP tool. Server-scoped, so
+   * that `xyne-spaces` and `xyne-spaces-app-tools` — which publish 47
+   * identically-named tools — stay separate checkboxes. See
+   * ../lib/toolSelectionKeys.ts.
+   */
+  const selectionKeyForMcpTool = mcpSelectionKey;
+
+  /** Non-gateway catalog pairs, for rewriting legacy bare-name entries. */
+  const legacyScopeEntries = mcpEntries as ReadonlyArray<
+    readonly [string, ReadonlyArray<{ slug: string; name: string }>]
+  >;
 
   const gatewayKeysForService = (serviceName: string): string[] =>
     mcpEntries.flatMap(([source, tools]) => {
@@ -379,6 +424,10 @@ export function ToolboxPicker({
     const key = selectionKeyForMcpTool(source, tool);
     if (value.direct.includes(key)) return true;
     const gatewaySource = parseGatewaySource(source);
+    // A legacy bare-name entry really does grant this tool on every server
+    // publishing the name, so showing it ticked on each is the honest reading.
+    // The first toggle rewrites it into scoped keys (expandLegacyDirect).
+    if (!gatewaySource && value.direct.includes(tool.name)) return true;
     return !!gatewaySource && (value.gateway ?? []).includes(gatewaySource.serviceName);
   };
 
@@ -390,7 +439,12 @@ export function ToolboxPicker({
   ) => {
     const gatewaySource = parseGatewaySource(source);
     if (!gatewaySource) {
-      toggle("direct", tool.name);
+      const key = selectionKeyForMcpTool(source, tool);
+      const direct = expandLegacyDirect(legacyScopeEntries, value.direct, tool.name);
+      onChange({
+        ...value,
+        direct: next ? [...new Set([...direct, key])] : direct.filter((k) => k !== key),
+      });
       return;
     }
     const serviceKeys = gatewayKeysForService(gatewaySource.serviceName);
@@ -418,7 +472,15 @@ export function ToolboxPicker({
   ) => {
     const gatewaySource = parseGatewaySource(source);
     if (!gatewaySource) {
-      toggleAll("direct", tools.map((t) => t.name));
+      // Scope the bulk action to THIS server's keys. `toggleAll` compared the
+      // whole `direct` length against one server's tool count, so "Select all"
+      // on a second server could clear the first server's picks.
+      const groupKeys = tools.map((t) => selectionKeyForMcpTool(source, t));
+      let direct: string[] = value.direct;
+      for (const t of tools) direct = expandLegacyDirect(legacyScopeEntries, direct, t.name);
+      const groupKeySet = new Set(groupKeys);
+      const rest = direct.filter((k) => !groupKeySet.has(k));
+      onChange({ ...value, direct: next ? [...rest, ...groupKeys] : rest });
       return;
     }
     const groupKeys = tools.map((t) => t.slug);
@@ -509,7 +571,9 @@ export function ToolboxPicker({
     }
   };
   const agentNeedsReason = (agentOption: AgentLight) =>
-    !!delegatedAgents && agentOption.ownerUserId !== delegatedAgents.currentUserId;
+    // The caller-supplied id and Claw rows may each use either id form
+    // (canonical Claw id or raw Spaces id) — accept either as "mine".
+    !!delegatedAgents && !isCurrentUser(agentOption.ownerUserId) && agentOption.ownerUserId !== delegatedAgents.currentUserId;
 
   const requestDelegationReason = (agentsToAdd: AgentLight[]) => {
     const firstAgent = agentsToAdd[0];
@@ -595,9 +659,28 @@ export function ToolboxPicker({
     searchQ ? toolNames.some((n) => toolMatchesSearch(n)) : expandedSections.has(key);
   const sectionVisible = (toolNames: string[]) => !searchQ || toolNames.some((n) => toolMatchesSearch(n));
 
+  /**
+   * Which server a selected `direct` key came from. Two servers can publish the
+   * same tool name, so the tray has to name the server or the entries read as
+   * duplicates of each other.
+   */
+  const ownerLabelForDirectKey = (key: string): string | undefined => {
+    for (const [source, tools] of mcpEntries) {
+      if (tools.some((t) => selectionKeyForMcpTool(source, t) === key)) return formatServerLabel(source);
+    }
+    // A legacy bare name genuinely spans every server publishing it.
+    const owners = mcpEntries
+      .filter(([, tools]) => tools.some((t) => t.name === key))
+      .map(([source]) => formatServerLabel(source));
+    if (owners.length > 1) return `${owners.length} servers`;
+    return owners[0];
+  };
+
   type SelectionCat = "subagents" | "callableAgents" | "integrations" | "builtin";
   const selectionItems: Array<{
     label: string;
+    /** Where it comes from — server or group. Disambiguates same-named tools. */
+    owner?: string | undefined;
     key: string;
     cat: SelectionCat;
     riskLevel: "read" | "write" | "destructive" | undefined;
@@ -632,14 +715,15 @@ export function ToolboxPicker({
     // value.direct holds every selected MCP-integration tool (read + write).
     ...selectedDirectKeys.map((key) => {
       const info = toolInfoMap.get(key);
+      const owner = ownerLabelForDirectKey(key);
       return {
-        label: humanizeToolName(info?.name ?? key), key: `d-${key}`, cat: "integrations" as const,
+        label: humanizeToolName(info?.name ?? key, owner), owner, key: `d-${key}`, cat: "integrations" as const,
         riskLevel: info?.riskLevel ?? ("write" as const), onRemove: () => removeDirectSelection(key),
       };
     }),
     ...(availableTools?.customGroups.flatMap((g) =>
       g.tools.filter((t) => value.custom.includes(t.slug)).map((t) => ({
-        label: humanizeToolName(t.name), key: `c-${t.slug}`, cat: "builtin" as const, riskLevel: (toolInfoMap.get(t.slug) ?? toolInfoMap.get(t.name))?.riskLevel ?? ("write" as const), onRemove: () => toggle("custom", t.slug),
+        label: humanizeToolName(t.name), owner: customLabel(g.source), key: `c-${t.slug}`, cat: "builtin" as const, riskLevel: (toolInfoMap.get(t.slug) ?? toolInfoMap.get(t.name))?.riskLevel ?? ("write" as const), onRemove: () => toggle("custom", t.slug),
       }))
     ) ?? []),
   ];
@@ -815,7 +899,6 @@ export function ToolboxPicker({
             </div>
           ) : suggestion ? (() => {
             const newSubagents = (suggestion.subagents ?? []).filter((n) => !value.subagents.includes(n));
-            const newDirect: string[] = [];
             const newIntegrationTools: string[] = [];
             const newCustom: string[] = [];
             if (availableTools) {
@@ -824,19 +907,16 @@ export function ToolboxPicker({
                 for (const n of sugg.readTools ?? []) suggestedNames.add(n);
                 for (const n of sugg.writeTools ?? []) suggestedNames.add(n);
               }
-              const writeToolNameSet = new Set(availableTools.writeTools.map((t) => t.name));
-              for (const t of availableTools.writeTools) if (suggestedNames.has(t.name) && !value.direct.includes(t.name)) newDirect.push(t.name);
-              for (const [source, tools] of Object.entries(availableTools.serverTools))
+              for (const [source, tools] of mcpEntries)
                 for (const t of tools) {
-                  if (writeToolNameSet.has(t.name)) continue;
-                  const selectionKey = parseGatewaySource(source) ? t.slug : t.name;
-                  if (suggestedNames.has(t.name) && !value.direct.includes(selectionKey) && !newIntegrationTools.includes(selectionKey)) newIntegrationTools.push(selectionKey);
+                  const selectionKey = selectionKeyForMcpTool(source, t);
+                  if (suggestedNames.has(t.name) && !isMcpToolSelected(source, t) && !newIntegrationTools.includes(selectionKey)) newIntegrationTools.push(selectionKey);
                 }
               for (const g of availableTools.customGroups)
                 for (const t of g.tools) if (suggestedNames.has(t.name) && !value.custom.includes(t.slug)) newCustom.push(t.slug);
             }
             const newIntegrationsTotal = newIntegrationTools.length + newCustom.length;
-            const total = newSubagents.length + newDirect.length + newIntegrationsTotal;
+            const total = newSubagents.length + newIntegrationsTotal;
             if (total === 0) return <p className="text-[12px] text-[#7c3aed] dark:text-[#a78bfa]">Already covered — nothing new to add.</p>;
             return (
               <div className="flex flex-col gap-2.5">
@@ -848,15 +928,6 @@ export function ToolboxPicker({
                       <span className="flex flex-wrap gap-1">
                         {newSubagents.slice(0, 4).map((n) => <span key={n} className="text-[11px] px-1.5 py-0.5 rounded-full bg-white dark:bg-[#1e1b4b]/40 border border-[#c4b5fd] dark:border-[#6d28d9]/40 text-[#5b21b6] dark:text-[#c4b5fd]">{n}</span>)}
                         {newSubagents.length > 4 && <span className="text-[11px] text-[#7c3aed] dark:text-[#a78bfa]">+{newSubagents.length - 4} more</span>}
-                      </span>
-                    </div>
-                  )}
-                  {newDirect.length > 0 && (
-                    <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
-                      <span className="text-[11px] font-medium text-[#7c3aed] dark:text-[#a78bfa]">Direct actions · {newDirect.length}</span>
-                      <span className="flex flex-wrap gap-1">
-                        {newDirect.slice(0, 4).map((n) => <span key={n} className="text-[11px] px-1.5 py-0.5 rounded-full bg-white dark:bg-[#1e1b4b]/40 border border-[#c4b5fd] dark:border-[#6d28d9]/40 text-[#5b21b6] dark:text-[#c4b5fd]">{humanizeToolName(n)}</span>)}
-                        {newDirect.length > 4 && <span className="text-[11px] text-[#7c3aed] dark:text-[#a78bfa]">+{newDirect.length - 4} more</span>}
                       </span>
                     </div>
                   )}
@@ -1276,7 +1347,7 @@ export function ToolboxPicker({
                         <span className="text-[11px] font-semibold uppercase tracking-[0.06em] text-xyne-fg-tertiary">{grp.label}</span>
                         <span className="text-[10px] tabular-nums text-xyne-fg-tertiary">{grp.items.length}</span>
                       </div>
-                      {grp.items.map(({ label, key, riskLevel, badge, status, onRemove }) => (
+                      {grp.items.map(({ label, owner, key, riskLevel, badge, status, onRemove }) => (
                         <div
                           key={key}
                           role="listitem"
@@ -1285,8 +1356,14 @@ export function ToolboxPicker({
                             status === "pending" ? "border-y border-dashed border-amber-200 bg-amber-50/60 dark:border-amber-500/30 dark:bg-amber-900/10" : ""
                           }`}
                         >
-                          <span className={`h-1.5 w-1.5 flex-shrink-0 rounded-full ${riskDotCls(riskLevel)}`} aria-hidden="true" />
-                          <span className="flex-1 min-w-0 truncate text-[12px] text-xyne-fg-primary">{label}</span>
+                          <span className={`mt-1 h-1.5 w-1.5 flex-shrink-0 self-start rounded-full ${riskDotCls(riskLevel)}`} aria-hidden="true" />
+                          <span className="flex-1 min-w-0">
+                            <span className="block truncate text-[12px] text-xyne-fg-primary">{label}</span>
+                            {/* Without the server, two rows named "Vespa search"
+                                are indistinguishable — the exact confusion the
+                                bare-name selection key used to cause. */}
+                            {owner && <span className="block truncate text-[10px] text-xyne-fg-tertiary">{owner}</span>}
+                          </span>
                           {badge && (
                             <AgentHeavyweightBadge compact />
                           )}
@@ -1328,10 +1405,27 @@ export function ToolboxPicker({
           {selectionItems.length > 0 && (
             <div className="sticky top-0 z-10 bg-xyne-surface pb-3 border-b border-xyne-border-subtle" aria-live="polite" aria-atomic="true">
               <div className="flex items-center justify-between gap-2 pt-1">
-                <span className="text-[12px] font-medium text-xyne-fg-secondary">{selectionItems.length} tool{selectionItems.length !== 1 ? "s" : ""} selected</span>
-                <button type="button" onClick={clearAll} className="text-[11px] text-xyne-fg-tertiary hover:text-red-500 dark:hover:text-red-400 transition-colors">Clear all</button>
+                <span className="text-[12px] font-medium text-xyne-fg-secondary">
+                  {selectionItems.length} tool{selectionItems.length !== 1 ? "s" : ""} selected
+                  {!compactTrayOpen && groupedSelection.length > 0 && (
+                    <span className="ml-1.5 font-normal text-xyne-fg-tertiary">
+                      {groupedSelection.map((g) => `${g.items.length} ${g.label.toLowerCase()}`).join(" · ")}
+                    </span>
+                  )}
+                </span>
+                <span className="flex shrink-0 items-center gap-2.5">
+                  <button
+                    type="button"
+                    onClick={() => setCompactTrayOpen((o) => !o)}
+                    aria-expanded={compactTrayOpen}
+                    className="text-[11px] text-xyne-fg-tertiary transition-colors hover:text-xyne-fg-primary"
+                  >
+                    {compactTrayOpen ? "Hide" : "Show"}
+                  </button>
+                  <button type="button" onClick={clearAll} className="text-[11px] text-xyne-fg-tertiary hover:text-red-500 dark:hover:text-red-400 transition-colors">Clear all</button>
+                </span>
               </div>
-              <div className="flex flex-col gap-2 mt-1.5" role="list" aria-label="Selected tools">
+              <div className={`flex-col gap-2 mt-1.5 ${compactTrayOpen ? "flex" : "hidden"}`} role="list" aria-label="Selected tools">
                 {groupedSelection.map((grp) => (
                   <div key={grp.cat}>
                     <div className="flex items-center gap-1.5 mb-1">
@@ -1340,11 +1434,17 @@ export function ToolboxPicker({
                       <span className="text-[10px] tabular-nums text-xyne-fg-tertiary">{grp.items.length}</span>
                     </div>
                     <div className="flex flex-wrap gap-1">
-                      {grp.items.map(({ label, key, riskLevel, badge, status, onRemove }) => (
+                      {grp.items.map(({ label, owner, key, riskLevel, badge, status, onRemove }) => (
                         <span
                           key={key}
                           role="listitem"
-                          title={status === "pending" ? `waiting for ${label}'s owner to approve` : undefined}
+                          title={
+                            status === "pending"
+                              ? `waiting for ${label}'s owner to approve`
+                              : owner
+                                ? `${label} · ${owner}`
+                                : undefined
+                          }
                           className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] ${
                             status === "pending"
                               ? "border-dashed border-amber-400 bg-amber-50 text-amber-800 dark:border-amber-500/70 dark:bg-amber-900/20 dark:text-amber-300"

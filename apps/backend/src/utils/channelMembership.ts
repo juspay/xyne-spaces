@@ -1,5 +1,6 @@
 import { Request } from 'express';
 import { Channel } from '@prisma/client';
+import { ChannelRole } from '@xyne/shared';
 import { ChannelRepository } from '@/database/repositories/channelRepository';
 import { ChannelParticipantRepository } from '@/database/repositories/channelParticipantRepository';
 
@@ -59,4 +60,19 @@ export function assertDeskOwner(
     return access;
   }
   return { ok: false, status: 403, error: denyMessage };
+}
+
+/**
+ * Desk-insights ACL shared by metrics, the topics feed and desk reports so the
+ * surfaces cannot drift: desk owner OR channel admin — NOT channel.createdBy.
+ */
+export async function isDeskOwnerOrChannelAdmin(
+  channelId: string,
+  userId: string | undefined,
+  preferenceOwnerUserId: string | null | undefined,
+): Promise<boolean> {
+  if (!userId) return false;
+  if (preferenceOwnerUserId && preferenceOwnerUserId === userId) return true;
+  const participant = await channelParticipantRepo.findParticipant(channelId, userId);
+  return participant?.role === ChannelRole.ADMIN;
 }

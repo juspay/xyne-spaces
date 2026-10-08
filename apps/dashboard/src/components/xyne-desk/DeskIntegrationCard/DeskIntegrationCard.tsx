@@ -10,6 +10,7 @@ import {
   clearChannelConnectedEmailCache,
 } from '../../../hooks/useChannelConnectedEmail';
 import { clearDeskContactsCache } from '../../../hooks/useDeskContacts';
+import { globalClickTracker } from '../../../services/Analytics/globalClickTracker';
 import { Dialog } from '../../ui/Dialog';
 import Button from '../../ui/Button';
 import { cn } from '../../../utils/classNames';
@@ -23,7 +24,12 @@ export const DeskIntegrationCard = ({
   channelId,
   canManage,
 }: DeskIntegrationCardProps): ReactElement | null => {
-  const { email: connectedEmail, isConnected, hasSource } = useChannelIntegrationInfo(channelId);
+  const {
+    email: connectedEmail,
+    isConnected,
+    hasSource,
+    sourceType,
+  } = useChannelIntegrationInfo(channelId);
   const [showDisconnectConfirm, setShowDisconnectConfirm] = useState(false);
   const [isDisconnecting, setIsDisconnecting] = useState(false);
   const [isReconnecting, setIsReconnecting] = useState(false);
@@ -32,13 +38,36 @@ export const DeskIntegrationCard = ({
 
   const handleDisconnect = async (): Promise<void> => {
     setIsDisconnecting(true);
+    // Outcome of confirm-disconnect: the click is intent, this is the result.
+    const startedAt = Date.now();
+    const disconnectDims = {
+      channelId,
+      provider: sourceType ?? 'unknown',
+      scope: 'channel',
+    };
     try {
       await disconnectDeskIntegration(channelId);
+      globalClickTracker.trackManualEvent(
+        'desk-integration',
+        'EMAIL_ACCOUNT_DISCONNECTED',
+        undefined,
+        { ...disconnectDims, latencyMs: Date.now() - startedAt },
+      );
       toast.success('Mailbox disconnected. Email history is preserved.');
       setShowDisconnectConfirm(false);
       clearChannelConnectedEmailCache(channelId);
       clearDeskContactsCache(channelId);
     } catch (err) {
+      globalClickTracker.trackManualEvent(
+        'desk-integration',
+        'EMAIL_ACCOUNT_DISCONNECT_FAILED',
+        undefined,
+        {
+          ...disconnectDims,
+          latencyMs: Date.now() - startedAt,
+          errorKind: err instanceof Error ? err.name : 'unknown',
+        },
+      );
       toast.error(err instanceof Error ? err.message : 'Failed to disconnect — please try again.');
     } finally {
       setIsDisconnecting(false);

@@ -25,6 +25,8 @@ interface ComposeEmailModalProps {
    */
   draftId?: string;
   initialTo?: string[] | undefined;
+  /** Analytics `source` for COMPOSER_OPENED — header · mailto · reopen_draft. */
+  trackSource?: string;
 }
 
 const COMPOSE_HEIGHT_KEY = 'support-compose-height-vh';
@@ -62,6 +64,7 @@ export const ComposeEmailModal = ({
   onDiscard,
   draftId,
   initialTo,
+  trackSource,
 }: ComposeEmailModalProps): ReactElement | null => {
   const channelIntegrationInfo = useChannelIntegrationInfo(channelId);
   const [internalMinimized, setInternalMinimized] = useState(false);
@@ -203,6 +206,7 @@ export const ComposeEmailModal = ({
             {...(initialTo ? { initialTo } : {})}
             {...(onDiscard ? { onDiscard } : {})}
             {...(draftId ? { composeDraftId: draftId } : {})}
+            {...(trackSource ? { trackSource } : {})}
           />
         </div>
       )}

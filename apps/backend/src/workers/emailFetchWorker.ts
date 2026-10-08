@@ -13,11 +13,12 @@ import {
   type EmailFetchQueueJobData,
   type CursorCatchupJobData,
 } from '@/queues/emailFetchQueue';
-import { runAsServiceActor } from '@/database/tenant/context';
-import { socialMediaService } from '@/integrations/social-media/socialMediaService';
+import { catchUpEmailSource, refetchEmailSource, syncSocialMediaSources } from '@/bypassAcl/emailFetchServices';
 import { getHttpStatus } from '@/services/googleService';
-import { catchUpFromCursor } from '@/integrations/adapters/google/refetch';
 import { seedSyncCursor } from '@/services/syncCursorRecovery';
+import { toGooglePlayErrorResponse } from '@/integrations/adapters/social-media/google-play/client';
+import { db } from '@/database/client';
+import { ExternalSourcePlatform } from '@/integrations/core/types';
 
 const externalSourceRepo = new ExternalSourceRepository();
 
@@ -42,6 +43,11 @@ class EmailFetchWorker {
       return this.processCursorCatchup(job as Bull.Job<CursorCatchupJobData>);
     });
 
+    // Call pulls sleep 31s between Ozonetel requests; a separate job name keeps them from queueing behind email refetches.
+    queue.process('ozonetel-refetch', 1, async (job) => {
+      return this.processJob(job as Bull.Job<EmailFetchJobData>);
+    });
+
     queue.on('failed', (job, err) => {
       const source = 'sourceId' in job.data ? job.data.sourceId : job.data.sourceIds.join(',');
       logger.error(
@@ -51,7 +57,7 @@ class EmailFetchWorker {
 
       if ('sourceIds' in job.data) {
         void this.notifySocialMediaFailure(job.data, err);
-      } else if (job.name === 'refetch') {
+      } else if (job.name === 'refetch' || job.name === 'ozonetel-refetch') {
         void this.notifyFailure(job.data as EmailFetchJobData, err);
       }
     });
@@ -90,11 +96,9 @@ class EmailFetchWorker {
       return;
     }
 
-    const adapter = adapterRegistry.getAdapter(source.name);
+    const adapter = adapterRegistry.getAdapter(source.sourceType);
     try {
-      const result = await runAsServiceActor('email-fetch-worker', workspaceId, () =>
-        catchUpFromCursor(source, adapter, cursor),
-      );
+      const result = await catchUpEmailSource(workspaceId, source, adapter, cursor);
 
       logger.info(
         `[EMAIL-FETCH-WORKER] Catchup done — source ${source.name}: processed=${result.processed} new=${result.newTickets} skipped=${result.skipped} errors=${result.errors?.length ?? 0}`,
@@ -139,7 +143,7 @@ class EmailFetchWorker {
       return;
     }
 
-    const adapter = adapterRegistry.getAdapter(source.name);
+    const adapter = adapterRegistry.getAdapter(source.sourceType);
     if (!adapter.refetch) {
       logger.warn(
         `[EMAIL-FETCH-WORKER] Adapter ${source.name} does not support fetch — skipping`,
@@ -160,9 +164,7 @@ class EmailFetchWorker {
     try {
       // Background job → open a tenant scope from the job's workspaceId so ingested
       // emails/drafts/assignments get workspaceId stamped instead of leaking NULL.
-      result = await runAsServiceActor('email-fetch-worker', job.data.workspaceId,
-        () => adapter.refetch!(source, options),
-      );
+      result = await refetchEmailSource(job.data.workspaceId, adapter, source, options);
     } catch (error) {
       if (job.data.isDlMemberSync && this.isFinalAttempt(job)) {
         await this.cleanupDlMemberSyncSource(sourceRepo, sourceId);
@@ -174,7 +176,7 @@ class EmailFetchWorker {
       `[EMAIL-FETCH-WORKER] Job ${job.id} done — processed=${result.processed} new=${result.newTickets} skipped=${result.skipped} errors=${result.errors?.length ?? 0}`,
     );
 
-    await this.notifySuccess(job.data, result);
+    await this.notifySuccess(job.data, result, source.sourceType === 'ozonetel' ? 'call' : 'email');
 
     if (job.data.isDlMemberSync) {
       await this.cleanupDlMemberSyncSource(sourceRepo, sourceId);
@@ -184,28 +186,19 @@ class EmailFetchWorker {
   private async processSocialMediaJob(
     job: Bull.Job<SocialMediaFetchJobData>,
   ): Promise<void> {
-    const { sourceIds, channelId, workspaceId } = job.data;
+    const { sourceIds, channelId, workspaceId, startDate, endDate } = job.data;
+    const backfill =
+      startDate && endDate
+        ? { startDate: new Date(startDate), endDate: new Date(endDate) }
+        : undefined;
     logger.info(
-      `[EMAIL-FETCH-WORKER] Processing Google Play job ${job.id} — channel ${channelId}`,
+      `[EMAIL-FETCH-WORKER] Processing review sync job ${job.id} — channel ${channelId}`,
     );
 
-    const synced = await runAsServiceActor(
-      'social-media-fetch-worker',
-      workspaceId,
-      async () => {
-        let newInteractionCount = 0;
-        for (const sourceId of sourceIds) {
-          const result = await socialMediaService.syncSource(sourceId, {
-            ignoreSyncCursor: true,
-          });
-          newInteractionCount += result.synced;
-        }
-        return newInteractionCount;
-      },
-    );
+    const synced = await syncSocialMediaSources(workspaceId, sourceIds, backfill);
 
     logger.info(
-      `[EMAIL-FETCH-WORKER] Google Play job ${job.id} done — new=${synced}`,
+      `[EMAIL-FETCH-WORKER] Review sync job ${job.id} done — new=${synced}`,
     );
     await this.notifySocialMediaSuccess(job.data, synced);
   }
@@ -232,26 +225,48 @@ class EmailFetchWorker {
 
   private async notifySuccess(
     data: EmailFetchJobData,
-    result: { processed: number; newTickets: number; skipped: number; errors?: string[] },
+    result: { processed: number; newTickets: number; skipped: number; errors?: string[]; partial?: boolean },
+    noun: 'email' | 'call' = 'email',
   ): Promise<void> {
     try {
       const newCount = result.newTickets;
       const skipped = result.skipped;
       const isMemberSync = data.isDlMemberSync;
+      const errors = result.errors ?? [];
+      const nothingLanded = newCount === 0 && skipped === 0 && errors.length > 0;
+      // A failed Ozonetel request drops a whole day of calls, so the user must not read "up to date".
+      const failedCount = noun === 'call' ? errors.length : 0;
+      const failedNote = failedCount > 0
+        ? ` ${failedCount} failed, so some calls may be missing. First error: ${errors[0]}`
+        : '';
       const title = isMemberSync
         ? (newCount > 0
           ? `Synced ${newCount} older ${newCount === 1 ? 'email' : 'emails'} from DL member`
           : 'No older emails found to sync')
-        : (newCount > 0
-          ? `Fetched ${newCount} new ${newCount === 1 ? 'email' : 'emails'}`
-          : 'Inbox is up to date');
+        : failedCount > 0 && newCount === 0
+          ? 'Call fetch finished with errors'
+        : nothingLanded
+          ? 'Fetch completed but imported nothing — check the source configuration'
+          : result.partial
+            ? (newCount > 0
+              ? `Partially fetched ${newCount} new ${newCount === 1 ? noun : `${noun}s`} — rerun Fetch to continue`
+              : 'Partially fetched — rerun Fetch to continue')
+            : (newCount > 0
+              ? `Fetched ${newCount} new ${newCount === 1 ? noun : `${noun}s`}`
+              : noun === 'call' ? 'Calls are up to date' : 'Inbox is up to date');
       const message = isMemberSync
         ? (newCount > 0
           ? `${newCount} new, ${skipped} already existed.`
           : `All ${skipped} emails were already in the desk.`)
-        : (newCount > 0
-          ? `${newCount} new, ${skipped} already imported.`
-          : `${skipped} emails were already imported.`);
+        : failedCount > 0
+          ? `${newCount} new, ${skipped} already imported.${failedNote}`
+        : nothingLanded
+          // The first error carries the offending field path, which is what an
+          // operator needs — a count alone sends them to the logs.
+          ? `${errors.length} ${errors.length === 1 ? 'problem' : 'problems'}: ${errors[0]}`
+          : (newCount > 0
+            ? `${newCount} new, ${skipped} already imported.${errors.length > 0 ? ` ${errors.length} skipped with errors.` : ''}`
+            : `${skipped} ${noun}s were already imported.${errors.length > 0 ? ` ${errors.length} skipped with errors.` : ''}`);
 
       await notificationService.sendNotification(
         data.requesterUserId,
@@ -324,20 +339,32 @@ class EmailFetchWorker {
     }
   }
 
+  private async isFacebookFetch(data: SocialMediaFetchJobData): Promise<boolean> {
+    const facebookSources = await db.externalSource.count({
+      where: { id: { in: data.sourceIds }, sourceType: ExternalSourcePlatform.FACEBOOK },
+    });
+    return facebookSources > 0;
+  }
+
   private async notifySocialMediaSuccess(
     data: SocialMediaFetchJobData,
     synced: number,
   ): Promise<void> {
     try {
+      // This job also serves Facebook desks, which hold messages, comments and mentions.
+      const isFacebook = await this.isFacebookFetch(data);
+      const item = isFacebook ? 'Facebook item' : 'review interaction';
       await notificationService.sendNotification(
         data.requesterUserId,
         NotificationType.EMAIL_FETCH_COMPLETED,
         synced > 0
-          ? `Fetched ${synced} new Google Play interaction${synced === 1 ? '' : 's'}`
-          : 'Google Play reviews are up to date',
+          ? `Fetched ${synced} new ${item}${synced === 1 ? '' : 's'}`
+          : isFacebook
+            ? 'Facebook desk is up to date'
+            : 'Reviews are up to date',
         synced > 0
-          ? `${synced} new review interaction${synced === 1 ? '' : 's'} added to the desk.`
-          : 'No new review interactions were found.',
+          ? `${synced} new ${item}${synced === 1 ? '' : 's'} added to the desk.`
+          : `No new ${item}s were found.`,
         {
           channelId: data.channelId,
           sourceCount: data.sourceIds.length,
@@ -346,7 +373,7 @@ class EmailFetchWorker {
         `/${data.workspaceId}/support/${data.channelId}`,
       );
     } catch (error) {
-      logger.error('[EMAIL-FETCH-WORKER] Failed to publish Google Play completion notification', {
+      logger.error('[EMAIL-FETCH-WORKER] Failed to publish review sync completion notification', {
         error,
       });
     }
@@ -360,8 +387,8 @@ class EmailFetchWorker {
       await notificationService.sendNotification(
         data.requesterUserId,
         NotificationType.EMAIL_FETCH_FAILED,
-        'Google Play review fetch failed',
-        error.message.substring(0, 200),
+        (await this.isFacebookFetch(data)) ? 'Facebook fetch failed' : 'Review fetch failed',
+        (toGooglePlayErrorResponse(error)?.error ?? error.message).substring(0, 400),
         {
           channelId: data.channelId,
           sourceCount: data.sourceIds.length,
@@ -369,7 +396,7 @@ class EmailFetchWorker {
         `/${data.workspaceId}/support/${data.channelId}`,
       );
     } catch (notificationError) {
-      logger.error('[EMAIL-FETCH-WORKER] Failed to publish Google Play failure notification', {
+      logger.error('[EMAIL-FETCH-WORKER] Failed to publish review sync failure notification', {
         error: notificationError,
       });
     }

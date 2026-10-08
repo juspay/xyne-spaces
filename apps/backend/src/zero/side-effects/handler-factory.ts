@@ -11,6 +11,7 @@ import { TicketAssignmentsSideEffectHandler } from './tables/ticket-assignments-
 import { TicketStageEtaSideEffectHandler } from './tables/ticket-stage-eta-handler';
 import { CanvasSideEffectHandler } from './tables/canvas-handler';
 import { CanvasParticipantsSideEffectHandler } from './tables/canvas-participants-handler';
+import { ViewAccessSideEffectHandler } from './tables/view-access-handler';
 import { UserGroupMappingsSideEffectHandler } from './tables/user-group-mappings-handler';
 import { ReactionsSideEffectHandler } from './tables/reactions-handler';
 import { DelayedMessagesSideEffectHandler } from './tables/delayed-messages-handler';
@@ -18,6 +19,7 @@ import { TicketTagsSideEffectHandler } from './tables/ticket-tags-handler';
 import { TicketTagMappingsSideEffectHandler } from './tables/ticket-tag-mappings-handler';
 import { ChannelsSideEffectHandler } from './tables/channels-handler';
 import { EmailReadsSideEffectHandler } from './tables/email-reads-handler';
+import { ConversationLabelMappingsSideEffectHandler } from './tables/conversation-label-mappings-handler';
 import { ChannelUserStatusSideEffectHandler } from './tables/channel-user-status-handler';
 import { ConversationParticipantsSideEffectHandler } from './tables/conversation-participants-handler';
 import { FormEntityValuesSideEffectHandler } from './tables/form-entity-values-handler';
@@ -43,6 +45,8 @@ export class SideEffectHandlerFactory {
         return new ChannelParticipantsSideEffectHandler(ctx);
       case 'canvas_participants':
         return new CanvasParticipantsSideEffectHandler(ctx);
+      case 'view_access':
+        return new ViewAccessSideEffectHandler(ctx);
       case 'user_group_mappings':
         return new UserGroupMappingsSideEffectHandler(ctx);
       case 'calls':
@@ -72,6 +76,8 @@ export class SideEffectHandlerFactory {
         return new ChannelsSideEffectHandler(ctx);
       case 'email_reads':
         return new EmailReadsSideEffectHandler(ctx);
+      case 'conversation_label_mappings':
+        return new ConversationLabelMappingsSideEffectHandler(ctx);
       case 'channel_user_status':
         return new ChannelUserStatusSideEffectHandler(ctx);
       case 'conversation_participants':

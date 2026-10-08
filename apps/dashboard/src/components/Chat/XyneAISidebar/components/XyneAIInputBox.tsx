@@ -1,3 +1,4 @@
+import { aiSendButtonTrackingMetadata } from '../../../../services/Analytics/xyneAiTracking';
 import { logger, Event as LogEvent } from '../../../../utils/logger';
 import React, { type ReactElement } from 'react';
 import {
@@ -35,6 +36,7 @@ import Placeholder from '@tiptap/extension-placeholder';
 import LinkExtension from '@tiptap/extension-link';
 import { LinkSyncPlugin } from '../../../ui/TipTapExtensions/LinkSyncPlugin';
 import { toast } from 'sonner';
+import { AudioLines } from 'lucide-react';
 import { VoiceInput } from '../../../ui/InputBox/VoiceInput';
 import type { VoiceInputHandle } from '../../../ui/InputBox/VoiceInput';
 import { StopIcon } from './StopIcon';
@@ -59,7 +61,12 @@ import { posthogService } from '../../../../services/Analytics/posthogService';
 import type { CollectionSummary } from '../../../../services/Knowledge/collectionService';
 import { useCachedQuery } from '../../../../hooks/useCachedQuery';
 import { queries } from '../../../../zero/queries';
-import type { ThreadInfo, CanvasInfo, SelectionInfo } from '../../../../machines/xyneAIMachine';
+import type {
+  ThreadInfo,
+  CanvasInfo,
+  SelectionInfo,
+  WorkflowInfo,
+} from '../../../../machines/xyneAIMachine';
 import type { VisibleChannel } from '../../../../machines/stateMachine';
 import { useNavigate } from 'react-router-dom';
 import { xyneAIActor } from '../../../../machines/xyneAIMachine';
@@ -78,6 +85,7 @@ import type {
 } from './ContextPickerPanel';
 import type { Channel } from '@xyne/shared';
 import { ChannelVisibility } from '@xyne/shared';
+import { searchMentionableChannels } from '../../../../hooks/useChannels';
 import type { DisplaySearchResult } from '../../../../types/search';
 import { TabType } from '../../ChatDirectory/ChannelCommandMenu.types';
 
@@ -114,10 +122,14 @@ export interface XyneAIInputBoxProps {
   showChannelTag?: boolean;
   threadInfo?: ThreadInfo | null | undefined;
   canvasInfo?: CanvasInfo | null | undefined;
+  workflowInfo?: WorkflowInfo | null | undefined;
+  onRemoveWorkflowInfo?: ((e: React.MouseEvent) => void) | undefined;
   selectionInfos?: SelectionInfo[];
   inputValue: string;
   onInputChange: (value: string) => void;
-  onSubmit: () => void;
+  /** `trigger` says which affordance sent it; the button has its own click row. */
+  onSubmit: (trigger?: 'button' | 'enter') => void;
+  onEnterVoiceMode?: () => void;
   onSelectedCollectionsChange?: (collectionIds: string[]) => void;
   onThreadInfoChange?: (threadInfo: ThreadInfo | null) => void;
   onSelectionInfosChange?: (selectionInfos: SelectionInfo[]) => void;
@@ -162,6 +174,8 @@ export interface XyneAIInputBoxProps {
   selectedAgentSlug?: string | null;
   agents?: AgentOption[];
   onSelectAgent?: (slug: string | null) => void;
+  isAuto?: boolean;
+  onSelectAuto?: () => void;
   /** Models the selected agent's LiteLLM key can serve. Empty ⇒ picker hides. */
   models?: ClawAgentModel[];
   /** The agent's configured model, shown against the default row. */
@@ -231,10 +245,13 @@ export const XyneAIInputBox = forwardRef<XyneAIInputBoxHandle, XyneAIInputBoxPro
       scopeType: _scopeType,
       threadInfo,
       canvasInfo,
+      workflowInfo,
+      onRemoveWorkflowInfo,
       selectionInfos = EMPTY_SELECTION_INFOS,
       inputValue,
       onInputChange,
       onSubmit,
+      onEnterVoiceMode,
       onSelectedCollectionsChange,
       onThreadInfoChange,
       onSelectionInfosChange,
@@ -279,6 +296,8 @@ export const XyneAIInputBox = forwardRef<XyneAIInputBoxHandle, XyneAIInputBoxPro
       selectedAgentSlug = null,
       agents = [],
       onSelectAgent,
+      isAuto = false,
+      onSelectAuto,
       models = [],
       defaultModel = null,
       selectedModel = null,
@@ -519,10 +538,15 @@ export const XyneAIInputBox = forwardRef<XyneAIInputBoxHandle, XyneAIInputBoxPro
       // CollectionItem has TWO ids:
       //   • `id`     — the row id (cuid). Claw-auth stores THIS in
       //                AgentCollection.fileId when the user picks a file in
-      //                the KB picker (see xyne-claw-auth/.../KnowledgeBasePicker.tsx).
-      //   • `fileId` — the stable UUID across versions. The dashboard's
-      //                fileScope / Vespa lookup uses this downstream.
-      // We need both: `rowId` for grant matching, `fileId` for downstream.
+      //                the KB picker (see xyne-claw-auth/.../KnowledgeBasePicker.tsx),
+      //                and it's the id attached_context 'file' items carry —
+      //                see toAttachedContext in ContextPickerPanel.tsx.
+      //   • `fileId` — the stable UUID across versions. Equals the Vespa docId
+      //                (see treeTypes.ts) and is used for content-fetch calls
+      //                like CitationDocsPanel's /collections/items/:fileId/download.
+      // We need both: `rowId` for grant matching + as the id fileScopes stores
+      // (so it can go straight into attached_context), `fileId` only for grant
+      // filtering below.
       const all = (currentFolderItems ?? [])
         .map(it => ({
           rowId: (it as { id?: string }).id ?? '',
@@ -530,18 +554,18 @@ export const XyneAIInputBox = forwardRef<XyneAIInputBoxHandle, XyneAIInputBoxPro
           name: (it as { name: string }).name,
         }))
         .filter(it => it.fileId && (!fileQuery || it.name.toLowerCase().includes(fileQuery)));
-      if (!hasAgentGating) return all.map(({ fileId, name }) => ({ fileId, name }));
+      if (!hasAgentGating) return all.map(({ rowId, name }) => ({ rowId, name }));
       // Whole-grant coverage of the current folder (or any ancestor) lets
       // every file pass through.
       if (folderCoveredByWholeGrant(currentFolderId)) {
-        return all.map(({ fileId, name }) => ({ fileId, name }));
+        return all.map(({ rowId, name }) => ({ rowId, name }));
       }
       const allowedRowIds = new Set(
         grantsForCurrentRoot.filter(g => g.fileId !== null).map(g => g.fileId as string),
       );
       return all
         .filter(it => allowedRowIds.has(it.rowId))
-        .map(({ fileId, name }) => ({ fileId, name }));
+        .map(({ rowId, name }) => ({ rowId, name }));
     }, [
       currentFolderItems,
       fileQuery,
@@ -601,12 +625,12 @@ export const XyneAIInputBox = forwardRef<XyneAIInputBoxHandle, XyneAIInputBoxPro
     // file, ensure its (root) collection is selected so the KB tool stays enabled
     // + the collection filter applies.
     const handleToggleFile = useCallback(
-      (file: { fileId: string; name: string }) => {
-        const isSelected = fileScopes.some(f => f.id === file.fileId);
+      (file: { rowId: string; name: string }) => {
+        const isSelected = fileScopes.some(f => f.id === file.rowId);
         onFileScopesChange?.(
           isSelected
-            ? fileScopes.filter(f => f.id !== file.fileId)
-            : [...fileScopes, { id: file.fileId, name: file.name }],
+            ? fileScopes.filter(f => f.id !== file.rowId)
+            : [...fileScopes, { id: file.rowId, name: file.name }],
         );
         if (!isSelected) {
           // Same rationale as handleCollectionSingleClick: explicit file pick is
@@ -1070,7 +1094,7 @@ export const XyneAIInputBox = forwardRef<XyneAIInputBoxHandle, XyneAIInputBoxPro
               trigger: 'keyboard',
               keyCombo: 'enter',
             });
-            onSubmit();
+            onSubmit('enter');
             return true;
           }
 
@@ -1168,18 +1192,15 @@ export const XyneAIInputBox = forwardRef<XyneAIInputBoxHandle, XyneAIInputBoxPro
       }
     }, [inputValue, editor]);
 
-    // Convert channels to MentionResult format for MentionSelector (exclude DMs), filtered by search query
+    // Convert ranked, mentionable channels to MentionResult format for MentionSelector
     const channelMentionItems: MentionResult[] = useMemo(() => {
-      const query = channelSearchQuery.toLowerCase();
-      return nonDMChannels
-        .filter(channel => !query || channel.name.toLowerCase().includes(query))
-        .map(channel => ({
-          id: channel.id,
-          name: channel.name,
-          type: 'channel' as const,
-          isPrivate: String(channel.visibility) === 'PRIVATE',
-          ...(channel.description && { description: channel.description }),
-        }));
+      return searchMentionableChannels(nonDMChannels, channelSearchQuery, 10).map(channel => ({
+        id: channel.id,
+        name: channel.name,
+        type: 'channel' as const,
+        isPrivate: String(channel.visibility) === 'PRIVATE',
+        ...(channel.description && { description: channel.description }),
+      }));
     }, [nonDMChannels, channelSearchQuery]);
 
     // Handle channel search from # mention trigger
@@ -1628,6 +1649,7 @@ export const XyneAIInputBox = forwardRef<XyneAIInputBoxHandle, XyneAIInputBoxPro
       canvases: selectedCanvases,
       transcripts: selectedTranscripts,
       recordings: selectedRecordings,
+      localFolders: [],
     });
 
     const handlePickerToggleChannel = (channel: Channel, displayName: string): void => {
@@ -1649,6 +1671,45 @@ export const XyneAIInputBox = forwardRef<XyneAIInputBoxHandle, XyneAIInputBoxPro
         ];
       }
       onContextSelectionsChange?.(next);
+    };
+
+    /**
+     * Fold a whole list of channels into the selection in one push.
+     *
+     * Not a loop over `handlePickerToggleChannel`: that reads `selectedChannels`
+     * from the render it was created in, so every iteration would start from the
+     * same state and the last write would win — attaching one channel out of N.
+     * Building the array once and pushing it once is the only correct shape while
+     * the selection lives above this component.
+     *
+     * The 5-channel cap is applied to the combined list, and a list that overruns
+     * it attaches what fits rather than failing whole — the button says "attach
+     * all 5 from this stream", so attaching four of them is the honest outcome.
+     */
+    const handlePickerAttachChannels = (
+      items: readonly { channel: Channel; displayName: string }[],
+    ): void => {
+      const next = currentSelections();
+      const have = new Set(selectedChannels.map(c => c.id));
+      const room = 5 - selectedChannels.length;
+      if (room <= 0) {
+        toast.error('Maximum 5 channels can be selected', { duration: 2000 });
+        return;
+      }
+      const additions = items
+        .filter(({ channel }) => !have.has(channel.id))
+        .slice(0, room)
+        .map(({ channel, displayName }) => ({
+          id: channel.id,
+          name: displayName,
+          isPrivate: channel.visibility === ChannelVisibility.PRIVATE,
+        }));
+      if (additions.length === 0) return;
+      next.channels = [...selectedChannels, ...additions];
+      onContextSelectionsChange?.(next);
+      if (additions.length < items.length) {
+        toast.error('Maximum 5 channels can be selected', { duration: 2000 });
+      }
     };
 
     const handlePickerToggleResult = (result: DisplaySearchResult, tab: TabType): void => {
@@ -1736,11 +1797,14 @@ export const XyneAIInputBox = forwardRef<XyneAIInputBoxHandle, XyneAIInputBoxPro
           showContextPicker={showContextPicker}
           onCloseContextPicker={closeContextPicker}
           onPickerToggleChannel={handlePickerToggleChannel}
+          onPickerAttachChannels={handlePickerAttachChannels}
           onPickerToggleResult={handlePickerToggleResult}
           threadInfo={activeThreadInfo}
           onThreadClick={handleThreadPillClick}
           onRemoveThread={handleRemoveThreadInfo}
           canvasInfo={activeCanvasInfo}
+          workflowInfo={workflowInfo ?? null}
+          onRemoveWorkflowInfo={onRemoveWorkflowInfo ?? ((): void => {})}
           onCanvasInfoClick={handleCanvasPillClick}
           onRemoveCanvasInfo={handleRemoveCanvasInfo}
           selectionInfos={activeSelectionInfos}
@@ -1804,7 +1868,7 @@ export const XyneAIInputBox = forwardRef<XyneAIInputBoxHandle, XyneAIInputBoxPro
               — same visual, one less render per focus change. */}
           <div
             className={`
-            overflow-hidden transition-all flex flex-col relative bg-clip-padding
+            overflow-hidden transition flex flex-col relative bg-clip-padding
             ${isMobile ? 'bg-background rounded-[26px] text-foreground shadow-sm' : 'bg-background rounded-2xl border border-chat-composer-border focus-within:border-chat-composer-border-active text-foreground shadow-none'}
           `}
           >
@@ -1885,7 +1949,7 @@ export const XyneAIInputBox = forwardRef<XyneAIInputBoxHandle, XyneAIInputBoxPro
                   >
                     <button
                       type='button'
-                      className={`flex items-center justify-center rounded hover:bg-accent transition-all duration-200 ease-in-out shrink-0 p-1.5`}
+                      className={`flex items-center justify-center rounded hover:bg-accent transition duration-200 ease-in-out shrink-0 p-1.5`}
                       aria-label='Add to conversation'
                       title='Add to conversation'
                       data-track-category='XyneAI'
@@ -1900,7 +1964,7 @@ export const XyneAIInputBox = forwardRef<XyneAIInputBoxHandle, XyneAIInputBoxPro
                   <button
                     type='button'
                     onClick={() => setShowContextPicker(prev => !prev)}
-                    className={`flex items-center justify-center rounded hover:bg-accent transition-all duration-200 ease-in-out shrink-0 p-1.5`}
+                    className={`flex items-center justify-center rounded hover:bg-accent transition duration-200 ease-in-out shrink-0 p-1.5`}
                     aria-label='Add context'
                     title={`Add context (${isMac ? '⌘⇧⌥' : 'Ctrl+Shift+Alt+'}/)`}
                     // Spared by the picker's outside-click handler, so this
@@ -1921,6 +1985,8 @@ export const XyneAIInputBox = forwardRef<XyneAIInputBoxHandle, XyneAIInputBoxPro
                         selectedAgentSlug={selectedAgentSlug}
                         agents={agents}
                         onSelect={onSelectAgent}
+                        auto={isAuto}
+                        {...(onSelectAuto ? { onSelectAuto } : {})}
                         compact={true}
                       />
                     </div>
@@ -1937,6 +2003,7 @@ export const XyneAIInputBox = forwardRef<XyneAIInputBoxHandle, XyneAIInputBoxPro
                         thinkingLevel={thinkingLevel}
                         onSelectThinking={onSelectThinking ?? (() => {})}
                         disabled={false}
+                        align='start'
                       />
                     </div>
                   )}
@@ -1950,8 +2017,22 @@ export const XyneAIInputBox = forwardRef<XyneAIInputBoxHandle, XyneAIInputBoxPro
                     disabled={isStreaming}
                     onStateChange={({ isRecording }) => setIsVoiceRecording(isRecording)}
                   />
+                  {onEnterVoiceMode && (
+                    <button
+                      type='button'
+                      onClick={onEnterVoiceMode}
+                      className='p-1.5 rounded transition-colors duration-200 ease-in-out hover:bg-accent text-muted-foreground'
+                      aria-label='Voice mode'
+                      title='Voice mode'
+                      disabled={isStreaming}
+                      data-track-category='CHAT_INPUT'
+                      data-track-name='ENTER_VOICE_MODE'
+                    >
+                      <AudioLines className='h-4 w-4' aria-hidden />
+                    </button>
+                  )}
                   <button
-                    onClick={isStreaming ? onAbort : onSubmit}
+                    onClick={isStreaming ? onAbort : () => onSubmit('button')}
                     data-ph-capture-attribute-track-id={
                       isStreaming ? 'abort_message' : 'submit_message'
                     }
@@ -1965,6 +2046,19 @@ export const XyneAIInputBox = forwardRef<XyneAIInputBoxHandle, XyneAIInputBoxPro
                     }`}
                     data-track-category='XyneAI'
                     data-track-name={isStreaming ? 'ABORT_MESSAGE' : 'SUBMIT_MESSAGE'}
+                    data-track-metadata={JSON.stringify(
+                      isStreaming
+                        ? { surface: 'panel' }
+                        : aiSendButtonTrackingMetadata({
+                            surface: 'panel',
+                            agentSlug: selectedAgentSlug,
+                            model: selectedModel,
+                            thinkingLevel,
+                            webSearchEnabled,
+                            deepResearchEnabled,
+                            createCanvasEnabled,
+                          }),
+                    )}
                   >
                     {isStreaming ? (
                       <StopIcon className='w-2.5 h-2.5' />
@@ -2047,10 +2141,10 @@ export const XyneAIInputBox = forwardRef<XyneAIInputBoxHandle, XyneAIInputBoxPro
                       );
                     })}
                     {currentFiles.map(file => {
-                      const isSelected = fileScopes.some(f => f.id === file.fileId);
+                      const isSelected = fileScopes.some(f => f.id === file.rowId);
                       return (
                         <button
-                          key={file.fileId}
+                          key={file.rowId}
                           type='button'
                           onClick={() => handleToggleFile(file)}
                           className={`w-full px-3 py-2 text-left text-sm flex items-center gap-2 hover:bg-accent ${
@@ -2058,7 +2152,7 @@ export const XyneAIInputBox = forwardRef<XyneAIInputBoxHandle, XyneAIInputBoxPro
                           }`}
                           data-track-category='XyneAI'
                           data-track-name='SELECT_FILE_SCOPE'
-                          data-track-metadata={JSON.stringify({ fileId: file.fileId })}
+                          data-track-metadata={JSON.stringify({ fileId: file.rowId })}
                         >
                           <FileText className='w-4 h-4 text-claw-ai-fg flex-shrink-0' />
                           <span className='flex-1 truncate'>{file.name}</span>

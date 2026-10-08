@@ -17,19 +17,28 @@ import { mutationSyncProcessor } from '../../mutation-sync/processor';
 import { collectMutationSyncPreviousValue } from '../../mutation-sync/config';
 import type { MutationSyncOperation } from '../../mutation-sync/types';
 import { wrapTransactionWithEncryption } from '../../encryption-interceptor';
+import {
+  collectZeroAuditOperation,
+  type AuditJobsAccumulator,
+  type AuditOperation,
+} from '../../audit';
+import { logger } from '@/utils/logger';
 
 /**
  * Wraps a Zero transaction with ACL checks and Vespa/side-effect job collection.
- * 
+ *
  * This creates a Proxy that intercepts the `mutate` property to apply ACL validation
  * before mutations execute. All other transaction properties (including methods that
  * access private fields like #schema and #serverSchema) are properly bound to the
  * original target to maintain correct `this` context for private field access.
- * 
+ *
  * @param tx - The Zero transaction to wrap
- * @param ctx - Query context with user information for ACL checks
+ * @param ctx - Query context with user information for ACL wrapping
  * @param vespaJobs - Accumulator for collecting Vespa indexing jobs
  * @param sideEffectJobs - Accumulator for collecting side effect jobs
+ * @param mutatorName - Name of the mutator being executed (for encryption context)
+ * @param auditJobs - Per-save audit accumulator; every audited table write of the
+ *   mutator execution is diffed into it and flushed as audit log rows by the caller
  * @returns Proxied transaction with ACL and job collection applied
  */
 export function wrapTransactionWithACL(
@@ -38,6 +47,7 @@ export function wrapTransactionWithACL(
   vespaJobs: VespaJobsAccumulator,
   sideEffectJobs: SideEffectJobsAccumulator,
   mutatorName?: string,
+  auditJobs?: AuditJobsAccumulator,
 ): Transaction<Schema> {
   if (!ctx) {
     throw new Error('QueryContext is required for ACL wrapping');
@@ -51,7 +61,7 @@ export function wrapTransactionWithACL(
   return new Proxy(storageTx, {
     get(target, prop: string | symbol, receiver) {
       if (prop === 'mutate') {
-        return wrapMutateWithACL(target.mutate, ctx, storageTx, vespaJobs, sideEffectJobs);
+        return wrapMutateWithACL(target.mutate, ctx, storageTx, vespaJobs, sideEffectJobs, auditJobs);
       }
       const value = Reflect.get(target, prop, receiver);
       if (typeof value === 'function') {
@@ -65,7 +75,7 @@ export function wrapTransactionWithACL(
 
 /**
  * Wraps the tx.mutate object (SchemaCRUD) to intercept table operations
- * for both ACL checks and Vespa job collection
+ * for ACL checks, Vespa job collection and audit trail collection
  */
 function wrapMutateWithACL(
   mutate: Transaction<Schema>['mutate'],
@@ -73,6 +83,7 @@ function wrapMutateWithACL(
   tx: Transaction<Schema>,
   vespaJobs: VespaJobsAccumulator,
   sideEffectJobs: SideEffectJobsAccumulator,
+  auditJobs?: AuditJobsAccumulator,
 ): Transaction<Schema>['mutate'] {
   return new Proxy(mutate, {
     get(target, tableName: string | symbol, receiver) {
@@ -107,12 +118,36 @@ function wrapMutateWithACL(
 
             const vespaOperation = operation as VespaOperation;
             const sideEffectOperation = operation as SideEffectOperation;
+            const auditOperation = operation as AuditOperation;
             const stagedSideEffectJobs = createSideEffectJobsAccumulator();
 
             // Capture side-effect previous state before the write, but only
             // publish the job if the write succeeds.
             if (['insert', 'update', 'upsert', 'delete'].includes(sideEffectOperation)) {
               await collectSideEffectJobs(tableName as TableName, sideEffectOperation, args, tx, stagedSideEffectJobs);
+            }
+            
+            const stagedAuditJobs: AuditJobsAccumulator | undefined = auditJobs
+              ? { jobs: [], resolution: auditJobs.resolution }
+              : undefined;
+            if (auditJobs && stagedAuditJobs && ['insert', 'update', 'upsert', 'delete'].includes(auditOperation)) {
+              try {
+                await collectZeroAuditOperation({
+                  table: tableName,
+                  operation: auditOperation,
+                  args,
+                  tx,
+                  accumulator: auditJobs,
+                  staging: stagedAuditJobs,
+                });
+              } catch (error) {
+                logger.error('[AuditCollector] failed to collect audit job', {
+                  table: tableName,
+                  operation,
+                  mutatorName: ctx.userID,
+                  error: error instanceof Error ? error.message : error,
+                });
+              }
             }
 
             previousValue = await collectMutationSyncPreviousValue(
@@ -130,6 +165,9 @@ function wrapMutateWithACL(
               collectVespaJobs(tableName as TableName, vespaOperation, args, tx, ctx, vespaJobs);
             }
             sideEffectJobs.push(...stagedSideEffectJobs);
+            if (auditJobs && stagedAuditJobs) {
+              auditJobs.jobs.push(...stagedAuditJobs.jobs);
+            }
 
             await mutationSyncProcessor(
               tableName as TableName,

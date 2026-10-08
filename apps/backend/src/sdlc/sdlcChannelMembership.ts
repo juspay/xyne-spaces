@@ -3,7 +3,7 @@ import {
   SDLC_MEMBERSHIP_RELATION,
   SDLC_TRACK_MEMBERSHIP_RELATION,
 } from '@xyne/shared/sdlc';
-
+import { AppError } from '@/middleware/errorHandler';
 
 type Db = PrismaClient | Prisma.TransactionClient;
 
@@ -90,6 +90,20 @@ export async function findSdlcMembershipForActor(
   return membership?.channelId && role ? { channelId: membership.channelId, role } : null;
 }
 
+export async function repoIdsForChannel(db: Db, channelId: string): Promise<string[]> {
+  const edges = await db.sdlcEntityLink.findMany({
+    where: {
+      channelId,
+      sourceType: 'CHANNEL',
+      targetType: 'REPOSITORY',
+      relationType: SDLC_MEMBERSHIP_RELATION,
+    },
+    orderBy: { createdAt: 'asc' },
+    select: { targetId: true },
+  });
+  return [...new Set(edges.map((edge) => edge.targetId))];
+}
+
 /**
  * The tracks of a hub. Tracks carry no scope column; the CHANNEL -> TRACK edge is
  * what places one, so the id list comes from the link table.
@@ -139,4 +153,22 @@ export async function isCanvasInChannel(
     select: { artifactId: true },
   });
   return Boolean(artifact);
+}
+
+/** Reads are open to the workspace on a public hub; writes still require membership. */
+export async function requireSdlcHubReader(
+  db: Db,
+  actor: { workspaceId: string; userId: string },
+  channelId: string
+): Promise<void> {
+  const channel = await db.channel.findFirst({
+    where: {
+      id: channelId,
+      workspaceId: actor.workspaceId,
+      type: 'SDLC',
+      OR: [{ visibility: 'PUBLIC' }, { participants: { some: { userId: actor.userId } } }],
+    },
+    select: { id: true },
+  });
+  if (!channel) throw new AppError('SDLC hub not found', 404);
 }

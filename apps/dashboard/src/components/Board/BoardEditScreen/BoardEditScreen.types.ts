@@ -37,7 +37,8 @@ export interface TicketField {
     | 'boolean'
     | 'doc'
     | 'tags'
-    | 'ticketType';
+    | 'ticketType'
+    | 'ticket';
   label: string;
   required: boolean;
   order: number;
@@ -63,6 +64,8 @@ export const mapFromFormFieldType = (fieldType: FormFieldType): TicketField['typ
       return 'boolean';
     case FormFieldType.DOC:
       return 'doc';
+    case FormFieldType.TICKET:
+      return 'ticket';
     default:
       return 'text';
   }
@@ -85,6 +88,8 @@ export const mapToFormFieldType = (type: TicketField['type']): FormFieldType => 
       return FormFieldType.BOOLEAN;
     case 'doc':
       return FormFieldType.DOC;
+    case 'ticket':
+      return FormFieldType.TICKET;
     default:
       return FormFieldType.STRING;
   }

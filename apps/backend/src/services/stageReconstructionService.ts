@@ -1,19 +1,17 @@
+import { applyReconstructedStateTx } from '@/bypassAcl/transactions/stageReconstructionService';
 import { Prisma, PrismaClient } from '@prisma/client';
 import { ActivityType, ExternalEntityType, MessageType, TicketStatusV2 } from '@xyne/shared';
 import { randomUUID } from 'crypto';
 import { DatabaseClient } from '@/database/client';
 import { withWorkspaceScope } from '@/database/tenant/context';
-import { syncConversationTicketMdFromPrismaTicket } from '@/utils/ticketMd';
-import { calculateETADeadline } from '@/utils/etaCalculation';
 import { logger } from '@/utils/logger';
-import { syncStageOverdueFlag } from '@/services/tickets/syncStageOverdueFlag';
 
-type PrismaTransaction = Omit<
+export type PrismaTransaction = Omit<
   PrismaClient,
   '$connect' | '$disconnect' | '$on' | '$transaction' | '$use' | '$extends'
 >;
 
-type DbClient = PrismaClient | PrismaTransaction;
+export type DbClient = PrismaClient | PrismaTransaction;
 
 export type StageReconstructionConfidence = 'high' | 'medium' | 'low' | 'manual_review';
 
@@ -50,7 +48,7 @@ export interface StageReconstructionResult {
   changes: StageReconstructionChange[];
 }
 
-interface TicketSnapshot {
+export interface TicketSnapshot {
   id: string;
   xyneId: string;
   workspaceId: string;
@@ -123,7 +121,7 @@ const BATCH_SIZE = 10;
 
 export class StageReconstructionService {
   constructor(
-    private readonly db: DbClient = DatabaseClient.getInstance(),
+    readonly db: DbClient = DatabaseClient.getInstance(),
   ) {}
 
   async *reconstruct(input: StageReconstructionInput): AsyncGenerator<StageReconstructionStreamEvent> {
@@ -413,119 +411,7 @@ export class StageReconstructionService {
     reconstructedStatusV2: TicketStatusV2,
     actorUserId: string,
   ): Promise<void> {
-    await this.runInTransaction(async (tx) => {
-      const now = new Date();
-      const stageChanged = ticket.stageName !== reconstructedStageName;
-      const statusChanged = ticket.statusV2 !== reconstructedStatusV2;
-
-      const updatedTicket = await tx.ticket.update({
-        where: { id: ticket.id },
-        data: {
-          stageName: reconstructedStageName,
-          statusV2: reconstructedStatusV2,
-          ...(statusChanged ? { statusUpdatedAt: now } : {}),
-          updatedBy: actorUserId,
-          updatedAt: now,
-        },
-      });
-
-      await syncConversationTicketMdFromPrismaTicket(tx, updatedTicket);
-
-      if (stageChanged) {
-        const targetStage = await tx.stage.findFirst({
-          where: { boardId: ticket.boardId, name: reconstructedStageName },
-          select: { id: true, eta: true },
-        });
-
-        if (targetStage) {
-          await tx.ticketStageEta.updateMany({
-            where: {
-              ticketId: ticket.id,
-              stageLeftAt: null,
-            },
-            data: {
-              stageLeftAt: now,
-              updatedAt: now,
-              updatedBy: actorUserId,
-            },
-          });
-
-          const existingEntry = await tx.ticketStageEta.findFirst({
-            where: { ticketId: ticket.id, stageId: targetStage.id },
-          });
-
-          if (existingEntry && targetStage.eta !== null && targetStage.eta > 0) {
-            await tx.ticketStageEta.update({
-              where: { id: existingEntry.id },
-              data: {
-                stageEnteredAt: now,
-                stageLeftAt: null,
-                stageEta: calculateETADeadline(now, targetStage.eta),
-                updatedAt: now,
-                updatedBy: actorUserId,
-              },
-            });
-          } else if (!existingEntry && targetStage.eta !== null && targetStage.eta > 0) {
-            await tx.ticketStageEta.create({
-              data: {
-                workspaceId: ticket.workspaceId,
-                ticketId: ticket.id,
-                stageId: targetStage.id,
-                stageEnteredAt: now,
-                stageLeftAt: null,
-                stageEta: calculateETADeadline(now, targetStage.eta),
-                updatedBy: actorUserId,
-              },
-            });
-          }
-        }
-
-        await syncStageOverdueFlag(tx, ticket.id, now);
-
-        await tx.ticketActivity.create({
-          data: {
-            workspaceId: ticket.workspaceId,
-            ticketId: ticket.id,
-            updatedBy: actorUserId,
-            timestamp: now,
-            activityType: ActivityType.STAGE_NAME,
-            value: {
-              field: 'stageName',
-              oldValue: ticket.stageName,
-              newValue: reconstructedStageName,
-              source: 'STAGE_RECONSTRUCTION',
-            } as Prisma.InputJsonValue,
-          },
-        });
-      }
-
-      if (statusChanged) {
-        await tx.ticketActivity.create({
-          data: {
-            workspaceId: ticket.workspaceId,
-            ticketId: ticket.id,
-            updatedBy: actorUserId,
-            timestamp: now,
-            activityType: ActivityType.STATUS,
-            value: {
-              field: 'statusV2',
-              oldValue: ticket.statusV2,
-              newValue: reconstructedStatusV2,
-              source: 'STAGE_RECONSTRUCTION',
-            } as Prisma.InputJsonValue,
-          },
-        });
-      }
-    });
-  }
-
-  private async runInTransaction<T>(fn: (tx: PrismaTransaction) => Promise<T>): Promise<T> {
-    const maybePrismaClient = this.db as PrismaClient;
-    if (typeof maybePrismaClient.$transaction === 'function') {
-      return maybePrismaClient.$transaction(fn);
-    }
-
-    return fn(this.db as PrismaTransaction);
+    await applyReconstructedStateTx(this, ticket, reconstructedStageName, reconstructedStatusV2, actorUserId);
   }
 
   private reconstructTicket(

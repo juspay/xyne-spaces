@@ -2,6 +2,11 @@ import { Request, Response } from 'express';
 import { WORKSPACE_LEVEL } from '@/integrations/core/sourceScope';
 import { ExternalSourcePlatform } from '@/integrations/core/types';
 import {
+  SOCIAL_MEDIA_PLATFORMS,
+  isSocialMediaPlatform,
+  isMetaMessagingPlatform,
+} from '@/integrations/social-media/constants';
+import {
   buildSlackDeskSourceName,
   resolveAppDeskInstalledAppId,
   extractSlackChannelId,
@@ -14,15 +19,15 @@ import { MessageAttachmentRepository } from '../database/repositories/messageAtt
 import { UserRepository } from '../database/repositories/users';
 import { UserGroupRepository } from '../database/repositories/userGroups';
 import { ProjectRepository } from '../database/repositories/projectRepository';
-import { Prisma, type User } from '@prisma/client';
+import { type User } from '@prisma/client';
 import { v4 as uuidv4 } from 'uuid';
+import { dlAddressesFor } from '@/services/dlResolver';
 import {
   createForwardedMessageXml,
   parseForwardedMessageXml,
   ChannelScopeType,
   ChannelVisibility,
   MessageType,
-  AttachmentEntityType,
   DeskType,
   EmailMergeMode,
   AppPermissionStatus,
@@ -52,10 +57,12 @@ import { userActivityTrackingService } from '@/services/userActivityTrackingServ
 import { vespaQueue } from '@/queues/vespaQueue';
 import { channelSchema } from '@/vespa/src/types';
 import { db } from '@/database/client';
+import { hasProjectAdminAccess } from '@/database/acl/admin-access';
 import { NAMESPACE } from '@/vespa/vespaConfig';
 import {logger} from '@/utils/logger';
 import { messageMetadataService } from '@/services/messageMetadataService';
-import { extractSpecialMentions, getChannelParticipantsForMention, getOnlineChannelParticipants } from '@/utils/mentionUtils';
+import { extractAllUsersForNotification, extractSpecialMentions, getChannelParticipantsForMention, getOnlineChannelParticipants } from '@/utils/mentionUtils';
+import { mentionRecipients } from '@/zero/side-effects/tables/mention-delivery';
 import { activityService } from '@/services/activity/activityService';
 import { encrypt, decrypt } from '@/services/encryptionService';
 import { vespaService } from '@/services/vespaSearch';
@@ -63,9 +70,10 @@ import { ChannelEmailAliasService } from '@/services/channelEmailAliasService';
 import { ensureDmConversationAuthorParticipant } from '@/utils/dmConversationParticipants';
 import { groupDmParticipantService } from '@/services/groupDmParticipantService';
 import { AppError } from '@/middleware/errorHandler';
+import { sendForwardedMessageTx } from '@/bypassAcl/transactions/channelController';
 
 export class ChannelController {
-  private channelRepository: ChannelRepository;
+  channelRepository: ChannelRepository;
   private channelParticipantRepository: ChannelParticipantRepository;
   private conversationRepository: ConversationRepository;
   private messageRepository: MessageRepository;
@@ -329,23 +337,37 @@ export class ChannelController {
 
         if (isGroupDm && mentionType) {
           const channel = await this.channelRepository.findById(channelId);
-          await notificationService.createMentionNotifications(
-            recipientIds,
-            createdMessage.messageId,
-            conversation.conversationId,
-            channelId,
-            channel?.name ?? channelId,
-            senderId,
-            senderInfo.name,
-            cleanContent,
-            workspaceId,
-            mentionType,
-            false, // isDMChannel
-            false, // isThreadMessage
-            senderInfo.picture ?? '',
-            undefined, // prefetchedData
-            true, // isGroupDM
-          );
+          // Personally mentioned members are sent without mentionType so the
+          // @channel/@here toggle can't suppress their mention.
+          const personalIds = mentionRecipients(
+            await extractAllUsersForNotification(messageContent, workspaceId),
+            { participantIds: new Set(recipientIds), senderId },
+          ).map(u => u.userId);
+          const personalSet = new Set(personalIds);
+          const sendMentions = (userIds: string[], groupMentionType: '@channel' | '@here' | undefined) =>
+            userIds.length === 0
+              ? Promise.resolve()
+              : notificationService.createMentionNotifications(
+                  userIds,
+                  createdMessage.messageId,
+                  conversation.conversationId,
+                  channelId,
+                  channel?.name ?? channelId,
+                  senderId,
+                  senderInfo.name,
+                  cleanContent,
+                  workspaceId,
+                  groupMentionType,
+                  false, // isDMChannel
+                  false, // isThreadMessage
+                  senderInfo.picture ?? '',
+                  undefined, // prefetchedData
+                  true, // isGroupDM
+                );
+          await Promise.all([
+            sendMentions(personalIds, undefined),
+            sendMentions(recipientIds.filter(id => !personalSet.has(id)), mentionType),
+          ]);
 
           // Mirror MessagesSideEffectHandler.handleSpecialMentionActivities: create
           // the activity-feed records for the @channel/@here audience so the mention
@@ -545,199 +567,7 @@ export class ChannelController {
       // Use transaction for all write operations to maintain atomicity
       const channelWorkspaceId = await this.channelRepository.getWorkspaceId(channelId);
       const targetChannel = await this.channelRepository.findById(channelId);
-      const result = await db.$transaction(async (tx) => {
-        // Create conversation
-      const conversation = await tx.conversation.create({
-        data: {
-          channelId: channelId,
-          createdBy: senderId,
-          initialMessageId: 'temp',
-          workspaceId: channelWorkspaceId,
-          lastActivityAt: new Date(),
-          replyCount: 0,
-          pinned: false,
-        },
-      });
-
-        const forwardedMessageMetadata = {} as Record<string, unknown>;
-        if (isCall) {
-          forwardedMessageMetadata['isCallMessage'] = true;
-          if (meta?.callId) {
-            forwardedMessageMetadata['callId'] = meta.callId;
-          }
-        }
-
-        // Create the forwarded message with XML content
-        const createdMessage = await tx.message.create({
-          data: {
-            conversationId: conversation.conversationId,
-            senderId: senderId,
-            workspaceId: channelWorkspaceId,
-            content: xmlContent,
-            msgType: MessageType.FORWARDED,
-            hasAttachment: originalAttachments.length > 0,
-            metadata: forwardedMessageMetadata as Prisma.InputJsonValue,
-          },
-        });
-        if (targetChannel) {
-          await ensureDmConversationAuthorParticipant({
-            channelId,
-            conversationId: conversation.conversationId,
-            senderId,
-            scopeType: targetChannel.scopeType as ChannelScopeType,
-            tx,
-          });
-        }
-
-         // Copy attachments to the new message
-         const copiedAttachments: any[] = [];
-        if (originalAttachments.length > 0) {
-           // Preserve the sender's display order: sort by explicit position
-           // (falling back to createdAt/id for legacy rows), then stamp a fresh
-           // strictly-increasing position + createdAt on each copy so the
-           // forwarded message renders in the same order as the source.
-           const orderedOriginalAttachments = [...originalAttachments].sort(
-             (a, b) =>
-               (a.position ?? Number.MAX_SAFE_INTEGER) -
-                 (b.position ?? Number.MAX_SAFE_INTEGER) ||
-               a.createdAt.getTime() - b.createdAt.getTime() ||
-               a.id.localeCompare(b.id)
-           );
-           const forwardCloneBaseTs = Date.now();
-           for (const [attIndex, attachment] of orderedOriginalAttachments.entries()) {
-             const copiedAttachment = await tx.messageAttachment.create({
-               data: {
-                 entityId: createdMessage.messageId,
-                 entityType: AttachmentEntityType.CHAT,
-                 originalFilename: attachment.originalFilename,
-                 size: attachment.size,
-                 mimetype: attachment.mimetype,
-                 url: attachment.url,
-                 thumbnailUrl: attachment.thumbnailUrl || undefined,
-                 uploadedByUserId: senderId,
-                 createdBy: senderId,
-                 storageProvider: attachment.storageProvider,
-                 conversationId: conversation.conversationId,
-                 workspaceId: channelWorkspaceId,
-                metadata: (attachment.metadata as Record<string, any>) || {},
-                 width: attachment.width ?? undefined,
-                 height: attachment.height ?? undefined,
-                 createdAt: new Date(forwardCloneBaseTs + attIndex),
-                 position: attIndex,
-               },
-             });
-             copiedAttachments.push(copiedAttachment);
-           }
-         }
-
-        let totalReplyCount = 0;
-
-        // If it is a call message, we want to clone all non-user bot messages (like transcipts/summaries)
-        if (isCall) {
-          // Get all bot thread messages from the original conversation
-          const botMessages = await tx.message.findMany({
-            where: {
-              conversationId: originalMessage.conversationId,
-              msgType: MessageType.BOT
-            }
-          });
-
-          totalReplyCount = botMessages.length;
-
-          // Insert the cloned bot messages into the new conversation
-          for (let i = 0; i < botMessages.length; i++) {
-            const botMsg = botMessages[i]!;
-            const clonedMessage = await tx.message.create({
-              data: {
-                conversationId: conversation.conversationId,
-                senderId: botMsg.senderId,
-                workspaceId: channelWorkspaceId,
-                content: botMsg.content,
-                msgType: botMsg.msgType,
-                hasAttachment: botMsg.hasAttachment,
-                edited: botMsg.edited,
-                isDeleted: botMsg.isDeleted,
-                isSent: botMsg.isSent,
-                showInChannel: botMsg.showInChannel,
-                childConversationId: botMsg.childConversationId,
-                metadata: (botMsg.metadata as Prisma.InputJsonValue) || {},
-                visibleTo: botMsg.visibleTo,
-              }
-            });
-
-            // If the bot message had attachments, clone them too
-            if (botMsg.hasAttachment) {
-              const botOriginalAttachments = await tx.messageAttachment.findMany({
-                where: {
-                  entityId: botMsg.messageId,
-                  entityType: AttachmentEntityType.CHAT
-                }
-              });
-
-              const botChannelWorkspaceId = await this.channelRepository.getWorkspaceId(conversation.channelId);
-              const orderedBotAttachments = [...botOriginalAttachments].sort(
-                (a, b) =>
-                  (a.position ?? Number.MAX_SAFE_INTEGER) -
-                    (b.position ?? Number.MAX_SAFE_INTEGER) ||
-                  a.createdAt.getTime() - b.createdAt.getTime() ||
-                  a.id.localeCompare(b.id)
-              );
-              const botCloneBaseTs = Date.now();
-              for (const [botAttIndex, originalAtt] of orderedBotAttachments.entries()) {
-                await tx.messageAttachment.create({
-                  data: {
-                    entityId: clonedMessage.messageId,
-                    entityType: AttachmentEntityType.CHAT,
-                    originalFilename: originalAtt.originalFilename,
-                    size: originalAtt.size,
-                    mimetype: originalAtt.mimetype,
-                    url: originalAtt.url,
-                    thumbnailUrl: originalAtt.thumbnailUrl || undefined,
-                    uploadedByUserId: senderId,
-                    createdBy: senderId,
-                    storageProvider: originalAtt.storageProvider,
-                    conversationId: conversation.conversationId,
-                    workspaceId: botChannelWorkspaceId,
-                    metadata: (originalAtt.metadata as Prisma.InputJsonValue) || {},
-                    width: originalAtt.width ?? undefined,
-                    height: originalAtt.height ?? undefined,
-                    createdAt: new Date(botCloneBaseTs + botAttIndex),
-                    position: botAttIndex,
-                  }
-                });
-              }
-            }
-          }
-        }
-
-        // Update conversation with real initial message ID and replyCount
-        await tx.conversation.update({
-          where: { conversationId: conversation.conversationId },
-          data: { 
-            initialMessageId: createdMessage.messageId,
-            replyCount: totalReplyCount,
-          },
-        });
-
-        // Update channel last activity in channel_stats
-        await tx.channelStats.upsert({
-          where: { channelId },
-          update: { lastActivityAt: new Date() },
-          create: { channelId, lastActivityAt: new Date(), workspaceId: channelWorkspaceId },
-        });
-
-        // Reopen DM for all participants so they can see the message
-        await tx.channelUserStatus.updateMany({
-          where: { channelId: channelId, isClosed: true },
-          data: { isClosed: false, updatedAt: new Date() },
-        });
-
-        return {
-          conversation,
-          createdMessage,
-          copiedAttachments,
-        };
-      });
+      const result = await sendForwardedMessageTx(channelId, senderId, channelWorkspaceId, isCall, meta, xmlContent, originalAttachments, targetChannel, originalMessage, this);
       await messageMetadataService.syncInitialMessageMd(result.conversation.conversationId);
 
       // Get channel participants for notifications and unread count
@@ -845,7 +675,7 @@ export class ChannelController {
         name?: string;
         description?: string;
         visibility?: ChannelVisibility;
-        projectId: string;
+        projectId?: string;
         participants?: string[];
         type?: 'DEFAULT' | 'EMAIL' | 'SUPPORT' | 'SLACK' | 'APP' | 'CALL';
         assigneeUserGroupId?: string;
@@ -858,13 +688,21 @@ export class ChannelController {
 
       const userId = req.user!.id;
 
-      // Validate required fields
-      if (!scopeType || !projectId) {
+      // Validate required fields. projectId is OPTIONAL only for a NATIVE channel
+      // (scopeType DEFAULT + type DEFAULT/unset). Everything else still requires a
+      // project: every desk type (EMAIL/SLACK/APP/CALL/SUPPORT/SOCIAL_MEDIA/SDLC — and
+      // any future type), plus DM/GROUP_DM/TICKET/DOCUMENT. Inverted on purpose so a
+      // new desk type is projectId-required by default without editing this check.
+      const isNativeChannel =
+        scopeType === ChannelScopeType.DEFAULT &&
+        (channelType === undefined || channelType === 'DEFAULT');
+      const projectIdRequired = !isNativeChannel;
+      if (!scopeType || (projectIdRequired && !projectId)) {
         res.status(400).json({
-          error: 'ScopeType and projectId are required',
+          error: projectIdRequired ? 'ScopeType and projectId are required' : 'ScopeType is required',
           details: {
             scopeType: !scopeType ? 'ScopeType is required' : undefined,
-            projectId: !projectId ? 'ProjectId is required' : undefined,
+            projectId: projectIdRequired && !projectId ? 'ProjectId is required' : undefined,
           }
         });
         return;
@@ -924,11 +762,12 @@ export class ChannelController {
             res.status(409).json({ error: 'Shared mailbox is disconnected' });
             return;
           }
-          const alreadyClaimed = await db.emailChannelPreference.findUnique({
-            where: { workspaceId_dlEmail: { workspaceId, dlEmail } },
-            select: { channelId: true },
+          const claimants = await db.emailChannelPreference.findMany({
+            where: { workspaceId, OR: [{ dlEmail: { not: null } }, { NOT: { dlAliases: null } }] },
+            select: { dlEmail: true, dlAliases: true },
           });
-          if (alreadyClaimed) {
+          const target = dlEmail.trim().toLowerCase();
+          if (claimants.some(pref => dlAddressesFor(pref).includes(target))) {
             res.status(409).json({ error: 'A desk already exists for this DL' });
             return;
           }
@@ -1059,6 +898,8 @@ export class ChannelController {
         projectId,
         workspaceId: req.user!.workspaceId!,
         type: (channelType || 'DEFAULT') as ChannelType,
+        // Desk channels: honour the requested board as the default mapping (else oldest).
+        ...(boardId && { defaultBoardId: boardId }),
       };
 
       const channel = await this.channelRepository.create(channelData);
@@ -1124,13 +965,13 @@ export class ChannelController {
         let resolvedBoardId: string | undefined = boardId;
         if (isDl && !resolvedBoardId) {
           const firstBoard = await db.board.findFirst({
-            where: { projectId: channel.projectId },
+            where: { projectId: projectId },
             orderBy: { createdAt: 'asc' },
             select: { id: true },
           });
           resolvedBoardId = firstBoard?.id;
           if (!resolvedBoardId) {
-            logger.error('Cannot create DL desk: project has no boards', { projectId: channel.projectId });
+            logger.error('Cannot create DL desk: project has no boards', { projectId: projectId });
             await db.channel.delete({ where: { id: channel.id } }).catch(() => {});
             res.status(409).json({ error: 'Project has no boards configured — cannot create DL desk' });
             return;
@@ -1173,7 +1014,7 @@ export class ChannelController {
           let callBoardId = boardId;
           if (!callBoardId) {
             const firstBoard = await db.board.findFirst({
-              where: { projectId: channel.projectId },
+              where: { projectId: projectId },
               orderBy: { createdAt: 'asc' },
               select: { id: true },
             });
@@ -1209,7 +1050,7 @@ export class ChannelController {
           let slackBoardId = boardId;
           if (!slackBoardId) {
             const firstBoard = await db.board.findFirst({
-              where: { projectId: channel.projectId },
+              where: { projectId: projectId },
               orderBy: { createdAt: 'asc' },
               select: { id: true },
             });
@@ -1291,7 +1132,7 @@ export class ChannelController {
           let appBoardId = boardId;
           if (!appBoardId) {
             const firstBoard = await db.board.findFirst({
-              where: { projectId: channel.projectId },
+              where: { projectId: projectId },
               orderBy: { createdAt: 'asc' },
               select: { id: true },
             });
@@ -1373,7 +1214,7 @@ export class ChannelController {
         scopeType: channel.scopeType as ChannelScopeType,
         description: channel.description,
         visibility: channel.visibility as ChannelVisibility,
-        projectId: channel.projectId,
+        projectId: projectId ?? '',
         createdAt: channel.createdAt,
       };
 
@@ -1528,8 +1369,20 @@ export class ChannelController {
 
       res.setHeader('Cache-Control', 'private, no-cache');
 
+      // Slack channels and apps can be bound onto any desk type; they must not shadow the desk's own source.
       const source = await db.externalSource.findFirst({
-        where: { channelId, workspaceId },
+        where: {
+          channelId,
+          workspaceId,
+          NOT: {
+            sourceType: {
+              in: [
+                ...(channel.type === ChannelType.SLACK ? [] : [ExternalSourcePlatform.SLACK_DESK]),
+                ...(channel.type === ChannelType.APP ? [] : [ExternalSourcePlatform.APP_DESK]),
+              ],
+            },
+          },
+        },
         select: { name: true, displayName: true, sourceType: true, isActive: true, externalIdentifier: true },
         orderBy: { createdAt: 'desc' },
       });
@@ -1539,9 +1392,10 @@ export class ChannelController {
 
       let connectedLabel: string | null = null;
       let outboundConfigured = true;
-      let googlePlayApps: Array<{
+      let deskApps: Array<{
         id: string;
         displayName: string;
+        externalIdentifier: string | null;
         packageName: string | null;
         isActive: boolean;
       }> = [];
@@ -1557,9 +1411,9 @@ export class ChannelController {
         );
       } else if (source?.sourceType === ExternalSourcePlatform.SLACK_DESK) {
         connectedLabel = extractSlackChannelId(source.name);
-      } else if (source?.sourceType === ExternalSourcePlatform.GOOGLE_PLAY) {
+      } else if (sourceType && isSocialMediaPlatform(sourceType) && !isMetaMessagingPlatform(sourceType)) {
         const reviewSources = await db.externalSource.findMany({
-          where: { channelId, workspaceId, sourceType: ExternalSourcePlatform.GOOGLE_PLAY },
+          where: { channelId, workspaceId, sourceType: { in: [...SOCIAL_MEDIA_PLATFORMS] } },
           select: {
             id: true,
             displayName: true,
@@ -1570,15 +1424,38 @@ export class ChannelController {
         });
         const activeReviewSources = reviewSources.filter(reviewSource => reviewSource.isActive);
         isConnected = activeReviewSources.length > 0;
-        googlePlayApps = reviewSources.map(reviewSource => ({
+        deskApps = reviewSources.map(reviewSource => ({
           id: reviewSource.id,
           displayName: reviewSource.displayName,
+          externalIdentifier: reviewSource.externalIdentifier,
           packageName: reviewSource.externalIdentifier,
           isActive: reviewSource.isActive,
         }));
         connectedLabel = activeReviewSources
           .map(reviewSource => reviewSource.displayName)
-          .join(', ') || 'No active Google Play apps';
+          .join(', ') || 'No active apps';
+      } else if (source && isMetaMessagingPlatform(source.sourceType)) {
+        const igSources = await db.externalSource.findMany({
+          where: { channelId, workspaceId, sourceType: source.sourceType },
+          select: {
+            id: true,
+            displayName: true,
+            externalIdentifier: true,
+            isActive: true,
+          },
+          orderBy: { createdAt: 'asc' },
+        });
+        const activeIgSources = igSources.filter(s => s.isActive);
+        isConnected = activeIgSources.length > 0;
+        deskApps = igSources.map(s => ({
+          id: s.id,
+          displayName: s.displayName ?? s.externalIdentifier ?? '',
+          externalIdentifier: s.externalIdentifier,
+          packageName: s.externalIdentifier,
+          isActive: s.isActive,
+        }));
+        const handlePrefix = source.sourceType === ExternalSourcePlatform.INSTAGRAM ? '@' : '';
+        connectedLabel = activeIgSources.map(s => s.displayName ? `${handlePrefix}${s.displayName}` : s.externalIdentifier).join(', ') || null;
       }
 
       const fromDisplay = (source?.displayName ?? '').match(/[\w.+-]+@[\w.-]+\.[\w.-]+/)?.[0];
@@ -1586,7 +1463,7 @@ export class ChannelController {
         const email = fromDisplay.toLowerCase();
         res
           .status(200)
-          .json({ email, isConnected, hasSource, sourceType, connectedLabel: connectedLabel ?? email, outboundConfigured, googlePlayApps });
+          .json({ email, isConnected, hasSource, sourceType, connectedLabel: connectedLabel ?? email, outboundConfigured, deskApps, googlePlayApps: deskApps });
         return;
       }
 
@@ -1603,12 +1480,12 @@ export class ChannelController {
           const email = owner.email.toLowerCase();
           res
             .status(200)
-            .json({ email, isConnected, hasSource, sourceType, connectedLabel: connectedLabel ?? email, outboundConfigured, googlePlayApps });
+            .json({ email, isConnected, hasSource, sourceType, connectedLabel: connectedLabel ?? email, outboundConfigured, deskApps, googlePlayApps: deskApps });
           return;
         }
       }
 
-      res.status(200).json({ email: null, isConnected, hasSource, sourceType, connectedLabel, outboundConfigured, googlePlayApps });
+      res.status(200).json({ email: null, isConnected, hasSource, sourceType, connectedLabel, outboundConfigured, deskApps, googlePlayApps: deskApps });
     } catch (error) {
       logger.error('Error in getConnectedEmail:', error);
       res.status(500).json({ error: 'Internal server error' });
@@ -1734,6 +1611,29 @@ export class ChannelController {
       res.status(200).json({ success: true, data: { members } });
     } catch (error) {
       logger.error('Error in getChannelMembers:', error);
+      res.status(500).json({ success: false, error: 'Internal server error' });
+    }
+  };
+  
+  canLinkChannelBoards = async (req: Request, res: Response): Promise<void> => {
+    try {
+      const userId = req.user!.id;
+      const { channelId } = req.params;
+      if (!channelId) {
+        res.status(400).json({ success: false, error: 'channelId is required' });
+        return;
+      }
+
+      const role = await this.channelParticipantRepository.getParticipantRole(channelId, userId);
+      if (role === ChannelRole.ADMIN) {
+        res.status(200).json({ success: true, data: { canLinkBoards: true } });
+        return;
+      }
+
+      const isProjectAdmin = await hasProjectAdminAccess(db, userId);
+      res.status(200).json({ success: true, data: { canLinkBoards: isProjectAdmin } });
+    } catch (error) {
+      logger.error('Error in canLinkChannelBoards:', error);
       res.status(500).json({ success: false, error: 'Internal server error' });
     }
   };
@@ -2594,13 +2494,14 @@ export class ChannelController {
           orgRole: req.user!.orgRole,
           memberId: req.user!.memberId,
         });
-        for (const participant of result.addedParticipants) {
+        // Awaited so "added" lands before the mention the client's prompt delete delivers next.
+        await Promise.all(result.addedParticipants.map(participant =>
           handler.onInsert({
             entityId: participant.participantId,
             entityType: 'channel_participants',
             operation: 'insert'
-          }).catch(err => logger.error('Side-effect handler error: channel_participants onInsert', err));
-        }
+          }).catch(err => logger.error('Side-effect handler error: channel_participants onInsert', err))
+        ));
       }
 
       const response: AddGroupDmParticipantsResponse = {
@@ -2622,3 +2523,4 @@ export class ChannelController {
     }
   };
 }
+

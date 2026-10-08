@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect } from 'react';
+import { useState, useMemo, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useZero } from '../../hooks/useZero';
 import { QueryResultType } from '@rocicorp/zero';
@@ -33,7 +33,7 @@ import { EditCallData } from '../../components/Call/ScheduleCallModal/ScheduleCa
 import { useQuery } from '@xyne/shared/hooks';
 
 type ScheduledCall = Omit<
-  QueryResultType<typeof queries.userScheduledCallsV2>[number],
+  QueryResultType<typeof queries.userUpcomingScheduledCalls>[number],
   'participants'
 > & {
   participants?: CallParticipants;
@@ -42,7 +42,7 @@ type ScheduledCall = Omit<
 interface UseCallHistoryReturn {
   calls: Call[] | undefined;
   scheduledCalls: ScheduledCall[] | undefined;
-  calendarScheduledCalls: ScheduledCall[] | undefined;
+  calendarRangeCalls: Call[] | undefined;
   missedCalls: Call[];
   isLoading: boolean;
   isScheduledCallsLoading: boolean;
@@ -88,9 +88,23 @@ interface UseCallHistoryReturn {
   setShowChannelCalls: (show: boolean) => void;
 }
 
-export function useCallHistory(userId: string | undefined): UseCallHistoryReturn {
+interface UseCallHistoryOptions {
+  calendarWindow?: { from: number; to: number } | undefined;
+}
+
+export function useCallHistory(
+  userId: string | undefined,
+  options: UseCallHistoryOptions = {},
+): UseCallHistoryReturn {
+  const { calendarWindow } = options;
   const zero = useZero();
 
+  // Toggle for showing channel calls (calls in channels the user is a member of but wasn't invited to)
+  // Defined early because it controls which paginated query to use
+  const [showChannelCalls, setShowChannelCalls] = useState(false);
+
+  // Use participant-only query when showChannelCalls is OFF (default)
+  // This is more efficient as it uses whereExists instead of complex ACL filtering
   const {
     calls: accumulatedCalls,
     hasMoreCalls,
@@ -98,15 +112,34 @@ export function useCallHistory(userId: string | undefined): UseCallHistoryReturn
     onVisibleRangeChanged,
     isLoading,
     queryDetails,
-  } = usePaginatedCalls();
+  } = usePaginatedCalls({ participantOnly: !showChannelCalls });
 
-  const [allScheduledCalls, scheduledQueryDetails] = useCachedQuery(queries.userScheduledCallsV2());
+  // Compute the 2-day window for upcoming calls (stable across renders)
+  // The normal view only shows 2 days of scheduled calls (see GroupedList.tsx)
+  const upcomingWindowEnd = useRef<number | null>(null);
+  if (!upcomingWindowEnd.current) {
+    const now = new Date();
+    // End of day after tomorrow (2 full days from now)
+    const endOf2Days = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 3);
+    upcomingWindowEnd.current = endOf2Days.getTime();
+  }
 
-  // Toggle for showing channel calls (calls in channels the user is a member of but wasn't invited to)
-  const [showChannelCalls, setShowChannelCalls] = useState(false);
+  // Upcoming scheduled calls for normal view (optimized - only next 2 days)
+  const [upcomingScheduledCalls, upcomingScheduledQueryDetails] = useCachedQuery(
+    queries.userUpcomingScheduledCalls({ startsBefore: upcomingWindowEnd.current }),
+  );
+
+  const [calendarRangeRows] = useCachedQuery(
+    queries.userCallsInRange({
+      from: calendarWindow?.from ?? 0,
+      to: calendarWindow?.to ?? 0,
+    }),
+    { enabled: Boolean(calendarWindow) },
+  );
 
   const calls = accumulatedCalls as Call[] | undefined;
-  const scheduledCallRows = allScheduledCalls as ScheduledCall[] | undefined;
+  // For normal view: use optimized 2-day window query
+  const upcomingScheduledCallRows = upcomingScheduledCalls as ScheduledCall[] | undefined;
   const [selectedCall, setSelectedCall] = useState<Call | null>(null);
   const [isParticipantsModalOpen, setIsParticipantsModalOpen] = useState(false);
   const [selectedUsers, setSelectedUsers] = useState<User[]>([]);
@@ -148,8 +181,9 @@ export function useCallHistory(userId: string | undefined): UseCallHistoryReturn
     call.participants?.find(p => p.userId === userId);
 
   // Filter scheduled calls to only show those that haven't ended yet.
+  // Uses optimized 2-day query for normal view (upcomingScheduledCallRows).
   const scheduledCalls = useMemo(() => {
-    if (!scheduledCallRows) return undefined;
+    if (!upcomingScheduledCallRows) return undefined;
 
     const now = Date.now();
 
@@ -158,7 +192,7 @@ export function useCallHistory(userId: string | undefined): UseCallHistoryReturn
     const activeCallIds = new Set(activeCalls?.map(call => call.id) ?? []);
     const activeExternalIds = new Set(activeCalls?.map(call => call.externalId) ?? []);
 
-    const filtered = scheduledCallRows.filter(call => {
+    const filtered = upcomingScheduledCallRows.filter(call => {
       if (call.status === CallStatus.ACTIVE) {
         return false;
       }
@@ -201,41 +235,31 @@ export function useCallHistory(userId: string | undefined): UseCallHistoryReturn
     });
 
     return filtered;
-  }, [scheduledCallRows, activeCalls, userId]);
+  }, [upcomingScheduledCallRows, activeCalls, userId]);
 
-  const calendarScheduledCalls = useMemo(() => {
-    if (!scheduledCallRows) return undefined;
+  // Visibility pass over the windowed rows. The query already settled reachability and
+  // ordering, so this only applies the two viewer-level rules the grid shares with the
+  // lists: calls the viewer hid, and channel-reachable calls they were never invited to
+  // (opt-in behind the same showChannelCalls toggle the list uses).
+  const calendarRangeCalls = useMemo(() => {
+    if (!calendarRangeRows) return undefined;
 
-    const activeCallIds = new Set(activeCalls?.map(call => call.id) ?? []);
-    const activeExternalIds = new Set(activeCalls?.map(call => call.externalId) ?? []);
-
-    const filtered = scheduledCallRows.filter(call => {
-      if (call.status === CallStatus.ACTIVE) {
-        return false;
-      }
-      if (activeCallIds.has(call.id) || activeExternalIds.has(call.externalId)) {
-        return false;
-      }
+    return (calendarRangeRows as Call[]).filter(call => {
       const currentUserParticipant = getCurrentUserParticipant(call);
+
       if (userId && currentUserParticipant?.meetingStatus === MeetingStatus.HIDDEN) {
         return false;
       }
 
+      // External calendar events carry no CallParticipant rows — attendees live in
+      // metadata, so the owning user id is what identifies them.
       if (isExternalCalendarEvent(call)) {
         return isExternalCalendarEventForUser(call, userId);
       }
 
-      return Boolean(currentUserParticipant);
+      return showChannelCalls || Boolean(currentUserParticipant);
     });
-
-    filtered.sort((a, b) => {
-      const aTime = a.startsAt ? new Date(a.startsAt).getTime() : Infinity;
-      const bTime = b.startsAt ? new Date(b.startsAt).getTime() : Infinity;
-      return aTime - bTime;
-    });
-
-    return filtered;
-  }, [scheduledCallRows, activeCalls, userId]);
+  }, [calendarRangeRows, showChannelCalls, userId]);
 
   const recentCalls = useMemo(() => {
     const baseCalls = calls;
@@ -245,15 +269,16 @@ export function useCallHistory(userId: string | undefined): UseCallHistoryReturn
 
     // Build lookup sets for stale-ACTIVE detection.
     // activeCalls (userActiveCalls) is the live source of truth: if a call is no longer
-    // in this set it has ended. allScheduledCalls covers the ACTIVE→SCHEDULED reversion
+    // in this set it has ended. The upcoming rows cover the ACTIVE→SCHEDULED reversion
     // (call ended before endsAt) where the call leaves userCallHistory but the
     // cumulative accumulator still holds an ACTIVE entry.
+    const scheduledSource = upcomingScheduledCallRows;
     const activeCallExternalIds = new Set(activeCalls?.map(c => c.externalId) ?? []);
-    const scheduledCallIds = new Set(scheduledCallRows?.map(c => c.id) ?? []);
+    const scheduledCallIds = new Set(scheduledSource?.map(c => c.id) ?? []);
 
     // Get active scheduled calls that have started
     const activeScheduledCalls =
-      scheduledCallRows?.filter(
+      scheduledSource?.filter(
         call =>
           call.status === CallStatus.ACTIVE ||
           (call.startsAt && new Date(call.startsAt).getTime() <= now),
@@ -296,7 +321,7 @@ export function useCallHistory(userId: string | undefined): UseCallHistoryReturn
       const bTime = b.startsAt || b.startedAt || b.createdAt;
       return new Date(bTime).getTime() - new Date(aTime).getTime();
     });
-  }, [calls, allScheduledCalls, activeCalls, showChannelCalls, userId]);
+  }, [calls, upcomingScheduledCallRows, activeCalls, showChannelCalls, userId]);
 
   const missedCalls = useMemo(() => {
     if (!recentCalls || !userId) return [];
@@ -754,10 +779,10 @@ export function useCallHistory(userId: string | undefined): UseCallHistoryReturn
   return {
     calls: recentCalls,
     scheduledCalls,
-    calendarScheduledCalls,
+    calendarRangeCalls,
     missedCalls,
     isLoading,
-    isScheduledCallsLoading: scheduledQueryDetails.type === 'unknown',
+    isScheduledCallsLoading: upcomingScheduledQueryDetails.type === 'unknown',
     queryDetails,
     selectedCall,
     isParticipantsModalOpen,

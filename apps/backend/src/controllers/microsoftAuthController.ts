@@ -132,7 +132,15 @@ export class MicrosoftAuthController {
   }
 
   private getMicrosoftAuthScopes(): string[] {
-    return ['openid', 'email', 'profile', 'User.Read', 'offline_access'];
+    return [
+      'openid',
+      'email',
+      'profile',
+      'User.Read',
+      'offline_access',
+      'Contacts.Read',
+      'People.Read',
+    ];
   }
 
   private getAccessTokenExpiry(token: Record<string, unknown>): Date | undefined {
@@ -530,13 +538,23 @@ export class MicrosoftAuthController {
           let publicEmailError = null;
 
           if (!userExistsButRemoved) {
-            if (peekedState?.enterpriseLogin) {
+            // Public email domains can never create enterprise workspaces, so fail
+            // fast on them regardless of the entry flow (mirrors Google's
+            // handleCallback). The remaining domain-conflict assert stays gated on
+            // the explicit enterprise intent.
+            try {
+              await organizationDomainService.assertNotPublicEmailDomain(microsoftUserData.email);
+            } catch (error) {
+              if (error instanceof PublicEmailDomainError) {
+                publicEmailError = error;
+              }
+            }
+
+            if (peekedState?.enterpriseLogin && !publicEmailError) {
               try {
                 await organizationDomainService.assertCanCreateOrgForEmail(microsoftUserData.email);
               } catch (error) {
-                if (error instanceof PublicEmailDomainError) {
-                  publicEmailError = error;
-                } else if (error instanceof OrganizationDomainConflictError) {
+                if (error instanceof OrganizationDomainConflictError) {
                   domainConflictError = error;
                 }
               }
@@ -704,7 +722,7 @@ export class MicrosoftAuthController {
           });
           res.cookie('xyne_last_workspace', workspaceId, {
             ...cookieOptions,
-            maxAge: 30 * 24 * 60 * 60 * 1000,
+            maxAge: config.session.expiryDays * 24 * 60 * 60 * 1000,
           });
           if (sessionId) {
             res.cookie('user_session_id', sessionId, {
@@ -942,13 +960,23 @@ export class MicrosoftAuthController {
       let domainConflictError = null;
       let publicEmailError = null;
 
-        if (stateData.enterpriseLogin) {
+        // Public email domains can never create enterprise workspaces, so fail fast
+        // on them regardless of the entry flow (mirrors Google's
+        // exchangeElectronCode). The remaining domain-conflict assert stays gated
+        // on the explicit enterprise intent.
+        try {
+          await organizationDomainService.assertNotPublicEmailDomain(email);
+        } catch (error) {
+          if (error instanceof PublicEmailDomainError) {
+            publicEmailError = error;
+          }
+        }
+
+        if (stateData.enterpriseLogin && !publicEmailError) {
           try {
             await organizationDomainService.assertCanCreateOrgForEmail(email);
           } catch (error) {
-            if (error instanceof PublicEmailDomainError) {
-              publicEmailError = error;
-            } else if (error instanceof OrganizationDomainConflictError) {
+            if (error instanceof OrganizationDomainConflictError) {
               domainConflictError = error;
             }
           }
@@ -1078,7 +1106,7 @@ export class MicrosoftAuthController {
 
         try {
           const refreshTokenExpiry = new Date();
-          refreshTokenExpiry.setDate(refreshTokenExpiry.getDate() + 30);
+          refreshTokenExpiry.setDate(refreshTokenExpiry.getDate() + config.session.expiryDays);
 
           const session = await this.userSessionService.createSession({
             userId: user.id,
@@ -1111,7 +1139,7 @@ export class MicrosoftAuthController {
 
         res.cookie('xyne_last_workspace', workspaceId, {
           ...cookieOptions,
-          maxAge: 30 * 24 * 60 * 60 * 1000,
+          maxAge: config.session.expiryDays * 24 * 60 * 60 * 1000,
         });
 
         res.cookie(`xyne_ws_${workspaceId}_token`, customToken, {
@@ -1122,7 +1150,7 @@ export class MicrosoftAuthController {
         if (sessionId) {
           res.cookie('user_session_id', sessionId, {
             ...cookieOptions,
-            maxAge: 30 * 24 * 60 * 60 * 1000,
+            maxAge: config.session.expiryDays * 24 * 60 * 60 * 1000,
           });
         }
 
@@ -1424,7 +1452,7 @@ export class MicrosoftAuthController {
         let sessionId: string | null = null;
         try {
           const refreshTokenExpiry = new Date();
-          refreshTokenExpiry.setDate(refreshTokenExpiry.getDate() + 30);
+          refreshTokenExpiry.setDate(refreshTokenExpiry.getDate() + config.session.expiryDays);
           const session = await this.userSessionService.createSession({
             userId: user.id,
             refreshToken: refreshToken || randomUUID(),
@@ -1451,12 +1479,12 @@ export class MicrosoftAuthController {
         });
         res.cookie('xyne_last_workspace', workspaceId, {
           ...cookieOptions,
-          maxAge: 30 * 24 * 60 * 60 * 1000,
+          maxAge: config.session.expiryDays * 24 * 60 * 60 * 1000,
         });
         if (sessionId) {
           res.cookie('user_session_id', sessionId, {
             ...cookieOptions,
-            maxAge: 30 * 24 * 60 * 60 * 1000,
+            maxAge: config.session.expiryDays * 24 * 60 * 60 * 1000,
           });
         }
         setOnboardingCookie(res, isNewUser, {

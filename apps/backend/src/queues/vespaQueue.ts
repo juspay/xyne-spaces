@@ -74,6 +74,7 @@ class VespaQueue {
 						type: 'exponential',
 						delay: 2000,
 					},
+					removeOnComplete: 1000,
 				},
 				settings: {
 					stalledInterval: 30 * 1000,    // 30 seconds

@@ -10,6 +10,7 @@ export interface Origin {
   head(key: string): Promise<ObjectInfo | null>;
   /** Stream one object with its metadata, or null when it does not exist. Errors propagate. */
   get(key: string): Promise<ObjectRead | null>;
+  listPrefixes(prefix: string): Promise<string[]>;
 }
 
 /** Short stable fingerprint of an object at the origin, for the cache key. */

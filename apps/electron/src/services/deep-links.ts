@@ -56,8 +56,11 @@ function isSafeDeepLinkPath(pathStr: string): boolean {
     if (/[\u0000-\u001F\u007F]/.test(c)) return false;     // control chars
     if (/[a-zA-Z][a-zA-Z0-9+.\-]*:/.test(c)) return false;     // embedded scheme (http:, javascript:, data:)
   }
-  // Conservative in-app route charset (path + query only).
-  if (!/^\/[A-Za-z0-9\-._~/?=&%]*$/.test(pathStr)) return false;
+  // Conservative in-app route charset (path + query + hash fragment).
+  // '#' is allowed so shared thread links keep their anchor
+  // (e.g. #origin=…&messageId=…&createdAt=…); the guards above still reject
+  // traversal, protocol-relative '//', backslashes and embedded schemes.
+  if (!/^\/[A-Za-z0-9\-._~/?=&%#]*$/.test(pathStr)) return false;
   return isAllowedDeepLinkRoute(pathStr);
 }
 

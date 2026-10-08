@@ -13,7 +13,10 @@ import HomeScreen from './HomeScreen';
 import SlackMigration from '../pages/SlackMigration';
 import AuthScreen from './AuthScreen/AuthScreen';
 import CommunityWorkspaceSelectionRoute from './AuthScreen/CommunityWorkspaceSelectionRoute';
+import TermsOfServiceScreen from './TermsOfServiceScreen/TermsOfServiceScreen';
+import PrivacyPolicyScreen from './PrivacyPolicyScreen/PrivacyPolicyScreen';
 import WorkspaceSelectionScreen from './WorkspaceSelectionScreen';
+import SdkSsoAuthorizeScreen from './SdkSsoAuthorizeScreen';
 import QuestionnaireScreen from './QuestionnaireScreen/QuestionnaireScreen';
 import IntentPlaygroundScreen from './IntentPlaygroundScreen';
 import ChatScreen from './ChatScreen/ChatScreen';
@@ -22,42 +25,22 @@ import TicketView from '../components/Tickets/TicketView/TicketView';
 import { BrowserTabsScreen } from './BrowserTabsScreen';
 import { getLastActiveWorkspaceId } from '../machines/authMachine';
 import AgentsScreen from './AgentsScreen/AgentScreen';
-import ClawAgentsScreen from './ClawAgentsScreen';
-import AgentsTab from './ClawAgentsScreen/tabs/AgentsTab';
-import McpTab from './ClawAgentsScreen/tabs/McpTab';
-import SkillsTab from './ClawAgentsScreen/tabs/SkillsTab';
-import ClawAgentDetailScreen from './ClawAgentsScreen/ClawAgentDetailScreen';
-import ClawAgentCreateScreen from './ClawAgentsScreen/ClawAgentCreateScreen';
-import ClawMcpDetailScreen from './ClawAgentsScreen/ClawMcpDetailScreen';
-import ClawSkillDetailScreen from './ClawAgentsScreen/ClawSkillDetailScreen';
-import ClawSkillCreateScreen from './ClawAgentsScreen/ClawSkillCreateScreen';
+// ClawSettingsScreen and ClawMetricsScreen are also mounted at /ai/settings and
+// /ai/metrics (via AISectionLayout below) — kept even though the standalone
+// /claw-agents module that used to own them is gone.
 import ClawSettingsScreen from './ClawAgentsScreen/ClawSettingsScreen';
 import ClawMetricsScreen from './ClawAgentsScreen/ClawMetricsScreen';
 import { RequireClawAdmin } from './AIScreen/screens/RequireClawAdmin';
 import { RequireOrgManager } from './AIScreen/screens/RequireOrgManager';
-import SubagentsTab from './ClawAgentsScreen/tabs/SubagentsTab';
-import ClawSubagentDetailScreen from './ClawAgentsScreen/ClawSubagentDetailScreen';
-import ClawSubagentCreateScreen from './ClawAgentsScreen/ClawSubagentCreateScreen';
-import ClawOrganizationScreen from './ClawAgentsScreen/ClawOrganizationScreen';
-import ClawDigitalTwinScreen from './ClawAgentsScreen/ClawDigitalTwinScreen';
-import ClawDigitalTwinMetricsScreen from './ClawAgentsScreen/ClawDigitalTwinMetricsScreen';
-import DigitalTwinMemoriesTab from './ClawAgentsScreen/tabs/DigitalTwinMemoriesTab';
-import DigitalTwinHotTab from './ClawAgentsScreen/tabs/DigitalTwinHotTab';
-import DigitalTwinProposalsTab from './ClawAgentsScreen/tabs/DigitalTwinProposalsTab';
-import DigitalTwinRecallTab from './ClawAgentsScreen/tabs/DigitalTwinRecallTab';
-import DigitalTwinGraphTab from './ClawAgentsScreen/tabs/DigitalTwinGraphTab';
-import DigitalTwinSettingsTab from './ClawAgentsScreen/tabs/DigitalTwinSettingsTab';
 import { KnowledgeBaseV2Layout } from '../components/knowledgeBaseV2/KnowledgeBaseV2Layout';
 import KnowledgeBaseV2Screen from '../components/knowledgeBaseV2/KnowledgeBaseV2Screen';
 import { LegacyKbRedirect } from '../components/knowledgeBaseV2/LegacyKbRedirect';
-import { MemoryScreen } from './MemoryScreen';
 import { FileViewerLayout } from '../components/knowledgeBase/layout/FileViewerLayout';
 import AnalyticsScreen from './AnalyticsScreen/AnalyticsScreen';
 import ProjectsScreen from './ProjectsScreen/ProjectsScreen';
 import UserGroupsScreen from './UserGroupsScreen/UserGroupsScreen';
 import ProjectDetailScreen from './ProjectDetailScreen/ProjectDetailScreen';
 import SdlcScreen from './SdlcScreen/SdlcScreen';
-import { SdlcDebuggerPanel } from './SdlcScreen/SdlcDebuggerPanel';
 import SdlcWindow from './SdlcScreen/SdlcWindow';
 import { APP_BASE_PATH, isSdlcSurface } from '../config';
 import SdlcFrameHost from './SdlcScreen/SdlcFrameHost';
@@ -70,12 +53,14 @@ import KanbanBoardScreen from './KanbanBoardScreen/KanbanBoardScreen';
 import MyTicketsScreen from './FilteredTicketsScreen/FilteredTicketsScreen.tsx';
 import ProjectViewBuilder from './ProjectViewsScreen/ProjectViewBuilder';
 import SupportScreen from './SupportScreen/SupportScreen.tsx';
+import { SupportListRestore } from './SupportScreen/SupportListRestore';
 import SaveRoute from '../components/SaveRoute/SaveRoute';
 import CanvasScreen from '../components/Canvas/CanvasScreen';
 import CanvasPanel from '../components/Canvas/CanvasPanel/CanvasPanel';
 import CallPage from './CallScreen/CallPage';
 import CanvasRedirectPage from './CanvasRedirect/CanvasRedirectPage';
 import { ClawOverlay } from '../components/Claw/ClawOverlay';
+import { ArtifactAppHostRoute } from '../components/ArtifactApp/ArtifactAppHostRoute';
 import AppSidebar from '../components/AppSidebar/AppSidebar';
 import { ReactElement, ReactNode, useRef, useEffect, useState } from 'react';
 import ZeroProvider from '../providers/ZeroProvider';
@@ -86,6 +71,7 @@ import { IncomingCallDevHarness } from '../components/Call/IncomingCall/Incoming
 import { GlobalCallOverlay } from '../components/Call/CallOverlay/GlobalCallOverlay';
 import { MobileCallHeader } from '../components/Call/MobileCallHeader/MobileCallHeader';
 import { NotificationHandler } from '../components/NotificationHandler/NotificationHandler';
+import { EphemeralFlowHost } from '../components/flowUI/EphemeralFlowHost';
 import { ElectronBadgeSync } from '../components/ElectronBadgeSync/ElectronBadgeSync';
 import {
   ElectronUpdateNudge,
@@ -113,6 +99,7 @@ import { xyneAIActor, setXyneAIPanelRefs, globalXyneAIPanelRefs } from '../machi
 import { browserPanelActor, setBrowserPanelRefs } from '../machines/browserPanelMachine';
 import ActivityListView from '../components/Activity/ActivityListView/ActivityListView';
 import ActivitySupportTicket from '../components/Activity/ActivitySupportTicket/ActivitySupportTicket';
+import { ActivityCalendarWeekView } from '../components/Activity/ActivityCalendarWeekView';
 import Search from '../components/Chat/Search/Search';
 import SearchResults from '../components/Chat/SearchResults/SearchResults';
 import ProjectsListView from './ProjectsScreen/ProjectsListView';
@@ -126,18 +113,18 @@ import { RouterErrorFallback } from '../components/ErrorBoundary';
 import NotFoundScreen from './NotFoundScreen/NotFoundScreen';
 import ChatRedirect from '../components/Chat/ChatRedirect/ChatRedirect';
 import DirectoryRedirect from '../components/Chat/DirectoryRedirect/DirectoryRedirect';
-import CallHistoryScreen from './CallHistoryScreen/CallHistoryScreen';
+import CallsRoute from './CallsRoute/CallsRoute';
 import CallDetailScreen from './CallDetailScreen/CallDetailScreen';
 import RecordingsRoute from './RecordingsRoute/RecordingsRoute';
 import RecordingDetailRoute from './RecordingDetailRoute/RecordingDetailRoute';
 import { RecordingOverlay } from '../components/Recording/RecordingOverlay/RecordingOverlay';
+import { RecordingCameraBubble } from '../components/Recording/RecordingCameraBubble/RecordingCameraBubble';
+import { ScreenPickerHost } from '../components/ScreenPicker/ScreenPickerHost';
 import { useRecordingVersion } from '../hooks/useRecordingVersion';
+import { useWorkspacePageTools } from '../components/AIScreen/Workspace';
 import { stopRecordingForTeardown } from '../hooks/useRecordingStore';
 import { isElectronApp } from '../utils/electronApp';
-import {
-  confirmRecordingInterrupt,
-  isRecordingInterruptible,
-} from '../components/Recording/RecordingInterruptGuard/RecordingInterruptGuard';
+import { confirmInterrupt, isInterruptible } from '../components/InterruptGuard/InterruptGuard';
 import { NoteTakerOverlayHost } from './RecordingsV2Screen/components/NoteTakerOverlayHost';
 import FormScreen from './FormScreen/FormScreen';
 import ScheduledMessageScreen from './ScheduledMessageScreen/ScheduledMessageScreen';
@@ -189,7 +176,6 @@ import { KeyedComposeDmPanel } from '../components/Chat/AddDmForm/ComposeDmPanel
 import ProfileSidebar from '../components/ProfileSidebar/ProfileSidebar';
 import UserGroupSidePanel from '../components/UserGroup/UserGroupSidePanel/UserGroupSidePanel';
 import GlobalCommandMenu from '../components/GlobalCommandMenu/GlobalCommandMenu';
-import ProductInsightsScreen from './ProductInsightsScreen/ProductInsightsScreen';
 import TicketReportsScreen from './TicketReportsScreen/TicketReportsScreen';
 import LaunchScreen from './LaunchScreen/LaunchScreen';
 import { AssignmentConfigWrapper } from '../components/UserGroup/AssignmentConfigScreen';
@@ -206,24 +192,47 @@ import {
 } from '../contexts/AIOnboardingContext';
 import UnreadsInbox from '../components/Chat/UnreadsInbox/UnreadsInbox';
 import { AIOnboardingOverlay } from '../components/AIOnboarding/AIOnboardingOverlay';
+import { AssistantPanelTrigger } from '../components/AIOnboarding/AssistantPanelTrigger';
 import XyneAISidebar from '../components/Chat/XyneAISidebar/XyneAISidebar';
+import {
+  XyneCalendarSidebar,
+  XYNE_CALENDAR_SIDEBAR_DEFAULT_SIZE,
+  XYNE_CALENDAR_SIDEBAR_MIN_SIZE,
+  XYNE_CALENDAR_SIDEBAR_MAX_SIZE,
+} from '../components/Chat/XyneCalendarSidebar';
+import { xyneCalendarActor, setXyneCalendarPanelRef } from '../machines/xyneCalendarMachine';
+import {
+  AppSidebarHost,
+  type SidebarPanelDescriptor,
+} from '../components/AppSidebarHost/AppSidebarHost';
 import { BrowserPanel, BrowserPanelHandler } from '../components/BrowserPanel';
 import { xyneAIStreamManager } from '../services/XyneAI';
-import { useExternalDebuggerStore } from '../store/useExternalDebuggerStore';
 import { AttachmentGalleryModal } from '../components/FileViewer/FileViewerModal';
 import { CreateTicketWindow } from '../components/Tickets/CreateTicketModal/CreateTicketWindow';
 import { AttachmentCitationPreview } from '../components/FileViewer/AttachmentCitationPreview';
 import { ThreadCitationModal } from '../components/xyne-desk/ThreadCitationModal/ThreadCitationModal';
 import { TranscriptCitationModal } from '../components/Chat/TranscriptCitationModal';
 import { sharedChatRoutes } from './SharedChatRoutes';
-import { ResourceAccessScreen } from './ResourceAccessScreen/ResourceAccessScreen';
 import { RoleManagementScreen } from './RoleManagementScreen';
 import { TagReviewView } from '../components/tags/TagReview/TagReviewView';
 import { ResourceProtectedRoute } from '../components/Auth/ResourceProtectedRoute';
 import { WorkflowScreen } from './WorkflowScreen';
-import { GuestBlockedRoute } from '../components/Auth/GuestBlockedRoute';
 import { ToolbarProtectedRoute } from '../components/Auth/ToolbarProtectedRoute';
-import { WorkspaceManagementScreen } from './WorkspaceManagementScreen';
+import {
+  GeneralTab,
+  GuestUsersTab,
+  InvitationsTab,
+  MembersTab,
+  RepositoryCredentialsTab,
+  ToolbarTab,
+} from './WorkspaceManagementScreen';
+import OrganisationsModuleScreen, {
+  LegacyOrganisationsRedirect,
+  OrganisationsIndexRedirect,
+  OrganisationsPage,
+  OrganisationsSectionGuard,
+  legacyWorkspaceTab,
+} from './OrganisationsModule/OrganisationsModuleScreen';
 import OrganisationsScreen from './OrganisationsScreen/OrganisationsScreen';
 import { AcceptInvitation } from './InvitationScreen/AcceptInvitation';
 import NoOrganizationAccessScreen from './NoOrganizationAccessScreen/NoOrganizationAccessScreen';
@@ -235,11 +244,13 @@ import Drawer from '../components/ui/Drawer';
 import { reactNativeBridge, NativeOutboundMessageType } from '../utils/reactNativeBridge';
 import RCADetailScreen from './RCAScreen/RCAScreen.tsx';
 import RCAListScreen from './RCAScreen/RCAListScreen.tsx';
+import StreamsScreen from '../components/Streams/StreamsScreen';
 import { useAuth } from '../hooks/useAuth';
 import { ShareRecordingHandler } from '../components/Chat/ShareRecordingHandler/ShareRecordingHandler';
 import { GlobalUploadProgress } from '../components/knowledgeBase/upload/GlobalUploadProgress';
 import JiraMigrationScreen from './JiraMigrationScreen/JiraMigrationScreen';
 import WhatsAppBulkMigrationScreen from './WhatsAppBulkMigrationScreen/WhatsAppBulkMigrationScreen';
+import MigrationsScreen, { MigrationsIndexRedirect } from './MigrationsScreen/MigrationsScreen';
 import { ErrorReportModal } from '../components/ErrorReportModal/ErrorReportModal';
 import { useScreenRecorder } from '../hooks/useScreenRecorder';
 import type { ScreenSource } from '../types/electron';
@@ -256,6 +267,7 @@ import AISubagentDetailScreen from './AIScreen/screens/AISubagentDetailScreen';
 import AISubagentEditScreen from './AIScreen/screens/AISubagentEditScreen';
 import AISkillDetailScreen from './AIScreen/screens/AISkillDetailScreen';
 import AIMcpDetailScreen from './AIScreen/screens/AIMcpDetailScreen';
+import AIDeveloperToolDetailScreen from './AIScreen/screens/AIDeveloperToolDetailScreen';
 import AIAgentEditScreen from './AIScreen/screens/AIAgentEditScreen';
 import AIKnowledgeScreen from './AIScreen/screens/AIKnowledgeScreen';
 import AIOrganizationScreen from './AIScreen/screens/AIOrganizationScreen';
@@ -344,6 +356,7 @@ const WorkspaceRedirect = (): ReactElement => {
 };
 
 const AppRoot = (): ReactElement => {
+  useWorkspacePageTools();
   const { recordingVersion } = useRecordingVersion();
   // Create panel refs for WebView
   const leftPanelRef = useRef<PanelImperativeHandle>(null);
@@ -351,6 +364,9 @@ const AppRoot = (): ReactElement => {
 
   // Create panel refs for XyneAI
   const xyneAIRightPanelRef = useRef<PanelImperativeHandle>(null);
+
+  // Panel ref for the Calendar sidebar (Week/Month force-max its own slot width)
+  const xyneCalendarPanelRef = useRef<PanelImperativeHandle>(null);
 
   const browserPanelLeftRef = useRef<PanelImperativeHandle>(null);
   const browserPanelRightRef = useRef<PanelImperativeHandle>(null);
@@ -389,7 +405,7 @@ const AppRoot = (): ReactElement => {
   useEffect(() => {
     const warnBeforeUnload = (event: BeforeUnloadEvent): void => {
       if (isElectronApp()) return;
-      if (!isRecordingInterruptible()) return;
+      if (!isInterruptible()) return;
       event.preventDefault();
     };
     window.addEventListener('beforeunload', warnBeforeUnload);
@@ -403,9 +419,9 @@ const AppRoot = (): ReactElement => {
       if (isElectronApp()) return;
       const isReloadCombo = (event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'r';
       if (!isReloadCombo && event.key !== 'F5') return;
-      if (!isRecordingInterruptible()) return;
+      if (!isInterruptible()) return;
       event.preventDefault();
-      void confirmRecordingInterrupt('reload').then(proceed => {
+      void confirmInterrupt('reload').then(proceed => {
         if (proceed) window.location.reload();
       });
     };
@@ -438,7 +454,11 @@ const AppRoot = (): ReactElement => {
         void navigate(`${base}/${encodeURIComponent(sessionId)}`);
         return;
       }
-      xyneAIActor.send({ type: 'OPEN', focusSessionId: sessionId });
+      xyneAIActor.send({
+        type: 'OPEN',
+        trackSource: 'completion_toast',
+        focusSessionId: sessionId,
+      });
     });
     return () => xyneAIStreamManager.setCompletionToastNavigator(null);
   }, [navigate, routeWorkspaceId]);
@@ -457,6 +477,7 @@ const AppRoot = (): ReactElement => {
       left: browserPanelLeftRef,
       right: browserPanelRightRef,
     });
+    setXyneCalendarPanelRef(xyneCalendarPanelRef);
   }, []);
 
   useEffect(() => {
@@ -496,11 +517,16 @@ const AppRoot = (): ReactElement => {
   const xyneAIKbDocName = useSelector(xyneAIActor, state => state.context.kbDocName);
   const xyneAIKbFolderId = useSelector(xyneAIActor, state => state.context.kbFolderId);
   const xyneAIKbFolderName = useSelector(xyneAIActor, state => state.context.kbFolderName);
+  const xyneAIWorkflowInfo = useSelector(xyneAIActor, state => state.context.workflowInfo);
+  const xyneAIWorkflowDismissed = useSelector(
+    xyneAIActor,
+    state => state.context.workflowDismissed,
+  );
   const xyneAIKbOpenNonce = useSelector(xyneAIActor, state => state.context.kbOpenNonce);
   const xyneAIResearchContext = useSelector(xyneAIActor, state => state.context.researchContext);
   const xyneAIInitialQuery = useSelector(xyneAIActor, state => state.context.initialQuery);
   const xyneAIAutoSendNonce = useSelector(xyneAIActor, state => state.context.autoSendNonce);
-  const isSdlcDebuggerOpen = useExternalDebuggerStore(state => state.target !== null);
+  const isCalendarOpen = useSelector(xyneCalendarActor, state => state.matches('open'));
   const { isMobile } = usePlatform();
   // No-op outside the SDLC bundle's framed instance.
   useSdlcFrameBridge();
@@ -511,19 +537,26 @@ const AppRoot = (): ReactElement => {
   // Get current location to check if we're on onboarding
   const location = useLocation();
   const sdlcChannelId = location.pathname.match(/\/sdlc\/([^/]+)/)?.[1] ?? null;
-  // On an SDLC route the iframe lane renders its own Ask AI panel, so the host
-  // must not also render one (that would double it).
-  const isSdlcRoute = /\/sdlc(\/|$)/.test(location.pathname);
+  // On an SDLC or Workflows route the iframe lane renders its own Ask AI panel, so
+  // the host must not also render one (that would double it).
+  const isSdlcRoute =
+    /\/sdlc(\/|$)/.test(location.pathname) || /^\/[^/]+\/workflows(\/|$)/.test(location.pathname);
   const previousSdlcChannelIdRef = useRef<string | null>(null);
 
   useEffect(() => {
     const previousChannelId = previousSdlcChannelIdRef.current;
     if (previousChannelId && previousChannelId !== sdlcChannelId) {
-      useExternalDebuggerStore.getState().close();
       setIsXyneDebuggerOpen(false);
     }
     previousSdlcChannelIdRef.current = sdlcChannelId;
   }, [sdlcChannelId]);
+
+  // Close the Ask AI drawer if the calendar opens, since they share the same right-side panel slot.
+  useEffect(() => {
+    if (isCalendarOpen) {
+      xyneAIActor.send({ type: 'CLOSE' });
+    }
+  }, [isCalendarOpen]);
 
   // Initialize activity tracking
   useActivityTracker(location.pathname);
@@ -532,12 +565,12 @@ const AppRoot = (): ReactElement => {
   // like "/<workspaceId>/ai" or "/<workspaceId>/ai/<sub>". Match that
   // structure rather than a leading "/ai" prefix (which never matches).
   const isOnAIPage = /^\/[^/]+\/ai(\/|$)/.test(location.pathname);
-  // /ai/knowledge is a KB browser (AIKnowledgeScreen), not the full-screen
-  // chat experience the isOnAIPage suppression below exists for — it has no
-  // embedded chat pane of its own, so "Ask AI" there needs the same global
-  // XyneAISidebar drawer /knowledge-base uses, or clicking it does nothing.
-  const isOnAIKnowledgePage = /^\/[^/]+\/ai\/knowledge(\/|$)/.test(location.pathname);
-  const isOnAIChatExperiencePage = isOnAIPage && !isOnAIKnowledgePage;
+  // Only /ai/chat has its own full-screen chat; other /ai pages keep the global XyneAISidebar.
+  const isOnAIChatExperiencePage = /^\/[^/]+\/ai\/chat(\/|$)/.test(location.pathname);
+  // Streams turns Ask AI into a column in the stream, so the floating drawer must
+  // not also appear — otherwise one trigger produces two chats. Same suppression
+  // shape as the /ai page, which has the same "already showing this" problem.
+  const isOnStreamsPage = /^\/[^/]+\/streams(\/|$)/.test(location.pathname);
 
   useEffect(() => {
     if (!reactNativeBridge.isAvailable()) {
@@ -569,19 +602,80 @@ const AppRoot = (): ReactElement => {
       (typeof state.value === 'object' && state.value !== null && 'connected' in state.value) ||
       state.value === 'connecting',
   );
-  const showSdlcDebuggerPanel = isSdlcDebuggerOpen && !isMobile && sdlcChannelId === null;
   // On SDLC routes the framed lane renders its own Ask AI panel inside the iframe,
   // so the host must not also show one (covers both /sdlc and /sdlc/<channelId>).
   const showXyneAIPanel =
     isXyneAIDrawerOpen &&
     !isMobile &&
     !isOnAIChatExperiencePage &&
-    !isSdlcRoute &&
-    !showSdlcDebuggerPanel;
+    !isOnStreamsPage &&
+    !isSdlcRoute;
+
+  const showCalendarPanel = isCalendarOpen && !isMobile && !isSdlcRoute && !showXyneAIPanel;
   // The SDLC lane ships Ask AI inside its own frame (see the isInPanelWebview
   // branch), so this is what decides whether that in-frame panel is showing.
   const showSdlcFrameXyneAI = isSdlcSurface && isXyneAIDrawerOpen && !isMobile && !isOnAIPage;
   const showBrowserPanel = browserPanelState === 'open' && !location.pathname.endsWith('/browser');
+
+  const renderPanels: SidebarPanelDescriptor[] = [
+    {
+      id: 'xyneai',
+      isActive: showXyneAIPanel,
+      size: {
+        default: XYNE_AI_PANEL_DEFAULT_SIZE,
+        min: isXyneDebuggerOpen ? XYNE_AI_PANEL_MIN_SIZE : 25,
+        max: isXyneDebuggerOpen ? 55 : 50,
+      },
+      panelRef: xyneAIRightPanelRef,
+      content: (
+        <XyneAISidebarZIndexShell>
+          <XyneAISidebar
+            channelId={xyneAIChannelId}
+            threadInfo={xyneAIThreadInfo}
+            startFreshChat={xyneAIStartFreshChat}
+            canvasInfo={xyneAICanvasInfo}
+            initialContextSelections={xyneAIInitialContextSelections}
+            contextOpenNonce={xyneAIContextOpenNonce}
+            kbCollectionId={xyneAIKbCollectionId ?? ''}
+            kbChannelId={xyneAIKbChannelId ?? ''}
+            kbDocId={xyneAIKbDocId ?? ''}
+            kbDocName={xyneAIKbDocName ?? ''}
+            kbFolderId={xyneAIKbFolderId ?? ''}
+            kbFolderName={xyneAIKbFolderName ?? ''}
+            kbOpenNonce={xyneAIKbOpenNonce}
+            workflowInfo={xyneAIWorkflowInfo}
+            workflowDismissed={xyneAIWorkflowDismissed}
+            researchContext={xyneAIResearchContext}
+            initialQuery={xyneAIInitialQuery ?? undefined}
+            autoSendNonce={xyneAIAutoSendNonce}
+            onDebuggerOpenChange={setIsXyneDebuggerOpen}
+          />
+        </XyneAISidebarZIndexShell>
+      ),
+    },
+    {
+      id: 'calendar',
+      isActive: showCalendarPanel,
+      size: {
+        default: XYNE_CALENDAR_SIDEBAR_DEFAULT_SIZE,
+        min: XYNE_CALENDAR_SIDEBAR_MIN_SIZE,
+        max: XYNE_CALENDAR_SIDEBAR_MAX_SIZE,
+      },
+      panelRef: xyneCalendarPanelRef,
+      content: <XyneCalendarSidebar />,
+    },
+    {
+      id: 'browser',
+      isActive: showBrowserPanel,
+      size: { default: 35, min: 0, max: 50 },
+      panelRef: browserPanelRightRef,
+      content: (
+        <div className='h-full'>
+          <BrowserPanel />
+        </div>
+      ),
+    },
+  ];
 
   const shouldShowMobileHeader =
     isMobile && isCallActive && machineViewMode === 'mini' && externalId && !isOnboarding;
@@ -606,7 +700,6 @@ const AppRoot = (): ReactElement => {
   // global XyneAISidebar must never be open there. Close it on any pathname
   // change that lands inside /ai — this covers both opening it elsewhere and
   // then navigating in, and any code path that tries to open it while here.
-  // /ai/knowledge is exempt — see isOnAIKnowledgePage above.
   useEffect(() => {
     if (!isOnAIChatExperiencePage) return;
     if (xyneAIActor.getSnapshot().matches('open')) {
@@ -695,6 +788,7 @@ const AppRoot = (): ReactElement => {
               <ShareRecordingHandler />
               <AIOnboardingProvider>
                 <AIOnboardingTrigger isOnboarding={isOnboarding} />
+                <AssistantPanelTrigger />
                 <AIOnboardingOverlay />
                 <SlashCommandArtifactSideEffectProvider>
                   {!isInPanelWebview && <SlashCommandArtifactBanner />}
@@ -775,6 +869,8 @@ const AppRoot = (): ReactElement => {
                                       kbCollectionId={xyneAIKbCollectionId ?? ''}
                                       kbChannelId={xyneAIKbChannelId ?? ''}
                                       kbDocId={xyneAIKbDocId ?? ''}
+                                      workflowInfo={xyneAIWorkflowInfo}
+                                      workflowDismissed={xyneAIWorkflowDismissed}
                                       kbDocName={xyneAIKbDocName ?? ''}
                                       kbFolderId={xyneAIKbFolderId ?? ''}
                                       kbFolderName={xyneAIKbFolderName ?? ''}
@@ -798,152 +894,57 @@ const AppRoot = (): ReactElement => {
                           <EditWarningModal />
                           <Outlet />
                         </main>
-                      ) : showXyneAIPanel ||
-                        showSdlcDebuggerPanel ||
-                        browserPanelState === 'open' ||
-                        webviewState === 'closed' ||
-                        webviewState === 'idle' ? (
-                        <div className='flex flex-col h-screen'>
-                          <ResizableGroup
-                            orientation='horizontal'
-                            className='flex-1 no-scrollbar overflow-auto'
-                            autoSaveId='app-root-browser'
-                            panelIds={
-                              showSdlcDebuggerPanel
-                                ? ['app-root-left', 'app-root-sdlc-debugger']
-                                : showXyneAIPanel
-                                  ? ['app-root-left', 'app-root-xyneai']
-                                  : showBrowserPanel
-                                    ? ['app-root-left', 'app-root-browser']
-                                    : ['app-root-left']
-                            }
-                          >
-                            <Panel
-                              id='app-root-left'
-                              panelRef={browserPanelLeftRef}
-                              defaultSize={
-                                showXyneAIPanel
-                                  ? `${100 - XYNE_AI_PANEL_DEFAULT_SIZE}%`
-                                  : showSdlcDebuggerPanel || showBrowserPanel
-                                    ? '65%'
-                                    : '100%'
-                              }
-                            >
-                              <div
-                                className={`flex h-full ${shouldShowMobileHeader ? 'pt-[60px]' : ''}`}
-                              >
-                                <AppSidebar />
-                                <main className='flex-1 no-scrollbar overflow-auto'>
-                                  <EditWarningModal />
-                                  <Outlet />
-                                </main>
-                              </div>
-                            </Panel>
-                            {showSdlcDebuggerPanel ? (
-                              <>
-                                <Separator className='w-[2px] transition-colors cursor-col-resize flex items-center justify-center group'>
-                                  <div
-                                    id='panel-resize-divider'
-                                    className='w-[2px] h-full bg-transparent group-hover:bg-primary group-active:bg-primary'
-                                  ></div>
-                                </Separator>
-                                <Panel
-                                  id='app-root-sdlc-debugger'
-                                  defaultSize='35%'
-                                  minSize='30%'
-                                  maxSize='55%'
-                                >
-                                  <SdlcDebuggerPanel />
-                                </Panel>
-                              </>
-                            ) : showXyneAIPanel ? (
-                              <>
-                                <Separator className='w-[2px] transition-colors cursor-col-resize flex items-center justify-center group'>
-                                  <div
-                                    id='panel-resize-divider'
-                                    className='w-[2px] h-full bg-transparent group-hover:bg-primary group-active:bg-primary'
-                                  ></div>
-                                </Separator>
-                                <Panel
-                                  id='app-root-xyneai'
-                                  panelRef={xyneAIRightPanelRef}
-                                  defaultSize={`${XYNE_AI_PANEL_DEFAULT_SIZE}%`}
-                                  maxSize={isXyneDebuggerOpen ? '55%' : '50%'}
-                                  minSize={
-                                    isXyneDebuggerOpen ? `${XYNE_AI_PANEL_MIN_SIZE}%` : '25%'
-                                  }
-                                >
-                                  <XyneAISidebarZIndexShell>
-                                    <XyneAISidebar
-                                      channelId={xyneAIChannelId}
-                                      threadInfo={xyneAIThreadInfo}
-                                      startFreshChat={xyneAIStartFreshChat}
-                                      canvasInfo={xyneAICanvasInfo}
-                                      initialContextSelections={xyneAIInitialContextSelections}
-                                      contextOpenNonce={xyneAIContextOpenNonce}
-                                      kbCollectionId={xyneAIKbCollectionId ?? ''}
-                                      kbChannelId={xyneAIKbChannelId ?? ''}
-                                      kbDocId={xyneAIKbDocId ?? ''}
-                                      kbDocName={xyneAIKbDocName ?? ''}
-                                      kbFolderId={xyneAIKbFolderId ?? ''}
-                                      kbFolderName={xyneAIKbFolderName ?? ''}
-                                      kbOpenNonce={xyneAIKbOpenNonce}
-                                      researchContext={xyneAIResearchContext}
-                                      initialQuery={xyneAIInitialQuery ?? undefined}
-                                      autoSendNonce={xyneAIAutoSendNonce}
-                                      onDebuggerOpenChange={setIsXyneDebuggerOpen}
-                                    />
-                                  </XyneAISidebarZIndexShell>
-                                </Panel>
-                              </>
-                            ) : (
-                              showBrowserPanel && (
-                                <>
-                                  <Separator className='w-1 hover:bg-sidebar-divider active:bg-sidebar-divider transition-colors duration-200 cursor-col-resize flex items-center justify-center group'>
-                                    <div className='w-0.5 h-8 bg-transparent group-hover:bg-sidebar-divider group-active:bg-sidebar-divider transition-colors duration-200 rounded-full'></div>
-                                  </Separator>
-                                  <Panel
-                                    id='app-root-browser'
-                                    panelRef={browserPanelRightRef}
-                                    defaultSize='35%'
-                                    maxSize='50%'
-                                  >
-                                    <div className='h-full'>
-                                      <BrowserPanel />
-                                    </div>
-                                  </Panel>
-                                </>
-                              )
-                            )}
-                          </ResizableGroup>
-                        </div>
                       ) : (
-                        // WebView is open - show panel layout with WebView
-                        <div className='flex flex-col h-screen'>
-                          <ResizableGroup
-                            orientation='horizontal'
-                            className='flex-1 overflow-hidden'
-                            autoSaveId='app-root'
-                          >
-                            <Panel id='app-root-left' panelRef={leftPanelRef} defaultSize='50%'>
-                              <div
-                                className={`flex h-full ${shouldShowMobileHeader ? 'pt-[60px]' : ''}`}
+                        <AppSidebarHost
+                          panels={renderPanels}
+                          mainPanelRef={browserPanelLeftRef}
+                          forceRender={
+                            webviewState === 'closed' ||
+                            webviewState === 'idle' ||
+                            browserPanelState === 'open'
+                          }
+                          fallback={
+                            <div className='flex flex-col h-screen'>
+                              <ResizableGroup
+                                orientation='horizontal'
+                                className='flex-1 overflow-hidden'
+                                autoSaveId='app-root'
                               >
-                                <AppSidebar />
-                                <main className='flex-1 no-scrollbar overflow-auto'>
-                                  <EditWarningModal />
-                                  <Outlet />
-                                </main>
-                              </div>
-                            </Panel>
-                            <Separator className='w-2 hover:bg-sidebar-divider active:bg-sidebar-divider transition-colors duration-200 cursor-col-resize flex items-center justify-center group'>
-                              <div className='w-0.5 h-8 bg-transparent group-hover:bg-sidebar-divider group-active:bg-sidebar-divider transition-colors duration-200 rounded-full'></div>
-                            </Separator>
-                            <Panel id='app-root-webview' panelRef={rightPanelRef} defaultSize='50%'>
-                              <WebView />
-                            </Panel>
-                          </ResizableGroup>
-                        </div>
+                                <Panel id='app-root-left' panelRef={leftPanelRef} defaultSize='50%'>
+                                  <div
+                                    className={`flex h-full ${shouldShowMobileHeader ? 'pt-[60px]' : ''}`}
+                                  >
+                                    <AppSidebar />
+                                    <main className='flex-1 no-scrollbar overflow-auto'>
+                                      <EditWarningModal />
+                                      <Outlet />
+                                    </main>
+                                  </div>
+                                </Panel>
+                                <Separator className='w-2 hover:bg-sidebar-divider active:bg-sidebar-divider transition-colors duration-200 cursor-col-resize flex items-center justify-center group'>
+                                  <div className='w-0.5 h-8 bg-transparent group-hover:bg-sidebar-divider group-active:bg-sidebar-divider transition-colors duration-200 rounded-full'></div>
+                                </Separator>
+                                <Panel
+                                  id='app-root-webview'
+                                  panelRef={rightPanelRef}
+                                  defaultSize='50%'
+                                >
+                                  <WebView />
+                                </Panel>
+                              </ResizableGroup>
+                            </div>
+                          }
+                        >
+                          <div
+                            className={`flex h-full ${shouldShowMobileHeader ? 'pt-[60px]' : ''}`}
+                          >
+                            <AppSidebar />
+                            <main className='flex-1 no-scrollbar overflow-auto'>
+                              <EditWarningModal />
+                              <Outlet />
+                            </main>
+                          </div>
+                        </AppSidebarHost>
                       )}
                       {/* Global overlays and IPC handlers — skipped in the panel
                     webview (we don't want nested CMDK, nested browser panel,
@@ -963,15 +964,18 @@ const AppRoot = (): ReactElement => {
                           ) : (
                             <RecordingOverlay />
                           )}
+                          <RecordingCameraBubble />
+                          <ScreenPickerHost />
                           <GlobalUploadProgress />
                           <NotificationHandler />
+                          <EphemeralFlowHost />
                           <ElectronBadgeSync />
                           {ELECTRON_UPDATE_NUDGE_ENABLED && <ElectronUpdateNudge />}
                           <SosAlertBanner />
                           <CallFromRecentsHandler />
                           <CloudAgentFloatingHost />
                           <BrowserPanelHandler />
-                          <GlobalCommandMenu />
+                          <GlobalCommandMenu aiOverview ticketScreenScope />
                           <ShortcutsHelpModal
                             isOpen={isShortcutsModalOpen}
                             onClose={() => setIsShortcutsModalOpen(false)}
@@ -1012,6 +1016,8 @@ const AppRoot = (): ReactElement => {
                             kbCollectionId={xyneAIKbCollectionId ?? ''}
                             kbChannelId={xyneAIKbChannelId ?? ''}
                             kbDocId={xyneAIKbDocId ?? ''}
+                            workflowInfo={xyneAIWorkflowInfo}
+                            workflowDismissed={xyneAIWorkflowDismissed}
                             kbDocName={xyneAIKbDocName ?? ''}
                             kbFolderId={xyneAIKbFolderId ?? ''}
                             kbFolderName={xyneAIKbFolderName ?? ''}
@@ -1025,52 +1031,43 @@ const AppRoot = (): ReactElement => {
                         </div>
                       )}
                       {/* XyneAI Mobile Drawer */}
-                      {isMobile && !isInPanelWebview && !isOnAIChatExperiencePage && (
-                        <Drawer
-                          open={isXyneAIDrawerOpen}
-                          onOpenChange={open => {
-                            // Don't allow closing during AI onboarding
-                            if (!open && isAIOnboardingActive()) return;
-                            xyneAIActor.send({ type: open ? 'OPEN' : 'CLOSE' });
-                          }}
-                          title='Xyne AI'
-                          description='Ask questions about your channel'
-                        >
-                          <XyneAISidebar
-                            channelId={xyneAIChannelId}
-                            threadInfo={xyneAIThreadInfo}
-                            startFreshChat={xyneAIStartFreshChat}
-                            canvasInfo={xyneAICanvasInfo}
-                            initialContextSelections={xyneAIInitialContextSelections}
-                            contextOpenNonce={xyneAIContextOpenNonce}
-                            kbCollectionId={xyneAIKbCollectionId ?? ''}
-                            kbChannelId={xyneAIKbChannelId ?? ''}
-                            kbDocId={xyneAIKbDocId ?? ''}
-                            kbDocName={xyneAIKbDocName ?? ''}
-                            kbFolderId={xyneAIKbFolderId ?? ''}
-                            kbFolderName={xyneAIKbFolderName ?? ''}
-                            kbOpenNonce={xyneAIKbOpenNonce}
-                            researchContext={xyneAIResearchContext}
-                            initialQuery={xyneAIInitialQuery ?? undefined}
-                            autoSendNonce={xyneAIAutoSendNonce}
-                            onDebuggerOpenChange={setIsXyneDebuggerOpen}
-                          />
-                        </Drawer>
-                      )}
-                      {isMobile && !isInPanelWebview && (
-                        <Drawer
-                          open={isSdlcDebuggerOpen}
-                          onOpenChange={open => {
-                            if (!open) useExternalDebuggerStore.getState().close();
-                          }}
-                          title='Debugger'
-                          description='Inspect this SDLC run'
-                        >
-                          <div className='h-[85vh]'>
-                            <SdlcDebuggerPanel />
-                          </div>
-                        </Drawer>
-                      )}
+                      {isMobile &&
+                        !isInPanelWebview &&
+                        !isOnAIChatExperiencePage &&
+                        !isOnStreamsPage && (
+                          <Drawer
+                            open={isXyneAIDrawerOpen}
+                            onOpenChange={open => {
+                              // Don't allow closing during AI onboarding
+                              if (!open && isAIOnboardingActive()) return;
+                              xyneAIActor.send({ type: open ? 'OPEN' : 'CLOSE' });
+                            }}
+                            title='Xyne AI'
+                            description='Ask questions about your channel'
+                          >
+                            <XyneAISidebar
+                              channelId={xyneAIChannelId}
+                              threadInfo={xyneAIThreadInfo}
+                              startFreshChat={xyneAIStartFreshChat}
+                              canvasInfo={xyneAICanvasInfo}
+                              initialContextSelections={xyneAIInitialContextSelections}
+                              contextOpenNonce={xyneAIContextOpenNonce}
+                              kbCollectionId={xyneAIKbCollectionId ?? ''}
+                              kbChannelId={xyneAIKbChannelId ?? ''}
+                              kbDocId={xyneAIKbDocId ?? ''}
+                              workflowInfo={xyneAIWorkflowInfo}
+                              workflowDismissed={xyneAIWorkflowDismissed}
+                              kbDocName={xyneAIKbDocName ?? ''}
+                              kbFolderId={xyneAIKbFolderId ?? ''}
+                              kbFolderName={xyneAIKbFolderName ?? ''}
+                              kbOpenNonce={xyneAIKbOpenNonce}
+                              researchContext={xyneAIResearchContext}
+                              initialQuery={xyneAIInitialQuery ?? undefined}
+                              autoSendNonce={xyneAIAutoSendNonce}
+                              onDebuggerOpenChange={setIsXyneDebuggerOpen}
+                            />
+                          </Drawer>
+                        )}
                     </SdlcFrameProvider>
                   </EditProvider>
                 </SlashCommandArtifactSideEffectProvider>
@@ -1090,6 +1087,10 @@ const SdlcRouteElement = (): ReactElement =>
 /** A ticket page, but still inside the hub's frame so its history stays in one router. */
 const SdlcTicketRouteElement = (): ReactElement =>
   isSdlcSurface ? <TicketView /> : <SdlcFrameViewport />;
+
+/** Real screen in the lane bundle; the framed placeholder in the main one, as for SDLC. */
+const WorkflowsRouteElement = (): ReactElement =>
+  isSdlcSurface ? <WorkflowScreen /> : <SdlcFrameViewport />;
 
 export const router = createBrowserRouter(
   [
@@ -1124,8 +1125,29 @@ export const router = createBrowserRouter(
                   element: <HomeScreen />,
                 },
                 {
+                  // A saved artifact app on its own, opened from the toolbar.
+                  // Outside the /ai subtree on purpose: a workspace that has
+                  // disabled Xyne AI from the rail can still keep apps there.
+                  path: 'app/:appId',
+                  element: <ArtifactAppHostRoute placement={{ surface: 'toolbar' }} />,
+                },
+                {
+                  // Standalone migration/insights URLs from before these were
+                  // folded into /migrations or removed; bookmarks still land here.
                   path: 'slack-migration',
-                  element: <SlackMigration />,
+                  element: <Navigate to='../migrations/slack' replace />,
+                },
+                {
+                  path: 'jira-migration',
+                  element: <Navigate to='../migrations/jira' replace />,
+                },
+                {
+                  path: 'migration/whatsapp',
+                  element: <Navigate to='../migrations/whatsapp' replace />,
+                },
+                {
+                  path: 'product-insights',
+                  element: <Navigate to='..' replace />,
                 },
                 {
                   path: 'ai',
@@ -1167,6 +1189,7 @@ export const router = createBrowserRouter(
                     { path: 'library/subagent/:name', element: <AISubagentDetailScreen /> },
                     { path: 'library/skill/:slug', element: <AISkillDetailScreen /> },
                     { path: 'library/mcp/:type', element: <AIMcpDetailScreen /> },
+                    { path: 'library/developers/:tool', element: <AIDeveloperToolDetailScreen /> },
                     { path: 'library/app/:appId', element: <ArtifactAppScreen /> },
                     {
                       path: 'knowledge',
@@ -1218,6 +1241,10 @@ export const router = createBrowserRouter(
                 {
                   path: 'rca/:rcaId',
                   element: <RCADetailScreen />,
+                },
+                {
+                  path: 'streams',
+                  element: <StreamsScreen />,
                 },
                 {
                   path: 'chat',
@@ -1308,6 +1335,12 @@ export const router = createBrowserRouter(
                         {
                           path: 'my-tickets',
                           element: <MyTicketsScreen />,
+                        },
+                        // An artifact app added to the Inbox menubar, shown in
+                        // the chat panel with the directory still alongside.
+                        {
+                          path: 'app/:appId',
+                          element: <ArtifactAppHostRoute placement={{ surface: 'inbox' }} />,
                         },
                         // Channel routes (must come after specific routes)
                         {
@@ -1437,6 +1470,14 @@ export const router = createBrowserRouter(
                         // ahead of the shared `:channelId` route.
                         { path: 'ticket/:channelId', element: <ActivitySupportTicket /> },
                         { path: 'ticket/:channelId/:ticketId', element: <ActivitySupportTicket /> },
+                        // Recordings opened from the Activity list render here for the
+                        // same reason — the list stays mounted on the left instead of
+                        // the page navigating away to the standalone /recordings/:id.
+                        {
+                          path: 'recording/:recordingId',
+                          element: <RecordingDetailRoute embedded />,
+                        },
+                        { path: 'calendar', element: <ActivityCalendarWeekView /> },
                         ...sharedChatRoutes,
                       ],
                     },
@@ -1462,15 +1503,7 @@ export const router = createBrowserRouter(
                   path: 'workflows/*',
                   element: (
                     <ResourceProtectedRoute resourceName='WORKFLOWS' minAccess='READ'>
-                      <WorkflowScreen />
-                    </ResourceProtectedRoute>
-                  ),
-                },
-                {
-                  path: 'product-insights',
-                  element: (
-                    <ResourceProtectedRoute resourceName='PRODUCT-INSIGHTS'>
-                      <ProductInsightsScreen />
+                      <WorkflowsRouteElement />
                     </ResourceProtectedRoute>
                   ),
                 },
@@ -1489,45 +1522,6 @@ export const router = createBrowserRouter(
                       <AgentsScreen />
                     </ResourceProtectedRoute>
                   ),
-                },
-                {
-                  path: 'claw-agents',
-                  element: (
-                    <ToolbarProtectedRoute path='/claw-agents'>
-                      <GuestBlockedRoute>
-                        <ClawAgentsScreen />
-                      </GuestBlockedRoute>
-                    </ToolbarProtectedRoute>
-                  ),
-                  children: [
-                    { index: true, element: <AgentsTab /> },
-                    { path: 'create', element: <ClawAgentCreateScreen /> },
-                    { path: 'agents/:agentSlug', element: <ClawAgentDetailScreen /> },
-                    { path: 'mcp', element: <McpTab /> },
-                    { path: 'mcp/:mcpId', element: <ClawMcpDetailScreen /> },
-                    { path: 'skills', element: <SkillsTab /> },
-                    { path: 'skills/create', element: <ClawSkillCreateScreen /> },
-                    { path: 'skills/:skillSlug', element: <ClawSkillDetailScreen /> },
-                    { path: 'subagents', element: <SubagentsTab /> },
-                    { path: 'subagents/create', element: <ClawSubagentCreateScreen /> },
-                    { path: 'subagents/:subagentName', element: <ClawSubagentDetailScreen /> },
-                    { path: 'organization', element: <ClawOrganizationScreen /> },
-                    {
-                      path: 'digital-twin',
-                      element: <ClawDigitalTwinScreen />,
-                      children: [
-                        { index: true, element: <DigitalTwinMemoriesTab /> },
-                        { path: 'hot', element: <DigitalTwinHotTab /> },
-                        { path: 'proposals', element: <DigitalTwinProposalsTab /> },
-                        { path: 'recall', element: <DigitalTwinRecallTab /> },
-                        { path: 'graph', element: <DigitalTwinGraphTab /> },
-                        { path: 'metrics', element: <ClawDigitalTwinMetricsScreen /> },
-                        { path: 'settings', element: <DigitalTwinSettingsTab /> },
-                      ],
-                    },
-                    { path: 'metrics', element: <ClawMetricsScreen /> },
-                    { path: 'settings', element: <ClawSettingsScreen /> },
-                  ],
                 },
                 {
                   path: 'knowledge-base',
@@ -1563,12 +1557,9 @@ export const router = createBrowserRouter(
                   ],
                 },
                 {
+                  // The Context screen was removed; old links land on the workspace home.
                   path: 'memory',
-                  element: (
-                    <ToolbarProtectedRoute path='/memory'>
-                      <MemoryScreen />
-                    </ToolbarProtectedRoute>
-                  ),
+                  element: <Navigate to='..' replace />,
                 },
                 {
                   path: 'analytics',
@@ -1641,6 +1632,14 @@ export const router = createBrowserRouter(
                   ),
                 },
                 {
+                  path: 'sdlc/:channelId/workflows/*',
+                  element: (
+                    <ResourceProtectedRoute resourceName='SDLC' minAccess='READ'>
+                      <SdlcRouteElement />
+                    </ResourceProtectedRoute>
+                  ),
+                },
+                {
                   path: 'sdlc/:channelId/tickets/:ticketId',
                   element: (
                     <ResourceProtectedRoute resourceName='SDLC' minAccess='READ'>
@@ -1672,15 +1671,7 @@ export const router = createBrowserRouter(
                 },
                 {
                   path: 'user-groups',
-                  element: (
-                    <ResourceProtectedRoute
-                      resourceName='USER-GROUPS'
-                      minAccess='WRITE'
-                      allowUserGroupCreator
-                    >
-                      <UserGroupsScreen />
-                    </ResourceProtectedRoute>
-                  ),
+                  element: <LegacyOrganisationsRedirect section='user-groups' />,
                 },
                 {
                   path: 'listProjects',
@@ -1710,7 +1701,7 @@ export const router = createBrowserRouter(
                   path: 'calls',
                   element: (
                     <ToolbarProtectedRoute path='/calls'>
-                      <CallHistoryScreen />
+                      <CallsRoute />
                     </ToolbarProtectedRoute>
                   ),
                   children: [
@@ -1742,15 +1733,7 @@ export const router = createBrowserRouter(
                 },
                 {
                   path: 'user-groups/:userGroupId/assignment-config',
-                  element: (
-                    <ResourceProtectedRoute
-                      resourceName='USER-GROUPS'
-                      minAccess='WRITE'
-                      allowUserGroupCreator
-                    >
-                      <AssignmentConfigWrapper />
-                    </ResourceProtectedRoute>
-                  ),
+                  element: <LegacyOrganisationsRedirect section='user-groups' />,
                 },
                 {
                   path: 'analytics-dashboard',
@@ -1787,22 +1770,24 @@ export const router = createBrowserRouter(
                   path: 'support',
                   element: (
                     <ResourceProtectedRoute resourceName='SUPPORT'>
-                      <SaveRoute
-                        keyword='support'
-                        stripSearchParams={['settings', 'openSettings']}
-                        preserveSearchParams={[
-                          'emailConnected',
-                          'emailError',
-                          'channelEmailMailboxConnected',
-                          'deskIntegrations',
-                          'workspaceMailboxConnected',
-                          'email',
-                          'provider',
-                        ]}
-                        redirectOnlyAt={/^\/[^/]+\/support\/?$/}
-                      >
-                        <SupportScreen />
-                      </SaveRoute>
+                      <SupportListRestore>
+                        <SaveRoute
+                          keyword='support'
+                          stripSearchParams={['settings', 'openSettings']}
+                          preserveSearchParams={[
+                            'emailConnected',
+                            'emailError',
+                            'channelEmailMailboxConnected',
+                            'deskIntegrations',
+                            'workspaceMailboxConnected',
+                            'email',
+                            'provider',
+                          ]}
+                          redirectOnlyAt={/^\/[^/]+\/support\/?$/}
+                        >
+                          <SupportScreen />
+                        </SaveRoute>
+                      </SupportListRestore>
                     </ResourceProtectedRoute>
                   ),
                   children: [
@@ -1828,19 +1813,115 @@ export const router = createBrowserRouter(
                 },
                 {
                   path: 'workspace-management',
-                  element: (
-                    <ResourceProtectedRoute resourceName='WORKSPACE'>
-                      <WorkspaceManagementScreen />
-                    </ResourceProtectedRoute>
-                  ),
+                  element: <LegacyOrganisationsRedirect section={legacyWorkspaceTab} />,
                 },
                 {
+                  // One sidebar module for workspace settings, members, user
+                  // groups, roles and organisations — see OrganisationsModule.
                   path: 'organisations',
-                  element: (
-                    <ResourceProtectedRoute resourceName='ORGANIZATIONS'>
-                      <OrganisationsScreen />
-                    </ResourceProtectedRoute>
-                  ),
+                  element: <OrganisationsModuleScreen />,
+                  children: [
+                    { index: true, element: <OrganisationsIndexRedirect /> },
+                    {
+                      path: 'general',
+                      element: (
+                        <OrganisationsSectionGuard section='general'>
+                          <OrganisationsPage>
+                            <GeneralTab isActive />
+                          </OrganisationsPage>
+                        </OrganisationsSectionGuard>
+                      ),
+                    },
+                    {
+                      path: 'members',
+                      element: (
+                        <OrganisationsSectionGuard section='members'>
+                          <OrganisationsPage wide>
+                            <MembersTab />
+                          </OrganisationsPage>
+                        </OrganisationsSectionGuard>
+                      ),
+                    },
+                    {
+                      path: 'invitations',
+                      element: (
+                        <OrganisationsSectionGuard section='invitations'>
+                          <OrganisationsPage>
+                            <InvitationsTab isActive />
+                          </OrganisationsPage>
+                        </OrganisationsSectionGuard>
+                      ),
+                    },
+                    {
+                      path: 'guests',
+                      element: (
+                        <OrganisationsSectionGuard section='guests'>
+                          <OrganisationsPage>
+                            <GuestUsersTab isActive />
+                          </OrganisationsPage>
+                        </OrganisationsSectionGuard>
+                      ),
+                    },
+                    {
+                      path: 'repository-credentials',
+                      element: (
+                        <OrganisationsSectionGuard section='repository-credentials'>
+                          <OrganisationsPage>
+                            <RepositoryCredentialsTab isActive />
+                          </OrganisationsPage>
+                        </OrganisationsSectionGuard>
+                      ),
+                    },
+                    {
+                      path: 'toolbar',
+                      element: (
+                        <OrganisationsSectionGuard section='toolbar'>
+                          <OrganisationsPage>
+                            <ToolbarTab isActive />
+                          </OrganisationsPage>
+                        </OrganisationsSectionGuard>
+                      ),
+                    },
+                    {
+                      path: 'user-groups',
+                      element: (
+                        <OrganisationsSectionGuard section='user-groups'>
+                          <UserGroupsScreen />
+                        </OrganisationsSectionGuard>
+                      ),
+                    },
+                    {
+                      path: 'user-groups/:userGroupId/assignment-config',
+                      // The inner guard also checks a creator owns *this* group.
+                      element: (
+                        <OrganisationsSectionGuard section='user-groups'>
+                          <ResourceProtectedRoute
+                            resourceName='USER-GROUPS'
+                            minAccess='WRITE'
+                            allowUserGroupCreator
+                          >
+                            <AssignmentConfigWrapper />
+                          </ResourceProtectedRoute>
+                        </OrganisationsSectionGuard>
+                      ),
+                    },
+                    {
+                      path: 'roles',
+                      element: (
+                        <OrganisationsSectionGuard section='roles'>
+                          <RoleManagementScreen />
+                        </OrganisationsSectionGuard>
+                      ),
+                    },
+                    {
+                      path: 'all',
+                      element: (
+                        <OrganisationsSectionGuard section='all'>
+                          <OrganisationsScreen />
+                        </OrganisationsSectionGuard>
+                      ),
+                    },
+                  ],
                 },
                 {
                   path: 'forms',
@@ -1884,33 +1965,17 @@ export const router = createBrowserRouter(
                 },
                 {
                   path: 'resource-access',
-                  element: (
-                    <ResourceProtectedRoute resourceName='USERS'>
-                      <ResourceAccessScreen />
-                    </ResourceProtectedRoute>
-                  ),
+                  element: <LegacyOrganisationsRedirect section='members' />,
                 },
                 {
                   path: 'roles',
-                  element: (
-                    <ResourceProtectedRoute resourceName='ROLES'>
-                      <RoleManagementScreen />
-                    </ResourceProtectedRoute>
-                  ),
+                  element: <LegacyOrganisationsRedirect section='roles' />,
                 },
                 {
                   path: 'tag-review',
                   element: (
                     <ResourceProtectedRoute resourceName='WORKSPACE'>
                       <TagReviewView />
-                    </ResourceProtectedRoute>
-                  ),
-                },
-                {
-                  path: 'jira-migration',
-                  element: (
-                    <ResourceProtectedRoute resourceName='TICKET-MIGRATION'>
-                      <JiraMigrationScreen />
                     </ResourceProtectedRoute>
                   ),
                 },
@@ -1923,12 +1988,38 @@ export const router = createBrowserRouter(
                   ),
                 },
                 {
-                  path: 'migration/whatsapp',
-                  element: (
-                    <ResourceProtectedRoute resourceName='TICKET-MIGRATION'>
-                      <WhatsAppBulkMigrationScreen />
-                    </ResourceProtectedRoute>
-                  ),
+                  // No toolbar guard on the hub itself: Jira/WhatsApp are gated by
+                  // TICKET-MIGRATION, Slack by its own toolbar path, and the index
+                  // redirect 404s when neither is reachable.
+                  path: 'migrations',
+                  element: <MigrationsScreen />,
+                  children: [
+                    { index: true, element: <MigrationsIndexRedirect /> },
+                    {
+                      path: 'jira',
+                      element: (
+                        <ResourceProtectedRoute resourceName='TICKET-MIGRATION'>
+                          <JiraMigrationScreen />
+                        </ResourceProtectedRoute>
+                      ),
+                    },
+                    {
+                      path: 'whatsapp',
+                      element: (
+                        <ResourceProtectedRoute resourceName='TICKET-MIGRATION'>
+                          <WhatsAppBulkMigrationScreen />
+                        </ResourceProtectedRoute>
+                      ),
+                    },
+                    {
+                      path: 'slack',
+                      element: (
+                        <ToolbarProtectedRoute path='/migrations/slack'>
+                          <SlackMigration />
+                        </ToolbarProtectedRoute>
+                      ),
+                    },
+                  ],
                 },
                 {
                   path: 'guide',
@@ -2087,6 +2178,18 @@ export const router = createBrowserRouter(
         {
           path: '/auth',
           element: <AuthScreen />,
+        },
+        {
+          path: '/terms',
+          element: <TermsOfServiceScreen />,
+        },
+        {
+          path: '/privacy',
+          element: <PrivacyPolicyScreen />,
+        },
+        {
+          path: '/sdk-sso/authorize',
+          element: <SdkSsoAuthorizeScreen />,
         },
         {
           path: '/workspaces',

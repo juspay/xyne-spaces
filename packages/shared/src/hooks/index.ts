@@ -37,26 +37,32 @@ export type { MentionResult } from "../types/mention.js";
 
 export {
   searchUsers,
+  searchUsersWithScores,
   useUsers,
   useUsersById,
   useUser,
+  useUserLookup,
   useSelf,
   useUserSearch,
   useActiveUsers,
   useActiveUserSearch,
   invalidateUsersMapCache,
 } from "./useUsers.js";
+export type { UserLookup } from "./useUsers.js";
 
 export {
   searchChannels,
   searchChannelsWithScores,
   useAllChannels,
+  getAllChannels,
   useAllVisibleChannels,
   useVisibleProjects,
   useChannel,
   useVisibleChannel,
   useChannelByName,
   useChannelSearch,
+  useChannelMentionSearch,
+  searchMentionableChannels,
   useBrowsableChannels,
   useMigratedChannels,
   useEmailChannels,
@@ -94,7 +100,7 @@ export {
 export { useQuery, useRawQuery } from "./useQuery.js";
 
 export { useCachedQuery } from "./useCachedQuery.js";
-export type { UseCachedQueryOptions } from "./useCachedQuery.js";
+export type { UseCachedQueryOptions, UseCachedQueryMeta, CachedQueryResult } from "./useCachedQuery.js";
 
 export { useCurrentUserRoleIds } from "./useRoles.js";
 export type { Role } from "./useRoles.js";

@@ -12,14 +12,22 @@ import { MESSAGE_RECEIVED_EVENT } from '../triggers/message-received.trigger';
 import { CALL_EVENT, CALL_STARTED, CALL_ENDED } from '../triggers/call.trigger';
 import { TAG_GENERATED_EVENT } from '../triggers/tag-generated.trigger';
 
+export interface TicketEventScope {
+  boardId: string | null;
+  projectId: string | null;
+  channelId: string | null;
+}
+
 export interface TicketCreatedEventPayload {
   ticketId: string;
+  scope: TicketEventScope;
   formFieldChanges?: FormFieldChanges;
   performedBy?: { id: string | null };
 }
 
 export interface TicketUpdatedEventPayload {
   ticketId: string;
+  scope: TicketEventScope;
   changes: TicketChanges;
   formFieldChanges?: FormFieldChanges;
   performedBy: { id: string | null };
@@ -44,6 +52,17 @@ export interface MessageReceivedEventPayload {
   channelId: string;
   authorId: string;
   msgType: MessageType;
+  /** True when an edit produced this event rather than a new message. */
+  isEdit?: boolean;
+  /** True when the message is a reply, not the first message of its conversation. */
+  isReply?: boolean;
+  /**
+   * Fields that must never be persisted or logged. The router drops `_transient`
+   * before serialising the execution context — whether or not the trigger
+   * projected the payload — so a registry miss degrades to "no transition
+   * detection" rather than writing a message body onto the execution row.
+   */
+  _transient?: { previousContent?: string };
 }
 
 export interface CallEventPayload {

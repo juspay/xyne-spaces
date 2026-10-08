@@ -1,5 +1,5 @@
 import { logger } from '@/utils/logger';
-import { runAsSystem } from '@/database/tenant/context';
+import { getWorkspaceNotificationCountsQuery } from '@/bypassAcl/notificationServices';
 import { repositories } from '@/database/repositories';
 import { websocketService } from './websocketService';
 import {
@@ -18,12 +18,12 @@ import { resolveSdlcNavTarget } from '@/sdlc/sdlcNavTarget';
 import { resolveWorkspaceIdFromModel } from '@/database/tenant/workspace-utils';
 import * as notificationFilterService from './notificationFilterService';
 import type { PrefetchedFilterData } from './notificationFilterService';
-import { serializeInitialMessageMd,
+import { buildInitialMessageMd,
   isDeskChannelType,
   type InitialMessageSummary,
   ChannelScopeType,
   NotificationDeliveryMethod,
-  NotificationType, MessageType, NotificationStatus, UserStatus, ActivityClassification, TicketStatusV2 } from '@xyne/shared';
+  NotificationType, MessageType, ActivityClassification, TicketStatusV2 } from '@xyne/shared';
 import { activityService } from '@/services/activity/activityService';
 
 const prisma = DatabaseClient.getInstance();
@@ -70,26 +70,11 @@ async function fetchConversationForNotification(conversationId: string) {
         where: { messageId: conversation.initialMessageId },
       });
       if (message) {
-        const summary: InitialMessageSummary = {
-          messageId: message.messageId,
-          conversationId: message.conversationId,
-          senderId: message.senderId,
-          content: message.content,
+        initialMessageMd = buildInitialMessageMd({
+          ...message,
           msgType: message.msgType as InitialMessageSummary['msgType'],
-          hasAttachment: message.hasAttachment,
-          edited: message.edited,
-          isDeleted: message.isDeleted,
-          showInChannel: message.showInChannel,
-          visibleTo: message.visibleTo,
           createdAt: message.createdAt.getTime(),
-          metadata: message.metadata ? JSON.stringify(message.metadata) : null,
-          nudgeCount: message.nudgeCount,
-          isSent: message.isSent,
-          reactions_md: message.reactions_md,
-          link_preview_md: message.link_preview_md,
-          childConversationId: message.childConversationId,
-        };
-        initialMessageMd = serializeInitialMessageMd(summary);
+        });
       }
     }
 
@@ -208,8 +193,6 @@ class NotificationService {
       workspaceId,
       userId,
       type: data.type,
-      title: data.title,
-      message: data.message,
       relatedEntityType: data.relatedEntityType,
       relatedEntityId: data.relatedEntityId,
       actionUrl: data.actionUrl,
@@ -1054,7 +1037,7 @@ class NotificationService {
       type: NotificationType.CHANNEL_MESSAGE,
       relatedEntityType: 'message' as const,
       relatedEntityId: messageId,
-      actionUrl: `/${workspaceId}/chat/${channelId}#origin=${conversationId}&messageId=${messageId}`,
+      actionUrl: `/${workspaceId}/chat/dir/${channelId}#origin=${conversationId}&messageId=${messageId}`,
       metadata: {
         channelId,
         conversationId,
@@ -1164,9 +1147,10 @@ class NotificationService {
       notificationContext,
     });
 
+    const mentionRouteBase = `/${workspaceId}/chat/${isDMChannel || isGroupDM ? 'dm' : 'dir'}/${channelId}`;
     const mentionActionUrl = isThreadMessage
-      ? `/${workspaceId}/chat/${channelId}/${conversationId}#origin=${conversationId}&messageId=${messageId}`
-      : `/${workspaceId}/chat/${channelId}#origin=${conversationId}&messageId=${messageId}`;
+      ? `${mentionRouteBase}/${conversationId}#origin=${conversationId}&messageId=${messageId}`
+      : `${mentionRouteBase}#origin=${conversationId}&messageId=${messageId}`;
 
     const conversationData = await fetchConversationForNotification(conversationId);
 
@@ -1266,8 +1250,8 @@ class NotificationService {
     });
 
     const actionUrl = isThreadMessage
-      ? `/${workspaceId}/chat/${channelId}/${conversationId}#origin=${conversationId}&messageId=${messageId}`
-      : `/${workspaceId}/chat/${channelId}#origin=${conversationId}&messageId=${messageId}`;
+      ? `/${workspaceId}/chat/dir/${channelId}/${conversationId}#origin=${conversationId}&messageId=${messageId}`
+      : `/${workspaceId}/chat/dir/${channelId}#origin=${conversationId}&messageId=${messageId}`;
 
     const conversationData = await fetchConversationForNotification(conversationId);
 
@@ -1497,14 +1481,68 @@ class NotificationService {
     return { deliveredUserIds };
   }
 
+  async createViewSharedNotifications(
+    recipientUserIds: string[],
+    viewId: string,
+    viewName: string,
+    actorId: string,
+    actorName: string,
+    actorAction: 'view_shared' | 'view_access_revoked',
+  ): Promise<{ deliveredUserIds: string[] }> {
+    const recipientIds = recipientUserIds.filter(id => id !== actorId);
+
+    if (recipientIds.length === 0) {
+      return { deliveredUserIds: [] };
+    }
+
+    getNotificationJobsExpected().add(recipientIds.length, { platform: 'desktop', message_type: 'saved_view' });
+
+    const title = actorAction === 'view_shared'
+      ? `${actorName} shared a view with you`
+      : `Your access to a view was revoked`;
+    const message = actorAction === 'view_shared'
+      ? `${actorName} shared "${viewName}" with you`
+      : `Your access to "${viewName}" was revoked by ${actorName}`;
+
+    const results = await Promise.allSettled(
+      recipientIds.map(async userId => {
+        await this.createNotification(userId, {
+          title,
+          message,
+          type: 'VIEW_SHARED' as NotificationType,
+          relatedEntityType: 'saved_view',
+          relatedEntityId: viewId,
+          // Opens the view directly (ProjectViewBuilder). NotificationHandler
+          // prefixes the workspace and navigates here on click; without it the
+          // popup falls back to /chat.
+          actionUrl: `/projects/views/${viewId}`,
+          metadata: {
+            viewId,
+            actorId,
+            actorName,
+            actorAction,
+          },
+        });
+        return userId;
+      })
+    );
+
+    const deliveredUserIds = results
+      .filter((r): r is PromiseFulfilledResult<string> => r.status === 'fulfilled')
+      .map(r => r.value);
+
+    return { deliveredUserIds };
+  }
+
   async createRecordingSharedNotifications(
     recipientUserIds: string[],
     callId: string,
     recordingTitle: string,
     actorId: string,
     actorName: string,
-    actorAction: 'recording_shared' | 'recording_access_revoked',
+    actorAction: 'recording_shared' | 'recording_access_changed' | 'recording_access_revoked',
     subject: string = 'recording',
+    accessLabel?: string,
   ): Promise<{ deliveredUserIds: string[] }> {
     const recipientIds = recipientUserIds.filter(id => id !== actorId);
 
@@ -1518,12 +1556,21 @@ class NotificationService {
     });
 
     const isRevoked = actorAction === 'recording_access_revoked';
+    const isChanged = actorAction === 'recording_access_changed';
     const title = isRevoked
       ? `${actorName} removed your access to a ${subject}`
-      : `${actorName} shared a ${subject} with you`;
+      : isChanged
+        ? `${actorName} changed your access to a ${subject}`
+        : `${actorName} shared a ${subject} with you`;
     const message = isRevoked
       ? `${actorName} removed your access to "${recordingTitle}"`
-      : `${actorName} shared "${recordingTitle}" with you`;
+      : isChanged
+        ? accessLabel
+          ? `${actorName} made you ${accessLabel} on "${recordingTitle}"`
+          : `${actorName} changed your access to "${recordingTitle}"`
+        : accessLabel
+          ? `${actorName} shared "${recordingTitle}" with you as ${accessLabel}`
+          : `${actorName} shared "${recordingTitle}" with you`;
 
     const results = await Promise.allSettled(
       recipientIds.map(async userId => {
@@ -1538,6 +1585,7 @@ class NotificationService {
             actorId,
             actorName,
             actorAction,
+            ...(accessLabel ? { accessLabel } : {}),
           },
         });
         return userId;
@@ -1652,7 +1700,7 @@ class NotificationService {
       type: NotificationType.THREAD_REPLY,
       relatedEntityType: 'message' as const,
       relatedEntityId: replyMessageId,
-      actionUrl: `/${workspaceId}/chat/${channelId}/${conversationId}#origin=${conversationId}&messageId=${replyMessageId}`,
+      actionUrl: `/${workspaceId}/chat/${isDMChannel || isGroupDM ? 'dm' : 'dir'}/${channelId}/${conversationId}#origin=${conversationId}&messageId=${replyMessageId}`,
       metadata: {
         channelId,
         conversationId,
@@ -1956,54 +2004,7 @@ class NotificationService {
       count: number;
     }>
   > {
-    // Spans the caller's own identities across workspaces.
-    return runAsSystem(async () => {
-      // Step 1: Get all active users for this member across workspaces
-      const users = await prisma.user.findMany({
-        where: {
-          orgMemberId: memberId,
-          leftAt: null,
-          status: UserStatus.ACTIVE,
-        },
-        select: {
-          id: true,
-          workspaceId: true,
-        },
-      });
-
-      if (users.length === 0) {
-        return [];
-      }
-
-      const userIds = users.map(u => u.id);
-
-      // Step 2: Count unread+delivered notifications per user
-      const notificationCounts = await prisma.notification.groupBy({
-        by: ['userId'],
-        where: {
-          userId: { in: userIds },
-          status: { in: [NotificationStatus.UNREAD, NotificationStatus.DELIVERED] },
-          readAt: null,
-          dismissedAt: null,
-        },
-        _count: {
-          id: true,
-        },
-      });
-
-      // Build a map: userId -> count
-      const countMap = new Map<string, number>();
-      for (const nc of notificationCounts) {
-        countMap.set(nc.userId, nc._count.id);
-      }
-
-      // Step 3: Merge users with their counts
-      return users.map(u => ({
-        workspaceId: u.workspaceId,
-        userId: u.id,
-        count: countMap.get(u.id) ?? 0,
-      }));
-    });
+    return getWorkspaceNotificationCountsQuery(memberId);
   }
 
   async getUserPreferences(userId: string): Promise<UserPreferences> {

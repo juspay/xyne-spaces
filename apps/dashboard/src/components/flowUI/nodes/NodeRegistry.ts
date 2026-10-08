@@ -24,6 +24,7 @@ import { ChartNode } from './ChartNode';
 import { AgentNode } from './AgentNode';
 import { AgentSummaryNode } from './AgentSummaryNode';
 import { McpSuggestNode } from './McpSuggestNode';
+import { ProviderSuggestNode } from './ProviderSuggestNode';
 import { McpConfigureNode } from './McpConfigureNode';
 import { SlashCommandArtifactNode } from '../../Chat/SlashCommandArtifacts';
 // PrApprovalNode is intentionally NOT imported/registered for now — the component
@@ -82,6 +83,7 @@ NodeRegistry.register('chart', ChartNode);
 NodeRegistry.register('agent', AgentNode);
 NodeRegistry.register('agent_summary', AgentSummaryNode);
 NodeRegistry.register('mcp_suggest', McpSuggestNode);
+NodeRegistry.register('provider_suggest', ProviderSuggestNode);
 NodeRegistry.register('mcpConfigure', McpConfigureNode);
 NodeRegistry.register('slash_command_artifact', SlashCommandArtifactNode);
 

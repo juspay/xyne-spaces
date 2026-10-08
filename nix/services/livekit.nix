@@ -3,8 +3,8 @@
 #   services.livekit."my-livekit" = {
 #     enable = true;
 #     port = 7880;
-#     apiKey = "devkey";
-#     apiSecret = "devsecret";
+#     apiKey = "localdevkey";
+#     apiSecret = "localdevsecret";
 #   };
 { config, lib, pkgs, ... }:
 let
@@ -43,13 +43,13 @@ in
 
         apiKey = lib.mkOption {
           type = types.str;
-          default = "devkey";
+          default = "localdevkey";
           description = "LiveKit API key";
         };
 
         apiSecret = lib.mkOption {
           type = types.str;
-          default = "devsecret";
+          default = "localdevsecret";
           description = "LiveKit API secret";
         };
 

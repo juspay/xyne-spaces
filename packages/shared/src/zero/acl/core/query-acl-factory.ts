@@ -64,7 +64,6 @@ import {
   UserRoleMappingsACL,
   UsersACL,
   UserWorkloadMappingsACL,
-  WorkflowExecutionsACL,
   WorkflowsACL,
   ReposACL,
   SdlcEntityLinksACL,
@@ -73,6 +72,7 @@ import {
   SavedUserConfigurationsACL,
   TicketAssignmentsACL,
   TicketStageEtaACL,
+  TicketDescriptionsACL,
   TicketStageRequestsACL,
   UserProfilesACL,
   UserPreferencesACL,
@@ -126,6 +126,8 @@ import {
   ViewAccessACL,
   StageApproversACL,
   SurfaceLinksACL,
+  SdlcFoldersACL,
+  SdlcItemCommentsACL,
   SurfaceNudgeCountsACL,
   SurfaceNudgesACL,
   ToolsACL,
@@ -270,14 +272,14 @@ export class QueryACLFactory {
         return new TicketAssignmentsACL(ctx) as BaseQueryACL<TTable>;
       case 'ticket_stage_eta':
         return new TicketStageEtaACL(ctx) as BaseQueryACL<TTable>;
+      case 'ticket_descriptions':
+        return new TicketDescriptionsACL(ctx) as BaseQueryACL<TTable>;
       case 'ticket_stage_requests':
         return new TicketStageRequestsACL(ctx) as BaseQueryACL<TTable>;
       case 'user_workload_mappings':
         return new UserWorkloadMappingsACL(ctx) as BaseQueryACL<TTable>;
       case 'users':
         return new UsersACL(ctx) as BaseQueryACL<TTable>;
-      case 'workflow_executions':
-        return new WorkflowExecutionsACL(ctx) as BaseQueryACL<TTable>;
       case 'workflows':
         return new WorkflowsACL(ctx) as BaseQueryACL<TTable>;
       case 'repos':
@@ -286,6 +288,10 @@ export class QueryACLFactory {
         return new SdlcEntityLinksACL(ctx) as BaseQueryACL<TTable>;
       case 'sdlc_artifacts':
         return new SdlcArtifactsACL(ctx) as BaseQueryACL<TTable>;
+      case 'sdlc_folders':
+        return new SdlcFoldersACL(ctx) as BaseQueryACL<TTable>;
+      case 'sdlc_item_comments':
+        return new SdlcItemCommentsACL(ctx) as BaseQueryACL<TTable>;
       case 'sdlc_tracks':
         return new SdlcTracksACL(ctx) as BaseQueryACL<TTable>;
       case 'saved_user_configurations':
@@ -394,6 +400,10 @@ export class QueryACLFactory {
         return new FormContextMappingsACL(ctx) as BaseQueryACL<TTable>;
       case 'guest_access':
         return new GuestAccessACL(ctx) as BaseQueryACL<TTable>;
+      case 'connect_group':
+        // Slack Connect reach table — no per-row ACL in Phase 1 (default pass-through).
+        // It has no workspaceId column, so it's also in WORKSPACE_SCOPE_OPT_OUT.
+        return new BaseQueryACL(ctx, 'connect_group') as BaseQueryACL<TTable>;
     }
   }
 }

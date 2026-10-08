@@ -1,3 +1,4 @@
+import { updateParticipantMeetingStatusTx } from '@/bypassAcl/transactions/scheduledCallNotificationService';
 import Bull from 'bull';
 import {
   CallStatus,
@@ -12,7 +13,6 @@ import { notificationService } from '@/services/notificationService';
 import { activityService } from '@/services/activity/activityService';
 import { formatDateTimeShort } from '@/utils/dateUtils';
 import { recurringCallService } from '@/services/recurringCallService';
-import { db } from '@/database/client';
 
 interface ScheduledCallReminderData {
   callId: string;
@@ -76,7 +76,6 @@ class ScheduledCallNotificationService {
       const { callId, callExternalId, title, startsAt, participantIds } = job.data as ScheduledCallReminderData;
 
       logger.info(`📢 Processing call reminder for call ${callExternalId}`, {
-        callId,
         title,
         startsAt,
         participantCount: participantIds.length,
@@ -87,12 +86,12 @@ class ScheduledCallNotificationService {
         const call = await repositories.calls.findByExternalId(callExternalId);
 
         if (!call) {
-          logger.warn(`Call ${callId} not found, skipping reminder`);
+          logger.warn(`Call ${callExternalId} not found, skipping reminder`);
           return;
         }
 
         if (call.status === CallStatus.CANCELLED) {
-          logger.info(`Call ${callId} has been cancelled, skipping reminder`);
+          logger.info(`Call ${callExternalId} has been cancelled, skipping reminder`);
           return;
         }
 
@@ -127,7 +126,7 @@ class ScheduledCallNotificationService {
 
         logger.info(`✅ Successfully sent reminders for call ${callExternalId} to ${participantsToRemind.length} participants`);
       } catch (error) {
-        logger.error(`Failed to send reminders for call ${callId}:`, error);
+        logger.error(`Failed to send reminders for call ${callExternalId}:`, error);
         throw error; // Bull will retry based on configuration
       }
     });
@@ -137,7 +136,6 @@ class ScheduledCallNotificationService {
       const { callId, callExternalId, endsAt } = job.data as ScheduledCallAutoEndData;
 
       logger.info(`⏰ Processing auto-end for call ${callExternalId}`, {
-        callId,
         endsAt,
       });
 
@@ -146,13 +144,13 @@ class ScheduledCallNotificationService {
         const call = await repositories.calls.findByExternalId(callExternalId);
 
         if (!call) {
-          logger.warn(`Call ${callId} not found, skipping auto-end`);
+          logger.warn(`Call ${callExternalId} not found, skipping auto-end`);
           return;
         }
 
         // ── Attempt to end the call if applicable ──
         if (call.status === CallStatus.CANCELLED) {
-          logger.info(`Call ${callId} has been cancelled, skipping auto-end attempt`);
+          logger.info(`Call ${callExternalId} has been cancelled, skipping auto-end attempt`);
         } else if (call.status === CallStatus.SCHEDULED) {
           const participants = await repositories.calls.findParticipantsWithStatus(callId);
           const activeParticipants = participants.filter(
@@ -161,14 +159,14 @@ class ScheduledCallNotificationService {
 
           if (activeParticipants.length > 0) {
             logger.info(
-              `Call ${callId} has ${activeParticipants.length} active participant(s) at endsAt — not ending`,
+              `Call ${callExternalId} has ${activeParticipants.length} active participant(s) at endsAt — not ending`,
             );
           } else {
             await repositories.calls.update(callId, { status: CallStatus.ENDED });
             logger.info(`✅ Auto-ended call ${callExternalId} — no active participants at scheduled end time`);
           }
         } else {
-          logger.info(`Call ${callId} status is ${call.status} — skipping auto-end`);
+          logger.info(`Call ${callExternalId} status is ${call.status} — skipping auto-end`);
         }
 
         // ── Buffer replenishment for recurring series ──
@@ -197,7 +195,7 @@ class ScheduledCallNotificationService {
           }
         }
       } catch (error) {
-        logger.error(`Failed to auto-end call ${callId}:`, error);
+        logger.error(`Failed to auto-end call ${callExternalId}:`, error);
         throw error; // Bull will retry based on configuration
       }
     });
@@ -290,7 +288,6 @@ class ScheduledCallNotificationService {
       );
 
       logger.info(`📅 Scheduled reminder for call ${callExternalId}`, {
-        callId,
         title,
         reminderTime: reminderTime.toISOString(),
         startsAt: startsAt.toISOString(),
@@ -299,7 +296,7 @@ class ScheduledCallNotificationService {
         jobId: job.id,
       });
     } catch (error) {
-      logger.error(`Failed to schedule reminder for call ${callId}:`, error);
+      logger.error(`Failed to schedule reminder for call ${callExternalId}:`, error);
       throw error;
     }
   }
@@ -357,13 +354,12 @@ class ScheduledCallNotificationService {
       );
 
       logger.info(`⏰ Scheduled auto-end for call ${callExternalId}`, {
-        callId,
         endsAt: endsAt.toISOString(),
         delayMs: delay,
         jobId: job.id,
       });
     } catch (error) {
-      logger.error(`Failed to schedule auto-end for call ${callId}:`, error);
+      logger.error(`Failed to schedule auto-end for call ${callExternalId}:`, error);
       throw error;
     }
   }
@@ -438,7 +434,7 @@ class ScheduledCallNotificationService {
       );
       logger.info(`Created scheduled_call activities for ${participantsToNotify.length} participants`);
     } catch (activityError) {
-      logger.error(`Failed to create activities for scheduled call ${callId}:`, activityError);
+      logger.error(`Failed to create activities for scheduled call ${callExternalId}:`, activityError);
     }
   }
 
@@ -512,30 +508,30 @@ class ScheduledCallNotificationService {
   /**
    * Remove the Bull reminder job for a call (used before rescheduling).
    */
-  private async removeReminderJob(callId: string): Promise<void> {
+  private async removeReminderJob(callId: string, callExternalId: string): Promise<void> {
     try {
       const job = await this.queue.getJob(`call-reminder-${callId}`);
       if (job) {
         await job.remove();
-        logger.info(`🗑️  Removed existing reminder job for call ${callId}`);
+        logger.info(`🗑️  Removed existing reminder job for call ${callExternalId}`);
       }
     } catch (error) {
-      logger.warn(`Failed to remove reminder job for call ${callId}:`, error);
+      logger.warn(`Failed to remove reminder job for call ${callExternalId}:`, error);
     }
   }
 
   /**
    * Remove the Bull auto-end job for a call (used before rescheduling).
    */
-  private async removeAutoEndJob(callId: string): Promise<void> {
+  private async removeAutoEndJob(callId: string, callExternalId: string): Promise<void> {
     try {
       const job = await this.queue.getJob(`call-auto-end-${callId}`);
       if (job) {
         await job.remove();
-        logger.info(`🗑️  Removed existing auto-end job for call ${callId}`);
+        logger.info(`🗑️  Removed existing auto-end job for call ${callExternalId}`);
       }
     } catch (error) {
-      logger.warn(`Failed to remove auto-end job for call ${callId}:`, error);
+      logger.warn(`Failed to remove auto-end job for call ${callExternalId}:`, error);
     }
   }
 
@@ -543,8 +539,8 @@ class ScheduledCallNotificationService {
    * Remove both Bull jobs (reminder + auto-end) for a call.
    * Used when deleting call instances during a series update.
    */
-  async removeCallJobs(callId: string): Promise<void> {
-    await Promise.all([this.removeReminderJob(callId), this.removeAutoEndJob(callId)]);
+  async removeCallJobs(callId: string, callExternalId: string): Promise<void> {
+    await Promise.all([this.removeReminderJob(callId, callExternalId), this.removeAutoEndJob(callId, callExternalId)]);
   }
 
   /**
@@ -557,7 +553,7 @@ class ScheduledCallNotificationService {
     newStartsAt: Date,
     participantIds: string[],
   ): Promise<void> {
-    await this.removeReminderJob(callId);
+    await this.removeReminderJob(callId, callExternalId);
     await this.scheduleCallReminder(callId, callExternalId, title, newStartsAt, participantIds);
   }
 
@@ -569,7 +565,7 @@ class ScheduledCallNotificationService {
     callExternalId: string,
     newEndsAt: Date,
   ): Promise<void> {
-    await this.removeAutoEndJob(callId);
+    await this.removeAutoEndJob(callId, callExternalId);
     await this.scheduleCallAutoEnd(callId, callExternalId, newEndsAt);
   }
 
@@ -639,7 +635,7 @@ class ScheduledCallNotificationService {
         }))
       );
     } catch (activityError) {
-      logger.error(`Failed to create update activities for call ${callId}:`, activityError);
+      logger.error(`Failed to create update activities for call ${callExternalId}:`, activityError);
     }
    }
 
@@ -665,19 +661,7 @@ class ScheduledCallNotificationService {
              organizerId, callId, callExternalId, channelId } = params;
      let updatedCount = 1;
 
-     await db.$transaction(async (tx) => {
-       await repositories.calls.updateParticipantMeetingStatus(participantId, meetingStatus, respondedAt, tx);
-
-       if (isSeries && recurringSeriesId) {
-         updatedCount = await repositories.calls.updateRecurringSeriesMeetingStatus({
-           recurringSeriesId,
-           userId,
-           meetingStatus,
-           respondedAt,
-           tx,
-         });
-       }
-     });
+     ({ updatedCount } = await updateParticipantMeetingStatusTx(participantId, meetingStatus, respondedAt, isSeries, recurringSeriesId, updatedCount, userId));
 
      // Create activity for the organizer when a participant accepts or declines
      if (userId !== organizerId &&

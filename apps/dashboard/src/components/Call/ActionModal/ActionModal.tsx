@@ -1,7 +1,7 @@
 import React from 'react';
 import { Dialog } from '../../ui/Dialog/Dialog';
 import { Button } from '../../ui/Button/Button';
-import HuddleIcon from '../../icons/HuddleIcon';
+import { PhoneDefault } from '@xyne/icons';
 
 interface ActionButton {
   label: string;
@@ -12,6 +12,8 @@ interface ActionButton {
   disabled?: boolean;
   /** Distinct analytics event name; falls back to the generic Action_Modal_Button. */
   trackName?: string;
+  /** Extra analytics context merged into this button's data-track-metadata. */
+  trackMetadata?: Record<string, unknown>;
 }
 
 interface ActionModalProps {
@@ -53,7 +55,7 @@ export const ActionModal: React.FC<ActionModalProps> = ({
         {showIcon && (
           <div className='w-10 h-10 rounded-xl bg-muted border border-border flex items-center justify-center mb-5'>
             <div className='scale-[1.25]'>
-              <HuddleIcon color={iconColor} />
+              <PhoneDefault size={16} color={iconColor} />
             </div>
           </div>
         )}
@@ -89,7 +91,11 @@ export const ActionModal: React.FC<ActionModalProps> = ({
               data-testid={button.testId}
               data-track-category='CALLS'
               data-track-name={button.trackName ?? 'Action_Modal_Button'}
-              data-track-metadata={JSON.stringify({ buttonLabel: button.label, modalTitle: title })}
+              data-track-metadata={JSON.stringify({
+                buttonLabel: button.label,
+                modalTitle: title,
+                ...button.trackMetadata,
+              })}
             >
               {button.label}
             </Button>

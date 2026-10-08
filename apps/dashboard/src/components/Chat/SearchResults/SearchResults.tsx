@@ -8,6 +8,7 @@ import {
   Loader2,
   Mail,
   MessageCircle,
+  MessageSquare,
   Mic,
   Paperclip,
   X,
@@ -50,7 +51,7 @@ import { SearchResultMessageCard } from './SearchResultMessageCard';
 import { RenderMessageWithHTML } from '../RenderMessageWithHTML/RenderMessageWithHTML';
 import { SearchSnippetRenderer } from '../RenderMessageWithHTML/searchSnippetRender';
 import { SearchResultsContext, SearchResultsThread } from './SearchResultsContext';
-import { SearchFilterBar } from './SearchFilterBar';
+import { SearchFilterBar, buildFilterSummary, sortSummary } from './SearchFilterBar';
 import { SearchQueryInput, type QueryToken } from './SearchQueryInput';
 import { parseSearchFilters } from '../../../utils/searchFilterParser';
 import {
@@ -62,6 +63,8 @@ import { useSearchMetrics } from '../../../hooks/useSearchMetrics';
 import { useCachedQuery } from '../../../hooks/useCachedQuery';
 import { queries } from '../../../zero/queries';
 import { useUser, useUsers } from '../../../hooks/useUsers';
+import { useUserGroups } from '../../../hooks/useUserGroup';
+import { makeMentionHighlightsBuilder } from '../../../search/mentionHighlights';
 import {
   getDMNames,
   isDMChannel,
@@ -76,6 +79,7 @@ import {
   VALID_DOC_TYPES,
   DOC_TYPE_TO_TAB,
 } from '../ChatDirectory/ChannelCommandMenu.types';
+import { saveCurrentSearchQuery, identityKeyFor } from '../ChatDirectory/RecentSearches';
 import { ChannelCategory } from '../ChatDirectory/ChatDirectory.types';
 import { Channel } from '@xyne/shared';
 import { resolveOrCreateDmChannelId } from '../../../utils/searchNavigation';
@@ -85,6 +89,7 @@ import { AnimatePresence, motion } from 'framer-motion';
 import { cn } from '../../../utils/classNames';
 import { CompareSelectRow } from './compare/CompareSelectRow';
 import { SearchCompareDialog } from './compare/SearchCompareDialog';
+import { SearchFeedbackPopover, useCanPostSearchFeedback } from '../SearchFeedback';
 import { hasRankingData } from './compare/rankingFeatures';
 import {
   TicketSearchHighlightContext,
@@ -205,6 +210,10 @@ const SearchResults = (): ReactElement => {
     parseFiltersFromParams(searchParams),
   );
 
+  // —— Search feedback popover ——
+  const [feedbackOpen, setFeedbackOpen] = useState(false);
+  const canPostFeedback = useCanPostSearchFeedback();
+
   // —— Compare mode (ranking comparison) ——
   const [compareMode, setCompareMode] = useState(false);
   const [selected, setSelected] = useState<DisplaySearchResult[]>([]);
@@ -292,6 +301,18 @@ const SearchResults = (): ReactElement => {
     return result;
   }, [starredChannels, regularChannels, dmChannels, allChannelsForNav, currentUserId, usersById]);
 
+  // Reuse this component's existing usersById + allUserGroups (no re-subscription) to resolve
+  // each mention chip's display forms for result highlighting.
+  const allUserGroups = useUserGroups();
+  const userGroupsById = useMemo(
+    () => new Map(allUserGroups.map(group => [group.id, group])),
+    [allUserGroups],
+  );
+  const buildMentionHighlights = useMemo(
+    () => makeMentionHighlightsBuilder(usersById, userGroupsById),
+    [usersById, userGroupsById],
+  );
+
   // Use the exact same hook as the popup modal — no separate search infrastructure
   const {
     searchResults: backendResults,
@@ -305,6 +326,7 @@ const SearchResults = (): ReactElement => {
     setSelectedMentions,
     setIncludeBotMessages,
     setOnlyMyChannels,
+    setExcludeArchived,
     setExactMatch,
     setRankProfile,
     setStructuredFilters,
@@ -313,17 +335,36 @@ const SearchResults = (): ReactElement => {
     paginationState,
     filteredLocalUsers,
     filteredLocalChannels,
+    onOpen: onSessionOpen,
+    onClose: onSessionClose,
+    onResultClick,
   } = useSearchMetrics({
+    surface: 'search_screen',
     allChannels: allChannelsWithCategory,
     mentionSearchType: null,
     defaultOnlyMyChannels: filters.onlyMyChannels,
+    // The Desk and Tickets tabs hide archived tickets by default; the "Show archived" toggle
+    // turns exclusion off. Every other tab leaves archived untouched (flag stays false).
+    defaultExcludeArchived:
+      filters.docType === 'desk' || filters.docType === 'tickets' ? !filters.showArchived : false,
     groupByDocType: true,
+    buildMentionHighlights,
     // The URL follows the results: the hook hands back the query these were fetched for,
     // so the address bar is shareable without anyone pressing Enter.
     onSearchComplete: (_results, searchedQuery) => {
       handleQuerySubmitRef.current(searchedQuery.trim());
     },
   });
+
+  // One search session per visit to this screen, for metrics. Mount-only via a ref (as in
+  // ContextPicker): onClose closes over the session id, so its identity flips after onOpen
+  // and would re-fire the effect if listed as a dep.
+  const sessionRef = useRef({ onSessionOpen, onSessionClose });
+  sessionRef.current = { onSessionOpen, onSessionClose };
+  useEffect(() => {
+    sessionRef.current.onSessionOpen('click');
+    return (): void => sessionRef.current.onSessionClose();
+  }, []);
 
   // The text the on-screen results actually reflect. Results update live as the user
   // types (the hook searches `searchedText`) but the URL `query` only commits on Enter,
@@ -380,6 +421,15 @@ const SearchResults = (): ReactElement => {
     setOnlyMyChannels(filters.onlyMyChannels);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [filters.onlyMyChannels]);
+
+  // Sync archived scope → hook. The Desk and Tickets tabs hide archived (and their "Show
+  // archived" toggle opts back in); other tabs never exclude, matching pre-existing behavior.
+  useEffect(() => {
+    setExcludeArchived(
+      filters.docType === 'desk' || filters.docType === 'tickets' ? !filters.showArchived : false,
+    );
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [filters.docType, filters.showArchived]);
 
   // Sync exact-match → hook; the hook quotes the query when the request is built.
   useEffect(() => {
@@ -450,34 +500,51 @@ const SearchResults = (): ReactElement => {
       )?.name,
     [allBoardsList],
   );
+  // Prefer the `@`-handle (alias), matching the cmd+K picker — else the same group chip reads
+  // `@rockers` here but `@rock-team` in the popup.
+  const mentionUserGroupName = useCallback(
+    (id: string): string | undefined => {
+      const group = userGroupsById.get(id);
+      return group ? (group.alias ?? group.name) : undefined;
+    },
+    [userGroupsById],
+  );
   const filterResolvers = useMemo(
     (): FilterResolvers => ({
       userName: mentionUserName,
       channelName: mentionChannelName,
+      userGroupName: mentionUserGroupName,
       boardName,
     }),
-    [mentionUserName, mentionChannelName, boardName],
+    [mentionUserName, mentionChannelName, mentionUserGroupName, boardName],
   );
 
-  // Sync every chip filter (from/to/with/in/assignee/priority + bare @/#) → hook mentions
-  useEffect(() => {
-    setSelectedMentions(
-      buildChips({ ...filters, inChannelIds: channelIdsForSearch }, filterResolvers),
-    );
+  // The active filter chips (from/to/with/in/assignee/priority + bare @/#), rebuilt only when a
+  // chip-relevant filter changes. One build shared by the hook-sync effect and the save snapshot.
+  const activeFilterChips = useMemo(
+    () => buildChips({ ...filters, inChannelIds: channelIdsForSearch }, filterResolvers),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [
-    filters.fromUserIds,
-    filters.fromEmails,
-    filters.toEmails,
-    channelIdsForSearch,
-    filters.assigneeIds,
-    filters.withUserIds,
-    filters.mentionUserIds,
-    filters.mentionChannelIds,
-    filters.priority,
-    mentionUserName,
-    mentionChannelName,
-  ]);
+    [
+      filters.fromUserIds,
+      filters.fromEmails,
+      filters.toEmails,
+      channelIdsForSearch,
+      filters.assigneeIds,
+      filters.withUserIds,
+      filters.mentionUserIds,
+      filters.mentionChannelIds,
+      filters.mentionUserGroupIds,
+      filters.priority,
+      mentionUserName,
+      mentionChannelName,
+      mentionUserGroupName,
+    ],
+  );
+
+  // Sync the chip filters → the shared search hook.
+  useEffect(() => {
+    setSelectedMentions(activeFilterChips);
+  }, [activeFilterChips, setSelectedMentions]);
 
   // Declared above the memo that uses it, so the callback is reached through a ref.
   const handleFiltersChangeRef = useRef<(next: SearchResultsFilters) => void>(() => undefined);
@@ -599,6 +666,27 @@ const SearchResults = (): ReactElement => {
   );
   handleQuerySubmitRef.current = handleQuerySubmit;
 
+  /**
+   * Identity key of the last query saved as a recent. Opening several results from one search fires
+   * the save on each click with the same query, so keying off this stores it once and skips the rest
+   * until the query or its filters actually change.
+   */
+  const lastSavedKeyRef = useRef<string | null>(null);
+
+  const saveCurrentSearchAsRecent = useCallback((): void => {
+    const identityKey = identityKeyFor({ text: query, filterChips: activeFilterChips });
+    if (identityKey === lastSavedKeyRef.current) return;
+    lastSavedKeyRef.current = identityKey;
+
+    saveCurrentSearchQuery(authContext.workspaceId ?? '', currentUserId, {
+      text: query,
+      filterChips: activeFilterChips,
+      tab: docTypeToTabType(filters.docType),
+      onlyMyChannels: filters.onlyMyChannels,
+      includeBotMessages: filters.includeBotMessages,
+    });
+  }, [authContext.workspaceId, currentUserId, query, filters, activeFilterChips]);
+
   // Use filteredLocalChannels from the hook (same data pipeline as cmdK).
   // Guard against empty query so we don't show all channels before the user types.
   const localChannelResults = useMemo((): DisplaySearchResult[] => {
@@ -700,19 +788,26 @@ const SearchResults = (): ReactElement => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [fullSearchKey]);
 
-  const handleSelectThread = useCallback((thread: SearchResultsThread) => {
-    setSelectedPanel({ kind: 'thread', thread });
-  }, []);
+  // The save lives on the two message-open handlers (thread + message context), not the card
+  // click, because every message-open affordance (body, keyboard, reply button) converges here.
+  const handleSelectThread = useCallback(
+    (thread: SearchResultsThread) => {
+      saveCurrentSearchAsRecent();
+      setSelectedPanel({ kind: 'thread', thread });
+    },
+    [saveCurrentSearchAsRecent],
+  );
   const handleSelectUser = useCallback((userId: string) => {
     setSelectedPanel({ kind: 'profile', userId });
   }, []);
-  const handleSelectChannelContext = useCallback(
+  const handleSelectMessageContext = useCallback(
     (
       channelId: string,
       conversationId: string,
       conversationCreatedAt?: number,
       matchedMessageId?: string | null,
     ) => {
+      saveCurrentSearchAsRecent();
       setSelectedPanel({
         kind: 'channel',
         channelId,
@@ -721,7 +816,7 @@ const SearchResults = (): ReactElement => {
         matchedMessageId: matchedMessageId ?? null,
       });
     },
-    [],
+    [saveCurrentSearchAsRecent],
   );
   // Open a user's 1:1 DM chat in the right pane, creating the DM if it doesn't exist.
   // Async; drops the result if the search changed while the DM was being created.
@@ -730,7 +825,11 @@ const SearchResults = (): ReactElement => {
       const keyAtClick = fullSearchKeyRef.current;
       void (async (): Promise<void> => {
         try {
-          const channelId = await resolveOrCreateDmChannelId(userId, allChannelsForNav);
+          const channelId = await resolveOrCreateDmChannelId(
+            userId,
+            allChannelsForNav,
+            currentUserId,
+          );
           if (fullSearchKeyRef.current !== keyAtClick) return;
           setSelectedPanel({ kind: 'channel', channelId });
         } catch {
@@ -738,13 +837,25 @@ const SearchResults = (): ReactElement => {
         }
       })();
     },
-    [allChannelsForNav],
+    [allChannelsForNav, currentUserId],
+  );
+  // Metrics for a result open. `rank` is the card's 1-indexed position within its section,
+  // the same meaning cmdK's rankPosition has. Message cards open through context handlers
+  // rather than openResult, so they call this directly.
+  const trackResultClick = useCallback(
+    (result: DisplaySearchResult, rank: number): void => {
+      onResultClick(result, rank, result.searchContext?.channelId);
+    },
+    [onResultClick],
   );
   // Single entry point for a result-card click: resolve what it should do, then do it.
   const openResult = useCallback(
-    (result: DisplaySearchResult): void => {
+    (result: DisplaySearchResult, rank: number): void => {
       const action = resolveResultClick(result, allChannelsForNav);
       if (!action) return;
+      trackResultClick(result, rank);
+      // Recents capture content searches — opening a person or channel is navigation, not a query to replay.
+      if (result.type !== 'user' && result.type !== 'channel') saveCurrentSearchAsRecent();
       switch (action.kind) {
         case 'panel':
           setSelectedPanel(action.panel);
@@ -757,7 +868,7 @@ const SearchResults = (): ReactElement => {
           return;
       }
     },
-    [allChannelsForNav, navigate, openUserDm],
+    [allChannelsForNav, navigate, openUserDm, saveCurrentSearchAsRecent, trackResultClick],
   );
   const handleClosePanel = (): void => {
     setSelectedPanel(null);
@@ -767,9 +878,10 @@ const SearchResults = (): ReactElement => {
     () => ({
       onSelectThread: handleSelectThread,
       onSelectUser: handleSelectUser,
-      onSelectChannelContext: handleSelectChannelContext,
+      onSelectMessageContext: handleSelectMessageContext,
+      onResultOpen: saveCurrentSearchAsRecent,
     }),
-    [handleSelectThread, handleSelectUser, handleSelectChannelContext],
+    [handleSelectThread, handleSelectUser, handleSelectMessageContext, saveCurrentSearchAsRecent],
   );
 
   const currentTab = docTypeToTabType(filters.docType);
@@ -805,6 +917,15 @@ const SearchResults = (): ReactElement => {
     }
     return map;
   }, [results]);
+
+  /** True when the search returned results. Controls the result count and Compare button. */
+  const hasResultsRow = results.length > 0 || (!!query && totalCount > 0);
+
+  // Filter labels sent with feedback.
+  const feedbackFilters = useMemo(
+    () => buildFilterSummary(filters, filterResolvers, query),
+    [filters, filterResolvers, query],
+  );
 
   const resultsColumn = (
     <div className='relative flex flex-col h-full min-h-0'>
@@ -858,26 +979,58 @@ const SearchResults = (): ReactElement => {
             onQueryChange={handleQuerySubmit}
           />
         </div>
-        {(results.length > 0 || (query && totalCount > 0)) && (
+        {/* Shown for any query or active filter so Feedback is available even with no results.
+            The result count and Compare still need results. */}
+        {(hasResultsRow || (canPostFeedback && (!!displayQuery || filtersActive))) && (
           <div className='flex items-center justify-between gap-3 pb-2'>
-            <p className='text-xs text-muted-foreground tabular-nums'>
-              {(totalCount || results.length).toLocaleString()} results
-            </p>
-            <button
-              onClick={() => setCompareMode(v => !v)}
-              title='Compare how results ranked'
-              data-track-category='SEARCH_RESULTS'
-              data-track-name='TOGGLE_COMPARE'
-              className={cn(
-                'inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium rounded-md active:scale-[0.96] transition',
-                compareMode
-                  ? 'bg-primary text-primary-foreground shadow-sm'
-                  : 'text-muted-foreground hover:text-foreground hover:bg-muted/60 border border-border',
+            {hasResultsRow && (
+              <p className='text-xs text-muted-foreground tabular-nums'>
+                {(totalCount || results.length).toLocaleString()} results
+              </p>
+            )}
+            <div className='flex items-center gap-2 ml-auto'>
+              {canPostFeedback && (
+                <SearchFeedbackPopover
+                  open={feedbackOpen}
+                  onOpenChange={setFeedbackOpen}
+                  query={displayQuery}
+                  filters={feedbackFilters}
+                  sort={sortSummary(filters)}
+                >
+                  <button
+                    title='Tell the search team about these results'
+                    data-track-category='SEARCH_RESULTS'
+                    data-track-name='OPEN_FEEDBACK'
+                    className={cn(
+                      'inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium rounded-md active:scale-[0.96] transition',
+                      feedbackOpen
+                        ? 'bg-primary text-primary-foreground shadow-sm'
+                        : 'text-muted-foreground hover:text-foreground hover:bg-muted/60 border border-border',
+                    )}
+                  >
+                    <MessageSquare size={13} />
+                    Feedback
+                  </button>
+                </SearchFeedbackPopover>
               )}
-            >
-              <GitCompare size={13} />
-              Compare
-            </button>
+              {hasResultsRow && (
+                <button
+                  onClick={() => setCompareMode(v => !v)}
+                  title='Compare how results ranked'
+                  data-track-category='SEARCH_RESULTS'
+                  data-track-name='TOGGLE_COMPARE'
+                  className={cn(
+                    'inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium rounded-md active:scale-[0.96] transition',
+                    compareMode
+                      ? 'bg-primary text-primary-foreground shadow-sm'
+                      : 'text-muted-foreground hover:text-foreground hover:bg-muted/60 border border-border',
+                  )}
+                >
+                  <GitCompare size={13} />
+                  Compare
+                </button>
+              )}
+            </div>
           </div>
         )}
       </div>
@@ -904,6 +1057,7 @@ const SearchResults = (): ReactElement => {
             loadMoreRef={loadMoreRef}
             selectedPanel={selectedPanel}
             onOpenResult={openResult}
+            onTrackResultClick={trackResultClick}
             channelData={allChannelsForNav}
             searchableChannels={allChannelsWithCategory}
             usersById={usersById}
@@ -1007,7 +1161,8 @@ interface ResultsBodyProps {
   results: DisplaySearchResult[];
   loadMoreRef: React.RefObject<HTMLDivElement | null>;
   selectedPanel: SidePanelState;
-  onOpenResult: (result: DisplaySearchResult) => void;
+  onOpenResult: (result: DisplaySearchResult, rank: number) => void;
+  onTrackResultClick: (result: DisplaySearchResult, rank: number) => void;
   channelData: ReturnType<typeof useAllChannels>;
   searchableChannels: Array<{
     channel: Channel;
@@ -1153,6 +1308,7 @@ function ResultsBody({
   loadMoreRef,
   selectedPanel,
   onOpenResult,
+  onTrackResultClick,
   channelData,
   searchableChannels,
   usersById,
@@ -1197,12 +1353,19 @@ function ResultsBody({
   };
 
   // Renders a single result card — shared between flat and grouped views
-  const renderCard = (result: DisplaySearchResult): ReactElement | null => {
+  // `resultIndex` is the 0-based rank of this card within its section (the whole list in the
+  // flat view). It is the whole search-quality signal — mean click rank and click-through by
+  // position are uncomputable without it — so it rides down to the tracked elements and is the
+  // rank every click reports, matching cmdK's per-section rankPosition.
+  const renderCard = (result: DisplaySearchResult, resultIndex: number): ReactElement | null => {
     const key = `${result.type}-${result.id}`;
+    const rank = resultIndex + 1;
 
     // User card — opens the user's DM chat in the right pane.
     if (result.type === 'user') {
-      return <UserResultCard key={key} result={result} onSelectUser={() => onOpenResult(result)} />;
+      return (
+        <UserResultCard key={key} result={result} onSelectUser={() => onOpenResult(result, rank)} />
+      );
     }
 
     // Channel card
@@ -1213,7 +1376,7 @@ function ResultsBody({
       return (
         <button
           key={key}
-          onClick={() => onOpenResult(result)}
+          onClick={() => onOpenResult(result, rank)}
           className='w-full flex items-center gap-3 px-4 py-3 rounded-xl border border-border bg-card hover:bg-muted transition-colors text-left'
           data-track-category='SEARCH_RESULTS'
           data-track-name={isDeskChannel ? 'OPEN_DESK_CHANNEL' : 'OPEN_CHANNEL'}
@@ -1259,7 +1422,7 @@ function ResultsBody({
       return (
         <button
           key={key}
-          onClick={() => onOpenResult(result)}
+          onClick={() => onOpenResult(result, rank)}
           className='w-full flex items-center gap-3 px-4 py-3 rounded-xl border border-border bg-card hover:bg-muted transition-colors text-left'
           data-track-category='SEARCH_RESULTS'
           data-track-name='OPEN_ATTACHMENT'
@@ -1308,7 +1471,7 @@ function ResultsBody({
       return (
         <button
           key={key}
-          onClick={() => onOpenResult(result)}
+          onClick={() => onOpenResult(result, rank)}
           className='w-full flex items-start gap-3 px-4 py-3 rounded-xl border border-border bg-card hover:bg-muted transition-colors text-left'
           data-track-category='SEARCH_RESULTS'
           data-track-name='OPEN_MAIL'
@@ -1338,6 +1501,13 @@ function ResultsBody({
               {senderName}
               {recipientCount > 0 && ` +${recipientCount} more`}
             </span>
+            {/* Assignee of the linked desk ticket, when set — same muted style as the
+                sender line above (mirrors the cmdK desk row). */}
+            {result.searchContext?.assigneeName && (
+              <span className='block min-w-0 truncate text-xs text-muted-foreground'>
+                {`Assigned to ${result.searchContext.assigneeName}`}
+              </span>
+            )}
             {result.context && (
               <div className='mt-0.5 text-xs text-muted-foreground'>
                 <SearchSnippetRenderer message={result.context} wordLimit={40} />
@@ -1389,7 +1559,7 @@ function ResultsBody({
             ticket={ticketSummary}
             isConversation
             width='max-w-none w-full'
-            onClick={() => onOpenResult(result)}
+            onClick={() => onOpenResult(result, rank)}
           />
         </div>
       );
@@ -1402,6 +1572,9 @@ function ResultsBody({
     return (
       <SearchResultMessageCard
         key={key}
+        resultIndex={resultIndex}
+        onOpen={() => onTrackResultClick(result, rank)}
+        resultCount={results.length}
         channelId={ctx.channelId}
         conversationId={ctx.conversationId}
         matchedMessageId={ctx.messageId ?? null}
@@ -1511,8 +1684,8 @@ function ResultsBody({
             {CATEGORY_LABELS[sectionKey]}
           </p>
           <div className='space-y-2'>
-            {displayItems.map(({ channel: c, searchableNames }) =>
-              renderCard(toChannelResult(c, searchableNames)),
+            {displayItems.map(({ channel: c, searchableNames }, i) =>
+              renderCard(toChannelResult(c, searchableNames), i),
             )}
           </div>
           {hasMore && (
@@ -1542,7 +1715,7 @@ function ResultsBody({
           <p className='px-1 pb-2 text-xs font-medium text-muted-foreground uppercase tracking-wide font-mono'>
             Users ({userResults.length})
           </p>
-          <div className='space-y-2'>{displayItems.map(result => renderCard(result))}</div>
+          <div className='space-y-2'>{displayItems.map((result, i) => renderCard(result, i))}</div>
           {hasMore && (
             <button
               onClick={() => toggleExpand('user')}
@@ -1616,7 +1789,7 @@ function ResultsBody({
                   {GROUP_LABELS[gk]} ({grouped.get(gk)!.length})
                 </p>
                 <div className='space-y-2'>
-                  {grouped.get(gk)!.map(result => renderCard(result))}
+                  {grouped.get(gk)!.map((result, i) => renderCard(result, i))}
                 </div>
               </div>
             ))
@@ -1625,7 +1798,9 @@ function ResultsBody({
                 <p className='px-1 pb-2 text-xs font-medium text-muted-foreground uppercase tracking-wide font-mono'>
                   {GROUP_LABELS['others']} ({backendOnly.length})
                 </p>
-                <div className='space-y-2'>{backendOnly.map(result => renderCard(result))}</div>
+                <div className='space-y-2'>
+                  {backendOnly.map((result, i) => renderCard(result, i))}
+                </div>
               </div>
             )}
         {footer}
@@ -1662,7 +1837,7 @@ function ResultsBody({
   return (
     <div className='w-full space-y-2 pt-2 pb-6'>
       {results.map((result, index) => {
-        const el = renderCard(result);
+        const el = renderCard(result, index);
         if (!el) return null;
         if (!compareMode) return el;
         const key = `${result.type}-${result.id}`;

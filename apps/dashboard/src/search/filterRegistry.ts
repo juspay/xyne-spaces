@@ -36,6 +36,7 @@ export type ResultsMention = {
 export interface FilterResolvers {
   userName: (id: string) => string | undefined;
   channelName: (id: string) => string | undefined;
+  userGroupName?: (id: string) => string | undefined;
   boardName?: (id: string) => string | undefined;
 }
 
@@ -49,9 +50,12 @@ export type TokenIcon =
   // Carries the id so the renderer can pick hash / lock / person from the channel's
   // visibility and scope, the way the palette's chips do.
   | { kind: 'channel'; channelId: string }
+  // A user-group always reads as the same people glyph — no id-dependent variant like a channel.
+  | { kind: 'userGroup' }
   | { kind: 'priority'; value: string }
   | { kind: 'date' }
   | { kind: 'board' }
+  | { kind: 'entity' }
   | { kind: 'value' };
 
 /** One removable thing in the search box / bar. */
@@ -136,7 +140,10 @@ export type FilterControl =
   | { kind: 'date' }
   // Toggles live in the bar as pills, not in the modal: `barLabel` is the short caption
   // the pill wears (`@Ch`, `Bot`, `"ab"`), `label` the sentence its tooltip spells out.
-  | { kind: 'toggle'; barLabel: string };
+  | { kind: 'toggle'; barLabel: string }
+  // A boolean that lives *inside* the Filters modal as a checkbox (never a bar pill), for
+  // toggles that would clutter the bar. Uses `label` for its caption.
+  | { kind: 'checkbox' };
 
 /** The shape `parseSearchFilters` returns — filter syntax found in free text. */
 export interface TypedFilters {
@@ -150,7 +157,7 @@ export interface TypedFilters {
 }
 
 /** The backend query-param names a text-list filter can set. */
-type SearchFilterKey = 'status' | 'board' | 'tags';
+type SearchFilterKey = 'status' | 'board' | 'tags' | 'entity';
 
 /** Filter values travel as plain strings (URL params, typed syntax), so options are too. */
 export type FilterOption = { value: string; label: string };
@@ -316,9 +323,10 @@ function textListEntry(opts: {
   id: string;
   label: string;
   param: string;
-  field: 'statuses' | 'boardIds' | 'tags';
+  field: 'statuses' | 'boardIds' | 'tags' | 'entities';
   syntax: string;
-  typedKey: 'status' | 'board' | 'tags';
+  /** Omitted for chip-only filters, whose value can only come from a chip or the param. */
+  typedKey?: 'status' | 'board' | 'tags';
   searchKey: SearchFilterKey;
   tokenIcon?: TokenIcon;
   appliesTo?: (docType: DocType) => boolean;
@@ -345,7 +353,7 @@ function textListEntry(opts: {
     read: (params, typed) => ({
       [opts.field]: params.get(opts.param)
         ? csv(params.get(opts.param))
-        : csv(typed[opts.typedKey]),
+        : csv(opts.typedKey ? typed[opts.typedKey] : undefined),
     }),
     write: (f, params) => setOrDelete(params, opts.param, f[opts.field].join(',')),
     queryText: f => (f[opts.field].length > 0 ? `${opts.syntax}${f[opts.field].join(',')}` : ''),
@@ -400,25 +408,30 @@ function toggleEntry(opts: {
   id: string;
   label: string;
   param: string;
-  field: 'onlyMyChannels' | 'includeBotMessages' | 'exactMatch';
+  field: 'onlyMyChannels' | 'includeBotMessages' | 'exactMatch' | 'showArchived';
   /** Written only when it differs from this. */
   defaultValue: boolean;
   /** Short caption for the bar pill. */
   barLabel: string;
   explicitOff?: boolean;
   appliesTo?: (docType: DocType) => boolean;
+  /**
+   * Where the control lives. Default ('bar') renders a standalone pill and is never counted
+   * in the Filters badge. 'modal' renders a checkbox *inside* the Filters popover instead,
+   * and — since it then lives in the dialog like any other filter — is counted in the badge.
+   */
+  renderIn?: 'bar' | 'modal';
 }): FilterEntry {
+  const inModal = opts.renderIn === 'modal';
   return {
     id: opts.id,
     label: opts.label,
     params: [opts.param],
     ...(opts.appliesTo ? { appliesTo: opts.appliesTo } : {}),
-    // Never counted in the Filters badge. That badge counts what the *dialog* holds, and
-    // every toggle has its own lit pill in the bar — the same rule From and In follow.
-    // Counting one there too would report a filter the dialog doesn't contain, and for a
-    // default-on toggle it read as a lie: switching `onlyMyChannels` OFF *widens* the
-    // search, yet the badge announced "Filters 1" as though it had been narrowed.
-    hidden: false,
+    // Bar toggles are never counted in the Filters badge — that badge counts what the
+    // *dialog* holds, and every bar toggle has its own lit pill (the rule From and In
+    // follow). A modal checkbox, by contrast, lives in the dialog, so it *is* counted.
+    hidden: inModal ? true : false,
     isActive: f => f[opts.field] !== opts.defaultValue,
     cleared: { [opts.field]: opts.defaultValue } as Partial<SearchResultsFilters>,
     read: params => {
@@ -436,7 +449,7 @@ function toggleEntry(opts: {
     // token appeared only once it was switched OFF, captioned "Only my channels": the
     // exact opposite of the truth. Its checkbox in the dialog (and the Filters badge, for
     // the ones without their own bar control) is the honest representation.
-    control: { kind: 'toggle', barLabel: opts.barLabel },
+    control: inModal ? { kind: 'checkbox' } : { kind: 'toggle', barLabel: opts.barLabel },
     getValue: f => f[opts.field],
     setValue: next => ({ [opts.field]: next }) as Partial<SearchResultsFilters>,
   };
@@ -527,18 +540,23 @@ export const FILTER_REGISTRY: FilterEntry[] = [
   {
     id: 'mentions',
     label: 'Mentions',
-    params: ['mentions', 'channelMentions'],
+    params: ['mentions', 'channelMentions', 'groupMentions'],
     syntax: 'mentions:',
     appliesTo: isMessageType,
-    isActive: f => f.mentionUserIds.length > 0 || f.mentionChannelIds.length > 0,
-    cleared: { mentionUserIds: [], mentionChannelIds: [] },
+    isActive: f =>
+      f.mentionUserIds.length > 0 ||
+      f.mentionChannelIds.length > 0 ||
+      f.mentionUserGroupIds.length > 0,
+    cleared: { mentionUserIds: [], mentionChannelIds: [], mentionUserGroupIds: [] },
     read: params => ({
       mentionUserIds: csv(params.get('mentions')),
       mentionChannelIds: csv(params.get('channelMentions')),
+      mentionUserGroupIds: csv(params.get('groupMentions')),
     }),
     write: (f, params) => {
       setOrDelete(params, 'mentions', f.mentionUserIds.join(','));
       setOrDelete(params, 'channelMentions', f.mentionChannelIds.join(','));
+      setOrDelete(params, 'groupMentions', f.mentionUserGroupIds.join(','));
     },
     chips: (f, resolve) => [
       ...f.mentionUserIds.map(id => ({
@@ -553,14 +571,22 @@ export const FILTER_REGISTRY: FilterEntry[] = [
         prefix: 'mentions:' as const,
         name: resolve.channelName(id) ?? id,
       })),
+      ...f.mentionUserGroupIds.map(id => ({
+        id,
+        type: ChipType.USER_GROUP,
+        prefix: 'mentions:' as const,
+        name: resolve.userGroupName?.(id) ?? id,
+      })),
     ],
     // Prefix-less chips are still accepted: `hi @vishal` produced them before `mentions:`
-    // existed, and a saved URL can still bring one back.
+    // existed, and a saved URL can still bring one back. Groups are always picked, so they
+    // only ever arrive with the `mentions:` prefix.
     fromChips: mentions => {
       const mine = mentions.filter(m => m.prefix === 'mentions:' || !m.prefix);
       return {
         mentionUserIds: mine.filter(m => m.type === ChipType.USER).map(m => m.id),
         mentionChannelIds: mine.filter(m => m.type === ChipType.CHANNEL).map(m => m.id),
+        mentionUserGroupIds: mine.filter(m => m.type === ChipType.USER_GROUP).map(m => m.id),
       };
     },
     tokens: (f, resolve) => [
@@ -580,8 +606,15 @@ export const FILTER_REGISTRY: FilterEntry[] = [
         patch: { mentionChannelIds: f.mentionChannelIds.filter(v => v !== id) },
         icon: { kind: 'channel', channelId: id } as const,
       })),
+      ...f.mentionUserGroupIds.map(id => ({
+        key: `mentions-group-${id}`,
+        prefix: 'mentions:',
+        label: `@${resolve.userGroupName?.(id) ?? id}`,
+        patch: { mentionUserGroupIds: f.mentionUserGroupIds.filter(v => v !== id) },
+        icon: { kind: 'userGroup' } as const,
+      })),
     ],
-    control: { kind: 'mentions', placeholder: 'e.g. Emily Anderson or general' },
+    control: { kind: 'mentions', placeholder: 'e.g. Emily Anderson, general or Frontend Team' },
   },
   {
     id: 'date',
@@ -858,6 +891,43 @@ export const FILTER_REGISTRY: FilterEntry[] = [
     // and a message's `messageActs`, so this is one filter over both.
     appliesTo: isTicketOrMessageType,
     control: { kind: 'text', placeholder: 'e.g. billing, urgent' },
+  }),
+  textListEntry({
+    id: 'entity',
+    label: 'Entity',
+    param: 'entity',
+    field: 'entities',
+    syntax: 'entity:',
+    searchKey: 'entity',
+    // Same glyph the palette chip uses (ChipIcon in FilterChipNode), so a filter looks
+    // identical in cmd+K and on the results page.
+    tokenIcon: { kind: 'entity' },
+    // Entity annotations live on both a message's and a ticket's `entityNames`, and the
+    // backend AND-s the values — two entities means docs mentioning both, not either.
+    appliesTo: isTicketOrMessageType,
+    control: { kind: 'text', placeholder: 'e.g. Big Basket, Swiggy' },
+    // The chip's value IS what the backend matches (an entity name, not an id), so unlike
+    // `board:` the label needs no resolver — it reads back exactly what was typed.
+    chip: {
+      type: ChipType.ENTITY,
+      prefix: 'entity:',
+      label: value => value,
+    },
+  }),
+  // Kept last so it renders at the bottom of the Filters popover, beneath the ticket
+  // filters. Desk and Tickets tabs hide archived tickets by default; this checkbox brings
+  // them back. Scoped to those two tabs so it never appears elsewhere, and the registry is
+  // unused by cmd+k, so it is full-page-only. Lives inside the Filters popover
+  // (renderIn: 'modal'), not as a standalone bar pill.
+  toggleEntry({
+    id: 'showArchived',
+    label: 'Show archived',
+    param: 'showArchived',
+    field: 'showArchived',
+    defaultValue: false,
+    barLabel: 'Archived',
+    appliesTo: d => d === 'desk' || d === 'tickets',
+    renderIn: 'modal',
   }),
 ];
 

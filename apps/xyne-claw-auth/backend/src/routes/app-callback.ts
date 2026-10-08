@@ -18,6 +18,7 @@ import { CONFIG } from "../config.js";
 import { prisma } from "../db.js";
 import { decrypt } from "../crypto.js";
 import { expandSpacesMentions } from "../lib/mention-transform.js";
+import { resolveClawUserIdForSpacesIdentity } from "../lib/users-jit.js";
 import { agentRunRepository } from "../repositories/index.js";
 
 import { createLogger } from "../logger.js";
@@ -178,7 +179,7 @@ async function escalateWriteActionFailure(opts: {
     `      userId: "${writeUserId}"`,
     "---",
     "",
-    `❌ **Action failed**: ${errorReason}`,
+    `**Action failed**: ${errorReason}`,
     "",
     `The agent wanted to execute **${humanizeToolName(tool)}**. Click **Retry** to let the agent try again.`,
   ].join("\n");
@@ -468,7 +469,7 @@ router.post("/callback", async (req: Request, res: Response) => {
     if (appToken && (conversationId || channelId)) {
       try {
         const body: Record<string, unknown> = {
-          markdownText: `🔄 Retrying **${humanizeToolName(tool ?? "unknown")}** — the agent is diagnosing the failure and will attempt again.`,
+          markdownText: `Retrying **${humanizeToolName(tool ?? "unknown")}** — the agent is diagnosing the failure and will attempt again.`,
           userId: (await findAgent(agentSlug, spacesAppId))?.spacesAppUserId ?? "",
           metadata: { contentFormat: "markdown" },
         };
@@ -572,7 +573,7 @@ router.post("/callback", async (req: Request, res: Response) => {
           // 403 with "private" in the message means private channel — report and bail
           // (other 403s like "bot/app users" from the join endpoint are logged and we still attempt the post)
           if (errText.includes("private")) {
-            const failMsg = `❌ I need to be added to #${targetChannelId} (private channel) to post there. Please add me and try again.`;
+            const failMsg = `I need to be added to #${targetChannelId} (private channel) to post there. Please add me and try again.`;
             if (sourceConversationId) {
               await spacesAppFetch("/chat/postMessage", { conversationId: sourceConversationId, text: failMsg }, appToken).catch(() => {});
             }
@@ -587,7 +588,7 @@ router.post("/callback", async (req: Request, res: Response) => {
         await spacesAppFetch("/chat/postMessage", { channelId: targetChannelId, text: content }, appToken);
 
         // Confirm in source thread
-        const confirmMsg = `✅ Posted in #${channelName}`;
+        const confirmMsg = `Posted in #${channelName}`;
         if (sourceConversationId) {
           await spacesAppFetch("/chat/postMessage", { conversationId: sourceConversationId, text: confirmMsg }, appToken).catch((e) => {
             log.error("[app-callback] spaces-send-message: failed to send confirmation:", e);
@@ -774,7 +775,11 @@ router.post("/callback", async (req: Request, res: Response) => {
 
   if (targetConversationId && messageContent && targetChannelId && mentionedUserId && workspaceId) {
     // Verify caller is the intended user (XYNE-12145). Fail closed.
-    if (!callerUserId || callerUserId !== mentionedUserId) {
+    // The card bakes the raw Spaces id (kept for the postAsUser body below),
+    // while callerUserId is the canonical Claw id — resolve before comparing
+    // or post-canonicalization users can never approve their own twin card.
+    const mentionedClawUserId = await resolveClawUserIdForSpacesIdentity(mentionedUserId).catch(() => undefined);
+    if (!callerUserId || (callerUserId !== mentionedUserId && callerUserId !== mentionedClawUserId)) {
       log.error(`[app-callback] Unauthorized: caller ${callerUserId ?? "(none)"} != expected ${mentionedUserId}`);
       return;
     }

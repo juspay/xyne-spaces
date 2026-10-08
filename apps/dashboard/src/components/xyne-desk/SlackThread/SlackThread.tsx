@@ -1,6 +1,7 @@
 import { ReactElement, useEffect, useMemo, useRef } from 'react';
 import SlackMessage, { SlackEmailMessage } from './SlackMessage';
 import { useMarkEmailRead } from '../../../hooks/useMarkEmailRead';
+import { CallEmailRow, isCallEmailBody } from '../CallThread/CallThread';
 
 interface SlackThreadProps {
   emails: SlackEmailMessage[];
@@ -29,9 +30,21 @@ const SlackThread = ({ emails, ticketId }: SlackThreadProps): ReactElement => {
 
   return (
     <div ref={containerRef} className='divide-y divide-border overflow-y-auto'>
-      {sorted.map(email => (
-        <SlackMessage key={email.id} email={email} />
-      ))}
+      {sorted.map(email =>
+        // Call records are JSON that SlackMessage would print raw; same row layout, phone as avatar.
+        isCallEmailBody(email.body) ? (
+          <CallEmailRow
+            key={email.id}
+            emailId={email.id}
+            body={email.body}
+            ticketId={ticketId}
+            attachments={email.attachments}
+            className='px-4 py-3'
+          />
+        ) : (
+          <SlackMessage key={email.id} email={email} />
+        ),
+      )}
     </div>
   );
 };

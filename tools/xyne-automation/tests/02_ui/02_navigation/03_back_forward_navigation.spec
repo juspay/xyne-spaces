@@ -4,6 +4,7 @@
 ## User navigates back and forward through visited pages
 * Using browser
 * Ensuring user "user-1" is logged in
+* clicking on "[data-testid='nav-chat']"
 * waiting for "[data-testid='channel-list']" to appear
 * clicking on "[data-testid='nav-recordings']"
-* waiting for "[data-testid='recordings-page']" to appear
+* waiting for "[data-testid='recordings-v2-page']" to appear

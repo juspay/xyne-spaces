@@ -11,6 +11,8 @@ import { prisma } from "./db.js";
 import { SKIP_CATALOG_SOURCES } from "./catalog-skip.js";
 
 import { createLogger } from "./logger.js";
+import { syncToolsToIndexBestEffort } from "./services/tool-index/index.js";
+
 const log = createLogger("bootstrap-tools");
 
 export async function bootstrapCustomTools(): Promise<void> {
@@ -48,6 +50,9 @@ export async function bootstrapCustomTools(): Promise<void> {
     }
 
     log.info(`[bootstrap-tools] upserted ${upserted} custom tools from shared registry`);
+    // Unqualified so it also picks up MCP rows tool-sync already wrote — the
+    // index self-populates on boot without an admin remembering to rebuild it.
+    syncToolsToIndexBestEffort();
   } catch (err) {
     log.error("[bootstrap-tools] failed:", err);
   }

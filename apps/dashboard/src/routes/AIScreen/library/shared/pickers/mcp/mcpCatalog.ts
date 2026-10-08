@@ -19,7 +19,7 @@ export interface McpCatalogEntry {
   server: McpServer | undefined;
   category: AgentCategoryId;
   isGateway: boolean;
-  verified: boolean;
+  scope: McpScope;
   selectable: boolean;
 }
 
@@ -28,12 +28,35 @@ function metaString(server: McpServer, key: string): string | undefined {
   return typeof value === 'string' && value ? value : undefined;
 }
 
-function isVerified(server: McpServer | undefined): boolean {
-  if (!server) return false;
+export type McpScope = 'global' | 'personal' | 'built-in' | 'unknown';
+
+export function connectorScope(server: McpServer | undefined): McpScope {
+  if (!server) return 'unknown';
   const scope = metaString(server, 'scope');
-  const publishStatus = metaString(server, 'publishStatus');
-  if (!scope && !publishStatus) return true;
-  return scope === 'global' || scope === 'built-in';
+  if (scope === 'global' || scope === 'personal' || scope === 'built-in') return scope;
+  return metaString(server, 'publishStatus') ? 'unknown' : 'built-in';
+}
+
+const SCOPE_LABELS = new Map<McpScope, string>([
+  ['global', 'Global'],
+  ['personal', 'Personal'],
+  ['built-in', 'Built-in'],
+  ['unknown', 'Unlisted'],
+]);
+
+export function scopeLabel(scope: McpScope): string {
+  return SCOPE_LABELS.get(scope) ?? 'Unlisted';
+}
+
+const SCOPE_HINTS = new Map<McpScope, string>([
+  ['global', 'Added by someone here and approved for the whole workspace.'],
+  ['personal', 'Added by one person — only they can see it.'],
+  ['built-in', 'Ships with Xyne. Everyone can see it, though it may still need a key.'],
+  ['unknown', 'This connector has no publish scope recorded.'],
+]);
+
+export function scopeHint(scope: McpScope): string {
+  return SCOPE_HINTS.get(scope) ?? 'This connector has no publish scope recorded.';
 }
 
 export function buildMcpCatalog(
@@ -59,7 +82,7 @@ export function buildMcpCatalog(
         server,
         category: server ? deriveMcpCategory(server) : 'other',
         isGateway,
-        verified: isVerified(server),
+        scope: connectorScope(server),
         selectable: tools.length > 0,
       };
     });

@@ -60,6 +60,13 @@ export function McpConnectForm({
 
       {error && <p className='text-xs leading-4 text-destructive'>{error}</p>}
 
+      {isPending && !error && (
+        <p className='text-xs leading-4 text-muted-foreground'>
+          Checking these details with the connector — starting it for the first time can take a few
+          moments.
+        </p>
+      )}
+
       <div className='flex w-full items-center justify-end gap-1.5'>
         <button
           type='button'
@@ -81,7 +88,7 @@ export function McpConnectForm({
           )}
         >
           {isPending && <Loader2 className='size-3.5 animate-spin' aria-hidden />}
-          Connect
+          {isPending ? 'Verifying…' : 'Connect'}
         </button>
       </div>
     </form>

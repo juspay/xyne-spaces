@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useMemo } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import type { Agent, AgentLight, AgentShare, ScheduledJob } from "../../lib/types";
+import { isCurrentUser } from "../../lib/identity";
 import type {
   ClaudeModelInfo,
   AvailableTools,
@@ -73,6 +74,9 @@ function extractToolsFromConfig(config: Record<string, unknown> | undefined | nu
     custom:    t.custom ?? [],
     gateway:   t.gateway ?? [],
     callableAgents: t.callableAgents ?? [],
+    // Anything unrecognised reads as off — a stray value must not widen a
+    // boundary, and the backend's parser makes the same call.
+    ...(t.openPalette === "read" || t.openPalette === "all" ? { openPalette: t.openPalette } : {}),
   };
 }
 
@@ -80,6 +84,17 @@ function sameSet(a: string[], b: string[]): boolean {
   if (a.length !== b.length) return false;
   const s = new Set(a);
   return b.every((v) => s.has(v));
+}
+
+function readAgentOptimizations(config: Record<string, unknown> | undefined | null): Record<string, boolean> {
+  const raw = config?.["optimizations"];
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return {};
+  return Object.fromEntries(Object.entries(raw).filter((e): e is [string, boolean] => typeof e[1] === "boolean"));
+}
+
+function sameOptimizations(a: Record<string, boolean>, b: Record<string, boolean>): boolean {
+  const keys = Object.keys(a);
+  return keys.length === Object.keys(b).length && keys.every((k) => a[k] === b[k]);
 }
 
 /* ── props ─────────────────────────────────────────────────────────── */
@@ -163,6 +178,7 @@ export function AgentDetailPageV3({ userId, isAdmin }: Props) {
   // routes every run to the shared read-only sbx-git sandbox (grep across all repos,
   // no per-project clone, mutating sandbox tools stripped).
   const [draftForceReadOnlySandbox, setDraftForceReadOnlySandbox] = useState(false);
+  const [draftAllowWriteInReadOnlyJob, setDraftAllowWriteInReadOnlyJob] = useState(false);
   // Operator-selected repo focus for read-only agents (agent.config.sbxGitRepos).
   const [draftSbxGitRepos, setDraftSbxGitRepos] = useState<string[]>([]);
   const [sbxGitRepoOptions, setSbxGitRepoOptions] = useState<SbxGitRepoOption[]>([]);
@@ -200,6 +216,7 @@ export function AgentDetailPageV3({ userId, isAdmin }: Props) {
   // Plan mode opt-in (agent.config.planMode). When on, non-twin thread mentions
   // propose a plan and wait for approval before multi-step work. Default false.
   const [draftPlanMode, setDraftPlanMode] = useState(false);
+  const [draftOptimizations, setDraftOptimizations] = useState<Record<string, boolean>>({});
   // Editable plan-mode primer (agent.config.planModePrompt) — how the agent scopes
   // a plan. Pre-filled with the default; only a CUSTOM value is persisted. Never
   // changes the propose→approve gate (enforced by the tool palette).
@@ -320,6 +337,7 @@ export function AgentDetailPageV3({ userId, isAdmin }: Props) {
         setDraftPromptInjection(promptInj);
         setDraftSandboxRepo((agentData.config as { sandboxRepo?: string }).sandboxRepo ?? "");
         setDraftForceReadOnlySandbox((agentData.config as { forceReadOnlySandbox?: boolean }).forceReadOnlySandbox === true);
+        setDraftAllowWriteInReadOnlyJob((agentData.config as { allowWriteInReadOnlyJob?: boolean }).allowWriteInReadOnlyJob === true);
         setDraftSbxGitRepos(Array.isArray((agentData.config as { sbxGitRepos?: string[] }).sbxGitRepos) ? (agentData.config as { sbxGitRepos: string[] }).sbxGitRepos : []);
         setDraftResearchAgentProductId((agentData.config as { product_id?: string | null; RESEARCH_AGENT_PRODUCT_ID?: string | null }).product_id ?? (agentData.config as { RESEARCH_AGENT_PRODUCT_ID?: string | null }).RESEARCH_AGENT_PRODUCT_ID ?? "");
         setDraftResearchAgentRepositoryId((agentData.config as { repository_id?: string | null; RESEARCH_AGENT_REPOSITORY_ID?: string | null }).repository_id ?? (agentData.config as { RESEARCH_AGENT_REPOSITORY_ID?: string | null }).RESEARCH_AGENT_REPOSITORY_ID ?? "");
@@ -329,6 +347,7 @@ export function AgentDetailPageV3({ userId, isAdmin }: Props) {
         setDraftPlanTracking((agentData.config as { planTracking?: boolean }).planTracking !== false);
         setDraftAutoGoal((agentData.config as { autoGoal?: boolean }).autoGoal === true);
         setDraftPlanMode((agentData.config as { planMode?: boolean }).planMode === true);
+        setDraftOptimizations(readAgentOptimizations(agentData.config));
         {
           const pmp = (agentData.config as { planModePrompt?: string }).planModePrompt;
           setDraftPlanModePrompt(typeof pmp === "string" && pmp.trim() ? pmp : DEFAULT_PLAN_MODE_PROMPT);
@@ -429,6 +448,7 @@ export function AgentDetailPageV3({ userId, isAdmin }: Props) {
     const basePromptInjection = (agent.config as { promptInjection?: string }).promptInjection ?? "";
     const baseSandboxRepo = (agent.config as { sandboxRepo?: string }).sandboxRepo ?? "";
     const baseForceReadOnlySandbox = (agent.config as { forceReadOnlySandbox?: boolean }).forceReadOnlySandbox === true;
+    const baseAllowWriteInReadOnlyJob = (agent.config as { allowWriteInReadOnlyJob?: boolean }).allowWriteInReadOnlyJob === true;
     const baseSbxGitRepos = Array.isArray((agent.config as { sbxGitRepos?: string[] }).sbxGitRepos) ? (agent.config as { sbxGitRepos: string[] }).sbxGitRepos : [];
     const baseResearchAgentProductId = (agent.config as { product_id?: string | null; RESEARCH_AGENT_PRODUCT_ID?: string | null }).product_id ?? (agent.config as { RESEARCH_AGENT_PRODUCT_ID?: string | null }).RESEARCH_AGENT_PRODUCT_ID ?? "";
     const baseResearchAgentRepositoryId = (agent.config as { repository_id?: string | null; RESEARCH_AGENT_REPOSITORY_ID?: string | null }).repository_id ?? (agent.config as { RESEARCH_AGENT_REPOSITORY_ID?: string | null }).RESEARCH_AGENT_REPOSITORY_ID ?? "";
@@ -438,6 +458,7 @@ export function AgentDetailPageV3({ userId, isAdmin }: Props) {
     const basePlanTracking = (agent.config as { planTracking?: boolean }).planTracking !== false;
     const baseAutoGoal = (agent.config as { autoGoal?: boolean }).autoGoal === true;
     const basePlanMode = (agent.config as { planMode?: boolean }).planMode === true;
+    const baseOptimizations = readAgentOptimizations(agent.config);
     const basePlanModePromptRaw = (agent.config as { planModePrompt?: string }).planModePrompt;
     const basePlanModePrompt =
       typeof basePlanModePromptRaw === "string" && basePlanModePromptRaw.trim()
@@ -466,6 +487,7 @@ export function AgentDetailPageV3({ userId, isAdmin }: Props) {
       !sameSet(draftTools.custom, baseTools.custom) ||
       !sameSet(draftTools.gateway, baseTools.gateway) ||
       !sameSet(draftTools.callableAgents, baseTools.callableAgents) ||
+      draftTools.openPalette !== baseTools.openPalette ||
       !sameSet(draftSkillIds, baseSkills) ||
       kbChanged ||
       kbScopeChanged ||
@@ -474,6 +496,7 @@ export function AgentDetailPageV3({ userId, isAdmin }: Props) {
       draftPromptInjection !== basePromptInjection ||
       draftSandboxRepo !== baseSandboxRepo ||
       draftForceReadOnlySandbox !== baseForceReadOnlySandbox ||
+      draftAllowWriteInReadOnlyJob !== baseAllowWriteInReadOnlyJob ||
       JSON.stringify([...draftSbxGitRepos].sort()) !== JSON.stringify([...baseSbxGitRepos].sort()) ||
       draftResearchAgentProductId !== baseResearchAgentProductId ||
       draftResearchAgentRepositoryId !== baseResearchAgentRepositoryId ||
@@ -483,6 +506,7 @@ export function AgentDetailPageV3({ userId, isAdmin }: Props) {
       draftPlanTracking !== basePlanTracking ||
       draftAutoGoal !== baseAutoGoal ||
       draftPlanMode !== basePlanMode ||
+      !sameOptimizations(draftOptimizations, baseOptimizations) ||
       // Only counts as a change when plan mode is on (a prompt with no plan mode
       // is never persisted).
       (draftPlanMode && draftPlanModePrompt !== basePlanModePrompt) ||
@@ -498,7 +522,7 @@ export function AgentDetailPageV3({ userId, isAdmin }: Props) {
       draftOutputRequireTools !== baseOutputRequireTools ||
       triggersChanged
     );
-  }, [agent, config, draftName, draftDescription, prompt, draftTools, draftSkillIds, draftKbResources, draftKbScope, draftProvider, draftModel, draftPromptInjection, draftSandboxRepo, draftForceReadOnlySandbox, draftSbxGitRepos, draftResearchAgentProductId, draftResearchAgentRepositoryId, draftSuggestGoal, draftPrefetchContext, draftPostTodos, draftPlanTracking, draftAutoGoal, draftPlanMode, draftPlanModePrompt, draftMaxDelegations, draftVerifyResponses, draftCitationReflection, draftAutoToolCitations, draftVerifyResponseCriteria, draftOutputFormatEnabled, draftOutputType, draftOutputSchema, draftOutputTemplate, draftOutputRequireTools, skillTriggers]);
+  }, [agent, config, draftName, draftDescription, prompt, draftTools, draftSkillIds, draftKbResources, draftKbScope, draftProvider, draftModel, draftPromptInjection, draftSandboxRepo, draftForceReadOnlySandbox, draftAllowWriteInReadOnlyJob, draftSbxGitRepos, draftResearchAgentProductId, draftResearchAgentRepositoryId, draftSuggestGoal, draftPrefetchContext, draftPostTodos, draftPlanTracking, draftAutoGoal, draftPlanMode, draftOptimizations, draftPlanModePrompt, draftMaxDelegations, draftVerifyResponses, draftCitationReflection, draftAutoToolCitations, draftVerifyResponseCriteria, draftOutputFormatEnabled, draftOutputType, draftOutputSchema, draftOutputTemplate, draftOutputRequireTools, skillTriggers]);
 
   /* ── handlers ──────────────────────────────────────────────────── */
 
@@ -537,7 +561,12 @@ export function AgentDetailPageV3({ userId, isAdmin }: Props) {
     setSavingConfig(true);
     try {
       const nextConfig = { ...(agent.config ?? {}) } as Record<string, unknown>;
-      if (draftTools.subagents.length || draftTools.direct.length || draftTools.custom.length || draftTools.gateway.length || draftTools.callableAgents.length) {
+      // `openPalette` must count as content here, or an agent with the flag set
+      // and no explicit grants loses `config.tools` — and the flag — on every save.
+      if (
+        draftTools.subagents.length || draftTools.direct.length || draftTools.custom.length ||
+        draftTools.gateway.length || draftTools.callableAgents.length || draftTools.openPalette
+      ) {
         nextConfig.tools = draftTools;
       } else {
         delete nextConfig.tools;
@@ -556,6 +585,11 @@ export function AgentDetailPageV3({ userId, isAdmin }: Props) {
         nextConfig.forceReadOnlySandbox = true;
       } else {
         delete nextConfig.forceReadOnlySandbox;
+      }
+      if (draftAllowWriteInReadOnlyJob) {
+        nextConfig.allowWriteInReadOnlyJob = true;
+      } else {
+        delete nextConfig.allowWriteInReadOnlyJob;
       }
       if (draftSbxGitRepos.length > 0) {
         nextConfig.sbxGitRepos = draftSbxGitRepos;
@@ -634,6 +668,11 @@ export function AgentDetailPageV3({ userId, isAdmin }: Props) {
       } else {
         delete nextConfig.planMode;
         delete nextConfig.planModePrompt;
+      }
+      if (Object.keys(draftOptimizations).length) {
+        nextConfig.optimizations = draftOptimizations;
+      } else {
+        delete nextConfig.optimizations;
       }
       // Per-run delegation budget. Persist only a non-default value; DEFAULT
       // drops the key so the runtime falls back to its own default (kept in
@@ -728,7 +767,7 @@ export function AgentDetailPageV3({ userId, isAdmin }: Props) {
     } finally {
       setSavingConfig(false);
     }
-  }, [agent, draftName, draftDescription, prompt, draftTools, draftSkillIds, draftKbResources, draftKbScope, draftProvider, draftModel, draftPromptInjection, draftSandboxRepo, draftForceReadOnlySandbox, draftSbxGitRepos, draftResearchAgentProductId, draftResearchAgentRepositoryId, draftSuggestGoal, draftPrefetchContext, draftPostTodos, draftPlanTracking, draftAutoGoal, draftPlanMode, draftPlanModePrompt, draftMaxDelegations, draftVerifyResponses, draftCitationReflection, draftAutoToolCitations, draftVerifyResponseCriteria, draftOutputFormatEnabled, draftOutputType, draftOutputSchema, draftOutputTemplate, draftOutputRequireTools, skillTriggers, config, savingConfig, dirty, userId, showSnackbar]);
+  }, [agent, draftName, draftDescription, prompt, draftTools, draftSkillIds, draftKbResources, draftKbScope, draftProvider, draftModel, draftPromptInjection, draftSandboxRepo, draftForceReadOnlySandbox, draftAllowWriteInReadOnlyJob, draftSbxGitRepos, draftResearchAgentProductId, draftResearchAgentRepositoryId, draftSuggestGoal, draftPrefetchContext, draftPostTodos, draftPlanTracking, draftAutoGoal, draftPlanMode, draftOptimizations, draftPlanModePrompt, draftMaxDelegations, draftVerifyResponses, draftCitationReflection, draftAutoToolCitations, draftVerifyResponseCriteria, draftOutputFormatEnabled, draftOutputType, draftOutputSchema, draftOutputTemplate, draftOutputRequireTools, skillTriggers, config, savingConfig, dirty, userId, showSnackbar]);
 
   const persistToolsConfig = useCallback(async (nextTools: AgentToolSelection): Promise<Agent> => {
     if (!agent) throw new Error("Agent not loaded");
@@ -1101,6 +1140,8 @@ export function AgentDetailPageV3({ userId, isAdmin }: Props) {
             sandboxRepoOptions={sandboxRepoOptions}
             draftForceReadOnlySandbox={draftForceReadOnlySandbox}
             onDraftForceReadOnlySandboxChange={setDraftForceReadOnlySandbox}
+            draftAllowWriteInReadOnlyJob={draftAllowWriteInReadOnlyJob}
+            onDraftAllowWriteInReadOnlyJobChange={setDraftAllowWriteInReadOnlyJob}
             draftSbxGitRepos={draftSbxGitRepos}
             onDraftSbxGitReposChange={setDraftSbxGitRepos}
             sbxGitRepoOptions={sbxGitRepoOptions}
@@ -1130,6 +1171,8 @@ export function AgentDetailPageV3({ userId, isAdmin }: Props) {
             onDraftAutoGoalChange={setDraftAutoGoal}
             draftPlanMode={draftPlanMode}
             onDraftPlanModeChange={setDraftPlanMode}
+            draftOptimizations={draftOptimizations}
+            onDraftOptimizationsChange={setDraftOptimizations}
             draftPlanModePrompt={draftPlanModePrompt}
             onDraftPlanModePromptChange={setDraftPlanModePrompt}
             draftMaxDelegations={draftMaxDelegations}
@@ -1250,7 +1293,7 @@ export function AgentDetailPageV3({ userId, isAdmin }: Props) {
         onOpenChange={setCloneDialogOpen}
         sourceName={agent.name}
         needsApproval={!permissions?.canEdit}
-        isOwnAgent={agent.ownerUserId === userId}
+        isOwnAgent={isCurrentUser(agent.ownerUserId)}
         sourceEnabled={agent.enabled}
         submitting={cloning}
         onConfirm={(name) => void doClone(name)}

@@ -1,28 +1,25 @@
 import { Router, type NextFunction, type Request, type Response } from 'express';
 import { z, ZodError } from 'zod';
-import { AppError } from '@/middleware/errorHandler';
+import { AppError, zodErrorToAppError } from '@/middleware/errorHandler';
 import { SdlcArtifactVersionStore } from '@/sdlc/SdlcArtifactVersionStore';
 
 const router = Router();
 const store = new SdlcArtifactVersionStore();
 
-const selectorSchema = z.discriminatedUnion('type', [
-  z.object({
-    type: z.literal('WIKI_PAGE'),
-    path: z.string().trim().min(1).max(512),
-    includeArchived: z.boolean().optional(),
-  }).strict(),
-  z.object({
-    type: z.literal('SDLC_CANVAS'),
-    canvasId: z.string().trim().min(1).max(256),
-  }).strict(),
-]);
-
 const bindingSchema = z.object({
-  repoId: z.string().trim().min(1),
   workspaceId: z.string().trim().min(1),
   actorUserId: z.string().trim().min(1),
 }).passthrough();
+
+const canvasIdSchema = z.string().trim().min(1).max(256);
+
+const listSchema = z.object({
+  channelId: z.string().trim().min(1),
+  artifactTypeId: z.string().trim().min(1).optional(),
+  trackId: z.string().trim().min(1).optional(),
+  trackFolderId: z.string().trim().min(1).optional(),
+  includeArchived: z.boolean().optional(),
+});
 
 function route(
   handler: (req: Request, res: Response) => Promise<void>
@@ -34,11 +31,7 @@ function parse<T>(callback: () => T): T {
   try {
     return callback();
   } catch (error) {
-    if (error instanceof ZodError) {
-      const issue = error.issues[0];
-      const location = issue?.path.length ? `${issue.path.join('.')}: ` : '';
-      throw new AppError(`${location}${issue?.message ?? 'Invalid artifact history request'}`, 400);
-    }
+    if (error instanceof ZodError) throw zodErrorToAppError(error, 'Invalid artifact history request');
     throw error;
   }
 }
@@ -49,39 +42,19 @@ function binding(req: Request) {
   if (!actingUserId || actingUserId !== parsed.actorUserId) {
     throw new AppError('SDLC artifact history binding mismatch', 403);
   }
-  return {
-    repoId: parsed.repoId,
-    workspaceId: parsed.workspaceId,
-    userId: parsed.actorUserId,
-  };
+  return { workspaceId: parsed.workspaceId, userId: parsed.actorUserId };
+}
+
+function canvasId(req: Request): string {
+  return parse(() => canvasIdSchema.parse((req.body as Record<string, unknown>).canvasId));
 }
 
 router.post(
   '/current/list',
   route(async (req, res) => {
     const trusted = binding(req);
-    const body = req.body as Record<string, unknown>;
-    const rawKinds = Array.isArray(body.kinds) ? body.kinds : [];
-    const mappedKinds = rawKinds.map((kind) => {
-      const value = String(kind);
-      if (value === 'PRD' || value === 'TECH_DOC') return 'ARTIFACT';
-      return value;
-    });
-    const kinds = [
-      ...new Set(
-        mappedKinds.filter((kind): kind is 'WIKI' | 'BASELINE' | 'ARTIFACT' =>
-          ['WIKI', 'BASELINE', 'ARTIFACT'].includes(kind)
-        )
-      ),
-    ];
-    if (kinds.length !== new Set(mappedKinds).size) {
-      throw new AppError('Unsupported artifact kind', 400);
-    }
-    const artifacts = await store.listArtifacts({
-      ...trusted,
-      ...(kinds.length > 0 ? { kinds } : {}),
-      includeArchived: body.includeArchived === true,
-    });
+    const filters = parse(() => listSchema.parse(req.body));
+    const artifacts = await store.listArtifacts({ ...trusted, ...filters });
     res.status(200).json({ success: true, artifacts });
   })
 );
@@ -90,9 +63,10 @@ router.post(
   '/current/read',
   route(async (req, res) => {
     const trusted = binding(req);
-    const body = req.body as Record<string, unknown>;
-    const selector = parse(() => selectorSchema.parse(body.selector));
-    const result = await store.readArtifact({ ...trusted, selector });
+    const versionId = String((req.body as Record<string, unknown>).versionId ?? '').trim();
+    const result = versionId
+      ? await store.readVersion({ ...trusted, canvasId: canvasId(req), versionId })
+      : await store.readArtifact({ ...trusted, canvasId: canvasId(req) });
     res.status(200).json({ success: true, ...result });
   })
 );
@@ -102,7 +76,6 @@ router.post(
   route(async (req, res) => {
     const trusted = binding(req);
     const body = req.body as Record<string, unknown>;
-    const selector = parse(() => selectorSchema.parse(body.selector));
     const rawLimit = body.limit === undefined ? 10 : Number(body.limit);
     if (!Number.isInteger(rawLimit) || rawLimit < 1 || rawLimit > 25) {
       throw new AppError('limit must be an integer between 1 and 25', 400);
@@ -111,23 +84,10 @@ router.post(
     if (body.cursor !== undefined && !cursor) throw new AppError('cursor must not be empty', 400);
     const result = await store.listVersions({
       ...trusted,
-      selector,
+      canvasId: canvasId(req),
       limit: rawLimit,
       ...(cursor ? { cursor } : {}),
     });
-    res.status(200).json({ success: true, ...result });
-  })
-);
-
-router.post(
-  '/read',
-  route(async (req, res) => {
-    const trusted = binding(req);
-    const body = req.body as Record<string, unknown>;
-    const selector = parse(() => selectorSchema.parse(body.selector));
-    const versionId = String(body.versionId ?? '').trim();
-    if (!versionId) throw new AppError('versionId is required', 400);
-    const result = await store.readVersion({ ...trusted, selector, versionId });
     res.status(200).json({ success: true, ...result });
   })
 );

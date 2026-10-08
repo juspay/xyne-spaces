@@ -41,7 +41,7 @@ import {
 } from '@/services/googleCalendarApi';
 import { buildGoogleEventBody, hashEventBody } from '@/services/calendarEventPayload';
 import { normalizeCalendarOwnerEmail } from '@/services/calendarCallStore.utils';
-import { runAsServiceActor, runAsSystem } from '@/database/tenant/context';
+import { findCallForCalendarPush, syncCallToGoogleCalendarAsCreator } from '@/bypassAcl/callServices';
 import { buildCallInviteUrl } from '@/utils/urlUtils';
 import { logger } from '@/utils/logger';
 
@@ -117,6 +117,7 @@ async function resolveOrganizerCredentials(organizerUserId: string) {
 /** Remove the mirrored event, then forget it so a later re-push starts clean. */
 async function removePushedEvent(
   callId: string,
+  callExternalId: string,
   pushState: GoogleCalendarPushState,
   organizerUserId: string,
 ): Promise<void> {
@@ -127,18 +128,130 @@ async function removePushedEvent(
     // Keep the stored id: if the organizer reconnects, the next sync for this
     // call still knows which event to delete.
     logger.warn(`${TAG} Cannot delete pushed event — organizer has no active source`, {
-      callId,
+      callId: callExternalId,
       eventId: pushState.eventId,
     });
     return;
   }
 
+  // sendUpdates:'none' — Xyne notifies participants itself; Google must not
+  // also email a cancellation for a call that was cancelled inside Xyne.
   await deleteGoogleEvent(resolved.credentials.accessToken, pushState.eventId, {
-    sendUpdates: 'all',
+    sendUpdates: 'none',
   });
   await repositories.calls.setGoogleCalendarPushState(callId, null);
 
-  logger.info(`${TAG} Deleted pushed event`, { callId, eventId: pushState.eventId });
+  logger.info(`${TAG} Deleted pushed event`, { callId: callExternalId, eventId: pushState.eventId });
+}
+
+/**
+ * Reconciles one pushable call against the organizer's Google calendar. Runs only under the
+ * organizer's tenant scope — reach it through syncCallToGoogleCalendarAsCreator (bypassAcl/callServices).
+ */
+export async function pushCallToCalendar(call: NonNullable<Awaited<ReturnType<typeof findCallForCalendarPush>>>): Promise<void> {
+  const pushState = (call.metadata as CallMetadata | null)?.googleCalendarPush ?? null;
+
+  if (call.status === CallStatus.CANCELLED) {
+    if (pushState) await removePushedEvent(call.id, call.externalId, pushState, call.createdByUserId);
+    return;
+  }
+
+  // Only a still-scheduled call is written or rewritten. Once it is live or
+  // over, the calendar entry stays exactly as the attendees last saw it.
+  if (call.status !== CallStatus.SCHEDULED) return;
+
+  if (!call.startsAt || !call.endsAt) {
+    logger.info(`${TAG} Call has no start/end; nothing to put on a calendar`, { callId: call.externalId });
+    return;
+  }
+
+  const organizer = await repositories.users.findById(call.createdByUserId);
+  if (!organizer?.email) {
+    logger.warn(`${TAG} Organizer has no email; skipping push`, {
+      callId: call.externalId,
+      organizerUserId: call.createdByUserId,
+    });
+    return;
+  }
+
+  const resolved = await resolveOrganizerCredentials(call.createdByUserId);
+  if (!resolved) return;
+
+  const attendeeEmails = await resolveAttendeeEmails(call.id, organizer.email);
+  const body = buildGoogleEventBody({
+    title: call.title ?? 'Xyne Call',
+    description: call.description,
+    // Every scheduled call is created with a roomLink; derive it from the
+    // public id rather than emit a dead "Join" link if one is ever missing.
+    roomLink: call.roomLink ?? buildCallInviteUrl(call.externalId),
+    startsAt: call.startsAt,
+    endsAt: call.endsAt,
+    timezone: call.timezone,
+    attendeeEmails,
+    callId: call.id,
+    callExternalId: call.externalId,
+  });
+
+  const contentHash = hashEventBody(body);
+
+  // Nothing about the event changed since the last push. Reconciles run for
+  // reasons that have nothing to do with the calendar (a series cascade, a
+  // buffer replenishment, a retry), so skipping a no-op write also avoids
+  // needless churn on every attendee's calendar entry.
+  if (pushState?.eventId && pushState.contentHash === contentHash) {
+    logger.info(`${TAG} Event already matches call; skipping update`, {
+      callId: call.externalId,
+      eventId: pushState.eventId,
+    });
+    return;
+  }
+
+  // sendUpdates:'none' on every write. The event (and the Xyne join link)
+  // still lands on each invitee's calendar; Google just does not send the
+  // invitation/update emails — Xyne owns participant notification.
+  let event;
+  if (pushState?.eventId) {
+    try {
+      event = await patchGoogleEvent(resolved.credentials.accessToken, pushState.eventId, body, {
+        sendUpdates: 'none',
+      });
+    } catch (err) {
+      if (!(err instanceof GoogleCalendarEventGoneError)) throw err;
+      // Someone deleted the event straight from Google. Re-create it rather
+      // than leaving the call permanently invisible on their calendar.
+      logger.warn(`${TAG} Pushed event vanished; re-creating`, {
+        callId: call.externalId,
+        eventId: pushState.eventId,
+      });
+      event = await insertGoogleEvent(resolved.credentials.accessToken, body, {
+        sendUpdates: 'none',
+      });
+    }
+  } else {
+    event = await insertGoogleEvent(resolved.credentials.accessToken, body, {
+      sendUpdates: 'none',
+    });
+  }
+
+  if (!event.id) {
+    throw new Error(`Google returned an event without an id for call ${call.externalId}`);
+  }
+
+  await repositories.calls.setGoogleCalendarPushState(call.id, {
+    eventId: event.id,
+    sourceId: resolved.sourceId,
+    organizerUserId: call.createdByUserId,
+    contentHash,
+    ...(event.htmlLink ? { htmlLink: event.htmlLink } : {}),
+    syncedAt: new Date().toISOString(),
+  });
+
+  logger.info(`${TAG} Pushed call to organizer's calendar`, {
+    callId: call.externalId,
+    eventId: event.id,
+    attendees: attendeeEmails.length,
+    created: !pushState?.eventId,
+  });
 }
 
 /**
@@ -149,123 +262,19 @@ async function removePushedEvent(
  * tell whether the call was edited again while this ran, or null when there
  * was no such row.
  */
-export async function syncCallToGoogleCalendar(callId: string): Promise<Date | null> {
+export async function syncCallToGoogleCalendar(callId: string, callExternalId: string): Promise<Date | null> {
   // The job carries only a call id, so the row's own workspaceId is read
   // cross-workspace first and every later query runs inside that scope.
-  const call = await runAsSystem(() => repositories.calls.findForCalendarPush(callId));
+  const call = await findCallForCalendarPush(callId);
 
   if (!call) {
-    logger.warn(`${TAG} Call not found; nothing to sync`, { callId });
+    logger.warn(`${TAG} Call not found; nothing to sync`, { callId: callExternalId });
     return null;
   }
 
   if (!PUSHABLE_ORIGINS.has(call.callOrigin)) return call.updatedAt;
 
-  await runAsServiceActor(call.createdByUserId, call.workspaceId, async () => {
-    const pushState = (call.metadata as CallMetadata | null)?.googleCalendarPush ?? null;
-
-    if (call.status === CallStatus.CANCELLED) {
-      if (pushState) await removePushedEvent(call.id, pushState, call.createdByUserId);
-      return;
-    }
-
-    // Only a still-scheduled call is written or rewritten. Once it is live or
-    // over, the calendar entry stays exactly as the attendees last saw it.
-    if (call.status !== CallStatus.SCHEDULED) return;
-
-    if (!call.startsAt || !call.endsAt) {
-      logger.info(`${TAG} Call has no start/end; nothing to put on a calendar`, { callId });
-      return;
-    }
-
-    const organizer = await repositories.users.findById(call.createdByUserId);
-    if (!organizer?.email) {
-      logger.warn(`${TAG} Organizer has no email; skipping push`, {
-        callId,
-        organizerUserId: call.createdByUserId,
-      });
-      return;
-    }
-
-    const resolved = await resolveOrganizerCredentials(call.createdByUserId);
-    if (!resolved) return;
-
-    const attendeeEmails = await resolveAttendeeEmails(call.id, organizer.email);
-    const body = buildGoogleEventBody({
-      title: call.title ?? 'Xyne Call',
-      description: call.description,
-      // Every scheduled call is created with a roomLink; derive it from the
-      // public id rather than emit a dead "Join" link if one is ever missing.
-      roomLink: call.roomLink ?? buildCallInviteUrl(call.externalId),
-      startsAt: call.startsAt,
-      endsAt: call.endsAt,
-      timezone: call.timezone,
-      attendeeEmails,
-      callId: call.id,
-      callExternalId: call.externalId,
-    });
-
-    const contentHash = hashEventBody(body);
-
-    // Nothing about the event changed since the last push. Returning here is
-    // not just an optimisation: `sendUpdates: 'all'` makes Google email every
-    // attendee on an update, and reconciles run for reasons that have nothing
-    // to do with the calendar (a series cascade, a buffer replenishment, a
-    // retry). Those must not surface as "this meeting changed".
-    if (pushState?.eventId && pushState.contentHash === contentHash) {
-      logger.info(`${TAG} Event already matches call; skipping update`, {
-        callId,
-        eventId: pushState.eventId,
-      });
-      return;
-    }
-
-    // sendUpdates:'all' on every write — unlike the inbound reconciler these
-    // ARE the organizer's own changes, so invitees should be told about them.
-    let event;
-    if (pushState?.eventId) {
-      try {
-        event = await patchGoogleEvent(resolved.credentials.accessToken, pushState.eventId, body, {
-          sendUpdates: 'all',
-        });
-      } catch (err) {
-        if (!(err instanceof GoogleCalendarEventGoneError)) throw err;
-        // Someone deleted the event straight from Google. Re-create it rather
-        // than leaving the call permanently invisible on their calendar.
-        logger.warn(`${TAG} Pushed event vanished; re-creating`, {
-          callId,
-          eventId: pushState.eventId,
-        });
-        event = await insertGoogleEvent(resolved.credentials.accessToken, body, {
-          sendUpdates: 'all',
-        });
-      }
-    } else {
-      event = await insertGoogleEvent(resolved.credentials.accessToken, body, {
-        sendUpdates: 'all',
-      });
-    }
-
-    if (!event.id) {
-      throw new Error(`Google returned an event without an id for call ${callId}`);
-    }
-
-    await repositories.calls.setGoogleCalendarPushState(call.id, {
-      eventId: event.id,
-      sourceId: resolved.sourceId,
-      organizerUserId: call.createdByUserId,
-      contentHash,
-      ...(event.htmlLink ? { htmlLink: event.htmlLink } : {}),
-      syncedAt: new Date().toISOString(),
-    });
-
-    logger.info(`${TAG} Pushed call to organizer's calendar`, {
-      callId,
-      eventId: event.id,
-      attendees: attendeeEmails.length,
-      created: !pushState?.eventId,
-    });
-  });
+  await syncCallToGoogleCalendarAsCreator(call);
 
   return call.updatedAt;
 }

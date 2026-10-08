@@ -9,12 +9,14 @@ import {
   type KeyboardEvent,
 } from 'react';
 import {
+  Building2,
   CalendarDays,
   LayoutGrid,
   Loader2,
   Search,
   SignalHigh,
   SlidersHorizontal,
+  Users,
   X,
 } from 'lucide-react';
 import { cn } from '../../../utils/classNames';
@@ -86,6 +88,14 @@ interface SearchQueryInputProps {
 /** Ties the wrapping <label> to the text input so a click anywhere focuses it. */
 const QUERY_INPUT_ID = 'search-query-input';
 
+/** Glyph-only token kinds. The rest (user/channel/priority) render their own component. */
+const GLYPH_BY_ICON_KIND: Partial<Record<TokenIcon['kind'], typeof CalendarDays>> = {
+  date: CalendarDays,
+  board: LayoutGrid,
+  entity: Building2,
+  userGroup: Users,
+};
+
 function TokenGlyph({ icon }: { icon?: TokenIcon | undefined }): ReactElement | null {
   if (!icon) return null;
   if (icon.kind === 'user') {
@@ -105,8 +115,7 @@ function TokenGlyph({ icon }: { icon?: TokenIcon | undefined }): ReactElement | 
       <SignalHigh size={16} className={cn('shrink-0', PRIORITY_ICON_COLOR[icon.value] ?? '')} />
     );
   }
-  const Icon =
-    icon.kind === 'date' ? CalendarDays : icon.kind === 'board' ? LayoutGrid : SlidersHorizontal;
+  const Icon = GLYPH_BY_ICON_KIND[icon.kind] ?? SlidersHorizontal;
   // No colour: the glyph inherits `--chip-fg` from the pill, matching the palette's chip.
   return <Icon size={16} className='shrink-0' />;
 }
@@ -348,6 +357,8 @@ export function SearchQueryInput({
                   <Avatar userId={s.icon.userId} size='xs' showActiveStatus={false} />
                 ) : s.icon.kind === 'channel' ? (
                   <ChannelChipIcon id={s.icon.channelId} size={12} />
+                ) : s.icon.kind === 'userGroup' ? (
+                  <Users size={12} />
                 ) : (
                   <SlidersHorizontal size={12} />
                 )}

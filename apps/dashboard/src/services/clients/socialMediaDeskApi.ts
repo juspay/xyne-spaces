@@ -1,6 +1,7 @@
 import { apiInstance } from './apiClient';
 
-export async function startGooglePlayOAuth(input: {
+export async function connectGooglePlayDesk(input: {
+  serviceAccountKey: string;
   channelName: string;
   applications: Array<{
     packageName: string;
@@ -10,13 +11,12 @@ export async function startGooglePlayOAuth(input: {
   boardId: string;
   assigneeUserGroupId?: string;
   visibility: 'PUBLIC' | 'PRIVATE';
-  platform: 'web' | 'electron';
 }): Promise<string> {
-  const response = await apiInstance.post<{ authorizationUrl: string }>(
-    '/integrations/social-media/google-play/oauth/start',
+  const response = await apiInstance.post<{ channelId: string }>(
+    '/integrations/social-media/google-play/connect',
     input,
   );
-  return response.data.authorizationUrl;
+  return response.data.channelId;
 }
 
 export async function addGooglePlayApps(
@@ -39,14 +39,15 @@ export async function disconnectSocialMediaDesk(channelId: string): Promise<void
   await apiInstance.post(`/integrations/social-media/${channelId}/disconnect`);
 }
 
-export async function fetchGooglePlayReviews(
+export async function fetchSocialMediaReviews(
   channelId: string,
+  range?: { startDate: string; endDate: string },
 ): Promise<
   { synced: number; sourceCount: number } | { success: true; queued: true; jobId: string }
 > {
   const response = await apiInstance.post<
     { synced: number; sourceCount: number } | { success: true; queued: true; jobId: string }
-  >(`/integrations/social-media/${channelId}/sync`);
+  >(`/integrations/social-media/${channelId}/sync`, range);
   return response.data;
 }
 
@@ -62,13 +63,171 @@ export async function reconnectGooglePlayApp(channelId: string, sourceId: string
   );
 }
 
-export async function reconnectSocialMediaDesk(
+export async function rotateGooglePlayCredentials(
+  channelId: string,
+  serviceAccountKey: string,
+): Promise<void> {
+  await apiInstance.post(`/integrations/social-media/${channelId}/google-play/credentials`, {
+    serviceAccountKey,
+  });
+}
+
+export interface AppStoreCredentialsInput {
+  keyId: string;
+  privateKey: string;
+}
+
+/** App Store Connect authenticates with a signed JWT, so connecting is one POST — no OAuth. */
+export async function connectAppStoreDesk(
+  input: AppStoreCredentialsInput & {
+    channelName: string;
+    applications: Array<{ bundleId: string }>;
+    projectId: string;
+    boardId: string;
+    assigneeUserGroupId?: string;
+    visibility: 'PUBLIC' | 'PRIVATE';
+  },
+): Promise<string> {
+  const response = await apiInstance.post<{ channelId: string }>(
+    '/integrations/social-media/app-store/connect',
+    input,
+  );
+  return response.data.channelId;
+}
+
+export async function addAppStoreApps(
+  channelId: string,
+  input: { applications: Array<{ bundleId: string }> },
+): Promise<{ added: number }> {
+  const response = await apiInstance.post<{ added: number }>(
+    `/integrations/social-media/${channelId}/app-store/apps`,
+    input,
+  );
+  return response.data;
+}
+
+export async function setAppStoreAppConnection(
+  channelId: string,
+  sourceId: string,
+  connected: boolean,
+): Promise<void> {
+  await apiInstance.post(
+    `/integrations/social-media/${channelId}/app-store/apps/${sourceId}/${
+      connected ? 'reconnect' : 'disconnect'
+    }`,
+  );
+}
+
+/** Initiates Instagram Business OAuth — returns authorization URL for redirect. */
+export async function startInstagramOAuth(input: {
+  channelName: string;
+  projectId: string;
+  boardId?: string;
+  assigneeUserGroupId?: string;
+  visibility: 'PUBLIC' | 'PRIVATE';
+  platform: 'web' | 'electron';
+}): Promise<string> {
+  const response = await apiInstance.post<{ authorizationUrl: string }>(
+    '/integrations/social-media/instagram/oauth/start',
+    { name: input.channelName, ...input },
+  );
+  return response.data.authorizationUrl;
+}
+
+export async function disconnectInstagramDesk(channelId: string): Promise<void> {
+  await apiInstance.post(`/integrations/social-media/${channelId}/instagram/disconnect`);
+}
+
+export async function disconnectInstagramAccount(
+  channelId: string,
+  sourceId: string,
+): Promise<void> {
+  await apiInstance.post(
+    `/integrations/social-media/${channelId}/instagram/${sourceId}/disconnect`,
+  );
+}
+
+export async function reconnectInstagramAccount(
+  channelId: string,
+  sourceId: string,
+  platform: 'web' | 'electron',
+): Promise<string> {
+  const response = await apiInstance.post<{ authorizationUrl: string }>(
+    `/integrations/social-media/${channelId}/instagram/${sourceId}/reconnect`,
+    { platform },
+  );
+  return response.data.authorizationUrl;
+}
+
+export async function addInstagramAccount(
   channelId: string,
   platform: 'web' | 'electron',
 ): Promise<string> {
   const response = await apiInstance.post<{ authorizationUrl: string }>(
-    `/integrations/social-media/${channelId}/reconnect`,
+    `/integrations/social-media/${channelId}/instagram/add-account`,
     { platform },
   );
   return response.data.authorizationUrl;
+}
+
+export async function reconnectInstagramDesk(
+  channelId: string,
+  platform: 'web' | 'electron',
+): Promise<string> {
+  const response = await apiInstance.post<{ authorizationUrl: string }>(
+    `/integrations/social-media/${channelId}/instagram/reconnect`,
+    { platform },
+  );
+  return response.data.authorizationUrl;
+}
+
+/** Initiates Facebook Login for a Page desk — returns authorization URL for redirect. */
+export async function startFacebookOAuth(input: {
+  channelName: string;
+  projectId: string;
+  boardId?: string;
+  assigneeUserGroupId?: string;
+  visibility: 'PUBLIC' | 'PRIVATE';
+  platform: 'web' | 'electron';
+}): Promise<string> {
+  const response = await apiInstance.post<{ authorizationUrl: string }>(
+    '/integrations/social-media/facebook/oauth/start',
+    { name: input.channelName, ...input },
+  );
+  return response.data.authorizationUrl;
+}
+
+export async function disconnectFacebookPage(channelId: string, sourceId: string): Promise<void> {
+  await apiInstance.post(`/integrations/social-media/${channelId}/facebook/${sourceId}/disconnect`);
+}
+
+export async function reconnectFacebookPage(
+  channelId: string,
+  sourceId: string,
+  platform: 'web' | 'electron',
+): Promise<string> {
+  const response = await apiInstance.post<{ authorizationUrl: string }>(
+    `/integrations/social-media/${channelId}/facebook/${sourceId}/reconnect`,
+    { platform },
+  );
+  return response.data.authorizationUrl;
+}
+
+export async function addFacebookPage(
+  channelId: string,
+  platform: 'web' | 'electron',
+): Promise<string> {
+  const response = await apiInstance.post<{ authorizationUrl: string }>(
+    `/integrations/social-media/${channelId}/facebook/add-page`,
+    { platform },
+  );
+  return response.data.authorizationUrl;
+}
+
+/** Apple keys are rotated by pasting a new .p8, not by re-running a consent redirect. */
+export async function rotateAppStoreCredentials(
+  channelId: string,
+  input: AppStoreCredentialsInput,
+): Promise<void> {
+  await apiInstance.post(`/integrations/social-media/${channelId}/app-store/credentials`, input);
 }

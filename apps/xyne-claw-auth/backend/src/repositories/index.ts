@@ -4,6 +4,7 @@ export { agentRequestRepository } from "./agentRequestRepository.js";
 export { userRoleRepository } from "./userRoleRepository.js";
 export { auditLogRepository } from "./auditLogRepository.js";
 export { chatMessageRepository } from "./chatMessageRepository.js";
+export { chatConversationMetaRepository } from "./chatConversationMetaRepository.js";
 export { chatAttachmentRepository } from "./chatAttachmentRepository.js";
 export { agentRunRepository } from "./agentRunRepository.js";
 export { agentChainWorkflowRepository } from "./agentChainWorkflowRepository.js";
@@ -15,6 +16,7 @@ export { agentProviderCredentialsRepository } from "./agentProviderCredentialsRe
 export { sharedProviderCredentialRepository } from "./sharedProviderCredentialRepository.js";
 export { userSubagentConfigRepository } from "./userSubagentConfigRepository.js";
 export { localHarnessRepository } from "./localHarnessRepository.js";
+export { localHarnessSessionRepository } from "./localHarnessSessionRepository.js";
 export { userRepository } from "./userRepository.js";
 export { skillRepository } from "./skillRepository.js";
 export { subagentDefinitionRepository } from "./subagentDefinitionRepository.js";

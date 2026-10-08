@@ -12,6 +12,7 @@ import {
   type RemoteParticipant,
 } from 'livekit-client';
 import { recordingService } from '../services/Recording/recordingService';
+import { getLocalVideoState, setLocalVideoMuted } from '../utils/recordingMedia';
 import { toast } from 'sonner';
 import { logger, Event } from '../utils/logger';
 import { formatDuration, normalizeTimestamp } from '../utils/dateUtils';
@@ -108,6 +109,8 @@ export interface RecordingState {
   activeLayout: RecordingLayout;
   isTranscriptMinimized: boolean;
   agentLeft: boolean;
+  isCameraEnabled: boolean;
+  isScreenShareEnabled: boolean;
 }
 
 const initialContext: RecordingState = {
@@ -136,6 +139,8 @@ const initialContext: RecordingState = {
   activeLayout: 'transcript',
   isTranscriptMinimized: false,
   agentLeft: false,
+  isCameraEnabled: false,
+  isScreenShareEnabled: false,
 };
 
 const ACTIVE_STATUSES: ReadonlySet<RecordingStatus> = new Set(['recording', 'paused', 'stopping']);
@@ -397,11 +402,17 @@ export const recordingStore = createStore({
         }
       };
 
+      const handleLocalTracksChanged = (): void => {
+        recordingStore.send({ type: 'syncLocalMedia', room });
+      };
+
       room.on(RoomEvent.DataReceived, handleDataReceived);
       room.on(RoomEvent.ParticipantDisconnected, handleParticipantDisconnected);
       room.on(RoomEvent.ParticipantConnected, handleParticipantConnected);
       room.on(RoomEvent.Disconnected, handleRoomDisconnected);
       room.on(RoomEvent.RoomMetadataChanged, handleRoomMetadataChanged);
+      room.on(RoomEvent.LocalTrackPublished, handleLocalTracksChanged);
+      room.on(RoomEvent.LocalTrackUnpublished, handleLocalTracksChanged);
 
       transcriptUnsubscribe = (): void => {
         clearAgentLeftTimer();
@@ -410,6 +421,8 @@ export const recordingStore = createStore({
         room.off(RoomEvent.ParticipantConnected, handleParticipantConnected);
         room.off(RoomEvent.Disconnected, handleRoomDisconnected);
         room.off(RoomEvent.RoomMetadataChanged, handleRoomMetadataChanged);
+        room.off(RoomEvent.LocalTrackPublished, handleLocalTracksChanged);
+        room.off(RoomEvent.LocalTrackUnpublished, handleLocalTracksChanged);
       };
 
       playAudio(AUDIO_PATHS.RECORDING_START);
@@ -437,9 +450,10 @@ export const recordingStore = createStore({
       const pauseStartedAt = Date.now();
       if (context.room) {
         void context.room.localParticipant.setMicrophoneEnabled(false);
+        setLocalVideoMuted(context.room, true);
       }
       toast.info('Recording paused', {
-        description: 'Microphone is muted',
+        description: 'Microphone and video are muted',
         duration: 2000,
       });
       return {
@@ -455,6 +469,7 @@ export const recordingStore = createStore({
       const resumedAt = Date.now();
       if (context.room) {
         void context.room.localParticipant.setMicrophoneEnabled(true);
+        setLocalVideoMuted(context.room, false);
       }
       toast.success('Recording resumed', {
         duration: 2000,
@@ -468,6 +483,9 @@ export const recordingStore = createStore({
           (context.pauseStartedAt !== null ? resumedAt - context.pauseStartedAt : 0),
       };
     },
+
+    syncLocalMedia: (context, event: { room: Room }): RecordingState =>
+      context.room === event.room ? { ...context, ...getLocalVideoState(event.room) } : context,
 
     stopRecording: (context, event?: { silent?: boolean }): RecordingState => {
       const durationMs = context.startTime
@@ -533,6 +551,8 @@ export const recordingStore = createStore({
         activeLayout: 'transcript',
         isTranscriptMinimized: false,
         agentLeft: false,
+        isCameraEnabled: false,
+        isScreenShareEnabled: false,
       };
     },
 
@@ -566,6 +586,8 @@ export const recordingStore = createStore({
         accumulatedPausedMs: 0,
         error: event.error,
         agentLeft: false,
+        isCameraEnabled: false,
+        isScreenShareEnabled: false,
       };
     },
 
@@ -600,6 +622,8 @@ export const recordingStore = createStore({
         activeLayout: 'transcript',
         isTranscriptMinimized: false,
         agentLeft: false,
+        isCameraEnabled: false,
+        isScreenShareEnabled: false,
       };
     },
 

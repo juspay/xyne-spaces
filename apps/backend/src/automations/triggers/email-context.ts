@@ -68,11 +68,13 @@ interface EmailRow {
   to: string[];
   cc: string[];
   bcc: string[];
+  replyTo: string[];
   type: EmailType;
   conversationId: string;
   channelId: string;
   externalThreadId: string;
   externalMessageId: string;
+  rating: number | null;
   createdAt: Date;
   hasAttachments?: boolean;
 }
@@ -125,11 +127,13 @@ function emailRowToOutput(email: EmailRow): EmailRow {
     to: email.to,
     cc: email.cc,
     bcc: email.bcc,
+    replyTo: email.replyTo,
     type: email.type,
     conversationId: email.conversationId,
     channelId: email.channelId,
     externalThreadId: email.externalThreadId,
     externalMessageId: email.externalMessageId,
+    rating: email.rating,
     createdAt: email.createdAt,
     hasAttachments: email.hasAttachments,
   };

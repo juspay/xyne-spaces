@@ -2,7 +2,7 @@ import { BrowserWindow, shell, Menu, MenuItem, app, dialog, screen } from 'elect
 import path from 'path';
 import log from 'electron-log/main';
 import { config } from '../app/config';
-import { getIsQuitting } from '../app/main';
+import { getIsQuitting } from '../app/app-state';
 import { setMainWindow as setDeepLinksMainWindow } from '../services/deep-links';
 import { setupPermissionRequestOnFocus } from '../services/media-permission';
 import {
@@ -13,6 +13,12 @@ import { getBundledUIUrl } from '../services/custom-protocol';
 import { browserSettingsService } from '../services/browser-settings';
 import { getCreateOptions, applyPostCreate, track, saveNow } from './window-state';
 import { callInvitePath } from '../utils/validation';
+import {
+  configureIncomingCallWindow,
+  incomingCallWindowOptions,
+  isIncomingCallWindowOpen,
+  isOpenedByMainFrame,
+} from '../services/incoming-call-window';
 
 import { keychain } from '../keychain';
 import { Logger } from '../services/logger/Logger';
@@ -20,26 +26,69 @@ import { EnrollmentEvent } from '../services/logger/enrollment-events';
 import { handleCertificateError, isCertificateError } from '../services/certificate-error-handler';
 import { dashboardLoad, enrollmentSkipped, mtlsFrontendLoaded } from '../services/enrollmentMetrics';
 import { safeRecordMetric } from '../services/telemetry';
-import { isRecordingInProgress, stopRecordingForReload } from '../services/recording-controller';
+import {
+  isCallActive,
+  isRecordingInProgress,
+  stopCallForReload,
+  stopRecordingForReload,
+} from '../services/recording-controller';
 import type { Counter } from '@opentelemetry/api';
 
-async function confirmReloadWhileRecording(window: BrowserWindow): Promise<boolean> {
-  if (!isRecordingInProgress()) return true;
+type ReloadSubject = 'recording' | 'call' | 'both';
 
-  const { response } = await dialog.showMessageBox(window, {
-    type: 'warning',
-    buttons: ['Keep recording', 'Reload anyway'],
-    defaultId: 0,
-    cancelId: 0,
-    noLink: true,
+const RELOAD_COPY: Record<
+  ReloadSubject,
+  { title: string; message: string; detail: string; keep: string; proceed: string }
+> = {
+  recording: {
     title: 'Recording in progress',
     message: 'Reloading will stop your recording.',
     detail: 'Everything captured so far is saved to your recordings.',
+    keep: 'Keep recording',
+    proceed: 'Stop and reload',
+  },
+  call: {
+    title: 'Call in progress',
+    message: 'Reloading will end your call.',
+    detail:
+      'Reloading drops you from this call. Everyone else stays on, and you can rejoin from the channel.',
+    keep: 'Stay on call',
+    proceed: 'Leave and reload',
+  },
+  both: {
+    title: 'Call and recording in progress',
+    message: 'Reloading will end your call and stop your recording.',
+    detail: 'Everything captured so far is saved to your recordings.',
+    keep: 'Keep both',
+    proceed: 'End and reload',
+  },
+};
+
+async function confirmReloadWhileBusy(window: BrowserWindow): Promise<boolean> {
+  const recording = isRecordingInProgress();
+  const call = isCallActive();
+  if (!recording && !call) return true;
+
+  const subject: ReloadSubject = recording && call ? 'both' : recording ? 'recording' : 'call';
+  const copy = RELOAD_COPY[subject];
+
+  const { response } = await dialog.showMessageBox(window, {
+    type: 'warning',
+    buttons: [copy.keep, copy.proceed],
+    defaultId: 0,
+    cancelId: 0,
+    noLink: true,
+    title: copy.title,
+    message: copy.message,
+    detail: copy.detail,
   });
 
   if (response !== 1) return false;
 
-  await stopRecordingForReload();
+  const pending: Promise<void>[] = [];
+  if (recording) pending.push(stopRecordingForReload());
+  if (call) pending.push(stopCallForReload());
+  await Promise.all(pending);
   return true;
 }
 
@@ -57,6 +106,57 @@ function isAppWindowUrl(rawUrl: string): boolean {
 function trackAppWindow(win: BrowserWindow): void {
   appWindows.add(win);
   win.once('closed', () => appWindows.delete(win));
+}
+
+/**
+ * Whether a full Xyne window — the main one or another app window — has focus.
+ * Each of those already shows the in-app incoming-call card, so a ringing call
+ * only needs the floating one when none of them does. Asked of the main process
+ * because the renderer's own `window` blur also fires when focus moves into an
+ * embedded webview (the browser panel) while Xyne is still in front.
+ */
+export function isAppWindowFocused(): boolean {
+  const focused = BrowserWindow.getFocusedWindow();
+  return !!focused && (focused === mainWindow || appWindows.has(focused));
+}
+
+const appFocusWatchers = new Set<Electron.WebContents>();
+
+/**
+ * Read on the next tick so that moving between two Xyne windows (blur, then
+ * focus) settles before it is reported, instead of flashing "unfocused".
+ */
+function reportAppFocus(): void {
+  setImmediate(() => {
+    const focused = isAppWindowFocused();
+    for (const watcher of appFocusWatchers) {
+      if (!watcher.isDestroyed()) watcher.send('incoming-call-window:app-focus-changed', focused);
+    }
+  });
+}
+
+/**
+ * Starts or stops telling a page whether Xyne has focus. The dashboard only
+ * watches while a call is ringing, so the app-wide focus listeners exist only
+ * while someone is watching.
+ */
+export function watchAppFocus(watcher: Electron.WebContents, watch: boolean): void {
+  const wasWatched = appFocusWatchers.size > 0;
+  if (watch && !appFocusWatchers.has(watcher)) {
+    appFocusWatchers.add(watcher);
+    watcher.once('destroyed', () => watchAppFocus(watcher, false));
+  } else if (!watch) {
+    appFocusWatchers.delete(watcher);
+  }
+
+  const isWatched = appFocusWatchers.size > 0;
+  if (isWatched && !wasWatched) {
+    app.on('browser-window-focus', reportAppFocus);
+    app.on('browser-window-blur', reportAppFocus);
+  } else if (!isWatched && wasWatched) {
+    app.removeListener('browser-window-focus', reportAppFocus);
+    app.removeListener('browser-window-blur', reportAppFocus);
+  }
 }
 
 const namedChildWindows = new Map<string, BrowserWindow>();
@@ -85,6 +185,12 @@ function applyWindowPolicy(win: BrowserWindow): void {
   win.webContents.setWindowOpenHandler((details) => {
      try {
       const url = details.url;
+
+      // The floating incoming-call card. Checked first because it is the one
+      // window the app opens on about:blank, which the http(s) rule below denies.
+      if (isIncomingCallWindowOpen(details.frameName, url)) {
+        return { action: 'allow', overrideBrowserWindowOptions: incomingCallWindowOptions() };
+      }
 
 
       const urlObj = new URL(url);
@@ -144,6 +250,14 @@ function applyWindowPolicy(win: BrowserWindow): void {
         return { action: 'deny' };
       }
 
+      const childWebPreferences = {
+        nodeIntegration: false,
+        contextIsolation: true,
+        webviewTag: true,
+        preload: path.join(__dirname, '..', 'preload.js'),
+        spellcheck: true,
+      };
+
       if (urlObj.pathname.startsWith('/newWindow/create-ticket')) {
         return {
           action: 'allow',
@@ -152,6 +266,7 @@ function applyWindowPolicy(win: BrowserWindow): void {
             height: 820,
             minWidth: 640,
             minHeight: 600,
+            webPreferences: childWebPreferences,
           },
         };
       }
@@ -166,19 +281,15 @@ function applyWindowPolicy(win: BrowserWindow): void {
             minHeight: 600,
             titleBarStyle: 'hiddenInset',
             trafficLightPosition: { x: 19, y: 20 },
-            webPreferences: {
-              nodeIntegration: false,
-              contextIsolation: true,
-              webviewTag: true,
-              preload: path.join(__dirname, '..', 'preload.js'),
-              backgroundThrottling: false,
-              spellcheck: true,
-            },
+            webPreferences: childWebPreferences,
           },
         };
       }
 
-      return { action: 'allow' };
+      return {
+        action: 'allow',
+        overrideBrowserWindowOptions: { webPreferences: childWebPreferences },
+      };
 
     } catch (error) {
       log.warn('Failed to parse URL in setWindowOpenHandler:', details.url, error);
@@ -206,18 +317,18 @@ function applyWindowPolicy(win: BrowserWindow): void {
 
       const currentAppUrl = new URL(config.FRONTEND_URL);
       const currentUrl = win.webContents.getURL();
-      const currentUrlObj = new URL(currentUrl || '');
+      const currentUrlObj = currentUrl ? new URL(currentUrl) : null;
 
       // Allow in-app navigation (same origin as configured frontend or current page)
       if (
         navUrlObj.origin === currentAppUrl.origin ||
-        navUrlObj.origin === currentUrlObj.origin
+        navUrlObj.origin === currentUrlObj?.origin
       ) {
         return;
       }
 
       // Mirror the mTLS branch from setWindowOpenHandler
-      if (currentUrlObj.origin === config.MTLS_FRONTEND_URL) {
+      if (currentUrlObj?.origin === config.MTLS_FRONTEND_URL) {
         event.preventDefault();
         shell.openExternal(navUrl);
         notifyExternalOpen(navUrl);
@@ -237,6 +348,18 @@ function applyWindowPolicy(win: BrowserWindow): void {
   });
 
   win.webContents.on('did-create-window', (childWindow, details) => {
+    if (isIncomingCallWindowOpen(details.frameName, details.url)) {
+      // Created hidden, so a request from anywhere but the main window's own
+      // page (an embedded frame, another window) is destroyed before it shows.
+      if (!isOpenedByMainFrame(childWindow, win, mainWindow)) {
+        log.warn('[IncomingCallWindow] Refused: not opened by the main window frame');
+        childWindow.destroy();
+        return;
+      }
+      configureIncomingCallWindow(childWindow, win.webContents);
+      return;
+    }
+
     if (isAppWindowUrl(details.url)) {
       trackAppWindow(childWindow);
     }
@@ -350,7 +473,6 @@ export async function createMainWindow(options?: { inactive?: boolean }): Promis
       contextIsolation: true,
       webviewTag: true,
       preload: path.join(__dirname, '..', 'preload.js'),
-      backgroundThrottling: false,
       spellcheck: true,
     },
   });
@@ -392,7 +514,7 @@ export async function createMainWindow(options?: { inactive?: boolean }): Promis
       try {
         if (mainWindow) {
           isReloading = true;
-          if (!(await confirmReloadWhileRecording(mainWindow))) return;
+          if (!(await confirmReloadWhileBusy(mainWindow))) return;
           // Clear cache before reloading for a true hard refresh
           await mainWindow.webContents.session.clearCache();
           await loadApp(mainWindow);
@@ -413,7 +535,7 @@ export async function createMainWindow(options?: { inactive?: boolean }): Promis
       try {
         if (mainWindow) {
           isReloading = true;
-          if (!(await confirmReloadWhileRecording(mainWindow))) return;
+          if (!(await confirmReloadWhileBusy(mainWindow))) return;
           await loadUrl(mainWindow, mainWindow.webContents.getURL());
         }
       } catch (error) {

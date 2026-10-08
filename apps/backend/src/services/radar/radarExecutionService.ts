@@ -2,15 +2,22 @@ import type { Prisma } from '@prisma/client';
 import { config } from '@/config/env';
 import { DatabaseClient } from '@/database/client';
 import { logger } from '@/utils/logger';
-import { extractUserMentions } from '@/utils/mentionParser';
+import { extractGroupMentions, extractUserMentions } from '@/utils/mentionParser';
 import { AttachmentEntityType } from '@xyne/shared';
 import {
   radarParser,
   type ParserOpenItem,
   type ParserWindowMessage,
 } from '@/services/radar/radarParser';
-import { validateTransitions } from '@/services/radar/radarValidator';
+import { noOpReassignFeedback, validateTransitions } from '@/services/radar/radarValidator';
 import { radarApplier } from '@/services/radar/radarApplier';
+import { recordPrLinks } from '@/services/radar/radarPrLinks';
+import {
+  duplicateCreateFeedback,
+  isDuplicate,
+  radarDedupScorer,
+  type DedupCheck,
+} from '@/services/radar/radarDedupScorer';
 import type { RadarScope } from '@/services/radar/radarScope';
 
 const prisma = DatabaseClient.getInstance();
@@ -67,6 +74,7 @@ interface RunLogDraft {
   droppedOps?: unknown;
   applied?: unknown;
   assessment?: string;
+  dedupChecks?: unknown;
   error?: string;
 }
 
@@ -104,6 +112,53 @@ const buildThreadLabels = (
     if (threaded) labels.set(m.conversationId, `T${labels.size + 1}`);
   }
   return labels;
+};
+
+type TrailOp = { op: string; itemId?: string; title?: string; sourceMessageId: string };
+type Validated = ReturnType<typeof validateTransitions>;
+
+/**
+ * The debug trail's record of the Jev duplicate check: one row per create it
+ * scored. A flagged create that went back to the parser also says what came of
+ * it, once the final answer is known. The parser answers with a whole new set,
+ * so there is no id linking the two; the outcome is read off what changed
+ * between its first and final valid operations.
+ */
+const dedupTrail = (
+  checks: DedupCheck[],
+  firstOps: TrailOp[] | null,
+  finalOps: TrailOp[] | null,
+) => ({
+  threshold: config.radar.dedupThreshold,
+  recalled: firstOps !== null,
+  checks: checks.map(c => ({
+    title: c.create.title,
+    sourceMessageId: c.create.sourceMessageId,
+    itemId: c.item?.id ?? null,
+    itemTitle: c.item?.title ?? null,
+    probability: c.probability,
+    verdict: c.item === null ? 'unscored' : c.flagged ? 'duplicate' : 'distinct',
+    ...(c.flagged && firstOps && finalOps ? { outcome: dedupOutcome(c, firstOps, finalOps) } : {}),
+  })),
+});
+
+const dedupOutcome = (
+  check: DedupCheck,
+  firstOps: TrailOp[],
+  finalOps: TrailOp[],
+): 'reassigned' | 'kept' | 'dropped' => {
+  const reassigns = (ops: TrailOp[]) =>
+    ops.some(op => op.op === 'reassign' && op.itemId === check.item?.id);
+  const fromSameMessage = (ops: TrailOp[]) =>
+    ops.filter(op => op.op === 'create' && op.sourceMessageId === check.create.sourceMessageId);
+  const titleOf = (op: TrailOp) => (op.title ?? '').trim().toLowerCase();
+  if (reassigns(finalOps) && !reassigns(firstOps)) return 'reassigned';
+  // Only the same title surviving is the create itself; counting creates per
+  // message cannot tell which of them went, so it is not used.
+  const title = titleOf(check.create as TrailOp);
+  return title && fromSameMessage(finalOps).some(op => titleOf(op) === title)
+    ? 'kept'
+    : 'dropped';
 };
 
 class RadarExecutionService {
@@ -156,9 +211,13 @@ class RadarExecutionService {
       if (window.length === 0) {
         return; // drained — the job may complete
       }
+      // Before the gate, so a PR link is remembered even in a pass the parser
+      // skips; a merge later finds this thread by that link. Never throws.
+      await recordPrLinks(scope, window);
 
-      // Gate: three deterministic branches — a tracked scope (any reply may move
-      // a ball), an untracked one with a resolved @mention, or a two-person DM.
+      // Gate: four deterministic branches — a tracked scope (any reply may move
+      // a ball), an untracked one with a resolved @mention of a person or of a
+      // group, or a two-person DM.
       // No heuristics; the only probabilistic judgment belongs to the parser.
       const openItems = await this.loadOpenItems(scope, [
         ...new Set(window.map(m => m.conversationId)),
@@ -172,6 +231,17 @@ class RadarExecutionService {
       );
       const mentionedUserIds = [...new Set([...mentionsByMessage.values()].flat())];
 
+      // Group mentions open the gate but go no further — "@spaces can someone
+      // look at this" used to die here, in any channel nobody had tracked yet.
+      // Deliberately NOT merged into mentionedUserIds: that is the parser's
+      // closed set of assignment sources and a group id is not a person, so an
+      // item would be handed to something that can never resolve it. With no
+      // assignee to infer, the parser creates it with pendingOn: [].
+      const groupsByMessage = new Map(
+        window.map(m => [m.messageId, extractGroupMentions(m.content)]),
+      );
+      const mentionedGroupIds = [...new Set([...groupsByMessage.values()].flat())];
+
       // In a 1:1 DM every message is addressed to the other person, so the
       // counterpart is an implicit mention. Without this a DM can never
       // bootstrap: tracked needs an item to already exist and nobody @mentions
@@ -184,7 +254,20 @@ class RadarExecutionService {
         ? await this.dmParticipants(scope.channelId)
         : [];
       const isOneToOneDm = dmParticipants.length === 2;
-      const gatePassed = tracked || mentionedUserIds.length > 0 || isOneToOneDm;
+      const gatePassed =
+        tracked || mentionedUserIds.length > 0 || mentionedGroupIds.length > 0 || isOneToOneDm;
+
+      // Decided once: the run log and the log line below used to derive this
+      // separately, and the log line called every non-tracked pass a mention.
+      const gateReason = !gatePassed
+        ? 'skip'
+        : tracked
+          ? 'tracked-thread'
+          : mentionedUserIds.length > 0
+            ? 'new-mention'
+            : mentionedGroupIds.length > 0
+              ? 'group-mention'
+              : 'dm-counterpart';
 
       // Debug trail for the Radar debug panel: one row per drain pass,
       // written best-effort — observability must never break the pipeline.
@@ -195,13 +278,7 @@ class RadarExecutionService {
         // across the sibling conversations its messages happen to start.
         conversationId: scope.key,
         gatePassed,
-        gateReason: gatePassed
-          ? tracked
-            ? 'tracked-thread'
-            : mentionedUserIds.length > 0
-              ? 'new-mention'
-              : 'dm-counterpart'
-          : 'skip',
+        gateReason,
         windowSize: window.length,
         parserRan: false,
       };
@@ -210,9 +287,10 @@ class RadarExecutionService {
         logger.info('[RADAR-EXECUTION] Gate PASS', {
           conversationId,
           windowSize: window.length,
-          reason: tracked ? 'tracked-thread' : 'new-mention',
+          reason: gateReason,
           openItemCount: openItems.length,
           mentionedUserIds,
+          mentionedGroupIds,
           bootstrap: !state,
         });
         // Valid operations + audit + watermark commit in ONE transaction, and a
@@ -263,18 +341,6 @@ class RadarExecutionService {
             new Set(openItems.map(i => i.conversationId)),
             scope.isDmChannel,
           );
-          const transitions = await radarParser.parseWindow(
-            openItems.map(({ conversationId, ...item }) =>
-              threadLabels.size > 0
-                ? { ...item, thread: threadLabels.get(conversationId) ?? null }
-                : item,
-            ),
-            this.toParserMessages(window, mentionsByMessage, nameById, attachmentsByMessage, threadLabels),
-            knownUsers,
-            this.toParserMessages(context, contextMentions, nameById, attachmentsByMessage, threadLabels),
-          );
-          run.proposedOps = transitions.operations;
-          run.assessment = transitions.assessment;
           const windowSenders = new Map(window.map(m => [m.messageId, m.senderId]));
           // Legal assignees: window mentions + senders, plus everyone already
           // involved in the thread's open items or the context tail — the
@@ -302,17 +368,90 @@ class RadarExecutionService {
             window[0].workspaceId,
             candidateUserIds,
           );
-          const { valid, dropped } = validateTransitions(transitions.operations, {
+          const validationCtx = {
             openItems,
             windowSenders,
             // Mention ids are regex-scraped out of message HTML, so they are
             // attacker-authored: narrow them to ids that are really users in
             // this workspace before they can land in the ledger.
             allowedUserIds,
-          });
+          };
+          // Set by the semantic check below, which runs once per parse on the
+          // model's first schema-valid answer.
+          let dedupChecks: DedupCheck[] = [];
+          let firstAttempt: Validated | null = null;
+          const transitions = await radarParser.parseWindow(
+            openItems.map(({ conversationId, ...item }) =>
+              threadLabels.size > 0
+                ? { ...item, thread: threadLabels.get(conversationId) ?? null }
+                : item,
+            ),
+            this.toParserMessages(window, mentionsByMessage, nameById, attachmentsByMessage, threadLabels),
+            knownUsers,
+            this.toParserMessages(context, contextMentions, nameById, attachmentsByMessage, threadLabels),
+            undefined,
+            // The validator doubles as the parser's semantic check: a reassign
+            // it would drop as a no-op goes back to the model once, because
+            // that drop nearly always means the wrong open item was matched.
+            // A create the duplicate scorer matches to an open item rides the
+            // same single round-trip — the prompt's own duplicate rules are
+            // what the model misses most, and a pointed second look at the
+            // specific pair is what gets it to re-apply them.
+            async ops => {
+              firstAttempt = validateTransitions(ops, validationCtx);
+              try {
+                if (radarDedupScorer.isActive()) {
+                  // Scored as they would be applied: an ownerless create in a
+                  // DM is the counterpart's, and a handoff only reads as one
+                  // once it names them. Copies, so the answer is untouched.
+                  const scored = firstAttempt.valid.map(op => ({ ...op }));
+                  await this.directDmOwnerless(scored, scope, windowSenders, allowedUserIds);
+                  dedupChecks = await radarDedupScorer.scoreCreates(scored, openItems);
+                }
+              } catch (error) {
+                // An optional check must never cost the window its parse.
+                // The error's type only — a message can quote the data it failed on.
+                logger.warn('[RADAR-DEDUP] duplicate check failed, continuing without it', {
+                  conversationId,
+                  error: error instanceof Error ? error.name : typeof error,
+                });
+                dedupChecks = [];
+              }
+              const feedback = [
+                noOpReassignFeedback(firstAttempt.dropped, openItems),
+                duplicateCreateFeedback(dedupChecks.filter(isDuplicate)),
+              ].filter(Boolean);
+              // Recorded now, so a retry that fails still leaves the verdicts
+              // that sent it back in the trail.
+              if (dedupChecks.length > 0) {
+                run.dedupChecks = dedupTrail(
+                  dedupChecks,
+                  feedback.length > 0 ? firstAttempt.valid : null,
+                  null,
+                );
+              }
+              return feedback.length > 0 ? feedback.join('\n\n') : null;
+            },
+          );
+          run.proposedOps = transitions.operations;
+          run.assessment = transitions.assessment;
+          const { valid, dropped } = validateTransitions(transitions.operations, validationCtx);
           await this.directDmOwnerless(valid, scope, windowSenders, allowedUserIds);
           run.validOps = valid;
-          run.droppedOps = dropped;
+          // The semantic check validated the first answer; it is only the
+          // first attempt when that answer was sent back.
+          // (Assigned inside the callback, which TypeScript cannot see.)
+          const recalledFrom = transitions.repair ? (firstAttempt as Validated | null) : null;
+          if (dedupChecks.length > 0) {
+            run.dedupChecks = dedupTrail(dedupChecks, recalledFrom?.valid ?? null, valid);
+          }
+          // A repaired pass keeps its first attempt's rejects in the trail,
+          // flagged, so the debug panel shows what the model was corrected on.
+          // Creates the duplicate check sent back are not rejects — the dedup
+          // section of the trail records them and what the parser did.
+          run.droppedOps = recalledFrom
+            ? [...recalledFrom.dropped.map(d => ({ ...d, repaired: true })), ...dropped]
+            : dropped;
           const last = window[window.length - 1];
           const applied = await radarApplier.apply({
             workspaceId: last.workspaceId,
@@ -321,6 +460,7 @@ class RadarExecutionService {
             conversationBySourceMessage: new Map(
               window.map(m => [m.messageId, m.conversationId]),
             ),
+            groupsBySourceMessage: groupsByMessage,
             operations: valid,
             watermark: { createdAt: last.createdAt, messageId: last.messageId },
             actorType: 'llm',
@@ -366,7 +506,7 @@ class RadarExecutionService {
           throw error;
         }
       } else {
-        logger.info('[RADAR-EXECUTION] Gate skip — untracked thread, no new @mention', {
+        logger.info('[RADAR-EXECUTION] Gate skip — untracked thread, no @mention of anyone', {
           conversationId,
           windowSize: window.length,
           bootstrap: !state,
@@ -426,6 +566,7 @@ class RadarExecutionService {
           droppedOps: run.droppedOps as object | undefined,
           applied: run.applied as object | undefined,
           assessment: run.assessment ?? null,
+          dedupChecks: run.dedupChecks as object | undefined,
           error: run.error ?? null,
           durationMs: Date.now() - startedAt,
         },
@@ -686,7 +827,7 @@ class RadarExecutionService {
   }
 }
 
-const stripHtml = (html: string): string =>
+export const stripHtml = (html: string): string =>
   html
     .replace(/<[^>]*>/g, ' ')
     .replace(/&nbsp;/g, ' ')

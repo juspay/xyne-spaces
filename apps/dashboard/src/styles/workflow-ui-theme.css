@@ -1,3 +1,12 @@
+/*
+ * Layered, not plainly imported. The package ships its own unscoped Tailwind build, so its
+ * `.flex-col` and `.border-b` used to land after ours and beat the variants that override
+ * them — `md:flex-row`, `md:border-b-0` — collapsing every two-column layout in the app.
+ * Unlayered CSS always beats layered, so this holds regardless of import order.
+ */
+@layer workflow-ui;
+@import "@xyne/workflow-ui/styles.css" layer(workflow-ui);
+
 /**
  * Theme bridge for @xyne/workflow-ui.
  *
@@ -76,14 +85,6 @@
   --wui-status-pending: hsl(var(--muted-foreground));
   --wui-status-running: hsl(var(--primary));
   --wui-status-skipped: hsl(var(--border));
-}
-
-/* WorkflowUIProvider renders an unstyled wrapper between the app shell's <main> and
-   WorkflowApp, so the app's own `h-full` resolves against a parent that has collapsed to
-   content height — leaving the pane floating above the wallpaper. Give that wrapper the
-   height instead of fighting it from inside. */
-:where(div):has(> .xyne-workflow-ui) {
-  height: 100%;
 }
 
 /* The package's Tailwind preflight pins `font-family: ui-sans-serif, system-ui`, so

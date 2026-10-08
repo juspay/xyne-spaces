@@ -232,9 +232,8 @@ console.log(`\n📁 Run artifacts: ${path.relative(process.cwd(), runArtifactDir
 const gaugeArgs = [
   'run',
   '--sort=alpha',
-  // Retry failures immediately; scenarios that still fail are retried again at the end.
-  '--max-retries-count',
-  String(testConfig.retries),
+  // Retry failed scenarios; gauge rejects `--max-retries-count 0`, so only pass it when retries > 0.
+  ...(testConfig.retries > 0 ? ['--max-retries-count', String(testConfig.retries)] : []),
   // Exclude quarantined (known-flaky) scenarios.
   '--tags',
   scenarioTagFilter,
@@ -603,6 +602,12 @@ async function main(): Promise<void> {
 
   stopProgressMonitoring();
   fs.rmSync(retryReportsDirectory, { recursive: true, force: true });
+  // json-report/result.json keeps the pre-retry status; persist what the end-of-run
+  // passes changed so build-summary-report can show the final outcome.
+  fs.writeFileSync(
+    path.join(runArtifactDirectory, 'retry-recovery.json'),
+    JSON.stringify({ retriedAtEnd: failedAfterInlineRetries, stillFailing: remainingFailedItems }, null, 2)
+  );
 
   const specOf = (item: string): string => item.replace(/:\d+$/, '');
   const finalFailedSpecs = new Set(remainingFailedItems.map(specOf));

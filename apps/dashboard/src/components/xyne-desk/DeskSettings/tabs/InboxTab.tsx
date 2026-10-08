@@ -1,20 +1,33 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { Plus, X, Check, Pencil, Trash2 } from 'lucide-react';
-import type { EmailSignature } from '@xyne/shared';
+import {
+  FormContextType,
+  FormEntityType,
+  MAX_DUPLICATE_SCOPE_FIELDS,
+  type EmailSignature,
+} from '@xyne/shared';
 import { v4 as uuidv4 } from 'uuid';
+import { toast } from 'sonner';
 import Avatar from '../../../ui/Avatar/Avatar';
 import { UserSelector } from '../../../Tickets/CreateTicketModal/UserSelector';
 import { DeskIntegrationCard } from '../../DeskIntegrationCard/DeskIntegrationCard';
-import { SlackDeskIntegrationCard } from '../../DeskIntegrationCard/SlackDeskIntegrationCard';
 import { SocialMediaDeskIntegrationCard } from '../../DeskIntegrationCard/SocialMediaDeskIntegrationCard';
+import { AppStoreDeskIntegrationCard } from '../../DeskIntegrationCard/AppStoreDeskIntegrationCard';
+import { MetaDeskIntegrationCard } from '../../DeskIntegrationCard/MetaDeskIntegrationCard';
 import { ConnectedAppsSection } from '../ConnectedAppsSection';
+import { ConnectedSlackSection } from '../ConnectedSlackSection';
 import { InlineSignatureEditor } from '../InlineSignatureEditor';
 import { Switch } from '../../../ui/Switch';
+import { SearchableMultiSelect } from '../../../ui/SearchableMultiSelect/SearchableMultiSelect';
 import { matchesUserQuery } from '../../../../utils/userDisplayName';
 import { useChannelApps } from '../../../../hooks/useChannelApps';
+import { useCachedQuery } from '../../../../hooks/useCachedQuery';
 import { useUsers } from '../../../../hooks/useUsers';
 import { useZero } from '../../../../hooks/useZero';
 import { mutators } from '../../../../zero/mutators';
+import { queries } from '../../../../zero/queries';
+import { resolveDisplayFormFields } from '../../../../utils/board/resolveDisplayFormFields';
+import { getIconForFieldType } from '../../../Tickets/TicketFilters/fieldTypeIcons';
 import type { useDeskSettingsForm } from '../useDeskSettingsForm';
 import SignatureIcon from '../../../icons/SignatureIcon';
 
@@ -46,7 +59,6 @@ export const InboxTab: React.FC<InboxTabProps> = ({ channelId, form, signatures 
   const {
     canManage,
     isEmail,
-    isSlack,
     isApp,
     isSocial,
     isDeskChannel,
@@ -55,6 +67,10 @@ export const InboxTab: React.FC<InboxTabProps> = ({ channelId, form, signatures 
     sendAsAlias,
     setSendAsAlias,
     sendAsAliasError,
+    isDl,
+    dlEmail,
+    dlAliases,
+    setDlAliases,
     ccEmails,
     setCcEmails,
     twoStepSend,
@@ -63,9 +79,25 @@ export const InboxTab: React.FC<InboxTabProps> = ({ channelId, form, signatures 
     setAutoMergeEmails,
     appWebhookDeliveryEnabled,
     setAppWebhookDeliveryEnabled,
+    duplicateDetectionEnabled,
+    setDuplicateDetectionEnabled,
+    duplicateScopeFieldIds,
+    setDuplicateScopeFieldIds,
+    boardId,
   } = form;
 
   const [ccInputValue, setCcInputValue] = useState('');
+  const [dlAliasInput, setDlAliasInput] = useState('');
+  const commitDlAlias = (): boolean => {
+    const candidate = dlAliasInput.trim().toLowerCase();
+    if (!candidate) return true;
+    if (!/^[^\s@,()]+@[^\s@,()]+\.[^\s@,()]+$/.test(candidate)) return false;
+    if (candidate !== dlEmail?.trim().toLowerCase() && !dlAliases.includes(candidate)) {
+      setDlAliases(prev => [...prev, candidate]);
+    }
+    setDlAliasInput('');
+    return true;
+  };
   const [ccHighlightIndex, setCcHighlightIndex] = useState(0);
   const [signatureModalOpen, setSignatureModalOpen] = useState(false);
   const [editingSignature, setEditingSignature] = useState<EmailSignature | undefined>();
@@ -77,8 +109,43 @@ export const InboxTab: React.FC<InboxTabProps> = ({ channelId, form, signatures 
   // Webhook delivery is a per-channel preference that now applies to any desk
   // carrying app bindings, not just ChannelType.APP. Keep it visible on APP desks
   // even before the first connect so the pre-existing control never disappears.
-  const { data: connectedApps } = useChannelApps(channelId, isDeskChannel);
+  const { data: connectedApps } = useChannelApps(channelId, isDeskChannel && canManage);
   const showAppWebhookDelivery = isApp || (connectedApps?.length ?? 0) > 0;
+
+  const [scopeFieldPickerOpen, setScopeFieldPickerOpen] = useState(false);
+  // The board's ticket form, not the project's global fields: a legacy form's fields have
+  // no GlobalField id, so project-wide options would offer keys the backend can't resolve.
+  const [scopeFieldsMapping, scopeFieldsDetails] = useCachedQuery(
+    queries.getFormMappingByContextId({
+      contextId: boardId || 'nonexistent',
+      contextType: FormContextType.BOARD,
+      entityType: FormEntityType.TICKET,
+    }),
+    { enabled: isDeskChannel && !!boardId },
+  );
+  const scopedFields = useMemo(
+    () =>
+      scopeFieldsMapping?.formFields
+        ? resolveDisplayFormFields(scopeFieldsMapping.formId, [...scopeFieldsMapping.formFields])
+        : [],
+    [scopeFieldsMapping?.formFields, scopeFieldsMapping?.formId],
+  );
+  // Chips come from the saved config, not the field list, so a deleted field still gets a
+  // chip to remove rather than a stranded id that counts toward the cap forever.
+  const scopeFieldById = useMemo(
+    () => new Map(scopedFields.map(field => [field.id, field])),
+    [scopedFields],
+  );
+  const selectedDuplicateScopeFields = duplicateScopeFieldIds.map(id => ({
+    id,
+    field: scopeFieldById.get(id),
+  }));
+  // No board and an unlanded sync both leave scopedFields empty, so nothing calls a saved
+  // field deleted until the result is complete.
+  const scopeFieldsResolved = !!boardId && scopeFieldsDetails.type === 'complete';
+  const hasUnresolvedScopeField =
+    scopeFieldsResolved && selectedDuplicateScopeFields.some(entry => !entry.field);
+  const duplicateScopeFieldCapReached = duplicateScopeFieldIds.length >= MAX_DUPLICATE_SCOPE_FIELDS;
 
   useEffect(() => {
     if (signatureModalOpen) {
@@ -100,14 +167,21 @@ export const InboxTab: React.FC<InboxTabProps> = ({ channelId, form, signatures 
   return (
     <>
       {isEmail && <DeskIntegrationCard channelId={channelId} canManage={canManage} />}
-      {isSlack && <SlackDeskIntegrationCard channelId={channelId} canManage={canManage} />}
       {isSocial && <SocialMediaDeskIntegrationCard channelId={channelId} canManage={canManage} />}
+      {isSocial && <AppStoreDeskIntegrationCard channelId={channelId} canManage={canManage} />}
+      {isSocial && (
+        <MetaDeskIntegrationCard provider='instagram' channelId={channelId} canManage={canManage} />
+      )}
+      {isSocial && (
+        <MetaDeskIntegrationCard provider='facebook' channelId={channelId} canManage={canManage} />
+      )}
       {/*
-        Single owner of app connections on every desk type, APP included. Apps are the
-        one source type that went 1:N per channel, so unlike Slack/social they cannot be
-        managed by a single-connection card.
+        Single owner of app connections on every desk type, APP included. Apps and Slack both
+        went 1:N per channel, so unlike social they cannot be managed by a
+        single-connection card.
       */}
       {isDeskChannel && <ConnectedAppsSection channelId={channelId} canManage={canManage} />}
+      {isDeskChannel && <ConnectedSlackSection channelId={channelId} canManage={canManage} />}
 
       <div className='flex flex-col gap-[16px]'>
         <div className='flex flex-col gap-[4px]'>
@@ -169,6 +243,65 @@ export const InboxTab: React.FC<InboxTabProps> = ({ channelId, form, signatures 
           {sendAsAliasError && (
             <p className='text-[12px] leading-[120%] text-red-500'>{sendAsAliasError}</p>
           )}
+        </div>
+      )}
+
+      {isEmail && isDl && (
+        <div className='flex flex-col gap-[16px]'>
+          <div className='flex flex-col gap-[4px]'>
+            <div className='text-desk-label'>Additional inbound addresses</div>
+            <div className='text-desk-helper w-full max-w-[500px]'>
+              Mail addressed to any of these also lands in this desk. Add domain aliases of{' '}
+              {dlEmail ?? 'the distribution list'} — mail sent to an alias keeps the alias in its To
+              header, so it is not matched otherwise. Replies still go out from{' '}
+              {dlEmail ?? 'the distribution list'}.
+            </div>
+          </div>
+          <div
+            className={`flex w-full max-w-[500px] flex-wrap items-center gap-1.5 rounded-[10px] border border-border bg-background p-[6px] text-sm shadow-sm focus-within:ring-1 focus-within:ring-desk-accent ${
+              !canManage ? 'cursor-not-allowed bg-muted/40 opacity-60' : ''
+            }`}
+          >
+            {dlAliases.map((alias, idx) => (
+              <div
+                key={`${alias}-${idx}`}
+                className='inline-flex shrink-0 items-center gap-[4px] whitespace-nowrap rounded-[6px] bg-desk-accent-subtle py-[2px] pl-[6px] pr-[4px]'
+              >
+                <span className='text-[13px] font-medium leading-[18px] tracking-[-0.2px] text-desk-accent-foreground'>
+                  {alias}
+                </span>
+                <button
+                  type='button'
+                  onClick={() => setDlAliases(prev => prev.filter((_, i) => i !== idx))}
+                  disabled={!canManage}
+                  className='text-desk-accent-foreground hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50'
+                  data-track-category='DeskSettings'
+                  data-track-name='RemoveDlAlias'
+                  aria-label={`Remove ${alias}`}
+                >
+                  <X size={14} />
+                </button>
+              </div>
+            ))}
+            <input
+              type='text'
+              value={dlAliasInput}
+              onChange={e => setDlAliasInput(e.target.value)}
+              onKeyDown={e => {
+                if (e.key !== 'Enter' && e.key !== ',' && e.key !== 'Tab') return;
+                if (!dlAliasInput.trim()) return;
+                e.preventDefault();
+                if (!commitDlAlias()) toast.error('Enter a valid email address');
+              }}
+              onBlur={() => commitDlAlias()}
+              placeholder={dlAliases.length === 0 ? 'support.global@yourcompany.io' : ''}
+              readOnly={!canManage}
+              disabled={!canManage}
+              className='h-[24px] min-w-[180px] flex-1 border-0 bg-transparent px-[6px] text-sm text-foreground placeholder:text-muted-foreground focus:outline-none disabled:cursor-not-allowed'
+              data-track-category='DeskSettings'
+              data-track-name='DlAliasInput'
+            />
+          </div>
         </div>
       )}
 
@@ -356,6 +489,145 @@ export const InboxTab: React.FC<InboxTabProps> = ({ channelId, form, signatures 
         </div>
       )}
 
+      {isDeskChannel && (
+        <div className='flex flex-col gap-[16px]'>
+          <div className='flex items-start justify-between gap-4'>
+            <div className='flex flex-col gap-[4px]'>
+              <div className='text-desk-label'>Limit duplicate detection by field</div>
+              <div className='text-desk-helper w-full max-w-[500px]'>
+                Restrict possible-duplicate matching to tickets sharing the selected fields. Tickets
+                without a value keep project-wide detection. Select up to{' '}
+                {MAX_DUPLICATE_SCOPE_FIELDS} fields.
+              </div>
+            </div>
+            <Switch
+              variant='desk'
+              checked={duplicateDetectionEnabled}
+              onCheckedChange={setDuplicateDetectionEnabled}
+              disabled={!canManage}
+              aria-label='Toggle limiting duplicate detection by field'
+            />
+          </div>
+
+          {duplicateDetectionEnabled && (
+            <div className='flex flex-col gap-[8px]'>
+              <div className='text-desk-label'>Scope fields</div>
+              <div className='flex w-full max-w-[500px] flex-wrap items-center gap-[6px]'>
+                {selectedDuplicateScopeFields.map(({ id, field }) => {
+                  const isMissing = scopeFieldsResolved && !field;
+                  const unresolvedLabel = boardId ? 'Loading…' : 'Unresolved field';
+                  const label = field?.fieldName ?? (isMissing ? 'Deleted field' : unresolvedLabel);
+                  return (
+                    <div
+                      key={id}
+                      title={isMissing ? `This field no longer exists (${id})` : undefined}
+                      className={`inline-flex shrink-0 items-center gap-[4px] whitespace-nowrap rounded-[6px] py-[2px] pl-[6px] pr-[4px] ${
+                        isMissing
+                          ? 'bg-destructive/10 line-through decoration-destructive/60'
+                          : 'bg-desk-accent-subtle'
+                      }`}
+                    >
+                      <span
+                        className={`max-w-[220px] truncate text-[13px] font-medium leading-[18px] tracking-[-0.2px] ${
+                          isMissing ? 'text-destructive' : 'text-desk-accent-foreground'
+                        }`}
+                      >
+                        {label}
+                      </span>
+                      <button
+                        type='button'
+                        onClick={() =>
+                          setDuplicateScopeFieldIds(
+                            duplicateScopeFieldIds.filter(selected => selected !== id),
+                          )
+                        }
+                        disabled={!canManage || !duplicateDetectionEnabled}
+                        className={`hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50 ${
+                          isMissing ? 'text-destructive' : 'text-desk-accent-foreground'
+                        }`}
+                        data-track-category='DeskSettings'
+                        data-track-name='RemoveDuplicateScopeField'
+                        aria-label={`Remove ${label}`}
+                      >
+                        <X size={14} />
+                      </button>
+                    </div>
+                  );
+                })}
+                {scopeFieldsResolved && scopedFields.length > 0 && (
+                  <SearchableMultiSelect
+                    options={scopedFields.map(field => {
+                      const FieldTypeIcon = getIconForFieldType(field.fieldType);
+                      return {
+                        value: field.id,
+                        label: field.fieldName,
+                        icon: (
+                          <FieldTypeIcon size={13} className='shrink-0 text-muted-foreground' />
+                        ),
+                      };
+                    })}
+                    selectedValues={duplicateScopeFieldIds}
+                    onSelectedValuesChange={next => {
+                      // The trigger is disabled at the cap, but the popover stays open,
+                      // so a 6th option is still clickable in the already-open list.
+                      // Reject it loudly instead of letting the setter quietly slice it off.
+                      if (next.length > MAX_DUPLICATE_SCOPE_FIELDS) {
+                        toast.error(`Select up to ${MAX_DUPLICATE_SCOPE_FIELDS} scope fields.`);
+                        return;
+                      }
+                      setDuplicateScopeFieldIds(next);
+                    }}
+                    isOpen={scopeFieldPickerOpen && duplicateDetectionEnabled && canManage}
+                    onOpenChange={open => {
+                      if (open && (!duplicateDetectionEnabled || !canManage)) return;
+                      setScopeFieldPickerOpen(open);
+                    }}
+                    searchPlaceholder='Search fields...'
+                    searchAriaLabel='Search scope fields'
+                    listAriaLabel='Scope fields'
+                    emptyMessage='No matching fields'
+                    align='start'
+                    trackCategory='DeskSettings'
+                    trackName='DuplicateScopeFieldOption'
+                    trigger={
+                      <button
+                        type='button'
+                        className='inline-flex h-[28px] items-center gap-1.5 rounded-[10px] border border-border bg-background px-3 py-1.5 text-desk-label text-foreground shadow-sm transition-colors hover:bg-muted/40 disabled:cursor-not-allowed disabled:opacity-50'
+                        disabled={
+                          !canManage || !duplicateDetectionEnabled || duplicateScopeFieldCapReached
+                        }
+                        data-track-category='DeskSettings'
+                        data-track-name='AddDuplicateScopeField'
+                      >
+                        <Plus size={14} />
+                        <span>Add field</span>
+                      </button>
+                    }
+                  />
+                )}
+              </div>
+              {hasUnresolvedScopeField && (
+                <div className='w-full max-w-[500px] text-[13px] leading-[18px] text-destructive'>
+                  A selected field is not on the board ticket form for this desk, so duplicate
+                  detection falls back to project-wide here. Remove it and pick a field from the
+                  list to re-enable scoping.
+                </div>
+              )}
+              {!boardId && (
+                <div className='text-desk-helper w-full max-w-[500px]'>
+                  Set a target board for this desk first — scope fields come from its ticket form.
+                </div>
+              )}
+              {scopeFieldsResolved && scopedFields.length === 0 && (
+                <div className='text-desk-helper w-full max-w-[500px]'>
+                  This board&apos;s ticket form has no fields yet. Add one there first.
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+
       {isEmail && (
         <div className='flex flex-col gap-[16px] rounded-[16px] bg-muted/60 p-[6px] dark:bg-muted/20'>
           <div className='flex items-start justify-between gap-4 py-[8px]'>
@@ -382,6 +654,7 @@ export const InboxTab: React.FC<InboxTabProps> = ({ channelId, form, signatures 
           {signatureModalOpen && (
             <div ref={signatureModalRef}>
               <InlineSignatureEditor
+                signatureCount={signatures?.length ?? 0}
                 initial={editingSignature}
                 onSave={data => {
                   const now = Date.now();
@@ -494,6 +767,10 @@ export const InboxTab: React.FC<InboxTabProps> = ({ channelId, form, signatures 
                           className='h-auto p-0 text-[13px] font-medium leading-[120%] tracking-[-0.1px] text-foreground hover:bg-transparent'
                           data-track-category='DeskSettings'
                           data-track-name='SetDefaultSignature'
+                          data-track-metadata={JSON.stringify({
+                            signatureCount: signatures?.length ?? 0,
+                            isDefault: true,
+                          })}
                         >
                           Set as default
                         </button>

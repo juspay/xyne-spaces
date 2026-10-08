@@ -16,6 +16,7 @@ import {
   CheckIcon,
   ArrowDownIcon,
   PencilSimpleIcon,
+  LightningIcon,
 } from "@phosphor-icons/react";
 import type { Agent, AgentLight } from "../../../lib/types";
 import { PromptVersionHistory } from "../../../components/PromptVersionHistory";
@@ -27,6 +28,9 @@ import type { AgentToolSelection } from "../ToolPickerDialog";
 import { useSnackbar } from "../ui/Snackbar";
 import { Dialog } from "../ui/Dialog";
 import { IntegrationCard } from "./IntegrationCard";
+import { SettingGroup, SettingRow } from "./SettingRow";
+import { OptimizationsSection, changedOptimizationKeys, useOptimizationCatalog } from "./OptimizationsSection";
+import { Switch } from "../ui/Switch";
 import { ToolboxPicker } from "../ToolboxPicker";
 import { KnowledgeBasePicker } from "../KnowledgeBasePicker";
 import { parseGatewaySource } from "../../lib/gatewayKeys";
@@ -47,7 +51,8 @@ type ConfigTabKey =
   | "persona"
   | "knowledge"
   | "toolbox"
-  | "behavior";
+  | "behavior"
+  | "optimizations";
 
 /* ── constants ─────────────────────────────────────────────────────── */
 
@@ -1514,6 +1519,8 @@ interface Props {
   // route every run to the shared sbx-git sandbox (grep all repos, no clone/write).
   draftForceReadOnlySandbox: boolean;
   onDraftForceReadOnlySandboxChange: (v: boolean) => void;
+  draftAllowWriteInReadOnlyJob: boolean;
+  onDraftAllowWriteInReadOnlyJobChange: (v: boolean) => void;
   // Operator-selected repo focus for read-only agents (agent.config.sbxGitRepos).
   draftSbxGitRepos: string[];
   onDraftSbxGitReposChange: (v: string[]) => void;
@@ -1597,6 +1604,8 @@ interface Props {
   // propose a plan and wait for the user's approval before doing multi-step work.
   draftPlanMode: boolean;
   onDraftPlanModeChange: (v: boolean) => void;
+  draftOptimizations: Record<string, boolean>;
+  onDraftOptimizationsChange: (v: Record<string, boolean>) => void;
   // Editable plan-mode primer (agent.config.planModePrompt) — how the agent scopes
   // a plan. Pre-filled with the default; only shown/saved when plan mode is on.
   draftPlanModePrompt: string;
@@ -1680,6 +1689,28 @@ function DisclosureHeader({
 
 /* ── main component ────────────────────────────────────────────────── */
 
+const OPEN_PALETTE_OPTIONS: ReadonlyArray<{
+  value: "off" | "read" | "all";
+  label: string;
+  detail: string;
+}> = [
+  {
+    value: "off",
+    label: "Off",
+    detail: "Only the tools selected below. This is the default.",
+  },
+  {
+    value: "read",
+    label: "Read-only",
+    detail: "Also any read-only tool in the deployment, without a grant.",
+  },
+  {
+    value: "all",
+    label: "Reads + writes",
+    detail: "Also tools that write. Destructive tools are still refused.",
+  },
+];
+
 export function AgentDetailLeftColumn({
   agent,
   userId,
@@ -1723,6 +1754,8 @@ export function AgentDetailLeftColumn({
   onDraftSandboxRepoChange,
   draftForceReadOnlySandbox,
   onDraftForceReadOnlySandboxChange,
+  draftAllowWriteInReadOnlyJob,
+  onDraftAllowWriteInReadOnlyJobChange,
   draftSbxGitRepos,
   onDraftSbxGitReposChange,
   sbxGitRepoOptions,
@@ -1752,6 +1785,8 @@ export function AgentDetailLeftColumn({
   onDraftAutoGoalChange,
   draftPlanMode,
   onDraftPlanModeChange,
+  draftOptimizations,
+  onDraftOptimizationsChange,
   draftPlanModePrompt,
   onDraftPlanModePromptChange,
   draftMaxDelegations,
@@ -1842,24 +1877,28 @@ export function AgentDetailLeftColumn({
 
   // Toolbox summary — total enabled tools including subagents.
   // The total is what the user cares about ("how capable is this agent?").
-  const toolboxSummary = useMemo(() => {
-    if (!availableTools) return { totalEnabled: 0, totalAvailable: 0 };
-    let enabledIntegrationTools = 0;
-    let totalIntegrationTools = 0;
-    for (const intg of availableTools.integrations) {
-      for (const t of intg.readTools) {
-        totalIntegrationTools++;
-        if (integrationToolSelected(intg, t, draftTools)) enabledIntegrationTools++;
-      }
-      for (const t of intg.writeTools) {
-        totalIntegrationTools++;
-        if (integrationToolSelected(intg, t, draftTools)) enabledIntegrationTools++;
-      }
-    }
-    const totalEnabled = draftTools.subagents.length + draftTools.callableAgents.length + enabledIntegrationTools;
-    const totalAvailable = availableTools.subagents.length + totalIntegrationTools;
-    return { totalEnabled, totalAvailable };
-  }, [availableTools, draftTools]);
+  /** Same count the Toolbox body shows, so header and body never disagree. */
+  const selectedToolCount =
+    draftTools.subagents.length +
+    draftTools.direct.length +
+    draftTools.custom.length +
+    draftTools.callableAgents.length;
+  // Same test the save path uses to keep or drop `config.tools`
+  // (AgentDetailPageV3): no key at all is the "nothing selected" state, whose
+  // meaning depends on the tier — see resolveAgentToolsConfig in xyne-claw-shared.
+  const hasToolSelection =
+    selectedToolCount + draftTools.gateway.length > 0 || !!draftTools.openPalette;
+  const isOrchestratorTier = agent.delegationTier === "orchestrator";
+  const toolsSummary = hasToolSelection
+    ? `${selectedToolCount} selected`
+    : isOrchestratorTier
+      ? "All tools"
+      : "File tools only";
+  const { catalog: optimizationCatalog } = useOptimizationCatalog();
+  const changedOptimizationCount = optimizationCatalog
+    ? changedOptimizationKeys(optimizationCatalog, draftOptimizations, agent.delegationTier).length
+    : Object.keys(draftOptimizations).length;
+
 
   // Filtered lists for search — narrows integration cards (Subagents tab has its own search).
   const filteredIntegrations = useMemo(() => {
@@ -2024,6 +2063,7 @@ export function AgentDetailLeftColumn({
             onChange={(e) => onDraftDescriptionChange(e.target.value)}
             readOnly={!canEdit}
             aria-label="Agent description"
+            title={draftDescription || undefined}
             placeholder="What does this agent do?"
             className={`w-full bg-transparent border-0 outline-none px-0 py-0 text-[14px] font-medium text-xyne-fg-primary placeholder:text-xyne-fg-muted ${
               canEdit ? "" : "cursor-default"
@@ -2067,13 +2107,12 @@ export function AgentDetailLeftColumn({
       {activeTab === "persona" && (
       <div className="flex flex-col gap-2.5 border-t border-xyne-border-subtle px-4 py-4">
 
-        {/* Header row: "Persona • system prompt" + info bubble */}
-        <div className="flex items-center gap-2">
-          <span className="inline-flex items-baseline gap-2 min-w-0">
-            <span className="text-[14px] font-semibold text-xyne-fg-primary">Persona</span>
-            <span className="text-xyne-fg-tertiary">•</span>
-            <span className="text-[13px] font-normal text-xyne-fg-tertiary">system prompt</span>
-          </span>
+        {/* The card header already reads "Persona • system prompt"; this row
+            carries only the info bubble and the character count, so the
+            editor starts at the top of the panel. */}
+        <div className="flex items-center justify-between gap-2">
+          <span className="inline-flex items-center gap-1.5 text-[12px] text-xyne-fg-tertiary">
+            The voice and constraints that shape every reply.
           <TabInfoBubble
             modalTitle="Persona"
             modalDescription="The system prompt that shapes this agent's voice, role, and constraints"
@@ -2094,17 +2133,26 @@ export function AgentDetailLeftColumn({
               </div>
             }
           />
+          </span>
+          <span className="text-[11px] tabular-nums text-xyne-fg-tertiary">
+            {prompt.length.toLocaleString()} character{prompt.length === 1 ? "" : "s"}
+          </span>
         </div>
 
-        {/* One-line subtitle */}
-        <p className="-mt-1 text-[12px] text-xyne-fg-tertiary">
-          The voice and constraints that shape every reply.
-        </p>
-
+        {/* flex-1 + min-h-0 lets this textarea consume the rest of the
+              vertical space. `resize-none` because manual resize would
+              fight the flex-grow behavior. */}
+        <textarea
+          value={prompt}
+          onChange={(e) => onPromptChange(e.target.value)}
+          placeholder="You are an agent that…"
+          readOnly={!canEdit}
+          className="min-h-[420px] w-full resize-y rounded-lg border border-xyne-border bg-xyne-surface-sunken px-3 py-2.5 font-mono text-[12px] leading-relaxed text-xyne-fg-primary placeholder:text-xyne-fg-placeholder focus:border-xyne-border-focus focus:outline-none disabled:opacity-60"
+        />
         {/* Update with AI — single compact row */}
         {canEdit && (
-          <div className="flex items-center gap-2.5 rounded-lg border border-[#c4b5fd]/70 bg-[#faf5ff] px-3 py-2">
-            <MagicWandIcon size={13} weight="fill" className="shrink-0 text-[#7c3aed]" />
+          <div className="flex items-center gap-2.5 rounded-lg border border-xyne-border-subtle bg-xyne-surface-subtle px-3 py-2">
+            <MagicWandIcon size={13} weight="fill" className="shrink-0 text-xyne-fg-tertiary" />
             <input
               type="text"
               value={briefInput}
@@ -2116,7 +2164,7 @@ export function AgentDetailLeftColumn({
                 }
               }}
               placeholder="Describe what to change in the persona…"
-              className="min-w-0 flex-1 bg-transparent text-[12px] text-xyne-fg-primary placeholder:text-[#a78bfa]/80 focus:outline-none"
+              className="min-w-0 flex-1 bg-transparent text-[12px] text-xyne-fg-primary placeholder:text-xyne-fg-placeholder focus:outline-none"
             />
             <button
               type="button"
@@ -2127,25 +2175,12 @@ export function AgentDetailLeftColumn({
                 }
               }}
               disabled={!briefInput.trim()}
-              className="shrink-0 rounded-md bg-[#7c3aed] px-3 py-1.5 text-[12px] font-medium text-white transition-colors hover:bg-[#6d28d9] disabled:opacity-40 disabled:cursor-not-allowed"
+              className="shrink-0 rounded-md border border-xyne-border bg-xyne-surface px-3 py-1.5 text-[12px] font-medium text-xyne-fg-primary transition-colors hover:bg-xyne-surface-subtle disabled:opacity-40 disabled:cursor-not-allowed"
             >
               Update with AI
             </button>
           </div>
         )}
-        {/* flex-1 + min-h-0 lets this textarea consume the rest of the
-              vertical space. `resize-none` because manual resize would
-              fight the flex-grow behavior. */}
-        <textarea
-          value={prompt}
-          onChange={(e) => onPromptChange(e.target.value)}
-          placeholder="You are an agent that…"
-          readOnly={!canEdit}
-          className="min-h-[200px] w-full resize-y rounded-lg border border-xyne-border bg-xyne-surface-sunken px-3 py-2 font-mono text-[12px] leading-relaxed text-xyne-fg-primary placeholder:text-xyne-fg-placeholder focus:border-xyne-border-focus focus:outline-none disabled:opacity-60"
-        />
-        <span className="shrink-0 text-[11px] text-xyne-fg-tertiary">
-          {prompt.length.toLocaleString()} character{prompt.length === 1 ? "" : "s"}
-        </span>
         <PromptVersionHistory
           agentSlug={agent.slug}
           activeVersion={agent.activePromptVersion}
@@ -2162,15 +2197,33 @@ export function AgentDetailLeftColumn({
         icon={PlugIcon}
         label="Tools"
         tech="what it can do"
-        subtitle="what it's allowed to do"
-        notes={["acts on real systems", "credentials live with each integration"]}
-        summary={availableTools ? `${toolboxSummary.totalEnabled} of ${toolboxSummary.totalAvailable}` : `${totalTools} on`}
+        subtitle="acts on real systems — credentials live with each integration"
+        summary={toolsSummary}
         open={activeTab === "toolbox"}
         onToggle={() => toggleSection("toolbox")}
       />
 
       {activeTab === "toolbox" && (
        <div className="border-t border-xyne-border-subtle px-4 py-4">
+        {!hasToolSelection && (
+          <div className="mb-3 rounded-lg border border-xyne-border-subtle bg-xyne-surface-raised px-3 py-2.5 text-[12px] leading-relaxed text-xyne-fg-secondary">
+            {isOrchestratorTier ? (
+              <>
+                <span className="font-medium text-xyne-fg-primary">Nothing selected — all available tools.</span>{" "}
+                As an orchestrator this agent gets every tool the signed-in user has connected. Its most-used
+                tools stay active and the rest load on demand through{" "}
+                <code className="text-xyne-fg-tertiary">search-tools</code> /{" "}
+                <code className="text-xyne-fg-tertiary">load-tools</code>. Select tools to restrict it to them.
+              </>
+            ) : (
+              <>
+                <span className="font-medium text-xyne-fg-primary">Nothing selected — file tools only.</span>{" "}
+                This agent runs with just the built-in file tools (read, write, grep, find, ls) and per-run
+                defaults such as Spaces tools in a Spaces thread. Select integrations or tools to give it more.
+              </>
+            )}
+          </div>
+        )}
         <ToolboxPicker
           availableTools={availableTools}
           loading={!availableTools}
@@ -2194,6 +2247,62 @@ export function AgentDetailLeftColumn({
             onRemoveConfigEntry: onRemoveDelegationConfigEntry,
           } : undefined}
         />
+        <details className="mt-4 rounded-lg border border-xyne-border-subtle bg-xyne-surface-raised px-3 py-2.5">
+          <summary className="cursor-pointer list-none text-[12px] font-medium text-xyne-fg-secondary transition-colors hover:text-xyne-fg-primary">
+            <span className="inline-flex items-center gap-1.5">
+              Beyond the selection
+              <span className="rounded-full bg-xyne-surface-sunken px-1.5 py-0.5 text-[10px] font-medium text-xyne-fg-tertiary">
+                {OPEN_PALETTE_OPTIONS.find((o) => o.value === (draftTools.openPalette ?? "off"))?.label}
+              </span>
+            </span>
+          </summary>
+          <div className="pt-2.5">
+        <div>
+          <p className="mb-3 text-xs leading-relaxed text-xyne-fg-secondary">
+            Lets this agent find and load tools nobody selected for it, using{" "}
+            <code className="text-xyne-fg-tertiary">search-tools</code> and{" "}
+            <code className="text-xyne-fg-tertiary">load-tools</code>. It still only reaches
+            integrations the signed-in user has connected — this removes the need for a grant,
+            not the need for credentials.
+          </p>
+          <div className="flex flex-col gap-1.5">
+            {OPEN_PALETTE_OPTIONS.map((option) => {
+              const selected = (draftTools.openPalette ?? "off") === option.value;
+              return (
+                <label
+                  key={option.value}
+                  className={`flex cursor-pointer items-start gap-2 rounded-md border px-2.5 py-2 transition-colors ${
+                    selected
+                      ? "border-xyne-border-strong bg-xyne-surface"
+                      : "border-transparent hover:bg-xyne-surface"
+                  } ${canEdit ? "" : "cursor-not-allowed opacity-60"}`}
+                >
+                  <input
+                    type="radio"
+                    name="open-palette"
+                    className="mt-0.5"
+                    checked={selected}
+                    disabled={!canEdit}
+                    onChange={() =>
+                      onDraftToolsChange((prev) => {
+                        const next = { ...prev };
+                        if (option.value === "off") delete next.openPalette;
+                        else next.openPalette = option.value;
+                        return next;
+                      })
+                    }
+                  />
+                  <span className="min-w-0">
+                    <span className="block text-xs font-medium text-xyne-fg-primary">{option.label}</span>
+                    <span className="block text-[11px] leading-snug text-xyne-fg-tertiary">{option.detail}</span>
+                  </span>
+                </label>
+              );
+            })}
+          </div>
+        </div>
+          </div>
+        </details>
       </div>
       )}
       </div>
@@ -2586,579 +2695,104 @@ export function AgentDetailLeftColumn({
       />
 
       {activeTab === "behavior" && (
-      <div className="flex flex-col gap-5 border-t border-xyne-border-subtle px-4 py-4">
+      <div className="flex flex-col gap-6 border-t border-xyne-border-subtle px-4 py-4">
 
-      {/* Behavior — Constant Reminders (per-turn promptInjection appended
-            as a [System Reminder]). Contextual Responses / skill triggers
-            were relocated to the Knowledge tab to keep skills-related UI
-            together (see the Knowledge block above). */}
-      {canEdit && (
-        <Section
-          title={
-            <span className="inline-flex items-baseline gap-2">
-              Constant Reminders
-              <span className="text-xyne-fg-tertiary">•</span>
-              <span className="font-normal text-xyne-fg-tertiary">prompt injection</span>
-            </span>
-          }
-          description="A system message appended on every turn (e.g. ‘always respond in JSON’)"
-          info={{
-            title: "Constant Reminders",
-            description: "Persistent instructions appended to every message",
-            content: (
-              <div className="flex flex-col gap-4">
-                <div>
-                  <div className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-xyne-fg-tertiary">What it is</div>
-                  <p className="text-[13px] leading-relaxed text-xyne-fg-secondary">A block of text appended as a system instruction on every turn — the model always sees it, regardless of the conversation topic.</p>
-                </div>
-                <div>
-                  <div className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-xyne-fg-tertiary">When to use it</div>
-                  <p className="text-[13px] leading-relaxed text-xyne-fg-secondary">Use it for global rules the agent must never break — output format requirements (e.g. "always respond in JSON"), language preferences, safety guardrails, or compliance constraints.</p>
-                </div>
-              </div>
-            ),
-          }}
-        >
-          <textarea
-            value={draftPromptInjection}
-            onChange={(e) => onDraftPromptInjectionChange(e.target.value)}
-            placeholder="Add a constant reminder…"
-            rows={3}
-            readOnly={!canEdit}
-            className="min-w-0 w-full resize-y rounded-lg border border-xyne-border bg-xyne-surface-sunken px-3 py-2 text-[12px] leading-relaxed text-xyne-fg-primary placeholder:text-xyne-fg-placeholder focus:border-xyne-border-focus focus:outline-none disabled:opacity-60"
-          />
-        </Section>
-      )}
+      {/* Behaviour settings are grouped by what they change about a run rather
+          than listed flat. Fifteen equally-weighted cards meant the one setting
+          someone came for was never findable; the per-setting rationale is
+          preserved verbatim behind each row's "Details" disclosure. */}
 
-      {/* Sandbox repository — pins which REPO_CONFIGS setup the sandbox uses, so
-          the runtime forces sandbox-repo-setup onto this repo (deterministic). */}
-      {(canEdit || draftSandboxRepo) && (
-        <div className="rounded-xl border border-xyne-border bg-xyne-surface p-4">
-          <div className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-xyne-fg-tertiary">Sandbox repository</div>
-          <p className="mb-2 text-[12px] leading-relaxed text-xyne-fg-secondary">
-            Pin this agent to a sandbox setup. When set, the runtime forces <code className="text-xyne-fg-tertiary">sandbox-repo-setup</code> onto this repo — the agent can&apos;t pick the wrong one. &quot;None&quot; lets the agent choose.
-          </p>
-          <select
-            value={draftSandboxRepo}
-            onChange={(e) => onDraftSandboxRepoChange(e.target.value)}
-            disabled={!canEdit}
-            className="min-w-0 w-full rounded-lg border border-xyne-border bg-xyne-surface-sunken px-3 py-2 text-[12px] text-xyne-fg-primary focus:border-xyne-border-focus focus:outline-none disabled:opacity-60"
-          >
-            <option value="">None (agent chooses)</option>
-            {sandboxRepoOptions.map((r) => (
-              <option key={r.key} value={r.key}>{r.name} ({r.key})</option>
-            ))}
-          </select>
-        </div>
-      )}
-
-      {/* Read-only multi-repo sandbox (reviewer agents). Routes EVERY run to the
-          shared sbx-git sandbox: grep across all cloned repos read-only, no
-          per-project clone, mutating sandbox tools (run/build/write) stripped.
-          Off by default. Show when canEdit OR already on. */}
-      {(canEdit || draftForceReadOnlySandbox) && (
-        <div className="rounded-xl border border-xyne-border bg-xyne-surface p-4">
-          <div className="flex items-start justify-between gap-4">
-            <div className="min-w-0 flex-1">
-              <div className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-xyne-fg-tertiary">Read-only multi-repo sandbox</div>
-              <p className="text-[12px] leading-relaxed text-xyne-fg-secondary">
-                Route every run to the shared <code className="text-xyne-fg-tertiary">sbx-git</code> sandbox — the agent greps across all cloned repos read-only, with no per-project clone or snapshot. Mutating sandbox tools (run/build/write) are stripped.
-                {" "}
-                <span className="text-xyne-fg-tertiary">Best for code-review agents that only read code.</span>
-              </p>
-            </div>
-            <label className="flex shrink-0 items-center gap-2 select-none">
-              <input
-                type="checkbox"
-                checked={draftForceReadOnlySandbox}
-                onChange={(e) => onDraftForceReadOnlySandboxChange(e.target.checked)}
-                disabled={!canEdit}
-                className="h-4 w-4 cursor-pointer accent-xyne-accent disabled:cursor-not-allowed disabled:opacity-60"
-                aria-label="Enable read-only multi-repo sandbox"
-              />
-              <span className="text-[12px] text-xyne-fg-primary">{draftForceReadOnlySandbox ? "On" : "Off"}</span>
-            </label>
-          </div>
-
-          {/* Repo context — advisory scope surfaced to the agent. Empty = all repos. */}
-          {draftForceReadOnlySandbox && (
-            <div className="mt-3 border-t border-xyne-border pt-3">
-              <div className="mb-1 flex items-center justify-between">
-                <div className="text-[11px] font-semibold uppercase tracking-wide text-xyne-fg-tertiary">Repo context</div>
-                <span className="text-[11px] text-xyne-fg-tertiary">
-                  {draftSbxGitRepos.length > 0 ? `${draftSbxGitRepos.length} selected` : "all repos"}
-                </span>
-              </div>
-              <p className="mb-2 text-[12px] leading-relaxed text-xyne-fg-secondary">
-                Focus this reviewer on specific repos — the selection is surfaced to the agent as its scope. Leave empty to use all {sbxGitRepoOptions.length}. Advisory: every repo stays on disk in the shared sandbox.
-              </p>
-              <div className="max-h-48 overflow-y-auto rounded-lg border border-xyne-border bg-xyne-surface-sunken p-2">
-                {sbxGitRepoOptions.map((r) => {
-                  const checked = draftSbxGitRepos.includes(r.key);
-                  return (
-                    <label key={r.key} className="flex cursor-pointer items-center gap-2 rounded px-1 py-0.5 text-[12px] text-xyne-fg-primary hover:bg-xyne-surface">
-                      <input
-                        type="checkbox"
-                        checked={checked}
-                        disabled={!canEdit}
-                        onChange={(e) => {
-                          if (e.target.checked) onDraftSbxGitReposChange([...draftSbxGitRepos, r.key]);
-                          else onDraftSbxGitReposChange(draftSbxGitRepos.filter((k) => k !== r.key));
-                        }}
-                        className="h-3.5 w-3.5 cursor-pointer accent-xyne-accent disabled:opacity-60"
-                      />
-                      <span className="truncate">{r.key}</span>
-                    </label>
-                  );
-                })}
-              </div>
-              {canEdit && draftSbxGitRepos.length > 0 && (
-                <button
-                  type="button"
-                  onClick={() => onDraftSbxGitReposChange([])}
-                  className="mt-2 text-[11px] text-xyne-fg-tertiary underline hover:text-xyne-fg-primary"
-                >
-                  Clear selection (use all repos)
-                </button>
-              )}
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* Research Agent context — used by query-codebase and review-pull-request. */}
-      {(canEdit || draftResearchAgentProductId || draftResearchAgentRepositoryId) && (
-        <div className="rounded-xl border border-xyne-border bg-xyne-surface p-4">
-          <div className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-xyne-fg-tertiary">Research Agent context</div>
-          <p className="mb-3 text-[12px] leading-relaxed text-xyne-fg-secondary">
-            Pick the product or repository used by <code className="text-xyne-fg-tertiary">query-codebase</code> and <code className="text-xyne-fg-tertiary">review-pull-request</code>. Product wins when both are set.
-          </p>
-          <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
-            <label className="min-w-0">
-              <div className="mb-1 text-[11px] font-medium text-xyne-fg-tertiary">Product</div>
-              <Dropdown
-                value={draftResearchAgentProductId}
-                options={researchAgentProductOptions.map((p) => ({ value: p.id, label: `${p.name} (${p.id})` }))}
-                placeholder="None"
-                onChange={onDraftResearchAgentProductIdChange}
-                disabled={!canEdit}
-              />
-            </label>
-            <label className="min-w-0">
-              <div className="mb-1 text-[11px] font-medium text-xyne-fg-tertiary">Repository</div>
-              <Dropdown
-                value={draftResearchAgentRepositoryId}
-                options={researchAgentRepositoryOptions.map((r) => ({ value: r.id, label: `${r.name} (${r.id})` }))}
-                placeholder="None"
-                onChange={onDraftResearchAgentRepositoryIdChange}
-                disabled={!canEdit}
-              />
-            </label>
-          </div>
-        </div>
-      )}
-
-      {/* Suggest Goals — opt-in switch. When on, xyne-claw injects the
-          `suggest-goal` tool and a /goal-awareness primer into the agent's
-          context. At the end of a planning turn the agent can call the tool;
-          the user then sees a one-click "▶ Run autonomously as /goal" button
-          in the Spaces thread. Off by default (no behaviour change for
-          existing agents). Display when canEdit OR when already on, so
-          read-only viewers see the current setting on agents that have it
-          enabled. */}
-      {/* Prefetch context — opt-IN switch (agent.config.prefetchContext). Before
-          the first model turn, a cheap model extracts the names the question
-          mentions and the platform resolves each one against channels,
-          projects and people in parallel, then attaches the ids to the prompt.
-          Measured motivation: runs were spending whole turns (15-25s each)
-          re-deriving a user id already in the request payload and mapping
-          channel/project names to ids. Off by default. */}
-      {(canEdit || draftPrefetchContext) && (
-        <div className="rounded-xl border border-xyne-border bg-xyne-surface p-4">
-          <div className="flex items-start justify-between gap-4">
-            <div className="min-w-0 flex-1">
-              <div className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-xyne-fg-tertiary">Prefetch Context</div>
-              <p className="text-[12px] leading-relaxed text-xyne-fg-secondary">
-                Resolve the channels, projects and people a question names before the agent&apos;s first turn, and hand it the ids up front.
-                {" "}
-                <span className="text-xyne-fg-tertiary">Best for search and reporting agents that otherwise burn turns looking up ids. Results are attached as a hint the agent still verifies.</span>
-              </p>
-            </div>
-            <label className="flex shrink-0 items-center gap-2 select-none">
-              <input
-                type="checkbox"
-                checked={draftPrefetchContext}
-                onChange={(e) => onDraftPrefetchContextChange(e.target.checked)}
-                disabled={!canEdit}
-                className="h-4 w-4 cursor-pointer accent-xyne-accent disabled:cursor-not-allowed disabled:opacity-60"
-                aria-label="Enable Prefetch Context"
-              />
-              <span className="text-[12px] text-xyne-fg-primary">{draftPrefetchContext ? "On" : "Off"}</span>
-            </label>
-          </div>
-        </div>
-      )}
-
-      {/* Plan tracking — opt-OUT switch (agent.config.planTracking). Default ON.
-          Distinct from "Post TODOs", which only hides the rendered card: this
-          removes the todo-write/todo-read tools AND the primer that requires
-          them. Worth turning off for agents that answer in one message —
-          `todo-write` ends the assistant turn like any tool call, and the primer
-          mandates a todo-only turn at BOTH ends of a run (before the first tool
-          call, and again immediately before the final answer). On a slow model
-          that measured ~50% of wall-clock on ask-ai runs, for zero data. */}
-      {(canEdit || !draftPlanTracking) && (
-        <div className="rounded-xl border border-xyne-border bg-xyne-surface p-4">
-          <div className="flex items-start justify-between gap-4">
-            <div className="min-w-0 flex-1">
-              <div className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-xyne-fg-tertiary">Plan Tracking</div>
-              <p className="text-[12px] leading-relaxed text-xyne-fg-secondary">
-                Give this agent the <code className="text-xyne-fg-tertiary">todo-write</code> checklist tools and require a plan before it starts work.
-                {" "}
-                <span className="text-xyne-fg-tertiary">On by default. Turn it off for agents that answer in a single message &mdash; each plan update costs a full model round trip, and the checklist card adds little when there is nothing to track.</span>
-              </p>
-            </div>
-            <label className="flex shrink-0 items-center gap-2 select-none">
-              <input
-                type="checkbox"
-                checked={draftPlanTracking}
-                onChange={(e) => onDraftPlanTrackingChange(e.target.checked)}
-                disabled={!canEdit}
-                className="h-4 w-4 cursor-pointer accent-xyne-accent disabled:cursor-not-allowed disabled:opacity-60"
-                aria-label="Enable Plan Tracking"
-              />
-              <span className="text-[12px] text-xyne-fg-primary">{draftPlanTracking ? "On" : "Off"}</span>
-            </label>
-          </div>
-        </div>
-      )}
-      {/* Delegation budget — per-run cap on child-agent delegations
-          (agent.config.maxDelegationsPerRun). Each delegation is a full nested
-          agent run, so the cap is a cost / blast-radius guard. Raise it for
-          orchestrators that fan out (analyzer -> N generators -> code-writer);
-          leave at the default (3) for simple agents. The runtime re-clamps to
-          [1,25], so this control can never widen the real bound. */}
-      <div className="rounded-xl border border-xyne-border bg-xyne-surface p-4">
-        <div className="flex items-start justify-between gap-4">
-          <div className="min-w-0 flex-1">
-            <div className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-xyne-fg-tertiary">Delegation Budget</div>
-            <p className="text-[12px] leading-relaxed text-xyne-fg-secondary">
-              Maximum child-agent delegations this agent may make in a single run. Each delegation is a full nested agent run.
-              {" "}
-              <span className="text-xyne-fg-tertiary">Raise it for orchestrators that fan out to several sub-agents in one run; keep the default ({MAX_DELEGATIONS_PER_RUN_BOUNDS.DEFAULT}) for simple agents. The runtime clamps to [{MAX_DELEGATIONS_PER_RUN_BOUNDS.MIN}, {MAX_DELEGATIONS_PER_RUN_BOUNDS.MAX}].</span>
-            </p>
-          </div>
-          <label className="flex shrink-0 items-center gap-2 select-none">
-            <select
-              value={draftMaxDelegations}
-              onChange={(e) => onDraftMaxDelegationsChange(Number(e.target.value))}
-              disabled={!canEdit}
-              className="rounded-md border border-xyne-border bg-xyne-surface px-2 py-1 text-[12px] text-xyne-fg-primary disabled:cursor-not-allowed disabled:opacity-60"
-              aria-label="Delegation budget (max delegations per run)"
-            >
-              {MAX_DELEGATIONS_PER_RUN_OPTIONS.map((n) => (
-                <option key={n} value={n}>
-                  {n}
-                  {n === MAX_DELEGATIONS_PER_RUN_BOUNDS.DEFAULT ? " (default)" : ""}
-                </option>
-              ))}
-            </select>
-          </label>
-        </div>
-      </div>
-
-      {(canEdit || draftSuggestGoal) && (
-        <div className="rounded-xl border border-xyne-border bg-xyne-surface p-4">
-          <div className="flex items-start justify-between gap-4">
-            <div className="min-w-0 flex-1">
-              <div className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-xyne-fg-tertiary">Suggest Goals</div>
-              <p className="text-[12px] leading-relaxed text-xyne-fg-secondary">
-                Let this agent propose autonomous <code className="text-xyne-fg-tertiary">/goal</code> loops. At the end of a multi-turn plan, the user sees a one-click button to run the work to completion (turn cap + judge enforced).
-                {" "}
-                <span className="text-xyne-fg-tertiary">Best for agents that handle long-horizon tasks (audits, sweeps, multi-PR reviews).</span>
-              </p>
-            </div>
-            {/* Checkbox styled as a switch — matches the visual weight of the
-                sandbox repository dropdown card above. */}
-            <label className="flex shrink-0 items-center gap-2 select-none">
-              <input
-                type="checkbox"
-                checked={draftSuggestGoal}
-                onChange={(e) => onDraftSuggestGoalChange(e.target.checked)}
-                disabled={!canEdit}
-                className="h-4 w-4 cursor-pointer accent-xyne-accent disabled:cursor-not-allowed disabled:opacity-60"
-                aria-label="Enable Suggest Goals"
-              />
-              <span className="text-[12px] text-xyne-fg-primary">{draftSuggestGoal ? "On" : "Off"}</span>
-            </label>
-          </div>
-        </div>
-      )}
-
-      {/* Post TODOs to Spaces — opt-OUT switch (agent.config.postTodos). The
-          todo-write tool renders a live, in-place checklist card in the thread
-          by default. Turning this OFF suppresses that card (claw-auth's
-          doRenderPlanCard early-returns) — the agent keeps tracking TODOs
-          internally, only the Spaces render is hidden. On by default; surface
-          when canEdit OR when already OFF so read-only viewers see the state. */}
-      {(canEdit || !draftPostTodos) && (
-        <div className="rounded-xl border border-xyne-border bg-xyne-surface p-4">
-          <div className="flex items-start justify-between gap-4">
-            <div className="min-w-0 flex-1">
-              <div className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-xyne-fg-tertiary">Post TODOs to Spaces</div>
-              <p className="text-[12px] leading-relaxed text-xyne-fg-secondary">
-                Show this agent&apos;s TODO checklist as a live, in-place-updating card in the thread while it works.
-                {" "}
-                <span className="text-xyne-fg-tertiary">Turn off for agents where the plan is noise (advice-only or single-shot agents). The agent still tracks its TODOs internally — only the card is hidden.</span>
-              </p>
-            </div>
-            <label className="flex shrink-0 items-center gap-2 select-none">
-              <input
-                type="checkbox"
-                checked={draftPostTodos}
-                onChange={(e) => onDraftPostTodosChange(e.target.checked)}
-                disabled={!canEdit}
-                className="h-4 w-4 cursor-pointer accent-xyne-accent disabled:cursor-not-allowed disabled:opacity-60"
-                aria-label="Post TODOs to Spaces"
-              />
-              <span className="text-[12px] text-xyne-fg-primary">{draftPostTodos ? "On" : "Off"}</span>
-            </label>
-          </div>
-        </div>
-      )}
-
-      {/* Always Goal — every user message becomes `/goal <text>` automatically.
-          Stronger than Suggest Goals: there's no choice surface, every reply
-          this agent gets is run as an autonomous loop. The user can still send
-          `/stop` or `/goal status` to control — those start with `/` and bypass
-          the wrap. Off by default; turning this on for a chat-style agent
-          would be a UX regression, so the help copy spells out the implications. */}
-      {(canEdit || draftAutoGoal) && (
-        <div className="rounded-xl border border-xyne-border bg-xyne-surface p-4">
-          <div className="flex items-start justify-between gap-4">
-            <div className="min-w-0 flex-1">
-              <div className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-xyne-fg-tertiary">Always Goal</div>
-              <p className="text-[12px] leading-relaxed text-xyne-fg-secondary">
-                Run every message as a <code className="text-xyne-fg-tertiary">/goal</code> loop automatically. Each user reply becomes an autonomous turn budget — the agent works until the judge says done or the turn cap hits.
-                {" "}
-                <span className="text-xyne-fg-tertiary">Use only when the agent is purpose-built for autonomous execution (PR sweeps, scheduled audits). Users can still type <code className="text-xyne-fg-tertiary">/stop</code> to cancel mid-loop.</span>
-              </p>
-            </div>
-            <label className="flex shrink-0 items-center gap-2 select-none">
-              <input
-                type="checkbox"
-                checked={draftAutoGoal}
-                onChange={(e) => onDraftAutoGoalChange(e.target.checked)}
-                disabled={!canEdit}
-                className="h-4 w-4 cursor-pointer accent-xyne-accent disabled:cursor-not-allowed disabled:opacity-60"
-                aria-label="Enable Always Goal"
-              />
-              <span className="text-[12px] text-xyne-fg-primary">{draftAutoGoal ? "On" : "Off"}</span>
-            </label>
-          </div>
-        </div>
-      )}
-
-      {/* Plan mode opt-in (agent.config.planMode). When on, a non-twin thread
-          mention or DM that needs multi-step work makes the agent PROPOSE a plan
-          (read-only) and STOP for the user's approval; on approve it executes.
-          Trivial asks skip the approval prompt. Off = act immediately (today's
-          behavior). Show when canEdit OR already on. */}
-      {(canEdit || draftPlanMode) && (
-        <div className="rounded-xl border border-xyne-border bg-xyne-surface p-4">
-          <div className="flex items-start justify-between gap-4">
-            <div className="min-w-0 flex-1">
-              <div className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-xyne-fg-tertiary">Plan Mode</div>
-              <p className="text-[12px] leading-relaxed text-xyne-fg-secondary">
-                For multi-step requests in threads and DMs, the agent proposes a plan and waits for approval before doing the work — you pick which steps to keep, then it runs.
-                {" "}
-                <span className="text-xyne-fg-tertiary">Trivial one-step asks run without a prompt. Off = act immediately (default). Twin (@user) flows are never affected.</span>
-              </p>
-            </div>
-            <label className="flex shrink-0 items-center gap-2 select-none">
-              <input
-                type="checkbox"
-                checked={draftPlanMode}
-                onChange={(e) => onDraftPlanModeChange(e.target.checked)}
-                disabled={!canEdit}
-                className="h-4 w-4 cursor-pointer accent-xyne-accent disabled:cursor-not-allowed disabled:opacity-60"
-                aria-label="Enable Plan Mode"
-              />
-              <span className="text-[12px] text-xyne-fg-primary">{draftPlanMode ? "On" : "Off"}</span>
-            </label>
-          </div>
-          {/* Editable plan-mode primer (agent.config.planModePrompt) — how the agent
-              scopes a plan. Only shown/saved when plan mode is on; a value equal to
-              the default is not persisted. Guidance ONLY — the propose→approve gate
-              and propose-plan contract are enforced by the tool palette, not this text. */}
-          {draftPlanMode && (
-            <div className="mt-3 border-t border-xyne-border-subtle pt-3">
-              <div className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-xyne-fg-tertiary">
-                Plan-mode prompt <span className="font-normal normal-case text-xyne-fg-tertiary">(optional)</span>
-              </div>
-              <p className="mb-2 text-[12px] leading-relaxed text-xyne-fg-secondary">
-                System prompt the agent follows while it scopes a plan — pre-filled with the default; edit only if you need custom guidance on HOW it plans. The propose-then-approve gate and the propose-plan contract are always enforced regardless of this text.
-              </p>
-              <textarea
-                value={draftPlanModePrompt}
-                onChange={(e) => onDraftPlanModePromptChange(e.target.value)}
-                disabled={!canEdit}
-                rows={10}
-                className="w-full resize-y rounded-md border border-xyne-border-subtle bg-xyne-surface px-2.5 py-2 font-mono text-[12px] leading-relaxed text-xyne-fg-primary placeholder:text-xyne-fg-muted focus:border-xyne-border focus:outline-none disabled:opacity-60"
-              />
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* Verify Responses opt-in (agent.config.verifyResponses). The agent
-          delivers its final answer via the submit-response tool, which checks
-          the draft's factual claims (counts, dates, IDs) against the tool
-          evidence gathered this run before posting — a wrong claim is sent
-          back for correction. Adds one LLM call per response (more on a
-          rejection). Best for agents that report data; not for casual chat.
-          Off by default. Show when canEdit OR already on. */}
-      {activeTab === "behavior" && (canEdit || draftVerifyResponses) && (
-        <div className="rounded-xl border border-xyne-border bg-xyne-surface p-4">
-          <div className="flex items-start justify-between gap-4">
-            <div className="min-w-0 flex-1">
-              <div className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-xyne-fg-tertiary">Verify Responses</div>
-              <p className="text-[12px] leading-relaxed text-xyne-fg-secondary">
-                Before the final answer is sent, check its factual claims (counts, dates, IDs, totals) against the tool results the agent gathered. A contradicted claim is sent back for correction.
-                {" "}
-                <span className="text-xyne-fg-tertiary">Adds one LLM call per response (more on a rejection). Best for agents that report data; skip for casual chat.</span>
-              </p>
-            </div>
-            <label className="flex shrink-0 items-center gap-2 select-none">
-              <input
-                type="checkbox"
+      <SettingGroup
+        title="Answering"
+        description="What the agent must do before its reply is delivered."
+      >
+        {(canEdit || draftVerifyResponses) && (
+          <SettingRow
+            title="Verify responses"
+            summary="Check the answer's factual claims against the tool results the agent gathered, and send contradictions back for correction."
+            detail="Counts, dates, IDs and totals are checked. Adds one LLM call per response (more on a rejection). Best for agents that report data; skip for casual chat."
+            enabled={draftVerifyResponses}
+            control={
+              <Switch
                 checked={draftVerifyResponses}
-                onChange={(e) => onDraftVerifyResponsesChange(e.target.checked)}
+                onChange={onDraftVerifyResponsesChange}
                 disabled={!canEdit}
-                className="h-4 w-4 cursor-pointer accent-xyne-accent disabled:cursor-not-allowed disabled:opacity-60"
-                aria-label="Enable Verify Responses"
+                ariaLabel="Verify responses"
               />
-              <span className="text-[12px] text-xyne-fg-primary">{draftVerifyResponses ? "On" : "Off"}</span>
-            </label>
-          </div>
-          {/* Per-agent delivery criteria — stacked on top of the default factual
-              check. Inverted rule: a stated requirement with no supporting
-              evidence is a FAILURE (e.g. "must post a POT video before claiming
-              done"). Only shown/saved when verification is on. */}
-          {draftVerifyResponses && (
-            <div className="mt-3 border-t border-xyne-border-subtle pt-3">
-              <div className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-xyne-fg-tertiary">
-                Delivery criteria <span className="font-normal normal-case text-xyne-fg-tertiary">(optional)</span>
-              </div>
-              <p className="mb-2 text-[12px] leading-relaxed text-xyne-fg-secondary">
-                Extra requirements the response MUST meet before it&apos;s delivered — checked against the run&apos;s evidence. Unlike the factual check above, a requirement with no proof is rejected. One per line.
-              </p>
-              <textarea
-                value={draftVerifyResponseCriteria}
-                onChange={(e) => onDraftVerifyResponseCriteriaChange(e.target.value)}
-                disabled={!canEdit}
-                rows={4}
-                placeholder={"e.g.\n- Must post a Proof-of-Testing video to the thread before claiming the fix is done.\n- Must include a PR link when it says a PR was opened."}
-                className="w-full resize-y rounded-md border border-xyne-border-subtle bg-xyne-surface px-2.5 py-2 text-[12px] leading-relaxed text-xyne-fg-primary placeholder:text-xyne-fg-muted focus:border-xyne-border focus:outline-none disabled:opacity-60"
-              />
-            </div>
-          )}
-        </div>
-      )}
+            }
+          >
+            {draftVerifyResponses && (
+              <>
+                <div className="mb-1 text-[12px] font-medium text-xyne-fg-primary">
+                  Delivery criteria <span className="font-normal text-xyne-fg-tertiary">(optional)</span>
+                </div>
+                <p className="mb-2 text-[12px] leading-relaxed text-xyne-fg-secondary">
+                  Extra requirements the response MUST meet before it&apos;s delivered — checked against the run&apos;s evidence. Unlike the factual check above, a requirement with no proof is rejected. One per line.
+                </p>
+                <textarea
+                  value={draftVerifyResponseCriteria}
+                  onChange={(e) => onDraftVerifyResponseCriteriaChange(e.target.value)}
+                  disabled={!canEdit}
+                  rows={4}
+                  placeholder={"e.g.\n- Must post a Proof-of-Testing video to the thread before claiming the fix is done.\n- Must include a PR link when it says a PR was opened."}
+                  className="w-full resize-y rounded-lg border border-xyne-border bg-xyne-surface-sunken px-3 py-2 text-[12px] leading-relaxed text-xyne-fg-primary placeholder:text-xyne-fg-placeholder focus:border-xyne-border-focus focus:outline-none disabled:opacity-60"
+                />
+              </>
+            )}
+          </SettingRow>
+        )}
 
-      {/* Citation reflection opt-in (agent.config.citationReflection). After the
-          agent answers, if it drew on citeable sources (search / KB / subagents
-          that emit [clf-…] tokens) but cited none, the runtime nudges it once to
-          rewrite with verbatim inline citations. Cheap (regex + ≤1 re-prompt, no
-          extra LLM judge call). Off by default. Show when canEdit OR already on. */}
-      {activeTab === "behavior" && (canEdit || draftCitationReflection) && (
-        <div className="rounded-xl border border-xyne-border bg-xyne-surface p-4">
-          <div className="flex items-start justify-between gap-4">
-            <div className="min-w-0 flex-1">
-              <div className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-xyne-fg-tertiary">Enforce Citations</div>
-              <p className="text-[12px] leading-relaxed text-xyne-fg-secondary">
-                After the answer is written, if the agent used citeable sources but cited none, nudge it once to rewrite with verbatim inline citations.
-                {" "}
-                <span className="text-xyne-fg-tertiary">Cheap — a token check plus at most one re-prompt; no extra LLM call. Best for agents that answer from retrieved data.</span>
-              </p>
-            </div>
-            <label className="flex shrink-0 items-center gap-2 select-none">
-              <input
-                type="checkbox"
+        {(canEdit || draftCitationReflection) && (
+          <SettingRow
+            title="Enforce citations"
+            summary="If the agent used citeable sources but cited none, nudge it once to rewrite with verbatim inline citations."
+            detail="Cheap — a token check plus at most one re-prompt; no extra LLM call. Best for agents that answer from retrieved data."
+            enabled={draftCitationReflection}
+            control={
+              <Switch
                 checked={draftCitationReflection}
-                onChange={(e) => onDraftCitationReflectionChange(e.target.checked)}
+                onChange={onDraftCitationReflectionChange}
                 disabled={!canEdit}
-                className="h-4 w-4 cursor-pointer accent-xyne-accent disabled:cursor-not-allowed disabled:opacity-60"
-                aria-label="Enable Enforce Citations"
+                ariaLabel="Enforce citations"
               />
-              <span className="text-[12px] text-xyne-fg-primary">{draftCitationReflection ? "On" : "Off"}</span>
-            </label>
-          </div>
-        </div>
-      )}
+            }
+          />
+        )}
 
-      {/* Auto-cite all tools (agent.config.autoToolCitations). Chunks EVERY tool
-          result that doesn't already self-cite and injects [clf-…] tokens so the
-          model can cite any output — every MCP, sandbox, and built-in tool. Tools
-          that emit their own citations are untouched. Off by default. */}
-      {activeTab === "behavior" && (canEdit || draftAutoToolCitations) && (
-        <div className="rounded-xl border border-xyne-border bg-xyne-surface p-4">
-          <div className="flex items-start justify-between gap-4">
-            <div className="min-w-0 flex-1">
-              <div className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-xyne-fg-tertiary">Auto-cite All Tools</div>
-              <p className="text-[12px] leading-relaxed text-xyne-fg-secondary">
-                Chunk every tool result and inject inline citation tokens so the agent can cite any tool's output — every MCP, sandbox, and built-in tool.
-                {" "}
-                <span className="text-xyne-fg-tertiary">Tools that already emit their own citations are left untouched. Built-in file/shell output gets cited too.</span>
-              </p>
-            </div>
-            <label className="flex shrink-0 items-center gap-2 select-none">
-              <input
-                type="checkbox"
+        {(canEdit || draftAutoToolCitations) && (
+          <SettingRow
+            title="Auto-cite all tools"
+            summary="Chunk every tool result and inject inline citation tokens, so the agent can cite any tool's output."
+            detail="Covers every MCP, sandbox and built-in tool. Tools that already emit their own citations are left untouched. Built-in file/shell output gets cited too."
+            enabled={draftAutoToolCitations}
+            control={
+              <Switch
                 checked={draftAutoToolCitations}
-                onChange={(e) => onDraftAutoToolCitationsChange(e.target.checked)}
+                onChange={onDraftAutoToolCitationsChange}
                 disabled={!canEdit}
-                className="h-4 w-4 cursor-pointer accent-xyne-accent disabled:cursor-not-allowed disabled:opacity-60"
-                aria-label="Enable Auto-cite All Tools"
+                ariaLabel="Auto-cite all tools"
               />
-              <span className="text-[12px] text-xyne-fg-primary">{draftAutoToolCitations ? "On" : "Off"}</span>
-            </label>
-          </div>
-        </div>
-      )}
+            }
+          />
+        )}
 
-      {/* Structured JSON output (agent.config.outputFormat). When on, xyne-claw
-          injects a `submit-result` tool whose input schema is the schema below
-          and requires the agent to deliver its final answer through it — the
-          agent still uses tools/reasoning normally, only the final answer is
-          constrained. Best for trigger/workflow/scheduled runs consumed by a
-          machine; in chat threads the reply is raw JSON. Off by default. */}
-      {activeTab === "behavior" && (canEdit || draftOutputFormatEnabled) && (
-        <div className="rounded-xl border border-xyne-border bg-xyne-surface p-4">
-          <div className="flex items-start justify-between gap-4">
-            <div className="min-w-0 flex-1">
-              <div className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-xyne-fg-tertiary">Structured Output</div>
-              <p className="text-[12px] leading-relaxed text-xyne-fg-secondary">
-                Force the agent to deliver its final answer through a fixed format. The agent works normally (tools, reasoning); only the final answer is constrained.
-                {" "}
-                <span className="text-xyne-fg-tertiary">JSON suits machine consumers (workflows/triggers); Markdown renders natively in Spaces threads.</span>
-              </p>
-            </div>
-            <label className="flex shrink-0 items-center gap-2 select-none">
-              <input
-                type="checkbox"
+        {(canEdit || draftOutputFormatEnabled) && (
+          <SettingRow
+            title="Structured output"
+            summary="Force the final answer through a fixed format. The agent still works normally — only the answer is constrained."
+            detail="JSON suits machine consumers (workflows/triggers); Markdown renders natively in Spaces threads."
+            enabled={draftOutputFormatEnabled}
+            control={
+              <Switch
                 checked={draftOutputFormatEnabled}
-                onChange={(e) => onDraftOutputFormatEnabledChange(e.target.checked)}
+                onChange={onDraftOutputFormatEnabledChange}
                 disabled={!canEdit}
-                className="h-4 w-4 cursor-pointer accent-xyne-accent disabled:cursor-not-allowed disabled:opacity-60"
-                aria-label="Enable Structured Output"
+                ariaLabel="Structured output"
               />
-              <span className="text-[12px] text-xyne-fg-primary">{draftOutputFormatEnabled ? "On" : "Off"}</span>
-            </label>
-          </div>
-
-          {draftOutputFormatEnabled && (
-            <div className="mt-3 space-y-3">
+            }
+          >
+            {draftOutputFormatEnabled && (
+            <div className="space-y-3">
               {/* Format type toggle */}
               <div>
                 <label className="mb-1.5 block text-[11px] font-medium text-xyne-fg-secondary">Format</label>
@@ -3309,10 +2943,365 @@ export function AgentDetailLeftColumn({
                 </p>
               </div>
             </div>
+            )}
+          </SettingRow>
+        )}
+      </SettingGroup>
+
+      <SettingGroup
+        title="Autonomy"
+        description="How much the agent decides for itself, and how far one run may go."
+      >
+        {(canEdit || draftPlanMode) && (
+          <SettingRow
+            title="Plan mode"
+            summary="For multi-step requests, propose a plan and wait for approval before doing the work."
+            detail="You pick which steps to keep, then it runs. Trivial one-step asks run without a prompt. Off = act immediately (default). Twin (@user) flows are never affected."
+            enabled={draftPlanMode}
+            control={
+              <Switch
+                checked={draftPlanMode}
+                onChange={onDraftPlanModeChange}
+                disabled={!canEdit}
+                ariaLabel="Plan mode"
+              />
+            }
+          >
+            {draftPlanMode && (
+              <>
+                <div className="mb-1 text-[12px] font-medium text-xyne-fg-primary">
+                  Plan-mode prompt <span className="font-normal text-xyne-fg-tertiary">(optional)</span>
+                </div>
+                <p className="mb-2 text-[12px] leading-relaxed text-xyne-fg-secondary">
+                  System prompt the agent follows while it scopes a plan — pre-filled with the default; edit only if you need custom guidance on HOW it plans. The propose-then-approve gate and the propose-plan contract are always enforced regardless of this text.
+                </p>
+                <textarea
+                  value={draftPlanModePrompt}
+                  onChange={(e) => onDraftPlanModePromptChange(e.target.value)}
+                  disabled={!canEdit}
+                  rows={10}
+                  className="w-full resize-y rounded-lg border border-xyne-border bg-xyne-surface-sunken px-3 py-2 font-mono text-[12px] leading-relaxed text-xyne-fg-primary placeholder:text-xyne-fg-placeholder focus:border-xyne-border-focus focus:outline-none disabled:opacity-60"
+                />
+              </>
+            )}
+          </SettingRow>
+        )}
+
+        {(canEdit || draftSuggestGoal) && (
+          <SettingRow
+            title="Suggest goals"
+            summary="Let the agent propose autonomous /goal loops the user can start with one click."
+            detail="At the end of a multi-turn plan, the user sees a one-click button to run the work to completion (turn cap + judge enforced). Best for agents that handle long-horizon tasks (audits, sweeps, multi-PR reviews)."
+            enabled={draftSuggestGoal}
+            control={
+              <Switch
+                checked={draftSuggestGoal}
+                onChange={onDraftSuggestGoalChange}
+                disabled={!canEdit}
+                ariaLabel="Suggest goals"
+              />
+            }
+          />
+        )}
+
+        {(canEdit || draftAutoGoal) && (
+          <SettingRow
+            title="Always goal"
+            summary="Run every message as a /goal loop automatically — each reply becomes an autonomous turn budget."
+            detail="The agent works until the judge says done or the turn cap hits. Use only when the agent is purpose-built for autonomous execution (PR sweeps, scheduled audits). Users can still type /stop to cancel mid-loop."
+            enabled={draftAutoGoal}
+            control={
+              <Switch
+                checked={draftAutoGoal}
+                onChange={onDraftAutoGoalChange}
+                disabled={!canEdit}
+                ariaLabel="Always goal"
+              />
+            }
+          />
+        )}
+
+        <SettingRow
+          title="Delegation budget"
+          summary="Maximum child-agent delegations this agent may make in a single run."
+          detail={`Each delegation is a full nested agent run. Raise it for orchestrators that fan out to several sub-agents in one run; keep the default (${MAX_DELEGATIONS_PER_RUN_BOUNDS.DEFAULT}) for simple agents. The runtime clamps to [${MAX_DELEGATIONS_PER_RUN_BOUNDS.MIN}, ${MAX_DELEGATIONS_PER_RUN_BOUNDS.MAX}].`}
+          enabled={draftMaxDelegations !== MAX_DELEGATIONS_PER_RUN_BOUNDS.DEFAULT}
+          control={
+            <select
+              value={draftMaxDelegations}
+              onChange={(e) => onDraftMaxDelegationsChange(Number(e.target.value))}
+              disabled={!canEdit}
+              className="rounded-md border border-xyne-border bg-xyne-surface px-2 py-1 text-[12px] text-xyne-fg-primary disabled:cursor-not-allowed disabled:opacity-60"
+              aria-label="Delegation budget (max delegations per run)"
+            >
+              {MAX_DELEGATIONS_PER_RUN_OPTIONS.map((n) => (
+                <option key={n} value={n}>
+                  {n}
+                  {n === MAX_DELEGATIONS_PER_RUN_BOUNDS.DEFAULT ? " (default)" : ""}
+                </option>
+              ))}
+            </select>
+          }
+        />
+      </SettingGroup>
+
+      <SettingGroup
+        title="Planning &amp; progress"
+        description="Whether the agent keeps a checklist, and whether people see it."
+      >
+        {(canEdit || !draftPlanTracking) && (
+          <SettingRow
+            title="Plan tracking"
+            summary="Give the agent todo-write checklist tools and require a plan before it starts work."
+            detail="On by default. Turn it off for agents that answer in a single message — each plan update costs a full model round trip, and the checklist adds little when there is nothing to track."
+            enabled={draftPlanTracking}
+            control={
+              <Switch
+                checked={draftPlanTracking}
+                onChange={onDraftPlanTrackingChange}
+                disabled={!canEdit}
+                ariaLabel="Plan tracking"
+              />
+            }
+          />
+        )}
+
+        {(canEdit || !draftPostTodos) && (
+          <SettingRow
+            title="Post TODOs to Spaces"
+            summary="Show the agent's checklist as a live, in-place-updating card in the thread while it works."
+            detail="Turn off for agents where the plan is noise (advice-only or single-shot agents). The agent still tracks its TODOs internally — only the card is hidden."
+            enabled={draftPostTodos}
+            control={
+              <Switch
+                checked={draftPostTodos}
+                onChange={onDraftPostTodosChange}
+                disabled={!canEdit}
+                ariaLabel="Post TODOs to Spaces"
+              />
+            }
+          />
+        )}
+      </SettingGroup>
+
+      <SettingGroup
+        title="Context"
+        description="What the agent is told, and what it looks up, before it starts."
+      >
+        {canEdit && (
+          <SettingRow
+            title="Constant reminders"
+            summary="A system message appended on every turn (e.g. &lsquo;always respond in JSON&rsquo;)."
+            detail="The model always sees it, regardless of the conversation topic. Use it for global rules the agent must never break — output format requirements, language preferences, safety guardrails, or compliance constraints."
+            enabled={draftPromptInjection.trim().length > 0}
+            control={
+              <span className="text-[11px] tabular-nums text-xyne-fg-tertiary">
+                {draftPromptInjection.trim() ? `${draftPromptInjection.trim().length} chars` : "None"}
+              </span>
+            }
+          >
+            <textarea
+              value={draftPromptInjection}
+              onChange={(e) => onDraftPromptInjectionChange(e.target.value)}
+              placeholder="Add a constant reminder…"
+              rows={3}
+              readOnly={!canEdit}
+              className="min-w-0 w-full resize-y rounded-lg border border-xyne-border bg-xyne-surface-sunken px-3 py-2 text-[12px] leading-relaxed text-xyne-fg-primary placeholder:text-xyne-fg-placeholder focus:border-xyne-border-focus focus:outline-none disabled:opacity-60"
+            />
+          </SettingRow>
+        )}
+
+        {(canEdit || draftPrefetchContext) && (
+          <SettingRow
+            title="Prefetch context"
+            summary="Resolve the channels, projects and people a question names before the first turn, and hand the agent the ids up front."
+            detail="Best for search and reporting agents that otherwise burn turns looking up ids. Results are attached as a hint the agent still verifies."
+            enabled={draftPrefetchContext}
+            control={
+              <Switch
+                checked={draftPrefetchContext}
+                onChange={onDraftPrefetchContextChange}
+                disabled={!canEdit}
+                ariaLabel="Prefetch context"
+              />
+            }
+          />
+        )}
+      </SettingGroup>
+
+      {(canEdit
+        || draftSandboxRepo
+        || draftForceReadOnlySandbox
+        || draftAllowWriteInReadOnlyJob
+        || draftResearchAgentProductId
+        || draftResearchAgentRepositoryId) && (
+        <SettingGroup
+          title="Code &amp; sandbox"
+          description="Where the agent runs code, and which repositories it can see."
+        >
+          {(canEdit || draftSandboxRepo) && (
+            <SettingRow
+              title="Sandbox repository"
+              summary="Pin this agent to one sandbox setup so it can't pick the wrong repo."
+              detail="When set, the runtime forces sandbox-repo-setup onto this repo. “None” lets the agent choose."
+              enabled={!!draftSandboxRepo}
+              control={
+                <select
+                  value={draftSandboxRepo}
+                  onChange={(e) => onDraftSandboxRepoChange(e.target.value)}
+                  disabled={!canEdit}
+                  className="max-w-[220px] rounded-md border border-xyne-border bg-xyne-surface px-2 py-1 text-[12px] text-xyne-fg-primary focus:border-xyne-border-focus focus:outline-none disabled:cursor-not-allowed disabled:opacity-60"
+                  aria-label="Sandbox repository"
+                >
+                  <option value="">None (agent chooses)</option>
+                  {sandboxRepoOptions.map((r) => (
+                    <option key={r.key} value={r.key}>{r.name} ({r.key})</option>
+                  ))}
+                </select>
+              }
+            />
           )}
-        </div>
+
+          {(canEdit || draftForceReadOnlySandbox) && (
+            <SettingRow
+              title="Read-only multi-repo sandbox"
+              summary="Route every run to the shared sbx-git sandbox — grep across all cloned repos, no clone or snapshot."
+              detail="Mutating sandbox tools (run/build/write) are stripped. Best for code-review agents that only read code."
+              enabled={draftForceReadOnlySandbox}
+              control={
+                <Switch
+                  checked={draftForceReadOnlySandbox}
+                  onChange={onDraftForceReadOnlySandboxChange}
+                  disabled={!canEdit}
+                  ariaLabel="Read-only multi-repo sandbox"
+                />
+              }
+            >
+              {draftForceReadOnlySandbox && (
+                <>
+                  <div className="mb-1 flex items-center justify-between">
+                    <div className="text-[12px] font-medium text-xyne-fg-primary">Repo context</div>
+                    <span className="text-[11px] text-xyne-fg-tertiary">
+                      {draftSbxGitRepos.length > 0 ? `${draftSbxGitRepos.length} selected` : "all repos"}
+                    </span>
+                  </div>
+                  <p className="mb-2 text-[12px] leading-relaxed text-xyne-fg-secondary">
+                    Focus this reviewer on specific repos — the selection is surfaced to the agent as its scope. Leave empty to use all {sbxGitRepoOptions.length}. Advisory: every repo stays on disk in the shared sandbox.
+                  </p>
+                  <div className="max-h-48 overflow-y-auto rounded-lg border border-xyne-border bg-xyne-surface-sunken p-2">
+                    {sbxGitRepoOptions.map((r) => {
+                      const checked = draftSbxGitRepos.includes(r.key);
+                      return (
+                        <label key={r.key} className="flex cursor-pointer items-center gap-2 rounded px-1 py-0.5 text-[12px] text-xyne-fg-primary hover:bg-xyne-surface">
+                          <input
+                            type="checkbox"
+                            checked={checked}
+                            disabled={!canEdit}
+                            onChange={(e) => {
+                              if (e.target.checked) onDraftSbxGitReposChange([...draftSbxGitRepos, r.key]);
+                              else onDraftSbxGitReposChange(draftSbxGitRepos.filter((k) => k !== r.key));
+                            }}
+                            className="h-3.5 w-3.5 cursor-pointer accent-xyne-accent disabled:opacity-60"
+                          />
+                          <span className="truncate">{r.key}</span>
+                        </label>
+                      );
+                    })}
+                  </div>
+                  {canEdit && draftSbxGitRepos.length > 0 && (
+                    <button
+                      type="button"
+                      onClick={() => onDraftSbxGitReposChange([])}
+                      className="mt-2 text-[11px] text-xyne-fg-tertiary underline hover:text-xyne-fg-primary"
+                    >
+                      Clear selection (use all repos)
+                    </button>
+                  )}
+                </>
+              )}
+            </SettingRow>
+          )}
+
+          {(canEdit || draftAllowWriteInReadOnlyJob) && (
+            <SettingRow
+              title="Writable sandbox for automations"
+              summary="Let automation and scheduled runs edit, build and push code."
+              detail="At most 3 of these runs go at once; the rest wait their turn. Has no effect while the read-only multi-repo sandbox is on."
+              enabled={draftAllowWriteInReadOnlyJob}
+              control={
+                <Switch
+                  checked={draftAllowWriteInReadOnlyJob}
+                  onChange={onDraftAllowWriteInReadOnlyJobChange}
+                  disabled={!canEdit || draftForceReadOnlySandbox}
+                  ariaLabel="Writable sandbox for automations"
+                />
+              }
+            />
+          )}
+
+          {(canEdit || draftResearchAgentProductId || draftResearchAgentRepositoryId) && (
+            <SettingRow
+              title="Research agent context"
+              summary="The product or repository used by query-codebase and review-pull-request."
+              detail="Product wins when both are set."
+              enabled={!!draftResearchAgentProductId || !!draftResearchAgentRepositoryId}
+              control={
+                <span className="text-[11px] text-xyne-fg-tertiary">
+                  {draftResearchAgentProductId ? "Product" : draftResearchAgentRepositoryId ? "Repository" : "None"}
+                </span>
+              }
+            >
+              <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+                <label className="min-w-0">
+                  <div className="mb-1 text-[11px] font-medium text-xyne-fg-tertiary">Product</div>
+                  <Dropdown
+                    value={draftResearchAgentProductId}
+                    options={researchAgentProductOptions.map((p) => ({ value: p.id, label: `${p.name} (${p.id})` }))}
+                    placeholder="None"
+                    onChange={onDraftResearchAgentProductIdChange}
+                    disabled={!canEdit}
+                  />
+                </label>
+                <label className="min-w-0">
+                  <div className="mb-1 text-[11px] font-medium text-xyne-fg-tertiary">Repository</div>
+                  <Dropdown
+                    value={draftResearchAgentRepositoryId}
+                    options={researchAgentRepositoryOptions.map((r) => ({ value: r.id, label: `${r.name} (${r.id})` }))}
+                    placeholder="None"
+                    onChange={onDraftResearchAgentRepositoryIdChange}
+                    disabled={!canEdit}
+                  />
+                </label>
+              </div>
+            </SettingRow>
+          )}
+        </SettingGroup>
       )}
 
+      </div>
+      )}
+      </div>
+
+      {/* Optimizations card */}
+      <div className={`rounded-xl border bg-xyne-surface transition-colors ${activeTab === "optimizations" ? "border-xyne-border-strong" : "border-xyne-border-subtle"}`}>
+      <DisclosureHeader
+        icon={LightningIcon}
+        label="Optimizations"
+        tech="runtime switches"
+        subtitle="speed and answer-quality switches, each with a platform default"
+        summary={changedOptimizationCount > 0 ? `${changedOptimizationCount} changed` : "Defaults"}
+        open={activeTab === "optimizations"}
+        onToggle={() => toggleSection("optimizations")}
+      />
+
+      {activeTab === "optimizations" && (
+      <div className="border-t border-xyne-border-subtle px-4 py-4">
+        <OptimizationsSection
+          draft={draftOptimizations}
+          onChange={onDraftOptimizationsChange}
+          canEdit={canEdit}
+          delegationTier={agent.delegationTier}
+        />
       </div>
       )}
       </div>

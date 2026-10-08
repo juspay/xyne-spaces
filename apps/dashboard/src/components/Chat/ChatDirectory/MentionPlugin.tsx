@@ -9,15 +9,13 @@ import {
   KEY_ESCAPE_COMMAND,
   KEY_TAB_COMMAND,
   TextNode,
-  type LexicalNode,
   $getSelection,
   $isRangeSelection,
-  $createTextNode,
   $getRoot,
 } from 'lexical';
 import { TicketPriority } from '@xyne/shared';
 import { isChipPrefix, type ChipPrefix } from '../../../search/filterModel';
-import { $createFilterChip, $removeExistingPriorityChips } from './FilterChipNode';
+import { $removeExistingPriorityChips, $spliceFilterChip } from './FilterChipNode';
 import { ChipType, type ChipData } from './ChannelCommandMenu.types';
 
 export type ChannelTriggerType = '#' | 'in:' | 'in:#' | 'in:@';
@@ -68,11 +66,13 @@ function normalizePrefix(trigger: string): ChipPrefix | null {
 }
 
 function buildMentionData(
-  item: { id: string; name: string; email?: string },
+  item: { id: string; name: string; email?: string; alias?: string | null },
   type: ChipType,
   trigger: string,
 ): ChipData {
-  const mentionData: ChipData = { id: item.id, name: item.name, type };
+  // A user-group's chip reads its `@`-handle (alias) like the compose box; other kinds have
+  // no alias and fall back to their name.
+  const mentionData: ChipData = { id: item.id, name: item.alias ?? item.name, type };
   const prefix = normalizePrefix(trigger);
   if (prefix) mentionData.prefix = prefix;
   if (item.email) mentionData.email = item.email;
@@ -106,6 +106,16 @@ interface MentionPluginProps {
   availableDates?: Array<{ id: string; name: string }>;
   availableBoards?: Array<{ id: string; name: string }>;
   availableMentionTargets?: Array<{ id: string; name: string; type: ChipType }>;
+  // The bare `@` typeahead's flat list — people interleaved with user-groups, pre-ordered by
+  // the palette. Each item's optional `type` tells `insertMention` which chip to land (a
+  // user vs a `groupMentions` group chip). When absent, USER mode uses `availableUsers`.
+  availableUserMentionItems?: Array<{
+    id: string;
+    name: string;
+    email?: string;
+    type?: ChipType;
+    alias?: string | null;
+  }>;
   onMentionSelect?: (mention: ChipData) => void;
   mentionSearchType?: ChipType | null;
   selectedMentionIndex?: number;
@@ -142,6 +152,7 @@ export function MentionPlugin({
   availableDates = [],
   availableBoards = [],
   availableMentionTargets = [],
+  availableUserMentionItems = [],
   onMentionSelect,
   mentionSearchType,
   selectedMentionIndex = 0,
@@ -229,21 +240,10 @@ export function MentionPlugin({
         // Bail if the trigger moved out from under us (same guard insertMention uses).
         if (textContent.substring(mentionStart, mentionStart + trigger.length) !== trigger) return;
 
-        const textBefore = textContent.substring(0, mentionStart);
-        const textAfter = textContent.substring(cursorOffset);
-        anchorNode.setTextContent(textBefore);
-
         // Chips in order, each followed by a space, so they read as separate pills.
-        let cursor: LexicalNode = anchorNode;
-        for (const chip of chips) {
-          const chipNode = $createFilterChip(chip, currentUserID);
-          cursor.insertAfter(chipNode);
-          const spaceNode = $createTextNode(' ');
-          chipNode.insertAfter(spaceNode);
-          cursor = spaceNode;
-        }
-        if (textAfter) cursor.insertAfter($createTextNode(textAfter));
-        cursor.selectEnd();
+        $spliceFilterChip(anchorNode, mentionStart, cursorOffset, chips, {
+          currentUserId: currentUserID,
+        });
 
         for (const chip of chips) onMentionSelect?.(chip);
       });
@@ -262,7 +262,13 @@ export function MentionPlugin({
 
   // Insert mention
   const insertMention = useCallback(
-    (item: { id: string; name: string; email?: string; type?: ChipType }) => {
+    (item: {
+      id: string;
+      name: string;
+      email?: string;
+      type?: ChipType;
+      alias?: string | null;
+    }) => {
       // Set flag to prevent update listener from interfering
       isInsertingMention.current = true;
 
@@ -311,32 +317,15 @@ export function MentionPlugin({
               return;
             }
 
-            // Get text parts
-            const textBefore = textContent.substring(0, mentionStart);
-            const textAfter = textContent.substring(cursorOffset);
-
-            // Set the node text to only the text before trigger
-            anchorNode.setTextContent(textBefore);
-
             const mentionData = buildMentionData(item, type, trigger);
             // Priority is the exclusive filter — drop any existing priority chip first.
             if (type === ChipType.PRIORITY) {
               $removeExistingPriorityChips();
             }
-            // Insert the chip pill (icon + editable label) then a trailing space.
-            const chip = $createFilterChip(mentionData, currentUserID);
-            const spaceNode = $createTextNode(' ');
-            anchorNode.insertAfter(chip);
-            chip.insertAfter(spaceNode);
-
-            // If there's text after, add it
-            if (textAfter) {
-              const afterNode = $createTextNode(textAfter);
-              spaceNode.insertAfter(afterNode);
-            }
-
-            // Move cursor after the space
-            spaceNode.selectEnd();
+            // Swap the typed trigger for the chip pill; the caret lands after its trailing space.
+            $spliceFilterChip(anchorNode, mentionStart, cursorOffset, [mentionData], {
+              currentUserId: currentUserID,
+            });
 
             onMentionSelect?.(mentionData);
           } else {
@@ -357,32 +346,15 @@ export function MentionPlugin({
         const triggerAtStart = textContent.substring(mentionStart, mentionStart + trigger.length);
         if (triggerAtStart !== trigger) return;
 
-        // Get text parts
-        const textBefore = textContent.substring(0, mentionStart);
-        const textAfter = textContent.substring(cursorOffset);
-
-        // Set the node text to only the text before trigger
-        anchorNode.setTextContent(textBefore);
-
         const mentionData = buildMentionData(item, type, trigger);
         // Priority is the exclusive filter — drop any existing priority chip first.
         if (type === ChipType.PRIORITY) {
           $removeExistingPriorityChips();
         }
-        // Insert the chip pill (icon + editable label) then a trailing space.
-        const chip = $createFilterChip(mentionData, currentUserID);
-        const spaceNode = $createTextNode(' ');
-        anchorNode.insertAfter(chip);
-        chip.insertAfter(spaceNode);
-
-        // If there's text after, add it
-        if (textAfter) {
-          const afterNode = $createTextNode(textAfter);
-          spaceNode.insertAfter(afterNode);
-        }
-
-        // Move cursor after the space
-        spaceNode.selectEnd();
+        // Swap the typed trigger for the chip pill; the caret lands after its trailing space.
+        $spliceFilterChip(anchorNode, mentionStart, cursorOffset, [mentionData], {
+          currentUserId: currentUserID,
+        });
 
         onMentionSelect?.(mentionData);
       });
@@ -403,7 +375,8 @@ export function MentionPlugin({
       // USER or CHANNEL, so keying off it would re-open the people/channel typeahead.
       if (wasMentionsTrigger && onMentionsSearch) {
         onMentionsSearch('');
-      } else if (type === ChipType.USER && onUserSearch) {
+      } else if ((type === ChipType.USER || type === ChipType.USER_GROUP) && onUserSearch) {
+        // A user-group is picked from the `@` (user) typeahead, so clearing it closes that list.
         onUserSearch('');
       } else if (type === ChipType.CHANNEL && onChannelSearch) {
         onChannelSearch('');
@@ -455,8 +428,24 @@ export function MentionPlugin({
     // Up/Down/Tab were never registered at all. Enter still worked, because the palette
     // handles that one itself (acceptHighlightedMention), which is what made this look
     // like a navigation-only bug.
-    const itemsByType: Partial<Record<ChipType, ReadonlyArray<{ id: string; name: string }>>> = {
-      [ChipType.USER]: availableUsers,
+    // The bare `@` typeahead is one flat list of people + user-groups, pre-interleaved by the
+    // palette. Each item may carry its own `type` so `insertMention` lands the right chip
+    // (a user vs a `groupMentions` chip); items without a type default to the trigger's type.
+    const itemsByType: Partial<
+      Record<
+        ChipType,
+        ReadonlyArray<{
+          id: string;
+          name: string;
+          email?: string;
+          type?: ChipType;
+          alias?: string | null;
+        }>
+      >
+    > = {
+      [ChipType.USER]: availableUserMentionItems.length
+        ? availableUserMentionItems
+        : availableUsers,
       [ChipType.CHANNEL]: availableChannels,
       [ChipType.PRIORITY]: availablePriorities,
       [ChipType.DATE]: availableDates,
@@ -516,11 +505,9 @@ export function MentionPlugin({
           event?.stopPropagation();
           const item = insertableItems[selectedMentionIndex];
           if (item) {
-            const userItem =
-              mentionSearchType === ChipType.USER
-                ? (item as { id: string; name: string; email?: string })
-                : (item as { id: string; name: string });
-            insertMention(userItem);
+            // The item carries its own `type` (user vs user-group in the `@` list); insertMention
+            // routes on it, falling back to the trigger's type when absent.
+            insertMention(item);
           }
           return true;
         }
@@ -542,11 +529,9 @@ export function MentionPlugin({
           event?.preventDefault();
           const item = insertableItems[selectedMentionIndex];
           if (item) {
-            const userItem =
-              mentionSearchType === ChipType.USER
-                ? (item as { id: string; name: string; email?: string })
-                : (item as { id: string; name: string });
-            insertMention(userItem);
+            // The item carries its own `type` (user vs user-group in the `@` list); insertMention
+            // routes on it, falling back to the trigger's type when absent.
+            insertMention(item);
           }
           return true;
         }
@@ -594,6 +579,7 @@ export function MentionPlugin({
     editor,
     mentionSearchType,
     availableUsers,
+    availableUserMentionItems,
     availableChannels,
     availablePriorities,
     availableDates,

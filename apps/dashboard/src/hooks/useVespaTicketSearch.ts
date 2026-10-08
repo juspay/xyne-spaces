@@ -5,12 +5,12 @@ import type { Ticket } from '@xyne/shared';
 import { TicketPriority, TicketStatusV2 } from '@xyne/shared';
 import { useCmdkDefaultRankProfiles } from './useCmdkSearchConfig';
 
-const MAX_VESPA_TICKET_SEARCH_LIMIT = 200;
+// Filter-only matches fetched per request (the backend's max page).
+const MAX_VESPA_TICKET_SEARCH_LIMIT = 400;
 const FILTER_ONLY_DYNAMIC_FIELD_CACHE_TTL_MS = 30_000;
 const SEARCH_DEBOUNCE_MS = 300;
 
 interface UseVespaTicketSearchParams {
-  searchTerm?: string;
   projectId?: string;
   boardId?: string;
   status?: string;
@@ -19,13 +19,10 @@ interface UseVespaTicketSearchParams {
   assignee?: string;
   tags?: string;
   createdBy?: string;
+  userGroup?: string;
   dynamicFieldValues?: string[];
   dynamicFieldDateRanges?: Record<string, { start?: number; end?: number }>;
   enabled?: boolean;
-  limit?: number;
-  fetchAllDynamicFieldMatches?: boolean;
-  maxFetchedResults?: number;
-  searchKey?: string;
 }
 
 interface UseVespaTicketSearchResult {
@@ -66,10 +63,9 @@ const getFilterOnlyDynamicFieldCacheKey = (filters: VespaSearchFilters): string 
     limit: filters.limit ?? null,
   });
 
-const fetchAllFilterOnlyDynamicFieldResults = async (
+/** One filter-only request per filter set: cached briefly and shared while in flight. */
+const fetchFilterOnlyResults = async (
   vespaFilters: VespaSearchFilters,
-  pageLimit: number,
-  maxFetchedResults: number,
 ): Promise<DisplaySearchResult[]> => {
   const cacheKey = getFilterOnlyDynamicFieldCacheKey(vespaFilters);
   const cached = filterOnlyDynamicFieldCache.get(cacheKey);
@@ -83,30 +79,12 @@ const fetchAllFilterOnlyDynamicFieldResults = async (
   }
 
   const request = (async (): Promise<DisplaySearchResult[]> => {
-    const firstResponse: VespaTicketSearchResponse = await searchService.vespaSearch(vespaFilters);
-    const allResults = [...firstResponse.results];
-    const totalToFetch = firstResponse.totalCount;
-    const cappedTotal = Math.min(totalToFetch, maxFetchedResults);
-
-    for (let offset = firstResponse.offset + pageLimit; offset < cappedTotal; offset += pageLimit) {
-      const pageResponse = await searchService.vespaSearch({
-        ...vespaFilters,
-        offset,
-      });
-      allResults.push(...pageResponse.results);
-
-      if (pageResponse.results.length === 0) break;
-    }
-
-    const uniqueResults = Array.from(
-      new Map(allResults.map(result => [result.id, result])).values(),
-    );
+    const response: VespaTicketSearchResponse = await searchService.vespaSearch(vespaFilters);
     filterOnlyDynamicFieldCache.set(cacheKey, {
       expiresAt: Date.now() + FILTER_ONLY_DYNAMIC_FIELD_CACHE_TTL_MS,
-      results: uniqueResults,
+      results: response.results,
     });
-
-    return uniqueResults;
+    return response.results;
   })();
 
   filterOnlyDynamicFieldInflight.set(cacheKey, request);
@@ -172,12 +150,12 @@ function toTicket(r: DisplaySearchResult): Ticket {
 }
 
 /**
- * Debounced Vespa search for tickets. Returns Ticket[] directly from Vespa
- * when a search term is active, or null when there's no search.
- * Only passes server-side scoping (projectId, boardId) to Vespa.
+ * The tickets matching the board's custom-field filters, fetched from Vespa as a filter-only
+ * search (every match, up to MAX_VESPA_TICKET_SEARCH_LIMIT), together with the other filters
+ * Vespa can express. Null while no custom-field filter is set. Requests are cached and shared
+ * by filters, so the columns of one board make one call.
  */
 export const useVespaTicketSearch = ({
-  searchTerm = '',
   projectId,
   boardId,
   status,
@@ -186,13 +164,10 @@ export const useVespaTicketSearch = ({
   assignee,
   tags,
   createdBy,
+  userGroup,
   dynamicFieldValues = EMPTY_DYNAMIC_FIELD_VALUES,
   dynamicFieldDateRanges = {},
   enabled = true,
-  limit = MAX_VESPA_TICKET_SEARCH_LIMIT,
-  fetchAllDynamicFieldMatches = false,
-  maxFetchedResults = 400,
-  searchKey,
 }: UseVespaTicketSearchParams): UseVespaTicketSearchResult => {
   const [searchResults, setSearchResults] = useState<Ticket[] | null>(null);
   const [isSearching, setIsSearching] = useState(false);
@@ -224,133 +199,95 @@ export const useVespaTicketSearch = ({
 
     return Object.fromEntries(entries) as Record<string, { start?: number; end?: number }>;
   }, [dynamicFieldDateRangesKey]);
-  const safeLimit = Math.min(limit, MAX_VESPA_TICKET_SEARCH_LIMIT);
+  const hasDynamicFieldFilters =
+    normalizedDynamicFieldValues.length > 0 ||
+    Object.keys(normalizedDynamicFieldDateRanges).length > 0;
 
-  const performSearch = useCallback(
-    async (query: string) => {
-      if (abortControllerRef.current) {
-        abortControllerRef.current.abort();
-      }
-      const abortController = new AbortController();
-      abortControllerRef.current = abortController;
+  const performSearch = useCallback(async () => {
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+    }
+    const abortController = new AbortController();
+    abortControllerRef.current = abortController;
 
-      const isFilterOnlyDynamicSearch =
-        (normalizedDynamicFieldValues.length > 0 ||
-          Object.keys(normalizedDynamicFieldDateRanges).length > 0) &&
-        (!query.trim() || query.trim() === '*');
-      const shouldFetchAllDynamicMatches = fetchAllDynamicFieldMatches && isFilterOnlyDynamicSearch;
-      const pageLimit = shouldFetchAllDynamicMatches ? MAX_VESPA_TICKET_SEARCH_LIMIT : safeLimit;
-      const cappedMaxResults = Math.max(pageLimit, maxFetchedResults);
-      const vespaFilters: VespaSearchFilters = {
-        query,
-        type: 'tickets',
-        apps: 'ticket',
-      };
-
-      vespaFilters.limit = pageLimit;
-      vespaFilters.rankProfile = rankProfile;
-
-      if (projectId) vespaFilters.projectId = projectId;
-      if (boardId) vespaFilters.board = boardId;
-      if (status) vespaFilters.status = status;
-      if (stage) vespaFilters.stage = stage;
-      if (priority) vespaFilters.priority = priority;
-      if (assignee) vespaFilters.assignee = assignee;
-      if (tags) vespaFilters.tags = tags;
-      if (createdBy) vespaFilters.from = createdBy;
-      if (normalizedDynamicFieldValues.length > 0) {
-        vespaFilters.dynamicFieldValues = normalizedDynamicFieldValues;
-        // Only set filterOnly when true - when false, omit it so backend uses default behavior
-        // This ensures dynamic field values are always used as filters, even with search terms
-        if (isFilterOnlyDynamicSearch) {
-          vespaFilters.filterOnly = true;
-        }
-      }
-      if (Object.keys(normalizedDynamicFieldDateRanges).length > 0) {
-        vespaFilters.dynamicFieldDateRanges = normalizedDynamicFieldDateRanges;
-        if (isFilterOnlyDynamicSearch) {
-          vespaFilters.filterOnly = true;
-        }
-      }
-
-      try {
-        if (shouldFetchAllDynamicMatches) {
-          const results = await fetchAllFilterOnlyDynamicFieldResults(
-            vespaFilters,
-            pageLimit,
-            cappedMaxResults,
-          );
-          if (!abortController.signal.aborted) {
-            setSearchResults(results.map(toTicket));
-          }
-          return;
-        }
-
-        const firstResponse = await searchService.vespaSearch(vespaFilters);
-        if (!abortController.signal.aborted) {
-          setSearchResults(firstResponse.results.map(toTicket));
-        }
-      } catch {
-        if (!abortController.signal.aborted) {
-          setSearchResults(null);
-        }
-      } finally {
-        if (!abortController.signal.aborted) {
-          setIsSearching(false);
-        }
-      }
-    },
-    [
-      projectId,
-      boardId,
-      status,
-      stage,
-      priority,
-      assignee,
-      tags,
-      createdBy,
-      normalizedDynamicFieldValues,
-      normalizedDynamicFieldDateRanges,
-      safeLimit,
-      fetchAllDynamicFieldMatches,
-      maxFetchedResults,
+    const vespaFilters: VespaSearchFilters = {
+      query: '*',
+      type: 'tickets',
+      apps: 'ticket',
+      limit: MAX_VESPA_TICKET_SEARCH_LIMIT,
       rankProfile,
-    ],
-  );
+      filterOnly: true,
+    };
+    if (projectId) vespaFilters.projectId = projectId;
+    if (boardId) vespaFilters.board = boardId;
+    if (status) vespaFilters.status = status;
+    if (stage) vespaFilters.stage = stage;
+    if (priority) vespaFilters.priority = priority;
+    if (assignee) vespaFilters.assignee = assignee;
+    if (tags) vespaFilters.tags = tags;
+    if (createdBy) vespaFilters.from = createdBy;
+    if (userGroup) vespaFilters.userGroup = userGroup;
+    if (normalizedDynamicFieldValues.length > 0) {
+      vespaFilters.dynamicFieldValues = normalizedDynamicFieldValues;
+    }
+    if (Object.keys(normalizedDynamicFieldDateRanges).length > 0) {
+      vespaFilters.dynamicFieldDateRanges = normalizedDynamicFieldDateRanges;
+    }
+
+    try {
+      const results = await fetchFilterOnlyResults(vespaFilters);
+      if (!abortController.signal.aborted) {
+        setSearchResults(results.map(toTicket));
+      }
+    } catch {
+      if (!abortController.signal.aborted) {
+        setSearchResults(null);
+      }
+    } finally {
+      if (!abortController.signal.aborted) {
+        setIsSearching(false);
+      }
+    }
+  }, [
+    projectId,
+    boardId,
+    status,
+    stage,
+    priority,
+    assignee,
+    tags,
+    createdBy,
+    userGroup,
+    normalizedDynamicFieldValues,
+    normalizedDynamicFieldDateRanges,
+    rankProfile,
+  ]);
 
   useEffect(() => {
     if (debounceTimerRef.current) {
       clearTimeout(debounceTimerRef.current);
+      debounceTimerRef.current = null;
     }
 
-    const trimmed = searchTerm.trim();
-    const hasDynamicFieldFilters =
-      normalizedDynamicFieldValues.length > 0 ||
-      Object.keys(normalizedDynamicFieldDateRanges).length > 0;
-    if (!enabled || (!trimmed && !hasDynamicFieldFilters)) {
+    if (!enabled || !hasDynamicFieldFilters) {
       setSearchResults(null);
       setIsSearching(false);
       return;
     }
 
     setIsSearching(true);
+
     debounceTimerRef.current = setTimeout(() => {
-      void performSearch(trimmed || '*');
+      void performSearch();
     }, SEARCH_DEBOUNCE_MS);
 
     return (): void => {
       if (debounceTimerRef.current) {
         clearTimeout(debounceTimerRef.current);
+        debounceTimerRef.current = null;
       }
     };
-  }, [
-    searchTerm,
-    normalizedDynamicFieldValues,
-    normalizedDynamicFieldDateRanges,
-    enabled,
-    performSearch,
-    searchKey,
-  ]);
+  }, [enabled, hasDynamicFieldFilters, performSearch]);
 
   useEffect(() => {
     return (): void => {

@@ -1,5 +1,6 @@
 import Fuse from 'fuse.js';
 import type { Channel } from '@xyne/shared';
+import { saturateAffinity, tierOf, type RankedCandidate } from '@xyne/shared/utils';
 import { affinityService } from '../services/affinityService';
 import { searchChannelsWithScores } from '../hooks/useChannels';
 import { isDMChannel } from '../components/Chat/ChatDirectory/ChatDirectory.utils';
@@ -12,9 +13,10 @@ import { isUserDeactivated, matchesUserQuery } from './userDisplayName';
  * Consumed by `useRankedPeopleSearch`, the cmd+K menu, slash pickers, Compose, Forward, and DM search.
  */
 
-// Squashes raw affinity into [0, 1] with diminishing returns.
-// At affinity=50 → sat=0.5; at affinity=200 → sat≈0.9.
-const sat = (x: number): number => (2 / Math.PI) * Math.atan(x / 50);
+// Squashes raw affinity into [0, 1) with diminishing returns: 50 → 0.5, 100 → 0.705.
+// Shared with the global-phase merge so both paths agree on what a weight is worth; the
+// server caps raw weight at 100, so 0.705 is the ceiling in practice.
+const sat = saturateAffinity;
 
 // A single Fuse doc: one participant name tagged with the DM channel it belongs
 // to. We index every DM participant name into ONE Fuse instance instead of
@@ -44,6 +46,32 @@ function getDmFuse(docs: DmParticipantDoc[], sig: string): Fuse<DmParticipantDoc
     _dmFuse = { sig, fuse: new Fuse(docs, DM_FUSE_OPTIONS) };
   }
   return _dmFuse.fuse;
+}
+
+// Cache docs+sig by `items` array identity: callers whose items are referentially stable
+// (e.g. useDmsSearch's hoisted groupItems) rebuild them only when the DM set changes.
+const _dmDocsCache = new WeakMap<
+  ReadonlyArray<unknown>,
+  { docs: DmParticipantDoc[]; sig: string }
+>();
+
+function getDmDocsForItems<
+  T extends { channel: Channel; searchableNames?: string[]; searchNames?: string[] },
+>(items: ReadonlyArray<T>, dmItems: T[]): { docs: DmParticipantDoc[]; sig: string } {
+  const cached = _dmDocsCache.get(items);
+  if (cached) return cached;
+  const docs: DmParticipantDoc[] = [];
+  for (const item of dmItems) {
+    // Prefer the search-only superset (displayName + raw name) when present; regular channels and
+    // callers without it fall back to searchableNames. `??` (not `||`) so a caller can't accidentally
+    // blank the fallback with an empty array — searchNames is only ever set (non-empty) on DM items.
+    const names = item.searchNames ?? item.searchableNames;
+    if (!names) continue;
+    for (const name of names) docs.push({ channelId: item.channel.id, name });
+  }
+  const sig = docs.map(d => d.channelId + '\x1f' + d.name).join('\x1e');
+  _dmDocsCache.set(items, { docs, sig });
+  return { docs, sig };
 }
 
 // Affinity weight for DM ranking. Fuse scores are [0, 1]; 0.5 means peak
@@ -203,6 +231,20 @@ export function rankChannelsByAffinity<
   });
 }
 
+/** The shape every Cmd+K channel/DM candidate arrives in. */
+export type ChannelSearchItem = {
+  channel: Channel;
+  searchableNames?: string[];
+  searchNames?: string[];
+};
+
+/**
+ * Names a DM is MATCHED on: the search-only superset (displayName + raw name) when present.
+ * `??` not `||`, so a caller cannot blank the fallback with an empty array.
+ */
+const matchNamesOf = (item: ChannelSearchItem): string[] =>
+  item.searchNames ?? item.searchableNames ?? [];
+
 /**
  * Filter channel entries for Cmd+K search.
  *
@@ -217,10 +259,18 @@ export function rankChannelsByAffinity<
  *
  * @param options.excludeDMs  Drop DMs/Group DMs entirely — used by the `#`
  *   Slack-style quick switcher which should show only regular channels.
+ * @param options.regularFuseMatches  Regular-channel matches already computed in a web worker.
  */
 export function filterChannelsBySearchableNames<
   T extends { channel: Channel; searchableNames?: string[]; searchNames?: string[] },
->(items: T[], query: string, options: { excludeDMs?: boolean } = {}): T[] {
+>(
+  items: T[],
+  query: string,
+  options: {
+    excludeDMs?: boolean;
+    regularFuseMatches?: ReadonlyArray<{ id: string; score?: number | undefined }>;
+  } = {},
+): T[] {
   const scoped = options.excludeDMs
     ? items.filter(({ channel }) => !isDMChannel(channel.scopeType))
     : items;
@@ -241,21 +291,13 @@ export function filterChannelsBySearchableNames<
   // Fuse per DM and searching each one per token. For P tokens and N DMs this
   // turns O(N) index constructions + O(N*P) searches per keystroke into a
   // cached single construction + O(P) searches.
-  const dmDocs: DmParticipantDoc[] = [];
-  for (const item of dmItems) {
-    // Prefer the search-only superset (displayName + raw name) when present; regular channels and
-    // callers without it fall back to searchableNames. `??` (not `||`) so a caller can't accidentally
-    // blank the fallback with an empty array — searchNames is only ever set (non-empty) on DM items.
-    const names = item.searchNames ?? item.searchableNames;
-    if (!names) continue;
-    for (const name of names) dmDocs.push({ channelId: item.channel.id, name });
-  }
+  const { docs: dmDocs, sig } =
+    dmItems.length > 0 ? getDmDocsForItems(scoped, dmItems) : { docs: [], sig: '' };
 
   let matchedDms: T[] = [];
   if (dmItems.length > 0 && queryParts.length > 0 && dmDocs.length > 0) {
     // Signature is stable across keystrokes for a fixed DM set, so the index is
     // constructed once per session and reused. Keyed on channel id + names.
-    const sig = dmDocs.map(d => d.channelId + '\x1f' + d.name).join('\x1e');
     const fuse = getDmFuse(dmDocs, sig);
 
     // For each token, record the best (lowest) Fuse score per channel plus the
@@ -298,11 +340,20 @@ export function filterChannelsBySearchableNames<
 
   const regularChannels = regularItems.map(item => item.channel);
   const regularItemsById = new Map(regularItems.map(item => [item.channel.id, item]));
+  const fuseMatches = options.regularFuseMatches?.flatMap(({ id, score }) => {
+    const item = regularItemsById.get(id);
+    return item ? [{ item: item.channel, score }] : [];
+  });
 
   // searchChannelsWithScores runs the same Fuse fuzzy match + prefix boosts
   // as searchChannels but returns { item, score }[] instead of just items,
   // so we can apply affinity on top before deciding the final order.
-  const matchedRegular = searchChannelsWithScores(regularChannels, query, regularChannels.length)
+  const matchedRegular = searchChannelsWithScores(
+    regularChannels,
+    query,
+    regularChannels.length,
+    fuseMatches,
+  )
     .flatMap(({ item: channel, score }) => {
       const item = regularItemsById.get(channel.id);
       if (!item) return [];
@@ -316,4 +367,73 @@ export function filterChannelsBySearchableNames<
     .map(({ item }) => item);
 
   return [...matchedDms, ...matchedRegular];
+}
+
+/* ------------------------------------------------------------------------------------
+ * Global-phase candidates
+ *
+ * These do NOT search. They tag the lists the palette already computed with a shared tier so
+ * one merge can interleave them — same rows, one order instead of three.
+ *
+ * `score` is the entry's index in its source list, so the source's own order is the
+ * within-tier tie-break. Deriving a score here would be a second matcher, and folding in
+ * affinity would double-count it: the merge applies affinity once, across all sources.
+ * ---------------------------------------------------------------------------------- */
+
+/** Names a person should be matched on: display name first, raw name when it differs. */
+const userMatchNames = (user: { name: string; displayName?: string | null }): string[] =>
+  user.displayName && user.displayName !== user.name ? [user.displayName, user.name] : [user.name];
+
+export function toUserCandidates<
+  T extends {
+    id: string;
+    name: string;
+    status?: string | null;
+    displayName?: string | null;
+    email?: string;
+  },
+>(users: T[], query: string): RankedCandidate<T>[] {
+  return users.map((item, index) => ({
+    id: item.id,
+    type: 'user' as const,
+    tier: tierOf(userMatchNames(item), query, { tokenStartIsPrefix: true }),
+    score: index,
+    affinity: affinityService.getUserWeight(item.id),
+    // Below every active match whatever its tier — same rule rankUsers applies outermost.
+    demoted: isUserDeactivated(item),
+    item,
+  }));
+}
+
+/**
+ * Tag an already-filtered channel/DM list. Adds a tier; does not search or reorder.
+ *
+ * WHICH channels reach it is the caller's call: Cmd+K passes regular channels only when
+ * searching (group DMs keep their own section, a 1:1 would duplicate the person) and
+ * everything including DMs when browsing, where no people rows exist to duplicate.
+ */
+export function toChannelCandidates<T extends ChannelSearchItem>(
+  items: T[],
+  query: string,
+): RankedCandidate<T>[] {
+  // No early return on an empty query: browse needs candidates too, and tierOf puts
+  // everything on the top rung, leaving affinity as the sole key — which is what browse wants.
+  const searchLower = query.toLowerCase().trim();
+
+  return items.map((item, index) => {
+    const { channel } = item;
+    const isDm = isDMChannel(channel.scopeType);
+    // Same rule as toUserCandidates, so a person ranks alike however they surface.
+    const tier = tierOf(isDm ? matchNamesOf(item) : [channel.name], searchLower, {
+      tokenStartIsPrefix: true,
+    });
+    return {
+      id: channel.id,
+      type: isDm ? ('dm' as const) : ('channel' as const),
+      tier,
+      score: index,
+      affinity: affinityService.getChannelWeight(channel.id),
+      item,
+    };
+  });
 }

@@ -203,6 +203,22 @@ export function AgentBehaviourTabV2({
           </BehaviourRow>
 
           <BehaviourRow
+            title='Writable sandbox for automations'
+            hint='Let automation and scheduled runs edit, build and push code. At most 3 of these runs go at once; the rest wait their turn.'
+          >
+            <BehaviourToggle
+              checked={sandbox.allowWriteInReadOnlyJob}
+              editable={editable}
+              disabled={busy || sandbox.forceReadOnlySandbox}
+              label='Writable sandbox for automations'
+              trackName='Agent detail v2: toggle writable automation sandbox'
+              onChange={next =>
+                setSandbox({ allowWriteInReadOnlyJob: next }, 'Automation sandbox access updated')
+              }
+            />
+          </BehaviourRow>
+
+          <BehaviourRow
             title='Research product'
             hint='Used by query-codebase and review-pull-request. Takes priority over the repository below.'
           >

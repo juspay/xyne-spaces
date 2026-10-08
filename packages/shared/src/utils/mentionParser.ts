@@ -8,13 +8,45 @@
  * @param htmlContent - HTML content containing mentions
  * @returns Array of unique user IDs
  */
+/**
+ * Remove <pre>…</pre> and <code>…</code> regions from HTML before mention
+ * extraction. A mention span that lives inside a code block/inline code is a
+ * false positive (e.g. `@name` inside an email in a SQL snippet) and must NOT
+ * produce a notification. Kept as a string transform (no DOM) so it works in
+ * both the browser and Node/worker contexts that share this module.
+ *
+ * The attribute class excludes '<' as well as '>': message bodies are attacker
+ * controlled, and `[^>]*` lets a run of unterminated '<pre' re-scan the tail
+ * from every position (js/polynomial-redos). A real tag's attributes cannot
+ * contain a raw '<', so nothing valid is lost.
+ */
+export function stripCodeRegions(htmlContent: string): string {
+  return (
+    htmlContent
+      // Balanced regions: strip just the <pre>…</pre> / <code>…</code> span.
+      .replace(/<pre\b[^<>]*>[\s\S]*?<\/pre>/gi, ' ')
+      .replace(/<code\b[^<>]*>[\s\S]*?<\/code>/gi, ' ')
+      // Unclosed / mismatched openers: a <pre/<code with no matching close is
+      // left untouched by the balanced pass above, so its mention spans would
+      // still be extracted and notify — while the DOM renderer auto-closes the
+      // tag at end-of-input and flattens them (a notify-without-chip
+      // divergence). Mirror the DOM: strip from the dangling opener to
+      // end-of-string. Runs after the balanced pass so well-formed trailing
+      // regions are already removed, and never backtracks (js/polynomial-redos).
+      .replace(/<pre\b[^<>]*>[\s\S]*$/i, ' ')
+      .replace(/<code\b[^<>]*>[\s\S]*$/i, ' ')
+  );
+}
+
 export function extractUserMentions(htmlContent: string): string[] {
+  // Ignore mentions nested inside code blocks / inline code.
+  const scannable = stripCodeRegions(htmlContent);
   // Match span tags that have both data-mention-type=user and data-user-id in any order.
   // Accept either quote style: Slack blocks/attachments emit single-quoted spans (isStringified).
   const userMentionRegex = /<span[^>]*data-mention-type=["']user["'][^>]*>/g;
   const userIdRegex = /data-user-id=(["'])([^"']+)\1/;
 
-  const spans = [...htmlContent.matchAll(userMentionRegex)];
+  const spans = [...scannable.matchAll(userMentionRegex)];
   const userIds = spans
     .map(spanMatch => {
       const userIdMatch = spanMatch[0].match(userIdRegex);
@@ -37,12 +69,14 @@ export function extractUserMentions(htmlContent: string): string[] {
  * @returns Array of unique group IDs
  */
 export function extractGroupMentions(htmlContent: string): string[] {
+  // Ignore mentions nested inside code blocks / inline code.
+  const scannable = stripCodeRegions(htmlContent);
   // Match span tags that have both data-mention-type=group and data-group-id in any order.
   // Accept either quote style: Slack blocks/attachments emit single-quoted spans (isStringified).
   const groupMentionRegex = /<span[^>]*data-mention-type=["']group["'][^>]*>/g;
   const groupIdRegex = /data-group-id=(["'])([^"']+)\1/;
 
-  const spans = [...htmlContent.matchAll(groupMentionRegex)];
+  const spans = [...scannable.matchAll(groupMentionRegex)];
   const groupIds = spans
     .map(spanMatch => {
       const groupIdMatch = spanMatch[0].match(groupIdRegex);

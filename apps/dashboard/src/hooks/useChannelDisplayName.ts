@@ -42,6 +42,7 @@ export const useChannelDisplayName = (
     showTicketsTabTicketsInChat: true,
     callSummaryPrompt: null,
     workspaceId: workspaceId,
+    connectId: null,
   };
 
   // Use fallback for null/undefined channels

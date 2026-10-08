@@ -10,7 +10,7 @@ import { makeStatusHandlers } from './status.js';
 
 export function createEdgeServer(store: RulesStore, origin: Origin, config: Config): Server {
   const resolveHandler = makeResolveHandler(store);
-  const objectsHandler = makeObjectsHandler(origin);
+  const objectsHandler = makeObjectsHandler(origin, store);
   const statusHandlers = makeStatusHandlers(store, origin, config);
 
   const route = async (req: IncomingMessage, res: ServerResponse): Promise<void> => {
@@ -27,6 +27,10 @@ export function createEdgeServer(store: RulesStore, origin: Origin, config: Conf
     // the callee is never derived from request data.
     if (req.method === 'POST' && pathname === '/_edge/reload') {
       await statusHandlers.reload(req, res);
+      return;
+    }
+    if (req.method === 'POST' && pathname === '/_edge/validate') {
+      await statusHandlers.validate(req, res);
       return;
     }
     if (req.method === 'GET' || req.method === 'HEAD') {

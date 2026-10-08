@@ -23,12 +23,25 @@ import { ParticipantInfo_Kind } from '@livekit/protocol';
 import { emitCallEnded, emitCallStarted } from '@/automations/triggers/call.trigger';
 import { noteTakerWebhookController } from '@/controllers/noteTakerWebhookController';
 import { buildCallInviteUrl } from '@/utils/urlUtils';
-import { isTrackInChannel } from '@/sdlc/sdlcChannelMembership';
+import { validateOwnerInChannel, resolveItemTrackId, resolveInheritedOwner } from '@/sdlc/entityLinkService';
+import { SDLC_TRACK_FLAT_RELATION, type EntityLinkOwner } from '@xyne/shared/sdlc';
 
-class LiveKitWebhookController {
+/** The owners a call may be filed against; mirrors sdlcCallLinkSchema. */
+const SDLC_CALL_OWNER_TYPES: readonly string[] = [
+  'CANVAS',
+  'TRACK',
+  'FOLDER',
+  'LINK',
+  'ATTACHMENT',
+];
+import { activityService } from '@/services/activity/activityService';
+import { userActivityStatusService } from '@/services/userActivityStatusService';
+import { handleParticipantJoinedTx } from '@/bypassAcl/transactions/livekitWebhookController';
+
+export class LiveKitWebhookController {
   private receiver: WebhookReceiver;
 
-  private get db() {
+  get db() {
     return DatabaseClient.getInstance();
   }
 
@@ -114,12 +127,10 @@ class LiveKitWebhookController {
 
     try {
       // Global routing: NOTE_TAKER (HEADLESS / "Xyne Oats") rooms never have a
-      // channel/message/conversation, so every event type for them is handled
-      // entirely by noteTakerWebhookController instead of the channel-based
-      // handlers below. This check must run before the switch so no event type
-      // (room_finished, participant_left, track_published, egress_*, etc.) ever
-      // falls through to the channel-based DB operations, which don't apply.
-      if (await this.isNoteTakerRoom(event)) {
+      // channel/message/conversation, so their events go to noteTakerWebhookController.
+      // Egress events are shared: callRecordingService handles them by egressId.
+      const isEgressEvent = event.event === 'egress_started' || event.event === 'egress_ended';
+      if (!isEgressEvent && (await this.isNoteTakerRoom(event))) {
         await noteTakerWebhookController.handleEvent(event);
         res.status(200).json({ success: true });
         return;
@@ -279,6 +290,8 @@ class LiveKitWebhookController {
 
       if (result.shouldEndCall) {
         logger.info(`[LiveKit Webhook] Marked call ${callId} as ENDED`);
+
+        void userActivityStatusService.clearInCallForEndedCall(result.call);
 
         await this.emitCallEndedAutomation(result.call, now, 'room_finished');
 
@@ -521,23 +534,24 @@ class LiveKitWebhookController {
         // and its conversation exist, record the entity mapping. Owner is a
         // canvas or a track — either way the same two links are written:
         //   OWNER -> CALL (relation CALL) and OWNER -> CONVERSATION (DISCUSSION).
-        const sdlcLink = (roomMetadata as {
-          sdlcLink?: { ownerType?: string; ownerId?: string };
-        }).sdlcLink;
+        const sdlcLink = (
+          roomMetadata as {
+            sdlcLink?: { ownerType?: string; ownerId?: string };
+          }
+        ).sdlcLink;
         if (sdlcLink?.ownerType && sdlcLink.ownerId) {
           try {
             const linkWorkspaceId = channelRecord?.workspaceId ?? null;
-            const ownerValid =
-              sdlcLink.ownerType === 'CANVAS'
-                ? Boolean(
-                    await this.db.canvas.findFirst({
-                      where: { id: sdlcLink.ownerId, channelId },
-                      select: { id: true },
-                    }),
-                  )
-                : sdlcLink.ownerType === 'TRACK'
-                  ? await isTrackInChannel(this.db, sdlcLink.ownerId, channelId)
-                  : false;
+            const ownerValid = SDLC_CALL_OWNER_TYPES.includes(sdlcLink.ownerType)
+              ? await validateOwnerInChannel(
+                  this.db,
+                  {
+                    sourceType: sdlcLink.ownerType as EntityLinkOwner['sourceType'],
+                    sourceId: sdlcLink.ownerId,
+                  },
+                  channelId
+                )
+              : false;
             if (linkWorkspaceId && ownerValid) {
               await this.db.sdlcEntityLink.createMany({
                 data: [
@@ -564,16 +578,84 @@ class LiveKitWebhookController {
                 ],
                 skipDuplicates: true,
               });
+              // A conversation filed against an item is also filed against the
+              // item's track, the way a message-started one is through
+              // entityLinkContext.trackRollUp. Without this edge the call's
+              // conversation exists but never appears in the track's list.
+              if (
+                sdlcLink.ownerType === 'FOLDER' ||
+                sdlcLink.ownerType === 'ATTACHMENT' ||
+                sdlcLink.ownerType === 'LINK'
+              ) {
+                const rollUpTrackId = await resolveItemTrackId(
+                  this.db,
+                  sdlcLink.ownerType,
+                  sdlcLink.ownerId
+                );
+                if (rollUpTrackId) {
+                  await this.db.sdlcEntityLink.createMany({
+                    data: [
+                      {
+                        workspaceId: linkWorkspaceId,
+                        channelId,
+                        sourceType: 'TRACK',
+                        sourceId: rollUpTrackId,
+                        targetType: 'CONVERSATION',
+                        targetId: conversationId,
+                        relationType: SDLC_TRACK_FLAT_RELATION,
+                        createdBy,
+                      },
+                    ],
+                    skipDuplicates: true,
+                  });
+                }
+              }
+              if (existingConversationId) {
+                await activityService.fillSdlcOwner(conversationId, channelId);
+              }
               logger.info(
-                `[LiveKit Webhook] sdlc_link_created | call=${callId} owner=${sdlcLink.ownerType}:${sdlcLink.ownerId}`,
+                `[LiveKit Webhook] sdlc_link_created | call=${roomName} owner=${sdlcLink.ownerType}:${sdlcLink.ownerId}`,
               );
             }
           } catch (sdlcLinkError) {
             // Linking must never break call creation.
             logger.warn('[LiveKit Webhook] sdlc_link_failed', {
-              room: roomName,
-              call: callId,
+              call: roomName,
               error: sdlcLinkError,
+            });
+          }
+        } else if (existingConversationId) {
+          // A call started inside a discussion belongs where the discussion does: its
+          // DISCUSSION link names the track, item or artifact, and the call is filed
+          // there too. The conversation already carries that link.
+          try {
+            const linkWorkspaceId = channelRecord?.workspaceId ?? null;
+            const owner = await resolveInheritedOwner(this.db, existingConversationId, channelId);
+            if (linkWorkspaceId && owner) {
+              await this.db.sdlcEntityLink.createMany({
+                data: [
+                  {
+                    workspaceId: linkWorkspaceId,
+                    channelId,
+                    sourceType: owner.sourceType,
+                    sourceId: owner.sourceId,
+                    targetType: 'CALL',
+                    targetId: callId,
+                    relationType: 'CALL',
+                    createdBy,
+                  },
+                ],
+                skipDuplicates: true,
+              });
+              logger.info(
+                `[LiveKit Webhook] sdlc_call_link_inherited | call=${roomName} owner=${owner.sourceType}:${owner.sourceId}`,
+              );
+            }
+          } catch (inheritError) {
+            // Linking must never break call creation.
+            logger.warn('[LiveKit Webhook] sdlc_call_link_inherit_failed', {
+              call: roomName,
+              error: inheritError,
             });
           }
         }
@@ -673,14 +755,7 @@ class LiveKitWebhookController {
         } else {
           // Update participant to ACCEPTED with joinedAt timestamp using repository method
           const now = new Date();
-          await this.db.$transaction(async (tx) => {
-            await repositories.calls.updateParticipantResponse(
-              existingParticipant.id,
-              InvitationResponse.ACCEPTED,
-              now,
-              tx
-            );
-          });
+          await handleParticipantJoinedTx(this, existingParticipant, now);
           logger.info(`[LiveKit Webhook] Updated participant ${participant.identity} to ACCEPTED for call ${roomName}`);
 
           // Trigger side effects for participant response (dismiss notification, cleanup timeout).
@@ -703,6 +778,8 @@ class LiveKitWebhookController {
           }
         }
       }
+      void userActivityStatusService.markInCall(participant.identity, roomName);
+
       // Notify all connected clients that participants changed
       if (roomName) {
         await callHostControlService.applyHostControlsToParticipant(
@@ -808,6 +885,8 @@ class LiveKitWebhookController {
 
       logger.info(`[LiveKit Webhook] Marked participant ${participant.identity} as left for call ${callId}`);
 
+      void userActivityStatusService.clearInCall(participant.identity, callId);
+
       if (result.shouldEndCall) {
         logger.info(`[LiveKit Webhook] No active participants remaining for call ${callId}. Call ended.`);
 
@@ -904,3 +983,4 @@ class LiveKitWebhookController {
 }
 
 export const livekitWebhookController = new LiveKitWebhookController();
+

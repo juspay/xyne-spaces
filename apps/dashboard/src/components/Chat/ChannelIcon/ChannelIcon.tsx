@@ -4,6 +4,8 @@ import { Hashtag, UserTwo } from '@xyne/icons';
 import ChatLock from '../../icons/ChatLock';
 import Avatar, { type AvatarSize } from '../../ui/Avatar/Avatar';
 import { getDMParticipantIdsToFetch, isGroupDMChannel } from '../ChatDirectory/ChatDirectory.utils';
+import { useUser } from '../../../hooks/useUsers';
+import { isUserDeactivated } from '../../../utils/userDisplayName';
 
 interface ChannelIconProps {
   // The channel to render an icon for. Undefined (e.g. not yet resolved) falls back to a hashtag.
@@ -48,9 +50,7 @@ const ChannelIcon = ({
   if (channel.scopeType === ChannelScopeType.DM) {
     const participantIds = getDMParticipantIdsToFetch(channel, context.userID);
     const otherUserId = participantIds.find(id => id !== context.userID);
-    return (
-      <Avatar userId={otherUserId || context.userID} size={avatarSize} showActiveStatus={true} />
-    );
+    return <DmAvatar userId={otherUserId || context.userID} size={avatarSize} />;
   }
 
   if (channel.scopeType === ChannelScopeType.DEFAULT) {
@@ -64,6 +64,16 @@ const ChannelIcon = ({
   }
 
   return <Hashtag size={16} className={glyphClassName} />;
+};
+
+/**
+ * Avatar used for a 1:1 DM row. Suppresses the "online" presence dot when the
+ * partner is deactivated — a stale ONLINE state from before deactivation would
+ * otherwise flash green on an archive.
+ */
+const DmAvatar = ({ userId, size }: { userId: string; size: AvatarSize }): React.ReactElement => {
+  const user = useUser(userId);
+  return <Avatar userId={userId} size={size} showActiveStatus={!isUserDeactivated(user)} />;
 };
 
 export default ChannelIcon;

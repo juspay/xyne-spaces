@@ -107,30 +107,18 @@ export async function spacesAppFetch(path: string, body: Record<string, unknown>
  * pill self-clears via the /webhook/result "done" signal (and a client stale-sweep).
  */
 export async function emitAgentWorkingSignal(opts: {
+  /** Required: Spaces keys straggler suppression on it. See agent-progress.ts. */
+  sessionId: string;
   conversationId?: string | undefined;
   channelId?: string | undefined;
   agentSlug?: string | undefined;
+  agentName?: string | undefined;
   spacesAppUserId?: string | undefined;
   appToken?: string | undefined;
   toolLabel?: string;
 }): Promise<void> {
-  if (!opts.appToken) return;
-  try {
-    await spacesAppFetch(
-      "/chat/agentProgress",
-      {
-        conversationId: opts.conversationId,
-        channelId: opts.channelId,
-        agentSlug: opts.agentSlug,
-        userId: opts.spacesAppUserId,
-        toolLabel: opts.toolLabel ?? "Working on it...",
-        status: "working",
-      },
-      opts.appToken,
-    );
-  } catch {
-    // Best-effort — the pill will still light on the first real progress tick.
-  }
+  const { emitAgentProgressWorking } = await import("./agent-progress.js");
+  await emitAgentProgressWorking(opts, opts.toolLabel ?? "Working on it...");
 }
 
 export function decryptStoredField(stored: string): string {

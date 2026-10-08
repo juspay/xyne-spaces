@@ -1,6 +1,7 @@
 import type { StdioMcpAdapter, McpToolInfo } from "../types.js";
 import type { Citation } from "xyne-claw-shared";
 import { prefixChunk } from "./grafana.js";
+import { pathSegment, repoFilePath } from "../../lib/url-path.js";
 
 export const bitbucketAdapter: StdioMcpAdapter = {
   transport: "stdio",
@@ -249,7 +250,10 @@ export async function handleUploadPrScreenshot(
   const authHeader = "Basic " + Buffer.from(`${username}:${token}`).toString("base64");
 
   // Upload as repo attachment — Bitbucket Server returns attachment metadata with links
-  const uploadUrl = `${baseUrl}/rest/api/1.0/projects/${projectKey}/repos/${repoSlug}/attachments`;
+  const safeProject = pathSegment("upload-pr-screenshot: projectKey", projectKey);
+  const safeRepo = pathSegment("upload-pr-screenshot: repoSlug", repoSlug);
+  const safePrId = pathSegment("upload-pr-screenshot: prId", prId);
+  const uploadUrl = `${baseUrl}/rest/api/1.0/projects/${safeProject}/repos/${safeRepo}/attachments`;
 
   const boundary = "----XyneUpload" + Date.now();
   const bodyParts = [
@@ -292,7 +296,7 @@ export async function handleUploadPrScreenshot(
   const fullUrl = attachmentUrl.startsWith("http") ? attachmentUrl : `${baseUrl}${attachmentUrl}`;
 
   // Add a PR comment with the embedded image
-  const commentUrl = `${baseUrl}/rest/api/1.0/projects/${projectKey}/repos/${repoSlug}/pull-requests/${prId}/comments`;
+  const commentUrl = `${baseUrl}/rest/api/1.0/projects/${safeProject}/repos/${safeRepo}/pull-requests/${safePrId}/comments`;
   const commentBody = `![${caption}](${fullUrl})\n\n**${caption}**`;
 
   const commentRes = await fetch(commentUrl, {
@@ -455,6 +459,9 @@ export async function handleGetPrComments(
     throw new Error("get-pr-comments: projectKey, repoSlug, and prId are required");
   }
 
+  const safeProject = pathSegment("get-pr-comments: projectKey", projectKey);
+  const safeRepo = pathSegment("get-pr-comments: repoSlug", repoSlug);
+  const safePrId = pathSegment("get-pr-comments: prId", prId);
   const authHeader = "Basic " + Buffer.from(`${username}:${token}`).toString("base64");
   const pageSize = 100;
   const out: FlatComment[] = [];
@@ -464,8 +471,8 @@ export async function handleGetPrComments(
 
   while (out.length < maxComments && pagesWalked < maxPages) {
     const url =
-      `${baseUrl}/rest/api/1.0/projects/${projectKey}/repos/${repoSlug}` +
-      `/pull-requests/${prId}/activities?start=${start}&limit=${pageSize}`;
+      `${baseUrl}/rest/api/1.0/projects/${safeProject}/repos/${safeRepo}` +
+      `/pull-requests/${safePrId}/activities?start=${start}&limit=${pageSize}`;
 
     const res = await fetch(url, {
       method: "GET",
@@ -558,14 +565,16 @@ export async function handleGetPrTemplate(
     throw new Error("get-pr-template: path must be a relative repo path with no '..' or empty segments");
   }
 
+  const safeProject = pathSegment("get-pr-template: projectKey", projectKey);
+  const safeRepo = pathSegment("get-pr-template: repoSlug", repoSlug);
   const authHeader = "Basic " + Buffer.from(`${username}:${token}`).toString("base64");
   const candidates = explicitPath ? [explicitPath] : DEFAULT_PR_TEMPLATE_PATHS;
   const tried: string[] = [];
 
   for (const path of candidates) {
     // Encode each path segment to prevent traversal / stray query chars leaking into the URL.
-    const encodedPath = path.split("/").map(encodeURIComponent).join("/");
-    let url = `${baseUrl}/rest/api/1.0/projects/${projectKey}/repos/${repoSlug}/raw/${encodedPath}`;
+    const encodedPath = repoFilePath("get-pr-template: path", path);
+    let url = `${baseUrl}/rest/api/1.0/projects/${safeProject}/repos/${safeRepo}/raw/${encodedPath}`;
     if (at) url += `?at=${encodeURIComponent(at)}`;
 
     tried.push(path);
@@ -624,7 +633,12 @@ interface BbPrPage {
 
 /** `vpa-beta` and `refs/heads/vpa-beta` are the same branch; callers pass either. */
 function normalizeBranchRef(branch: string): { ref: string; displayId: string } {
-  const trimmed = branch.trim().replace(/^\/+|\/+$/g, "");
+  const raw = branch.trim();
+  let begin = 0;
+  let end = raw.length;
+  while (begin < end && raw.charCodeAt(begin) === 47) begin += 1;
+  while (end > begin && raw.charCodeAt(end - 1) === 47) end -= 1;
+  const trimmed = raw.slice(begin, end);
   const displayId = trimmed.replace(/^refs\/heads\//, "");
   return { ref: `refs/heads/${displayId}`, displayId };
 }
@@ -665,6 +679,8 @@ export async function handleListPullRequests(
   const targetBranchRaw = typeof params["targetBranch"] === "string" ? (params["targetBranch"] as string).trim() : "";
   const target = targetBranchRaw ? normalizeBranchRef(targetBranchRaw) : null;
 
+  const safeProject = pathSegment("list-pull-requests: projectKey", projectKey);
+  const safeRepo = pathSegment("list-pull-requests: repoSlug", repoSlug);
   const authHeader = "Basic " + Buffer.from(`${username}:${token}`).toString("base64");
   const pageSize = 100;
   const collected: BbPullRequest[] = [];
@@ -689,7 +705,7 @@ export async function handleListPullRequests(
       qs.set("direction", "INCOMING");
     }
 
-    const url = `${baseUrl}/rest/api/1.0/projects/${projectKey}/repos/${repoSlug}/pull-requests?${qs.toString()}`;
+    const url = `${baseUrl}/rest/api/1.0/projects/${safeProject}/repos/${safeRepo}/pull-requests?${qs.toString()}`;
     const res = await fetch(url, {
       method: "GET",
       headers: { Authorization: authHeader, Accept: "application/json" },

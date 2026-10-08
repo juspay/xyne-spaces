@@ -2,6 +2,7 @@ import type { InsertValue, Transaction, UpdateValue } from '@rocicorp/zero';
 import { CanvasRole, Schema } from '@xyne/shared';
 import { BaseACL } from '../core/base-acl';
 import { MutationACLError, TableSchema } from '../core/types';
+import { assertConnectMutateAllowed } from '../core/connect-mutation-reach';
 import { zql } from '../../queries';
 
 export class CanvasCommentThreadsACL extends BaseACL<'canvas_comment_threads'> {
@@ -10,11 +11,14 @@ export class CanvasCommentThreadsACL extends BaseACL<'canvas_comment_threads'> {
     if (!canvas) {
       throw new MutationACLError('Canvas comment thread failed: canvas not found', 'canvas_comment_threads');
     }
+    // Slack Connect: connectId present → connect_group reach; else legacy workspaceId match.
+    await assertConnectMutateAllowed(this.ctx, tx, canvas, 'canvas_comment_threads');
 
     if (canvas.createdBy === this.ctx.userID) return true;
 
     const participant = await tx.run(
       zql.canvas_participants
+        .where('workspaceId', this.ctx.workspaceId)
         .where('canvasId', canvasId)
         .where('role', 'IN', [CanvasRole.EDITOR, CanvasRole.OWNER])
         .where(({ or, cmp, exists: ex }: any) =>
@@ -35,12 +39,13 @@ export class CanvasCommentThreadsACL extends BaseACL<'canvas_comment_threads'> {
   }
 
   async canInsert(args: InsertValue<TableSchema<'canvas_comment_threads'>>, tx: Transaction<Schema>): Promise<void> {
-    if (args.workspaceId !== this.ctx.workspaceId) {
-      throw new MutationACLError(
-        'Canvas comment thread insert failed: workspace mismatch',
-        'canvas_comment_threads',
-      );
-    }
+    // Slack Connect: connectId present → connect_group reach; else legacy workspaceId match.
+    await assertConnectMutateAllowed(
+      this.ctx,
+      tx,
+      { connectId: args.canvasConnectId as string | undefined, workspaceId: args.workspaceId as string },
+      'canvas_comment_threads',
+    );
 
     if (!(await this.canEditCanvas(args.canvasId, tx))) {
       throw new MutationACLError('Canvas comment thread insert failed: edit access required', 'canvas_comment_threads');
@@ -52,9 +57,11 @@ export class CanvasCommentThreadsACL extends BaseACL<'canvas_comment_threads'> {
     if (!thread) {
       throw new MutationACLError('Canvas comment thread update failed: thread not found', 'canvas_comment_threads');
     }
+    // Slack Connect: connectId present → connect_group reach; else legacy workspaceId match.
+    await assertConnectMutateAllowed(this.ctx, tx, { connectId: thread.canvasConnectId, workspaceId: thread.workspaceId }, 'canvas_comment_threads');
 
     if (thread.createdBy === this.ctx.userID) {
-      return;
+     return;
     }
 
     if (!(await this.canEditCanvas(thread.canvasId, tx))) {

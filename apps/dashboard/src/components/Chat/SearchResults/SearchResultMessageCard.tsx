@@ -27,6 +27,10 @@ import type {
 const WORD_LIMIT = 30;
 
 interface SearchResultMessageCardProps {
+  /** 0-based rank of this card in the result list; the search-quality signal. */
+  resultIndex?: number;
+  /** Total results the query returned, so click rank can be normalised. */
+  resultCount?: number;
   channelId: string;
   conversationId: string;
   matchedMessageId: string | null;
@@ -34,6 +38,8 @@ interface SearchResultMessageCardProps {
   isSelected?: boolean;
   searchSnippet?: string;
   onCardClick?: () => void;
+  /** Called when the card opens its result (side panel or jump to home), for click metrics. */
+  onOpen?: () => void;
   // Message + thread fields from the Vespa search payload. The card builds the
   // message object from these — no Zero message/conversation queries. For ticket
   // results, `ticketMd` carries the serialized ticket card so a conversation is
@@ -51,6 +57,8 @@ interface SearchResultMessageCardProps {
 }
 
 export const SearchResultMessageCard = memo(function SearchResultMessageCard({
+  resultIndex,
+  resultCount,
   channelId,
   conversationId,
   matchedMessageId,
@@ -58,9 +66,11 @@ export const SearchResultMessageCard = memo(function SearchResultMessageCard({
   isSelected = false,
   searchSnippet,
   onCardClick,
+  onOpen,
   searchThread,
 }: SearchResultMessageCardProps): ReactElement | null {
-  const { onSelectThread, onSelectUser, onSelectChannelContext } = useContext(SearchResultsContext);
+  const { onSelectThread, onSelectUser, onSelectMessageContext, onResultOpen } =
+    useContext(SearchResultsContext);
   const channel = useChannel(channelId);
   const navigate = useNavigate();
   const [isExpanded, setIsExpanded] = useState(false);
@@ -120,6 +130,7 @@ export const SearchResultMessageCard = memo(function SearchResultMessageCard({
           createdBy: uploadedByUserId,
           metadata: null,
           conversationId,
+          channelId,
           thumbnailUrl: null,
           isDeleted: false,
           uploadStatus: null,
@@ -130,6 +141,7 @@ export const SearchResultMessageCard = memo(function SearchResultMessageCard({
   }, [
     attachmentIds,
     attachmentResults?.results,
+    channelId,
     conversationId,
     renderedMessageId,
     searchThread.createdAt,
@@ -237,6 +249,9 @@ export const SearchResultMessageCard = memo(function SearchResultMessageCard({
 
   const navigateToMessage = (): void => {
     if (!targetMessage) return;
+    // Jumping to home still leaves from this search — record it before routing away.
+    onOpen?.();
+    onResultOpen?.();
     void navigate(
       isMatchRoot
         ? `/chat/dir/${channelId}#origin=${conversationId}`
@@ -245,10 +260,11 @@ export const SearchResultMessageCard = memo(function SearchResultMessageCard({
   };
 
   const openPanel = (): void => {
+    onOpen?.();
     if (replyCount > 0) {
       onSelectThread?.({ channelId, conversationId, matchedMessageId });
     } else {
-      onSelectChannelContext?.(channelId, conversationId, undefined, matchedMessageId);
+      onSelectMessageContext?.(channelId, conversationId, undefined, matchedMessageId);
     }
   };
 
@@ -280,6 +296,7 @@ export const SearchResultMessageCard = memo(function SearchResultMessageCard({
   };
 
   const handleOpenThread = (): void => {
+    onOpen?.();
     onSelectThread?.({ channelId, conversationId });
   };
 
@@ -295,6 +312,13 @@ export const SearchResultMessageCard = memo(function SearchResultMessageCard({
       )}
       data-track-category='SEARCH_RESULTS'
       data-track-name='OPEN_SEARCH_MESSAGE'
+      data-track-label='Open search result'
+      data-track-metadata={JSON.stringify({
+        ...(resultIndex !== undefined && { resultIndex }),
+        ...(resultCount !== undefined && { resultCount }),
+        channelId,
+        source: 'search_result',
+      })}
     >
       <div className='relative py-1'>
         <button
@@ -308,6 +332,12 @@ export const SearchResultMessageCard = memo(function SearchResultMessageCard({
           aria-label='Open in home'
           data-track-category='SEARCH_RESULTS'
           data-track-name='JUMP_TO_MESSAGE'
+          data-track-metadata={JSON.stringify({
+            ...(resultIndex !== undefined && { resultIndex }),
+            ...(resultCount !== undefined && { resultCount }),
+            channelId,
+            source: 'search_result',
+          })}
         >
           <Home size={14} />
         </button>

@@ -9,10 +9,8 @@ import { resolveFormFieldDefinitionsForForm } from '@/utils/fieldDefinition';
 import { EntitySequenceService } from '@/services/entitySequenceService';
 import { randomUUID } from 'crypto';
 import {
-  serializeInitialMessageMd,
-  serializeTicketMd,
+  buildInitialMessageMd,
   type InitialMessageSummary,
-  type TicketCardSummary,
   BaseTicketType,
   ActivityType,
   AttachmentEntityType,
@@ -31,7 +29,6 @@ import { adfToHtmlAsync, adfToText } from '@/services/jira/adfHtml';
 import { JiraMigrationClient } from '@/services/jira/client';
 import { JiraUserResolver, type UnresolvedJiraUser } from '@/services/jira/userResolver';
 import { getCachedJiraUserEmailMappings } from '@/services/jira/jiraUserMapCsv';
-import { TicketIdService } from '@/services/ticketIdService';
 import { UserRepository } from '@/database/repositories/users';
 import { jiraMigrationProjectIndexService, type JiraMigrationFilters } from '@/services/jiraMigrationProjectIndexService';
 import { writeFile } from 'fs/promises';
@@ -43,6 +40,7 @@ import {
 import {
   syncConversationTicketMdFromPrismaTicket,
 } from '@/utils/ticketMd';
+import { processIssuesChunkTx } from '@/bypassAcl/transactions/jiraMigrationImportService';
 
 type JiraFieldDefinition = {
   id: string;
@@ -54,7 +52,7 @@ type JiraFieldDefinition = {
   };
 };
 
-type JiraUser = {
+export type JiraUser = {
   accountId?: string;
   displayName?: string;
   emailAddress?: string;
@@ -101,7 +99,7 @@ type JiraIssueLink = {
   outwardIssue?: { id: string; key: string };
 };
 
-type JiraIssue = {
+export type JiraIssue = {
   id: string;
   key: string;
   fields: Record<string, any>;
@@ -213,7 +211,7 @@ export interface JiraMigrationProgressUpdate {
   issueResult?: JiraMigrationIssueResult;
 }
 
-const db = DatabaseClient.getInstance();
+export const db = DatabaseClient.getInstance();
 
 const BOARD_FIELD_TYPE_MAP: Record<string, string> = {
   string: 'STRING',
@@ -431,7 +429,7 @@ const inferXyneFieldType = (field: JiraFieldDefinition, sampleValues: string[]):
   return FormFieldType.STRING;
 };
 
-const mapPriority = (value?: string): TicketPriority => {
+export const mapPriority = (value?: string): TicketPriority => {
   const normalized = (value || '').toLowerCase();
   if (normalized.includes('highest') || normalized.includes('high')) return TicketPriority.HIGH;
   if (normalized.includes('medium')) return TicketPriority.MEDIUM;
@@ -499,7 +497,7 @@ const resolveJiraParentIssueKey = (
   return null;
 };
 
-const mapJiraIssueTypeToTicketType = (jiraIssueTypeName?: string): BaseTicketType => {
+export const mapJiraIssueTypeToTicketType = (jiraIssueTypeName?: string): BaseTicketType => {
   const normalized = (jiraIssueTypeName || '').trim().toLowerCase().replace(/[^a-z]/g, '');
   switch (normalized) {
     case 'epic': return BaseTicketType.Epic;
@@ -548,7 +546,7 @@ const parseTicketStatusV2 = (value: string): TicketStatusV2 | null => {
 
 
 export class JiraMigrationImportService {
-  private ticketRepository = new TicketRepository();
+  ticketRepository = new TicketRepository();
   private jiraClient = new JiraMigrationClient();
   private userResolver = new JiraUserResolver(config.defaultWorkspaceId);
   private userRepository = new UserRepository();
@@ -686,11 +684,11 @@ export class JiraMigrationImportService {
     return `${entityId}:${attachmentId}`;
   }
 
-  private buildIssueThreadExternalId(issueId: string): string {
+  buildIssueThreadExternalId(issueId: string): string {
     return issueId;
   }
 
-  private buildIssueRootMessageExternalId(issueId: string): string {
+  buildIssueRootMessageExternalId(issueId: string): string {
     return `jira-root:${issueId}`;
   }
 
@@ -1617,27 +1615,11 @@ export class JiraMigrationImportService {
 
     await syncConversationTicketMdFromPrismaTicket(db as any, ticket);
     if (initialMessage) {
-      const summaryData: InitialMessageSummary = {
-        messageId: initialMessage.messageId,
-        conversationId: initialMessage.conversationId,
-        senderId: initialMessage.senderId,
-        content: initialMessage.content,
+      const md = buildInitialMessageMd({
+        ...initialMessage,
         msgType: initialMessage.msgType as InitialMessageSummary['msgType'],
-        hasAttachment: initialMessage.hasAttachment,
-        edited: initialMessage.edited,
-        isDeleted: initialMessage.isDeleted,
-        showInChannel: initialMessage.showInChannel,
-        visibleTo: initialMessage.visibleTo,
         createdAt: initialMessage.createdAt.getTime(),
-        metadata: initialMessage.metadata ? JSON.stringify(initialMessage.metadata) : null,
-        nudgeCount: initialMessage.nudgeCount,
-        isSent: initialMessage.isSent,
-        reactions_md: initialMessage.reactions_md,
-        link_preview_md: initialMessage.link_preview_md,
-        childConversationId: initialMessage.childConversationId,
-      };
-
-      const md = serializeInitialMessageMd(summaryData);
+      });
       if (md) {
         await db.conversation.update({
           where: { conversationId },
@@ -2996,8 +2978,6 @@ export class JiraMigrationImportService {
     if (!channel) throw new Error('Target channel not found');
     if (initialStages.length === 0) throw new Error('Target board has no stages');
     if (board.projectId !== project.id) throw new Error('Board does not belong to target project');
-    if (channel.projectId !== project.id) throw new Error('Channel does not belong to target project');
-
     // Workspace scoping: some Prisma client types in this repo omit `workspaceId` even though the DB schema
     // contains it (denormalized on Board/Channel and present on Project). Resolve it defensively.
     const workspaceId: string =
@@ -3288,165 +3268,7 @@ export class JiraMigrationImportService {
             const initialMessageId = randomUUID();
             initialMessageIdForTicket = initialMessageId;
 
-            const ticket = await db.$transaction(async tx => {
-              await tx.conversation.create({
-                data: {
-                  conversationId: generatedConversationId,
-                  channelId: channel.id,
-                  createdBy: resolvedReporterId,
-                  initialMessageId,
-                  workspaceId,
-                  createdAt,
-                  lastActivityAt: createdAt,
-                },
-              });
-
- 	              await tx.message.create({
- 	                data: {
- 	                  messageId: initialMessageId,
- 	                  conversationId: generatedConversationId,
- 	                  senderId: initialTicketMessageSenderId,
- 	                  workspaceId,
- 	                  content: rootMessageContent,
-	                  msgType: MessageType.USER,
-	                  hasAttachment: false,
-	                  edited: false,
-	                  isDeleted: false,
-	                  showInChannel: false,
-	                  visibleTo: null,
-	                  createdAt,
-	                },
-	              });
-	
-	              const initialMessageMd = serializeInitialMessageMd({
-	                messageId: initialMessageId,
-	                conversationId: generatedConversationId,
-	                senderId: initialTicketMessageSenderId,
-	                content: rootMessageContent,
-	                msgType: MessageType.USER as InitialMessageSummary['msgType'],
-	                hasAttachment: false,
-	                edited: false,
-	                isDeleted: false,
-	                showInChannel: false,
-                visibleTo: null,
-                createdAt: createdAt.getTime(),
-                metadata: null,
-                nudgeCount: null,
-                isSent: true,
-                reactions_md: null,
-                link_preview_md: null,
-                childConversationId: null,
-              });
-
-              await tx.conversationParticipant.upsert({
-                where: {
-                  conversationId_userId: {
-                    conversationId: generatedConversationId,
-                    userId: resolvedReporterId,
-                  },
-                },
-                create: {
-                  id: randomUUID(),
-                  conversationId: generatedConversationId,
-                  userId: resolvedReporterId,
-                  participationType: ConversationParticipation.AUTHOR,
-                  isSubscribed: true,
-                  joinedAt: createdAt,
-                  channelId: channel.id,
-                  workspaceId,
-                },
-                update: {
-                  participationType: ConversationParticipation.AUTHOR,
-                  isSubscribed: true,
-                },
-              });
-
-              const xyneId = await TicketIdService.generateTicketId(tx as any, board.id);
-
-              const dueDateRaw = issue.fields.duedate;
-              const eta =
-                typeof dueDateRaw === 'string' && dueDateRaw.trim()
-                  ? new Date(dueDateRaw)
-                  : undefined;
-
-	              const createdTicket = await this.ticketRepository.createTicket(
-	                {
-	                  title: summary,
-	                  description,
-	                  createdBy: resolvedReporterId,
-	                  updatedBy: fallbackUserId,
-	                  assignedTo: assignee ? resolvedAssigneeId : undefined,
-	                  conversationId: generatedConversationId,
-	                  channelId: channel.id,
-	                  projectId: project.id,
-                  boardId: board.id,
-                  statusV2: stageMatch.statusV2,
-                  priority: mapPriority(issue.fields.priority?.name),
-                  xyneId,
-	                  ticketType: mapJiraIssueTypeToTicketType(issue.fields.issuetype?.name),
-	                  stageName: stageMatch.stageName,
-                    skipStageEta: true,
-	                  createdAt: createdAt.toISOString(),
-	                  workspaceId,
-                  ...(eta ? { eta } : {}),
-	                },
-	                tx as any,
-	              );
-
-              const ticketMd = serializeTicketMd({
-                id: createdTicket.id,
-                title: createdTicket.title,
-                description: createdTicket.description,
-                statusV2: createdTicket.statusV2 as TicketCardSummary['statusV2'],
-                priority: createdTicket.priority as TicketCardSummary['priority'],
-                assignedTo: createdTicket.assignedTo ?? null,
-                createdBy: createdTicket.createdBy,
-                createdAt: createdTicket.createdAt.getTime(),
-                eta: createdTicket.eta ? createdTicket.eta.getTime() : null,
-                xyneId: createdTicket.xyneId,
-                stageName: createdTicket.stageName,
-                ticketType: createdTicket.ticketType ?? null,
-                channelId: createdTicket.channelId,
-                conversationId: createdTicket.conversationId,
-              });
-
-              await tx.conversation.update({
-                where: { conversationId: generatedConversationId },
-                data: {
-                  ticketId: createdTicket.id,
-                  initial_message_md: initialMessageMd,
-                  ticket_md: ticketMd,
-                },
-              });
-
-              await tx.externalMessage.createMany({
-                data: [
-                  {
-                    externalSourceId,
-                    externalId: issue.id,
-                    externalThreadId: this.buildIssueThreadExternalId(issue.id),
-                    messageId: createdTicket.id,
-                    entityId: createdTicket.id,
-                    direction: MessageDirection.INCOMING,
-                    entityType: ExternalEntityType.TICKET,
-                    workspaceId,
-                  },
-                  {
-                    externalSourceId,
-                    externalId: this.buildIssueRootMessageExternalId(issue.id),
-                    externalThreadId: this.buildIssueThreadExternalId(issue.id),
-                    messageId: initialMessageId,
-                    entityId: initialMessageId,
-                    direction: MessageDirection.INCOMING,
-                    entityType: ExternalEntityType.MESSAGE,
-                    workspaceId,
-                  },
-                ],
-                skipDuplicates: true,
-              });
-
-              return createdTicket;
-            });
+            const ticket = await processIssuesChunkTx(generatedConversationId, channel, resolvedReporterId, initialMessageId, workspaceId, createdAt, initialTicketMessageSenderId, rootMessageContent, project, issue, this, summary, description, fallbackUserId, assignee, resolvedAssigneeId, board, stageMatch, externalSourceId);
 
             ticketId = ticket.id;
             conversationId = generatedConversationId;
@@ -4288,3 +4110,4 @@ export class JiraMigrationImportService {
 }
 
 export const jiraMigrationImportService = new JiraMigrationImportService();
+

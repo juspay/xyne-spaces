@@ -6,6 +6,7 @@ import { CombinedMessageItem, shouldShowAvatar } from './ChatListUtils';
 import { MessageMetadata } from '../../ui/MessageBubble/MessageBubble.utils';
 import { MessageType, parseReactionsMd } from '@xyne/shared';
 import { getInitialMessageFromConversation } from '../../../utils/conversationMessageHelpers';
+import { isPreviewableDocument } from '../../../services/documentThumbnailService';
 
 type CombinedMesseges = {
   combinedMessages: CombinedMessageItem[];
@@ -39,6 +40,7 @@ const WITHOUT_AVATAR_PADDING = 16;
 const ATTACHMENT_CHROME = 16; // py-2 wrapper (8px top + 8px bottom)
 const MEDIA_CAP = 256; // Preview fixedHeight (desktop)
 const FILE_CARD_HEIGHT = 256; // h-64 container for non-image file attachments (estimator)
+const FILE_PILL_HEIGHT = 62;
 const ATTACHMENT_HEADER = 16; // single text-xs flex row, line-height ~16px
 
 // Video constraints (must match InlineVideoPlayer)
@@ -59,6 +61,7 @@ const LINK_PREVIEW_TEXT_HEIGHT = 55; // text-only, no OG image (~44px base)
 const LINK_PREVIEW_IMAGE_HEIGHT_DESKTOP = 240; // OG image at ~380px width (~238px base)
 const LINK_PREVIEW_IMAGE_HEIGHT_MOBILE = 170; // OG image at ~260px mobile width (~158px base)
 const MESSAGE_PREVIEW_HEIGHT = 120; // internal linked-message card
+const CALL_PREVIEW_HEIGHT = 36; // single-row call card: py-1(8) + Join pill(24) + border(2)
 const THREAD_INDICATOR_HEIGHT = 36; // "N replies" bar: mt-2(8) + pt-2(8) + AvatarGroup sm(20)
 const REACTIONS_HEIGHT = 28; // height of one row of h-6 pills (24px) + ~4px gap
 /** Approx width of one reaction pill: emoji(22) + optional count(12) + px-2×2(16) + gap(4) */
@@ -178,8 +181,11 @@ export function estimateMessageHeight(
   // ── Private system notice header ("Only visible to you") ──
   const isMentionUserAddition = metadata?.messageSubtype === 'user_not_in_channel';
   const isTicketNudge = metadata?.messageSubtype === 'ticket_nudge';
+  // Ephemeral cards render the same header (see MessageBubble), so the
+  // virtualizer has to allocate the same extra height or the row is mis-sized.
+  const isEphemeralNotice = metadata?.['__xyneEphemeral'] === true;
   const isPrivateSystemNotice = isMentionUserAddition || isTicketNudge;
-  if (isPrivateSystemNotice) height += PRIVATE_NOTICE_HEADER;
+  if (isPrivateSystemNotice || isEphemeralNotice) height += PRIVATE_NOTICE_HEADER;
 
   // ── Avatar header row (sender name + timestamp) ──
   if (showAvatar) height += AVATAR_HEADER_HEIGHT;
@@ -416,10 +422,18 @@ export function estimateMessageHeight(
         height += rowCount * (MEDIA_CAP + ATTACHMENT_CHROME);
       }
 
-      // Files (includes text/plain, PDFs, etc.): each on its own row.
-      // FilePills are in flex-col gap-2 (8px gap between each pill).
       if (files.length > 0) {
-        height += files.length * FILE_CARD_HEIGHT + (files.length - 1) * 8;
+        const singleFile = files.length === 1 ? files[0] : undefined;
+        const showsPreviewCard =
+          !!singleFile && isPreviewableDocument(singleFile.mimetype) && !!singleFile.thumbnailUrl;
+
+        if (showsPreviewCard) {
+          height += FILE_CARD_HEIGHT;
+        } else {
+          const pillsPerRow = isMobile ? 1 : 2;
+          const rows = Math.ceil(files.length / pillsPerRow);
+          height += rows * FILE_PILL_HEIGHT + (rows - 1) * 8;
+        }
       }
     }
   }
@@ -452,15 +466,18 @@ export function estimateMessageHeight(
   const hasCallSummaryCanvas = !!metadata?.['detailedSummaryCanvasUrl'];
   if (hasCanvasLink || hasCallSummaryCanvas) height += 260;
 
-  // ── Link preview (both internal and external are stored in link_preview_md) ──
-  // Three distinct heights:
+  // ── Link preview (internal, call and external all live in link_preview_md) ──
+  // Four distinct heights:
   //   • Internal message preview (:::message_preview) → MESSAGE_PREVIEW_HEIGHT
+  //   • Call preview (:::call_preview) → CALL_PREVIEW_HEIGHT
   //   • External with OG image (\nimage: present in block) → platform-aware image height
   //   • External text-only → LINK_PREVIEW_TEXT_HEIGHT
   const linkPreviewMd = (message as unknown as { link_preview_md?: string | null }).link_preview_md;
   if (linkPreviewMd) {
     if (linkPreviewMd.includes(':::message_preview')) {
       height += MESSAGE_PREVIEW_HEIGHT;
+    } else if (linkPreviewMd.includes(':::call_preview')) {
+      height += CALL_PREVIEW_HEIGHT;
     } else if (/\nimage:\s*\S/.test(linkPreviewMd)) {
       height += isMobile ? LINK_PREVIEW_IMAGE_HEIGHT_MOBILE : LINK_PREVIEW_IMAGE_HEIGHT_DESKTOP;
     } else {

@@ -1,12 +1,15 @@
 import { conversationService } from '@/services/conversationService';
-import { MessageType } from '@xyne/shared';
+import { AttachmentEntityType, MessageType } from '@xyne/shared';
 import { logger } from '@/utils/logger';
 import { ChatEventType, ChatActionResponse, ChannelHistoryResponse, ChannelHistoryCursor, ChannelHistoryItem, ConversationRepliesResponse, ConversationRepliesCursor, ConversationRepliesItem } from '../types';
 import { UploadedFileResult } from '@/services/fileUploadService';
 import { repositories } from '@/database/repositories';
+import { db } from '@/database/client';
+import { storageService } from '@/services/storage';
 import { decodeCursor, paginateResults } from './paginationUtils';
 import { MessagesSideEffectHandler } from '@/zero/side-effects/tables/messages-handler';
 import { buildUserQueryContext } from '@/utils/queryContext';
+import { deleteConversationMessageTx } from '@/bypassAcl/transactions/conversationUtils';
 
 /**
  * Find or create a conversation and add a message
@@ -52,6 +55,7 @@ export async function findOrCreateConversation(
         isMarkdown: isMarkdown,
         metadata: metadata,
         uploadedFiles: uploadedFiles,
+        emitsMessageReceivedViaSideEffects: true,
       });
 
       // Trigger side effects for notifications, activities, and unread counts
@@ -132,6 +136,92 @@ export async function updateConversation(
     };
   } catch (error) {
     logger.error('[UPDATE-CONVERSATION] Error updating conversation:', error);
+    throw error;
+  }
+}
+
+
+/**
+ * Delete an app-authored message using the same soft-vs-hard policy as the UI:
+ * root-with-replies is soft-deleted; replies and root-without-replies are hard-deleted.
+ * The caller validates actor ownership and channel access before calling.
+ */
+export async function deleteConversationMessage(
+  messageId: string,
+  actorUserId: string,
+): Promise<ChatActionResponse> {
+  try {
+    logger.info(`[DELETE-CONVERSATION] Deleting message ${messageId} by ${actorUserId}`);
+
+    const message = await repositories.messages.findById(messageId);
+    if (!message) throw new Error(`Message not found: ${messageId}`);
+
+    const conversation = await repositories.conversations.findById(message.conversationId);
+    if (!conversation) throw new Error(`Conversation not found: ${message.conversationId}`);
+
+    const previousValue = {
+      messageId: message.messageId,
+      conversationId: message.conversationId,
+      senderId: message.senderId,
+      msgType: message.msgType,
+      content: message.content,
+      isDeleted: message.isDeleted,
+      channelId: conversation.channelId,
+      isThreadReply: conversation.initialMessageId !== message.messageId,
+    };
+
+    if (message.isDeleted) {
+      return {
+        eventType: ChatEventType.MESSAGE_DELETED,
+        conversationId: conversation.conversationId,
+        messageId: message.messageId,
+        channelId: conversation.channelId,
+        ticketId: conversation.ticketId || undefined,
+      };
+    }
+
+    const attachments = await db.messageAttachment.findMany({
+      where: { entityId: messageId, entityType: AttachmentEntityType.CHAT },
+      select: { url: true, thumbnailUrl: true },
+    });
+
+    const deleteResult = await deleteConversationMessageTx(messageId);
+
+    if (deleteResult.mutated) {
+      for (const attachment of attachments) {
+        for (const url of [attachment.url, attachment.thumbnailUrl].filter(Boolean)) {
+          storageService.deleteFile(url as string).catch((err: unknown) => logger.error('[DELETE-CONVERSATION] Failed to delete attachment blob', err));
+        }
+      }
+
+      const ctx = await buildUserQueryContext(actorUserId);
+      const handler = new MessagesSideEffectHandler(ctx);
+      if (deleteResult.softDeleted) {
+        handler.onUpdate({
+          entityId: messageId,
+          entityType: 'messages',
+          operation: 'update',
+          previousValue,
+        }).catch(err => logger.error('[DELETE-CONVERSATION] Side-effect update handler error', err));
+      } else if (deleteResult.hardDeleted) {
+        handler.onDelete({
+          entityId: messageId,
+          entityType: 'messages',
+          operation: 'delete',
+          previousValue,
+        }).catch(err => logger.error('[DELETE-CONVERSATION] Side-effect delete handler error', err));
+      }
+    }
+
+    return {
+      eventType: ChatEventType.MESSAGE_DELETED,
+      conversationId: conversation.conversationId,
+      messageId: message.messageId,
+      channelId: conversation.channelId,
+      ticketId: conversation.ticketId || undefined,
+    };
+  } catch (error) {
+    logger.error('[DELETE-CONVERSATION] Error deleting message:', error);
     throw error;
   }
 }

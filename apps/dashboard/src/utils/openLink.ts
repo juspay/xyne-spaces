@@ -84,7 +84,12 @@ const openExternal = (url: string): void => {
 };
 
 const openInApp = (url: string): void => {
-  if (isElectronApp()) {
+  // The browser panel is mounted by the top-level document only. A framed
+  // bundle — the SDLC lane — has its own copy of this actor with no panel
+  // behind it, so sending to it would drop the link on the floor. window.open
+  // reaches Electron's window-open handler on the host webContents, which
+  // routes to the real panel and applies the user's open-externally setting.
+  if (isElectronApp() && window.parent === window) {
     const { browserPanelState } = browserPanelActor.getSnapshot().context;
     if (browserPanelState === 'open') {
       browserPanelActor.send({ type: 'OPEN_URLS', urls: [url] });

@@ -5,6 +5,21 @@ export interface McpToolInfo {
   readonly serviceName?: string;
   readonly backendId?: string;
   readonly selectionKey?: string;
+  /**
+   * The tool DECLARES that it never mutates anything.
+   *
+   * Without a declaration, claw's open-palette gate falls back to guessing
+   * risk from the name (`classifyToolRisk`), which leans write on purpose —
+   * and that heuristic reads "star" as a mutation, so read-only tools like
+   * `github-list-stargazers` get refused by a read palette. Set this only for
+   * tools that genuinely cannot write; it is the source of record that
+   * overrides the guess.
+   *
+   * NOT inferable from a connector's `writeTools`: that list is the
+   * human-approval allowlist (GitHub gates 3 tools), so "absent from it"
+   * would wrongly mark `create_issue` read-only.
+   */
+  readonly readOnly?: boolean;
 }
 
 export interface McpServerTools {
@@ -13,6 +28,12 @@ export interface McpServerTools {
   readonly displayName?: string;
   readonly tools: McpToolInfo[];
   readonly writeTools: readonly string[];
+  /**
+   * Set when the group exists ONLY because a subagent definition carries the
+   * credentials for this server. xyne-claw uses it to keep those tools inside
+   * the subagent's palette instead of the parent agent's direct tools.
+   */
+  readonly sourceSubagent?: { readonly id: string; readonly name: string };
 }
 
 export interface McpCallResult {
@@ -110,6 +131,10 @@ export interface ResolvedConnectorDefinition {
   readonly credentialFields: readonly CredentialField[];
   readonly healthCheck: PennyDropTool;
   readonly writeTools: readonly string[];
+  /** Parsed write-tool policy for dynamic (DB) connectors. When present it drives
+   *  write-tool gating by mode (allowlist/denylist/allAsk/allowAll); static
+   *  adapters leave it undefined and are gated by `writeTools`. */
+  readonly writePolicy?: WriteToolPolicy;
   /** Picker-only fallback list; see StdioMcpAdapter.staticTools. */
   readonly staticTools: readonly string[];
   /** When true, binary content (EmbeddedResource blob / image / audio) returned

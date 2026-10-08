@@ -152,8 +152,12 @@ const electronAPI = {
     return () => ipcRenderer.removeListener('app-window-limit-reached', listener);
   },
 
-  onOpenInBrowserPanel: (callback: (url: string) => void) => {
-    const listener = (_event: unknown, url: string) => callback(url);
+  /** Moves focus off an embedded <webview> guest and back to the app. */
+  focusHostWebContents: (): Promise<void> => ipcRenderer.invoke('focus-host-webcontents'),
+
+  onOpenInBrowserPanel: (callback: (url: string, sourceWebContentsId?: number) => void) => {
+    const listener = (_event: unknown, url: string, sourceWebContentsId?: number) =>
+      callback(url, sourceWebContentsId);
     ipcRenderer.on('open-in-browser-panel', listener);
     return () => ipcRenderer.removeListener('open-in-browser-panel', listener);
   },
@@ -182,6 +186,12 @@ const electronAPI = {
     return () => ipcRenderer.removeListener('recording:stop-for-teardown', listener);
   },
 
+  onCallStopForTeardown: (callback: () => void) => {
+    const listener = () => callback();
+    ipcRenderer.on('call:stop-for-teardown', listener);
+    return () => ipcRenderer.removeListener('call:stop-for-teardown', listener);
+  },
+
   onRecordingResumeRequest: (callback: () => void) => {
     const listener = () => callback();
     ipcRenderer.on('recording:resume-requested', listener);
@@ -204,8 +214,11 @@ const electronAPI = {
     ipcRenderer.on('auth:mtls-success', listener);
   },
 
-  onTokenExpired: (callback: () => void) => {
-    ipcRenderer.on('auth:token-expired', callback);
+  onTokenExpired: (callback: (payload?: { url?: string; resourceType?: string }) => void) => {
+    ipcRenderer.on(
+      'auth:token-expired',
+      (_event: unknown, payload?: { url?: string; resourceType?: string }) => callback(payload),
+    );
   },
   showBrowserView: (config: {
     url: string;
@@ -243,6 +256,11 @@ const electronAPI = {
   getBrowserSettings: () => ipcRenderer.invoke('get-browser-settings'),
   setBrowserSettings: (settings: any) => ipcRenderer.invoke('set-browser-settings', settings),
   clearSiteData: () => ipcRenderer.invoke('clear-site-data'),
+  captureAppWindow: (maxWidth?: number) => ipcRenderer.invoke('app-window:capture', maxWidth),
+  readClipboardText: () => ipcRenderer.invoke('clipboard:read-text'),
+  writeClipboardText: (text: string) => ipcRenderer.invoke('clipboard:write-text', text),
+  browserImportAvailable: () => ipcRenderer.invoke('browser-import:available'),
+  importChromeCookies: () => ipcRenderer.invoke('browser-import:chrome'),
 
   // File Management APIs
   openDownloadsFolder: () => ipcRenderer.invoke('open-downloads-folder'),
@@ -367,6 +385,28 @@ const electronAPI = {
     dismiss: () => ipcRenderer.send('meeting-popup:dismiss'),
     startRecording: () => ipcRenderer.send('meeting-popup:start-recording'),
   },
+
+  // Floating incoming-call card. Its presence tells the dashboard this build
+  // will turn `window.open('', 'xyne-incoming-call:…')` into the floating card.
+  incomingCallWindow: (() => {
+    // The main process only listens for app focus while a page is subscribed.
+    let focusSubscribers = 0;
+    return {
+      bringAppToFront: () => ipcRenderer.send('incoming-call-window:bring-app-to-front'),
+      isAppFocused: (): Promise<boolean> => ipcRenderer.invoke('incoming-call-window:is-app-focused'),
+      getHost: (): Promise<{ isMain: boolean; mainExists: boolean }> =>
+        ipcRenderer.invoke('incoming-call-window:get-host'),
+      onAppFocusChanged: (callback: (focused: boolean) => void) => {
+        const listener = (_event: unknown, focused: boolean) => callback(focused);
+        ipcRenderer.on('incoming-call-window:app-focus-changed', listener);
+        if (focusSubscribers++ === 0) ipcRenderer.send('incoming-call-window:watch-focus', true);
+        return () => {
+          ipcRenderer.removeListener('incoming-call-window:app-focus-changed', listener);
+          if (--focusSubscribers === 0) ipcRenderer.send('incoming-call-window:watch-focus', false);
+        };
+      },
+    };
+  })(),
 
   // Agent authorization consent modal (used by the consent window itself)
   agentConsent: {
@@ -502,8 +542,27 @@ const electronAPI = {
     detect: () => ipcRenderer.invoke('local-harness:detect'),
     connect: () => ipcRenderer.invoke('local-harness:connect'),
     disconnect: () => ipcRenderer.invoke('local-harness:disconnect'),
+    connectComputer: () => ipcRenderer.invoke('local-harness:connect-computer'),
+    disconnectComputer: () => ipcRenderer.invoke('local-harness:disconnect-computer'),
     setProviderEnabled: (provider: string, enabled: boolean) =>
       ipcRenderer.invoke('local-harness:set-provider', provider, enabled),
+    pickFolder: (): Promise<{ path: string; name: string; branch?: string; remote?: string } | null> =>
+      ipcRenderer.invoke('local-harness:pick-folder'),
+    listFolders: (): Promise<Array<{ path: string; name: string }>> =>
+      ipcRenderer.invoke('local-harness:list-folders'),
+    onPageToolRequest: (
+      callback: (req: { id: string; toolName: string; args: Record<string, unknown> }) => void,
+    ) => {
+      const listener = (
+        _event: unknown,
+        req: { id: string; toolName: string; args: Record<string, unknown> },
+      ) => callback(req);
+      ipcRenderer.on('local-harness:page-tool', listener);
+      return () => ipcRenderer.removeListener('local-harness:page-tool', listener);
+    },
+    sendPageToolResult: (id: string, result: { ok: boolean; content: string; image?: { data: string; mimeType: string } }) => {
+      ipcRenderer.send('local-harness:page-tool-result', { id, result });
+    },
   },
 };
 

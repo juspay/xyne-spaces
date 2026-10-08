@@ -9,6 +9,7 @@ export const CREDENTIAL_SUMMARY_SELECT = {
   workspaceId: true,
   name: true,
   credType: true,
+  authType: true,
   status: true,
   createdAt: true,
   updatedAt: true,

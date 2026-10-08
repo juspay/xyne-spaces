@@ -1,11 +1,16 @@
-import { SDLC_MEMBERSHIP_RELATION } from '@xyne/shared';
+import { SDLC_MEMBERSHIP_RELATION, VespaInsertionStatus, VespaOperationType } from '@xyne/shared';
 import { BaseRepository } from './base';
 import { Channel } from '@prisma/client';
 import { ChannelScopeType, ChannelVisibility, ChannelType, ProjectType } from '@xyne/shared';
 import { QueryOptions } from '@/types/database';
 import { logger } from '@/utils/logger';
 import { withWorkspaceScope } from '@/database/tenant/context';
+import { newConnectId } from '@/database/connectGroup';
+import { createChannelWithConnectGroupTx } from '@/bypassAcl/transactions/connectGroupEntities';
 //import { queueChannelIngestion } from '@/queues/vespaQueue';
+import { vespaQueue } from '@/queues/vespaQueue';
+import { channelSchema } from '@/vespa/src/types';
+import { NAMESPACE } from '@/vespa/vespaConfig';
 
 export interface CreateChannelInput {
   scopeType: ChannelScopeType;
@@ -13,9 +18,15 @@ export interface CreateChannelInput {
   description?: string;
   visibility?: ChannelVisibility;
   createdBy: string;
-  projectId: string;
+  /** Optional at the app boundary — a projectless (decoupled) channel is stored with '' .
+   *  When a real projectId is set, the project's boards are mirrored into
+   *  channel_board_mappings; when '' (or omitted), no mappings are created. */
+  projectId?: string;
   workspaceId: string;
   type?: ChannelType;
+  /** Desk channels: board to mark isDefault in channel_board_mappings. Falls back to the
+   *  oldest board when absent or not part of the project's boards. */
+  defaultBoardId?: string;
 }
 
 export interface UpdateChannelInput {
@@ -45,7 +56,6 @@ export class ChannelRepository extends BaseRepository<Channel, CreateChannelInpu
     }
     await this.validateString(data.createdBy, 'createdBy');
     await this.validateString(data.scopeType, 'scopeType');
-    await this.validateString(data.projectId, 'projectId');
     await this.validateEnum(data.scopeType, 'scopeType', ['DEFAULT', 'DM', 'TICKET', 'DOCUMENT', 'GROUP_DM']);
 
     // Validate visibility if provided
@@ -59,49 +69,89 @@ export class ChannelRepository extends BaseRepository<Channel, CreateChannelInpu
       throw new Error(`Channel with name "${data.name}" already exists.`);
     }
 
-    const result = await this.db.channel.create({
-      data: {
+    // Slack Connect: mint a connectId, stamp it on the channel, and create its private
+    // connect_group row so every new channel has a group entry from creation.
+    const connectId = newConnectId();
+    // Atomic channel + connect_group (bypassAcl op): a channel with a connectId but no group row is
+    // invisible to connectReach and unrepairable via the app, so both must commit together.
+    const result = await createChannelWithConnectGroupTx(
+      {
         scopeType: data.scopeType,
         name: data.name,
         description: data.description,
         visibility: data.visibility || 'PUBLIC',
         createdBy: data.createdBy,
-        projectId: data.projectId,
+        // '' sentinel for a projectless channel (column stays NOT NULL for prod/pre-prod sync).
+        projectId: data.projectId ?? '',
         workspaceId: data.workspaceId,
+        connectId,
         ...(data.type && { type: data.type }),
-      }
-    });
+      },
+      data.workspaceId,
+      connectId,
+      this.db,
+    );
 
-    // Dual-write: mirror the channel→project board set into ChannelBoardMapping
-    // so downstream consumers never need to read channel.projectId.
-    const boards = await this.db.board.findMany({
-      where: { projectId: data.projectId },
-      orderBy: { createdAt: 'asc' },
-      select: { id: true },
-    });
-    if (boards.length > 0) {
-      const now = new Date();
-      await this.db.channelBoardMapping.createMany({
-        data: boards.map((board, index) => ({
-          channelId: result.id,
-          boardId: board.id,
-          workspaceId: data.workspaceId,
-          isDefault: index === 0,
-          createdBy: data.createdBy,
-          createdAt: now,
-          updatedAt: now,
-        })),
-        skipDuplicates: true,
+    // Dual-write: mirror the channel→project board set into ChannelBoardMapping so
+    // downstream consumers never read channel.projectId. Skipped entirely when the
+    // channel has no project (nothing to map).
+    if (data.projectId) {
+      const boards = await this.db.board.findMany({
+        where: { projectId: data.projectId },
+        orderBy: { createdAt: 'asc' },
+        select: { id: true },
       });
+      if (boards.length > 0) {
+        // Default board = the caller-supplied one when it belongs to this project,
+        // otherwise the oldest board. Guarding against an out-of-project boardId keeps
+        // exactly one isDefault row (see the desk-integration fix).
+        const requested = data.defaultBoardId;
+        const defaultBoardId =
+          requested && boards.some(b => b.id === requested) ? requested : boards[0].id;
+        const now = new Date();
+        await this.db.channelBoardMapping.createMany({
+          data: boards.map((board) => ({
+            channelId: result.id,
+            boardId: board.id,
+            workspaceId: data.workspaceId,
+            isDefault: board.id === defaultBoardId,
+            createdBy: data.createdBy,
+            createdAt: now,
+            updatedAt: now,
+          })),
+          skipDuplicates: true,
+        });
+      }
     }
 
     return result;
   }
 
   /**
-   * Queue channel for Vespa ingestion with complete data
-   * Should be called AFTER participants are added to the channel
+   * Queue a feed of the channel's Vespa doc (chat_container). Repository writes don't reach the Zero Vespa handlers, so a
+   * caller that needs the channel searchable right away opts in — AFTER its participants are added (they become the
+   * doc's permissions). Never throws: a failed enqueue leaves a retryable vespaInsertionLogs row.
    */
+  async queueVespaFeed(channelId: string, workspaceId: string): Promise<void> {
+    try {
+      await vespaQueue.addJob({ schema: channelSchema, jobType: 'feed', docId: channelId, workspaceId });
+    } catch (error) {
+      logger.error(`[ChannelRepository] Failed to queue Vespa feed for channel ${channelId}:`, error);
+      await this.db.vespaInsertionLogs.create({
+        data: {
+          status: VespaInsertionStatus.FAILED,
+          type: VespaOperationType.INSERT,
+          entityId: channelId,
+          entityType: channelSchema,
+          namespace: NAMESPACE,
+          errorMessage: `Failed to enqueue Vespa job: ${error instanceof Error ? error.message : String(error)}`,
+          workspaceId,
+          createdAt: new Date(),
+        },
+      }).catch((dbError) => logger.error('[ChannelRepository] Failed to log the Vespa enqueue failure:', dbError));
+    }
+  }
+
 
   async findById(id: string): Promise<Channel | null> {
     return await this.db.channel.findUnique({
@@ -171,11 +221,14 @@ export class ChannelRepository extends BaseRepository<Channel, CreateChannelInpu
   }): Promise<Channel[]> {
     const { where = {}, limit, cursor } = options;
 
+    // (createdAt DESC, id DESC): the id tiebreaker keeps the cursor stable when
+    // several channels share the same createdAt — without it rows can be skipped
+    // or repeated across pages.
     return await this.db.channel.findMany({
       where,
       take: limit,
       ...(cursor ? { skip: 1, cursor: { id: cursor } } : {}),
-      orderBy: { createdAt: 'desc' },
+      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
     });
   }
 
@@ -341,8 +394,10 @@ export class ChannelRepository extends BaseRepository<Channel, CreateChannelInpu
   }
 
   async checkDuplicateName(name: string, workspaceId: string): Promise<boolean> {
+    // Filter on the denormalized workspaceId, not the project relation — projectless
+    // channels (projectId nullable, decoupling) would otherwise escape the uniqueness check.
     const existingChannel = await this.db.channel.findFirst({
-      where: { name, project: { workspaceId } }
+      where: { name, workspaceId }
     });
     return !!existingChannel;
   }
@@ -366,13 +421,16 @@ export class ChannelRepository extends BaseRepository<Channel, CreateChannelInpu
    * @param invitedUserIds - Array of user IDs to include in the channel
    * @param channelParticipants - Channel participants repository for adding users
    * @param workspaceId - The workspace ID to get the DM project from
+   * @param options.indexInVespa - Make sure the returned channel is in Vespa: feed it whether created or found, since an
+   *   existing DM may come from a path that never indexed it (default false: Zero / the caller indexes it)
    * @returns The channel ID (either existing or newly created)
    */
   async findOrCreateDMChannel(
     userId: string,
     invitedUserIds: string[],
     channelParticipants: any, // We'll pass this from the controller to avoid circular dependency
-    workspaceId: string
+    workspaceId: string,
+    options: { indexInVespa?: boolean } = {}
   ): Promise<string> {
     if (invitedUserIds.length === 0) {
       throw new Error('No users to invite');
@@ -401,6 +459,7 @@ export class ChannelRepository extends BaseRepository<Channel, CreateChannelInpu
       let dmChannel = await this.getDMChannel(userId, targetUserId);
 
       if (dmChannel) {
+        if (options.indexInVespa) await this.queueVespaFeed(dmChannel.id, workspaceId);
         return dmChannel.id;
       }
 
@@ -419,6 +478,7 @@ export class ChannelRepository extends BaseRepository<Channel, CreateChannelInpu
       // Add both users as participants
       await channelParticipants.addParticipant(dmChannel.id, userId, 'ADMIN', false);
       await channelParticipants.addParticipant(dmChannel.id, targetUserId, 'MEMBER', false);
+      if (options.indexInVespa) await this.queueVespaFeed(dmChannel.id, workspaceId);
 
       return dmChannel.id;
     }
@@ -436,6 +496,7 @@ export class ChannelRepository extends BaseRepository<Channel, CreateChannelInpu
       const existingGroupDM = await this.getGroupChannelByMembers(allUserIds);
 
       if (existingGroupDM) {
+        if (options.indexInVespa) await this.queueVespaFeed(existingGroupDM.id, workspaceId);
         return existingGroupDM.id;
       }
 
@@ -454,6 +515,7 @@ export class ChannelRepository extends BaseRepository<Channel, CreateChannelInpu
       for (const invitedId of invitedUserIds) {
         await channelParticipants.addParticipant(groupDMChannel.id, invitedId, 'MEMBER', false);
       }
+      if (options.indexInVespa) await this.queueVespaFeed(groupDMChannel.id, workspaceId);
 
       return groupDMChannel.id;
     }
@@ -463,6 +525,7 @@ export class ChannelRepository extends BaseRepository<Channel, CreateChannelInpu
     // from call_participants, so invitees still see and join without a channel.
     const selfDm = await this.getDMChannel(userId, userId);
     if (selfDm) {
+      if (options.indexInVespa) await this.queueVespaFeed(selfDm.id, workspaceId);
       return selfDm.id;
     }
 
@@ -477,6 +540,7 @@ export class ChannelRepository extends BaseRepository<Channel, CreateChannelInpu
       workspaceId,
     });
     await channelParticipants.addParticipant(newSelfDm.id, userId, 'ADMIN', false);
+    if (options.indexInVespa) await this.queueVespaFeed(newSelfDm.id, workspaceId);
 
     return newSelfDm.id;
   }

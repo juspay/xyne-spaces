@@ -1,13 +1,15 @@
 import { PrismaClient } from '@prisma/client';
-import { ActivityClassification, ActivityClassificationJobType, UserStatus } from '@xyne/shared';
+import { ActivityClassification, ActivityClassificationJobType } from '@xyne/shared';
 import { db } from '@/database/client';
 import { repositories } from '@/database/repositories';
-import { currentWorkspaceId, withWorkspaceScope, runAsSystem } from '@/database/tenant/context';
+import { currentWorkspaceId, withWorkspaceScope } from '@/database/tenant/context';
+import { fillSdlcOwnerActivities, getWorkspaceActivityCountsQuery } from '@/bypassAcl/activityServices';
 import { logger } from '@/utils/logger';
 import {
   isSdlcChannel,
   sdlcConversationOwner,
   sdlcConversationTicket,
+  sdlcFolderTrackId,
   sdlcTicketConversation,
 } from '@/sdlc/sdlcNavTarget';
 
@@ -29,6 +31,7 @@ export interface CreateActivityParams {
   channelId?: string;
   pullRequestId?: string;
   canvasId?: string;
+  savedViewId?: string;
   trackId?: string;
   blockId?: string;
   conversationSeenCutoffAt?: Date | null;
@@ -260,9 +263,11 @@ export class ActivityService {
 
       const owner = await sdlcConversationOwner(conversationId);
       if (owner) {
-        return owner.sourceType === 'CANVAS'
-          ? { canvasId: owner.sourceId, conversationId }
-          : { trackId: owner.sourceId, conversationId };
+        if (owner.sourceType === 'CANVAS') return { canvasId: owner.sourceId, conversationId };
+        // A folder discussion opens under its parent track, as notifications route it.
+        const trackId =
+          owner.sourceType === 'FOLDER' ? await sdlcFolderTrackId(owner.sourceId) : owner.sourceId;
+        return trackId ? { trackId, conversationId } : {};
       }
       if (row.ticketId) return {};
       const ticketId = await sdlcConversationTicket(conversationId);
@@ -270,6 +275,17 @@ export class ActivityService {
     } catch (error) {
       logger.error('[ActivityService] SDLC owner lookup failed', { row, error });
       return {};
+    }
+  }
+
+  /** Stamps a conversation's rows written before it had an owner. */
+  async fillSdlcOwner(conversationId: string, channelId: string): Promise<void> {
+    const { canvasId, trackId, ticketId } = await this.sdlcOwner({ channelId, conversationId });
+    if (!canvasId && !trackId && !ticketId) return;
+    try {
+      await fillSdlcOwnerActivities(conversationId, canvasId, trackId, ticketId);
+    } catch (error) {
+      logger.error('[ActivityService] SDLC owner fill failed', { conversationId, error });
     }
   }
 
@@ -311,6 +327,7 @@ export class ActivityService {
         ...(activity.conversationId ? { conversationId: activity.conversationId } : {}),
         ...(activity.pullRequestId ? { pullRequestId: activity.pullRequestId } : {}),
         ...(activity.canvasId ? { canvasId: activity.canvasId } : {}),
+        ...(activity.savedViewId ? { savedViewId: activity.savedViewId } : {}),
         ...(activity.trackId ? { trackId: activity.trackId } : {}),
         ...(activity.blockId ? { blockId: activity.blockId } : {}),
         ...(activity.conversationSeenCutoffAt
@@ -388,6 +405,7 @@ export class ActivityService {
         ...(a.conversationId ? { conversationId: a.conversationId } : {}),
         ...(a.pullRequestId ? { pullRequestId: a.pullRequestId } : {}),
         ...(a.canvasId ? { canvasId: a.canvasId } : {}),
+        ...(a.savedViewId ? { savedViewId: a.savedViewId } : {}),
         ...(a.trackId ? { trackId: a.trackId } : {}),
         ...(a.blockId ? { blockId: a.blockId } : {}),
         ...(a.conversationSeenCutoffAt
@@ -476,14 +494,21 @@ export class ActivityService {
       const conversationSeenCutoffAt = existingActivity.conversationSeenCutoffAt
         ? null
         : activity.conversationSeenCutoffAt;
+      // The row is reused for every reaction, so one written without an owner gets it here.
+      const owned =
+        existingActivity.canvasId || existingActivity.trackId || existingActivity.ticketId
+          ? {}
+          : await this.sdlcOwner(activity);
 
       await this.prisma.activity.update({
         where: { id: existingActivity.id },
         data: {
           actorId: actorId,
           isRead: false,
+          updatedAt: new Date(), // intentional: re-surface in the feed
           ...(isThreadActivity !== undefined ? { isThreadActivity } : {}),
           ...(conversationSeenCutoffAt ? { conversationSeenCutoffAt } : {}),
+          ...owned,
         },
       });
 
@@ -560,21 +585,23 @@ export class ActivityService {
   }
 
 
-  async updateReactionActivityActorIdOnlyV2(params: {       //using only in case of reaction deletion where updateAt is not to be updated
+  /** Re-points the reaction activity at the remaining reactor without re-surfacing it in the feed. */
+  async updateReactionActivityActorIdOnlyV2(params: {
     messageId: string;
     messageAuthorId: string;
     actorId: string;
   }): Promise<void> {
     const { messageId, messageAuthorId, actorId } = params;
 
-    await this.prisma.$executeRaw`
-      UPDATE "activities"
-      SET "actorId" = ${actorId}
-      WHERE "userId" = ${messageAuthorId}
-        AND "messageId" = ${messageId}
-        AND "actorAction" = 'added_v2'
-        AND "actionSource" = 'message'
-    `;
+    await this.prisma.activity.updateMany({
+      where: {
+        userId: messageAuthorId,
+        messageId,
+        actorAction: 'added_v2',
+        actionSource: 'message',
+      },
+      data: { actorId },
+    });
   }
 
 
@@ -614,6 +641,11 @@ export class ActivityService {
         const conversationSeenCutoffAt =
           existingActivity.conversationSeenCutoffAt ??
           (await this.getConversationSeenCutoffAtForConversation(conversationId, channelId));
+        // Reused for every reply in the thread, so a row written without an owner gets it here.
+        const owned =
+          existingActivity.canvasId || existingActivity.trackId || existingActivity.ticketId
+            ? {}
+            : await this.sdlcOwner({ channelId, conversationId });
 
         await this.prisma.activity.update({
           where: { id: existingActivity.id },
@@ -622,7 +654,9 @@ export class ActivityService {
             isRead: false,
             messageId: latestReplyMessageId,
             actionSourceId: latestReplyMessageId,
+            updatedAt: new Date(), // intentional: re-surface in the feed
             ...(conversationSeenCutoffAt ? { conversationSeenCutoffAt } : {}),
+            ...owned,
           },
         });
 
@@ -720,48 +754,7 @@ export class ActivityService {
       count: number;
     }>
   > {
-    // Spans the caller's own identities across workspaces.
-    return runAsSystem(async () => {
-      const users = await this.prisma.user.findMany({
-        where: {
-          orgMemberId: memberId,
-          leftAt: null,
-          status: UserStatus.ACTIVE,
-        },
-        select: {
-          id: true,
-          workspaceId: true,
-        },
-      });
-
-      if (users.length === 0) {
-        return [];
-      }
-
-      const userIds = users.map(u => u.id);
-
-      const activityCounts = await this.prisma.activity.groupBy({
-        by: ['userId'],
-        where: {
-          userId: { in: userIds },
-          isRead: false,
-        },
-        _count: {
-          id: true,
-        },
-      });
-
-      const countMap = new Map<string, number>();
-      for (const ac of activityCounts) {
-        countMap.set(ac.userId, ac._count.id);
-      }
-
-      return users.map(u => ({
-        workspaceId: u.workspaceId,
-        userId: u.id,
-        count: countMap.get(u.id) ?? 0,
-      }));
-    });
+    return getWorkspaceActivityCountsQuery(memberId);
   }
 }
 

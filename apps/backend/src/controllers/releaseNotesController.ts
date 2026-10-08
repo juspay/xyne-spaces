@@ -1,3 +1,4 @@
+import { syncToYSweet } from '@/utils/ysweetUtils';
 import { Request, Response } from 'express';
 import { ReleaseNotesService } from '@/services/releaseNotes/releaseNotesService';
 import { conversationService } from '@/services/conversationService';
@@ -11,6 +12,8 @@ import { unifiedBotUserService } from '@/bots/unified';
 import { v4 as uuidv4 } from 'uuid';
 import type { BlockNoteBlock, BlockNoteInlineContent } from '@/types/blockNoteTypes';
 import { db } from '@/database/client';
+import { newConnectId } from '@/database/connectGroup';
+import { createCanvasWithConnectGroupTx } from '@/bypassAcl/transactions/connectGroupEntities';
 import { withWorkspaceScope } from '@/database/tenant/context';
 
 interface PRData {
@@ -215,21 +218,29 @@ Release notes have been generated for **${ticket.title}**
       const finalTitle = `📝 Release Notes: ${context.release.title} - ${dateStr}`;
 
       const blocks = this.buildReleaseNotesBlocks(markdown, context);
+      const synced = await syncToYSweet(canvasId, blocks, botUser.id);
+      if (!synced) {
+        throw new Error(`Failed to save release notes canvas ${canvasId} to Y-Sweet`);
+      }
 
-      await prisma.canvas.create({
-        data: {
+      const connectId = newConnectId();
+      // Atomic canvas + connect_group (bypassAcl op): a canvas with a connectId but no group row is
+      // invisible to connectReach and unrepairable via the app, so both must commit together.
+      await createCanvasWithConnectGroupTx(
+        {
           id: canvasId,
           title: finalTitle,
-          content: blocks as any,
+          content: [],
           workspaceId,
           createdBy: botUser.id,
           visibility: CanvasVisibility.PUBLIC,
           isTemplate: false,
-          isCollaborative: false,
+          isCollaborative: true,
           lastEditedBy: botUser.id,
           lastEditedAt: now,
           createdAt: now,
           updatedAt: now,
+          connectId,
           channelId: context.release.channelId || null,
           metadata: {
             source: 'release_notes',
@@ -239,7 +250,9 @@ Release notes have been generated for **${ticket.title}**
             ...(context.release.conversationId && { conversationId: context.release.conversationId }),
           },
         },
-      });
+        workspaceId,
+        connectId,
+      );
 
       await prisma.canvasParticipant.create({
         data: {
@@ -250,6 +263,7 @@ Release notes have been generated for **${ticket.title}**
           role: CanvasRole.VIEWER,
           joinedAt: now,
           updatedAt: now,
+          canvasConnectId: connectId,
         },
       });
 

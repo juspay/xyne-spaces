@@ -20,6 +20,7 @@
       "@/*": ["./src/*"],
       "@xyne/icons": ["../../packages/icons/dist/index.d.ts"],
       "@xyne/icons/*": ["../../packages/icons/dist/*"],
+      "@xyne/shared": ["../../packages/shared/dist/index.d.ts"],
       "@xyne/shared/*": ["../../packages/shared/dist/*"],
       "react-router-dom-actual": ["./node_modules/react-router-dom"]
     },
@@ -53,5 +54,6 @@
     
     
   },
-  "include": ["src"]
+  "include": ["src"],
+  "exclude": ["src/**/*.test.ts", "src/**/*.test.tsx"]
 }

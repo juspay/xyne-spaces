@@ -2,7 +2,14 @@ import { randomUUID } from "node:crypto";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { Router, type Response } from "express";
-import { publishHandoffSignal } from "../handoff-redis.js";
+import { currentOwnerPod, isFencedSession } from "../run-ownership.js";
+import {
+  decideRunControl,
+  publishRunControl,
+  registerRunControlApplier,
+  type RunControlMessage,
+} from "../run-control.js";
+import { buildPublishReviewRoomTool } from "../pr-review-room.js";
 import {
   runTask,
   pushAttachment,
@@ -33,18 +40,39 @@ import {
   type UiWidget,
   type ToolExecutionContext,
   cleanupSdlcSandboxCredentialsForContext,
+  openPaletteAdmits,
+  openPaletteMode,
+  openPaletteModeFromTools,
 } from "xyne-claw-shared";
 import { SessionLockedError } from "../session-lock.js";
+import { matchesDirectPick } from "../tool-resolution.js";
+import { describeFetchError } from "../run-deadline.js";
 import { SandboxUnavailableError } from "../sandbox-unavailable.js";
 import { isSafeId } from "../safe-id.js";
 import { sanitizeCitations } from "../citation-sanitizer.js";
 import { validateS2SKey } from "../middleware/auth.js";
 import { transientProviderCallback } from "../transient-provider-callback.js";
-import { loadMcpToolsForUser } from "../mcp.js";
-import { trustedSdlcToolBindings } from "../sdlc-wiki-tool-bindings.js";
+import { loadMcpToolsForUser,
+  searchDeploymentTools,
+} from "../mcp.js";
+import {
+  buildSdlcRunContextSection,
+  packSdlcRunMeta,
+  SDLC_DIRECT_TOOL_NAMES,
+  SDLC_META_KEYS,
+  trustedSdlcToolBindings,
+} from "xyne-claw-shared";
 import { loadCustomTools } from "../custom-tools.js";
 import { buildCopilotTool } from "../copilot.js";
+import { pinRunJudgeBackend } from "../judge-backend.js";
+import { optEnabled, pinRunOptimizations, tierOptimizationDefaults } from "../optimizations.js";
+import { activeToolCap, demotedCatalogItem, planActiveToolCap, readToolUsageRank } from "../active-tool-cap.js";
 import { buildExperimentTools, buildExperimentReviewTools, type ExperimentContext } from "../experiment.js";
+import {
+  executeRunFromPayload,
+  type InternalRunPayload,
+  type RunExecutionState,
+} from "../run-execution.js";
 import {
   buildVerifiedResponseTool,
   SUBMIT_RESPONSE_SYSTEM_INSTRUCTION,
@@ -63,6 +91,7 @@ import {
   asFollowUpPendingQuestion,
   buildFollowUpGenerationEndEvent,
   buildFollowUpGenerationStartEvent,
+  describeFollowUpGenerationInput,
   generateFollowUpSuggestions,
   normalizeFollowUpAgentContext,
   normalizeFollowUpConversationHistory,
@@ -71,20 +100,30 @@ import {
 } from "../follow-up-generator.js";
 import {
   buildSubagentTools,
+  withoutBuiltinSubagents,
   loadDeepwikiTools,
   loadContext7Tools,
-  loadPlaywrightTools,
   type SkillTrigger,
 } from "../subagent-tools.js";
+import { createChildTaskRegistry } from "../child-tasks.js";
+import { childRunIdFor } from "../debug/index.js";
+import { buildChildTaskTools } from "../child-task-tools.js";
+import { reportDelegatedRunStart, reportDelegatedRunFinish } from "../delegated-run.js";
 import {
   buildFastModeDirectTools,
   buildFastModeMetaTools,
+  duplicatesMetaTool,
+  type DeploymentToolSearch,
+  renderUnresolvedConfigured,
   buildToolCatalog,
+  describeMcpServers,
   renderToolCatalogForPrompt,
   type FastToolRuntimeController,
+  type ToolCatalogEntry,
   type ToolCatalogItem,
 } from "../tool-catalog.js";
 import {
+  A2A_DEFAULTS,
   AgentDelegationGovernor,
   buildCallableAgentTools,
   buildOrchestratorCallableAgentTool,
@@ -96,30 +135,35 @@ import {
 import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
 import {
   parseToolsConfig,
+  resolveAgentToolsConfig,
   COPILOT_SYSTEM_INSTRUCTION,
   REPO_CONFIGS,
   getSandboxSession,
   probeSession,
   buildSandboxStoreKey,
   clearPlan,
+  isDigitalTwinAgent,
   isPlanToolSlug,
   // Aliased: run.ts declares a local `isReadOnlyJob` const later in the same
   // scope; this shared util is the single-source scheduled/automation check.
   isReadOnlyJob as isScheduledOrAutomationRun,
   type SetupStep,
 } from "xyne-claw-shared";
-import { SERVER, PATHS, LITELLM, isAllowedCallbackUrl } from "../config.js";
+import { SERVER, PATHS, LITELLM, litellmEndpoint, isAllowedCallbackUrl } from "../config.js";
 import { judgeChainContinuation } from "../chain-judge.js";
-import { isDigitalTwinAgent, listSubsystemTaxonomy, fetchAgentPromptFiles } from "../memory.js";
+import { buildTaxonomyInjection, listSubsystemTaxonomy } from "../twin-memory-taxonomy.js";
 import { buildMemorySearchTool } from "../memory-search.js";
 import { buildMemoryWriteTool } from "../memory-write.js";
 import { buildMemoryFileTools } from "../memory-file-tools.js";
-import { buildTwinDeliverTool, buildTwinDeliverMandate, type TwinDeliverRef } from "../twin-deliver.js";
+import { buildTwinDeliverTool, type TwinDeliverRef } from "../twin-deliver.js";
+import { buildTwinDeliverMandate } from "../twin-prompts.js";
+import { buildTwinPersonaBlock } from "../twin-persona.js";
 import { buildProposePlanTool, PROPOSE_PLAN_TOOL_NAME, type ProposePlanRef } from "../propose-plan.js";
 import { presentationCatalogDefaultOn, isFreePresentationTool, buildPresentationPrimer } from "../presentation-catalog.js";
 import { buildProposeAgentTool, type ProposeAgentRef } from "../propose-agent.js";
 import { buildDescribeAgentTool, type DescribeAgentRef } from "../describe-agent.js";
-import { buildSuggestConnectorsTool, type SuggestConnectorsRef } from "../suggest-connectors.js";
+import { buildSuggestConnectorsTool, SUGGEST_CONNECTORS_TOOL_NAME, type SuggestConnectorsRef } from "../suggest-connectors.js";
+import { buildSuggestProvidersTool, SUGGEST_PROVIDERS_TOOL_NAME, type SuggestProvidersRef } from "../suggest-providers.js";
 import { buildEmitBriefTool, EMIT_BRIEF_TOOL_NAME, type EmitBriefRef } from "../daily-brief.js";
 import {
   buildSuggestGoalTool,
@@ -132,13 +176,15 @@ import {
   writeWorkspaceTextFiles,
   writeWorkspaceBinaryFiles,
 } from "../workspace.js";
-import { toolOutputBaseDir, deleteSession, branchSession } from "../session-store.js";
+import { toolOutputBaseDir, deleteSession, branchSession, sessionDir, sessionExistsAnywhere } from "../session-store.js";
 import { gcsUploadResultMarker, gcsDownloadResultMarker } from "../storage.js";
 import { takeLlmCitations } from "xyne-claw-shared";
 import { ingestAttachments } from "../attachment-ingest.js";
 import { metric } from "../metrics.js";
+import { decidePlanTracking, isShortFollowUp, readPreviousAgentReply } from "../plan-gate.js";
 import { runWithProviderFallback } from "../provider-fallback.js";
 import { isDraining } from "../drain.js";
+import { routeTaskMode } from "../mode-router.js";
 import {
   buildDesignSystemPromptInjection,
   parseTaskCommand,
@@ -159,7 +205,7 @@ const UNDERSTANDING_SKILL_PATH = "understanding-skills";
 
 const router = Router();
 
-interface ActiveRunControl {
+export interface ActiveRunControl {
   abortController: AbortController;
   /** Owner of the run. Used to reject cross-user cancellation. */
   userId: string;
@@ -194,6 +240,29 @@ interface ActiveRunControl {
 }
 
 const activeRuns = new Map<string, ActiveRunControl>();
+
+export function ensureActiveRun(
+  sessionId: string,
+  payload: { userId?: string; agentSlug?: string; callbackUrl?: string },
+): ActiveRunControl {
+  const existing = activeRuns.get(sessionId);
+  if (existing) return existing;
+  const activeRun: ActiveRunControl = {
+    abortController: new AbortController(),
+    userId: (payload.userId ?? "").trim(),
+    agentSlug: payload.agentSlug ?? "unknown",
+    startedAtMs: Date.now(),
+    hasCallbackUrl: typeof payload.callbackUrl === "string" && !!payload.callbackUrl.trim(),
+  };
+  activeRuns.set(sessionId, activeRun);
+  return activeRun;
+}
+
+export function finishActiveRun(sessionId: string, activeRun: ActiveRunControl): void {
+  if (activeRun.handoffCapTimer) clearTimeout(activeRun.handoffCapTimer);
+  if (activeRun.gracefulInterruptSummaryTimer) clearTimeout(activeRun.gracefulInterruptSummaryTimer);
+  activeRuns.delete(sessionId);
+}
 const configuredSseReconnectGraceMs = Number(process.env["SSE_RECONNECT_GRACE_MS"] ?? 180_000);
 const SSE_RECONNECT_GRACE_MS = Number.isFinite(configuredSseReconnectGraceMs) && configuredSseReconnectGraceMs >= 0
   ? configuredSseReconnectGraceMs
@@ -214,7 +283,7 @@ function effectiveFastMode(fastMode: boolean | undefined, agentConfig: Record<st
   return typeof fastMode === "boolean" ? fastMode : configFastModeEnabled(agentConfig);
 }
 
-function normalizeExperimentContext(raw: unknown): ExperimentContext | undefined {
+export function normalizeExperimentContext(raw: unknown): ExperimentContext | undefined {
   if (!raw || typeof raw !== "object") return undefined;
   const obj = raw as Record<string, unknown>;
   const id = typeof obj["id"] === "string" ? obj["id"].trim() : "";
@@ -302,6 +371,21 @@ export function getActiveRunCount(): number {
   return activeRuns.size;
 }
 
+export function getActiveSessionIds(): string[] {
+  return [...activeRuns.keys()];
+}
+
+/** Ownership fencing (run-queue path only): this pod lost the run-owner key to
+ *  a stalled-job takeover, so its in-flight copy must stop producing output. */
+export function abortRunForOwnershipLoss(sessionId: string): boolean {
+  const active = activeRuns.get(sessionId);
+  if (!active || active.abortController.signal.aborted) return false;
+  clog.warn(`[run] ownership lost — aborting superseded run sessionId=${sessionId} agent=${active.agentSlug ?? "unknown"}`);
+  active.drainCancelled = true;
+  active.abortController.abort();
+  return true;
+}
+
 export function cancelActiveRunsForDrain(reason = "server draining"): number {
   let cancelled = 0;
   for (const [sessionId, active] of activeRuns.entries()) {
@@ -381,6 +465,11 @@ The minimum unit size is ₹1 crore. [1.1](cite:clf-chatcmpl-tool-9a01ab9ff7b89d
 The minimum unit size is ₹1 crore [clf-agzja79pabewihgzkfe9pa97#14-#22].
 
 The inline citation tokens are the only citation mechanism for Claw v3. Never use the legacy add-citations flow.`;
+
+const RESULT_SIFT_GUIDE = `
+
+## Filtered tool results
+Large list results from tools are pre-filtered to the items most relevant to this conversation. A filtered result starts with a "Relevance filter" note giving how many items were hidden and the file holding the full result. Counts and totals must use the full number from that note. If an item you need seems missing, read that file, or call the tool again with "sift": false to get the raw result. Pass "sift": true to filter a result that would not be filtered by default.`;
 
 const SPACES_MENTION_GUIDE = `
 
@@ -483,8 +572,9 @@ router.post("/run", validateS2SKey, async (req, res: Response) => {
     detached,
     fastMode,
     resumedFromHandoff,
+    judgeBackend,
+    optimizations,
     memoryBankId,
-    twinDestinations,
     senderName,
     channelName,
     mode,
@@ -492,146 +582,11 @@ router.post("/run", validateS2SKey, async (req, res: Response) => {
     planContinuation,
     awakening,
     generateFollowUpSuggestions: shouldGenerateFollowUpSuggestions,
-  } = req.body as {
-    userId?: string;
-    userName?: string;
-    userEmail?: string;
-    task?: string;
-    context?: string;
-    conversationId?: string;
-    /** When set, this OVERRIDES conversationId for the persistent-session
-     *  lookup (the PI session JSONL filename). Used by chat branching: the
-     *  conversation row stays the same so the UI keeps one thread, but the
-     *  underlying PI session lives at a branched id like
-     *  `${conversationId}__branch__${assistantMessageId}` so context from the
-     *  selected branch doesn't leak across siblings. */
-    piSessionConversationId?: string;
-    // Optional upstream-provided Spaces thread/conversation ID. Surfaced to
-    // the agent's system metadata so it can construct thread-link citations
-    // even when the agent session's own conversationId is a synthetic one
-    // (e.g. scheduled job IDs). Caller-side wiring: webhook.ts / agent-chat.ts
-    // forward this field when they have a Spaces conversation context.
-    spacesConversationId?: string;
-    callbackUrl?: string;
-    systemPrompt?: string;
-    agentConfig?: Record<string, unknown>;
-    agentSlug?: string;
-    channelId?: string;
-    cwd?: string;
-    eventType?: string;
-    scheduledJobId?: string;
-    traceId?: string;
-    skills?: {
-      slug?: string;
-      name: string;
-      description?: string;
-      content: string;
-      // Bundled skill files (scripts/, assets, …) materialized alongside
-      // SKILL.md by writeSessionSkills. Omitting this here silently dropped a
-      // skill's script folder on the top-level run path.
-      files?: { relativePath: string; content: string; contentType?: string | null }[];
-    }[];
-    provider?: string;
-    // Ordered fallback chain set by the agent owner via the Provider tab.
-    // First entry is the primary parent; subsequent entries are walked on
-    // quota exhaustion before dropping to "spaces" (LiteLLM/Kimi).
-    providerOrder?: string[];
-    subagentProviders?: Record<string, string>;
-    subagentProviderMode?: "parent" | "spaces" | "fast-model";
-    providerConfigs?: Record<
-      string,
-      {
-        apiKey: string;
-        model: string;
-        baseUrl?: string;
-        authType?: string;
-        reasoningEffort?: string;
-      }
-    >;
-    progressUrl?: string;
-    attachments?: Array<{ fileName: string; mimeType: string; data: string }>;
-    recordingRefs?: Array<{ attachmentId: string; fileName: string; mimeType: string; fileSize: number }>;
-    contextFiles?: Array<{ path: string; content: string }>;
-    /** Set by claw-auth's awakening dispatcher for an unattended run. */
-    awakening?: {
-      kind: string;
-      writePolicy: string;
-      shadow: boolean;
-      injectEnabled?: boolean;
-      windowStartMs?: number;
-      windowEndMs?: number;
-      entryPath?: string;
-    };
-    additionalInstructions?: string;
-    researchContext?: {
-      type: string;
-      id?: string;
-      name: string;
-      repositoryId?: string;
-      productId?: string;
-    };
-    customSubagents?: import("../subagent-tools.js").CustomSubagentSpec[];
-    callableAgents?: Array<CallableAgentSpec | CallableAgentLightSpec>;
-    delegationMode?: "orchestrator";
-    // claw-auth-issued per-run identifiers. sessionId is the URL-bound run id;
-    // sessionToken is an HMAC bearer used on every outbound /sessions/:sessionId/mcp/*
-    // call back to claw-auth. Both REQUIRED in production — required check below.
-    sessionId?: string;
-    sessionToken?: string;
-    ticketIds?: string[];
-    canvasIds?: string[];
-    callIds?: string[];
-    // Stable per-unit-of-work key for run idempotency. Set by the recovery
-    // worker to the rootSessionId so a re-dispatch of an already-completed run
-    // is detected (via the GCS result marker) and NOT re-executed. Absent on
-    // first dispatch (the marker is then keyed by sessionId).
-    idempotencyKey?: string;
-    // `/compact`: force a one-shot compaction of the resumed session before the
-    // first turn runs (only fires when resuming an existing session). Plumbed
-    // into the initial runAttempt below.
-    compactBeforeRun?: boolean;
-    /** Branching: when true, runTask branches the PI session at the last user
-     *  entry so the new assistant turn becomes a sibling of the previous one. */
-    isRegenerate?: boolean;
-    detached?: boolean;
-    fastMode?: boolean;
-    resumedFromHandoff?: boolean;
-    memoryBankId?: string;
-    /** Digital Twin mention flow: real reply destinations the user can post in
-     *  (their accessible channels/threads), built by claw-auth from Spaces
-     *  memberships. Injected into the mandatory twin_deliver tool as a
-     *  provider-constrained enum so the model can't invent a channel id. */
-    twinDestinations?: import("xyne-claw-shared").TwinDestinationCandidate[];
-    /** Digital Twin mention flow: who @mentioned the user, and the channel name.
-     *  Fed into the twin_deliver mandate's who/where line in the SYSTEM prompt so
-     *  the model knows who's asking and where — the thread history only carries a
-     *  raw sender id. Set by claw-auth webhook.ts on USER_MENTIONED dispatches. */
-    senderName?: string;
-    channelName?: string;
-    /** Pipeline mode gate. 'plan' (agent.config.planMode) ⇒ read-only palette +
-     *  terminal propose-plan tool; the agent proposes a plan and STOPS.
-     *  'daily_brief' (agent.config.dailyBriefMode) ⇒ read-only palette + subagents
-     *  + terminal emit_brief tool; the agent gathers, emits the structured brief,
-     *  and STOPS. 'auto' (or absent) ⇒ today's behavior, unchanged. Set by
-     *  claw-auth, trust-gated on the matching agent config flag. */
-    mode?: "plan" | "auto" | "daily_brief";
-    /** /experiment autonomous exploration mode context, forwarded by claw-auth. */
-    experiment?: {
-      id?: string;
-      epoch?: number;
-      deadlineAt?: string;
-      focus?: string;
-      /** "understanding" = coverage-gated variant: exit on an exhausted
-       *  code-path frontier instead of the deadline. Set by claw-auth. */
-      kind?: "understanding" | "framework" | "security" | "repo-history";
-    };
-    /** True when this run is Turn 2 (auto) dispatched right after a plan was
-     *  approved (or a trivial plan auto-continued). Used only to emit a
-     *  mode_switch debug event; behavior is identical to any other auto run. */
-    planContinuation?: boolean;
-    generateFollowUpSuggestions?: boolean;
-  };
+  } = req.body as InternalRunPayload;
+
   const experiment = normalizeExperimentContext(rawExperiment);
+  pinRunJudgeBackend(judgeBackend);
+  pinRunOptimizations(optimizations, agentConfig?.["optimizations"], tierOptimizationDefaults(delegationMode));
 
   // [AUTODBG] claw-side receipt of every /run forward (esp. automations). Confirms
   // the request crossed claw-auth → claw and which session id it arrived under
@@ -877,7 +832,6 @@ router.post("/run", validateS2SKey, async (req, res: Response) => {
       fastMode,
       resumedFromHandoff,
       memoryBankId,
-      twinDestinations,
       senderName,
       channelName,
       effectiveMode,
@@ -1004,7 +958,6 @@ router.post("/run", validateS2SKey, async (req, res: Response) => {
         fastMode,
         resumedFromHandoff,
         memoryBankId,
-        twinDestinations,
         senderName,
         channelName,
         effectiveMode,
@@ -1069,67 +1022,7 @@ router.post("/run", validateS2SKey, async (req, res: Response) => {
   // scheduled jobs, etc.). It must stay byte-identical until they migrate.
   res.json({ success: true, sessionId });
 
-  // Process in background
-  processTask(
-    sessionId,
-    sessionToken.trim(),
-    userId.trim(),
-    task.trim(),
-    context,
-    userName,
-    userEmail,
-    conversationId,
-    piSessionConversationId,
-    spacesConversationId,
-    callbackUrl,
-    systemPrompt,
-    agentConfig,
-    agentSlug,
-    channelId,
-    requestCwd,
-    eventType,
-    scheduledJobId,
-    traceId,
-    skills,
-    provider,
-    providerOrder,
-    subagentProviders,
-    subagentProviderMode,
-    providerConfigs,
-    progressUrl,
-    attachments,
-    recordingRefs,
-    contextFiles,
-    additionalInstructions,
-    researchContext,
-    customSubagents,
-    callableAgents,
-    delegationMode,
-    ticketIds,
-    canvasIds,
-    callIds,
-    idempotencyKey,
-    isRegenerate,
-    abortController.signal,
-    () => abortController.abort(),
-    compactBeforeRun,
-    fastMode,
-    resumedFromHandoff,
-    memoryBankId,
-    twinDestinations,
-    senderName,
-    channelName,
-    effectiveMode,
-    experiment,
-    planContinuation,
-    shouldGenerateFollowUpSuggestions,
-    typeof callbackUrl === "string" ? callbackUrl : undefined,
-    awakening,
-  ).finally(() => {
-    if (activeRun.handoffCapTimer) clearTimeout(activeRun.handoffCapTimer);
-    if (activeRun.gracefulInterruptSummaryTimer) clearTimeout(activeRun.gracefulInterruptSummaryTimer);
-    activeRuns.delete(sessionId);
-  });
+  void executeRunFromPayload({ ...(req.body as InternalRunPayload), sessionId });
 });
 
 // ── SSE producer: in-process emitter that writes ClawStreamEvent frames into
@@ -1317,63 +1210,58 @@ router.post("/clear-session", validateS2SKey, async (req, res: Response) => {
   }
 });
 
-/**
- * Liveness probe for claw-auth's run-recovery watchdog.
- *
- * The watchdog previously inferred death from heartbeat age alone, but a
- * heartbeat only lands on progress events — so a run sitting inside ONE long
- * tool call (a /design browser QA pass, a big sandbox build) looks dead while
- * it is working perfectly. It would then re-dispatch the whole request, and
- * the retry raced the original: two agents, two sandboxes, duplicate
- * deliverables (2026-08-18 /design thread — one request produced four runs and
- * shipped the same HTML twice).
- *
- * `activeRuns` is the authoritative answer to "is this still executing"; it is
- * in-process, which is sound while xyne-claw runs a single replica. If that
- * ever scales out this must move to Redis, otherwise a run on another replica
- * reads as dead. Deliberately NOT ownership-checked like /cancel: this returns
- * one boolean about a session id the caller already holds, and it must keep
- * working for recovery paths that have no user context.
- */
-router.get("/run/:sessionId/alive", validateS2SKey, (req, res: Response) => {
+router.post("/run/:sessionId/interrupt-with-reply", validateS2SKey, async (req, res: Response) => {
   const { sessionId } = req.params as { sessionId?: string };
   if (!sessionId) {
     res.status(400).json({ success: false, error: "sessionId is required" });
-    return;
-  }
-  res.json({ success: true, sessionId, alive: activeRuns.has(sessionId) });
-});
-
-router.post("/run/:sessionId/interrupt-with-reply", validateS2SKey, (req, res: Response) => {
-  const { sessionId } = req.params as { sessionId?: string };
-  if (!sessionId) {
-    res.status(400).json({ success: false, error: "sessionId is required" });
-    return;
-  }
-
-  const active = activeRuns.get(sessionId);
-  if (!active) {
-    res.json({ success: true, sessionId, status: "not_running" });
     return;
   }
 
   const callerUserId = req.headers["x-user-id"];
-  if (
-    typeof callerUserId !== "string" ||
-    !callerUserId ||
-    callerUserId !== active.userId
-  ) {
+  const active = activeRuns.get(sessionId);
+  if (!active) {
+    if (typeof callerUserId !== "string" || !callerUserId) {
+      res.json({ success: true, sessionId, status: "not_running" });
+      return;
+    }
+    const decision = await decideRunControl(
+      { type: "interrupt", sessionId, requestedBy: callerUserId },
+      { currentOwnerPod, publish: publishRunControl },
+    );
+    if (decision.action === "forwarded") {
+      clog.info(`[run] interrupt forwarded session=${sessionId} ownerPod=${decision.ownerPod}`);
+      res.json({ success: true, sessionId, status: "forwarded", ownerPod: decision.ownerPod });
+      return;
+    }
+    res.json({ success: true, sessionId, status: "not_running" });
+    return;
+  }
+
+  if (typeof callerUserId !== "string" || !callerUserId) {
     res
       .status(403)
       .json({ success: false, error: "Not authorized to interrupt this run" });
     return;
   }
+  if (callerUserId !== active.userId) {
+    clog.info(
+      `[run] cross-user interrupt session=${sessionId} owner=${active.userId} by=${callerUserId}`,
+    );
+  }
 
-  // This is intentionally NOT userCancelled. /cancel suppresses output; a
-  // same-user follow-up wants the active turn to summarize/post what it has, then
-  // let claw-auth drain the queued follow-up as the next user turn. Prefer a
-  // model-generated summary via steering, but keep a bounded hard-abort fallback
-  // so a stuck tool/provider cannot block the new prompt forever.
+  applyGracefulInterrupt(sessionId, active);
+  res.json({ success: true, sessionId, status: "interrupt_requested" });
+});
+
+// This is intentionally NOT userCancelled. /cancel suppresses output; a
+// follow-up in the thread wants the active turn to summarize/post what it has,
+// then let claw-auth drain the queued follow-up as the next user turn. The
+// follow-up may come from ANY user in the conversation, not just the run's
+// owner — claw-auth decides who may interrupt; this endpoint is S2S-only and
+// just needs a caller identity for the audit line above. Prefer a
+// model-generated summary via steering, but keep a bounded hard-abort fallback
+// so a stuck tool/provider cannot block the new prompt forever.
+function applyGracefulInterrupt(sessionId: string, active: ActiveRunControl): void {
   active.gracefulInterruptRequested = true;
   if (!active.gracefulInterruptSummaryTimer) {
     const timeoutMs = Number(process.env["CLAW_INTERRUPT_SUMMARY_TIMEOUT_MS"] ?? 15_000);
@@ -1391,10 +1279,9 @@ router.post("/run/:sessionId/interrupt-with-reply", validateS2SKey, (req, res: R
       active.abortController.abort();
     }
   });
-  res.json({ success: true, sessionId, status: "interrupt_requested" });
-});
+}
 
-router.post("/run/:sessionId/cancel", validateS2SKey, (req, res: Response) => {
+router.post("/run/:sessionId/cancel", validateS2SKey, async (req, res: Response) => {
   const { sessionId } = req.params as { sessionId?: string };
   if (!sessionId) {
     res.status(400).json({ success: false, error: "sessionId is required" });
@@ -1403,6 +1290,20 @@ router.post("/run/:sessionId/cancel", validateS2SKey, (req, res: Response) => {
 
   const active = activeRuns.get(sessionId);
   if (!active) {
+    const callerId = req.headers["x-user-id"];
+    const decision = await decideRunControl(
+      {
+        type: "cancel",
+        sessionId,
+        ...(typeof callerId === "string" && callerId ? { userId: callerId } : {}),
+      },
+      { currentOwnerPod, publish: publishRunControl },
+    );
+    if (decision.action === "forwarded") {
+      clog.info(`[run] cancel forwarded session=${sessionId} ownerPod=${decision.ownerPod}`);
+      res.json({ success: true, sessionId, status: "forwarded", ownerPod: decision.ownerPod });
+      return;
+    }
     res.json({ success: true, sessionId, status: "not_running" });
     return;
   }
@@ -1431,6 +1332,30 @@ router.post("/run/:sessionId/cancel", validateS2SKey, (req, res: Response) => {
   active.userCancelled = true;
   active.abortController.abort();
   res.json({ success: true, sessionId, status: "cancelled" });
+});
+
+registerRunControlApplier((msg: RunControlMessage): boolean => {
+  const active = activeRuns.get(msg.sessionId);
+  if (!active) return false;
+  if (msg.type === "cancel") {
+    if (!msg.userId || msg.userId !== active.userId) {
+      clog.warn(
+        `[run-control] refusing cancel session=${msg.sessionId} owner=${active.userId} by=${msg.userId ?? "?"}`,
+      );
+      return false;
+    }
+    active.userCancelled = true;
+    active.abortController.abort();
+    return true;
+  }
+  if (!msg.requestedBy) return false;
+  if (msg.requestedBy !== active.userId) {
+    clog.info(
+      `[run] cross-user interrupt session=${msg.sessionId} owner=${active.userId} by=${msg.requestedBy}`,
+    );
+  }
+  applyGracefulInterrupt(msg.sessionId, active);
+  return true;
 });
 
 // POST /clone-session — branch a persistent session to a new conversationId
@@ -1467,8 +1392,9 @@ router.post("/clone-session", validateS2SKey, async (req, res: Response) => {
   }
 
   try {
+    const targetExisted = branchMode === "full" && (await sessionExistsAnywhere(targetConversationId));
     const success = await branchSession(sourceConversationId, targetConversationId, branchMode);
-    res.json({ success });
+    res.json({ success, targetExisted });
   } catch (err) {
     clog.error(
       `[clone-session] ${sourceConversationId} → ${targetConversationId}: ${err instanceof Error ? err.stack ?? err.message : String(err)}`,
@@ -1490,12 +1416,16 @@ function buildInterruptSummary(partialResult: string, fallback?: { toolsUsed?: s
   const fallbackText = details.length > 0
     ? details.join("\n")
     : "I had not produced a stable partial result yet.";
+  // Claw speaking about itself, not agent output — italic marks it as an aside
+  // so it reads as distinct from the summary below, which is the agent's own
+  // words. See systemNote() in xyne-claw-auth notice-format.ts for the rule.
+  const lead = "_Picked up your new message and I'm switching to it now._";
   return trimmed
-    ? `✅ Picked up your new message and I’m switching to it now.\n\n**Summary of the work so far:**\n\n${trimmed}`
-    : `✅ Picked up your new message and I’m switching to it now.\n\n**Summary of the work so far:** ${fallbackText}`;
+    ? `${lead}\n\n**Summary of the work so far:**\n\n${trimmed}`
+    : `${lead}\n\n**Summary of the work so far:** ${fallbackText}`;
 }
 
-async function processTask(
+export async function processTask(
   sessionId: string,
   sessionToken: string,
   userId: string,
@@ -1568,7 +1498,6 @@ async function processTask(
   fastMode?: boolean,
   resumedFromHandoff?: boolean,
   memoryBankId?: string,
-  twinDestinations?: import("xyne-claw-shared").TwinDestinationCandidate[],
   senderName?: string,
   channelName?: string,
   mode?: "plan" | "auto" | "daily_brief",
@@ -1586,12 +1515,10 @@ async function processTask(
     windowEndMs?: number;
     entryPath?: string;
   },
+  execution?: RunExecutionState,
 ): Promise<void> {
-  // Query prefetch (opt-in, `agentConfig.prefetchContext`). Fired at the TOP of
-  // the run so the fast-model extractor overlaps the expensive setup that
-  // follows — session restore and the MCP tool listing — instead of adding its
-  // latency in front of the first turn. It is awaited far below, once the tool
-  // palette exists and the resolvers can run. Never rejects; see prefetch.ts.
+  // Started here so the extractor overlaps session restore + MCP listing;
+  // awaited once the tool palette exists. Never rejects (see prefetch.ts).
   const prefetchSpecPromise = prefetchEnabled(agentConfig)
     ? startPrefetchExtraction(task)
     : null;
@@ -1616,58 +1543,6 @@ async function processTask(
       if (active) active.handoffLastTurn = Math.max(active.handoffLastTurn ?? 0, lastTurn);
     },
   };
-  const sendHandoffCallback = async (lastTurn?: number): Promise<void> => {
-    const active = activeRuns.get(sessionId);
-    const resolvedLastTurn = Math.max(0, lastTurn ?? active?.handoffLastTurn ?? 0);
-    log(`Session handoff checkpointed: ${sessionId} lastTurn=${resolvedLastTurn} aborted=${active?.handoffCapFired === true}`);
-    // NEVER deliver handoff over an in-process SSE emitter: during a drain the
-    // bridge is dead (or dying) almost by definition — the first live drill
-    // (2026-07-15, session c304df10) lost the handoff exactly this way. Force
-    // the HTTP /sessions/:id/result fallback (sendCallback builds it when
-    // callbackUrl is null), whose claw-auth handler owns the handoff branch.
-    // Real string callback URLs (scheduled-jobs result etc.) stay as-is —
-    // their handlers have handoff branches too.
-    // PRIMARY channel: Redis. The recovery worker only needs the sessionId —
-    // all run state lives in its Redis registration — and the HTTP hop to
-    // claw-auth failed three different ways in two days (zero-endpoint window,
-    // purge-on-boot, and a version-skew 401 on 2026-07-16 that dropped ~50
-    // handoffs in one drain). One LPUSH has no endpoint, no auth contract,
-    // and no rollout-timing dependency. See handoff-redis.ts.
-    const viaRedis = await publishHandoffSignal(sessionId, resolvedLastTurn);
-    if (viaRedis) {
-      log(`Handoff signal published to Redis for ${sessionId} (lastTurn=${resolvedLastTurn})`);
-      metric.count("handoff_ok", { agent: agentSlug ?? "unknown", session: sessionId, channel: "redis" });
-      return;
-    }
-    const handoffDest = typeof callbackUrl === "string" ? callbackUrl : undefined;
-    // HTTP FALLBACK (Redis unreachable/unconfigured only). Long retry schedule
-    // (~90s total): when claw and claw-auth roll in the same window, the auth
-    // Service can briefly have ZERO ready endpoints (old pod Terminating, new
-    // pod Pending on node scale-up) and the default ~4s budget drops the
-    // callback — round-6 drill (2026-07-15) lost 3 handoffs exactly this way.
-    // The draining pod has DRAIN_TIMEOUT (900s) / grace (1000s) to live, so
-    // waiting out the endpoint gap is free.
-    const delivered = await sendCallback(
-      handoffDest,
-      sessionToken,
-      {
-        sessionId,
-        userId,
-        conversationId: conversationId ?? null,
-        agentSlug: agentSlug ?? null,
-        fastMode: fastModeForCallback,
-        status: "handoff",
-        lastTurn: resolvedLastTurn,
-      },
-      { backoffsMs: [1_000, 2_000, 5_000, 10_000, 15_000, 15_000, 15_000, 15_000, 15_000] },
-    );
-    if (delivered) {
-      metric.count("handoff_ok", { agent: agentSlug ?? "unknown", session: sessionId });
-    } else {
-      metric.count("handoff_callback_lost", { agent: agentSlug ?? "unknown", session: sessionId });
-    }
-  };
-
   // Idempotency backstop: only re-dispatches carry idempotencyKey (the recovery
   // rootSessionId). If a terminal-result marker for it already exists in GCS,
   // this run already finished and its completion callback was lost — replay the
@@ -1704,47 +1579,26 @@ async function processTask(
     }
   }
 
-  // Hoisted so the catch handler can recover pendingResponses when
-  // respond-to-user fires the abort (graceful copilot termination).
+  // Terminal tools (respond-to-user, propose-plan, propose-agent, emit_brief)
+  // end the turn via abortRun, so the run lands in the CATCH handler — these
+  // are hoisted so the catch can still recover and forward their results
+  // (signed pendingActions, plans, cards, briefs would otherwise drop silently).
   let customToolsResult: ReturnType<typeof loadCustomTools> | undefined;
-  // Hoisted so the catch handler (copilot-mode respond-to-user terminations)
-  // can still forward MCP-layer pendingActions to claw-auth. Without this,
-  // a copilot-mode agent that calls a write tool like spaces-create-ticket
-  // and then ends the turn via respond-to-user has its signed pendingAction
-  // silently dropped — claw-auth never sees it, no Approve/Decline button
-  // gets posted to the user, and the agent's text says "queued for approval"
-  // with nothing to approve. Observed 2026-06-09 with agent "triage-room"
-  // (slug used in prod) running model=claude-sonnet-4.6 via copilot.
   let mcpGetPendingActions: (() => Array<Record<string, unknown>>) | undefined;
-  // Hoisted like mcpGetPendingActions so both the success path and the catch
-  // handler can include files forwarded from MCP tools in the run's attachments.
   let mcpGetAttachments: (() => Attachment[]) | undefined;
-  // Hoisted so the catch handler (copilot-mode respond-to-user terminations)
-  // can still surface a goal suggestion the worker queued before the early
-  // abort. Filled by buildSuggestGoalTool's callback when the agent calls
-  // suggest-goal.
   let pendingGoalSuggestion: PendingGoalSuggestion | null = null;
-  // Hoisted so the catch handler can recover the proposed plan: propose-plan
-  // (plan mode's terminal tool) fires abortRun, so the run lands in the catch
-  // — never the success path — and the plan is read from ref.value there and
-  // shipped as `pendingPlan` on the callback.
   const proposePlanRef: ProposePlanRef = {};
-  // Hoisted for the same reason: propose-agent (agent-authoring's terminal tool)
-  // fires abortRun, so the drafted agent is recovered from ref.value in the catch
-  // block and shipped as `pendingAgentCard` on the callback.
   const proposeAgentRef: ProposeAgentRef = {};
-  // describe-agent is NOT terminal, so this is read on the success path; hoisted
-  // alongside the others so the catch handler can still ship a queued card when
-  // the turn ends some other way.
   const describeAgentRef: DescribeAgentRef = {};
   const suggestConnectorsRef: SuggestConnectorsRef = {};
+  const suggestProvidersRef: SuggestProvidersRef = {};
   const blockedConnectors = new Set<string>();
-  // Hoisted for the same reason: emit_brief (daily-brief mode's terminal tool)
-  // fires abortRun, so the brief is recovered from ref.value in the catch block
-  // and shipped as `dailyBrief` on the callback.
   const emitBriefRef: EmitBriefRef = {};
   let callbackProvider = provider ?? "spaces";
-  let callbackModel = LITELLM.model;
+  // Seed from THIS run's provider — a hardcoded default made every early
+  // failure report the wrong model (740 codex / 461 claude rows, 2026-08-29).
+  let callbackModel: string | undefined =
+    provider && provider !== "spaces" ? providerConfigs?.[provider]?.model : LITELLM.model;
   let requiresStructuredDelivery = false;
   const followUpsEnabledByFlag = shouldGenerateFollowUpSuggestions === true;
   const followUpsEnabled = followUpsEnabledByFlag;
@@ -1754,17 +1608,15 @@ async function processTask(
   const followUpConversationHistory = normalizeFollowUpConversationHistory(
     agentConfig?.["followUpConversationHistory"],
   );
-  const followUpGenerationInput = followUpConversationHistory.length > 0
-    ? "conversation_history_and_prompt"
-    : "prompt_only";
-  const parallelFollowUpStartedAt = new Date().toISOString();
-  const parallelFollowUpDebugSeq = Date.now();
-  let parallelFollowUpResult:
-    | { generation: FollowUpGenerationResult; completedAt: string }
-    | undefined;
-  let parallelFollowUpPromise:
-    | Promise<{ generation: FollowUpGenerationResult; completedAt: string }>
-    | undefined;
+  // Follow-ups are generated AFTER the agent loop finishes so the model sees
+  // the user's request AND the agent's final answer. Suggestions grounded in
+  // the actual answer ("drill into item X it listed", "apply the fix it
+  // proposed") are far more useful than ones guessed from the question alone.
+  const followUpGenerationInput = describeFollowUpGenerationInput(
+    followUpConversationHistory.length,
+    true,
+  );
+  const runDebugStartedAt = new Date().toISOString();
 
   try {
     // SSRF guard: progressUrl is caller-supplied and gets POSTed to on every
@@ -1781,49 +1633,6 @@ async function processTask(
     log(
       `Session ${sessionId}: starting for user ${userId}, progressUrl=${progressUrlLabel}`,
     );
-    if (followUpsEnabled) {
-      // Follow-ups use prior conversation plus the current user prompt, but
-      // never wait for the current assistant response. This fast-model request
-      // overlaps the main agent run and stays off the answer's critical path.
-      pushDebugProgress(
-        progressUrl,
-        sessionId,
-        buildFollowUpGenerationStartEvent({
-          seq: parallelFollowUpDebugSeq,
-          at: parallelFollowUpStartedAt,
-          sessionId,
-          model: LITELLM.fastModel,
-          generationInput: followUpGenerationInput,
-          conversationMessageCount: followUpConversationHistory.length,
-          ...(followUpAgentContext ? { agentContext: followUpAgentContext } : {}),
-        }),
-      );
-      parallelFollowUpPromise = generateFollowUpSuggestions(
-        task,
-        followUpAgentContext,
-        followUpConversationHistory,
-        abortSignal,
-      ).then((generation) => {
-        const settled = { generation, completedAt: new Date().toISOString() };
-        pushDebugProgress(
-          progressUrl,
-          sessionId,
-          buildFollowUpGenerationEndEvent({
-            seq: parallelFollowUpDebugSeq + 1,
-            at: settled.completedAt,
-            startedAt: parallelFollowUpStartedAt,
-            sessionId,
-            model: LITELLM.fastModel,
-            generationInput: followUpGenerationInput,
-            conversationMessageCount: followUpConversationHistory.length,
-            ...(followUpAgentContext ? { agentContext: followUpAgentContext } : {}),
-            generation,
-          }),
-        );
-        parallelFollowUpResult = settled;
-        return settled;
-      });
-    }
 
     // All per-type attachment ingestion (filter → decode → convert to a
     // `.context/` markdown sibling, plus the pdf/video/zip side effects) lives
@@ -1832,7 +1641,12 @@ async function processTask(
     // Parse command contracts before attachment ingestion. /record-skill keeps
     // the raw recording for a fixed-command sandbox analyzer rather than
     // spending ffmpeg CPU in the long-lived claw pod.
-    const taskCommand = parseTaskCommand(task);
+    const explicitTaskCommand = parseTaskCommand(task);
+    const routedMode = await routeTaskMode(task, explicitTaskCommand, abortSignal);
+    const taskCommand = routedMode.command;
+    if ((routedMode.source === "model" || routedMode.source === "jev") && taskCommand) {
+      log(`[task-command] ${taskCommand.command} selected by the mode router (${routedMode.source})`);
+    }
     const recordSkillCommand = taskCommand?.command === "/record-skill";
     const {
       derivedContextFiles,
@@ -1934,6 +1748,7 @@ async function processTask(
     const trustedSdlcBindings = trustedSdlcToolBindings(agentConfig?.["sdlcContext"]);
     const {
       groups: mcpGroups,
+      unresolvedConfigured,
       cleanup,
       getPendingActions,
       getAttachments: getMcpAttachments,
@@ -1966,6 +1781,9 @@ async function processTask(
     if (agentSlug) meta["agentSlug"] = agentSlug;
     if (channelId) meta["channelId"] = channelId;
     if (conversationId) meta["conversationId"] = conversationId;
+    else meta["sandboxConversationId"] = sessionId;
+    // Root of this run's spilled tool-result / attachment files, so sandbox-copy-in can forward a whole MCP result file into a sandbox (contextPath).
+    meta["contextRoot"] = join(mcpOutputDir, ".context");
     if (taskCommand) meta["taskCommand"] = taskCommand.command;
     if (recordingFiles.length > 0) {
       // Server-authored metadata consumed only by analyze-skill-recording. The
@@ -2008,82 +1826,12 @@ async function processTask(
     // sandbox-routing gate in claw-shared honors it too — otherwise the tools
     // stay but the sandbox is still routed read-only. Default-off.
     if (agentConfig?.["allowWriteInReadOnlyJob"] === true) meta["allowWriteInReadOnlyJob"] = "true";
-    if (agentConfig?.["requireSdlcRepository"] === true) meta["requireSdlcRepository"] = "true";
     const sdlcContext = agentConfig?.["sdlcContext"];
     const trustedSdlcContext =
       sdlcContext && typeof sdlcContext === "object" && !Array.isArray(sdlcContext)
         ? (sdlcContext as Record<string, unknown>)
         : undefined;
-    const trustedSdlcRepository =
-      trustedSdlcContext?.["repository"] &&
-      typeof trustedSdlcContext["repository"] === "object" &&
-      !Array.isArray(trustedSdlcContext["repository"])
-        ? (trustedSdlcContext["repository"] as Record<string, unknown>)
-        : undefined;
-    const trustedSdlcExecution =
-      trustedSdlcContext?.["execution"] &&
-      typeof trustedSdlcContext["execution"] === "object" &&
-      !Array.isArray(trustedSdlcContext["execution"])
-        ? (trustedSdlcContext["execution"] as Record<string, unknown>)
-        : undefined;
-    const trustedSdlcWiki =
-      trustedSdlcContext?.["wiki"] &&
-      typeof trustedSdlcContext["wiki"] === "object" &&
-      !Array.isArray(trustedSdlcContext["wiki"])
-        ? (trustedSdlcContext["wiki"] as Record<string, unknown>)
-        : undefined;
-    const isTrustedSdlcWikiRun =
-      trustedSdlcContext?.["operation"] === "wiki" && trustedSdlcWiki !== undefined;
-    if (trustedSdlcRepository) {
-      if (typeof trustedSdlcRepository["id"] === "string") meta["sdlcRepositoryId"] = trustedSdlcRepository["id"];
-      if (typeof trustedSdlcRepository["name"] === "string") meta["sdlcRepositoryName"] = trustedSdlcRepository["name"];
-      if (typeof trustedSdlcRepository["url"] === "string") meta["sdlcRepositoryUrl"] = trustedSdlcRepository["url"];
-      if (typeof trustedSdlcRepository["baseBranch"] === "string") meta["sdlcRepositoryBaseBranch"] = trustedSdlcRepository["baseBranch"];
-      if (typeof trustedSdlcExecution?.["workflowExecutionId"] === "string") {
-        meta["sdlcExecutionId"] = trustedSdlcExecution["workflowExecutionId"];
-      }
-      if (typeof trustedSdlcExecution?.["sessionId"] === "string") {
-        meta["sdlcSessionId"] = trustedSdlcExecution["sessionId"];
-      }
-      if (typeof trustedSdlcExecution?.["conversationId"] === "string") {
-        meta["sdlcConversationId"] = trustedSdlcExecution["conversationId"];
-      }
-      // Runtime credentials are issued per dispatched execution (setup/
-      // artifact/work). Chat-surface runs carry repository context but no
-      // execution, so setting the operation flag without the ids would only
-      // trip the incomplete-binding guard in sandbox-repo-setup. Gate on both
-      // execution identifiers so chat runs degrade to baseline-canvas access.
-      if (
-        typeof trustedSdlcExecution?.["workflowExecutionId"] === "string" &&
-        typeof trustedSdlcExecution?.["sessionId"] === "string"
-      ) {
-        meta["sdlcRuntimeCredentialOperation"] =
-          trustedSdlcContext?.["operation"] === "work" ? "PUSH" : "CLONE";
-      } else if (
-        trustedSdlcContext?.["operation"] === "interactive" &&
-        typeof trustedSdlcContext["interactiveGrant"] === "string"
-      ) {
-        meta["sdlcRuntimeCredentialOperation"] = "INTERACTIVE";
-        meta["sdlcInteractiveGrant"] = trustedSdlcContext["interactiveGrant"];
-      }
-    }
-    if (trustedSdlcContext?.["operation"] === "wiki" && trustedSdlcWiki) {
-      meta["sdlcWikiRun"] = "true";
-      if (typeof trustedSdlcWiki["role"] === "string") {
-        meta["sdlcWikiRole"] = trustedSdlcWiki["role"];
-      }
-      if (Array.isArray(trustedSdlcWiki["assignedCommitShas"])) {
-        meta["sdlcWikiAssignedCommitShas"] = JSON.stringify(
-          trustedSdlcWiki["assignedCommitShas"].filter(value => typeof value === "string"),
-        );
-      }
-      if (typeof trustedSdlcWiki["bootstrapRef"] === "string") {
-        meta["sdlcWikiBootstrapRef"] = trustedSdlcWiki["bootstrapRef"];
-      }
-      if (typeof trustedSdlcWiki["targetHeadSha"] === "string") {
-        meta["sdlcWikiTargetHeadSha"] = trustedSdlcWiki["targetHeadSha"];
-      }
-    }
+    Object.assign(meta, packSdlcRunMeta(trustedSdlcContext));
     // Operator-selected sbx-git repo context (agent.config.sbxGitRepos: string[]).
     // Surfaced to the read-only sandbox message so the agent focuses on these repos.
     const sbxGitRepos = agentConfig?.["sbxGitRepos"];
@@ -2100,13 +1848,23 @@ async function processTask(
     // For google-agent: fetch the user's Google OAuth token from xyne-claw-auth
     const effectiveConfig = { ...(agentConfig ?? {}) };
 
+    // The tools selection this run enforces (resolveAgentToolsConfig, shared
+    // with claw-auth's MCP gate). A standard agent with nothing selected gets
+    // an EMPTY selection here — only framework tools no selection gates
+    // survive the filters below. Only an orchestrator with nothing selected
+    // keeps a missing `tools` object, which every filter reads as unrestricted.
+    const runToolsSelection = resolveAgentToolsConfig(effectiveConfig, delegationMode ?? "standard");
+    if (runToolsSelection) effectiveConfig["tools"] = runToolsSelection;
+    else delete effectiveConfig["tools"];
+
     // Surface-default tool injection, per run only. Slack already injects its
     // subagent in claw-auth before dispatch; Spaces runs arrive directly from
     // the Spaces webhook and need the same default here so mention/automation/
     // scheduled runs can read the room without mutating the stored agent config.
     // Scheduled jobs post into a Spaces channel too, so they get the same spaces
-    // default as an interactive mention. A missing tools object means the agent
-    // is unrestricted, so do not create one.
+    // default as an interactive mention. A missing tools object only remains for
+    // an unrestricted orchestrator (see above), which already has everything, so
+    // do not create one.
     const effectiveTools = effectiveConfig["tools"];
     const isSpacesSurfaceEvent =
       eventType === "APP_MENTIONED" ||
@@ -2126,7 +1884,8 @@ async function processTask(
       const subagents = Array.isArray(toolsObj["subagents"])
         ? (toolsObj["subagents"] as unknown[]).filter((value): value is string => typeof value === "string")
         : [];
-      if (!subagents.includes("spaces")) {
+      const wrapperRedundant = optEnabled("lean_palette") && openPaletteModeFromTools(toolsObj) === "all";
+      if (!subagents.includes("spaces") && !wrapperRedundant) {
         effectiveConfig["tools"] = { ...toolsObj, subagents: [...subagents, "spaces"] };
       }
     }
@@ -2207,10 +1966,9 @@ async function processTask(
     // Load deepwiki/context7/playwright MCP tool groups (stdio transport, cached).
     // Playwright doesn't get its own subagent — its tools are spliced into the
     // sandbox subagent's palette via bonusToolsBySubagent below.
-    const [deepwikiGroup, context7Group, playwrightGroup] = await Promise.all([
+    const [deepwikiGroup, context7Group] = await Promise.all([
       loadDeepwikiTools(),
       loadContext7Tools(),
-      loadPlaywrightTools(),
     ]);
 
     // Extract skill triggers from agent config (needed by both subagent tools and runTask)
@@ -2273,63 +2031,17 @@ async function processTask(
     const memoryEnabled =
       agentConfig?.["memoryEnabled"] === true ||
       agentConfig?.["memoryEnabled"] === "true";
-    if (agentSlug && memoryEnabled) {
-      // Bank-id comparison, not raw slug — see isDigitalTwinAgent in memory.ts.
-      const isDigitalTwin = isDigitalTwinAgent(agentSlug);
-      const taxonomy = await listSubsystemTaxonomy(
-        agentSlug,
-        isDigitalTwin ? { userTag: `user:${userId}` } : undefined,
-        memoryBankId,
-      ).catch(() => []);
-      if (isDigitalTwin && taxonomy.length > 0) {
-        const lines = taxonomy
-          .slice(0, 12)
-          .map(
-            (s) =>
-              `- ${s.name} (${s.memoryCount} ${s.memoryCount === 1 ? "memory" : "memories"})`,
-          )
-          .join("\n");
-        activeInjections.push({
-          id: "__memory-taxonomy",
-          label: "Your Personal Memory",
-          content: [
-            "You have a personal memory bank — facts about THIS user that they",
-            "themselves approved. Currently you have memories under these clusters:",
-            "",
-            lines,
-            "",
-            "When you need to know how the user works, who they collaborate with,",
-            "what they prefer, or what they own, call `memory-search` FIRST with a",
-            "specific natural-language query. Never invent facts about the user —",
-            "only use what the tool returns.",
-          ].join("\n"),
-        });
-      }
+    // Bank-id comparison, not raw slug (see isDigitalTwinAgent in xyne-claw-shared).
+    const isTwinAgent = isDigitalTwinAgent(agentSlug);
+    if (agentSlug && memoryEnabled && isTwinAgent) {
+      const taxonomy = await listSubsystemTaxonomy(agentSlug, `user:${userId}`).catch(() => []);
+      if (taxonomy.length > 0) activeInjections.push(buildTaxonomyInjection(taxonomy));
 
-      // Digital Twin: inject the always-loaded persona files (soul.md, …) so the
-      // twin speaks AS the user with ZERO tool calls. Injected via
-      // activeInjections (not systemPrompt) so it applies on BOTH the @mention
-      // flow (which sends no systemPrompt) and interactive chat. Files are the
-      // user's own, ≤3, each ≤20k chars — enforced in claw-auth.
-      if (isDigitalTwin) {
-        const promptFiles = await fetchAgentPromptFiles(agentSlug, userId).catch(() => []);
-        if (promptFiles.length > 0) {
-          const body = promptFiles
-            .map((f) => `=== ${f.name} ===\n${f.content.trim()}`)
-            .join("\n\n");
-          // Folded into the system prompt inside runTask (both the override and
-          // the buildSystemPrompt-fallback paths), so it shows under LLM →
-          // system prompt in the debug panel.
-          twinPersonaBlock = [
-            "# Speaking as you",
-            "This is your persona — who you are and how you sound — drawn from the user's own",
-            "approved memory files. Speak AS this person by default; you do not need to call any",
-            "tool to use what's below. Prefer this voice over generic phrasing.",
-            "",
-            body,
-          ].join("\n");
-        }
-      }
+      // Digital Twin: the always-loaded persona files (soul.md, …), so the twin
+      // speaks AS the user with ZERO tool calls. Folded into the system prompt
+      // inside runTask (both the override and the buildTwinSystemPrompt-fallback
+      // paths), so it shows under LLM → system prompt in the debug panel.
+      twinPersonaBlock = await buildTwinPersonaBlock(agentSlug, userId, task);
     }
 
     // Resolve subagent-level skills: NONE by default — users opt skills in
@@ -2423,13 +2135,21 @@ async function processTask(
     // should still expose that one tool to the parent. Without this, picking
     // individual tools from a subagent-backed connector was a silent no-op.
     const toolsConfigEarly = parseToolsConfig(effectiveConfig);
-    const directPickSuffixes = toolsConfigEarly?.direct ?? [];
+    // An agent with no tools selection still gets the SDLC tools out of the spaces wrapper in a hub;
+    // one with a selection already has them from claw-auth's per-run merge.
+    const directPickSuffixes = toolsConfigEarly?.direct ?? (trustedSdlcContext ? SDLC_DIRECT_TOOL_NAMES : []);
+    // Hoisted above the catalog build: the palette decides what gets catalogued,
+    // not just what survives filtering (see `includeSubagentTools` below).
+    const paletteMode = openPaletteModeFromTools(toolsConfigEarly);
 
     // Per-run registry for background (run_in_background) subagents. Shared by
     // reference with the subagent tools (via the progressCtx below) and with
     // runTask (opts), so a detached spawn registered inside a tool's execute()
     // is drained by runTask after the model loop settles. See agent.ts.
-    const backgroundSubagentRegistry: import("../subagent-tools.js").BackgroundSubagentRegistry = new Map();
+    const childTaskRegistry = createChildTaskRegistry();
+    // Filled in by runTask once this run's trace is open; the subagent tools
+    // below only close over the object.
+    const parentDebugHandle: import("../subagent-tools.js").ParentDebugHandle = {};
 
     const fastModeEnabled = effectiveFastMode(fastMode, agentConfig);
     const fastToolController: FastToolRuntimeController = {};
@@ -2442,13 +2162,26 @@ async function processTask(
       groups: allGroups,
       customTools: customToolDefs,
       ...(customSubagents ? { customSubagents } : {}),
-      includeSubagentTools: fastModeEnabled,
+      // Also when the palette is open: with delegation ON a server's tools
+      // exist only behind its wrapper, so without their members catalogued
+      // here the palette has nothing to admit and load-tools nothing to load.
+      // The palette itself still refuses wrappers (a wrapper grants a whole
+      // server, not one tool).
+      includeSubagentTools: fastModeEnabled || paletteMode !== "off" || optEnabled("subagent_read_tools") || optEnabled("subagent_direct_only"),
+      // Without this, def-less servers' tools and in-process custom tools are
+      // admitted straight into the always-active set instead of the catalog —
+      // bigger prompt, not wider reach.
+      catalogUnwrapped: paletteMode !== "off",
+      catalogUnwrappedWrites: paletteMode !== "off" && optEnabled("lean_palette"),
     });
     const fastCatalogCandidateByName = new Map(fastCatalogCandidateItems.map((item) => [item.entry.name, item]));
     let fastCatalogItems: ToolCatalogItem[] = [];
     let fastCatalogNames: string[] = [];
+    /** Tools the agent was NOT given, kept only by the open palette. They are
+     *  loadable on demand and must never be always-active. */
+    const paletteAdmittedNames = new Set<string>();
 
-    const { subagentTools, directTools, remainingCustomTools } = fastModeEnabled
+    const { subagentTools: builtSubagentTools, directTools, remainingCustomTools } = fastModeEnabled
       ? {
           subagentTools: [] as ToolDefinition[],
           ...buildFastModeDirectTools({
@@ -2484,12 +2217,19 @@ async function processTask(
             // hits Stop, instead of running for its full duration and orphaning
             // the result back to a parent that's already thrown RunCancelledError.
             ...(abortSignal ? { abortSignal } : {}),
-            backgroundRegistry: backgroundSubagentRegistry,
+            backgroundRegistry: childTaskRegistry,
+            parentDebug: parentDebugHandle,
           },
           undefined, // bonusToolsBySubagent — removed with the sandbox subagent
           customSubagents,
           directPickSuffixes,
         );
+
+    const subagentTools = optEnabled("subagent_direct_only")
+      ? withoutBuiltinSubagents(builtSubagentTools)
+      : builtSubagentTools;
+
+    directTools.push(buildPublishReviewRoomTool(sessionId));
 
     let fastMetaTools: ToolDefinition[] = [];
 
@@ -2504,15 +2244,6 @@ async function processTask(
       const src = (t as { source?: string }).source ?? "";
       return src === "custom:sandbox" && t.name !== "sandbox-destroy";
     });
-
-    // Playwright browser tools (@playwright/mcp) ride on sandbox selection —
-    // they were previously only in the sandbox subagent palette. An agent that
-    // selects any sandbox tool gets the browser tools on the parent too. They
-    // bypass the tools.custom gate (not custom-sourced), so only add them when
-    // sandbox is actually selected.
-    const sandboxSelected = (toolsConfigEarly?.custom ?? []).some((s) => s.startsWith("sandbox-"));
-    const playwrightHoistedTools =
-      sandboxSelected && playwrightGroup ? playwrightGroup.tools : [];
 
     const emitDelegationProgress = (label: string): void => {
       if (!progressUrl) return;
@@ -2552,17 +2283,7 @@ async function processTask(
       const rawName = extractRuntimeToolName(tool.name);
       return groups.some((group) => group.writeTools.map(String).includes(rawName));
     };
-    const selectedAsDirect = (tool: ToolDefinition, allowedDirect: string[]): boolean => {
-      const norm = (s: string): string => s.toLowerCase().replace(/_/g, "-");
-      const toolSelectionKey = (tool as { selectionKey?: string }).selectionKey;
-      return allowedDirect.some((d) =>
-        tool.name === d ||
-        tool.name.endsWith(d) ||
-        d.endsWith(`__${tool.name}`) ||
-        norm(tool.name) === norm(d) ||
-        (toolSelectionKey ? d === toolSelectionKey : false),
-      );
-    };
+    const selectedAsDirect = (tool: ToolDefinition, allowedDirect: string[]): boolean => matchesDirectPick(tool, allowedDirect);
     const applyAgentToolFilter = (
       tools: ToolDefinition[],
       cfg: ReturnType<typeof parseToolsConfig>,
@@ -2572,6 +2293,8 @@ async function processTask(
         customTools: ToolDefinition[];
       },
     ): ToolDefinition[] => {
+      // No selection only reaches here for an orchestrator callee
+      // (resolveAgentToolsConfig): unrestricted by design.
       if (!cfg) return tools;
       const allowedSubagents = new Set(cfg.subagents ?? []);
       const allowedDirect = cfg.direct ?? [];
@@ -2595,16 +2318,19 @@ async function processTask(
       });
     };
 
-    const buildNestedRunner = (): NestedAgentRunner => async ({ spec, question, childGovernor, signal, onProgress }) => {
+    const buildNestedRunner = (): NestedAgentRunner => async ({ spec, question, childGovernor, toolCallId, followUpId, signal, onProgress }) => {
       const calleeSessionToken = spec.sessionToken ?? sessionToken;
       const label = spec.progressLabels?.[0] ?? `Delegating to ${spec.name}...`;
       onProgress?.(label);
       const calleeConfig = spec.agentConfig ?? {};
-      const calleeToolsConfig = parseToolsConfig(calleeConfig);
+      // Same tier rule as the parent run: an empty selection means nothing
+      // granted unless the callee itself is an orchestrator.
+      const calleeToolsConfig = resolveAgentToolsConfig(calleeConfig, spec.delegationTier ?? "standard");
       const calleeMeta: Record<string, string> = { userId };
       if (userName) calleeMeta["userName"] = userName;
       if (userEmail) calleeMeta["userEmail"] = userEmail;
       calleeMeta["agentSlug"] = spec.slug;
+      calleeMeta["contextRoot"] = join(mcpOutputDir, ".context");
       if (channelId) calleeMeta["channelId"] = channelId;
       if (conversationId) calleeMeta["conversationId"] = conversationId;
       if (eventType) calleeMeta["eventType"] = eventType;
@@ -2630,6 +2356,10 @@ async function processTask(
         spec.slug,
         mcpOutputDir,
         (att) => pushAttachment(progressUrl, sessionId, att),
+        undefined,
+        // A delegated agent's 401/403 is the same signal as the parent's: the
+        // user's own connection is the fix, so it feeds the same connector card.
+        (serverType) => blockedConnectors.add(serverType),
       );
       try {
         const calleeCustom = loadCustomTools(
@@ -2658,6 +2388,7 @@ async function processTask(
             : "spaces";
         const calleeDirectPickSuffixes = calleeToolsConfig?.direct ?? [];
         const calleeInnerTools: string[] = [];
+        const calleeDebugHandle: import("../subagent-tools.js").ParentDebugHandle = {};
         const calleeSubagents = buildSubagentTools(
           calleeGroups,
           calleeCustom.tools,
@@ -2685,24 +2416,21 @@ async function processTask(
               userId,
             },
             ...(signal ? { abortSignal: signal } : {}),
+            parentDebug: calleeDebugHandle,
           },
           undefined,
           spec.customSubagents as import("../subagent-tools.js").CustomSubagentSpec[] | undefined,
           calleeDirectPickSuffixes,
         );
-        const calleeSandboxSelected = (calleeToolsConfig?.custom ?? []).some((s) => s.startsWith("sandbox-"));
         const calleeParentHoistedTools = calleeCustom.tools.filter((t) => {
           const src = (t as { source?: string }).source ?? "";
           return src === "custom:sandbox" && t.name !== "sandbox-destroy";
         });
-        const calleePlaywrightTools =
-          calleeSandboxSelected && playwrightGroup ? playwrightGroup.tools : [];
         let calleePalette = [
           ...calleeSubagents.subagentTools,
           ...calleeSubagents.directTools,
           ...calleeSubagents.remainingCustomTools,
           ...calleeParentHoistedTools,
-          ...calleePlaywrightTools,
           ...calleeKbTools,
         ];
         calleePalette = applyAgentToolFilter(calleePalette, calleeToolsConfig, {
@@ -2717,29 +2445,140 @@ async function processTask(
         }
 
         const providerConfig = spec.provider ? spec.providerConfigs?.[spec.provider] : undefined;
-        const result = await runTask({
-          userId,
-          task: question,
-          userName,
-          userEmail,
-          customTools: calleePalette,
-          systemPromptOverride: spec.systemPrompt,
-          cwd: workspaceDir,
-          provider: spec.provider,
-          providerConfig,
-          progressUrl: undefined,
-          sessionId: `${sessionId}-a2a-${spec.slug}`,
-          skills: spec.skills,
-          abortSignal: signal,
-          progressMeta: {
-            ...(conversationId ? { conversationId } : {}),
-            agentSlug: spec.slug,
+
+        // A delegation is a real run in a thread of its OWN, keyed per follow-up
+        // handle so a follow-up resumes it. Filed under the CALLER's conversation
+        // it would point at a thread holding none of its messages. `a2a_` marks
+        // it machine-initiated the way `app_` marks artifact-app threads: real
+        // and openable, but kept out of the chat sidebar.
+        const calleeFollowUpId = followUpId ?? randomUUID();
+        const calleeChatConversationId = `a2a_${calleeFollowUpId}`;
+        const calleeConversationId =
+          buildSandboxStoreKey(userId, calleeChatConversationId, spec.slug) ?? calleeChatConversationId;
+
+        // File the callee's trace inside the CALLER's run, so reading the
+        // parent's trace already contains the delegated session.
+        const parentStoreKey =
+          parentDebugHandle.storeKey ??
+          (conversationId ? buildSandboxStoreKey(userId, conversationId, agentSlug) : undefined);
+        const calleeSessionId = `${sessionId}-a2a-${toolCallId}`;
+        const calleeRunId = childRunIdFor(Date.now(), spec.slug, toolCallId);
+        const calleeChildRun = parentStoreKey
+          ? {
+              storeKey: parentStoreKey,
+              runId: calleeRunId,
+              ...(parentDebugHandle.runId ? { parentRunId: parentDebugHandle.runId } : {}),
+              parentSessionId: sessionId,
+              parentToolCallId: toolCallId,
+              label: spec.slug,
+              kind: "agent" as const,
+              ...(parentDebugHandle.captureLevel ? { captureLevel: parentDebugHandle.captureLevel } : {}),
+              ...(progressUrl ? { liveMirror: progressUrl } : {}),
+            }
+          : undefined;
+
+        parentDebugHandle.recorder?.record(
+          "subagent_start",
+          {
+            subagentName: spec.slug,
+            childKind: "agent",
+            ...(calleeChildRun ? { childRunId: calleeRunId } : {}),
+            question,
+            questionChars: question.length,
+            provider: spec.provider ?? "spaces",
+            model: providerConfig?.model ?? "shared",
+            toolNames: calleePalette.map((t) => t.name),
           },
+          { toolCallId },
+        );
+
+        const calleeStartedAt = Date.now();
+        await reportDelegatedRunStart({
+          sessionId: calleeSessionId,
+          userId,
+          agentSlug: spec.slug,
+          task: question,
+          conversationId: calleeChatConversationId,
+          parentSessionId: sessionId,
+          ...(agentSlug ? { parentAgentSlug: agentSlug } : {}),
+          parentToolCallId: toolCallId,
         });
-        if (calleeInnerTools.length > 0) {
-          subagentInnerTools.push(...calleeInnerTools.map((toolName) => `${spec.slug}.${toolName}`));
+        try {
+          const result = await runTask({
+            userId,
+            task: question,
+            userName,
+            userEmail,
+            customTools: calleePalette,
+            systemPromptOverride: spec.systemPrompt,
+            cwd: workspaceDir,
+            provider: spec.provider,
+            providerConfig,
+            progressUrl: undefined,
+            conversationId: calleeConversationId,
+            sessionId: calleeSessionId,
+            skills: spec.skills,
+            abortSignal: signal,
+            parentDebug: calleeDebugHandle,
+            ...(calleeChildRun ? { childRun: calleeChildRun } : {}),
+            progressMeta: {
+              ...(conversationId ? { conversationId } : {}),
+              agentSlug: spec.slug,
+            },
+          });
+          if (calleeInnerTools.length > 0) {
+            subagentInnerTools.push(...calleeInnerTools.map((toolName) => `${spec.slug}.${toolName}`));
+          }
+          parentDebugHandle.recorder?.record(
+            "subagent_end",
+            {
+              subagentName: spec.slug,
+              childKind: "agent",
+              ...(calleeChildRun ? { childRunId: calleeRunId } : {}),
+              status: "completed",
+              durationMs: Date.now() - calleeStartedAt,
+              textLength: result.text.length,
+              toolsUsed: result.toolsUsed,
+            },
+            { toolCallId },
+          );
+          await reportDelegatedRunFinish({
+            sessionId: calleeSessionId,
+            status: "completed",
+            result: result.text,
+            ...(spec.provider ? { provider: spec.provider } : {}),
+            ...(providerConfig?.model ? { model: providerConfig.model } : {}),
+            toolsUsed: result.toolsUsed,
+            toolInvocations: result.toolInvocations,
+            tokenUsage: result.tokenUsage,
+            ...(result.latency ? { latency: result.latency } : {}),
+          });
+          return {
+            text: result.text,
+            toolsUsed: result.toolsUsed,
+            followUpId: calleeFollowUpId,
+          };
+        } catch (err) {
+          parentDebugHandle.recorder?.record(
+            "subagent_end",
+            {
+              subagentName: spec.slug,
+              childKind: "agent",
+              ...(calleeChildRun ? { childRunId: calleeRunId } : {}),
+              status: signal?.aborted ? "cancelled" : "error",
+              durationMs: Date.now() - calleeStartedAt,
+              providerError: err instanceof Error ? err.message : String(err),
+            },
+            { toolCallId },
+          );
+          await reportDelegatedRunFinish({
+            sessionId: calleeSessionId,
+            status: signal?.aborted ? "cancelled" : "failed",
+            error: err instanceof Error ? err.message : String(err),
+            ...(spec.provider ? { provider: spec.provider } : {}),
+          });
+          throw err;
         }
-        return { text: result.text, toolsUsed: result.toolsUsed };
       } finally {
         await calleeMcp.cleanup().catch(() => {});
       }
@@ -2747,9 +2586,13 @@ async function processTask(
 
     // Per-agent, per-run delegation budget. Read from the parent agent's
     // free-form config bag (set in the Behaviour screen) and clamped to a safe
-    // range; falls back to A2A_DEFAULTS.MAX_DELEGATIONS_PER_RUN when unset.
+    // range; falls back to A2A_DEFAULTS.MAX_DELEGATIONS_PER_RUN when unset
+    // (the higher MAX_DELEGATIONS_PER_RUN_ORCHESTRATOR for orchestrator-tier runs).
     const maxDelegationsPerRun = clampMaxDelegationsPerRun(
       agentConfig?.["maxDelegationsPerRun"],
+      delegationMode === "orchestrator"
+        ? A2A_DEFAULTS.MAX_DELEGATIONS_PER_RUN_ORCHESTRATOR
+        : undefined,
     );
     if (agentConfig?.["maxDelegationsPerRun"] !== undefined) {
       log(
@@ -2759,6 +2602,11 @@ async function processTask(
     const delegationGovernor = new AgentDelegationGovernor({
       ownerSlug: agentSlug ?? "root",
       maxDelegationsPerRun,
+      // Orchestrator-tier runs fan a multi-part request out to one specialist
+      // per part; serializing them would make the wait the SUM of the callees
+      // instead of the slowest, which is the whole point of routing. Standard
+      // callers keep the concurrency-1 mutex. Budget + depth cap still bound it.
+      ...(delegationMode === "orchestrator" ? { concurrency: Number.POSITIVE_INFINITY } : {}),
       onEvent: (ev) => {
         log(`A2A ${ev.kind}: ${ev.caller} -> ${ev.callee}${ev.reason ? ` (${ev.reason})` : ""}`);
         if (ev.kind === "requested" || ev.kind === "queued" || ev.kind === "started") {
@@ -2796,23 +2644,38 @@ async function processTask(
             delegationGovernor,
             hydrateOrchestratorCallee,
             buildNestedRunner(),
-            { ...(abortSignal ? { signal: abortSignal } : {}), onProgress: emitDelegationProgress },
+            {
+              ...(abortSignal ? { signal: abortSignal } : {}),
+              onProgress: emitDelegationProgress,
+              registry: childTaskRegistry,
+            },
           ) as unknown as ToolDefinition[]
         : buildCallableAgentTools(
             callableAgents as CallableAgentSpec[],
             delegationGovernor,
             buildNestedRunner(),
-            { ...(abortSignal ? { signal: abortSignal } : {}), onProgress: emitDelegationProgress },
+            {
+              ...(abortSignal ? { signal: abortSignal } : {}),
+              onProgress: emitDelegationProgress,
+              registry: childTaskRegistry,
+            },
           ) as unknown as ToolDefinition[]
       : [];
+
+    // Only worth exposing when something in this run can actually spawn
+    // background work to inspect.
+    const childTaskTools =
+      subagentTools.length > 0 || callableAgentTools.length > 0
+        ? buildChildTaskTools(childTaskRegistry)
+        : [];
 
     const fastAlwaysActiveToolNames = new Set([
       ...directTools,
       ...remainingCustomTools,
       ...parentHoistedTools,
-      ...playwrightHoistedTools,
       ...kbHoistedTools,
       ...callableAgentTools,
+      ...childTaskTools,
     ].map((tool) => tool.name));
 
     let allTools = [
@@ -2820,10 +2683,10 @@ async function processTask(
       ...fastMetaTools, // search-tools/load-tools in fast mode only
       ...fastCatalogCandidateItems.map((item) => item.tool), // narrowed after all standard filters, dormant until load-tools activates them
       ...callableAgentTools, // A2A governed full-agent delegation tools
+      ...childTaskTools, // task-status / task-stop over background children
       ...directTools, // write tools (create-ticket, send-message)
       ...remainingCustomTools, // custom tools not wrapped in a subagent
       ...parentHoistedTools, // sandbox tools mounted directly on the parent
-      ...playwrightHoistedTools, // browser tools, for sandbox-selected agents
       ...kbHoistedTools, // kb-* tools when the agent has ≥1 AgentCollection grant
     ];
 
@@ -2846,13 +2709,16 @@ async function processTask(
 
     // Apply agent-level tool config from DB (agent.config.tools). Reuses the
     // toolsConfigEarly parse we did above for the directPickSuffixes hoist.
+    // `toolsConfigEarly` is undefined only for an orchestrator with nothing
+    // selected — it keeps every resolved tool, capped by active_tool_cap below.
     if (toolsConfigEarly) {
       const allowedSubagents = new Set(toolsConfigEarly.subagents ?? []);
       const allowedDirect = toolsConfigEarly.direct ?? [];
       const allowedCustom = expandCustomSelection(toolsConfigEarly.custom);
       const allowedGatewayServices = new Set(toolsConfigEarly.gateway ?? []);
 
-      allTools = allTools.filter((t) => {
+
+      const grantedByConfig = (t: (typeof allTools)[number]): boolean => {
         if (subagentTools.some((s) => s.name === t.name))
           return allowedSubagents.has(t.name);
         if (directTools.some((d) => d.name === t.name)) {
@@ -2867,17 +2733,8 @@ async function processTask(
           // matching across different servers — we compare the whole string,
           // not just the bare suffix, so a config entry from server A can't
           // accidentally grant tools from server B that share a bare name.
-          const norm = (s: string): string =>
-            s.toLowerCase().replace(/_/g, "-");
-          const tNorm = norm(t.name);
           const toolSelectionKey = (t as { selectionKey?: string }).selectionKey;
-          const isDirectPick = allowedDirect.some((d: string) =>
-            t.name === d ||
-            t.name.endsWith(d) ||
-            d.endsWith(`__${t.name}`) ||
-            tNorm === norm(d) ||
-            (toolSelectionKey ? d === toolSelectionKey : false),
-          );
+          const isDirectPick = matchesDirectPick(t, allowedDirect);
           // Gateway tools are exposed as direct tools; keep them when their
           // service name (e.g. "mettle") is selected in tools.gateway.
           // Use stable serviceName metadata instead of mutable display label.
@@ -2925,11 +2782,46 @@ async function processTask(
           return false;
         }
         return true;
+      };
+
+      /**
+       * Live gate for the open palette. `tool-resolution.ts::authorize()` has
+       * the same rule but no production caller yet — without this one, a tool
+       * the claw-auth gates admitted would just get dropped again below.
+       * Wrappers are excluded: one stands for a whole server, not a single tool.
+       */
+      const admittedByOpenPalette = (t: (typeof allTools)[number]): boolean => {
+        if (paletteMode === "off") return false;
+        if (subagentTools.some((s) => s.name === t.name)) return false;
+        return openPaletteAdmits(paletteMode, t.name, (t as { isWriteTool?: boolean }).isWriteTool);
+      };
+
+      const before = allTools.length;
+      allTools = allTools.filter((t) => {
+        if (grantedByConfig(t)) return true;
+        if (!admittedByOpenPalette(t)) return false;
+        // Palette-only grant: must land in the catalog, not always-active —
+        // see the fastCatalogItems filter below.
+        paletteAdmittedNames.add(t.name);
+        return true;
       });
+      const granted = allTools.filter(grantedByConfig).length;
 
       log(
-        `Agent tools config applied: ${allTools.length} tools after filtering`,
+        `Agent tools config applied: ${allTools.length} tools after filtering` +
+        (paletteMode === "off" ? "" : ` (open palette "${paletteMode}" admitted ${allTools.length - granted} beyond the grant, of ${before} offered)`),
       );
+
+      // task-status / task-stop were built from the PRE-filter wrappers. When
+      // the selection kept nothing that can run in the background (e.g. a
+      // standard agent with nothing selected), they have nothing to inspect.
+      const canRunInBackground = allTools.some((t) =>
+        subagentTools.some((s) => s.name === t.name) || callableAgentTools.some((c) => c.name === t.name),
+      );
+      if (!canRunInBackground && childTaskTools.length > 0) {
+        const childTaskNames = new Set(childTaskTools.map((t) => t.name));
+        allTools = allTools.filter((t) => !childTaskNames.has(t.name));
+      }
     }
 
     // ── Plan tools: framework default, not per-agent config ──────────────────
@@ -2950,7 +2842,7 @@ async function processTask(
     // actively conflict with twin_deliver — the model followed the primer and
     // never called the delivery tool, fail-closing to silence. Exclude the twin
     // mention flow from plan tools/primer entirely.
-    const isTwinMentionFlow = !!agentSlug && isDigitalTwinAgent(agentSlug) && eventType === "USER_MENTIONED";
+    const isTwinMentionFlow = isTwinAgent && eventType === "USER_MENTIONED";
     // Plan mode (agent.config.planMode → dispatched with mode='plan' for non-twin
     // thread mentions): the agent gets a READ-ONLY palette + the terminal
     // propose-plan tool, proposes a plan, and STOPS for approval. The
@@ -2980,17 +2872,37 @@ async function processTask(
     // pay the whole cost.
     const planTrackingEnabled =
       agentConfig?.["planTracking"] !== false && agentConfig?.["planTracking"] !== "false";
-    const planToolsDefaultOn =
+    const planGateEligible =
       planTrackingEnabled &&
       (!!channelId || (progressUrl && typeof progressUrl !== "string")) &&
       !isScheduledOrAutomationRun(eventType, conversationId) &&
       !isTwinMentionFlow &&
       !isPlanMode &&
       !isDailyBrief;
+    const planGatePreviousReply =
+      planGateEligible && isShortFollowUp(task)
+        ? readPreviousAgentReply(
+            sessionDir(
+              buildSandboxStoreKey(userId, piSessionConversationId ?? conversationId, agentSlug) ??
+                piSessionConversationId ??
+                conversationId ??
+                "",
+            ),
+          )
+        : undefined;
+    const planGate = planGateEligible ? await decidePlanTracking(task, agentConfig, {}, planGatePreviousReply) : null;
+    const planToolsDefaultOn = planGateEligible && (planGate?.plan ?? true);
     if (!planTrackingEnabled) log("[plan] planTracking=false — todo tools and primer suppressed");
+    if (planGate && !planGate.plan) log(`[plan] jev says direct reply (p=${planGate.probability?.toFixed(2)}) — todo tools and primer skipped`);
     const planTools = remainingCustomTools.filter((t) => isPlanToolSlug(t.name));
     allTools = allTools.filter((t) => !isPlanToolSlug(t.name));
-    if (planToolsDefaultOn) allTools.push(...planTools);
+    if (planToolsDefaultOn) {
+      allTools.push(...planTools);
+      // The palette filter ran earlier and may have marked plan tools
+      // palette-only (they read as non-write); undo that so the framework
+      // default keeps them always-active, not stuck behind load-tools.
+      for (const t of planTools) paletteAdmittedNames.delete(t.name);
+    }
     // Plan mode swaps the live todo-write/todo-read tools OUT (they're already
     // filtered above; planToolsDefaultOn is false here) and the terminal
     // propose-plan tool IN — the ONLY exit in plan mode. It captures the plan
@@ -3061,16 +2973,21 @@ async function processTask(
     // mode's read-only filter passes it through untouched), and an agent
     // configured to plan first should still be able to say what it is. Twin is
     // excluded because that flow delivers through its own approval surface.
-    const describeAgentAvailable =
-      (!!channelId || (progressUrl && typeof progressUrl !== "string")) &&
+    const interactiveCardRun =
       !isScheduledOrAutomationRun(eventType, conversationId) &&
       !isTwinMentionFlow &&
       !isDailyBrief;
+    const hasSpacesCardSurface = !!channelId || (progressUrl && typeof progressUrl !== "string");
+    const isChatSurfaceRun = !channelId && !eventType;
+    const describeAgentAvailable = interactiveCardRun && (hasSpacesCardSurface || isChatSurfaceRun);
     if (describeAgentAvailable) {
       allTools.push(buildDescribeAgentTool(describeAgentRef));
-      // Same gate as describe-agent: a connector card is only worth posting
-      // where a human is watching and can press Connect.
-      allTools.push(buildSuggestConnectorsTool(suggestConnectorsRef, userId));
+    }
+    if (interactiveCardRun && hasSpacesCardSurface) {
+      allTools.push(buildSuggestConnectorsTool(suggestConnectorsRef, userId, { agentSlug }));
+    }
+    if (describeAgentAvailable) {
+      allTools.push(buildSuggestProvidersTool(suggestProvidersRef, userId));
     }
 
 
@@ -3101,7 +3018,7 @@ async function processTask(
       log("Memory enabled — injected memory-search tool");
       // Deterministic file-memory tools (read/write named files) — twin only,
       // since the file store is per-user (agentSlug + userId).
-      if (isDigitalTwinAgent(agentSlug)) {
+      if (isTwinAgent) {
         for (const t of buildMemoryFileTools(agentSlug, userId, sessionId)) allTools.push(t);
         allTools.push(buildMemoryWriteTool(agentSlug, userId, sessionId));
         log("Digital Twin — injected read/write memory-file tools + memory-write");
@@ -3157,7 +3074,6 @@ async function processTask(
     const verifyAllDefault =
       (process.env["RESPONSE_VERIFY_ALL"] ?? "off").toLowerCase() === "on";
     const verifyCfg = agentConfig?.["verifyResponses"] as boolean | undefined;
-    const isTwinAgent = agentSlug ? isDigitalTwinAgent(agentSlug) : false;
 
     // Digital Twin mention/approval flow: the twin_deliver tool is the single,
     // MANDATORY delivery channel (react and/or reply, and where). It replaces the
@@ -3301,12 +3217,25 @@ async function processTask(
     // runs (reviewer agents). It wins over allowWriteInReadOnlyJob — explicit
     // read-only intent — and applies even to interactive (non-job) runs.
     const forceReadOnlySandbox = agentConfig?.["forceReadOnlySandbox"] === true;
+
+    // Default off. Read once here so the palette filter and the search tool's
+    // wording stay in sync.
+    const openPaletteEnabled = openPaletteMode(agentConfig) !== "off";
     if (forceReadOnlySandbox || (isReadOnlyJob && !allowWriteInReadOnlyJob)) {
       // Keep in sync with SBX_GIT.disabledTools (xyne-claw-shared/.../repo-configs.ts).
       const RO_DISABLED = new Set([
         "sandbox-run", "sandbox-run-detached", "sandbox-write-file",
         "sandbox-create", "sandbox-destroy", "write",
       ]);
+      const pinnedProfile = meta["sandboxRepo"] ? REPO_CONFIGS[meta["sandboxRepo"]] : undefined;
+      if (!forceReadOnlySandbox && pinnedProfile && !pinnedProfile.repoUrl) {
+        RO_DISABLED.delete("sandbox-create");
+        RO_DISABLED.delete("sandbox-destroy");
+        RO_DISABLED.delete("sandbox-run");
+        RO_DISABLED.delete("sandbox-run-detached");
+        RO_DISABLED.delete("sandbox-write-file");
+        RO_DISABLED.delete("write");
+      }
       const before = allTools.length;
       allTools = allTools.filter((t) => !RO_DISABLED.has(t.name));
       if (allTools.length !== before) {
@@ -3359,26 +3288,118 @@ async function processTask(
     }
 
     allTools = dedupeToolsByName(allTools);
+    if (optEnabled("active_tool_cap")) {
+      const demotable = new Set(
+        [...directTools, ...remainingCustomTools, ...parentHoistedTools, ...kbHoistedTools].map((tool) => tool.name),
+      );
+      const capPlan = planActiveToolCap({
+        activeNames: allTools
+          .filter((tool) =>
+            !duplicatesMetaTool(tool.name) &&
+            (!fastCatalogCandidateByName.has(tool.name) ||
+              (fastAlwaysActiveToolNames.has(tool.name) && !paletteAdmittedNames.has(tool.name))),
+          )
+          .map((tool) => tool.name),
+        demotable,
+        pinned: new Set([
+          PROPOSE_PLAN_TOOL_NAME,
+          EMIT_BRIEF_TOOL_NAME,
+          "ask-user-question",
+          ...forcedTaskCommandTools,
+          ...(taskCommand?.requiredTool ? [taskCommand.requiredTool] : []),
+        ]),
+        usageRank: readToolUsageRank(agentConfig),
+        cap: activeToolCap(agentConfig),
+        fixedExtra: 7,
+      });
+      const toolByName = new Map(allTools.map((tool) => [tool.name, tool]));
+      for (const name of capPlan.demote) {
+        const tool = toolByName.get(name);
+        if (!tool) continue;
+        const item = demotedCatalogItem(tool, isWriteTool(tool, allGroups));
+        fastCatalogCandidateItems.push(item);
+        fastCatalogCandidateByName.set(name, item);
+        fastAlwaysActiveToolNames.delete(name);
+      }
+      log(
+        `[active-tool-cap] outcome=${capPlan.outcome} cap=${capPlan.cap} total=${capPlan.total} budget=${capPlan.budget} demoted=${capPlan.demote.length}${capPlan.demote.length ? ` (${capPlan.demote.join(", ")})` : ""}`,
+      );
+    }
     // Derived predicate, not a new config knob: the catalog machinery runs when
     // there is something to catalogue. `fastModeEnabled ||` keeps fast mode
     // byte-identical — a fast-mode run with an EMPTY catalog still gets its
     // (empty) meta-tools exactly as it did before, rather than silently losing
-    // search-tools/load-tools.
-    const catalogActive = fastModeEnabled || fastCatalogCandidateItems.length > 0;
+    // search-tools/load-tools. Orchestrators ALWAYS get them: their job is
+    // finding the right capability, and search-tools scope="claw" is how they
+    // see tools (connected or not) beyond what this run resolved.
+    //
+    // Decided on the catalog that SURVIVED the selection filter, not on the
+    // pre-filter candidates: a standard agent whose selection leaves nothing to
+    // load gets no search-tools / load-tools (they would only ever answer
+    // "the catalog is empty").
+    const isOrchestratorRun = delegationMode === "orchestrator";
+    const registeredToolNames = new Set(allTools.map((tool) => tool.name));
+    const survivingCatalogItems = fastCatalogCandidateItems.filter((item) =>
+      registeredToolNames.has(item.entry.name) &&
+      // Palette-admitted tools can also be in the always-active list (def-less
+      // servers push everything to directTools) — palette wins, route to catalog.
+      (paletteAdmittedNames.has(item.entry.name) || !fastAlwaysActiveToolNames.has(item.entry.name)),
+    );
+    const catalogActive = fastModeEnabled || survivingCatalogItems.length > 0 || isOrchestratorRun;
+    const suggestConnectorsRegistered = allTools.some((tool) => tool.name === SUGGEST_CONNECTORS_TOOL_NAME);
+    const suggestProvidersRegistered = allTools.some((tool) => tool.name === SUGGEST_PROVIDERS_TOOL_NAME);
     if (catalogActive) {
-      const registeredToolNames = new Set(allTools.map((tool) => tool.name));
-      fastCatalogItems = fastCatalogCandidateItems.filter((item) =>
-        registeredToolNames.has(item.entry.name) &&
-        !fastAlwaysActiveToolNames.has(item.entry.name),
-      );
+      fastCatalogItems = survivingCatalogItems;
       fastCatalogNames = fastCatalogItems.map((item) => item.entry.name);
       const finalFastCatalogNameSet = new Set(fastCatalogNames);
+      const activeToolEntries: ToolCatalogEntry[] | undefined =
+        optEnabled("catalog_full_index") || optEnabled("subagent_read_tools") || optEnabled("subagent_direct_only") || optEnabled("active_tool_cap")
+          ? allTools
+              .filter((tool) =>
+                !duplicatesMetaTool(tool.name) &&
+                tool.name !== "search-tools" &&
+                tool.name !== "load-tools" &&
+                !finalFastCatalogNameSet.has(tool.name) &&
+                (!fastCatalogCandidateByName.has(tool.name) || fastAlwaysActiveToolNames.has(tool.name)),
+              )
+              .map((tool) => ({
+                name: tool.name,
+                oneLineDescription: String(tool.description ?? "").replace(/\s+/g, " ").trim().slice(0, 300),
+                source: "active",
+                catalog: "active",
+              }))
+          : undefined;
       allTools = dedupeToolsByName([
         ...buildFastModeMetaTools({
           catalog: fastCatalogItems.map((item) => item.entry),
+          ...(activeToolEntries ? { activeTools: activeToolEntries } : {}),
           controller: fastToolController,
+          // Injected here (needs the run's session) rather than imported by the
+          // catalog module; absent without a session — scope:"claw" reports why.
+          ...(sessionId && sessionToken
+            ? {
+                searchDeployment: (params: Parameters<DeploymentToolSearch>[0]) =>
+                  searchDeploymentTools(sessionId, sessionToken, params),
+              }
+            : {}),
+          openPalette: openPaletteEnabled,
+          mcpServers: describeMcpServers(allGroups),
+          unresolvedConfigured,
+          suggestConnectorsAvailable: suggestConnectorsRegistered,
+          runToolNames: [...registeredToolNames],
+          ...(fastCatalogItems.length === 0 && (customSubagents?.length ?? 0) > 0
+            ? {
+                emptyCatalogNote:
+                  `Configured subagents: ${customSubagents!.map((s) => s.name).join(", ")} — they resolved to 0 tools, ` +
+                  "so their MCP servers have no credentials in this run.",
+              }
+            : {}),
         }),
         ...allTools.filter((tool) => {
+          // claw-auth's `search_tools` duplicates this meta-tool and, having no
+          // label, renders identically as "Search Tools" in the run trace. It's
+          // eager rather than catalogued, so it must be dropped here.
+          if (duplicatesMetaTool(tool.name)) return false;
           if (!fastCatalogCandidateByName.has(tool.name)) return true;
           return finalFastCatalogNameSet.has(tool.name) || fastAlwaysActiveToolNames.has(tool.name);
         }),
@@ -3481,6 +3502,27 @@ async function processTask(
       fullContext = fullContext
         ? `${fullContext}\n\n${metaLines.join("\n")}`
         : metaLines.join("\n");
+    }
+
+    // Configured-but-unresolved connectors. The agent's selection grants these
+    // servers, the UI shows them as selected, but this user has no working
+    // connection, so their tools never reached the tool list. Say so up front:
+    // otherwise the agent answers as if the capability does not exist instead
+    // of offering the one fix (the user connecting it).
+    if (unresolvedConfigured.length > 0) {
+      const connectorPrimer = renderUnresolvedConfigured(unresolvedConfigured, suggestConnectorsRegistered);
+      fullContext = fullContext ? `${fullContext}\n\n${connectorPrimer}` : connectorPrimer;
+      log(`[connectors] configured-but-unresolved: ${unresolvedConfigured.map((u) => `${u.serverType}:${u.reason}`).join(", ")}`);
+    }
+
+    if (suggestProvidersRegistered) {
+      const runModelPrimer = [
+        "## Your model",
+        `You are running on provider \`${provider ?? "spaces"}\`, model \`${effectiveModel}\`.`,
+        "If the user asks what model or provider YOU run on, answer from this line — it is your own configuration.",
+        "That is NOT a question about their connected accounts, so do not call suggest-providers for it and do not say the model is unavailable to you.",
+      ].join("\n");
+      fullContext = fullContext ? `${fullContext}\n\n${runModelPrimer}` : runModelPrimer;
     }
 
     // /goal-awareness primer. Injected only when suggest-goal is registered
@@ -3607,12 +3649,16 @@ async function processTask(
       // sandbox-* slug in tools.custom.
       return customList.some((s) => s.startsWith("sandbox-"));
     })();
+    const sdlcRepositoryAccessEnabled =
+      Boolean(meta[SDLC_META_KEYS.actorUserId]) &&
+      (((agentConfig?.["tools"] as Record<string, unknown> | undefined)?.["custom"] ?? []) as unknown[]).includes(
+        "sdlc-repository-access",
+      );
     if (sandboxEnabledForPrompt) {
-      const isSdlcRepositoryContext = Boolean(meta["sdlcRepositoryId"]);
       const sandboxLines: string[] = [
         "## Sandbox usage",
-        isSdlcRepositoryContext
-          ? "This SDLC repository uses one write-capable workspace. Capability is not authorization: inspect only unless the task explicitly requires implementation. Follow the repository's declared package manager and setup instructions. If a required package-manager command is unavailable, make one bounded attempt to install/enable it; use npm as a fallback only when the repository's scripts and lockfiles support npm. Do not loop on environment repair. If setup or verification still fails, stop cleanly and report the exact command/error, changes already completed, checks not run, and branch/commit/PR state."
+        sdlcRepositoryAccessEnabled
+          ? "SDLC hub repositories: follow the SDLC Run Context section for sandbox, repository access and pull requests. Capability is not authorization: inspect only unless the task explicitly requires implementation. Follow the repository's declared package manager and setup instructions. If a required package-manager command is unavailable, make one bounded attempt to install/enable it; use npm as a fallback only when the repository's scripts and lockfiles support npm. Do not loop on environment repair. If setup or verification still fails, stop cleanly and report the exact command/error, changes already completed, checks not run, and branch/commit/PR state."
           : "READ vs WRITE — this matters. For read-first repos (e.g. xyne-spaces) `sandbox-repo-setup` DEFAULTS to an instant READ-ONLY git sandbox (no wait): use it for reading, grepping, and inspecting code / PR review — which is almost everything. Only call `sandbox-repo-setup` with `write:true` when you must actually EDIT files, build, run tests, or commit — that claims a short-lived, auto-expiring writable dev sandbox. Do NOT request write just to look at code; default to read and escalate to write only when you're about to change something.",
         "Sandbox tools (sandbox-create, sandbox-run, sandbox-write-file, sandbox-read-file, sandbox-deliver-files, sandbox-pw-*) run code/commands in an isolated VM. Use them whenever you need execution, file generation, screenshots, or browser automation.",
         "- To send a file BACK to the user, you MUST call `sandbox-deliver-files` with the path(s). Returning file contents as text in your reply is NOT delivery — Spaces won't render it as an attachment.",
@@ -3885,16 +3931,10 @@ async function processTask(
         : "";
     // Digital Twin mention flow runs with the agent's CONFIGURED system prompt
     // (systemPromptOverride), so the twin_deliver mandate baked into
-    // buildSystemPrompt's fallback never reaches it — the model was never told
+    // buildTwinSystemPrompt's fallback never reaches it — the model was never told
     // the tool is its only output channel and just answered in text. Append the
     // mandate to the ACTUAL system prompt here so the model always sees it.
-    const twinMandate = isTwinMentionFlow
-      ? buildTwinDeliverMandate({
-          ...(userName ? { userName } : {}),
-          ...(senderName ? { senderName } : {}),
-          ...(channelName ? { channelName } : {}),
-        })
-      : "";
+    const twinMandate = isTwinMentionFlow ? buildTwinDeliverMandate({ userName, senderName, channelName }) : "";
     // Accounts the agent is configured to use but the user hasn't connected or
     // configured. Told to the model so it surfaces the gap instead of
     // fabricating results from a tool it never received.
@@ -3927,12 +3967,13 @@ async function processTask(
       : experiment
       ? `\n\n## Experiment mode\nYou are in a time-boxed experiment (epoch ${experiment.epoch}; deadline ${experiment.deadlineAt}; focus ${experiment.focus ?? "unspecified"}). You cannot finish early — end-experiment refuses before the deadline. Loop: read the ledger → declare a hypothesis (experiment-ledger action=hypothesis) → gather PROOF in the sandbox (failing test, benchmark delta, profile) → record the finding with its proof path. Never re-test refuted hypotheses. If your current lead dies, pick a different subsystem. Prose without a recorded finding is wasted time.`
       : "";
-    const authoritativeSdlcContext = trustedSdlcContext
-      ? `\n\n## Authoritative SDLC Run Context\n\nThe platform verified this immutable run context. Use these exact IDs and repository coordinates; never infer or replace them. Runtime credentials are intentionally absent.\n\n\`\`\`json\n${JSON.stringify(trustedSdlcContext, null, 2)}\n\`\`\``
-      : "";
+    const authoritativeSdlcContext = trustedSdlcContext ? buildSdlcRunContextSection(trustedSdlcContext) : "";
+    // R4: when tool-result sifting is on, tell the model up front what it will
+    // see and how to get the raw result — not only after the fact per result.
+    const siftGuide = optEnabled("jev_result_sift") ? RESULT_SIFT_GUIDE : "";
     const effectiveSystemPrompt = ((channelId
       ? `${basePrompt}${citationGuide}${SPACES_MENTION_GUIDE}`
-      : `${basePrompt}${citationGuide}`) + authoritativeSdlcContext) + twinMandate + experimentGuide;
+      : `${basePrompt}${citationGuide}`) + authoritativeSdlcContext) + siftGuide + twinMandate + experimentGuide;
     // Proof (twin mention flow only) that BOTH prompt changes actually reach the
     // model: the twin_deliver mandate + its who/where line in the SYSTEM prompt,
     // and the "@mentioned by" note in the USER-prompt context. Grep the run logs
@@ -3948,6 +3989,8 @@ async function processTask(
           // Only fast mode actually turns delegation off; asserting it on a
           // normal run would be a lie the model acts on.
           subagentDelegationDisabled: fastModeEnabled,
+          fullIndex: optEnabled("catalog_full_index") || optEnabled("subagent_read_tools") || optEnabled("subagent_direct_only") || optEnabled("active_tool_cap"),
+          preferDirect: optEnabled("subagent_read_tools") && !optEnabled("subagent_direct_only"),
         })
       : "";
     if (fastModeCatalogPrompt) {
@@ -4094,7 +4137,7 @@ async function processTask(
           : {}),
         ...(twinPersonaBlock ? { twinPersona: twinPersonaBlock } : {}),
         abortSignal,
-        debugStartedAt: parallelFollowUpStartedAt,
+        debugStartedAt: runDebugStartedAt,
         // Raw Spaces identity for progress callbacks → lets /webhook/progress fall
         // back to claw-auth's conv-keyed session index (mirrors the /result body).
         progressMeta: {
@@ -4112,9 +4155,10 @@ async function processTask(
         // Thread invocations (Spaces/Slack replies — channelId present) keep a
         // clean posted reply = the last 2 assistant turns; ask-ai and every other
         // surface keep ALL turns so the stored answer matches the streamed one.
-        finalAnswerMaxTurns: channelId ? 2 : undefined,
+        finalAnswerMaxTurns: channelId ? (optEnabled("interim_messages") ? 1 : 2) : undefined,
         ...(isRegenerate ? { isRegenerate: true } : {}),
-        backgroundRegistry: backgroundSubagentRegistry,
+        backgroundRegistry: childTaskRegistry,
+        parentDebug: parentDebugHandle,
         fastMode: fastModeEnabled,
         ...(catalogActive ? { fastToolCatalogNames: fastCatalogNames } : {}),
         ...(catalogActive ? { fastToolController } : {}),
@@ -4228,9 +4272,77 @@ async function processTask(
       result.text,
       pendingQuestions,
     );
-    const inlineFollowUps = shouldAttachGeneratedFollowUps
-      ? parallelFollowUpResult
-      : undefined;
+    // End-of-loop follow-up generation: the agent's final answer is now known,
+    // so the fast model gets (history, user request, final answer). When a
+    // late-delivery callback exists, generation runs in the background after
+    // the answer is posted, so the answer's latency is unchanged. Without one,
+    // we await it inline (bounded by the generator's own timeout).
+    // NOTE: the "parallel_pending" outcome name is kept for wire compatibility
+    // with claw-auth / the dashboard debug panel; it now means "generating
+    // after the answer, delivered via the late follow-ups callback".
+    const lateFollowUpDeliveryUrl =
+      shouldAttachGeneratedFollowUps && lateFollowUpCallbackUrl
+        ? buildLateFollowUpCallbackUrl(lateFollowUpCallbackUrl)
+        : undefined;
+    const followUpStartedAt = new Date().toISOString();
+    const followUpDebugSeq = Date.now();
+    const startFollowUpGeneration = (
+      signal: AbortSignal | undefined,
+    ): Promise<{ generation: FollowUpGenerationResult; completedAt: string }> => {
+      const lifecycle = {
+        sessionId,
+        model: LITELLM.fastModel,
+        generationInput: followUpGenerationInput,
+        conversationMessageCount: followUpConversationHistory.length,
+        ...(followUpAgentContext ? { agentContext: followUpAgentContext } : {}),
+      };
+      pushDebugProgress(
+        progressUrl,
+        sessionId,
+        buildFollowUpGenerationStartEvent({
+          seq: followUpDebugSeq,
+          at: followUpStartedAt,
+          ...lifecycle,
+        }),
+      );
+      return generateFollowUpSuggestions({
+        task,
+        finalResponse: result.text,
+        agentContext: followUpAgentContext,
+        conversationHistory: followUpConversationHistory,
+        abortSignal: signal,
+      }).then((generation) => {
+        const settled = { generation, completedAt: new Date().toISOString() };
+        pushDebugProgress(
+          progressUrl,
+          sessionId,
+          buildFollowUpGenerationEndEvent({
+            seq: followUpDebugSeq + 1,
+            at: settled.completedAt,
+            startedAt: followUpStartedAt,
+            ...lifecycle,
+            generation,
+          }),
+        );
+        return settled;
+      });
+    };
+    let followUpPromise:
+      | Promise<{ generation: FollowUpGenerationResult; completedAt: string }>
+      | undefined;
+    let inlineFollowUps:
+      | { generation: FollowUpGenerationResult; completedAt: string }
+      | undefined;
+    if (shouldAttachGeneratedFollowUps) {
+      if (lateFollowUpDeliveryUrl) {
+        // The run's abort signal is deliberately NOT passed: the answer has
+        // already been produced, and tearing down the run must not cancel
+        // suggestions for it. The generator enforces its own timeout.
+        followUpPromise = startFollowUpGeneration(undefined);
+      } else {
+        inlineFollowUps = await startFollowUpGeneration(abortSignal);
+      }
+    }
     const followUpOutcome:
       | "delivered_inline"
       | "parallel_pending"
@@ -4295,12 +4407,12 @@ async function processTask(
         },
         result: `Follow-up generation ${followUpOutcome}.`,
         isError: false,
-        startedAt: parallelFollowUpStartedAt,
+        startedAt: followUpStartedAt,
         durationMs: inlineFollowUps
           ? Math.max(
               0,
               new Date(inlineFollowUps.completedAt).getTime() -
-                new Date(parallelFollowUpStartedAt).getTime(),
+                new Date(followUpStartedAt).getTime(),
             )
           : 0,
         status: followUpOutcome === "parallel_pending" ? ("running" as const) : ("completed" as const),
@@ -4333,7 +4445,18 @@ async function processTask(
     const pendingResponses = getPendingResponses();
     const completedProvider =
       completedAttempt?.provider ?? runtimeProvider ?? "spaces";
-    const completedModel = completedAttempt?.config?.model ?? effectiveModel;
+    // Report the model that the COMPLETED attempt actually used. The old
+    // `?? effectiveModel` leaked one provider's model onto another: the
+    // "spaces" attempt carries config: undefined by design, so a run that fell
+    // back to spaces reported the parent's model (spaces/gpt-5.5), and a codex
+    // run whose config had no model reported LITELLM.model
+    // (codex/private-large-spaces). Both shapes are visible in agent_runs and
+    // sent two prod diagnoses down the wrong path (2026-08-27/28). Only spaces
+    // may default to the platform model; anything else reports undefined
+    // (column left unset) rather than a model that never ran.
+    const completedModel =
+      completedAttempt?.config?.model ??
+      (completedProvider === "spaces" ? LITELLM.model : undefined);
     callbackProvider = completedProvider;
     callbackModel = completedModel;
 
@@ -4558,8 +4681,20 @@ async function processTask(
       pendingResponses.length === 0 &&
       pendingActions.length === 0 &&
       pendingQuestions.length === 0;
-    const emptyReason =
-      finalProducedNothing && providerFellBack ? "provider_capacity" : undefined;
+    // Reaching the success path having produced NOTHING — no text, no
+    // attachment, no pending anything — is an anomaly, not an outcome. A user
+    // stop is caught above (userCancelled) and a handoff throws, so the
+    // remaining cause is a turn that ended without writing: an aborted or
+    // stalled LLM request whose stopReason the loop treats as benign. Naming
+    // it here means the surfaces stop guessing why the answer was blank.
+    const emptyReason = finalProducedNothing
+      ? providerFellBack
+        ? "provider_capacity"
+        : "no_output"
+      : undefined;
+    if (emptyReason === "no_output") {
+      logErr(`[run] completed with no output at all session=${sessionId} agentSlug=${agentSlug ?? ""}`);
+    }
     const emptyReasonDetail =
       emptyReason && lastFallbackUnderlying
         ? lastFallbackUnderlying
@@ -4647,6 +4782,9 @@ async function processTask(
       ...(suggestConnectorsRef.value
         ? { pendingConnectorSuggestions: suggestConnectorsRef.value }
         : {}),
+      ...(suggestProvidersRef.value
+        ? { pendingProviderSuggestions: suggestProvidersRef.value }
+        : {}),
       ...(blockedConnectors.size > 0 ? { blockedConnectors: [...blockedConnectors] } : {}),
       ...(proposeAgentRef.value || describeAgentRef.value
         ? { pendingAgentCard: proposeAgentRef.value ?? describeAgentRef.value }
@@ -4661,18 +4799,16 @@ async function processTask(
       provider: completedProvider,
       model: completedModel,
     });
-    if (
-      followUpOutcome === "parallel_pending" &&
-      parallelFollowUpPromise &&
-      lateFollowUpCallbackUrl
-    ) {
-      const lateCallbackUrl = buildLateFollowUpCallbackUrl(lateFollowUpCallbackUrl);
-      if (lateCallbackUrl) {
-        void parallelFollowUpPromise.then(async ({ generation, completedAt }) => {
+    if (followUpOutcome === "parallel_pending" && followUpPromise && lateFollowUpDeliveryUrl) {
+      // Attached only after the main result callback above has been sent, so
+      // claw-auth always sees the answer before its follow-up suggestions.
+      const lateCallbackUrl = lateFollowUpDeliveryUrl;
+      void followUpPromise
+        .then(async ({ generation, completedAt }) => {
           const delivered = await sendCallback(lateCallbackUrl, sessionToken, {
             sessionId,
             suggestions: generation.suggestions,
-            startedAt: parallelFollowUpStartedAt,
+            startedAt: followUpStartedAt,
             completedAt,
             answerLength: result.text.length,
             enabledByV2Flag: followUpsEnabledByFlag,
@@ -4691,12 +4827,24 @@ async function processTask(
           if (!delivered) {
             clog.warn(`[follow-ups] late callback was not delivered sessionId=${sessionId}`);
           }
+        })
+        .catch((err: unknown) => {
+          clog.warn(
+            `[follow-ups] late generation failed sessionId=${sessionId}: ${err instanceof Error ? err.message : String(err)}`,
+          );
         });
-      }
     }
   } catch (err) {
     if (err instanceof RunHandoffError) {
-      await sendHandoffCallback(err.lastTurn);
+      if (execution?.hooks?.onDrainRequested) {
+        const decision = await execution.hooks.onDrainRequested();
+        if (decision === "reschedule") {
+          execution.outcome = "rescheduled";
+          log(`Run rescheduled for drain: ${sessionId} lastTurn=${err.lastTurn}`);
+          return;
+        }
+      }
+      log(`Run drain-signalled with no reschedule hook: ${sessionId} lastTurn=${err.lastTurn}`);
       return;
     }
     // HA: another pod already owns this conversation's lock. In callback mode
@@ -4834,6 +4982,9 @@ async function processTask(
         ...(describeAgentRef.value ? { pendingAgentCard: describeAgentRef.value } : {}),
         ...(suggestConnectorsRef.value
           ? { pendingConnectorSuggestions: suggestConnectorsRef.value }
+          : {}),
+        ...(suggestProvidersRef.value
+          ? { pendingProviderSuggestions: suggestProvidersRef.value }
           : {}),
         ...(blockedConnectors.size > 0 ? { blockedConnectors: [...blockedConnectors] } : {}),
         ...(pendingGoalSuggestion ? { pendingGoalSuggestion } : {}),
@@ -5128,12 +5279,18 @@ function buildLateFollowUpCallbackUrl(callbackUrl: string): string | undefined {
   }
 }
 
-async function sendCallback(
+export async function sendCallback(
   callbackUrl: ProgressDest,
   sessionToken: string,
   payload: Record<string, unknown>,
   opts?: { backoffsMs?: number[] },
 ): Promise<boolean> {
+  const fencedSid = payload["sessionId"] as string | undefined;
+  if (isFencedSession(fencedSid)) {
+    clog.warn(`[run] suppressing result for superseded run (ownership lost) session=${fencedSid}`);
+    metric.count("run_stale_result_suppressed", { session: fencedSid ?? "unknown" });
+    return false;
+  }
   // SSE mode: the final result is a `done` frame on the in-process emitter, not a POST.
   // The route handler closes the response after this returns.
   if (callbackUrl && typeof callbackUrl !== "string") {
@@ -5201,7 +5358,7 @@ async function sendCallback(
     } catch (err) {
       lastErr = err;
       clog.error(
-        `[run] Callback to ${url} threw (session=${sid}, attempt=${attempt}, bytes=${body.length}): ${err instanceof Error ? err.message : String(err)}`,
+        `[run] Callback to ${url} threw (session=${sid}, attempt=${attempt}, bytes=${body.length}): ${describeFetchError(err)}`,
       );
       if (attempt === maxAttempts) return false;
     }
@@ -5226,6 +5383,7 @@ router.post("/chain-judge", validateS2SKey, async (req, res: Response) => {
     taskTemplate,
     userQuery,
     judgeContext,
+    toolInvocations,
   } = req.body as {
     agentResult?: string;
     sourceAgent?: string;
@@ -5233,6 +5391,7 @@ router.post("/chain-judge", validateS2SKey, async (req, res: Response) => {
     taskTemplate?: string;
     userQuery?: string;
     judgeContext?: string;
+    toolInvocations?: Array<{ toolName?: string; command?: string; isError?: boolean }>;
   };
 
   if (!agentResult || !sourceAgent || !targetAgent) {
@@ -5252,6 +5411,7 @@ router.post("/chain-judge", validateS2SKey, async (req, res: Response) => {
     taskTemplate,
     userQuery,
     judgeContext,
+    Array.isArray(toolInvocations) ? toolInvocations : undefined,
   );
   res.json({ success: true, data: decision });
 });
@@ -5308,7 +5468,7 @@ router.post("/generate-prompt", validateS2SKey, async (req, res: Response) => {
     : `Generate a system prompt for an agent${agentName ? ` called "${agentName}"` : ""}. The user described it as:\n\n"${intent}"\n\nThe prompt should:\n- Define the agent's role and personality\n- List what the agent can and cannot do\n- Include guidelines for response style\n- Be concise but thorough (200-400 words)`;
 
   try {
-    const llmRes = await fetch(`${LITELLM.url}/v1/chat/completions`, {
+    const llmRes = await fetch(litellmEndpoint("/v1/chat/completions"), {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -5498,7 +5658,7 @@ router.post(
 
     try {
       const llmRes = await fetchLiteLLMWithRetry(
-        `${LITELLM.url}/v1/chat/completions`,
+        litellmEndpoint("/v1/chat/completions"),
         {
           method: "POST",
           headers: {
@@ -5717,7 +5877,7 @@ router.post("/suggest-tools", validateS2SKey, async (req, res: Response) => {
   ].join("\n");
 
   try {
-    const llmRes = await fetch(`${LITELLM.url}/v1/chat/completions`, {
+    const llmRes = await fetch(litellmEndpoint("/v1/chat/completions"), {
       method: "POST",
       headers: {
         "Content-Type": "application/json",

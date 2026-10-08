@@ -23,8 +23,10 @@ export class TicketUserMailboxACL extends BaseQueryACL<'ticket_user_mailbox'> {
       return owned.whereExists('channel', scalarChannelBody(this.ctx, channelId, isMember), SCALAR);
     }
 
+    // Pin the join direction — see tickets-acl.ts for the full rationale.
     return owned.whereExists('channel', (ch) =>
       ch.where(channelAccessWhere(this.ctx)),
+      { flip: false },
     );
   }
 }

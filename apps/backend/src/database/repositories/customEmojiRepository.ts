@@ -86,8 +86,10 @@ export class CustomEmojiRepository {
   }
 
   async findByName(name: string): Promise<CustomEmoji | null> {
+    const workspaceId = currentWorkspaceId();
+    if (!workspaceId) return null;
     return await this.db.customEmoji.findUnique({
-      where: { name },
+      where: { workspaceId_name: { workspaceId, name } },
     });
   }
 

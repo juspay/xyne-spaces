@@ -3,6 +3,7 @@ import { MessageAttachment } from '@prisma/client';
 import { AttachmentEntityType } from '@xyne/shared';
 
 export interface CreateMessageAttachmentInput {
+  id?: string; // Supplied when the caller needs to find its own rows again
   entityId: string; // Message ID or Ticket ID
   entityType: AttachmentEntityType; // CHAT or TICKET
   originalFilename: string;
@@ -16,6 +17,7 @@ export interface CreateMessageAttachmentInput {
   createdBy: string;
   storageProvider: string;
   conversationId: string | null;
+  channelId: string | null;
   workspaceId: string;
   metadata?: Record<string, any>; // eslint-disable-line @typescript-eslint/no-explicit-any
   createdAt?: Date;
@@ -41,6 +43,7 @@ export class MessageAttachmentRepository {
         createdBy: data.createdBy,
         storageProvider: data.storageProvider,
         conversationId: data.conversationId,
+        channelId: data.channelId,
         workspaceId: data.workspaceId,
         metadata: data.metadata || {},
         ...(data.uploadStatus && { uploadStatus: data.uploadStatus }),
@@ -188,6 +191,17 @@ export class MessageAttachmentRepository {
         entityId: messageId,
         entityType: AttachmentEntityType.CHAT
       }
+    });
+  }
+
+  /** Removes the attachments owned by note-taker recordings. */
+  async deleteByRecordingIds(recordingIds: string[]): Promise<void> {
+    if (recordingIds.length === 0) return;
+    await this.db.messageAttachment.deleteMany({
+      where: {
+        entityId: { in: recordingIds },
+        entityType: AttachmentEntityType.RECORDING,
+      },
     });
   }
 

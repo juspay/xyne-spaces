@@ -3,14 +3,21 @@ import { errMsg } from "../lib/errors.js";
 import { Router, type Request, type Response } from "express";
 import { agentChainWorkflowRepository, agentRepository } from "../repositories/index.js";
 import { getRequesterId, getOrgId, isClawAdmin , requireRequester} from "../middleware/agent-acl.js";
-import { requireS2S } from "../middleware/require-auth.js";
+import { requireStrictS2S } from "../middleware/require-auth.js";
 import { CONFIG } from "../config.js";
 import { prisma } from "../db.js";
 import { decrypt } from "../crypto.js";
-import { getSpacesAuthForUser, getWorkspaceIdForUser } from "../lib/spaces-db.js";
+import { getSpacesAuthForUser, getWorkspaceIdForUser, requestWorkspaceHint } from "../lib/spaces-db.js";
 import { setSession, type SessionContext } from "./webhook.js";
 import { spacesAppFetch } from "../lib/spaces-api.js";
 import { getAdminOrgScope, getOrgNameMap, withOrgLabel } from "../lib/admin-org-scope.js";
+import {
+  parseChainWorkflowDefinition,
+  validateChainWorkflowDefinition,
+  type ChainWorkflowDefinition,
+  type ChainWorkflowEdge,
+  type ChainWorkflowNode,
+} from "../lib/chain-workflow.js";
 
 import { asyncHandler, ok, badRequest, unauthorized, forbidden, notFound, HttpError } from "../lib/http.js";
 
@@ -21,29 +28,9 @@ const log = createLogger("chain-workflows");
 /*  Workflow definition types                                           */
 /* ------------------------------------------------------------------ */
 
-interface WorkflowNode {
-  id: string;
-  agentSlug: string;
-  taskTemplate?: string;
-}
-
-interface WorkflowEdge {
-  id: string;
-  fromNodeId: string;
-  toNodeId: string;
-  mode?: "always" | "tools" | "judge";
-  toolsMustInclude?: string[];
-  toolsMustExclude?: string[];
-  judgeContext?: string;
-  taskTemplate?: string;
-}
-
-interface WorkflowDefinition {
-  version?: number;
-  maxDepth?: number;
-  nodes: WorkflowNode[];
-  edges: WorkflowEdge[];
-}
+type WorkflowNode = ChainWorkflowNode;
+type WorkflowEdge = ChainWorkflowEdge;
+type WorkflowDefinition = ChainWorkflowDefinition;
 
 /* ------------------------------------------------------------------ */
 /*  Trigger JSON types (stored on agent_chain_workflows.triggers)      */
@@ -82,76 +69,8 @@ interface TriggerPayloadItem {
 
 const router = Router();
 
-function isStringArray(value: unknown): value is string[] {
-  return Array.isArray(value) && value.every((v) => typeof v === "string");
-}
-
-function parseWorkflowDefinition(definition: unknown): WorkflowDefinition | null {
-  if (!definition || typeof definition !== "object") return null;
-
-  const raw = definition as Record<string, unknown>;
-  if (!Array.isArray(raw["nodes"]) || !Array.isArray(raw["edges"])) return null;
-
-  const nodes = raw["nodes"]
-    .filter((n): n is Record<string, unknown> => typeof n === "object" && n !== null)
-    .filter((n) => typeof n["id"] === "string" && typeof n["agentSlug"] === "string")
-    .map((n) => ({
-      id: n["id"] as string,
-      agentSlug: n["agentSlug"] as string,
-      ...(typeof n["taskTemplate"] === "string" ? { taskTemplate: n["taskTemplate"] } : {}),
-    }));
-
-  const edges = raw["edges"]
-    .filter((e): e is Record<string, unknown> => typeof e === "object" && e !== null)
-    .filter((e) => typeof e["id"] === "string" && typeof e["fromNodeId"] === "string" && typeof e["toNodeId"] === "string")
-    .map((e) => {
-      const edge: WorkflowEdge = {
-        id: e["id"] as string,
-        fromNodeId: e["fromNodeId"] as string,
-        toNodeId: e["toNodeId"] as string,
-      };
-      const mode = e["mode"];
-      if (mode === "always" || mode === "tools" || mode === "judge") edge.mode = mode;
-      if (isStringArray(e["toolsMustInclude"])) edge.toolsMustInclude = e["toolsMustInclude"];
-      if (isStringArray(e["toolsMustExclude"])) edge.toolsMustExclude = e["toolsMustExclude"];
-      if (typeof e["judgeContext"] === "string") edge.judgeContext = e["judgeContext"];
-      if (typeof e["taskTemplate"] === "string") edge.taskTemplate = e["taskTemplate"];
-      return edge;
-    });
-
-  if (nodes.length === 0) return null;
-
-  return {
-    nodes,
-    edges,
-    ...(typeof raw["version"] === "number" ? { version: raw["version"] } : {}),
-    ...(typeof raw["maxDepth"] === "number" ? { maxDepth: raw["maxDepth"] } : {}),
-  };
-}
-
-function validateWorkflowDefinition(definition: WorkflowDefinition): string | null {
-  if (definition.nodes.length === 0) return "workflow must include at least one node";
-
-  const nodeIdSet = new Set<string>();
-  for (const node of definition.nodes) {
-    if (!node.id.trim()) return "node id is required";
-    if (!node.agentSlug.trim()) return "node agentSlug is required";
-    if (nodeIdSet.has(node.id)) return `duplicate node id: ${node.id}`;
-    nodeIdSet.add(node.id);
-  }
-
-  for (const edge of definition.edges) {
-    if (!nodeIdSet.has(edge.fromNodeId) || !nodeIdSet.has(edge.toNodeId)) {
-      return `edge ${edge.id} references missing nodes`;
-    }
-  }
-
-  if (definition.maxDepth !== undefined && (definition.maxDepth < 1 || definition.maxDepth > 50)) {
-    return "maxDepth must be between 1 and 50";
-  }
-
-  return null;
-}
+const parseWorkflowDefinition = parseChainWorkflowDefinition;
+const validateWorkflowDefinition = validateChainWorkflowDefinition;
 
 function parseTriggers(raw: unknown): WorkflowTrigger[] {
   if (!Array.isArray(raw)) return [];
@@ -195,6 +114,7 @@ async function callSpacesAutomations(
   method: "POST" | "PUT" | "DELETE",
   path: string,
   body?: Record<string, unknown>,
+  workspaceHint?: string,
 ): Promise<SpacesAutomationResult | null> {
   try {
     // Prefer a LIVE token from the Spaces session DB — getSpacesAuthForUser
@@ -206,7 +126,7 @@ async function callSpacesAutomations(
     let baseUrl = "";
     let sessionId = "";
     let workspaceId = "";
-    const live = await getSpacesAuthForUser(userId, "require-auth").catch(() => null);
+    const live = await getSpacesAuthForUser(userId, "require-auth", workspaceHint).catch(() => null);
     if (live?.token) {
       token = live.token;
       baseUrl = CONFIG.spacesInternalUrl;
@@ -228,7 +148,7 @@ async function callSpacesAutomations(
     }
     if (!token) return null;
     if (!workspaceId) {
-      workspaceId = await getWorkspaceIdForUser(userId, "require-auth").catch(() => null) ?? "";
+      workspaceId = await getWorkspaceIdForUser(userId, "require-auth", workspaceHint).catch(() => null) ?? "";
       if (workspaceId) log.info(`[chain-workflows] resolved workspaceId=${workspaceId} from user row for automation userId=${userId}`);
     }
     const cookieParts: string[] = [];
@@ -452,15 +372,15 @@ async function createAndSubmitSpacesAutomation(
   requesterId: string,
   name: string,
   config: Record<string, unknown>,
-  opts?: { issueWebhook?: boolean },
+  opts?: { issueWebhook?: boolean; workspaceHint?: string | undefined },
 ): Promise<{ id: string | null; webhookUrl: string | null }> {
-  const created = await callSpacesAutomations(requesterId, "POST", "", { name, config });
+  const created = await callSpacesAutomations(requesterId, "POST", "", { name, config }, opts?.workspaceHint);
   const id = created?.id ?? null;
   if (!id) {
     throw new Error(`Spaces rejected automation config for "${name}"`);
   }
   let webhookUrl: string | null = null;
-  const submitted = await callSpacesAutomations(requesterId, "POST", `/${id}/submit`);
+  const submitted = await callSpacesAutomations(requesterId, "POST", `/${id}/submit`, undefined, opts?.workspaceHint);
   if (!submitted) {
     log.warn(`[chain-workflows] automation ${id} created but submit-for-approval failed — left as DRAFT, submit manually from Spaces`);
   }
@@ -468,7 +388,7 @@ async function createAndSubmitSpacesAutomation(
   // once and capture the full URL — Spaces only returns it on first issue, so
   // we persist it on the trigger channel for the UI to display.
   if (opts?.issueWebhook) {
-    const issued = await callSpacesAutomations(requesterId, "POST", `/${id}/webhook`);
+    const issued = await callSpacesAutomations(requesterId, "POST", `/${id}/webhook`, undefined, opts?.workspaceHint);
     webhookUrl = issued?.url ?? null;
     if (!webhookUrl) {
       log.warn(`[chain-workflows] automation ${id}: webhook URL issue returned no url`);
@@ -482,10 +402,12 @@ export async function syncWorkflowTriggers(params: {
   workflowName: string;
   entryAgentSlug: string;
   requesterId: string;
+  /** Verified workspace header from the request — scopes identity resolution. */
+  requesterWorkspaceHint?: string | undefined;
   existingTriggers: WorkflowTrigger[];
   newTriggers: TriggerPayloadItem[] | null;
 }): Promise<void> {
-  const { workflowId, workflowName, entryAgentSlug, requesterId, existingTriggers, newTriggers } = params;
+  const { workflowId, workflowName, entryAgentSlug, requesterId, existingTriggers, newTriggers, requesterWorkspaceHint } = params;
   const existingById = new Map(existingTriggers.map((t) => [t.id, t]));
   const oldChannelIds = collectChannelIds(existingTriggers);
   const newTriggersJson: WorkflowTrigger[] = [];
@@ -503,7 +425,7 @@ export async function syncWorkflowTriggers(params: {
       // Delete automations for removed channels.
       for (const [channelId, ch] of existingChannelMap) {
         if (!newChannelSet.has(channelId) && ch.spacesAutomationId) {
-          await callSpacesAutomations(requesterId, "DELETE", `/${ch.spacesAutomationId}`);
+          await callSpacesAutomations(requesterId, "DELETE", `/${ch.spacesAutomationId}`, undefined, requesterWorkspaceHint);
         }
       }
       // Create or keep automations for current channels.
@@ -516,7 +438,7 @@ export async function syncWorkflowTriggers(params: {
             requesterId,
             `${workflowName} — ${t.type}`,
             buildSpacesConfig(t.type, channelId, entryAgentSlug, requesterId, t.configValues),
-            { issueWebhook: isVcsTemplateTrigger(t.type) },
+            { issueWebhook: isVcsTemplateTrigger(t.type), workspaceHint: requesterWorkspaceHint },
           );
           channels.push({ channelId, spacesAutomationId: id, webhookUrl });
         }
@@ -534,7 +456,7 @@ export async function syncWorkflowTriggers(params: {
     // newTriggers null/[] → delete all existing automations.
     for (const t of existingTriggers) {
       for (const c of t.channels) {
-        if (c.spacesAutomationId) await callSpacesAutomations(requesterId, "DELETE", `/${c.spacesAutomationId}`);
+        if (c.spacesAutomationId) await callSpacesAutomations(requesterId, "DELETE", `/${c.spacesAutomationId}`, undefined, requesterWorkspaceHint);
       }
     }
   }
@@ -544,7 +466,7 @@ export async function syncWorkflowTriggers(params: {
     const stillExists = (newTriggers ?? []).some((t) => t.id === id);
     if (!stillExists) {
       for (const c of et.channels) {
-        if (c.spacesAutomationId) await callSpacesAutomations(requesterId, "DELETE", `/${c.spacesAutomationId}`);
+        if (c.spacesAutomationId) await callSpacesAutomations(requesterId, "DELETE", `/${c.spacesAutomationId}`, undefined, requesterWorkspaceHint);
       }
     }
   }
@@ -656,7 +578,7 @@ router.post("/", asyncHandler(async (req: Request, res: Response) => {
           requesterId,
           `${name.trim()} — ${t.type}`,
           buildSpacesConfig(t.type, channelId, entryAgentSlug, requesterId, t.configValues),
-          { issueWebhook: isVcsTemplateTrigger(t.type) },
+          { issueWebhook: isVcsTemplateTrigger(t.type), workspaceHint: requestWorkspaceHint(req) },
         );
         channels.push({ channelId, spacesAutomationId: id, webhookUrl });
         allNewChannelIds.add(channelId);
@@ -1002,6 +924,7 @@ router.put("/:id", asyncHandler(async (req: Request<{ id: string }>, res: Respon
       workflowName: name?.trim() || existing.name,
       entryAgentSlug,
       requesterId,
+      requesterWorkspaceHint: requestWorkspaceHint(req),
       existingTriggers: parseTriggers(existing.triggers),
       newTriggers: triggers,
     });
@@ -1031,7 +954,7 @@ router.delete("/:id", async (req: Request<{ id: string }>, res: Response) => {
     for (const t of existingTriggers) {
       for (const c of t.channels) {
         if (!c.spacesAutomationId) continue;
-        const result = await callSpacesAutomations(requesterId, "DELETE", `/${c.spacesAutomationId}`);
+        const result = await callSpacesAutomations(requesterId, "DELETE", `/${c.spacesAutomationId}`, undefined, requestWorkspaceHint(req));
         if (!result) failed.push(c.spacesAutomationId);
       }
     }
@@ -1074,7 +997,7 @@ function buildTriggerInitialMessage(triggerPayload: Record<string, unknown> | un
   return `Automation event triggered: ${type ?? "unknown"}`;
 }
 
-router.post("/:id/trigger", requireS2S, asyncHandler(async (req: Request<{ id: string }>, res: Response) => {
+router.post("/:id/trigger", requireStrictS2S, asyncHandler(async (req: Request<{ id: string }>, res: Response) => {
   const { userId, triggerPayload, conversationId: bodyConversationId, targetChannelId } = req.body as {
     userId?: string;
     triggerPayload?: Record<string, unknown>;

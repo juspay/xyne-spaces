@@ -169,7 +169,7 @@ in
                   then "${config.nodeModulesPath}/.bin/zero-cache"
                   else "${config.package}/bin/npx --yes -p @rocicorp/zero@1.6.1 zero-cache";
               in
-              "${envExports} ${zeroCacheCmd}";
+              "${pkgs.coreutils}/bin/mkdir -p ${lib.escapeShellArg (builtins.dirOf config.replicaFile)} && ${envExports} ${zeroCacheCmd}";
 
             readiness_probe = {
               http_get = {

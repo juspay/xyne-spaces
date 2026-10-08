@@ -11,6 +11,7 @@ import { useRouteContext } from '../../../hooks/useRouteContext';
 import { standaloneNavigate } from '../../../utils/electronApp';
 import { useLocation } from 'react-router-dom';
 import { SearchResultsContext } from '../SearchResults/SearchResultsContext';
+import { ThreadNavigationContext } from '../ThreadNavigationContext';
 import { useNavigate } from '../../../hooks/useWorkspaceNavigate';
 
 interface BotBubbleProps {
@@ -56,6 +57,7 @@ const useOpenTicketCard = (
   const { isMobile } = usePlatform();
   const location = useLocation();
   const { onSelectThread: onSelectSearchThread } = useContext(SearchResultsContext);
+  const { openTicket } = useContext(ThreadNavigationContext);
 
   // In the Desk/email ticket-detail view the user is already looking at the
   // ticket whose card is being rendered in the right-panel thread — instead
@@ -69,7 +71,7 @@ const useOpenTicketCard = (
     const resolvedConversationId = ticket.conversationId || fallbackConversationId;
     if (!resolvedChannelId || !resolvedConversationId) return;
 
-    if (isDeskView) {
+    if (isDeskView && resolvedConversationId === fallbackConversationId) {
       const params = new URLSearchParams(location.search);
       params.set('selectedTab', 'details');
       void navigate(`${location.pathname}?${params.toString()}`, { replace: true });
@@ -82,6 +84,11 @@ const useOpenTicketCard = (
       const ws = window.location.pathname.split('/').find(s => s.length > 0) ?? '';
       const ticketUrl = `${ws ? `/${ws}` : ''}/chat/dir/${resolvedChannelId}?tab=tickets&ticketId=${ticket.id}&conversationId=${resolvedConversationId}`;
       window.open(ticketUrl, '_blank');
+      return;
+    }
+
+    if (openTicket) {
+      openTicket(ticket.id);
       return;
     }
 
@@ -99,11 +106,12 @@ const useOpenTicketCard = (
       standaloneNavigate(
         navigate,
         `${baseRoute}/${resolvedChannelId}/${resolvedConversationId}/${ticket.id}?selectedTab=details`,
-        { event },
+        { event, state: { trackSource: 'chat_message' } },
       );
     } else {
       standaloneNavigate(navigate, `${baseRoute}/${resolvedChannelId}/${resolvedConversationId}`, {
         event,
+        state: { trackSource: 'chat_message' },
       });
     }
   };
@@ -219,6 +227,7 @@ const TicketCreateModeWithChannel: React.FC<{
   isModalOpen: boolean;
   onModalOpenChange: (isOpen: boolean) => void;
   onTicketCreated?: (ticket: { id: string; conversationId?: string }) => void;
+  trackSource: string;
 }> = ({
   messageId,
   messageContent,
@@ -227,6 +236,7 @@ const TicketCreateModeWithChannel: React.FC<{
   isModalOpen,
   onModalOpenChange,
   onTicketCreated,
+  trackSource,
 }) => {
   const channel = useChannel(channelId);
   const projectId = channel?.projectId || '';
@@ -255,6 +265,7 @@ const TicketCreateModeWithChannel: React.FC<{
       onClose={() => onModalOpenChange(false)}
       channelId={channelId}
       projectId={projectId}
+      trackSource={trackSource}
       initialTitle=''
       initialDescription={stripHtml(messageContent)}
       sourceMessageId={messageId}
@@ -314,6 +325,7 @@ export const BotBubble: React.FC<BotBubbleProps> = ({
         conversation={conversation}
         isModalOpen={isModalOpen}
         onModalOpenChange={onModalOpenChange}
+        trackSource={context === 'thread' ? 'thread_panel' : 'chat_message'}
         {...(onTicketCreated && { onTicketCreated })}
       />
     );

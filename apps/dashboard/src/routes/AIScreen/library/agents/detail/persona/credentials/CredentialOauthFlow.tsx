@@ -3,14 +3,8 @@ import { Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/Button/index';
 import { Textarea } from '@/components/ui/Textarea';
 import { clawErrorText } from '@/services/claw/clawRequest';
-import {
-  exchangeAgentOauth,
-  pollAgentCopilotLogin,
-  startAgentCopilotLogin,
-  startAgentOauth,
-  type AgentCopilotDeviceCode,
-  type AgentOauthFlow,
-} from './agentCredentialsService';
+import { type AgentCopilotDeviceCode, type AgentOauthFlow } from './agentCredentialsService';
+import type { CredentialScope } from './credentialScope';
 
 type OauthProvider = 'codex' | 'claude' | 'copilot';
 
@@ -40,11 +34,11 @@ const COPY: Record<OauthProvider, { button: string; blurb: string; alternative: 
  * we don't own, so the browser can't hand the code back to us directly.
  */
 export function CredentialOauthFlow({
-  slug,
+  scope,
   provider,
   onConnected,
 }: {
-  slug: string;
+  scope: CredentialScope;
   provider: OauthProvider;
   onConnected: () => void;
 }): ReactElement {
@@ -68,7 +62,7 @@ export function CredentialOauthFlow({
 
     const tick = async (): Promise<void> => {
       try {
-        const result = await pollAgentCopilotLogin(slug);
+        const result = await scope.pollCopilot();
         if (cancelled) return;
         if (result.status === 'approved') {
           setDevice(null);
@@ -89,19 +83,19 @@ export function CredentialOauthFlow({
       cancelled = true;
       clearTimeout(timer);
     };
-  }, [device, slug]);
+  }, [device, scope]);
 
   const start = async (): Promise<void> => {
     setBusy(true);
     setError(null);
     try {
       if (isDeviceFlow) {
-        const next = await startAgentCopilotLogin(slug);
+        const next = await scope.startCopilot();
         setDevice(next);
         window.open(next.verificationUri, '_blank', 'noopener,noreferrer');
         return;
       }
-      const next = await startAgentOauth(slug, provider);
+      const next = await scope.startOauth(provider);
       setFlow(next);
       window.open(next.url, '_blank', 'noopener,noreferrer');
     } catch (err) {
@@ -116,7 +110,7 @@ export function CredentialOauthFlow({
     setBusy(true);
     setError(null);
     try {
-      await exchangeAgentOauth(slug, provider, { code: code.trim(), state: flow.state });
+      await scope.exchangeOauth(provider, { code: code.trim(), state: flow.state });
       setFlow(null);
       setCode('');
       onConnected();

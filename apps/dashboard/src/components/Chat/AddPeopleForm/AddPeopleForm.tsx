@@ -30,6 +30,7 @@ import {
   isScopeValid,
   previewLowerBound,
 } from './AddPeopleForm.utils';
+import { channelTrackingMetadata } from '../../../services/Analytics/channelTracking';
 
 export const AddPeopleForm: React.FC<AddPeopleFormProps> = ({
   channelId,
@@ -211,7 +212,11 @@ export const AddPeopleForm: React.FC<AddPeopleFormProps> = ({
           data-testid='add-people-confirm'
           data-track-category='ADD_CHAT_PARTICIPANTS'
           data-track-name='ADD_PEOPLE_SUBMIT'
-          data-track-metadata={JSON.stringify({ selectedUsers, scopeMode })}
+          data-track-metadata={JSON.stringify({
+            ...channelTrackingMetadata(channel),
+            selectedUsers,
+            scopeMode,
+          })}
         >
           Done
         </Button>

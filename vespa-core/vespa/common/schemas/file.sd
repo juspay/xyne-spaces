@@ -343,6 +343,8 @@ schema file {
     summary messageId {}
     summary ticketId {}
     summary callType {}
+    summary clId {}
+    summary clFd {}
   }
 
   document-summary embeddings {
