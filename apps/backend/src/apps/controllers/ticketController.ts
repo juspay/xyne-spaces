@@ -1675,8 +1675,15 @@ export class TicketController {
         return;
       }
 
+      // Same assignee/creator enrichment as POST /list/search so app callers
+      // don't need a follow-up users lookup.
+      const { assignedTo, createdBy } = ticketInfo.ticket;
+      const userMap = await getTicketUserInfoMap([assignedTo, createdBy]);
+
       res.status(200).json({
         ...ticketInfo.ticket,
+        assignedToUser: userInfoOrNull(userMap, assignedTo),
+        createdByUser: userInfoOrNull(userMap, createdBy),
         customFormData: ticketInfo.customFormData,
         history: ticketInfo.history,
       });
