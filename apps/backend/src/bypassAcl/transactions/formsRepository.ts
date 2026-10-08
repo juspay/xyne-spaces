@@ -149,14 +149,17 @@ export async function syncFormFields(tx: Prisma.TransactionClient, formId: strin
           continue;
         }
 
-        // Reuse an existing project global field (e.g. picked from autocomplete) by
-        // linking it to this form without mutating the shared definition.
+        // Reuse an existing global field (e.g. picked from autocomplete) by linking it to this
+        // form. A form may link fields from any project in its workspace — the request's
+        // projectId only scopes fields created by this save — so the boundary checked here is
+        // the workspace, not the project.
         const reusableGlobal = await tx.globalField.findUnique({
           where: { id: field.fieldId },
         });
         if (reusableGlobal) {
-          if (reusableGlobal.projectId !== projectId) {
-            throw new Error(`Field ${field.fieldId} does not belong to this form`);
+          const formWorkspaceId = await resolveWorkspaceIdFromModel(tx, 'form', { id: formId });
+          if (reusableGlobal.workspaceId !== formWorkspaceId) {
+            throw new Error(`Field ${field.fieldId} does not belong to this workspace`);
           }
           await updateGlobalFieldDefinition(tx, formId, reusableGlobal.id, field);
           const existingMembership = existingByGlobalId.get(reusableGlobal.id);
