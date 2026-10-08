@@ -232,10 +232,6 @@ function createPillWindow(): void {
       nodeIntegration: false,
       contextIsolation: true,
       preload: path.join(__dirname, '..', 'preload.js'),
-      // Throttling left on. It only applies while the window is hidden or occluded, and a hidden
-      // pill has nothing to render — the previous `backgroundThrottling: false` kept an idle
-      // renderer running at full rate for the whole session. While recording the pill is an
-      // always-on-top panel, so it is visible and never throttled.
     },
   });
 
@@ -281,11 +277,8 @@ function createPillWindow(): void {
   };
   ipcMain.on('recording-pill:drag-end', dragEndHandler);
 
-  // The pill renders one local file and must never navigate anywhere else. It had no guard at
-  // all, so a stray loadURL — a certificate-recovery redirect picked this window by mistake —
-  // left an always-on-top panel showing the enrollment flow over the user's screen, with nothing
-  // to ever restore it: the pill is only loaded once, at construction. The claw overlay already
-  // guards itself the same way.
+  // The pill renders one local file and is loaded only here, at construction, so a navigation
+  // away from it is permanent for the rest of the session.
   const isOwnRoute = (navUrl: string): boolean => {
     try {
       return new URL(navUrl).protocol === 'file:';

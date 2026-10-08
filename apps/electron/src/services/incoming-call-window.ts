@@ -81,9 +81,6 @@ export function incomingCallWindowOptions(): BrowserWindowConstructorOptions {
     webPreferences: {
       nodeIntegration: false,
       contextIsolation: true,
-      // Kept: the card is visible for its whole short life, so this is a no-op except when it
-      // is occluded — which is exactly the case that matters, a call arriving while the user is
-      // in a full-screen app. A throttled ring is a missed call.
       backgroundThrottling: false,
     },
   };
