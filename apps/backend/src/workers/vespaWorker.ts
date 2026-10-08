@@ -1,14 +1,17 @@
 import Bull from 'bull';
 import vespaClient from '@/vespa/client';
 import { logger } from '@/utils/logger';
-import { InsertDocument, samTranscriptSchema, VespaSchema } from '@/vespa/src/types';
+import { InsertDocument, samTranscriptSchema, SDLC_DISCUSSION_FIELDS, SDLC_FILE_FIELDS, VespaSchema } from '@/vespa/src/types';
 import { VespaJob, VespaJobType } from '@/zero/vespa-injection/core/types';
 import { db } from '@/database/client';
 import { NAMESPACE } from '@/vespa/vespaConfig';
-import { fetchAndMapBySchema, fetchDataBySchema, mapBySchema, VespaOperationType } from '@/zero/vespa-injection/core/mapper';
+import { fetchAndMapBySchema, fetchDataBySchema, mapBySchema, mapSdlcFieldsOnly, VespaOperationType } from '@/zero/vespa-injection/core/mapper';
 import { vespaPostIngestHooks } from './vespaPostIngestHooks';
 import { VespaInsertionStatus } from '@xyne/shared';
 import { config } from '@/config/env';
+
+// SDLC fields a field-scoped update may clear (see processJob).
+const SDLC_CLEARABLE_FIELDS: ReadonlySet<string> = new Set([...SDLC_FILE_FIELDS, ...SDLC_DISCUSSION_FIELDS]);
 
 export class VespaWorker {
 	private queue: Bull.Queue<VespaJob> | null = null;
@@ -217,15 +220,21 @@ export class VespaWorker {
 				// Field-scoped update: build the full document the same way a 'feed' would,
 				// then only keep the requested fields for the partial Vespa update.
 				logger.info(`[VESPA_WORKER] Fetching data from database for field-scoped update ${schema}/${docId}: [${job.data.fields.join(', ')}]`);
-				const rawData = await fetchDataBySchema(schema, docId, app);
+				const sdlcOnly = await mapSdlcFieldsOnly(schema, docId, job.data.fields, app);
+				const rawData = sdlcOnly ? sdlcOnly : await fetchDataBySchema(schema, docId, app);
 				if (!rawData) {
 					throw new Error(`Data not found for ${schema}/${docId}`);
 				}
-				const fullDoc = await mapBySchema(schema, rawData, 'feed', app, job.data.workspaceId, job.data.orgId);
+				const fullDoc = sdlcOnly ?? await mapBySchema(schema, rawData, 'feed', app, job.data.workspaceId, job.data.orgId);
 				mappedData = Object.fromEntries(
 					job.data.fields
-						.filter((field) => field in fullDoc)
-						.map((field) => [field, (fullDoc as Record<string, unknown>)[field]])
+						// SDLC fields are left out of a document outside SDLC (a reference can't be
+						// ''); here that has to clear what an earlier sync wrote, so assign null.
+						.filter((field) => field in fullDoc || SDLC_CLEARABLE_FIELDS.has(field))
+						.map((field) => {
+							const value = (fullDoc as Record<string, unknown>)[field];
+							return [field, value === undefined && SDLC_CLEARABLE_FIELDS.has(field) ? null : value];
+						})
 				) as Partial<InsertDocument>;
 			} else {
 				logger.info(`[VESPA_WORKER] Fetching data from database for ${schema}/${docId}`);

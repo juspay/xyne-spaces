@@ -6,7 +6,7 @@ import { InsertDocument, fileSchema, VespaSchema } from '@/vespa/src/types';
 import { VespaJob, VespaJobType } from '@/zero/vespa-injection/core/types';
 import { db } from '@/database/client';
 import { NAMESPACE } from '@/vespa/vespaConfig';
-import { fetchAndMapBySchema, fetchDataBySchema, mapBySchema, computeCanvasPermissions, VespaOperationType } from '@/zero/vespa-injection/core/mapper';
+import { fetchAndMapBySchema, fetchDataBySchema, mapBySchema, mapSdlcFieldsOnly, computeCanvasPermissions, VespaOperationType } from '@/zero/vespa-injection/core/mapper';
 import { vespaPostIngestHooks } from './vespaPostIngestHooks';
 import { superpositionClient } from '@/services/superpositionClient';
 import { routePdfToScheduler } from '@/services/ingestion/docling/scheduler/intake';
@@ -267,10 +267,16 @@ export class VespaFileWorker {
 				// `chunks` isn't sent, Vespa does not re-embed — this is what keeps the
 				// membership fan-out (re-computing canvas ACLs) cheap.
 				const fields = job.data.fields;
+				const sdlcOnly = await mapSdlcFieldsOnly(schema, docId, fields, app);
 				if (app === SubApp.CANVAS && fields.length === 1 && fields[0] === 'permissions') {
 					// Fast path: canvas ACL refresh — recompute just permissions, skip the
 					// content extraction/embedding a full mapCanvas would do.
 					mappedData = { permissions: await computeCanvasPermissions(docId) } as Partial<InsertDocument>;
+				} else if (sdlcOnly) {
+					// Fast path: an SDLC hub sync re-placing a document; null clears a placement.
+					mappedData = Object.fromEntries(
+						Object.entries(sdlcOnly).map(([field, value]) => [field, value ?? null])
+					) as Partial<InsertDocument>;
 				} else {
 					const rawData = await fetchDataBySchema(schema, docId, app);
 					if (!rawData) {
