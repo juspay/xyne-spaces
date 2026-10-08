@@ -277,7 +277,7 @@ export interface VespaProjectDocument extends VespaDocument {
   updatedAt: number;
 }
 
-export interface VespaTicketDocument extends Omit<VespaDocument, 'orgId' | 'workspaceId'>, Partial<SdlcDiscussionFields> {
+export interface VespaTicketDocument extends Omit<VespaDocument, 'orgId' | 'workspaceId'>, Partial<SdlcTicketFields> {
   convId: string;
   userGroupId: string;
   channelRef: string;
@@ -635,7 +635,7 @@ export type InsertDocument =
  * Where an item sits in an SDLC Hub: a reference to the track or folder it is in. Vespa
  * imports the container's branch, track, scope and path from it (sdlcContainerId,
  * sdlcContainerType, sdlcBranch, sdlcTrackId, sdlcScopeIds, sdlcPath), so nothing else is fed.
- * Empty when the item is in no hub. Shared by documents (`file`), tickets and messages.
+ * Empty when the item is in no hub. Shared by documents (`file`) and messages.
  */
 export interface SdlcPlacementFields {
   /** id:sdlc_container:sdlc_container::<trackId|folderId>, or '' outside SDLC. */
@@ -653,16 +653,29 @@ export interface SdlcFileFields extends SdlcPlacementFields {
 }
 
 /**
- * Where a ticket or conversation sits in an SDLC Hub. Started on a document, it is placed in
- * the document's container and names the document; started on a track or folder, the
- * document is ''.
+ * Where a conversation sits in an SDLC Hub. Started on a document, it is placed in the
+ * document's container and names the document; started on a track or folder, the document
+ * is ''.
  */
 export interface SdlcDiscussionFields extends SdlcPlacementFields {
   /** The file docId (canvas or upload) it was started on, or ''. */
   sdlcDocumentId: string;
 }
 
+/**
+ * Where a ticket sits in SDLC hubs. Unlike a document or discussion, one ticket can sit in
+ * several places (raised on one item, linked from items in other tracks or hubs), so its places
+ * are fed as lists rather than imported through a single container reference.
+ */
+export interface SdlcTicketFields {
+  /** Every hub, track and folder above every item it is linked from, and every track holding it. */
+  sdlcScopeIds: string[];
+  /** Every document (canvas or upload) linked to it by a TICKET or CONTEXT edge. */
+  sdlcDocumentIds: string[];
+}
+
 export const SDLC_DISCUSSION_FIELDS: readonly (keyof SdlcDiscussionFields)[] = ['sdlcContainerRef', 'sdlcDocumentId'];
+export const SDLC_TICKET_FIELDS: readonly (keyof SdlcTicketFields)[] = ['sdlcScopeIds', 'sdlcDocumentIds'];
 export const SDLC_FILE_FIELDS: readonly (keyof SdlcFileFields)[] = [
   'sdlcContainerRef', 'sdlcTypeName', 'sdlcStatus', 'sdlcRelatedDocumentIds',
 ];

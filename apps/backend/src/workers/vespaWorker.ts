@@ -1,7 +1,7 @@
 import Bull from 'bull';
 import vespaClient from '@/vespa/client';
 import { logger } from '@/utils/logger';
-import { InsertDocument, samTranscriptSchema, SDLC_DISCUSSION_FIELDS, SDLC_FILE_FIELDS, VespaSchema } from '@/vespa/src/types';
+import { InsertDocument, samTranscriptSchema, SDLC_DISCUSSION_FIELDS, SDLC_FILE_FIELDS, SDLC_TICKET_FIELDS, VespaSchema } from '@/vespa/src/types';
 import { VespaJob, VespaJobType } from '@/zero/vespa-injection/core/types';
 import { db } from '@/database/client';
 import { NAMESPACE } from '@/vespa/vespaConfig';
@@ -11,7 +11,7 @@ import { VespaInsertionStatus } from '@xyne/shared';
 import { config } from '@/config/env';
 
 // SDLC fields a field-scoped update may clear (see processJob).
-const SDLC_CLEARABLE_FIELDS: ReadonlySet<string> = new Set([...SDLC_FILE_FIELDS, ...SDLC_DISCUSSION_FIELDS]);
+const SDLC_CLEARABLE_FIELDS: ReadonlySet<string> = new Set([...SDLC_FILE_FIELDS, ...SDLC_DISCUSSION_FIELDS, ...SDLC_TICKET_FIELDS]);
 
 export class VespaWorker {
 	private queue: Bull.Queue<VespaJob> | null = null;

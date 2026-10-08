@@ -8,6 +8,7 @@ import {
   messageSchema,
   SDLC_FILE_FIELDS,
   SDLC_DISCUSSION_FIELDS,
+  SDLC_TICKET_FIELDS,
   sdlcContainerSchema,
   sdlcRepositorySchema,
   SubApp,
@@ -18,9 +19,10 @@ import type { VespaJob } from '@/zero/vespa-injection/core/types';
 import { hubOfContainer, invalidateSdlcHubIndex, loadSdlcHubIndex } from './sdlcSearchIndex';
 
 const TAG = '[SDLC-SEARCH-SYNC]';
-// Vespa's per-query hit limit (query maxHits); larger sets are read in pages.
+// Vespa's per-query hit limit (query maxHits); larger sets are read in pages, up to the highest
+// offset Vespa accepts (query maxOffset, 1000 by default).
 const PAGE = 400;
-const MAX_PAGES = 25;
+const MAX_OFFSET = 1000;
 
 export interface SdlcHubSyncResult {
   hubId: string;
@@ -58,6 +60,7 @@ export async function syncSdlcHub(hubId: string): Promise<SdlcHubSyncResult | nu
   const jobs: VespaJob[] = [];
   const fileFields = [...SDLC_FILE_FIELDS];
   const placementFields = [...SDLC_DISCUSSION_FIELDS];
+  const ticketFields = [...SDLC_TICKET_FIELDS];
 
   // The hub's own entry: containers import its id and members (permissions) through channelRef,
   // and a hub created on the server (not through Zero) is never fed otherwise.
@@ -91,7 +94,7 @@ export async function syncSdlcHub(hubId: string): Promise<SdlcHubSyncResult | nu
   const indexedTickets = await existingIds(ticketSchema, [...index.tickets.keys()]);
   for (const ticketId of index.tickets.keys()) {
     jobs.push(indexedTickets.has(ticketId)
-      ? { schema: ticketSchema, jobType: 'update', docId: ticketId, fields: placementFields, ...base }
+      ? { schema: ticketSchema, jobType: 'update', docId: ticketId, fields: ticketFields, ...base }
       : { schema: ticketSchema, jobType: 'feed', docId: ticketId, ...base });
     if (!indexedTickets.has(ticketId)) fedDocuments++;
   }
@@ -111,36 +114,33 @@ export async function syncSdlcHub(hubId: string): Promise<SdlcHubSyncResult | nu
 
   // Stale entries: what Vespa still places in this hub that Postgres no longer does. Items are
   // found through the containers they reference, so this runs before stale containers go.
+  // Vespa is asked only for entries outside the live set, so a large hub is not paged through.
   const inHub = `sdlcScopeIds contains "${hubId}"`;
-  const liveFiles = new Set([...index.canvases.keys(), ...index.attachments.keys()]);
-  const liveMessages = new Set(messages.map(m => m.messageId));
   let cleared = 0;
-  for (const hit of await indexedHits(fileSchema, inHub, ['subApp'])) {
-    if (liveFiles.has(hit.id)) continue;
+  const staleFiles = await indexedHits(
+    fileSchema, notIn(inHub, [...index.canvases.keys(), ...index.attachments.keys()]), ['subApp'],
+  );
+  for (const hit of staleFiles) {
     const app = hit.fields.subApp === SubApp.CANVAS ? SubApp.CANVAS : SubApp.CHAT_ATTACHMENT;
     jobs.push({ schema: fileSchema, jobType: 'update', docId: hit.id, app, fields: fileFields, ...base });
     cleared++;
   }
-  for (const hit of await indexedHits(ticketSchema, inHub)) {
-    if (index.tickets.has(hit.id)) continue;
-    jobs.push({ schema: ticketSchema, jobType: 'update', docId: hit.id, fields: placementFields, ...base });
+  for (const hit of await indexedHits(ticketSchema, notIn(inHub, [...index.tickets.keys()]))) {
+    jobs.push({ schema: ticketSchema, jobType: 'update', docId: hit.id, fields: ticketFields, ...base });
     cleared++;
   }
-  for (const hit of await indexedHits(messageSchema, inHub)) {
-    if (liveMessages.has(hit.id)) continue;
+  for (const hit of await indexedHits(messageSchema, notIn(inHub, messages.map(m => m.messageId)))) {
     jobs.push({ schema: messageSchema, jobType: 'update', docId: hit.id, fields: placementFields, ...base });
     cleared++;
   }
 
-  const staleContainers = (await indexedHits(sdlcContainerSchema, `channelId contains "${hubId}"`))
-    .map(hit => hit.id)
-    .filter(id => !index.containers.has(id));
+  const staleContainers = (await indexedHits(sdlcContainerSchema, notIn(`channelId contains "${hubId}"`, [...index.containers.keys()])))
+    .map(hit => hit.id);
   for (const id of staleContainers) {
     jobs.push({ schema: sdlcContainerSchema, jobType: 'delete', docId: id, ...base });
   }
-  const staleRepos = (await indexedHits(sdlcRepositorySchema, `hubIds contains "${hubId}"`))
-    .map(hit => hit.id)
-    .filter(id => !index.repoIds.includes(id));
+  const staleRepos = (await indexedHits(sdlcRepositorySchema, notIn(`hubIds contains "${hubId}"`, index.repoIds)))
+    .map(hit => hit.id);
   if (staleRepos.length) {
     const existing = new Set(
       (await db.repo.findMany({ where: { id: { in: staleRepos } }, select: { id: true } })).map(r => r.id),
@@ -184,17 +184,26 @@ async function existingIds(schema: VespaSchema, ids: string[]): Promise<Set<stri
   return found;
 }
 
+/** `where`, minus the entries whose docId is in `liveIds`. */
+function notIn(where: string, liveIds: string[]): string {
+  if (!liveIds.length) return where;
+  return `${where} and !(docId in (${liveIds.map(id => JSON.stringify(id)).join(', ')}))`;
+}
+
 interface IndexedHit {
   id: string;
   fields: Record<string, unknown>;
 }
 
-/** Entries of `schema` matching `where`. Empty (with a warning) if Vespa can't answer. */
+/**
+ * Entries of `schema` matching `where`. If Vespa stops answering part way, what was read so far
+ * is kept (with a warning).
+ */
 async function indexedHits(schema: VespaSchema, where: string, fields: string[] = []): Promise<IndexedHit[]> {
+  const hits: IndexedHit[] = [];
   try {
     const select = ['documentid', ...fields].join(', ');
-    const hits: IndexedHit[] = [];
-    for (let page = 0; page < MAX_PAGES; page++) {
+    for (let page = 0; page * PAGE <= MAX_OFFSET; page++) {
       const response = await vespa.vespaClient.search<{
         root?: { children?: { id?: string; fields?: Record<string, unknown> }[] };
       }>({
@@ -210,13 +219,13 @@ async function indexedHits(schema: VespaSchema, where: string, fields: string[] 
       }
       if (children.length < PAGE) return hits;
     }
-    logger.warn(`${TAG} ${schema} where ${where} has over ${PAGE * MAX_PAGES} entries; some stale entries may remain`);
+    logger.warn(`${TAG} ${schema}: over ${hits.length} matching entries; the rest wait for the next sync`);
     return hits;
   } catch (error) {
-    logger.warn(`${TAG} could not list indexed ${schema} entries (${where}); skipping stale check`, {
+    logger.warn(`${TAG} could not list indexed ${schema} entries; continuing with ${hits.length} read`, {
       error: error instanceof Error ? error.message : String(error),
     });
-    return [];
+    return hits;
   }
 }
 

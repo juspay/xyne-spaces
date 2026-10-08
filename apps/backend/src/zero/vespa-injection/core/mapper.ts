@@ -1,7 +1,7 @@
 import { readFromYSweetStrict } from '@/utils/ysweetUtils';
 import { extractMentionsFromContent } from '@/utils/mentionUtils';
 import { extractChannelMentions, extractGroupMentions } from '@/utils/mentionParser';
-import { appSchema, callSchema, channelSchema, InsertDocument, mailSchema, messageSchema, projectSchema, schemaToDocType, SubApp, ticketSchema, userSchema, VespaAppDocument, VespaCallDocument, VespaChatContainerDocument, VespaChatMessageDocument, VespaDocType, VespaFileDocument, VespaMailDocument, VespaProjectDocument, VespaSchema, VespaTicketDocument, samTranscriptSchema, sdlcContainerSchema, sdlcRepositorySchema, SDLC_DISCUSSION_FIELDS, SDLC_FILE_FIELDS, type SdlcDiscussionFields, type SdlcFileFields, type VespaSdlcContainerDocument, type VespaSdlcRepositoryDocument } from '@/vespa/src/types';
+import { appSchema, callSchema, channelSchema, InsertDocument, mailSchema, messageSchema, projectSchema, schemaToDocType, SubApp, ticketSchema, userSchema, VespaAppDocument, VespaCallDocument, VespaChatContainerDocument, VespaChatMessageDocument, VespaDocType, VespaFileDocument, VespaMailDocument, VespaProjectDocument, VespaSchema, VespaTicketDocument, samTranscriptSchema, sdlcContainerSchema, sdlcRepositorySchema, SDLC_DISCUSSION_FIELDS, SDLC_FILE_FIELDS, SDLC_TICKET_FIELDS, type SdlcDiscussionFields, type SdlcFileFields, type SdlcTicketFields, type VespaSdlcContainerDocument, type VespaSdlcRepositoryDocument } from '@/vespa/src/types';
 import {
   hubOfContainer,
   loadSdlcHubIndex,
@@ -749,7 +749,7 @@ export const mapTicket = async (args: InsertValue<TicketsSchema>): Promise<Vespa
     initialMessageSender: initialMessageSender,
     parentTicketXyneId: parentTicketXyneId,
     childTicketXyneIds: childTicketXyneIds,
-    ...sdlcPlacement(await sdlcFieldsForTicket(args.id)),
+    ...sdlcTicketPlacement(await sdlcFieldsForTicket(args.id)),
   }
 }
 
@@ -1564,6 +1564,10 @@ const sdlcPlacement = (fields: SdlcDiscussionFields): Partial<SdlcDiscussionFiel
   return fields.sdlcDocumentId ? { ...fields } : { sdlcContainerRef: fields.sdlcContainerRef };
 };
 
+/** A ticket's places and linked documents; left out for a ticket in no hub. */
+const sdlcTicketPlacement = (fields: SdlcTicketFields): Partial<SdlcTicketFields> =>
+  fields.sdlcScopeIds.length || fields.sdlcDocumentIds.length ? { ...fields } : {};
+
 const sdlcFileFields = (fields: SdlcFileFields): Partial<SdlcFileFields> => {
   if (!fields.sdlcContainerRef) return {};
   return { ...fields };
@@ -1628,8 +1632,11 @@ export const mapSdlcFieldsOnly = async (
     }
     return null;
   }
+  if (schema === ticketSchema) {
+    if (!fields.every(f => (SDLC_TICKET_FIELDS as readonly string[]).includes(f))) return null;
+    return pick({ ...(await sdlcFieldsForTicket(docId)) });
+  }
   if (!fields.every(f => (SDLC_DISCUSSION_FIELDS as readonly string[]).includes(f))) return null;
-  if (schema === ticketSchema) return pick({ ...(await sdlcFieldsForTicket(docId)) });
   if (schema === messageSchema) {
     const message = await db.message.findUnique({ where: { messageId: docId }, select: { conversationId: true } });
     return pick({ ...(await sdlcFieldsForConversation(message?.conversationId)) });
