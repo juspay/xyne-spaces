@@ -25,7 +25,13 @@ import {
 } from '@xyne/icons';
 import * as Tabs from '@radix-ui/react-tabs';
 import * as DialogPrimitive from '@radix-ui/react-dialog';
-import { Channel, ChannelVisibility, isDeskChannelType, TicketPriority } from '@xyne/shared';
+import {
+  Channel,
+  ChannelVisibility,
+  isDeskChannelType,
+  TicketPriority,
+  UserType,
+} from '@xyne/shared';
 import { ChannelChipIcon, resolveChipName, PRIORITY_ICON_COLOR } from './FilterChipNode';
 import {
   isDMChannel,
@@ -101,7 +107,7 @@ import { cn } from '../../../utils/classNames';
 import SearchResultItem from './SearchResultItem';
 import SearchSectionSkeleton from './SearchSectionSkeleton';
 import { getUserDisplayName, isUserDeactivated } from '../../../utils/userDisplayName';
-import { LexicalSearchInput, type InitialQueryData } from './LexicalSearchInput';
+import { LexicalSearchInput, type InitialQueryData, type InsertText } from './LexicalSearchInput';
 import { StatusIndicator } from '../../ui/StatusIndicator';
 import { useSearchMetrics, CMDK_USER_LIMIT } from '../../../hooks/useSearchMetrics';
 import {
@@ -863,6 +869,22 @@ const ChannelCommandMenuContent = ({
     ticketView,
   });
 
+  // Bots, apps and agents post BOT-type messages, which search hides unless the Bot toggle is
+  // on — so a `from:` one of them would find nothing. The toggle follows the chip: on when one
+  // is added, off when the last is removed. Only a change flips it, so mount (a restored search)
+  // and a manual toggle while the chip is present are left alone.
+  const hasBotAuthorFilter = selectedMentions.some(mention => {
+    if (mention.prefix !== 'from:') return false;
+    const userType = usersById.get(mention.id)?.userType;
+    return userType === UserType.BOT || userType === UserType.APP || userType === UserType.AGENT;
+  });
+  const prevHasBotAuthorFilterRef = useRef(hasBotAuthorFilter);
+  useEffect(() => {
+    if (prevHasBotAuthorFilterRef.current === hasBotAuthorFilter) return;
+    prevHasBotAuthorFilterRef.current = hasBotAuthorFilter;
+    setIncludeBotMessages(hasBotAuthorFilter);
+  }, [hasBotAuthorFilter, setIncludeBotMessages]);
+
   // In a ticket view, the skeleton fills the list while a search runs and nothing is listed yet.
   const showTicketViewSkeleton =
     isInTicketView && (isLoading || isSearchPending) && backendResults.length === 0;
@@ -1027,7 +1049,7 @@ const ChannelCommandMenuContent = ({
   >(null);
 
   const commitEntityRef = useRef<(() => boolean) | null>(null);
-  const insertTextRef = useRef<((text: string) => void) | null>(null);
+  const insertTextRef = useRef<InsertText | null>(null);
   const toggleQuotesRef = useRef<(() => void) | null>(null);
 
   /**
@@ -1314,11 +1336,16 @@ const ChannelCommandMenuContent = ({
   // chip and no mention typeahead is open. getScreenSearchSuffix() picks the text.
   const screenSearchActive =
     !mentionSearchType && (Boolean(searchText.trim()) || selectedMentions.length > 0);
+  // What Tab fills: the rest of the highlighted row's name after what's been typed
+  // (`vaib` → `hav Garg`), or '' when the ghost below shows no completion. Mirrors the
+  // completion check in getScreenSearchSuffix.
+  const getOpenRowCompletion = (): string => {
+    if (mentionSearchType || !enterWillOpen || !activeItemLabel || !searchText.trim()) return '';
+    if (!activeItemLabel.toLowerCase().startsWith(searchText.toLowerCase())) return '';
+    return activeItemLabel.slice(searchText.length);
+  };
   const getScreenSearchSuffix = (): string => {
-    // At rest (before arrowing/hovering onto a row): "- Search" - Enter searches everything,
-    // not the arbitrary first row previewed as if chosen.
-    if (!hasNavigated) return '\u00a0\u2013 Search';
-    // Navigated: preview the highlighted row - " - Search" for the search row, else the row
+    // Preview the highlighted row - " - Search" for the search row, else the row
     // name's completion + " - Open".
     if (!enterWillOpen) return '\u00a0\u2013 Search';
     // Match the RAW typed text so the completion lines up after it (the ghost sits
@@ -2960,9 +2987,10 @@ const ChannelCommandMenuContent = ({
           item.setAttribute('aria-selected', i === selectedIndex ? 'true' : 'false');
         });
       }
-      // No sync here: the results-list observer recomputes actionability whenever rows change
-      // (incl. a re-rank, which reorders keyed rows = a childList mutation), and enterWillOpen/label
-      // stay hidden until the user navigates (arrow/hover re-sync them then).
+      // Sync the ghost to the row just selected. aria-selected is an attribute, which the
+      // results-list observer (childList only) never sees — so without this the ghost keeps
+      // its pre-selection state until the user arrows or hovers, though Enter opens this row.
+      syncEnterIntent();
     }, 50);
     return () => clearTimeout(timer);
   }, [
@@ -2980,6 +3008,7 @@ const ChannelCommandMenuContent = ({
     // `commandText` is a dep (not read in the body) so the first-row auto-select
     // re-fires as the `/` command list / user picker narrows while typing.
     commandText,
+    syncEnterIntent,
   ]);
 
   // Browse-mode hint sync lives in attachCommandRef's MutationObserver (the auto-select effect above
@@ -3917,6 +3946,16 @@ const ChannelCommandMenuContent = ({
       e.stopPropagation();
       acceptHighlightedMention();
       return;
+    }
+
+    if ((e.key === 'Tab' && !e.shiftKey) || e.key === 'ArrowRight') {
+      const completion = getOpenRowCompletion();
+      if (completion && insertTextRef.current) {
+        e.preventDefault();
+        e.stopPropagation();
+        insertTextRef.current(completion, { continueWord: true });
+        return;
+      }
     }
 
     // ── Tab / Shift+Tab: cycle filter tabs ──────────────────────────────
