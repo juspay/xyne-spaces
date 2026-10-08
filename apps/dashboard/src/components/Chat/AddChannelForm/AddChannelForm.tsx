@@ -840,9 +840,8 @@ export const AddChannelForm: React.FC<AddChannelFormProps> = ({
           ) : (
             <>
               <Select value={selectedInstalledAppId} onValueChange={setSelectedInstalledAppId}>
-                <SelectTrigger id='app-desk-select' className='w-full min-w-0'>
-                  {/* Render only the app name in the trigger — the item's description /
-                      desk count would otherwise be mirrored here and overflow the field. */}
+                {/* Radix SelectValue drops className, so let its span shrink from here. */}
+                <SelectTrigger id='app-desk-select' className='w-full min-w-0 [&>span]:min-w-0'>
                   <SelectValue placeholder='Select a Xyne App'>
                     <span className='block truncate'>
                       {
@@ -852,8 +851,7 @@ export const AddChannelForm: React.FC<AddChannelFormProps> = ({
                     </span>
                   </SelectValue>
                 </SelectTrigger>
-                {/* Pin the popover to the trigger width so long app descriptions wrap/truncate
-                    instead of stretching the dropdown across the viewport. */}
+                {/* Keep the dropdown as wide as the field. */}
                 <SelectContent className='w-[var(--radix-select-trigger-width)] max-w-[var(--radix-select-trigger-width)]'>
                   {eligibleAppsData.map(app => {
                     const meta = [
