@@ -235,6 +235,12 @@ interface BulkGmailMessage {
   date?: unknown;
 }
 
+/**
+ * Thrown by the bulk Pub/Sub fixture to simulate a worker crash mid-batch, so
+ * the route can answer the way a nacked Pub/Sub push would (retryable 503).
+ */
+class InjectedPubSubFailure extends Error {}
+
 function isBulkGmailMessage(value: unknown): value is BulkGmailMessage {
   if (!value || typeof value !== 'object') return false;
   const record = value as Record<string, unknown>;
@@ -839,6 +845,10 @@ router.post('/desk/pubsub/bulk-gmail', async (req, res, next) => {
     const channelId = typeof req.body?.channelId === 'string' ? req.body.channelId : '';
     const historyId = typeof req.body?.historyId === 'string' ? req.body.historyId : '';
     const messages: unknown[] = Array.isArray(req.body?.messages) ? req.body.messages : [];
+    // Optional: fail at this message on this delivery only. Messages before it
+    // are persisted; the caller redelivers the whole batch to simulate a retry.
+    const failAtMessageId =
+      typeof req.body?.failAtMessageId === 'string' ? req.body.failAtMessageId : '';
     if (!userId || !workspaceId) {
       return res.status(401).json({ error: 'Authenticated workspace required' });
     }
@@ -860,8 +870,18 @@ router.post('/desk/pubsub/bulk-gmail', async (req, res, next) => {
     if (!messages.every(isBulkGmailMessage)) {
       return res.status(400).json({ error: 'Each message requires messageId, threadId, from, and subject' });
     }
+    if (failAtMessageId && !messages.some((message) => message.messageId === failAtMessageId)) {
+      return res.status(400).json({ error: 'failAtMessageId must match a message in the batch' });
+    }
     const deterministicAdapter = {
       ...googleAdapter,
+      transform: (...[payload, src]: Parameters<typeof googleAdapter.transform>) => {
+        const parsedEmail = (payload as { parsedEmail?: { messageId?: string } } | undefined)?.parsedEmail;
+        if (failAtMessageId && parsedEmail?.messageId === failAtMessageId) {
+          throw new InjectedPubSubFailure(`Injected retryable failure at ${failAtMessageId}`);
+        }
+        return googleAdapter.transform(payload, src);
+      },
       preprocess: async () =>
         messages.map((message) => ({
           pubsubData: { emailAddress: source.displayName, historyId },
@@ -879,12 +899,20 @@ router.post('/desk/pubsub/bulk-gmail', async (req, res, next) => {
           },
         })),
     };
-    const results = await externalSourceCore.ingest(
-      deterministicAdapter,
-      source.name,
-      { messages },
-      source,
-    );
+    let results;
+    try {
+      results = await externalSourceCore.ingest(
+        deterministicAdapter,
+        source.name,
+        { messages },
+        source,
+      );
+    } catch (error) {
+      if (error instanceof InjectedPubSubFailure) {
+        return res.status(503).json({ success: false, retryable: true, error: error.message });
+      }
+      throw error;
+    }
     return res.json({
       success: true,
       published: messages.length,

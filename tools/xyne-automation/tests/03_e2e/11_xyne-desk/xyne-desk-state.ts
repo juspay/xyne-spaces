@@ -31,7 +31,10 @@ export const mockDeskMails = new Map<string, MockDeskMailFixture>();
 export const deskChannelDlEmails = new Map<string, string>();
 export const slackChannelIds = new Map<string, string>();
 export const mockDlEmails = new Map<string, string>();
-export const mockPubSubBatches = new Map<string, { messageIds: string[]; historyId: string }>();
+export const mockPubSubBatches = new Map<
+  string,
+  { messageIds: string[]; historyId: string; failedAtIndex?: number }
+>();
 export const mockPubSubMessages = new Map<string, Array<Record<string, unknown>>>();
 export const apiContextsByUserAlias = new Map<string, APIRequestContext>();
 

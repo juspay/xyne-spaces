@@ -87,6 +87,14 @@ const DESK_UI_TIMEOUT_MS = config.timeout * 2;
 // timeouts, so the request budget scales with the batch size.
 const PUBSUB_PER_MESSAGE_TIMEOUT_MS = 15_000;
 
+type PubSubBulkResult = {
+  published?: number;
+  processed?: number;
+  created?: number;
+  duplicates?: number;
+  skipped?: number;
+};
+
 function assertFixture(alias: string): MockDeskMailFixture {
   const fixture = mockDeskMails.get(alias);
   assert.ok(fixture, `Expected mock desk mail fixture "${alias}" to exist.`);
@@ -890,7 +898,8 @@ export default class XyneDeskSteps {
         messageId,
         threadId: `mock-pubsub-thread-${batchAlias}-${index}`,
         from: `bulk-customer-${index}@example.test`,
-        subject: `Bulk Desk Pub/Sub message ${index}`,
+        // Batch alias in the subject keeps batches distinguishable across channels.
+        subject: `Bulk Desk Pub/Sub ${batchAlias} message ${index}`,
         body: `Deterministic Pub/Sub body ${index}`,
       };
     });
@@ -918,43 +927,20 @@ export default class XyneDeskSteps {
   ): Promise<void> {
     assertValidChannelAlias(channelAlias);
     assertValidUserAlias(userAlias);
-    const batch = mockPubSubBatches.get(batchAlias);
-    assert.ok(batch, `Expected Pub/Sub batch "${batchAlias}" to be generated.`);
-    const channelId = this.getStoredChannelId(channelAlias, userAlias);
-    const messages = mockPubSubMessages.get(batchAlias);
-    assert.ok(messages, `Expected Pub/Sub messages for batch "${batchAlias}".`);
-    const response = await withDevAuthenticatedApiContext(userAlias, (apiContext) =>
-      apiContext.post('/api/test/desk/pubsub/bulk-gmail', {
-        data: { channelId, historyId: batch.historyId, messages },
-        timeout: DESK_UI_TIMEOUT_MS + messages.length * PUBSUB_PER_MESSAGE_TIMEOUT_MS,
-      })
-    );
+    const { batch, response } = await this.postPubSubBatch(batchAlias, channelAlias, userAlias);
     await assertOkResponse(response, 'Deterministic Pub/Sub Gmail batch');
-    const result = (await response.json()) as {
-      published?: number;
-      processed?: number;
-      created?: number;
-      duplicates?: number;
-      skipped?: number;
-    };
+    const result = (await response.json()) as PubSubBulkResult;
     assert.equal(result.published, batch.messageIds.length);
     assert.equal(result.processed, batch.messageIds.length);
     assert.equal(result.created, batch.messageIds.length);
     assert.equal(result.duplicates, 0);
     assert.equal(result.skipped, 0);
-    const ticketsResponse = await withDevAuthenticatedApiContext(userAlias, (apiContext) =>
-      apiContext.get(`/api/test/desk/channel/${channelId}/tickets`)
+    await this.assertPubSubBatchTicketCount(
+      batchAlias,
+      channelAlias,
+      userAlias,
+      batch.messageIds.length
     );
-    await assertOkResponse(ticketsResponse, 'Desk Pub/Sub ticket verification');
-    const ticketsBody = (await ticketsResponse.json()) as { tickets?: Array<{ title?: string }> };
-    const expectedTitles = new Set(
-      (mockPubSubMessages.get(batchAlias) ?? []).map((message) => String(message.subject))
-    );
-    const actualTitles = (ticketsBody.tickets ?? []).filter((ticket) =>
-      expectedTitles.has(String(ticket.title))
-    );
-    assert.equal(actualTitles.length, expectedTitles.size);
-    assert.equal(new Set(actualTitles.map((ticket) => ticket.title)).size, expectedTitles.size);
   }
 
   @Step(
@@ -967,6 +953,94 @@ export default class XyneDeskSteps {
   ): Promise<void> {
     assertValidChannelAlias(channelAlias);
     assertValidUserAlias(userAlias);
+    const { batch, response } = await this.postPubSubBatch(batchAlias, channelAlias, userAlias);
+    await assertOkResponse(response, 'Deterministic Pub/Sub duplicate batch');
+    const result = (await response.json()) as PubSubBulkResult;
+    assert.equal(result.created, 0);
+    assert.equal(result.duplicates, batch.messageIds.length);
+  }
+
+  @Step(
+    'publishing deterministic Pub/Sub batch <batchAlias> to Desk channel <channelAlias> for user <userAlias> failing at message <failIndex>'
+  )
+  public async publishDeterministicPubSubBatchWithFailure(
+    batchAlias: string,
+    channelAlias: string,
+    userAlias: string,
+    failIndex: string
+  ): Promise<void> {
+    assertValidChannelAlias(channelAlias);
+    assertValidUserAlias(userAlias);
+    const batch = mockPubSubBatches.get(batchAlias);
+    assert.ok(batch, `Expected Pub/Sub batch "${batchAlias}" to be generated.`);
+    const index = Number.parseInt(failIndex, 10);
+    assert.ok(
+      Number.isInteger(index) && index > 0 && index < batch.messageIds.length,
+      `Fail index must be inside the batch so some messages land before the failure.`
+    );
+    const { response } = await this.postPubSubBatch(
+      batchAlias,
+      channelAlias,
+      userAlias,
+      batch.messageIds[index]
+    );
+    assert.equal(response.status(), 503, 'Injected failure must surface as a retryable 503.');
+    const result = (await response.json()) as { retryable?: boolean };
+    assert.equal(result.retryable, true);
+    batch.failedAtIndex = index;
+    // Messages before the failure point are persisted; nothing at or after it is.
+    await this.assertPubSubBatchTicketCount(batchAlias, channelAlias, userAlias, index);
+  }
+
+  @Step(
+    'redelivering failed Pub/Sub batch <batchAlias> to Desk channel <channelAlias> for user <userAlias>'
+  )
+  public async redeliverFailedPubSubBatch(
+    batchAlias: string,
+    channelAlias: string,
+    userAlias: string
+  ): Promise<void> {
+    assertValidChannelAlias(channelAlias);
+    assertValidUserAlias(userAlias);
+    const batch = mockPubSubBatches.get(batchAlias);
+    assert.ok(batch, `Expected Pub/Sub batch "${batchAlias}" to be generated.`);
+    const { failedAtIndex } = batch;
+    assert.ok(
+      failedAtIndex !== undefined,
+      `Expected Pub/Sub batch "${batchAlias}" to have failed before redelivery.`
+    );
+    const { response } = await this.postPubSubBatch(batchAlias, channelAlias, userAlias);
+    await assertOkResponse(response, 'Redelivered Pub/Sub batch after failure');
+    const result = (await response.json()) as PubSubBulkResult;
+    assert.equal(result.duplicates, failedAtIndex, 'Already-persisted messages must dedupe.');
+    assert.equal(result.created, batch.messageIds.length - failedAtIndex);
+    await this.assertPubSubBatchTicketCount(
+      batchAlias,
+      channelAlias,
+      userAlias,
+      batch.messageIds.length
+    );
+  }
+
+  @Step(
+    'verifying Desk channel <channelAlias> has no tickets from Pub/Sub batch <batchAlias> for user <userAlias>'
+  )
+  public async verifyChannelHasNoPubSubBatchTickets(
+    channelAlias: string,
+    batchAlias: string,
+    userAlias: string
+  ): Promise<void> {
+    assertValidChannelAlias(channelAlias);
+    assertValidUserAlias(userAlias);
+    await this.assertPubSubBatchTicketCount(batchAlias, channelAlias, userAlias, 0);
+  }
+
+  private async postPubSubBatch(
+    batchAlias: string,
+    channelAlias: string,
+    userAlias: string,
+    failAtMessageId?: string
+  ) {
     const batch = mockPubSubBatches.get(batchAlias);
     assert.ok(batch, `Expected Pub/Sub batch "${batchAlias}" to be generated.`);
     const channelId = this.getStoredChannelId(channelAlias, userAlias);
@@ -974,14 +1048,42 @@ export default class XyneDeskSteps {
     assert.ok(messages, `Expected Pub/Sub messages for batch "${batchAlias}".`);
     const response = await withDevAuthenticatedApiContext(userAlias, (apiContext) =>
       apiContext.post('/api/test/desk/pubsub/bulk-gmail', {
-        data: { channelId, historyId: batch.historyId, messages },
+        data: { channelId, historyId: batch.historyId, messages, failAtMessageId },
         timeout: DESK_UI_TIMEOUT_MS + messages.length * PUBSUB_PER_MESSAGE_TIMEOUT_MS,
       })
     );
-    await assertOkResponse(response, 'Deterministic Pub/Sub duplicate batch');
-    const result = (await response.json()) as { created?: number; duplicates?: number };
-    assert.equal(result.created, 0);
-    assert.equal(result.duplicates, batch.messageIds.length);
+    return { batch, response };
+  }
+
+  /** Asserts the channel holds exactly `expected` tickets from the batch, each title once. */
+  private async assertPubSubBatchTicketCount(
+    batchAlias: string,
+    channelAlias: string,
+    userAlias: string,
+    expected: number
+  ): Promise<void> {
+    const channelId = this.getStoredChannelId(channelAlias, userAlias);
+    const ticketsResponse = await withDevAuthenticatedApiContext(userAlias, (apiContext) =>
+      apiContext.get(`/api/test/desk/channel/${channelId}/tickets`)
+    );
+    await assertOkResponse(ticketsResponse, 'Desk Pub/Sub ticket verification');
+    const ticketsBody = (await ticketsResponse.json()) as { tickets?: Array<{ title?: string }> };
+    const batchTitles = new Set(
+      (mockPubSubMessages.get(batchAlias) ?? []).map((message) => String(message.subject))
+    );
+    const matching = (ticketsBody.tickets ?? []).filter((ticket) =>
+      batchTitles.has(String(ticket.title))
+    );
+    assert.equal(
+      matching.length,
+      expected,
+      `Expected ${expected} tickets from batch "${batchAlias}" in channel "${channelAlias}".`
+    );
+    assert.equal(
+      new Set(matching.map((ticket) => ticket.title)).size,
+      expected,
+      `Expected no duplicate tickets from batch "${batchAlias}" in channel "${channelAlias}".`
+    );
   }
 
   @Step(
