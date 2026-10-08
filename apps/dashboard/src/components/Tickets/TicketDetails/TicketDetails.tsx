@@ -1293,7 +1293,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
     projectTicketNextOffset,
   ]);
 
-  const [boards] = useCachedQuery(
+  const [boards, boardsDetails] = useCachedQuery(
     queries.boardsListByProject({ projectId: ticket?.projectId || '' }),
     {
       // Also needed by the sub-ticket picker, which must know each board's type.
@@ -1303,25 +1303,50 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
     },
   );
 
-  const [ticketNamespaces] = useCachedQuery(
+  const [ticketNamespaces, ticketNamespacesDetails] = useCachedQuery(
     queries.ticketNamespacesByProject({ projectId: ticket?.projectId || '' }),
     { enabled: !!ticket?.projectId && hasBoardDropdownOpened },
   );
 
-  // Moving to a board with a different code leaves the ticket's immutable id mismatched
-  // with the board's code — surfaced only when that will actually happen.
+  const [ticketProject, ticketProjectDetails] = useCachedQuery(
+    queries.projectById({ projectId: ticket?.projectId || '' }),
+    { enabled: !!ticket?.projectId && hasBoardDropdownOpened },
+  );
+
+  // Don't decide move vs transfer until everything it depends on has settled
+  const boardChangeDataReady =
+    boardsDetails.type !== 'unknown' &&
+    ticketNamespacesDetails.type !== 'unknown' &&
+    ticketProjectDetails.type !== 'unknown';
+
+  // Transfer only when the boards' effective namespaces differ, matching the backend
   const boardChangeCodeMismatch = useMemo(() => {
-    if (!pendingBoardChange || !ticket?.xyneId) return null;
+    if (!pendingBoardChange || !ticket?.xyneId || !boardChangeDataReady) return null;
     const boardList = boards && !(boards instanceof Error) ? boards : [];
-    const targetBoard = boardList.find(board => board.id === pendingBoardChange);
-    if (!targetBoard?.ticketNamespaceId) return null;
+    const project = ticketProject && !(ticketProject instanceof Error) ? ticketProject : undefined;
+    const effectiveNamespaceId = (boardId: string | null | undefined): string | null => {
+      const board = boardList.find(b => b.id === boardId);
+      return board?.ticketNamespaceId ?? project?.defaultTicketNamespaceId ?? null;
+    };
+    const sourceNamespaceId = effectiveNamespaceId(ticket.boardId);
+    const targetNamespaceId = effectiveNamespaceId(pendingBoardChange);
+    if (!sourceNamespaceId || !targetNamespaceId || sourceNamespaceId === targetNamespaceId) {
+      return null;
+    }
     const nsList =
       ticketNamespaces && !(ticketNamespaces instanceof Error) ? ticketNamespaces : [];
-    const targetCode = nsList.find(ns => ns.id === targetBoard.ticketNamespaceId)?.code;
-    const ticketPrefix = ticket.xyneId.split('-')[0];
-    if (!targetCode || targetCode === ticketPrefix) return null;
+    const targetCode = nsList.find(ns => ns.id === targetNamespaceId)?.code;
+    if (!targetCode) return null;
     return { targetCode, ticketId: ticket.xyneId };
-  }, [pendingBoardChange, boards, ticketNamespaces, ticket?.xyneId]);
+  }, [
+    pendingBoardChange,
+    boardChangeDataReady,
+    boards,
+    ticketProject,
+    ticketNamespaces,
+    ticket?.xyneId,
+    ticket?.boardId,
+  ]);
 
   // Get current active stage entry (where stageLeftAt is null)
   const currentStageEntry = useMemo(() => {
@@ -2815,7 +2840,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
   };
 
   const confirmBoardChange = (): void => {
-    if (!pendingBoardChange || !ticket) return;
+    if (!pendingBoardChange || !ticket || !boardChangeDataReady) return;
 
     // Different namespace -> transfer (new ticket + relationship), never a move.
     if (boardChangeCodeMismatch) {
@@ -5520,16 +5545,18 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
               </Button>
               <Button
                 onClick={confirmBoardChange}
-                disabled={isTransferringBoard}
+                disabled={isTransferringBoard || !boardChangeDataReady}
                 data-track-category='Tickets'
                 data-track-name='CONFIRM_BOARD_CHANGE'
                 className='bg-primary text-primary-foreground hover:opacity-90'
               >
-                {boardChangeCodeMismatch
-                  ? isTransferringBoard
-                    ? 'Creating…'
-                    : 'Create ticket'
-                  : 'Confirm'}
+                {!boardChangeDataReady
+                  ? 'Checking…'
+                  : boardChangeCodeMismatch
+                    ? isTransferringBoard
+                      ? 'Creating…'
+                      : 'Create ticket'
+                    : 'Confirm'}
               </Button>
             </div>
           </div>
