@@ -2,7 +2,7 @@ import { appItemId, isAppItemId } from './appItemId';
 
 /**
  * A channel's tabs are two layers: the apps a channel admin published
- * (Channel.publishedAppIds, shared) and each member's own changes on top of it
+ * (channel_published_apps, shared) and each member's own changes on top of it
  * (localStorage, per device). These two functions convert between the three
  * local lists and the single list the member actually sees.
  *

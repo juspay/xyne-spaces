@@ -241,6 +241,7 @@ import { DeskSettings } from '../../components/xyne-desk/DeskSettings';
 import { DeskAppsMenu } from '../../components/xyne-desk/DeskApps/DeskAppsMenu';
 import { ArtifactAppHost } from '../../components/ArtifactApp/ArtifactAppHost';
 import { useDeskApps } from '../../components/xyne-desk/DeskApps/useDeskApps';
+import { useChannelPublishedApps } from '../../hooks/useChannelPublishedApps';
 import { DeskMetricsDashboard } from '../../components/xyne-desk/DeskMetrics';
 import { TopicsExplorer } from '../../components/xyne-desk/TopicsExplorer';
 import { AutoLabelWizard } from '../../components/xyne-desk/AutoLabelWizard/AutoLabelWizard';
@@ -2231,10 +2232,11 @@ const SupportScreen = (): ReactElement => {
   const isFacebookDesk = selectedChannelIntegration.sourceType === 'facebook';
   const isCallDesk = selectedChannelFull?.type === ChannelType.CALL;
 
-  // Artifact apps added to this desk (EmailChannelPreference.deskAppIds). Every
-  // member sees and opens them; the desk owner and channel admins add/remove
-  // them — the same rule the preference ACL enforces on the write.
-  const deskApps = useDeskApps(channelPreference?.deskAppIds);
+  // Artifact apps added to this desk (channel_published_apps). Every member sees
+  // and opens them; the desk owner and channel admins add/remove them — the same
+  // rule the table's ACL enforces on the write (canPublishAppsTo).
+  const deskPublishedAppIds = useChannelPublishedApps(preferenceChannelId);
+  const deskApps = useDeskApps(deskPublishedAppIds);
   const canManageDeskApps =
     canManageDeskInsights && isSelectedChannelJoined && selectedChannelId !== ALL_CHANNELS_ID;
   const requestedDeskAppId = searchParams.get('deskApp');

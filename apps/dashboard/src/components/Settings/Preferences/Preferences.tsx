@@ -74,7 +74,8 @@ import {
 } from '../../../hooks/useCallMediaQualitySettings';
 import { useMaxCameraHeight, filterQualityOptionsByMax } from '../../../hooks/useMaxCameraQuality';
 import { useParams } from 'react-router-dom';
-import { ChannelScopeType, parsePublishedAppIds } from '@xyne/shared';
+import { ChannelScopeType } from '@xyne/shared';
+import { useChannelPublishedApps } from '../../../hooks/useChannelPublishedApps';
 import { AI_TOOLBAR_PATH, useAiLaunchPreference } from '../../../hooks/useAiLaunchPreference';
 import {
   toolbarItemsStore,
@@ -1372,12 +1373,9 @@ const ChannelTabsSection: FC<{ state: PreferencesState }> = () => {
 
   const builtIns = useChannelTabBuiltIns(selected?.scopeType);
   // Hooks run before the empty-state return below, so they take a placeholder id.
-  const store = useChannelTabsStore(selected?.id ?? 'unknown', selected?.publishedAppIds);
-  const publish = useChannelAppPublishing(selected?.id ?? 'unknown', selected);
-  const publishedIds = useMemo(
-    () => parsePublishedAppIds(selected?.publishedAppIds),
-    [selected?.publishedAppIds],
-  );
+  const publishedIds = useChannelPublishedApps(selected?.id);
+  const store = useChannelTabsStore(selected?.id ?? 'unknown', publishedIds);
+  const publish = useChannelAppPublishing(selected?.id ?? 'unknown', selected, publishedIds);
   const publishedSet = useMemo(() => new Set(publishedIds), [publishedIds]);
   useEnsureAppSnapshots(publishedIds);
 

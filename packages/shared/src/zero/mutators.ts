@@ -119,13 +119,12 @@ import {
 import {
   isDeskChannelType,
   deskTypeForChannelType,
-  serializeAppIdList,
-  serializeDeskAppIds,
-  supportsChannelApps,
-  canPublishChannelApps,
-  parsePublishedAppIds,
+  canPublishAppsTo,
+  maxPublishedApps,
+  MAX_PUBLISHED_APP_ID_LENGTH,
 } from '../utils/channel.js';
-import { MAX_CHANNEL_PUBLISHED_APPS, MAX_DESK_APPS, MAX_DUPLICATE_SCOPE_FIELDS } from './types.js';
+import { MAX_DUPLICATE_SCOPE_FIELDS } from './types.js';
+import type { ChannelPublishedApp } from './schema.js';
 import { DEFAULT_ROLE_NAME_TO_ENUM } from '../utils/roleFrameworkUtils.js';
 import { SUMMARY_PROMPT_MAX_LENGTH } from '../templates/callSummary.js';
 import { z } from 'zod';
@@ -142,17 +141,17 @@ const serializeCanvasCommentMentionedUserIds = (mentionedUserIds: string[]): str
   JSON.stringify([...new Set(mentionedUserIds)]);
 
 /**
- * Loads a channel for publishing an app and checks the caller may: the channel
- * exists, isn't archived, supports apps (channel, DM or group DM — never a
- * desk), and the caller passes canPublishChannelApps. Returns the published
- * list as stored NOW, so publishApp/unpublishApp change one entry against the
- * current row instead of overwriting it with a client's (possibly stale) copy.
+ * Loads a channel for publishing or unpublishing an app and checks the caller
+ * may (canPublishAppsTo): the channel exists and isn't archived; a desk needs
+ * its owner or a channel ADMIN, a channel needs an ADMIN, a DM or group DM any
+ * participant. Returns the channel and its published rows as they are NOW, so
+ * each mutation adds or removes one row against the current state.
  */
 async function loadChannelForAppPublish(
   tx: Transaction<Schema>,
   channelId: string,
   userId: string,
-): Promise<string[]> {
+): Promise<{ channelType: string | null; rows: ChannelPublishedApp[] }> {
   const channel = await tx.run(zql.channels.where('id', channelId).one());
   if (!channel) {
     throw new Error("Channel doesn't exist");
@@ -160,21 +159,25 @@ async function loadChannelForAppPublish(
   if (channel.isArchived) {
     throw new Error('Cannot publish apps to an archived channel');
   }
-  if (!supportsChannelApps(channel)) {
-    throw new Error('Apps can only be published to channels, DMs and group DMs');
-  }
   const participant = await tx.run(
     zql.channel_participants.where('channelId', channelId).where('userId', userId).one(),
   );
-  // Channels: ADMINs only. DMs and group DMs: any participant (peers).
-  if (!canPublishChannelApps(channel.scopeType, participant?.role)) {
+  const isDesk = isDeskChannelType(channel.type);
+  const deskPreference = isDesk
+    ? await tx.run(zql.email_channel_preferences.where('channelId', channelId).one())
+    : undefined;
+  const isDeskOwner = !!deskPreference?.ownerUserId && deskPreference.ownerUserId === userId;
+  if (!canPublishAppsTo(channel, participant?.role, isDeskOwner)) {
     throw new Error(
-      channel.scopeType === ChannelScopeType.DEFAULT
-        ? 'Only channel admins can publish apps to the channel'
-        : 'Only participants can publish apps to this conversation',
+      isDesk
+        ? 'Only the desk owner or a channel admin can change desk apps'
+        : channel.scopeType === ChannelScopeType.DEFAULT
+          ? 'Only channel admins can publish apps to the channel'
+          : 'Apps can only be published to channels, DMs, group DMs and desks',
     );
   }
-  return parsePublishedAppIds(channel.publishedAppIds);
+  const rows = await tx.run(zql.channel_published_apps.where('channelId', channelId));
+  return { channelType: channel.type ?? null, rows };
 }
 
 async function getCanvasThreadCommentCount(
@@ -957,36 +960,43 @@ export const mutators = defineMutators({
         });
       },
     ),
-    // Apps published to every participant's tabs (Channel.publishedAppIds) — by an
-    // ADMIN in a channel, by any participant in a DM or group DM. Members layer their
-    // own changes on top locally. Desks are excluded outright: they keep their own
-    // all-shared list in email_channel_preferences.deskAppIds.
-    //
-    // One app per call, applied to the row as read inside this transaction, so two
-    // people publishing at once each add their app rather than overwriting the other.
+    // Apps published to a channel, DM, group DM or desk (channel_published_apps): an
+    // ADMIN in a channel, any participant in a DM or group DM, the owner or an ADMIN
+    // on a desk. Channel members layer their own changes on top locally; a desk
+    // shows the list as-is. One row per call, so concurrent publishes don't collide.
     publishApp: defineMutator(
-      z.object({ channelId: z.string(), appId: z.string().min(1).max(64) }),
-      async ({ tx, ctx, args: { channelId, appId } }) => {
-        const current = await loadChannelForAppPublish(tx, channelId, ctx.userID);
-        if (current.includes(appId)) return;
-        if (current.length >= MAX_CHANNEL_PUBLISHED_APPS) {
-          throw new Error(`Up to ${MAX_CHANNEL_PUBLISHED_APPS} apps can be published here`);
+      z.object({
+        // Generated client-side (uuid) so optimistic apply and server replay agree.
+        id: z.string().min(1).max(64),
+        channelId: z.string(),
+        appId: z.string().min(1).max(MAX_PUBLISHED_APP_ID_LENGTH),
+        timestamp: z.number(),
+      }),
+      async ({ tx, ctx, args: { id, channelId, appId, timestamp } }) => {
+        const { channelType, rows } = await loadChannelForAppPublish(tx, channelId, ctx.userID);
+        if (rows.some(row => row.appId === appId)) return;
+        const max = maxPublishedApps(channelType);
+        if (rows.length >= max) {
+          throw new Error(`Up to ${max} apps can be published here`);
         }
-        await tx.mutate.channels.update({
-          id: channelId,
-          publishedAppIds: serializeAppIdList([...current, appId]),
+        await tx.mutate.channel_published_apps.insert({
+          id,
+          workspaceId: ctx.workspaceId,
+          channelId,
+          appId,
+          position: rows.reduce((top, row) => Math.max(top, row.position), -1) + 1,
+          publishedBy: ctx.userID,
+          createdAt: timestamp,
         });
       },
     ),
     unpublishApp: defineMutator(
-      z.object({ channelId: z.string(), appId: z.string().min(1).max(64) }),
+      z.object({ channelId: z.string(), appId: z.string().min(1).max(MAX_PUBLISHED_APP_ID_LENGTH) }),
       async ({ tx, ctx, args: { channelId, appId } }) => {
-        const current = await loadChannelForAppPublish(tx, channelId, ctx.userID);
-        if (!current.includes(appId)) return;
-        await tx.mutate.channels.update({
-          id: channelId,
-          publishedAppIds: serializeAppIdList(current.filter(id => id !== appId)),
-        });
+        const { rows } = await loadChannelForAppPublish(tx, channelId, ctx.userID);
+        const row = rows.find(r => r.appId === appId);
+        if (!row) return;
+        await tx.mutate.channel_published_apps.delete({ id: row.id });
       },
     ),
     updateShowTicketsTabTicketsInChat: defineMutator(
@@ -10734,9 +10744,6 @@ export const mutators = defineMutators({
         deskReportEnabled: z.boolean().optional(),
         deskReportAgentSlug: z.string().optional().nullable(),
         deskReportRangeDays: z.number().optional(),
-        // Artifact apps shown on this desk, in order (see EmailChannelPreference.deskAppIds).
-        // An empty list clears the column.
-        deskAppIds: z.array(z.string().min(1).max(64)).max(MAX_DESK_APPS).nullable().optional(),
         // Scoped duplicate detection config (see EmailChannelPreference.duplicateScopeConfig)
         duplicateScopeConfig: z
           .object({
@@ -10767,7 +10774,6 @@ export const mutators = defineMutators({
           deskReportEnabled,
           deskReportAgentSlug,
           deskReportRangeDays,
-          deskAppIds,
           duplicateScopeConfig,
         },
       }) => {
@@ -10793,7 +10799,6 @@ export const mutators = defineMutators({
             ...(deskReportEnabled !== undefined ? { deskReportEnabled } : {}),
             ...(deskReportAgentSlug !== undefined ? { deskReportAgentSlug } : {}),
             ...(deskReportRangeDays !== undefined ? { deskReportRangeDays } : {}),
-            ...(deskAppIds !== undefined ? { deskAppIds: serializeDeskAppIds(deskAppIds) } : {}),
             ...(duplicateScopeConfig !== undefined
               ? { duplicateScopeConfig: duplicateScopeConfig == null ? null : JSON.stringify(duplicateScopeConfig) }
               : {}),
@@ -10828,7 +10833,6 @@ export const mutators = defineMutators({
             deskReportEnabled: deskReportEnabled ?? false,
             deskReportAgentSlug: deskReportAgentSlug ?? null,
             deskReportRangeDays: deskReportRangeDays ?? 1,
-            deskAppIds: serializeDeskAppIds(deskAppIds ?? null),
             duplicateScopeConfig: duplicateScopeConfig ? JSON.stringify(duplicateScopeConfig) : null,
           });
         }

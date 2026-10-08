@@ -1,10 +1,10 @@
 import { useMemo } from 'react';
+import { v4 as uuidv4 } from 'uuid';
 import {
   ChannelRole,
   ChannelScopeType,
   MAX_CHANNEL_PUBLISHED_APPS,
   canPublishChannelApps,
-  parsePublishedAppIds,
 } from '@xyne/shared';
 import { useZero } from '../../hooks/useZero';
 import { useCachedQuery } from '../../hooks/useCachedQuery';
@@ -24,6 +24,8 @@ export interface AppPublishOptions {
   /** The channel already has the maximum number of published apps. */
   isFull: boolean;
   onToggle: (app: ArtifactAppSummary, next: boolean) => void;
+  /** Unpublish by id — for the globe on a published tab, which has no summary to hand. */
+  unpublish: (appId: string) => void;
   /** Who a published app reaches, for the picker's copy. */
   audience: 'channel' | 'conversation';
 }
@@ -33,12 +35,15 @@ export interface AppPublishOptions {
  * participant of a DM or group DM. Never a desk. Undefined for everyone else,
  * which is how the picker knows to show no publish controls at all.
  *
- * The rule is the shared `canPublishChannelApps`, which `channel.setPublishedApps`
- * and the channels ACL run again server-side — this only decides what to show.
+ * The rule is the shared `canPublishChannelApps`, which `channel.publishApp` /
+ * `unpublishApp` and the channel_published_apps ACL run again server-side —
+ * this only decides what to show.
  */
 export const useChannelAppPublishing = (
   channelId: string,
   channel: ChannelTabsSource | null | undefined,
+  /** From useChannelPublishedApps — stable until the ids change. */
+  published: readonly string[],
 ): AppPublishOptions | undefined => {
   const zero = useZero();
   // Only this user's ADMIN participations; the same source Canvas and Desk use.
@@ -53,27 +58,37 @@ export const useChannelAppPublishing = (
   const role = isAdmin ? ChannelRole.ADMIN : isDirect ? ChannelRole.MEMBER : null;
   const canPublish =
     isChannelTabsCustomizable(channel) && canPublishChannelApps(channel?.scopeType, role);
-  const publishedAppIdsRaw = channel?.publishedAppIds;
 
   return useMemo((): AppPublishOptions | undefined => {
     if (!canPublish) return undefined;
-    const current = parsePublishedAppIds(publishedAppIdsRaw);
     return {
-      publishedAppIds: new Set(current),
-      isFull: current.length >= MAX_CHANNEL_PUBLISHED_APPS,
+      publishedAppIds: new Set(published),
+      isFull: published.length >= MAX_CHANNEL_PUBLISHED_APPS,
       audience: isDirect ? 'conversation' : 'channel',
+      unpublish: (appId): void => {
+        void surfaceMutationError(
+          zero.mutate(mutators.channel.unpublishApp({ channelId, appId })),
+          'Could not unpublish the app',
+        );
+      },
       onToggle: (app, next): void => {
         if (next) setAppSnapshot(app.id, { title: app.title, icon: app.icon });
         // One app per call: the mutator applies it to the row as it stands, so a
         // quick second click or another person publishing at once isn't lost.
-        const args = { channelId, appId: app.id };
         void surfaceMutationError(
           zero.mutate(
-            next ? mutators.channel.publishApp(args) : mutators.channel.unpublishApp(args),
+            next
+              ? mutators.channel.publishApp({
+                  id: uuidv4(),
+                  channelId,
+                  appId: app.id,
+                  timestamp: Date.now(),
+                })
+              : mutators.channel.unpublishApp({ channelId, appId: app.id }),
           ),
           next ? 'Could not publish the app' : 'Could not unpublish the app',
         );
       },
     };
-  }, [canPublish, publishedAppIdsRaw, channelId, zero, isDirect]);
+  }, [canPublish, published, channelId, zero, isDirect]);
 };

@@ -1,12 +1,5 @@
 import type { DeleteID, InsertValue, Transaction, UpdateValue } from '@rocicorp/zero';
-import {
-  ChannelRole,
-  Schema,
-  canPublishChannelApps,
-  isDeskChannelType,
-  isValidPublishedAppIdList,
-  supportsChannelApps,
-} from '@xyne/shared';
+import { ChannelRole, Schema } from '@xyne/shared';
 import { BaseACL } from '../core/base-acl';
 import { MutationACLError, TableSchema } from '../core/types';
 import { zql } from '../../queries';
@@ -28,12 +21,6 @@ export class ChannelsACL extends BaseACL<'channels'> {
 
   async canInsert(args: InsertValue<TableSchema<'channels'>>, tx: Transaction<Schema>): Promise<void> {
     assertGuestWriteBlocked(this.ctx, 'channels', 'insert', 'Channel');
-
-    // Apps are published to an existing channel (channel.publishApp / unpublishApp),
-    // never seeded at creation — which also keeps the column null on every new desk.
-    if (args.publishedAppIds) {
-      throw new MutationACLError('Channel insert failed: apps are published after the channel exists', 'channels');
-    }
 
     if (args.projectId) {
       const project = await tx.run(zql.projects.where('id', args.projectId).one());
@@ -74,26 +61,6 @@ export class ChannelsACL extends BaseACL<'channels'> {
 
     if (!currentUserParticipantData) {
        throw new MutationACLError('Channel update failed: only channel participants can modify channel settings', 'channels');
-    }
-
-    // Published apps: channels (ADMINs), DMs and group DMs (any participant). Desks
-    // keep theirs in email_channel_preferences.deskAppIds, so the column must stay
-    // null on a desk — and on ticket/document channels, which have no tabs.
-    if (args.publishedAppIds !== undefined) {
-      if (isDeskChannelType(channel.type)) {
-        throw new MutationACLError('Channel update failed: apps cannot be published to a desk channel', 'channels');
-      }
-      if (!supportsChannelApps(channel)) {
-        throw new MutationACLError('Channel update failed: apps can only be published to channels, DMs and group DMs', 'channels');
-      }
-      if (!canPublishChannelApps(channel.scopeType, currentUserParticipantData.role)) {
-        throw new MutationACLError('Channel update failed: only ADMINs can publish apps to the channel', 'channels');
-      }
-      // Who may write it is checked above; this is what may be written. The
-      // mutators already enforce it — this covers any other update path.
-      if (!isValidPublishedAppIdList(args.publishedAppIds)) {
-        throw new MutationACLError('Channel update failed: published apps must be up to 8 distinct app ids', 'channels');
-      }
     }
 
     // Only admins or channel creator can rename the channel

@@ -35,7 +35,8 @@ import {
   ConversationTabListType,
   isChannelTabsCustomizable,
 } from '../ConversationPannel/ConversationPannel.utils';
-import { useChannelTabsStore } from '../../../hooks/barItems';
+import { appIdOf, useChannelTabsStore } from '../../../hooks/barItems';
+import { useChannelPublishedApps } from '../../../hooks/useChannelPublishedApps';
 import {
   BarAddMenu,
   BarRemoveButton,
@@ -84,6 +85,12 @@ interface ChannelTabTriggerProps {
   isActive: boolean;
   /** Reserves room for the "×" drawn over the label while the strip is in edit mode. */
   removable: boolean;
+  /**
+   * The published-app globe is drawn OUTSIDE this button, as its own unpublish
+   * control (a button can't contain a button), so the inline badge is dropped
+   * and room is reserved for it.
+   */
+  globeAsControl?: boolean;
   onSelect: (tab: string, e?: React.MouseEvent) => void;
 }
 
@@ -92,6 +99,7 @@ const ChannelTabTrigger = ({
   tab,
   isActive,
   removable,
+  globeAsControl = false,
   onSelect,
 }: ChannelTabTriggerProps): JSX.Element => {
   const trigger = (
@@ -105,6 +113,7 @@ const ChannelTabTrigger = ({
         className={cn(
           'flex items-center justify-center gap-2 px-2.5 py-1.5 rounded-lg transition-colors duration-100 cursor-pointer',
           removable && 'pr-7',
+          globeAsControl && 'pr-12',
           isActive
             ? 'bg-muted text-foreground'
             : 'text-muted-foreground hover:bg-muted/60 hover:text-foreground',
@@ -114,7 +123,7 @@ const ChannelTabTrigger = ({
           {cloneElement(tab.icon, { color: 'currentColor' } as { color: string })}
         </span>
         <span className={cn('text-sm font-medium tracking-[-0.28px]')}>{tab.label}</span>
-        {tab.published && (
+        {tab.published && !globeAsControl && (
           <Globe
             size={12}
             className='shrink-0 text-muted-foreground'
@@ -158,10 +167,11 @@ const ConversationHeader = ({
   const channelTabBuiltIns = useChannelTabBuiltIns(channel?.scopeType);
   // Null in a ticket/document channel or a desk: those show the built-in tabs
   // with no ×, no + and no dragging. Channels, DMs and group DMs are editable.
-  const layeredTabsStore = useChannelTabsStore(channelId, channel?.publishedAppIds);
+  const publishedAppIds = useChannelPublishedApps(channelId);
+  const layeredTabsStore = useChannelTabsStore(channelId, publishedAppIds);
   const tabsStore = isChannelTabsCustomizable(channel) ? layeredTabsStore : null;
   // Channel admins get step 2 in the app picker: publish to everyone's tabs.
-  const appPublishing = useChannelAppPublishing(channelId, channel);
+  const appPublishing = useChannelAppPublishing(channelId, channel, publishedAppIds);
   const channelTabIds = useMemo(() => (channelTabs ?? []).map(tab => tab.value), [channelTabs]);
   const [editSnapshot, setEditSnapshot] = useState<readonly string[] | null>(null);
   const isEditingTabs = !!tabsStore && editSnapshot !== null;
@@ -675,8 +685,32 @@ const ConversationHeader = ({
                       tab={tab}
                       isActive={activeTab === tab.value}
                       removable={!tabsStore.locked.includes(tab.value)}
+                      globeAsControl={!!tab.published && !!appPublishing}
                       onSelect={handleTabSelect}
                     />
+                    {tab.published && appPublishing && (
+                      // × only hides a published app for this person; this is
+                      // how someone who can publish takes it away from everyone.
+                      <Tooltip content='Unpublish — remove from everyone’s tabs' side='bottom'>
+                        <button
+                          type='button'
+                          aria-label={`Unpublish ${tab.label.trim()} from everyone's tabs`}
+                          onClick={event => {
+                            // The tab beneath is a trigger; this must not select it.
+                            event.preventDefault();
+                            event.stopPropagation();
+                            const appId = appIdOf(tab.value);
+                            if (appId) appPublishing.unpublish(appId);
+                          }}
+                          className='absolute right-6 top-1/2 z-[1] flex size-5 -translate-y-1/2 items-center justify-center rounded-full text-primary transition-colors hover:bg-primary/10'
+                          data-track-category='CHANNELS'
+                          data-track-name='UnpublishChannelAppFromTab'
+                          data-track-metadata={JSON.stringify({ tab: tab.value })}
+                        >
+                          <Globe size={12} aria-hidden='true' />
+                        </button>
+                      </Tooltip>
+                    )}
                     <BarRemoveButton
                       store={tabsStore}
                       id={tab.value}

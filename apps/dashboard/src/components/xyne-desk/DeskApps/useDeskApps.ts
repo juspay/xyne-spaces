@@ -1,6 +1,5 @@
-import { useCallback, useMemo } from 'react';
+import { useCallback } from 'react';
 import { useQueries, type UseQueryResult } from '@tanstack/react-query';
-import { parseDeskAppIds } from '@xyne/shared';
 import { getArtifactApp } from '../../../services/claw/artifactAppsService';
 
 export interface DeskApp {
@@ -23,7 +22,7 @@ export interface DeskApps {
 /**
  * The desk's apps, resolved for the current viewer.
  *
- * The desk stores ids only (EmailChannelPreference.deskAppIds); titles and icons
+ * The desk stores ids only (channel_published_apps); titles and icons
  * are read live, so a renamed app or a new icon shows up for everyone without
  * touching the desk. Each lookup shares ArtifactAppHost's query key, so opening
  * an app from the desk reuses the fetch the header already made.
@@ -31,8 +30,8 @@ export interface DeskApps {
  * The claw-auth route decides who may see an app. An id it refuses for this
  * viewer is dropped from `apps` rather than shown as a dead entry.
  */
-export function useDeskApps(rawDeskAppIds: string | null | undefined): DeskApps {
-  const ids = useMemo(() => parseDeskAppIds(rawDeskAppIds), [rawDeskAppIds]);
+export function useDeskApps(publishedAppIds: readonly string[]): DeskApps {
+  const ids = publishedAppIds as string[];
 
   // `combine` is re-run only when a query's result changes (and when this
   // callback does, i.e. when the id list does), so the returned object keeps its

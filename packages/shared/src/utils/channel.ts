@@ -39,77 +39,10 @@ export function deskTypeForChannelType(type: string | null | undefined): DeskTyp
 }
 
 /**
- * An ordered list of artifact app ids kept in one TEXT column (a JSON string[]
- * so Zero can sync it). Anything malformed reads as no apps rather than
- * throwing, since a bad value must not break the screen showing them.
- */
-export function parseAppIdList(raw: string | null | undefined, max: number): string[] {
-  if (!raw) return [];
-  try {
-    const parsed: unknown = JSON.parse(raw);
-    if (!Array.isArray(parsed)) return [];
-    const ids = parsed.filter((id): id is string => typeof id === 'string' && id.length > 0);
-    return [...new Set(ids)].slice(0, max);
-  } catch {
-    return [];
-  }
-}
-
-/** Write-side twin of parseAppIdList: de-duplicated, order kept, empty → null. */
-export function serializeAppIdList(ids: readonly string[] | null): string | null {
-  const unique = [...new Set(ids ?? [])];
-  return unique.length > 0 ? JSON.stringify(unique) : null;
-}
-
-/** The artifact apps on a desk (EmailChannelPreference.deskAppIds), in order. */
-export function parseDeskAppIds(raw: string | null | undefined): string[] {
-  return parseAppIdList(raw, MAX_DESK_APPS);
-}
-
-export const serializeDeskAppIds = serializeAppIdList;
-
-/** Longest app id accepted in Channel.publishedAppIds (ids are 25-char cuids). */
-export const MAX_PUBLISHED_APP_ID_LENGTH = 64;
-
-/**
- * Whether a raw Channel.publishedAppIds value is one the writers could have
- * produced: null, or a JSON array of at most MAX_CHANNEL_PUBLISHED_APPS
- * distinct ids of 1–64 characters. The channels ACL checks this, so a write that
- * bypasses publishApp/unpublishApp can't store anything larger or malformed in a
- * column every member syncs.
- */
-export function isValidPublishedAppIdList(raw: string | null | undefined): boolean {
-  if (raw === null || raw === undefined) return true;
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(raw);
-  } catch {
-    return false;
-  }
-  return (
-    Array.isArray(parsed) &&
-    parsed.length > 0 &&
-    parsed.length <= MAX_CHANNEL_PUBLISHED_APPS &&
-    new Set(parsed).size === parsed.length &&
-    parsed.every(
-      id => typeof id === 'string' && id.length > 0 && id.length <= MAX_PUBLISHED_APP_ID_LENGTH,
-    )
-  );
-}
-
-/**
- * Apps a channel admin published to a normal channel (Channel.publishedAppIds),
- * in order. Desks never have any — see isDeskChannelType.
- */
-export function parsePublishedAppIds(raw: string | null | undefined): string[] {
-  return parseAppIdList(raw, MAX_CHANNEL_PUBLISHED_APPS);
-}
-
-/**
- * Whether a channel has member-customizable tabs and can have apps published to
- * it: public and private channels, DMs and group DMs — never a desk (desks are
- * DEFAULT-scoped too, and keep their own email_channel_preferences.deskAppIds)
- * and never a ticket or document channel.
+ * Whether a channel has member-customizable tabs: public and private channels,
+ * DMs and group DMs — never a desk (desks are DEFAULT-scoped too, but show their
+ * published apps in the desk's Apps menu instead) and never a ticket or document
+ * channel.
  */
 export function supportsChannelApps(channel: {
   scopeType?: ChannelScopeType | null;
@@ -124,10 +57,10 @@ export function supportsChannelApps(channel: {
 }
 
 /**
- * Who may publish apps (Channel.publishedAppIds), given the caller's participant
- * role (null when they are not a participant). In a channel, only its ADMINs; in
- * a DM or group DM every participant is a peer, so any of them may. The same
- * rule runs in both mutators, the channels ACL and the UI.
+ * Who may publish apps to a channel, DM or group DM (not a desk — see
+ * canPublishAppsTo), given the caller's participant role (null when they are not
+ * a participant). In a channel, only its ADMINs; in a DM or group DM every
+ * participant is a peer, so any of them may.
  */
 export function canPublishChannelApps(
   scopeType: ChannelScopeType | null | undefined,
@@ -136,6 +69,32 @@ export function canPublishChannelApps(
   if (!participantRole) return false;
   if (scopeType === ChannelScopeType.DM || scopeType === ChannelScopeType.GROUP_DM) return true;
   return scopeType === ChannelScopeType.DEFAULT && participantRole === ChannelRole.ADMIN;
+}
+
+/** Longest app id accepted in channel_published_apps.appId (ids are 25-char cuids). */
+export const MAX_PUBLISHED_APP_ID_LENGTH = 64;
+
+/** How many apps a channel (or desk) can have published. */
+export function maxPublishedApps(channelType: string | null | undefined): number {
+  return isDeskChannelType(channelType) ? MAX_DESK_APPS : MAX_CHANNEL_PUBLISHED_APPS;
+}
+
+/**
+ * Who may publish or unpublish an app (channel_published_apps) — the single rule
+ * the mutators, the table's ACL and the dashboard all use:
+ *  - desk: its owner (email_channel_preferences.ownerUserId) or a channel ADMIN;
+ *  - channel: ADMINs only; DM / group DM: any participant;
+ *  - anything else (ticket, document): nobody.
+ */
+export function canPublishAppsTo(
+  channel: { scopeType?: ChannelScopeType | null; type?: string | null },
+  participantRole: ChannelRole | null | undefined,
+  isDeskOwner: boolean,
+): boolean {
+  if (isDeskChannelType(channel.type)) {
+    return isDeskOwner || participantRole === ChannelRole.ADMIN;
+  }
+  return supportsChannelApps(channel) && canPublishChannelApps(channel.scopeType, participantRole);
 }
 
 export const CHANNEL_NAME_MIN_LENGTH = 2;

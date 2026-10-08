@@ -223,9 +223,10 @@ const PublishButton = ({
       disabled={blocked}
       onClick={() => publish.onToggle(app, !published)}
       title={title}
+      aria-label={title}
       aria-pressed={published}
       className={cn(
-        'mr-3 flex shrink-0 items-center gap-1 rounded-md border px-2 py-1 text-xs font-medium transition-colors',
+        'mr-3 grid size-7 shrink-0 place-items-center rounded-md border transition-colors',
         published
           ? 'border-primary/30 bg-primary/10 text-primary hover:bg-primary/15'
           : 'border-border text-muted-foreground hover:bg-accent hover:text-foreground',
@@ -235,8 +236,7 @@ const PublishButton = ({
       data-track-name={published ? 'UnpublishChannelApp' : 'PublishChannelApp'}
       data-track-metadata={JSON.stringify({ appId: app.id })}
     >
-      <Globe className='size-3' />
-      {published ? 'Published' : 'Publish'}
+      <Globe className='size-3.5' aria-hidden='true' />
     </button>
   );
 };

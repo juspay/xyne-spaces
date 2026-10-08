@@ -9,7 +9,8 @@ import {
   TicketToken,
 } from '@xyne/icons';
 import { useCanReadTicket } from '../../../hooks/usePermissions';
-import { ChannelScopeType, parsePublishedAppIds, supportsChannelApps } from '@xyne/shared';
+import { ChannelScopeType, supportsChannelApps } from '@xyne/shared';
+import { useChannelPublishedApps } from '../../../hooks/useChannelPublishedApps';
 import { isDMChannel } from '../ChatDirectory/ChatDirectory.utils';
 import { AppIcon } from '../../AppIcon/AppIcon';
 import {
@@ -32,7 +33,6 @@ export interface ConversationTabListType {
 export interface ChannelTabsSource {
   scopeType?: ChannelScopeType | null;
   type?: string | null;
-  publishedAppIds?: string | null;
 }
 
 /** The tab every channel opens on and the only one a user cannot remove. */
@@ -107,7 +107,7 @@ export const useAvailableBuiltInTabs = (
  * DMs and group DMs. A ticket/document channel or a desk shows the built-in tabs
  * and offers no editing affordances. Desks are DEFAULT-scoped channels too, so
  * the type check (inside supportsChannelApps) is what keeps them out; they keep
- * their own shared app list (email_channel_preferences.deskAppIds).
+ * their published apps in the desk's Apps menu instead.
  */
 export const isChannelTabsCustomizable = (channel?: ChannelTabsSource | null): boolean =>
   !!channel && supportsChannelApps(channel);
@@ -125,12 +125,9 @@ export const useConversationTabs = (channelId: string, channel?: ChannelTabsSour
   // Read unconditionally — a hook cannot be skipped for a DM. The store for a
   // non-customizable channel is only ever read, never written, so subscribing
   // to it costs a listener and nothing else.
-  const store = useChannelTabsStore(channelId || 'unknown', channel?.publishedAppIds);
+  const publishedIds = useChannelPublishedApps(channelId);
+  const store = useChannelTabsStore(channelId || 'unknown', publishedIds);
   const ids = store.useItems();
-  const publishedIds = useMemo(
-    () => parsePublishedAppIds(channel?.publishedAppIds),
-    [channel?.publishedAppIds],
-  );
   // Published apps this device never added have no snapshot yet; fetch them.
   useEnsureAppSnapshots(publishedIds);
   const snapshots = useAppSnapshots();

@@ -1,5 +1,4 @@
 import { useMemo } from 'react';
-import { parsePublishedAppIds } from '@xyne/shared';
 import { createBarItemsStore, type BarItemsStore } from './barItemsStore';
 import { isAppItemId } from './appItemId';
 import { mergeChannelTabs, splitChannelTabs, type ChannelTabLayers } from './channelTabLayers';
@@ -16,7 +15,7 @@ import { mergeChannelTabs, splitChannelTabs, type ChannelTabLayers } from './cha
  * module. See `isChannelTabsCustomizable`.
  *
  * On top of that list sit the apps a channel admin published
- * (Channel.publishedAppIds). Two more local lists per channel record how this
+ * (channel_published_apps). Two more local lists per channel record how this
  * member relates to them — `:added` (apps they added themselves) and `:hidden`
  * (published apps they removed) — and `useChannelTabsStore` merges the three
  * into what the member sees. See channelTabLayers.ts.
@@ -103,34 +102,7 @@ export const getChannelTabsStore = (channelId: string): BarItemsStore => {
 
 const addedStores = new Map<string, BarItemsStore>();
 
-/**
- * One-time repair, run once when this module loads (never during render). An
- * earlier build seeded `:added` from the channel's visible list even when the
- * channel had never been customized — so the default layout's apps were
- * recorded as "added" in every channel it was opened in. Any real edit writes
- * the channel's own list too (useChannelTabsStore's `set` writes all three), so
- * an `:added` list next to NO saved channel list can only be that seed: drop it
- * and let the corrected migration reseed it (empty).
- */
 const ADDED_SUFFIX = ':added';
-const repairSeededFromDefaults = (): void => {
-  try {
-    const stale: string[] = [];
-    for (let i = 0; i < localStorage.length; i += 1) {
-      const key = localStorage.key(i);
-      if (!key?.startsWith(CHANNEL_TABS_KEY_PREFIX) || !key.endsWith(ADDED_SUFFIX)) continue;
-      const orderKey = key.slice(0, -ADDED_SUFFIX.length);
-      if (localStorage.getItem(orderKey) === null && (readList(key) ?? []).length > 0) {
-        stale.push(key);
-      }
-    }
-    // Removed after the scan: removing while iterating shifts localStorage's indices.
-    stale.forEach(key => localStorage.removeItem(key));
-  } catch {
-    // Storage unavailable: nothing persisted to repair.
-  }
-};
-repairSeededFromDefaults();
 const hiddenStores = new Map<string, BarItemsStore>();
 
 /**
@@ -174,14 +146,14 @@ const getHiddenStore = (channelId: string): BarItemsStore => {
  * back into the three local layers — that is what makes the header's Cancel
  * (`set(snapshot)`) restore hidden and self-added state exactly.
  *
- * `publishedAppIdsRaw` is the channel row's column as synced by Zero.
+ * `published` comes from useChannelPublishedApps, which keeps the array's
+ * identity until the ids change — so it is safe as a dependency below.
  */
 export const useChannelTabsStore = (
   channelId: string,
-  publishedAppIdsRaw: string | null | undefined,
+  published: readonly string[],
 ): BarItemsStore =>
   useMemo((): BarItemsStore => {
-    const published = parsePublishedAppIds(publishedAppIdsRaw);
     const order = getChannelTabsStore(channelId);
     const added = getAddedStore(channelId);
     const hidden = getHiddenStore(channelId);
@@ -205,10 +177,13 @@ export const useChannelTabsStore = (
         const orderIds = order.useItems();
         const addedIds = added.useItems();
         const hiddenIds = hidden.useItems();
+        // `published` must be a dependency: React keys this memo by its call
+        // position, not by the store object, so a rebuilt store (new published
+        // list) would otherwise get the merge cached from the old one.
         return useMemo(
           () =>
             mergeChannelTabs({ order: orderIds, added: addedIds, hidden: hiddenIds }, published),
-          [orderIds, addedIds, hiddenIds],
+          [orderIds, addedIds, hiddenIds, published],
         );
       },
       get,
@@ -245,4 +220,4 @@ export const useChannelTabsStore = (
         hidden.set([]);
       },
     };
-  }, [channelId, publishedAppIdsRaw]);
+  }, [channelId, published]);

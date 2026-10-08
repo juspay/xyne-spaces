@@ -110,9 +110,7 @@ export const useChannel = (channelId: string): Channel | undefined => {
       a?.visibility === b?.visibility &&
       a?.description === b?.description &&
       a?.createdAt === b?.createdAt &&
-      a?.showTicketsTabTicketsInChat === b?.showTicketsTabTicketsInChat &&
-      // Published apps change the channel's tabs for every member.
-      a?.publishedAppIds === b?.publishedAppIds,
+      a?.showTicketsTabTicketsInChat === b?.showTicketsTabTicketsInChat,
   );
   const visibleChannel = useSelector(
     stateMachineActor,
@@ -124,9 +122,7 @@ export const useChannel = (channelId: string): Channel | undefined => {
       a?.visibility === b?.visibility &&
       a?.description === b?.description &&
       a?.createdAt === b?.createdAt &&
-      a?.showTicketsTabTicketsInChat === b?.showTicketsTabTicketsInChat &&
-      // Published apps change the channel's tabs for every member.
-      a?.publishedAppIds === b?.publishedAppIds,
+      a?.showTicketsTabTicketsInChat === b?.showTicketsTabTicketsInChat,
   );
   return channel || visibleChannel;
 };

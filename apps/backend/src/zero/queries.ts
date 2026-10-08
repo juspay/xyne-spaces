@@ -4483,6 +4483,17 @@ export const queries: AnyQueryRegistry = defineQueries({
   // load the related board rows: chat surfaces ask this on every channel just to
   // decide whether to render a control, and boardsByChannel would pull the whole
   // mapping set with its joins for a question a single row answers.
+  // Apps published to a channel, DM, group DM or desk, in display order. Small
+  // (≤ 8 rows per channel); visibility follows the channel (ChannelPublishedAppsACL).
+  channelPublishedApps: defineQuery(
+    z.object({ channelId: z.string() }),
+    ({ args: { channelId } }) =>
+      zql.channel_published_apps
+        .where('channelId', channelId)
+        .orderBy('position', 'asc')
+        .orderBy('createdAt', 'asc'),
+  ),
+
   channelHasBoards: defineQuery(z.object({ channelId: z.string() }), ({ args: { channelId } }) => {
     return zql.channel_board_mappings.where('channelId', channelId).limit(1);
   }),

@@ -15,6 +15,7 @@ import { ChannelParticipantsACL } from '../tables/channel-participants-acl';
 import { ChannelStatsACL } from '../tables/channel-stats-acl';
 import { ChannelsACL } from '../tables/channels-acl';
 import { ChannelBoardMappingsACL } from '../tables/channel-board-mappings-acl';
+import { ChannelPublishedAppsACL } from '../tables/channel-published-apps-acl';
 import { ConversationParticipantsACL } from '../tables/conversation-participants-acl';
 import { ConversationsACL } from '../tables/conversations-acl';
 import { MessageAttachmentsACL } from '../tables/message-attachments-acl';
@@ -235,6 +236,8 @@ export class ACLFactory {
         return new ChannelsACL(ctx);
       case 'channel_board_mappings':
         return new ChannelBoardMappingsACL(ctx);
+      case 'channel_published_apps':
+        return new ChannelPublishedAppsACL(ctx);
       case 'conversation_participants':
         return new ConversationParticipantsACL(ctx);
       case 'conversations':

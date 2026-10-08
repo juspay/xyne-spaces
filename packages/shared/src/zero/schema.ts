@@ -794,7 +794,6 @@ export const channelTable = table('channels')
     showTicketsTabTicketsInChat: boolean().optional(),
     callSummaryPrompt: string().optional(), // Per-channel detailed call summary sections override
     connectId: string().optional(), // Slack Connect: connect_group handle (null until backfilled)
-    publishedAppIds: string().optional(), // JSON string[] of artifact apps a channel admin published; always null on desks
   })
   .primaryKey('id');
 
@@ -808,6 +807,20 @@ export const channelBoardMappingTable = table('channel_board_mappings' /* Channe
     createdBy: string(),
     createdAt: number(),
     updatedAt: number(),
+  })
+  .primaryKey('id');
+
+// Artifact apps published to a channel, DM, group DM or desk — one row per app.
+// ChannelPublishedAppsACL decides who may insert/delete; reads follow channel access.
+export const channelPublishedAppTable = table('channel_published_apps' /* ChannelPublishedApp */)
+  .columns({
+    id: string(),
+    workspaceId: string(),
+    channelId: string(),
+    appId: string(),
+    position: number(),
+    publishedBy: string(),
+    createdAt: number(),
   })
   .primaryKey('id');
 
@@ -1744,7 +1757,6 @@ export const emailChannelPreferenceTable = table('email_channel_preferences')
     deskReportRangeDays: number().optional(),
     duplicateScopeConfig: string().optional(),
     slackDeskTriggerMode: enumeration<SlackDeskTriggerMode>().optional(),
-    deskAppIds: string().optional(),
   })
   .primaryKey('channelId');
 
@@ -3458,6 +3470,11 @@ export const channelTableRelationships = relationships(channelTable, ({ one, man
     destField: ['channelId'],
     destSchema: channelBoardMappingTable,
   }),
+  publishedApps: many({
+    sourceField: ['id'],
+    destField: ['channelId'],
+    destSchema: channelPublishedAppTable,
+  }),
   ticketDescriptions: many({
     sourceField: ['id'],
     destField: ['channelId'],
@@ -3477,6 +3494,17 @@ export const channelBoardMappingTableRelationships = relationships(
       sourceField: ['boardId'],
       destField: ['id'],
       destSchema: boardTable,
+    }),
+  }),
+);
+
+export const channelPublishedAppTableRelationships = relationships(
+  channelPublishedAppTable,
+  ({ one }) => ({
+    channel: one({
+      sourceField: ['channelId'],
+      destField: ['id'],
+      destSchema: channelTable,
     }),
   }),
 );
@@ -5043,6 +5071,7 @@ export const schema = createSchema({
     guestAccessTable,
     channelTable,
     channelBoardMappingTable,
+    channelPublishedAppTable,
     channelStatsTable,
     channelParticipantTable,
     channelUserStatusTable,
@@ -5180,6 +5209,7 @@ export const schema = createSchema({
     conversationParticipantTableRelationships,
     channelTableRelationships,
     channelBoardMappingTableRelationships,
+    channelPublishedAppTableRelationships,
     channelStatsTableRelationships,
     repoTableRelationships,
     sdlcEntityLinkTableRelationships,
@@ -5322,6 +5352,7 @@ export type Invitation = Row<typeof schema.tables.invitations>;
 export type GuestAccess = Row<typeof schema.tables.guest_access>;
 export type Channel = Row<typeof schema.tables.channels>;
 export type ChannelBoardMapping = Row<typeof schema.tables.channel_board_mappings>;
+export type ChannelPublishedApp = Row<typeof schema.tables.channel_published_apps>;
 export type ChannelStats = Row<typeof schema.tables.channel_stats>;
 export type ChannelParticipant = Row<typeof schema.tables.channel_participants>;
 export type ChannelUserStatus = Row<typeof schema.tables.channel_user_status>;
