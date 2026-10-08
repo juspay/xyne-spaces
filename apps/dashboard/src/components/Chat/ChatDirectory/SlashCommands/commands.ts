@@ -63,6 +63,9 @@ export const COMMAND_KINDS = Object.keys(COMMAND_CATALOG) as SearchCommandKind[]
 
 export const getCommand = (kind: SearchCommandKind): CommandDef => COMMAND_CATALOG[kind];
 
+// Guests can join calls but not start calls or recordings.
+export const GUEST_BLOCKED_COMMANDS: ReadonlySet<SearchCommandKind> = new Set(['call', 'record']);
+
 // Regex derived from the catalog keys — no second hand-kept list to drift. Each key is escaped
 // (defensive if a future key has a regex-special char) and sorted longest-first (prefix-safe).
 const escapeRegex = (value: string): string => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');

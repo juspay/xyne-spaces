@@ -5,6 +5,7 @@ import Avatar from '../Avatar/Avatar';
 import { Button } from '../Button/Button';
 import { UserHoverWrapperProps } from './types';
 import { useAuth } from '../../../hooks/useAuth';
+import { WorkspaceRole } from '@xyne/shared';
 import { channelService } from '../../../services/Chat/channelService';
 import { toast } from 'sonner';
 import { useUser } from '../../../hooks/useUsers';
@@ -251,20 +252,23 @@ const UserHoverWrapperInner: React.FC<UserHoverWrapperProps> = ({
               <ChatDefault className='size-4' />
               <span>Message</span>
             </Button>
-            <Button
-              variant='secondary'
-              size='default'
-              onClick={e => {
-                e.stopPropagation();
-                handleHuddleClick();
-              }}
-              data-track-category='MENTION'
-              data-track-name='START_HUDDLE_FROM_MENTION'
-              className='flex items-center gap-2'
-            >
-              <PhoneDefault className='size-4' />
-              <span>Huddle</span>
-            </Button>
+            {/* Guests can join calls but not start them */}
+            {currentUser?.role !== WorkspaceRole.GUEST && (
+              <Button
+                variant='secondary'
+                size='default'
+                onClick={e => {
+                  e.stopPropagation();
+                  handleHuddleClick();
+                }}
+                data-track-category='MENTION'
+                data-track-name='START_HUDDLE_FROM_MENTION'
+                className='flex items-center gap-2'
+              >
+                <PhoneDefault className='size-4' />
+                <span>Huddle</span>
+              </Button>
+            )}
           </div>
         )}
       </div>

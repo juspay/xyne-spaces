@@ -21,7 +21,7 @@ import { useLocation, useNavigate, useOutlet } from 'react-router-dom';
 import { Virtuoso } from 'react-virtuoso';
 import { useAuth } from '../../hooks/useAuth';
 import { useCallHistory } from './useCallHistory';
-import { CallStatus, TagMethod } from '@xyne/shared';
+import { CallStatus, TagMethod, WorkspaceRole } from '@xyne/shared';
 import { logger, Event } from '../../utils/logger';
 import { dataLoadDuration, safeRecordMetric } from '../../services/otel';
 import AppNavigator from '../../components/AppNavigator/AppNavigator';
@@ -877,51 +877,53 @@ const CallHistoryScreen = (): ReactElement => {
             viewMode === 'calendar' ? 'flex-1 min-h-0' : 'pb-6',
           )}
         >
-          {/* Action cards */}
-          <div className='grid grid-cols-2 gap-3' data-testid='new-call-button'>
-            <button
-              data-testid='start-instant-call-option'
-              onClick={() => setIsInstantCallModalOpen(true)}
-              data-track-category='CALLS'
-              data-track-name='start-instant-call'
-              data-track-metadata={JSON.stringify({ source: 'call_history_tile' })}
-              className='flex items-center gap-4 p-2.5 sm:p-4 rounded-xl border border-border hover:bg-accent/50 transition-colors text-left'
-            >
-              <div className='size-6 rounded-md bg-action-primary flex items-center justify-center shrink-0'>
-                <Plus className='size-4 text-action-primary-foreground' strokeWidth={2.5} />
-              </div>
-              <div className='flex flex-col min-w-0 gap-0.5'>
-                <p className='text-sm font-medium text-foreground'>
-                  <span className='sm:hidden'>Instant call</span>
-                  <span className='hidden sm:inline'>Start an instant call</span>
-                </p>
-                <p className='hidden sm:block text-xs text-muted-foreground'>
-                  Connect right away and begin your conversation.
-                </p>
-              </div>
-            </button>
-            <button
-              data-testid='schedule-call-option'
-              onClick={() => setIsScheduleModalOpen(true)}
-              data-track-category='CALLS'
-              data-track-name='schedule-call'
-              data-track-metadata={JSON.stringify({ source: 'call_history_tile' })}
-              className='flex items-center gap-4 p-2.5 sm:p-4 rounded-xl border border-border hover:bg-accent/50 transition-colors text-left'
-            >
-              <div className='size-6 rounded-md bg-blue-500 flex items-center justify-center shrink-0'>
-                <CalendarDays className='size-4 text-white' />
-              </div>
-              <div className='flex flex-col min-w-0 gap-0.5'>
-                <p className='text-sm font-medium text-foreground'>
-                  <span className='sm:hidden'>Schedule call</span>
-                  <span className='hidden sm:inline'>Schedule a call</span>
-                </p>
-                <p className='hidden sm:block text-xs text-muted-foreground'>
-                  Pick a time that works for everyone and plan ahead.
-                </p>
-              </div>
-            </button>
-          </div>
+          {/* Action cards — guests can join calls but not start or schedule them */}
+          {user?.role !== WorkspaceRole.GUEST && (
+            <div className='grid grid-cols-2 gap-3' data-testid='new-call-button'>
+              <button
+                data-testid='start-instant-call-option'
+                onClick={() => setIsInstantCallModalOpen(true)}
+                data-track-category='CALLS'
+                data-track-name='start-instant-call'
+                data-track-metadata={JSON.stringify({ source: 'call_history_tile' })}
+                className='flex items-center gap-4 p-2.5 sm:p-4 rounded-xl border border-border hover:bg-accent/50 transition-colors text-left'
+              >
+                <div className='size-6 rounded-md bg-action-primary flex items-center justify-center shrink-0'>
+                  <Plus className='size-4 text-action-primary-foreground' strokeWidth={2.5} />
+                </div>
+                <div className='flex flex-col min-w-0 gap-0.5'>
+                  <p className='text-sm font-medium text-foreground'>
+                    <span className='sm:hidden'>Instant call</span>
+                    <span className='hidden sm:inline'>Start an instant call</span>
+                  </p>
+                  <p className='hidden sm:block text-xs text-muted-foreground'>
+                    Connect right away and begin your conversation.
+                  </p>
+                </div>
+              </button>
+              <button
+                data-testid='schedule-call-option'
+                onClick={() => setIsScheduleModalOpen(true)}
+                data-track-category='CALLS'
+                data-track-name='schedule-call'
+                data-track-metadata={JSON.stringify({ source: 'call_history_tile' })}
+                className='flex items-center gap-4 p-2.5 sm:p-4 rounded-xl border border-border hover:bg-accent/50 transition-colors text-left'
+              >
+                <div className='size-6 rounded-md bg-blue-500 flex items-center justify-center shrink-0'>
+                  <CalendarDays className='size-4 text-white' />
+                </div>
+                <div className='flex flex-col min-w-0 gap-0.5'>
+                  <p className='text-sm font-medium text-foreground'>
+                    <span className='sm:hidden'>Schedule call</span>
+                    <span className='hidden sm:inline'>Schedule a call</span>
+                  </p>
+                  <p className='hidden sm:block text-xs text-muted-foreground'>
+                    Pick a time that works for everyone and plan ahead.
+                  </p>
+                </div>
+              </button>
+            </div>
+          )}
 
           {/* UPCOMING section */}
           <div className={cn('flex flex-col gap-3', viewMode === 'calendar' && 'flex-1 min-h-0')}>
