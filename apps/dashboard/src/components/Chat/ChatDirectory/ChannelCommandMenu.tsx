@@ -1524,7 +1524,8 @@ const ChannelCommandMenuContent = ({
 
   // Whether the search feedback view is showing in place of the results.
   const [feedbackOpen, setFeedbackOpen] = useState(false);
-  const canPostFeedback = useCanPostSearchFeedback();
+  // Feedback is about search results, so it's hidden in the context-picker and desk-merge modes.
+  const canPostFeedback = useCanPostSearchFeedback() && !contextSelectionMode && !deskMergeMode;
 
   // Only the real search palette keeps history — not the context picker or desk-merge mode.
   const recentSearchesEnabled = !contextSelectionMode && !deskMergeMode;

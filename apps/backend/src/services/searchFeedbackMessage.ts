@@ -65,6 +65,14 @@ function escapeSlackText(text: string): string {
 }
 
 /**
+ * A single-line value (query, filter, sort, name, email, workspace), escaped. Line breaks become
+ * spaces so a value can't start a line of its own and pass as another field of the message.
+ */
+function oneLine(text: string): string {
+  return escapeSlackText(text.replace(/\s*[\r\n]+\s*/g, ' ').trim());
+}
+
+/**
  * Builds the message sent to the incoming webhook, in Slack's text format (the webhook's format).
  * The webhook turns `<!subteam^id>` into a group mention, `*x*` into bold and `> x` into a quote.
  *
@@ -90,8 +98,8 @@ export function buildSearchFeedbackText(params: SearchFeedbackContentParams): st
   const reporter = reporterMentionId
     ? `<@${reporterMentionId}>`
     : reporterEmail
-      ? `*${escapeSlackText(reporterName)}* (${escapeSlackText(reporterEmail)})`
-      : `*${escapeSlackText(reporterName)}*`;
+      ? `*${oneLine(reporterName)}* (${oneLine(reporterEmail)})`
+      : `*${oneLine(reporterName)}*`;
   const headline = `New search feedback from ${reporter}`;
   const lines: string[] = [];
 
@@ -99,30 +107,26 @@ export function buildSearchFeedbackText(params: SearchFeedbackContentParams): st
   lines.push('');
   // The comment is optional; without one the message goes straight to the details.
   if (feedback.trim()) {
-    for (const line of feedback.trim().split('\n')) {
+    for (const line of feedback.trim().split(/\r?\n|\r/)) {
       lines.push(`> ${escapeSlackText(line)}`);
     }
     lines.push('');
   }
-  lines.push(`*Query:* ${query.trim() ? escapeSlackText(query.trim()) : '_(empty)_'}`);
+  lines.push(`*Query:* ${query.trim() ? oneLine(query) : '_(empty)_'}`);
 
   const appliedFilters = filters.map((f) => f.trim()).filter(Boolean);
   lines.push(
     `*Filters:* ${
-      appliedFilters.length > 0
-        ? appliedFilters.map(escapeSlackText).join(FILTER_SEPARATOR)
-        : NO_FILTERS
+      appliedFilters.length > 0 ? appliedFilters.map(oneLine).join(FILTER_SEPARATOR) : NO_FILTERS
     }`
   );
 
   if (sort?.trim()) {
-    lines.push(`*Sort:* ${escapeSlackText(sort.trim())}`);
+    lines.push(`*Sort:* ${oneLine(sort)}`);
   }
 
   lines.push(`*Surface:* ${SOURCE_LABELS[source]}`);
-  lines.push(
-    `*Workspace:* ${workspaceName.trim() ? escapeSlackText(workspaceName.trim()) : '_(unknown)_'}`
-  );
+  lines.push(`*Workspace:* ${workspaceName.trim() ? oneLine(workspaceName) : '_(unknown)_'}`);
   lines.push(`*When:* ${formatFeedbackTimestamp(when, timeZone)}`);
 
   return lines.join('\n');

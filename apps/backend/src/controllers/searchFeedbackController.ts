@@ -29,9 +29,9 @@ export class SearchFeedbackController {
       const data = await searchFeedbackService.getTargetDisplay(user.workspaceId);
       res.json({ success: true, data });
     } catch (error) {
-      // Display only. Return nulls so the form shows generic text instead of failing.
+      // Treat as not set up: the buttons hide, the same as when posting can't resolve a target.
       logger.error('[SearchFeedback] Failed to resolve target for display:', error);
-      res.json({ success: true, data: { channelName: null, groupHandle: null } });
+      res.json({ success: true, data: { enabled: false, channelName: null, groupHandle: null } });
     }
   }
 

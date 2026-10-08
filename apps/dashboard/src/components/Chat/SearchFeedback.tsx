@@ -14,26 +14,23 @@ import { apiInstance } from '../../services/clients/apiClient';
  * page. Both use the same form. The backend decides which channel and group to post to.
  */
 
-/** Guests can't post feedback (the backend returns 403), so the Feedback buttons are hidden for them. */
-export function useCanPostSearchFeedback(): boolean {
-  return useAuth().user?.role !== WorkspaceRole.GUEST;
-}
-
 /** Same limit as the backend. */
 const MAX_FEEDBACK_LENGTH = 2000;
 
 /** Where the feedback was sent from. Must match the backend's allowed values. */
 type SearchFeedbackSource = 'cmdk' | 'search_results';
 
-/** Channel and group the feedback will be posted to (configured per workspace). */
+/** Whether feedback is set up, and where it goes (configured per workspace). */
 interface SearchFeedbackTarget {
+  /** False when feedback isn't set up in CAC; the Feedback buttons are hidden then. */
+  enabled: boolean;
   channelName: string | null;
   groupHandle: string | null;
 }
 
 /**
- * Fetches the destination for the "Posts to …" line. Cached per workspace. Only used for
- * display: if it fails, the form shows generic text and posting still works.
+ * Fetches whether feedback is set up and the names for the "Posts to …" line. Cached per
+ * workspace and shared by the buttons and the form, so it's one request per workspace.
  */
 function useSearchFeedbackTarget(): SearchFeedbackTarget | null {
   const { workspaceId } = useAuthContextValues();
@@ -47,6 +44,16 @@ function useSearchFeedbackTarget(): SearchFeedbackTarget | null {
     retry: false,
   });
   return data ?? null;
+}
+
+/**
+ * Whether to show the Feedback buttons: feedback is set up for this workspace, and the user isn't
+ * a guest (the backend returns 403 for guests). Hidden until the target has loaded.
+ */
+export function useCanPostSearchFeedback(): boolean {
+  const isGuest = useAuth().user?.role === WorkspaceRole.GUEST;
+  const target = useSearchFeedbackTarget();
+  return target?.enabled === true && !isGuest;
 }
 
 interface SearchFeedbackFormProps {
@@ -137,6 +144,7 @@ const SearchFeedbackForm = ({
             post();
           }
         }}
+        aria-label='Search feedback'
         placeholder='What did you expect to find?'
         disabled={isPosting}
         data-testid='search-feedback-input'

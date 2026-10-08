@@ -189,7 +189,6 @@ const envSchema = Joi.object({
   META_IG_REDIRECT_URI: Joi.string().allow('').default(''), // Override redirect URI for Instagram OAuth (e.g. ngrok URL in local dev)
   ENABLE_INSTAGRAM_TOKEN_REFRESH_WORKER: Joi.boolean().default(false),
   SLACK_SIGNING_SECRET: Joi.string().allow('').default(''), // Slack signing secret for request verification
-  SEARCH_FEEDBACK_WEBHOOK_SECRET: Joi.string().allow('').default(''), // Secret of the incoming webhook search feedback posts to (ids are in CAC search_feedback_target)
   SLACK_MIGRATION_APPROVALS: Joi.string().allow('').default(''), // Comma-separated list of approved Slack user IDs
   SLACK_IGNORED_BOT_IDS: Joi.string().allow('').default(''), // Comma-separated list of bot IDs to exclude from migration
   SLACK_MIGRATION_FINAL_MESSAGE: Joi.string().allow('').default(''), // Custom message appended to the final migration notification
@@ -909,7 +908,6 @@ export const config = {
   META_IG_REDIRECT_URI: envVars.META_IG_REDIRECT_URI as string,
   enableInstagramTokenRefreshWorker: envVars.ENABLE_INSTAGRAM_TOKEN_REFRESH_WORKER as boolean,
   slackSigningSecret: envVars.SLACK_SIGNING_SECRET,
-  searchFeedbackWebhookSecret: envVars.SEARCH_FEEDBACK_WEBHOOK_SECRET,
   slackMigrationApprovals: envVars.SLACK_MIGRATION_APPROVALS
     ? envVars.SLACK_MIGRATION_APPROVALS.split(',')
         .map((id: string) => id.trim())

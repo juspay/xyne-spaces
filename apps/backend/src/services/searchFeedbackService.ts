@@ -1,9 +1,11 @@
+import type { Response } from 'express';
 import { db } from '@/database/client';
 import { logger } from '@/utils/logger';
-import { config } from '@/config/env';
 import { CacConfigService } from '@/services/cacConfigService';
 import { UserRepository } from '@/database/repositories/users';
 import { sanitizeForLog } from '@/git-providers/github/apis';
+import { processSlackIncoming } from '@/bypassAcl/appServices';
+import type { WebhookContext } from '@/apps/controllers/incomingWebhookController';
 import {
   buildSearchFeedbackText,
   type SearchFeedbackSource,
@@ -11,33 +13,34 @@ import {
 
 /**
  * Superposition (CAC) key for where feedback is posted. Resolved per `workspaceId`, so a
- * workspace override wins and every other workspace gets the default config. Value:
- * `{ "workspaceId", "appId", "userGroupId", "channelName", "groupHandle" }`.
+ * workspace override wins and every other workspace gets the default config. Value, ids only:
+ * `{ "workspaceId", "channelId", "appUserId", "userGroupId" }`.
  *
- * `workspaceId` + `appId` identify an incoming webhook: an app installed in the channel's
- * workspace, with a webhook bound to the feedback channel. The webhook's secret is the env var
- * SEARCH_FEEDBACK_WEBHOOK_SECRET, so config only holds ids. The webhook posts as the app, in the
- * channel's own workspace, so the message, the group ping and notifications all resolve there.
+ * - `workspaceId` / `channelId`: the feedback channel (one channel can serve every workspace).
+ * - `appUserId`: the user of an app installed in that workspace (`installed_apps.userId`). The
+ *   message is posted as this app, so the sender, mentions and notifications resolve in the
+ *   channel's workspace even when the reporter is elsewhere.
+ * - `userGroupId`: group to tag. Optional.
  */
 const FEEDBACK_TARGET_CAC_KEY = 'search_feedback_target';
 
 interface SearchFeedbackTarget {
   workspaceId?: string;
-  appId?: string;
+  channelId?: string;
+  appUserId?: string;
   userGroupId?: string;
-  channelName?: string;
-  groupHandle?: string;
 }
 
-/** Shown in the form's "Posts to #x and tags @y" line when CAC doesn't set the names. */
-const FEEDBACK_CHANNEL_NAME = 'xyne-spaces';
-const FEEDBACK_GROUP = 'spaces-search';
+/** Fields `processSlackIncoming` reads from the webhook context; the rest of it is unused. */
+type FeedbackPostContext = Pick<WebhookContext, 'workspaceId' | 'appId' | 'channelId' | 'body'> & {
+  installedApp: Pick<WebhookContext['installedApp'], 'userId'>;
+};
+
+/** Stands in for the webhook's app id in `processSlackIncoming`'s logs. */
+const FEEDBACK_LOG_APP_ID = 'search-feedback';
 
 /** Timezone for the `When:` line. IST, same as recaps and desk metrics. */
 const FEEDBACK_TIMEZONE = 'Asia/Kolkata';
-
-/** How long to wait for the webhook before failing the post. */
-const WEBHOOK_TIMEOUT_MS = 10_000;
 
 export interface PostSearchFeedbackParams {
   /** Reporter. Named in the message. */
@@ -54,7 +57,7 @@ export interface PostSearchFeedbackParams {
   source: SearchFeedbackSource;
 }
 
-/** Feedback isn't set up (or the webhook rejected it). Returned to the client as 409, not a crash. */
+/** Feedback isn't set up, or the post was rejected. Returned to the client as 409, not a crash. */
 export class SearchFeedbackUnavailableError extends Error {}
 
 export class SearchFeedbackService {
@@ -72,9 +75,9 @@ export class SearchFeedbackService {
       }
       return {};
     }
-    // Keep only non-empty strings; anything else in config is ignored, not put in a URL.
+    // Keep only non-empty strings; anything else in config is ignored.
     const target: SearchFeedbackTarget = {};
-    const fields = ['workspaceId', 'appId', 'userGroupId', 'channelName', 'groupHandle'] as const;
+    const fields = ['workspaceId', 'channelId', 'appUserId', 'userGroupId'] as const;
     for (const field of fields) {
       const value = (raw as Record<string, unknown>)[field];
       if (typeof value === 'string' && value.trim()) {
@@ -90,45 +93,57 @@ export class SearchFeedbackService {
     return target;
   }
 
-  /** Webhook path, or null when CAC or the env secret is missing. */
-  private webhookPath(target: SearchFeedbackTarget): string | null {
-    const secret = config.searchFeedbackWebhookSecret;
-    if (!target.workspaceId || !target.appId || !secret) return null;
-    return `/api/apps/webhooks/${encodeURIComponent(target.workspaceId)}/${encodeURIComponent(
-      target.appId
-    )}/${encodeURIComponent(secret)}`;
+  private isConfigured(target: SearchFeedbackTarget): boolean {
+    return !!(target.workspaceId && target.channelId && target.appUserId);
   }
 
   /**
-   * Channel and group names for the form's "Posts to #x and tags @y" line. `null` when feedback
-   * isn't set up, or when the channel is in another workspace: those users can't see it, so the
-   * form shows a general note instead of naming it.
+   * What the form needs: `enabled` decides whether the Feedback buttons show at all (same check
+   * as posting, so removing `channelId` or `appUserId` from CAC turns feedback off). The channel
+   * and group names fill the "Posts to #x and tags @y" line, only for users in the channel's
+   * workspace, read under their own access; anyone else (or anyone who can't see the channel)
+   * gets `null` names, and the form shows a general note instead.
    */
   async getTargetDisplay(
     workspaceId: string
-  ): Promise<{ channelName: string | null; groupHandle: string | null }> {
+  ): Promise<{ enabled: boolean; channelName: string | null; groupHandle: string | null }> {
     const target = await this.resolveTarget(workspaceId);
-    if (!this.webhookPath(target) || target.workspaceId !== workspaceId) {
-      return { channelName: null, groupHandle: null };
+    const enabled = this.isConfigured(target);
+    if (!enabled || target.workspaceId !== workspaceId) {
+      return { enabled, channelName: null, groupHandle: null };
     }
+    const [channel, group] = await Promise.all([
+      db.channel.findFirst({
+        where: { id: target.channelId, isArchived: false },
+        select: { name: true },
+      }),
+      target.userGroupId
+        ? db.userGroup.findFirst({
+            where: { id: target.userGroupId },
+            select: { name: true, alias: true },
+          })
+        : null,
+    ]);
+    if (!channel) return { enabled, channelName: null, groupHandle: null };
     return {
-      channelName: target.channelName ?? FEEDBACK_CHANNEL_NAME,
-      groupHandle: target.userGroupId ? (target.groupHandle ?? FEEDBACK_GROUP) : null,
+      enabled,
+      channelName: channel.name,
+      // Same label the group mention shows: alias if set, else name.
+      groupHandle: group ? (group.alias ?? group.name) : null,
     };
   }
 
-  /** Sends the feedback to the configured incoming webhook, tagging the group. */
+  /** Posts the feedback to the configured channel as the configured app, tagging the group. */
   async postFeedback(params: PostSearchFeedbackParams): Promise<void> {
     const { userId, workspaceId, query, feedback, filters, sort, source } = params;
 
     const target = await this.resolveTarget(workspaceId);
-    const path = this.webhookPath(target);
-    if (!path) {
-      logger.warn('[SearchFeedback] Feedback webhook not configured', {
+    if (!this.isConfigured(target)) {
+      logger.warn('[SearchFeedback] Feedback target not configured', {
         cacKey: FEEDBACK_TARGET_CAC_KEY,
         hasWorkspaceId: !!target.workspaceId,
-        hasAppId: !!target.appId,
-        hasSecret: !!config.searchFeedbackWebhookSecret,
+        hasChannelId: !!target.channelId,
+        hasAppUserId: !!target.appUserId,
         workspaceId: sanitizeForLog(workspaceId),
       });
       throw new SearchFeedbackUnavailableError('Search feedback is not set up for this workspace');
@@ -157,25 +172,32 @@ export class SearchFeedbackService {
       timeZone: FEEDBACK_TIMEZONE,
     });
 
-    // Sent to this backend's own webhook route, the same as any outside system posting to it.
-    const response = await fetch(`http://localhost:${config.port}${path}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ text }),
-      signal: AbortSignal.timeout(WEBHOOK_TIMEOUT_MS),
-    });
+    // Post through the incoming-webhook pipeline, in-process: it opens its own scope in the
+    // channel's workspace, resolves the mentions there and posts as the app.
+    const context: FeedbackPostContext = {
+      workspaceId: target.workspaceId!,
+      appId: FEEDBACK_LOG_APP_ID,
+      channelId: target.channelId!,
+      installedApp: { userId: target.appUserId! },
+      body: { text },
+    };
+    // processSlackIncoming answers through an Express response (`res.status(code).send(...)`);
+    // this records the status code instead. It's 200 when the message was posted.
+    let status = 0;
+    const res = {
+      status(code: number) {
+        status = code;
+        return { send: (): void => undefined };
+      },
+    };
+    await processSlackIncoming(context as WebhookContext, res as unknown as Response);
 
-    if (!response.ok) {
-      // 400 is the webhook's answer for a wrong or revoked secret/app, i.e. a config problem.
-      logger.error('[SearchFeedback] Feedback webhook rejected the post', {
-        status: response.status,
+    if (status !== 200) {
+      logger.error('[SearchFeedback] Feedback post was rejected', {
+        status,
         targetWorkspaceId: sanitizeForLog(target.workspaceId ?? ''),
-        appId: sanitizeForLog(target.appId ?? ''),
       });
-      if (response.status === 400) {
-        throw new SearchFeedbackUnavailableError('The search feedback channel is not available');
-      }
-      throw new Error(`Feedback webhook returned ${response.status}`);
+      throw new SearchFeedbackUnavailableError('The search feedback channel is not available');
     }
 
     logger.info('[SearchFeedback] Posted feedback', {
