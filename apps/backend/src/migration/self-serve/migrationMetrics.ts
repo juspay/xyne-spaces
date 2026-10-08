@@ -1,0 +1,122 @@
+import { metrics } from '@opentelemetry/api';
+import { config } from '@/config/env';
+import { logger } from '@/utils/logger';
+import { MigrationQueues, queueFor } from './queues';
+import { MigrationStore } from './store';
+import { MigrationStatus, MigrationType, QueueName } from './types';
+
+/**
+ * OpenTelemetry gauges for the self-serve Slack migration, mirroring the Vespa backfill queue metrics
+ * (services/otel/vespaMetrics.ts). Each is an observable gauge sampled at scrape time:
+ *
+ *   slack_migration_queue_{waiting,active,completed,failed,delayed,total}{queue="<name>"[, workspace="<id>"]}
+ *   slack_migration_{jobs,messages,conversations}{status="<MigrationStatus>", type="<MigrationType>", workspace="<id>"}
+ *
+ * Collection queues are per workspace, so they carry a `workspace` label; ingestion is shared and has none.
+ *
+ * Register on the primary instance only (the counts are Redis/DB-global, so one reporter avoids N× series).
+ */
+const QUEUE_STATES = ['waiting', 'active', 'completed', 'failed', 'delayed', 'total'] as const;
+const GLOBAL_QUEUES = [QueueName.INGESTION, QueueName.CONV_INGEST];
+
+// Short cache so many scrapes (or multiple scrapers) don't each run a store.list(). The cached promise is shared
+// by concurrent scrapes, and dropped on failure so the next scrape retries.
+const JOB_AGG_TTL_MS = 15_000;
+type Bucket = { workspace: string; status: string; type: string; jobs: number; messages: number; conversations: number };
+type JobAggregate = Record<string, Bucket>;
+let _aggCache: { at: number; value: Promise<JobAggregate> } | null = null;
+
+function sampleJobAggregate(store: MigrationStore): Promise<JobAggregate> {
+  const now = Date.now();
+  if (_aggCache && now - _aggCache.at < JOB_AGG_TTL_MS) return _aggCache.value;
+  const value = (async () => {
+    const agg: JobAggregate = {};
+    const jobs = await store.list(5000, 0);
+    // Pre-seed every status×type per workspace so absent combinations report 0 (stable series, no gaps).
+    for (const workspace of new Set(jobs.map((j) => j.workspaceId)))
+      for (const status of Object.values(MigrationStatus))
+        for (const type of Object.values(MigrationType))
+          agg[`${workspace}::${status}::${type}`] = { workspace, status, type, jobs: 0, messages: 0, conversations: 0 };
+    for (const j of jobs) {
+      const a = (agg[`${j.workspaceId}::${j.status}::${j.type}`] ??= { workspace: j.workspaceId, status: j.status, type: j.type, jobs: 0, messages: 0, conversations: 0 });
+      a.jobs += 1;
+      a.messages += j.stats?.messages ?? 0;
+      a.conversations += j.stats?.conversations ?? 0;
+    }
+    return agg;
+  })();
+  _aggCache = { at: now, value };
+  value.catch(() => { if (_aggCache?.value === value) _aggCache = null; });
+  return value;
+}
+
+/** One collection lane per workspace that has jobs, plus the shared ingestion queues. */
+async function queueSeries(store: MigrationStore): Promise<{ name: string; attrs: Record<string, string> }[]> {
+  const workspaces = new Set(Object.values(await sampleJobAggregate(store)).map((a) => a.workspace));
+  return [
+    ...[...workspaces].map((workspace) => ({ name: queueFor(QueueName.COLLECTION, workspace), attrs: { queue: QueueName.COLLECTION, workspace } })),
+    ...GLOBAL_QUEUES.map((name) => ({ name, attrs: { queue: name } })),
+  ];
+}
+
+let _registered = false;
+/**
+ * `isLeader` gates observation to the single lease-holding worker: the counts are Redis/DB-global, so if every pod
+ * reported them the series would be multiplied N×. Instruments are still created on all workers (cheap); only the
+ * leader's callbacks observe, and reporting follows the lease across pods on failover.
+ */
+export function registerMigrationMetrics(queues: MigrationQueues, store: MigrationStore, isLeader: () => boolean = () => true): void {
+  if (_registered) return;
+  _registered = true;
+  const meter = metrics.getMeter(config.otel.serviceName);
+
+  for (const state of QUEUE_STATES) {
+    meter
+      .createObservableGauge(`slack_migration_queue_${state}`, {
+        description: `Slack migration queue ${state} job count`,
+      })
+      .addCallback(async (result) => {
+        if (!isLeader()) return;
+        const series = await queueSeries(store).catch((e: unknown) => {
+          logger.warn('[SlackMigration] queue metric sample failed', { state, error: e instanceof Error ? e.message : String(e) });
+          return [];
+        });
+        for (const { name, attrs } of series) {
+          try {
+            const stats = await queues.getStats(name);
+            result.observe(stats[state], attrs);
+          } catch (e) {
+            logger.warn('[SlackMigration] queue metric sample failed', { queue: name, state, error: e instanceof Error ? e.message : String(e) });
+          }
+        }
+      });
+  }
+
+  // Store-derived gauges (jobs / messages / conversations) grouped by migration status. These read the retained
+  // job records, so they reflect ALL historical jobs still in the store — e.g. slack_migration_messages{status="COMPLETED"}
+  // is the cumulative messages ingested across every completed job, populated the moment this deploys (not from zero).
+  // One batch callback so the whole set is computed from a single store.list() per scrape.
+  const jobsGauge = meter.createObservableGauge('slack_migration_jobs', { description: 'Slack migration jobs by status' });
+  const messagesGauge = meter.createObservableGauge('slack_migration_messages', { description: 'Slack migration messages by job status' });
+  const conversationsGauge = meter.createObservableGauge('slack_migration_conversations', { description: 'Slack migration conversations by job status' });
+
+  meter.addBatchObservableCallback(
+    async (result) => {
+      if (!isLeader()) return;
+      try {
+        const agg = await sampleJobAggregate(store);
+        for (const a of Object.values(agg)) {
+          const attrs = { status: a.status, type: a.type, workspace: a.workspace };
+          result.observe(jobsGauge, a.jobs, attrs);
+          result.observe(messagesGauge, a.messages, attrs);
+          result.observe(conversationsGauge, a.conversations, attrs);
+        }
+      } catch (e) {
+        logger.warn('[SlackMigration] jobs/messages metric sample failed', { error: e instanceof Error ? e.message : String(e) });
+      }
+    },
+    [jobsGauge, messagesGauge, conversationsGauge],
+  );
+
+  logger.info('[SlackMigration] migration metrics registered');
+}

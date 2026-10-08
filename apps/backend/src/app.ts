@@ -104,6 +104,7 @@ import auditLogRoutes from '@/routes/auditLogs';
 import recordingPointerBackfillRoutes from '@/routes/recordingPointerBackfill';
 import sdlcRepoCredentialBackfillRoutes from '@/routes/sdlcRepoCredentialBackfill';
 import searchMetricsRoutes from '@/routes/searchMetrics';
+import searchFeedbackRoutes from '@/routes/searchFeedback';
 import knowledgeRoutes from '@/routes/knowledge';
 import vespaSearchRoutes, { relatedContextRouter } from '@/routes/vespaSearch';
 import assistantRouteRoutes from '@/routes/assistantRoute';
@@ -704,6 +705,7 @@ export class App {
     this.app.use('/api', authMiddleware.authenticate, draftAttachmentRoutes); // Draft attachment upload routes
     this.app.use('/api/link-preview', authMiddleware.authenticate, linkPreviewRoutes); // Link preview routes
     this.app.use('/api/search-metrics', authMiddleware.authenticate, searchMetricsRoutes); // Search metrics routes (POST /api/search-metrics/...)
+    this.app.use('/api/search-feedback', authMiddleware.authenticate, searchFeedbackRoutes); // Search feedback routes (POST /api/search-feedback)
 
     // API Key management routes (admin only, no ACL needed as it has requireAdmin middleware)
     this.app.use('/api/admin/api-keys', apiKeyRoutes);
@@ -1097,11 +1099,15 @@ export class App {
       );
     }
 
-    try {
-      await registerAllExternalSources();
-    } catch (error) {
-      logger.error('Failed to register external sources:', error);
-      logger.warn('Continuing startup without external sources...');
+    if (config.enableExternalSourceRegistration) {
+      try {
+        await registerAllExternalSources();
+      } catch (error) {
+        logger.error('Failed to register external sources:', error);
+        logger.warn('Continuing startup without external sources...');
+      }
+    } else {
+      logger.info('Skipping external-source bot registration (ENABLE_EXTERNAL_SOURCE_REGISTRATION=false)');
     }
 
     // Register workflow definitions

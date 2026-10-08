@@ -1,24 +1,39 @@
-import { Worker, type Job } from "bullmq";
+import { DelayedError, Worker, type Job } from "bullmq";
 import { redisService } from "../redis.js";
 import { prisma } from "../db.js";
 import { CONFIG } from "../config.js";
 import { decrypt } from "../crypto.js";
 import { agentRunRepository, chatMessageRepository } from "../repositories/index.js";
-import { ensureUserExists } from "../lib/users-jit.js";
+import { ensureUserExists, resolveCanonicalUserIdOrSelf } from "../lib/users-jit.js";
 import { resolveAgentProviderConfigs } from "../lib/agent-provider-config.js";
 import { resolveFastMode } from "../lib/fast-mode.js";
 import { registerRunRecovery, type RecoverySessionContext } from "./run-recovery-worker.js";
 import type { ScheduledJobData } from "./scheduled-jobs-queue.js";
+import {
+  admitAutomationRun,
+  agentRunQueueKey,
+  rebindAutomationRun,
+  releaseAutomationRun,
+  WRITE_AUTOMATION_MAX_CONCURRENT,
+  isWriteAutomationAgent,
+} from "../lib/agent-run-queue.js";
 
 import { createLogger } from "../logger.js";
 const log = createLogger("scheduled-jobs-worker");
 
 let worker: Worker<ScheduledJobData> | undefined;
 
-async function processJob(job: Job<ScheduledJobData>): Promise<void> {
-  const { scheduledJobId, userId, agentSlug, channelId, conversationId } = job.data;
+const WRITE_SLOT_RETRY_MS = 30_000;
+
+async function processJob(job: Job<ScheduledJobData>, token?: string): Promise<void> {
+  const { scheduledJobId, userId: jobUserId, agentSlug, channelId, conversationId } = job.data;
 
   log.info(`[scheduler] Firing job ${scheduledJobId} (agent: ${agentSlug})`);
+
+  // Rows may predate canonicalization (keyed by the raw Spaces workspace id).
+  // Normalize once: the dispatch payload, run/chat persistence, and the
+  // session token the runtime mints all key on Claw's canonical id.
+  const userId = await resolveCanonicalUserIdOrSelf(jobUserId);
 
   // Verify the job is still active
   const row = await prisma.scheduledJob.findUnique({ where: { id: scheduledJobId } });
@@ -125,16 +140,35 @@ async function processJob(job: Job<ScheduledJobData>): Promise<void> {
     fastMode: fastModeEnabled,
   };
 
-  const res = await fetch(`${CONFIG.internalUrl}/claw/api/v1/internal/run`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      ...(CONFIG.xyneClawS2sKey ? { "x-s2s-key": CONFIG.xyneClawS2sKey } : {}),
-    },
-    body: JSON.stringify(dispatchPayload),
-  });
+  const runCapped = isWriteAutomationAgent(agentRow?.config);
+  const runQueueKey = agentRunQueueKey(row.orgId, agentSlug);
+  const runSlotId = `scheduled:${job.id ?? scheduledJobId}`;
+  if (runCapped && !(await admitAutomationRun(runQueueKey, runSlotId))) {
+    log.info(`[scheduler] Job ${scheduledJobId} waiting: ${runQueueKey} already has ${WRITE_AUTOMATION_MAX_CONCURRENT} write-enabled runs`);
+    await job.moveToDelayed(Date.now() + WRITE_SLOT_RETRY_MS, token);
+    throw new DelayedError();
+  }
 
-  const body = (await res.json()) as { success: boolean; sessionId?: string; error?: string };
+  let body: { success: boolean; sessionId?: string; error?: string };
+  try {
+    const res = await fetch(`${CONFIG.internalUrl}/claw/api/v1/internal/run`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        ...(CONFIG.xyneClawS2sKey ? { "x-s2s-key": CONFIG.xyneClawS2sKey } : {}),
+      },
+      body: JSON.stringify(dispatchPayload),
+    });
+    body = (await res.json()) as { success: boolean; sessionId?: string; error?: string };
+  } catch (err) {
+    if (runCapped) await releaseAutomationRun(runQueueKey, runSlotId);
+    throw err;
+  }
+
+  if (runCapped) {
+    if (body.success && body.sessionId) await rebindAutomationRun(runQueueKey, runSlotId, body.sessionId);
+    else await releaseAutomationRun(runQueueKey, runSlotId);
+  }
 
   if (!body.success) {
     // Persist failed run
@@ -191,7 +225,10 @@ async function processJob(job: Job<ScheduledJobData>): Promise<void> {
     const recoveryCtx: RecoverySessionContext = {
       mentionedUserId: agentRow?.spacesAppUserId ?? "",
       senderId: userId,
-      senderName: userId,
+      // Display name, not the canonical id — senderName is rendered to humans.
+      senderName: await prisma.user.findUnique({ where: { id: userId }, select: { name: true, email: true } })
+        .then((u) => (u?.name ?? "").trim() || u?.email || userId)
+        .catch(() => userId),
       channelId: channelId ?? "",
       channelName: channelId ?? "",
       conversationId: conversationId ?? runConversationId,

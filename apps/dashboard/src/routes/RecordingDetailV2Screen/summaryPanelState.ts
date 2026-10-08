@@ -17,6 +17,7 @@ export interface DeriveSummaryPanelStateInput {
   awaitingSummary: boolean;
   /** Last regenerate attempt from this browser session threw. */
   summaryFailed: boolean;
+  noTranscriptTimedOut: boolean;
 }
 
 /**
@@ -27,19 +28,22 @@ export interface DeriveSummaryPanelStateInput {
  * Priority order — earlier rules always win over later ones:
  *   1. Backend-published detailedSummaryStatus (authoritative when set — it is
  *      written 'pending' at recording creation and flipped to 'ready'/'failed'
- *      by every generation path).
+ *      by every generation path). One exception: 'pending' is downgraded to
+ *      'failed' when the recording ended with no transcript, since nothing
+ *      can ever generate it.
  *   2. Local client state (in-flight click, this-session failure).
  *   3. Legacy detailedSummaryReady/detailedSummaryCanvasId inference for
  *      recordings that predate the status field.
  */
 export function deriveSummaryPanelState(input: DeriveSummaryPanelStateInput): SummaryPanelState {
-  const { recording, awaitingSummary, summaryFailed } = input;
+  const { recording, awaitingSummary, summaryFailed, noTranscriptTimedOut } = input;
 
   // 1. Backend-published status wins. 'failed' in particular is terminal — the
   // panel must render "Try again" regardless of any stale awaiting marker,
   // in-flight request, or legacy boolean flag from earlier revisions.
   if (recording.detailedSummaryStatus === 'failed') return 'failed';
-  if (recording.detailedSummaryStatus === 'pending') return 'pending';
+  if (recording.detailedSummaryStatus === 'pending')
+    return noTranscriptTimedOut ? 'failed' : 'pending';
   if (recording.detailedSummaryStatus === 'ready') return 'ready';
 
   // 2. This-session local state next. A local failure (regenerate request

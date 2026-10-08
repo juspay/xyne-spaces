@@ -4,6 +4,8 @@ import {
   allowedSourcesForHostControls,
   hasTurnedOffHostControl,
   getHostControls,
+  isAgentParticipant,
+  isHumanParticipant,
 } from '@/services/liveKitService';
 import { repositories } from '@/database/repositories';
 import { DatabaseClient, db } from '@/database/client';
@@ -502,7 +504,7 @@ export class CallController {
         }
 
         stage = 'transcription_agent_resolution';
-        const headlessAgentName = await livekitService.resolveAgentNameForUser(userId);
+        const headlessAgentName = await livekitService.resolveAgentNameForUser(userId, { roomName: callExternalId });
 
         const roomLink = buildCallInviteUrl(callExternalId);
         const roomMetadata = JSON.stringify({
@@ -766,7 +768,7 @@ export class CallController {
       }
 
       stage = 'transcription_agent_resolution';
-      const agentName = await livekitService.resolveAgentNameForUser(userId);
+      const agentName = await livekitService.resolveAgentNameForUser(userId, { roomName: callExternalId });
 
       // Create LiveKit room with metadata
       // The webhook will create all DB records when first participant joins
@@ -811,7 +813,14 @@ export class CallController {
             return;
           }
           const participants = await livekitService.listParticipants(callExternalId!);
-          const hasAgent = participants.some(p => p.identity.startsWith('agent-'));
+          // A room outlives its last participant (emptyTimeout), so a call that ended
+          // inside the 30s shows up here as an active room with nobody in it; that is
+          // not an agent failure, only a short call.
+          if (!participants.some(isHumanParticipant)) {
+            logger.info(`[${callExternalId}] agent_join_check_skipped | reason=no_human_participants`);
+            return;
+          }
+          const hasAgent = participants.some(isAgentParticipant);
           if (!hasAgent) {
             logger.error(`[${callExternalId}] agent_failed_to_join | reason=timeout_30s`);
             // Second safety net behind dispatchTranscriptionAgentForCall's own ~9s claim
@@ -995,7 +1004,7 @@ export class CallController {
           logger.info(`Deleted existing room ${callId}`);
         }
 
-        const joinAgentName = await livekitService.resolveAgentNameForUser(activeCall.createdByUserId);
+        const joinAgentName = await livekitService.resolveAgentNameForUser(activeCall.createdByUserId, { roomName: callId });
 
         // Prepare room metadata
         const roomMetadata = JSON.stringify({
@@ -3068,7 +3077,7 @@ export class CallController {
 
       // stopRecording clears the room-metadata indicator (every stop path) and the
       // egress_ended webhook finalizes the file + posts it to the thread.
-      await callRecordingService.stopRecording(recording);
+      await callRecordingService.stopRecording(recording, call.externalId);
 
       logger.info(`[CallController] stopCallRecording | callId=${callId}, recordingId=${recording.id}, userId=${userId}`);
       res.json({ success: true, recordingId: recording.id });

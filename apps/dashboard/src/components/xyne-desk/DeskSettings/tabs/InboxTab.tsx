@@ -11,10 +11,9 @@ import { toast } from 'sonner';
 import Avatar from '../../../ui/Avatar/Avatar';
 import { UserSelector } from '../../../Tickets/CreateTicketModal/UserSelector';
 import { DeskIntegrationCard } from '../../DeskIntegrationCard/DeskIntegrationCard';
-import { SlackDeskIntegrationCard } from '../../DeskIntegrationCard/SlackDeskIntegrationCard';
 import { SocialMediaDeskIntegrationCard } from '../../DeskIntegrationCard/SocialMediaDeskIntegrationCard';
 import { AppStoreDeskIntegrationCard } from '../../DeskIntegrationCard/AppStoreDeskIntegrationCard';
-import { InstagramDeskIntegrationCard } from '../../DeskIntegrationCard/InstagramDeskIntegrationCard';
+import { MetaDeskIntegrationCard } from '../../DeskIntegrationCard/MetaDeskIntegrationCard';
 import { ConnectedAppsSection } from '../ConnectedAppsSection';
 import { ConnectedSlackSection } from '../ConnectedSlackSection';
 import { InlineSignatureEditor } from '../InlineSignatureEditor';
@@ -60,7 +59,6 @@ export const InboxTab: React.FC<InboxTabProps> = ({ channelId, form, signatures 
   const {
     canManage,
     isEmail,
-    isSlack,
     isApp,
     isSocial,
     isDeskChannel,
@@ -169,20 +167,21 @@ export const InboxTab: React.FC<InboxTabProps> = ({ channelId, form, signatures 
   return (
     <>
       {isEmail && <DeskIntegrationCard channelId={channelId} canManage={canManage} />}
-      {isSlack && <SlackDeskIntegrationCard channelId={channelId} canManage={canManage} />}
       {isSocial && <SocialMediaDeskIntegrationCard channelId={channelId} canManage={canManage} />}
       {isSocial && <AppStoreDeskIntegrationCard channelId={channelId} canManage={canManage} />}
-      {isSocial && <InstagramDeskIntegrationCard channelId={channelId} canManage={canManage} />}
+      {isSocial && (
+        <MetaDeskIntegrationCard provider='instagram' channelId={channelId} canManage={canManage} />
+      )}
+      {isSocial && (
+        <MetaDeskIntegrationCard provider='facebook' channelId={channelId} canManage={canManage} />
+      )}
       {/*
-        Single owner of app connections on every desk type, APP included. Apps are the
-        one source type that went 1:N per channel, so unlike Slack/social they cannot be
-        managed by a single-connection card.
+        Single owner of app connections on every desk type, APP included. Apps and Slack both
+        went 1:N per channel, so unlike social they cannot be managed by a
+        single-connection card.
       */}
       {isDeskChannel && <ConnectedAppsSection channelId={channelId} canManage={canManage} />}
-      {/* Not on a SLACK desk — the card above already owns its single binding. */}
-      {isDeskChannel && !isSlack && (
-        <ConnectedSlackSection channelId={channelId} canManage={canManage} />
-      )}
+      {isDeskChannel && <ConnectedSlackSection channelId={channelId} canManage={canManage} />}
 
       <div className='flex flex-col gap-[16px]'>
         <div className='flex flex-col gap-[4px]'>
@@ -411,7 +410,7 @@ export const InboxTab: React.FC<InboxTabProps> = ({ channelId, form, signatures 
                       />
                       <span className='min-w-0 flex-1 truncate text-[13px] leading-[18px]'>
                         <span className='font-medium text-foreground'>{user.name}</span>
-                        <span className='text-desk-helper'> · {user.email}</span>
+                        {user.email && <span className='text-desk-helper'> · {user.email}</span>}
                       </span>
                       {isSelected && <Check size={16} className='shrink-0 text-foreground' />}
                     </button>

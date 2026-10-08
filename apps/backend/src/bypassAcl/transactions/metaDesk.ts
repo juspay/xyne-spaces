@@ -1,7 +1,7 @@
 import { transaction } from '../base';
-import { ExternalSourcePlatform } from '@/integrations/core/types';
+import type { ExternalSourcePlatform } from '@/integrations/core/types';
 import { db } from '@/database/client';
-import type { InstagramOAuthState } from '@/integrations/adapters/social-media/instagram/oauthStateService';
+import { newConnectId, createConnectGroupForEntity, ConnectEntityType } from '@/database/connectGroup';
 import {
   ChannelType,
   ChannelScopeType,
@@ -12,19 +12,37 @@ import {
 } from '@xyne/shared';
 import { logger } from '@/utils/logger';
 
-export function getInstagramOauthCallbackTx(
-  state: InstagramOAuthState,
-  sourceName: string,
-  igUsername: string | undefined,
-  igUserId: string,
-  encryptedCredentials: string,
+export interface MetaDeskSetup {
+  userId: string;
+  workspaceId: string;
+  channelName: string;
+  projectId: string;
+  boardId?: string;
+  assigneeUserGroupId?: string;
+  visibility: 'PUBLIC' | 'PRIVATE';
+}
+
+/** One connected Instagram account or Facebook Page. */
+export interface MetaDeskSource {
+  name: string;
+  displayName: string;
+  externalIdentifier: string;
+  encryptedCredentials: string;
+}
+
+export function createMetaDeskTx(
+  state: MetaDeskSetup,
+  sourceType: ExternalSourcePlatform,
+  sources: MetaDeskSource[],
   now: Date,
 ) {
   return transaction(
-    ['Board', 'Channel', 'ChannelBoardMapping', 'ChannelParticipant', 'ChannelStats', 'ChannelUserStatus', 'EmailChannelPreference', 'ExternalSource'],
+    ['Board', 'Channel', 'ChannelBoardMapping', 'ChannelParticipant', 'ChannelStats', 'ChannelUserStatus', 'EmailChannelPreference', 'ExternalSource', 'ConnectGroup'],
     'getInstagramOauthCallback: channel, participant, status, preference, board-mapping and external-source rows must commit atomically; tx is not ACL-wrapped',
     db,
     async (tx) => {
+      // Slack Connect: the channel is a shareable entity → its own connectId + a private connect_group row.
+      const connectId = newConnectId();
       const channel = await tx.channel.create({
         data: {
           name: state.channelName,
@@ -36,7 +54,14 @@ export function getInstagramOauthCallbackTx(
           workspaceId: state.workspaceId,
           participantCount: 1,
           lastActivityAt: now,
+          connectId,
         },
+      });
+      await createConnectGroupForEntity(tx, {
+        entityType: ConnectEntityType.CHANNEL,
+        entityId: channel.id,
+        hostWorkspaceId: state.workspaceId,
+        connectId,
       });
       await tx.channelParticipant.create({
         data: {
@@ -105,59 +130,55 @@ export function getInstagramOauthCallbackTx(
         });
       }
 
-      const source = await tx.externalSource.create({
-        data: {
-          name: sourceName,
-          sourceType: ExternalSourcePlatform.INSTAGRAM,
-          displayName: igUsername || state.channelName,
+      await tx.externalSource.createMany({
+        data: sources.map((source) => ({
+          name: source.name,
+          sourceType,
+          displayName: source.displayName || state.channelName,
           channelId: channel.id,
-          externalIdentifier: igUserId,
+          externalIdentifier: source.externalIdentifier,
           workspaceId: state.workspaceId,
           boardId: state.boardId,
           ownerUserId: state.userId,
-          credentials: encryptedCredentials,
+          credentials: source.encryptedCredentials,
           isActive: true,
-        },
-        select: { id: true },
+        })),
       });
-      return { channelId: channel.id, sourceId: source.id };
+      return { channelId: channel.id };
     },
   );
 }
 
-// Adds a second (or further) Instagram account to an already-existing channel.
+// Adds further Instagram accounts or Facebook Pages to an already-existing channel.
 // Does NOT create a new Channel row — only ExternalSource.
-export function addInstagramSourceToChannelTx(
+export function addMetaSourcesToChannelTx(
   channelId: string,
   workspaceId: string,
   userId: string,
   boardId: string | undefined,
-  sourceName: string,
-  igUsername: string | undefined,
-  igUserId: string,
-  encryptedCredentials: string,
+  sourceType: ExternalSourcePlatform,
+  sources: MetaDeskSource[],
 ) {
   return transaction(
     ['ExternalSource'],
-    'addInstagramSourceToChannel: create ExternalSource row for additional IG account on existing channel; tx is not ACL-wrapped',
+    'addMetaSourcesToChannel: create ExternalSource rows for additional accounts on existing channel; tx is not ACL-wrapped',
     db,
     async (tx) => {
-      const source = await tx.externalSource.create({
-        data: {
-          name: sourceName,
-          sourceType: ExternalSourcePlatform.INSTAGRAM,
-          displayName: igUsername || sourceName,
+      await tx.externalSource.createMany({
+        data: sources.map((source) => ({
+          name: source.name,
+          sourceType,
+          displayName: source.displayName || source.name,
           channelId,
-          externalIdentifier: igUserId,
+          externalIdentifier: source.externalIdentifier,
           workspaceId,
           boardId,
           ownerUserId: userId,
-          credentials: encryptedCredentials,
+          credentials: source.encryptedCredentials,
           isActive: true,
-        },
-        select: { id: true },
+        })),
       });
-      return { channelId, sourceId: source.id };
+      return { channelId };
     },
   );
 }

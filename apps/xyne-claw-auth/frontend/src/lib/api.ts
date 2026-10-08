@@ -121,6 +121,30 @@ export async function getMe(): Promise<User> {
   return data.user;
 }
 
+/**
+ * The Claw-side identity for the logged-in user. `userId` is the canonical
+ * Claw id (what Claw-owned rows like Agent.ownerUserId store); `spacesUserId`
+ * is the raw workspace-scoped Spaces id (what `getMe().id` returns). A user's
+ * agent rows may be keyed by either, so ownership comparisons must accept both.
+ */
+export interface ClawIdentity {
+  userId: string;
+  spacesUserId?: string;
+  spacesWorkspaceId?: string;
+  spacesOrgMemberId?: string;
+}
+
+export async function getClawIdentity(): Promise<ClawIdentity | null> {
+  try {
+    const data = await request<{ success: boolean; data: ClawIdentity }>(
+      `${AUTH_API_URL}/api/v1/users/me`,
+    );
+    return data.data;
+  } catch {
+    return null;
+  }
+}
+
 export async function upsertUser(user: User): Promise<void> {
   const spacesToken = getGoogleToken();
   await request<{ success: boolean }>(
@@ -463,6 +487,33 @@ export interface SandboxRepoOption {
   description?: string;
 }
 
+export interface OptimizationOption {
+  key: string;
+  label: string;
+  summary: string;
+  detail: string;
+  group: string;
+  defaultOn: boolean;
+  /** "fleet" switches are decided outside agent runs, so only env changes them. */
+  scope: "agent" | "fleet";
+  requires?: string;
+}
+
+export interface OptimizationCatalog {
+  groups: Array<{ id: string; title: string; description: string }>;
+  optimizations: OptimizationOption[];
+  /** Per delegation tier: switches that default on (or off) for that tier. */
+  tierDefaults: Record<string, Record<string, boolean>>;
+}
+
+/** Every claw optimization switch, for the agent page's Optimizations section. */
+export async function getOptimizationCatalog(): Promise<OptimizationCatalog> {
+  const data = await request<{ success: boolean; data: OptimizationCatalog }>(
+    `${AUTH_API_URL}/api/v1/agents/optimizations`,
+  );
+  return data.data;
+}
+
 /** Available sandbox repo setups (for the agent "Sandbox repository" picker). */
 export async function listSandboxRepos(): Promise<SandboxRepoOption[]> {
   const data = await request<{ success: boolean; data: SandboxRepoOption[] }>(
@@ -708,6 +759,65 @@ export async function decideDelegationRequest(
   const data = await request<{ success: boolean; data: AgentDelegationGrant }>(
     `${AUTH_API_URL}/api/v1/agents/${encodeURIComponent(slug)}/delegation-requests/${encodeURIComponent(grantId)}/decision`,
     { method: "POST", body: JSON.stringify({ approve }) },
+  );
+  return data.data;
+}
+
+export interface AgentRunHealth {
+  windowDays: number;
+  sampled: boolean;
+  totals: { runs: number; completed: number; failed: number; cancelled: number; running: number };
+  duration: { p50Ms: number | null; p90Ms: number | null; llmP50Ms: number | null; toolP50Ms: number | null };
+  daily: Array<{ day: string; runs: number; failed: number }>;
+  byTrigger: Array<{ trigger: string; runs: number; failed: number; p50Ms: number | null; p90Ms: number | null }>;
+  byModel: Array<{ provider: string; model: string; runs: number; failed: number; llmP50Ms: number | null }>;
+  topErrors: Array<{ error: string; count: number; lastAt: string }>;
+  stuckAfterMs: number;
+  runningNow: Array<{ sessionId: string; trigger: string; startedAt: string; ageMs: number; stuck: boolean; currentTool: string | null }>;
+  recentFailures: Array<{ sessionId: string; trigger: string; startedAt: string; model: string | null; error: string }>;
+  recentRuns: Array<{ sessionId: string; trigger: string; status: string; startedAt: string; durationMs: number | null; model: string | null; task: string }>;
+}
+
+export interface AgentRunDetail {
+  run: {
+    sessionId: string;
+    agentSlug: string;
+    status: string;
+    triggerSource: string;
+    task: string;
+    result: string | null;
+    error: string | null;
+    provider: string | null;
+    model: string | null;
+    conversationId: string | null;
+    channelId: string | null;
+    parentSessionId: string | null;
+    currentToolLabel: string | null;
+    toolInvocations: ToolInvocation[] | null;
+    tokensIn: number | null;
+    tokensOut: number | null;
+    llmTotalMs: number | null;
+    toolMs: number | null;
+    llmTurns: number | null;
+    llmRetries: number | null;
+    lastRetryReason: string | null;
+    startedAt: string;
+    completedAt: string | null;
+  };
+  requester: { id: string; name: string | null; email: string | null } | null;
+  children: Array<{ sessionId: string; agentSlug: string; status: string; startedAt: string; durationMs: number | null; task: string }>;
+}
+
+export async function getAgentRunDetail(slug: string, sessionId: string): Promise<AgentRunDetail> {
+  const data = await request<{ success: boolean; data: AgentRunDetail }>(
+    `${AUTH_API_URL}/api/v1/agents/${encodeURIComponent(slug)}/monitor/runs/${encodeURIComponent(sessionId)}`,
+  );
+  return data.data;
+}
+
+export async function getAgentRunHealth(slug: string, days: number): Promise<AgentRunHealth> {
+  const data = await request<{ success: boolean; data: AgentRunHealth }>(
+    `${AUTH_API_URL}/api/v1/agents/${encodeURIComponent(slug)}/monitor?days=${days}`,
   );
   return data.data;
 }
@@ -7203,6 +7313,43 @@ export async function saveErrorPipelineRule(
 export async function deleteErrorPipelineRule(userId: string, name: string): Promise<void> {
   await request(
     `${AUTH_API_URL}/api/v1/admin/error-pipeline/rules/${encodeURIComponent(name)}`,
+    { method: "DELETE", headers: { "x-user-id": userId } },
+  );
+}
+
+export interface SandboxRepoConfigRow {
+  key: string;
+  source: "database" | "default";
+  hasDefault: boolean;
+  enabled: boolean;
+  active: boolean;
+  config: Record<string, unknown>;
+  updatedAt: string | null;
+  updatedByUserId: string | null;
+}
+
+export async function listSandboxRepoConfigs(userId: string): Promise<SandboxRepoConfigRow[]> {
+  const data = await request<{ success: boolean; data: SandboxRepoConfigRow[] }>(
+    `${AUTH_API_URL}/api/v1/admin/sandbox-repos`,
+    { headers: { "x-user-id": userId } },
+  );
+  return data.data;
+}
+
+export async function saveSandboxRepoConfig(
+  userId: string,
+  key: string,
+  body: { config: unknown; enabled: boolean },
+): Promise<void> {
+  await request(
+    `${AUTH_API_URL}/api/v1/admin/sandbox-repos/${encodeURIComponent(key)}`,
+    { method: "PUT", headers: { "x-user-id": userId, "Content-Type": "application/json" }, body: JSON.stringify(body) },
+  );
+}
+
+export async function deleteSandboxRepoConfig(userId: string, key: string): Promise<void> {
+  await request(
+    `${AUTH_API_URL}/api/v1/admin/sandbox-repos/${encodeURIComponent(key)}`,
     { method: "DELETE", headers: { "x-user-id": userId } },
   );
 }

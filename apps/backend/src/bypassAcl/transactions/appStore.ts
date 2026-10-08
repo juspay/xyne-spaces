@@ -1,12 +1,15 @@
 import { transaction } from '../base';
 import type { Request } from 'express';
 import { db } from '@/database/client';
+import { newConnectId, createConnectGroupForEntity, ConnectEntityType } from '@/database/connectGroup';
 import { reactivateOrCreateSources } from '@/integrations/routes/social-media/app-store';
 import { ChannelType, ChannelScopeType, ChannelVisibility, ChannelRole, DeskType, EmailMergeMode } from '@xyne/shared';
 
 
 export function postAppStoreConnectTx(input: { keyId: string; privateKey: string; channelName: string; applications: { bundleId: string; }[]; projectId: string; boardId: string; visibility: "PUBLIC" | "PRIVATE" | "public" | "private"; assigneeUserGroupId?: string | undefined; }, applications: { appId: string; displayName: string; }[], userId: string, workspaceId: string, now: Date, encryptedCredentials: string) {
-  return transaction(['Board', 'Channel', 'ChannelBoardMapping', 'ChannelParticipant', 'ChannelStats', 'ChannelUserStatus', 'EmailChannelPreference', 'ExternalSource'], 'postAppStoreConnect: app-store channel, participants, board mappings and external sources must commit atomically; tx is not ACL-wrapped', db, async (tx) => {
+  return transaction(['Board', 'Channel', 'ChannelBoardMapping', 'ChannelParticipant', 'ChannelStats', 'ChannelUserStatus', 'EmailChannelPreference', 'ExternalSource', 'ConnectGroup'], 'postAppStoreConnect: app-store channel, participants, board mappings and external sources must commit atomically; tx is not ACL-wrapped', db, async (tx) => {
+    // Slack Connect: the channel is a shareable entity → its own connectId + a private connect_group row.
+    const connectId = newConnectId();
     const channel = await tx.channel.create({
       data: {
         name: input.channelName,
@@ -21,7 +24,14 @@ export function postAppStoreConnectTx(input: { keyId: string; privateKey: string
         workspaceId,
         participantCount: 1,
         lastActivityAt: now,
+        connectId,
       },
+    });
+    await createConnectGroupForEntity(tx, {
+      entityType: ConnectEntityType.CHANNEL,
+      entityId: channel.id,
+      hostWorkspaceId: workspaceId,
+      connectId,
     });
     await tx.channelParticipant.create({
       data: { workspaceId, channelId: channel.id, userId, role: ChannelRole.ADMIN },

@@ -1775,7 +1775,7 @@ export class TranscriptService {
    * both the normal tail of processing and the solo-call early exit.
    */
   private async queueTranscriptIndexing(
-    call: Pick<Call, 'id' | 'channelId' | 'createdByUserId'>,
+    call: Pick<Call, 'id' | 'externalId' | 'channelId' | 'createdByUserId'>,
   ): Promise<void> {
     try {
       const callChannel = call.channelId
@@ -1789,9 +1789,9 @@ export class TranscriptService {
         app: SubApp.TRANSCRIPT,
         ...(callChannel?.workspaceId ? { workspaceId: callChannel.workspaceId } : {}),
       });
-      logger.info(`[TranscriptService] Queued Vespa indexing for transcript ${call.id}`);
+      logger.info(`[TranscriptService] Queued Vespa indexing for transcript ${call.externalId}`);
     } catch (vespaError) {
-      logger.error(`[TranscriptService] Failed to queue Vespa job for transcript ${call.id}:`, vespaError);
+      logger.error(`[TranscriptService] Failed to queue Vespa job for transcript ${call.externalId}:`, vespaError);
     }
   }
 

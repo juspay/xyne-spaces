@@ -3,7 +3,11 @@ import { errMsg } from "../lib/errors.js";
 import { randomUUID } from "node:crypto";
 import { CONFIG } from "../config.js";
 import type { FlowDefinition } from "xyne-claw-shared";
+import type { DraftAgentSpec } from "../lib/agent-card.js";
 import { requireAuth, requireNoAccessToken, requireResultToken, s2sKeyMatches } from "../middleware/require-auth.js";
+import { matchesAuthenticatedUserId } from "../middleware/pin-user-id-param.js";
+import { resolveCanonicalUserIdOrSelf } from "../lib/users-jit.js";
+import { requestWorkspaceHint } from "../lib/spaces-db.js";
 import { conversationAccessError } from "../lib/conversation-access.js";
 import { getRequesterId, getAgentEditAccess, isClawAdmin } from "../middleware/agent-acl.js";
 import { prisma } from "../db.js";
@@ -172,6 +176,8 @@ const SESSION_LOCKED_USER_MESSAGE =
    ───────────────────────────────────────────────────────────────────── */
 const STREAM_EVENTS_CHANNEL = "run-stream:events";
 const STREAM_PERSIST_KEY_PREFIX = "run-stream:msg-persisted:";
+/** Turn text when a propose-agent draft could not be put up for approval. */
+const AGENT_DRAFT_DELIVERY_FAILED = "I drafted the agent but couldn't post it for approval. Please try again.";
 
 interface PersistedAttachment {
   id: string;
@@ -536,7 +542,6 @@ publicRouter.post("/", requireAuth, requireNoAccessToken, async (req: Request, r
 
   try {
     const {
-      userId,
       userName,
       userEmail,
       task,
@@ -595,10 +600,14 @@ publicRouter.post("/", requireAuth, requireNoAccessToken, async (req: Request, r
       return;
     }
 
-    if (!userId || typeof userId !== "string") {
+    // Declared separately (typed `string`) so the canonicalization below can
+    // reassign it: a destructured `unknown` binding would lose its narrowing.
+    const rawUserId = (req.body as Record<string, unknown>)["userId"];
+    if (!rawUserId || typeof rawUserId !== "string") {
       res.status(400).json({ success: false, error: "userId is required" });
       return;
     }
+    let userId: string = rawUserId;
 
     if (studioMode !== undefined && studioMode !== "design") {
       res.status(400).json({ success: false, error: "Unknown studioMode" });
@@ -735,10 +744,22 @@ publicRouter.post("/", requireAuth, requireNoAccessToken, async (req: Request, r
       : applyAiScreenCommand(task).task;
 
     const sessionUserId = req.headers["x-user-id"];
-    if (typeof sessionUserId === "string" && sessionUserId && sessionUserId !== userId) {
+    // Spaces sends its workspace membership ID in the body while requireAuth
+    // resolves the verified session to Claw's canonical user ID. They are two
+    // representations of the same caller, not an attempted cross-user run.
+    if (typeof sessionUserId === "string" && sessionUserId && !matchesAuthenticatedUserId(req, userId)) {
       res.status(403).json({ success: false, error: "Body userId does not match authenticated session" });
       return;
     }
+    // Canonicalize once: everything downstream — ACL checks (isClawAdmin,
+    // getAgentEditAccess), user-agent config, local-harness device lookup and
+    // session-token minting, and every persisted chat/run/attachment row —
+    // keys on Claw's canonical user id. The verified session header already
+    // carries it; an S2S caller that pinned only the raw alias is resolved
+    // through the identity ladder (fail-open to the supplied id).
+    userId = typeof sessionUserId === "string" && sessionUserId
+      ? sessionUserId
+      : await resolveCanonicalUserIdOrSelf(userId, requestWorkspaceHint(req));
 
     const slug = typeof agentSlug === "string" && agentSlug ? agentSlug : "assistant";
     const convId = typeof conversationId === "string" && conversationId ? conversationId : `chat-${randomUUID()}`;
@@ -748,15 +769,21 @@ publicRouter.post("/", requireAuth, requireNoAccessToken, async (req: Request, r
     // conversationId, not userId), so a caller supplying another user's
     // conversationId could attach to and poison their session. Skip for genuine
     // S2S callers; new conversations (no supplied conversationId) pass.
-    const authUserId =
-      typeof sessionUserId === "string" && sessionUserId ? sessionUserId : userId;
+    // The Spaces conversation-access check matches channel_participants by the
+    // workspace-scoped Spaces id, so pass the raw `x-spaces-user-id` (set by
+    // stampVerifiedIdentity) — NOT the canonical `x-user-id`, which Spaces can't resolve.
+    const spacesRequesterId = req.headers["x-spaces-user-id"];
+    const accessCheckUserId =
+      typeof spacesRequesterId === "string" && spacesRequesterId
+        ? spacesRequesterId
+        : (typeof sessionUserId === "string" && sessionUserId ? sessionUserId : userId);
     if (
       typeof conversationId === "string" && conversationId &&
-      authUserId && !s2sKeyMatches(req.headers["x-s2s-key"] as string | undefined)
+      accessCheckUserId && !s2sKeyMatches(req.headers["x-s2s-key"] as string | undefined)
     ) {
-      const accessError = await conversationAccessError(authUserId, [conversationId]);
+      const accessError = await conversationAccessError(accessCheckUserId, [conversationId]);
       if (accessError) {
-        log.warn(`[run-stream] conversation access denied userId=${authUserId} conversationId=${conversationId}`);
+        log.warn(`[run-stream] conversation access denied userId=${accessCheckUserId} conversationId=${conversationId}`);
         res.status(403).json({ success: false, error: accessError });
         return;
       }
@@ -802,6 +829,7 @@ publicRouter.post("/", requireAuth, requireNoAccessToken, async (req: Request, r
         ? researchContext as { type?: unknown; id?: unknown }
         : undefined,
       convId,
+      requestWorkspaceHint(req),
     );
     if (!sdlcResolution.ok) {
       res.status(sdlcResolution.status).json({ success: false, error: sdlcResolution.error });
@@ -810,7 +838,7 @@ publicRouter.post("/", requireAuth, requireNoAccessToken, async (req: Request, r
     const sdlcContext =
       sdlcResolution.repository?.agentContext ??
       (typeof channelId === "string"
-        ? await resolveSdlcHubContextForUser(userId, channelId, convId)
+        ? await resolveSdlcHubContextForUser(userId, channelId, convId, requestWorkspaceHint(req))
         : undefined);
 
     // Resolve the agent's provider credentials so this SSE run uses the agent's
@@ -1625,7 +1653,7 @@ publicRouter.post("/", requireAuth, requireNoAccessToken, async (req: Request, r
           "../services/agentChatContextService.js"
         );
         const { getSpacesAuthForUser } = await import("../lib/spaces-db.js");
-        const auth = await getSpacesAuthForUser(userId);
+        const auth = await getSpacesAuthForUser(userId, "agent-chat", requestWorkspaceHint(req));
         const normalized = normalizeAttachedContext(forwardedAttachedContext);
         if (auth && normalized.items.length > 0) {
           const payload = await buildAttachedContextPayload(normalized.items, auth);
@@ -1995,7 +2023,10 @@ publicRouter.post("/cancel", requireAuth, requireNoAccessToken, async (req: Requ
     }
 
     const run = await agentRunRepository.findBySessionId(sessionId);
-    if (!run || run.userId !== userId) {
+    // run.userId may be keyed by EITHER verified representation of the caller
+    // (canonical Claw id or the raw Spaces id the session was started under),
+    // so a strict equality check would 404 the legitimate owner.
+    if (!run || (run.userId !== userId && !matchesAuthenticatedUserId(req, run.userId))) {
       res.status(404).json({ success: false, error: "Run not found" });
       return;
     }
@@ -2008,12 +2039,14 @@ publicRouter.post("/cancel", requireAuth, requireNoAccessToken, async (req: Requ
       return;
     }
 
+    // Forward the run's stored owner id (not the requester): the pod compares
+    // x-user-id against the id the run was dispatched with.
     const cancelRes = await fetch(`${CONFIG.internalUrl}/claw/api/v1/internal/run/${encodeURIComponent(sessionId)}/cancel`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
         ...(CONFIG.xyneClawS2sKey ? { "x-s2s-key": CONFIG.xyneClawS2sKey } : {}),
-        "x-user-id": userId,
+        "x-user-id": run.userId,
       },
     });
 
@@ -2231,7 +2264,7 @@ internalRouter.post("/:streamId/callback", async (req: Request<{ streamId: strin
       ? `I couldn't reach **${localHarnessProviderLabel(typeof body["localHarnessProvider"] === "string" ? body["localHarnessProvider"] : "your local harness")}** on your machine, and running this on Xyne's servers instead didn't start either. Open the Xyne desktop app (or turn off the local harness for this agent) and try again.`
       : undefined;
 
-    const content = harnessUnreachableNotice
+    const baseContent = harnessUnreachableNotice
       ? harnessUnreachableNotice
       : isSessionLockedFailure
       ? SESSION_LOCKED_USER_MESSAGE
@@ -2274,6 +2307,72 @@ internalRouter.post("/:streamId/callback", async (req: Request<{ streamId: strin
     // Branching: resolve the placeholder assistant id — query param wins
     // (cross-pod safe), streamMeta is the same-pod fast path.
     const assistantMessageId = queryAssistantMessageId ?? meta?.assistantMessageId;
+
+    // propose-agent ends its run with an EMPTY result on purpose — the draft
+    // card is the deliverable. The Spaces-thread path (webhook.ts) intercepts
+    // it; without the same branch here the empty-result guard in
+    // persistRunStreamResult rewrites the turn as "The model returned
+    // nothing…" and the draft is lost. So: persist the AgentRequest, put the
+    // card on the assistant row, and use the agent's own summary as the turn's
+    // text. Runs BEFORE persistence so the content is right the first time.
+    const pendingAgentCard = body["pendingAgentCard"] as
+      | { variant?: string; slug?: string; slugs?: string[]; agent?: DraftAgentSpec }
+      | undefined;
+    let draftCardFlow: FlowDefinition | undefined;
+    let draftContent: string | undefined;
+    if (
+      pendingAgentCard?.variant === "draft" &&
+      pendingAgentCard.agent &&
+      status === "completed" &&
+      !rawResult.trim()
+    ) {
+      const spec = pendingAgentCard.agent;
+      // claw retries callbacks; only the first delivery may create the
+      // AgentRequest + append the card (Redis down fails open, like persist).
+      // Keyed per assistant reply (not per session) so a later draft in the
+      // same conversation still gets its own card.
+      const claimed = assistantMessageId
+        ? await redisService.getConnection()
+            .set(`${STREAM_PERSIST_KEY_PREFIX}agent-draft:${assistantMessageId}`, "1", "EX", 86_400, "NX")
+            .catch(() => "OK" as const)
+        : "OK";
+      try {
+        const { prepareAgentDraftCard, agentDraftLeadIn } = await import("../lib/agent-card-render.js");
+        draftContent = agentDraftLeadIn(spec);
+        if (claimed === "OK") {
+          const { resolveXyneAiCardTarget, postFlowCard } = await import("../lib/flow-card-delivery.js");
+          const draftTarget = await resolveXyneAiCardTarget({ assistantMessageId });
+          if (!draftTarget) {
+            log.warn(`[agent-card] xyne-ai draft skipped — no assistant row for stream=${streamId}`);
+            draftContent = AGENT_DRAFT_DELIVERY_FAILED;
+          } else {
+            const prepared = await prepareAgentDraftCard(spec, {
+              agentSlug: draftTarget.agentSlug,
+              orgId: draftTarget.orgId,
+              userId: draftTarget.userId,
+              conversationId: draftTarget.conversationId,
+              channelId: "",
+              spacesAppId: draftTarget.spacesAppId,
+            });
+            if (!prepared.ok) {
+              draftContent = prepared.message;
+            } else {
+              // postFlowCard stamps surface/chatMessageId (so approval is
+              // routed back to this row) and persists it in uiFlows, so the
+              // card survives a reload.
+              draftCardFlow = await postFlowCard(prepared.flow, draftTarget);
+              log.info(
+                `[agent-card] xyne-ai draft card slug=${spec.slug} request=${prepared.requestId} conv=${draftTarget.conversationId}`,
+              );
+            }
+          }
+        }
+      } catch (draftErr) {
+        log.error(`[agent-card] xyne-ai draft card failed slug=${spec.slug}:`, errMsg(draftErr));
+        draftContent = AGENT_DRAFT_DELIVERY_FAILED;
+      }
+    }
+    const content = draftContent ?? baseContent;
 
     // DURABLE write: persist the assistant message + attachments here, on
     // whichever pod received the callback. SETNX guard on sessionId stops
@@ -2334,10 +2433,19 @@ internalRouter.post("/:streamId/callback", async (req: Request<{ streamId: strin
     }
 
 
-    const pendingAgentCard = body["pendingAgentCard"] as
-      | { variant?: string; slug?: string; slugs?: string[] }
-      | undefined;
-    if (pendingAgentCard?.variant) {
+    if (draftCardFlow) {
+      // Same reason as the sibling cards below: the terminal payload has no
+      // uiFlows slot, so the card goes on the wire to paint without a refetch.
+      const draftStream = pendingStreams.get(streamId);
+      if (draftStream) draftStream.sendEvent("ui-flow", { flow: draftCardFlow });
+      else
+        publishStreamEvent({
+          kind: "progress",
+          streamId,
+          events: [{ event: "ui-flow", data: { flow: draftCardFlow } }],
+        });
+    }
+    if (pendingAgentCard?.variant && pendingAgentCard.variant !== "draft") {
       try {
         const { resolveXyneAiCardTarget } = await import("../lib/flow-card-delivery.js");
         const cardTarget = await resolveXyneAiCardTarget({ assistantMessageId });
@@ -2434,13 +2542,18 @@ internalRouter.post("/:streamId/callback", async (req: Request<{ streamId: strin
               }),
             );
           }
-          delivered.push(
-            await renderProviderSuggestCard({
-              taskText,
-              id: suggestIdentity,
-              target: suggestTarget,
-            }),
-          );
+          const providerSuggestions = body["pendingProviderSuggestions"] as
+            | { providers: string[]; listAll?: boolean; title?: string }
+            | undefined;
+          if (providerSuggestions) {
+            delivered.push(
+              await renderProviderSuggestCard({
+                suggestions: providerSuggestions,
+                id: suggestIdentity,
+                target: suggestTarget,
+              }),
+            );
+          }
           // Same reason as the agent cards: the terminal payload has no uiFlows
           // slot, so a card must go on the wire to paint without a refetch.
           for (const flow of delivered) {

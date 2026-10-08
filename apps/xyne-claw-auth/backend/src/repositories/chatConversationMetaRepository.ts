@@ -1,6 +1,7 @@
 import { Prisma, type ChatConversationMeta } from "@prisma/client";
 import { prisma } from "../db.js";
 import { isDirectChatConversation } from "../lib/conversation-kind.js";
+import { userIdFilter } from "./userIdFilter.js";
 
 interface MetaKey {
   conversationId: string;
@@ -38,23 +39,24 @@ export const chatConversationMetaRepository = {
 
   /** One user's meta rows for these conversations under ANY agent. A direct
    *  chat that switched agents keeps its title on its home agent's row, so the
-   *  sidebar resolves the row per conversation instead of per list slug. */
+   *  sidebar resolves the row per conversation instead of per list slug. Rows
+   *  may be keyed by either of the caller's verified ids (see userIdFilter). */
   forConversationsAnyAgent: (
     conversationIds: string[],
-    userId: string,
+    userIds: string | string[],
   ): Promise<Array<{ conversationId: string; agentSlug: string; title: string | null; pinned: boolean }>> => {
     if (conversationIds.length === 0) return Promise.resolve([]);
     return prisma.chatConversationMeta.findMany({
-      where: { conversationId: { in: conversationIds }, userId },
+      where: { conversationId: { in: conversationIds }, ...userIdFilter(userIds) },
       select: { conversationId: true, agentSlug: true, title: true, pinned: true },
     });
   },
 
   /** `conversationId:agentSlug` of every meta row this user has pinned — the
    *  first page of the chat list carries all of them, however old. */
-  pinnedKeys: async (userId: string): Promise<Set<string>> => {
+  pinnedKeys: async (userIds: string | string[]): Promise<Set<string>> => {
     const rows = await prisma.chatConversationMeta.findMany({
-      where: { userId, pinned: true },
+      where: { ...userIdFilter(userIds), pinned: true },
       select: { conversationId: true, agentSlug: true },
     });
     return new Set(rows.map((row) => `${row.conversationId}:${row.agentSlug}`));

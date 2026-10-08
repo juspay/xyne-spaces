@@ -1,6 +1,7 @@
 import { Prisma } from "@prisma/client";
 import type { AssistantPart } from "../lib/chat-run-record.js";
 import { prisma } from "../db.js";
+import { userIdFilter } from "./userIdFilter.js";
 
 export const chatMessageRepository = {
   create: (data: {
@@ -203,13 +204,14 @@ export const chatMessageRepository = {
 
   /** Every (conversation, agent) pair one user has rows in, with first/last
    *  activity and row counts — the whole all-agents history in one aggregate
-   *  query instead of loading every message. */
+   *  query instead of loading every message. Rows may be keyed by either of
+   *  the caller's verified ids (see getRequesterAliases). */
   conversationAgentGroupsForUser: async (
-    userId: string,
+    userIds: string | string[],
   ): Promise<Array<{ conversationId: string; agentSlug: string; firstAt: Date; lastAt: Date; count: number }>> => {
     const rows = await prisma.chatMessage.groupBy({
       by: ["conversationId", "agentSlug"],
-      where: { userId },
+      where: userIdFilter(userIds),
       _min: { createdAt: true },
       _max: { createdAt: true },
       _count: { _all: true },
@@ -230,14 +232,15 @@ export const chatMessageRepository = {
    *  per pair rather than every user message in every conversation. */
   firstUserMessagesPerAgent: async (
     conversationIds: string[],
-    userId: string,
+    userIds: string | string[],
   ): Promise<Array<{ conversationId: string; agentSlug: string; content: string }>> => {
     if (conversationIds.length === 0) return [];
+    const ids = Array.isArray(userIds) ? userIds : [userIds];
     const rows = await prisma.$queryRaw<Array<{ conversationId: string; agentSlug: string; content: string; createdAt: Date }>>`
       SELECT DISTINCT ON ("conversationId", "agentSlug")
         "conversationId", "agentSlug", left("content", 200) AS "content", "createdAt"
       FROM "chat_messages"
-      WHERE "userId" = ${userId} AND "role" = 'user' AND "conversationId" = ANY(${conversationIds})
+      WHERE "userId" = ANY(${ids}) AND "role" = 'user' AND "conversationId" = ANY(${conversationIds})
       ORDER BY "conversationId", "agentSlug", "createdAt" ASC`;
     return rows
       .sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime())
@@ -250,14 +253,15 @@ export const chatMessageRepository = {
 
   /** Delete every message in a conversation belonging to this user+agent.
    *  Scoped by all three to prevent one user from deleting another's chat
-   *  even if they guess a conversationId. Returns the delete count. */
-  deleteConversation: async (userId: string, agentSlug: string, conversationId: string) => {
+   *  even if they guess a conversationId. Returns the delete count. Alias
+   *  array = both verified representations of the SAME caller. */
+  deleteConversation: async (userIds: string | string[], agentSlug: string, conversationId: string) => {
     const result = await prisma.chatMessage.deleteMany({
-      where: { userId, agentSlug, conversationId },
+      where: { ...userIdFilter(userIds), agentSlug, conversationId },
     });
     if (result.count > 0) {
       await prisma.chatConversationMeta.deleteMany({
-        where: { conversationId, userId, agentSlug },
+        where: { conversationId, agentSlug, ...userIdFilter(userIds) },
       });
     }
     return result.count;
@@ -267,10 +271,10 @@ export const chatMessageRepository = {
    *  in it. A chat the user switched agents in is one conversation: deleting
    *  only the requesting agent's rows would leave the other agents' turns
    *  hanging off parents that no longer exist. Same user scoping as above. */
-  deleteConversationAllAgents: async (userId: string, conversationId: string) => {
-    const result = await prisma.chatMessage.deleteMany({ where: { userId, conversationId } });
+  deleteConversationAllAgents: async (userIds: string | string[], conversationId: string) => {
+    const result = await prisma.chatMessage.deleteMany({ where: { ...userIdFilter(userIds), conversationId } });
     if (result.count > 0) {
-      await prisma.chatConversationMeta.deleteMany({ where: { conversationId, userId } });
+      await prisma.chatConversationMeta.deleteMany({ where: { conversationId, ...userIdFilter(userIds) } });
     }
     return result.count;
   },

@@ -20,6 +20,7 @@
  */
 
 import { useState, useEffect, useRef, useCallback, Fragment } from "react";
+import { isCurrentUser } from "../../../lib/identity";
 import {
   Sparkles,
   ChevronRight,
@@ -894,13 +895,13 @@ export function CreateAgentModal({ userId, onClose, onCreated }: Props) {
                     </div>
                   </div>
                 )}
-                {w.availableSkills.filter((s) => s.ownerUserId === userId).length > 0 && (
+                {w.availableSkills.filter((s) => isCurrentUser(s.ownerUserId)).length > 0 && (
                   <div>
                     <p className="text-[11px] font-medium text-xyne-fg-tertiary mb-2 uppercase tracking-[0.06em]">
                       My skills
                     </p>
                     <div className="flex flex-wrap gap-1.5">
-                      {w.availableSkills.filter((s) => s.ownerUserId === userId).map((skill) => (
+                      {w.availableSkills.filter((s) => isCurrentUser(s.ownerUserId)).map((skill) => (
                         <button
                           key={skill.id}
                           onClick={() => setW((p) => ({ ...p, selectedSkillIds: p.selectedSkillIds.includes(skill.id) ? p.selectedSkillIds.filter((x) => x !== skill.id) : [...p.selectedSkillIds, skill.id] }))}

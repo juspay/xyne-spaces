@@ -16,8 +16,9 @@
  * Authentication: Cookie-based auth via authMiddleware (same as dashboard).
  */
 
-import { Router, type Request, type RequestHandler, type Response } from 'express';
+import { Router, type NextFunction, type Request, type RequestHandler, type Response } from 'express';
 import { z, type ZodTypeAny } from 'zod';
+import { AccessType, MAX_RULES, NotificationStatus } from '@xyne/shared';
 import { searchQuerySchema, searchSchemaQuerySchema } from './schemas/search';
 import { db } from '@/database/client';
 import type { AuthData } from '@/zero/mutators';
@@ -26,6 +27,25 @@ import { ConversationController } from '@/controllers/conversationController';
 import { TicketController } from '@/controllers/ticketController';
 import { AttachmentController } from '@/controllers/attachmentController';
 import { DraftAttachmentController } from '@/controllers/draftAttachmentController';
+import { callController as callsController } from '@/controllers/callController';
+import { affinityController } from '@/controllers/affinityController';
+import { userManagementController } from '@/controllers/userManagementController';
+import { notificationController } from '@/controllers/notificationController';
+import * as dailyBriefController from '@/controllers/dailyBriefController';
+import { customEmojiController } from '@/controllers/customEmojiController';
+import { CanvasController } from '@/controllers/canvasController';
+import { deskMetricsController } from '@/controllers/deskMetricsController';
+import { deskReportPanelController } from '@/controllers/deskReportPanelController';
+import { workspaceScopedRoute } from '@/database/tenant/context';
+import { repositories } from '@/database/repositories/index';
+import { MessageAttachmentRepository } from '@/database/repositories/messageAttachmentRepository';
+import { authorize } from '@/middleware/authorize';
+import { notificationService } from '@/services/notificationService';
+import { RadarActionError, radarManualActions } from '@/services/radar/radarManualActions';
+import { radarFeedService } from '@/services/radar/radarFeedService';
+import { radarRuleStore } from '@/services/radar/radarRuleStore';
+import { canReadTicket } from '@/services/subTicketLinkService';
+import { cleanConditions, parsePageQuery } from '@/routes/radarExecution';
 import { searchHandler } from '@/services/vespaSearch';
 import { schemaHandler } from '@/services/vespaSearch/schemaHandler';
 import {
@@ -46,7 +66,7 @@ import {
   ConnectorRateLimitedError,
   ConnectorWriteToolError,
 } from '@/services/clawConnectorsService';
-import { uploadMultiple } from '@/middleware/upload';
+import { uploadMultiple, uploadSingle } from '@/middleware/upload';
 import { config } from '@/config/env';
 import { SdkApiError } from './errors';
 import { handle } from './handler';
@@ -56,6 +76,8 @@ const conversationController = new ConversationController();
 const ticketController = new TicketController();
 const attachmentController = new AttachmentController();
 const draftAttachmentController = new DraftAttachmentController();
+// Constructed the way routes/canvas.ts constructs it.
+const canvasController = new CanvasController(new MessageAttachmentRepository());
 
 /**
  * Build SDK auth data from req.user (set by authMiddleware).
@@ -110,14 +132,26 @@ async function buildAuthData(req: Request): Promise<AuthData> {
   };
 }
 
-/** A product controller: writes its response rather than returning it. */
-type Controller = (req: Request, res: Response) => Promise<void> | void;
+/**
+ * A product controller: writes its response rather than returning it. Some
+ * return the `res` they wrote to; that value is ignored.
+ */
+type Controller = (req: Request, res: Response) => Promise<unknown> | void;
 
 /** A service function: returns its payload, so nothing needs capturing. */
 type Service = (req: Request, authData: AuthData) => Promise<unknown>;
 
+/**
+ * A check that runs before the handler and throws an `SdkApiError` to refuse.
+ *
+ * For the routes whose product counterpart is protected by something that does
+ * not apply under /api/sdk — a URL-keyed ACL, or nothing at all — so the
+ * protection is restated here rather than assumed.
+ */
+type Guard = (req: Request) => Promise<void>;
+
 interface BaseRoute {
-  readonly method: 'get' | 'post';
+  readonly method: 'get' | 'post' | 'put' | 'patch' | 'delete';
   /** Express path relative to the /api/sdk mount. */
   readonly path: string;
   /** Route-local parsing, such as multipart handling. */
@@ -132,6 +166,8 @@ interface BaseRoute {
   readonly mapBody?: (body: unknown) => unknown;
   /** Unwrap the controller's envelope into the SDK's response shape. */
   readonly unwrap?: (body: unknown) => unknown;
+  /** Run in order before the handler; any of them may refuse the request. */
+  readonly guards?: readonly Guard[];
 }
 
 /**
@@ -141,6 +177,50 @@ interface BaseRoute {
 type DirectRoute =
   | (BaseRoute & { readonly controller: Controller; readonly service?: never })
   | (BaseRoute & { readonly service: Service; readonly controller?: never });
+
+/** A query-string parameter the desk metrics controller decodes as a JSON array of strings. */
+const jsonStringArrayParam = z
+  .string()
+  .refine((raw) => {
+    try {
+      const parsed: unknown = JSON.parse(raw);
+      return Array.isArray(parsed) && parsed.every((v) => typeof v === 'string');
+    } catch {
+      return false;
+    }
+  }, 'Must be a JSON-encoded array of strings.')
+  .optional();
+
+/**
+ * The desk metrics filters, as `parseMetricsQuery` reads them from the query
+ * string. The controller silently drops malformed JSON; this refuses it, so a
+ * filter the caller meant is never ignored.
+ */
+const deskMetricsQuery = z.object({
+  timeRange: z
+    .string()
+    .regex(/^\d+_\d+$/, 'Use startMs_endMs.')
+    .optional(),
+  dateBasis: z.enum(['created', 'active']).optional(),
+  assigneeIds: jsonStringArrayParam,
+  stageNames: jsonStringArrayParam,
+  priorities: jsonStringArrayParam,
+  userGroupIds: jsonStringArrayParam,
+  tagValues: jsonStringArrayParam,
+  aiCategories: jsonStringArrayParam,
+  customFieldKeys: jsonStringArrayParam,
+  customFieldPerKeyFilters: z
+    .string()
+    .refine((raw) => {
+      try {
+        const parsed: unknown = JSON.parse(raw);
+        return typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed);
+      } catch {
+        return false;
+      }
+    }, 'Must be a JSON-encoded object.')
+    .optional(),
+});
 
 /**
  * A Claw run request.
@@ -196,6 +276,17 @@ function connectorSettingsUrl(authData: AuthData, type: string): string {
   return `${base}/${encodeURIComponent(authData.workspaceId)}/ai/library/mcp/${encodeURIComponent(type)}`;
 }
 
+/** `GET /notifications`: the product route's paging, with its 100-row cap as a bound. */
+const notificationListQuery = z.object({
+  page: z.coerce.number().int().min(1).optional(),
+  limit: z.coerce.number().int().min(1).max(100).optional(),
+  status: z.nativeEnum(NotificationStatus).optional(),
+});
+
+const dailyBriefLimitQuery = z.object({
+  limit: z.coerce.number().int().min(1).optional(),
+});
+
 const ROUTES: readonly DirectRoute[] = [
   {
     method: 'post',
@@ -232,6 +323,34 @@ const ROUTES: readonly DirectRoute[] = [
     path: '/draft-attachments',
     middleware: [uploadMultiple],
     controller: draftAttachmentController.uploadDraftAttachment.bind(draftAttachmentController),
+  },
+
+  /*
+   * Calls. The room is provisioned and the media token minted by the calls
+   * controller, so starting, joining and leaving a call live here rather than in
+   * the catalog. Also reached by operation id: `calls.initiate`, `calls.join` and
+   * `calls.leave` resolve to these routes (see v1/mapper.ts).
+   */
+  {
+    method: 'post',
+    path: '/calls/initiate',
+    controller: callsController.initiateCall,
+    unwrap: unwrapEnvelope,
+  },
+  {
+    method: 'post',
+    path: '/calls/join',
+    // As on the product route: the call link is the invitation, so the handler's
+    // lookups run at workspace scope and joinCall checks the workspace itself.
+    middleware: [workspaceScopedRoute],
+    controller: callsController.joinCall,
+    unwrap: unwrapEnvelope,
+  },
+  {
+    method: 'post',
+    path: '/calls/:callId/leave',
+    controller: callsController.leaveCall,
+    unwrap: unwrapEnvelope,
   },
   {
     method: 'get',
@@ -398,6 +517,456 @@ const ROUTES: readonly DirectRoute[] = [
       });
     },
   },
+
+  /*
+   * The caller: personalization weights, people search, and DMs.
+   */
+  {
+    method: 'get',
+    path: '/me/affinity',
+    controller: affinityController.getAffinity,
+  },
+  {
+    method: 'get',
+    path: '/users/search',
+    controller: userManagementController.searchUsers,
+    query: z.object({
+      q: z.string().min(1),
+      limit: z.coerce.number().int().min(1).max(100).optional(),
+      offset: z.coerce.number().int().min(0).optional(),
+    }),
+    unwrap: unwrapUserSearch,
+  },
+  {
+    method: 'get',
+    path: '/me/dms',
+    controller: channelController.getUserDMs,
+  },
+  {
+    method: 'post',
+    path: '/me/dms',
+    controller: channelController.createNewDM,
+    body: z.object({
+      participantIds: z.array(z.string().min(1)).min(1),
+      message: z.string().optional(),
+      forwardedMessage: z
+        .object({ originalMessageId: z.string().min(1), optionalMessage: z.string().optional() })
+        .optional(),
+      silent: z.boolean().optional(),
+    }),
+  },
+
+  /*
+   * Notifications: the caller's in-app notification inbox and preferences.
+   * Reads that are a single service call go to the service; the rest reuse the
+   * controller, which also clears channel/thread unread state on markAsRead.
+   */
+  {
+    method: 'get',
+    path: '/notifications',
+    query: notificationListQuery,
+    service: async (req, authData) => {
+      const { page, limit, status } = notificationListQuery.parse(req.query);
+      return notificationService.getUserNotifications(authData.sub, {
+        page: page ?? 1,
+        limit: limit ?? 20,
+        ...(status ? { status } : {}),
+      });
+    },
+  },
+  {
+    method: 'get',
+    path: '/notifications/unread-count',
+    service: async (_req, authData) => ({
+      count: await notificationService.getUnreadCount(authData.sub),
+    }),
+  },
+  {
+    method: 'get',
+    path: '/notifications/workspace-counts',
+    controller: notificationController.getWorkspaceNotificationCounts.bind(notificationController),
+  },
+  {
+    method: 'patch',
+    path: '/notifications/mark-all-read',
+    service: async (_req, authData) => {
+      await notificationService.markAllAsRead(authData.sub);
+      return {};
+    },
+  },
+  {
+    method: 'patch',
+    path: '/notifications/:id/read',
+    controller: notificationController.markAsRead.bind(notificationController),
+    body: z.object({
+      channelId: z.string().min(1).optional(),
+      conversationId: z.string().min(1).optional(),
+    }),
+    unwrap: unwrapEnvelope,
+  },
+  {
+    method: 'patch',
+    path: '/notifications/:id/dismiss',
+    controller: notificationController.dismiss.bind(notificationController),
+    unwrap: unwrapEnvelope,
+  },
+  {
+    method: 'get',
+    path: '/notifications/preferences',
+    controller: notificationController.getPreferences.bind(notificationController),
+  },
+  {
+    method: 'put',
+    path: '/notifications/preferences',
+    // Validated by the controller against its own preferencesSchema, after it
+    // drops retired notification types — so a stale client still saves.
+    controller: notificationController.updatePreferences.bind(notificationController),
+    unwrap: unwrapEnvelope,
+  },
+
+  /*
+   * Daily brief. Stored and generated by claw-auth; these relay the caller's
+   * request. The org-wide settings write is admin-only, enforced by claw-auth.
+   */
+  {
+    method: 'get',
+    path: '/daily-brief/latest',
+    controller: dailyBriefController.getLatest,
+  },
+  {
+    method: 'get',
+    path: '/daily-brief/history',
+    controller: dailyBriefController.getHistory,
+    query: dailyBriefLimitQuery,
+  },
+  {
+    method: 'get',
+    path: '/daily-brief/dates',
+    controller: dailyBriefController.getDates,
+    query: dailyBriefLimitQuery,
+  },
+  {
+    method: 'get',
+    path: '/daily-brief/by-date/:date',
+    controller: dailyBriefController.getByDate,
+    guards: [briefDateGuard],
+  },
+  {
+    method: 'get',
+    path: '/daily-brief/config',
+    controller: dailyBriefController.getConfig,
+  },
+  {
+    method: 'put',
+    path: '/daily-brief/config',
+    controller: dailyBriefController.saveConfig,
+    body: z.object({
+      enabled: z.boolean().optional(),
+      instructions: z.string().optional(),
+      instructionsEnabled: z.boolean().optional(),
+    }),
+  },
+  {
+    method: 'get',
+    path: '/daily-brief/settings',
+    controller: dailyBriefController.getSettings,
+  },
+  {
+    method: 'put',
+    path: '/daily-brief/settings',
+    controller: dailyBriefController.saveSettings,
+    body: z.object({ agentSlug: z.string().min(1).nullable() }),
+  },
+
+  /*
+   * Radar. The product handlers are closures in routes/radarExecution.ts, so
+   * these call the same services with the same caller context, and share that
+   * router's query and rule-condition parsing.
+   */
+  {
+    method: 'get',
+    path: '/radar/feed/pending-me',
+    service: async (_req, authData) => ({ threads: await radarFeedService.pendingMe(radarAuth(authData)) }),
+  },
+  {
+    method: 'get',
+    path: '/radar/feed/waiting-on',
+    service: async (_req, authData) => ({ threads: await radarFeedService.waitingOn(radarAuth(authData)) }),
+  },
+  {
+    method: 'get',
+    path: '/radar/feed/pending-others',
+    service: async (req, authData) => {
+      const auth = radarAuth(authData);
+      // Paged when the caller asks for a page; the whole feed otherwise, as on
+      // the product route.
+      if (typeof req.query['page'] === 'string') {
+        return radarFeedService.pendingOthersPage(auth, parsePageQuery(req.query));
+      }
+      return { threads: await radarFeedService.pendingOthers(auth) };
+    },
+  },
+  {
+    method: 'post',
+    path: '/radar/items/:itemId/resolve',
+    service: async (req, authData) =>
+      radarAction(() => radarManualActions.resolveItem(radarAuth(authData), pathParam(req, 'itemId'))),
+  },
+  {
+    method: 'post',
+    path: '/radar/items/:itemId/dismiss',
+    service: async (req, authData) =>
+      radarAction(() => radarManualActions.dismissItem(radarAuth(authData), pathParam(req, 'itemId'))),
+  },
+  {
+    method: 'get',
+    path: '/radar/rules',
+    service: async (_req, authData) => ({ rules: await radarRuleStore.list(radarAuth(authData)) }),
+  },
+  {
+    method: 'post',
+    path: '/radar/rules',
+    service: async (req, authData) => {
+      const conditions = radarConditions(req);
+      // Counted and written together, as on the product route.
+      const rule = await radarRuleStore.createWithinLimit(radarAuth(authData), conditions, MAX_RULES);
+      if (!rule) throw new SdkApiError('validation_failed', `At most ${MAX_RULES} rules`);
+      return { rule };
+    },
+  },
+  {
+    method: 'patch',
+    path: '/radar/rules/:ruleId',
+    service: async (req, authData) => {
+      const conditions = radarConditions(req);
+      const rule = await radarRuleStore.update(radarAuth(authData), pathParam(req, 'ruleId'), conditions);
+      if (!rule) throw SdkApiError.notFound('Rule');
+      return { rule };
+    },
+  },
+  {
+    method: 'delete',
+    path: '/radar/rules/:ruleId',
+    service: async (req, authData) => {
+      const ruleId = pathParam(req, 'ruleId');
+      if (!(await radarRuleStore.remove(radarAuth(authData), ruleId))) throw SdkApiError.notFound('Rule');
+      return { id: ruleId };
+    },
+  },
+
+  /*
+   * Channels: mention search, member counts and a channel's roster. The roster
+   * controller checks membership itself.
+   */
+  {
+    method: 'get',
+    path: '/channels/search',
+    controller: channelController.searchForMentions,
+    query: z.object({
+      q: z.string().min(1),
+      limit: z.string().regex(/^\d+$/).optional(),
+      types: z.string().optional(),
+    }),
+  },
+  {
+    method: 'post',
+    path: '/channels/member-counts',
+    controller: channelController.getChannelMemberCounts,
+    body: z.object({ channelIds: z.array(z.string()).max(10000) }),
+    unwrap: unwrapEnvelope,
+  },
+  {
+    method: 'get',
+    path: '/channels/:channelId/members',
+    controller: channelController.getChannelMembers,
+    unwrap: unwrapEnvelope,
+  },
+
+  /*
+   * Conversations: the caller's thread list, recently visited conversations,
+   * and a conversation looked up by one of its messages.
+   */
+  {
+    method: 'get',
+    path: '/conversations/threads',
+    // Pagination is validated by the controller, which also decodes the cursor.
+    controller: conversationController.getUserThreads,
+  },
+  {
+    method: 'get',
+    path: '/conversations/recent-visited',
+    controller: conversationController.getRecentVisitedConversations,
+  },
+  {
+    method: 'get',
+    path: '/conversations/by-message/:messageId',
+    controller: conversationController.getConversationByMessageId,
+    guards: [messageAccessGuard],
+  },
+
+  /*
+   * Custom emojis. Creation is multipart with the product route's own upload
+   * middleware and size cap; only the emoji's creator may delete it, which the
+   * controller enforces.
+   */
+  {
+    method: 'get',
+    path: '/emojis',
+    controller: customEmojiController.getAllCustomEmojis,
+    unwrap: (body) => field(body, 'emojis'),
+  },
+  {
+    method: 'get',
+    path: '/emojis/:emojiId',
+    controller: customEmojiController.getCustomEmojiById,
+    unwrap: (body) => field(body, 'emoji'),
+  },
+  {
+    method: 'post',
+    path: '/emojis',
+    middleware: [uploadSingle({ maxBytes: 256 * 1024 })],
+    controller: customEmojiController.createCustomEmoji,
+    unwrap: (body) => field(body, 'emoji'),
+  },
+  {
+    method: 'delete',
+    path: '/emojis/:emojiId',
+    controller: customEmojiController.deleteCustomEmoji,
+    unwrap: () => ({}),
+  },
+
+  /*
+   * Canvases created from markdown, file uploads into a canvas, and labels.
+   * Edit access for uploads and label writes is checked by the controller.
+   */
+  {
+    method: 'post',
+    path: '/canvases/create',
+    controller: canvasController.createCanvas,
+    // No sdlcFolderId: SDLC is not exposed, and the schema strips it.
+    body: z.object({
+      title: z.string().min(1),
+      markdown: z.string().min(1),
+      visibility: z.enum(['PUBLIC', 'PRIVATE']).optional(),
+      channelId: z.string().min(1).optional(),
+    }),
+    guards: [canvasChannelGuard],
+  },
+  {
+    method: 'post',
+    path: '/canvases/upload',
+    // Fields are checked by the controller, which also cleans up the stored
+    // file when it refuses; a schema here would refuse after the upload.
+    middleware: [uploadSingle()],
+    controller: canvasController.uploadFile,
+  },
+  {
+    method: 'get',
+    path: '/canvases/labels',
+    controller: canvasController.getCanvasLabels,
+    query: z.object({ canvasIds: z.string().min(1) }),
+  },
+  {
+    method: 'get',
+    path: '/canvases/labels/suggestions',
+    controller: canvasController.getCanvasLabelSuggestions,
+    query: z.object({
+      query: z.string().optional(),
+      offset: z.string().regex(/^\d+$/).optional(),
+      limit: z.string().regex(/^\d+$/).optional(),
+    }),
+  },
+  {
+    method: 'post',
+    path: '/canvases/:canvasId/labels',
+    controller: canvasController.addCanvasLabel,
+    body: z.object({ names: z.array(z.string()).min(1) }),
+  },
+  {
+    // POST rather than the product route's DELETE: it carries a body, which
+    // not every HTTP client will send on a DELETE.
+    method: 'post',
+    path: '/canvases/:canvasId/labels/remove',
+    controller: canvasController.removeCanvasLabel,
+    body: z.object({ labelIds: z.array(z.string()).min(1) }),
+    unwrap: unwrapEnvelope,
+  },
+
+  /*
+   * Ticket field update, including custom form fields and tags. The product
+   * route is guarded only by the URL-keyed ACL, which does not apply under
+   * /api/sdk, so its protection is restated: the TICKETS write grant, and a
+   * ticket the caller can see in their own workspace.
+   */
+  {
+    method: 'patch',
+    path: '/tickets/:ticketId',
+    controller: ticketController.updateTicket,
+    guards: [middlewareGuard(authorize('TICKETS', AccessType.WRITE)), ticketVisibleGuard],
+    unwrap: unwrapEnvelope,
+  },
+
+  /*
+   * Desk metrics and the desk report. The controllers enforce access
+   * themselves — channel membership, the desk's metricsEnabled preference on
+   * the dashboard handlers, and desk owner / channel admin — so nothing is
+   * restated here. Metrics responses carry no envelope and pass through as-is.
+   */
+  {
+    method: 'get',
+    path: '/channels/:channelId/metrics',
+    controller: deskMetricsController.getMetrics,
+    query: deskMetricsQuery,
+  },
+  {
+    method: 'get',
+    path: '/desk-metrics/aggregate',
+    controller: deskMetricsController.getAggregateMetrics,
+    query: deskMetricsQuery.extend({ channelIds: z.string().min(1) }),
+  },
+  {
+    method: 'get',
+    path: '/desk-metrics/desks',
+    controller: deskMetricsController.listDesks,
+  },
+  {
+    method: 'get',
+    path: '/desk-report/:channelId/latest',
+    controller: deskReportPanelController.getLatest,
+    unwrap: unwrapDeskReportLatest,
+  },
+  {
+    // HTML, not JSON: the controller sets a text/html Content-Type, so the
+    // router passes the body through untouched (see createDirectRouter).
+    method: 'get',
+    path: '/desk-report/:channelId/view',
+    controller: deskReportPanelController.serveReport,
+    // The controller reads `download === '1'`; anything else is inline.
+    query: z.object({ download: z.enum(['0', '1']).optional() }),
+  },
+  {
+    // Starts an agent run; owner / channel admin only, checked by the controller.
+    method: 'post',
+    path: '/desk-report/:channelId/generate',
+    controller: deskReportPanelController.generateNow,
+    unwrap: unwrapDeskReportGenerate,
+  },
+
+  /*
+   * The agent-facing desk metrics surface (the product's
+   * /api/desk-metrics/claw mount). The query body is validated by the
+   * controller's own strict schema, whose 400s name the offending field.
+   */
+  {
+    method: 'get',
+    path: '/claw/desk-metrics/desks',
+    controller: deskMetricsController.listDesks,
+  },
+  {
+    method: 'post',
+    path: '/claw/desk-metrics/query',
+    controller: deskMetricsController.queryMetrics,
+  },
 ];
 
 /** Build the router for every direct operation. */
@@ -409,6 +978,8 @@ export function createDirectRouter(): Router {
       route.path,
       ...(route.middleware ?? []),
       handle(async (req: Request, res: Response) => {
+        for (const guard of route.guards ?? []) await guard(req);
+
         if (route.service) {
           const authData = await buildAuthData(req);
           if (route.query) route.query.parse(req.query);
@@ -434,6 +1005,14 @@ export function createDirectRouter(): Router {
         }
         if (result.status === 204 || result.body === undefined) {
           res.status(result.status).end();
+          return;
+        }
+        // A controller that declared a non-JSON Content-Type (the desk report's
+        // HTML) is passed through as written. Every other controller writes
+        // JSON without setting one, so this is the only branch they take.
+        const contentType = headerValue(result.headers, 'content-type');
+        if (contentType && !/\bjson\b/i.test(contentType)) {
+          res.status(result.status).send(result.body);
           return;
         }
         res.status(result.status).json(result.body);
@@ -466,6 +1045,9 @@ export async function callController(
   const query = route.query
     ? (route.query.parse(req.query) as Record<string, unknown>)
     : (req.query as Record<string, unknown>);
+  // The parsed body, not the raw one: the schema also strips what the route
+  // does not accept, before the controller can act on it.
+  const requestBody: unknown = route.body ? route.body.parse(req.body ?? {}) : req.body;
 
   const proxyReq = Object.create(req) as Request;
   Object.defineProperties(proxyReq, {
@@ -477,7 +1059,7 @@ export async function callController(
       configurable: true,
     },
     body: {
-      value: route.mapBody ? route.mapBody(req.body) : req.body,
+      value: route.mapBody ? route.mapBody(requestBody) : requestBody,
       writable: true,
       configurable: true,
     },
@@ -511,6 +1093,11 @@ export async function callController(
       headers.set(name, Array.isArray(value) ? value.join(', ') : String(value));
       return stub;
     },
+    removeHeader(name: string) {
+      for (const key of [...headers.keys()]) {
+        if (key.toLowerCase() === name.toLowerCase()) headers.delete(key);
+      }
+    },
     get headersSent() {
       return settled;
     },
@@ -530,6 +1117,173 @@ export async function callController(
   };
 }
 
+/** A captured header, looked up case-insensitively as HTTP names are. */
+function headerValue(headers: Record<string, string>, name: string): string | undefined {
+  const wanted = name.toLowerCase();
+  for (const [key, value] of Object.entries(headers)) {
+    if (key.toLowerCase() === wanted) return value;
+  }
+  return undefined;
+}
+
+/** One field of a `{ success, <field> }` envelope. */
+function field(raw: unknown, name: string): unknown {
+  const body = raw as Record<string, unknown> | undefined;
+  if (body?.['success'] === false) {
+    throw new SdkApiError('internal', typeof body['error'] === 'string' ? body['error'] : 'The request failed.');
+  }
+  return body?.[name];
+}
+
+/**
+ * User search keeps its `{ data, pagination }` shape, minus the two fields that
+ * describe how a user signs in rather than who they are.
+ */
+function unwrapUserSearch(raw: unknown): unknown {
+  const body = raw as { data?: unknown; pagination?: unknown } | undefined;
+  const rows = Array.isArray(body?.data) ? (body.data as Record<string, unknown>[]) : [];
+  return {
+    data: rows.map(({ authProvider: _authProvider, orgMemberId: _orgMemberId, ...user }) => user),
+    pagination: body?.pagination,
+  };
+}
+
+/** A path parameter Express has already matched, so present by construction. */
+function pathParam(req: Request, name: string): string {
+  const value = req.params[name];
+  if (!value) throw new SdkApiError('validation_failed', `${name} is required.`);
+  return value;
+}
+
+// ----- radar -----
+
+/**
+ * The caller as radar sees them. As on the product routes, a caller with no
+ * resolved role is refused rather than evaluated under the member rule.
+ */
+function radarAuth(authData: AuthData): { userId: string; workspaceId: string; role: string } {
+  if (!authData.role) throw new SdkApiError('unauthenticated', 'Missing authenticated principal.');
+  return { userId: authData.sub, workspaceId: authData.workspaceId, role: authData.role };
+}
+
+/** A manual radar action, with its typed refusals mapped as the product route maps them. */
+async function radarAction<T>(run: () => Promise<T>): Promise<T> {
+  try {
+    return await run();
+  } catch (err) {
+    if (!(err instanceof RadarActionError)) throw err;
+    const code = err.code === 'not-found' ? 'not_found' : err.code === 'forbidden' ? 'forbidden' : 'validation_failed';
+    throw new SdkApiError(code, err.message, { cause: err });
+  }
+}
+
+/** A rule's conditions, rebuilt by the product router's own cleaner. */
+function radarConditions(req: Request): { scope: string; values: string[] }[] {
+  const cleaned = cleanConditions((req.body as { conditions?: unknown } | undefined)?.conditions);
+  if ('error' in cleaned) throw new SdkApiError('validation_failed', cleaned.error);
+  return cleaned.conditions;
+}
+
+// ----- guards -----
+
+/**
+ * Run an Express middleware as a guard.
+ *
+ * The middleware answers a refusal itself, in the product's shape; that answer
+ * is captured and re-raised as the SDK error for its status. Calling `next`
+ * means it passed.
+ */
+function middlewareGuard(middleware: RequestHandler): Guard {
+  return (req) =>
+    new Promise<void>((resolve, reject) => {
+      let status = 200;
+      const stub = {
+        status(code: number) {
+          status = code;
+          return stub;
+        },
+        json(payload: unknown) {
+          reject(controllerError(status, payload));
+          return stub;
+        },
+      };
+      const next: NextFunction = (err?: unknown) => (err ? reject(err) : resolve());
+      Promise.resolve(middleware(req, stub as unknown as Response, next)).catch(reject);
+    });
+}
+
+const BRIEF_DATE = /^\d{4}-\d{2}-\d{2}$/;
+
+async function briefDateGuard(req: Request): Promise<void> {
+  if (!BRIEF_DATE.test(req.params['date'] ?? '')) {
+    throw new SdkApiError('validation_failed', 'date must be YYYY-MM-DD.');
+  }
+}
+
+/**
+ * The access `getConversationMessage` requires, applied to the conversation a
+ * message belongs to: same workspace, membership when the channel is private,
+ * and a message not addressed only to somebody else. `getConversationByMessageId`
+ * checks none of it. Every refusal is a 404, so a message id does not reveal
+ * whether the message exists.
+ */
+async function messageAccessGuard(req: Request): Promise<void> {
+  const user = req.user;
+  if (!user) throw new SdkApiError('unauthenticated', 'Missing authenticated principal.');
+  const denied = SdkApiError.notFound('Conversation');
+
+  const message = await repositories.messages.findById(pathParam(req, 'messageId'));
+  if (!message || (message.visibleTo !== null && message.visibleTo !== user.id)) throw denied;
+
+  const conversation = await repositories.conversations.findById(message.conversationId);
+  if (!conversation) throw denied;
+
+  const channel = await repositories.channels.findById(conversation.channelId);
+  if (!channel || channel.workspaceId !== user.workspaceId) throw denied;
+  if (
+    channel.visibility === 'PRIVATE' &&
+    !(await repositories.channelParticipants.isParticipant(conversation.channelId, user.id))
+  ) {
+    throw denied;
+  }
+}
+
+/**
+ * A canvas filed in a channel must be filed by one of its members. The product
+ * route does not check; under /api/sdk it would let any caller post into any
+ * channel whose id they hold.
+ */
+async function canvasChannelGuard(req: Request): Promise<void> {
+  const user = req.user;
+  if (!user) throw new SdkApiError('unauthenticated', 'Missing authenticated principal.');
+  const channelId = (req.body as { channelId?: unknown } | undefined)?.channelId;
+  if (typeof channelId !== 'string' || !channelId) return;
+  if (!(await repositories.channelParticipants.isParticipant(channelId, user.id))) {
+    throw SdkApiError.notFound('Channel');
+  }
+}
+
+/**
+ * The ticket exists in the caller's workspace and the caller can read it, by the
+ * same rule the ticket table ACL applies to their queries. Otherwise 404.
+ */
+async function ticketVisibleGuard(req: Request): Promise<void> {
+  const user = req.user;
+  if (!user?.workspaceId || !user.role) {
+    throw new SdkApiError('unauthenticated', 'Missing authenticated principal.');
+  }
+  const ticket = await db.ticket.findUnique({
+    where: { id: pathParam(req, 'ticketId') },
+    select: { id: true, workspaceId: true, channelId: true, projectId: true },
+  });
+  if (
+    !ticket ||
+    !(await canReadTicket(db, { userId: user.id, workspaceId: user.workspaceId, role: user.role }, ticket))
+  ) {
+    throw SdkApiError.notFound('Ticket');
+  }
+}
+
 /**
  * Translate a legacy `{ success, data, error }` envelope into a bare payload.
  *
@@ -547,6 +1301,32 @@ function unwrapEnvelope(raw: unknown): unknown {
     return rest;
   }
   return body;
+}
+
+/**
+ * The latest desk report: `{ success, data, canGenerate }` becomes
+ * `{ report, canGenerate }`, keeping the flag `unwrapEnvelope` would drop.
+ * `report` is null when the desk has never had one.
+ */
+function unwrapDeskReportLatest(raw: unknown): unknown {
+  const body = raw as { success?: boolean; data?: unknown; canGenerate?: unknown; error?: string } | undefined;
+  if (body?.success === false) {
+    throw new SdkApiError('internal', body.error ?? 'The request failed.');
+  }
+  return { report: body?.data ?? null, canGenerate: body?.canGenerate === true };
+}
+
+/**
+ * "Generate now" reports a refusal — no desk owner, a run already in flight, the
+ * agent not installed — as HTTP 200 with `success: false`. Each is a business
+ * rule the caller can act on, so it is a 400 carrying the controller's message.
+ */
+function unwrapDeskReportGenerate(raw: unknown): unknown {
+  const body = raw as { success?: boolean; error?: string } | undefined;
+  if (body?.success !== true) {
+    throw new SdkApiError('validation_failed', body?.error ?? 'The desk report could not be started.');
+  }
+  return { started: true };
 }
 
 // API KEY AUTH (COMMENTED OUT) - principalOf was used to build AuthenticatedUser from authData
@@ -585,6 +1365,8 @@ function unwrapEnvelope(raw: unknown): unknown {
 function controllerError(status: number, body: unknown): SdkApiError {
   const payload = body as { error?: unknown; message?: unknown } | undefined;
   const message =
+    // Plain-text controllers (the desk report's HTML route) fail with a string body.
+    (typeof body === 'string' && body) ||
     (typeof payload?.message === 'string' && payload.message) ||
     (typeof payload?.error === 'string' && payload.error) ||
     'Request failed.';

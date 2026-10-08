@@ -307,7 +307,7 @@ export class CallValidationWorker {
           );
         } catch (error) {
           logger.error(
-            `[CallValidationWorker] Failed to repair stranded participants for call ${call.id}:`,
+            `[CallValidationWorker] Failed to repair stranded participants for call ${call.externalId}:`,
             error,
           );
         }

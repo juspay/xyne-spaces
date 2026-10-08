@@ -518,7 +518,57 @@ export type SetupStep =
   // healthCheck still runs so the caller knows the dependency is ready.
   | { type: "services"; cmd: string; healthCheck?: HealthCheck; markerPath?: string }
   | { type: "devserver"; name: string; cmd: string; cwd: string; markerPath?: string }
-  | { type: "run"; label: string; cmd: string; cwd?: string; timeoutMs?: number };
+  | { type: "run"; label: string; cmd: string; cwd?: string; timeoutMs?: number; runOnReuse?: boolean };
+
+type ReuseStepSession = {
+  commands: {
+    runDetached(cmd: string): Promise<string>;
+    pollJob(jobId: string): Promise<{ done: boolean; exitCode: number | null; stdout?: string | null; stderr?: string | null }>;
+  };
+};
+
+const STEP_OUTPUT_TAIL_LINES = 20;
+
+export function stepOutputTail(stdout: string | null | undefined): string | null {
+  const output = redactSecrets(stdout ?? "").trim();
+  return output ? output.split("\n").slice(-STEP_OUTPUT_TAIL_LINES).join("\n") : null;
+}
+
+export async function runReuseSteps(
+  session: ReuseStepSession,
+  steps: readonly SetupStep[],
+  workDir: string,
+  log: string[],
+  pollIntervalMs = 2_000,
+): Promise<void> {
+  for (const step of steps) {
+    if (step.type !== "run" || step.runOnReuse !== true) continue;
+    log.push(`Running on reuse: ${step.label}...`);
+    try {
+      const jobId = await session.commands.runDetached(`cd ${step.cwd || workDir} && ${step.cmd}`);
+      const timeoutMs = step.timeoutMs || 5 * 60_000;
+      const deadline = Date.now() + timeoutMs;
+      let finished = false;
+      while (Date.now() < deadline) {
+        await new Promise((r) => setTimeout(r, pollIntervalMs));
+        const status = await session.commands.pollJob(jobId);
+        if (!status.done) continue;
+        finished = true;
+        if (status.exitCode !== null && status.exitCode !== 0) {
+          log.push(`${step.label}: WARN failed on reuse (exit ${status.exitCode}): ${redactSecrets(status.stderr ?? "")}`);
+        } else {
+          log.push(`${step.label} done.`);
+        }
+        const tail = stepOutputTail(status.stdout);
+        if (tail) log.push(tail);
+        break;
+      }
+      if (!finished) log.push(`${step.label}: WARN still running after ${timeoutMs / 1000}s on reuse; continuing.`);
+    } catch (err) {
+      log.push(`${step.label}: WARN ${redactSecrets(err instanceof Error ? err.message : String(err))}`);
+    }
+  }
+}
 
 // Auxiliary repos baked into a sandbox template alongside the primary
 // repo. Each entry's branch is independently overridable at claim time
@@ -642,17 +692,18 @@ function makeClient(config: Record<string, string>, templateOverride?: string): 
 async function pinnedTemplateForContext(context: ToolExecutionContext): Promise<string | undefined> {
   const pinnedRepo = context.meta?.["sandboxRepo"]?.trim();
   if (!pinnedRepo) return undefined;
-  const { REPO_CONFIGS } = await import("./repo-configs.js");
-  return REPO_CONFIGS[pinnedRepo]?.template;
+  const { getRepoConfig } = await import("./repo-config-source.js");
+  return (await getRepoConfig(pinnedRepo))?.template;
 }
 
 /** An unknown template name from the LLM falls back to the agent's or default template instead of failing the claim. */
 async function knownTemplate(value: unknown): Promise<string | undefined> {
   if (typeof value !== "string" || !value.trim()) return undefined;
-  const { REPO_CONFIGS } = await import("./repo-configs.js");
+  const { getRepoConfigs } = await import("./repo-config-source.js");
+  const repoConfigs = await getRepoConfigs();
   const known = new Set([
     "kata-workspace-template",
-    ...Object.values(REPO_CONFIGS).map((config) => config.template),
+    ...Object.values(repoConfigs).map((config) => config.template),
     ...rotatedTemplateNames(),
   ]);
   return known.has(value.trim()) ? value.trim() : undefined;
@@ -1836,6 +1887,7 @@ export function makeRepoSetupTool(config: RepoSetupConfig): ToolDefinition {
             // meta come from the caller's /run payload, so if a different
             // user picks up the conversation we want their identity now.
             await configureGitIdentity(cached, allWorkDirs, userEmail, userName, log);
+            await runReuseSteps(cached, config.steps, config.workDir, log);
             return JSON.stringify({
               sessionId: cached.id,
               branch: branchName,
@@ -2223,7 +2275,9 @@ export function makeRepoSetupTool(config: RepoSetupConfig): ToolDefinition {
             log.push(`Running: ${step.label}...`);
             const cwd = step.cwd || config.workDir;
             const jobId = await session.commands.runDetached(`cd ${cwd} && ${step.cmd}`);
-            await pollUntilDone(jobId, step.label, step.timeoutMs || 5 * 60_000);
+            const status = await pollUntilDone(jobId, step.label, step.timeoutMs || 5 * 60_000);
+            const tail = stepOutputTail(status.stdout);
+            if (tail) log.push(tail);
             break;
           }
         }
@@ -2458,7 +2512,9 @@ export const sandboxRepoSetup: ToolDefinition = {
     const requestedBranchName = params["branchName"] as string;
     const sessionDurationMs = params["sessionDurationMs"] as number | undefined;
     // Import here to avoid circular dependency
-    const { REPO_CONFIGS, isReadOnlyJob } = await import("./repo-configs.js");
+    const { isReadOnlyJob } = await import("./repo-configs.js");
+    const { getRepoConfigs } = await import("./repo-config-source.js");
+    const repoConfigs = await getRepoConfigs();
 
     // ── Routing ──────────────────────────────────────────────────────────
     // 1. Always-read-only contexts → shared read-only sbx-git (no snapshot
@@ -2473,7 +2529,7 @@ export const sandboxRepoSetup: ToolDefinition = {
     // read-only). It ONLY relaxes the isReadOnlyJob force; `forceReadOnlySandbox`
     // (reviewer agents) still wins unconditionally. Default-off.
     const allowWriteInReadOnlyJob = context.meta?.["allowWriteInReadOnlyJob"] === "true";
-    const profile = pinnedRepo ? REPO_CONFIGS[pinnedRepo] : undefined;
+    const profile = pinnedRepo ? repoConfigs[pinnedRepo] : undefined;
     if (profile && !profile.repoUrl && context.meta?.["forceReadOnlySandbox"] !== "true") {
       try {
         return await makeRepoSetupTool(profile).execute(
@@ -2491,7 +2547,7 @@ export const sandboxRepoSetup: ToolDefinition = {
       return resolveSbxGit(repoName, context);
     }
 
-    const config = REPO_CONFIGS[repoName];
+    const config = repoConfigs[repoName];
 
     // 2. Per-repo READ-FIRST (config.readFirst, e.g. xyne-spaces): default every
     //    interactive run to read-only sbx-git; only claim a writable golden dev
@@ -2505,7 +2561,7 @@ export const sandboxRepoSetup: ToolDefinition = {
     // 3. Provision a writable dev sandbox (golden clone). Reached when a
     //    read-first repo asked write:true, OR a non-read-first (legacy) repo.
     if (!config) {
-      const availableRepos = Object.keys(REPO_CONFIGS).join(", ");
+      const availableRepos = Object.keys(repoConfigs).join(", ");
       return `Error: Repository '${repoName}' not found. Available repos: ${availableRepos}`;
     }
     // branchName is now optional in the schema (read-first calls don't pass it).
@@ -2618,9 +2674,11 @@ export const sdlcRepositoryAccess: ToolDefinition = {
     if (!workspaceId || !actorUserId) {
       return "Error: SDLC repository access is only available in a run started from an SDLC hub or with a repository selected.";
     }
-    if (actorUserId !== context.meta?.["userId"]?.trim()) {
-      return "Error: SDLC run context does not belong to this run's user.";
-    }
+    // actorUserId (workspace-scoped Spaces id from the hub context) and
+    // meta.userId (canonical Claw id) live in different id namespaces, so no
+    // equality check is possible here. The authoritative binding — actorUserId
+    // must be one of the session-token user's own ids — is enforced by
+    // claw-auth's runtime-credentials bootstrap route, which this call hits.
     // The tool's sessionId is the sandbox. claw-auth checks the run session the token was minted for.
     const runSessionId = context.sessionId;
     const sessionToken = context.sessionToken;

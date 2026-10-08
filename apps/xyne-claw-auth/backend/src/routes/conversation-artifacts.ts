@@ -2,6 +2,7 @@ import { Router, type Request, type Response } from "express";
 import { createLogger } from "../logger.js";
 import { prisma } from "../db.js";
 import { getRequesterId } from "../middleware/agent-acl.js";
+import { getRequesterAliases } from "../middleware/pin-user-id-param.js";
 import {
   findArtifactsByRef,
   getConversationArtifact,
@@ -23,13 +24,16 @@ function serialize(artifact: NonNullable<ArtifactRow>): Record<string, unknown> 
   return { ...artifact, openRef: toOpenRef(artifact) };
 }
 
-async function canRead(artifact: NonNullable<ArtifactRow>, requesterId: string): Promise<boolean> {
-  if (artifact.createdByUserId === requesterId) return true;
-  return userOwnsConversation(artifact.conversationId, requesterId);
+// Artifact rows and conversation chat rows may be keyed by EITHER verified id
+// form of a user (canonical Claw id or the workspace's raw Spaces alias) —
+// every ACL compare must match the caller's full alias set, not one form.
+async function canRead(artifact: NonNullable<ArtifactRow>, requesterAliases: readonly string[]): Promise<boolean> {
+  if (requesterAliases.includes(artifact.createdByUserId)) return true;
+  return userOwnsConversation(artifact.conversationId, [...requesterAliases]);
 }
 
-function canWrite(artifact: NonNullable<ArtifactRow>, requesterId: string): boolean {
-  return artifact.createdByUserId === requesterId;
+function canWrite(artifact: NonNullable<ArtifactRow>, requesterAliases: readonly string[]): boolean {
+  return requesterAliases.includes(artifact.createdByUserId);
 }
 
 conversationArtifactsRouter.get("/", async (req: Request, res: Response): Promise<void> => {
@@ -44,7 +48,7 @@ conversationArtifactsRouter.get("/", async (req: Request, res: Response): Promis
       res.status(400).json({ success: false, error: "conversationId is required" });
       return;
     }
-    const rows = await listConversationArtifacts(conversationId, requesterId);
+    const rows = await listConversationArtifacts(conversationId, getRequesterAliases(req));
     res.json({ success: true, artifacts: rows.map(serialize) });
   } catch (err) {
     log.error("list failed", err);
@@ -68,7 +72,7 @@ conversationArtifactsRouter.get("/by-ref", async (req: Request, res: Response): 
     const rows = await findArtifactsByRef(service, refId);
     const visible: Record<string, unknown>[] = [];
     for (const row of rows) {
-      if (await canRead(row, requesterId)) visible.push(serialize(row));
+      if (await canRead(row, getRequesterAliases(req))) visible.push(serialize(row));
     }
     res.json({ success: true, artifacts: visible });
   } catch (err) {
@@ -85,7 +89,7 @@ conversationArtifactsRouter.get("/:id", async (req: Request<{ id: string }>, res
       return;
     }
     const artifact = await getConversationArtifact(req.params.id);
-    if (!artifact || !(await canRead(artifact, requesterId))) {
+    if (!artifact || !(await canRead(artifact, getRequesterAliases(req)))) {
       res.status(404).json({ success: false, error: "Artifact not found" });
       return;
     }
@@ -104,11 +108,12 @@ conversationArtifactsRouter.patch("/:id", async (req: Request<{ id: string }>, r
       return;
     }
     const artifact = await getConversationArtifact(req.params.id);
-    if (!artifact || !(await canRead(artifact, requesterId))) {
+    const requesterAliases = getRequesterAliases(req);
+    if (!artifact || !(await canRead(artifact, requesterAliases))) {
       res.status(404).json({ success: false, error: "Artifact not found" });
       return;
     }
-    if (!canWrite(artifact, requesterId)) {
+    if (!canWrite(artifact, requesterAliases)) {
       res.status(403).json({ success: false, error: "Only the artifact creator can update it" });
       return;
     }
@@ -201,7 +206,7 @@ async function readableArtifact(req: Request, res: Response): Promise<NonNullabl
     res.status(404).json({ success: false, error: "Artifact not found" });
     return null;
   }
-  if (!(await canRead(artifact, requesterId))) {
+  if (!(await canRead(artifact, getRequesterAliases(req)))) {
     res.status(403).json({ success: false, error: "Not allowed" });
     return null;
   }

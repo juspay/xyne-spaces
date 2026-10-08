@@ -1,5 +1,7 @@
-import { ReactElement } from 'react';
+import { ReactElement, useMemo } from 'react';
 import { TagsListContent } from '../../../TagsListContent';
+import { useAuth } from '../../../../../hooks/useAuth';
+import { loadRecentLabels, sortByRecency } from '../../../../../utils/recentLabels';
 
 interface TagsSubmenuProps {
   selectedTags: string[];
@@ -12,6 +14,7 @@ interface TagsSubmenuProps {
   hasMore?: boolean | undefined;
   /** Callback for server-side search */
   onSearch?: ((query: string) => void) | undefined;
+  recentBoardIds?: string[] | undefined;
 }
 
 export const TagsSubmenu = ({
@@ -22,7 +25,15 @@ export const TagsSubmenu = ({
   onLoadMore,
   hasMore = false,
   onSearch,
+  recentBoardIds,
 }: TagsSubmenuProps): ReactElement => {
+  const { user } = useAuth();
+  const orderedTags = useMemo(() => {
+    if (!user?.id || !recentBoardIds?.length) return availableTags;
+    const recent = loadRecentLabels(user.id, recentBoardIds);
+    return sortByRecency([...new Set([...availableTags, ...recent])], recent);
+  }, [availableTags, recentBoardIds, user?.id]);
+
   return (
     <div
       className={`w-80 border border-border flex flex-col rounded-lg shadow-lg bg-background overflow-hidden ${className}`}
@@ -30,7 +41,7 @@ export const TagsSubmenu = ({
       <TagsListContent
         selectedTags={selectedTags}
         onChange={onChange}
-        availableTags={availableTags}
+        availableTags={orderedTags}
         onLoadMore={onLoadMore}
         hasMore={hasMore}
         showSelectAll={true}

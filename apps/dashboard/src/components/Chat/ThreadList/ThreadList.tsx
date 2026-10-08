@@ -66,9 +66,12 @@ const SELECTION_VIEWPORT_PADDING = 8;
 /**
  * Where a selection that had to scroll comes to rest, measured from the top of
  * the panel. No sticky date pill here (thread separators scroll inline), so
- * this is just the container's own `pt-4` worth of breathing room.
+ * this is just the container's own top padding worth of breathing room. That
+ * padding is `pt-9` (36px) rather than `pt-4` so the shared hover toolbar,
+ * which floats `-top-7` above the hovered row, fits above the thread parent
+ * instead of being clipped by the panel or covering the message text.
  */
-const SELECTION_SCROLL_TOP_OFFSET = 16;
+const SELECTION_SCROLL_TOP_OFFSET = 36;
 
 const ThreadList = ({
   channelId,
@@ -615,7 +618,7 @@ const ThreadList = ({
     return (
       <div
         ref={hoverToolbarContainerRef}
-        className='relative min-h-0 max-h-full bg-background isolate'
+        className='relative min-h-0 max-h-full bg-background isolate overflow-hidden'
       >
         {/* ONE shared hover-actions toolbar for the thread (zero-render hover). */}
         <MessageHoverToolbar
@@ -627,7 +630,7 @@ const ThreadList = ({
           data-component='ThreadList'
           ref={scrollContainerRef}
           onClickCapture={handleMessageListClick}
-          className='h-full overflow-auto no-scrollbar pt-4'
+          className='h-full overflow-auto no-scrollbar pt-9'
           style={{ paddingBottom: ACTIVITY_BAR_PADDING }}
         >
           <div ref={scrollContentRef}>
@@ -752,7 +755,7 @@ const ThreadList = ({
   return (
     <div
       ref={hoverToolbarContainerRef}
-      className='relative min-h-0 max-h-full bg-background isolate'
+      className='relative min-h-0 max-h-full bg-background isolate overflow-hidden'
     >
       {/* ONE shared hover-actions toolbar for the thread (zero-render hover). */}
       <MessageHoverToolbar
@@ -764,7 +767,7 @@ const ThreadList = ({
         data-component='ThreadList'
         ref={scrollContainerRef}
         onClickCapture={handleMessageListClick}
-        className='h-full overflow-auto no-scrollbar pt-4'
+        className='h-full overflow-auto no-scrollbar pt-9'
         style={{ paddingBottom: ACTIVITY_BAR_PADDING }}
       >
         <div ref={scrollContentRef}>

@@ -5,7 +5,7 @@ import { createLogger } from "../logger.js";
 import { chatMessageRepository } from "../repositories/chatMessageRepository.js";
 import { errMsg } from "./errors.js";
 import { publishLiveEvent } from "./live-conversation-bus.js";
-import { spacesAppFetch } from "./spaces-api.js";
+import { spacesAppFetch } from "../surfaces/spaces/client.js";
 
 const log = createLogger("flow-card");
 
@@ -167,7 +167,9 @@ export async function replaceFlowCardOnRow(input: {
 
 /**
  * The one delivery seam for FlowUI cards. The Spaces branch is the pre-existing
- * `/chat/postMessage` call verbatim; the Xyne AI branch goes through uiFlows.
+ * `/chat/postMessage` call, through the same client webhook.ts posts with, so a
+ * card still retries once on a Spaces 5xx; the Xyne AI branch goes through
+ * uiFlows.
  */
 export async function postFlowCard(
   flow: FlowDefinition,

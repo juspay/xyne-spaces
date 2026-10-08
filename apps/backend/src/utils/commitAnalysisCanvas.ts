@@ -11,6 +11,8 @@ import { CanvasSideEffectHandler } from '@/zero/side-effects/tables/canvas-handl
 import { vespaQueue } from '@/queues/vespaQueue';
 import { fileSchema, SubApp } from '@/vespa/src/types';
 import { db } from '@/database/client';
+import { newConnectId } from '@/database/connectGroup';
+import { createCanvasWithConnectGroupTx } from '@/bypassAcl/transactions/connectGroupEntities';
 import { withWorkspaceScope } from '@/database/tenant/context';
 import { CanvasRole, CanvasVisibility } from '@xyne/shared';
 import { readFromYSweetStrict, syncToYSweet } from '@/utils/ysweetUtils';
@@ -936,13 +938,16 @@ async function persistNewAnalysisCanvas(args: {
     throw new Error(`User ${createdByUserId} not found or has no workspace assigned`);
   }
 
+  const connectId = newConnectId();
   const synced = await syncToYSweet(canvasId, content, createdByUserId);
   if (!synced) {
     throw new Error(`Failed to save commit analysis canvas ${canvasId} to Y-Sweet`);
   }
 
-  await prisma.canvas.create({
-    data: {
+  // Atomic canvas + connect_group (bypassAcl op): a canvas with a connectId but no group row is
+  // invisible to connectReach and unrepairable via the app, so both must commit together.
+  await createCanvasWithConnectGroupTx(
+    {
       id: canvasId,
       title: finalTitle,
       content: [],
@@ -955,6 +960,7 @@ async function persistNewAnalysisCanvas(args: {
       lastEditedAt: now,
       createdAt: now,
       updatedAt: now,
+      connectId,
       channelId: metadata.channelId || null,
       metadata: {
         source: 'commit_analysis',
@@ -971,7 +977,9 @@ async function persistNewAnalysisCanvas(args: {
         ...(metadata.conversationId && { conversationId: metadata.conversationId }),
       },
     },
-  });
+    creator.workspaceId,
+    connectId,
+  );
 
   await prisma.canvasParticipant.create({
     data: {
@@ -982,6 +990,7 @@ async function persistNewAnalysisCanvas(args: {
       role: CanvasRole.VIEWER,
       joinedAt: now,
       updatedAt: now,
+      canvasConnectId: connectId,
     },
   });
 

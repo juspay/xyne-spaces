@@ -3,6 +3,7 @@ import type { MessagingChannelKey } from "../surfaces/messaging/plugin.js";
 import { prisma, type AppTransactionClient } from "../db.js";
 import { formatDayIST } from "../lib/ist-time.js";
 import { createLogger } from "../logger.js";
+import { userIdFilter } from "./userIdFilter.js";
 
 const log = createLogger("agent-run");
 
@@ -256,11 +257,15 @@ export interface FinalizeRunInput {
  * requester's own id is the only scope there is.
  */
 export interface RunListFilter {
-  requesterId: string;
+  /** The caller's verified id forms (canonical + raw Spaces alias) — rows may
+   *  be keyed by either. */
+  requesterIds: string[];
   scope: "own" | "all";
   orgId?: string;
   agentSlug?: string;
-  userId?: string;
+  /** Admin's explicit target-user filter (scope=all only) — again every id
+   *  form the target's rows may be keyed by. */
+  userIds?: string[];
   status?: string;
   from: Date;
   to: Date;
@@ -305,7 +310,7 @@ function buildRunListWhere(f: RunListFilter): Prisma.AgentRunWhereInput {
     // would diverge from listByUser / listByUserLight / searchByUser for no
     // gain while pushing the query off the (userId, startedAt) index.
     return {
-      userId: f.requesterId,
+      ...userIdFilter(f.requesterIds),
       ...window,
       ...(f.status ? { status: f.status } : {}),
       ...(f.agentSlug ? { agentSlug: f.agentSlug } : {}),
@@ -326,8 +331,8 @@ function buildRunListWhere(f: RunListFilter): Prisma.AgentRunWhereInput {
       // The user filter is an ADDITIONAL term, never a replacement for the
       // token guard below: "show me Asha's runs" must not hand over the ones
       // Asha ran under her own OAuth token (mail/calendar/drive content).
-      ...(f.userId ? [{ userId: f.userId }] : []),
-      { OR: [{ userId: f.requesterId }, { usedUserToken: false }] },
+      ...(f.userIds && f.userIds.length > 0 ? [userIdFilter(f.userIds)] : []),
+      { OR: [userIdFilter(f.requesterIds), { usedUserToken: false }] },
     ],
   };
 }
@@ -597,9 +602,9 @@ export const agentRunRepository = {
     });
   },
 
-  rate: (sessionId: string, userId: string, rating: "up" | "down", comment?: string | null) =>
+  rate: (sessionId: string, userIds: string | string[], rating: "up" | "down", comment?: string | null) =>
     prisma.agentRun.updateMany({
-      where: { sessionId, userId },
+      where: { sessionId, ...userIdFilter(userIds) },
       data: { rating, ratingComment: comment ?? null, ratedAt: new Date() },
     }),
 
@@ -610,12 +615,12 @@ export const agentRunRepository = {
   // caller can only rate their own run.
   rateByChatMessageId: (
     chatMessageId: string,
-    userId: string,
+    userIds: string | string[],
     rating: "up" | "down",
     comment?: string | null,
   ) =>
     prisma.agentRun.updateMany({
-      where: { chatMessageId, userId },
+      where: { chatMessageId, ...userIdFilter(userIds) },
       data: { rating, ratingComment: comment ?? null, ratedAt: new Date() },
     }),
 
@@ -626,10 +631,12 @@ export const agentRunRepository = {
 
   flushAllToolInvocations: (): Promise<void> => flushAllToolInvocations(),
 
-  listByUser: (userId: string, opts?: { status?: string; limit?: number; conversationId?: string; agentSlug?: string }) =>
+  /** Accepts one id or the caller's alias pair (canonical + raw Spaces id);
+   *  runs may be keyed by either (see getRequesterAliases). */
+  listByUser: (userIds: string | string[], opts?: { status?: string; limit?: number; conversationId?: string; agentSlug?: string }) =>
     prisma.agentRun.findMany({
       where: {
-        userId,
+        ...userIdFilter(userIds),
         ...(opts?.status ? { status: opts.status } : {}),
         ...(opts?.conversationId ? { conversationId: opts.conversationId } : {}),
         ...(opts?.agentSlug ? { agentSlug: opts.agentSlug } : {}),
@@ -694,7 +701,7 @@ export const agentRunRepository = {
   listAllForAgent: async (
     agentSlug: string,
     orgId: string,
-    requesterId: string,
+    requesterIds: string | string[],
     opts?: { status?: string; limit?: number; conversationId?: string },
   ) => {
     const rows = await prisma.agentRun.findMany({
@@ -704,7 +711,7 @@ export const agentRunRepository = {
         ...(opts?.status ? { status: opts.status } : {}),
         ...(opts?.conversationId ? { conversationId: opts.conversationId } : {}),
         OR: [
-          { userId: requesterId }, // your own runs, always
+          userIdFilter(requesterIds), // your own runs, always (either id form)
           { usedUserToken: false }, // other users' runs only if no user-token usage
         ],
       },
@@ -818,11 +825,11 @@ export const agentRunRepository = {
    * user-token tool calls the All Runs ACL hides from the list. Your own runs
    * always; everyone else's only when no user token was used.
    */
-  listByConversation: (conversationId: string, requesterId: string, opts?: { limit?: number }) =>
+  listByConversation: (conversationId: string, requesterIds: string | string[], opts?: { limit?: number }) =>
     prisma.agentRun.findMany({
       where: {
         conversationId,
-        OR: [{ userId: requesterId }, { usedUserToken: false }],
+        OR: [userIdFilter(requesterIds), { usedUserToken: false }],
       },
       orderBy: { startedAt: "desc" },
       take: opts?.limit ?? 50,
@@ -1032,7 +1039,7 @@ export const agentRunRepository = {
    * still allow `limit` as a defensive ceiling for very long histories.
    */
   listByUserLight: (
-    userId: string,
+    userIds: string | string[],
     // agentSlug/conversationId: the /runs/light route always accepted and
     // forwarded agentSlug, but this signature silently dropped it (spread into
     // an opts shape that never read it) — fixed 2026-07-17 alongside adding
@@ -1041,7 +1048,9 @@ export const agentRunRepository = {
   ) =>
     prisma.agentRun.findMany({
       where: {
-        userId,
+        // Accept the caller's alias pair (canonical + raw Spaces id) — runs
+        // may be keyed by either (see getRequesterAliases).
+        ...userIdFilter(userIds),
         ...(opts?.status ? { status: opts.status } : {}),
         ...(opts?.since ? { startedAt: { gte: opts.since } } : {}),
         ...(opts?.agentSlug ? { agentSlug: opts.agentSlug } : {}),
@@ -1076,13 +1085,13 @@ export const agentRunRepository = {
    * a match snippet.
    */
   searchByUser: (
-    userId: string,
+    userIds: string | string[],
     query: string,
     opts?: { agentSlug?: string; limit?: number },
   ) =>
     prisma.agentRun.findMany({
       where: {
-        userId,
+        ...userIdFilter(userIds),
         ...(opts?.agentSlug ? { agentSlug: opts.agentSlug } : {}),
         task: { contains: query, mode: "insensitive" },
       },
@@ -1187,7 +1196,7 @@ export const agentRunRepository = {
     const dropAgentSlug = f.admin === true || f.scope === "own";
     // Destructured rather than spread-with-undefined: exactOptionalPropertyTypes
     // rejects `{ ...f, agentSlug: undefined }` against `agentSlug?: string`.
-    const { agentSlug: droppedAgentSlug, userId: _droppedUserId, ...rest } = f;
+    const { agentSlug: droppedAgentSlug, userIds: _droppedUserIds, ...rest } = f;
     const unfaceted: RunListFilter = dropAgentSlug
       ? rest
       : { ...rest, ...(droppedAgentSlug ? { agentSlug: droppedAgentSlug } : {}) };

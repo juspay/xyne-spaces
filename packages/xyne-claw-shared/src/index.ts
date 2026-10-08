@@ -9,10 +9,11 @@ export { respondToUser, COPILOT_SYSTEM_INSTRUCTION } from "./tools/respond-to-us
 export { SUBAGENT_DEFINITIONS, getSubagentDefinition, findSubagentDefinitionForServer, parseToolsConfig, resolveAgentToolsConfig, isEmptyToolsSelection, type SubagentDefinition, type AgentToolsConfig, type AgentDelegationTier } from "./tools/subagents/index.js";
 export { PLATFORM_ONLY_CONFIG_KEYS, stripPlatformConfigKeys } from "./tools/platform-config-keys.js";
 export { parseAgentPrivacy, isAgentInvocableBy, normalizeAgentPrivacy, DEFAULT_AGENT_PRIVACY, type AgentPrivacy, type AgentPrivacyMode } from "./agent-privacy.js";
+export { OPTIMIZATIONS, OPTIMIZATION_KEYS, OPTIMIZATION_GROUPS, OPTIMIZATION_TIER_DEFAULTS, optimizationCatalog, type OptimizationSpec, type OptimizationKey, type OptimizationGroup } from "./optimizations.js";
 export { PRESENTATION_TOOL_SOURCES, PRESENTATION_CATALOG_SOURCE, isPresentationToolSource } from "./tools/presentation.js";
 export { classifyToolRisk, riskAtOrBelow, TOOL_RISK_LADDER, type ToolRiskLevel } from "./tools/tool-risk.js";
 export { openPaletteMode, openPaletteModeFromTools, openPaletteAdmits, type OpenPaletteMode } from "./tools/open-palette.js";
-export { getSandboxSession, probeSession, cleanupSdlcSandboxCredentialsForContext, buildSandboxStoreKey, sandboxConversationIdFromMeta, sandboxContentType, REPO_CONFIGS, SBX_GIT, type RepoSetupConfig, type SetupStep } from "./tools/sandbox/index.js";
+export { getSandboxSession, probeSession, cleanupSdlcSandboxCredentialsForContext, buildSandboxStoreKey, sandboxConversationIdFromMeta, sandboxContentType, DEFAULT_REPO_CONFIGS, SBX_GIT, type RepoSetupConfig, type SetupStep, buildEffectiveRepoConfigs, getCachedRepoConfigs, getRepoConfig, getRepoConfigs, setRepoConfigLoader, type RepoConfigLoader, type RepoConfigMap, type RepoConfigOverride } from "./tools/sandbox/index.js";
 export type { Citation, CitationIconKey } from "./types/citation.js";
 export { citationIconUrl, citationIconKey, iconUrlForKey, toolIconKey, CITATION_ICONS } from "./types/citation.js";
 export type { ClassifierExchange } from "./types/classifier-exchange.js";

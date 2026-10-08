@@ -139,7 +139,7 @@ import {
   parseToolsConfig,
   resolveAgentToolsConfig,
   COPILOT_SYSTEM_INSTRUCTION,
-  REPO_CONFIGS,
+  getRepoConfig,
   getSandboxSession,
   probeSession,
   buildSandboxStoreKey,
@@ -165,6 +165,7 @@ import { presentationCatalogDefaultOn, isFreePresentationTool, buildPresentation
 import { buildProposeAgentTool, type ProposeAgentRef } from "../propose-agent.js";
 import { buildDescribeAgentTool, type DescribeAgentRef } from "../describe-agent.js";
 import { buildSuggestConnectorsTool, SUGGEST_CONNECTORS_TOOL_NAME, type SuggestConnectorsRef } from "../suggest-connectors.js";
+import { buildSuggestProvidersTool, SUGGEST_PROVIDERS_TOOL_NAME, type SuggestProvidersRef } from "../suggest-providers.js";
 import { buildEmitBriefTool, EMIT_BRIEF_TOOL_NAME, type EmitBriefRef } from "../daily-brief.js";
 import {
   buildSuggestGoalTool,
@@ -1597,6 +1598,7 @@ export async function processTask(
   const proposeAgentRef: ProposeAgentRef = {};
   const describeAgentRef: DescribeAgentRef = {};
   const suggestConnectorsRef: SuggestConnectorsRef = {};
+  const suggestProvidersRef: SuggestProvidersRef = {};
   const blockedConnectors = new Set<string>();
   const emitBriefRef: EmitBriefRef = {};
   let callbackProvider = provider ?? "spaces";
@@ -2991,6 +2993,9 @@ export async function processTask(
     if (interactiveCardRun && hasSpacesCardSurface) {
       allTools.push(buildSuggestConnectorsTool(suggestConnectorsRef, userId, { agentSlug }));
     }
+    if (describeAgentAvailable) {
+      allTools.push(buildSuggestProvidersTool(suggestProvidersRef, userId));
+    }
 
 
     // Inject copilot respond-to-user tool if provider is copilot.
@@ -3229,7 +3234,7 @@ export async function processTask(
         "sandbox-run", "sandbox-run-detached", "sandbox-write-file",
         "sandbox-create", "sandbox-destroy", "write",
       ]);
-      const pinnedProfile = meta["sandboxRepo"] ? REPO_CONFIGS[meta["sandboxRepo"]] : undefined;
+      const pinnedProfile = meta["sandboxRepo"] ? await getRepoConfig(meta["sandboxRepo"]) : undefined;
       if (!forceReadOnlySandbox && pinnedProfile && !pinnedProfile.repoUrl) {
         RO_DISABLED.delete("sandbox-create");
         RO_DISABLED.delete("sandbox-destroy");
@@ -3349,6 +3354,7 @@ export async function processTask(
     );
     const catalogActive = fastModeEnabled || survivingCatalogItems.length > 0 || isOrchestratorRun;
     const suggestConnectorsRegistered = allTools.some((tool) => tool.name === SUGGEST_CONNECTORS_TOOL_NAME);
+    const suggestProvidersRegistered = allTools.some((tool) => tool.name === SUGGEST_PROVIDERS_TOOL_NAME);
     if (catalogActive) {
       fastCatalogItems = survivingCatalogItems;
       fastCatalogNames = fastCatalogItems.map((item) => item.entry.name);
@@ -3514,6 +3520,16 @@ export async function processTask(
       const connectorPrimer = renderUnresolvedConfigured(unresolvedConfigured, suggestConnectorsRegistered);
       fullContext = fullContext ? `${fullContext}\n\n${connectorPrimer}` : connectorPrimer;
       log(`[connectors] configured-but-unresolved: ${unresolvedConfigured.map((u) => `${u.serverType}:${u.reason}`).join(", ")}`);
+    }
+
+    if (suggestProvidersRegistered) {
+      const runModelPrimer = [
+        "## Your model",
+        `You are running on provider \`${provider ?? "spaces"}\`, model \`${effectiveModel}\`.`,
+        "If the user asks what model or provider YOU run on, answer from this line — it is your own configuration.",
+        "That is NOT a question about their connected accounts, so do not call suggest-providers for it and do not say the model is unavailable to you.",
+      ].join("\n");
+      fullContext = fullContext ? `${fullContext}\n\n${runModelPrimer}` : runModelPrimer;
     }
 
     // /goal-awareness primer. Injected only when suggest-goal is registered
@@ -3690,7 +3706,7 @@ export async function processTask(
       const pinnedRepoName =
         (agentConfig?.["sandboxRepo"] as string | undefined) ?? undefined;
       const pinnedRepo = pinnedRepoName
-        ? REPO_CONFIGS[pinnedRepoName]
+        ? await getRepoConfig(pinnedRepoName)
         : undefined;
       if (pinnedRepoName && pinnedRepo) {
         const installPkgs = pinnedRepo.steps
@@ -4783,6 +4799,9 @@ export async function processTask(
       ...(suggestConnectorsRef.value
         ? { pendingConnectorSuggestions: suggestConnectorsRef.value }
         : {}),
+      ...(suggestProvidersRef.value
+        ? { pendingProviderSuggestions: suggestProvidersRef.value }
+        : {}),
       ...(blockedConnectors.size > 0 ? { blockedConnectors: [...blockedConnectors] } : {}),
       ...(proposeAgentRef.value || describeAgentRef.value
         ? { pendingAgentCard: proposeAgentRef.value ?? describeAgentRef.value }
@@ -4980,6 +4999,9 @@ export async function processTask(
         ...(describeAgentRef.value ? { pendingAgentCard: describeAgentRef.value } : {}),
         ...(suggestConnectorsRef.value
           ? { pendingConnectorSuggestions: suggestConnectorsRef.value }
+          : {}),
+        ...(suggestProvidersRef.value
+          ? { pendingProviderSuggestions: suggestProvidersRef.value }
           : {}),
         ...(blockedConnectors.size > 0 ? { blockedConnectors: [...blockedConnectors] } : {}),
         ...(pendingGoalSuggestion ? { pendingGoalSuggestion } : {}),

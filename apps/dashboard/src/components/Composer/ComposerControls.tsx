@@ -46,6 +46,7 @@ import {
 import Avatar from '../ui/Avatar/Avatar';
 import { Popover } from '../ui/Popover';
 import { AgentGlyph } from '../AIScreen/AIAgentSelector';
+import { rankAgentsByQuery } from '../AIScreen/agentSearch';
 import { DEFAULT_AGENT_SLUG } from '../../hooks/useSelectedAgent';
 import { cn } from '../../utils/classNames';
 import type {
@@ -1196,6 +1197,30 @@ function useAgentOptions(agent: ComposerAgentControl): {
 }
 
 /**
+ * The options matching `query`: Auto and Ask AI by their label, then agents
+ * ranked by name match the way the agent search ranks them (rankAgentsByQuery
+ * — an agent named "Xyne …" before one that only mentions Xyne).
+ */
+function searchAgentOptions(
+  options: AgentOption[],
+  agents: ComposerAgentControl['agents'],
+  query: string,
+): AgentOption[] {
+  const q = query.trim().toLowerCase();
+  if (!q) return options;
+  const byValue = new Map(options.map(option => [option.value, option]));
+  return [
+    ...options.filter(
+      o => (o.value === 'auto' || o.value === 'ask-ai') && o.label.toLowerCase().includes(q),
+    ),
+    ...rankAgentsByQuery(
+      agents.filter(a => a.slug !== 'ask-ai'),
+      q,
+    ).flatMap(a => byValue.get(a.slug) ?? []),
+  ];
+}
+
+/**
  * "Agents ›" in the "+" menu: who answers. Opens beside the menu like Model ›;
  * the row names the current choice.
  */
@@ -1204,7 +1229,7 @@ export function AgentsSubmenu({ agent }: { agent: ComposerAgentControl }): React
   const submenu = usePlusSubmenu('agents');
   const [query, setQuery] = useState('');
   const q = query.trim().toLowerCase();
-  const filtered = options.filter(o => !q || o.label.toLowerCase().includes(q));
+  const filtered = searchAgentOptions(options, agent.agents, q);
 
   return (
     <Menu.Sub
@@ -1304,6 +1329,7 @@ export function AgentPicker({
   side?: 'top' | 'bottom';
 }): ReactElement | null {
   const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState('');
   const { options, current, fallback } = useAgentOptions(agent);
   if (current.value === fallback.value) return null;
 
@@ -1361,7 +1387,10 @@ export function AgentPicker({
       </button>
       <Popover
         open={open}
-        onOpenChange={setOpen}
+        onOpenChange={next => {
+          if (!next) setQuery('');
+          setOpen(next);
+        }}
         side={side}
         align='start'
         sideOffset={8}
@@ -1386,10 +1415,12 @@ export function AgentPicker({
           </button>
         }
       >
-        <Command loop className='flex max-h-[min(380px,60vh)] flex-col'>
+        <Command loop shouldFilter={false} className='flex max-h-[min(380px,60vh)] flex-col'>
           <div className='flex items-center px-3.5'>
             <Command.Input
               autoFocus
+              value={query}
+              onValueChange={setQuery}
               placeholder='Search agents'
               className='h-11 flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground'
               data-track-category='XyneAI'
@@ -1400,7 +1431,7 @@ export function AgentPicker({
             <Command.Empty className='px-3 py-4 text-center text-sm text-muted-foreground'>
               No agents match
             </Command.Empty>
-            {options.map(row)}
+            {searchAgentOptions(options, agent.agents, query).map(row)}
           </Command.List>
         </Command>
       </Popover>

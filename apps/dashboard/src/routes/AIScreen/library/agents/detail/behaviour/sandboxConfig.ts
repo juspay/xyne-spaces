@@ -23,6 +23,7 @@ export function useSandboxRepos(): UseQueryResult<SandboxRepoOption[], Error> {
 export interface SandboxDraft {
   sandboxRepo: string;
   forceReadOnlySandbox: boolean;
+  allowWriteInReadOnlyJob: boolean;
   researchProductId: string;
   researchRepositoryId: string;
 }
@@ -30,6 +31,7 @@ export interface SandboxDraft {
 interface SandboxShape {
   sandboxRepo?: unknown;
   forceReadOnlySandbox?: unknown;
+  allowWriteInReadOnlyJob?: unknown;
   product_id?: unknown;
   repository_id?: unknown;
 }
@@ -41,6 +43,7 @@ export function readSandboxDraft(config: Record<string, unknown> | undefined): S
   return {
     sandboxRepo: str(c.sandboxRepo),
     forceReadOnlySandbox: c.forceReadOnlySandbox === true,
+    allowWriteInReadOnlyJob: c.allowWriteInReadOnlyJob === true,
     researchProductId: str(c.product_id),
     researchRepositoryId: str(c.repository_id),
   };
@@ -57,6 +60,9 @@ export function applySandbox(
 
   if (draft.forceReadOnlySandbox) next['forceReadOnlySandbox'] = true;
   else delete next['forceReadOnlySandbox'];
+
+  if (draft.allowWriteInReadOnlyJob) next['allowWriteInReadOnlyJob'] = true;
+  else delete next['allowWriteInReadOnlyJob'];
 
   if (draft.researchProductId) next['product_id'] = draft.researchProductId;
   else delete next['product_id'];
