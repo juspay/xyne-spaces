@@ -228,23 +228,39 @@ export const chatMessageRepository = {
   },
 
   /** The earliest user message per (conversation, agent) for one user, oldest
-   *  first, clipped to a title's worth of text. DISTINCT ON keeps it to one row
-   *  per pair rather than every user message in every conversation. */
+   *  first, clipped to a title's worth of text. One aggregate finds each
+   *  pair's first timestamp, then only those rows are read — not every user
+   *  message in every conversation. */
   firstUserMessagesPerAgent: async (
     conversationIds: string[],
     userIds: string | string[],
   ): Promise<Array<{ conversationId: string; agentSlug: string; content: string }>> => {
     if (conversationIds.length === 0) return [];
-    const ids = Array.isArray(userIds) ? userIds : [userIds];
-    const rows = await prisma.$queryRaw<Array<{ conversationId: string; agentSlug: string; content: string; createdAt: Date }>>`
-      SELECT DISTINCT ON ("conversationId", "agentSlug")
-        "conversationId", "agentSlug", left("content", 200) AS "content", "createdAt"
-      FROM "chat_messages"
-      WHERE "userId" = ANY(${ids}) AND "role" = 'user' AND "conversationId" = ANY(${conversationIds})
-      ORDER BY "conversationId", "agentSlug", "createdAt" ASC`;
-    return rows
-      .sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime())
-      .map(({ conversationId, agentSlug, content }) => ({ conversationId, agentSlug, content }));
+    const where = { ...userIdFilter(userIds), role: "user", conversationId: { in: conversationIds } };
+    const firsts = await prisma.chatMessage.groupBy({
+      by: ["conversationId", "agentSlug"],
+      where,
+      _min: { createdAt: true },
+    });
+    const pairs = firsts.flatMap((row) =>
+      row._min.createdAt
+        ? [{ conversationId: row.conversationId, agentSlug: row.agentSlug, createdAt: row._min.createdAt }]
+        : [],
+    );
+    if (pairs.length === 0) return [];
+    const rows = await prisma.chatMessage.findMany({
+      where: { ...where, OR: pairs },
+      select: { conversationId: true, agentSlug: true, content: true, createdAt: true },
+      orderBy: { createdAt: "asc" },
+    });
+    // Two messages can share a pair's first timestamp; keep one per pair.
+    const seen = new Set<string>();
+    return rows.flatMap(({ conversationId, agentSlug, content }) => {
+      const key = `${conversationId}:${agentSlug}`;
+      if (seen.has(key)) return [];
+      seen.add(key);
+      return [{ conversationId, agentSlug, content: content.slice(0, 200) }];
+    });
   },
 
   /** The ordered parts a still-running placeholder accumulated (partial writes). */
