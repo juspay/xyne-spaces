@@ -172,7 +172,7 @@ locals {
     for w in var.workers : {
       name   = w.name
       env    = w.env
-      values = w.values == "" ? {} : yamldecode(w.values)
+      values = yamldecode(w.values == "" ? "{}" : w.values)
     }
   ]
 
