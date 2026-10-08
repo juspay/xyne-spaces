@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { CONFIG } from "../config.js";
+import { prisma } from "../db.js";
 import { createLogger } from "../logger.js";
 import { redisService } from "../redis.js";
 import { agentRunRepository, chatMessageRepository } from "../repositories/index.js";
@@ -89,6 +90,21 @@ export async function dispatchXyneAiContinuationRun(input: {
       input.agent?.config ?? null,
     ).catch(() => false);
 
+    const { withAiScreenPresentationTools, withAiScreenPresentationInstructions } = await import(
+      "./ai-screen-presentation-tools.js"
+    );
+    const storedConfig = (input.agent?.config ?? null) as Record<string, unknown> | null;
+    const delegationTier = input.agent
+      ? (
+          await prisma.agent
+            .findUnique({ where: { id: input.agent.id }, select: { delegationTier: true } })
+            .catch(() => null)
+        )?.delegationTier ?? null
+      : null;
+    const enrichedConfig = storedConfig
+      ? withAiScreenPresentationTools(storedConfig, storedConfig["tools"], delegationTier)
+      : null;
+
     const runRes = await fetch(`${CONFIG.internalUrl}/claw/api/v1/internal/run`, {
       method: "POST",
       headers: {
@@ -108,7 +124,8 @@ export async function dispatchXyneAiContinuationRun(input: {
         idempotencyKey: input.idempotencyKey.replace(/[^A-Za-z0-9_-]/g, "_").slice(0, 128),
         detached: true,
         __persistedByCaller: true,
-        ...(input.agent?.config ? { agentConfig: input.agent.config } : {}),
+        additionalInstructions: withAiScreenPresentationInstructions(undefined),
+        ...(enrichedConfig ? { agentConfig: enrichedConfig } : {}),
         ...(providers?.parent ? { provider: providers.parent } : {}),
         ...(providers && Object.keys(providers.providerConfigs).length > 0
           ? { providerConfigs: providers.providerConfigs }

@@ -2952,9 +2952,11 @@ export async function processTask(
     // without a human to approve its card, so a scheduled/automation run (no one
     // watching) must never get the tool. Never alongside the other terminal tools
     // (plan / daily brief own turn termination in their modes).
+    const hasSpacesCardSurface = !!channelId || (progressUrl && typeof progressUrl !== "string");
+    const isChatSurfaceRun = !channelId && !eventType;
     const agentAuthoringEnabled =
       agentConfig?.["agentAuthoring"] === true &&
-      (!!channelId || (progressUrl && typeof progressUrl !== "string")) &&
+      (hasSpacesCardSurface || isChatSurfaceRun) &&
       !isScheduledOrAutomationRun(eventType, conversationId) &&
       !isTwinMentionFlow &&
       !isPlanMode &&
@@ -2977,8 +2979,6 @@ export async function processTask(
       !isScheduledOrAutomationRun(eventType, conversationId) &&
       !isTwinMentionFlow &&
       !isDailyBrief;
-    const hasSpacesCardSurface = !!channelId || (progressUrl && typeof progressUrl !== "string");
-    const isChatSurfaceRun = !channelId && !eventType;
     const describeAgentAvailable = interactiveCardRun && (hasSpacesCardSurface || isChatSurfaceRun);
     if (describeAgentAvailable) {
       allTools.push(buildDescribeAgentTool(describeAgentRef));

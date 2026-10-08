@@ -1,4 +1,5 @@
 import { s2sKeyMatches } from "../middleware/require-auth.js";
+import type { DraftAgentSpec } from "../lib/agent-card.js";
 import { isAgentOwnedRun } from "../lib/agent-owned-runs.js";
 import { applyAiScreenCommand } from "../lib/ai-screen-commands.js";
 import { parseSlashCommand } from "../lib/parseSlashCommand.js";
@@ -2673,7 +2674,52 @@ internalRouter.post("/:slug/chat/:convId/callback", async (req: Request<{ slug: 
     pendingConnectorSuggestions?: { serverTypes: string[]; listAll?: boolean; title?: string };
     pendingProviderSuggestions?: { providers: string[]; listAll?: boolean; title?: string };
     blockedConnectors?: unknown;
+    pendingAgentCard?: { variant?: string; agent?: DraftAgentSpec };
   };
+
+  // A draft proposed in a continuation (the run after a question card) finalizes
+  // here, not on run-stream, so #2794's branch never saw it and the turn came
+  // back as paste-this-yourself markdown. Same producer as the other two
+  // surfaces — a third copy is how they drifted apart before.
+  // claw retries callbacks, and prepareAgentDraftCard WRITES an AgentRequest —
+  // a second pass would mint a second row and, because the screenId carries the
+  // requestId, append a second card next to the first. persistedFlag is already
+  // the "this callback wrote the row, not a retry" signal, so reuse it rather
+  // than add a second guard key.
+  const draftCard = callbackBody.pendingAgentCard;
+  if (persistedFlag && finalStatus === "completed" && draftCard?.variant === "draft" && draftCard.agent) {
+    try {
+      const { resolveXyneAiCardTarget, postFlowCard } = await import("../lib/flow-card-delivery.js");
+      const target = await resolveXyneAiCardTarget({
+        assistantMessageId: chatMessageId,
+        conversationId: req.params.convId,
+        agentSlug: req.params.slug,
+      });
+      if (target) {
+        const { prepareAgentDraftCard } = await import("../lib/agent-card-render.js");
+        const prepared = await prepareAgentDraftCard(draftCard.agent, {
+          agentSlug: target.agentSlug,
+          orgId: target.orgId,
+          userId: target.userId,
+          conversationId: target.conversationId,
+          channelId: "",
+          spacesAppId: target.spacesAppId,
+        });
+        if (prepared.ok) {
+          const flow = await postFlowCard(prepared.flow, target);
+          if (callbackId) {
+            const localStream = pendingStreams.get(callbackId);
+            if (localStream) localStream.sendEvent("ui-flow", { flow });
+            else publishChatEvent({ kind: "progress", callbackId, events: [{ event: "ui-flow", data: { flow } }] });
+          }
+        } else {
+          log.info(`[agent-card] continuation draft not delivered (${prepared.reason}) conv=${target.conversationId}`);
+        }
+      }
+    } catch (err) {
+      log.warn(`[agent-card] continuation draft card failed: ${errMsg(err)}`);
+    }
+  }
   if (finalStatus === "completed" && callbackBody.pendingConnectorSuggestions) {
     try {
       const { resolveXyneAiCardTarget } = await import("../lib/flow-card-delivery.js");
