@@ -1273,7 +1273,7 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
         if (safeAttachmentId) {
           sources.push({
             label: "apps-route",
-            url: `${CONFIG.spacesInternalUrl}/api/apps/files/download/${safeAttachmentId}`,
+            url: `${CONFIG.spacesInternalUrl}/api/apps/attachments/${safeAttachmentId}/download`,
             headers: { Authorization: `Bearer ${agent.appToken}` },
           });
           sources.push({
