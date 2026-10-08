@@ -1,3 +1,10 @@
+## [1.477.0](https://github.com/juspay/xyne-spaces/compare/v1.476.2...v1.477.0) (2026-10-08)
+
+
+### Features
+
+* move sandbox repo configs to the database ([#2357](https://github.com/juspay/xyne-spaces/issues/2357)) ([6e50b8c](https://github.com/juspay/xyne-spaces/commit/6e50b8c556fc5f21092e5e0d7b55e4f5762f5859))
+
 ## [1.476.2](https://github.com/juspay/xyne-spaces/compare/v1.476.1...v1.476.2) (2026-10-08)
 
 
