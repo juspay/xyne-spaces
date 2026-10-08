@@ -24,6 +24,8 @@ interface BarAddMenuProps {
   align?: 'start' | 'center' | 'end';
   /** Channel admins only: lets the app picker publish apps to the channel. */
   publish?: AppPublishOptions;
+  /** Published apps; they don't count toward the bar's own app limit. */
+  publishedAppIds?: ReadonlySet<string>;
 }
 
 /**
@@ -45,6 +47,7 @@ export const BarAddMenu = ({
   side = 'bottom',
   align = 'start',
   publish,
+  publishedAppIds,
 }: BarAddMenuProps): ReactElement => {
   const ids = store.useItems();
   const [open, setOpen] = useState(false);
@@ -55,7 +58,9 @@ export const BarAddMenu = ({
     () => new Set(ids.map(appIdOf).filter((id): id is string => id !== null)),
     [ids],
   );
-  const appsFull = addedAppIds.size >= MAX_APPS_PER_BAR;
+  const appsFull =
+    [...addedAppIds].filter(id => !publishedAppIds?.has(id)).length >= MAX_APPS_PER_BAR;
+  const pickerBlocked = appsFull && !publish && !publishedAppIds?.size;
 
   return (
     <>
@@ -118,16 +123,16 @@ export const BarAddMenu = ({
           <div className='my-1 border-t border-border' />
           <button
             type='button'
-            disabled={appsFull}
+            disabled={pickerBlocked}
             onClick={() => {
               setOpen(false);
               setPickerOpen(true);
             }}
             className={cn(
               'flex w-full items-center gap-2.5 rounded-md px-2 py-1.5 text-left text-sm text-foreground transition-colors',
-              appsFull ? 'cursor-not-allowed opacity-50' : 'hover:bg-accent',
+              pickerBlocked ? 'cursor-not-allowed opacity-50' : 'hover:bg-accent',
             )}
-            title={appsFull ? `Up to ${MAX_APPS_PER_BAR} apps per bar` : undefined}
+            title={pickerBlocked ? `Up to ${MAX_APPS_PER_BAR} apps per bar` : undefined}
             data-track-category={trackCategory}
             data-track-name='OpenAppPicker'
           >
@@ -144,6 +149,7 @@ export const BarAddMenu = ({
         onOpenChange={setPickerOpen}
         addedAppIds={addedAppIds}
         isFull={appsFull}
+        {...(publishedAppIds ? { publishedAppIds } : {})}
         onToggle={(app, next) => {
           if (!next) {
             store.remove(appItemId(app.id));

@@ -85,7 +85,8 @@ export const BarCustomizer = ({
     () => new Set(ids.map(appIdOf).filter((id): id is string => id !== null)),
     [ids],
   );
-  const appsFull = addedAppIds.size >= MAX_APPS_PER_BAR;
+  const appsFull =
+    [...addedAppIds].filter(id => !publishedAppIds?.has(id)).length >= MAX_APPS_PER_BAR;
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 4 } }),
@@ -252,6 +253,7 @@ export const BarCustomizer = ({
         onOpenChange={setPickerOpen}
         addedAppIds={addedAppIds}
         isFull={appsFull}
+        {...(publishedAppIds ? { publishedAppIds } : {})}
         onToggle={(app, next) => {
           if (!next) {
             store.remove(appItemId(app.id));

@@ -17,6 +17,8 @@ interface AppPickerDialogProps {
   addedAppIds: ReadonlySet<string>;
   /** The bar has no room for another app. */
   isFull: boolean;
+  /** Published apps; showing one again doesn't need room in the bar. */
+  publishedAppIds?: ReadonlySet<string>;
   /** `next` is the membership the row is being toggled to. */
   onToggle: (app: ArtifactAppSummary, next: boolean) => void;
   trackCategory: string;
@@ -50,6 +52,7 @@ export const AppPickerDialog = ({
   onOpenChange,
   addedAppIds,
   isFull,
+  publishedAppIds,
   onToggle,
   trackCategory,
   appFilter,
@@ -136,7 +139,7 @@ export const AppPickerDialog = ({
                   const added = addedAppIds.has(app.id);
                   // A full bar blocks adding, never un-adding — otherwise the
                   // only way back under the cap would be the bar itself.
-                  const disabled = !added && isFull;
+                  const disabled = !added && isFull && !publishedAppIds?.has(app.id);
                   const published = publish?.publishedAppIds.has(app.id) ?? false;
                   return (
                     <li key={app.id} className='flex items-center'>
@@ -171,9 +174,7 @@ export const AppPickerDialog = ({
                         </span>
                         <ToggleGlyph checked={added} />
                       </button>
-                      {/* Step 2: once an admin has the app (or it is already
-                          published), they can put it in everyone's tabs. */}
-                      {publish && (added || published) && (
+                      {publish && (
                         <PublishButton app={app} published={published} publish={publish} />
                       )}
                     </li>

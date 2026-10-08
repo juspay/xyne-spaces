@@ -528,6 +528,14 @@ export const AUDIT_TABLE_CONFIG: Record<string, AuditTableConfig> = {
     },
   },
 
+  channel_published_apps: {
+    resolveScope: async (row, res) =>
+      (await res.isDeskChannel(rowString(row, 'channelId'))) ? deskScope(row) : null,
+    resolveTargetName: async () => 'Desk apps',
+    ignoreFields: ['channelId', 'position', 'publishedBy'],
+    deleteSummary: { field: 'appId' },
+  },
+
   // Category -> user group routing rules (Agent -> Attribution).
   classification_mappings: {
     resolveScope: async row => deskScope(row),
