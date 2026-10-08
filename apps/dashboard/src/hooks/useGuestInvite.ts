@@ -46,7 +46,7 @@ export const useGuestInvite = ({
 
     setIsLoading(true);
     try {
-      await apiInstance.post('/invitations', {
+      const { data } = await apiInstance.post<{ pendingApproval?: boolean }>('/invitations', {
         email: email.trim(),
         role: 'GUEST',
         workspaceId: self.workspaceId,
@@ -54,10 +54,18 @@ export const useGuestInvite = ({
         entityId: entityId.trim(),
       });
 
-      toast.success('Invitation sent', {
-        description: `An invitation has been sent to ${email.trim()}`,
-        duration: 2000,
-      });
+      // Pending unless the invitee is already in the workspace's org or the inviter is its admin/owner.
+      if (data?.pendingApproval) {
+        toast.success('Invitation sent for approval', {
+          description: `An org admin must approve before ${email.trim()} is emailed`,
+          duration: 2500,
+        });
+      } else {
+        toast.success('Invitation sent', {
+          description: `An invitation has been sent to ${email.trim()}`,
+          duration: 2000,
+        });
+      }
 
       setEmail('');
       return true;

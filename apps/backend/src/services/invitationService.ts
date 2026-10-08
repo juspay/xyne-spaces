@@ -66,6 +66,7 @@ export class InvitationService {
     if (role === WorkspaceRole.OWNER) return OrgRole.OWNER;
     if (role === WorkspaceRole.ADMIN) return OrgRole.ADMIN;
     if (role === WorkspaceRole.COMMUNITY_MEMBER) return OrgRole.COMMUNITY_MEMBER;
+    if (role === WorkspaceRole.GUEST) return OrgRole.GUEST;
     return OrgRole.MEMBER;
   }
 
@@ -109,7 +110,17 @@ export class InvitationService {
       }
       orgId = communityWorkspace.orgId;
     } else {
-      // Derive orgId from the inviting user's active org membership
+      // The invite belongs to the workspace's org, not the inviter's — an inviter may
+      // sit in another org (e.g. a partner org's member added to this workspace).
+      const workspace = await this.prisma.workspace.findUnique({
+        where: { id: workspaceId },
+        select: { orgId: true },
+      });
+      if (!workspace?.orgId) {
+        throw new Error('Workspace not found');
+      }
+      orgId = workspace.orgId;
+
       const inviter = await this.prisma.user.findUnique({
         where: { id: invitedBy },
         select: { email: true },
@@ -118,39 +129,35 @@ export class InvitationService {
         where: { email: inviter?.email ?? '', leftAt: null },
         select: { orgId: true, role: true },
       });
-      const derivedOrgId = inviterOrgMember?.orgId;
-
-      if (!derivedOrgId) {
+      if (!inviterOrgMember) {
         throw new Error('You must be a member of an organization to invite others');
       }
-      orgId = derivedOrgId;
 
       // Non-org invitees are no longer rejected — the invite waits for admin approval.
-      // GUEST and COMMUNITY_MEMBER are handled in the branches above.
-      if (role !== WorkspaceRole.GUEST) {
-        // Looks the invitee up across any org, not just the caller's, so it runs above the caller's own scope.
-        // The query MUST be awaited inside the closure: Prisma promises are lazy, so awaiting
-        // outside would execute the query after withWorkspaceScope has exited — back in the
-        // request context where OrgMembersACL scopes it to the caller's own membership.
-        const inviteeInOrg = await withWorkspaceScope(async () => {
-          return await this.prisma.orgMember.findFirst({
-            where: { email, leftAt: null },
-          });
+      // COMMUNITY_MEMBER is handled in the branch above.
+      // Looks the invitee up across any org, not just the caller's, so it runs above the caller's own scope.
+      // The query MUST be awaited inside the closure: Prisma promises are lazy, so awaiting
+      // outside would execute the query after withWorkspaceScope has exited — back in the
+      // request context where OrgMembersACL scopes it to the caller's own membership.
+      const inviteeInOrg = await withWorkspaceScope(async () => {
+        return await this.prisma.orgMember.findFirst({
+          where: { email, leftAt: null },
         });
+      });
 
-        // orgMember.email is globally unique, so the lookup can hit a member of a
-        // DIFFERENT org — only a same-org member skips the approval queue.
-        isOrgApproved = inviteeInOrg?.orgId === orgId;
+      // orgMember.email is globally unique, so the lookup can hit a member of a
+      // DIFFERENT org — only a same-org member skips the approval queue.
+      isOrgApproved = inviteeInOrg?.orgId === orgId;
 
-        // Org admins/owners bypass the approval queue — the org member is created
-        // directly and the invite email goes out immediately.
-        if (
-          !isOrgApproved &&
-          (inviterOrgMember.role === OrgRole.ADMIN || inviterOrgMember.role === OrgRole.OWNER)
-        ) {
-          isOrgApproved = true;
-          createOrgMemberDirectly = true;
-        }
+      // Admins/owners of the workspace's org bypass the approval queue — the org member
+      // is created directly (not for guests; see approveInvitationTx) and the invite
+      // email goes out immediately.
+      const isAdminOfWorkspaceOrg =
+        inviterOrgMember.orgId === orgId &&
+        (inviterOrgMember.role === OrgRole.ADMIN || inviterOrgMember.role === OrgRole.OWNER);
+      if (!isOrgApproved && isAdminOfWorkspaceOrg) {
+        isOrgApproved = true;
+        createOrgMemberDirectly = true;
       }
     }
 
@@ -373,8 +380,9 @@ export class InvitationService {
   /**
    * Ensure orgMember has a password. If not, generate a temporary one,
    * hash it, store it, and return the plaintext for the invitation email.
+   * Returns null when a password is already set — it is never overwritten.
    */
-  async generateOrgMemberPassword(email: string): Promise<string> {
+  async generateOrgMemberPassword(email: string): Promise<string | null> {
     return withWorkspaceScope(async () => {
       const orgMember = await this.prisma.orgMember.findUnique({
         where: { email: email.toLowerCase() },
@@ -383,6 +391,10 @@ export class InvitationService {
 
       if (!orgMember) {
         throw new Error(`orgMember not found for ${email}`);
+      }
+
+      if (orgMember.passwordHash) {
+        return null;
       }
 
       const tempPassword = crypto.randomBytes(12).toString('base64url'); // ~16 chars

@@ -97,6 +97,7 @@ import {
   computeActivitySectionSuggestions,
   computeDmSectionSuggestions,
   getCandidateProjectIds,
+  WorkspaceRole,
 } from '@xyne/shared';
 import { DndContext, DragOverlay, useDroppable } from '@dnd-kit/core';
 import { SortableContext, verticalListSortingStrategy } from '@dnd-kit/sortable';
@@ -273,6 +274,8 @@ const ChatDirectory = ({
   // enabling it must not need a dashboard rebuild, and the pilot runs on an
   // allowedEmails subset first.
   const radarEnabled = useRadarEnabled(auth.user?.email);
+  // Guests are scoped to the channels they were invited to — they can't create channels.
+  const canCreateChannel = auth.user?.role !== WorkspaceRole.GUEST;
   const inboxNavItems = useInboxNavItems(radarEnabled);
   const inboxBuiltIns = useInboxBuiltIns();
   const inboxNavIds = useMemo(() => inboxNavItems.map(item => item.key), [inboxNavItems]);
@@ -292,9 +295,9 @@ const ChatDirectory = ({
   );
   useEffect(() => {
     if (!opensAddChannel) return;
-    setShowAddChannelForm(true);
+    if (canCreateChannel) setShowAddChannelForm(true);
     void navigate(pathname, { replace: true });
-  }, [opensAddChannel, navigate, pathname]);
+  }, [opensAddChannel, navigate, pathname, canCreateChannel]);
   const [showAddSectionForm, setShowAddSectionForm] = useState(false);
   const [addSectionSource, setAddSectionSource] = useState<'channels' | 'dms'>('channels');
   const [sectionToRename, setSectionToRename] = useState<ChannelSection | null>(null);
@@ -1321,32 +1324,34 @@ const ChatDirectory = ({
                           />
                         </button>
                       </Tooltip>
-                      <Tooltip
-                        content='Create channel'
-                        side='top'
-                        sideOffset={0}
-                        delayDuration={500}
-                      >
-                        <button
-                          className='group/child text-sidebar-foreground hover:text-sidebar-accent-foreground hover:bg-sidebar-accent transition-colors rounded-md p-1'
-                          onClick={(e: React.MouseEvent<HTMLButtonElement>) => {
-                            e.preventDefault();
-                            e.stopPropagation();
-                            setShowAddChannelForm(true);
-                          }}
-                          data-testid='create-new-channel'
-                          data-track-event='BUTTON_CLICK'
-                          data-track-category='CHAT_SIDEBAR'
-                          data-track-name='CREATE_NEW_CHANNEL'
-                          data-track-metadata={JSON.stringify({ source: 'directory' })}
+                      {canCreateChannel && (
+                        <Tooltip
+                          content='Create channel'
+                          side='top'
+                          sideOffset={0}
+                          delayDuration={500}
                         >
-                          <PlusDefault
-                            strokeWidth={2.33}
-                            size={14}
-                            className='text-sidebar-foreground group-hover/child:text-sidebar-primary transition-colors'
-                          />
-                        </button>
-                      </Tooltip>
+                          <button
+                            className='group/child text-sidebar-foreground hover:text-sidebar-accent-foreground hover:bg-sidebar-accent transition-colors rounded-md p-1'
+                            onClick={(e: React.MouseEvent<HTMLButtonElement>) => {
+                              e.preventDefault();
+                              e.stopPropagation();
+                              setShowAddChannelForm(true);
+                            }}
+                            data-testid='create-new-channel'
+                            data-track-event='BUTTON_CLICK'
+                            data-track-category='CHAT_SIDEBAR'
+                            data-track-name='CREATE_NEW_CHANNEL'
+                            data-track-metadata={JSON.stringify({ source: 'directory' })}
+                          >
+                            <PlusDefault
+                              strokeWidth={2.33}
+                              size={14}
+                              className='text-sidebar-foreground group-hover/child:text-sidebar-primary transition-colors'
+                            />
+                          </button>
+                        </Tooltip>
+                      )}
                       <GroupSettingsMenu
                         group='channels'
                         trackName='CHANNELS_SECTION_OPTIONS'
@@ -1361,12 +1366,16 @@ const ChatDirectory = ({
                             trackName: 'BROWSE_CHANNELS',
                             onSelect: () => void navigate('/chat/search?mode=channels'),
                           },
-                          {
-                            label: 'Create channel',
-                            icon: PlusDefault,
-                            trackName: 'CREATE_NEW_CHANNEL',
-                            onSelect: () => setShowAddChannelForm(true),
-                          },
+                          ...(canCreateChannel
+                            ? [
+                                {
+                                  label: 'Create channel',
+                                  icon: PlusDefault,
+                                  trackName: 'CREATE_NEW_CHANNEL',
+                                  onSelect: () => setShowAddChannelForm(true),
+                                },
+                              ]
+                            : []),
                           {
                             label: 'New section',
                             icon: FolderPlus,

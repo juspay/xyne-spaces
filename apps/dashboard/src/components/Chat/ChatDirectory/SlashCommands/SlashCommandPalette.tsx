@@ -1,7 +1,7 @@
 import { ReactElement, type MouseEventHandler } from 'react';
 import { Command } from 'cmdk';
 import { UserTwo } from '@xyne/icons';
-import { COMMAND_KINDS, getCommand } from './commands';
+import { getCommand } from './commands';
 import { getUserDisplayName } from '../../../../utils/userDisplayName';
 import Avatar from '../../../ui/Avatar/Avatar';
 import ChannelIcon from '../../ChannelIcon/ChannelIcon';
@@ -37,6 +37,7 @@ export function SlashCommandPalette({
   onItemMouseDown,
 }: SlashCommandPaletteProps): ReactElement | null {
   const {
+    availableCommandKinds,
     commandKind,
     commandText,
     commandTarget,
@@ -59,7 +60,7 @@ export function SlashCommandPalette({
   // `/` discovery: just a slash or an unrecognized command → list the commands.
   if (commandKind === null) {
     const typed = commandText.slice(1).toLowerCase();
-    const matches = COMMAND_KINDS.filter(k => k.startsWith(typed));
+    const matches = availableCommandKinds.filter(k => k.startsWith(typed));
     // A non-empty prefix that matches nothing (e.g. `/xyz`) shows a no-match state rather than
     // every command; a bare `/` (empty prefix) still lists them all.
     if (typed && matches.length === 0) {
@@ -67,7 +68,7 @@ export function SlashCommandPalette({
         <div className='py-6 text-center text-sm text-muted-foreground'>No matching commands</div>
       );
     }
-    const shown = matches.length ? matches : COMMAND_KINDS;
+    const shown = matches.length ? matches : availableCommandKinds;
     return (
       <Command.Group heading='Commands' className={COMMAND_GROUP_HEADING_CLASS}>
         {shown.map(kind => {

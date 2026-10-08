@@ -28,7 +28,18 @@ interface PendingInvitation {
   invitedByEmail: string | null;
   isOrgApproved: boolean;
   inviteEmailSentAt: string | null;
+  /** Guest invites only: the channel/canvas/project the guest gets access to. */
+  entityType: 'CHANNEL' | 'CANVAS' | 'PROJECT' | null;
+  entityTitle: string | null;
 }
+
+// "Guest · #support" — so the approver sees what a guest invite grants.
+const formatRole = (invitation: PendingInvitation): string => {
+  if (!invitation.entityType) return invitation.role;
+  const title = invitation.entityTitle ?? 'Untitled';
+  const target = invitation.entityType === 'CHANNEL' ? `#${title}` : title;
+  return `${invitation.role} · ${target}`;
+};
 
 interface PendingInvitationsSectionProps {
   orgId: string;
@@ -152,7 +163,7 @@ export const PendingInvitationsSection = ({
                       <p className='truncate font-medium text-foreground'>{invitation.email}</p>
                       <p className='text-sm text-muted-foreground'>
                         {invitation.workspaceName ? `${invitation.workspaceName} • ` : ''}
-                        {invitation.role} • invited{' '}
+                        {formatRole(invitation)} • invited{' '}
                         {invitation.invitedByName
                           ? `by ${invitation.invitedByName}`
                           : formatDate(invitation.createdAt)}

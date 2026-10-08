@@ -9,9 +9,16 @@ import {
   Inbox,
   type LucideIcon,
 } from 'lucide-react';
-import { ChannelScopeType } from '@xyne/shared';
+import { ChannelScopeType, WorkspaceRole } from '@xyne/shared';
 import type { User, Channel } from '@xyne/shared';
-import { parseSearchCommand, COMMAND_KINDS, getCommand, type SearchCommandKind } from './commands';
+import {
+  parseSearchCommand,
+  COMMAND_KINDS,
+  GUEST_BLOCKED_COMMANDS,
+  getCommand,
+  type SearchCommandKind,
+} from './commands';
+import { useAuth } from '../../../../hooks/useAuth';
 import { useQuickCall } from '../../../../hooks/useQuickCall';
 import { useUsers } from '../../../../hooks/useUsers';
 import { useChannelSearch, useAllVisibleChannels } from '../../../../hooks/useChannels';
@@ -109,6 +116,8 @@ export interface GotoExtra {
 
 export interface UseSlashCommandsReturn {
   commandActive: boolean;
+  /** Commands this user may run — guests lose `/call` and `/record`. */
+  availableCommandKinds: SearchCommandKind[];
   commandKind: SearchCommandKind | null;
   commandText: string;
   commandTarget: CommandTarget | null;
@@ -196,7 +205,16 @@ export function useSlashCommands({
     [],
   );
 
-  const parsedCommand = useMemo(() => parseSearchCommand(commandText), [commandText]);
+  const isGuest = useAuth().user?.role === WorkspaceRole.GUEST;
+  const availableCommandKinds = useMemo(
+    () => (isGuest ? COMMAND_KINDS.filter(k => !GUEST_BLOCKED_COMMANDS.has(k)) : COMMAND_KINDS),
+    [isGuest],
+  );
+  // A blocked command parses as plain text, so `/call` does nothing for a guest.
+  const parsedCommand = useMemo(() => {
+    const parsed = parseSearchCommand(commandText);
+    return parsed && availableCommandKinds.includes(parsed.kind) ? parsed : null;
+  }, [commandText, availableCommandKinds]);
   const commandActive = commandText.startsWith('/') || commandTarget !== null;
   // `commandText` keeps its `/call `/`/chat ` prefix even after a target is picked, so the kind is
   // always parseable — no need to infer it from the target.
@@ -644,7 +662,7 @@ export function useSlashCommands({
       if (!typedWord && !hasNavigated && !activeCommandWord) {
         return { suffix: ' Quick commands', word: '', canComplete: false };
       }
-      const matches = COMMAND_KINDS.filter(k => k.startsWith(typedWord));
+      const matches = availableCommandKinds.filter(k => k.startsWith(typedWord));
       const kind = matches.find(k => k === activeCommandWord) ?? matches[0];
       if (kind) {
         // Inline-complete the command word, then the " – Select" action (mirrors the picker rows).
@@ -684,6 +702,7 @@ export function useSlashCommands({
     activeItemLabel,
     commandQuery,
     hasNavigated,
+    availableCommandKinds,
   ]);
 
   const onSetTextReady = useCallback((setText: (text: string) => void): void => {
@@ -713,6 +732,7 @@ export function useSlashCommands({
 
   return {
     commandActive,
+    availableCommandKinds,
     commandKind,
     commandText,
     commandTarget,

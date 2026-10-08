@@ -16,7 +16,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '../../ui/dropdown-menu';
-import { useAuthContextValues } from '../../../hooks/useAuth';
+import { useAuth, useAuthContextValues } from '../../../hooks/useAuth';
 import { ChatDirectoryProps, ChannelCategory } from './ChatDirectory.types';
 import { useAllUnreadCount } from '../../../hooks/useUnreadCount';
 import { useMutation } from '@tanstack/react-query';
@@ -35,7 +35,7 @@ import { MobileProfileMenu } from '../../ui/MobileProfileMenu/MobileProfileMenu'
 import { useZero } from '../../../hooks/useZero';
 import { mutators } from '../../../zero/mutators';
 import { useChannelSort } from '../../../hooks/useChannelSort';
-import { ChannelSortOrder } from '@xyne/shared';
+import { ChannelSortOrder, WorkspaceRole } from '@xyne/shared';
 import { Accordion } from 'radix-ui';
 import MobileChannelItem from './MobileChannelItem';
 import Tooltip from '../../ui/Tooltip';
@@ -46,6 +46,8 @@ const MobileChatDirectory = ({
 }: ChatDirectoryProps): ReactElement | null => {
   const navigate = useNavigate();
   const context = useAuthContextValues();
+  // Guests are scoped to the channels they were invited to — they can't create channels.
+  const canCreateChannel = useAuth().user?.role !== WorkspaceRole.GUEST;
   const zero = useZero();
 
   const { starred, channels, directMessages, channelSortOrder, setChannelSortOrder } =
@@ -254,20 +256,22 @@ const MobileChatDirectory = ({
                       </DropdownMenuItem>
                     </DropdownMenuContent>
                   </DropdownMenu>
-                  <Tooltip content='Add channel' side='top' sideOffset={0} delayDuration={500}>
-                    <button
-                      className='text-muted-foreground hover:text-foreground transition-colors'
-                      onClick={(e: React.MouseEvent<HTMLButtonElement>) => {
-                        e.preventDefault();
-                        e.stopPropagation();
-                        setShowAddChannelForm(true);
-                      }}
-                      data-track-category='MOBILE_CHAT_DIRECTORY'
-                      data-track-name='ADD_CHANNEL_MOBILE'
-                    >
-                      <PlusDefault size={20} />
-                    </button>
-                  </Tooltip>
+                  {canCreateChannel && (
+                    <Tooltip content='Add channel' side='top' sideOffset={0} delayDuration={500}>
+                      <button
+                        className='text-muted-foreground hover:text-foreground transition-colors'
+                        onClick={(e: React.MouseEvent<HTMLButtonElement>) => {
+                          e.preventDefault();
+                          e.stopPropagation();
+                          setShowAddChannelForm(true);
+                        }}
+                        data-track-category='MOBILE_CHAT_DIRECTORY'
+                        data-track-name='ADD_CHANNEL_MOBILE'
+                      >
+                        <PlusDefault size={20} />
+                      </button>
+                    </Tooltip>
+                  )}
                 </div>
               </div>
             </Accordion.Trigger>

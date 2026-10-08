@@ -5,11 +5,12 @@ import { useCallActions } from '../../../hooks/useCallActions';
 import { cn } from '../../../utils/classNames';
 import Tooltip from '../../ui/Tooltip';
 import { ShortcutHint } from '../../ui/ShortcutHint';
-import { ChannelScopeType } from '@xyne/shared';
+import { ChannelScopeType, WorkspaceRole } from '@xyne/shared';
 import { CallConfirmationModal } from '../CallConfirmationModal';
 import { useCallConfirmation } from '../../../hooks/useCallConfirmation';
 import { useShortcutById } from '../../../shortcuts';
 import { usePlatform } from '../../../hooks/usePlatform';
+import { useAuth } from '../../../hooks/useAuth';
 
 interface CallTriggerProps {
   channelId: string;
@@ -80,7 +81,12 @@ export const CallTrigger: React.FC<CallTriggerProps> = ({
       isInCall,
     });
 
+  // Guests can join or leave an ongoing call but not start one.
+  const isGuest = useAuth().user?.role === WorkspaceRole.GUEST;
+  const canUseTrigger = !isGuest || hasActiveCallInChannel;
+
   const handleButtonClick = (): void => {
+    if (!canUseTrigger) return;
     handleCallAction(handleCallClick);
   };
 
@@ -110,6 +116,8 @@ export const CallTrigger: React.FC<CallTriggerProps> = ({
         : isInCall
           ? 'End current call and start new one'
           : 'Start audio call';
+
+  if (!canUseTrigger) return null;
 
   // Default Button trigger
   return (

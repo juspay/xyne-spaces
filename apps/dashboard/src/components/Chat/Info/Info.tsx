@@ -1,5 +1,5 @@
 import React, { ReactElement, useState, useMemo, useCallback, useEffect, useRef } from 'react';
-import { useAuthContextValues } from '../../../hooks/useAuth';
+import { useAuth, useAuthContextValues } from '../../../hooks/useAuth';
 import { queries } from '../../../zero/queries';
 import {
   ChannelVisibility,
@@ -7,6 +7,7 @@ import {
   ChannelRole,
   ChannelAddUserPolicy,
   Channel,
+  WorkspaceRole,
 } from '@xyne/shared';
 import { useZero } from '../../../hooks/useZero';
 import { QueryResultType } from '@rocicorp/zero';
@@ -265,6 +266,10 @@ const Info = ({
       isInCall,
     });
 
+  // Guests can join or leave an ongoing call but not start one.
+  const isGuest = useAuth().user?.role === WorkspaceRole.GUEST;
+  const showCallButton = !isGuest || hasActiveCallInChannel;
+
   const handleCallTrigger = (): void => {
     handleCallAction(handleCallClick);
   };
@@ -377,27 +382,29 @@ const Info = ({
             <div className='text-muted-foreground text-[13px]'>Add People</div>
           </button>
         )}
-        <button
-          onClick={handleCallTrigger}
-          disabled={participants.length === 1}
-          className={`${headerLinkContainerStyle} ${participants.length === 1 ? 'opacity-50 cursor-not-allowed' : ''}`}
-          data-track-category='CHAT_INFO'
-          data-track-name='START_CALL'
-          data-track-metadata={JSON.stringify({ channelId: channel.id })}
-        >
-          {isUserInCurrentChannelCall ? (
-            <PhoneOff className='w-4 h-4 text-status-failure' />
-          ) : hasActiveCallInChannel && !isUserInCurrentChannelCall ? (
-            <PhoneDefault size={16} color='currentColor' />
-          ) : (
-            <PhoneDefault size={16} color='currentColor' />
-          )}
-          <div
-            className={`${isUserInCurrentChannelCall ? 'text-status-failure' : 'text-muted-foreground'} text-[13px]`}
+        {showCallButton && (
+          <button
+            onClick={handleCallTrigger}
+            disabled={participants.length === 1}
+            className={`${headerLinkContainerStyle} ${participants.length === 1 ? 'opacity-50 cursor-not-allowed' : ''}`}
+            data-track-category='CHAT_INFO'
+            data-track-name='START_CALL'
+            data-track-metadata={JSON.stringify({ channelId: channel.id })}
           >
-            {isUserInCurrentChannelCall ? 'Leave' : 'Call'}
-          </div>
-        </button>
+            {isUserInCurrentChannelCall ? (
+              <PhoneOff className='w-4 h-4 text-status-failure' />
+            ) : hasActiveCallInChannel && !isUserInCurrentChannelCall ? (
+              <PhoneDefault size={16} color='currentColor' />
+            ) : (
+              <PhoneDefault size={16} color='currentColor' />
+            )}
+            <div
+              className={`${isUserInCurrentChannelCall ? 'text-status-failure' : 'text-muted-foreground'} text-[13px]`}
+            >
+              {isUserInCurrentChannelCall ? 'Leave' : 'Call'}
+            </div>
+          </button>
+        )}
         {showPromoteButton && (
           <button
             onClick={handlePromoteClick}
