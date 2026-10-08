@@ -226,7 +226,8 @@ export function SdlcKnowledgeSection(props: {
       skill.enabled &&
       !linkedIds.has(skill.id) &&
       // Linking a global skill gives it to every member, so that is the admin's call.
-      (isHubAdmin || skill.ownerUserId === userId) &&
+      // The catalog holds global skills and the viewer's own, so a personal one is theirs.
+      (isHubAdmin || skill.scope === 'personal') &&
       `${skill.name} ${skill.slug} ${skill.description}`.toLowerCase().includes(pickerNeedle),
   );
 
@@ -615,7 +616,7 @@ export function SdlcKnowledgeSection(props: {
                         className='w-48 rounded-xl p-1.5 shadow-sm'
                         onClick={event => event.stopPropagation()}
                       >
-                        {skill && personal && skill.ownerUserId === userId && (
+                        {skill && personal && (
                           <DropdownMenuItem
                             onClick={() => setShareSkill(skill)}
                             data-track-category='SdlcHub'

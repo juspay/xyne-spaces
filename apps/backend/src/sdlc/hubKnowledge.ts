@@ -173,11 +173,12 @@ export async function linkHubSkill(
   skillId: string
 ): Promise<void> {
   const { isAdmin } = await requireMember(actor, channelId);
-  const skill = (await listS2SClawSkills(actor.userId)).find(
+  // The list holds global skills and the caller's own, so a personal one found here is theirs.
+  const skill = (await listS2SClawSkills(actor.userId, actor.workspaceId)).find(
     (candidate) => candidate.id === skillId
   );
   if (!skill) throw new AppError('Skill not found', 404);
-  if (skill.scope === 'global' ? !isAdmin : skill.ownerUserId !== actor.userId) {
+  if (skill.scope === 'global' && !isAdmin) {
     throw new AppError('Only a hub admin can link a global skill', 403);
   }
   await ensureLink(db, skillLink(channelId, skillId), actor);
@@ -246,7 +247,7 @@ export async function setHubPin(
   if (!inHub) throw new AppError('Not found in Hub Knowledge', 404);
   if (target.targetType === 'SKILL') {
     // The list holds global skills and the caller's own, so a miss is someone else's personal skill.
-    const skill = (await listS2SClawSkills(actor.userId)).find(
+    const skill = (await listS2SClawSkills(actor.userId, actor.workspaceId)).find(
       (candidate) => candidate.id === target.targetId
     );
     if (!skill) throw new AppError('Skill not found', 404);

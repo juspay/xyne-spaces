@@ -5,6 +5,7 @@ import { prisma } from "../db.js";
 import { createLogger } from "../logger.js";
 import { errMsg } from "./errors.js";
 import { getSpacesAuthForUser } from "./spaces-db.js";
+import { spacesUserIdForClawUser } from "./users-jit.js";
 import { spacesFetch } from "../mcp/servers/xyne-spaces-client.js";
 
 const log = createLogger("sdlc-repository-context");
@@ -208,9 +209,11 @@ export async function loadHubRunContext(
 export async function linkSdlcHubSkill(channelId: string, userId: string, skillId: string): Promise<void> {
   const auth = s2sAuth();
   if (!auth) return;
+  // Spaces checks hub membership by the Spaces user id. Callers pass it when they have it; a Claw id is converted.
+  const actorUserId = await spacesUserIdForClawUser(userId);
   await spacesFetch(
     "/api/internal/sdlc/agent/hub-skill",
-    { method: "POST", body: JSON.stringify({ channelId, actorUserId: userId, skillId }), signal: AbortSignal.timeout(5_000) },
+    { method: "POST", body: JSON.stringify({ channelId, actorUserId, skillId }), signal: AbortSignal.timeout(5_000) },
     auth,
   );
 }

@@ -4160,7 +4160,10 @@ router.post("/:slug/chat/approve-action", async (req: Request<{ slug: string }>,
     if (result.createdSkillId && typeof hubChannelId === "string") {
       const { linkSdlcHubSkill } = await import("../lib/sdlc-repository-context.js");
       // Detached: the skill exists by now, so a failed link must not fail the approval.
-      void linkSdlcHubSkill(hubChannelId, callerUserId, result.createdSkillId).catch((err: unknown) =>
+      // The session's own Spaces id names the right workspace for a user who is in two.
+      const spacesCallerId = req.headers["x-spaces-user-id"];
+      const linkUserId = typeof spacesCallerId === "string" && spacesCallerId ? spacesCallerId : callerUserId;
+      void linkSdlcHubSkill(hubChannelId, linkUserId, result.createdSkillId).catch((err: unknown) =>
         log.warn(`[agent-chat] create-skill hub link failed: ${errMsg(err)}`),
       );
     }

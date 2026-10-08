@@ -1769,12 +1769,17 @@ export async function listS2SClawAgents(): Promise<S2SClawAgent[]> {
 
 /** The skills a user can see: global ones and their own personal ones. */
 export async function listS2SClawSkills(
-  userId: string
+  userId: string,
+  workspaceId?: string
 ): Promise<Array<{ id: string; scope: string; ownerUserId: string | null }>> {
   const url = `${getClawBaseUrl()}/claw/api/v1/skills?userId=${encodeURIComponent(userId)}`;
   const res = await fetch(url, {
     // The pinned user scopes the list to their org.
-    headers: { 'Content-Type': 'application/json', ...getS2SHeaders(), ...extractUserIdHeader(userId) },
+    headers: {
+      'Content-Type': 'application/json',
+      ...getS2SHeaders(),
+      ...extractUserIdHeader(userId, workspaceId),
+    },
     signal: AbortSignal.timeout(15_000),
   });
   if (!res.ok) {
