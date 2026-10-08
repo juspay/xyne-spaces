@@ -98,6 +98,16 @@ describe("dispatchXyneAiContinuationRun", () => {
     expect(body["__persistedByCaller"]).toBe(true);
   });
 
+  it("marks the continuation as a Xyne AI card surface so claw keeps card tools (propose-agent)", async () => {
+    await dispatchXyneAiContinuationRun({
+      ...BASE,
+      prompt: "The user answered your questions. Continue the task based on these answers:\nName: u decide",
+      idempotencyKey: "user_answer_q-2",
+      failureMessage: "failed",
+    });
+    expect(state.fetchBodies[0]!["cardSurface"]).toBe("xyne-ai");
+  });
+
   it("forwards context as a separate field when the caller supplies it (write card)", async () => {
     await dispatchXyneAiContinuationRun({
       ...BASE,

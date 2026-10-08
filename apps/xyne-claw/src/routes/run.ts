@@ -51,6 +51,7 @@ import { SandboxUnavailableError } from "../sandbox-unavailable.js";
 import { isSafeId } from "../safe-id.js";
 import { sanitizeCitations } from "../citation-sanitizer.js";
 import { validateS2SKey } from "../middleware/auth.js";
+import { hasInteractiveCardSurface } from "../card-surface.js";
 import { transientProviderCallback } from "../transient-provider-callback.js";
 import { loadMcpToolsForUser,
   searchDeploymentTools,
@@ -581,6 +582,7 @@ router.post("/run", validateS2SKey, async (req, res: Response) => {
     experiment: rawExperiment,
     planContinuation,
     awakening,
+    cardSurface,
     generateFollowUpSuggestions: shouldGenerateFollowUpSuggestions,
   } = req.body as InternalRunPayload;
 
@@ -840,6 +842,8 @@ router.post("/run", validateS2SKey, async (req, res: Response) => {
       shouldGenerateFollowUpSuggestions,
       typeof callbackUrl === "string" ? callbackUrl : undefined,
       awakening,
+      undefined,
+      cardSurface,
     ).finally(() => {
       if (activeRun.handoffCapTimer) clearTimeout(activeRun.handoffCapTimer);
       if (activeRun.gracefulInterruptSummaryTimer) clearTimeout(activeRun.gracefulInterruptSummaryTimer);
@@ -966,6 +970,8 @@ router.post("/run", validateS2SKey, async (req, res: Response) => {
         shouldGenerateFollowUpSuggestions,
         typeof callbackUrl === "string" ? callbackUrl : undefined,
         awakening,
+        undefined,
+        cardSurface,
       );
     } catch (err) {
       processTaskError = err;
@@ -1516,6 +1522,8 @@ export async function processTask(
     entryPath?: string;
   },
   execution?: RunExecutionState,
+  /** "xyne-ai" marks a Xyne AI continuation run as card-capable. */
+  cardSurface?: string,
 ): Promise<void> {
   // Started here so the extractor overlaps session restore + MCP listing;
   // awaited once the tool palette exists. Never rejects (see prefetch.ts).
@@ -2952,16 +2960,25 @@ export async function processTask(
     // without a human to approve its card, so a scheduled/automation run (no one
     // watching) must never get the tool. Never alongside the other terminal tools
     // (plan / daily brief own turn termination in their modes).
-    const agentAuthoringEnabled =
-      agentConfig?.["agentAuthoring"] === true &&
-      (!!channelId || (progressUrl && typeof progressUrl !== "string")) &&
-      !isScheduledOrAutomationRun(eventType, conversationId) &&
-      !isTwinMentionFlow &&
-      !isPlanMode &&
-      !isDailyBrief;
+    // The card surface check is shared with suggest-connectors below so the two
+    // can't drift (they did: a Xyne AI continuation run got neither, and the
+    // model fell back to a "paste this yourself" markdown reply).
+    const runHasCardSurface = hasInteractiveCardSurface({ channelId, progressUrl, cardSurface });
+    const authoringRequested = agentConfig?.["agentAuthoring"] === true;
+    const authoringBlockers = [
+      !runHasCardSurface && "no card surface",
+      isScheduledOrAutomationRun(eventType, conversationId) && "scheduled/automation run",
+      isTwinMentionFlow && "twin mention flow",
+      isPlanMode && "plan mode",
+      isDailyBrief && "daily brief",
+    ].filter((r): r is string => typeof r === "string");
+    const agentAuthoringEnabled = authoringRequested && authoringBlockers.length === 0;
     if (agentAuthoringEnabled) {
       allTools.push(buildProposeAgentTool(proposeAgentRef, abortRun));
       log("Agent authoring enabled — injected terminal propose-agent tool");
+    } else if (authoringRequested) {
+      // Without this the only signal was a MISSING "enabled" line.
+      log(`Agent authoring configured but propose-agent NOT injected: ${authoringBlockers.join(", ")}`);
     }
 
     // describe-agent: EVERY agent gets this, no config. "What can you do?" is a
@@ -2977,7 +2994,7 @@ export async function processTask(
       !isScheduledOrAutomationRun(eventType, conversationId) &&
       !isTwinMentionFlow &&
       !isDailyBrief;
-    const hasSpacesCardSurface = !!channelId || (progressUrl && typeof progressUrl !== "string");
+    const hasSpacesCardSurface = runHasCardSurface;
     const isChatSurfaceRun = !channelId && !eventType;
     const describeAgentAvailable = interactiveCardRun && (hasSpacesCardSurface || isChatSurfaceRun);
     if (describeAgentAvailable) {

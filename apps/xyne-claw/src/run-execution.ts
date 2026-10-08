@@ -76,6 +76,9 @@ export interface InternalRunPayload {
   recordingRefs?: Array<{ attachmentId: string; fileName: string; mimeType: string; fileSize: number }>;
   contextFiles?: Array<{ path: string; content: string }>;
   /** Set by claw-auth's awakening dispatcher for an unattended run. */
+  /** "xyne-ai" for Xyne AI continuation runs — the chat can render cards even
+   *  though progress is a URL. See card-surface.ts. */
+  cardSurface?: string;
   awakening?: {
     kind: string;
     writePolicy: string;
@@ -223,6 +226,7 @@ export async function executeRunFromPayload(
     experiment: rawExperiment,
     planContinuation,
     awakening,
+    cardSurface,
     generateFollowUpSuggestions: shouldGenerateFollowUpSuggestions,
   } = payload;
 
@@ -297,6 +301,7 @@ export async function executeRunFromPayload(
       typeof callbackUrl === "string" ? callbackUrl : undefined,
       awakening,
       state,
+      cardSurface,
     );
   } catch (err) {
     clog.error(

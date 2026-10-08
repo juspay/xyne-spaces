@@ -5,6 +5,7 @@ import { parseSlashCommand } from "../lib/parseSlashCommand.js";
 import { screenUploadFiles } from "../lib/upload-screening.js";
 import { Router, type Request, type RequestHandler, type Response } from "express";
 import { errMsg } from "../lib/errors.js";
+import { deliverXyneAiAgentDraft, type PendingAgentCardPayload } from "../lib/xyne-ai-agent-draft.js";
 import { SDLC_AGENT_SLUG, isAgentInvocableBy, IMMEDIATE_TASK_COMMAND_RE, parseLocalSandboxCommand } from "xyne-claw-shared";
 import { recordDeliveredArtifacts } from "../lib/delivered-artifacts.js";
 import { recordUploadedArtifacts } from "../lib/conversation-artifact-signals.js";
@@ -2606,7 +2607,25 @@ internalRouter.post("/:slug/chat/:convId/callback", async (req: Request<{ slug: 
   // resolved, and the message was lost from the chat UI (still visible in
   // /debug via finalize above). The SETNX guard inside makes this idempotent
   // across claw's callback retries.
-  const finalContent = enrichedResult ?? widgetErrorContent(error, error ?? "No response");
+  // propose-agent ends its run with an EMPTY result on purpose — the draft card
+  // is the deliverable. This route carries Xyne AI continuation turns (after a
+  // question card is answered), so without this branch the draft was persisted
+  // as "No response" and never reached the user. Same helper as run-stream.
+  const draft = await deliverXyneAiAgentDraft({
+    pendingAgentCard: (req.body as { pendingAgentCard?: PendingAgentCardPayload }).pendingAgentCard,
+    status,
+    rawResult,
+    assistantMessageId: chatMessageId,
+    conversationId: req.params.convId,
+    agentSlug: req.params.slug,
+    dedupKey: chatMessageId
+      ? `agent-chat:agent-draft:${chatMessageId}`
+      : sessionId
+        ? `agent-chat:agent-draft:session:${sessionId}`
+        : undefined,
+    logContext: `conv=${req.params.convId} session=${sessionId ?? "?"}`,
+  });
+  const finalContent = draft?.content ?? enrichedResult ?? widgetErrorContent(error, error ?? "No response");
   const finalStatus = normalizeRunStatus(status);
   const errorCode = typeof error === "string" ? error : undefined;
   // persistedFlag semantics: true ⇔ a chat_messages row for this result
@@ -2664,6 +2683,14 @@ internalRouter.post("/:slug/chat/:convId/callback", async (req: Request<{ slug: 
     log.warn(`[agent-chat] callback without userId (conv=${req.params.convId}) — message persistence falls back to the SSE pod`);
   }
   const persistedAttachments = persisted?.persistedAttachments ?? [];
+
+  // Paint the draft card live; postFlowCard already stored it on the row's
+  // uiFlows, so a reload shows it even if this event is missed.
+  if (draft?.flow && callbackId) {
+    const localStream = pendingStreams.get(callbackId);
+    if (localStream) localStream.sendEvent("ui-flow", { flow: draft.flow });
+    else publishChatEvent({ kind: "progress", callbackId, events: [{ event: "ui-flow", data: { flow: draft.flow } }] });
+  }
 
   // Connector card from the agent's suggest-connectors call — the same
   // renderer (and already-connected filter) the Spaces webhook and run-stream

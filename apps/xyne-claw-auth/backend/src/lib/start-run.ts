@@ -1561,6 +1561,12 @@ export async function prepareRun(
         ? { planContinuation: true }
         : {}),
       ...(generateFollowUpSuggestions === true ? { generateFollowUpSuggestions: true } : {}),
+      // Card-surface marker for Xyne AI continuation runs (xyne-ai-continuation.ts).
+      // Trust boundary: only an internal S2S caller may claim it, so an external
+      // or user caller can't unlock interactive card tools on a headless run.
+      ...(input.isInternalS2SCaller && (body as { cardSurface?: unknown }).cardSurface === "xyne-ai"
+        ? { cardSurface: "xyne-ai" }
+        : {}),
       // /experiment epoch context (id/epoch/deadlineAt/focus) — set only by
       // dispatchExperimentEpoch (lib/experiment.ts) via this same S2S proxy.
       // Must be threaded through the allowlist or the runtime never injects the

@@ -108,6 +108,11 @@ export async function dispatchXyneAiContinuationRun(input: {
         idempotencyKey: input.idempotencyKey.replace(/[^A-Za-z0-9_-]/g, "_").slice(0, 128),
         detached: true,
         __persistedByCaller: true,
+        // The sidebar chat can render cards (draft agent, connectors) even
+        // though progress here is a URL, not a live emitter. Without this
+        // marker claw treats the continuation as a headless run and drops
+        // propose-agent / suggest-connectors. Honored only from S2S callers.
+        cardSurface: "xyne-ai",
         ...(input.agent?.config ? { agentConfig: input.agent.config } : {}),
         ...(providers?.parent ? { provider: providers.parent } : {}),
         ...(providers && Object.keys(providers.providerConfigs).length > 0
