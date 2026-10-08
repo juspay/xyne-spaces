@@ -25,6 +25,7 @@ import { RedisEventBus } from './adapters/event-bus';
 import { PrismaPersistenceAdapter } from './adapters/persistence';
 import { BullQueueAdapter } from './adapters/queue';
 import { BullSchedulerAdapter } from './adapters/scheduler';
+import { createWorkflowSandboxAdapter } from './adapters/sandbox';
 import { WorkflowStorageAdapter } from './adapters/storage';
 import { XyneWorkflowAuthorizer } from './authorizer';
 import { DEFAULT_CRON_TIMEZONE } from './constants';
@@ -123,11 +124,23 @@ const APPROVAL_POLICY = {
   triggers: {},
 } as const satisfies ApprovalConfig;
 
+/**
+ * Code-execution sandbox for the CODE step and the agent-step `run_code` tool. Unset
+ * (WORKFLOWS_SANDBOX_BACKEND=none) the SDK fails closed, as it always has.
+ *
+ * Wired into the executor only. Every execution is enqueued and run by the workflows worker,
+ * so that is the only process that needs Kata access (env + RBAC). It is deliberately NOT
+ * passed to WorkflowRuntime, which would give the builder/approval chats (served by the API
+ * pods) a `run_code` tool and pull the API onto the Kata trust boundary too.
+ */
+const sandbox = createWorkflowSandboxAdapter();
+
 const executor = new WorkflowExecutor(persistence, connectors, services, {
   eventBus,
   baseUrl: BASE_URL,
   storage,
   logger: sdkLogger,
+  ...(sandbox ? { sandbox } : {}),
 });
 
 export const workflowRuntime = new WorkflowRuntime<Record<string, unknown>, XyneCtx, XyneFilter>({

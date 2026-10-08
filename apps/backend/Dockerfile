@@ -21,6 +21,7 @@ COPY packages/shared/package.json           packages/shared/
 COPY packages/storage/package.json          packages/storage/
 COPY packages/framework/package.json        packages/framework/
 COPY packages/cache/package.json            packages/cache/
+COPY packages/kata-sdk/package.json         packages/kata-sdk/
 COPY apps/backend/package.json              apps/backend/
 COPY apps/backend/eslint-rules/package.json apps/backend/eslint-rules/
 
@@ -39,6 +40,8 @@ COPY packages/shared    packages/shared
 COPY packages/storage   packages/storage
 COPY packages/framework packages/framework
 COPY packages/cache     packages/cache
+# Workflow code sandbox (WORKFLOWS_SANDBOX_BACKEND=kata). Ships TS source, loaded via tsx.
+COPY packages/kata-sdk  packages/kata-sdk
 COPY apps/backend       apps/backend
 COPY scripts            scripts
 
