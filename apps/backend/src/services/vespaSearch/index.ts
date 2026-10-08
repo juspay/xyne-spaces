@@ -979,8 +979,9 @@ export const searchHandler = async (req: Request, res: Response): Promise<void> 
     // messages/canvases/attachments drop out of the public branch, and people-search hides
     // guests the searcher has no channel or canvas in common with.
     if ((req as any).user?.role === WorkspaceRole.GUEST) {
-      // A guest searches only the channels they belong to, never public ones they aren't in.
+      // A guest searches only the channels/canvases they belong to, never public ones they aren't in.
       options.slack.onlyMyChannels = true;
+      options.file.onlyExplicitAccess = true;
     } else {
       const { guestUserIds, hiddenGuestUserIds } = await getGuestSearchScope(workspaceId, userId);
       if (guestUserIds.length > 0) {
