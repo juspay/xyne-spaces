@@ -13,6 +13,8 @@ import { getRecoveryContextForSession } from "../queue/run-recovery-worker.js";
 import type { ExternalResultCallbackConfig } from "../surfaces/external-api/delivery.js";
 import type { SlackDeliveryTarget } from "../surfaces/slack/delivery.js";
 import type { ChannelDeliveryTarget, MessagingChannelKey } from "../surfaces/messaging/plugin.js";
+import type { RootAttachmentRef } from "./workflow-handoff.js";
+import { twinScopedKey } from "./twin-scope.js";
 
 
 export interface SessionContext {
@@ -28,6 +30,17 @@ export interface SessionContext {
    */
   targetUserId?: string;
   senderId: string;
+  /**
+   * Raw (workspace-scoped) Spaces ids for the mentioned user and the sender.
+   * `mentionedUserId`/`senderId` are CANONICAL Claw ids now — Claw-owned reads
+   * use those; Spaces-facing payloads (openDm, twin-reply-draft, postAsUser,
+   * reactAsUser) MUST use these, because Spaces keys its own tables by the
+   * workspace-scoped id and can't resolve a Claw-internal id. Absent on older
+   * sessions → consumers fall back to `mentionedUserId`/`senderId`, which was
+   * the raw form pre-canonicalization, so the fallback is correct there too.
+   */
+  mentionedSpacesUserId?: string;
+  senderSpacesUserId?: string;
   senderName: string;
   channelId: string;
   channelName: string;
@@ -44,6 +57,7 @@ export interface SessionContext {
    * whether the user's request is satisfied.
    */
   rootTask?: string;
+  rootAttachments?: RootAttachmentRef[];
   agentId?: string;
   agentOrgId?: string | null;
   agentSlug?: string | undefined;
@@ -87,7 +101,7 @@ export interface SessionContext {
    */
   isExperiment?: boolean;
   /**
-   * MessageId of the "⏳ Working on it…" placeholder we posted at webhook-arrival
+   * MessageId of the "Working on it…" placeholder we posted at webhook-arrival
    * time. Used ONLY when USE_EPHEMERAL_PROGRESS=false — we edit this message
    * in-place as tools run, and replace its content with the final agent
    * response in the result handler. Undefined under the ephemeral path.
@@ -181,15 +195,9 @@ const CONV_PREFIX = "session-by-conv:";
 // busy slot (tryAcquireSlot) + runtime session lock, not this key.
 export const AUTOMATION_RUN_DEDUP_TTL = Number(process.env["AUTOMATION_RUN_DEDUP_TTL_SEC"] ?? 30);
 
+// Digital-twin runs are PER-USER, so the conv index is user-scoped too (see twinScopedKey).
 export function convKey(conversationId: string, agentSlug: string, twinUserScopeId?: string): string {
-  const base = `${CONV_PREFIX}${conversationId}:${agentSlug}`;
-  // Digital-twin runs are PER-USER: one claw session per mentioned user in a
-  // thread (see buildSandboxStoreKey). So the conv index must be user-scoped
-  // too — otherwise two twins mentioned in ONE thread clobber each other's row
-  // and the /result conv-index fallback resolves the wrong user. Only the twin
-  // passes twinUserScopeId; every conversation-mode caller keeps the legacy 2-part
-  // key (backward compatible, unchanged).
-  return agentSlug === "digital-twin" && twinUserScopeId ? `${base}:${twinUserScopeId}` : base;
+  return twinScopedKey(`${CONV_PREFIX}${conversationId}:${agentSlug}`, agentSlug, twinUserScopeId);
 }
 
 export function automationRunDedupKey(conversationId: string, agentSlug: string): string {

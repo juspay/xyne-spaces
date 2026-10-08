@@ -2,7 +2,13 @@ import { Router, type Request, type Response } from "express";
 import { errMsg } from "../lib/errors.js";
 import { randomUUID } from "node:crypto";
 import { CONFIG } from "../config.js";
-import { requireAuth, requireNoAccessToken, requireResultToken } from "../middleware/require-auth.js";
+import type { FlowDefinition } from "xyne-claw-shared";
+import type { DraftAgentSpec } from "../lib/agent-card.js";
+import { requireAuth, requireNoAccessToken, requireResultToken, s2sKeyMatches } from "../middleware/require-auth.js";
+import { matchesAuthenticatedUserId } from "../middleware/pin-user-id-param.js";
+import { resolveCanonicalUserIdOrSelf } from "../lib/users-jit.js";
+import { requestWorkspaceHint } from "../lib/spaces-db.js";
+import { conversationAccessError } from "../lib/conversation-access.js";
 import { getRequesterId, getAgentEditAccess, isClawAdmin } from "../middleware/agent-acl.js";
 import { prisma } from "../db.js";
 import { chatMessageRepository, agentRunRepository, chatAttachmentRepository, userAgentConfigRepository } from "../repositories/index.js";
@@ -20,6 +26,7 @@ import {
   type LocalFolderContextItem,
 } from "../lib/local-folder-context.js";
 import { gcsService } from "../services/storageService.js";
+import { maybeGenerateConversationTitle } from "../services/chatTitleClient.js";
 import { appendCitations, hydrateInvocationIcons } from "../lib/citations.js";
 import { resolveAgentProviderConfigs, agentDefaultSpeed, parseFastModeProfile } from "../lib/agent-provider-config.js";
 import { resolveFastMode } from "../lib/fast-mode.js";
@@ -38,6 +45,10 @@ import { recordUploadedArtifacts } from "../lib/conversation-artifact-signals.js
 import { attachArtifactToSessionApp } from "../lib/artifact-app-session.js";
 import { recordDeliveredArtifacts } from "../lib/delivered-artifacts.js";
 import { publishLiveEvent } from "../lib/live-conversation-bus.js";
+import {
+  withAiScreenPresentationTools,
+  withAiScreenPresentationInstructions,
+} from "../lib/ai-screen-presentation-tools.js";
 import { pushDelta, endDeltaCoalescer } from "../lib/live-delta-coalescer.js";
 import { redisService } from "../redis.js";
 import {
@@ -47,6 +58,7 @@ import {
   cloneBranchSession,
   type ChatTreeMessage,
 } from "./lib/branching.js";
+import { buildCallbackBodyFromDone } from "./lib/sse-done-callback.js";
 
 import { createLogger } from "../logger.js";
 const log = createLogger("run-stream");
@@ -159,6 +171,8 @@ const SESSION_LOCKED_USER_MESSAGE =
    ───────────────────────────────────────────────────────────────────── */
 const STREAM_EVENTS_CHANNEL = "run-stream:events";
 const STREAM_PERSIST_KEY_PREFIX = "run-stream:msg-persisted:";
+/** Turn text when a propose-agent draft could not be put up for approval. */
+const AGENT_DRAFT_DELIVERY_FAILED = "I drafted the agent but couldn't post it for approval. Please try again.";
 
 interface PersistedAttachment {
   id: string;
@@ -184,7 +198,8 @@ type StreamBusEvent =
       toolInvocations?: unknown;
       followUpSuggestions?: string[];
       followUpsPending?: boolean;
-    };
+    }
+  | { kind: "follow_ups"; streamId: string; suggestions: string[] };
 
 let _streamSubReady = false;
 function ensureStreamEventsSubscriber(): void {
@@ -198,6 +213,12 @@ function ensureStreamEventsSubscriber(): void {
   sub.on("message", (_ch: string, raw: string) => {
     let msg: StreamBusEvent;
     try { msg = JSON.parse(raw) as StreamBusEvent; } catch { return; }
+    if (msg.kind === "follow_ups") {
+      // The answer's pendingStreams entry is gone by now; the held stream is
+      // tracked separately. Never republish — every pod already got this.
+      deliverLateFollowUpsLocally(msg.streamId, msg.suggestions);
+      return;
+    }
     const stream = pendingStreams.get(msg.streamId);
     if (!stream) return; // stream lives on another pod (or already resolved)
     if (msg.kind === "progress") {
@@ -234,6 +255,85 @@ function publishStreamEvent(event: StreamBusEvent): void {
     .catch((err) => log.warn("[run-stream] events publish failed:", err instanceof Error ? err.message : err));
 }
 
+/* ─────────────────────────────────────────────────────────────────────
+   Late follow-ups ride the answer's own SSE stream.
+
+   claw generates follow-up suggestions AFTER the answer, so they reach
+   /callback/follow-ups seconds after `done`. Rather than closing on `done`
+   and having the dashboard poll conversation history, the route holds the
+   answer stream open (bounded by CONFIG.followUpStreamHoldMs), writes
+   `event: follow-ups` the moment they land, then closes. claw's POST can
+   land on any replica, so delivery reuses the bus above; only the pod
+   holding the stream writes. The callback persists BEFORE delivering, so a
+   missed hold (expired, Redis down) costs liveness only.
+   ───────────────────────────────────────────────────────────────────── */
+interface FollowUpHold {
+  res: Response;
+  messageId: string | undefined;
+}
+/** Plain data keyed by streamId — nothing looked up here is ever invoked. */
+const followUpHolds = new Map<string, FollowUpHold>();
+/** Follow-ups that beat their own answer's `done` on the owning pod (an
+ *  instant fallback when generation fails fast). Consumed when the hold starts. */
+const earlyFollowUps = new Map<string, string[]>();
+
+/** Write the follow-ups and end the answer stream; ending it releases the hold. */
+function writeLateFollowUps(hold: FollowUpHold, suggestions: string[]): void {
+  const { res, messageId } = hold;
+  if (res.writableEnded || res.destroyed) return;
+  try {
+    res.write(`event: follow-ups\ndata: ${JSON.stringify({ suggestions, ...(messageId ? { id: messageId } : {}) })}\n\n`);
+    res.end();
+  } catch { /* client already gone; its 'close' releases the hold */ }
+}
+
+/** True when this pod owns the stream (held now, or still running). */
+function deliverLateFollowUpsLocally(streamId: string, suggestions: string[]): boolean {
+  const hold = followUpHolds.get(streamId);
+  if (hold) {
+    writeLateFollowUps(hold, suggestions);
+    return true;
+  }
+  if (pendingStreams.has(streamId)) {
+    earlyFollowUps.set(streamId, suggestions);
+    setTimeout(() => earlyFollowUps.delete(streamId), CONFIG.followUpStreamHoldMs + 60_000).unref();
+    return true;
+  }
+  return false;
+}
+
+/** After `done`: wait until this answer's follow-ups are written as
+ *  `event: follow-ups` (which ends `res`), the hold lapses, or the client
+ *  leaves. The caller ends `res` if it is still open. */
+function holdForLateFollowUps(res: Response, streamId: string, messageId: string | undefined): Promise<void> {
+  if (CONFIG.followUpStreamHoldMs <= 0 || res.writableEnded || res.destroyed) return Promise.resolve();
+  return new Promise<void>((resolve) => {
+    const hold: FollowUpHold = { res, messageId };
+    let settled = false;
+    const finish = (): void => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      if (followUpHolds.get(streamId) === hold) followUpHolds.delete(streamId);
+      res.off("finish", finish);
+      res.off("close", finish);
+      resolve();
+    };
+    const timer = setTimeout(() => {
+      log.info(`[follow-ups] stream hold lapsed streamId=${streamId} after ${CONFIG.followUpStreamHoldMs}ms`);
+      finish();
+    }, CONFIG.followUpStreamHoldMs);
+    res.on("finish", finish);
+    res.on("close", finish);
+    followUpHolds.set(streamId, hold);
+    const early = earlyFollowUps.get(streamId);
+    if (early) {
+      earlyFollowUps.delete(streamId);
+      writeLateFollowUps(hold, early);
+    }
+  });
+}
+
 /**
  * Persist the assistant message + tool-generated attachments for a finished
  * run. Called from the /callback handler (pod-independent). Idempotent
@@ -250,6 +350,7 @@ export async function persistRunStreamResult(args: {
   content: string;
   status: "completed" | "failed" | "cancelled";
   orgId: string;
+  generateTitle?: boolean;
   attachments?: StreamAttachment[];
   sessionId?: string;
   pendingActions?: Array<Record<string, unknown>>;
@@ -389,6 +490,17 @@ export async function persistRunStreamResult(args: {
     }
   }
 
+  if (args.status === "completed") {
+    void maybeGenerateConversationTitle({
+      conversationId: args.conversationId,
+      agentSlug: args.agentSlug,
+      userId: args.userId,
+      orgId: args.orgId,
+      assistantReply: args.content,
+      ...(args.generateTitle !== undefined ? { generateTitle: args.generateTitle } : {}),
+    }).catch((err) => log.warn("[run-stream] chat title generation failed:", errMsg(err)));
+  }
+
   return { messageId: assistantMsg.id, persistedAttachments };
 }
 
@@ -413,7 +525,6 @@ publicRouter.post("/", requireAuth, requireNoAccessToken, async (req: Request, r
 
   try {
     const {
-      userId,
       userName,
       userEmail,
       task,
@@ -452,6 +563,7 @@ publicRouter.post("/", requireAuth, requireNoAccessToken, async (req: Request, r
       agentConfig,
       additionalInstructions,
       generateFollowUpSuggestions,
+      generateTitle,
       // Branching: same semantics as the /agent-chat/:slug/chat route.
       isRegenerate,
       isEditUserMessage,
@@ -471,10 +583,14 @@ publicRouter.post("/", requireAuth, requireNoAccessToken, async (req: Request, r
       return;
     }
 
-    if (!userId || typeof userId !== "string") {
+    // Declared separately (typed `string`) so the canonicalization below can
+    // reassign it: a destructured `unknown` binding would lose its narrowing.
+    const rawUserId = (req.body as Record<string, unknown>)["userId"];
+    if (!rawUserId || typeof rawUserId !== "string") {
       res.status(400).json({ success: false, error: "userId is required" });
       return;
     }
+    let userId: string = rawUserId;
 
     if (studioMode !== undefined && studioMode !== "design") {
       res.status(400).json({ success: false, error: "Unknown studioMode" });
@@ -611,13 +727,50 @@ publicRouter.post("/", requireAuth, requireNoAccessToken, async (req: Request, r
       : applyAiScreenCommand(task).task;
 
     const sessionUserId = req.headers["x-user-id"];
-    if (typeof sessionUserId === "string" && sessionUserId && sessionUserId !== userId) {
+    // Spaces sends its workspace membership ID in the body while requireAuth
+    // resolves the verified session to Claw's canonical user ID. They are two
+    // representations of the same caller, not an attempted cross-user run.
+    if (typeof sessionUserId === "string" && sessionUserId && !matchesAuthenticatedUserId(req, userId)) {
       res.status(403).json({ success: false, error: "Body userId does not match authenticated session" });
       return;
     }
+    // Canonicalize once: everything downstream — ACL checks (isClawAdmin,
+    // getAgentEditAccess), user-agent config, local-harness device lookup and
+    // session-token minting, and every persisted chat/run/attachment row —
+    // keys on Claw's canonical user id. The verified session header already
+    // carries it; an S2S caller that pinned only the raw alias is resolved
+    // through the identity ladder (fail-open to the supplied id).
+    userId = typeof sessionUserId === "string" && sessionUserId
+      ? sessionUserId
+      : await resolveCanonicalUserIdOrSelf(userId, requestWorkspaceHint(req));
 
     const slug = typeof agentSlug === "string" && agentSlug ? agentSlug : "assistant";
     const convId = typeof conversationId === "string" && conversationId ? conversationId : `chat-${randomUUID()}`;
+
+    // Conversation-ownership guard, BEFORE any convId-keyed side effect (message
+    // persist, branch clone). Claw sessions are shared per thread (keyed by
+    // conversationId, not userId), so a caller supplying another user's
+    // conversationId could attach to and poison their session. Skip for genuine
+    // S2S callers; new conversations (no supplied conversationId) pass.
+    // The Spaces conversation-access check matches channel_participants by the
+    // workspace-scoped Spaces id, so pass the raw `x-spaces-user-id` (set by
+    // stampVerifiedIdentity) — NOT the canonical `x-user-id`, which Spaces can't resolve.
+    const spacesRequesterId = req.headers["x-spaces-user-id"];
+    const accessCheckUserId =
+      typeof spacesRequesterId === "string" && spacesRequesterId
+        ? spacesRequesterId
+        : (typeof sessionUserId === "string" && sessionUserId ? sessionUserId : userId);
+    if (
+      typeof conversationId === "string" && conversationId &&
+      accessCheckUserId && !s2sKeyMatches(req.headers["x-s2s-key"] as string | undefined)
+    ) {
+      const accessError = await conversationAccessError(accessCheckUserId, [conversationId]);
+      if (accessError) {
+        log.warn(`[run-stream] conversation access denied userId=${accessCheckUserId} conversationId=${conversationId}`);
+        res.status(403).json({ success: false, error: accessError });
+        return;
+      }
+    }
     const requestOrgId = typeof req.headers["x-org-id"] === "string" && req.headers["x-org-id"].trim()
       ? req.headers["x-org-id"].trim()
       : undefined;
@@ -635,6 +788,7 @@ publicRouter.post("/", requireAuth, requireNoAccessToken, async (req: Request, r
         description: true,
         config: true,
         systemPrompt: true,
+        delegationTier: true,
       },
     }).catch(() => null);
     if (!agentRow) {
@@ -658,6 +812,7 @@ publicRouter.post("/", requireAuth, requireNoAccessToken, async (req: Request, r
         ? researchContext as { type?: unknown; id?: unknown }
         : undefined,
       convId,
+      requestWorkspaceHint(req),
     );
     if (!sdlcResolution.ok) {
       res.status(sdlcResolution.status).json({ success: false, error: sdlcResolution.error });
@@ -666,7 +821,7 @@ publicRouter.post("/", requireAuth, requireNoAccessToken, async (req: Request, r
     const sdlcContext =
       sdlcResolution.repository?.agentContext ??
       (typeof channelId === "string"
-        ? await resolveSdlcHubContextForUser(userId, channelId, convId)
+        ? await resolveSdlcHubContextForUser(userId, channelId, convId, requestWorkspaceHint(req))
         : undefined);
 
     // Resolve the agent's provider credentials so this SSE run uses the agent's
@@ -865,6 +1020,16 @@ publicRouter.post("/", requireAuth, requireNoAccessToken, async (req: Request, r
           log.warn("[run-stream] Failed to persist user message:", errMsg(msgErr));
         }
       }
+    }
+
+    if (convId && userId && createdUserMessageId) {
+      void maybeGenerateConversationTitle({
+        conversationId: convId,
+        agentSlug: slug,
+        userId,
+        orgId,
+        ...(generateTitle !== undefined ? { generateTitle: Boolean(generateTitle) } : {}),
+      }).catch((err) => log.warn("[run-stream] chat title generation failed:", errMsg(err)));
     }
 
     // Pre-create the running assistant placeholder. Its id powers PI session
@@ -1208,6 +1373,10 @@ publicRouter.post("/", requireAuth, requireNoAccessToken, async (req: Request, r
         conversationId: convId,
         agentSlug: slug,
         userId,
+        // Our own run row was written at status "running" above, before dispatch.
+        // Without this the handoff finds it, interrupts a session claw has never
+        // started, and polls itself for the full 30s timeout.
+        currentSessionId: runSessionId,
         onLabel: (label) => pendingStreams.get(streamId)?.sendEvent("label", { toolLabel: label }),
       });
       if (handoff.handedOff) {
@@ -1219,7 +1388,14 @@ publicRouter.post("/", requireAuth, requireNoAccessToken, async (req: Request, r
     // resolve the placeholder without depending on local pendingStreams.
     const internalCallbackUrl = `${CONFIG.internalUrl}/claw/api/v1/internal/run-stream/${streamId}/callback` +
       (assistantMsg ? `?assistantMessageId=${encodeURIComponent(assistantMsg.id)}` : "");
-    const internalProgressUrl = `${CONFIG.internalUrl}/claw/api/v1/internal/run-stream/${streamId}/progress`;
+    // A card needs the row it belongs on, which claw cannot know; conversation
+    // + agent ride in on the widget body instead.
+    const internalProgressUrl = `${CONFIG.internalUrl}/claw/api/v1/internal/run-stream/${streamId}/progress` +
+      (assistantMsg ? `?assistantMessageId=${encodeURIComponent(assistantMsg.id)}` : "");
+    // Composed here so both the base field and the design/page override use it.
+    const aiScreenInstructions = withAiScreenPresentationInstructions(
+      typeof additionalInstructions === "string" ? additionalInstructions : undefined,
+    );
     const incomingAgentConfig = agentConfig && typeof agentConfig === "object" && !Array.isArray(agentConfig)
       ? agentConfig as Record<string, unknown>
       : {};
@@ -1342,12 +1518,16 @@ publicRouter.post("/", requireAuth, requireNoAccessToken, async (req: Request, r
       researchContext,
       webSearchEnabled,
       deepResearchEnabled,
-      agentConfig: enrichedAgentConfig,
-      additionalInstructions,
+      agentConfig: withAiScreenPresentationTools(
+        enrichedAgentConfig,
+        (agentRow.config as Record<string, unknown> | null)?.["tools"],
+        agentRow.delegationTier,
+      ),
+      additionalInstructions: aiScreenInstructions,
       ...(designSelectionInstruction || pageSelectionInstruction || openItemsInstruction
         ? {
             additionalInstructions: [
-              typeof additionalInstructions === "string" ? additionalInstructions.trim() : "",
+              aiScreenInstructions,
               designSelectionInstruction,
               pageSelectionInstruction,
               openItemsInstruction,
@@ -1422,7 +1602,7 @@ publicRouter.post("/", requireAuth, requireNoAccessToken, async (req: Request, r
           "../services/agentChatContextService.js"
         );
         const { getSpacesAuthForUser } = await import("../lib/spaces-db.js");
-        const auth = await getSpacesAuthForUser(userId);
+        const auth = await getSpacesAuthForUser(userId, "agent-chat", requestWorkspaceHint(req));
         const normalized = normalizeAttachedContext(forwardedAttachedContext);
         if (auth && normalized.items.length > 0) {
           const payload = await buildAttachedContextPayload(normalized.items, auth);
@@ -1650,7 +1830,8 @@ publicRouter.post("/", requireAuth, requireNoAccessToken, async (req: Request, r
           ...(result.followUpSuggestions?.length ? { followUpSuggestions: result.followUpSuggestions } : {}),
           ...(result.followUpsPending === true ? { followUpsPending: true } : {}),
         })}\n\n`);
-        res.end();
+        if (result.followUpsPending === true) await holdForLateFollowUps(res, streamId, assistantMsg?.id);
+        if (!res.writableEnded) res.end();
       }
       return;
     }
@@ -1732,7 +1913,8 @@ publicRouter.post("/", requireAuth, requireNoAccessToken, async (req: Request, r
         ...(result.followUpSuggestions?.length ? { followUpSuggestions: result.followUpSuggestions } : {}),
         ...(result.followUpsPending === true ? { followUpsPending: true } : {}),
       })}\n\n`);
-      res.end();
+      if (result.followUpsPending === true) await holdForLateFollowUps(res, streamId, assistantMsg?.id);
+      if (!res.writableEnded) res.end();
     }
 
   } catch (err) {
@@ -1787,7 +1969,10 @@ publicRouter.post("/cancel", requireAuth, requireNoAccessToken, async (req: Requ
     }
 
     const run = await agentRunRepository.findBySessionId(sessionId);
-    if (!run || run.userId !== userId) {
+    // run.userId may be keyed by EITHER verified representation of the caller
+    // (canonical Claw id or the raw Spaces id the session was started under),
+    // so a strict equality check would 404 the legitimate owner.
+    if (!run || (run.userId !== userId && !matchesAuthenticatedUserId(req, run.userId))) {
       res.status(404).json({ success: false, error: "Run not found" });
       return;
     }
@@ -1800,12 +1985,14 @@ publicRouter.post("/cancel", requireAuth, requireNoAccessToken, async (req: Requ
       return;
     }
 
+    // Forward the run's stored owner id (not the requester): the pod compares
+    // x-user-id against the id the run was dispatched with.
     const cancelRes = await fetch(`${CONFIG.internalUrl}/claw/api/v1/internal/run/${encodeURIComponent(sessionId)}/cancel`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
         ...(CONFIG.xyneClawS2sKey ? { "x-s2s-key": CONFIG.xyneClawS2sKey } : {}),
-        "x-user-id": userId,
+        "x-user-id": run.userId,
       },
     });
 
@@ -1863,6 +2050,78 @@ internalRouter.post("/:streamId/progress", (req: Request<{ streamId: string }>, 
       events.push({ event: "delta", data: { content: body.textDelta } });
     } else if (Array.isArray(body.todos)) {
       events.push({ event: "plan", data: { todos: body.todos, ...(typeof body.planTitle === "string" ? { title: body.planTitle } : {}) } });
+    } else if (body.kind === "ui-widget" && body.widget) {
+      // Async, so it can't join the `events` batch. streamMeta is a same-pod
+      // fast path only — a late card needs the identity on the body/URL.
+      const meta = streamMeta.get(streamId);
+      const bodyStr = (key: string): string | undefined =>
+        typeof body[key] === "string" && body[key] ? (body[key] as string) : undefined;
+      const widgetConversationId = bodyStr("conversationId") ?? meta?.conversationId;
+      const widgetAgentSlug = bodyStr("agentSlug") ?? meta?.agentSlug;
+      const queryAssistantMessageId = req.query["assistantMessageId"];
+      const widgetAssistantMessageId =
+        (typeof queryAssistantMessageId === "string" && queryAssistantMessageId
+          ? queryAssistantMessageId
+          : undefined) ?? meta?.assistantMessageId;
+      if (widgetConversationId && widgetAgentSlug) {
+        void (async () => {
+          try {
+            const { isUiWidget } = await import("xyne-claw-shared");
+            if (!isUiWidget(body.widget)) return;
+            const { deliverXyneAiWidget } = await import("./webhook.js");
+            const flow = await deliverXyneAiWidget({
+              widget: body.widget,
+              agentSlug: widgetAgentSlug,
+              conversationId: widgetConversationId,
+              userId: meta?.userId,
+              orgId: meta?.orgId,
+              assistantMessageId: widgetAssistantMessageId,
+            });
+            if (!flow) return;
+            const target = pendingStreams.get(streamId);
+            if (target) target.sendEvent("ui-flow", { flow });
+            else publishStreamEvent({ kind: "progress", streamId, events: [{ event: "ui-flow", data: { flow } }] });
+          } catch (err) {
+            log.warn(`[run-stream] ui-flow progress delivery failed: ${errMsg(err)}`);
+          }
+        })();
+      } else {
+        log.warn(`[run-stream] ui-widget progress with no conversation identity stream=${streamId}; card dropped`);
+      }
+    } else if (body.kind === "pr" && body.pr) {
+      // Display-only, so nothing routes back. Same identity resolution as the
+      // ui-widget branch above.
+      const meta = streamMeta.get(streamId);
+      const queryAssistantMessageId = req.query["assistantMessageId"];
+      const prAssistantMessageId =
+        (typeof queryAssistantMessageId === "string" && queryAssistantMessageId
+          ? queryAssistantMessageId
+          : undefined) ?? meta?.assistantMessageId;
+      void (async () => {
+        try {
+          const { readPrProgressFact, renderXyneAiPrCard } = await import("../lib/pr-card-render.js");
+          const fact = readPrProgressFact(body.pr);
+          if (!fact) return;
+          const { resolveXyneAiCardTarget } = await import("../lib/flow-card-delivery.js");
+          const target = await resolveXyneAiCardTarget({
+            assistantMessageId: prAssistantMessageId,
+            conversationId:
+              (typeof body["conversationId"] === "string" ? body["conversationId"] : undefined) ??
+              meta?.conversationId,
+            agentSlug:
+              (typeof body["agentSlug"] === "string" ? body["agentSlug"] : undefined) ??
+              meta?.agentSlug,
+          });
+          if (!target) return;
+          const flow = await renderXyneAiPrCard({ pr: fact, target });
+          if (!flow) return;
+          const stream = pendingStreams.get(streamId);
+          if (stream) stream.sendEvent("ui-flow", { flow });
+          else publishStreamEvent({ kind: "progress", streamId, events: [{ event: "ui-flow", data: { flow } }] });
+        } catch (err) {
+          log.warn(`[run-stream] pr card delivery failed: ${errMsg(err)}`);
+        }
+      })();
     } else if (body.attachment) {
       events.push({ event: "attachment", data: body.attachment });
     } else if (body.debugEvent) {
@@ -1948,10 +2207,10 @@ internalRouter.post("/:streamId/callback", async (req: Request<{ streamId: strin
       : undefined;
 
     const harnessUnreachableNotice = body["localHarnessUnreachable"] === true
-      ? `⚠️ I couldn't reach **${localHarnessProviderLabel(typeof body["localHarnessProvider"] === "string" ? body["localHarnessProvider"] : "your local harness")}** on your machine, and running this on Xyne's servers instead didn't start either. Open the Xyne desktop app (or turn off the local harness for this agent) and try again.`
+      ? `I couldn't reach **${localHarnessProviderLabel(typeof body["localHarnessProvider"] === "string" ? body["localHarnessProvider"] : "your local harness")}** on your machine, and running this on Xyne's servers instead didn't start either. Open the Xyne desktop app (or turn off the local harness for this agent) and try again.`
       : undefined;
 
-    const content = harnessUnreachableNotice
+    const baseContent = harnessUnreachableNotice
       ? harnessUnreachableNotice
       : isSessionLockedFailure
       ? SESSION_LOCKED_USER_MESSAGE
@@ -1994,6 +2253,72 @@ internalRouter.post("/:streamId/callback", async (req: Request<{ streamId: strin
     // Branching: resolve the placeholder assistant id — query param wins
     // (cross-pod safe), streamMeta is the same-pod fast path.
     const assistantMessageId = queryAssistantMessageId ?? meta?.assistantMessageId;
+
+    // propose-agent ends its run with an EMPTY result on purpose — the draft
+    // card is the deliverable. The Spaces-thread path (webhook.ts) intercepts
+    // it; without the same branch here the empty-result guard in
+    // persistRunStreamResult rewrites the turn as "The model returned
+    // nothing…" and the draft is lost. So: persist the AgentRequest, put the
+    // card on the assistant row, and use the agent's own summary as the turn's
+    // text. Runs BEFORE persistence so the content is right the first time.
+    const pendingAgentCard = body["pendingAgentCard"] as
+      | { variant?: string; slug?: string; slugs?: string[]; agent?: DraftAgentSpec }
+      | undefined;
+    let draftCardFlow: FlowDefinition | undefined;
+    let draftContent: string | undefined;
+    if (
+      pendingAgentCard?.variant === "draft" &&
+      pendingAgentCard.agent &&
+      status === "completed" &&
+      !rawResult.trim()
+    ) {
+      const spec = pendingAgentCard.agent;
+      // claw retries callbacks; only the first delivery may create the
+      // AgentRequest + append the card (Redis down fails open, like persist).
+      // Keyed per assistant reply (not per session) so a later draft in the
+      // same conversation still gets its own card.
+      const claimed = assistantMessageId
+        ? await redisService.getConnection()
+            .set(`${STREAM_PERSIST_KEY_PREFIX}agent-draft:${assistantMessageId}`, "1", "EX", 86_400, "NX")
+            .catch(() => "OK" as const)
+        : "OK";
+      try {
+        const { prepareAgentDraftCard, agentDraftLeadIn } = await import("../lib/agent-card-render.js");
+        draftContent = agentDraftLeadIn(spec);
+        if (claimed === "OK") {
+          const { resolveXyneAiCardTarget, postFlowCard } = await import("../lib/flow-card-delivery.js");
+          const draftTarget = await resolveXyneAiCardTarget({ assistantMessageId });
+          if (!draftTarget) {
+            log.warn(`[agent-card] xyne-ai draft skipped — no assistant row for stream=${streamId}`);
+            draftContent = AGENT_DRAFT_DELIVERY_FAILED;
+          } else {
+            const prepared = await prepareAgentDraftCard(spec, {
+              agentSlug: draftTarget.agentSlug,
+              orgId: draftTarget.orgId,
+              userId: draftTarget.userId,
+              conversationId: draftTarget.conversationId,
+              channelId: "",
+              spacesAppId: draftTarget.spacesAppId,
+            });
+            if (!prepared.ok) {
+              draftContent = prepared.message;
+            } else {
+              // postFlowCard stamps surface/chatMessageId (so approval is
+              // routed back to this row) and persists it in uiFlows, so the
+              // card survives a reload.
+              draftCardFlow = await postFlowCard(prepared.flow, draftTarget);
+              log.info(
+                `[agent-card] xyne-ai draft card slug=${spec.slug} request=${prepared.requestId} conv=${draftTarget.conversationId}`,
+              );
+            }
+          }
+        }
+      } catch (draftErr) {
+        log.error(`[agent-card] xyne-ai draft card failed slug=${spec.slug}:`, errMsg(draftErr));
+        draftContent = AGENT_DRAFT_DELIVERY_FAILED;
+      }
+    }
+    const content = draftContent ?? baseContent;
 
     // DURABLE write: persist the assistant message + attachments here, on
     // whichever pod received the callback. SETNX guard on sessionId stops
@@ -2039,6 +2364,181 @@ internalRouter.post("/:streamId/callback", async (req: Request<{ streamId: strin
       }
     } else {
       log.warn(`[run-stream] callback streamId=${streamId} missing meta (userId/conversationId) — message persistence skipped`);
+    }
+
+
+    if (draftCardFlow) {
+      // Same reason as the sibling cards below: the terminal payload has no
+      // uiFlows slot, so the card goes on the wire to paint without a refetch.
+      const draftStream = pendingStreams.get(streamId);
+      if (draftStream) draftStream.sendEvent("ui-flow", { flow: draftCardFlow });
+      else
+        publishStreamEvent({
+          kind: "progress",
+          streamId,
+          events: [{ event: "ui-flow", data: { flow: draftCardFlow } }],
+        });
+    }
+    if (pendingAgentCard?.variant && pendingAgentCard.variant !== "draft") {
+      try {
+        const { resolveXyneAiCardTarget } = await import("../lib/flow-card-delivery.js");
+        const cardTarget = await resolveXyneAiCardTarget({ assistantMessageId });
+        if (!cardTarget) {
+          log.info(`[agent-card] xyne-ai card skipped — no assistant row for stream=${streamId}`);
+        } else {
+          const {
+            renderAgentProfileCard,
+            renderAgentProfileListCard,
+            renderAgentSummaryCard,
+          } = await import("../lib/agent-card-render.js");
+          const identity = {
+            agentSlug: cardTarget.agentSlug,
+            orgId: cardTarget.orgId,
+            userId: cardTarget.userId,
+            conversationId: cardTarget.conversationId,
+            channelId: "",
+            spacesAppId: cardTarget.spacesAppId,
+          };
+          const delivered =
+            pendingAgentCard.variant === "profile"
+              ? await renderAgentProfileCard(
+                  pendingAgentCard.slug?.trim() || cardTarget.agentSlug,
+                  identity,
+                  cardTarget,
+                )
+              : pendingAgentCard.variant === "summary"
+                ? await renderAgentSummaryCard(identity, cardTarget)
+                : pendingAgentCard.variant === "profile-list"
+                  ? await renderAgentProfileListCard(pendingAgentCard.slugs ?? [], identity, cardTarget)
+                  : null;
+          if (!delivered) {
+            log.info(`[agent-card] xyne-ai no card for variant "${pendingAgentCard.variant}"`);
+          } else {
+            const cardStream = pendingStreams.get(streamId);
+            if (cardStream) cardStream.sendEvent("ui-flow", { flow: delivered });
+            else
+              publishStreamEvent({
+                kind: "progress",
+                streamId,
+                events: [{ event: "ui-flow", data: { flow: delivered } }],
+              });
+          }
+        }
+      } catch (cardErr) {
+        log.warn(`[agent-card] xyne-ai card failed:`, errMsg(cardErr));
+      }
+    }
+
+    // Connector + provider suggestion cards. Both are display plus client-side
+    // connect, so there is no server action or terminal state to make
+    // surface-aware — delivery is the whole job. Connector cards come only
+    // from the agent's suggest-connectors call; provider cards are read from
+    // the user's own words.
+    try {
+      const { resolveXyneAiCardTarget } = await import("../lib/flow-card-delivery.js");
+      const suggestTarget = await resolveXyneAiCardTarget({ assistantMessageId });
+      if (suggestTarget) {
+        // The user's own words, read off the row rather than streamMeta.
+        const ask = await prisma.chatMessage
+          .findFirst({
+            where: { conversationId: suggestTarget.conversationId, role: "user" },
+            orderBy: { createdAt: "desc" },
+            select: { content: true },
+          })
+          .catch(() => null);
+        const taskText = ask?.content ?? "";
+        if (taskText) {
+          const { renderConnectorSuggestCard, renderProviderSuggestCard } = await import(
+            "../lib/connector-card-render.js"
+          );
+          const suggestIdentity = {
+            agentSlug: suggestTarget.agentSlug,
+            agentOrgId: suggestTarget.orgId,
+            userId: suggestTarget.userId,
+            conversationId: suggestTarget.conversationId,
+            channelId: "",
+            spacesAppId: suggestTarget.spacesAppId,
+          };
+          const blocked = Array.isArray(body["blockedConnectors"])
+            ? (body["blockedConnectors"] as string[])
+            : undefined;
+          const connectorSuggestions = body["pendingConnectorSuggestions"] as
+            | { serverTypes: string[]; listAll?: boolean; title?: string }
+            | undefined;
+          const delivered: Array<FlowDefinition | null> = [];
+          if (connectorSuggestions) {
+            delivered.push(
+              await renderConnectorSuggestCard({
+                suggestions: connectorSuggestions,
+                blockedConnectors: blocked,
+                id: suggestIdentity,
+                target: suggestTarget,
+              }),
+            );
+          }
+          const providerSuggestions = body["pendingProviderSuggestions"] as
+            | { providers: string[]; listAll?: boolean; title?: string }
+            | undefined;
+          if (providerSuggestions) {
+            delivered.push(
+              await renderProviderSuggestCard({
+                suggestions: providerSuggestions,
+                id: suggestIdentity,
+                target: suggestTarget,
+              }),
+            );
+          }
+          // Same reason as the agent cards: the terminal payload has no uiFlows
+          // slot, so a card must go on the wire to paint without a refetch.
+          for (const flow of delivered) {
+            if (!flow) continue;
+            const suggestStream = pendingStreams.get(streamId);
+            if (suggestStream) suggestStream.sendEvent("ui-flow", { flow });
+            else
+              publishStreamEvent({
+                kind: "progress",
+                streamId,
+                events: [{ event: "ui-flow", data: { flow } }],
+              });
+          }
+        }
+      }
+    } catch (suggestErr) {
+      log.warn(`[connector-card] xyne-ai suggestion cards failed:`, errMsg(suggestErr));
+    }
+
+    // Request side only — action and result are surface-aware in flow-action.ts.
+    // A pending action with no card keeps its raw row, so a delivery failure
+    // cannot make it unapprovable.
+    if (pendingActions?.length) {
+      try {
+        const { resolveXyneAiCardTarget } = await import("../lib/flow-card-delivery.js");
+        const ticketTarget = await resolveXyneAiCardTarget({ assistantMessageId });
+        if (ticketTarget) {
+          const { readPendingWriteAction, renderXyneAiWriteApprovalCard } = await import(
+            "../lib/write-card-render.js"
+          );
+          for (const raw of pendingActions) {
+            const writeAction = readPendingWriteAction(raw);
+            if (!writeAction) continue;
+            const flow = await renderXyneAiWriteApprovalCard({
+              action: writeAction,
+              target: ticketTarget,
+            });
+            if (!flow) continue;
+            const ticketStream = pendingStreams.get(streamId);
+            if (ticketStream) ticketStream.sendEvent("ui-flow", { flow });
+            else
+              publishStreamEvent({
+                kind: "progress",
+                streamId,
+                events: [{ event: "ui-flow", data: { flow } }],
+              });
+          }
+        }
+      } catch (ticketErr) {
+        log.warn(`[ticket-card] xyne-ai ticket card failed:`, errMsg(ticketErr));
+      }
     }
 
     // Finalize AgentRun (same pattern as /agent-chat). Pod-independent —
@@ -2127,10 +2627,10 @@ internalRouter.post("/:streamId/callback", async (req: Request<{ streamId: strin
 });
 
 /**
- * Persists contextual follow-ups that finish after the main answer callback.
- * The answer stream is already closed at this point, so conversation history
- * is the durable delivery channel; the dashboard's bounded reconciliation
- * picks up the recorder without delaying the answer.
+ * Persists contextual follow-ups that finish after the main answer callback,
+ * then pushes them down the answer stream, which the route holds open after
+ * `done` for exactly this (see holdForLateFollowUps). Conversation history
+ * stays the durable channel when the hold has already lapsed.
  */
 internalRouter.post(
   "/:streamId/callback/follow-ups",
@@ -2183,6 +2683,10 @@ internalRouter.post(
       await agentRunRepository.flushToolInvocations(sessionId);
       await Promise.all(appended);
       log.info(`[follow-ups] persisted late suggestions streamId=${req.params.streamId} sessionId=${sessionId} count=${suggestions.length}`);
+      // Persisted first (durable); now push them down the held answer stream.
+      if (!deliverLateFollowUpsLocally(req.params.streamId, suggestions)) {
+        publishStreamEvent({ kind: "follow_ups", streamId: req.params.streamId, suggestions });
+      }
       res.json({ success: true });
     } catch (err) {
       log.warn(`[follow-ups] failed to persist late suggestions sessionId=${sessionId}:`, errMsg(err));
@@ -2302,9 +2806,44 @@ async function runViaSseTransport(opts: RunViaSseOpts): Promise<void> {
       onUiWidget: (_sid, widget) => {
         if (widget.type === "plan") {
           stream.sendEvent("plan", { todos: widget.payload.todos });
-        } else {
-          stream.sendEvent("ui-widget", { widget });
+          return;
         }
+        void (async () => {
+          try {
+            const { deliverXyneAiWidget } = await import("./webhook.js");
+            const flow = await deliverXyneAiWidget({
+              widget,
+              agentSlug: slug,
+              conversationId: convId,
+              userId,
+              orgId,
+              assistantMessageId,
+            });
+            if (flow) stream.sendEvent("ui-flow", { flow });
+          } catch (err) {
+            log.warn(`[run-stream/sse] ui-flow emit failed: ${errMsg(err)}`);
+          }
+        })();
+      },
+      onPr: (_sid, pr) => {
+        void (async () => {
+          try {
+            const { readPrProgressFact, renderXyneAiPrCard } = await import("../lib/pr-card-render.js");
+            const fact = readPrProgressFact(pr);
+            if (!fact) return;
+            const { resolveXyneAiCardTarget } = await import("../lib/flow-card-delivery.js");
+            const target = await resolveXyneAiCardTarget({
+              assistantMessageId,
+              conversationId: convId,
+              agentSlug: slug,
+            });
+            if (!target) return;
+            const flow = await renderXyneAiPrCard({ pr: fact, target });
+            if (flow) stream.sendEvent("ui-flow", { flow });
+          } catch (err) {
+            log.warn(`[run-stream/sse] pr card emit failed: ${errMsg(err)}`);
+          }
+        })();
       },
       onSandboxPreview: (sessionId, payload) => {
         // Sandbox preview today lands on /webhook/progress which posts the
@@ -2423,30 +2962,12 @@ async function runViaSseTransport(opts: RunViaSseOpts): Promise<void> {
       "Content-Type": "application/json",
       ...(CONFIG.xyneClawS2sKey ? { "x-s2s-key": CONFIG.xyneClawS2sKey } : {}),
     },
-    body: JSON.stringify({
+    body: JSON.stringify(buildCallbackBodyFromDone(r, {
       sessionId,
-      // Ship the meta explicitly so the receiving pod's /callback handler
-      // can persist without falling back to an agent_runs lookup when the
-      // POST load-balances away from the SSE pod.
       userId,
       conversationId: convId,
       agentSlug: slug,
-      status: r["status"],
-      // claw's sendCallback puts assistant text on `result` (both completed
-      // and cancelled paths). `.content` is kept as a forward-compat fallback.
-      result:
-        (r["result"] as string | undefined)
-        ?? (r["content"] as string | undefined)
-        ?? "",
-      ...(r["error"] ? { error: r["error"] } : {}),
-      ...(r["pendingActions"] ? { pendingActions: r["pendingActions"] } : {}),
-      ...(r["attachments"] ? { attachments: r["attachments"] } : {}),
-      ...(r["toolInvocations"] ? { toolInvocations: r["toolInvocations"] } : {}),
-      ...(r["pendingQuestions"] ? { pendingQuestions: r["pendingQuestions"] } : {}),
-      ...(r["toolsUsed"] ? { toolsUsed: r["toolsUsed"] } : {}),
-      ...(r["followUpsPending"] === true ? { followUpsPending: true } : {}),
-      ...((r["meta"] as Record<string, unknown> | undefined) ?? {}),
-    }),
+    })),
   });
   if (!cbRes.ok) {
     const text = await cbRes.text().catch(() => "");

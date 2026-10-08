@@ -12,6 +12,7 @@ import {
   UserRound,
 } from 'lucide-react';
 import { useAuth } from '../../hooks/useAuth';
+import { markJustOnboarded } from '../../components/Assistant/newUser';
 import { useZero } from '../../hooks/useZero';
 import { useChannelByName } from '../../hooks/useChannels';
 import { useProfilePictureUrl } from '../../hooks/useProfilePicture';
@@ -22,6 +23,7 @@ import {
   uploadProfilePicture as uploadProfilePictureViaApi,
 } from '../../services/userProfile/userProfileService';
 import { v4 as uuidv4 } from 'uuid';
+import { clearOrgCreator, getCreatedOrgName } from '../../utils/onboardingOrgCreator';
 import type { LocalHarnessInstallation } from '../../types/electron';
 import {
   LocalHarnessStepPanel,
@@ -30,8 +32,16 @@ import {
   platformNoun,
   type HarnessProvider,
 } from './LocalHarnessStep';
+import { InviteContactsStepPanel, InviteContactsPreview } from './InviteContactsStep';
+import { getUserContacts } from '../../services/clients/userContactsApi';
+import type { UserContact, UserContactsProvider } from '../../services/clients/userContactsApi';
 
-type StepKey = 'name' | 'company' | 'harness' | 'ai';
+type StepKey = 'name' | 'company' | 'invite' | 'harness';
+
+type ContactsStepState =
+  | { status: 'loading' }
+  | { status: 'skipped' }
+  | { status: 'ready'; contacts: UserContact[]; provider: UserContactsProvider };
 
 const TEAM_SIZE_OPTIONS = ['0-10', '11-100', '100-1000', '1000+'] as const;
 type TeamSize = (typeof TEAM_SIZE_OPTIONS)[number];
@@ -39,7 +49,6 @@ type TeamSize = (typeof TEAM_SIZE_OPTIONS)[number];
 interface OnboardingDraft {
   displayName?: string;
   role?: string;
-  companyName?: string;
   companySize?: TeamSize | '';
   photoFileName?: string;
 }
@@ -71,7 +80,11 @@ const QuestionnaireScreen = (): ReactElement | null => {
 
   const [displayName, setDisplayName] = useState(user?.['displayName'] || user?.name || '');
   const [role, setRole] = useState('');
-  const [companyName, setCompanyName] = useState('');
+  const createdOrgName = getCreatedOrgName(user?.email);
+  const hasCompanyStep = createdOrgName !== null;
+  // Steps fetched async (invite, harness) slot in after this index; skip them once the user is past it
+  const lastFixedStepIndexRef = useRef(0);
+  lastFixedStepIndexRef.current = hasCompanyStep ? 1 : 0;
   const [companySize, setCompanySize] = useState<TeamSize | ''>('');
   const [photoPreviewUrl, setPhotoPreviewUrl] = useState<string | null>(null);
   const [photoFileName, setPhotoFileName] = useState('');
@@ -84,15 +97,22 @@ const QuestionnaireScreen = (): ReactElement | null => {
   const [harnessDevice, setHarnessDevice] = useState({ name: 'This machine', platform: '' });
   const [selectedHarness, setSelectedHarness] = useState<HarnessProvider | null>(null);
   const [connectedHarness, setConnectedHarness] = useState<HarnessProvider | null>(null);
+  const [contactsState, setContactsState] = useState<ContactsStepState>({ status: 'loading' });
+  const [invitedContactEmails, setInvitedContactEmails] = useState<Set<string>>(new Set());
+  // In the browser there is nothing to detect; in Electron the harness step may still be
+  // appended after the last fixed step, so don't finish onboarding until detection settles.
+  const [isDetectingHarness, setIsDetectingHarness] = useState(
+    () => !!window.electronAPI?.localHarness,
+  );
 
   const { url: existingPictureUrl } = useProfilePictureUrl(user?.id || '', user?.picture);
   const effectivePhotoUrl = photoPreviewUrl || existingPictureUrl || null;
 
   const steps: StepKey[] = [
     'name',
-    'company',
+    ...(hasCompanyStep ? (['company'] as StepKey[]) : []),
+    ...(contactsState.status === 'ready' ? (['invite'] as StepKey[]) : []),
     ...(harnesses.length > 0 ? (['harness'] as StepKey[]) : []),
-    'ai',
   ];
   const clampedStep = Math.min(currentStep, steps.length - 1);
   const step: StepKey = steps[clampedStep] ?? 'name';
@@ -106,7 +126,6 @@ const QuestionnaireScreen = (): ReactElement | null => {
       const draft = JSON.parse(raw) as OnboardingDraft;
       if (draft.displayName) setDisplayName(draft.displayName);
       if (draft.role) setRole(draft.role);
-      if (draft.companyName) setCompanyName(draft.companyName);
       if (draft.companySize && (TEAM_SIZE_OPTIONS as readonly string[]).includes(draft.companySize))
         setCompanySize(draft.companySize);
       if (draft.photoFileName) setPhotoFileName(draft.photoFileName);
@@ -121,7 +140,6 @@ const QuestionnaireScreen = (): ReactElement | null => {
       const draft: OnboardingDraft = {
         displayName,
         role,
-        companyName,
         companySize,
         photoFileName,
       };
@@ -129,7 +147,7 @@ const QuestionnaireScreen = (): ReactElement | null => {
     } catch {
       // Storage may be unavailable (e.g. private mode); persistence is best-effort
     }
-  }, [draftStorageKey, displayName, role, companyName, companySize, photoFileName]);
+  }, [draftStorageKey, displayName, role, companySize, photoFileName]);
 
   useEffect(() => {
     const hash = `#${clampedStep + 1}`;
@@ -151,11 +169,46 @@ const QuestionnaireScreen = (): ReactElement | null => {
     let cancelled = false;
     void Promise.all([api.detect(), api.getStatus()])
       .then(([found, status]) => {
-        if (cancelled || currentStepRef.current > 1) return;
+        if (cancelled || currentStepRef.current > lastFixedStepIndexRef.current) return;
         setHarnesses(found.filter(install => install.authenticated));
         setHarnessDevice({ name: machineLabel(status.deviceName), platform: status.platform });
       })
-      .catch(() => {});
+      .catch(() => {})
+      .finally(() => {
+        if (!cancelled) setIsDetectingHarness(false);
+      });
+    return (): void => {
+      cancelled = true;
+    };
+  }, []);
+
+  /**
+   * Prefetch the user's contacts on mount so the invite step is ready by the time
+   * the user gets past the name/company steps.
+   */
+  useEffect(() => {
+    let cancelled = false;
+    void getUserContacts()
+      .then(result => {
+        if (cancelled) return;
+        if (
+          result.connected &&
+          result.provider &&
+          result.contacts.length > 0 &&
+          currentStepRef.current <= lastFixedStepIndexRef.current
+        ) {
+          setContactsState({
+            status: 'ready',
+            contacts: result.contacts,
+            provider: result.provider,
+          });
+        } else {
+          setContactsState({ status: 'skipped' });
+        }
+      })
+      .catch(() => {
+        if (!cancelled) setContactsState({ status: 'skipped' });
+      });
     return (): void => {
       cancelled = true;
     };
@@ -210,15 +263,15 @@ const QuestionnaireScreen = (): ReactElement | null => {
       await saveQuestionnaireResponse({
         questionnaireType: 'onboarding',
         payload: {
-          ...(companyName.trim()
+          ...(createdOrgName?.trim()
             ? {
                 company_name: {
                   question: 'Company name',
-                  answer: companyName.trim(),
+                  answer: createdOrgName.trim(),
                 },
               }
             : {}),
-          ...(companySize
+          ...(hasCompanyStep && companySize
             ? {
                 company_size: {
                   question: 'Company size',
@@ -237,7 +290,9 @@ const QuestionnaireScreen = (): ReactElement | null => {
     } catch {
       // Best-effort cleanup
     }
+    clearOrgCreator(user?.email);
 
+    if (user?.id) markJustOnboarded(user.id);
     authActor.send({ type: 'COMPLETE_ONBOARDING' });
 
     const workspaceId = user?.workspaceId;
@@ -247,120 +302,40 @@ const QuestionnaireScreen = (): ReactElement | null => {
     }
   };
 
+  // While contacts are loading or Electron is still detecting harnesses, the current last step may
+  // not really be last (invite/harness can still be appended), so hold off completing onboarding.
+  const isWaitingForSteps =
+    (contactsState.status === 'loading' || isDetectingHarness) && clampedStep >= steps.length - 1;
+
   const canAdvance = (): boolean => {
+    if (isWaitingForSteps) return false;
     if (step === 'name') return displayName.trim().length > 0;
-    if (step === 'company') return companyName.trim().length > 0 && companySize !== '';
+    if (step === 'company') return companySize !== '';
     return true;
   };
 
   const handleNext = (): void => {
+    if (!canAdvance()) return;
     if (clampedStep < steps.length - 1) {
-      if (!canAdvance()) return;
       setCurrentStep(clampedStep + 1);
       return;
     }
     void handleComplete();
   };
 
-  if (step === 'ai') {
-    return (
-      <div className='relative h-[100dvh] w-full overflow-x-hidden overflow-y-auto bg-white'>
-        <img
-          src='/svgs/xyne.svg'
-          alt='Xyne'
-          className='absolute left-6 top-6 h-7 w-auto md:left-12 md:top-[34px] md:h-[30px] lg:left-16'
-        />
-
-        <div className='mx-auto flex min-h-full w-full max-w-[920px] flex-col items-center justify-center px-4 pb-16 sm:px-6 md:justify-start md:pb-10 md:pt-[clamp(72px,12dvh,156px)]'>
-          <div className='flex h-[84px] w-[84px] shrink-0 items-center justify-center rounded-[22px] bg-gradient-to-b from-[#FF8C8C] to-[#FF4F4F] shadow-[0_16px_40px_rgba(255,79,79,0.24)] md:h-[118px] md:w-[118px] md:rounded-[30px]'>
-            <img
-              src='/svgs/icons/genius-star-white.svg'
-              alt=''
-              className='h-[48px] w-[48px] md:h-[66px] md:w-[66px]'
-            />
-          </div>
-
-          <h1 className='mt-[24px] text-center text-[30px] leading-[38px] font-bold text-[#242936] md:mt-[34px] md:text-[40px] md:leading-[48px]'>
-            Meet Xyne AI
-          </h1>
-          <p className='mt-[14px] max-w-[430px] text-center text-[16px] leading-[26px] font-medium text-[#5F646D] md:text-[18px] md:leading-[28px]'>
-            It&apos;s wherever you are, and it already knows what you&apos;re looking at
-          </p>
-
-          <div className='hidden grid-cols-2 gap-[38px] md:mt-[clamp(40px,6dvh,72px)] md:grid'>
-            <div>
-              <div className='relative h-[176px] w-[400px] max-w-full overflow-hidden rounded-[18px] border border-[#E1E5EC] bg-[#F8FAFD] shadow-[inset_0_-44px_62px_rgba(145,158,178,0.14)]'>
-                <div className='absolute inset-x-0 top-[80px] h-px bg-[#D9DEE7]' />
-                <div className='absolute left-0 top-[97px] h-[66px] w-[338px] rounded-r-[14px] bg-white shadow-[0_13px_28px_rgba(30,41,59,0.18)]'>
-                  <div className='absolute -left-[12px] top-[16px] h-[36px] w-[36px] overflow-hidden rounded-full bg-gradient-to-br from-[#98C464] to-[#DCA47C]'>
-                    <div className='absolute left-[13px] top-[9px] h-[18px] w-[18px] rounded-full bg-[#D19A72]' />
-                    <div className='absolute bottom-[-10px] left-[8px] h-[30px] w-[28px] rounded-t-full bg-[#6A2F1F]' />
-                  </div>
-                  <div className='absolute left-[38px] top-[15px] flex items-baseline gap-2.5'>
-                    <span className='text-[16px] leading-none font-bold text-[#242936]'>Alex</span>
-                    <span className='text-[14px] leading-none text-[#747B87]'>11:05</span>
-                  </div>
-                  <div className='absolute left-[38px] top-[39px] text-[17px] leading-none text-[#242936]'>
-                    Who owns the pricing page now?
-                  </div>
-                </div>
-                <div className='absolute left-[188px] top-[57px] flex h-[45px] w-[168px] items-center justify-center gap-5 rounded-[13px] border border-[#DDE3EC] bg-white shadow-[0_8px_18px_rgba(30,41,59,0.14)]'>
-                  <span className='text-[16px] leading-none font-normal text-[#8A929F]'>☺</span>
-                  <span className='relative h-4 w-4'>
-                    <span className='absolute left-[3px] top-[7px] h-px w-[10px] rounded-full bg-[#8A929F]' />
-                    <span className='absolute left-[3px] top-[4px] h-[7px] w-[7px] rotate-45 border-b border-l border-[#8A929F]' />
-                    <span className='absolute right-[1px] top-[7px] h-[7px] w-[6px] rounded-tr-full border-r border-t border-[#8A929F]' />
-                  </span>
-                  <span className='relative h-4 w-4'>
-                    <span className='absolute left-[1px] top-[3px] h-[11px] w-[14px] rounded-t-full border border-b-0 border-[#8A929F]' />
-                    <span className='absolute left-[1px] top-[9px] h-[6px] w-[3px] rounded-sm bg-[#8A929F]' />
-                    <span className='absolute right-[1px] top-[9px] h-[6px] w-[3px] rounded-sm bg-[#8A929F]' />
-                  </span>
-                  <img src='/svgs/icons/ai-bot-gradient-star.svg' alt='' className='h-4 w-4' />
-                </div>
-              </div>
-              <p className='mt-[22px] text-center text-[18px] leading-[24px] font-semibold text-black'>
-                Call from anywhere
-              </p>
-            </div>
-
-            <div>
-              <div className='relative h-[176px] w-[400px] max-w-full overflow-hidden rounded-[18px] border border-[#E1E5EC] bg-[#F8FAFD] shadow-[inset_0_-44px_62px_rgba(145,158,178,0.14)]'>
-                <div className='absolute inset-x-0 top-[66px] h-px bg-[#D9DEE7]' />
-                <div className='absolute left-[62px] top-[58px] h-[92px] w-[342px] rounded-[14px] bg-white shadow-[0_13px_28px_rgba(30,41,59,0.18)]'>
-                  <div className='absolute left-[20px] top-[23px] whitespace-nowrap text-[17px] leading-[23px] text-[#242936]'>
-                    <span className='rounded-[5px] bg-[#DCEAFF] px-1 text-[#4D8BFF]'>@xyne</span>
-                    <span className='ml-2'>create a ticket from this convo</span>
-                  </div>
-                  <div className='absolute bottom-[18px] left-[20px] flex gap-5 text-[19px] leading-none text-[#747C89]'>
-                    <span>+</span>
-                    <span>☺</span>
-                    <span>@</span>
-                    <span>#</span>
-                  </div>
-                </div>
-              </div>
-              <p className='mt-[22px] text-center text-[18px] leading-[24px] font-semibold text-black'>
-                Or just say @xyne
-              </p>
-            </div>
-          </div>
-
-          <button
-            type='button'
-            onClick={() => void handleComplete()}
-            disabled={isCompleting}
-            className='mt-[48px] inline-flex h-[56px] shrink-0 items-center gap-3 rounded-[12px] bg-[#FF6868] px-6 text-[18px] font-semibold text-white transition-colors hover:bg-[#FF5A5A] disabled:cursor-not-allowed disabled:opacity-60 md:mt-[clamp(40px,8dvh,120px)]'
-            data-track-category='Questionnaire'
-            data-track-name='EnterWorkspace'
-          >
-            {isCompleting ? 'Entering...' : 'Enter Workspace'}
-            <ArrowRight className='h-5 w-5' />
-          </button>
-        </div>
-      </div>
-    );
-  }
+  const photoUploadButton = (
+    <button
+      type='button'
+      onClick={() => fileInputRef.current?.click()}
+      disabled={isUploadingPhoto}
+      className='inline-flex h-[32px] min-w-[78px] shrink-0 items-center justify-center gap-1.5 px-3 border border-[#DDE3EC] rounded-[8px] bg-white text-[14px] leading-none text-[#272B35] hover:bg-[#F8FAFC] transition-colors disabled:opacity-50'
+      data-track-category='Questionnaire'
+      data-track-name='UploadPhoto'
+    >
+      {isUploadingPhoto ? <Loader2 className='w-4 h-4 animate-spin' /> : null}
+      {effectivePhotoUrl ? 'Change image' : 'Upload image'}
+    </button>
+  );
 
   return (
     <div className='h-[100dvh] w-full bg-white grid grid-cols-1 md:grid-cols-2 overflow-hidden'>
@@ -411,29 +386,21 @@ const QuestionnaireScreen = (): ReactElement | null => {
               />
             </div>
 
-            <div className='mt-[46px] flex items-center justify-between gap-3'>
+            <input
+              ref={fileInputRef}
+              type='file'
+              accept='image/jpeg,image/png,image/webp'
+              onChange={e => void handlePhotoChange(e)}
+              className='hidden'
+            />
+
+            {/* On desktop the upload button lives on the profile card preview (right panel) */}
+            <div className='mt-[46px] flex items-center justify-between gap-3 md:hidden'>
               <p className='text-[14px] leading-[20px] font-semibold text-[#272B35]'>
                 Your profile photo{' '}
                 <span className='text-[#8E939D] font-normal text-[12px]'>(optional)</span>
               </p>
-              <button
-                type='button'
-                onClick={() => fileInputRef.current?.click()}
-                disabled={isUploadingPhoto}
-                className='inline-flex h-[32px] min-w-[78px] shrink-0 items-center justify-center px-3 border border-[#DDE3EC] rounded-[8px] bg-white text-[14px] leading-none text-[#272B35] hover:bg-[#F8FAFC] transition-colors disabled:opacity-50'
-                data-track-category='Questionnaire'
-                data-track-name='UploadPhoto'
-              >
-                {isUploadingPhoto ? <Loader2 className='w-4 h-4 animate-spin' /> : null}
-                {photoFileName ? 'Change' : 'Upload'}
-              </button>
-              <input
-                ref={fileInputRef}
-                type='file'
-                accept='image/jpeg,image/png,image/webp'
-                onChange={e => void handlePhotoChange(e)}
-                className='hidden'
-              />
+              {photoUploadButton}
             </div>
 
             {photoFileName ? (
@@ -448,13 +415,17 @@ const QuestionnaireScreen = (): ReactElement | null => {
             <button
               type='button'
               onClick={handleNext}
-              disabled={!displayName.trim()}
+              disabled={!canAdvance() || isCompleting}
               className='mt-auto mb-4 md:mb-0 self-start inline-flex h-[48px] items-center gap-2.5 px-5 bg-[#FF6868] text-white text-[15px] font-semibold rounded-[10px] hover:bg-[#FF5A5A] disabled:opacity-30 disabled:cursor-not-allowed transition-colors'
               data-track-category='Questionnaire'
               data-track-name='Step1Next'
             >
-              Next
-              <ArrowRight className='w-4 h-4' />
+              {isCompleting ? 'Entering...' : 'Next'}
+              {isWaitingForSteps || isCompleting ? (
+                <Loader2 className='w-4 h-4 animate-spin' />
+              ) : (
+                <ArrowRight className='w-4 h-4' />
+              )}
             </button>
           </div>
         )}
@@ -471,22 +442,6 @@ const QuestionnaireScreen = (): ReactElement | null => {
             <div className='mt-[28px] h-px w-full bg-[#ECEFF3]' />
 
             <div className='mt-[54px]'>
-              <p className='text-[14px] leading-[20px] font-semibold text-[#272B35]'>
-                Company name
-              </p>
-              <input
-                type='text'
-                value={companyName}
-                onChange={e => setCompanyName(e.target.value)}
-                placeholder='Ex: Nike'
-                autoComplete='organization'
-                className='mt-[12px] h-[44px] w-full px-[13px] border border-[#DDE3EC] rounded-[9px] bg-white text-[#272B35] text-[14px] placeholder:text-[#B2B6BE] focus:outline-none focus:border-[#AEB7C5] transition-colors'
-                data-track-category='Questionnaire'
-                data-track-name='CompanyNameInput'
-              />
-            </div>
-
-            <div className='mt-[28px]'>
               <p className='text-[14px] leading-[20px] font-semibold text-[#272B35]'>
                 Company size
               </p>
@@ -533,16 +488,40 @@ const QuestionnaireScreen = (): ReactElement | null => {
               <button
                 type='button'
                 onClick={handleNext}
-                disabled={!companyName.trim() || !companySize}
+                disabled={!canAdvance() || isCompleting}
                 className='inline-flex h-[48px] items-center gap-2.5 px-5 bg-[#FF6868] text-white text-[15px] font-semibold rounded-[10px] hover:bg-[#FF5A5A] disabled:bg-[#B9B9B9] disabled:opacity-100 disabled:cursor-not-allowed transition-colors'
                 data-track-category='Questionnaire'
                 data-track-name='Step2Next'
               >
-                Next
-                <ArrowRight className='w-4 h-4' />
+                {isCompleting ? 'Entering...' : 'Next'}
+                {isWaitingForSteps || isCompleting ? (
+                  <Loader2 className='w-4 h-4 animate-spin' />
+                ) : (
+                  <ArrowRight className='w-4 h-4' />
+                )}
               </button>
             </div>
           </div>
+        )}
+
+        {step === 'invite' && contactsState.status === 'ready' && (
+          <InviteContactsStepPanel
+            contacts={contactsState.contacts}
+            provider={contactsState.provider}
+            workspaceId={user?.workspaceId || ''}
+            invitedEmails={invitedContactEmails}
+            onInvited={emails =>
+              setInvitedContactEmails(previous => {
+                const next = new Set(previous);
+                for (const email of emails) {
+                  next.add(email);
+                }
+                return next;
+              })
+            }
+            onBack={() => setCurrentStep(currentStep - 1)}
+            onNext={handleNext}
+          />
         )}
 
         {step === 'harness' && (
@@ -584,6 +563,7 @@ const QuestionnaireScreen = (): ReactElement | null => {
                 {displayName.trim() || 'Your name'}
               </p>
               <p className='mt-1 text-[16px] leading-[20px] text-[#9399A6]'>{user?.email}</p>
+              <div className='mt-[16px] flex justify-center'>{photoUploadButton}</div>
             </div>
           </div>
         )}
@@ -596,7 +576,7 @@ const QuestionnaireScreen = (): ReactElement | null => {
 
             <div className='absolute left-[11%] top-[164px] z-10 flex h-[84px] w-[468px] max-w-[68%] -translate-y-1/2 items-center rounded-[16px] border border-[#DDE3EC] bg-white px-[22px] shadow-[0_16px_34px_rgba(25,35,55,0.16)]'>
               <span className='max-w-[350px] truncate text-[22px] leading-none font-bold text-[#172032]'>
-                {companyName.trim() || 'Company name'}
+                {createdOrgName?.trim() || 'Company name'}
               </span>
               <span className='ml-4 flex flex-col items-center justify-center gap-0.5 text-[#8B95A6]'>
                 <ChevronUp className='size-4' strokeWidth={2.25} />
@@ -633,6 +613,13 @@ const QuestionnaireScreen = (): ReactElement | null => {
               </div>
             </div>
           </div>
+        )}
+
+        {step === 'invite' && contactsState.status === 'ready' && (
+          <InviteContactsPreview
+            contacts={contactsState.contacts}
+            invitedEmails={invitedContactEmails}
+          />
         )}
 
         {step === 'harness' && (

@@ -6,6 +6,7 @@ import { MessageBubble } from '../../ui/MessageBubble/MessageBubble';
 import { BotBubble } from '../BotBubble';
 import { LinkPreview } from '../LinkPreview/LinkPreview';
 import { InternalMessagePreview } from '../LinkPreview/InternalMessagePreview';
+import { CallLinkPreview } from '../LinkPreview/CallLinkPreview';
 import { CanvasPreview } from '../../Canvas/CanvasPreview';
 import { TicketActivityMessage } from '../TicketActivityMessage/TicketActivityMessage';
 import { ConversationTabContext } from '../ConversationTabContext';
@@ -22,7 +23,7 @@ import { ChatInput } from '../ChatInput';
 import { usePin } from '../../../hooks/usePin';
 import { useMessageEdit } from '../../../providers/EditProvider';
 import { toast } from 'sonner';
-import { useNavigate, useParams, useLocation } from 'react-router-dom';
+import { useRouterSelector, useStableNavigate } from '../../../hooks/useStableRouter';
 import {
   MessageType,
   BookmarkEntityType,
@@ -62,6 +63,7 @@ import {
 } from '../ChatList/ChatListUtils';
 import { useUserBookmarks } from '../../../hooks/useUserBookmarks';
 import { useChannel } from '../../../hooks/useChannels';
+import { useIsDmReadOnly } from '../../../hooks/useIsDmReadOnly';
 import { usePlatform } from '../../../hooks/usePlatform';
 import { logger, Event } from '../../../utils/logger';
 import { MessageActionsDrawer } from '../MessageActionsDrawer/MessageActionsDrawer';
@@ -185,10 +187,16 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
   const zero = useZero();
   const { onMessageChange } = useSummaryCache();
   const { togglePin } = usePin();
-  const navigate = useNavigate();
+  const navigate = useStableNavigate();
   const shareableOrigin = useShareableOrigin();
-  const location = useLocation();
-  const { conversationId } = useParams<{ conversationId?: string }>();
+  // Router state through narrow selectors: rendered once per message, this component
+  // otherwise re-rendered on every navigation anywhere in the app.
+  const locationHash = useRouterSelector(snapshot => snapshot.location.hash);
+  // A repeat navigation to the same hash has to re-flash the highlight.
+  const hashNavigationKey = useRouterSelector(snapshot =>
+    snapshot.location.hash ? snapshot.location.key : '',
+  );
+  const conversationId = useRouterSelector(snapshot => snapshot.params['conversationId']);
   const { isEditingMessage, requestEdit, stopEditing } = useMessageEdit();
   // channelHasBoards rides on the context rather than a per-bubble query: it is
   // constant per channel and this component renders once per message.
@@ -213,8 +221,8 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
   const [isHighlighted, setIsHighlighted] = useState(false);
 
   useEffect(() => {
-    const highlightedConversationId = linkedConversationId ?? extractOriginFromHash(location.hash);
-    const highlightedMessageId = extractMessageIdFromHash(location.hash);
+    const highlightedConversationId = linkedConversationId ?? extractOriginFromHash(locationHash);
+    const highlightedMessageId = extractMessageIdFromHash(locationHash);
 
     let shouldHighlight = false;
     if (context === 'thread') {
@@ -238,8 +246,8 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
       setIsHighlighted(false);
     }
   }, [
-    location.key,
-    location.hash,
+    hashNavigationKey,
+    locationHash,
     linkedConversationId,
     highlightMessageId,
     context,
@@ -1017,13 +1025,19 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
       </>
     ) : undefined;
 
+  // A DM whose other participant is deactivated is an archive: no reactions, no
+  // edits, no thread replies — hide the hover toolbar and the mobile actions
+  // drawer entirely. The composer above is already replaced with a banner in
+  // ConversationPanelV2, so this closes the remaining write paths from the row.
+  const isDmReadOnly = useIsDmReadOnly(channelId);
   const canShowHoverToolbar =
     !isMobile &&
     !searchItemView &&
     variant !== 'pinned' &&
     !isMentionUserAddition &&
     !isTicketActivity &&
-    !isCurrentEditing;
+    !isCurrentEditing &&
+    !isDmReadOnly;
 
   // No dependency array on purpose: re-registering is a cheap Map.set and this
   // keeps the registered handlers/capabilities in sync with the latest render.
@@ -1069,9 +1083,6 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
       ...(!isMessageDeleted && shouldShowCopyButton && { onCopyMessage: handleCopyMessage }),
       ...(!isMessageDeleted && { onEmojiPickerOpenChange: setIsEmojiPickerOpen }),
       isChannelArchived: channel?.isArchived ?? false,
-      // The thread parent sits flush under the thread header, so the default
-      // lift above the row would render the toolbar on top of it.
-      placement: context === 'thread' && isFirstInThread ? 'below' : 'above',
       ...(context === 'channel' &&
         !isSystemMessage &&
         !isMessageDeleted &&
@@ -1357,6 +1368,7 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
             channelScopeType={channelScopeType}
             isFirstInThread={isFirstInThread}
             showLinkPreview={false}
+            callLinkCardShown={shouldShowStandaloneLinkPreview}
             searchItemView={searchItemView}
             {...(onUserClick && { onUserClick })}
             {...(allThreadAttachments && { allThreadAttachments })}
@@ -1420,7 +1432,7 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
             />
           )}
           {/* Mobile Actions Drawer */}
-          {isMobile && !searchItemView && isActionsDrawerOpen && (
+          {isMobile && !searchItemView && isActionsDrawerOpen && !isDmReadOnly && (
             <MessageActionsDrawer
               open
               onOpenChange={handleActionsDrawerOpenChange}
@@ -1503,7 +1515,9 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
       {shouldShowStandaloneLinkPreview && (
         <div
           className={cn(
-            'pr-3 max-w-full pl-4 ml-14 transition-colors rounded-r border-l-4 border-l-gray-300 dark:border-l-gray-600',
+            'pr-3 max-w-full ml-14 transition-colors rounded-r',
+            previewResult.type !== 'call_preview' &&
+              'pl-4 border-l-4 border-l-gray-300 dark:border-l-gray-600',
             message.senderId === user?.id && 'max-[500px]:mb-5',
             'group-data-[hovered]/bubble:bg-accent/50',
           )}
@@ -1514,6 +1528,11 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
                 type: 'internal_message',
                 ...previewResult.data,
               }}
+              onClose={() => setShowLinkPreview(false)}
+            />
+          ) : previewResult.type === 'call_preview' ? (
+            <CallLinkPreview
+              metadata={previewResult.data}
               onClose={() => setShowLinkPreview(false)}
             />
           ) : (

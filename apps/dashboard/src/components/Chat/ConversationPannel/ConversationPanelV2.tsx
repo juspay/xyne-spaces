@@ -1,4 +1,4 @@
-import { ReactElement, useCallback, useEffect, useRef, useMemo, useState } from 'react';
+import { ReactElement, useCallback, useContext, useEffect, useRef, useMemo, useState } from 'react';
 import { useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import { useRouteContext } from '../../../hooks/useRouteContext';
 import {
@@ -31,12 +31,10 @@ import { queries } from '../../../zero/queries';
 import { useCachedQuery } from '../../../hooks/useCachedQuery';
 import { ExpandedTicketView } from '../../Tickets/ExpandedTicketView/ExpandedTicketView';
 import ChatListV4 from '../ChatList/ChatListV4';
+import { DiscussionListContext, type DiscussionScope } from './DiscussionListContext';
 import LinksTab from '../LinksTab/LinksTab';
 import { Archive } from 'lucide-react';
-import { useUser } from '../../../hooks/useUsers';
-import { useAuthContextValues } from '../../../hooks/useAuth';
-import { isUserDeactivated } from '../../../utils/userDisplayName';
-import { parseDMParticipantIds } from '../ChatDirectory/ChatDirectory.utils';
+import { useIsDmReadOnly } from '../../../hooks/useIsDmReadOnly';
 
 // Stable empty array — an inline `[]` here would be a new reference on every
 // render, causing useChannelSubscription's effect to unsubscribe/resubscribe
@@ -85,6 +83,7 @@ const ConversationPanelV2 = ({
   listLoadingFallback,
   skipSubscription = false,
   conversationIds,
+  discussionScope,
   onOpenThread,
   useLocalTabState = false,
   unreadsOnly,
@@ -99,6 +98,8 @@ const ConversationPanelV2 = ({
   showHeader?: boolean;
   /** Restrict the feed to these conversations (e.g. the SDLC panel's DISCUSSION-linked set). */
   conversationIds?: string[] | undefined;
+  /** Scopes the list to SDLC discussions, joined in the list's own queries. */
+  discussionScope?: DiscussionScope | undefined;
   /** Overrides thread-open navigation (e.g. open in-panel instead of routing). */
   onOpenThread?: ((conversationId: string, e?: React.MouseEvent) => void) | undefined;
   // When true, suppress the message composer / join / archive footer entirely.
@@ -135,6 +136,8 @@ const ConversationPanelV2 = ({
   // Reports the message list's real total content height (px).
   onTotalHeightChange?: (height: number) => void;
 }): ReactElement => {
+  // Set by a host that shows these conversations as discussions (the SDLC panel).
+  const discussionList = useContext(DiscussionListContext);
   const { baseRoute } = useRouteContext();
   const channel = useChannel(channelId);
   // Resolved once here and handed down through ConversationTabContext: it is
@@ -229,10 +232,12 @@ const ConversationPanelV2 = ({
   // the normal pagination path.
   const cachedConversations = useMemo(() => {
     const snapshot = getChannelConversationsSnapshot(channelId, urlCreatedAt ?? undefined);
+    // A scoped list can't be told from the channel's cached rows, so it starts empty.
+    if (discussionScope) return [];
     if (!conversationIds) return snapshot;
     const allowed = new Set(conversationIds);
     return snapshot.filter(conversation => allowed.has(conversation.conversationId));
-  }, [channelId, urlCreatedAt, conversationIds]);
+  }, [channelId, urlCreatedAt, conversationIds, discussionScope]);
 
   // Skip mark as read functionality
   const skipMarkAsReadRef = useRef(skipMarkAsRead || false);
@@ -251,12 +256,7 @@ const ConversationPanelV2 = ({
   const shouldShowJoinChannel =
     channel?.visibility === ChannelVisibility.PUBLIC && !isUserMember && !channel?.isArchived;
 
-  const { userID: currentUserId } = useAuthContextValues();
-  const dmPartnerId =
-    channel?.scopeType === ChannelScopeType.DM
-      ? parseDMParticipantIds(channel).find(id => id !== currentUserId)
-      : undefined;
-  const isDeactivatedDmArchive = isUserDeactivated(useUser(dmPartnerId ?? ''));
+  const isDeactivatedDmArchive = useIsDmReadOnly(channelId);
 
   // Safe tab setter with validation. Memoized because it feeds the context
   // value below — an unstable reference re-rendered every visible ChatBubble
@@ -329,6 +329,7 @@ const ConversationPanelV2 = ({
                   channelScopeType={channel?.scopeType}
                   skipMarkAsReadRef={skipMarkAsReadRef}
                   {...(conversationIds && { conversationIds })}
+                  {...(discussionScope && { discussionScope })}
                   {...(onOpenThread && { onOpenThread })}
                   unreadsOnly={unreadsOnly ?? false}
                   {...(onThreadClick && { onThreadClick })}
@@ -340,7 +341,11 @@ const ConversationPanelV2 = ({
               ) : isDeactivatedDmArchive ? (
                 <DeactivatedDmArchiveBanner />
               ) : (
-                <div className='pb-3 bg-background px-[var(--composer-px)] [--composer-px:0.75rem]'>
+                // Discussions sit in a side panel whose foot the key hint would otherwise
+                // crowd, so the composer stands as far off it as the list ends above it.
+                <div
+                  className={`${discussionList ? 'pb-5' : 'pb-3'} bg-background px-[var(--composer-px)] [--composer-px:0.75rem]`}
+                >
                   <ChatInput
                     // eslint-disable-next-line jsx-a11y/no-autofocus
                     autoFocus={skipInputAutoFocus ? null : 'end'}

@@ -27,6 +27,7 @@ const flowRunExportController = new FlowRunExportController();
 
 // Kanban board counts grouped by the active view, filters, and group-by mode
 router.post('/kanban/counts', kanbanTicketController.getCounts);
+router.post('/kanban/track-counts', kanbanTicketController.getTrackCounts);
 router.post('/flow-run-export/pdf', flowRunExportController.exportPdf);
 router.get('/my-board-ids', ticketController.getMyTicketBoardIds);
 
@@ -50,6 +51,7 @@ router.patch('/:ticketId', ticketController.updateTicket);
 // Workflow metrics for tickets dashboard
 router.get('/workflow-metrics', analyticsAuthMiddleware.requireWorkspaceContext, analyticsController.getWorkflowMetrics);
 router.post('/duplicates', validate(ticketDuplicateCheckSchema), ticketController.checkDuplicateTickets);
+router.post('/:ticketId/duplicates/recheck', ticketController.recheckTicketDuplicates);
 router.post('/suggest-board', validate(ticketBoardSuggestionSchema), ticketController.suggestBoard);
 
 router.get('/:ticketId/pending-human-intervention', ticketController.getPendingHumanIntervention);
@@ -58,6 +60,10 @@ router.get('/:ticketId/pending-human-intervention', ticketController.getPendingH
 router.get('/:ticketId/latest-email-tags', ticketController.getLatestEmailTags);
 
 router.post('/:ticketId/attachments/from-conversation', ticketController.addAttachmentsFromConversation);
+
+// Ozonetel call recording → transcript attachment (manual trigger from the call thread)
+router.post('/:ticketId/emails/:emailId/transcribe', ticketController.transcribeCallRecording);
+router.post('/:ticketId/emails/:emailId/summarize', ticketController.summarizeCallTranscript);
 
 router.post('/:ticketId/release-notes/generate', releaseNotesController.generateReleaseNotes);
 // Gated like the other release-manager AI actions (suggest/analyze), not plain TICKETS WRITE.

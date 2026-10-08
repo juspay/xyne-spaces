@@ -223,7 +223,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request): Promise<CallToo
       } catch (e) {
         const errText = errMsg(e);
         if (errText.includes("private")) {
-          const failMsg = `❌ I need to be added to #${targetChannelId} (private channel) to post there. Please add me and try again.`;
+          const failMsg = `I need to be added to #${targetChannelId} (private channel) to post there. Please add me and try again.`;
           if (sourceConversationId) {
             await spacesAppFetch("/chat/postMessage", { conversationId: sourceConversationId, text: failMsg }).catch(() => {});
           }
@@ -235,7 +235,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request): Promise<CallToo
 
       await spacesAppFetch("/chat/postMessage", { channelId: targetChannelId, text: content });
 
-      const confirmMsg = `✅ Posted in #${channelName}`;
+      const confirmMsg = `Posted in #${channelName}`;
       if (sourceConversationId) {
         await spacesAppFetch("/chat/postMessage", { conversationId: sourceConversationId, text: confirmMsg }).catch(() => {});
       }

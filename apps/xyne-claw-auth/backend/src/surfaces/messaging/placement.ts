@@ -95,7 +95,9 @@ export type ControlMessage =
   | { op: "login"; accountId: string }
   | { op: "logout"; accountId: string }
   | { op: "rebind"; accountId: string }
-  | { op: "wake"; accountId: string };
+  | { op: "wake"; accountId: string }
+  /** A pod is shutting down and has released this account. */
+  | { op: "handoff"; accountId: string };
 
 export async function publishControl(message: ControlMessage): Promise<void> {
   try {

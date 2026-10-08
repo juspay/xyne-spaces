@@ -3,6 +3,8 @@ import { Prisma } from '@prisma/client';
 import { createId } from '@paralleldrive/cuid2';
 import { AttachmentEntityType, CanvasRole, CanvasVisibility } from '@xyne/shared';
 import { db } from '@/database/client';
+import { newConnectId } from '@/database/connectGroup';
+import { createCanvasWithConnectGroupTx } from '@/bypassAcl/transactions/connectGroupEntities';
 import { config } from '@/config/env';
 import { logger } from '@/utils/logger';
 import { uploadFiles } from '@/services/fileUploadService';
@@ -59,7 +61,7 @@ async function rehostCanvasImages(html: string, canvasId: string, createdBy: str
       const [up] = await uploadFiles([{ originalname: info.name || fileId, mimetype: info.mimetype || 'application/octet-stream', size: buffer.length, buffer } as Express.Multer.File]);
       if (!up) continue;
       const att = await attachmentRepo.create({
-        entityId: canvasId, entityType: AttachmentEntityType.CANVAS, conversationId: `canvas_${canvasId}`,
+        entityId: canvasId, entityType: AttachmentEntityType.CANVAS, conversationId: `canvas_${canvasId}`, channelId: null,
         originalFilename: up.originalName, size: up.fileSize, mimetype: up.mimeType, url: up.fileUrl, thumbnailUrl: up.thumbnailUrl,
         width: up.width, height: up.height, uploadedByUserId: createdBy, createdBy, storageProvider: config.fileStorage.provider,
         workspaceId: target.workspaceId, metadata: { canvasId, type: 'canvas_attachment' },
@@ -320,21 +322,27 @@ async function createCanvas(cv: ChannelCanvas, createdBy: string, target: Migrat
   // Preserve the canvas's real Slack dates (files.info created / updated) so it isn't stamped with the migration time.
   const createdAt = cv.createdTs ? new Date(cv.createdTs * 1000) : now;
   const editedAt = cv.updatedTs ? new Date(cv.updatedTs * 1000) : createdAt;
-  await db.canvas.create({
-    data: {
+  // Slack Connect: a canvas is a shareable entity → its own connectId + a private connect_group row
+  // (atomic via the bypassAcl op). Children below carry the same connectId.
+  const connectId = newConnectId();
+  await createCanvasWithConnectGroupTx(
+    {
       id: canvasId, workspaceId: target.workspaceId, title: cv.title,
       content,
       channelId: target.xyneChannelId, createdBy, visibility: CanvasVisibility.PUBLIC, isCollaborative: true,
       lastEditedBy: createdBy, lastEditedAt: editedAt, createdAt, updatedAt: editedAt,
+      connectId,
       // Keep the source HTML so no canvas data is ever unrecoverable, even if the parser drops something.
       metadata: { source: 'slack_migration', slackFileId: cv.slackFileId, sourceHtml: cv.html },
     },
-  });
+    target.workspaceId,
+    connectId,
+  );
   // Creator is OWNER; the channel is an EDITOR so every member can open/edit it.
   await db.canvasParticipant.createMany({
     data: [
-      { id: createId(), canvasId, workspaceId: target.workspaceId, userId: createdBy, role: CanvasRole.OWNER, joinedAt: now, updatedAt: now },
-      { id: createId(), canvasId, workspaceId: target.workspaceId, channelId: target.xyneChannelId, role: CanvasRole.EDITOR, joinedAt: now, updatedAt: now },
+      { id: createId(), canvasId, workspaceId: target.workspaceId, userId: createdBy, role: CanvasRole.OWNER, joinedAt: now, updatedAt: now, canvasConnectId: connectId },
+      { id: createId(), canvasId, workspaceId: target.workspaceId, channelId: target.xyneChannelId, role: CanvasRole.EDITOR, joinedAt: now, updatedAt: now, canvasConnectId: connectId },
     ],
     skipDuplicates: true,
   });

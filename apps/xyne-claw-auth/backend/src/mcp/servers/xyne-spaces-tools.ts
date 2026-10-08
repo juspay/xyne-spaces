@@ -22,7 +22,7 @@ import { esc, queryDirect, type DirectSearchResponse } from "./vespa-direct.js";
 import { buildYqlFromParams, AREA_NAMES, AREA_ALIASES, describeAreasForPrompt } from "./vespa-search-areas.js";
 import { validateCorpusScan, buildCorpusScanYql, parseBucketKey, termToQuery, MAX_SCAN_TERMS, type CorpusScanScope } from "./vespa-corpus-scan.js";
 import { validateEvidencePack, bucketRange, buildPackFetchYql, formatIstDate, toSnippet, MAX_PACK_PER_BUCKET, DEFAULT_PACK_PER_BUCKET, MAX_BUCKET_FETCHES } from "./vespa-evidence-pack.js";
-import { getWorkspaceIdForUser } from "../../lib/spaces-db.js";
+import { getWorkspaceIdForUser, spacesDbAvailable } from "../../lib/spaces-db.js";
 import {
   extractCleanTextFromFlowJson,
   isFlowJsonContent,
@@ -7059,7 +7059,7 @@ const userSendMessage: ToolDef = {
       { required: ["channelId"], not: { required: ["conversationId"] } },
     ],
   },
-  async handler(args) {
+  async handler(args, ctx) {
     try {
       const conversationId = String(args["conversationId"] ?? "").trim();
       const channelId = String(args["channelId"] ?? "").trim();
@@ -7073,8 +7073,16 @@ const userSendMessage: ToolDef = {
 
       // Same mention-expansion the app-tools version uses, so @Name[userId]
       // shorthand works consistently across both tools.
-      const { expandSpacesMentions } = await import("../../lib/mention-transform.js");
-      const content = expandSpacesMentions(rawContent);
+      const { expandSpacesMentions, resolveUnboundMentions } = await import("../../lib/mention-transform.js");
+      const { buildSpacesMentionLookupsDb } = await import("../../lib/mention-lookups.js");
+      const workspaceId =
+        (process.env["XYNE_SPACES_WORKSPACE_ID"] ?? "").trim() ||
+        (ctx?.userId ? await getWorkspaceIdForUser(ctx.userId).catch(() => null) : null) ||
+        undefined;
+      const resolved = spacesDbAvailable()
+        ? await resolveUnboundMentions(rawContent, buildSpacesMentionLookupsDb(workspaceId)).catch(() => rawContent)
+        : rawContent;
+      const content = expandSpacesMentions(resolved);
 
       if (conversationId) {
         const result = (await spacesFetch(
@@ -7564,7 +7572,8 @@ async function directVespaIdentity(
   // XYNE_SPACES_WORKSPACE_ID when the adapter is bound — bench + session modes.
   // Falls back to the Spaces-DB user row when no env set.
   const envWorkspace = (process.env["XYNE_SPACES_WORKSPACE_ID"] ?? "").trim();
-  const workspaceId = devWorkspace || envWorkspace || (await getWorkspaceIdForUser(userId));
+  const workspaceId =
+    devWorkspace || envWorkspace || (await getWorkspaceIdForUser(userId, "mcp-runner", envWorkspace || undefined));
   if (devUser || devWorkspace) {
     log.warn(
       `[xyne-spaces-tools] DEV vespa identity override: user ${ctxUserId} -> ${userId}, workspace -> ${workspaceId}`,

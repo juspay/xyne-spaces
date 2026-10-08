@@ -54,6 +54,7 @@ import {
   type RadarPendingOthersPageParams,
 } from '../../api/radarApi';
 import { ChannelScopeType, parseInitialMessageMd, type User } from '@xyne/shared';
+import { htmlToPlainText } from '../../utils/sanitizer';
 import { useAuth } from '../../hooks/useAuth';
 import { useRadarEnabled } from '../../hooks/radarCacConfig';
 import {
@@ -65,6 +66,7 @@ import {
   usePersistedRadarTeams,
   type RadarTeam,
 } from '../../hooks/usePersistedRadarTeams';
+import { usePersistedRadarViewMode } from '../../hooks/usePersistedRadarViewMode';
 import {
   MAX_RULES,
   MAX_RULE_VALUES,
@@ -227,9 +229,9 @@ const RadarPanel = (): ReactElement => {
   const [pending, setPending] = useState<RadarThreadCard[]>([]);
   const [waiting, setWaiting] = useState<RadarThreadCard[]>([]);
   const [loading, setLoading] = useState(true);
-  // Which layout draws the feed — a view preference, not part of what's
-  // fetched or filtered, so it doesn't need to survive a reload.
-  const [viewMode, setViewMode] = useState<'cards' | 'table'>('table');
+  // Which layout draws the feed. A per-browser view preference: persisted so
+  // leaving Radar doesn't reset it.
+  const [viewMode, setViewMode] = usePersistedRadarViewMode();
   const [busyKey, setBusyKey] = useState<string | null>(null);
   // One debug surface: the card's Debug button opens this thread-scoped view
   // (watermark position, per-item trails with the model's reasoning, runs).
@@ -809,21 +811,20 @@ const RadarPanel = (): ReactElement => {
   // before display, never shown as-is) rather than the human text it wraps.
   // Unwrap it to that real content when present.
   const cleanText = (text: string): string => {
-    if (!text.trimStart().startsWith(':::initialMessage')) return text;
-    const parsed = parseInitialMessageMd(text);
-    return parsed?.content || text;
+    const unwrapped = text.trimStart().startsWith(':::initialMessage')
+      ? parseInitialMessageMd(text)?.content || text
+      : text;
+    return htmlToPlainText(unwrapped) || unwrapped;
   };
 
   // The card's headline: what a reader scans first. Falls back through the
   // thread preview to the lead item's own title so a card never renders
   // blank above the numbered list.
   const threadTitle = (card: RadarThreadCard): string => {
-    // threadPreview is truncated to a single line server-side, so when the
-    // source message itself was a `:::initialMessage` block, the truncated
-    // copy never reaches the closing `:::` — cleanText can't parse a block
-    // it can't fully see, and hands the raw marker text back unchanged.
-    // That's worse than no preview: fall through to the item's own title,
-    // which is never truncated mid-block.
+    // threadPreview is truncated to a single line server-side. The server now
+    // unwraps a `:::initialMessage` block before cutting, but an item stored
+    // before that fix can still carry marker text here — that's worse than no
+    // preview, so fall through to the item's own title in that case.
     const cleaned = card.threadPreview && cleanText(card.threadPreview);
     if (cleaned && !cleaned.trimStart().startsWith(':::initialMessage')) return cleaned;
     return cleanText(card.items[0]?.title || 'Thread');
@@ -1031,7 +1032,7 @@ const RadarPanel = (): ReactElement => {
               openThread(card, item.conversationId, item.sourceMessageId);
             }}
           >
-            {index !== null ? `${index + 1}. ${item.title}` : item.title}
+            {index !== null ? `${index + 1}. ${cleanText(item.title)}` : cleanText(item.title)}
           </button>
           {item.contextSummary && (
             <ul className='mt-2 space-y-1'>
@@ -3910,7 +3911,11 @@ const RadarPanel = (): ReactElement => {
                               <span className='font-semibold text-foreground'>
                                 {m.actorType === 'llm'
                                   ? 'LLM parser'
-                                  : `${nameOf(m.actorId ?? '')} · by hand`}
+                                  : m.actorType === 'pr_merge'
+                                    ? 'PR merged'
+                                    : m.actorType === 'reaction'
+                                      ? `${nameOf(m.actorId ?? '')} · by reaction`
+                                      : `${nameOf(m.actorId ?? '')} · by hand`}
                               </span>
                               <span className='ml-auto text-muted-foreground'>
                                 {formatDistanceToNow(new Date(m.createdAt), { addSuffix: true })}

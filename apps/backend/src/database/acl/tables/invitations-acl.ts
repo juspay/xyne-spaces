@@ -46,7 +46,11 @@ export class InvitationsACL extends BaseQueryACL<
   }
 
   async canCreate(data: Prisma.InvitationUncheckedCreateInput): Promise<boolean> {
+    // Guests are channel/canvas-scoped — they must never create invitations,
+    // even though the invited role below would otherwise let MEMBER through.
+    if (isGuestContext(this.ctx)) return false
     if (data.workspaceId !== this.ctx.workspaceId) return false
-    return this.ctx.role === 'ADMIN' || this.ctx.role === 'OWNER'
+    if (this.ctx.role === 'ADMIN' || this.ctx.role === 'OWNER') return true
+    return data.role === 'COMMUNITY_MEMBER' || data.role === 'MEMBER'
   }
 }

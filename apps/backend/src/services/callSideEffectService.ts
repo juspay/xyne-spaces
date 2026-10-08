@@ -406,7 +406,7 @@ class CallSideEffectService {
             });
 
             if (!call) {
-                this.logger.warn(`Call not found for id ${callId} — skipping external chat summary`);
+                this.logger.warn(`Call not found for ${callExternalId} — skipping external chat summary`);
                 return;
             }
 

@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Redis } from "ioredis";
 import {
+  OWNERSHIP_CLAIM_SCRIPT,
   OWNERSHIP_TTL_SECONDS,
   POD_ALIVE_TTL_SECONDS,
   __setOwnershipClientForTests,
@@ -9,6 +10,7 @@ import {
   currentOwnerPod,
   fenceSession,
   handleOwnershipLoss,
+  inspectOwner,
   isFencedSession,
   isOwnedByOther,
   ownerPodFromToken,
@@ -41,8 +43,13 @@ function memoryRedis(): { stub: Redis; store: Map<string, Entry> } {
     async exists(key: string) {
       return store.has(key) ? 1 : 0;
     },
-    async eval(script: string, _n: number, key: string, token: string, ttl?: string) {
+    async eval(script: string, _n: number, key: string, token: string, ttl?: string, takeoverFrom?: string) {
       const current = store.get(key)?.value ?? null;
+      if (script === OWNERSHIP_CLAIM_SCRIPT) {
+        if (current !== null && current !== token && !(takeoverFrom && current === takeoverFrom)) return 0;
+        store.set(key, { value: token, ttl: Number(ttl) });
+        return 1;
+      }
       if (current !== token) return 0;
       if (script.includes("DEL")) {
         store.delete(key);
@@ -100,7 +107,7 @@ describe("run-ownership", () => {
     __setOwnershipClientForTests(stub);
     await claimOwnership("s3", "tok-1");
     expect(await refreshOwnership("s3", "tok-1")).toBe(true);
-    await claimOwnership("s3", "tok-2");
+    store.set("claw:run-owner:s3", { value: "tok-2", ttl: OWNERSHIP_TTL_SECONDS });
     expect(await refreshOwnership("s3", "tok-1")).toBe(false);
     expect(store.get("claw:run-owner:s3")?.value).toBe("tok-2");
   });
@@ -113,6 +120,25 @@ describe("run-ownership", () => {
     expect(store.has("claw:run-owner:s4")).toBe(true);
     expect(await releaseOwnership("s4", "tok-1")).toBe(true);
     expect(store.has("claw:run-owner:s4")).toBe(false);
+  });
+
+  it("never overwrites a holder it was not told to take over from", async () => {
+    const { stub, store } = memoryRedis();
+    __setOwnershipClientForTests(stub);
+    expect(await claimOwnership("s6", "tok-1")).toBe(true);
+    expect(await claimOwnership("s6", "tok-2")).toBe(false);
+    expect(await claimOwnership("s6", "tok-2", "tok-stale")).toBe(false);
+    expect(store.get("claw:run-owner:s6")?.value).toBe("tok-1");
+    expect(await claimOwnership("s6", "tok-1")).toBe(true);
+  });
+
+  it("takes over only from the exact dead holder that was inspected", async () => {
+    const { stub, store } = memoryRedis();
+    __setOwnershipClientForTests(stub);
+    await claimOwnership("s7", "dead-pod:aaa");
+    expect(await claimOwnership("s7", "worker-a:bbb", "dead-pod:aaa")).toBe(true);
+    expect(await claimOwnership("s7", "worker-b:ccc", "dead-pod:aaa")).toBe(false);
+    expect(store.get("claw:run-owner:s7")?.value).toBe("worker-a:bbb");
   });
 
   it("fails open when redis throws", async () => {
@@ -194,6 +220,14 @@ describe("ownerStatus", () => {
   it("fails open to free when redis throws", async () => {
     __setOwnershipClientForTests(throwingRedis());
     expect(await ownerStatus("s1", mine)).toBe("free");
+  });
+
+  it("returns the holder token alongside the status", async () => {
+    const { stub } = memoryRedis();
+    __setOwnershipClientForTests(stub);
+    expect(await inspectOwner("s1", mine)).toEqual({ status: "free", holder: null });
+    await claimOwnership("s1", theirs);
+    expect(await inspectOwner("s1", mine)).toEqual({ status: "dead-other", holder: theirs });
   });
 
   it("names the holding pod for the takeover log", async () => {

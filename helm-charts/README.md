@@ -59,8 +59,8 @@ installer):
 | Redis | any Redis reachable from the namespace; `xyne-redis` is a single-node, single-volume chart you may use instead of a managed one |
 | Object storage | S3-compatible buckets or GCS buckets |
 | Kubernetes Secrets | never created by a chart; every chart references Secrets by name (see [Create the Secrets](#3-create-the-secrets)) |
-| Database schema | not created by the charts and not migrated by the backend at start (see [Apply the database schema](#4-apply-the-database-schema)) |
-| Vespa application package | `xyne-vespa` runs the nodes; the schemas are deployed with `vespa deploy` |
+| Database roles and databases | the five databases and the replication role; the schema itself is migrated by the charts (see [Database schema and seeds](#4-database-schema-and-seeds)) |
+| Vespa application package | `xyne-vespa` runs the nodes; the schemas are deployed by the `vespa-core/vespa` chart, or `vespa deploy` |
 | LiveKit | the transcription agent and the backend dial out to a LiveKit server you run |
 | Kata runtime, sandbox controller, SandboxTemplate | the sandbox router and the egress proxy only make sense next to that stack |
 | Ingress controller, Istio, cert-manager | the charts render Ingress or Istio objects; the controllers are yours |
@@ -267,27 +267,36 @@ kubectl -n xyne create secret generic xyne-lighton-ocr-secrets \
 Anything else you need in a pod's environment goes through the same two keys on any chart:
 `secretEnv` (one variable from one Secret key) or `envFromSecrets` (every key of a Secret).
 
-### 4. Apply the database schema
+### 4. Database schema and seeds
 
-The backend does not run migrations at start and no chart ships a migration Job. Apply the two
-Prisma schemas once, before the first install, from the backend image with the same
-`DATABASE_URL` and `COMMON_DATABASE_URL` the pods will use. This is the sequence the repository's
-own test stack uses (`docker-compose.test.yml`):
+`xyne-backend` and `xyne-claw-auth` ship a migration Job (`<release>-migrate`), a Helm
+`pre-install,pre-upgrade` hook that runs before their pods roll, from the service's own image.
+It is `migrations` in the chart values, and for each entry of `migrations.schemas`:
 
-```bash
-docker run --rm \
-  -e DATABASE_URL="${PG}/xyne?sslmode=require" \
-  -e COMMON_DATABASE_URL="${PG}/xyne_common?sslmode=require" \
-  ghcr.io/juspay/xyne-spaces-backend:<version> \
-  sh -c 'pnpm exec prisma db push --skip-generate \
-    && pnpm exec prisma db push --schema prisma-common/schema.prisma --accept-data-loss --skip-generate \
-    && pnpm exec prisma db execute --file prisma/migrations/20251127175400_add_ticket_xyne_id_sequence/migration.sql --schema prisma/schema.prisma'
-```
+1. When the schema ships a baseline (`prisma/baseline/migrations.txt` next to it) and the
+   database is **empty**, it applies the baseline (`schema.sql`, then `extras.sql`), runs the
+   entry's `seeds`, and records the baseline migrations as applied. A Job interrupted halfway
+   resumes where it stopped. A database that has tables but no migration history is refused
+   rather than guessed at.
+2. It runs `prisma migrate deploy`, applying pending migrations.
+3. With `reseed: true` it runs the `seeds` after that on every deploy, unless step 1 just ran
+   them. The seeds must be idempotent. A schema without a baseline only ever seeds this way.
 
-Run the same three commands after every upgrade whose release notes mention a schema change
-(from inside a running backend pod: `kubectl -n xyne exec deployment/xyne-backend -- sh -c '...'`).
-The `claw_auth` database is prepared the same way from the `xyne-spaces-claw-auth-backend` image
-(`npx prisma db push`) when you enable `xyne-claw-auth`.
+| Chart | Schemas | Seeds | Reseed |
+|---|---|---|---|
+| `xyne-backend` | `prisma/schema.prisma`, `prisma-common/schema.prisma` | `scripts/seed-acl.ts` (the default organisation, workspace, ACL resources and groups, and the admin `DEFAULT_ADMIN_EMAIL`, `admin@xyne.ai` when empty), `scripts/seed-app-permissions.ts` | no |
+| `xyne-claw-auth` | `prisma/schema.prisma` (no baseline) | `prisma/seed.ts` (the built-in global agents, tools, MCP servers and skills, and the admin `DEFAULT_ADMIN_EMAIL`, `admin@xyne.ai`) | yes: the only way it seeds, and a release that adds agents or skills reaches existing installs |
+
+The claw-auth seed reads skill files from `apps/xyne-claw/skills`, which ship in the
+`xyne-spaces-claw` image, not claw-auth's. Its Job therefore has an init container
+(`migrations.initContainers`) that copies them from the claw image at the same tag into a
+volume mounted where the seed looks (`migrations.volumes`, `migrations.volumeMounts`;
+`migrations.skillsImage` overrides the image). It also needs `ENCRYPTION_KEY`, to store
+built-in credentials encrypted.
+
+The Job reads `DATABASE_URL` (and `COMMON_DATABASE_URL` for the backend) from the service's
+Secret; claw-auth also reads `SPACES_DB_URL` to link its admin to the Spaces user. Watch it with
+`kubectl -n <namespace> logs job/<release>-migrate`.
 
 ### 5. Write `my-values.yaml`
 

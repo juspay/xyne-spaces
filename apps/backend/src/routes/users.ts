@@ -18,6 +18,7 @@ router.get('/me/affinity', affinityController.getAffinity); // Get personalizati
 router.get('/me/dms', channelController.getUserDMs); // Get all user's DM channels
 router.post('/me/questionnaire', userManagementController.saveQuestionnaireResponse); // Save current user's questionnaire response
 router.post('/me/picture', uploadConfig.single('picture'), userManagementController.uploadProfilePicture); // Upload profile picture
+router.delete('/me/picture', userManagementController.removeProfilePicture); // Remove profile picture
 router.patch('/me/calendar-visibility', userManagementController.updateCalendarVisibility); // Update calendar visibility
 router.get('/:id/picture', userManagementController.streamProfilePicture); // Stream user's profile picture
 

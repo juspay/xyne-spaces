@@ -2,6 +2,7 @@ import type { XyneAiSendTrigger } from '../../services/Analytics/xyneAiTracking'
 import { type ReactElement, useState, useCallback, useEffect, useMemo, useRef } from 'react';
 import { useNavigate, useParams, useLocation, useNavigationType } from 'react-router-dom';
 import { Upload } from 'lucide-react';
+import { SidebarLeftOpen } from '@xyne/icons';
 import { AIShell, type WorkspacePanelControls } from '../../components/AIScreen/AIShell';
 import { ArtifactAppPane } from '../../components/AIScreen/ReactArtifact/ArtifactAppPane';
 import { AppCreationModeProvider } from '../../components/AIScreen/ReactArtifact/appCreationModeContext';
@@ -34,6 +35,8 @@ import { globalClickTracker } from '../../services/Analytics/globalClickTracker'
 import { readTrackSource } from '../../services/Analytics/trackSource';
 import { useV2SessionInvalidator } from '../../hooks/useAskAISessionsV2';
 import { useSelectedAgent } from '../../hooks/useSelectedAgent';
+import { useAssistantActions } from '../../components/Assistant/useAssistantActions';
+import type { AssistantRouting } from '../../components/Assistant/useRoutedSubmit';
 import { AI_ACTIVE_SESSION_KEY, AI_SHOW_CHAT_VIEW_KEY } from './aiSessionStorage';
 
 function CitationWorkspaceOpener({ onOpenSources }: { onOpenSources: () => void }): null {
@@ -166,6 +169,9 @@ const AIScreen = (): ReactElement => {
   const isV2 = true;
   const effectiveAgentSlug = selectedAgentSlug;
   const { invalidateSessions: invalidateV2Sessions } = useV2SessionInvalidator();
+  // Above the thread, whose remounts would otherwise drop the local turns.
+  const assistant = useAssistantActions({ enabled: true });
+  const { reset: resetAssistant } = assistant;
 
   useEffect(() => {
     showChatViewRef.current = showChatView;
@@ -204,7 +210,8 @@ const AIScreen = (): ReactElement => {
     setInitialQuery('');
     setInitialAttachments(undefined);
     setChatKey(prev => prev + 1);
-  }, [sessionFromUrl, activeSessionId]);
+    resetAssistant();
+  }, [sessionFromUrl, activeSessionId, resetAssistant]);
 
   useEffect(() => {
     if (activeSessionId) {
@@ -339,7 +346,8 @@ const AIScreen = (): ReactElement => {
     setInitialExtras(undefined);
     setChatKey(prev => prev + 1);
     setShowChatView(false); // Return to landing page
-  }, []);
+    resetAssistant();
+  }, [resetAssistant]);
 
   const handleSelectSession = useCallback(
     (sessionId: string): void => {
@@ -353,8 +361,9 @@ const AIScreen = (): ReactElement => {
       setInitialExtras(lastContextRef.current);
       setChatKey(prev => prev + 1);
       setShowChatView(true);
+      resetAssistant();
     },
-    [activeSessionId],
+    [activeSessionId, resetAssistant],
   );
 
   const handleContextChange = useCallback((context: ComposerContext): void => {
@@ -399,15 +408,44 @@ const AIScreen = (): ReactElement => {
   // matching the XyneAISidebar behaviour. Seeding initialExtras carries the
   // selections into the remounted chat composer; the landing composer keeps its
   // own state (it isn't remounted).
-  const handleAgentChange = useCallback((_slug: string | null, context: ComposerContext): void => {
+  const handleAgentChange = useCallback(
+    (_slug: string | null, context: ComposerContext): void => {
+      setInitialQuery('');
+      setInitialAttachments(undefined);
+      setInitialTrigger(undefined);
+      setInitialExtras(context);
+      setActiveSessionId('');
+      setChatKey(prev => prev + 1);
+      resetAssistant();
+    },
+    [resetAssistant],
+  );
+
+  const showAssistantThread = useCallback((): void => {
     setInitialQuery('');
     setInitialAttachments(undefined);
     setInitialTrigger(undefined);
-    setInitialExtras(context);
+    setInitialExtras(lastContextRef.current);
     setActiveSessionId('');
     setChatKey(prev => prev + 1);
+    setShowChatView(true);
   }, []);
-
+  const landingAssistant: AssistantRouting | undefined =
+    assistant.actions.length > 0
+      ? {
+          ask: async text => {
+            const outcome = await assistant.ask(text);
+            if (outcome.outcome === 'replied') showAssistantThread();
+            return outcome;
+          },
+          answer: async text => {
+            const reply = await assistant.answer(text);
+            if (reply) showAssistantThread();
+            return reply;
+          },
+          cancel: assistant.cancel,
+        }
+      : undefined;
   const handleConversationChange = useCallback(
     (sessionId: string): void => {
       setActiveSessionId(sessionId);
@@ -615,6 +653,7 @@ const AIScreen = (): ReactElement => {
               mobileOpen={mobileSidebarOpen}
               onMobileOpenChange={setMobileSidebarOpen}
               mainRef={dropZoneRef}
+              onToggleCollapse={handleToggleSidebar}
               collapseSignal={collapseSignal}
               onSidebarCollapsedChange={setSidebarCollapsed}
               sidebarToggleRef={sidebarToggleRef}
@@ -656,10 +695,28 @@ const AIScreen = (): ReactElement => {
                   onAgentChange={handleAgentChange}
                   onContextChange={handleContextChange}
                   onInitialQueryConsumed={handleInitialQueryConsumed}
+                  assistant={assistant}
                 />
               ) : (
                 /* Landing page – centred greeting + composer */
-                <main className='flex h-full flex-1 items-center justify-center px-6 py-8'>
+                <main className='relative flex h-full flex-1 items-center justify-center px-6 py-8'>
+                  {/* The landing page has no header, so without this the
+                      sidebar's own collapse button would strand the user with
+                      no way to bring it back. */}
+                  {sidebarCollapsed && (
+                    <button
+                      type='button'
+                      onClick={handleToggleSidebar}
+                      aria-label='Expand sidebar'
+                      aria-controls='ai-sidebar'
+                      title='Expand sidebar'
+                      className='absolute left-3 top-3 hidden size-8 place-items-center rounded-lg text-muted-foreground transition-colors hover:bg-secondary/60 hover:text-foreground sm:left-4 md:grid'
+                      data-track-category='XyneAI'
+                      data-track-name='TOGGLE_DESKTOP_SIDEBAR'
+                    >
+                      <SidebarLeftOpen size={16} aria-hidden='true' />
+                    </button>
+                  )}
                   <div className='flex w-full max-w-3xl flex-col'>
                     <AIEmptyState />
                     <div className='mt-6'>
@@ -667,6 +724,8 @@ const AIScreen = (): ReactElement => {
                         ref={landingComposerRef}
                         autoFocus
                         onSubmit={handleComposerSubmit}
+                        assistant={landingAssistant}
+                        pending={assistant.isRouting}
                         onAgentChange={handleAgentChange}
                         showAgentSelector={isV2}
                         onContextChange={handleContextChange}

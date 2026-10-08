@@ -48,6 +48,7 @@ import {
   InvitationsACL,
   OrganizationDomainsACL,
   OrgLLMServiceAccountCredentialsACL,
+  OrgMemberCredentialsACL,
   LinkAccessACL,
   LinksACL,
   LookupValuesACL,
@@ -190,6 +191,8 @@ export class ACLFactory {
     case 'executionItemMutation':
       return new BaseQueryACL(ctx, prisma)
     case 'executionRunLog':
+      return new BaseQueryACL(ctx, prisma)
+    case 'radarPrLink':
       return new BaseQueryACL(ctx, prisma)
     // Rules are per user, and every read is already scoped to (workspaceId,
     // userId) by radarRuleStore — there is no route that reads anyone else's.
@@ -541,6 +544,8 @@ export class ACLFactory {
       return new UnscopedACL(ctx, prisma)
     case 'orgLLMServiceAccountCredential':
       return new OrgLLMServiceAccountCredentialsACL(ctx, prisma)
+    case 'orgMemberCredential':
+      return new OrgMemberCredentialsACL(ctx, prisma)
     case 'guestAccess':
       return new BaseQueryACL(ctx, prisma)
     case 'entity':
@@ -550,6 +555,9 @@ export class ACLFactory {
     case 'entityAlias':
       return new BaseQueryACL(ctx, prisma)
     case 'deskAutoLabelRuleReference':
+      return new BaseQueryACL(ctx, prisma)
+    case 'connectGroup':
+      // Slack Connect reach table — default ACL in Phase 1 (no per-row restriction yet).
       return new BaseQueryACL(ctx, prisma)
     }
   }

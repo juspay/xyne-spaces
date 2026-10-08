@@ -19,8 +19,8 @@ export async function handleClear(ctx: WebhookCommandCtx): Promise<void> {
   }
   await ctx.reply(
     cleared
-      ? "🧹 Cleared this thread's context — I'll start fresh on your next message."
-      : "⚠️ Couldn't clear the conversation context. Please try again.",
+      ? "Cleared this thread's context — I'll start fresh on your next message."
+      : "Couldn't clear the conversation context. Please try again.",
     "Failed to post /clear reply",
   );
 }

@@ -13,6 +13,8 @@ import {
   MultipleCrossCancelCircle,
   PluginAddonDefault,
 } from '@xyne/icons';
+import { cn } from '@/utils/classNames';
+import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
 import Tooltip from '@/components/ui/Tooltip';
@@ -29,6 +31,7 @@ import {
   rejectServerPublish,
   rejectWorkflowGlobalRequest,
 } from '@/services/claw/clawAdminService';
+import { getClawAgentDetail } from '@/services/claw/clawAuthAgentsService';
 import type {
   AdminOrgScope,
   AgentRequestItem,
@@ -37,9 +40,10 @@ import type {
 import { OrgBadge } from './components/AdminTable';
 import { FilterSelect } from './components/FilterSelect';
 import { TabMessage } from './components/TabMessage';
-import { RegistrationFlowCard } from './components/RegistrationFlowCard';
+import { RegistrationFlowDialog } from './components/RegistrationFlowDialog';
 import {
   adminAgentsPrefix,
+  agentDetailKey,
   mcpPublishKey,
   pendingRequestsKey,
   pendingRequestsPrefix,
@@ -76,6 +80,7 @@ interface UnifiedRequest {
   extra?: string | null;
   orgName?: string | null;
   detail?: ReactNode;
+  isDraft?: boolean;
   approveLabel: string;
   approveDisabled?: boolean;
   onApprove: () => void;
@@ -100,6 +105,133 @@ const agentRequestTitle = (request: AgentRequestItem): string =>
   request.targetType === 'skill'
     ? (request.skillName ?? request.skillSlug ?? 'Skill')
     : (request.agentName ?? 'Agent');
+
+interface ProposedAgent {
+  description?: string;
+  systemPrompt?: string;
+  tools?: string[];
+  mcps?: string[];
+  summary?: string;
+}
+
+interface DetailEntry {
+  label: string;
+  value: string;
+  scrollable?: boolean;
+}
+
+const parseProposedAgent = (raw: string | null | undefined): ProposedAgent | null => {
+  if (!raw) return null;
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    return parsed && typeof parsed === 'object' ? (parsed as ProposedAgent) : null;
+  } catch {
+    return null;
+  }
+};
+
+const configToolNames = (config: Record<string, unknown>): string[] => {
+  const groups = config['tools'];
+  if (!groups || typeof groups !== 'object') return [];
+  return Object.values(groups as Record<string, unknown>)
+    .flatMap(group => (Array.isArray(group) ? (group as unknown[]) : []))
+    .filter((name): name is string => typeof name === 'string' && name.length > 0);
+};
+
+const DetailShell = ({ children }: { children: ReactNode }): ReactElement => (
+  <div className='mt-3 flex flex-col gap-3 rounded-lg border border-border bg-muted/50 p-3'>
+    {children}
+  </div>
+);
+
+const DetailPanel = ({
+  entries,
+  systemPrompt,
+}: {
+  entries: DetailEntry[];
+  systemPrompt?: string | undefined;
+}): ReactElement => (
+  <DetailShell>
+    {entries.map(entry => (
+      <div key={entry.label} className='flex flex-col gap-0.5'>
+        <span className='text-xs font-medium text-foreground'>{entry.label}</span>
+        <span
+          className={cn(
+            'break-words text-xs text-muted-foreground',
+            entry.scrollable && 'max-h-24 overflow-y-auto',
+          )}
+        >
+          {entry.value}
+        </span>
+      </div>
+    ))}
+
+    {systemPrompt && (
+      <div className='flex flex-col gap-0.5'>
+        <span className='text-xs font-medium text-foreground'>System prompt</span>
+        <pre className='max-h-72 overflow-auto whitespace-pre-wrap break-words text-xs text-muted-foreground'>
+          {systemPrompt}
+        </pre>
+      </div>
+    )}
+  </DetailShell>
+);
+
+const ProposedAgentDetail = ({ proposed }: { proposed: ProposedAgent }): ReactElement => {
+  const entries: DetailEntry[] = [];
+  if (proposed.description) entries.push({ label: 'Description', value: proposed.description });
+  if (proposed.tools?.length) {
+    entries.push({ label: 'Tools', value: proposed.tools.join(', '), scrollable: true });
+  }
+  if (proposed.mcps?.length) {
+    entries.push({ label: 'MCPs', value: proposed.mcps.join(', '), scrollable: true });
+  }
+  if (proposed.summary) entries.push({ label: 'Summary', value: proposed.summary });
+
+  return (
+    <DetailPanel
+      entries={entries}
+      {...(proposed.systemPrompt ? { systemPrompt: proposed.systemPrompt } : {})}
+    />
+  );
+};
+
+const ExistingAgentDetail = ({ slug }: { slug: string }): ReactElement => {
+  const { data, isPending, isError } = useQuery({
+    queryKey: agentDetailKey(slug),
+    queryFn: () => getClawAgentDetail(slug),
+    staleTime: 5 * 60 * 1000,
+  });
+
+  if (isPending) {
+    return (
+      <DetailShell>
+        <Skeleton className='h-3 w-2/3' />
+        <Skeleton className='h-3 w-1/2' />
+      </DetailShell>
+    );
+  }
+
+  if (isError || !data) {
+    return (
+      <DetailShell>
+        <span className='text-xs text-muted-foreground'>Couldn’t load this agent.</span>
+      </DetailShell>
+    );
+  }
+
+  const tools = configToolNames(data.config);
+  const entries: DetailEntry[] = [];
+  if (data.description) entries.push({ label: 'Description', value: data.description });
+  if (tools.length) entries.push({ label: 'Tools', value: tools.join(', '), scrollable: true });
+
+  return (
+    <DetailPanel
+      entries={entries}
+      {...(data.systemPrompt ? { systemPrompt: data.systemPrompt } : {})}
+    />
+  );
+};
 
 const connectorDefinition = (server: McpPublishRequest): string =>
   JSON.stringify(
@@ -297,6 +429,8 @@ export function RequestsTab({
       if (orgId && request.orgId !== orgId) continue;
       const isSkill = request.targetType === 'skill';
       const slug = request.agentSlug ?? null;
+      const isDraft = request.requestType === 'agent_create';
+      const proposed = isDraft ? parseProposedAgent(request.proposedContent) : null;
       const requester = request.requesterName ?? request.requesterEmail ?? 'Unknown requester';
       all.push({
         key: `agent-${request.id}`,
@@ -313,8 +447,14 @@ export function RequestsTab({
             ? runApproveSkill(request.id)
             : runApproveAndSetup({ requestId: request.id, slug: slug as string }),
         onReject: note => runRejectAgent({ requestId: request.id, ...(note ? { note } : {}) }),
+        ...(proposed
+          ? { detail: <ProposedAgentDetail proposed={proposed} /> }
+          : !isSkill && slug
+            ? { detail: <ExistingAgentDetail slug={slug} /> }
+            : {}),
+        isDraft,
         onView:
-          !isSkill && slug
+          !isSkill && !isDraft && slug
             ? (): void => {
                 void navigate(`${libraryPath}/agent/${encodeURIComponent(slug)}?tab=persona`, {
                   state: { returnTo: `${location.pathname}${location.search}${location.hash}` },
@@ -462,6 +602,7 @@ export function RequestsTab({
                       <HighlightMatch text={row.title} query={query} />
                     </span>
                   )}
+                  {row.isDraft && <Badge variant='secondary'>Draft</Badge>}
                   {showOrgLabels && row.orgName && <OrgBadge orgName={row.orgName} />}
                 </div>
 
@@ -502,40 +643,44 @@ export function RequestsTab({
                   <span className='size-7' aria-hidden />
                 )}
 
-                <Tooltip content={row.approveLabel} side='top'>
-                  <Button
-                    type='button'
-                    variant='ghost'
-                    size='icon'
-                    aria-label={row.approveLabel}
-                    disabled={busy || row.approveDisabled}
-                    onClick={row.onApprove}
-                    className='size-7 text-muted-foreground hover:bg-status-success/10 hover:text-status-success'
-                    data-track-category='Claw Admin'
-                    data-track-name={`Approve ${row.kind} request`}
-                  >
-                    <CheckTickCircle className='size-4' />
-                  </Button>
-                </Tooltip>
+                {!row.isDraft && (
+                  <>
+                    <Tooltip content={row.approveLabel} side='top'>
+                      <Button
+                        type='button'
+                        variant='ghost'
+                        size='icon'
+                        aria-label={row.approveLabel}
+                        disabled={busy || row.approveDisabled}
+                        onClick={row.onApprove}
+                        className='size-7 text-muted-foreground hover:bg-status-success/10 hover:text-status-success'
+                        data-track-category='Claw Admin'
+                        data-track-name={`Approve ${row.kind} request`}
+                      >
+                        <CheckTickCircle className='size-4' />
+                      </Button>
+                    </Tooltip>
 
-                <Tooltip content='Reject request' side='top'>
-                  <Button
-                    type='button'
-                    variant='ghost'
-                    size='icon'
-                    aria-label='Reject request'
-                    disabled={busy}
-                    onClick={() => {
-                      setRejectNote('');
-                      setRejectingKey(prev => (prev === row.key ? null : row.key));
-                    }}
-                    className='size-7 text-muted-foreground hover:bg-destructive/10 hover:text-destructive'
-                    data-track-category='Claw Admin'
-                    data-track-name={`Reject ${row.kind} request`}
-                  >
-                    <MultipleCrossCancelCircle className='size-4' />
-                  </Button>
-                </Tooltip>
+                    <Tooltip content='Reject request' side='top'>
+                      <Button
+                        type='button'
+                        variant='ghost'
+                        size='icon'
+                        aria-label='Reject request'
+                        disabled={busy}
+                        onClick={() => {
+                          setRejectNote('');
+                          setRejectingKey(prev => (prev === row.key ? null : row.key));
+                        }}
+                        className='size-7 text-muted-foreground hover:bg-destructive/10 hover:text-destructive'
+                        data-track-category='Claw Admin'
+                        data-track-name={`Reject ${row.kind} request`}
+                      >
+                        <MultipleCrossCancelCircle className='size-4' />
+                      </Button>
+                    </Tooltip>
+                  </>
+                )}
               </div>
             </div>
           </div>
@@ -571,16 +716,14 @@ export function RequestsTab({
 
   return (
     <div className='flex min-h-0 flex-1 flex-col gap-6 overflow-auto pb-6'>
-      {registration.flow && (
-        <RegistrationFlowCard
-          flow={registration.flow}
-          onRun={() => void registration.runStep()}
-          onPickPicture={registration.pickPicture}
-          onSkipUpload={registration.dismiss}
-          onDismiss={registration.dismiss}
-          showUploadStep
-        />
-      )}
+      <RegistrationFlowDialog
+        flow={registration.flow}
+        onRun={() => void registration.runStep()}
+        onPickPicture={registration.pickPicture}
+        onSkipUpload={registration.dismiss}
+        onDismiss={registration.dismiss}
+        showUploadStep
+      />
 
       {filterBar}
 

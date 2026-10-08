@@ -22,6 +22,7 @@ import { CallVespaFeedSource, queueCallVespaFeed } from '@/services/callVespaQue
 import { queueCallCalendarPush, queueCallCalendarPushMany } from '@/queues/callCalendarPushQueue';
 import { buildCallInviteUrl } from '@/utils/urlUtils';
 import { messageMetadataService } from '@/services/messageMetadataService';
+import { summaryTemplateService } from '@/services/summaryTemplateService';
 import { withWorkspaceScope } from '@/database/tenant/context';
 
 // Number of milliseconds to buffer recurring call instances ahead of time (60 days)
@@ -180,6 +181,23 @@ export class ScheduleCallController {
     return participantUserIds;
   }
 
+  /**
+   * A pinned summary template must be one the organizer can access: the detailed summary
+   * later resolves it as the organizer, and falls back to LLM selection if it can't.
+   */
+  private async canPinSummaryTemplate(
+    summaryTemplateId: string,
+    req: Request,
+    organizerId: string,
+  ): Promise<boolean> {
+    const template = await summaryTemplateService.findAccessibleById(
+      summaryTemplateId,
+      req.user!.workspaceId!,
+      organizerId,
+    );
+    return template !== null;
+  }
+
   // POST /api/calls/series - Create a recurring call series
   createRecurringSeries = async (req: Request, res: Response): Promise<void> => {
     try {
@@ -203,8 +221,14 @@ export class ScheduleCallController {
         endsOn,
         externalInvitees,
         invitation,
+        summaryTemplateId,
       } = RecurringScheduleCallSchema.parse(req.body);
       const normalizedExternalInvitees = normalizeEmailList(externalInvitees);
+
+      if (summaryTemplateId && !(await this.canPinSummaryTemplate(summaryTemplateId, req, userId))) {
+        res.status(400).json({ success: false, error: 'Invalid summary template' });
+        return;
+      }
 
       // Scope is fully decided by the frontend; the backend does NO scopeType inspection:
       //   - channelId present [+ targetUserIds subset] → channel-scoped call, keep channelId
@@ -249,7 +273,7 @@ export class ScheduleCallController {
       // Create series and pre-create all instances for the next 60 days
       // Only the first upcoming instance notifies participants (to avoid spam)
       let createdCallIds: string[] = [];
-      ({ createdCallIds } = await createRecurringSeriesTx(dbClient, seriesId, title, description, req, userId, finalChannelId, recurrenceRule, timezone, startTime, endTime, startsOn, resolvedEndsOn, callUpdatesChannel, recurringParticipantUserIds, normalizedExternalInvitees, createdCallIds));
+      ({ createdCallIds } = await createRecurringSeriesTx(dbClient, seriesId, title, description, req, userId, finalChannelId, recurrenceRule, timezone, startTime, endTime, startsOn, resolvedEndsOn, callUpdatesChannel, recurringParticipantUserIds, normalizedExternalInvitees, createdCallIds, summaryTemplateId));
 
       logger.info(
         `Recurring series ${seriesId} created by ${userId} — ${createdCallIds.length} instances pre-created`,
@@ -311,7 +335,13 @@ export class ScheduleCallController {
         externalInvitees,
         externalInviteDelivery,
         invitation,
+        summaryTemplateId,
       } = ScheduleCallSchema.parse(req.body);
+
+      if (summaryTemplateId && !(await this.canPinSummaryTemplate(summaryTemplateId, req, userId))) {
+        res.status(400).json({ success: false, error: 'Invalid summary template' });
+        return;
+      }
 
       // Scope is fully decided by the frontend; the backend does NO scopeType inspection
       // (see createRecurringSeries for the full rationale):
@@ -347,21 +377,21 @@ export class ScheduleCallController {
 
       if (hasExternals) {
         logger.info(
-          `[scheduleCall] External invitees detected | callId=${callId} externalId=${externalId} inviteeCount=${normalizedExternalInvitees.length} delivery=${externalInviteDelivery ?? 'standalone'} hasConversation=${hasConversation}`,
+          `[scheduleCall] External invitees detected | callId=${externalId} inviteeCount=${normalizedExternalInvitees.length} delivery=${externalInviteDelivery ?? 'standalone'} hasConversation=${hasConversation}`,
         );
       }
 
       const db = DatabaseClient.getInstance();
       const resolvedCallOrigin = conversationId ? CallOrigin.CONVERSATION : CallOrigin.CHANNEL;
 
-      const { participantUserIds, pillConversationId } = await scheduleCallTx(db, callId, externalId, title, userId, finalChannelId, conversationId, roomLink, startsAt, endsAt, targetUserIds, callUpdatesChannel, normalizedExternalInvitees, resolvedCallOrigin, req);
+      const { participantUserIds, pillConversationId } = await scheduleCallTx(db, callId, externalId, title, userId, finalChannelId, conversationId, roomLink, startsAt, endsAt, targetUserIds, callUpdatesChannel, normalizedExternalInvitees, resolvedCallOrigin, req, summaryTemplateId);
 
       // Eager, so initial_message_md is populated before the response returns.
       if (pillConversationId) {
         try {
           await messageMetadataService.syncInitialMessageMd(pillConversationId);
         } catch (error) {
-          logger.error(`Failed to sync initial_message_md for call pill ${callId}:`, error);
+          logger.error(`Failed to sync initial_message_md for call pill ${externalId}:`, error);
         }
       }
 
@@ -386,7 +416,7 @@ export class ScheduleCallController {
 
       // Put the call on the organizer's Google Calendar (and, as attendees, on
       // every participant's) so it is visible to people who never open Xyne.
-      queueCallCalendarPush(callId, 'scheduleCall');
+      queueCallCalendarPush(callId, externalId, 'scheduleCall');
 
       // Send immediate notifications + create activities for all participants (excluding organizer)
       try {
@@ -401,7 +431,7 @@ export class ScheduleCallController {
           participantUserIds,
         });
       } catch (error) {
-        logger.error(`Failed to send immediate notifications for call ${callId}:`, error);
+        logger.error(`Failed to send immediate notifications for call ${externalId}:`, error);
       }
 
       // Schedule 10-minute reminder notification for all participants
@@ -416,7 +446,7 @@ export class ScheduleCallController {
         logger.info(`Scheduled 10-minute reminder for call ${externalId} with ${participantUserIds.length} participants`);
       } catch (error) {
         // Log error but don't fail the call creation
-        logger.error(`Failed to schedule reminder for call ${callId}:`, error);
+        logger.error(`Failed to schedule reminder for call ${externalId}:`, error);
       }
 
       // Schedule auto-end job at endsAt time
@@ -429,7 +459,7 @@ export class ScheduleCallController {
         logger.info(`Scheduled auto-end for call ${externalId} at ${new Date(endsAt).toISOString()}`);
       } catch (error) {
         // Log error but don't fail the call creation
-        logger.error(`Failed to schedule auto-end for call ${callId}:`, error);
+        logger.error(`Failed to schedule auto-end for call ${externalId}:`, error);
       }
 
       logger.info(`Scheduled call created: ${externalId} for channel ${finalChannelId} by user ${userId}`);
@@ -480,7 +510,7 @@ export class ScheduleCallController {
 
     try {
       const parsedBody = UpdateScheduleCallSchema.parse(req.body);
-      const { title, startsAt, endsAt, targetUserIds, channelId: reqChannelId, callUpdatesChannel: reqCallUpdatesChannel, externalInvitees } = parsedBody;
+      const { title, startsAt, endsAt, targetUserIds, channelId: reqChannelId, callUpdatesChannel: reqCallUpdatesChannel, externalInvitees, summaryTemplateId } = parsedBody;
       const normalizedExternalInvitees = externalInvitees !== undefined
         ? normalizeEmailList(externalInvitees)
         : undefined;
@@ -494,7 +524,7 @@ export class ScheduleCallController {
         return;
       }
 
-      logger.info(`[updateScheduledCall] call found | callId=${call.id} currentChannelId=${call.channelId} status=${call.status} organizer=${call.createdByUserId}`);
+      logger.info(`[updateScheduledCall] call found | callId=${call.externalId} currentChannelId=${call.channelId} status=${call.status} organizer=${call.createdByUserId}`);
 
       const auth = await this.authorizeParticipantEdit({
         subject: {
@@ -510,7 +540,8 @@ export class ScheduleCallController {
           endsAt !== undefined ||
           reqChannelId !== undefined ||
           reqCallUpdatesChannel !== undefined ||
-          normalizedExternalInvitees !== undefined,
+          normalizedExternalInvitees !== undefined ||
+          summaryTemplateId !== undefined,
         targetUserIds,
         // findParticipants already excludes external invitees.
         loadParticipants: () => repositories.calls.findParticipants(call.id),
@@ -522,6 +553,14 @@ export class ScheduleCallController {
 
       if (call.status !== CallStatus.SCHEDULED) {
         res.status(400).json({ success: false, error: 'Only SCHEDULED calls can be edited' });
+        return;
+      }
+
+      if (
+        summaryTemplateId &&
+        !(await this.canPinSummaryTemplate(summaryTemplateId, req, call.createdByUserId))
+      ) {
+        res.status(400).json({ success: false, error: 'Invalid summary template' });
         return;
       }
 
@@ -601,7 +640,7 @@ export class ScheduleCallController {
         );
       }
 
-      logger.info(`[updateScheduledCall] calling updateScheduledCall repo | callId=${call.id} resolvedChannelId=${resolvedChannelId}`);
+      logger.info(`[updateScheduledCall] calling updateScheduledCall repo | callId=${call.externalId} resolvedChannelId=${resolvedChannelId}`);
 
       const updatedCall = await repositories.calls.updateScheduledCall({
         callId: call.id,
@@ -614,9 +653,10 @@ export class ScheduleCallController {
         invitedByUserId: userId,
         callUpdatesChannel: newCallUpdatesChannel,
         externalInvitees: normalizedExternalInvitees,
+        summaryTemplateId,
       });
 
-      logger.info(`[updateScheduledCall] repo update complete | callId=${call.id} resolvedChannelId=${resolvedChannelId}`);
+      logger.info(`[updateScheduledCall] repo update complete | callId=${call.externalId} resolvedChannelId=${resolvedChannelId}`);
 
       // The call changed channels: retire the old pill as "moved" and post a fresh one.
       if (channelChanged && resolvedChannelId) {
@@ -632,11 +672,11 @@ export class ScheduleCallController {
             senderName: organizer?.displayName || organizer?.name || 'Someone',
           });
         } catch (error) {
-          logger.error(`Failed to move scheduled call pill for call ${call.id}:`, error);
+          logger.error(`Failed to move scheduled call pill for call ${call.externalId}:`, error);
         }
       }
 
-      queueCallCalendarPush(call.id, 'updateScheduledCall');
+      queueCallCalendarPush(call.id, call.externalId, 'updateScheduledCall');
 
       if (newlyAddedExternalInvitees.length > 0) {
         const inviteStartsAt = updatedCall.startsAt ?? call.startsAt;
@@ -658,7 +698,7 @@ export class ScheduleCallController {
           });
         } else {
           logger.warn(
-            `[updateScheduledCall] Skipping external invite email for newly added invitees because call time is missing | callId=${call.id} invitees=${newlyAddedExternalInvitees.join(', ')}`,
+            `[updateScheduledCall] Skipping external invite email for newly added invitees because call time is missing | callId=${call.externalId} invitees=${newlyAddedExternalInvitees.join(', ')}`,
           );
         }
       }
@@ -678,7 +718,7 @@ export class ScheduleCallController {
             participantIds,
           );
         } catch (err) {
-          logger.error(`Failed to reschedule reminder for call ${call.id}:`, err);
+          logger.error(`Failed to reschedule reminder for call ${call.externalId}:`, err);
         }
       }
 
@@ -690,7 +730,7 @@ export class ScheduleCallController {
             new Date(endsAt),
           );
         } catch (err) {
-          logger.error(`Failed to reschedule auto-end for call ${call.id}:`, err);
+          logger.error(`Failed to reschedule auto-end for call ${call.externalId}:`, err);
         }
       }
 
@@ -707,7 +747,7 @@ export class ScheduleCallController {
           participantUserIds: participantIds,
         });
       } catch (err) {
-        logger.error(`Failed to send update notifications for call ${call.id}:`, err);
+        logger.error(`Failed to send update notifications for call ${call.externalId}:`, err);
       }
 
       logger.info(`Call ${externalId} updated by organizer ${userId}`);
@@ -749,7 +789,7 @@ export class ScheduleCallController {
 
     try {
       const parsedBody = UpdateRecurringSeriesSchema.parse(req.body);
-      const { title, recurrenceRule, startTime, endTime, endsOn, timezone, targetUserIds, channelId: reqChannelId, callUpdatesChannel: reqCallUpdatesChannel, externalInvitees } = parsedBody;
+      const { title, recurrenceRule, startTime, endTime, endsOn, timezone, targetUserIds, channelId: reqChannelId, callUpdatesChannel: reqCallUpdatesChannel, externalInvitees, summaryTemplateId } = parsedBody;
       const normalizedExternalInvitees = externalInvitees !== undefined
         ? normalizeEmailList(externalInvitees)
         : undefined;
@@ -783,7 +823,8 @@ export class ScheduleCallController {
           timezone !== undefined ||
           reqChannelId !== undefined ||
           reqCallUpdatesChannel !== undefined ||
-          normalizedExternalInvitees !== undefined,
+          normalizedExternalInvitees !== undefined ||
+          summaryTemplateId !== undefined,
         targetUserIds,
         loadParticipants: () =>
           repositories.recurringCallParticipants.findInternalParticipants(series.id),
@@ -804,6 +845,14 @@ export class ScheduleCallController {
 
       if (series.status === 'CANCELLED') {
         res.status(400).json({ success: false, error: 'Cannot edit a cancelled series' });
+        return;
+      }
+
+      if (
+        summaryTemplateId &&
+        !(await this.canPinSummaryTemplate(summaryTemplateId, req, series.organizerId))
+      ) {
+        res.status(400).json({ success: false, error: 'Invalid summary template' });
         return;
       }
 
@@ -878,6 +927,7 @@ export class ScheduleCallController {
       if (endsOn !== undefined) seriesUpdate.endsOn = new Date(endsOn);
       if (resolvedChannelId !== undefined) seriesUpdate.channelId = resolvedChannelId;
       if (newCallUpdatesChannel !== undefined) seriesUpdate.callUpdatesChannel = newCallUpdatesChannel;
+      if (summaryTemplateId !== undefined) seriesUpdate.summaryTemplateId = summaryTemplateId;
       // NOTE: We intentionally do NOT update startsOn. The original series.startsOn is the
       // RRULE dtstart anchor and must remain unchanged. The frontend may send startsOn as the
       // instance date, but overwriting the series start would corrupt the recurrence calculation.
@@ -964,12 +1014,13 @@ export class ScheduleCallController {
               endsAt: newEndsAt,
             });
 
-            logger.info(`[updateRecurringSeries] updated instance ${instance.id} time: ${existingStart.toISOString()} -> ${newStartsAt.toISOString()}`);
+            logger.info(`[updateRecurringSeries] updated instance ${instance.externalId} time: ${existingStart.toISOString()} -> ${newStartsAt.toISOString()}`);
           }
         }
 
         // Cascade callUpdatesChannel when mode changed — safe to use updateMany on a plain column
         if (newCallUpdatesChannel !== undefined) instanceCascade.callUpdatesChannel = newCallUpdatesChannel;
+        if (summaryTemplateId !== undefined) instanceCascade.summaryTemplateId = summaryTemplateId;
 
         if (Object.keys(instanceCascade).length > 0 && allScheduledInstances.length > 0) {
           logger.info(`[updateRecurringSeries] cascading ${JSON.stringify(instanceCascade)} to ${allScheduledInstances.length} instances`);
@@ -978,6 +1029,7 @@ export class ScheduleCallController {
             title: title !== undefined ? title : undefined,
             channelId: resolvedChannelId,
             callUpdatesChannel: newCallUpdatesChannel,
+            summaryTemplateId,
           });
           allScheduledInstances.forEach((instance) => queueCallVespaFeed(instance.id, {
             source: CallVespaFeedSource.ScheduleCallControllerUpdateRecurringSeriesCascade,
@@ -1004,9 +1056,9 @@ export class ScheduleCallController {
                 instance.externalId,
                 instance.endsAt,
               );
-              logger.info(`[updateRecurringSeries] rescheduled Bull jobs for instance ${instance.id}`);
+              logger.info(`[updateRecurringSeries] rescheduled Bull jobs for instance ${instance.externalId}`);
             } catch (err) {
-              logger.error(`[updateRecurringSeries] failed to reschedule Bull jobs for instance ${instance.id}:`, err);
+              logger.error(`[updateRecurringSeries] failed to reschedule Bull jobs for instance ${instance.externalId}:`, err);
             }
           }
         }
@@ -1048,10 +1100,7 @@ export class ScheduleCallController {
         // Title / time / participant edits cascaded above; mirror them out.
         // (The regeneration branch is covered by recurringCallService, which
         // pushes the new instances and withdraws the superseded ones.)
-        queueCallCalendarPushMany(
-          allScheduledInstances.map((instance) => instance.id),
-          'updateRecurringSeries',
-        );
+        queueCallCalendarPushMany(allScheduledInstances, 'updateRecurringSeries');
       }
 
       if (newlyAddedExternalInvitees.length > 0) {
@@ -1160,16 +1209,16 @@ export class ScheduleCallController {
 
       // Remove Bull jobs for this instance
       try {
-        await scheduledCallNotificationService.removeCallJobs(call.id);
+        await scheduledCallNotificationService.removeCallJobs(call.id, call.externalId);
       } catch (err) {
-        logger.error(`Failed to remove Bull jobs for call ${call.id}:`, err);
+        logger.error(`Failed to remove Bull jobs for call ${call.externalId}:`, err);
       }
 
       // Mark the instance as CANCELLED (preserve record)
       await repositories.scheduledCalls.cancelCall(call.id);
 
       // Withdraw the mirrored calendar event so attendees' calendars clear too.
-      queueCallCalendarPush(call.id, 'cancelScheduledCall');
+      queueCallCalendarPush(call.id, call.externalId, 'cancelScheduledCall');
 
       logger.info(`Call ${externalId} cancelled by organizer ${userId}`);
 

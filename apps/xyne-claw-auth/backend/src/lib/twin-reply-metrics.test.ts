@@ -6,6 +6,7 @@ import {
   computeGateAgg,
   computeBehaviorAgg,
   computePerUser,
+  computeWeeklyTrend,
   type ReplyFeedbackRow,
   type GateEventRow,
   type BehaviorRow,
@@ -165,5 +166,41 @@ describe("computePerUser", () => {
     const u2 = perUser.find((u) => u.userId === "u2")!;
     expect(u2.replies.declined).toBe(1);
     expect(u2.behavior.ignored).toBe(1);
+  });
+});
+
+describe("weekly approval trend", () => {
+  const row = (status: string, iso: string) => ({ userId: "u", status, deliveryAction: "reply", proposedAt: new Date(iso), decidedAt: null });
+
+  it("buckets by Monday (UTC) and computes approval and sent-untouched rates", () => {
+    const weeks = computeWeeklyTrend([
+      row("accepted", "2026-09-21T10:00:00Z"), // Mon
+      row("declined", "2026-09-27T23:00:00Z"), // Sun, same week
+      row("accepted_edited", "2026-09-28T01:00:00Z"), // next Mon
+      row("accepted", "2026-09-29T01:00:00Z"),
+      row("ignored", "2026-09-29T02:00:00Z"),
+    ]);
+    expect(weeks.map((w) => w.weekStart)).toEqual(["2026-09-21", "2026-09-28"]);
+    expect(weeks[0]).toMatchObject({ proposed: 2, accepted: 1, declined: 1, approvalRate: 0.5, cleanApprovalRate: 0.5 });
+    expect(weeks[1]).toMatchObject({ proposed: 3, acceptedEdited: 1, accepted: 1, ignored: 1, approvalRate: 1, cleanApprovalRate: 0.5 });
+  });
+
+  it("a pending-only week counts as proposed with null rates", () => {
+    expect(computeWeeklyTrend([row("pending", "2026-09-23T10:00:00Z")])).toEqual([
+      {
+        weekStart: "2026-09-21",
+        proposed: 1,
+        accepted: 0,
+        acceptedEdited: 0,
+        declined: 0,
+        ignored: 0,
+        approvalRate: null,
+        cleanApprovalRate: null,
+      },
+    ]);
+  });
+
+  it("no rows → no weeks", () => {
+    expect(computeWeeklyTrend([])).toEqual([]);
   });
 });

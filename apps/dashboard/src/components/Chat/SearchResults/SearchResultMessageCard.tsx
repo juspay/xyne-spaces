@@ -38,6 +38,8 @@ interface SearchResultMessageCardProps {
   isSelected?: boolean;
   searchSnippet?: string;
   onCardClick?: () => void;
+  /** Called when the card opens its result (side panel or jump to home), for click metrics. */
+  onOpen?: () => void;
   // Message + thread fields from the Vespa search payload. The card builds the
   // message object from these — no Zero message/conversation queries. For ticket
   // results, `ticketMd` carries the serialized ticket card so a conversation is
@@ -64,6 +66,7 @@ export const SearchResultMessageCard = memo(function SearchResultMessageCard({
   isSelected = false,
   searchSnippet,
   onCardClick,
+  onOpen,
   searchThread,
 }: SearchResultMessageCardProps): ReactElement | null {
   const { onSelectThread, onSelectUser, onSelectMessageContext, onResultOpen } =
@@ -127,6 +130,7 @@ export const SearchResultMessageCard = memo(function SearchResultMessageCard({
           createdBy: uploadedByUserId,
           metadata: null,
           conversationId,
+          channelId,
           thumbnailUrl: null,
           isDeleted: false,
           uploadStatus: null,
@@ -137,6 +141,7 @@ export const SearchResultMessageCard = memo(function SearchResultMessageCard({
   }, [
     attachmentIds,
     attachmentResults?.results,
+    channelId,
     conversationId,
     renderedMessageId,
     searchThread.createdAt,
@@ -245,6 +250,7 @@ export const SearchResultMessageCard = memo(function SearchResultMessageCard({
   const navigateToMessage = (): void => {
     if (!targetMessage) return;
     // Jumping to home still leaves from this search — record it before routing away.
+    onOpen?.();
     onResultOpen?.();
     void navigate(
       isMatchRoot
@@ -254,6 +260,7 @@ export const SearchResultMessageCard = memo(function SearchResultMessageCard({
   };
 
   const openPanel = (): void => {
+    onOpen?.();
     if (replyCount > 0) {
       onSelectThread?.({ channelId, conversationId, matchedMessageId });
     } else {
@@ -289,6 +296,7 @@ export const SearchResultMessageCard = memo(function SearchResultMessageCard({
   };
 
   const handleOpenThread = (): void => {
+    onOpen?.();
     onSelectThread?.({ channelId, conversationId });
   };
 

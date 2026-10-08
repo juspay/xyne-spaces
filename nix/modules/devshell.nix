@@ -37,10 +37,16 @@ in
         ```
       '';
     };
+
+    environment = mkOption {
+      type = types.attrsOf types.str;
+      default = { };
+      description = "Environment variables for development commands";
+    };
   };
 
   config = mkIf (cfg.packages != [ ] || cfg.banner != null) {
-    devShells.default = pkgs.mkShell {
+    devShells.default = pkgs.mkShell (cfg.environment // {
       name = cfg.name;
 
       packages = cfg.packages ++ lib.optional (cfg.banner != null) pkgs.glow;
@@ -50,6 +56,6 @@ in
 ${cfg.banner}
 BANNER_EOF
       '';
-    };
+    });
   };
 }

@@ -1,0 +1,208 @@
+{{- $version := include "workflows.ref" "inputs.parameters.version" }}
+{{- $checked := include "workflows.ref" "steps.check.outputs.parameters.version" }}
+{{- $pending := list }}
+{{- range .Values.migrating }}
+{{- $pending = append $pending (include "workflows.ref" (printf "steps.plan-%s.outputs.parameters.pending" .)) }}
+{{- end }}
+apiVersion: argoproj.io/v1alpha1
+kind: WorkflowTemplate
+metadata:
+  name: xyne-upgrade
+  namespace: {{ .Values.namespace }}
+  labels:
+    {{- include "workflows.labels" . | nindent 4 }}
+spec:
+  serviceAccountName: {{ .Values.serviceAccount }}
+  entrypoint: upgrade
+  {{- with .Values.imagePullSecrets }}
+  imagePullSecrets:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  arguments:
+    parameters:
+      - name: version
+        description: Release to move to, for example 1.420.1
+  templates:
+    - name: upgrade
+      steps:
+        - - name: check
+            template: check
+            arguments:
+              parameters:
+                - name: version
+                  value: {{ include "workflows.ref" "workflow.parameters.version" | quote }}
+        {{- if .Values.migrating }}
+        {{- range $i, $app := .Values.migrating }}
+        {{ if eq $i 0 }}- {{ else }}  {{ end }}- name: plan-{{ $app }}
+            template: plan-{{ $app }}
+            arguments:
+              parameters:
+                - name: version
+                  value: {{ $checked | quote }}
+        {{- end }}
+        - - name: approve
+            template: approve
+            when: {{ printf "%s > 0" (join " + " $pending) | quote }}
+        {{- end }}
+        - - name: deploy
+            template: deploy
+            arguments:
+              parameters:
+                - name: version
+                  value: {{ $checked | quote }}
+        - - name: rollout
+            template: rollout
+            arguments:
+              parameters:
+                - name: version
+                  value: {{ $checked | quote }}
+
+    - name: check
+      inputs:
+        parameters:
+          - name: version
+      outputs:
+        parameters:
+          - name: version
+            valueFrom:
+              path: /tmp/version
+      script:
+        image: {{ .Values.toolsImage }}
+        command:
+          - /bin/sh
+        env:
+          - name: VERSION
+            value: {{ $version | quote }}
+          - name: REPO
+            value: {{ .Values.repoURL | quote }}
+          - name: ARGOCD_NAMESPACE
+            value: {{ .Values.argocdNamespace | quote }}
+          - name: ROOT_APP
+            value: {{ .Values.rootApp | quote }}
+        source: |
+          set -eu
+          v="${VERSION#v}"
+          case "$v" in
+            ""|*[!0-9A-Za-z.-]*) echo "not a release version: $VERSION" >&2; exit 1 ;;
+          esac
+          for tag in "v$v" "chart-$v"; do
+            if ! git ls-remote --exit-code --tags "$REPO" "refs/tags/$tag" > /dev/null; then
+              echo "$tag is not a tag in $REPO; publish the release first" >&2
+              exit 1
+            fi
+          done
+          current="$(kubectl -n "$ARGOCD_NAMESPACE" get application "$ROOT_APP" -o jsonpath='{.spec.source.targetRevision}')"
+          echo "$ROOT_APP is on $current, moving to v$v"
+          printf '%s' "$v" > /tmp/version
+    {{- range $app := .Values.migrating }}
+    {{- $t := index $.Values.targets $app }}
+
+    - name: plan-{{ $app }}
+      inputs:
+        parameters:
+          - name: version
+      outputs:
+        parameters:
+          - name: pending
+            valueFrom:
+              path: /tmp/pending
+      activeDeadlineSeconds: {{ $.Values.timeouts.plan }}
+      script:
+        image: {{ include "workflows.image" (dict "root" $ "target" $t) }}
+        imagePullPolicy: IfNotPresent
+        workingDir: {{ $t.workingDir }}
+        command:
+          - /bin/sh
+        env:
+          {{- range $t.secretEnv }}
+          - name: {{ .name }}
+            valueFrom:
+              secretKeyRef:
+                name: {{ .secret }}
+                key: {{ .key | default .name }}
+          {{- end }}
+        source: |
+          set -eu
+          prisma=./node_modules/.bin/prisma
+          count=0
+          for schema in {{ join " " $t.schemas }}; do
+            if "$prisma" migrate status --schema "$schema" > /tmp/status.txt 2>&1; then
+              echo "$schema: no pending migrations"
+              continue
+            fi
+            names="$(awk '/have not yet been applied/ { f = 1; next } f && NF == 0 { exit } f { print $1 }' /tmp/status.txt)"
+            if [ -z "$names" ]; then
+              cat /tmp/status.txt >&2
+              exit 1
+            fi
+            dir="$(dirname "$schema")/migrations"
+            echo "$schema: pending migrations"
+            for name in $names; do
+              echo
+              echo "=== $name"
+              cat "$dir/$name/migration.sql"
+              count=$((count + 1))
+            done
+            echo
+          done
+          echo "{{ $app }}: $count pending migrations"
+          printf '%s' "$count" > /tmp/pending
+    {{- end }}
+
+    - name: approve
+      suspend: {}
+
+    - name: deploy
+      inputs:
+        parameters:
+          - name: version
+      script:
+        image: {{ .Values.toolsImage }}
+        command:
+          - /bin/sh
+        env:
+          - name: VERSION
+            value: {{ $version | quote }}
+          - name: ARGOCD_NAMESPACE
+            value: {{ .Values.argocdNamespace | quote }}
+          - name: ROOT_APP
+            value: {{ .Values.rootApp | quote }}
+        source: |
+          set -eu
+          v="$VERSION"
+          patch="$(jq -nc --arg v "$v" '{spec: {source: {targetRevision: ("v" + $v), helm: {valuesObject: {platformRevision: ("v" + $v), global: {chartRevision: ("chart-" + $v), imageTag: $v}}}}}}')"
+          kubectl -n "$ARGOCD_NAMESPACE" patch application "$ROOT_APP" --type merge -p "$patch"
+          kubectl -n "$ARGOCD_NAMESPACE" annotate application "$ROOT_APP" argocd.argoproj.io/refresh=normal --overwrite
+          echo "$ROOT_APP now points at v$v. Set the same in 02-platform.tfvars so the next setup.sh run keeps it:"
+          echo "  chart_revision = \"chart-$v\""
+          echo "  root_revision  = \"v$v\""
+          echo "  image_tag      = \"$v\""
+
+    - name: rollout
+      inputs:
+        parameters:
+          - name: version
+      activeDeadlineSeconds: {{ .Values.timeouts.rollout }}
+      script:
+        image: {{ .Values.toolsImage }}
+        command:
+          - /bin/sh
+        env:
+          - name: VERSION
+            value: {{ $version | quote }}
+          - name: ARGOCD_NAMESPACE
+            value: {{ .Values.argocdNamespace | quote }}
+          - name: APPS
+            value: {{ join " " .Values.apps | quote }}
+          - name: TIMEOUT
+            value: {{ printf "%ds" (int .Values.timeouts.rollout) | quote }}
+        source: |
+          set -eu
+          for app in $APPS; do
+            kubectl -n "$ARGOCD_NAMESPACE" wait "application/$app" --for=jsonpath='{.status.sync.comparedTo.source.targetRevision}'="chart-$VERSION" --timeout="$TIMEOUT"
+          done
+          for app in $APPS; do
+            kubectl -n "$ARGOCD_NAMESPACE" wait "application/$app" --for=jsonpath='{.status.sync.status}'=Synced --timeout="$TIMEOUT"
+            kubectl -n "$ARGOCD_NAMESPACE" wait "application/$app" --for=jsonpath='{.status.health.status}'=Healthy --timeout="$TIMEOUT"
+            echo "$app: Synced and Healthy on chart-$VERSION"
+          done

@@ -13,6 +13,7 @@ import {
 } from 'react';
 import {
   Globe,
+  Copy,
   Pencil,
   RefreshCw,
   ChevronLeft,
@@ -87,6 +88,12 @@ import type {
   ClawCitation,
 } from '../utils/XyneAITypes';
 import { ActivityBlock } from './ActivityBlock';
+import { FlowScreenManager } from '../../../flowUI/FlowScreenManager';
+import {
+  flowMessageId,
+  requirePendingActionIndex,
+  unpresentedPendingActions,
+} from '../utils/XyneAITypes';
 import { PendingActionBlock } from './PendingActionBlock';
 import { respondToPendingAction } from '../../../../services/XyneAI/XyneAIPendingActionService';
 import { Link2 } from 'lucide-react';
@@ -419,7 +426,7 @@ const UserTagComponent = React.memo(({ userTag }: { userTag: UserTag }) => {
 UserTagComponent.displayName = 'UserTagComponent';
 
 /** Resolves a candidate "@name" to a real workspace user, or null otherwise. */
-type MentionResolver = (rawName: string) => UserTag | null;
+export type MentionResolver = (rawName: string) => UserTag | null;
 
 const MENTION_AMBIGUOUS: unique symbol = Symbol('mention-ambiguous');
 
@@ -593,15 +600,21 @@ export const processNodeForUserTags = (
 };
 
 /**
- * Process a string to replace user tags with actual user names for copying
- * Returns plain text with user names instead of <Full Name> tags
+ * Replace `<Full Name>` tags with the plain name, so copied text matches what
+ * the bubble renders.
+ *
+ * Takes the same resolver the renderer uses rather than the raw `userTags`
+ * map. `userTags` only exists on a message while its run is live — it is not
+ * persisted, so after a reload (and on the AI screen, whose composer never
+ * produces it) the map is empty and a map-based lookup silently copied the raw
+ * tag. The resolver falls back to the live workspace directory, which is
+ * exactly why the rendered chip still showed the name.
  */
-const processTextForCopy = (str: string, userTags?: Record<string, UserTag>): string => {
-  if (!userTags || Object.keys(userTags).length === 0) return str;
+export const processTextForCopy = (str: string, resolveMention?: MentionResolver): string => {
+  if (!resolveMention) return str;
 
-  // Updated regex to match any content inside < > (e.g., <Pradeep J>, <Prajwal Prasad>)
-  return str.replace(/<([^>]+)>/g, match => {
-    const userTag = userTags[match];
+  return str.replace(/<([^>]+)>/g, (match, rawName: string) => {
+    const userTag = resolveMention(rawName);
     return userTag ? userTag.name : match;
   });
 };
@@ -626,6 +639,8 @@ interface MessageContentProps {
   onSummarizerCitationClick: (citation: SummarizerCitation) => void;
   /** Run dimensions merged into tracked clicks (see MessageItemProps). */
   trackContext?: Record<string, unknown> | undefined;
+  /** See MessageItemProps.flowCards — absence means render no cards. */
+  flowCards?: { conversationId: string; onActionComplete: () => void } | undefined;
 }
 
 interface SingleStatObject {
@@ -708,6 +723,8 @@ interface MessageItemProps {
   onEditSubmit?: ((newContent: string, context?: EditedMessageContext) => void) | undefined;
   onEditMobile?: (() => void) | undefined;
   isLatestBotMessage?: boolean | undefined;
+  /** Hides feedback and regenerate, for messages the Ask AI server does not know about. */
+  readOnly?: boolean | undefined;
   branchInfo?: { index: number; total: number } | undefined;
   onBranchNavigate?: ((direction: 'prev' | 'next') => void) | undefined;
   onDebug?: (() => void) | undefined;
@@ -718,6 +735,10 @@ interface MessageItemProps {
   /** Run dimensions (surface, conversationId, agentSlug, model) merged into
    *  every act-on-answer click so it joins back to the run that produced it. */
   trackContext?: Record<string, unknown> | undefined;
+  /** Render this message's FlowUI artifact cards. Opt-in on purpose: absence
+   *  is the off switch, so a surface that cannot service a flow action never
+   *  shows a card it would leave stuck. */
+  flowCards?: { conversationId: string; onActionComplete: () => void } | undefined;
 }
 
 // Image preview component that fetches with auth and creates blob URL
@@ -1144,11 +1165,13 @@ export const MessageItem = React.memo(
     onEditSubmit,
     onEditMobile,
     isLatestBotMessage,
+    readOnly = false,
     branchInfo,
     onBranchNavigate,
     onDebug,
     onFollowUpSuggestionClick,
     trackContext,
+    flowCards,
   }: MessageItemProps): ReactElement => {
     const [copied, setCopied] = useState(false);
     const [isEditing, setIsEditing] = useState(false);
@@ -1236,20 +1259,23 @@ export const MessageItem = React.memo(
       // Get summary/content
       if (message.agentType === 'summarizer' && message.summarizerOutput?.summary) {
         // Process summary to replace user tags with plain text names
-        textToCopy = processTextForCopy(message.summarizerOutput.summary, message.userTags);
+        textToCopy = processTextForCopy(message.summarizerOutput.summary, resolveMention);
         // Add key points
         if (message.summarizerOutput.keyPoints && message.summarizerOutput.keyPoints.length > 0) {
           textToCopy += '\n\nKey Points:\n';
           textToCopy += message.summarizerOutput.keyPoints
             .map(kp => {
               // Process key points to replace user tags with plain text names
-              return `• ${processTextForCopy(kp.point, message.userTags)}`;
+              return `• ${processTextForCopy(kp.point, resolveMention)}`;
             })
             .join('\n');
         }
       } else {
         // Genius or generic message
-        textToCopy = message.content || message.streamingContent || '';
+        textToCopy = processTextForCopy(
+          message.content || message.streamingContent || '',
+          resolveMention,
+        );
         // Add key points from parsed content
         if (message.parsedContent && message.parsedContent.keypoints.length > 0) {
           textToCopy += '\n\nKey Points:\n';
@@ -1257,7 +1283,7 @@ export const MessageItem = React.memo(
             .map(point => {
               // Remove markdown bold markers (**text**) and replace user tags
               const cleanedPoint = point.replace(/\*\*([^*]+)\*\*/g, '$1');
-              return `• ${processTextForCopy(cleanedPoint, message.userTags)}`;
+              return `• ${processTextForCopy(cleanedPoint, resolveMention)}`;
             })
             .join('\n');
         }
@@ -1273,25 +1299,6 @@ export const MessageItem = React.memo(
       <div
         className={`group/message flex ${message.type === 'user' ? 'justify-end gap-3' : 'justify-start'}`}
       >
-        {/* Edit button for user messages - appears on hover to the left of the bubble */}
-        {message.type === 'user' && (onEditSubmit || onEditMobile) && !isEditing && (
-          <button
-            onClick={() => {
-              if (onEditMobile) {
-                onEditMobile();
-              } else {
-                startEditing();
-              }
-            }}
-            className='self-start mt-2 p-1 rounded opacity-0 group-hover/message:opacity-100 transition-opacity hover:bg-accent flex-shrink-0'
-            title='Edit message'
-            data-track-category='XyneAI'
-            data-track-name='EDIT_MESSAGE'
-          >
-            <Pencil size={14} className='text-muted-foreground' />
-          </button>
-        )}
-
         <div
           className={
             message.type === 'user'
@@ -1516,6 +1523,7 @@ export const MessageItem = React.memo(
                 onCitationClick={onCitationClick}
                 onSummarizerCitationClick={onSummarizerCitationClick}
                 onOpenToolDebug={onOpenToolDebug}
+                flowCards={flowCards}
               />
             )}
           </div>
@@ -1603,7 +1611,7 @@ export const MessageItem = React.memo(
             (() => {
               const stamp = formatMessageTime(message.timestamp);
               const complete = !message.isStreaming;
-              const showActions = complete && !message.isAborted;
+              const showActions = complete && !message.isAborted && !readOnly;
               return (
                 <div className='mt-3 flex items-center justify-between gap-2'>
                   <div className='flex items-center gap-2 text-muted-foreground'>
@@ -1697,6 +1705,44 @@ export const MessageItem = React.memo(
                 </div>
               );
             })()}
+
+          {message.type === 'user' && !isEditing && (
+            <div className='mt-0.5 flex items-center gap-1 opacity-0 group-hover/message:opacity-100 transition-opacity'>
+              {Boolean(message.content || message.streamingContent) && (
+                <button
+                  onClick={handleCopy}
+                  className='p-1.5 rounded transition-colors hover:bg-accent'
+                  title={copied ? 'Copied!' : 'Copy'}
+                  data-track-category='XyneAI'
+                  data-track-name='COPY_USER_MESSAGE'
+                  data-track-metadata={JSON.stringify({ ...trackContext, messageId: message.id })}
+                >
+                  {copied ? (
+                    <Check size={16} className='text-muted-foreground' />
+                  ) : (
+                    <Copy size={16} className='text-muted-foreground' />
+                  )}
+                </button>
+              )}
+              {(onEditSubmit || onEditMobile) && (
+                <button
+                  onClick={() => {
+                    if (onEditMobile) {
+                      onEditMobile();
+                    } else {
+                      startEditing();
+                    }
+                  }}
+                  className='p-1.5 rounded transition-colors hover:bg-accent'
+                  title='Edit message'
+                  data-track-category='XyneAI'
+                  data-track-name='EDIT_MESSAGE'
+                >
+                  <Pencil size={16} className='text-muted-foreground' />
+                </button>
+              )}
+            </div>
+          )}
         </div>
       </div>
     );
@@ -1768,6 +1814,7 @@ const MessageContent = ({
   onSummarizerCitationClick,
   onOpenToolDebug,
   trackContext,
+  flowCards,
 }: MessageContentProps): ReactElement => {
   const resolveMention = useMentionResolver(message.userTags);
 
@@ -1783,6 +1830,11 @@ const MessageContent = ({
 
   // Memoize markdown components to prevent re-renders on parent updates
   const markdownComponents = useMemo(() => createMarkdownComponents(message.id), [message.id]);
+
+  const visiblePendingActions = useMemo(
+    () => unpresentedPendingActions(message.pendingActions, message.uiFlows),
+    [message.pendingActions, message.uiFlows],
+  );
 
   // Extend markdown components with image download button for sidebar
   const sidebarMarkdownComponents = useMemo<Components>(() => {
@@ -1973,15 +2025,37 @@ const MessageContent = ({
         messageAborted={!!message.isAborted}
       />
 
+      {flowCards &&
+        message.uiFlows?.map(flow => (
+          <div key={flow.screenId} className='mt-1.5'>
+            <FlowScreenManager
+              flow={flow}
+              messageId={flowMessageId(flow, message.id)}
+              conversationId={flowCards.conversationId}
+              onClose={flowCards.onActionComplete}
+            />
+          </div>
+        ))}
+
       {/* v2: Pending Actions (Human-in-the-loop) */}
-      {message.pendingActions && message.pendingActions.length > 0 && (
+      {visiblePendingActions.length > 0 && (
         <PendingActionBlock
-          actions={message.pendingActions}
-          onApprove={async (action, index) => {
-            await respondToPendingAction(message, action, index, true);
+          actions={visiblePendingActions}
+          onApprove={async action => {
+            await respondToPendingAction(
+              message,
+              action,
+              requirePendingActionIndex(message.pendingActions, action),
+              true,
+            );
           }}
-          onDecline={async (action, index) => {
-            await respondToPendingAction(message, action, index, false);
+          onDecline={async action => {
+            await respondToPendingAction(
+              message,
+              action,
+              requirePendingActionIndex(message.pendingActions, action),
+              false,
+            );
           }}
         />
       )}

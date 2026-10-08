@@ -52,6 +52,9 @@ import type {
 import { buildXyneAIStreamThreadId } from '../../utils/xyneAIStreamThreadId';
 import { cn } from '../../utils/classNames';
 import { AskAiRatingButtons } from './AskAiRatingButtons';
+import { isAssistantMessage } from '../Assistant/turns';
+import { useTranscript } from '../Assistant/useTranscript';
+import type { AssistantActions } from '../Assistant/useAssistantActions';
 import { AIComposer, type AIComposerAttachment, type AIComposerHandle } from './AIComposer';
 import { ReadonlyContextPills } from './ReadonlyContextPills';
 import { type ComposerContext, toStreamOverrides } from './composerContext';
@@ -69,6 +72,7 @@ import {
   usePageSelection,
 } from './Workspace';
 import { fetchV2ConversationMessages } from '../../services/XyneAI/XyneAISessionsV2Service';
+import { useV2SessionsList, useV2SessionInvalidator } from '../../hooks/useAskAISessionsV2';
 import { lengthBucket } from '../../services/Analytics/trackSource';
 import { xyneAIStreamManager } from '../../services/XyneAI/XyneAIStreamManager';
 import { BASE_URL } from '../../services/clients/apiClient';
@@ -95,18 +99,27 @@ import { CitationLink } from '../Chat/XyneAISidebar/components/CitationLink';
 
 import { useCitationDocs, panelDocFromCitation } from './citationDocs';
 import { MessageReactArtifacts, toArtifactRef } from './ReactArtifact';
+import { FlowScreenManager } from '../flowUI/FlowScreenManager';
+import { useFlowActionComplete } from '../../hooks/useFlowActionComplete';
+import {
+  flowMessageId,
+  requirePendingActionIndex,
+  unpresentedPendingActions,
+} from '../Chat/XyneAISidebar/utils/XyneAITypes';
 import { OpenUrlActions } from './OpenUrlActions';
 import { ArtifactRestoreNotice } from './ReactArtifact/ArtifactRestoreNotice';
 import { PromptMarkerRail, type PromptMarker } from './PromptMarkerRail';
 import type { ArtifactAppRestoreEvent } from '../../services/claw/artifactAppsService';
 import { useAppCreationModeSignal } from './ReactArtifact/appCreationModeContext';
-import { SidebarLeftClose, SidebarLeftOpen } from '@xyne/icons';
+import { SidebarLeftOpen } from '@xyne/icons';
+import { formatChatTurnSeparator } from '../../utils/dateUtils';
 import { Tooltip } from '../ui/Tooltip';
 import {
   ConversationToolInvocationsContext,
   AttachmentPreview,
   useMentionResolver,
   processNodeForUserTags,
+  processTextForCopy,
 } from '../Chat/XyneAISidebar/components/MessageItem';
 import { ToolInvocationList } from '../Chat/XyneAISidebar/components/ToolInvocationList';
 import { PendingActionBlock } from '../Chat/XyneAISidebar/components/PendingActionBlock';
@@ -167,6 +180,7 @@ interface AIChatThreadProps {
    *  it and opens yet another conversation. Clearing it at the source is the
    *  guard that survives a remount. */
   onInitialQueryConsumed?: (() => void) | undefined;
+  assistant?: AssistantActions | undefined;
 }
 
 export interface AIChatThreadHandle {
@@ -242,24 +256,27 @@ function stripUnknownCiteLinks(content: string, validCitationKeys: Set<string>):
   });
 }
 
+/** A turn opens a new block when it is the first, or follows a gap this long.
+ *  Four hours keeps one sitting under a single stamp while still marking a
+ *  thread picked back up later in the day. */
+const TURN_SEPARATOR_GAP_MS = 4 * 60 * 60 * 1000;
+
 // ═══════════════════════════════════════════════════════════════════════════════
 // Topbar
 // ═══════════════════════════════════════════════════════════════════════════════
 
 function ChatTopbar({
-  title,
   onOpenSidebar,
   onToggleSidebar,
   sidebarCollapsed,
 }: {
-  title: string;
   onOpenSidebar?: () => void;
   onToggleSidebar?: (() => void) | undefined;
   sidebarCollapsed?: boolean | undefined;
 }): ReactElement {
   return (
     <header
-      className={`ai-chat-topbar flex h-[53px] shrink-0 items-center gap-1 border-b border-sidebar-border-muted bg-transparent px-3 backdrop-blur-md sm:px-4`}
+      className={`ai-chat-topbar flex h-[53px] shrink-0 items-center gap-1 bg-transparent px-3 backdrop-blur-md sm:px-4`}
     >
       <button
         type='button'
@@ -272,25 +289,23 @@ function ChatTopbar({
       >
         <Menu className='h-4 w-4' aria-hidden strokeWidth={1.75} />
       </button>
-      {onToggleSidebar && (
+      {/* Expand only. Collapsing is done from the sidebar's own header, the
+          same split the ticket views sidebar uses — so the control always
+          sits next to the thing it acts on. */}
+      {onToggleSidebar && sidebarCollapsed && (
         <button
           type='button'
           onClick={onToggleSidebar}
-          aria-label={sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+          aria-label='Expand sidebar'
           aria-controls='ai-sidebar'
-          title={sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+          title='Expand sidebar'
           className='hidden h-8 w-8 shrink-0 place-items-center rounded-lg text-muted-foreground transition-colors hover:bg-secondary/60 hover:text-foreground md:grid'
           data-track-category='XyneAI'
           data-track-name='TOGGLE_DESKTOP_SIDEBAR'
         >
-          {sidebarCollapsed ? (
-            <SidebarLeftOpen size={16} aria-hidden='true' />
-          ) : (
-            <SidebarLeftClose size={16} aria-hidden='true' />
-          )}
+          <SidebarLeftOpen size={16} aria-hidden='true' />
         </button>
       )}
-      <h1 className='flex-1 truncate text-base font-medium text-foreground'>{title}</h1>
     </header>
   );
 }
@@ -812,8 +827,15 @@ function ChatMessageBubble({
   trackContext,
   agentSlug,
   onPendingActionResolved,
+  conversationId,
+  onFlowActionComplete,
+  readOnly = false,
 }: {
   message: Message;
+  readOnly?: boolean;
+  /** FlowUI actions are dispatched against (messageId, conversationId). */
+  conversationId?: string | undefined;
+  onFlowActionComplete?: (() => void) | undefined;
   /** Run dimensions merged into every act-on-answer click (joins to the run). */
   trackContext?: Record<string, unknown> | undefined;
   agentSlug?: string | undefined;
@@ -841,6 +863,7 @@ function ChatMessageBubble({
   const isUser = message.type === 'user';
   const [isEditing, setIsEditing] = useState(false);
   const [editText, setEditText] = useState('');
+  const [copied, setCopied] = useState(false);
   const editTextareaRef = useRef<HTMLTextAreaElement | null>(null);
 
   // Once this message has streamed live, KEEP the per-block render after
@@ -1157,6 +1180,24 @@ function ChatMessageBubble({
   const hasAttachedContext =
     isUser && !!message.attachedContext && message.attachedContext.length > 0;
   const passage = isUser ? message.pageSelection : undefined;
+  const visiblePendingActions = useMemo(
+    () => unpresentedPendingActions(message.pendingActions, message.uiFlows),
+    [message.pendingActions, message.uiFlows],
+  );
+  const userStrippedContent = useMemo(
+    () =>
+      isUser
+        ? stripUnknownCiteLinks(
+            stripNonClfCitationTokens(stripCitationMarks(message.content)),
+            validCitationKeys,
+          )
+        : '',
+    [isUser, message.content, validCitationKeys],
+  );
+  const markCopied = useCallback((): void => {
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  }, []);
   if (isUser && !hasUserContent && !hasUserAttachments) {
     return null as unknown as ReactElement;
   }
@@ -1180,24 +1221,6 @@ function ChatMessageBubble({
           )}
         >
           <div className='flex w-full items-start justify-end gap-1'>
-            {/* Edit button — appears on hover to the left of the bubble, forks a
-                new sibling branch from the same parent (mirrors the sidebar). */}
-            {onEditSubmit && !isEditing && (
-              <button
-                type='button'
-                onClick={() => {
-                  setEditText(message.content);
-                  setIsEditing(true);
-                  setTimeout(() => editTextareaRef.current?.focus(), 0);
-                }}
-                className='mt-2 flex-shrink-0 rounded p-1 opacity-0 transition-opacity hover:bg-accent group-hover:opacity-100'
-                title='Edit message'
-                data-track-category='XyneAI'
-                data-track-name='EDIT_MESSAGE'
-              >
-                <Pencil size={14} className='text-muted-foreground' />
-              </button>
-            )}
             <div
               className={cn(
                 'ai-user-bubble rounded-3xl bg-[#ececec] px-4 py-2.5 text-sm leading-relaxed text-gray-900',
@@ -1266,13 +1289,7 @@ function ChatMessageBubble({
                   )}
                   {hasUserContent && (
                     <div className='whitespace-pre-wrap'>
-                      {processNodeForUserTags(
-                        stripUnknownCiteLinks(
-                          stripNonClfCitationTokens(stripCitationMarks(message.content)),
-                          validCitationKeys,
-                        ),
-                        resolveMention,
-                      )}
+                      {processNodeForUserTags(userStrippedContent, resolveMention)}
                     </div>
                   )}
                 </>
@@ -1304,6 +1321,47 @@ function ChatMessageBubble({
               total={branchInfo.total}
               onNavigate={onBranchNavigate}
             />
+          )}
+          {!isEditing && (
+            <div className='mt-0.5 flex items-center gap-0.5 opacity-0 transition-opacity duration-150 group-hover:opacity-100'>
+              {hasUserContent && (
+                <button
+                  type='button'
+                  onClick={(): void => {
+                    void navigator.clipboard
+                      .writeText(processTextForCopy(userStrippedContent, resolveMention))
+                      .then(markCopied);
+                  }}
+                  className='inline-flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground'
+                  title={copied ? 'Copied!' : 'Copy'}
+                  data-track-category='XyneAI'
+                  data-track-name='COPY_USER_MESSAGE'
+                  data-track-metadata={JSON.stringify({ ...trackContext, messageId: message.id })}
+                >
+                  {copied ? (
+                    <Check className='h-3.5 w-3.5' aria-hidden strokeWidth={1.75} />
+                  ) : (
+                    <Copy className='h-3.5 w-3.5' aria-hidden strokeWidth={1.75} />
+                  )}
+                </button>
+              )}
+              {onEditSubmit && (
+                <button
+                  type='button'
+                  onClick={() => {
+                    setEditText(message.content);
+                    setIsEditing(true);
+                    setTimeout(() => editTextareaRef.current?.focus(), 0);
+                  }}
+                  className='inline-flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground'
+                  title='Edit message'
+                  data-track-category='XyneAI'
+                  data-track-name='EDIT_MESSAGE'
+                >
+                  <Pencil className='h-3.5 w-3.5' aria-hidden strokeWidth={1.75} />
+                </button>
+              )}
+            </div>
           )}
         </div>
       ) : (
@@ -1345,15 +1403,41 @@ function ChatMessageBubble({
             <PlanCard todos={message.planTodos} title={message.planTitle} />
           )}
 
-          {!isUser && message.pendingActions && message.pendingActions.length > 0 && (
+          {!isUser &&
+            message.uiFlows?.map(flow => (
+              <div key={flow.screenId} className='mt-1.5'>
+                <FlowScreenManager
+                  flow={flow}
+                  // The card's own chatMessageId, NOT message.id — mid-run the
+                  // latter is a client-side placeholder and every action 403s.
+                  messageId={flowMessageId(flow, message.id)}
+                  conversationId={conversationId ?? ''}
+                  {...(onFlowActionComplete ? { onClose: onFlowActionComplete } : {})}
+                />
+              </div>
+            ))}
+
+          {!isUser && visiblePendingActions.length > 0 && (
             <PendingActionBlock
-              actions={message.pendingActions}
-              onApprove={async (action, index) => {
-                await respondToPendingAction(message, action, index, true, agentSlug || 'ask-ai');
+              actions={visiblePendingActions}
+              onApprove={async action => {
+                await respondToPendingAction(
+                  message,
+                  action,
+                  requirePendingActionIndex(message.pendingActions, action),
+                  true,
+                  agentSlug || 'ask-ai',
+                );
                 onPendingActionResolved?.();
               }}
-              onDecline={async (action, index) => {
-                await respondToPendingAction(message, action, index, false, agentSlug || 'ask-ai');
+              onDecline={async action => {
+                await respondToPendingAction(
+                  message,
+                  action,
+                  requirePendingActionIndex(message.pendingActions, action),
+                  false,
+                  agentSlug || 'ask-ai',
+                );
                 onPendingActionResolved?.();
               }}
             />
@@ -1420,18 +1504,25 @@ function ChatMessageBubble({
           )}
 
           {/* Hover actions — on all bot messages */}
-          {!isUser && !message.isStreaming && (
+          {!isUser && !message.isStreaming && !readOnly && (
             <div className='mt-1.5 flex items-center gap-0.5 opacity-0 transition-opacity duration-150 group-hover:opacity-100'>
               <button
                 type='button'
-                onClick={onCopy}
-                title='Copy'
+                onClick={(): void => {
+                  onCopy?.();
+                  markCopied();
+                }}
+                title={copied ? 'Copied!' : 'Copy'}
                 className='inline-flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground'
                 data-track-category='XyneAI'
                 data-track-name='COPY_MESSAGE'
                 data-track-metadata={JSON.stringify({ ...trackContext, messageId: message.id })}
               >
-                <Copy className='h-3.5 w-3.5' aria-hidden strokeWidth={1.75} />
+                {copied ? (
+                  <Check className='h-3.5 w-3.5' aria-hidden strokeWidth={1.75} />
+                ) : (
+                  <Copy className='h-3.5 w-3.5' aria-hidden strokeWidth={1.75} />
+                )}
               </button>
               {isV2 ? (
                 // v2 (claw): persist to agent_runs.rating (metrics + reload) with
@@ -1538,6 +1629,7 @@ export const AIChatThread = forwardRef<AIChatThreadHandle, AIChatThreadProps>(fu
     onAgentChange,
     onContextChange,
     onInitialQueryConsumed,
+    assistant,
   },
   ref,
 ): ReactElement {
@@ -1731,8 +1823,31 @@ export const AIChatThread = forwardRef<AIChatThreadHandle, AIChatThreadProps>(fu
     () => resolveActivePath(messages, branchSelections),
     [messages, branchSelections],
   );
+  const assistantMessages = assistant?.messages;
+  const { messages: transcriptMessages, serverIndexById } = useTranscript(
+    displayMessages,
+    assistantMessages,
+  );
 
   const queryClient = useQueryClient();
+  const { data: v2Sessions } = useV2SessionsList(
+    effectiveAgentSlug,
+    isV2 && Boolean(conversationId),
+  );
+  const { invalidateSessions } = useV2SessionInvalidator();
+  const generatedTitle = useMemo(() => {
+    if (!conversationId) return undefined;
+    const session = v2Sessions?.find(s => s.sessionId === conversationId);
+    return session?.titleGenerated ? session.title : undefined;
+  }, [v2Sessions, conversationId]);
+  useEffect(() => {
+    if (!isV2 || !conversationId) return;
+    if (generatedTitle) return;
+    const timers = [4_000, 10_000, 20_000, 35_000, 60_000, 90_000].map(delay =>
+      window.setTimeout(() => invalidateSessions(effectiveAgentSlug), delay),
+    );
+    return () => timers.forEach(id => window.clearTimeout(id));
+  }, [isV2, conversationId, effectiveAgentSlug, invalidateSessions, generatedTitle]);
   const designStudio = useDesignStudio();
   const revealedEditsRef = useRef<Set<string>>(new Set());
 
@@ -1762,36 +1877,38 @@ export const AIChatThread = forwardRef<AIChatThreadHandle, AIChatThreadProps>(fu
 
   // Precompute the latest bot/user index in the active path plus each message's
   // sibling index/count, so the render pass doesn't re-scan on every delta.
-  const { lastBotIndex, lastUserIndex, siblingIndexById, siblingCountById } = useMemo(() => {
-    let botIdx = -1;
-    let userIdx = -1;
-    for (let i = displayMessages.length - 1; i >= 0; i--) {
-      if (botIdx === -1 && displayMessages[i]?.type === 'bot') botIdx = i;
-      if (userIdx === -1 && displayMessages[i]?.type === 'user') userIdx = i;
-      if (botIdx !== -1 && userIdx !== -1) break;
-    }
-    const indexById = new Map<string, number>();
-    const countById = new Map<string, number>();
-    const groups = new Map<string, string[]>();
-    for (const m of messages) {
-      const key = m.parentId ?? BRANCH_ROOT_KEY;
-      const group = groups.get(key);
-      if (group) group.push(m.id);
-      else groups.set(key, [m.id]);
-    }
-    for (const [, group] of groups) {
-      group.forEach((id, i) => {
-        indexById.set(id, i);
-        countById.set(id, group.length);
-      });
-    }
-    return {
-      lastBotIndex: botIdx,
-      lastUserIndex: userIdx,
-      siblingIndexById: indexById,
-      siblingCountById: countById,
-    };
-  }, [messages, displayMessages]);
+  const { lastBotIndex, lastUserIndex, firstUserIndex, siblingIndexById, siblingCountById } =
+    useMemo(() => {
+      let botIdx = -1;
+      let userIdx = -1;
+      for (let i = displayMessages.length - 1; i >= 0; i--) {
+        if (botIdx === -1 && displayMessages[i]?.type === 'bot') botIdx = i;
+        if (userIdx === -1 && displayMessages[i]?.type === 'user') userIdx = i;
+        if (botIdx !== -1 && userIdx !== -1) break;
+      }
+      const indexById = new Map<string, number>();
+      const countById = new Map<string, number>();
+      const groups = new Map<string, string[]>();
+      for (const m of messages) {
+        const key = m.parentId ?? BRANCH_ROOT_KEY;
+        const group = groups.get(key);
+        if (group) group.push(m.id);
+        else groups.set(key, [m.id]);
+      }
+      for (const [, group] of groups) {
+        group.forEach((id, i) => {
+          indexById.set(id, i);
+          countById.set(id, group.length);
+        });
+      }
+      return {
+        lastBotIndex: botIdx,
+        lastUserIndex: userIdx,
+        firstUserIndex: displayMessages.findIndex(m => m.type === 'user'),
+        siblingIndexById: indexById,
+        siblingCountById: countById,
+      };
+    }, [messages, displayMessages]);
 
   // Legacy conversation: no message has a parentId — branching features disabled
   // (older sessions predate the tree; edit/regenerate/nav are hidden for them).
@@ -2235,7 +2352,7 @@ export const AIChatThread = forwardRef<AIChatThreadHandle, AIChatThreadProps>(fu
     const tail = tailRef.current;
     if (!tail) return;
     tail.scrollIntoView({ block: 'end', behavior: 'instant' as ScrollBehavior });
-  }, [messages]);
+  }, [messages, assistantMessages]);
 
   const jumpToLatest = useCallback((): void => {
     isAtBottomRef.current = true;
@@ -2408,6 +2525,27 @@ export const AIChatThread = forwardRef<AIChatThreadHandle, AIChatThreadProps>(fu
     [setMessages],
   );
 
+  const detachFlowLiveViewer = useCallback((): void => {
+    liveViewerRef.current?.detach();
+  }, []);
+  const storeFlowLiveViewer = useCallback(
+    (detach: () => void): void => {
+      liveViewerRef.current = { sessionId: conversationId, detach };
+    },
+    [conversationId],
+  );
+
+  const handleFlowActionComplete = useFlowActionComplete({
+    conversationId,
+    agentSlug: effectiveAgentSlug,
+    threadId,
+    enabled: Boolean(isV2),
+    messages,
+    setMessages,
+    detachLiveViewer: detachFlowLiveViewer,
+    storeLiveViewer: storeFlowLiveViewer,
+  });
+
   const isAnyMessageStreaming = messages.some(m => m.isStreaming);
 
   const streamingBotTurnIndex = useMemo(() => {
@@ -2482,11 +2620,6 @@ export const AIChatThread = forwardRef<AIChatThreadHandle, AIChatThreadProps>(fu
     [displayMessages],
   );
 
-  const title =
-    messages.length > 0
-      ? (messages.find(m => m.type === 'user')?.content.slice(0, 40) ?? 'New chat')
-      : 'New chat';
-
   return (
     <div className='flex h-full min-w-0 flex-1'>
       <div ref={dropZoneRef} className='relative flex h-full min-w-0 flex-1 flex-col'>
@@ -2506,7 +2639,6 @@ export const AIChatThread = forwardRef<AIChatThreadHandle, AIChatThreadProps>(fu
           </div>
         )}
         <ChatTopbar
-          title={title}
           onOpenSidebar={(): void => onSetMobileSidebarOpen?.(true)}
           onToggleSidebar={onToggleSidebar}
           sidebarCollapsed={sidebarCollapsed}
@@ -2538,7 +2670,20 @@ export const AIChatThread = forwardRef<AIChatThreadHandle, AIChatThreadProps>(fu
           >
             <div ref={contentRef} className='mx-auto flex max-w-3xl flex-col'>
               <ConversationToolInvocationsContext.Provider value={conversationToolInvocations}>
-                {displayMessages.map((message, idx) => {
+                {transcriptMessages.map(message => {
+                  if (isAssistantMessage(message.id)) {
+                    return (
+                      <ChatMessageBubble
+                        key={message.id}
+                        message={message}
+                        readOnly
+                        onFollowUpSuggestionClick={label => {
+                          assistant?.openPill(message.id, label);
+                        }}
+                      />
+                    );
+                  }
+                  const idx = serverIndexById.get(message.id) ?? -1;
                   const feedbackValue: FeedbackValue =
                     message.feedback === 1 ? 'LIKE' : message.feedback === 2 ? 'DISLIKE' : null;
                   const botTurnIndex =
@@ -2555,14 +2700,30 @@ export const AIChatThread = forwardRef<AIChatThreadHandle, AIChatThreadProps>(fu
                       ? { index: siblingIndexById.get(message.id) ?? 0, total: siblingCount }
                       : undefined;
                   const restoresHere = restoresByMessageId.get(message.id);
+                  // Anchor on the USER turn: it is persisted first, so its
+                  // timestamp is the real one even while the reply streams.
+                  const previousTurn = idx > 0 ? displayMessages[idx - 1] : undefined;
+                  const showTurnSeparator =
+                    message.type === 'user' &&
+                    (idx === firstUserIndex ||
+                      !previousTurn?.timestamp ||
+                      new Date(message.timestamp).getTime() -
+                        new Date(previousTurn.timestamp).getTime() >
+                        TURN_SEPARATOR_GAP_MS);
                   return (
                     // Stable key so the bubble doesn't remount when the id swaps
                     // temp→server at completion (which would kill the reasoning
                     // section's transitions).
                     <Fragment key={message.stableKey ?? message.id}>
+                      {showTurnSeparator && (
+                        <div className='py-3 text-center text-xs text-muted-foreground'>
+                          {formatChatTurnSeparator(message.timestamp)}
+                        </div>
+                      )}
                       <ChatMessageBubble
                         trackContext={messageTrackContext}
                         message={message}
+                        conversationId={conversationId || undefined}
                         agentSlug={effectiveAgentSlug ?? undefined}
                         onPendingActionResolved={() => {
                           if (!conversationId) return;
@@ -2585,6 +2746,7 @@ export const AIChatThread = forwardRef<AIChatThreadHandle, AIChatThreadProps>(fu
                             ),
                           };
                         }}
+                        onFlowActionComplete={handleFlowActionComplete}
                         onCopy={() => {
                           void navigator.clipboard.writeText(
                             message.content || message.streamingContent || '',
@@ -2686,8 +2848,9 @@ export const AIChatThread = forwardRef<AIChatThreadHandle, AIChatThreadProps>(fu
               showAgentSelector={isV2}
               initialExtras={initialExtras}
               onContextChange={onContextChange}
-              pending={isAnyMessageStreaming}
+              pending={isAnyMessageStreaming || (assistant?.isRouting ?? false)}
               onStop={handleStop}
+              assistant={assistant && assistant.actions.length > 0 ? assistant : undefined}
               placeholder='Write a message...'
             />
           </div>

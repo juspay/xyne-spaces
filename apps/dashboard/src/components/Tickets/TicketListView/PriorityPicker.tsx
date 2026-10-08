@@ -8,6 +8,7 @@ import { getPriorityIcon } from '../TicketCard/TicketCard.utils';
 import { surfaceMutationError } from '../../../utils/zeroMutationToast';
 import { trackTicketOutcome } from '../../../services/Analytics/ticketTracking';
 import { cn } from '../../../utils/classNames';
+import { useExclusivePicker } from '../TicketTable/ExclusivePickerScope';
 
 interface PriorityPickerProps {
   ticketId: string;
@@ -30,6 +31,7 @@ export function PriorityPicker({
   compact = false,
 }: PriorityPickerProps): ReactElement {
   const [open, setOpen] = useState(false);
+  useExclusivePicker(open, setOpen);
   const zero = useZero();
 
   const current = (priority as TicketPriority | undefined) ?? TicketPriority.LOW;

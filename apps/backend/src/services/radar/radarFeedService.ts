@@ -7,6 +7,7 @@ import {
 import { radarScopeFor, scopeKeyFor, type RadarScope } from '@/services/radar/radarScope';
 import { explainItemMute, mutedItemIds } from '@/services/radar/radarRuleEvaluator';
 import { compile } from 'html-to-text';
+import { parseInitialMessageMd } from '@xyne/shared';
 import { replaceCustomEmojiImagesWithAltText } from '@/utils/contentUtils';
 
 const prisma = DatabaseClient.getInstance();
@@ -61,15 +62,19 @@ const previewTextOf = (html: string): string => {
 
 /** A thread's opening message as a one-line headline. Rich-editor messages are
  *  stored as HTML with escaped entities, so they are converted to text before
- *  the cut — cutting first could end mid-tag. A `:::initialMessage` block is
- *  not converted, only cut like plain text; the panel sees it is cut short and
- *  falls back to the item's title. */
+ *  the cut — cutting first could end mid-tag. A thread opened from a forwarded
+ *  message stores a `:::initialMessage` key:value snapshot instead, whose real
+ *  text lives under `content:`; it is unwrapped here so the preview is the
+ *  message and never the carrier block or a fragment of one. */
 const threadPreviewOf = (md: string | null | undefined): string | null => {
   if (!md) return null;
-  const isHtml = !md.trimStart().startsWith(':::initialMessage') && EDITOR_HTML.test(md);
-  const text = isHtml
-    ? previewTextOf(md.slice(0, PREVIEW_SOURCE_CHARS)).replace(/\s+/g, ' ').trim()
+  const source = md.trimStart().startsWith(':::initialMessage')
+    ? parseInitialMessageMd(md)?.content || md
     : md;
+  const isHtml = !source.trimStart().startsWith(':::initialMessage') && EDITOR_HTML.test(source);
+  const text = isHtml
+    ? previewTextOf(source.slice(0, PREVIEW_SOURCE_CHARS)).replace(/\s+/g, ' ').trim()
+    : source;
   return text.slice(0, THREAD_PREVIEW_CHARS) || null;
 };
 

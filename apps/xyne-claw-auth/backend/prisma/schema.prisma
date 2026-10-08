@@ -85,6 +85,11 @@ model User {
   org            Organization @relation(fields: [orgId], references: [id], onDelete: Restrict)
   orgMemberships OrgMember[]
 
+  // NOTE on Spaces surface coupling: this table stores NO Spaces-derived
+  // keys. Cross-workspace person reuse on the Spaces surface resolves
+  // email-first within an org — (email, orgId) unique is the invariant the
+  // JIT ladder, backfill and spaces-sync routes all lean on.
+
   @@unique([email, orgId])
   @@map("users")
 }
@@ -229,6 +234,7 @@ enum OrgRole {
   OWNER
   ADMIN
   MEMBER
+  COMMUNITY_MEMBER
 }
 
 enum OrgStatus {
@@ -294,6 +300,7 @@ model ConnectedSurface {
   surfaceId       String
   surface         Surface       @relation(fields: [surfaceId], references: [id], onDelete: Restrict)
   surfaceTenantId String        @default("")
+  surfaceOrgId    String?
   accessToken     String?       @db.Text
   refreshToken    String?       @db.Text
   tokenExpiresAt  DateTime?
@@ -306,6 +313,8 @@ model ConnectedSurface {
 
   @@unique([orgId, surfaceId, surfaceTenantId])
   @@index([orgId])
+  @@index([surfaceId, surfaceTenantId])
+  @@index([surfaceId, surfaceOrgId])
   @@map("connected_surfaces")
 }
 
@@ -356,6 +365,12 @@ model UserSurfaceIdentity {
   userId             String?
   user               User?         @relation(fields: [userId], references: [id], onDelete: SetNull)
   status             SurfaceStatus @default(ACTIVE)
+  /// Generic per-surface *person* key: the member-level principal the source
+  /// system guarantees per (org, person) — for Spaces this is
+  /// public.org_members.id. Optional (nullable); non-unique because the same
+  /// person legitimately earns one identity row per workspace membership.
+  /// Its only role is to hard-refuse email-collision merges at first contact.
+  surfaceMemberId    String?
   lastSeenAt         DateTime?
   linkedAt           DateTime?
   createdAt          DateTime      @default(now())
@@ -364,6 +379,7 @@ model UserSurfaceIdentity {
   @@unique([surfaceId, surfaceWorkspaceId, surfaceUserId])
   @@index([orgId])
   @@index([userId])
+  @@index([surfaceId, orgId, surfaceMemberId])
   @@map("user_surface_identities")
 }
 
@@ -452,6 +468,7 @@ model SurfaceAccessToken {
   @@map("surface_access_tokens")
 }
 
+/// DEPRECATED legacy fallback for ConnectedSurface.
 /// Maps an external surface's tenant (today: a Spaces workspace, i.e.
 /// public.users.workspaceId) to a claw Organization. One org can have several
 /// tenant links (a Spaces org has several workspaces), so this is a table, not
@@ -1316,6 +1333,10 @@ model ChatMessage {
 
   pendingActions Json?
 
+  /// FlowUI artifact cards posted on this message, as a FlowDefinition[].
+  /// Stored without __xyneFlowToken — that is minted per fetch.
+  uiFlows Json?
+
   runProvider String?
 
   attachments ChatAttachment[]
@@ -1348,6 +1369,33 @@ model ChatAttachment {
   @@index([chatMessageId])
   @@index([uploaderUserId, createdAt])
   @@map("chat_attachments")
+}
+
+/// Per-conversation metadata for Ask AI chats. A conversation is otherwise just
+/// a grouping of chat_messages rows, so anything belonging to the conversation
+/// rather than to one message lives here — today the generated title the
+/// sidebar and chat header show instead of the truncated first user message.
+model ChatConversationMeta {
+  conversationId   String
+  userId           String
+  agentSlug        String
+  orgId            String
+  /// Null until generation succeeds; every reader falls back to the first user
+  /// message, so old conversations need no backfill.
+  title            String?
+  titleGeneratedAt DateTime?
+  /// Lifts the chat into the sidebar's Pinned section.
+  pinned           Boolean   @default(false)
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  /// Per user, not per conversation: two people can hold messages in one
+  /// conversationId, and a shared row would let either rename or pin it for
+  /// the other.
+  @@id([conversationId, userId, agentSlug])
+  @@index([userId, agentSlug])
+  @@index([orgId])
+  @@map("chat_conversation_meta")
 }
 
 /// A chat artifact the user chose to keep: a generated React project promoted out

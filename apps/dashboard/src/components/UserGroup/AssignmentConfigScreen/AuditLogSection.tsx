@@ -26,6 +26,7 @@ const PAGE_SIZE = 10;
 const ENTITY_NOUNS: Record<AuditEntityType, string> = {
   [AuditEntityType.BOARD]: 'board',
   [AuditEntityType.USER_GROUP_ASSIGNMENT_CONFIG]: 'assignment configuration',
+  [AuditEntityType.DESK]: 'desk settings',
 };
 
 /** Reconstructs the feed line ("updated board for Payments") from the change rows. */
@@ -41,7 +42,9 @@ const deriveSummary = (
       : actions.size === 1 && actions.has(AuditAction.DELETE)
         ? 'removed'
         : 'updated';
-  const noun = ENTITY_NOUNS[entityType];
+  const isRoutingOnly =
+    changes.length > 0 && changes.every(change => change.tableName === 'classification_mappings');
+  const noun = isRoutingOnly ? 'routing rule' : ENTITY_NOUNS[entityType];
   return `${verb} ${noun}${entityName ? ` for ${entityName}` : ''}`;
 };
 
@@ -68,6 +71,42 @@ const humanizeField = (field: string): string =>
     .replace(/([A-Z])/g, ' $1')
     .replace(/^./, char => char.toUpperCase())
     .trim();
+
+/** Column names that don't humanize well, worded like the settings screens. */
+const FIELD_LABELS: Record<string, string> = {
+  roleId: 'Role',
+  userGroupId: 'User group',
+  subCategory: 'Sub-category',
+  ownerUserId: 'Inbox owner',
+  sendAsEmail: 'Send-as alias',
+  dlEmail: 'Distribution list',
+  dlAliases: 'Additional inbound addresses',
+  deskAppIds: 'Desk apps',
+  defaultCc: 'Default CC',
+  assigneeUserGroupId: 'Default assignee group',
+  boardId: 'Board',
+  twoStepSendEnabled: 'Two-step send',
+  emailMergeMode: 'Auto-merge similar emails',
+  appWebhookDeliveryEnabled: 'Send replies to app webhook',
+  duplicateScopeConfig: 'Limit duplicate detection by field',
+  autoDraftMode: 'Auto AI draft',
+  autoDraftAgentSlug: 'Draft agent',
+  deskReportEnabled: 'Desk report',
+  deskReportAgentSlug: 'Desk report agent',
+  deskReportRangeDays: 'Report window',
+  classificationEnabled: 'Auto-classification',
+  categoryField: 'Category field',
+  subCategoryField: 'Sub-category field',
+  classificationPrompt: 'Classification prompt',
+  priorityClassificationEnabled: 'AI priority detection',
+  priorityClassificationThreshold: 'Confidence threshold',
+  priorityClassificationPrompt: 'Priority prompt',
+  metricsEnabled: 'Desk metrics',
+  frtStageNames: 'First response stops at',
+  metricsGuestVisibility: 'Guest visibility',
+};
+
+const fieldLabel = (field: string): string => FIELD_LABELS[field] ?? humanizeField(field);
 
 /** Values longer than this lose their inline readability — hover reveals the full text. */
 const LONG_VALUE_THRESHOLD = 48;
@@ -120,7 +159,7 @@ const AuditChangeRow = ({
   <li className='flex items-center justify-between gap-3 border-b border-dashed border-border py-1 text-xs last:border-b-0'>
     <span className='flex min-w-0 shrink items-center gap-2 font-medium text-muted-foreground'>
       {bullet && <span className='h-1 w-1 shrink-0 rounded-full bg-muted-foreground/60' />}
-      <span className='min-w-0 truncate'>{label ?? humanizeField(change.field)}</span>
+      <span className='min-w-0 truncate'>{label ?? fieldLabel(change.field)}</span>
     </span>
     <span className='flex min-w-0 max-w-[60%] shrink items-center justify-end gap-1.5 font-mono text-[11px] tabular-nums'>
       {change.action === AuditAction.DELETE ? (

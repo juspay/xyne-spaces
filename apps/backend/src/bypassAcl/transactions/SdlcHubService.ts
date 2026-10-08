@@ -2,11 +2,12 @@ import { transaction } from '../base';
 import type { SdlcActor } from '@/sdlc/types';
 import { AppError } from '@/middleware/errorHandler';
 import { sdlcChannelCanvasParticipant } from '@/sdlc/sdlcCanvasAccess';
+import { newConnectId, createConnectGroupForEntity, ConnectEntityType } from '@/database/connectGroup';
 import { ensureHubKnowledgeFolder, placeHubItem, ensureHubWikiFolder, ensureRepositoryWikiFolder } from '@/sdlc/hubFolders';
-import { ensureLink } from '@/sdlc/entityLinkService';
+import { ensureLink, refileFolderEdges } from '@/sdlc/entityLinkService';
 import { SdlcHubService, SDLC_FOLDERS, channelRepository, linkRelatedCanvases } from '@/sdlc/SdlcHubService';
 import { type ParsedRepository, sdlcVcs } from '@/sdlc/vcs';
-import { CanvasVisibility, SDLC_CONTAINMENT_RELATION, SDLC_TRACK_FLAT_RELATION, SDLC_HUB_KNOWLEDGE_ARTIFACT_TYPE, SDLC_ARTIFACT_REPOSITORY_RELATION, SDLC_TRACK_MEMBERSHIP_RELATION, ChannelAddUserPolicy, ChannelRole, ChannelScopeType, ChannelType, ChannelVisibility, normalizeChannelName, validateChannelName, SDLC_MEMBERSHIP_RELATION } from '@xyne/shared';
+import { CanvasVisibility, isSdlcTreeItemType, SDLC_CONTAINMENT_RELATION, SDLC_TRACK_FLAT_RELATION, SDLC_HUB_KNOWLEDGE_ARTIFACT_TYPE, SDLC_ARTIFACT_REPOSITORY_RELATION, SDLC_TRACK_MEMBERSHIP_RELATION, ChannelAddUserPolicy, ChannelRole, ChannelScopeType, ChannelType, ChannelVisibility, normalizeChannelName, validateChannelName, SDLC_MEMBERSHIP_RELATION } from '@xyne/shared';
 import { Prisma } from '@prisma/client';
 import { BlockNoteBlock } from '@/types/blockNoteTypes';
 import { randomUUID } from 'crypto';
@@ -90,8 +91,10 @@ export function addChannelRepositoriesTx(self: SdlcHubService, actor: SdlcActor,
   }));
 }
 export function createArtifactFromClawTx(self: SdlcHubService, actor: SdlcActor, input: { title: string; folderId: string; markdown: string; channelId?: string | undefined; trackId?: string | undefined; trackFolderId?: string | undefined; repoId?: string | undefined; repoIds?: string[] | undefined; relatedCanvasIds?: string[] | undefined; }, content: BlockNoteBlock[], channelId: string, folder: { id: string; name: string }, projectId: string, repo: { id: string } | null, hubKnowledge: boolean, trackFolderId: string | undefined, repoIds: string[]) {
-  return transaction(['Canvas', 'CanvasParticipant', 'SdlcArtifact', 'SdlcEntityLink', 'SdlcFolder'], 'createArtifactFromClaw: canvas, artifact, track/repo links and hub placement must commit atomically; tx is not ACL-wrapped', self.prisma, async (tx) => {
+  return transaction(['Canvas', 'CanvasParticipant', 'SdlcArtifact', 'SdlcEntityLink', 'SdlcFolder', 'ConnectGroup'], 'createArtifactFromClaw: canvas, artifact, track/repo links and hub placement must commit atomically; tx is not ACL-wrapped', self.prisma, async (tx) => {
     const viewAccessId = randomUUID();
+    // Slack Connect: a canvas is a shareable entity → its own connectId + a private connect_group row.
+    const connectId = newConnectId();
     const canvas = await tx.canvas.create({
       data: {
         workspaceId: actor.workspaceId,
@@ -106,11 +109,18 @@ export function createArtifactFromClawTx(self: SdlcHubService, actor: SdlcActor,
         viewAccessId,
         visibility: CanvasVisibility.PRIVATE,
         isCollaborative: true,
+        connectId,
         metadata: {} as Prisma.InputJsonValue,
         participants: {
-          create: sdlcChannelCanvasParticipant(actor.workspaceId, channelId),
+          create: sdlcChannelCanvasParticipant(actor.workspaceId, channelId, connectId),
         },
       },
+    });
+    await createConnectGroupForEntity(tx, {
+      entityType: ConnectEntityType.CANVAS,
+      entityId: canvas.id,
+      hostWorkspaceId: actor.workspaceId,
+      connectId,
     });
     if (input.trackId) {
       await tx.sdlcEntityLink.create({
@@ -137,6 +147,17 @@ export function createArtifactFromClawTx(self: SdlcHubService, actor: SdlcActor,
           createdBy: actor.userId,
         },
       });
+      await refileFolderEdges(
+        tx,
+        {
+          channelId,
+          item: { type: 'CANVAS', id: canvas.id },
+          parent: trackFolderId
+            ? { type: 'FOLDER', id: trackFolderId }
+            : { type: 'TRACK', id: input.trackId },
+        },
+        { workspaceId: actor.workspaceId, userId: actor.userId }
+      );
     }
     await tx.sdlcArtifact.create({
       data: {
@@ -268,7 +289,7 @@ export function createTrackTx(self: SdlcHubService, actor: SdlcActor, input: { n
 
   /** The private channel a hub lives in, plus its starting artifact-type folders. */
 export function moveArtifactFromClawTx(self: SdlcHubService, actor: SdlcActor, channelId: string, input: { canvasId: string; parentId: string }, toRoot: boolean) {
-  return transaction(['SdlcEntityLink'], 'moveArtifactFromClaw: removing the old containment edge and adding the new one must commit atomically; tx is not ACL-wrapped', self.prisma, async tx => {
+  return transaction(['SdlcEntityLink'], 'moveArtifactFromClaw: the old containment edge, the new one and the folder edges that follow must commit atomically; tx is not ACL-wrapped', self.prisma, async tx => {
     await tx.sdlcEntityLink.deleteMany({
       where: {
         channelId,
@@ -289,12 +310,41 @@ export function moveArtifactFromClawTx(self: SdlcHubService, actor: SdlcActor, c
       },
       { workspaceId: actor.workspaceId, userId: actor.userId }
     );
+    await refileFolderEdges(
+      tx,
+      {
+        channelId,
+        item: { type: 'CANVAS', id: input.canvasId },
+        parent: { type: toRoot ? 'TRACK' : 'FOLDER', id: input.parentId },
+      },
+      { workspaceId: actor.workspaceId, userId: actor.userId }
+    );
+  });
+}
+
+/**
+ * Removes a content link. When it filed an item into a folder, the item leaves the
+ * folders it was under, taking everything beneath it along.
+ */
+export function unlinkContextTx(self: SdlcHubService, actor: SdlcActor, channelId: string, link: { id: string; relationType: string; targetType: string; targetId: string }): Promise<number> {
+  return transaction(['SdlcEntityLink'], 'unlinkContext: the link and the folder edges that follow an unfiled item must commit atomically; tx is not ACL-wrapped', self.prisma, async tx => {
+    const removed = await tx.sdlcEntityLink.deleteMany({
+      where: { id: link.id, channelId, workspaceId: actor.workspaceId },
+    });
+    if (removed.count > 0 && link.relationType === SDLC_CONTAINMENT_RELATION && isSdlcTreeItemType(link.targetType)) {
+      await refileFolderEdges(
+        tx,
+        { channelId, item: { type: link.targetType, id: link.targetId }, parent: null },
+        { workspaceId: actor.workspaceId, userId: actor.userId }
+      );
+    }
+    return removed.count;
   });
 }
 
 export function createTrackFolderFromClawTx(self: SdlcHubService, actor: SdlcActor, input: { channelId: string; trackId: string; name: string; parentTrackFolderId?: string | undefined }) {
   const actorRef = { workspaceId: actor.workspaceId, userId: actor.userId };
-  return transaction(['SdlcEntityLink', 'SdlcFolder'], 'createTrackFolderFromClaw: folder create and its two containment edges must commit atomically; tx is not ACL-wrapped', self.prisma, async tx => {
+  return transaction(['SdlcEntityLink', 'SdlcFolder'], 'createTrackFolderFromClaw: folder create, its containment and track edges and its folder edges must commit atomically; tx is not ACL-wrapped', self.prisma, async tx => {
     const folder = await tx.sdlcFolder.create({
       data: { workspaceId: actor.workspaceId, name: input.name, createdBy: actor.userId },
       select: { id: true, name: true },
@@ -323,6 +373,17 @@ export function createTrackFolderFromClawTx(self: SdlcHubService, actor: SdlcAct
       },
       actorRef
     );
+    await refileFolderEdges(
+      tx,
+      {
+        channelId: input.channelId,
+        item: { type: 'FOLDER', id: folder.id },
+        parent: input.parentTrackFolderId
+          ? { type: 'FOLDER', id: input.parentTrackFolderId }
+          : { type: 'TRACK', id: input.trackId },
+      },
+      actorRef
+    );
     return { ...folder, trackId: input.trackId, parentId: input.parentTrackFolderId ?? input.trackId };
   });
 }
@@ -339,6 +400,8 @@ export async function createSdlcChannel(tx: TransactionClient, actor: SdlcActor,
 
     const channelId = randomUUID();
     const now = new Date();
+    // Slack Connect: the channel is a shareable entity → its own connectId + a private connect_group row.
+    const connectId = newConnectId();
 
     await tx.channel.create({
       data: {
@@ -351,6 +414,7 @@ export async function createSdlcChannel(tx: TransactionClient, actor: SdlcActor,
         createdBy: actor.userId,
         projectId: input.projectId,
         workspaceId: actor.workspaceId,
+        connectId,
         participantCount: 1,
         addUserPolicy: ChannelAddUserPolicy.ADMINS_ONLY,
         showTicketsTabTicketsInChat: false,
@@ -379,6 +443,12 @@ export async function createSdlcChannel(tx: TransactionClient, actor: SdlcActor,
           },
         },
       },
+    });
+    await createConnectGroupForEntity(tx, {
+      entityType: ConnectEntityType.CHANNEL,
+      entityId: channelId,
+      hostWorkspaceId: actor.workspaceId,
+      connectId,
     });
 
     // Dual-write: mirror the channel→project board set into ChannelBoardMapping so

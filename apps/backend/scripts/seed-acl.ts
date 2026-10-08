@@ -46,7 +46,6 @@ const ESSENTIAL_RESOURCES = [
   { name: 'FORMS', description: 'Form management and submission access' },
   { name: 'SUPPORT', description: 'Support ticket and help desk access' },
   { name: 'PROJECTS', description: 'Project management access' },
-  { name: 'PRODUCT-INSIGHTS', description: 'Product insights and analytics access' },
   { name: 'LISTPROJECTS', description: 'Project listing and management access' },
   { name: 'CHANNELS', description: 'Read only will not allow to create channel' },
   { name: 'CANVASES', description: 'Canvases creation access' },
@@ -100,7 +99,6 @@ const DEFAULT_USER_GROUPS = [
       { resourceName: 'FORMS', accessType: AccessType.WRITE },
       { resourceName: 'SUPPORT', accessType: AccessType.WRITE },
       { resourceName: 'PROJECTS', accessType: AccessType.WRITE },
-      { resourceName: 'PRODUCT-INSIGHTS', accessType: AccessType.READ },
       { resourceName: 'LISTPROJECTS', accessType: AccessType.READ },
       { resourceName: 'CHANNELS', accessType: AccessType.WRITE },
       { resourceName: 'CANVASES', accessType: AccessType.WRITE },
@@ -126,7 +124,6 @@ const DEFAULT_USER_GROUPS = [
       { resourceName: 'FORMS', accessType: AccessType.READ },
       { resourceName: 'SUPPORT', accessType: AccessType.READ },
       { resourceName: 'PROJECTS', accessType: AccessType.READ },
-      { resourceName: 'PRODUCT-INSIGHTS', accessType: AccessType.READ },
       { resourceName: 'LISTPROJECTS', accessType: AccessType.READ },
       { resourceName: 'CHANNELS', accessType: AccessType.READ },
       { resourceName: 'CANVASES', accessType: AccessType.READ },
@@ -416,13 +413,19 @@ async function main() {
       } else {
         // Create orgMember FIRST to get memberId
         const passwordHash = await hashPassword(DEV_ADMIN_PASSWORD);
-        const orgMember = await prisma.orgMember.create({
-          data: {
-            email: DEFAULT_ADMIN_USER.email,
-            orgId: DEFAULT_ORG.orgId,
-            role: OrgRole.OWNER,
-            passwordHash,
-          }
+        const orgMember = await prisma.$transaction(async (tx) => {
+          const created = await tx.orgMember.create({
+            data: {
+              email: DEFAULT_ADMIN_USER.email,
+              orgId: DEFAULT_ORG.orgId,
+              role: OrgRole.OWNER,
+              passwordHash,
+            }
+          });
+          await tx.orgMemberCredential.create({
+            data: { memberId: created.memberId, orgId: created.orgId, passwordHash },
+          });
+          return created;
         });
         console.log(`  ✅ Created orgMember with id: ${orgMember.memberId}`);
         console.log(`  ℹ️  Admin login: ${DEFAULT_ADMIN_USER.email} / ${DEV_ADMIN_PASSWORD}`);

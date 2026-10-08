@@ -26,7 +26,7 @@ export const grafanaAdapter: StdioMcpAdapter = {
     const token = credentials["token"] as string;
     return {
       cmd: "uvx",
-      args: ["mcp-grafana==0.15.2", "--enabled-tools", GRAFANA_ENABLED_TOOLS],
+      args: ["mcp-grafana==1.6.1", "--enabled-tools", GRAFANA_ENABLED_TOOLS],
       env: {
         GRAFANA_URL: url,
         GRAFANA_SERVICE_ACCOUNT_TOKEN: token,

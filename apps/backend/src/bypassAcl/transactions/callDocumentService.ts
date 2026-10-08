@@ -1,5 +1,6 @@
 import { CanvasVisibility, CallOrigin, CanvasRole } from '@xyne/shared';
 import {  INITIAL_DETAILED_SUMMARY_CANVAS_VERSION } from '@/services/callDocumentService';
+import { newConnectId, createConnectGroupForEntity, resolveCanvasConnectId, ConnectEntityType } from '@/database/connectGroup';
 import { PrismaClient } from '@prisma/client';
 import { transaction } from '../base';
 import { v4 as uuidv4 } from 'uuid';
@@ -31,9 +32,11 @@ export function updateCallMessageMetadataTx(prisma: PrismaClient, callMessage: a
 }
 
 export async function createPRDCanvasTx(prisma: PrismaClient, canvasId: string, title: string, channelId: string, workspaceId: string, createdByUserId: string, now: Date, callId: string, conversationId: string, accessMode: string, callCreatorUserId: string) {
-  const result = await transaction(['Call', 'CallParticipant', 'Canvas', 'CanvasParticipant'], 'createPRDCanvas: PRD canvas creation and call access grants must commit atomically; tx is not ACL-wrapped', prisma, async (tx) => {
+  const result = await transaction(['Call', 'CallParticipant', 'Canvas', 'CanvasParticipant', 'ConnectGroup'], 'createPRDCanvas: PRD canvas creation and call access grants must commit atomically; tx is not ACL-wrapped', prisma, async (tx) => {
     // Keep PRD canvases private and grant the same explicit access as
     // detailed-summary canvases generated from this call.
+    // Slack Connect: a canvas is a shareable entity → its own connectId + a private connect_group row.
+    const connectId = newConnectId();
     await tx.canvas.create({
       data: {
         id: canvasId,
@@ -49,6 +52,7 @@ export async function createPRDCanvasTx(prisma: PrismaClient, canvasId: string, 
         lastEditedAt: now,
         createdAt: now,
         updatedAt: now,
+        connectId,
         metadata: {
           source: 'call_prd',
           callId,
@@ -56,6 +60,12 @@ export async function createPRDCanvasTx(prisma: PrismaClient, canvasId: string, 
           generatedAt: now.toISOString(),
         },
       },
+    });
+    await createConnectGroupForEntity(tx, {
+      entityType: ConnectEntityType.CANVAS,
+      entityId: canvasId,
+      hostWorkspaceId: workspaceId,
+      connectId,
     });
     accessMode = await createCallCanvasAccess(tx, {
       canvasId,
@@ -70,8 +80,10 @@ export async function createPRDCanvasTx(prisma: PrismaClient, canvasId: string, 
   return { result, accessMode };
 }
 
-export async function createDetailedSummaryCanvasTx(prisma: PrismaClient, canvasId: string, title: string, channelId: string | null, workspaceId: string, createdByUserId: string, now: Date, callId: string, conversationId: string | null, mentionedUserIds: string[], options: { deferInsertSideEffects?: boolean; summaryModelPreference?: "fast" | "thinking"; }, accessMode: string, callCreatorUserId: string) {
-  const result = await transaction(['Call', 'CallParticipant', 'Canvas', 'CanvasParticipant'], 'createDetailedSummaryCanvas: summary canvas creation and call access grants must commit atomically; tx is not ACL-wrapped', prisma, async (tx) => {
+export async function createDetailedSummaryCanvasTx(prisma: PrismaClient, canvasId: string, title: string, channelId: string | null, workspaceId: string, createdByUserId: string, now: Date, callId: string, conversationId: string | null, mentionedUserIds: string[], options: { deferInsertSideEffects?: boolean; summaryModelPreference?: "fast" | "thinking"; isRecording?: boolean; }, accessMode: string, callCreatorUserId: string) {
+  const result = await transaction(['Call', 'CallParticipant', 'Canvas', 'CanvasParticipant', 'ConnectGroup'], 'createDetailedSummaryCanvas: summary canvas creation and call access grants must commit atomically; tx is not ACL-wrapped', prisma, async (tx) => {
+    // Slack Connect: a canvas is a shareable entity → its own connectId + a private connect_group row.
+    const connectId = newConnectId();
     await tx.canvas.create({
       data: {
         id: canvasId,
@@ -87,10 +99,12 @@ export async function createDetailedSummaryCanvasTx(prisma: PrismaClient, canvas
         lastEditedAt: now,
         createdAt: now,
         updatedAt: now,
+        connectId,
         metadata: {
           source: 'call_detailed_summary',
           callId,
           conversationId,
+          isRecording: options.isRecording === true,
           isAiGenerated: true,
           generatedAt: now.toISOString(),
           mentionedUserIds, // Store mentioned users for side effect handler
@@ -103,6 +117,12 @@ export async function createDetailedSummaryCanvasTx(prisma: PrismaClient, canvas
             : {}),
         },
       },
+    });
+    await createConnectGroupForEntity(tx, {
+      entityType: ConnectEntityType.CANVAS,
+      entityId: canvasId,
+      hostWorkspaceId: workspaceId,
+      connectId,
     });
 
     accessMode = await createCallCanvasAccess(tx, {
@@ -137,16 +157,19 @@ export async function createCallCanvasAccess(tx: Prisma.TransactionClient, param
     });
     const isChannelThreadCall = call?.callOrigin === CallOrigin.CONVERSATION && channelId !== null;
 
+    // Slack Connect: participants inherit the parent canvas's connectId (null until backfilled).
+    const connectId = await resolveCanvasConnectId(tx, canvasId);
+
     await tx.canvasParticipant.create({
       data: {
         id: uuidv4(), canvasId, workspaceId, userId: createdByUserId, role: CanvasRole.OWNER,
-        joinedAt: now, updatedAt: now,
+        joinedAt: now, updatedAt: now, ...(connectId ? { canvasConnectId: connectId } : {}),
       },
     });
     await tx.canvasParticipant.create({
       data: {
         id: uuidv4(), canvasId, workspaceId, userId: callCreatorUserId, role: CanvasRole.OWNER,
-        joinedAt: now, updatedAt: now,
+        joinedAt: now, updatedAt: now, ...(connectId ? { canvasConnectId: connectId } : {}),
       },
     });
 
@@ -161,7 +184,7 @@ export async function createCallCanvasAccess(tx: Prisma.TransactionClient, param
         await tx.canvasParticipant.createMany({
           data: editorUserIds.map((userId) => ({
             id: uuidv4(), canvasId, workspaceId, userId, role: CanvasRole.EDITOR,
-            joinedAt: now, updatedAt: now,
+            joinedAt: now, updatedAt: now, ...(connectId ? { canvasConnectId: connectId } : {}),
           })),
         });
       }
@@ -172,7 +195,7 @@ export async function createCallCanvasAccess(tx: Prisma.TransactionClient, param
         data: {
           id: uuidv4(), canvasId, workspaceId, channelId,
           role: isChannelThreadCall ? CanvasRole.VIEWER : CanvasRole.EDITOR,
-          joinedAt: now, updatedAt: now,
+          joinedAt: now, updatedAt: now, ...(connectId ? { canvasConnectId: connectId } : {}),
         },
       });
     }

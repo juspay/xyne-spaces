@@ -1,22 +1,20 @@
-import { Prisma } from "@prisma/client";
 import { errMsg } from "../lib/errors.js";
 import { prisma } from "../db.js";
 import { createLogger } from "../logger.js";
-import { ensureTwinBank } from "./userMemoryCuratorClient.js";
+import { ensureTwinBank } from "./twinMemoryBank.js";
 import { ensureDefaultFiles, TWIN_AGENT_SLUG } from "./agentMemoryFiles.js";
+import { cancelDigitalTwinBackfill } from "../queue/digital-twin-backfill-queue.js";
+import { disableTwin, enqueueBackfillForAllSources, writeBackfillState } from "./digitalTwinLifecycle.js";
 import {
-  cancelDigitalTwinBackfill,
-  enqueueDigitalTwinBackfill,
-  type BackfillSource,
-} from "../queue/digital-twin-backfill-queue.js";
-import {
-  BACKFILL_SOURCE_KEYS,
+  BACKFILL_SOURCES,
+  MAX_BACKFILL_MONTHS,
+  backfillRangeProblem,
+  buildBackfillState,
   type BackfillState,
   type BackfillEntryShape,
-} from "./backfillStatus.js";
+} from "./digitalTwinBackfillState.js";
 
 const log = createLogger("admin-digital-twin-control");
-const MAX_BACKFILL_MONTHS = 24;
 
 export interface AdminBackfillWindowInput {
   from: string;
@@ -52,48 +50,17 @@ export function parseAdminBackfillWindow(
 
   const from = new Date(input.from);
   const to = input.to ? new Date(input.to) : now;
-  if (Number.isNaN(from.getTime()) || Number.isNaN(to.getTime()) || from > to) {
-    throw new AdminDigitalTwinControlError("Invalid backfill date range", 400, "INVALID_BACKFILL_WINDOW");
-  }
-  const earliestAllowed = new Date(to);
-  earliestAllowed.setUTCMonth(earliestAllowed.getUTCMonth() - MAX_BACKFILL_MONTHS);
-  if (from < earliestAllowed) {
+  const problem = backfillRangeProblem(from, to);
+  if (problem) {
     throw new AdminDigitalTwinControlError(
-      `Backfill must span ${MAX_BACKFILL_MONTHS} months or fewer`,
+      problem === "invalid"
+        ? "Invalid backfill date range"
+        : `Backfill must span ${MAX_BACKFILL_MONTHS} months or fewer`,
       400,
       "INVALID_BACKFILL_WINDOW",
     );
   }
   return { from, to };
-}
-
-export function buildAdminBackfillState(
-  window: ParsedAdminBackfillWindow,
-  now = new Date(),
-): BackfillState {
-  const spanMs = window.to.getTime() - window.from.getTime();
-  const windowsTotal = Math.max(1, Math.ceil(spanMs / (30 * 24 * 60 * 60 * 1000)));
-  const nowIso = now.toISOString();
-  const state: BackfillState = {};
-  for (const source of BACKFILL_SOURCE_KEYS) {
-    state[source] = {
-      from: window.from.toISOString(),
-      to: window.to.toISOString(),
-      cursor: window.from.toISOString(),
-      complete: false,
-      progress: {
-        windowsTotal,
-        windowsDone: 0,
-        recordsSeen: 0,
-        candidatesMade: 0,
-        currentWindow: null,
-        lastError: null,
-        startedAt: nowIso,
-        updatedAt: nowIso,
-      },
-    };
-  }
-  return state;
 }
 
 export interface AdminBackfillSummary {
@@ -118,7 +85,7 @@ export function summarizeAdminBackfill(raw: unknown): AdminBackfillSummary {
       lastError: null,
     };
   }
-  const entries = BACKFILL_SOURCE_KEYS
+  const entries = BACKFILL_SOURCES
     .map((source) => (raw as BackfillState)[source])
     .filter((entry): entry is BackfillEntryShape => Boolean(entry));
   if (entries.length === 0) return summarizeAdminBackfill(null);
@@ -128,16 +95,17 @@ export function summarizeAdminBackfill(raw: unknown): AdminBackfillSummary {
   const lastError = entries
     .map((entry) => entry.progress?.lastError?.message ?? null)
     .find((message): message is string => Boolean(message)) ?? null;
-  const windowsDone = entries.reduce((sum, entry) => sum + (entry.progress?.windowsDone ?? 0), 0);
-  const windowsTotal = entries.reduce((sum, entry) => sum + (entry.progress?.windowsTotal ?? 0), 0);
+  const sum = (pick: (e: BackfillEntryShape) => number | undefined) => entries.reduce((n, e) => n + (pick(e) ?? 0), 0);
+  const windowsDone = sum((e) => e.progress?.windowsDone);
+  const windowsTotal = sum((e) => e.progress?.windowsTotal);
 
   return {
     status: lastError ? "error" : incomplete.length === 0 ? "complete" : allPaused ? "paused" : "running",
     from: entries.map((entry) => entry.from).filter((value): value is string => Boolean(value)).sort()[0] ?? null,
     to: entries.map((entry) => entry.to).filter((value): value is string => Boolean(value)).sort().at(-1) ?? null,
     progressPct: windowsTotal > 0 ? Math.min(100, Math.round((windowsDone * 100) / windowsTotal)) : null,
-    recordsSeen: entries.reduce((sum, entry) => sum + (entry.progress?.recordsSeen ?? 0), 0),
-    candidatesMade: entries.reduce((sum, entry) => sum + (entry.progress?.candidatesMade ?? 0), 0),
+    recordsSeen: sum((e) => e.progress?.recordsSeen),
+    candidatesMade: sum((e) => e.progress?.candidatesMade),
     lastError,
   };
 }
@@ -149,17 +117,6 @@ async function requireTargetUser(userId: string): Promise<void> {
   }
 }
 
-async function enqueueBackfillForAllSources(
-  userId: string,
-  window: ParsedAdminBackfillWindow,
-): Promise<string[]> {
-  const jobIds: string[] = [];
-  for (const source of BACKFILL_SOURCE_KEYS as readonly BackfillSource[]) {
-    jobIds.push(await enqueueDigitalTwinBackfill({ userId, source, ...window }));
-  }
-  return jobIds;
-}
-
 export async function adminEnableDigitalTwin(input: {
   userId: string;
   backfill?: AdminBackfillWindowInput | null;
@@ -167,19 +124,10 @@ export async function adminEnableDigitalTwin(input: {
   await requireTargetUser(input.userId);
   const now = new Date();
   const window = input.backfill ? parseAdminBackfillWindow(input.backfill, now) : null;
-  const state = window ? buildAdminBackfillState(window, now) : null;
+  const state = window ? buildBackfillState(window, now) : null;
 
   await cancelDigitalTwinBackfill(input.userId);
-  await prisma.user.update({
-    where: { id: input.userId },
-    data: {
-      digitalTwinEnabled: true,
-      digitalTwinEnabledAt: now,
-      digitalTwinBackfillState: state
-        ? (state as unknown as Prisma.InputJsonValue)
-        : (Prisma.JsonNull as unknown as Prisma.NullableJsonNullValueInput),
-    },
-  });
+  await writeBackfillState(input.userId, state, { digitalTwinEnabled: true, digitalTwinEnabledAt: now });
 
   await ensureTwinBank();
   await ensureDefaultFiles(TWIN_AGENT_SLUG, input.userId).catch((error) => {
@@ -197,15 +145,7 @@ export async function adminEnableDigitalTwin(input: {
 
 export async function adminDisableDigitalTwin(userId: string): Promise<{ cancelledJobs: number }> {
   await requireTargetUser(userId);
-  const cancelledJobs = await cancelDigitalTwinBackfill(userId);
-  await prisma.user.update({
-    where: { id: userId },
-    data: {
-      digitalTwinEnabled: false,
-      digitalTwinBackfillState: Prisma.JsonNull as unknown as Prisma.NullableJsonNullValueInput,
-    },
-  });
-  return { cancelledJobs };
+  return { cancelledJobs: await disableTwin(userId) };
 }
 
 export async function adminStartDigitalTwinBackfill(input: {
@@ -226,12 +166,9 @@ export async function adminStartDigitalTwinBackfill(input: {
   }
 
   const window = parseAdminBackfillWindow(input.backfill);
-  const state = buildAdminBackfillState(window);
+  const state = buildBackfillState(window, new Date());
   await cancelDigitalTwinBackfill(input.userId);
-  await prisma.user.update({
-    where: { id: input.userId },
-    data: { digitalTwinBackfillState: state as unknown as Prisma.InputJsonValue },
-  });
+  await writeBackfillState(input.userId, state);
   await ensureTwinBank();
   return { backfillJobIds: await enqueueBackfillForAllSources(input.userId, window) };
 }

@@ -29,6 +29,7 @@ import {
   mergeRecordingSummaryMarkedItems,
   type RecordingSummaryMarkedItem,
 } from '@/services/recordingSummaryMarkedItems';
+import { emitCallSummaryReadyToApp } from '@/services/callSummaryAppEventService';
 
 // Activity.actorAction for "the AI summary for this recording is ready".
 // Rendered by the dashboard's RecordingSummaryActivity.
@@ -288,7 +289,7 @@ class NoteTakerTranscriptService {
   private async notifySummaryReady(call: Call): Promise<void> {
     const actionUrl = isRecording(call)
       ? `/recordings/${call.externalId}`
-      : `/calls/${call.id}/detail`;
+      : `/calls/${call.externalId}/detail`;
     try {
       if (!call.workspaceId) return;
       // The AI title may have landed after our `call` snapshot was taken —
@@ -314,6 +315,13 @@ class NoteTakerTranscriptService {
     }
 
     await this.recordSummaryReadyActivity(call);
+
+    // App-scheduled calls get the summary pushed to their app's webhook. This
+    // covers the note-taker pipeline and every regeneration (both call types
+    // route through regenerateSummary); regular calls are covered from
+    // transcriptService.processCallWithSummary. No-ops unless the call carries
+    // an initiatedByInstalledAppId, and never throws.
+    await emitCallSummaryReadyToApp(call.externalId);
   }
 
   /**
@@ -416,7 +424,7 @@ class NoteTakerTranscriptService {
           : {};
       return canvasMeta.summaryModelPreference === 'thinking' ? 'thinking' : 'fast';
     } catch (error) {
-      logger.warn('summary_model_preference_lookup_failed', { callId: call.id, error });
+      logger.warn('summary_model_preference_lookup_failed', { callId: call.externalId, error });
       return 'fast';
     }
   }
@@ -820,6 +828,7 @@ class NoteTakerTranscriptService {
           freshCallTitle,
           citationCtx,
           workspaceId,
+          true,
         );
         if (!canvasId) {
           logDetailedSummaryFailed(callId, 'canvas_update_failed');
@@ -909,7 +918,7 @@ class NoteTakerTranscriptService {
             resolvedCallTitle,
             citationCtx,
             workspaceId,
-            { deferInsertSideEffects: true },
+            { deferInsertSideEffects: true, isRecording: true },
           );
           if (!canvasId) {
             throw new Error('Failed to create detailed summary canvas');
@@ -1004,6 +1013,8 @@ class NoteTakerTranscriptService {
         call.startedAt,
         freshCallTitle,
         citationCtx,
+        undefined,
+        true,
       );
       if (!finalized) {
         logDetailedSummaryFailed(callId, 'canvas_finalize_failed');
@@ -1058,9 +1069,9 @@ class NoteTakerTranscriptService {
         app: SubApp.TRANSCRIPT,
         ...(call.workspaceId ? { workspaceId: call.workspaceId } : {}),
       });
-      logger.info(`[NoteTakerTranscriptService] Queued Vespa indexing for transcript ${call.id}`, { path: 'note_taker' });
+      logger.info(`[NoteTakerTranscriptService] Queued Vespa indexing for transcript ${call.externalId}`, { path: 'note_taker' });
     } catch (vespaError) {
-      logger.error(`[NoteTakerTranscriptService] Failed to queue Vespa job for transcript ${call.id}:`, vespaError);
+      logger.error(`[NoteTakerTranscriptService] Failed to queue Vespa job for transcript ${call.externalId}:`, vespaError);
     }
   }
 }

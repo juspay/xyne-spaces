@@ -1,9 +1,10 @@
 import React from 'react';
-import { DragableSixDots, EyeOff, PlusDefault as Plus, ThreeDotsMenuHorizontal } from '@xyne/icons';
+import { EyeOff, PlusDefault as Plus, ThreeDotsMenuHorizontal } from '@xyne/icons';
 import { useDroppable } from '@dnd-kit/core';
 import { SortableContext, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 import { useVirtualizer } from '@tanstack/react-virtual';
+import { useScrollFade } from '../../../hooks/useScrollFade';
 import type { Ticket, TicketTagMapping, FormEntityValues } from '@xyne/shared';
 import { TicketStatusV2 } from '@xyne/shared';
 
@@ -31,6 +32,11 @@ import {
   type KanbanTicketsPageBaseArgs,
   useKanbanTicketsPage,
 } from '../../../routes/KanbanBoardScreen/useKanbanTicketsPage';
+import {
+  type SupportKanbanPageBaseArgs,
+  useSupportKanbanTicketsPage,
+} from '../../../routes/SupportScreen/useSupportKanbanTicketsPage';
+import type { DynamicFieldFilterEntry } from '../../../utils/board/dynamicFieldFilters';
 import { TicketCard } from '../TicketCard/TicketCard';
 import {
   DropdownMenu,
@@ -41,6 +47,7 @@ import {
 import { cn } from '../../../utils/classNames';
 import { KanbanIcon } from './KanbanIcon';
 import { HiddenColumnsPanel } from '../HiddenColumnsPanel/HiddenColumnsPanel';
+import { useColumnReorder } from './useColumnReorder';
 
 // Re-exported for the many call sites that already import it from here.
 export { KanbanIcon };
@@ -83,25 +90,6 @@ const writeColumnLayout = (key: string, patch: Partial<ColumnLayout>): void => {
     // Storage blocked or full — the layout lives for this session only.
   }
 };
-
-/** Visible grip — the only part of a column that starts a reorder drag. */
-const ColumnDragHandle: React.FC<{
-  stageId: string;
-  onDraggedStageChange: (stageId: string | null) => void;
-}> = ({ stageId, onDraggedStageChange }) => (
-  <div
-    draggable
-    onDragStart={event => {
-      event.dataTransfer.setData('text/plain', stageId); // Firefox needs data to start a drag.
-      onDraggedStageChange(stageId);
-    }}
-    onDragEnd={() => onDraggedStageChange(null)}
-    title='Drag to reorder column'
-    className='cursor-grab text-muted-foreground active:cursor-grabbing'
-  >
-    <DragableSixDots className='size-4' />
-  </div>
-);
 
 const SortableTicketCard: React.FC<SortableTicketCardProps> = ({
   ticket,
@@ -198,7 +186,9 @@ const VirtualizedStageList: React.FC<{
   onTicketClick,
   slaPolicies,
 }) => {
-  const scrollRef = React.useRef<HTMLDivElement>(null);
+  // Fades at the column's ends while there are more cards past them.
+  const fade = useScrollFade<HTMLDivElement>('y', 40);
+  const scrollRef = fade.node;
   const lastReportedTicketSnapshotRef = React.useRef<string>('');
   const scrollKey = `kanban-scroll-${stageId}`;
   const ticketSnapshotSignature = React.useMemo(
@@ -243,7 +233,12 @@ const VirtualizedStageList: React.FC<{
   const virtualItems = virtualizer.getVirtualItems();
 
   return (
-    <div ref={scrollRef} className='h-full overflow-y-auto pt-3 px-3'>
+    <div
+      ref={fade.ref}
+      onScroll={fade.onScroll}
+      style={fade.style}
+      className='h-full overflow-y-auto pt-3 px-3'
+    >
       <div
         className='relative w-full'
         style={{
@@ -516,6 +511,61 @@ const PaginatedStageList: React.FC<{
   );
 };
 
+const DeskPaginatedStageList: React.FC<{
+  stage: Stage;
+  columnKey: string;
+  pageArgs: SupportKanbanPageBaseArgs;
+  otherStageNames?: string[] | undefined;
+  dynamicFieldEntries?: DynamicFieldFilterEntry[] | undefined;
+  onPageComplete?: ((pageArgs: SupportKanbanPageBaseArgs) => void) | undefined;
+  expectedCount?: number | undefined;
+  onTicketsChange?: ((columnKey: string, tickets: Ticket[]) => void) | undefined;
+  availableTags: string[];
+  visibleColumns?: Set<string> | undefined;
+  activeTicketId?: string;
+  showEmailReads?: boolean;
+  onTicketClick: (e: React.MouseEvent | KeyboardEvent, ticket: Ticket) => void;
+  slaPolicies?: BoardSlaPolicy[];
+}> = ({
+  stage,
+  columnKey,
+  pageArgs,
+  otherStageNames,
+  dynamicFieldEntries,
+  onPageComplete,
+  expectedCount,
+  ...listProps
+}) => {
+  const { tickets, isComplete, hasMore, isLoadingMore, loadMore } = useSupportKanbanTicketsPage({
+    ...pageArgs,
+    stage: stage.name,
+    ...(otherStageNames ? { otherStageNames } : {}),
+    ...(dynamicFieldEntries ? { dynamicFieldEntries } : {}),
+    ...(expectedCount !== undefined ? { expectedCount } : {}),
+  });
+
+  React.useEffect(() => {
+    if (isComplete) onPageComplete?.(pageArgs);
+  }, [isComplete, onPageComplete, pageArgs]);
+
+  return (
+    <SortableContext
+      items={tickets.map(ticket => ticket.id)}
+      strategy={verticalListSortingStrategy}
+    >
+      <VirtualizedStageList
+        stageId={stage.id}
+        columnKey={columnKey}
+        stageTickets={tickets}
+        hasMore={hasMore}
+        isLoadingMore={isLoadingMore}
+        onLoadMore={loadMore}
+        {...listProps}
+      />
+    </SortableContext>
+  );
+};
+
 const ticketBelongsToColumn = (
   ticket: Ticket,
   columnType: 'stage' | 'status',
@@ -555,12 +605,11 @@ interface KanbanColumnsProps {
     columnType: 'stage' | 'status';
     baseArgs: KanbanTicketsPageBaseArgs;
   };
-  /**
-   * A search is active. Server counts are not refetched for the search term, so
-   * they are either stale or absent, and the count display has to stop trusting
-   * `stageCounts` while this is true.
-   */
-  searchActive?: boolean;
+  deskPaginationConfig?: {
+    pageArgs: SupportKanbanPageBaseArgs;
+    dynamicFieldEntries?: DynamicFieldFilterEntry[] | undefined;
+    onPageComplete?: (pageArgs: SupportKanbanPageBaseArgs) => void;
+  };
   allKnownTickets?: Ticket[];
   onTicketsChange?: (columnKey: string, tickets: Ticket[]) => void;
   onAddTicketInColumn?: (column: {
@@ -604,7 +653,7 @@ export const KanbanColumns: React.FC<KanbanColumnsProps> = ({
   showEmailReads,
   slaPolicies,
   paginatedColumnConfig,
-  searchActive,
+  deskPaginationConfig,
   allKnownTickets,
   onTicketsChange,
   onAddTicketInColumn,
@@ -623,23 +672,17 @@ export const KanbanColumns: React.FC<KanbanColumnsProps> = ({
     // In normal mode, use allKnownTickets for optimistic updates
     return allKnownTickets ?? Object.values(ticketsByStage).flat();
   }, [allKnownTickets, isGroupByActive, ticketsByStage]);
-  // Only the paginated board can starve a collapsed column of its count; the
-  // non-paginated board always has every ticket in `ticketsByStage`.
-  const countsAreReliable = !(paginatedColumnConfig && searchActive);
   const stageCountById = React.useMemo(() => {
     const counts: Record<string, number> = {};
 
     for (const stage of stages) {
       const loaded = ticketsByStage[stage.id]?.length ?? 0;
-      counts[stage.id] = countsAreReliable
-        ? (stageCounts?.[stage.id] ?? stageCounts?.[stage.name] ?? loaded)
-        : loaded;
+      counts[stage.id] = stageCounts?.[stage.id] ?? stageCounts?.[stage.name] ?? loaded;
     }
 
     return counts;
-  }, [stages, stageCounts, ticketsByStage, countsAreReliable]);
+  }, [stages, stageCounts, ticketsByStage]);
   const [columnOrder, setColumnOrder] = React.useState<string[]>([]);
-  const [draggedStageId, setDraggedStageId] = React.useState<string | null>(null);
 
   const layoutKey = [layoutScope, ...stages.map(stage => stage.id).sort()].join('|');
   const seededLayoutKeyRef = React.useRef('');
@@ -667,28 +710,28 @@ export const KanbanColumns: React.FC<KanbanColumnsProps> = ({
     : [];
   const orderedStages = columnOrder.length ? [...visibleStages].sort(bySavedOrder) : visibleStages;
 
-  const moveColumnTo = (targetStageId: string): void => {
-    setDraggedStageId(null);
-    if (!draggedStageId || draggedStageId === targetStageId) return;
-
+  const commitColumnOrder = (visibleIds: string[]): void => {
     // Ordered over every stage, hidden ones included, so unhiding a column
     // restores it where it was rather than at the head of the strip.
-    const stageIds = [...stages].sort(bySavedOrder).map(stage => stage.id);
-    // Target index taken before the removal, so the column lands after the target
-    // when dragged rightwards and before it when dragged leftwards.
-    const fromIndex = stageIds.indexOf(draggedStageId);
-    const toIndex = stageIds.indexOf(targetStageId);
-    if (fromIndex === -1 || toIndex === -1) return; // A -1 would splice off the last column.
-    stageIds.splice(fromIndex, 1);
-    stageIds.splice(toIndex, 0, draggedStageId);
+    const queue = [...visibleIds];
+    const visible = new Set(visibleIds);
+    const stageIds = [...stages]
+      .sort(bySavedOrder)
+      .map(stage => (visible.has(stage.id) ? (queue.shift() ?? stage.id) : stage.id));
     setColumnOrder(stageIds);
     writeColumnLayout(layoutKey, { order: stageIds });
   };
+  const canReorderColumns = orderedStages.length > 1;
+  const reorder = useColumnReorder({
+    stageIds: orderedStages.map(stage => stage.id),
+    onReorder: commitColumnOrder,
+  });
 
   return (
     <div
+      ref={reorder.stripRef}
       className={cn(
-        'flex gap-1 sm:gap-4 p-2 sm:p-3 h-full bg-background overflow-x-auto min-w-screen no-scrollbar',
+        'flex gap-1 sm:gap-4 p-2 sm:p-3 h-full bg-background overflow-x-auto min-w-screen',
         containerClassName,
       )}
     >
@@ -696,10 +739,9 @@ export const KanbanColumns: React.FC<KanbanColumnsProps> = ({
         const stageTickets = ticketsByStage[stage.id] || [];
         const ticketIds = stageTickets.map(t => t.id);
         const stageCount = stageCountById[stage.id] ?? stageTickets.length;
-        const serverStageCount =
-          countsAreReliable && stageCounts
-            ? (stageCounts[stage.id] ?? stageCounts[stage.name] ?? 0)
-            : undefined;
+        const serverStageCount = stageCounts
+          ? (stageCounts[stage.id] ?? stageCounts[stage.name] ?? 0)
+          : undefined;
         const columnKey = `${keyPrefix}${stage.id}`;
         const handleAddTicket = onAddTicketInColumn
           ? (): void =>
@@ -712,14 +754,28 @@ export const KanbanColumns: React.FC<KanbanColumnsProps> = ({
         return (
           <DroppableStage key={`${keyPrefix}${stage.id}`} id={stage.id}>
             <div
-              onDragOver={event => event.preventDefault()}
-              onDrop={() => moveColumnTo(stage.id)}
-              className={cn(
-                'group/kanbancol flex flex-col rounded-lg bg-muted h-full w-72 sm:w-96',
-                draggedStageId === stage.id && 'opacity-40',
-              )}
+              ref={reorder.columnRef(stage.id)}
+              className='group/kanbancol relative flex flex-col rounded-lg bg-muted h-full w-72 sm:w-96'
             >
-              <div className='flex items-center justify-between px-4 pt-3 pb-1 w-full'>
+              <div
+                data-column-socket
+                aria-hidden
+                className='pointer-events-none absolute inset-0 rounded-lg border-[1.5px] border-dashed border-foreground/15 bg-foreground/[0.02] opacity-0'
+              />
+              <div
+                onPointerDown={event => reorder.startPress(stage.id, event)}
+                className={cn(
+                  'group/colhead relative flex items-center justify-between px-4 pt-3 pb-1 w-full select-none',
+                  canReorderColumns && 'cursor-grab active:cursor-grabbing',
+                )}
+              >
+                {canReorderColumns && (
+                  <span
+                    data-column-grabber
+                    aria-hidden
+                    className='pointer-events-none absolute left-1/2 top-1 h-[3px] w-7 -translate-x-1/2 rounded-full bg-foreground/20 opacity-0 transition-opacity duration-150 ease-out [@media(hover:hover)_and_(pointer:fine)]:group-hover/colhead:opacity-100'
+                  />
+                )}
                 <div className='flex items-center gap-2 min-w-0'>
                   <KanbanIcon status={stage.defaultTicketStatusV2} />
                   <h3 className='text-xs font-medium truncate uppercase text-foreground'>
@@ -731,7 +787,6 @@ export const KanbanColumns: React.FC<KanbanColumnsProps> = ({
                 </div>
 
                 <div className='flex items-center gap-1'>
-                  <ColumnDragHandle stageId={stage.id} onDraggedStageChange={setDraggedStageId} />
                   {onHideColumn && (
                     <DropdownMenu>
                       <DropdownMenuTrigger asChild>
@@ -793,6 +848,26 @@ export const KanbanColumns: React.FC<KanbanColumnsProps> = ({
                     {...(formValuesByTicketId !== undefined && { formValuesByTicketId })}
                     {...(userNamesById !== undefined && { userNamesById })}
                   />
+                ) : deskPaginationConfig ? (
+                  <DeskPaginatedStageList
+                    key={columnKey}
+                    stage={stage}
+                    columnKey={columnKey}
+                    pageArgs={deskPaginationConfig.pageArgs}
+                    otherStageNames={
+                      stage.id === stages[0]?.id ? stages.slice(1).map(s => s.name) : undefined
+                    }
+                    dynamicFieldEntries={deskPaginationConfig.dynamicFieldEntries}
+                    onPageComplete={deskPaginationConfig.onPageComplete}
+                    {...(serverStageCount !== undefined ? { expectedCount: serverStageCount } : {})}
+                    {...(onTicketsChange !== undefined ? { onTicketsChange } : {})}
+                    availableTags={availableTags}
+                    visibleColumns={visibleColumns}
+                    {...(activeTicketId !== undefined && { activeTicketId })}
+                    {...(showEmailReads !== undefined && { showEmailReads })}
+                    onTicketClick={onTicketClick}
+                    {...(slaPolicies !== undefined && { slaPolicies })}
+                  />
                 ) : (
                   <SortableContext items={ticketIds} strategy={verticalListSortingStrategy}>
                     <VirtualizedStageList
@@ -826,6 +901,7 @@ export const KanbanColumns: React.FC<KanbanColumnsProps> = ({
           onUnhide={onUnhideColumn}
         />
       )}
+      {reorder.layer}
     </div>
   );
 };

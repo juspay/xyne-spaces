@@ -36,6 +36,7 @@ export interface RecurringSeriesShape {
   startsOn: Date;
   endsOn: Date | null;
   callUpdatesChannel: string | null;
+  summaryTemplateId?: string | null;
 }
 
 // ── Service ───────────────────────────────────────────────────────────────────
@@ -121,13 +122,14 @@ export class RecurringCallService {
         participantInviters,
         ...(externalInvitees.length > 0 && { externalInvitees }),
         callUpdatesChannel: callUpdatesChannel ?? null,
+        ...(recurringSeries.summaryTemplateId && { summaryTemplateId: recurringSeries.summaryTemplateId }),
       }, tx);
 
       queueCallVespaFeed(callId, { source: CallVespaFeedSource.RecurringCallServiceCreateInstance });
       // Every materialized instance — first creation, buffer replenishment,
       // regeneration, the auto-end chain — passes through here, so this one
       // hook puts the whole series on the organizer's calendar.
-      queueCallCalendarPush(callId, 'recurringCallService.createInstance');
+      queueCallCalendarPush(callId, externalId, 'recurringCallService.createInstance');
 
       // Send immediate CALL_SCHEDULED notifications + activities for the first instance only
       if (notifyParticipants) {
@@ -143,7 +145,7 @@ export class RecurringCallService {
             participantUserIds,
           });
         } catch (err) {
-          logger.error(`Failed to send scheduled notifications for recurring instance ${callId}:`, err);
+          logger.error(`Failed to send scheduled notifications for recurring instance ${externalId}:`, err);
         }
       }
 
@@ -159,12 +161,12 @@ export class RecurringCallService {
           );
           await scheduledCallNotificationService.scheduleCallAutoEnd(callId, externalId, endsAt);
         } catch (err) {
-          logger.error(`Failed to schedule jobs for recurring instance ${callId}:`, err);
+          logger.error(`Failed to schedule jobs for recurring instance ${externalId}:`, err);
         }
       }
 
       logger.info(
-        `Created recurring instance ${callId} (${externalId}) for series ${recurringSeries.id} at ${startsAt.toISOString()}`,
+        `Created recurring instance ${externalId} for series ${recurringSeries.id} at ${startsAt.toISOString()}`,
       );
       return callId;
     });
@@ -286,9 +288,9 @@ export class RecurringCallService {
     // Remove Bull jobs BEFORE the transaction to avoid Redis calls inside a DB transaction
     for (const instance of allScheduledInstances) {
       try {
-        await scheduledCallNotificationService.removeCallJobs(instance.id);
+        await scheduledCallNotificationService.removeCallJobs(instance.id, instance.externalId);
       } catch (err) {
-        logger.error(`Failed to remove Bull jobs for instance ${instance.id}:`, err);
+        logger.error(`Failed to remove Bull jobs for instance ${instance.externalId}:`, err);
       }
     }
 
@@ -303,7 +305,7 @@ export class RecurringCallService {
     // The replacements were pushed by createInstance; these are the instances
     // the new rule superseded, so withdraw their calendar events.
     queueCallCalendarPushMany(
-      scheduledInstanceIds,
+      allScheduledInstances,
       'recurringCallService.regenerateFutureInstances',
     );
 
@@ -333,26 +335,30 @@ export class RecurringCallService {
     // Step 1: Collect instance IDs that need their Bull jobs removed.
     // Do this BEFORE the transaction so we don't hold a DB connection while
     // making external Redis calls.
-    const futureInstanceIds = await repositories.scheduledCalls.findFutureScheduledCallIds({
+    const futureInstances = await repositories.scheduledCalls.findFutureScheduledCalls({
       seriesId,
       now,
       tx: db,
     });
+    const futureInstanceIds = futureInstances.map((instance) => instance.id);
 
     // Step 2: Remove Bull jobs outside the transaction (Redis calls should not
     // live inside a Prisma transaction as they can cause timeouts).
-    for (const instanceId of futureInstanceIds) {
+    for (const instance of futureInstances) {
       try {
-        await scheduledCallNotificationService.removeCallJobs(instanceId);
+        await scheduledCallNotificationService.removeCallJobs(instance.id, instance.externalId);
       } catch (err) {
-        logger.error(`Failed to remove Bull jobs for instance ${instanceId}:`, err);
+        logger.error(`Failed to remove Bull jobs for instance ${instance.externalId}:`, err);
       }
     }
 
     // Step 3: Atomically mark instances + series as CANCELLED via ScheduledCallRepository.
     const result = await cancelSeriesTx(db, seriesId, now);
 
-    queueCallCalendarPushMany(futureInstanceIds, 'recurringCallService.cancelSeries');
+    queueCallCalendarPushMany(futureInstances, 'recurringCallService.cancelSeries');
+    futureInstanceIds.forEach((instanceId) =>
+      queueCallVespaFeed(instanceId, { source: CallVespaFeedSource.RecurringCallServiceCancelSeries }),
+    );
 
     return result;
   }
@@ -366,22 +372,26 @@ export class RecurringCallService {
     const db = DatabaseClient.getInstance();
 
     // Remove Bull jobs outside the transaction to avoid Redis calls inside DB transaction
-    const instanceIds = await repositories.scheduledCalls.findCallIdsBySeriesId({
+    const instances = await repositories.scheduledCalls.findCallsBySeriesId({
       seriesId,
       tx: db,
     });
+    const instanceIds = instances.map((instance) => instance.id);
 
-    for (const instanceId of instanceIds) {
+    for (const instance of instances) {
       try {
-        await scheduledCallNotificationService.removeCallJobs(instanceId);
+        await scheduledCallNotificationService.removeCallJobs(instance.id, instance.externalId);
       } catch (err) {
-        logger.error(`Failed to remove Bull jobs for instance ${instanceId}:`, err);
+        logger.error(`Failed to remove Bull jobs for instance ${instance.externalId}:`, err);
       }
     }
 
     const result = await deleteSeriesTx(db, seriesId);
 
-    queueCallCalendarPushMany(instanceIds, 'recurringCallService.deleteSeries');
+    queueCallCalendarPushMany(instances, 'recurringCallService.deleteSeries');
+    instanceIds.forEach((instanceId) =>
+      queueCallVespaFeed(instanceId, { source: CallVespaFeedSource.RecurringCallServiceDeleteSeries }),
+    );
 
     return result;
   }

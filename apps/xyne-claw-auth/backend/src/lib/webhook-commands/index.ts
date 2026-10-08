@@ -13,6 +13,7 @@ import { handleStop } from "./stop.js";
 import { announceGoalStart, replyGoalControl, runGoalIntercept } from "./goal.js";
 import { buildCompactTask } from "./compact.js";
 import { stripLeadingAgentMention } from "../strip-agent-mention.js";
+import { preDispatchSessionKey } from "../../surfaces/spaces/agent-progress.js";
 import type { CommandOutcome, PendingGoalStart, WebhookCommandCtx } from "./context.js";
 
 export type {
@@ -122,7 +123,9 @@ export async function handleWebhookCommands(ctx: WebhookCommandCtx): Promise<Com
       ...(intercept.providerOverride ? { providerOverride: intercept.providerOverride } : {}),
     };
     task = intercept.firstTurnTask;
-    await announceGoalStart(ctx, intercept.replyToUser);
+    // Pre-dispatch: the run has no sessionId yet, so the pill is keyed on the
+    // conversation. The dispatch below re-lights it with the real one.
+    await announceGoalStart(ctx, intercept.replyToUser, preDispatchSessionKey(ctx.payload.conversationId));
   } else {
     task = ctx.immediateTaskCommand ? ctx.taskCommandText : ctx.userText;
   }

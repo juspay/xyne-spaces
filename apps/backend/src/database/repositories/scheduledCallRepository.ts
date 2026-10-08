@@ -3,6 +3,7 @@ import { type Prisma } from '@prisma/client';
 import { CallStatus, RecurringCallSeriesStatus } from '@xyne/shared';
 import { logger } from '@/utils/logger';
 import { queueScheduledCallPillSync } from '@/services/scheduledCallPillSync';
+import { CallVespaFeedSource, queueCallVespaFeed } from '@/services/callVespaQueue';
 
 export class ScheduledCallRepository {
   private client(tx?: Prisma.TransactionClient) {
@@ -13,11 +14,12 @@ export class ScheduledCallRepository {
    * Cancel a single SCHEDULED call instance by marking it as CANCELLED.
    */
   async cancelCall(callId: string): Promise<void> {
-    await this.client().call.update({
+    const call = await this.client().call.update({
       where: { id: callId },
       data: { status: CallStatus.CANCELLED },
     });
-    queueScheduledCallPillSync(callId, 'scheduledCallRepository.cancelCall');
+    queueScheduledCallPillSync(callId, call.externalId, 'scheduledCallRepository.cancelCall');
+    queueCallVespaFeed(callId, { source: CallVespaFeedSource.ScheduledCallRepositoryCancelCall });
   }
 
   async findFirstUpcomingSeriesInstance(params: {
@@ -124,38 +126,36 @@ export class ScheduledCallRepository {
   }
 
   /**
-   * Find all call instance IDs for a series.
+   * Find all call instances (id + externalId) for a series.
    */
-  async findCallIdsBySeriesId(params: {
+  async findCallsBySeriesId(params: {
     seriesId: string;
     tx: Prisma.TransactionClient;
-  }): Promise<string[]> {
+  }): Promise<Array<{ id: string; externalId: string }>> {
     const { seriesId, tx } = params;
-    const instances = await tx.call.findMany({
+    return tx.call.findMany({
       where: { recurringSeriesId: seriesId },
-      select: { id: true },
+      select: { id: true, externalId: true },
     });
-    return instances.map((i) => i.id);
   }
 
   /**
-   * Find future SCHEDULED call instance IDs for a series.
+   * Find future SCHEDULED call instances (id + externalId) for a series.
    */
-  async findFutureScheduledCallIds(params: {
+  async findFutureScheduledCalls(params: {
     seriesId: string;
     now: Date;
     tx: Prisma.TransactionClient;
-  }): Promise<string[]> {
+  }): Promise<Array<{ id: string; externalId: string }>> {
     const { seriesId, now, tx } = params;
-    const instances = await tx.call.findMany({
+    return tx.call.findMany({
       where: {
         recurringSeriesId: seriesId,
         status: CallStatus.SCHEDULED,
         startsAt: { gt: now },
       },
-      select: { id: true },
+      select: { id: true, externalId: true },
     });
-    return instances.map((i) => i.id);
   }
 
   /**
@@ -194,15 +194,17 @@ export class ScheduledCallRepository {
     title?: string | null;
     channelId?: string | null;
     callUpdatesChannel?: string | null;
+    summaryTemplateId?: string | null;
     tx?: Prisma.TransactionClient;
   }): Promise<number> {
-    const { callIds, title, channelId, callUpdatesChannel, tx } = params;
+    const { callIds, title, channelId, callUpdatesChannel, summaryTemplateId, tx } = params;
     if (callIds.length === 0) return 0;
 
     const data: Prisma.CallUncheckedUpdateManyInput = {};
     if (title !== undefined) data.title = title;
     if (channelId !== undefined) data.channelId = channelId;
     if (callUpdatesChannel !== undefined) data.callUpdatesChannel = callUpdatesChannel;
+    if (summaryTemplateId !== undefined) data.summaryTemplateId = summaryTemplateId;
 
     if (Object.keys(data).length === 0) return 0;
 

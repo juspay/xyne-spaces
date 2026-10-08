@@ -6,6 +6,12 @@
  */
 
 /**
+ * Which search UI an event came from: 'cmdk' is the Cmd+K palette, 'search_screen' the
+ * full-page /search-results screen.
+ */
+export type SearchSurface = 'cmdk' | 'search_screen';
+
+/**
  * Common fields included in all search metric events
  * Note: timestamp, version, and event_name are handled by the logger automatically
  */
@@ -20,6 +26,12 @@ interface CommonEventFields {
  */
 export interface SearchSessionStartEvent extends CommonEventFields {
   tab: string;
+  /**
+   * How many channels the user has starred when the session starts.
+   * Absent on surfaces that don't search channels (e.g. call history).
+   */
+  starred_count?: number;
+  surface?: SearchSurface;
 }
 
 /**
@@ -102,6 +114,12 @@ export interface SearchClickEvent extends CommonEventFields {
    * Higher scores indicate more relevant results
    */
   relevance_score?: number;
+  /**
+   * Whether the clicked result is a channel the user has starred.
+   * Absent on surfaces that don't search channels (e.g. call history).
+   */
+  is_starred?: boolean;
+  surface?: SearchSurface;
 }
 
 /**

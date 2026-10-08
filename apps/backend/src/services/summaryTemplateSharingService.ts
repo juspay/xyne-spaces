@@ -1,6 +1,6 @@
 import { executeTx } from '@/bypassAcl/transactions/summaryTemplateSharingService';
 import { Prisma, type EntityAccess, type SummaryTemplate } from '@prisma/client';
-import { EntityUserAccess, ShareableEntityType } from '@xyne/shared';
+import { ChannelVisibility, EntityUserAccess, ShareableEntityType } from '@xyne/shared';
 import { db } from '@/database/client';
 import {
   summaryTemplateSharingNotificationService,
@@ -58,7 +58,53 @@ export const targetData = (
       ? { userGroupId: target.id }
       : { channelId: target.id };
 
+export type SummaryTemplateShareLevel = 'view' | 'edit';
+
+/** Only EDIT lets a recipient edit; any other live level reads as view. */
+const toShareLevel = (entityUserAccess: string): SummaryTemplateShareLevel =>
+  entityUserAccess === EntityUserAccess.EDIT ? 'edit' : 'view';
+
 export class SummaryTemplateSharingService {
+  /** Templates shared with a user, each with the strongest level reaching them. */
+  async findSharedTemplateLevels(
+    workspaceId: string,
+    userId: string,
+    templateId?: string
+  ): Promise<Map<string, SummaryTemplateShareLevel>> {
+    const [groupMappings, channelParticipations] = await Promise.all([
+      db.userGroupMapping.findMany({
+        where: { userId },
+        select: { userGroupId: true },
+      }),
+      db.channelParticipant.findMany({
+        where: { userId },
+        select: { channelId: true },
+      }),
+    ]);
+    const userGroupIds = groupMappings.map((mapping) => mapping.userGroupId);
+    const channelIds = channelParticipations.map((participation) => participation.channelId);
+    const shares = await db.entityAccess.findMany({
+      where: {
+        workspaceId,
+        shareableEntityType: ShareableEntityType.SUMMARY_TEMPLATE,
+        entityUserAccess: { not: EntityUserAccess.REVOKED },
+        ...(templateId ? { entityId: templateId } : {}),
+        OR: [
+          { userId },
+          ...(userGroupIds.length ? [{ userGroupId: { in: userGroupIds } }] : []),
+          ...(channelIds.length ? [{ channelId: { in: channelIds } }] : []),
+        ],
+      },
+      select: { entityId: true, entityUserAccess: true },
+    });
+    const levels = new Map<string, SummaryTemplateShareLevel>();
+    for (const share of shares) {
+      if (levels.get(share.entityId) === 'edit') continue;
+      levels.set(share.entityId, toShareLevel(share.entityUserAccess));
+    }
+    return levels;
+  }
+
   async list(
     templateId: string,
     actor: SummaryTemplateSharingActor
@@ -145,9 +191,11 @@ export class SummaryTemplateSharingService {
   async validateTargets(
     tx: Prisma.TransactionClient,
     template: SummaryTemplate,
-    workspaceId: string,
-    targets: SummaryTemplateShareTarget[]
+    actor: SummaryTemplateSharingActor,
+    targets: SummaryTemplateShareTarget[],
+    action: SummaryTemplateSharingCommand['action']
   ): Promise<void> {
+    const { workspaceId } = actor;
     for (const target of targets) {
       if (target.type === 'user') {
         if (target.id === template.createdBy) {
@@ -169,10 +217,20 @@ export class SummaryTemplateSharingService {
       } else {
         const channel = await tx.channel.findFirst({
           where: { id: target.id, workspaceId },
-          select: { id: true },
+          select: { id: true, visibility: true },
         });
         if (!channel) {
           throw new SummaryTemplateSharingError('Channel not found in this workspace', 400);
+        }
+        // Only a member can share to a private channel; revoking is not restricted.
+        if (action === 'grant' && channel.visibility === ChannelVisibility.PRIVATE) {
+          const membership = await tx.channelParticipant.findFirst({
+            where: { channelId: channel.id, userId: actor.userId },
+            select: { id: true },
+          });
+          if (!membership) {
+            throw new SummaryTemplateSharingError('Channel not found in this workspace', 400);
+          }
         }
       }
     }

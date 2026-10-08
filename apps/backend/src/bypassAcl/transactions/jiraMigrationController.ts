@@ -2,6 +2,7 @@ import { transaction } from '../base';
 import { db, JiraMigrationController } from '@/controllers/jiraMigrationController';
 import { CanvasVisibility, CanvasRole, MessageType, ConversationParticipation } from '@xyne/shared';
 import { JiraMigrationExecuteResult } from '@/services/jiraMigrationImportService';
+import { createConnectGroupForEntity, ConnectEntityType } from '@/database/connectGroup';
 import { randomUUID } from 'crypto';
 
 
@@ -90,8 +91,8 @@ export function runPurgeJobTx(chunk: string[]) {
     await tx.conversation.deleteMany({ where: { conversationId: { in: chunk } } });
   });
 }
-export function createMigrationReportCanvasTx(canvasId: string, canvasChannel: any, result: JiraMigrationExecuteResult, channelId: string, actorUserId: string, now: Date, self: JiraMigrationController, participantId: string) {
-  return transaction(['Canvas', 'CanvasParticipant'], 'createMigrationReportCanvas: migration report canvas plus participant rows must commit atomically; tx is not ACL-wrapped', db, async tx => {
+export function createMigrationReportCanvasTx(canvasId: string, canvasChannel: any, result: JiraMigrationExecuteResult, channelId: string, actorUserId: string, now: Date, self: JiraMigrationController, participantId: string, connectId: string) {
+  return transaction(['Canvas', 'CanvasParticipant', 'ConnectGroup'], 'createMigrationReportCanvas: migration report canvas plus participant rows must commit atomically; tx is not ACL-wrapped', db, async tx => {
     await tx.canvas.create({
       data: {
         id: canvasId,
@@ -107,6 +108,7 @@ export function createMigrationReportCanvasTx(canvasId: string, canvasChannel: a
         lastEditedAt: now,
         createdAt: now,
         updatedAt: now,
+        connectId,
         metadata: {
           source: 'jira_migration_report',
           jiraProjectKey: result.jiraProjectKey,
@@ -132,7 +134,14 @@ export function createMigrationReportCanvasTx(canvasId: string, canvasChannel: a
         role: CanvasRole.OWNER,
         joinedAt: now,
         updatedAt: now,
+        canvasConnectId: connectId,
       },
+    });
+    await createConnectGroupForEntity(tx, {
+      entityType: ConnectEntityType.CANVAS,
+      entityId: canvasId,
+      hostWorkspaceId: canvasChannel.workspaceId,
+      connectId,
     });
   });
 }

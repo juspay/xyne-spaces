@@ -6,7 +6,6 @@ import { Button } from '../Button/Button';
 import { UserHoverWrapperProps } from './types';
 import { useAuth } from '../../../hooks/useAuth';
 import { channelService } from '../../../services/Chat/channelService';
-import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import { toast } from 'sonner';
 import { useUser } from '../../../hooks/useUsers';
 import { useTypingState } from '../../../contexts/TypingStateContext';
@@ -15,7 +14,9 @@ import { StatusIndicator } from '../StatusIndicator';
 import { useCallActions } from '../../../hooks/useCallActions';
 import { usePlatform } from '../../../hooks/usePlatform';
 import { getUserDisplayName, isUserDeactivated } from '../../../utils/userDisplayName';
-import { useRouteContext } from '../../../hooks/useRouteContext';
+import { getBaseRoute } from '../../../hooks/useRouteContext';
+import { useIsCommunityWorkspace } from '../../../hooks/useIsCommunityWorkspace';
+import { useStableRouter } from '../../../hooks/useStableRouter';
 
 /**
  * UserHoverWrapper Component
@@ -27,14 +28,15 @@ const UserHoverWrapperInner: React.FC<UserHoverWrapperProps> = ({
   preserveThreadRoute = false,
 }) => {
   const { user: currentUser } = useAuth();
-  const navigate = useNavigate();
+  // Route state is read at click time: one of these wraps every sender name and mention, and
+  // subscribing to the router re-rendered all of them on every navigation.
+  const stableRouter = useStableRouter();
+  const navigate = stableRouter.navigate;
   const { hasTyped } = useTypingState();
   const { isMobile } = usePlatform();
   const user = useUser(userId);
+  const isCommunityWorkspace = useIsCommunityWorkspace();
   const [dmChannelId, setDmChannelId] = useState<string | null>(null);
-  const { baseRoute } = useRouteContext();
-  const { channelId, conversationId } = useParams<{ channelId: string; conversationId?: string }>();
-  const location = useLocation();
   const shouldTriggerCallRef = useRef(false);
 
   // Don't show hover card when user has typed (until they move cursor)
@@ -113,6 +115,10 @@ const UserHoverWrapperInner: React.FC<UserHoverWrapperProps> = ({
   const isCurrentUser = user.id === currentUser?.id;
 
   const handleProfileClick = (): void => {
+    const { location, params } = stableRouter.getSnapshot();
+    const channelId = params['channelId'];
+    const conversationId = params['conversationId'];
+    const baseRoute = getBaseRoute(location.pathname);
     if (channelId) {
       const isFocusThread = new URLSearchParams(location.search).get('focusThread') === '1';
       const threadSegment =
@@ -208,7 +214,8 @@ const UserHoverWrapperInner: React.FC<UserHoverWrapperProps> = ({
                 </span>
               )}
             </div>
-            {user.email && (
+            {/* Email hidden in community workspaces */}
+            {user.email && !isCommunityWorkspace && (
               <div className='text-sm text-muted-foreground truncate'>{user.email}</div>
             )}
             {displayStatus.hasStatus && (
@@ -226,7 +233,7 @@ const UserHoverWrapperInner: React.FC<UserHoverWrapperProps> = ({
             )}
           </div>
         </div>
-        {!isCurrentUser && (
+        {!isCurrentUser && !isUserDeactivated(user) && (
           <div className='flex items-center justify-end p-4 gap-3 border-t border-muted-foreground/20'>
             <Button
               variant='secondary'

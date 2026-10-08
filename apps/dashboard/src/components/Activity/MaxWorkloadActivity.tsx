@@ -22,7 +22,7 @@ export const MaxWorkloadActivity = ({
 
   const actorName = getUserDisplayName(actor);
   const groupName = userGroup?.name ?? 'This group';
-  const targetPath = `/user-groups/${activity.actionSourceId}/assignment-config`;
+  const targetPath = `/organisations/user-groups/${activity.actionSourceId}/assignment-config`;
 
   return (
     <ActivityItemCard

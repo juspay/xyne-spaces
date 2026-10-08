@@ -2,6 +2,7 @@ import { createLogger } from "../logger.js";
 import { errMsg } from "../lib/errors.js";
 import { appFetch, interact, spacesFetch, SpacesApiError, type SpacesAuthContext } from "./servers/xyne-spaces-client.js";
 import { SDLC_TOOL_NAMES } from "xyne-claw-shared";
+import { spacesConversationExists } from "../lib/spaces-post-target.js";
 const log = createLogger("validators");
 
 type ValidatorFn = (
@@ -114,6 +115,7 @@ async function validateTargetConversationId(
   if (baseUrl) auth.baseUrl = baseUrl;
 
   if (conversationId) {
+    if ((await spacesConversationExists(conversationId, auth)) === true) return null;
     try {
       await spacesFetch(
         `/api/conversations/${encodeURIComponent(conversationId)}/messages?limit=1`,

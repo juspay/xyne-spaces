@@ -36,6 +36,7 @@ export interface AuditLookup {
   rolesByIds(ids: string[]): Promise<{ id: string; name: string }[]>;
   formsByIds(ids: string[]): Promise<{ id: string; formName: string }[]>;
   globalFieldsByIds(ids: string[]): Promise<{ id: string; fieldName: string }[]>;
+  userGroupsByIds(ids: string[]): Promise<{ id: string; name: string }[]>;
   /** board ids a form is bound to, resolved through forms_context_mapping (BOARD + STAGE contexts). */
   boardIdsForFormIds(formIds: string[]): Promise<{ formId: string; boardIds: string[] }[]>;
 }
@@ -53,6 +54,8 @@ export interface AuditDeleteSummary {
 }
 
 export interface AuditTableConfig {
+  /** Primary-key column when it isn't `id` (e.g. email_channel_preferences.channelId). */
+  primaryKey?: string;
   /** Resolve the audit scope(s) for a mutated row; null/[] = not auditable. */
   resolveScope(row: AuditRow, res: AuditResolution): Promise<AuditScope | AuditScope[] | null>;
   /** Human label of the changed row (audit targetName). */

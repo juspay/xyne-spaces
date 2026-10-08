@@ -8,6 +8,7 @@ import { logger } from '@/utils/logger';
 import { transaction, type TableName } from '../base';
 import { callShareService, type CallAccessLevel } from '@/services/callShareService';
 import { db } from '@/database/client';
+import { resolveCanvasConnectId } from '@/database/connectGroup';
 import { repositories } from '@/database/repositories';
 import { isRecording } from '@/utils/callTypeUtils';
 import { sanitizeMessageContent } from '@/utils/contentUtils';
@@ -340,7 +341,7 @@ export async function createRecordingPostMessage(tx: Prisma.TransactionClient, r
             isRecordingMessage: true,
             operation: 'recording_ended',
           }
-        : { messageSubtype: 'call_share_post', isCallShareMessage: true, callRowId: recording.id }),
+        : { messageSubtype: 'call_share_post', isCallShareMessage: true }),
       ...(sanitizedMessageContent ? { messageContent: sanitizedMessageContent } : {}),
     };
 
@@ -742,6 +743,10 @@ export async function syncCanvasAccess(self: RecordingSharingService, tx: Prisma
         : target.type === 'user_group'
           ? { canvasId_userGroupId: { canvasId, userGroupId: target.id } }
           : { canvasId_channelId: { canvasId, channelId: target.id } };
+    // Slack Connect: stamp the canvas's connectId on the participant so it isn't NULL (which would
+    // drop it once connect_query_enabled_canvas flips on). NULL when the canvas predates backfill —
+    // matches the canvas row, which also still queries by canvasId.
+    const connectId = await resolveCanvasConnectId(tx, canvasId);
     await tx.canvasParticipant.upsert({
       where,
       create: {
@@ -750,6 +755,7 @@ export async function syncCanvasAccess(self: RecordingSharingService, tx: Prisma
         workspaceId,
         role,
         ...targetFields,
+        ...(connectId ? { canvasConnectId: connectId } : {}),
       },
       update: { role },
     });

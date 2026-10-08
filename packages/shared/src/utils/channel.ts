@@ -1,6 +1,6 @@
-import { ChannelType, DeskType } from '../zero/schema.js';
+import { ChannelType, DeskType, MAX_DESK_APPS } from '../zero/types.js';
 
-/** Channel types that feed into Xyne Desk. */
+/** Desk channel types — EMAIL, SLACK, APP, CALL and SOCIAL_MEDIA channels all feed into Xyne Desk. */
 export const DESK_CHANNEL_TYPES: ReadonlySet<ChannelType> = new Set([
   ChannelType.EMAIL,
   ChannelType.SLACK,
@@ -27,6 +27,29 @@ export function deskTypeForChannelType(type: string | null | undefined): DeskTyp
     default:
       return DeskType.EMAIL;
   }
+}
+
+/**
+ * The artifact apps on a desk (EmailChannelPreference.deskAppIds), in order.
+ * The column is a JSON string[] so Zero can sync it; anything malformed reads as
+ * no apps rather than throwing, since a bad value must not break the desk.
+ */
+export function parseDeskAppIds(raw: string | null | undefined): string[] {
+  if (!raw) return [];
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    const ids = parsed.filter((id): id is string => typeof id === 'string' && id.length > 0);
+    return [...new Set(ids)].slice(0, MAX_DESK_APPS);
+  } catch {
+    return [];
+  }
+}
+
+/** Write-side twin of parseDeskAppIds: de-duplicated, order kept, empty → null. */
+export function serializeDeskAppIds(ids: readonly string[] | null): string | null {
+  const unique = [...new Set(ids ?? [])];
+  return unique.length > 0 ? JSON.stringify(unique) : null;
 }
 
 export const CHANNEL_NAME_MIN_LENGTH = 2;

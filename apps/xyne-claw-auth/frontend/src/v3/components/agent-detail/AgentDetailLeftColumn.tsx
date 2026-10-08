@@ -16,6 +16,7 @@ import {
   CheckIcon,
   ArrowDownIcon,
   PencilSimpleIcon,
+  LightningIcon,
 } from "@phosphor-icons/react";
 import type { Agent, AgentLight } from "../../../lib/types";
 import { PromptVersionHistory } from "../../../components/PromptVersionHistory";
@@ -28,6 +29,7 @@ import { useSnackbar } from "../ui/Snackbar";
 import { Dialog } from "../ui/Dialog";
 import { IntegrationCard } from "./IntegrationCard";
 import { SettingGroup, SettingRow } from "./SettingRow";
+import { OptimizationsSection, changedOptimizationKeys, useOptimizationCatalog } from "./OptimizationsSection";
 import { Switch } from "../ui/Switch";
 import { ToolboxPicker } from "../ToolboxPicker";
 import { KnowledgeBasePicker } from "../KnowledgeBasePicker";
@@ -49,7 +51,8 @@ type ConfigTabKey =
   | "persona"
   | "knowledge"
   | "toolbox"
-  | "behavior";
+  | "behavior"
+  | "optimizations";
 
 /* ── constants ─────────────────────────────────────────────────────── */
 
@@ -80,24 +83,6 @@ const TOOL_TAB_LABELS = {
 } as const;
 
 type ToolTabKey = keyof typeof TOOL_TAB_LABELS;
-
-const TOOL_DISCOVERY_OPTIMIZATIONS = [
-  {
-    key: "catalog_full_index",
-    label: "Full tool index",
-    description: "List every loadable tool by name in the prompt, so the agent loads the right one directly instead of guessing with searches.",
-  },
-  {
-    key: "subagent_read_tools",
-    label: "Direct subagent tools",
-    description: "Let the agent search and load its subagents' tools, writes included, and call them itself first instead of waiting on a slow nested subagent run. Writes keep their approval settings.",
-  },
-  {
-    key: "active_tool_cap",
-    label: "Top-25 active tools",
-    description: "Start each run with only the agent's 25 most-used tools of the last 7 days. The rest stay listed by name and load with one call, so every request is smaller. Nothing is removed from the agent.",
-  },
-] as const;
 
 function kindToTab(kind: string): Exclude<ToolTabKey, "subagents"> {
   const map: Record<string, Exclude<ToolTabKey, "subagents">> = {
@@ -1894,6 +1879,21 @@ export function AgentDetailLeftColumn({
     draftTools.direct.length +
     draftTools.custom.length +
     draftTools.callableAgents.length;
+  // Same test the save path uses to keep or drop `config.tools`
+  // (AgentDetailPageV3): no key at all is the "nothing selected" state, whose
+  // meaning depends on the tier — see resolveAgentToolsConfig in xyne-claw-shared.
+  const hasToolSelection =
+    selectedToolCount + draftTools.gateway.length > 0 || !!draftTools.openPalette;
+  const isOrchestratorTier = agent.delegationTier === "orchestrator";
+  const toolsSummary = hasToolSelection
+    ? `${selectedToolCount} selected`
+    : isOrchestratorTier
+      ? "All tools"
+      : "File tools only";
+  const { catalog: optimizationCatalog } = useOptimizationCatalog();
+  const changedOptimizationCount = optimizationCatalog
+    ? changedOptimizationKeys(optimizationCatalog, draftOptimizations, agent.delegationTier).length
+    : Object.keys(draftOptimizations).length;
 
 
   // Filtered lists for search — narrows integration cards (Subagents tab has its own search).
@@ -2194,13 +2194,32 @@ export function AgentDetailLeftColumn({
         label="Tools"
         tech="what it can do"
         subtitle="acts on real systems — credentials live with each integration"
-        summary={`${selectedToolCount} selected`}
+        summary={toolsSummary}
         open={activeTab === "toolbox"}
         onToggle={() => toggleSection("toolbox")}
       />
 
       {activeTab === "toolbox" && (
        <div className="border-t border-xyne-border-subtle px-4 py-4">
+        {!hasToolSelection && (
+          <div className="mb-3 rounded-lg border border-xyne-border-subtle bg-xyne-surface-raised px-3 py-2.5 text-[12px] leading-relaxed text-xyne-fg-secondary">
+            {isOrchestratorTier ? (
+              <>
+                <span className="font-medium text-xyne-fg-primary">Nothing selected — all available tools.</span>{" "}
+                As an orchestrator this agent gets every tool the signed-in user has connected. Its most-used
+                tools stay active and the rest load on demand through{" "}
+                <code className="text-xyne-fg-tertiary">search-tools</code> /{" "}
+                <code className="text-xyne-fg-tertiary">load-tools</code>. Select tools to restrict it to them.
+              </>
+            ) : (
+              <>
+                <span className="font-medium text-xyne-fg-primary">Nothing selected — file tools only.</span>{" "}
+                This agent runs with just the built-in file tools (read, write, grep, find, ls) and per-run
+                defaults such as Spaces tools in a Spaces thread. Select integrations or tools to give it more.
+              </>
+            )}
+          </div>
+        )}
         <ToolboxPicker
           availableTools={availableTools}
           loading={!availableTools}
@@ -2666,7 +2685,7 @@ export function AgentDetailLeftColumn({
         label="Behaviour"
         tech="rules & autonomy"
         subtitle="extra rules applied on every turn"
-        summary={behaviorCount > 0 || draftSuggestGoal || draftPrefetchContext || draftAutoGoal || draftPlanMode || Object.keys(draftOptimizations).length > 0 || !draftPostTodos || draftMaxDelegations !== MAX_DELEGATIONS_PER_RUN_BOUNDS.DEFAULT ? "Customised" : "Defaults"}
+        summary={behaviorCount > 0 || draftSuggestGoal || draftPrefetchContext || draftAutoGoal || draftPlanMode || !draftPostTodos || draftMaxDelegations !== MAX_DELEGATIONS_PER_RUN_BOUNDS.DEFAULT ? "Customised" : "Defaults"}
         open={activeTab === "behavior"}
         onToggle={() => toggleSection("behavior")}
       />
@@ -3104,42 +3123,6 @@ export function AgentDetailLeftColumn({
             }
           />
         )}
-
-        {(canEdit || TOOL_DISCOVERY_OPTIMIZATIONS.some((o) => draftOptimizations[o.key] !== undefined)) && (
-          <SettingRow
-            title="Tool discovery"
-            summary="How the agent finds tools it has not loaded yet."
-            detail="Off = fleet default. Grants no new access: only tools this agent already has are affected."
-            enabled={TOOL_DISCOVERY_OPTIMIZATIONS.some((o) => draftOptimizations[o.key] === true)}
-            control={
-              <span className="rounded-full bg-xyne-surface-sunken px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide text-xyne-fg-tertiary">
-                beta
-              </span>
-            }
-          >
-            <div className="flex flex-col gap-3">
-              {TOOL_DISCOVERY_OPTIMIZATIONS.map((o) => (
-                <div key={o.key} className="flex items-start justify-between gap-4">
-                  <div className="min-w-0 flex-1">
-                    <div className="text-[12px] font-medium text-xyne-fg-primary">{o.label}</div>
-                    <p className="text-[12px] leading-relaxed text-xyne-fg-secondary">{o.description}</p>
-                  </div>
-                  <Switch
-                    checked={draftOptimizations[o.key] === true}
-                    onChange={(v) => {
-                      const next = { ...draftOptimizations };
-                      if (v) next[o.key] = true;
-                      else delete next[o.key];
-                      onDraftOptimizationsChange(next);
-                    }}
-                    disabled={!canEdit}
-                    ariaLabel={o.label}
-                  />
-                </div>
-              ))}
-            </div>
-          </SettingRow>
-        )}
       </SettingGroup>
 
       {(canEdit
@@ -3273,6 +3256,30 @@ export function AgentDetailLeftColumn({
         </SettingGroup>
       )}
 
+      </div>
+      )}
+      </div>
+
+      {/* Optimizations card */}
+      <div className={`rounded-xl border bg-xyne-surface transition-colors ${activeTab === "optimizations" ? "border-xyne-border-strong" : "border-xyne-border-subtle"}`}>
+      <DisclosureHeader
+        icon={LightningIcon}
+        label="Optimizations"
+        tech="runtime switches"
+        subtitle="speed and answer-quality switches, each with a platform default"
+        summary={changedOptimizationCount > 0 ? `${changedOptimizationCount} changed` : "Defaults"}
+        open={activeTab === "optimizations"}
+        onToggle={() => toggleSection("optimizations")}
+      />
+
+      {activeTab === "optimizations" && (
+      <div className="border-t border-xyne-border-subtle px-4 py-4">
+        <OptimizationsSection
+          draft={draftOptimizations}
+          onChange={onDraftOptimizationsChange}
+          canEdit={canEdit}
+          delegationTier={agent.delegationTier}
+        />
       </div>
       )}
       </div>

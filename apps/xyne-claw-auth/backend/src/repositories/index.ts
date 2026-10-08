@@ -4,6 +4,7 @@ export { agentRequestRepository } from "./agentRequestRepository.js";
 export { userRoleRepository } from "./userRoleRepository.js";
 export { auditLogRepository } from "./auditLogRepository.js";
 export { chatMessageRepository } from "./chatMessageRepository.js";
+export { chatConversationMetaRepository } from "./chatConversationMetaRepository.js";
 export { chatAttachmentRepository } from "./chatAttachmentRepository.js";
 export { agentRunRepository } from "./agentRunRepository.js";
 export { agentChainWorkflowRepository } from "./agentChainWorkflowRepository.js";

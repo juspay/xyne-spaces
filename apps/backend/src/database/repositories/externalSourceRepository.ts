@@ -9,6 +9,7 @@ import { buildChannelAppSourceName, resolveAppDeskInstalledAppId } from '@/integ
 import { encrypt, decrypt } from '@/services/encryptionService';
 import { logger } from '@/utils/logger';
 import type { ExternalSource } from '@prisma/client';
+import { ExternalSourcePlatform } from '@/integrations/core/types';
 
 export type CalendarProvider = 'GOOGLE' | 'MICROSOFT';
 
@@ -49,6 +50,9 @@ export function serializeCalendarCredentials(
   return encrypt(JSON.stringify(credentials));
 }
 
+/** Mailbox-level source types that can carry a desk's email history (apps excluded). */
+export const MAILBOX_SOURCE_TYPES = ['google', 'microsoft', 'zoho'] as const;
+
 export class ExternalSourceRepository {
   private db = DatabaseClient.getInstance();
 
@@ -59,6 +63,15 @@ export class ExternalSourceRepository {
   async findByName(name: string) {
     return await this.db.externalSource.findUnique({
       where: { name }
+    });
+  }
+
+  // Find an active Instagram source by its externalIdentifier (the stored igUserId).
+  // Used as a fallback when the webhook entry.id matches externalIdentifier but not the
+  // source name (e.g. after a manual DB fix or in production where user_id is returned).
+  async findInstagramByExternalIdentifier(externalIdentifier: string) {
+    return await this.db.externalSource.findFirst({
+      where: { sourceType: ExternalSourcePlatform.INSTAGRAM, externalIdentifier, isActive: true },
     });
   }
 
@@ -214,6 +227,11 @@ export class ExternalSourceRepository {
    * Same ordering as findByChannelId (active first, then newest); pass
    * requireActive to only consider active sources. Returns null when the
    * channel has no source of the requested types.
+   *
+   * DL member-sync rows are excluded: they are channel-bound, active and
+   * google/microsoft while a sync runs, so they would outrank the real
+   * mailbox here — but they hold one member's personal credentials and are
+   * only ever meant to be driven by their own `isDlMemberSync` job.
    */
   async findChannelSource(
     channelId: string,
@@ -223,9 +241,26 @@ export class ExternalSourceRepository {
       where: {
         channelId,
         sourceType: { in: opts.sourceTypes },
+        NOT: { OR: [{ name: { startsWith: 'google-dl-sync--' } }, { name: { startsWith: 'microsoft-dl-sync--' } }] },
         ...(opts.requireActive ? { isActive: true } : {}),
       },
       orderBy: [{ isActive: 'desc' }, { createdAt: 'desc' }],
+    });
+  }
+
+  /**
+   * List all of a channel's email-family sources (oldest first).
+   * findChannelSource is findFirst; the sources-listing endpoint needs them all.
+   */
+  async listChannelEmailSources(channelId: string, opts?: { activeOnly?: boolean }) {
+    return await this.db.externalSource.findMany({
+      where: {
+        channelId,
+        sourceType: { in: [...MAILBOX_SOURCE_TYPES] },
+        NOT: { OR: [{ name: { startsWith: 'google-dl-sync--' } }, { name: { startsWith: 'microsoft-dl-sync--' } }] },
+        ...(opts?.activeOnly ? { isActive: true } : {}),
+      },
+      orderBy: { createdAt: 'asc' },
     });
   }
 

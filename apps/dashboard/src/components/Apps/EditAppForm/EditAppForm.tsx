@@ -2,6 +2,7 @@ import { type ReactElement, useMemo, useEffect, useRef, useState, useCallback } 
 import { useForm, Controller } from 'react-hook-form';
 import { Button } from '../../ui/Button/Button';
 import { AppResourceSection } from './AppResourceSection';
+import { AppFetchSection } from '../AppFetchSection/AppFetchSection';
 import { ATTACHABLE_RESOURCES } from './attachableResources';
 import Input from '../../ui/Input/Input';
 import Textarea from '../../ui/Textarea/Textarea';
@@ -26,6 +27,7 @@ import {
   Shield,
   Boxes,
   Link2,
+  DownloadCloud,
 } from 'lucide-react';
 import { cn } from '../../../utils/classNames';
 import { toast } from 'sonner';
@@ -807,6 +809,7 @@ const WEBHOOK_TYPE_OPTIONS = [
   { value: 'AMAZON_SNS', label: 'Amazon SNS' },
   { value: 'PINGDOM', label: 'Pingdom' },
   { value: 'GCP', label: 'GCP Monitoring' },
+  { value: 'HUBSPOT', label: 'HubSpot' },
 ] as const;
 type IncomingWebhookType = (typeof WEBHOOK_TYPE_OPTIONS)[number]['value'];
 const WEBHOOK_TYPE_LABELS: Record<IncomingWebhookType, string> = Object.fromEntries(
@@ -861,7 +864,14 @@ function WebhookNameInput({
 
 // ─── Sectioned navigation ─────────────────────────────────────────────────────
 
-type EditAppSection = 'basic' | 'commands' | 'shortcuts' | 'permissions' | 'resources' | 'incoming';
+type EditAppSection =
+  | 'basic'
+  | 'commands'
+  | 'shortcuts'
+  | 'permissions'
+  | 'resources'
+  | 'incoming'
+  | 'fetch';
 
 interface EditAppNavItem {
   id: EditAppSection;
@@ -1277,6 +1287,16 @@ export const EditAppForm = ({
             id: 'incoming' as const,
             label: 'Incoming Webhooks',
             icon: <Link2 className='size-4' />,
+          },
+        ]
+      : []),
+    // Outbound history pull — per-install, like incoming webhooks and attachments.
+    ...(isInstallMode && installedAppId
+      ? [
+          {
+            id: 'fetch' as const,
+            label: 'History fetch',
+            icon: <DownloadCloud className='size-4' />,
           },
         ]
       : []),
@@ -1986,6 +2006,10 @@ export const EditAppForm = ({
                 />
               ))}
             </div>
+          )}
+
+          {activeSection === 'fetch' && installedAppId && (
+            <AppFetchSection installedAppId={installedAppId} readOnly={!canEditInstallSettings} />
           )}
 
           {/* Permissions */}

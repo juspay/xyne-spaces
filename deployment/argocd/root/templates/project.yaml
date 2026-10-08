@@ -1,5 +1,5 @@
 {{- $a := .Values.addons }}
-{{- $namespaces := list .Values.global.namespace .Release.Namespace $a.lbController.namespace $a.externalDns.namespace $a.istio.namespace $a.istio.gatewayNamespace $a.certManager.namespace $a.cnpg.namespace $a.monitoring.namespace $a.sandbox.kata.namespace "agent-sandbox-system" }}
+{{- $namespaces := list .Values.global.namespace .Release.Namespace $a.lbController.namespace $a.externalDns.namespace $a.istio.namespace $a.istio.gatewayNamespace $a.certManager.namespace $a.cnpg.namespace $a.monitoring.namespace $a.sandbox.kata.namespace $a.hindsight.namespace $a.workflows.namespace $a.clusterAutoscaler.namespace "agent-sandbox-system" }}
 {{- $namespaces = concat $namespaces .Values.argocd.extraDestinations | uniq }}
 apiVersion: argoproj.io/v1alpha1
 kind: AppProject

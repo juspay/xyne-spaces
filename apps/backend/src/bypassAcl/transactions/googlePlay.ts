@@ -1,73 +1,27 @@
 import { transaction } from '../base';
-import { ExternalSourcePlatform } from '@/integrations/core/types';
 import { db } from '@/database/client';
-import { GooglePlayOAuthState } from '@/integrations/adapters/social-media/google-play/oauthStateService';
+import { newConnectId, createConnectGroupForEntity, ConnectEntityType } from '@/database/connectGroup';
 import { buildGooglePlaySourceRecords } from '@/integrations/adapters/social-media/google-play/sourceRecords';
 import { logger } from '@/utils/logger';
 import { ChannelType, ChannelScopeType, ChannelVisibility, ChannelRole, DeskType, EmailMergeMode } from '@xyne/shared';
 
 
-export function getGooglePlayOauthCallbackTx(state: GooglePlayOAuthState, encryptedCredentials: string, now: Date) {
-  return transaction(['Board', 'Channel', 'ChannelBoardMapping', 'ChannelParticipant', 'ChannelStats', 'ChannelUserStatus', 'EmailChannelPreference', 'ExternalSource'], 'getGooglePlayOauthCallback: channel, participant, status, preference, board-mapping and external-source rows must commit atomically; tx is not ACL-wrapped', db, async (tx) => {
-    if (state.mode === 'reconnect' && state.channelId) {
-      const [channel, preference, sources] = await Promise.all([
-        tx.channel.findFirst({
-          where: {
-            id: state.channelId,
-            workspaceId: state.workspaceId,
-            type: ChannelType.SOCIAL_MEDIA,
-          },
-          select: { id: true, createdBy: true },
-        }),
-        tx.emailChannelPreference.findUnique({
-          where: { channelId: state.channelId },
-          select: { ownerUserId: true },
-        }),
-        tx.externalSource.findMany({
-          where: {
-            channelId: state.channelId,
-            workspaceId: state.workspaceId,
-            sourceType: ExternalSourcePlatform.GOOGLE_PLAY,
-          },
-          select: { id: true, externalIdentifier: true, isActive: true },
-        }),
-      ]);
-      if (
-        !channel ||
-        (channel.createdBy !== state.userId && preference?.ownerUserId !== state.userId)
-      ) {
-        throw new Error('The user can no longer manage this social media desk');
-      }
+interface GooglePlayConnectInput {
+  channelName: string;
+  applications: Array<{
+    packageName: string;
+    displayName: string;
+  }>;
+  projectId: string;
+  boardId: string;
+  assigneeUserGroupId?: string;
+  visibility: 'PUBLIC' | 'PRIVATE';
+}
 
-      const expectedPackages = new Set(
-        state.applications.map((application) => application.packageName)
-      );
-      const sourcesToValidate = state.reactivateAll
-        ? sources
-        : sources.filter((source) => source.isActive);
-      if (
-        sourcesToValidate.length !== expectedPackages.size ||
-        sourcesToValidate.some(
-          (source) =>
-            !source.externalIdentifier || !expectedPackages.has(source.externalIdentifier)
-        )
-      ) {
-        throw new Error('Google Play app configuration changed during reconnection');
-      }
-
-      await tx.externalSource.updateMany({
-        where: { id: { in: sources.map((source) => source.id) } },
-        data: {
-          credentials: encryptedCredentials,
-          ...(state.reactivateAll && { isActive: true }),
-        },
-      });
-      return {
-        channelId: channel.id,
-        sourceIds: sources.map((source) => source.id),
-      };
-    }
-
+export function postGooglePlayConnectTx(state: GooglePlayConnectInput & { userId: string; workspaceId: string }, encryptedCredentials: string, now: Date) {
+  return transaction(['Board', 'Channel', 'ChannelBoardMapping', 'ChannelParticipant', 'ChannelStats', 'ChannelUserStatus', 'EmailChannelPreference', 'ExternalSource', 'ConnectGroup'], 'postGooglePlayConnect: channel, participant, status, preference, board-mapping and external-source rows must commit atomically; tx is not ACL-wrapped', db, async (tx) => {
+    // Slack Connect: the channel is a shareable entity → its own connectId + a private connect_group row.
+    const connectId = newConnectId();
     const channel = await tx.channel.create({
       data: {
         name: state.channelName,
@@ -82,7 +36,14 @@ export function getGooglePlayOauthCallbackTx(state: GooglePlayOAuthState, encryp
         workspaceId: state.workspaceId,
         participantCount: 1,
         lastActivityAt: now,
+        connectId,
       },
+    });
+    await createConnectGroupForEntity(tx, {
+      entityType: ConnectEntityType.CHANNEL,
+      entityId: channel.id,
+      hostWorkspaceId: state.workspaceId,
+      connectId,
     });
     await tx.channelParticipant.create({
       data: {

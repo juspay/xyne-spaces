@@ -1,5 +1,6 @@
 import { ReactElement, useEffect, useMemo, useRef, useState } from 'react';
-import { Link, useLocation, useNavigate, useParams } from 'react-router-dom';
+import { Link, useLocation, type Location } from 'react-router-dom';
+import { useRouterSelector, useStableNavigate } from '../../hooks/useStableRouter';
 import { Tooltip } from '../ui/Tooltip/Tooltip';
 import { XyneAIQuickMenu } from './XyneAIQuickMenu';
 import { ChatQuickMenu } from './ChatQuickMenu';
@@ -47,10 +48,9 @@ import { useAllVisibleChannels } from '../../hooks/useChannels';
 import { useAllUnreadCount } from '../../hooks/useUnreadCount';
 import { reactNativeBridge } from '../../utils/reactNativeBridge';
 import { useVisibleNavigationItems } from '../../hooks/useVisibleNavigationItems';
+import { useIsCommunityWorkspace } from '../../hooks/useIsCommunityWorkspace';
 import { AppIcon } from '../AppIcon/AppIcon';
 import { toolbarItemsStore, useAppSnapshots, appIdOf } from '../../hooks/barItems';
-import { useCachedQuery } from '../../hooks/useCachedQuery';
-import { queries } from '../../zero/queries';
 import type { NavigationItem } from './navigationConfig';
 
 /** One slot in the rail: a built-in destination or an artifact app. */
@@ -172,46 +172,23 @@ const SUPPORT_REUSED_ROUTES = [
   '/knowledge-base',
 ];
 
-const AppSidebar = (): ReactElement => {
-  const location = useLocation();
-  const navigate = useNavigate();
-  const { workspaceId } = useParams<{ workspaceId?: string }>();
-  const prefixWs = (path: string): string => (workspaceId ? `/${workspaceId}${path}` : path);
-  const { user } = useAuth();
-  const currentUser = useSelf();
-  const visibleNavigationItems = useVisibleNavigationItems();
-  const toolbarIds = toolbarItemsStore.useItems();
-  const appSnapshots = useAppSnapshots();
-  const missedCallCount = useMissedCallCount();
-  const hasOngoingCall = useRailActiveCalls().length > 0;
-  const unreadActivityCount = useUnreadActivitiesCount();
-  const { unreadCount: recapUnreadCount } = useRecapUnreadCount();
-  const { isMobile } = usePlatform();
-  const visibleChannels = useAllVisibleChannels();
-  const unreadCounts = useAllUnreadCount();
-  const [workspace] = useCachedQuery(queries.getWorkspaceById({ workspaceId: workspaceId || '' }), {
-    enabled: !!workspaceId,
-  });
-  const isCommunityWorkspace = workspace?.workspaceType === WorkspaceType.COMMUNITY;
+// Determine active route with early returns for special chat paths
+const getActiveRoute = (pathname: string): string => {
+  if (pathname.startsWith('/chat/dir')) return '/chat/dir';
+  if (pathname.startsWith('/chat/dm')) return '/chat/dm';
+  if (pathname.startsWith('/chat/activity')) return '/chat/activity';
+  if (pathname.startsWith('/chat/canvas')) return '/chat/canvas';
+  if (pathname.startsWith('/chat/drafts')) return '/chat/drafts';
+  if (pathname.startsWith('/chat/sent')) return '/chat/sent';
+  if (pathname.startsWith('/chat/scheduled')) return '/chat/scheduled';
+  if (pathname.startsWith('/migration/confluence')) return '/migration/confluence';
+  // One rail entry per app, so the active route has to carry the app id.
+  if (pathname.startsWith('/app/')) return `/app/${pathname.split('/')[2] ?? ''}`;
+  return '/' + (pathname.split('/')[1] || '');
+};
 
-  const [windowWidth, setWindowWidth] = useState(window.innerWidth);
-
-  // Determine active route with early returns for special chat paths
-  const getActiveRoute = (pathname: string): string => {
-    if (pathname.startsWith('/chat/dir')) return '/chat/dir';
-    if (pathname.startsWith('/chat/dm')) return '/chat/dm';
-    if (pathname.startsWith('/chat/activity')) return '/chat/activity';
-    if (pathname.startsWith('/chat/canvas')) return '/chat/canvas';
-    if (pathname.startsWith('/chat/drafts')) return '/chat/drafts';
-    if (pathname.startsWith('/chat/sent')) return '/chat/sent';
-    if (pathname.startsWith('/chat/scheduled')) return '/chat/scheduled';
-    if (pathname.startsWith('/migration/confluence')) return '/migration/confluence';
-    if (pathname.startsWith('/migration/whatsapp')) return '/migration/whatsapp';
-    // One rail entry per app, so the active route has to carry the app id.
-    if (pathname.startsWith('/app/')) return `/app/${pathname.split('/')[2] ?? ''}`;
-    return '/' + (pathname.split('/')[1] || '');
-  };
-
+/** The rail entry to highlight for a location. */
+const getRailRoute = (location: Location, workspaceId: string | undefined): string => {
   const relativePath =
     workspaceId && location.pathname.startsWith(`/${workspaceId}`)
       ? location.pathname.slice(`/${workspaceId}`.length) || '/'
@@ -222,7 +199,52 @@ const AppSidebar = (): ReactElement => {
     relativePath.startsWith('/listProjects/') &&
     (relativePath.includes('/releases/') ||
       (location.state as { from?: string } | null)?.from === 'releaseManager');
-  const activeRoute = inReleaseManager ? '/releaseManager' : getActiveRoute(relativePath);
+  return inReleaseManager ? '/releaseManager' : getActiveRoute(relativePath);
+};
+
+// Hide footer only on pages that have their own complete navigation (channels, bookmarks, threads, etc.)
+const isChannelOrThreadLocation = ({ pathname, hash }: Location): boolean =>
+  (pathname.includes('/chat/dir/') && pathname.split('/').length > 3) ||
+  (pathname.includes('/chat/dm/') && pathname.split('/').length > 3) ||
+  (pathname.includes('/chat/activity/') && pathname.split('/').length > 3) ||
+  (pathname.includes('/chat/bookmarks/') && pathname.split('/').length > 3) ||
+  (pathname.includes('/chat/drafts/') && pathname.split('/').length > 3) ||
+  (pathname.includes('/chat/sent/') && pathname.split('/').length > 3) ||
+  (pathname.includes('/chat/scheduled/') && pathname.split('/').length > 3) ||
+  pathname.includes('threadId') ||
+  hash.includes('threadId');
+
+const AppSidebar = (): ReactElement => {
+  const navigate = useStableNavigate();
+  const location = useLocation();
+  const workspaceId = useRouterSelector(snapshot => snapshot.params['workspaceId']);
+  // Narrow selectors: the rail only changes with the section and whether a channel or thread
+  // is open, not on every navigation inside a section (switching channels, threads, hashes).
+  const activeRoute = useRouterSelector(({ location, params }) =>
+    getRailRoute(location, params['workspaceId']),
+  );
+  const hasChannelOrThreadId = useRouterSelector(({ location }) =>
+    isChannelOrThreadLocation(location),
+  );
+  const prefixWs = (path: string): string => (workspaceId ? `/${workspaceId}${path}` : path);
+  const { user } = useAuth();
+  const currentUser = useSelf();
+  const isCommunityWorkspace = useIsCommunityWorkspace();
+  // Everyone except guests can invite — enterprise invites to non-org members
+  // land in the admin approval queue.
+  const canInvitePeople = !!user && user.role !== 'GUEST';
+  const visibleNavigationItems = useVisibleNavigationItems();
+  const toolbarIds = toolbarItemsStore.useItems();
+  const appSnapshots = useAppSnapshots();
+  const missedCallCount = useMissedCallCount();
+  const hasOngoingCall = useRailActiveCalls().length > 0;
+  const unreadActivityCount = useUnreadActivitiesCount();
+  const { unreadCount: recapUnreadCount } = useRecapUnreadCount();
+  const { isMobile } = usePlatform();
+  const visibleChannels = useAllVisibleChannels();
+  const unreadCounts = useAllUnreadCount();
+
+  const [windowWidth, setWindowWidth] = useState(window.innerWidth);
 
   const isSupportHome = SUPPORT_HOME_ROUTES.includes(activeRoute);
   const isSupportReused = SUPPORT_REUSED_ROUTES.includes(activeRoute);
@@ -243,6 +265,9 @@ const AppSidebar = (): ReactElement => {
   const [isSettingsPopoverOpen, setIsSettingsPopoverOpen] = useState(false);
   const [isSupportOpen, setIsSupportOpen] = useState(false);
   const [isInviteDialogOpen, setIsInviteDialogOpen] = useState(false);
+  const [inviteDialogInitialView, setInviteDialogInitialView] = useState<'default' | 'contacts'>(
+    'default',
+  );
   const [isErrorReportOpen, setIsErrorReportOpen] = useState(false);
   const [isMoreOpen, setIsMoreOpen] = useState(false);
   const [isPreferencesOpen, setIsPreferencesOpen] = useState(false);
@@ -250,6 +275,45 @@ const AppSidebar = (): ReactElement => {
   const [preferencesInitialSection, setPreferencesInitialSection] = useState<
     PreferenceSection | undefined
   >(undefined);
+
+  // Contacts-import OAuth return: the backend redirects back with
+  // ?contactsImport=success (or contactsImportError=...). Strip the params and
+  // reopen the invite dialog straight into the contacts picker.
+  useEffect(() => {
+    const params = new URLSearchParams(location.search);
+    const contactsImport = params.get('contactsImport');
+    const contactsImportError = params.get('contactsImportError');
+    if (!contactsImport && !contactsImportError) return;
+
+    params.delete('contactsImport');
+    params.delete('contactsImportError');
+    const remainingSearch = params.toString();
+    void navigate(`${location.pathname}${remainingSearch ? `?${remainingSearch}` : ''}`, {
+      replace: true,
+    });
+
+    if (contactsImport === 'success') {
+      setInviteDialogInitialView('contacts');
+      setIsInviteDialogOpen(true);
+    } else {
+      toast.error('Failed to import contacts. Please try again.');
+    }
+  }, [location.pathname, location.search, navigate]);
+
+  const handleInviteDialogOpenChange = (nextOpen: boolean): void => {
+    setIsInviteDialogOpen(nextOpen);
+    if (!nextOpen) {
+      setInviteDialogInitialView('default');
+    }
+  };
+
+  // Fresh workspace: the switcher sets a one-shot sessionStorage flag before its
+  // full-page navigation. Consume it here to prompt the creator to invite people.
+  useEffect(() => {
+    if (sessionStorage.getItem('xyne-open-invite-dialog') !== 'true') return;
+    sessionStorage.removeItem('xyne-open-invite-dialog');
+    setIsInviteDialogOpen(true);
+  }, []);
 
   useEffect(() => {
     setOpenQuickMenu(null);
@@ -296,18 +360,6 @@ const AppSidebar = (): ReactElement => {
   const handleStatusModalClose = (): void => {
     setIsStatusModalOpen(false);
   };
-
-  // Hide footer only on pages that have their own complete navigation (channels, bookmarks, threads, etc.)
-  const hasChannelOrThreadId =
-    (location.pathname.includes('/chat/dir/') && location.pathname.split('/').length > 3) ||
-    (location.pathname.includes('/chat/dm/') && location.pathname.split('/').length > 3) ||
-    (location.pathname.includes('/chat/activity/') && location.pathname.split('/').length > 3) ||
-    (location.pathname.includes('/chat/bookmarks/') && location.pathname.split('/').length > 3) ||
-    (location.pathname.includes('/chat/drafts/') && location.pathname.split('/').length > 3) ||
-    (location.pathname.includes('/chat/sent/') && location.pathname.split('/').length > 3) ||
-    (location.pathname.includes('/chat/scheduled/') && location.pathname.split('/').length > 3) ||
-    location.pathname.includes('threadId') ||
-    location.hash.includes('threadId');
 
   // The rail in the user's order: nav items and artifact apps interleaved as
   // the toolbar list says. Ids that no longer resolve — a path the user lost
@@ -628,7 +680,7 @@ const AppSidebar = (): ReactElement => {
         >
           <ZeroConnectionStatus className='mb-2' />
 
-          {isCommunityWorkspace && (
+          {canInvitePeople && (
             <Tooltip content='Invite people' side='right' delayDuration={0}>
               <button
                 type='button'
@@ -777,8 +829,10 @@ const AppSidebar = (): ReactElement => {
 
         <WorkspaceInviteDialog
           open={isInviteDialogOpen}
-          onOpenChange={setIsInviteDialogOpen}
+          onOpenChange={handleInviteDialogOpenChange}
           workspaceId={workspaceId}
+          initialView={inviteDialogInitialView}
+          workspaceType={isCommunityWorkspace ? WorkspaceType.COMMUNITY : undefined}
         />
 
         {/* Status Update Modal */}
@@ -943,7 +997,7 @@ const MobileNavbar = ({
   const analyticsPermission = useCanViewAnalytics();
   const { isMobile } = usePlatform();
   const { isKeyboardOpen } = useKeyboard();
-  const { workspaceId } = useParams<{ workspaceId?: string }>();
+  const workspaceId = useRouterSelector(snapshot => snapshot.params['workspaceId']);
   const prefixWs = (path: string): string => (workspaceId ? `/${workspaceId}${path}` : path);
   const [isErrorReportOpen, setIsErrorReportOpen] = useState(false);
 

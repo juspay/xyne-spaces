@@ -37,6 +37,7 @@ import {
 import { markSdlcRun, SDLC_AGENT_TOOL_PROFILE } from "./sdlc-run-tools.js";
 import { getSessionByConv } from "./session-context.js";
 import { mintSessionToken } from "./session-tokens.js";
+import { resolveClawUserIdForSpacesIdentity, spacesUserIdForClawUser } from "./users-jit.js";
 import {
   resolveAgentProviderConfigs,
   resolveSubagentProviderMode,
@@ -51,11 +52,13 @@ import {
   isInternalCallbackOrigin,
   type ExternalResultCallbackConfig,
 } from "../surfaces/external-api/delivery.js";
+import { assertSafeOutboundUrl } from "../mcpgateway/services/http-client.js";
 import type { VerifiedCliToken } from "./cli-tokens.js";
 import { agentScopeAllows } from "./service-tokens.js";
 import { encryptSurfaceSecret } from "./surface-resolver.js";
 import { isClawAdmin } from "../middleware/agent-acl.js";
 import { isScheduledOrAutomationEvent } from "./run-bridge.js";
+import { conversationAccessError } from "./conversation-access.js";
 import { dispatchRun } from "./dispatch-run.js";
 import { toolUsageRankFor, wantsToolUsageRank } from "./tool-usage-rank.js";
 import { createLogger } from "../logger.js";
@@ -210,6 +213,15 @@ function normalizeRecordingRefs(value: unknown): RunRecordingRef[] | null {
 }
 
 /** Loose shape check for the /experiment epoch context forwarded to the runtime. */
+async function isPublicOutboundUrl(url: string): Promise<boolean> {
+  try {
+    await assertSafeOutboundUrl(url);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 function isExperimentContext(value: unknown): boolean {
   if (!value || typeof value !== "object") return false;
   const obj = value as Record<string, unknown>;
@@ -241,12 +253,23 @@ async function resolveUserId(
 
   // Direct call with userId (e.g., from Xyne Spaces)
   if (userId && typeof userId === "string" && userId.trim().length > 0) {
+    // The body id arrives in either representation: legacy callers (queued
+    // messages, pre-migration cards) send the raw Spaces id, current callers
+    // the canonical Claw id. Resolve through the identity ladder so the run
+    // and every downstream row is keyed canonically.
+    // Deliberate MIXED failure policy: an identity-resolution failure here is
+    // FAIL-OPEN (fall back to the raw id — the request was authenticated
+    // upstream and a lookup hiccup must not block runs), while the
+    // body-vs-header userId pin check above is FAIL-CLOSED (403) because a
+    // mismatch there is a conflicting identity claim, not an infra error.
+    const clawUserId =
+      (await resolveClawUserIdForSpacesIdentity(userId.trim()).catch(() => undefined)) ?? userId.trim();
     const user = await prisma.user.findUnique({
-      where: { id: userId.trim() },
+      where: { id: clawUserId },
       select: { name: true, email: true, orgId: true },
     });
     return {
-      userId: userId.trim(),
+      userId: clawUserId,
       userName: userName?.trim() ?? user?.name ?? "",
       userEmail: user?.email ?? "",
       ...(user?.orgId ? { orgId: user.orgId } : {}),
@@ -642,11 +665,21 @@ export async function prepareRun(
     if ((isMessagingChannelKey(triggerSource) || channelDelivery !== undefined) && !isInternalS2SCaller) {
       return { ok: false, status: 400, error: "channelDelivery requires internal service authentication" };
     }
-    if (callbackUrl && !isInternalCallbackOrigin(callbackUrl) && !isAllowedExternalCallbackUrl(callbackUrl)) {
-      return { ok: false, status: 400, error: "callbackUrl is not an allowed target" };
+    if (callbackUrl) {
+      const allowed = isInternalS2SCaller
+        ? isInternalCallbackOrigin(callbackUrl) || isAllowedExternalCallbackUrl(callbackUrl)
+        : !isInternalCallbackOrigin(callbackUrl) &&
+          isAllowedExternalCallbackUrl(callbackUrl) &&
+          (await isPublicOutboundUrl(callbackUrl));
+      if (!allowed) {
+        return { ok: false, status: 400, error: "callbackUrl is not an allowed target" };
+      }
     }
     if (progressUrl !== undefined && typeof progressUrl !== "string") {
       return { ok: false, status: 400, error: "progressUrl must be a string" };
+    }
+    if (progressUrl && !isInternalS2SCaller) {
+      return { ok: false, status: 400, error: "progressUrl requires internal service authentication" };
     }
     if (progressUrl && !isInternalCallbackOrigin(progressUrl) && !isAllowedExternalCallbackUrl(progressUrl)) {
       return { ok: false, status: 400, error: "progressUrl is not an allowed target" };
@@ -662,8 +695,16 @@ export async function prepareRun(
     const bodyUserId =
       typeof bodyUserIdRaw === "string" && bodyUserIdRaw.trim() ? bodyUserIdRaw.trim() : undefined;
     if (bodyUserId && authenticatedUserId && bodyUserId !== authenticatedUserId) {
-      log.warn(`[run] userId pin mismatch: session=${authenticatedUserId} body=${bodyUserId}`);
-      return { ok: false, status: 403, error: "Body userId does not match authenticated session" };
+      // The pinned header is canonical while legacy clients still send the
+      // raw Spaces alias in the body — resolve before comparing, or the
+      // authenticated user's own runs get falsely rejected. FAIL-CLOSED: an
+      // unresolvable or mismatching body id is a 403 (see resolveUserId for
+      // the complementary fail-open path).
+      const resolvedBodyUserId = await resolveClawUserIdForSpacesIdentity(bodyUserId).catch(() => undefined);
+      if (!resolvedBodyUserId || resolvedBodyUserId !== authenticatedUserId) {
+        log.warn(`[run] userId pin mismatch: session=${authenticatedUserId} body=${bodyUserId}`);
+        return { ok: false, status: 403, error: "Body userId does not match authenticated session" };
+      }
     }
 
     const identityBody = {
@@ -673,6 +714,41 @@ export async function prepareRun(
     const resolved = await resolveUserId(identityBody);
     if ("error" in resolved) {
       return { ok: false, status: 400, error: resolved.error };
+    }
+
+    // Conversation-ownership backstop. Claw sessions are keyed by conversationId
+    // (not userId), so a caller who supplies another user's conversationId would
+    // attach to that thread's shared session. userId is already pinned above;
+    // this stops the cross-user hijack. Only enforced on the interactive-user
+    // path — S2S/automation/scheduled/service-token runs legitimately act on
+    // conversations the authenticated caller doesn't "own". Non-existent/new
+    // conversations pass (verdict "unknown").
+    if (
+      authenticatedUserId &&
+      !isServiceTokenCaller &&
+      !isInternalS2SCaller &&
+      !isScheduledOrAutomationEvent(eventType) &&
+      (conversationId || piSessionConversationId)
+    ) {
+      // The Spaces conversation-access check matches channel_participants by the
+      // workspace-scoped Spaces id, so translate the canonical resolved.userId
+      // back to the Spaces id first. No workspace hint is available this early,
+      // so a multi-workspace user resolves to their most-recent membership —
+      // acceptable for a fail-open defense-in-depth backstop (the interactive
+      // run-stream guard enforces with the request's exact x-spaces-user-id).
+      // TODO(identity): thread the request workspace hint into StartRunInput so
+      // this resolves the exact membership for multi-workspace /run callers.
+      const spacesCheckId = await spacesUserIdForClawUser(resolved.userId).catch(() => resolved.userId);
+      const accessError = await conversationAccessError(spacesCheckId, [
+        conversationId,
+        piSessionConversationId,
+      ]);
+      if (accessError) {
+        log.warn(
+          `[run] conversation access denied userId=${spacesCheckId} conversationId=${conversationId ?? "none"} pi=${piSessionConversationId ?? "none"}`,
+        );
+        return { ok: false, status: 403, error: accessError };
+      }
     }
 
     const headerOrgId = input.headerOrgId;
@@ -910,14 +986,6 @@ export async function prepareRun(
         ? `${resolvedAttachedContext.promptPrefix}\n\n${mergedContext}`
         : resolvedAttachedContext.promptPrefix;
     }
-    if (effectiveChannelId) {
-      try {
-        const hubKnowledge = await loadSdlcHubKnowledge(effectiveChannelId, resolved.userId);
-        if (hubKnowledge) mergedContext = mergedContext ? `${hubKnowledge}\n\n${mergedContext}` : hubKnowledge;
-      } catch (err) {
-        log.warn("[run] failed to load SDLC Hub Knowledge:", errMsg(err));
-      }
-    }
 
     // Inject live agent catalog for the Claw concierge agent so the LLM
     // always sees the current agents without any hardcoded list in the prompt.
@@ -969,8 +1037,13 @@ export async function prepareRun(
         (conversationId && agentSlug
           ? ((await getSessionByConv(conversationId, agentSlug).catch(() => null))?.channelId ?? "")
           : "");
+      // Automation/queued dispatch bodies may carry the hub's workspace;
+      // without it a two-workspace user's identity resolution is ambiguous.
+      const bodyWorkspaceId = (body as { workspaceId?: unknown }).workspaceId;
+      const hubWorkspaceHint =
+        typeof bodyWorkspaceId === "string" && bodyWorkspaceId.trim() ? bodyWorkspaceId.trim() : undefined;
       sdlcAgentRunContext = parseSdlcAgentRunContext(
-        await resolveSdlcHubContextForUser(resolved.userId, hubChannelId, conversationId),
+        await resolveSdlcHubContextForUser(resolved.userId, hubChannelId, conversationId, hubWorkspaceHint),
       );
       if (sdlcAgentRunContext) mergedAgentConfig = { ...mergedAgentConfig, sdlcContext: sdlcAgentRunContext };
     }
@@ -979,6 +1052,24 @@ export async function prepareRun(
       mergedAgentConfig = mergeSdlcToolProfile(mergedAgentConfig, SDLC_AGENT_TOOL_PROFILE, {
         interactive: !isScheduledOrAutomationEvent(eventType),
       });
+    }
+    if (effectiveChannelId) {
+      try {
+        // Hub Knowledge membership (channelParticipant.userId) is keyed by the
+        // workspace-scoped Spaces id, while resolved.userId is the canonical
+        // Claw id — convert before the lookup or the filter matches nothing
+        // and hub knowledge silently drops out of the run context. The hub
+        // context carries the run's workspace, which disambiguates users
+        // holding memberships in two Spaces workspaces.
+        const hubWorkspaceRaw = sdlcAgentRunContext?.["workspaceId"];
+        const hubWorkspaceId =
+          typeof hubWorkspaceRaw === "string" && hubWorkspaceRaw.trim() ? hubWorkspaceRaw.trim() : undefined;
+        const hubKnowledgeUserId = await spacesUserIdForClawUser(resolved.userId, hubWorkspaceId);
+        const hubKnowledge = await loadSdlcHubKnowledge(effectiveChannelId, hubKnowledgeUserId);
+        if (hubKnowledge) mergedContext = mergedContext ? `${hubKnowledge}\n\n${mergedContext}` : hubKnowledge;
+      } catch (err) {
+        log.warn("[run] failed to load SDLC Hub Knowledge:", errMsg(err));
+      }
     }
     const effectiveFastMode =
       explicitFastMode ??
@@ -1169,7 +1260,9 @@ export async function prepareRun(
     }
 
     const acceptHeader = input.wantsSse ? "text/event-stream" : "";
-    const hasExternalCallback = Boolean(callbackUrl && !isInternalCallbackOrigin(callbackUrl));
+    const hasExternalCallback = Boolean(
+      callbackUrl && !(input.isInternalS2SCaller && isInternalCallbackOrigin(callbackUrl)),
+    );
     const externalResultCallback: ExternalResultCallbackConfig | undefined =
       hasExternalCallback && callbackUrl
         ? {
@@ -1269,7 +1362,8 @@ export async function prepareRun(
         const sessionContext: SessionContext = {
           mentionedUserId: agent.spacesAppUserId ?? "",
           senderId: resolved.userId,
-          senderName: resolved.userName || resolved.userId,
+          // Never render the canonical id as a display name.
+          senderName: resolved.userName || resolved.userEmail || resolved.userId,
           channelId: effectiveChannelId ?? "",
           channelName: effectiveChannelId ?? "",
           conversationId: conversationId ?? "",
@@ -1396,7 +1490,7 @@ export async function prepareRun(
     ];
 
     const toolUsageRank =
-      agentSlug && wantsToolUsageRank(mergedAgentConfig["optimizations"], optimizations)
+      agentSlug && wantsToolUsageRank(mergedAgentConfig["optimizations"], optimizations, agent.delegationTier)
         ? await toolUsageRankFor(agentSlug, agent.orgId)
         : [];
     const { toolUsageRank: _suppliedToolUsageRank, ...agentConfigWithoutRank } = mergedAgentConfig;

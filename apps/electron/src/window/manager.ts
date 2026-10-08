@@ -13,6 +13,12 @@ import { getBundledUIUrl } from '../services/custom-protocol';
 import { browserSettingsService } from '../services/browser-settings';
 import { getCreateOptions, applyPostCreate, track, saveNow } from './window-state';
 import { callInvitePath } from '../utils/validation';
+import {
+  configureIncomingCallWindow,
+  incomingCallWindowOptions,
+  isIncomingCallWindowOpen,
+  isOpenedByMainFrame,
+} from '../services/incoming-call-window';
 
 import { keychain } from '../keychain';
 import { Logger } from '../services/logger/Logger';
@@ -102,6 +108,57 @@ function trackAppWindow(win: BrowserWindow): void {
   win.once('closed', () => appWindows.delete(win));
 }
 
+/**
+ * Whether a full Xyne window — the main one or another app window — has focus.
+ * Each of those already shows the in-app incoming-call card, so a ringing call
+ * only needs the floating one when none of them does. Asked of the main process
+ * because the renderer's own `window` blur also fires when focus moves into an
+ * embedded webview (the browser panel) while Xyne is still in front.
+ */
+export function isAppWindowFocused(): boolean {
+  const focused = BrowserWindow.getFocusedWindow();
+  return !!focused && (focused === mainWindow || appWindows.has(focused));
+}
+
+const appFocusWatchers = new Set<Electron.WebContents>();
+
+/**
+ * Read on the next tick so that moving between two Xyne windows (blur, then
+ * focus) settles before it is reported, instead of flashing "unfocused".
+ */
+function reportAppFocus(): void {
+  setImmediate(() => {
+    const focused = isAppWindowFocused();
+    for (const watcher of appFocusWatchers) {
+      if (!watcher.isDestroyed()) watcher.send('incoming-call-window:app-focus-changed', focused);
+    }
+  });
+}
+
+/**
+ * Starts or stops telling a page whether Xyne has focus. The dashboard only
+ * watches while a call is ringing, so the app-wide focus listeners exist only
+ * while someone is watching.
+ */
+export function watchAppFocus(watcher: Electron.WebContents, watch: boolean): void {
+  const wasWatched = appFocusWatchers.size > 0;
+  if (watch && !appFocusWatchers.has(watcher)) {
+    appFocusWatchers.add(watcher);
+    watcher.once('destroyed', () => watchAppFocus(watcher, false));
+  } else if (!watch) {
+    appFocusWatchers.delete(watcher);
+  }
+
+  const isWatched = appFocusWatchers.size > 0;
+  if (isWatched && !wasWatched) {
+    app.on('browser-window-focus', reportAppFocus);
+    app.on('browser-window-blur', reportAppFocus);
+  } else if (!isWatched && wasWatched) {
+    app.removeListener('browser-window-focus', reportAppFocus);
+    app.removeListener('browser-window-blur', reportAppFocus);
+  }
+}
+
 const namedChildWindows = new Map<string, BrowserWindow>();
 
 const STANDALONE_WINDOW_PREFIX = 'xyne-window:';
@@ -128,6 +185,12 @@ function applyWindowPolicy(win: BrowserWindow): void {
   win.webContents.setWindowOpenHandler((details) => {
      try {
       const url = details.url;
+
+      // The floating incoming-call card. Checked first because it is the one
+      // window the app opens on about:blank, which the http(s) rule below denies.
+      if (isIncomingCallWindowOpen(details.frameName, url)) {
+        return { action: 'allow', overrideBrowserWindowOptions: incomingCallWindowOptions() };
+      }
 
 
       const urlObj = new URL(url);
@@ -192,7 +255,6 @@ function applyWindowPolicy(win: BrowserWindow): void {
         contextIsolation: true,
         webviewTag: true,
         preload: path.join(__dirname, '..', 'preload.js'),
-        backgroundThrottling: false,
         spellcheck: true,
       };
 
@@ -286,6 +348,18 @@ function applyWindowPolicy(win: BrowserWindow): void {
   });
 
   win.webContents.on('did-create-window', (childWindow, details) => {
+    if (isIncomingCallWindowOpen(details.frameName, details.url)) {
+      // Created hidden, so a request from anywhere but the main window's own
+      // page (an embedded frame, another window) is destroyed before it shows.
+      if (!isOpenedByMainFrame(childWindow, win, mainWindow)) {
+        log.warn('[IncomingCallWindow] Refused: not opened by the main window frame');
+        childWindow.destroy();
+        return;
+      }
+      configureIncomingCallWindow(childWindow, win.webContents);
+      return;
+    }
+
     if (isAppWindowUrl(details.url)) {
       trackAppWindow(childWindow);
     }
@@ -399,7 +473,6 @@ export async function createMainWindow(options?: { inactive?: boolean }): Promis
       contextIsolation: true,
       webviewTag: true,
       preload: path.join(__dirname, '..', 'preload.js'),
-      backgroundThrottling: false,
       spellcheck: true,
     },
   });

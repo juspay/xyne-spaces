@@ -386,6 +386,28 @@ const electronAPI = {
     startRecording: () => ipcRenderer.send('meeting-popup:start-recording'),
   },
 
+  // Floating incoming-call card. Its presence tells the dashboard this build
+  // will turn `window.open('', 'xyne-incoming-call:…')` into the floating card.
+  incomingCallWindow: (() => {
+    // The main process only listens for app focus while a page is subscribed.
+    let focusSubscribers = 0;
+    return {
+      bringAppToFront: () => ipcRenderer.send('incoming-call-window:bring-app-to-front'),
+      isAppFocused: (): Promise<boolean> => ipcRenderer.invoke('incoming-call-window:is-app-focused'),
+      getHost: (): Promise<{ isMain: boolean; mainExists: boolean }> =>
+        ipcRenderer.invoke('incoming-call-window:get-host'),
+      onAppFocusChanged: (callback: (focused: boolean) => void) => {
+        const listener = (_event: unknown, focused: boolean) => callback(focused);
+        ipcRenderer.on('incoming-call-window:app-focus-changed', listener);
+        if (focusSubscribers++ === 0) ipcRenderer.send('incoming-call-window:watch-focus', true);
+        return () => {
+          ipcRenderer.removeListener('incoming-call-window:app-focus-changed', listener);
+          if (--focusSubscribers === 0) ipcRenderer.send('incoming-call-window:watch-focus', false);
+        };
+      },
+    };
+  })(),
+
   // Agent authorization consent modal (used by the consent window itself)
   agentConsent: {
     onShow: (
@@ -520,6 +542,8 @@ const electronAPI = {
     detect: () => ipcRenderer.invoke('local-harness:detect'),
     connect: () => ipcRenderer.invoke('local-harness:connect'),
     disconnect: () => ipcRenderer.invoke('local-harness:disconnect'),
+    connectComputer: () => ipcRenderer.invoke('local-harness:connect-computer'),
+    disconnectComputer: () => ipcRenderer.invoke('local-harness:disconnect-computer'),
     setProviderEnabled: (provider: string, enabled: boolean) =>
       ipcRenderer.invoke('local-harness:set-provider', provider, enabled),
     pickFolder: (): Promise<{ path: string; name: string; branch?: string; remote?: string } | null> =>

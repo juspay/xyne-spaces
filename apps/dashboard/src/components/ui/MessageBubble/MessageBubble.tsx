@@ -1,6 +1,5 @@
 import React, { useContext, useEffect, useMemo, useState } from 'react';
 import { ConversationBadgeContext } from '../../Chat/ConversationPannel/ConversationBadgeContext';
-import { useLocation, useNavigate } from 'react-router-dom';
 import Tooltip from '../Tooltip/Tooltip';
 import { AvatarSize } from '../../UserAvatar/UserAvatar';
 import * as Popover from '@radix-ui/react-popover';
@@ -28,11 +27,14 @@ import UserAvatar from '../../UserAvatar/UserAvatar';
 import { UserHoverWrapper } from '../UserMentionPopover/UserMentionPopover';
 import MessageAttachment from '../../Chat/MessageAttachment/MessageAttachment';
 import { FilePill, HtmlPreviewCard } from '../files';
+import { InlineCsvFile } from '../../Chat/MessageAttachment/InlineCsvFile';
+import { isCsvFile } from '../../Chat/MessageAttachment/csvPreview';
 import { useReactions } from '../../../hooks/useReaction';
 import { MessageBubbleProps } from './MessageBubble.types';
 import { useAuth } from '../../../hooks/useAuth';
 import { useTheme } from '../../../hooks/useTheme';
 import { useChannel } from '../../../hooks/useChannels';
+import { useIsDmReadOnly } from '../../../hooks/useIsDmReadOnly';
 import { useChannelDisplayName } from '../../../hooks/useChannelDisplayName';
 import { ChannelScopeType, ChannelVisibility } from '@xyne/shared';
 import { usePendingStatusByMessageId } from '@xyne/shared/messages';
@@ -47,6 +49,8 @@ import EmojiPicker, { EmojiStyle, Theme as EmojiTheme } from 'emoji-picker-react
 import { BotBubble } from '../../Chat/BotBubble';
 import { LinkPreview } from '../../Chat/LinkPreview/LinkPreview';
 import { InternalMessagePreview } from '../../Chat/LinkPreview/InternalMessagePreview';
+import { CallLinkPreview } from '../../Chat/LinkPreview/CallLinkPreview';
+import { CallLinkCaption, isCallLinkOnlyMessage } from '../../Chat/LinkPreview/CallLinkCaption';
 import { getEmojiFontSizeClass } from '../../../utils/emojiUtils';
 import { RenderMessageWithHTML } from '../../Chat/RenderMessageWithHTML/RenderMessageWithHTML';
 import { createMarkdownComponents } from '../../../utils/markdownComponents';
@@ -74,7 +78,8 @@ import { PendingIcon } from '../../../assets/icons/WorkflowIcons';
 import { useIsCallActive } from '../../../hooks/useCalls';
 import { useUsers, useUser } from '../../../hooks/useUsers';
 import { ThreadInfoIndicator, AlsoSentToChannelIndicator } from './ThreadMessageIndicators';
-import { useRouteContext } from '../../../hooks/useRouteContext';
+import { getBaseRoute } from '../../../hooks/useRouteContext';
+import { useStableRouter } from '../../../hooks/useStableRouter';
 import { getUserDisplayName } from '../../../utils/userDisplayName';
 import { StatusIndicator } from '../StatusIndicator';
 import DOMPurify from 'dompurify';
@@ -188,10 +193,18 @@ const AttachmentsBlock: React.FC<AttachmentsBlockProps> = ({
   // every sibling attachment to a pill.
   const htmlAttachments = activeAttachments.filter(a => isHtmlAttachment(a));
 
+  const csvAttachments = isMobile
+    ? []
+    : activeAttachments.filter(a => isCsvFile(a.mimetype, a.originalFilename));
+  const isInlineCsv = (a: AttachmentType): boolean => csvAttachments.includes(a);
+
   // Files - separate into those with thumbnails (PDFs, Office docs) and those without
   const fileAttachments = activeAttachments.filter(
     a =>
-      !a.mimetype.startsWith('image/') && !a.mimetype.startsWith('video/') && !isHtmlAttachment(a),
+      !a.mimetype.startsWith('image/') &&
+      !a.mimetype.startsWith('video/') &&
+      !isHtmlAttachment(a) &&
+      !isInlineCsv(a),
   );
 
   const previewableFiles = fileAttachments.filter(a => hasDocumentThumbnail(a));
@@ -361,6 +374,20 @@ const AttachmentsBlock: React.FC<AttachmentsBlockProps> = ({
             </div>
           )}
 
+          {csvAttachments.length > 0 && (
+            <div className='flex flex-col gap-2'>
+              {csvAttachments.map(attachment => (
+                <InlineCsvFile
+                  key={attachment.id}
+                  attachmentId={attachment.id}
+                  fileName={attachment.originalFilename}
+                  fileSize={attachment.size}
+                  onOpen={() => handleFileClick(attachment)}
+                />
+              ))}
+            </div>
+          )}
+
           {/* Non-previewable files - use FilePill component */}
           {/* If useFilePillForAllFiles is true, show ALL files in FilePill format */}
           {(useFilePillForAllFiles ? fileAttachments : nonPreviewableFiles).length > 0 && (
@@ -507,14 +534,21 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
   allThreadAttachments,
   workflowNumber,
   showLinkPreview: shouldRenderLinkPreview = true,
+  callLinkCardShown,
   searchItemView = false,
   afterTextContent,
   headerContent,
   onUserClick,
 }) => {
   const renderConversationBadge = useContext(ConversationBadgeContext);
-  const navigate = useNavigate();
+  // Route state is read at click time: rendered once per message, subscribing to the router
+  // re-rendered every bubble on every navigation.
+  const stableRouter = useStableRouter();
+  const navigate = stableRouter.navigate;
   const { toggleReaction } = useReactions();
+  // Deactivated 1:1 DM archives are strictly read-only: existing reactions render
+  // but neither their toggle nor the add-reaction picker are interactive.
+  const isDmReadOnly = useIsDmReadOnly(channelId);
   const attachments = message.attachments || [];
   const [showLinkPreview, setShowLinkPreview] = useState(true);
 
@@ -523,6 +557,14 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
   const isForwardedMessage = message.msgType === MessageType.FORWARDED;
   const metadata = message.metadata as MessageMetadata | null;
   const previewResult = parsePreviewMd(message.link_preview_md);
+  // A message that is nothing but a call link shows a status caption in place of the link;
+  // the link chip comes back only once its card is closed, so there's always a way in.
+  const callLinkOnlyExternalId =
+    previewResult?.type === 'call_preview' &&
+    isCallLinkOnlyMessage(message.content, previewResult.data.url)
+      ? previewResult.data.externalId
+      : null;
+  const isCallCardShown = callLinkCardShown ?? (shouldRenderLinkPreview && showLinkPreview);
 
   // Parse forwarded message XML content
   const forwardedMessageData = useMemo(() => {
@@ -660,8 +702,6 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
   const sender = useUser(message.senderId);
   const originalSender = useUser(forwardedMessageData?.originalSenderId || '');
   const isMe = user?.id === message.senderId;
-  const { baseRoute } = useRouteContext();
-  const location = useLocation();
   const actionableCount = useMemo(
     () => (message.nudgeCounts ?? []).reduce((sum, row) => sum + row.nudgeCount, 0),
     [message.nudgeCounts],
@@ -676,6 +716,8 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
       onUserClick(userId);
       return;
     }
+    const { location } = stableRouter.getSnapshot();
+    const baseRoute = getBaseRoute(location.pathname);
     const isFocusThread = new URLSearchParams(location.search).get('focusThread') === '1';
     const messageConversationId = conversation?.conversationId || message.conversationId;
     const threadSegment =
@@ -695,6 +737,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
     const isThreadReply = conversation?.initialMessageId
       ? conversation.initialMessageId !== message.messageId
       : context === 'thread' && !isFirstInThread;
+    const baseRoute = getBaseRoute(stableRouter.getSnapshot().location.pathname);
     if (window.location.pathname.includes('/chat/dir/threads')) {
       if (isThreadReply) {
         void navigate(
@@ -914,7 +957,8 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                   }
                 />
               </div>
-            ) : showAvatar && sender?.userType === UserType.APP ? (
+            ) : showAvatar &&
+              (sender?.userType === UserType.APP || sender?.userType === UserType.AGENT) ? (
               <div
                 onClick={() => handleUserClick(sender.id)}
                 data-track-category='MESSAGE'
@@ -1204,7 +1248,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                           }
                         }
                   }
-                  className={`${isMobile ? 'text-[12px]' : 'text-xs'} text-muted-foreground cursor-pointer hover:underline transition-all duration-150 visual-regression-hide ${searchItemView ? 'ml-auto shrink-0' : ''}`}
+                  className={`${isMobile ? 'text-[12px]' : 'text-xs'} text-muted-foreground cursor-pointer hover:underline transition duration-150 visual-regression-hide ${searchItemView ? 'ml-auto shrink-0' : ''}`}
                 >
                   {searchItemView || context === 'thread'
                     ? formatThreadTimestamp(message.createdAt)
@@ -1216,7 +1260,11 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
               ) : null}
               {/* Host-supplied mark for where this conversation belongs. Null in
                   every surface that does not provide one. */}
-              {message.conversationId ? renderConversationBadge?.(message.conversationId) : null}
+              {message.conversationId
+                ? renderConversationBadge?.(
+                    conversation ?? { conversationId: message.conversationId },
+                  )
+                : null}
               {headerContent}
             </div>
           )}
@@ -1573,25 +1621,32 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                       className={`jp-message-html whitespace-pre-wrap break-all-words inline-block ${emojiFontSizeClass}`}
                       style={isSystemMessage ? systemMessageStyles : undefined}
                     >
-                      <ExpandableMessage maxHeight={500}>
-                        <div className='jp-message-html inline-block'>
-                          <RenderMessageWithHTML
-                            disableLinks={disableLinks}
-                            message={isWorkflowMessage ? 'Workflow created' : message.content}
-                            showEdited={message.edited}
-                            isSystemMessage={isSystemMessage}
-                            messageId={message.messageId}
-                            conversationId={message.conversationId}
-                            preserveThreadRoute={context === 'thread'}
-                            slashCommandArtifactContext={{
-                              ...(channelId && { channelId }),
-                              senderId: message.senderId,
-                              createdAt: message.createdAt,
-                              surface: context === 'thread' ? 'thread' : 'channel',
-                            }}
-                          />
-                        </div>
-                      </ExpandableMessage>
+                      {callLinkOnlyExternalId && (
+                        <CallLinkCaption externalId={callLinkOnlyExternalId} />
+                      )}
+                      {!(callLinkOnlyExternalId && isCallCardShown) && (
+                        <>
+                          <ExpandableMessage maxHeight={500}>
+                            <div className='jp-message-html inline-block'>
+                              <RenderMessageWithHTML
+                                disableLinks={disableLinks}
+                                message={isWorkflowMessage ? 'Workflow created' : message.content}
+                                showEdited={message.edited}
+                                isSystemMessage={isSystemMessage}
+                                messageId={message.messageId}
+                                conversationId={message.conversationId}
+                                preserveThreadRoute={context === 'thread'}
+                                slashCommandArtifactContext={{
+                                  ...(channelId && { channelId }),
+                                  senderId: message.senderId,
+                                  createdAt: message.createdAt,
+                                  surface: context === 'thread' ? 'thread' : 'channel',
+                                }}
+                              />
+                            </div>
+                          </ExpandableMessage>
+                        </>
+                      )}
                       {afterTextContent}
                     </div>
                   )}
@@ -1662,6 +1717,11 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                       }}
                       onClose={() => setShowLinkPreview(false)}
                     />
+                  ) : previewResult.type === 'call_preview' ? (
+                    <CallLinkPreview
+                      metadata={previewResult.data}
+                      onClose={() => setShowLinkPreview(false)}
+                    />
                   ) : (
                     <LinkPreview
                       metadata={previewResult.data}
@@ -1688,6 +1748,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                   reactionsMd={message.reactions_md}
                   toggleReaction={toggleReaction}
                   messageId={message.messageId}
+                  readOnly={isDmReadOnly}
                 />
               )}
             </div>
@@ -1750,10 +1811,13 @@ export const ReactionView = ({
   reactionsMd,
   toggleReaction,
   messageId,
+  readOnly = false,
 }: {
   reactionsMd: string | null | undefined;
   toggleReaction: (params: { messageId: string; emoji: string; hasReacted: boolean }) => void;
   messageId: string;
+  /** When true, existing reactions render but are non-interactive and the add-reaction picker is hidden. */
+  readOnly?: boolean;
 }): React.ReactNode => {
   const { user } = useAuth();
   const [emojiPickerOpen, setEmojiPickerOpen] = useState(false);
@@ -1874,12 +1938,19 @@ export const ReactionView = ({
               <button
                 type='button'
                 data-testid='message-reaction-chip'
-                className={`inline-flex items-center gap-1 h-6 px-2 rounded-full text-sm cursor-pointer transition-all duration-150 ${
+                disabled={readOnly}
+                className={`inline-flex items-center gap-1 h-6 px-2 rounded-full text-sm transition duration-150 ${
+                  readOnly ? 'cursor-default' : 'cursor-pointer'
+                } ${
                   reaction.userHasReacted
-                    ? 'bg-accent border border-action-primary hover:bg-accent/80'
-                    : 'bg-muted hover:bg-accent'
+                    ? `bg-accent border border-action-primary ${readOnly ? '' : 'hover:bg-accent/80'}`
+                    : `bg-muted ${readOnly ? '' : 'hover:bg-accent'}`
                 }`}
                 onClick={e => {
+                  if (readOnly) {
+                    e.stopPropagation();
+                    return;
+                  }
                   toggleReaction({
                     messageId: messageId,
                     emoji: reaction.emojiName,
@@ -1939,7 +2010,7 @@ export const ReactionView = ({
         })}
 
         {/* Add Reaction */}
-        {isMobile ? (
+        {readOnly ? null : isMobile ? (
           <AddReactionDrawerMobile
             messageId={messageId}
             user={user}
@@ -1952,7 +2023,7 @@ export const ReactionView = ({
             <Popover.Trigger asChild>
               <button
                 type='button'
-                className='inline-flex items-center justify-center w-6 h-6 rounded-full text-muted-foreground bg-muted hover:bg-accent cursor-pointer transition-all duration-150'
+                className='inline-flex items-center justify-center w-6 h-6 rounded-full text-muted-foreground bg-muted hover:bg-accent cursor-pointer transition duration-150'
                 onClick={e => e.stopPropagation()}
                 data-track-category='MESSAGE'
                 data-track-name='OPEN_EMOJI_PICKER'

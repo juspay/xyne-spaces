@@ -3,6 +3,7 @@ import { PROSE_BOX_HEIGHT, ProseBox } from '../../../shared/primitives/ProseBox'
 import { AgentPromptVersions } from './AgentPromptVersions';
 import { CredentialsCard } from './credentials/CredentialsCard';
 import { ModelCard } from './model/ModelCard';
+import { PersonalHarnessSection } from './model/PersonalHarnessSection';
 import type { Agent } from '@/services/claw/clawAuthAgentTypes';
 import type { AgentDraft } from '../useAgentDraft';
 import {
@@ -137,6 +138,8 @@ export function AgentPersonaTabV2({
       )}
 
       <ModelCard agent={agent} canEdit={canEdit} />
+
+      <PersonalHarnessSection agentSlug={agent.slug} />
 
       <CredentialsCard slug={agent.slug} canRead={canEdit} canManage={canManageCredentials} />
     </div>

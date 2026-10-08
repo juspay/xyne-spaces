@@ -6,8 +6,12 @@ describe("parseAgentRoute", () => {
     expect(parseAgentRoute("/ask-ai summarise this")).toEqual({ slug: "ask-ai", task: "summarise this", listAgents: false });
   });
 
-  it("accepts @slug as well, and lower-cases the slug", () => {
-    expect(parseAgentRoute("@Ask-AI hello")).toMatchObject({ slug: "ask-ai", task: "hello" });
+  it("lower-cases the slug", () => {
+    expect(parseAgentRoute("/Ask-AI hello")).toMatchObject({ slug: "ask-ai", task: "hello" });
+  });
+
+  it("reads a leading @name as a mention of a person, not an agent", () => {
+    expect(parseAgentRoute("@Priya can you help")).toEqual({ task: "@Priya can you help", listAgents: false });
   });
 
   it("keeps a bare slug with no task, so the caller can ask what they want", () => {
@@ -28,13 +32,13 @@ describe("parseAgentRoute", () => {
 
 describe("namesAnAgent", () => {
   it("is true for the forms that address an agent", () => {
-    for (const text of ["/ask-ai hi", "@ask-ai hi", "/agents", "/ask-ai"]) {
+    for (const text of ["/ask-ai hi", "/agents", "/ask-ai"]) {
       expect(namesAnAgent(text)).toBe(true);
     }
   });
 
   it("is false for ordinary chatter, including a stray slash", () => {
-    for (const text of ["hello there", "and/or", "50/50 split"]) {
+    for (const text of ["hello there", "and/or", "50/50 split", "@Priya hi", "@agents"]) {
       expect(namesAnAgent(text)).toBe(false);
     }
   });

@@ -37,6 +37,7 @@ import {
 } from '../../utils/recordingSummaryRequest';
 import AppNavigator from '../../components/AppNavigator/AppNavigator';
 import { usePlatform } from '../../hooks/usePlatform';
+import { useTranscriptTranslation } from '../../hooks/useTranscriptTranslation';
 import { useSpeakerIdentificationEnabled } from '../../components/SpeakerIdentification/useSpeakerIdentificationEnabled';
 import {
   Spinner,
@@ -97,6 +98,7 @@ import {
   TranscriptSidePanel,
   type TranscriptPanelTarget,
 } from '../../components/Chat/TranscriptCitationModal/TranscriptSidePanel';
+import { ORIGINAL_TRANSCRIPT_LANGUAGE, SUPPORTED_TRANSCRIPT_LANGUAGES } from '@xyne/shared';
 import { transcriptCitationStore } from '../../components/Chat/TranscriptCitationModal';
 import { parseMarkedItems, type MarkedItem } from '../../components/CallTimeline/markedItems';
 import type { Canvas } from '../../components/Canvas/Canvas.types';
@@ -219,7 +221,6 @@ export default function RecordingDetailV2Screen({
   const capturedTranscript =
     navState?.hasTranscript === true &&
     (stoppedAtMs === null || Date.now() - stoppedAtMs < NO_TRANSCRIPT_AFTER_MS);
-  const speakerIdentificationEnabled = useSpeakerIdentificationEnabled();
   const currentUser = useSelf();
   const { summaryModelPreference, setSummaryModelPreference } = useSummaryModelPreference();
 
@@ -240,6 +241,21 @@ export default function RecordingDetailV2Screen({
     requestedTab === 'notes' ? 'notes' : justStopped ? 'secondary' : getRecordingV2Tab(),
   );
   const [showTranscriptPanel, setShowTranscriptPanel] = useState(false);
+  const [selectedTranscriptLanguage, setSelectedTranscriptLanguage] = useState(
+    ORIGINAL_TRANSCRIPT_LANGUAGE,
+  );
+
+  // Deep link `?lang=…` opens the transcript panel on arrival
+  useEffect(() => {
+    const lang = new URLSearchParams(location.search).get('lang');
+    if (!lang) return;
+    const isValid =
+      lang === ORIGINAL_TRANSCRIPT_LANGUAGE ||
+      SUPPORTED_TRANSCRIPT_LANGUAGES.some(language => language.code === lang);
+    setShowTranscriptPanel(true);
+    setSelectedTranscriptLanguage(isValid ? lang : ORIGINAL_TRANSCRIPT_LANGUAGE);
+  }, [location.search]);
+
   const [showShareModal, setShowShareModal] = useState(false);
   const [showPostToChannelModal, setShowPostToChannelModal] = useState(false);
   const [showPostToEmailModal, setShowPostToEmailModal] = useState(false);
@@ -704,16 +720,16 @@ export default function RecordingDetailV2Screen({
       // Patch only the fields being polled for: a failed refresh must not tear down
       // the loaded screen, and Zero owns the rest.
       void recordingService
-        .getRecordingDetail(recordingId)
+        .getRecordingStatus(recordingId)
         .then(fresh =>
           setRecording(current =>
             current
               ? {
                   ...current,
-                  hasRecording: !!fresh.hasRecording,
+                  hasRecording: fresh.hasRecording,
+                  durationMs: fresh.durationMs ?? current.durationMs,
                   recordingType: fresh.recordingType ?? current.recordingType ?? null,
                   attachmentId: fresh.attachmentId ?? current.attachmentId ?? null,
-                  durationMs: fresh.durationMs ?? current.durationMs,
                 }
               : current,
           ),
@@ -728,7 +744,7 @@ export default function RecordingDetailV2Screen({
     try {
       if (loadedRecordingIdRef.current !== id) setLoading(true);
       setFailure(null);
-      const data = await recordingService.getRecordingDetail(id);
+      const data = await recordingService.getRecordingDetail(id, { scope: 'metadata' });
       loadedRecordingIdRef.current = id;
       setRecording(prev =>
         prev ? { ...prev, ...data, durationMs: data.durationMs ?? prev.durationMs } : data,
@@ -970,10 +986,20 @@ export default function RecordingDetailV2Screen({
     [recordingId],
   );
 
+  const transcript = useTranscriptTranslation({
+    externalId: recording?.externalId,
+    language: selectedTranscriptLanguage,
+    // Fetch only once the panel is actually opened, not on page load — mirrors
+    // getRecordingDetail no longer embedding the transcript body.
+    enabled: showTranscriptPanel,
+  });
+  const speakerIdentificationEnabled = useSpeakerIdentificationEnabled();
   const transcriptText =
-    speakerIdentificationEnabled && recording?.hasIdentifiedTranscript
-      ? (recording.identifiedTranscript ?? recording.transcript)
-      : recording?.transcript;
+    selectedTranscriptLanguage === ORIGINAL_TRANSCRIPT_LANGUAGE &&
+    speakerIdentificationEnabled &&
+    recording?.hasIdentifiedTranscript
+      ? (recording.identifiedTranscript ?? transcript.text)
+      : transcript.text;
 
   const markedMomentSeconds = useMemo(
     () =>
@@ -983,12 +1009,9 @@ export default function RecordingDetailV2Screen({
     [recording?.markedItems],
   );
 
-  /**
-   * Route canvas citations into this screen's own transcript panel instead of the
-   * global TranscriptCitationModal, so clicking a citation behaves like the toolbar
-   */
+  // Route canvas citations into this screen's own transcript panel instead of the global TranscriptCitationModal.
   useEffect(() => {
-    if (!recordingId || !transcriptText?.trim()) return;
+    if (!recordingId) return;
     return transcriptCitationStore.setHandler(ref => {
       if (ref.callId !== recordingId) return false;
       setCitationRef({
@@ -1000,7 +1023,7 @@ export default function RecordingDetailV2Screen({
       setShowTranscriptPanel(true);
       return true;
     });
-  }, [recordingId, transcriptText]);
+  }, [recordingId]);
 
   // Seeds the summary-request record for the auto-detected pending state (server
   // summarizing without an explicit "Generate summary" click), so its progress
@@ -1109,6 +1132,7 @@ export default function RecordingDetailV2Screen({
     recording,
     awaitingSummary,
     summaryFailed,
+    noTranscriptTimedOut: !isLive && !hasTranscript,
   });
   const showSummaryShimmer = summaryPanelState === 'pending';
   const summaryFailedEffective = summaryPanelState === 'failed';
@@ -1162,8 +1186,6 @@ export default function RecordingDetailV2Screen({
           <AppNavigator />
         </div>
       )}
-      {/* layoutScroll: the tab indicator animates inside this scroller, so Motion has
-          to account for its scroll offset when measuring positions. */}
       <motion.div
         ref={scrollContainerRef}
         layoutScroll
@@ -1284,7 +1306,7 @@ export default function RecordingDetailV2Screen({
                       recordingService.downloadRecordingBlob(recording.externalId, signal),
                   }
                 : {})}
-              {...(transcriptText
+              {...(hasTranscript
                 ? { onMarkerSelect: handleMarkerSelect, onOpenTranscript: openTranscriptPanel }
                 : {})}
             />
@@ -1432,7 +1454,7 @@ export default function RecordingDetailV2Screen({
           ) : visibleTab === 'transcript' ? (
             <LiveTranscriptSection recordingExternalId={recording.externalId} />
           ) : (
-            <section className='mb-8 max-w-full'>
+            <section className='flex max-w-full flex-1 flex-col'>
               <div className='flex items-center justify-between'>
                 <div className='flex items-center gap-2.5'>
                   <h2 className='text-lg font-semibold text-foreground'>Summary</h2>
@@ -1442,7 +1464,7 @@ export default function RecordingDetailV2Screen({
                     </span>
                   )}
                 </div>
-                {transcriptText ? (
+                {hasTranscript ? (
                   <Tooltip
                     content={!showTranscriptPanel ? 'Open transcript' : 'Close transcript'}
                     side='left'
@@ -1478,146 +1500,149 @@ export default function RecordingDetailV2Screen({
                       Fast. Each "Retry with …" opens a popover to apply the tier to
                       just this summary or make it the default for future
                       recordings. */}
-                  {canEdit &&
-                    (recording.summaryModelUsed === 'thinking' ? (
-                      <div className='mt-5 flex items-center justify-between gap-2.5 border-t border-border pt-3'>
-                        <span className='text-xs text-muted-foreground'>
-                          Generated with a thinking model
-                          {summaryModelPreference === 'thinking'
-                            ? ' · default for future summaries'
-                            : ''}
-                        </span>
-                        <div className='flex items-center gap-2.5'>
-                          <span className='text-xs text-muted-foreground'>Want it faster?</span>
-                          <Popover
-                            open={modelMenuOpen}
-                            onOpenChange={setModelMenuOpen}
-                            side='top'
-                            align='end'
-                            sideOffset={8}
-                            className='w-72 rounded-xl border border-border bg-popover p-1.5 shadow-lg'
-                            trigger={
-                              <Button
-                                type='button'
-                                variant='outline'
-                                size='sm'
-                                disabled={isRegeneratingSummary}
-                                title='Regenerate with Fast — single pass, ready in seconds'
-                                className='h-7 gap-1.5 rounded-lg text-xs font-medium text-muted-foreground'
-                                data-track-category='RecordingDetailV2'
-                                data-track-name='retry_with_fast'
-                              >
-                                <RefreshCw className='size-3.5' />
-                                Retry with Fast
-                              </Button>
-                            }
-                          >
-                            <div>
-                              <p className='px-2 pb-1 pt-1.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground'>
-                                Apply fast to
-                              </p>
-                              <button
-                                type='button'
-                                onClick={() => void applyModel('fast', false)}
-                                className='block w-full rounded-lg px-2 py-2 text-left transition-colors hover:bg-muted'
-                                data-track-category='RecordingDetailV2'
-                                data-track-name='retry_fast_once'
-                              >
-                                <p className='text-sm font-medium text-foreground'>
-                                  Just this summary
+                  {canEdit && (
+                    <div className='mt-auto'>
+                      {recording.summaryModelUsed === 'thinking' ? (
+                        <div className='flex items-center justify-between gap-2.5 border-t border-border pt-3'>
+                          <span className='text-xs text-muted-foreground'>
+                            Generated with a thinking model
+                            {summaryModelPreference === 'thinking'
+                              ? ' · default for future summaries'
+                              : ''}
+                          </span>
+                          <div className='flex items-center gap-2.5'>
+                            <span className='text-xs text-muted-foreground'>Want it faster?</span>
+                            <Popover
+                              open={modelMenuOpen}
+                              onOpenChange={setModelMenuOpen}
+                              side='top'
+                              align='end'
+                              sideOffset={8}
+                              className='w-72 rounded-xl border border-border bg-popover p-1.5 shadow-lg'
+                              trigger={
+                                <Button
+                                  type='button'
+                                  variant='outline'
+                                  size='sm'
+                                  disabled={isRegeneratingSummary}
+                                  title='Regenerate with Fast — single pass, ready in seconds'
+                                  className='h-7 gap-1.5 rounded-lg text-xs font-medium text-muted-foreground'
+                                  data-track-category='RecordingDetailV2'
+                                  data-track-name='retry_with_fast'
+                                >
+                                  <RefreshCw className='size-3.5' />
+                                  Retry with Fast
+                                </Button>
+                              }
+                            >
+                              <div>
+                                <p className='px-2 pb-1 pt-1.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground'>
+                                  Apply fast to
                                 </p>
-                                <p className='mt-0.5 text-xs leading-snug text-muted-foreground'>
-                                  Regenerate once. Your default stays Thinking.
-                                </p>
-                              </button>
-                              <button
-                                type='button'
-                                onClick={() => void applyModel('fast', true)}
-                                className='block w-full rounded-lg px-2 py-2 text-left transition-colors hover:bg-muted'
-                                data-track-category='RecordingDetailV2'
-                                data-track-name='retry_fast_always'
-                              >
-                                <p className='text-sm font-medium text-foreground'>
-                                  All future summaries
-                                </p>
-                                <p className='mt-0.5 text-xs leading-snug text-muted-foreground'>
-                                  Make Fast the default for every call you capture.
-                                </p>
-                              </button>
-                            </div>
-                          </Popover>
+                                <button
+                                  type='button'
+                                  onClick={() => void applyModel('fast', false)}
+                                  className='block w-full rounded-lg px-2 py-2 text-left transition-colors hover:bg-muted'
+                                  data-track-category='RecordingDetailV2'
+                                  data-track-name='retry_fast_once'
+                                >
+                                  <p className='text-sm font-medium text-foreground'>
+                                    Just this summary
+                                  </p>
+                                  <p className='mt-0.5 text-xs leading-snug text-muted-foreground'>
+                                    Regenerate once. Your default stays Thinking.
+                                  </p>
+                                </button>
+                                <button
+                                  type='button'
+                                  onClick={() => void applyModel('fast', true)}
+                                  className='block w-full rounded-lg px-2 py-2 text-left transition-colors hover:bg-muted'
+                                  data-track-category='RecordingDetailV2'
+                                  data-track-name='retry_fast_always'
+                                >
+                                  <p className='text-sm font-medium text-foreground'>
+                                    All future summaries
+                                  </p>
+                                  <p className='mt-0.5 text-xs leading-snug text-muted-foreground'>
+                                    Make Fast the default for every call you capture.
+                                  </p>
+                                </button>
+                              </div>
+                            </Popover>
+                          </div>
                         </div>
-                      </div>
-                    ) : (
-                      <div className='mt-5 flex items-center justify-between gap-2.5 border-t border-border pt-3'>
-                        <span className='text-xs text-muted-foreground'>
-                          Generated with a fast model
-                          {summaryModelPreference === 'fast'
-                            ? ' · default for future summaries'
-                            : ''}
-                        </span>
-                        <div className='flex items-center gap-2.5'>
-                          <span className='text-xs text-muted-foreground'>Not quite right?</span>
-                          <Popover
-                            open={modelMenuOpen}
-                            onOpenChange={setModelMenuOpen}
-                            side='top'
-                            align='end'
-                            sideOffset={8}
-                            className='w-72 rounded-xl border border-border bg-popover p-1.5 shadow-lg'
-                            trigger={
-                              <Button
-                                type='button'
-                                variant='outline'
-                                size='sm'
-                                disabled={isRegeneratingSummary}
-                                title='Regenerate with Thinking — deeper pass, takes a little longer'
-                                className='h-7 gap-1.5 rounded-lg text-xs font-medium text-muted-foreground'
-                                data-track-category='RecordingDetailV2'
-                                data-track-name='retry_with_thinking'
-                              >
-                                <RefreshCw className='size-3.5' />
-                                Retry with Thinking
-                              </Button>
-                            }
-                          >
-                            <div>
-                              <p className='px-2 pb-1 pt-1.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground'>
-                                Apply thinking to
-                              </p>
-                              <button
-                                type='button'
-                                onClick={() => void applyModel('thinking', false)}
-                                className='block w-full rounded-lg px-2 py-2 text-left transition-colors hover:bg-muted'
-                                data-track-category='RecordingDetailV2'
-                                data-track-name='retry_thinking_once'
-                              >
-                                <p className='text-sm font-medium text-foreground'>
-                                  Just this summary
+                      ) : (
+                        <div className='flex items-center justify-between gap-2.5 border-t border-border pt-3'>
+                          <span className='text-xs text-muted-foreground'>
+                            Generated with a fast model
+                            {summaryModelPreference === 'fast'
+                              ? ' · default for future summaries'
+                              : ''}
+                          </span>
+                          <div className='flex items-center gap-2.5'>
+                            <span className='text-xs text-muted-foreground'>Not quite right?</span>
+                            <Popover
+                              open={modelMenuOpen}
+                              onOpenChange={setModelMenuOpen}
+                              side='top'
+                              align='end'
+                              sideOffset={8}
+                              className='w-72 rounded-xl border border-border bg-popover p-1.5 shadow-lg'
+                              trigger={
+                                <Button
+                                  type='button'
+                                  variant='outline'
+                                  size='sm'
+                                  disabled={isRegeneratingSummary}
+                                  title='Regenerate with Thinking — deeper pass, takes a little longer'
+                                  className='h-7 gap-1.5 rounded-lg text-xs font-medium text-muted-foreground'
+                                  data-track-category='RecordingDetailV2'
+                                  data-track-name='retry_with_thinking'
+                                >
+                                  <RefreshCw className='size-3.5' />
+                                  Retry with Thinking
+                                </Button>
+                              }
+                            >
+                              <div>
+                                <p className='px-2 pb-1 pt-1.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground'>
+                                  Apply thinking to
                                 </p>
-                                <p className='mt-0.5 text-xs leading-snug text-muted-foreground'>
-                                  Regenerate once. Your default stays Fast.
-                                </p>
-                              </button>
-                              <button
-                                type='button'
-                                onClick={() => void applyModel('thinking', true)}
-                                className='block w-full rounded-lg px-2 py-2 text-left transition-colors hover:bg-muted'
-                                data-track-category='RecordingDetailV2'
-                                data-track-name='retry_thinking_always'
-                              >
-                                <p className='text-sm font-medium text-foreground'>
-                                  All future summaries
-                                </p>
-                                <p className='mt-0.5 text-xs leading-snug text-muted-foreground'>
-                                  Make Thinking the default for every call you capture.
-                                </p>
-                              </button>
-                            </div>
-                          </Popover>
+                                <button
+                                  type='button'
+                                  onClick={() => void applyModel('thinking', false)}
+                                  className='block w-full rounded-lg px-2 py-2 text-left transition-colors hover:bg-muted'
+                                  data-track-category='RecordingDetailV2'
+                                  data-track-name='retry_thinking_once'
+                                >
+                                  <p className='text-sm font-medium text-foreground'>
+                                    Just this summary
+                                  </p>
+                                  <p className='mt-0.5 text-xs leading-snug text-muted-foreground'>
+                                    Regenerate once. Your default stays Fast.
+                                  </p>
+                                </button>
+                                <button
+                                  type='button'
+                                  onClick={() => void applyModel('thinking', true)}
+                                  className='block w-full rounded-lg px-2 py-2 text-left transition-colors hover:bg-muted'
+                                  data-track-category='RecordingDetailV2'
+                                  data-track-name='retry_thinking_always'
+                                >
+                                  <p className='text-sm font-medium text-foreground'>
+                                    All future summaries
+                                  </p>
+                                  <p className='mt-0.5 text-xs leading-snug text-muted-foreground'>
+                                    Make Thinking the default for every call you capture.
+                                  </p>
+                                </button>
+                              </div>
+                            </Popover>
+                          </div>
                         </div>
-                      </div>
-                    ))}
+                      )}
+                    </div>
+                  )}
                 </>
               ) : (
                 <SummaryGenerationPanel
@@ -1630,7 +1655,7 @@ export default function RecordingDetailV2Screen({
                   initialProgress={getSummaryProgress(recordingId)}
                   initialStageIndex={getSummaryStage(recordingId)}
                   onProgressPause={handleSummaryProgressPause}
-                  onReadTranscript={transcriptText ? openTranscriptPanel : undefined}
+                  onReadTranscript={hasTranscript ? openTranscriptPanel : undefined}
                 />
               )}
               {/* Shown to everyone with the recording. Each doc lives in the
@@ -1648,12 +1673,19 @@ export default function RecordingDetailV2Screen({
 
       {/* Transcript side panel */}
       <AnimatePresence>
-        {showTranscriptPanel && transcriptText && (
+        {showTranscriptPanel && (
           <TranscriptSidePanel
-            transcript={transcriptText}
+            transcript={transcriptText ?? ''}
+            isLoading={transcript.isLoading}
+            error={transcript.error ?? null}
+            onRetry={transcript.retry}
             target={citationRef}
             openNonce={citationNonce}
             markedTimestampsSeconds={markedMomentSeconds}
+            title={recording.title}
+            selectedLanguage={selectedTranscriptLanguage}
+            onLanguageChange={setSelectedTranscriptLanguage}
+            isTranslating={transcript.isTranslating}
             onClose={() => {
               setShowTranscriptPanel(false);
               setCitationRef(null);

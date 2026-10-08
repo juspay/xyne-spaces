@@ -121,6 +121,30 @@ export async function getMe(): Promise<User> {
   return data.user;
 }
 
+/**
+ * The Claw-side identity for the logged-in user. `userId` is the canonical
+ * Claw id (what Claw-owned rows like Agent.ownerUserId store); `spacesUserId`
+ * is the raw workspace-scoped Spaces id (what `getMe().id` returns). A user's
+ * agent rows may be keyed by either, so ownership comparisons must accept both.
+ */
+export interface ClawIdentity {
+  userId: string;
+  spacesUserId?: string;
+  spacesWorkspaceId?: string;
+  spacesOrgMemberId?: string;
+}
+
+export async function getClawIdentity(): Promise<ClawIdentity | null> {
+  try {
+    const data = await request<{ success: boolean; data: ClawIdentity }>(
+      `${AUTH_API_URL}/api/v1/users/me`,
+    );
+    return data.data;
+  } catch {
+    return null;
+  }
+}
+
 export async function upsertUser(user: User): Promise<void> {
   const spacesToken = getGoogleToken();
   await request<{ success: boolean }>(
@@ -461,6 +485,33 @@ export interface SandboxRepoOption {
   key: string;
   name: string;
   description?: string;
+}
+
+export interface OptimizationOption {
+  key: string;
+  label: string;
+  summary: string;
+  detail: string;
+  group: string;
+  defaultOn: boolean;
+  /** "fleet" switches are decided outside agent runs, so only env changes them. */
+  scope: "agent" | "fleet";
+  requires?: string;
+}
+
+export interface OptimizationCatalog {
+  groups: Array<{ id: string; title: string; description: string }>;
+  optimizations: OptimizationOption[];
+  /** Per delegation tier: switches that default on (or off) for that tier. */
+  tierDefaults: Record<string, Record<string, boolean>>;
+}
+
+/** Every claw optimization switch, for the agent page's Optimizations section. */
+export async function getOptimizationCatalog(): Promise<OptimizationCatalog> {
+  const data = await request<{ success: boolean; data: OptimizationCatalog }>(
+    `${AUTH_API_URL}/api/v1/agents/optimizations`,
+  );
+  return data.data;
 }
 
 /** Available sandbox repo setups (for the agent "Sandbox repository" picker). */
@@ -4857,7 +4908,10 @@ export interface CuratorEmittedCandidate {
   signalScore?: number;
   groundedOnIds?: string[];
   verdict: "kept" | "dropped";
-  dropReason?: "empty" | "empty-or-too-long" | "bad-subsystem" | "low-signal" | "ungrounded" | "malformed";
+  dropReason?: "empty" | "empty-or-too-long" | "bad-subsystem" | "low-signal" | "ungrounded" | "malformed" | "classifier-duplicate" | "classifier-noise";
+  jevVerdict?: "new" | "duplicate" | "update" | "noise";
+  jevConfidence?: number;
+  jevScore?: number;
 }
 
 /** Full trace of one curator LLM call. Mirrors UserMemoryCuratorTrace in
@@ -4885,14 +4939,26 @@ export interface CuratorTrace {
    *  Guard (`trace?.emitted`) before reading `.length` / `.map`. */
   emitted?: CuratorEmittedCandidate[];
   error?: string;
+  /** Classifier (Jev) pass after the LLM (R8), stored with the LLM exchange. */
+  classifier?: CuratorClassifierTrace;
 }
 
 /** Per-file outcome of a soul-synthesis run (runType="synthesize"). */
 export interface SynthFileResult {
   name: string;
   factsUsed: number;
-  action: "updated" | "skipped" | "error";
+  /** "held" = rewrite generated, but the nightly update check kept the old file. */
+  action: "updated" | "skipped" | "error" | "held";
   chars?: number;
+  check?: {
+    verdict: "accept" | "review" | "reject";
+    keepsOld?: number;
+    supported?: number;
+    choice?: string;
+    source: "jev" | "fallback";
+    ms: number;
+    exchange?: ClassifierExchange;
+  };
   error?: string;
   model?: string;
   durationMs?: number;
@@ -4938,6 +5004,8 @@ export interface GateTrace {
   /** Set when the gate FAILED (timeout / HTTP error / bad response) and
    *  fail-opened — the event is recorded with status="error". */
   error?: string;
+  /** Every classifier (Jev) call the gate made, in full. */
+  classifier?: ClassifierExchange[];
 }
 
 export interface PipelineRecordPreview {
@@ -5817,6 +5885,19 @@ export interface TwinReplyAgg {
   responseTime: TwinReplyResponseTime;
   previousApprovalRate: number | null;
   previousEditRate: number | null;
+  /** Per-week approval trend, oldest first (absent on older backends). */
+  weekly?: TwinWeeklyReplyPoint[];
+}
+
+export interface TwinWeeklyReplyPoint {
+  weekStart: string;
+  proposed: number;
+  accepted: number;
+  acceptedEdited: number;
+  declined: number;
+  ignored: number;
+  approvalRate: number | null;
+  cleanApprovalRate: number | null;
 }
 
 export interface TwinGateAgg {
@@ -7724,4 +7805,32 @@ export async function deregisterGatewayService(serviceName: string): Promise<voi
     `${AUTH_API_URL}/api/v1/gateway-registry/${encodeURIComponent(serviceName)}`,
     { method: "DELETE" },
   );
+}
+
+/** One classifier (Jev) call in full: what it was told, asked, and answered. */
+export interface ClassifierExchange {
+  purpose: string;
+  backend: string;
+  ms: number;
+  ok: boolean;
+  error?: string;
+  state: string;
+  questionSpec: Record<string, unknown>;
+  answers: Record<string, unknown> | null;
+  at: string;
+}
+
+export interface CuratorClassifierTrace {
+  checked: number;
+  kept: number;
+  dropped: number;
+  unavailable: number;
+  ms: number;
+  calls: Array<{
+    text: string;
+    verdict?: "new" | "duplicate" | "update" | "noise";
+    confidence?: number;
+    worth?: number;
+    exchange: ClassifierExchange;
+  }>;
 }

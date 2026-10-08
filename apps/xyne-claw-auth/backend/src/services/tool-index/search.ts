@@ -4,6 +4,9 @@ import { ensureToolIndexBank, memory, memoryEnabled } from "./bank.js";
 import { classifyToolRisk } from "xyne-claw-shared";
 import { extractParams, integrationOf, readToolTag } from "./render.js";
 import type { RiskLevel, ToolMatch } from "./types.js";
+import { createLogger } from "../../logger.js";
+
+const log = createLogger("tool-index-search");
 
 /**
  * Search stage: a need in natural language becomes a ranked shortlist of tools.
@@ -95,6 +98,7 @@ async function enrich(ranked: Array<{ slug: string; score: number }>, orgId?: st
       slug: row.slug,
       name: row.name,
       integration: integrationOf(row.source),
+      source: row.source,
       description: row.description,
       risk: classifyToolRisk(row.name),
       params: extractParams(row.inputSchema),
@@ -178,6 +182,73 @@ export async function searchTools(need: string, opts: SearchToolsOpts = {}): Pro
   return enrich(rankBySlug(results).slice(0, limit), opts.orgId);
 }
 
+/** Words too generic to rank a tool by — they match most of the catalog. */
+const KEYWORD_STOPWORDS = new Set([
+  "the", "and", "for", "with", "from", "into", "that", "this", "tool", "tools", "list", "get", "use",
+  "using", "integration", "integrations", "can", "you", "all", "any", "some", "via",
+]);
+
+/**
+ * Keyword search over the same Postgres rows, for when semantic search is
+ * unavailable (memory backend not configured, or down). A tool scores one point
+ * per distinct query word found in its name, source or description; a name or
+ * source hit counts double so "github …" ranks GitHub's own tools first.
+ */
+/** The distinct, non-generic words of a query (≥3 chars), for keyword matching. */
+export function keywordQueryWords(need: string): string[] {
+  return [
+    ...new Set(need.toLowerCase().split(/[^a-z0-9]+/).filter((w) => w.length >= 3 && !KEYWORD_STOPWORDS.has(w))),
+  ];
+}
+
+export async function keywordSearchTools(need: string, opts: SearchToolsOpts = {}): Promise<ToolMatch[]> {
+  const words = keywordQueryWords(need);
+  if (words.length === 0) return [];
+  const limit = Math.min(Math.max(opts.limit ?? DEFAULT_LIMIT, 1), MAX_LIMIT);
+  const allowedRisk = opts.maxRisk ? new Set(riskAtOrBelow(opts.maxRisk)) : null;
+  // Every row, not listTools' capped page — ranking has to see the whole catalog.
+  const rows = await prisma.tool.findMany({
+    where: {
+      ...(opts.includeDisabled ? {} : { enabled: true }),
+      ...(opts.integrations?.length
+        ? { OR: opts.integrations.flatMap((i) => [{ source: i }, { source: `custom:${i}` }, { source: `mcp:${i}` }]) }
+        : {}),
+    },
+    select: { slug: true, name: true, description: true, source: true },
+  });
+  const ranked = rows
+    .map((row) => {
+      const head = `${row.name} ${row.slug} ${row.source}`.toLowerCase();
+      const body = row.description.toLowerCase();
+      const score = words.reduce((acc, w) => acc + (head.includes(w) ? 2 : body.includes(w) ? 1 : 0), 0);
+      return { slug: row.slug, score, risk: classifyToolRisk(row.name) };
+    })
+    .filter((r) => r.score > 0 && (!allowedRisk || allowedRisk.has(r.risk)))
+    .sort((a, b) => b.score - a.score || a.slug.localeCompare(b.slug))
+    .slice(0, limit)
+    .map(({ slug, score }) => ({ slug, score }));
+  return enrich(ranked, opts.orgId);
+}
+
+/**
+ * Semantic search, degrading to keyword search instead of failing. The
+ * deployment-scope search-tools answer is how an agent learns an integration
+ * exists at all; a memory-backend outage must not turn that into an error.
+ */
+export async function searchToolsWithFallback(
+  need: string,
+  opts: SearchToolsOpts = {},
+): Promise<{ matches: ToolMatch[]; ranking: "semantic" | "keyword" }> {
+  if (memoryEnabled()) {
+    try {
+      return { matches: await searchTools(need, opts), ranking: "semantic" };
+    } catch (err) {
+      log.warn(`[tool-index] semantic search failed, using keyword search: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
+  return { matches: await keywordSearchTools(need, opts), ranking: "keyword" };
+}
+
 /**
  * The same shortlist without a query: the catalog, filtered.
  * Reads Postgres, not the bank — listing has no relevance to rank by, and this
@@ -203,6 +274,7 @@ export async function listTools(opts: SearchToolsOpts = {}): Promise<ToolMatch[]
       slug: row.slug,
       name: row.name,
       integration: integrationOf(row.source),
+      source: row.source,
       description: row.description,
       risk: classifyToolRisk(row.name),
       params: extractParams(row.inputSchema),

@@ -53,6 +53,7 @@ function getParsedConfigs(): BotConfigMap {
 
     // Normalise each entry
     for (const entry of Object.values(parsed)) {
+      if (typeof entry.slackBotToken === 'string') entry.slackBotToken = entry.slackBotToken.trim();
       // Decode base64 migrationFinalMessage if present
       if (entry.migrationFinalMessage) {
         try {

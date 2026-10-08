@@ -175,3 +175,42 @@ export function parseMrkdwnBlocks<T>(content: string, handlers: MrkdwnBlockHandl
 
   return results;
 }
+
+// ============================================================================
+// Link-URL angle-bracket sanitizer
+// ============================================================================
+
+/**
+ * Percent-encode `<` and `>` that appear *inside a link URL*.
+ *
+ * Alertmanager / Grafana templates emit graph links whose URL carries an
+ * unescaped `>` (e.g. a PromQL threshold `...sum(rate(istio[5m]))>100`). The
+ * downstream Slack→HTML escaper (`@clearfeed-ai/slack-to-html`) terminates a
+ * link token at the FIRST `>`, so the URL is truncated and its tail leaks out
+ * as literal text — producing the broken `">📈` / `100|📈>` remnants seen in
+ * #production-swat alert threads.
+ *
+ * Slack's own spec requires senders to entity-escape `<`/`>` inside link URLs;
+ * these alert senders don't. We repair it here BEFORE escaping, for both link
+ * forms, without touching plain-text `>` (so "more than 100 > 5" is preserved):
+ *   1. HTML anchors:      <a ... href="URL" ...>
+ *   2. Slack link syntax: <scheme://URL>  and  <scheme://URL|label>
+ */
+export function encodeAnglesInsideLinkUrls(text: string): string {
+  const enc = (url: string): string => url.replace(/</g, '%3C').replace(/>/g, '%3E');
+
+  // 1) HTML anchor href attribute (double- or single-quoted).
+  let out = text.replace(/href\s*=\s*"([^"]*)"/gi, (_m, url: string) => `href="${enc(url)}"`);
+  out = out.replace(/href\s*=\s*'([^']*)'/gi, (_m, url: string) => `href='${enc(url)}'`);
+
+  // 2) Slack link syntax <url> / <url|label>. Anchor on a real scheme so we
+  //    never touch mentions (<@U…>), channels (<#C…>) or plain-text angles.
+  //    Capture the whole token up to the LAST `>` and split the optional
+  //    `|label` (labels never contain `<`, `>` or `|`).
+  out = out.replace(
+    /<((?:https?|mailto):[^\s<]*?)(\|[^<>|]*)?>(?=\s|$|[^A-Za-z0-9])/g,
+    (_m, url: string, label: string | undefined) => `<${enc(url)}${label || ''}>`,
+  );
+
+  return out;
+}

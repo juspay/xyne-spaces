@@ -50,6 +50,8 @@ import { useZero } from '../../../hooks/useZero';
 import { mutators } from '../../../zero/mutators';
 import { DownloadButton } from './DownloadButton';
 import { DeleteButton } from './DeleteButton';
+import { InlineCsvFile } from './InlineCsvFile';
+import { isCsvFile } from './csvPreview';
 
 import { CopyCopied, CopyDefault } from '@xyne/icons';
 import { useClipboard } from '../../../hooks/useClipboard';
@@ -1273,8 +1275,10 @@ export const MessageAttachment: React.FC<MessageAttachmentProps> = ({
     );
   }
 
+  const isCsv = isCsvFile(attachment.mimetype, attachment.originalFilename);
   const isTextFile =
-    attachment.mimetype === 'text/plain' || attachment.originalFilename.endsWith('.txt');
+    !isCsv &&
+    (attachment.mimetype === 'text/plain' || attachment.originalFilename.endsWith('.txt'));
   const isCodeFile = isCodeFileByName(attachment.originalFilename);
   const isVideo = isVideoFile(attachment.mimetype);
   const isImage =
@@ -1316,6 +1320,18 @@ export const MessageAttachment: React.FC<MessageAttachmentProps> = ({
       handleCardClick();
     }
   };
+
+  if (isCsv && !compact && !isMobile) {
+    return (
+      <InlineCsvFile
+        attachmentId={attachment.id}
+        fileName={attachment.originalFilename}
+        fileSize={attachment.size}
+        onOpen={handleCardClick}
+        {...(extraActions && { extraActions })}
+      />
+    );
+  }
 
   // Render inline text viewer for .txt files on PC only (mobile shows as regular attachment)
   if (isTextFile && !compact && !isMobile) {
@@ -1383,7 +1399,7 @@ export const MessageAttachment: React.FC<MessageAttachmentProps> = ({
     <>
       <div
         className={cn(
-          'message-attachment group/attachment relative flex flex-col bg-card border border-border rounded-lg overflow-hidden hover:shadow-md transition-all duration-200 cursor-pointer focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2',
+          'message-attachment group/attachment relative flex flex-col bg-card border border-border rounded-lg overflow-hidden hover:shadow-md transition duration-200 cursor-pointer focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2',
           compact
             ? 'w-16 h-16 '
             : isInGrid
@@ -1444,7 +1460,7 @@ export const MessageAttachment: React.FC<MessageAttachmentProps> = ({
         </div>
 
         {/* Hover overlay for better UX feedback */}
-        <div className='absolute inset-0 bg-black bg-opacity-0 group-hover/attachment:bg-opacity-5 transition-all duration-200 pointer-events-none' />
+        <div className='absolute inset-0 bg-black bg-opacity-0 group-hover/attachment:bg-opacity-5 transition duration-200 pointer-events-none' />
       </div>
     </>
   );

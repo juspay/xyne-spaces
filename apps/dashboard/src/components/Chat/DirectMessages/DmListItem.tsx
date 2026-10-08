@@ -1,4 +1,4 @@
-import { ReactElement, ReactNode, KeyboardEvent, useMemo } from 'react';
+import { ReactElement, ReactNode, KeyboardEvent, memo, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   type Channel,
@@ -39,7 +39,7 @@ const getSenderLabel = (isCurrentUser: boolean, isDM: boolean, senderName?: stri
   return senderName?.split(' ')[0] ?? '';
 };
 
-export const DmListItem = ({
+const DmListItemComponent = ({
   channel,
   unreadCount = 0,
   isSelected = false,
@@ -296,6 +296,8 @@ export const DmListItem = ({
   }
 
   const isUnread = unreadCount > 0;
+  // The open DM is being read right now; don't flag it as unread in the list.
+  const showUnread = isUnread && !isSelected;
 
   return (
     <div
@@ -304,7 +306,7 @@ export const DmListItem = ({
       onKeyDown={handleKeyDown}
       className={cn(
         'group flex w-full font-normal items-center gap-3 px-3 py-2 text-left cursor-pointer transition-colors duration-150 h-auto rounded-[14px] border border-transparent',
-        isUnread ? 'bg-activity-sidebar-primary' : 'bg-transparent',
+        showUnread ? 'bg-activity-sidebar-primary' : 'bg-transparent',
         'hover:!bg-sidebar-accent',
         isSelected && '!bg-sidebar-accent border-sidebar-border',
       )}
@@ -338,7 +340,7 @@ export const DmListItem = ({
           <div
             className={cn(
               'flex items-center gap-1.5 min-w-0 flex-1 text-sm leading-snug',
-              isUnread ? 'text-foreground' : 'text-muted-foreground',
+              showUnread ? 'text-foreground' : 'text-muted-foreground',
             )}
           >
             <span className='font-semibold truncate min-w-0'>{displayName}</span>
@@ -379,7 +381,7 @@ export const DmListItem = ({
             data-track-name='PREVIEW_LINK_CONTAINER'
             className={cn(
               'w-full min-w-0 overflow-hidden text-ellipsis whitespace-nowrap text-sm break-normal',
-              isUnread
+              showUnread
                 ? 'text-foreground [&_.message-html-root]:!text-foreground'
                 : 'text-muted-foreground [&_.message-html-root]:!text-muted-foreground',
               // Make RenderMessageWithHTML output inline and preserve link styles
@@ -402,7 +404,7 @@ export const DmListItem = ({
           >
             {renderMessagePreview()}
           </div>
-          {isUnread && (
+          {showUnread && (
             <span className='shrink-0 rounded-md bg-sidebar-primary px-1 text-[0.625rem] font-bold tabular-nums text-sidebar-primary-foreground'>
               {unreadCount > 9 ? '9+' : unreadCount}
             </span>
@@ -412,6 +414,10 @@ export const DmListItem = ({
     </div>
   );
 };
+
+// DmsPage re-renders on every search keystroke; row props are shallow-stable while typing, so
+// memoized rows skip that render (each mounts Avatar + presence subscriptions + preview logic).
+export const DmListItem = memo(DmListItemComponent);
 
 const DMItemAvatar = ({
   userId,

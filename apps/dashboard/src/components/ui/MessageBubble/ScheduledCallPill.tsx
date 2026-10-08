@@ -4,6 +4,7 @@ import { Calendar, XCircle } from 'lucide-react';
 import { PhoneDefault } from '@xyne/icons';
 import { useCallJoinOrInitiate } from '../../../hooks/useCallJoinOrInitiate';
 import { useAllChannels } from '../../../hooks/useChannels';
+import { isDMChannel } from '../../Chat/ChatDirectory/ChatDirectory.utils';
 import { cn } from '../../../utils/classNames';
 import { PILL_STATUS_LABEL, formatCallWindow, toPillState } from '../../../utils/scheduledCallPill';
 import type { MessageMetadata, ScheduledCallPillSnapshot } from './MessageBubble.utils';
@@ -34,7 +35,9 @@ export function ScheduledCallPill({ message, callId }: ScheduledCallPillProps): 
 
   // The call moved channels. This card is dead and is never updated again.
   if (metadata?.retired === true) {
-    const movedToName = channels.find(c => c.id === metadata.movedTo)?.name;
+    const movedToChannel = channels.find(c => c.id === metadata.movedTo);
+    const movedToName =
+      movedToChannel && !isDMChannel(movedToChannel.scopeType) ? movedToChannel.name : undefined;
     return (
       <div className='xs-cc-scope'>
         <div
@@ -89,7 +92,6 @@ export function ScheduledCallPill({ message, callId }: ScheduledCallPillProps): 
   const isReschedule = state === 'CANCELLED';
   const isOpenSummary = state === 'ENDED';
   const when = formatCallWindow(call.startsAt, call.endsAt);
-  const channelName = channels.find(c => c.id === call.channelId)?.name;
 
   // CallHistoryScreen keys ?callId= on the internal id, not externalId.
   const openInCalls = (): void => {
@@ -97,7 +99,7 @@ export function ScheduledCallPill({ message, callId }: ScheduledCallPillProps): 
   };
 
   const openSummary = (): void => {
-    void navigate(`/calls/${call.id}/detail`);
+    void navigate(`/calls/${callId}/detail`);
   };
 
   const handleJoin = (): void => {
@@ -106,9 +108,7 @@ export function ScheduledCallPill({ message, callId }: ScheduledCallPillProps): 
 
   return (
     <div className='xs-cc-scope flex w-full max-w-[560px] flex-col gap-2'>
-      <p className='text-[13.5px] leading-[1.55] text-muted-foreground'>
-        scheduled a call{channelName ? ` in #${channelName}` : ''}
-      </p>
+      <p className='text-[13.5px] leading-[1.55] text-muted-foreground'>scheduled a call</p>
 
       <div
         className={cn(

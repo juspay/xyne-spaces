@@ -156,10 +156,10 @@ export function scheduleJobsForNextInstanceTx(db: PrismaClient, seriesId: string
       );
 
       logger.info(
-        `Scheduled Bull jobs for next recurring instance ${nextInstance.id} (${nextInstance.externalId}) at ${nextInstance.startsAt!.toISOString()}`,
+        `Scheduled Bull jobs for next recurring instance ${nextInstance.externalId} at ${nextInstance.startsAt!.toISOString()}`,
       );
     } catch (err) {
-      logger.error(`Failed to schedule jobs for next instance ${nextInstance.id}:`, err);
+      logger.error(`Failed to schedule jobs for next instance ${nextInstance.externalId}:`, err);
     }
   });
 }

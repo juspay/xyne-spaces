@@ -10,7 +10,7 @@ generator client {
 
 generator zero {
   provider      = "prisma-generator-zero"
-  excludeTables = ["WorkspaceJoinRequest", "AiProvisioningStatus", "OrgLLMServiceAccountCredential", "OrganizationDomain", "QuestionnaireResponse", "ExternalSource", "WorkflowFolder", "WorkflowCredential", "AgentConversationShare"]
+  excludeTables = ["WorkspaceJoinRequest", "AiProvisioningStatus", "OrgLLMServiceAccountCredential", "OrganizationDomain", "QuestionnaireResponse", "ExternalSource", "WorkflowFolder", "WorkflowCredential", "AgentConversationShare", "OrgMemberCredential"]
 }
 
 datasource db {
@@ -516,6 +516,7 @@ model WorkflowExecution {
   @@index([workflowId])
   @@index([workflowId, createdAt(sort: Desc), id])
   @@index([parentWorkflowExecutionId])
+  @@index([status, workflowType, createdAt])
   @@map("workflow_executions")
   @@schema("workflow")
 }
@@ -947,6 +948,7 @@ model User {
 
   @@index([workspaceId, id])
   @@index([activityStatus])
+  @@index([orgMemberId])
   @@map("users")
   @@schema("public")
 }
@@ -1110,6 +1112,9 @@ model BoardComplexityScore {
   boardId         String
   weight          Int      @default(1)
   usePercentage   Boolean  @default(false)
+  percentageWindowDays Int? // Length (days) of each % share window; required for % share assignment
+  percentageShareBasis String? // ALL | OPEN — which tickets in the window count toward a member's % share
+  percentageWindowStartAt DateTime? // Start of the first % share window; counts reset every percentageWindowDays from here
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
   createdBy       String
@@ -1355,6 +1360,7 @@ model PullRequests {
   @@index([workflowExecutionId])
   @@index([date])
   @@index([ticketId, date(sort: Desc)], map: "pull_requests_ticketId_date_idx")
+  @@index([prUrl])
   @@map("pull_requests")
   @@schema("public")
 }
@@ -1582,6 +1588,17 @@ model OrgMember {
   @@schema("public")
 }
 
+model OrgMemberCredential {
+  id           String    @id @default(cuid())
+  memberId     String    @unique // OrgMember.memberId (no FK constraint, matches OrgMember's own convention)
+  orgId        String    // Denormalized from OrgMember.orgId — tenant key for workspace-scoped ACL (no FK constraint)
+  passwordHash String
+  updatedAt    DateTime  @updatedAt
+
+  @@map("org_member_credentials")
+  @@schema("non_zero")
+}
+
 model WorkspaceOrganization {
   id           String      @id @default(cuid())
   orgId        String
@@ -1703,6 +1720,8 @@ model Invitation {
   entityId     String?        // projectId | channelId | canvasId
   entityType   String?   // PROJECT | CHANNEL | CANVAS
   channelId    String?       // For PROJECT guests: the specific channel to grant access to
+  isOrgApproved Boolean?
+  inviteEmailSentAt DateTime?  // Approval flow: when the invite email actually went out. null on an approved invite = email failed, resend needed
   createdAt    DateTime      @default(now())
   updatedAt    DateTime      @updatedAt
 
@@ -1716,6 +1735,7 @@ model Invitation {
   @@index([invitationId])
   @@index([entityId])
   @@index([createdAt(sort: Desc), id])
+  @@index([orgId, isOrgApproved])
   @@map("invitations")
   @@schema("public")
 }
@@ -1892,6 +1912,7 @@ model Channel {
   isArchived      Boolean                @default(false)
   showTicketsTabTicketsInChat Boolean?   @default(true)
   callSummaryPrompt String?              // Per-channel detailed call summary sections override; null = default
+  connectId       String?                // Slack Connect: this channel's connect_group handle (null until backfilled)
 
   // Relations
   conversations      Conversation[]
@@ -1921,6 +1942,7 @@ model Channel {
 
   @@index([workspaceId, id])
   @@index([workspaceId, name, id])
+  @@index([connectId])
   @@map("channels")
   @@schema("public")
 }
@@ -1943,6 +1965,41 @@ model ChannelBoardMapping {
   @@unique([channelId, boardId])
   @@index([channelId])
   @@map("channel_board_mappings")
+  @@schema("public")
+}
+
+// Slack Connect — one row per channel/canvas "connection".
+// Phase 1: always PRIVATE (a single workspace) — invitedEntityId / invitedWorkspaceId
+// are NULL and status is 'ACTIVE'. Multiple rows sharing a connectId = shared (later phases).
+model ConnectGroup {
+  id                 String   @id @default(cuid())
+  entityType         String   // 'channel' | 'canvas'
+  entityId           String   // the channel/canvas id (host-side)
+  hostWorkspaceId    String   // the workspace that owns the entity
+  invitedEntityId    String?  // guest-side proxy entity id (NULL until shared)
+  invitedWorkspaceId String?  // invited workspace (NULL until shared)
+  connectId          String   // shared handle linking all rows for this entity
+  status             String   // 'ACTIVE' | 'REVOKED'
+
+  createdAt          DateTime // set in code
+  updatedAt          DateTime // set in code
+
+  // Slack Connect — filter-only relation back to the canvas (entityId == canvas.id). Used by the
+  // Prisma ACL's correlated-EXISTS reach; typed non-optional because entityId is required (for a
+  // channel group it simply points at no canvas — relationMode="prisma", so nothing enforces it and
+  // we never `include` it). Cascade: deleting a canvas drops its connect_group rows.
+  canvasEntity       Canvas   @relation("CanvasConnectGroups", fields: [entityId], references: [id], onDelete: Cascade)
+
+  // (connectId, invitedWorkspaceId) unique also serves every `connectId = ?` probe via its
+  // leftmost prefix. hostWorkspaceId and invitedWorkspaceId are each indexed for the
+  // (hostWorkspaceId = me OR invitedWorkspaceId = me) filter (bitmap-OR).
+  // entityId is indexed because the canvas ACL's correlated-EXISTS reach joins
+  // connect_group.entityId == canvas.id per row (one indexed probe instead of a materialised id-set).
+  @@unique([connectId, invitedWorkspaceId])
+  @@index([hostWorkspaceId])
+  @@index([invitedWorkspaceId])
+  @@index([entityId])
+  @@map("connect_group")
   @@schema("public")
 }
 
@@ -2125,6 +2182,7 @@ model Conversation {
   @@index([channelId, doNotPostToChannel, createdAt(sort: Desc), conversationId(sort: Asc)])
   @@index([createdBy])
   @@index([initialMessageId])
+  @@index([parentMessageId])
   @@map("conversations")
   @@schema("public")
 }
@@ -2383,6 +2441,8 @@ model EmailChannelPreference {
   deskReportAgentSlug    String?
   deskReportRangeDays    Int?     @default(1) // 1 = "Last 1 day", 7 = "Last 1 week"
   duplicateScopeConfig   String?    // Scoped duplicate detection: JSON-serialized { enabled, scopeFieldGlobalIds }; stored as string for Zero compatibility, parsed at code level (null = project-wide legacy behavior)
+  slackDeskTriggerMode   String?  // ALL_MESSAGES | MENTION_ONLY; null == ALL_MESSAGES
+  deskAppIds             String?  // JSON-serialised string[] of artifact app ids shown on this desk, in order; set by the desk owner or a channel admin
   @@index([ownerUserId])
   @@index([assigneeUserGroupId])
   @@index([boardId])
@@ -2522,6 +2582,7 @@ model MessageAttachment {
   createdBy          String                // User who uploaded the attachment (no FK constraint)
   metadata           Json?                 // Width/height for images, duration for videos, etc.
   conversationId     String?                // Every message belongs to a conversation (no FK constraint)
+  channelId          String?               // Denormalized conversation.channelId, stamped on insert; NULL when not conversation-anchored
   thumbnailUrl       String?               // For images/videos
   isDeleted          Boolean               @default(false) // Soft-delete: true when attachment has been removed
   uploadStatus       String?                 // Tracks upload state
@@ -2535,6 +2596,7 @@ model MessageAttachment {
   @@index([entityId])
   @@index([entityId, id])
   @@index([entityId, position])
+  @@index([workspaceId, channelId, createdAt(sort: Desc), id])
   @@map("message_attachments")
   @@schema("public")
 }
@@ -2585,7 +2647,7 @@ model CustomEmoji {
   createdBy String   // User ID who created the emoji (no FK constraint)
   createdAt DateTime @default(now())
 
-  @@unique([name])
+  @@unique([workspaceId, name])
 
   @@index([createdAt(sort: Desc), id])
   @@map("custom_emojis")
@@ -2611,6 +2673,7 @@ model Activity {
   channelId       String?  // Channel where the activity occurred (optional, not present for ticket activities)
   pullRequestId   String?  // FK to pull_requests.id (optional, present only for PR-related ticket activities)
   canvasId        String?  // FK to canvas.id for canvas mention activities (no constraint)
+  savedViewId     String?  // FK to saved_user_configurations.id for view-share activities (no constraint)
   trackId         String?  // FK to sdlc_tracks.id (no constraint)
   blockId         String?  // Block ID within the canvas for canvas mention activities
   actorId         String  // User who performed the action (no FK constraint)
@@ -2646,6 +2709,7 @@ model Activity {
   @@index([reactionId]) // Fast lookup by reaction
   @@index([callId]) // Fast lookup by call
   @@index([ticketId]) // Fast lookup by ticket
+  @@index([savedViewId]) // Fast lookup by saved view
   @@index([channelId]) // Fast lookup by channel
   @@index([conversationId, userId]) // Fast lookup for reply batching
   @@index([actorId])
@@ -2725,6 +2789,7 @@ model ExternalMessage {
   @@unique([externalSourceId, externalId])  // Prevent duplicates
   @@index([externalSourceId, externalThreadId])  // Fast lookup by thread
   @@index([messageId])                           // Fast lookup by message
+  @@index([externalId])
   @@map("external_messages")
   @@schema("workflow")
 }
@@ -2935,6 +3000,10 @@ model Call {
 
   @@index([status, startedAt(sort: Desc), externalId])
   @@index([status, startsAt, externalId])
+  // A hub's or track's calls, a page at a time: the ended ones newest first, and the
+  // scheduled ones by when they start.
+  @@index([channelId, status, endedAt(sort: Desc)])
+  @@index([channelId, status, startsAt])
   @@map("calls")
   @@schema("public")
 }
@@ -3068,6 +3137,7 @@ model RecurringCallSeries {
   endsOn         DateTime?                 // Series end date (null = indefinite)
   metadata           Json?                     // Extra config e.g. { "reminderMinutes": 10 }
   callUpdatesChannel String?                   // Non-null = post call updates to this channel (Case 3); null = no broadcast
+  summaryTemplateId  String?                   // Pinned detailed-summary template, stamped onto every instance (no FK constraint)
   createdAt          DateTime                  // Set explicitly in code
   updatedAt          DateTime                  @updatedAt
 
@@ -3180,6 +3250,11 @@ model Canvas {
   entryFile    String?          // Entry file path within the bundle
   quartoDocumentType String?    // "docs" | "book" | "slides" | "website" (type of Quarto document)
   gcsPath      String?          // Path in GCS where the bundle is stored
+  connectId    String?          // Slack Connect: this canvas's connect_group handle (null until backfilled)
+  // Slack Connect: filter-only relation to this canvas's connect_group rows (connect_group.entityId ==
+  // canvas.id). Lets the Prisma ACL authorize reach with a correlated EXISTS — "is my workspace a host
+  // or invited member of this canvas's group?" — instead of materialising every reachable canvas id.
+  connectGroups ConnectGroup[] @relation("CanvasConnectGroups")
 
   @@unique([userRepo]) // One doc per repo/branch combination (backward compatibility)
   @@unique([repoId, branchName]) // One doc per repo/branch combination (when repoId is set)
@@ -3195,6 +3270,7 @@ model Canvas {
 
   @@index([createdBy, updatedAt(sort: Desc), id])
   @@index([docType, updatedAt(sort: Desc), id])
+  @@index([connectId])
   @@map("canvases")
   @@schema("public")
 }
@@ -3209,12 +3285,14 @@ model CanvasVersion {
   createdBy   String?
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
+  canvasConnectId   String?  // Slack Connect: resolved from parent canvas (null until backfilled)
 
   canvas      Canvas   @relation(fields: [canvasId], references: [id], onDelete: Cascade)
 
   @@unique([canvasId, contentHash])
   @@index([canvasId, updatedAt])
   @@index([createdBy])
+  @@index([canvasConnectId])
 
   @@map("canvas_versions")
   @@schema("public")
@@ -3233,6 +3311,7 @@ model CanvasCommentThread {
   statusUpdatedAt DateTime?
   createdBy       String
   createdAt       DateTime                  @default(now())
+  canvasConnectId       String?                   // Slack Connect: resolved from parent canvas (null until backfilled)
 
   canvas              Canvas          @relation(fields: [canvasId], references: [id], onDelete: Cascade)
   comments            CanvasComment[] @relation("CanvasCommentThreadComments")
@@ -3241,6 +3320,7 @@ model CanvasCommentThread {
   statusUpdatedByUser User?           @relation("CanvasCommentThreadStatusUpdatedBy", fields: [statusUpdatedBy], references: [id])
 
   @@index([workspaceId, canvasId, createdAt])
+  @@index([canvasConnectId])
   @@map("canvas_comment_threads")
   @@schema("public")
 }
@@ -3257,11 +3337,13 @@ model CanvasComment {
   editedAt         DateTime?
   deletedAt        DateTime?
   createdAt        DateTime @default(now())
+  canvasConnectId        String?  // Slack Connect: resolved from parent canvas (null until backfilled)
 
   thread       CanvasCommentThread  @relation("CanvasCommentThreadComments", fields: [threadId], references: [id], onDelete: Cascade)
   initialForThreads CanvasCommentThread[] @relation("CanvasCommentThreadInitialComment")
   createdByUser User               @relation("CanvasCommentCreatedBy", fields: [createdBy], references: [id])
 
+  @@index([canvasConnectId])
   @@index([workspaceId, threadId, createdAt])
   @@map("canvas_comments")
   @@schema("public")
@@ -3277,6 +3359,7 @@ model CanvasParticipant {
   role        String     @default("VIEWER") // OWNER | EDITOR | VIEWER
   joinedAt    DateTime   @default(now())
   updatedAt   DateTime   @updatedAt
+  canvasConnectId   String?    // Slack Connect: resolved from parent canvas (null until backfilled)
 
   // Relations (no FK constraints - consistent with userId and canvasId)
   canvas    Canvas     @relation(fields: [canvasId], references: [id])
@@ -3288,6 +3371,7 @@ model CanvasParticipant {
   @@index([userId])
   @@index([userGroupId])
   @@index([channelId])
+  @@index([canvasConnectId])
   @@map("canvas_participants")
   @@schema("public")
 }
@@ -3300,6 +3384,7 @@ model CanvasUserStatus {
   isStarred  Boolean   @default(false)
   createdAt  DateTime  @default(now())
   updatedAt  DateTime?
+  canvasConnectId  String?   // Slack Connect: resolved from parent canvas (null until backfilled)
 
   canvas Canvas @relation(fields: [canvasId], references: [id])
   user   User   @relation("CanvasUserStatusUser", fields: [userId], references: [id])
@@ -3308,6 +3393,7 @@ model CanvasUserStatus {
   @@index([canvasId])
   @@index([userId])
   @@index([userId, isStarred])
+  @@index([canvasConnectId])
   @@map("canvas_user_status")
   @@schema("public")
 }
@@ -3551,6 +3637,8 @@ model SdlcFolder {
   workspaceId String
   id          String   @id @default(cuid())
   name        String
+  /// An @xyne/icons name shown in place of the folder mark; null shows the mark.
+  icon        String?
   createdBy   String
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
@@ -3567,6 +3655,8 @@ model SdlcTrack {
   repoId      String?
   name        String
   description String?
+  /// An @xyne/icons name shown in place of the track mark; null shows the mark.
+  icon        String?
   status      String   @default("ACTIVE") // ACTIVE | COMPLETED | ARCHIVED
   createdBy   String
   createdAt   DateTime @default(now())
@@ -4346,6 +4436,7 @@ model InstalledApps {
   appId String
   userId String
   webhookUrl String?
+  fetchConfig String?
 
   signingSecret String?   // @deprecated
   version Int
@@ -5082,6 +5173,28 @@ model ExecutionRunLog {
   // the rightmost leaf.
   @@index([createdAt])
   @@map("execution_run_logs")
+  @@schema("non_zero")
+}
+
+// Where each pull request link was posted, so a merge can find the Radar
+// threads to judge with one lookup instead of searching chat. Written by the
+// Radar worker as it reads each window; read by the PR-merge pass.
+model RadarPrLink {
+  workspaceId    String // denormalized tenant key (stamped on insert)
+  id             String   @id @default(cuid())
+  prUrl          String // canonical, lowercased: https://<host>/<owner>/<repo>/pull/<n> (GitHub) or https://<host>/projects/<KEY>/repos/<slug>/pull-requests/<n> (Bitbucket)
+  scopeKey       String // the Radar scope the link was posted in (conversationId, or dm:<channelId>)
+  channelId      String
+  conversationId String // the conversation of the message itself (no FK constraint, as elsewhere here)
+  messageId      String
+  postedAt       DateTime // the message's createdAt
+  createdAt      DateTime @default(now())
+
+  // A replayed window writes nothing twice.
+  @@unique([messageId, prUrl])
+  // The only read: every link to one PR in a workspace.
+  @@index([workspaceId, prUrl])
+  @@map("radar_pr_links")
   @@schema("non_zero")
 }
 

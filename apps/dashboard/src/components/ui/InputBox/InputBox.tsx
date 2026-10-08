@@ -128,6 +128,8 @@ type SendTrigger =
   | 'mobile_editor'
   | 'unknown';
 import { useChannel } from '../../../hooks/useChannels';
+import { extractCallLinkFromInviteText } from '../../../utils/callControls';
+import { parseCallInviteLink } from '../../Chat/RenderMessageWithHTML/internalLinkUtils';
 
 const lowlight = createLowlight(all);
 
@@ -761,11 +763,6 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
       ],
       content: value || '',
       editable: !isSending,
-      onCreate: ({ editor }) => {
-        const initialText = editor.getText().trim();
-        setContent(initialText.length > 0 ? 'has-content' : '');
-        updateEmojiSizeClass(editor);
-      },
       autofocus: autoFocus ? autoFocus : null,
       onFocus: () => {
         setIsFocused(true);
@@ -1052,6 +1049,21 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
             }
           }
 
+          // A copied call invite ("Copy link" / "Copy joining info") is written for email and
+          // calendars. In chat, keep only its link: the message then renders as the call card.
+          const inviteCallLink = extractCallLinkFromInviteText(
+            clipboard?.getData('text/plain') ?? '',
+          );
+          if (inviteCallLink && parseCallInviteLink(inviteCallLink)) {
+            event.preventDefault();
+            editor?.commands.insertContent({
+              type: 'text',
+              text: inviteCallLink,
+              marks: [{ type: 'link', attrs: { href: inviteCallLink } }],
+            });
+            return true;
+          }
+
           /** Handle File Pasting */
           const files = clipboard?.files ?? [];
           if (features.fileAttachments && files.length > 0) {
@@ -1217,6 +1229,14 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
         },
       },
     });
+
+    // What the editor starts with, read once it exists. It is made during the first
+    // render, so onCreate would set this state before the component had mounted.
+    useEffect(() => {
+      if (!editor) return;
+      setContent(editor.getText().trim().length > 0 ? 'has-content' : '');
+      updateEmojiSizeClass(editor);
+    }, [editor, updateEmojiSizeClass]);
 
     useEffect(() => {
       editor?.setEditable(!disabled && !isSending, false);
@@ -1736,7 +1756,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
         >
           <div
             className={`
-            overflow-hidden transition-all flex flex-col relative
+            overflow-hidden transition flex flex-col relative
             ${isMobile ? 'bg-background rounded-[26px] text-foreground shadow-sm' : 'bg-background rounded-2xl border text-foreground shadow-none'}
             ${
               !isMobile && artifactComposerDefinition
@@ -2017,7 +2037,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
                         <DropdownMenuTrigger asChild>
                           <button
                             type='button'
-                            className='p-1.5 rounded hover:bg-accent transition-all duration-200 ease-in-out'
+                            className='p-1.5 rounded hover:bg-accent transition duration-200 ease-in-out'
                             aria-label='Add content'
                             disabled={disabled || isSending}
                           >
@@ -2107,7 +2127,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
                         }}
                         data-track-category='CHAT_INPUT'
                         data-track-name='INSERT_USER_MENTION'
-                        className='p-1.5 rounded hover:bg-accent transition-all duration-200 ease-in-out'
+                        className='p-1.5 rounded hover:bg-accent transition duration-200 ease-in-out'
                         aria-label='Mention user'
                         data-testid='mention-user-btn'
                         disabled={disabled || isSending}
@@ -2131,7 +2151,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
                         }}
                         data-track-category='CHAT_INPUT'
                         data-track-name='INSERT_CHANNEL_MENTION'
-                        className='p-1.5 rounded hover:bg-accent transition-all duration-200 ease-in-out'
+                        className='p-1.5 rounded hover:bg-accent transition duration-200 ease-in-out'
                         aria-label='Mention channel'
                         disabled={disabled || isSending}
                       >
@@ -2220,7 +2240,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
                     <div className='relative flex items-center'>
                       {onCreateTicket ? (
                         <div
-                          className={`flex items-stretch rounded-md overflow-hidden transition-all duration-200 ease-in-out ${
+                          className={`flex items-stretch rounded-md overflow-hidden transition duration-200 ease-in-out ${
                             hasSendableContent && !sendDisabled
                               ? artifactComposerDefinition
                                 ? 'bg-orange-500 text-white'
@@ -2307,7 +2327,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
                       ) : onScheduleSend ? (
                         // No ticket creation but schedule send is available — split button
                         <div
-                          className={`flex items-stretch rounded-md overflow-hidden transition-all duration-200 ease-in-out ${
+                          className={`flex items-stretch rounded-md overflow-hidden transition duration-200 ease-in-out ${
                             hasSendableContent
                               ? artifactComposerDefinition
                                 ? 'bg-orange-500 text-white'

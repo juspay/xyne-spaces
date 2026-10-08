@@ -5,11 +5,14 @@
 
 import {
   ExternalSourceAdapter,
+  ExternalSourcePlatform,
   NormalizedData,
   IngestionResult,
   type IngestionOptions,
 } from './types';
 import { SourceNotFoundError } from './errors';
+import { isMetaMessagingPlatform } from '../social-media/constants';
+import { appendFailedAttachmentLinks } from '../adapters/social-media/shared/metaDmAttachments';
 import { ExternalSourceRepository } from '../../database/repositories/externalSourceRepository';
 import { ExternalMessageRepository } from '../../database/repositories/externalMessageRepository';
 import { ConversationRepository } from '../../database/repositories/conversationRepository';
@@ -101,6 +104,7 @@ export class ExternalSourceCore {
 
     const allResults: IngestionResult[] = [];
     const failedExternalIds: string[] = [];
+    let firstFailureMessage: string | undefined;
     for (const payload of payloads) {
       if (payload && typeof payload === 'object' && (payload as any).__skipIngestion) {
         const reason = (payload as any).__skipReason || 'unspecified';
@@ -127,6 +131,7 @@ export class ExternalSourceCore {
           allResults.push(...results);
         } catch (error) {
           failedExternalIds.push(normalizedData.externalId);
+          firstFailureMessage ??= error instanceof Error ? error.message : String(error);
           logger.error(`Failed to sync interaction from ${sourceName}`, {
             externalId: normalizedData.externalId,
             eventType: normalizedData.metadata.eventType,
@@ -153,7 +158,7 @@ export class ExternalSourceCore {
         { sourceName, externalIds: failedExternalIds },
       );
       throw new Error(
-        `Failed to sync ${failedExternalIds.length} interaction${failedExternalIds.length === 1 ? '' : 's'} from ${sourceName}`,
+        `Failed to sync ${failedExternalIds.length} interaction${failedExternalIds.length === 1 ? '' : 's'} from ${sourceName}: ${firstFailureMessage}`,
       );
     }
 
@@ -280,6 +285,14 @@ export class ExternalSourceCore {
       }
     }
 
+    if (isMetaMessagingPlatform(source.sourceType) && normalizedData.attachments?.length) {
+      normalizedData.content = appendFailedAttachmentLinks(
+        normalizedData.content,
+        normalizedData.attachments,
+        downloadedAttachments.map((attachment) => attachment.metadata?.externalUrl),
+      );
+    }
+
     // 3. Check for duplicate (deduplication)
     const existingExtMsg = await this.externalMessageRepo.findByExternalId(
       source.id,
@@ -379,8 +392,15 @@ export class ExternalSourceCore {
         externalId: normalizedData.externalId,
         externalThreadId: normalizedData.externalThreadId,
         entityId: resolvedEntityId,
-        direction: MessageDirection.INCOMING,
+        // For Zoho, TICKET_THREAD_ADD sets isReply=true but represents a customer message (INCOMING).
+        // For all other adapters, isReply=true means an agent sent the message (OUTGOING).
+        direction: (normalizedData.metadata.isReply && source.sourceType !== ExternalSourcePlatform.ZOHO)
+          ? MessageDirection.OUTGOING
+          : MessageDirection.INCOMING,
         entityType: isDeskChannel ? ExternalEntityType.EMAIL : ExternalEntityType.MESSAGE,
+        // Override createdAt with the real event time for Instagram/Facebook only (24h window check).
+        // Other adapters keep @default(now()) to avoid reordering historical imports.
+        ...(isMetaMessagingPlatform(source.sourceType) && { createdAt: normalizedData.metadata.timestamp }),
       });
     }
 

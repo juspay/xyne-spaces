@@ -2,12 +2,18 @@ import type { DeleteID, InsertValue, Transaction, UpdateValue, UpsertValue } fro
 import { Schema } from '@xyne/shared';
 import { BaseACL } from '../core/base-acl';
 import { MutationACLError, type TableSchema } from '../core/types';
-import { assertWorkspaceMatch } from '../core/workspace-match';
+import { assertConnectMutateAllowed } from '../core/connect-mutation-reach';
 import { zql } from '../../queries';
 
 export class CanvasVersionsACL extends BaseACL<'canvas_versions'> {
-  async canInsert(args: InsertValue<TableSchema<'canvas_versions'>>, _tx: Transaction<Schema>): Promise<void> {
-    assertWorkspaceMatch(this.ctx, args.workspaceId as string, 'canvas_versions');
+  async canInsert(args: InsertValue<TableSchema<'canvas_versions'>>, tx: Transaction<Schema>): Promise<void> {
+    // Slack Connect: connectId present → connect_group reach; else legacy workspaceId match.
+    await assertConnectMutateAllowed(
+      this.ctx,
+      tx,
+      { connectId: args.canvasConnectId as string | undefined, workspaceId: args.workspaceId as string },
+      'canvas_versions',
+    );
   }
 
   async canUpdate(args: UpdateValue<TableSchema<'canvas_versions'>>, tx: Transaction<Schema>): Promise<void> {
@@ -15,7 +21,7 @@ export class CanvasVersionsACL extends BaseACL<'canvas_versions'> {
     if (!row) {
       throw new MutationACLError('Canvas version update failed: version does not exist', 'canvas_versions');
     }
-    assertWorkspaceMatch(this.ctx, row.workspaceId, 'canvas_versions');
+    await assertConnectMutateAllowed(this.ctx, tx, { connectId: row.canvasConnectId, workspaceId: row.workspaceId }, 'canvas_versions');
   }
 
   async canDelete(args: DeleteID<TableSchema<'canvas_versions'>>, tx: Transaction<Schema>): Promise<void> {
@@ -23,7 +29,7 @@ export class CanvasVersionsACL extends BaseACL<'canvas_versions'> {
     if (!row) {
       throw new MutationACLError('Canvas version delete failed: version does not exist', 'canvas_versions');
     }
-    assertWorkspaceMatch(this.ctx, row.workspaceId, 'canvas_versions');
+    await assertConnectMutateAllowed(this.ctx, tx, { connectId: row.canvasConnectId, workspaceId: row.workspaceId }, 'canvas_versions');
   }
 
   async canUpsert(_args: UpsertValue<TableSchema<'canvas_versions'>>, _tx: Transaction<Schema>): Promise<void> {
