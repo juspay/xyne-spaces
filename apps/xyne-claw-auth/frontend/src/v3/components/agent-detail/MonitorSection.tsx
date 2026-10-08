@@ -2,19 +2,10 @@ import { useCallback, useEffect, useState } from "react";
 import { ArrowClockwiseIcon, CopyIcon } from "@phosphor-icons/react";
 import { getAgentRunHealth, type AgentRunHealth } from "../../../lib/api";
 import { useSnackbar } from "../ui/Snackbar";
+import { RunDetailDialog, StatusPill, fmtMs } from "./RunDetailDialog";
 
 const WINDOWS = [1, 7, 30] as const;
-
-function fmtMs(value: number | null | undefined): string {
-  if (value === null || value === undefined) return "—";
-  if (value < 1000) return `${value}ms`;
-  const s = Math.round(value / 1000);
-  if (s < 60) return `${s}s`;
-  const m = Math.floor(s / 60);
-  if (m < 60) return `${m}m ${s % 60}s`;
-  const h = Math.floor(m / 60);
-  return `${h}h ${m % 60}m`;
-}
+const LIVE_REFRESH_MS = 15000;
 
 function pct(part: number, whole: number): string {
   if (whole === 0) return "—";
@@ -49,7 +40,7 @@ function Group({ title, children, note }: { title: string; children: React.React
   );
 }
 
-function Table({ head, rows }: { head: string[]; rows: Array<Array<React.ReactNode>> }) {
+function Table({ head, rows, onRowClick }: { head: string[]; rows: Array<Array<React.ReactNode>>; onRowClick?: (index: number) => void }) {
   return (
     <div className="overflow-x-auto rounded-xl border border-xyne-border bg-xyne-surface">
       <table className="w-full text-[12px] tabular-nums">
@@ -62,7 +53,11 @@ function Table({ head, rows }: { head: string[]; rows: Array<Array<React.ReactNo
         </thead>
         <tbody className="divide-y divide-xyne-border-subtle">
           {rows.map((r, i) => (
-            <tr key={i} className="text-xyne-fg-secondary">
+            <tr
+              key={i}
+              onClick={onRowClick ? () => onRowClick(i) : undefined}
+              className={`text-xyne-fg-secondary ${onRowClick ? "cursor-pointer hover:bg-xyne-surface-sunken" : ""}`}
+            >
               {r.map((c, j) => (
                 <td key={j} className="px-3 py-2 align-top">{c}</td>
               ))}
@@ -98,7 +93,8 @@ function SessionId({ id }: { id: string }) {
   return (
     <button
       type="button"
-      onClick={() => {
+      onClick={(e) => {
+        e.stopPropagation();
         void navigator.clipboard.writeText(id).then(() => show({ variant: "info", title: "Session id copied" }));
       }}
       className="inline-flex items-center gap-1 font-mono text-[11px] text-xyne-fg-secondary hover:text-xyne-fg-primary"
@@ -115,6 +111,7 @@ export function MonitorSection({ slug }: { slug: string }) {
   const [data, setData] = useState<AgentRunHealth | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [openRun, setOpenRun] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -131,6 +128,13 @@ export function MonitorSection({ slug }: { slug: string }) {
   useEffect(() => {
     void load();
   }, [load]);
+
+  const hasRunning = (data?.runningNow.length ?? 0) > 0;
+  useEffect(() => {
+    if (!hasRunning) return;
+    const timer = setInterval(() => void load(), LIVE_REFRESH_MS);
+    return () => clearInterval(timer);
+  }, [hasRunning, load]);
 
   const stuck = data?.runningNow.filter((r) => r.stuck).length ?? 0;
 
@@ -191,8 +195,9 @@ export function MonitorSection({ slug }: { slug: string }) {
           )}
 
           {data.runningNow.length > 0 && (
-            <Group title="Running now" note={`stuck after ${fmtMs(data.stuckAfterMs)}`}>
+            <Group title="Running now" note={`click a run to watch it · stuck after ${fmtMs(data.stuckAfterMs)}`}>
               <Table
+                onRowClick={(i) => setOpenRun(data.runningNow[i]!.sessionId)}
                 head={["Session", "Trigger", "Running for", "Current step"]}
                 rows={data.runningNow.map((r) => [
                   <SessionId key="s" id={r.sessionId} />,
@@ -252,6 +257,7 @@ export function MonitorSection({ slug }: { slug: string }) {
           {data.recentFailures.length > 0 && (
             <Group title="Recent failures">
               <Table
+                onRowClick={(i) => setOpenRun(data.recentFailures[i]!.sessionId)}
                 head={["Session", "Trigger", "When", "Model", "Error"]}
                 rows={data.recentFailures.map((f) => [
                   <SessionId key="s" id={f.sessionId} />,
@@ -264,11 +270,29 @@ export function MonitorSection({ slug }: { slug: string }) {
             </Group>
           )}
 
+          {data.recentRuns.length > 0 && (
+            <Group title="Recent runs" note="click to open">
+              <Table
+                onRowClick={(i) => setOpenRun(data.recentRuns[i]!.sessionId)}
+                head={["Status", "Trigger", "When", "Took", "Task"]}
+                rows={data.recentRuns.map((r) => [
+                  <StatusPill key="s" status={r.status} />,
+                  r.trigger,
+                  ago(r.startedAt),
+                  fmtMs(r.durationMs),
+                  <span key="t" className="line-clamp-2 break-words">{r.task}</span>,
+                ])}
+              />
+            </Group>
+          )}
+
           {data.totals.runs === 0 && data.runningNow.length === 0 && (
             <div className="text-[12px] text-xyne-fg-tertiary">No runs in this window.</div>
           )}
         </>
       )}
+
+      <RunDetailDialog slug={slug} sessionId={openRun} onClose={() => setOpenRun(null)} />
     </div>
   );
 }

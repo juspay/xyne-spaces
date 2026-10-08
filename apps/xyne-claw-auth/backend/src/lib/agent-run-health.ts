@@ -15,6 +15,13 @@ export interface AgentRunHealth {
   stuckAfterMs: number;
   runningNow: Array<{ sessionId: string; trigger: string; startedAt: string; ageMs: number; stuck: boolean; currentTool: string | null }>;
   recentFailures: Array<{ sessionId: string; trigger: string; startedAt: string; model: string | null; error: string }>;
+  recentRuns: Array<{ sessionId: string; trigger: string; status: string; startedAt: string; durationMs: number | null; model: string | null; task: string }>;
+}
+
+export interface AgentRunDetail {
+  run: Record<string, unknown>;
+  requester: { id: string; name: string | null; email: string | null } | null;
+  children: Array<{ sessionId: string; agentSlug: string; status: string; startedAt: string; durationMs: number | null; task: string }>;
 }
 
 const num = (v: unknown): number => Number(v ?? 0);
@@ -103,6 +110,13 @@ export async function agentRunHealth(agentSlug: string, orgId: string, windowDay
     select: { sessionId: true, triggerSource: true, startedAt: true, model: true, error: true },
   });
 
+  const recent = await prisma.agentRun.findMany({
+    where: { agentSlug, orgId, startedAt: { gte: since } },
+    orderBy: { startedAt: "desc" },
+    take: 30,
+    select: { sessionId: true, triggerSource: true, status: true, startedAt: true, completedAt: true, model: true, task: true },
+  });
+
   const now = Date.now();
   return {
     windowDays,
@@ -157,6 +171,41 @@ export async function agentRunHealth(agentSlug: string, orgId: string, windowDay
       startedAt: f.startedAt.toISOString(),
       model: f.model ?? null,
       error: (f.error ?? "").slice(0, 300),
+    })),
+    recentRuns: recent.map((r) => ({
+      sessionId: r.sessionId,
+      trigger: r.triggerSource ?? "unknown",
+      status: r.status,
+      startedAt: r.startedAt.toISOString(),
+      durationMs: r.completedAt ? r.completedAt.getTime() - r.startedAt.getTime() : null,
+      model: r.model ?? null,
+      task: r.task.slice(0, 200),
+    })),
+  };
+}
+
+export async function agentRunDetail(agentSlug: string, orgId: string, sessionId: string): Promise<AgentRunDetail | null> {
+  const run = await prisma.agentRun.findUnique({ where: { sessionId } });
+  if (!run || run.agentSlug !== agentSlug || run.orgId !== orgId) return null;
+  const [requester, children] = await Promise.all([
+    prisma.user.findUnique({ where: { id: run.userId }, select: { id: true, name: true, email: true } }),
+    prisma.agentRun.findMany({
+      where: { parentSessionId: sessionId },
+      orderBy: { startedAt: "asc" },
+      take: 50,
+      select: { sessionId: true, agentSlug: true, status: true, startedAt: true, completedAt: true, task: true },
+    }),
+  ]);
+  return {
+    run: run as unknown as Record<string, unknown>,
+    requester,
+    children: children.map((c) => ({
+      sessionId: c.sessionId,
+      agentSlug: c.agentSlug,
+      status: c.status,
+      startedAt: c.startedAt.toISOString(),
+      durationMs: c.completedAt ? c.completedAt.getTime() - c.startedAt.getTime() : null,
+      task: c.task.slice(0, 200),
     })),
   };
 }
