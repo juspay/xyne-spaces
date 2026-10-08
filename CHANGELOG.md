@@ -1,3 +1,10 @@
+## [1.476.0](https://github.com/juspay/xyne-spaces/compare/v1.475.4...v1.476.0) (2026-10-08)
+
+
+### Features
+
+* search feedback ([#2417](https://github.com/juspay/xyne-spaces/issues/2417)) ([61884b4](https://github.com/juspay/xyne-spaces/commit/61884b45a0c36ac16689bc6e7c23d7a7b0458776))
+
 ## [1.475.4](https://github.com/juspay/xyne-spaces/compare/v1.475.3...v1.475.4) (2026-10-08)
 
 
