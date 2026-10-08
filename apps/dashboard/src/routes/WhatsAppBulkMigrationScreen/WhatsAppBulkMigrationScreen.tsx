@@ -36,6 +36,7 @@ import {
   type WhatsAppMigrationJobProgress,
   type WhatsAppPurgeImportResponse,
 } from '../../services/WhatsAppMigration/whatsAppMigrationService';
+import { useCanSeeUserEmail } from '../../hooks/useCanSeeUserEmail';
 
 type MappingEntry = {
   whatsappName: string;
@@ -115,6 +116,7 @@ const WhatsAppBulkMigrationScreen = (): ReactElement => {
   const allChannels = useAllChannels();
   const hydratedUsers = useUsers();
   const allUsers = workspaceUsers.length > 0 ? workspaceUsers : hydratedUsers;
+  const canSeeUserEmail = useCanSeeUserEmail();
   const { userID } = useAuthContextValues();
   const [archiveFiles, setArchiveFiles] = useState<File[]>([]);
   const [mappingCsvFile, setMappingCsvFile] = useState<File | null>(null);
@@ -171,10 +173,10 @@ const WhatsAppBulkMigrationScreen = (): ReactElement => {
           label:
             user.id === userID ? `${getUserDisplayName(user)} (you)` : getUserDisplayName(user),
           icon: <User className='w-4 h-4 text-muted-foreground' />,
-          subtitle: user.email || 'Create or reuse personal DM',
+          subtitle: (canSeeUserEmail(user.id) && user.email) || 'Create or reuse personal DM',
         })),
     ],
-    [availableChannels, allUsers, userID],
+    [availableChannels, allUsers, userID, canSeeUserEmail],
   );
 
   const resolveTargetChannelId = async (value: string | null): Promise<string> => {

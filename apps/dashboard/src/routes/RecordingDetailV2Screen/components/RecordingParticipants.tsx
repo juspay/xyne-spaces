@@ -9,6 +9,7 @@ import AvatarGroup from '../../../components/ui/Avatar/AvatarGroup';
 import { Popover } from '../../../components/ui/Popover/Popover';
 import { Button } from '../../../components/ui/Button/Button';
 import { cn } from '../../../utils/classNames';
+import { useCanSeeUserEmail } from '../../../hooks/useCanSeeUserEmail';
 
 interface RecordingParticipantsProps {
   recordingExternalId: string;
@@ -24,6 +25,7 @@ export function RecordingParticipants({
   shares,
 }: RecordingParticipantsProps): ReactElement | null {
   const reduceMotion = useReducedMotion();
+  const canSeeUserEmail = useCanSeeUserEmail();
   const {
     self,
     searchRef,
@@ -174,9 +176,11 @@ export function RecordingParticipants({
               <Avatar userId={user.id} size='rg' showActiveStatus={false} />
               <span className='min-w-0 flex-1'>
                 <span className='block truncate text-[13px]'>{getUserDisplayName(user)}</span>
-                <span className='block truncate text-[11px] text-muted-foreground'>
-                  {user.email}
-                </span>
+                {canSeeUserEmail(user.id) && (
+                  <span className='block truncate text-[11px] text-muted-foreground'>
+                    {user.email}
+                  </span>
+                )}
               </span>
             </button>
           ))}
@@ -207,7 +211,7 @@ export function RecordingParticipants({
                       )}
                     </div>
                     <span className='block truncate text-[11px] text-muted-foreground'>
-                      {isOwner ? 'Owner' : user.email}
+                      {isOwner ? 'Owner' : canSeeUserEmail(user.id) ? user.email : null}
                     </span>
                   </div>
                   {canManage && !isOwner && (

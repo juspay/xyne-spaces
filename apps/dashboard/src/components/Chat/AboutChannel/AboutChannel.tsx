@@ -21,6 +21,7 @@ import { channelService } from '../../../services/Chat/channelService';
 import { toast } from 'sonner';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useRouteContext } from '../../../hooks/useRouteContext';
+import { useCanSeeUserEmail } from '../../../hooks/useCanSeeUserEmail';
 
 export interface AboutChannelProps {
   channel: Channel;
@@ -63,6 +64,7 @@ const AboutChannel = ({
   const isAdmin = userRole === ChannelRole.ADMIN;
   const canRename = isParticipant && isAdmin && isDefaultChannel;
   const dmUser = useUser(dmUserId || '');
+  const canSeeUserEmail = useCanSeeUserEmail();
 
   const profilePath = `${baseRoute}/${channel.id}/profile/${dmUserId}`;
   const isProfileAlreadyOpen = location.pathname === profilePath;
@@ -379,15 +381,17 @@ const AboutChannel = ({
         {/* Email + View full profile — only for 1:1 DMs */}
         {isDM && dmUserId && (
           <div className='bg-card rounded-[12px] border border-border overflow-hidden'>
-            <div className='p-[12px]'>
-              <p className='text-xs font-medium text-muted-foreground uppercase tracking-wide mb-0.5'>
-                Email
-              </p>
-              <p className='text-sm text-foreground'>{dmUser?.email || '—'}</p>
-            </div>
+            {canSeeUserEmail(dmUserId) && (
+              <div className='p-[12px]'>
+                <p className='text-xs font-medium text-muted-foreground uppercase tracking-wide mb-0.5'>
+                  Email
+                </p>
+                <p className='text-sm text-foreground'>{dmUser?.email || '—'}</p>
+              </div>
+            )}
             <button
               onClick={handleViewProfile}
-              className='px-[12px] pb-[10px] text-xs font-sans font-semibold text-muted-foreground underline text-left hover:text-foreground transition-colors'
+              className={`px-[12px] pb-[10px] ${canSeeUserEmail(dmUserId) ? '' : 'pt-[10px] '}text-xs font-sans font-semibold text-muted-foreground underline text-left hover:text-foreground transition-colors`}
               data-track-category='ABOUT_CHANNEL_FORM'
               data-track-name='View_Full_Profile'
               data-track-metadata={JSON.stringify({ channelId: channel?.id, userId: dmUserId })}

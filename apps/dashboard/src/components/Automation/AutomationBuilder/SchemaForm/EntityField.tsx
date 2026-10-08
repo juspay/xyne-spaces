@@ -21,6 +21,7 @@ import { EntityMultiSelector } from '../../../ui/EntitySelector/EntityMultiSelec
 import type { SelectorOption } from '../../../ui/EntitySelector/EntitySelector.types';
 import { getUserDisplayName } from '../../../../utils/userDisplayName';
 import { EntityKind } from './SchemaForm.utils';
+import { useCanSeeUserEmail } from '../../../../hooks/useCanSeeUserEmail';
 
 interface EntityFieldProps {
   kind: EntityKind;
@@ -181,16 +182,17 @@ function UserField({ value, onChange, placeholder }: FieldProps): React.ReactEle
   const [search, setSearch] = useState('');
   const users = useActiveUserSearch(search, 15);
   const selectedUser = useUser(value ?? '');
+  const canSeeUserEmail = useCanSeeUserEmail();
 
   const baseOptions: SelectorOption[] = useMemo(() => {
     if (!users) return [];
     return users.map(u => ({
       value: u.id,
       label: getUserDisplayName(u),
-      subtitle: u.email,
+      subtitle: canSeeUserEmail(u.id) ? u.email : null,
       icon: <UserAvatar userId={u.id} size={AvatarSize.SM} shape={AvatarShape.CIRCULAR} />,
     }));
-  }, [users]);
+  }, [users, canSeeUserEmail]);
 
   const options = useMemo(() => {
     if (!value || !selectedUser) return baseOptions;
@@ -199,14 +201,14 @@ function UserField({ value, onChange, placeholder }: FieldProps): React.ReactEle
       {
         value: selectedUser.id,
         label: getUserDisplayName(selectedUser),
-        subtitle: selectedUser.email,
+        subtitle: canSeeUserEmail(selectedUser.id) ? selectedUser.email : null,
         icon: (
           <UserAvatar userId={selectedUser.id} size={AvatarSize.SM} shape={AvatarShape.CIRCULAR} />
         ),
       },
       ...baseOptions,
     ];
-  }, [baseOptions, selectedUser, value]);
+  }, [baseOptions, selectedUser, value, canSeeUserEmail]);
 
   return (
     <EntitySelector
@@ -622,15 +624,16 @@ interface MultiFieldProps {
 function MultiUsers({ value, onChange, placeholder }: MultiFieldProps): React.ReactElement {
   const [search, setSearch] = useState('');
   const users = useActiveUserSearch(search, 30);
+  const canSeeUserEmail = useCanSeeUserEmail();
   const options: SelectorOption[] = useMemo(() => {
     if (!users) return [];
     return users.map(u => ({
       value: u.id,
       label: getUserDisplayName(u),
-      subtitle: u.email,
+      subtitle: canSeeUserEmail(u.id) ? u.email : null,
       icon: <UserAvatar userId={u.id} size={AvatarSize.SM} shape={AvatarShape.CIRCULAR} />,
     }));
-  }, [users]);
+  }, [users, canSeeUserEmail]);
   return (
     <EntityMultiSelector
       options={options}

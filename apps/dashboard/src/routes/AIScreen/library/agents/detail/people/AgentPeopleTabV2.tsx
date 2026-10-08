@@ -31,6 +31,7 @@ import type { AgentDetailActions } from '../useAgentDetailActions';
 import { AddMemberDialog } from './AddMemberDialog';
 import { PersonRow } from './PersonRow';
 import { isShareRole, ROLE_OPTIONS, roleLabel } from './roles';
+import { useCanSeeUserEmail } from '../../../../../../hooks/useCanSeeUserEmail';
 
 const VISIBILITY_OPTIONS = [
   { value: 'global', label: 'Global (Anyone in the workspace)' },
@@ -49,6 +50,7 @@ export function AgentPeopleTabV2({
 }): ReactElement {
   const { user } = useAuth();
   const queryClient = useQueryClient();
+  const canSeeUserEmail = useCanSeeUserEmail();
 
   const shares = useClawAgentShares(agent.slug);
   const cloneRequests = useClawCloneRequests(agent.id, agent.slug);
@@ -279,7 +281,13 @@ export function AgentPeopleTabV2({
                 key={row.key}
                 userId={row.userId}
                 name={row.name}
-                detail={row.detail}
+                detail={
+                  canSeeUserEmail(row.userId, row.detail)
+                    ? row.detail
+                    : row.owner
+                      ? 'Agent creator'
+                      : ''
+                }
                 trailing={
                   row.owner ? (
                     <Pill tone='neutral'>Agent Creator</Pill>
@@ -342,7 +350,12 @@ export function AgentPeopleTabV2({
                   key={request.id}
                   userId={request.requesterId}
                   name={request.requesterName || request.requesterEmail || request.requesterId}
-                  detail={request.requesterEmail ?? 'Requested a copy of this agent'}
+                  detail={
+                    request.requesterEmail &&
+                    canSeeUserEmail(request.requesterId, request.requesterEmail)
+                      ? request.requesterEmail
+                      : 'Requested a copy of this agent'
+                  }
                   trailing={
                     <>
                       <button

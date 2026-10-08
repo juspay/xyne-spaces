@@ -90,6 +90,7 @@ import { useCanvasCommentEditorBridge } from '../useCanvasCommentEditorBridge';
 import { useCanvasTicketEditorBridge } from '../useCanvasTicketEditorBridge';
 import { CanvasTicketCreationFlow } from '../CanvasTicketCreationFlow/CanvasTicketCreationFlow';
 import { CanvasTicketLinkFlow } from '../CanvasTicketLinkFlow/CanvasTicketLinkFlow';
+import { useCanSeeUserEmail } from '../../../hooks/useCanSeeUserEmail';
 
 const canvasDictionary = {
   ...en,
@@ -154,6 +155,7 @@ export const CanvasEditor = forwardRef<CanvasEditorRef, CanvasEditorProps>(
     const allUserGroups = useUserGroups();
     const { user: authUser } = useAuth();
     const selfUser = useSelf();
+    const canSeeUserEmail = useCanSeeUserEmail();
     const currentUser = selfUser || authUser;
     const { theme } = useTheme();
     const isXyneAIOpen = useSelector(xyneAIActor, state => state.matches('open'));
@@ -296,6 +298,7 @@ export const CanvasEditor = forwardRef<CanvasEditorRef, CanvasEditorProps>(
               rounded: true,
               showActiveStatus: false,
             });
+            if (!canSeeUserEmail(userId)) delete item.subtext;
           }
         }
         // User groups - include deactivated with indicator
@@ -341,7 +344,7 @@ export const CanvasEditor = forwardRef<CanvasEditorRef, CanvasEditorProps>(
             };
             return {
               title: displayName,
-              subtext: u.email ?? '',
+              subtext: canSeeUserEmail(u.id) ? (u.email ?? '') : '',
               group: 'Users',
               icon: createElement(Avatar, {
                 userId: u.id,
@@ -389,7 +392,16 @@ export const CanvasEditor = forwardRef<CanvasEditorRef, CanvasEditorProps>(
         });
         return [...userItems, ...groupItems];
       };
-    }, [editor, users, currentUser?.id, allUserGroups, canvasId, onMentionInsert, canvasCreatedBy]);
+    }, [
+      canSeeUserEmail,
+      editor,
+      users,
+      currentUser?.id,
+      allUserGroups,
+      canvasId,
+      onMentionInsert,
+      canvasCreatedBy,
+    ]);
 
     const [tocHeadings, setTocHeadings] = useState<TocHeading[]>([]);
     const containerRef = useRef<HTMLDivElement>(null);

@@ -30,6 +30,7 @@ import {
   type AutomationDateField,
   type AutomationFilters,
 } from './filters';
+import { useCanSeeUserEmail } from '../../../../hooks/useCanSeeUserEmail';
 
 interface AutomationFiltersBarProps {
   query: string;
@@ -214,11 +215,12 @@ function useChannelOptions(search: string, value: string[]): ChecklistOption<str
 function useCreatedByOptions(search: string, value: string[]): ChecklistOption<string>[] {
   const users = useUserSearch(search, 30);
   const usersById = useUsersById();
+  const canSeeUserEmail = useCanSeeUserEmail();
   return useMemo(() => {
     const base = users.map(u => ({
       value: u.id,
       label: getUserDisplayName(u),
-      subtitle: u.email,
+      subtitle: canSeeUserEmail(u.id) ? u.email : null,
       icon: <UserAvatar userId={u.id} size={AvatarSize.SM} shape={AvatarShape.CIRCULAR} />,
       isDeactivated: isUserDeactivated(u),
     }));
@@ -227,12 +229,12 @@ function useCreatedByOptions(search: string, value: string[]): ChecklistOption<s
       return {
         value: id,
         label: u ? getUserDisplayName(u) : id,
-        subtitle: u?.email ?? null,
+        subtitle: canSeeUserEmail(id) ? (u?.email ?? null) : null,
         icon: <UserAvatar userId={id} size={AvatarSize.SM} shape={AvatarShape.CIRCULAR} />,
         isDeactivated: u ? isUserDeactivated(u) : false,
       };
     });
-  }, [users, usersById, value]);
+  }, [users, usersById, value, canSeeUserEmail]);
 }
 
 type FilterKey = 'trigger' | 'status' | 'channels' | 'createdBy';

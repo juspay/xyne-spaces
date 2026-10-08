@@ -6,6 +6,7 @@ import { SearchParticipants } from '../../../routes/CallHistoryScreen/SearchPart
 import { useRankedActivePeople } from '../../../hooks/useRankedPeopleSearch';
 import { getUserDisplayName } from '../../../utils/userDisplayName';
 import Avatar from '../Avatar/Avatar';
+import { useCanSeeUserEmail } from '../../../hooks/useCanSeeUserEmail';
 
 const DEFAULT_USER_LIMIT = 20;
 const DEFAULT_GROUP_LIMIT = 10;
@@ -53,6 +54,7 @@ export function UnifiedParticipantSearch({
   const rankedUsers = useRankedActivePeople(searchQuery.trim(), userLimit + excludedUserIds.size);
   const userGroups = useUserGroupSearch(searchQuery, userGroupLimit + excludedUserGroupIds.size);
   const channels = useChannelSearch(searchQuery, channelLimit + excludedChannelIds.size);
+  const canSeeUserEmail = useCanSeeUserEmail();
 
   const options = useMemo(() => {
     const userOptions = rankedUsers
@@ -61,7 +63,7 @@ export function UnifiedParticipantSearch({
       .map(user => ({
         ...user,
         label: getUserDisplayName(user),
-        subtitle: user.email ?? '',
+        subtitle: canSeeUserEmail(user.id) ? (user.email ?? '') : '',
         value: `user:${user.id}`,
         icon: <Avatar userId={user.id} size='sm' showActiveStatus={false} />,
       }));
@@ -94,6 +96,7 @@ export function UnifiedParticipantSearch({
 
     return [...userOptions, ...groupOptions, ...channelOptions];
   }, [
+    canSeeUserEmail,
     channelLimit,
     channels,
     excludedChannelIds,

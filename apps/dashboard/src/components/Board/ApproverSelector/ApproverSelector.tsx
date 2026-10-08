@@ -8,6 +8,7 @@ import { useCachedQuery } from '../../../hooks/useCachedQuery';
 import { queries } from '../../../zero/queries';
 import type { ApproverEntry, ApproverSelectorProps } from './ApproverSelector.types';
 import { ApproverType } from '@xyne/shared';
+import { useCanSeeUserEmail } from '../../../hooks/useCanSeeUserEmail';
 
 type Tab = 'USERS' | 'ROLES';
 
@@ -17,6 +18,7 @@ export const ApproverSelector = ({
 }: ApproverSelectorProps): ReactElement => {
   const [tab, setTab] = useState<Tab>('USERS');
   const [searchQuery, setSearchQuery] = useState('');
+  const canSeeUserEmail = useCanSeeUserEmail();
 
   const handleTabChange = (next: Tab): void => {
     setTab(next);
@@ -139,9 +141,11 @@ export const ApproverSelector = ({
                       <span className='text-[14px] font-medium text-foreground'>
                         {getUserDisplayName(user)}
                       </span>
-                      <span className='text-[12px] text-muted-foreground truncate'>
-                        {user.email}
-                      </span>
+                      {canSeeUserEmail(user.id) && (
+                        <span className='text-[12px] text-muted-foreground truncate'>
+                          {user.email}
+                        </span>
+                      )}
                     </div>
                     {isSelected && <Check className='w-4 h-4 text-action-primary shrink-0' />}
                   </button>

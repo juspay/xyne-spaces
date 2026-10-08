@@ -7,6 +7,7 @@ import { searchUsers, useActiveUsers } from '../../../hooks/useUsers';
 import Avatar from '../../ui/Avatar/Avatar';
 import { cn } from '../../../utils/classNames';
 import { getUserDisplayName } from '../../../utils/userDisplayName';
+import { useCanSeeUserEmail } from '../../../hooks/useCanSeeUserEmail';
 
 const MAX_SUGGESTIONS = 6;
 const PENDING_COLOR = '#94a3b8';
@@ -28,6 +29,7 @@ export const XyneCalendarMeetWith = memo(
     onRemoveUser,
   }: XyneCalendarMeetWithProps): ReactElement => {
     const listboxId = useId();
+    const canSeeUserEmail = useCanSeeUserEmail();
     const [query, setQuery] = useState('');
     const [isOpen, setIsOpen] = useState(false);
     const [activeIndex, setActiveIndex] = useState(0);
@@ -242,11 +244,13 @@ export const XyneCalendarMeetWith = memo(
                         <span className='truncate text-sm font-medium text-foreground'>
                           {displayName}
                         </span>
-                        {candidate.email && candidate.email !== displayName && (
-                          <span className='truncate text-xs text-muted-foreground'>
-                            {candidate.email}
-                          </span>
-                        )}
+                        {candidate.email &&
+                          candidate.email !== displayName &&
+                          canSeeUserEmail(candidate.id) && (
+                            <span className='truncate text-xs text-muted-foreground'>
+                              {candidate.email}
+                            </span>
+                          )}
                       </span>
                       {isActive && (
                         <kbd className='shrink-0 rounded border border-border bg-background px-1.5 py-0.5 font-mono text-[10px] leading-none text-muted-foreground'>

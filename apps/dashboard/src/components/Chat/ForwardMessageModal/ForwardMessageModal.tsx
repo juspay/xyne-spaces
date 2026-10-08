@@ -80,6 +80,7 @@ import {
   isShareableTarget,
   type ForwardMode,
 } from './forwardMode';
+import { useCanSeeUserEmail } from '../../../hooks/useCanSeeUserEmail';
 
 /**
  * ForwardMessageForm component allows users to forward a message to channels or users.
@@ -384,6 +385,7 @@ export const ForwardMessageForm: React.FC<ForwardMessageFormProps> = ({
 
   // Get current user and sender info
   const { user: currentUser } = useAuth();
+  const canSeeUserEmail = useCanSeeUserEmail();
   const sender = useUser(message.senderId);
 
   // Mention search for @ mentions in optional message
@@ -694,7 +696,7 @@ export const ForwardMessageForm: React.FC<ForwardMessageFormProps> = ({
             defaults.push({
               leftSlot: <Avatar userId={otherUser.id} size='sm' />,
               label: getUserDisplayName(otherUser),
-              description: otherUser.email,
+              description: canSeeUserEmail(otherUser.id) ? otherUser.email : '',
               value: otherUser.id,
             });
           }
@@ -767,7 +769,7 @@ export const ForwardMessageForm: React.FC<ForwardMessageFormProps> = ({
             .map(currUser => ({
               leftSlot: <Avatar userId={currUser.id} size='sm' />,
               label: getForwardUserLabel(currUser),
-              description: currUser.email,
+              description: canSeeUserEmail(currUser.id) ? currUser.email : '',
               value: currUser.id,
             }));
 
@@ -816,6 +818,7 @@ export const ForwardMessageForm: React.FC<ForwardMessageFormProps> = ({
     }
     return suggestedUsers;
   }, [
+    canSeeUserEmail,
     inputValue,
     trimmedInputValue,
     selectedUserIds,

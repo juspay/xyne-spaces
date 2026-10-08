@@ -18,6 +18,7 @@ import { GoogleCalendarIcon, MicrosoftIcon } from './CalendarIcons';
 import type { CalendarProvider } from '../../services/clients/calendarApi';
 import type { CalendarReauthCountdown, CalendarSyncMessage } from '../../utils/calendarSync';
 import { xyneCalendarActor } from '../../machines/xyneCalendarMachine';
+import { useCanSeeUserEmail } from '../../hooks/useCanSeeUserEmail';
 
 interface CallHistorySearchPanelBaseProps {
   callMentionSearchType: ChipType | null;
@@ -102,6 +103,7 @@ export function CallHistorySearchPanel(props: CallHistorySearchPanelProps): Reac
     isMobile,
     currentUserId,
   } = props;
+  const canSeeUserEmail = useCanSeeUserEmail();
   const insertMentionRef = useRef<
     ((item: { id: string; name: string; email?: string }) => void) | null
   >(null);
@@ -286,9 +288,11 @@ export function CallHistorySearchPanel(props: CallHistorySearchPanelProps): Reac
                             <span className='truncate font-medium'>
                               {getUserDisplayName(candidate)}
                             </span>
-                            <span className='truncate text-xs text-muted-foreground'>
-                              {candidate.email}
-                            </span>
+                            {canSeeUserEmail(candidate.id) && (
+                              <span className='truncate text-xs text-muted-foreground'>
+                                {candidate.email}
+                              </span>
+                            )}
                           </span>
                         </button>
                       </li>

@@ -10,6 +10,7 @@ import { BasePopoverSelector, type BaseSelectorPluginState } from './BasePopover
 import { useUser } from '../../../hooks/useUsers';
 import { resolveUserStatus } from '../../../utils/statusUtils';
 import { renderEmoji } from '../../../utils/customEmojiUtils';
+import { useCanSeeUserEmail } from '../../../hooks/useCanSeeUserEmail';
 
 /**
  * Sub-component to render user avatar with resolved profile picture URL.
@@ -21,6 +22,7 @@ const UserAvatarItem: React.FC<{ item: MentionResult }> = ({ item }) => {
   const hasValidStatus = status.hasStatus;
   const statusText = status.content ?? undefined;
   const isDeactivated = user?.status === UserStatus.INACTIVE || item.isDeactivated;
+  const canSeeUserEmail = useCanSeeUserEmail();
 
   return (
     <>
@@ -51,7 +53,7 @@ const UserAvatarItem: React.FC<{ item: MentionResult }> = ({ item }) => {
             </span>
           )}
         </div>
-        {item.email && (
+        {item.email && canSeeUserEmail(item.id) && (
           <span className='text-xs text-muted-foreground whitespace-nowrap overflow-hidden text-ellipsis'>
             {item.email}
           </span>

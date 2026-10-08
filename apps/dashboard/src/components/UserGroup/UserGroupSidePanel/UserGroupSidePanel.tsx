@@ -10,6 +10,7 @@ import { UserStatus } from '@xyne/shared';
 import Avatar from '../../ui/Avatar/Avatar';
 import { useRouteContext } from '../../../hooks/useRouteContext';
 import { getUserDisplayName } from '../../../utils/userDisplayName';
+import { useCanSeeUserEmail } from '../../../hooks/useCanSeeUserEmail';
 
 export const UserGroupSidePanel = (): ReactElement | null => {
   const navigate = useNavigate();
@@ -31,6 +32,7 @@ export const UserGroupSidePanel = (): ReactElement | null => {
   };
 
   const allUsers = useUsers();
+  const canSeeUserEmail = useCanSeeUserEmail();
   const usersById = useMemo(() => {
     const map = new Map<string, User>();
     for (const u of allUsers) {
@@ -115,7 +117,9 @@ export const UserGroupSidePanel = (): ReactElement | null => {
                         </span>
                       )}
                     </div>
-                    <p className='text-[12px] text-muted-foreground truncate'>{user.email}</p>
+                    {canSeeUserEmail(user.id) && (
+                      <p className='text-[12px] text-muted-foreground truncate'>{user.email}</p>
+                    )}
                   </div>
                   {roleName && (
                     <span className='text-[12px] px-2 py-0.5 rounded font-medium flex-shrink-0 bg-muted text-muted-foreground'>

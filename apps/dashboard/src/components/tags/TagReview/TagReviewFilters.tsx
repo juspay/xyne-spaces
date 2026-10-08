@@ -1,3 +1,4 @@
+import { useCanSeeUserEmail } from '../../../hooks/useCanSeeUserEmail';
 /**
  * The toolbar's filter pills.
  *
@@ -40,6 +41,7 @@ export const TagReviewFilter = ({
 }: TagReviewFilterProps): JSX.Element => {
   const [open, setOpen] = useState(false);
   const [search, setSearch] = useState('');
+  const canSeeUserEmail = useCanSeeUserEmail();
 
   const visible = useMemo(() => {
     const query = search.trim().toLowerCase();
@@ -132,7 +134,7 @@ export const TagReviewFilter = ({
                   <span className='min-w-0 truncate'>{option.label}</span>
                   {/* The email is the identifier a reviewer actually recognises — two people
                       can share a display name, and nobody shares an address. */}
-                  {option.email ? (
+                  {option.email && canSeeUserEmail(option.value) ? (
                     <span className='min-w-0 truncate text-[11px] text-muted-foreground'>
                       {option.email}
                     </span>

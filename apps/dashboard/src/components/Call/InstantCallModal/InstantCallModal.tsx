@@ -20,6 +20,7 @@ import {
   buildUserGroupParticipantOption,
   buildUserParticipantOption,
 } from '../participantOptions';
+import { useCanSeeUserEmail } from '../../../hooks/useCanSeeUserEmail';
 
 interface InstantCallModalProps {
   isOpen: boolean;
@@ -67,6 +68,7 @@ export const InstantCallModal: React.FC<InstantCallModalProps> = ({
 
   // Bounded + ranked candidates. Only these get turned into rows, so a keystroke
   // decorates ~40 entities instead of the whole workspace.
+  const canSeeUserEmail = useCanSeeUserEmail();
   const { users, userGroups, channels } = useParticipantCandidates({
     query: searchQuery,
     excludeUserIds: excludedUserIds,
@@ -75,11 +77,11 @@ export const InstantCallModal: React.FC<InstantCallModalProps> = ({
 
   const participantOptions = useMemo(
     () => [
-      ...users.map(buildUserParticipantOption),
+      ...users.map(u => buildUserParticipantOption(u, canSeeUserEmail(u.id))),
       ...channels.map(buildChannelParticipantOption),
       ...userGroups.map(buildUserGroupParticipantOption),
     ],
-    [users, channels, userGroups],
+    [users, channels, userGroups, canSeeUserEmail],
   );
 
   // Pills for the current selection. Bulk paste can add people the ranked slice

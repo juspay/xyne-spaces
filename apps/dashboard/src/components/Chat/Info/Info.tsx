@@ -65,6 +65,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { VisibleChannel } from '../../../machines/stateMachine';
 import { getUserDisplayName, isUserDeactivated } from '../../../utils/userDisplayName';
 import { channelTrackingMetadata } from '../../../services/Analytics/channelTracking';
+import { useCanSeeUserEmail } from '../../../hooks/useCanSeeUserEmail';
 
 export type ChannelTab =
   | 'about'
@@ -619,6 +620,7 @@ const ParticipantListItem = ({
 }: ParticipantListItemProps): ReactElement => {
   const [isPopoverOpen, setIsPopoverOpen] = useState(false);
   const user = useUser(participant.userId);
+  const canSeeUserEmail = useCanSeeUserEmail();
   const isAdmin = participant.role === ChannelRole.ADMIN;
   const isCreator = channelCreatedBy === participant.userId;
   const canManageThisUser =
@@ -658,9 +660,11 @@ const ParticipantListItem = ({
               </span>
             )}
           </div>
-          <div className='text-sm text-muted-foreground truncate text-muted-foreground'>
-            {user?.email}
-          </div>
+          {canSeeUserEmail(participant.userId) && (
+            <div className='text-sm text-muted-foreground truncate text-muted-foreground'>
+              {user?.email}
+            </div>
+          )}
         </div>
 
         <div

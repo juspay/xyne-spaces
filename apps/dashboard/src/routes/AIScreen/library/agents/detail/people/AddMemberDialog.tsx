@@ -10,6 +10,7 @@ import { V2Dialog } from '../../../shared/primitives/V2Dialog';
 import { BehaviourSelect } from '../behaviour/BehaviourRows';
 import { ROLE_OPTIONS } from './roles';
 import { PersonRow } from './PersonRow';
+import { useCanSeeUserEmail } from '../../../../../../hooks/useCanSeeUserEmail';
 
 interface AddMemberDialogProps {
   open: boolean;
@@ -30,6 +31,7 @@ export function AddMemberDialog({
 }: AddMemberDialogProps): ReactElement {
   const { user } = useAuth();
   const [query, setQuery] = useState('');
+  const canSeeUserEmail = useCanSeeUserEmail();
   const [debounced, setDebounced] = useState('');
   const [role, setRole] = useState<AgentShareRole>(defaultRole);
 
@@ -117,7 +119,7 @@ export function AddMemberDialog({
               key={candidate.id}
               userId={candidate.id}
               name={candidate.name || candidate.email}
-              detail={candidate.email}
+              detail={canSeeUserEmail(candidate.id, candidate.email) ? candidate.email : ''}
               trailing={
                 <Button
                   onClick={() => onAdd(candidate, role)}

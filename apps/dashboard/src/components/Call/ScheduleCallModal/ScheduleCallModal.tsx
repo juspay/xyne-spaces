@@ -75,6 +75,7 @@ import {
   mergeDateWithTime,
 } from '../../../utils/callTimeValidation';
 import { logger, Event } from '../../../utils/logger';
+import { useCanSeeUserEmail } from '../../../hooks/useCanSeeUserEmail';
 
 export type { EditCallData } from './types';
 
@@ -339,6 +340,8 @@ const ScheduleCallModalContent: React.FC<ScheduleCallModalProps> = ({
     validateTimes,
   });
 
+  const canSeeUserEmail = useCanSeeUserEmail();
+
   // Build ParticipantOptions for the unfurled channel-member checkbox list.
   // Members come from the API as { id, name }, so no allUsers cross-reference is needed.
   // Bounded by the channel's own membership, not the workspace.
@@ -346,7 +349,7 @@ const ScheduleCallModalContent: React.FC<ScheduleCallModalProps> = ({
     if (!selectedChannelId || !selectedChannelParticipants) return null;
     return selectedChannelParticipants
       .filter(m => m.id !== user?.id)
-      .map(buildUserParticipantOption);
+      .map(member => buildUserParticipantOption(member));
   }, [selectedChannelId, selectedChannelParticipants, user?.id]);
 
   const {
@@ -411,11 +414,11 @@ const ScheduleCallModalContent: React.FC<ScheduleCallModalProps> = ({
 
   const rankedParticipantOptions = useMemo(
     () => [
-      ...candidateUsers.map(buildUserParticipantOption),
+      ...candidateUsers.map(u => buildUserParticipantOption(u, canSeeUserEmail(u.id))),
       ...candidateChannels.map(buildChannelParticipantOption),
       ...candidateUserGroups.map(buildUserGroupParticipantOption),
     ],
-    [candidateUsers, candidateChannels, candidateUserGroups],
+    [candidateUsers, candidateChannels, candidateUserGroups, canSeeUserEmail],
   );
 
   // Pills for the current selection. `rankedParticipantOptions` is a query-ranked

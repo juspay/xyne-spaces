@@ -7,6 +7,7 @@ import { searchClawUsers } from '@/services/claw/clawAuthAgentsService';
 import type { ClawUser } from '@/services/claw/clawAuthAgentTypes';
 import { V2Dialog } from '../../../shared/primitives/V2Dialog';
 import { PersonRow } from '../../../agents/detail/people/PersonRow';
+import { useCanSeeUserEmail } from '../../../../../../hooks/useCanSeeUserEmail';
 
 interface AddContributorDialogProps {
   open: boolean;
@@ -25,6 +26,7 @@ export function AddContributorDialog({
 }: AddContributorDialogProps): ReactElement {
   const { user } = useAuth();
   const [query, setQuery] = useState('');
+  const canSeeUserEmail = useCanSeeUserEmail();
   const [debounced, setDebounced] = useState('');
 
   useEffect(() => {
@@ -99,7 +101,7 @@ export function AddContributorDialog({
               key={candidate.id}
               userId={candidate.id}
               name={candidate.name || candidate.email}
-              detail={candidate.email}
+              detail={canSeeUserEmail(candidate.id, candidate.email) ? candidate.email : ''}
               trailing={
                 <Button
                   onClick={() => onAdd(candidate)}

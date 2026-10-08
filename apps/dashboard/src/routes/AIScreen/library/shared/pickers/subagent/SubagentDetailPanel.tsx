@@ -16,6 +16,7 @@ import {
   type SubagentCatalogEntry,
   type SubagentSelection,
 } from './subagentCatalog';
+import { useCanSeeUserEmail } from '../../../../../../hooks/useCanSeeUserEmail';
 
 const PROMPT_MAX_HEIGHT = 300;
 const TOOLS_MAX_HEIGHT = 175;
@@ -81,6 +82,7 @@ export function SubagentDetailPanel({
   const selected = isSubagentSelected(selection, entry);
   const availableTools = useClawAvailableTools();
   const { def } = useSubagentDetail(entry.name, entry.def);
+  const canSeeUserEmail = useCanSeeUserEmail();
 
   const capabilities = resolveSubagentCapabilities(
     availableTools.data ?? null,
@@ -170,7 +172,7 @@ export function SubagentDetailPanel({
                       </ChipIconTile>
                     }
                     label={share.name || share.email}
-                    secondary={share.email}
+                    {...(canSeeUserEmail(share.userId, share.email) && { secondary: share.email })}
                   />
                 ))}
               </ChipRow>

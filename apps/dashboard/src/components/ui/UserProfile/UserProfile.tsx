@@ -46,7 +46,7 @@ import { queryClient } from '../../../services/clients/queryClient';
 import { usePlatform } from '../../../hooks/usePlatform';
 import { useMettleEmployeeDetails } from '../../../hooks/useMettleEmployeeDetails';
 import { PhoneDefault } from '@xyne/icons';
-import { useIsCommunityWorkspace } from '../../../hooks/useIsCommunityWorkspace';
+import { useCanSeeUserEmail } from '../../../hooks/useCanSeeUserEmail';
 
 interface UserProfileProps {
   userId: string;
@@ -72,7 +72,7 @@ export const UserProfile: React.FC<UserProfileProps> = ({
   const navigate = useNavigate();
   const { user: currentUser } = useAuth();
   const { isMobile } = usePlatform();
-  const isCommunityWorkspace = useIsCommunityWorkspace();
+  const canSeeUserEmail = useCanSeeUserEmail();
 
   const [userProfile] = useCachedQuery(queries.getUserProfile({ userId }));
   const user = useUser(userId);
@@ -723,8 +723,8 @@ export const UserProfile: React.FC<UserProfileProps> = ({
             </div>
           </div>
 
-          {/* Email Address — hidden in community workspaces */}
-          {!isCommunityWorkspace && (
+          {/* Email Address — hidden in community workspaces (except your own) */}
+          {canSeeUserEmail(user.id) && (
             <div className='flex items-start gap-3'>
               <div className='p-2 bg-muted rounded-lg flex-shrink-0'>
                 <Mail className='size-4 text-muted-foreground' />

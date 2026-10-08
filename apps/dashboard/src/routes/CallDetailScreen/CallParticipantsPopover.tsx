@@ -7,6 +7,7 @@ import { type CallParticipantRow } from '../../hooks/useCallParticipantRoster';
 import { usePlatform } from '../../hooks/usePlatform';
 import { cn } from '../../utils/classNames';
 import { getCallParticipantCount, type Call } from '../CallHistoryScreen/callHistoryItem.utils';
+import { useIsCommunityWorkspace } from '../../hooks/useIsCommunityWorkspace';
 
 /** Faces shown on the pill before it falls back to the bare count. */
 const MAX_PARTICIPANT_FACES = 4;
@@ -33,6 +34,7 @@ export function CallParticipantsPopover({
 }: CallParticipantsPopoverProps): ReactElement | null {
   const [isOpen, setIsOpen] = useState(false);
   const { isMobile } = usePlatform();
+  const isCommunityWorkspace = useIsCommunityWorkspace();
 
   // Attendees first, invitees after. `sort` is stable, so each group keeps the
   // roster order the hook produced.
@@ -106,7 +108,7 @@ export function CallParticipantsPopover({
                   </span>
                   {participant.isExternal && <StatusPill tone='pending' label='External' />}
                 </div>
-                {participant.email && (
+                {participant.email && (!isCommunityWorkspace || participant.isCurrentUser) && (
                   <span className='block truncate text-[11.5px] text-muted-foreground'>
                     {participant.email}
                   </span>
