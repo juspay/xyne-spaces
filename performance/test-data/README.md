@@ -24,8 +24,8 @@ generic terms. Supply `searchTerms` only if the terms are safe to commit to a Je
 
 `attachmentIds` (an array of strings) is required by the `attachments` scenario and ignored by
 every other one. Use small, non-confidential test files: each iteration transfers the real bytes
-out of object storage, so a long run has a measurable egress cost. The scenario refuses to start
-if the list is empty or an id is not retrievable, because a run against a missing id would
+out of object storage, so a long run has a measurable egress cost. The runner refuses to start
+if any identity's list is empty, and the scenario refuses if the first id is not retrievable, because a run against a missing id would
 measure the not-found path instead of retrieval.
 
 Never commit the real file, archive it in Jenkins, print it in logs, or use customer/production data.

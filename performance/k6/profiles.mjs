@@ -8,46 +8,46 @@ export const PROFILE_NAMES = Object.freeze([
 ]);
 
 const DEFINITIONS = Object.freeze({
-  smoke: Object.freeze({
+  smoke: {
     executor: 'shared-iterations',
     vus: 1,
     iterations: 1,
     maxDuration: '2m',
-  }),
-  release: Object.freeze({
+  },
+  release: {
     executor: 'ramping-vus',
     peakVus: 25,
     steadyStageIndex: 2,
-    stages: Object.freeze([
-      Object.freeze({ duration: '1m', ratio: 0.2 }),
-      Object.freeze({ duration: '2m', ratio: 0.4 }),
-      Object.freeze({ duration: '5m', ratio: 1 }),
-      Object.freeze({ duration: '2m', ratio: 0 }),
-    ]),
-  }),
-  load: Object.freeze({
+    stages: [
+      { duration: '1m', ratio: 0.2 },
+      { duration: '2m', ratio: 0.4 },
+      { duration: '5m', ratio: 1 },
+      { duration: '2m', ratio: 0 },
+    ],
+  },
+  load: {
     executor: 'ramping-vus',
     peakVus: 100,
     steadyStageIndex: 2,
-    stages: Object.freeze([
-      Object.freeze({ duration: '5m', ratio: 0.25 }),
-      Object.freeze({ duration: '5m', ratio: 0.5 }),
-      Object.freeze({ duration: '25m', ratio: 1 }),
-      Object.freeze({ duration: '5m', ratio: 0 }),
-    ]),
-  }),
-  stress: Object.freeze({
+    stages: [
+      { duration: '5m', ratio: 0.25 },
+      { duration: '5m', ratio: 0.5 },
+      { duration: '25m', ratio: 1 },
+      { duration: '5m', ratio: 0 },
+    ],
+  },
+  stress: {
     executor: 'ramping-vus',
     peakVus: 300,
     steadyStageIndex: 3,
-    stages: Object.freeze([
-      Object.freeze({ duration: '3m', ratio: 0.1 }),
-      Object.freeze({ duration: '3m', ratio: 0.25 }),
-      Object.freeze({ duration: '3m', ratio: 0.5 }),
-      Object.freeze({ duration: '3m', ratio: 1 }),
-      Object.freeze({ duration: '5m', ratio: 0 }),
-    ]),
-  }),
+    stages: [
+      { duration: '3m', ratio: 0.1 },
+      { duration: '3m', ratio: 0.25 },
+      { duration: '3m', ratio: 0.5 },
+      { duration: '3m', ratio: 1 },
+      { duration: '5m', ratio: 0 },
+    ],
+  },
   // A spike is not a smaller stress test. `stress` climbs in three-minute steps to find
   // where the system degrades; `spike` slams from a tenth of peak to full peak in ten
   // seconds to find whether it survives a surge at all — and, in the stage after, whether
@@ -58,29 +58,29 @@ const DEFINITIONS = Object.freeze({
   // `steadyStageIndex` points at the recovery hold, not the surge: lengthening a run
   // should buy more time watching queues drain, because a surge held for ten minutes is
   // by definition no longer a spike.
-  spike: Object.freeze({
+  spike: {
     executor: 'ramping-vus',
     peakVus: 300,
     steadyStageIndex: 4,
-    stages: Object.freeze([
-      Object.freeze({ duration: '1m', ratio: 0.1 }),   // baseline
-      Object.freeze({ duration: '10s', ratio: 1 }),    // the surge
-      Object.freeze({ duration: '1m', ratio: 1 }),     // hold at peak
-      Object.freeze({ duration: '10s', ratio: 0.1 }),  // drop back
-      Object.freeze({ duration: '3m', ratio: 0.1 }),   // recovery window
-      Object.freeze({ duration: '1m', ratio: 0 }),     // wind down
-    ]),
-  }),
-  soak: Object.freeze({
+    stages: [
+      { duration: '1m', ratio: 0.1 },   // baseline
+      { duration: '10s', ratio: 1 },    // the surge
+      { duration: '1m', ratio: 1 },     // hold at peak
+      { duration: '10s', ratio: 0.1 },  // drop back
+      { duration: '3m', ratio: 0.1 },   // recovery window
+      { duration: '1m', ratio: 0 },     // wind down
+    ],
+  },
+  soak: {
     executor: 'ramping-vus',
     peakVus: 25,
     steadyStageIndex: 1,
-    stages: Object.freeze([
-      Object.freeze({ duration: '5m', ratio: 1 }),
-      Object.freeze({ duration: '4h', ratio: 1 }),
-      Object.freeze({ duration: '5m', ratio: 0 }),
-    ]),
-  }),
+    stages: [
+      { duration: '5m', ratio: 1 },
+      { duration: '4h', ratio: 1 },
+      { duration: '5m', ratio: 0 },
+    ],
+  },
 });
 
 export function buildExecutionProfile(name, overrides = {}) {

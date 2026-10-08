@@ -1,8 +1,8 @@
 import { sleep } from 'k6';
 import http from 'k6/http';
 
-import { messageSendDuration, parseJson, verify } from '../lib/checks.js';
-import { buildOptions, getRunConfig, readinessUrl } from '../lib/config.js';
+import { assertReady, messageSendDuration, parseJson, verify } from '../lib/checks.js';
+import { buildOptions, getRunConfig } from '../lib/config.js';
 import { authenticatedHeaders, userForVirtualUser } from '../lib/data.js';
 import { buildSummary } from '../lib/report.js';
 import { routeEnvHeaders } from '../env-routing.mjs';
@@ -14,18 +14,7 @@ const ROUTE_HEADERS = routeEnvHeaders(config.environment);
 export const options = buildOptions(config);
 
 export function setup() {
-  const response = http.get(readinessUrl(config), {
-    headers: ROUTE_HEADERS,
-    tags: { operation: 'readiness' },
-  });
-  const body = parseJson(response);
-  const ready = verify(response, {
-    'readiness returns 200': (result) => result.status === 200,
-    'readiness reports success': () => body?.success === true,
-    'database is ready': () => body?.data?.status === 'ready',
-  }, { operation: 'readiness' });
-
-  if (!ready) throw new Error('ENVIRONMENT_FAILURE: target is not ready');
+  assertReady(config, ROUTE_HEADERS);
   return { runId: config.runId };
 }
 

@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdtempSync, mkdirSync, readdirSync, realpathSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, mkdirSync, readdirSync, realpathSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
@@ -72,7 +72,8 @@ test('builds a pinned read-only smoke invocation without revealing secrets', () 
       runId: 'run-1',
       releaseVersion: '1.0.0',
       baseUrl: 'https://sandbox.example',
-      token: 'super-secret-token',
+      remoteWriteUrl: 'https://metrics.example/api/v1/write',
+      remoteWritePassword: 'super-secret-password',
     },
   );
 
@@ -80,9 +81,9 @@ test('builds a pinned read-only smoke invocation without revealing secrets', () 
   assert.ok(result.args.includes('grafana/k6:2.2.0'));
   assert.ok(result.args.includes(`${root}:/work:ro`));
   assert.ok(result.args.includes('/work/performance/k6/scenarios/smoke.js'));
-  assert.equal(result.safeDisplay.includes('super-secret-token'), false);
-  assert.equal(result.args.join(' ').includes('super-secret-token'), false);
-  assert.equal(result.env.PERF_TEST_TOKEN, 'super-secret-token');
+  assert.equal(result.safeDisplay.includes('super-secret-password'), false);
+  assert.equal(result.args.join(' ').includes('super-secret-password'), false);
+  assert.equal(result.env.K6_PROMETHEUS_RW_PASSWORD, 'super-secret-password');
 });
 
 test('passes only environment variable names to Docker for credentials', () => {
@@ -94,17 +95,16 @@ test('passes only environment variable names to Docker for credentials', () => {
       runId: 'run-2',
       releaseVersion: 'abc123',
       baseUrl: 'https://preprod.example',
-      token: 'token-value',
-      workspaceId: 'workspace-secret',
+      remoteWriteUrl: 'https://metrics.example/api/v1/write',
+      remoteWritePassword: 'password-value',
       usersFile: '/repo/performance/test-data/users.json',
     },
   );
 
   const joined = result.args.join(' ');
   assert.match(joined, /--env PERF_BASE_URL/);
-  assert.match(joined, /--env PERF_TEST_TOKEN/);
-  assert.equal(joined.includes('token-value'), false);
-  assert.equal(joined.includes('workspace-secret'), false);
+  assert.match(joined, /--env K6_PROMETHEUS_RW_PASSWORD/);
+  assert.equal(joined.includes('password-value'), false);
 });
 
 test('enables VictoriaMetrics output only when a Remote Write URL is configured', () => {
@@ -153,6 +153,7 @@ test('requires a base URL and keeps report output inside the repository', () => 
   assert.throws(
     () => validateRuntime({
       root,
+      config: { scenario: 'smoke' },
       env: {
         PERF_BASE_URL: 'https://sandbox.example',
         PERF_REMOTE_WRITE_URL: 'https://user:password@metrics.example/api/v1/write',
@@ -208,6 +209,30 @@ test('rejects missing, malformed, empty, and incomplete messaging fixtures', () 
   assert.throws(() => runtime('incomplete.json'), /userId.*workspaceId.*conversationId/i);
 });
 
+test('refuses an attachments fixture where any identity lacks attachmentIds', () => {
+  // Identities are assigned round-robin, so one without ids leaves its virtual users idle.
+  const temporaryRoot = mkdtempSync(path.join(tmpdir(), 'xyne-perf-'));
+  const usersFile = path.join(temporaryRoot, 'users.json');
+  const user = (index, attachmentIds) => ({
+    userId: `user-${index}`,
+    token: `token-${index}`,
+    workspaceId: 'workspace-1',
+    conversationId: 'conversation-1',
+    ...(attachmentIds ? { attachmentIds } : {}),
+  });
+  const runtime = () => validateRuntime({
+    root: temporaryRoot,
+    config: { scenario: 'attachments', profile: 'release' },
+    env: { PERF_BASE_URL: 'https://sandbox.example', PERF_USERS_FILE: usersFile },
+  });
+
+  writeFileSync(usersFile, JSON.stringify({ users: [user(1, ['a-1']), user(2)] }));
+  assert.throws(runtime, /user 1 requires attachmentIds/);
+
+  writeFileSync(usersFile, JSON.stringify({ users: [user(1, ['a-1']), user(2, ['a-2'])] }));
+  assert.doesNotThrow(runtime);
+});
+
 test('every supported profile selects an existing scenario entry file', () => {
   const repositoryRoot = path.resolve(import.meta.dirname, '..', '..');
   const combinations = [
@@ -224,18 +249,9 @@ test('every supported profile selects an existing scenario entry file', () => {
 
   for (const [profile, scenario] of combinations) {
     const entry = path.join(repositoryRoot, 'performance', 'k6', 'scenarios', `${scenario}.js`);
-    assert.equal(exists(entry), true, `${profile}/${scenario} is missing ${entry}`);
+    assert.equal(existsSync(entry), true, `${profile}/${scenario} is missing ${entry}`);
   }
 });
-
-function exists(file) {
-  try {
-    statSync(file);
-    return true;
-  } catch {
-    return false;
-  }
-}
 
 test('requires an identity fixture for every authenticated scenario', () => {
   for (const scenario of ['zero-query-transform', 'zero-push', 'rest-messaging', 'search', 'attachments']) {
@@ -517,12 +533,12 @@ test('a Docker start failure exits 2, not Docker\'s own 125', () => {
   assert.equal(processExitCodeFor(1), 1);
 });
 
-test('refuses a production host even when the run is labelled preprod', () => {
-  // The whole point: the name says preprod, the traffic would hit customers.
+test('refuses a production host unless the run is preprod', () => {
+  // The name says sandbox, the traffic would hit customers.
   assert.throws(
     () => validateRuntime({
       root,
-      config: { scenario: 'smoke', profile: 'smoke' },
+      config: { environment: 'sandbox', scenario: 'smoke', profile: 'smoke' },
       env: { PERF_BASE_URL: 'https://app.spaces.xyne.juspay.net' },
     }),
     /serves production/i,
@@ -534,6 +550,17 @@ test('refuses a production host even when the run is labelled preprod', () => {
       env: { PERF_BASE_URL: 'https://auth.spaces.xyne.juspay.net/api' },
     }),
     /serves production/i,
+  );
+});
+
+test('accepts the production host for a preprod run, which has no host of its own', () => {
+  assert.equal(
+    validateRuntime({
+      root,
+      config: { environment: 'preprod', scenario: 'smoke', profile: 'smoke' },
+      env: { PERF_BASE_URL: 'https://app.spaces.xyne.juspay.net' },
+    }).baseUrl,
+    'https://app.spaces.xyne.juspay.net',
   );
 });
 

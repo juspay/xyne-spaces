@@ -9,8 +9,7 @@ import {
 
 test('names the production hosts that must never receive load', () => {
   // apps/electron/src/app/config.ts:65-70
-  assert.ok(PRODUCTION_HOSTS.includes('app.spaces.xyne.juspay.net'));
-  assert.ok(PRODUCTION_HOSTS.includes('auth.spaces.xyne.juspay.net'));
+  assert.deepEqual(PRODUCTION_HOSTS, ['app.spaces.xyne.juspay.net', 'auth.spaces.xyne.juspay.net']);
 });
 
 test('pre-prod is the production host plus a routing header, so it must be sent', () => {
@@ -23,7 +22,7 @@ test('sandbox is a separate deployment and takes no routing header', () => {
   assert.deepEqual(routeEnvHeaders(undefined), {});
 });
 
-test('refuses a production host whatever the run is labelled', () => {
+test('refuses a production host for any environment other than preprod', () => {
   // The environment name is a label; the hostname is where traffic actually lands.
   for (const url of [
     'https://app.spaces.xyne.juspay.net',
@@ -32,7 +31,13 @@ test('refuses a production host whatever the run is labelled', () => {
     'http://app.spaces.xyne.juspay.net:8080/x',
   ]) {
     assert.throws(() => assertNotProductionHost(url), /production/i, url);
+    assert.throws(() => assertNotProductionHost(url, 'sandbox'), /production/i, url);
   }
+});
+
+test('accepts the production host for preprod, which has no host of its own', () => {
+  // Pre-production is this host plus x-route-env; the catalog limits it to smoke and release.
+  assert.doesNotThrow(() => assertNotProductionHost('https://app.spaces.xyne.juspay.net', 'preprod'));
 });
 
 test('allows sandbox and anything that is not a known production host', () => {

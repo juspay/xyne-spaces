@@ -17,8 +17,8 @@
 import http from 'k6/http';
 import { sleep } from 'k6';
 
-import { attachmentDuration, parseJson, verify } from '../lib/checks.js';
-import { buildOptions, getRunConfig, pathUrl, readinessUrl } from '../lib/config.js';
+import { assertReady, attachmentDuration, verify } from '../lib/checks.js';
+import { buildOptions, getRunConfig, pathUrl } from '../lib/config.js';
 import { authenticatedHeaders, userForVirtualUser } from '../lib/data.js';
 import { buildSummary } from '../lib/report.js';
 import { routeEnvHeaders } from '../env-routing.mjs';
@@ -44,15 +44,7 @@ function requestAttachment(user, path) {
 }
 
 export function setup() {
-  const readiness = http.get(readinessUrl(config), { headers: ROUTE_HEADERS, tags: { operation: 'readiness' } });
-  const readinessBody = parseJson(readiness);
-  const ready = verify(readiness, {
-    'readiness returns 200': (result) => result.status === 200,
-    'readiness reports success': () => readinessBody?.success === true,
-    'database is ready': () => readinessBody?.data?.status === 'ready',
-  }, { operation: 'readiness' });
-
-  if (!ready) throw new Error('ENVIRONMENT_FAILURE: target is not ready');
+  assertReady(config, ROUTE_HEADERS);
 
   const probeUser = userForVirtualUser(1);
   const ids = selectAttachmentIds(probeUser);
@@ -88,7 +80,10 @@ export function setup() {
 export default function () {
   const user = userForVirtualUser(__VU);
   const ids = selectAttachmentIds(user);
-  if (ids.length === 0) return;
+  // The runner refuses such a fixture; this guards a direct `k6 run` against idle-looping.
+  if (ids.length === 0) {
+    throw new Error(`ENVIRONMENT_FAILURE: identity ${user.userId} supplies no attachmentIds`);
+  }
 
   // Rotate file and retrieval kind so the run is not one cached object.
   const attachmentId = ids[__ITER % ids.length];
@@ -101,7 +96,6 @@ export default function () {
     'attachment returns 200': (result) => result.status === 200,
     'attachment is not rate limited': (result) => result.status !== 429,
     'attachment was found': (result) => result.status !== 404,
-    'attachment transferred bytes': (result) => result.body === null || result.body.length >= 0,
   }, { operation: 'attachment', kind });
 
   sleep(config.thinkTimeSeconds);

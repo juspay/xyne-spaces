@@ -8,18 +8,27 @@ parameters {
     defaultValue: false,
     description: 'Run the post-deployment k6 stage'
   )
-  choice(name: 'PERF_ENVIRONMENT', choices: ['sandbox', 'preprod'], description: 'Safe target')
+  choice(
+    name: 'PERF_ENVIRONMENT',
+    choices: ['sandbox', 'preprod'],
+    description: 'sandbox takes every profile; preprod is the shared host plus x-route-env and takes smoke and release only'
+  )
   choice(
     name: 'PERF_PROFILE',
-    choices: ['smoke', 'release', 'load', 'stress', 'soak'],
-    description: 'Traffic profile; load/stress/soak are preprod-only'
+    choices: ['smoke', 'release', 'load', 'stress', 'spike', 'soak'],
+    description: 'Traffic profile; load, stress, spike and soak run on sandbox only'
   )
   choice(
     name: 'PERF_SCENARIO',
     choices: [
       'zero-query-transform', 'search', 'attachments', 'zero-push', 'rest-messaging', 'smoke',
     ],
-    description: 'first three read; zero-push and rest-messaging write rows and need the opt-in'
+    description: 'first three read; zero-push and rest-messaging write rows, need PERF_ALLOW_WRITE_SCENARIOS and run on sandbox only'
+  )
+  booleanParam(
+    name: 'PERF_ALLOW_WRITE_SCENARIOS',
+    defaultValue: false,
+    description: 'Required for zero-push and rest-messaging; they insert rows and have no cleanup yet'
   )
   string(name: 'PERF_VUS_OVERRIDE', defaultValue: '', description: 'Optional bounded VU override')
   string(
@@ -53,7 +62,7 @@ stage('Performance and load test') {
   when {
     expression { params.RUN_PERFORMANCE_TESTS }
   }
-  // Ceiling, not a target: preprod permits an 8h steady duration, so anything past this
+  // Ceiling, not a target: sandbox permits an 8h steady duration, so anything past this
   // is a hung container rather than a long run, and must not hold the agent.
   options {
     timeout(time: 9, unit: 'HOURS')
@@ -65,6 +74,7 @@ stage('Performance and load test') {
     PERF_VUS_OVERRIDE = "${params.PERF_VUS_OVERRIDE}"
     PERF_DURATION_OVERRIDE = "${params.PERF_DURATION_OVERRIDE}"
     PERF_ENFORCE_THRESHOLDS = "${params.PERF_ENFORCE_THRESHOLDS}"
+    PERF_ALLOW_WRITE_SCENARIOS = "${params.PERF_ALLOW_WRITE_SCENARIOS}"
     PERF_ZERO_MAX_REQUESTS = "${params.PERF_ZERO_MAX_REQUESTS}"
     PERF_ZERO_SCHEMA = "${params.PERF_ZERO_SCHEMA}"
     PERF_ZERO_APP_ID = "${params.PERF_ZERO_APP_ID}"

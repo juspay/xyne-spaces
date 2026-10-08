@@ -90,5 +90,3 @@ export function zeroQueryUrl(config) {
 export function pathUrl(config, path) {
   return `${config.baseUrl}${path}`;
 }
-
-export const searchUrl = pathUrl;

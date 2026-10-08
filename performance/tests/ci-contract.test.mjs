@@ -3,6 +3,9 @@ import { readFileSync, readdirSync } from 'node:fs';
 import path from 'node:path';
 import test from 'node:test';
 
+import { SCENARIOS } from '../config/catalog.mjs';
+import { PROFILE_NAMES } from '../k6/profiles.mjs';
+
 const repositoryRoot = path.resolve(import.meta.dirname, '..', '..');
 
 test('Jenkins adapter is parameterized, conditional, secret-bound, and always archives reports', () => {
@@ -47,7 +50,7 @@ test('Jenkins adapter bounds the stage so a hung run cannot hold an agent foreve
   );
 
   assert.match(source, /timeout\(/);
-  // The ceiling must cover the longest legal run: preprod allows an 8h duration.
+  // The ceiling must cover the longest legal run: sandbox allows an 8h duration.
   assert.match(source, /unit:\s*'HOURS'/);
 });
 
@@ -61,7 +64,24 @@ test('Jenkins adapter offers the Zero and REST scenarios by their explicit names
   assert.match(source, /'rest-messaging'/);
   assert.match(source, /'search'/);
   assert.match(source, /'attachments'/);
-  assert.doesNotMatch(source, /'messaging'/);
+});
+
+test('Jenkins adapter offers exactly the profiles and scenarios the runner accepts', () => {
+  const source = readFileSync(
+    path.join(repositoryRoot, 'performance', 'ci', 'jenkins-performance-stage.groovy'),
+    'utf8',
+  );
+  const choicesOf = (name) => {
+    const block = source.match(new RegExp(`name: '${name}',\\s*choices: \\[([^\\]]+)]`))?.[1];
+    assert.ok(block, `${name} choices not found`);
+    return [...block.matchAll(/'([^']+)'/g)].map((match) => match[1]).sort();
+  };
+
+  assert.deepEqual(choicesOf('PERF_PROFILE'), [...PROFILE_NAMES].sort());
+  assert.deepEqual(choicesOf('PERF_SCENARIO'), [...SCENARIOS].sort());
+  // Without the opt-in in the environment block, the write scenarios are unreachable.
+  assert.match(source, /booleanParam\(\s*name: 'PERF_ALLOW_WRITE_SCENARIOS'/);
+  assert.match(source, /PERF_ALLOW_WRITE_SCENARIOS = "\$\{params\.PERF_ALLOW_WRITE_SCENARIOS\}"/);
 });
 
 test('the Zero query scenario reads only, so a run needs no fixture reset', () => {
@@ -83,8 +103,6 @@ test('the Zero query scenario sends the verified transform envelope only', () =>
   );
 
   assert.match(source, /buildTransformMessage/);
-  // The encoding is settled from the library source; probing alternatives is gone.
-  assert.doesNotMatch(source, /ARG_ENCODINGS|encodeArgs/);
   // A rejected fixture token must be reported as an environment fault, not a slow product.
   assert.match(source, /ENVIRONMENT_FAILURE[^\n]*token rejected/);
 });
