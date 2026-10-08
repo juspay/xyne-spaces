@@ -1,3 +1,10 @@
+## [1.474.5](https://github.com/juspay/xyne-spaces/compare/v1.474.4...v1.474.5) (2026-10-08)
+
+
+### Bug Fixes
+
+* change guest user ui ([#2757](https://github.com/juspay/xyne-spaces/issues/2757)) ([c12f151](https://github.com/juspay/xyne-spaces/commit/c12f151a7ff0eb1f29106f6d7279b97370835c90))
+
 ## [1.474.4](https://github.com/juspay/xyne-spaces/compare/v1.474.3...v1.474.4) (2026-10-07)
 
 
