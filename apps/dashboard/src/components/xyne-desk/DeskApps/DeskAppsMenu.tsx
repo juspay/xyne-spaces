@@ -40,9 +40,10 @@ interface DeskAppsMenuProps {
  * apps…". Hidden entirely when there is nothing to show and nothing to manage.
  *
  * The list is the desk's channel_published_apps rows — shared by everyone on the
- * desk, unlike the per-device bars elsewhere — written through the same upsert
- * mutator the desk settings use, so the server ACL (owner or channel admin) is
- * what actually decides whether a change sticks.
+ * desk, unlike the per-device bars elsewhere — added and removed one app at a
+ * time through channel.publishApp / unpublishApp. The server re-checks every
+ * change (the mutators and ChannelPublishedAppsACL both run canPublishAppsTo:
+ * the desk owner or a channel admin), so that is what decides whether it sticks.
  */
 export const DeskAppsMenu = ({
   channelId,
