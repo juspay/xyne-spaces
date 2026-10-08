@@ -116,8 +116,9 @@ const TAILWIND_SHELL_HTML = `<!DOCTYPE html>
 /** Always installed, so the agent never spends output tokens declaring them. */
 const BASE_DEPENDENCIES: Record<string, string> = {
   ...SHADCN_DEPENDENCIES,
+  // Pinned: `latest` restyles every app on each Tailwind release and defeats the bundler's cache.
   // eslint-disable-next-line @typescript-eslint/naming-convention -- npm package name
-  '@tailwindcss/browser': 'latest',
+  '@tailwindcss/browser': '4.3.3',
 };
 
 /** "/components/App.tsx" -> "./components/App" (extension stripped for the import). */
