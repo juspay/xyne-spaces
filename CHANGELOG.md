@@ -1,3 +1,10 @@
+## [1.474.5-release-20261008.1](https://github.com/juspay/xyne-spaces/compare/v1.474.4...v1.474.5-release-20261008.1) (2026-10-08)
+
+
+### Bug Fixes
+
+* add include replies toggle to message received automation trigger ([#2792](https://github.com/juspay/xyne-spaces/issues/2792)) ([2c1b3c3](https://github.com/juspay/xyne-spaces/commit/2c1b3c33da2c6138e3ad3a4678f4175ffbe6ddde))
+
 ## [1.474.4](https://github.com/juspay/xyne-spaces/compare/v1.474.3...v1.474.4) (2026-10-07)
 
 
