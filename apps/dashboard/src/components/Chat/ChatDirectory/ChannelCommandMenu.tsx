@@ -3201,8 +3201,7 @@ const ChannelCommandMenuContent = ({
           // only offers the link when it actually cut items off. A ticket-screen search
           // never offers it: the results page would drop the view's filters, and the
           // list already pages in place.
-          const showSeeMore =
-            !!sectionTab && !isInTicketView && (!isScreenAll || hiddenCount > 0);
+          const showSeeMore = !!sectionTab && !isInTicketView && (!isScreenAll || hiddenCount > 0);
 
           return (
             <div key={groupKey} className={`mb-4 ${pendingDimClass}`}>
