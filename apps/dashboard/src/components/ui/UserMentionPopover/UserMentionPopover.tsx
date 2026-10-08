@@ -15,7 +15,6 @@ import { useCallActions } from '../../../hooks/useCallActions';
 import { usePlatform } from '../../../hooks/usePlatform';
 import { getUserDisplayName, isUserDeactivated } from '../../../utils/userDisplayName';
 import { getBaseRoute } from '../../../hooks/useRouteContext';
-import { useIsCommunityWorkspace } from '../../../hooks/useIsCommunityWorkspace';
 import { useStableRouter } from '../../../hooks/useStableRouter';
 
 /**
@@ -35,7 +34,6 @@ const UserHoverWrapperInner: React.FC<UserHoverWrapperProps> = ({
   const { hasTyped } = useTypingState();
   const { isMobile } = usePlatform();
   const user = useUser(userId);
-  const isCommunityWorkspace = useIsCommunityWorkspace();
   const [dmChannelId, setDmChannelId] = useState<string | null>(null);
   const shouldTriggerCallRef = useRef(false);
 
@@ -214,8 +212,7 @@ const UserHoverWrapperInner: React.FC<UserHoverWrapperProps> = ({
                 </span>
               )}
             </div>
-            {/* Email hidden in community workspaces */}
-            {user.email && !isCommunityWorkspace && (
+            {user.email && (
               <div className='text-sm text-muted-foreground truncate'>{user.email}</div>
             )}
             {displayStatus.hasStatus && (

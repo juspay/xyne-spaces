@@ -260,12 +260,14 @@ export const CanvasEditor = forwardRef<CanvasEditorRef, CanvasEditorProps>(
       if (!editor) return (): Promise<DefaultReactSuggestionItem[]> => Promise.resolve([]);
       return async (query: string): Promise<DefaultReactSuggestionItem[]> => {
         const editorTyped = asBlockNoteEditorForView(editor);
+        let searchedUsers: typeof users = [];
         const userItems: DefaultReactSuggestionItem[] = await getMentionSuggestionMenuItems(
           editorTyped,
           query,
           {
             onUserSearch: (q: string) => {
               const results = searchUsers(users, q, 10);
+              searchedUsers = results;
               return Promise.resolve(
                 results.map(u => {
                   const displayName = getUserDisplayName(u);
@@ -282,13 +284,16 @@ export const CanvasEditor = forwardRef<CanvasEditorRef, CanvasEditorProps>(
           },
         );
         // The library hardcodes a generic person glyph; swap in the user's avatar.
-        // Items only carry the email, so resolve the id from it.
+        // Items only carry the email (blank for community members), so resolve the id from it,
+        // falling back to the display name among this search's results.
         const idByEmail = new Map<string, string>();
         for (const u of users) {
           if (u.email) idByEmail.set(u.email, u.id);
         }
         for (const item of userItems) {
-          const userId = item.subtext ? idByEmail.get(item.subtext) : undefined;
+          const userId = item.subtext
+            ? idByEmail.get(item.subtext)
+            : searchedUsers.find(u => getUserDisplayName(u) === item.title)?.id;
           if (userId) {
             item.icon = createElement(Avatar, {
               userId,
