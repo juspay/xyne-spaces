@@ -7,7 +7,7 @@ import { prisma } from "../db.js";
 import { CONFIG } from "../config.js";
 import { decrypt } from "../crypto.js";
 import { errMsg } from "./errors.js";
-import { loadSdlcHubKnowledge, renderSdlcHubKnowledge, resolveSdlcHubContextForUser } from "./sdlc-repository-context.js";
+import { loadHubRunContext, resolveSdlcHubContextForUser } from "./sdlc-repository-context.js";
 import { spacesAppFetch } from "./spaces-api.js";
 import {
   chatMessageRepository,
@@ -1077,25 +1077,9 @@ export async function prepareRun(
         const hubWorkspaceId =
           typeof hubWorkspaceRaw === "string" && hubWorkspaceRaw.trim() ? hubWorkspaceRaw.trim() : undefined;
         const hubKnowledgeUserId = await spacesUserIdForClawUser(resolved.userId, hubWorkspaceId);
-        const hub = await loadSdlcHubKnowledge(effectiveChannelId, hubKnowledgeUserId);
-        if (hub) {
-          // A global Linked Skill reaches every member, a personal one only its owner.
-          // Every channel run reaches here, and only a hub has links.
-          const linked = hub.skills.length === 0 ? [] : await prisma.skill.findMany({
-            where: {
-              id: { in: hub.skills.map((skill) => skill.skillId) },
-              orgId: agent.orgId,
-              enabled: true,
-              OR: [{ scope: "global" }, { ownerUserId: resolved.userId }],
-            },
-            include: { files: true },
-          });
-          // Pinned skills stay in this list too: the Hub Knowledge text carries their body, the skill entry their files.
-          hubSkills = linked.map(toRunSkill);
-          const pinnedIds = new Set(hub.skills.filter((skill) => skill.pinned).map((skill) => skill.skillId));
-          const hubKnowledge = renderSdlcHubKnowledge(hub, linked.filter((skill) => pinnedIds.has(skill.id)));
-          if (hubKnowledge) mergedContext = mergedContext ? `${hubKnowledge}\n\n${mergedContext}` : hubKnowledge;
-        }
+        const hub = await loadHubRunContext(effectiveChannelId, hubKnowledgeUserId, resolved.userId, agent.orgId);
+        hubSkills = hub.skills.map(toRunSkill);
+        if (hub.text) mergedContext = mergedContext ? `${hub.text}\n\n${mergedContext}` : hub.text;
       } catch (err) {
         log.warn("[run] failed to load SDLC Hub Knowledge:", errMsg(err));
       }
