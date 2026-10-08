@@ -2238,13 +2238,15 @@ const KanbanBoardScreen: React.FC<BoardKanbanScreenProps> = ({
   const projectTags = accumulatedTags;
 
   // Handle load more tags (pagination)
+  // Search results page like any other list: the Zero query applies the search
+  // itself, so the cursor walks the matching rows rather than a cut of them.
   const handleLoadMoreTags = useCallback(() => {
-    if (!hasMoreZeroTags || tagsSearchQuery.trim()) return;
+    if (!hasMoreZeroTags) return;
     const lastTag = accumulatedTags[accumulatedTags.length - 1];
     if (lastTag) {
       setTagsCursor({ name: lastTag.name, id: lastTag.id });
     }
-  }, [hasMoreZeroTags, tagsSearchQuery, accumulatedTags]);
+  }, [hasMoreZeroTags, accumulatedTags]);
 
   // Handle tag search callback
   const handleSearchTags = useCallback((query: string) => {
