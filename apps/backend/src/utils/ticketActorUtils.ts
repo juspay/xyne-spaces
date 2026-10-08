@@ -65,7 +65,7 @@ export async function getFormFieldUserActors(ticketId: string): Promise<string[]
 
     return [...new Set(userIds)];
   } catch (error) {
-    logger.error(`Failed to fetch form field users for ticket ${ticketId}`, error);
+    logger.error(`Failed to fetch form field users for ticket ${ticketId.replace(/[\r\n]/g, '')}`, error);
     return [];
   }
 }
@@ -100,7 +100,7 @@ export async function excludeTicketOptOuts(ticketId: string, userIds: string[]):
     const optedOutIds = new Set(optedOut.map(p => p.userId));
     return userIds.filter(id => !optedOutIds.has(id));
   } catch (error) {
-    logger.error(`Failed to filter notification opt-outs for ticket ${ticketId}`, error);
+    logger.error(`Failed to filter notification opt-outs for ticket ${ticketId.replace(/[\r\n]/g, '')}`, error);
     return userIds;
   }
 }
@@ -127,6 +127,9 @@ export async function clearTicketOptOut(ticketId: string, userId: string): Promi
       }),
     );
   } catch (error) {
-    logger.error(`Failed to clear notification opt-out for user ${userId} on ticket ${ticketId}`, error);
+    logger.error(
+      `Failed to clear notification opt-out for user ${userId.replace(/[\r\n]/g, '')} on ticket ${ticketId.replace(/[\r\n]/g, '')}`,
+      error,
+    );
   }
 }
