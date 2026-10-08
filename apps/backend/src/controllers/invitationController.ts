@@ -6,6 +6,7 @@
 import { Request, Response } from 'express';
 import { invitationService } from '@/services/invitationService';
 import { readPendingAuth } from '@/auth/pendingAuth';
+import { PENDING_AUTH_COOKIE } from '@/auth/constants';
 import { DatabaseClient } from '@/database/client';
 import { withWorkspaceScope } from '@/database/tenant/context';
 import { createOwnerInvitation, syncAllBotUsersForNewWorkspace } from '@/bypassAcl/orgServices';
@@ -313,15 +314,17 @@ export class InvitationController {
         return;
       }
 
-      // Read identity from the httpOnly google_access_token cookie (pending identity, signed JWT).
-      if (!req.cookies?.google_access_token) {
-        res.status(401).json({ error: 'Not authenticated. Please login first.' });
-        return;
-      }
-
+      // Identity comes from the httpOnly pending-auth cookie, which is a JWT this server signed:
+      // `readPendingAuth` verifying the signature is the ONLY gate. The raw cookie is looked at
+      // afterwards purely to pick the clearer of the two 401 messages ("never logged in" vs
+      // "session no longer valid") — a forged or tampered value cannot take the friendlier path,
+      // and nothing downstream depends on which message was sent.
       const pending = readPendingAuth(req);
       if (!pending) {
-        res.status(401).json({ error: 'Invalid authentication session. Please login again.' });
+        const hadCookie = typeof req.cookies?.[PENDING_AUTH_COOKIE] === 'string';
+        res.status(401).json({
+          error: hadCookie ? 'Invalid authentication session. Please login again.' : 'Not authenticated. Please login first.',
+        });
         return;
       }
 

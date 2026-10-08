@@ -3,6 +3,7 @@ import { UserStatus, AuthProvider } from '@xyne/shared';
 import { config } from '@/config/env';
 import { logger } from '@/utils/logger';
 import { UserService } from '@/services/userService';
+import { markClaimsStaleForUser } from '@/bypassAcl/authSessionServices';
 
 export interface MettleSubteam {
   id: string;
@@ -282,6 +283,11 @@ export class MettleUserSyncService {
             ...(hasUserStatusUpdate ? { status: userStatus } : {}),
           },
         });
+        // An HR feed deactivating someone must take their access away now, not when their access
+        // token expires: `status` is not re-read on the stateless path.
+        if (hasUserStatusUpdate && userStatus !== UserStatus.ACTIVE) {
+          await markClaimsStaleForUser(user.id);
+        }
       }
 
       if (Object.keys(userProfileData).length > 0) {

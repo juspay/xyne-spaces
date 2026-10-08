@@ -1,5 +1,5 @@
 import { Router, type Request, type Response } from "express";
-import { interact, spacesFetch, type SpacesAuthContext } from "../mcp/servers/xyne-spaces-client.js";
+import { interact, type SpacesAuthContext } from "../mcp/servers/xyne-spaces-client.js";
 import { spacesAppFetchGet } from "../lib/spaces-api.js";
 import { prisma } from "../db.js";
 import { decrypt } from "../crypto.js";
@@ -133,15 +133,24 @@ router.get("/channels", async (req: Request, res: Response) => {
     if (scopeType) where["scopeType"] = { equals: scopeType };
 
     if (memberOnly) {
-      try {
-        const meRes = await spacesFetch("/api/auth/me", undefined, userAuth) as { user?: { id?: string } };
-        const spacesUserId = meRes?.user?.id;
-        if (spacesUserId) {
-          where["participants"] = { some: { userId: spacesUserId } };
-        }
-      } catch (err) {
-        log.warn("[spaces/channels] memberOnly: could not resolve Spaces userId, skipping filter:", err);
+      // The Spaces user id comes from the MINTED credential, not from a
+      // GET /api/auth/me probe: that endpoint sits behind the v2 auth
+      // middleware with `allowBearer: false`, so a Bearer-only credential
+      // always 401s there. The old probe therefore silently failed and the
+      // membership filter was dropped, returning EVERY channel. Never widen
+      // the result set on failure — fail the request instead.
+      const spacesUserId = userAuth.live.userId;
+      if (!spacesUserId) {
+        log.error(
+          `[spaces/channels] memberOnly: minted Spaces credential carries no userId requesterId=${requesterId} workspaceId=${userAuth.workspaceId ?? "none"}`,
+        );
+        res.status(500).json({
+          success: false,
+          error: "Could not resolve Spaces user identity for memberOnly filter",
+        });
+        return;
       }
+      where["participants"] = { some: { userId: spacesUserId } };
     }
 
     try {

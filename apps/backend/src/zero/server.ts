@@ -39,6 +39,7 @@ import { checkRateLimit } from '@/services/zeroRateLimiter';
 import { superpositionClient } from '@/services/superpositionClient';
 import { runCompiledZqlSql } from '@/bypassAcl/zeroServices';
 import { redisRevocationStore } from '@/auth/revocation';
+import { recordClaimsStale } from '@/services/otel/authMetrics';
 import { isSessionJwt, type JwtPayload } from '@/services/jwtService';
 
 const mustGetBackendQuery = (name: string): AnyCustomQuery =>
@@ -110,6 +111,9 @@ export async function extractAuthDataFromJWT(encodedJWT?: string): Promise<AuthD
       throw new Error('JWT_SECRET environment variable is required');
     }
 
+    // Not `jwtService.verifyToken`: the secret/issuer/audience/algorithms are identical, but that
+    // helper folds FORCE_LOGOUT_BEFORE into a generic throw, which would collapse the distinct
+    // rejection reasons this verifier logs into one 'JWT verification failed' line.
     const decoded = jwt.verify(encodedJWT, secret, {
       issuer: 'xyne',
       audience: 'xyne-user',
@@ -124,16 +128,37 @@ export async function extractAuthDataFromJWT(encodedJWT?: string): Promise<AuthD
       return undefined;
     }
 
-    // A token minted from an auth session (`sid`) dies with it: logout / password reset /
-    // device reuse write a Redis tombstone for the sid, and the token must stop working before
-    // it expires. Same check as the HTTP resolver, no DB read. Pre-deploy tokens carry no `sid`
-    // and are accepted on signature + expiry alone.
-    if (decoded.sid && (await redisRevocationStore.isRevoked(decoded.sid))) {
-      logger.warn('JWT rejected: bound session is revoked', { sid: decoded.sid });
-      return undefined;
+    // A token minted from an auth session (`sid`) dies with it, and so does the authorization it
+    // froze: logout / password reset / device reuse write a Redis tombstone for the sid, and a
+    // role / org-role / membership change stamps the account's claims watermark. One MGET covers
+    // both, same check as the HTTP resolver, no DB read. Pre-deploy tokens carry no `sid` and so
+    // match neither key; they are accepted on signature + expiry alone.
+    let claimsStale = false;
+    if (decoded.sid) {
+      const verdict = await redisRevocationStore.checkClaims({
+        sid: decoded.sid,
+        accountId: decoded.memberId,
+        iat: decoded.iat,
+      });
+      if (verdict === 'revoked') {
+        logger.warn('JWT rejected: bound session is revoked', { sid: decoded.sid });
+        return undefined;
+      }
+      // Stale is not a rejection: Zero cannot be handed a fresh token here, and an auth error would
+      // tear the connection down. The role / org role / membership are re-read from the DB for this
+      // request instead — exactly what every request did before the claims were frozen into the
+      // token — which is bounded by one JWT TTL after a role change.
+      if (verdict === 'stale') {
+        claimsStale = true;
+        recordClaimsStale({ surface: 'zero', outcome: 'db_verified' });
+        logger.info('Zero auth: claims stale, re-reading role and membership from the DB', {
+          sid: decoded.sid,
+          memberId: decoded.memberId,
+        });
+      }
     }
 
-    if (isSessionJwt(decoded)) {
+    if (isSessionJwt(decoded) && !claimsStale) {
       // Roles and org travel as claims; only `displayName` (rendered by mutators) needs the row.
       const user = await db.user.findUnique({
         where: { id: decoded.sub },
@@ -156,15 +181,16 @@ export async function extractAuthDataFromJWT(encodedJWT?: string): Promise<AuthD
       };
     }
 
-    // Pre-deploy token (no session claims): roles and org come from the DB as before.
+    // Pre-deploy token (no session claims), or a token whose claims are stale: roles, org and
+    // membership liveness all come from the DB.
     const [user, orgMember] = await Promise.all([
       db.user.findUnique({
         where: { id: decoded.sub },
-        select: { role: true, displayName: true },
+        select: { role: true, displayName: true, status: true, leftAt: true },
       }),
       db.orgMember.findUnique({
         where: { memberId: decoded.memberId },
-        select: { role: true, orgId: true },
+        select: { role: true, orgId: true, leftAt: true },
       }),
     ]);
 
@@ -177,6 +203,16 @@ export async function extractAuthDataFromJWT(encodedJWT?: string): Promise<AuthD
         orgMemberExists: !!orgMember,
       });
       throw new Error('User authentication data inconsistent');
+    }
+
+    // The whole point of re-reading: someone removed from the workspace or the org must stop being
+    // authorized now, not when their token expires.
+    if (user.status !== 'ACTIVE' || user.leftAt || orgMember.leftAt) {
+      logger.warn('JWT rejected: user is no longer active in this workspace or organization', {
+        userId: decoded.sub,
+        memberId: decoded.memberId,
+      });
+      return undefined;
     }
 
     return {

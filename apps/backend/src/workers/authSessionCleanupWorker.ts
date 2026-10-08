@@ -1,5 +1,6 @@
 import { logger } from '@/utils/logger';
-import { expireSessions } from '@/bypassAcl/authSessionServices';
+import { countTokenlessMobileSessions, expireSessions } from '@/bypassAcl/authSessionServices';
+import { recordPushTokenMissing } from '@/services/otel/authMetrics';
 
 const TAG = '[AUTH_SESSION_CLEANUP]';
 
@@ -12,6 +13,8 @@ export interface AuthSessionCleanupTotals {
   batches: number;
   /** True when the run stopped on the batch cap with work still outstanding. */
   capped: boolean;
+  /** ACTIVE mobile sessions with no push token, as of the end of this run. */
+  mobileSessionsWithoutPushToken: number;
 }
 
 export interface AuthSessionCleanupOptions {
@@ -31,7 +34,7 @@ export class AuthSessionCleanupWorker {
       options.maxBatches && options.maxBatches > 0 ? Math.floor(options.maxBatches) : DEFAULT_MAX_BATCHES;
     const now = options.now ?? new Date();
     const startedAt = Date.now();
-    const totals: AuthSessionCleanupTotals = { sessionsExpired: 0, batches: 0, capped: false };
+    const totals: AuthSessionCleanupTotals = { sessionsExpired: 0, batches: 0, capped: false, mobileSessionsWithoutPushToken: 0 };
 
     logger.info(`${TAG} started`, { batchSize, maxBatches, now: now.toISOString() });
 
@@ -42,6 +45,13 @@ export class AuthSessionCleanupWorker {
       logger.debug(`${TAG} batch #${batch}`, { expired });
       if (expired === 0) break;
       if (batch === maxBatches) totals.capped = true;
+    }
+
+    // Push-token coverage is a slowly-changing fleet property, so it is sampled once per run here
+    // rather than counted per push delivery (where it tracked notification volume, not coverage).
+    totals.mobileSessionsWithoutPushToken = await countTokenlessMobileSessions(now);
+    if (totals.mobileSessionsWithoutPushToken > 0) {
+      recordPushTokenMissing({ platform: 'MOBILE', count: totals.mobileSessionsWithoutPushToken });
     }
 
     logger.info(`${TAG} finished`, { ...totals, durationMs: Date.now() - startedAt });

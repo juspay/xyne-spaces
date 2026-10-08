@@ -56,11 +56,41 @@ const preferencesSchema = z.record(
   })
 );
 
+/**
+ * No resolved session behind an otherwise-authenticated request. The common cause is a pre-deploy
+ * mobile build presenting a `sid`-less Bearer JWT with no `xs` cookie beside it: the resolver's
+ * legacy-JWT path adopts an accompanying same-account session cookie, but that build has none, so
+ * there is no row to hang the push token on (tokens live on the session row by design — there is
+ * no sessionless place to put one).
+ *
+ * Answered with a distinguishable `SESSION_REQUIRED` rather than a bare 401 so the client knows the
+ * fix is `GET /auth/refresh-session` (which mints `xs` + `xw_<ws>`) and a retry, instead of treating
+ * it as a dead credential and waiting for the next manual login. Logged under one stable event name
+ * so the volume of pre-deploy builds still in the field is countable.
+ */
+function rejectWithoutSession(req: Request, res: Response, action: 'register' | 'unregister'): void {
+  logger.warn('[AUTH] push_session_required', {
+    event: 'push_session_required',
+    action,
+    userId: req.user?.id,
+    hasBearer: !!req.headers.authorization,
+    platform: req.headers['x-platform'],
+    appVersion: req.headers['x-app-version'],
+    path: req.path,
+  });
+  res.status(401).json({
+    error: 'Session required',
+    message: 'Please refresh your session and retry',
+    code: 'SESSION_REQUIRED',
+  });
+}
+
 export class NotificationController {
   /**
    * Push tokens are stored on the caller's own `auth_sessions` row and delivered by account, so
-   * both handlers need the resolved auth session (API-key / dev-mode / `sid`-less JWT requests
-   * without a session cookie have none → 401).
+   * both handlers need the resolved auth session. A request without one (API key, dev mode, or a
+   * pre-deploy `sid`-less Bearer with no session cookie) gets `SESSION_REQUIRED` — see
+   * `rejectWithoutSession`.
    */
   registerMobilePushToken = async (req: Request, res: Response): Promise<void> => {
     try {
@@ -74,8 +104,7 @@ export class NotificationController {
       const session = req.authSession;
 
       if (!session) {
-        logger.error('Failed to register mobile push token: no auth session on request');
-        res.status(401).json({ error: 'Unauthorized' });
+        rejectWithoutSession(req, res, 'register');
         return;
       }
 
@@ -110,8 +139,7 @@ export class NotificationController {
       const session = req.authSession;
 
       if (!session) {
-        logger.error('Failed to unregister mobile push token: no auth session on request');
-        res.status(401).json({ error: 'Unauthorized' });
+        rejectWithoutSession(req, res, 'unregister');
         return;
       }
 

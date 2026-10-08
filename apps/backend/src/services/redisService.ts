@@ -1067,6 +1067,16 @@ class RedisService {
     return await this.redis.get(key);
   }
 
+  /**
+   * Several keys in ONE round trip. Used on the auth hot path (session tombstone + claims-stale
+   * watermark), where two sequential GETs would double the per-request Redis latency.
+   */
+  async mget(keys: string[]): Promise<(string | null)[]> {
+    if (!this.redis) throw new Error('Redis not initialized');
+    if (keys.length === 0) return [];
+    return await this.redis.mget(keys);
+  }
+
   async setHashField(key: string, field: string, value: string, ttlSeconds: number): Promise<void> {
     if (!this.redis) throw new Error('Redis not initialized');
     await this.redis.hset(key, field, value);

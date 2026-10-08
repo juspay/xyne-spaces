@@ -1,4 +1,5 @@
 import { User } from '@prisma/client';
+import { markAccountClaimsStale } from '@/bypassAcl/authSessionServices';
 import { CommunityJoinResultStatus,
   type CommunityJoinResultStatus as CommunityJoinResultStatusType,
   ChannelRole,
@@ -679,6 +680,13 @@ export class CommunityWorkspaceService {
 
     if (existingOrgMember?.role === OrgRole.COMMUNITY_MEMBER) {
       await aiProvisioningService.upgradeCommunityToEnterpriseBudget(existingOrgMember.memberId);
+    }
+
+    // The upsert writes `role: MEMBER` unconditionally, so approving a join request can also
+    // DEMOTE an existing ADMIN or OWNER. `orgRole` is frozen in their access tokens, so without
+    // the stamp they keep the higher org role until every token expires.
+    if (existingOrgMember && existingOrgMember.role !== OrgRole.MEMBER) {
+      await markAccountClaimsStale(existingOrgMember.memberId);
     }
   }
 

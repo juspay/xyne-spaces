@@ -290,9 +290,18 @@ const AuthScreen = (): ReactElement | null => {
     selectWorkspace(workspaceId);
   };
 
-  const handleTryDifferentAccount = (): void => {
-    void logout();
-    window.location.reload();
+  const handleTryDifferentAccount = async (): Promise<void> => {
+    // The session cookie is httpOnly: only the server's logout clears it, so wait
+    // for that before reloading — reloading first aborts the in-flight request and
+    // the session stays ACTIVE, signing the user straight back in. Reload in
+    // `finally` so a failed logout still takes them off this screen.
+    try {
+      await logout();
+    } catch {
+      // nothing to show: the screen is about to be replaced by the reload
+    } finally {
+      window.location.reload();
+    }
   };
 
   const handleCreateOrg = (e: React.FormEvent): void => {
@@ -721,7 +730,7 @@ const AuthScreen = (): ReactElement | null => {
 
                   <button
                     type='button'
-                    onClick={handleTryDifferentAccount}
+                    onClick={() => void handleTryDifferentAccount()}
                     className='text-sm text-muted-foreground hover:text-foreground text-center cursor-pointer'
                     data-track-category='Auth'
                     data-track-name='TryDifferentAccount'
@@ -827,7 +836,7 @@ const AuthScreen = (): ReactElement | null => {
 
                   <button
                     type='button'
-                    onClick={handleTryDifferentAccount}
+                    onClick={() => void handleTryDifferentAccount()}
                     className='text-sm text-muted-foreground hover:text-foreground text-center cursor-pointer'
                     data-track-category='Auth'
                     data-track-name='TryDifferentAccount'
@@ -849,7 +858,7 @@ const AuthScreen = (): ReactElement | null => {
 
                   <button
                     type='button'
-                    onClick={handleTryDifferentAccount}
+                    onClick={() => void handleTryDifferentAccount()}
                     className='text-sm text-muted-foreground hover:text-foreground text-center cursor-pointer'
                     data-track-category='Auth'
                     data-track-name='TryDifferentAccount'

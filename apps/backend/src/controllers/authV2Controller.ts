@@ -26,28 +26,32 @@ import { migrateLegacyIdentity } from '@/services/legacyIdentityMigrationHelper'
 import { randomUUID } from 'crypto';
 import { completeLogin, logoutSession } from '@/auth/loginCompletion';
 import { readPendingAuth, setPendingAuthCookie, type PendingAuthIdentity } from '@/auth/pendingAuth';
-import { legacyCookieMirror, platformFromRequest, sameSiteFor, toSessionPlatform } from '@/auth/platform';
-import { failure, resolveSessionFromRequest } from '@/auth/sessionResolver';
-import { mintWorkspaceJwt, secureCookies } from '@/auth/sessionIssuer';
-import { accessTokenCookie, applyCookies, cookiesForLegacyConversion } from '@/auth/sessionCookies';
-import { getClientSessionFingerprint, isLegacyShaped } from '@/auth/sessionTokens';
+import { platformFromRequest, responsePlatform, sameSiteFor, toSessionPlatform } from '@/auth/platform';
+import { failure, grantWorkspaceForRequest, resolveSessionFromRequest } from '@/auth/sessionResolver';
+import { applyCookies } from '@/auth/sessionCookies';
+import { getClientSessionFingerprint } from '@/auth/sessionTokens';
 import { deviceIdFromHeaders } from '@/auth/deviceKey';
-import { LAST_WORKSPACE_COOKIE, PENDING_AUTH_COOKIE, WORKSPACE_HEADER } from '@/auth/constants';
-import { recordAuthResolve, recordLegacyCredential, recordTokenMinted } from '@/services/otel/authMetrics';
+import { PENDING_AUTH_COOKIE } from '@/auth/constants';
+import { recordAuthResolve } from '@/services/otel/authMetrics';
 import type {
   CompleteLoginResult,
-  CookieInstruction,
   CookieSameSite,
   MembershipUser,
   OrgMemberRef,
   RequestPlatform,
-  SessionPlatform,
 } from '@/auth/types';
 
 const authTag = (flowId: string): string => `[AUTH][flow=${flowId}]`;
 
 const workspaceOutcome = (count: number): string =>
   count === 0 ? 'no_workspace' : count === 1 ? 'single_workspace' : 'multi_workspace';
+
+/**
+ * Request-supplied id for a log field: clamped so an oversized body value cannot bloat the log,
+ * and only ever passed as structured metadata (never interpolated into the message).
+ */
+const logSafeId = (value: unknown): string =>
+  typeof value === 'string' ? value.slice(0, 64) : value === undefined || value === null ? 'MISSING' : 'INVALID';
 
 /**
  * Result of a single-workspace auto-login: the workspace user plus the completed session login.
@@ -66,7 +70,10 @@ const ONBOARDING_COOKIE_ONE_DAY_MS = 24 * 60 * 60 * 1000;
  * workspace JWT. Web gets neither — the browser holds them as the httpOnly `xs` / `xw_<ws>` cookies.
  */
 const nonWebAuthFields = (login: CompleteLoginResult): { sessionId?: string | null; token?: string } =>
-  login.platform === 'WEB' ? {} : { sessionId: login.sessionToken, token: login.token };
+  // `responsePlatform`, not the row's platform: a session row can say MOBILE because a legacy user
+  // agent contained "Mobile", and handing the opaque session token to a mobile BROWSER in a readable
+  // JSON body would undo httpOnly. Native clients announce themselves with `x-platform`.
+  login.responsePlatform === 'WEB' ? {} : { sessionId: login.sessionToken, token: login.token };
 
 /** Pending (pre-workspace) identity for the `google_access_token` cookie. Identity only, never tokens. */
 const pendingIdentityFromGoogle = (g: { googleId: string; email: string; name: string; picture?: string }): PendingAuthIdentity => ({
@@ -74,13 +81,17 @@ const pendingIdentityFromGoogle = (g: { googleId: string; email: string; name: s
   name: g.name,
   picture: g.picture,
   provider: AuthProvider.GOOGLE,
-  googleId: g.googleId,
   providerUserId: g.googleId,
 });
 
-/** SameSite for cookies written outside the OAuth redirect: the mobile jar needs `none`, else `strict`. */
+/**
+ * SameSite for cookies written outside the OAuth redirect: the mobile jar needs `none`, else
+ * `strict`. Routed through `responsePlatform` for the same reason as `nonWebAuthFields` — a
+ * session whose stored platform is MOBILE but whose caller is a plain browser must not be handed
+ * cross-site cookies.
+ */
 const sameSiteForLogin = (req: Request, platform: RequestPlatform): CookieSameSite =>
-  sameSiteFor(req.authSession?.platform ?? toSessionPlatform(platform));
+  sameSiteFor(responsePlatform(req, req.authSession?.platform ?? toSessionPlatform(platform)));
 
 export class AuthV2Controller {
   private googleClient: OAuth2Client;
@@ -632,19 +643,21 @@ export class AuthV2Controller {
 
   /**
    * Explicit access-token refresh for every platform (the middleware also refreshes inline).
-   * Resolves the opaque session (`xs`, legacy names still read), picks the workspace from
-   * `x-workspace-id` (fallback `xyne_last_workspace`), checks the membership row and mints a
-   * fresh `xw_<ws>` access JWT bound to the session (`sid`). The JWT is also returned in the
-   * body for clients that read JSON instead of a cookie jar (mobile, Electron).
+   * Resolves the opaque session (`xs`, legacy names still read), then hands it to the resolver's
+   * shared workspace-grant step: workspace claim (`x-workspace-id`, fallback
+   * `xyne_last_workspace`), membership check, `xw_<ws>` mint bound to the session (`sid`), and the
+   * response cookies — including the legacy -> new switch-over set for a request that arrived on a
+   * legacy credential, or the mirrored legacy set for an old mobile build under the version gate.
+   * That step is the SAME code the auth middleware runs, so this endpoint and the inline refresh
+   * can never disagree about what gets minted or which cookies change; it also owns the
+   * `auth_resolve_total` / `auth_legacy_credential_total` accounting for everything it returns.
    *
-   * A request that arrived on a legacy credential (`user_session_id`, `xyne_session`, the
-   * matching headers, or a legacy-shaped id under `xs`) is switched over here: `xs` + `xw_<ws>`
-   * are written and the legacy names cleared, unless the caller is an old mobile build under the
-   * version gate, which keeps a mirrored legacy set. The `xs` cookie is left alone otherwise.
+   * The JWT is also returned in the body for clients that read JSON instead of a cookie jar
+   * (mobile, Electron).
    *
-   * When the client sends `x-device-id` and it differs from the row's `deviceKey`, the row
-   * adopts it (Electron and mobile own a stable device id; other ACTIVE rows holding that key
-   * are revoked by the repository).
+   * What stays here is what the grant step does not own: when the client sends `x-device-id` and
+   * it differs from the row's `deviceKey`, the row adopts it (Electron and mobile own a stable
+   * device id; other ACTIVE rows holding that key are revoked by the repository).
    */
   refreshSession = async (req: Request, res: Response): Promise<void> => {
     const requestId = `REFRESH_${Date.now()}`;
@@ -659,77 +672,18 @@ export class AuthV2Controller {
         res.status(resolved.status).json(resolved.body);
         return;
       }
-      const { session, orgMember, credential, source, path } = resolved.session;
-      const platform = session.platform as SessionPlatform;
+      const { session } = resolved.session;
 
-      const headerWorkspace = req.headers[WORKSPACE_HEADER];
-      const workspaceId =
-        (Array.isArray(headerWorkspace) ? headerWorkspace[0] : headerWorkspace) ||
-        (req.cookies?.[LAST_WORKSPACE_COOKIE] as string | undefined);
-      if (!workspaceId) {
-        const f = failure('workspace_hint_missing');
-        logger.warn(`[${requestId}] Session refresh rejected (reason=${f.reason}, sessionId=${session.id})`);
-        recordAuthResolve({ path: 'none', outcome: 'fail', reason: f.reason, middleware: 'refresh' });
-        res.status(f.status).json(f.body);
+      // Workspace hint, membership, mint and cookies all come from the resolver's grant step,
+      // which also records the metrics and the switch-over log for both outcomes.
+      const granted = await grantWorkspaceForRequest(req, resolved.session, { middleware: 'refresh' });
+      if (!granted.ok) {
+        logger.warn(`[${requestId}] Session refresh rejected (reason=${granted.reason}, sessionId=${session.id})`);
+        res.status(granted.status).json(granted.body);
         return;
       }
-
-      const membership = await findMembership(session.accountId, workspaceId);
-      if (!membership) {
-        const f = failure('workspace_forbidden');
-        logger.warn(`[${requestId}] Session refresh rejected (reason=${f.reason}, sessionId=${session.id}, workspaceId=${workspaceId})`);
-        recordAuthResolve({ path: 'none', outcome: 'fail', reason: f.reason, middleware: 'refresh' });
-        res.status(f.status).json(f.body);
-        return;
-      }
-
-      const token = mintWorkspaceJwt({
-        user: membership,
-        memberId: orgMember.memberId,
-        workspaceId,
-        sid: session.id,
-        orgId: orgMember.orgId,
-        orgRole: orgMember.role,
-        platform,
-      });
-      recordTokenMinted({ audience: 'cookie' });
-
-      const cookieBase = { sameSite: sameSiteFor(platform), secure: secureCookies() };
-      // Legacy credential: under a legacy name, or a legacy-shaped id under `xs`. Same rule as the resolver.
-      const legacyCredential = source !== 'xs' || isLegacyShaped(credential);
-      let cookies: CookieInstruction[];
-      if (legacyCredential) {
-        const legacyMirror = platform === 'MOBILE' && legacyCookieMirror(req);
-        cookies = cookiesForLegacyConversion({
-          ...cookieBase,
-          sessionToken: credential,
-          sessionExpiresAt: session.absoluteExpiry,
-          workspaceId,
-          jwt: token,
-          jwtTtlSeconds: config.jwt.expirationSeconds,
-          presentNames: Object.keys(req.cookies ?? {}),
-          writeLastWorkspace: !req.cookies?.[LAST_WORKSPACE_COOKIE],
-          legacyMirror,
-        });
-        const outcome = path === 'session_converted' ? 'row_converted' : 'cookies_migrated';
-        // Same event as the resolver emits, so one query counts every switch-over.
-        logger.info('[AUTH] legacy_session_converted', {
-          event: 'legacy_session_converted',
-          source,
-          outcome,
-          rowCreated: path === 'session_converted',
-          legacyMirror,
-          platform,
-          orgId: session.orgId,
-          accountId: session.accountId,
-          sessionId: session.id,
-          workspaceId,
-          middleware: 'refresh',
-        });
-        recordLegacyCredential({ source, platform, outcome, legacyMirror });
-      } else {
-        cookies = [accessTokenCookie(workspaceId, token, config.jwt.expirationSeconds, cookieBase)];
-      }
+      const { workspaceId, accessToken, cookies, legacyConversion } = granted.auth;
+      const platform = session.platform;
       applyCookies(res, cookies);
 
       // Device adoption: a client that owns a stable device id (Electron clientSessionId, mobile
@@ -745,14 +699,13 @@ export class AuthV2Controller {
         });
       }
 
-      recordAuthResolve({ path, outcome: 'ok', middleware: 'refresh' });
-      logger.info(`[${requestId}] Access token refreshed (platform=${platform}, workspaceId=${workspaceId}, sessionId=${session.id}, legacyCredential=${legacyCredential})`);
+      logger.info(`[${requestId}] Access token refreshed (platform=${platform}, workspaceId=${workspaceId}, sessionId=${session.id}, legacyCredential=${!!legacyConversion})`);
 
       res.status(200).json({
         success: true,
-        token,
+        token: accessToken,
         workspaceId,
-        sessionId: credential,
+        sessionId: resolved.session.credential,
       });
     } catch (error) {
       logger.error(`[${requestId}] Error refreshing session:`, error);
@@ -1328,7 +1281,9 @@ export class AuthV2Controller {
       // Revokes the device session (auth_sessions) and clears every auth cookie (never `xd`).
       const { sessionId } = await logoutSession(req, res, 'USER_LOGOUT');
       if (sessionId) {
-        logger.info(`[${requestId}] Revoked session ${sessionId} for user ${req.user?.email}`);
+        // Email is request-derived (JWT claim): a structured field, never interpolated, so a
+        // newline in it cannot forge a second log line.
+        logger.info(`[${requestId}] Revoked session ${sessionId}`, { sessionId, email: req.user?.email });
       }
 
       if (req.user && fingerprint) {
@@ -1370,7 +1325,12 @@ export class AuthV2Controller {
     try {
       const { workspaceId } = req.body;
 
-      logger.info(`[LOGIN-WORKSPACE] Workspace login received (platform=${platform}, workspaceId=${workspaceId ?? 'MISSING'}, hasPendingCookie=${!!req.cookies?.[PENDING_AUTH_COOKIE]})`);
+      // `workspaceId` is raw request body: a structured field (and clamped), never interpolated,
+      // so it cannot inject a line break into the log stream.
+      logger.info(`[LOGIN-WORKSPACE] Workspace login received (platform=${platform}, hasPendingCookie=${!!req.cookies?.[PENDING_AUTH_COOKIE]})`, {
+        platform,
+        workspaceId: logSafeId(workspaceId),
+      });
 
       if (!workspaceId) {
         logger.warn(`[LOGIN-WORKSPACE] Workspace login rejected (platform=${platform}, reason=missing_workspaceId)`);
@@ -1390,7 +1350,7 @@ export class AuthV2Controller {
       let isAutoLogin = false;
 
       if (pending) {
-        const providerUserId = pending.providerUserId || pending.googleId;
+        const providerUserId = pending.providerUserId;
         if (!providerUserId) {
           logger.warn(`[LOGIN-WORKSPACE] Workspace login rejected (platform=${platform}, reason=missing_provider_identity)`);
           res.status(401).json({
@@ -1423,7 +1383,7 @@ export class AuthV2Controller {
         const membership = await findMembership(session.accountId, workspaceId);
         if (!membership) {
           const f = failure('workspace_forbidden');
-          logger.warn(`[LOGIN-WORKSPACE] Workspace login rejected (platform=${platform}, workspaceId=${workspaceId}, reason=${f.reason})`);
+          logger.warn(`[LOGIN-WORKSPACE] Workspace login rejected (platform=${platform}, reason=${f.reason})`, { workspaceId: logSafeId(workspaceId) });
           res.status(f.status).json(f.body);
           return;
         }
@@ -1437,7 +1397,7 @@ export class AuthV2Controller {
         isAutoLogin = true;
       }
 
-      logger.info(`[LOGIN-WORKSPACE] User ${identity.email} logging into workspace ${workspaceId} via ${provider} (platform=${platform})`);
+      logger.info(`[LOGIN-WORKSPACE] User ${identity.email} logging in via ${provider} (platform=${platform})`, { workspaceId: logSafeId(workspaceId) });
 
       // Create workspace-scoped user (or get existing)
       const { user: workspaceUser, isNewUser } = await this.userService.createOrGetWorkspaceUser({
@@ -1451,7 +1411,7 @@ export class AuthV2Controller {
 
       // Check if user is inactive or has left the workspace
       if (workspaceUser.status === UserStatus.INACTIVE || workspaceUser.leftAt !== null) {
-        logger.warn(`[LOGIN-WORKSPACE] Workspace login rejected (platform=${platform}, provider=${provider}, workspaceId=${workspaceId}, reason=user_inactive)`);
+        logger.warn(`[LOGIN-WORKSPACE] Workspace login rejected (platform=${platform}, provider=${provider}, reason=user_inactive)`, { workspaceId: logSafeId(workspaceId) });
         res.status(403).json({
           error: 'User inactive',
           message: 'Your account has been deactivated or you have left this workspace'
@@ -1467,7 +1427,7 @@ export class AuthV2Controller {
 
       const orgMember = await this.orgMemberFor(workspaceUser.orgMemberId);
       if (!orgMember) {
-        logger.warn(`[LOGIN-WORKSPACE] Workspace login rejected (platform=${platform}, provider=${provider}, workspaceId=${workspaceId}, reason=org_member_missing)`);
+        logger.warn(`[LOGIN-WORKSPACE] Workspace login rejected (platform=${platform}, provider=${provider}, reason=org_member_missing)`, { workspaceId: logSafeId(workspaceId) });
         res.status(403).json({
           error: 'User inactive',
           message: 'Your account has been deactivated or you have left this workspace'
@@ -1494,7 +1454,7 @@ export class AuthV2Controller {
 
       const orgRole = (await this.userService.getOrgRole(orgMember.memberId)) ?? '';
 
-      logger.info(`[LOGIN-WORKSPACE] Workspace login succeeded (platform=${platform}, provider=${provider}, workspaceId=${workspaceId}, isNewUser=${isNewUser}, sessionId=${login.sessionId}, reused=${login.reused})`);
+      logger.info(`[LOGIN-WORKSPACE] Workspace login succeeded (platform=${platform}, provider=${provider}, isNewUser=${isNewUser}, sessionId=${login.sessionId}, reused=${login.reused})`, { workspaceId: logSafeId(workspaceId) });
       res.status(200).json({
         success: true,
         workspaceId,
@@ -1541,7 +1501,7 @@ export class AuthV2Controller {
         });
         return;
       }
-      const providerUserId = pending.providerUserId || pending.googleId;
+      const providerUserId = pending.providerUserId;
       if (!providerUserId) {
         res.status(401).json({
           error: 'Invalid auth data',
@@ -1551,7 +1511,7 @@ export class AuthV2Controller {
       }
       const provider = pending.provider;
 
-      logger.info(`[CREATE-ORG] User ${pending.email} creating org "${orgName}" with workspace "${workspaceName}" via ${provider}`);
+      logger.info(`[CREATE-ORG] User ${pending.email} creating an org via ${provider}`, { orgName: logSafeId(orgName), workspaceName: logSafeId(workspaceName) });
 
       const userData = {
         providerUserId,
@@ -1692,7 +1652,7 @@ export class AuthV2Controller {
 
       const targetUser = await findMembership(currentUser.memberId, workspaceId);
       if (!targetUser) {
-        logger.warn(`[SWITCH-WORKSPACE] ${currentUser.email} has no membership in workspace ${workspaceId}`);
+        logger.warn(`[SWITCH-WORKSPACE] ${currentUser.email} has no membership in the requested workspace`, { workspaceId: logSafeId(workspaceId) });
         res.status(403).json({
           error: 'Forbidden',
           message: 'You do not have access to this workspace',
@@ -1729,7 +1689,7 @@ export class AuthV2Controller {
         isNewUser: false,
       });
 
-      logger.info(`[SWITCH-WORKSPACE] User ${currentUser.email} switched to workspace ${workspaceId} (sessionId=${login.sessionId}, reused=${login.reused})`);
+      logger.info(`[SWITCH-WORKSPACE] User ${currentUser.email} switched workspace (sessionId=${login.sessionId}, reused=${login.reused})`, { workspaceId: logSafeId(workspaceId) });
 
       res.status(200).json({
         user: {
@@ -1771,7 +1731,7 @@ export class AuthV2Controller {
         });
         return;
       }
-      const providerUserId = pending.providerUserId || pending.googleId;
+      const providerUserId = pending.providerUserId;
       if (!providerUserId) {
         res.status(401).json({
           error: 'Invalid auth data',
@@ -1804,7 +1764,7 @@ export class AuthV2Controller {
           return;
         }
 
-        logger.info(`[CREATE-WORKSPACE-PENDING] User ${pending.email} creating workspace "${workspaceName}" via ${provider}`);
+        logger.info(`[CREATE-WORKSPACE-PENDING] User ${pending.email} creating a workspace via ${provider}`, { workspaceName: logSafeId(workspaceName) });
 
         const userData = {
           providerUserId,
@@ -1882,7 +1842,7 @@ export class AuthV2Controller {
           onboardingMaxAgeMs: ONBOARDING_COOKIE_ONE_DAY_MS,
         });
 
-        logger.info(`[CREATE-WORKSPACE-PENDING] Created workspace "${workspaceName}" for ${pending.email} in org ${organization.orgId} (sessionId=${login.sessionId})`);
+        logger.info(`[CREATE-WORKSPACE-PENDING] Created a workspace for ${pending.email} in org ${organization.orgId} (sessionId=${login.sessionId})`, { workspaceName: logSafeId(workspaceName) });
 
         res.status(201).json({
           organization: { id: organization.orgId, name: organization.name },

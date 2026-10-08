@@ -1,18 +1,5 @@
 import type { To } from 'react-router-dom';
-
-/**
- * Paths that must NOT receive the workspace prefix.
- * These are top-level routes that live outside the /:workspaceId layout.
- */
-const WORKSPACE_EXEMPT_PREFIXES = [
-  '/auth',
-  '/invite',
-  '/launch',
-  '/newWindow',
-  '/redirected',
-  '/call/',
-  '/api/',
-];
+import { isNonWorkspacePath } from './workspaceRootSegments';
 
 function normalizeSameOriginPath(to: string): string {
   if (typeof window === 'undefined' || !/^https?:\/\//i.test(to)) return to;
@@ -39,7 +26,7 @@ export const prefixWorkspacePath = (to: To, workspaceId: string | undefined): To
     typeof normalizedTo === 'string' &&
     normalizedTo.startsWith('/') &&
     !normalizedTo.startsWith(`/${workspaceId}`) &&
-    !WORKSPACE_EXEMPT_PREFIXES.some(prefix => normalizedTo.startsWith(prefix))
+    !isNonWorkspacePath(normalizedTo)
   ) {
     return `/${workspaceId}${normalizedTo}`;
   }

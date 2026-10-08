@@ -12,7 +12,7 @@ import { userActivityTrackingService } from '@/services/userActivityTrackingServ
 import { authSessionRepository } from '@/bypassAcl/authSessionServices';
 import { recordSessionIssued, recordTokenMinted } from '@/services/otel/authMetrics';
 import { clearPendingAuth } from './pendingAuth';
-import { legacyCookieMirror, toSessionPlatform } from './platform';
+import { legacyCookieMirror, responsePlatform, toSessionPlatform } from './platform';
 import { applyCookies, cookiesForLogout, cookiesForSession } from './sessionCookies';
 import { issueSession, mintWorkspaceJwt, secureCookies } from './sessionIssuer';
 import { resolveSessionFromRequest } from './sessionResolver';
@@ -29,20 +29,18 @@ export async function completeLogin(input: CompleteLoginInput): Promise<Complete
   const requested = toSessionPlatform(input.platform);
 
   // Reuse: the request already carries a live session of this account (switch / create / join /
-  // second-workspace auto-login). Never for SDK issuance.
+  // second-workspace auto-login).
   let session: AuthSessionRow | null = null;
   let sessionToken: string | null = null;
-  if (requested !== 'SDK') {
-    const existing = await resolveSessionFromRequest(req);
-    if (existing.ok && existing.session.session.accountId === orgMember.memberId) {
-      session = existing.session.session;
-      sessionToken = existing.session.credential;
-    } else if (req.authSession?.accountId === orgMember.memberId) {
-      // Resolved earlier through a Bearer JWT with `sid` (mobile switch) and no cookie travelled.
-      session = await authSessionRepository.findById(req.authSession.sessionId);
-      sessionToken = readSessionCredential(req)?.value ?? null;
-      if (session && (session.status !== 'ACTIVE' || session.absoluteExpiry.getTime() <= Date.now())) session = null;
-    }
+  const existing = await resolveSessionFromRequest(req);
+  if (existing.ok && existing.session.session.accountId === orgMember.memberId) {
+    session = existing.session.session;
+    sessionToken = existing.session.credential;
+  } else if (req.authSession?.accountId === orgMember.memberId) {
+    // Resolved earlier through a Bearer JWT with `sid` (mobile switch) and no cookie travelled.
+    session = await authSessionRepository.findById(req.authSession.sessionId);
+    sessionToken = readSessionCredential(req)?.value ?? null;
+    if (session && (session.status !== 'ACTIVE' || session.absoluteExpiry.getTime() <= Date.now())) session = null;
   }
   const reused = !!session;
 
@@ -54,6 +52,10 @@ export async function completeLogin(input: CompleteLoginInput): Promise<Complete
     deviceCookie = issued.deviceCookie;
   }
   const platform = session.platform as SessionPlatform;
+  // What the cookies are shaped for. A reused session row can say MOBILE because its legacy user
+  // agent did, while this request is a plain browser; `responsePlatform` keeps SameSite=None and
+  // the JSON session token for callers that actually announce themselves as native.
+  const forResponse = responsePlatform(req, platform);
 
   // Requirement: a fresh access token on every login / switch / create / join.
   const token = mintWorkspaceJwt({
@@ -71,7 +73,7 @@ export async function completeLogin(input: CompleteLoginInput): Promise<Complete
     applyCookies(
       res,
       cookiesForSession({
-        platform,
+        platform: forResponse,
         sessionToken,
         sessionExpiresAt: session.absoluteExpiry,
         workspaceId: workspaceUser.workspaceId,
@@ -82,7 +84,7 @@ export async function completeLogin(input: CompleteLoginInput): Promise<Complete
         deviceCookie,
         writeSessionCookies: !reused,
         writeLastWorkspace: true,
-        legacyMirror: platform === 'MOBILE' && legacyCookieMirror(req),
+        legacyMirror: forResponse === 'MOBILE' && legacyCookieMirror(req),
       }),
     );
   }
@@ -112,7 +114,15 @@ export async function completeLogin(input: CompleteLoginInput): Promise<Complete
     isNewUser,
   });
 
-  return { sessionId: session.id, sessionToken, token, workspaceId: workspaceUser.workspaceId, platform, reused };
+  return {
+    sessionId: session.id,
+    sessionToken,
+    token,
+    workspaceId: workspaceUser.workspaceId,
+    platform,
+    responsePlatform: forResponse,
+    reused,
+  };
 }
 
 /**

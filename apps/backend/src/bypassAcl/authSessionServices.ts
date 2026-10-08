@@ -19,10 +19,12 @@ import { db } from '@/database/client';
 import { config } from '@/config/env';
 import { logger } from '@/utils/logger';
 import { encrypt } from '@/services/encryptionService';
-import { UserSessionService, resolveSessionPlatform, type LogoutReason } from '@/services/userSessionService';
-import { recordPushTokenMissing, recordSessionIssued, recordSessionRevoked } from '@/services/otel/authMetrics';
+import { UserSessionService, resolveSessionPlatform } from '@/services/userSessionService';
+import { recordSessionIssued, recordSessionRevoked } from '@/services/otel/authMetrics';
 import { redisRevocationStore } from '@/auth/revocation';
 import { appVersionFromDeviceInfo, parseLegacyPushToken } from '@/auth/legacyPushToken';
+import { S2S_DEVICE_KEY_PREFIX, s2sDeviceKey } from '@/auth/constants';
+import { hashToken } from '@/auth/sessionTokens';
 import type {
   AuthSessionRow,
   CreateSessionInput,
@@ -55,14 +57,57 @@ const MEMBERSHIP_SELECT = {
 
 const ORG_MEMBER_SELECT = { memberId: true, orgId: true, role: true, leftAt: true } as const;
 
-/** Tombstone TTL: the longest-lived JWT a session can have minted. */
-function tombstoneTtlSeconds(): number {
+/** Ceiling on a tombstone TTL: the longest-lived JWT any session can mint. */
+function maxJwtTtlSeconds(): number {
   return Math.max(config.jwt.expirationSeconds, config.session.workspaceTokenTtlSeconds, config.sdkSso.tokenTtlSeconds);
 }
 
-async function tombstone(sessionIds: string[]): Promise<void> {
-  const ttl = tombstoneTtlSeconds();
-  await Promise.all(sessionIds.map((sid) => redisRevocationStore.markRevoked(sid, ttl)));
+type TombstoneTarget = { id: string; absoluteExpiry?: Date | null };
+
+/**
+ * A tombstone only has to outlive the JWTs the session could still have in flight. The TTL is
+ * therefore the session's own remaining life, capped by the longest JWT TTL — not the raw TTL
+ * read from config, which a deploy that LOWERS `JWT_EXPIRATION_SECONDS` would make too short for
+ * tokens minted before it (and needlessly long for a session that expires in a minute).
+ */
+async function tombstone(targets: TombstoneTarget[], now: Date = new Date()): Promise<void> {
+  const ceiling = maxJwtTtlSeconds();
+  await Promise.all(
+    targets.map((t) => {
+      const remaining = t.absoluteExpiry ? Math.ceil((t.absoluteExpiry.getTime() - now.getTime()) / 1000) : ceiling;
+      return redisRevocationStore.markRevoked(t.id, Math.max(1, Math.min(ceiling, remaining)));
+    }),
+  );
+}
+
+/**
+ * Stamp the account's claims watermark: every access JWT minted before now carries a role / org
+ * role / workspace membership that has just changed, so the stateless path must stop trusting it
+ * and re-mint from the session. Called by the writers of those fields, never on a read path.
+ */
+export async function markAccountClaimsStale(accountId: string, at: Date = new Date()): Promise<void> {
+  await redisRevocationStore.markClaimsStale(accountId, maxJwtTtlSeconds(), at);
+  logger.info('[AUTH] claims watermark stamped', { accountId, at: at.toISOString() });
+}
+
+/**
+ * Same stamp, for writers that hold a `users.id` rather than the account id (status flips,
+ * workspace-role writes). Best-effort: a missing row or a user with no org member means there is
+ * no account to invalidate, and failing the caller's write over a metrics-grade Redis key would be
+ * the wrong trade.
+ */
+export async function markClaimsStaleForUser(userId: string, at: Date = new Date()): Promise<void> {
+  try {
+    const row = await asSystem(['User'], 'claims watermark lookup: maps a workspace user to its account, no tenant context', () =>
+      db.user.findUnique({ where: { id: userId }, select: { orgMemberId: true } }),
+    );
+    if (row?.orgMemberId) await markAccountClaimsStale(row.orgMemberId, at);
+  } catch (error) {
+    logger.warn('[AUTH] claims watermark stamp failed', {
+      userId,
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
 }
 
 function isUniqueViolation(error: unknown): boolean {
@@ -113,22 +158,27 @@ export function findOrgMember(memberId: string): Promise<OrgMemberRef | null> {
   );
 }
 
+/**
+ * Is the account signed in on a real device anywhere? Two deliberate adjustments:
+ *   - S2S rows (`s2s:` deviceKey) do not count. They are created BY the token endpoint, so
+ *     counting them would make the first mint keep answering "yes" long after the user logged out.
+ *   - never-converted legacy `workflow.user_sessions` rows do count. An account that logged in
+ *     before the deploy and has not made a request since has no `auth_sessions` row yet, and
+ *     background work for that user (claw agents, webhooks, scheduled jobs) must not stop.
+ */
 export function hasActiveSession(accountId: string, now: Date = new Date()): Promise<boolean> {
-  return asSystem(['AuthSession'], 'account liveness check (internal token endpoint): spans every workspace', async () => {
+  return asSystem(['AuthSession', 'UserSession', 'User'], 'account liveness check (internal token endpoint): spans every workspace', async () => {
     const n = await db.authSession.count({
-      where: { accountId, status: SessionStatus.ACTIVE, absoluteExpiry: { gt: now } },
+      where: {
+        accountId,
+        status: SessionStatus.ACTIVE,
+        absoluteExpiry: { gt: now },
+        NOT: { deviceKey: { startsWith: S2S_DEVICE_KEY_PREFIX } },
+      },
     });
-    return n > 0;
+    if (n > 0) return true;
+    return userSessionService.hasActiveSessionForAccount(accountId, now);
   });
-}
-
-export function listAccountSessions(accountId: string, now: Date = new Date()): Promise<AuthSessionRow[]> {
-  return asSystem(['AuthSession'], 'account session list: spans every workspace of the account', () =>
-    db.authSession.findMany({
-      where: { accountId, status: SessionStatus.ACTIVE, absoluteExpiry: { gt: now } },
-      orderBy: { createdAt: 'desc' },
-    }),
-  );
 }
 
 // ─── Create / convert ─────────────────────────────────────────────────────────
@@ -145,12 +195,12 @@ export async function createSession(input: CreateSessionInput): Promise<AuthSess
     async (tx) => {
       const prior = await tx.authSession.findMany({
         where: { deviceKey: input.deviceKey, status: SessionStatus.ACTIVE },
-        select: { id: true },
+        select: { id: true, absoluteExpiry: true },
       });
-      const revokedIds = prior.map((p) => p.id);
+      const revokedIds = prior;
       if (revokedIds.length > 0) {
         await tx.authSession.updateMany({
-          where: { id: { in: revokedIds } },
+          where: { id: { in: revokedIds.map((p) => p.id) } },
           data: { status: SessionStatus.REVOKED, revokedAt: new Date(), revokeReason: 'DEVICE_REUSED' },
         });
       }
@@ -175,7 +225,7 @@ export async function createSession(input: CreateSessionInput): Promise<AuthSess
     recordSessionRevoked({ reason: 'DEVICE_REUSED', scope: 'session' });
     logger.info('[AUTH] device reused: prior sessions revoked', { count: revokedIds.length, platform: input.platform });
   }
-  recordSessionIssued({ kind: 'login', platform: input.platform });
+  recordSessionIssued({ kind: input.issuedKind ?? 'login', platform: input.platform });
   return created;
 }
 
@@ -247,14 +297,16 @@ export async function convertLegacySession(input: { legacy: LegacySessionWithUse
 // ─── Revoke / expire ──────────────────────────────────────────────────────────
 
 export async function revokeSession(sessionId: string, reason: SessionRevokeReason): Promise<void> {
-  const r = await asSystem(['AuthSession'], 'session revoke: logout / membership loss, before or without a tenant context', () =>
-    db.authSession.updateMany({
+  const row = await asSystem(['AuthSession'], 'session revoke: logout / membership loss, before or without a tenant context', async () => {
+    const r = await db.authSession.updateMany({
       where: { id: sessionId, status: SessionStatus.ACTIVE },
       data: { status: SessionStatus.REVOKED, revokedAt: new Date(), revokeReason: reason },
-    }),
-  );
-  if (r.count > 0) {
-    await tombstone([sessionId]);
+    });
+    if (r.count === 0) return null;
+    return db.authSession.findUnique({ where: { id: sessionId }, select: { id: true, absoluteExpiry: true } });
+  });
+  if (row) {
+    await tombstone([row]);
     recordSessionRevoked({ reason, scope: 'session' });
   }
 }
@@ -270,12 +322,12 @@ export async function revokeAccountSessions(accountId: string, reason: SessionRe
     async () => {
       const live = await db.authSession.findMany({
         where: { accountId, status: SessionStatus.ACTIVE },
-        select: { id: true },
+        select: { id: true, absoluteExpiry: true },
       });
-      const ids = live.map((s) => s.id);
+      const ids = live;
       if (ids.length > 0) {
         await db.authSession.updateMany({
-          where: { id: { in: ids } },
+          where: { id: { in: ids.map((s) => s.id) } },
           data: { status: SessionStatus.REVOKED, revokedAt: new Date(), revokeReason: reason },
         });
       }
@@ -290,30 +342,116 @@ export async function revokeAccountSessions(accountId: string, reason: SessionRe
   // Legacy exception (a): status-only flips on workflow.user_sessions.
   await asSystem(['UserSession'], 'account-wide revoke: unconverted legacy rows must not convert into ACTIVE sessions later', async () => {
     for (const userId of userIds) {
-      await userSessionService.revokeAllUserSessions(userId, reason as LogoutReason);
+      await userSessionService.revokeAllUserSessions(userId, reason);
     }
   });
   if (userIds.length > 0) recordSessionRevoked({ reason, scope: 'legacy' });
   return ids.length;
 }
 
-/** Cleanup worker step: ACTIVE rows past absoluteExpiry → EXPIRED, at most `batchSize`. */
-export function expireSessions(batchSize: number, now: Date): Promise<number> {
+/**
+ * Cleanup worker step: ACTIVE rows past absoluteExpiry → EXPIRED, at most `batchSize`.
+ *
+ * Expiring a row is a revocation as far as outstanding tokens are concerned: a JWT minted in the
+ * last seconds before `absoluteExpiry` stays signature-valid for a whole JWT TTL afterwards, so the
+ * ids are tombstoned exactly like a logout — at the full JWT ceiling, since the row's own remaining
+ * life (the clamp `tombstone` applies elsewhere) is by definition already spent here.
+ */
+export async function expireSessions(batchSize: number, now: Date): Promise<number> {
   const take = Math.max(1, Math.floor(batchSize));
-  return asSystem(['AuthSession'], 'session cleanup worker: expires sessions past absoluteExpiry across every org', async () => {
-    const rows = await db.authSession.findMany({
-      where: { status: SessionStatus.ACTIVE, absoluteExpiry: { lt: now } },
-      select: { id: true },
-      orderBy: { absoluteExpiry: 'asc' },
-      take,
+  const { count, expired } = await asSystem(
+    ['AuthSession'],
+    'session cleanup worker: expires sessions past absoluteExpiry across every org',
+    async () => {
+      const rows = await db.authSession.findMany({
+        where: { status: SessionStatus.ACTIVE, absoluteExpiry: { lt: now } },
+        select: { id: true, absoluteExpiry: true },
+        orderBy: { absoluteExpiry: 'asc' },
+        take,
+      });
+      if (rows.length === 0) return { count: 0, expired: [] as TombstoneTarget[] };
+      const r = await db.authSession.updateMany({
+        where: { id: { in: rows.map((x) => x.id) }, status: SessionStatus.ACTIVE },
+        data: { status: SessionStatus.EXPIRED, revokedAt: now, revokeReason: 'EXPIRED' },
+      });
+      return { count: r.count, expired: rows };
+    },
+  );
+  if (expired.length > 0) {
+    // The JWT ceiling, not the (already elapsed) row lifetime: these tokens are the ones still in flight.
+    await Promise.all(expired.map((row) => redisRevocationStore.markRevoked(row.id, maxJwtTtlSeconds())));
+    recordSessionRevoked({ reason: 'EXPIRED', scope: 'session' });
+  }
+  return count;
+}
+
+/**
+ * Mobile sessions that never registered a push token — the constraint the DB cannot express.
+ * Counted once per cleanup run (a fleet-wide snapshot), NOT per push delivery: counting it there
+ * put a slowly-changing state on the notification-volume clock, so the number said more about how
+ * chatty the workspace was than about how many phones were unreachable.
+ */
+export function countTokenlessMobileSessions(now: Date = new Date()): Promise<number> {
+  return asSystem(['AuthSession'], 'push-token coverage snapshot for the cleanup worker: spans every org', () =>
+    db.authSession.count({
+      where: { status: SessionStatus.ACTIVE, absoluteExpiry: { gt: now }, platform: 'MOBILE', fcmToken: null },
+    }),
+  );
+}
+
+/**
+ * The one long-lived row that server-to-server tokens for this account are pinned to.
+ *
+ * Deliberately not a device session: a user logging out on one phone must not tombstone the token
+ * a background job (claw agent, webhook, scheduled run) is holding, while an account-wide revoke
+ * (password reset, member removed) must kill it. Reused while ACTIVE and not about to expire, so a
+ * burst of mints costs one row, and `hasActiveSession` ignores it so it can never stand in for a
+ * real login.
+ */
+export async function ensureServiceSession(accountId: string, orgId: string, now: Date = new Date()): Promise<AuthSessionRow> {
+  const deviceKey = s2sDeviceKey(accountId);
+  // Must outlive any token minted from it; one session lifetime, re-created when close to the edge.
+  const minRemainingMs = maxJwtTtlSeconds() * 1000;
+  const existing = await asSystem(['AuthSession'], 'S2S session lookup: minted for background services, spans every workspace', () =>
+    db.authSession.findFirst({
+      where: {
+        accountId,
+        deviceKey,
+        status: SessionStatus.ACTIVE,
+        absoluteExpiry: { gt: new Date(now.getTime() + minRemainingMs) },
+      },
+    }),
+  );
+  if (existing) return existing;
+  try {
+    // Rolling over revokes (and tombstones) the previous S2S row, so tokens still cached from it die
+    // early — once per session lifetime per account, and claw-auth's one-shot 401 retry re-mints, so
+    // the worst case is a single retried call rather than a failed job.
+    return await createSession({
+      accountId,
+      orgId,
+      // No client ever presents this token, so the hash is of a value nobody holds.
+      tokenHash: hashToken(`s2s:${randomUUID()}`),
+      deviceKey,
+      platform: 'SDK',
+      absoluteExpiry: new Date(now.getTime() + config.session.expiryDays * 24 * 60 * 60 * 1000),
+      deviceInfo: null,
+      appVersion: null,
+      issuedKind: 'sdk',
     });
-    if (rows.length === 0) return 0;
-    const r = await db.authSession.updateMany({
-      where: { id: { in: rows.map((x) => x.id) }, status: SessionStatus.ACTIVE },
-      data: { status: SessionStatus.EXPIRED, revokedAt: now, revokeReason: 'EXPIRED' },
-    });
-    return r.count;
-  });
+  } catch (error) {
+    // Two concurrent mints for the same account (two workspaces, or two claw pods) race on the
+    // partial unique "one ACTIVE row per deviceKey": the loser gets P2002. The winner's row is
+    // exactly what this function was asked for, so re-read it instead of failing the request —
+    // the same shape as `convertLegacySession`'s idempotency.
+    if (!isUniqueViolation(error)) throw error;
+    const winner = await asSystem(['AuthSession'], 'S2S session re-read after a concurrent insert lost the unique race', () =>
+      db.authSession.findFirst({ where: { accountId, deviceKey, status: SessionStatus.ACTIVE } }),
+    );
+    if (!winner) throw error;
+    logger.info('[AUTH] S2S session insert lost the race; reusing the winner', { accountId, sessionId: winner.id });
+    return winner;
+  }
 }
 
 // ─── Device key ───────────────────────────────────────────────────────────────
@@ -327,16 +465,16 @@ async function adoptDeviceKeyInTx(
   tx: Prisma.TransactionClient,
   own: { id: string; deviceKey: string },
   deviceKey: string,
-): Promise<string[]> {
+): Promise<TombstoneTarget[]> {
   if (deviceKey === own.deviceKey) return [];
   const others = await tx.authSession.findMany({
     where: { deviceKey, status: SessionStatus.ACTIVE, id: { not: own.id } },
-    select: { id: true },
+    select: { id: true, absoluteExpiry: true },
   });
-  const revokedIds = others.map((o) => o.id);
+  const revokedIds = others;
   if (revokedIds.length > 0) {
     await tx.authSession.updateMany({
-      where: { id: { in: revokedIds } },
+      where: { id: { in: revokedIds.map((o) => o.id) } },
       data: { status: SessionStatus.REVOKED, revokedAt: new Date(), revokeReason: 'DEVICE_REUSED' },
     });
   }
@@ -344,7 +482,7 @@ async function adoptDeviceKeyInTx(
   return revokedIds;
 }
 
-async function afterDeviceReuse(revokedIds: string[], context: string): Promise<void> {
+async function afterDeviceReuse(revokedIds: TombstoneTarget[], context: string): Promise<void> {
   if (revokedIds.length === 0) return;
   await tombstone(revokedIds);
   recordSessionRevoked({ reason: 'DEVICE_REUSED', scope: 'session' });
@@ -366,7 +504,7 @@ export async function adoptDeviceKey(sessionId: string, accountId: string, devic
         where: { id: sessionId, accountId, status: SessionStatus.ACTIVE },
         select: { id: true, deviceKey: true },
       });
-      if (!own) return { updated: false, revokedIds: [] as string[] };
+      if (!own) return { updated: false, revokedIds: [] as TombstoneTarget[] };
       const revokedIds = await adoptDeviceKeyInTx(tx, own, deviceKey);
       return { updated: true, revokedIds };
     },
@@ -393,7 +531,7 @@ export async function setPushTokens(input: SetPushTokensInput): Promise<boolean>
         where: { id: input.sessionId, accountId: input.accountId, status: SessionStatus.ACTIVE },
         select: { id: true, deviceKey: true },
       });
-      if (!own) return { updated: false, revokedIds: [] as string[] };
+      if (!own) return { updated: false, revokedIds: [] as TombstoneTarget[] };
 
       await tx.authSession.updateMany({
         where: { id: { not: own.id }, status: SessionStatus.ACTIVE, fcmToken: input.fcmToken },
@@ -456,12 +594,6 @@ export function findPushTargetsForAccount(accountId: string, now: Date = new Dat
           appVersion: r.appVersion ?? undefined,
         }));
 
-      // Observability for the constraint the DB cannot express: mobile sessions that never registered a token.
-      const tokenless = await db.authSession.count({
-        where: { accountId, status: SessionStatus.ACTIVE, absoluteExpiry: { gt: now }, platform: 'MOBILE', fcmToken: null },
-      });
-      for (let i = 0; i < tokenless; i += 1) recordPushTokenMissing({ platform: 'MOBILE' });
-
       const legacyRows = await userSessionService.findLegacyPushRowsForAccount(accountId, now);
       for (const row of legacyRows) {
         const fcm = parseLegacyPushToken(row.fcmToken);
@@ -507,8 +639,8 @@ export const authSessionRepository: SessionRepository = {
   revokeSession,
   revokeAccountSessions,
   hasActiveSession,
-  listAccountSessions,
   expireSessions,
+  ensureServiceSession,
   adoptDeviceKey,
   setPushTokens,
   clearPushTokens,

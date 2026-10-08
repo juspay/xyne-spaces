@@ -154,7 +154,9 @@ class WebSocketService {
           method: 'GET',
           path: '/api/socket.io/',
           // Set-Cookie cannot reach a socket client: an about-to-expire `xw_<ws>` is accepted as
-          // is, and a missing one falls to the `xs` session path without minting a cookie.
+          // is, and a missing one falls to the `xs` session path without minting a cookie. The
+          // resolver already suppresses cookie computation for this flag; the `cookie` /
+          // `clearCookie` stubs below are belt-and-braces for any future caller that does emit some.
           inlineRefresh: false,
         } as any;
 
@@ -167,6 +169,9 @@ class WebSocketService {
             }
           }),
           cookie: () => { },
+          // `applyCookies` calls clearCookie for every clear instruction (legacy switch-over):
+          // without this stub the handshake threw TypeError instead of authenticating.
+          clearCookie: () => { },
           setHeader: () => { } // Ignore headers for WebSocket
         } as any;
 

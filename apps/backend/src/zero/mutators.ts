@@ -199,6 +199,7 @@ import {
 import { deleteHeicRenditions, isHeicAttachment } from '@/services/heicRenditionService';
 import { deliverDraftServerMessage } from '@/services/messageDeliveryService';
 import { organizationDomainService } from '@/services/organizationDomainService';
+import { markAccountClaimsStale } from '@/bypassAcl/authSessionServices';
 // Data-driven visit versioning + ETA reset/continue decision for NON_LINEAR transitions.
 import { decideVisitVersion, foldFormRowsToValues } from '@/services/stageTransition/visitVersioning';
 import {
@@ -16005,11 +16006,19 @@ export function createMutators(
           });
 
           if (updates.role !== undefined) {
+            // One read serves both followers: the ADMIN branch needs `email`, and the claims
+            // watermark needs `orgMemberId`. A 24h access JWT freezes `role`, so without the
+            // stamp a demoted user keeps admin authorization until it expires — nothing else
+            // invalidates an already-minted token.
+            const user = await tx.run(zql.users.where('id', userId).one());
+            if (user?.orgMemberId) {
+              const accountId = user.orgMemberId;
+              asyncTasks.push(() => markAccountClaimsStale(accountId));
+            }
             if (updates.role === WorkspaceRole.ADMIN) {
               // Promote: grant the full ADMIN permission matrix, same as invite-accept
               // (grantPermissionsForRole), so "becomes an admin" is consistent regardless
               // of whether the user was invited straight in as ADMIN or promoted later.
-              const user = await tx.run(zql.users.where('id', userId).one());
               if (user) {
                 const { email } = user;
                 asyncTasks.push(() =>
@@ -16036,11 +16045,19 @@ export function createMutators(
         }),
         async ({ tx, args: { userId, timestamp } }) => {
           // ACL check is handled by UsersACL
+          const user = await tx.run(zql.users.where('id', userId).one());
           await tx.mutate.users.update({
             id: userId,
             leftAt: timestamp,
             updatedAt: timestamp,
           });
+
+          // Workspace membership is frozen in the access JWT for its full 24h TTL, so a removed
+          // user keeps reaching this workspace until the token expires unless it is stamped.
+          if (user?.orgMemberId) {
+            const accountId = user.orgMemberId;
+            asyncTasks.push(() => markAccountClaimsStale(accountId));
+          }
         }
       ),
     },
@@ -16278,6 +16295,9 @@ export function createMutators(
           });
 
           if (updates.role !== undefined) {
+            // `orgRole` is frozen in the access JWT: stamp the account so outstanding tokens are
+            // re-minted instead of carrying the old org role for up to a full JWT TTL.
+            asyncTasks.push(() => markAccountClaimsStale(memberId));
             const member = await tx.run(zql.org_members.where('memberId', memberId).one());
             if (member) {
               const shouldHaveAccess = updates.role === OrgRole.ADMIN || updates.role === OrgRole.OWNER;
@@ -16300,6 +16320,10 @@ export function createMutators(
             memberId,
             leftAt: timestamp,
           });
+
+          // Org membership is frozen in the access JWT; the stateless path never re-reads
+          // `org_members`, so without the stamp a removed account keeps its token's authorization.
+          asyncTasks.push(() => markAccountClaimsStale(memberId));
         },
       ),
     },

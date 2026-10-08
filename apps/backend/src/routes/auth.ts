@@ -6,26 +6,11 @@ import { channelService } from '../services/channelService';
 import { canCreateWorkspace } from '../middleware/workspaceAuth';
 import { logger } from '../utils/logger';
 import { DatabaseClient } from '../database/client';
-import { findUserById } from '@/bypassAcl/authSessionServices';
+import { providerIdentity } from '@/auth/providerIdentity';
 
 const prisma = DatabaseClient.getInstance();
 const router = express.Router();
 const authV2Controller = new AuthV2Controller();
-
-/**
- * `req.user` is built from the access JWT claims on the stateless path, which do not carry the
- * provider identity. One `users` read fills `googleId` / `authProvider`; the claims stay the
- * fallback (API-key and dev users have no row behind them).
- */
-async function providerIdentity(req: express.Request): Promise<{ googleId: string; authProvider?: string }> {
-  const user = req.user!;
-  if (user.isApiKeyUser) return { googleId: user.googleId, authProvider: user.authProvider };
-  const row = await findUserById(user.id);
-  return {
-    googleId: row?.providerUserId ?? user.googleId,
-    authProvider: row?.authProvider ?? user.authProvider,
-  };
-}
 
 router.get('/login', authV2Controller.initiateLogin);
 

@@ -37,7 +37,7 @@ export function isLegacyShaped(value: string): boolean {
   return !value.startsWith(SESSION_TOKEN_PREFIX);
 }
 
-export type CredentialSource = 'xs' | 'user_session_id' | 'xyne_session' | 'x-session-token' | 'x-session-id';
+export type CredentialSource = 'xs' | 'user_session_id' | 'xyne_session' | 'x-session-token';
 
 export interface SessionCredentialValue {
   value: string;
@@ -61,8 +61,13 @@ function cookieString(cookies: Record<string, unknown> | undefined, name: string
 }
 
 /**
- * The session credential a request presents. Cookies before headers: `x-session-id` is read LAST
- * because the dashboard echoes the encryption fingerprint (a hash) in it on encrypted bodies.
+ * The session credential a request presents. Cookies before headers.
+ *
+ * `x-session-id` is deliberately NOT in this list: the dashboard echoes the ENCRYPTION FINGERPRINT
+ * in that header (a sha256, not a token), so reading it as a credential made the resolver look a
+ * hash up as a legacy session id — which fails, and worse, shadowed a perfectly good `xw_` cookie
+ * into a `session_not_found` 401. The header has exactly one reader now:
+ * `getClientSessionFingerprint`.
  */
 export function readSessionCredential(input: CredentialSourceInput): SessionCredentialValue | null {
   const tries: Array<[CredentialSource, string | undefined]> = [
@@ -70,21 +75,26 @@ export function readSessionCredential(input: CredentialSourceInput): SessionCred
     ['user_session_id', cookieString(input.cookies, LEGACY_SESSION_COOKIE)],
     ['xyne_session', cookieString(input.cookies, OLD_SESSION_COOKIE)],
     ['x-session-token', headerString(input.headers, SESSION_TOKEN_HEADER)],
-    ['x-session-id', headerString(input.headers, LEGACY_SESSION_HEADER)],
   ];
   for (const [source, value] of tries) if (value) return { value, source };
   return null;
 }
 
 /**
- * Stable per-client id for the encryption key store, usable before auth runs. Never the raw
- * token: `xs1_` ⇒ sha256(token) (= `tokenHash`); a legacy id stays itself so sessions converted
- * from `user_sessions` keep the key they registered before the deploy. The dashboard echoes this
- * value back as `x-session-id` on encrypted bodies, so that header is accepted as a last resort.
+ * Stable per-client id for the encryption key store (`routes/encryption.ts`,
+ * `decryptionMiddleware`), usable before auth runs.
+ *
+ * Derived from the session credential whenever the request carries one, and never from the raw
+ * token: `xs1_` ⇒ sha256(token) (= `tokenHash`); a legacy id stays itself, so sessions converted
+ * from `user_sessions` keep the key they registered before the deploy.
+ *
+ * The echoed `x-session-id` header is a FALLBACK, not a preference, and the order is deliberate:
+ * the key store trusts this value to name whose key to use, so a caller that holds a session must
+ * not be able to point at someone else's entry by sending a different header. It is read only when
+ * no credential accompanies the request — the Bearer-only clients the dashboard's echo exists for.
  */
 export function getClientSessionFingerprint(req: CredentialSourceInput): string | undefined {
   const cred = readSessionCredential(req);
-  if (!cred) return undefined;
-  if (cred.source === 'x-session-id') return cred.value; // already a fingerprint
-  return isLegacyShaped(cred.value) ? cred.value : hashToken(cred.value);
+  if (cred) return isLegacyShaped(cred.value) ? cred.value : hashToken(cred.value);
+  return headerString(req.headers, LEGACY_SESSION_HEADER);
 }

@@ -422,13 +422,18 @@ export class WorkerScheduler {
                 }
             });
 
-            // Remove existing repeatable job to allow CRON updates
+            // Remove existing repeatable job(s) to allow CRON updates. The key Bull stores is a
+            // composite (name:id:cron:…), never the bare jobId, so it has to be looked up — passing
+            // the jobId matched nothing and left the OLD schedule running beside the new one.
             try {
-                await this.authSessionCleanupQueue.removeRepeatableByKey('auth-session-cleanup-repeatable');
-                logger.info('[WORKER_SCHEDULER] Removed existing auth session cleanup repeatable job');
+                const existingRepeatable = await this.authSessionCleanupQueue.getRepeatableJobs();
+                for (const job of existingRepeatable) {
+                    if (job.id !== 'auth-session-cleanup-repeatable') continue;
+                    await this.authSessionCleanupQueue.removeRepeatableByKey(job.key);
+                    logger.info(`[WORKER_SCHEDULER] Removed existing auth session cleanup repeatable job (cron: ${job.cron})`);
+                }
             } catch (error) {
-                // Ignore error if job doesn't exist
-                logger.debug('[WORKER_SCHEDULER] No existing auth session cleanup repeatable job to remove');
+                logger.debug('[WORKER_SCHEDULER] No existing auth session cleanup repeatable job to remove', error);
             }
 
             const sessionCleanupCron = config.session.cleanupCron;

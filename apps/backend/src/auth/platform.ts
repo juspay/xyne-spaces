@@ -43,11 +43,34 @@ export function fromSessionPlatform(p: SessionPlatform | string): RequestPlatfor
   }
 }
 
-/** Default SameSite for cookies written outside an OAuth redirect: mobile jar needs none. */
-export function sameSiteFor(platform: SessionPlatform | string, flow: 'oauth_web' | 'default' = 'default'): CookieSameSite {
-  if (platform === 'MOBILE') return 'none';
-  if (flow === 'oauth_web') return 'lax';
-  return 'strict';
+/**
+ * Default SameSite for cookies written on a normal API response: mobile jars need none, everything
+ * else is strict. The OAuth callback is the one exception and it is NOT routed through here — that
+ * handler needs Lax so its cookies survive the cross-site redirect, and it says so inline where
+ * the redirect is built (`authV2Controller`'s `sameSite` on completeLogin).
+ */
+export function sameSiteFor(platform: SessionPlatform | string): CookieSameSite {
+  return platform === 'MOBILE' ? 'none' : 'strict';
+}
+
+/**
+ * The platform a RESPONSE should be shaped for (cookie SameSite, and whether the session token may
+ * travel in the JSON body) — as opposed to `auth_sessions.platform`, which records what created
+ * the session.
+ *
+ * They differ for one reason: a session's stored platform can be MOBILE because a legacy row's
+ * user agent merely contained "Mobile" (`resolveSessionPlatform` sniffs it, and rows written by the
+ * workspace-create path carry no explicit platform at all). A mobile BROWSER is not a native
+ * client: handing it SameSite=None cookies and the opaque session token in a readable JSON body
+ * would undo httpOnly for page JavaScript. A native client always announces itself with
+ * `x-platform: native|mobile`, so when that is absent the response is shaped as WEB.
+ *
+ * The JWT claim and `req.authSession.platform` keep the row's own value — they describe the
+ * session, not this response.
+ */
+export function responsePlatform(req: HeaderSource, sessionPlatform: SessionPlatform | string): SessionPlatform {
+  if (sessionPlatform === 'MOBILE' && platformFromRequest(req) !== 'mobile') return 'WEB';
+  return sessionPlatform as SessionPlatform;
 }
 
 // ─── Mobile legacy-cookie gate ───────────────────────────────────────────────

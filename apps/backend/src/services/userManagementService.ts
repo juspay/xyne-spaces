@@ -2,7 +2,7 @@ import { repositories } from '../database/repositories/index';
 import { aclService } from './aclService';
 import { getStorageService } from './storage';
 import { PrismaClient } from '@prisma/client';
-import { GuestEntity, AccessType, WorkspaceRole } from '@xyne/shared';
+import { GuestEntity, AccessType, UserStatus, WorkspaceRole } from '@xyne/shared';
 import { logger } from '../utils/logger';
 import { DatabaseClient } from '@/database/client';
 import { config } from '@/config/env';
@@ -27,6 +27,7 @@ import {
 } from '../types/database';
 import { v4 as uuidv4 } from 'uuid';
 import { revokeGuestEntityAccessTx } from '@/bypassAcl/transactions/userManagementService';
+import { markClaimsStaleForUser } from '@/bypassAcl/authSessionServices';
 
 /**
  * User Management Service
@@ -388,7 +389,14 @@ export class UserManagementService {
       await repositories.users.validateProviderUserIdUnique(data.providerUserId, id);
     }
 
-    return repositories.users.update(id, data);
+    const updated = await repositories.users.update(id, data);
+    // Deactivation takes a user's access away, and `status` is not re-read on the stateless path:
+    // without the stamp their open tabs and mobile tokens keep working until expiry. Activation is
+    // a grant, so it needs nothing.
+    if (data.status && data.status !== UserStatus.ACTIVE) {
+      await markClaimsStaleForUser(id);
+    }
+    return updated;
   }
 
   async deleteUser(id: string): Promise<User> {

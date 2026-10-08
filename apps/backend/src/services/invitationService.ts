@@ -27,6 +27,7 @@ import { ensureUserInGeneralChannel } from '@/utils/workspaceGeneralChannel';
 import { acceptInvitationTx } from '@/bypassAcl/transactions/invitationService';
 import { acceptInvitationTx2 } from '@/bypassAcl/transactions/invitationService';
 import { acceptInvitationTx3 } from '@/bypassAcl/transactions/invitationService';
+import { markAccountClaimsStale } from '@/bypassAcl/authSessionServices';
 
 type TxClient = Parameters<Parameters<PrismaClient['$transaction']>[0]>[0];
 
@@ -748,6 +749,21 @@ export class InvitationService {
 
     // ── Post-commit side effects (best-effort, must not roll back the
     //    transaction above). These are idempotent or error-swallowing. ──
+
+    // Accepting an invitation writes the workspace role and the org role, and the invitation may
+    // carry a LOWER role than the person already had. Any access JWT minted before this moment has
+    // the old role frozen in it for up to a full token lifetime, so the account's claims watermark
+    // is stamped and those tokens are re-minted on their next request.
+    if (newWorkspaceUser?.orgMemberId) {
+      try {
+        await markAccountClaimsStale(newWorkspaceUser.orgMemberId);
+      } catch (error) {
+        logger.warn('[acceptInvitation] failed to stamp the claims watermark', {
+          userId: newWorkspaceUser.id,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+    }
 
     if (upgradeCommunityMemberId) {
       try {

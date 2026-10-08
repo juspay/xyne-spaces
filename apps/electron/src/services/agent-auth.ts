@@ -10,6 +10,7 @@ import * as path from 'path';
 import { resolvePeerProcess, describePeer, PeerProcess } from './peer-process';
 import { showAgentConsentWindow } from './agent-consent-window';
 import { readWorkspaceJwt } from './cookies';
+import { getMainWindow } from '../window/manager';
 
 /** The signed-in user's workspace JWT plus the workspace it was minted for. */
 interface UserWorkspaceCredential {
@@ -56,6 +57,18 @@ const DENY_COOLDOWN_MS = 30 * 1000;
 // socket's peer process cannot change within this window, so caching removes most of
 // the per-request shell-out cost without weakening the path binding.
 const PEER_RECHECK_CACHE_MS = 1500;
+
+// Budget for the main->renderer "which workspace are you showing?" read. An
+// agent request must never be held up by a busy or wedged renderer, so the read
+// loses the race after this long and the cookie fallback takes over. Kept short
+// because the answer is a synchronous property read in the renderer — anything
+// slower than this means the renderer is not healthy anyway.
+const RENDERER_WORKSPACE_READ_TIMEOUT_MS = 1000;
+
+// Shape a path segment must have to be treated as a workspace id. The segment
+// comes out of the renderer's URL, and the value ends up in the `x-workspace-id`
+// request header, so reject anything that is not a plain id before using it.
+const WORKSPACE_ID_SEGMENT = /^[A-Za-z0-9_-]{1,64}$/;
 
 // Registry of executables recognised as first-party agents. Anything not on the
 // list is shown in the consent dialog as an "Unregistered agent" alongside its
@@ -1397,21 +1410,107 @@ class AgentAuthService {
   }
 
   /**
-   * The signed-in user's workspace JWT, taken from the cookie jar:
-   * 1) the `xyne_last_workspace` hint names the active workspace
-   * 2) `readWorkspaceJwt` finds that workspace's token cookie
-   * Returns the workspace id too, because the backend expects the Bearer
-   * token to be accompanied by `x-workspace-id`.
+   * Ask the renderer which workspace it is CURRENTLY showing.
+   *
+   * The renderer is the authority on this, not the main process. Within a single
+   * login the user can switch workspace any number of times; every switch
+   * re-routes the window to `/:workspaceId/...` and mints that workspace's
+   * `xw_<id>` cookie. Nothing in main observes those switches, so any main-side
+   * record of "the active workspace" is stale from the moment it is written —
+   * which is exactly what the `xyne_last_workspace` cookie is (a hint written at
+   * login and at switch time, and never corrected afterwards).
+   *
+   * Mechanism is the existing main->renderer read: `executeJavaScript` on the
+   * main window's webContents, the same way version-checker and the
+   * `get-bundle-version` IPC handler read `window.__APP_VERSION__`. It asks for
+   * nothing the dashboard bundle does not already expose, so no renderer-side
+   * change is needed: the first path segment IS the workspace id on every
+   * workspace route (`/:workspaceId/...`).
+   *
+   * Returns null — i.e. "the renderer cannot answer" — when there is no window
+   * to ask yet or it is gone, when the renderer does not answer inside
+   * RENDERER_WORKSPACE_READ_TIMEOUT_MS, or when the window sits on a
+   * non-workspace screen (`/invite`, `/workspaces`, `/auth`, `/newWindow/...`)
+   * whose first segment is not a workspace id.
+   */
+  private async getCurrentWorkspaceIdFromRenderer(): Promise<string | null> {
+    const mainWindow = getMainWindow();
+    if (!mainWindow || mainWindow.isDestroyed()) return null;
+
+    let timer: NodeJS.Timeout | undefined;
+    try {
+      const segment = await Promise.race([
+        mainWindow.webContents.executeJavaScript(
+          "window.location.pathname.split('/')[1] || ''",
+        ) as Promise<unknown>,
+        new Promise<null>((resolve) => {
+          timer = setTimeout(() => resolve(null), RENDERER_WORKSPACE_READ_TIMEOUT_MS);
+        }),
+      ]);
+
+      if (typeof segment !== 'string') return null;
+      return WORKSPACE_ID_SEGMENT.test(segment) ? segment : null;
+    } catch (error) {
+      // A reloading / crashed renderer rejects the read. Not fatal: the caller
+      // falls back to the cookie hint.
+      log.warn('[AgentAuth] Could not read current workspace from renderer:', error);
+      return null;
+    } finally {
+      if (timer) clearTimeout(timer);
+    }
+  }
+
+  /**
+   * The signed-in user's workspace JWT for the workspace the app is showing
+   * RIGHT NOW, plus that workspace's id.
+   *
+   * The order is the whole point. The renderer is asked first because it owns
+   * the current workspace; `xyne_last_workspace` is consulted only when the
+   * renderer cannot answer. Reading the hint first was the old behaviour and the
+   * bug: after a workspace switch without a re-login the hint still names the
+   * previous workspace, so the proxy picked that workspace's `xw_<stale>` JWT
+   * and sent `x-workspace-id: <stale>` — a 403, or worse, a successful call
+   * against the wrong workspace's data.
+   *
+   * Both halves of the credential are derived from the SAME resolved id — the
+   * Bearer token through `readWorkspaceJwt` (the single place the `xw_` / legacy
+   * cookie names are known) and the `x-workspace-id` header through
+   * `userAuthHeaders` — because the backend now fails a mismatch closed with a
+   * hard 401 (workspace_mismatch).
    */
   private async getUserAccessTokenFromSession(): Promise<UserWorkspaceCredential | null> {
     const cookies = await session.defaultSession.cookies.get({});
-    const workspaceId = cookies.find((cookie) => cookie.name === 'xyne_last_workspace')?.value;
-    if (!workspaceId) return null;
+    const hintedWorkspaceId = cookies.find((cookie) => cookie.name === 'xyne_last_workspace')?.value;
+    const rendererWorkspaceId = await this.getCurrentWorkspaceIdFromRenderer();
 
-    const token = readWorkspaceJwt(cookies, workspaceId);
+    if (rendererWorkspaceId) {
+      // The renderer mints `xw_<id>` for whatever workspace it shows, so the
+      // token cookie's presence double-checks the answer. A reported id with no
+      // token is not a workspace this device is signed into (a segment that
+      // merely looks like an id, or a jar that has not caught up yet), so it is
+      // treated as no answer rather than used to build a credential that would
+      // 401 anyway.
+      const rendererToken = readWorkspaceJwt(cookies, rendererWorkspaceId);
+      if (rendererToken) {
+        return { token: rendererToken, workspaceId: rendererWorkspaceId };
+      }
+    }
+
+    // Fallback path. Warn with BOTH values: once the login-time hint is what
+    // goes on the wire the agent may be acting in a workspace the user left, and
+    // a "the agent used the wrong workspace" report is undiagnosable without
+    // knowing which side answered and what the two sides disagreed on.
+    Logger.warn(ElectronEvent.AGENT_AUTH_WORKSPACE_FALLBACK, {
+      rendererWorkspaceId: rendererWorkspaceId ?? null,
+      hintedWorkspaceId: hintedWorkspaceId ?? null,
+    }, 'AgentAuth');
+
+    if (!hintedWorkspaceId) return null;
+
+    const token = readWorkspaceJwt(cookies, hintedWorkspaceId);
     if (!token) return null;
 
-    return { token, workspaceId };
+    return { token, workspaceId: hintedWorkspaceId };
   }
 
   /** Headers that authenticate a proxied backend call as the signed-in user. */

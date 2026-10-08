@@ -14,9 +14,11 @@ export interface PendingAuthIdentity {
   picture?: string;
   /** AuthProvider value (GOOGLE | MICROSOFT | EMAIL). */
   provider: string;
-  /** Google subject (legacy name, kept for acceptInvitation / loginWorkspace readers). */
-  googleId?: string;
-  /** Provider subject; email users use `email-<email>`. */
+  /**
+   * Provider subject; email users use `email-<email>`. Cookies signed before this field existed
+   * carry the same value under `googleId`; `readPendingAuth` folds that in, so nothing downstream
+   * has to know about the old name.
+   */
   providerUserId?: string;
 }
 
@@ -32,7 +34,6 @@ export function signPendingAuth(identity: PendingAuthIdentity): string {
     name: identity.name,
     provider: identity.provider,
     ...(identity.picture ? { picture: identity.picture } : {}),
-    ...(identity.googleId ? { googleId: identity.googleId } : {}),
     ...(identity.providerUserId ? { providerUserId: identity.providerUserId } : {}),
   };
   return jwt.sign(payload, secret(), { expiresIn: Math.floor(PENDING_AUTH_MAX_AGE_MS / 1000) });
@@ -58,16 +59,16 @@ export function readPendingAuth(req: Pick<Request, 'cookies'>): PendingAuthIdent
   const raw = req.cookies?.[PENDING_AUTH_COOKIE];
   if (typeof raw !== 'string' || !raw) return null;
   try {
-    const decoded = jwt.verify(raw, secret()) as Partial<PendingAuthIdentity> & { provider?: string };
+    // `googleId` is the pre-rename spelling of `providerUserId`: a cookie signed by the previous
+    // deploy is still valid for its 10 minutes, so it is read and folded in here, once.
+    const decoded = jwt.verify(raw, secret()) as Partial<PendingAuthIdentity> & { provider?: string; googleId?: string };
     if (!decoded || typeof decoded.email !== 'string' || !decoded.email) return null;
-    const providerUserId = decoded.providerUserId || decoded.googleId;
     return {
       email: decoded.email,
       name: decoded.name || '',
       picture: decoded.picture || undefined,
       provider: decoded.provider || 'GOOGLE',
-      googleId: decoded.googleId || undefined,
-      providerUserId: providerUserId || undefined,
+      providerUserId: decoded.providerUserId || decoded.googleId || undefined,
     };
   } catch {
     return null;

@@ -5,7 +5,7 @@ import { UserService } from '../services/userService';
 import { completeLogin } from '@/auth/loginCompletion';
 import { setPendingAuthCookie, type PendingAuthIdentity } from '@/auth/pendingAuth';
 import { platformFromRequest } from '@/auth/platform';
-import { revokeAccountSessions } from '@/bypassAcl/authSessionServices';
+import { markAccountClaimsStale, revokeAccountSessions } from '@/bypassAcl/authSessionServices';
 import {
   hashPassword,
   validatePasswordComplexity,
@@ -1021,6 +1021,12 @@ export class EmailAuthController {
             ...(invitationOrgRole ? { role: invitationOrgRole } : {}),
           },
         });
+        // `orgId` and `orgRole` ride in the access token and the stateless path never re-reads
+        // them, so a member moved to another org — or given the invitation's org role — would
+        // otherwise keep acting under the old pair until every outstanding token expired.
+        if ((orgId && existingOrgMember.orgId !== orgId) || invitationOrgRole) {
+          await markAccountClaimsStale(existingOrgMember.memberId);
+        }
       } else if (orgId) {
         await this.prisma.orgMember.create({
           data: {

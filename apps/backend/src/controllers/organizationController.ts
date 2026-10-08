@@ -11,6 +11,7 @@ import { buildInvitationLink } from '@/controllers/invitationController';
 import { getEncryptionProvider } from '@/services/encryption';
 import { createId } from '@paralleldrive/cuid2';
 import { createOrganizationWithWorkspace, createOwnerInvitation } from '@/bypassAcl/orgServices';
+import { markAccountClaimsStale } from '@/bypassAcl/authSessionServices';
 
 // Create OrgMemberRepository interface since we don't have the full file yet
 interface OrgMember {
@@ -29,7 +30,18 @@ interface CreateOrgMemberInput {
   invitedBy?: string;
 }
 
-// Simple OrgMemberRepository class (this should be moved to a separate file)
+/**
+ * NOTE (pre-existing, not introduced by the session work): this class is broken against the
+ * current schema. `org_members` has no `userId` column and no `@@unique([orgId, userId])`, so
+ * `findMember`, `removeMember` and `updateMemberRole` all query a `orgId_userId` compound that
+ * does not exist — `this.db` is typed `any`, which is why the compiler never said so. Every
+ * request to `PUT|DELETE /api/organizations/:orgId/members/:userId` therefore throws inside
+ * Prisma and the handler answers 500.
+ *
+ * The claims-watermark stamps below are correct for the day that is fixed, but they are
+ * unreachable today. The org-role path that actually runs is the Zero mutator
+ * `orgMember.updateRole` (zero/mutators.ts), which is stamped and does work.
+ */
 class OrgMemberRepository {
   private db: any;
 
@@ -64,20 +76,28 @@ class OrgMemberRepository {
   }
 
   async removeMember(orgId: string, userId: string): Promise<void> {
-    await this.db.orgMember.delete({
+    const removed: OrgMember = await this.db.orgMember.delete({
       where: {
         orgId_userId: { orgId, userId }
       }
     });
+    // Org membership is frozen in the access JWT for its full TTL and the stateless path never
+    // re-reads `org_members`; stamping is the only thing that stops an outstanding token.
+    await markAccountClaimsStale(removed.memberId);
   }
 
   async updateMemberRole(orgId: string, userId: string, role: OrgRole): Promise<OrgMember> {
-    return await this.db.orgMember.update({
+    const updated: OrgMember = await this.db.orgMember.update({
       where: {
         orgId_userId: { orgId, userId }
       },
       data: { role }
     });
+    // `orgRole` is frozen in the access JWT: without the stamp the demoted member keeps the old
+    // org role until the token expires. Stamped here rather than in the handler so every caller
+    // of this method is covered.
+    await markAccountClaimsStale(updated.memberId);
+    return updated;
   }
 }
 

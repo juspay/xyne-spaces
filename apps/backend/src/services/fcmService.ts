@@ -8,6 +8,7 @@ import { sendLocalIosPush } from './localIosPush';
 import { getNotificationFcmPayloadTruncated } from '@/services/otel';
 import { recordPushTargets } from '@/services/otel/authMetrics';
 import { normalizePushPlatform } from '@/auth/legacyPushToken';
+import { isClientDeviceKey } from '@/auth/deviceKey';
 import type { PushTarget, PushTargetRef, SessionRepository } from '@/auth/types';
 import * as authSessionRepo from '@/bypassAcl/authSessionServices';
 
@@ -293,6 +294,15 @@ export class FcmPushService {
       voipTokenPreview,
     });
 
+    // The body's `deviceId` becomes the session row's deviceKey, and "one ACTIVE session per
+    // device" revokes whoever else holds that key — so it must pass the same validation as the
+    // `x-device-id` header, reserved `s2s:` namespace included. An unusable value is dropped
+    // rather than rejected: registering the push token still matters, adopting the id does not.
+    const deviceId = reg.deviceId && isClientDeviceKey(reg.deviceId.trim()) ? reg.deviceId.trim() : null;
+    if (reg.deviceId && !deviceId) {
+      logger.warn('[FCM] registerToken step=device_id_rejected', { accountId, sessionId: reg.sessionId });
+    }
+
     const updated = await this.repo.setPushTokens({
       sessionId: reg.sessionId,
       accountId,
@@ -300,7 +310,7 @@ export class FcmPushService {
       voipToken: reg.voipToken?.trim() || null,
       pushPlatform,
       appVersion: reg.appVersion,
-      deviceId: reg.deviceId,
+      deviceId,
     });
 
     if (!updated) {

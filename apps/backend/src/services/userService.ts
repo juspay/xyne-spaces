@@ -1,4 +1,5 @@
 import { PrismaClient, User } from '@prisma/client';
+import { markAccountClaimsStale } from '@/bypassAcl/authSessionServices';
 import { logger } from '../utils/logger';
 import { repositories } from '../database/repositories/index';
 import { DatabaseClient } from '@/database/client';
@@ -842,6 +843,13 @@ export class UserService {
 
       if (existingOrgMember?.role === (OrgRole.COMMUNITY_MEMBER as any)) {
         await aiProvisioningService.upgradeCommunityToEnterpriseBudget(orgMember.memberId);
+      }
+
+      // The org and the org role both changed on an EXISTING member. `orgRole` and `orgId` are
+      // frozen in that member's access tokens and the stateless path never re-reads `org_members`,
+      // so without the stamp their open tabs keep acting as a COMMUNITY_MEMBER of the old org.
+      if (existingOrgMember) {
+        await markAccountClaimsStale(orgMember.memberId);
       }
 
       // Step 5: Create workspace user as OWNER

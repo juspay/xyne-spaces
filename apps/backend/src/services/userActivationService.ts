@@ -4,6 +4,7 @@ import { logger } from '../utils/logger';
 import { DatabaseClient } from '@/database/client';
 import { ticketReassignmentQueue } from '@/queues/ticketReassignmentQueue';
 import { bulkUpdateUserStatusTx } from '@/bypassAcl/transactions/userActivationService';
+import { markAccountClaimsStale } from '@/bypassAcl/authSessionServices';
 
 export interface BulkStatusUpdateResult {
   successful: string[];
@@ -79,9 +80,11 @@ export class UserActivationService {
         // workspace. Scoping the existence check here is the security gate: any id
         // outside this workspace (or nonexistent) lands in missingUserIds and fails
         // the batch, so no cross-tenant user is ever mutated below.
+        // `orgMemberId` comes along for the claims watermark below: the existence check is
+        // already reading these rows, so the stamp costs no extra query.
         const existingUsers = await this.prisma.user.findMany({
           where: { id: { in: batch }, workspaceId },
-          select: { id: true }
+          select: { id: true, orgMemberId: true }
         });
 
         const existingUserIds = new Set(existingUsers.map(u => u.id));
@@ -117,6 +120,17 @@ export class UserActivationService {
 
         // Step 2: All users exist, perform batch update in transaction
         await bulkUpdateUserStatusTx(this, batch, workspaceId, status);
+
+        // A 24h access JWT freezes workspace membership (`status` / `leftAt`) and nothing else
+        // invalidates one, so a deactivated user would keep reaching the workspace until it
+        // expired. Stamped post-commit (never inside the transaction — a Redis write must not be
+        // able to roll back with it) and in both directions, since a reactivated account has no
+        // live token the watermark could wrongly invalidate.
+        await Promise.all(
+          existingUsers
+            .filter((u) => u.orgMemberId)
+            .map((u) => markAccountClaimsStale(u.orgMemberId)),
+        );
 
         // Hand off the departed members' open tickets. Scheduled post-commit so the
         // queue processor reads committed rows: by the time it runs, the mappings above

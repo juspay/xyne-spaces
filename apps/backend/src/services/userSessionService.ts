@@ -3,6 +3,7 @@ import { AuthProvider, Platform, SessionStatus } from '@xyne/shared';
 import { logger } from '../utils/logger';
 import { DatabaseClient } from '@/database/client';
 import { userActivityTrackingService } from './userActivityTrackingService';
+import type { SessionRevokeReason } from '@/auth/types';
 
 /**
  * LEGACY `workflow.user_sessions` access. The table is read-only since the move to
@@ -11,17 +12,13 @@ import { userActivityTrackingService } from './userActivityTrackingService';
  * rows that were never converted) — see bypassAcl/authSessionServices.revokeAccountSessions.
  */
 
-// Why a session ended — stored as the AUTH/LOGOUT activity event's label.
-export type LogoutReason =
-  | 'USER_LOGOUT'
-  | 'DEVICE_REUSED'
-  | 'PASSWORD_CHANGED'
-  | 'PASSWORD_RESET'
-  | 'PROVIDER_REVOKED'
-  | 'ACCOUNT_LEFT'
-  | 'TOKEN_EXPIRED'
-  | 'EXPIRED'
-  | 'TEST_CLEANUP';
+/**
+ * Why a session ended — stored as the AUTH/LOGOUT activity event's label. The same concept as
+ * `SessionRevokeReason` (what `auth_sessions.revokeReason` stores), so it is DERIVED from it
+ * rather than repeated: the two drifting apart silently mislabels the activity feed.
+ * `TOKEN_EXPIRED` is legacy-only — the old flow ended a session when its refresh token died.
+ */
+export type LogoutReason = SessionRevokeReason | 'TOKEN_EXPIRED';
 
 // How the session was minted — stored as the AUTH/LOGIN activity event's
 // label. A closed union so a typo'd method can't silently fragment the
@@ -114,6 +111,22 @@ export class UserSessionService {
       select: { id: true, fcmToken: true, voipToken: true, deviceInfo: true },
       orderBy: { updatedAt: 'desc' },
     });
+  }
+
+  /**
+   * Does the account still hold a never-converted legacy session? Used only by the liveness gate
+   * on S2S token minting: an account that logged in before the move to `auth_sessions` and has not
+   * made a request since has no new row yet, and background work for that user must not stop.
+   */
+  async hasActiveSessionForAccount(accountId: string, now: Date = new Date()): Promise<boolean> {
+    const n = await this.prisma.userSession.count({
+      where: {
+        status: SessionStatus.ACTIVE,
+        refreshTokenExpiry: { gt: now },
+        user: { orgMemberId: accountId },
+      },
+    });
+    return n > 0;
   }
 
   /**

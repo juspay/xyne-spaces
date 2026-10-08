@@ -1,16 +1,7 @@
 import { Link, NavLink, useParams } from 'react-router-dom-actual';
 import type { LinkProps, NavLinkProps } from 'react-router-dom-actual';
 import { ReactElement } from 'react';
-
-const WORKSPACE_EXEMPT_PREFIXES = [
-  '/auth',
-  '/invite',
-  '/launch',
-  '/newWindow',
-  '/redirected',
-  '/call/',
-  '/api/',
-];
+import { isNonWorkspacePath } from '../../lib/workspaceRootSegments';
 
 function normalizeSameOriginPath(to: string): string {
   if (typeof window === 'undefined' || !/^https?:\/\//i.test(to)) return to;
@@ -32,7 +23,7 @@ function prefixPath(to: LinkProps['to'], workspaceId: string | undefined): LinkP
     typeof normalizedTo === 'string' &&
     normalizedTo.startsWith('/') &&
     !normalizedTo.startsWith(`/${workspaceId}`) &&
-    !WORKSPACE_EXEMPT_PREFIXES.some(prefix => normalizedTo.startsWith(prefix))
+    !isNonWorkspacePath(normalizedTo)
   ) {
     return `/${workspaceId}${normalizedTo}`;
   }

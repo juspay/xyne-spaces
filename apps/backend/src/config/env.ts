@@ -1137,6 +1137,10 @@ export const config = {
   jwt: {
     expirationSeconds: envVars.JWT_EXPIRATION_SECONDS,
     forceLogoutBefore: envVars.FORCE_LOGOUT_BEFORE,
+    // Re-mint `xw_<ws>` from the session when the access JWT has less than this left. Derived from
+    // the TTL rather than fixed: with a short JWT_EXPIRATION_SECONDS a fixed 5 minutes would make
+    // every request a DB read + mint. A quarter of the TTL, capped at 5 minutes.
+    refreshAheadSeconds: Math.max(30, Math.min(300, Math.floor((envVars.JWT_EXPIRATION_SECONDS as number) / 4))),
   },
   session: {
     expiryDays: envVars.SESSION_EXPIRY_DAYS as number,

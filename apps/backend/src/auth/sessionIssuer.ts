@@ -3,6 +3,7 @@
  * place a workspace access JWT is minted from (`mintWorkspaceJwt`), so every token carries the
  * same claim set (`SessionJwtClaims`) and is bound to its session (`sid`).
  */
+import { randomUUID } from 'crypto';
 import type { Request } from 'express';
 import { config } from '@/config/env';
 import { jwtService } from '@/services/jwtService';
@@ -68,13 +69,19 @@ export function mintWorkspaceJwt(input: MintWorkspaceJwtInput): string {
  */
 export async function issueSession(input: IssueSessionInput, repo: SessionRepository = authSessionRepository): Promise<IssueSessionResult> {
   const now = new Date();
-  // `xd` is not a credential: Lax so it still travels on the cross-site OAuth callback navigation
-  // (a Strict cookie would not, and every Google re-login would mint a new device key). Mobile jars need None.
-  const device = resolveDeviceKey(input.req, {
-    sameSite: input.platform === 'MOBILE' ? 'none' : 'lax',
-    secure: secureCookies(),
-    persist: input.platform !== 'SDK',
-  });
+  // An SDK session belongs to the API client being authorised, NOT to the browser that approved it:
+  // it gets its own random device key. Reading the approver's `x-device-id` / `xd` here would make
+  // the DB's "one ACTIVE session per device" rule revoke that browser's own session on approval.
+  // Otherwise: `xd` is not a credential, so Lax, which still travels on the cross-site OAuth
+  // callback navigation (a Strict cookie would not, and every Google re-login would mint a new
+  // device key). Mobile jars need None.
+  const device =
+    input.platform === 'SDK'
+      ? { deviceKey: randomUUID(), cookie: null, source: 'minted' as const }
+      : resolveDeviceKey(input.req, {
+          sameSite: input.platform === 'MOBILE' ? 'none' : 'lax',
+          secure: secureCookies(),
+        });
   const minted = mintSessionToken();
   const session = await repo.createSession({
     accountId: input.accountId,

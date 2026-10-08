@@ -3,27 +3,12 @@ import { AuthV2Controller } from '../controllers/authV2Controller';
 import { MicrosoftAuthController } from '../controllers/microsoftAuthController';
 import { EmailAuthController } from '../controllers/emailAuthController';
 import { authV2Middleware } from '../middleware/authV2Middleware';
-import { findUserById } from '@/bypassAcl/authSessionServices';
+import { providerIdentity } from '@/auth/providerIdentity';
 
 const router = express.Router();
 const authV2Controller = new AuthV2Controller();
 const microsoftAuthController = new MicrosoftAuthController();
 const emailAuthController = new EmailAuthController();
-
-/**
- * `req.user` is built from the access JWT claims on the stateless path, which do not carry the
- * provider identity. One `users` read fills `googleId` / `authProvider`; the claims stay the
- * fallback (API-key and dev users have no row behind them).
- */
-async function providerIdentity(req: express.Request): Promise<{ googleId: string; authProvider?: string }> {
-  const user = req.user!;
-  if (user.isApiKeyUser) return { googleId: user.googleId, authProvider: user.authProvider };
-  const row = await findUserById(user.id);
-  return {
-    googleId: row?.providerUserId ?? user.googleId,
-    authProvider: row?.authProvider ?? user.authProvider,
-  };
-}
 
 router.get('/providers', (_req, res) => {
   return res.json({

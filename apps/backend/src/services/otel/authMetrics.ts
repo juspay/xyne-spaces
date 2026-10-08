@@ -16,6 +16,7 @@ export type AuthSessionRevokedScope = 'session' | 'account' | 'legacy';
 export type AuthTokenAudience = 'internal' | 'sdk' | 'cookie';
 export type LegacyCredentialOutcome = 'row_converted' | 'cookies_migrated' | 'jwt_reissued';
 export type PushTargetSource = 'session' | 'legacy';
+export type RevocationFailOpenOperation = 'tombstone_read' | 'claims_read';
 
 export interface AuthResolveAttributes extends Attributes {
   path: string;
@@ -45,6 +46,19 @@ export interface PushTargetsAttributes extends Attributes {
 export interface PushTokenMissingAttributes extends Attributes {
   platform: string;
 }
+export interface RevocationFailOpenAttributes extends Attributes {
+  operation: RevocationFailOpenOperation;
+}
+export interface ClaimsStaleAttributes extends Attributes {
+  /** Where the stale token was presented: the resolver's cookie/Bearer path, or Zero's verifier. */
+  surface: string;
+  /**
+   * `refreshed` — a fresh token was minted onto the same response (cookie clients).
+   * `db_verified` — the caller could not be re-minted (Bearer, socket handshake, Zero), so the
+   * role / membership was re-read from the DB and the request proceeded.
+   */
+  outcome: 'refreshed' | 'db_verified';
+}
 export interface LegacyCredentialAttributes extends Attributes {
   source: string;
   platform: string;
@@ -70,7 +84,18 @@ const getSessionIssued = lazyCounter<AuthSessionIssuedAttributes>('auth_session_
 const getSessionRevoked = lazyCounter<AuthSessionRevokedAttributes>('auth_session_revoked_total', 'Auth sessions / legacy rows revoked by reason and scope');
 const getTokenMinted = lazyCounter<AuthTokenMintedAttributes>('auth_token_minted_total', 'Workspace JWTs minted by audience');
 const getPushTargets = lazyCounter<PushTargetsAttributes>('push_targets_total', 'Push delivery targets resolved by store');
-const getPushTokenMissing = lazyCounter<PushTokenMissingAttributes>('push_token_missing_total', 'Mobile sessions seen without a push token');
+const getPushTokenMissing = lazyCounter<PushTokenMissingAttributes>(
+  'push_token_missing_total',
+  'ACTIVE mobile sessions with no push token, sampled once per session-cleanup run',
+);
+const getRevocationFailOpen = lazyCounter<RevocationFailOpenAttributes>(
+  'auth_revocation_fail_open_total',
+  'Redis revocation/claims reads that failed and were allowed through (instant revocation is degraded while this is non-zero)',
+);
+const getClaimsStale = lazyCounter<ClaimsStaleAttributes>(
+  'auth_claims_stale_total',
+  'Access tokens whose frozen role / membership was out of date, by how the request was salvaged',
+);
 const getLegacyCredential = lazyCounter<LegacyCredentialAttributes>(
   'auth_legacy_credential_total',
   'Requests that authenticated with a legacy credential and were switched to the xs / xw_ cookies, by source and outcome',
@@ -122,8 +147,24 @@ export function recordPushTargets(attrs: { source: PushTargetSource; count: numb
   safeAdd('push_targets_total', getPushTargets, { source: attrs.source }, attrs.count);
 }
 
-export function recordPushTokenMissing(attrs: { platform: string }): void {
-  safeAdd('push_token_missing_total', getPushTokenMissing, { platform: attrs.platform });
+/** Sampled once per cleanup run (see authSessionCleanupWorker), not once per push delivery. */
+export function recordPushTokenMissing(attrs: { platform: string; count?: number }): void {
+  const count = attrs.count ?? 1;
+  if (!Number.isFinite(count) || count <= 0) return;
+  safeAdd('push_token_missing_total', getPushTokenMissing, { platform: attrs.platform }, count);
+}
+
+/**
+ * A Redis read behind instant revocation failed and the request was allowed through. Non-zero means
+ * revoked sessions and changed roles stay usable until their JWT expires — alert on a sustained rate.
+ */
+export function recordRevocationFailOpen(attrs: { operation: RevocationFailOpenOperation }): void {
+  safeAdd('auth_revocation_fail_open_total', getRevocationFailOpen, { operation: attrs.operation });
+}
+
+/** An access token older than its account's claims watermark (role / membership change). */
+export function recordClaimsStale(attrs: { surface: string; outcome: 'refreshed' | 'db_verified' }): void {
+  safeAdd('auth_claims_stale_total', getClaimsStale, { surface: attrs.surface, outcome: attrs.outcome });
 }
 
 /** One per request that arrived on a legacy credential (`[AUTH] legacy_session_converted` carries the detail). */

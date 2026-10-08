@@ -12,7 +12,10 @@ const ElectronEvent = {
     AGENT_AUTH_REQUEST: 'agent_auth_request',
     AGENT_AUTH_DENIED: 'agent_auth_denied',
     AGENT_AUTH_GRANTED: 'agent_auth_granted',
-    
+    // The renderer could not say which workspace it is showing, so the agent
+    // proxy fell back to the login-time `xyne_last_workspace` hint.
+    AGENT_AUTH_WORKSPACE_FALLBACK: 'agent_auth_workspace_fallback',
+
     // Memory Proxy events
     MEMORY_SEARCH_REQUEST: 'memory_search_request',
     MEMORY_UPLOAD_REQUEST: 'memory_upload_request',

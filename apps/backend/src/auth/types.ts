@@ -15,6 +15,7 @@ import type { AuthSession, OrgMember, User, UserSession } from '@prisma/client';
 import type { AuthenticatedUser } from '@/types/express';
 import type { LoginMethod } from '@/services/userSessionService';
 import type { CredentialSource } from './sessionTokens';
+import type { AuthSessionIssuedKind } from '@/services/otel/authMetrics';
 
 // ─── Platform / cookies ──────────────────────────────────────────────────────
 
@@ -109,7 +110,8 @@ export type ResolveFailureReason =
   | 'user_not_found'
   | 'jwt_expired'
   | 'jwt_invalid'
-  | 'jwt_revoked';
+  | 'jwt_revoked'
+  | 'jwt_stale';
 
 export interface ResolveInput {
   cookies: Record<string, string | undefined>;
@@ -218,6 +220,8 @@ export interface CreateSessionInput {
   /** Already encrypted. */
   deviceInfo?: string | null;
   appVersion?: string | null;
+  /** How `auth_session_issued_total` labels this row; defaults to `login`. */
+  issuedKind?: AuthSessionIssuedKind;
 }
 
 export interface SessionRepository {
@@ -236,9 +240,19 @@ export interface SessionRepository {
   revokeSession(sessionId: string, reason: SessionRevokeReason): Promise<void>;
   /** Every ACTIVE row of the account → REVOKED (+ legacy rows of the account's users, status only). */
   revokeAccountSessions(accountId: string, reason: SessionRevokeReason): Promise<number>;
+  /**
+   * Is the account signed in on a real device anywhere? S2S rows (`s2s:` deviceKey) are excluded —
+   * they are minted by background services and would otherwise keep answering "yes" forever —
+   * and never-converted legacy `workflow.user_sessions` rows count, so an account that has not
+   * made a request since the deploy is still considered live.
+   */
   hasActiveSession(accountId: string, now?: Date): Promise<boolean>;
-  /** ACTIVE, unexpired rows of the account, newest first. */
-  listAccountSessions(accountId: string, now?: Date): Promise<AuthSessionRow[]>;
+  /**
+   * The one long-lived session row that server-to-server tokens for this account are pinned to
+   * (deviceKey `s2s:<accountId>`), created on first use. Kept separate from device sessions so one
+   * device's logout does not tombstone a background job's token, while an account-wide revoke does.
+   */
+  ensureServiceSession(accountId: string, orgId: string, now?: Date): Promise<AuthSessionRow>;
   /** ACTIVE rows past absoluteExpiry → EXPIRED, at most `batchSize`. Returns the count. */
   expireSessions(batchSize: number, now: Date): Promise<number>;
   /**
@@ -256,9 +270,20 @@ export interface SessionRepository {
 }
 
 /** Redis tombstones for instant JWT revocation. */
+/**
+ * `ok` — trust the claims. `revoked` — the session behind the token is gone. `stale` — the
+ * account's role / org role / workspace membership changed after the token was minted, so the
+ * authorization it carries can no longer be trusted (re-mint from the session instead).
+ */
+export type ClaimsVerdict = 'ok' | 'revoked' | 'stale';
+
 export interface RevocationStore {
   isRevoked(sid: string): Promise<boolean>;
+  /** Tombstone + claims watermark in one round trip; `iat` is the token's epoch-second issue time. */
+  checkClaims(input: { sid: string; accountId: string; iat?: number }): Promise<ClaimsVerdict>;
   markRevoked(sid: string, ttlSeconds: number): Promise<void>;
+  /** Stamp the account's claims watermark (role / membership writers call this). */
+  markClaimsStale(accountId: string, ttlSeconds: number, at?: Date): Promise<void>;
 }
 
 // ─── Issuer / login completion ───────────────────────────────────────────────
@@ -297,7 +322,12 @@ export interface CompleteLoginInput {
   res: Response;
   workspaceUser: MembershipUser;
   orgMember: Pick<OrgMember, 'memberId' | 'orgId' | 'role'>;
-  platform: RequestPlatform | 'sdk';
+  /**
+   * No `'sdk'`: SDK SSO issues its session and token directly (`routes/sdk-sso.ts`) because it
+   * writes no cookies and approves on behalf of another client. Admitting it here left dead
+   * branches in `completeLogin` for a caller that does not exist.
+   */
+  platform: RequestPlatform;
   loginMethod: LoginMethod;
   sameSite: CookieSameSite;
   isNewUser: boolean;
@@ -315,7 +345,14 @@ export interface CompleteLoginResult {
   /** Workspace JWT for the login workspace (`sid` bound). Returned in JSON for non-web platforms. */
   token: string;
   workspaceId: string;
+  /** `auth_sessions.platform` — what created the session. Use it for logging / push / claims. */
   platform: SessionPlatform;
+  /**
+   * What THIS response was shaped for (`auth/platform.responsePlatform`): MOBILE only when the
+   * caller announced itself as native. Use it to decide whether the session token may travel in
+   * the JSON body — a mobile browser must not read it.
+   */
+  responsePlatform: SessionPlatform;
   /** True when an existing session of the same account was reused (switch / create / join). */
   reused: boolean;
 }

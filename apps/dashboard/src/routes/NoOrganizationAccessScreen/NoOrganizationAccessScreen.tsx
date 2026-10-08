@@ -28,9 +28,18 @@ const NoOrganizationAccessScreen = (): ReactElement => {
     }
   }, [navigate]);
 
-  const handleGoBack = (): void => {
-    void logout();
-    window.location.href = '/auth';
+  const handleGoBack = async (): Promise<void> => {
+    // The session cookie is httpOnly: only the server's logout clears it, so wait
+    // for that before leaving — navigating first aborts the in-flight request and
+    // the session stays ACTIVE, so /auth signs the user straight back in. Navigate
+    // in `finally` so a failed logout still takes them off this dead-end screen.
+    try {
+      await logout();
+    } catch {
+      // nothing to show: this screen is about to be replaced by /auth
+    } finally {
+      window.location.href = '/auth';
+    }
   };
 
   return (
@@ -74,7 +83,7 @@ const NoOrganizationAccessScreen = (): ReactElement => {
 
             {/* Back Button */}
             <button
-              onClick={handleGoBack}
+              onClick={() => void handleGoBack()}
               className='inline-flex items-center gap-2 text-sm text-slate-600 hover:text-slate-900 transition-colors'
               data-track-category='Auth'
               data-track-name='TryDifferentAccount'

@@ -2,6 +2,7 @@ import crypto from 'crypto';
 import { AuthProvider, UserStatus, AccessType } from '@xyne/shared';
 import { DatabaseClient } from '../database/client';
 import { logger } from '../utils/logger';
+import { markClaimsStaleForUser } from '@/bypassAcl/authSessionServices';
 import { CreateApiKeyRequest, CreateApiKeyResponse, ApiKeyListItem, ApiKeyUser } from '../types/express';
 
 export class ApiKeyService {
@@ -530,6 +531,9 @@ export class ApiKeyService {
         where: { id: apiKey.userId },
         data: { status: UserStatus.INACTIVE }
       });
+      // Revoking the key must also stop any access token already minted for that API-key user;
+      // `status` is not re-read on the stateless path.
+      await markClaimsStaleForUser(apiKey.userId);
 
       logger.info(`API key revoked: ${apiKey.name} (${keyId}) by user ${revokedByUserId}`);
       return true;
