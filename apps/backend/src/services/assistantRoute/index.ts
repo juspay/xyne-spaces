@@ -9,9 +9,15 @@ export interface AssistantRouteAction {
   description: string;
 }
 
+// Jev's top pick and its share of the vote, so a caller can apply its own bar.
+interface JevPick {
+  chosen: string;
+  probability: number;
+}
+
 type AssistantRouteResult =
-  | { route: 'actions'; actionIds: string[]; confidence: number }
-  | { route: 'ask_ai'; reason: 'none' | 'low_confidence' }
+  | ({ route: 'actions'; actionIds: string[]; confidence: number } & JevPick)
+  | ({ route: 'ask_ai'; reason: 'none' | 'low_confidence' } & JevPick)
   | { route: 'unavailable' };
 
 interface AssistantRouteContext {
@@ -35,6 +41,32 @@ const NONE_DESCRIPTION =
 const INSTRUCTIONS =
   'Which of these is the user asking to do, or asking how to do? Pick none when the ' +
   'message is about something else or is a general question.';
+
+// Screen mode: the options are the controls on the user's screen.
+const SCREEN_INSTRUCTIONS =
+  'If the user asked a question (what, why, who, which, explain), made small talk, or asked ' +
+  'for something to be written, summarized or found, pick none. Otherwise they want something ' +
+  'done in the app: pick the control on the screen they named, or that does it, or that leads to ' +
+  'where it is done.';
+
+const SCREEN_NONE_DESCRIPTION =
+  'None: a question, small talk, or a request to write, summarize or find something, for the ' +
+  'AI assistant to answer.';
+
+export type AssistantRouteMode = 'actions' | 'screen';
+
+// Catalog actions are shuffled against position bias; screen controls keep screen order.
+const PROMPTS: Record<
+  AssistantRouteMode,
+  { instructions: string; none: string; order: <T>(items: T[]) => T[] }
+> = {
+  actions: { instructions: INSTRUCTIONS, none: NONE_DESCRIPTION, order: (items) => shuffle(items) },
+  screen: {
+    instructions: SCREEN_INSTRUCTIONS,
+    none: SCREEN_NONE_DESCRIPTION,
+    order: (items) => items,
+  },
+};
 
 interface AssistantRouteConfig {
   enabled: boolean;
@@ -85,8 +117,10 @@ export const routeAssistantMessage = async (
   text: string,
   actions: AssistantRouteAction[],
   ctx: AssistantRouteContext,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  mode: AssistantRouteMode = 'actions'
 ): Promise<AssistantRouteResult> => {
+  const prompt = PROMPTS[mode];
   const started = Date.now();
   const finish = (result: AssistantRouteResult, chosen?: string, confidence?: number) => {
     // Never the text or the action descriptions: they are user content.
@@ -107,16 +141,25 @@ export const routeAssistantMessage = async (
   // Shuffled against position bias. Built with fromEntries, not `criteria[id] =`: ids come from
   // the request, and fromEntries defines own keys without going through prototype setters.
   const criteria: Record<string, string> = Object.fromEntries([
-    ...shuffle(actions).map((action) => [action.id, action.description]),
-    [NONE_ID, NONE_DESCRIPTION],
+    ...prompt.order(actions).map((action) => [action.id, action.description]),
+    [NONE_ID, prompt.none],
   ]);
-  const question: JevChoiceQuestion = { type: 'choice', instructions: INSTRUCTIONS, criteria };
+  const question: JevChoiceQuestion = {
+    type: 'choice',
+    instructions: prompt.instructions,
+    criteria,
+  };
 
   const answers = await askJev({ text: text.trim() }, { action: question }, TIMEOUT_MS, signal);
   const answer = answers?.action;
   if (!answer || answer.type !== 'choice') return finish({ route: 'unavailable' });
 
-  if (answer.choice === NONE_ID) return finish({ route: 'ask_ai', reason: 'none' }, NONE_ID);
+  const pick: JevPick = {
+    chosen: answer.choice,
+    probability: answer.probabilities[answer.choice] ?? answer.confidence ?? 0,
+  };
+  if (answer.choice === NONE_ID)
+    return finish({ route: 'ask_ai', reason: 'none', ...pick }, NONE_ID);
 
   const scored = Object.entries(answer.probabilities)
     .filter(([id]) => id !== NONE_ID && Object.prototype.hasOwnProperty.call(criteria, id))
@@ -129,11 +172,15 @@ export const routeAssistantMessage = async (
         )
       : answer.confidence;
   if (confidence === undefined || confidence < config.actionThreshold) {
-    return finish({ route: 'ask_ai', reason: 'low_confidence' }, answer.choice, confidence);
+    return finish(
+      { route: 'ask_ai', reason: 'low_confidence', ...pick },
+      answer.choice,
+      confidence
+    );
   }
 
   const offered = scored.filter(([, p]) => p >= config.alsoThreshold).map(([id]) => id);
   const actionIds = offered.length > 0 ? offered : [answer.choice];
 
-  return finish({ route: 'actions', actionIds, confidence }, actionIds[0], confidence);
+  return finish({ route: 'actions', actionIds, confidence, ...pick }, actionIds[0], confidence);
 };
