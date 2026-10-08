@@ -1,6 +1,6 @@
 // Zero internal API (mapped via #imports in package.json)
 import { asQueryInternals } from '#zero-internal/query-internals';
-import { Context, schema } from '@xyne/shared';
+import { Context, schema, WorkspaceRole } from '@xyne/shared';
 import { logger } from '@/utils/logger';
 
 // The tenant boundary is applied here, to every query, rather than trusting each
@@ -45,6 +45,45 @@ const CUSTOM_SCOPES: Record<string, OrgScopeRule> = {
     ),
 };
 
+/**
+ * The user row shares a channel or canvas with the caller: both are participants of the
+ * same channel (DMs included), or of the same canvas (or the caller created it).
+ */
+function sharesSurfaceWithCaller(ctx: Context) {
+  const isMe = (q: ScopableQuery): ScopableQuery => q.where('userId', ctx.userID);
+  return ({ or, exists }: any) =>
+    or(
+      exists('channelParticipations', (cp: ScopableQuery) =>
+        cp.whereExists('channel', (ch: ScopableQuery) => ch.whereExists('participants', isMe)),
+      ),
+      exists('canvasParticipations', (cp: ScopableQuery) =>
+        cp.whereExists('canvas', (c: ScopableQuery) =>
+          c.where(({ or: anyOf, cmp, exists: has }: any) =>
+            anyOf(cmp('createdBy', ctx.userID), has('participants', isMe)),
+          ),
+        ),
+      ),
+    );
+}
+
+/**
+ * Guest visibility, both ways: a guest sees only themselves and the people they share a
+ * channel or canvas with, and is seen only by those people. Workspace admins/owners see
+ * everyone — they manage guests from the Members tab. Applied to root `users` reads only:
+ * a user reached through a relation (a message's sender, a channel's participants) is
+ * already on a surface the caller can see.
+ */
+function scopeUsersForGuests(query: ScopableQuery, ctx: Context): ScopableQuery {
+  if (ctx.role === WorkspaceRole.ADMIN || ctx.role === WorkspaceRole.OWNER) {
+    return query;
+  }
+  const sharesSurface = sharesSurfaceWithCaller(ctx);
+  if (ctx.role === WorkspaceRole.GUEST) {
+    return query.where((eb: any) => eb.or(eb.cmp('id', ctx.userID), sharesSurface(eb)));
+  }
+  return query.where((eb: any) => eb.or(eb.cmp('role', '!=', WorkspaceRole.GUEST), sharesSurface(eb)));
+}
+
 /** Reference data that is the same for every tenant. */
 const GLOBAL_REFERENCE_TABLES = new Set(['lookup_values', 'merchants', 'resources']);
 
@@ -63,7 +102,8 @@ export function scopeQueryToTenant<T>(query: T, ctx: Context, queryName: string)
     if (!ctx.workspaceId) {
       logger.warn('zero_query_missing_workspace', { query: queryName, table });
     }
-    return scopable.where('workspaceId', ctx.workspaceId) as unknown as T;
+    const scoped = scopable.where('workspaceId', ctx.workspaceId);
+    return (table === 'users' ? scopeUsersForGuests(scoped, ctx) : scoped) as unknown as T;
   }
   const customRule = CUSTOM_SCOPES[table];
   if (customRule) {

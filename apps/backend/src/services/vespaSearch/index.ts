@@ -7,6 +7,8 @@ import {
   type TransformedSearchResult,
 } from './resultTransform';
 import { db } from '@/database/client';
+import { WorkspaceRole } from '@xyne/shared';
+import { getGuestSearchScope } from '@/bypassAcl/guestSearchScope';
 import { repositories } from '@/database/repositories';
 import { VALID_DOC_TYPES } from '@/utils/idValidator';
 import { MatchFeatures, RankProfile, SubApp, VespaDocType, VespaSearchHit, fileSchema } from '@/vespa/src/types';
@@ -972,6 +974,21 @@ export const searchHandler = async (req: Request, res: Response): Promise<void> 
     // My-channels toggle: when true, scope chat results to channels the user is a
     // member of (drop the public-non-member access branch in YqlBuilder).
     options.slack.onlyMyChannels = String(onlyMyChannels) === 'true';
+
+    // Guests are visible in search only on surfaces the searcher shares with them: their
+    // messages/canvases/attachments drop out of the public branch, and people-search hides
+    // guests the searcher has no channel or canvas in common with.
+    if ((req as any).user?.role === WorkspaceRole.GUEST) {
+      // A guest searches only the channels they belong to, never public ones they aren't in.
+      options.slack.onlyMyChannels = true;
+    } else {
+      const { guestUserIds, hiddenGuestUserIds } = await getGuestSearchScope(workspaceId, userId);
+      if (guestUserIds.length > 0) {
+        options.slack.guestAuthorIds = guestUserIds;
+        options.file.guestOwnerIds = guestUserIds;
+        options.user = { excludeUserIds: hiddenGuestUserIds };
+      }
+    }
 
     // Sort by timestamp: force flat (ungrouped) results so ORDER BY applies cleanly.
     if (orderBy === 'newest' || orderBy === 'oldest') {
