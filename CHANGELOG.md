@@ -1,3 +1,11 @@
+## [1.475.2](https://github.com/juspay/xyne-spaces/compare/v1.475.1...v1.475.2) (2026-10-08)
+
+
+### Bug Fixes
+
+* add include replies toggle to message received automation trigger ([#2791](https://github.com/juspay/xyne-spaces/issues/2791)) ([add44e1](https://github.com/juspay/xyne-spaces/commit/add44e1b40faae7b0c78aa934a52e0b8194faf23))
+* render the agent draft card on Xyne AI ([#2794](https://github.com/juspay/xyne-spaces/issues/2794)) ([7db9205](https://github.com/juspay/xyne-spaces/commit/7db9205e83237d21b67907e87223ac2cbe74a329)), closes [#2651](https://github.com/juspay/xyne-spaces/issues/2651) [#2683](https://github.com/juspay/xyne-spaces/issues/2683)
+
 ## [1.475.1](https://github.com/juspay/xyne-spaces/compare/v1.475.0...v1.475.1) (2026-10-08)
 
 
