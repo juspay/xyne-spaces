@@ -136,6 +136,13 @@ serviceAccount:
   annotations: {}
   automount: false
 
+# Kata sandbox access for workflow CODE steps / run_code (WORKFLOWS_SANDBOX_BACKEND=kata).
+# Enabling also requires serviceAccount.automount=true and the WORKFLOWS_KATA_* env vars.
+sandboxRbac:
+  create: false
+  # Namespace the SandboxTemplate lives in (WORKFLOWS_KATA_NAMESPACE); defaults to the release namespace.
+  namespace: ""
+
 commonLabels: {}
 podLabels: {}
 podAnnotations: {}

@@ -25,6 +25,7 @@ import { RedisEventBus } from './adapters/event-bus';
 import { PrismaPersistenceAdapter } from './adapters/persistence';
 import { BullQueueAdapter } from './adapters/queue';
 import { BullSchedulerAdapter } from './adapters/scheduler';
+import { createWorkflowSandboxAdapter } from './adapters/sandbox';
 import { WorkflowStorageAdapter } from './adapters/storage';
 import { XyneWorkflowAuthorizer } from './authorizer';
 import { DEFAULT_CRON_TIMEZONE } from './constants';
@@ -123,11 +124,19 @@ const APPROVAL_POLICY = {
   triggers: {},
 } as const satisfies ApprovalConfig;
 
+/**
+ * Code-execution sandbox for the CODE step, the `run_code` agent tool and the approval chat
+ * tools. Unset (WORKFLOWS_SANDBOX_BACKEND=none) the SDK fails closed, as it always has.
+ * Both the executor (step context) and the runtime (router chat tools) need it.
+ */
+const sandbox = createWorkflowSandboxAdapter();
+
 const executor = new WorkflowExecutor(persistence, connectors, services, {
   eventBus,
   baseUrl: BASE_URL,
   storage,
   logger: sdkLogger,
+  ...(sandbox ? { sandbox } : {}),
 });
 
 export const workflowRuntime = new WorkflowRuntime<Record<string, unknown>, XyneCtx, XyneFilter>({
@@ -141,6 +150,7 @@ export const workflowRuntime = new WorkflowRuntime<Record<string, unknown>, Xyne
   eventBus,
   authorizer: new XyneWorkflowAuthorizer(),
   logger: sdkLogger,
+  ...(sandbox ? { sandbox } : {}),
   config: {
     baseUrl: BASE_URL,
     defaultCronTimezone: DEFAULT_CRON_TIMEZONE,

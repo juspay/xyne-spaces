@@ -298,6 +298,21 @@ const envSchema = Joi.object({
   WORKFLOWS_WORKER_CONCURRENCY: Joi.number().integer().min(1).default(3),
   WORKFLOWS_LOCK_DURATION_MS: Joi.number().integer().min(60_000).default(15 * 60 * 1000),
   WORKFLOWS_BASE_URL: Joi.string().allow('').default(''),
+  // Code-execution sandbox for the CODE step and the `run_code` agent tool. `none` keeps the
+  // SDK failing closed; `kata` claims a Kata microVM per call (same infra as xyne-claw).
+  WORKFLOWS_SANDBOX_BACKEND: Joi.string().valid('none', 'kata').default('none'),
+  WORKFLOWS_KATA_ROUTER_URL: Joi.string()
+    .uri()
+    .when('WORKFLOWS_SANDBOX_BACKEND', {
+      is: 'kata',
+      then: Joi.required(),
+      otherwise: Joi.optional().allow(''),
+    }),
+  WORKFLOWS_KATA_NAMESPACE: Joi.string().default('xyne-apps'),
+  WORKFLOWS_KATA_TEMPLATE: Joi.string().default('kata-workspace-template'),
+  WORKFLOWS_SANDBOX_SESSION_TTL_MS: Joi.number().integer().min(60_000).default(15 * 60 * 1000),
+  WORKFLOWS_SANDBOX_READY_TIMEOUT_MS: Joi.number().integer().min(5_000).default(120_000),
+  WORKFLOWS_SANDBOX_EXEC_TIMEOUT_MS: Joi.number().integer().min(1_000).default(120_000),
   ENABLE_RECAP_SCHEDULER: Joi.boolean().default(true),
   RECAP_GENERATION_CRON: Joi.string().default('15 0 * * *'), //5:45 IST daily
   RECAP_CLEANUP_CRON: Joi.string().default('30 23 * * *'), //5:00 IST daily
@@ -1098,6 +1113,17 @@ export const config = {
     workerConcurrency: envVars.WORKFLOWS_WORKER_CONCURRENCY as number,
     lockDurationMs: envVars.WORKFLOWS_LOCK_DURATION_MS as number,
     baseUrl: (envVars.WORKFLOWS_BASE_URL || envVars.BACKEND_URL) as string,
+    sandbox: {
+      backend: envVars.WORKFLOWS_SANDBOX_BACKEND as 'none' | 'kata',
+      kata: {
+        routerUrl: (envVars.WORKFLOWS_KATA_ROUTER_URL || '') as string,
+        namespace: envVars.WORKFLOWS_KATA_NAMESPACE as string,
+        template: envVars.WORKFLOWS_KATA_TEMPLATE as string,
+      },
+      sessionTtlMs: envVars.WORKFLOWS_SANDBOX_SESSION_TTL_MS as number,
+      readyTimeoutMs: envVars.WORKFLOWS_SANDBOX_READY_TIMEOUT_MS as number,
+      execTimeoutMs: envVars.WORKFLOWS_SANDBOX_EXEC_TIMEOUT_MS as number,
+    },
   },
   ticketCleanupWorkerEnabled: envVars.ENABLE_TICKET_CLEANUP_WORKER,
   notificationWorkerEnabled: envVars.ENABLE_NOTIFICATION_WORKER,
