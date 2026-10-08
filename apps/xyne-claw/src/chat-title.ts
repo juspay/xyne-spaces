@@ -39,171 +39,65 @@ export interface ChatTitleInput {
   assistantReply?: string;
 }
 
-const STRUCTURED_ARTIFACT =
-  /<\/?(?:tool_?calls?|function_?calls?|invoke|parameter)\b|toolcall|arg_?key|record_?chat_?title/i;
-
-/** Text that only appears when the model narrates its reasoning instead of answering. */
-const REASONING_LEAK = new RegExp(
-  [
-    String.raw`<\/?think`,
-    String.raw`\bi(?:'|’)?ll\b`,
-    String.raw`\bi will\b`,
-    String.raw`\bi(?:'|’)?m going\b`,
-    String.raw`\blet me\b`,
-    String.raw`\bgo with\b`,
-    String.raw`\bsomething like\b`,
-    String.raw`\b(?:maybe|perhaps|hmm|alternatively|actually)\b`,
-    String.raw`\b(?:one|two|three|four|five|six|seven|eight|\d+)\s+words?\b`,
-    String.raw`\bwords?\s*[).,]`,
-    String.raw`\bthe rules?\b`,
-    String.raw`^rules?\b`,
-    String.raw`\btitle\s*[:=]`,
-    String.raw`\b(?:a|the|this|that) title (?:is|should|could|would|for)\b`,
-    String.raw`^(?:the user|user (?:asks|asked|wants|is)|this (?:conversation|chat)|here(?:'s| is)|okay|ok|sure)\b`,
-  ].join("|"),
-  "i",
-);
-
-const GENERIC_ADJECTIVE = String.raw`(?:(?:simple|casual|friendly|quick|brief)\s+)?`;
-
-/** Titles that name the interaction instead of the subject. */
-const GENERIC_TITLE = new RegExp(
-  `^${GENERIC_ADJECTIVE}(?:${[
-    String.raw`greetings?`,
-    String.raw`hello|hi|hey`,
-    String.raw`new (?:chat|conversation)`,
-    String.raw`untitled(?: chat| conversation)?`,
-    String.raw`general (?:question|chat|inquiry|conversation)`,
-    String.raw`(?:casual|friendly|initial|simple) (?:conversation|chat|greeting|exchange|message)`,
-    String.raw`greeting(?: message| exchange)?`,
-    String.raw`user (?:greeting|request|question|message)`,
-    String.raw`help request`,
-    String.raw`quick question`,
-    String.raw`test message`,
-    String.raw`conversation start`,
-  ].join("|")})$`,
-  "i",
-);
-
-const QUOTED = /["“”«»]([^"“”«»\n]{2,120})["“”«»]/g;
-
-function stripReasoningBlock(raw: string): string {
-  // Keep what follows the LAST closing think tag; if nothing does, the title
-  // was written inside the reasoning, so keep the whole thing for quote mining.
-  const closers = [...raw.matchAll(/<\/think>?/gi)];
-  const last = closers[closers.length - 1];
-  if (last && last.index !== undefined) {
-    const after = raw.slice(last.index + last[0].length).trim();
-    if (after) return after;
-  }
-  return raw.replace(/<\/?think>?/gi, " ");
-}
-
-function normalize(candidate: string): string {
-  return candidate
-    .replace(/^\s*(?:[-*•>]|\d+[.)]|[a-z][.)])\s+/i, "")
-    .replace(/^title\s*[:=-]\s*/i, "")
-    .replace(/[*_`#"“”‘«»]/g, "")
-    .replace(/^'+|'+$/g, "")
-    .replace(/\s+/g, " ")
-    .replace(/[\s.,;:!?…—–-]+$/g, "")
-    .replace(/^[\s.,;:!?…—–-]+/g, "")
-    .trim();
-}
-
 const WORD_SEGMENTER = new Intl.Segmenter(undefined, { granularity: "word" });
 
-function countWords(text: string): number {
-  let count = 0;
-  for (const part of WORD_SEGMENTER.segment(text)) if (part.isWordLike) count += 1;
-  return count;
+function wordsOf(text: string): string[] {
+  const words: string[] = [];
+  for (const part of WORD_SEGMENTER.segment(text.toLowerCase())) {
+    if (part.isWordLike) words.push(part.segment);
+  }
+  return words;
 }
 
+/** Short Latin words ("the", "a", "can") are too common to prove a title is on topic. */
+const isSubjectWord = (word: string): boolean => word.length >= 4 || /[^a-z]/.test(word);
+
 /**
- * The single gate every generated title passes before it can be stored. Returns
- * the cleaned title or null; null means "show the fallback", never "show this".
+ * The single gate before a title is stored. Shape checks plus one grounding
+ * check: the title must reuse a subject word from the conversation itself.
+ * That rejects "Greeting" / "Casual conversation" without any word list.
  */
-export function validateChatTitle(candidate: string): string | null {
-  const cleaned = normalize(candidate);
+export function validateChatTitle(candidate: string, conversation: string): string | null {
+  const cleaned = candidate
+    .replace(/\s+/g, " ")
+    .replace(/[\s.,;:!?…]+$/, "")
+    .trim();
   if (!cleaned) return null;
   if (cleaned.length > GENERATED_CHAT_TITLE_MAX_CHARS) return null;
-  const words = countWords(cleaned);
-  if (words < GENERATED_CHAT_TITLE_MIN_WORDS) return null;
+  if (/[\n{}[\]<>|\\"`*#]/.test(cleaned)) return null;
+  if (!/\p{L}/u.test(cleaned)) return null;
+  const titleWords = wordsOf(cleaned);
+  if (titleWords.length < GENERATED_CHAT_TITLE_MIN_WORDS) return null;
   // Japanese, Chinese and Thai write without spaces, so a word ceiling there
   // measures morphemes rather than words; the character limit is the real
   // guard for those. Only hold spaced writing to the word count.
-  if (cleaned.includes(" ") && words > GENERATED_CHAT_TITLE_MAX_WORDS) return null;
-  if (!/\p{L}/u.test(cleaned)) return null;
-  if (REASONING_LEAK.test(cleaned) || GENERIC_TITLE.test(cleaned)) return null;
-  if (/[{}[\]<>|\\]/.test(cleaned)) return null;
+  if (cleaned.includes(" ") && titleWords.length > GENERATED_CHAT_TITLE_MAX_WORDS) return null;
+  const conversationWords = new Set(wordsOf(conversation));
+  if (!titleWords.some((word) => isSubjectWord(word) && conversationWords.has(word))) return null;
   return cleaned.charAt(0).toUpperCase() + cleaned.slice(1);
 }
 
-/** Candidate strings in the order they should be tried. */
-function titleCandidates(text: string): string[] {
-  const candidates: string[] = [];
-  // 1. Explicit JSON `"title": "..."` anywhere — last one wins (the final answer).
-  // The closing quote has to be the same character as the opening one, or an
-  // apostrophe inside the title ends the match early and truncates it.
-  const jsonTitles = [
-    ...text.matchAll(/["']title["']\s*:\s*(["'])((?:\\.|(?!\1)[^\\\n]){1,200})\1/gi),
-  ].map((m) => (m[2] ?? "").replace(/\\(.)/g, "$1"));
-  candidates.push(...jsonTitles.reverse());
-
-  const lines = text
-    .split(/\r?\n/)
-    .map((line) => line.trim())
-    .filter(Boolean);
-  const leaked = REASONING_LEAK.test(text) || lines.length > 1;
-
-  // 2. Reasoning leaked: the real title is almost always the last quoted phrase.
-  if (leaked) {
-    const quoted = [...text.matchAll(QUOTED)].map((m) => m[1] ?? "");
-    candidates.push(...quoted.reverse());
-  }
-
-  // 3. Plain lines: a clean single-line answer, or the head of "Title — note".
-  for (const line of leaked ? [...lines].reverse() : lines) {
-    candidates.push(line);
-    const head = line.split(/\s[—–-]\s|\s\(/)[0];
-    if (head && head !== line) candidates.push(head);
-  }
-  return candidates;
-}
-
-export function sanitizeChatTitle(raw: unknown): string | null {
-  if (typeof raw !== "string") return null;
-  if (STRUCTURED_ARTIFACT.test(raw)) return null;
-  const text = stripReasoningBlock(raw)
-    .trim()
-    .replace(/^```(?:json)?\s*/i, "")
-    .replace(/\s*```$/, "")
-    .trim();
-  if (!text) return null;
-  for (const candidate of titleCandidates(text)) {
-    const title = validateChatTitle(candidate);
-    if (title) return title;
-  }
-  return null;
-}
-
-export function parseChatTitlePayload(value: unknown): string | null {
+/**
+ * The answer must BE {"title": "..."}. Prose, reasoning, or a title buried in
+ * text is rejected, not repaired, so nothing has to recognise reasoning words.
+ */
+export function parseChatTitlePayload(value: unknown, conversation: string): string | null {
   if (value && typeof value === "object" && !Array.isArray(value)) {
     const title = (value as Record<string, unknown>)["title"];
-    return typeof title === "string" ? validateChatTitle(title) : null;
+    return typeof title === "string" ? validateChatTitle(title, conversation) : null;
   }
   if (typeof value !== "string") return null;
-  const trimmed = value.trim();
-  if (!trimmed) return null;
-  if (trimmed.startsWith("{")) {
-    try {
-      const fromJson = parseChatTitlePayload(JSON.parse(trimmed) as unknown);
-      if (fromJson) return fromJson;
-    } catch {
-      /* not JSON */
-    }
+  // A reasoning model may put a <think> block first; only what follows it is the answer.
+  const answer = (value.split(/<\/think>/i).pop() ?? "")
+    .trim()
+    .replace(/^```(?:json)?\s*|\s*```$/gi, "")
+    .trim();
+  if (!answer) return null;
+  try {
+    return parseChatTitlePayload(JSON.parse(answer) as unknown, conversation);
+  } catch {
+    return null;
   }
-  return sanitizeChatTitle(trimmed);
 }
 
 /** Model used for titles: a non-reasoning model when one is configured. */
@@ -268,7 +162,10 @@ async function requestTitle(
     message?.content,
     ...(message?.tool_calls?.map((call) => call.function?.arguments) ?? []),
     message?.function_call?.arguments,
-  ].reduce<string | null>((found, candidate) => found ?? parseChatTitlePayload(candidate), null);
+  ].reduce<string | null>(
+    (found, candidate) => found ?? parseChatTitlePayload(candidate, conversation),
+    null,
+  );
 
   if (title) return { kind: "title", title };
   const preview =
