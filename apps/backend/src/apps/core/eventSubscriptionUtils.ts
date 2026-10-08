@@ -6,7 +6,6 @@ import { decrypt } from '@/services/encryptionService';
 import { prepareAppWebhookDispatch } from './appUrlResolver';
 import { safeWebhookFetch } from '@/utils/ssrfGuard';
 import crypto from 'crypto';
-import { UserType } from '@xyne/shared';
 import { repositories } from '@/database/repositories';
 
 const installedAppsRepository = new InstalledAppsRepository();
@@ -173,15 +172,7 @@ export async function emitEventToChannelApps(
             return;
         }
 
-        const channelParticipants = await repositories.channelParticipants.getChannelParticipants(channelId);
-        const participantUserIds = channelParticipants.map(p => p.userId);
-        if (participantUserIds.length === 0) return;
-
-        const appUsers = await repositories.users.findMany({
-            where: { id: { in: participantUserIds }, userType: { in: [UserType.APP, UserType.AGENT] } },
-        });
-
-        let appUserIds = appUsers.map(u => u.id);
+        let appUserIds = await repositories.channelParticipants.getAppParticipantUserIds(channelId);
 
         if (options?.excludeUserId) {
             appUserIds = appUserIds.filter(id => id !== options.excludeUserId);
