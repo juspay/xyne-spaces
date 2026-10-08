@@ -92,6 +92,8 @@ export interface ReactArtifactViewProps {
    * title; this removes it and leaves the actions in place.
    */
   hideTitle?: boolean;
+  /** Drops the saved chip — on the app's own page it would only link back to itself. */
+  hideSavedIndicator?: boolean;
   /**
    * Contents of the Settings tab. Supplied by the caller rather than built
    * here: settings are properties of the APP (its icon, later its name and

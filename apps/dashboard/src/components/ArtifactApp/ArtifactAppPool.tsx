@@ -1,0 +1,147 @@
+import {
+  memo,
+  ReactElement,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useSyncExternalStore,
+  type MutableRefObject,
+} from 'react';
+import { createPortal } from 'react-dom';
+import { useParams } from 'react-router-dom';
+import { ArtifactAppHostView } from './ArtifactAppHostView';
+import {
+  initialPoolState,
+  isAppVisible,
+  ownerSlotId,
+  poolReducer,
+  type PoolAction,
+  type PooledApp,
+  type PoolState,
+  type SlotProps,
+  type SlotRect,
+} from './artifactAppPool.state';
+
+type BackRef = MutableRefObject<(() => void) | undefined>;
+
+// Module-level so slots anywhere under AppRoot reach the one host without a provider around the shell.
+let poolState: PoolState = initialPoolState;
+const listeners = new Set<() => void>();
+const backRefs = new Map<string, BackRef>();
+
+function dispatch(action: PoolAction): void {
+  const next = poolReducer(poolState, action);
+  if (next === poolState) return;
+  poolState = next;
+  listeners.forEach(listener => listener());
+}
+
+function subscribe(listener: () => void): () => void {
+  listeners.add(listener);
+  return () => listeners.delete(listener);
+}
+
+const getState = (): PoolState => poolState;
+
+export const artifactAppPool = {
+  mount(slotId: string, appId: string, props: SlotProps, backRef: BackRef): () => void {
+    backRefs.set(slotId, backRef);
+    dispatch({ type: 'mount', slotId, appId, props });
+    return () => {
+      backRefs.delete(slotId);
+      dispatch({ type: 'unmount', slotId, appId });
+    };
+  },
+  update(slotId: string, appId: string, patch: { props?: SlotProps; rect?: SlotRect }): void {
+    dispatch({ type: 'update', slotId, appId, ...patch });
+  },
+};
+
+// Memoized so a slot moving every frame (a panel being dragged) restyles the frame without re-rendering the app.
+const PooledAppView = memo(ArtifactAppHostView);
+
+const PooledAppFrame = memo(({ app }: { app: PooledApp }): ReactElement => {
+  const visible = isAppVisible(app);
+  const owner = ownerSlotId(app);
+  const frameRef = useRef<HTMLDivElement | null>(null);
+
+  // A hidden app must not keep keyboard focus, or typing lands in an app nobody can see.
+  useEffect(() => {
+    const active = document.activeElement;
+    if (!visible && active instanceof HTMLElement && frameRef.current?.contains(active)) {
+      active.blur();
+    }
+  }, [visible]);
+
+  const onBack = useCallback((): void => {
+    if (owner) backRefs.get(owner)?.current?.();
+  }, [owner]);
+
+  return (
+    <div
+      ref={frameRef}
+      inert={!visible}
+      aria-hidden={!visible}
+      style={{
+        position: 'fixed',
+        top: app.rect?.top ?? 0,
+        left: app.rect?.left ?? 0,
+        width: app.rect?.width ?? 0,
+        height: app.rect?.height ?? 0,
+        visibility: visible ? 'visible' : 'hidden',
+        pointerEvents: visible ? 'auto' : 'none',
+        // Same layer as the SDLC frame: above page content, below popovers and modals.
+        zIndex: 1,
+      }}
+    >
+      <PooledAppView
+        appId={app.appId}
+        placement={app.props.placement}
+        showPayloadTitle={app.props.showPayloadTitle}
+        visible={visible}
+        {...(app.props.hasBack ? { onBack } : {})}
+      />
+    </div>
+  );
+});
+PooledAppFrame.displayName = 'PooledAppFrame';
+
+/**
+ * Keeps recently opened artifact apps running across tabs and routes.
+ *
+ * Apps render here, portalled to document.body, and are positioned over the
+ * slot the current screen reports — the SdlcFrameHost pattern. Moving an iframe
+ * in the DOM reloads it, so a slot never owns the app, only its geometry.
+ * Mounted once in AppRoot; every ArtifactAppHost renders through it.
+ */
+const ArtifactAppPoolHost = (): ReactElement | null => {
+  const state = useSyncExternalStore(subscribe, getState);
+  const { workspaceId } = useParams<{ workspaceId?: string }>();
+
+  const container = useMemo(() => {
+    if (typeof document === 'undefined') return null;
+    const element = document.createElement('div');
+    element.dataset['artifactAppPool'] = 'true';
+    return element;
+  }, []);
+
+  useEffect(() => {
+    if (!container) return undefined;
+    document.body.appendChild(container);
+    return (): void => container.remove();
+  }, [container]);
+
+  // Another workspace's apps must not keep running behind this one.
+  useEffect(() => {
+    dispatch({ type: 'dropHidden' });
+  }, [workspaceId]);
+
+  if (!container) return null;
+  return createPortal(
+    state.apps.map(app => <PooledAppFrame key={app.appId} app={app} />),
+    container,
+  );
+};
+
+export default ArtifactAppPoolHost;

@@ -212,6 +212,7 @@ export const ReactArtifactView = ({
   onClose,
   titleSlot,
   hideTitle = false,
+  hideSavedIndicator = false,
   settingsSlot,
   onSave,
   saveState = 'idle',
@@ -389,7 +390,7 @@ export const ReactArtifactView = ({
               Can make changes
             </span>
           )}
-          {savedAppId && (
+          {savedAppId && !hideSavedIndicator && (
             <ArtifactSavedIndicator appId={savedAppId} {...(versionId ? { versionId } : {})} />
           )}
           {payload.dataRequirements?.some(r => r.source) && (

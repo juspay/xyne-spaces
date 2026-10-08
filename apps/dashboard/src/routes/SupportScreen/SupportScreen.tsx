@@ -4559,8 +4559,8 @@ const SupportScreen = (): ReactElement => {
                 </DeskInsightsPanel>
               )}
               {selectedChannelId && openDeskAppId ? (
-                // A desk app replaces the ticket list. Keyed on the app so switching
-                // apps boots a fresh sandbox; the host's back arrow returns to tickets.
+                // A desk app replaces the ticket list. Keyed on the app so each one
+                // claims its own pooled sandbox; the host's back arrow returns to tickets.
                 // Apps see the `channel` surface with this desk, so a channel-scoped
                 // app scopes itself to the desk unchanged.
                 <div className='flex-1 min-h-0'>
