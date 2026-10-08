@@ -145,3 +145,27 @@ describe("notice copy", () => {
     expect(PICTOGRAPHIC.test('"🖥️ Live preview"')).toBe(true);
   });
 });
+
+describe("/webhook/progress sandbox preview records sandbox ownership", () => {
+  const previewBranch = (() => {
+    const start = webhook.indexOf("if (sandboxPreviewUrl && sandboxId) {");
+    expect(start).toBeGreaterThan(-1);
+    return webhook.slice(start, start + 1500);
+  })();
+
+  it("writes the ConversationArtifact owner row the sandbox router's access check reads", () => {
+    expect(previewBranch).toContain("ingestSandboxPreviewSignals(");
+  });
+
+  it("records ownership before the responseMode early return", () => {
+    const ingest = previewBranch.indexOf("ingestSandboxPreviewSignals(");
+    const modeReturn = previewBranch.indexOf('ctx.responseMode !== "conversation"');
+    expect(modeReturn).toBeGreaterThan(-1);
+    expect(ingest).toBeLessThan(modeReturn);
+  });
+
+  it("attributes the sandbox to the conversation and the user who started the run", () => {
+    expect(previewBranch).toMatch(/conversationId:\s*ctx\.conversationId/);
+    expect(previewBranch).toMatch(/userId:\s*ctx\.senderId/);
+  });
+});

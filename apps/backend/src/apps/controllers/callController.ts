@@ -4,6 +4,8 @@ import { callController as nativeCallController } from '@/controllers/callContro
 import { repositories } from '@/database/repositories';
 import { callShareService } from '@/services/callShareService';
 import { transcriptService } from '@/services/transcriptService';
+import { convertBlockNoteToMarkdown } from '@/services/canvasService';
+import { readFromYSweet } from '@/utils/ysweetUtils';
 import { summaryTemplateService } from '@/services/summaryTemplateService';
 import { INITIATED_BY_INSTALLED_APP_ID_KEY } from '@/services/callSummaryAppEventService';
 import { logger } from '@/utils/logger';
@@ -155,6 +157,62 @@ export class AppCallController {
   };
 
   /**
+   * GET /api/apps/calls/:callId/summary — the detailed summary as Markdown.
+   * The pull counterpart of CALL_SUMMARY_READY, for apps that missed the
+   * webhook or did not schedule the call. Answers 404 until a summary exists;
+   * `summaryStatus` tells a 'pending' summary apart from a 'failed' one.
+   */
+  getSummary = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+    const { callId } = req.params;
+    try {
+      const call = await this.loadReadableCall(req, res);
+      if (!call) return;
+
+      if (!(await callShareService.canViewRecordings(call, req.user!.id))) {
+        res.status(403).json({ success: false, error: 'Access denied' });
+        return;
+      }
+
+      const metadata =
+        call.metadata && typeof call.metadata === 'object' && !Array.isArray(call.metadata)
+          ? (call.metadata as Record<string, unknown>)
+          : {};
+      const canvasId =
+        typeof metadata.detailedSummaryCanvasId === 'string' && metadata.detailedSummaryCanvasId
+          ? metadata.detailedSummaryCanvasId
+          : null;
+      const summaryStatus =
+        typeof metadata.detailedSummaryStatus === 'string'
+          ? metadata.detailedSummaryStatus
+          : canvasId
+            ? 'ready'
+            : null;
+
+      const summary = canvasId ? await this.readSummaryCanvas(canvasId, call.workspaceId, req.user!.id) : null;
+      if (!summary?.trim()) {
+        res.status(404).json({
+          success: false,
+          error: 'Summary not available for this call',
+          summaryStatus,
+        });
+        return;
+      }
+
+      res.json({
+        success: true,
+        callId: call.externalId,
+        summaryStatus,
+        summaryTemplateId: call.summaryTemplateId,
+        detailedSummaryCanvasId: canvasId,
+        detailedSummary: summary,
+      });
+    } catch (error) {
+      logger.error(`[AppCallController] [${callId}] Failed to get summary:`, error);
+      next(error);
+    }
+  };
+
+  /**
    * POST /api/apps/calls/:callId/regenerate-summary
    * Asynchronous by design: answers 202 and the finished summary arrives as a
    * CALL_SUMMARY_READY webhook. Body: { summaryTemplateId, modelType? }.
@@ -273,6 +331,24 @@ export class AppCallController {
     }
 
     return call;
+  }
+
+  /**
+   * Reads a summary canvas as Markdown: live Y-Sweet content first, falling
+   * back to the persisted canvas.content snapshot when Y-Sweet has nothing.
+   */
+  private async readSummaryCanvas(
+    canvasId: string,
+    workspaceId: string | null,
+    userId: string,
+  ): Promise<string | null> {
+    const canvas = await repositories.calls.findSummaryCanvas(canvasId, workspaceId);
+    if (!canvas) return null;
+
+    const ySweetBlocks = await readFromYSweet(canvas.id, userId);
+    const storedBlocks = Array.isArray(canvas.content) ? canvas.content : [];
+    const blocks = ySweetBlocks.length > 0 ? ySweetBlocks : storedBlocks;
+    return blocks.length > 0 ? convertBlockNoteToMarkdown(blocks) : null;
   }
 
   /** Merge-writes the owning app id onto Call.metadata. */

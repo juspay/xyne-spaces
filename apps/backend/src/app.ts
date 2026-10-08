@@ -614,6 +614,48 @@ export class App {
         res.status(500).json({ error: 'Internal error' });
       }
     });
+    // Conversation-access check for claw: claw sessions are keyed by
+    // conversationId (not userId), so claw must verify the caller may access a
+    // conversation before binding its session. Returns whether the conversation
+    // exists and whether the user is a member of its channel (or it is a PUBLIC
+    // channel in the user's workspace). Spaces owns this ACL.
+    this.app.post('/api/internal/conversation-access', validateS2SKey, async (req: Request, res: Response) => {
+      try {
+        const { conversationId, userId } = (req.body ?? {}) as { conversationId?: string; userId?: string };
+        if (!conversationId || !userId) {
+          res.status(400).json({ error: 'conversationId and userId are required' });
+          return;
+        }
+        const prisma = DatabaseClient.getInstance();
+        const conv = await prisma.conversation.findUnique({
+          where: { conversationId },
+          select: { channelId: true },
+        });
+        if (!conv) {
+          res.json({ exists: false, canAccess: false });
+          return;
+        }
+        const participant = await prisma.channelParticipant.findUnique({
+          where: { channelId_userId: { channelId: conv.channelId, userId } },
+          select: { id: true },
+        });
+        let canAccess = participant !== null;
+        if (!canAccess) {
+          const channel = await prisma.channel.findUnique({
+            where: { id: conv.channelId },
+            select: { visibility: true, workspaceId: true },
+          });
+          if (channel?.visibility === 'PUBLIC') {
+            const user = await prisma.user.findUnique({ where: { id: userId }, select: { workspaceId: true } });
+            canAccess = !!user?.workspaceId && user.workspaceId === channel.workspaceId;
+          }
+        }
+        res.json({ exists: true, canAccess });
+      } catch (err) {
+        logger.error('[conversation-access] failed', err);
+        res.status(500).json({ error: 'Internal error' });
+      }
+    });
     this.app.post(
       '/api/internal/automations/claw-callback/:executionId/:stepName',
       validateS2SKey,
@@ -1055,11 +1097,15 @@ export class App {
       );
     }
 
-    try {
-      await registerAllExternalSources();
-    } catch (error) {
-      logger.error('Failed to register external sources:', error);
-      logger.warn('Continuing startup without external sources...');
+    if (config.enableExternalSourceRegistration) {
+      try {
+        await registerAllExternalSources();
+      } catch (error) {
+        logger.error('Failed to register external sources:', error);
+        logger.warn('Continuing startup without external sources...');
+      }
+    } else {
+      logger.info('Skipping external-source bot registration (ENABLE_EXTERNAL_SOURCE_REGISTRATION=false)');
     }
 
     // Register workflow definitions

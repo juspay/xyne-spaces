@@ -121,6 +121,30 @@ export async function getMe(): Promise<User> {
   return data.user;
 }
 
+/**
+ * The Claw-side identity for the logged-in user. `userId` is the canonical
+ * Claw id (what Claw-owned rows like Agent.ownerUserId store); `spacesUserId`
+ * is the raw workspace-scoped Spaces id (what `getMe().id` returns). A user's
+ * agent rows may be keyed by either, so ownership comparisons must accept both.
+ */
+export interface ClawIdentity {
+  userId: string;
+  spacesUserId?: string;
+  spacesWorkspaceId?: string;
+  spacesOrgMemberId?: string;
+}
+
+export async function getClawIdentity(): Promise<ClawIdentity | null> {
+  try {
+    const data = await request<{ success: boolean; data: ClawIdentity }>(
+      `${AUTH_API_URL}/api/v1/users/me`,
+    );
+    return data.data;
+  } catch {
+    return null;
+  }
+}
+
 export async function upsertUser(user: User): Promise<void> {
   const spacesToken = getGoogleToken();
   await request<{ success: boolean }>(
@@ -461,6 +485,33 @@ export interface SandboxRepoOption {
   key: string;
   name: string;
   description?: string;
+}
+
+export interface OptimizationOption {
+  key: string;
+  label: string;
+  summary: string;
+  detail: string;
+  group: string;
+  defaultOn: boolean;
+  /** "fleet" switches are decided outside agent runs, so only env changes them. */
+  scope: "agent" | "fleet";
+  requires?: string;
+}
+
+export interface OptimizationCatalog {
+  groups: Array<{ id: string; title: string; description: string }>;
+  optimizations: OptimizationOption[];
+  /** Per delegation tier: switches that default on (or off) for that tier. */
+  tierDefaults: Record<string, Record<string, boolean>>;
+}
+
+/** Every claw optimization switch, for the agent page's Optimizations section. */
+export async function getOptimizationCatalog(): Promise<OptimizationCatalog> {
+  const data = await request<{ success: boolean; data: OptimizationCatalog }>(
+    `${AUTH_API_URL}/api/v1/agents/optimizations`,
+  );
+  return data.data;
 }
 
 /** Available sandbox repo setups (for the agent "Sandbox repository" picker). */

@@ -4,11 +4,12 @@ import {
   allowedSourcesForHostControls,
   hasTurnedOffHostControl,
   getHostControls,
+  isAgentParticipant,
+  isHumanParticipant,
 } from '@/services/liveKitService';
 import { repositories } from '@/database/repositories';
 import { DatabaseClient, db } from '@/database/client';
 import { logger } from '@/utils/logger';
-import { isHostOrActingHost } from '@/services/actingHost';
 import { v4 as uuidv4 } from 'uuid';
 import { transcriptService } from '@/services/transcriptService';
 import { Prisma } from '@prisma/client';
@@ -503,7 +504,7 @@ export class CallController {
         }
 
         stage = 'transcription_agent_resolution';
-        const headlessAgentName = await livekitService.resolveAgentNameForUser(userId);
+        const headlessAgentName = await livekitService.resolveAgentNameForUser(userId, { roomName: callExternalId });
 
         const roomLink = buildCallInviteUrl(callExternalId);
         const roomMetadata = JSON.stringify({
@@ -767,7 +768,7 @@ export class CallController {
       }
 
       stage = 'transcription_agent_resolution';
-      const agentName = await livekitService.resolveAgentNameForUser(userId);
+      const agentName = await livekitService.resolveAgentNameForUser(userId, { roomName: callExternalId });
 
       // Create LiveKit room with metadata
       // The webhook will create all DB records when first participant joins
@@ -812,7 +813,14 @@ export class CallController {
             return;
           }
           const participants = await livekitService.listParticipants(callExternalId!);
-          const hasAgent = participants.some(p => p.identity.startsWith('agent-'));
+          // A room outlives its last participant (emptyTimeout), so a call that ended
+          // inside the 30s shows up here as an active room with nobody in it; that is
+          // not an agent failure, only a short call.
+          if (!participants.some(isHumanParticipant)) {
+            logger.info(`[${callExternalId}] agent_join_check_skipped | reason=no_human_participants`);
+            return;
+          }
+          const hasAgent = participants.some(isAgentParticipant);
           if (!hasAgent) {
             logger.error(`[${callExternalId}] agent_failed_to_join | reason=timeout_30s`);
             // Second safety net behind dispatchTranscriptionAgentForCall's own ~9s claim
@@ -996,7 +1004,7 @@ export class CallController {
           logger.info(`Deleted existing room ${callId}`);
         }
 
-        const joinAgentName = await livekitService.resolveAgentNameForUser(activeCall.createdByUserId);
+        const joinAgentName = await livekitService.resolveAgentNameForUser(activeCall.createdByUserId, { roomName: callId });
 
         // Prepare room metadata
         const roomMetadata = JSON.stringify({
@@ -2668,8 +2676,8 @@ export class CallController {
         return;
       }
 
-      if (!(await isHostOrActingHost({ hostId: call.createdByUserId, userId, roomName: callId }))) {
-        logger.warn(`[CallController] User ${userId} attempted to end call ${callId} but is not host/acting-host`);
+      if (call.createdByUserId !== userId) {
+        logger.warn(`[CallController] User ${userId} attempted to end call ${callId} but is not the host`);
         res.status(403).json({ success: false, error: 'Only the call host can end the call for everyone' });
         return;
       }
@@ -2771,9 +2779,9 @@ export class CallController {
 
       logger.info(`[CallController] mute-all call found | callId=${callId}, createdByUserId=${call.createdByUserId}`);
 
-      // 2. Host or acting-host check
-      if (!(await isHostOrActingHost({ hostId: call.createdByUserId, userId, roomName: callId }))) {
-        logger.warn(`[CallController] mute-all not host/acting-host | callId=${callId}, userId=${userId}, hostId=${call.createdByUserId}`);
+      // 2. Host-only check
+      if (call.createdByUserId !== userId) {
+        logger.warn(`[CallController] mute-all not host | callId=${callId}, userId=${userId}, hostId=${call.createdByUserId}`);
         res.status(403).json({
           success: false,
           error: 'Only the call host can mute all participants',
@@ -2838,9 +2846,9 @@ export class CallController {
 
       logger.info(`[CallController] mute-participant call found | callId=${callId}, createdByUserId=${call.createdByUserId}`);
 
-      // 2. Host or acting-host check
-      if (!(await isHostOrActingHost({ hostId: call.createdByUserId, userId, roomName: callId }))) {
-        logger.warn(`[CallController] mute-participant not host/acting-host | callId=${callId}, userId=${userId}, hostId=${call.createdByUserId}`);
+      // 2. Host-only check
+      if (call.createdByUserId !== userId) {
+        logger.warn(`[CallController] mute-participant not host | callId=${callId}, userId=${userId}, hostId=${call.createdByUserId}`);
         res.status(403).json({
           success: false,
           error: 'Only the call host can mute participants',

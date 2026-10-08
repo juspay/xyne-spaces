@@ -179,7 +179,7 @@ class RadarReactionResolver {
         ],
         Object.fromEntries(nameById),
         [],
-        { by: reactorName, emoji: reaction.emojiName },
+        { reaction: { by: reactorName, emoji: reaction.emojiName } },
       );
 
       run.proposedOps = transitions.operations;

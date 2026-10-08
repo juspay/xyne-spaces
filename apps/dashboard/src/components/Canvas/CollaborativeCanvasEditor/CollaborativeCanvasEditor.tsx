@@ -46,6 +46,7 @@ import { logger, Event } from '../../../utils/logger';
 import { useZero } from '../../../hooks/useZero';
 import { queries } from '../../../zero/queries';
 import { useCachedQuery } from '../../../hooks/useCachedQuery';
+import { useCanvasConnectId } from '../../../hooks/useCanvasConnectId';
 import {
   resolveFileUrl,
   extractHeadingsFromBlocks,
@@ -185,9 +186,13 @@ export const CollaborativeCanvasEditor = forwardRef<
     const isXyneAIOpen = useSelector(xyneAIActor, state => state.matches('open'));
     const z = useZero();
     const currentUserId = (user?.id as string) || '';
-    const [queriedParticipants = []] = useCachedQuery(queries.canvasParticipants({ canvasId }), {
-      enabled: Boolean(canvasId) && !preloadedParticipants,
-    });
+    const connectId = useCanvasConnectId(canvasId);
+    const [queriedParticipants = []] = useCachedQuery(
+      queries.canvasParticipants({ canvasId, connectId }),
+      {
+        enabled: Boolean(canvasId) && !preloadedParticipants,
+      },
+    );
     const canvasParticipants = preloadedParticipants ?? queriedParticipants;
     const currentUserName =
       (user?.name ? String(user.name) : undefined) ||

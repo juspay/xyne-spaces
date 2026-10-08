@@ -518,7 +518,57 @@ export type SetupStep =
   // healthCheck still runs so the caller knows the dependency is ready.
   | { type: "services"; cmd: string; healthCheck?: HealthCheck; markerPath?: string }
   | { type: "devserver"; name: string; cmd: string; cwd: string; markerPath?: string }
-  | { type: "run"; label: string; cmd: string; cwd?: string; timeoutMs?: number };
+  | { type: "run"; label: string; cmd: string; cwd?: string; timeoutMs?: number; runOnReuse?: boolean };
+
+type ReuseStepSession = {
+  commands: {
+    runDetached(cmd: string): Promise<string>;
+    pollJob(jobId: string): Promise<{ done: boolean; exitCode: number | null; stdout?: string | null; stderr?: string | null }>;
+  };
+};
+
+const STEP_OUTPUT_TAIL_LINES = 20;
+
+export function stepOutputTail(stdout: string | null | undefined): string | null {
+  const output = redactSecrets(stdout ?? "").trim();
+  return output ? output.split("\n").slice(-STEP_OUTPUT_TAIL_LINES).join("\n") : null;
+}
+
+export async function runReuseSteps(
+  session: ReuseStepSession,
+  steps: readonly SetupStep[],
+  workDir: string,
+  log: string[],
+  pollIntervalMs = 2_000,
+): Promise<void> {
+  for (const step of steps) {
+    if (step.type !== "run" || step.runOnReuse !== true) continue;
+    log.push(`Running on reuse: ${step.label}...`);
+    try {
+      const jobId = await session.commands.runDetached(`cd ${step.cwd || workDir} && ${step.cmd}`);
+      const timeoutMs = step.timeoutMs || 5 * 60_000;
+      const deadline = Date.now() + timeoutMs;
+      let finished = false;
+      while (Date.now() < deadline) {
+        await new Promise((r) => setTimeout(r, pollIntervalMs));
+        const status = await session.commands.pollJob(jobId);
+        if (!status.done) continue;
+        finished = true;
+        if (status.exitCode !== null && status.exitCode !== 0) {
+          log.push(`${step.label}: WARN failed on reuse (exit ${status.exitCode}): ${redactSecrets(status.stderr ?? "")}`);
+        } else {
+          log.push(`${step.label} done.`);
+        }
+        const tail = stepOutputTail(status.stdout);
+        if (tail) log.push(tail);
+        break;
+      }
+      if (!finished) log.push(`${step.label}: WARN still running after ${timeoutMs / 1000}s on reuse; continuing.`);
+    } catch (err) {
+      log.push(`${step.label}: WARN ${redactSecrets(err instanceof Error ? err.message : String(err))}`);
+    }
+  }
+}
 
 // Auxiliary repos baked into a sandbox template alongside the primary
 // repo. Each entry's branch is independently overridable at claim time
@@ -1836,6 +1886,7 @@ export function makeRepoSetupTool(config: RepoSetupConfig): ToolDefinition {
             // meta come from the caller's /run payload, so if a different
             // user picks up the conversation we want their identity now.
             await configureGitIdentity(cached, allWorkDirs, userEmail, userName, log);
+            await runReuseSteps(cached, config.steps, config.workDir, log);
             return JSON.stringify({
               sessionId: cached.id,
               branch: branchName,
@@ -2223,7 +2274,9 @@ export function makeRepoSetupTool(config: RepoSetupConfig): ToolDefinition {
             log.push(`Running: ${step.label}...`);
             const cwd = step.cwd || config.workDir;
             const jobId = await session.commands.runDetached(`cd ${cwd} && ${step.cmd}`);
-            await pollUntilDone(jobId, step.label, step.timeoutMs || 5 * 60_000);
+            const status = await pollUntilDone(jobId, step.label, step.timeoutMs || 5 * 60_000);
+            const tail = stepOutputTail(status.stdout);
+            if (tail) log.push(tail);
             break;
           }
         }
@@ -2618,9 +2671,11 @@ export const sdlcRepositoryAccess: ToolDefinition = {
     if (!workspaceId || !actorUserId) {
       return "Error: SDLC repository access is only available in a run started from an SDLC hub or with a repository selected.";
     }
-    if (actorUserId !== context.meta?.["userId"]?.trim()) {
-      return "Error: SDLC run context does not belong to this run's user.";
-    }
+    // actorUserId (workspace-scoped Spaces id from the hub context) and
+    // meta.userId (canonical Claw id) live in different id namespaces, so no
+    // equality check is possible here. The authoritative binding — actorUserId
+    // must be one of the session-token user's own ids — is enforced by
+    // claw-auth's runtime-credentials bootstrap route, which this call hits.
     // The tool's sessionId is the sandbox. claw-auth checks the run session the token was minted for.
     const runSessionId = context.sessionId;
     const sessionToken = context.sessionToken;

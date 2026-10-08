@@ -106,6 +106,16 @@ export enum GuestEntity {
   CANVAS = 'CANVAS',
 }
 
+// Slack Connect — the two entity kinds that get a connectId + connect_group row.
+// Values are LOWERCASE on purpose: they are the exact strings stored in the
+// connect_group.entityType String column, so this is a code-level enum only — the
+// DB column stays a plain String and existing rows keep matching.
+// @ts-ignore TS1294
+export enum ConnectEntityType {
+  CHANNEL = 'channel',
+  CANVAS = 'canvas',
+}
+
 // @ts-ignore TS1294
 export enum RecapEntityType {
   CHANNEL = 'CHANNEL',
@@ -537,6 +547,7 @@ export enum AppIncomingWebhookType {
   AMAZON_SNS = 'AMAZON_SNS',
   PINGDOM = 'PINGDOM',
   GCP = 'GCP',
+  HUBSPOT = 'HUBSPOT',
 }
 
 // @ts-ignore TS1294

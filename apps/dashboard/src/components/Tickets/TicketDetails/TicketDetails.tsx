@@ -142,6 +142,7 @@ import { formatETADisplay, getLocalISOString, getStatusBadgeConfig } from '../ut
 import { cn } from '../../../utils/classNames';
 import { getApiErrorMessage } from '../../../utils/apiError';
 import { surfaceMutationError } from '../../../utils/zeroMutationToast';
+import { loadRecentLabels, saveRecentLabels, sortByRecency } from '../../../utils/recentLabels';
 import Button from '../../ui/Button';
 import { Dialog } from '../../ui/Dialog';
 import { FileBubble } from '../../ui/FileBubble/FileBubble';
@@ -1908,19 +1909,23 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
   };
 
   const tags = ticket?.tagMappings;
+  const recentTags = useMemo(() => {
+    if (!showTagDropdown || !currentUser?.id || !ticket?.boardId) return [];
+    return loadRecentLabels(currentUser.id, [ticket.boardId]);
+  }, [showTagDropdown, currentUser?.id, ticket?.boardId]);
   // Available tags from project_tags
   const availableTags = useMemo(() => {
     if (!projectTags) return [];
 
-    const tagSet = new Set<string>();
+    const tagSet = new Set<string>(recentTags);
     projectTags.forEach(t => {
       if (t?.name) {
         tagSet.add(t.name);
       }
     });
 
-    return Array.from(tagSet).sort();
-  }, [projectTags]);
+    return sortByRecency(Array.from(tagSet).sort(), recentTags);
+  }, [projectTags, recentTags]);
 
   // Filter available tags based on search query and exclude already assigned tags
   const filteredTags = useMemo(() => {
@@ -3166,6 +3171,9 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
     // Outcome only once the server confirmed, not on the optimistic apply.
     void surfaceMutationError(tagMutation, 'Failed to update labels').then(ok => {
       if (ok) {
+        if (!existingTag && currentUser?.id && ticket.boardId) {
+          saveRecentLabels(currentUser.id, ticket.boardId, [tagName.trim()]);
+        }
         trackTicketOutcome('TICKET_FIELD_UPDATED', ticket, {
           surface: 'details',
           field: 'tags',

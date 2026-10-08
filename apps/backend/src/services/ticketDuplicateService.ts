@@ -1,5 +1,5 @@
 import { logger } from '@/utils/logger';
-import { MAX_DUPLICATE_SCOPE_FIELDS, TicketReferenceRelation } from '@xyne/shared';
+import { ActivityType, MAX_DUPLICATE_SCOPE_FIELDS, TicketReferenceRelation } from '@xyne/shared';
 import {
   resolveBoardTicketFormId,
   resolveFormFieldDefinitionsForForm,
@@ -8,6 +8,7 @@ import { extractPlainTextFromHtml } from '@/utils/contentUtils';
 import { resolveWorkspaceIdFromModel } from '@/database/tenant/workspace-utils';
 import { config } from '@/config/env';
 import { DatabaseClient } from '@/database/client';
+import { TicketsACL } from '@/database/acl/tables/tickets-acl';
 import { EmailChannelPreferenceRepository } from '@/database/repositories/emailChannelPreferenceRepository';
 import { transformVespaResults } from '@/services/vespaSearch/resultTransform';
 import { vespaService } from '@/services/vespaSearch';
@@ -21,6 +22,7 @@ import type {
 } from '@/types/ticket';
 import {
   analyzeTicketDuplicates,
+  isJevScoringEnabled,
   type TicketDuplicateCandidateInput,
   type TicketDuplicateContext,
 } from '@/agents/ticket-duplicate';
@@ -31,6 +33,7 @@ const DUPLICATE_REFERENCE_LIMIT = 10;
 // Cap on extra Vespa hits fetched to make up for excluded tickets, so a ticket with
 // many links can't blow up the search size.
 const MAX_EXCLUDED_OVERFETCH = 20;
+const ACCESS_OVERFETCH = 10;
 
 const DUPLICATE_RELATIONS = [
   TicketReferenceRelation.DUPLICATE_POSSIBLE,
@@ -153,15 +156,34 @@ export const buildDuplicateScopeFieldValues = async (params: {
   }
 };
 
-// Cap on the text handed to Vespa, mirroring the agent's MAX_DESCRIPTION_LENGTH.
-const VESPA_QUERY_MAX_LENGTH = 4000;
+const QUERY_DESCRIPTION_MAX_LENGTH = 1500;
 
 // Desk tickets carry raw HTML email bodies, so strip markup before it reaches the
-// lexical term and the embedding. Mirrors normalizePromptText in agents/ticket-duplicate.
+// lexical term and the embedding.
 const buildDuplicateSearchQuery = (title: string, description: string): string => {
   const plainTitle = extractPlainTextFromHtml(title).trim() || title.trim();
   const plainDescription = extractPlainTextFromHtml(description).trim();
-  return `${plainTitle}\n\n${plainDescription}`.trim().slice(0, VESPA_QUERY_MAX_LENGTH);
+  return `${plainTitle}\n\n${plainDescription.slice(0, QUERY_DESCRIPTION_MAX_LENGTH)}`.trim();
+};
+
+const DISMISSED_DUPLICATE_RELATIONS = new Set<string>(DUPLICATE_RELATIONS);
+
+const counterpartOf = (ticketId: string, activityTicketId: string, value: unknown): string | null => {
+  if (!value || typeof value !== 'object') return null;
+  const target = (value as { targetTicketId?: unknown }).targetTicketId;
+  if (typeof target !== 'string') return null;
+  return activityTicketId === ticketId ? target : activityTicketId;
+};
+
+const isDismissal = (value: unknown): boolean => {
+  if (!value || typeof value !== 'object') return false;
+  const { action, relationType, oldRelationType } = value as Record<string, unknown>;
+  if (action === 'removed') return DISMISSED_DUPLICATE_RELATIONS.has(String(relationType));
+  return (
+    action === 'updated' &&
+    DISMISSED_DUPLICATE_RELATIONS.has(String(oldRelationType)) &&
+    !DISMISSED_DUPLICATE_RELATIONS.has(String(relationType))
+  );
 };
 
 class TicketDuplicateService {
@@ -374,7 +396,7 @@ class TicketDuplicateService {
   private async detectForSavedTicket(
     ticket: NonNullable<Awaited<ReturnType<TicketDuplicateService['findTicketForDetection']>>>,
   ): Promise<DuplicateDetectionOutcome | null> {
-    const [savedValues, parentMappings, duplicateReferences] = await Promise.all([
+    const [savedValues, parentMappings, duplicateReferences, referenceActivities] = await Promise.all([
       prisma.formEntityValues.findMany({
         where: { entityId: ticket.id, entityType: 'TICKET' },
         orderBy: [{ version: 'desc' }, { updatedAt: 'desc' }],
@@ -392,13 +414,28 @@ class TicketDuplicateService {
         },
         select: { sourceTicketId: true, targetTicketId: true },
       }),
+      prisma.ticketActivity.findMany({
+        where: { ticketId: ticket.id, activityType: ActivityType.REFERENCE_TICKET },
+        orderBy: { timestamp: 'asc' },
+        select: { ticketId: true, value: true },
+      }),
     ]);
+
+    const latestByCounterpart = new Map<string, unknown>();
+    for (const activity of referenceActivities) {
+      const counterpart = counterpartOf(ticket.id, activity.ticketId, activity.value);
+      if (counterpart) latestByCounterpart.set(counterpart, activity.value);
+    }
+    const dismissedTicketIds = [...latestByCounterpart]
+      .filter(([, value]) => isDismissal(value))
+      .map(([counterpart]) => counterpart);
 
     const excludeTicketIds = [
       ...parentMappings.map(mapping => mapping.ticketId),
       ...duplicateReferences.map(reference =>
         reference.sourceTicketId === ticket.id ? reference.targetTicketId : reference.sourceTicketId,
       ),
+      ...dismissedTicketIds,
     ];
 
     return this.persistDuplicateReferences({
@@ -425,8 +462,22 @@ class TicketDuplicateService {
     excludeTicketIds?: string[];
     channelId?: string;
     scopeFieldValues?: DuplicateScopeFieldValue[];
+    jevOnly?: boolean;
   }): Promise<{ candidates: TicketDuplicateCandidate[]; analysis: TicketDuplicateCheckAnalysis }> {
-    const { title, description, projectId, userId, limit, excludeTicketId, parentTicketId, excludeTicketIds, channelId, scopeFieldValues } = params;
+    const { title, description, projectId, userId, limit, excludeTicketId, parentTicketId, excludeTicketIds, channelId, scopeFieldValues, jevOnly } = params;
+
+    if (jevOnly && !(await isJevScoringEnabled())) {
+      return {
+        candidates: [],
+        analysis: {
+          isDuplicate: false,
+          duplicateTicketId: null,
+          confidence: 0,
+          reason: 'Duplicate scoring is not available.',
+          matches: [],
+        },
+      };
+    }
 
     const scopeDynamicFieldValues = await this.buildScopeDynamicFieldValues({
       channelId,
@@ -475,49 +526,55 @@ class TicketDuplicateService {
     const analysis = await this.analyzeDuplicate(
       { title, description },
       candidates,
-      { userId, projectId },
+      { userId, projectId, ...(excludeTicketId ? { ticketId: excludeTicketId } : {}) },
+      { jevOnly: jevOnly === true },
     );
 
-
-    const reorderedCandidates = this.reorderCandidatesWithDuplicateFirst(
-      candidates,
-      analysis.duplicateTicketId,
-    );
+    const reorderedCandidates = this.reorderCandidatesByMatches(candidates, analysis);
 
     return { candidates: reorderedCandidates, analysis };
   }
 
-  private reorderCandidatesWithDuplicateFirst(
+  private reorderCandidatesByMatches(
     candidates: TicketDuplicateCandidate[],
-    duplicateTicketId: string | null | undefined,
+    analysis: TicketDuplicateCheckAnalysis,
   ): TicketDuplicateCandidate[] {
-    // If no duplicate identified, return original order
-    if (!duplicateTicketId) {
-      return candidates;
-    }
-
-    const duplicateIndex = candidates.findIndex(c => c.id === duplicateTicketId);
-
-    // If duplicate not found or already at index 0, return original order
-    if (duplicateIndex <= 0) {
-      return candidates;
-    }
-
-    // Move the duplicate to index 0, keep rest in original order
-    const duplicate = candidates[duplicateIndex];
-    const reordered = [
-      duplicate,
-      ...candidates.slice(0, duplicateIndex),
-      ...candidates.slice(duplicateIndex + 1),
+    const order = [
+      ...(analysis.duplicateTicketId ? [analysis.duplicateTicketId] : []),
+      ...(analysis.matches ?? []).map(match => match.id),
     ];
+    const rank = new Map<string, number>();
+    order.forEach(id => {
+      if (!rank.has(id)) rank.set(id, rank.size);
+    });
+    return [...candidates].sort(
+      (a, b) => (rank.get(a.id) ?? Number.MAX_SAFE_INTEGER) - (rank.get(b.id) ?? Number.MAX_SAFE_INTEGER),
+    );
+  }
 
-    return reordered;
+  private async visibleTicketIds(userId: string, ticketIds: string[]): Promise<Set<string>> {
+    if (ticketIds.length === 0) return new Set();
+    const user = await prisma.user.findUnique({
+      where: { id: userId },
+      select: { workspaceId: true, role: true },
+    });
+    if (!user?.workspaceId) return new Set();
+    const accessible = await new TicketsACL(
+      { userId, workspaceId: user.workspaceId, ...(user.role ? { role: user.role } : {}) },
+      prisma,
+    ).getWhereClause();
+    const rows = await prisma.ticket.findMany({
+      where: { AND: [accessible, { id: { in: ticketIds } }, { isArchived: false }] },
+      select: { id: true },
+    });
+    return new Set(rows.map(row => row.id));
   }
 
   async analyzeDuplicate(
     ticket: { title: string; description: string },
     candidates: TicketDuplicateCandidate[],
     context: TicketDuplicateContext,
+    options: { jevOnly?: boolean } = {},
   ): Promise<TicketDuplicateCheckAnalysis> {
     if (candidates.length === 0) {
       return {
@@ -542,6 +599,9 @@ class TicketDuplicateService {
           candidates: agentCandidates,
         },
         context,
+        undefined,
+        undefined,
+        options,
       );
 
       const candidateIds = new Set(candidates.map(candidate => candidate.id));
@@ -551,10 +611,11 @@ class TicketDuplicateService {
           : null;
 
       return {
-        isDuplicate: result.isDuplicate,
+        isDuplicate: result.isDuplicate && safeDuplicateTicketId !== null,
         duplicateTicketId: safeDuplicateTicketId,
         confidence: result.confidence,
         reason: result.reason,
+        matches: (result.matches ?? []).filter(match => candidateIds.has(match.id)),
       };
     } catch (error) {
       logger.error('Duplicate ticket analysis failed', error);
@@ -609,8 +670,10 @@ class TicketDuplicateService {
           offset: 0,
           // Over-fetch by what gets filtered out below, so exclusions don't shrink the
           // candidate list the model sees.
-          limit: limit + Math.min(excludeIds.size, MAX_EXCLUDED_OVERFETCH),
+          limit: limit + Math.min(excludeIds.size, MAX_EXCLUDED_OVERFETCH) + ACCESS_OVERFETCH,
           rankProfile: RankProfile.duplicateDetection,
+          privateQuery: true,
+          literalQuery: true,
           ticket: {
             projectId: [projectId],
             ...(dynamicFieldValues && dynamicFieldValues.length > 0
@@ -631,9 +694,10 @@ class TicketDuplicateService {
     const transformedResults = await transformVespaResults(hits, prisma);
 
     const candidates = transformedResults
-      .filter(result => result.type === 'ticket')
+      .filter(result => result.type === 'ticket' && !excludeIds.has(result.id))
       .map(result => ({
         id: result.id,
+        ...(result.searchContext?.xyneId ? { xyneId: result.searchContext.xyneId.replace(/<\/?hi>/gi, '') } : {}),
         title: result.title,
         description: result.context || '',
         boardId: result.searchContext?.boardId,
@@ -644,8 +708,10 @@ class TicketDuplicateService {
         createdAt: result.metadata.timestamp,
       }));
 
+    const visible = await this.visibleTicketIds(userId, candidates.map(candidate => candidate.id));
+
     return {
-      candidates: candidates.filter(candidate => !excludeIds.has(candidate.id)).slice(0, limit),
+      candidates: candidates.filter(candidate => visible.has(candidate.id)).slice(0, limit),
       searchFailed: false,
     };
   }
@@ -714,6 +780,13 @@ class TicketDuplicateService {
       const { count } = await prisma.ticketReferenceMapping.createMany({
         data: referenceRows,
         skipDuplicates: true,
+      });
+
+      logger.info('[TicketDuplicateService] Linked possible duplicate', {
+        ticketId,
+        targetTicketId: duplicateCandidate.id,
+        confidence: analysis.confidence,
+        created: count > 0,
       });
 
       // skipDuplicates makes an existing link a silent no-op; only report a link made now.

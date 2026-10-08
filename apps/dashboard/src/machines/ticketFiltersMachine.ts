@@ -52,11 +52,7 @@ export type TicketFiltersEvent =
       enabled?: boolean | undefined;
       selectedBoardIdFromDb?: string | null | undefined;
       /**
-       * Board to fall back to when nothing else picks one. Channels pass their
-       * first linked board here so the tickets tab always has exactly one board
-       * selected — a channel has no "All Boards" state, and an empty
-       * `filters.boards` would leave the query with no scope at all now that
-       * channel.projectId is no longer read.
+       * Board to fall back to when nothing else picks one.
        */
       defaultBoardId?: string | null | undefined;
       searchParams: URLSearchParams;

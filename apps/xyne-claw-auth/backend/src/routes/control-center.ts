@@ -25,7 +25,7 @@ import { CONFIG } from "../config.js";
 import { redisService } from "../redis.js";
 import { scanKeys } from "../lib/redis-scan.js";
 import { requireClawAdmin, getRequesterId } from "../middleware/agent-acl.js";
-import { requireS2S } from "../middleware/require-auth.js";
+import { requireStrictS2S } from "../middleware/require-auth.js";
 import { getAdminOrgScope, getOrgNameMap, withOrgLabel } from "../lib/admin-org-scope.js";
 import { twinReplyMetricsRouter } from "./control-center-twin-metrics.js";
 
@@ -350,7 +350,7 @@ router.get("/approvals", requireClawAdmin, asyncHandler(async (req: Request, res
    POST /approvals — agents write approval requests here (internal/S2S)
    ───────────────────────────────────────────────────────────────────── */
 
-router.post("/approvals", requireS2S, asyncHandler(async (req: Request, res: Response) => {
+router.post("/approvals", requireStrictS2S, asyncHandler(async (req: Request, res: Response) => {
   const { agentSlug, agentName, sessionId, action, targetSystem } = req.body as {
     agentSlug?: string;
     agentName?: string;

@@ -846,6 +846,8 @@ const ChannelCommandMenuContent = ({
     onManualKeystroke,
     markRecentReplay,
   } = useSearchMetrics({
+    // Context-selection pickers reuse this menu but aren't Cmd+K, so they send no surface.
+    ...(!contextSelectionMode && { surface: 'cmdk' as const }),
     allChannels,
     mentionSearchType,
     // Default "my channels" ON everywhere (restrict to the user's channels by default),

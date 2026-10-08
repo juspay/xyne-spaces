@@ -191,6 +191,8 @@ export class ACLFactory {
       return new BaseQueryACL(ctx, prisma)
     case 'executionRunLog':
       return new BaseQueryACL(ctx, prisma)
+    case 'radarPrLink':
+      return new BaseQueryACL(ctx, prisma)
     // Rules are per user, and every read is already scoped to (workspaceId,
     // userId) by radarRuleStore — there is no route that reads anyone else's.
     case 'radarRule':
@@ -550,6 +552,9 @@ export class ACLFactory {
     case 'entityAlias':
       return new BaseQueryACL(ctx, prisma)
     case 'deskAutoLabelRuleReference':
+      return new BaseQueryACL(ctx, prisma)
+    case 'connectGroup':
+      // Slack Connect reach table — default ACL in Phase 1 (no per-row restriction yet).
       return new BaseQueryACL(ctx, prisma)
     }
   }

@@ -59,6 +59,7 @@ import {
   SavedConfigEntityName,
   ViewAccessEntityType,
   GuestEntity,
+  ConnectEntityType,
   WorkspaceRole,
   Status,
   OrgRole,
@@ -98,6 +99,7 @@ import {
   createSdlcLinkSchema,
   entityLinkContextSchema,
   sdlcIconNameSchema,
+  withKeptExtension,
 } from '../sdlc.js';
 import { isSdlcTreeItemType } from '../sdlcFolderAncestry.js';
 import { refileSdlcFolderEdges } from './sdlcFolderAncestry.js';
@@ -5986,6 +5988,13 @@ export const mutators = defineMutators({
         content: z.any().optional(),
         timestamp: z.number(),
         participantId: z.string(),
+        // Slack Connect (Phase 1): caller-generated so the optimistic client run and the
+        // authoritative server run write the SAME value (a uuid minted inside the mutator
+        // would diverge across the two runs). Optional for rolling-deploy safety — when
+        // absent we skip the connect_group row (canvas.connectId stays null and the
+        // workspaceId fallback covers it). This is the host/private row, one per connectId,
+        // so it doubles as the row's primary key (id = connectId).
+        connectId: z.string().optional(),
         // Legacy fields (pre-XYNE-17290). Accepted so old clients don't get
         // Zod validation errors during a rolling deploy; intentionally
         // ignored — the canonical `id` is the only identity we write.
@@ -6005,6 +6014,7 @@ export const mutators = defineMutators({
           content,
           timestamp,
           participantId,
+          connectId,
         },
       }) => {
         const now = timestamp;
@@ -6041,7 +6051,24 @@ export const mutators = defineMutators({
           createdAt: now,
           updatedAt: now,
           metadata: {},
+          connectId,
         });
+
+        // Slack Connect: create this canvas's private connect_group row (Phase 1 = a
+        // single workspace; invited side stays NULL). Skipped for old clients that don't
+        // pass the caller-generated ids — the workspaceId fallback covers those.
+        if (connectId) {
+          await tx.mutate.connect_group.insert({
+            id: connectId, // host/private row: one per connectId, so id == connectId
+            entityType: ConnectEntityType.CANVAS,
+            entityId: id,
+            hostWorkspaceId: ctx.workspaceId,
+            connectId,
+            status: 'ACTIVE',
+            createdAt: now,
+            updatedAt: now,
+          });
+        }
 
         // Add creator as participant with OWNER role
         await tx.mutate.canvas_participants.insert({
@@ -6052,6 +6079,7 @@ export const mutators = defineMutators({
           role: CanvasRole.OWNER,
           joinedAt: now,
           updatedAt: now,
+          ...(connectId ? { canvasConnectId: connectId } : {}),
         });
       },
     ),
@@ -6294,6 +6322,7 @@ export const mutators = defineMutators({
             role,
             joinedAt: now,
             updatedAt: now,
+            ...(canvas?.connectId ? { canvasConnectId: canvas.connectId } : {}),
           });
         }
       },
@@ -6334,6 +6363,7 @@ export const mutators = defineMutators({
           role,
           joinedAt: timestamp,
           updatedAt: timestamp,
+          ...(canvas?.connectId ? { canvasConnectId: canvas.connectId } : {}),
         });
       },
     ),
@@ -6385,6 +6415,7 @@ export const mutators = defineMutators({
           role,
           joinedAt: timestamp,
           updatedAt: timestamp,
+          ...(canvas?.connectId ? { canvasConnectId: canvas.connectId } : {}),
         });
       },
     ),
@@ -6678,6 +6709,7 @@ export const mutators = defineMutators({
           isStarred: true,
           createdAt: timestamp,
           updatedAt: timestamp,
+          ...(canvas?.connectId ? { canvasConnectId: canvas.connectId } : {}),
         });
       },
     ),
@@ -6697,6 +6729,9 @@ export const mutators = defineMutators({
       async ({ tx, ctx, args: { threadId, commentId, canvasId, blockId, anchorText, body, mentionedUserIds, timestamp } }) => {
         await assertCanvasCommentEditAccess(tx, canvasId, ctx.userID, ctx.workspaceId);
 
+        // Slack Connect: inherit the parent canvas's connectId (null until backfilled).
+        const canvas = await tx.run(zql.canvases.where('id', canvasId).one());
+
         await tx.mutate.canvas_comment_threads.insert({
           id: threadId,
           workspaceId: ctx.workspaceId,
@@ -6710,6 +6745,7 @@ export const mutators = defineMutators({
           statusUpdatedAt: null,
           createdBy: ctx.userID,
           createdAt: timestamp,
+          ...(canvas?.connectId ? { canvasConnectId: canvas.connectId } : {}),
         });
 
         await tx.mutate.canvas_comments.insert({
@@ -6724,6 +6760,7 @@ export const mutators = defineMutators({
           editedAt: null,
           deletedAt: null,
           createdAt: timestamp,
+          ...(canvas?.connectId ? { canvasConnectId: canvas.connectId } : {}),
         });
       },
     ),
@@ -6749,6 +6786,9 @@ export const mutators = defineMutators({
 
         await assertCanvasCommentEditAccess(tx, canvasId, ctx.userID, ctx.workspaceId);
 
+        // Slack Connect: inherit the parent canvas's connectId (null until backfilled).
+        const canvas = await tx.run(zql.canvases.where('id', canvasId).one());
+
         await tx.mutate.canvas_comments.insert({
           id: commentId,
           workspaceId: ctx.workspaceId,
@@ -6761,6 +6801,7 @@ export const mutators = defineMutators({
           editedAt: null,
           deletedAt: null,
           createdAt: timestamp,
+          ...(canvas?.connectId ? { canvasConnectId: canvas.connectId } : {}),
         });
 
         const commentCount = await getCanvasThreadCommentCount(tx, threadId, ctx.workspaceId);
@@ -6936,6 +6977,7 @@ export const mutators = defineMutators({
           createdBy: ctx.userID,
           createdAt: timestamp,
           updatedAt: timestamp,
+          ...(canvas?.connectId ? { canvasConnectId: canvas.connectId } : {}),
         });
       },
     ),
@@ -7321,9 +7363,10 @@ export const mutators = defineMutators({
         name: z.string(),
         emoji: z.string().nullable().optional(),
         position: z.string(),
+        filterMode: z.nativeEnum(ChannelFilterMode).nullable().optional(),
         timestamp: z.number(),
       }),
-      async ({ tx, ctx, args: { id, name, emoji, position, timestamp } }) => {
+      async ({ tx, ctx, args: { id, name, emoji, position, filterMode, timestamp } }) => {
         // Reject a name this user already uses in this workspace (case-insensitive).
         const siblings = await tx.run(
           zql.channel_sections
@@ -7344,6 +7387,7 @@ export const mutators = defineMutators({
           position,
           isCollapsed: false,
           isDeleted: false,
+          ...(filterMode !== undefined && { filterMode: filterMode ?? null }),
           createdAt: timestamp,
           updatedAt: timestamp,
         });
@@ -7923,6 +7967,10 @@ export const mutators = defineMutators({
             boardId: z.string(),
             weight: z.number(),
             usePercentage: z.boolean(),
+            percentageWindowDays: z.number().int().min(1).max(90).optional(),
+            percentageShareBasis: z.enum(['ALL', 'OPEN']).optional(),
+            // Start of the first share window (ms); null clears it. Omit to keep the current start.
+            percentageWindowStartAt: z.number().nullable().optional(),
           })
           .optional(),
         expertiseMappings: z
@@ -8038,6 +8086,15 @@ export const mutators = defineMutators({
               id: existingScore.id,
               weight: boardWeight.weight,
               usePercentage: boardWeight.usePercentage,
+              ...(boardWeight.percentageWindowDays !== undefined && {
+                percentageWindowDays: boardWeight.percentageWindowDays,
+              }),
+              ...(boardWeight.percentageShareBasis !== undefined && {
+                percentageShareBasis: boardWeight.percentageShareBasis,
+              }),
+              ...(boardWeight.percentageWindowStartAt !== undefined && {
+                percentageWindowStartAt: boardWeight.percentageWindowStartAt,
+              }),
               updatedAt: now,
             });
           } else {
@@ -8054,6 +8111,9 @@ export const mutators = defineMutators({
               boardId: boardWeight.boardId,
               weight: boardWeight.weight,
               usePercentage: boardWeight.usePercentage,
+              percentageWindowDays: boardWeight.percentageWindowDays ?? null,
+              percentageShareBasis: boardWeight.percentageShareBasis ?? null,
+              percentageWindowStartAt: boardWeight.percentageWindowStartAt ?? null,
               createdBy: ctx.userID,
               createdAt: now,
               updatedAt: now,
@@ -8417,6 +8477,61 @@ export const mutators = defineMutators({
           id: args.folderId,
           name: args.name,
           updatedAt: args.timestamp,
+        });
+      },
+    ),
+
+    /**
+     * Rename a link or an uploaded file in a hub — what the explorer and the file list
+     * call it. Any member can, as with folders; a file keeps its extension, so it
+     * still opens and previews as what it is. Artifacts are renamed through
+     * canvas.update, under their own edit access.
+     */
+    renameSdlcItem: defineMutator(
+      z.object({
+        itemType: z.enum(['LINK', 'ATTACHMENT']),
+        itemId: z.string(),
+        channelId: z.string(),
+        name: z.string().trim().min(1).max(300),
+        timestamp: z.number(),
+      }),
+      async ({ tx, ctx, args }) => {
+        const participant = await tx.run(
+          zql.channel_participants
+            .where('channelId', args.channelId)
+            .where('userId', ctx.userID)
+            .one(),
+        );
+        if (!participant) {
+          throw new Error('Hub membership required');
+        }
+        const placement = await tx.run(
+          zql.sdlc_entity_links
+            .where('channelId', args.channelId)
+            .where('sourceType', 'TRACK')
+            .where('targetType', args.itemType)
+            .where('targetId', args.itemId)
+            .where('relationType', SDLC_TRACK_FLAT_RELATION)
+            .one(),
+        );
+        if (!placement) {
+          throw new Error('Not found in this hub');
+        }
+        if (args.itemType === 'LINK') {
+          await tx.mutate.links.update({
+            id: args.itemId,
+            title: args.name,
+            updatedAt: args.timestamp,
+          });
+          return;
+        }
+        const attachment = await tx.run(zql.message_attachments.where('id', args.itemId).one());
+        if (!attachment) {
+          throw new Error('File not found');
+        }
+        await tx.mutate.message_attachments.update({
+          id: args.itemId,
+          originalFilename: withKeptExtension(attachment.originalFilename, args.name),
         });
       },
     ),

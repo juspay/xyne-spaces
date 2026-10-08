@@ -19,6 +19,7 @@
 
 import type { Request } from "express";
 import { getRequesterId, isClawAdmin } from "../middleware/agent-acl.js";
+import { matchesAuthenticatedUserId } from "../middleware/pin-user-id-param.js";
 
 export type ScheduledJobControlAuthResult =
   | { ok: true; actorUserId: string }
@@ -30,7 +31,9 @@ export async function assertCanControlScheduledJob(
 ): Promise<ScheduledJobControlAuthResult> {
   const requesterId = getRequesterId(req);
   if (requesterId) {
-    if (row.userId === requesterId || (await isClawAdmin(requesterId))) {
+    // The job row may be keyed by either verified id form of the owner
+    // (canonical Claw id or the workspace's raw Spaces id) — match both.
+    if (matchesAuthenticatedUserId(req, row.userId) || (await isClawAdmin(requesterId))) {
       return { ok: true, actorUserId: requesterId };
     }
     return { ok: false, status: 404, error: "Not found" };

@@ -11,6 +11,7 @@ import { RunDateRangeFilter } from "../../runs/RunDateRangeFilter";
 import { RunListFooter } from "../../runs/RunListFooter";
 import { runOwnerLabel, rangeToIso, type RunRangePreset } from "../../../lib/runFormat";
 import { runReplayPath } from "../../../../lib/runReplay";
+import { isCurrentUser } from "../../../../lib/identity";
 
 interface Props {
   agentSlug: string;
@@ -316,7 +317,7 @@ export function RunHistoryTab({ agentSlug, userId, canViewAllRuns }: Props) {
             // shared twin thread never renders a confusing mix of other people's
             // turns unless explicitly inspected from here.
             onOpen={(() => {
-              const path = runReplayPath(run, { allRuns: run.userId !== userId });
+              const path = runReplayPath(run, { allRuns: !isCurrentUser(run.userId) });
               return path ? () => navigate(path) : undefined;
             })()}
           />

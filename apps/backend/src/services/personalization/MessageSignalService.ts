@@ -14,6 +14,8 @@ export interface MessageSignalContext {
     channelScopeType?: ChannelScopeType;
     isReply?: boolean;
     replyCount?: number;
+    // ms epoch the message was sent (original time for imported history); signals decay by its age
+    createdAt?: number;
 }
 
 export class MessageSignalService {
@@ -46,7 +48,8 @@ export class MessageSignalService {
             channelId,
             mentionUserIds,
             channelScopeType,
-            replyCount = 0
+            replyCount = 0,
+            createdAt: occurredAt
         } = context;
 
         // Derive flags
@@ -63,6 +66,7 @@ export class MessageSignalService {
             userId: senderId,
             channelId: channelId,
             signalType: channelSignalType,
+            occurredAt,
             metadata: {
                 messageId,
                 conversationId,
@@ -84,6 +88,7 @@ export class MessageSignalService {
                     fromUserId: senderId,
                     toUserId: parentMessage.senderId,
                     signalType: SignalType.USER_REPLIED_TO,
+                    occurredAt,
                     metadata: {
                         messageId,
                         conversationId,
@@ -111,6 +116,7 @@ export class MessageSignalService {
                         fromUserId: senderId,
                         toUserId: participant.userId,
                         signalType: SignalType.USER_DM_SENT,
+                        occurredAt,
                         metadata: {
                             messageId,
                             conversationId,
@@ -125,6 +131,7 @@ export class MessageSignalService {
                         fromUserId: participant.userId,
                         toUserId: senderId,
                         signalType: SignalType.USER_DM_RECEIVED,
+                        occurredAt,
                         metadata: {
                             messageId,
                             conversationId,
@@ -149,6 +156,7 @@ export class MessageSignalService {
                         fromUserId: senderId,
                         toUserId: userId,
                         signalType: SignalType.USER_MENTIONED,
+                        occurredAt,
                         metadata: {
                             messageId,
                             conversationId,
@@ -160,6 +168,7 @@ export class MessageSignalService {
                         userId: userId,
                         channelId: channelId,
                         signalType: SignalType.CHANNEL_MENTIONED_IN,
+                        occurredAt,
                         metadata: {
                             messageId,
                             conversationId,

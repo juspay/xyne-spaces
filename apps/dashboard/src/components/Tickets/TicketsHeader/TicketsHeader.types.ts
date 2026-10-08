@@ -38,12 +38,6 @@ export interface FilterPickerContext {
   availableBoardDetails?: BoardOption[] | undefined;
   sourceChannelProjectIds?: string[] | undefined;
   /**
-   * Whether the board picker offers "All boards" (an empty selection). Channels
-   * pass false: their boards come from channel_board_mappings and an empty
-   * selection would leave the ticket query with no scope at all.
-   */
-  allowAllBoards?: boolean;
-  /**
    * Offer "All Boards" even when there is only one board to pick. A track view sets
    * it: its tickets can sit on boards the hub doesn't list, so all boards is a real
    * choice there, and the way back once one board is picked.
@@ -53,6 +47,7 @@ export interface FilterPickerContext {
   onLoadMoreTags?: () => void;
   hasMoreTags?: boolean;
   onSearchTags?: (query: string) => void;
+  recentLabelsBoardIds?: string[] | undefined;
   availableStages?: { name: string; status?: TicketStatusV2 | undefined }[] | undefined;
   formMappings?: readonly FormContextMapping[] | undefined;
   selectedBoardName?: string | undefined;
