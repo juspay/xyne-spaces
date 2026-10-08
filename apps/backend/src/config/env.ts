@@ -311,7 +311,9 @@ const envSchema = Joi.object({
   WORKFLOWS_KATA_NAMESPACE: Joi.string().default('xyne-apps'),
   WORKFLOWS_KATA_TEMPLATE: Joi.string().default('kata-workspace-template'),
   WORKFLOWS_SANDBOX_SESSION_TTL_MS: Joi.number().integer().min(60_000).default(15 * 60 * 1000),
-  WORKFLOWS_SANDBOX_READY_TIMEOUT_MS: Joi.number().integer().min(5_000).default(120_000),
+  // kata-workspace-template has no warm pool in prod, so every claim is a cold kata-qemu boot;
+  // claw allows up to 10 min for its (snapshot-backed) templates. 5 min covers a cold boot.
+  WORKFLOWS_SANDBOX_READY_TIMEOUT_MS: Joi.number().integer().min(5_000).default(300_000),
   WORKFLOWS_SANDBOX_EXEC_TIMEOUT_MS: Joi.number().integer().min(1_000).default(120_000),
   ENABLE_RECAP_SCHEDULER: Joi.boolean().default(true),
   RECAP_GENERATION_CRON: Joi.string().default('15 0 * * *'), //5:45 IST daily

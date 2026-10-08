@@ -197,14 +197,24 @@ export class KataSandboxAdapter implements SandboxAdapter {
     throwIfAborted(opts?.signal);
     const startedAt = Date.now();
     const client = await this.client();
-    const session = await withAbort(
-      client.createSession({
-        timeoutMs: this.opts.sessionTtlMs,
-        readyTimeoutMs: this.opts.readyTimeoutMs,
-        idleTimeoutMs: this.opts.sessionTtlMs,
-      }),
-      opts?.signal,
-    );
+    const pending = client.createSession({
+      timeoutMs: this.opts.sessionTtlMs,
+      readyTimeoutMs: this.opts.readyTimeoutMs,
+      idleTimeoutMs: this.opts.sessionTtlMs,
+    });
+    let session: KataSession;
+    try {
+      session = await withAbort(pending, opts?.signal);
+    } catch (err) {
+      // On abort `withAbort` rejects immediately, but the SandboxClaim already exists and keeps
+      // binding. Reap it as soon as it lands instead of leaving a VM up until `sessionTtlMs`.
+      // (If the SDK itself timed out, it does not delete its claim — the claim's shutdownTime
+      // of `sessionTtlMs` is what bounds that leak.)
+      if (opts?.signal?.aborted) {
+        void pending.then((s) => s.destroy()).catch(() => undefined);
+      }
+      throw err;
+    }
     try {
       // The Sandbox reports Ready before the in-VM agent always answers; probe it.
       await withAbort(session.waitUntilReady(this.opts.readyTimeoutMs), opts?.signal);
