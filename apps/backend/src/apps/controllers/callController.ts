@@ -247,6 +247,23 @@ export class AppCallController {
   };
 
   /**
+   * DELETE /api/apps/calls/:callId — cancel a SCHEDULED call. Reuses the native
+   * cancel flow: only the organizer (the app's user) may cancel, the record is
+   * kept with status CANCELLED, and the calendar event is withdrawn.
+   */
+  cancelScheduledCall = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+    try {
+      await scheduleCallController.cancelScheduledCall(req, res);
+    } catch (error) {
+      logger.error(
+        `[AppCallController] [${req.params.callId}] Failed to cancel scheduled call:`,
+        error,
+      );
+      next(error);
+    }
+  };
+
+  /**
    * GET /api/apps/calls/summary-templates — every template visible to the
    * installing user: their own, workspace-public, and explicitly shared ones.
    *
