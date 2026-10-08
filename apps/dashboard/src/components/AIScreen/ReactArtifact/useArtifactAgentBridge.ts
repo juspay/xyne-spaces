@@ -34,7 +34,7 @@ interface AgentBridgeArgs {
   /** Feature flag only. Authorization is the server's, per the caller's ACLs. */
   canInvokeAgents: boolean;
   previewRef: MutableRefObject<PreviewClientRef | null>;
-  /** While hidden, new runs wait for the app to be shown. */
+  /** While hidden, new runs are refused. */
   visibility?: ArtifactVisibility;
 }
 
@@ -378,8 +378,6 @@ export function useArtifactAgentBridge({
       void finalize(key);
     }
 
-    const heldRuns = new Map<string, { prompt: string; agentSlug: string | undefined }>();
-
     const onMessage = (event: MessageEvent): void => {
       if (!isAppArtifactMessage(event.data)) return;
       if (!isFromArtifactFrame(event, previewRef)) return;
@@ -390,31 +388,27 @@ export function useArtifactAgentBridge({
         return;
       }
       if (type === 'agent-run' && runKey && event.data.prompt) {
-        // Runs have no timeout, so a start from a hidden app waits; the latest per key wins.
+        // Refused like a write: a run started late would act on what the app saw while hidden.
         if (visibility && !visibility.isActive()) {
-          heldRuns.set(runKey, { prompt: event.data.prompt, agentSlug: event.data.agentSlug });
+          const state = stateFor(runKey);
+          state.status = 'failed';
+          state.error = 'This app is in the background, so it cannot start an agent.';
+          postEvent(runKey, { kind: 'error', error: state.error });
           return;
         }
         void startRun(runKey, event.data.prompt, event.data.agentSlug);
         return;
       }
       if (type === 'agent-cancel' && runKey) {
-        heldRuns.delete(runKey);
         void cancelRun(runKey);
       }
     };
-
-    const stopResume = visibility?.onResume(() => {
-      for (const [runKey, run] of heldRuns) void startRun(runKey, run.prompt, run.agentSlug);
-      heldRuns.clear();
-    });
 
     window.addEventListener('message', onMessage);
 
     return (): void => {
       cancelled = true;
       window.removeEventListener('message', onMessage);
-      stopResume?.();
       // Stop WATCHING every key. The runs themselves keep going server-side —
       // that is the entire point, and aborting them here would break it.
       keys.forEach(state => {

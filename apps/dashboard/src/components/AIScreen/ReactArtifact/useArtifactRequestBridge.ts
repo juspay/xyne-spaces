@@ -24,11 +24,11 @@ interface BridgeArgs {
   /** The saved app's id. Injected into storage requests so an app can only ever
    *  touch its OWN storage — the app never sets (or can spoof) it. */
   appId?: string;
-  /** While hidden, requests wait for the app to be shown. */
+  /** While hidden, reads wait for the app to be shown and writes are refused. */
   visibility?: ArtifactVisibility;
 }
 
-/** Requests held for a hidden app; a polling app's oldest are failed past this. */
+/** Reads held for a hidden app; a polling app's oldest are failed past this. */
 const MAX_HELD_REQUESTS = 20;
 
 /** Storage requests carry appId in their JSON body; the host owns that value. */
@@ -179,8 +179,13 @@ export function useArtifactRequestBridge({ previewRef, appId, visibility }: Brid
 
       const { requestId, method, url, headers, body } = event.data;
       if (!requestId || !method || !url) return;
-      // Safe to hold: app requests have no timeout, so they simply resolve once the app is shown.
       if (visibility && !visibility.isActive()) {
+        // Only reads wait for the app to be shown; a write sent late would act on stale state, so refuse it like mutate.
+        const verb = method.toUpperCase();
+        if (verb !== 'GET' && verb !== 'HEAD') {
+          reply(requestId, 0, {}, '', 'This app is in the background, so it cannot make changes.');
+          return;
+        }
         held.push([requestId, method, url, headers, body]);
         const dropped = held.length > MAX_HELD_REQUESTS ? held.shift() : undefined;
         if (dropped) reply(dropped[0], 0, {}, '', 'Dropped while the app was in the background.');
