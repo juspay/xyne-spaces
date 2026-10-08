@@ -7,6 +7,7 @@ import {
 	slackRawBodyAuthenticateApp,
 } from "./middleware";
 import { requirePermission } from "@/middleware/requirePermission";
+import { withChatPostMessageIdempotency } from "./idempotency";
 
 const router = Router();
 const controller = new SlackController();
@@ -28,7 +29,7 @@ router.post(
 	"/chat.postMessage",
 	requirePermission("chat:write"),
 	slackChannelValidation("body"),
-	controller.chatPostMessage,
+	withChatPostMessageIdempotency(controller.chatPostMessage),
 );
 
 router.post(
