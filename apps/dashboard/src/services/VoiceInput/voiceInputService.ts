@@ -16,7 +16,8 @@ export interface VoiceStreamSession {
   /** Hard-close immediately (abort / error / unmount) — may drop the tail. */
   close(): void;
   onMessage(handler: (msg: VoiceStreamMessage) => void): void;
-  onClose(handler: () => void): void;
+  onOpen(handler: () => void): void;
+  onClose(handler: (event: CloseEvent) => void): void;
   onError(handler: (ev: Event) => void): void;
 }
 
@@ -109,7 +110,11 @@ class VoiceInputService {
           }
         });
       },
-      onClose(handler: () => void): void {
+      onOpen(handler: () => void): void {
+        if (ws.readyState === window.WebSocket.OPEN) handler();
+        else ws.addEventListener('open', handler, { once: true });
+      },
+      onClose(handler: (event: CloseEvent) => void): void {
         ws.addEventListener('close', handler);
       },
       onError(handler: (ev: Event) => void): void {

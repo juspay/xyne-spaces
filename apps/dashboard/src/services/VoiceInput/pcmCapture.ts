@@ -74,7 +74,10 @@ export async function startPcmCapture(params: {
   onLevel?: (level: number) => void;
   /** Microphone to use; the default one when omitted or no longer available. */
   deviceId?: string | null | undefined;
+  /** Each step of opening the microphone, for the voice debugger. */
+  onStep?: (step: string, detail?: string) => void;
 }): Promise<PcmCapture> {
+  const step = params.onStep ?? ((): void => undefined);
   if (!isPcmCaptureSupported()) {
     throw new Error('Audio capture is not supported in this browser');
   }
@@ -90,6 +93,7 @@ export async function startPcmCapture(params: {
   }
   // Started inside the user's press: Safari only lets an audio context run when it was resumed there.
   const { context, workletLoaded } = sharedAudio();
+  step('Audio context', context.state);
   const running = context.resume();
   activeCaptures++;
   // The last capture to end puts the context back to sleep (a context that failed to load is already closed).
@@ -100,15 +104,18 @@ export async function startPcmCapture(params: {
     if (--activeCaptures === 0) context.suspend().catch(() => undefined);
   };
   let stream: MediaStream;
+  step('Requesting microphone', params.deviceId ? 'chosen device' : 'default device');
   try {
     stream = await openMicrophone(audio, params.deviceId);
   } catch (error) {
     release();
     throw error;
   }
+  step('Microphone granted', stream.getAudioTracks()[0]?.label ?? '');
 
   try {
     await Promise.all([running, workletLoaded]);
+    step('Audio running', `context ${context.state}, worklet loaded, ${context.sampleRate} Hz`);
     const source = context.createMediaStreamSource(stream);
     const worklet = new AudioWorkletNode(context, 'pcm-capture', {
       numberOfInputs: 1,

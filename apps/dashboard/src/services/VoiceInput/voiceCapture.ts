@@ -1,11 +1,17 @@
 import { isPcmCaptureSupported, startPcmCapture, type PcmCapture } from './pcmCapture';
 import { voiceInputService, type VoiceStreamSession } from './voiceInputService';
+import { voiceDebug } from './voiceDebug';
+
+// The status strip counts frames, updated once a second (ten 100 ms frames) rather than per frame.
+const STATUS_EVERY_FRAMES = 10;
 
 // Safety net after end-of-audio: if the server never closes the stream, force-close it so
 // callers can't stay on "transcribing".
 const FORCE_CLOSE_MS = 12000;
 
 export interface UtteranceOptions {
+  /** Language to transcribe in ('en'); the server detects it when omitted. */
+  language?: string;
   /** 'manual' ends the utterance only when stopped; by default the server also ends phrases on silence. */
   commit?: 'manual';
   /** Microphone to use; the default one when omitted or no longer available. */
@@ -66,6 +72,20 @@ export function startUtterance(options: UtteranceOptions = {}): Utterance {
   let closeTimer: number | undefined;
   let stopped = false;
   let over = false;
+  let frames = 0;
+  let bytes = 0;
+  let firstFrameLogged = false;
+  const countFrame = (frame: ArrayBuffer): void => {
+    frames++;
+    bytes += frame.byteLength;
+    if (!firstFrameLogged) {
+      firstFrameLogged = true;
+      voiceDebug.log('mic', 'First audio frame', `${frame.byteLength} bytes`);
+    }
+    if (frames % STATUS_EVERY_FRAMES === 0) {
+      voiceDebug.setStatus({ framesSent: frames, bytesSent: bytes });
+    }
+  };
 
   const committed = (): string => finals.join(' ').trim();
   const release = (): void => {
@@ -98,10 +118,22 @@ export function startUtterance(options: UtteranceOptions = {}): Utterance {
     let opened: PcmCapture;
     try {
       // Frames are sent through `session`, which is open by the time the first one arrives.
+      voiceDebug.setStatus({ mic: 'starting', micLabel: '', framesSent: 0, bytesSent: 0 });
       opened = await startPcmCapture({
-        onFrame: frame => session?.sendChunk(frame),
+        onFrame: frame => {
+          countFrame(frame);
+          session?.sendChunk(frame);
+        },
         onLevel: level => options.onLevel?.(level),
         deviceId: options.deviceId,
+        onStep: (step, detail) => {
+          voiceDebug.log('mic', step, detail);
+          if (step === 'Audio context' || step === 'Audio running') {
+            voiceDebug.setStatus({
+              audioContext: detail?.split(',')[0]?.replace('context ', '') ?? '',
+            });
+          }
+        },
       });
       if (over) {
         opened.stop();
@@ -109,15 +141,34 @@ export function startUtterance(options: UtteranceOptions = {}): Utterance {
       }
       capture = opened;
     } catch (error) {
+      const name = error instanceof Error ? error.name : 'Error';
+      const message = error instanceof Error ? error.message : String(error);
+      voiceDebug.log('mic', 'Microphone failed', `${name}: ${message}`, { level: 'error' });
+      voiceDebug.setStatus({ mic: 'error' });
       if (!over) ready.reject(error);
       return;
     }
+    voiceDebug.setStatus({ mic: 'live', micLabel: opened.label });
     const open = voiceInputService.openStreamSession({
       format: 'pcm16',
       ...(options.commit && { commit: options.commit }),
+      ...(options.language && { language: options.language }),
     });
     session = open;
+    const openedAt = performance.now();
+    voiceDebug.log('socket', 'Connecting', 'voice-input/stream, pcm16');
+    voiceDebug.setStatus({ socket: 'connecting' });
+    open.onOpen(() => {
+      voiceDebug.log('socket', 'Open', `after ${Math.round(performance.now() - openedAt)}ms`);
+      voiceDebug.setStatus({ socket: 'open' });
+    });
     open.onMessage(msg => {
+      voiceDebug.setStatus({ lastServerMessage: msg.type });
+      if (msg.type === 'error') {
+        voiceDebug.log('stt', 'Server error', msg.message ?? 'no message', { level: 'error' });
+      } else if (msg.type === 'final') {
+        voiceDebug.log('stt', 'Final phrase', `“${msg.text ?? ''}”`);
+      }
       if (over) return;
       if (msg.type === 'partial' && msg.text) {
         options.onPartial?.(msg.text, committed());
@@ -128,12 +179,25 @@ export function startUtterance(options: UtteranceOptions = {}): Utterance {
         fail(new Error(msg.message ?? 'Streaming error'));
       }
     });
-    open.onClose(() => {
+    open.onClose(event => {
+      voiceDebug.log(
+        'socket',
+        'Closed',
+        `code ${event.code}${event.reason ? ` (${event.reason})` : ''}, ${frames} frames / ${bytes} bytes sent`,
+        { level: event.code === 1000 || event.code === 1005 ? 'info' : 'warn' },
+      );
+      voiceDebug.setStatus({ socket: 'closed', mic: 'off', framesSent: frames, bytesSent: bytes });
       if (!finish()) return;
       session = null;
       ended.resolve(committed());
     });
-    open.onError(() => fail(new Error('Voice stream disconnected unexpectedly')));
+    open.onError(() => {
+      voiceDebug.log('socket', 'Error', 'the socket failed (auth, origin or network)', {
+        level: 'error',
+      });
+      voiceDebug.setStatus({ socket: 'error' });
+      fail(new Error('Voice stream disconnected unexpectedly'));
+    });
     ready.resolve(opened.label);
   })();
 

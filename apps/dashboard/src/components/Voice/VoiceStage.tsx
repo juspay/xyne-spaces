@@ -12,7 +12,7 @@ import {
 } from './VoiceControls';
 import { DiagnosePanel } from './DiagnosePanel';
 import { VoiceSettingsPopover } from './VoiceSettingsPopover';
-import { DIAGNOSE_ENABLED } from './diagnoseLog';
+import { VOICE_DEBUG_ENABLED } from '../../services/VoiceInput/voiceDebug';
 import { useVoiceSession, voiceSession, type VoicePhase } from './voiceSession';
 
 interface VoiceStageProps {
@@ -33,7 +33,7 @@ type Panel = 'transcript' | 'diagnose';
 
 /** Voice mode for the sidebar and the /ai page: the orb centered with its status and current line, the transcript or diagnostics in a panel below on request. */
 export function VoiceStage({ studioMode }: VoiceStageProps): ReactElement {
-  const { phase, liveText, turns, diagnostics, playbackBlocked } = useVoiceSession();
+  const { phase, liveText, turns, playbackBlocked } = useVoiceSession();
   const [panel, setPanel] = useState<Panel | null>(null);
   const toggle = (next: Panel): void => setPanel(open => (open === next ? null : next));
   const stageRef = useRef<HTMLElement>(null);
@@ -108,7 +108,7 @@ export function VoiceStage({ studioMode }: VoiceStageProps): ReactElement {
 
       {panel === 'diagnose' && (
         <div className='mt-2 flex min-h-0 w-full flex-[2] flex-col'>
-          <DiagnosePanel events={diagnostics} />
+          <DiagnosePanel phase={phase} />
         </div>
       )}
       {panel === 'transcript' && (
@@ -139,14 +139,18 @@ export function VoiceStage({ studioMode }: VoiceStageProps): ReactElement {
         <VoiceSettingsPopover />
         <IconButton
           label={panel === 'transcript' ? 'Hide transcript' : 'Show transcript'}
+            data-track-category='XyneAI'
+            data-track-name='VOICE_MODE_TRANSCRIPT'
           className={cn(panel === 'transcript' && 'bg-accent text-foreground')}
           onClick={() => toggle('transcript')}
         >
           <Captions />
         </IconButton>
-        {DIAGNOSE_ENABLED && (
+        {VOICE_DEBUG_ENABLED && (
           <IconButton
-            label={panel === 'diagnose' ? 'Hide diagnostics' : 'Diagnose'}
+            label={panel === 'diagnose' ? 'Hide debugger' : 'Voice debugger'}
+            data-track-category='XyneAI'
+            data-track-name='VOICE_MODE_DEBUGGER'
             className={cn(panel === 'diagnose' && 'bg-accent text-foreground')}
             onClick={() => toggle('diagnose')}
           >

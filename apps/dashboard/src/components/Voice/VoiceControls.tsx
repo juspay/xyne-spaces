@@ -1,4 +1,4 @@
-import { type ComponentProps, type ReactElement, type RefObject } from 'react';
+import { useRef, type ComponentProps, type ReactElement, type RefObject } from 'react';
 import { Keyboard, Square, Volume2, VolumeX } from 'lucide-react';
 import { cn } from '../../utils/classNames';
 import { Button } from '../ui/Button';
@@ -6,6 +6,7 @@ import { Tooltip } from '../ui/Tooltip';
 import { VoiceOrb } from './VoiceOrb';
 import { updateVoiceSettings, useVoiceSettings } from './voiceSettings';
 import { useSpaceToTalk } from './useSpaceToTalk';
+import { voiceDebug } from '../../services/VoiceInput/voiceDebug';
 import type { VoicePhase } from './voiceSession';
 
 // The assistant is working out an answer: routing the request, waiting on Ask AI.
@@ -52,27 +53,54 @@ export function VoiceOrbButton({
   const busy = phase === 'transcribing' || isWorking(phase);
   const speaking = phase === 'speaking';
 
+  // Pointer up and the capture being lost both end a hold, so only the first one counts.
+  const holding = useRef(false);
+
+  // A press while busy is refused, and the debugger says so rather than the press vanishing.
+  const press = (source: string): boolean => {
+    if (busy) {
+      voiceDebug.log('input', 'Press ignored', `${source} while ${phase}`, { level: 'warn' });
+      return false;
+    }
+    voiceDebug.log('input', 'Pressed', source);
+    onHoldStart();
+    return true;
+  };
+  const release = (): void => {
+    if (!holding.current) return;
+    holding.current = false;
+    onHoldEnd();
+  };
+
   useSpaceToTalk(scope, {
-    onPress: () => {
-      if (!busy) onHoldStart();
-    },
+    onPress: () => press('Space'),
     onRelease: onHoldEnd,
   });
 
   return (
     <button
       type='button'
-      disabled={busy}
+      aria-disabled={busy}
       onPointerDown={e => {
+        if (e.button !== 0) return;
         e.preventDefault();
-        onHoldStart();
+        // Captured, the hold survives the pointer drifting off the orb and always gets its release.
+        e.currentTarget.setPointerCapture(e.pointerId);
+        holding.current = press(`orb (${e.pointerType})`);
       }}
-      onPointerUp={onHoldEnd}
-      onPointerLeave={onHoldEnd}
-      onPointerCancel={onHoldEnd}
+      onPointerUp={release}
+      onPointerCancel={() => {
+        if (holding.current) {
+          voiceDebug.log('input', 'Pointer cancelled', 'the browser took the pointer', {
+            level: 'warn',
+          });
+        }
+        release();
+      }}
+      onLostPointerCapture={release}
       aria-label={speaking ? 'Hold to interrupt and reply' : 'Hold to talk'}
       aria-pressed={phase === 'listening'}
-      className='flex h-40 w-40 shrink-0 select-none items-center justify-center rounded-full disabled:cursor-default'
+      className='flex h-40 w-40 shrink-0 touch-none select-none items-center justify-center rounded-full aria-disabled:cursor-default'
       data-track-category='XyneAI'
       data-track-name={speaking ? 'VOICE_MODE_BARGE_IN' : 'VOICE_MODE_PTT'}
     >

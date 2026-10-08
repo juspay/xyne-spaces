@@ -8,7 +8,7 @@ import {
 import { xyneAIStreamManager, type StreamState } from '../../services/XyneAI';
 import { splitSentences, flushRemainder, toSpokenText } from './voiceSentences';
 import { voiceLevel } from './voiceLevel';
-import { DIAGNOSE_ENABLED, type VoiceDiagnostic } from './diagnoseLog';
+import { voiceDebug, type VoiceDebugStage } from '../../services/VoiceInput/voiceDebug';
 import { getVoiceSettings, subscribeVoiceSettings } from './voiceSettings';
 import { createSpeechQueue } from './speechQueue';
 
@@ -34,8 +34,6 @@ export interface VoiceSessionState {
   // The current line: what you are saying while listening, then Xyne's reply as it streams in and is spoken.
   liveText: string;
   turns: VoiceTurn[];
-  // What happened, step by step; empty unless diagnostics are enabled (see diagnoseLog).
-  diagnostics: VoiceDiagnostic[];
   // The browser refused to start audio without a user gesture; resumePlayback retries inside a click.
   playbackBlocked: boolean;
 }
@@ -50,10 +48,16 @@ export interface VoiceHost {
   onStop?: (() => void) | undefined;
   // Leaves voice mode: the user went back to chat, or another surface took the session over.
   onExit: () => void;
+  // The session on this surface is over: drop anything left waiting on the user's next words.
+  onEnd?: (() => void) | undefined;
 }
 
 const MAX_TURNS = 20;
-const MAX_DIAGNOSTICS = 200;
+// A held orb whose microphone has not started by then is reported instead of waiting silently.
+const MIC_START_TIMEOUT_MS = 8_000;
+// Working out what to do with a transcript (routing, acting on the screen) is given up after this.
+const UNDERSTAND_TIMEOUT_MS = 30_000;
+const TAP_HINT = 'Keep holding the orb while you speak';
 // Ask AI gets 15s to start answering and 45s between updates before the turn is given up.
 const START_TIMEOUT_MS = 15_000;
 const STALL_TIMEOUT_MS = 45_000;
@@ -65,7 +69,6 @@ const IDLE: VoiceSessionState = {
   phase: 'idle',
   liveText: '',
   turns: [],
-  diagnostics: [],
   playbackBlocked: false,
 };
 
@@ -81,6 +84,7 @@ function setState(patch: Partial<VoiceSessionState>): void {
 
 const setPhase = (phase: VoicePhase): void => {
   if (phase !== state.phase) {
+    voiceDebug.log('session', 'Phase', `${state.phase} → ${phase}`);
     setState({ phase, ...(!TEXT_PHASES.includes(phase) && { liveText: '' }) });
   }
 };
@@ -91,8 +95,8 @@ let host: VoiceHost | null = null;
 let unsubscribe: (() => void) | null = null;
 let utterance: Utterance | null = null;
 let turnSeq = 0;
-let diagnosticSeq = 0;
-let holdStart: number | null = null;
+let holdStartedAt = 0;
+let micWatchdog: ReturnType<typeof setTimeout> | undefined;
 
 // The turn being followed: when it was submitted, what has been spoken of the streamed reply, and
 // which stream it is. `watchdog` gives the turn up when Ask AI goes quiet.
@@ -103,19 +107,10 @@ let consumed = 0;
 let activeStreamId: string | null = null;
 let watchdog: ReturnType<typeof setTimeout> | undefined;
 
-function log(step: string, detail = ''): void {
-  if (!DIAGNOSE_ENABLED) return;
-  const now = performance.now();
-  holdStart ??= now;
-  const event = {
-    id: diagnosticSeq++,
-    at: new Date(),
-    ms: Math.round(now - holdStart),
-    step,
-    detail,
-  };
-  setState({ diagnostics: [...state.diagnostics, event].slice(-MAX_DIAGNOSTICS) });
-}
+const log = (stage: VoiceDebugStage, step: string, detail = ''): void =>
+  voiceDebug.log(stage, step, detail);
+const logError = (stage: VoiceDebugStage, step: string, detail = ''): void =>
+  voiceDebug.log(stage, step, detail, { level: 'error' });
 
 function appendTurn(speaker: VoiceTurn['speaker'], text: string): void {
   const { turns } = state;
@@ -129,7 +124,7 @@ function appendTurn(speaker: VoiceTurn['speaker'], text: string): void {
 }
 
 const speech = createSpeechQueue({
-  log,
+  log: (step, detail) => log('tts', step, detail),
   onSpeaking: sentence => setState({ phase: 'speaking', liveText: sentence }),
   // A streamed reply may still add sentences, so running dry mid-reply is not the end.
   onDrained: () => {
@@ -154,7 +149,7 @@ function interrupt(): void {
 
 // Ends the turn with a message when Ask AI errored or went quiet.
 function failTurn(detail: string): void {
-  log('Ask AI', `error: ${detail}`);
+  logError('ask', 'Ask AI failed', detail);
   interrupt();
   speak(ASK_AI_FAILED);
   // Muted, the message would only be a caption in the transcript, so it also stays on the stage.
@@ -174,7 +169,7 @@ function enqueue(sentences: string[]): void {
   if (sentences.length === 0) return;
   const text = sentences.join(' ');
   appendTurn('xyne', text);
-  log('Reply queued', `“${text}”`);
+  log('tts', 'Reply queued', `“${text}”`);
   // Muted: the reply only shows as a caption. While a reply streams, its end resets the phase.
   if (!getVoiceSettings().speakReplies) {
     if (!turnActive) setPhase('idle');
@@ -238,7 +233,7 @@ function followReply(stream: StreamState): void {
   }
   // Aborted only ever means someone stopped it, so it ends quietly; an error gets a message.
   if (stream.status === 'aborted') {
-    log('Ask AI', 'stopped');
+    log('ask', 'Stopped');
     interrupt();
     setPhase('idle');
     return;
@@ -253,14 +248,35 @@ function followReply(stream: StreamState): void {
   if (content !== null) {
     if (!gotText) {
       gotText = true;
-      log('Ask AI', `first text after ${Date.now() - askedAt}ms`);
+      log('ask', 'First text', `after ${Date.now() - askedAt}ms`);
     }
     if (state.phase === 'asking') setState({ liveText: latestSentence(content) });
     processReply(content, done);
   } else if (done && !speech.isBusy()) setPhase('idle');
   if (done) {
-    log('Ask AI', 'done');
+    log('ask', 'Done');
     endTurn();
+  }
+}
+
+// The host's answer, given up after UNDERSTAND_TIMEOUT_MS so the orb never stays busy.
+async function understand(text: string): Promise<string | null> {
+  if (!host?.answer) {
+    log('route', 'No router on this surface', 'sending to Ask AI');
+    return null;
+  }
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<'timeout'>(resolve => {
+    timer = setTimeout(() => resolve('timeout'), UNDERSTAND_TIMEOUT_MS);
+  });
+  try {
+    const result = await Promise.race([host.answer(text), timeout]);
+    if (result !== 'timeout') return result;
+    logError('route', 'Timed out', `no decision after ${UNDERSTAND_TIMEOUT_MS / 1000}s`);
+    host.onStop?.();
+    return 'That took too long. Try again.';
+  } finally {
+    clearTimeout(timer);
   }
 }
 
@@ -275,69 +291,116 @@ async function handleTranscript(rawText: string): Promise<void> {
   try {
     const text = rawText.trim();
     if (!text) {
-      log('Transcript', 'empty');
+      voiceDebug.log('stt', 'Empty transcript', 'nothing was heard', { level: 'warn' });
       setPhase('idle');
+      setState({ liveText: "I didn't catch that. Try again." });
       return;
     }
-    log('Transcript', `“${text}”`);
+    log('stt', 'Transcript', `“${text}”`);
     appendTurn('you', text);
     setPhase('understanding');
-    const reply = (await host?.answer?.(text)) ?? null;
+    const routeStarted = performance.now();
+    const reply = await understand(text);
     if (session !== current || !host) return;
+    const took = `${Math.round(performance.now() - routeStarted)}ms`;
     if (reply === '') {
-      log('Routing', 'handled locally, nothing to say');
+      log('route', 'Handled, nothing to say', took);
       setPhase('idle');
       return;
     }
     if (reply !== null) {
-      log('Routing', `local reply “${reply}”`);
+      log('route', 'Replied', `${took}: “${reply}”`);
       speak(reply);
       return;
     }
-    log('Routing', 'sent to Ask AI');
+    log('route', 'Sent to Ask AI', took);
     consumed = 0;
     activeStreamId = null;
     turnActive = true;
     gotText = false;
     askedAt = Date.now();
     setPhase('asking');
-    log('Ask AI', 'request sent');
+    log('ask', 'Request sent');
     watch(START_TIMEOUT_MS);
     host.submit(text);
   } catch (err) {
     if (session !== current) return;
     const description = err instanceof Error ? err.message : 'Unknown error';
-    log('Error', `transcription failed: ${description}`);
+    logError('route', 'Failed', description);
     toast.error('Voice transcription failed', { description });
     setPhase('idle');
   }
 }
 
+// The browser's microphone permission, for the debugger; Safari has no query for it.
+async function logPermission(): Promise<void> {
+  try {
+    const status = await navigator.permissions.query({ name: 'microphone' as PermissionName });
+    voiceDebug.setStatus({ permission: status.state });
+    if (status.state === 'denied') {
+      voiceDebug.log('mic', 'Permission denied', 'allow the microphone in the site settings', {
+        level: 'error',
+      });
+    }
+  } catch {
+    voiceDebug.setStatus({ permission: 'unavailable' });
+  }
+}
+
 function startRecording(): void {
-  if (utterance) return;
-  holdStart = null;
-  log('Hold start');
+  if (utterance) {
+    voiceDebug.log('input', 'Hold ignored', 'a recording is already running', { level: 'warn' });
+    return;
+  }
+  voiceDebug.startTurn();
+  holdStartedAt = performance.now();
+  log('input', 'Hold start', `phase ${state.phase}`);
+  void logPermission();
   // Talking over the answer ends that turn, so the rest of it is not spoken.
   interrupt();
   const mine = startUtterance({
     commit: 'manual',
+    // Detection mixed in Hindi for English speech ("और अंडमान" for "random"), which then went into
+    // forms as typed; the assistant and the app's controls are in English.
+    language: 'en',
     deviceId: getVoiceSettings().micId,
     onLevel: voiceLevel.set,
     onPartial: (text, committed) => {
-      if (!state.liveText) log('First partial', `“${text}”`);
+      if (!state.liveText) log('stt', 'First partial', `“${text}”`);
       setState({ liveText: `${committed} ${text}`.trim() });
     },
     onFinal: (_text, committed) => setState({ liveText: committed }),
   });
   utterance = mine;
+  clearTimeout(micWatchdog);
+  micWatchdog = setTimeout(() => {
+    if (utterance !== mine || state.phase === 'listening') return;
+    logError('mic', 'Did not start', `still waiting after ${MIC_START_TIMEOUT_MS / 1000}s`);
+    toast.error(
+      'The microphone did not start. If the browser asks for permission, allow it and hold again.',
+    );
+    mine.cancel();
+    utterance = null;
+    setPhase('idle');
+  }, MIC_START_TIMEOUT_MS);
   mine.ready.then(
     label => {
-      log('Mic ready', label || 'unnamed device');
+      clearTimeout(micWatchdog);
+      log(
+        'mic',
+        'Ready',
+        `${label || 'unnamed device'} after ${Math.round(performance.now() - holdStartedAt)}ms`,
+      );
       setState({ liveText: '', phase: 'listening' });
     },
     (error: unknown) => {
+      clearTimeout(micWatchdog);
       utterance = null;
-      log('Error', `microphone: ${error instanceof Error ? error.message : 'access denied'}`);
+      logError(
+        'mic',
+        'Failed',
+        error instanceof Error ? `${error.name}: ${error.message}` : 'access denied',
+      );
       toast.error(micErrorMessage(error));
       setPhase('idle');
     },
@@ -346,12 +409,16 @@ function startRecording(): void {
     text => {
       utterance = null;
       // The server can end the stream first (e.g. an upstream error) while still listening.
-      if (state.phase === 'listening') setPhase('idle');
-      else void handleTranscript(text);
+      if (state.phase === 'listening') {
+        voiceDebug.log('socket', 'Ended while listening', 'the server closed the stream', {
+          level: 'warn',
+        });
+        setPhase('idle');
+      } else void handleTranscript(text);
     },
     (error: Error) => {
       utterance = null;
-      log('Error', error.message);
+      logError('stt', 'Stream failed', error.message);
       toast.error('Voice transcription failed', { description: error.message });
       setPhase('idle');
     },
@@ -359,21 +426,33 @@ function startRecording(): void {
 }
 
 function stopRecording(): void {
-  if (!utterance) return;
+  // Already released: the transcript is on its way.
+  if (!utterance || state.phase === 'transcribing') return;
   // Released before the microphone was granted, so nothing was said.
   if (state.phase !== 'listening') {
+    const held = Math.round(performance.now() - holdStartedAt);
+    voiceDebug.log(
+      'input',
+      'Released too early',
+      `after ${held}ms, before the microphone was ready`,
+      {
+        level: 'warn',
+      },
+    );
+    clearTimeout(micWatchdog);
     utterance.cancel();
     utterance = null;
+    setState({ liveText: TAP_HINT });
     return;
   }
-  log('Release');
+  log('input', 'Release', `held ${Math.round(performance.now() - holdStartedAt)}ms`);
   utterance.stop();
   setPhase('transcribing');
 }
 
 // Ends the current turn without leaving voice mode: silences speech and cancels routing and the LLM request.
 function stop(): void {
-  log('Stopped');
+  log('session', 'Stopped by user');
   interrupt();
   host?.onStop?.();
   setPhase('idle');
@@ -382,10 +461,10 @@ function stop(): void {
 // Drops everything of the session: the microphone, the speech, the turn and what was shown.
 function reset(): void {
   session++;
+  clearTimeout(micWatchdog);
   utterance?.cancel();
   utterance = null;
   interrupt();
-  holdStart = null;
   state = IDLE;
   listeners.forEach(listener => listener());
 }
@@ -422,11 +501,13 @@ function claim(next: VoiceHost): () => void {
   host = next;
   activate();
   if (previous && previous !== next) {
+    previous.onEnd?.();
     previous.onExit();
     reset();
   }
   return (): void => {
     if (host !== next) return;
+    next.onEnd?.();
     host = null;
     queueMicrotask(() => {
       if (!host) deactivate();
@@ -467,6 +548,7 @@ export function useVoiceHost(enabled: boolean, surface: VoiceHost): void {
       answer: async text => (await surfaceRef.current.answer?.(text)) ?? null,
       onStop: () => surfaceRef.current.onStop?.(),
       onExit: () => surfaceRef.current.onExit(),
+      onEnd: () => surfaceRef.current.onEnd?.(),
     });
   }, [enabled]);
 }
