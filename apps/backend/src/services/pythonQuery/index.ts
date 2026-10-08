@@ -1,4 +1,11 @@
-export { validateQueryAST, QueryASTSchema, ALLOWED_MODELS, MAX_TAKE } from './validator'
+export {
+  validateQueryAST,
+  QueryASTSchema,
+  WhereInputSchema,
+  ALLOWED_MODELS,
+  MAX_TAKE,
+  MAX_WHERE_DEPTH,
+} from './validator'
 export type { QueryAST, ValidationResult } from './validator'
 
 export { translateQueryAST } from './translator'
