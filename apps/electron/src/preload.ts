@@ -5,6 +5,9 @@ const { contextBridge, ipcRenderer } = require('electron');
 declare const window: {
   location: { protocol: string; hostname: string; origin: string };
 };
+declare const document: {
+  documentElement: { setAttribute(name: string, value: string): void } | null;
+};
 
 interface RecordingPillState {
   startTime: number;
@@ -16,10 +19,9 @@ interface RecordingPillState {
 // ── Renderer trust boundary ────────────────────────────────────────────────
 // This preload injects a *privileged* IPC bridge: mTLS key generation,
 // certificate storage, cookie/session control, screen recording, native file
-// access, app reload, and more. It is attached to the main window, the
-// certificate-health-check window, and the local popup windows (meeting popup,
-// recording pill) — all of which load first-party Xyne content or bundled
-// file:// assets.
+// access, app reload, and more. It is attached to the main window and the local
+// popup windows (meeting popup, recording pill) — all of which load first-party
+// Xyne content or bundled file:// assets.
 //
 // If the renderer is ever navigated to — or embeds a sub-frame of — an
 // untrusted origin (open redirect, malicious link, compromised sub-resource),
@@ -47,6 +49,33 @@ function isTrustedOrigin(): boolean {
   }
 }
 
+
+/**
+ * Stamps the remembered theme onto <html> before the document's own scripts run.
+ *
+ * The dashboard's boot splash needs a themed ground on the very first frame, and the theme only
+ * exists in the renderer's localStorage, read inside a useEffect long after paint — so a
+ * midnight user watched a white document turn dark once the bundle finished. An inline script in
+ * index.html cannot do this either: the CSP the main process injects for the app origin allows
+ * no inline script. A preload is exempt from page CSP and runs at document start, which makes it
+ * the only place this fits.
+ *
+ * sendSync is deliberate. It has to resolve before the first paint, it reads one small value the
+ * main process already holds in memory, and anything asynchronous would land after the frame it
+ * is meant to colour.
+ */
+function applyBootTheme(): void {
+  try {
+    if (!isTrustedOrigin()) return;
+    const theme = ipcRenderer.sendSync('app:get-boot-theme');
+    if (typeof theme !== 'string' || !theme) return;
+    document.documentElement?.setAttribute('data-theme', theme);
+  } catch {
+    // No theme stamped — index.html's markup default stands.
+  }
+}
+
+applyBootTheme();
 
 interface ElectronAuthData {
   workspaces: { id: string; name: string; role: string }[];

@@ -157,6 +157,31 @@ export function reportClientAuthFailure(context: { url?: string; errorCode?: str
 }
 
 /**
+ * Recovers immediately from a client-auth failure, with no threshold.
+ *
+ * Used where one failure is already conclusive: a top-level navigation to one of our own hosts
+ * that the server refused on client-auth grounds. There is nothing to debounce — the user is
+ * looking at a page that did not load, and retrying with the same certificate cannot help. This
+ * replaces the startup health check, which paid a hidden window plus a full TLS round trip on
+ * every launch to learn the same thing the real navigation reports for free.
+ *
+ * Subresource and XHR failures still go through reportClientAuthFailure, where a threshold keeps
+ * a flaky network from wiping a healthy certificate.
+ */
+export async function recoverFromClientAuthFailure(
+    context: { url?: string; errorCode?: string; trigger: string },
+): Promise<void> {
+    const reason: EnrollmentReasonType = isStoredCertificateExpired()
+        ? EnrollmentReason.CERTIFICATE_EXPIRED
+        : EnrollmentReason.CERTIFICATE_REJECTED;
+
+    await recoverFromDeadCertificate(reason, {
+        detail: context.errorCode,
+        trigger: context.trigger,
+    });
+}
+
+/**
  * Checks the stored expiry and recovers if it has passed. Safe to call often.
  */
 export async function checkCertificateExpiry(trigger: string): Promise<void> {
