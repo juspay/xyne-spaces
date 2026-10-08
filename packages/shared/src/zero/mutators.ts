@@ -120,10 +120,9 @@ import {
   isDeskChannelType,
   deskTypeForChannelType,
   canPublishAppsTo,
-  maxPublishedApps,
   MAX_PUBLISHED_APP_ID_LENGTH,
 } from '../utils/channel.js';
-import { MAX_DUPLICATE_SCOPE_FIELDS } from './types.js';
+import { MAX_DUPLICATE_SCOPE_FIELDS, MAX_PUBLISHED_APPS } from './types.js';
 import type { ChannelPublishedApp } from './schema.js';
 import { DEFAULT_ROLE_NAME_TO_ENUM } from '../utils/roleFrameworkUtils.js';
 import { SUMMARY_PROMPT_MAX_LENGTH } from '../templates/callSummary.js';
@@ -140,18 +139,12 @@ import {
 const serializeCanvasCommentMentionedUserIds = (mentionedUserIds: string[]): string =>
   JSON.stringify([...new Set(mentionedUserIds)]);
 
-/**
- * Loads a channel for publishing or unpublishing an app and checks the caller
- * may (canPublishAppsTo): the channel exists and isn't archived; a desk needs
- * its owner or a channel ADMIN, a channel needs an ADMIN, a DM or group DM any
- * participant. Returns the channel and its published rows as they are NOW, so
- * each mutation adds or removes one row against the current state.
- */
+/** Checks the caller may change the channel's published apps; returns its current rows. */
 async function loadChannelForAppPublish(
   tx: Transaction<Schema>,
   channelId: string,
   userId: string,
-): Promise<{ channelType: string | null; rows: ChannelPublishedApp[] }> {
+): Promise<ChannelPublishedApp[]> {
   const channel = await tx.run(zql.channels.where('id', channelId).one());
   if (!channel) {
     throw new Error("Channel doesn't exist");
@@ -176,8 +169,7 @@ async function loadChannelForAppPublish(
           : 'Apps can only be published to channels, DMs, group DMs and desks',
     );
   }
-  const rows = await tx.run(zql.channel_published_apps.where('channelId', channelId));
-  return { channelType: channel.type ?? null, rows };
+  return tx.run(zql.channel_published_apps.where('channelId', channelId));
 }
 
 async function getCanvasThreadCommentCount(
@@ -960,24 +952,18 @@ export const mutators = defineMutators({
         });
       },
     ),
-    // Apps published to a channel, DM, group DM or desk (channel_published_apps): an
-    // ADMIN in a channel, any participant in a DM or group DM, the owner or an ADMIN
-    // on a desk. Channel members layer their own changes on top locally; a desk
-    // shows the list as-is. One row per call, so concurrent publishes don't collide.
     publishApp: defineMutator(
       z.object({
-        // Generated client-side (uuid) so optimistic apply and server replay agree.
-        id: z.string().min(1).max(64),
+          id: z.string().min(1).max(64),
         channelId: z.string(),
         appId: z.string().min(1).max(MAX_PUBLISHED_APP_ID_LENGTH),
         timestamp: z.number(),
       }),
       async ({ tx, ctx, args: { id, channelId, appId, timestamp } }) => {
-        const { channelType, rows } = await loadChannelForAppPublish(tx, channelId, ctx.userID);
+        const rows = await loadChannelForAppPublish(tx, channelId, ctx.userID);
         if (rows.some(row => row.appId === appId)) return;
-        const max = maxPublishedApps(channelType);
-        if (rows.length >= max) {
-          throw new Error(`Up to ${max} apps can be published here`);
+        if (rows.length >= MAX_PUBLISHED_APPS) {
+          throw new Error(`Up to ${MAX_PUBLISHED_APPS} apps can be published here`);
         }
         await tx.mutate.channel_published_apps.insert({
           id,
@@ -993,7 +979,7 @@ export const mutators = defineMutators({
     unpublishApp: defineMutator(
       z.object({ channelId: z.string(), appId: z.string().min(1).max(MAX_PUBLISHED_APP_ID_LENGTH) }),
       async ({ tx, ctx, args: { channelId, appId } }) => {
-        const { rows } = await loadChannelForAppPublish(tx, channelId, ctx.userID);
+        const rows = await loadChannelForAppPublish(tx, channelId, ctx.userID);
         const row = rows.find(r => r.appId === appId);
         if (!row) return;
         await tx.mutate.channel_published_apps.delete({ id: row.id });

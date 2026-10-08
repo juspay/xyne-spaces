@@ -864,17 +864,8 @@ export enum FormFieldType {
  */
 export const MAX_DUPLICATE_SCOPE_FIELDS = 5;
 
-/**
- * Max artifact apps published to a desk (channel_published_apps). Enforced by the
- * mutators, the table's ACL and the desk's app picker.
- */
-export const MAX_DESK_APPS = 8;
-
-/**
- * Max artifact apps a channel admin can publish to a normal channel
- * (channel_published_apps). Enforced by the mutators, the table's ACL and the picker.
- */
-export const MAX_CHANNEL_PUBLISHED_APPS = 8;
+/** Max apps published to one channel, DM, group DM or desk (channel_published_apps). */
+export const MAX_PUBLISHED_APPS = 8;
 
 // @ts-ignore TS1294
 export enum FormContextType {

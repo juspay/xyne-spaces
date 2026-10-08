@@ -1,13 +1,4 @@
-// From types.js, not schema.js: these are all plain enums, and types.js has no
-// imports of its own, so this module (and its node:test) loads without the schema.
-import {
-  ChannelRole,
-  ChannelScopeType,
-  ChannelType,
-  DeskType,
-  MAX_CHANNEL_PUBLISHED_APPS,
-  MAX_DESK_APPS,
-} from '../zero/types.js';
+import { ChannelRole, ChannelScopeType, ChannelType, DeskType } from '../zero/types.js';
 
 /** Desk channel types — EMAIL, SLACK, APP, CALL and SOCIAL_MEDIA channels all feed into Xyne Desk. */
 export const DESK_CHANNEL_TYPES: ReadonlySet<ChannelType> = new Set([
@@ -73,11 +64,6 @@ export function canPublishChannelApps(
 
 /** Longest app id accepted in channel_published_apps.appId (ids are 25-char cuids). */
 export const MAX_PUBLISHED_APP_ID_LENGTH = 64;
-
-/** How many apps a channel (or desk) can have published. */
-export function maxPublishedApps(channelType: string | null | undefined): number {
-  return isDeskChannelType(channelType) ? MAX_DESK_APPS : MAX_CHANNEL_PUBLISHED_APPS;
-}
 
 /**
  * Who may publish or unpublish an app (channel_published_apps) — the single rule

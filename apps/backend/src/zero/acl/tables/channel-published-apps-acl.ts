@@ -2,8 +2,8 @@ import type { DeleteID, InsertValue, Transaction } from '@rocicorp/zero';
 import {
   MAX_PUBLISHED_APP_ID_LENGTH,
   canPublishAppsTo,
+  MAX_PUBLISHED_APPS,
   isDeskChannelType,
-  maxPublishedApps,
   type Schema,
 } from '@xyne/shared';
 import { BaseACL } from '../core/base-acl';
@@ -41,10 +41,10 @@ export class ChannelPublishedAppsACL extends BaseACL<'channel_published_apps'> {
       throw new MutationACLError('Publish app failed: invalid app id', 'channel_published_apps');
     }
 
-    const channelType = await this.assertCanPublish(args.channelId, tx, 'Publish app');
+    await this.assertCanPublish(args.channelId, tx, 'Publish app');
 
     const existing = await tx.run(zql.channel_published_apps.where('channelId', args.channelId));
-    if (existing.length >= maxPublishedApps(channelType)) {
+    if (existing.length >= MAX_PUBLISHED_APPS) {
       throw new MutationACLError(
         'Publish app failed: this channel already has the maximum number of published apps',
         'channel_published_apps'
@@ -73,7 +73,7 @@ export class ChannelPublishedAppsACL extends BaseACL<'channel_published_apps'> {
     channelId: string,
     tx: Transaction<Schema>,
     action: string
-  ): Promise<string | null> {
+  ): Promise<void> {
     const channel = await tx.run(zql.channels.where('id', channelId).one());
     if (!channel || channel.workspaceId !== this.ctx.workspaceId) {
       throw new MutationACLError(
@@ -102,6 +102,5 @@ export class ChannelPublishedAppsACL extends BaseACL<'channel_published_apps'> {
         'channel_published_apps'
       );
     }
-    return channel.type ?? null;
   }
 }

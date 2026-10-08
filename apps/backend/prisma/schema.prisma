@@ -1936,18 +1936,13 @@ model Channel {
   @@schema("public")
 }
 
-/// An artifact app published to a channel, DM, group DM or desk, so it shows for
-/// every participant (in members' tabs, or in the desk's Apps menu). One row per
-/// app per channel. Apps live in claw-auth's database, so appId has no FK.
-/// Who may insert/delete is decided by ChannelPublishedAppsACL: ADMINs in a
-/// channel, any participant in a DM/group DM, the desk owner or an ADMIN on a desk.
 model ChannelPublishedApp {
-  id          String   @id // client-generated uuid, so optimistic apply and server replay agree
-  workspaceId String   // tenant key
-  channelId   String   // no FK, like email_channel_preferences.channelId
+  id          String   @id
+  workspaceId String
+  channelId   String
   appId       String   // artifact app id (claw-auth); no FK — different database
-  position    Int      // display order within the channel; ties broken by createdAt
-  publishedBy String   // user who published it
+  position    Int
+  publishedBy String
   createdAt   DateTime @default(now())
 
   @@unique([channelId, appId])
@@ -2452,7 +2447,7 @@ model EmailChannelPreference {
   deskReportRangeDays    Int?     @default(1) // 1 = "Last 1 day", 7 = "Last 1 week"
   duplicateScopeConfig   String?    // Scoped duplicate detection: JSON-serialized { enabled, scopeFieldGlobalIds }; stored as string for Zero compatibility, parsed at code level (null = project-wide legacy behavior)
   slackDeskTriggerMode   String?  // ALL_MESSAGES | MENTION_ONLY; null == ALL_MESSAGES
-  deskAppIds             String?  // DEPRECATED — moved to channel_published_apps (20261008120000_channel_published_apps). No longer read or written
+  deskAppIds             String?  // DEPRECATED: moved to channel_published_apps
   @@index([ownerUserId])
   @@index([assigneeUserGroupId])
   @@index([boardId])

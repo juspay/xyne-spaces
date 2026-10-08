@@ -810,8 +810,6 @@ export const channelBoardMappingTable = table('channel_board_mappings' /* Channe
   })
   .primaryKey('id');
 
-// Artifact apps published to a channel, DM, group DM or desk — one row per app.
-// ChannelPublishedAppsACL decides who may insert/delete; reads follow channel access.
 export const channelPublishedAppTable = table('channel_published_apps' /* ChannelPublishedApp */)
   .columns({
     id: string(),

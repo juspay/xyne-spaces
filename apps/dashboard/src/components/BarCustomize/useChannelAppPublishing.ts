@@ -3,7 +3,7 @@ import { v4 as uuidv4 } from 'uuid';
 import {
   ChannelRole,
   ChannelScopeType,
-  MAX_CHANNEL_PUBLISHED_APPS,
+  MAX_PUBLISHED_APPS,
   canPublishChannelApps,
 } from '@xyne/shared';
 import { useZero } from '../../hooks/useZero';
@@ -63,7 +63,7 @@ export const useChannelAppPublishing = (
     if (!canPublish) return undefined;
     return {
       publishedAppIds: new Set(published),
-      isFull: published.length >= MAX_CHANNEL_PUBLISHED_APPS,
+      isFull: published.length >= MAX_PUBLISHED_APPS,
       audience: isDirect ? 'conversation' : 'channel',
       unpublish: (appId): void => {
         void surfaceMutationError(

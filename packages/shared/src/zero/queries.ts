@@ -3657,8 +3657,6 @@ export const queries = defineQueries({
     },
   ),
 
-  // Apps published to a channel, DM, group DM or desk, in display order. Small
-  // (≤ 8 rows per channel); visibility follows the channel (ChannelPublishedAppsACL).
   channelPublishedApps: defineQuery(
     z.object({ channelId: z.string() }),
     ({ args: { channelId } }) =>

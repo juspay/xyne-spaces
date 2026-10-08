@@ -1,7 +1,7 @@
 import { ReactElement, useState } from 'react';
 import { v4 as uuidv4 } from 'uuid';
 import { Grid01, PlusDefault as Plus, CheckTickSingle as Check } from '@xyne/icons';
-import { MAX_DESK_APPS } from '@xyne/shared';
+import { MAX_PUBLISHED_APPS } from '@xyne/shared';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -162,12 +162,12 @@ export const DeskAppsMenu = ({
           open={pickerOpen}
           onOpenChange={setPickerOpen}
           addedAppIds={new Set(ids)}
-          isFull={ids.length >= MAX_DESK_APPS}
+          isFull={ids.length >= MAX_PUBLISHED_APPS}
           onToggle={onToggle}
           appFilter={isWorkspaceApp}
           description='Apps added here appear on this desk for everyone. Only apps published to the workspace can be added.'
           limitNote={{
-            normal: `Up to ${MAX_DESK_APPS} apps per desk.`,
+            normal: `Up to ${MAX_PUBLISHED_APPS} apps per desk.`,
             full: 'This desk already has the maximum number of apps. Switch one off to add another.',
           }}
           trackCategory={TRACK}
