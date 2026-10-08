@@ -3,12 +3,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { Select } from '@base-ui/react/select';
 import { Check, ChevronDown, Hash, Archive, ArchiveRestore } from 'lucide-react';
 import { toast } from 'sonner';
-import {
-  ChannelAddUserPolicy,
-  ChannelScopeType,
-  ChannelVisibility,
-  WorkspaceRole,
-} from '@xyne/shared';
+import { ChannelAddUserPolicy, ChannelScopeType, ChannelVisibility } from '@xyne/shared';
 import { useZero } from '../../../hooks/useZero';
 import { mutators } from '../../../zero/mutators';
 import { queries } from '../../../zero/queries';
@@ -381,7 +376,7 @@ export const ChannelSettings: React.FC<ChannelSettingsProps> = ({
             <span className='inline-flex items-center gap-2'>Copy member names</span>
           </button>
 
-          {context.role !== WorkspaceRole.COMMUNITY_MEMBER && (
+          {context.role !== 'COMMUNITY_MEMBER' && (
             <>
               <div className='h-px bg-border' />
 

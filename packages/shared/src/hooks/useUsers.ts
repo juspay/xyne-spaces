@@ -138,8 +138,7 @@ export const useUserLookup = (userId: string): UserLookup => {
   );
 
   if (cachedUser) return { user: cachedUser, isResolving: false };
-  if (!needsFallback)
-    return { user: undefined, isResolving: !!userId && !usersHydrated };
+  if (!needsFallback) return { user: undefined, isResolving: !!userId && !usersHydrated };
   return {
     user: maskedFallbackUser ?? undefined,
     isResolving: !fallbackUser && fallbackDetails.type !== "complete",
