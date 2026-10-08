@@ -234,6 +234,7 @@ export function MiniCallView({
     [isDmCall, callParticipants, participants, currentUserId, user?.id],
   );
   const containerRef = useRef<HTMLDivElement>(null);
+  const dragBoundsRef = useRef<HTMLDivElement>(null);
   const [overlayMode, setOverlayMode] = useState<'mini' | 'line'>('mini');
   const [miniLeft, setMiniLeft] = useState(20);
 
@@ -394,6 +395,7 @@ export function MiniCallView({
       <>
         {/* Draggable like the mini window: kept 20px inside the viewport on every
             side. The header buttons stop pointerdown, so clicks never start a drag. */}
+        <div ref={dragBoundsRef} className='pointer-events-none fixed inset-5' />
         <motion.div
           // Distinct keys: line and mini views are both motion.divs in the same
           // slot, and without them React reuses one element — carrying this
@@ -402,12 +404,7 @@ export function MiniCallView({
           drag
           dragMomentum={false}
           dragElastic={0}
-          dragConstraints={{
-            top: -(window.innerHeight - LINE_VIEW_HEIGHT - dockedLineBottom - 20),
-            left: 20 - lineLeft,
-            right: window.innerWidth - lineViewWidth - 20 - lineLeft,
-            bottom: 0,
-          }}
+          dragConstraints={dragBoundsRef}
           whileDrag={{ cursor: 'grabbing' }}
           className='fixed z-50 group/container cursor-grab'
           style={{
@@ -418,7 +415,7 @@ export function MiniCallView({
           <div
             ref={containerRef}
             className={cn(
-              'bg-[#1e1f20] shadow-2xl overflow-hidden border backdrop-blur-sm relative',
+              'bg-[#1e1f20] shadow-2xl overflow-hidden border relative',
               'border-white/10 rounded-full',
             )}
             style={{
@@ -518,17 +515,16 @@ export function MiniCallView({
 
   return (
     <>
+      <div
+        ref={dragBoundsRef}
+        className='pointer-events-none fixed left-5 right-5 top-5 bottom-0'
+      />
       <motion.div
         key='mini-view'
         drag
         dragMomentum={false}
         dragElastic={0}
-        dragConstraints={{
-          top: -(window.innerHeight - size.height - (isChatOpen ? 410 : 0) - 20),
-          left: 20 - miniLeft,
-          right: window.innerWidth - size.width - 20 - miniLeft,
-          bottom: 20,
-        }}
+        dragConstraints={dragBoundsRef}
         dragListener={!isResizing}
         whileDrag={{ cursor: 'grabbing' }}
         className='fixed z-50 group/container'
@@ -542,7 +538,7 @@ export function MiniCallView({
           <div
             ref={containerRef}
             className={cn(
-              'bg-[#131314] shadow-2xl overflow-hidden border-2 backdrop-blur-sm relative',
+              'bg-[#131314] shadow-2xl overflow-hidden border-2 relative',
               'border-white/10',
             )}
             style={{
