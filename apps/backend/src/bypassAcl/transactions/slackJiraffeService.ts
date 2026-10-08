@@ -10,7 +10,7 @@ import { generateTicketId } from '@/bypassAcl/transactions/ticketIdService';
 
 export function ingestTicketTx(db: PrismaClient, boardProjectId: any, channelRepo: ChannelRepository, channelId: string, titleText: string, description: string, userId: string, conversation: Awaited<ReturnType<typeof conversationService.createConversationWithMessage>>, boardId: string, resolvedUserGroupId: string | undefined, resolvedStageName: string, resolvedStatusV2: any, assignedToUserId: string | undefined, ticket: BitbotTicket, externalSource: any) {
   return transaction(['Conversation', 'ExternalMessage', 'Message', 'Ticket'], 'ingestTicket: allocates the ticket id and creates the ticket, its conversation link and the external message together so a failure leaves no half-ingested Jira ticket; tx is not ACL-wrapped', db, async (tx) => {
-    const xyneId = await generateTicketId(tx, boardProjectId);
+    const xyneId = await generateTicketId(tx, boardId);
     const channel = await channelRepo.findById(channelId);
 
     const newTicket = await tx.ticket.create({

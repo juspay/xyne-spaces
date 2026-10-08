@@ -11,6 +11,7 @@ import {
   CollectionPermissionsACL,
   BoardComplexityScoresACL,
   BoardsACL,
+  TicketNamespacesACL,
   BookmarksACL,
   CallParticipantsACL,
   CallsACL,
@@ -151,6 +152,8 @@ export class QueryACLFactory {
         return new BoardComplexityScoresACL(ctx) as BaseQueryACL<TTable>;
       case 'boards':
         return new BoardsACL(ctx) as BaseQueryACL<TTable>;
+      case 'ticket_namespaces':
+        return new TicketNamespacesACL(ctx) as BaseQueryACL<TTable>;
       case 'bookmarks':
         return new BookmarksACL(ctx) as BaseQueryACL<TTable>;
       case 'call_participants':

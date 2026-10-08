@@ -13,6 +13,7 @@ import {
   ApplicationsACL,
   BoardComplexityScoresACL,
   BoardsACL,
+  TicketNamespacesACL,
   BookmarksACL,
   CallParticipantsACL,
   CallsACL,
@@ -332,6 +333,8 @@ export class ACLFactory {
       return new SurfaceNudgeCountsACL(ctx, prisma)
     case 'ticket':
       return new TicketsACL(ctx, prisma)
+    case 'ticketNamespace':
+      return new TicketNamespacesACL(ctx, prisma)
     case 'ticketDescription':
       return new TicketDescriptionsACL(ctx, prisma)
     case 'ticketActivity':

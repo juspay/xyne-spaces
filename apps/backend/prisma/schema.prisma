@@ -1761,6 +1761,7 @@ model Project {
   name           String
   code           String // Project shortcode for ticket IDs (e.g., EUL, INF)
   ticketSequence Int              @default(0) // Used when ENABLE_COMMON_DB_TICKET_SEQUENCE is disabled
+  defaultTicketNamespaceId String? // Namespace new boards inherit; source of the ticket-ID prefix
   description    String?
   workspaceId    String // Workspace this project belongs to
   type           String           @default("DEFAULT")
@@ -1774,6 +1775,7 @@ model Project {
   tickets  Ticket[]
   channels Channel[]
   boards   Board[]
+  ticketNamespaces TicketNamespace[]
   globalFields GlobalField[]
   canvasFolders CanvasFolder[]
   canvases      Canvas[]
@@ -1787,12 +1789,33 @@ model Project {
   @@schema("public")
 }
 
+model TicketNamespace {
+  id             String    @id @default(cuid())
+  workspaceId    String
+  projectId      String
+  code           String
+  ticketSequence Int
+  name           String?
+  createdBy      String
+  updatedBy      String?
+  createdAt      DateTime
+  updatedAt      DateTime
+
+  project        Project   @relation(fields: [projectId], references: [id])
+
+  @@unique([code, workspaceId])
+  @@index([projectId])
+  @@map("ticket_namespaces")
+  @@schema("public")
+}
+
 // Board Models
 model Board {
   id                  String               @id @default(cuid())
   name                String
   boardType           String               @default("DEFAULT")
   projectId           String               // Project ID (no FK constraint)
+  ticketNamespaceId   String?              // Namespace supplying this board's ticket-ID prefix + sequence
   workspaceId         String               // Workspace for ACL optimization (denormalized from project)
   createdBy           String               // User ID (no FK constraint)
   updatedBy           String?              // User ID (no FK constraint)
@@ -1818,6 +1841,7 @@ model Board {
 
   @@unique([name, projectId])
   @@index([projectId])
+  @@index([ticketNamespaceId])
 
   @@index([workspaceId, createdAt(sort: Desc), id])
   @@index([projectId, createdAt, id])

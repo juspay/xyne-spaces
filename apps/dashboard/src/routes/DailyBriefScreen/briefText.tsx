@@ -155,15 +155,20 @@ export function useBriefRenderContext(
   key: string,
 ): BriefRenderContext {
   const [projects] = useCachedQuery(queries.getAllProjects());
-  const ticketPrefixes = useMemo(
-    () =>
-      new Set(
-        ((projects ?? []) as Array<{ code?: string | null }>)
-          .map(p => (p.code ?? '').toUpperCase())
-          .filter(Boolean),
-      ),
-    [projects],
-  );
+  const [namespaces] = useCachedQuery(queries.allTicketNamespaces());
+  const ticketPrefixes = useMemo(() => {
+    const prefixes = new Set<string>();
+    for (const p of (projects ?? []) as Array<{ code?: string | null }>) {
+      const code = (p.code ?? '').toUpperCase();
+      if (code) prefixes.add(code);
+    }
+    // Board-scoped codes (e.g. SEA) are not project codes, so linkify from namespaces too.
+    for (const n of (namespaces ?? []) as Array<{ code?: string | null }>) {
+      const code = (n.code ?? '').toUpperCase();
+      if (code) prefixes.add(code);
+    }
+    return prefixes;
+  }, [projects, namespaces]);
 
   return useMemo(() => {
     const clawCitations = data?.clawCitations as ToolInvocation[] | undefined;

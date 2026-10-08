@@ -1,4 +1,4 @@
-import { ReactElement, useState } from 'react';
+import { ReactElement, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Button } from '../../ui/Button';
 import { CopyDefault as Copy, CheckTickSingle as Check } from '@xyne/icons';
@@ -6,6 +6,8 @@ import { copyTextToClipboard } from '../../../utils/clipboardUtils';
 import { formatDateNumeric } from '../../../utils/dateUtils';
 import { toast } from 'sonner';
 import type { Project } from '@xyne/shared';
+import { useCachedQuery } from '../../../hooks/useCachedQuery';
+import { queries } from '../../../zero/queries';
 
 interface ProjectCardProps {
   project: Project;
@@ -26,6 +28,35 @@ export const ProjectCard = ({
 }: ProjectCardProps): ReactElement => {
   const navigate = useNavigate();
   const [copied, setCopied] = useState(false);
+
+  // All workspace codes in one deduped query; this project's codes are the ones
+  // whose namespace belongs to it. project.code is the default; extras are board codes.
+  const [namespaces] = useCachedQuery(queries.allTicketNamespaces());
+  const projectNamespaces = useMemo(() => {
+    const list = (namespaces && !(namespaces instanceof Error) ? namespaces : []).filter(
+      namespace => namespace.projectId === project.id,
+    );
+    // Default code first, then the rest in their existing order.
+    return [...list].sort((a, b) => {
+      if (a.id === project.defaultTicketNamespaceId) return -1;
+      if (b.id === project.defaultTicketNamespaceId) return 1;
+      return 0;
+    });
+  }, [namespaces, project.id, project.defaultTicketNamespaceId]);
+
+  // Codes to badge. With namespaces, show each (default first); without any (a
+  // project not yet backfilled / feature not activated), fall back to project.code
+  // so the card still shows the project's prefix instead of nothing.
+  const displayCodes = useMemo(() => {
+    if (projectNamespaces.length > 0) {
+      return projectNamespaces.map(namespace => ({
+        key: namespace.id,
+        code: namespace.code,
+        isDefault: namespace.id === project.defaultTicketNamespaceId,
+      }));
+    }
+    return project.code ? [{ key: 'project-code', code: project.code, isDefault: true }] : [];
+  }, [projectNamespaces, project.defaultTicketNamespaceId, project.code]);
 
   const handleCardClick = (): void => {
     const state =
@@ -76,11 +107,19 @@ export const ProjectCard = ({
     >
       <div className='flex items-start justify-between mb-4'>
         <div className='flex-1'>
-          <div className='flex items-center gap-2 mb-2'>
+          <div className='flex flex-wrap items-center gap-2 mb-2'>
             <h3 className='text-lg font-semibold text-foreground'>{project.name}</h3>
-            <span className='px-2 py-0.5 text-xs font-medium bg-primary/10 text-primary rounded'>
-              {project.code}
-            </span>
+            {displayCodes.map(({ key, code, isDefault }) => (
+              <span
+                key={key}
+                title={isDefault ? 'Default code' : undefined}
+                className={`px-2 py-0.5 text-xs font-medium rounded ${
+                  isDefault ? 'bg-primary/10 text-primary' : 'bg-muted text-muted-foreground'
+                }`}
+              >
+                {code}
+              </span>
+            ))}
           </div>
           {project.description && (
             <p className='text-sm text-muted-foreground line-clamp-2'>{project.description}</p>

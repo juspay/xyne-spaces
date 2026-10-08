@@ -19,7 +19,7 @@ export function createApplicationSubTicketsTx(opts: CreateApplicationSubTicketsO
 }
 export function createApplicationSubTicketsLockedTx(projectId: string, prLinksByApplication: Map<string, string[]>, application: any, parentTitle: string, createdBy: string, conversationId: string, channelId: string, ticketWorkspaceId: string, isHotFix: boolean | undefined, parentTicketId: string) {
   return transaction(['Project', 'ProjectTag', 'Stage', 'SubTicket', 'Ticket', 'TicketActivity', 'TicketSubTicketMapping', 'TicketTag', 'TicketTagMapping'], 'createApplicationSubTicketsLocked: per-application ticket, sub-ticket, mapping, activity and tag writes plus id allocation must commit atomically; tx is not ACL-wrapped', prisma, async (tx) => {
-    const xyneId = await generateTicketId(tx, projectId);
+    const xyneId = await generateTicketId(tx, application.boardId!);
 
     const prLinks = prLinksByApplication.get(application.id) || [];
     const prLinksSection = prLinks.length > 0

@@ -27,6 +27,7 @@ export interface CreateBoardInput {
   boardType?: BoardType;
   metadata?: Record<string, unknown>;
   flowPlan?: FlowPlan;
+  ticketNamespaceId?: string;
 }
 
 export interface CreateBoardWithStagesInput extends CreateBoardInput {

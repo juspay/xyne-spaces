@@ -115,7 +115,8 @@ router.get('/rest/api/2/serverInfo', (req: Request, res: Response) => {
 
 /**
  * Project list. Bitbucket caches these keys to decide which `<KEY>-<N>` tokens
- * to linkify. We return every distinct Spaces project code.
+ * to linkify. We return every distinct ticket code — legacy project codes and
+ * board-scoped namespace codes — so all `<CODE>-<N>` ids linkify.
  */
 router.get('/rest/api/2/project', async (req: Request, res: Response) => {
   const ws = workspaceId(req);
@@ -124,19 +125,36 @@ router.get('/rest/api/2/project', async (req: Request, res: Response) => {
     return;
   }
   try {
-    const projects = await prisma.project.findMany({
-      where: { workspaceId: ws },
-      select: { id: true, code: true, name: true },
-      distinct: ['code'],
-      orderBy: { code: 'asc' },
-    });
+    // Advertise every distinct ticket code so Bitbucket linkifies both legacy
+    // project codes and board-scoped namespace codes (e.g. SEA-42).
+    const [projects, namespaces] = await Promise.all([
+      prisma.project.findMany({
+        where: { workspaceId: ws },
+        select: { code: true, name: true },
+      }),
+      prisma.ticketNamespace.findMany({
+        where: { workspaceId: ws },
+        select: { code: true, project: { select: { name: true } } },
+      }),
+    ]);
+    const nameByCode = new Map<string, string>();
+    for (const project of projects) {
+      if (project.code) nameByCode.set(project.code, project.name);
+    }
+    for (const namespace of namespaces) {
+      if (namespace.code && !nameByCode.has(namespace.code)) {
+        nameByCode.set(namespace.code, namespace.project?.name ?? namespace.code);
+      }
+    }
     res.json(
-      projects.map((p) => ({
-        id: p.id,
-        key: p.code,
-        name: p.name,
-        projectTypeKey: 'software',
-      }))
+      [...nameByCode.entries()]
+        .sort(([a], [b]) => a.localeCompare(b))
+        .map(([code, name]) => ({
+          id: code,
+          key: code,
+          name,
+          projectTypeKey: 'software',
+        })),
     );
   } catch (error) {
     // 503 (not an empty list) so Bitbucket retries instead of caching "no projects".

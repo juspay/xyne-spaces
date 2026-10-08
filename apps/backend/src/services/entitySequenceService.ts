@@ -20,7 +20,8 @@ function isUniqueViolation(error: unknown): boolean {
  * entityValue holds the id of the entity that owns the counter.
  */
 export const SequenceEntityType = {
-  PROJECT_TICKET: 'PROJECT_TICKET', // entityValue = projectId; ticket numbering (e.g. XYNE-0001)
+  PROJECT_TICKET: 'PROJECT_TICKET', // entityValue = projectId; legacy ticket numbering
+  NAMESPACE_TICKET: 'NAMESPACE_TICKET', // entityValue = namespaceId; ticket numbering per board namespace
   BOARD_STAGE: 'BOARD_STAGE', // entityValue = boardId; monotonic stage sequence numbers
   FORM_FIELD: 'FORM_FIELD', // entityValue = formId; monotonic field sequence numbers
 } as const;

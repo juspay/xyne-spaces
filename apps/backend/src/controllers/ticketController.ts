@@ -54,6 +54,8 @@ import { activityService } from '@/services/activity/activityService';
 import { entityLinkOwnerSchema, type EntityLinkOwner } from '@xyne/shared';
 import { vespaQueue } from '@/queues/vespaQueue';
 import { ticketSchema, fileSchema, SubApp } from '@/vespa/src/types';
+import { vespaBackfillQueue } from '@/queues/vespaQueue';
+import { pushVespaJobForTicket } from '@/apps/core/ticketutils';
 import { isSupportedMimeType } from '@/services/fileProcessor';
 import { logger } from '@/utils/logger';
 import { resolveChannelDefaultBoard } from '@/utils/channelDefaultBoard';
@@ -99,6 +101,7 @@ import { createTicketWithConversationTx } from '@/bypassAcl/transactions/control
 import { createTicketTx } from '@/bypassAcl/transactions/controllersTicketController';
 import { mergeTicketTx } from '@/bypassAcl/transactions/controllersTicketController';
 import { unmergeTicketTx } from '@/bypassAcl/transactions/controllersTicketController';
+import { transferTicketAcrossNamespacesTx } from '@/bypassAcl/transactions/controllersTicketController';
 import { acquireLock, releaseLock } from '@/utils/distributedLock';
 
 
@@ -383,6 +386,154 @@ export class TicketController {
     } catch (error) {
       logger.error('[TicketController] Failed to fetch my ticket board ids', error);
       res.status(500).json({ error: 'Failed to fetch board ids' });
+    }
+  };
+
+  /**
+   * Transfer a ticket to a board in a DIFFERENT ticket namespace. We never re-key
+   * an id (it is immutable and external refs depend on it), so instead we create a
+   * fresh ticket on the target board — which draws a new id from the target
+   * namespace — link it to the original via TicketReferenceMapping, copy the
+   * labels, and (by default) close the original. A move WITHIN the same namespace
+   * must use the normal ticket update (boardId change), not this endpoint.
+   */
+  transferTicketToBoard = async (req: Request, res: Response): Promise<void> => {
+    try {
+      const userId = req.user?.id;
+      const workspaceId = req.user?.workspaceId;
+      if (!userId || !workspaceId) {
+        res.status(401).json({ error: 'Unauthorized' });
+        return;
+      }
+
+      const ticketId = req.params.ticketId;
+      const { targetBoardId } = req.body as { targetBoardId?: string };
+      const closeOld = req.body?.closeOld !== false; // default: close the original
+      if (!ticketId || !targetBoardId) {
+        res.status(400).json({ error: 'ticketId and targetBoardId are required' });
+        return;
+      }
+
+      const source = await db.ticket.findFirst({
+        where: { id: ticketId, workspaceId },
+        select: {
+          id: true, xyneId: true, title: true, description: true, boardId: true,
+          projectId: true, channelId: true, assignedTo: true, priority: true,
+          userGroupId: true, eta: true, ticketType: true, isArchived: true, statusV2: true,
+          tags: { select: { name: true } },
+        },
+      });
+      if (!source) {
+        res.status(404).json({ error: 'Ticket not found' });
+        return;
+      }
+      // Already closed (e.g. by an earlier transfer); a transfer would duplicate it
+      if (source.isArchived || source.statusV2 === TicketStatusV2.CANCELLED) {
+        res.status(409).json({ error: 'Cannot transfer an archived or cancelled ticket' });
+        return;
+      }
+
+      const [targetBoard, sourceBoard] = await Promise.all([
+        db.board.findFirst({
+          where: { id: targetBoardId, workspaceId },
+          select: { id: true, projectId: true, ticketNamespaceId: true },
+        }),
+        db.board.findFirst({
+          where: { id: source.boardId },
+          select: { projectId: true, ticketNamespaceId: true },
+        }),
+      ]);
+      if (!targetBoard) {
+        res.status(404).json({ error: 'Target board not found' });
+        return;
+      }
+
+      // Effective namespace = board's own namespace, else its project's default.
+      const effectiveNamespaceId = async (
+        boardNamespaceId: string | null,
+        projectId: string,
+      ): Promise<string | null> => {
+        if (boardNamespaceId) return boardNamespaceId;
+        const project = await db.project.findUnique({
+          where: { id: projectId },
+          select: { defaultTicketNamespaceId: true },
+        });
+        return project?.defaultTicketNamespaceId ?? null;
+      };
+      const [sourceNamespaceId, targetNamespaceId] = await Promise.all([
+        effectiveNamespaceId(sourceBoard?.ticketNamespaceId ?? null, source.projectId),
+        effectiveNamespaceId(targetBoard.ticketNamespaceId, targetBoard.projectId),
+      ]);
+
+      if (sourceNamespaceId && targetNamespaceId && sourceNamespaceId === targetNamespaceId) {
+        res.status(400).json({
+          error:
+            'Target board shares the same ticket namespace; move the ticket with a board update instead of a transfer.',
+        });
+        return;
+      }
+
+      const relationType = closeOld
+        ? TicketReferenceRelation.MERGED_INTO
+        : TicketReferenceRelation.LINKED;
+
+      // Claim/close the original, create, link and copy labels atomically
+      const created = await transferTicketAcrossNamespacesTx(
+        source,
+        { boardId: targetBoardId, projectId: targetBoard.projectId },
+        workspaceId,
+        userId,
+        closeOld,
+        relationType,
+      );
+      if (!created) {
+        res.status(409).json({ error: 'Cannot transfer an archived or cancelled ticket' });
+        return;
+      }
+
+      // Index and publish after commit
+      pushVespaJobForTicket(created.ticketId, userId, workspaceId).catch((error) => {
+        logger.error(`[TRANSFER-TICKET] Vespa indexing failed for ${created.ticketId}:`, error);
+      });
+      void emitTicketCreated(
+        {
+          id: created.ticketId,
+          workspaceId,
+          boardId: targetBoardId,
+          projectId: targetBoard.projectId,
+          channelId: source.channelId,
+        },
+        undefined,
+        userId,
+      );
+      if (closeOld) {
+        try {
+          await vespaBackfillQueue.addJob({
+            schema: ticketSchema,
+            jobType: 'update',
+            docId: source.id,
+            userId,
+            workspaceId,
+          });
+        } catch (error) {
+          logger.error(`[TRANSFER-TICKET] Vespa re-index failed for ${source.id}:`, error);
+        }
+      }
+
+      res.status(200).json({
+        success: true,
+        newTicketId: created.ticketId,
+        newXyneId: created.xyneId,
+        oldTicketId: source.id,
+        oldXyneId: source.xyneId,
+        relationType,
+        closedOld: closeOld,
+      });
+    } catch (error) {
+      logger.error('[TRANSFER-TICKET] Transfer failed:', error);
+      res.status(500).json({
+        error: error instanceof Error ? error.message : 'Failed to transfer ticket',
+      });
     }
   };
 

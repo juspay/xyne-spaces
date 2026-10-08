@@ -145,6 +145,7 @@ import { surfaceMutationError } from '../../../utils/zeroMutationToast';
 import { loadRecentLabels, saveRecentLabels, sortByRecency } from '../../../utils/recentLabels';
 import Button from '../../ui/Button';
 import { Dialog } from '../../ui/Dialog';
+import { Checkbox } from '../../ui/Checkbox/Checkbox';
 import { FileBubble } from '../../ui/FileBubble/FileBubble';
 import { StageFormModal } from '../StageFormModal/StageFormModal';
 import { StageFormInlinePanel } from '../StageFormInlinePanel/StageFormInlinePanel';
@@ -653,6 +654,10 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
   } | null>(null);
   const [showBoardChangeConfirmDialog, setShowBoardChangeConfirmDialog] = useState(false);
   const [pendingBoardChange, setPendingBoardChange] = useState<string | null>(null);
+  // Cross-namespace board changes become a transfer (new ticket + link); this
+  // controls whether the original is closed as part of it.
+  const [closeOriginalOnTransfer, setCloseOriginalOnTransfer] = useState(true);
+  const [isTransferringBoard, setIsTransferringBoard] = useState(false);
   const [isGeneratingReleaseNotes, setIsGeneratingReleaseNotes] = useState(false);
   const [showArchiveConfirmDialog, setShowArchiveConfirmDialog] = useState(false);
   const [pendingTitleValue, setPendingTitleValue] = useState<string | null>(null);
@@ -1360,7 +1365,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
     projectTicketNextOffset,
   ]);
 
-  const [boards] = useCachedQuery(
+  const [boards, boardsDetails] = useCachedQuery(
     queries.boardsListByProject({ projectId: ticket?.projectId || '' }),
     {
       // Eager on manual boards too: TicketActivity names boards from this list.
@@ -1369,6 +1374,50 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
         (hasBoardDropdownOpened || isManualSubTicketBoard(boardData?.boardType)),
     },
   );
+
+  const [ticketNamespaces, ticketNamespacesDetails] = useCachedQuery(
+    queries.ticketNamespacesByProject({ projectId: ticket?.projectId || '' }),
+    { enabled: !!ticket?.projectId && hasBoardDropdownOpened },
+  );
+
+  const [ticketProject, ticketProjectDetails] = useCachedQuery(
+    queries.projectById({ projectId: ticket?.projectId || '' }),
+    { enabled: !!ticket?.projectId && hasBoardDropdownOpened },
+  );
+
+  // Don't decide move vs transfer until everything it depends on has settled
+  const boardChangeDataReady =
+    boardsDetails.type !== 'unknown' &&
+    ticketNamespacesDetails.type !== 'unknown' &&
+    ticketProjectDetails.type !== 'unknown';
+
+  // Transfer only when the boards' effective namespaces differ, matching the backend
+  const boardChangeCodeMismatch = useMemo(() => {
+    if (!pendingBoardChange || !ticket?.xyneId || !boardChangeDataReady) return null;
+    const boardList = boards && !(boards instanceof Error) ? boards : [];
+    const project = ticketProject && !(ticketProject instanceof Error) ? ticketProject : undefined;
+    const effectiveNamespaceId = (boardId: string | null | undefined): string | null => {
+      const board = boardList.find(b => b.id === boardId);
+      return board?.ticketNamespaceId ?? project?.defaultTicketNamespaceId ?? null;
+    };
+    const sourceNamespaceId = effectiveNamespaceId(ticket.boardId);
+    const targetNamespaceId = effectiveNamespaceId(pendingBoardChange);
+    if (!sourceNamespaceId || !targetNamespaceId || sourceNamespaceId === targetNamespaceId) {
+      return null;
+    }
+    const nsList = ticketNamespaces && !(ticketNamespaces instanceof Error) ? ticketNamespaces : [];
+    const targetCode = nsList.find(ns => ns.id === targetNamespaceId)?.code;
+    if (!targetCode) return null;
+    return { targetCode, ticketId: ticket.xyneId };
+  }, [
+    pendingBoardChange,
+    boardChangeDataReady,
+    boards,
+    ticketProject,
+    ticketNamespaces,
+    ticket?.xyneId,
+    ticket?.boardId,
+  ]);
 
   // Get current active stage entry (where stageLeftAt is null)
   const currentStageEntry = useMemo(() => {
@@ -3130,8 +3179,43 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
     }
   };
 
-  const confirmBoardChange = (): void => {
+  // Cross-namespace change: the id can't move to a different code (it's immutable),
+  // so create a new ticket on the target board via the transfer endpoint, link it
+  // back, and optionally close the original.
+  const handleTransferToBoard = async (): Promise<void> => {
     if (!pendingBoardChange || !ticket) return;
+    setIsTransferringBoard(true);
+    try {
+      const response = await apiInstance.post(`/tickets/${ticket.id}/transfer`, {
+        targetBoardId: pendingBoardChange,
+        closeOld: closeOriginalOnTransfer,
+      });
+      const newXyneId = (response?.data as { newXyneId?: string } | undefined)?.newXyneId;
+      toast.success(
+        closeOriginalOnTransfer
+          ? `Transferred to ${newXyneId ?? 'a new ticket'} and closed ${ticket.xyneId}`
+          : `Created ${newXyneId ?? 'a linked ticket'}, linked to ${ticket.xyneId}`,
+      );
+      setShowBoardChangeConfirmDialog(false);
+      setPendingBoardChange(null);
+    } catch (err) {
+      const message =
+        (err as { response?: { data?: { error?: string } } })?.response?.data?.error ||
+        (err instanceof Error ? err.message : 'Failed to transfer ticket');
+      toast.error(message);
+    } finally {
+      setIsTransferringBoard(false);
+    }
+  };
+
+  const confirmBoardChange = (): void => {
+    if (!pendingBoardChange || !ticket || !boardChangeDataReady) return;
+
+    // Different namespace -> transfer (new ticket + relationship), never a move.
+    if (boardChangeCodeMismatch) {
+      void handleTransferToBoard();
+      return;
+    }
 
     zero.mutate(mutators.ticketStageRequest.deleteByTicketId({ ticketId: ticket.id }));
 
@@ -6024,18 +6108,51 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
         <Dialog
           open={showBoardChangeConfirmDialog}
           onOpenChange={setShowBoardChangeConfirmDialog}
-          title='Confirm Board Change'
+          title={
+            boardChangeCodeMismatch
+              ? 'Move to a board with a different code'
+              : 'Confirm Board Change'
+          }
         >
           <div className='p-6'>
-            <p className='text-sm text-muted-foreground mb-6'>
-              Changing the board will move this ticket to the first stage of the selected board. All
-              previous stage progress and change requests will be permanently removed.
-            </p>
+            {boardChangeCodeMismatch ? (
+              <>
+                <p className='text-sm text-muted-foreground mb-4'>
+                  This board uses the code{' '}
+                  <span className='font-mono text-foreground'>
+                    {boardChangeCodeMismatch.targetCode}
+                  </span>
+                  , which differs from this ticket&apos;s. Ids never change, so a new ticket is
+                  created on the target board (with a{' '}
+                  <span className='font-mono text-foreground'>
+                    {boardChangeCodeMismatch.targetCode}
+                  </span>{' '}
+                  id) and linked to{' '}
+                  <span className='font-mono text-foreground'>
+                    {boardChangeCodeMismatch.ticketId}
+                  </span>
+                  .
+                </p>
+                <div className='mb-6'>
+                  <Checkbox
+                    checked={closeOriginalOnTransfer}
+                    onChange={setCloseOriginalOnTransfer}
+                    label={`Close the original ticket ${boardChangeCodeMismatch.ticketId}`}
+                  />
+                </div>
+              </>
+            ) : (
+              <p className='text-sm text-muted-foreground mb-6'>
+                Changing the board will move this ticket to the first stage of the selected board.
+                All previous stage progress and change requests will be permanently removed.
+              </p>
+            )}
 
             <div className='flex justify-end gap-3'>
               <Button
                 variant='secondary'
                 onClick={() => setShowBoardChangeConfirmDialog(false)}
+                disabled={isTransferringBoard}
                 data-track-category='Tickets'
                 data-track-name='CANCEL_BOARD_CHANGE'
               >
@@ -6043,11 +6160,18 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
               </Button>
               <Button
                 onClick={confirmBoardChange}
+                disabled={isTransferringBoard || !boardChangeDataReady}
                 data-track-category='Tickets'
                 data-track-name='CONFIRM_BOARD_CHANGE'
                 className='bg-primary text-primary-foreground hover:opacity-90'
               >
-                Confirm
+                {!boardChangeDataReady
+                  ? 'Checking…'
+                  : boardChangeCodeMismatch
+                    ? isTransferringBoard
+                      ? 'Creating…'
+                      : 'Create ticket'
+                    : 'Confirm'}
               </Button>
             </div>
           </div>

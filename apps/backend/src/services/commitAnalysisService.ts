@@ -17,16 +17,19 @@ import {
   DiffParser,
   ReleaseEventContext,
 } from './release/core';
+
+const sanitizeForLog = (value: string): string => value.replace(/[\r\n]/g, '');
+
 export type AnalyzeCommitsRequest =
   | {
     commitIds: string[];
     projectKey: string;
     repositorySlug: string;
     workspaceId: string;
-    // Local Project.code used to build the ticket-id regex (e.g. 'TSP'). When
-    // omitted, falls back to 'XYNE' for legacy callers that haven't been
-    // updated yet.
-    ticketPrefix?: string;
+    // The project's ticket codes (board-scoped namespaces + legacy project code)
+    // used to build the ticket-id regex. When omitted, falls back to ['XYNE']
+    // for legacy callers that haven't been updated yet.
+    ticketPrefixes?: string[];
     branch?: string;
     retryMissingPr?: boolean;
   }
@@ -36,7 +39,7 @@ export type AnalyzeCommitsRequest =
     projectKey: string;
     repositorySlug: string;
     workspaceId: string;
-    ticketPrefix?: string;
+    ticketPrefixes?: string[];
     branch?: string;
     retryMissingPr?: boolean;
   };
@@ -135,15 +138,18 @@ export class CommitAnalysisService {
 
 
 
-  private extractTicketId(prTitle: string, prefix: string): string | null {
-    // Build the regex dynamically from the project's code (e.g. TSP, XYNE).
-    // Escape any regex metachars defensively even though codes are usually
-    // uppercase alphanumerics.
-    const escaped = prefix.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    const start = new RegExp(`^(${escaped}-\\d+)`);
+  private extractTicketId(prTitle: string, prefixes: string[]): string | null {
+    if (prefixes.length === 0) return null;
+    // Match any of the project's codes (board-scoped namespaces + legacy project
+    // code). Escape regex metachars defensively even though codes are uppercase
+    // alphanumerics.
+    const escaped = prefixes
+      .map(prefix => prefix.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
+      .join('|');
+    const start = new RegExp(`^((?:${escaped})-\\d+)`);
     // \b prevents matching the code inside a larger token (e.g. prefix "EX"
     // must not match "EX-12" embedded in "FLEX-12").
-    const anywhere = new RegExp(`\\b${escaped}-\\d+`);
+    const anywhere = new RegExp(`\\b(?:${escaped})-\\d+`);
 
     const match = prTitle.match(start);
     if (match) {
@@ -164,7 +170,6 @@ export class CommitAnalysisService {
   private async fetchTicketByXyneId(
     xyneId: string,
     workspaceId: string,
-    ticketPrefix: string,
     prTitle?: string,
     prAuthor?: StubAuthor,
   ): Promise<TicketInfo | null> {
@@ -194,7 +199,7 @@ export class CommitAnalysisService {
         process.env.NODE_ENV !== 'production' &&
         process.env.RELEASE_AUTOSTUB_MISSING_TICKETS === '1'
       ) {
-        const stub = await this.autoStubMissingTicket(xyneId, ticketPrefix, workspaceId, prTitle, prAuthor);
+        const stub = await this.autoStubMissingTicket(xyneId, workspaceId, prTitle, prAuthor);
         if (stub) {
           logger.info(`[AutoStub] Created stub ticket for ${xyneId} (dev only)`);
           return stub;
@@ -218,19 +223,32 @@ export class CommitAnalysisService {
    */
   private async autoStubMissingTicket(
     xyneId: string,
-    ticketPrefix: string,
     workspaceId: string,
     prTitle?: string,
     author?: StubAuthor,
   ): Promise<TicketInfo | null> {
     try {
       const db = DatabaseClient.getInstance();
-      const project = await db.project.findFirst({
-        where: { code: ticketPrefix, workspaceId },
-        select: { id: true, workspaceId: true },
+      // Resolve the project from the code embedded in the xyneId: prefer the
+      // namespace that owns the code (board-scoped), else a legacy project code.
+      const code = xyneId.split('-')[0];
+      const namespace = await db.ticketNamespace.findFirst({
+        where: { code, workspaceId },
+        select: { projectId: true },
       });
+      const project = namespace
+        ? await db.project.findFirst({
+            where: { id: namespace.projectId },
+            select: { id: true, workspaceId: true },
+          })
+        : await db.project.findFirst({
+            where: { code, workspaceId },
+            select: { id: true, workspaceId: true },
+          });
       if (!project) {
-        logger.warn(`[AutoStub] No project found with code=${ticketPrefix} in workspace=${workspaceId}`);
+        logger.warn(
+          `[AutoStub] No project found for code=${sanitizeForLog(code)} in workspace=${sanitizeForLog(workspaceId)}`
+        );
         return null;
       }
       const board = await db.board.findFirst({
@@ -414,7 +432,7 @@ export class CommitAnalysisService {
     projectKey: string,
     repositorySlug: string,
     workspaceId: string,
-    ticketPrefix: string,
+    ticketPrefixes: string[],
     branch?: string,
     retryMissingPr = false,
   ): Promise<CommitAnalysisResult> {
@@ -455,7 +473,7 @@ export class CommitAnalysisService {
       result.pullRequest = pullRequest;
       logger.debug(`Commit ${commitId}: Found PR #${pullRequest.id} - "${pullRequest.title}"`);
 
-      const ticketId = this.extractTicketId(pullRequest.title, ticketPrefix);
+      const ticketId = this.extractTicketId(pullRequest.title, ticketPrefixes);
 
       if (!ticketId) {
         result.error = 'No ticket ID found in PR title';
@@ -463,7 +481,7 @@ export class CommitAnalysisService {
       } else {
         logger.debug(`Commit ${commitId}: Extracted ticket ID ${ticketId}`);
 
-        const ticket = await this.fetchTicketByXyneId(ticketId, workspaceId, ticketPrefix, pullRequest.title, pullRequest.author);
+        const ticket = await this.fetchTicketByXyneId(ticketId, workspaceId, pullRequest.title, pullRequest.author);
 
         if (!ticket) {
           logger.info(`Commit ${commitId}: Ticket ${ticketId} not found in database`);
@@ -519,9 +537,9 @@ export class CommitAnalysisService {
     if (!workspaceId) {
       throw new Error('workspaceId is required for commit analysis');
     }
-    // Default to 'XYNE' to preserve the legacy hardcoded behavior for any
-    // caller that hasn't been updated to pass `ticketPrefix`.
-    const ticketPrefix = request.ticketPrefix ?? 'XYNE';
+    // Default to ['XYNE'] to preserve the legacy hardcoded behavior for any
+    // caller that hasn't been updated to pass `ticketPrefixes`.
+    const ticketPrefixes = request.ticketPrefixes ?? ['XYNE'];
 
     let commitIds: string[];
 
@@ -588,7 +606,7 @@ export class CommitAnalysisService {
           commitIds
             .slice(i, i + CONCURRENCY)
             .map((commitId) =>
-              this.analyzeEachCommit(commitId, projectKey, repositorySlug, workspaceId, ticketPrefix, request.branch, request.retryMissingPr ?? false)
+              this.analyzeEachCommit(commitId, projectKey, repositorySlug, workspaceId, ticketPrefixes, request.branch, request.retryMissingPr ?? false)
             )
         );
         results.push(...batch);

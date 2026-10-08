@@ -354,6 +354,7 @@ export const projectTable = table('projects')
     name: string(),
     code: string(),
     ticketSequence: number(),
+    defaultTicketNamespaceId: string().optional(),
     description: string().optional(),
     workspaceId: string(),
     type: enumeration<ProjectType>(),
@@ -371,6 +372,7 @@ export const boardTable = table('boards')
     description: string().optional(),
     boardType: enumeration<BoardType>(),
     projectId: string(),
+    ticketNamespaceId: string().optional(),
     workspaceId: string(),
     createdBy: string(),
     updatedBy: string().optional(),
@@ -380,6 +382,21 @@ export const boardTable = table('boards')
     releaseTrackingMode: enumeration<ReleaseTrackingMode>().optional(),
     createdAt: number(),
     updatedAt: number().optional(),
+  })
+  .primaryKey('id');
+
+export const ticketNamespaceTable = table('ticket_namespaces')
+  .columns({
+    id: string(),
+    workspaceId: string(),
+    projectId: string(),
+    code: string(),
+    ticketSequence: number(),
+    name: string().optional(),
+    createdBy: string(),
+    updatedBy: string().optional(),
+    createdAt: number(),
+    updatedAt: number(),
   })
   .primaryKey('id');
 
@@ -2819,6 +2836,14 @@ export const projectTableRelationships = relationships(projectTable, ({ one, man
   }),
 }));
 
+export const ticketNamespaceTableRelationships = relationships(ticketNamespaceTable, ({ one }) => ({
+  project: one({
+    sourceField: ['projectId'],
+    destField: ['id'],
+    destSchema: projectTable,
+  }),
+}));
+
 export const boardTableRelationships = relationships(boardTable, ({ one, many }) => ({
   project: one({
     sourceField: ['projectId'],
@@ -5016,6 +5041,7 @@ export const schema = createSchema({
     ticketStageEtaTable,
     projectTable,
     boardTable,
+    ticketNamespaceTable,
     stageTable,
     stagePRStatusMappingTable,
     userGroupMappingTable,
@@ -5158,6 +5184,7 @@ export const schema = createSchema({
     projectTableRelationships,
     attachementTableRelationShips,
     boardTableRelationships,
+    ticketNamespaceTableRelationships,
     stageTableRelationships,
     stagePRStatusMappingTableRelationships,
     userGroupMappingTableRelationships,

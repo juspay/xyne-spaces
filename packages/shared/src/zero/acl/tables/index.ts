@@ -6,6 +6,7 @@ export { CollectionItemsACL } from './collection-items-acl';
 export { CollectionPermissionsACL } from './collection-permissions-acl';
 export { BoardComplexityScoresACL } from './board-complexity-scores-acl';
 export { BoardsACL } from './boards-acl';
+export { TicketNamespacesACL } from './ticket-namespaces-acl';
 export { BookmarksACL } from './bookmarks-acl';
 export { EmailSignaturesACL } from './email-signatures-acl';
 export { EmailsACL } from './emails-acl';

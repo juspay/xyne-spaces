@@ -1,10 +1,11 @@
 import { transaction } from '../base';
 import { ProjectRepository, CreateProjectInput } from '@/database/repositories/projectRepository';
 import { ProjectType, TicketStatusV2 } from '@xyne/shared';
+import { createDefaultTicketNamespace } from '@/utils/ticketNamespaceUtils';
 
 
 export function createTx(self: ProjectRepository, data: CreateProjectInput) {
-  return transaction(['Board', 'Project', 'Stage'], 'create: project, default board and default stages must commit atomically; tx is not ACL-wrapped', self.db, async (tx) => {
+  return transaction(['Board', 'Project', 'Stage', 'TicketNamespace'], 'create: project, default board, default stages and default ticket namespace must commit atomically; tx is not ACL-wrapped', self.db, async (tx) => {
     const project = await tx.project.create({
       data: {
         name: data.name,
@@ -64,6 +65,14 @@ export function createTx(self: ProjectRepository, data: CreateProjectInput) {
       ]
     });
 
-    return project;
+    // Seed the project's default namespace and link its board(s)
+    const namespace = await createDefaultTicketNamespace(tx, {
+      workspaceId: data.workspaceId,
+      projectId: project.id,
+      code: data.code,
+      createdBy: data.createdBy,
+    });
+
+    return { ...project, defaultTicketNamespaceId: namespace?.id ?? null };
   });
 }

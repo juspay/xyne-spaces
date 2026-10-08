@@ -1,6 +1,7 @@
 import { Prisma, PrismaClient } from '@prisma/client';
 import { sanitizeProjectCode, ProjectType, ChannelRole, ChannelScopeType, ChannelVisibility } from '@xyne/shared';
 import { repositories } from '@/database/repositories';
+import { createDefaultTicketNamespace, isTicketCodeTaken } from './ticketNamespaceUtils';
 import { newConnectId } from '@/database/connectGroup';
 import { createChannelWithConnectGroupMaybeTx } from '@/bypassAcl/transactions/connectGroupEntities';
 
@@ -62,6 +63,13 @@ export async function ensureGeneralChannelForWorkspace(
           createdBy,
         },
         select: { id: true },
+      });
+
+      await createDefaultTicketNamespace(db, {
+        workspaceId,
+        projectId: project.id,
+        code,
+        createdBy,
       });
     }
 
@@ -160,12 +168,7 @@ async function generateUniqueDefaultProjectCode(
   for (let index = 0; index < 100; index += 1) {
     const suffix = index === 0 ? '' : String(index + 1);
     const candidate = `${base.slice(0, 10 - suffix.length)}${suffix}`;
-    const existing = await db.project.findFirst({
-      where: { workspaceId, code: candidate },
-      select: { id: true },
-    });
-
-    if (!existing) {
+    if (!(await isTicketCodeTaken(db, candidate, workspaceId))) {
       return candidate;
     }
   }

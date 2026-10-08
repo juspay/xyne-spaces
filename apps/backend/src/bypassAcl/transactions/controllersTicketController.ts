@@ -23,6 +23,7 @@ import { messageMetadataService } from '@/services/messageMetadataService';
 import { logger } from '@/utils/logger';
 import { generateTicketId } from '@/bypassAcl/transactions/ticketIdService';
 import { lockTicketMetadataAndEta } from '@/bypassAcl/rowLockServices';
+import { createTicketWithConversation as createTransferredTicket } from '@/apps/core/ticketutils';
 
 
 export function transferTicketToBoardTx(targetBoardId: string, ticketId: string, now: Date, updatedBy: string, currentTicket: any, systemActorId: string) {
@@ -183,7 +184,7 @@ export function createTicketWithConversationTx(self: TicketController, conversat
     const channelWorkspaceId = await self.channelRepository.getWorkspaceId(channelId);
 
     // Generate xyneId using project-scoped format
-    const xyneId = await generateTicketId(tx, projectId);
+    const xyneId = await generateTicketId(tx, boardId);
 
     const creationMessageId = randomUUID();
 
@@ -283,7 +284,7 @@ export function createTicketWithConversationTx(self: TicketController, conversat
 export function createTicketTx(projectId: string, sourceConversationId: string | undefined, validatedConversation: any, self: TicketController, requestedTicketId: string | undefined, title: string, description: string, userId: string, finalAssignedTo: string | undefined, userGroupId: string | undefined, boardId: string, effectiveStatusV2: TicketStatusV2, priority: TicketPriority | undefined, eta: Date | undefined, metadata: Record<string, unknown> | undefined, closedAt: Date | undefined, closedBy: string | undefined, merchantId: string | undefined, sourceMessageId: string | undefined, effectiveTicketType: string | undefined, effectiveStageName: string | undefined, dynamicFields: Record<string, string | string[]>, formFieldChangesForEmit: FormFieldChanges | undefined, channelId: string | undefined, excludedChatAttachmentIds: string[] | undefined, entityLinkOwner: { sourceId: string; sourceType: "CANVAS" | "ATTACHMENT" | "TRACK" | "FOLDER" | "LINK"; } | undefined, fromTicketsTab: boolean, initialMessageId: `${string}-${string}-${string}-${string}-${string}`, board: { name: string; boardType: BoardType; projectId: string; } | null, uploadedFiles: UploadedFileResult[], draftAttachmentIds: string[] | undefined) {
   return transaction(['Board', 'Channel', 'Conversation', 'ConversationParticipant', 'MessageAttachment', 'Project', 'SdlcEntityLink', 'Stage', 'StageTransition', 'Ticket', 'TicketActivity', 'TicketStageEta'], 'createTicket: ticket, conversation, participant, attachment and entity-link writes must commit atomically; tx is not ACL-wrapped', prisma, async (tx) => {
     // Generate xyneId using project-scoped format
-    const xyneId = await generateTicketId(tx, projectId);
+    const xyneId = await generateTicketId(tx, boardId);
 
     let conversationId: string;
     let ticket: Ticket;
@@ -704,4 +705,71 @@ export function unmergeTicketTx(mapping: any, ticketId: string, userId: string, 
       data: { ticketId: mapping.targetTicketId, updatedBy: userId, workspaceId: mapping.targetTicket.workspaceId, activityType: ActivityType.UNMERGED, value: { sourceTicketId: ticketId, sourceTicketXyneId: ticket.xyneId, sourceTicketTitle: ticket.title } },
     });
   });
+}
+export function transferTicketAcrossNamespacesTx(
+  source: {
+    id: string; title: string; description: string | null; channelId: string; priority: string;
+    assignedTo: string | null; userGroupId: string | null; eta: Date | null; ticketType: string | null;
+    tags: { name: string }[];
+  },
+  target: { boardId: string; projectId: string },
+  workspaceId: string,
+  userId: string,
+  closeOld: boolean,
+  relationType: TicketReferenceRelation,
+) {
+  return transaction(['Board', 'Conversation', 'FormEntityValues', 'Merchant', 'Project', 'Stage', 'StageTransition', 'Ticket', 'TicketActivity', 'TicketDescription', 'TicketNamespace', 'TicketReferenceMapping', 'TicketStageEta', 'TicketTag', 'TicketTagMapping'], 'transferTicketAcrossNamespaces: claiming/closing the original, creating the new ticket, linking it and copying labels must commit atomically so a failure leaves no unlinked duplicate; tx is not ACL-wrapped', prisma, async (tx) => {
+    // Conditional update: only one concurrent transfer can claim the original
+    const claimed = await tx.ticket.updateMany({
+      where: { id: source.id, isArchived: false, statusV2: { not: TicketStatusV2.CANCELLED } },
+      data: closeOld
+        ? { isArchived: true, statusV2: TicketStatusV2.CANCELLED, statusUpdatedAt: new Date(), updatedBy: userId }
+        : { updatedBy: userId },
+    });
+    if (claimed.count === 0) {
+      return null;
+    }
+
+    const newTicket = await createTransferredTicket(
+      {
+        title: source.title,
+        description: source.description?.trim() || source.title,
+        projectId: target.projectId,
+        boardId: target.boardId,
+        channelId: source.channelId,
+        userId,
+        priority: source.priority as TicketPriority,
+        assignedTo: source.assignedTo ?? undefined,
+        userGroupId: source.userGroupId ?? undefined,
+        eta: source.eta ?? undefined,
+        ticketType: source.ticketType ?? undefined,
+      },
+      tx,
+    );
+
+    // Link original -> new (MERGED_INTO surfaces the original on the new
+    // ticket's detail view; LINKED keeps both visibly related).
+    await tx.ticketReferenceMapping.create({
+      data: { workspaceId, sourceTicketId: source.id, targetTicketId: newTicket.ticketId, relationType, createdBy: userId },
+    });
+
+    // Carry the labels over to the new ticket.
+    if (source.tags.length > 0) {
+      await tx.ticketTag.createMany({
+        data: source.tags.map((tag) => ({ workspaceId, name: tag.name, ticketId: newTicket.ticketId })),
+      });
+    }
+    const tagMappings = await tx.ticketTagMapping.findMany({
+      where: { ticketId: source.id },
+      select: { tagId: true, tagName: true },
+    });
+    if (tagMappings.length > 0) {
+      await tx.ticketTagMapping.createMany({
+        data: tagMappings.map((mapping) => ({ workspaceId, ticketId: newTicket.ticketId, tagId: mapping.tagId, tagName: mapping.tagName })),
+        skipDuplicates: true,
+      });
+    }
+
+    return newTicket;
+  }, { maxWait: 5_000, timeout: 15_000 });
 }

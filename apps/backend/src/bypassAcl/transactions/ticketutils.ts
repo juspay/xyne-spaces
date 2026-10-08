@@ -4,14 +4,15 @@ import { pushVespaJobForTicket } from '@/apps/core/ticketutils';
 import { FormFieldChanges } from '@/automations/triggers/ticket-updated.trigger';
 import { logger } from '@/utils/logger';
 import { TicketPriority, serializeTicketMd, type TicketCardSummary, FormEntityType } from '@xyne/shared';
-import { PrismaClient } from '@prisma/client';
+import { Prisma, PrismaClient } from '@prisma/client';
 import { generateTicketId } from '@/bypassAcl/transactions/ticketIdService';
 
 
-export function createTicketWithConversationTx(prisma: PrismaClient, projectId: string, ticketRepository: TicketRepository, title: string, description: string, userId: string, assignedTo: string | undefined, userGroupId: string | undefined, finalConversationId: string, channelId: string, workspaceId: string, boardId: string, priority: TicketPriority | undefined, stageName: string | undefined, eta: Date | undefined, ticketType: string | undefined, merchantId: string | undefined, formFieldChanges: FormFieldChanges | undefined, customFieldValues: { formId: string; contextId: string; fieldValues: { fieldId: string; fieldValue: string; fieldName?: string | undefined; actualFieldValue?: any; }[]; } | undefined) {
-  return transaction(['Board', 'Conversation', 'FormEntityValues', 'Merchant', 'Project', 'Stage', 'StageTransition', 'Ticket', 'TicketActivity', 'TicketDescription', 'TicketStageEta', 'TicketTag'], 'createTicketWithConversation: ticket creation with sequence allocation, conversation link, and custom fields must commit atomically; tx is not ACL-wrapped', prisma, async (tx) => {
-    // Generate xyneId using project-scoped format
-    const xyneId = await generateTicketId(tx, projectId);
+export function createTicketWithConversationTx(prisma: PrismaClient, projectId: string, ticketRepository: TicketRepository, title: string, description: string, userId: string, assignedTo: string | undefined, userGroupId: string | undefined, finalConversationId: string, channelId: string, workspaceId: string, boardId: string, priority: TicketPriority | undefined, stageName: string | undefined, eta: Date | undefined, ticketType: string | undefined, merchantId: string | undefined, formFieldChanges: FormFieldChanges | undefined, customFieldValues: { formId: string; contextId: string; fieldValues: { fieldId: string; fieldValue: string; fieldName?: string | undefined; actualFieldValue?: any; }[]; } | undefined, callerTx?: Prisma.TransactionClient) {
+  // With callerTx the ticket joins the caller's transaction (e.g. a transfer)
+  const createInTx = async (tx: Prisma.TransactionClient) => {
+    // Generate xyneId from the board's namespace
+    const xyneId = await generateTicketId(tx, boardId);
     // Create ticket using repository
     const createdTicket = await ticketRepository.createTicket({
       title,
@@ -34,9 +35,12 @@ export function createTicketWithConversationTx(prisma: PrismaClient, projectId: 
       formFieldChanges,
     }, tx);
 
-    pushVespaJobForTicket(createdTicket.id, userId, workspaceId || undefined).catch(error => {
-      logger.error(`[CREATE-TICKET] Error pushing Vespa job for ticket ${createdTicket.id}:`, error);
-    });
+    // With callerTx the caller indexes after its commit
+    if (!callerTx) {
+      pushVespaJobForTicket(createdTicket.id, userId, workspaceId || undefined).catch(error => {
+        logger.error(`[CREATE-TICKET] Error pushing Vespa job for ticket ${createdTicket.id}:`, error);
+      });
+    }
 
      const ticketMd = serializeTicketMd({
        id: createdTicket.id,
@@ -77,5 +81,9 @@ export function createTicketWithConversationTx(prisma: PrismaClient, projectId: 
     }
 
     return createdTicket;
-  });
+  };
+  if (callerTx) {
+    return createInTx(callerTx);
+  }
+  return transaction(['Board', 'Conversation', 'FormEntityValues', 'Merchant', 'Project', 'Stage', 'StageTransition', 'Ticket', 'TicketActivity', 'TicketDescription', 'TicketStageEta', 'TicketTag'], 'createTicketWithConversation: ticket creation with sequence allocation, conversation link, and custom fields must commit atomically; tx is not ACL-wrapped', prisma, createInTx);
 }

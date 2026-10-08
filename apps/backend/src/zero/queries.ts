@@ -4457,6 +4457,9 @@ export const queries: AnyQueryRegistry = defineQueries({
       .orderBy('createdAt', 'desc')
       .related('boards');
   }),
+  allTicketNamespaces: defineQuery(() => {
+    return zql.ticket_namespaces.orderBy('createdAt', 'desc');
+  }),
   // Projects only (no boards) — boards are lazy-loaded per project in pickers.
   getAllProjectsList: defineQuery(() => {
     return zql.projects.where('type', '!=', ProjectType.DM).orderBy('createdAt', 'desc');
@@ -4506,6 +4509,14 @@ export const queries: AnyQueryRegistry = defineQueries({
     z.object({ projectId: z.string() }),
     ({ args: { projectId } }) => {
       return zql.boards
+        .where('projectId', projectId)
+        .orderBy('createdAt', 'asc');
+    },
+  ),
+  ticketNamespacesByProject: defineQuery(
+    z.object({ projectId: z.string() }),
+    ({ args: { projectId } }) => {
+      return zql.ticket_namespaces
         .where('projectId', projectId)
         .orderBy('createdAt', 'asc');
     },

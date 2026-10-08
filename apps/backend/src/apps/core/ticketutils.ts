@@ -102,10 +102,12 @@ export async function pushVespaJobForTicket(
  * and then creates a ticket linked to that conversation. The ticket is created with a generated xyneId.
  * 
  * @param params - Ticket creation parameters
+ * @param callerTx - Optional transaction to run in; the caller then indexes and emits after commit
  * @returns The ticket action response with event type, ticket details, and conversation info
  */
 export async function createTicketWithConversation(
-  params: z.infer<typeof CreateTicketParamsSchema>
+  params: z.infer<typeof CreateTicketParamsSchema>,
+  callerTx?: Prisma.TransactionClient
 ): Promise<TicketActionResponse> {
   try {
     // Validate parameters with Zod
@@ -187,11 +189,13 @@ export async function createTicketWithConversation(
         : undefined;
 
     // Generate xyneId and create ticket in a transaction
-    const ticket = await createTicketWithConversationTx(prisma, projectId, ticketRepository, title, description, userId, assignedTo, userGroupId, finalConversationId, channelId, workspaceId, boardId, priority, stageName, eta, ticketType, merchantId, formFieldChanges, customFieldValues);
+    const ticket = await createTicketWithConversationTx(prisma, projectId, ticketRepository, title, description, userId, assignedTo, userGroupId, finalConversationId, channelId, workspaceId, boardId, priority, stageName, eta, ticketType, merchantId, formFieldChanges, customFieldValues, callerTx);
 
     // Automations re-read the ticket on their own connection, so the event must
-    // not be published before the transaction above commits.
-    void emitTicketCreated(ticket, undefined, ticket.createdBy);
+    // not be published before the transaction above commits (with callerTx, the caller does it).
+    if (!callerTx) {
+      void emitTicketCreated(ticket, undefined, ticket.createdBy);
+    }
 
     logger.info(`[CREATE-TICKET] Created ticket ${ticket.id} (${ticket.xyneId}) in conversation ${finalConversationId}`);
 
