@@ -6,6 +6,7 @@ import {
 } from './artifactData.constants';
 import { API_BASE_URL } from '../../../config';
 import type { PreviewClientRef } from './useArtifactDataBridge';
+import { artifactFrame, isFromArtifactFrame } from './artifactFrame';
 
 // The backend origin the dashboard's own api client talks to. On localhost that
 // is :3001 (there is no /api vite proxy in dev); in prod it's same-origin. /claw
@@ -61,15 +62,11 @@ const ALLOWED_PREFIXES = ['/api/sdk/', STORAGE_PREFIX];
  */
 export function useArtifactRequestBridge({ previewRef, appId }: BridgeArgs): void {
   useEffect(() => {
-    /** The app's window, resolved at call time — the iframe is replaced on reload. */
-    const appWindow = (): Window | null =>
-      previewRef.current?.getClient()?.iframe?.contentWindow ?? null;
-
     const post = (message: HostRequestResultMessage): void => {
-      const target = appWindow();
+      const target = artifactFrame(previewRef);
       if (!target) return;
       try {
-        target.postMessage(message, '*');
+        target.window.postMessage(message, target.origin);
       } catch {
         /* the app's own fetch timeout will fire */
       }
@@ -169,8 +166,7 @@ export function useArtifactRequestBridge({ previewRef, appId }: BridgeArgs): voi
       if (!isAppArtifactMessage(event.data)) return;
       // Several artifacts can be mounted at once and all post to this window, so
       // only accept messages from *our* iframe.
-      const target = appWindow();
-      if (!target || event.source !== target) return;
+      if (!isFromArtifactFrame(event, previewRef)) return;
       if (event.data.type !== 'request') return;
 
       const { requestId, method, url, headers, body } = event.data;

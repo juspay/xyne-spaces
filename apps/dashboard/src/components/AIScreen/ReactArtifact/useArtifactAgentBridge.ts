@@ -19,6 +19,7 @@ import {
   type HostAgentStateMessage,
 } from './artifactData.constants';
 import type { PreviewClientRef } from './useArtifactDataBridge';
+import { artifactFrame, isFromArtifactFrame } from './artifactFrame';
 
 interface AgentBridgeArgs {
   /** Which app this is. Both fields may be absent for a preview that has not
@@ -116,14 +117,11 @@ export function useArtifactAgentBridge({
       return state;
     }
 
-    const appWindow = (): Window | null =>
-      previewRef.current?.getClient()?.iframe?.contentWindow ?? null;
-
     function postToApp(message: HostAgentStateMessage | HostAgentEventMessage): void {
-      const target = appWindow();
+      const target = artifactFrame(previewRef);
       if (!target) return;
       try {
-        target.postMessage(message, '*');
+        target.window.postMessage(message, target.origin);
       } catch {
         /* structured-clone failure — the app's own state simply does not advance */
       }
@@ -374,8 +372,7 @@ export function useArtifactAgentBridge({
 
     const onMessage = (event: MessageEvent): void => {
       if (!isAppArtifactMessage(event.data)) return;
-      const target = appWindow();
-      if (!target || event.source !== target) return;
+      if (!isFromArtifactFrame(event, previewRef)) return;
 
       const { type, runKey } = event.data;
       if (type === 'agent-attach' && runKey) {
@@ -415,8 +412,8 @@ function attachUnavailableListener(
 ): () => void {
   const onMessage = (event: MessageEvent): void => {
     if (!isAppArtifactMessage(event.data)) return;
-    const target = previewRef.current?.getClient()?.iframe?.contentWindow ?? null;
-    if (!target || event.source !== target) return;
+    const target = artifactFrame(previewRef);
+    if (!target || !isFromArtifactFrame(event, previewRef)) return;
     const { type, runKey } = event.data;
     if (type !== 'agent-attach' && type !== 'agent-run') return;
 
@@ -438,7 +435,7 @@ function attachUnavailableListener(
       },
     };
     try {
-      target.postMessage(message, '*');
+      target.window.postMessage(message, target.origin);
     } catch {
       /* nothing useful to do */
     }

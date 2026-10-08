@@ -16,6 +16,7 @@ import {
   type HostDataMessage,
   type HostMutateResultMessage,
 } from './artifactData.constants';
+import { artifactFrame, isFromArtifactFrame } from './artifactFrame';
 
 /** The SandpackPreview ref itself — only its client's iframe is used here. */
 export type PreviewClientRef = SandpackPreviewRef;
@@ -76,13 +77,8 @@ export function useArtifactDataBridge({
           };
     }
 
-    /** The app's window, resolved at call time — the client may not exist yet
-     *  under lazy init, and the iframe is replaced on reload. */
-    const appWindow = (): Window | null =>
-      previewRef.current?.getClient()?.iframe?.contentWindow ?? null;
-
     const postSnapshot = (): void => {
-      const target = appWindow();
+      const target = artifactFrame(previewRef);
       if (!target) return;
       const message: HostDataMessage = {
         source: 'xyne-artifact-host',
@@ -91,7 +87,7 @@ export function useArtifactDataBridge({
         payloads: snapshot,
       };
       try {
-        target.postMessage(message, '*');
+        target.window.postMessage(message, target.origin);
       } catch {
         // Structured clone failed — something in a result isn't serialisable.
         // Replace the offending payloads with an error so the app can render.
@@ -101,7 +97,7 @@ export function useArtifactDataBridge({
           }
         }
         try {
-          target.postMessage({ ...message, payloads: snapshot }, '*');
+          target.window.postMessage({ ...message, payloads: snapshot }, target.origin);
         } catch {
           /* give up — the app keeps showing its loading state */
         }
@@ -178,7 +174,7 @@ export function useArtifactDataBridge({
     };
 
     const postMutateResult = (requestId: string, ok: boolean, error?: string): void => {
-      const target = appWindow();
+      const target = artifactFrame(previewRef);
       if (!target) return;
       const message: HostMutateResultMessage = {
         source: 'xyne-artifact-host',
@@ -189,7 +185,7 @@ export function useArtifactDataBridge({
         ...(error ? { error } : {}),
       };
       try {
-        target.postMessage(message, '*');
+        target.window.postMessage(message, target.origin);
       } catch {
         /* the app's own timeout will fire */
       }
@@ -230,8 +226,7 @@ export function useArtifactDataBridge({
       if (!isAppArtifactMessage(event.data)) return;
       // Several artifacts can be mounted at once and they all post to this same
       // window, so only accept messages from *our* iframe.
-      const target = appWindow();
-      if (!target || event.source !== target) return;
+      if (!isFromArtifactFrame(event, previewRef)) return;
 
       if (event.data.type === 'ready') {
         // Re-deliver what we already hold. An iframe reload must not re-query.
