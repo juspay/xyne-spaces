@@ -281,6 +281,27 @@ function createPillWindow(): void {
   };
   ipcMain.on('recording-pill:drag-end', dragEndHandler);
 
+  // The pill renders one local file and must never navigate anywhere else. It had no guard at
+  // all, so a stray loadURL — a certificate-recovery redirect picked this window by mistake —
+  // left an always-on-top panel showing the enrollment flow over the user's screen, with nothing
+  // to ever restore it: the pill is only loaded once, at construction. The claw overlay already
+  // guards itself the same way.
+  const isOwnRoute = (navUrl: string): boolean => {
+    try {
+      return new URL(navUrl).protocol === 'file:';
+    } catch {
+      return false;
+    }
+  };
+
+  pillWindow.webContents.on('will-navigate', (event, navUrl) => {
+    if (isOwnRoute(navUrl)) return;
+    event.preventDefault();
+    log.warn('[RecordingPill] Blocked navigation away from the pill:', navUrl);
+  });
+
+  pillWindow.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
+
   pillWindow.webContents.on('did-finish-load', () => {
     if (!pillWindow || pillWindow.isDestroyed()) return;
     void pillWindow.webContents
