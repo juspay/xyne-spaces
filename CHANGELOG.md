@@ -1,3 +1,10 @@
+## [1.481.0](https://github.com/juspay/xyne-spaces/compare/v1.480.1...v1.481.0) (2026-10-08)
+
+
+### Features
+
+* Add artifact app tools and artifact apps in context ([#2807](https://github.com/juspay/xyne-spaces/issues/2807)) ([ab2cbc0](https://github.com/juspay/xyne-spaces/commit/ab2cbc04732a6c1aed94babf9fe9926c73bf6c6f))
+
 ## [1.480.1](https://github.com/juspay/xyne-spaces/compare/v1.480.0...v1.480.1) (2026-10-08)
 
 
