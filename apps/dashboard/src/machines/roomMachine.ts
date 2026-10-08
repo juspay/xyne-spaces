@@ -2085,6 +2085,10 @@ export const roomMachine = setup({
                 eventName: 'call_window_connect_failed',
                 error: event.error instanceof Error ? event.error.message : String(event.error),
               });
+              // Gave up waiting (e.g. the timeout): the call window may still
+              // connect later, so tell it to leave rather than leave a call
+              // running there that this window no longer shows.
+              sendCallWindowCommand({ type: 'DISCONNECT' });
             },
             'showCallWindowErrorToast',
             'cleanupRoom',
@@ -2858,6 +2862,17 @@ export const roomMachine = setup({
 
 // Create the global Room actor instance
 export const roomActor = createActor(roomMachine).start();
+
+/**
+ * The call has been handed to the desktop call window, which now owns it and
+ * keeps it through this window reloading. Before the handoff (initiating,
+ * joining) the call, and the call window opened early for it, still belong here.
+ */
+export const isCallHandedToCallWindow = (
+  snapshot: ReturnType<typeof roomActor.getSnapshot>,
+): boolean =>
+  snapshot.context.isCallWindowMode &&
+  (snapshot.matches('connecting') || snapshot.matches('connected'));
 
 /**
  * Join a call from outside the React tree, leaving any call already running.

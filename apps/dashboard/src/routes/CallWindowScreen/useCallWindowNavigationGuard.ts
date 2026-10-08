@@ -6,7 +6,7 @@ import { toRegularPath } from '../../utils/electronApp';
 /**
  * In-app navigation away from the call belongs to the main window: following
  * it here would unmount the call UI. (The handoff, status and commands run
- * outside React — see callWindowHost.)
+ * outside React — see utils/callWindowHost.)
  */
 export function useCallWindowNavigationGuard(): void {
   const blocker = useBlocker(({ nextLocation }) => nextLocation.pathname !== CALL_WINDOW_ROUTE);

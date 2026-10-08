@@ -353,8 +353,8 @@ export function setupRequestInterceptor(): void {
   );
 }
 
-// The picker is shown in the window that asked for the capture — the call
-// window when a call runs there — rather than always in the main window.
+// The window that asked for the capture. showScreenPicker uses it only if it
+// hosts a picker (the call window); anything else falls back to the main window.
 function requestingWindow(frame: Electron.WebFrameMain | null): BrowserWindow | null {
   if (!frame) return null;
   try {

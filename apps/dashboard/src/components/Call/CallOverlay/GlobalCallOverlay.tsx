@@ -1,5 +1,5 @@
 import { useSelector } from '@xstate/react';
-import { roomActor } from '../../../machines/roomMachine';
+import { isCallHandedToCallWindow, roomActor } from '../../../machines/roomMachine';
 import { createPortal } from 'react-dom';
 import { RoomAudioRenderer } from '@livekit/components-react';
 import { CustomLiveKitRoom } from '../CallViews/CustomLiveKitRoom';
@@ -64,8 +64,9 @@ export function GlobalCallOverlay({
         snapshot.matches('connecting') ||
         snapshot.matches('connected');
 
-      // A call in the call window outlives this window reloading.
-      if (isInCall && !snapshot.context.isCallWindowMode) {
+      // A call handed to the call window outlives this window reloading. Before
+      // the handoff, disconnecting also closes the call window opened early.
+      if (isInCall && !isCallHandedToCallWindow(snapshot)) {
         // Send disconnect event to clean up properly
         roomActor.send({ type: 'DISCONNECT' });
       }

@@ -15,7 +15,7 @@ import { useAuth } from '../../hooks/useAuth';
 import { CallStateTransition } from '../../components/Call/CallStateTransition/CallStateTransition';
 import { GlobalCallOverlay } from '../../components/Call/CallOverlay/GlobalCallOverlay';
 import { ScreenPickerHost } from '../../components/ScreenPicker/ScreenPickerHost';
-import { useCallWindowNavigationGuard } from './useCallWindowHost';
+import { useCallWindowNavigationGuard } from './useCallWindowNavigationGuard';
 
 // Set by the call UI when it mounts, which is only once the app behind it has
 // finished loading (InitialStateLoader holds it until then).
@@ -45,7 +45,7 @@ function CallWindowJoining(): ReactElement {
  * Route element for /newWindow/call. Deliberately outside SplashScreen: the
  * joining screen shows from the first frame instead of the app splash or
  * loader, and the providers (passed as children) load behind it. The call
- * itself started connecting before any of this — see callWindowHost.
+ * itself started connecting before any of this — see utils/callWindowHost.
  */
 export function CallWindowRoot({ children }: { children: ReactNode }): ReactElement {
   const { isLoading, isAuthenticated } = useAuth();

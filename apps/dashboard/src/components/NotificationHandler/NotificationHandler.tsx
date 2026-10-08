@@ -12,7 +12,7 @@ import { queryClient } from '../../services/clients/queryClient';
 import { NativeInboundMessageType, reactNativeBridge } from '../../utils/reactNativeBridge';
 import { useZero } from '../../hooks/useZero';
 import { callActor } from '../../machines/callMachine';
-import { roomActor } from '../../machines/roomMachine';
+import { isCallHandedToCallWindow, roomActor } from '../../machines/roomMachine';
 import { useSelector } from '@xstate/react';
 import { CallType } from '@xyne/shared';
 import { buildSdlcPath, parseSdlcNavTarget } from '@xyne/shared/sdlc';
@@ -752,7 +752,7 @@ export const NotificationHandler: React.FC = () => {
         s.matches('joining') ||
         s.matches('connecting') ||
         s.matches('connected')) &&
-      !(s.context.isCallWindowMode && (s.matches('connecting') || s.matches('connected'))),
+      !isCallHandedToCallWindow(s),
   );
   useEffect(() => {
     if (!isElectron) return;

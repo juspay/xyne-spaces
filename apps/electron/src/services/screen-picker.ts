@@ -18,6 +18,14 @@ let isPickerOpen = false;
 // The window whose getDisplayMedia() is waiting on the picker: the main window,
 // or the call window when the call runs there.
 let pickerWindow: BrowserWindow | null = null;
+// Windows besides the main one that mount a ScreenPickerHost. A request from
+// any other window (e.g. SDLC, which has a call overlay but no picker) shows
+// the picker in the main window, as before.
+const pickerHostWindows = new WeakSet<BrowserWindow>();
+
+export function registerScreenPickerWindow(win: BrowserWindow): void {
+  pickerHostWindows.add(win);
+}
 
 function resolvePickerWindow(): BrowserWindow | null {
   if (pickerWindow && !pickerWindow.isDestroyed()) return pickerWindow;
@@ -62,7 +70,8 @@ export function showScreenPicker(
     return;
   }
 
-  pickerWindow = requester && !requester.isDestroyed() ? requester : null;
+  pickerWindow =
+    requester && !requester.isDestroyed() && pickerHostWindows.has(requester) ? requester : null;
   const targetWindow = resolvePickerWindow();
   if (!targetWindow) {
     Logger.warn('[ScreenPicker] No window available to show the picker');
@@ -72,10 +81,16 @@ export function showScreenPicker(
   isPickerOpen = true;
   let callbackCalled = false;
 
-  const cleanup = (): void => {
+  // Stop listening and free the picker for the next request.
+  const release = (): void => {
     isPickerOpen = false;
     ipcMain.removeListener('screen-picker:select', handleSelect);
     ipcMain.removeListener('screen-picker:cancel', handleCancel);
+    targetWindow.removeListener('closed', handleCancel);
+  };
+
+  const cleanup = (): void => {
+    release();
     const win = resolvePickerWindow();
     if (win) {
       win.webContents.send('screen-picker:close');
@@ -122,6 +137,9 @@ export function showScreenPicker(
 
   ipcMain.on('screen-picker:select', handleSelect);
   ipcMain.on('screen-picker:cancel', handleCancel);
+  // The window went away (e.g. the call window closed with the call) without
+  // an answer: cancel, or every later screen share would hit isPickerOpen.
+  targetWindow.once('closed', handleCancel);
 
   // Fetch sources — triggers macOS permission prompt on first run
   void (async () => {
@@ -134,9 +152,7 @@ export function showScreenPicker(
       Logger.info(`[ScreenPicker] Got ${sources.length} sources`);
 
       if (sources.length === 0) {
-        isPickerOpen = false;
-        ipcMain.removeListener('screen-picker:select', handleSelect);
-        ipcMain.removeListener('screen-picker:cancel', handleCancel);
+        release();
         showPermissionError(callback);
         return;
       }
@@ -154,11 +170,7 @@ export function showScreenPicker(
         }));
 
       if (targetWindow.isDestroyed()) {
-        isPickerOpen = false;
-        pickerWindow = null;
-        ipcMain.removeListener('screen-picker:select', handleSelect);
-        ipcMain.removeListener('screen-picker:cancel', handleCancel);
-        try { callback({} as Electron.Streams); } catch { /* suppress */ }
+        handleCancel();
         return;
       }
       targetWindow.webContents.send('screen-picker:show', {
@@ -167,9 +179,7 @@ export function showScreenPicker(
       } satisfies ScreenPickerPayload);
     } catch (err) {
       Logger.error('[ScreenPicker] getSources threw:', err);
-      isPickerOpen = false;
-      ipcMain.removeListener('screen-picker:select', handleSelect);
-      ipcMain.removeListener('screen-picker:cancel', handleCancel);
+      release();
       showPermissionError(callback);
     }
   })();

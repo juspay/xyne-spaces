@@ -139,7 +139,7 @@ function isPreviewSenderTrusted(event: IpcMainEvent): boolean {
 // identity, write persisted settings. Only honor them from the trusted main
 // window's top-level frame, so a sub-frame, webview, or untrusted origin cannot
 // force a one-call logout/DoS, spoof telemetry identity, or pollute config.
-function isMainWindowSender(event: IpcMainEvent | IpcMainInvokeEvent): boolean {
+export function isMainWindowSender(event: IpcMainEvent | IpcMainInvokeEvent): boolean {
   const mainWindow = getMainWindow();
   const frame = event.senderFrame;
   const trusted =

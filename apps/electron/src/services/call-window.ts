@@ -10,7 +10,9 @@ import { registerAppOwnedWindow } from './request-interceptor';
 import { browserSettingsService } from './browser-settings';
 import { setCallWindowActive } from './recording-controller';
 import { getMainWindow } from '../window/manager';
-import { callInvitePath } from '../utils/validation';
+import { callInvitePath, isSafeInAppPath } from '../utils/validation';
+import { isMainWindowSender } from '../ipc/handlers';
+import { registerScreenPickerWindow } from './screen-picker';
 
 /**
  * The call window: a call running in its own top-level window (as in Slack
@@ -30,6 +32,14 @@ const ROUTE_PATH = '/newWindow/call';
 const DESTROY_AFTER_HIDE_MS = 15_000;
 const LEAVE_TIMEOUT_MS = 3_000;
 const BOUNDS_KEY = 'callWindowBounds';
+// First-open size (later opens reuse the last bounds): a share of the work
+// area, capped so it does not take over a large display.
+const DEFAULT_MAX_WIDTH = 1100;
+const DEFAULT_MAX_HEIGHT = 760;
+const DEFAULT_WIDTH_RATIO = 0.7;
+const DEFAULT_HEIGHT_RATIO = 0.75;
+const MIN_WIDTH = 480;
+const MIN_HEIGHT = 360;
 
 const store = new Store({ name: 'call-window' });
 
@@ -50,6 +60,8 @@ export interface CallWindowStatus {
   externalId: string | null;
   callId: string | null;
   channelId: string | null;
+  // CallType from @xyne/shared, which this package does not depend on. Main
+  // only stores and forwards it; the renderers own its meaning.
   callType: string | null;
   roomLink: string | null;
   scopeType: string | null;
@@ -172,18 +184,6 @@ function publishEndedIfLive(error: string | null): void {
   });
 }
 
-function isMainWindowTopFrame(event: IpcMainEvent | IpcMainInvokeEvent): boolean {
-  const mainWindow = getMainWindow();
-  const trusted =
-    !!mainWindow &&
-    !mainWindow.isDestroyed() &&
-    event.sender === mainWindow.webContents &&
-    !!event.senderFrame &&
-    event.senderFrame.parent === null;
-  if (!trusted) log.warn('[CallWindow] Blocked IPC from a sender other than the main window');
-  return trusted;
-}
-
 function isCallWindowTopFrame(event: IpcMainEvent | IpcMainInvokeEvent): boolean {
   const trusted =
     !!callWindow &&
@@ -246,8 +246,12 @@ function forwardUrlToMain(rawUrl: string): void {
   }
 
   if (isAppOrigin(rawUrl)) {
-    const appPath = `${url.pathname}${url.search}${url.hash}`;
-    sendToMainWindow('navigate-to', appPath.replace(/^\/newWindow(?=\/)/, ''));
+    const appPath = `${url.pathname}${url.search}${url.hash}`.replace(/^\/newWindow(?=\/)/, '');
+    if (!isSafeInAppPath(appPath)) {
+      log.warn('[CallWindow] Dropped an unsafe in-app link');
+      return;
+    }
+    sendToMainWindow('navigate-to', appPath);
     focusMain();
     return;
   }
@@ -287,8 +291,8 @@ function getInitialBounds(): Electron.Rectangle {
       ? screen.getDisplayMatching(anchor.getBounds())
       : screen.getPrimaryDisplay();
   const area = display.workArea;
-  const width = Math.min(1100, Math.round(area.width * 0.7));
-  const height = Math.min(760, Math.round(area.height * 0.75));
+  const width = Math.min(DEFAULT_MAX_WIDTH, Math.round(area.width * DEFAULT_WIDTH_RATIO));
+  const height = Math.min(DEFAULT_MAX_HEIGHT, Math.round(area.height * DEFAULT_HEIGHT_RATIO));
   return {
     x: area.x + Math.round((area.width - width) / 2),
     y: area.y + Math.round((area.height - height) / 2),
@@ -366,8 +370,8 @@ function createCallWindow(workspaceId: string | null): BrowserWindow {
 
   const win = new BrowserWindow({
     ...bounds,
-    minWidth: 480,
-    minHeight: 360,
+    minWidth: MIN_WIDTH,
+    minHeight: MIN_HEIGHT,
     show: false,
     title: 'Call',
     backgroundColor: '#131314',
@@ -386,6 +390,8 @@ function createCallWindow(workspaceId: string | null): BrowserWindow {
   // Grants getUserMedia/getDisplayMedia (first-party URL only) — see
   // installMediaPermissionGuard.
   registerAppOwnedWindow(win);
+  // It mounts its own ScreenPickerHost, so screen share asks there.
+  registerScreenPickerWindow(win);
 
   // Up at once: the dark background paints immediately and the page's own
   // "Joining call…" takes over as soon as the bundle runs.
@@ -545,7 +551,7 @@ function cancelPreparedCallWindow(): void {
 
 export function setupCallWindowHandlers(): void {
   ipcMain.handle('call-window:open', (event, payload: unknown) => {
-    if (!isMainWindowTopFrame(event)) throw new Error('Unauthorized sender');
+    if (!isMainWindowSender(event)) throw new Error('Unauthorized sender');
     if (!payload || typeof payload !== 'object') throw new Error('Invalid call handoff');
     const { handoff, workspaceId } = payload as {
       handoff?: unknown;
@@ -560,7 +566,7 @@ export function setupCallWindowHandlers(): void {
   });
 
   ipcMain.on('call-window:prepare', (event, payload: unknown) => {
-    if (!isMainWindowTopFrame(event)) return;
+    if (!isMainWindowSender(event)) return;
     const workspaceId = (payload as { workspaceId?: unknown } | null)?.workspaceId;
     prepareCallWindow(
       typeof workspaceId === 'string' && /^[A-Za-z0-9_-]{1,128}$/.test(workspaceId)
@@ -570,7 +576,7 @@ export function setupCallWindowHandlers(): void {
   });
 
   ipcMain.on('call-window:cancel-prepare', event => {
-    if (!isMainWindowTopFrame(event)) return;
+    if (!isMainWindowSender(event)) return;
     cancelPreparedCallWindow();
   });
 
@@ -610,12 +616,12 @@ export function setupCallWindowHandlers(): void {
   });
 
   ipcMain.handle('call-window:get-status', event => {
-    if (!isMainWindowTopFrame(event)) return null;
+    if (!isMainWindowSender(event)) return null;
     return isLive(lastStatus) ? lastStatus : null;
   });
 
   ipcMain.on('call-window:command', (event, command: unknown) => {
-    if (!isMainWindowTopFrame(event)) return;
+    if (!isMainWindowSender(event)) return;
     if (!command || typeof command !== 'object') return;
     const { type, endForAll } = command as { type?: unknown; endForAll?: unknown };
     if (typeof type !== 'string' || !COMMAND_TYPES.has(type as CallWindowCommand['type'])) return;
@@ -644,7 +650,7 @@ export function setupCallWindowHandlers(): void {
   });
 
   ipcMain.on('call-window:focus', event => {
-    if (!isMainWindowTopFrame(event)) return;
+    if (!isMainWindowSender(event)) return;
     if (!callWindow || callWindow.isDestroyed() || !isLive(lastStatus)) return;
     if (callWindow.isMinimized()) callWindow.restore();
     callWindow.show();
@@ -653,9 +659,7 @@ export function setupCallWindowHandlers(): void {
 
   ipcMain.on('call-window:open-in-main', (event, appPath: unknown) => {
     if (!isCallWindowTopFrame(event)) return;
-    if (typeof appPath !== 'string' || !appPath.startsWith('/') || appPath.startsWith('//')) {
-      return;
-    }
+    if (!isSafeInAppPath(appPath)) return;
     sendToMainWindow('navigate-to', appPath);
     focusMain();
   });

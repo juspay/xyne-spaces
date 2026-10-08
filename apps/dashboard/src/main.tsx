@@ -7,7 +7,7 @@ import { globalClickTracker } from './services/Analytics/globalClickTracker';
 import { installErrorReportLogCollector } from './utils/errorReportLogCollector';
 import { maybeOpenInDesktopApp } from './utils/openInDesktopApp';
 import { isCallWindowRoute } from './utils/callWindow';
-import { startCallWindowHost } from './routes/CallWindowScreen/callWindowHost';
+import { startCallWindowHost } from './utils/callWindowHost';
 import { logger, Event } from './utils/logger';
 
 // Expose app version to window for Electron access

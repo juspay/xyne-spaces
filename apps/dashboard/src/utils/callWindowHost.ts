@@ -1,11 +1,11 @@
-import { roomActor, type RoomContext } from '../../machines/roomMachine';
+import { roomActor, type RoomContext } from '../machines/roomMachine';
 import type {
   CallWindowCommand,
   CallWindowHandoff,
   CallWindowPhase,
   CallWindowStatus,
-} from '../../utils/callWindow';
-import { logger, Event } from '../../utils/logger';
+} from './callWindow';
+import { logger, Event } from './logger';
 
 /**
  * The call window's side of the handoff, run from main.tsx as soon as the
@@ -25,6 +25,9 @@ const ENDED_SETTLE_MS = 250;
 // The handoff this window is running.
 let activeHandoffId: number | null = null;
 let started = false;
+// Waiting for the previous call to finish leaving before connecting the next.
+// Only the latest handoff may wait: a newer one replaces an older waiter.
+let waitForIdle: { unsubscribe: () => void } | null = null;
 
 type SnapshotLike = {
   context: RoomContext;
@@ -79,6 +82,8 @@ const connectHandoff = (handoff: CallWindowHandoff & { handoffId: number }): voi
   });
 
   const connect = (): void => {
+    // Superseded while waiting: a newer handoff connects instead.
+    if (activeHandoffId !== handoff.handoffId) return;
     // The machine only carries Zero along for later; connecting never uses it.
     roomActor.send({
       type: 'CONNECT',
@@ -92,6 +97,9 @@ const connectHandoff = (handoff: CallWindowHandoff & { handoffId: number }): voi
     report(buildStatus(handoff.handoffId, 'connecting', roomActor.getSnapshot().context));
   };
 
+  waitForIdle?.unsubscribe();
+  waitForIdle = null;
+
   if (roomActor.getSnapshot().matches('idle')) {
     connect();
     return;
@@ -99,9 +107,14 @@ const connectHandoff = (handoff: CallWindowHandoff & { handoffId: number }): voi
   const subscription = roomActor.subscribe(state => {
     if (!state.matches('idle')) return;
     subscription.unsubscribe();
+    if (waitForIdle === subscription) waitForIdle = null;
     connect();
   });
-  roomActor.send({ type: 'DISCONNECT' });
+  waitForIdle = subscription;
+  // Already leaving for an earlier handoff: one leave is enough.
+  if (!roomActor.getSnapshot().matches('disconnecting')) {
+    roomActor.send({ type: 'DISCONNECT' });
+  }
 };
 
 const startHandoffIntake = (api: NonNullable<Window['electronAPI']>['callWindow']): void => {
