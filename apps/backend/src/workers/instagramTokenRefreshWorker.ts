@@ -2,6 +2,8 @@ import { db } from '@/database/client';
 import { encrypt, decrypt } from '@/services/encryptionService';
 import { logger } from '@/utils/logger';
 import { metaGraphClient } from '@/integrations/adapters/social-media/instagram/metaGraphClient';
+import { isMetaTokenRejected } from '@/integrations/adapters/social-media/shared/metaTokenRejection';
+import { disconnectDeskSourceBySystem } from '@/integrations/core/deskSourceDisconnect';
 import type { InstagramCredentials } from '@/integrations/adapters/social-media/instagram/types';
 import { ExternalSourcePlatform } from '@/integrations/core/types';
 
@@ -83,6 +85,11 @@ class InstagramTokenRefreshWorker {
       } catch (err) {
         logger.error(`${TAG} Failed to refresh token for source ${source.id}`, { error: err });
         failed++;
+        if (isMetaTokenRejected(err)) {
+          await disconnectDeskSourceBySystem(source.id, { clearCredentials: true }).catch((error) =>
+            logger.error(`${TAG} Failed to mark source ${source.id} disconnected`, { error }),
+          );
+        }
       }
     }
 

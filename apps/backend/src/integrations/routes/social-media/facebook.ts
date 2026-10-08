@@ -22,6 +22,7 @@ import {
 } from '../../adapters/social-media/facebook/oauthStateService';
 import type { FacebookCredentials } from '../../adapters/social-media/facebook/types';
 import { authorizeSocialMediaManager } from './access';
+import { disconnectDeskSourceBySystem } from '../../core/deskSourceDisconnect';
 import { oauthDeskStartSchema, parseOAuthPlatform, validateOAuthDeskSetup } from './deskSetup';
 
 const TAG = '[FacebookRoutes]';
@@ -484,17 +485,24 @@ router.post(
       // that still holds a token, including ones already deactivated.
       const sources = await db.externalSource.findMany({
         where: { sourceType: ExternalSourcePlatform.FACEBOOK, NOT: { credentials: '' } },
-        select: { id: true, credentials: true },
+        select: { id: true, credentials: true, isActive: true },
       });
       const matching = sources.flatMap(source => {
         try {
           const creds = JSON.parse(decrypt(source.credentials)) as FacebookCredentials;
-          return creds.fbUserId === payload.user_id ? [{ id: source.id, creds }] : [];
+          return creds.fbUserId === payload.user_id
+            ? [{ id: source.id, creds, wasActive: source.isActive }]
+            : [];
         } catch {
           return [];
         }
       });
       if (matching.length > 0) {
+        // Active ones one at a time, so only a source this request actually flipped is notified
+        // about; the update after it wipes tokens on sources that were already inactive.
+        for (const source of matching.filter(source => source.wasActive)) {
+          await disconnectDeskSourceBySystem(source.id, { clearCredentials: true });
+        }
         await db.externalSource.updateMany({
           where: { id: { in: matching.map(source => source.id) } },
           data: { isActive: false, credentials: '' },
