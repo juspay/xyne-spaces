@@ -1,3 +1,4 @@
+import { Prisma } from "@prisma/client";
 import { prisma } from "../db.js";
 import { createLogger } from "../logger.js";
 
@@ -69,16 +70,25 @@ export async function applyCreateSkill(
     return { status: "duplicate", error: `A skill with slug "${slug}" already exists.` };
   }
 
-  const created = await skillRepository.create({
-    slug,
-    name,
-    description,
-    content: content.trim(),
-    source: "agent-authored",
-    scope: "personal",
-    owner: { connect: { id: userId } },
-    org: { connect: { id: skillOrgId } },
-  });
+  let created;
+  try {
+    created = await skillRepository.create({
+      slug,
+      name,
+      description,
+      content: content.trim(),
+      source: "agent-authored",
+      scope: "personal",
+      owner: { connect: { id: userId } },
+      org: { connect: { id: skillOrgId } },
+    });
+  } catch (err) {
+    // Two approvals at once both pass the lookup above; the unique slug stops the second.
+    if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === "P2002") {
+      return { status: "duplicate", error: `A skill with slug "${slug}" already exists.` };
+    }
+    throw err;
+  }
   log.info(`[skill-apply] create-skill approved slug=${slug} owner=${userId} org=${skillOrgId}`);
   return { status: "created", id: created.id, name, slug, message: `Skill "${name}" created.` };
 }

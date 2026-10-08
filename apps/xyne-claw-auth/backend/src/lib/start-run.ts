@@ -1090,6 +1090,7 @@ export async function prepareRun(
             },
             include: { files: true },
           });
+          // Pinned skills stay in this list too: the Hub Knowledge text carries their body, the skill entry their files.
           hubSkills = linked.map(toRunSkill);
           const pinnedIds = new Set(hub.skills.filter((skill) => skill.pinned).map((skill) => skill.skillId));
           const hubKnowledge = renderSdlcHubKnowledge(hub, linked.filter((skill) => pinnedIds.has(skill.id)));

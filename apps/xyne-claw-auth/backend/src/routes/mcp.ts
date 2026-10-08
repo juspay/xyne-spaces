@@ -1,7 +1,7 @@
 import { Router, type Request, type Response } from "express";
 import { AWAKENING_SEND_TOOL } from "../awakening/send-tool.js";
 import { errMsg } from "../lib/errors.js";
-import { withSdlcRunTools } from "../lib/sdlc-run-tools.js";
+import { sdlcRunChannelId, withSdlcRunTools } from "../lib/sdlc-run-tools.js";
 import crypto from "node:crypto";
 import { prisma } from "../db.js";
 import { decrypt } from "../crypto.js";
@@ -2561,6 +2561,11 @@ router.post("/:sessionId/actions/sign", async (req: Request<{ sessionId: string 
       );
       if (customWriteTool) {
         // Registry match is the validation; fall through to signing.
+        if (tool === "create-skill") {
+          // Signed with the action, so the approval links the skill to the hub it was proposed in.
+          const sdlcChannelId = await sdlcRunChannelId(req.params.sessionId);
+          if (sdlcChannelId) actionParams = { ...actionParams, sdlcChannelId };
+        }
       } else {
         // Revalidate non-gateway actions before issuing a signature.
         if (!(await hasConnectorDefinition(serverType))) {
