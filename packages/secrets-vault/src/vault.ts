@@ -1,3 +1,4 @@
+import { createCache } from '@xyne/cache';
 import { EncryptionImpl, SecretVersionStatus, RotationState } from './types.js';
 import type { EncryptionAdapter, VaultPrismaClient } from './types.js';
 import type { VerifyResult } from './secretHandler.js';
@@ -12,6 +13,8 @@ export interface SecretsVaultDeps {
   encryptionAdapters: Record<EncryptionImpl, EncryptionAdapter>;
   isGenericEncryptionEnabled: () => boolean;
   cacheTtlMs?: number;
+  /** Max distinct secret names held in the in-memory cache at once (LRU-evicted beyond this). Defaults to 100 — comfortably above any realistic secret count. */
+  cacheMaxEntries?: number;
   allocateVersion: (secretDefinitionId: string) => Promise<number>;
   logger?: VaultLogger;
 }
@@ -38,18 +41,12 @@ export class ActiveVersionMismatchError extends Error {
   }
 }
 
-interface CacheEntry {
-  value: string;
-  expiresAt: number;
-}
-
 function aadFor(secretDefinitionId: string, version: number): string {
   return `secrets-vault:1:${secretDefinitionId}:${version}`;
 }
 
 export function createSecretsVault(deps: SecretsVaultDeps) {
   const cacheTtlMs = deps.cacheTtlMs ?? 0;
-  const cache = new Map<string, CacheEntry>();
   const logger = deps.logger ?? console;
 
   function activeEncryptionImpl(): EncryptionImpl {
@@ -64,6 +61,32 @@ export function createSecretsVault(deps: SecretsVaultDeps) {
     return adapter;
   }
 
+  /** The actual DB-lookup-and-decrypt — undefined means "no definition or no active version". */
+  async function fetchSecret(name: string): Promise<string | undefined> {
+    const definition = await deps.prisma.secretDefinition.findUnique({ where: { name } });
+    if (!definition) return undefined;
+
+    const activeVersion = await deps.prisma.secretVersion.findFirst({
+      where: { secretDefinitionId: definition.id, status: SecretVersionStatus.ACTIVE },
+    });
+    if (!activeVersion) return undefined;
+
+    const adapter = adapterFor(activeVersion.encryptionImpl as EncryptionImpl);
+    return adapter.decrypt(activeVersion.value, aadFor(definition.id, activeVersion.version));
+  }
+
+  // Only built when caching is actually enabled — lru-cache's ttl:0 means "never
+  // expire," the opposite of our cacheTtlMs<=0 ("don't cache") convention, so we
+  // skip the cache entirely rather than misconfigure it.
+  const secretCache =
+    cacheTtlMs > 0
+      ? createCache<string, string>({
+          max: deps.cacheMaxEntries ?? 100,
+          ttlMs: cacheTtlMs,
+          fetch: fetchSecret,
+        })
+      : null;
+
   /**
    * Returns the decrypted active value for `name`, or null if no SecretDefinition
    * or no active SecretVersion exists. Callers are responsible for falling back to
@@ -71,32 +94,8 @@ export function createSecretsVault(deps: SecretsVaultDeps) {
    * this function does not know about env vars.
    */
   async function getSecret(name: string): Promise<string | null> {
-    if (cacheTtlMs > 0) {
-      const cached = cache.get(name);
-      if (cached && cached.expiresAt > Date.now()) {
-        return cached.value;
-      }
-    }
-
-    const definition = await deps.prisma.secretDefinition.findUnique({ where: { name } });
-    if (!definition) return null;
-
-    const activeVersion = await deps.prisma.secretVersion.findFirst({
-      where: { secretDefinitionId: definition.id, status: SecretVersionStatus.ACTIVE },
-    });
-    if (!activeVersion) return null;
-
-    const adapter = adapterFor(activeVersion.encryptionImpl as EncryptionImpl);
-    const plaintext = await adapter.decrypt(
-      activeVersion.value,
-      aadFor(definition.id, activeVersion.version),
-    );
-
-    if (cacheTtlMs > 0) {
-      cache.set(name, { value: plaintext, expiresAt: Date.now() + cacheTtlMs });
-    }
-
-    return plaintext;
+    const value = secretCache ? await secretCache.get(name) : await fetchSecret(name);
+    return value ?? null;
   }
 
   /**
@@ -135,7 +134,7 @@ export function createSecretsVault(deps: SecretsVaultDeps) {
       },
     });
 
-    cache.delete(input.name);
+    secretCache?.delete(input.name);
   }
 
   /**
@@ -221,7 +220,7 @@ export function createSecretsVault(deps: SecretsVaultDeps) {
         where: { id: definition.id },
         data: { updatedBy: input.updatedBy },
       });
-      cache.delete(input.name);
+      secretCache?.delete(input.name);
       logger.info(`[secrets-vault] addVersion: "${input.name}" v${version} verified and now active`);
 
       return { status: SecretVersionStatus.ACTIVE, version };
@@ -325,7 +324,7 @@ export function createSecretsVault(deps: SecretsVaultDeps) {
       where: { id: definition.id },
       data: { updatedBy: input.updatedBy },
     });
-    cache.delete(input.name);
+    secretCache?.delete(input.name);
     logger.warn(
       `[secrets-vault] revokeActiveVersion: "${input.name}" v${active.version} revoked by ${input.updatedBy} — no version is active until rotate/rollback`,
     );
@@ -334,7 +333,7 @@ export function createSecretsVault(deps: SecretsVaultDeps) {
   }
 
   function invalidateCache(name: string): void {
-    cache.delete(name);
+    secretCache?.delete(name);
   }
 
   return {
