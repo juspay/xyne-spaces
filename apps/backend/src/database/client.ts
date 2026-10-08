@@ -13,6 +13,7 @@ import { withWorkspaceStamp } from './tenant/stamp';
 import { setupTicketActivityChannelSync } from './middleware/ticketActivityChannelSync';
 import { setupTicketCreatedActivity } from './middleware/ticketCreatedActivity';
 import { setupUserVespaSync } from './middleware/userVespaSync';
+import { setupSdlcSearchSync } from './middleware/sdlcSearchSync';
 import { setupEnumTextValidation } from './middleware/enumTextValidation';
 import { pingDatabase } from '@/bypassAcl/healthServices';
 
@@ -74,6 +75,7 @@ export class DatabaseClient {
       setupTicketActivityChannelSync(DatabaseClient.instance);
       setupTicketCreatedActivity(DatabaseClient.instance);
       setupUserVespaSync(DatabaseClient.instance);
+      setupSdlcSearchSync(DatabaseClient.instance);
 
       // Registered last on purpose — see installPrismaRetryMiddleware.
       installPrismaRetryMiddleware(DatabaseClient.instance);
