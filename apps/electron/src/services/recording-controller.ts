@@ -7,7 +7,6 @@ import {
   isPillWindow,
   isRecordingPillEnabled,
   persistRecordingPillEnabled,
-  prewarmRecordingPill,
 } from './recording-pill-window';
 
 export type RecordingTrigger = 'tray' | 'shortcut' | 'pill';
@@ -209,7 +208,6 @@ function scheduleSyncPillVisibility(): void {
 
 export function setRecordingPillEnabled(enabled: boolean): void {
   persistRecordingPillEnabled(enabled);
-  if (enabled) prewarmRecordingPill();
   syncPillVisibility();
   log.info(`[RecordingController] Recording pill ${enabled ? 'enabled' : 'disabled'}`);
 }
@@ -225,8 +223,10 @@ export function setOverlayMinimized(next: boolean): void {
 }
 
 export function initRecordingPillVisibility(): void {
-  if (isRecordingPillEnabled()) prewarmRecordingPill();
-
+  // The pill window is built on first use, not here. Prewarming it at startup put a hidden
+  // BrowserWindow — and its renderer process — in every session for a feature most launches
+  // never touch; showRecordingPill() already creates the window when it is missing and shows it
+  // from did-finish-load, so the only thing prewarming bought was ~100ms off the first recording.
   const handleWindowFocus = (_event: Electron.Event, window: BrowserWindow): void => {
     if (isPillWindow(window)) return;
     if (window === getMainWindow()) clearFocusRequested();

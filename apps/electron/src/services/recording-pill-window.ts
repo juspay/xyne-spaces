@@ -209,15 +209,6 @@ export function showRecordingPill(state: RecordingPillState): void {
   }
 }
 
-/**
- * Builds the pill window ahead of the first recording so a start never pays
- * window construction + loadFile on the critical path.
- */
-export function prewarmRecordingPill(): void {
-  if (pillWindow && !pillWindow.isDestroyed()) return;
-  createPillWindow();
-}
-
 function createPillWindow(): void {
   const pos = getInitialPosition();
 
@@ -241,7 +232,10 @@ function createPillWindow(): void {
       nodeIntegration: false,
       contextIsolation: true,
       preload: path.join(__dirname, '..', 'preload.js'),
-      backgroundThrottling: false,
+      // Throttling left on. It only applies while the window is hidden or occluded, and a hidden
+      // pill has nothing to render — the previous `backgroundThrottling: false` kept an idle
+      // renderer running at full rate for the whole session. While recording the pill is an
+      // always-on-top panel, so it is visible and never throttled.
     },
   });
 

@@ -78,6 +78,9 @@ class ErrorReportRecorder {
       webPreferences: {
         nodeIntegration: true,
         contextIsolation: false,
+        // Load-bearing: this hidden window runs an active MediaRecorder capture. Throttling a
+        // hidden renderer drops frames and stalls the recording. Short-lived and created on
+        // demand, so it costs nothing between error reports.
         backgroundThrottling: false,
       },
     });

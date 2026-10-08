@@ -25,6 +25,9 @@ function createWindow(): BrowserWindow {
       offscreen: true,
       nodeIntegration: false,
       contextIsolation: true,
+      // Load-bearing, unlike the other hidden windows. This one is never shown: it renders
+      // offscreen at a fixed frame rate and the `paint` events below ARE the menubar animation.
+      // Throttling it stalls that pump, so the tray pill would freeze during a recording.
       backgroundThrottling: false,
     },
   });

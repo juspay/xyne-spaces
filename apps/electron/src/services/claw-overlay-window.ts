@@ -393,7 +393,8 @@ function createClawOverlay(): BrowserWindow {
       contextIsolation: true,
       preload: path.join(__dirname, "..", "preload.js"),
 
-      backgroundThrottling: false,
+      // Throttling left on: the overlay is hidden for most of a session, and throttling only
+      // applies while it is. When shown it is an always-on-top panel, so it stays unthrottled.
     },
   });
 
