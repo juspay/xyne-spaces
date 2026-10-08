@@ -93,7 +93,6 @@ import { useCanvasCommentEditorBridge } from '../useCanvasCommentEditorBridge';
 import { useCanvasTicketEditorBridge } from '../useCanvasTicketEditorBridge';
 import { CanvasTicketCreationFlow } from '../CanvasTicketCreationFlow/CanvasTicketCreationFlow';
 import { CanvasTicketLinkFlow } from '../CanvasTicketLinkFlow/CanvasTicketLinkFlow';
-import { useCanSeeUserEmail } from '../../../hooks/useCanSeeUserEmail';
 
 const DEFAULT_CANVAS_PLACEHOLDER = "Write something, or press '/' for commands";
 const RECORDING_SUMMARY_EDITED_TEXT_COLOR = 'recording-summary-edited';
@@ -182,7 +181,6 @@ export const CollaborativeCanvasEditor = forwardRef<
     const [isEditorReady, setIsEditorReady] = useState(false);
     const { user: authUser } = useAuth();
     const selfUser = useSelf();
-    const canSeeUserEmail = useCanSeeUserEmail();
     const user = selfUser || authUser;
     const { theme } = useTheme();
     const isXyneAIOpen = useSelector(xyneAIActor, state => state.matches('open'));
@@ -416,7 +414,7 @@ export const CollaborativeCanvasEditor = forwardRef<
           };
           return {
             title: displayName,
-            subtext: canSeeUserEmail(u.id) ? (u.email ?? '') : '',
+            subtext: u.email ?? '',
             group: 'Users',
             icon: createElement(Avatar, {
               userId: u.id,
@@ -502,7 +500,6 @@ export const CollaborativeCanvasEditor = forwardRef<
         return Promise.resolve([...customUserItems, ...groupItems]);
       };
     }, [
-      canSeeUserEmail,
       editor,
       users,
       currentUserId,

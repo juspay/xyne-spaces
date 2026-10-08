@@ -14,7 +14,6 @@ import { ChannelScopeType, type SdlcCallLink } from '@xyne/shared';
 import { useAuth } from '../../../hooks/useAuth';
 import { getUserDisplayName, isUserDeactivated } from '../../../utils/userDisplayName';
 import { rankParticipantOptions } from '../../../utils/participantSearch';
-import { useCanSeeUserEmail } from '../../../hooks/useCanSeeUserEmail';
 
 interface InstantCallModalProps {
   isOpen: boolean;
@@ -82,8 +81,6 @@ export const InstantCallModal: React.FC<InstantCallModalProps> = ({
     );
   }, [allUsers, channelParticipantUserIds, currentUser?.id]);
 
-  const canSeeUserEmail = useCanSeeUserEmail();
-
   // Normalize the channel-member payload before passing it to the shared
   // participant matcher. Some channel members have no email, which the raw
   // `searchUsers` matcher assumes is always present.
@@ -110,10 +107,10 @@ export const InstantCallModal: React.FC<InstantCallModalProps> = ({
             className='rounded-md size-[18px] flex items-center justify-center bg-background'
           />
         ),
-        subtitle: canSeeUserEmail(user.id) ? user.email : null,
+        subtitle: user.email,
         isDeactivated: isUserDeactivated(user),
       })),
-    [rankedChannelUsers, canSeeUserEmail],
+    [rankedChannelUsers],
   );
 
   // Get selected users for display

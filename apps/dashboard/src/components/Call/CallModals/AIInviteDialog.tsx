@@ -8,7 +8,6 @@ import { apiInstance } from '../../../services/clients/apiClient';
 import { mutators } from '../../../zero/mutators';
 import { v4 as uuidv4 } from 'uuid';
 import { getUserDisplayName } from '../../../utils/userDisplayName';
-import { useCanSeeUserEmail } from '../../../hooks/useCanSeeUserEmail';
 
 interface InviteUser {
   id: string;
@@ -38,7 +37,6 @@ export function AIInviteDialog({
   const zero = useZero();
   const [selectedUserIds, setSelectedUserIds] = useState<Set<string>>(new Set());
   const [message, setMessage] = useState('');
-  const canSeeUserEmail = useCanSeeUserEmail();
   const [isInviting, setIsInviting] = useState(false);
 
   // Initialize selected users and message when dialog opens
@@ -187,9 +185,7 @@ export function AIInviteDialog({
                     <div className='font-medium text-foreground truncate'>
                       {getUserDisplayName(user)}
                     </div>
-                    {canSeeUserEmail(user.id) && (
-                      <div className='text-xs text-muted-foreground truncate'>{user.email}</div>
-                    )}
+                    <div className='text-xs text-muted-foreground truncate'>{user.email}</div>
                   </div>
                 </button>
               ))

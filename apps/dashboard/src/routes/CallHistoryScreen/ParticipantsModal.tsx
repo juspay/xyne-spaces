@@ -5,7 +5,6 @@ import { Button } from '../../components/ui/Button/Button';
 import { Dialog } from '../../components/ui/Dialog/Dialog';
 import { useCallParticipantRoster } from '../../hooks/useCallParticipantRoster';
 import { type Call } from './callHistoryItem.utils';
-import { useIsCommunityWorkspace } from '../../hooks/useIsCommunityWorkspace';
 
 interface CallParticipantsContentProps {
   call: Call;
@@ -21,7 +20,6 @@ function CallParticipantsContent({
   onClose,
 }: CallParticipantsContentProps): ReactElement {
   const { participants, isLoading } = useCallParticipantRoster(call, isOpen, currentUserId);
-  const isCommunityWorkspace = useIsCommunityWorkspace();
 
   return (
     <div className='p-6'>
@@ -46,9 +44,7 @@ function CallParticipantsContent({
                   </span>
                 )}
               </h4>
-              {(!isCommunityWorkspace || participant.isCurrentUser) && (
-                <p className='text-xs text-muted-foreground truncate'>{participant.email}</p>
-              )}
+              <p className='text-xs text-muted-foreground truncate'>{participant.email}</p>
             </div>
           </div>
         ))}

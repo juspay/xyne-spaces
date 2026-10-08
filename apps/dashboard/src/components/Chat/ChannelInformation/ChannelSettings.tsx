@@ -3,7 +3,12 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { Select } from '@base-ui/react/select';
 import { Check, ChevronDown, Hash, Archive, ArchiveRestore } from 'lucide-react';
 import { toast } from 'sonner';
-import { ChannelAddUserPolicy, ChannelScopeType, ChannelVisibility } from '@xyne/shared';
+import {
+  ChannelAddUserPolicy,
+  ChannelScopeType,
+  ChannelVisibility,
+  WorkspaceRole,
+} from '@xyne/shared';
 import { useZero } from '../../../hooks/useZero';
 import { mutators } from '../../../zero/mutators';
 import { queries } from '../../../zero/queries';
@@ -376,18 +381,22 @@ export const ChannelSettings: React.FC<ChannelSettingsProps> = ({
             <span className='inline-flex items-center gap-2'>Copy member names</span>
           </button>
 
-          <div className='h-px bg-border' />
+          {context.role !== WorkspaceRole.COMMUNITY_MEMBER && (
+            <>
+              <div className='h-px bg-border' />
 
-          <button
-            type='button'
-            onClick={() => void handleCopyEmails()}
-            className='w-full px-[12px] py-[10px] text-left text-sm font-medium text-foreground transition-colors hover:bg-accent'
-            data-track-category='CHANNEL_SETTINGS'
-            data-track-name='CopyMemberEmails'
-            data-track-metadata={JSON.stringify({ channelId: channel.id, isAdmin })}
-          >
-            <span className='inline-flex items-center gap-2'>Copy member email addresses</span>
-          </button>
+              <button
+                type='button'
+                onClick={() => void handleCopyEmails()}
+                className='w-full px-[12px] py-[10px] text-left text-sm font-medium text-foreground transition-colors hover:bg-accent'
+                data-track-category='CHANNEL_SETTINGS'
+                data-track-name='CopyMemberEmails'
+                data-track-metadata={JSON.stringify({ channelId: channel.id, isAdmin })}
+              >
+                <span className='inline-flex items-center gap-2'>Copy member email addresses</span>
+              </button>
+            </>
+          )}
         </div>
 
         {/* Private -> public card */}

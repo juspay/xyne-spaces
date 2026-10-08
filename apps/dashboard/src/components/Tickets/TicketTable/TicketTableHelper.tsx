@@ -13,7 +13,6 @@ import type { User, UserGroup } from '../../../machines/stateMachine';
 import { EntityOption, StageOptionSource, StatusEntityOption } from './TicketTableTypes';
 import { getUserDisplayName, withYouLabel } from '../../../utils/userDisplayName';
 import { channelMembersFirst, currentUserFirst } from '../../../utils/channelMembersFirst';
-import { useCanSeeUserEmail } from '../../../hooks/useCanSeeUserEmail';
 
 export const TAG_COLORS = [
   'bg-red-500',
@@ -65,7 +64,6 @@ export const getAssigneeOptions = (
   memberIds?: Set<string>,
   // When provided, the current user is pinned to the very top and labelled "(You)".
   selfId?: string,
-  canSeeUserEmail: (userId: string) => boolean = () => true,
 ): EntityOption[] => {
   // On channel-scoped lists (the board card passes memberIds), rank channel
   // members first, then sink deactivated users to the bottom. Stable sort keeps
@@ -81,7 +79,7 @@ export const getAssigneeOptions = (
   const userOptions: EntityOption[] = orderedUsers.map(user => ({
     value: `user:${user.id}`,
     label: withYouLabel(getUserDisplayName(user), user.id === selfId),
-    subtitle: canSeeUserEmail(user.id) ? user.email : undefined,
+    subtitle: user.email,
     icon: <Avatar userId={user.id} size='sm' className='rounded-full' />,
     isDeactivated: user.status === UserStatus.INACTIVE,
   }));
@@ -176,13 +174,9 @@ export const useAssigneeOptions = (
   memberIds?: Set<string>,
   selfId?: string,
 ) => {
-  const canSeeUserEmail = useCanSeeUserEmail();
   return useMemo(() => {
-    return [
-      UNASSIGNED_OPTION,
-      ...getAssigneeOptions(users, userGroups, memberIds, selfId, canSeeUserEmail),
-    ];
-  }, [users, userGroups, memberIds, selfId, canSeeUserEmail]);
+    return [UNASSIGNED_OPTION, ...getAssigneeOptions(users, userGroups, memberIds, selfId)];
+  }, [users, userGroups, memberIds, selfId]);
 };
 
 export const useStageOptions = (stages: StageOptionSource[] = []) => {

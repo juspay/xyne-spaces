@@ -57,7 +57,6 @@ import {
   GROUP_KEY_TO_DOC_TYPE,
   getRelevantTabs,
 } from './ChannelCommandMenu.types';
-import { useCanSeeUserEmail } from '../../../hooks/useCanSeeUserEmail';
 
 /**
  * What the palette stores on its history entry so a back-navigation can rebuild the
@@ -507,7 +506,6 @@ function AtMentionRow({
   isMobile: boolean;
 }): ReactElement {
   const isUserGroup = item.type === ChipType.USER_GROUP;
-  const canSeeUserEmail = useCanSeeUserEmail();
   // One line like the user rows: a name-sized foreground label + a muted secondary. A group
   // reads `@alias` with its display name as the secondary; a user reads name + email.
   const primaryLabel = isUserGroup ? (item.alias ?? item.name) : item.name;
@@ -515,9 +513,7 @@ function AtMentionRow({
     ? item.alias && item.name !== item.alias
       ? item.name
       : undefined
-    : canSeeUserEmail(item.id)
-      ? item.email
-      : undefined;
+    : item.email;
   return (
     <Command.Item
       key={`${item.type}-${item.id}`}
@@ -621,7 +617,6 @@ const ChannelCommandMenuContent = ({
   const generalChannelForProfileFallback = useChannelByName('general');
   const profileFallbackAnchorChannelId =
     currentChannelIdFromRoute ?? generalChannelForProfileFallback?.id ?? null;
-  const canSeeUserEmail = useCanSeeUserEmail();
   const { workspaceId } = useAuthContextValues(); // Per-user, per-workspace key for recents
   const commandRef = useRef<HTMLDivElement | null>(null);
   // MutationObserver (owned by attachCommandRef) that recomputes the ⌥↵ hint when cmdk adds/removes rows.
@@ -1667,7 +1662,7 @@ const ChannelCommandMenuContent = ({
           id: mention.id,
           type: 'user',
           title: mention.name,
-          subtitle: canSeeUserEmail(mention.id) ? mention.email || '' : '',
+          subtitle: mention.email || '',
           relevanceScore: 1,
           metadata: {},
         };
@@ -1700,7 +1695,6 @@ const ChannelCommandMenuContent = ({
       }
     },
     [
-      canSeeUserEmail,
       channelTrigger,
       userTrigger,
       onOpenChange,
@@ -3028,7 +3022,7 @@ const ChannelCommandMenuContent = ({
                 id: user.id,
                 type: 'user' as const,
                 title: getUserDisplayName(user),
-                subtitle: canSeeUserEmail(user.id) ? user.email || '' : '',
+                subtitle: user.email || '',
                 relevanceScore: 1,
                 metadata: {},
               };
@@ -3305,7 +3299,7 @@ const ChannelCommandMenuContent = ({
             id: user.id,
             type: 'user' as const,
             title: getUserDisplayName(user),
-            subtitle: canSeeUserEmail(user.id) ? user.email || '' : '',
+            subtitle: user.email || '',
             relevanceScore: 1,
             metadata: {},
           }));

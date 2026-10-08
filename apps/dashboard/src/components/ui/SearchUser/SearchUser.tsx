@@ -12,7 +12,6 @@ import { useActiveUserSearch, useSelf } from '../../../hooks/useUsers';
 import { getUserDisplayName, isUserDeactivated } from '../../../utils/userDisplayName';
 import { renderEmoji } from '../../../utils/customEmojiUtils';
 import { resolveUserStatus } from '../../../utils/statusUtils';
-import { useCanSeeUserEmail } from '../../../hooks/useCanSeeUserEmail';
 
 interface SearchUserProps {
   excludeUserIds?: string[];
@@ -46,7 +45,6 @@ export const SearchUser: React.FC<SearchUserProps> = ({
   allowedUserIds,
 }) => {
   const [searchValue, setSearchValue] = useState('');
-  const canSeeUserEmail = useCanSeeUserEmail();
   const [isOpen, setIsOpen] = useState(false);
   const [selectedIndex, setSelectedIndex] = useState(-1);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -322,9 +320,7 @@ export const SearchUser: React.FC<SearchUserProps> = ({
                           </span>
                         )}
                       </div>
-                      {canSeeUserEmail(user.id) && (
-                        <span className='text-xs text-muted-foreground truncate'>{user.email}</span>
-                      )}
+                      <span className='text-xs text-muted-foreground truncate'>{user.email}</span>
                     </div>
                   </li>
                 ))}

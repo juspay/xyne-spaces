@@ -22,7 +22,6 @@ import { getUserDisplayName } from '../../../utils/userDisplayName';
 import { cn } from '../../../utils/classNames';
 import Avatar from '../../ui/Avatar/Avatar';
 import { Tooltip } from '../../ui/Tooltip';
-import { useCanSeeUserEmail } from '../../../hooks/useCanSeeUserEmail';
 
 interface ShareViewPopoverProps {
   viewId: string;
@@ -61,7 +60,6 @@ export const ShareViewPopover = ({ viewId, viewName }: ShareViewPopoverProps): R
   const [pendingId, setPendingId] = useState<string | null>(null);
   const [justShared, setJustShared] = useState<string[]>([]);
   const reduceMotion = useReducedMotion();
-  const canSeeUserEmail = useCanSeeUserEmail();
   const tickHidden = { opacity: 0, scale: reduceMotion ? 1 : 0.25, filter: 'blur(4px)' };
 
   const [configs] = useCachedQuery(queries.savedConfigsByUser({ userId: user?.id ?? '' }), {
@@ -80,13 +78,8 @@ export const ShareViewPopover = ({ viewId, viewName }: ShareViewPopoverProps): R
     (): ShareCandidate[] =>
       (allUsers ?? [])
         .filter(u => u.id !== user?.id)
-        .map(u => ({
-          type: 'USER',
-          id: u.id,
-          name: getUserDisplayName(u),
-          sub: canSeeUserEmail(u.id) ? (u.email ?? '') : '',
-        })),
-    [allUsers, user?.id, canSeeUserEmail],
+        .map(u => ({ type: 'USER', id: u.id, name: getUserDisplayName(u), sub: u.email ?? '' })),
+    [allUsers, user?.id],
   );
   const channels = useMemo(
     (): ShareCandidate[] =>

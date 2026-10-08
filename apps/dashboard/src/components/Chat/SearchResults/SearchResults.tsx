@@ -12,7 +12,6 @@ import {
   Paperclip,
   X,
 } from 'lucide-react';
-import { useCanSeeUserEmail } from '../../../hooks/useCanSeeUserEmail';
 
 const utcToIst = (utcString?: string): string => {
   // The backend writes the literal 'N/A' when a doc has no usable timestamp, so
@@ -1191,7 +1190,6 @@ function UserResultCard({
 }): ReactElement {
   const user = useUser(result.id);
   const isDeactivated = isUserDeactivated(user);
-  const canSeeUserEmail = useCanSeeUserEmail();
 
   if (!user) {
     return (
@@ -1229,7 +1227,7 @@ function UserResultCard({
             </span>
           )}
         </div>
-        {result.subtitle && canSeeUserEmail(result.id) && (
+        {result.subtitle && (
           <p className='text-xs text-muted-foreground truncate'>{result.subtitle}</p>
         )}
       </div>

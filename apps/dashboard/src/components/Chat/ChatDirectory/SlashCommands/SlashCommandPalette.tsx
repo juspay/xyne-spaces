@@ -6,7 +6,6 @@ import { getUserDisplayName } from '../../../../utils/userDisplayName';
 import Avatar from '../../../ui/Avatar/Avatar';
 import ChannelIcon from '../../ChannelIcon/ChannelIcon';
 import type { UseSlashCommandsReturn, GotoExtra } from './useSlashCommands';
-import { useCanSeeUserEmail } from '../../../../hooks/useCanSeeUserEmail';
 
 // cmdk group-heading style (uppercase mono muted) so the palette matches the menu's
 // other sections.
@@ -37,7 +36,6 @@ export function SlashCommandPalette({
   command,
   onItemMouseDown,
 }: SlashCommandPaletteProps): ReactElement | null {
-  const canSeeUserEmail = useCanSeeUserEmail();
   const {
     commandKind,
     commandText,
@@ -206,11 +204,7 @@ export function SlashCommandPalette({
                     <span className='text-muted-foreground'> (you)</span>
                   )}
                 </span>
-                {canSeeUserEmail(user.id) && (
-                  <span className='min-w-0 truncate text-xs text-muted-foreground'>
-                    {user.email}
-                  </span>
-                )}
+                <span className='min-w-0 truncate text-xs text-muted-foreground'>{user.email}</span>
               </div>
             </Command.Item>
           ))}

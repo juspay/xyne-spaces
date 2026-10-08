@@ -21,7 +21,6 @@ import type { FieldConfig } from '../../routes/QueryBuilderScreen/QueryBuilderSc
 import { transformValueForOperator } from '../../routes/QueryBuilderScreen/QueryBuilderScreen.utils';
 import { detectFieldType } from '../../utils/queryBuilderFieldMappings';
 import { getUserDisplayName, isUserDeactivated } from '../../utils/userDisplayName';
-import { useCanSeeUserEmail } from '../../hooks/useCanSeeUserEmail';
 
 // Local types for dropdown items
 interface BoardItem {
@@ -65,7 +64,6 @@ const UserSelectEditor: React.FC<{
   const [searchQuery, setSearchQuery] = useState('');
   const users = useUsers();
   const searchedUsers = useUserSearch(searchQuery, 20);
-  const canSeeUserEmail = useCanSeeUserEmail();
 
   const selectedIds = useSelectedIds(value);
 
@@ -92,7 +90,7 @@ const UserSelectEditor: React.FC<{
       value: u.id,
       label: getUserDisplayName(u),
       icon: <Avatar userId={u.id} size='sm' showActiveStatus={false} />,
-      subtitle: canSeeUserEmail(u.id) ? u.email : null,
+      subtitle: u.email,
       isDeactivated: isUserDeactivated(u),
     }));
 

@@ -21,7 +21,6 @@ import {
   type WhatsAppPurgeImportResponse,
   type WhatsAppMigrationPreviewResponse,
 } from '../../services/WhatsAppMigration/whatsAppMigrationService';
-import { useCanSeeUserEmail } from '../../hooks/useCanSeeUserEmail';
 
 type MappingEntry = {
   whatsappName: string;
@@ -101,7 +100,6 @@ const WhatsAppMigrationPanel = (): ReactElement => {
   const allChannels = useAllChannels();
   const hydratedUsers = useUsers();
   const allUsers = workspaceUsers.length > 0 ? workspaceUsers : hydratedUsers;
-  const canSeeUserEmail = useCanSeeUserEmail();
   const { userID } = useAuthContextValues();
 
   const targetOptions = useMemo(
@@ -133,10 +131,10 @@ const WhatsAppMigrationPanel = (): ReactElement => {
           label:
             user.id === userID ? `${getUserDisplayName(user)} (you)` : getUserDisplayName(user),
           icon: <User className='w-4 h-4 text-muted-foreground' />,
-          subtitle: (canSeeUserEmail(user.id) && user.email) || 'Create or reuse personal DM',
+          subtitle: user.email || 'Create or reuse personal DM',
         })),
     ],
-    [allChannels, allUsers, userID, canSeeUserEmail],
+    [allChannels, allUsers, userID],
   );
 
   const resolveTargetChannelId = async (value: string | null): Promise<string> => {

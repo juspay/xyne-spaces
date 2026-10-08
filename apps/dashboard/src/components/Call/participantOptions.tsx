@@ -39,12 +39,8 @@ const userAvatar = (userId: string): ReactNode => (
   />
 );
 
-export function buildUserParticipantOption(
-  user: UserLikeForOption,
-  showEmail: boolean = true,
-): ParticipantOption {
+export function buildUserParticipantOption(user: UserLikeForOption): ParticipantOption {
   const label = getUserDisplayName(user);
-  const email = showEmail ? user.email : undefined;
   return {
     ...user,
     value: `user:${user.id}`,
@@ -52,13 +48,13 @@ export function buildUserParticipantOption(
     // The dropdown row comes from `children`, so this only surfaces in the
     // channel-member checklist — whose payload is `{ id, name }` with no email.
     // Falling back to `name` keeps that list rendering exactly as it did.
-    subtitle: email ?? user.name,
+    subtitle: user.email ?? user.name,
     icon: userAvatar(user.id),
     children: (
       <ParticipantOptionContent
         icon={userAvatar(user.id)}
         label={label}
-        subtitle={email}
+        subtitle={user.email}
         isDeactivated={isUserDeactivated(user)}
       />
     ),

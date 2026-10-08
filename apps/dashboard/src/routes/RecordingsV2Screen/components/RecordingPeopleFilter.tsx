@@ -9,7 +9,6 @@ import { useRankedActivePeople } from '../../../hooks/useRankedPeopleSearch';
 import { useActiveUsers, useUser } from '../../../hooks/useUsers';
 import { cn } from '../../../utils/classNames';
 import { getUserDisplayName } from '../../../utils/userDisplayName';
-import { useCanSeeUserEmail } from '../../../hooks/useCanSeeUserEmail';
 
 /**
  * Rows actually offered per keystroke. The filter targets a participant id that
@@ -44,7 +43,6 @@ export function RecordingPeopleFilter({
   onUserChange,
 }: RecordingPeopleFilterProps): ReactElement {
   const [searchValue, setSearchValue] = useState('');
-  const canSeeUserEmail = useCanSeeUserEmail();
 
   const rankedPeople = useRankedActivePeople(searchValue.trim(), PEOPLE_LIMIT);
   // Resolved from the full roster (not the ranked slice): the trigger label and
@@ -65,7 +63,7 @@ export function RecordingPeopleFilter({
           className='size-4 rounded-md flex items-center justify-center'
         />
       ),
-      subtitle: canSeeUserEmail(user.id) ? (user.email ?? null) : null,
+      subtitle: user.email ?? null,
     });
 
     const rows = rankedPeople.map(toOption);
@@ -73,7 +71,7 @@ export function RecordingPeopleFilter({
       rows.unshift(toOption(selectedUser));
     }
     return rows;
-  }, [rankedPeople, selectedUser, currentUserId, canSeeUserEmail]);
+  }, [rankedPeople, selectedUser, currentUserId]);
 
   if (!hasPeople) {
     return (

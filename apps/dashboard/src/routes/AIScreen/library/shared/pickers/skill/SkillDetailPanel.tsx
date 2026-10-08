@@ -14,7 +14,6 @@ import {
 } from './skillFileNodes';
 import { useSkillFileContent } from './useSkillFileContent';
 import { disableSkill, enableSkill, isSkillSelected, type SkillCatalogEntry } from './skillCatalog';
-import { useCanSeeUserEmail } from '../../../../../../hooks/useCanSeeUserEmail';
 
 const PANE_HEIGHT = 298;
 
@@ -75,9 +74,7 @@ export function SkillDetailPanel({
   const fileContent = useSkillFileContent(entry.slug, openFile.fileId);
   const preview = isSkillMd ? entry.skill.content : fileContent.content;
 
-  const canSeeUserEmail = useCanSeeUserEmail();
-  const ownerEmail = entry.skill.owner?.email ?? null;
-  const email = canSeeUserEmail(null, ownerEmail) ? ownerEmail : null;
+  const email = entry.skill.owner?.email ?? null;
 
   return (
     <div className='flex min-h-0 flex-1 flex-col'>

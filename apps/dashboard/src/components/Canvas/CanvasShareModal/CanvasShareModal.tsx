@@ -38,7 +38,6 @@ import { v4 as uuidv4 } from 'uuid';
 import { usePlatform } from '../../../hooks/usePlatform';
 import { useUserGroups } from '@/hooks/useUserGroup';
 import { getUserDisplayName } from '../../../utils/userDisplayName';
-import { useCanSeeUserEmail } from '../../../hooks/useCanSeeUserEmail';
 
 export interface CanvasShareModalProps {
   canvas: Canvas;
@@ -79,7 +78,6 @@ export const CanvasShareModal: React.FC<CanvasShareModalProps> = ({
   const z = useZero();
   const shareableOrigin = useShareableOrigin();
   const { isMobile } = usePlatform();
-  const canSeeUserEmail = useCanSeeUserEmail();
   const guestInvite = useGuestInvite({ entityType: 'CANVAS', entityId: canvas.id });
 
   const [query, setQuery] = useState('');
@@ -159,7 +157,7 @@ export const CanvasShareModal: React.FC<CanvasShareModalProps> = ({
       kind: 'user',
       id: u.id,
       name: getUserDisplayName(u),
-      sub: canSeeUserEmail(u.id) ? (u.email ?? '') : '',
+      sub: u.email ?? '',
       user: u,
     }));
 
@@ -188,7 +186,6 @@ export const CanvasShareModal: React.FC<CanvasShareModalProps> = ({
 
     return [...users, ...groups, ...channels];
   }, [
-    canSeeUserEmail,
     query,
     activeUsers,
     allUserGroups,
@@ -436,11 +433,7 @@ export const CanvasShareModal: React.FC<CanvasShareModalProps> = ({
   ): { kind: AddKind; name: string; sub: string } => {
     if (p.userId) {
       const u = usersById.get(p.userId);
-      return {
-        kind: 'user',
-        name: getUserDisplayName(u),
-        sub: canSeeUserEmail(p.userId) ? (u?.email ?? '') : '',
-      };
+      return { kind: 'user', name: getUserDisplayName(u), sub: u?.email ?? '' };
     }
     if (p.userGroupId) {
       return {

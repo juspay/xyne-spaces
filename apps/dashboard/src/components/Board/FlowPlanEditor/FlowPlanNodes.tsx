@@ -31,7 +31,6 @@ import { getUserDisplayName, matchesUserQuery } from '../../../utils/userDisplay
 import { cn } from '../../../utils/classNames';
 import { FlowGroupNode, type FlowGroupNodeData } from '../FlowRun/FlowGroupNode';
 import { Popover } from '../../ui/Popover/Popover';
-import { useCanSeeUserEmail } from '../../../hooks/useCanSeeUserEmail';
 
 export type AddStepKind = FlowStepGate['type'] | 'group' | 'decision';
 
@@ -87,7 +86,6 @@ export const StepAssigneePicker: React.FC<{
   const [open, setOpen] = useState(false);
   const [search, setSearch] = useState('');
   const users = useActiveUsers();
-  const canSeeUserEmail = useCanSeeUserEmail();
   const assigneeId = value?.replace(/^(user:|group:)/, '') || '';
   const filteredUsers = useMemo(() => {
     if (!users) return [];
@@ -192,7 +190,7 @@ export const StepAssigneePicker: React.FC<{
               <UserAvatar userId={user.id} showActiveStatus={false} size={AvatarSize.SM} />
               <div className='flex-1 min-w-0'>
                 <div className='text-foreground truncate'>{getUserDisplayName(user)}</div>
-                {user.email && canSeeUserEmail(user.id) ? (
+                {user.email ? (
                   <div className='text-[10px] text-muted-foreground truncate'>{user.email}</div>
                 ) : null}
               </div>

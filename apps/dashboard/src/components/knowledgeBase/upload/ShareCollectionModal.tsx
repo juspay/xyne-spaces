@@ -36,7 +36,6 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '../../ui/dropdown-menu';
-import { useCanSeeUserEmail } from '../../../hooks/useCanSeeUserEmail';
 
 type UserGroupLike = ReturnType<typeof useUserGroups>[number];
 type VisibleChannelLike = ReturnType<typeof useAllVisibleChannels>[number];
@@ -87,7 +86,6 @@ export const ShareCollectionModal = ({
 }: ShareCollectionModalProps): ReactElement => {
   const { user } = useAuth();
   const zero = useZero();
-  const canSeeUserEmail = useCanSeeUserEmail();
   const { activeCollection } = useProjectCollections();
   const { setCollectionVisibility } = useProjectCollectionMutations();
   const collectionRole = activeCollection?.role;
@@ -317,7 +315,7 @@ export const ShareCollectionModal = ({
         kind: 'user',
         id: u.id,
         name: getUserDisplayName(u),
-        sub: canSeeUserEmail(u.id) ? (u.email ?? '') : '',
+        sub: u.email ?? '',
         user: u,
       }));
 
@@ -335,7 +333,6 @@ export const ShareCollectionModal = ({
 
     return [...users, ...groups, ...channels];
   }, [
-    canSeeUserEmail,
     query,
     userSearchResults,
     user?.id,
@@ -629,11 +626,7 @@ export const ShareCollectionModal = ({
                           <div className='text-sm font-medium text-foreground truncate'>
                             {user.name || 'Unnamed User'}
                           </div>
-                          {canSeeUserEmail(user.id) && (
-                            <div className='text-xs text-muted-foreground truncate'>
-                              {user.email}
-                            </div>
-                          )}
+                          <div className='text-xs text-muted-foreground truncate'>{user.email}</div>
                         </div>
                       </div>
                       <div className='flex items-center gap-2 flex-shrink-0'>

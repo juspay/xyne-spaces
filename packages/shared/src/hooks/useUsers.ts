@@ -8,6 +8,7 @@ import {
   searchUsersWithScores as _searchUsersWithScores,
 } from "../utils/search.js";
 import { UserStatus } from "../zero/schema.js";
+import { WorkspaceRole } from "../zero/types.js";
 import { queries } from "../zero/queries.js";
 import { useQuery } from "./useQuery.js";
 
@@ -37,6 +38,32 @@ export function invalidateUsersMapCache(): void {
   _usersMap = new Map();
 }
 
+// Community members must not see other users' emails. Emails are blanked (not removed) so
+// `user.email` stays a string and existing `email && …` / `name || email` checks just skip it.
+let _maskedSrc: User[] | null = null;
+let _maskedSelfId: string | null = null;
+let _masked: User[] = [];
+
+function maskUserEmail(user: User, selfId: string): User {
+  return user.id === selfId || !user.email ? user : { ...user, email: "" };
+}
+
+function maskEmails(users: User[], selfId: string | null): User[] {
+  if (selfId === null) return users;
+  if (_maskedSrc !== users || _maskedSelfId !== selfId) {
+    _maskedSrc = users;
+    _maskedSelfId = selfId;
+    _masked = users.map((u) => maskUserEmail(u, selfId));
+  }
+  return _masked;
+}
+
+/** Viewer's id when emails of other users must be hidden, otherwise null. */
+const useEmailMaskSelfId = (): string | null => {
+  const { userID, role } = useSharedAuthContext();
+  return role === WorkspaceRole.COMMUNITY_MEMBER ? userID : null;
+};
+
 function getUsersMap(users: User[]): Map<string, User> {
   if (_usersMapRef !== users) {
     _usersMapRef = users;
@@ -46,8 +73,9 @@ function getUsersMap(users: User[]): Map<string, User> {
 }
 
 export const useUsers = (): User[] => {
+  const maskSelfId = useEmailMaskSelfId();
   const users = useSelector(stateMachineActor, (state) => state.context.users);
-  return useMemo(() => users, [users]);
+  return useMemo(() => maskEmails(users, maskSelfId), [users, maskSelfId]);
 };
 
 /**
@@ -58,8 +86,9 @@ export const useUsers = (): User[] => {
  * Map lookup per id instead of an O(users) scan per lookup.
  */
 export const useUsersById = (): Map<string, User> => {
+  const maskSelfId = useEmailMaskSelfId();
   return useSelector(stateMachineActor, (state) =>
-    getUsersMap(state.context.users),
+    getUsersMap(maskEmails(state.context.users, maskSelfId)),
   );
 };
 
@@ -82,8 +111,9 @@ export interface UserLookup {
 export const useUserLookup = (userId: string): UserLookup => {
   // O(1) Map lookup inside selector. Re-renders only when this specific user
   // object changes (=== check on the returned User object, not the entire array).
+  const maskSelfId = useEmailMaskSelfId();
   const cachedUser = useSelector(stateMachineActor, (state) =>
-    getUsersMap(state.context.users).get(userId),
+    getUsersMap(maskEmails(state.context.users, maskSelfId)).get(userId),
   );
   // Before the users set is hydrated every id is "missing"; firing a point
   // query per rendered avatar then would flood Zero on initial load.
@@ -99,10 +129,19 @@ export const useUserLookup = (userId: string): UserLookup => {
     { enabled: needsFallback },
   );
 
+  const maskedFallbackUser = useMemo(
+    () =>
+      fallbackUser && maskSelfId !== null
+        ? maskUserEmail(fallbackUser as User, maskSelfId)
+        : (fallbackUser as User | undefined),
+    [fallbackUser, maskSelfId],
+  );
+
   if (cachedUser) return { user: cachedUser, isResolving: false };
-  if (!needsFallback) return { user: undefined, isResolving: !!userId && !usersHydrated };
+  if (!needsFallback)
+    return { user: undefined, isResolving: !!userId && !usersHydrated };
   return {
-    user: (fallbackUser as User | undefined) ?? undefined,
+    user: maskedFallbackUser ?? undefined,
     isResolving: !fallbackUser && fallbackDetails.type !== "complete",
   };
 };

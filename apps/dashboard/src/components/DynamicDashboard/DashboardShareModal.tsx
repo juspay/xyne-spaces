@@ -17,7 +17,6 @@ import Avatar from '../ui/Avatar/Avatar';
 import { Button } from '../ui/Button';
 import { Dialog } from '../ui/Dialog';
 import { usePlatform } from '../../hooks/usePlatform';
-import { useCanSeeUserEmail } from '../../hooks/useCanSeeUserEmail';
 
 interface DashboardSummary {
   id: string;
@@ -45,7 +44,6 @@ export const DashboardShareModal = ({
 }: DashboardShareModalProps): ReactElement => {
   const { user: currentUser } = useAuth();
   const { isMobile } = usePlatform();
-  const canSeeUserEmail = useCanSeeUserEmail();
   const [selectedUsers, setSelectedUsers] = useState<User[]>([]);
   const [isAddingUser, setIsAddingUser] = useState(false);
   const [localVisibility, setLocalVisibility] = useState(dashboard.visibility);
@@ -288,11 +286,9 @@ export const DashboardShareModal = ({
                       {usersById.get(participant.userId)?.name || 'Unknown User'}
                       {isSelf && <span className='ml-2 text-xs text-muted-foreground'>(You)</span>}
                     </p>
-                    {canSeeUserEmail(participant.userId) && (
-                      <p className='text-xs text-muted-foreground truncate'>
-                        {usersById.get(participant.userId)?.email || ''}
-                      </p>
-                    )}
+                    <p className='text-xs text-muted-foreground truncate'>
+                      {usersById.get(participant.userId)?.email || ''}
+                    </p>
                   </div>
                 </div>
 

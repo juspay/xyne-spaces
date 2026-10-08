@@ -11,7 +11,6 @@ import { useZero } from '../../../hooks/useZero';
 import { useAuth } from '../../../hooks/useAuth';
 import { mutators } from '../../../zero/mutators';
 import { cn } from '../../../utils/classNames';
-import { useCanSeeUserEmail } from '../../../hooks/useCanSeeUserEmail';
 
 interface ShareViewDialogProps {
   isOpen: boolean;
@@ -35,7 +34,6 @@ export const ShareViewDialog = ({
   const zero = useZero();
   const { user } = useAuth();
   const allUsers = useUsers();
-  const canSeeUserEmail = useCanSeeUserEmail();
 
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedUserIds, setSelectedUserIds] = useState<Set<string>>(new Set());
@@ -146,7 +144,7 @@ export const ShareViewDialog = ({
                 >
                   <div className='flex-1 min-w-0'>
                     <div className='text-sm font-medium truncate'>{u.name}</div>
-                    {u.email && canSeeUserEmail(u.id) && (
+                    {u.email && (
                       <div className='text-xs text-muted-foreground truncate'>{u.email}</div>
                     )}
                   </div>

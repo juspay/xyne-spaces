@@ -410,7 +410,7 @@ export const InboxTab: React.FC<InboxTabProps> = ({ channelId, form, signatures 
                       />
                       <span className='min-w-0 flex-1 truncate text-[13px] leading-[18px]'>
                         <span className='font-medium text-foreground'>{user.name}</span>
-                        <span className='text-desk-helper'> · {user.email}</span>
+                        {user.email && <span className='text-desk-helper'> · {user.email}</span>}
                       </span>
                       {isSelected && <Check size={16} className='shrink-0 text-foreground' />}
                     </button>

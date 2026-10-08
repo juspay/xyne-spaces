@@ -20,7 +20,6 @@ import { useChannelAssignGate } from '../../../hooks/useChannelAssignGate';
 import { useUserGroupById } from '../../../hooks/useUserGroup';
 import { channelMembersFirst, currentUserFirst } from '../../../utils/channelMembersFirst';
 import { useExclusivePicker } from '../TicketTable/ExclusivePickerScope';
-import { useCanSeeUserEmail } from '../../../hooks/useCanSeeUserEmail';
 
 interface UserSelectorProps {
   selectedUserId: string | null;
@@ -69,7 +68,6 @@ export function UserSelector({
   const { shouldGate, memberIds, gatedAssign } = useChannelAssignGate(channelId);
   const activeUsers = useActiveUsers();
   const selfId = useSelf()?.id;
-  const canSeeUserEmail = useCanSeeUserEmail();
   const selectedUser = useUser(selectedUserId || '');
   const assignedGroup = useUserGroupById(assignedGroupId || '');
 
@@ -93,11 +91,11 @@ export function UserSelector({
     return ordered.map(user => ({
       value: user.id,
       label: withYouLabel(getUserDisplayName(user), user.id === selfId),
-      subtitle: canSeeUserEmail(user.id) ? user.email : null,
+      subtitle: user.email,
       icon: <UserAvatar userId={user.id} size={AvatarSize.SM} shape={AvatarShape.CIRCULAR} />,
       badge: shouldGate && !memberIds.has(user.id) ? 'Not in channel' : undefined,
     }));
-  }, [open, activeUsers, searchValue, shouldGate, memberIds, selfId, canSeeUserEmail]);
+  }, [open, activeUsers, searchValue, shouldGate, memberIds, selfId]);
 
   /**
    * Keep the selected user present in `options` even when the list above is
@@ -110,14 +108,14 @@ export function UserSelector({
     const pinnedOption: SelectorOption = {
       value: selectedUser.id,
       label: getUserDisplayName(selectedUser),
-      subtitle: canSeeUserEmail(selectedUser.id) ? selectedUser.email : null,
+      subtitle: selectedUser.email,
       icon: (
         <UserAvatar userId={selectedUser.id} size={AvatarSize.SM} shape={AvatarShape.CIRCULAR} />
       ),
       badge: shouldGate && !memberIds.has(selectedUser.id) ? 'Not in channel' : undefined,
     };
     return [pinnedOption, ...userOptions];
-  }, [selectedUser, userOptions, shouldGate, memberIds, canSeeUserEmail]);
+  }, [selectedUser, userOptions, shouldGate, memberIds]);
 
   const handleSelect = (userId: string | null): void => {
     if (!userId) {

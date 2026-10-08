@@ -16,7 +16,6 @@ import {
 } from '../../../shared/primitives/DetailPrimitives';
 import { PersonRow } from '../../../agents/detail/people/PersonRow';
 import { AddContributorDialog } from './AddContributorDialog';
-import { useCanSeeUserEmail } from '../../../../../../hooks/useCanSeeUserEmail';
 
 const LOCK_NOTE =
   'Only the person who created this subagent, an editor, or an admin can change who contributes.';
@@ -38,7 +37,6 @@ export function SubagentContributorsTabV2({
   const shares = useClawSubagentShares(subagent.name);
 
   const [addOpen, setAddOpen] = useState(false);
-  const canSeeUserEmail = useCanSeeUserEmail();
   const [searchOpen, setSearchOpen] = useState(false);
   const [query, setQuery] = useState('');
   const [busyUserId, setBusyUserId] = useState<string | null>(null);
@@ -189,13 +187,7 @@ export function SubagentContributorsTabV2({
                 key={row.key}
                 userId={row.userId}
                 name={row.name}
-                detail={
-                  canSeeUserEmail(row.userId, row.detail)
-                    ? row.detail
-                    : row.creator
-                      ? 'Subagent creator'
-                      : ''
-                }
+                detail={row.detail}
                 trailing={
                   row.creator ? (
                     <Pill tone='neutral'>Subagent Creator</Pill>
