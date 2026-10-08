@@ -61,6 +61,7 @@ import { emitAgentWorkingSignal } from "../surfaces/spaces/client.js";
 import { resolveFastMode } from "../lib/fast-mode.js";
 import { dispatchXyneAiContinuationRun } from "../lib/xyne-ai-continuation.js";
 import { applyCreateSkill, isCreateSkillAction } from "../lib/skill-apply.js";
+import { applyArtifactAppAction, isArtifactAppAction } from "../lib/artifact-app-apply.js";
 import { isClawAdmin } from "../middleware/agent-acl.js";
 import { applyAgentToolAction, AGENT_TOOL_SLUGS } from "../lib/agent-tools-apply.js";
 import { applyConversationFork } from "../lib/conversation-fork.js";
@@ -1242,6 +1243,26 @@ router.post("/action", pinAgentSlugFromHeader, verifySpacesSignature, async (req
         }
         res.json(resp);
         void replaceFlowCardWithText(messageId, agentSlug, `**Skill created:** ${outcome.name} (\`${outcome.slug}\`)`, conversationId, undefined, spacesAppId);
+        return;
+      }
+
+      // ── publish-app: artifact apps live in claw-auth's own tables ───────────
+      // No MCP connector. Applied as the card-signed write owner; ownership is
+      // re-checked against the app row inside applyArtifactAppAction.
+      if (isArtifactAppAction(serverType, tool)) {
+        const outcome = await applyArtifactAppAction(tool, params, writeClawUserId);
+        if (!outcome.ok) {
+          res.json({ type: "error", message: outcome.error } satisfies AppActionResponse);
+          return;
+        }
+        resp = { type: "close_screen", finalMessage: outcome.message };
+        if (xyneAiCard) {
+          await finishTextWriteOnRow({ card: xyneAiCard, tool, ok: true, heading: outcome.message });
+          res.json(resp);
+          return;
+        }
+        res.json(resp);
+        void replaceFlowCardWithText(messageId, agentSlug, outcome.message, conversationId, undefined, spacesAppId);
         return;
       }
 

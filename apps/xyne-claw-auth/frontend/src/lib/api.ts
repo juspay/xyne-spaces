@@ -2952,7 +2952,7 @@ export interface ChatMsg {
   contextItems?: AttachedContextRef[];
 }
 
-export type ContextType = "channel" | "ticket" | "canvas" | "call" | "repository";
+export type ContextType = "channel" | "ticket" | "canvas" | "call" | "app" | "repository";
 export type ContextSearchType = ContextType | "all";
 
 export interface ContextItem {

@@ -42,7 +42,7 @@ import {
 import { consumeClawStream } from "../lib/consume-claw-stream.js";
 import { mintChatSessionId, beginChatRun, failChatRun } from "../lib/chat-run-record.js";
 import { recordUploadedArtifacts } from "../lib/conversation-artifact-signals.js";
-import { attachArtifactToSessionApp } from "../lib/artifact-app-session.js";
+import { attachArtifactToApp, type ArtifactAppTarget } from "../lib/artifact-app-session.js";
 import { recordDeliveredArtifacts } from "../lib/delivered-artifacts.js";
 import { publishLiveEvent } from "../lib/live-conversation-bus.js";
 import {
@@ -435,16 +435,17 @@ export async function persistRunStreamResult(args: {
         // via the /agents/:convId/messages path and be missing from this run.
         let attachmentMetadata = att.metadata as Record<string, unknown> | undefined;
 
-        // A conversation owns ONE app. This mirrors the identical hook in
+        // Land the build on its target app. This mirrors the identical hook in
         // agent-chat.ts's persistAssistantResult: the dashboard's AI screen
-        // streams through THIS path, not /agent-chat, so scoping only that one
+        // streams through THIS path, not /agent-chat, so handling only that one
         // left every AI-screen artifact unversioned and unowned.
         const sessionArtifact = attachmentMetadata?.["reactArtifact"];
         if (sessionArtifact && typeof sessionArtifact === "object") {
-          const session = await attachArtifactToSessionApp({
+          const session = await attachArtifactToApp({
             conversationId: args.conversationId,
             userId: args.userId,
             payload: buffer,
+            target: sessionArtifact as ArtifactAppTarget,
           });
           if (session) {
             attachmentMetadata = {
@@ -1605,7 +1606,7 @@ publicRouter.post("/", requireAuth, requireNoAccessToken, async (req: Request, r
         const auth = await getSpacesAuthForUser(userId, "agent-chat", requestWorkspaceHint(req));
         const normalized = normalizeAttachedContext(forwardedAttachedContext);
         if (auth && normalized.items.length > 0) {
-          const payload = await buildAttachedContextPayload(normalized.items, auth);
+          const payload = await buildAttachedContextPayload(normalized.items, auth, { userId });
           attachedContextPrefix = payload.promptPrefix ?? '';
           attachedContextFiles = payload.contextFiles ?? [];
         }

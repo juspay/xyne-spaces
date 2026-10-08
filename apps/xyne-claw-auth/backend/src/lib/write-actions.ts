@@ -157,6 +157,17 @@ export async function executeWriteAction(action: SignedWriteAction): Promise<Wri
       }
     }
 
+    // 2b-iii. Artifact-app writes (publish-app) — no MCP connector; applied
+    // directly against claw-auth's own app tables.
+    {
+      const { applyArtifactAppAction, isArtifactAppAction } = await import("./artifact-app-apply.js");
+      if (isArtifactAppAction(serverType, tool)) {
+        const outcome = await applyArtifactAppAction(tool, params, userId);
+        if (!outcome.ok) return { ok: false, content: "", error: outcome.error };
+        return { ok: true, content: outcome.message };
+      }
+    }
+
     // 2c. MCP-based adapters (xyne-spaces, bitbucket, ardra-finops, github, ...)
     // Also covers dynamic DB-stored connectors (e.g. cloudinary, airtable)
     const { callTool } = await import("../mcp/runner.js");

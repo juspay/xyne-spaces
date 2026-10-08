@@ -907,6 +907,7 @@ export async function prepareRun(
       if (spacesAuth) {
         try {
           resolvedAttachedContext = await buildAttachedContextPayload(normalizedAttached, spacesAuth, {
+            userId: resolved.userId,
             ...(attachedThreadConversationId ? { threadConversationId: attachedThreadConversationId } : {}),
             ...(attachedCanvasViewAccessId ? { canvasViewAccessId: attachedCanvasViewAccessId } : {}),
             ...(attachedWorkflowId ? { workflowId: attachedWorkflowId } : {}),

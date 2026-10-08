@@ -152,6 +152,7 @@ register(researchAgent.reviewPullRequest);
 // historical messages; only the registration is gone.
 register(reactArtifact.createReactArtifactTool);
 register(reactArtifact.readArtifactAppFileTool);
+register(reactArtifact.publishArtifactAppTool);
 
 // Register create-html-report tool — renders a markdown report into a
 // standalone HTML file and attaches it, leaving a short summary inline in

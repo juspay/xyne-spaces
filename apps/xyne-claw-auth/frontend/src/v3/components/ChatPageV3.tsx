@@ -77,7 +77,7 @@ import { DebugDrawer } from "../../components/DebugDrawer";
 import { MessageRatingButtons } from "../../components/MessageRatingButtons";
 import type { AgentLight } from "../../lib/types";
 import { Avatar, nameToHsl } from "./ui/Avatar";
-import { ReadonlyContextPills } from "./ReadonlyContextPills";
+import { ReadonlyContextPills, iconForType } from "./ReadonlyContextPills";
 import { Dialog } from "./ui/Dialog";
 import { SessionExportMenu } from "./ui/SessionExportMenu";
 import { ConfirmDialog } from "./ui/ConfirmDialog";
@@ -2962,7 +2962,7 @@ export const InputArea = forwardRef<InputAreaHandle, InputAreaProps>(function In
                   className="inline-flex max-w-full items-center gap-1.5 rounded-full border border-xyne-border-subtle bg-xyne-surface-subtle px-2.5 py-0.5 text-[11px] text-xyne-fg-secondary"
                   title={`${item.type} · ${item.title}`}
                 >
-                  <AtIcon size={10} className="shrink-0 text-xyne-fg-tertiary" />
+                  {iconForType(item.type, 11)}
                   <span className="truncate">{item.title}</span>
                   <button
                     type="button"

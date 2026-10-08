@@ -1,7 +1,9 @@
 import { interact, spacesFetch, type SpacesAuthContext } from "../mcp/servers/xyne-spaces-client.js";
 import { errMsg } from "../lib/errors.js";
+import { prisma } from "../db.js";
+import { getWorkspaceIdForUser } from "../lib/spaces-db.js";
 
-export type ContextType = "channel" | "ticket" | "canvas" | "call" | "activity" | "collection" | "file" | "folder";
+export type ContextType = "channel" | "ticket" | "canvas" | "call" | "app" | "activity" | "collection" | "file" | "folder";
 // 'collection' / 'file' / 'folder' are not user-searchable via this service
 // (they're picked through the dashboard's KB picker, not via the generic
 // search), so they're intentionally excluded from the search-type enum.
@@ -133,6 +135,7 @@ export function normalizeAttachedContext(input: unknown): { items: AttachedConte
     ["ticket", 0],
     ["canvas", 0],
     ["call", 0],
+    ["app", 0],
     ["collection", 0],
     ["file", 0],
     ["folder", 0],
@@ -144,7 +147,7 @@ export function normalizeAttachedContext(input: unknown): { items: AttachedConte
     const type = obj["type"];
     const id = obj["id"];
     const title = obj["title"];
-    if (!isContextType(type)) return { items: [], error: "attachedContext.type must be one of channel|ticket|canvas|call|activity|collection|file|folder" };
+    if (!isContextType(type)) return { items: [], error: "attachedContext.type must be one of channel|ticket|canvas|call|app|activity|collection|file|folder" };
     if (typeof id !== "string" || id.trim().length === 0) return { items: [], error: "attachedContext.id must be a non-empty string" };
     if (typeof title !== "string" || title.trim().length === 0) return { items: [], error: "attachedContext.title must be a non-empty string" };
     const threadId = obj["threadId"];
@@ -199,19 +202,35 @@ export function normalizeAttachedContext(input: unknown): { items: AttachedConte
   return { items };
 }
 
-export async function searchContextItems(type: ContextSearchType, q: string, limit: number, auth?: SpacesAuthContext): Promise<ContextItem[]> {
+/** Who is searching. Artifact apps live in claw-auth's own database, not in
+ *  Spaces, so they are scoped by the requester rather than by Spaces auth. */
+export interface ContextRequester {
+  userId: string;
+  workspaceHint?: string;
+}
+
+export async function searchContextItems(
+  type: ContextSearchType,
+  q: string,
+  limit: number,
+  auth?: SpacesAuthContext,
+  requester?: ContextRequester,
+): Promise<ContextItem[]> {
   const safeLimit = clamp(limit, 1, 50);
   const query = q.trim();
 
   if (type === "all") {
-    const [channels, tickets, canvases, calls] = await Promise.all([
+    const [channels, tickets, canvases, calls, apps] = await Promise.all([
       searchChannels(query, safeLimit, auth),
       searchTickets(query, safeLimit, auth),
       searchCanvases(query, safeLimit, auth),
       searchCalls(query, safeLimit, auth),
+      requester ? searchApps(query, safeLimit, requester) : Promise.resolve([]),
     ]);
-    return interleave([channels, tickets, canvases, calls], safeLimit);
+    return interleave([channels, tickets, canvases, calls, apps], safeLimit);
   }
+
+  if (type === "app") return requester ? searchApps(query, safeLimit, requester) : [];
 
   if (type === "channel") return searchChannels(query, safeLimit, auth);
   if (type === "ticket") return searchTickets(query, safeLimit, auth);
@@ -228,6 +247,8 @@ export async function buildAttachedContextPayload(
     canvasViewAccessId?: string;
     workflowId?: string;
     workflowExecutionId?: string;
+    /** The run's user — artifact apps are resolved against their access. */
+    userId?: string;
   },
 ): Promise<{ promptPrefix?: string; contextFiles: ContextFile[] }> {
   const threadConversationId = opts?.threadConversationId;
@@ -246,7 +267,7 @@ export async function buildAttachedContextPayload(
 
   const sections = await Promise.all(items.map(async (item) => {
     try {
-      return await resolveSection(item, auth);
+      return await resolveSection(item, auth, opts?.userId);
     } catch (err) {
       const message = errMsg(err);
       return {
@@ -398,6 +419,51 @@ async function searchChannels(q: string, limit: number, auth?: SpacesAuthContext
   }));
 }
 
+/**
+ * Artifact apps the requester may attach: their own, plus every app published
+ * to their workspace — the same read rule `GET /artifact-apps/:id` enforces, so
+ * the picker never offers something the agent then cannot open.
+ */
+async function searchApps(q: string, limit: number, requester: ContextRequester): Promise<ContextItem[]> {
+  const workspaceId = await getWorkspaceIdForUser(requester.userId, "artifact-apps", requester.workspaceHint);
+  if (!workspaceId) return [];
+
+  const apps = await prisma.artifactApp.findMany({
+    where: {
+      workspaceId,
+      isArchived: false,
+      OR: [{ ownerUserId: requester.userId }, { visibility: "WORKSPACE" }],
+      ...(q ? { title: { contains: q, mode: "insensitive" as const } } : {}),
+    },
+    orderBy: { updatedAt: "desc" },
+    take: limit,
+    select: { id: true, title: true, ownerUserId: true, visibility: true },
+  });
+
+  const otherOwners = [...new Set(apps.map((a) => a.ownerUserId).filter((id) => id !== requester.userId))];
+  const owners = otherOwners.length
+    ? await prisma.user.findMany({
+        where: { id: { in: otherOwners } },
+        select: { id: true, name: true, email: true },
+      })
+    : [];
+  const ownerNames = new Map(
+    owners.map((u) => [u.id, u.name?.trim() || u.email?.split("@")[0] || null] as const),
+  );
+
+  return apps.map((app) => {
+    const isOwner = app.ownerUserId === requester.userId;
+    const by = isOwner ? "Yours" : `By ${ownerNames.get(app.ownerUserId) ?? "a teammate"}`;
+    return {
+      id: app.id,
+      type: "app" as const,
+      title: app.title,
+      subtitle: `${by} · ${app.visibility === "WORKSPACE" ? "Published" : "Private"}`,
+      meta: { isOwner },
+    };
+  });
+}
+
 async function searchRepositories(q: string, limit: number, auth?: SpacesAuthContext): Promise<ContextItem[]> {
   const params = new URLSearchParams({ q, limit: String(limit) });
   const response = await spacesFetch(
@@ -542,7 +608,12 @@ async function searchCalls(q: string, limit: number, auth?: SpacesAuthContext): 
   });
 }
 
-async function resolveSection(item: AttachedContextRef, auth?: SpacesAuthContext): Promise<ResolvedContextSection> {
+async function resolveSection(
+  item: AttachedContextRef,
+  auth?: SpacesAuthContext,
+  userId?: string,
+): Promise<ResolvedContextSection> {
+  if (item.type === "app") return resolveAppSection(item, userId);
   if (item.type === "channel") return resolveChannelSection(item, auth);
   if (item.type === "ticket") return resolveTicketSection(item, auth);
   if (item.type === "canvas") return resolveCanvasSection(item, auth);
@@ -551,6 +622,39 @@ async function resolveSection(item: AttachedContextRef, auth?: SpacesAuthContext
   if (item.type === "file") return resolveFileSection(item);
   if (item.type === "folder") return resolveFolderSection(item);
   return resolveCallSection(item, auth);
+}
+
+/**
+ * An artifact app. Its source is not inlined — `read-app-file` reads it on
+ * demand, through the same ACL — so this only says what the app is and what
+ * this user may do with it. Access is re-checked here because the id arrives
+ * from the client: an app the user cannot see is reported as unavailable, not
+ * described.
+ */
+async function resolveAppSection(item: AttachedContextRef, userId?: string): Promise<ResolvedContextSection> {
+  const header = `App "${item.title}" (appId=${item.id})`;
+  const app = await prisma.artifactApp.findUnique({
+    where: { id: item.id },
+    select: { title: true, ownerUserId: true, visibility: true, isArchived: true, workspaceId: true },
+  });
+
+  const isOwner = Boolean(app && userId && app.ownerUserId === userId);
+  let visible = Boolean(app && !app.isArchived && isOwner);
+  if (app && !app.isArchived && !isOwner && userId && app.visibility === "WORKSPACE") {
+    visible = (await getWorkspaceIdForUser(userId, "artifact-apps")) === app.workspaceId;
+  }
+  if (!app || !visible) {
+    return { header, inlineText: "This app is unavailable — it may have been deleted, unpublished, or never shared with me." };
+  }
+
+  const lines = [
+    `App: ${app.title} (appId=${item.id}) — ${isOwner ? "my own app" : "published by a teammate; read-only for me"}.`,
+    `Fetch: list its files with \`read-app-file\` (appId=${item.id}), then read the ones you need with a \`path\`.`,
+    isOwner
+      ? `Change: \`create-app\` with mode "update" and appId=${item.id}, sending only the files you changed. Publish: \`publish-app\` (appId=${item.id}), only if I ask.`
+      : `Change: you cannot update it. If I want changes, build me my own app based on it with \`create-app\` mode "create".`,
+  ];
+  return { header, inlineText: lines.join("\n") };
 }
 
 /** Knowledge Base collection attached from the ask-ai v2 picker.
@@ -910,6 +1014,7 @@ function isContextType(value: unknown): value is ContextType {
     value === "ticket" ||
     value === "canvas" ||
     value === "call" ||
+    value === "app" ||
     value === "activity" ||
     value === "collection" ||
     value === "file" ||
@@ -921,6 +1026,7 @@ function labelForType(type: ContextType): string {
   if (type === "channel") return "Channel";
   if (type === "ticket") return "Ticket";
   if (type === "canvas") return "Canvas";
+  if (type === "app") return "App";
   if (type === "activity") return "Activity";
   if (type === "collection") return "Collection";
   if (type === "file") return "File";

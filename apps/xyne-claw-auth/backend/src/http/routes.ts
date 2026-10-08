@@ -45,7 +45,6 @@ import { sessionsArchiveRouter } from "../routes/sessions-archive.js";
 import { surfaceInternalRouter } from "../routes/surface-internal.js";
 import { pagePanelRouter } from "../routes/page-panel.js";
 import { experimentsInternalRouter } from "../routes/experiments-internal.js";
-import { artifactAppsInternalRouter } from "../routes/artifact-apps-internal.js";
 import { errorPipelineIngestRouter, errorPipelineInternalRouter } from "../routes/error-pipeline.js";
 import { connectorsInternalRouter } from "../routes/connectors-internal.js";
 import { providersInternalRouter } from "../routes/providers-internal.js";
@@ -214,7 +213,6 @@ function mountCoreApi(app: Express): void {
   // org/workspace/user upserts — see services/clawSpacesSyncClient.ts in Spaces.
   app.use(`${BASE}/internal/spaces-sync`, requireStrictS2S, spacesSyncRouter);
   app.use(`${BASE}/internal/experiments`, requireStrictS2S, experimentsInternalRouter);
-  app.use(`${BASE}/internal/artifact-apps`, requireStrictS2S, artifactAppsInternalRouter); // create-app reads the conversation's head build before an incremental update
   app.use(`${BASE}/error-pipeline`, errorPipelineIngestRouter); // Grafana webhook ingest (JWT-authed inside)
   app.use(`${BASE}/internal/error-pipeline`, requireStrictS2S, errorPipelineInternalRouter); // run-result callback from xyne-claw (S2S only)
   app.use(`${BASE}/internal/tts`, requireStrictS2S, ttsRouter);
