@@ -15,6 +15,7 @@ import { emailService } from '@/services/emailService';
 import { mockDeskMailService } from '@/services/mockDeskMailService';
 import { externalSourceCore } from '@/integrations/core/core';
 import { googleAdapter } from '@/integrations/adapters/google';
+import { upsertMockDeskChannelSourceTx } from '@/bypassAcl/transactions/mockDeskChannelSource';
 import { ChannelExternalSourceResolver } from '@/services/channelExternalSourceResolver';
 import { logger } from '@/utils/logger';
 import {
@@ -435,38 +436,15 @@ router.post('/desk/channel-source', async (req, res, next) => {
     }
     if (rejectNonMockSourceOverwrite(existingSource, res)) return;
 
-    const externalSource = await db.$transaction(async (tx) => {
-      // Upsert (not updateMany): a channel without an existing preference row
-      // used to leave updateMany a silent 0-row no-op, producing a mock source
-      // pointed at a channel with no ticket board. Upsert guarantees the
-      // preference exists and targets the resolved board.
-      await tx.emailChannelPreference.upsert({
-        where: { channelId },
-        create: { channelId, workspaceId, boardId: firstBoard.id },
-        update: { boardId: firstBoard.id },
-      });
-
-      return tx.externalSource.upsert({
-        where: { name },
-        create: {
-          name,
-          workspaceId,
-          sourceType: persistedSourceType,
-          displayName: email,
-          channelId,
-          ownerUserId: userId,
-          credentials: buildMockDeskCredentials({ email, sourceType }),
-          isActive: true,
-        },
-        update: {
-          sourceType: persistedSourceType,
-          displayName: email,
-          channelId,
-          ownerUserId: userId,
-          credentials: buildMockDeskCredentials({ email, sourceType }),
-          isActive: true,
-        },
-      });
+    const externalSource = await upsertMockDeskChannelSourceTx({
+      name,
+      workspaceId,
+      userId,
+      channelId,
+      boardId: firstBoard.id,
+      email,
+      sourceType: persistedSourceType,
+      credentials: buildMockDeskCredentials({ email, sourceType }),
     });
 
     logger.info('[TestDesk] Mock channel Desk source configured', {
