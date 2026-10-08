@@ -6,7 +6,7 @@ import { AuthProvider, ChannelRole, OrgRole, UserType } from '@xyne/shared';
 import { db } from '../src/database/client';
 import { repositories } from '../src/database/repositories/index';
 import { runWithContext } from '../src/database/tenant/context';
-import { installApp, configureWebhook, appUserEmail, appUserProviderId } from '../src/apps/core/appUtils';
+import { installApp, configureWebhook } from '../src/apps/core/appUtils';
 import { decrypt } from '../src/services/encryptionService';
 
 const CLAW_APP_PERMISSIONS = [
@@ -191,7 +191,14 @@ async function registerAgent(
   const alreadyInstalled = await repositories.installedApps.findFirst({
     where: { appId: app.id, user: { workspaceId: ctx.workspaceId } },
   });
-  const email = appUserEmail(app.name, ctx.workspaceId);
+  // Same email installApp derives for the app user, so installApp finds and reuses this user.
+  const botName = app.name
+    .toLowerCase()
+    .trim()
+    .replace(/[^a-z0-9-]/g, '-')
+    .replace(/-+/g, '-')
+    .replace(/^-|-$/g, '');
+  const email = `${botName}-${ctx.workspaceId}@app.xyne.ai`;
   if (!alreadyInstalled && !(await repositories.users.findByEmail(email, ctx.workspaceId))) {
     const orgMember =
       (await repositories.orgMembers.findByEmail(email)) ??
@@ -203,7 +210,7 @@ async function registerAgent(
     await repositories.users.create({
       name: app.name,
       email,
-      providerUserId: appUserProviderId(app.id),
+      providerUserId: `xyne-app-${app.id}`,
       authProvider: AuthProvider.API_KEY,
       userType: UserType.AGENT,
       status: 'ACTIVE',

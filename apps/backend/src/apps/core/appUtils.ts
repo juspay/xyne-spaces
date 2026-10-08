@@ -30,24 +30,6 @@ async function syncInstalledCommands(installedAppId: string, appId: string, work
 }
 
 /**
- * Email of an app's per-workspace user. Suffixed with the workspace id because
- * OrgMember.email is globally unique, so the same app installs across workspaces/orgs.
- */
-export function appUserEmail(appName: string, workspaceId: string): string {
-  const botName = appName
-    .toLowerCase()
-    .trim()
-    .replace(/[^a-z0-9-]/g, '-')
-    .replace(/-+/g, '-')
-    .replace(/^-|-$/g, '');
-  return `${botName}-${workspaceId}@app.xyne.ai`;
-}
-
-export function appUserProviderId(appId: string): string {
-  return `xyne-app-${appId}`;
-}
-
-/**
  * Install (or Update) an app into a workspace. Each install is a version-frozen snapshot of the
  * app's commands + permissions; calling again for the same workspace performs an Update.
  */
@@ -88,34 +70,39 @@ export async function installApp(appId: string, workspaceId: string) {
       return { jwtToken };
     }
 
-    // 2. New install — dedicated per-workspace app user.
-    const email = appUserEmail(app.name, workspaceId);
+    // 2. New install — dedicated per-workspace app user. Email is suffixed with the workspace id
+    // because OrgMember.email is globally unique, so the same app installs across workspaces/orgs.
+    const botName = app.name
+      .toLowerCase()
+      .trim()
+      .replace(/[^a-z0-9-]/g, '-')
+      .replace(/-+/g, '-')
+      .replace(/^-|-$/g, '');
+    const email = `${botName}-${workspaceId}@app.xyne.ai`;
 
     const workspace = await db.workspace.findUnique({ where: { id: workspaceId }, select: { orgId: true } });
     if (!workspace) {
       throw new Error(`[INSTALL-APP] Workspace ${workspaceId} not found`);
     }
 
-    // Reuse an existing app user if present (idempotent — survives prior manual cleanup); it
-    // keeps the type it was created with, so claw-auth is only asked when one is created.
+    // Reuse an existing orgMember/app-user if present (idempotent — survives prior manual cleanup).
+    // Resolves the app's own bot membership, not the installer's.
+    const orgMember = await withWorkspaceScope(async () => {
+      const existing = await db.orgMember.findUnique({ where: { email }, select: { memberId: true } });
+      if (existing) return existing;
+      return db.orgMember.create({
+        data: { email, orgId: workspace.orgId, role: OrgRole.MEMBER },
+        select: { memberId: true },
+      });
+    });
     let appUser = await repositories.users.findByEmail(email, workspaceId);
     if (!appUser) {
-      // AGENT vs APP, decided before any write: the type is set once, so a lookup that
-      // cannot answer fails the install (retryable, nothing left behind) instead of guessing.
+      // AGENT vs APP is set once at creation; a failed lookup throws so the install can be retried.
       const userType = (await isSpacesAppClawAgent(appId)) ? UserType.AGENT : UserType.APP;
-      // Resolves the app's own bot membership, not the installer's.
-      const orgMember = await withWorkspaceScope(async () => {
-        const existing = await db.orgMember.findUnique({ where: { email }, select: { memberId: true } });
-        if (existing) return existing;
-        return db.orgMember.create({
-          data: { email, orgId: workspace.orgId, role: OrgRole.MEMBER },
-          select: { memberId: true },
-        });
-      });
       appUser = await repositories.users.create({
         name: app.name,
         email,
-        providerUserId: appUserProviderId(appId),
+        providerUserId: `xyne-app-${appId}`,
         authProvider: AuthProvider.API_KEY,
         userType,
         status: 'ACTIVE',
